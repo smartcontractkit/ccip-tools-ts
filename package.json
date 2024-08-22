@@ -1,0 +1,61 @@
+{
+  "name": "ccip-tools-ts",
+  "version": "0.0.1",
+  "description": "Scripts and library to interact with CCIP",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "test": "jest",
+    "lint": "prettier --check ./src && eslint ./src",
+    "lint:fix": "prettier --write ./src && eslint --fix ./src",
+    "build": "npm run clean && tsc",
+    "start": "tsx src",
+    "clean": "rm -rfv ./dist"
+  },
+  "author": "André Matos <andre.matos@smartcontract.com>",
+  "license": "ISC",
+  "devDependencies": {
+    "@eslint/js": "^9.9.0",
+    "@types/eslint__js": "^8.42.3",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^22.1.0",
+    "@types/yargs": "^17.0.33",
+    "abitype": "^1.0.6",
+    "eslint": "^9.9.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "eslint-plugin-simple-import-sort": "^12.1.1",
+    "ethers-abitype": "^1.0.3",
+    "jest": "^29.7.0",
+    "prettier": "^3.3.3",
+    "ts-jest": "^29.2.4",
+    "tsx": "^4.16.5",
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.1.0"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^5.3.8",
+    "ethers": "^6.13.2",
+    "tslib": "^2.6.3",
+    "yaml": "^2.5.0",
+    "yargs": "^17.7.2"
+  },
+  "prettier": {
+    "trailingComma": "all",
+    "tabWidth": 2,
+    "semi": false,
+    "singleQuote": true,
+    "printWidth": 100
+  },
+  "jest": {
+    "preset": "ts-jest/presets/default-esm",
+    "modulePathIgnorePatterns": [
+      "<rootDir>/dist/"
+    ],
+    "moduleNameMapper": {
+      "(.+)\\.js": "$1"
+    }
+  }
+}
