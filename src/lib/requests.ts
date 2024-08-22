@@ -1,4 +1,4 @@
-import type { Addressable } from 'ethers'
+import type { Addressable, TransactionReceipt } from 'ethers'
 import {
   AbiCoder,
   Contract,
@@ -59,14 +59,9 @@ export async function getOnRampStaticConfig(source: Provider, address: string) {
   })
 }
 
-export async function fetchCCIPMessagesInTx(
-  source: Provider,
-  txHash: string,
-): Promise<CCIPRequest[]> {
-  const tx = await source.getTransactionReceipt(txHash)
-  if (!tx) {
-    throw new Error(`Could not find source tx: ${txHash}`)
-  }
+export async function fetchCCIPMessagesInTx(tx: TransactionReceipt): Promise<CCIPRequest[]> {
+  const source = tx.provider
+  const txHash = tx.hash
   const timestamp = (await tx.getBlock()).timestamp
 
   const requests: CCIPRequest[] = []
@@ -90,15 +85,14 @@ export async function fetchCCIPMessagesInTx(
 }
 
 export async function fetchCCIPMessageInLog(
-  source: Provider,
-  txHash: string,
+  tx: TransactionReceipt,
   logIndex: number,
 ): Promise<CCIPRequest> {
-  const requests = await fetchCCIPMessagesInTx(source, txHash)
+  const requests = await fetchCCIPMessagesInTx(tx)
   const request = requests.find(({ log }) => log.index === logIndex)
   if (!request)
     throw new Error(
-      `Could not find a CCIPSendRequested message in tx ${txHash} with logIndex=${logIndex}`,
+      `Could not find a CCIPSendRequested message in tx ${tx.hash} with logIndex=${logIndex}`,
     )
   return request
 }

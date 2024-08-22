@@ -1,6 +1,7 @@
+import fs from 'node:fs'
+
 import { Contract, type Provider } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
-import fs from 'fs'
 import path from 'path'
 import YAML from 'yaml'
 
@@ -153,13 +154,15 @@ export function chainIdFromSelector(selector: bigint): bigint {
 
 export async function getProviderNetwork(
   provider: Provider,
-): Promise<{ chainId: number; chainSelector: bigint; name: string }> {
+): Promise<{ chainId: number; chainSelector: bigint; name: string; isTestnet: boolean }> {
   // AbstractProvider.getNetwork() is cached
   const chainId = (await provider.getNetwork()).chainId
+  const name = chainNameFromId(chainId)
   return {
     chainId: Number(chainId),
     chainSelector: chainSelectorFromId(chainId),
-    name: chainNameFromId(chainId),
+    name,
+    isTestnet: !name.includes('-mainnet'),
   }
 }
 

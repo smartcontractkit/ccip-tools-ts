@@ -10,7 +10,7 @@
     "test": "jest",
     "lint": "prettier --check ./src && eslint ./src",
     "lint:fix": "prettier --write ./src && eslint --fix ./src",
-    "build": "npm run clean && tsc",
+    "build": "npm run clean && tsc && cp -v ./src/lib/selectors.yml ./dist/lib/",
     "start": "tsx src",
     "clean": "rm -rfv ./dist"
   },
