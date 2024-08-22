@@ -89,7 +89,7 @@ export async function fetchOffRamp<V extends CCIPVersion>(
 
   const seen = new Set<string>()
   const latestBlock = await dest.getBlockNumber()
-  for (const blockRange of blockRangeGenerator({ latestBlock, startBlock: hints?.fromBlock })) {
+  for (const blockRange of blockRangeGenerator({ endBlock: latestBlock, startBlock: hints?.fromBlock })) {
     // we don't know our OffRamp address yet, so fetch any compatible log
     const logs = await dest.getLogs({ ...blockRange, topics: [topic0] })
 
@@ -163,7 +163,7 @@ export async function* fetchExecutionReceipts(
   const contractsToIgnore = new Set<string>()
   const completed = new Set<string>()
   const latestBlock = await dest.getBlockNumber()
-  for (const blockRange of blockRangeGenerator({ latestBlock, startBlock: hints?.fromBlock })) {
+  for (const blockRange of blockRangeGenerator({ endBlock: latestBlock, startBlock: hints?.fromBlock })) {
     const topics = new Set(
       requests.map(({ version }) => {
         const offRampInterface = getOffRampInterface(version)

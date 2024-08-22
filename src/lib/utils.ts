@@ -173,20 +173,20 @@ const BLOCK_RANGE = 10_000
  * Otherwise, moves backwards down to genesis (you probably want to break/return before that)
  **/
 export function* blockRangeGenerator(
-  params: { latestBlock: number; startBlock?: number } | { singleBlock: number },
+  params: { endBlock: number; startBlock?: number } | { singleBlock: number },
   stepSize = BLOCK_RANGE,
 ) {
   if ('singleBlock' in params) {
     yield { fromBlock: params.singleBlock, toBlock: params.singleBlock }
   } else if ('startBlock' in params && params.startBlock) {
-    for (let fromBlock = params.startBlock; fromBlock < params.latestBlock; fromBlock += stepSize) {
+    for (let fromBlock = params.startBlock; fromBlock < params.endBlock; fromBlock += stepSize) {
       yield {
         fromBlock,
-        toBlock: fromBlock + stepSize >= params.latestBlock ? 'latest' : fromBlock + stepSize - 1,
+        toBlock: Math.min(params.endBlock, fromBlock + stepSize - 1),
       }
     }
   } else {
-    for (let toBlock = params.latestBlock; toBlock > 1; toBlock -= stepSize) {
+    for (let toBlock = params.endBlock; toBlock > 1; toBlock -= stepSize) {
       yield {
         fromBlock: Math.max(1, toBlock - stepSize + 1),
         toBlock,

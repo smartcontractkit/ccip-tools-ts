@@ -31,7 +31,7 @@ export async function fetchCommitReport(
   for (const blockRange of blockRangeGenerator(
     hints?.commitBlock
       ? { singleBlock: hints.commitBlock }
-      : { latestBlock, startBlock: await getSomeBlockNumberBefore(dest, requestTimestamp) },
+      : { endBlock: latestBlock, startBlock: await getSomeBlockNumberBefore(dest, requestTimestamp) },
   )) {
     // we don't know our CommitStore address yet, so fetch any compatible log
     const logs = await dest.getLogs({

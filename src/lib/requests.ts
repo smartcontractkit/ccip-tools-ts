@@ -20,7 +20,7 @@ import {
   type CCIPRequest,
   type CCIPVersion,
 } from './types.js'
-import { getTypeAndVersion, lazyCached } from './utils.js'
+import { blockRangeGenerator, getTypeAndVersion, lazyCached } from './utils.js'
 
 async function getOnRampInterface(
   source: Provider,
@@ -141,27 +141,29 @@ export async function fetchAllMessagesInBatch(
   const events = await getDecodedEvents(initFromBlock, initToBlock)
 
   // page back if needed
-  for (
-    let toBlock = initFromBlock - 1;
-    toBlock >= 1 &&
-    (events.length === 0 || events[0].message.sequenceNumber > min) &&
-    (initToBlock - toBlock) / eventsBatchSize <= maxPageCount;
-    toBlock -= eventsBatchSize
-  ) {
-    const fromBlock = Math.max(1, toBlock - eventsBatchSize + 1)
+  for (const { fromBlock, toBlock } of blockRangeGenerator(
+    { endBlock: initFromBlock - 1 },
+    eventsBatchSize,
+  )) {
+    if (
+      events[0].message.sequenceNumber <= min ||
+      (initToBlock - toBlock) / eventsBatchSize > maxPageCount
+    )
+      break
     const newEvents = await getDecodedEvents(fromBlock, toBlock)
     events.unshift(...newEvents)
   }
 
   // page forward if needed
-  for (
-    let fromBlock = initToBlock + 1;
-    fromBlock <= latestBlock &&
-    (events.length === 0 || events[events.length - 1].message.sequenceNumber < max) &&
-    (fromBlock - initFromBlock) / eventsBatchSize <= maxPageCount;
-    fromBlock += eventsBatchSize
-  ) {
-    const toBlock = Math.min(latestBlock, fromBlock + eventsBatchSize - 1)
+  for (const { fromBlock, toBlock } of blockRangeGenerator(
+    { startBlock: initToBlock + 1, endBlock: latestBlock },
+    eventsBatchSize,
+  )) {
+    if (
+      events[events.length - 1].message.sequenceNumber >= max ||
+      (fromBlock - initToBlock) / eventsBatchSize > maxPageCount
+    )
+      break
     const newEvents = await getDecodedEvents(fromBlock, toBlock)
     events.push(...newEvents)
   }
