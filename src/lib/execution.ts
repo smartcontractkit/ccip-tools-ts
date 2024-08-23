@@ -165,32 +165,47 @@ const SUCCESS = 2
  **/
 export async function* fetchExecutionReceipts(
   dest: Provider,
-  requests: CCIPRequest[],
+  requests: readonly Pick<CCIPRequest, 'message' | 'log' | 'version'>[],
   hints?: { fromBlock?: number },
 ): AsyncGenerator<CCIPExecution, void, unknown> {
   const onlyLast = !hints?.fromBlock // backwards
-  const contractsToIgnore = new Set<string>()
-  const completed = new Set<string>()
   const latestBlock = await dest.getBlockNumber()
+
+  const onrampToOfframp = new Map<string, string>()
+  const messageIdsCompleted = new Set<string>()
   for (const blockRange of blockRangeGenerator({
     endBlock: latestBlock,
     startBlock: hints?.fromBlock,
   })) {
+    // we build filters on every loop, so we can narrow them down
+    // depending on the remaining work to do (discovered offramps, requests left)
+    const addressFilter = new Set<string>()
+    for (const request of requests) {
+      const offramp = onrampToOfframp.get(request.log.address)
+      if (offramp) addressFilter.add(offramp)
+      else {
+        addressFilter.clear() // we haven't discovered some offramp yet,
+        break // so don't filter by offramps contract address
+      }
+    }
+    // support fetching with different versions/topics
     const topics = new Set(
       requests.map(({ version }) => {
         const offRampInterface = getOffRampInterface(version)
         return offRampInterface.getEvent('ExecutionStateChanged')!.topicHash
       }),
     )
+
     // we don't know our OffRamp address yet, so fetch any compatible log
-    const logs = await dest.getLogs({ ...blockRange, topics: Array.from(topics) })
+    const logs = await dest.getLogs({
+      ...blockRange,
+      ...(addressFilter.size ? { address: Array.from(addressFilter) } : {}),
+      topics: Array.from(topics),
+    })
     if (onlyLast) logs.reverse()
 
     let lastLogBlock: readonly [block: number, timestamp: number] | undefined
     for (const log of logs) {
-      if (contractsToIgnore.has(log.address)) continue
-
-      let laneOfInterest = false
       try {
         const [staticConfig] = await getOffRampStaticConfig(dest, log.address)
 
@@ -201,19 +216,21 @@ export async function* fetchExecutionReceipts(
             request.log.address !== staticConfig.onRamp
           )
             continue
-          // _some_ of our requests are on this lane
-          laneOfInterest = true
+          onrampToOfframp.set(request.log.address, log.address) // found an offramp of interest!
 
           const offRampInterface = getOffRampInterface(request.version)
           const decoded = offRampInterface.parseLog(log)
           if (!decoded) continue
 
           const receipt = decoded.args.toObject() as ExecutionReceipt
-          if (receipt.messageId !== request.message.messageId || completed.has(receipt.messageId))
+          if (
+            receipt.messageId !== request.message.messageId ||
+            messageIdsCompleted.has(receipt.messageId)
+          )
             continue
           // onlyLast if we're paging blockRanges backwards, or if receipt.state is success (last state)
           if (onlyLast || Number(receipt.state) === SUCCESS) {
-            completed.add(receipt.messageId)
+            messageIdsCompleted.add(receipt.messageId)
           }
           if (log.blockNumber !== lastLogBlock?.[0]) {
             lastLogBlock = [log.blockNumber, (await dest.getBlock(log.blockNumber))!.timestamp]
@@ -224,10 +241,9 @@ export async function* fetchExecutionReceipts(
       } catch (_) {
         // passthrough to contractsToIgnore + continue
       }
-      if (!laneOfInterest) contractsToIgnore.add(log.address)
     }
     // cleanup requests, which _may_ also simplify next pages' topics
-    requests = requests.filter(({ message }) => !completed.has(message.messageId))
+    requests = requests.filter(({ message }) => !messageIdsCompleted.has(message.messageId))
     // all messages were seen (if onlyLast) or completed (state==success)
     if (!requests.length) break
   }

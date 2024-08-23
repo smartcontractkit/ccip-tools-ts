@@ -20,18 +20,27 @@ import { blockRangeGenerator, getSomeBlockNumberBefore, lazyCached } from './uti
  **/
 export async function fetchCommitReport(
   dest: Provider,
-  { log: { address: onRamp }, message, timestamp: requestTimestamp, version }: CCIPRequest,
-  hints?: { commitBlock?: number; commitStore?: string },
+  {
+    log: { address: onRamp },
+    message,
+    timestamp: requestTimestamp,
+    version,
+  }: Pick<CCIPRequest, 'log' | 'message' | 'version'> & { timestamp?: number },
+  hints?: { startBlock?: number; endBlock?: number; commitBlock?: number; commitStore?: string },
 ): Promise<CCIPCommit> {
   const commitStoreABI = CCIP_ABIs[CCIPContractTypeCommitStore][version]
   const commitStoreInterface = new Interface(commitStoreABI)
   const topic0 = commitStoreInterface.getEvent('ReportAccepted')!.topicHash
 
-  const latestBlock = await dest.getBlockNumber()
   for (const blockRange of blockRangeGenerator(
     hints?.commitBlock
       ? { singleBlock: hints.commitBlock }
-      : { endBlock: latestBlock, startBlock: await getSomeBlockNumberBefore(dest, requestTimestamp) },
+      : {
+          endBlock: hints?.endBlock ?? (await dest.getBlockNumber()),
+          startBlock:
+            hints?.startBlock ??
+            (requestTimestamp ? await getSomeBlockNumberBefore(dest, requestTimestamp) : undefined),
+        },
   )) {
     // we don't know our CommitStore address yet, so fetch any compatible log
     const logs = await dest.getLogs({
@@ -51,12 +60,7 @@ export async function fetchCommitReport(
         message.sequenceNumber > report.interval.max
       )
         continue
-      let commitTimestamp: number
       try {
-        commitTimestamp = (await log.getBlock()).timestamp
-        // reject if it is not newer than our request's log
-        if (commitTimestamp <= requestTimestamp) continue
-
         const staticConfig = await lazyCached(
           `CommitStore ${log.address}.staticConfig`,
           async () => {
@@ -79,7 +83,7 @@ export async function fetchCommitReport(
         continue
       }
 
-      return { report, log, timestamp: commitTimestamp }
+      return { report, log }
     }
   }
 

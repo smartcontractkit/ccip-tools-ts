@@ -70,7 +70,7 @@ export interface LaneInfo {
 
 export interface CCIPRequest {
   message: CCIPMessage
-  log: Pick<Log, 'topics' | 'index' | 'address' | 'blockNumber'>
+  log: Pick<Log, 'topics' | 'index' | 'address' | 'blockNumber' | 'transactionHash'>
   tx: { logs: readonly Pick<Log, 'topics' | 'index' | 'data' | 'address' | 'transactionHash'>[] }
   timestamp: number
   version: CCIPVersion
@@ -90,7 +90,6 @@ export type CommitReport = AbiParametersToPrimitiveTypes<
 export interface CCIPCommit {
   report: CommitReport
   log: Pick<Log, 'blockNumber' | 'transactionHash'>
-  timestamp: number
 }
 
 export type ExecutionReceipt = AbiParameterToPrimitiveType<{

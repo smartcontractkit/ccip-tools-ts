@@ -284,7 +284,7 @@ async function getUsdcTokenData(
  * @returns Array of byte arrays, one per transfer in request
  */
 export async function fetchOffchainTokenData(
-  request: CCIPRequest,
+  request: Pick<CCIPRequest, 'log' | 'tx' | 'message'>,
   isTestnet: boolean,
 ): Promise<string[]> {
   // there's a chance there are other CCIPSendRequested in same tx,
@@ -312,4 +312,32 @@ export async function fetchOffchainTokenData(
   }
 
   return offchainTokenData
+}
+
+export async function* fetchRequestsForSender(
+  source: Provider,
+  firstRequest: CCIPRequest,
+): AsyncGenerator<Omit<CCIPRequest, 'tx' | 'timestamp'>, void, unknown> {
+  const [onRampInterface] = await getOnRampInterface(source, firstRequest.log.address)
+
+  for (const blockRange of blockRangeGenerator({
+    endBlock: await source.getBlockNumber(),
+    startBlock: firstRequest.log.blockNumber,
+  })) {
+    const logs = await source.getLogs({
+      ...blockRange,
+      topics: [firstRequest.log.topics[0]],
+      address: firstRequest.log.address,
+    })
+
+    for (const log of logs) {
+      const decoded = onRampInterface.parseLog(log)
+      if (!decoded) continue
+
+      const message = resultsToMessage(decoded.args)
+      if (message.sender !== firstRequest.message.sender) continue
+
+      yield { message, log, version: firstRequest.version }
+    }
+  }
 }

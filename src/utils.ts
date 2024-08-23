@@ -14,7 +14,7 @@ import {
 } from 'ethers'
 import util from 'util'
 
-import { getProviderNetwork } from './lib/index.js'
+import { getOnRampStaticConfig, getProviderNetwork } from './lib/index.js'
 import type { CCIPMessage, CCIPRequest, CCIPRequestWithLane } from './lib/types.js'
 
 util.inspect.defaultOptions.depth = 4 // print down to tokenAmounts in requests
@@ -147,4 +147,21 @@ export function withDateTimestamp<T extends { readonly timestamp: number }>(
   obj: T,
 ): Omit<T, 'timestamp'> & { timestamp: Date } {
   return { ...obj, timestamp: new Date(obj.timestamp * 1e3) }
+}
+
+export async function withLanes(
+  source: Provider,
+  requests: CCIPRequest[],
+): Promise<CCIPRequestWithLane[]> {
+  const requestsWithLane: CCIPRequestWithLane[] = []
+  for (const request of requests) {
+    const [, , lane] = await getOnRampStaticConfig(source, request.log.address)
+
+    const requestWithLane: CCIPRequestWithLane = {
+      ...request,
+      lane,
+    }
+    requestsWithLane.push(requestWithLane)
+  }
+  return requestsWithLane
 }
