@@ -5,6 +5,7 @@ import type { TypedContract } from 'ethers-abitype'
 import path from 'path'
 import YAML from 'yaml'
 
+import type { NetworkInfo } from './types.js'
 import {
   type CCIPContractType,
   CCIPContractTypeCommitStore,
@@ -135,35 +136,47 @@ fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors.ym
   })
   .catch((err) => console.warn('Could not fetch up-to-date chain-selectors; using embedded', err))
 
-export function chainNameFromId(id: bigint): string {
-  return SELECTORS[Number(id)].name
+export function chainNameFromId(id: number): string {
+  return SELECTORS[id].name
 }
 
-export function chainSelectorFromId(id: bigint): bigint {
-  return SELECTORS[Number(id)].selector
+export function chainSelectorFromId(id: number): bigint {
+  return SELECTORS[id].selector
 }
 
-export function chainIdFromSelector(selector: bigint): bigint {
-  for (const id in SELECTORS) {
-    if (SELECTORS[id].selector === selector) {
-      return BigInt(id)
+export function chainIdFromSelector(selector: bigint): number {
+  const id = lazyCached(`chainIdFromSelector ${selector}`, () => {
+    for (const id in SELECTORS) {
+      if (SELECTORS[id].selector === selector) {
+        return Number(id)
+      }
     }
-  }
-  throw new Error(`Selector not found: ${selector}`)
+  })
+  if (id === undefined) throw new Error(`Selector not found: ${selector}`)
+  return id
 }
 
-export async function getProviderNetwork(
-  provider: Provider,
-): Promise<{ chainId: number; chainSelector: bigint; name: string; isTestnet: boolean }> {
-  // AbstractProvider.getNetwork() is cached
-  const chainId = (await provider.getNetwork()).chainId
+export function networkInfo(selectorOrId: bigint | number): NetworkInfo {
+  let chainId: number, chainSelector: bigint
+  if (typeof selectorOrId === 'number') {
+    chainId = selectorOrId
+    chainSelector = chainSelectorFromId(chainId)
+  } else {
+    chainSelector = selectorOrId
+    chainId = chainIdFromSelector(chainSelector)
+  }
   const name = chainNameFromId(chainId)
   return {
-    chainId: Number(chainId),
-    chainSelector: chainSelectorFromId(chainId),
+    chainId,
+    chainSelector,
     name,
     isTestnet: !name.includes('-mainnet'),
   }
+}
+
+export async function getProviderNetwork(provider: Provider): Promise<NetworkInfo> {
+  // AbstractProvider.getNetwork() is cached
+  return networkInfo(Number((await provider.getNetwork()).chainId))
 }
 
 const BLOCK_RANGE = 10_000

@@ -7,7 +7,15 @@ export {
   fetchOffchainTokenData,
   getOnRampStaticConfig,
 } from './requests.js'
-export type { CCIPMessage } from './types.js'
+export type {
+  CCIPCommit,
+  CCIPExecution,
+  CCIPMessage,
+  CCIPRequest,
+  CCIPRequestWithLane,
+  CommitReport,
+  ExecutionReceipt,
+} from './types.js'
 export {
   chainIdFromSelector,
   chainNameFromId,

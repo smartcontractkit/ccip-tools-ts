@@ -2,7 +2,7 @@ import { Contract, Interface, type Provider } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import { getLeafHasher, proofFlagsToBits, Tree } from './hasher/index.js'
-import type { CCIPExecution, CCIPRequest, ExecutionReceipt } from './types.js'
+import type { CCIPExecution, CCIPRequest, ExecutionReceipt, LaneInfo } from './types.js'
 import {
   CCIP_ABIs,
   CCIPContractTypeOffRamp,
@@ -10,7 +10,7 @@ import {
   type CCIPVersion,
   type LeafHasherArgs,
 } from './types.js'
-import { blockRangeGenerator, getTypeAndVersion, lazyCached } from './utils.js'
+import { blockRangeGenerator, getTypeAndVersion, lazyCached, networkInfo } from './utils.js'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
@@ -89,7 +89,10 @@ export async function fetchOffRamp<V extends CCIPVersion>(
 
   const seen = new Set<string>()
   const latestBlock = await dest.getBlockNumber()
-  for (const blockRange of blockRangeGenerator({ endBlock: latestBlock, startBlock: hints?.fromBlock })) {
+  for (const blockRange of blockRangeGenerator({
+    endBlock: latestBlock,
+    startBlock: hints?.fromBlock,
+  })) {
     // we don't know our OffRamp address yet, so fetch any compatible log
     const logs = await dest.getLogs({ ...blockRange, topics: [topic0] })
 
@@ -128,7 +131,13 @@ export async function getOffRampStaticConfig(dest: Provider, address: string) {
     const offRampContract = new Contract(address, offRampABI, dest) as unknown as TypedContract<
       typeof offRampABI
     >
-    return [await offRampContract.getStaticConfig(), offRampContract] as const
+    const staticConfig = await offRampContract.getStaticConfig()
+    const lane: LaneInfo = {
+      source: networkInfo(staticConfig.sourceChainSelector),
+      dest: networkInfo(staticConfig.chainSelector),
+      onRamp: staticConfig.onRamp as string,
+    }
+    return [staticConfig, offRampContract, lane] as const
   })
 }
 
@@ -163,7 +172,10 @@ export async function* fetchExecutionReceipts(
   const contractsToIgnore = new Set<string>()
   const completed = new Set<string>()
   const latestBlock = await dest.getBlockNumber()
-  for (const blockRange of blockRangeGenerator({ endBlock: latestBlock, startBlock: hints?.fromBlock })) {
+  for (const blockRange of blockRangeGenerator({
+    endBlock: latestBlock,
+    startBlock: hints?.fromBlock,
+  })) {
     const topics = new Set(
       requests.map(({ version }) => {
         const offRampInterface = getOffRampInterface(version)

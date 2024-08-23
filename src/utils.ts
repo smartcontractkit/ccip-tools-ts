@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/restrict-template-expressions */
+/* eslint-disable @typescript-eslint/no-base-to-string */
 import { readFile } from 'node:fs/promises'
 
 import { select } from '@inquirer/prompts'
@@ -13,7 +15,7 @@ import {
 import util from 'util'
 
 import { getProviderNetwork } from './lib/index.js'
-import type { CCIPRequest } from './lib/types.js'
+import type { CCIPMessage, CCIPRequest, CCIPRequestWithLane } from './lib/types.js'
 
 util.inspect.defaultOptions.depth = 4 // print down to tokenAmounts in requests
 const RPCS_RE = /\b(http|ws)s?:\/\/\S+/
@@ -110,7 +112,7 @@ export function getWallet(): BaseWallet {
   throw new Error('Could not get wallet; please, set USER_KEY envvar as a hex-encoded private key')
 }
 
-export async function selectRequest<R extends CCIPRequest>(
+export async function selectRequest<R extends CCIPRequest | CCIPRequestWithLane>(
   requests: R[],
   promptSuffix?: string,
 ): Promise<R> {
@@ -121,8 +123,14 @@ export async function selectRequest<R extends CCIPRequest>(
       ...requests.map((req, i) => ({
         value: i,
         name: `${req.log.index} => ${req.message.messageId}`,
-        // eslint-disable-next-line @typescript-eslint/no-base-to-string, @typescript-eslint/restrict-template-expressions
-        description: `sender =\t\t${req.message.sender}\nreceiver =\t\t${req.message.receiver}\ngasLimit =\t\t${req.message.gasLimit}\ntokenTransfers =\t[${req.message.tokenAmounts.map(({ token }) => token).join(',')}]`,
+        description:
+          `sender =\t\t${req.message.sender}
+receiver =\t\t${req.message.receiver}
+gasLimit =\t\t${req.message.gasLimit}
+tokenTransfers =\t[${req.message.tokenAmounts.map(({ token }) => token).join(',')}]` +
+          ('lane' in req
+            ? `\ndestination =\t\t${req.lane.dest.name} [${req.lane.dest.chainId}]`
+            : ''),
       })),
       {
         value: -1,
@@ -131,9 +139,7 @@ export async function selectRequest<R extends CCIPRequest>(
       },
     ],
   })
-  if (answer < 0) {
-    throw new Error('User requested exit')
-  }
+  if (answer < 0) throw new Error('User requested exit')
   return requests[answer]
 }
 

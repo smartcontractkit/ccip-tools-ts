@@ -3,6 +3,8 @@ import util from 'util'
 
 import {
   calculateManualExecProof,
+  type CCIPRequest,
+  type CCIPRequestWithLane,
   chainIdFromSelector,
   chainNameFromId,
   fetchAllMessagesInBatch,
@@ -15,22 +17,9 @@ import {
   getOnRampStaticConfig,
   getProviderNetwork,
 } from './lib/index.js'
-import type { CCIPRequest } from './lib/types.js'
 import { getTxInAnyProvider, getWallet, selectRequest, withDateTimestamp } from './utils.js'
 
 util.inspect.defaultOptions.depth = 4 // print down to tokenAmounts in requests
-
-interface CCIPRequestWithLane extends CCIPRequest {
-  lane: {
-    sourceChainSelector: bigint
-    sourceChainId: number
-    sourceNetworkName: string
-    destChainSelector: bigint
-    destChainId: number
-    destNetworkName: string
-    onRamp: string
-  }
-}
 
 export async function showRequests(providers: Record<number, Provider>, txHash: string) {
   const tx = await getTxInAnyProvider(providers, txHash)
@@ -43,31 +32,21 @@ export async function showRequests(providers: Record<number, Provider>, txHash: 
   const requestsWithLane: CCIPRequestWithLane[] = []
   for (const request of requests) {
     const onRamp = request.log.address
-    const [{ destChainSelector }] = await getOnRampStaticConfig(source, onRamp)
-    const destChainId = chainIdFromSelector(destChainSelector)
-    const destNetworkName = chainNameFromId(destChainId)
+    const [, , lane] = await getOnRampStaticConfig(source, onRamp)
 
-    const requestWithLane = {
+    const requestWithLane: CCIPRequestWithLane = {
       ...request,
-      lane: {
-        sourceChainSelector: sourceNetworkInfo.chainSelector,
-        sourceChainId: sourceNetworkInfo.chainId,
-        sourceNetworkName: sourceNetworkInfo.name,
-        destChainSelector,
-        destChainId: Number(destChainId),
-        destNetworkName,
-        onRamp,
-      },
+      lane,
     }
     requestsWithLane.push(requestWithLane)
     console.log(`message ${request.log.index} =`, withDateTimestamp(requestWithLane))
   }
 
   const request = await selectRequest(requestsWithLane, 'to know more')
-  const dest = providers[request.lane.destChainId]
+  const dest = providers[request.lane.dest.chainId]
   if (!dest) {
     throw new Error(
-      `Could not find an RPC for dest network: "${request.lane.destNetworkName}" [${request.lane.destChainId}]`,
+      `Could not find an RPC for dest network: "${request.lane.dest.name}" [${request.lane.dest.chainId}]`,
     )
   }
 

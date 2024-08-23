@@ -55,12 +55,29 @@ export const CCIP_ABIs = {
 
 const _: Record<CCIPContractType, Record<CCIPVersion, readonly unknown[]>> = CCIP_ABIs
 
+export interface NetworkInfo {
+  chainId: number
+  chainSelector: bigint
+  name: string
+  isTestnet: boolean
+}
+
+export interface LaneInfo {
+  source: NetworkInfo
+  dest: NetworkInfo
+  onRamp: string
+}
+
 export interface CCIPRequest {
   message: CCIPMessage
   log: Pick<Log, 'topics' | 'index' | 'address' | 'blockNumber'>
   tx: { logs: readonly Pick<Log, 'topics' | 'index' | 'data' | 'address' | 'transactionHash'>[] }
   timestamp: number
   version: CCIPVersion
+}
+
+export interface CCIPRequestWithLane extends CCIPRequest {
+  lane: LaneInfo
 }
 
 export type CommitReport = AbiParametersToPrimitiveTypes<
