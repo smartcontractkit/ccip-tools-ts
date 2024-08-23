@@ -101,7 +101,8 @@ export async function getTypeAndVersion(
       provider,
     ) as unknown as TypedContract<typeof VersionedContractABI>
     const typeAndVersion = await versionedContract.typeAndVersion()
-    const [type_, version] = typeAndVersion.split(' ', 2)
+    const [type_, version_] = typeAndVersion.split(' ', 2)
+    const [version] = version_.split('-', 2) // remove `-dev` suffixes
 
     if (
       ![CCIPContractTypeOnRamp, CCIPContractTypeOffRamp, CCIPContractTypeCommitStore].some(

@@ -68,10 +68,11 @@ export interface LaneInfo {
   onRamp: string
 }
 
+type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'data' | 'blockNumber' | 'transactionHash'>
 export interface CCIPRequest {
   message: CCIPMessage
-  log: Pick<Log, 'topics' | 'index' | 'address' | 'blockNumber' | 'transactionHash'>
-  tx: { logs: readonly Pick<Log, 'topics' | 'index' | 'data' | 'address' | 'transactionHash'>[] }
+  log: Log_
+  tx: { logs: readonly Log_[] }
   timestamp: number
   version: CCIPVersion
 }
