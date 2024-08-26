@@ -3,3 +3,4 @@ dist/
 *.tsbuildinfo
 .direnv/
 .envrc
+.env
