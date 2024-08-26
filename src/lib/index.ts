@@ -22,5 +22,7 @@ export {
   chainNameFromId,
   chainSelectorFromId,
   getProviderNetwork,
+  getSomeBlockNumberBefore,
   getTypeAndVersion,
+  lazyCached,
 } from './utils.js'

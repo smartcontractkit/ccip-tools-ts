@@ -17,8 +17,9 @@ import {
   fetchRequestsForSender,
   getOnRampStaticConfig,
   getProviderNetwork,
+  getSomeBlockNumberBefore,
+  lazyCached,
 } from './lib/index.js'
-import { getSomeBlockNumberBefore, lazyCached } from './lib/utils.js'
 import {
   getTxInAnyProvider,
   getWallet,
