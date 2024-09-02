@@ -7,6 +7,7 @@ import type { CCIPRequest } from './lib/index.js'
 import {
   calculateManualExecProof,
   chainIdFromSelector,
+  chainNameFromSelector,
   fetchAllMessagesInBatch,
   fetchCCIPMessageInLog,
   fetchCCIPMessagesInTx,
@@ -19,10 +20,16 @@ import {
   getProviderNetwork,
   getSomeBlockNumberBefore,
   lazyCached,
+  networkInfo,
 } from './lib/index.js'
+import { bigIntReplacer } from './lib/utils.js'
 import {
   getTxInAnyProvider,
   getWallet,
+  prettyCommit,
+  prettyLane,
+  prettyReceipt,
+  prettyRequest,
   selectRequest,
   withDateTimestamp,
   withLanes,
@@ -30,39 +37,80 @@ import {
 
 util.inspect.defaultOptions.depth = 4 // print down to tokenAmounts in requests
 
-export async function showRequests(providers: Record<number, Provider>, txHash: string) {
+export enum Format {
+  log = 'log',
+  pretty = 'pretty',
+  json = 'json',
+}
+
+export async function showRequests(
+  providers: Record<number, Provider>,
+  txHash: string,
+  format: Format,
+) {
   const tx = await getTxInAnyProvider(providers, txHash)
   const source = tx.provider
-  const sourceNetworkInfo = await getProviderNetwork(source)
-  console.table({ network: 'source', ...sourceNetworkInfo })
 
   const requests = await withLanes(source, await fetchCCIPMessagesInTx(tx))
-  for (const request of requests) {
-    console.log(`message ${request.log.index} =`, withDateTimestamp(request))
+  const request = await selectRequest(requests, 'to know more')
+
+  switch (format) {
+    case Format.log:
+      console.log(`message ${request.log.index} =`, withDateTimestamp(request))
+      break
+    case Format.pretty:
+      await prettyRequest(source, request)
+      break
+    case Format.json:
+      console.info(JSON.stringify(request, bigIntReplacer, 2))
+      break
   }
 
-  const request = await selectRequest(requests, 'to know more')
-  const dest = providers[request.lane.dest.chainId]
+  const dest = providers[chainIdFromSelector(request.lane.destChainSelector)]
   if (!dest) {
     throw new Error(
-      `Could not find an RPC for dest network: "${request.lane.dest.name}" [${request.lane.dest.chainId}]`,
+      `Could not find an RPC for dest network: "${chainNameFromSelector(request.lane.destChainSelector)}" [${chainIdFromSelector(request.lane.destChainSelector)}]`,
     )
   }
 
   const commit = await fetchCommitReport(dest, request)
-  console.log(
-    'commit =',
-    withDateTimestamp({
-      ...commit,
-      timestamp: (await dest.getBlock(commit.log.blockNumber))!.timestamp,
-    }),
-  )
+  switch (format) {
+    case Format.log:
+      console.log(
+        'commit =',
+        withDateTimestamp({
+          ...commit,
+          timestamp: (await dest.getBlock(commit.log.blockNumber))!.timestamp,
+        }),
+      )
+      break
+    case Format.pretty:
+      await prettyCommit(dest, commit, request)
+      break
+    case Format.json:
+      console.info(JSON.stringify(commit, bigIntReplacer, 2))
+      break
+  }
 
+  let found = false
   for await (const receipt of fetchExecutionReceipts(dest, [request], {
     fromBlock: commit.log.blockNumber,
   })) {
-    console.log('receipt =', withDateTimestamp(receipt))
+    switch (format) {
+      case Format.log:
+        console.log('receipt =', withDateTimestamp(receipt))
+        break
+      case Format.pretty:
+        if (!found) console.info('Receipts:')
+        prettyReceipt(receipt, request)
+        break
+      case Format.json:
+        console.info(JSON.stringify(receipt, bigIntReplacer, 2))
+        break
+    }
+    found = true
   }
+  if (!found) console.warn(`No execution receipt found for request`)
 }
 
 export async function manualExec(
@@ -71,12 +119,12 @@ export async function manualExec(
   argv: {
     'gas-limit': number
     'log-index'?: number
+    format: Format
   },
 ) {
   const tx = await getTxInAnyProvider(providers, txHash)
   const source = tx.provider
   const sourceNetworkInfo = await getProviderNetwork(source)
-  console.table({ network: 'source', ...sourceNetworkInfo })
 
   let request
   if (argv['log-index'] != null) {
@@ -85,28 +133,40 @@ export async function manualExec(
     request = await selectRequest(await fetchCCIPMessagesInTx(tx), 'to execute')
   }
 
-  const [, , lane] = await getOnRampStaticConfig(source, request.log.address)
-
-  const dest = providers[chainIdFromSelector(lane.dest.chainSelector)]
-  if (!dest) {
-    throw new Error(
-      `Could not find an RPC for dest network: "${lane.dest.name}" [${lane.dest.chainId}]`,
-    )
+  switch (argv.format) {
+    case Format.log:
+      console.log(`message ${request.log.index} =`, withDateTimestamp(request))
+      break
+    case Format.pretty:
+      await prettyRequest(source, request)
+      break
+    case Format.json:
+      console.info(JSON.stringify(request, bigIntReplacer, 2))
+      break
   }
-  console.table({ network: 'dest', ...lane.dest })
 
-  const commit = await fetchCommitReport(dest, request)
+  const [staticConfig] = await getOnRampStaticConfig(source, request.log.address)
 
-  const requestsInBatch = await fetchAllMessagesInBatch(source, request.log, commit.report.interval)
-
-  const leafHasherArgs = {
-    sourceChainSelector: lane.source.chainSelector,
-    destChainSelector: lane.dest.chainSelector,
+  const lane = {
+    sourceChainSelector: staticConfig.chainSelector,
+    destChainSelector: staticConfig.destChainSelector,
     onRamp: request.log.address,
   }
+  prettyLane(lane)
+
+  const dest = providers[chainIdFromSelector(staticConfig.destChainSelector)]
+  if (!dest) {
+    throw new Error(
+      `Could not find an RPC for dest network: "${chainNameFromSelector(staticConfig.destChainSelector)}" [${chainIdFromSelector(staticConfig.destChainSelector)}]`,
+    )
+  }
+
+  const commit = await fetchCommitReport(dest, request)
+  const requestsInBatch = await fetchAllMessagesInBatch(source, request.log, commit.report.interval)
+
   const manualExecReport = calculateManualExecProof(
     requestsInBatch.map(({ message }) => message),
-    leafHasherArgs,
+    lane,
     [request.message.messageId],
     commit.report.merkleRoot,
   )
@@ -116,9 +176,8 @@ export async function manualExec(
   const gasOverrides = Array.from({ length: manualExecReport.messages.length }, () =>
     BigInt(argv['gas-limit']),
   )
-  console.log('proof =', execReport, gasOverrides)
 
-  let offRampContract = await fetchOffRamp(dest, leafHasherArgs, request.version, {
+  let offRampContract = await fetchOffRamp(dest, lane, request.version, {
     fromBlock: commit.log.blockNumber,
   })
   console.log('offRamp =', await offRampContract.getAddress())
@@ -127,7 +186,14 @@ export async function manualExec(
   offRampContract = offRampContract.connect(wallet) as typeof offRampContract
 
   const manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
-  console.log('manualExec tx =', manualExecTx)
+  console.log(
+    'manualExec tx =',
+    manualExecTx.hash,
+    'to =',
+    manualExecTx.to,
+    'gasLimit =',
+    manualExecTx.gasLimit,
+  )
 }
 
 export async function manualExecSenderQueue(
@@ -137,12 +203,12 @@ export async function manualExecSenderQueue(
     'gas-limit': number
     'log-index'?: number
     'exec-failed'?: boolean
+    format: Format
   },
 ) {
   const tx = await getTxInAnyProvider(providers, txHash)
   const source = tx.provider
   const sourceNetworkInfo = await getProviderNetwork(source)
-  console.table({ network: 'source', ...sourceNetworkInfo })
 
   let firstRequest
   if (argv['log-index'] != null) {
@@ -150,7 +216,24 @@ export async function manualExecSenderQueue(
   } else {
     firstRequest = await selectRequest(await fetchCCIPMessagesInTx(tx), 'to execute')
   }
-  const [, , lane] = await getOnRampStaticConfig(source, firstRequest.log.address)
+  switch (argv.format) {
+    case Format.log:
+      console.log(`message ${firstRequest.log.index} =`, withDateTimestamp(firstRequest))
+      break
+    case Format.pretty:
+      await prettyRequest(source, firstRequest)
+      break
+    case Format.json:
+      console.info(JSON.stringify(firstRequest, bigIntReplacer, 2))
+      break
+  }
+
+  const [staticConfig] = await getOnRampStaticConfig(source, firstRequest.log.address)
+  const lane = {
+    source: networkInfo(staticConfig.chainSelector),
+    dest: networkInfo(staticConfig.destChainSelector),
+    onRamp: firstRequest.log.address,
+  }
 
   const dest = providers[lane.dest.chainId]
   if (!dest) {
@@ -158,7 +241,6 @@ export async function manualExecSenderQueue(
       `Could not find an RPC for dest network: "${lane.dest.name}" [${lane.dest.chainId}]`,
     )
   }
-  console.table({ network: 'dest', ...lane.dest })
 
   const requests: Omit<CCIPRequest, 'timestamp' | 'tx'>[] = []
   for await (const request of fetchRequestsForSender(source, firstRequest)) {
@@ -203,7 +285,7 @@ export async function manualExecSenderQueue(
     const msgIdsToExec = [request.message.messageId]
     batches.push([commit, batch, msgIdsToExec] as const)
   }
-  console.log('Got', batches.length, 'batches to execute')
+  console.info('Got', batches.length, 'batches to execute')
 
   const leafHasherArgs = {
     sourceChainSelector: lane.source.chainSelector,
@@ -217,7 +299,7 @@ export async function manualExecSenderQueue(
   const wallet = getWallet().connect(dest)
   offRampContract = offRampContract.connect(wallet) as typeof offRampContract
 
-  for (const [commit, batch, msgIdsToExec] of batches) {
+  for (const [i, [commit, batch, msgIdsToExec]] of batches.entries()) {
     const manualExecReport = calculateManualExecProof(
       batch.map(({ message }) => message),
       leafHasherArgs,
@@ -243,8 +325,14 @@ export async function manualExecSenderQueue(
       BigInt(argv['gas-limit']),
     )
 
-    console.info('proof =', execReport, gasOverrides)
     const manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
-    console.log('manualExec tx =', manualExecTx)
+    console.log(
+      `manualExec tx (${i + 1} of ${batches.length}, ${batch.length} msgs) =`,
+      manualExecTx.hash,
+      'to =',
+      manualExecTx.to,
+      'gasLimit =',
+      manualExecTx.gasLimit,
+    )
   }
 }

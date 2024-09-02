@@ -1,7 +1,7 @@
 // For reference implementation, see https://github.com/smartcontractkit/ccip/blob/ccip-develop/core/services/ocr2/plugins/ccip/hasher/leaf_hasher.go
 import { AbiCoder, concat, hexlify, id, keccak256, toBeHex, zeroPadValue } from 'ethers'
 
-import type { CCIPMessage, LeafHasherArgs } from '../types.js'
+import type { CCIPMessage, Lane } from '../types.js'
 
 export const ZERO_HASH = hexlify(new Uint8Array(32).fill(0xff))
 
@@ -30,7 +30,7 @@ export function getLeafHasher({
   sourceChainSelector,
   destChainSelector,
   onRamp,
-}: LeafHasherArgs): LeafHasher {
+}: Lane): LeafHasher {
   const metadataHash = keccak256(
     concat([
       METADATA_PREFIX_1_2,

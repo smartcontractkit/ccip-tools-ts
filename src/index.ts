@@ -3,7 +3,7 @@ import util from 'util'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
-import { manualExec, manualExecSenderQueue, showRequests } from './commands.js'
+import { Format, manualExec, manualExecSenderQueue, showRequests } from './commands.js'
 import { loadRpcProviders } from './utils.js'
 
 util.inspect.defaultOptions.depth = 4 // print down to tokenAmounts in requests
@@ -25,6 +25,11 @@ async function main() {
         // demandOption: true,
         // default: 'wss://rpc.chiadochain.net/wss',
       },
+      format: {
+        alias: 'f',
+        choices: Object.values(Format),
+        default: Format.pretty,
+      },
     })
     .coerce('rpcs', (rpcs: (string | number)[] | undefined) =>
       rpcs ? rpcs.map((r) => r.toString()) : <string[]>[],
@@ -42,7 +47,7 @@ async function main() {
           .check(({ tx_hash }) => isHexString(tx_hash, 32)),
       async (argv) => {
         const providers = await loadRpcProviders(argv)
-        return showRequests(providers, argv.tx_hash)
+        return showRequests(providers, argv.tx_hash, argv.format)
           .catch((err) => console.error(err))
           .finally(() => Object.values(providers).forEach((provider) => provider.destroy()))
       },

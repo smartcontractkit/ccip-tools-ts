@@ -1,21 +1,34 @@
-/* eslint-disable @typescript-eslint/restrict-template-expressions */
-/* eslint-disable @typescript-eslint/no-base-to-string */
+/* eslint-disable @typescript-eslint/restrict-template-expressions,@typescript-eslint/no-base-to-string */
 import { readFile } from 'node:fs/promises'
 
 import { select } from '@inquirer/prompts'
-import type { TransactionReceipt } from 'ethers'
+import { parseAbi } from 'abitype'
+import type { Addressable, TransactionReceipt } from 'ethers'
 import {
   BaseWallet,
+  Contract,
+  formatUnits,
   hexlify,
   JsonRpcProvider,
   type Provider,
   SigningKey,
   WebSocketProvider,
 } from 'ethers'
+import type { TypedContract } from 'ethers-abitype'
 import util from 'util'
 
-import { getOnRampStaticConfig, getProviderNetwork } from './lib/index.js'
-import type { CCIPMessage, CCIPRequest, CCIPRequestWithLane } from './lib/types.js'
+import type { CCIPCommit, CCIPExecution, Lane } from './lib/index.js'
+import {
+  type CCIPRequest,
+  type CCIPRequestWithLane,
+  chainIdFromSelector,
+  chainNameFromId,
+  chainNameFromSelector,
+  getOnRampStaticConfig,
+  getProviderNetwork,
+  lazyCached,
+  networkInfo,
+} from './lib/index.js'
 
 util.inspect.defaultOptions.depth = 4 // print down to tokenAmounts in requests
 const RPCS_RE = /\b(http|ws)s?:\/\/\S+/
@@ -129,7 +142,7 @@ receiver =\t\t${req.message.receiver}
 gasLimit =\t\t${req.message.gasLimit}
 tokenTransfers =\t[${req.message.tokenAmounts.map(({ token }) => token).join(',')}]` +
           ('lane' in req
-            ? `\ndestination =\t\t${req.lane.dest.name} [${req.lane.dest.chainId}]`
+            ? `\ndestination =\t\t${chainNameFromId(chainIdFromSelector(req.lane.destChainSelector))} [${chainIdFromSelector(req.lane.destChainSelector)}]`
             : ''),
       })),
       {
@@ -154,8 +167,20 @@ export async function withLanes(
   requests: CCIPRequest[],
 ): Promise<CCIPRequestWithLane[]> {
   const requestsWithLane: CCIPRequestWithLane[] = []
+  const cache = new Map<string, unknown>()
   for (const request of requests) {
-    const [, , lane] = await getOnRampStaticConfig(source, request.log.address)
+    const lane = await lazyCached(
+      request.log.address,
+      async () => {
+        const [staticConfig] = await getOnRampStaticConfig(source, request.log.address)
+        return {
+          sourceChainSelector: staticConfig.chainSelector,
+          destChainSelector: staticConfig.destChainSelector,
+          onRamp: request.log.address,
+        }
+      },
+      cache,
+    )
 
     const requestWithLane: CCIPRequestWithLane = {
       ...request,
@@ -164,4 +189,152 @@ export async function withLanes(
     requestsWithLane.push(requestWithLane)
   }
   return requestsWithLane
+}
+
+export function prettyLane(lane: Lane) {
+  console.info('Lane:')
+  const source = networkInfo(lane.sourceChainSelector),
+    dest = networkInfo(lane.destChainSelector)
+  console.table({
+    name: { source: source.name, dest: dest.name },
+    chainId: { source: source.chainId, dest: dest.chainId },
+    chainSelector: { source: source.chainSelector, dest: dest.chainSelector },
+    onRamp: { source: lane.onRamp },
+  })
+}
+
+const TokenABI = parseAbi([
+  'function decimals() view returns (uint8)',
+  'function symbol() view returns (string)',
+])
+
+async function formatToken(
+  provider: Provider,
+  { token, amount }: { token: string | Addressable; amount: bigint },
+): Promise<string> {
+  const [decimals_, symbol] = await lazyCached(`token ${token}`, async () => {
+    const contract = new Contract(token, TokenABI, provider) as unknown as TypedContract<
+      typeof TokenABI
+    >
+    return Promise.all([contract.decimals(), contract.symbol()] as const)
+  })
+  const decimals = Number(decimals_)
+  return `${formatUnits(amount, decimals)} ${symbol}`
+}
+
+function formatArray<T>(name: string, values: readonly T[]): Record<string, T> {
+  if (values.length <= 1) return { [name]: values[0] }
+  return Object.fromEntries(values.map((v, i) => [`${name}[${i}]`, v] as const))
+}
+
+function formatData(name: string, data: string): Record<string, string> {
+  const split = []
+  if (data.length <= 66) split.push(data)
+  else
+    for (let i = data.length; i > 2; i -= 64) {
+      split.unshift(data.substring(Math.max(i - 64, 0), i))
+    }
+  return formatArray(name, split)
+}
+
+function formatDate(timestamp: number) {
+  return new Date(timestamp * 1e3).toISOString().substring(0, 19).replace('T', ' ')
+}
+
+function formatDuration(secs: number) {
+  if (secs < 0) secs = -secs
+  const time = {
+    d: Math.floor(secs / 86400),
+    h: Math.floor(secs / 3600) % 24,
+    m: Math.floor(secs / 60) % 60,
+    s: Math.floor(secs) % 60,
+  }
+  return Object.entries(time)
+    .filter((val) => val[1] !== 0)
+    .map(([key, val]) => `${val}${key}${key === 'd' ? ' ' : ''}`)
+    .join('')
+}
+
+export async function prettyRequest<R extends CCIPRequest | CCIPRequestWithLane>(
+  source: Provider,
+  request: R,
+) {
+  if ('lane' in request) {
+    prettyLane(request.lane)
+  }
+  console.info('Request:')
+
+  const finalized = await source.getBlock('finalized')
+  console.table({
+    messageId: request.message.messageId,
+    sender: request.message.sender,
+    receiver: request.message.receiver,
+    sequenceNumber: Number(request.message.sequenceNumber),
+    nonce: Number(request.message.nonce),
+    gasLimit: Number(request.message.gasLimit),
+    strict: request.message.strict,
+    transactionHash: request.log.transactionHash,
+    logIndex: request.log.index,
+    blockNumber: request.log.blockNumber,
+    timestamp: formatDate(request.timestamp),
+    finalized:
+      finalized &&
+      (finalized.timestamp < request.timestamp
+        ? formatDuration(request.timestamp - finalized.timestamp) + ' left'
+        : true),
+    fee: await formatToken(source, {
+      token: request.message.feeToken,
+      amount: request.message.feeTokenAmount,
+    }),
+    ...formatArray(
+      'tokens',
+      await Promise.all(request.message.tokenAmounts.map(formatToken.bind(null, source))),
+    ),
+    ...formatData('data', request.message.data),
+  })
+}
+
+export async function prettyCommit(
+  dest: Provider,
+  commit: CCIPCommit,
+  request: { timestamp: number },
+) {
+  console.info('Commit:')
+  const timestamp = (await dest.getBlock(commit.log.blockNumber))!.timestamp
+  console.table({
+    merkleRoot: commit.report.merkleRoot,
+    'interval.min': Number(commit.report.interval.min),
+    'interval.max': Number(commit.report.interval.max),
+    ...Object.fromEntries(
+      commit.report.priceUpdates.tokenPriceUpdates.map(
+        ({ sourceToken, usdPerToken }) =>
+          [`tokenPrice[${sourceToken}]`, `${formatUnits(usdPerToken)} USD`] as const,
+      ),
+    ),
+    ...Object.fromEntries(
+      commit.report.priceUpdates.gasPriceUpdates.map(({ destChainSelector, usdPerUnitGas }) => {
+        const execLayerGas = usdPerUnitGas % (1n << 112n)
+        const daLayerGas = usdPerUnitGas / (1n << 112n)
+        return [
+          `gasPrice[${chainNameFromSelector(destChainSelector)}]`,
+          `${formatUnits(execLayerGas)}` +
+            (daLayerGas > 0 ? ` (DA: ${formatUnits(daLayerGas)})` : ''),
+        ] as const
+      }),
+    ),
+    transactionHash: commit.log.transactionHash,
+    blockNumber: commit.log.blockNumber,
+    timestamp: `${formatDate(timestamp)} (${formatDuration(timestamp - request.timestamp)} after request)`,
+  })
+}
+
+export function prettyReceipt(receipt: CCIPExecution, request: { timestamp: number }) {
+  console.table({
+    state: receipt.receipt.state === 2n ? '✅ success' : '❌ failed',
+    ...formatData('returnData', receipt.receipt.returnData),
+    transactionHash: receipt.log.transactionHash,
+    logIndex: receipt.log.index,
+    blockNumber: receipt.log.blockNumber,
+    timestamp: `${formatDate(receipt.timestamp)} (${formatDuration(receipt.timestamp - request.timestamp)} after request)`,
+  })
 }

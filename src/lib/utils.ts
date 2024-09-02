@@ -77,17 +77,19 @@ export async function getSomeBlockNumberBefore(
   return beforeBlockNumber
 }
 
-const lazyCache = new Map<string, unknown>()
+const defaultSharedCache = new Map<string, unknown>()
 /**
- * Receives a key and a Promise factory: creates, caches and returns the same Promise
- * for any given key
+ * Receives a key and a factory: creates, caches and returns the same value for a given key
  **/
-export function lazyCached<T>(key: string, lazy: () => T): T {
-  let cached = lazyCache.get(key)
-  if (cached !== undefined) return cached as T
-  cached = lazy()
-  lazyCache.set(key, cached)
-  return cached as T
+export function lazyCached<T>(
+  key: string,
+  lazy: () => T,
+  cache: Map<string, unknown> = defaultSharedCache,
+): T {
+  if (cache.has(key)) return cache.get(key) as T
+  const cached = lazy()
+  cache.set(key, cached)
+  return cached
 }
 
 export async function getTypeAndVersion(
@@ -157,6 +159,9 @@ export function chainIdFromSelector(selector: bigint): number {
   return id
 }
 
+export const chainNameFromSelector = (selector: bigint) =>
+  chainNameFromId(chainIdFromSelector(selector))
+
 export function networkInfo(selectorOrId: bigint | number): NetworkInfo {
   let chainId: number, chainSelector: bigint
   if (typeof selectorOrId === 'number') {
@@ -207,4 +212,18 @@ export function* blockRangeGenerator(
       }
     }
   }
+}
+
+export function bigIntReplacer(_key: string, value: unknown): unknown {
+  if (typeof value === 'bigint') {
+    return value.toString()
+  }
+  return value
+}
+
+export function bigIntReviver(_key: string, value: unknown): unknown {
+  if (typeof value === 'string' && /^\d+$/.test(value)) {
+    return BigInt(value)
+  }
+  return value
 }

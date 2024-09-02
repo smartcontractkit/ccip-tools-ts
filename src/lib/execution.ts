@@ -2,15 +2,15 @@ import { Contract, Interface, type Provider } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import { getLeafHasher, proofFlagsToBits, Tree } from './hasher/index.js'
-import type { CCIPExecution, CCIPRequest, ExecutionReceipt, LaneInfo } from './types.js'
+import type { CCIPExecution, CCIPRequest, ExecutionReceipt } from './types.js'
 import {
   CCIP_ABIs,
   CCIPContractTypeOffRamp,
   type CCIPMessage,
   type CCIPVersion,
-  type LeafHasherArgs,
+  type Lane,
 } from './types.js'
-import { blockRangeGenerator, getTypeAndVersion, lazyCached, networkInfo } from './utils.js'
+import { blockRangeGenerator, getTypeAndVersion, lazyCached } from './utils.js'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
@@ -23,7 +23,7 @@ import { blockRangeGenerator, getTypeAndVersion, lazyCached, networkInfo } from 
  **/
 export function calculateManualExecProof(
   messagesInBatch: CCIPMessage[],
-  { destChainSelector, onRamp }: Pick<LeafHasherArgs, 'destChainSelector' | 'onRamp'>,
+  { destChainSelector, onRamp }: Pick<Lane, 'destChainSelector' | 'onRamp'>,
   messageIds: string[],
   merkleRoot?: string,
 ): {
@@ -79,7 +79,7 @@ export function calculateManualExecProof(
 
 export async function fetchOffRamp<V extends CCIPVersion>(
   dest: Provider,
-  { sourceChainSelector, destChainSelector, onRamp }: LeafHasherArgs,
+  { sourceChainSelector, destChainSelector, onRamp }: Lane,
   ccipVersion: V,
   hints?: { fromBlock?: number },
 ): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]>> {
@@ -132,12 +132,7 @@ export async function getOffRampStaticConfig(dest: Provider, address: string) {
       typeof offRampABI
     >
     const staticConfig = await offRampContract.getStaticConfig()
-    const lane: LaneInfo = {
-      source: networkInfo(staticConfig.sourceChainSelector),
-      dest: networkInfo(staticConfig.chainSelector),
-      onRamp: staticConfig.onRamp as string,
-    }
-    return [staticConfig, offRampContract, lane] as const
+    return [staticConfig, offRampContract] as const
   })
 }
 

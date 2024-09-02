@@ -16,13 +16,17 @@ export type {
   CCIPRequestWithLane,
   CommitReport,
   ExecutionReceipt,
+  Lane,
+  NetworkInfo,
 } from './types.js'
 export {
   chainIdFromSelector,
   chainNameFromId,
+  chainNameFromSelector,
   chainSelectorFromId,
   getProviderNetwork,
   getSomeBlockNumberBefore,
   getTypeAndVersion,
   lazyCached,
+  networkInfo,
 } from './utils.js'

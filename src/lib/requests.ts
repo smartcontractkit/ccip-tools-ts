@@ -13,7 +13,6 @@ import {
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
-import type { LaneInfo } from './types.js'
 import {
   CCIP_ABIs,
   CCIPContractTypeOnRamp,
@@ -21,7 +20,7 @@ import {
   type CCIPRequest,
   type CCIPVersion,
 } from './types.js'
-import { blockRangeGenerator, getTypeAndVersion, lazyCached, networkInfo } from './utils.js'
+import { blockRangeGenerator, getTypeAndVersion, lazyCached } from './utils.js'
 
 async function getOnRampInterface(
   source: Provider,
@@ -57,12 +56,7 @@ export async function getOnRampStaticConfig(source: Provider, address: string) {
       typeof onRampABI
     >
     const staticConfig = await onRampContract.getStaticConfig()
-    const lane: LaneInfo = {
-      source: networkInfo(staticConfig.chainSelector),
-      dest: networkInfo(staticConfig.destChainSelector),
-      onRamp: address,
-    }
-    return [staticConfig, onRampContract, lane] as const
+    return [staticConfig, onRampContract] as const
   })
 }
 

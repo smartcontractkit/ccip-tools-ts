@@ -9,7 +9,7 @@ import EVM2EVMOffRamp_1_5_ABI from '../abi/OffRamp_1_5.js'
 import EVM2EVMOnRamp_1_2_ABI from '../abi/OnRamp_1_2.js'
 import EVM2EVMOnRamp_1_5_ABI from '../abi/OnRamp_1_5.js'
 
-export interface LeafHasherArgs {
+export interface Lane {
   sourceChainSelector: bigint
   destChainSelector: bigint
   onRamp: string
@@ -62,12 +62,6 @@ export interface NetworkInfo {
   isTestnet: boolean
 }
 
-export interface LaneInfo {
-  source: NetworkInfo
-  dest: NetworkInfo
-  onRamp: string
-}
-
 type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'data' | 'blockNumber' | 'transactionHash'>
 export interface CCIPRequest {
   message: CCIPMessage
@@ -78,7 +72,7 @@ export interface CCIPRequest {
 }
 
 export interface CCIPRequestWithLane extends CCIPRequest {
-  lane: LaneInfo
+  lane: Lane
 }
 
 export type CommitReport = AbiParametersToPrimitiveTypes<
@@ -90,7 +84,7 @@ export type CommitReport = AbiParametersToPrimitiveTypes<
 
 export interface CCIPCommit {
   report: CommitReport
-  log: Pick<Log, 'blockNumber' | 'transactionHash'>
+  log: Log_
 }
 
 export type ExecutionReceipt = AbiParameterToPrimitiveType<{
@@ -104,6 +98,6 @@ export type ExecutionReceipt = AbiParameterToPrimitiveType<{
 
 export interface CCIPExecution {
   receipt: ExecutionReceipt
-  log: Pick<Log, 'address' | 'blockNumber' | 'transactionHash'>
+  log: Log_
   timestamp: number
 }
