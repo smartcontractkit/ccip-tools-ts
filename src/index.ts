@@ -72,6 +72,11 @@ async function main() {
               describe: 'Override gas limit for receivers callback (0 keeps original)',
               default: 0,
             },
+            'tokens-gas-limit': {
+              type: 'number',
+              describe: 'Override gas limit for tokens releaseOrMint calls (0 keeps original)',
+              default: 0,
+            },
           })
           .check(({ tx_hash }) => isHexString(tx_hash, 32)),
       async (argv) => {
@@ -99,6 +104,11 @@ async function main() {
             'gas-limit': {
               type: 'number',
               describe: "Override gas limit for receivers callback (0 keeps request's)",
+              default: 0,
+            },
+            'tokens-gas-limit': {
+              type: 'number',
+              describe: 'Override gas limit for tokens releaseOrMint calls (0 keeps original)',
               default: 0,
             },
             'exec-failed': {

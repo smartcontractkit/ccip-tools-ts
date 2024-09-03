@@ -3,9 +3,11 @@
 import type { Provider } from 'ethers'
 import util from 'util'
 
-import type { CCIPRequest } from './lib/index.js'
 import {
+  bigIntReplacer,
   calculateManualExecProof,
+  type CCIPRequest,
+  CCIPVersion_1_2,
   chainIdFromSelector,
   chainNameFromSelector,
   fetchAllMessagesInBatch,
@@ -22,7 +24,6 @@ import {
   lazyCached,
   networkInfo,
 } from './lib/index.js'
-import { bigIntReplacer } from './lib/utils.js'
 import {
   getTxInAnyProvider,
   getWallet,
@@ -118,6 +119,7 @@ export async function manualExec(
   txHash: string,
   argv: {
     'gas-limit': number
+    'tokens-gas-limit': number
     'log-index'?: number
     format: Format
   },
@@ -173,19 +175,27 @@ export async function manualExec(
 
   const offchainTokenData = await fetchOffchainTokenData(request, sourceNetworkInfo.isTestnet)
   const execReport = { ...manualExecReport, offchainTokenData: [offchainTokenData] }
-  const gasOverrides = Array.from({ length: manualExecReport.messages.length }, () =>
-    BigInt(argv['gas-limit']),
-  )
-
-  let offRampContract = await fetchOffRamp(dest, lane, request.version, {
-    fromBlock: commit.log.blockNumber,
-  })
-  console.log('offRamp =', await offRampContract.getAddress())
 
   const wallet = getWallet().connect(dest)
-  offRampContract = offRampContract.connect(wallet) as typeof offRampContract
 
-  const manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
+  let manualExecTx
+  if (request.version === CCIPVersion_1_2) {
+    const gasOverrides = manualExecReport.messages.map(() => BigInt(argv['gas-limit']))
+    const offRampContract = await fetchOffRamp(wallet, lane, request.version, {
+      fromBlock: commit.log.blockNumber,
+    })
+    manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
+  } else {
+    const gasOverrides = manualExecReport.messages.map((message) => ({
+      receiverExecutionGasLimit: BigInt(argv['gas-limit']),
+      tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv['tokens-gas-limit'])),
+    }))
+    const offRampContract = await fetchOffRamp(wallet, lane, request.version, {
+      fromBlock: commit.log.blockNumber,
+    })
+    manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
+  }
+
   console.log(
     'manualExec tx =',
     manualExecTx.hash,
@@ -201,6 +211,7 @@ export async function manualExecSenderQueue(
   txHash: string,
   argv: {
     'gas-limit': number
+    'tokens-gas-limit': number
     'log-index'?: number
     'exec-failed'?: boolean
     format: Format
@@ -293,11 +304,11 @@ export async function manualExecSenderQueue(
     onRamp: lane.onRamp,
   }
 
-  let offRampContract = await fetchOffRamp(dest, leafHasherArgs, firstRequest.version, {
+  const wallet = getWallet().connect(dest)
+
+  const offRampContract = await fetchOffRamp(wallet, leafHasherArgs, firstRequest.version, {
     fromBlock: destFromBlock,
   })
-  const wallet = getWallet().connect(dest)
-  offRampContract = offRampContract.connect(wallet) as typeof offRampContract
 
   for (const [i, [commit, batch, msgIdsToExec]] of batches.entries()) {
     const manualExecReport = calculateManualExecProof(
@@ -321,13 +332,22 @@ export async function manualExecSenderQueue(
       }),
     )
     const execReport = { ...manualExecReport, offchainTokenData }
-    const gasOverrides = Array.from({ length: manualExecReport.messages.length }, () =>
-      BigInt(argv['gas-limit']),
-    )
 
-    const manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
+    let manualExecTx
+    if (firstRequest.version === CCIPVersion_1_2) {
+      const gasOverrides = manualExecReport.messages.map(() => BigInt(argv['gas-limit']))
+      manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
+    } else {
+      const gasOverrides = manualExecReport.messages.map((message) => ({
+        receiverExecutionGasLimit: BigInt(argv['gas-limit']),
+        tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv['tokens-gas-limit'])),
+      }))
+      manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
+    }
+
     console.log(
-      `manualExec tx (${i + 1} of ${batches.length}, ${batch.length} msgs) =`,
+      `[${i + 1} of ${batches.length}, ${batch.length} msgs]`,
+      'manualExec tx =',
       manualExecTx.hash,
       'to =',
       manualExecTx.to,

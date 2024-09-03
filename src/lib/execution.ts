@@ -1,4 +1,4 @@
-import { Contract, Interface, type Provider } from 'ethers'
+import { Contract, type ContractRunner, Interface, type Provider } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import { getLeafHasher, proofFlagsToBits, Tree } from './hasher/index.js'
@@ -78,11 +78,12 @@ export function calculateManualExecProof(
 }
 
 export async function fetchOffRamp<V extends CCIPVersion>(
-  dest: Provider,
+  runner: ContractRunner,
   { sourceChainSelector, destChainSelector, onRamp }: Lane,
   ccipVersion: V,
   hints?: { fromBlock?: number },
 ): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]>> {
+  const dest = runner.provider!
   const offRampABI = CCIP_ABIs[CCIPContractTypeOffRamp][ccipVersion]
   const offRampInterface = new Interface(offRampABI)
   const topic0 = offRampInterface.getEvent('ExecutionStateChanged')!.topicHash
@@ -100,7 +101,7 @@ export async function fetchOffRamp<V extends CCIPVersion>(
       if (seen.has(log.address)) continue
 
       try {
-        const [staticConfig, offRampContract] = await getOffRampStaticConfig(dest, log.address)
+        const [staticConfig, offRampContract] = await getOffRampStaticConfig(runner, log.address)
 
         // reject if it's not an OffRamp for our onRamp
         if (
@@ -122,9 +123,9 @@ export async function fetchOffRamp<V extends CCIPVersion>(
   throw new Error(`Could not find OffRamp for onRamp=${onRamp}`)
 }
 
-export async function getOffRampStaticConfig(dest: Provider, address: string) {
+export async function getOffRampStaticConfig(dest: ContractRunner, address: string) {
   return lazyCached(`OffRamp ${address}.staticConfig`, async () => {
-    const [type_, version] = await getTypeAndVersion(dest, address)
+    const [type_, version] = await getTypeAndVersion(dest.provider!, address)
     if (type_ != CCIPContractTypeOffRamp)
       throw new Error(`Not an OffRamp: ${address} is "${type_} ${version}"`)
     const offRampABI = CCIP_ABIs[CCIPContractTypeOffRamp][version]
