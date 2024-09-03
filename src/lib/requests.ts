@@ -3,7 +3,6 @@ import {
   AbiCoder,
   Contract,
   EventFragment,
-  FetchRequest,
   Interface,
   keccak256,
   type Log,
@@ -202,14 +201,12 @@ async function getUsdcAttestation(message: string, isTestnet: boolean): Promise<
   const msgHash = keccak256(message)
 
   const circleApiBaseUrl = isTestnet ? CIRCLE_API_URL.testnet : CIRCLE_API_URL.mainnet
-  const req = new FetchRequest(`${circleApiBaseUrl}/attestations/${msgHash}`)
-  const response = await req.send()
-  const json = response.bodyJson as AttestationResponse
-  if ('status' in json && json.status === 'complete' && json.attestation) {
-    return json.attestation
-  } else {
+  const res = await fetch(`${circleApiBaseUrl}/attestations/${msgHash}`)
+  const json = (await res.json()) as AttestationResponse
+  if (!('status' in json) || json.status !== 'complete' || !json.attestation) {
     throw new Error('Could not fetch USDC attestation. Response: ' + JSON.stringify(json, null, 2))
   }
+  return json.attestation
 }
 
 /**
