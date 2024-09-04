@@ -1,3 +1,5 @@
+#!/usr/bin/env -S npx tsx
+
 import { isHexString } from 'ethers'
 import util from 'util'
 import yargs from 'yargs'
@@ -130,4 +132,4 @@ async function main() {
     .parse()
 }
 
-void main()
+await main()

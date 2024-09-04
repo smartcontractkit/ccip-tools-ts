@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 const fs = require('fs/promises')
 
 const newLineRe = /(?:\r\n|\r|\n)/g
