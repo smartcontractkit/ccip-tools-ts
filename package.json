@@ -26,7 +26,6 @@
     "@types/jest": "^29.5.12",
     "@types/node": "^22.1.0",
     "@types/yargs": "^17.0.33",
-    "abitype": "^1.0.6",
     "eslint": "^9.9.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.2.1",
@@ -41,6 +40,7 @@
     "yaml": "^2.5.0"
   },
   "dependencies": {
+    "abitype": "^1.0.6",
     "@inquirer/prompts": "^5.3.8",
     "ethers": "^6.13.2",
     "tslib": "^2.6.3",
