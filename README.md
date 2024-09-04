@@ -8,11 +8,15 @@ In order to run commands/test from this repo, do the following:
 git clone https://github.com/smartcontractkit/ccip-tools-ts
 cd ccip-tools-ts
 npm install
-npx tsx src --help
+./src/index.ts --help  # tsx shebang available
+# or
+npm run build
+./dist/ccip-tools-ts --help  # node shebang script
+npx path/to/repo/ccip-tools-ts --help  # or pointing to folder directly
 ```
 
 > [!NOTE]
-> In dev context below, we'll call `$cli="npx tsx src"`
+> In dev context below, we'll call `$cli="./src/index.ts"`
 
 ## RPCs
 All commands require a list of RPCs endpoints for the networks of interest (source and destination).
@@ -54,7 +58,7 @@ Receipts until a `success` receipt or head is hit.
 ### `manualExec`
 
 ```sh
-$cli manualExec <source_transaction_hash> [--gas-limit num]
+$cli manualExec <source_transaction_hash> [--gas-limit num] [--tokens-gas-limit num]
 ```
 
 Try to manually execute the message in source transaction. If more than one found, user is prompted
