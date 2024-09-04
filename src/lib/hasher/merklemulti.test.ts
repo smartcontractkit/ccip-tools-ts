@@ -79,11 +79,8 @@ describe('Merkle multi basic tests', () => {
     const sourceFlags: boolean[] = [false, true, true]
 
     try {
-      verifyComputeRoot(leaves, {
-        hashes: proofs,
-        sourceFlags: sourceFlags,
-        countSourceFlags: (b) => new Proof([], []).countSourceFlags(b),
-      })
+      const proof = new Proof(proofs, sourceFlags)
+      verifyComputeRoot(leaves, proof)
     } catch (err: unknown) {
       expect((err as Error).message).toEqual('proof source flags 1 != proof hashes 2')
     }
