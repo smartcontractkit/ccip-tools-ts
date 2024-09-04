@@ -15,7 +15,8 @@
     "build": "npm run clean && npm run generate && tsc && npm run make-script",
     "make-script": "mv ./dist/{index.js,ccip-tools-ts} && sed -i -e '1i #!/usr/bin/env node' -e '1 {/^#!\\/usr\\/bin\\/env\\b.*tsx\\b/d}' ./dist/ccip-tools-ts && chmod +x ./dist/ccip-tools-ts",
     "start": "tsx src",
-    "clean": "rm -rfv ./dist"
+    "clean": "rm -rfv ./dist",
+    "prepare": "npm run build"
   },
   "author": "André Matos <andre.matos@smartcontract.com>",
   "license": "ISC",
