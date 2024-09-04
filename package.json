@@ -10,7 +10,8 @@
     "test": "jest",
     "lint": "prettier --check ./src && eslint ./src",
     "lint:fix": "prettier --write ./src && eslint --fix ./src",
-    "build": "npm run clean && tsc && cp -v ./src/lib/selectors.yml ./dist/lib/",
+    "generate": "node ./generate.cjs ./src/lib/selectors.ts && prettier --write ./src/lib/selectors.ts",
+    "build": "npm run clean && npm run generate && tsc",
     "start": "tsx src",
     "clean": "rm -rfv ./dist"
   },
@@ -33,13 +34,13 @@
     "ts-jest": "^29.2.4",
     "tsx": "^4.16.5",
     "typescript": "^5.5.4",
-    "typescript-eslint": "^8.1.0"
+    "typescript-eslint": "^8.1.0",
+    "yaml": "^2.5.0"
   },
   "dependencies": {
     "@inquirer/prompts": "^5.3.8",
     "ethers": "^6.13.2",
     "tslib": "^2.6.3",
-    "yaml": "^2.5.0",
     "yargs": "^17.7.2"
   },
   "prettier": {

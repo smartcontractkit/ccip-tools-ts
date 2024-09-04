@@ -1,10 +1,7 @@
-import fs from 'node:fs'
-
 import { Contract, type Provider } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
-import path from 'path'
-import YAML from 'yaml'
 
+import SELECTORS from './selectors.js'
 import type { NetworkInfo } from './types.js'
 import {
   type CCIPContractType,
@@ -121,25 +118,8 @@ export async function getTypeAndVersion(
   })
 }
 
-interface Selectors {
-  selectors: Record<number, { selector: bigint; name: string }>
-}
-
-// TODO: embed this instead of reading from fs
-let SELECTORS = (
-  YAML.parse(fs.readFileSync(path.join(import.meta.dirname, 'selectors.yml'), 'utf8'), {
-    intAsBigInt: true,
-  }) as Selectors
-).selectors
-
-fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors.yml')
-  .then((res) => res.text())
-  .then((body) => {
-    SELECTORS = (YAML.parse(body, { intAsBigInt: true }) as Selectors).selectors
-  })
-  .catch((err) => console.warn('Could not fetch up-to-date chain-selectors; using embedded', err))
-
 export function chainNameFromId(id: number): string {
+  if (!SELECTORS[id].name) throw new Error(`No name for chain with id = ${id}`)
   return SELECTORS[id].name
 }
 
