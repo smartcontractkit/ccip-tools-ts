@@ -27,9 +27,10 @@ async function generate(path) {
     const res = await eval(expr)
     if (typeof res === 'string') res = [res]
 
-    const endIdx = lines.findIndex((l, idx) => idx > i && ['//', 'end', 'generate'].every((w) => l.includes(w)))
+    const endIdx = lines.findIndex((l, idx) => idx >= i && ['//', 'end', 'generate'].every((w) => l.includes(w)))
 
-    lines.splice(i++, Math.max(0, endIdx - i + 1), ...res)
+    lines.splice(i, Math.max(0, endIdx - i), ...res)
+    i = endIdx
   }
   await fs.writeFile(path, lines.join('\n'))
 }
