@@ -10,8 +10,6 @@
     "declarationMap": true,
     "sourceMap": true,
     "moduleResolution": "node",
-    "forceConsistentCasingInFileNames": true,
-    "outDir": "./dist"
-  },
-  "include": ["./src"]
+    "forceConsistentCasingInFileNames": true
+  }
 }

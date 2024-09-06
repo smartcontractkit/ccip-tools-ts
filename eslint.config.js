@@ -12,7 +12,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['*.js', '*.mjs'],
+          allowDefaultProject: ['*.js', '*.cjs'],
         },
         tsconfigRootDir: import.meta.dirname,
       },
@@ -31,6 +31,16 @@ export default tseslint.config(
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/consistent-type-exports': 'error',
       '@typescript-eslint/consistent-type-imports': 'error',
+    },
+  },
+  {
+    // Apply these settings to test files
+    files: ['**/*.test.ts', '**/*.spec.ts', 'tests/**/*.ts'],
+    rules: {
+      // Disable specific rules for test files
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
     },
   },
   {
