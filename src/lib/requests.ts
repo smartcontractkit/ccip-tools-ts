@@ -19,7 +19,7 @@ import {
   type CCIPRequest,
   type CCIPVersion,
 } from './types.js'
-import { blockRangeGenerator, getTypeAndVersion, lazyCached } from './utils.js'
+import { blockRangeGenerator, getTypeAndVersion, lazyCached, networkInfo } from './utils.js'
 
 async function getOnRampInterface(
   source: Provider,
@@ -271,13 +271,15 @@ async function getUsdcTokenData(
  * Fetch offchain token data for all transfers in request
  *
  * @param request - Request (or subset of) to fetch offchainTokenData for
- * @param isTestnet - Use testnet attestation endpoints
  * @returns Array of byte arrays, one per transfer in request
  */
 export async function fetchOffchainTokenData(
-  request: Pick<CCIPRequest, 'log' | 'tx' | 'message'>,
-  isTestnet: boolean,
+  request: Pick<CCIPRequest, 'tx'> & {
+    message: Pick<CCIPRequest['message'], 'tokenAmounts' | 'sourceChainSelector'>
+    log: Pick<CCIPRequest['log'], 'topics' | 'index'>
+  },
 ): Promise<string[]> {
+  const { isTestnet } = networkInfo(request.message.sourceChainSelector)
   // there's a chance there are other CCIPSendRequested in same tx,
   // and they may contain USDC transfers as well, so we select
   // any USDC logs after that and before our CCIPSendRequested
@@ -289,8 +291,7 @@ export async function fetchOffchainTokenData(
     ({ index }) => prevCcipRequestIdx < index && index < request.log.index,
   )
 
-  const offchainTokenData: string[] = Array.from(
-    { length: request.message.tokenAmounts.length },
+  const offchainTokenData: string[] = request.message.tokenAmounts.map(
     () => '0x', // default tokenData
   )
 
@@ -307,7 +308,10 @@ export async function fetchOffchainTokenData(
 
 export async function* fetchRequestsForSender(
   source: Provider,
-  firstRequest: CCIPRequest,
+  firstRequest: Pick<CCIPRequest, 'version'> & {
+    log: Pick<CCIPRequest['log'], 'address' | 'topics' | 'blockNumber'>
+    message: Pick<CCIPRequest['message'], 'sender'>
+  },
 ): AsyncGenerator<Omit<CCIPRequest, 'tx' | 'timestamp'>, void, unknown> {
   const [onRampInterface] = await getOnRampInterface(source, firstRequest.log.address)
 

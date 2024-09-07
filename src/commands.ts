@@ -19,7 +19,6 @@ import {
   fetchOffRamp,
   fetchRequestsForSender,
   getOnRampStaticConfig,
-  getProviderNetwork,
   getSomeBlockNumberBefore,
   lazyCached,
   networkInfo,
@@ -126,7 +125,6 @@ export async function manualExec(
 ) {
   const tx = await getTxInAnyProvider(providers, txHash)
   const source = tx.provider
-  const sourceNetworkInfo = await getProviderNetwork(source)
 
   let request
   if (argv['log-index'] != null) {
@@ -173,7 +171,7 @@ export async function manualExec(
     commit.report.merkleRoot,
   )
 
-  const offchainTokenData = await fetchOffchainTokenData(request, sourceNetworkInfo.isTestnet)
+  const offchainTokenData = await fetchOffchainTokenData(request)
   const execReport = { ...manualExecReport, offchainTokenData: [offchainTokenData] }
 
   const wallet = getWallet().connect(dest)
@@ -219,7 +217,6 @@ export async function manualExecSenderQueue(
 ) {
   const tx = await getTxInAnyProvider(providers, txHash)
   const source = tx.provider
-  const sourceNetworkInfo = await getProviderNetwork(source)
 
   let firstRequest
   if (argv['log-index'] != null) {
@@ -328,7 +325,7 @@ export async function manualExecSenderQueue(
             return res
           }),
         )
-        return fetchOffchainTokenData({ ...request, tx }, sourceNetworkInfo.isTestnet)
+        return fetchOffchainTokenData({ ...request, tx })
       }),
     )
     const execReport = { ...manualExecReport, offchainTokenData }
