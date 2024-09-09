@@ -25,23 +25,23 @@ export async function fetchCommitReport(
     message,
     timestamp: requestTimestamp,
     version,
-  }: Pick<CCIPRequest, 'log' | 'message' | 'version'> & { timestamp?: number },
-  hints?: { startBlock?: number; endBlock?: number; commitBlock?: number; commitStore?: string },
+  }: Pick<CCIPRequest, 'version'> & {
+    message: Pick<CCIPRequest['message'], 'sequenceNumber' | 'sourceChainSelector'>
+    log: Pick<CCIPRequest['log'], 'address'>
+    timestamp?: number
+  },
+  hints?: { startBlock?: number; commitStore?: string },
 ): Promise<CCIPCommit> {
   const commitStoreABI = CCIP_ABIs[CCIPContractTypeCommitStore][version]
   const commitStoreInterface = new Interface(commitStoreABI)
   const topic0 = commitStoreInterface.getEvent('ReportAccepted')!.topicHash
 
-  for (const blockRange of blockRangeGenerator(
-    hints?.commitBlock
-      ? { singleBlock: hints.commitBlock }
-      : {
-          endBlock: hints?.endBlock ?? (await dest.getBlockNumber()),
-          startBlock:
-            hints?.startBlock ??
-            (requestTimestamp ? await getSomeBlockNumberBefore(dest, requestTimestamp) : undefined),
-        },
-  )) {
+  for (const blockRange of blockRangeGenerator({
+    endBlock: await dest.getBlockNumber(),
+    startBlock:
+      hints?.startBlock ??
+      (requestTimestamp ? await getSomeBlockNumberBefore(dest, requestTimestamp) : undefined),
+  })) {
     // we don't know our CommitStore address yet, so fetch any compatible log
     const logs = await dest.getLogs({
       ...blockRange,
@@ -88,7 +88,7 @@ export async function fetchCommitReport(
   }
 
   throw new Error(
-    `Could not find commit after ${requestTimestamp} for sequenceNumber=${message.sequenceNumber}`,
+    `Could not find commit after ${hints?.startBlock ?? requestTimestamp} for sequenceNumber=${message.sequenceNumber}`,
   )
 }
 
