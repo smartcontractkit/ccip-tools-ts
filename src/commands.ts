@@ -152,7 +152,7 @@ export async function manualExec(
     destChainSelector: staticConfig.destChainSelector,
     onRamp: request.log.address,
   }
-  prettyLane(lane)
+  prettyLane(lane, request.version)
 
   const dest = providers[chainIdFromSelector(staticConfig.destChainSelector)]
   if (!dest) {

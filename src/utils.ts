@@ -191,7 +191,7 @@ export async function withLanes(
   return requestsWithLane
 }
 
-export function prettyLane(lane: Lane) {
+export function prettyLane(lane: Lane, version: string) {
   console.info('Lane:')
   const source = networkInfo(lane.sourceChainSelector),
     dest = networkInfo(lane.destChainSelector)
@@ -199,7 +199,7 @@ export function prettyLane(lane: Lane) {
     name: { source: source.name, dest: dest.name },
     chainId: { source: source.chainId, dest: dest.chainId },
     chainSelector: { source: source.chainSelector, dest: dest.chainSelector },
-    onRamp: { source: lane.onRamp },
+    'onRamp/version': { source: lane.onRamp, dest: version },
   })
 }
 
@@ -260,7 +260,7 @@ export async function prettyRequest<R extends CCIPRequest | CCIPRequestWithLane>
   request: R,
 ) {
   if ('lane' in request) {
-    prettyLane(request.lane)
+    prettyLane(request.lane, request.version)
   }
   console.info('Request:')
 

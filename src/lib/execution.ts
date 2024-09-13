@@ -123,7 +123,7 @@ export async function fetchOffRamp<V extends CCIPVersion>(
   throw new Error(`Could not find OffRamp for onRamp=${onRamp}`)
 }
 
-export async function getOffRampStaticConfig(dest: ContractRunner, address: string) {
+async function getOffRampStaticConfig(dest: ContractRunner, address: string) {
   return lazyCached(`OffRamp ${address}.staticConfig`, async () => {
     const [type_, version] = await getTypeAndVersion(dest.provider!, address)
     if (type_ != CCIPContractTypeOffRamp)
@@ -137,7 +137,7 @@ export async function getOffRampStaticConfig(dest: ContractRunner, address: stri
   })
 }
 
-export function getOffRampInterface(version: CCIPVersion): Interface {
+function getOffRampInterface(version: CCIPVersion): Interface {
   return lazyCached(
     `OffRampInterface ${version}`,
     () => new Interface(CCIP_ABIs[CCIPContractTypeOffRamp][version]),
