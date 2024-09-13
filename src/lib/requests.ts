@@ -59,6 +59,10 @@ export async function getOnRampStaticConfig(source: Provider, address: string) {
   })
 }
 
+const ccipRequestsTopicHashes = new Set(Object.values(CCIP_ABIs[CCIPContractTypeOnRamp]).map(
+  (abi) => new Interface(abi).getEvent('CCIPSendRequested')!.topicHash,
+))
+
 export async function fetchCCIPMessagesInTx(tx: TransactionReceipt): Promise<CCIPRequest[]> {
   const source = tx.provider
   const txHash = tx.hash
@@ -66,6 +70,7 @@ export async function fetchCCIPMessagesInTx(tx: TransactionReceipt): Promise<CCI
 
   const requests: CCIPRequest[] = []
   for (const log of tx.logs) {
+    if (!ccipRequestsTopicHashes.has(log.topics[0])) continue
     let onRampInterface: Interface, version: CCIPVersion
     try {
       ;[onRampInterface, version] = await getOnRampInterface(source, log.address)
