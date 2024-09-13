@@ -128,9 +128,13 @@ export async function manualExec(
 
   let request
   if (argv['log-index'] != null) {
-    request = await fetchCCIPMessageInLog(tx, argv['log-index'])
+    const request_ = await fetchCCIPMessageInLog(tx, argv['log-index'])
+    request = (await withLanes(source, [request_]))[0]
   } else {
-    request = await selectRequest(await fetchCCIPMessagesInTx(tx), 'to execute')
+    request = await selectRequest(
+      await withLanes(source, await fetchCCIPMessagesInTx(tx)),
+      'to execute',
+    )
   }
 
   switch (argv.format) {
@@ -145,19 +149,10 @@ export async function manualExec(
       break
   }
 
-  const [staticConfig] = await getOnRampStaticConfig(source, request.log.address)
-
-  const lane = {
-    sourceChainSelector: staticConfig.chainSelector,
-    destChainSelector: staticConfig.destChainSelector,
-    onRamp: request.log.address,
-  }
-  prettyLane(lane, request.version)
-
-  const dest = providers[chainIdFromSelector(staticConfig.destChainSelector)]
+  const dest = providers[chainIdFromSelector(request.lane.destChainSelector)]
   if (!dest) {
     throw new Error(
-      `Could not find an RPC for dest network: "${chainNameFromSelector(staticConfig.destChainSelector)}" [${chainIdFromSelector(staticConfig.destChainSelector)}]`,
+      `Could not find an RPC for dest network: "${chainNameFromSelector(request.lane.destChainSelector)}" [${chainIdFromSelector(request.lane.destChainSelector)}]`,
     )
   }
 
@@ -166,7 +161,7 @@ export async function manualExec(
 
   const manualExecReport = calculateManualExecProof(
     requestsInBatch.map(({ message }) => message),
-    lane,
+    request.lane,
     [request.message.messageId],
     commit.report.merkleRoot,
   )
@@ -179,7 +174,7 @@ export async function manualExec(
   let manualExecTx
   if (request.version === CCIPVersion_1_2) {
     const gasOverrides = manualExecReport.messages.map(() => BigInt(argv['gas-limit']))
-    const offRampContract = await fetchOffRamp(wallet, lane, request.version, {
+    const offRampContract = await fetchOffRamp(wallet, request.lane, request.version, {
       fromBlock: commit.log.blockNumber,
     })
     manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
@@ -188,18 +183,18 @@ export async function manualExec(
       receiverExecutionGasLimit: BigInt(argv['gas-limit']),
       tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv['tokens-gas-limit'])),
     }))
-    const offRampContract = await fetchOffRamp(wallet, lane, request.version, {
+    const offRampContract = await fetchOffRamp(wallet, request.lane, request.version, {
       fromBlock: commit.log.blockNumber,
     })
     manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
   }
 
   console.log(
-    'manualExec tx =',
+    '🚀 manualExec tx =',
     manualExecTx.hash,
-    'to =',
+    ', to =',
     manualExecTx.to,
-    'gasLimit =',
+    ', gasLimit =',
     manualExecTx.gasLimit,
   )
 }
@@ -220,9 +215,13 @@ export async function manualExecSenderQueue(
 
   let firstRequest
   if (argv['log-index'] != null) {
-    firstRequest = await fetchCCIPMessageInLog(tx, argv['log-index'])
+    const firstRequest_ = await fetchCCIPMessageInLog(tx, argv['log-index'])
+    firstRequest = (await withLanes(source, [firstRequest_]))[0]
   } else {
-    firstRequest = await selectRequest(await fetchCCIPMessagesInTx(tx), 'to execute')
+    firstRequest = await selectRequest(
+      await withLanes(source, await fetchCCIPMessagesInTx(tx)),
+      'to execute',
+    )
   }
   switch (argv.format) {
     case Format.log:
@@ -236,17 +235,10 @@ export async function manualExecSenderQueue(
       break
   }
 
-  const [staticConfig] = await getOnRampStaticConfig(source, firstRequest.log.address)
-  const lane = {
-    source: networkInfo(staticConfig.chainSelector),
-    dest: networkInfo(staticConfig.destChainSelector),
-    onRamp: firstRequest.log.address,
-  }
-
-  const dest = providers[lane.dest.chainId]
+  const dest = providers[chainIdFromSelector(firstRequest.lane.destChainSelector)]
   if (!dest) {
     throw new Error(
-      `Could not find an RPC for dest network: "${lane.dest.name}" [${lane.dest.chainId}]`,
+      `Could not find an RPC for dest network: "${chainNameFromSelector(firstRequest.lane.destChainSelector)}" [${chainIdFromSelector(firstRequest.lane.destChainSelector)}]`,
     )
   }
 
@@ -295,22 +287,16 @@ export async function manualExecSenderQueue(
   }
   console.info('Got', batches.length, 'batches to execute')
 
-  const leafHasherArgs = {
-    sourceChainSelector: lane.source.chainSelector,
-    destChainSelector: lane.dest.chainSelector,
-    onRamp: lane.onRamp,
-  }
-
   const wallet = getWallet().connect(dest)
 
-  const offRampContract = await fetchOffRamp(wallet, leafHasherArgs, firstRequest.version, {
+  const offRampContract = await fetchOffRamp(wallet, firstRequest.lane, firstRequest.version, {
     fromBlock: destFromBlock,
   })
 
   for (const [i, [commit, batch, msgIdsToExec]] of batches.entries()) {
     const manualExecReport = calculateManualExecProof(
       batch.map(({ message }) => message),
-      leafHasherArgs,
+      firstRequest.lane,
       msgIdsToExec,
       commit.report.merkleRoot,
     )
