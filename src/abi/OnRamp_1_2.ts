@@ -1,4 +1,10 @@
 export default [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/ccip/raw/release/2.7.1-ccip1.2/core/gethwrappers/ccip/generated/evm_2_evm_onramp/evm_2_evm_onramp.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   {
     inputs: [
       {
@@ -45,11 +51,7 @@ export default [
       },
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'router',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'router', type: 'address' },
           {
             internalType: 'uint16',
             name: 'maxNumberOfTokensPerMsg',
@@ -102,16 +104,8 @@ export default [
       },
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'token',
-            type: 'address',
-          },
-          {
-            internalType: 'address',
-            name: 'pool',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'token', type: 'address' },
+          { internalType: 'address', name: 'pool', type: 'address' },
         ],
         internalType: 'structInternal.PoolUpdate[]',
         name: 'tokensAndPools',
@@ -119,21 +113,13 @@ export default [
       },
       {
         components: [
-          {
-            internalType: 'bool',
-            name: 'isEnabled',
-            type: 'bool',
-          },
+          { internalType: 'bool', name: 'isEnabled', type: 'bool' },
           {
             internalType: 'uint128',
             name: 'capacity',
             type: 'uint128',
           },
-          {
-            internalType: 'uint128',
-            name: 'rate',
-            type: 'uint128',
-          },
+          { internalType: 'uint128', name: 'rate', type: 'uint128' },
         ],
         internalType: 'structRateLimiter.Config',
         name: 'rateLimiterConfig',
@@ -141,11 +127,7 @@ export default [
       },
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'token',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'token', type: 'address' },
           {
             internalType: 'uint32',
             name: 'networkFeeUSDCents',
@@ -161,11 +143,7 @@ export default [
             name: 'premiumMultiplierWeiPerEth',
             type: 'uint64',
           },
-          {
-            internalType: 'bool',
-            name: 'enabled',
-            type: 'bool',
-          },
+          { internalType: 'bool', name: 'enabled', type: 'bool' },
         ],
         internalType: 'structEVM2EVMOnRamp.FeeTokenConfigArgs[]',
         name: 'feeTokenConfigs',
@@ -173,11 +151,7 @@ export default [
       },
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'token',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'token', type: 'address' },
           {
             internalType: 'uint32',
             name: 'minFeeUSDCents',
@@ -188,11 +162,7 @@ export default [
             name: 'maxFeeUSDCents',
             type: 'uint32',
           },
-          {
-            internalType: 'uint16',
-            name: 'deciBps',
-            type: 'uint16',
-          },
+          { internalType: 'uint16', name: 'deciBps', type: 'uint16' },
           {
             internalType: 'uint32',
             name: 'destGasOverhead',
@@ -210,16 +180,8 @@ export default [
       },
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'nop',
-            type: 'address',
-          },
-          {
-            internalType: 'uint16',
-            name: 'weight',
-            type: 'uint16',
-          },
+          { internalType: 'address', name: 'nop', type: 'address' },
+          { internalType: 'uint16', name: 'weight', type: 'uint16' },
         ],
         internalType: 'structEVM2EVMOnRamp.NopAndWeight[]',
         name: 'nopsAndWeights',
@@ -231,16 +193,8 @@ export default [
   },
   {
     inputs: [
-      {
-        internalType: 'uint256',
-        name: 'capacity',
-        type: 'uint256',
-      },
-      {
-        internalType: 'uint256',
-        name: 'requested',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'capacity', type: 'uint256' },
+      { internalType: 'uint256', name: 'requested', type: 'uint256' },
     ],
     name: 'AggregateValueMaxCapacityExceeded',
     type: 'error',
@@ -252,215 +206,81 @@ export default [
         name: 'minWaitInSeconds',
         type: 'uint256',
       },
-      {
-        internalType: 'uint256',
-        name: 'available',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'available', type: 'uint256' },
     ],
     name: 'AggregateValueRateLimitReached',
     type: 'error',
   },
+  { inputs: [], name: 'BadARMSignal', type: 'error' },
+  { inputs: [], name: 'BucketOverfilled', type: 'error' },
+  { inputs: [], name: 'CannotSendZeroTokens', type: 'error' },
+  { inputs: [], name: 'InsufficientBalance', type: 'error' },
   {
-    inputs: [],
-    name: 'BadARMSignal',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'BucketOverfilled',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'CannotSendZeroTokens',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'InsufficientBalance',
-    type: 'error',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'bytes',
-        name: 'encodedAddress',
-        type: 'bytes',
-      },
-    ],
+    inputs: [{ internalType: 'bytes', name: 'encodedAddress', type: 'bytes' }],
     name: 'InvalidAddress',
     type: 'error',
   },
   {
-    inputs: [
-      {
-        internalType: 'uint64',
-        name: 'chainSelector',
-        type: 'uint64',
-      },
-    ],
+    inputs: [{ internalType: 'uint64', name: 'chainSelector', type: 'uint64' }],
     name: 'InvalidChainSelector',
     type: 'error',
   },
+  { inputs: [], name: 'InvalidConfig', type: 'error' },
+  { inputs: [], name: 'InvalidExtraArgsTag', type: 'error' },
   {
-    inputs: [],
-    name: 'InvalidConfig',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'InvalidExtraArgsTag',
-    type: 'error',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'nop',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'nop', type: 'address' }],
     name: 'InvalidNopAddress',
     type: 'error',
   },
-  {
-    inputs: [],
-    name: 'InvalidTokenPoolConfig',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'InvalidWithdrawParams',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'LinkBalanceNotSettled',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'MaxFeeBalanceReached',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'MessageGasLimitTooHigh',
-    type: 'error',
-  },
+  { inputs: [], name: 'InvalidTokenPoolConfig', type: 'error' },
+  { inputs: [], name: 'InvalidWithdrawParams', type: 'error' },
+  { inputs: [], name: 'LinkBalanceNotSettled', type: 'error' },
+  { inputs: [], name: 'MaxFeeBalanceReached', type: 'error' },
+  { inputs: [], name: 'MessageGasLimitTooHigh', type: 'error' },
   {
     inputs: [
-      {
-        internalType: 'uint256',
-        name: 'maxSize',
-        type: 'uint256',
-      },
-      {
-        internalType: 'uint256',
-        name: 'actualSize',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'maxSize', type: 'uint256' },
+      { internalType: 'uint256', name: 'actualSize', type: 'uint256' },
     ],
     name: 'MessageTooLarge',
     type: 'error',
   },
+  { inputs: [], name: 'MustBeCalledByRouter', type: 'error' },
+  { inputs: [], name: 'NoFeesToPay', type: 'error' },
+  { inputs: [], name: 'NoNopsToPay', type: 'error' },
   {
-    inputs: [],
-    name: 'MustBeCalledByRouter',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'NoFeesToPay',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'NoNopsToPay',
-    type: 'error',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'token',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'token', type: 'address' }],
     name: 'NotAFeeToken',
     type: 'error',
   },
-  {
-    inputs: [],
-    name: 'OnlyCallableByAdminOrOwner',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'OnlyCallableByOwnerOrAdmin',
-    type: 'error',
-  },
+  { inputs: [], name: 'OnlyCallableByAdminOrOwner', type: 'error' },
+  { inputs: [], name: 'OnlyCallableByOwnerOrAdmin', type: 'error' },
   {
     inputs: [],
     name: 'OnlyCallableByOwnerOrAdminOrNop',
     type: 'error',
   },
+  { inputs: [], name: 'PoolAlreadyAdded', type: 'error' },
   {
-    inputs: [],
-    name: 'PoolAlreadyAdded',
-    type: 'error',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'token',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'token', type: 'address' }],
     name: 'PoolDoesNotExist',
     type: 'error',
   },
   {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'token',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'token', type: 'address' }],
     name: 'PriceNotFoundForToken',
     type: 'error',
   },
+  { inputs: [], name: 'RouterMustSetOriginalSender', type: 'error' },
   {
-    inputs: [],
-    name: 'RouterMustSetOriginalSender',
-    type: 'error',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'token',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'token', type: 'address' }],
     name: 'SourceTokenDataTooLarge',
     type: 'error',
   },
   {
     inputs: [
-      {
-        internalType: 'uint256',
-        name: 'capacity',
-        type: 'uint256',
-      },
-      {
-        internalType: 'uint256',
-        name: 'requested',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'capacity', type: 'uint256' },
+      { internalType: 'uint256', name: 'requested', type: 'uint256' },
       {
         internalType: 'address',
         name: 'tokenAddress',
@@ -470,11 +290,7 @@ export default [
     name: 'TokenMaxCapacityExceeded',
     type: 'error',
   },
-  {
-    inputs: [],
-    name: 'TokenPoolMismatch',
-    type: 'error',
-  },
+  { inputs: [], name: 'TokenPoolMismatch', type: 'error' },
   {
     inputs: [
       {
@@ -482,11 +298,7 @@ export default [
         name: 'minWaitInSeconds',
         type: 'uint256',
       },
-      {
-        internalType: 'uint256',
-        name: 'available',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'available', type: 'uint256' },
       {
         internalType: 'address',
         name: 'tokenAddress',
@@ -496,16 +308,8 @@ export default [
     name: 'TokenRateLimitReached',
     type: 'error',
   },
-  {
-    inputs: [],
-    name: 'TooManyNops',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'UnsupportedNumberOfTokens',
-    type: 'error',
-  },
+  { inputs: [], name: 'TooManyNops', type: 'error' },
+  { inputs: [], name: 'UnsupportedNumberOfTokens', type: 'error' },
   {
     inputs: [
       {
@@ -540,11 +344,7 @@ export default [
             name: 'sourceChainSelector',
             type: 'uint64',
           },
-          {
-            internalType: 'address',
-            name: 'sender',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'sender', type: 'address' },
           {
             internalType: 'address',
             name: 'receiver',
@@ -560,16 +360,8 @@ export default [
             name: 'gasLimit',
             type: 'uint256',
           },
-          {
-            internalType: 'bool',
-            name: 'strict',
-            type: 'bool',
-          },
-          {
-            internalType: 'uint64',
-            name: 'nonce',
-            type: 'uint64',
-          },
+          { internalType: 'bool', name: 'strict', type: 'bool' },
+          { internalType: 'uint64', name: 'nonce', type: 'uint64' },
           {
             internalType: 'address',
             name: 'feeToken',
@@ -580,11 +372,7 @@ export default [
             name: 'feeTokenAmount',
             type: 'uint256',
           },
-          {
-            internalType: 'bytes',
-            name: 'data',
-            type: 'bytes',
-          },
+          { internalType: 'bytes', name: 'data', type: 'bytes' },
           {
             components: [
               {
@@ -670,11 +458,7 @@ export default [
       },
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'router',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'router', type: 'address' },
           {
             internalType: 'uint16',
             name: 'maxNumberOfTokensPerMsg',
@@ -735,11 +519,7 @@ export default [
     inputs: [
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'token',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'token', type: 'address' },
           {
             internalType: 'uint32',
             name: 'networkFeeUSDCents',
@@ -755,11 +535,7 @@ export default [
             name: 'premiumMultiplierWeiPerEth',
             type: 'uint64',
           },
-          {
-            internalType: 'bool',
-            name: 'enabled',
-            type: 'bool',
-          },
+          { internalType: 'bool', name: 'enabled', type: 'bool' },
         ],
         indexed: false,
         internalType: 'structEVM2EVMOnRamp.FeeTokenConfigArgs[]',
@@ -800,16 +576,8 @@ export default [
       },
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'nop',
-            type: 'address',
-          },
-          {
-            internalType: 'uint16',
-            name: 'weight',
-            type: 'uint16',
-          },
+          { internalType: 'address', name: 'nop', type: 'address' },
+          { internalType: 'uint16', name: 'weight', type: 'uint16' },
         ],
         indexed: false,
         internalType: 'structEVM2EVMOnRamp.NopAndWeight[]',
@@ -901,11 +669,7 @@ export default [
     inputs: [
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'token',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'token', type: 'address' },
           {
             internalType: 'uint32',
             name: 'minFeeUSDCents',
@@ -916,11 +680,7 @@ export default [
             name: 'maxFeeUSDCents',
             type: 'uint32',
           },
-          {
-            internalType: 'uint16',
-            name: 'deciBps',
-            type: 'uint16',
-          },
+          { internalType: 'uint16', name: 'deciBps', type: 'uint16' },
           {
             internalType: 'uint32',
             name: 'destGasOverhead',
@@ -952,16 +712,8 @@ export default [
     inputs: [
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'token',
-            type: 'address',
-          },
-          {
-            internalType: 'address',
-            name: 'pool',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'token', type: 'address' },
+          { internalType: 'address', name: 'pool', type: 'address' },
         ],
         internalType: 'structInternal.PoolUpdate[]',
         name: 'removes',
@@ -969,16 +721,8 @@ export default [
       },
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'token',
-            type: 'address',
-          },
-          {
-            internalType: 'address',
-            name: 'pool',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'token', type: 'address' },
+          { internalType: 'address', name: 'pool', type: 'address' },
         ],
         internalType: 'structInternal.PoolUpdate[]',
         name: 'adds',
@@ -996,31 +740,19 @@ export default [
     outputs: [
       {
         components: [
-          {
-            internalType: 'uint128',
-            name: 'tokens',
-            type: 'uint128',
-          },
+          { internalType: 'uint128', name: 'tokens', type: 'uint128' },
           {
             internalType: 'uint32',
             name: 'lastUpdated',
             type: 'uint32',
           },
-          {
-            internalType: 'bool',
-            name: 'isEnabled',
-            type: 'bool',
-          },
+          { internalType: 'bool', name: 'isEnabled', type: 'bool' },
           {
             internalType: 'uint128',
             name: 'capacity',
             type: 'uint128',
           },
-          {
-            internalType: 'uint128',
-            name: 'rate',
-            type: 'uint128',
-          },
+          { internalType: 'uint128', name: 'rate', type: 'uint128' },
         ],
         internalType: 'structRateLimiter.TokenBucket',
         name: '',
@@ -1039,16 +771,8 @@ export default [
       },
       {
         components: [
-          {
-            internalType: 'bytes',
-            name: 'receiver',
-            type: 'bytes',
-          },
-          {
-            internalType: 'bytes',
-            name: 'data',
-            type: 'bytes',
-          },
+          { internalType: 'bytes', name: 'receiver', type: 'bytes' },
+          { internalType: 'bytes', name: 'data', type: 'bytes' },
           {
             components: [
               {
@@ -1071,11 +795,7 @@ export default [
             name: 'feeToken',
             type: 'address',
           },
-          {
-            internalType: 'bytes',
-            name: 'extraArgs',
-            type: 'bytes',
-          },
+          { internalType: 'bytes', name: 'extraArgs', type: 'bytes' },
         ],
         internalType: 'structClient.EVM2AnyMessage',
         name: 'message',
@@ -1093,13 +813,7 @@ export default [
       },
     ],
     name: 'forwardFromRouter',
-    outputs: [
-      {
-        internalType: 'bytes32',
-        name: '',
-        type: 'bytes32',
-      },
-    ],
+    outputs: [{ internalType: 'bytes32', name: '', type: 'bytes32' }],
     stateMutability: 'nonpayable',
     type: 'function',
   },
@@ -1109,11 +823,7 @@ export default [
     outputs: [
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'router',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'router', type: 'address' },
           {
             internalType: 'uint16',
             name: 'maxNumberOfTokensPerMsg',
@@ -1171,13 +881,7 @@ export default [
   {
     inputs: [],
     name: 'getExpectedNextSequenceNumber',
-    outputs: [
-      {
-        internalType: 'uint64',
-        name: '',
-        type: 'uint64',
-      },
-    ],
+    outputs: [{ internalType: 'uint64', name: '', type: 'uint64' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -1190,16 +894,8 @@ export default [
       },
       {
         components: [
-          {
-            internalType: 'bytes',
-            name: 'receiver',
-            type: 'bytes',
-          },
-          {
-            internalType: 'bytes',
-            name: 'data',
-            type: 'bytes',
-          },
+          { internalType: 'bytes', name: 'receiver', type: 'bytes' },
+          { internalType: 'bytes', name: 'data', type: 'bytes' },
           {
             components: [
               {
@@ -1222,11 +918,7 @@ export default [
             name: 'feeToken',
             type: 'address',
           },
-          {
-            internalType: 'bytes',
-            name: 'extraArgs',
-            type: 'bytes',
-          },
+          { internalType: 'bytes', name: 'extraArgs', type: 'bytes' },
         ],
         internalType: 'structClient.EVM2AnyMessage',
         name: 'message',
@@ -1245,13 +937,7 @@ export default [
     type: 'function',
   },
   {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'token',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'token', type: 'address' }],
     name: 'getFeeTokenConfig',
     outputs: [
       {
@@ -1271,11 +957,7 @@ export default [
             name: 'premiumMultiplierWeiPerEth',
             type: 'uint64',
           },
-          {
-            internalType: 'bool',
-            name: 'enabled',
-            type: 'bool',
-          },
+          { internalType: 'bool', name: 'enabled', type: 'bool' },
         ],
         internalType: 'structEVM2EVMOnRamp.FeeTokenConfig',
         name: 'feeTokenConfig',
@@ -1288,13 +970,7 @@ export default [
   {
     inputs: [],
     name: 'getNopFeesJuels',
-    outputs: [
-      {
-        internalType: 'uint96',
-        name: '',
-        type: 'uint96',
-      },
-    ],
+    outputs: [{ internalType: 'uint96', name: '', type: 'uint96' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -1304,16 +980,8 @@ export default [
     outputs: [
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'nop',
-            type: 'address',
-          },
-          {
-            internalType: 'uint16',
-            name: 'weight',
-            type: 'uint16',
-          },
+          { internalType: 'address', name: 'nop', type: 'address' },
+          { internalType: 'uint16', name: 'weight', type: 'uint16' },
         ],
         internalType: 'structEVM2EVMOnRamp.NopAndWeight[]',
         name: 'nopsAndWeights',
@@ -1330,11 +998,7 @@ export default [
   },
   {
     inputs: [
-      {
-        internalType: 'uint64',
-        name: '',
-        type: 'uint64',
-      },
+      { internalType: 'uint64', name: '', type: 'uint64' },
       {
         internalType: 'contractIERC20',
         name: 'sourceToken',
@@ -1342,32 +1006,14 @@ export default [
       },
     ],
     name: 'getPoolBySourceToken',
-    outputs: [
-      {
-        internalType: 'contractIPool',
-        name: '',
-        type: 'address',
-      },
-    ],
+    outputs: [{ internalType: 'contractIPool', name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'sender',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'sender', type: 'address' }],
     name: 'getSenderNonce',
-    outputs: [
-      {
-        internalType: 'uint64',
-        name: '',
-        type: 'uint64',
-      },
-    ],
+    outputs: [{ internalType: 'uint64', name: '', type: 'uint64' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -1422,45 +1068,21 @@ export default [
     type: 'function',
   },
   {
-    inputs: [
-      {
-        internalType: 'uint64',
-        name: '',
-        type: 'uint64',
-      },
-    ],
+    inputs: [{ internalType: 'uint64', name: '', type: 'uint64' }],
     name: 'getSupportedTokens',
-    outputs: [
-      {
-        internalType: 'address[]',
-        name: '',
-        type: 'address[]',
-      },
-    ],
+    outputs: [{ internalType: 'address[]', name: '', type: 'address[]' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
     inputs: [],
     name: 'getTokenLimitAdmin',
-    outputs: [
-      {
-        internalType: 'address',
-        name: '',
-        type: 'address',
-      },
-    ],
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'token',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'token', type: 'address' }],
     name: 'getTokenTransferFeeConfig',
     outputs: [
       {
@@ -1475,11 +1097,7 @@ export default [
             name: 'maxFeeUSDCents',
             type: 'uint32',
           },
-          {
-            internalType: 'uint16',
-            name: 'deciBps',
-            type: 'uint16',
-          },
+          { internalType: 'uint16', name: 'deciBps', type: 'uint16' },
           {
             internalType: 'uint32',
             name: 'destGasOverhead',
@@ -1502,26 +1120,14 @@ export default [
   {
     inputs: [],
     name: 'linkAvailableForPayment',
-    outputs: [
-      {
-        internalType: 'int256',
-        name: '',
-        type: 'int256',
-      },
-    ],
+    outputs: [{ internalType: 'int256', name: '', type: 'int256' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
     inputs: [],
     name: 'owner',
-    outputs: [
-      {
-        internalType: 'address',
-        name: '',
-        type: 'address',
-      },
-    ],
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -1533,13 +1139,7 @@ export default [
     type: 'function',
   },
   {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'newAdmin',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'newAdmin', type: 'address' }],
     name: 'setAdmin',
     outputs: [],
     stateMutability: 'nonpayable',
@@ -1549,11 +1149,7 @@ export default [
     inputs: [
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'router',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'router', type: 'address' },
           {
             internalType: 'uint16',
             name: 'maxNumberOfTokensPerMsg',
@@ -1614,11 +1210,7 @@ export default [
     inputs: [
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'token',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'token', type: 'address' },
           {
             internalType: 'uint32',
             name: 'networkFeeUSDCents',
@@ -1634,11 +1226,7 @@ export default [
             name: 'premiumMultiplierWeiPerEth',
             type: 'uint64',
           },
-          {
-            internalType: 'bool',
-            name: 'enabled',
-            type: 'bool',
-          },
+          { internalType: 'bool', name: 'enabled', type: 'bool' },
         ],
         internalType: 'structEVM2EVMOnRamp.FeeTokenConfigArgs[]',
         name: 'feeTokenConfigArgs',
@@ -1654,16 +1242,8 @@ export default [
     inputs: [
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'nop',
-            type: 'address',
-          },
-          {
-            internalType: 'uint16',
-            name: 'weight',
-            type: 'uint16',
-          },
+          { internalType: 'address', name: 'nop', type: 'address' },
+          { internalType: 'uint16', name: 'weight', type: 'uint16' },
         ],
         internalType: 'structEVM2EVMOnRamp.NopAndWeight[]',
         name: 'nopsAndWeights',
@@ -1679,21 +1259,13 @@ export default [
     inputs: [
       {
         components: [
-          {
-            internalType: 'bool',
-            name: 'isEnabled',
-            type: 'bool',
-          },
+          { internalType: 'bool', name: 'isEnabled', type: 'bool' },
           {
             internalType: 'uint128',
             name: 'capacity',
             type: 'uint128',
           },
-          {
-            internalType: 'uint128',
-            name: 'rate',
-            type: 'uint128',
-          },
+          { internalType: 'uint128', name: 'rate', type: 'uint128' },
         ],
         internalType: 'structRateLimiter.Config',
         name: 'config',
@@ -1709,11 +1281,7 @@ export default [
     inputs: [
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'token',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'token', type: 'address' },
           {
             internalType: 'uint32',
             name: 'minFeeUSDCents',
@@ -1724,11 +1292,7 @@ export default [
             name: 'maxFeeUSDCents',
             type: 'uint32',
           },
-          {
-            internalType: 'uint16',
-            name: 'deciBps',
-            type: 'uint16',
-          },
+          { internalType: 'uint16', name: 'deciBps', type: 'uint16' },
           {
             internalType: 'uint32',
             name: 'destGasOverhead',
@@ -1751,13 +1315,7 @@ export default [
     type: 'function',
   },
   {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'to',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'to', type: 'address' }],
     name: 'transferOwnership',
     outputs: [],
     stateMutability: 'nonpayable',
@@ -1766,32 +1324,19 @@ export default [
   {
     inputs: [],
     name: 'typeAndVersion',
-    outputs: [
-      {
-        internalType: 'string',
-        name: '',
-        type: 'string',
-      },
-    ],
+    outputs: [{ internalType: 'string', name: '', type: 'string' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
     inputs: [
-      {
-        internalType: 'address',
-        name: 'feeToken',
-        type: 'address',
-      },
-      {
-        internalType: 'address',
-        name: 'to',
-        type: 'address',
-      },
+      { internalType: 'address', name: 'feeToken', type: 'address' },
+      { internalType: 'address', name: 'to', type: 'address' },
     ],
     name: 'withdrawNonLinkFees',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  // generate:end
 ] as const

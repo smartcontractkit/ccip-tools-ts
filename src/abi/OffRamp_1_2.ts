@@ -1,4 +1,10 @@
 export default [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/ccip/raw/release/2.7.1-ccip1.2/core/gethwrappers/ccip/generated/evm_2_evm_offramp/evm_2_evm_offramp.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   {
     inputs: [
       {
@@ -18,11 +24,7 @@ export default [
             name: 'sourceChainSelector',
             type: 'uint64',
           },
-          {
-            internalType: 'address',
-            name: 'onRamp',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'onRamp', type: 'address' },
           {
             internalType: 'address',
             name: 'prevOffRamp',
@@ -50,21 +52,13 @@ export default [
       },
       {
         components: [
-          {
-            internalType: 'bool',
-            name: 'isEnabled',
-            type: 'bool',
-          },
+          { internalType: 'bool', name: 'isEnabled', type: 'bool' },
           {
             internalType: 'uint128',
             name: 'capacity',
             type: 'uint128',
           },
-          {
-            internalType: 'uint128',
-            name: 'rate',
-            type: 'uint128',
-          },
+          { internalType: 'uint128', name: 'rate', type: 'uint128' },
         ],
         internalType: 'structRateLimiter.Config',
         name: 'rateLimiterConfig',
@@ -76,16 +70,8 @@ export default [
   },
   {
     inputs: [
-      {
-        internalType: 'uint256',
-        name: 'capacity',
-        type: 'uint256',
-      },
-      {
-        internalType: 'uint256',
-        name: 'requested',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'capacity', type: 'uint256' },
+      { internalType: 'uint256', name: 'requested', type: 'uint256' },
     ],
     name: 'AggregateValueMaxCapacityExceeded',
     type: 'error',
@@ -97,11 +83,7 @@ export default [
         name: 'minWaitInSeconds',
         type: 'uint256',
       },
-      {
-        internalType: 'uint256',
-        name: 'available',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'available', type: 'uint256' },
     ],
     name: 'AggregateValueRateLimitReached',
     type: 'error',
@@ -128,106 +110,46 @@ export default [
     name: 'AlreadyExecuted',
     type: 'error',
   },
-  {
-    inputs: [],
-    name: 'BadARMSignal',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'BucketOverfilled',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'CanOnlySelfCall',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'CommitStoreAlreadyInUse',
-    type: 'error',
-  },
+  { inputs: [], name: 'BadARMSignal', type: 'error' },
+  { inputs: [], name: 'BucketOverfilled', type: 'error' },
+  { inputs: [], name: 'CanOnlySelfCall', type: 'error' },
+  { inputs: [], name: 'CommitStoreAlreadyInUse', type: 'error' },
   {
     inputs: [
-      {
-        internalType: 'bytes32',
-        name: 'expected',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes32',
-        name: 'actual',
-        type: 'bytes32',
-      },
+      { internalType: 'bytes32', name: 'expected', type: 'bytes32' },
+      { internalType: 'bytes32', name: 'actual', type: 'bytes32' },
     ],
     name: 'ConfigDigestMismatch',
     type: 'error',
   },
+  { inputs: [], name: 'EmptyReport', type: 'error' },
   {
-    inputs: [],
-    name: 'EmptyReport',
-    type: 'error',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'bytes',
-        name: 'error',
-        type: 'bytes',
-      },
-    ],
+    inputs: [{ internalType: 'bytes', name: 'error', type: 'bytes' }],
     name: 'ExecutionError',
     type: 'error',
   },
   {
     inputs: [
-      {
-        internalType: 'uint256',
-        name: 'expected',
-        type: 'uint256',
-      },
-      {
-        internalType: 'uint256',
-        name: 'actual',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'expected', type: 'uint256' },
+      { internalType: 'uint256', name: 'actual', type: 'uint256' },
     ],
     name: 'ForkedChain',
     type: 'error',
   },
   {
-    inputs: [
-      {
-        internalType: 'string',
-        name: 'message',
-        type: 'string',
-      },
-    ],
+    inputs: [{ internalType: 'string', name: 'message', type: 'string' }],
     name: 'InvalidConfig',
     type: 'error',
   },
   {
     inputs: [
-      {
-        internalType: 'uint256',
-        name: 'index',
-        type: 'uint256',
-      },
-      {
-        internalType: 'uint256',
-        name: 'newLimit',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'index', type: 'uint256' },
+      { internalType: 'uint256', name: 'newLimit', type: 'uint256' },
     ],
     name: 'InvalidManualExecutionGasLimit',
     type: 'error',
   },
-  {
-    inputs: [],
-    name: 'InvalidMessageId',
-    type: 'error',
-  },
+  { inputs: [], name: 'InvalidMessageId', type: 'error' },
   {
     inputs: [
       {
@@ -255,84 +177,36 @@ export default [
     name: 'InvalidSourceChain',
     type: 'error',
   },
-  {
-    inputs: [],
-    name: 'InvalidTokenPoolConfig',
-    type: 'error',
-  },
+  { inputs: [], name: 'InvalidTokenPoolConfig', type: 'error' },
   {
     inputs: [],
     name: 'ManualExecutionGasLimitMismatch',
     type: 'error',
   },
-  {
-    inputs: [],
-    name: 'ManualExecutionNotYetEnabled',
-    type: 'error',
-  },
+  { inputs: [], name: 'ManualExecutionNotYetEnabled', type: 'error' },
   {
     inputs: [
-      {
-        internalType: 'uint256',
-        name: 'maxSize',
-        type: 'uint256',
-      },
-      {
-        internalType: 'uint256',
-        name: 'actualSize',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'maxSize', type: 'uint256' },
+      { internalType: 'uint256', name: 'actualSize', type: 'uint256' },
     ],
     name: 'MessageTooLarge',
     type: 'error',
   },
+  { inputs: [], name: 'OnlyCallableByAdminOrOwner', type: 'error' },
+  { inputs: [], name: 'OracleCannotBeZeroAddress', type: 'error' },
+  { inputs: [], name: 'PoolAlreadyAdded', type: 'error' },
+  { inputs: [], name: 'PoolDoesNotExist', type: 'error' },
   {
-    inputs: [],
-    name: 'OnlyCallableByAdminOrOwner',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'OracleCannotBeZeroAddress',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'PoolAlreadyAdded',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'PoolDoesNotExist',
-    type: 'error',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'token',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'token', type: 'address' }],
     name: 'PriceNotFoundForToken',
     type: 'error',
   },
   {
-    inputs: [
-      {
-        internalType: 'bytes',
-        name: 'error',
-        type: 'bytes',
-      },
-    ],
+    inputs: [{ internalType: 'bytes', name: 'error', type: 'bytes' }],
     name: 'ReceiverError',
     type: 'error',
   },
-  {
-    inputs: [],
-    name: 'RootNotCommitted',
-    type: 'error',
-  },
+  { inputs: [], name: 'RootNotCommitted', type: 'error' },
   {
     inputs: [
       {
@@ -345,28 +219,14 @@ export default [
     type: 'error',
   },
   {
-    inputs: [
-      {
-        internalType: 'bytes',
-        name: 'error',
-        type: 'bytes',
-      },
-    ],
+    inputs: [{ internalType: 'bytes', name: 'error', type: 'bytes' }],
     name: 'TokenHandlingError',
     type: 'error',
   },
   {
     inputs: [
-      {
-        internalType: 'uint256',
-        name: 'capacity',
-        type: 'uint256',
-      },
-      {
-        internalType: 'uint256',
-        name: 'requested',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'capacity', type: 'uint256' },
+      { internalType: 'uint256', name: 'requested', type: 'uint256' },
       {
         internalType: 'address',
         name: 'tokenAddress',
@@ -376,11 +236,7 @@ export default [
     name: 'TokenMaxCapacityExceeded',
     type: 'error',
   },
-  {
-    inputs: [],
-    name: 'TokenPoolMismatch',
-    type: 'error',
-  },
+  { inputs: [], name: 'TokenPoolMismatch', type: 'error' },
   {
     inputs: [
       {
@@ -388,11 +244,7 @@ export default [
         name: 'minWaitInSeconds',
         type: 'uint256',
       },
-      {
-        internalType: 'uint256',
-        name: 'available',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'available', type: 'uint256' },
       {
         internalType: 'address',
         name: 'tokenAddress',
@@ -402,16 +254,8 @@ export default [
     name: 'TokenRateLimitReached',
     type: 'error',
   },
-  {
-    inputs: [],
-    name: 'UnauthorizedTransmitter',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'UnexpectedTokenData',
-    type: 'error',
-  },
+  { inputs: [], name: 'UnauthorizedTransmitter', type: 'error' },
+  { inputs: [], name: 'UnexpectedTokenData', type: 'error' },
   {
     inputs: [
       {
@@ -436,25 +280,13 @@ export default [
   },
   {
     inputs: [
-      {
-        internalType: 'uint256',
-        name: 'expected',
-        type: 'uint256',
-      },
-      {
-        internalType: 'uint256',
-        name: 'actual',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'expected', type: 'uint256' },
+      { internalType: 'uint256', name: 'actual', type: 'uint256' },
     ],
     name: 'WrongMessageLength',
     type: 'error',
   },
-  {
-    inputs: [],
-    name: 'ZeroAddressNotAllowed',
-    type: 'error',
-  },
+  { inputs: [], name: 'ZeroAddressNotAllowed', type: 'error' },
   {
     anonymous: false,
     inputs: [
@@ -488,11 +320,7 @@ export default [
             name: 'sourceChainSelector',
             type: 'uint64',
           },
-          {
-            internalType: 'address',
-            name: 'onRamp',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'onRamp', type: 'address' },
           {
             internalType: 'address',
             name: 'prevOffRamp',
@@ -516,11 +344,7 @@ export default [
             name: 'permissionLessExecutionThresholdSeconds',
             type: 'uint32',
           },
-          {
-            internalType: 'address',
-            name: 'router',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'router', type: 'address' },
           {
             internalType: 'address',
             name: 'priceRegistry',
@@ -787,16 +611,8 @@ export default [
     inputs: [
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'token',
-            type: 'address',
-          },
-          {
-            internalType: 'address',
-            name: 'pool',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'token', type: 'address' },
+          { internalType: 'address', name: 'pool', type: 'address' },
         ],
         internalType: 'structInternal.PoolUpdate[]',
         name: 'removes',
@@ -804,16 +620,8 @@ export default [
       },
       {
         components: [
-          {
-            internalType: 'address',
-            name: 'token',
-            type: 'address',
-          },
-          {
-            internalType: 'address',
-            name: 'pool',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'token', type: 'address' },
+          { internalType: 'address', name: 'pool', type: 'address' },
         ],
         internalType: 'structInternal.PoolUpdate[]',
         name: 'adds',
@@ -839,16 +647,8 @@ export default [
             name: 'sourceChainSelector',
             type: 'uint64',
           },
-          {
-            internalType: 'bytes',
-            name: 'sender',
-            type: 'bytes',
-          },
-          {
-            internalType: 'bytes',
-            name: 'data',
-            type: 'bytes',
-          },
+          { internalType: 'bytes', name: 'sender', type: 'bytes' },
+          { internalType: 'bytes', name: 'data', type: 'bytes' },
           {
             components: [
               {
@@ -883,31 +683,19 @@ export default [
     outputs: [
       {
         components: [
-          {
-            internalType: 'uint128',
-            name: 'tokens',
-            type: 'uint128',
-          },
+          { internalType: 'uint128', name: 'tokens', type: 'uint128' },
           {
             internalType: 'uint32',
             name: 'lastUpdated',
             type: 'uint32',
           },
-          {
-            internalType: 'bool',
-            name: 'isEnabled',
-            type: 'bool',
-          },
+          { internalType: 'bool', name: 'isEnabled', type: 'bool' },
           {
             internalType: 'uint128',
             name: 'capacity',
             type: 'uint128',
           },
-          {
-            internalType: 'uint128',
-            name: 'rate',
-            type: 'uint128',
-          },
+          { internalType: 'uint128', name: 'rate', type: 'uint128' },
         ],
         internalType: 'structRateLimiter.TokenBucket',
         name: '',
@@ -926,11 +714,7 @@ export default [
             name: 'sourceChainSelector',
             type: 'uint64',
           },
-          {
-            internalType: 'address',
-            name: 'sender',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'sender', type: 'address' },
           {
             internalType: 'address',
             name: 'receiver',
@@ -946,16 +730,8 @@ export default [
             name: 'gasLimit',
             type: 'uint256',
           },
-          {
-            internalType: 'bool',
-            name: 'strict',
-            type: 'bool',
-          },
-          {
-            internalType: 'uint64',
-            name: 'nonce',
-            type: 'uint64',
-          },
+          { internalType: 'bool', name: 'strict', type: 'bool' },
+          { internalType: 'uint64', name: 'nonce', type: 'uint64' },
           {
             internalType: 'address',
             name: 'feeToken',
@@ -966,11 +742,7 @@ export default [
             name: 'feeTokenAmount',
             type: 'uint256',
           },
-          {
-            internalType: 'bytes',
-            name: 'data',
-            type: 'bytes',
-          },
+          { internalType: 'bytes', name: 'data', type: 'bytes' },
           {
             components: [
               {
@@ -1023,13 +795,7 @@ export default [
       },
     ],
     name: 'getDestinationToken',
-    outputs: [
-      {
-        internalType: 'contractIERC20',
-        name: '',
-        type: 'address',
-      },
-    ],
+    outputs: [{ internalType: 'contractIERC20', name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -1057,11 +823,7 @@ export default [
             name: 'permissionLessExecutionThresholdSeconds',
             type: 'uint32',
           },
-          {
-            internalType: 'address',
-            name: 'router',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'router', type: 'address' },
           {
             internalType: 'address',
             name: 'priceRegistry',
@@ -1119,13 +881,7 @@ export default [
       },
     ],
     name: 'getPoolByDestToken',
-    outputs: [
-      {
-        internalType: 'contractIPool',
-        name: '',
-        type: 'address',
-      },
-    ],
+    outputs: [{ internalType: 'contractIPool', name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -1138,32 +894,14 @@ export default [
       },
     ],
     name: 'getPoolBySourceToken',
-    outputs: [
-      {
-        internalType: 'contractIPool',
-        name: '',
-        type: 'address',
-      },
-    ],
+    outputs: [{ internalType: 'contractIPool', name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'sender',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'sender', type: 'address' }],
     name: 'getSenderNonce',
-    outputs: [
-      {
-        internalType: 'uint64',
-        name: 'nonce',
-        type: 'uint64',
-      },
-    ],
+    outputs: [{ internalType: 'uint64', name: 'nonce', type: 'uint64' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -1188,11 +926,7 @@ export default [
             name: 'sourceChainSelector',
             type: 'uint64',
           },
-          {
-            internalType: 'address',
-            name: 'onRamp',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'onRamp', type: 'address' },
           {
             internalType: 'address',
             name: 'prevOffRamp',
@@ -1228,26 +962,14 @@ export default [
   {
     inputs: [],
     name: 'getTokenLimitAdmin',
-    outputs: [
-      {
-        internalType: 'address',
-        name: '',
-        type: 'address',
-      },
-    ],
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
     inputs: [],
     name: 'getTransmitters',
-    outputs: [
-      {
-        internalType: 'address[]',
-        name: '',
-        type: 'address[]',
-      },
-    ],
+    outputs: [{ internalType: 'address[]', name: '', type: 'address[]' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -1255,16 +977,8 @@ export default [
     inputs: [],
     name: 'latestConfigDetails',
     outputs: [
-      {
-        internalType: 'uint32',
-        name: 'configCount',
-        type: 'uint32',
-      },
-      {
-        internalType: 'uint32',
-        name: 'blockNumber',
-        type: 'uint32',
-      },
+      { internalType: 'uint32', name: 'configCount', type: 'uint32' },
+      { internalType: 'uint32', name: 'blockNumber', type: 'uint32' },
       {
         internalType: 'bytes32',
         name: 'configDigest',
@@ -1278,21 +992,13 @@ export default [
     inputs: [],
     name: 'latestConfigDigestAndEpoch',
     outputs: [
-      {
-        internalType: 'bool',
-        name: 'scanLogs',
-        type: 'bool',
-      },
+      { internalType: 'bool', name: 'scanLogs', type: 'bool' },
       {
         internalType: 'bytes32',
         name: 'configDigest',
         type: 'bytes32',
       },
-      {
-        internalType: 'uint32',
-        name: 'epoch',
-        type: 'uint32',
-      },
+      { internalType: 'uint32', name: 'epoch', type: 'uint32' },
     ],
     stateMutability: 'view',
     type: 'function',
@@ -1328,16 +1034,8 @@ export default [
                 name: 'gasLimit',
                 type: 'uint256',
               },
-              {
-                internalType: 'bool',
-                name: 'strict',
-                type: 'bool',
-              },
-              {
-                internalType: 'uint64',
-                name: 'nonce',
-                type: 'uint64',
-              },
+              { internalType: 'bool', name: 'strict', type: 'bool' },
+              { internalType: 'uint64', name: 'nonce', type: 'uint64' },
               {
                 internalType: 'address',
                 name: 'feeToken',
@@ -1348,11 +1046,7 @@ export default [
                 name: 'feeTokenAmount',
                 type: 'uint256',
               },
-              {
-                internalType: 'bytes',
-                name: 'data',
-                type: 'bytes',
-              },
+              { internalType: 'bytes', name: 'data', type: 'bytes' },
               {
                 components: [
                   {
@@ -1419,24 +1113,12 @@ export default [
   {
     inputs: [],
     name: 'owner',
-    outputs: [
-      {
-        internalType: 'address',
-        name: '',
-        type: 'address',
-      },
-    ],
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'newAdmin',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'newAdmin', type: 'address' }],
     name: 'setAdmin',
     outputs: [],
     stateMutability: 'nonpayable',
@@ -1444,36 +1126,20 @@ export default [
   },
   {
     inputs: [
-      {
-        internalType: 'address[]',
-        name: 'signers',
-        type: 'address[]',
-      },
+      { internalType: 'address[]', name: 'signers', type: 'address[]' },
       {
         internalType: 'address[]',
         name: 'transmitters',
         type: 'address[]',
       },
-      {
-        internalType: 'uint8',
-        name: 'f',
-        type: 'uint8',
-      },
-      {
-        internalType: 'bytes',
-        name: 'onchainConfig',
-        type: 'bytes',
-      },
+      { internalType: 'uint8', name: 'f', type: 'uint8' },
+      { internalType: 'bytes', name: 'onchainConfig', type: 'bytes' },
       {
         internalType: 'uint64',
         name: 'offchainConfigVersion',
         type: 'uint64',
       },
-      {
-        internalType: 'bytes',
-        name: 'offchainConfig',
-        type: 'bytes',
-      },
+      { internalType: 'bytes', name: 'offchainConfig', type: 'bytes' },
     ],
     name: 'setOCR2Config',
     outputs: [],
@@ -1484,21 +1150,13 @@ export default [
     inputs: [
       {
         components: [
-          {
-            internalType: 'bool',
-            name: 'isEnabled',
-            type: 'bool',
-          },
+          { internalType: 'bool', name: 'isEnabled', type: 'bool' },
           {
             internalType: 'uint128',
             name: 'capacity',
             type: 'uint128',
           },
-          {
-            internalType: 'uint128',
-            name: 'rate',
-            type: 'uint128',
-          },
+          { internalType: 'uint128', name: 'rate', type: 'uint128' },
         ],
         internalType: 'structRateLimiter.Config',
         name: 'config',
@@ -1511,13 +1169,7 @@ export default [
     type: 'function',
   },
   {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'to',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'to', type: 'address' }],
     name: 'transferOwnership',
     outputs: [],
     stateMutability: 'nonpayable',
@@ -1530,26 +1182,10 @@ export default [
         name: 'reportContext',
         type: 'bytes32[3]',
       },
-      {
-        internalType: 'bytes',
-        name: 'report',
-        type: 'bytes',
-      },
-      {
-        internalType: 'bytes32[]',
-        name: 'rs',
-        type: 'bytes32[]',
-      },
-      {
-        internalType: 'bytes32[]',
-        name: 'ss',
-        type: 'bytes32[]',
-      },
-      {
-        internalType: 'bytes32',
-        name: '',
-        type: 'bytes32',
-      },
+      { internalType: 'bytes', name: 'report', type: 'bytes' },
+      { internalType: 'bytes32[]', name: 'rs', type: 'bytes32[]' },
+      { internalType: 'bytes32[]', name: 'ss', type: 'bytes32[]' },
+      { internalType: 'bytes32', name: '', type: 'bytes32' },
     ],
     name: 'transmit',
     outputs: [],
@@ -1559,14 +1195,9 @@ export default [
   {
     inputs: [],
     name: 'typeAndVersion',
-    outputs: [
-      {
-        internalType: 'string',
-        name: '',
-        type: 'string',
-      },
-    ],
+    outputs: [{ internalType: 'string', name: '', type: 'string' }],
     stateMutability: 'view',
     type: 'function',
   },
+  // generate:end
 ] as const

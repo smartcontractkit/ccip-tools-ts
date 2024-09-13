@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 
 const fs = require('fs/promises')
+const prettier = require('prettier')
+const { glob } = require('glob') // FIXME: replace with fs.glob after node22 LTS
 
 const newLineRe = /(?:\r\n|\r|\n)/g
 
 /**
  * Process a file, replacing comment blocks starting with `// generate:` and ending
- * with `// end:generate` with the result of the eval of the lines in between
+ * with `// generate:end` with the result of the eval of the lines in between
  **/
-async function generate(path) {
-  const file = await fs.readFile(path, 'utf8')
+async function generate(filepath) {
+  const file = await fs.readFile(filepath, 'utf8')
   const lines = file.split(newLineRe)
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i]
@@ -19,22 +21,33 @@ async function generate(path) {
     for (++i; i < lines.length; i++) {
       line = lines[i]
       const match = line.match(/^\s*\/\/ (.*)$/)
-      if (!match || ['end', 'generate'].every((w) => line.includes(w))) break
+      if (!match || ['generate', 'end'].every((w) => line.includes(w))) break
       expr.push(match[1])
     }
 
-    expr = expr.map((l) => l.trim()).join('')
+    expr = expr.join('\n')
     const res = await eval(expr)
     if (typeof res === 'string') res = [res]
 
-    const endIdx = lines.findIndex((l, idx) => idx >= i && ['//', 'end', 'generate'].every((w) => l.includes(w)))
+    const endIdx = lines.findIndex(
+      (l, idx) => idx >= i && ['//', 'generate', 'end'].every((w) => l.includes(w)),
+    )
+    if (endIdx <= 0) throw new Error('no "// generate:end" found')
 
-    lines.splice(i, Math.max(0, endIdx - i), ...res)
+    lines.splice(i, endIdx - i, ...res)
     i = endIdx
   }
-  await fs.writeFile(path, lines.join('\n'))
+  const options = await prettier.resolveConfig(filepath)
+  const newFile = await prettier.format(lines.join('\n'), { ...options, filepath })
+  if (newFile !== file) await fs.writeFile(filepath, newFile)
+  return newFile !== file
 }
 
-generate(process.argv[2]).catch((err) =>
-  console.error('generate error:', err),
-)
+process.argv.slice(2).forEach(async (param) => {
+  for (const filepath of await glob(param)) {
+    await generate(filepath).then(
+      (changed) => console.info(changed ? 'generated' : 'up-to-date', filepath),
+      (err) => console.error('generate error:', err),
+    )
+  }
+})

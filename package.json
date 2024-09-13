@@ -11,7 +11,7 @@
     "test": "jest",
     "lint": "prettier --check ./src && eslint ./src",
     "lint:fix": "prettier --write ./src && eslint --fix ./src",
-    "generate": "node ./generate.cjs ./src/lib/selectors.ts && prettier --write ./src/lib/selectors.ts",
+    "generate": "node ./generate.cjs ./src/abi/* ./src/lib/selectors.ts",
     "build": "npm run clean && npm run generate && tsc -p ./tsconfig.build.json && npm run make-script",
     "make-script": "mv ./dist/index.js ./dist/ccip-tools-ts && sed -i -e '1i #!/usr/bin/env node' -e '1 {/^#!\\/usr\\/bin\\/env\\b.*tsx\\b/d}' ./dist/ccip-tools-ts && chmod +x ./dist/ccip-tools-ts",
     "start": "tsx src",
@@ -34,6 +34,7 @@
     "eslint-plugin-prettier": "^5.2.1",
     "eslint-plugin-simple-import-sort": "^12.1.1",
     "ethers-abitype": "^1.0.3",
+    "glob": "^11.0.0",
     "jest": "^29.7.0",
     "prettier": "^3.3.3",
     "ts-jest": "^29.2.4",
@@ -43,8 +44,8 @@
     "yaml": "^2.5.0"
   },
   "dependencies": {
-    "abitype": "^1.0.6",
     "@inquirer/prompts": "^5.3.8",
+    "abitype": "^1.0.6",
     "ethers": "^6.13.2",
     "tslib": "^2.6.3",
     "yargs": "^17.7.2"

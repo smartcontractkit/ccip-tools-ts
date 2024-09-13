@@ -1,4 +1,10 @@
 export default [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/ccip/raw/release/2.7.1-ccip1.2/core/gethwrappers/ccip/generated/commit_store/commit_store.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   {
     inputs: [
       {
@@ -13,11 +19,7 @@ export default [
             name: 'sourceChainSelector',
             type: 'uint64',
           },
-          {
-            internalType: 'address',
-            name: 'onRamp',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'onRamp', type: 'address' },
           {
             internalType: 'address',
             name: 'armProxy',
@@ -32,56 +34,26 @@ export default [
     stateMutability: 'nonpayable',
     type: 'constructor',
   },
-  {
-    inputs: [],
-    name: 'BadARMSignal',
-    type: 'error',
-  },
+  { inputs: [], name: 'BadARMSignal', type: 'error' },
   {
     inputs: [
-      {
-        internalType: 'bytes32',
-        name: 'expected',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes32',
-        name: 'actual',
-        type: 'bytes32',
-      },
+      { internalType: 'bytes32', name: 'expected', type: 'bytes32' },
+      { internalType: 'bytes32', name: 'actual', type: 'bytes32' },
     ],
     name: 'ConfigDigestMismatch',
     type: 'error',
   },
   {
     inputs: [
-      {
-        internalType: 'uint256',
-        name: 'expected',
-        type: 'uint256',
-      },
-      {
-        internalType: 'uint256',
-        name: 'actual',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'expected', type: 'uint256' },
+      { internalType: 'uint256', name: 'actual', type: 'uint256' },
     ],
     name: 'ForkedChain',
     type: 'error',
   },
+  { inputs: [], name: 'InvalidCommitStoreConfig', type: 'error' },
   {
-    inputs: [],
-    name: 'InvalidCommitStoreConfig',
-    type: 'error',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'string',
-        name: 'message',
-        type: 'string',
-      },
-    ],
+    inputs: [{ internalType: 'string', name: 'message', type: 'string' }],
     name: 'InvalidConfig',
     type: 'error',
   },
@@ -89,16 +61,8 @@ export default [
     inputs: [
       {
         components: [
-          {
-            internalType: 'uint64',
-            name: 'min',
-            type: 'uint64',
-          },
-          {
-            internalType: 'uint64',
-            name: 'max',
-            type: 'uint64',
-          },
+          { internalType: 'uint64', name: 'min', type: 'uint64' },
+          { internalType: 'uint64', name: 'max', type: 'uint64' },
         ],
         internalType: 'structCommitStore.Interval',
         name: 'interval',
@@ -108,82 +72,26 @@ export default [
     name: 'InvalidInterval',
     type: 'error',
   },
-  {
-    inputs: [],
-    name: 'InvalidProof',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'InvalidRoot',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'LeavesCannotBeEmpty',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'NonUniqueSignatures',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'OracleCannotBeZeroAddress',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'PausedError',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'RootAlreadyCommitted',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'SignaturesOutOfRegistration',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'StaleReport',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'UnauthorizedSigner',
-    type: 'error',
-  },
-  {
-    inputs: [],
-    name: 'UnauthorizedTransmitter',
-    type: 'error',
-  },
+  { inputs: [], name: 'InvalidProof', type: 'error' },
+  { inputs: [], name: 'InvalidRoot', type: 'error' },
+  { inputs: [], name: 'LeavesCannotBeEmpty', type: 'error' },
+  { inputs: [], name: 'NonUniqueSignatures', type: 'error' },
+  { inputs: [], name: 'OracleCannotBeZeroAddress', type: 'error' },
+  { inputs: [], name: 'PausedError', type: 'error' },
+  { inputs: [], name: 'RootAlreadyCommitted', type: 'error' },
+  { inputs: [], name: 'SignaturesOutOfRegistration', type: 'error' },
+  { inputs: [], name: 'StaleReport', type: 'error' },
+  { inputs: [], name: 'UnauthorizedSigner', type: 'error' },
+  { inputs: [], name: 'UnauthorizedTransmitter', type: 'error' },
   {
     inputs: [
-      {
-        internalType: 'uint256',
-        name: 'expected',
-        type: 'uint256',
-      },
-      {
-        internalType: 'uint256',
-        name: 'actual',
-        type: 'uint256',
-      },
+      { internalType: 'uint256', name: 'expected', type: 'uint256' },
+      { internalType: 'uint256', name: 'actual', type: 'uint256' },
     ],
     name: 'WrongMessageLength',
     type: 'error',
   },
-  {
-    inputs: [],
-    name: 'WrongNumberOfSignatures',
-    type: 'error',
-  },
+  { inputs: [], name: 'WrongNumberOfSignatures', type: 'error' },
   {
     anonymous: false,
     inputs: [
@@ -199,11 +107,7 @@ export default [
             name: 'sourceChainSelector',
             type: 'uint64',
           },
-          {
-            internalType: 'address',
-            name: 'onRamp',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'onRamp', type: 'address' },
           {
             internalType: 'address',
             name: 'armProxy',
@@ -392,16 +296,8 @@ export default [
           },
           {
             components: [
-              {
-                internalType: 'uint64',
-                name: 'min',
-                type: 'uint64',
-              },
-              {
-                internalType: 'uint64',
-                name: 'max',
-                type: 'uint64',
-              },
+              { internalType: 'uint64', name: 'min', type: 'uint64' },
+              { internalType: 'uint64', name: 'max', type: 'uint64' },
             ],
             internalType: 'structCommitStore.Interval',
             name: 'interval',
@@ -497,45 +393,21 @@ export default [
   {
     inputs: [],
     name: 'getExpectedNextSequenceNumber',
-    outputs: [
-      {
-        internalType: 'uint64',
-        name: '',
-        type: 'uint64',
-      },
-    ],
+    outputs: [{ internalType: 'uint64', name: '', type: 'uint64' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
     inputs: [],
     name: 'getLatestPriceEpochAndRound',
-    outputs: [
-      {
-        internalType: 'uint64',
-        name: '',
-        type: 'uint64',
-      },
-    ],
+    outputs: [{ internalType: 'uint64', name: '', type: 'uint64' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
-    inputs: [
-      {
-        internalType: 'bytes32',
-        name: 'root',
-        type: 'bytes32',
-      },
-    ],
+    inputs: [{ internalType: 'bytes32', name: 'root', type: 'bytes32' }],
     name: 'getMerkleRoot',
-    outputs: [
-      {
-        internalType: 'uint256',
-        name: '',
-        type: 'uint256',
-      },
-    ],
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -555,11 +427,7 @@ export default [
             name: 'sourceChainSelector',
             type: 'uint64',
           },
-          {
-            internalType: 'address',
-            name: 'onRamp',
-            type: 'address',
-          },
+          { internalType: 'address', name: 'onRamp', type: 'address' },
           {
             internalType: 'address',
             name: 'armProxy',
@@ -577,58 +445,28 @@ export default [
   {
     inputs: [],
     name: 'getTransmitters',
-    outputs: [
-      {
-        internalType: 'address[]',
-        name: '',
-        type: 'address[]',
-      },
-    ],
+    outputs: [{ internalType: 'address[]', name: '', type: 'address[]' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
     inputs: [],
     name: 'isARMHealthy',
-    outputs: [
-      {
-        internalType: 'bool',
-        name: '',
-        type: 'bool',
-      },
-    ],
+    outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
-    inputs: [
-      {
-        internalType: 'bytes32',
-        name: 'root',
-        type: 'bytes32',
-      },
-    ],
+    inputs: [{ internalType: 'bytes32', name: 'root', type: 'bytes32' }],
     name: 'isBlessed',
-    outputs: [
-      {
-        internalType: 'bool',
-        name: '',
-        type: 'bool',
-      },
-    ],
+    outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
     inputs: [],
     name: 'isUnpausedAndARMHealthy',
-    outputs: [
-      {
-        internalType: 'bool',
-        name: '',
-        type: 'bool',
-      },
-    ],
+    outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -636,16 +474,8 @@ export default [
     inputs: [],
     name: 'latestConfigDetails',
     outputs: [
-      {
-        internalType: 'uint32',
-        name: 'configCount',
-        type: 'uint32',
-      },
-      {
-        internalType: 'uint32',
-        name: 'blockNumber',
-        type: 'uint32',
-      },
+      { internalType: 'uint32', name: 'configCount', type: 'uint32' },
+      { internalType: 'uint32', name: 'blockNumber', type: 'uint32' },
       {
         internalType: 'bytes32',
         name: 'configDigest',
@@ -659,21 +489,13 @@ export default [
     inputs: [],
     name: 'latestConfigDigestAndEpoch',
     outputs: [
-      {
-        internalType: 'bool',
-        name: 'scanLogs',
-        type: 'bool',
-      },
+      { internalType: 'bool', name: 'scanLogs', type: 'bool' },
       {
         internalType: 'bytes32',
         name: 'configDigest',
         type: 'bytes32',
       },
-      {
-        internalType: 'uint32',
-        name: 'epoch',
-        type: 'uint32',
-      },
+      { internalType: 'uint32', name: 'epoch', type: 'uint32' },
     ],
     stateMutability: 'view',
     type: 'function',
@@ -681,13 +503,7 @@ export default [
   {
     inputs: [],
     name: 'owner',
-    outputs: [
-      {
-        internalType: 'address',
-        name: '',
-        type: 'address',
-      },
-    ],
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -701,13 +517,7 @@ export default [
   {
     inputs: [],
     name: 'paused',
-    outputs: [
-      {
-        internalType: 'bool',
-        name: '',
-        type: 'bool',
-      },
-    ],
+    outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -738,13 +548,7 @@ export default [
     type: 'function',
   },
   {
-    inputs: [
-      {
-        internalType: 'uint64',
-        name: 'minSeqNr',
-        type: 'uint64',
-      },
-    ],
+    inputs: [{ internalType: 'uint64', name: 'minSeqNr', type: 'uint64' }],
     name: 'setMinSeqNr',
     outputs: [],
     stateMutability: 'nonpayable',
@@ -752,36 +556,20 @@ export default [
   },
   {
     inputs: [
-      {
-        internalType: 'address[]',
-        name: 'signers',
-        type: 'address[]',
-      },
+      { internalType: 'address[]', name: 'signers', type: 'address[]' },
       {
         internalType: 'address[]',
         name: 'transmitters',
         type: 'address[]',
       },
-      {
-        internalType: 'uint8',
-        name: 'f',
-        type: 'uint8',
-      },
-      {
-        internalType: 'bytes',
-        name: 'onchainConfig',
-        type: 'bytes',
-      },
+      { internalType: 'uint8', name: 'f', type: 'uint8' },
+      { internalType: 'bytes', name: 'onchainConfig', type: 'bytes' },
       {
         internalType: 'uint64',
         name: 'offchainConfigVersion',
         type: 'uint64',
       },
-      {
-        internalType: 'bytes',
-        name: 'offchainConfig',
-        type: 'bytes',
-      },
+      { internalType: 'bytes', name: 'offchainConfig', type: 'bytes' },
     ],
     name: 'setOCR2Config',
     outputs: [],
@@ -789,13 +577,7 @@ export default [
     type: 'function',
   },
   {
-    inputs: [
-      {
-        internalType: 'address',
-        name: 'to',
-        type: 'address',
-      },
-    ],
+    inputs: [{ internalType: 'address', name: 'to', type: 'address' }],
     name: 'transferOwnership',
     outputs: [],
     stateMutability: 'nonpayable',
@@ -808,26 +590,10 @@ export default [
         name: 'reportContext',
         type: 'bytes32[3]',
       },
-      {
-        internalType: 'bytes',
-        name: 'report',
-        type: 'bytes',
-      },
-      {
-        internalType: 'bytes32[]',
-        name: 'rs',
-        type: 'bytes32[]',
-      },
-      {
-        internalType: 'bytes32[]',
-        name: 'ss',
-        type: 'bytes32[]',
-      },
-      {
-        internalType: 'bytes32',
-        name: 'rawVs',
-        type: 'bytes32',
-      },
+      { internalType: 'bytes', name: 'report', type: 'bytes' },
+      { internalType: 'bytes32[]', name: 'rs', type: 'bytes32[]' },
+      { internalType: 'bytes32[]', name: 'ss', type: 'bytes32[]' },
+      { internalType: 'bytes32', name: 'rawVs', type: 'bytes32' },
     ],
     name: 'transmit',
     outputs: [],
@@ -837,13 +603,7 @@ export default [
   {
     inputs: [],
     name: 'typeAndVersion',
-    outputs: [
-      {
-        internalType: 'string',
-        name: '',
-        type: 'string',
-      },
-    ],
+    outputs: [{ internalType: 'string', name: '', type: 'string' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -861,11 +621,7 @@ export default [
         name: 'hashedLeaves',
         type: 'bytes32[]',
       },
-      {
-        internalType: 'bytes32[]',
-        name: 'proofs',
-        type: 'bytes32[]',
-      },
+      { internalType: 'bytes32[]', name: 'proofs', type: 'bytes32[]' },
       {
         internalType: 'uint256',
         name: 'proofFlagBits',
@@ -873,14 +629,9 @@ export default [
       },
     ],
     name: 'verify',
-    outputs: [
-      {
-        internalType: 'uint256',
-        name: 'timestamp',
-        type: 'uint256',
-      },
-    ],
+    outputs: [{ internalType: 'uint256', name: 'timestamp', type: 'uint256' }],
     stateMutability: 'view',
     type: 'function',
   },
+  // generate:end
 ] as const
