@@ -142,6 +142,18 @@ export function chainIdFromSelector(selector: bigint): number {
 export const chainNameFromSelector = (selector: bigint) =>
   chainNameFromId(chainIdFromSelector(selector))
 
+export function chainIdFromName(name: string): number {
+  const id = lazyCached(`chainIdFromName ${name}`, () => {
+    for (const id in SELECTORS) {
+      if (SELECTORS[id].name === name) {
+        return Number(id)
+      }
+    }
+  })
+  if (id === undefined) throw new Error(`Chain name not found: ${name}`)
+  return id
+}
+
 export function networkInfo(selectorOrId: bigint | number): NetworkInfo {
   let chainId: number, chainSelector: bigint
   if (typeof selectorOrId === 'number') {

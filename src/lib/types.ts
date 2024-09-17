@@ -1,6 +1,12 @@
 import type { AbiParameterToPrimitiveType, SolidityTuple } from 'abitype'
-import { type AbiParametersToPrimitiveTypes, type ExtractAbiEvent, parseAbi } from 'abitype'
-import type { Log } from 'ethers'
+import {
+  type AbiParametersToPrimitiveTypes,
+  type ExtractAbiEvent,
+  parseAbi,
+  parseAbiItem,
+  parseAbiParameter,
+} from 'abitype'
+import { AbiCoder, concat, id, keccak256, type Log } from 'ethers'
 
 import CommitStore_1_2_ABI from '../abi/CommitStore_1_2.js'
 import CommitStore_1_5_ABI from '../abi/CommitStore_1_5.js'
@@ -100,4 +106,27 @@ export interface CCIPExecution {
   receipt: ExecutionReceipt
   log: Log_
   timestamp: number
+}
+
+const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10)
+const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10)
+const EVMExtraArgsV1 = 'tuple(uint256 gasLimit)'
+const EVMExtraArgsV2 = 'tuple(uint256 gasLimit, bool allowOutOfOrderExecution)'
+export interface EVMExtraArgsV1 {
+  gasLimit?: bigint
+}
+export interface EVMExtraArgsV2 extends EVMExtraArgsV1 {
+  allowOutOfOrderExecution: boolean
+}
+
+const defaultAbiCoder = AbiCoder.defaultAbiCoder()
+const defaultGasLimit = 200_000n
+export function encodeExtraArgs<A extends EVMExtraArgsV1 | EVMExtraArgsV2>(args: A): string {
+  if ('allowOutOfOrderExecution' in args && args.allowOutOfOrderExecution) {
+    if (args.gasLimit == null) args.gasLimit = defaultGasLimit
+    return concat([EVMExtraArgsV2Tag, defaultAbiCoder.encode([EVMExtraArgsV2], [args])])
+  } else if (args.gasLimit != null) {
+    return concat([EVMExtraArgsV1Tag, defaultAbiCoder.encode([EVMExtraArgsV1], [args])])
+  }
+  return '0x'
 }

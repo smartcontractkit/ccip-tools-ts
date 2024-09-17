@@ -1,14 +1,14 @@
 #!/usr/bin/env -S npx tsx
 
-import { isHexString } from 'ethers'
+import { isAddress, isHexString } from 'ethers'
 import util from 'util'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
-import { Format, manualExec, manualExecSenderQueue, showRequests } from './commands.js'
+import { Format, manualExec, manualExecSenderQueue, sendMessage, showRequests } from './commands.js'
 import { loadRpcProviders } from './utils.js'
 
-util.inspect.defaultOptions.depth = 4 // print down to tokenAmounts in requests
+util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 
 async function main() {
   await yargs(hideBin(process.argv))
@@ -18,14 +18,13 @@ async function main() {
         type: 'array',
         alias: 'r',
         describe: 'List of RPC endpoint URLs, ws[s] or http[s]',
-        // default: 'wss://ethereum-sepolia-rpc.publicnode.com',
+        string: true,
       },
       'rpcs-file': {
         type: 'string',
         default: './.env',
         describe: 'File containing a list of RPCs endpoints to use',
         // demandOption: true,
-        // default: 'wss://rpc.chiadochain.net/wss',
       },
       format: {
         alias: 'f',
@@ -33,9 +32,6 @@ async function main() {
         default: Format.pretty,
       },
     })
-    .coerce('rpcs', (rpcs: (string | number)[] | undefined) =>
-      rpcs ? rpcs.map((r) => r.toString()) : <string[]>[],
-    )
     .command(
       ['show <tx_hash>', '*'],
       'show CCIP messages info',
@@ -122,6 +118,75 @@ async function main() {
       async (argv) => {
         const providers = await loadRpcProviders(argv)
         return manualExecSenderQueue(providers, argv.tx_hash, argv)
+          .catch((err) => console.error(err))
+          .finally(() => Object.values(providers).forEach((provider) => provider.destroy()))
+      },
+    )
+    .command(
+      'send <source> <router> <dest>',
+      'send a CCIP message from router on source to dest',
+      (yargs) =>
+        yargs
+          .positional('source', {
+            type: 'string',
+            demandOption: true,
+            describe: 'source network, chainId or name',
+            example: 'ethereum-testnet-sepolia',
+          })
+          .positional('router', {
+            type: 'string',
+            demandOption: true,
+            describe: 'router contract address on source',
+          })
+          .positional('dest', {
+            type: 'string',
+            demandOption: true,
+            describe: 'destination network, chainId or name',
+            example: 'ethereum-testnet-sepolia-arbitrum-1',
+          })
+          .options({
+            receiver: {
+              type: 'string',
+              describe: 'Receiver of the message; defaults to the sender wallet address',
+            },
+            data: {
+              type: 'string',
+              describe: 'Data to send in the message',
+              example: '0x1234',
+            },
+            'gas-limit': {
+              type: 'number',
+              describe:
+                'Gas limit for receiver callback execution; defaults to default configured on ramps',
+            },
+            'allow-out-of-order-exec': {
+              type: 'boolean',
+              describe:
+                'Allow execution of messages out of order (i.e. sender nonce not enforced, only v1.5+ lanes)',
+            },
+            'fee-token': {
+              type: 'string',
+              describe:
+                'Address of the fee token (e.g. LINK address on source); if not provided, will pay in native',
+            },
+            'transfer-tokens': {
+              type: 'array',
+              string: true,
+              describe: 'List of token amounts to transfer to the receiver',
+              example: '0xtoken=0.1',
+            },
+          })
+          .check(
+            ({ router, receiver, 'fee-token': feeToken, 'transfer-tokens': transferTokens }) =>
+              isAddress(router) &&
+              (!receiver || isAddress(receiver)) &&
+              (!feeToken || isAddress(feeToken)) &&
+              (!transferTokens ||
+                transferTokens.every((t) => /^0x[0-9a-fA-F]{40}=\d+(\.\d+)?$/.test(t))),
+          ),
+      async (argv) => {
+        const providers = await loadRpcProviders(argv)
+        return sendMessage(providers, argv)
           .catch((err) => console.error(err))
           .finally(() => Object.values(providers).forEach((provider) => provider.destroy()))
       },

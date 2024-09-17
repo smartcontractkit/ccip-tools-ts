@@ -22,6 +22,9 @@ export {
   CCIPVersion_1_2,
   CCIPVersion_1_5,
   type CommitReport,
+  encodeExtraArgs,
+  type EVMExtraArgsV1,
+  type EVMExtraArgsV2,
   type ExecutionReceipt,
   type Lane,
   type NetworkInfo,
@@ -29,6 +32,7 @@ export {
 export {
   bigIntReplacer,
   bigIntReviver,
+  chainIdFromName,
   chainIdFromSelector,
   chainNameFromId,
   chainNameFromSelector,

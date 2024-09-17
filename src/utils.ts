@@ -203,9 +203,11 @@ export function prettyLane(lane: Lane, version: string) {
   })
 }
 
-const TokenABI = parseAbi([
+export const TokenABI = parseAbi([
   'function decimals() view returns (uint8)',
   'function symbol() view returns (string)',
+  'function allowance(address owner, address spender) view returns (uint256)',
+  'function approve(address spender, uint256 amount) returns (bool)',
 ])
 
 async function formatToken(
