@@ -1,12 +1,6 @@
 import type { AbiParameterToPrimitiveType, SolidityTuple } from 'abitype'
-import {
-  type AbiParametersToPrimitiveTypes,
-  type ExtractAbiEvent,
-  parseAbi,
-  parseAbiItem,
-  parseAbiParameter,
-} from 'abitype'
-import { AbiCoder, concat, id, keccak256, type Log } from 'ethers'
+import { type AbiParametersToPrimitiveTypes, type ExtractAbiEvent, parseAbi } from 'abitype'
+import { AbiCoder, concat, id, type Log } from 'ethers'
 
 import CommitStore_1_2_ABI from '../abi/CommitStore_1_2.js'
 import CommitStore_1_5_ABI from '../abi/CommitStore_1_5.js'

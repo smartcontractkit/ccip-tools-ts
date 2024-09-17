@@ -1,10 +1,10 @@
 export { fetchCommitReport } from './commits.js'
 export { calculateManualExecProof, fetchExecutionReceipts, fetchOffRamp } from './execution.js'
+export { fetchOffchainTokenData } from './offchain.js'
 export {
   fetchAllMessagesInBatch,
   fetchCCIPMessageInLog,
   fetchCCIPMessagesInTx,
-  fetchOffchainTokenData,
   fetchRequestsForSender,
   getOnRampStaticConfig,
 } from './requests.js'
