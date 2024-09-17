@@ -75,6 +75,11 @@ async function main() {
               describe: 'Override gas limit for tokens releaseOrMint calls (0 keeps original)',
               default: 0,
             },
+            wallet: {
+              type: 'string',
+              describe:
+                'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar',
+            },
           })
           .check(({ tx_hash }) => isHexString(tx_hash, 32)),
       async (argv) => {
@@ -112,6 +117,11 @@ async function main() {
             'exec-failed': {
               type: 'boolean',
               describe: 'Whether to re-execute failed messages (instead of just non-executed)',
+            },
+            wallet: {
+              type: 'string',
+              describe:
+                'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar',
             },
           })
           .check(({ tx_hash }) => isHexString(tx_hash, 32)),
@@ -174,6 +184,11 @@ async function main() {
               string: true,
               describe: 'List of token amounts to transfer to the receiver',
               example: '0xtoken=0.1',
+            },
+            wallet: {
+              type: 'string',
+              describe:
+                'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar',
             },
           })
           .check(

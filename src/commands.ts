@@ -134,6 +134,7 @@ export async function manualExec(
     'tokens-gas-limit': number
     'log-index'?: number
     format: Format
+    wallet?: string
   },
 ) {
   const tx = await getTxInAnyProvider(providers, txHash)
@@ -182,7 +183,7 @@ export async function manualExec(
   const offchainTokenData = await fetchOffchainTokenData(request)
   const execReport = { ...manualExecReport, offchainTokenData: [offchainTokenData] }
 
-  const wallet = getWallet().connect(dest)
+  const wallet = (await getWallet(argv)).connect(dest)
 
   let manualExecTx
   if (request.version === CCIPVersion_1_2) {
@@ -221,6 +222,7 @@ export async function manualExecSenderQueue(
     'log-index'?: number
     'exec-failed'?: boolean
     format: Format
+    wallet?: string
   },
 ) {
   const tx = await getTxInAnyProvider(providers, txHash)
@@ -300,7 +302,7 @@ export async function manualExecSenderQueue(
   }
   console.info('Got', batches.length, 'batches to execute')
 
-  const wallet = getWallet().connect(dest)
+  const wallet = (await getWallet(argv)).connect(dest)
 
   const offRampContract = await fetchOffRamp(wallet, firstRequest.lane, firstRequest.version, {
     fromBlock: destFromBlock,
@@ -368,12 +370,13 @@ export async function sendMessage(
     'fee-token'?: string
     'transfer-tokens'?: string[]
     format: Format
+    wallet?: string
   },
 ) {
   const sourceChainId = isNaN(+argv.source) ? chainIdFromName(argv.source) : +argv.source
   const source = providers[sourceChainId]
   if (!source) throw new Error(`No provider for source chain: "${chainNameFromId(sourceChainId)}"`)
-  const wallet = getWallet().connect(source)
+  const wallet = (await getWallet(argv)).connect(source)
 
   const destChainId = isNaN(+argv.dest) ? chainIdFromName(argv.dest) : +argv.dest
   const destSelector = chainSelectorFromId(destChainId)

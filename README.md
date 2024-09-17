@@ -34,8 +34,8 @@ Once the list is gathered, we connect to all RPCs and use the fastest to reply f
 Commands which need to send transactions try to get its private key from a `USER_KEY` environment
 variable.
 
-Soon, we'll include a `--wallet` option receiving an encrypted JSON path and prompt user
-for its password (or read from an `USER_KEY_PASSWORD` environment variable).
+An encrypted wallet json can also be passed to `--wallet` option. It'll be decrypted with password
+from `USER_KEY_PASSWORD` environment variable, or interactively prompted if not set.
 
 ## Quick command reference:
 
@@ -103,11 +103,16 @@ Sends a message from router on source network, to dest; positional parameters ar
 
 If `--receiver` is omitted, sends to self (sender) address on dest (see [Wallet](#wallet) section
 above).
+
 If `--data` is not a hex-string, it will be UTF-8 encoded.
+
 If `--gas-limit` is omitted, ramp default config (usually 200k) is used. It can be `0`.
+
 If `--fee-token` is omitted, CCIP fee will be paid in native token.
+
 `--transfer-tokens` can receive multiple pairs of `0xTokenAddr=amount` (separated by spaces, terminated
 with `--` if needed). `amount` will be converted using token decimals (e.g. 0.1 = 10^5 of the
 smallest unit for USDC, which is 6 decimals).
+
 `--allow-out-of-order-exec` is only available on v1.5+ lanes, and opt-out of *sender* `nonce` order
 enforcement. It's useful for destinations where execution can't be guaranteed (e.g. zkOverflow).

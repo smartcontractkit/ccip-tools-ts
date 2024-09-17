@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/restrict-template-expressions,@typescript-eslint/no-base-to-string */
 import { readFile } from 'node:fs/promises'
 
-import { select } from '@inquirer/prompts'
+import { password, select } from '@inquirer/prompts'
 import { parseAbi } from 'abitype'
 import type { Addressable, TransactionReceipt } from 'ethers'
 import {
@@ -12,6 +12,7 @@ import {
   JsonRpcProvider,
   type Provider,
   SigningKey,
+  Wallet,
   WebSocketProvider,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
@@ -115,7 +116,12 @@ export async function getTxInAnyProvider(
   )
 }
 
-export function getWallet(): BaseWallet {
+export async function getWallet(argv?: { wallet?: string }): Promise<BaseWallet> {
+  if (argv?.wallet) {
+    let pw = process.env['USER_KEY_PASSWORD']
+    if (!pw) pw = await password({ message: 'Enter password for json wallet' })
+    return Wallet.fromEncryptedJson(await readFile(argv.wallet, 'utf8'), pw)
+  }
   const keyFromEnv = process.env['USER_KEY']
   if (keyFromEnv) {
     return new BaseWallet(
