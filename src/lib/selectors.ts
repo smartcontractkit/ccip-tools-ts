@@ -104,6 +104,7 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
     selector: 686603546605904534n,
     name: 'ethereum-testnet-sepolia-soneium-1',
   },
+  '2021': { selector: 13116810400804392105n, name: 'ronin-testnet-saigon' },
   '2031': {
     selector: 8175830712062617656n,
     name: 'polkadot-mainnet-centrifuge',

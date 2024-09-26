@@ -400,7 +400,9 @@ export async function sendMessage(
   // `--allow-out-of-order-exec` forces EVMExtraArgsV2, which shouldn't work on v1.2 lanes;
   // otherwise, fallsback to EVMExtraArgsV1 (compatible with v1.2 & v1.5)
   const extraArgs = {
-    ...(argv['allow-out-of-order-exec'] ? { allowOutOfOrderExecution: true } : {}),
+    ...(argv['allow-out-of-order-exec'] != null
+      ? { allowOutOfOrderExecution: argv['allow-out-of-order-exec'] }
+      : {}),
     ...(argv['gas-limit'] != null ? { gasLimit: BigInt(argv['gas-limit']) } : {}),
   }
 

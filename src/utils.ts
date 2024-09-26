@@ -330,6 +330,7 @@ export async function prettyCommit(
         ] as const
       }),
     ),
+    commitStore: commit.log.address,
     transactionHash: commit.log.transactionHash,
     blockNumber: commit.log.blockNumber,
     timestamp: `${formatDate(timestamp)} (${formatDuration(timestamp - request.timestamp)} after request)`,
@@ -340,6 +341,7 @@ export function prettyReceipt(receipt: CCIPExecution, request: { timestamp: numb
   console.table({
     state: receipt.receipt.state === 2n ? '✅ success' : '❌ failed',
     ...formatData('returnData', receipt.receipt.returnData),
+    offRamp: receipt.log.address,
     transactionHash: receipt.log.transactionHash,
     logIndex: receipt.log.index,
     blockNumber: receipt.log.blockNumber,

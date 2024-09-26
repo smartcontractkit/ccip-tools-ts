@@ -114,10 +114,15 @@ export interface EVMExtraArgsV2 extends EVMExtraArgsV1 {
 }
 
 const defaultAbiCoder = AbiCoder.defaultAbiCoder()
-const defaultGasLimit = 200_000n
-export function encodeExtraArgs<A extends EVMExtraArgsV1 | EVMExtraArgsV2>(args: A): string {
-  if ('allowOutOfOrderExecution' in args && args.allowOutOfOrderExecution) {
-    if (args.gasLimit == null) args.gasLimit = defaultGasLimit
+const DEFAULT_GAS_LIMIT = 200_000n
+
+/**
+ * Encodes extra arguments for CCIP messages.
+ * args.allowOutOfOrderExecution enforces ExtraArgsV2 (v1.5+)
+ **/
+export function encodeExtraArgs(args: EVMExtraArgsV1 | EVMExtraArgsV2): string {
+  if ('allowOutOfOrderExecution' in args) {
+    if (args.gasLimit == null) args.gasLimit = DEFAULT_GAS_LIMIT
     return concat([EVMExtraArgsV2Tag, defaultAbiCoder.encode([EVMExtraArgsV2], [args])])
   } else if (args.gasLimit != null) {
     return concat([EVMExtraArgsV1Tag, defaultAbiCoder.encode([EVMExtraArgsV1], [args])])

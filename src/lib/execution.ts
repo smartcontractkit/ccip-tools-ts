@@ -90,10 +90,31 @@ export async function fetchOffRamp<V extends CCIPVersion>(
 
   const seen = new Set<string>()
   const latestBlock = await dest.getBlockNumber()
-  for (const blockRange of blockRangeGenerator({
-    endBlock: latestBlock,
-    startBlock: hints?.fromBlock,
-  })) {
+
+  function* interleaveBlockRanges() {
+    const it1 = blockRangeGenerator({
+      endBlock: latestBlock,
+      startBlock: hints?.fromBlock,
+    })
+    if (!hints?.fromBlock) {
+      yield* it1
+      return
+    }
+    // if we receive hints.fromBlock, alternate between paging forward and backwards
+    const it2 = blockRangeGenerator({
+      endBlock: hints.fromBlock - 1,
+    })
+
+    let res1, res2
+    do {
+      if (!res1 || !res1.done) res1 = it1.next()
+      if (!res1.done) yield res1.value
+      if (!res2 || !res2.done) res2 = it2.next()
+      if (!res2.done) yield res2.value
+    } while (!res1.done || !res2.done)
+  }
+
+  for (const blockRange of interleaveBlockRanges()) {
     // we don't know our OffRamp address yet, so fetch any compatible log
     const logs = await dest.getLogs({ ...blockRange, topics: [topic0] })
 
@@ -185,7 +206,7 @@ export async function* fetchExecutionReceipts(
       }
     }
     // support fetching with different versions/topics
-    const topics = new Set(
+    const topic0s = new Set(
       requests.map(({ version }) => {
         const offRampInterface = getOffRampInterface(version)
         return offRampInterface.getEvent('ExecutionStateChanged')!.topicHash
@@ -196,7 +217,8 @@ export async function* fetchExecutionReceipts(
     const logs = await dest.getLogs({
       ...blockRange,
       ...(addressFilter.size ? { address: Array.from(addressFilter) } : {}),
-      topics: Array.from(topics),
+      // ExecutionStateChanged v1.2-v1.5 (at least) has messageId as indexed topic2
+      topics: [Array.from(topic0s), null, requests.map(({ message }) => message.messageId)],
     })
     if (onlyLast) logs.reverse()
 
