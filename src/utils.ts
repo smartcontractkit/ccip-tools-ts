@@ -272,7 +272,12 @@ export async function prettyRequest<R extends CCIPRequest | CCIPRequestWithLane>
   }
   console.info('Request:')
 
-  const finalized = await source.getBlock('finalized')
+  let finalized
+  try {
+    finalized = await source.getBlock('finalized')
+  } catch (_) {
+    // no finalized tag support
+  }
   console.table({
     messageId: request.message.messageId,
     sender: request.message.sender,
