@@ -82,17 +82,19 @@ export class Providers {
         ]),
       )
     } else {
-      this.#endpoints = readFile(argv['rpcs-file'], 'utf8').then((file) => {
-        const rpcs = new Set<string>()
-        for (const line of file.toString().split(/(?:\r\n|\r|\n)/g)) {
-          const match = line.match(RPCS_RE)
-          if (match) rpcs.add(match[0])
-        }
-        for (const [env, val] of Object.entries(process.env)) {
-          if (env.startsWith('RPC_') && val && RPCS_RE.test(val)) rpcs.add(val)
-        }
-        return rpcs
-      })
+      this.#endpoints = readFile(argv['rpcs-file'], 'utf8')
+        .catch(() => '')
+        .then((file) => {
+          const rpcs = new Set<string>()
+          for (const line of file.toString().split(/(?:\r\n|\r|\n)/g)) {
+            const match = line.match(RPCS_RE)
+            if (match) rpcs.add(match[0])
+          }
+          for (const [env, val] of Object.entries(process.env)) {
+            if (env.startsWith('RPC_') && val && RPCS_RE.test(val)) rpcs.add(val)
+          }
+          return rpcs
+        })
     }
   }
 
@@ -223,13 +225,15 @@ export async function getWallet(argv?: { wallet?: string }): Promise<BaseWallet>
     if (!pw) pw = await password({ message: 'Enter password for json wallet' })
     return Wallet.fromEncryptedJson(await readFile(argv.wallet, 'utf8'), pw)
   }
-  const keyFromEnv = process.env['USER_KEY']
+  const keyFromEnv = process.env['USER_KEY'] || process.env['OWNER_KEY']
   if (keyFromEnv) {
     return new BaseWallet(
       new SigningKey(hexlify((keyFromEnv.startsWith('0x') ? '' : '0x') + keyFromEnv)),
     )
   }
-  throw new Error('Could not get wallet; please, set USER_KEY envvar as a hex-encoded private key')
+  throw new Error(
+    'Could not get wallet; please, set USER_KEY envvar as a hex-encoded private key, or --wallet option',
+  )
 }
 
 export async function selectRequest<R extends CCIPRequest | CCIPRequestWithLane>(
