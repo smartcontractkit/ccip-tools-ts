@@ -34,86 +34,175 @@ import {
 util.inspect.defaultOptions.depth = 4 // print down to tokenAmounts in requests
 const RPCS_RE = /\b(http|ws)s?:\/\/\S+/
 
-export async function loadRpcProviders({
-  rpcs: rpcsArray,
-  'rpcs-file': rpcsPath,
-}: {
-  rpcs?: string[]
-  'rpcs-file'?: string
-}): Promise<Record<number, Provider>> {
-  const rpcs = new Set<string>(rpcsArray)
-  for (const [env, val] of Object.entries(process.env)) {
-    if (!env.startsWith('RPC_') || !val || !RPCS_RE.test(val)) continue
-    rpcs.add(val)
-  }
-  if (rpcsPath) {
-    try {
-      const rpcsFile = await readFile(rpcsPath, 'utf8')
-      for (const line of rpcsFile.toString().split(/(?:\r\n|\r|\n)/g)) {
-        const match = line.match(RPCS_RE)
-        if (!match) continue
-        rpcs.add(match[0])
-      }
-    } catch (_) {
-      // ignore if path doesn't exist or can't be read
+function withTimeout<T>(promise: Promise<T>, ms: number, message = 'Timeout'): Promise<T> {
+  return Promise.race([
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+    promise,
+  ])
+}
+
+/**
+ * Load providers from a list of RPC endpoints
+ *
+ * This class manages concurrent access to providers, racing them as soon as they are created for
+ * the `getTxReceipt` method, or managing a singleton promise requested with `forChainId` method,
+ * resolved to the first RPC responding for that chainId, even before the chainIds of all
+ * providers are known.
+ * It also ensures that all providers are destroyed when the instance is destroyed.
+ *
+ * @param argv - Object with either `rpcs` or `rpcs-file` property
+ * @returns instance of Providers manager class
+ * @throws Error if no providers are found
+ **/
+export class Providers {
+  #endpoints: Promise<Set<string>>
+  #providersList?: Promise<Provider[]>
+  #providersPromises: Record<number, Promise<Provider>> = {}
+  #promisesCallbacks: Record<
+    number,
+    readonly [resolve: (provider: Provider) => void, reject: (reason: unknown) => void]
+  > = {}
+  #destroy!: (v: unknown) => void
+  destroyed: Promise<unknown> = new Promise((resolve) => {
+    this.#destroy = resolve
+  })
+
+  constructor(argv: { rpcs: string[] } | { 'rpcs-file': string }) {
+    if ('rpcs' in argv) {
+      this.#endpoints = Promise.resolve(
+        new Set([
+          ...argv.rpcs,
+          ...Object.entries(process.env)
+            .filter(([env, val]) => env.startsWith('RPC_') && val && RPCS_RE.test(val))
+            .map(([, val]) => val!),
+        ]),
+      )
+    } else {
+      this.#endpoints = readFile(argv['rpcs-file'], 'utf8').then((file) => {
+        const rpcs = new Set<string>()
+        for (const line of file.toString().split(/(?:\r\n|\r|\n)/g)) {
+          const match = line.match(RPCS_RE)
+          if (match) rpcs.add(match[0])
+        }
+        for (const [env, val] of Object.entries(process.env)) {
+          if (env.startsWith('RPC_') && val && RPCS_RE.test(val)) rpcs.add(val)
+        }
+        return rpcs
+      })
     }
   }
 
-  const results: Record<number, Provider> = {}
-  const promises: Promise<unknown>[] = []
-  for (const endpoint of rpcs) {
-    const promise = (async () => {
-      let provider: Provider
-      if (endpoint.startsWith('ws')) {
-        provider = await new Promise((resolve, reject) => {
-          const provider = new WebSocketProvider(endpoint)
-          provider.websocket.onerror = reject
-          provider
-            ._waitUntilReady()
-            .then(() => resolve(provider))
-            .catch(reject)
-        })
-      } else if (endpoint.startsWith('http')) {
-        provider = new JsonRpcProvider(endpoint)
-      } else {
-        throw new Error(
-          `Unknown JSON RPC protocol in endpoint (should be wss?:// or https?://): ${endpoint}`,
-        )
-      }
+  destroy() {
+    this.#destroy(null)
+  }
 
-      try {
-        const { chainId } = await getProviderNetwork(provider)
-        if (results[chainId] != null) throw new Error('Already raced')
-        results[chainId] = provider
-      } catch (_) {
-        provider.destroy()
-      }
-    })()
-    promises.push(
-      promise.catch(
-        () => null, // ignore errors
+  /**
+   * Trigger fetching providers from RPC endpoints, with their networks in parallel
+   **/
+  #loadProviders(): Promise<Provider[]> {
+    if (this.#providersList) return this.#providersList
+
+    const readyPromises: Promise<unknown>[] = []
+    return (this.#providersList = this.#endpoints
+      .then((rpcs) =>
+        [...rpcs].map((url) => {
+          let provider: Provider
+          let providerReady: Promise<Provider>
+          if (url.startsWith('ws')) {
+            const provider_ = new WebSocketProvider(url)
+            providerReady = new Promise((resolve, reject) => {
+              provider_.websocket.onerror = reject
+              provider_
+                ._waitUntilReady()
+                .then(() => resolve(provider_))
+                .catch(reject)
+            })
+            provider = provider_
+          } else if (url.startsWith('http')) {
+            provider = new JsonRpcProvider(url)
+            providerReady = Promise.resolve(provider)
+          } else {
+            throw new Error(
+              `Unknown JSON RPC protocol in endpoint (should be wss?:// or https?://): ${url}`,
+            )
+          }
+
+          void this.destroyed.then(() => provider.destroy()) // schedule cleanup
+          readyPromises.push(
+            // wait for connection and check network in background
+            withTimeout(
+              providerReady.then((provider) => getProviderNetwork(provider)),
+              15e3,
+            )
+              .then(({ chainId }) => {
+                if (chainId in this.#promisesCallbacks) {
+                  const [resolve] = this.#promisesCallbacks[chainId]
+                  delete this.#promisesCallbacks[chainId]
+                  resolve(provider)
+                } else if (!(chainId in this.#providersPromises)) {
+                  this.#providersPromises[chainId] = Promise.resolve(provider)
+                } else {
+                  throw new Error(`Raced by a faster provider`)
+                }
+              })
+              .catch((_reason) => {
+                // destroy earlier if provider failed to connect, or if raced
+                provider.destroy()
+              }),
+          )
+          return provider
+        }),
+      )
+      .finally(() => {
+        void Promise.allSettled(readyPromises).then(() => {
+          for (const [chainId, [, reject]] of Object.entries(this.#promisesCallbacks)) {
+            // if `forChainId` in the meantime requested a provider that was not found, reject it
+            reject(
+              new Error(
+                `Could not find provider for chain "${chainNameFromId(+chainId)}" [${chainId}]`,
+              ),
+            )
+            delete this.#promisesCallbacks[+chainId]
+          }
+        })
+      }))
+  }
+
+  /**
+   * Ask for a provider for a given chainId, or wait for it to be available
+   * @param chainId - chainId to get a provider for
+   * @returns Promise for a provider for the given chainId
+   **/
+  async forChainId(chainId: number): Promise<Provider> {
+    if (chainId in this.#providersPromises) return this.#providersPromises[chainId]
+    if (!(chainId in this.#promisesCallbacks)) {
+      this.#providersPromises[chainId] = new Promise((resolve, reject) => {
+        this.#promisesCallbacks[chainId] = [resolve, reject]
+      })
+      void this.#loadProviders()
+    }
+    return this.#providersPromises[chainId]
+  }
+
+  /**
+   * Get transaction receipt from any of the providers;
+   * Races them even before network is known, returning first to respond.
+   * Continues populating the list of providers in the background after resolved.
+   * @param txHash - transaction hash to get receipt for
+   * @returns Promise for the transaction receipt, with provider in TransactionReceipt.provider
+   **/
+  async getTxReceipt(txHash: string): Promise<TransactionReceipt> {
+    return this.#loadProviders().then((providers) =>
+      Promise.any(
+        providers.map((provider) =>
+          withTimeout(provider.getTransactionReceipt(txHash), 15e3).then((receipt) => {
+            if (!receipt) throw new Error(`Transaction not found: ${txHash}`)
+            return receipt
+          }),
+        ),
       ),
     )
   }
-  await Promise.all(promises)
-  return results
-}
-
-export async function getTxInAnyProvider(
-  providers: Record<number, Provider>,
-  txHash: string,
-): Promise<TransactionReceipt> {
-  return Promise.any(
-    Object.values(providers).map((provider) =>
-      provider.getTransactionReceipt(txHash).then((receipt) => {
-        if (!receipt) {
-          throw new Error(`Transaction not found: ${txHash}`)
-        } else {
-          return receipt
-        }
-      }),
-    ),
-  )
 }
 
 export async function getWallet(argv?: { wallet?: string }): Promise<BaseWallet> {

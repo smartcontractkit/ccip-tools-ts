@@ -6,7 +6,7 @@ import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
 import { Format, manualExec, manualExecSenderQueue, sendMessage, showRequests } from './commands.js'
-import { loadRpcProviders } from './utils.js'
+import { Providers } from './utils.js'
 
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 
@@ -44,10 +44,10 @@ async function main() {
           })
           .check(({ tx_hash }) => isHexString(tx_hash, 32)),
       async (argv) => {
-        const providers = await loadRpcProviders(argv)
+        const providers = new Providers(argv)
         return showRequests(providers, argv.tx_hash, argv.format)
           .catch((err) => console.error(err))
-          .finally(() => Object.values(providers).forEach((provider) => provider.destroy()))
+          .finally(() => providers.destroy())
       },
     )
     .command(
@@ -83,10 +83,10 @@ async function main() {
           })
           .check(({ tx_hash }) => isHexString(tx_hash, 32)),
       async (argv) => {
-        const providers = await loadRpcProviders(argv)
+        const providers = new Providers(argv)
         return manualExec(providers, argv.tx_hash, argv)
           .catch((err) => console.error(err))
-          .finally(() => Object.values(providers).forEach((provider) => provider.destroy()))
+          .finally(() => providers.destroy())
       },
     )
     .command(
@@ -126,10 +126,10 @@ async function main() {
           })
           .check(({ tx_hash }) => isHexString(tx_hash, 32)),
       async (argv) => {
-        const providers = await loadRpcProviders(argv)
+        const providers = new Providers(argv)
         return manualExecSenderQueue(providers, argv.tx_hash, argv)
           .catch((err) => console.error(err))
-          .finally(() => Object.values(providers).forEach((provider) => provider.destroy()))
+          .finally(() => providers.destroy())
       },
     )
     .command(
@@ -200,10 +200,10 @@ async function main() {
                 transferTokens.every((t) => /^0x[0-9a-fA-F]{40}=\d+(\.\d+)?$/.test(t))),
           ),
       async (argv) => {
-        const providers = await loadRpcProviders(argv)
+        const providers = new Providers(argv)
         return sendMessage(providers, argv)
           .catch((err) => console.error(err))
-          .finally(() => Object.values(providers).forEach((provider) => provider.destroy()))
+          .finally(() => providers.destroy())
       },
     )
     .demandCommand()

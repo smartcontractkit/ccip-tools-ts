@@ -5,7 +5,6 @@ import {
   hexlify,
   isHexString,
   parseUnits,
-  type Provider,
   toUtf8Bytes,
   ZeroAddress,
   zeroPadValue,
@@ -22,7 +21,6 @@ import {
   chainIdFromName,
   chainIdFromSelector,
   chainNameFromId,
-  chainNameFromSelector,
   chainSelectorFromId,
   encodeExtraArgs,
   fetchAllMessagesInBatch,
@@ -37,11 +35,11 @@ import {
   lazyCached,
 } from './lib/index.js'
 import {
-  getTxInAnyProvider,
   getWallet,
   prettyCommit,
   prettyReceipt,
   prettyRequest,
+  type Providers,
   selectRequest,
   TokenABI,
   withDateTimestamp,
@@ -56,12 +54,8 @@ export enum Format {
   json = 'json',
 }
 
-export async function showRequests(
-  providers: Record<number, Provider>,
-  txHash: string,
-  format: Format,
-) {
-  const tx = await getTxInAnyProvider(providers, txHash)
+export async function showRequests(providers: Providers, txHash: string, format: Format) {
+  const tx = await providers.getTxReceipt(txHash)
   const source = tx.provider
 
   const requests = await withLanes(source, await fetchCCIPMessagesInTx(tx))
@@ -79,12 +73,7 @@ export async function showRequests(
       break
   }
 
-  const dest = providers[chainIdFromSelector(request.lane.destChainSelector)]
-  if (!dest) {
-    throw new Error(
-      `Could not find an RPC for dest network: "${chainNameFromSelector(request.lane.destChainSelector)}" [${chainIdFromSelector(request.lane.destChainSelector)}]`,
-    )
-  }
+  const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
 
   const commit = await fetchCommitReport(dest, request)
   switch (format) {
@@ -127,7 +116,7 @@ export async function showRequests(
 }
 
 export async function manualExec(
-  providers: Record<number, Provider>,
+  providers: Providers,
   txHash: string,
   argv: {
     'gas-limit': number
@@ -137,7 +126,7 @@ export async function manualExec(
     wallet?: string
   },
 ) {
-  const tx = await getTxInAnyProvider(providers, txHash)
+  const tx = await providers.getTxReceipt(txHash)
   const source = tx.provider
 
   let request
@@ -163,12 +152,7 @@ export async function manualExec(
       break
   }
 
-  const dest = providers[chainIdFromSelector(request.lane.destChainSelector)]
-  if (!dest) {
-    throw new Error(
-      `Could not find an RPC for dest network: "${chainNameFromSelector(request.lane.destChainSelector)}" [${chainIdFromSelector(request.lane.destChainSelector)}]`,
-    )
-  }
+  const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
 
   const commit = await fetchCommitReport(dest, request)
   const requestsInBatch = await fetchAllMessagesInBatch(source, request.log, commit.report.interval)
@@ -214,7 +198,7 @@ export async function manualExec(
 }
 
 export async function manualExecSenderQueue(
-  providers: Record<number, Provider>,
+  providers: Providers,
   txHash: string,
   argv: {
     'gas-limit': number
@@ -225,7 +209,7 @@ export async function manualExecSenderQueue(
     wallet?: string
   },
 ) {
-  const tx = await getTxInAnyProvider(providers, txHash)
+  const tx = await providers.getTxReceipt(txHash)
   const source = tx.provider
 
   let firstRequest
@@ -250,12 +234,7 @@ export async function manualExecSenderQueue(
       break
   }
 
-  const dest = providers[chainIdFromSelector(firstRequest.lane.destChainSelector)]
-  if (!dest) {
-    throw new Error(
-      `Could not find an RPC for dest network: "${chainNameFromSelector(firstRequest.lane.destChainSelector)}" [${chainIdFromSelector(firstRequest.lane.destChainSelector)}]`,
-    )
-  }
+  const dest = await providers.forChainId(chainIdFromSelector(firstRequest.lane.destChainSelector))
 
   const requests: Omit<CCIPRequest, 'timestamp' | 'tx'>[] = []
   for await (const request of fetchRequestsForSender(source, firstRequest)) {
@@ -358,7 +337,7 @@ export async function manualExecSenderQueue(
 type AnyMessage = Parameters<TypedContract<typeof Router>['ccipSend']>[1]
 
 export async function sendMessage(
-  providers: Record<number, Provider>,
+  providers: Providers,
   argv: {
     source: string
     dest: string
@@ -374,8 +353,7 @@ export async function sendMessage(
   },
 ) {
   const sourceChainId = isNaN(+argv.source) ? chainIdFromName(argv.source) : +argv.source
-  const source = providers[sourceChainId]
-  if (!source) throw new Error(`No provider for source chain: "${chainNameFromId(sourceChainId)}"`)
+  const source = await providers.forChainId(sourceChainId)
   const wallet = (await getWallet(argv)).connect(source)
 
   const destChainId = isNaN(+argv.dest) ? chainIdFromName(argv.dest) : +argv.dest
