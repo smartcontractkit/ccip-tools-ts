@@ -56,7 +56,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message = 'Timeout'): P
  **/
 export class Providers {
   #endpoints: Promise<Set<string>>
-  #providersList?: Promise<Provider[]>
+  #providersList?: Promise<(readonly [provider: Provider, endpoint: string])[]>
   #providersPromises: Record<number, Promise<Provider>> = {}
   #promisesCallbacks: Record<
     number,
@@ -103,17 +103,17 @@ export class Providers {
   /**
    * Trigger fetching providers from RPC endpoints, with their networks in parallel
    **/
-  #loadProviders(): Promise<Provider[]> {
+  #loadProviders(): Promise<(readonly [provider: Provider, endpoint: string])[]> {
     if (this.#providersList) return this.#providersList
 
     const readyPromises: Promise<unknown>[] = []
     return (this.#providersList = this.#endpoints
       .then((rpcs) =>
-        [...rpcs].map((url) => {
+        [...rpcs].map((endpoint) => {
           let provider: Provider
           let providerReady: Promise<Provider>
-          if (url.startsWith('ws')) {
-            const provider_ = new WebSocketProvider(url)
+          if (endpoint.startsWith('ws')) {
+            const provider_ = new WebSocketProvider(endpoint)
             providerReady = new Promise((resolve, reject) => {
               provider_.websocket.onerror = reject
               provider_
@@ -122,12 +122,12 @@ export class Providers {
                 .catch(reject)
             })
             provider = provider_
-          } else if (url.startsWith('http')) {
-            provider = new JsonRpcProvider(url)
+          } else if (endpoint.startsWith('http')) {
+            provider = new JsonRpcProvider(endpoint)
             providerReady = Promise.resolve(provider)
           } else {
             throw new Error(
-              `Unknown JSON RPC protocol in endpoint (should be wss?:// or https?://): ${url}`,
+              `Unknown JSON RPC protocol in endpoint (should be wss?:// or https?://): ${endpoint}`,
             )
           }
 
@@ -154,7 +154,7 @@ export class Providers {
                 provider.destroy()
               }),
           )
-          return provider
+          return [provider, endpoint] as const
         }),
       )
       .finally(() => {
@@ -202,9 +202,13 @@ export class Providers {
   async getTxReceipt(txHash: string): Promise<TransactionReceipt> {
     return this.#loadProviders().then((providers) =>
       Promise.any(
-        providers.map((provider) =>
-          withTimeout(provider.getTransactionReceipt(txHash), 30e3).then((receipt) => {
-            if (!receipt) throw new Error(`Transaction not found: ${txHash}`)
+        providers.map(([provider, endpoint]) =>
+          withTimeout(
+            provider.getTransactionReceipt(txHash),
+            30e3,
+            `Timeout fetching tx=${txHash} from "${endpoint}"`,
+          ).then((receipt) => {
+            if (!receipt) throw new Error(`Transaction=${txHash} not found in "${endpoint}"`)
             return receipt
           }),
         ),
