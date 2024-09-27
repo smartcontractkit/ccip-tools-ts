@@ -66,6 +66,10 @@ export class Providers {
   destroyed: Promise<unknown> = new Promise((resolve) => {
     this.#destroy = resolve
   })
+  #complete!: (v: true) => void
+  completed: true | Promise<true> = new Promise((resolve) => {
+    this.#complete = resolve
+  })
 
   constructor(argv: { rpcs: string[] } | { 'rpcs-file': string }) {
     if ('rpcs' in argv) {
@@ -132,7 +136,7 @@ export class Providers {
             // wait for connection and check network in background
             withTimeout(
               providerReady.then((provider) => getProviderNetwork(provider)),
-              15e3,
+              30e3,
             )
               .then(({ chainId }) => {
                 if (chainId in this.#promisesCallbacks) {
@@ -164,6 +168,8 @@ export class Providers {
             )
             delete this.#promisesCallbacks[+chainId]
           }
+          this.#complete(true)
+          this.completed = true
         })
       }))
   }
@@ -175,12 +181,14 @@ export class Providers {
    **/
   async forChainId(chainId: number): Promise<Provider> {
     if (chainId in this.#providersPromises) return this.#providersPromises[chainId]
-    if (!(chainId in this.#promisesCallbacks)) {
-      this.#providersPromises[chainId] = new Promise((resolve, reject) => {
-        this.#promisesCallbacks[chainId] = [resolve, reject]
-      })
-      void this.#loadProviders()
-    }
+    if (this.completed === true)
+      throw new Error(
+        `Could not find provider for chain "${chainNameFromId(chainId)}" [${chainId}]`,
+      )
+    this.#providersPromises[chainId] = new Promise((resolve, reject) => {
+      this.#promisesCallbacks[chainId] = [resolve, reject]
+    })
+    void this.#loadProviders()
     return this.#providersPromises[chainId]
   }
 
@@ -195,7 +203,7 @@ export class Providers {
     return this.#loadProviders().then((providers) =>
       Promise.any(
         providers.map((provider) =>
-          withTimeout(provider.getTransactionReceipt(txHash), 15e3).then((receipt) => {
+          withTimeout(provider.getTransactionReceipt(txHash), 30e3).then((receipt) => {
             if (!receipt) throw new Error(`Transaction not found: ${txHash}`)
             return receipt
           }),
