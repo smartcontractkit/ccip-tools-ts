@@ -33,7 +33,10 @@ export async function fetchCommitReport(
   hints?: { startBlock?: number; commitStore?: string },
 ): Promise<CCIPCommit> {
   const commitStoreABI = CCIP_ABIs[CCIPContractTypeCommitStore][version]
-  const commitStoreInterface = new Interface(commitStoreABI)
+  const commitStoreInterface = lazyCached(
+    `Interface ${CCIPContractTypeCommitStore} ${version}`,
+    () => new Interface(commitStoreABI),
+  )
   const topic0 = commitStoreInterface.getEvent('ReportAccepted')!.topicHash
 
   for (const blockRange of blockRangeGenerator({

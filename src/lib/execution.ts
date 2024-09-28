@@ -84,8 +84,7 @@ export async function fetchOffRamp<V extends CCIPVersion>(
   hints?: { fromBlock?: number },
 ): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]>> {
   const dest = runner.provider!
-  const offRampABI = CCIP_ABIs[CCIPContractTypeOffRamp][ccipVersion]
-  const offRampInterface = new Interface(offRampABI)
+  const offRampInterface = getOffRampInterface(ccipVersion)
   const topic0 = offRampInterface.getEvent('ExecutionStateChanged')!.topicHash
 
   const seen = new Set<string>()

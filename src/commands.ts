@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-base-to-string */
 import {
   AbiCoder,
-  BytesLike,
+  type BytesLike,
   Contract,
   dataSlice,
   hexlify,
