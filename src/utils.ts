@@ -6,9 +6,11 @@ import {
   type Addressable,
   BaseWallet,
   Contract,
+  dataSlice,
   formatUnits,
   hexlify,
   type Provider,
+  type Result,
   SigningKey,
   Wallet,
 } from 'ethers'
@@ -24,6 +26,7 @@ import {
   chainNameFromId,
   chainNameFromSelector,
   getErrorData,
+  getFunctionBySelector,
   getOnRampStaticConfig,
   type Lane,
   lazyCached,
@@ -264,26 +267,34 @@ export function prettyReceipt(receipt: CCIPExecution, request: { timestamp: numb
   })
 }
 
-export const ErrorParsed = Symbol('ErrorParsed')
-export async function logParsedError<T>(
-  promise: Promise<T>,
-  callName: string,
-): Promise<T | typeof ErrorParsed> {
-  try {
-    return await promise
-  } catch (err) {
-    const errorData = getErrorData(err)
-    if (errorData) {
-      const parsed = parseErrorData(errorData)
-      if (parsed) {
-        console.error(
-          `🛑 Failed to call ${callName}, Error =`,
-          parsed.signature,
-          parsed.args.toObject(),
-        )
-        return ErrorParsed
-      }
-    }
-    throw err
+export function logParsedError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const shortMessage = (err as { shortMessage: string }).shortMessage
+  if (!shortMessage) return false
+
+  const transaction = (err as { transaction: { to: string; data: string } }).transaction
+  const invocation_ = (err as { invocation: { method: string; args: Result } | null }).invocation
+  let method, invocation
+  if (invocation_) {
+    const { method: method_, args, ...rest } = invocation_
+    method = method_
+    invocation = { ...rest, args: args.toObject(true) }
+  } else {
+    method = dataSlice(transaction.data, 0, 4)
+    const func = getFunctionBySelector(method)
+    if (func) method = func.name
   }
+  let reason: unknown[] = []
+  const errorData = getErrorData(err)
+  if (errorData) {
+    const parsed = parseErrorData(errorData)
+    if (parsed) {
+      reason = ['\nreason =', parsed.signature, parsed.args.toObject()]
+    }
+  }
+  console.error(`🛑 Failed to call "${method}", Error =`, shortMessage, ...reason, '\ncall =', {
+    ...transaction,
+    ...invocation,
+  })
+  return true
 }

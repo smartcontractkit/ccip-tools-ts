@@ -1,4 +1,4 @@
-import { type BytesLike, Interface, type InterfaceAbi, isBytesLike } from 'ethers'
+import { type BytesLike, FunctionFragment, Interface, type InterfaceAbi, isBytesLike } from 'ethers'
 
 import TokenABI from '../abi/BurnMintERC677Token.js'
 import BurnMintTokenPool_1_5 from '../abi/BurnMintTokenPool_1_5.js'
@@ -36,6 +36,22 @@ export function parseErrorData(data: BytesLike) {
   for (const iface of ifaces) {
     try {
       const parsed = iface.parseError(data)
+      if (parsed) return parsed
+    } catch (_) {
+      // test all abis
+    }
+  }
+}
+
+/**
+ * Get function fragment by selector from our supported ABIs
+ * @param selector - function selector
+ * @returns FunctionFragment if found
+ **/
+export function getFunctionBySelector(selector: string): FunctionFragment | undefined {
+  for (const iface of ifaces) {
+    try {
+      const parsed = iface.getFunction(selector)
       if (parsed) return parsed
     } catch (_) {
       // test all abis

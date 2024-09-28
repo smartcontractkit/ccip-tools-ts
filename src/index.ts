@@ -7,6 +7,7 @@ import { hideBin } from 'yargs/helpers'
 
 import { Format, manualExec, manualExecSenderQueue, sendMessage, showRequests } from './commands.js'
 import { Providers } from './providers.js'
+import { logParsedError } from './utils.js'
 
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 
@@ -46,7 +47,10 @@ async function main() {
       async (argv) => {
         const providers = new Providers(argv)
         return showRequests(providers, argv.tx_hash, argv.format)
-          .catch((err) => console.error(err))
+          .catch((err) => {
+            process.exitCode = 1
+            if (!logParsedError(err)) console.error(err)
+          })
           .finally(() => providers.destroy())
       },
     )
@@ -85,7 +89,10 @@ async function main() {
       async (argv) => {
         const providers = new Providers(argv)
         return manualExec(providers, argv.tx_hash, argv)
-          .catch((err) => console.error(err))
+          .catch((err) => {
+            process.exitCode = 1
+            if (!logParsedError(err)) console.error(err)
+          })
           .finally(() => providers.destroy())
       },
     )
@@ -128,7 +135,10 @@ async function main() {
       async (argv) => {
         const providers = new Providers(argv)
         return manualExecSenderQueue(providers, argv.tx_hash, argv)
-          .catch((err) => console.error(err))
+          .catch((err) => {
+            process.exitCode = 1
+            if (!logParsedError(err)) console.error(err)
+          })
           .finally(() => providers.destroy())
       },
     )
@@ -202,7 +212,10 @@ async function main() {
       async (argv) => {
         const providers = new Providers(argv)
         return sendMessage(providers, argv)
-          .catch((err) => console.error(err))
+          .catch((err) => {
+            process.exitCode = 1
+            if (!logParsedError(err)) console.error(err)
+          })
           .finally(() => providers.destroy())
       },
     )
