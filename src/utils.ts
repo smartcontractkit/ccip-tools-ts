@@ -281,13 +281,13 @@ export function logParsedError(err: unknown): boolean {
     invocation = { ...rest, args: args.toObject(true) }
   } else {
     method = dataSlice(transaction.data, 0, 4)
-    const func = getFunctionBySelector(method)
+    const func = getFunctionBySelector(method)?.[0]
     if (func) method = func.name
   }
   let reason: unknown[] = []
   const errorData = getErrorData(err)
   if (errorData) {
-    const parsed = parseErrorData(errorData)
+    const parsed = parseErrorData(errorData)?.[0]
     if (parsed) {
       reason = ['\nreason =', parsed.signature, parsed.args.toObject()]
     }

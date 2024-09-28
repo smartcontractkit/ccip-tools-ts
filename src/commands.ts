@@ -1,7 +1,10 @@
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/no-base-to-string */
 import {
+  AbiCoder,
+  BytesLike,
   Contract,
+  dataSlice,
   hexlify,
   isHexString,
   parseUnits,
@@ -31,8 +34,10 @@ import {
   fetchOffchainTokenData,
   fetchOffRamp,
   fetchRequestsForSender,
+  getFunctionBySelector,
   getSomeBlockNumberBefore,
   lazyCached,
+  parseErrorData,
 } from './lib/index.js'
 import type { Providers } from './providers.js'
 import {
@@ -452,4 +457,26 @@ export async function sendMessage(
       console.info(JSON.stringify(request, bigIntReplacer, 2))
       break
   }
+}
+
+const defaultAbiCoder = AbiCoder.defaultAbiCoder()
+export function parseData(data: BytesLike) {
+  const func = getFunctionBySelector(dataSlice(data, 0, 4))
+  if (func) {
+    const [fragment, contract] = func
+    const args = defaultAbiCoder.decode(fragment.inputs, dataSlice(data, 4))
+    console.info('Function:', `${contract}.${fragment.format()}`)
+    console.info('Args:', args.toObject(true))
+    return
+  }
+
+  const error = parseErrorData(data)
+  if (error) {
+    const [parsed, contract] = error
+    console.info('Error:', `${contract}.${parsed.signature}`)
+    console.info('Args:', parsed.args.toObject(true))
+    return
+  }
+
+  throw new Error('Unknown data')
 }

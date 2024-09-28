@@ -116,3 +116,14 @@ smallest unit for USDC, which is 6 decimals).
 
 `--allow-out-of-order-exec` is only available on v1.5+ lanes, and opt-out of *sender* `nonce` order
 enforcement. It's useful for destinations where execution can't be guaranteed (e.g. zkOverflow).
+
+### parseData
+
+```sh
+$cli parseData 0xbf16aab6000000000000000000000000779877a7b0d9e8603169ddbd7836e478b4624789
+
+Error: EVM2EVMOnRamp_1.2.0.UnsupportedToken(address)
+Args: { token: '0x779877A7B0D9E8603169DdbD7836e478b4624789' }
+```
+
+Attempts to parse hex-encoded function call data, error and revert reasons, for our known contracts.

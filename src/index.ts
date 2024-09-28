@@ -5,7 +5,7 @@ import util from 'util'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
-import { Format, manualExec, manualExecSenderQueue, sendMessage, showRequests } from './commands.js'
+import { Format, manualExec, manualExecSenderQueue, parseData, sendMessage, showRequests } from './commands.js'
 import { Providers } from './providers.js'
 import { logParsedError } from './utils.js'
 
@@ -217,6 +217,26 @@ async function main() {
             if (!logParsedError(err)) console.error(err)
           })
           .finally(() => providers.destroy())
+      },
+    )
+    .command(
+      'parseData <data>',
+      'try to parse and print errors, revert reasons or function call data',
+      (yargs) =>
+        yargs
+          .positional('data', {
+            type: 'string',
+            demandOption: true,
+            describe: 'router contract address on source',
+          })
+          .check(({ data }) => isHexString(data)),
+      (argv) => {
+        try {
+          parseData(argv.data)
+        } catch (err) {
+          process.exitCode = 1
+          console.error(err)
+        }
       },
     )
     .demandCommand()

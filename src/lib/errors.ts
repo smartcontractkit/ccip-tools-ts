@@ -1,4 +1,5 @@
-import { type BytesLike, FunctionFragment, Interface, type InterfaceAbi, isBytesLike } from 'ethers'
+import type { ErrorDescription, FunctionFragment } from 'ethers'
+import { type BytesLike, Interface, type InterfaceAbi, isBytesLike } from 'ethers'
 
 import TokenABI from '../abi/BurnMintERC677Token.js'
 import BurnMintTokenPool_1_5 from '../abi/BurnMintTokenPool_1_5.js'
@@ -7,36 +8,42 @@ import Router from '../abi/Router.js'
 import { CCIP_ABIs, CCIPVersion_1_5 } from './types.js'
 import { lazyCached } from './utils.js'
 
-const ifaces = [
-  lazyCached('Interface Router', () => new Interface(Router)),
-  lazyCached(`Interface Token`, () => new Interface(TokenABI)),
-  lazyCached(
+const ifaces: Record<string, Interface> = {
+  Router: lazyCached('Interface Router', () => new Interface(Router)),
+  Token: lazyCached(`Interface Token`, () => new Interface(TokenABI)),
+  'BurnMintTokenPool_1.5.0': lazyCached(
     `Interface BurnMintTokenPool ${CCIPVersion_1_5}`,
     () => new Interface(BurnMintTokenPool_1_5),
   ),
-  lazyCached(
+  'LockReleaseTokenPool_1.5.0': lazyCached(
     `Interface LockReleaseTokenPool ${CCIPVersion_1_5}`,
     () => new Interface(LockReleaseTokenPool_1_5),
   ),
-  ...Object.entries(CCIP_ABIs)
-    .map(([type_, obj]) =>
-      Object.entries(obj).map(([version, abi]) =>
-        lazyCached(`Interface ${type_} ${version}`, () => new Interface(abi as InterfaceAbi)),
-      ),
-    )
-    .flat(1),
-]
+  ...Object.fromEntries(
+    Object.entries(CCIP_ABIs)
+      .map(([type_, obj]) =>
+        Object.entries(obj).map(
+          ([version, abi]) =>
+            [
+              `${type_}_${version}`,
+              lazyCached(`Interface ${type_} ${version}`, () => new Interface(abi as InterfaceAbi)),
+            ] as const,
+        ),
+      )
+      .flat(1),
+  ),
+}
 
 /**
  * Parse error data from revert call data, if possible, from our supported ABIs
  * @param data - error data from a revert call
  * @returns ErrorDescription if found
  **/
-export function parseErrorData(data: BytesLike) {
-  for (const iface of ifaces) {
+export function parseErrorData(data: BytesLike): [ErrorDescription, string] | undefined {
+  for (const [name, iface] of Object.entries(ifaces)) {
     try {
       const parsed = iface.parseError(data)
-      if (parsed) return parsed
+      if (parsed) return [parsed, name]
     } catch (_) {
       // test all abis
     }
@@ -48,11 +55,11 @@ export function parseErrorData(data: BytesLike) {
  * @param selector - function selector
  * @returns FunctionFragment if found
  **/
-export function getFunctionBySelector(selector: string): FunctionFragment | undefined {
-  for (const iface of ifaces) {
+export function getFunctionBySelector(selector: string): [FunctionFragment, string] | undefined {
+  for (const [name, iface] of Object.entries(ifaces)) {
     try {
       const parsed = iface.getFunction(selector)
-      if (parsed) return parsed
+      if (parsed) return [parsed, name]
     } catch (_) {
       // test all abis
     }
