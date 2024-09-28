@@ -6,7 +6,7 @@ import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
 import { Format, manualExec, manualExecSenderQueue, sendMessage, showRequests } from './commands.js'
-import { Providers } from './utils.js'
+import { Providers } from './providers.js'
 
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 

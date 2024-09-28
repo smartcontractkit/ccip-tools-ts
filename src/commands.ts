@@ -10,9 +10,9 @@ import {
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
-import util from 'util'
 
-import Router from './abi/Router.js'
+import TokenABI from './abi/BurnMintERC677Token.js'
+import RouterABI from './abi/Router.js'
 import {
   bigIntReplacer,
   calculateManualExecProof,
@@ -34,19 +34,18 @@ import {
   getSomeBlockNumberBefore,
   lazyCached,
 } from './lib/index.js'
+import type { Providers } from './providers.js'
 import {
+  ErrorParsed,
   getWallet,
+  logParsedError,
   prettyCommit,
   prettyReceipt,
   prettyRequest,
-  type Providers,
   selectRequest,
-  TokenABI,
   withDateTimestamp,
   withLanes,
 } from './utils.js'
-
-util.inspect.defaultOptions.depth = 4 // print down to tokenAmounts in requests
 
 export enum Format {
   log = 'log',
@@ -175,7 +174,10 @@ export async function manualExec(
     const offRampContract = await fetchOffRamp(wallet, request.lane, request.version, {
       fromBlock: commit.log.blockNumber,
     })
-    manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
+    manualExecTx = await logParsedError(
+      offRampContract.manuallyExecute(execReport, gasOverrides),
+      'OffRamp.manuallyExecute',
+    )
   } else {
     const gasOverrides = manualExecReport.messages.map((message) => ({
       receiverExecutionGasLimit: BigInt(argv['gas-limit']),
@@ -184,8 +186,12 @@ export async function manualExec(
     const offRampContract = await fetchOffRamp(wallet, request.lane, request.version, {
       fromBlock: commit.log.blockNumber,
     })
-    manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
+    manualExecTx = await logParsedError(
+      offRampContract.manuallyExecute(execReport, gasOverrides),
+      'OffRamp.manuallyExecute',
+    )
   }
+  if (manualExecTx === ErrorParsed) return
 
   console.log(
     '🚀 manualExec tx =',
@@ -313,14 +319,21 @@ export async function manualExecSenderQueue(
     let manualExecTx
     if (firstRequest.version === CCIPVersion_1_2) {
       const gasOverrides = manualExecReport.messages.map(() => BigInt(argv['gas-limit']))
-      manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
+      manualExecTx = await logParsedError(
+        offRampContract.manuallyExecute(execReport, gasOverrides),
+        'OffRamp.manuallyExecute',
+      )
     } else {
       const gasOverrides = manualExecReport.messages.map((message) => ({
         receiverExecutionGasLimit: BigInt(argv['gas-limit']),
         tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv['tokens-gas-limit'])),
       }))
-      manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
+      manualExecTx = await logParsedError(
+        offRampContract.manuallyExecute(execReport, gasOverrides),
+        'OffRamp.manuallyExecute',
+      )
     }
+    if (manualExecTx === ErrorParsed) return
 
     console.log(
       `[${i + 1} of ${batches.length}, ${batch.length} msgs]`,
@@ -334,7 +347,7 @@ export async function manualExecSenderQueue(
   }
 }
 
-type AnyMessage = Parameters<TypedContract<typeof Router>['ccipSend']>[1]
+type AnyMessage = Parameters<TypedContract<typeof RouterABI>['ccipSend']>[1]
 
 export async function sendMessage(
   providers: Providers,
@@ -393,12 +406,13 @@ export async function sendMessage(
     tokenAmounts,
   }
 
-  const router = new Contract(argv.router, Router, wallet) as unknown as TypedContract<
-    typeof Router
+  const router = new Contract(argv.router, RouterABI, wallet) as unknown as TypedContract<
+    typeof RouterABI
   >
 
   // calculate fee
-  const fee = await router.getFee(destSelector, message)
+  const fee = await logParsedError(router.getFee(destSelector, message), 'Router.getFee')
+  if (fee === ErrorParsed) return
 
   // make sure to approve once per token, for the total amount (including fee, if needed)
   const amountsToApprove = tokenAmounts.reduce(
@@ -426,11 +440,15 @@ export async function sendMessage(
     }),
   )
 
-  const tx = await router.ccipSend(destSelector, message, {
-    nonce: nonce++,
-    // if native fee, include it in value; otherwise, it's transferedFrom fee token
-    ...(!argv['fee-token'] ? { value: fee } : {}),
-  })
+  const tx = await logParsedError(
+    router.ccipSend(destSelector, message, {
+      nonce: nonce++,
+      // if native fee, include it in value; otherwise, it's transferedFrom fee token
+      ...(!argv['fee-token'] ? { value: fee } : {}),
+    }),
+    'Router.ccipSend',
+  )
+  if (tx === ErrorParsed) return
   console.log(
     'Sending message to',
     receiver,
