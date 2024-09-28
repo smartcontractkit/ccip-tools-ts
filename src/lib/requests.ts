@@ -24,10 +24,13 @@ async function getOnRampInterface(
 ): Promise<readonly [Interface, CCIPVersion]> {
   const [type_, version] = await getTypeAndVersion(source, onRamp)
   if (type_ !== CCIPContractTypeOnRamp) throw new Error(`Not an OnRamp: ${onRamp}`)
-  return lazyCached(
-    `OnRampInterface ${version}`,
-    () => [new Interface(CCIP_ABIs[CCIPContractTypeOnRamp][version]), version] as const,
-  )
+  return [
+    lazyCached(
+      `Interface ${CCIPContractTypeOnRamp} ${version}`,
+      () => new Interface(CCIP_ABIs[CCIPContractTypeOnRamp][version]),
+    ),
+    version,
+  ] as const
 }
 
 function resultsToMessage(result: Result): CCIPMessage {
@@ -57,8 +60,12 @@ export async function getOnRampStaticConfig(source: Provider, address: string) {
 }
 
 const ccipRequestsTopicHashes = new Set(
-  Object.values(CCIP_ABIs[CCIPContractTypeOnRamp]).map(
-    (abi) => new Interface(abi).getEvent('CCIPSendRequested')!.topicHash,
+  Object.entries(CCIP_ABIs[CCIPContractTypeOnRamp]).map(
+    ([version, abi]) =>
+      lazyCached(
+        `Interface ${CCIPContractTypeOnRamp} ${version}`,
+        () => new Interface(abi),
+      ).getEvent('CCIPSendRequested')!.topicHash,
   ),
 )
 

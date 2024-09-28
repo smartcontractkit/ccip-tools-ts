@@ -160,7 +160,7 @@ async function getOffRampStaticConfig(dest: ContractRunner, address: string) {
 
 function getOffRampInterface(version: CCIPVersion): Interface {
   return lazyCached(
-    `OffRampInterface ${version}`,
+    `Interface ${CCIPContractTypeOffRamp} ${version}`,
     () => new Interface(CCIP_ABIs[CCIPContractTypeOffRamp][version]),
   )
 }
