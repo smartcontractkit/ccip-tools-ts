@@ -56,14 +56,26 @@ export enum Format {
   json = 'json',
 }
 
-export async function showRequests(providers: Providers, txHash: string, format: Format) {
+export async function showRequests(
+  providers: Providers,
+  txHash: string,
+  argv: { logIndex?: number; format: Format },
+) {
   const tx = await providers.getTxReceipt(txHash)
   const source = tx.provider
 
-  const requests = await withLanes(source, await fetchCCIPMessagesInTx(tx))
-  const request = await selectRequest(requests, 'to know more')
+  let request
+  if (argv.logIndex != null) {
+    const request_ = await fetchCCIPMessageInLog(tx, argv.logIndex)
+    request = (await withLanes(source, [request_]))[0]
+  } else {
+    request = await selectRequest(
+      await withLanes(source, await fetchCCIPMessagesInTx(tx)),
+      'to know more',
+    )
+  }
 
-  switch (format) {
+  switch (argv.format) {
     case Format.log:
       console.log(`message ${request.log.index} =`, withDateTimestamp(request))
       break
@@ -78,7 +90,7 @@ export async function showRequests(providers: Providers, txHash: string, format:
   const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
 
   const commit = await fetchCommitReport(dest, request)
-  switch (format) {
+  switch (argv.format) {
     case Format.log:
       console.log(
         'commit =',
@@ -100,7 +112,7 @@ export async function showRequests(providers: Providers, txHash: string, format:
   for await (const receipt of fetchExecutionReceipts(dest, [request], {
     fromBlock: commit.log.blockNumber,
   })) {
-    switch (format) {
+    switch (argv.format) {
       case Format.log:
         console.log('receipt =', withDateTimestamp(receipt))
         break
@@ -121,9 +133,9 @@ export async function manualExec(
   providers: Providers,
   txHash: string,
   argv: {
-    'gas-limit': number
-    'tokens-gas-limit': number
-    'log-index'?: number
+    gasLimit: number
+    tokensGasLimit: number
+    logIndex?: number
     format: Format
     wallet?: string
   },
@@ -132,8 +144,8 @@ export async function manualExec(
   const source = tx.provider
 
   let request
-  if (argv['log-index'] != null) {
-    const request_ = await fetchCCIPMessageInLog(tx, argv['log-index'])
+  if (argv.logIndex != null) {
+    const request_ = await fetchCCIPMessageInLog(tx, argv.logIndex)
     request = (await withLanes(source, [request_]))[0]
   } else {
     request = await selectRequest(
@@ -173,15 +185,15 @@ export async function manualExec(
 
   let manualExecTx
   if (request.version === CCIPVersion_1_2) {
-    const gasOverrides = manualExecReport.messages.map(() => BigInt(argv['gas-limit']))
+    const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit))
     const offRampContract = await fetchOffRamp(wallet, request.lane, request.version, {
       fromBlock: commit.log.blockNumber,
     })
     manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
   } else {
     const gasOverrides = manualExecReport.messages.map((message) => ({
-      receiverExecutionGasLimit: BigInt(argv['gas-limit']),
-      tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv['tokens-gas-limit'])),
+      receiverExecutionGasLimit: BigInt(argv.gasLimit),
+      tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv.tokensGasLimit)),
     }))
     const offRampContract = await fetchOffRamp(wallet, request.lane, request.version, {
       fromBlock: commit.log.blockNumber,
@@ -203,10 +215,10 @@ export async function manualExecSenderQueue(
   providers: Providers,
   txHash: string,
   argv: {
-    'gas-limit': number
-    'tokens-gas-limit': number
-    'log-index'?: number
-    'exec-failed'?: boolean
+    gasLimit: number
+    tokensGasLimit: number
+    logIndex?: number
+    execFailed?: boolean
     format: Format
     wallet?: string
   },
@@ -215,8 +227,8 @@ export async function manualExecSenderQueue(
   const source = tx.provider
 
   let firstRequest
-  if (argv['log-index'] != null) {
-    const firstRequest_ = await fetchCCIPMessageInLog(tx, argv['log-index'])
+  if (argv.logIndex != null) {
+    const firstRequest_ = await fetchCCIPMessageInLog(tx, argv.logIndex)
     firstRequest = (await withLanes(source, [firstRequest_]))[0]
   } else {
     firstRequest = await selectRequest(
@@ -258,7 +270,7 @@ export async function manualExecSenderQueue(
   }
 
   const requestsPending = requests.filter(({ message }) =>
-    argv['exec-failed']
+    argv.execFailed
       ? lastExecSuccess.get(message.messageId) !== true
       : !lastExecSuccess.has(message.messageId),
   )
@@ -314,12 +326,12 @@ export async function manualExecSenderQueue(
 
     let manualExecTx
     if (firstRequest.version === CCIPVersion_1_2) {
-      const gasOverrides = manualExecReport.messages.map(() => BigInt(argv['gas-limit']))
+      const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit))
       manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
     } else {
       const gasOverrides = manualExecReport.messages.map((message) => ({
-        receiverExecutionGasLimit: BigInt(argv['gas-limit']),
-        tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv['tokens-gas-limit'])),
+        receiverExecutionGasLimit: BigInt(argv.gasLimit),
+        tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv.tokensGasLimit)),
       }))
       manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
     }

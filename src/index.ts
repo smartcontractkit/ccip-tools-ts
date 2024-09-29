@@ -50,10 +50,16 @@ async function main() {
             demandOption: true,
             describe: 'transaction hash of the request (source) message',
           })
+          .options({
+            'log-index': {
+              type: 'number',
+              describe: 'Log index of message to execute (if more than one in request tx)',
+            },
+          })
           .check(({ tx_hash }) => isHexString(tx_hash, 32)),
       async (argv) => {
         const providers = new Providers(argv)
-        return showRequests(providers, argv.tx_hash, argv.format)
+        return showRequests(providers, argv.tx_hash, argv)
           .catch((err) => {
             process.exitCode = 1
             if (!logParsedError(err)) console.error(err)
@@ -63,7 +69,7 @@ async function main() {
     )
     .command(
       'manualExec <tx_hash>',
-      'execute manually a single message',
+      'execute manually pending or failed messages',
       (yargs) =>
         yargs
           .positional('tx_hash', {
@@ -91,57 +97,25 @@ async function main() {
               describe:
                 'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar',
             },
-          })
-          .check(({ tx_hash }) => isHexString(tx_hash, 32)),
-      async (argv) => {
-        const providers = new Providers(argv)
-        return manualExec(providers, argv.tx_hash, argv)
-          .catch((err) => {
-            process.exitCode = 1
-            if (!logParsedError(err)) console.error(err)
-          })
-          .finally(() => providers.destroy())
-      },
-    )
-    .command(
-      'manualExecSenderQueue <tx_hash>',
-      'execute manually all messages since the provided request transaction',
-      (yargs) =>
-        yargs
-          .positional('tx_hash', {
-            type: 'string',
-            demandOption: true,
-            describe: 'transaction hash of the first request to start queue',
-          })
-          .options({
-            'log-index': {
-              type: 'number',
-              describe: 'Log index of entry message message (if more than one in request tx)',
-            },
-            'gas-limit': {
-              type: 'number',
-              describe: "Override gas limit for receivers callback (0 keeps request's)",
-              default: 0,
-            },
-            'tokens-gas-limit': {
-              type: 'number',
-              describe: 'Override gas limit for tokens releaseOrMint calls (0 keeps original)',
-              default: 0,
+            'sender-queue': {
+              type: 'boolean',
+              describe: 'Execute all messages in sender queue, starting with the provided tx',
+              default: false,
             },
             'exec-failed': {
               type: 'boolean',
               describe: 'Whether to re-execute failed messages (instead of just non-executed)',
-            },
-            wallet: {
-              type: 'string',
-              describe:
-                'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar',
+              implies: 'sender-queue',
             },
           })
           .check(({ tx_hash }) => isHexString(tx_hash, 32)),
       async (argv) => {
         const providers = new Providers(argv)
-        return manualExecSenderQueue(providers, argv.tx_hash, argv)
+        return (
+          argv.senderQueue
+            ? manualExecSenderQueue(providers, argv.tx_hash, argv)
+            : manualExec(providers, argv.tx_hash, argv)
+        )
           .catch((err) => {
             process.exitCode = 1
             if (!logParsedError(err)) console.error(err)
@@ -247,6 +221,7 @@ async function main() {
       },
     )
     .demandCommand()
+    .strict()
     .help()
     .alias({ h: 'help', V: 'version' })
     .parse()

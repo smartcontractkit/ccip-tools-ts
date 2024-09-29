@@ -62,28 +62,18 @@ $cli manualExec <source_transaction_hash> [--gas-limit num] [--tokens-gas-limit 
 ```
 
 Try to manually execute the message in source transaction. If more than one found, user is prompted
-same as with `show` command above. `--gas-limit` allows to override the exec limit for this message
-(in the OffRamp, not transaction, which is always estimated). `gas-limit=0` default re-uses limit
-specified in original request.
+same as with `show` command above.
 
-### `manualExecSenderQueue`
+`--gas-limit` allows to override the exec limit for this message (in the OffRamp, not transaction,
+which is always estimated). `--gas-limit=0` default re-uses limit specified in original request.
 
-```sh
-$cli manualExec <source_transaction_hash> [--gas-limit num] [--[no-]exec-failed]
-```
+`--tokens-gas-limit` allows to override the gas limit for the token pool operations, if any.
 
-Scans the source network for every request from sender of CCIP messages in given transaction hash,
-then scans for their execution state on destination, then try to manually execute every pending
-message for that sender.
-
-If `--exec-failed` toggle is provided, also pick any message in failed state.
-
-If more than one sender request is included in each commit, this command can batch them together and
-generate proofs to manually execute them in the same transaction.
-
-This command can be slower on low quality RPCs or old messages, since it has to scan source up to
-head to discover sender's requests, and dest up to latest successful execution or head, to know all
-requests' latest execution state.
+`--sender-queue` opts into collecting all following messages from the same sender, starting from
+the provided message, and executing all of the eligible ones. By default, only pending
+(non-executed) messages are included. `--exec-failed` includes failed messages as well. This option
+can take some time, specially for older messages, as it needs to scan the source and dest networks
+since request, to find messages and their execution state.
 
 ### `send`
 
