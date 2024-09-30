@@ -148,7 +148,17 @@ function formatArray<T>(name: string, values: readonly T[]): Record<string, T> {
   return Object.fromEntries(values.map((v, i) => [`${name}[${i}]`, v] as const))
 }
 
-function formatData(name: string, data: string): Record<string, string> {
+function formatData(name: string, data: string, parseError = false): Record<string, string> {
+  if (parseError) {
+    const parsed = parseErrorData(data)
+    if (parsed) {
+      const res: Record<string, string> = { [name]: parsed[0].signature }
+      Object.entries(parsed[0].args.toObject()).forEach(([key, val]) => {
+        Object.assign(res, formatData(`${name}.${key}`, val as string, true))
+      })
+      return res
+    }
+  }
   const split = []
   if (data.length <= 66) split.push(data)
   else
@@ -258,7 +268,7 @@ export async function prettyCommit(
 export function prettyReceipt(receipt: CCIPExecution, request: { timestamp: number }) {
   console.table({
     state: receipt.receipt.state === 2n ? '✅ success' : '❌ failed',
-    ...formatData('returnData', receipt.receipt.returnData),
+    ...formatData('returnData', receipt.receipt.returnData, true),
     offRamp: receipt.log.address,
     transactionHash: receipt.log.transactionHash,
     logIndex: receipt.log.index,
