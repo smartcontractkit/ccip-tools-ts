@@ -53,7 +53,12 @@ async function main() {
           .options({
             'log-index': {
               type: 'number',
-              describe: 'Log index of message to execute (if more than one in request tx)',
+              describe: 'Log index of message to select to know more, instead of prompting',
+            },
+            'id-from-source': {
+              type: 'string',
+              describe:
+                'Search by messageId instead of tx_hash; requires specifying source network (by id or name)',
             },
           })
           .check(({ tx_hash }) => isHexString(tx_hash, 32)),

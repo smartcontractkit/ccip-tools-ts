@@ -4,6 +4,7 @@ export { calculateManualExecProof, fetchExecutionReceipts, fetchOffRamp } from '
 export { fetchOffchainTokenData } from './offchain.js'
 export {
   fetchAllMessagesInBatch,
+  fetchCCIPMessageById,
   fetchCCIPMessageInLog,
   fetchCCIPMessagesInTx,
   fetchRequestsForSender,

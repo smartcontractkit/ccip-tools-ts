@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/no-base-to-string */
+import type { Provider } from 'ethers'
 import {
   AbiCoder,
   type BytesLike,
@@ -20,6 +21,7 @@ import {
   bigIntReplacer,
   calculateManualExecProof,
   type CCIPRequest,
+  type CCIPRequestWithLane,
   CCIPVersion_1_2,
   chainIdFromName,
   chainIdFromSelector,
@@ -27,6 +29,7 @@ import {
   chainSelectorFromId,
   encodeExtraArgs,
   fetchAllMessagesInBatch,
+  fetchCCIPMessageById,
   fetchCCIPMessageInLog,
   fetchCCIPMessagesInTx,
   fetchCommitReport,
@@ -59,20 +62,29 @@ export enum Format {
 export async function showRequests(
   providers: Providers,
   txHash: string,
-  argv: { logIndex?: number; format: Format },
+  argv: { logIndex?: number; idFromSource?: string; format: Format },
 ) {
-  const tx = await providers.getTxReceipt(txHash)
-  const source = tx.provider
-
-  let request
-  if (argv.logIndex != null) {
-    const request_ = await fetchCCIPMessageInLog(tx, argv.logIndex)
+  let source: Provider, request: CCIPRequestWithLane
+  if (argv.idFromSource) {
+    const sourceChainId = isNaN(+argv.idFromSource)
+      ? chainIdFromName(argv.idFromSource)
+      : +argv.idFromSource
+    source = await providers.forChainId(sourceChainId)
+    const request_ = await fetchCCIPMessageById(source, txHash)
     request = (await withLanes(source, [request_]))[0]
   } else {
-    request = await selectRequest(
-      await withLanes(source, await fetchCCIPMessagesInTx(tx)),
-      'to know more',
-    )
+    const tx = await providers.getTxReceipt(txHash)
+    source = tx.provider
+
+    if (argv.logIndex != null) {
+      const request_ = await fetchCCIPMessageInLog(tx, argv.logIndex)
+      request = (await withLanes(source, [request_]))[0]
+    } else {
+      request = await selectRequest(
+        await withLanes(source, await fetchCCIPMessagesInTx(tx)),
+        'to know more',
+      )
+    }
   }
 
   switch (argv.format) {

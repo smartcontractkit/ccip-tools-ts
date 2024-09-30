@@ -69,6 +69,11 @@ const ccipRequestsTopicHashes = new Set(
   ),
 )
 
+/**
+ * Fetch all CCIP messages in a transaction
+ * @param tx - TransactionReceipt to search in
+ * @returns CCIP messages in the transaction (at least one)
+ **/
 export async function fetchCCIPMessagesInTx(tx: TransactionReceipt): Promise<CCIPRequest[]> {
   const source = tx.provider
   const txHash = tx.hash
@@ -95,6 +100,12 @@ export async function fetchCCIPMessagesInTx(tx: TransactionReceipt): Promise<CCI
   return requests
 }
 
+/**
+ * Fetch a CCIP message by its log index in a transaction
+ * @param tx - TransactionReceipt to search in
+ * @param logIndex - log index to search for
+ * @returns CCIPRequest in the transaction, with given logIndex
+ **/
 export async function fetchCCIPMessageInLog(
   tx: TransactionReceipt,
   logIndex: number,
@@ -106,6 +117,42 @@ export async function fetchCCIPMessageInLog(
       `Could not find a CCIPSendRequested message in tx ${tx.hash} with logIndex=${logIndex}`,
     )
   return request
+}
+
+/**
+ * Fetch a CCIP message by its messageId
+ * Can be slow due to having to paginate backwards through logs
+ *
+ * @param source - Provider to fetch logs from
+ * @param messageId - messageId to search for
+ * @returns CCIPRequest with given messageId
+ **/
+export async function fetchCCIPMessageById(
+  source: Provider,
+  messageId: string,
+): Promise<CCIPRequest> {
+  for (const blockRange of blockRangeGenerator({ endBlock: await source.getBlockNumber() })) {
+    const logs = await source.getLogs({
+      ...blockRange,
+      topics: [Array.from(ccipRequestsTopicHashes)],
+    })
+    for (const log of logs) {
+      let onRampInterface: Interface
+      try {
+        ;[onRampInterface] = await getOnRampInterface(source, log.address)
+      } catch (_) {
+        continue
+      }
+      const decoded = onRampInterface.parseLog(log)
+      if (!decoded || decoded.name != 'CCIPSendRequested') continue
+      if ((decoded.args.message as CCIPMessage).messageId !== messageId) continue
+      return fetchCCIPMessageInLog(
+        (await source.getTransactionReceipt(log.transactionHash))!,
+        log.index,
+      )
+    }
+  }
+  throw new Error('Could not find a CCIPSendRequested message with messageId: ' + messageId)
 }
 
 // Number of blocks to expand the search window for logs
