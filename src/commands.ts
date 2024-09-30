@@ -129,7 +129,7 @@ export async function showRequests(
         console.log('receipt =', withDateTimestamp(receipt))
         break
       case Format.pretty:
-        if (!found) console.info('Receipts:')
+        if (!found) console.info('Receipts (dest):')
         prettyReceipt(receipt, request)
         break
       case Format.json:

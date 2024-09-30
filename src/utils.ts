@@ -193,7 +193,7 @@ export async function prettyRequest<R extends CCIPRequest | CCIPRequestWithLane>
   if ('lane' in request) {
     prettyLane(request.lane, request.version)
   }
-  console.info('Request:')
+  console.info('Request (source):')
 
   let finalized
   try {
@@ -235,7 +235,7 @@ export async function prettyCommit(
   commit: CCIPCommit,
   request: { timestamp: number },
 ) {
-  console.info('Commit:')
+  console.info('Commit (dest):')
   const timestamp = (await dest.getBlock(commit.log.blockNumber))!.timestamp
   console.table({
     merkleRoot: commit.report.merkleRoot,
@@ -299,10 +299,10 @@ export function logParsedError(err: unknown): boolean {
   if (errorData) {
     const parsed = parseErrorData(errorData)?.[0]
     if (parsed) {
-      reason = ['\nreason =', parsed.signature, parsed.args.toObject()]
+      reason = ['\nReason =', parsed.signature, parsed.args.toObject()]
     }
   }
-  console.error(`🛑 Failed to call "${method}", Error =`, shortMessage, ...reason, '\ncall =', {
+  console.error(`🛑 Failed to call "${method}"\nError =`, shortMessage, ...reason, '\nCall =', {
     ...transaction,
     ...invocation,
   })
