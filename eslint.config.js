@@ -29,8 +29,8 @@ export default tseslint.config(
         },
       ],
       '@typescript-eslint/no-non-null-assertion': 'off',
+      '@typescript-eslint/consistent-type-imports': ['error', { fixStyle: 'inline-type-imports' }],
       '@typescript-eslint/consistent-type-exports': 'error',
-      '@typescript-eslint/consistent-type-imports': 'error',
     },
   },
   {
@@ -49,8 +49,8 @@ export default tseslint.config(
       'simple-import-sort': simpleImportSort,
     },
     rules: {
-      'simple-import-sort/imports': 'error',
-      'simple-import-sort/exports': 'error',
+      'simple-import-sort/imports': 'warn',
+      'simple-import-sort/exports': 'warn',
     },
   },
 )
