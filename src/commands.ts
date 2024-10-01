@@ -372,6 +372,7 @@ export async function sendMessage(
     receiver?: string
     data?: string
     gasLimit?: number
+    estimateGasLimit?: number
     allowOutOfOrderExec?: boolean
     feeToken?: string
     transferTokens?: string[]
@@ -391,6 +392,28 @@ export async function sendMessage(
     tokenAmounts = await parseTokenAmounts(source, argv.transferTokens)
   }
 
+  const receiver = argv.receiver ?? wallet.address
+  const data = !argv.data
+    ? '0x'
+    : isHexString(argv.data)
+      ? argv.data
+      : hexlify(toUtf8Bytes(argv.data))
+
+  if (argv.estimateGasLimit != null) {
+    const gasLimit = await estimateExecGasForRequest(
+      source,
+      await providers.forChainId(destChainId),
+      argv.router,
+      {
+        sender: wallet.address,
+        receiver,
+        data,
+        tokenAmounts,
+      },
+    )
+    argv.gasLimit = Math.ceil(gasLimit * (1 + argv.estimateGasLimit / 100))
+  }
+
   // `--allow-out-of-order-exec` forces EVMExtraArgsV2, which shouldn't work on v1.2 lanes;
   // otherwise, fallsback to EVMExtraArgsV1 (compatible with v1.2 & v1.5)
   const extraArgs = {
@@ -400,10 +423,9 @@ export async function sendMessage(
     ...(argv.gasLimit != null ? { gasLimit: BigInt(argv.gasLimit) } : {}),
   }
 
-  const receiver = argv.receiver ?? wallet.address
   const message: AnyMessage = {
     receiver: zeroPadValue(receiver, 32), // receiver must be 32B value-encoded
-    data: !argv.data ? '0x' : isHexString(argv.data) ? argv.data : hexlify(toUtf8Bytes(argv.data)),
+    data,
     extraArgs: encodeExtraArgs(extraArgs),
     feeToken: argv.feeToken ?? ZeroAddress, // feeToken=ZeroAddress means native
     tokenAmounts,

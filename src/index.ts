@@ -166,6 +166,13 @@ async function main() {
               describe:
                 'Gas limit for receiver callback execution; defaults to default configured on ramps',
             },
+            'estimate-gas-limit': {
+              type: 'number',
+              describe:
+                'Estimate gas limit for receiver callback execution; argument is a % margin to add to the estimate',
+              example: '10',
+              conflicts: 'gas-limit',
+            },
             'allow-out-of-order-exec': {
               type: 'boolean',
               describe:
