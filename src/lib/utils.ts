@@ -99,7 +99,17 @@ export async function getTypeAndVersion(
       VersionedContractABI,
       provider,
     ) as unknown as TypedContract<typeof VersionedContractABI>
-    const typeAndVersion = await versionedContract.typeAndVersion()
+    let typeAndVersion
+    try {
+      typeAndVersion = await versionedContract.typeAndVersion()
+    } catch (err) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'BAD_DATA') {
+        throw new Error(
+          `${address} not a CCIP contract on "${(await getProviderNetwork(provider)).name}"`,
+        )
+      }
+      throw err
+    }
     const [type_, version_] = typeAndVersion.split(' ', 2)
     const [version] = version_.split('-', 2) // remove `-dev` suffixes
 

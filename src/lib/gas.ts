@@ -6,12 +6,11 @@ import {
   FunctionFragment,
   getNumber,
   hexlify,
-  isHexString,
   type Provider,
   randomBytes,
   solidityPackedKeccak256,
   toBeHex,
-  toUtf8Bytes,
+  ZeroAddress,
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
@@ -20,8 +19,12 @@ import TokenABI from '../abi/BurnMintERC677Token.js'
 import BurnMintTokenPool from '../abi/BurnMintTokenPool_1_5.js'
 import RouterABI from '../abi/Router.js'
 import { fetchOffRamp } from './execution.js'
-import type { CCIPContractTypeOffRamp } from './types.js'
-import { CCIP_ABIs, CCIPContractTypeOnRamp, CCIPVersion_1_2 } from './types.js'
+import {
+  CCIP_ABIs,
+  type CCIPContractTypeOffRamp,
+  CCIPContractTypeOnRamp,
+  CCIPVersion_1_2,
+} from './types.js'
 import { getProviderNetwork, getTypeAndVersion, lazyCached } from './utils.js'
 
 const defaultAbiCoder = AbiCoder.defaultAbiCoder()
@@ -91,18 +94,20 @@ export async function estimateExecGasForRequest(
   request: {
     sender: string
     receiver: string
-    data?: string
+    data: string
     tokenAmounts: readonly { token: string; amount: bigint }[]
   },
 ) {
-  const { chainSelector: sourceChainSelector } = await getProviderNetwork(source)
-  const { chainSelector: destChainSelector } = await getProviderNetwork(dest)
+  const { chainSelector: sourceChainSelector, name: sourceName } = await getProviderNetwork(source)
+  const { chainSelector: destChainSelector, name: destName } = await getProviderNetwork(dest)
   const sourceRouterContract = new Contract(
     sourceRouter,
     RouterABI,
     source,
   ) as unknown as TypedContract<typeof RouterABI>
   const onRamp = (await sourceRouterContract.getOnRamp(destChainSelector)) as string
+  if (!onRamp || onRamp === ZeroAddress)
+    throw new Error(`No "${sourceName}" -> "${destName}" lane on ${sourceRouter}`)
   const [, version] = await getTypeAndVersion(source, onRamp)
 
   const offRamp = await fetchOffRamp(
@@ -122,11 +127,7 @@ export async function estimateExecGasForRequest(
   const message: Any2EVMMessage = {
     messageId: hexlify(randomBytes(32)),
     sender: zeroPadValue(request.sender, 32),
-    data: !request.data
-      ? '0x'
-      : isHexString(request.data)
-        ? request.data
-        : hexlify(toUtf8Bytes(request.data)),
+    data: request.data,
     sourceChainSelector,
     destTokenAmounts: destTokenAmounts,
   }
@@ -157,15 +158,18 @@ export async function estimateExecGasForRequest(
     defaultAbiCoder.encode(ccipReceive.inputs, [message]),
   ])
 
-  return getNumber(
-    (await dest.send('eth_estimateGas', [
-      {
-        from: destRouter,
-        to: request.receiver,
-        data: calldata,
-      },
-      'latest',
-      ...(Object.keys(stateOverrides).length ? [stateOverrides] : []),
-    ])) as string,
+  return (
+    getNumber(
+      (await dest.send('eth_estimateGas', [
+        {
+          from: destRouter,
+          to: request.receiver,
+          data: calldata,
+        },
+        'latest',
+        ...(Object.keys(stateOverrides).length ? [stateOverrides] : []),
+      ])) as string,
+    ) -
+    (21_000 - 700) // 21k is the base gas cost for a transaction, 700 is the gas cost of the call
   )
 }

@@ -526,6 +526,7 @@ export async function estimateGas(
     receiver: string
     sender?: string
     data?: string
+    offRamp?: string
     transferTokens?: string[]
   },
 ) {
@@ -536,6 +537,11 @@ export async function estimateGas(
     isNaN(+argv.dest) ? chainIdFromName(argv.dest) : +argv.dest,
   )
 
+  const data = !argv.data
+    ? '0x'
+    : isHexString(argv.data)
+      ? argv.data
+      : hexlify(toUtf8Bytes(argv.data))
   let tokenAmounts: { token: string; amount: bigint }[] = []
   if (argv.transferTokens) {
     tokenAmounts = await parseTokenAmounts(source, argv.transferTokens)
@@ -544,7 +550,7 @@ export async function estimateGas(
   const gas = await estimateExecGasForRequest(source, dest, argv.router, {
     sender: argv.sender ?? ZeroAddress,
     receiver: argv.receiver,
-    data: argv.data,
+    data,
     tokenAmounts,
   })
   console.log('Estimated gas:', gas)
