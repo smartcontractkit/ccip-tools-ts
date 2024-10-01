@@ -1,11 +1,12 @@
 #!/usr/bin/env -S npx tsx
 
-import { isAddress, isHexString } from 'ethers'
+import { isAddress, isHexString, ZeroAddress } from 'ethers'
 import util from 'util'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
 import {
+  estimateGas,
   Format,
   manualExec,
   manualExecSenderQueue,
@@ -178,7 +179,7 @@ async function main() {
             'transfer-tokens': {
               type: 'array',
               string: true,
-              describe: 'List of token amounts to transfer to the receiver',
+              describe: 'List of token amounts (on source) to transfer to the receiver',
               example: '0xtoken=0.1',
             },
             wallet: {
@@ -198,6 +199,68 @@ async function main() {
       async (argv) => {
         const providers = new Providers(argv)
         return sendMessage(providers, argv)
+          .catch((err) => {
+            process.exitCode = 1
+            if (!logParsedError(err)) console.error(err)
+          })
+          .finally(() => providers.destroy())
+      },
+    )
+    .command(
+      'estimateGas <source> <router> <dest>',
+      'estimate gasLimit for a CCIP message to be executed on receiver on dest',
+      (yargs) =>
+        yargs
+          .positional('source', {
+            type: 'string',
+            demandOption: true,
+            describe: 'source network, chainId or name',
+            example: 'ethereum-testnet-sepolia',
+          })
+          .positional('router', {
+            type: 'string',
+            demandOption: true,
+            describe: 'router contract address on source',
+          })
+          .positional('dest', {
+            type: 'string',
+            demandOption: true,
+            describe: 'destination network, chainId or name',
+            example: 'ethereum-testnet-sepolia-arbitrum-1',
+          })
+          .options({
+            receiver: {
+              type: 'string',
+              demandOption: true,
+              describe: 'Receiver contract address (on dest, implementing ccipReceive)',
+            },
+            sender: {
+              type: 'string',
+              describe: 'Sender address of the message (passed to receiver)',
+              default: ZeroAddress,
+            },
+            data: {
+              type: 'string',
+              describe: 'Data to send in the message',
+              example: '0x1234',
+            },
+            'transfer-tokens': {
+              type: 'array',
+              string: true,
+              describe: 'List of token amounts (on source) to transfer to the receiver',
+              example: '0xtoken=0.1',
+            },
+          })
+          .check(({ router }) => isAddress(router))
+          .check(({ receiver }) => isAddress(receiver))
+          .check(
+            ({ 'transfer-tokens': transferTokens }) =>
+              !transferTokens ||
+              transferTokens.every((t) => /^0x[0-9a-fA-F]{40}=\d+(\.\d+)?$/.test(t)),
+          ),
+      async (argv) => {
+        const providers = new Providers(argv)
+        return estimateGas(providers, argv)
           .catch((err) => {
             process.exitCode = 1
             if (!logParsedError(err)) console.error(err)

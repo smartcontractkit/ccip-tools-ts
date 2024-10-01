@@ -1,17 +1,13 @@
-/* eslint-disable @typescript-eslint/restrict-template-expressions,@typescript-eslint/no-base-to-string */
 import { readFile } from 'node:fs/promises'
 
-import type { TransactionReceipt } from 'ethers'
 import {
+  type JsonRpcApiProvider,
   JsonRpcProvider,
-  type Provider,
+  type TransactionReceipt,
   WebSocketProvider,
 } from 'ethers'
 
-import {
-  chainNameFromId,
-  getProviderNetwork,
-} from './lib/index.js'
+import { chainNameFromId, getProviderNetwork } from './lib/index.js'
 
 const RPCS_RE = /\b(http|ws)s?:\/\/\S+/
 
@@ -54,11 +50,11 @@ async function withTimeout<T>(
  **/
 export class Providers {
   #endpoints: Promise<Set<string>>
-  #providersList?: Promise<(readonly [provider: Provider, endpoint: string])[]>
-  #providersPromises: Record<number, Promise<Provider>> = {}
+  #providersList?: Promise<(readonly [provider: JsonRpcApiProvider, endpoint: string])[]>
+  #providersPromises: Record<number, Promise<JsonRpcApiProvider>> = {}
   #promisesCallbacks: Record<
     number,
-    readonly [resolve: (provider: Provider) => void, reject: (reason: unknown) => void]
+    readonly [resolve: (provider: JsonRpcApiProvider) => void, reject: (reason: unknown) => void]
   > = {}
   #destroy!: (v: unknown) => void
   destroyed: Promise<unknown> = new Promise((resolve) => {
@@ -103,15 +99,15 @@ export class Providers {
   /**
    * Trigger fetching providers from RPC endpoints, with their networks in parallel
    **/
-  #loadProviders(): Promise<(readonly [provider: Provider, endpoint: string])[]> {
+  #loadProviders(): Promise<(readonly [provider: JsonRpcApiProvider, endpoint: string])[]> {
     if (this.#providersList) return this.#providersList
 
     const readyPromises: Promise<unknown>[] = []
     return (this.#providersList = this.#endpoints
       .then((rpcs) =>
         [...rpcs].map((endpoint) => {
-          let provider: Provider
-          let providerReady: Promise<Provider>
+          let provider: JsonRpcApiProvider
+          let providerReady: Promise<JsonRpcApiProvider>
           if (endpoint.startsWith('ws')) {
             const provider_ = new WebSocketProvider(endpoint)
             providerReady = new Promise((resolve, reject) => {
@@ -181,7 +177,7 @@ export class Providers {
    * @param chainId - chainId to get a provider for
    * @returns Promise for a provider for the given chainId
    **/
-  async forChainId(chainId: number): Promise<Provider> {
+  async forChainId(chainId: number): Promise<JsonRpcApiProvider> {
     if (chainId in this.#providersPromises) return this.#providersPromises[chainId]
     if (this.completed === true)
       throw new Error(
@@ -219,4 +215,3 @@ export class Providers {
     )
   }
 }
-

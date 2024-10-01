@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/no-base-to-string */
-import type { Provider } from 'ethers'
 import {
   AbiCoder,
   type BytesLike,
@@ -8,7 +7,7 @@ import {
   dataSlice,
   hexlify,
   isHexString,
-  parseUnits,
+  type Provider,
   toUtf8Bytes,
   ZeroAddress,
   zeroPadValue,
@@ -28,6 +27,7 @@ import {
   chainNameFromId,
   chainSelectorFromId,
   encodeExtraArgs,
+  estimateExecGasForRequest,
   fetchAllMessagesInBatch,
   fetchCCIPMessageById,
   fetchCCIPMessageInLog,
@@ -45,6 +45,7 @@ import {
 import type { Providers } from './providers.js'
 import {
   getWallet,
+  parseTokenAmounts,
   prettyCommit,
   prettyReceipt,
   prettyRequest,
@@ -370,10 +371,10 @@ export async function sendMessage(
     router: string
     receiver?: string
     data?: string
-    'gas-limit'?: number
-    'allow-out-of-order-exec'?: boolean
-    'fee-token'?: string
-    'transfer-tokens'?: string[]
+    gasLimit?: number
+    allowOutOfOrderExec?: boolean
+    feeToken?: string
+    transferTokens?: string[]
     format: Format
     wallet?: string
   },
@@ -385,29 +386,18 @@ export async function sendMessage(
   const destChainId = isNaN(+argv.dest) ? chainIdFromName(argv.dest) : +argv.dest
   const destSelector = chainSelectorFromId(destChainId)
 
-  // parse `--transfer-tokens token1=amount1 token2=amount2 ...` into `{ token, amount }[]`
-  const tokenAmounts = []
-  if (argv['transfer-tokens']) {
-    for (const tokenAmount of argv['transfer-tokens']) {
-      const [token, amount_] = tokenAmount.split('=')
-      const decimals = await lazyCached(`decimals ${token}`, () => {
-        const contract = new Contract(token, TokenABI, source) as unknown as TypedContract<
-          typeof TokenABI
-        >
-        return contract.decimals()
-      })
-      const amount = parseUnits(amount_, decimals)
-      tokenAmounts.push({ token, amount })
-    }
+  let tokenAmounts: { token: string; amount: bigint }[] = []
+  if (argv.transferTokens) {
+    tokenAmounts = await parseTokenAmounts(source, argv.transferTokens)
   }
 
   // `--allow-out-of-order-exec` forces EVMExtraArgsV2, which shouldn't work on v1.2 lanes;
   // otherwise, fallsback to EVMExtraArgsV1 (compatible with v1.2 & v1.5)
   const extraArgs = {
-    ...(argv['allow-out-of-order-exec'] != null
-      ? { allowOutOfOrderExecution: argv['allow-out-of-order-exec'] }
+    ...(argv.allowOutOfOrderExec != null
+      ? { allowOutOfOrderExecution: argv.allowOutOfOrderExec }
       : {}),
-    ...(argv['gas-limit'] != null ? { gasLimit: BigInt(argv['gas-limit']) } : {}),
+    ...(argv.gasLimit != null ? { gasLimit: BigInt(argv.gasLimit) } : {}),
   }
 
   const receiver = argv.receiver ?? wallet.address
@@ -415,7 +405,7 @@ export async function sendMessage(
     receiver: zeroPadValue(receiver, 32), // receiver must be 32B value-encoded
     data: !argv.data ? '0x' : isHexString(argv.data) ? argv.data : hexlify(toUtf8Bytes(argv.data)),
     extraArgs: encodeExtraArgs(extraArgs),
-    feeToken: argv['fee-token'] ?? ZeroAddress, // feeToken=ZeroAddress means native
+    feeToken: argv.feeToken ?? ZeroAddress, // feeToken=ZeroAddress means native
     tokenAmounts,
   }
 
@@ -431,8 +421,8 @@ export async function sendMessage(
     (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
     <Record<string, bigint>>{},
   )
-  if (argv['fee-token']) {
-    amountsToApprove[argv['fee-token']] = (amountsToApprove[argv['fee-token']] ?? 0n) + fee
+  if (argv.feeToken) {
+    amountsToApprove[argv.feeToken] = (amountsToApprove[argv.feeToken] ?? 0n) + fee
   }
 
   // approve all tokens (including fee token) in parallel
@@ -455,7 +445,7 @@ export async function sendMessage(
   const tx = await router.ccipSend(destSelector, message, {
     nonce: nonce++,
     // if native fee, include it in value; otherwise, it's transferedFrom fee token
-    ...(!argv['fee-token'] ? { value: fee } : {}),
+    ...(!argv.feeToken ? { value: fee } : {}),
   })
   console.log(
     'Sending message to',
@@ -503,4 +493,37 @@ export function parseData(data: BytesLike) {
   }
 
   throw new Error('Unknown data')
+}
+
+export async function estimateGas(
+  providers: Providers,
+  argv: {
+    source: string
+    dest: string
+    router: string
+    receiver: string
+    sender?: string
+    data?: string
+    transferTokens?: string[]
+  },
+) {
+  const source = await providers.forChainId(
+    isNaN(+argv.source) ? chainIdFromName(argv.source) : +argv.source,
+  )
+  const dest = await providers.forChainId(
+    isNaN(+argv.dest) ? chainIdFromName(argv.dest) : +argv.dest,
+  )
+
+  let tokenAmounts: { token: string; amount: bigint }[] = []
+  if (argv.transferTokens) {
+    tokenAmounts = await parseTokenAmounts(source, argv.transferTokens)
+  }
+
+  const gas = await estimateExecGasForRequest(source, dest, argv.router, {
+    sender: argv.sender ?? ZeroAddress,
+    receiver: argv.receiver,
+    data: argv.data,
+    tokenAmounts,
+  })
+  console.log('Estimated gas:', gas)
 }

@@ -9,6 +9,7 @@ import {
   dataSlice,
   formatUnits,
   hexlify,
+  parseUnits,
   type Provider,
   type Result,
   SigningKey,
@@ -280,15 +281,15 @@ export function prettyReceipt(receipt: CCIPExecution, request: { timestamp: numb
 export function logParsedError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false
   const shortMessage = (err as { shortMessage: string }).shortMessage
-  if (!shortMessage) return false
-
   const transaction = (err as { transaction: { to: string; data: string } }).transaction
+  if (!shortMessage || !transaction) return false
+
   const invocation_ = (err as { invocation: { method: string; args: Result } | null }).invocation
   let method, invocation
   if (invocation_) {
     const { method: method_, args, ...rest } = invocation_
     method = method_
-    invocation = { ...rest, args: args.toObject(true) }
+    invocation = { ...rest, args }
   } else {
     method = dataSlice(transaction.data, 0, 4)
     const func = getFunctionBySelector(method)?.[0]
@@ -307,4 +308,23 @@ export function logParsedError(err: unknown): boolean {
     ...invocation,
   })
   return true
+}
+
+/**
+ * Parse `--transfer-tokens token1=amount1 token2=amount2 ...` into `{ token, amount }[]`
+ **/
+export async function parseTokenAmounts(source: Provider, transferTokens: readonly string[]) {
+  return Promise.all(
+    transferTokens.map(async (tokenAmount) => {
+      const [token, amount_] = tokenAmount.split('=')
+      const decimals = await lazyCached(`decimals ${token}`, () => {
+        const contract = new Contract(token, TokenABI, source) as unknown as TypedContract<
+          typeof TokenABI
+        >
+        return contract.decimals()
+      })
+      const amount = parseUnits(amount_, decimals)
+      return { token, amount }
+    }),
+  )
 }
