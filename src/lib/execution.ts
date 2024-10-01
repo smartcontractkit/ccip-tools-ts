@@ -1,16 +1,24 @@
 import { Contract, type ContractRunner, Interface, type Provider } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
+import Router from '../abi/Router.js'
 import { getLeafHasher, proofFlagsToBits, Tree } from './hasher/index.js'
-import type { CCIPExecution, CCIPRequest, ExecutionReceipt } from './types.js'
 import {
   CCIP_ABIs,
   CCIPContractTypeOffRamp,
+  type CCIPExecution,
   type CCIPMessage,
+  type CCIPRequest,
   type CCIPVersion,
+  type ExecutionReceipt,
   type Lane,
 } from './types.js'
-import { blockRangeGenerator, getTypeAndVersion, lazyCached } from './utils.js'
+import {
+  blockRangeGenerator,
+  chainNameFromSelector,
+  getTypeAndVersion,
+  lazyCached,
+} from './utils.js'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
@@ -84,8 +92,14 @@ export async function fetchOffRamp<V extends CCIPVersion>(
   hints?: { fromBlock?: number },
 ): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]>> {
   const dest = runner.provider!
+  // we use Router interface to find a router, and from there find the OffRamp,
+  // because these events are more frequent than some low-activity OffRamp's
+  const routerInterface = lazyCached('Interface Router', () => new Interface(Router))
   const offRampInterface = getOffRampInterface(ccipVersion)
-  const topic0 = offRampInterface.getEvent('ExecutionStateChanged')!.topicHash
+  const routerTopics = new Set<string>([routerInterface.getEvent('MessageExecuted')!.topicHash])
+  const offRampTopics = new Set<string>([
+    offRampInterface.getEvent('ExecutionStateChanged')!.topicHash,
+  ])
 
   const seen = new Set<string>()
   const latestBlock = await dest.getBlockNumber()
@@ -114,24 +128,41 @@ export async function fetchOffRamp<V extends CCIPVersion>(
   }
 
   for (const blockRange of interleaveBlockRanges()) {
-    // we don't know our OffRamp address yet, so fetch any compatible log
-    const logs = await dest.getLogs({ ...blockRange, topics: [topic0] })
+    // we don't know our OffRamp address yet, so fetch any compatible log from OffRamps or Routers
+    const logs = await dest.getLogs({
+      ...blockRange,
+      topics: [Array.from(new Set([...routerTopics, ...offRampTopics]))],
+    })
 
     for (const log of logs) {
       if (seen.has(log.address)) continue
 
       try {
-        const [staticConfig, offRampContract] = await getOffRampStaticConfig(runner, log.address)
+        // if an offRamp log, check it directly; otherwise, check each offRamp of the router
+        const offRamps = offRampTopics.has(log.topics[0])
+          ? [log.address]
+          : (
+              await (
+                new Contract(log.address, routerInterface, dest) as unknown as TypedContract<
+                  typeof Router
+                >
+              ).getOffRamps()
+            )
+              .filter(({ sourceChainSelector: sel }) => sel === sourceChainSelector)
+              .map(({ offRamp }) => offRamp as string)
+        for (const offRamp of offRamps) {
+          const [staticConfig, offRampContract] = await getOffRampStaticConfig(runner, offRamp)
 
-        // reject if it's not an OffRamp for our onRamp
-        if (
-          sourceChainSelector === staticConfig.sourceChainSelector &&
-          destChainSelector == staticConfig.chainSelector &&
-          onRamp === staticConfig.onRamp
-        ) {
-          return offRampContract as unknown as TypedContract<
-            (typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]
-          >
+          // reject if it's not an OffRamp for our onRamp
+          if (
+            sourceChainSelector === staticConfig.sourceChainSelector &&
+            destChainSelector == staticConfig.chainSelector &&
+            onRamp === staticConfig.onRamp
+          ) {
+            return offRampContract as unknown as TypedContract<
+              (typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]
+            >
+          }
         }
       } catch (_) {
         // passthrough to seen + continue
@@ -140,7 +171,9 @@ export async function fetchOffRamp<V extends CCIPVersion>(
     }
   }
 
-  throw new Error(`Could not find OffRamp for onRamp=${onRamp}`)
+  throw new Error(
+    `Could not find OffRamp on "${chainNameFromSelector(destChainSelector)}" for OnRamp=${onRamp} on "${chainNameFromSelector(sourceChainSelector)}"`,
+  )
 }
 
 async function getOffRampStaticConfig(dest: ContractRunner, address: string) {
