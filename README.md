@@ -97,15 +97,30 @@ above).
 If `--data` is not a hex-string, it will be UTF-8 encoded.
 
 If `--gas-limit` is omitted, ramp default config (usually 200k) is used. It can be `0`.
+`--estimate-gas-limit` can be provided instead, to estimate the gas limit for the message execution.
+It receives a percentage margin (e.g. `--estimate-gas-limit 10` for 10% margin), which is added to
+the estimation before sending the message.
 
 If `--fee-token` is omitted, CCIP fee will be paid in native token.
 
-`--transfer-tokens` can receive multiple pairs of `0xTokenAddr=amount` (separated by spaces, terminated
-with `--` if needed). `amount` will be converted using token decimals (e.g. 0.1 = 10^5 of the
-smallest unit for USDC, which is 6 decimals).
+`--transfer-tokens` can receive multiple pairs of `0xTokenAddr=amount` (source token addresses,
+separated by spaces, terminated with `--` if needed). `amount` will be converted using token
+decimals (e.g. 0.1 = 10^5 of the smallest unit for USDC, which is 6 decimals).
 
 `--allow-out-of-order-exec` is only available on v1.5+ lanes, and opt-out of *sender* `nonce` order
 enforcement. It's useful for destinations where execution can't be guaranteed (e.g. zkOverflow).
+
+### `estimateGas`
+
+```sh
+$cli estimateGas 11155111 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 ethereum-testnet-sepolia-arbitrum-1 \
+    --receiver 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+    --sender 0xEC1062cbDf4fBf31B3A6Aac62B6F6F123bb70E12 \
+    --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=0.1
+```
+
+Estimates gas for a message, same as `send` command, but doesn't send it, and just prints the
+minimum CCIP `gasLimit` required for the execution to be successful.
 
 ### parseData
 
