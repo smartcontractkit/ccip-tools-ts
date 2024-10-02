@@ -1,6 +1,5 @@
 import type { JsonRpcApiProvider } from 'ethers'
 import {
-  AbiCoder,
   concat,
   Contract,
   FunctionFragment,
@@ -24,10 +23,10 @@ import {
   type CCIPContractTypeOffRamp,
   CCIPContractTypeOnRamp,
   CCIPVersion_1_2,
+  defaultAbiCoder,
+  type Lane,
 } from './types.js'
 import { getProviderNetwork, getTypeAndVersion, lazyCached } from './utils.js'
-
-const defaultAbiCoder = AbiCoder.defaultAbiCoder()
 
 const BALANCES_SLOT = 0
 const ccipReceive = FunctionFragment.from({
@@ -108,13 +107,11 @@ export async function estimateExecGasForRequest(
   const onRamp = (await sourceRouterContract.getOnRamp(destChainSelector)) as string
   if (!onRamp || onRamp === ZeroAddress)
     throw new Error(`No "${sourceName}" -> "${destName}" lane on ${sourceRouter}`)
-  const [, version] = await getTypeAndVersion(source, onRamp)
 
-  const offRamp = await fetchOffRamp(
-    dest,
-    { sourceChainSelector, destChainSelector, onRamp },
-    version,
-  )
+  const [, version] = await getTypeAndVersion(source, onRamp)
+  const lane: Lane = { sourceChainSelector, destChainSelector, onRamp, version }
+
+  const offRamp = await fetchOffRamp(dest, lane)
   const { router: destRouter } = await offRamp.getDynamicConfig()
 
   const destTokenAmounts = await Promise.all(

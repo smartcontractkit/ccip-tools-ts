@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/no-base-to-string */
 import {
-  AbiCoder,
   type BytesLike,
   Contract,
   dataSlice,
@@ -20,12 +19,12 @@ import {
   bigIntReplacer,
   calculateManualExecProof,
   type CCIPRequest,
-  type CCIPRequestWithLane,
   CCIPVersion_1_2,
   chainIdFromName,
   chainIdFromSelector,
   chainNameFromId,
   chainSelectorFromId,
+  defaultAbiCoder,
   encodeExtraArgs,
   estimateExecGasForRequest,
   fetchAllMessagesInBatch,
@@ -51,7 +50,6 @@ import {
   prettyRequest,
   selectRequest,
   withDateTimestamp,
-  withLanes,
 } from './utils.js'
 
 export enum Format {
@@ -65,26 +63,21 @@ export async function showRequests(
   txHash: string,
   argv: { logIndex?: number; idFromSource?: string; format: Format },
 ) {
-  let source: Provider, request: CCIPRequestWithLane
+  let source: Provider, request: CCIPRequest
   if (argv.idFromSource) {
     const sourceChainId = isNaN(+argv.idFromSource)
       ? chainIdFromName(argv.idFromSource)
       : +argv.idFromSource
     source = await providers.forChainId(sourceChainId)
-    const request_ = await fetchCCIPMessageById(source, txHash)
-    request = (await withLanes(source, [request_]))[0]
+    request = await fetchCCIPMessageById(source, txHash)
   } else {
     const tx = await providers.getTxReceipt(txHash)
     source = tx.provider
 
     if (argv.logIndex != null) {
-      const request_ = await fetchCCIPMessageInLog(tx, argv.logIndex)
-      request = (await withLanes(source, [request_]))[0]
+      request = await fetchCCIPMessageInLog(tx, argv.logIndex)
     } else {
-      request = await selectRequest(
-        await withLanes(source, await fetchCCIPMessagesInTx(tx)),
-        'to know more',
-      )
+      request = await selectRequest(await fetchCCIPMessagesInTx(tx), 'to know more')
     }
   }
 
@@ -158,13 +151,9 @@ export async function manualExec(
 
   let request
   if (argv.logIndex != null) {
-    const request_ = await fetchCCIPMessageInLog(tx, argv.logIndex)
-    request = (await withLanes(source, [request_]))[0]
+    request = await fetchCCIPMessageInLog(tx, argv.logIndex)
   } else {
-    request = await selectRequest(
-      await withLanes(source, await fetchCCIPMessagesInTx(tx)),
-      'to execute',
-    )
+    request = await selectRequest(await fetchCCIPMessagesInTx(tx), 'to execute')
   }
 
   switch (argv.format) {
@@ -197,9 +186,9 @@ export async function manualExec(
   const wallet = (await getWallet(argv)).connect(dest)
 
   let manualExecTx
-  if (request.version === CCIPVersion_1_2) {
+  if (request.lane.version === CCIPVersion_1_2) {
     const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit))
-    const offRampContract = await fetchOffRamp(wallet, request.lane, request.version, {
+    const offRampContract = await fetchOffRamp(wallet, request.lane, {
       fromBlock: commit.log.blockNumber,
     })
     manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
@@ -208,7 +197,7 @@ export async function manualExec(
       receiverExecutionGasLimit: BigInt(argv.gasLimit),
       tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv.tokensGasLimit)),
     }))
-    const offRampContract = await fetchOffRamp(wallet, request.lane, request.version, {
+    const offRampContract = await fetchOffRamp(wallet, request.lane, {
       fromBlock: commit.log.blockNumber,
     })
     manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
@@ -241,13 +230,9 @@ export async function manualExecSenderQueue(
 
   let firstRequest
   if (argv.logIndex != null) {
-    const firstRequest_ = await fetchCCIPMessageInLog(tx, argv.logIndex)
-    firstRequest = (await withLanes(source, [firstRequest_]))[0]
+    firstRequest = await fetchCCIPMessageInLog(tx, argv.logIndex)
   } else {
-    firstRequest = await selectRequest(
-      await withLanes(source, await fetchCCIPMessagesInTx(tx)),
-      'to execute',
-    )
+    firstRequest = await selectRequest(await fetchCCIPMessagesInTx(tx), 'to execute')
   }
   switch (argv.format) {
     case Format.log:
@@ -310,7 +295,7 @@ export async function manualExecSenderQueue(
 
   const wallet = (await getWallet(argv)).connect(dest)
 
-  const offRampContract = await fetchOffRamp(wallet, firstRequest.lane, firstRequest.version, {
+  const offRampContract = await fetchOffRamp(wallet, firstRequest.lane, {
     fromBlock: destFromBlock,
   })
 
@@ -338,7 +323,7 @@ export async function manualExecSenderQueue(
     const execReport = { ...manualExecReport, offchainTokenData }
 
     let manualExecTx
-    if (firstRequest.version === CCIPVersion_1_2) {
+    if (firstRequest.lane.version === CCIPVersion_1_2) {
       const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit))
       manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
     } else {
@@ -480,7 +465,7 @@ export async function sendMessage(
 
   // print CCIPRequest from tx receipt
   const receipt = (await tx.wait(1, 60_000))!
-  const request = (await withLanes(source, await fetchCCIPMessagesInTx(receipt)))[0]
+  const request = (await fetchCCIPMessagesInTx(receipt))[0]
 
   switch (argv.format) {
     case Format.log:
@@ -493,28 +478,6 @@ export async function sendMessage(
       console.info(JSON.stringify(request, bigIntReplacer, 2))
       break
   }
-}
-
-const defaultAbiCoder = AbiCoder.defaultAbiCoder()
-export function parseData(data: BytesLike) {
-  const func = getFunctionBySelector(dataSlice(data, 0, 4))
-  if (func) {
-    const [fragment, contract] = func
-    const args = defaultAbiCoder.decode(fragment.inputs, dataSlice(data, 4))
-    console.info('Function:', `${contract}.${fragment.format()}`)
-    console.info('Args:', args.toObject(true))
-    return
-  }
-
-  const error = parseErrorData(data)
-  if (error) {
-    const [parsed, contract] = error
-    console.info('Error:', `${contract}.${parsed.signature}`)
-    console.info('Args:', parsed.args.toObject(true))
-    return
-  }
-
-  throw new Error('Unknown data')
 }
 
 export async function estimateGas(
@@ -554,4 +517,25 @@ export async function estimateGas(
     tokenAmounts,
   })
   console.log('Estimated gas:', gas)
+}
+
+export function parseData(data: BytesLike) {
+  const func = getFunctionBySelector(dataSlice(data, 0, 4))
+  if (func) {
+    const [fragment, contract] = func
+    const args = defaultAbiCoder.decode(fragment.inputs, dataSlice(data, 4))
+    console.info('Function:', `${contract}.${fragment.format()}`)
+    console.info('Args:', args.toObject(true))
+    return
+  }
+
+  const error = parseErrorData(data)
+  if (error) {
+    const [parsed, contract] = error
+    console.info('Error:', `${contract}.${parsed.signature}`)
+    console.info('Args:', parsed.args.toObject(true))
+    return
+  }
+
+  throw new Error('Unknown data')
 }

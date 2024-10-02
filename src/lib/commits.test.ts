@@ -1,7 +1,7 @@
 import type { Provider } from 'ethers'
 
 import { fetchCommitReport } from './commits.js'
-import { CCIPContractTypeOnRamp, CCIPVersion_1_2 } from './types.js'
+import { CCIPContractTypeOnRamp, CCIPVersion_1_2, type Lane } from './types.js'
 
 const mockProvider = {
   getBlockNumber: jest.fn(() => 15_000),
@@ -54,7 +54,7 @@ describe('fetchCommitReport', () => {
     const request = {
       log: { address: '0xOnRamp' },
       message: { sequenceNumber: 1n, sourceChainSelector: 5009297550715157269n },
-      version: CCIPVersion_1_2 as CCIPVersion_1_2,
+      lane: { version: CCIPVersion_1_2 as CCIPVersion_1_2 } as Lane,
     }
     const result = await fetchCommitReport(mockProvider as unknown as Provider, request, hints)
     expect(result).toMatchObject({
@@ -73,7 +73,7 @@ describe('fetchCommitReport', () => {
     const request = {
       log: { address: '0xAnotherOnRamp' },
       message: { sequenceNumber: 1n, sourceChainSelector: 5009297550715157269n },
-      version: CCIPVersion_1_2 as CCIPVersion_1_2,
+      lane: { version: CCIPVersion_1_2 as CCIPVersion_1_2 } as Lane,
     }
     await expect(
       fetchCommitReport(mockProvider as unknown as Provider, request, hints),

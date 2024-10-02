@@ -22,13 +22,11 @@ import {
   type CCIPCommit,
   type CCIPExecution,
   type CCIPRequest,
-  type CCIPRequestWithLane,
   chainIdFromSelector,
   chainNameFromId,
   chainNameFromSelector,
   getErrorData,
   getFunctionBySelector,
-  getOnRampStaticConfig,
   type Lane,
   lazyCached,
   networkInfo,
@@ -52,10 +50,10 @@ export async function getWallet(argv?: { wallet?: string }): Promise<BaseWallet>
   )
 }
 
-export async function selectRequest<R extends CCIPRequest | CCIPRequestWithLane>(
-  requests: R[],
+export async function selectRequest(
+  requests: readonly CCIPRequest[],
   promptSuffix?: string,
-): Promise<R> {
+): Promise<CCIPRequest> {
   if (requests.length === 1) return requests[0]
   const answer = await select({
     message: `${requests.length} messageIds found; select one${promptSuffix ? ' ' + promptSuffix : ''}`,
@@ -89,36 +87,7 @@ export function withDateTimestamp<T extends { readonly timestamp: number }>(
   return { ...obj, timestamp: new Date(obj.timestamp * 1e3) }
 }
 
-export async function withLanes(
-  source: Provider,
-  requests: CCIPRequest[],
-): Promise<CCIPRequestWithLane[]> {
-  const requestsWithLane: CCIPRequestWithLane[] = []
-  const cache = new Map<string, unknown>()
-  for (const request of requests) {
-    const lane = await lazyCached(
-      request.log.address,
-      async () => {
-        const [staticConfig] = await getOnRampStaticConfig(source, request.log.address)
-        return {
-          sourceChainSelector: staticConfig.chainSelector,
-          destChainSelector: staticConfig.destChainSelector,
-          onRamp: request.log.address,
-        }
-      },
-      cache,
-    )
-
-    const requestWithLane: CCIPRequestWithLane = {
-      ...request,
-      lane,
-    }
-    requestsWithLane.push(requestWithLane)
-  }
-  return requestsWithLane
-}
-
-export function prettyLane(lane: Lane, version: string) {
+export function prettyLane(lane: Lane) {
   console.info('Lane:')
   const source = networkInfo(lane.sourceChainSelector),
     dest = networkInfo(lane.destChainSelector)
@@ -126,7 +95,7 @@ export function prettyLane(lane: Lane, version: string) {
     name: { source: source.name, dest: dest.name },
     chainId: { source: source.chainId, dest: dest.chainId },
     chainSelector: { source: source.chainSelector, dest: dest.chainSelector },
-    'onRamp/version': { source: lane.onRamp, dest: version },
+    'onRamp/version': { source: lane.onRamp, dest: lane.version },
   })
 }
 
@@ -187,13 +156,8 @@ function formatDuration(secs: number) {
     .join('')
 }
 
-export async function prettyRequest<R extends CCIPRequest | CCIPRequestWithLane>(
-  source: Provider,
-  request: R,
-) {
-  if ('lane' in request) {
-    prettyLane(request.lane, request.version)
-  }
+export async function prettyRequest(source: Provider, request: CCIPRequest) {
+  prettyLane(request.lane)
   console.info('Request (source):')
 
   let finalized

@@ -9,7 +9,7 @@ import {
 
 const mockedContract = {
   typeAndVersion: jest.fn(() => `${CCIPContractTypeOnRamp} ${CCIPVersion_1_2}`),
-  getStaticConfig: jest.fn(() => ({ chainSelector: 1 })),
+  getStaticConfig: jest.fn(() => ({ chainSelector: 1, destChainSelector: 2 })),
 }
 
 function mockedMessage(seqNum: number) {
@@ -54,20 +54,30 @@ import {
   fetchCCIPMessageInLog,
   fetchCCIPMessagesInTx,
   fetchRequestsForSender,
-  getOnRampStaticConfig,
+  getOnRampLane,
 } from './requests.js'
-import { CCIPContractTypeOffRamp, CCIPContractTypeOnRamp, CCIPVersion_1_2 } from './types.js'
+import {
+  CCIPContractTypeOffRamp,
+  CCIPContractTypeOnRamp,
+  CCIPVersion_1_2,
+  type Lane,
+} from './types.js'
 
 beforeEach(() => {
   jest.clearAllMocks()
 })
 
-describe('getOnRampStaticConfig', () => {
+describe('getOnRampLane', () => {
   it('should return static config and contract', async () => {
     const rampAddress = getAddress(hexlify(randomBytes(20)))
     await expect(
-      getOnRampStaticConfig(mockedProvider as unknown as Provider, rampAddress),
-    ).resolves.toEqual([expect.objectContaining({ chainSelector: 1 }), mockedContract])
+      getOnRampLane(mockedProvider as unknown as Provider, rampAddress),
+    ).resolves.toEqual({
+      sourceChainSelector: 1,
+      destChainSelector: 2,
+      onRamp: rampAddress,
+      version: CCIPVersion_1_2,
+    })
     expect(Contract).toHaveBeenCalledWith(rampAddress, expect.anything(), mockedProvider)
   })
 
@@ -77,9 +87,7 @@ describe('getOnRampStaticConfig', () => {
       `${CCIPContractTypeOffRamp} ${CCIPVersion_1_2}`,
     )
 
-    await expect(
-      getOnRampStaticConfig(mockedProvider as unknown as Provider, rampAddress),
-    ).rejects.toThrow(
+    await expect(getOnRampLane(mockedProvider as unknown as Provider, rampAddress)).rejects.toThrow(
       `Not an OnRamp: ${rampAddress} is "${CCIPContractTypeOffRamp} ${CCIPVersion_1_2}"`,
     )
   })
@@ -102,8 +110,8 @@ describe('fetchCCIPMessagesInTx', () => {
         sourceTokenData: [],
       },
       timestamp: 1234567890,
-      version: CCIPVersion_1_2,
       tx: mockTx,
+      lane: { version: CCIPVersion_1_2 },
     })
   })
 
@@ -145,8 +153,8 @@ describe('fetchCCIPMessageInLog', () => {
       log: { index: 1 },
       message: {},
       timestamp: 1234567890,
-      version: CCIPVersion_1_2,
       tx: mockTx,
+      lane: { version: CCIPVersion_1_2 },
     })
   })
 
@@ -227,6 +235,7 @@ describe('fetchRequestsForSender', () => {
       log: { address: '0xOnRamp', topics: ['0x123'], blockNumber: 11 },
       message: { sender: '0xSender' },
       version: CCIPVersion_1_2 as CCIPVersion_1_2,
+      lane: {} as Lane,
     }
     mockedProvider.getLogs.mockResolvedValue([])
     mockedProvider.getLogs.mockResolvedValueOnce([{}, {}])

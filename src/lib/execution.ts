@@ -30,8 +30,8 @@ import {
  * @returns ManualExec report arguments
  **/
 export function calculateManualExecProof(
-  messagesInBatch: CCIPMessage[],
-  { destChainSelector, onRamp }: Pick<Lane, 'destChainSelector' | 'onRamp'>,
+  messagesInBatch: readonly CCIPMessage[],
+  lane: Lane,
   messageIds: string[],
   merkleRoot?: string,
 ): {
@@ -40,11 +40,7 @@ export function calculateManualExecProof(
   proofFlagBits: bigint
 } {
   const leaves: string[] = []
-  const hasher = getLeafHasher({
-    sourceChainSelector: messagesInBatch[0].sourceChainSelector,
-    destChainSelector,
-    onRamp,
-  })
+  const hasher = getLeafHasher(lane)
   const prove: number[] = []
   const messages: CCIPMessage[] = []
   const seen = new Set<string>()
@@ -87,15 +83,14 @@ export function calculateManualExecProof(
 
 export async function fetchOffRamp<V extends CCIPVersion>(
   runner: ContractRunner,
-  { sourceChainSelector, destChainSelector, onRamp }: Lane,
-  ccipVersion: V,
+  { sourceChainSelector, destChainSelector, onRamp, version }: Lane<V>,
   hints?: { fromBlock?: number },
 ): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]>> {
   const dest = runner.provider!
   // we use Router interface to find a router, and from there find the OffRamp,
   // because these events are more frequent than some low-activity OffRamp's
   const routerInterface = lazyCached('Interface Router', () => new Interface(Router))
-  const offRampInterface = getOffRampInterface(ccipVersion)
+  const offRampInterface = getOffRampInterface(version)
   const routerTopics = new Set<string>([routerInterface.getEvent('MessageExecuted')!.topicHash])
   const offRampTopics = new Set<string>([
     offRampInterface.getEvent('ExecutionStateChanged')!.topicHash,
@@ -214,7 +209,7 @@ const SUCCESS = 2
  **/
 export async function* fetchExecutionReceipts(
   dest: Provider,
-  requests: readonly Pick<CCIPRequest, 'message' | 'log' | 'version'>[],
+  requests: readonly Omit<CCIPRequest, 'tx' | 'timestamp'>[],
   hints?: { fromBlock?: number },
 ): AsyncGenerator<CCIPExecution, void, unknown> {
   const onlyLast = !hints?.fromBlock // backwards
@@ -239,8 +234,8 @@ export async function* fetchExecutionReceipts(
     }
     // support fetching with different versions/topics
     const topic0s = new Set(
-      requests.map(({ version }) => {
-        const offRampInterface = getOffRampInterface(version)
+      requests.map(({ lane }) => {
+        const offRampInterface = getOffRampInterface(lane.version)
         return offRampInterface.getEvent('ExecutionStateChanged')!.topicHash
       }),
     )
@@ -268,7 +263,7 @@ export async function* fetchExecutionReceipts(
             continue
           onrampToOfframp.set(request.log.address, log.address) // found an offramp of interest!
 
-          const offRampInterface = getOffRampInterface(request.version)
+          const offRampInterface = getOffRampInterface(request.lane.version)
           const decoded = offRampInterface.parseLog(log)
           if (!decoded) continue
 

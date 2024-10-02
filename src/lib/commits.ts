@@ -24,17 +24,17 @@ export async function fetchCommitReport(
     log: { address: onRamp },
     message,
     timestamp: requestTimestamp,
-    version,
-  }: Pick<CCIPRequest, 'version'> & {
+    lane,
+  }: Pick<CCIPRequest, 'lane'> & {
     message: Pick<CCIPRequest['message'], 'sequenceNumber' | 'sourceChainSelector'>
     log: Pick<CCIPRequest['log'], 'address'>
     timestamp?: number
   },
   hints?: { startBlock?: number; commitStore?: string },
 ): Promise<CCIPCommit> {
-  const commitStoreABI = CCIP_ABIs[CCIPContractTypeCommitStore][version]
+  const commitStoreABI = CCIP_ABIs[CCIPContractTypeCommitStore][lane.version]
   const commitStoreInterface = lazyCached(
-    `Interface ${CCIPContractTypeCommitStore} ${version}`,
+    `Interface ${CCIPContractTypeCommitStore} ${lane.version}`,
     () => new Interface(commitStoreABI),
   )
   const topic0 = commitStoreInterface.getEvent('ReportAccepted')!.topicHash

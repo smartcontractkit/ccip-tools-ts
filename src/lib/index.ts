@@ -9,7 +9,7 @@ export {
   fetchCCIPMessageInLog,
   fetchCCIPMessagesInTx,
   fetchRequestsForSender,
-  getOnRampStaticConfig,
+  getOnRampLane,
 } from './requests.js'
 export {
   type CCIPCommit,
@@ -20,11 +20,11 @@ export {
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
-  type CCIPRequestWithLane,
   type CCIPVersion,
   CCIPVersion_1_2,
   CCIPVersion_1_5,
   type CommitReport,
+  defaultAbiCoder,
   encodeExtraArgs,
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,

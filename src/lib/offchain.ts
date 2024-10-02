@@ -1,6 +1,6 @@
-import { AbiCoder, type Addressable, EventFragment, keccak256, type Log } from 'ethers'
+import { type Addressable, EventFragment, keccak256, type Log } from 'ethers'
 
-import { type CCIPMessage, type CCIPRequest } from './types.js'
+import { type CCIPMessage, type CCIPRequest, defaultAbiCoder } from './types.js'
 import { networkInfo } from './utils.js'
 
 const USDC_EVENT = EventFragment.from('MessageSent(bytes message)')
@@ -15,8 +15,6 @@ type AttestationResponse =
   | { error: 'string' }
   | { status: 'pending_confirmations' }
   | { status: 'complete'; attestation: string }
-
-const defaultAbiCoder = AbiCoder.defaultAbiCoder()
 
 /**
  * Returns the USDC attestation for a given MessageSent Log

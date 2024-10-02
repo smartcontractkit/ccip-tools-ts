@@ -9,13 +9,8 @@ import EVM2EVMOffRamp_1_5_ABI from '../abi/OffRamp_1_5.js'
 import EVM2EVMOnRamp_1_2_ABI from '../abi/OnRamp_1_2.js'
 import EVM2EVMOnRamp_1_5_ABI from '../abi/OnRamp_1_5.js'
 
-export interface Lane {
-  sourceChainSelector: bigint
-  destChainSelector: bigint
-  onRamp: string
-}
-
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
+export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
 
 export type CCIPMessage = AbiParametersToPrimitiveTypes<
   ExtractAbiEvent<typeof EVM2EVMOnRamp_1_2_ABI, 'CCIPSendRequested'>['inputs']
@@ -62,17 +57,20 @@ export interface NetworkInfo {
   isTestnet: boolean
 }
 
+export interface Lane<V extends CCIPVersion = CCIPVersion> {
+  sourceChainSelector: bigint
+  destChainSelector: bigint
+  onRamp: string
+  version: V
+}
+
 type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'data' | 'blockNumber' | 'transactionHash'>
-export interface CCIPRequest {
+export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
   message: CCIPMessage
   log: Log_
   tx: { logs: readonly Log_[] }
   timestamp: number
-  version: CCIPVersion
-}
-
-export interface CCIPRequestWithLane extends CCIPRequest {
-  lane: Lane
+  lane: Lane<V>
 }
 
 export type CommitReport = AbiParametersToPrimitiveTypes<
@@ -113,7 +111,6 @@ export interface EVMExtraArgsV2 extends EVMExtraArgsV1 {
   allowOutOfOrderExecution: boolean
 }
 
-const defaultAbiCoder = AbiCoder.defaultAbiCoder()
 const DEFAULT_GAS_LIMIT = 200_000n
 
 /**

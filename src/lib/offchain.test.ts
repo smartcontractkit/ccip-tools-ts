@@ -1,7 +1,7 @@
-import { AbiCoder, getAddress, hexlify, id, keccak256, randomBytes } from 'ethers'
+import { getAddress, hexlify, id, keccak256, randomBytes } from 'ethers'
 
 import { fetchOffchainTokenData } from './offchain.js'
-import type { CCIPRequest } from './types.js'
+import { type CCIPRequest, defaultAbiCoder } from './types.js'
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -10,7 +10,6 @@ beforeEach(() => {
 describe('fetchOffchainTokenData', () => {
   const MESSAGE_SENT_TOPIC0 = id('MessageSent(bytes)')
   const TRANSFER_TOPIC0 = id('Transfer(address,address,uint256)')
-  const defaultAbiCoder = AbiCoder.defaultAbiCoder()
   const usdcToken = getAddress(hexlify(randomBytes(20)))
 
   const origFetch = global.fetch
