@@ -1,6 +1,6 @@
 import type { AbiParameterToPrimitiveType, SolidityTuple } from 'abitype'
 import { type AbiParametersToPrimitiveTypes, type ExtractAbiEvent, parseAbi } from 'abitype'
-import { AbiCoder, concat, id, type Log } from 'ethers'
+import { AbiCoder, concat, dataSlice, id, type Log } from 'ethers'
 
 import CommitStore_1_2_ABI from '../abi/CommitStore_1_2.js'
 import CommitStore_1_5_ABI from '../abi/CommitStore_1_5.js'
@@ -100,8 +100,8 @@ export interface CCIPExecution {
   timestamp: number
 }
 
-const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10)
-const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10)
+const EVMExtraArgsV1Tag = dataSlice(id('CCIP EVMExtraArgsV1'), 0, 4)
+const EVMExtraArgsV2Tag = dataSlice(id('CCIP EVMExtraArgsV2'), 0, 4)
 const EVMExtraArgsV1 = 'tuple(uint256 gasLimit)'
 const EVMExtraArgsV2 = 'tuple(uint256 gasLimit, bool allowOutOfOrderExecution)'
 export interface EVMExtraArgsV1 {

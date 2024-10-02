@@ -166,14 +166,14 @@ export async function prettyRequest(source: Provider, request: CCIPRequest) {
   } catch (_) {
     // no finalized tag support
   }
+  const nonce = Number(request.message.nonce)
   console.table({
     messageId: request.message.messageId,
     sender: request.message.sender,
     receiver: request.message.receiver,
     sequenceNumber: Number(request.message.sequenceNumber),
-    nonce: Number(request.message.nonce),
+    nonce: nonce === 0 ? '0 => allow out-of-order exec' : nonce,
     gasLimit: Number(request.message.gasLimit),
-    strict: request.message.strict,
     transactionHash: request.log.transactionHash,
     logIndex: request.log.index,
     blockNumber: request.log.blockNumber,
