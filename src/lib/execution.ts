@@ -11,6 +11,7 @@ import {
   type CCIPRequest,
   type CCIPVersion,
   type ExecutionReceipt,
+  ExecutionState,
   type Lane,
 } from './types.js'
 import {
@@ -192,8 +193,6 @@ function getOffRampInterface(version: CCIPVersion): Interface {
   )
 }
 
-const SUCCESS = 2
-
 /**
  * Fetch ExecutionReceipts for given requests
  * If more than one request is given, may yield them interleaved
@@ -267,14 +266,16 @@ export async function* fetchExecutionReceipts(
           const decoded = offRampInterface.parseLog(log)
           if (!decoded) continue
 
-          const receipt = decoded.args.toObject() as ExecutionReceipt
+          const receipt = Object.assign(decoded.args.toObject(), {
+            state: Number(decoded.args.state),
+          }) as ExecutionReceipt
           if (
             receipt.messageId !== request.message.messageId ||
             messageIdsCompleted.has(receipt.messageId)
           )
             continue
           // onlyLast if we're paging blockRanges backwards, or if receipt.state is success (last state)
-          if (onlyLast || Number(receipt.state) === SUCCESS) {
+          if (onlyLast || receipt.state === ExecutionState.Success) {
             messageIdsCompleted.add(receipt.messageId)
           }
           if (log.blockNumber !== lastLogBlock?.[0]) {

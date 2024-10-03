@@ -85,14 +85,22 @@ export interface CCIPCommit {
   log: Log_
 }
 
-export type ExecutionReceipt = AbiParameterToPrimitiveType<{
-  // hack: trick abitypes into giving us the struct equivalent types, to cast from Result
-  type: SolidityTuple
-  components: ExtractAbiEvent<
-    (typeof CCIP_ABIs)[CCIPContractTypeOffRamp][CCIPVersion_1_2],
-    'ExecutionStateChanged'
-  >['inputs']
-}>
+export enum ExecutionState {
+  Success = 2,
+  Failed,
+}
+
+export type ExecutionReceipt = Omit<
+  AbiParameterToPrimitiveType<{
+    // hack: trick abitypes into giving us the struct equivalent types, to cast from Result
+    type: SolidityTuple
+    components: ExtractAbiEvent<
+      (typeof CCIP_ABIs)[CCIPContractTypeOffRamp][CCIPVersion_1_2],
+      'ExecutionStateChanged'
+    >['inputs']
+  }>,
+  'state'
+> & { state: ExecutionState }
 
 export interface CCIPExecution {
   receipt: ExecutionReceipt

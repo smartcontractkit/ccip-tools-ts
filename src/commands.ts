@@ -27,6 +27,7 @@ import {
   defaultAbiCoder,
   encodeExtraArgs,
   estimateExecGasForRequest,
+  ExecutionState,
   fetchAllMessagesInBatch,
   fetchCCIPMessageById,
   fetchCCIPMessageInLog,
@@ -255,13 +256,13 @@ export async function manualExecSenderQueue(
   console.info('Found', requests.length, `requests for "${firstRequest.message.sender}"`)
 
   const destFromBlock = await getSomeBlockNumberBefore(dest, firstRequest.timestamp)
-  const lastExecSuccess = new Map<string, boolean>()
+  const lastExecState = new Map<string, ExecutionState>()
   const firstExecBlock = new Map<string, number>()
   let offRamp: string
   for await (const { receipt, log } of fetchExecutionReceipts(dest, requests, {
     fromBlock: destFromBlock,
   })) {
-    lastExecSuccess.set(receipt.messageId, receipt.state === 2n)
+    lastExecState.set(receipt.messageId, receipt.state)
     if (!firstExecBlock.has(receipt.messageId))
       firstExecBlock.set(receipt.messageId, log.blockNumber)
     offRamp ??= log.address
@@ -269,8 +270,8 @@ export async function manualExecSenderQueue(
 
   const requestsPending = requests.filter(({ message }) =>
     argv.execFailed
-      ? lastExecSuccess.get(message.messageId) !== true
-      : !lastExecSuccess.has(message.messageId),
+      ? lastExecState.get(message.messageId) !== ExecutionState.Success
+      : !lastExecState.has(message.messageId),
   )
   console.info(requestsPending.length, `requests eligible for manualExec`)
   if (!requestsPending.length) return

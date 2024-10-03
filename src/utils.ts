@@ -25,6 +25,7 @@ import {
   chainIdFromSelector,
   chainNameFromId,
   chainNameFromSelector,
+  ExecutionState,
   getErrorData,
   getFunctionBySelector,
   type Lane,
@@ -219,7 +220,7 @@ export async function prettyCommit(
         return [
           `gasPrice[${chainNameFromSelector(destChainSelector)}]`,
           `${formatUnits(execLayerGas)}` +
-            (daLayerGas > 0 ? ` (DA: ${formatUnits(daLayerGas)})` : ''),
+          (daLayerGas > 0 ? ` (DA: ${formatUnits(daLayerGas)})` : ''),
         ] as const
       }),
     ),
@@ -232,7 +233,7 @@ export async function prettyCommit(
 
 export function prettyReceipt(receipt: CCIPExecution, request: { timestamp: number }) {
   console.table({
-    state: receipt.receipt.state === 2n ? '✅ success' : '❌ failed',
+    state: receipt.receipt.state === ExecutionState.Success ? '✅ success' : '❌ failed',
     ...formatData('returnData', receipt.receipt.returnData, true),
     offRamp: receipt.log.address,
     transactionHash: receipt.log.transactionHash,

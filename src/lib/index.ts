@@ -29,6 +29,7 @@ export {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
   type ExecutionReceipt,
+  ExecutionState,
   type Lane,
   type NetworkInfo,
 } from './types.js'
