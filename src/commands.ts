@@ -140,8 +140,9 @@ export async function manualExec(
   providers: Providers,
   txHash: string,
   argv: {
-    gasLimit: number
-    tokensGasLimit: number
+    gasLimit?: number
+    estimateGasLimit?: number
+    tokensGasLimit?: number
     logIndex?: number
     format: Format
     wallet?: string
@@ -185,22 +186,37 @@ export async function manualExec(
   const execReport = { ...manualExecReport, offchainTokenData: [offchainTokenData] }
 
   const wallet = (await getWallet(argv)).connect(dest)
+  const offRampContract = await discoverOffRamp(wallet, request.lane, {
+    fromBlock: commit.log.blockNumber,
+  })
+
+  if (argv.estimateGasLimit != null) {
+    argv.gasLimit = Math.ceil(
+      (await estimateExecGasForRequest(
+        source,
+        dest,
+        request.lane.onRamp,
+        {
+          sender: request.message.sender as string,
+          receiver: request.message.receiver as string,
+          data: request.message.data,
+          tokenAmounts: request.message.tokenAmounts as { token: string; amount: bigint }[],
+        },
+        { offRamp: await offRampContract.getAddress() },
+      )) *
+        (1 + argv.estimateGasLimit / 100),
+    )
+  }
 
   let manualExecTx
   if (request.lane.version === CCIPVersion_1_2) {
-    const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit))
-    const offRampContract = await discoverOffRamp(wallet, request.lane, {
-      fromBlock: commit.log.blockNumber,
-    })
+    const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit ?? 0))
     manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
   } else {
     const gasOverrides = manualExecReport.messages.map((message) => ({
-      receiverExecutionGasLimit: BigInt(argv.gasLimit),
-      tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv.tokensGasLimit)),
+      receiverExecutionGasLimit: BigInt(argv.gasLimit ?? 0),
+      tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv.tokensGasLimit ?? 0)),
     }))
-    const offRampContract = await discoverOffRamp(wallet, request.lane, {
-      fromBlock: commit.log.blockNumber,
-    })
     manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
   }
 
@@ -218,8 +234,8 @@ export async function manualExecSenderQueue(
   providers: Providers,
   txHash: string,
   argv: {
-    gasLimit: number
-    tokensGasLimit: number
+    gasLimit?: number
+    tokensGasLimit?: number
     logIndex?: number
     execFailed?: boolean
     format: Format
@@ -325,12 +341,12 @@ export async function manualExecSenderQueue(
 
     let manualExecTx
     if (firstRequest.lane.version === CCIPVersion_1_2) {
-      const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit))
+      const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit ?? 0))
       manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
     } else {
       const gasOverrides = manualExecReport.messages.map((message) => ({
-        receiverExecutionGasLimit: BigInt(argv.gasLimit),
-        tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv.tokensGasLimit)),
+        receiverExecutionGasLimit: BigInt(argv.gasLimit ?? 0),
+        tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv.tokensGasLimit ?? 0)),
       }))
       manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
     }

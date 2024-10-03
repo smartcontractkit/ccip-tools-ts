@@ -266,6 +266,8 @@ export function logParsedError(err: unknown): boolean {
     const parsed = parseErrorData(errorData)?.[0]
     if (parsed) {
       reason = ['\nReason =', parsed.signature, parsed.args.toObject()]
+    } else {
+      reason = ['\nReturnData =', errorData]
     }
   }
   console.error(`🛑 Failed to call "${method}"\nError =`, shortMessage, ...reason, '\nCall =', {

@@ -91,12 +91,17 @@ async function main() {
             'gas-limit': {
               type: 'number',
               describe: 'Override gas limit for receivers callback (0 keeps original)',
-              default: 0,
             },
             'tokens-gas-limit': {
               type: 'number',
               describe: 'Override gas limit for tokens releaseOrMint calls (0 keeps original)',
-              default: 0,
+            },
+            'estimate-gas-limit': {
+              type: 'number',
+              describe:
+                'Estimate gas limit for receivers callback; argument is a % margin to add to the estimate',
+              example: '10',
+              conflicts: 'gas-limit',
             },
             wallet: {
               type: 'string',

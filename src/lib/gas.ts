@@ -9,7 +9,6 @@ import {
   randomBytes,
   solidityPackedKeccak256,
   toBeHex,
-  ZeroAddress,
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'

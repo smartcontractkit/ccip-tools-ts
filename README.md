@@ -69,6 +69,10 @@ which is always estimated). `--gas-limit=0` default re-uses limit specified in o
 
 `--tokens-gas-limit` allows to override the gas limit for the token pool operations, if any.
 
+`--estimate-gas-limit` option will try to estimate automatically the gas limit moverride for the
+message execution, based on the current state of the network. That's only for main `ccipReceive`
+exec callback. Tokens gas limit override estimation is not supported.
+
 `--sender-queue` opts into collecting all following messages from the same sender, starting from
 the provided message, and executing all of the eligible ones. By default, only pending
 (non-executed) messages are included. `--exec-failed` includes failed messages as well. This option
