@@ -247,7 +247,7 @@ export function logParsedError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false
   const shortMessage = (err as { shortMessage: string }).shortMessage
   const transaction = (err as { transaction: { to: string; data: string } }).transaction
-  if (!shortMessage || !transaction) return false
+  if (!shortMessage || !transaction?.data) return false
 
   const invocation_ = (err as { invocation: { method: string; args: Result } | null }).invocation
   let method, invocation

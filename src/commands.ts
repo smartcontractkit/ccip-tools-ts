@@ -191,21 +191,20 @@ export async function manualExec(
   })
 
   if (argv.estimateGasLimit != null) {
-    argv.gasLimit = Math.ceil(
-      (await estimateExecGasForRequest(
-        source,
-        dest,
-        request.lane.onRamp,
-        {
-          sender: request.message.sender as string,
-          receiver: request.message.receiver as string,
-          data: request.message.data,
-          tokenAmounts: request.message.tokenAmounts as { token: string; amount: bigint }[],
-        },
-        { offRamp: await offRampContract.getAddress() },
-      )) *
-        (1 + argv.estimateGasLimit / 100),
+    const estimated = await estimateExecGasForRequest(
+      source,
+      dest,
+      request.lane.onRamp,
+      {
+        sender: request.message.sender as string,
+        receiver: request.message.receiver as string,
+        data: request.message.data,
+        tokenAmounts: request.message.tokenAmounts as { token: string; amount: bigint }[],
+      },
+      { offRamp: await offRampContract.getAddress() },
     )
+    console.log('Estimated gasLimit override:', estimated)
+    argv.gasLimit = Math.ceil(estimated * (1 + argv.estimateGasLimit / 100))
   }
 
   let manualExecTx
@@ -223,10 +222,10 @@ export async function manualExec(
   console.log(
     '🚀 manualExec tx =',
     manualExecTx.hash,
-    ', to =',
+    'to offRamp =',
     manualExecTx.to,
-    ', gasLimit =',
-    manualExecTx.gasLimit,
+    'gasLimit =',
+    Number(manualExecTx.gasLimit),
   )
 }
 
@@ -411,7 +410,7 @@ export async function sendMessage(
       throw new Error(
         `No "${chainNameFromId(sourceChainId)}" -> "${chainNameFromId(destChainId)}" lane on ${argv.router}`,
       )
-    const gasLimit = await estimateExecGasForRequest(
+    const estimated = await estimateExecGasForRequest(
       source,
       await providers.forChainId(destChainId),
       onRamp,
@@ -422,7 +421,8 @@ export async function sendMessage(
         tokenAmounts,
       },
     )
-    argv.gasLimit = Math.ceil(gasLimit * (1 + argv.estimateGasLimit / 100))
+    console.log('Estimated gasLimit:', estimated)
+    argv.gasLimit = Math.ceil(estimated * (1 + argv.estimateGasLimit / 100))
   }
 
   // `--allow-out-of-order-exec` forces EVMExtraArgsV2, which shouldn't work on v1.2 lanes;
