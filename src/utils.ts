@@ -220,7 +220,7 @@ export async function prettyCommit(
         return [
           `gasPrice[${chainNameFromSelector(destChainSelector)}]`,
           `${formatUnits(execLayerGas)}` +
-          (daLayerGas > 0 ? ` (DA: ${formatUnits(daLayerGas)})` : ''),
+            (daLayerGas > 0 ? ` (DA: ${formatUnits(daLayerGas)})` : ''),
         ] as const
       }),
     ),

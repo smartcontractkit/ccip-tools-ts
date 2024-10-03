@@ -17,7 +17,7 @@ import type { TypedContract } from 'ethers-abitype'
 import TokenABI from '../abi/BurnMintERC677Token.js'
 import BurnMintTokenPool from '../abi/BurnMintTokenPool_1_5.js'
 import RouterABI from '../abi/Router.js'
-import { fetchOffRamp } from './execution.js'
+import { discoverOffRamp, validateOffRamp } from './execution.js'
 import {
   CCIP_ABIs,
   type CCIPContractTypeOffRamp,
@@ -45,7 +45,7 @@ async function getDestTokenForSource(
   source: Provider,
   dest: JsonRpcApiProvider,
   onRamp: string,
-  offRamp: Awaited<ReturnType<typeof fetchOffRamp>>,
+  offRamp: Awaited<ReturnType<typeof discoverOffRamp>>,
   token: string,
 ) {
   return lazyCached(`destToken ${token}`, async () => {
@@ -82,36 +82,39 @@ async function getDestTokenForSource(
  *
  * @param source - Provider for the source chain
  * @param dest - Provider for the destination chain
- * @param sourceRouter - Router contract address on the source chain
+ * @param onRamp - onRamp contract address
  * @param request - CCIP request info
+ * @param hints - hints for the offRamp contract (optional, to skip offramp discovery)
  * @returns estimated gasLimit
  **/
 export async function estimateExecGasForRequest(
   source: Provider,
   dest: JsonRpcApiProvider,
-  sourceRouter: string,
+  onRamp: string,
   request: {
     sender: string
     receiver: string
     data: string
     tokenAmounts: readonly { token: string; amount: bigint }[]
   },
+  hints?: { offRamp?: string },
 ) {
   const { chainSelector: sourceChainSelector, name: sourceName } = await getProviderNetwork(source)
   const { chainSelector: destChainSelector, name: destName } = await getProviderNetwork(dest)
-  const sourceRouterContract = new Contract(
-    sourceRouter,
-    RouterABI,
-    source,
-  ) as unknown as TypedContract<typeof RouterABI>
-  const onRamp = (await sourceRouterContract.getOnRamp(destChainSelector)) as string
-  if (!onRamp || onRamp === ZeroAddress)
-    throw new Error(`No "${sourceName}" -> "${destName}" lane on ${sourceRouter}`)
 
   const [, version] = await getTypeAndVersion(source, onRamp)
   const lane: Lane = { sourceChainSelector, destChainSelector, onRamp, version }
 
-  const offRamp = await fetchOffRamp(dest, lane)
+  let offRamp
+  if (hints?.offRamp) {
+    offRamp = await validateOffRamp(dest, hints.offRamp, lane)
+    if (!offRamp)
+      throw new Error(
+        `Invalid offRamp for "${sourceName}" -> "${destName}" (onRamp=${onRamp}) lane`,
+      )
+  } else {
+    offRamp = await discoverOffRamp(dest, lane)
+  }
   const { router: destRouter } = await offRamp.getDynamicConfig()
 
   const destTokenAmounts = await Promise.all(

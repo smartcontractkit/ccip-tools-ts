@@ -25,6 +25,7 @@ import {
   chainNameFromId,
   chainSelectorFromId,
   defaultAbiCoder,
+  discoverOffRamp,
   encodeExtraArgs,
   estimateExecGasForRequest,
   ExecutionState,
@@ -35,7 +36,6 @@ import {
   fetchCommitReport,
   fetchExecutionReceipts,
   fetchOffchainTokenData,
-  fetchOffRamp,
   fetchRequestsForSender,
   getFunctionBySelector,
   getSomeBlockNumberBefore,
@@ -189,7 +189,7 @@ export async function manualExec(
   let manualExecTx
   if (request.lane.version === CCIPVersion_1_2) {
     const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit))
-    const offRampContract = await fetchOffRamp(wallet, request.lane, {
+    const offRampContract = await discoverOffRamp(wallet, request.lane, {
       fromBlock: commit.log.blockNumber,
     })
     manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
@@ -198,7 +198,7 @@ export async function manualExec(
       receiverExecutionGasLimit: BigInt(argv.gasLimit),
       tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv.tokensGasLimit)),
     }))
-    const offRampContract = await fetchOffRamp(wallet, request.lane, {
+    const offRampContract = await discoverOffRamp(wallet, request.lane, {
       fromBlock: commit.log.blockNumber,
     })
     manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
@@ -296,7 +296,7 @@ export async function manualExecSenderQueue(
 
   const wallet = (await getWallet(argv)).connect(dest)
 
-  const offRampContract = await fetchOffRamp(wallet, firstRequest.lane, {
+  const offRampContract = await discoverOffRamp(wallet, firstRequest.lane, {
     fromBlock: destFromBlock,
   })
 
@@ -385,11 +385,20 @@ export async function sendMessage(
       ? argv.data
       : hexlify(toUtf8Bytes(argv.data))
 
+  const router = new Contract(argv.router, RouterABI, wallet) as unknown as TypedContract<
+    typeof RouterABI
+  >
+
   if (argv.estimateGasLimit != null) {
+    const onRamp = (await router.getOnRamp(destSelector)) as string
+    if (!onRamp || onRamp === ZeroAddress)
+      throw new Error(
+        `No "${chainNameFromId(sourceChainId)}" -> "${chainNameFromId(destChainId)}" lane on ${argv.router}`,
+      )
     const gasLimit = await estimateExecGasForRequest(
       source,
       await providers.forChainId(destChainId),
-      argv.router,
+      onRamp,
       {
         sender: wallet.address,
         receiver,
@@ -416,10 +425,6 @@ export async function sendMessage(
     feeToken: argv.feeToken ?? ZeroAddress, // feeToken=ZeroAddress means native
     tokenAmounts,
   }
-
-  const router = new Contract(argv.router, RouterABI, wallet) as unknown as TypedContract<
-    typeof RouterABI
-  >
 
   // calculate fee
   const fee = await router.getFee(destSelector, message)
@@ -490,16 +495,13 @@ export async function estimateGas(
     receiver: string
     sender?: string
     data?: string
-    offRamp?: string
     transferTokens?: string[]
   },
 ) {
-  const source = await providers.forChainId(
-    isNaN(+argv.source) ? chainIdFromName(argv.source) : +argv.source,
-  )
-  const dest = await providers.forChainId(
-    isNaN(+argv.dest) ? chainIdFromName(argv.dest) : +argv.dest,
-  )
+  const sourceChainId = isNaN(+argv.source) ? chainIdFromName(argv.source) : +argv.source
+  const source = await providers.forChainId(sourceChainId)
+  const destChainId = isNaN(+argv.dest) ? chainIdFromName(argv.dest) : +argv.dest
+  const dest = await providers.forChainId(destChainId)
 
   const data = !argv.data
     ? '0x'
@@ -511,7 +513,16 @@ export async function estimateGas(
     tokenAmounts = await parseTokenAmounts(source, argv.transferTokens)
   }
 
-  const gas = await estimateExecGasForRequest(source, dest, argv.router, {
+  const router = new Contract(argv.router, RouterABI, source) as unknown as TypedContract<
+    typeof RouterABI
+  >
+  const onRamp = (await router.getOnRamp(chainSelectorFromId(sourceChainId))) as string
+  if (!onRamp || onRamp === ZeroAddress)
+    throw new Error(
+      `No "${chainNameFromId(sourceChainId)}" -> "${chainNameFromId(destChainId)}" lane on ${argv.router}`,
+    )
+
+  const gas = await estimateExecGasForRequest(source, dest, onRamp, {
     sender: argv.sender ?? ZeroAddress,
     receiver: argv.receiver,
     data,

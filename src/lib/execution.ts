@@ -82,16 +82,35 @@ export function calculateManualExecProof(
   return offRampProof
 }
 
-export async function fetchOffRamp<V extends CCIPVersion>(
+export async function validateOffRamp<V extends CCIPVersion>(
   runner: ContractRunner,
-  { sourceChainSelector, destChainSelector, onRamp, version }: Lane<V>,
+  address: string,
+  lane: Lane<V>,
+): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]> | undefined> {
+  const [staticConfig, offRampContract] = await getOffRampStaticConfig(runner, address)
+
+  // reject if it's not an OffRamp for our lane
+  if (
+    lane.sourceChainSelector !== staticConfig.sourceChainSelector ||
+    lane.destChainSelector !== staticConfig.chainSelector ||
+    lane.onRamp === staticConfig.onRamp
+  ) {
+    return offRampContract as unknown as TypedContract<
+      (typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]
+    >
+  }
+}
+
+export async function discoverOffRamp<V extends CCIPVersion>(
+  runner: ContractRunner,
+  lane: Lane<V>,
   hints?: { fromBlock?: number },
 ): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]>> {
   const dest = runner.provider!
   // we use Router interface to find a router, and from there find the OffRamp,
   // because these events are more frequent than some low-activity OffRamp's
   const routerInterface = lazyCached('Interface Router', () => new Interface(Router))
-  const offRampInterface = getOffRampInterface(version)
+  const offRampInterface = getOffRampInterface(lane.version)
   const routerTopics = new Set<string>([routerInterface.getEvent('MessageExecuted')!.topicHash])
   const offRampTopics = new Set<string>([
     offRampInterface.getEvent('ExecutionStateChanged')!.topicHash,
@@ -125,14 +144,26 @@ export async function fetchOffRamp<V extends CCIPVersion>(
 
   for (const blockRange of interleaveBlockRanges()) {
     // we don't know our OffRamp address yet, so fetch any compatible log from OffRamps or Routers
-    const logs = await dest.getLogs({
-      ...blockRange,
-      topics: [Array.from(new Set([...routerTopics, ...offRampTopics]))],
-    })
+    const logs = (
+      await dest.getLogs({
+        ...blockRange,
+        topics: [Array.from(new Set([...offRampTopics, ...routerTopics]))],
+      })
+    )
+      .filter(({ address }) => {
+        // keep only one log per address
+        if (seen.has(address)) return false
+        seen.add(address)
+        return true
+      })
+      .sort((a, b) => {
+        // sort OffRamp logs before Router logs (to possibly save on the `Router.getOffRamps` call)
+        if (offRampTopics.has(a.topics[0]) && routerTopics.has(b.topics[0])) return -1
+        if (routerTopics.has(a.topics[0]) && offRampTopics.has(b.topics[0])) return 1
+        return 0
+      })
 
     for (const log of logs) {
-      if (seen.has(log.address)) continue
-
       try {
         // if an offRamp log, check it directly; otherwise, check each offRamp of the router
         const offRamps = offRampTopics.has(log.topics[0])
@@ -144,31 +175,20 @@ export async function fetchOffRamp<V extends CCIPVersion>(
                 >
               ).getOffRamps()
             )
-              .filter(({ sourceChainSelector: sel }) => sel === sourceChainSelector)
+              .filter(({ sourceChainSelector: sel }) => sel === lane.sourceChainSelector)
               .map(({ offRamp }) => offRamp as string)
         for (const offRamp of offRamps) {
-          const [staticConfig, offRampContract] = await getOffRampStaticConfig(runner, offRamp)
-
-          // reject if it's not an OffRamp for our onRamp
-          if (
-            sourceChainSelector === staticConfig.sourceChainSelector &&
-            destChainSelector == staticConfig.chainSelector &&
-            onRamp === staticConfig.onRamp
-          ) {
-            return offRampContract as unknown as TypedContract<
-              (typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]
-            >
-          }
+          const contract = await validateOffRamp<V>(runner, offRamp, lane)
+          if (contract) return contract
         }
       } catch (_) {
         // passthrough to seen + continue
       }
-      seen.add(log.address)
     }
   }
 
   throw new Error(
-    `Could not find OffRamp on "${chainNameFromSelector(destChainSelector)}" for OnRamp=${onRamp} on "${chainNameFromSelector(sourceChainSelector)}"`,
+    `Could not find OffRamp on "${chainNameFromSelector(lane.destChainSelector)}" for OnRamp=${lane.onRamp} on "${chainNameFromSelector(lane.sourceChainSelector)}"`,
   )
 }
 
@@ -177,10 +197,11 @@ async function getOffRampStaticConfig(dest: ContractRunner, address: string) {
     const [type_, version] = await getTypeAndVersion(dest.provider!, address)
     if (type_ != CCIPContractTypeOffRamp)
       throw new Error(`Not an OffRamp: ${address} is "${type_} ${version}"`)
-    const offRampABI = CCIP_ABIs[CCIPContractTypeOffRamp][version]
-    const offRampContract = new Contract(address, offRampABI, dest) as unknown as TypedContract<
-      typeof offRampABI
-    >
+    const offRampContract = new Contract(
+      address,
+      getOffRampInterface(version),
+      dest,
+    ) as unknown as TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOffRamp][typeof version]>
     const staticConfig = await offRampContract.getStaticConfig()
     return [staticConfig, offRampContract] as const
   })
