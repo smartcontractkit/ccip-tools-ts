@@ -2,13 +2,16 @@ import type { JsonRpcApiProvider } from 'ethers'
 import {
   concat,
   Contract,
+  dataSlice,
   FunctionFragment,
+  getAddress,
   getNumber,
   hexlify,
   type Provider,
   randomBytes,
   solidityPackedKeccak256,
   toBeHex,
+  ZeroAddress,
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
@@ -25,7 +28,12 @@ import {
   defaultAbiCoder,
   type Lane,
 } from './types.js'
-import { getProviderNetwork, getTypeAndVersion, lazyCached } from './utils.js'
+import {
+  chainNameFromSelector,
+  getProviderNetwork,
+  getTypeAndVersion,
+  lazyCached,
+} from './utils.js'
 
 const BALANCES_SLOT = 0
 const ccipReceive = FunctionFragment.from({
@@ -49,6 +57,7 @@ async function getDestTokenForSource(
 ) {
   return lazyCached(`destToken ${token}`, async () => {
     const [, version] = await getTypeAndVersion(source, onRamp)
+    let remoteToken
     if (version === CCIPVersion_1_2) {
       const offRampContract = offRamp as unknown as TypedContract<
         (typeof CCIP_ABIs)[CCIPContractTypeOffRamp][typeof version]
@@ -57,7 +66,7 @@ async function getDestTokenForSource(
       const poolContract = new Contract(pool, BurnMintTokenPool, dest) as unknown as TypedContract<
         typeof BurnMintTokenPool
       >
-      return poolContract.getToken() as Promise<string>
+      remoteToken = (await poolContract.getToken()) as string
     } else {
       const onRampContract = new Contract(
         onRamp,
@@ -71,8 +80,13 @@ async function getDestTokenForSource(
         BurnMintTokenPool,
         source,
       ) as unknown as TypedContract<typeof BurnMintTokenPool>
-      return poolContract.getRemoteToken(destChainSelector)
+      remoteToken = getAddress(dataSlice(await poolContract.getRemoteToken(destChainSelector), -20))
+      if (remoteToken === ZeroAddress)
+        throw new Error(
+          `Token pool ${pool as string} doesnt support "${chainNameFromSelector(destChainSelector)}" dest`,
+        )
     }
+    return remoteToken
   })
 }
 
