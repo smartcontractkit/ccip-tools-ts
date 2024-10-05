@@ -55,10 +55,10 @@ export async function getSomeBlockNumberBefore(
 
   // now, bin-search based on timestamp proportions, looking for
   // a block at most N estimated blockTimes from our target timestamp
-  while (afterBlockNumber - beforeBlockNumber > precision) {
+  while (timestamp - beforeTimestamp >= 1 && afterBlockNumber - beforeBlockNumber > precision) {
     const pivot =
       beforeBlockNumber +
-      Math.trunc(
+      Math.ceil(
         ((timestamp - beforeTimestamp) / (afterTimestamp - beforeTimestamp)) *
           (afterBlockNumber - beforeBlockNumber),
       )
