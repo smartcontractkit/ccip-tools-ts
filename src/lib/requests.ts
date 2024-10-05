@@ -141,6 +141,7 @@ export async function fetchCCIPMessageById(
       ...blockRange,
       topics: [Array.from(ccipRequestsTopicHashes)],
     })
+    console.debug('fetchCCIPMessageById: found', logs.length, 'logs in', blockRange)
     for (const log of logs) {
       let onRampInterface: Interface
       try {
@@ -185,6 +186,7 @@ export async function fetchAllMessagesInBatch(
       fromBlock,
       toBlock,
     })
+    console.debug('fetchAllMessagesInBatch: found', logs.length, 'logs in', { fromBlock, toBlock })
     const result: Omit<CCIPRequest, 'tx' | 'timestamp'>[] = []
     for (const log of logs) {
       const decoded = onRampInterface.parseLog(log)

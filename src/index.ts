@@ -40,6 +40,15 @@ async function main() {
         choices: Object.values(Format),
         default: Format.pretty,
       },
+      verbose: {
+        alias: 'v',
+        type: 'boolean',
+      },
+    })
+    .middleware((argv) => {
+      if (!argv.verbose) {
+        console.debug = () => {}
+      }
     })
     .command(
       ['show <tx_hash>', '*'],

@@ -162,6 +162,7 @@ export async function discoverOffRamp<V extends CCIPVersion>(
         if (routerTopics.has(a.topics[0]) && offRampTopics.has(b.topics[0])) return 1
         return 0
       })
+    console.debug('discoverOffRamp', { blockRange, logs, seen })
 
     for (const log of logs) {
       try {
@@ -268,6 +269,7 @@ export async function* fetchExecutionReceipts(
       topics: [Array.from(topic0s), null, requests.map(({ message }) => message.messageId)],
     })
     if (onlyLast) logs.reverse()
+    console.debug('fetchExecutionReceipts: found', logs.length, 'logs in', blockRange)
 
     let lastLogBlock: readonly [block: number, timestamp: number] | undefined
     for (const log of logs) {

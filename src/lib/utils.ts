@@ -70,6 +70,17 @@ export async function getSomeBlockNumberBefore(
       beforeBlockNumber = pivot
       beforeTimestamp = pivotTimestamp
     }
+    console.debug('getSomeBlockNumberBefore: searching block before', {
+      beforeBlockNumber,
+      beforeTimestamp,
+      pivot,
+      pivotTimestamp,
+      afterBlockNumber,
+      afterTimestamp,
+      estimatedBlockTime,
+      timestamp,
+      diffNumber: afterBlockNumber - beforeBlockNumber,
+    })
   }
   return beforeBlockNumber
 }

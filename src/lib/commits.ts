@@ -51,6 +51,7 @@ export async function fetchCommitReport(
       topics: [topic0],
       ...(hints?.commitStore ? { address: hints?.commitStore } : {}),
     })
+    console.debug('fetchCommitReport: found', logs.length, 'logs in', blockRange)
 
     for (const log of logs) {
       const decoded = commitStoreInterface.parseLog(log)
