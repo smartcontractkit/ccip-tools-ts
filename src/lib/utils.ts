@@ -37,7 +37,7 @@ export async function getSomeBlockNumberBefore(
     afterTimestamp = now
 
   // first, go back looking for a block prior to our target timestamp
-  for (let iter = 0; beforeBlockNumber > 1 && beforeTimestamp >= timestamp; iter++) {
+  for (let iter = 0; beforeBlockNumber > 1 && beforeTimestamp > timestamp; iter++) {
     afterBlockNumber = beforeBlockNumber
     afterTimestamp = beforeTimestamp
     beforeBlockNumber = Math.max(
@@ -49,19 +49,22 @@ export async function getSomeBlockNumberBefore(
     estimatedBlockTime = (now - beforeTimestamp) / (currentBlockNumber - beforeBlockNumber)
   }
 
-  if (beforeTimestamp >= timestamp) {
+  if (beforeTimestamp > timestamp) {
     throw new Error(`Could not find a block prior to timestamp=${timestamp}`)
   }
 
   // now, bin-search based on timestamp proportions, looking for
   // a block at most N estimated blockTimes from our target timestamp
   while (timestamp - beforeTimestamp >= 1 && afterBlockNumber - beforeBlockNumber > precision) {
-    const pivot =
-      beforeBlockNumber +
-      Math.ceil(
-        ((timestamp - beforeTimestamp) / (afterTimestamp - beforeTimestamp)) *
-          (afterBlockNumber - beforeBlockNumber),
-      )
+    const prop = (timestamp - beforeTimestamp) / (afterTimestamp - beforeTimestamp)
+    const delta =
+      prop > 0.5
+        ? Math.floor(prop * (afterBlockNumber - beforeBlockNumber))
+        : Math.ceil(prop * (afterBlockNumber - beforeBlockNumber))
+    let pivot = beforeBlockNumber + delta
+    if (pivot === afterBlockNumber) {
+      pivot--
+    }
     const pivotTimestamp = (await provider.getBlock(pivot))!.timestamp
     if (pivotTimestamp > timestamp) {
       afterBlockNumber = pivot
