@@ -1,4 +1,4 @@
-import { type Addressable, EventFragment, keccak256, type Log } from 'ethers'
+import { type Addressable, type Log, EventFragment, keccak256 } from 'ethers'
 
 import { type CCIPMessage, type CCIPRequest, defaultAbiCoder } from './types.js'
 import { networkInfo } from './utils.js'

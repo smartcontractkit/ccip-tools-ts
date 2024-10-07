@@ -2,13 +2,13 @@
 /* eslint-disable @typescript-eslint/no-base-to-string */
 import {
   type BytesLike,
+  type Provider,
   Contract,
+  ZeroAddress,
   dataSlice,
   hexlify,
   isHexString,
-  type Provider,
   toUtf8Bytes,
-  ZeroAddress,
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
@@ -16,10 +16,11 @@ import type { TypedContract } from 'ethers-abitype'
 import TokenABI from './abi/BurnMintERC677Token.js'
 import RouterABI from './abi/Router.js'
 import {
-  bigIntReplacer,
-  calculateManualExecProof,
   type CCIPRequest,
   CCIPVersion_1_2,
+  ExecutionState,
+  bigIntReplacer,
+  calculateManualExecProof,
   chainIdFromName,
   chainIdFromSelector,
   chainNameFromId,
@@ -28,7 +29,6 @@ import {
   discoverOffRamp,
   encodeExtraArgs,
   estimateExecGasForRequest,
-  ExecutionState,
   fetchAllMessagesInBatch,
   fetchCCIPMessageById,
   fetchCCIPMessageInLog,

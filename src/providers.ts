@@ -2,8 +2,8 @@ import { readFile } from 'node:fs/promises'
 
 import {
   type JsonRpcApiProvider,
-  JsonRpcProvider,
   type TransactionReceipt,
+  JsonRpcProvider,
   WebSocketProvider,
 } from 'ethers'
 

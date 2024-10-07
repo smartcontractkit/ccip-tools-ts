@@ -2,7 +2,7 @@
 import { concat, keccak256 } from 'ethers'
 
 import { testVectors } from './__mocks__/merklemultiTestVectors.js'
-import { hashInternal, ZERO_HASH } from './hasher.js'
+import { ZERO_HASH, hashInternal } from './hasher.js'
 import { Proof, Tree, verifyComputeRoot } from './merklemulti.js'
 // import { CombinationGenerator } from './utils'
 

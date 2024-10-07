@@ -1,10 +1,10 @@
 import {
+  type Provider,
+  type TransactionReceipt,
   Contract,
   getAddress,
   hexlify,
-  type Provider,
   randomBytes,
-  type TransactionReceipt,
 } from 'ethers'
 
 const mockedContract = {
@@ -57,10 +57,10 @@ import {
   getOnRampLane,
 } from './requests.js'
 import {
+  type Lane,
   CCIPContractTypeOffRamp,
   CCIPContractTypeOnRamp,
   CCIPVersion_1_2,
-  type Lane,
 } from './types.js'
 
 beforeEach(() => {

@@ -1,14 +1,14 @@
-import { Contract, type Provider } from 'ethers'
+import { type Provider, Contract } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import SELECTORS from './selectors.js'
-import type { NetworkInfo } from './types.js'
 import {
   type CCIPContractType,
+  type CCIPVersion,
+  type NetworkInfo,
   CCIPContractTypeCommitStore,
   CCIPContractTypeOffRamp,
   CCIPContractTypeOnRamp,
-  type CCIPVersion,
   CCIPVersion_1_2,
   CCIPVersion_1_5,
   VersionedContractABI,

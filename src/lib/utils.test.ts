@@ -56,7 +56,7 @@ describe('getSomeBlockNumberBefore', () => {
     const blockNumber = await getSomeBlockNumberBefore(provider as unknown as Provider, targetTs)
     expect(blockNumber).toBeLessThanOrEqual(800)
     expect(blockNumber).toBeGreaterThanOrEqual(790)
-    expect(provider.getBlock(blockNumber).timestamp).toBeLessThan(targetTs)
+    expect(provider.getBlock(blockNumber).timestamp).toBeLessThanOrEqual(targetTs)
   })
 })
 

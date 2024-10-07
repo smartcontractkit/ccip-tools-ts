@@ -4,16 +4,16 @@ import { readFile } from 'node:fs/promises'
 import { password, select } from '@inquirer/prompts'
 import {
   type Addressable,
+  type Provider,
+  type Result,
   BaseWallet,
   Contract,
+  SigningKey,
+  Wallet,
   dataSlice,
   formatUnits,
   hexlify,
   parseUnits,
-  type Provider,
-  type Result,
-  SigningKey,
-  Wallet,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
@@ -22,13 +22,13 @@ import {
   type CCIPCommit,
   type CCIPExecution,
   type CCIPRequest,
+  type Lane,
+  ExecutionState,
   chainIdFromSelector,
   chainNameFromId,
   chainNameFromSelector,
-  ExecutionState,
   getErrorData,
   getFunctionBySelector,
-  type Lane,
   lazyCached,
   networkInfo,
   parseErrorData,

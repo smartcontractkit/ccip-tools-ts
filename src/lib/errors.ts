@@ -1,11 +1,17 @@
-import type { ErrorDescription, FunctionFragment } from 'ethers'
-import { type BytesLike, Interface, type InterfaceAbi, isBytesLike } from 'ethers'
+import {
+  type BytesLike,
+  type ErrorDescription,
+  type FunctionFragment,
+  type InterfaceAbi,
+  Interface,
+  isBytesLike,
+} from 'ethers'
 
 import TokenABI from '../abi/BurnMintERC677Token.js'
 import BurnMintTokenPool_1_5 from '../abi/BurnMintTokenPool_1_5.js'
 import LockReleaseTokenPool_1_5 from '../abi/LockReleaseTokenPool_1_5.js'
 import Router from '../abi/Router.js'
-import { CCIP_ABIs, CCIPVersion_1_5 } from './types.js'
+import { CCIPVersion_1_5, CCIP_ABIs } from './types.js'
 import { lazyCached } from './utils.js'
 
 const ifaces: Record<string, Interface> = {

@@ -1,7 +1,7 @@
 // For reference implementation, see https://github.com/smartcontractkit/ccip/blob/ccip-develop/core/services/ocr2/plugins/ccip/hasher/leaf_hasher.go
 import { concat, hexlify, id, keccak256, toBeHex, zeroPadValue } from 'ethers'
 
-import { type CCIPMessage, defaultAbiCoder, type Lane } from '../types.js'
+import { type CCIPMessage, type Lane, defaultAbiCoder } from '../types.js'
 
 export const ZERO_HASH = hexlify(new Uint8Array(32).fill(0xff))
 

@@ -1,5 +1,5 @@
 // For reference implementation, see https://github.com/smartcontractkit/ccip/blob/ccip-develop/core/services/ocr2/plugins/ccip/merklemulti/merkle_multi.go
-import { hashInternal, ZERO_HASH } from './hasher.js'
+import { ZERO_HASH, hashInternal } from './hasher.js'
 
 export const MAX_NUMBER_TREE_LEAVES = 256
 

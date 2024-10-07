@@ -1,12 +1,14 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-argument,@typescript-eslint/no-unsafe-member-access */
 import eslint from '@eslint/js'
+import importPlugin from 'eslint-plugin-import'
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
-import simpleImportSort from 'eslint-plugin-simple-import-sort'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   eslint.configs.recommended,
   eslintPluginPrettierRecommended,
+  importPlugin.flatConfigs.recommended,
+  importPlugin.flatConfigs.typescript,
   ...tseslint.configs.recommendedTypeChecked,
   {
     languageOptions: {
@@ -45,12 +47,28 @@ export default tseslint.config(
     },
   },
   {
-    plugins: {
-      'simple-import-sort': simpleImportSort,
+    settings: {
+      'import/parsers': {
+        '@typescript-eslint/parser': ['.ts'],
+      },
+      'import/resolver': {
+        typescript: {
+          project: ['tsconfig.json'],
+          alwaysTryTypes: true,
+        },
+        node: {
+          project: ['tsconfig.json'],
+        },
+      },
     },
     rules: {
-      'simple-import-sort/imports': 'warn',
-      'simple-import-sort/exports': 'warn',
+      'import/order': [
+        'warn',
+        {
+          named: { enabled: true, import: true, export: true, types: 'types-first' },
+          alphabetize: { order: 'asc' },
+        },
+      ],
     },
   },
 )

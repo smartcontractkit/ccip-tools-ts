@@ -1,21 +1,21 @@
 import {
-  Contract,
-  Interface,
   type Log,
   type Numeric,
   type Provider,
   type Result,
   type TransactionReceipt,
+  Contract,
+  Interface,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import {
-  CCIP_ABIs,
-  CCIPContractTypeOnRamp,
   type CCIPMessage,
   type CCIPRequest,
   type CCIPVersion,
   type Lane,
+  CCIPContractTypeOnRamp,
+  CCIP_ABIs,
 } from './types.js'
 import { blockRangeGenerator, getTypeAndVersion, lazyCached } from './utils.js'
 

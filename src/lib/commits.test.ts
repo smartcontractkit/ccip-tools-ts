@@ -1,7 +1,7 @@
 import type { Provider } from 'ethers'
 
 import { fetchCommitReport } from './commits.js'
-import { CCIPContractTypeOnRamp, CCIPVersion_1_2, type Lane } from './types.js'
+import { type Lane, CCIPContractTypeOnRamp, CCIPVersion_1_2 } from './types.js'
 
 const mockProvider = {
   getBlockNumber: jest.fn(() => 15_000),
