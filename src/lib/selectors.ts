@@ -48,6 +48,10 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
   },
   '196': { selector: 3016212468291539606n, name: 'ethereum-mainnet-xlayer-1' },
   '199': { selector: 3776006016387883143n, name: 'bittorrent_chain-mainnet' },
+  '223': {
+    selector: 5406759801798337480n,
+    name: 'bitcoin-mainnet-bsquared-1',
+  },
   '250': { selector: 3768048213127883732n, name: 'fantom-testnet-opera' },
   '252': { selector: 1462016016387883143n, name: 'fraxtal-mainnet' },
   '255': { selector: 3719320017875267166n, name: 'ethereum-mainnet-kroma-1' },
@@ -79,6 +83,7 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
     selector: 829525985033418733n,
     name: 'ethereum-testnet-sepolia-mode-1',
   },
+  '998': { selector: 4286062357653186312n, name: 'hyperliquid-testnet' },
   '1029': { selector: 4459371029167934217n, name: 'bittorrent_chain-testnet' },
   '1088': { selector: 8805746078405598895n, name: 'ethereum-mainnet-metis-1' },
   '1101': {
@@ -87,17 +92,24 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
   },
   '1111': { selector: 5142893604156789321n, name: 'wemix-mainnet' },
   '1112': { selector: 9284632837123596123n, name: 'wemix-testnet' },
+  '1123': {
+    selector: 1948510578179542068n,
+    name: 'bitcoin-testnet-bsquared-1',
+  },
   '1284': { selector: 1252863800116739621n, name: 'polkadot-mainnet-moonbeam' },
   '1285': { selector: 1355020143337428062n, name: 'kusama-mainnet-moonriver' },
   '1287': {
     selector: 5361632739113536121n,
     name: 'polkadot-testnet-moonbeam-moonbase',
   },
+  '1328': { selector: 1216300075444106652n, name: 'sei-testnet-atlantic' },
+  '1329': { selector: 9027416829622342829n, name: 'sei-mainnet' },
   '1337': { selector: 3379446385462418246n, name: 'geth-testnet' },
   '1442': {
     selector: 11059667695644972511n,
     name: 'ethereum-testnet-goerli-polygon-zkevm-1',
   },
+  '1513': { selector: 4237030917318060427n, name: 'story-testnet' },
   '1907': { selector: 4874388048629246000n, name: 'bitcichain-mainnet' },
   '1908': { selector: 4888058894222120000n, name: 'bitcichain-testnet' },
   '1946': {
@@ -175,6 +187,10 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
     name: 'ethereum-testnet-sepolia-immutable-zkevm-1',
   },
   '34443': { selector: 7264351850409363825n, name: 'ethereum-mainnet-mode-1' },
+  '37111': {
+    selector: 6827576821754315911n,
+    name: 'ethereum-testnet-sepolia-lens-1',
+  },
   '42161': {
     selector: 4949039107694359620n,
     name: 'ethereum-mainnet-arbitrum-1',
@@ -205,9 +221,12 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
     selector: 3777822886988675105n,
     name: 'ethereum-testnet-sepolia-metis-1',
   },
+  '60808': { selector: 3849287863852499584n, name: 'bitcoin-mainnet-bob-1' },
+  '64165': { selector: 3676871237479449268n, name: 'sonic-testnet' },
   '76578': { selector: 781901677223027175n },
   '80001': { selector: 12532609583862916517n, name: 'polygon-testnet-mumbai' },
   '80002': { selector: 16281711391670634445n, name: 'polygon-testnet-amoy' },
+  '80084': { selector: 8999465244383784164n, name: 'berachain-testnet-bartio' },
   '80085': { selector: 12336603543561911511n, name: 'berachain-testnet-artio' },
   '81457': { selector: 4411394078118774322n, name: 'ethereum-mainnet-blast-1' },
   '84531': {
@@ -217,6 +236,14 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
   '84532': {
     selector: 10344971235874465080n,
     name: 'ethereum-testnet-sepolia-base-1',
+  },
+  '200810': {
+    selector: 3789623672476206327n,
+    name: 'bitcoin-testnet-bitlayer-1',
+  },
+  '200901': {
+    selector: 7937294810946806131n,
+    name: 'bitcoin-mainnet-bitlayer-1',
   },
   '421613': {
     selector: 6101244977088475029n,
@@ -248,6 +275,10 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
   '717160': {
     selector: 4418231248214522936n,
     name: 'ethereum-testnet-sepolia-polygon-validium-1',
+  },
+  '808813': {
+    selector: 5535534526963509396n,
+    name: 'bitcoin-testnet-sepolia-bob-1',
   },
   '810180': { selector: 4350319965322101699n, name: 'zklink_nova-mainnet' },
   '810181': { selector: 5837261596322416298n, name: 'zklink_nova-testnet' },

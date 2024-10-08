@@ -46,10 +46,16 @@ beforeEach(() => {
 describe('getSomeBlockNumberBefore', () => {
   it('should return a block number before the given timestamp', async () => {
     const avgBlockTime = 12
+    const rand = Math.random() * (avgBlockTime - 1) + 1 // [1, 12[
     const now = Math.trunc(Date.now() / 1e3)
     const provider = {
       getBlockNumber: jest.fn(() => 15000),
-      getBlock: jest.fn((num) => ({ timestamp: now - (15000 - num) * avgBlockTime })),
+      getBlock: jest.fn((num) => ({
+        timestamp:
+          now -
+          (15000 - num) * avgBlockTime -
+          Math.trunc(rand ** (num % avgBlockTime) % avgBlockTime),
+      })),
     }
 
     const targetTs = now - avgBlockTime * 14200
