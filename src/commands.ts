@@ -41,6 +41,7 @@ import {
   getSomeBlockNumberBefore,
   lazyCached,
   parseErrorData,
+  tryParseEventData,
 } from './lib/index.js'
 import type { Providers } from './providers.js'
 import {
@@ -547,7 +548,17 @@ export async function estimateGas(
   console.log('Estimated gas:', gas)
 }
 
-export function parseData(data: BytesLike) {
+export function parseData({ data, event }: { data: BytesLike; event?: string }) {
+  if (event) {
+    const parsed = tryParseEventData(event, data)
+    if (parsed) {
+      const [result, fragment] = parsed
+      console.info('Event:', fragment.format())
+      console.info('Args:', result.toObject(true))
+      return
+    }
+  }
+
   const func = getFunctionBySelector(dataSlice(data, 0, 4))
   if (func) {
     const [fragment, contract] = func

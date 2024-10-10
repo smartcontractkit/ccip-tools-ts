@@ -3,15 +3,17 @@ import {
   type ErrorDescription,
   type FunctionFragment,
   type InterfaceAbi,
+  EventFragment,
   Interface,
   isBytesLike,
+  Result,
 } from 'ethers'
 
 import TokenABI from '../abi/BurnMintERC677Token.js'
 import BurnMintTokenPool_1_5 from '../abi/BurnMintTokenPool_1_5.js'
 import LockReleaseTokenPool_1_5 from '../abi/LockReleaseTokenPool_1_5.js'
 import Router from '../abi/Router.js'
-import { CCIPVersion_1_5, CCIP_ABIs } from './types.js'
+import { CCIPVersion_1_5, CCIP_ABIs, defaultAbiCoder } from './types.js'
 import { lazyCached } from './utils.js'
 
 const ifaces: Record<string, Interface> = {
@@ -95,4 +97,25 @@ export function getErrorData(err: unknown): BytesLike | undefined {
   const match = err.info.error.data.match(/\b0x[0-9a-fA-F]+\b/)
   if (!match) return
   return match[0]
+}
+
+export function tryParseEventData(topicHashOrName: string, data: BytesLike) {
+  let res: readonly [Result, EventFragment] | undefined
+  for (const iface of Object.values(ifaces)) {
+    iface.forEachEvent((event) => {
+      if (event.topicHash !== topicHashOrName && event.name !== topicHashOrName) return
+      try {
+        const parsed = defaultAbiCoder.decode(
+          event.inputs.filter(({ indexed }) => !indexed),
+          data,
+          false,
+        )
+        if (parsed) res = [parsed, event]
+      } catch (_) {
+        // test all abis
+      }
+    })
+    if (res) break
+  }
+  return res
 }

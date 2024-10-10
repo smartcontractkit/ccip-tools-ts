@@ -299,10 +299,16 @@ async function main() {
             demandOption: true,
             describe: 'router contract address on source',
           })
+          .options({
+            event: {
+              type: 'string',
+              describe: 'Event name or topicHash to parse data as',
+            },
+          })
           .check(({ data }) => isHexString(data)),
       (argv) => {
         try {
-          parseData(argv.data)
+          parseData(argv)
         } catch (err) {
           process.exitCode = 1
           console.error(err)
