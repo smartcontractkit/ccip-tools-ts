@@ -1,12 +1,12 @@
 import {
   type BytesLike,
   type ErrorDescription,
+  type EventFragment,
   type FunctionFragment,
   type InterfaceAbi,
-  EventFragment,
+  type Result,
   Interface,
   isBytesLike,
-  Result,
 } from 'ethers'
 
 import TokenABI from '../abi/BurnMintERC677Token.js'

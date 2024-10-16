@@ -127,14 +127,16 @@ export async function getTypeAndVersion(
     const [type_, version_] = typeAndVersion.split(' ', 2)
     const [version] = version_.split('-', 2) // remove `-dev` suffixes
 
-    if (
-      ![CCIPContractTypeOnRamp, CCIPContractTypeOffRamp, CCIPContractTypeCommitStore].some(
+    const isCcipContractType = (t: string): t is CCIPContractType =>
+      [CCIPContractTypeOnRamp, CCIPContractTypeOffRamp, CCIPContractTypeCommitStore].some(
         (t) => type_ === t,
       )
-    ) {
+    const isCcipContractVersion = (v: string): v is CCIPVersion =>
+      [CCIPVersion_1_2, CCIPVersion_1_5].some((v) => version === v)
+    if (!isCcipContractType(type_)) {
       throw new Error(`Unknown contract type: ${typeAndVersion}`)
     }
-    if (![CCIPVersion_1_2, CCIPVersion_1_5].some((v) => version === v)) {
+    if (!isCcipContractVersion(version)) {
       throw new Error(`Unsupported contract version: "${typeAndVersion}" != "${version}"`)
     }
 

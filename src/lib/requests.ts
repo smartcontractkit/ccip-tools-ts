@@ -47,7 +47,6 @@ export async function getOnRampLane(
       (typeof CCIP_ABIs)[CCIPContractTypeOnRamp][typeof version]
     >
     const staticConfig = await onRampContract.getStaticConfig()
-    console.debug('OnRamp staticConfig', address, (staticConfig as unknown as Result).toObject())
     return [
       {
         sourceChainSelector: staticConfig.chainSelector,

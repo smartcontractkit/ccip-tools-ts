@@ -17,8 +17,8 @@ import type { TypedContract } from 'ethers-abitype'
 import TokenABI from './abi/BurnMintERC677Token.js'
 import RouterABI from './abi/Router.js'
 import {
-  CCIPContractTypeOffRamp,
   type CCIPRequest,
+  CCIPContractTypeOffRamp,
   CCIPVersion_1_2,
   ExecutionState,
   bigIntReplacer,
@@ -620,7 +620,7 @@ export async function showLaneConfigs(
     onrampContract.getStaticConfig(),
     onrampContract.getDynamicConfig(),
   ])
-  if (!argv.dest && dynamicConfig.router !== ZeroAddress) {
+  if (dynamicConfig.router !== ZeroAddress) {
     const router = new Contract(
       dynamicConfig.router,
       RouterABI,
@@ -632,6 +632,11 @@ export async function showLaneConfigs(
         `OnRamp=${onramp} is not registered in Router=${await router.getAddress()} for dest="${chainNameFromSelector(lane.destChainSelector)}"; instead, have=${onRampInRouter}`,
       )
     }
+  }
+  if (argv.dest && argv.onramp_or_router !== dynamicConfig.router) {
+    console.warn(
+      `OnRamp=${onramp} has Router=${dynamicConfig.router} set instead of ${argv.onramp_or_router}`,
+    )
   }
   switch (argv.format) {
     case Format.log:

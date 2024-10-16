@@ -72,12 +72,15 @@ describe('getOnRampLane', () => {
     const rampAddress = getAddress(hexlify(randomBytes(20)))
     await expect(
       getOnRampLane(mockedProvider as unknown as Provider, rampAddress),
-    ).resolves.toEqual({
-      sourceChainSelector: 1,
-      destChainSelector: 2,
-      onRamp: rampAddress,
-      version: CCIPVersion_1_2,
-    })
+    ).resolves.toEqual([
+      {
+        sourceChainSelector: 1,
+        destChainSelector: 2,
+        onRamp: rampAddress,
+        version: CCIPVersion_1_2,
+      },
+      mockedContract,
+    ])
     expect(Contract).toHaveBeenCalledWith(rampAddress, expect.anything(), mockedProvider)
   })
 
