@@ -180,7 +180,10 @@ export async function discoverOffRamp<V extends CCIPVersion>(
               .map(({ offRamp }) => offRamp as string)
         for (const offRamp of offRamps) {
           const contract = await validateOffRamp<V>(runner, offRamp, lane)
-          if (contract) return contract
+          if (contract) {
+            console.debug('Found offRamp', offRamp, 'for lane', lane)
+            return contract
+          }
         }
       } catch (_) {
         // passthrough to seen + continue

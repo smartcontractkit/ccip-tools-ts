@@ -3,6 +3,7 @@
 import {
   type BytesLike,
   type Provider,
+  type Result,
   Contract,
   ZeroAddress,
   dataSlice,
@@ -16,6 +17,7 @@ import type { TypedContract } from 'ethers-abitype'
 import TokenABI from './abi/BurnMintERC677Token.js'
 import RouterABI from './abi/Router.js'
 import {
+  CCIPContractTypeOffRamp,
   type CCIPRequest,
   CCIPVersion_1_2,
   ExecutionState,
@@ -24,6 +26,7 @@ import {
   chainIdFromName,
   chainIdFromSelector,
   chainNameFromId,
+  chainNameFromSelector,
   chainSelectorFromId,
   defaultAbiCoder,
   discoverOffRamp,
@@ -38,7 +41,9 @@ import {
   fetchOffchainTokenData,
   fetchRequestsForSender,
   getFunctionBySelector,
+  getOnRampLane,
   getSomeBlockNumberBefore,
+  getTypeAndVersion,
   lazyCached,
   parseErrorData,
   tryParseEventData,
@@ -48,6 +53,7 @@ import {
   getWallet,
   parseTokenAmounts,
   prettyCommit,
+  prettyLane,
   prettyReceipt,
   prettyRequest,
   selectRequest,
@@ -577,4 +583,149 @@ export function parseData({ data, event }: { data: BytesLike; event?: string }) 
   }
 
   throw new Error('Unknown data')
+}
+
+export async function showLaneConfigs(
+  providers: Providers,
+  argv: { source: string; onramp_or_router: string; dest?: string; format: Format },
+) {
+  const sourceChainId = isNaN(+argv.source) ? chainIdFromName(argv.source) : +argv.source
+  const source = await providers.forChainId(sourceChainId)
+  let onramp
+  if (argv.dest) {
+    const destChainId = isNaN(+argv.dest) ? chainIdFromName(argv.dest) : +argv.dest
+    const router = new Contract(
+      argv.onramp_or_router,
+      RouterABI,
+      source,
+    ) as unknown as TypedContract<typeof RouterABI>
+    onramp = (await router.getOnRamp(chainSelectorFromId(destChainId))) as string
+  } else {
+    onramp = argv.onramp_or_router
+  }
+  const [lane, onrampContract] = await getOnRampLane(source, onramp)
+  switch (argv.format) {
+    case Format.log:
+      console.log('Lane:', lane)
+      break
+    case Format.pretty:
+      prettyLane(lane)
+      break
+    case Format.json:
+      console.info(JSON.stringify(lane, bigIntReplacer, 2))
+      break
+  }
+
+  const [staticConfig, dynamicConfig] = await Promise.all([
+    onrampContract.getStaticConfig(),
+    onrampContract.getDynamicConfig(),
+  ])
+  if (!argv.dest && dynamicConfig.router !== ZeroAddress) {
+    const router = new Contract(
+      dynamicConfig.router,
+      RouterABI,
+      source,
+    ) as unknown as TypedContract<typeof RouterABI>
+    const onRampInRouter = (await router.getOnRamp(lane.destChainSelector)) as string
+    if (onRampInRouter !== onramp) {
+      console.warn(
+        `OnRamp=${onramp} is not registered in Router=${await router.getAddress()} for dest="${chainNameFromSelector(lane.destChainSelector)}"; instead, have=${onRampInRouter}`,
+      )
+    }
+  }
+  switch (argv.format) {
+    case Format.log:
+      console.log('OnRamp configs:', {
+        staticConfig: (staticConfig as unknown as Result).toObject(),
+        dynamicConfig: (dynamicConfig as unknown as Result).toObject(),
+      })
+      break
+    case Format.pretty:
+      console.info('OnRamp configs:')
+      console.table({
+        ...(staticConfig as unknown as Result).toObject(),
+        ...(dynamicConfig as unknown as Result).toObject(),
+      })
+      break
+    case Format.json:
+      console.log(
+        JSON.stringify(
+          {
+            onRamp: {
+              staticConfig: (staticConfig as unknown as Result).toObject(),
+              dynamicConfig: (dynamicConfig as unknown as Result).toObject(),
+            },
+          },
+          bigIntReplacer,
+          2,
+        ),
+      )
+      break
+  }
+
+  const dest = await providers.forChainId(chainIdFromSelector(lane.destChainSelector))
+  const offRampContract = await discoverOffRamp(dest, lane)
+  const offRamp = await offRampContract.getAddress()
+  const [offType, offVersion, offTnV] = await getTypeAndVersion(dest, offRamp)
+  console.info('OffRamp:', offRamp, 'is', offTnV)
+  if (offType !== CCIPContractTypeOffRamp || offVersion !== lane.version) {
+    console.warn(`OffRamp=${offRamp} is not v${lane.version}`)
+  }
+
+  const [offStaticConfig, offDynamicConfig] = await Promise.all([
+    offRampContract.getStaticConfig(),
+    offRampContract.getDynamicConfig(),
+  ])
+
+  if (offDynamicConfig.router !== ZeroAddress) {
+    const router = new Contract(
+      offDynamicConfig.router,
+      RouterABI,
+      dest,
+    ) as unknown as TypedContract<typeof RouterABI>
+    const offRamps = await router.getOffRamps()
+    if (
+      !offRamps.some(
+        ({ sourceChainSelector, offRamp: addr }) =>
+          sourceChainSelector === lane.sourceChainSelector && addr === offRamp,
+      )
+    ) {
+      console.warn(
+        `OffRamp=${offRamp} is not registered in Router=${await router.getAddress()} for source="${chainNameFromSelector(lane.sourceChainSelector)}"; instead, have=${offRamps
+          .filter(({ sourceChainSelector }) => sourceChainSelector === lane.sourceChainSelector)
+          .map(({ offRamp }) => offRamp)
+          .join(', ')}`,
+      )
+    }
+  }
+
+  switch (argv.format) {
+    case Format.log:
+      console.log('OffRamp configs:', {
+        staticConfig: (offStaticConfig as unknown as Result).toObject(),
+        dynamicConfig: (offDynamicConfig as unknown as Result).toObject(),
+      })
+      break
+    case Format.pretty:
+      console.info('OffRamp configs:')
+      console.table({
+        ...(offStaticConfig as unknown as Result).toObject(),
+        ...(offDynamicConfig as unknown as Result).toObject(),
+      })
+      break
+    case Format.json:
+      console.log(
+        JSON.stringify(
+          {
+            offRamp: {
+              staticConfig: (offStaticConfig as unknown as Result).toObject(),
+              dynamicConfig: (offDynamicConfig as unknown as Result).toObject(),
+            },
+          },
+          bigIntReplacer,
+          2,
+        ),
+      )
+      break
+  }
 }

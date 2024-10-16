@@ -106,7 +106,7 @@ export function lazyCached<T>(
 export async function getTypeAndVersion(
   provider: Provider,
   address: string,
-): Promise<readonly [type_: CCIPContractType, version: CCIPVersion]> {
+): Promise<readonly [type_: CCIPContractType, version: CCIPVersion, typeAndVersion: string]> {
   return lazyCached(`${address}.typeAndVersion()`, async () => {
     const versionedContract = new Contract(
       address,
@@ -138,7 +138,7 @@ export async function getTypeAndVersion(
       throw new Error(`Unsupported contract version: "${typeAndVersion}" != "${version}"`)
     }
 
-    return [type_, version] as readonly [type_: CCIPContractType, version: CCIPVersion]
+    return [type_, version, typeAndVersion]
   })
 }
 

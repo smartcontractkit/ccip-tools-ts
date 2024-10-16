@@ -35,6 +35,31 @@ async function getOnRampInterface(
   ] as const
 }
 
+export async function getOnRampLane(
+  source: Provider,
+  address: string,
+): Promise<
+  readonly [Lane, TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOnRamp][CCIPVersion]>]
+> {
+  return lazyCached(`OnRamp ${address} lane`, async () => {
+    const [iface, version] = await getOnRampInterface(source, address)
+    const onRampContract = new Contract(address, iface, source) as unknown as TypedContract<
+      (typeof CCIP_ABIs)[CCIPContractTypeOnRamp][typeof version]
+    >
+    const staticConfig = await onRampContract.getStaticConfig()
+    console.debug('OnRamp staticConfig', address, (staticConfig as unknown as Result).toObject())
+    return [
+      {
+        sourceChainSelector: staticConfig.chainSelector,
+        destChainSelector: staticConfig.destChainSelector,
+        onRamp: address,
+        version,
+      },
+      onRampContract,
+    ]
+  })
+}
+
 function resultsToMessage(result: Result): CCIPMessage {
   if (result.length === 1) result = result[0] as Result
   const message = {
@@ -45,22 +70,6 @@ function resultsToMessage(result: Result): CCIPMessage {
     sourceTokenData: (result.sourceTokenData as Result).toArray(),
   } as unknown as CCIPMessage
   return message
-}
-
-export async function getOnRampLane(source: Provider, address: string): Promise<Lane> {
-  return lazyCached(`OnRamp ${address} lane`, async () => {
-    const [iface, version] = await getOnRampInterface(source, address)
-    const onRampContract = new Contract(address, iface, source) as unknown as TypedContract<
-      (typeof CCIP_ABIs)[CCIPContractTypeOnRamp][typeof version]
-    >
-    const staticConfig = await onRampContract.getStaticConfig()
-    return {
-      sourceChainSelector: staticConfig.chainSelector,
-      destChainSelector: staticConfig.destChainSelector,
-      onRamp: address,
-      version,
-    }
-  })
 }
 
 const ccipRequestsTopicHashes = new Set(
@@ -95,7 +104,7 @@ export async function fetchCCIPMessagesInTx(tx: TransactionReceipt): Promise<CCI
     const decoded = onRampInterface.parseLog(log)
     if (!decoded || decoded.name != 'CCIPSendRequested') continue
     const message = resultsToMessage(decoded.args)
-    const lane = await getOnRampLane(source, log.address)
+    const [lane] = await getOnRampLane(source, log.address)
     requests.push({ message, log, tx, timestamp, lane })
   }
   if (!requests.length) {
@@ -178,7 +187,7 @@ export async function fetchAllMessagesInBatch(
   const latestBlock: number = await source.getBlockNumber()
 
   const [onRampInterface] = await getOnRampInterface(source, onRamp)
-  const lane = await getOnRampLane(source, onRamp)
+  const [lane] = await getOnRampLane(source, onRamp)
   const getDecodedEvents = async (fromBlock: number, toBlock: number) => {
     const logs = await source.getLogs({
       address: onRamp,

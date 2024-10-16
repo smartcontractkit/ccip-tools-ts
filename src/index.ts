@@ -11,6 +11,7 @@ import {
   manualExec,
   manualExecSenderQueue,
   parseData,
+  showLaneConfigs,
   sendMessage,
   showRequests,
 } from './commands.js'
@@ -313,6 +314,36 @@ async function main() {
           process.exitCode = 1
           console.error(err)
         }
+      },
+    )
+    .command(
+      'lane <source> <onramp_or_router> [dest]',
+      'show CCIP ramps info and configs',
+      (yargs) =>
+        yargs
+          .positional('source', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Source chain name or id',
+          })
+          .positional('onramp_or_router', {
+            type: 'string',
+            demandOption: true,
+            describe: 'onramp (if dest is not provided) or source router',
+          })
+          .positional('dest', {
+            type: 'string',
+            describe: 'Dest chain name or id (implies previous arg is router)',
+          })
+          .check(({ onramp_or_router }) => isAddress(onramp_or_router)),
+      async (argv) => {
+        const providers = new Providers(argv)
+        return showLaneConfigs(providers, argv)
+          .catch((err) => {
+            process.exitCode = 1
+            if (!logParsedError(err)) console.error(err)
+          })
+          .finally(() => providers.destroy())
       },
     )
     .demandCommand()
