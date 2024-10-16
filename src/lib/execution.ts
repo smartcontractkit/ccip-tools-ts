@@ -1,4 +1,4 @@
-import { type ContractRunner, type Provider, Contract, Interface } from 'ethers'
+import { type ContractRunner, type EventFragment, type Provider, Contract, Interface } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import Router from '../abi/Router.js'
@@ -111,8 +111,15 @@ export async function discoverOffRamp<V extends CCIPVersion>(
   const routerInterface = lazyCached('Interface Router', () => new Interface(Router))
   const offRampInterface = getOffRampInterface(lane.version)
   const routerTopics = new Set<string>([routerInterface.getEvent('MessageExecuted')!.topicHash])
+  // OffRamps have 2 ConfigSet events; to avoid having to use the typed overload of
+  // interface.getEvent, we just iterate and pick the one with 2 args
+  let configSetFrag!: EventFragment
+  offRampInterface.forEachEvent((frag) => {
+    if (frag.name === 'ConfigSet' && frag.inputs.length === 2) configSetFrag = frag
+  })
   const offRampTopics = new Set<string>([
     offRampInterface.getEvent('ExecutionStateChanged')!.topicHash,
+    configSetFrag.topicHash,
   ])
 
   const seen = new Set<string>()
