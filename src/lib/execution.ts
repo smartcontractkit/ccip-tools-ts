@@ -89,10 +89,9 @@ export async function validateOffRamp<V extends CCIPVersion>(
 ): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]> | undefined> {
   const [staticConfig, offRampContract] = await getOffRampStaticConfig(runner, address)
 
-  // reject if it's not an OffRamp for our lane
   if (
-    lane.sourceChainSelector !== staticConfig.sourceChainSelector ||
-    lane.destChainSelector !== staticConfig.chainSelector ||
+    lane.sourceChainSelector === staticConfig.sourceChainSelector &&
+    lane.destChainSelector === staticConfig.chainSelector &&
     lane.onRamp === staticConfig.onRamp
   ) {
     return offRampContract as unknown as TypedContract<
