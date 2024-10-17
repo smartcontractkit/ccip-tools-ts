@@ -25,8 +25,8 @@ import {
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
  *
  * @param messagesInBatch - Array containing all messages in batch, ordered
- * @param LeafHasherArgs - Arguments for leafeHasher (lane info)
- * @param messageIds - list of messages (from batch) to manually execute
+ * @param lane - Arguments for leafeHasher (lane info)
+ * @param messageIds - list of messages (from batch) to prove for manual execution
  * @param merkleRoot - Optional merkleRoot of the CommitReport, for validation
  * @returns ManualExec report arguments
  **/
@@ -82,6 +82,13 @@ export function calculateManualExecProof(
   return offRampProof
 }
 
+/**
+ * Validates the provided address belongs to an OffRamp for given lane
+ * @param runner - ContractRunner/Provider to use
+ * @param address - OffRamp contract address
+ * @param lane - Lane to validate OffRamp for
+ * @returns Typed OffRamp contract, if compatible, or undefined otherwise
+ **/
 export async function validateOffRamp<V extends CCIPVersion>(
   runner: ContractRunner,
   address: string,
@@ -141,9 +148,9 @@ export async function discoverOffRamp<V extends CCIPVersion>(
 
     let res1, res2
     do {
-      if (!res1 || !res1.done) res1 = it1.next()
+      if (!res1?.done) res1 = it1.next()
       if (!res1.done) yield res1.value
-      if (!res2 || !res2.done) res2 = it2.next()
+      if (!res2?.done) res2 = it2.next()
       if (!res2.done) yield res2.value
     } while (!res1.done || !res2.done)
   }
@@ -227,10 +234,12 @@ function getOffRampInterface(version: CCIPVersion): Interface {
 /**
  * Fetch ExecutionReceipts for given requests
  * If more than one request is given, may yield them interleaved
+ * Completes as soon as there's no more work to be done
  * 2 possible behaviors:
- * - if `hints.fromBlock` is given, pages forward from that block up
- * - otherwise, pages backwards and returns only the last receipt per request
- * Either way, it completes as soon as there's no more work to be done
+ * - if `hints.fromBlock` is given, pages forward from that block up;
+ *   completes when success (final) receipt is found for all requests (or reach latest)
+ * - otherwise, pages backwards and returns only the most recent receipt per request;
+ *   completes when receipts for all requests were seen
  *
  * @param dest - provider to page through
  * @param requests - CCIP requests to search executions for
