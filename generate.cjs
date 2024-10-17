@@ -46,7 +46,10 @@ async function generate(filepath) {
 process.argv.slice(2).forEach(async (param) => {
   for (const filepath of await glob(param)) {
     await generate(filepath).then(
-      (changed) => console.info(changed ? 'generated' : 'up-to-date', filepath),
+      (changed) => {
+        if (changed) process.exitCode = 1
+        console.info(changed ? 'generated' : 'up-to-date', filepath)
+      },
       (err) => console.error('generate error:', err),
     )
   }
