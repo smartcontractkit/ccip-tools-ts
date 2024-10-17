@@ -10,6 +10,7 @@ import {
   bigIntReplacer,
   bigIntReviver,
   blockRangeGenerator,
+  chainIdFromName,
   chainIdFromSelector,
   chainNameFromId,
   chainNameFromSelector,
@@ -22,8 +23,8 @@ import {
 } from './utils.js'
 
 const mockedContract = {
-  typeAndVersion: jest.fn(() => `${CCIPContractTypeOnRamp} ${CCIPVersion_1_2}`),
-  getStaticConfig: jest.fn(() => ({ chainSelector: 1 })),
+  typeAndVersion: jest.fn(() => Promise.resolve(`${CCIPContractTypeOnRamp} ${CCIPVersion_1_2}`)),
+  getStaticConfig: jest.fn(() => Promise.resolve({ chainSelector: 1 })),
 }
 
 // Mock Contract instance
@@ -39,7 +40,7 @@ beforeEach(() => {
   provider = {
     getBlockNumber: jest.fn(),
     getBlock: jest.fn(),
-    getNetwork: jest.fn(),
+    getNetwork: jest.fn(() => Promise.resolve({ chainId: 1n })),
   } as unknown as jest.Mocked<Provider>
 })
 
@@ -92,12 +93,19 @@ describe('getTypeAndVersion', () => {
   })
 
   it('should return base version of -dev contracts', async () => {
-    mockedContract.typeAndVersion.mockReturnValueOnce(
+    mockedContract.typeAndVersion.mockResolvedValueOnce(
       `${CCIPContractTypeOffRamp} ${CCIPVersion_1_5}-dev`,
     )
     const [type_, version] = await getTypeAndVersion(provider, '0x124')
     expect(type_).toBe(CCIPContractTypeOffRamp)
     expect(version).toBe(CCIPVersion_1_5)
+  })
+
+  it('should throw on contracts not implementing interface', async () => {
+    mockedContract.typeAndVersion.mockRejectedValueOnce({ code: 'BAD_DATA' })
+    await expect(getTypeAndVersion(provider, '0x125')).rejects.toThrow(
+      '0x125 not a CCIP contract on "ethereum-mainnet"',
+    )
   })
 })
 
@@ -122,6 +130,12 @@ describe('chainIdFromSelector', () => {
 describe('chainNameFromSelector', () => {
   it('should return the chain name for a given selector', () => {
     expect(chainNameFromSelector(5009297550715157269n)).toBe('ethereum-mainnet')
+  })
+})
+
+describe('chainIdFromName', () => {
+  it('should return the chain id for a given name', () => {
+    expect(chainIdFromName('ethereum-mainnet')).toBe(1)
   })
 })
 

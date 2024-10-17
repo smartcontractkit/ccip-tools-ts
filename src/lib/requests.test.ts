@@ -14,6 +14,7 @@ const mockedContract = {
 
 function mockedMessage(seqNum: number) {
   return {
+    messageId: `0xMessageId${seqNum}`,
     sender: '0xSender',
     sequenceNumber: BigInt(seqNum),
     tokenAmounts: [{ toObject: jest.fn(() => ({ token: '0xtoken', amount: 123n })) }],
@@ -28,10 +29,13 @@ function mockedMessage(seqNum: number) {
 }
 
 const mockedInterface = {
-  parseLog: jest.fn(() => ({
-    name: 'CCIPSendRequested',
-    args: [mockedMessage(1)],
-  })),
+  parseLog: jest.fn(() => {
+    const message = mockedMessage(1)
+    return {
+      name: 'CCIPSendRequested',
+      args: Object.assign([message], { message }) as any[],
+    }
+  }),
   getEvent: jest.fn(() => ({
     topicHash: '0xCcipSendRequestedTopic0',
   })),
@@ -47,10 +51,12 @@ jest.mock('ethers', () => ({
 const mockedProvider = {
   getBlockNumber: jest.fn(() => 15_000),
   getLogs: jest.fn<any, [], any>(() => [{}]),
+  getTransactionReceipt: jest.fn(),
 }
 
 import {
   fetchAllMessagesInBatch,
+  fetchCCIPMessageById,
   fetchCCIPMessageInLog,
   fetchCCIPMessagesInTx,
   fetchRequestsForSender,
@@ -172,6 +178,43 @@ describe('fetchCCIPMessageInLog', () => {
     await expect(fetchCCIPMessageInLog(mockTx, 2)).rejects.toThrow(
       'Could not find a CCIPSendRequested message in tx 0x123 with logIndex=2',
     )
+  })
+})
+
+describe('fetchCCIPMessageById', () => {
+  const rampAddress = getAddress(hexlify(randomBytes(20)))
+  it('should return a CCIP request by messageId', async () => {
+    mockedProvider.getLogs.mockResolvedValueOnce([{ index: 1 }])
+    const mockTx = {
+      provider: mockedProvider,
+      hash: '0x123',
+      logs: [{ address: rampAddress, index: 1, topics: ['0xCcipSendRequestedTopic0'] }],
+      getBlock: jest.fn().mockResolvedValue({ timestamp: 1234567890 }),
+    } as unknown as TransactionReceipt
+    mockedProvider.getTransactionReceipt.mockResolvedValueOnce(mockTx)
+    const result = await fetchCCIPMessageById(mockedProvider as unknown as Provider, '0xMessageId1')
+    expect(result).toMatchObject({
+      log: { index: 1 },
+      message: {},
+      timestamp: 1234567890,
+      tx: mockTx,
+      lane: { version: CCIPVersion_1_2 },
+    })
+  })
+
+  it('should throw an error if no request found for the log index', async () => {
+    mockedProvider.getLogs.mockResolvedValueOnce([{ index: 1 }])
+    const mockTx = {
+      provider: mockedProvider,
+      hash: '0x123',
+      logs: [{ address: rampAddress, index: 1, topics: ['0xCcipSendRequestedTopic0'] }],
+      getBlock: jest.fn().mockResolvedValue({ timestamp: 1234567890 }),
+    } as unknown as TransactionReceipt
+    mockedProvider.getTransactionReceipt.mockResolvedValueOnce(mockTx)
+
+    await expect(
+      fetchCCIPMessageById(mockedProvider as unknown as Provider, '0xMessageId2'),
+    ).rejects.toThrow('Could not find a CCIPSendRequested message with messageId: 0xMessageId2')
   })
 })
 
