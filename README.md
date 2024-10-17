@@ -136,3 +136,16 @@ Args: { token: '0x779877A7B0D9E8603169DdbD7836e478b4624789' }
 ```
 
 Attempts to parse hex-encoded function call data, error and revert reasons, for our known contracts.
+
+### `lane`
+
+```sh
+$cli lane lane ethereum-mainnet 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D avalanche-mainnet
+```
+
+Prints lane, OnRamp and OffRamp configurations for the specified lane.
+
+If 3rd argument is omitted, 2nd argument (address) should be an OnRamp address.
+
+Also, performs some validations and warns in case of some mistmatches, e.g. OnRamp is not
+registered in Router.
