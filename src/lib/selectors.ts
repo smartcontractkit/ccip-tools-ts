@@ -48,11 +48,15 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
   },
   '196': { selector: 3016212468291539606n, name: 'ethereum-mainnet-xlayer-1' },
   '199': { selector: 3776006016387883143n, name: 'bittorrent_chain-mainnet' },
+  '204': {
+    selector: 465944652040885897n,
+    name: 'binance_smart_chain-mainnet-opbnb-1',
+  },
   '223': {
     selector: 5406759801798337480n,
     name: 'bitcoin-mainnet-bsquared-1',
   },
-  '250': { selector: 3768048213127883732n, name: 'fantom-testnet-opera' },
+  '250': { selector: 3768048213127883732n, name: 'fantom-mainnet' },
   '252': { selector: 1462016016387883143n, name: 'fraxtal-mainnet' },
   '255': { selector: 3719320017875267166n, name: 'ethereum-mainnet-kroma-1' },
   '259': { selector: 8239338020728974000n, name: 'neonlink-mainnet' },
@@ -102,6 +106,10 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
     selector: 5361632739113536121n,
     name: 'polkadot-testnet-moonbeam-moonbase',
   },
+  '1301': {
+    selector: 14135854469784514356n,
+    name: 'ethereum-testnet-sepolia-unichain-1',
+  },
   '1328': { selector: 1216300075444106652n, name: 'sei-testnet-atlantic' },
   '1329': { selector: 9027416829622342829n, name: 'sei-mainnet' },
   '1337': { selector: 3379446385462418246n, name: 'geth-testnet' },
@@ -116,6 +124,7 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
     selector: 686603546605904534n,
     name: 'ethereum-testnet-sepolia-soneium-1',
   },
+  '2020': { selector: 6916147374840168594n, name: 'ronin-mainnet' },
   '2021': { selector: 13116810400804392105n, name: 'ronin-testnet-saigon' },
   '2031': {
     selector: 8175830712062617656n,
@@ -164,6 +173,10 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
     selector: 8236463271206331221n,
     name: 'ethereum-testnet-sepolia-mantle-1',
   },
+  '5611': {
+    selector: 13274425992935471758n,
+    name: 'binance_smart_chain-testnet-opbnb-1',
+  },
   '8453': { selector: 15971525489660198786n, name: 'ethereum-mainnet-base-1' },
   '9559': { selector: 1113014352258747600n, name: 'neonlink-testnet' },
   '10200': {
@@ -186,6 +199,7 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
     selector: 4526165231216331901n,
     name: 'ethereum-testnet-sepolia-immutable-zkevm-1',
   },
+  '17000': { selector: 7717148896336251131n, name: 'ethereum-testnet-holesky' },
   '34443': { selector: 7264351850409363825n, name: 'ethereum-mainnet-mode-1' },
   '37111': {
     selector: 6827576821754315911n,
@@ -236,6 +250,11 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
   '84532': {
     selector: 10344971235874465080n,
     name: 'ethereum-testnet-sepolia-base-1',
+  },
+  '167000': { selector: 16468599424800719238n, name: 'ethereum-mainnet-taiko-1' },
+  '167009': {
+    selector: 7248756420937879088n,
+    name: 'ethereum-testnet-holesky-taiko-1',
   },
   '200810': {
     selector: 3789623672476206327n,
@@ -300,6 +319,7 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
     name: 'ethereum-testnet-sepolia-corn-1',
   },
   '31415926': { selector: 7060342227814389000n, name: 'filecoin-testnet' },
+  '161221135': { selector: 14684575664602284776n, name: 'plume-testnet' },
   '168587773': {
     selector: 2027362563942762617n,
     name: 'ethereum-testnet-sepolia-blast-1',
