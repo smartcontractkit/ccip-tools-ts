@@ -29,10 +29,42 @@ jobs:
       run: npm run lint
 
     - name: Run tests with coverage
-      run: npm test -- --coverage
+      run: npm test -- --coverage | tee coverage-summary.txt
 
     - name: Upload coverage report
       uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
       with:
         name: coverage-report
         path: coverage
+
+    - name: Post or update PR comment with coverage summary
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+      with:
+        script: |
+          const fs = require('fs');
+          const coverageSummary = fs.readFileSync('coverage-summary.txt', 'utf8').split('\n').slice(4).join('\n');
+          const prNumber = context.payload.pull_request ? context.payload.pull_request.number : null;
+
+          if (prNumber) {
+            const commentBody = `## Coverage Report\n\n\`\`\`\n${coverageSummary}\n\`\`\``;
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo,
+              issue_number: prNumber,
+            });
+
+            const botComment = comments.find(comment => comment.user.login === 'github-actions[bot]' && comment.body.includes('## Coverage Report'));
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: botComment.id,
+                body: commentBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: prNumber,
+                body: commentBody,
+              });
+            }
+          }
