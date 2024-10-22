@@ -20,7 +20,6 @@
     "prepare": "npm run build"
   },
   "author": "André Matos <andre.matos@smartcontract.com>",
-  "license": "ISC",
   "files": [
     "./dist/**"
   ],
