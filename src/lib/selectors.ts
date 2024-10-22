@@ -82,6 +82,10 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
   },
   '462': { selector: 7317911323415911000n, name: 'areon-testnet' },
   '463': { selector: 1939936305787790600n, name: 'areon-mainnet' },
+  '480': {
+    selector: 2049429975587534727n,
+    name: 'ethereum-mainnet-worldchain-1',
+  },
   '592': { selector: 6422105447186081193n, name: 'polkadot-mainnet-astar' },
   '919': {
     selector: 829525985033418733n,
@@ -163,6 +167,10 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
   '4202': {
     selector: 5298399861320400553n,
     name: 'ethereum-testnet-sepolia-lisk-1',
+  },
+  '4801': {
+    selector: 5299555114858065850n,
+    name: 'ethereum-testnet-sepolia-worldchain-1',
   },
   '5000': { selector: 1556008542357238666n, name: 'ethereum-mainnet-mantle-1' },
   '5001': {
