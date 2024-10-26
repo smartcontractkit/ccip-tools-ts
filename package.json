@@ -19,7 +19,7 @@
     "clean": "rm -rfv ./dist ./coverage",
     "prepare": "npm run build"
   },
-  "author": "André Matos <andre.matos@smartcontract.com>",
+  "author": "Chainlink devs",
   "license": "MIT",
   "files": [
     "./dist/**"
