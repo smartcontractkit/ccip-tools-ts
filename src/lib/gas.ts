@@ -75,6 +75,7 @@ async function getDestTokenForSource(
       ) as unknown as TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOnRamp][typeof version]>
       const destChainSelector = (await getProviderNetwork(dest)).chainSelector
       const pool = await onRampContract.getPoolBySourceToken(destChainSelector, token)
+      if (pool === ZeroAddress) throw new Error(`Token=${token} not supported by OnRamp=${onRamp}`)
       const poolContract = new Contract(
         pool,
         BurnMintTokenPool,
@@ -83,7 +84,7 @@ async function getDestTokenForSource(
       remoteToken = getAddress(dataSlice(await poolContract.getRemoteToken(destChainSelector), -20))
       if (remoteToken === ZeroAddress)
         throw new Error(
-          `Token pool ${pool as string} doesnt support "${chainNameFromSelector(destChainSelector)}" dest`,
+          `TokenPool=${pool as string} doesnt support dest="${chainNameFromSelector(destChainSelector)}"`,
         )
     }
     return remoteToken
@@ -110,7 +111,7 @@ export async function estimateExecGasForRequest(
     data: string
     tokenAmounts: readonly { token: string; amount: bigint }[]
   },
-  hints?: { offRamp?: string },
+  hints?: { offRamp?: string; page?: number },
 ) {
   const { chainSelector: sourceChainSelector, name: sourceName } = await getProviderNetwork(source)
   const { chainSelector: destChainSelector, name: destName } = await getProviderNetwork(dest)
@@ -126,7 +127,7 @@ export async function estimateExecGasForRequest(
         `Invalid offRamp for "${sourceName}" -> "${destName}" (onRamp=${onRamp}) lane`,
       )
   } else {
-    offRamp = await discoverOffRamp(dest, lane)
+    offRamp = await discoverOffRamp(dest, lane, hints)
   }
   const { router: destRouter } = await offRamp.getDynamicConfig()
 

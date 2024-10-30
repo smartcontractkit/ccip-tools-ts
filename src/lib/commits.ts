@@ -16,6 +16,7 @@ import { blockRangeGenerator, getSomeBlockNumberBefore, lazyCached } from './uti
  *
  * @param dest - Destination network provider
  * @param request - CCIP request info
+ * @param hints - Additional filtering hints
  * @returns CCIP commit info
  **/
 export async function fetchCommitReport(
@@ -30,7 +31,7 @@ export async function fetchCommitReport(
     log: Pick<CCIPRequest['log'], 'address'>
     timestamp?: number
   },
-  hints?: { startBlock?: number; commitStore?: string },
+  hints?: { startBlock?: number; commitStore?: string; page?: number },
 ): Promise<CCIPCommit> {
   const commitStoreABI = CCIP_ABIs[CCIPContractTypeCommitStore][lane.version]
   const commitStoreInterface = lazyCached(
@@ -39,12 +40,15 @@ export async function fetchCommitReport(
   )
   const topic0 = commitStoreInterface.getEvent('ReportAccepted')!.topicHash
 
-  for (const blockRange of blockRangeGenerator({
-    endBlock: await dest.getBlockNumber(),
-    startBlock:
-      hints?.startBlock ??
-      (requestTimestamp ? await getSomeBlockNumberBefore(dest, requestTimestamp) : undefined),
-  })) {
+  for (const blockRange of blockRangeGenerator(
+    {
+      endBlock: await dest.getBlockNumber(),
+      startBlock:
+        hints?.startBlock ??
+        (requestTimestamp ? await getSomeBlockNumberBefore(dest, requestTimestamp) : undefined),
+    },
+    hints?.page,
+  )) {
     // we don't know our CommitStore address yet, so fetch any compatible log
     const logs = await dest.getLogs({
       ...blockRange,

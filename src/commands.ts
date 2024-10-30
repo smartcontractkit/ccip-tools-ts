@@ -69,7 +69,7 @@ export enum Format {
 export async function showRequests(
   providers: Providers,
   txHash: string,
-  argv: { logIndex?: number; idFromSource?: string; format: Format },
+  argv: { logIndex?: number; idFromSource?: string; format: Format; page: number },
 ) {
   let source: Provider, request: CCIPRequest
   if (argv.idFromSource) {
@@ -103,7 +103,7 @@ export async function showRequests(
 
   const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
 
-  const commit = await fetchCommitReport(dest, request)
+  const commit = await fetchCommitReport(dest, request, { page: argv.page })
   switch (argv.format) {
     case Format.log:
       console.log(
@@ -125,6 +125,7 @@ export async function showRequests(
   let found = false
   for await (const receipt of fetchExecutionReceipts(dest, [request], {
     fromBlock: commit.log.blockNumber,
+    page: argv.page,
   })) {
     switch (argv.format) {
       case Format.log:
@@ -152,6 +153,7 @@ export async function manualExec(
     tokensGasLimit?: number
     logIndex?: number
     format: Format
+    page: number
     wallet?: string
   },
 ) {
@@ -179,8 +181,13 @@ export async function manualExec(
 
   const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
 
-  const commit = await fetchCommitReport(dest, request)
-  const requestsInBatch = await fetchAllMessagesInBatch(source, request.log, commit.report.interval)
+  const commit = await fetchCommitReport(dest, request, { page: argv.page })
+  const requestsInBatch = await fetchAllMessagesInBatch(
+    source,
+    request.log,
+    commit.report.interval,
+    { page: argv.page },
+  )
 
   const manualExecReport = calculateManualExecProof(
     requestsInBatch.map(({ message }) => message),
@@ -195,6 +202,7 @@ export async function manualExec(
   const wallet = (await getWallet(argv)).connect(dest)
   const offRampContract = await discoverOffRamp(wallet, request.lane, {
     fromBlock: commit.log.blockNumber,
+    page: argv.page,
   })
 
   if (argv.estimateGasLimit != null) {
@@ -245,6 +253,7 @@ export async function manualExecSenderQueue(
     logIndex?: number
     execFailed?: boolean
     format: Format
+    page: number
     wallet?: string
   },
 ) {
@@ -283,6 +292,7 @@ export async function manualExecSenderQueue(
   let offRamp: string
   for await (const { receipt, log } of fetchExecutionReceipts(dest, requests, {
     fromBlock: destFromBlock,
+    page: argv.page,
   })) {
     lastExecState.set(receipt.messageId, receipt.state)
     if (!firstExecBlock.has(receipt.messageId))
@@ -306,11 +316,13 @@ export async function manualExecSenderQueue(
       batches[batches.length - 1][2].push(request.message.messageId)
       continue
     }
-    const commit = await fetchCommitReport(dest, request, { startBlock })
+    const commit = await fetchCommitReport(dest, request, { startBlock, page: argv.page })
     lastCommitMax = commit.report.interval.max
     startBlock = commit.log.blockNumber + 1
 
-    const batch = await fetchAllMessagesInBatch(source, request.log, commit.report.interval)
+    const batch = await fetchAllMessagesInBatch(source, request.log, commit.report.interval, {
+      page: argv.page,
+    })
     const msgIdsToExec = [request.message.messageId]
     batches.push([commit, batch, msgIdsToExec] as const)
   }
@@ -320,6 +332,7 @@ export async function manualExecSenderQueue(
 
   const offRampContract = await discoverOffRamp(wallet, firstRequest.lane, {
     fromBlock: destFromBlock,
+    page: argv.page,
   })
 
   for (const [i, [commit, batch, msgIdsToExec]] of batches.entries()) {
@@ -519,6 +532,7 @@ export async function estimateGas(
     sender?: string
     data?: string
     transferTokens?: string[]
+    page: number
   },
 ) {
   const sourceChainId = isNaN(+argv.source) ? chainIdFromName(argv.source) : +argv.source
@@ -539,18 +553,24 @@ export async function estimateGas(
   const router = new Contract(argv.router, RouterABI, source) as unknown as TypedContract<
     typeof RouterABI
   >
-  const onRamp = (await router.getOnRamp(chainSelectorFromId(sourceChainId))) as string
+  const onRamp = (await router.getOnRamp(chainSelectorFromId(destChainId))) as string
   if (!onRamp || onRamp === ZeroAddress)
     throw new Error(
       `No "${chainNameFromId(sourceChainId)}" -> "${chainNameFromId(destChainId)}" lane on ${argv.router}`,
     )
 
-  const gas = await estimateExecGasForRequest(source, dest, onRamp, {
-    sender: argv.sender ?? ZeroAddress,
-    receiver: argv.receiver,
-    data,
-    tokenAmounts,
-  })
+  const gas = await estimateExecGasForRequest(
+    source,
+    dest,
+    onRamp,
+    {
+      sender: argv.sender ?? ZeroAddress,
+      receiver: argv.receiver,
+      data,
+      tokenAmounts,
+    },
+    { page: argv.page },
+  )
   console.log('Estimated gas:', gas)
 }
 
@@ -587,7 +607,7 @@ export function parseData({ data, event }: { data: BytesLike; event?: string }) 
 
 export async function showLaneConfigs(
   providers: Providers,
-  argv: { source: string; onramp_or_router: string; dest?: string; format: Format },
+  argv: { source: string; onramp_or_router: string; dest?: string; format: Format; page: number },
 ) {
   const sourceChainId = isNaN(+argv.source) ? chainIdFromName(argv.source) : +argv.source
   const source = await providers.forChainId(sourceChainId)
@@ -669,7 +689,7 @@ export async function showLaneConfigs(
   }
 
   const dest = await providers.forChainId(chainIdFromSelector(lane.destChainSelector))
-  const offRampContract = await discoverOffRamp(dest, lane)
+  const offRampContract = await discoverOffRamp(dest, lane, { page: argv.page })
   const offRamp = await offRampContract.getAddress()
   const [offType, offVersion, offTnV] = await getTypeAndVersion(dest, offRamp)
   console.info('OffRamp:', offRamp, 'is', offTnV)

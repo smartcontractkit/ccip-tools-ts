@@ -107,10 +107,22 @@ export async function validateOffRamp<V extends CCIPVersion>(
   }
 }
 
+/**
+ * Discover an OffRamp for a given lane (source, dest, onRamp)
+ * It paginates on dest chain's logs, looking for OffRamp's ExecutionStateChanged events or
+ * Router's MessageExecuted events, and validates the OffRamp belongs to the given lane.
+ *
+ * @param runner - Dest ContractRunner/Provider to use
+ * @param lane - Lane to discover OffRamp for
+ * @param hints.fromBlock - A block from where to start paging forward; otherwise, pages backwards
+ *   from latest
+ * @param hints.page - getLogs pagination range param
+ * @returns Typed OffRamp contract
+ **/
 export async function discoverOffRamp<V extends CCIPVersion>(
   runner: ContractRunner,
   lane: Lane<V>,
-  hints?: { fromBlock?: number },
+  hints?: { fromBlock?: number; page?: number },
 ): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]>> {
   const dest = runner.provider!
   // we use Router interface to find a router, and from there find the OffRamp,
@@ -133,18 +145,16 @@ export async function discoverOffRamp<V extends CCIPVersion>(
   const latestBlock = await dest.getBlockNumber()
 
   function* interleaveBlockRanges() {
-    const it1 = blockRangeGenerator({
-      endBlock: latestBlock,
-      startBlock: hints?.fromBlock,
-    })
+    const it1 = blockRangeGenerator(
+      { endBlock: latestBlock, startBlock: hints?.fromBlock },
+      hints?.page,
+    )
     if (!hints?.fromBlock) {
       yield* it1
       return
     }
     // if we receive hints.fromBlock, alternate between paging forward and backwards
-    const it2 = blockRangeGenerator({
-      endBlock: hints.fromBlock - 1,
-    })
+    const it2 = blockRangeGenerator({ endBlock: hints.fromBlock - 1 }, hints.page)
 
     let res1, res2
     do {
@@ -245,21 +255,22 @@ function getOffRampInterface(version: CCIPVersion): Interface {
  * @param requests - CCIP requests to search executions for
  * @param hints.fromBlock - A block from where to start paging forward;
  *  otherwise, page backwards and completes on first (most recent) receipt
+ * @param hints.page - getLogs pagination range param
  **/
 export async function* fetchExecutionReceipts(
   dest: Provider,
   requests: readonly Omit<CCIPRequest, 'tx' | 'timestamp'>[],
-  hints?: { fromBlock?: number },
+  hints?: { fromBlock?: number; page?: number },
 ): AsyncGenerator<CCIPExecution, void, unknown> {
   const onlyLast = !hints?.fromBlock // backwards
   const latestBlock = await dest.getBlockNumber()
 
   const onrampToOfframp = new Map<string, string>()
   const messageIdsCompleted = new Set<string>()
-  for (const blockRange of blockRangeGenerator({
-    endBlock: latestBlock,
-    startBlock: hints?.fromBlock,
-  })) {
+  for (const blockRange of blockRangeGenerator(
+    { endBlock: latestBlock, startBlock: hints?.fromBlock },
+    hints?.page,
+  )) {
     // we build filters on every loop, so we can narrow them down
     // depending on the remaining work to do (discovered offramps, requests left)
     const addressFilter = new Set<string>()

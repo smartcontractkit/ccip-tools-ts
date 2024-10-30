@@ -1,7 +1,7 @@
 #!/usr/bin/env -S npx tsx
 import util from 'util'
 
-import { ZeroAddress, isAddress, isHexString } from 'ethers'
+import { ZeroAddress, getAddress, isHexString } from 'ethers'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
@@ -38,12 +38,18 @@ async function main() {
       },
       format: {
         alias: 'f',
+        describe: "Output to console format: pretty tables, node's console.log or JSON",
         choices: Object.values(Format),
         default: Format.pretty,
       },
       verbose: {
         alias: 'v',
         type: 'boolean',
+      },
+      page: {
+        type: 'number',
+        describe: 'getLogs page/range size',
+        default: 10_000,
       },
     })
     .middleware((argv) => {
@@ -159,6 +165,7 @@ async function main() {
             type: 'string',
             demandOption: true,
             describe: 'router contract address on source',
+            coerce: getAddress,
           })
           .positional('dest', {
             type: 'string',
@@ -170,10 +177,11 @@ async function main() {
             receiver: {
               type: 'string',
               describe: 'Receiver of the message; defaults to the sender wallet address',
+              coerce: getAddress,
             },
             data: {
               type: 'string',
-              describe: 'Data to send in the message',
+              describe: 'Data to send in the message (non-hex will be utf-8 encoded)',
               example: '0x1234',
             },
             'gas-limit': {
@@ -197,6 +205,7 @@ async function main() {
               type: 'string',
               describe:
                 'Address of the fee token (e.g. LINK address on source); if not provided, will pay in native',
+              coerce: getAddress,
             },
             'transfer-tokens': {
               type: 'array',
@@ -207,16 +216,13 @@ async function main() {
             wallet: {
               type: 'string',
               describe:
-                'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar',
+                'Encrypted wallet json file path; password will be prompted if not provided in USER_KEY_PASSWORD envvar',
             },
           })
           .check(
-            ({ router, receiver, 'fee-token': feeToken, 'transfer-tokens': transferTokens }) =>
-              isAddress(router) &&
-              (!receiver || isAddress(receiver)) &&
-              (!feeToken || isAddress(feeToken)) &&
-              (!transferTokens ||
-                transferTokens.every((t) => /^0x[0-9a-fA-F]{40}=\d+(\.\d+)?$/.test(t))),
+            ({ 'transfer-tokens': transferTokens }) =>
+              !transferTokens ||
+              transferTokens.every((t) => /^0x[0-9a-fA-F]{40}=\d+(\.\d+)?$/.test(t)),
           ),
       async (argv) => {
         const providers = new Providers(argv)
@@ -243,6 +249,7 @@ async function main() {
             type: 'string',
             demandOption: true,
             describe: 'router contract address on source',
+            coerce: getAddress,
           })
           .positional('dest', {
             type: 'string',
@@ -255,11 +262,13 @@ async function main() {
               type: 'string',
               demandOption: true,
               describe: 'Receiver contract address (on dest, implementing ccipReceive)',
+              coerce: getAddress,
             },
             sender: {
               type: 'string',
               describe: 'Sender address of the message (passed to receiver)',
               default: ZeroAddress,
+              coerce: getAddress,
             },
             data: {
               type: 'string',
@@ -273,8 +282,6 @@ async function main() {
               example: '0xtoken=0.1',
             },
           })
-          .check(({ router }) => isAddress(router))
-          .check(({ receiver }) => isAddress(receiver))
           .check(
             ({ 'transfer-tokens': transferTokens }) =>
               !transferTokens ||
@@ -330,12 +337,12 @@ async function main() {
             type: 'string',
             demandOption: true,
             describe: 'onramp (if dest is not provided) or source router',
+            coerce: getAddress,
           })
           .positional('dest', {
             type: 'string',
             describe: 'Dest chain name or id (implies previous arg is router)',
-          })
-          .check(({ onramp_or_router }) => isAddress(onramp_or_router)),
+          }),
       async (argv) => {
         const providers = new Providers(argv)
         return showLaneConfigs(providers, argv)

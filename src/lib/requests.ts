@@ -138,13 +138,18 @@ export async function fetchCCIPMessageInLog(
  *
  * @param source - Provider to fetch logs from
  * @param messageId - messageId to search for
+ * @param hints - Optional hints for pagination
  * @returns CCIPRequest with given messageId
  **/
 export async function fetchCCIPMessageById(
   source: Provider,
   messageId: string,
+  hints?: { page?: number },
 ): Promise<CCIPRequest> {
-  for (const blockRange of blockRangeGenerator({ endBlock: await source.getBlockNumber() })) {
+  for (const blockRange of blockRangeGenerator(
+    { endBlock: await source.getBlockNumber() },
+    hints?.page,
+  )) {
     const logs = await source.getLogs({
       ...blockRange,
       topics: [Array.from(ccipRequestsTopicHashes)],
@@ -178,8 +183,10 @@ export async function fetchAllMessagesInBatch(
   source: Provider,
   { address: onRamp, blockNumber: sendBlock }: Pick<Log, 'address' | 'blockNumber'>,
   interval: { min: Numeric; max: Numeric },
-  eventsBatchSize = BLOCK_LOG_WINDOW_SIZE,
-  maxPageCount = MAX_PAGES,
+  {
+    page: eventsBatchSize = BLOCK_LOG_WINDOW_SIZE,
+    maxPageCount = MAX_PAGES,
+  }: { page?: number; maxPageCount?: number } = {},
 ): Promise<Omit<CCIPRequest, 'tx' | 'timestamp'>[]> {
   const min = Number(interval.min)
   const max = Number(interval.max)
