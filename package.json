@@ -1,7 +1,9 @@
 {
-  "name": "ccip-tools-ts",
-  "version": "0.0.1",
-  "description": "Scripts and library to interact with CCIP",
+  "name": "@chainlink/ccip-tools-ts",
+  "version": "0.1.0",
+  "description": "CLI and library to interact with CCIP",
+  "author": "Chainlink devs",
+  "license": "MIT",
   "type": "module",
   "main": "dist/lib/index.js",
   "module": "dist/lib/index.js",
@@ -19,8 +21,6 @@
     "clean": "rm -rfv ./dist ./coverage",
     "prepare": "npm run build"
   },
-  "author": "Chainlink devs",
-  "license": "MIT",
   "files": [
     "./dist/**"
   ],
