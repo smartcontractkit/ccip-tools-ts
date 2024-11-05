@@ -1,5 +1,5 @@
 export { fetchCommitReport } from './commits.js'
-export { getErrorData, getFunctionBySelector, parseErrorData, tryParseEventData } from './errors.js'
+export { getErrorData, parseWithFragment } from './errors.js'
 export { calculateManualExecProof, discoverOffRamp, fetchExecutionReceipts } from './execution.js'
 export { estimateExecGasForRequest } from './gas.js'
 export { fetchOffchainTokenData } from './offchain.js'

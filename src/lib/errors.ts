@@ -1,12 +1,12 @@
 import {
   type BytesLike,
-  type ErrorDescription,
+  type ErrorFragment,
   type EventFragment,
   type FunctionFragment,
   type InterfaceAbi,
   type Result,
   Interface,
-  isBytesLike,
+  isHexString,
 } from 'ethers'
 
 import TokenABI from '../abi/BurnMintERC677Token.js'
@@ -43,45 +43,13 @@ const ifaces: Record<string, Interface> = {
 }
 
 /**
- * Parse error data from revert call data, if possible, from our supported ABIs
- * @param data - error data from a revert call
- * @returns ErrorDescription if found
- **/
-export function parseErrorData(data: BytesLike): [ErrorDescription, string] | undefined {
-  for (const [name, iface] of Object.entries(ifaces)) {
-    try {
-      const parsed = iface.parseError(data)
-      if (parsed) return [parsed, name]
-    } catch (_) {
-      // test all abis
-    }
-  }
-}
-
-/**
- * Get function fragment by selector from our supported ABIs
- * @param selector - function selector
- * @returns FunctionFragment if found
- **/
-export function getFunctionBySelector(selector: string): [FunctionFragment, string] | undefined {
-  for (const [name, iface] of Object.entries(ifaces)) {
-    try {
-      const parsed = iface.getFunction(selector)
-      if (parsed) return [parsed, name]
-    } catch (_) {
-      // test all abis
-    }
-  }
-}
-
-/**
  * Get error data from an error object, if possible
  * @param err - error object
  * @returns error data if found
  **/
-export function getErrorData(err: unknown): BytesLike | undefined {
+export function getErrorData(err: unknown): string | undefined {
   if (!err || typeof err != 'object') return
-  if ('data' in err && err.data && isBytesLike(err.data)) return err.data
+  if ('data' in err && err.data && isHexString(err.data)) return err.data
   if (
     !('info' in err) ||
     !err.info ||
@@ -99,23 +67,71 @@ export function getErrorData(err: unknown): BytesLike | undefined {
   return match[0]
 }
 
-export function tryParseEventData(topicHashOrName: string, data: BytesLike) {
-  let res: readonly [Result, EventFragment] | undefined
-  for (const iface of Object.values(ifaces)) {
-    iface.forEachEvent((event) => {
-      if (event.topicHash !== topicHashOrName && event.name !== topicHashOrName) return
-      try {
-        const parsed = defaultAbiCoder.decode(
-          event.inputs.filter(({ indexed }) => !indexed),
-          data,
-          false,
-        )
-        if (parsed) res = [parsed, event]
-      } catch (_) {
-        // test all abis
+/**
+ * Try to parse selector and data with any known ABI
+ * selector must be either:
+ * - Error, Function or Event name or signature
+ * - 4-byte for Error or Function selector (first 4B of its keccak256(signature))
+ * - 32-byte for Event topicHash (keccak256(signature))
+ * If data is provided, it will be parsed with the fragment's inputs. For events, only the
+ * non-indexed arguments are parsed.
+ *
+ * @param selector - error, function or event selector
+ * @param data - data to parse as fragment's inputs
+ * @returns Fragment and contract name, if found, and parsed data if possible
+ **/
+export function parseWithFragment(
+  selector: string,
+  data?: BytesLike,
+):
+  | readonly [
+      fragment: ErrorFragment | FunctionFragment | EventFragment,
+      contractName: string,
+      parsed?: Result,
+    ]
+  | undefined {
+  let res: readonly [ErrorFragment | FunctionFragment | EventFragment, string] | undefined
+  for (const [name, iface] of Object.entries(ifaces)) {
+    try {
+      const error = iface.getError(selector)
+      if (error) {
+        res = [error, name] as const
+        break
       }
-    })
-    if (res) break
+    } catch (_) {
+      // test all abis
+    }
+    try {
+      const func = iface.getFunction(selector)
+      if (func) {
+        res = [func, name] as const
+        break
+      }
+    } catch (_) {
+      // test all abis
+    }
+    try {
+      const event = iface.getEvent(selector)
+      if (event) {
+        res = [event, name] as const
+        break
+      }
+    } catch (_) {
+      // test all abis
+    }
+  }
+  if (res && data) {
+    let parsed
+    const [fragment] = res
+    try {
+      parsed = defaultAbiCoder.decode(
+        fragment.inputs.filter(({ indexed }) => !indexed),
+        data,
+      )
+    } catch (_) {
+      // ignore
+    }
+    if (parsed) return [...res, parsed]
   }
   return res
 }
