@@ -10,7 +10,7 @@ import {
   estimateGas,
   manualExec,
   manualExecSenderQueue,
-  parseData,
+  parseBytes,
   sendMessage,
   showLaneConfigs,
   showRequests,
@@ -298,7 +298,7 @@ async function main() {
       },
     )
     .command(
-      'parseData <data>',
+      ['parseBytes <data>', 'parseData <data>', 'parse <data>'],
       'try to parse and print errors, revert reasons or function call data',
       (yargs) =>
         yargs
@@ -308,15 +308,15 @@ async function main() {
             describe: 'router contract address on source',
           })
           .options({
-            event: {
+            selector: {
               type: 'string',
-              describe: 'Event name or topicHash to parse data as',
+              describe: 'Event, Error, Function name or topicHash to parse data as',
             },
           })
-          .check(({ data }) => isHexString(data)),
+          .alias({ event: 'selector' }),
       (argv) => {
         try {
-          parseData(argv)
+          parseBytes(argv)
         } catch (err) {
           process.exitCode = 1
           console.error(err)

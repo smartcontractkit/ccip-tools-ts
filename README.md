@@ -126,16 +126,26 @@ $cli estimateGas 11155111 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 ethereum-te
 Estimates gas for a message, same as `send` command, but doesn't send it, and just prints the
 minimum CCIP `gasLimit` required for the execution to be successful.
 
-### parseData
+### parseBytes
 
 ```sh
-$cli parseData 0xbf16aab6000000000000000000000000779877a7b0d9e8603169ddbd7836e478b4624789
+$cli parseBytes 0xbf16aab6000000000000000000000000779877a7b0d9e8603169ddbd7836e478b4624789
 
 Error: EVM2EVMOnRamp_1.2.0.UnsupportedToken(address)
 Args: { token: '0x779877A7B0D9E8603169DdbD7836e478b4624789' }
 ```
 
 Attempts to parse hex-encoded function call data, error and revert reasons, for our known contracts.
+
+If `--selector <sel>` is provided, which receives Error, Function or Event names, 4-bytes for
+Error or Function selectors, or 32-bytes for Events topic0/topicHash, it'll try to decode as that
+specific fragment. To decode events, this is required, and `data` is parsed as the non-indexed
+event arguments only.
+
+If `--selector` is not provided, the first 4-bytes will be used as Error or Function selector, and
+the rest as `data`.
+
+It'll recursively try to decode `returnData` and `error` arguments.
 
 ### `lane`
 

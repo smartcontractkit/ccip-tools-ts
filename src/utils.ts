@@ -28,10 +28,9 @@ import {
   chainNameFromId,
   chainNameFromSelector,
   getErrorData,
-  getFunctionBySelector,
   lazyCached,
   networkInfo,
-  parseErrorData,
+  parseWithFragment,
 } from './lib/index.js'
 
 export async function getWallet(argv?: { wallet?: string }): Promise<BaseWallet> {
@@ -121,10 +120,10 @@ function formatArray<T>(name: string, values: readonly T[]): Record<string, T> {
 
 function formatData(name: string, data: string, parseError = false): Record<string, string> {
   if (parseError) {
-    const parsed = parseErrorData(data)
-    if (parsed) {
-      const res: Record<string, string> = { [name]: parsed[0].signature }
-      Object.entries(parsed[0].args.toObject()).forEach(([key, val]) => {
+    const parsed = parseWithFragment(data)
+    if (parsed && parsed[2]) {
+      const res: Record<string, string> = { [name]: `${parsed[1]}.${parsed[0].format()}` }
+      Object.entries(parsed[2].toObject()).forEach(([key, val]) => {
         Object.assign(res, formatData(`${name}.${key}`, val as string, true))
       })
       return res
@@ -257,15 +256,25 @@ export function logParsedError(err: unknown): boolean {
     invocation = { ...rest, args }
   } else {
     method = dataSlice(transaction.data, 0, 4)
-    const func = getFunctionBySelector(method)?.[0]
+    const func = parseWithFragment(method)?.[0]
     if (func) method = func.name
   }
   let reason: unknown[] = []
   const errorData = getErrorData(err)
   if (errorData) {
-    const parsed = parseErrorData(errorData)?.[0]
-    if (parsed) {
-      reason = ['\nReason =', parsed.signature, parsed.args.toObject()]
+    const parsed = parseWithFragment(errorData)
+    if (parsed && parsed[2]) {
+      let args
+      try {
+        args = parsed[2].toObject(true)
+      } catch (_) {
+        try {
+          args = parsed[2].toObject()
+        } catch (_) {
+          args = parsed[2].toArray()
+        }
+      }
+      reason = ['\nReason =', `${parsed[1]}.${parsed[0].format()}`, args]
     } else {
       reason = ['\nReturnData =', errorData]
     }

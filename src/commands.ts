@@ -1,13 +1,13 @@
 /* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/no-base-to-string */
 import {
-  type BytesLike,
   type Provider,
   type Result,
   Contract,
   ZeroAddress,
   dataSlice,
   hexlify,
+  isBytesLike,
   isHexString,
   toUtf8Bytes,
   zeroPadValue,
@@ -28,7 +28,6 @@ import {
   chainNameFromId,
   chainNameFromSelector,
   chainSelectorFromId,
-  defaultAbiCoder,
   discoverOffRamp,
   encodeExtraArgs,
   estimateExecGasForRequest,
@@ -40,13 +39,11 @@ import {
   fetchExecutionReceipts,
   fetchOffchainTokenData,
   fetchRequestsForSender,
-  getFunctionBySelector,
   getOnRampLane,
   getSomeBlockNumberBefore,
   getTypeAndVersion,
   lazyCached,
-  parseErrorData,
-  tryParseEventData,
+  parseWithFragment,
 } from './lib/index.js'
 import type { Providers } from './providers.js'
 import {
@@ -574,35 +571,44 @@ export async function estimateGas(
   console.log('Estimated gas:', gas)
 }
 
-export function parseData({ data, event }: { data: BytesLike; event?: string }) {
-  if (event) {
-    const parsed = tryParseEventData(event, data)
-    if (parsed) {
-      const [result, fragment] = parsed
-      console.info('Event:', fragment.format())
-      console.info('Args:', result.toObject(true))
-      return
+export function parseBytes({ data, selector }: { data: string; selector?: string }) {
+  let parsed
+  if (selector) {
+    parsed = parseWithFragment(selector, data)
+  } else {
+    if (isBytesLike(data)) {
+      parsed = parseWithFragment(dataSlice(data, 0, 4), dataSlice(data, 4))
+    }
+    if (!parsed) {
+      parsed = parseWithFragment(data)
     }
   }
-
-  const func = getFunctionBySelector(dataSlice(data, 0, 4))
-  if (func) {
-    const [fragment, contract] = func
-    const args = defaultAbiCoder.decode(fragment.inputs, dataSlice(data, 4))
-    console.info('Function:', `${contract}.${fragment.format()}`)
-    console.info('Args:', args.toObject(true))
-    return
+  if (!parsed) throw new Error('Unknown data')
+  const [fragment, contract, args] = parsed
+  const name = fragment.constructor.name.replace(/Fragment$/, '')
+  console.info(`${name}: ${contract}.${fragment.format()}`)
+  if (args) {
+    let formatted
+    try {
+      formatted = args.toObject(true)
+    } catch (_) {
+      try {
+        formatted = args.toObject()
+      } catch (_) {
+        formatted = args.toArray()
+      }
+    }
+    console.info('Args:', formatted)
+    if (args.length === 1) {
+      if (args.returnData) {
+        console.info('Inner returnData:')
+        parseBytes({ data: args.returnData as string })
+      } else if (args.error) {
+        console.info('Inner error:')
+        parseBytes({ data: args.error as string })
+      }
+    }
   }
-
-  const error = parseErrorData(data)
-  if (error) {
-    const [parsed, contract] = error
-    console.info('Error:', `${contract}.${parsed.signature}`)
-    console.info('Args:', parsed.args.toObject(true))
-    return
-  }
-
-  throw new Error('Unknown data')
 }
 
 export async function showLaneConfigs(
