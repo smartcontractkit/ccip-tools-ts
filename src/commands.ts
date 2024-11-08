@@ -5,6 +5,7 @@ import {
   type Result,
   Contract,
   ZeroAddress,
+  dataLength,
   dataSlice,
   hexlify,
   isBytesLike,
@@ -599,14 +600,12 @@ export function parseBytes({ data, selector }: { data: string; selector?: string
       }
     }
     console.info('Args:', formatted)
-    if (args.length === 1) {
-      if (args.returnData) {
-        console.info('Inner returnData:')
-        parseBytes({ data: args.returnData as string })
-      } else if (args.error) {
-        console.info('Inner error:')
-        parseBytes({ data: args.error as string })
-      }
+    if (args.returnData && dataLength(args.returnData as string) > 0) {
+      console.info('Inner returnData:')
+      parseBytes({ data: args.returnData as string })
+    } else if (args.error && dataLength(args.error as string) > 0) {
+      console.info('Inner error:')
+      parseBytes({ data: args.error as string })
     }
   }
 }
