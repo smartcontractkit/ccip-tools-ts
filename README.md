@@ -1,5 +1,12 @@
 # ccip-tools-ts
-Typescript CLI and library to interact with CCIP
+
+## Typescript CLI and library to interact with CCIP.
+
+This tool can be used to query and interact with [CCIP](https://ccip.chain.link) contracts deployed
+in supported blockchains, through its publicly accessible data and methods.
+
+> [!IMPORTANT]
+> This tool is provided under an MIT license and is for convenience and illustration purposes only.
 
 ## Development
 In order to run commands/test from this repo, do the following:
