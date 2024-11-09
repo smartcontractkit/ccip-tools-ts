@@ -14,7 +14,7 @@
     "lint": "prettier --check ./src && eslint ./src",
     "lint:fix": "prettier --write ./src && eslint --fix ./src",
     "typecheck": "tsc --noEmit",
-    "generate": "node ./generate.cjs ./src/abi/* ./src/lib/selectors.ts",
+    "generate": "node ./generate.cjs ./src/abi/* ./src/lib/selectors.ts ./src/index.ts",
     "build": "npm run clean && npm run generate && tsc -p ./tsconfig.build.json && npm run make-script",
     "make-script": "sed -e '1s|#!/.*|#!/usr/bin/env node|' ./dist/index.js > ./dist/ccip-tools-ts && chmod +x ./dist/ccip-tools-ts && rm -v ./dist/index.js",
     "start": "tsx src",

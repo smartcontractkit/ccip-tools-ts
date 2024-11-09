@@ -19,6 +19,10 @@ import { Providers } from './providers.js'
 import { logParsedError } from './utils.js'
 
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
+// generate:nofail
+// `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
+const VERSION = '0.1.1-a733214'
+// generate:end
 
 async function main() {
   await yargs(hideBin(process.argv))
@@ -356,6 +360,7 @@ async function main() {
     .demandCommand()
     .strict()
     .help()
+    .version(VERSION)
     .alias({ h: 'help', V: 'version' })
     .parse()
 }

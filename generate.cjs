@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 const fs = require('fs/promises')
-const prettier = require('prettier')
 const { glob } = require('glob') // FIXME: replace with fs.glob after node22 LTS
+const prettier = require('prettier')
 
 const newLineRe = /(?:\r\n|\r|\n)/g
 
@@ -13,9 +13,11 @@ const newLineRe = /(?:\r\n|\r|\n)/g
 async function generate(filepath) {
   const file = await fs.readFile(filepath, 'utf8')
   const lines = file.split(newLineRe)
+  let noFail
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i]
-    if (!/\s*\/\/ generate:$/.test(line)) continue
+    if (!/\s*\/\/ generate:(?:nofail)?$/.test(line)) continue
+    noFail ||= line.endsWith('nofail')
 
     let expr = []
     for (++i; i < lines.length; i++) {
@@ -26,7 +28,7 @@ async function generate(filepath) {
     }
 
     expr = expr.join('\n')
-    const res = await eval(expr)
+    let res = await eval(expr)
     if (typeof res === 'string') res = [res]
 
     const endIdx = lines.findIndex(
@@ -40,14 +42,14 @@ async function generate(filepath) {
   const options = await prettier.resolveConfig(filepath)
   const newFile = await prettier.format(lines.join('\n'), { ...options, filepath })
   if (newFile !== file) await fs.writeFile(filepath, newFile)
-  return newFile !== file
+  return newFile !== file && (noFail ? true : -1)
 }
 
 process.argv.slice(2).forEach(async (param) => {
   for (const filepath of await glob(param)) {
     await generate(filepath).then(
       (changed) => {
-        if (changed) process.exitCode = 1
+        if (changed == -1) process.exitCode = 1
         console.info(changed ? 'generated' : 'up-to-date', filepath)
       },
       (err) => console.error('generate error:', err),
