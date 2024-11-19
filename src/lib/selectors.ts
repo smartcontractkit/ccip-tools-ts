@@ -40,8 +40,13 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
   },
   '100': { selector: 465200170687744372n, name: 'gnosis_chain-mainnet' },
   '106': { selector: 374210358663784372n, name: 'velas-mainnet' },
+  '109': { selector: 3993510008929295315n, name: 'shibarium-mainnet' },
   '111': { selector: 572210378683744374n, name: 'velas-testnet' },
   '137': { selector: 4051577828743386545n, name: 'polygon-mainnet' },
+  '157': {
+    selector: 17833296867764334567n,
+    name: 'shibarium-testnet-puppynet',
+  },
   '195': {
     selector: 2066098519157881736n,
     name: 'ethereum-testnet-sepolia-xlayer-1',
@@ -313,6 +318,7 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
     selector: 10443705513486043421n,
     name: 'ethereum-testnet-sepolia-arbitrum-1-treasure-1',
   },
+  '978658': { selector: 3676916124122457866n, name: 'treasure-testnet-topaz' },
   '978670': {
     selector: 1010349088906777999n,
     name: 'ethereum-mainnet-arbitrum-1-treasure-1',
@@ -322,7 +328,7 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
     selector: 5224473277236331295n,
     name: 'ethereum-testnet-sepolia-optimism-1',
   },
-  '21000000': {
+  '21000001': {
     selector: 1467427327723633929n,
     name: 'ethereum-testnet-sepolia-corn-1',
   },
