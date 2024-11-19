@@ -6,6 +6,9 @@ import {
   type InterfaceAbi,
   type Result,
   Interface,
+  dataLength,
+  dataSlice,
+  isBytesLike,
   isHexString,
 } from 'ethers'
 
@@ -90,6 +93,13 @@ export function parseWithFragment(
       parsed?: Result,
     ]
   | undefined {
+  if (!dataLength(data ?? '0x') && isBytesLike(selector)) {
+    const len = dataLength(selector)
+    if (len > 4 && len !== 32) {
+      data = dataSlice(selector, 4)
+      selector = dataSlice(selector, 0, 4)
+    }
+  }
   let res: readonly [ErrorFragment | FunctionFragment | EventFragment, string] | undefined
   for (const [name, iface] of Object.entries(ifaces)) {
     try {
