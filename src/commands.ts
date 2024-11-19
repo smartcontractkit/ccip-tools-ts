@@ -456,7 +456,7 @@ export async function sendMessage(
     receiver: zeroPadValue(receiver, 32), // receiver must be 32B value-encoded
     data,
     extraArgs: encodeExtraArgs(extraArgs),
-    feeToken: argv.feeToken ?? ZeroAddress, // feeToken=ZeroAddress means native
+    feeToken: argv.feeToken || ZeroAddress, // feeToken==ZeroAddress means native
     tokenAmounts,
   }
 
@@ -468,8 +468,9 @@ export async function sendMessage(
     (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
     <Record<string, bigint>>{},
   )
-  if (argv.feeToken) {
-    amountsToApprove[argv.feeToken] = (amountsToApprove[argv.feeToken] ?? 0n) + fee
+  if (message.feeToken !== ZeroAddress) {
+    amountsToApprove[message.feeToken as string] =
+      (amountsToApprove[message.feeToken as string] ?? 0n) + fee
   }
 
   // approve all tokens (including fee token) in parallel
@@ -491,8 +492,8 @@ export async function sendMessage(
 
   const tx = await router.ccipSend(destSelector, message, {
     nonce: nonce++,
-    // if native fee, include it in value; otherwise, it's transferedFrom fee token
-    ...(!argv.feeToken ? { value: fee } : {}),
+    // if native fee, include it in value; otherwise, it's transferedFrom feeToken
+    ...(message.feeToken === ZeroAddress ? { value: fee } : {}),
   })
   console.log(
     'Sending message to',
