@@ -18,14 +18,14 @@ export const VersionedContractABI = parseAbi(['function typeAndVersion() view re
 export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
 
 export type CCIPMessage = AbiParametersToPrimitiveTypes<
-  ExtractAbiEvent<typeof EVM2EVMOnRamp_1_2_ABI, 'CCIPSendRequested'>['inputs']
+  ExtractAbiEvent<typeof EVM2EVMOnRamp_1_5_ABI, 'CCIPSendRequested'>['inputs']
 >[0]
 
-export const CCIPVersion_1_2 = '1.2.0'
-export type CCIPVersion_1_2 = typeof CCIPVersion_1_2
 export const CCIPVersion_1_5 = '1.5.0'
 export type CCIPVersion_1_5 = typeof CCIPVersion_1_5
-export type CCIPVersion = CCIPVersion_1_2 | CCIPVersion_1_5
+export const CCIPVersion_1_2 = '1.2.0'
+export type CCIPVersion_1_2 = typeof CCIPVersion_1_2
+export type CCIPVersion = CCIPVersion_1_5 | CCIPVersion_1_2
 
 export const CCIPContractTypeOnRamp = 'EVM2EVMOnRamp'
 export type CCIPContractTypeOnRamp = typeof CCIPContractTypeOnRamp
@@ -40,16 +40,16 @@ export type CCIPContractType =
 
 export const CCIP_ABIs = {
   [CCIPContractTypeOnRamp]: {
-    [CCIPVersion_1_2]: EVM2EVMOnRamp_1_2_ABI,
     [CCIPVersion_1_5]: EVM2EVMOnRamp_1_5_ABI,
+    [CCIPVersion_1_2]: EVM2EVMOnRamp_1_2_ABI,
   },
   [CCIPContractTypeOffRamp]: {
-    [CCIPVersion_1_2]: EVM2EVMOffRamp_1_2_ABI,
     [CCIPVersion_1_5]: EVM2EVMOffRamp_1_5_ABI,
+    [CCIPVersion_1_2]: EVM2EVMOffRamp_1_2_ABI,
   },
   [CCIPContractTypeCommitStore]: {
-    [CCIPVersion_1_2]: CommitStore_1_2_ABI,
     [CCIPVersion_1_5]: CommitStore_1_5_ABI,
+    [CCIPVersion_1_2]: CommitStore_1_2_ABI,
   },
 } as const
 
