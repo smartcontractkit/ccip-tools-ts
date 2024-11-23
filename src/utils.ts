@@ -177,7 +177,7 @@ export async function prettyRequest(source: Provider, request: CCIPRequest) {
     transactionHash: request.log.transactionHash,
     logIndex: request.log.index,
     blockNumber: request.log.blockNumber,
-    timestamp: formatDate(request.timestamp),
+    timestamp: `${formatDate(request.timestamp)} (${formatDuration(Date.now() / 1e3 - request.timestamp)} ago)`,
     finalized:
       finalized &&
       (finalized.timestamp < request.timestamp
