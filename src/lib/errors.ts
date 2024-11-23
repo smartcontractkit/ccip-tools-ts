@@ -145,3 +145,52 @@ export function parseWithFragment(
   }
   return res
 }
+
+/**
+ * Recursively parse error data, returning an array of key/value pairs, where key is the path to
+ * error, and error maybe an error description or format, or the raw data if not parsable.
+ *
+ * @param key - key to use for the error data
+ * @param data - error bytearray data to parse
+ * @returns array of key/value pairs
+ **/
+export function recursiveParseError(
+  key: string,
+  data: string,
+): (readonly [key: string, error: unknown])[] {
+  if (!isBytesLike(data) || [0, 20, 32].includes(dataLength(data))) {
+    return [[key, data]]
+  }
+  const parsed = parseWithFragment(data)
+  if (!parsed?.[2]) return [[key, data]]
+  const [fragment, contractName, args] = parsed
+  const res = [
+    [key, `${contractName.replace(/_\d\.\d.*$/, '')} ${fragment.format('full')}`],
+  ] as ReturnType<typeof recursiveParseError>
+  if (fragment.name === 'ReceiverError' && args.err === '0x') {
+    res.push([`${key}.err`, '0x [possibly out-of-gas or abi.decode error]'])
+    return res
+  }
+  try {
+    const argsObj = args.toObject()
+    if (!(Object.keys(argsObj)[0] ?? '').match(/^[a-z]/)) throw new Error('Not an object')
+    for (const [k, v] of Object.entries(argsObj)) {
+      if (isHexString(v)) {
+        res.push(...recursiveParseError(`${key}.${k}`, v))
+      } else {
+        res.push([`${key}.${k}`, v])
+      }
+    }
+  } catch (_) {
+    const argsArr = args.toArray()
+    for (let i = 0; i < argsArr.length; i++) {
+      const v: unknown = argsArr[i]
+      if (isHexString(v)) {
+        res.push(...recursiveParseError(`${key}[${i}]`, v))
+      } else {
+        res.push([`${key}[${i}]`, v])
+      }
+    }
+  }
+  return res
+}

@@ -1,5 +1,5 @@
 import { ErrorFragment, EventFragment, FunctionFragment, Result } from 'ethers'
-import { getErrorData, parseWithFragment } from './errors.js'
+import { getErrorData, parseWithFragment, recursiveParseError } from './errors.js'
 import { chainSelectorFromId } from './utils.js'
 
 beforeEach(() => {
@@ -97,5 +97,18 @@ describe('getErrorData', () => {
     expect(getErrorData(null)).toBeUndefined()
     expect(getErrorData(123)).toBeUndefined()
     expect(getErrorData({ info: { error: { data: 'Unknown' } } })).toBeUndefined()
+  })
+})
+
+describe('recursiveParseError', () => {
+  it('should parse error data', () => {
+    const data =
+      '0xcf19edfd000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000440a8d6e8c0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+    const res = recursiveParseError('revert', data)
+    expect(res).toHaveLength(3)
+    expect(res[0]).toEqual(['revert', expect.stringContaining('ExecutionError')])
+    expect(res[1]).toEqual(['revert.err', expect.stringContaining('ReceiverError')])
+    expect(res[2]).toEqual(['revert.err.err', expect.stringMatching(/\b0x\b/)])
+    expect(res[2][1]).toContain('out-of-gas')
   })
 })

@@ -45,9 +45,11 @@ import {
   getTypeAndVersion,
   lazyCached,
   parseWithFragment,
+  recursiveParseError,
 } from './lib/index.js'
 import type { Providers } from './providers.js'
 import {
+  formatResult,
   getWallet,
   parseTokenAmounts,
   prettyCommit,
@@ -588,25 +590,24 @@ export function parseBytes({ data, selector }: { data: string; selector?: string
   if (!parsed) throw new Error('Unknown data')
   const [fragment, contract, args] = parsed
   const name = fragment.constructor.name.replace(/Fragment$/, '')
-  console.info(`${name}: ${contract}.${fragment.format()}`)
+  console.info(`${name}: ${contract.replace(/_\d\.\d.*$/, '')} ${fragment.format('full')}`)
   if (args) {
-    let formatted
-    try {
-      formatted = args.toObject(true)
-    } catch (_) {
-      try {
-        formatted = args.toObject()
-      } catch (_) {
-        formatted = args.toArray()
-      }
+    const formatted = formatResult(args)
+    const ps: unknown[] = []
+    if (fragment.name === 'ReceiverError' && args.err === '0x') {
+      ps.push('[possibly out-of-gas or abi.decode error]')
     }
-    console.info('Args:', formatted)
-    if (args.returnData && dataLength(args.returnData as string) > 0) {
-      console.info('Inner returnData:')
-      parseBytes({ data: args.returnData as string })
-    } else if (args.error && dataLength(args.error as string) > 0) {
-      console.info('Inner error:')
-      parseBytes({ data: args.error as string })
+    console.info('Args:', formatted ?? args, ...ps)
+    if (dataLength(((args.err || args.error || args.returnData) as string) ?? '0x') > 0) {
+      for (const [key, data] of Object.entries(args.toObject())) {
+        if (isHexString(data)) {
+          for (const [k, err] of recursiveParseError(key, data)) {
+            console.info(`${k}:`, err)
+          }
+        } else {
+          console.info(`${key}:`, data)
+        }
+      }
     }
   }
 }

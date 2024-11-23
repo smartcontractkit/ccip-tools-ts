@@ -5,14 +5,15 @@ import { password, select } from '@inquirer/prompts'
 import {
   type Addressable,
   type Provider,
-  type Result,
   BaseWallet,
   Contract,
+  Result,
   SigningKey,
   Wallet,
   dataSlice,
   formatUnits,
   hexlify,
+  isHexString,
   parseUnits,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
@@ -31,6 +32,7 @@ import {
   lazyCached,
   networkInfo,
   parseWithFragment,
+  recursiveParseError,
 } from './lib/index.js'
 
 export async function getWallet(argv?: { wallet?: string }): Promise<BaseWallet> {
@@ -120,14 +122,12 @@ function formatArray<T>(name: string, values: readonly T[]): Record<string, T> {
 
 function formatData(name: string, data: string, parseError = false): Record<string, string> {
   if (parseError) {
-    const parsed = parseWithFragment(data)
-    if (parsed && parsed[2]) {
-      const res: Record<string, string> = { [name]: `${parsed[1]}.${parsed[0].format()}` }
-      Object.entries(parsed[2].toObject()).forEach(([key, val]) => {
-        Object.assign(res, formatData(`${name}.${key}`, val as string, true))
-      })
-      return res
+    const res: Record<string, string> = {}
+    for (const [key, error] of recursiveParseError(name, data)) {
+      if (isHexString(error)) Object.assign(res, formatData(key, error))
+      else res[key] = error as string
     }
+    return res
   }
   const split = []
   if (data.length <= 66) split.push(data)
@@ -136,6 +136,29 @@ function formatData(name: string, data: string, parseError = false): Record<stri
       split.unshift(data.substring(Math.max(i - 64, 0), i))
     }
   return formatArray(name, split)
+}
+
+export function formatResult(result: unknown): unknown {
+  if (!(result instanceof Result)) return result
+  try {
+    const res = result.toObject()
+    if (!(Object.keys(res)[0] ?? '').match(/^[a-z]/)) throw new Error('Not an object')
+    for (const [k, v] of Object.entries(res)) {
+      if (v instanceof Result) {
+        res[k] = formatResult(v)
+      }
+    }
+    return res
+  } catch (_) {
+    const res = result.toArray()
+    for (let i = 0; i < res.length; i++) {
+      const v = res[i] as unknown
+      if (v instanceof Result) {
+        res[i] = formatResult(v)
+      }
+    }
+    return res
+  }
 }
 
 function formatDate(timestamp: number) {
@@ -259,25 +282,10 @@ export function logParsedError(err: unknown): boolean {
     const func = parseWithFragment(method)?.[0]
     if (func) method = func.name
   }
-  let reason: unknown[] = []
+  const reason: unknown[] = []
   const errorData = getErrorData(err)
   if (errorData) {
-    const parsed = parseWithFragment(errorData)
-    if (parsed && parsed[2]) {
-      let args
-      try {
-        args = parsed[2].toObject(true)
-      } catch (_) {
-        try {
-          args = parsed[2].toObject()
-        } catch (_) {
-          args = parsed[2].toArray()
-        }
-      }
-      reason = ['\nReason =', `${parsed[1]}.${parsed[0].format()}`, args]
-    } else {
-      reason = ['\nReturnData =', errorData]
-    }
+    reason.push(...recursiveParseError('Revert', errorData).map(([k, e]) => `\n${k} = ${e}`))
   }
   console.error(`🛑 Failed to call "${method}"\nError =`, shortMessage, ...reason, '\nCall =', {
     ...transaction,
