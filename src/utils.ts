@@ -138,14 +138,19 @@ function formatData(name: string, data: string, parseError = false): Record<stri
   return formatArray(name, split)
 }
 
-export function formatResult(result: unknown): unknown {
+export function formatResult(
+  result: unknown,
+  parseValue?: (val: unknown, key: string | number) => unknown,
+): unknown {
   if (!(result instanceof Result)) return result
   try {
     const res = result.toObject()
     if (!(Object.keys(res)[0] ?? '').match(/^[a-z]/)) throw new Error('Not an object')
     for (const [k, v] of Object.entries(res)) {
       if (v instanceof Result) {
-        res[k] = formatResult(v)
+        res[k] = formatResult(v, parseValue)
+      } else if (parseValue) {
+        res[k] = parseValue(v, k)
       }
     }
     return res
@@ -154,7 +159,9 @@ export function formatResult(result: unknown): unknown {
     for (let i = 0; i < res.length; i++) {
       const v = res[i] as unknown
       if (v instanceof Result) {
-        res[i] = formatResult(v)
+        res[i] = formatResult(v, parseValue)
+      } else if (parseValue) {
+        res[i] = parseValue(v, i)
       }
     }
     return res

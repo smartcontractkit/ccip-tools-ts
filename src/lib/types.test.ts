@@ -1,5 +1,5 @@
 import { dataSlice, getNumber } from 'ethers'
-import { encodeExtraArgs } from './types.js'
+import { encodeExtraArgs, parseExtraArgs } from './types.js'
 
 describe('encodeExtraArgs', () => {
   it('should encode v2 args', () => {
@@ -17,5 +17,31 @@ describe('encodeExtraArgs', () => {
 
   it('should default to empty v1', () => {
     expect(encodeExtraArgs({})).toBe('0x')
+  })
+})
+
+describe('parseExtraArgs', () => {
+  it('should parse v1 args', () => {
+    const res = parseExtraArgs(
+      '0x97a657c9000000000000000000000000000000000000000000000000000000000000000a',
+    )
+    expect(res).toEqual({ _tag: 'EVMExtraArgsV1', gasLimit: 10n })
+  })
+
+  it('should parse v2 args', () => {
+    const res = parseExtraArgs(
+      '0x181dcf10000000000000000000000000000000000000000000000000000000000000000b0000000000000000000000000000000000000000000000000000000000000001',
+    )
+    expect(res).toEqual({ _tag: 'EVMExtraArgsV2', gasLimit: 11n, allowOutOfOrderExecution: true })
+  })
+
+  it('should return v1 on empty data', () => {
+    const res = parseExtraArgs('0x')
+    expect(res).toEqual({ _tag: 'EVMExtraArgsV1' })
+  })
+
+  it('should return undefined on unknown data', () => {
+    const res = parseExtraArgs('0x1234')
+    expect(res).toBeUndefined()
   })
 })

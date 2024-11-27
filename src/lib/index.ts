@@ -32,6 +32,7 @@ export {
   ExecutionState,
   defaultAbiCoder,
   encodeExtraArgs,
+  parseExtraArgs,
 } from './types.js'
 export {
   bigIntReplacer,

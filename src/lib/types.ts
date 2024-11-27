@@ -5,7 +5,7 @@ import {
   type SolidityTuple,
   parseAbi,
 } from 'abitype'
-import { type Log, AbiCoder, concat, dataSlice, id } from 'ethers'
+import { type Log, type Result, AbiCoder, concat, dataSlice, id } from 'ethers'
 
 import CommitStore_1_2_ABI from '../abi/CommitStore_1_2.js'
 import CommitStore_1_5_ABI from '../abi/CommitStore_1_5.js'
@@ -113,8 +113,8 @@ export interface CCIPExecution {
   timestamp: number
 }
 
-const EVMExtraArgsV1Tag = dataSlice(id('CCIP EVMExtraArgsV1'), 0, 4)
-const EVMExtraArgsV2Tag = dataSlice(id('CCIP EVMExtraArgsV2'), 0, 4)
+const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'
+const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'
 const EVMExtraArgsV1 = 'tuple(uint256 gasLimit)'
 const EVMExtraArgsV2 = 'tuple(uint256 gasLimit, bool allowOutOfOrderExecution)'
 export interface EVMExtraArgsV1 {
@@ -138,4 +138,25 @@ export function encodeExtraArgs(args: EVMExtraArgsV1 | EVMExtraArgsV2): string {
     return concat([EVMExtraArgsV1Tag, defaultAbiCoder.encode([EVMExtraArgsV1], [args])])
   }
   return '0x'
+}
+
+/**
+ * Parses extra arguments from CCIP messages
+ * @param data - extra arguments bytearray data
+ * @returns extra arguments object if found
+ **/
+export function parseExtraArgs(data: string):
+  | ((EVMExtraArgsV1 | EVMExtraArgsV2) & {
+      _tag: 'EVMExtraArgsV1' | 'EVMExtraArgsV2'
+    })
+  | undefined {
+  if (data === '0x') return { _tag: 'EVMExtraArgsV1' }
+  if (data.startsWith(EVMExtraArgsV1Tag)) {
+    const args = defaultAbiCoder.decode([EVMExtraArgsV1], dataSlice(data, 4))
+    return { ...(args[0] as Result).toObject(), _tag: 'EVMExtraArgsV1' }
+  }
+  if (data.startsWith(EVMExtraArgsV2Tag)) {
+    const args = defaultAbiCoder.decode([EVMExtraArgsV2], dataSlice(data, 4))
+    return { ...(args[0] as Result).toObject(), _tag: 'EVMExtraArgsV2' }
+  }
 }
