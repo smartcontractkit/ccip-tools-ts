@@ -101,7 +101,7 @@ describe('getErrorData', () => {
 })
 
 describe('recursiveParseError', () => {
-  it('should parse error data', () => {
+  it('should parse object error data', () => {
     const data =
       '0xcf19edfd000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000440a8d6e8c0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
     const res = recursiveParseError('revert', data)
@@ -110,5 +110,15 @@ describe('recursiveParseError', () => {
     expect(res[1]).toEqual(['revert.err', expect.stringContaining('ReceiverError')])
     expect(res[2]).toEqual(['revert.err.err', expect.stringMatching(/\b0x\b/)])
     expect(res[2][1]).toContain('out-of-gas')
+  })
+
+  it('should parse array error data', () => {
+    const data =
+      '0xe1cd55090000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000006408c379a0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000156d73672e73656e646572206e6f74206d696e746572000000000000000000000000000000000000000000000000000000000000000000000000000000'
+    const res = recursiveParseError('revert', data)
+    expect(res).toHaveLength(3)
+    expect(res[0]).toEqual(['revert', expect.stringContaining('TokenHandlingError')])
+    expect(res[1]).toEqual(['revert.err', expect.stringContaining('Error(string)')])
+    expect(res[2]).toEqual(['revert.err[0]', 'msg.sender not minter'])
   })
 })
