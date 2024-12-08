@@ -160,3 +160,20 @@ export function parseExtraArgs(data: string):
     return { ...(args[0] as Result).toObject(), _tag: 'EVMExtraArgsV2' }
   }
 }
+
+const SourceTokenData = 'tuple(bytes sourcePoolAddress, bytes destTokenAddress, bytes extraData, uint64 destGasAmount)'
+export interface SourceTokenData {
+  sourcePoolAddress: string;
+  destTokenAddress: string;
+  extraData: string;
+  destGasAmount: number; 
+}
+
+export function encodeSourceTokenData(data: SourceTokenData): string {
+  return defaultAbiCoder.encode([SourceTokenData], [data])
+}
+
+export function parseSourceTokenData(data: string): SourceTokenData {
+  const decoded = defaultAbiCoder.decode([SourceTokenData], data)
+  return (decoded[0] as Result).toObject() as SourceTokenData
+}
