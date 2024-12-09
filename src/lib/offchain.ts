@@ -1,11 +1,18 @@
 import { type Addressable, type Log, EventFragment, keccak256 } from 'ethers'
 
-import { type CCIPMessage, type CCIPRequest, defaultAbiCoder, parseSourceTokenData } from './types.js'
+import {
+  type CCIPMessage,
+  type CCIPRequest,
+  defaultAbiCoder,
+  parseSourceTokenData,
+} from './types.js'
 import { networkInfo } from './utils.js'
 
 const USDC_EVENT = EventFragment.from('MessageSent(bytes message)')
 const TRANSFER_EVENT = EventFragment.from('Transfer(address from, address to, uint256 value)')
-export const LBTC_EVENT = EventFragment.from('DepositToBridge(address fromAddress, bytes32 toAddress, bytes32 payloadHash, bytes payload)')
+export const LBTC_EVENT = EventFragment.from(
+  'DepositToBridge(address fromAddress, bytes32 toAddress, bytes32 payloadHash, bytes payload)',
+)
 
 const CIRCLE_API_URL = {
   mainnet: 'https://iris-api.circle.com/v1',
@@ -21,8 +28,8 @@ type AttestationResponse =
   | { status: 'pending_confirmations' }
   | { status: 'complete'; attestation: string }
 
-type LombardAttestation = { status: string, message_hash: string, attestation: string }
-type LombardAttestationsResponse =  { attestations: Array<LombardAttestation> }
+type LombardAttestation = { status: string; message_hash: string; attestation: string }
+type LombardAttestationsResponse = { attestations: Array<LombardAttestation> }
 
 /**
  * Returns the USDC attestation for a given MessageSent Log
@@ -111,17 +118,33 @@ async function getUsdcTokenData(
  */
 async function getLbtcAttestation(payloadHash: string, isTestnet: boolean): Promise<string> {
   const lbtcApiBaseUrl = isTestnet ? LOMBARD_API_URL.testnet : LOMBARD_API_URL.mainnet
-  const res = await fetch(`${lbtcApiBaseUrl}/bridge/v1/deposits/getByHash`, {method: "POST", body: JSON.stringify({"messageHash": [payloadHash]})})
+  const res = await fetch(`${lbtcApiBaseUrl}/bridge/v1/deposits/getByHash`, {
+    method: 'POST',
+    body: JSON.stringify({ messageHash: [payloadHash] }),
+  })
   const response = (await res.json()) as LombardAttestationsResponse
   if (response == null || !('attestations' in response)) {
-    throw new Error('Error while fetching LBTC attestation. Response: ' + JSON.stringify(response, null, 2))
+    throw new Error(
+      'Error while fetching LBTC attestation. Response: ' + JSON.stringify(response, null, 2),
+    )
   }
-  const attestation = response.attestations.find(att => att.message_hash === payloadHash)
+  const attestation = response.attestations.find((att) => att.message_hash === payloadHash)
   if (attestation == null) {
-    throw new Error('Could not find requested LBTC attestation with hash:' + payloadHash + ' in response: ' + JSON.stringify(response, null, 2))
+    throw new Error(
+      'Could not find requested LBTC attestation with hash:' +
+        payloadHash +
+        ' in response: ' +
+        JSON.stringify(response, null, 2),
+    )
   }
-  if (!('status' in attestation) || attestation.status !== 'NOTARIZATION_STATUS_SESSION_APPROVED' || !attestation.attestation) {
-    throw new Error('Could not fetch LBTC attestation. Response: ' + JSON.stringify(attestation, null, 2))
+  if (
+    !('status' in attestation) ||
+    attestation.status !== 'NOTARIZATION_STATUS_SESSION_APPROVED' ||
+    !attestation.attestation
+  ) {
+    throw new Error(
+      'Could not fetch LBTC attestation. Response: ' + JSON.stringify(attestation, null, 2),
+    )
   }
   return attestation.attestation
 }
@@ -138,9 +161,9 @@ async function getLbtcTokenData(
   allLogsInRequest: readonly Pick<Log, 'topics' | 'address' | 'data'>[],
   isTestnet: boolean,
 ): Promise<(string | undefined)[]> {
-  const lbtcDepositHashes = allLogsInRequest.filter(
-    ({ topics }) => topics[0] === LBTC_EVENT.topicHash,
-  ).map(({ topics }) => topics[2])
+  const lbtcDepositHashes = allLogsInRequest
+    .filter(({ topics }) => topics[0] === LBTC_EVENT.topicHash)
+    .map(({ topics }) => topics[2])
   if (lbtcDepositHashes.length === 0) return msg.tokenAmounts.map(() => undefined)
   const attestations: (string | undefined)[] = []
   for (const [i, { token }] of msg.tokenAmounts.entries()) {
@@ -168,7 +191,10 @@ async function getLbtcTokenData(
  */
 export async function fetchOffchainTokenData(
   request: Pick<CCIPRequest, 'tx'> & {
-    message: Pick<CCIPRequest['message'], 'sourceTokenData' | 'tokenAmounts' | 'sourceChainSelector'>
+    message: Pick<
+      CCIPRequest['message'],
+      'sourceTokenData' | 'tokenAmounts' | 'sourceChainSelector'
+    >
     log: Pick<CCIPRequest['log'], 'topics' | 'index'>
   },
 ): Promise<string[]> {
@@ -187,9 +213,13 @@ export async function fetchOffchainTokenData(
   const offchainTokenData: string[] = request.message.tokenAmounts.map(
     () => '0x', // default tokenData
   )
-  let usdcTokenData = await getUsdcTokenData(request.message.tokenAmounts, usdcRequestLogs, isTestnet)
+  const usdcTokenData = await getUsdcTokenData(
+    request.message.tokenAmounts,
+    usdcRequestLogs,
+    isTestnet,
+  )
   //for lbtc we distinguish logs by hash in event, so we can pass all of them
-  let lbtcTokenData = await getLbtcTokenData(request.message, request.tx.logs, isTestnet)
+  const lbtcTokenData = await getLbtcTokenData(request.message, request.tx.logs, isTestnet)
 
   for (let i = 0; i < offchainTokenData.length; i++) {
     if (usdcTokenData[i]) {

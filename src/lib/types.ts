@@ -161,12 +161,13 @@ export function parseExtraArgs(data: string):
   }
 }
 
-const SourceTokenData = 'tuple(bytes sourcePoolAddress, bytes destTokenAddress, bytes extraData, uint64 destGasAmount)'
+const SourceTokenData =
+  'tuple(bytes sourcePoolAddress, bytes destTokenAddress, bytes extraData, uint64 destGasAmount)'
 export interface SourceTokenData {
-  sourcePoolAddress: string;
-  destTokenAddress: string;
-  extraData: string;
-  destGasAmount: number; 
+  sourcePoolAddress: string
+  destTokenAddress: string
+  extraData: string
+  destGasAmount: number
 }
 
 export function encodeSourceTokenData(data: SourceTokenData): string {

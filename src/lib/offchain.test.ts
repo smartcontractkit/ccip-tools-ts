@@ -1,7 +1,7 @@
 import { getAddress, hexlify, id, keccak256, randomBytes } from 'ethers'
 
-import { fetchOffchainTokenData, LBTC_EVENT} from './offchain.js'
-import { type CCIPRequest, encodeSourceTokenData, defaultAbiCoder } from './types.js'
+import { LBTC_EVENT, fetchOffchainTokenData } from './offchain.js'
+import { type CCIPRequest, defaultAbiCoder, encodeSourceTokenData } from './types.js'
 
 const orig_fetch = global.fetch
 
@@ -120,20 +120,27 @@ describe('fetchOffchainTokenData', () => {
   })
 })
 
-
 describe('fetchLbtcOffchainTokenData', () => {
   const lbtcToken = getAddress(hexlify(randomBytes(20)))
-  const approvedPayloadHash1 = "0x111114eb42fd24b59b6edf6c5aa6b9357be7dcaf91f1d62da303f1fad100762e"
+  const approvedPayloadHash1 = '0x111114eb42fd24b59b6edf6c5aa6b9357be7dcaf91f1d62da303f1fad100762e'
   const approvedPayloadAttestation1 = hexlify(randomBytes(20))
-  const approvedPayloadHash2 = "0x222224eb42fd24b59b6edf6c5aa6b9357be7dcaf91f1d62da303f1fad100762e"
+  const approvedPayloadHash2 = '0x222224eb42fd24b59b6edf6c5aa6b9357be7dcaf91f1d62da303f1fad100762e'
   const approvedPayloadAttestation2 = hexlify(randomBytes(20))
-  const pendingPayloadHash = "0x333334eb42fd24b59b6edf6c5aa6b9357be7dcaf91f1d62da303f1fad100762e"
+  const pendingPayloadHash = '0x333334eb42fd24b59b6edf6c5aa6b9357be7dcaf91f1d62da303f1fad100762e'
 
   const mockedFetchJson = jest.fn<any, [], any>(() => ({
     attestations: [
-      { message_hash: approvedPayloadHash1, status: 'NOTARIZATION_STATUS_SESSION_APPROVED', attestation: approvedPayloadAttestation1 },
-      { message_hash: approvedPayloadHash2, status: 'NOTARIZATION_STATUS_SESSION_APPROVED', attestation: approvedPayloadAttestation2 },
-      { message_hash: pendingPayloadHash, status: 'NOTARIZATION_STATUS_SESSION_PENDING'},
+      {
+        message_hash: approvedPayloadHash1,
+        status: 'NOTARIZATION_STATUS_SESSION_APPROVED',
+        attestation: approvedPayloadAttestation1,
+      },
+      {
+        message_hash: approvedPayloadHash2,
+        status: 'NOTARIZATION_STATUS_SESSION_APPROVED',
+        attestation: approvedPayloadAttestation2,
+      },
+      { message_hash: pendingPayloadHash, status: 'NOTARIZATION_STATUS_SESSION_PENDING' },
     ],
   }))
   const mockedFetch = jest.fn(() => ({ json: mockedFetchJson }))
@@ -150,12 +157,12 @@ describe('fetchLbtcOffchainTokenData', () => {
         sourceChainSelector: 16015286601757825753n,
         tokenAmounts: [{ token: lbtcToken, amount: 100n }],
         sourceTokenData: [
-          encodeSourceTokenData({ 
+          encodeSourceTokenData({
             sourcePoolAddress: '0x',
             destTokenAddress: '0x',
             extraData: approvedPayloadHash1,
             destGasAmount: 0,
-          })
+          }),
         ],
       },
       log: { topics: ['0x123'], index: 7 },
@@ -166,7 +173,7 @@ describe('fetchLbtcOffchainTokenData', () => {
     const result = await fetchOffchainTokenData(mockRequest as unknown as CCIPRequest)
     expect(result).toHaveLength(1)
     expect(result[0]).toBeUndefined
-  });
+  })
 
   it('should return offchain token data', async () => {
     const mockRequest = {
@@ -174,12 +181,12 @@ describe('fetchLbtcOffchainTokenData', () => {
         sourceChainSelector: 16015286601757825753n,
         tokenAmounts: [{ token: lbtcToken, amount: 100n }],
         sourceTokenData: [
-          encodeSourceTokenData({ 
+          encodeSourceTokenData({
             sourcePoolAddress: '0x',
             destTokenAddress: '0x',
             extraData: approvedPayloadHash1,
             destGasAmount: 0,
-         })
+          }),
         ],
       },
       log: { topics: ['0x123'], index: 7 },
@@ -200,13 +207,13 @@ describe('fetchLbtcOffchainTokenData', () => {
   })
 
   it('should throw error if attestation is not found', async () => {
-    const randomExtraData = "0x0000000000000000000000000000000000000000000000000000000000000000"
+    const randomExtraData = '0x0000000000000000000000000000000000000000000000000000000000000000'
     const mockRequest = {
       message: {
         sourceChainSelector: 16015286601757825753n,
         tokenAmounts: [{ token: lbtcToken, amount: 100n }],
         sourceTokenData: [
-          encodeSourceTokenData({ 
+          encodeSourceTokenData({
             sourcePoolAddress: '0x1234',
             destTokenAddress: '0x5678',
             extraData: randomExtraData,
@@ -225,7 +232,9 @@ describe('fetchLbtcOffchainTokenData', () => {
         ],
       },
     }
-    await expect(async () => { await fetchOffchainTokenData(mockRequest as unknown as CCIPRequest) }).rejects.toThrow()
+    await expect(async () => {
+      await fetchOffchainTokenData(mockRequest as unknown as CCIPRequest)
+    }).rejects.toThrow()
   })
 
   it('should throw if attestation is not approved', async () => {
@@ -234,7 +243,7 @@ describe('fetchLbtcOffchainTokenData', () => {
         sourceChainSelector: 16015286601757825753n,
         tokenAmounts: [{ token: lbtcToken, amount: 100n }],
         sourceTokenData: [
-          encodeSourceTokenData({ 
+          encodeSourceTokenData({
             sourcePoolAddress: '0x1234',
             destTokenAddress: '0x5678',
             extraData: pendingPayloadHash,
@@ -253,22 +262,27 @@ describe('fetchLbtcOffchainTokenData', () => {
         ],
       },
     }
-    await expect(async () => { await fetchOffchainTokenData(mockRequest as unknown as CCIPRequest) }).rejects.toThrow()
+    await expect(async () => {
+      await fetchOffchainTokenData(mockRequest as unknown as CCIPRequest)
+    }).rejects.toThrow()
   })
 
   it('should return offchain token data multiple transfers', async () => {
     const mockRequest = {
       message: {
         sourceChainSelector: 16015286601757825753n,
-        tokenAmounts: [{ token: lbtcToken, amount: 100n }, { token: lbtcToken, amount: 200n }],
+        tokenAmounts: [
+          { token: lbtcToken, amount: 100n },
+          { token: lbtcToken, amount: 200n },
+        ],
         sourceTokenData: [
-          encodeSourceTokenData({ 
+          encodeSourceTokenData({
             sourcePoolAddress: '0x',
             destTokenAddress: '0x',
             extraData: approvedPayloadHash1,
             destGasAmount: 100,
           }),
-          encodeSourceTokenData({ 
+          encodeSourceTokenData({
             sourcePoolAddress: '0x',
             destTokenAddress: '0x',
             extraData: approvedPayloadHash2,
