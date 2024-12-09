@@ -3,7 +3,7 @@ import { getAddress, hexlify, id, keccak256, randomBytes } from 'ethers'
 import { LBTC_EVENT, fetchOffchainTokenData } from './offchain.js'
 import { type CCIPRequest, defaultAbiCoder, encodeSourceTokenData } from './types.js'
 
-const orig_fetch = global.fetch
+const origFetch = global.fetch
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -23,7 +23,7 @@ describe('fetchOffchainTokenData', () => {
     global.fetch = mockedFetch as any
   })
   afterAll(() => {
-    global.fetch = orig_fetch
+    global.fetch = origFetch
   })
 
   it('should return offchain token data', async () => {
@@ -148,7 +148,7 @@ describe('fetchLbtcOffchainTokenData', () => {
     global.fetch = mockedFetch as any
   })
   afterAll(() => {
-    global.fetch = orig_fetch
+    global.fetch = origFetch
   })
 
   it('should skip if has no LBTC Deposit Event', async () => {
@@ -161,7 +161,7 @@ describe('fetchLbtcOffchainTokenData', () => {
             sourcePoolAddress: '0x',
             destTokenAddress: '0x',
             extraData: approvedPayloadHash1,
-            destGasAmount: 0,
+            destGasAmount: 0n,
           }),
         ],
       },
@@ -185,7 +185,7 @@ describe('fetchLbtcOffchainTokenData', () => {
             sourcePoolAddress: '0x',
             destTokenAddress: '0x',
             extraData: approvedPayloadHash1,
-            destGasAmount: 0,
+            destGasAmount: 0n,
           }),
         ],
       },
@@ -206,7 +206,7 @@ describe('fetchLbtcOffchainTokenData', () => {
     expect(result[0]).toBe(approvedPayloadAttestation1)
   })
 
-  it('should throw error if attestation is not found', async () => {
+  it('should fallback if attestation is not found', async () => {
     const randomExtraData = '0x0000000000000000000000000000000000000000000000000000000000000000'
     const mockRequest = {
       message: {
@@ -217,7 +217,7 @@ describe('fetchLbtcOffchainTokenData', () => {
             sourcePoolAddress: '0x1234',
             destTokenAddress: '0x5678',
             extraData: randomExtraData,
-            destGasAmount: 100,
+            destGasAmount: 100n,
           }),
         ],
       },
@@ -232,12 +232,12 @@ describe('fetchLbtcOffchainTokenData', () => {
         ],
       },
     }
-    await expect(async () => {
-      await fetchOffchainTokenData(mockRequest as unknown as CCIPRequest)
-    }).rejects.toThrow()
+    await expect(fetchOffchainTokenData(mockRequest as unknown as CCIPRequest)).resolves.toEqual([
+      '0x',
+    ])
   })
 
-  it('should throw if attestation is not approved', async () => {
+  it('should fallback if attestation is not approved', async () => {
     const mockRequest = {
       message: {
         sourceChainSelector: 16015286601757825753n,
@@ -247,7 +247,7 @@ describe('fetchLbtcOffchainTokenData', () => {
             sourcePoolAddress: '0x1234',
             destTokenAddress: '0x5678',
             extraData: pendingPayloadHash,
-            destGasAmount: 100,
+            destGasAmount: 100n,
           }),
         ],
       },
@@ -262,9 +262,9 @@ describe('fetchLbtcOffchainTokenData', () => {
         ],
       },
     }
-    await expect(async () => {
-      await fetchOffchainTokenData(mockRequest as unknown as CCIPRequest)
-    }).rejects.toThrow()
+    await expect(fetchOffchainTokenData(mockRequest as unknown as CCIPRequest)).resolves.toEqual([
+      '0x',
+    ])
   })
 
   it('should return offchain token data multiple transfers', async () => {
@@ -280,13 +280,13 @@ describe('fetchLbtcOffchainTokenData', () => {
             sourcePoolAddress: '0x',
             destTokenAddress: '0x',
             extraData: approvedPayloadHash1,
-            destGasAmount: 100,
+            destGasAmount: 100n,
           }),
           encodeSourceTokenData({
             sourcePoolAddress: '0x',
             destTokenAddress: '0x',
             extraData: approvedPayloadHash2,
-            destGasAmount: 100,
+            destGasAmount: 100n,
           }),
         ],
       },

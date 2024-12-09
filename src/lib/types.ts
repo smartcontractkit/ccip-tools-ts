@@ -167,7 +167,7 @@ export interface SourceTokenData {
   sourcePoolAddress: string
   destTokenAddress: string
   extraData: string
-  destGasAmount: number
+  destGasAmount: bigint
 }
 
 export function encodeSourceTokenData(data: SourceTokenData): string {

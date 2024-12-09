@@ -28,7 +28,9 @@ type AttestationResponse =
   | { status: 'pending_confirmations' }
   | { status: 'complete'; attestation: string }
 
-type LombardAttestation = { status: string; message_hash: string; attestation: string }
+type LombardAttestation =
+  | { status: 'NOTARIZATION_STATUS_SESSION_APPROVED'; message_hash: string; attestation: string }
+  | { status: string; message_hash: string }
 type LombardAttestationsResponse = { attestations: Array<LombardAttestation> }
 
 /**
@@ -78,7 +80,6 @@ async function getUsdcTokenData(
     const token = logBefore.address
     return acc.set(token, [...(acc.get(token) ?? []), log])
   }, new Map<string | Addressable, (typeof allLogsInRequest)[number][]>())
-
   for (const [i, { token }] of tokenAmounts.entries()) {
     // what if there are more USDC transfers of this same token after this one?
     const tokenTransfersCountAfter = tokenAmounts.filter(
@@ -138,48 +139,47 @@ async function getLbtcAttestation(payloadHash: string, isTestnet: boolean): Prom
     )
   }
   if (
-    !('status' in attestation) ||
-    attestation.status !== 'NOTARIZATION_STATUS_SESSION_APPROVED' ||
-    !attestation.attestation
+    attestation.status === 'NOTARIZATION_STATUS_SESSION_APPROVED' &&
+    'attestation' in attestation
   ) {
-    throw new Error(
-      'Could not fetch LBTC attestation. Response: ' + JSON.stringify(attestation, null, 2),
-    )
+    return attestation.attestation
   }
-  return attestation.attestation
+  throw new Error(
+    'LBTC attestation is not approved or invalid. Response: ' +
+      JSON.stringify(attestation, null, 2),
+  )
 }
 
 /**
  * Try to fetch LBTC attestations for transfers, return undefined in position if can't or not required
  *
- * @param msg - CCIPMessage to fetch attestation for every tokenAmounts
+ * @param message - CCIPMessage to fetch attestation for every tokenAmounts
  * @param isTestnet - use testnet CCTP API endpoint
  * @returns array where each position is either the attestation for that transfer or undefined
  **/
 async function getLbtcTokenData(
-  msg: Pick<CCIPRequest['message'], 'sourceTokenData' | 'tokenAmounts' | 'sourceChainSelector'>,
+  message: Pick<CCIPRequest['message'], 'sourceTokenData' | 'tokenAmounts' | 'sourceChainSelector'>,
   allLogsInRequest: readonly Pick<Log, 'topics' | 'address' | 'data'>[],
   isTestnet: boolean,
 ): Promise<(string | undefined)[]> {
   const lbtcDepositHashes = allLogsInRequest
     .filter(({ topics }) => topics[0] === LBTC_EVENT.topicHash)
     .map(({ topics }) => topics[2])
-  if (lbtcDepositHashes.length === 0) return msg.tokenAmounts.map(() => undefined)
-  const attestations: (string | undefined)[] = []
-  for (const [i, _] of msg.tokenAmounts.entries()) {
-    const destTokenData = parseSourceTokenData(msg.sourceTokenData[i]).extraData
-    // If attestation is required, SourceTokenData.extraData will be 32 bytes ('0x' + 64 hex chars)
-    // otherwise attestation is not required
-    if (destTokenData.length !== 66) {
-      attestations.push(undefined)
-      continue
-    }
-    // check that this is LBTC indeed
-    if (lbtcDepositHashes.includes(destTokenData)) {
-      attestations.push(await getLbtcAttestation(destTokenData, isTestnet))
-    }
-  }
-  return attestations
+  if (lbtcDepositHashes.length === 0) return message.tokenAmounts.map(() => undefined)
+  return Promise.all(
+    message.tokenAmounts.map(async (_, idx) => {
+      const destTokenData = parseSourceTokenData(message.sourceTokenData[idx]).extraData
+      // Attestation is required when SourceTokenData.extraData is 32 bytes long ('0x' + 64 hex chars)
+      // otherwise attestation is not required
+      if (destTokenData.length === 66 && lbtcDepositHashes.includes(destTokenData)) {
+        try {
+          return await getLbtcAttestation(destTokenData, isTestnet)
+        } catch (_) {
+          // fallback: undefined
+        }
+      }
+    }),
+  )
 }
 
 /**
