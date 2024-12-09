@@ -166,9 +166,8 @@ async function getLbtcTokenData(
     .map(({ topics }) => topics[2])
   if (lbtcDepositHashes.length === 0) return msg.tokenAmounts.map(() => undefined)
   const attestations: (string | undefined)[] = []
-  for (const [i, { token }] of msg.tokenAmounts.entries()) {
+  for (const i in msg.tokenAmounts) {
     const destTokenData = parseSourceTokenData(msg.sourceTokenData[i]).extraData
-    console.log('destTokenData', destTokenData)
     // If attestation is required, SourceTokenData.extraData will be 32 bytes ('0x' + 64 hex chars)
     // otherwise attestation is not required
     if (destTokenData.length !== 66) {

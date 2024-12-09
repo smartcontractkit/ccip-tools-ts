@@ -172,7 +172,7 @@ describe('fetchLbtcOffchainTokenData', () => {
     }
     const result = await fetchOffchainTokenData(mockRequest as unknown as CCIPRequest)
     expect(result).toHaveLength(1)
-    expect(result[0]).toBeUndefined
+    expect(result[0]).toBe("0x")
   })
 
   it('should return offchain token data', async () => {
