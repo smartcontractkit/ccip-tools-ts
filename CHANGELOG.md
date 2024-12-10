@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 - Allow `parseBytes` command to parse EVMExtraArgs bytearrays, both standalone and in structs (#7)
+- Support Lombard attestation for LBTC transfers (#8)
 
 ## [0.1.2] - 2024-11-25
 - Add public `recursiveParseErrors` function to lib, to return nested/inner ABI errors
