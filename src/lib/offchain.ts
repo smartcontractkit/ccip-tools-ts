@@ -165,7 +165,6 @@ async function getLbtcTokenData(
   const lbtcDepositHashes = allLogsInRequest
     .filter(({ topics }) => topics[0] === LBTC_EVENT.topicHash)
     .map(({ topics }) => topics[3])
-  console.log(lbtcDepositHashes)
   if (lbtcDepositHashes.length === 0) return message.tokenAmounts.map(() => undefined)
   return Promise.all(
     message.tokenAmounts.map(async (_, idx) => {
@@ -175,8 +174,8 @@ async function getLbtcTokenData(
       if (destTokenData.length === 66 && lbtcDepositHashes.includes(destTokenData)) {
         try {
           return await getLbtcAttestation(destTokenData, isTestnet)
-        } catch (e) {
-          console.log(e)
+        } catch (_) {
+          // fallback: undefined
         }
       }
     }),
