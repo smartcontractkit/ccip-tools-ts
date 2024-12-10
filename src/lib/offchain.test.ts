@@ -193,7 +193,7 @@ describe('fetchLbtcOffchainTokenData', () => {
       tx: {
         logs: [
           {
-            topics: [LBTC_EVENT.topicHash, '0x', approvedPayloadHash1, '0x'],
+            topics: [LBTC_EVENT.topicHash, '0x', '0x', approvedPayloadHash1],
             index: 6,
             data: '0x',
           },
@@ -225,7 +225,7 @@ describe('fetchLbtcOffchainTokenData', () => {
       tx: {
         logs: [
           {
-            topics: [LBTC_EVENT.topicHash, '0x', randomExtraData, '0x'],
+            topics: [LBTC_EVENT.topicHash, '0x', '0x', randomExtraData],
             index: 6,
             data: '0x',
           },
@@ -255,7 +255,7 @@ describe('fetchLbtcOffchainTokenData', () => {
       tx: {
         logs: [
           {
-            topics: [LBTC_EVENT.topicHash, '0x', pendingPayloadHash, '0x'],
+            topics: [LBTC_EVENT.topicHash, '0x', '0x', pendingPayloadHash],
             index: 6,
             data: '0x',
           },
@@ -294,12 +294,12 @@ describe('fetchLbtcOffchainTokenData', () => {
       tx: {
         logs: [
           {
-            topics: [LBTC_EVENT.topicHash, '0x', approvedPayloadHash1, '0x'],
+            topics: [LBTC_EVENT.topicHash, '0x', '0x', approvedPayloadHash1],
             index: 6,
             data: '0x',
           },
           {
-            topics: [LBTC_EVENT.topicHash, '0x', approvedPayloadHash2, '0x'],
+            topics: [LBTC_EVENT.topicHash, '0x', '0x', approvedPayloadHash2],
             index: 7,
             data: '0x',
           },
