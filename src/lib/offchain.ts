@@ -19,8 +19,8 @@ const CIRCLE_API_URL = {
   testnet: 'https://iris-api-sandbox.circle.com/v1',
 }
 const LOMBARD_API_URL = {
-  mainnet: 'https://bridge-manager.lombard.finance',
-  testnet: 'https://bridge-manager.staging.lombard.finance',
+  mainnet: 'https://mainnet.prod.lombard.finance',
+  testnet: 'https://gastald-testnet.prod.lombard.finance',
 }
 
 type AttestationResponse =
@@ -119,7 +119,7 @@ async function getUsdcTokenData(
  */
 async function getLbtcAttestation(payloadHash: string, isTestnet: boolean): Promise<string> {
   const lbtcApiBaseUrl = isTestnet ? LOMBARD_API_URL.testnet : LOMBARD_API_URL.mainnet
-  const res = await fetch(`${lbtcApiBaseUrl}/bridge/v1/deposits/getByHash`, {
+  const res = await fetch(`${lbtcApiBaseUrl}/api/bridge/v1/deposits/getByHash`, {
     method: 'POST',
     body: JSON.stringify({ messageHash: [payloadHash] }),
   })
