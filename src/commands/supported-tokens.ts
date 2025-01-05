@@ -19,6 +19,29 @@ import {
 import type { Providers } from '../providers.js'
 import { Format } from './types.js'
 
+// Configuration constants for fine-tuning performance and behavior
+const CONFIG = {
+  /**
+   * Maximum number of tokens to fetch in a single registry request.
+   * This limit helps avoid:
+   * - RPC timeout issues
+   * - Memory pressure on the client
+   * Adjust based on network conditions and RPC provider limits.
+   */
+  BATCH_SIZE: 100,
+
+  /**
+   * Number of pools to check in parallel for chain support.
+   * This chunk size balances between:
+   * - RPC rate limits (avoid too many parallel requests)
+   * - Performance (process multiple tokens simultaneously)
+   * - Memory usage (keep Promise.all() batches reasonable)
+   * Increase for faster processing if your RPC can handle it.
+   * Decrease if you encounter rate limits or timeouts.
+   */
+  PARALLEL_POOL_CHECKS: 5,
+} as const
+
 export async function showSupportedTokens(
   providers: Providers,
   argv: { source: string; router: string; dest: string; format: Format },
@@ -65,10 +88,10 @@ export async function showSupportedTokens(
 
   // Handle pagination
   let startIndex = 0n
-  const maxCount = 100
-  const tokenToPoolMap: Record<string, string> = {} // Single source of truth for supported tokens
+  const maxCount = CONFIG.BATCH_SIZE
+  const tokenToPoolMap: Record<string, string> = {}
   let tokensBatch: Array<string | Addressable> = []
-  let totalScanned = 0 // Track total tokens we've looked at
+  let totalScanned = 0
 
   console.log(
     `[INFO] Fetching all registered tokens from "${chainNameFromId(sourceChainId)}" using TokenAdminRegistry`,
@@ -86,9 +109,8 @@ export async function showSupportedTokens(
       )
       const pools = await registry.getPools(tokensBatch)
 
-      // Process pools in chunks of 5 for parallel processing
-      for (let i = 0; i < tokensBatch.length; i += 5) {
-        const chunkEnd = Math.min(i + 5, tokensBatch.length)
+      for (let i = 0; i < tokensBatch.length; i += CONFIG.PARALLEL_POOL_CHECKS) {
+        const chunkEnd = Math.min(i + CONFIG.PARALLEL_POOL_CHECKS, tokensBatch.length)
         const chunk = tokensBatch.slice(i, chunkEnd)
         const poolsChunk = pools.slice(i, chunkEnd)
 
@@ -185,10 +207,36 @@ export async function showSupportedTokens(
     .map((result) => result.success!)
   const failedTokens = tokenDetails.filter((result) => result.error).map((result) => result.error!)
 
+  // Create metadata structure once
+  const summary = {
+    metadata: {
+      timestamp: new Date().toISOString(),
+      source: {
+        chain: chainNameFromId(sourceChainId),
+        chainId: sourceChainId,
+        router: argv.router,
+      },
+      destination: {
+        chain: chainNameFromId(destChainId),
+        chainId: destChainId,
+      },
+      stats: {
+        totalScanned,
+        supported: successfulTokens.length,
+        failed: failedTokens.length,
+      },
+    },
+    tokens: successfulTokens,
+    failedTokens: failedTokens.map(({ token, error }) => ({
+      address: token,
+      error: error.message,
+    })),
+  }
+
   // Log successful tokens
   switch (argv.format) {
     case Format.json:
-      console.log(JSON.stringify({ tokens: successfulTokens }, bigIntReplacer, 2))
+      console.log(JSON.stringify(summary, bigIntReplacer, 2))
       break
 
     case Format.log:
@@ -197,10 +245,35 @@ export async function showSupportedTokens(
 
     case Format.pretty:
     default:
+      // Log metadata first
+      console.log('\n=== Summary ===')
+      console.log(`Timestamp: ${summary.metadata.timestamp}`)
+      console.log('\nSource:')
+      console.log(`  Chain: ${summary.metadata.source.chain} (${summary.metadata.source.chainId})`)
+      console.log(`  Router: ${summary.metadata.source.router}`)
+      console.log('\nDestination:')
+      console.log(
+        `  Chain: ${summary.metadata.destination.chain} (${summary.metadata.destination.chainId})`,
+      )
+      console.log('\nStats:')
+      console.log(`  Total Scanned: ${summary.metadata.stats.totalScanned}`)
+      console.log(`  Supported: ${summary.metadata.stats.supported}`)
+      console.log(`  Failed: ${summary.metadata.stats.failed}`)
+
+      // Log tokens
+      console.log('\n=== Supported Tokens ===')
       for (const token of successfulTokens) {
         console.log(
           `[INFO] Token: ${token.name} (${token.symbol}) at ${token.address}, decimals=${token.decimals}, pool=${token.pool}`,
         )
+      }
+
+      // Log failed tokens
+      if (failedTokens.length > 0) {
+        console.log('\n=== Failed Tokens ===')
+        for (const { token, error } of failedTokens) {
+          console.error(`[ERROR] Token: ${token}, Error:`, error)
+        }
       }
   }
 
