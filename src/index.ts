@@ -5,6 +5,7 @@ import { ZeroAddress, getAddress, isHexString } from 'ethers'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
+import { showSupportedTokens } from './commands/index.js'
 import {
   Format,
   estimateGas,
@@ -21,7 +22,7 @@ import { logParsedError } from './utils.js'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.1.3-c92e135'
+const VERSION = '0.1.3-037a908'
 // generate:end
 
 async function main() {
@@ -350,6 +351,39 @@ async function main() {
       async (argv) => {
         const providers = new Providers(argv)
         return showLaneConfigs(providers, argv)
+          .catch((err) => {
+            process.exitCode = 1
+            if (!logParsedError(err)) console.error(err)
+          })
+          .finally(() => providers.destroy())
+      },
+    )
+    .command(
+      'supported-tokens <source> <router> <dest>',
+      'show supported tokens for cross-chain transfers',
+      (yargs) =>
+        yargs
+          .positional('source', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Source chain name or id',
+            example: 'ethereum-testnet-sepolia',
+          })
+          .positional('router', {
+            type: 'string',
+            demandOption: true,
+            describe: 'router contract address on source',
+            coerce: getAddress,
+          })
+          .positional('dest', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Destination chain name or id',
+            example: 'optimism-testnet-goerli',
+          }),
+      async (argv) => {
+        const providers = new Providers(argv)
+        return showSupportedTokens(providers, argv)
           .catch((err) => {
             process.exitCode = 1
             if (!logParsedError(err)) console.error(err)
