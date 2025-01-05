@@ -66,10 +66,9 @@ export async function showSupportedTokens(
   // Handle pagination
   let startIndex = 0n
   const maxCount = 100
-  const tokenToPoolMap: Record<string, string> = {}
-  const uniqueTokens = new Set<string>()
+  const tokenToPoolMap: Record<string, string> = {} // Single source of truth for supported tokens
   let tokensBatch: Array<string | Addressable> = []
-  let totalProcessed = 0
+  let totalScanned = 0 // Track total tokens we've looked at
 
   console.log(
     `[INFO] Fetching all registered tokens from "${chainNameFromId(sourceChainId)}" using TokenAdminRegistry`,
@@ -78,12 +77,12 @@ export async function showSupportedTokens(
   do {
     console.log(`[INFO] Fetching batch: offset=${startIndex}, limit=${maxCount}`)
     tokensBatch = [...(await registry.getAllConfiguredTokens(startIndex, BigInt(maxCount)))]
-    totalProcessed += tokensBatch.length
-    console.log(`[INFO] Found ${tokensBatch.length} tokens (total processed: ${totalProcessed})`)
+    totalScanned += tokensBatch.length
+    console.log(`[INFO] Found ${tokensBatch.length} tokens (total scanned: ${totalScanned})`)
 
     if (tokensBatch.length > 0) {
       console.log(
-        `[INFO] Fetching pools for ${tokensBatch.length} tokens and checking support for "${chainNameFromId(destChainId)}"`,
+        `[INFO] Checking CCIP support for ${tokensBatch.length} tokens on "${chainNameFromId(destChainId)}"`,
       )
       const pools = await registry.getPools(tokensBatch)
 
@@ -126,7 +125,6 @@ export async function showSupportedTokens(
 
         for (const { token, pool, isSupported } of supportChecks) {
           if (isSupported) {
-            uniqueTokens.add(token)
             tokenToPoolMap[token] = pool
           }
         }
@@ -136,52 +134,50 @@ export async function showSupportedTokens(
     startIndex += BigInt(tokensBatch.length)
   } while (tokensBatch.length === maxCount)
 
-  const eligibleTokens = Object.keys(tokenToPoolMap).length
+  const supportedTokenCount = Object.keys(tokenToPoolMap).length
   console.log(
-    `[SUMMARY] Found ${uniqueTokens.size} tokens, ${eligibleTokens} support "${chainNameFromId(destChainId)}"`,
+    `[SUMMARY] Scanned ${totalScanned} tokens, found ${supportedTokenCount} supported for "${chainNameFromId(sourceChainId)}" -> "${chainNameFromId(destChainId)}"`,
   )
 
   // Get metadata for supported tokens
   const tokenDetails = await Promise.all(
-    Array.from(uniqueTokens)
-      .filter((token) => tokenToPoolMap[token])
-      .map(
-        async (
-          token,
-        ): Promise<{
-          success: CCIPSupportedToken | null
-          error: { token: string; error: Error } | null
-        }> => {
-          try {
-            const erc20 = new Contract(token, TokenABI, sourceProvider) as unknown as TypedContract<
-              typeof TokenABI
-            >
-            const [name, symbol, decimals] = await Promise.all([
-              erc20.name(),
-              erc20.symbol(),
-              erc20.decimals(),
-            ])
-            return {
-              success: {
-                name,
-                symbol,
-                decimals,
-                address: token,
-                pool: tokenToPoolMap[token],
-              },
-              error: null,
-            }
-          } catch (error) {
-            return {
-              success: null,
-              error: {
-                token,
-                error: error instanceof Error ? error : new Error(String(error)),
-              },
-            }
+    Array.from(Object.keys(tokenToPoolMap)).map(
+      async (
+        token,
+      ): Promise<{
+        success: CCIPSupportedToken | null
+        error: { token: string; error: Error } | null
+      }> => {
+        try {
+          const erc20 = new Contract(token, TokenABI, sourceProvider) as unknown as TypedContract<
+            typeof TokenABI
+          >
+          const [name, symbol, decimals] = await Promise.all([
+            erc20.name(),
+            erc20.symbol(),
+            erc20.decimals(),
+          ])
+          return {
+            success: {
+              name,
+              symbol,
+              decimals,
+              address: token,
+              pool: tokenToPoolMap[token],
+            },
+            error: null,
           }
-        },
-      ),
+        } catch (error) {
+          return {
+            success: null,
+            error: {
+              token,
+              error: error instanceof Error ? error : new Error(String(error)),
+            },
+          }
+        }
+      },
+    ),
   )
 
   const successfulTokens = tokenDetails
