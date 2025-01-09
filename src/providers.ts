@@ -9,7 +9,7 @@ import {
 
 import { chainNameFromId, getProviderNetwork } from './lib/index.js'
 
-const RPCS_RE = /\b(http|ws)s?:\/\/\S+/
+const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
 
 /**
  * Wrap a promise with a timeout
