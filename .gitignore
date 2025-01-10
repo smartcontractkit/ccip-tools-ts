@@ -5,3 +5,4 @@ dist/
 .envrc
 .env
 coverage
+coverage-summary.txt
