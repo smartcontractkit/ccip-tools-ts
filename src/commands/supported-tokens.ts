@@ -8,8 +8,6 @@ import RouterABI from '../abi/Router.js'
 import TokenAdminRegistryABI from '../abi/TokenAdminRegistry_1_5.js'
 
 import {
-  type CCIPSupportedToken,
-  type PoolSupportCheck,
   CCIPVersion_1_2,
   bigIntReplacer,
   chainIdFromName,
@@ -18,7 +16,7 @@ import {
   getOnRampLane,
 } from '../lib/index.js'
 import type { Providers } from '../providers.js'
-import { Format } from './types.js'
+import { type CCIPSupportedToken, type PoolSupportCheck, Format } from './types.js'
 
 // Configuration constants for fine-tuning performance and behavior
 const CONFIG = {
