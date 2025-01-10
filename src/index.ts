@@ -379,7 +379,7 @@ async function main() {
             type: 'string',
             demandOption: true,
             describe: 'Destination chain name or id',
-            example: 'optimism-testnet-goerli',
+            example: 'ethereum-testnet-sepolia-optimism-1',
           }),
       async (argv) => {
         const providers = new Providers(argv)
