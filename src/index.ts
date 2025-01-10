@@ -359,7 +359,7 @@ async function main() {
       },
     )
     .command(
-      'supported-tokens <source> <router> <dest>',
+      'getSupportedTokens <source> <router> <dest>',
       'show supported tokens for cross-chain transfers',
       (yargs) =>
         yargs

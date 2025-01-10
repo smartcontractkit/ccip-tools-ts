@@ -3,9 +3,10 @@ import { type Addressable, Contract } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import TokenABI from '../abi/BurnMintERC677Token.js'
+import TokenPoolABI from '../abi/BurnMintTokenPool_1_5.js'
 import RouterABI from '../abi/Router.js'
 import TokenAdminRegistryABI from '../abi/TokenAdminRegistry_1_5.js'
-import TokenPoolABI from '../abi/TokenPool_1_5.js'
+
 import {
   type CCIPSupportedToken,
   type PoolSupportCheck,
