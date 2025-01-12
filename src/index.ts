@@ -22,7 +22,7 @@ import { logParsedError } from './utils.js'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.1.3-cb14173'
+const VERSION = '0.1.3-4790fa5'
 // generate:end
 
 async function main() {

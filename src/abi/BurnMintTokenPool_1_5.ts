@@ -1,6 +1,6 @@
 export default [
   // generate:
-  // fetch('https://github.com/smartcontractkit/ccip/raw/release/2.14.0-ccip1.5/core/gethwrappers/ccip/generated/burn_mint_token_pool/burn_mint_token_pool.go')
+  // fetch('https://github.com/smartcontractkit/ccip/raw/release/contracts-ccip-1.5.1/core/gethwrappers/ccip/generated/burn_mint_token_pool/burn_mint_token_pool.go')
   //   .then((res) => res.text())
   //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
   //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
@@ -11,6 +11,11 @@ export default [
         internalType: 'contractIBurnMintERC20',
         name: 'token',
         type: 'address',
+      },
+      {
+        internalType: 'uint8',
+        name: 'localTokenDecimals',
+        type: 'uint8',
       },
       {
         internalType: 'address[]',
@@ -50,6 +55,7 @@ export default [
     name: 'CallerIsNotARampOnRouter',
     type: 'error',
   },
+  { inputs: [], name: 'CannotTransferToSelf', type: 'error' },
   {
     inputs: [{ internalType: 'uint64', name: 'chainSelector', type: 'uint64' }],
     name: 'ChainAlreadyExists',
@@ -89,6 +95,14 @@ export default [
   },
   {
     inputs: [
+      { internalType: 'uint8', name: 'expected', type: 'uint8' },
+      { internalType: 'uint8', name: 'actual', type: 'uint8' },
+    ],
+    name: 'InvalidDecimalArgs',
+    type: 'error',
+  },
+  {
+    inputs: [
       {
         components: [
           { internalType: 'bool', name: 'isEnabled', type: 'bool' },
@@ -108,6 +122,27 @@ export default [
     type: 'error',
   },
   {
+    inputs: [{ internalType: 'bytes', name: 'sourcePoolData', type: 'bytes' }],
+    name: 'InvalidRemoteChainDecimals',
+    type: 'error',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'uint64',
+        name: 'remoteChainSelector',
+        type: 'uint64',
+      },
+      {
+        internalType: 'bytes',
+        name: 'remotePoolAddress',
+        type: 'bytes',
+      },
+    ],
+    name: 'InvalidRemotePoolForChain',
+    type: 'error',
+  },
+  {
     inputs: [
       {
         internalType: 'bytes',
@@ -123,6 +158,8 @@ export default [
     name: 'InvalidToken',
     type: 'error',
   },
+  { inputs: [], name: 'MismatchedArrayLengths', type: 'error' },
+  { inputs: [], name: 'MustBeProposedOwner', type: 'error' },
   {
     inputs: [
       {
@@ -132,6 +169,37 @@ export default [
       },
     ],
     name: 'NonExistentChain',
+    type: 'error',
+  },
+  { inputs: [], name: 'OnlyCallableByOwner', type: 'error' },
+  {
+    inputs: [
+      { internalType: 'uint8', name: 'remoteDecimals', type: 'uint8' },
+      { internalType: 'uint8', name: 'localDecimals', type: 'uint8' },
+      {
+        internalType: 'uint256',
+        name: 'remoteAmount',
+        type: 'uint256',
+      },
+    ],
+    name: 'OverflowDetected',
+    type: 'error',
+  },
+  { inputs: [], name: 'OwnerCannotBeZero', type: 'error' },
+  {
+    inputs: [
+      {
+        internalType: 'uint64',
+        name: 'remoteChainSelector',
+        type: 'uint64',
+      },
+      {
+        internalType: 'bytes',
+        name: 'remotePoolAddress',
+        type: 'bytes',
+      },
+    ],
+    name: 'PoolAlreadyAdded',
     type: 'error',
   },
   { inputs: [], name: 'RateLimitMustBeDisabled', type: 'error' },
@@ -434,6 +502,19 @@ export default [
     anonymous: false,
     inputs: [
       {
+        indexed: false,
+        internalType: 'address',
+        name: 'rateLimitAdmin',
+        type: 'address',
+      },
+    ],
+    name: 'RateLimitAdminSet',
+    type: 'event',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
         indexed: true,
         internalType: 'address',
         name: 'sender',
@@ -467,8 +548,21 @@ export default [
       {
         indexed: false,
         internalType: 'bytes',
-        name: 'previousPoolAddress',
+        name: 'remotePoolAddress',
         type: 'bytes',
+      },
+    ],
+    name: 'RemotePoolAdded',
+    type: 'event',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: 'uint64',
+        name: 'remoteChainSelector',
+        type: 'uint64',
       },
       {
         indexed: false,
@@ -477,7 +571,7 @@ export default [
         type: 'bytes',
       },
     ],
-    name: 'RemotePoolSet',
+    name: 'RemotePoolRemoved',
     type: 'event',
   },
   {
@@ -521,6 +615,24 @@ export default [
   },
   {
     inputs: [
+      {
+        internalType: 'uint64',
+        name: 'remoteChainSelector',
+        type: 'uint64',
+      },
+      {
+        internalType: 'bytes',
+        name: 'remotePoolAddress',
+        type: 'bytes',
+      },
+    ],
+    name: 'addRemotePool',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
       { internalType: 'address[]', name: 'removes', type: 'address[]' },
       { internalType: 'address[]', name: 'adds', type: 'address[]' },
     ],
@@ -532,17 +644,21 @@ export default [
   {
     inputs: [
       {
+        internalType: 'uint64[]',
+        name: 'remoteChainSelectorsToRemove',
+        type: 'uint64[]',
+      },
+      {
         components: [
           {
             internalType: 'uint64',
             name: 'remoteChainSelector',
             type: 'uint64',
           },
-          { internalType: 'bool', name: 'allowed', type: 'bool' },
           {
-            internalType: 'bytes',
-            name: 'remotePoolAddress',
-            type: 'bytes',
+            internalType: 'bytes[]',
+            name: 'remotePoolAddresses',
+            type: 'bytes[]',
           },
           {
             internalType: 'bytes',
@@ -587,7 +703,7 @@ export default [
           },
         ],
         internalType: 'structTokenPool.ChainUpdate[]',
-        name: 'chains',
+        name: 'chainsToAdd',
         type: 'tuple[]',
       },
     ],
@@ -693,8 +809,8 @@ export default [
         type: 'uint64',
       },
     ],
-    name: 'getRemotePool',
-    outputs: [{ internalType: 'bytes', name: '', type: 'bytes' }],
+    name: 'getRemotePools',
+    outputs: [{ internalType: 'bytes[]', name: '', type: 'bytes[]' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -742,6 +858,31 @@ export default [
         type: 'address',
       },
     ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'getTokenDecimals',
+    outputs: [{ internalType: 'uint8', name: 'decimals', type: 'uint8' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'uint64',
+        name: 'remoteChainSelector',
+        type: 'uint64',
+      },
+      {
+        internalType: 'bytes',
+        name: 'remotePoolAddress',
+        type: 'bytes',
+      },
+    ],
+    name: 'isRemotePool',
+    outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -894,6 +1035,24 @@ export default [
         type: 'uint64',
       },
       {
+        internalType: 'bytes',
+        name: 'remotePoolAddress',
+        type: 'bytes',
+      },
+    ],
+    name: 'removeRemotePool',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'uint64',
+        name: 'remoteChainSelector',
+        type: 'uint64',
+      },
+      {
         components: [
           { internalType: 'bool', name: 'isEnabled', type: 'bool' },
           {
@@ -930,12 +1089,40 @@ export default [
   {
     inputs: [
       {
-        internalType: 'address',
-        name: 'rateLimitAdmin',
-        type: 'address',
+        internalType: 'uint64[]',
+        name: 'remoteChainSelectors',
+        type: 'uint64[]',
+      },
+      {
+        components: [
+          { internalType: 'bool', name: 'isEnabled', type: 'bool' },
+          {
+            internalType: 'uint128',
+            name: 'capacity',
+            type: 'uint128',
+          },
+          { internalType: 'uint128', name: 'rate', type: 'uint128' },
+        ],
+        internalType: 'structRateLimiter.Config[]',
+        name: 'outboundConfigs',
+        type: 'tuple[]',
+      },
+      {
+        components: [
+          { internalType: 'bool', name: 'isEnabled', type: 'bool' },
+          {
+            internalType: 'uint128',
+            name: 'capacity',
+            type: 'uint128',
+          },
+          { internalType: 'uint128', name: 'rate', type: 'uint128' },
+        ],
+        internalType: 'structRateLimiter.Config[]',
+        name: 'inboundConfigs',
+        type: 'tuple[]',
       },
     ],
-    name: 'setRateLimitAdmin',
+    name: 'setChainRateLimiterConfigs',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
@@ -943,17 +1130,12 @@ export default [
   {
     inputs: [
       {
-        internalType: 'uint64',
-        name: 'remoteChainSelector',
-        type: 'uint64',
-      },
-      {
-        internalType: 'bytes',
-        name: 'remotePoolAddress',
-        type: 'bytes',
+        internalType: 'address',
+        name: 'rateLimitAdmin',
+        type: 'address',
       },
     ],
-    name: 'setRemotePool',
+    name: 'setRateLimitAdmin',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',

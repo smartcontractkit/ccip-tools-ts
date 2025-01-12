@@ -1,6 +1,6 @@
 export default [
   // generate:
-  // fetch('https://raw.githubusercontent.com/smartcontractkit/ccip/release/2.14.0-ccip1.5/core/gethwrappers/ccip/generated/token_admin_registry/token_admin_registry.go')
+  // fetch('https://raw.githubusercontent.com/smartcontractkit/ccip/release/contracts-ccip-1.5.1/core/gethwrappers/ccip/generated/token_admin_registry/token_admin_registry.go')
   //   .then((res) => res.text())
   //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
   //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
