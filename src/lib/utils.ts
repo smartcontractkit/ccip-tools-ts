@@ -9,8 +9,10 @@ import {
   CCIPContractTypeCommitStore,
   CCIPContractTypeOffRamp,
   CCIPContractTypeOnRamp,
+  CCIPContractTypeTokenPool,
   CCIPVersion_1_2,
   CCIPVersion_1_5,
+  CCIPVersion_1_5_1,
   VersionedContractABI,
 } from './types.js'
 
@@ -128,11 +130,14 @@ export async function getTypeAndVersion(
     const [version] = version_.split('-', 2) // remove `-dev` suffixes
 
     const isCcipContractType = (t: string): t is CCIPContractType =>
-      [CCIPContractTypeOnRamp, CCIPContractTypeOffRamp, CCIPContractTypeCommitStore].some(
-        (t) => type_ === t,
-      )
+      [
+        CCIPContractTypeOnRamp,
+        CCIPContractTypeOffRamp,
+        CCIPContractTypeCommitStore,
+        ...CCIPContractTypeTokenPool,
+      ].some((t) => type_ === t)
     const isCcipContractVersion = (v: string): v is CCIPVersion =>
-      [CCIPVersion_1_2, CCIPVersion_1_5].some((v) => version === v)
+      [CCIPVersion_1_2, CCIPVersion_1_5, CCIPVersion_1_5_1].some((v) => version === v)
     if (!isCcipContractType(type_)) {
       throw new Error(`Unknown contract type: ${typeAndVersion}`)
     }
