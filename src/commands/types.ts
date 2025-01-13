@@ -1,14 +1,10 @@
+import type { TypedContract } from 'ethers-abitype'
+import type { CCIPContractTypeTokenPool, CCIPTokenPoolsVersion, CCIP_ABIs } from '../lib/types.js'
+
 export enum Format {
   log = 'log',
   pretty = 'pretty',
   json = 'json',
-}
-
-// Basic token metadata (standard ERC20 metadata)
-export interface TokenMetadata {
-  name: string
-  symbol: string
-  decimals: bigint
 }
 
 // Extended token info with pool details for CCIP
@@ -26,13 +22,6 @@ export interface TokenDetailsError {
   error: Error
 }
 
-export interface PoolSupportCheck {
-  token: string
-  pool: string
-  isSupported: boolean
-  error: Error | null
-}
-
 // First, let's add the necessary types
 export interface TokenBucket {
   tokens: bigint
@@ -47,11 +36,9 @@ export interface TokenPoolDetails {
   remotePools: string[]
   outboundRateLimiter: TokenBucket
   inboundRateLimiter: TokenBucket
-}
-
-export interface RemoteTokenConfig {
-  remoteToken: string
-  remotePools: string[]
+  isCustomPool?: boolean
+  type: CCIPContractTypeTokenPool
+  version: CCIPTokenPoolsVersion
 }
 
 // Token processing types
@@ -60,3 +47,13 @@ export type TokenChunk = readonly string[]
 export type TokenDetailsResult =
   | { success: CCIPSupportedToken; error: null }
   | { success: null; error: TokenDetailsError }
+
+/**
+ * Version-aware token pool contract wrapper
+ */
+export interface VersionedTokenPool {
+  type: CCIPContractTypeTokenPool
+  version: CCIPTokenPoolsVersion
+  contract: TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeTokenPool][CCIPTokenPoolsVersion]>
+  isCustomPool?: boolean
+}

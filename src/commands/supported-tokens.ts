@@ -1,3 +1,28 @@
+/**
+ * CCIP Token Discovery Service
+ *
+ * Discovers and validates tokens that can be transferred between chains using Chainlink's CCIP.
+ * The service handles pagination, parallel processing, and comprehensive error collection.
+ *
+ * Architecture:
+ * 1. Chain & Contract Setup: Validates cross-chain paths and initializes core contracts
+ * 2. Token Discovery: Fetches all registered tokens with pagination
+ * 3. Support Validation: Checks token support for destination chain
+ * 4. Detail Collection: Gathers token and pool information in parallel
+ *
+ * Performance Considerations:
+ * - Uses batching to prevent RPC timeouts (configurable batch sizes)
+ * - Implements parallel processing with rate limiting
+ * - Memory-efficient token processing through pagination
+ *
+ * Error Handling:
+ * - Individual token failures don't halt the process
+ * - Errors are collected and reported comprehensively
+ * - Detailed error reporting for debugging
+ *
+ * @module supported-tokens
+ */
+
 /* eslint-disable @typescript-eslint/no-base-to-string */
 import { type Addressable, type JsonRpcApiProvider, Contract } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
@@ -5,36 +30,64 @@ import type { TypedContract } from 'ethers-abitype'
 import { chunk } from 'lodash-es'
 
 import TokenABI from '../abi/BurnMintERC677Token.js'
-import TokenPoolABI from '../abi/BurnMintTokenPool_1_5.js'
 import RouterABI from '../abi/Router.js'
 import TokenAdminRegistryABI from '../abi/TokenAdminRegistry_1_5.js'
 
 import {
+  type CCIPContractType,
+  type CCIPTokenPoolsVersion,
+  type CCIPVersion,
+  CCIPContractTypeBurnMintTokenPool,
+  CCIPContractTypeTokenPool,
   CCIPVersion_1_2,
+  CCIPVersion_1_5_1,
+  CCIP_ABIs,
   bigIntReplacer,
   chainIdFromName,
   chainNameFromId,
   chainSelectorFromId,
   getOnRampLane,
 } from '../lib/index.js'
+import { getTypeAndVersion } from '../lib/utils.js'
 import type { Providers } from '../providers.js'
 import {
   type CCIPSupportedToken,
-  type PoolSupportCheck,
   type TokenChunk,
   type TokenDetailsError,
   type TokenDetailsResult,
   type TokenPoolDetails,
+  type VersionedTokenPool,
   Format,
 } from './types.js'
 
-// Configuration constants for fine-tuning performance and behavior
+/**
+ * Performance and reliability configuration.
+ * Adjust these values based on network conditions and RPC provider capabilities.
+ */
 const CONFIG = {
+  /**
+   * Maximum tokens per registry request.
+   */
   BATCH_SIZE: 100,
+
+  /**
+   * Parallel pool support checks.
+   * - Increase: If RPC can handle more concurrent requests
+   * - Decrease: If hitting rate limits or timeouts
+   */
   PARALLEL_POOL_CHECKS: 5,
+
+  /**
+   * Parallel pool detail fetching.
+   * Separate from POOL_CHECKS as these calls are heavier.
+   */
   PARALLEL_POOL_DETAILS: 3,
 } as const
 
+/**
+ * Type guards for processing token discovery results.
+ * Used to maintain type safety when handling success/error cases.
+ */
 function isSuccessResult(
   result: TokenDetailsResult,
 ): result is { success: CCIPSupportedToken; error: null } {
@@ -47,24 +100,37 @@ function isErrorResult(
   return result.error !== null
 }
 
+interface PoolInfo {
+  type: CCIPContractTypeTokenPool
+  version: CCIPTokenPoolsVersion
+  contract: TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeTokenPool][CCIPTokenPoolsVersion]>
+  address: string
+  isCustomPool?: boolean
+}
+
 /**
- * Fetch details about a specific pool (remote token, rate limiters, etc.).
+ * Fetches detailed information about a token pool including:
+ * - Remote token address
+ * - Associated remote pools
+ * - Rate limiter configurations
+ *
+ * Failures here don't stop the overall process.
  */
 async function getPoolDetails(
-  pool: TypedContract<typeof TokenPoolABI>,
+  poolInfo: PoolInfo,
   destSelector: bigint,
 ): Promise<TokenPoolDetails | null> {
   try {
     const [remoteToken, remotePools, outboundState, inboundState] = await Promise.all([
-      pool.getRemoteToken(destSelector),
-      pool.getRemotePools(destSelector),
-      pool.getCurrentOutboundRateLimiterState(destSelector),
-      pool.getCurrentInboundRateLimiterState(destSelector),
+      poolInfo.contract.getRemoteToken(destSelector),
+      getRemotePoolsForVersion(poolInfo, destSelector),
+      poolInfo.contract.getCurrentOutboundRateLimiterState(destSelector),
+      poolInfo.contract.getCurrentInboundRateLimiterState(destSelector),
     ])
 
     return {
       remoteToken: remoteToken.toString(),
-      remotePools: remotePools.map((p) => p.toString()),
+      remotePools,
       outboundRateLimiter: {
         tokens: outboundState.tokens,
         lastUpdated: Number(outboundState.lastUpdated),
@@ -79,10 +145,13 @@ async function getPoolDetails(
         capacity: inboundState.capacity,
         rate: inboundState.rate,
       },
+      isCustomPool: poolInfo.isCustomPool,
+      type: poolInfo.type,
+      version: poolInfo.version,
     }
   } catch (error) {
     console.error(
-      `[ERROR] Failed to fetch pool details for pool ${await pool.getAddress()}:`,
+      `[ERROR] Failed to fetch pool details for pool ${poolInfo.address}:`,
       error instanceof Error ? error.message : String(error),
     )
     return null
@@ -90,7 +159,9 @@ async function getPoolDetails(
 }
 
 /**
- * 1) Parse CLI arguments into chain IDs and providers.
+ * Resolves chain identifiers and initializes required providers.
+ *
+ * @throws {Error} If chain identifiers are invalid or providers unavailable
  */
 async function parseChainIds(
   providers: Providers,
@@ -106,7 +177,9 @@ async function parseChainIds(
 }
 
 /**
- * 2) Check chain support to ensure the lane is valid.
+ * Validates that the specified cross-chain lane is supported.
+ *
+ * @throws {Error} If the lane is not supported by CCIP
  */
 async function checkChainSupport(
   routerAddress: string,
@@ -134,7 +207,9 @@ async function checkChainSupport(
 }
 
 /**
- * 3) Retrieve the TokenAdminRegistry contract from onRamp's static config.
+ * Retrieves the TokenAdminRegistry contract from the onRamp's configuration.
+ *
+ * @throws {Error} If using deprecated CCIP version
  */
 async function getRegistryContract(
   router: TypedContract<typeof RouterABI>,
@@ -166,7 +241,12 @@ async function getRegistryContract(
 }
 
 /**
- * 4) Fetch all registered tokens from the registry in a paginated manner.
+ * Fetches all registered tokens using pagination to handle large sets.
+ *
+ * Performance Notes:
+ * - Uses BATCH_SIZE to limit request size
+ * - Implements pagination to handle any number of tokens
+ * - Memory-efficient through incremental processing
  */
 async function fetchAllRegisteredTokens(
   registry: TypedContract<typeof TokenAdminRegistryABI>,
@@ -196,142 +276,153 @@ async function fetchAllRegisteredTokens(
 }
 
 /**
- * 5) Check which tokens are supported on the destination chain.
+ * Identifies which tokens are supported for transfer to the destination chain.
+ *
+ * Performance Notes:
+ * - Processes tokens in parallel with rate limiting
+ * - Handles failures gracefully without stopping the process
+ * - Collects all results for comprehensive reporting
  */
-
 async function findSupportedTokens(
   registry: TypedContract<typeof TokenAdminRegistryABI>,
   allTokens: Array<string | Addressable>,
   sourceProvider: JsonRpcApiProvider,
   destSelector: bigint,
-) {
-  const tokenToPoolMap: Record<string, string> = {}
-  // Split `allTokens` into slices of size `CONFIG.PARALLEL_POOL_CHECKS`
+): Promise<Record<string, PoolInfo>> {
+  const tokenToPoolInfo: Record<string, PoolInfo> = {}
   const tokenChunks = chunk(allTokens, CONFIG.PARALLEL_POOL_CHECKS)
 
   for (const chunkTokens of tokenChunks) {
-    // We fetch pools for these chunk tokens
     const poolsChunk = await registry.getPools(chunkTokens)
 
-    const supportChecks: PoolSupportCheck[] = await Promise.all(
+    const supportChecks = await Promise.all(
       poolsChunk.map(async (poolAddress, idx) => {
-        try {
-          const pool = new Contract(
-            poolAddress.toString(),
-            TokenPoolABI,
-            sourceProvider,
-          ) as unknown as TypedContract<typeof TokenPoolABI>
+        const result = await getVersionedPoolContract(poolAddress.toString(), sourceProvider)
 
-          const isSupported = await pool.isSupportedChain(destSelector)
+        if ('error' in result) {
+          console.error(
+            `[ERROR] Failed to initialize pool ${poolAddress.toString()} | token ${chunkTokens[idx].toString()}`,
+            result.error,
+          )
           return {
             token: chunkTokens[idx].toString(),
-            pool: poolAddress.toString(),
+            isSupported: false,
+            error: result.error,
+          }
+        }
+
+        try {
+          const isSupported = await result.contract.isSupportedChain(destSelector)
+          return {
+            token: chunkTokens[idx].toString(),
+            pool: {
+              ...result,
+              address: poolAddress.toString(),
+            },
             isSupported,
             error: null,
-          } satisfies PoolSupportCheck
+          }
         } catch (error) {
           console.error(
-            `[ERROR] Failed to check support for pool ${poolAddress.toString()} | token ${chunkTokens[
-              idx
-            ].toString()}`,
+            `[ERROR] Failed to check support for pool ${poolAddress.toString()} | type ${result.type} | version ${result.version} | token ${chunkTokens[idx].toString()}`,
             error,
           )
           return {
             token: chunkTokens[idx].toString(),
-            pool: poolAddress.toString(),
             isSupported: false,
             error: error instanceof Error ? error : new Error(String(error)),
-          } satisfies PoolSupportCheck
+          }
         }
       }),
     )
 
     // Collect results
-    for (const { token, pool, isSupported } of supportChecks) {
-      if (isSupported) {
-        tokenToPoolMap[token] = pool
+    for (const check of supportChecks) {
+      if (check.isSupported && 'pool' in check) {
+        tokenToPoolInfo[check.token] = check.pool as PoolInfo
       }
     }
   }
 
-  return tokenToPoolMap
+  return tokenToPoolInfo
 }
 
 /**
- * 6) Fetch details (ERC20 + pool details) for each supported token.
+ * Gathers detailed information about supported tokens and their pools.
+ *
+ * Performance Notes:
+ * - Parallel processing with configurable limits
+ * - Comprehensive error collection
+ * - Memory-efficient through chunking
  */
 async function fetchTokenDetailsForSupportedTokens(
-  tokenToPoolMap: Record<string, string>,
+  tokenToPoolInfo: Record<string, PoolInfo>,
   sourceProvider: JsonRpcApiProvider,
   destSelector: bigint,
 ): Promise<TokenDetailsResult[]> {
-  // chunk tokens for parallel fetching
-  const tokens = Object.keys(tokenToPoolMap)
-  const tokenDetails = (
+  const tokens = Object.keys(tokenToPoolInfo)
+  return (
     await Promise.all(
-      chunk(tokens, CONFIG.PARALLEL_POOL_DETAILS).map(
-        async (tokenChunk: TokenChunk): Promise<TokenDetailsResult[]> => {
-          const chunkResults: TokenDetailsResult[] = await Promise.all(
-            tokenChunk.map(async (token: string): Promise<TokenDetailsResult> => {
-              try {
-                const erc20 = new Contract(
+      chunk(tokens, CONFIG.PARALLEL_POOL_DETAILS).map(async (tokenChunk: TokenChunk) => {
+        return Promise.all(
+          tokenChunk.map(async (token: string): Promise<TokenDetailsResult> => {
+            try {
+              const erc20 = new Contract(
+                token,
+                TokenABI,
+                sourceProvider,
+              ) as unknown as TypedContract<typeof TokenABI>
+              const poolInfo = tokenToPoolInfo[token]
+
+              const [name, symbol, decimalsBI, poolDetails] = await Promise.all([
+                erc20.name(),
+                erc20.symbol(),
+                erc20.decimals(),
+                getPoolDetails(poolInfo, destSelector),
+              ])
+
+              const decimals = Number(decimalsBI)
+
+              console.log(
+                `[INFO] Successfully fetched details for token ${name} (${symbol}) and its pool`,
+              )
+
+              return {
+                success: {
+                  name,
+                  symbol,
+                  decimals,
+                  address: token,
+                  pool: poolInfo.address,
+                  poolDetails: poolDetails ?? undefined,
+                },
+                error: null,
+              } satisfies TokenDetailsResult
+            } catch (error: unknown) {
+              const actualError = error instanceof Error ? error : new Error(String(error))
+              return {
+                success: null,
+                error: {
                   token,
-                  TokenABI,
-                  sourceProvider,
-                ) as unknown as TypedContract<typeof TokenABI>
-                const pool = new Contract(
-                  tokenToPoolMap[token],
-                  TokenPoolABI,
-                  sourceProvider,
-                ) as unknown as TypedContract<typeof TokenPoolABI>
-
-                const [name, symbol, decimalsBI, poolDetails] = await Promise.all([
-                  erc20.name(),
-                  erc20.symbol(),
-                  erc20.decimals(),
-                  getPoolDetails(pool, destSelector),
-                ])
-
-                const decimals = Number(decimalsBI)
-
-                console.log(
-                  `[INFO] Successfully fetched details for token ${name} (${symbol}) and its pool`,
-                )
-
-                return {
-                  success: {
-                    name,
-                    symbol,
-                    decimals,
-                    address: token,
-                    pool: tokenToPoolMap[token],
-                    poolDetails: poolDetails ?? undefined,
-                  },
-                  error: null,
-                } satisfies TokenDetailsResult
-              } catch (error: unknown) {
-                const actualError = error instanceof Error ? error : new Error(String(error))
-                return {
-                  success: null,
-                  error: {
-                    token,
-                    error: actualError,
-                  },
-                } satisfies TokenDetailsResult
-              }
-            }),
-          )
-          return chunkResults
-        },
-      ),
+                  error: actualError,
+                },
+              } satisfies TokenDetailsResult
+            }
+          }),
+        )
+      }),
     )
   ).flat()
-
-  return tokenDetails
 }
 
 /**
- * Consolidate successful / failed tokens into an object for final reporting.
+ * Prepares the final report including success and failure information.
+ *
+ * Output includes:
+ * - Metadata about the discovery process
+ * - Successfully validated tokens with details
+ * - Failed tokens with error information
+ * - Statistical summary
  */
 function prepareSummary(
   tokenDetails: TokenDetailsResult[],
@@ -404,7 +495,111 @@ function prepareSummary(
 }
 
 /**
- * 7) Main function: Orchestrates the entire flow while keeping the logic the same.
+ * Gets a version-aware pool contract instance
+ */
+async function getVersionedPoolContract(
+  address: string,
+  provider: JsonRpcApiProvider,
+): Promise<VersionedTokenPool | { error: Error }> {
+  try {
+    let type_: CCIPContractType
+    let version: CCIPVersion
+    let isCustomPool = false
+
+    try {
+      ;[type_, version] = await getTypeAndVersion(provider, address)
+    } catch (versionError) {
+      console.warn(
+        `[WARN] Could not determine pool type and version for ${address}. Error: ${
+          versionError instanceof Error ? versionError.message : String(versionError)
+        }`,
+      )
+      console.warn('[WARN] Assuming this is a custom pool, will try with latest version')
+
+      type_ = CCIPContractTypeBurnMintTokenPool
+      version = CCIPVersion_1_5_1
+      isCustomPool = true
+    }
+
+    // Validate pool type
+    if (!CCIPContractTypeTokenPool.includes(type_)) {
+      throw new Error(
+        `Not a token pool: ${address} is "${type_} ${version}" - Supported types: ${CCIPContractTypeTokenPool.join(
+          ', ',
+        )}`,
+      )
+    }
+
+    // Get correct ABI based on type and version
+    const abi = CCIP_ABIs[type_ as CCIPContractTypeTokenPool][version as CCIPTokenPoolsVersion]
+    if (!abi) {
+      throw new Error(`Unsupported pool version: ${version} for type ${type_}`)
+    }
+
+    const contract = new Contract(address, abi, provider) as unknown as TypedContract<typeof abi>
+
+    return {
+      version: version as CCIPTokenPoolsVersion,
+      type: type_ as CCIPContractTypeTokenPool,
+      contract,
+      isCustomPool,
+    }
+  } catch (error) {
+    return {
+      error:
+        error instanceof Error
+          ? error
+          : new Error(error instanceof Object ? JSON.stringify(error) : String(error)),
+    }
+  }
+}
+
+/**
+ * Gets remote pools based on contract version
+ */
+async function getRemotePoolsForVersion(
+  versionedPool: VersionedTokenPool,
+  destSelector: bigint,
+): Promise<string[]> {
+  try {
+    switch (versionedPool.version) {
+      case '1.5.0': {
+        const remotePool = await versionedPool.contract.getRemotePool(destSelector)
+        return [remotePool.toString()]
+      }
+      case '1.5.1': {
+        const remotePools = await versionedPool.contract.getRemotePools(destSelector)
+        return remotePools.map((pool) => pool.toString())
+      }
+    }
+  } catch (error) {
+    console.error(
+      `[ERROR] Failed to get remote pools for ${await versionedPool.contract.getAddress()}:`,
+      error instanceof Error ? error.message : String(error),
+    )
+    return []
+  }
+}
+
+/**
+ * Main entry point for token discovery process.
+ *
+ * Process Flow:
+ * 1. Chain setup and validation
+ * 2. Registry contract initialization
+ * 3. Token discovery and filtering
+ * 4. Detailed information gathering
+ * 5. Result compilation and reporting
+ *
+ * Error Handling:
+ * - Critical errors (chain/contract setup) halt the process
+ * - Non-critical errors (individual tokens) are collected and reported
+ * - Comprehensive error reporting for debugging
+ *
+ * Output Formats:
+ * - json: Machine-readable complete output
+ * - log: Basic console logging
+ * - pretty: Formatted human-readable output
  */
 export async function showSupportedTokens(
   providers: Providers,
@@ -434,14 +629,14 @@ export async function showSupportedTokens(
   const { allTokens, totalScanned } = await fetchAllRegisteredTokens(registry, sourceChainId)
 
   // Step 5) Check which tokens are supported on the destination chain
-  const tokenToPoolMap = await findSupportedTokens(
+  const tokenToPoolInfo = await findSupportedTokens(
     registry,
     allTokens,
     sourceProvider,
     destSelector,
   )
 
-  const supportedTokenCount = Object.keys(tokenToPoolMap).length
+  const supportedTokenCount = Object.keys(tokenToPoolInfo).length
   console.log(
     `[SUMMARY] Scanned ${totalScanned} tokens, found ${supportedTokenCount} supported for "${chainNameFromId(
       sourceChainId,
@@ -451,7 +646,7 @@ export async function showSupportedTokens(
   // Step 6) Fetch detailed token + pool info for the supported tokens
   console.log('[INFO] Fetching detailed token and pool information')
   const tokenDetails = await fetchTokenDetailsForSupportedTokens(
-    tokenToPoolMap,
+    tokenToPoolInfo,
     sourceProvider,
     destSelector,
   )
@@ -496,8 +691,16 @@ export async function showSupportedTokens(
       console.log('\n=== Supported Tokens ===')
       for (const token of successfulTokens) {
         console.log(
-          `[INFO] Token: ${token.name} (${token.symbol}) at ${token.address}, decimals=${token.decimals}, pool=${token.pool}`,
+          `[INFO] Token: ${token.name} (${token.symbol}) at ${token.address}, decimals=${token.decimals}`,
         )
+        console.log(
+          `  Pool: ${token.pool}${
+            token.poolDetails?.isCustomPool
+              ? ' (Custom Pool)'
+              : ` (${token.poolDetails?.type} v${token.poolDetails?.version})`
+          }`,
+        )
+
         if (token.poolDetails) {
           console.log(`  Remote Token: ${token.poolDetails.remoteToken}`)
           console.log(`  Remote Pools: ${token.poolDetails.remotePools.join(', ')}`)
@@ -506,12 +709,12 @@ export async function showSupportedTokens(
           console.log(`      Enabled: ${token.poolDetails.outboundRateLimiter.isEnabled}`)
           console.log(`      Tokens: ${token.poolDetails.outboundRateLimiter.tokens}`)
           console.log(`      Capacity: ${token.poolDetails.outboundRateLimiter.capacity}`)
-          console.log(`      Rate: ${token.poolDetails.outboundRateLimiter.rate}/sec`)
+          console.log(`      Rate: ${token.poolDetails.outboundRateLimiter.rate}`)
           console.log('    Inbound:')
           console.log(`      Enabled: ${token.poolDetails.inboundRateLimiter.isEnabled}`)
           console.log(`      Tokens: ${token.poolDetails.inboundRateLimiter.tokens}`)
           console.log(`      Capacity: ${token.poolDetails.inboundRateLimiter.capacity}`)
-          console.log(`      Rate: ${token.poolDetails.inboundRateLimiter.rate}/sec`)
+          console.log(`      Rate: ${token.poolDetails.inboundRateLimiter.rate}`)
         }
         console.log('---')
       }

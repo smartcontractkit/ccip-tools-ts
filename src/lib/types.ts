@@ -7,8 +7,12 @@ import {
 } from 'abitype'
 import { type Log, type Result, AbiCoder, concat, dataSlice, id } from 'ethers'
 
+import BurnMintTokenPool_1_5_ABI from '../abi/BurnMintTokenPool_1_5.js'
+import BurnMintTokenPool_1_5_1_ABI from '../abi/BurnMintTokenPool_1_5_1.js'
 import CommitStore_1_2_ABI from '../abi/CommitStore_1_2.js'
 import CommitStore_1_5_ABI from '../abi/CommitStore_1_5.js'
+import LockReleaseTokenPool_1_5_ABI from '../abi/LockReleaseTokenPool_1_5.js'
+import LockReleaseTokenPool_1_5_1_ABI from '../abi/LockReleaseTokenPool_1_5_1.js'
 import EVM2EVMOffRamp_1_2_ABI from '../abi/OffRamp_1_2.js'
 import EVM2EVMOffRamp_1_5_ABI from '../abi/OffRamp_1_5.js'
 import EVM2EVMOnRamp_1_2_ABI from '../abi/OnRamp_1_2.js'
@@ -21,11 +25,14 @@ export type CCIPMessage = AbiParametersToPrimitiveTypes<
   ExtractAbiEvent<typeof EVM2EVMOnRamp_1_5_ABI, 'CCIPSendRequested'>['inputs']
 >[0]
 
+export const CCIPVersion_1_5_1 = '1.5.1'
+export type CCIPVersion_1_5_1 = typeof CCIPVersion_1_5_1
 export const CCIPVersion_1_5 = '1.5.0'
 export type CCIPVersion_1_5 = typeof CCIPVersion_1_5
 export const CCIPVersion_1_2 = '1.2.0'
 export type CCIPVersion_1_2 = typeof CCIPVersion_1_2
-export type CCIPVersion = CCIPVersion_1_5 | CCIPVersion_1_2
+export type CCIPVersion = CCIPVersion_1_5 | CCIPVersion_1_2 | CCIPVersion_1_5_1
+export type CCIPTokenPoolsVersion = CCIPVersion_1_5 | CCIPVersion_1_5_1
 
 export const CCIPContractTypeOnRamp = 'EVM2EVMOnRamp'
 export type CCIPContractTypeOnRamp = typeof CCIPContractTypeOnRamp
@@ -33,23 +40,113 @@ export const CCIPContractTypeOffRamp = 'EVM2EVMOffRamp'
 export type CCIPContractTypeOffRamp = typeof CCIPContractTypeOffRamp
 export const CCIPContractTypeCommitStore = 'EVM2EVMCommitStore'
 export type CCIPContractTypeCommitStore = typeof CCIPContractTypeCommitStore
+export const CCIPContractTypeBurnMintTokenPool = 'BurnMintTokenPool'
+export type CCIPContractTypeBurnMintTokenPool = typeof CCIPContractTypeBurnMintTokenPool
+export const CCIPContractTypeBurnMintTokenPoolAndProxy = 'BurnMintTokenPoolAndProxy'
+export type CCIPContractTypeBurnMintTokenPoolAndProxy =
+  typeof CCIPContractTypeBurnMintTokenPoolAndProxy
+export const CCIPContractTypeBurnMintTokenPoolWithTax = 'BurnMintTokenPoolWithTax'
+
+export const CCIPContractTypeBurnWithFromMintTokenPool = 'BurnWithFromMintTokenPool'
+export type CCIPContractTypeBurnWithFromMintTokenPool =
+  typeof CCIPContractTypeBurnWithFromMintTokenPool
+
+export const CCIPContractTypeBurnWithFromMintTokenPoolAndProxy = 'BurnWithFromMintTokenPoolAndProxy'
+export type CCIPContractTypeBurnWithFromMintTokenPoolAndProxy =
+  typeof CCIPContractTypeBurnWithFromMintTokenPoolAndProxy
+
+export type CCIPContractTypeBurnMintTokenPoolWithTax =
+  typeof CCIPContractTypeBurnMintTokenPoolWithTax
+export const CCIPContractTypeBurnWithFromMintRebasingTokenPool = 'BurnWithFromMintRebasingTokenPool'
+export type CCIPContractTypeBurnWithFromMintRebasingTokenPool =
+  typeof CCIPContractTypeBurnWithFromMintRebasingTokenPool
+export const CCIPContractTypeLockReleaseTokenPool = 'LockReleaseTokenPool'
+export type CCIPContractTypeLockReleaseTokenPool = typeof CCIPContractTypeLockReleaseTokenPool
+export const CCIPContractTypeLockReleaseTokenPoolAndProxy = 'LockReleaseTokenPoolAndProxy'
+export type CCIPContractTypeLockReleaseTokenPoolAndProxy =
+  typeof CCIPContractTypeLockReleaseTokenPoolAndProxy
+export const CCIPContractTypeUSDCTokenPool = 'USDCTokenPool'
+export type CCIPContractTypeUSDCTokenPool = typeof CCIPContractTypeUSDCTokenPool
+
+export const CCIPContractTypeTokenPool = [
+  CCIPContractTypeBurnMintTokenPool,
+  CCIPContractTypeBurnMintTokenPoolAndProxy,
+  CCIPContractTypeBurnMintTokenPoolWithTax,
+  CCIPContractTypeBurnWithFromMintRebasingTokenPool,
+  CCIPContractTypeLockReleaseTokenPool,
+  CCIPContractTypeLockReleaseTokenPoolAndProxy,
+  CCIPContractTypeUSDCTokenPool,
+  CCIPContractTypeBurnWithFromMintTokenPoolAndProxy,
+  CCIPContractTypeBurnWithFromMintTokenPool,
+]
+export type CCIPContractTypeTokenPool =
+  | CCIPContractTypeBurnMintTokenPool
+  | CCIPContractTypeLockReleaseTokenPool
+  | CCIPContractTypeLockReleaseTokenPoolAndProxy
+  | CCIPContractTypeUSDCTokenPool
+  | CCIPContractTypeBurnWithFromMintRebasingTokenPool
+  | CCIPContractTypeBurnMintTokenPoolAndProxy
+  | CCIPContractTypeBurnMintTokenPoolWithTax
+  | CCIPContractTypeBurnWithFromMintTokenPoolAndProxy
+  | CCIPContractTypeBurnWithFromMintTokenPool
+
 export type CCIPContractType =
   | CCIPContractTypeOnRamp
   | CCIPContractTypeOffRamp
   | CCIPContractTypeCommitStore
+  | CCIPContractTypeTokenPool
 
 export const CCIP_ABIs = {
   [CCIPContractTypeOnRamp]: {
+    [CCIPVersion_1_5_1]: EVM2EVMOnRamp_1_5_ABI,
     [CCIPVersion_1_5]: EVM2EVMOnRamp_1_5_ABI,
     [CCIPVersion_1_2]: EVM2EVMOnRamp_1_2_ABI,
   },
   [CCIPContractTypeOffRamp]: {
+    [CCIPVersion_1_5_1]: EVM2EVMOffRamp_1_5_ABI,
     [CCIPVersion_1_5]: EVM2EVMOffRamp_1_5_ABI,
     [CCIPVersion_1_2]: EVM2EVMOffRamp_1_2_ABI,
   },
   [CCIPContractTypeCommitStore]: {
+    [CCIPVersion_1_5_1]: CommitStore_1_5_ABI,
     [CCIPVersion_1_5]: CommitStore_1_5_ABI,
     [CCIPVersion_1_2]: CommitStore_1_2_ABI,
+  },
+  [CCIPContractTypeBurnMintTokenPool]: {
+    [CCIPVersion_1_5]: BurnMintTokenPool_1_5_ABI,
+    [CCIPVersion_1_5_1]: BurnMintTokenPool_1_5_1_ABI,
+  },
+  [CCIPContractTypeLockReleaseTokenPool]: {
+    [CCIPVersion_1_5]: LockReleaseTokenPool_1_5_ABI,
+    [CCIPVersion_1_5_1]: LockReleaseTokenPool_1_5_1_ABI,
+  },
+  [CCIPContractTypeLockReleaseTokenPoolAndProxy]: {
+    [CCIPVersion_1_5]: LockReleaseTokenPool_1_5_ABI,
+    [CCIPVersion_1_5_1]: LockReleaseTokenPool_1_5_1_ABI,
+  },
+  [CCIPContractTypeUSDCTokenPool]: {
+    [CCIPVersion_1_5]: BurnMintTokenPool_1_5_ABI,
+    [CCIPVersion_1_5_1]: BurnMintTokenPool_1_5_1_ABI,
+  },
+  [CCIPContractTypeBurnWithFromMintRebasingTokenPool]: {
+    [CCIPVersion_1_5]: BurnMintTokenPool_1_5_ABI,
+    [CCIPVersion_1_5_1]: BurnMintTokenPool_1_5_1_ABI,
+  },
+  [CCIPContractTypeBurnMintTokenPoolAndProxy]: {
+    [CCIPVersion_1_5]: BurnMintTokenPool_1_5_ABI,
+    [CCIPVersion_1_5_1]: BurnMintTokenPool_1_5_1_ABI,
+  },
+  [CCIPContractTypeBurnMintTokenPoolWithTax]: {
+    [CCIPVersion_1_5]: BurnMintTokenPool_1_5_ABI,
+    [CCIPVersion_1_5_1]: BurnMintTokenPool_1_5_1_ABI,
+  },
+  [CCIPContractTypeBurnWithFromMintTokenPoolAndProxy]: {
+    [CCIPVersion_1_5]: BurnMintTokenPool_1_5_ABI,
+    [CCIPVersion_1_5_1]: BurnMintTokenPool_1_5_1_ABI,
+  },
+  [CCIPContractTypeBurnWithFromMintTokenPool]: {
+    [CCIPVersion_1_5]: BurnMintTokenPool_1_5_ABI,
+    [CCIPVersion_1_5_1]: BurnMintTokenPool_1_5_1_ABI,
   },
 } as const
 

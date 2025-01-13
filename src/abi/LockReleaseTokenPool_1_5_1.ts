@@ -1,6 +1,6 @@
 export default [
   // generate:
-  // fetch('https://github.com/smartcontractkit/ccip/raw/release/2.14.0-ccip1.5/core/gethwrappers/ccip/generated/burn_mint_token_pool/burn_mint_token_pool.go')
+  // fetch('https://github.com/smartcontractkit/ccip/raw/release/contracts-ccip-1.5.1/core/gethwrappers/ccip/generated/lock_release_token_pool/lock_release_token_pool.go')
   //   .then((res) => res.text())
   //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
   //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
@@ -8,9 +8,14 @@ export default [
   {
     inputs: [
       {
-        internalType: 'contractIBurnMintERC20',
+        internalType: 'contractIERC20',
         name: 'token',
         type: 'address',
+      },
+      {
+        internalType: 'uint8',
+        name: 'localTokenDecimals',
+        type: 'uint8',
       },
       {
         internalType: 'address[]',
@@ -18,6 +23,7 @@ export default [
         type: 'address[]',
       },
       { internalType: 'address', name: 'rmnProxy', type: 'address' },
+      { internalType: 'bool', name: 'acceptLiquidity', type: 'bool' },
       { internalType: 'address', name: 'router', type: 'address' },
     ],
     stateMutability: 'nonpayable',
@@ -50,6 +56,7 @@ export default [
     name: 'CallerIsNotARampOnRouter',
     type: 'error',
   },
+  { inputs: [], name: 'CannotTransferToSelf', type: 'error' },
   {
     inputs: [{ internalType: 'uint64', name: 'chainSelector', type: 'uint64' }],
     name: 'ChainAlreadyExists',
@@ -87,6 +94,15 @@ export default [
     name: 'DisabledNonZeroRateLimit',
     type: 'error',
   },
+  { inputs: [], name: 'InsufficientLiquidity', type: 'error' },
+  {
+    inputs: [
+      { internalType: 'uint8', name: 'expected', type: 'uint8' },
+      { internalType: 'uint8', name: 'actual', type: 'uint8' },
+    ],
+    name: 'InvalidDecimalArgs',
+    type: 'error',
+  },
   {
     inputs: [
       {
@@ -108,6 +124,27 @@ export default [
     type: 'error',
   },
   {
+    inputs: [{ internalType: 'bytes', name: 'sourcePoolData', type: 'bytes' }],
+    name: 'InvalidRemoteChainDecimals',
+    type: 'error',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'uint64',
+        name: 'remoteChainSelector',
+        type: 'uint64',
+      },
+      {
+        internalType: 'bytes',
+        name: 'remotePoolAddress',
+        type: 'bytes',
+      },
+    ],
+    name: 'InvalidRemotePoolForChain',
+    type: 'error',
+  },
+  {
     inputs: [
       {
         internalType: 'bytes',
@@ -123,6 +160,9 @@ export default [
     name: 'InvalidToken',
     type: 'error',
   },
+  { inputs: [], name: 'LiquidityNotAccepted', type: 'error' },
+  { inputs: [], name: 'MismatchedArrayLengths', type: 'error' },
+  { inputs: [], name: 'MustBeProposedOwner', type: 'error' },
   {
     inputs: [
       {
@@ -132,6 +172,37 @@ export default [
       },
     ],
     name: 'NonExistentChain',
+    type: 'error',
+  },
+  { inputs: [], name: 'OnlyCallableByOwner', type: 'error' },
+  {
+    inputs: [
+      { internalType: 'uint8', name: 'remoteDecimals', type: 'uint8' },
+      { internalType: 'uint8', name: 'localDecimals', type: 'uint8' },
+      {
+        internalType: 'uint256',
+        name: 'remoteAmount',
+        type: 'uint256',
+      },
+    ],
+    name: 'OverflowDetected',
+    type: 'error',
+  },
+  { inputs: [], name: 'OwnerCannotBeZero', type: 'error' },
+  {
+    inputs: [
+      {
+        internalType: 'uint64',
+        name: 'remoteChainSelector',
+        type: 'uint64',
+      },
+      {
+        internalType: 'bytes',
+        name: 'remotePoolAddress',
+        type: 'bytes',
+      },
+    ],
+    name: 'PoolAlreadyAdded',
     type: 'error',
   },
   { inputs: [], name: 'RateLimitMustBeDisabled', type: 'error' },
@@ -354,6 +425,63 @@ export default [
       {
         indexed: true,
         internalType: 'address',
+        name: 'provider',
+        type: 'address',
+      },
+      {
+        indexed: true,
+        internalType: 'uint256',
+        name: 'amount',
+        type: 'uint256',
+      },
+    ],
+    name: 'LiquidityAdded',
+    type: 'event',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: 'address',
+        name: 'provider',
+        type: 'address',
+      },
+      {
+        indexed: true,
+        internalType: 'uint256',
+        name: 'amount',
+        type: 'uint256',
+      },
+    ],
+    name: 'LiquidityRemoved',
+    type: 'event',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: 'address',
+        name: 'from',
+        type: 'address',
+      },
+      {
+        indexed: false,
+        internalType: 'uint256',
+        name: 'amount',
+        type: 'uint256',
+      },
+    ],
+    name: 'LiquidityTransferred',
+    type: 'event',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: 'address',
         name: 'sender',
         type: 'address',
       },
@@ -434,6 +562,19 @@ export default [
     anonymous: false,
     inputs: [
       {
+        indexed: false,
+        internalType: 'address',
+        name: 'rateLimitAdmin',
+        type: 'address',
+      },
+    ],
+    name: 'RateLimitAdminSet',
+    type: 'event',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
         indexed: true,
         internalType: 'address',
         name: 'sender',
@@ -467,8 +608,21 @@ export default [
       {
         indexed: false,
         internalType: 'bytes',
-        name: 'previousPoolAddress',
+        name: 'remotePoolAddress',
         type: 'bytes',
+      },
+    ],
+    name: 'RemotePoolAdded',
+    type: 'event',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: 'uint64',
+        name: 'remoteChainSelector',
+        type: 'uint64',
       },
       {
         indexed: false,
@@ -477,7 +631,7 @@ export default [
         type: 'bytes',
       },
     ],
-    name: 'RemotePoolSet',
+    name: 'RemotePoolRemoved',
     type: 'event',
   },
   {
@@ -521,6 +675,24 @@ export default [
   },
   {
     inputs: [
+      {
+        internalType: 'uint64',
+        name: 'remoteChainSelector',
+        type: 'uint64',
+      },
+      {
+        internalType: 'bytes',
+        name: 'remotePoolAddress',
+        type: 'bytes',
+      },
+    ],
+    name: 'addRemotePool',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
       { internalType: 'address[]', name: 'removes', type: 'address[]' },
       { internalType: 'address[]', name: 'adds', type: 'address[]' },
     ],
@@ -532,17 +704,21 @@ export default [
   {
     inputs: [
       {
+        internalType: 'uint64[]',
+        name: 'remoteChainSelectorsToRemove',
+        type: 'uint64[]',
+      },
+      {
         components: [
           {
             internalType: 'uint64',
             name: 'remoteChainSelector',
             type: 'uint64',
           },
-          { internalType: 'bool', name: 'allowed', type: 'bool' },
           {
-            internalType: 'bytes',
-            name: 'remotePoolAddress',
-            type: 'bytes',
+            internalType: 'bytes[]',
+            name: 'remotePoolAddresses',
+            type: 'bytes[]',
           },
           {
             internalType: 'bytes',
@@ -587,13 +763,20 @@ export default [
           },
         ],
         internalType: 'structTokenPool.ChainUpdate[]',
-        name: 'chains',
+        name: 'chainsToAdd',
         type: 'tuple[]',
       },
     ],
     name: 'applyChainUpdates',
     outputs: [],
     stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'canAcceptLiquidity',
+    outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
+    stateMutability: 'view',
     type: 'function',
   },
   {
@@ -686,6 +869,13 @@ export default [
     type: 'function',
   },
   {
+    inputs: [],
+    name: 'getRebalancer',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
     inputs: [
       {
         internalType: 'uint64',
@@ -693,8 +883,8 @@ export default [
         type: 'uint64',
       },
     ],
-    name: 'getRemotePool',
-    outputs: [{ internalType: 'bytes', name: '', type: 'bytes' }],
+    name: 'getRemotePools',
+    outputs: [{ internalType: 'bytes[]', name: '', type: 'bytes[]' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -742,6 +932,31 @@ export default [
         type: 'address',
       },
     ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'getTokenDecimals',
+    outputs: [{ internalType: 'uint8', name: 'decimals', type: 'uint8' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'uint64',
+        name: 'remoteChainSelector',
+        type: 'uint64',
+      },
+      {
+        internalType: 'bytes',
+        name: 'remotePoolAddress',
+        type: 'bytes',
+      },
+    ],
+    name: 'isRemotePool',
+    outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -823,6 +1038,13 @@ export default [
     type: 'function',
   },
   {
+    inputs: [{ internalType: 'uint256', name: 'amount', type: 'uint256' }],
+    name: 'provideLiquidity',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
     inputs: [
       {
         components: [
@@ -894,6 +1116,24 @@ export default [
         type: 'uint64',
       },
       {
+        internalType: 'bytes',
+        name: 'remotePoolAddress',
+        type: 'bytes',
+      },
+    ],
+    name: 'removeRemotePool',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'uint64',
+        name: 'remoteChainSelector',
+        type: 'uint64',
+      },
+      {
         components: [
           { internalType: 'bool', name: 'isEnabled', type: 'bool' },
           {
@@ -930,6 +1170,47 @@ export default [
   {
     inputs: [
       {
+        internalType: 'uint64[]',
+        name: 'remoteChainSelectors',
+        type: 'uint64[]',
+      },
+      {
+        components: [
+          { internalType: 'bool', name: 'isEnabled', type: 'bool' },
+          {
+            internalType: 'uint128',
+            name: 'capacity',
+            type: 'uint128',
+          },
+          { internalType: 'uint128', name: 'rate', type: 'uint128' },
+        ],
+        internalType: 'structRateLimiter.Config[]',
+        name: 'outboundConfigs',
+        type: 'tuple[]',
+      },
+      {
+        components: [
+          { internalType: 'bool', name: 'isEnabled', type: 'bool' },
+          {
+            internalType: 'uint128',
+            name: 'capacity',
+            type: 'uint128',
+          },
+          { internalType: 'uint128', name: 'rate', type: 'uint128' },
+        ],
+        internalType: 'structRateLimiter.Config[]',
+        name: 'inboundConfigs',
+        type: 'tuple[]',
+      },
+    ],
+    name: 'setChainRateLimiterConfigs',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
         internalType: 'address',
         name: 'rateLimitAdmin',
         type: 'address',
@@ -941,19 +1222,8 @@ export default [
     type: 'function',
   },
   {
-    inputs: [
-      {
-        internalType: 'uint64',
-        name: 'remoteChainSelector',
-        type: 'uint64',
-      },
-      {
-        internalType: 'bytes',
-        name: 'remotePoolAddress',
-        type: 'bytes',
-      },
-    ],
-    name: 'setRemotePool',
+    inputs: [{ internalType: 'address', name: 'rebalancer', type: 'address' }],
+    name: 'setRebalancer',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
@@ -973,6 +1243,16 @@ export default [
     type: 'function',
   },
   {
+    inputs: [
+      { internalType: 'address', name: 'from', type: 'address' },
+      { internalType: 'uint256', name: 'amount', type: 'uint256' },
+    ],
+    name: 'transferLiquidity',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
     inputs: [{ internalType: 'address', name: 'to', type: 'address' }],
     name: 'transferOwnership',
     outputs: [],
@@ -984,6 +1264,13 @@ export default [
     name: 'typeAndVersion',
     outputs: [{ internalType: 'string', name: '', type: 'string' }],
     stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'uint256', name: 'amount', type: 'uint256' }],
+    name: 'withdrawLiquidity',
+    outputs: [],
+    stateMutability: 'nonpayable',
     type: 'function',
   },
   // generate:end
