@@ -495,31 +495,53 @@ function prepareSummary(
 }
 
 /**
- * Gets a version-aware pool contract instance
+ * Move pool version detection logic into a local utility
+ */
+async function detectPoolVersion(
+  address: string,
+  provider: JsonRpcApiProvider,
+): Promise<{ type: CCIPContractType; version: CCIPVersion; isCustomPool: boolean }> {
+  try {
+    const [type_, version] = await getTypeAndVersion(provider, address)
+    return { type: type_, version, isCustomPool: false }
+  } catch (versionError) {
+    console.warn(
+      `[WARN] Could not determine pool type and version for ${address}. Error: ${
+        versionError instanceof Error ? versionError.message : String(versionError)
+      }`,
+    )
+    console.warn('[WARN] Assuming this is a custom pool, will try with latest version')
+
+    return {
+      type: CCIPContractTypeBurnMintTokenPool,
+      version: CCIPVersion_1_5_1,
+      isCustomPool: true,
+    }
+  }
+}
+
+/**
+ * Move pool contract creation into a local utility
+ */
+function createPoolContract(
+  address: string,
+  provider: JsonRpcApiProvider,
+  type_: CCIPContractTypeTokenPool,
+  version: CCIPTokenPoolsVersion,
+  abi: (typeof CCIP_ABIs)[CCIPContractTypeTokenPool][CCIPTokenPoolsVersion],
+): TypedContract<typeof abi> {
+  return new Contract(address, abi, provider) as unknown as TypedContract<typeof abi>
+}
+
+/**
+ * Refactor getVersionedPoolContract to use these utilities
  */
 async function getVersionedPoolContract(
   address: string,
   provider: JsonRpcApiProvider,
 ): Promise<VersionedTokenPool | { error: Error }> {
   try {
-    let type_: CCIPContractType
-    let version: CCIPVersion
-    let isCustomPool = false
-
-    try {
-      ;[type_, version] = await getTypeAndVersion(provider, address)
-    } catch (versionError) {
-      console.warn(
-        `[WARN] Could not determine pool type and version for ${address}. Error: ${
-          versionError instanceof Error ? versionError.message : String(versionError)
-        }`,
-      )
-      console.warn('[WARN] Assuming this is a custom pool, will try with latest version')
-
-      type_ = CCIPContractTypeBurnMintTokenPool
-      version = CCIPVersion_1_5_1
-      isCustomPool = true
-    }
+    const { type: type_, version, isCustomPool } = await detectPoolVersion(address, provider)
 
     // Validate pool type
     if (!CCIPContractTypeTokenPool.includes(type_)) {
@@ -536,7 +558,13 @@ async function getVersionedPoolContract(
       throw new Error(`Unsupported pool version: ${version} for type ${type_}`)
     }
 
-    const contract = new Contract(address, abi, provider) as unknown as TypedContract<typeof abi>
+    const contract = createPoolContract(
+      address,
+      provider,
+      type_ as CCIPContractTypeTokenPool,
+      version as CCIPTokenPoolsVersion,
+      abi,
+    )
 
     return {
       version: version as CCIPTokenPoolsVersion,
