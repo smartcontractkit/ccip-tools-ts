@@ -85,8 +85,10 @@ const CONFIG = {
 } as const
 
 /**
- * Type guards for processing token discovery results.
- * Used to maintain type safety when handling success/error cases.
+ * Type guard for successful token discovery results
+ *
+ * @param result - Token discovery result to check
+ * @returns True if result contains successful token discovery
  */
 function isSuccessResult(
   result: TokenDetailsResult,
@@ -94,12 +96,22 @@ function isSuccessResult(
   return result.success !== null
 }
 
+/**
+ * Type guard for failed token discovery results
+ *
+ * @param result - Token discovery result to check
+ * @returns True if result contains token discovery error
+ */
 function isErrorResult(
   result: TokenDetailsResult,
 ): result is { success: null; error: TokenDetailsError } {
   return result.error !== null
 }
 
+/**
+ * Pool information interface
+ * Contains version, type, and contract details for a token pool
+ */
 interface PoolInfo {
   type: CCIPContractTypeTokenPool
   version: CCIPTokenPoolsVersion
@@ -109,12 +121,17 @@ interface PoolInfo {
 }
 
 /**
- * Fetches detailed information about a token pool including:
+ * Fetches detailed information about a token pool
+ *
+ * Retrieves:
  * - Remote token address
  * - Associated remote pools
- * - Rate limiter configurations
+ * - Rate limiter configurations (inbound/outbound)
+ * - Pool type and version information
  *
- * Failures here don't stop the overall process.
+ * @param poolInfo - Pool contract and metadata
+ * @param destSelector - Destination chain selector
+ * @returns Pool details or null if fetching fails
  */
 async function getPoolDetails(
   poolInfo: PoolInfo,
@@ -276,12 +293,19 @@ async function fetchAllRegisteredTokens(
 }
 
 /**
- * Identifies which tokens are supported for transfer to the destination chain.
+ * Identifies supported tokens for cross-chain transfer
  *
- * Performance Notes:
- * - Processes tokens in parallel with rate limiting
- * - Handles failures gracefully without stopping the process
- * - Collects all results for comprehensive reporting
+ * Process:
+ * 1. Fetches pool addresses for tokens
+ * 2. Validates pool contracts and versions
+ * 3. Checks destination chain support
+ * 4. Collects pool information for supported tokens
+ *
+ * @param registry - Token registry contract
+ * @param allTokens - List of token addresses to check
+ * @param sourceProvider - Source chain provider
+ * @param destSelector - Destination chain selector
+ * @returns Mapping of token addresses to their pool information
  */
 async function findSupportedTokens(
   registry: TypedContract<typeof TokenAdminRegistryABI>,
@@ -348,12 +372,18 @@ async function findSupportedTokens(
 }
 
 /**
- * Gathers detailed information about supported tokens and their pools.
+ * Gathers detailed information about supported tokens and their pools
  *
- * Performance Notes:
- * - Parallel processing with configurable limits
- * - Comprehensive error collection
- * - Memory-efficient through chunking
+ * Collects:
+ * - Token metadata (name, symbol, decimals)
+ * - Pool configuration and status
+ * - Rate limiter settings
+ * - Remote token and pool information
+ *
+ * @param tokenToPoolInfo - Mapping of tokens to their pool information
+ * @param sourceProvider - Source chain provider
+ * @param destSelector - Destination chain selector
+ * @returns Array of token details or error information
  */
 async function fetchTokenDetailsForSupportedTokens(
   tokenToPoolInfo: Record<string, PoolInfo>,
@@ -416,13 +446,20 @@ async function fetchTokenDetailsForSupportedTokens(
 }
 
 /**
- * Prepares the final report including success and failure information.
+ * Prepares the final discovery report
  *
- * Output includes:
- * - Metadata about the discovery process
- * - Successfully validated tokens with details
- * - Failed tokens with error information
+ * Generates:
+ * - Process metadata (timestamp, chains, router)
  * - Statistical summary
+ * - Supported token details
+ * - Failed token information
+ *
+ * @param tokenDetails - Array of token discovery results
+ * @param totalScanned - Total number of tokens checked
+ * @param sourceChainId - Source chain identifier
+ * @param destChainId - Destination chain identifier
+ * @param routerAddress - CCIP router address
+ * @returns Formatted summary and categorized results
  */
 function prepareSummary(
   tokenDetails: TokenDetailsResult[],
