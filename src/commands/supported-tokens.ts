@@ -168,7 +168,7 @@ async function getPoolDetails(
     }
   } catch (error) {
     console.error(
-      `[ERROR] Failed to fetch pool details for pool ${poolInfo.address}:`,
+      `[ERROR] Failed to fetch pool details for pool ${poolInfo.address} | type ${poolInfo.type} v${poolInfo.version}:`,
       error instanceof Error ? error.message : String(error),
     )
     return null
@@ -325,7 +325,7 @@ async function findSupportedTokens(
 
         if ('error' in result) {
           console.error(
-            `[ERROR] Failed to initialize pool ${poolAddress.toString()} | token ${chunkTokens[idx].toString()}`,
+            `[ERROR] Failed to initialize pool ${poolAddress.toString()} | token ${chunkTokens[idx].toString()}}`,
             result.error,
           )
           return {
@@ -414,7 +414,7 @@ async function fetchTokenDetailsForSupportedTokens(
               const decimals = Number(decimalsBI)
 
               console.log(
-                `[INFO] Successfully fetched details for token ${name} (${symbol}) and its pool`,
+                `[INFO] Successfully fetched details for token ${name} (${symbol}) at ${token} | pool ${poolInfo.address} | type ${poolInfo.type} v${poolInfo.version}`,
               )
 
               return {
@@ -550,7 +550,7 @@ async function detectPoolVersion(
     return { type: type_, version, isCustomPool: false }
   } catch (versionError) {
     console.warn(
-      `[WARN] Could not determine pool type and version for ${address}. Error: ${
+      `[WARN] Could not determine pool type and version for pool ${address}. Error: ${
         versionError instanceof Error ? versionError.message : String(versionError)
       }`,
     )
@@ -610,7 +610,7 @@ async function getVersionedPoolContract(
       throw new Error(
         `Not a token pool: ${address} is "${type_} ${version}" - Supported types: ${CCIPContractTypeTokenPool.join(
           ', ',
-        )}`,
+        )}}`,
       )
     }
 
@@ -672,7 +672,7 @@ async function getRemotePoolsForVersion(
     }
   } catch (error) {
     console.error(
-      `[ERROR] Failed to get remote pools for ${await versionedPool.contract.getAddress()}:`,
+      `[ERROR] Failed to get remote pools for ${await versionedPool.contract.getAddress()} | type ${versionedPool.type} v${versionedPool.version}:`,
       error instanceof Error ? error.message : String(error),
     )
     return []
