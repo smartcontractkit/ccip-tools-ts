@@ -495,7 +495,14 @@ function prepareSummary(
 }
 
 /**
- * Move pool version detection logic into a local utility
+ * Pool version detection utility
+ *
+ * Attempts to detect the pool type and version. Falls back to BurnMintTokenPool
+ * with latest version if detection fails.
+ *
+ * @param address - The pool contract address
+ * @param provider - JSON RPC provider instance
+ * @returns Pool type, version and custom pool flag
  */
 async function detectPoolVersion(
   address: string,
@@ -521,7 +528,16 @@ async function detectPoolVersion(
 }
 
 /**
- * Move pool contract creation into a local utility
+ * Pool contract instantiation utility
+ *
+ * Creates a typed contract instance for a token pool with the correct ABI.
+ *
+ * @param address - The pool contract address
+ * @param provider - JSON RPC provider instance
+ * @param type_ - The pool contract type
+ * @param version - The pool contract version
+ * @param abi - The contract ABI matching the type and version
+ * @returns Typed contract instance
  */
 function createPoolContract(
   address: string,
@@ -534,7 +550,16 @@ function createPoolContract(
 }
 
 /**
- * Refactor getVersionedPoolContract to use these utilities
+ * Version-aware pool contract factory
+ *
+ * Creates a version-aware pool contract instance with proper typing and error handling.
+ * Handles custom pools by falling back to latest known compatible ABI.
+ *
+ * @param address - The pool contract address
+ * @param provider - JSON RPC provider instance
+ * @returns Version-aware pool contract or error details
+ *
+ * @throws Will not throw, returns error object instead
  */
 async function getVersionedPoolContract(
   address: string,
@@ -584,6 +609,14 @@ async function getVersionedPoolContract(
 
 /**
  * Gets remote pools based on contract version
+ *
+ * Handles different remote pool retrieval methods based on contract version:
+ * - v1.5.0: Single remote pool via getRemotePool
+ * - v1.5.1: Multiple remote pools via getRemotePools
+ *
+ * @param versionedPool - The version-aware pool contract
+ * @param destSelector - Destination chain selector
+ * @returns Array of remote pool addresses
  */
 async function getRemotePoolsForVersion(
   versionedPool: VersionedTokenPool,
