@@ -1,6 +1,6 @@
 export default [
   // generate:
-  // fetch('https://github.com/smartcontractkit/ccip/raw/release/2.14.0-ccip1.5/core/gethwrappers/generated/burn_mint_erc677/burn_mint_erc677.go')
+  // fetch('https://github.com/smartcontractkit/ccip/raw/release/contracts-ccip-1.5.1/core/gethwrappers/generated/burn_mint_erc677/burn_mint_erc677.go')
   //   .then((res) => res.text())
   //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
   //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))

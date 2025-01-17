@@ -9,8 +9,10 @@ import {
   CCIPContractTypeCommitStore,
   CCIPContractTypeOffRamp,
   CCIPContractTypeOnRamp,
+  CCIPContractTypeTokenPool,
   CCIPVersion_1_2,
   CCIPVersion_1_5,
+  CCIPVersion_1_5_1,
   VersionedContractABI,
 } from './types.js'
 
@@ -128,11 +130,14 @@ export async function getTypeAndVersion(
     const [version] = version_.split('-', 2) // remove `-dev` suffixes
 
     const isCcipContractType = (t: string): t is CCIPContractType =>
-      [CCIPContractTypeOnRamp, CCIPContractTypeOffRamp, CCIPContractTypeCommitStore].some(
-        (t) => type_ === t,
-      )
+      [
+        CCIPContractTypeOnRamp,
+        CCIPContractTypeOffRamp,
+        CCIPContractTypeCommitStore,
+        ...CCIPContractTypeTokenPool,
+      ].some((t) => type_ === t)
     const isCcipContractVersion = (v: string): v is CCIPVersion =>
-      [CCIPVersion_1_2, CCIPVersion_1_5].some((v) => version === v)
+      [CCIPVersion_1_2, CCIPVersion_1_5, CCIPVersion_1_5_1].some((v) => version === v)
     if (!isCcipContractType(type_)) {
       throw new Error(`Unknown contract type: ${typeAndVersion}`)
     }
@@ -244,4 +249,31 @@ export function bigIntReviver(_key: string, value: unknown): unknown {
     return BigInt(value)
   }
   return value
+}
+
+/**
+ * Splits an array into multiple arrays of specified size.
+ *
+ * @template T - Type of array elements
+ * @param array - The array to split into chunks
+ * @param size - The size of each chunk. Must be greater than 0
+ * @returns Array of chunks, each of size `size` (except possibly the last one)
+ * @throws {Error} If size is less than or equal to 0
+ *
+ * @example
+ * ```ts
+ * const numbers = [1, 2, 3, 4, 5];
+ * const chunks = chunk(numbers, 2);
+ * // Result: [[1, 2], [3, 4], [5]]
+ * ```
+ */
+export function chunk<T>(array: readonly T[], size: number): T[][] {
+  if (size <= 0) {
+    throw new Error('Chunk size must be greater than 0')
+  }
+  const chunks: T[][] = []
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size))
+  }
+  return chunks
 }
