@@ -24,10 +24,8 @@
  */
 
 /* eslint-disable @typescript-eslint/no-base-to-string */
-import { type Addressable, type JsonRpcApiProvider, Contract } from 'ethers'
+import { type Addressable, type JsonRpcApiProvider, Contract, ZeroAddress } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
-
-import { chunk } from 'lodash-es'
 
 import TokenABI from '../abi/BurnMintERC677Token.js'
 import RouterABI from '../abi/Router.js'
@@ -48,7 +46,7 @@ import {
   chainSelectorFromId,
   getOnRampLane,
 } from '../lib/index.js'
-import { getTypeAndVersion } from '../lib/utils.js'
+import { chunk, getTypeAndVersion } from '../lib/utils.js'
 import type { Providers } from '../providers.js'
 import {
   type CCIPSupportedToken,
@@ -317,19 +315,24 @@ async function findSupportedTokens(
   const tokenChunks = chunk(allTokens, CONFIG.PARALLEL_POOL_CHECKS)
 
   for (const chunkTokens of tokenChunks) {
-    const poolsChunk = await registry.getPools(chunkTokens)
+    const rawPoolsChunk = await registry.getPools(chunkTokens)
+
+    // Filter out zero addresses and map to corresponding tokens
+    const validPools = rawPoolsChunk
+      .map((pool, idx) => ({
+        pool: pool.toString(),
+        token: chunkTokens[idx].toString(),
+      }))
+      .filter(({ pool }) => pool !== ZeroAddress)
 
     const supportChecks = await Promise.all(
-      poolsChunk.map(async (poolAddress, idx) => {
-        const result = await getVersionedPoolContract(poolAddress.toString(), sourceProvider)
+      validPools.map(async ({ pool, token }) => {
+        const result = await getVersionedPoolContract(pool, sourceProvider)
 
         if ('error' in result) {
-          console.error(
-            `[ERROR] Failed to initialize pool ${poolAddress.toString()} | token ${chunkTokens[idx].toString()}}`,
-            result.error,
-          )
+          console.error(`[ERROR] Failed to initialize pool ${pool} | token ${token}`, result.error)
           return {
-            token: chunkTokens[idx].toString(),
+            token,
             isSupported: false,
             error: result.error,
           }
@@ -338,21 +341,21 @@ async function findSupportedTokens(
         try {
           const isSupported = await result.contract.isSupportedChain(destSelector)
           return {
-            token: chunkTokens[idx].toString(),
+            token,
             pool: {
               ...result,
-              address: poolAddress.toString(),
+              address: pool,
             },
             isSupported,
             error: null,
           }
         } catch (error) {
           console.error(
-            `[ERROR] Failed to check support for pool ${poolAddress.toString()} | type ${result.type} | version ${result.version} | token ${chunkTokens[idx].toString()}`,
+            `[ERROR] Failed to check support for pool ${pool} | type ${result.type} | version ${result.version} | token ${token}`,
             error,
           )
           return {
-            token: chunkTokens[idx].toString(),
+            token,
             isSupported: false,
             error: error instanceof Error ? error : new Error(String(error)),
           }
