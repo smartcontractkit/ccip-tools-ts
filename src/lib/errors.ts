@@ -95,7 +95,7 @@ export function parseWithFragment(
   | undefined {
   if (!dataLength(data ?? '0x') && isBytesLike(selector)) {
     const len = dataLength(selector)
-    if (len > 4 && len !== 32) {
+    if (len >= 4 && len !== 32) {
       data = dataSlice(selector, 4)
       selector = dataSlice(selector, 0, 4)
     }

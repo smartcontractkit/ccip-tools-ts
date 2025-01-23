@@ -6,7 +6,6 @@ import {
   Contract,
   ZeroAddress,
   dataLength,
-  dataSlice,
   hexlify,
   isBytesLike,
   isHexString,
@@ -601,11 +600,8 @@ export function parseBytes({ data, selector }: { data: string; selector?: string
         console.info(`${_tag}:`, rest)
         return
       }
-      parsed = parseWithFragment(dataSlice(data, 0, 4), dataSlice(data, 4))
     }
-    if (!parsed) {
-      parsed = parseWithFragment(data)
-    }
+    parsed = parseWithFragment(data)
   }
   if (!parsed) throw new Error('Unknown data')
   const [fragment, contract, args] = parsed
