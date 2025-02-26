@@ -8,7 +8,7 @@ import {
 } from 'ethers'
 
 const mockedContract = {
-  typeAndVersion: jest.fn(() => `${CCIPContractTypeOnRamp} ${CCIPVersion_1_2}`),
+  typeAndVersion: jest.fn(() => `${CCIPContractType.OnRamp} ${CCIPVersion.V1_2}`),
   getStaticConfig: jest.fn(() => ({ chainSelector: 1, destChainSelector: 2 })),
 }
 
@@ -62,12 +62,7 @@ import {
   fetchRequestsForSender,
   getOnRampLane,
 } from './requests.js'
-import {
-  type Lane,
-  CCIPContractTypeOffRamp,
-  CCIPContractTypeOnRamp,
-  CCIPVersion_1_2,
-} from './types.js'
+import { type Lane, CCIPContractType, CCIPVersion } from './types.js'
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -83,7 +78,7 @@ describe('getOnRampLane', () => {
         sourceChainSelector: 1,
         destChainSelector: 2,
         onRamp: rampAddress,
-        version: CCIPVersion_1_2,
+        version: CCIPVersion.V1_2,
       },
       mockedContract,
     ])
@@ -93,11 +88,11 @@ describe('getOnRampLane', () => {
   it('should throw an error if not an OnRamp', async () => {
     const rampAddress = getAddress(hexlify(randomBytes(20)))
     mockedContract.typeAndVersion.mockReturnValueOnce(
-      `${CCIPContractTypeOffRamp} ${CCIPVersion_1_2}`,
+      `${CCIPContractType.OffRamp} ${CCIPVersion.V1_2}`,
     )
 
     await expect(getOnRampLane(mockedProvider as unknown as Provider, rampAddress)).rejects.toThrow(
-      `Not an OnRamp: ${rampAddress} is "${CCIPContractTypeOffRamp} ${CCIPVersion_1_2}"`,
+      `Not an OnRamp: ${rampAddress} is "${CCIPContractType.OffRamp} ${CCIPVersion.V1_2}"`,
     )
   })
 })
@@ -120,7 +115,7 @@ describe('fetchCCIPMessagesInTx', () => {
       },
       timestamp: 1234567890,
       tx: mockTx,
-      lane: { version: CCIPVersion_1_2 },
+      lane: { version: CCIPVersion.V1_2 },
     })
   })
 
@@ -137,10 +132,10 @@ describe('fetchCCIPMessagesInTx', () => {
       getBlock: jest.fn().mockResolvedValue({ timestamp: 1234567890 }),
     } as unknown as TransactionReceipt
     mockedInterface.parseLog.mockReturnValueOnce({ name: 'Unknown', args: [] })
-    mockedContract.typeAndVersion.mockReturnValueOnce(`UnknownContract ${CCIPVersion_1_2}`)
-    mockedContract.typeAndVersion.mockReturnValueOnce(`${CCIPContractTypeOffRamp} 1.0.0`)
+    mockedContract.typeAndVersion.mockReturnValueOnce(`UnknownContract ${CCIPVersion.V1_2}`)
+    mockedContract.typeAndVersion.mockReturnValueOnce(`${CCIPContractType.OffRamp} 1.0.0`)
     mockedContract.typeAndVersion.mockReturnValueOnce(
-      `${CCIPContractTypeOffRamp} ${CCIPVersion_1_2}`,
+      `${CCIPContractType.OffRamp} ${CCIPVersion.V1_2}`,
     )
     await expect(fetchCCIPMessagesInTx(mockTx)).rejects.toThrow(
       'Could not find any CCIPSendRequested message in tx: 0x123',
@@ -163,7 +158,7 @@ describe('fetchCCIPMessageInLog', () => {
       message: {},
       timestamp: 1234567890,
       tx: mockTx,
-      lane: { version: CCIPVersion_1_2 },
+      lane: { version: CCIPVersion.V1_2 },
     })
   })
 
@@ -198,7 +193,7 @@ describe('fetchCCIPMessageById', () => {
       message: {},
       timestamp: 1234567890,
       tx: mockTx,
-      lane: { version: CCIPVersion_1_2 },
+      lane: { version: CCIPVersion.V1_2 },
     })
   })
 
@@ -280,7 +275,7 @@ describe('fetchRequestsForSender', () => {
     const mockRequest = {
       log: { address: '0xOnRamp', topics: ['0x123'], blockNumber: 11 },
       message: { sender: '0xSender' },
-      version: CCIPVersion_1_2 as CCIPVersion_1_2,
+      version: CCIPVersion.V1_2,
       lane: {} as Lane,
     }
     mockedProvider.getLogs.mockResolvedValue([])

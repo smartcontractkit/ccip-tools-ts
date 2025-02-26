@@ -9,12 +9,12 @@ import {
 
 import { discoverOffRamp, validateOffRamp } from './execution.js'
 import { estimateExecGasForRequest } from './gas.js'
-import { CCIPContractTypeOnRamp, CCIPVersion_1_2, CCIPVersion_1_5 } from './types.js'
+import { CCIPContractType, CCIPVersion } from './types.js'
 
 jest.mock('./execution.js')
 
 const mockedContract = {
-  typeAndVersion: jest.fn(() => Promise.resolve(`${CCIPContractTypeOnRamp} ${CCIPVersion_1_2}`)),
+  typeAndVersion: jest.fn(() => Promise.resolve(`${CCIPContractType.OnRamp} ${CCIPVersion.V1_2}`)),
   getToken: jest.fn(() => '0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC'),
   balanceOf: jest.fn(() => 0n),
   getPoolBySourceToken: jest.fn(() => '0xPool'),
@@ -97,7 +97,9 @@ describe('estimateExecGasForRequest', () => {
       getDynamicConfig: jest.fn(() => ({ router })),
     }
     ;(discoverOffRamp as jest.Mock).mockResolvedValue(offRamp)
-    mockedContract.typeAndVersion.mockResolvedValue(`${CCIPContractTypeOnRamp} ${CCIPVersion_1_5}`)
+    mockedContract.typeAndVersion.mockResolvedValue(
+      `${CCIPContractType.OnRamp} ${CCIPVersion.V1_5}`,
+    )
     mockProvider.send.mockReturnValueOnce(toBeHex(46_000))
 
     const result = await estimateExecGasForRequest(

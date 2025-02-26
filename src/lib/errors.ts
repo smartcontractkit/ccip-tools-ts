@@ -13,22 +13,27 @@ import {
 } from 'ethers'
 
 import TokenABI from '../abi/BurnMintERC677Token.js'
-import BurnMintTokenPool_1_5 from '../abi/BurnMintTokenPool_1_5.js'
-import LockReleaseTokenPool_1_5 from '../abi/LockReleaseTokenPool_1_5.js'
+import BurnMintTokenPool from '../abi/BurnMintTokenPool_1_5_1.js'
+import LockReleaseTokenPool from '../abi/LockReleaseTokenPool_1_5_1.js'
 import Router from '../abi/Router.js'
-import { CCIPVersion_1_5, CCIP_ABIs, defaultAbiCoder } from './types.js'
+import TokenAdminRegistry from '../abi/TokenAdminRegistry_1_5.js'
+import { CCIP_ABIs, defaultAbiCoder } from './types.js'
 import { lazyCached } from './utils.js'
 
 const ifaces: Record<string, Interface> = {
   Router: lazyCached('Interface Router', () => new Interface(Router)),
   Token: lazyCached(`Interface Token`, () => new Interface(TokenABI)),
-  'BurnMintTokenPool_1.5.0': lazyCached(
-    `Interface BurnMintTokenPool ${CCIPVersion_1_5}`,
-    () => new Interface(BurnMintTokenPool_1_5),
+  TokenAdminRegistry: lazyCached(
+    `Interface TokenAdminRegistry 1.5`,
+    () => new Interface(TokenAdminRegistry),
   ),
-  'LockReleaseTokenPool_1.5.0': lazyCached(
-    `Interface LockReleaseTokenPool ${CCIPVersion_1_5}`,
-    () => new Interface(LockReleaseTokenPool_1_5),
+  BurnMintTokenPool: lazyCached(
+    `Interface BurnMintTokenPool 1.5.1`,
+    () => new Interface(BurnMintTokenPool),
+  ),
+  LockReleaseTokenPool: lazyCached(
+    `Interface LockReleaseTokenPool 1.5.1`,
+    () => new Interface(LockReleaseTokenPool),
   ),
   ...Object.fromEntries(
     Object.entries(CCIP_ABIs)

@@ -5,7 +5,7 @@ import {
   type CCIPCommit,
   type CCIPRequest,
   type CommitReport,
-  CCIPContractTypeCommitStore,
+  CCIPContractType,
   CCIP_ABIs,
 } from './types.js'
 import { blockRangeGenerator, getSomeBlockNumberBefore, lazyCached } from './utils.js'
@@ -33,9 +33,9 @@ export async function fetchCommitReport(
   },
   hints?: { startBlock?: number; commitStore?: string; page?: number },
 ): Promise<CCIPCommit> {
-  const commitStoreABI = CCIP_ABIs[CCIPContractTypeCommitStore][lane.version]
+  const commitStoreABI = CCIP_ABIs[CCIPContractType.CommitStore][lane.version]
   const commitStoreInterface = lazyCached(
-    `Interface ${CCIPContractTypeCommitStore} ${lane.version}`,
+    `Interface ${CCIPContractType.CommitStore} ${lane.version}`,
     () => new Interface(commitStoreABI),
   )
   const topic0 = commitStoreInterface.getEvent('ReportAccepted')!.topicHash

@@ -18,8 +18,8 @@ import TokenABI from './abi/BurnMintERC677Token.js'
 import RouterABI from './abi/Router.js'
 import {
   type CCIPRequest,
-  CCIPContractTypeOffRamp,
-  CCIPVersion_1_2,
+  CCIPContractType,
+  CCIPVersion,
   ExecutionState,
   bigIntReplacer,
   calculateManualExecProof,
@@ -41,11 +41,11 @@ import {
   fetchRequestsForSender,
   getOnRampLane,
   getSomeBlockNumberBefore,
-  getTypeAndVersion,
   lazyCached,
   parseExtraArgs,
   parseWithFragment,
   recursiveParseError,
+  validateTypeAndVersion,
 } from './lib/index.js'
 import type { Providers } from './providers.js'
 import {
@@ -236,7 +236,7 @@ export async function manualExec(
   }
 
   let manualExecTx
-  if (request.lane.version === CCIPVersion_1_2) {
+  if (request.lane.version === CCIPVersion.V1_2) {
     const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit ?? 0))
     manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
   } else {
@@ -372,7 +372,7 @@ export async function manualExecSenderQueue(
     const execReport = { ...manualExecReport, offchainTokenData }
 
     let manualExecTx
-    if (firstRequest.lane.version === CCIPVersion_1_2) {
+    if (firstRequest.lane.version === CCIPVersion.V1_2) {
       const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit ?? 0))
       manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
     } else {
@@ -725,9 +725,9 @@ export async function showLaneConfigs(
   const dest = await providers.forChainId(chainIdFromSelector(lane.destChainSelector))
   const offRampContract = await discoverOffRamp(dest, lane, { page: argv.page })
   const offRamp = await offRampContract.getAddress()
-  const [offType, offVersion, offTnV] = await getTypeAndVersion(dest, offRamp)
+  const [offType, offVersion, offTnV] = await validateTypeAndVersion(dest, offRamp)
   console.info('OffRamp:', offRamp, 'is', offTnV)
-  if (offType !== CCIPContractTypeOffRamp || offVersion !== lane.version) {
+  if (offType !== CCIPContractType.OffRamp || offVersion !== lane.version) {
     console.warn(`OffRamp=${offRamp} is not v${lane.version}`)
   }
 

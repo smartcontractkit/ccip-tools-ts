@@ -17,22 +17,15 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 
 import TokenABI from '../abi/BurnMintERC677Token.js'
-import BurnMintTokenPool from '../abi/BurnMintTokenPool_1_5.js'
+import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.js'
 import RouterABI from '../abi/Router.js'
 import { discoverOffRamp, validateOffRamp } from './execution.js'
-import {
-  type CCIPContractTypeOffRamp,
-  type Lane,
-  CCIPContractTypeOnRamp,
-  CCIPVersion_1_2,
-  CCIP_ABIs,
-  defaultAbiCoder,
-} from './types.js'
+import { type Lane, CCIPContractType, CCIPVersion, CCIP_ABIs, defaultAbiCoder } from './types.js'
 import {
   chainNameFromSelector,
   getProviderNetwork,
-  getTypeAndVersion,
   lazyCached,
+  validateTypeAndVersion,
 } from './utils.js'
 
 const BALANCES_SLOT = 0
@@ -56,31 +49,29 @@ async function getDestTokenForSource(
   token: string,
 ) {
   return lazyCached(`destToken ${token}`, async () => {
-    const [, version] = await getTypeAndVersion(source, onRamp)
+    const [, version] = await validateTypeAndVersion(source, onRamp)
     let remoteToken
-    if (version === CCIPVersion_1_2) {
+    if (version === CCIPVersion.V1_2) {
       const offRampContract = offRamp as unknown as TypedContract<
-        (typeof CCIP_ABIs)[CCIPContractTypeOffRamp][typeof version]
+        (typeof CCIP_ABIs)[CCIPContractType.OffRamp][typeof version]
       >
       const pool = await offRampContract.getPoolBySourceToken(token)
-      const poolContract = new Contract(pool, BurnMintTokenPool, dest) as unknown as TypedContract<
-        typeof BurnMintTokenPool
+      const poolContract = new Contract(pool, TokenPoolABI, dest) as unknown as TypedContract<
+        typeof TokenPoolABI
       >
       remoteToken = (await poolContract.getToken()) as string
     } else {
       const onRampContract = new Contract(
         onRamp,
-        CCIP_ABIs[CCIPContractTypeOnRamp][version],
+        CCIP_ABIs[CCIPContractType.OnRamp][version],
         source,
-      ) as unknown as TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOnRamp][typeof version]>
+      ) as unknown as TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OnRamp][typeof version]>
       const destChainSelector = (await getProviderNetwork(dest)).chainSelector
       const pool = await onRampContract.getPoolBySourceToken(destChainSelector, token)
       if (pool === ZeroAddress) throw new Error(`Token=${token} not supported by OnRamp=${onRamp}`)
-      const poolContract = new Contract(
-        pool,
-        BurnMintTokenPool,
-        source,
-      ) as unknown as TypedContract<typeof BurnMintTokenPool>
+      const poolContract = new Contract(pool, TokenPoolABI, source) as unknown as TypedContract<
+        typeof TokenPoolABI
+      >
       remoteToken = getAddress(dataSlice(await poolContract.getRemoteToken(destChainSelector), -20))
       if (remoteToken === ZeroAddress)
         throw new Error(
@@ -116,7 +107,7 @@ export async function estimateExecGasForRequest(
   const { chainSelector: sourceChainSelector, name: sourceName } = await getProviderNetwork(source)
   const { chainSelector: destChainSelector, name: destName } = await getProviderNetwork(dest)
 
-  const [, version] = await getTypeAndVersion(source, onRamp)
+  const [, version] = await validateTypeAndVersion(source, onRamp)
   const lane: Lane = { sourceChainSelector, destChainSelector, onRamp, version }
 
   let offRamp
