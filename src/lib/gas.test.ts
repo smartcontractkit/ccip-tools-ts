@@ -9,18 +9,28 @@ import {
 
 import { discoverOffRamp, validateOffRamp } from './execution.js'
 import { estimateExecGasForRequest } from './gas.js'
-import { CCIPContractTypeOnRamp, CCIPVersion_1_2, CCIPVersion_1_5 } from './types.js'
+import { CCIPContractType, CCIPVersion } from './types.js'
 
 jest.mock('./execution.js')
 
+const mockProvider = {
+  get provider() {
+    return mockProvider
+  },
+  getNetwork: jest.fn(() => ({ chainId: 11155111 })),
+  send: jest.fn(() => toBeHex(44_000)),
+}
+
 const mockedContract = {
-  typeAndVersion: jest.fn(() => Promise.resolve(`${CCIPContractTypeOnRamp} ${CCIPVersion_1_2}`)),
+  runner: mockProvider,
+  typeAndVersion: jest.fn(() => Promise.resolve(`${CCIPContractType.OnRamp} ${CCIPVersion.V1_2}`)),
   getToken: jest.fn(() => '0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC'),
   balanceOf: jest.fn(() => 0n),
   getPoolBySourceToken: jest.fn(() => '0xPool'),
   getRemoteToken: jest.fn(
     () => '0x000000000000000000000000cccccccccccccccccccccccccccccccccccccccc',
   ),
+  getAddress: jest.fn(),
 }
 
 // Mock Contract instance
@@ -28,11 +38,6 @@ jest.mock('ethers', () => ({
   ...jest.requireActual('ethers'),
   Contract: jest.fn(() => mockedContract),
 }))
-
-const mockProvider = {
-  getNetwork: jest.fn(() => ({ chainId: 11155111 })),
-  send: jest.fn(() => toBeHex(44_000)),
-}
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -97,7 +102,10 @@ describe('estimateExecGasForRequest', () => {
       getDynamicConfig: jest.fn(() => ({ router })),
     }
     ;(discoverOffRamp as jest.Mock).mockResolvedValue(offRamp)
-    mockedContract.typeAndVersion.mockResolvedValue(`${CCIPContractTypeOnRamp} ${CCIPVersion_1_5}`)
+    mockedContract.getAddress.mockResolvedValue(onRamp)
+    mockedContract.typeAndVersion.mockResolvedValue(
+      `${CCIPContractType.OnRamp} ${CCIPVersion.V1_5}`,
+    )
     mockProvider.send.mockReturnValueOnce(toBeHex(46_000))
 
     const result = await estimateExecGasForRequest(

@@ -1,11 +1,6 @@
 import type { Network, Provider } from 'ethers'
 
-import {
-  CCIPContractTypeOffRamp,
-  CCIPContractTypeOnRamp,
-  CCIPVersion_1_2,
-  CCIPVersion_1_5,
-} from './types.js'
+import { CCIPContractType, CCIPVersion } from './types.js'
 import {
   bigIntReplacer,
   bigIntReviver,
@@ -17,27 +12,35 @@ import {
   chainSelectorFromId,
   getProviderNetwork,
   getSomeBlockNumberBefore,
-  getTypeAndVersion,
   lazyCached,
   networkInfo,
+  validateTypeAndVersion,
 } from './utils.js'
 
+let provider: jest.Mocked<Provider>
+
 const mockedContract = {
-  typeAndVersion: jest.fn(() => Promise.resolve(`${CCIPContractTypeOnRamp} ${CCIPVersion_1_2}`)),
+  typeAndVersion: jest.fn(() => Promise.resolve(`${CCIPContractType.OnRamp} ${CCIPVersion.V1_2}`)),
   getStaticConfig: jest.fn(() => Promise.resolve({ chainSelector: 1 })),
+  getAddress: jest.fn(() => '0x123'),
 }
 
 // Mock Contract instance
 jest.mock('ethers', () => ({
   ...jest.requireActual('ethers'),
-  Contract: jest.fn(() => mockedContract),
+  Contract: jest.fn((address, _2, runner) => ({
+    ...mockedContract,
+    runner,
+    getAddress: jest.fn(() => address),
+  })),
   // Interface: jest.fn(() => mockedInterface),
 }))
 
-let provider: jest.Mocked<Provider>
-
 beforeEach(() => {
   provider = {
+    get provider() {
+      return provider
+    },
     getBlockNumber: jest.fn(),
     getBlock: jest.fn(),
     getNetwork: jest.fn(() => Promise.resolve({ chainId: 1n })),
@@ -85,25 +88,25 @@ describe('lazyCached', () => {
   })
 })
 
-describe('getTypeAndVersion', () => {
+describe('validateTypeAndVersion', () => {
   it('should return the type and version of the contract', async () => {
-    const [type_, version] = await getTypeAndVersion(provider, '0x123')
-    expect(type_).toBe(CCIPContractTypeOnRamp)
-    expect(version).toBe(CCIPVersion_1_2)
+    const [type_, version] = await validateTypeAndVersion(provider, '0x123')
+    expect(type_).toBe(CCIPContractType.OnRamp)
+    expect(version).toBe(CCIPVersion.V1_2)
   })
 
   it('should return base version of -dev contracts', async () => {
     mockedContract.typeAndVersion.mockResolvedValueOnce(
-      `${CCIPContractTypeOffRamp} ${CCIPVersion_1_5}-dev`,
+      `${CCIPContractType.OffRamp} ${CCIPVersion.V1_5}-dev`,
     )
-    const [type_, version] = await getTypeAndVersion(provider, '0x124')
-    expect(type_).toBe(CCIPContractTypeOffRamp)
-    expect(version).toBe(CCIPVersion_1_5)
+    const [type_, version] = await validateTypeAndVersion(provider, '0x124')
+    expect(type_).toBe(CCIPContractType.OffRamp)
+    expect(version).toBe(CCIPVersion.V1_5)
   })
 
   it('should throw on contracts not implementing interface', async () => {
     mockedContract.typeAndVersion.mockRejectedValueOnce({ code: 'BAD_DATA' })
-    await expect(getTypeAndVersion(provider, '0x125')).rejects.toThrow(
+    await expect(validateTypeAndVersion(provider, '0x125')).rejects.toThrow(
       '0x125 not a CCIP contract on "ethereum-mainnet"',
     )
   })

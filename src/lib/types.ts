@@ -21,35 +21,29 @@ export type CCIPMessage = AbiParametersToPrimitiveTypes<
   ExtractAbiEvent<typeof EVM2EVMOnRamp_1_5_ABI, 'CCIPSendRequested'>['inputs']
 >[0]
 
-export const CCIPVersion_1_5 = '1.5.0'
-export type CCIPVersion_1_5 = typeof CCIPVersion_1_5
-export const CCIPVersion_1_2 = '1.2.0'
-export type CCIPVersion_1_2 = typeof CCIPVersion_1_2
-export type CCIPVersion = CCIPVersion_1_5 | CCIPVersion_1_2
+export enum CCIPVersion {
+  V1_2 = '1.2.0',
+  V1_5 = '1.5.0',
+}
 
-export const CCIPContractTypeOnRamp = 'EVM2EVMOnRamp'
-export type CCIPContractTypeOnRamp = typeof CCIPContractTypeOnRamp
-export const CCIPContractTypeOffRamp = 'EVM2EVMOffRamp'
-export type CCIPContractTypeOffRamp = typeof CCIPContractTypeOffRamp
-export const CCIPContractTypeCommitStore = 'EVM2EVMCommitStore'
-export type CCIPContractTypeCommitStore = typeof CCIPContractTypeCommitStore
-export type CCIPContractType =
-  | CCIPContractTypeOnRamp
-  | CCIPContractTypeOffRamp
-  | CCIPContractTypeCommitStore
+export enum CCIPContractType {
+  OnRamp = 'OnRamp',
+  OffRamp = 'OffRamp',
+  CommitStore = 'CommitStore',
+}
 
 export const CCIP_ABIs = {
-  [CCIPContractTypeOnRamp]: {
-    [CCIPVersion_1_5]: EVM2EVMOnRamp_1_5_ABI,
-    [CCIPVersion_1_2]: EVM2EVMOnRamp_1_2_ABI,
+  [CCIPContractType.OnRamp]: {
+    [CCIPVersion.V1_5]: EVM2EVMOnRamp_1_5_ABI,
+    [CCIPVersion.V1_2]: EVM2EVMOnRamp_1_2_ABI,
   },
-  [CCIPContractTypeOffRamp]: {
-    [CCIPVersion_1_5]: EVM2EVMOffRamp_1_5_ABI,
-    [CCIPVersion_1_2]: EVM2EVMOffRamp_1_2_ABI,
+  [CCIPContractType.OffRamp]: {
+    [CCIPVersion.V1_5]: EVM2EVMOffRamp_1_5_ABI,
+    [CCIPVersion.V1_2]: EVM2EVMOffRamp_1_2_ABI,
   },
-  [CCIPContractTypeCommitStore]: {
-    [CCIPVersion_1_5]: CommitStore_1_5_ABI,
-    [CCIPVersion_1_2]: CommitStore_1_2_ABI,
+  [CCIPContractType.CommitStore]: {
+    [CCIPVersion.V1_5]: CommitStore_1_5_ABI,
+    [CCIPVersion.V1_2]: CommitStore_1_2_ABI,
   },
 } as const
 
@@ -80,7 +74,7 @@ export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
 
 export type CommitReport = AbiParametersToPrimitiveTypes<
   ExtractAbiEvent<
-    (typeof CCIP_ABIs)[CCIPContractTypeCommitStore][CCIPVersion_1_2],
+    (typeof CCIP_ABIs)[CCIPContractType.CommitStore][CCIPVersion.V1_2],
     'ReportAccepted'
   >['inputs']
 >[0]
@@ -100,7 +94,7 @@ export type ExecutionReceipt = Omit<
     // hack: trick abitypes into giving us the struct equivalent types, to cast from Result
     type: SolidityTuple
     components: ExtractAbiEvent<
-      (typeof CCIP_ABIs)[CCIPContractTypeOffRamp][CCIPVersion_1_2],
+      (typeof CCIP_ABIs)[CCIPContractType.OffRamp][CCIPVersion.V1_2],
       'ExecutionStateChanged'
     >['inputs']
   }>,

@@ -1,18 +1,8 @@
-import { type Provider, Contract } from 'ethers'
+import { type BaseContract, type Provider, Contract } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import SELECTORS from './selectors.js'
-import {
-  type CCIPContractType,
-  type CCIPVersion,
-  type NetworkInfo,
-  CCIPContractTypeCommitStore,
-  CCIPContractTypeOffRamp,
-  CCIPContractTypeOnRamp,
-  CCIPVersion_1_2,
-  CCIPVersion_1_5,
-  VersionedContractABI,
-} from './types.js'
+import { type NetworkInfo, CCIPContractType, CCIPVersion, VersionedContractABI } from './types.js'
 
 /**
  * Returns *some* block number with timestamp prior to `timestamp`
@@ -103,19 +93,63 @@ export function lazyCached<T>(
   return cached
 }
 
+export type KeysMatching<T, V> = {
+  [K in keyof T]: T[K] extends V ? K : never
+}[keyof T]
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AwaitedReturn<T> = T extends (...args: any) => Promise<infer R> ? R : never
+
+export async function getContractProperties<
+  C extends Omit<BaseContract, 'getFunction' | 'getEvent'>,
+  T extends readonly (string & KeysMatching<C, () => Promise<unknown>>)[],
+>(contract: C, ...properties: T): Promise<{ [K in keyof T]: AwaitedReturn<C[T[K]]> }> {
+  const provider = contract.runner!.provider!
+  const { name } = await getProviderNetwork(provider)
+  return Promise.all(
+    properties.map(async (prop) =>
+      lazyCached(`${name}@${await contract.getAddress()}.${prop}()`, () =>
+        (contract[prop] as () => Promise<unknown>)(),
+      ),
+    ),
+  ) as Promise<{ [K in keyof T]: AwaitedReturn<C[T[K]]> }>
+}
+
 export async function getTypeAndVersion(
   provider: Provider,
   address: string,
-): Promise<readonly [type_: CCIPContractType, version: CCIPVersion, typeAndVersion: string]> {
-  return lazyCached(`${address}.typeAndVersion()`, async () => {
+): Promise<[type_: string, version: string, typeAndVersion: string, suffix?: string]>
+export async function getTypeAndVersion(
+  contract: Pick<TypedContract<typeof VersionedContractABI>, 'typeAndVersion'>,
+): Promise<[type_: string, version: string, typeAndVersion: string, suffix?: string]>
+/**
+ * Fetches cached typeAndVersion() of a contract
+ *
+ * @param provider - provider to fetch the contract from
+ * @param address - address of the contract
+ * @returns [type, version, typeAndVersion, suffix?] tuple
+ **/
+export async function getTypeAndVersion(
+  providerOrContract: Provider | Pick<TypedContract<typeof VersionedContractABI>, 'typeAndVersion'>,
+  address?: string,
+): Promise<[type_: string, version: string, typeAndVersion: string, suffix?: string]> {
+  let provider: Provider
+  if (address) {
+    provider = providerOrContract as Provider
+  } else {
+    provider = (providerOrContract as TypedContract<typeof VersionedContractABI>).runner!.provider!
+    address = await (providerOrContract as TypedContract<typeof VersionedContractABI>).getAddress()
+  }
+  const { name } = await getProviderNetwork(provider)
+  return lazyCached(`${name}@${address}.parsedTypeAndVersion`, async () => {
     const versionedContract = new Contract(
       address,
       VersionedContractABI,
       provider,
     ) as unknown as TypedContract<typeof VersionedContractABI>
-    let typeAndVersion
+    let typeAndVersion: string
     try {
-      typeAndVersion = await versionedContract.typeAndVersion()
+      ;[typeAndVersion] = await getContractProperties(versionedContract, 'typeAndVersion')
     } catch (err) {
       if (err && typeof err === 'object' && 'code' in err && err.code === 'BAD_DATA') {
         throw new Error(
@@ -124,24 +158,32 @@ export async function getTypeAndVersion(
       }
       throw err
     }
-    const [type_, version_] = typeAndVersion.split(' ', 2)
-    const [version] = version_.split('-', 2) // remove `-dev` suffixes
-
-    const isCcipContractType = (t: string): t is CCIPContractType =>
-      [CCIPContractTypeOnRamp, CCIPContractTypeOffRamp, CCIPContractTypeCommitStore].some(
-        (t) => type_ === t,
-      )
-    const isCcipContractVersion = (v: string): v is CCIPVersion =>
-      [CCIPVersion_1_2, CCIPVersion_1_5].some((v) => version === v)
-    if (!isCcipContractType(type_)) {
-      throw new Error(`Unknown contract type: ${typeAndVersion}`)
-    }
-    if (!isCcipContractVersion(version)) {
-      throw new Error(`Unsupported contract version: "${typeAndVersion}" != "${version}"`)
-    }
-
-    return [type_, version, typeAndVersion]
+    const match = typeAndVersion.match(/^(\w.+\S)\s+v?(\d+\.\d+(?:\.\d+)?)([^\d.].*)?$/)
+    if (!match) throw new Error(`Invalid typeAndVersion: "${typeAndVersion}"`)
+    if (!match[3]) return [match[1], match[2], typeAndVersion]
+    else return [match[1], match[2], typeAndVersion, match[3]]
   })
+}
+
+/**
+ * Fetches and validates typeAndVersion for known/core contract types (OnRamp, OffRamp, etc)
+ * and supported CCIP versions
+ **/
+export async function validateTypeAndVersion(
+  provider: Provider,
+  address: string,
+): Promise<readonly [type: CCIPContractType, version: CCIPVersion, typeAndVersion: string]> {
+  const [type_, version, typeAndVersion] = await getTypeAndVersion(provider, address)
+  const ctype = Object.values(CCIPContractType).find((t) => type_.endsWith(t))
+  if (!ctype) {
+    throw new Error(`Unknown/not-core contract type: ${typeAndVersion}`)
+  }
+  const isCcipContractVersion = (v: string): v is CCIPVersion =>
+    Object.values(CCIPVersion).includes(v as CCIPVersion)
+  if (!isCcipContractVersion(version)) {
+    throw new Error(`Unsupported contract version: "${typeAndVersion}"`)
+  }
+  return [ctype, version, typeAndVersion]
 }
 
 export function chainNameFromId(id: number): string {

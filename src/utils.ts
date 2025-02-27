@@ -115,7 +115,7 @@ async function formatToken(
   return `${formatUnits(amount, decimals)} ${symbol}`
 }
 
-function formatArray<T>(name: string, values: readonly T[]): Record<string, T> {
+export function formatArray<T>(name: string, values: readonly T[]): Record<string, T> {
   if (values.length <= 1) return { [name]: values[0] }
   return Object.fromEntries(values.map((v, i) => [`${name}[${i}]`, v] as const))
 }
@@ -172,7 +172,7 @@ function formatDate(timestamp: number) {
   return new Date(timestamp * 1e3).toISOString().substring(0, 19).replace('T', ' ')
 }
 
-function formatDuration(secs: number) {
+export function formatDuration(secs: number) {
   if (secs < 0) secs = -secs
   const time = {
     d: Math.floor(secs / 86400),
@@ -318,4 +318,20 @@ export async function parseTokenAmounts(source: Provider, transferTokens: readon
       return { token, amount }
     }),
   )
+}
+
+/**
+ * Yield resolved promises (like Promise.all), but as they resolve.
+ * Throws as soon as any promise rejects.
+ *
+ * @param promises - Promises to resolve
+ * @returns Resolved values as they resolve
+ **/
+export async function* yieldResolved<T>(promises: readonly Promise<T>[]): AsyncGenerator<T> {
+  const map = new Map(promises.map((p) => [p, p.then((res) => [p, res] as const)] as const))
+  while (map.size > 0) {
+    const [p, res] = await Promise.race(map.values())
+    map.delete(p)
+    yield res
+  }
 }

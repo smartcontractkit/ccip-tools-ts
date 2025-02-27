@@ -14,37 +14,32 @@ import {
   type CCIPRequest,
   type CCIPVersion,
   type Lane,
-  CCIPContractTypeOnRamp,
+  CCIPContractType,
   CCIP_ABIs,
 } from './types.js'
-import { blockRangeGenerator, getTypeAndVersion, lazyCached } from './utils.js'
+import { blockRangeGenerator, lazyCached, validateTypeAndVersion } from './utils.js'
 
 async function getOnRampInterface(
   source: Provider,
   onRamp: string,
 ): Promise<readonly [Interface, CCIPVersion]> {
-  const [type_, version] = await getTypeAndVersion(source, onRamp)
-  if (type_ !== CCIPContractTypeOnRamp)
+  const [type_, version] = await validateTypeAndVersion(source, onRamp)
+  if (type_ !== CCIPContractType.OnRamp)
     throw new Error(`Not an OnRamp: ${onRamp} is "${type_} ${version}"`)
   return [
     lazyCached(
-      `Interface ${CCIPContractTypeOnRamp} ${version}`,
-      () => new Interface(CCIP_ABIs[CCIPContractTypeOnRamp][version]),
+      `Interface ${CCIPContractType.OnRamp} ${version}`,
+      () => new Interface(CCIP_ABIs[CCIPContractType.OnRamp][version]),
     ),
     version,
   ] as const
 }
 
-export async function getOnRampLane(
-  source: Provider,
-  address: string,
-): Promise<
-  readonly [Lane, TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOnRamp][CCIPVersion]>]
-> {
+export async function getOnRampLane(source: Provider, address: string) {
   return lazyCached(`OnRamp ${address} lane`, async () => {
     const [iface, version] = await getOnRampInterface(source, address)
     const onRampContract = new Contract(address, iface, source) as unknown as TypedContract<
-      (typeof CCIP_ABIs)[CCIPContractTypeOnRamp][typeof version]
+      (typeof CCIP_ABIs)[CCIPContractType.OnRamp][typeof version]
     >
     const staticConfig = await onRampContract.getStaticConfig()
     return [
@@ -55,7 +50,21 @@ export async function getOnRampLane(
         version,
       },
       onRampContract,
-    ]
+    ] as
+      | readonly [
+          Lane<CCIPVersion.V1_2>,
+          TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OnRamp][CCIPVersion.V1_2]>,
+        ]
+      | readonly [
+          Lane<CCIPVersion.V1_5>,
+          TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OnRamp][CCIPVersion.V1_5]>,
+        ]
+    // {
+    //   [V in CCIPVersion]: readonly [
+    //     Lane<V>,
+    //     TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OnRamp][V]>,
+    //   ]
+    // }[CCIPVersion]
   })
 }
 
@@ -72,10 +81,10 @@ function resultsToMessage(result: Result): CCIPMessage {
 }
 
 const ccipRequestsTopicHashes = new Set(
-  Object.entries(CCIP_ABIs[CCIPContractTypeOnRamp]).map(
+  Object.entries(CCIP_ABIs[CCIPContractType.OnRamp]).map(
     ([version, abi]) =>
       lazyCached(
-        `Interface ${CCIPContractTypeOnRamp} ${version}`,
+        `Interface ${CCIPContractType.OnRamp} ${version}`,
         () => new Interface(abi),
       ).getEvent('CCIPSendRequested')!.topicHash,
   ),

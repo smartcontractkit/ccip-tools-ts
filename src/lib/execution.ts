@@ -10,15 +10,15 @@ import {
   type CCIPVersion,
   type ExecutionReceipt,
   type Lane,
-  CCIPContractTypeOffRamp,
+  CCIPContractType,
   CCIP_ABIs,
   ExecutionState,
 } from './types.js'
 import {
   blockRangeGenerator,
   chainNameFromSelector,
-  getTypeAndVersion,
   lazyCached,
+  validateTypeAndVersion,
 } from './utils.js'
 
 /**
@@ -93,7 +93,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
   runner: ContractRunner,
   address: string,
   lane: Lane<V>,
-): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]> | undefined> {
+): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OffRamp][V]> | undefined> {
   const [staticConfig, offRampContract] = await getOffRampStaticConfig(runner, address)
 
   if (
@@ -102,7 +102,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
     lane.onRamp === staticConfig.onRamp
   ) {
     return offRampContract as unknown as TypedContract<
-      (typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]
+      (typeof CCIP_ABIs)[CCIPContractType.OffRamp][V]
     >
   }
 }
@@ -123,7 +123,7 @@ export async function discoverOffRamp<V extends CCIPVersion>(
   runner: ContractRunner,
   lane: Lane<V>,
   hints?: { fromBlock?: number; page?: number },
-): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOffRamp][V]>> {
+): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OffRamp][V]>> {
   const dest = runner.provider!
   // we use Router interface to find a router, and from there find the OffRamp,
   // because these events are more frequent than some low-activity OffRamp's
@@ -221,14 +221,14 @@ export async function discoverOffRamp<V extends CCIPVersion>(
 
 async function getOffRampStaticConfig(dest: ContractRunner, address: string) {
   return lazyCached(`OffRamp ${address}.staticConfig`, async () => {
-    const [type_, version] = await getTypeAndVersion(dest.provider!, address)
-    if (type_ != CCIPContractTypeOffRamp)
+    const [type_, version] = await validateTypeAndVersion(dest.provider!, address)
+    if (type_ != CCIPContractType.OffRamp)
       throw new Error(`Not an OffRamp: ${address} is "${type_} ${version}"`)
     const offRampContract = new Contract(
       address,
       getOffRampInterface(version),
       dest,
-    ) as unknown as TypedContract<(typeof CCIP_ABIs)[CCIPContractTypeOffRamp][typeof version]>
+    ) as unknown as TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OffRamp][typeof version]>
     const staticConfig = await offRampContract.getStaticConfig()
     return [staticConfig, offRampContract] as const
   })
@@ -236,8 +236,8 @@ async function getOffRampStaticConfig(dest: ContractRunner, address: string) {
 
 function getOffRampInterface(version: CCIPVersion): Interface {
   return lazyCached(
-    `Interface ${CCIPContractTypeOffRamp} ${version}`,
-    () => new Interface(CCIP_ABIs[CCIPContractTypeOffRamp][version]),
+    `Interface ${CCIPContractType.OffRamp} ${version}`,
+    () => new Interface(CCIP_ABIs[CCIPContractType.OffRamp][version]),
   )
 }
 

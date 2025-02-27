@@ -1,5 +1,5 @@
 const mockContract = {
-  typeAndVersion: jest.fn(() => Promise.resolve(`${CCIPContractTypeOffRamp} ${CCIPVersion_1_5}`)),
+  typeAndVersion: jest.fn(() => Promise.resolve(`${CCIPContractType.OffRamp} ${CCIPVersion.V1_5}`)),
   getStaticConfig: jest.fn(() =>
     Promise.resolve({
       chainSelector: chainSelectorFromId(421614),
@@ -17,7 +17,11 @@ const mockContract = {
 // Mock Contract instance
 jest.mock('ethers', () => ({
   ...jest.requireActual('ethers'),
-  Contract: jest.fn(() => mockContract),
+  Contract: jest.fn((address, _, runner) => ({
+    ...mockContract,
+    getAddress: jest.fn(() => address),
+    runner,
+  })),
 }))
 
 import {
@@ -39,8 +43,8 @@ import {
   type CCIPMessage,
   type CCIPRequest,
   type Lane,
-  CCIPContractTypeOffRamp,
-  CCIPVersion_1_5,
+  CCIPContractType,
+  CCIPVersion,
   CCIP_ABIs,
   ExecutionState,
 } from './types.js'
@@ -55,7 +59,7 @@ describe('calculateManualExecProof', () => {
     sourceChainSelector: chainSelectorFromId(11155111),
     destChainSelector: chainSelectorFromId(421614),
     onRamp: '0x0000000000000000000000000000000000000007',
-    version: CCIPVersion_1_5,
+    version: CCIPVersion.V1_5,
   }
   const hasher = getLeafHasher(lane)
   const messages: CCIPMessage[] = [
@@ -138,15 +142,20 @@ describe('calculateManualExecProof', () => {
 })
 
 describe('validateOffRamp', () => {
+  const runner = {
+    get provider() {
+      return runner
+    },
+    getNetwork: jest.fn(() => ({ chainId: 1n })),
+  } as any
   it('should validate offRamp correctly', async () => {
-    const runner = {} as any
     const offRamp = hexlify(randomBytes(20))
     const onRamp = hexlify(randomBytes(20))
     const lane: Lane = {
       sourceChainSelector: chainSelectorFromId(11155111),
       destChainSelector: chainSelectorFromId(421614),
       onRamp,
-      version: CCIPVersion_1_5,
+      version: CCIPVersion.V1_5,
     }
     mockContract.getStaticConfig.mockResolvedValue({
       chainSelector: lane.destChainSelector,
@@ -156,18 +165,17 @@ describe('validateOffRamp', () => {
 
     const result = await validateOffRamp(runner, offRamp, lane)
 
-    expect(result).toBe(mockContract)
+    expect(result).toMatchObject({ runner })
   })
 
   it('should return undefined if offRamp is not valid', async () => {
-    const runner = {} as any
     const offRamp = hexlify(randomBytes(20))
     const onRamp = hexlify(randomBytes(20))
     const lane: Lane = {
       sourceChainSelector: chainSelectorFromId(11155111),
       destChainSelector: chainSelectorFromId(421614),
       onRamp,
-      version: CCIPVersion_1_5,
+      version: CCIPVersion.V1_5,
     }
     mockContract.getStaticConfig.mockResolvedValue({
       chainSelector: lane.destChainSelector,
@@ -184,16 +192,19 @@ describe('discoverOffRamp', () => {
     sourceChainSelector: chainSelectorFromId(11155111),
     destChainSelector: chainSelectorFromId(421614),
     onRamp: '0x0000000000000000000000000000000000000007',
-    version: CCIPVersion_1_5,
+    version: CCIPVersion.V1_5,
   }
   const routerEvt = '0x9b877de93ea9895756e337442c657f95a34fc68e7eb988bdfa693d5be83016b6'
   const offRampEvt = '0xd4f851956a5d67c3997d1c9205045fef79bae2947fdee7e9e2641abc7391ef65'
 
   const provider = {
+    get provider() {
+      return provider
+    },
     getBlockNumber: jest.fn(() => Promise.resolve(22050)),
     getLogs: jest.fn(() => Promise.resolve(<unknown[]>[])),
+    getNetwork: jest.fn(() => ({ chainId: 10n })),
   }
-  const runner = { provider }
 
   beforeEach(() => {
     lane.onRamp = hexlify(randomBytes(20))
@@ -216,9 +227,9 @@ describe('discoverOffRamp', () => {
     })
     const hints = { fromBlock: 50 }
 
-    const result = await discoverOffRamp(runner as unknown as ContractRunner, lane, hints)
+    const result = await discoverOffRamp(provider as unknown as ContractRunner, lane, hints)
 
-    expect(result).toBe(mockContract)
+    expect(result).toMatchObject({ runner: provider })
     expect(provider.getLogs).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -239,7 +250,7 @@ describe('discoverOffRamp', () => {
       onRamp: hexlify(randomBytes(20)),
     })
 
-    await expect(discoverOffRamp(runner as unknown as ContractRunner, lane)).rejects.toThrow(
+    await expect(discoverOffRamp(provider as unknown as ContractRunner, lane)).rejects.toThrow(
       /Could not find OffRamp on "ethereum-testnet-sepolia-arbitrum-1" for OnRamp=0x[a-zA-Z0-9]{40} on "ethereum-testnet-sepolia"/,
     )
   })
@@ -250,16 +261,20 @@ describe('fetchExecutionReceipts', () => {
     sourceChainSelector: chainSelectorFromId(11155111),
     destChainSelector: chainSelectorFromId(421614),
     onRamp: '0x0000000000000000000000000000000000000007',
-    version: CCIPVersion_1_5,
+    version: CCIPVersion.V1_5,
   }
   const dest = {
+    get provider() {
+      return dest
+    },
     getBlockNumber: jest.fn(() => Promise.resolve(22050)),
     getLogs: jest.fn(() => Promise.resolve(<unknown[]>[])),
     getBlock: jest.fn(() => Promise.resolve({ timestamp: 123456 })),
+    getNetwork: jest.fn(() => ({ chainId: 10n })),
   }
   const iface = lazyCached(
-    `Interface ${CCIPContractTypeOffRamp} ${lane.version}`,
-    () => new Interface(CCIP_ABIs[CCIPContractTypeOffRamp][lane.version]),
+    `Interface ${CCIPContractType.OffRamp} ${lane.version}`,
+    () => new Interface(CCIP_ABIs[CCIPContractType.OffRamp][lane.version]),
   )
 
   it('should fetch all execution receipts correctly', async () => {

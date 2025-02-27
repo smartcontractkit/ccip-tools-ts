@@ -9,6 +9,7 @@ in supported blockchains, through its publicly accessible data and methods.
 > This tool is provided under an MIT license and is for convenience and illustration purposes only.
 
 ## Development
+
 In order to run commands/test from this repo, do the following:
 
 ```sh
@@ -26,6 +27,7 @@ npx path/to/repo/ccip-tools-ts --help  # or pointing to folder directly
 > In dev context below, we'll call `$cli="./src/index.ts"`
 
 ## RPCs
+
 All commands require a list of RPCs endpoints for the networks of interest (source and destination).
 Both `http[s]` and `ws[s]` (websocket) URLs are supported.
 
@@ -38,6 +40,7 @@ arrays should work out of the box.
 Once the list is gathered, we connect to all RPCs and use the fastest to reply for each network.
 
 ## Wallet
+
 Commands which need to send transactions try to get its private key from a `USER_KEY` environment
 variable.
 
@@ -98,6 +101,7 @@ $cli send 11155111 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 ethereum-testnet-s
 ```
 
 Sends a message from router on source network, to dest; positional parameters are:
+
 1. `source`: chainId or name
 2. `router`: address on source
 3. `dest`: chainId or name
@@ -118,7 +122,7 @@ If `--fee-token` is omitted, CCIP fee will be paid in native token.
 separated by spaces, terminated with `--` if needed). `amount` will be converted using token
 decimals (e.g. 0.1 = 10^5 of the smallest unit for USDC, which is 6 decimals).
 
-`--allow-out-of-order-exec` is only available on v1.5+ lanes, and opt-out of *sender* `nonce` order
+`--allow-out-of-order-exec` is only available on v1.5+ lanes, and opt-out of _sender_ `nonce` order
 enforcement. It's useful for destinations where execution can't be guaranteed (e.g. zkOverflow).
 
 ### `estimateGas`
@@ -166,3 +170,38 @@ If 3rd argument is omitted, 2nd argument (address) should be an OnRamp address.
 
 Also, performs some validations and warns in case of some mistmatches, e.g. OnRamp is not
 registered in Router.
+
+### `getSupportedTokens`
+
+```sh
+$cli getSupportedTokens <source> <router> <dest>
+```
+
+Discovers and validates tokens that can be transferred between chains using CCIP. The command performs a comprehensive analysis of cross-chain token support.
+
+#### Parameters
+
+- `source`: Source chain ID or name (e.g., `ethereum-mainnet`, `1`)
+- `router`: CCIP Router contract address on source chain
+- `dest`: Destination chain ID or name (e.g., `polygon-mainnet`, `137`)
+
+#### Features
+
+- Automatic pool version detection
+- Custom pool support with fallback to latest ABI
+- Rate limiter configuration validation
+- Parallel processing with configurable batch sizes
+- Comprehensive error collection
+
+#### Example
+
+```sh
+# Check tokens supported for transfer from Ethereum to Polygon
+$cli --format pretty getSupportedTokens ethereum-mainnet 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D polygon-mainnet
+```
+
+#### Output Format Options
+
+- `--format pretty` (default): Human-readable output
+- `--format log`: Basic console logging
+- `--format json`: Machine-readable JSON
