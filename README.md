@@ -197,51 +197,11 @@ Discovers and validates tokens that can be transferred between chains using CCIP
 
 ```sh
 # Check tokens supported for transfer from Ethereum to Polygon
-$cli getSupportedTokens ethereum-mainnet 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D polygon-mainnet --format pretty
+$cli --format pretty getSupportedTokens ethereum-mainnet 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D polygon-mainnet
 ```
 
 #### Output Format Options
 
 - `--format pretty` (default): Human-readable output
-- `--format json`: Machine-readable JSON
 - `--format log`: Basic console logging
-
-#### Sample Output
-
-```
-=== Summary ===
-Timestamp: 2025-01-13T16:30:51.983Z
-
-Source:
-  Chain: ethereum-mainnet (1)
-  Router: 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D
-
-Destination:
-  Chain: polygon-mainnet (137)
-
-Stats:
-  Total Scanned: 83
-  Supported: 20
-  Failed: 0
-
-=== Supported Tokens ===
-[INFO] Token: TEST (TEST) at 0xB006...33CC, decimals=18
-  Pool: 0x5504...d451 (BurnMintTokenPool v1.5.0)
-  Remote Token: 0x18a4...044a
-  Remote Pools: 0xa0c3...1fc6
-  Rate Limiters:
-    Outbound:
-      Enabled: true
-      Tokens: 100000000000000000000000
-      Capacity: 100000000000000000000000
-      Rate: 167000000000000000000
-    Inbound:
-      Enabled: true
-      Tokens: 100000000000000000000000
-      Capacity: 100000000000000000000000
-      Rate: 167000000000000000000
-      ...
-```
-
-> [!NOTE]
-> The command requires access to both source and destination chain RPCs. Configure RPCs using the global options described in the [RPCs section](#rpcs).
+- `--format json`: Machine-readable JSON
