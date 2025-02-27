@@ -181,7 +181,7 @@ export async function validateTypeAndVersion(
   const isCcipContractVersion = (v: string): v is CCIPVersion =>
     Object.values(CCIPVersion).includes(v as CCIPVersion)
   if (!isCcipContractVersion(version)) {
-    throw new Error(`Unsupported contract version: "${typeAndVersion}" != "${version}"`)
+    throw new Error(`Unsupported contract version: "${typeAndVersion}"`)
   }
   return [ctype, version, typeAndVersion]
 }

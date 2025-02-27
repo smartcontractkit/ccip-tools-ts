@@ -7,9 +7,29 @@ import {
   randomBytes,
 } from 'ethers'
 
+let rampAddress: string
+
+const mockedProvider = {
+  get provider() {
+    return mockedProvider
+  },
+  getBlockNumber: jest.fn(() => 15_000),
+  getLogs: jest.fn<any, [], any>(() => [
+    {
+      address: rampAddress,
+      index: 1,
+      topics: ['0xCcipSendRequestedTopic0'],
+    },
+  ]),
+  getTransactionReceipt: jest.fn(),
+  getNetwork: jest.fn(() => ({ chainId: 11155111 })),
+}
+
 const mockedContract = {
+  runner: mockedProvider,
   typeAndVersion: jest.fn(() => `${CCIPContractType.OnRamp} ${CCIPVersion.V1_2}`),
   getStaticConfig: jest.fn(() => ({ chainSelector: 1, destChainSelector: 2 })),
+  getAddress: jest.fn(),
 }
 
 function mockedMessage(seqNum: number) {
@@ -44,15 +64,9 @@ const mockedInterface = {
 // Mock Contract instance
 jest.mock('ethers', () => ({
   ...jest.requireActual('ethers'),
-  Contract: jest.fn(() => mockedContract),
+  Contract: jest.fn((address) => ({ ...mockedContract, getAddress: jest.fn(() => address) })),
   Interface: jest.fn(() => mockedInterface),
 }))
-
-const mockedProvider = {
-  getBlockNumber: jest.fn(() => 15_000),
-  getLogs: jest.fn<any, [], any>(() => [{}]),
-  getTransactionReceipt: jest.fn(),
-}
 
 import {
   fetchAllMessagesInBatch,
@@ -66,11 +80,12 @@ import { type Lane, CCIPContractType, CCIPVersion } from './types.js'
 
 beforeEach(() => {
   jest.clearAllMocks()
+  rampAddress = getAddress(hexlify(randomBytes(20)))
+  mockedContract.getAddress.mockReturnValue(rampAddress)
 })
 
 describe('getOnRampLane', () => {
   it('should return static config and contract', async () => {
-    const rampAddress = getAddress(hexlify(randomBytes(20)))
     await expect(
       getOnRampLane(mockedProvider as unknown as Provider, rampAddress),
     ).resolves.toEqual([
@@ -80,13 +95,12 @@ describe('getOnRampLane', () => {
         onRamp: rampAddress,
         version: CCIPVersion.V1_2,
       },
-      mockedContract,
+      expect.objectContaining({ runner: mockedProvider }),
     ])
     expect(Contract).toHaveBeenCalledWith(rampAddress, expect.anything(), mockedProvider)
   })
 
   it('should throw an error if not an OnRamp', async () => {
-    const rampAddress = getAddress(hexlify(randomBytes(20)))
     mockedContract.typeAndVersion.mockReturnValueOnce(
       `${CCIPContractType.OffRamp} ${CCIPVersion.V1_2}`,
     )
@@ -99,7 +113,6 @@ describe('getOnRampLane', () => {
 
 describe('fetchCCIPMessagesInTx', () => {
   it('should return CCIP requests', async () => {
-    const rampAddress = getAddress(hexlify(randomBytes(20)))
     const mockTx = {
       provider: mockedProvider,
       hash: '0x123',
@@ -144,7 +157,6 @@ describe('fetchCCIPMessagesInTx', () => {
 })
 
 describe('fetchCCIPMessageInLog', () => {
-  const rampAddress = getAddress(hexlify(randomBytes(20)))
   it('should return a CCIP request for a specific log index', async () => {
     const mockTx = {
       provider: mockedProvider,
@@ -177,7 +189,6 @@ describe('fetchCCIPMessageInLog', () => {
 })
 
 describe('fetchCCIPMessageById', () => {
-  const rampAddress = getAddress(hexlify(randomBytes(20)))
   it('should return a CCIP request by messageId', async () => {
     mockedProvider.getLogs.mockResolvedValueOnce([{ index: 1 }])
     const mockTx = {

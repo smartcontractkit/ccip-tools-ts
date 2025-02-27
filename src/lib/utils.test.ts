@@ -17,22 +17,30 @@ import {
   validateTypeAndVersion,
 } from './utils.js'
 
+let provider: jest.Mocked<Provider>
+
 const mockedContract = {
   typeAndVersion: jest.fn(() => Promise.resolve(`${CCIPContractType.OnRamp} ${CCIPVersion.V1_2}`)),
   getStaticConfig: jest.fn(() => Promise.resolve({ chainSelector: 1 })),
+  getAddress: jest.fn(() => '0x123'),
 }
 
 // Mock Contract instance
 jest.mock('ethers', () => ({
   ...jest.requireActual('ethers'),
-  Contract: jest.fn(() => mockedContract),
+  Contract: jest.fn((address, _2, runner) => ({
+    ...mockedContract,
+    runner,
+    getAddress: jest.fn(() => address),
+  })),
   // Interface: jest.fn(() => mockedInterface),
 }))
 
-let provider: jest.Mocked<Provider>
-
 beforeEach(() => {
   provider = {
+    get provider() {
+      return provider
+    },
     getBlockNumber: jest.fn(),
     getBlock: jest.fn(),
     getNetwork: jest.fn(() => Promise.resolve({ chainId: 1n })),
@@ -80,7 +88,7 @@ describe('lazyCached', () => {
   })
 })
 
-describe('getTypeAndVersion', () => {
+describe('validateTypeAndVersion', () => {
   it('should return the type and version of the contract', async () => {
     const [type_, version] = await validateTypeAndVersion(provider, '0x123')
     expect(type_).toBe(CCIPContractType.OnRamp)
