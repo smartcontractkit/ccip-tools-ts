@@ -1,8 +1,7 @@
-/* eslint-disable @typescript-eslint/restrict-template-expressions */
 /* eslint-disable @typescript-eslint/no-base-to-string */
 import {
+  type Addressable,
   type Provider,
-  type Result,
   Contract,
   ZeroAddress,
   dataLength,
@@ -15,8 +14,13 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 
 import TokenABI from './abi/BurnMintERC677Token.js'
+import FeeQuoterABI from './abi/FeeQuoter_1_6.js'
+import TokenPoolABI from './abi/LockReleaseTokenPool_1_5_1.js'
 import RouterABI from './abi/Router.js'
+import TokenAdminRegistry_1_5 from './abi/TokenAdminRegistry_1_5.js'
 import {
+  type CCIPContract,
+  type CCIPMessage,
   type CCIPRequest,
   CCIPContractType,
   CCIPVersion,
@@ -28,6 +32,7 @@ import {
   chainNameFromId,
   chainNameFromSelector,
   chainSelectorFromId,
+  decodeAddress,
   discoverOffRamp,
   encodeExtraArgs,
   estimateExecGasForRequest,
@@ -40,15 +45,19 @@ import {
   fetchOffchainTokenData,
   fetchRequestsForSender,
   getOnRampLane,
+  getProviderNetwork,
   getSomeBlockNumberBefore,
+  getTypeAndVersion,
   lazyCached,
   parseExtraArgs,
   parseWithFragment,
   recursiveParseError,
-  validateTypeAndVersion,
+  toObject,
+  validateContractType,
 } from './lib/index.js'
 import type { Providers } from './providers.js'
 import {
+  formatDuration,
   formatResult,
   getWallet,
   parseTokenAmounts,
@@ -182,17 +191,14 @@ export async function manualExec(
   const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
 
   const commit = await fetchCommitReport(dest, request, { page: argv.page })
-  const requestsInBatch = await fetchAllMessagesInBatch(
-    source,
-    request.log,
-    commit.report.interval,
-    { page: argv.page },
-  )
+  const requestsInBatch = await fetchAllMessagesInBatch(source, request.log, commit.report, {
+    page: argv.page,
+  })
 
   const manualExecReport = calculateManualExecProof(
     requestsInBatch.map(({ message }) => message),
     request.lane,
-    [request.message.messageId],
+    [request.message.header.messageId],
     commit.report.merkleRoot,
   )
 
@@ -211,10 +217,10 @@ export async function manualExec(
       dest,
       request.lane.onRamp,
       {
-        sender: request.message.sender as string,
-        receiver: request.message.receiver as string,
+        sender: request.message.sender,
+        receiver: request.message.receiver,
         data: request.message.data,
-        tokenAmounts: request.message.tokenAmounts as { token: string; amount: bigint }[],
+        tokenAmounts: request.message.tokenAmounts,
       },
       { offRamp: await offRampContract.getAddress() },
     )
@@ -238,13 +244,52 @@ export async function manualExec(
   let manualExecTx
   if (request.lane.version === CCIPVersion.V1_2) {
     const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit ?? 0))
-    manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
-  } else {
+    manualExecTx = await (
+      offRampContract as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_2>
+    ).manuallyExecute(
+      execReport as {
+        offchainTokenData: string[][]
+        messages: CCIPMessage<CCIPVersion.V1_2>[]
+        proofs: string[]
+        proofFlagBits: bigint
+      },
+      gasOverrides,
+    )
+  } else if (request.lane.version === CCIPVersion.V1_5) {
     const gasOverrides = manualExecReport.messages.map((message) => ({
       receiverExecutionGasLimit: BigInt(argv.gasLimit ?? 0),
-      tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv.tokensGasLimit ?? 0)),
+      tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
     }))
-    manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
+    manualExecTx = await (
+      offRampContract as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_5>
+    ).manuallyExecute(
+      execReport as {
+        offchainTokenData: string[][]
+        messages: CCIPMessage<CCIPVersion.V1_5>[]
+        proofs: string[]
+        proofFlagBits: bigint
+      },
+      gasOverrides,
+    )
+  } /* v1.6 */ else {
+    const gasOverrides = manualExecReport.messages.map((message) => ({
+      receiverExecutionGasLimit: BigInt(argv.gasLimit ?? 0),
+      tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
+    }))
+    manualExecTx = await (
+      offRampContract as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_6>
+    ).manuallyExecute(
+      [
+        {
+          sourceChainSelector: request.lane.sourceChainSelector,
+          messages: execReport.messages as CCIPMessage<CCIPVersion.V1_6>[],
+          proofs: execReport.proofs,
+          proofFlagBits: execReport.proofFlagBits,
+          offchainTokenData: execReport.offchainTokenData,
+        },
+      ],
+      [gasOverrides],
+    )
   }
 
   console.log(
@@ -315,8 +360,8 @@ export async function manualExecSenderQueue(
 
   const requestsPending = requests.filter(({ message }) =>
     argv.execFailed
-      ? lastExecState.get(message.messageId) !== ExecutionState.Success
-      : !lastExecState.has(message.messageId),
+      ? lastExecState.get(message.header.messageId) !== ExecutionState.Success
+      : !lastExecState.has(message.header.messageId),
   )
   console.info(requestsPending.length, `requests eligible for manualExec`)
   if (!requestsPending.length) return
@@ -325,18 +370,18 @@ export async function manualExecSenderQueue(
   let startBlock = destFromBlock
   let lastCommitMax = 0n
   for (const request of requestsPending) {
-    if (request.message.sequenceNumber <= lastCommitMax) {
-      batches[batches.length - 1][2].push(request.message.messageId)
+    if (request.message.header.sequenceNumber <= lastCommitMax) {
+      batches[batches.length - 1][2].push(request.message.header.messageId)
       continue
     }
     const commit = await fetchCommitReport(dest, request, { startBlock, page: argv.page })
-    lastCommitMax = commit.report.interval.max
+    lastCommitMax = commit.report.maxSeqNr
     startBlock = commit.log.blockNumber + 1
 
-    const batch = await fetchAllMessagesInBatch(source, request.log, commit.report.interval, {
+    const batch = await fetchAllMessagesInBatch(source, request.log, commit.report, {
       page: argv.page,
     })
-    const msgIdsToExec = [request.message.messageId]
+    const msgIdsToExec = [request.message.header.messageId]
     batches.push([commit, batch, msgIdsToExec] as const)
   }
   console.info('Got', batches.length, 'batches to execute')
@@ -356,7 +401,8 @@ export async function manualExecSenderQueue(
       commit.report.merkleRoot,
     )
     const requestsToExec = manualExecReport.messages.map(
-      ({ messageId }) => requests.find(({ message }) => message.messageId === messageId)!,
+      ({ header }) =>
+        requests.find(({ message }) => message.header.messageId === header.messageId)!,
     )
     const offchainTokenData = await Promise.all(
       requestsToExec.map(async (request) => {
@@ -374,13 +420,52 @@ export async function manualExecSenderQueue(
     let manualExecTx
     if (firstRequest.lane.version === CCIPVersion.V1_2) {
       const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit ?? 0))
-      manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
-    } else {
+      manualExecTx = await (
+        offRampContract as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_2>
+      ).manuallyExecute(
+        execReport as {
+          offchainTokenData: string[][]
+          messages: CCIPMessage<CCIPVersion.V1_2>[]
+          proofs: string[]
+          proofFlagBits: bigint
+        },
+        gasOverrides,
+      )
+    } else if (firstRequest.lane.version === CCIPVersion.V1_5) {
       const gasOverrides = manualExecReport.messages.map((message) => ({
         receiverExecutionGasLimit: BigInt(argv.gasLimit ?? 0),
-        tokenGasOverrides: message.sourceTokenData.map(() => BigInt(argv.tokensGasLimit ?? 0)),
+        tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
       }))
-      manualExecTx = await offRampContract.manuallyExecute(execReport, gasOverrides)
+      manualExecTx = await (
+        offRampContract as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_5>
+      ).manuallyExecute(
+        execReport as {
+          offchainTokenData: string[][]
+          messages: CCIPMessage<CCIPVersion.V1_5>[]
+          proofs: string[]
+          proofFlagBits: bigint
+        },
+        gasOverrides,
+      )
+    } /* v1.6 */ else {
+      const gasOverrides = manualExecReport.messages.map((message) => ({
+        receiverExecutionGasLimit: BigInt(argv.gasLimit ?? 0),
+        tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
+      }))
+      manualExecTx = await (
+        offRampContract as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_6>
+      ).manuallyExecute(
+        [
+          {
+            sourceChainSelector: firstRequest.lane.sourceChainSelector,
+            messages: execReport.messages as CCIPMessage<CCIPVersion.V1_6>[],
+            proofs: execReport.proofs,
+            proofFlagBits: execReport.proofFlagBits,
+            offchainTokenData: execReport.offchainTokenData,
+          },
+        ],
+        [gasOverrides],
+      )
     }
 
     console.log(
@@ -421,6 +506,10 @@ export async function sendMessage(
   const destChainId = isNaN(+argv.dest) ? chainIdFromName(argv.dest) : +argv.dest
   const destSelector = chainSelectorFromId(destChainId)
 
+  const router = new Contract(argv.router, RouterABI, wallet) as unknown as TypedContract<
+    typeof RouterABI
+  >
+
   let tokenAmounts: { token: string; amount: bigint }[] = []
   if (argv.transferTokens) {
     tokenAmounts = await parseTokenAmounts(source, argv.transferTokens)
@@ -433,25 +522,22 @@ export async function sendMessage(
       ? argv.data
       : hexlify(toUtf8Bytes(argv.data))
 
-  const router = new Contract(argv.router, RouterABI, wallet) as unknown as TypedContract<
-    typeof RouterABI
-  >
-
   if (argv.estimateGasLimit != null) {
-    const onRamp = (await router.getOnRamp(destSelector)) as string
-    if (!onRamp || onRamp === ZeroAddress)
-      throw new Error(
-        `No "${chainNameFromId(sourceChainId)}" -> "${chainNameFromId(destChainId)}" lane on ${argv.router}`,
-      )
+    const [destTokenAmounts, onRampAddress] = await sourceToDestTokenAmounts(tokenAmounts, {
+      router: argv.router,
+      source,
+      dest: await providers.forChainId(destChainId),
+    })
+
     const estimated = await estimateExecGasForRequest(
       source,
       await providers.forChainId(destChainId),
-      onRamp,
+      onRampAddress,
       {
         sender: wallet.address,
         receiver,
         data,
-        tokenAmounts,
+        tokenAmounts: destTokenAmounts,
       },
     )
     console.log('Estimated gasLimit:', estimated)
@@ -536,6 +622,53 @@ export async function sendMessage(
   }
 }
 
+async function sourceToDestTokenAmounts<S extends { token: string }>(
+  sourceTokenAmounts: readonly S[],
+  { router: routerAddress, source, dest }: { router: string; source: Provider; dest: Provider },
+): Promise<[(Omit<S, 'token'> & { destTokenAddress: string })[], string]> {
+  const { name: sourceName } = await getProviderNetwork(source)
+  const { chainSelector: destSelector, name: destName } = await getProviderNetwork(dest)
+
+  const router = new Contract(routerAddress, RouterABI, source) as unknown as TypedContract<
+    typeof RouterABI
+  >
+  const onRampAddress = (await router.getOnRamp(destSelector)) as string
+  if (!onRampAddress || onRampAddress === ZeroAddress)
+    throw new Error(`No "${sourceName}" -> "${destName}" lane on ${routerAddress}`)
+  const [lane, onRamp] = await getOnRampLane(source, onRampAddress, destSelector)
+
+  let tokenAdminRegistryAddress
+  if (lane.version < CCIPVersion.V1_5) {
+    throw new Error('Deprecated lane version: ' + lane.version)
+  } else {
+    ;({ tokenAdminRegistry: tokenAdminRegistryAddress } = await (
+      onRamp as CCIPContract<CCIPContractType.OnRamp, CCIPVersion.V1_5 | CCIPVersion.V1_6>
+    ).getStaticConfig())
+  }
+  const tokenAdminRegistry = new Contract(
+    tokenAdminRegistryAddress,
+    TokenAdminRegistry_1_5,
+    source,
+  ) as unknown as TypedContract<typeof TokenAdminRegistry_1_5>
+
+  let pools: readonly (string | Addressable)[] = []
+  if (sourceTokenAmounts.length)
+    pools = await tokenAdminRegistry.getPools(sourceTokenAmounts.map(({ token }) => token))
+
+  return [
+    await Promise.all(
+      sourceTokenAmounts.map(async ({ token: _, ...ta }, i) => {
+        const pool = new Contract(pools[i], TokenPoolABI, source) as unknown as TypedContract<
+          typeof TokenPoolABI
+        >
+        const destToken = decodeAddress(await pool.getRemoteToken(destSelector))
+        return { ...ta, destTokenAddress: destToken }
+      }),
+    ),
+    onRampAddress,
+  ]
+}
+
 export async function estimateGas(
   providers: Providers,
   argv: {
@@ -559,19 +692,15 @@ export async function estimateGas(
     : isHexString(argv.data)
       ? argv.data
       : hexlify(toUtf8Bytes(argv.data))
-  let tokenAmounts: { token: string; amount: bigint }[] = []
+  let sourceTokenAmounts: { token: string; amount: bigint }[] = []
   if (argv.transferTokens) {
-    tokenAmounts = await parseTokenAmounts(source, argv.transferTokens)
+    sourceTokenAmounts = await parseTokenAmounts(source, argv.transferTokens)
   }
-
-  const router = new Contract(argv.router, RouterABI, source) as unknown as TypedContract<
-    typeof RouterABI
-  >
-  const onRamp = (await router.getOnRamp(chainSelectorFromId(destChainId))) as string
-  if (!onRamp || onRamp === ZeroAddress)
-    throw new Error(
-      `No "${chainNameFromId(sourceChainId)}" -> "${chainNameFromId(destChainId)}" lane on ${argv.router}`,
-    )
+  const [tokenAmounts, onRamp] = await sourceToDestTokenAmounts(sourceTokenAmounts, {
+    router: argv.router,
+    source,
+    dest,
+  })
 
   const gas = await estimateExecGasForRequest(
     source,
@@ -641,23 +770,33 @@ export function parseBytes({ data, selector }: { data: string; selector?: string
 
 export async function showLaneConfigs(
   providers: Providers,
-  argv: { source: string; onramp_or_router: string; dest?: string; format: Format; page: number },
+  argv: { source: string; onramp_or_router: string; dest: string; format: Format; page: number },
 ) {
   const sourceChainId = isNaN(+argv.source) ? chainIdFromName(argv.source) : +argv.source
+  const destChainId = isNaN(+argv.dest) ? chainIdFromName(argv.dest) : +argv.dest
   const source = await providers.forChainId(sourceChainId)
+  const [onrampOrRouterType, , onrampOrRouterTnV] = await getTypeAndVersion(
+    source,
+    argv.onramp_or_router,
+  )
   let onramp
-  if (argv.dest) {
-    const destChainId = isNaN(+argv.dest) ? chainIdFromName(argv.dest) : +argv.dest
+  if (onrampOrRouterType === 'Router') {
     const router = new Contract(
       argv.onramp_or_router,
       RouterABI,
       source,
     ) as unknown as TypedContract<typeof RouterABI>
     onramp = (await router.getOnRamp(chainSelectorFromId(destChainId))) as string
-  } else {
+  } else if (onrampOrRouterType.endsWith(CCIPContractType.OnRamp)) {
     onramp = argv.onramp_or_router
+  } else {
+    throw new Error(`Unknown contract type for onramp_or_router: ${onrampOrRouterTnV}`)
   }
-  const [lane, onrampContract] = await getOnRampLane(source, onramp)
+  const [lane, onRampContract] = await getOnRampLane(
+    source,
+    onramp,
+    chainSelectorFromId(destChainId),
+  )
   switch (argv.format) {
     case Format.log:
       console.log('Lane:', lane)
@@ -670,16 +809,22 @@ export async function showLaneConfigs(
       break
   }
 
-  const [staticConfig, dynamicConfig] = await Promise.all([
-    onrampContract.getStaticConfig(),
-    onrampContract.getDynamicConfig(),
-  ])
-  if (dynamicConfig.router !== ZeroAddress) {
-    const router = new Contract(
-      dynamicConfig.router,
-      RouterABI,
-      source,
-    ) as unknown as TypedContract<typeof RouterABI>
+  const staticConfig = toObject(await onRampContract.getStaticConfig())
+  const dynamicConfig = toObject(await onRampContract.getDynamicConfig())
+  let onRampRouter, destChainConfig
+  if ('router' in dynamicConfig) {
+    onRampRouter = dynamicConfig.router as string
+  } else {
+    const [sequenceNumber, allowlistEnabled, onRampRouter_] = await (
+      onRampContract as CCIPContract<CCIPContractType.OnRamp, CCIPVersion.V1_6>
+    ).getDestChainConfig(lane.destChainSelector)
+    onRampRouter = onRampRouter_ as string
+    destChainConfig = { sequenceNumber, allowlistEnabled, router: onRampRouter }
+  }
+  if (onRampRouter !== ZeroAddress) {
+    const router = new Contract(onRampRouter, RouterABI, source) as unknown as TypedContract<
+      typeof RouterABI
+    >
     const onRampInRouter = (await router.getOnRamp(lane.destChainSelector)) as string
     if (onRampInRouter !== onramp) {
       console.warn(
@@ -687,23 +832,42 @@ export async function showLaneConfigs(
       )
     }
   }
-  if (argv.dest && argv.onramp_or_router !== dynamicConfig.router) {
+  if (onrampOrRouterType === 'Router' && argv.onramp_or_router !== onRampRouter) {
     console.warn(
-      `OnRamp=${onramp} has Router=${dynamicConfig.router} set instead of ${argv.onramp_or_router}`,
+      `OnRamp=${onramp} has Router=${onRampRouter} set instead of ${argv.onramp_or_router}`,
     )
   }
+
+  let feeQuoterConfig
+  if ('feeQuoter' in dynamicConfig) {
+    const feeQuoter = new Contract(
+      dynamicConfig.feeQuoter,
+      FeeQuoterABI,
+      source,
+    ) as unknown as TypedContract<typeof FeeQuoterABI>
+    feeQuoterConfig = toObject(await feeQuoter.getDestChainConfig(lane.destChainSelector))
+  }
+
   switch (argv.format) {
     case Format.log:
       console.log('OnRamp configs:', {
-        staticConfig: (staticConfig as unknown as Result).toObject(),
-        dynamicConfig: (dynamicConfig as unknown as Result).toObject(),
+        staticConfig: staticConfig,
+        dynamicConfig: dynamicConfig,
+        ...(destChainConfig ? { destChainConfig } : {}),
+        ...(feeQuoterConfig ? { feeQuoterConfig } : {}),
       })
       break
     case Format.pretty:
-      console.info('OnRamp configs:')
       console.table({
-        ...(staticConfig as unknown as Result).toObject(),
-        ...(dynamicConfig as unknown as Result).toObject(),
+        typeAndVersion: (await getTypeAndVersion(onRampContract))[2],
+        ...staticConfig,
+        ...dynamicConfig,
+        ...(destChainConfig ?? {}),
+        ...(feeQuoterConfig
+          ? Object.fromEntries(
+              Object.entries(feeQuoterConfig).map(([k, v]) => [`feeQuoter.${k}`, v]),
+            )
+          : {}),
       })
       break
     case Format.json:
@@ -711,8 +875,10 @@ export async function showLaneConfigs(
         JSON.stringify(
           {
             onRamp: {
-              staticConfig: (staticConfig as unknown as Result).toObject(),
-              dynamicConfig: (dynamicConfig as unknown as Result).toObject(),
+              staticConfig: staticConfig,
+              dynamicConfig: dynamicConfig,
+              ...(destChainConfig ? { destChainConfig } : {}),
+              ...(feeQuoterConfig ? { feeQuoterConfig } : {}),
             },
           },
           bigIntReplacer,
@@ -725,23 +891,29 @@ export async function showLaneConfigs(
   const dest = await providers.forChainId(chainIdFromSelector(lane.destChainSelector))
   const offRampContract = await discoverOffRamp(dest, lane, { page: argv.page })
   const offRamp = await offRampContract.getAddress()
-  const [offType, offVersion, offTnV] = await validateTypeAndVersion(dest, offRamp)
+  const [offVersion, offTnV] = await validateContractType(dest, offRamp, CCIPContractType.OffRamp)
   console.info('OffRamp:', offRamp, 'is', offTnV)
-  if (offType !== CCIPContractType.OffRamp || offVersion !== lane.version) {
+  if (offVersion !== lane.version) {
     console.warn(`OffRamp=${offRamp} is not v${lane.version}`)
   }
 
-  const [offStaticConfig, offDynamicConfig] = await Promise.all([
-    offRampContract.getStaticConfig(),
-    offRampContract.getDynamicConfig(),
-  ])
-
-  if (offDynamicConfig.router !== ZeroAddress) {
-    const router = new Contract(
-      offDynamicConfig.router,
-      RouterABI,
-      dest,
-    ) as unknown as TypedContract<typeof RouterABI>
+  const offStaticConfig = toObject(await offRampContract.getStaticConfig())
+  const offDynamicConfig = toObject(await offRampContract.getDynamicConfig())
+  let offRampRouter, sourceChainConfig
+  if ('router' in offDynamicConfig) {
+    offRampRouter = offDynamicConfig.router as string
+  } else {
+    sourceChainConfig = toObject(
+      await (
+        offRampContract as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_6>
+      ).getSourceChainConfig(lane.sourceChainSelector),
+    )
+    offRampRouter = sourceChainConfig.router as string
+  }
+  if (offRampRouter !== ZeroAddress) {
+    const router = new Contract(offRampRouter, RouterABI, dest) as unknown as TypedContract<
+      typeof RouterABI
+    >
     const offRamps = await router.getOffRamps()
     if (
       !offRamps.some(
@@ -750,7 +922,7 @@ export async function showLaneConfigs(
       )
     ) {
       console.warn(
-        `OffRamp=${offRamp} is not registered in Router=${await router.getAddress()} for source="${chainNameFromSelector(lane.sourceChainSelector)}"; instead, have=${offRamps
+        `OffRamp=${offRamp} is not registered in Router=${offRampRouter} for source="${chainNameFromSelector(lane.sourceChainSelector)}"; instead, have=${offRamps
           .filter(({ sourceChainSelector }) => sourceChainSelector === lane.sourceChainSelector)
           .map(({ offRamp }) => offRamp)
           .join(', ')}`,
@@ -761,15 +933,27 @@ export async function showLaneConfigs(
   switch (argv.format) {
     case Format.log:
       console.log('OffRamp configs:', {
-        staticConfig: (offStaticConfig as unknown as Result).toObject(),
-        dynamicConfig: (offDynamicConfig as unknown as Result).toObject(),
+        staticConfig: offStaticConfig,
+        dynamicConfig: offDynamicConfig,
+        ...(sourceChainConfig ? { sourceChainConfig } : {}),
       })
       break
     case Format.pretty:
-      console.info('OffRamp configs:')
       console.table({
-        ...(offStaticConfig as unknown as Result).toObject(),
-        ...(offDynamicConfig as unknown as Result).toObject(),
+        typeAndVersion: (await getTypeAndVersion(offRampContract))[2],
+        ...offStaticConfig,
+        ...{
+          ...offDynamicConfig,
+          permissionLessExecutionThresholdSeconds: formatDuration(
+            Number(offDynamicConfig.permissionLessExecutionThresholdSeconds),
+          ),
+        },
+        ...(sourceChainConfig
+          ? {
+              ...sourceChainConfig,
+              onRamp: decodeAddress(sourceChainConfig.onRamp),
+            }
+          : {}),
       })
       break
     case Format.json:
@@ -777,8 +961,9 @@ export async function showLaneConfigs(
         JSON.stringify(
           {
             offRamp: {
-              staticConfig: (offStaticConfig as unknown as Result).toObject(),
-              dynamicConfig: (offDynamicConfig as unknown as Result).toObject(),
+              staticConfig: offStaticConfig,
+              dynamicConfig: offDynamicConfig,
+              ...(sourceChainConfig ? { sourceChainConfig } : {}),
             },
           },
           bigIntReplacer,

@@ -12,8 +12,9 @@ import {
   isHexString,
 } from 'ethers'
 
-import TokenABI from '../abi/BurnMintERC677Token.js'
+import Token from '../abi/BurnMintERC677Token.js'
 import BurnMintTokenPool from '../abi/BurnMintTokenPool_1_5_1.js'
+import FeeQuoter from '../abi/FeeQuoter_1_6.js'
 import LockReleaseTokenPool from '../abi/LockReleaseTokenPool_1_5_1.js'
 import Router from '../abi/Router.js'
 import TokenAdminRegistry from '../abi/TokenAdminRegistry_1_5.js'
@@ -22,11 +23,12 @@ import { lazyCached } from './utils.js'
 
 const ifaces: Record<string, Interface> = {
   Router: lazyCached('Interface Router', () => new Interface(Router)),
-  Token: lazyCached(`Interface Token`, () => new Interface(TokenABI)),
+  Token: lazyCached(`Interface Token`, () => new Interface(Token)),
   TokenAdminRegistry: lazyCached(
     `Interface TokenAdminRegistry 1.5`,
     () => new Interface(TokenAdminRegistry),
   ),
+  FeeQuoter: lazyCached(`Interface FeeQuoter 1.6`, () => new Interface(FeeQuoter)),
   BurnMintTokenPool: lazyCached(
     `Interface BurnMintTokenPool 1.5.1`,
     () => new Interface(BurnMintTokenPool),

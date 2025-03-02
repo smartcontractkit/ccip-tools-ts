@@ -3,10 +3,7 @@ import {
   type Provider,
   Contract,
   FunctionFragment,
-  ZeroAddress,
   concat,
-  dataSlice,
-  getAddress,
   getNumber,
   hexlify,
   randomBytes,
@@ -17,16 +14,17 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 
 import TokenABI from '../abi/BurnMintERC677Token.js'
-import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.js'
 import RouterABI from '../abi/Router.js'
 import { discoverOffRamp, validateOffRamp } from './execution.js'
-import { type Lane, CCIPContractType, CCIPVersion, CCIP_ABIs, defaultAbiCoder } from './types.js'
 import {
-  chainNameFromSelector,
-  getProviderNetwork,
-  lazyCached,
-  validateTypeAndVersion,
-} from './utils.js'
+  type CCIPContract,
+  type CCIPMessage,
+  type Lane,
+  CCIPContractType,
+  CCIPVersion,
+  defaultAbiCoder,
+} from './types.js'
+import { getProviderNetwork, validateContractType } from './utils.js'
 
 const BALANCES_SLOT = 0
 const ccipReceive = FunctionFragment.from({
@@ -40,47 +38,6 @@ const ccipReceive = FunctionFragment.from({
   outputs: [],
 })
 type Any2EVMMessage = Parameters<TypedContract<typeof RouterABI>['routeMessage']>[0]
-
-async function getDestTokenForSource(
-  source: Provider,
-  dest: JsonRpcApiProvider,
-  onRamp: string,
-  offRamp: Awaited<ReturnType<typeof discoverOffRamp>>,
-  token: string,
-) {
-  return lazyCached(`destToken ${token}`, async () => {
-    const [, version] = await validateTypeAndVersion(source, onRamp)
-    let remoteToken
-    if (version === CCIPVersion.V1_2) {
-      const offRampContract = offRamp as unknown as TypedContract<
-        (typeof CCIP_ABIs)[CCIPContractType.OffRamp][typeof version]
-      >
-      const pool = await offRampContract.getPoolBySourceToken(token)
-      const poolContract = new Contract(pool, TokenPoolABI, dest) as unknown as TypedContract<
-        typeof TokenPoolABI
-      >
-      remoteToken = (await poolContract.getToken()) as string
-    } else {
-      const onRampContract = new Contract(
-        onRamp,
-        CCIP_ABIs[CCIPContractType.OnRamp][version],
-        source,
-      ) as unknown as TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OnRamp][typeof version]>
-      const destChainSelector = (await getProviderNetwork(dest)).chainSelector
-      const pool = await onRampContract.getPoolBySourceToken(destChainSelector, token)
-      if (pool === ZeroAddress) throw new Error(`Token=${token} not supported by OnRamp=${onRamp}`)
-      const poolContract = new Contract(pool, TokenPoolABI, source) as unknown as TypedContract<
-        typeof TokenPoolABI
-      >
-      remoteToken = getAddress(dataSlice(await poolContract.getRemoteToken(destChainSelector), -20))
-      if (remoteToken === ZeroAddress)
-        throw new Error(
-          `TokenPool=${pool as string} doesnt support dest="${chainNameFromSelector(destChainSelector)}"`,
-        )
-    }
-    return remoteToken
-  })
-}
 
 /**
  * Estimate CCIP gasLimit needed to execute a request on a contract receiver
@@ -96,18 +53,18 @@ export async function estimateExecGasForRequest(
   source: Provider,
   dest: JsonRpcApiProvider,
   onRamp: string,
-  request: {
-    sender: string
-    receiver: string
-    data: string
-    tokenAmounts: readonly { token: string; amount: bigint }[]
+  request: Pick<CCIPMessage, 'sender' | 'receiver' | 'data'> & {
+    tokenAmounts: readonly Pick<
+      CCIPMessage['tokenAmounts'][number],
+      'destTokenAddress' | 'amount'
+    >[]
   },
   hints?: { offRamp?: string; page?: number },
 ) {
   const { chainSelector: sourceChainSelector, name: sourceName } = await getProviderNetwork(source)
   const { chainSelector: destChainSelector, name: destName } = await getProviderNetwork(dest)
 
-  const [, version] = await validateTypeAndVersion(source, onRamp)
+  const [version] = await validateContractType(source, onRamp, CCIPContractType.OnRamp)
   const lane: Lane = { sourceChainSelector, destChainSelector, onRamp, version }
 
   let offRamp
@@ -120,28 +77,33 @@ export async function estimateExecGasForRequest(
   } else {
     offRamp = await discoverOffRamp(dest, lane, hints)
   }
-  const { router: destRouter } = await offRamp.getDynamicConfig()
-
-  const destTokenAmounts = await Promise.all(
-    request.tokenAmounts.map(async ({ token, amount }) => {
-      const destToken = await getDestTokenForSource(source, dest, onRamp, offRamp, token)
-      return { token: destToken, amount }
-    }),
-  )
+  let destRouter
+  if (lane.version < CCIPVersion.V1_6) {
+    ;({ router: destRouter } = await (
+      offRamp as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_5>
+    ).getDynamicConfig())
+  } else {
+    ;({ router: destRouter } = await (
+      offRamp as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_6>
+    ).getSourceChainConfig(sourceChainSelector))
+  }
 
   const message: Any2EVMMessage = {
     messageId: hexlify(randomBytes(32)),
     sender: zeroPadValue(request.sender, 32),
     data: request.data,
     sourceChainSelector,
-    destTokenAmounts: destTokenAmounts,
+    destTokenAmounts: request.tokenAmounts.map(({ destTokenAddress: token, amount }) => ({
+      token,
+      amount,
+    })),
   }
 
   // we need to override the state, increasing receiver's balance for each token, to simulate the
   // state after tokens were transferred by the offRamp just before calling `ccipReceive`
   const destAmounts: Record<string, bigint> = {}
   const stateOverrides: Record<string, { stateDiff: Record<string, string> }> = {}
-  for (const { token, amount } of destTokenAmounts) {
+  for (const { destTokenAddress: token, amount } of request.tokenAmounts) {
     if (!(token in destAmounts)) {
       const tokenContract = new Contract(token, TokenABI, dest) as unknown as TypedContract<
         typeof TokenABI

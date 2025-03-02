@@ -244,7 +244,7 @@ describe('fetchAllMessagesInBatch', () => {
     const result = await fetchAllMessagesInBatch(
       mockedProvider as unknown as Provider,
       { address: '0xOnRamp', blockNumber: 12_000 },
-      { min: 8, max: 10 },
+      { minSeqNr: 8, maxSeqNr: 10 },
     )
     expect(result).toHaveLength(3)
     expect(result[0]).toMatchObject({
@@ -272,7 +272,7 @@ describe('fetchAllMessagesInBatch', () => {
       fetchAllMessagesInBatch(
         mockedProvider as unknown as Provider,
         { address: '0xOnRamp', blockNumber: 1 },
-        { min: 1, max: 10 },
+        { minSeqNr: 1, maxSeqNr: 10 },
       ),
     ).rejects.toThrow('Could not find all expected CCIPSendRequested events')
   })

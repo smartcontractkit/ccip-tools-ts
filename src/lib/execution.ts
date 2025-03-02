@@ -1,4 +1,11 @@
-import { type ContractRunner, type EventFragment, type Provider, Contract, Interface } from 'ethers'
+import {
+  type ContractRunner,
+  type EventFragment,
+  type Provider,
+  Contract,
+  Interface,
+  toBeHex,
+} from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import Router from '../abi/Router.js'
@@ -7,18 +14,20 @@ import {
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
-  type CCIPVersion,
   type ExecutionReceipt,
   type Lane,
   CCIPContractType,
+  CCIPVersion,
   CCIP_ABIs,
   ExecutionState,
 } from './types.js'
 import {
   blockRangeGenerator,
   chainNameFromSelector,
+  decodeAddress,
   lazyCached,
-  validateTypeAndVersion,
+  toObject,
+  validateContractType,
 } from './utils.js'
 
 /**
@@ -49,9 +58,10 @@ export function calculateManualExecProof(
   messagesInBatch.forEach((message, index) => {
     // Hash leaf node
     leaves.push(hasher(message))
-    seen.add(message.messageId)
+    const msgId = 'messageId' in message ? message.messageId : message.header.messageId
+    seen.add(msgId)
     // Find the providng leaf index with the matching sequence number
-    if (messageIds.includes(message.messageId)) {
+    if (messageIds.includes(msgId)) {
       messages.push(message)
       prove.push(index)
     }
@@ -94,13 +104,33 @@ export async function validateOffRamp<V extends CCIPVersion>(
   address: string,
   lane: Lane<V>,
 ): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OffRamp][V]> | undefined> {
-  const [staticConfig, offRampContract] = await getOffRampStaticConfig(runner, address)
+  const [version] = await validateContractType(runner.provider!, address, CCIPContractType.OffRamp)
+  if (version !== lane.version) return
 
-  if (
-    lane.sourceChainSelector === staticConfig.sourceChainSelector &&
-    lane.destChainSelector === staticConfig.chainSelector &&
-    lane.onRamp === staticConfig.onRamp
-  ) {
+  const offRampContract = new Contract(
+    address,
+    getOffRampInterface(version),
+    runner.provider,
+  ) as unknown as TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OffRamp][typeof version]>
+
+  let sourceChainSelector, onRamp
+  if (lane.version < CCIPVersion.V1_6) {
+    const [staticConfig] = await getOffRampStaticConfig(runner, address)
+    if (!('sourceChainSelector' in staticConfig)) return
+    sourceChainSelector = staticConfig.sourceChainSelector
+    onRamp = staticConfig.onRamp
+  } else {
+    const sourceConfig = await lazyCached(
+      `OffRamp ${address}.sourceConfig(${lane.sourceChainSelector})`,
+      async () => {
+        return toObject(await offRampContract.getSourceChainConfig(lane.sourceChainSelector))
+      },
+    )
+    sourceChainSelector = lane.sourceChainSelector
+    onRamp = decodeAddress(sourceConfig.onRamp)
+  }
+
+  if (lane.sourceChainSelector === sourceChainSelector && lane.onRamp === onRamp) {
     return offRampContract as unknown as TypedContract<
       (typeof CCIP_ABIs)[CCIPContractType.OffRamp][V]
     >
@@ -134,7 +164,11 @@ export async function discoverOffRamp<V extends CCIPVersion>(
   // interface.getEvent, we just iterate and pick the one with 2 args
   let configSetFrag!: EventFragment
   offRampInterface.forEachEvent((frag) => {
-    if (frag.name === 'ConfigSet' && frag.inputs.length === 2) configSetFrag = frag
+    if (
+      (frag.name === 'ConfigSet' && frag.inputs.length === 2) ||
+      frag.name === 'SourceChainConfigSet'
+    )
+      configSetFrag = frag
   })
   const offRampTopics = new Set<string>([
     offRampInterface.getEvent('ExecutionStateChanged')!.topicHash,
@@ -221,15 +255,13 @@ export async function discoverOffRamp<V extends CCIPVersion>(
 
 async function getOffRampStaticConfig(dest: ContractRunner, address: string) {
   return lazyCached(`OffRamp ${address}.staticConfig`, async () => {
-    const [type_, version] = await validateTypeAndVersion(dest.provider!, address)
-    if (type_ != CCIPContractType.OffRamp)
-      throw new Error(`Not an OffRamp: ${address} is "${type_} ${version}"`)
+    const [version] = await validateContractType(dest.provider!, address, CCIPContractType.OffRamp)
     const offRampContract = new Contract(
       address,
       getOffRampInterface(version),
       dest,
     ) as unknown as TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OffRamp][typeof version]>
-    const staticConfig = await offRampContract.getStaticConfig()
+    const staticConfig = toObject(await offRampContract.getStaticConfig())
     return [staticConfig, offRampContract] as const
   })
 }
@@ -289,13 +321,39 @@ export async function* fetchExecutionReceipts(
         return offRampInterface.getEvent('ExecutionStateChanged')!.topicHash
       }),
     )
+    const topics: (null | string[])[] = [Array.from(topic0s)]
+    if (
+      requests.every(
+        ({ lane }) => lane.version === CCIPVersion.V1_2 || lane.version === CCIPVersion.V1_5,
+      )
+    ) {
+      // ExecutionStateChanged v1.2-v1.5 has messageId as indexed topic2
+      topics.push(
+        null,
+        requests.map(
+          ({ message }) => (message as CCIPMessage<CCIPVersion.V1_2 | CCIPVersion.V1_5>).messageId,
+        ),
+      )
+    } else if (requests.every(({ lane }) => lane.version === CCIPVersion.V1_6)) {
+      // ExecutionStateChanged v1.6 has sourceChainSelector as indexed topic1, messageId as indexed topic3
+      topics.push(
+        Array.from(
+          new Set(
+            requests.map(({ message }) =>
+              toBeHex((message as CCIPMessage<CCIPVersion.V1_6>).header.sourceChainSelector, 32),
+            ),
+          ),
+        ),
+        null,
+        requests.map(({ message }) => (message as CCIPMessage<CCIPVersion.V1_6>).header.messageId),
+      )
+    }
 
     // we don't know our OffRamp address yet, so fetch any compatible log
     const logs = await dest.getLogs({
       ...blockRange,
       ...(addressFilter.size ? { address: Array.from(addressFilter) } : {}),
-      // ExecutionStateChanged v1.2-v1.5 (at least) has messageId as indexed topic2
-      topics: [Array.from(topic0s), null, requests.map(({ message }) => message.messageId)],
+      topics,
     })
     if (onlyLast) logs.reverse()
     console.debug('fetchExecutionReceipts: found', logs.length, 'logs in', blockRange)
@@ -303,26 +361,36 @@ export async function* fetchExecutionReceipts(
     let lastLogBlock: readonly [block: number, timestamp: number] | undefined
     for (const log of logs) {
       try {
-        const [staticConfig] = await getOffRampStaticConfig(dest, log.address)
+        const [version] = await validateContractType(dest, log.address, CCIPContractType.OffRamp)
+
+        const offRampInterface = getOffRampInterface(version)
+        const decoded = offRampInterface.parseLog(log)
+        if (!decoded) continue
+
+        const receipt = Object.assign(decoded.args.toObject(), {
+          state: Number(decoded.args.state),
+        }) as ExecutionReceipt
+
+        let sourceChainSelector
+        if (version === CCIPVersion.V1_2 || version === CCIPVersion.V1_5) {
+          const [staticConfig] = await getOffRampStaticConfig(dest, log.address)
+          if ('sourceChainSelector' in staticConfig)
+            sourceChainSelector = staticConfig.sourceChainSelector
+        } else {
+          sourceChainSelector = receipt.sourceChainSelector!
+        }
 
         for (const request of requests) {
           // reject if it's not an OffRamp for our onRamp
           if (
-            request.message.sourceChainSelector !== staticConfig.sourceChainSelector ||
-            request.log.address !== staticConfig.onRamp
+            request.lane.sourceChainSelector !== sourceChainSelector
+            // || request.log.address !== staticConfig.onRamp
           )
             continue
           onrampToOfframp.set(request.log.address, log.address) // found an offramp of interest!
 
-          const offRampInterface = getOffRampInterface(request.lane.version)
-          const decoded = offRampInterface.parseLog(log)
-          if (!decoded) continue
-
-          const receipt = Object.assign(decoded.args.toObject(), {
-            state: Number(decoded.args.state),
-          }) as ExecutionReceipt
           if (
-            receipt.messageId !== request.message.messageId ||
+            receipt.messageId !== request.message.header.messageId ||
             messageIdsCompleted.has(receipt.messageId)
           )
             continue
@@ -341,7 +409,7 @@ export async function* fetchExecutionReceipts(
       }
     }
     // cleanup requests, which _may_ also simplify next pages' topics
-    requests = requests.filter(({ message }) => !messageIdsCompleted.has(message.messageId))
+    requests = requests.filter(({ message }) => !messageIdsCompleted.has(message.header.messageId))
     // all messages were seen (if onlyLast) or completed (state==success)
     if (!requests.length) break
   }

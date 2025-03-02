@@ -3,9 +3,10 @@ import type { TypedContract } from 'ethers-abitype'
 
 import {
   type CCIPCommit,
-  type CCIPRequest,
   type CommitReport,
+  type Lane,
   CCIPContractType,
+  CCIPVersion,
   CCIP_ABIs,
 } from './types.js'
 import { blockRangeGenerator, getSomeBlockNumberBefore, lazyCached } from './utils.js'
@@ -22,23 +23,26 @@ import { blockRangeGenerator, getSomeBlockNumberBefore, lazyCached } from './uti
 export async function fetchCommitReport(
   dest: Provider,
   {
-    log: { address: onRamp },
-    message,
-    timestamp: requestTimestamp,
     lane,
-  }: Pick<CCIPRequest, 'lane'> & {
-    message: Pick<CCIPRequest['message'], 'sequenceNumber' | 'sourceChainSelector'>
-    log: Pick<CCIPRequest['log'], 'address'>
+    message: { header },
+    timestamp: requestTimestamp,
+  }: {
+    lane: Lane
+    message: { header: { sequenceNumber: bigint } }
     timestamp?: number
   },
   hints?: { startBlock?: number; commitStore?: string; page?: number },
 ): Promise<CCIPCommit> {
-  const commitStoreABI = CCIP_ABIs[CCIPContractType.CommitStore][lane.version]
+  const commitStoreType =
+    lane.version === CCIPVersion.V1_6 ? CCIPContractType.OffRamp : CCIPContractType.CommitStore
+  const commitStoreABI = CCIP_ABIs[commitStoreType][lane.version]
   const commitStoreInterface = lazyCached(
-    `Interface ${CCIPContractType.CommitStore} ${lane.version}`,
+    `Interface ${commitStoreType} ${lane.version}`,
     () => new Interface(commitStoreABI),
   )
-  const topic0 = commitStoreInterface.getEvent('ReportAccepted')!.topicHash
+  const topic0 = commitStoreInterface.getEvent(
+    lane.version < CCIPVersion.V1_6 ? 'ReportAccepted' : 'CommitReportAccepted',
+  )!.topicHash
 
   for (const blockRange of blockRangeGenerator(
     {
@@ -60,35 +64,33 @@ export async function fetchCommitReport(
     for (const log of logs) {
       const decoded = commitStoreInterface.parseLog(log)
       if (!decoded) continue
-      const report = resultsToCommitReport(decoded.args)
-
+      const report = resultsToCommitReport(decoded.args, lane)
+      if (!report) continue
       // fetch first ComitReport log (of any CommitStore) which has our desired interval
-      if (
-        report.interval.min > message.sequenceNumber ||
-        message.sequenceNumber > report.interval.max
-      )
+      if (report.minSeqNr > header.sequenceNumber || header.sequenceNumber > report.maxSeqNr)
         continue
-      try {
-        const staticConfig = await lazyCached(
-          `CommitStore ${log.address}.staticConfig`,
-          async () => {
+      if (lane.version < CCIPVersion.V1_6) {
+        try {
+          const staticConfig = await lazyCached(`CommitStore ${log.address}.staticConfig`, () => {
             const contract = new Contract(
               log.address,
               commitStoreInterface,
               dest,
-            ) as unknown as TypedContract<typeof commitStoreABI>
+            ) as unknown as TypedContract<
+              (typeof CCIP_ABIs)[CCIPContractType.CommitStore][CCIPVersion.V1_2 | CCIPVersion.V1_5]
+            >
             return contract.getStaticConfig()
-          },
-        )
+          })
 
-        // reject if it's not a CommitStore for our onRamp
-        if (
-          message.sourceChainSelector !== staticConfig.sourceChainSelector ||
-          onRamp !== staticConfig.onRamp
-        )
+          // reject if it's not a CommitStore for our onRamp
+          if (
+            lane.sourceChainSelector !== staticConfig.sourceChainSelector ||
+            lane.onRamp !== staticConfig.onRamp
+          )
+            continue
+        } catch (_) {
           continue
-      } catch (_) {
-        continue
+        }
       }
 
       return { report, log }
@@ -96,23 +98,34 @@ export async function fetchCommitReport(
   }
 
   throw new Error(
-    `Could not find commit after ${hints?.startBlock ?? requestTimestamp} for sequenceNumber=${message.sequenceNumber}`,
+    `Could not find commit after ${hints?.startBlock ?? requestTimestamp} for sequenceNumber=${header.sequenceNumber}`,
   )
 }
 
 // TODO: find a way to make these conversions generic
-function resultsToCommitReport(result: Result): CommitReport {
+function resultsToCommitReport<V extends CCIPVersion = CCIPVersion>(
+  result: Result,
+  lane: Lane<V>,
+): CommitReport | undefined {
   if (result.length === 1) result = result[0] as Result
-  const report = {
-    ...result.toObject(true),
-    priceUpdates: {
-      tokenPriceUpdates: ((result.priceUpdates as Result).tokenPriceUpdates as Result).map(
-        (update) => (update as Result).toObject(),
-      ),
-      gasPriceUpdates: ((result.priceUpdates as Result).gasPriceUpdates as Result).map((update) =>
-        (update as Result).toObject(),
-      ),
-    },
-  } as unknown as CommitReport
-  return report
+  if (lane.version < CCIPVersion.V1_6) {
+    return {
+      merkleRoot: result.merkleRoot as string,
+      minSeqNr: (result.interval as Result).min as bigint,
+      maxSeqNr: (result.interval as Result).max as bigint,
+      sourceChainSelector: lane.sourceChainSelector,
+      onRampAddress: lane.onRamp,
+    }
+  } else {
+    const res = [...(result[0] as Result[]), ...(result[1] as Result[])].find(
+      (r) =>
+        r.sourceChainSelector === lane.sourceChainSelector &&
+        (r.onRampAddress as string).endsWith(lane.onRamp.slice(2).toLowerCase()),
+    )
+    if (!res) return
+    return {
+      ...res.toObject(),
+      onRampAddress: lane.onRamp,
+    } as CommitReport
+  }
 }

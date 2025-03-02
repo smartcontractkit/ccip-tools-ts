@@ -29,9 +29,7 @@ import {
   type JsonRpcApiProvider,
   Contract,
   ZeroAddress,
-  dataLength,
   formatUnits,
-  getAddress,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
@@ -47,6 +45,7 @@ import {
   chainNameFromId,
   chainNameFromSelector,
   chainSelectorFromId,
+  decodeAddress,
   getContractProperties,
   getOnRampLane,
   getProviderNetwork,
@@ -183,7 +182,7 @@ async function getRegistryContract(
     )
   }
 
-  const [lane, onRampContract] = await getOnRampLane(sourceProvider, onRampAddress)
+  const [lane, onRampContract] = await getOnRampLane(sourceProvider, onRampAddress, destSelector)
   if ('applyPoolUpdates' in onRampContract) {
     throw new Error(`Deprecated CCIP onRamp version: ${lane.version}`) // v1.2
   }
@@ -342,12 +341,6 @@ async function fetchSupportedTokenDetails(
   }
 }
 
-function formatAddress(address: string): string {
-  return address.startsWith('0x000000000000000000000000') && dataLength(address) === 32
-    ? getAddress('0x' + address.slice(-40))
-    : address
-}
-
 export function prettySupportedToken(token: CCIPSupportedToken) {
   console.table({
     address: token.token,
@@ -356,8 +349,8 @@ export function prettySupportedToken(token: CCIPSupportedToken) {
     decimals: token.decimals,
     pool: token.pool,
     'pool.typeAndVersion': token.poolTypeAndVersion,
-    remoteToken: formatAddress(token.poolDetails.remoteToken),
-    ...formatArray('remotePools', token.poolDetails.remotePools.map(formatAddress)),
+    remoteToken: decodeAddress(token.poolDetails.remoteToken),
+    ...formatArray('remotePools', token.poolDetails.remotePools.map(decodeAddress)),
     ...(!token.poolDetails.outboundRateLimiter.isEnabled
       ? { 'rateLimiters.outbound': 'disabled' }
       : {

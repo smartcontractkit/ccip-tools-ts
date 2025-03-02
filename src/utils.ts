@@ -1,9 +1,8 @@
-/* eslint-disable @typescript-eslint/restrict-template-expressions,@typescript-eslint/no-base-to-string */
+/* eslint-disable @typescript-eslint/restrict-template-expressions */
 import { readFile } from 'node:fs/promises'
 
 import { password, select } from '@inquirer/prompts'
 import {
-  type Addressable,
   type Provider,
   BaseWallet,
   Contract,
@@ -19,6 +18,7 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 
 import TokenABI from './abi/BurnMintERC677Token.js'
+import TokenPoolABI from './abi/BurnMintTokenPool_1_5_1.js'
 import {
   type CCIPCommit,
   type CCIPExecution,
@@ -27,7 +27,6 @@ import {
   ExecutionState,
   chainIdFromSelector,
   chainNameFromId,
-  chainNameFromSelector,
   getErrorData,
   lazyCached,
   networkInfo,
@@ -62,12 +61,12 @@ export async function selectRequest(
     choices: [
       ...requests.map((req, i) => ({
         value: i,
-        name: `${req.log.index} => ${req.message.messageId}`,
+        name: `${req.log.index} => ${req.message.header.messageId}`,
         description:
           `sender =\t\t${req.message.sender}
 receiver =\t\t${req.message.receiver}
 gasLimit =\t\t${req.message.gasLimit}
-tokenTransfers =\t[${req.message.tokenAmounts.map(({ token }) => token).join(',')}]` +
+tokenTransfers =\t[${req.message.tokenAmounts.map((ta) => ('token' in ta ? ta.token : ta.destTokenAddress)).join(',')}]` +
           ('lane' in req
             ? `\ndestination =\t\t${chainNameFromId(chainIdFromSelector(req.lane.destChainSelector))} [${chainIdFromSelector(req.lane.destChainSelector)}]`
             : ''),
@@ -103,8 +102,20 @@ export function prettyLane(lane: Lane) {
 
 async function formatToken(
   provider: Provider,
-  { token, amount }: { token: string | Addressable; amount: bigint },
+  ta: { amount: bigint } & ({ token: string } | { sourcePoolAddress: string }),
 ): Promise<string> {
+  let token
+  if ('token' in ta) token = ta.token
+  else {
+    token = await lazyCached(`token ${ta.sourcePoolAddress}`, () => {
+      const pool = new Contract(
+        ta.sourcePoolAddress,
+        TokenPoolABI,
+        provider,
+      ) as unknown as TypedContract<typeof TokenPoolABI>
+      return pool.getToken() as Promise<string>
+    })
+  }
   const [decimals_, symbol] = await lazyCached(`token ${token}`, async () => {
     const contract = new Contract(token, TokenABI, provider) as unknown as TypedContract<
       typeof TokenABI
@@ -112,7 +123,7 @@ async function formatToken(
     return Promise.all([contract.decimals(), contract.symbol()] as const)
   })
   const decimals = Number(decimals_)
-  return `${formatUnits(amount, decimals)} ${symbol}`
+  return `${formatUnits(ta.amount, decimals)} ${symbol}`
 }
 
 export function formatArray<T>(name: string, values: readonly T[]): Record<string, T> {
@@ -196,12 +207,12 @@ export async function prettyRequest(source: Provider, request: CCIPRequest) {
   } catch (_) {
     // no finalized tag support
   }
-  const nonce = Number(request.message.nonce)
+  const nonce = Number(request.message.header.nonce)
   console.table({
-    messageId: request.message.messageId,
+    messageId: request.message.header.messageId,
     sender: request.message.sender,
     receiver: request.message.receiver,
-    sequenceNumber: Number(request.message.sequenceNumber),
+    sequenceNumber: Number(request.message.header.sequenceNumber),
     nonce: nonce === 0 ? '0 => allow out-of-order exec' : nonce,
     gasLimit: Number(request.message.gasLimit),
     transactionHash: request.log.transactionHash,
@@ -234,26 +245,9 @@ export async function prettyCommit(
   const timestamp = (await dest.getBlock(commit.log.blockNumber))!.timestamp
   console.table({
     merkleRoot: commit.report.merkleRoot,
-    'interval.min': Number(commit.report.interval.min),
-    'interval.max': Number(commit.report.interval.max),
-    ...Object.fromEntries(
-      commit.report.priceUpdates.tokenPriceUpdates.map(
-        ({ sourceToken, usdPerToken }) =>
-          [`tokenPrice[${sourceToken}]`, `${formatUnits(usdPerToken)} USD`] as const,
-      ),
-    ),
-    ...Object.fromEntries(
-      commit.report.priceUpdates.gasPriceUpdates.map(({ destChainSelector, usdPerUnitGas }) => {
-        const execLayerGas = usdPerUnitGas % (1n << 112n)
-        const daLayerGas = usdPerUnitGas / (1n << 112n)
-        return [
-          `gasPrice[${chainNameFromSelector(destChainSelector)}]`,
-          `${formatUnits(execLayerGas)}` +
-            (daLayerGas > 0 ? ` (DA: ${formatUnits(daLayerGas)})` : ''),
-        ] as const
-      }),
-    ),
-    commitStore: commit.log.address,
+    min: Number(commit.report.minSeqNr),
+    max: Number(commit.report.maxSeqNr),
+    contract: commit.log.address,
     transactionHash: commit.log.transactionHash,
     blockNumber: commit.log.blockNumber,
     timestamp: `${formatDate(timestamp)} (${formatDuration(timestamp - request.timestamp)} after request)`,
@@ -264,6 +258,7 @@ export function prettyReceipt(receipt: CCIPExecution, request: { timestamp: numb
   console.table({
     state: receipt.receipt.state === ExecutionState.Success ? '✅ success' : '❌ failed',
     ...formatData('returnData', receipt.receipt.returnData, true),
+    ...(receipt.receipt.gasUsed ? { gasUsed: Number(receipt.receipt.gasUsed) } : {}),
     offRamp: receipt.log.address,
     transactionHash: receipt.log.transactionHash,
     logIndex: receipt.log.index,
