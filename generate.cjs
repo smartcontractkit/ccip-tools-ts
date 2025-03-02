@@ -52,7 +52,7 @@ process.argv.slice(2).forEach(async (param) => {
         if (changed == -1) process.exitCode = 1
         console.info(changed ? 'generated' : 'up-to-date', filepath)
       },
-      (err) => console.error('generate error:', err),
+      (err) => console.error(`generate error on "${filepath}":`, err),
     )
   }
 })
