@@ -5,7 +5,6 @@ import { ZeroAddress, getAddress, isHexString } from 'ethers'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
-import { showSupportedTokens } from './commands/index.js'
 import {
   Format,
   estimateGas,
@@ -15,7 +14,8 @@ import {
   sendMessage,
   showLaneConfigs,
   showRequests,
-} from './commands.js'
+  showSupportedTokens,
+} from './commands/index.js'
 import { Providers } from './providers.js'
 import { logParsedError } from './utils.js'
 
