@@ -145,6 +145,7 @@ const selectors: Record<number, { readonly selector: bigint; readonly name?: str
   '1328': { selector: 1216300075444106652n, name: 'sei-testnet-atlantic' },
   '1329': { selector: 9027416829622342829n, name: 'sei-mainnet' },
   '1337': { selector: 3379446385462418246n, name: 'geth-testnet' },
+  '1338': { selector: 2181150070347029680n, name: 'megaeth-testnet' },
   '1442': {
     selector: 11059667695644972511n,
     name: 'ethereum-testnet-goerli-polygon-zkevm-1',
