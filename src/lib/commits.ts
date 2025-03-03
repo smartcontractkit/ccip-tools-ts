@@ -34,7 +34,7 @@ export async function fetchCommitReport(
   hints?: { startBlock?: number; commitStore?: string; page?: number },
 ): Promise<CCIPCommit> {
   const commitStoreType =
-    lane.version === CCIPVersion.V1_6 ? CCIPContractType.OffRamp : CCIPContractType.CommitStore
+    lane.version >= CCIPVersion.V1_6 ? CCIPContractType.OffRamp : CCIPContractType.CommitStore
   const commitStoreABI = CCIP_ABIs[commitStoreType][lane.version]
   const commitStoreInterface = lazyCached(
     `Interface ${commitStoreType} ${lane.version}`,

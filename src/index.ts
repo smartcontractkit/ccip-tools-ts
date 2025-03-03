@@ -16,8 +16,8 @@ import {
   showRequests,
   showSupportedTokens,
 } from './commands/index.js'
+import { logParsedError } from './commands/utils.js'
 import { Providers } from './providers.js'
-import { logParsedError } from './utils.js'
 
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail

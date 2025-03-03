@@ -247,7 +247,12 @@ const MAX_PAGES = 10
 // Helper function to find the sequence number from CCIPSendRequested event logs
 export async function fetchAllMessagesInBatch(
   source: Provider,
-  { address: onRamp, blockNumber: sendBlock }: Pick<Log, 'address' | 'blockNumber'>,
+  destChainSelector: bigint,
+  {
+    address: onRamp,
+    blockNumber: sendBlock,
+    topics: [topic0],
+  }: Pick<Log, 'address' | 'blockNumber' | 'topics'>,
   { minSeqNr, maxSeqNr }: { minSeqNr: Numeric; maxSeqNr: Numeric },
   {
     page: eventsBatchSize = BLOCK_LOG_WINDOW_SIZE,
@@ -259,11 +264,11 @@ export async function fetchAllMessagesInBatch(
   const latestBlock: number = await source.getBlockNumber()
 
   const [onRampInterface] = await getOnRampInterface(source, onRamp)
-  const [lane] = await getOnRampLane(source, onRamp)
+  const [lane] = await getOnRampLane(source, onRamp, destChainSelector)
   const getDecodedEvents = async (fromBlock: number, toBlock: number) => {
     const logs = await source.getLogs({
       address: onRamp,
-      topics: [onRampInterface.getEvent('CCIPSendRequested')!.topicHash],
+      topics: [topic0],
       fromBlock,
       toBlock,
     })

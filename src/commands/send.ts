@@ -13,6 +13,7 @@ import {
   fetchCCIPMessagesInTx,
 } from '../lib/index.js'
 import type { Providers } from '../providers.js'
+import { Format } from './types.js'
 import {
   getWallet,
   parseTokenAmounts,
@@ -20,7 +21,6 @@ import {
   sourceToDestTokenAmounts,
   withDateTimestamp,
 } from './utils.js'
-import { Format } from './types.js'
 
 type AnyMessage = Parameters<TypedContract<typeof RouterABI>['ccipSend']>[1]
 

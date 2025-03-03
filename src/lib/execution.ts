@@ -5,6 +5,7 @@ import {
   Contract,
   Interface,
   toBeHex,
+  zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
@@ -56,13 +57,24 @@ export function calculateManualExecProof(
   const seen = new Set<string>()
 
   messagesInBatch.forEach((message, index) => {
+    // messages on dest side needs to encode source addresses
+    const msg = { ...message }
+    if (lane.version >= CCIPVersion.V1_6) {
+      msg.sender = zeroPadValue(msg.sender, 32)
+      msg.tokenAmounts = (msg as CCIPMessage<CCIPVersion.V1_6>).tokenAmounts.map(
+        ({ sourcePoolAddress, ...rest }) => ({
+          ...rest,
+          sourcePoolAddress: zeroPadValue(sourcePoolAddress, 32),
+        }),
+      )
+    }
     // Hash leaf node
-    leaves.push(hasher(message))
-    const msgId = 'messageId' in message ? message.messageId : message.header.messageId
+    leaves.push(hasher(msg))
+    const msgId = msg.header.messageId
     seen.add(msgId)
     // Find the providng leaf index with the matching sequence number
     if (messageIds.includes(msgId)) {
-      messages.push(message)
+      messages.push(msg)
       prove.push(index)
     }
   })
@@ -110,7 +122,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
   const offRampContract = new Contract(
     address,
     getOffRampInterface(version),
-    runner.provider,
+    runner,
   ) as unknown as TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OffRamp][typeof version]>
 
   let sourceChainSelector, onRamp
@@ -322,11 +334,7 @@ export async function* fetchExecutionReceipts(
       }),
     )
     const topics: (null | string[])[] = [Array.from(topic0s)]
-    if (
-      requests.every(
-        ({ lane }) => lane.version === CCIPVersion.V1_2 || lane.version === CCIPVersion.V1_5,
-      )
-    ) {
+    if (requests.every(({ lane }) => lane.version < CCIPVersion.V1_6)) {
       // ExecutionStateChanged v1.2-v1.5 has messageId as indexed topic2
       topics.push(
         null,
@@ -334,7 +342,7 @@ export async function* fetchExecutionReceipts(
           ({ message }) => (message as CCIPMessage<CCIPVersion.V1_2 | CCIPVersion.V1_5>).messageId,
         ),
       )
-    } else if (requests.every(({ lane }) => lane.version === CCIPVersion.V1_6)) {
+    } else if (requests.every(({ lane }) => lane.version >= CCIPVersion.V1_6)) {
       // ExecutionStateChanged v1.6 has sourceChainSelector as indexed topic1, messageId as indexed topic3
       topics.push(
         Array.from(

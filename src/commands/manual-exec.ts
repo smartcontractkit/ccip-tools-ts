@@ -22,7 +22,13 @@ import {
 } from '../lib/index.js'
 import type { Providers } from '../providers.js'
 import { Format } from './types.js'
-import { getWallet, prettyRequest, selectRequest, withDateTimestamp } from './utils.js'
+import {
+  getWallet,
+  prettyCommit,
+  prettyRequest,
+  selectRequest,
+  withDateTimestamp,
+} from './utils.js'
 
 export async function manualExec(
   providers: Providers,
@@ -62,9 +68,31 @@ export async function manualExec(
   const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
 
   const commit = await fetchCommitReport(dest, request, { page: argv.page })
-  const requestsInBatch = await fetchAllMessagesInBatch(source, request.log, commit.report, {
-    page: argv.page,
-  })
+  switch (argv.format) {
+    case Format.log:
+      console.log(
+        'commit =',
+        withDateTimestamp({
+          ...commit,
+          timestamp: (await dest.getBlock(commit.log.blockNumber))!.timestamp,
+        }),
+      )
+      break
+    case Format.pretty:
+      await prettyCommit(dest, commit, request)
+      break
+    case Format.json:
+      console.info(JSON.stringify(commit, bigIntReplacer, 2))
+      break
+  }
+
+  const requestsInBatch = await fetchAllMessagesInBatch(
+    source,
+    request.lane.destChainSelector,
+    request.log,
+    commit.report,
+    { page: argv.page },
+  )
 
   const manualExecReport = calculateManualExecProof(
     requestsInBatch.map(({ message }) => message),
@@ -87,12 +115,7 @@ export async function manualExec(
       source,
       dest,
       request.lane.onRamp,
-      {
-        sender: request.message.sender,
-        receiver: request.message.receiver,
-        data: request.message.data,
-        tokenAmounts: request.message.tokenAmounts,
-      },
+      request.message,
       { offRamp: await offRampContract.getAddress() },
     )
     console.info('Estimated gasLimit override:', estimated)
@@ -112,6 +135,7 @@ export async function manualExec(
     }
   }
 
+  console.debug('manualExecReport:', { ...manualExecReport, root: commit.report.merkleRoot })
   let manualExecTx
   if (request.lane.version === CCIPVersion.V1_2) {
     const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit ?? 0))
@@ -249,9 +273,13 @@ export async function manualExecSenderQueue(
     lastCommitMax = commit.report.maxSeqNr
     startBlock = commit.log.blockNumber + 1
 
-    const batch = await fetchAllMessagesInBatch(source, request.log, commit.report, {
-      page: argv.page,
-    })
+    const batch = await fetchAllMessagesInBatch(
+      source,
+      request.lane.destChainSelector,
+      request.log,
+      commit.report,
+      { page: argv.page },
+    )
     const msgIdsToExec = [request.message.header.messageId]
     batches.push([commit, batch, msgIdsToExec] as const)
   }

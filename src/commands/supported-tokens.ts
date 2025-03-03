@@ -52,8 +52,8 @@ import {
   getTypeAndVersion,
 } from '../lib/index.js'
 import type { Providers } from '../providers.js'
-import { formatArray, formatDuration, yieldResolved } from '../utils.js'
 import { Format } from './types.js'
+import { formatArray, formatDuration, yieldResolved } from './utils.js'
 
 /**
  * Maximum tokens per registry request.
