@@ -182,15 +182,16 @@ async function getLbtcTokenData(
   allLogsInRequest: readonly Pick<Log, 'topics' | 'address' | 'data'>[],
   isTestnet: boolean,
 ): Promise<(string | undefined)[]> {
-  const lbtcDepositHashes = allLogsInRequest
-    .filter(({ topics }) => topics[0] === LBTC_EVENT.topicHash)
-    .map(({ topics }) => topics[3])
-  if (lbtcDepositHashes.length === 0) return tokenAmounts.map(() => undefined)
+  const lbtcDepositHashes = new Set(
+    allLogsInRequest
+      .filter(({ topics }) => topics[0] === LBTC_EVENT.topicHash)
+      .map(({ topics }) => topics[3]),
+  )
   return Promise.all(
     tokenAmounts.map(async ({ extraData }) => {
       // Attestation is required when SourceTokenData.extraData is 32 bytes long ('0x' + 64 hex chars)
       // otherwise attestation is not required
-      if (dataLength(extraData) === 66 && lbtcDepositHashes.includes(extraData)) {
+      if (lbtcDepositHashes.has(extraData)) {
         try {
           return await getLbtcAttestation(extraData, isTestnet)
         } catch (_) {

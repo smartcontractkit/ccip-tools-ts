@@ -64,6 +64,11 @@ describe('calculateManualExecProof', () => {
   const hasher = getLeafHasher(lane)
   const messages: CCIPMessage[] = [
     {
+      header: {
+        messageId: ZeroHash,
+        sequenceNumber: 1n,
+        nonce: 1n,
+      },
       messageId: ZeroHash,
       sourceChainSelector: chainSelectorFromId(11155111),
       sender: '0x0000000000000000000000000000000000000001',
@@ -79,6 +84,11 @@ describe('calculateManualExecProof', () => {
       sourceTokenData: [],
     },
     {
+      header: {
+        messageId: ZeroHash,
+        sequenceNumber: 2n,
+        nonce: 2n,
+      },
       messageId: ZeroHash,
       sourceChainSelector: chainSelectorFromId(11155111),
       sender: '0x0000000000000000000000000000000000000011',
@@ -90,16 +100,26 @@ describe('calculateManualExecProof', () => {
       sequenceNumber: 2n,
       feeToken: '0x0000000000000000000000000000000000000003',
       feeTokenAmount: 300n,
-      tokenAmounts: [{ token: '0x0000000000000000000000000000000000000004', amount: 100n }],
+      tokenAmounts: [
+        {
+          token: '0x0000000000000000000000000000000000000004',
+          destTokenAddress: '0x0200000000000000000000000000000000000004',
+          amount: 100n,
+          sourcePoolAddress: '0x0030000000000000000000000000000000000004',
+          extraData: '0x',
+          destExecData: '0x10',
+          destGasAmount: 16n,
+        } as any,
+      ],
       sourceTokenData: ['0x'],
     },
   ]
-  messages[0].messageId = hasher(messages[0])
-  messages[1].messageId = hasher(messages[1])
+  messages[0].header.messageId = hasher(messages[0])
+  messages[1].header.messageId = hasher(messages[1])
 
   it('should calculate manual execution proof correctly', () => {
     const merkleRoot = '0xd055c6a2bf69febaeae385fc855d732a2ed0d0fd14612d1fd45e0b83059b2876'
-    const messageIds = [messages[0].messageId]
+    const messageIds = [messages[0].header.messageId]
     const result = calculateManualExecProof(messages, lane, messageIds, merkleRoot)
 
     expect(result).toEqual({
@@ -110,7 +130,7 @@ describe('calculateManualExecProof', () => {
   })
 
   it('should calculate messageId as root of batch with single message', () => {
-    const messageIds = [messages[0].messageId]
+    const messageIds = [messages[0].header.messageId]
     const merkleRoot = messageIds[0]
     const batch = messages.slice(0, 1)
 
@@ -132,7 +152,7 @@ describe('calculateManualExecProof', () => {
   })
 
   it('should throw an error if merkle root does not match', () => {
-    const messageIds = [messages[1].messageId]
+    const messageIds = [messages[1].header.messageId]
     const merkleRoot = '0xMerkleRoot'
 
     expect(() => calculateManualExecProof(messages, lane, messageIds, merkleRoot)).toThrow(
@@ -278,10 +298,12 @@ describe('fetchExecutionReceipts', () => {
   )
 
   it('should fetch all execution receipts correctly', async () => {
+    const messageId = hexlify(randomBytes(32))
     const requests = [
       {
         message: {
-          messageId: hexlify(randomBytes(32)),
+          header: { messageId, sequenceNumber: 1n },
+          messageId,
           sequenceNumber: 1n,
           sourceChainSelector: lane.sourceChainSelector,
         },
@@ -314,8 +336,8 @@ describe('fetchExecutionReceipts', () => {
       {
         address: offRamp,
         ...iface.encodeEventLog('ExecutionStateChanged', [
-          requests[0].message.sequenceNumber,
-          requests[0].message.messageId,
+          requests[0].message.header.sequenceNumber,
+          requests[0].message.header.messageId,
           ExecutionState.Success,
           '0x',
         ]),
@@ -354,10 +376,12 @@ describe('fetchExecutionReceipts', () => {
   })
 
   it('should complete backwards when no more requests are left', async () => {
+    const messageId = hexlify(randomBytes(32))
     const requests = [
       {
         message: {
-          messageId: hexlify(randomBytes(32)),
+          header: { messageId, sequenceNumber: 1n },
+          messageId,
           sequenceNumber: 1n,
           sourceChainSelector: lane.sourceChainSelector,
         },

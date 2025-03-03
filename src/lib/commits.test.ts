@@ -19,18 +19,10 @@ const mockedContract = {
 const mockedInterface = {
   parseLog: jest.fn(() => ({
     name: 'ReportAccepted',
-    args: [
-      {
-        toObject: jest.fn(() => ({
-          interval: { min: 1n, max: 2n },
-          merkleRoot: '0x1234',
-        })),
-        priceUpdates: {
-          tokenPriceUpdates: [{ toObject: jest.fn() }],
-          gasPriceUpdates: [{ toObject: jest.fn() }],
-        },
-      },
-    ],
+    args: {
+      interval: { min: 1n, max: 2n },
+      merkleRoot: '0x1234',
+    } as Record<string, any>,
   })),
   getEvent: jest.fn(() => ({
     topicHash: '0xCommitReportAcceptedTopic0',
@@ -52,14 +44,18 @@ describe('fetchCommitReport', () => {
   it('should return first matching commit report', async () => {
     const hints = { startBlock: 12345 }
     const request = {
-      log: { address: '0xOnRamp' },
-      message: { sequenceNumber: 1n, sourceChainSelector: 5009297550715157269n },
-      lane: { version: CCIPVersion.V1_2 } as Lane,
+      message: { header: { sequenceNumber: 1n } },
+      lane: {
+        sourceChainSelector: 5009297550715157269n,
+        onRamp: '0xOnRamp',
+        version: CCIPVersion.V1_2,
+      } as Lane,
     }
     const result = await fetchCommitReport(mockProvider as unknown as Provider, request, hints)
     expect(result).toMatchObject({
       report: {
-        interval: { min: 1n, max: 2n },
+        minSeqNr: 1n,
+        maxSeqNr: 2n,
         merkleRoot: '0x1234',
       },
     })
@@ -71,12 +67,80 @@ describe('fetchCommitReport', () => {
   it('should ignore if CommitStore not for our onRamp', async () => {
     const hints = { startBlock: 12345 }
     const request = {
-      log: { address: '0xAnotherOnRamp' },
-      message: { sequenceNumber: 1n, sourceChainSelector: 5009297550715157269n },
-      lane: { version: CCIPVersion.V1_2 } as Lane,
+      message: { header: { sequenceNumber: 1n } },
+      lane: {
+        sourceChainSelector: 5009297550715157269n,
+        onRamp: '0xAnotherOnRamp',
+        version: CCIPVersion.V1_2,
+      } as Lane,
     }
     await expect(
       fetchCommitReport(mockProvider as unknown as Provider, request, hints),
     ).rejects.toThrow(`Could not find commit after 12345 for sequenceNumber=1`)
+  })
+
+  it('should return v1.6 commit report', async () => {
+    const request = {
+      message: { header: { sequenceNumber: 4n } },
+      lane: {
+        sourceChainSelector: 5009297550715157269n,
+        onRamp: '0xOnRamp',
+        version: CCIPVersion.V1_6,
+      } as Lane,
+    }
+
+    mockedContract.typeAndVersion.mockReturnValue(`${CCIPContractType.OffRamp} ${CCIPVersion.V1_6}`)
+    mockProvider.getLogs.mockReturnValueOnce([{}, {}, {}])
+    mockedInterface.parseLog.mockReturnValueOnce({
+      name: 'CommitReportAccepted',
+      args: [[], []],
+    })
+    mockedInterface.parseLog.mockReturnValueOnce({
+      name: 'CommitReportAccepted',
+      args: [
+        [],
+        [
+          {
+            sourceChainSelector: request.lane.sourceChainSelector,
+            onRampAddress: '0x000000000000000000000000OnRamp',
+            toObject: jest.fn(() => ({
+              minSeqNr: 1n,
+              maxSeqNr: 2n,
+              merkleRoot: '0xdeedbeef',
+            })),
+          },
+        ],
+      ],
+    })
+    mockedInterface.parseLog.mockReturnValueOnce({
+      name: 'CommitReportAccepted',
+      args: [
+        [],
+        [
+          {
+            sourceChainSelector: request.lane.sourceChainSelector,
+            onRampAddress: '0x000000000000000000000000OnRamp',
+            toObject: jest.fn(() => ({
+              minSeqNr: 3n,
+              maxSeqNr: 8n,
+              merkleRoot: '0x1234',
+            })),
+          },
+        ],
+      ],
+    })
+
+    const hints = { startBlock: 12345 }
+    const result = await fetchCommitReport(mockProvider as unknown as Provider, request, hints)
+    expect(result).toMatchObject({
+      report: {
+        minSeqNr: 3n,
+        maxSeqNr: 8n,
+        merkleRoot: '0x1234',
+      },
+    })
+    expect(mockProvider.getLogs).toHaveBeenCalledWith(
+      expect.objectContaining({ fromBlock: 12345, toBlock: 15000 }),
+    )
   })
 })

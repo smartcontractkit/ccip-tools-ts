@@ -120,8 +120,9 @@ function resultsToCommitReport<V extends CCIPVersion = CCIPVersion>(
     const res = [...(result[0] as Result[]), ...(result[1] as Result[])].find(
       (r) =>
         r.sourceChainSelector === lane.sourceChainSelector &&
-        (r.onRampAddress as string).endsWith(lane.onRamp.slice(2).toLowerCase()),
+        (r.onRampAddress as string).toLowerCase().endsWith(lane.onRamp.slice(2).toLowerCase()),
     )
+    console.debug('__resultsToCommitReport', lane, result, res)
     if (!res) return
     return {
       ...res.toObject(),

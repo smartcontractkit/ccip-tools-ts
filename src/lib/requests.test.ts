@@ -8,6 +8,7 @@ import {
 } from 'ethers'
 
 let rampAddress: string
+const topic0 = '0xCcipSendRequestedTopic0'
 
 const mockedProvider = {
   get provider() {
@@ -18,7 +19,7 @@ const mockedProvider = {
     {
       address: rampAddress,
       index: 1,
-      topics: ['0xCcipSendRequestedTopic0'],
+      topics: [topic0],
     },
   ]),
   getTransactionReceipt: jest.fn(),
@@ -38,7 +39,11 @@ function mockedMessage(seqNum: number) {
     sender: '0xSender',
     sequenceNumber: BigInt(seqNum),
     tokenAmounts: [{ toObject: jest.fn(() => ({ token: '0xtoken', amount: 123n })) }],
-    sourceTokenData: { toArray: jest.fn(() => []) },
+    sourceTokenData: {
+      toArray: jest.fn(() => []),
+      '0': '0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000005a51fc6c00000000000000000000000000000000000000000000000000000000000000200000000000000000000000006987756a2fc8e4f3f0a5e026cb200cc2b5221b1f0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000cc44ff0e5a1fc9a6f3224ef0f47f0c03b3f8eaee0000000000000000000000000000000000000000000000000000000000000020d8e78c2c6144d59c308cee0365b6d223a9cea73dd7a46e990505271b4abb47b4',
+    },
+    gasLimit: 100n,
     toObject: jest.fn(() => ({
       sender: '0xSender',
       sequenceNumber: BigInt(seqNum),
@@ -53,7 +58,7 @@ const mockedInterface = {
     const message = mockedMessage(1)
     return {
       name: 'CCIPSendRequested',
-      args: Object.assign([message], { message }) as any[],
+      args: { message } as Record<string, any>,
     }
   }),
   getEvent: jest.fn(() => ({
@@ -225,25 +230,27 @@ describe('fetchCCIPMessageById', () => {
 })
 
 describe('fetchAllMessagesInBatch', () => {
+  const destChainSelector = 10n
   it('should return all messages in a batch', async () => {
     // first getLogs will get the "middle" message
     mockedInterface.parseLog.mockReturnValueOnce({
       name: 'CCIPSendRequested',
-      args: [mockedMessage(9)],
+      args: { message: mockedMessage(9) },
     })
     // then need to go 1 page back
     mockedInterface.parseLog.mockReturnValueOnce({
       name: 'CCIPSendRequested',
-      args: [mockedMessage(8)],
+      args: { message: mockedMessage(8) },
     })
     // and 1 page forward
     mockedInterface.parseLog.mockReturnValueOnce({
       name: 'CCIPSendRequested',
-      args: [mockedMessage(10)],
+      args: { message: mockedMessage(10) },
     })
     const result = await fetchAllMessagesInBatch(
       mockedProvider as unknown as Provider,
-      { address: '0xOnRamp', blockNumber: 12_000 },
+      destChainSelector,
+      { address: '0xOnRamp', blockNumber: 12_000, topics: [topic0] },
       { minSeqNr: 8, maxSeqNr: 10 },
     )
     expect(result).toHaveLength(3)
@@ -271,7 +278,8 @@ describe('fetchAllMessagesInBatch', () => {
     await expect(
       fetchAllMessagesInBatch(
         mockedProvider as unknown as Provider,
-        { address: '0xOnRamp', blockNumber: 1 },
+        destChainSelector,
+        { address: '0xOnRamp', blockNumber: 1, topics: [topic0] },
         { minSeqNr: 1, maxSeqNr: 10 },
       ),
     ).rejects.toThrow('Could not find all expected CCIPSendRequested events')
@@ -299,7 +307,10 @@ describe('fetchRequestsForSender', () => {
       tokenAmounts: [],
       sourceTokenData: [],
     })
-    mockedInterface.parseLog.mockReturnValueOnce({ name: 'CCIPSendRequested', args: [someMessage] })
+    mockedInterface.parseLog.mockReturnValueOnce({
+      name: 'CCIPSendRequested',
+      args: { message: someMessage },
+    })
 
     const res = []
     const generator = fetchRequestsForSender(mockedProvider as unknown as Provider, mockRequest)

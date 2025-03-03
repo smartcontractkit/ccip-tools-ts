@@ -199,7 +199,9 @@ export async function validateContractType(
     throw new Error(`Unknown/not-core contract type: ${typeAndVersion}`)
   }
   if (ctype !== type) {
-    throw new Error(`Not a${type.startsWith('O') ? 'n' : ''} ${type}: "${typeAndVersion}"`)
+    throw new Error(
+      `Not a${type.startsWith('O') ? 'n' : ''} ${type}: ${address} is "${typeAndVersion}"`,
+    )
   }
   const isCcipContractVersion = (v: string): v is CCIPVersion =>
     Object.values(CCIPVersion).includes(v as CCIPVersion)

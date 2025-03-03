@@ -46,11 +46,12 @@ beforeEach(() => {
 describe('estimateExecGasForRequest', () => {
   it('should estimate 1.2 gas correctly', async () => {
     const onRamp = getAddress(hexlify(randomBytes(20)))
+    const destTokenAddress = getAddress(hexlify(randomBytes(20)))
     const request = {
       sender: getAddress(hexlify(randomBytes(20))),
       receiver: '0x00bb',
       data: '0xdaad',
-      tokenAmounts: [{ token: getAddress(hexlify(randomBytes(20))), amount: BigInt(1000) }],
+      tokenAmounts: [{ destTokenAddress, amount: BigInt(1000) }],
     }
     const hints = { offRamp: getAddress(hexlify(randomBytes(20))) }
     const router = getAddress(hexlify(randomBytes(20)))
@@ -77,7 +78,7 @@ describe('estimateExecGasForRequest', () => {
       }),
       'latest',
       expect.objectContaining({
-        '0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC': {
+        [destTokenAddress]: {
           stateDiff: {
             ['0x7ea9ef6961c72f24c672381b2c6f42f72eebb176da225658897880d3448d61f8']: toBeHex(
               1000,
@@ -91,11 +92,12 @@ describe('estimateExecGasForRequest', () => {
 
   it('should estimate 1.5 gas correctly', async () => {
     const onRamp = '0xOnRamp15'
+    const destTokenAddress = getAddress(hexlify(randomBytes(20)))
     const request = {
       sender: getAddress(hexlify(randomBytes(20))),
       receiver: '0x00dd',
       data: '0xdaad',
-      tokenAmounts: [{ token: getAddress(hexlify(randomBytes(20))), amount: BigInt(1000) }],
+      tokenAmounts: [{ destTokenAddress, amount: 1000n }],
     }
     const router = getAddress(hexlify(randomBytes(20)))
     const offRamp = {
@@ -124,7 +126,7 @@ describe('estimateExecGasForRequest', () => {
       }),
       'latest',
       expect.objectContaining({
-        '0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC': {
+        [destTokenAddress]: {
           stateDiff: {
             ['0x4dcf6190957b4c81ae2c63d03e0734b5724c3492a007dbdc3fc548e91171f626']: toBeHex(
               1000,
