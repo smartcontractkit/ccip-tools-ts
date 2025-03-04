@@ -5,7 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.2.0] - 2025-03-04
 - Add `getSupportedTokens` command to discover and validate tokens that can be transferred between chains using CCIP (#11)
+- Add support to CCIP v1.6 EVM lanes (#14)
+  - Add `decodeMessage` public function, to decode a CCIPMessage from anything (byte-arrays, JSON string, decoded objects)
+  - Add `origin` (sender of transaction) field to pretty requests, commits and receipts output.
+- Add Ledger hardware wallet (`--wallet ledger`) support (#14)
 
 ## [0.1.3] - 2024-12-10
 - Allow `parseBytes` command to parse EVMExtraArgs bytearrays, both standalone and in structs (#7)

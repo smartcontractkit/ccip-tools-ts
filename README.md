@@ -47,6 +47,10 @@ variable.
 An encrypted wallet json can also be passed to `--wallet` option. It'll be decrypted with password
 from `USER_KEY_PASSWORD` environment variable, or interactively prompted if not set.
 
+Additionally, `--wallet ledger` (or `--wallet "ledger:<derivationPath>"`) can be used to connect to
+a Ledger device, using the `@ledgerhq/hw-app-eth` library. The derivation path can be specified, or
+defaults to `m/44'/60'/0'/0/0`.
+
 ## Quick command reference:
 
 ### `show` (default command)
