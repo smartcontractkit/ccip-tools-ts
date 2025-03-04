@@ -1,15 +1,24 @@
-import { type Addressable, type Log, EventFragment, keccak256 } from 'ethers'
+import { type Addressable, type Log, EventFragment, Interface, keccak256 } from 'ethers'
 
+import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.js'
 import {
   type CCIPMessage,
   type CCIPRequest,
+  type SourceTokenData,
   defaultAbiCoder,
   parseSourceTokenData,
 } from './types.js'
-import { networkInfo } from './utils.js'
+import { lazyCached, networkInfo } from './utils.js'
+
+const TokenPoolInterface = lazyCached(
+  `Interface BurnMintTokenPool 1.5.1`,
+  () => new Interface(TokenPoolABI),
+)
+const BURNED_EVENT = TokenPoolInterface.getEvent('Burned')!
 
 const USDC_EVENT = EventFragment.from('MessageSent(bytes message)')
 const TRANSFER_EVENT = EventFragment.from('Transfer(address from, address to, uint256 value)')
+
 export const LBTC_EVENT = EventFragment.from(
   'DepositToBridge(address fromAddress, bytes32 toAddress, bytes32 payloadHash, bytes payload)',
 )
@@ -68,29 +77,40 @@ async function getUsdcTokenData(
 ): Promise<(string | undefined)[]> {
   const attestations: (string | undefined)[] = []
 
-  const messageSentPerToken = allLogsInRequest.reduce((acc, log, i, arr) => {
+  const messageSentPerTokenAndPool = allLogsInRequest.reduce((acc, log, i, arr) => {
     // for our MessageSent of interest (USDC-like), the token is the contract
-    // which emitted a (burn) Transfer immediately before this event
-    const logBefore = arr[i - 1]
+    // which emitted a (burn) Transfer immediately before this event, and the pool emitted a Burned
+    // event 2 events after
+    const transferLog = arr[i - 1]
+    const poolLog = arr[i + 2]
     if (
       log.topics[0] !== USDC_EVENT.topicHash ||
-      logBefore?.topics?.[0] !== TRANSFER_EVENT.topicHash
+      transferLog?.topics?.[0] !== TRANSFER_EVENT.topicHash ||
+      poolLog?.topics?.[0] !== BURNED_EVENT.topicHash
     )
       return acc
-    const token = logBefore.address
-    return acc.set(token, [...(acc.get(token) ?? []), log])
+    const token = transferLog.address
+    const pool = poolLog.address
+    acc.set(token, [...(acc.get(token) ?? []), log])
+    acc.set(pool, [...(acc.get(pool) ?? []), log])
+    return acc
   }, new Map<string | Addressable, (typeof allLogsInRequest)[number][]>())
-  for (const [i, { token }] of tokenAmounts.entries()) {
+
+  for (const [i, tokenAmount] of tokenAmounts.entries()) {
+    const tokenOrPool = 'token' in tokenAmount ? tokenAmount.token : tokenAmount.sourcePoolAddress
+
     // what if there are more USDC transfers of this same token after this one?
     const tokenTransfersCountAfter = tokenAmounts.filter(
-      ({ token: t }, j) => t === token && j > i,
+      (ta, j) => ('token' in ta ? ta.token : ta.sourcePoolAddress) === tokenOrPool && j > i,
     ).length
+
     let messageSentLog: (typeof allLogsInRequest)[number] | undefined
-    const messageSents = messageSentPerToken.get(token)
+    const messageSents = messageSentPerTokenAndPool.get(tokenOrPool)
     if (messageSents) {
       // look from the end (near our request), but skip MessageSents for further transfers
       messageSentLog = messageSents[messageSents.length - 1 - tokenTransfersCountAfter]
     }
+
     let tokenData: string | undefined
     if (messageSentLog) {
       try {
@@ -158,22 +178,22 @@ async function getLbtcAttestation(payloadHash: string, isTestnet: boolean): Prom
  * @returns array where each position is either the attestation for that transfer or undefined
  **/
 async function getLbtcTokenData(
-  message: Pick<CCIPRequest['message'], 'sourceTokenData' | 'tokenAmounts' | 'sourceChainSelector'>,
+  tokenAmounts: readonly SourceTokenData[],
   allLogsInRequest: readonly Pick<Log, 'topics' | 'address' | 'data'>[],
   isTestnet: boolean,
 ): Promise<(string | undefined)[]> {
-  const lbtcDepositHashes = allLogsInRequest
-    .filter(({ topics }) => topics[0] === LBTC_EVENT.topicHash)
-    .map(({ topics }) => topics[3])
-  if (lbtcDepositHashes.length === 0) return message.tokenAmounts.map(() => undefined)
+  const lbtcDepositHashes = new Set(
+    allLogsInRequest
+      .filter(({ topics }) => topics[0] === LBTC_EVENT.topicHash)
+      .map(({ topics }) => topics[3]),
+  )
   return Promise.all(
-    message.tokenAmounts.map(async (_, idx) => {
-      const destTokenData = parseSourceTokenData(message.sourceTokenData[idx]).extraData
+    tokenAmounts.map(async ({ extraData }) => {
       // Attestation is required when SourceTokenData.extraData is 32 bytes long ('0x' + 64 hex chars)
       // otherwise attestation is not required
-      if (destTokenData.length === 66 && lbtcDepositHashes.includes(destTokenData)) {
+      if (lbtcDepositHashes.has(extraData)) {
         try {
-          return await getLbtcAttestation(destTokenData, isTestnet)
+          return await getLbtcAttestation(extraData, isTestnet)
         } catch (_) {
           // fallback: undefined
         }
@@ -189,15 +209,12 @@ async function getLbtcTokenData(
  * @returns Array of byte arrays, one per transfer in request
  */
 export async function fetchOffchainTokenData(
-  request: Pick<CCIPRequest, 'tx'> & {
-    message: Pick<
-      CCIPRequest['message'],
-      'sourceTokenData' | 'tokenAmounts' | 'sourceChainSelector'
-    >
+  request: Pick<CCIPRequest, 'tx' | 'lane'> & {
+    message: CCIPMessage
     log: Pick<CCIPRequest['log'], 'topics' | 'index'>
   },
 ): Promise<string[]> {
-  const { isTestnet } = networkInfo(request.message.sourceChainSelector)
+  const { isTestnet } = networkInfo(request.lane.sourceChainSelector)
   // there's a chance there are other CCIPSendRequested in same tx,
   // and they may contain USDC transfers as well, so we select
   // any USDC logs after that and before our CCIPSendRequested
@@ -209,6 +226,12 @@ export async function fetchOffchainTokenData(
     ({ index }) => prevCcipRequestIdx < index && index < request.log.index,
   )
 
+  let tokenAmounts
+  if ('sourceTokenData' in request.message) {
+    tokenAmounts = request.message.sourceTokenData.map(parseSourceTokenData)
+  } else {
+    tokenAmounts = request.message.tokenAmounts as readonly SourceTokenData[]
+  }
   const offchainTokenData: string[] = request.message.tokenAmounts.map(
     () => '0x', // default tokenData
   )
@@ -218,7 +241,7 @@ export async function fetchOffchainTokenData(
     isTestnet,
   )
   //for lbtc we distinguish logs by hash in event, so we can pass all of them
-  const lbtcTokenData = await getLbtcTokenData(request.message, request.tx.logs, isTestnet)
+  const lbtcTokenData = await getLbtcTokenData(tokenAmounts, request.tx.logs, isTestnet)
 
   for (let i = 0; i < offchainTokenData.length; i++) {
     if (usdcTokenData[i]) {

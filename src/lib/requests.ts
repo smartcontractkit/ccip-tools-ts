@@ -1,4 +1,5 @@
 import {
+  type EventFragment,
   type Log,
   type Numeric,
   type Provider,
@@ -6,26 +7,38 @@ import {
   type TransactionReceipt,
   Contract,
   Interface,
+  ZeroAddress,
+  hexlify,
+  isHexString,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
+import yaml from 'yaml'
 
 import {
   type CCIPMessage,
   type CCIPRequest,
-  type CCIPVersion,
   type Lane,
   CCIPContractType,
+  CCIPVersion,
   CCIP_ABIs,
+  defaultAbiCoder,
+  parseExtraArgs,
+  parseSourceTokenData,
 } from './types.js'
-import { blockRangeGenerator, lazyCached, validateTypeAndVersion } from './utils.js'
+import {
+  blockRangeGenerator,
+  chainNameFromSelector,
+  decodeAddress,
+  lazyCached,
+  toObject,
+  validateContractType,
+} from './utils.js'
 
 async function getOnRampInterface(
   source: Provider,
   onRamp: string,
 ): Promise<readonly [Interface, CCIPVersion]> {
-  const [type_, version] = await validateTypeAndVersion(source, onRamp)
-  if (type_ !== CCIPContractType.OnRamp)
-    throw new Error(`Not an OnRamp: ${onRamp} is "${type_} ${version}"`)
+  const [version] = await validateContractType(source, onRamp, CCIPContractType.OnRamp)
   return [
     lazyCached(
       `Interface ${CCIPContractType.OnRamp} ${version}`,
@@ -35,60 +48,128 @@ async function getOnRampInterface(
   ] as const
 }
 
-export async function getOnRampLane(source: Provider, address: string) {
+export async function getOnRampLane(source: Provider, address: string, destChainSelector?: bigint) {
   return lazyCached(`OnRamp ${address} lane`, async () => {
     const [iface, version] = await getOnRampInterface(source, address)
     const onRampContract = new Contract(address, iface, source) as unknown as TypedContract<
       (typeof CCIP_ABIs)[CCIPContractType.OnRamp][typeof version]
     >
-    const staticConfig = await onRampContract.getStaticConfig()
+    const staticConfig = toObject(await onRampContract.getStaticConfig())
+    if (!('destChainSelector' in staticConfig)) {
+      if (!destChainSelector) {
+        throw new Error('destChainSelector is required for v1.6 OnRamp')
+      }
+      const [, , destRouter] = await onRampContract.getDestChainConfig(destChainSelector)
+      if (destRouter === ZeroAddress) {
+        throw new Error(
+          `OnRamp ${address} is not configured for dest ${chainNameFromSelector(destChainSelector)}`,
+        )
+      }
+    } else {
+      destChainSelector = staticConfig.destChainSelector
+    }
     return [
       {
         sourceChainSelector: staticConfig.chainSelector,
-        destChainSelector: staticConfig.destChainSelector,
+        destChainSelector,
         onRamp: address,
         version,
       },
       onRampContract,
-    ] as
-      | readonly [
-          Lane<CCIPVersion.V1_2>,
-          TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OnRamp][CCIPVersion.V1_2]>,
-        ]
-      | readonly [
-          Lane<CCIPVersion.V1_5>,
-          TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OnRamp][CCIPVersion.V1_5]>,
-        ]
-    // {
-    //   [V in CCIPVersion]: readonly [
-    //     Lane<V>,
-    //     TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OnRamp][V]>,
-    //   ]
-    // }[CCIPVersion]
+    ] as {
+      [V in CCIPVersion]: readonly [
+        Lane<V>,
+        TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OnRamp][V]>,
+      ]
+    }[CCIPVersion]
   })
 }
 
-function resultsToMessage(result: Result): CCIPMessage {
-  if (result.length === 1) result = result[0] as Result
-  const message = {
-    ...result.toObject(),
-    tokenAmounts: (result.tokenAmounts as Result).map((tokenAmount) =>
-      (tokenAmount as Result).toObject(),
-    ),
-    sourceTokenData: (result.sourceTokenData as Result).toArray(),
-  } as unknown as CCIPMessage
-  return message
+const ccipMessagesFragments: readonly EventFragment[] = [
+  // v1.2 has similar schema as v1.5
+  lazyCached(
+    `Interface ${CCIPContractType.OnRamp} ${CCIPVersion.V1_5}`,
+    () => new Interface(CCIP_ABIs[CCIPContractType.OnRamp][CCIPVersion.V1_5]),
+  ).getEvent('CCIPSendRequested')!,
+  lazyCached(
+    `Interface ${CCIPContractType.OnRamp} ${CCIPVersion.V1_6}`,
+    () => new Interface(CCIP_ABIs[CCIPContractType.OnRamp][CCIPVersion.V1_6]),
+  ).getEvent('CCIPMessageSent')!,
+]
+const ccipMessagesTopicHashes = new Set(ccipMessagesFragments.map((fragment) => fragment.topicHash))
+
+/**
+ * Decodes hex strings, bytearrays, JSON strings and raw objects as CCIPMessages
+ * Does minimal validation, but converts objects in the format expected by ccip-tools-ts
+ **/
+export function decodeMessage(data: string | Uint8Array | Record<string, unknown>): CCIPMessage {
+  if (data instanceof Uint8Array) data = hexlify(data)
+  if (isHexString(data)) {
+    let result: Result | undefined
+    for (const fragment of ccipMessagesFragments) {
+      try {
+        result = defaultAbiCoder.decode(
+          fragment.inputs.filter((p) => !p.indexed),
+          data,
+        )[0] as Result
+        if (!isHexString(result?.sender)) throw new Error('next')
+      } catch (_) {
+        // pass
+      }
+    }
+    if (!isHexString(result?.sender)) throw new Error('could not decode CCIPMessage')
+    data = resultsToMessage(result)
+  }
+  if (typeof data === 'string' && data.startsWith('{')) {
+    data = yaml.parse(data, { intAsBigInt: true }) as Record<string, unknown>
+  }
+  if (typeof data !== 'object' || typeof data?.sender !== 'string' || !data.sender.startsWith('0x'))
+    throw new Error('unknown message format: ' + JSON.stringify(data))
+
+  // conversions to make any message version be compatible with latest v1.6
+  data.tokenAmounts = (data.tokenAmounts as Record<string, string | bigint>[]).map(
+    (tokenAmount, i) => {
+      if (data.sourceTokenData) {
+        tokenAmount = {
+          ...parseSourceTokenData((data.sourceTokenData as string[])[i]),
+          ...tokenAmount,
+        }
+      }
+      if (tokenAmount.destExecData) {
+        tokenAmount.destGasAmount = defaultAbiCoder.decode(
+          ['uint32'],
+          tokenAmount.destExecData as string,
+        )[0] as bigint
+      }
+      tokenAmount.destTokenAddress = decodeAddress(tokenAmount.destTokenAddress as string)
+      return tokenAmount
+    },
+  )
+  data.receiver = decodeAddress(data.receiver as string)
+  if (!data.header) {
+    data.header = {
+      messageId: data.messageId as string,
+      sequenceNumber: data.sequenceNumber as bigint,
+      nonce: data.nonce as bigint,
+    }
+  }
+  if (data.gasLimit == null) {
+    data.gasLimit = parseExtraArgs(data.extraArgs as string)!.gasLimit!
+  }
+  return data as CCIPMessage
 }
 
-const ccipRequestsTopicHashes = new Set(
-  Object.entries(CCIP_ABIs[CCIPContractType.OnRamp]).map(
-    ([version, abi]) =>
-      lazyCached(
-        `Interface ${CCIPContractType.OnRamp} ${version}`,
-        () => new Interface(abi),
-      ).getEvent('CCIPSendRequested')!.topicHash,
-  ),
-)
+function resultsToMessage(result: Result): Record<string, unknown> {
+  if (result.message) result = result.message as Result
+  return {
+    ...result.toObject(),
+    tokenAmounts: (result.tokenAmounts as Result[]).map((ta) => ta.toObject()),
+    ...(result.sourceTokenData
+      ? { sourceTokenData: (result.sourceTokenData as Result).toArray() }
+      : {}),
+    ...(result.header ? { header: (result.header as Result).toObject() } : {}),
+  } as unknown as CCIPMessage
+}
 
 /**
  * Fetch all CCIP messages in a transaction
@@ -102,18 +183,24 @@ export async function fetchCCIPMessagesInTx(tx: TransactionReceipt): Promise<CCI
 
   const requests: CCIPRequest[] = []
   for (const log of tx.logs) {
-    if (!ccipRequestsTopicHashes.has(log.topics[0])) continue
-    let onRampInterface: Interface
+    if (!ccipMessagesTopicHashes.has(log.topics[0])) continue
+    let message: CCIPMessage, lane
     try {
-      ;[onRampInterface] = await getOnRampInterface(source, log.address)
+      message = decodeMessage(log.data)
+      if ('destChainSelector' in message.header) {
+        lane = {
+          sourceChainSelector: message.header.sourceChainSelector,
+          destChainSelector: message.header.destChainSelector,
+          onRamp: log.address,
+          version: CCIPVersion.V1_6,
+        }
+      } else {
+        ;[lane] = await getOnRampLane(source, log.address)
+      }
     } catch (_) {
       continue
     }
-    const decoded = onRampInterface.parseLog(log)
-    if (!decoded || decoded.name != 'CCIPSendRequested') continue
-    const message = resultsToMessage(decoded.args)
-    const [lane] = await getOnRampLane(source, log.address)
-    requests.push({ message, log, tx, timestamp, lane })
+    requests.push({ lane, message, log, tx, timestamp })
   }
   if (!requests.length) {
     throw new Error(`Could not find any CCIPSendRequested message in tx: ${txHash}`)
@@ -161,19 +248,17 @@ export async function fetchCCIPMessageById(
   )) {
     const logs = await source.getLogs({
       ...blockRange,
-      topics: [Array.from(ccipRequestsTopicHashes)],
+      topics: [Array.from(ccipMessagesTopicHashes)],
     })
     console.debug('fetchCCIPMessageById: found', logs.length, 'logs in', blockRange)
     for (const log of logs) {
-      let onRampInterface: Interface
+      let message
       try {
-        ;[onRampInterface] = await getOnRampInterface(source, log.address)
+        message = decodeMessage(log.data)
       } catch (_) {
         continue
       }
-      const decoded = onRampInterface.parseLog(log)
-      if (!decoded || decoded.name != 'CCIPSendRequested') continue
-      if ((decoded.args.message as CCIPMessage).messageId !== messageId) continue
+      if (message.header.messageId !== messageId) continue
       return fetchCCIPMessageInLog(
         (await source.getTransactionReceipt(log.transactionHash))!,
         log.index,
@@ -190,38 +275,43 @@ const MAX_PAGES = 10
 // Helper function to find the sequence number from CCIPSendRequested event logs
 export async function fetchAllMessagesInBatch(
   source: Provider,
-  { address: onRamp, blockNumber: sendBlock }: Pick<Log, 'address' | 'blockNumber'>,
-  interval: { min: Numeric; max: Numeric },
+  destChainSelector: bigint,
+  {
+    address: onRamp,
+    blockNumber: sendBlock,
+    topics: [topic0],
+  }: Pick<Log, 'address' | 'blockNumber' | 'topics'>,
+  { minSeqNr, maxSeqNr }: { minSeqNr: Numeric; maxSeqNr: Numeric },
   {
     page: eventsBatchSize = BLOCK_LOG_WINDOW_SIZE,
     maxPageCount = MAX_PAGES,
   }: { page?: number; maxPageCount?: number } = {},
 ): Promise<Omit<CCIPRequest, 'tx' | 'timestamp'>[]> {
-  const min = Number(interval.min)
-  const max = Number(interval.max)
+  const min = Number(minSeqNr)
+  const max = Number(maxSeqNr)
   const latestBlock: number = await source.getBlockNumber()
 
-  const [onRampInterface] = await getOnRampInterface(source, onRamp)
-  const [lane] = await getOnRampLane(source, onRamp)
+  const [lane] = await getOnRampLane(source, onRamp, destChainSelector)
   const getDecodedEvents = async (fromBlock: number, toBlock: number) => {
     const logs = await source.getLogs({
       address: onRamp,
-      topics: [onRampInterface.getEvent('CCIPSendRequested')!.topicHash],
+      topics: [topic0],
       fromBlock,
       toBlock,
     })
     console.debug('fetchAllMessagesInBatch: found', logs.length, 'logs in', { fromBlock, toBlock })
     const result: Omit<CCIPRequest, 'tx' | 'timestamp'>[] = []
     for (const log of logs) {
-      const decoded = onRampInterface.parseLog(log)
-      if (!decoded) continue
-
-      const message = resultsToMessage(decoded.args)
-      const seqNum = message.sequenceNumber
-      if (min > seqNum || seqNum > max) {
+      let message
+      try {
+        message = decodeMessage(log.data)
+      } catch (_) {
         continue
       }
-      result.push({ message, log, lane })
+      if (min > message.header.sequenceNumber || message.header.sequenceNumber > max) {
+        continue
+      }
+      result.push({ lane, message, log })
     }
     return result
   }
@@ -236,7 +326,7 @@ export async function fetchAllMessagesInBatch(
     eventsBatchSize,
   )) {
     if (
-      events[0].message.sequenceNumber <= min ||
+      events[0].message.header.sequenceNumber <= min ||
       (initToBlock - toBlock) / eventsBatchSize > maxPageCount
     )
       break
@@ -250,7 +340,7 @@ export async function fetchAllMessagesInBatch(
     eventsBatchSize,
   )) {
     if (
-      events[events.length - 1].message.sequenceNumber >= max ||
+      events[events.length - 1].message.header.sequenceNumber >= max ||
       (fromBlock - initToBlock) / eventsBatchSize > maxPageCount
     )
       break
@@ -271,8 +361,6 @@ export async function* fetchRequestsForSender(
     message: Pick<CCIPRequest['message'], 'sender'>
   },
 ): AsyncGenerator<Omit<CCIPRequest, 'tx' | 'timestamp'>, void, unknown> {
-  const [onRampInterface] = await getOnRampInterface(source, firstRequest.log.address)
-
   for (const blockRange of blockRangeGenerator({
     endBlock: await source.getBlockNumber(),
     startBlock: firstRequest.log.blockNumber,
@@ -283,14 +371,16 @@ export async function* fetchRequestsForSender(
       address: firstRequest.log.address,
     })
 
+    console.debug('fetchRequestsForSender: found', logs.length, 'logs in', blockRange)
     for (const log of logs) {
-      const decoded = onRampInterface.parseLog(log)
-      if (!decoded) continue
-
-      const message = resultsToMessage(decoded.args)
+      let message
+      try {
+        message = decodeMessage(log.data)
+      } catch (_) {
+        continue
+      }
       if (message.sender !== firstRequest.message.sender) continue
-
-      yield { message, log, lane: firstRequest.lane }
+      yield { lane: firstRequest.lane, message, log }
     }
   }
 }

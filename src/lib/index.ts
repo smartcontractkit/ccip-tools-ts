@@ -4,6 +4,7 @@ export { calculateManualExecProof, discoverOffRamp, fetchExecutionReceipts } fro
 export { estimateExecGasForRequest } from './gas.js'
 export { fetchOffchainTokenData } from './offchain.js'
 export {
+  decodeMessage,
   fetchAllMessagesInBatch,
   fetchCCIPMessageById,
   fetchCCIPMessageInLog,
@@ -13,6 +14,7 @@ export {
 } from './requests.js'
 export {
   type CCIPCommit,
+  type CCIPContract,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
@@ -37,11 +39,13 @@ export {
   chainNameFromId,
   chainNameFromSelector,
   chainSelectorFromId,
+  decodeAddress,
   getContractProperties,
   getProviderNetwork,
   getSomeBlockNumberBefore,
   getTypeAndVersion,
   lazyCached,
   networkInfo,
-  validateTypeAndVersion,
+  toObject,
+  validateContractType,
 } from './utils.js'

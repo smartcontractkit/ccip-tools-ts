@@ -1,11 +1,11 @@
 // For reference implementation, see https://github.com/smartcontractkit/ccip/blob/ccip-develop/core/services/ocr2/plugins/ccip/hasher/leaf_hasher.go
 import { concat, hexlify, id, keccak256, toBeHex, zeroPadValue } from 'ethers'
 
-import { type CCIPMessage, type Lane, defaultAbiCoder } from '../types.js'
+import { type CCIPMessage, type Lane, CCIPVersion, defaultAbiCoder } from '../types.js'
 
 export const ZERO_HASH = hexlify(new Uint8Array(32).fill(0xff))
 
-export type LeafHasher = (message: CCIPMessage) => string
+export type LeafHasher<V extends CCIPVersion = CCIPVersion> = (message: CCIPMessage<V>) => string
 const INTERNAL_DOMAIN_SEPARATOR = toBeHex(1, 32)
 
 /**
@@ -24,12 +24,11 @@ export function hashInternal(a: string, b: string): string {
 
 const LEAF_DOMAIN_SEPARATOR = '0x00'
 const METADATA_PREFIX_1_2 = id('EVM2EVMMessageHashV2')
-
-export function getLeafHasher({
-  sourceChainSelector,
-  destChainSelector,
-  onRamp,
-}: Omit<Lane, 'version'>): LeafHasher {
+function getV12LeafHasher(
+  sourceChainSelector: bigint,
+  destChainSelector: bigint,
+  onRamp: string,
+): LeafHasher<CCIPVersion.V1_2 | CCIPVersion.V1_5> {
   const metadataHash = keccak256(
     concat([
       METADATA_PREFIX_1_2,
@@ -39,16 +38,13 @@ export function getLeafHasher({
     ]),
   )
 
-  const leafHasher = (message: CCIPMessage): string => {
+  return (message: CCIPMessage<CCIPVersion.V1_2 | CCIPVersion.V1_5>): string => {
     const encodedTokens = defaultAbiCoder.encode(
       ['tuple(address token, uint256 amount)[]'],
       [message.tokenAmounts],
     )
 
-    const encodedSourceTokenData = defaultAbiCoder.encode(
-      ['bytes[]'],
-      [message.sourceTokenData ?? []],
-    )
+    const encodedSourceTokenData = defaultAbiCoder.encode(['bytes[]'], [message.sourceTokenData])
 
     const fixedSizeValues = defaultAbiCoder.encode(
       [
@@ -96,5 +92,90 @@ export function getLeafHasher({
 
     return keccak256(packedValues)
   }
-  return leafHasher
+}
+
+const ANY_2_EVM_MESSAGE_HASH = id('Any2EVMMessageHashV1')
+function getV16LeafHasher(
+  sourceChainSelector: bigint,
+  destChainSelector: bigint,
+  onRamp: string,
+): LeafHasher<CCIPVersion.V1_6> {
+  const metadataInput = concat([
+    ANY_2_EVM_MESSAGE_HASH,
+    toBeHex(sourceChainSelector, 32),
+    toBeHex(destChainSelector, 32),
+    keccak256(zeroPadValue(onRamp, 32)),
+  ])
+
+  return (message: CCIPMessage<CCIPVersion.V1_6>): string => {
+    const encodedTokens = defaultAbiCoder.encode(
+      [
+        'tuple(bytes sourcePoolAddress, address destTokenAddress, uint32 destGasAmount, bytes extraData, uint256 amount)[]',
+      ],
+      [message.tokenAmounts],
+    )
+
+    const fixedSizeValues = defaultAbiCoder.encode(
+      [
+        'bytes32 messageId',
+        'address receiver',
+        'uint64 sequenceNumber',
+        'uint256 gasLimit',
+        'uint64 nonce',
+      ],
+      [
+        message.header.messageId,
+        message.receiver,
+        message.header.sequenceNumber,
+        message.gasLimit,
+        message.header.nonce,
+      ],
+    )
+
+    const packedValues = defaultAbiCoder.encode(
+      [
+        'bytes32 leafDomainSeparator',
+        'bytes32 metadataHash',
+        'bytes32 fixedSizeValuesHash',
+        'bytes32 sender',
+        'bytes32 dataHash',
+        'bytes32 tokenAmountsHash',
+      ],
+      [
+        zeroPadValue(LEAF_DOMAIN_SEPARATOR, 32),
+        keccak256(metadataInput),
+        keccak256(fixedSizeValues),
+        keccak256(message.sender),
+        keccak256(message.data),
+        keccak256(encodedTokens),
+      ],
+    )
+
+    console.debug('v1.6 leafHasher:', {
+      messageId: message.header.messageId,
+      encodedTokens,
+      fixedSizeValues,
+      packedValues,
+      metadataInput,
+    })
+
+    return keccak256(packedValues)
+  }
+}
+
+export function getLeafHasher<V extends CCIPVersion = CCIPVersion>({
+  sourceChainSelector,
+  destChainSelector,
+  onRamp,
+  version,
+}: Lane<V>): LeafHasher {
+  switch (version) {
+    case CCIPVersion.V1_2:
+    case CCIPVersion.V1_5:
+      return getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp)
+    case CCIPVersion.V1_6:
+      return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp)
+    default:
+      throw new Error(`Unsupported CCIP version: ${version}`)
+  }
 }
