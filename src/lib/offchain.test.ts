@@ -2,7 +2,7 @@ import { Interface, getAddress, hexlify, id, keccak256, randomBytes } from 'ethe
 
 import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.js'
 import { LBTC_EVENT, fetchOffchainTokenData } from './offchain.js'
-import { type CCIPRequest, defaultAbiCoder, encodeSourceTokenData } from './types.js'
+import { type CCIPRequest, defaultAbiCoder } from './types.js'
 import { lazyCached } from './utils.js'
 
 const origFetch = global.fetch
@@ -155,7 +155,6 @@ describe('fetchOffchainTokenData', () => {
 })
 
 describe('fetchLbtcOffchainTokenData', () => {
-  const lbtcToken = getAddress(hexlify(randomBytes(20)))
   const approvedPayloadHash1 = '0x111114eb42fd24b59b6edf6c5aa6b9357be7dcaf91f1d62da303f1fad100762e'
   const approvedPayloadAttestation1 = hexlify(randomBytes(20))
   const approvedPayloadHash2 = '0x222224eb42fd24b59b6edf6c5aa6b9357be7dcaf91f1d62da303f1fad100762e'

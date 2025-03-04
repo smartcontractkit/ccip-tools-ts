@@ -1,4 +1,4 @@
-import { type Addressable, type Log, EventFragment, Interface, dataLength, keccak256 } from 'ethers'
+import { type Addressable, type Log, EventFragment, Interface, keccak256 } from 'ethers'
 
 import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.js'
 import {
