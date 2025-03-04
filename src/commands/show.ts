@@ -88,7 +88,11 @@ export async function showRequests(
         break
       case Format.pretty:
         if (!found) console.info('Receipts (dest):')
-        prettyReceipt(receipt, request)
+        prettyReceipt(
+          receipt,
+          request,
+          (await dest.getTransaction(receipt.log.transactionHash))?.from,
+        )
         break
       case Format.json:
         console.info(JSON.stringify(receipt, bigIntReplacer, 2))

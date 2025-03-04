@@ -219,6 +219,7 @@ export async function prettyRequest(source: Provider, request: CCIPRequest) {
   const nonce = Number(request.message.header.nonce)
   console.table({
     messageId: request.message.header.messageId,
+    ...(request.tx.from ? { origin: request.tx.from } : {}),
     sender: request.message.sender,
     receiver: request.message.receiver,
     sequenceNumber: Number(request.message.header.sequenceNumber),
@@ -256,6 +257,7 @@ export async function prettyCommit(
     merkleRoot: commit.report.merkleRoot,
     min: Number(commit.report.minSeqNr),
     max: Number(commit.report.maxSeqNr),
+    origin: (await dest.getTransaction(commit.log.transactionHash))?.from,
     contract: commit.log.address,
     transactionHash: commit.log.transactionHash,
     blockNumber: commit.log.blockNumber,
@@ -263,11 +265,16 @@ export async function prettyCommit(
   })
 }
 
-export function prettyReceipt(receipt: CCIPExecution, request: { timestamp: number }) {
+export function prettyReceipt(
+  receipt: CCIPExecution,
+  request: { timestamp: number },
+  origin?: string,
+) {
   console.table({
     state: receipt.receipt.state === ExecutionState.Success ? '✅ success' : '❌ failed',
     ...formatData('returnData', receipt.receipt.returnData, true),
     ...(receipt.receipt.gasUsed ? { gasUsed: Number(receipt.receipt.gasUsed) } : {}),
+    ...(origin ? { origin } : {}),
     offRamp: receipt.log.address,
     transactionHash: receipt.log.transactionHash,
     logIndex: receipt.log.index,
