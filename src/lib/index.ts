@@ -4,6 +4,7 @@ export { calculateManualExecProof, discoverOffRamp, fetchExecutionReceipts } fro
 export { estimateExecGasForRequest } from './gas.js'
 export { fetchOffchainTokenData } from './offchain.js'
 export {
+  decodeMessage,
   fetchAllMessagesInBatch,
   fetchCCIPMessageById,
   fetchCCIPMessageInLog,
