@@ -41,15 +41,15 @@
     "ts-jest": "29.2.6",
     "tsx": "4.19.3",
     "typescript": "5.7.3",
-    "typescript-eslint": "8.25.0",
-    "yaml": "2.7.0"
+    "typescript-eslint": "8.25.0"
   },
   "dependencies": {
     "@inquirer/prompts": "7.3.2",
     "abitype": "1.0.8",
     "ethers": "6.13.5",
     "tslib": "2.8.1",
-    "yargs": "17.7.2"
+    "yargs": "17.7.2",
+    "yaml": "2.7.0"
   },
   "prettier": {
     "trailingComma": "all",
