@@ -1,4 +1,12 @@
-import { type BaseContract, type Provider, Contract } from 'ethers'
+import {
+  type BaseContract,
+  type Provider,
+  Contract,
+  Result,
+  dataLength,
+  getAddress,
+  isHexString,
+} from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import SELECTORS from './selectors.js'
@@ -101,7 +109,7 @@ export type KeysMatching<T, V> = {
 export type AwaitedReturn<T> = T extends (...args: any) => Promise<infer R> ? R : never
 
 export async function getContractProperties<
-  C extends Omit<BaseContract, 'getFunction' | 'getEvent'>,
+  C extends Pick<BaseContract, 'getAddress' | 'runner'>,
   T extends readonly (string & KeysMatching<C, () => Promise<unknown>>)[],
 >(contract: C, ...properties: T): Promise<{ [K in keyof T]: AwaitedReturn<C[T[K]]> }> {
   const provider = contract.runner!.provider!
@@ -120,7 +128,10 @@ export async function getTypeAndVersion(
   address: string,
 ): Promise<[type_: string, version: string, typeAndVersion: string, suffix?: string]>
 export async function getTypeAndVersion(
-  contract: Pick<TypedContract<typeof VersionedContractABI>, 'typeAndVersion'>,
+  contract: Pick<
+    TypedContract<typeof VersionedContractABI>,
+    'typeAndVersion' | 'getAddress' | 'runner'
+  >,
 ): Promise<[type_: string, version: string, typeAndVersion: string, suffix?: string]>
 /**
  * Fetches cached typeAndVersion() of a contract
@@ -130,23 +141,31 @@ export async function getTypeAndVersion(
  * @returns [type, version, typeAndVersion, suffix?] tuple
  **/
 export async function getTypeAndVersion(
-  providerOrContract: Provider | Pick<TypedContract<typeof VersionedContractABI>, 'typeAndVersion'>,
+  providerOrContract:
+    | Provider
+    | Pick<TypedContract<typeof VersionedContractABI>, 'typeAndVersion' | 'getAddress' | 'runner'>,
   address?: string,
 ): Promise<[type_: string, version: string, typeAndVersion: string, suffix?: string]> {
   let provider: Provider
+  let versionedContract: Pick<
+    TypedContract<typeof VersionedContractABI>,
+    'typeAndVersion' | 'getAddress' | 'runner'
+  >
   if (address) {
     provider = providerOrContract as Provider
   } else {
     provider = (providerOrContract as TypedContract<typeof VersionedContractABI>).runner!.provider!
     address = await (providerOrContract as TypedContract<typeof VersionedContractABI>).getAddress()
+    versionedContract = providerOrContract as TypedContract<typeof VersionedContractABI>
   }
   const { name } = await getProviderNetwork(provider)
   return lazyCached(`${name}@${address}.parsedTypeAndVersion`, async () => {
-    const versionedContract = new Contract(
-      address,
-      VersionedContractABI,
-      provider,
-    ) as unknown as TypedContract<typeof VersionedContractABI>
+    if (!versionedContract)
+      versionedContract = new Contract(
+        address,
+        VersionedContractABI,
+        provider,
+      ) as unknown as TypedContract<typeof VersionedContractABI>
     let typeAndVersion: string
     try {
       ;[typeAndVersion] = await getContractProperties(versionedContract, 'typeAndVersion')
@@ -169,21 +188,27 @@ export async function getTypeAndVersion(
  * Fetches and validates typeAndVersion for known/core contract types (OnRamp, OffRamp, etc)
  * and supported CCIP versions
  **/
-export async function validateTypeAndVersion(
+export async function validateContractType(
   provider: Provider,
   address: string,
-): Promise<readonly [type: CCIPContractType, version: CCIPVersion, typeAndVersion: string]> {
+  type: CCIPContractType,
+): Promise<readonly [version: CCIPVersion, typeAndVersion: string]> {
   const [type_, version, typeAndVersion] = await getTypeAndVersion(provider, address)
   const ctype = Object.values(CCIPContractType).find((t) => type_.endsWith(t))
   if (!ctype) {
     throw new Error(`Unknown/not-core contract type: ${typeAndVersion}`)
+  }
+  if (ctype !== type) {
+    throw new Error(
+      `Not a${type.startsWith('O') ? 'n' : ''} ${type}: ${address} is "${typeAndVersion}"`,
+    )
   }
   const isCcipContractVersion = (v: string): v is CCIPVersion =>
     Object.values(CCIPVersion).includes(v as CCIPVersion)
   if (!isCcipContractVersion(version)) {
     throw new Error(`Unsupported contract version: "${typeAndVersion}"`)
   }
-  return [ctype, version, typeAndVersion]
+  return [version, typeAndVersion]
 }
 
 export function chainNameFromId(id: number): string {
@@ -286,4 +311,23 @@ export function bigIntReviver(_key: string, value: unknown): unknown {
     return BigInt(value)
   }
   return value
+}
+
+/**
+ * When decoding structs, we often get Results which don't support `<string> in` operator, so we need to convert them to proper objects first
+ **/
+export function toObject<T>(obj: T | Result): T {
+  if (obj instanceof Result) return obj.toObject() as T
+  return obj
+}
+
+/**
+ * Decode address from a 32-byte hex string
+ **/
+export function decodeAddress(address: string): string {
+  return isHexString(address) &&
+    dataLength(address) === 32 &&
+    address.startsWith('0x000000000000000000000000')
+    ? getAddress('0x' + address.slice(-40))
+    : address
 }

@@ -5,7 +5,6 @@ import { ZeroAddress, getAddress, isHexString } from 'ethers'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
-import { showSupportedTokens } from './commands/index.js'
 import {
   Format,
   estimateGas,
@@ -15,14 +14,15 @@ import {
   sendMessage,
   showLaneConfigs,
   showRequests,
-} from './commands.js'
+  showSupportedTokens,
+} from './commands/index.js'
+import { logParsedError } from './commands/utils.js'
 import { Providers } from './providers.js'
-import { logParsedError } from './utils.js'
 
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.1.3-8a2ed78'
+const VERSION = '0.2.0-1149e42'
 // generate:end
 
 async function main() {
@@ -127,7 +127,7 @@ async function main() {
             wallet: {
               type: 'string',
               describe:
-                'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar',
+                'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar; also supports `ledger[:<derivationPath>]` hardwallet',
             },
             'sender-queue': {
               type: 'boolean',
@@ -329,7 +329,7 @@ async function main() {
       },
     )
     .command(
-      'lane <source> <onramp_or_router> [dest]',
+      'lane <source> <onramp_or_router> <dest>',
       'show CCIP ramps info and configs',
       (yargs) =>
         yargs
@@ -346,6 +346,7 @@ async function main() {
           })
           .positional('dest', {
             type: 'string',
+            demandOption: true,
             describe: 'Dest chain name or id (implies previous arg is router)',
           }),
       async (argv) => {

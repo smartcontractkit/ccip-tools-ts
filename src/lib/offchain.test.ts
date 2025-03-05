@@ -1,7 +1,9 @@
-import { getAddress, hexlify, id, keccak256, randomBytes } from 'ethers'
+import { Interface, getAddress, hexlify, id, keccak256, randomBytes } from 'ethers'
 
+import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.js'
 import { LBTC_EVENT, fetchOffchainTokenData } from './offchain.js'
-import { type CCIPRequest, defaultAbiCoder, encodeSourceTokenData } from './types.js'
+import { type CCIPRequest, defaultAbiCoder } from './types.js'
+import { lazyCached } from './utils.js'
 
 const origFetch = global.fetch
 
@@ -9,10 +11,17 @@ beforeEach(() => {
   jest.clearAllMocks()
 })
 
+const TokenPoolInterface = lazyCached(
+  `Interface BurnMintTokenPool 1.5.1`,
+  () => new Interface(TokenPoolABI),
+)
+const BURNED_EVENT = TokenPoolInterface.getEvent('Burned')!
+
 describe('fetchOffchainTokenData', () => {
   const MESSAGE_SENT_TOPIC0 = id('MessageSent(bytes)')
   const TRANSFER_TOPIC0 = id('Transfer(address,address,uint256)')
   const usdcToken = getAddress(hexlify(randomBytes(20)))
+  const sourcePoolAddress = getAddress(hexlify(randomBytes(20)))
 
   const mockedFetchJson = jest.fn<any, [], any>(() => ({
     status: 'complete',
@@ -28,11 +37,13 @@ describe('fetchOffchainTokenData', () => {
 
   it('should return offchain token data', async () => {
     const mockRequest = {
-      message: {
+      lane: {
         sourceChainSelector: 16015286601757825753n,
-        tokenAmounts: [{ token: usdcToken, amount: 100n }],
       },
-      log: { topics: ['0x123'], index: 7 },
+      message: {
+        tokenAmounts: [{ token: usdcToken, sourcePoolAddress, amount: 100n }],
+      },
+      log: { topics: ['0x123'], index: 9 },
       tx: {
         logs: [
           { topics: [TRANSFER_TOPIC0], index: 5, address: usdcToken },
@@ -40,6 +51,12 @@ describe('fetchOffchainTokenData', () => {
             topics: [MESSAGE_SENT_TOPIC0],
             index: 6,
             data: defaultAbiCoder.encode(['bytes'], ['0x1337']),
+          },
+          { topics: [], index: 7 },
+          {
+            topics: [BURNED_EVENT.topicHash],
+            address: sourcePoolAddress,
+            index: 8,
           },
         ],
       },
@@ -51,13 +68,12 @@ describe('fetchOffchainTokenData', () => {
   })
 
   it('should return default token data if no USDC logs found', async () => {
-    const usdcToken = getAddress(hexlify(randomBytes(20)))
     const mockRequest = {
+      lane: { sourceChainSelector: 16015286601757825753n },
       message: {
-        sourceChainSelector: 16015286601757825753n,
-        tokenAmounts: [{ token: usdcToken, amount: 100n }],
+        tokenAmounts: [{ token: usdcToken, sourcePoolAddress, amount: 100n }],
       },
-      log: { topics: ['0x123'], index: 7 },
+      log: { topics: ['0x123'], index: 9 },
       tx: {
         logs: [
           { topics: [TRANSFER_TOPIC0], index: 5, address: usdcToken },
@@ -65,6 +81,12 @@ describe('fetchOffchainTokenData', () => {
             topics: [MESSAGE_SENT_TOPIC0],
             index: 6,
             data: defaultAbiCoder.encode(['bytes'], ['0x1337']),
+          },
+          { topics: [], index: 7 },
+          {
+            topics: [BURNED_EVENT.topicHash],
+            address: sourcePoolAddress,
+            index: 8,
           },
         ],
       },
@@ -79,11 +101,11 @@ describe('fetchOffchainTokenData', () => {
   it('should return correct USDC attestations for multiple transfers', async () => {
     const otherToken = getAddress(hexlify(randomBytes(20)))
     const mockRequest = {
+      lane: { sourceChainSelector: 16015286601757825753n },
       message: {
-        sourceChainSelector: 16015286601757825753n,
-        tokenAmounts: [{ token: usdcToken, amount: 100n }],
+        tokenAmounts: [{ token: usdcToken, sourcePoolAddress, amount: 100n }],
       },
-      log: { topics: ['0x123'], index: 7 },
+      log: { topics: ['0x123'], index: 11 },
       tx: {
         logs: [
           { topics: [TRANSFER_TOPIC0], index: 1, address: usdcToken },
@@ -101,12 +123,24 @@ describe('fetchOffchainTokenData', () => {
             index: 4,
             data: defaultAbiCoder.encode(['bytes'], ['0xbeef02']),
           },
-          // another "USDC-like"" transfer in request, unrelated token
-          { topics: [TRANSFER_TOPIC0], index: 5, address: otherToken },
+          { topics: [], index: 5 },
+          {
+            topics: [BURNED_EVENT.topicHash],
+            address: sourcePoolAddress,
+            index: 6,
+          },
+          // another "USDC-like" transfer in request, unrelated token
+          { topics: [TRANSFER_TOPIC0], index: 7, address: otherToken },
           {
             topics: [MESSAGE_SENT_TOPIC0],
-            index: 6,
+            index: 8,
             data: defaultAbiCoder.encode(['bytes'], ['0xbeef03']),
+          },
+          { topics: [], index: 9 },
+          {
+            topics: [BURNED_EVENT.topicHash],
+            address: getAddress(hexlify(randomBytes(20))),
+            index: 10,
           },
         ],
       },
@@ -121,7 +155,6 @@ describe('fetchOffchainTokenData', () => {
 })
 
 describe('fetchLbtcOffchainTokenData', () => {
-  const lbtcToken = getAddress(hexlify(randomBytes(20)))
   const approvedPayloadHash1 = '0x111114eb42fd24b59b6edf6c5aa6b9357be7dcaf91f1d62da303f1fad100762e'
   const approvedPayloadAttestation1 = hexlify(randomBytes(20))
   const approvedPayloadHash2 = '0x222224eb42fd24b59b6edf6c5aa6b9357be7dcaf91f1d62da303f1fad100762e'
@@ -153,17 +186,9 @@ describe('fetchLbtcOffchainTokenData', () => {
 
   it('should skip if has no LBTC Deposit Event', async () => {
     const mockRequest = {
+      lane: { sourceChainSelector: 16015286601757825753n },
       message: {
-        sourceChainSelector: 16015286601757825753n,
-        tokenAmounts: [{ token: lbtcToken, amount: 100n }],
-        sourceTokenData: [
-          encodeSourceTokenData({
-            sourcePoolAddress: '0x',
-            destTokenAddress: '0x',
-            extraData: approvedPayloadHash1,
-            destGasAmount: 0n,
-          }),
-        ],
+        tokenAmounts: [{ extraData: approvedPayloadHash1 }],
       },
       log: { topics: ['0x123'], index: 7 },
       tx: {
@@ -177,17 +202,9 @@ describe('fetchLbtcOffchainTokenData', () => {
 
   it('should return offchain token data', async () => {
     const mockRequest = {
+      lane: { sourceChainSelector: 16015286601757825753n },
       message: {
-        sourceChainSelector: 16015286601757825753n,
-        tokenAmounts: [{ token: lbtcToken, amount: 100n }],
-        sourceTokenData: [
-          encodeSourceTokenData({
-            sourcePoolAddress: '0x',
-            destTokenAddress: '0x',
-            extraData: approvedPayloadHash1,
-            destGasAmount: 0n,
-          }),
-        ],
+        tokenAmounts: [{ extraData: approvedPayloadHash1 }],
       },
       log: { topics: ['0x123'], index: 7 },
       tx: {
@@ -209,17 +226,9 @@ describe('fetchLbtcOffchainTokenData', () => {
   it('should fallback if attestation is not found', async () => {
     const randomExtraData = '0x0000000000000000000000000000000000000000000000000000000000000000'
     const mockRequest = {
+      lane: { sourceChainSelector: 16015286601757825753n },
       message: {
-        sourceChainSelector: 16015286601757825753n,
-        tokenAmounts: [{ token: lbtcToken, amount: 100n }],
-        sourceTokenData: [
-          encodeSourceTokenData({
-            sourcePoolAddress: '0x1234',
-            destTokenAddress: '0x5678',
-            extraData: randomExtraData,
-            destGasAmount: 100n,
-          }),
-        ],
+        tokenAmounts: [{ extraData: randomExtraData }],
       },
       log: { topics: ['0x123'], index: 7 },
       tx: {
@@ -239,17 +248,9 @@ describe('fetchLbtcOffchainTokenData', () => {
 
   it('should fallback if attestation is not approved', async () => {
     const mockRequest = {
+      lane: { sourceChainSelector: 16015286601757825753n },
       message: {
-        sourceChainSelector: 16015286601757825753n,
-        tokenAmounts: [{ token: lbtcToken, amount: 100n }],
-        sourceTokenData: [
-          encodeSourceTokenData({
-            sourcePoolAddress: '0x1234',
-            destTokenAddress: '0x5678',
-            extraData: pendingPayloadHash,
-            destGasAmount: 100n,
-          }),
-        ],
+        tokenAmounts: [{ extraData: pendingPayloadHash }],
       },
       log: { topics: ['0x123'], index: 7 },
       tx: {
@@ -269,26 +270,9 @@ describe('fetchLbtcOffchainTokenData', () => {
 
   it('should return offchain token data multiple transfers', async () => {
     const mockRequest = {
+      lane: { sourceChainSelector: 16015286601757825753n },
       message: {
-        sourceChainSelector: 16015286601757825753n,
-        tokenAmounts: [
-          { token: lbtcToken, amount: 100n },
-          { token: lbtcToken, amount: 200n },
-        ],
-        sourceTokenData: [
-          encodeSourceTokenData({
-            sourcePoolAddress: '0x',
-            destTokenAddress: '0x',
-            extraData: approvedPayloadHash1,
-            destGasAmount: 100n,
-          }),
-          encodeSourceTokenData({
-            sourcePoolAddress: '0x',
-            destTokenAddress: '0x',
-            extraData: approvedPayloadHash2,
-            destGasAmount: 100n,
-          }),
-        ],
+        tokenAmounts: [{ extraData: approvedPayloadHash1 }, { extraData: approvedPayloadHash2 }],
       },
       log: { topics: ['0x123'], index: 7 },
       tx: {

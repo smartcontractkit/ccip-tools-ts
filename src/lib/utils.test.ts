@@ -14,7 +14,7 @@ import {
   getSomeBlockNumberBefore,
   lazyCached,
   networkInfo,
-  validateTypeAndVersion,
+  validateContractType,
 } from './utils.js'
 
 let provider: jest.Mocked<Provider>
@@ -88,10 +88,9 @@ describe('lazyCached', () => {
   })
 })
 
-describe('validateTypeAndVersion', () => {
+describe('validateContractType', () => {
   it('should return the type and version of the contract', async () => {
-    const [type_, version] = await validateTypeAndVersion(provider, '0x123')
-    expect(type_).toBe(CCIPContractType.OnRamp)
+    const [version] = await validateContractType(provider, '0x123', CCIPContractType.OnRamp)
     expect(version).toBe(CCIPVersion.V1_2)
   })
 
@@ -99,14 +98,13 @@ describe('validateTypeAndVersion', () => {
     mockedContract.typeAndVersion.mockResolvedValueOnce(
       `${CCIPContractType.OffRamp} ${CCIPVersion.V1_5}-dev`,
     )
-    const [type_, version] = await validateTypeAndVersion(provider, '0x124')
-    expect(type_).toBe(CCIPContractType.OffRamp)
+    const [version] = await validateContractType(provider, '0x124', CCIPContractType.OffRamp)
     expect(version).toBe(CCIPVersion.V1_5)
   })
 
   it('should throw on contracts not implementing interface', async () => {
     mockedContract.typeAndVersion.mockRejectedValueOnce({ code: 'BAD_DATA' })
-    await expect(validateTypeAndVersion(provider, '0x125')).rejects.toThrow(
+    await expect(validateContractType(provider, '0x125', CCIPContractType.OnRamp)).rejects.toThrow(
       '0x125 not a CCIP contract on "ethereum-mainnet"',
     )
   })
