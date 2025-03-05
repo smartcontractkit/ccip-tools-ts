@@ -57,7 +57,7 @@ export async function sendMessage(
     tokenAmounts = await parseTokenAmounts(source, argv.transferTokens)
   }
 
-  const receiver = argv.receiver ?? wallet.address
+  const receiver = argv.receiver ?? (await wallet.getAddress())
   const data = !argv.data
     ? '0x'
     : isHexString(argv.data)
@@ -76,7 +76,7 @@ export async function sendMessage(
       await providers.forChainId(destChainId),
       onRampAddress,
       {
-        sender: wallet.address,
+        sender: await wallet.getAddress(),
         receiver,
         data,
         tokenAmounts: destTokenAmounts,
@@ -117,13 +117,13 @@ export async function sendMessage(
   }
 
   // approve all tokens (including fee token) in parallel
-  let nonce = await source.getTransactionCount(wallet.address)
+  let nonce = await source.getTransactionCount(await wallet.getAddress())
   await Promise.all(
     Object.entries(amountsToApprove).map(async ([token, amount]) => {
       const contract = new Contract(token, TokenABI, wallet) as unknown as TypedContract<
         typeof TokenABI
       >
-      const allowance = await contract.allowance(wallet.address, argv.router)
+      const allowance = await contract.allowance(await wallet.getAddress(), argv.router)
       if (allowance < amount) {
         // optimization: hardcode nonce and gasLimit to send all approvals in parallel without estimating
         const tx = await contract.approve(argv.router, amount, { nonce: nonce++, gasLimit: 50_000 })

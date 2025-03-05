@@ -45,11 +45,17 @@
   },
   "dependencies": {
     "@inquirer/prompts": "7.3.2",
+    "@xlabs-xyz/ledger-signer-ethers-v6": "^0.0.1",
     "abitype": "1.0.8",
     "ethers": "6.13.5",
     "tslib": "2.8.1",
-    "yargs": "17.7.2",
-    "yaml": "2.7.0"
+    "yaml": "2.7.0",
+    "yargs": "17.7.2"
+  },
+  "overrides": {
+    "@xlabs-xyz/ledger-signer-ethers-v6": {
+      "ethers": "$ethers"
+    }
   },
   "prettier": {
     "trailingComma": "all",

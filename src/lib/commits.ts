@@ -122,7 +122,6 @@ function resultsToCommitReport<V extends CCIPVersion = CCIPVersion>(
         r.sourceChainSelector === lane.sourceChainSelector &&
         (r.onRampAddress as string).toLowerCase().endsWith(lane.onRamp.slice(2).toLowerCase()),
     )
-    console.debug('__resultsToCommitReport', lane, result, res)
     if (!res) return
     return {
       ...res.toObject(),

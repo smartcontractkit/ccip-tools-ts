@@ -1,9 +1,11 @@
 import { readFile } from 'node:fs/promises'
 
 import { password, select } from '@inquirer/prompts'
+import { LedgerSigner } from '@xlabs-xyz/ledger-signer-ethers-v6'
 import {
   type Addressable,
   type Provider,
+  type Signer,
   BaseWallet,
   Contract,
   Result,
@@ -43,7 +45,12 @@ import {
   recursiveParseError,
 } from '../lib/index.js'
 
-export async function getWallet(argv?: { wallet?: string }): Promise<BaseWallet> {
+export async function getWallet(argv?: { wallet?: string }): Promise<Signer> {
+  if ((argv?.wallet ?? '').startsWith('ledger')) {
+    const ledger = await LedgerSigner.create(null, argv!.wallet!.split(':')[1])
+    console.info('Ledger connected:', await ledger.getAddress(), `at "${ledger.path}"`)
+    return ledger
+  }
   if (argv?.wallet) {
     let pw = process.env['USER_KEY_PASSWORD']
     if (!pw) pw = await password({ message: 'Enter password for json wallet' })

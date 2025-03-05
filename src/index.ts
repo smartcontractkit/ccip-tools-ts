@@ -127,7 +127,7 @@ async function main() {
             wallet: {
               type: 'string',
               describe:
-                'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar',
+                'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar; also supports `ledger[:<derivationPath>]` hardwallet',
             },
             'sender-queue': {
               type: 'boolean',
