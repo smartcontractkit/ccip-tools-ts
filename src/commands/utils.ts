@@ -378,16 +378,28 @@ export async function sourceToDestTokenAmounts<S extends { token: string }>(
   ) as unknown as TypedContract<typeof TokenAdminRegistry>
 
   let pools: readonly (string | Addressable)[] = []
-  if (sourceTokenAmounts.length)
+  if (sourceTokenAmounts.length) {
     pools = await tokenAdminRegistry.getPools(sourceTokenAmounts.map(({ token }) => token))
+    const missing = sourceTokenAmounts.filter((_, i) => (pools[i] as string).match(/^0x0+$/))
+    if (missing.length) {
+      throw new Error(
+        `Token${missing.length > 1 ? 's' : ''} not supported: ${missing.map(({ token }) => token).join(', ')}`,
+      )
+    }
+  }
 
   return [
     await Promise.all(
-      sourceTokenAmounts.map(async ({ token: _, ...ta }, i) => {
+      sourceTokenAmounts.map(async ({ token, ...ta }, i) => {
         const pool = new Contract(pools[i], TokenPoolABI, source) as unknown as TypedContract<
           typeof TokenPoolABI
         >
-        const destToken = decodeAddress(await pool.getRemoteToken(destSelector))
+        const remoteToken = await pool.getRemoteToken(destSelector)
+        const destToken = decodeAddress(remoteToken)
+        if (destToken === ZeroAddress)
+          throw new Error(
+            `Dest "${destName}" not supported by tokenPool ${pools[i] as string} for token ${token}`,
+          )
         return { ...ta, destTokenAddress: destToken }
       }),
     ),
