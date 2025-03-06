@@ -45,4 +45,3 @@ jobs:
           npm-token: ${{ secrets.NPM_TOKEN }}
           create-github-release: false
           publish-command: "npm publish --verbose"
-          package-json-directory: contracts
