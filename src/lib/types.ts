@@ -109,6 +109,30 @@ export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
       tokenAmounts: readonly (EVM2AnyMessageSent['tokenAmounts'][number] & SourceTokenData)[]
     }
 
+type AptosTokenTransfer = {
+  sourcePoolAddress: string
+  destTokenAddress: string
+  destGasAmount: bigint
+  extraData: string
+  amount: bigint
+}
+// TODO Rodrigo: Refactor it to be included in CCIPMessage type
+export type AptosCCIPMessage = {
+  header: {
+    messageId: string
+    sourceChainSelector: bigint
+    destChainSelector: bigint
+    sequenceNumber: bigint
+    nonce: bigint
+  }
+  sender: string
+  // data should be a hex encoded message
+  data: string
+  receiver: string
+  gasLimit: bigint
+  tokenAmounts: AptosTokenTransfer[]
+}
+
 // type Bla = CCIPMessage<CCIPVersion.V1_6> //['tokenAmounts'][number]
 
 type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'data' | 'blockNumber' | 'transactionHash'>
