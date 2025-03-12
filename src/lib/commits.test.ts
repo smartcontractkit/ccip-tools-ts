@@ -4,8 +4,12 @@ import { fetchCommitReport } from './commits.js'
 import { type Lane, CCIPContractType, CCIPVersion } from './types.js'
 
 const mockProvider = {
+  get provider() {
+    return mockProvider
+  },
   getBlockNumber: jest.fn(() => 15_000),
   getLogs: jest.fn<any, [], any>(() => [{}]),
+  getNetwork: jest.fn(() => ({ chainId: 11155111 })),
 }
 
 const mockedContract = {
@@ -43,6 +47,11 @@ describe('fetchCommitReport', () => {
 
   it('should return first matching commit report', async () => {
     const hints = { startBlock: 12345 }
+    mockProvider.getLogs.mockReturnValueOnce([
+      {
+        address: '0xCommitStore',
+      },
+    ])
     const request = {
       message: { header: { sequenceNumber: 1n } },
       lane: {
