@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2025-03-11
+- Fix manualExec on old v1.2 lanes or <1.5 TokenPools (legacy sourceTokenData) (#18)
+
 ## [0.2.0] - 2025-03-04
 - Add `getSupportedTokens` command to discover and validate tokens that can be transferred between chains using CCIP (#11)
 - Add support to CCIP v1.6 EVM lanes (#14)

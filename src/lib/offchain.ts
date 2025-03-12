@@ -226,12 +226,6 @@ export async function fetchOffchainTokenData(
     ({ index }) => prevCcipRequestIdx < index && index < request.log.index,
   )
 
-  let tokenAmounts
-  if ('sourceTokenData' in request.message) {
-    tokenAmounts = request.message.sourceTokenData.map(parseSourceTokenData)
-  } else {
-    tokenAmounts = request.message.tokenAmounts as readonly SourceTokenData[]
-  }
   const offchainTokenData: string[] = request.message.tokenAmounts.map(
     () => '0x', // default tokenData
   )
@@ -240,8 +234,19 @@ export async function fetchOffchainTokenData(
     usdcRequestLogs,
     isTestnet,
   )
-  //for lbtc we distinguish logs by hash in event, so we can pass all of them
-  const lbtcTokenData = await getLbtcTokenData(tokenAmounts, request.tx.logs, isTestnet)
+  let lbtcTokenData: (string | undefined)[] = []
+  try {
+    let tokenAmounts
+    if ('sourceTokenData' in request.message) {
+      tokenAmounts = request.message.sourceTokenData.map(parseSourceTokenData)
+    } else {
+      tokenAmounts = request.message.tokenAmounts as readonly SourceTokenData[]
+    }
+    //for lbtc we distinguish logs by hash in event, so we can pass all of them
+    lbtcTokenData = await getLbtcTokenData(tokenAmounts, request.tx.logs, isTestnet)
+  } catch (_) {
+    // pass
+  }
 
   for (let i = 0; i < offchainTokenData.length; i++) {
     if (usdcTokenData[i]) {

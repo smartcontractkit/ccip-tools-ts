@@ -101,7 +101,8 @@ export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
         sequenceNumber: bigint
         nonce: bigint
       }
-      tokenAmounts: readonly (EVM2AnyMessageRequested['tokenAmounts'][number] & SourceTokenData)[]
+      tokenAmounts: readonly (EVM2AnyMessageRequested['tokenAmounts'][number] &
+        Partial<SourceTokenData>)[]
     }
   : Omit<EVM2AnyMessageSent, 'tokenAmounts'> & {
       gasLimit: bigint

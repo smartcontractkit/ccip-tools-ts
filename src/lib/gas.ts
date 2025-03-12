@@ -88,22 +88,25 @@ export async function estimateExecGasForRequest(
     ).getSourceChainConfig(sourceChainSelector))
   }
 
+  const destTokenAmounts = []
+  for (const { destTokenAddress: token, amount } of request.tokenAmounts) {
+    if (!token) throw new Error('legacy <1.5 tokenPools not supported')
+    destTokenAmounts.push({ token, amount })
+  }
+
   const message: Any2EVMMessage = {
     messageId: hexlify(randomBytes(32)),
     sender: zeroPadValue(request.sender, 32),
     data: request.data,
     sourceChainSelector,
-    destTokenAmounts: request.tokenAmounts.map(({ destTokenAddress: token, amount }) => ({
-      token,
-      amount,
-    })),
+    destTokenAmounts,
   }
 
   // we need to override the state, increasing receiver's balance for each token, to simulate the
   // state after tokens were transferred by the offRamp just before calling `ccipReceive`
   const destAmounts: Record<string, bigint> = {}
   const stateOverrides: Record<string, { stateDiff: Record<string, string> }> = {}
-  for (const { destTokenAddress: token, amount } of request.tokenAmounts) {
+  for (const { token, amount } of destTokenAmounts) {
     if (!(token in destAmounts)) {
       const tokenContract = new Contract(token, TokenABI, dest) as unknown as TypedContract<
         typeof TokenABI

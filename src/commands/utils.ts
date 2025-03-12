@@ -36,10 +36,10 @@ import {
   chainIdFromSelector,
   chainNameFromId,
   decodeAddress,
+  getContractProperties,
   getErrorData,
   getOnRampLane,
   getProviderNetwork,
-  lazyCached,
   networkInfo,
   parseWithFragment,
   recursiveParseError,
@@ -117,27 +117,19 @@ export function prettyLane(lane: Lane) {
 }
 
 async function formatToken(
-  provider: Provider,
+  source: Provider,
   ta: { amount: bigint } & ({ token: string } | { sourcePoolAddress: string }),
 ): Promise<string> {
   let token
   if ('token' in ta) token = ta.token
   else {
-    token = await lazyCached(`token ${ta.sourcePoolAddress}`, () => {
-      const pool = new Contract(
-        ta.sourcePoolAddress,
-        TokenPoolABI,
-        provider,
-      ) as unknown as TypedContract<typeof TokenPoolABI>
-      return pool.getToken() as Promise<string>
-    })
+    ;[token] = await getContractProperties([ta.sourcePoolAddress, TokenPoolABI, source], 'getToken')
   }
-  const [decimals_, symbol] = await lazyCached(`token ${token}`, async () => {
-    const contract = new Contract(token, TokenABI, provider) as unknown as TypedContract<
-      typeof TokenABI
-    >
-    return Promise.all([contract.decimals(), contract.symbol()] as const)
-  })
+  const [decimals_, symbol] = await getContractProperties(
+    [token, TokenABI, source],
+    'decimals',
+    'symbol',
+  )
   const decimals = Number(decimals_)
   return `${formatUnits(ta.amount, decimals)} ${symbol}`
 }
@@ -327,12 +319,7 @@ export async function parseTokenAmounts(source: Provider, transferTokens: readon
   return Promise.all(
     transferTokens.map(async (tokenAmount) => {
       const [token, amount_] = tokenAmount.split('=')
-      const decimals = await lazyCached(`decimals ${token}`, () => {
-        const contract = new Contract(token, TokenABI, source) as unknown as TypedContract<
-          typeof TokenABI
-        >
-        return contract.decimals()
-      })
+      const [decimals] = await getContractProperties([token, TokenABI, source], 'decimals')
       const amount = parseUnits(amount_, decimals)
       return { token, amount }
     }),
