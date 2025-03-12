@@ -174,13 +174,13 @@ export function getLeafHasher<V extends CCIPVersion = CCIPVersion>({
   destChainSelector,
   onRamp,
   version,
-}: Lane<V>): LeafHasher {
+}: Lane<V>): LeafHasher<V> {
   switch (version) {
     case CCIPVersion.V1_2:
     case CCIPVersion.V1_5:
-      return getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp)
+      return getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher<V>
     case CCIPVersion.V1_6:
-      return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp)
+      return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher<V>
     default:
       throw new Error(`Unsupported CCIP version: ${version}`)
   }

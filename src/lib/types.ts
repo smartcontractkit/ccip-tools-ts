@@ -133,6 +133,7 @@ export type AptosCCIPMessage = {
   tokenAmounts: AptosTokenTransfer[]
 }
 
+export type CCIPMessageAny<V extends CCIPVersion> = CCIPMessage<V> | AptosCCIPMessage
 // type Bla = CCIPMessage<CCIPVersion.V1_6> //['tokenAmounts'][number]
 
 type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'data' | 'blockNumber' | 'transactionHash'>

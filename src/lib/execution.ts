@@ -71,6 +71,10 @@ export function calculateManualExecProof(
       )
     }
     // Hash leaf node
+    // TODO: msg here could be of any type (1.5 or 1.6), but we are using a specific version hasher. This will throw at runtime if encounters different message versions
+    // hasher type should detect the msg version
+    // If we want to be able to hash any message type, we should have a hasher per version
+    // If we don't want to hash any message type, `messagesInBatch` should only accept one type of message
     leaves.push(hasher(msg))
     const msgId = msg.header.messageId
     seen.add(msgId)
