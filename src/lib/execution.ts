@@ -12,6 +12,7 @@ import type { TypedContract } from 'ethers-abitype'
 import Router from '../abi/Router.js'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.js'
 import {
+  type CCIPContract,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
@@ -26,6 +27,7 @@ import {
   blockRangeGenerator,
   chainNameFromSelector,
   decodeAddress,
+  getContractProperties,
   lazyCached,
   toObject,
   validateContractType,
@@ -115,7 +117,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
   runner: ContractRunner,
   address: string,
   lane: Lane<V>,
-): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OffRamp][V]> | undefined> {
+): Promise<CCIPContract<CCIPContractType.OffRamp, V> | undefined> {
   const [version] = await validateContractType(runner.provider!, address, CCIPContractType.OffRamp)
   if (version !== lane.version) return
 
@@ -123,7 +125,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
     address,
     getOffRampInterface(version),
     runner,
-  ) as unknown as TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OffRamp][typeof version]>
+  ) as unknown as CCIPContract<CCIPContractType.OffRamp, typeof version>
 
   let sourceChainSelector, onRamp
   if (lane.version < CCIPVersion.V1_6) {
@@ -143,9 +145,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
   }
 
   if (lane.sourceChainSelector === sourceChainSelector && lane.onRamp === onRamp) {
-    return offRampContract as unknown as TypedContract<
-      (typeof CCIP_ABIs)[CCIPContractType.OffRamp][V]
-    >
+    return offRampContract as unknown as CCIPContract<CCIPContractType.OffRamp, V>
   }
 }
 
@@ -165,7 +165,7 @@ export async function discoverOffRamp<V extends CCIPVersion>(
   runner: ContractRunner,
   lane: Lane<V>,
   hints?: { fromBlock?: number; page?: number },
-): Promise<TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OffRamp][V]>> {
+): Promise<CCIPContract<CCIPContractType.OffRamp, V>> {
   const dest = runner.provider!
   // we use Router interface to find a router, and from there find the OffRamp,
   // because these events are more frequent than some low-activity OffRamp's
@@ -231,7 +231,7 @@ export async function discoverOffRamp<V extends CCIPVersion>(
         if (routerTopics.has(a.topics[0]) && offRampTopics.has(b.topics[0])) return 1
         return 0
       })
-    console.debug('discoverOffRamp', { blockRange, logs, seen })
+    console.debug('discoverOffRamp', { blockRange, logs, seen, offRampTopics, routerTopics })
 
     for (const log of logs) {
       try {
@@ -266,16 +266,14 @@ export async function discoverOffRamp<V extends CCIPVersion>(
 }
 
 async function getOffRampStaticConfig(dest: ContractRunner, address: string) {
-  return lazyCached(`OffRamp ${address}.staticConfig`, async () => {
-    const [version] = await validateContractType(dest.provider!, address, CCIPContractType.OffRamp)
-    const offRampContract = new Contract(
-      address,
-      getOffRampInterface(version),
-      dest,
-    ) as unknown as TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OffRamp][typeof version]>
-    const staticConfig = toObject(await offRampContract.getStaticConfig())
-    return [staticConfig, offRampContract] as const
-  })
+  const [version] = await validateContractType(dest.provider!, address, CCIPContractType.OffRamp)
+  const offRampContract = new Contract(
+    address,
+    getOffRampInterface(version),
+    dest,
+  ) as unknown as CCIPContract<CCIPContractType.OffRamp, typeof version>
+  const [staticConfig] = await getContractProperties(offRampContract, 'getStaticConfig')
+  return [toObject(staticConfig), offRampContract] as const
 }
 
 function getOffRampInterface(version: CCIPVersion): Interface {

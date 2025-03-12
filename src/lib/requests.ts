@@ -8,13 +8,13 @@ import {
   Contract,
   Interface,
   ZeroAddress,
-  hexlify,
+  isBytesLike,
   isHexString,
 } from 'ethers'
-import type { TypedContract } from 'ethers-abitype'
 import yaml from 'yaml'
 
 import {
+  type CCIPContract,
   type CCIPMessage,
   type CCIPRequest,
   type Lane,
@@ -51,8 +51,9 @@ async function getOnRampInterface(
 export async function getOnRampLane(source: Provider, address: string, destChainSelector?: bigint) {
   return lazyCached(`OnRamp ${address} lane`, async () => {
     const [iface, version] = await getOnRampInterface(source, address)
-    const onRampContract = new Contract(address, iface, source) as unknown as TypedContract<
-      (typeof CCIP_ABIs)[CCIPContractType.OnRamp][typeof version]
+    const onRampContract = new Contract(address, iface, source) as unknown as CCIPContract<
+      CCIPContractType.OnRamp,
+      typeof version
     >
     const staticConfig = toObject(await onRampContract.getStaticConfig())
     if (!('destChainSelector' in staticConfig)) {
@@ -77,10 +78,7 @@ export async function getOnRampLane(source: Provider, address: string, destChain
       },
       onRampContract,
     ] as {
-      [V in CCIPVersion]: readonly [
-        Lane<V>,
-        TypedContract<(typeof CCIP_ABIs)[CCIPContractType.OnRamp][V]>,
-      ]
+      [V in CCIPVersion]: readonly [Lane<V>, CCIPContract<CCIPContractType.OnRamp, V>]
     }[CCIPVersion]
   })
 }
@@ -103,8 +101,10 @@ const ccipMessagesTopicHashes = new Set(ccipMessagesFragments.map((fragment) => 
  * Does minimal validation, but converts objects in the format expected by ccip-tools-ts
  **/
 export function decodeMessage(data: string | Uint8Array | Record<string, unknown>): CCIPMessage {
-  if (data instanceof Uint8Array) data = hexlify(data)
-  if (isHexString(data)) {
+  if (typeof data === 'string' && data.startsWith('{')) {
+    data = yaml.parse(data, { intAsBigInt: true }) as Record<string, unknown>
+  }
+  if (isBytesLike(data)) {
     let result: Result | undefined
     for (const fragment of ccipMessagesFragments) {
       try {
@@ -113,15 +113,13 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
           data,
         )[0] as Result
         if (!isHexString(result?.sender)) throw new Error('next')
+        break
       } catch (_) {
-        // pass
+        // try next fragment
       }
     }
     if (!isHexString(result?.sender)) throw new Error('could not decode CCIPMessage')
     data = resultsToMessage(result)
-  }
-  if (typeof data === 'string' && data.startsWith('{')) {
-    data = yaml.parse(data, { intAsBigInt: true }) as Record<string, unknown>
   }
   if (typeof data !== 'object' || typeof data?.sender !== 'string' || !data.sender.startsWith('0x'))
     throw new Error('unknown message format: ' + JSON.stringify(data))
@@ -130,9 +128,13 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
   data.tokenAmounts = (data.tokenAmounts as Record<string, string | bigint>[]).map(
     (tokenAmount, i) => {
       if (data.sourceTokenData) {
-        tokenAmount = {
-          ...parseSourceTokenData((data.sourceTokenData as string[])[i]),
-          ...tokenAmount,
+        try {
+          tokenAmount = {
+            ...parseSourceTokenData((data.sourceTokenData as string[])[i]),
+            ...tokenAmount,
+          }
+        } catch (_) {
+          console.debug('legacy sourceTokenData:', i, (data.sourceTokenData as string[])[i])
         }
       }
       if (tokenAmount.destExecData) {
@@ -197,7 +199,8 @@ export async function fetchCCIPMessagesInTx(tx: TransactionReceipt): Promise<CCI
       } else {
         ;[lane] = await getOnRampLane(source, log.address)
       }
-    } catch (_) {
+    } catch (err) {
+      console.debug('failed parsing log in tx:', tx.hash, log, err)
       continue
     }
     requests.push({ lane, message, log, tx, timestamp })

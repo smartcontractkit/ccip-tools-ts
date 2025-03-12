@@ -1,15 +1,20 @@
-import { type Provider, type Result, Contract, Interface } from 'ethers'
-import type { TypedContract } from 'ethers-abitype'
+import { type Provider, type Result, Interface } from 'ethers'
 
 import {
   type CCIPCommit,
+  type CCIPContract,
   type CommitReport,
   type Lane,
   CCIPContractType,
   CCIPVersion,
   CCIP_ABIs,
 } from './types.js'
-import { blockRangeGenerator, getSomeBlockNumberBefore, lazyCached } from './utils.js'
+import {
+  blockRangeGenerator,
+  getContractProperties,
+  getSomeBlockNumberBefore,
+  lazyCached,
+} from './utils.js'
 
 /**
  * Look for a CommitReport at dest for given CCIP request
@@ -71,16 +76,13 @@ export async function fetchCommitReport(
         continue
       if (lane.version < CCIPVersion.V1_6) {
         try {
-          const staticConfig = await lazyCached(`CommitStore ${log.address}.staticConfig`, () => {
-            const contract = new Contract(
-              log.address,
-              commitStoreInterface,
-              dest,
-            ) as unknown as TypedContract<
-              (typeof CCIP_ABIs)[CCIPContractType.CommitStore][CCIPVersion.V1_2 | CCIPVersion.V1_5]
-            >
-            return contract.getStaticConfig()
-          })
+          const [staticConfig] = await getContractProperties(
+            [log.address, commitStoreInterface, dest] as unknown as CCIPContract<
+              CCIPContractType.CommitStore,
+              CCIPVersion.V1_2 | CCIPVersion.V1_5
+            >,
+            'getStaticConfig',
+          )
 
           // reject if it's not a CommitStore for our onRamp
           if (

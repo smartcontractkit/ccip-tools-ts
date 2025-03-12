@@ -1,5 +1,8 @@
+import { type Abi } from 'abitype'
 import {
+  type Addressable,
   type BaseContract,
+  type InterfaceAbi,
   type Provider,
   Contract,
   Result,
@@ -105,22 +108,51 @@ export type KeysMatching<T, V> = {
   [K in keyof T]: T[K] extends V ? K : never
 }[keyof T]
 
+export type ContractLike<C> = C extends { [1]: Abi } ? TypedContract<C[1]> : C
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AwaitedReturn<T> = T extends (...args: any) => Promise<infer R> ? R : never
 
+/**
+ * Fetches multiple properties of a contract (async getters with no arguments), caching the results
+ *
+ * @param contract - contract to fetch properties from, as contract instance
+ *   or [address, abi, provider] contract constructor arguments (constructed only if not cached)
+ * @param properties - list of property names to fetch
+ * @returns Promise to tuple of property values
+ **/
 export async function getContractProperties<
-  C extends Pick<BaseContract, 'getAddress' | 'runner'>,
-  T extends readonly (string & KeysMatching<C, () => Promise<unknown>>)[],
->(contract: C, ...properties: T): Promise<{ [K in keyof T]: AwaitedReturn<C[T[K]]> }> {
-  const provider = contract.runner!.provider!
+  C extends
+    | Pick<BaseContract, 'getAddress' | 'runner'>
+    | readonly [address: string | Addressable, abi: Abi, provider: Provider],
+  T extends readonly (string & KeysMatching<ContractLike<C>, () => Promise<unknown>>)[],
+>(
+  contract: C,
+  ...properties: T
+): Promise<{ [K in keyof T]: AwaitedReturn<ContractLike<C>[T[K]]> }> {
+  let provider, address
+  if ('runner' in contract) {
+    address = await contract.getAddress()
+    provider = contract.runner!.provider!
+  } else {
+    address = typeof contract[0] === 'string' ? contract[0] : await contract[0].getAddress()
+    provider = contract[2]
+  }
+
   const { name } = await getProviderNetwork(provider)
   return Promise.all(
     properties.map(async (prop) =>
-      lazyCached(`${name}@${await contract.getAddress()}.${prop}()`, () =>
-        (contract[prop] as () => Promise<unknown>)(),
+      lazyCached(`${name}@${address}.${prop}()`, () =>
+        (
+          ('runner' in contract
+            ? contract
+            : new Contract(address, contract[1] as InterfaceAbi, provider)) as unknown as {
+            [k: string]: () => Promise<unknown>
+          }
+        )[prop](),
       ),
     ),
-  ) as Promise<{ [K in keyof T]: AwaitedReturn<C[T[K]]> }>
+  ) as Promise<{ [K in keyof T]: AwaitedReturn<ContractLike<C>[T[K]]> }>
 }
 
 export async function getTypeAndVersion(
