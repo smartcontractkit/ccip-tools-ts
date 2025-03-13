@@ -49,3 +49,4 @@ export {
   toObject,
   validateContractType,
 } from './utils.js'
+export { getProvider } from '../providers.js'

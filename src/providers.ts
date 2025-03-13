@@ -36,6 +36,41 @@ async function withTimeout<T>(
 }
 
 /**
+ * Gets a provider for a given endpoint
+ *
+ * @param endpoint - RPC endpoint, either HTTP or WebSocket
+ * @returns instance of JsonRpcApiProvider and a promise that resolves when it is ready
+ * @throws Error if the protocol in the endpoint is unknown
+ **/
+export function getProvider(endpoint: string): {
+  provider: JsonRpcApiProvider
+  providerReady: Promise<JsonRpcApiProvider>
+} {
+  if (endpoint.startsWith('ws')) {
+    const provider = new WebSocketProvider(endpoint)
+    return {
+      provider: provider,
+      providerReady: new Promise((resolve, reject) => {
+        provider.websocket.onerror = reject
+        provider
+          ._waitUntilReady()
+          .then(() => resolve(provider))
+          .catch(reject)
+      }),
+    }
+  }
+
+  if (endpoint.startsWith('http')) {
+    const provider = new JsonRpcProvider(endpoint)
+    return { provider: new JsonRpcProvider(endpoint), providerReady: Promise.resolve(provider) }
+  }
+
+  throw new Error(
+    `Unknown JSON RPC protocol in endpoint (should be wss?:// or https?://): ${endpoint}`,
+  )
+}
+
+/**
  * Load providers from a list of RPC endpoints
  *
  * This class manages concurrent access to providers, racing them as soon as they are created for
@@ -106,26 +141,7 @@ export class Providers {
     return (this.#providersList = this.#endpoints
       .then((rpcs) =>
         [...rpcs].map((endpoint) => {
-          let provider: JsonRpcApiProvider
-          let providerReady: Promise<JsonRpcApiProvider>
-          if (endpoint.startsWith('ws')) {
-            const provider_ = new WebSocketProvider(endpoint)
-            providerReady = new Promise((resolve, reject) => {
-              provider_.websocket.onerror = reject
-              provider_
-                ._waitUntilReady()
-                .then(() => resolve(provider_))
-                .catch(reject)
-            })
-            provider = provider_
-          } else if (endpoint.startsWith('http')) {
-            provider = new JsonRpcProvider(endpoint)
-            providerReady = Promise.resolve(provider)
-          } else {
-            throw new Error(
-              `Unknown JSON RPC protocol in endpoint (should be wss?:// or https?://): ${endpoint}`,
-            )
-          }
+          const { provider, providerReady } = getProvider(endpoint)
 
           void this.destroyed.then(() => provider.destroy()) // schedule cleanup
           readyPromises.push(
