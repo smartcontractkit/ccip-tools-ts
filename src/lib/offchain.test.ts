@@ -1,9 +1,14 @@
 import { Interface, getAddress, hexlify, id, keccak256, randomBytes } from 'ethers'
 
-import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.ts'
-import { LBTC_EVENT, fetchOffchainTokenData } from './offchain.ts'
-import { type CCIPRequest, defaultAbiCoder } from './types.ts'
-import { lazyCached } from './utils.ts'
+import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.js'
+import {
+  type FetchOffchainTokenDataInput,
+  LBTC_EVENT,
+  fetchOffchainTokenData,
+  fetchOffchainTokenDataV2,
+} from './offchain.js'
+import { type CCIPRequest, defaultAbiCoder } from './types.js'
+import { lazyCached } from './utils.js'
 
 const origFetch = global.fetch
 
@@ -295,5 +300,55 @@ describe('fetchLbtcOffchainTokenData', () => {
     expect(result).toHaveLength(2)
     expect(result[0]).toBe(approvedPayloadAttestation1)
     expect(result[1]).toBe(approvedPayloadAttestation2)
+  })
+})
+
+describe('fetchOffchainTokenData with v2', () => {
+  const MESSAGE_SENT_TOPIC0 = id('MessageSent(bytes)')
+  const TRANSFER_TOPIC0 = id('Transfer(address,address,uint256)')
+  const usdcToken = getAddress(hexlify(randomBytes(20)))
+  const sourcePoolAddress = getAddress(hexlify(randomBytes(20)))
+
+  const mockedFetchJson = jest.fn<any, [], any>(() => ({
+    status: 'complete',
+    attestation: '0xa77e57a71090',
+  }))
+  const mockedFetch = jest.fn(() => ({ json: mockedFetchJson }))
+  beforeAll(() => {
+    global.fetch = mockedFetch as any
+  })
+  afterAll(() => {
+    global.fetch = origFetch
+  })
+
+  it('should return offchain token data', async () => {
+    const v2Request: FetchOffchainTokenDataInput = {
+      sourceChainSelector: 16015286601757825753n,
+      tokenAmounts: [{ token: usdcToken, sourcePoolAddress, amount: 100n }],
+      ccipLog: {
+        topics: ['0x123'],
+        index: 9,
+      },
+      txLogs: [
+        { topics: [TRANSFER_TOPIC0], index: 5, address: usdcToken, data: '' },
+        {
+          topics: [MESSAGE_SENT_TOPIC0],
+          index: 6,
+          data: defaultAbiCoder.encode(['bytes'], ['0x1337']),
+          address: '',
+        },
+        { topics: [], index: 7, address: '', data: '' },
+        {
+          topics: [BURNED_EVENT.topicHash],
+          address: sourcePoolAddress,
+          index: 8,
+          data: '',
+        },
+      ],
+    }
+
+    const result = await fetchOffchainTokenDataV2(v2Request)
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatch(/^0x.*1337.*a77e57a71090/)
   })
 })
