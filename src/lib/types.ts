@@ -109,8 +109,6 @@ export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
       tokenAmounts: readonly (EVM2AnyMessageSent['tokenAmounts'][number] & SourceTokenData)[]
     }
 
-// type Bla = CCIPMessage<CCIPVersion.V1_6> //['tokenAmounts'][number]
-
 type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'data' | 'blockNumber' | 'transactionHash'>
 
 export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
