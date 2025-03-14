@@ -91,6 +91,16 @@ type EVM2AnyMessageSent = CleanAddressable<
   >[2]
 >
 
+export type TokenAmounts<V extends CCIPVersion = CCIPVersion> = V extends
+  | CCIPVersion.V1_2
+  | CCIPVersion.V1_5
+  ? TokenAmounts_v1_5
+  : TokenAmounts_v1_6
+
+type TokenAmounts_v1_5 = (EVM2AnyMessageRequested['tokenAmounts'][number] &
+  Partial<SourceTokenData>)[]
+type TokenAmounts_v1_6 = (EVM2AnyMessageSent['tokenAmounts'][number] & Partial<SourceTokenData>)[]
+
 // v1.2-v1.5 | v1.6 Message, with decoded gasLimit, sourceTokenData and tokenAmounts.destGasAmount
 export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
   | CCIPVersion.V1_2
@@ -101,17 +111,19 @@ export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
         sequenceNumber: bigint
         nonce: bigint
       }
-      tokenAmounts: readonly (EVM2AnyMessageRequested['tokenAmounts'][number] &
-        Partial<SourceTokenData>)[]
+      tokenAmounts: TokenAmounts<V>
     }
   : Omit<EVM2AnyMessageSent, 'tokenAmounts'> & {
       gasLimit: bigint
-      tokenAmounts: readonly (EVM2AnyMessageSent['tokenAmounts'][number] & SourceTokenData)[]
+      tokenAmounts: TokenAmounts<V>
     }
 
 // type Bla = CCIPMessage<CCIPVersion.V1_6> //['tokenAmounts'][number]
 
-type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'data' | 'blockNumber' | 'transactionHash'>
+export type Log_ = Pick<
+  Log,
+  'topics' | 'index' | 'address' | 'data' | 'blockNumber' | 'transactionHash'
+>
 
 export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
   lane: Lane<V>
