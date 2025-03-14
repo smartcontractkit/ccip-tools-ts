@@ -1,6 +1,6 @@
 import { concat, id, keccak256, zeroPadValue } from 'ethers'
-import { type CCIPMessage, type CCIPVersion, defaultAbiCoder } from '../types'
-import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from './common'
+import { type CCIPMessage, type CCIPVersion, defaultAbiCoder } from '../types.js'
+import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from './common.js'
 
 export const getV16AptosLeafHasher =
   (

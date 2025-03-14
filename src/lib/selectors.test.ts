@@ -1,4 +1,4 @@
-import { aptosSelectors, isAptosChain } from './selectors'
+import { aptosSelectors, isAptosChain } from './selectors.js'
 
 describe('selectors', () => {
   it('should idenfify Aptos selectors', () => {

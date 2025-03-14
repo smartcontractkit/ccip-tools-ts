@@ -1,6 +1,6 @@
 type Selectors = Record<number, { readonly selector: bigint; readonly name?: string }>
 
-const evmSelectors: Selectors = {
+const selectors: Selectors = {
   // generate:
   // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors.yml')
   //   .then((res) => res.text())
@@ -386,12 +386,16 @@ const evmSelectors: Selectors = {
 }
 
 export const aptosSelectors: Selectors = {
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors_aptos.yml')
+  //   .then((res) => res.text())
+  //   .then((body) => require('yaml').parse(body, { intAsBigInt: true }).selectors)
+  //   .then((obj) => require('util').inspect(obj).split('\n').slice(1, -1))
   '1': { name: 'aptos-mainnet', selector: 4741433654826277614n },
   '2': { name: 'aptos-testnet', selector: 743186221051783445n },
   '4': { name: 'aptos-localnet', selector: 4457093679053095497n },
+  // end:generate
 }
-
-const selectors: Selectors = { ...evmSelectors, ...aptosSelectors }
 
 export const isAptosChain = (selector: bigint): boolean => {
   return Object.values(aptosSelectors).some((aptosSelector) => aptosSelector.selector === selector)

@@ -1,5 +1,5 @@
 import { concat, hexlify, keccak256, toBeHex } from 'ethers'
-import { type CCIPMessage, type CCIPVersion } from '../types.js'
+import type { CCIPMessage, CCIPVersion } from '../types.js'
 
 export type LeafHasher<V extends CCIPVersion = CCIPVersion> = (message: CCIPMessage<V>) => string
 

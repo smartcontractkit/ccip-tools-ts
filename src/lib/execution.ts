@@ -10,7 +10,7 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 
 import Router from '../abi/Router.js'
-import { Tree, getLeafHasher, proofFlagsToBits } from './hasher'
+import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.js'
 import {
   type CCIPContract,
   type CCIPExecution,
@@ -42,7 +42,7 @@ import {
  * @param merkleRoot - Optional merkleRoot of the CommitReport, for validation
  * @returns ManualExec report arguments
  **/
-export function calculateManualExecProof<V extends CCIPVersion>(
+export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
   messagesInBatch: readonly CCIPMessage<V>[],
   lane: Lane<V>,
   messageIds: string[],
