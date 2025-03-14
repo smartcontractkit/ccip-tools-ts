@@ -46,28 +46,33 @@ export function getProvider(endpoint: string): {
   provider: JsonRpcApiProvider
   providerReady: Promise<JsonRpcApiProvider>
 } {
-  if (endpoint.startsWith('ws')) {
-    const provider = new WebSocketProvider(endpoint)
-    return {
-      provider: provider,
-      providerReady: new Promise((resolve, reject) => {
-        provider.websocket.onerror = reject
-        provider
-          ._waitUntilReady()
-          .then(() => resolve(provider))
-          .catch(reject)
-      }),
+  const protocol = endpoint.split(':')[0] // Extract protocol (ws, wss, http, https)
+
+  switch (protocol) {
+    case 'ws':
+    case 'wss': {
+      const provider = new WebSocketProvider(endpoint)
+      return {
+        provider,
+        providerReady: new Promise((resolve, reject) => {
+          provider.websocket.onerror = reject
+          provider
+            ._waitUntilReady()
+            .then(() => resolve(provider))
+            .catch(reject)
+        }),
+      }
     }
+    case 'http':
+    case 'https': {
+      const provider = new JsonRpcProvider(endpoint)
+      return { provider, providerReady: Promise.resolve(provider) }
+    }
+    default:
+      throw new Error(
+        `Unknown JSON RPC protocol in endpoint (should be wss?:// or https?://): ${endpoint}`,
+      )
   }
-
-  if (endpoint.startsWith('http')) {
-    const provider = new JsonRpcProvider(endpoint)
-    return { provider: new JsonRpcProvider(endpoint), providerReady: Promise.resolve(provider) }
-  }
-
-  throw new Error(
-    `Unknown JSON RPC protocol in endpoint (should be wss?:// or https?://): ${endpoint}`,
-  )
 }
 
 /**
