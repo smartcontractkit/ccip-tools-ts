@@ -11,6 +11,7 @@ import {
   encodeExtraArgs,
   estimateExecGasForRequest,
   fetchCCIPMessagesInTx,
+  getOnRampLane,
 } from '../lib/index.js'
 import type { Providers } from '../providers.js'
 import { Format } from './types.js'
@@ -70,18 +71,17 @@ export async function sendMessage(
       source,
       dest: await providers.forChainId(destChainId),
     })
+    const [lane] = await getOnRampLane(source, onRampAddress, destSelector)
 
-    const estimated = await estimateExecGasForRequest(
-      source,
-      await providers.forChainId(destChainId),
-      onRampAddress,
-      {
+    const estimated = await estimateExecGasForRequest(await providers.forChainId(destChainId), {
+      lane,
+      message: {
         sender: await wallet.getAddress(),
         receiver,
         data,
         tokenAmounts: destTokenAmounts,
       },
-    )
+    })
     console.log('Estimated gasLimit:', estimated)
     argv.gasLimit = Math.ceil(estimated * (1 + argv.estimateGasLimit / 100))
   }

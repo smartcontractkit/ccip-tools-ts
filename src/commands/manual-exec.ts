@@ -111,13 +111,9 @@ export async function manualExec(
   })
 
   if (argv.estimateGasLimit != null) {
-    let estimated = await estimateExecGasForRequest(
-      source,
-      dest,
-      request.lane.onRamp,
-      request.message,
-      { offRamp: await offRampContract.getAddress() },
-    )
+    let estimated = await estimateExecGasForRequest(dest, request, {
+      offRamp: await offRampContract.getAddress(),
+    })
     console.info('Estimated gasLimit override:', estimated)
     estimated += Math.ceil(estimated * (argv.estimateGasLimit / 100))
     if (request.message.gasLimit >= estimated) {

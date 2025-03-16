@@ -1,6 +1,11 @@
 import { ZeroAddress, hexlify, isHexString, toUtf8Bytes } from 'ethers'
 
-import { chainIdFromName, estimateExecGasForRequest } from '../lib/index.js'
+import {
+  chainIdFromName,
+  chainSelectorFromId,
+  estimateExecGasForRequest,
+  getOnRampLane,
+} from '../lib/index.js'
 import type { Providers } from '../providers.js'
 import { parseTokenAmounts, sourceToDestTokenAmounts } from './utils.js'
 
@@ -36,16 +41,18 @@ export async function estimateGas(
     source,
     dest,
   })
+  const [lane] = await getOnRampLane(source, onRamp, chainSelectorFromId(destChainId))
 
   const gas = await estimateExecGasForRequest(
-    source,
     dest,
-    onRamp,
     {
-      sender: argv.sender ?? ZeroAddress,
-      receiver: argv.receiver,
-      data,
-      tokenAmounts,
+      lane,
+      message: {
+        sender: argv.sender ?? ZeroAddress,
+        receiver: argv.receiver,
+        data,
+        tokenAmounts,
+      },
     },
     { page: argv.page },
   )

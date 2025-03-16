@@ -1,6 +1,5 @@
 import {
   type JsonRpcApiProvider,
-  type Provider,
   Contract,
   FunctionFragment,
   concat,
@@ -18,13 +17,13 @@ import RouterABI from '../abi/Router.js'
 import { discoverOffRamp, validateOffRamp } from './execution.js'
 import {
   type CCIPContract,
+  type CCIPContractType,
   type CCIPMessage,
   type Lane,
-  CCIPContractType,
   CCIPVersion,
   defaultAbiCoder,
 } from './types.js'
-import { getProviderNetwork, validateContractType } from './utils.js'
+import { networkInfo } from './utils.js'
 
 const BALANCES_SLOT = 0
 const ccipReceive = FunctionFragment.from({
@@ -50,29 +49,25 @@ type Any2EVMMessage = Parameters<TypedContract<typeof RouterABI>['routeMessage']
  * @returns estimated gasLimit
  **/
 export async function estimateExecGasForRequest(
-  source: Provider,
   dest: JsonRpcApiProvider,
-  onRamp: string,
-  request: Pick<CCIPMessage, 'sender' | 'receiver' | 'data'> & {
-    tokenAmounts: readonly Pick<
-      CCIPMessage['tokenAmounts'][number],
-      'destTokenAddress' | 'amount'
-    >[]
+  request: {
+    lane: Lane
+    message: Pick<CCIPMessage, 'sender' | 'receiver' | 'data'> & {
+      tokenAmounts: readonly Pick<
+        CCIPMessage['tokenAmounts'][number],
+        'destTokenAddress' | 'amount'
+      >[]
+    }
   },
   hints?: { offRamp?: string; page?: number },
 ) {
-  const { chainSelector: sourceChainSelector, name: sourceName } = await getProviderNetwork(source)
-  const { chainSelector: destChainSelector, name: destName } = await getProviderNetwork(dest)
-
-  const [version] = await validateContractType(source, onRamp, CCIPContractType.OnRamp)
-  const lane: Lane = { sourceChainSelector, destChainSelector, onRamp, version }
-
   let offRamp
+  const lane = request.lane
   if (hints?.offRamp) {
     offRamp = await validateOffRamp(dest, hints.offRamp, lane)
     if (!offRamp)
       throw new Error(
-        `Invalid offRamp for "${sourceName}" -> "${destName}" (onRamp=${onRamp}) lane`,
+        `Invalid offRamp for "${networkInfo(lane.sourceChainSelector).name}" -> "${networkInfo(lane.destChainSelector).name}" (onRamp=${lane.onRamp}) lane`,
       )
   } else {
     offRamp = await discoverOffRamp(dest, lane, hints)
@@ -85,20 +80,20 @@ export async function estimateExecGasForRequest(
   } else {
     ;({ router: destRouter } = await (
       offRamp as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_6>
-    ).getSourceChainConfig(sourceChainSelector))
+    ).getSourceChainConfig(lane.sourceChainSelector))
   }
 
   const destTokenAmounts = []
-  for (const { destTokenAddress: token, amount } of request.tokenAmounts) {
+  for (const { destTokenAddress: token, amount } of request.message.tokenAmounts) {
     if (!token) throw new Error('legacy <1.5 tokenPools not supported')
     destTokenAmounts.push({ token, amount })
   }
 
   const message: Any2EVMMessage = {
     messageId: hexlify(randomBytes(32)),
-    sender: zeroPadValue(request.sender, 32),
-    data: request.data,
-    sourceChainSelector,
+    sender: zeroPadValue(request.message.sender, 32),
+    data: request.message.data,
+    sourceChainSelector: lane.sourceChainSelector,
     destTokenAmounts,
   }
 
@@ -111,14 +106,16 @@ export async function estimateExecGasForRequest(
       const tokenContract = new Contract(token, TokenABI, dest) as unknown as TypedContract<
         typeof TokenABI
       >
-      const currentBalance = await tokenContract.balanceOf(request.receiver)
+      const currentBalance = await tokenContract.balanceOf(request.message.receiver)
       destAmounts[token] = currentBalance
     }
     destAmounts[token] += amount
     stateOverrides[token] = {
       stateDiff: {
-        [solidityPackedKeccak256(['uint256', 'uint256'], [request.receiver, BALANCES_SLOT])]:
-          toBeHex(destAmounts[token], 32),
+        [solidityPackedKeccak256(
+          ['uint256', 'uint256'],
+          [request.message.receiver, BALANCES_SLOT],
+        )]: toBeHex(destAmounts[token], 32),
       },
     }
   }
@@ -133,7 +130,7 @@ export async function estimateExecGasForRequest(
       (await dest.send('eth_estimateGas', [
         {
           from: destRouter,
-          to: request.receiver,
+          to: request.message.receiver,
           data: calldata,
         },
         'latest',
