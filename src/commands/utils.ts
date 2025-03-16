@@ -47,7 +47,10 @@ import {
 
 export async function getWallet(argv?: { wallet?: string }): Promise<Signer> {
   if ((argv?.wallet ?? '').startsWith('ledger')) {
-    const ledger = await LedgerSigner.create(null, argv!.wallet!.split(':')[1])
+    let derivationPath = argv!.wallet!.split(':')[1]
+    if (derivationPath && !isNaN(Number(derivationPath)))
+      derivationPath = `m/44'/60'/${derivationPath}'/0/0`
+    const ledger = await LedgerSigner.create(null, derivationPath)
     console.info('Ledger connected:', await ledger.getAddress(), `at "${ledger.path}"`)
     return ledger
   }
