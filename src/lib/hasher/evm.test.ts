@@ -14,6 +14,7 @@ describe('EVM leaf hasher', () => {
       messageId: '0x1001',
       sequenceNumber: 1337n,
       nonce: 1337n,
+      sourceChainSelector,
     }
     const message = {
       header,

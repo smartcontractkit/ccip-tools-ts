@@ -100,6 +100,7 @@ export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
         messageId: string
         sequenceNumber: bigint
         nonce: bigint
+        sourceChainSelector: bigint
       }
       tokenAmounts: readonly (EVM2AnyMessageRequested['tokenAmounts'][number] &
         Partial<SourceTokenData>)[]

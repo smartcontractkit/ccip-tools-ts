@@ -153,6 +153,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
       messageId: data.messageId as string,
       sequenceNumber: data.sequenceNumber as bigint,
       nonce: data.nonce as bigint,
+      sourceChainSelector: data.sourceChainSelector as bigint,
     }
   }
   if (data.gasLimit == null) {
