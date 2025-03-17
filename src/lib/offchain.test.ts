@@ -326,23 +326,31 @@ describe('fetchOffchainTokenData with v2', () => {
       sourceChainSelector: 16015286601757825753n,
       tokenAmounts: [{ token: usdcToken, sourcePoolAddress, amount: 100n }],
       ccipLog: {
-        topics: ['0x123'],
+        id: '0x123',
         index: 9,
       },
       txLogs: [
-        { topics: [TRANSFER_TOPIC0], index: 5, address: usdcToken, data: '' },
         {
-          topics: [MESSAGE_SENT_TOPIC0],
+          id: TRANSFER_TOPIC0,
+          index: 5,
+          address: usdcToken,
+          data: '',
+          indexedArgs: [],
+        },
+        {
+          id: MESSAGE_SENT_TOPIC0,
           index: 6,
           data: defaultAbiCoder.encode(['bytes'], ['0x1337']),
           address: '',
+          indexedArgs: [],
         },
-        { topics: [], index: 7, address: '', data: '' },
+        { id: '', index: 7, address: '', data: '', indexedArgs: [] },
         {
-          topics: [BURNED_EVENT.topicHash],
+          id: BURNED_EVENT.topicHash,
           address: sourcePoolAddress,
           index: 8,
           data: '',
+          indexedArgs: [],
         },
       ],
     }
