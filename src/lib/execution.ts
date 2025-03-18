@@ -42,20 +42,20 @@ import {
  * @param merkleRoot - Optional merkleRoot of the CommitReport, for validation
  * @returns ManualExec report arguments
  **/
-export function calculateManualExecProof(
-  messagesInBatch: readonly CCIPMessage[],
-  lane: Lane,
+export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
+  messagesInBatch: readonly CCIPMessage<V>[],
+  lane: Lane<V>,
   messageIds: string[],
   merkleRoot?: string,
 ): {
-  messages: CCIPMessage[]
+  messages: CCIPMessage<V>[]
   proofs: string[]
   proofFlagBits: bigint
 } {
   const leaves: string[] = []
   const hasher = getLeafHasher(lane)
   const prove: number[] = []
-  const messages: CCIPMessage[] = []
+  const messages: CCIPMessage<V>[] = []
   const seen = new Set<string>()
 
   messagesInBatch.forEach((message, index) => {
