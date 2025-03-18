@@ -1,4 +1,4 @@
-type Selectors = Record<number, { readonly selector: bigint; readonly name?: string }>
+type Selectors = Record<string, { readonly selector: bigint; readonly name?: string }>
 
 const selectors: Selectors = {
   // generate:
@@ -397,8 +397,35 @@ export const aptosSelectors: Selectors = {
   // end:generate
 }
 
+export const solanaSelectors: Selectors = {
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors_solana.yml')
+  //   .then((res) => res.text())
+  //   .then((body) => require('yaml').parse(body, { intAsBigInt: true }).selectors)
+  //   .then((obj) => require('util').inspect(obj).split('\n').slice(1, -1))
+  '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d': {
+    name: 'solana-mainnet',
+    selector: 124615329519749607n,
+  },
+  '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY': {
+    name: 'solana-testnet',
+    selector: 6302590918974934319n,
+  },
+  EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG: {
+    name: 'solana-devnet',
+    selector: 16423721717087811551n,
+  },
+  // end:generate
+}
+
 export const isAptosChain = (selector: bigint): boolean => {
   return Object.values(aptosSelectors).some((aptosSelector) => aptosSelector.selector === selector)
+}
+
+export const isSolanaChain = (selector: bigint): boolean => {
+  return Object.values(aptosSelectors).some(
+    (solanaSelector) => solanaSelector.selector === selector,
+  )
 }
 
 export default selectors
