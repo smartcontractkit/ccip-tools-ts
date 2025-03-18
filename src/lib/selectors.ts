@@ -1,4 +1,4 @@
-type Selectors = Record<number, { readonly selector: bigint; readonly name?: string }>
+type Selectors = Record<string, { readonly selector: bigint; readonly name?: string }>
 
 const selectors: Selectors = {
   // generate:
@@ -120,6 +120,7 @@ const selectors: Selectors = {
     name: 'ethereum-testnet-sepolia-mode-1',
   },
   '998': { selector: 4286062357653186312n, name: 'hyperliquid-testnet' },
+  '999': { selector: 2442541497099098535n, name: 'hyperliquid-mainnet' },
   '1029': { selector: 4459371029167934217n, name: 'bittorrent_chain-testnet' },
   '1088': { selector: 8805746078405598895n, name: 'ethereum-mainnet-metis-1' },
   '1101': {
@@ -303,7 +304,8 @@ const selectors: Selectors = {
     name: 'ethereum-testnet-sepolia-base-1',
   },
   '98864': { selector: 3743020999916460931n, name: 'plume-devnet' },
-  '98865': { selector: 3208172210661564830n, name: 'plume-mainnet' },
+  '98865': { selector: 3208172210661564830n },
+  '98866': { selector: 17912061998839310979n, name: 'plume-mainnet' },
   '167000': { selector: 16468599424800719238n, name: 'ethereum-mainnet-taiko-1' },
   '167009': {
     selector: 7248756420937879088n,
@@ -397,8 +399,35 @@ export const aptosSelectors: Selectors = {
   // end:generate
 }
 
+export const solanaSelectors: Selectors = {
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors_solana.yml')
+  //   .then((res) => res.text())
+  //   .then((body) => require('yaml').parse(body, { intAsBigInt: true }).selectors)
+  //   .then((obj) => require('util').inspect(obj).split('\n').slice(1, -1))
+  '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d': {
+    name: 'solana-mainnet',
+    selector: 124615329519749607n,
+  },
+  '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY': {
+    name: 'solana-testnet',
+    selector: 6302590918974934319n,
+  },
+  EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG: {
+    name: 'solana-devnet',
+    selector: 16423721717087811551n,
+  },
+  // end:generate
+}
+
 export const isAptosChain = (selector: bigint): boolean => {
   return Object.values(aptosSelectors).some((aptosSelector) => aptosSelector.selector === selector)
+}
+
+export const isSolanaChain = (selector: bigint): boolean => {
+  return Object.values(aptosSelectors).some(
+    (solanaSelector) => solanaSelector.selector === selector,
+  )
 }
 
 export default selectors
