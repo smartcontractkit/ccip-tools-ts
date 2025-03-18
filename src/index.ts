@@ -22,7 +22,7 @@ import { Providers } from './providers.js'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.2.1-8817b03'
+const VERSION = '0.2.1-5d219ac'
 // generate:end
 
 async function main() {

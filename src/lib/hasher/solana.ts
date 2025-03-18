@@ -18,10 +18,10 @@ const encode = (target: string, value: string | bigint | number) =>
 
 const encodeSolanaAddress = (address: string): Uint8Array => {
   try {
-    const publicKey = new PublicKey(address)
-    return publicKey.toBytes() as Uint8Array
-  } catch (error: unknown) {
-    throw new Error(`Invalid Solana address: ${address}`, { cause: error })
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access
+    return new PublicKey(address).toBytes()
+  } catch {
+    throw new Error(`Invalid Solana address: ${address}`)
   }
 }
 

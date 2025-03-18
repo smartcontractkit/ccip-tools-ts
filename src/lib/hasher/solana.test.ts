@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 import { PublicKey } from '@solana/web3.js'
 import { hexlify, toUtf8Bytes } from 'ethers'
 import { type CCIPMessage, type CCIPVersion } from '../types.js'
@@ -5,15 +7,14 @@ import { hashSolanaMessage, hashSolanaMetadata } from './solana.js'
 
 describe('solana hasher', () => {
   it('should hash Solana msg', () => {
-    const msgId = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
-    const metadataHash = '0xaabbccddeeff00112233445566778899aabbccddeeff00112233445566778899'
+    const msgId = '0x2c5e01a5f3de3e74d1fd196ca431d7b40cba0b51d8c9a7c7927ddc7c81581500'
+    const metadataHash = '0x9b885ffea8ce84fb687f634618c035dac43adc1ad8c9a7c7927ddc7c81581520'
 
-    // Create valid Solana addresses
-    const receiverKey = new PublicKey('11111111111111111111111111111111')
-    const sourcePool1 = new PublicKey('22222222222222222222222222222222')
-    const sourcePool2 = new PublicKey('33333333333333333333333333333333')
-    const destToken1 = new PublicKey('44444444444444444444444444444444')
-    const destToken2 = new PublicKey('55555555555555555555555555555555')
+    const receiverKey = new PublicKey('EZWYeuSRZ82fptywrP6RsBTZsvxpMsYgd2va7T33ByKa')
+    const sourcePool1 = new PublicKey('9KRL5MTQXJPtsvSRVxrgRfAoZXtnCKjwkq4udt8nf1NV')
+    const sourcePool2 = new PublicKey('DLXh3D1MCP3KWxMK4gdnBDknTVqSXm2znPLkQwNHcd6S')
+    const destToken1 = new PublicKey('6K7sGRcM57i6JLe5qTkifBUfb6aGzuNChjFusSYirwxE')
+    const destToken2 = new PublicKey('2Mh3GbFtVRcqb4H9BbznL1dBqxQw5FUAPVSwa8Ky7qsn')
 
     const msg: CCIPMessage<CCIPVersion.V1_6> = {
       header: {
@@ -51,7 +52,6 @@ describe('solana hasher', () => {
       ],
     }
 
-    // Note: The expected hash will be different due to Solana address format
     const hash = hashSolanaMessage(msg, metadataHash)
     expect(hash).toMatch(/^0x[a-f0-9]{64}$/)
   })
@@ -59,8 +59,8 @@ describe('solana hasher', () => {
   it('should hash Solana metadata', () => {
     const source = 123456789n
     const dest = 987654321n
-    // Use a valid Solana address for onramp
-    const onramp = new PublicKey('11111111111111111111111111111111').toBase58()
+    const onrampKey = new PublicKey('HXoMKDD4hb6VvrgrTZ6kpvJELQrVs4ABgZKTwa1yJNgb')
+    const onramp = onrampKey.toBase58()
 
     const hash = hashSolanaMetadata(source, dest, onramp)
     expect(hash).toMatch(/^0x[a-f0-9]{64}$/)
@@ -97,13 +97,9 @@ describe('solana hasher', () => {
         },
       ],
     }
-
-    // Should throw when receiver is invalid
     expect(() => hashSolanaMessage(invalidMsg, metadataHash)).toThrow(
       'Invalid Solana address: invalid-solana-address',
     )
-
-    // Should also throw for invalid token addresses
     const validReceiverMsg = {
       ...invalidMsg,
       receiver: new PublicKey('11111111111111111111111111111111').toBase58(),

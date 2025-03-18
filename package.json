@@ -45,7 +45,7 @@
   },
   "dependencies": {
     "@inquirer/prompts": "7.3.3",
-    "@solana/web3.js": "^1.98.0",
+    "@solana/web3.js": "1.98.0",
     "@xlabs-xyz/ledger-signer-ethers-v6": "^0.0.1",
     "abitype": "1.0.8",
     "ethers": "6.13.5",
@@ -71,7 +71,7 @@
       "<rootDir>/dist/"
     ],
     "moduleNameMapper": {
-      "(.+)\\.js": "$1"
+      "^(\\.{1,2}/.*)\\.js$": "$1"
     },
     "collectCoverage": true
   }
