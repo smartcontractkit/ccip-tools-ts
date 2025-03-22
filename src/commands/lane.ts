@@ -21,13 +21,8 @@ import {
   validateContractType,
 } from '../lib/index.ts'
 import type { Providers } from '../providers.ts'
+import { Format } from './types.ts'
 import { formatDuration, prettyLane } from './utils.ts'
-
-export enum Format {
-  log = 'log',
-  pretty = 'pretty',
-  json = 'json',
-}
 
 export async function showLaneConfigs(
   providers: Providers,
