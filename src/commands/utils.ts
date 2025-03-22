@@ -365,7 +365,10 @@ export async function sourceToDestTokenAmounts<S extends { token: string }>(
     throw new Error('Deprecated lane version: ' + lane.version)
   } else {
     ;({ tokenAdminRegistry: tokenAdminRegistryAddress } = await (
-      onRamp as CCIPContract<CCIPContractType.OnRamp, CCIPVersion.V1_5 | CCIPVersion.V1_6>
+      onRamp as CCIPContract<
+        typeof CCIPContractType.OnRamp,
+        typeof CCIPVersion.V1_5 | typeof CCIPVersion.V1_6
+      >
     ).getStaticConfig())
   }
   const tokenAdminRegistry = new Contract(

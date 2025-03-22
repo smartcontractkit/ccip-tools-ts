@@ -136,11 +136,11 @@ export async function manualExec(
   if (request.lane.version === CCIPVersion.V1_2) {
     const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit ?? 0))
     manualExecTx = await (
-      offRampContract as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_2>
+      offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_2>
     ).manuallyExecute(
       execReport as {
         offchainTokenData: string[][]
-        messages: CCIPMessage<CCIPVersion.V1_2>[]
+        messages: CCIPMessage<typeof CCIPVersion.V1_2>[]
         proofs: string[]
         proofFlagBits: bigint
       },
@@ -152,11 +152,11 @@ export async function manualExec(
       tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
     }))
     manualExecTx = await (
-      offRampContract as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_5>
+      offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_5>
     ).manuallyExecute(
       execReport as {
         offchainTokenData: string[][]
-        messages: CCIPMessage<CCIPVersion.V1_5>[]
+        messages: CCIPMessage<typeof CCIPVersion.V1_5>[]
         proofs: string[]
         proofFlagBits: bigint
       },
@@ -168,12 +168,12 @@ export async function manualExec(
       tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
     }))
     manualExecTx = await (
-      offRampContract as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_6>
+      offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_6>
     ).manuallyExecute(
       [
         {
           sourceChainSelector: request.lane.sourceChainSelector,
-          messages: execReport.messages as CCIPMessage<CCIPVersion.V1_6>[],
+          messages: execReport.messages as CCIPMessage<typeof CCIPVersion.V1_6>[],
           proofs: execReport.proofs,
           proofFlagBits: execReport.proofFlagBits,
           offchainTokenData: execReport.offchainTokenData,
@@ -316,11 +316,11 @@ export async function manualExecSenderQueue(
     if (firstRequest.lane.version === CCIPVersion.V1_2) {
       const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit ?? 0))
       manualExecTx = await (
-        offRampContract as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_2>
+        offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_2>
       ).manuallyExecute(
         execReport as {
           offchainTokenData: string[][]
-          messages: CCIPMessage<CCIPVersion.V1_2>[]
+          messages: CCIPMessage<typeof CCIPVersion.V1_2>[]
           proofs: string[]
           proofFlagBits: bigint
         },
@@ -332,11 +332,11 @@ export async function manualExecSenderQueue(
         tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
       }))
       manualExecTx = await (
-        offRampContract as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_5>
+        offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_5>
       ).manuallyExecute(
         execReport as {
           offchainTokenData: string[][]
-          messages: CCIPMessage<CCIPVersion.V1_5>[]
+          messages: CCIPMessage<typeof CCIPVersion.V1_5>[]
           proofs: string[]
           proofFlagBits: bigint
         },
@@ -348,12 +348,12 @@ export async function manualExecSenderQueue(
         tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
       }))
       manualExecTx = await (
-        offRampContract as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_6>
+        offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_6>
       ).manuallyExecute(
         [
           {
             sourceChainSelector: firstRequest.lane.sourceChainSelector,
-            messages: execReport.messages as CCIPMessage<CCIPVersion.V1_6>[],
+            messages: execReport.messages as CCIPMessage<typeof CCIPVersion.V1_6>[],
             proofs: execReport.proofs,
             proofFlagBits: execReport.proofFlagBits,
             offchainTokenData: execReport.offchainTokenData,

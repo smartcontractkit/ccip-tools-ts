@@ -1,6 +1,6 @@
 import { CCIPVersion } from '../types.ts'
 
-jest.mock('./evm', () => {
+jest.mock('./evm.ts', () => {
   const originalModule = jest.requireActual('./evm')
   return {
     __esModule: true,
@@ -9,7 +9,7 @@ jest.mock('./evm', () => {
     getV16LeafHasher: jest.fn(() => () => 'v16LeafHasher'),
   }
 })
-jest.mock('./aptos', () => {
+jest.mock('./aptos.ts', () => {
   const originalModule = jest.requireActual('./aptos')
   return {
     __esModule: true,

@@ -4,7 +4,7 @@ import { discoverOffRamp, validateOffRamp } from './execution.ts'
 import { estimateExecGasForRequest } from './gas.ts'
 import { CCIPContractType, CCIPVersion } from './types.ts'
 
-jest.mock('./execution.js')
+jest.mock('./execution.ts')
 
 const mockProvider = {
   get provider() {

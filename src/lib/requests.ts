@@ -52,7 +52,7 @@ export async function getOnRampLane(source: Provider, address: string, destChain
   return lazyCached(`OnRamp ${address} lane`, async () => {
     const [iface, version] = await getOnRampInterface(source, address)
     const onRampContract = new Contract(address, iface, source) as unknown as CCIPContract<
-      CCIPContractType.OnRamp,
+      typeof CCIPContractType.OnRamp,
       typeof version
     >
     const staticConfig = toObject(await onRampContract.getStaticConfig())
@@ -78,7 +78,7 @@ export async function getOnRampLane(source: Provider, address: string, destChain
       },
       onRampContract,
     ] as {
-      [V in CCIPVersion]: readonly [Lane<V>, CCIPContract<CCIPContractType.OnRamp, V>]
+      [V in CCIPVersion]: readonly [Lane<V>, CCIPContract<typeof CCIPContractType.OnRamp, V>]
     }[CCIPVersion]
   })
 }
