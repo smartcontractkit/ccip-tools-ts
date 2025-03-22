@@ -2,14 +2,14 @@
 import eslint from '@eslint/js'
 import importPlugin from 'eslint-plugin-import'
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
-import tseslint from 'typescript-eslint'
+import tseslint, { configs as tseslintConfigs } from 'typescript-eslint'
 
 export default tseslint.config(
   eslint.configs.recommended,
   eslintPluginPrettierRecommended,
   importPlugin.flatConfigs.recommended,
   importPlugin.flatConfigs.typescript,
-  ...tseslint.configs.recommendedTypeChecked,
+  ...tseslintConfigs.recommendedTypeChecked,
   {
     languageOptions: {
       parserOptions: {
@@ -31,8 +31,9 @@ export default tseslint.config(
         },
       ],
       '@typescript-eslint/no-non-null-assertion': 'off',
-      '@typescript-eslint/consistent-type-imports': ['error', { fixStyle: 'inline-type-imports' }],
-      '@typescript-eslint/consistent-type-exports': 'error',
+      '@typescript-eslint/consistent-type-imports': ['warn', { fixStyle: 'inline-type-imports' }],
+      '@typescript-eslint/consistent-type-exports': 'warn',
+      '@typescript-eslint/no-import-type-side-effects': 'warn',
     },
   },
   {
@@ -60,6 +61,7 @@ export default tseslint.config(
           project: ['tsconfig.json'],
         },
       },
+      'import/extensions': ['.ts', '.js'],
     },
     rules: {
       'import/order': [
@@ -69,6 +71,8 @@ export default tseslint.config(
           alphabetize: { order: 'asc' },
         },
       ],
+      'import/no-duplicates': ['warn', { 'prefer-inline': true }],
+      'import/extensions': ['warn', 'always', { ignorePackages: true, checkTypeImports: true }],
     },
   },
 )

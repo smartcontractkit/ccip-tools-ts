@@ -120,6 +120,7 @@ const selectors: Selectors = {
     name: 'ethereum-testnet-sepolia-mode-1',
   },
   '998': { selector: 4286062357653186312n, name: 'hyperliquid-testnet' },
+  '999': { selector: 2442541497099098535n, name: 'hyperliquid-mainnet' },
   '1029': { selector: 4459371029167934217n, name: 'bittorrent_chain-testnet' },
   '1088': { selector: 8805746078405598895n, name: 'ethereum-mainnet-metis-1' },
   '1101': {
@@ -303,7 +304,8 @@ const selectors: Selectors = {
     name: 'ethereum-testnet-sepolia-base-1',
   },
   '98864': { selector: 3743020999916460931n, name: 'plume-devnet' },
-  '98865': { selector: 3208172210661564830n, name: 'plume-mainnet' },
+  '98865': { selector: 3208172210661564830n },
+  '98866': { selector: 17912061998839310979n, name: 'plume-mainnet' },
   '167000': { selector: 16468599424800719238n, name: 'ethereum-mainnet-taiko-1' },
   '167009': {
     selector: 7248756420937879088n,

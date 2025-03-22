@@ -5,9 +5,9 @@ import {
   chainSelectorFromId,
   estimateExecGasForRequest,
   getOnRampLane,
-} from '../lib/index.js'
-import type { Providers } from '../providers.js'
-import { parseTokenAmounts, sourceToDestTokenAmounts } from './utils.js'
+} from '../lib/index.ts'
+import type { Providers } from '../providers.ts'
+import { parseTokenAmounts, sourceToDestTokenAmounts } from './utils.ts'
 
 export async function estimateGas(
   providers: Providers,

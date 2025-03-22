@@ -37,8 +37,8 @@ import {
   discoverOffRamp,
   fetchExecutionReceipts,
   validateOffRamp,
-} from './execution.js'
-import { getLeafHasher } from './hasher/index.js'
+} from './execution.ts'
+import { getLeafHasher } from './hasher/index.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
@@ -47,8 +47,8 @@ import {
   CCIPVersion,
   CCIP_ABIs,
   ExecutionState,
-} from './types.js'
-import { chainSelectorFromId, lazyCached } from './utils.js'
+} from './types.ts'
+import { chainSelectorFromId, lazyCached } from './utils.ts'
 
 beforeEach(() => {
   jest.clearAllMocks()

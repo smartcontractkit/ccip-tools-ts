@@ -1,4 +1,4 @@
-import { CCIPVersion } from '../types.js'
+import { CCIPVersion } from '../types.ts'
 
 jest.mock('./evm', () => {
   const originalModule = jest.requireActual('./evm')
@@ -18,7 +18,7 @@ jest.mock('./aptos', () => {
   }
 })
 
-import { getLeafHasher } from './hasher.js'
+import { getLeafHasher } from './hasher.ts'
 
 describe('get leaf hasher', () => {
   it('should return the V1_2 EVM leaf hasher when version is CCIPVersion.V1_2', () => {

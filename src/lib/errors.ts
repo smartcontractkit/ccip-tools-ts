@@ -12,14 +12,14 @@ import {
   isHexString,
 } from 'ethers'
 
-import Token from '../abi/BurnMintERC677Token.js'
-import BurnMintTokenPool from '../abi/BurnMintTokenPool_1_5_1.js'
-import FeeQuoter from '../abi/FeeQuoter_1_6.js'
-import LockReleaseTokenPool from '../abi/LockReleaseTokenPool_1_5_1.js'
-import Router from '../abi/Router.js'
-import TokenAdminRegistry from '../abi/TokenAdminRegistry_1_5.js'
-import { CCIP_ABIs, defaultAbiCoder } from './types.js'
-import { lazyCached } from './utils.js'
+import Token from '../abi/BurnMintERC677Token.ts'
+import BurnMintTokenPool from '../abi/BurnMintTokenPool_1_5_1.ts'
+import FeeQuoter from '../abi/FeeQuoter_1_6.ts'
+import LockReleaseTokenPool from '../abi/LockReleaseTokenPool_1_5_1.ts'
+import Router from '../abi/Router.ts'
+import TokenAdminRegistry from '../abi/TokenAdminRegistry_1_5.ts'
+import { CCIP_ABIs, defaultAbiCoder } from './types.ts'
+import { lazyCached } from './utils.ts'
 
 const ifaces: Record<string, Interface> = {
   Router: lazyCached('Interface Router', () => new Interface(Router)),

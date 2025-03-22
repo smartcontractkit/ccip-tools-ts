@@ -12,9 +12,9 @@ import {
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
-import TokenABI from '../abi/BurnMintERC677Token.js'
-import RouterABI from '../abi/Router.js'
-import { discoverOffRamp, validateOffRamp } from './execution.js'
+import TokenABI from '../abi/BurnMintERC677Token.ts'
+import RouterABI from '../abi/Router.ts'
+import { discoverOffRamp, validateOffRamp } from './execution.ts'
 import {
   type CCIPContract,
   type CCIPContractType,
@@ -22,8 +22,8 @@ import {
   type Lane,
   CCIPVersion,
   defaultAbiCoder,
-} from './types.js'
-import { networkInfo } from './utils.js'
+} from './types.ts'
+import { networkInfo } from './utils.ts'
 
 const BALANCES_SLOT = 0
 const ccipReceive = FunctionFragment.from({

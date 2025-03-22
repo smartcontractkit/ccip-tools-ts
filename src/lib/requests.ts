@@ -24,7 +24,7 @@ import {
   defaultAbiCoder,
   parseExtraArgs,
   parseSourceTokenData,
-} from './types.js'
+} from './types.ts'
 import {
   blockRangeGenerator,
   chainNameFromSelector,
@@ -32,7 +32,7 @@ import {
   lazyCached,
   toObject,
   validateContractType,
-} from './utils.js'
+} from './utils.ts'
 
 async function getOnRampInterface(
   source: Provider,

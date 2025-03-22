@@ -1,6 +1,6 @@
 import { ZeroAddress, getBigInt } from 'ethers'
-import { type CCIPMessage, type CCIPVersion, parseExtraArgs } from '../types.js'
-import { getV12LeafHasher, getV16LeafHasher } from './evm.js'
+import { type CCIPMessage, type CCIPVersion, parseExtraArgs } from '../types.ts'
+import { getV12LeafHasher, getV16LeafHasher } from './evm.ts'
 
 describe('EVM leaf hasher', () => {
   it('should hash v1.5 msg', () => {

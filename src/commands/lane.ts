@@ -2,8 +2,8 @@
 import { Contract, ZeroAddress } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
-import FeeQuoterABI from '../abi/FeeQuoter_1_6.js'
-import RouterABI from '../abi/Router.js'
+import FeeQuoterABI from '../abi/FeeQuoter_1_6.ts'
+import RouterABI from '../abi/Router.ts'
 import {
   type CCIPContract,
   type CCIPVersion,
@@ -19,9 +19,9 @@ import {
   getTypeAndVersion,
   toObject,
   validateContractType,
-} from '../lib/index.js'
-import type { Providers } from '../providers.js'
-import { formatDuration, prettyLane } from './utils.js'
+} from '../lib/index.ts'
+import type { Providers } from '../providers.ts'
+import { formatDuration, prettyLane } from './utils.ts'
 
 export enum Format {
   log = 'log',

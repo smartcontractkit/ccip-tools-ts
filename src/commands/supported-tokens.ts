@@ -33,11 +33,11 @@ import {
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
-import TokenABI from '../abi/BurnMintERC677Token.js'
-import TokenPool_1_5_ABI from '../abi/LockReleaseTokenPool_1_5.js'
-import TokenPool_1_5_1_ABI from '../abi/LockReleaseTokenPool_1_5_1.js'
-import RouterABI from '../abi/Router.js'
-import TokenAdminRegistryABI from '../abi/TokenAdminRegistry_1_5.js'
+import TokenABI from '../abi/BurnMintERC677Token.ts'
+import TokenPool_1_5_ABI from '../abi/LockReleaseTokenPool_1_5.ts'
+import TokenPool_1_5_1_ABI from '../abi/LockReleaseTokenPool_1_5_1.ts'
+import RouterABI from '../abi/Router.ts'
+import TokenAdminRegistryABI from '../abi/TokenAdminRegistry_1_5.ts'
 
 import {
   bigIntReplacer,
@@ -50,10 +50,10 @@ import {
   getOnRampLane,
   getProviderNetwork,
   getTypeAndVersion,
-} from '../lib/index.js'
-import type { Providers } from '../providers.js'
-import { Format } from './types.js'
-import { formatArray, formatDuration, yieldResolved } from './utils.js'
+} from '../lib/index.ts'
+import type { Providers } from '../providers.ts'
+import { Format } from './types.ts'
+import { formatArray, formatDuration, yieldResolved } from './utils.ts'
 
 /**
  * Maximum tokens per registry request.

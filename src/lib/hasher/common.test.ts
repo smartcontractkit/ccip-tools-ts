@@ -1,4 +1,4 @@
-import { hashInternal } from './common.js'
+import { hashInternal } from './common.ts'
 
 describe('common hash', () => {
   it('should hash internal values', () => {

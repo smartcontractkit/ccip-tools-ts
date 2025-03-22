@@ -1,4 +1,4 @@
-import { type Abi } from 'abitype'
+import type { Abi } from 'abitype'
 import {
   type Addressable,
   type BaseContract,
@@ -12,8 +12,8 @@ import {
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
-import SELECTORS from './selectors.js'
-import { type NetworkInfo, CCIPContractType, CCIPVersion, VersionedContractABI } from './types.js'
+import SELECTORS from './selectors.ts'
+import { type NetworkInfo, CCIPContractType, CCIPVersion, VersionedContractABI } from './types.ts'
 
 /**
  * Returns *some* block number with timestamp prior to `timestamp`

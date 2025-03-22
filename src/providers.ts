@@ -7,7 +7,7 @@ import {
   WebSocketProvider,
 } from 'ethers'
 
-import { chainNameFromId, getProviderNetwork } from './lib/index.js'
+import { chainNameFromId, getProviderNetwork } from './lib/index.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
 

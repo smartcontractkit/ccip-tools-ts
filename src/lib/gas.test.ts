@@ -1,8 +1,8 @@
 import { type JsonRpcApiProvider, getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
-import { discoverOffRamp, validateOffRamp } from './execution.js'
-import { estimateExecGasForRequest } from './gas.js'
-import { CCIPContractType, CCIPVersion } from './types.js'
+import { discoverOffRamp, validateOffRamp } from './execution.ts'
+import { estimateExecGasForRequest } from './gas.ts'
+import { CCIPContractType, CCIPVersion } from './types.ts'
 
 jest.mock('./execution.js')
 

@@ -8,13 +8,13 @@ import {
   CCIPContractType,
   CCIPVersion,
   CCIP_ABIs,
-} from './types.js'
+} from './types.ts'
 import {
   blockRangeGenerator,
   getContractProperties,
   getSomeBlockNumberBefore,
   lazyCached,
-} from './utils.js'
+} from './utils.ts'
 
 /**
  * Look for a CommitReport at dest for given CCIP request

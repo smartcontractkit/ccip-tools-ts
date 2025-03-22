@@ -7,15 +7,15 @@ import {
 } from 'abitype'
 import { type Addressable, type Log, type Result, AbiCoder, concat, dataSlice, id } from 'ethers'
 
-import { type TypedContract } from 'ethers-abitype'
-import CommitStore_1_2_ABI from '../abi/CommitStore_1_2.js'
-import CommitStore_1_5_ABI from '../abi/CommitStore_1_5.js'
-import EVM2EVMOffRamp_1_2_ABI from '../abi/OffRamp_1_2.js'
-import EVM2EVMOffRamp_1_5_ABI from '../abi/OffRamp_1_5.js'
-import OffRamp_1_6_ABI from '../abi/OffRamp_1_6.js'
-import EVM2EVMOnRamp_1_2_ABI from '../abi/OnRamp_1_2.js'
-import EVM2EVMOnRamp_1_5_ABI from '../abi/OnRamp_1_5.js'
-import OnRamp_1_6_ABI from '../abi/OnRamp_1_6.js'
+import type { TypedContract } from 'ethers-abitype'
+import CommitStore_1_2_ABI from '../abi/CommitStore_1_2.ts'
+import CommitStore_1_5_ABI from '../abi/CommitStore_1_5.ts'
+import EVM2EVMOffRamp_1_2_ABI from '../abi/OffRamp_1_2.ts'
+import EVM2EVMOffRamp_1_5_ABI from '../abi/OffRamp_1_5.ts'
+import OffRamp_1_6_ABI from '../abi/OffRamp_1_6.ts'
+import EVM2EVMOnRamp_1_2_ABI from '../abi/OnRamp_1_2.ts'
+import EVM2EVMOnRamp_1_5_ABI from '../abi/OnRamp_1_5.ts'
+import OnRamp_1_6_ABI from '../abi/OnRamp_1_6.ts'
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 export const defaultAbiCoder = AbiCoder.defaultAbiCoder()

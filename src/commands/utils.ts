@@ -20,10 +20,10 @@ import {
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
-import TokenABI from '../abi/BurnMintERC677Token.js'
-import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.js'
-import RouterABI from '../abi/Router.js'
-import TokenAdminRegistry from '../abi/TokenAdminRegistry_1_5.js'
+import TokenABI from '../abi/BurnMintERC677Token.ts'
+import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.ts'
+import RouterABI from '../abi/Router.ts'
+import TokenAdminRegistry from '../abi/TokenAdminRegistry_1_5.ts'
 import {
   type CCIPCommit,
   type CCIPContract,
@@ -43,7 +43,7 @@ import {
   networkInfo,
   parseWithFragment,
   recursiveParseError,
-} from '../lib/index.js'
+} from '../lib/index.ts'
 
 export async function getWallet(argv?: { wallet?: string }): Promise<Signer> {
   if ((argv?.wallet ?? '').startsWith('ledger')) {

@@ -1,7 +1,7 @@
 // For reference implementation, see https://github.com/smartcontractkit/ccip/blob/ccip-develop/core/services/ocr2/plugins/ccip/hasher/leaf_hasher.go
 import { concat, id, keccak256, toBeHex, zeroPadValue } from 'ethers'
-import { type CCIPMessage, type CCIPVersion, defaultAbiCoder } from '../types.js'
-import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from './common.js'
+import { type CCIPMessage, type CCIPVersion, defaultAbiCoder } from '../types.ts'
+import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from './common.ts'
 
 const METADATA_PREFIX_1_2 = id('EVM2EVMMessageHashV2')
 export function getV12LeafHasher(

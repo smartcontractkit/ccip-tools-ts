@@ -19,16 +19,16 @@ import {
   fetchRequestsForSender,
   getSomeBlockNumberBefore,
   lazyCached,
-} from '../lib/index.js'
-import type { Providers } from '../providers.js'
-import { Format } from './types.js'
+} from '../lib/index.ts'
+import type { Providers } from '../providers.ts'
+import { Format } from './types.ts'
 import {
   getWallet,
   prettyCommit,
   prettyRequest,
   selectRequest,
   withDateTimestamp,
-} from './utils.js'
+} from './utils.ts'
 
 export async function manualExec(
   providers: Providers,

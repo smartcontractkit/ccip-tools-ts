@@ -1,14 +1,14 @@
 import { type Addressable, type Log, EventFragment, Interface, keccak256 } from 'ethers'
 
-import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.js'
+import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
   type SourceTokenData,
   defaultAbiCoder,
   parseSourceTokenData,
-} from './types.js'
-import { lazyCached, networkInfo } from './utils.js'
+} from './types.ts'
+import { lazyCached, networkInfo } from './utils.ts'
 
 const TokenPoolInterface = lazyCached(
   `Interface BurnMintTokenPool 1.5.1`,

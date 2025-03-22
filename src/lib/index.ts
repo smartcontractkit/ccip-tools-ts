@@ -1,8 +1,8 @@
-export { fetchCommitReport } from './commits.js'
-export { getErrorData, parseWithFragment, recursiveParseError } from './errors.js'
-export { calculateManualExecProof, discoverOffRamp, fetchExecutionReceipts } from './execution.js'
-export { estimateExecGasForRequest } from './gas.js'
-export { fetchOffchainTokenData } from './offchain.js'
+export { fetchCommitReport } from './commits.ts'
+export { getErrorData, parseWithFragment, recursiveParseError } from './errors.ts'
+export { calculateManualExecProof, discoverOffRamp, fetchExecutionReceipts } from './execution.ts'
+export { estimateExecGasForRequest } from './gas.ts'
+export { fetchOffchainTokenData } from './offchain.ts'
 export {
   decodeMessage,
   fetchAllMessagesInBatch,
@@ -11,7 +11,7 @@ export {
   fetchCCIPMessagesInTx,
   fetchRequestsForSender,
   getOnRampLane,
-} from './requests.js'
+} from './requests.ts'
 export {
   type CCIPCommit,
   type CCIPContract,
@@ -30,7 +30,7 @@ export {
   defaultAbiCoder,
   encodeExtraArgs,
   parseExtraArgs,
-} from './types.js'
+} from './types.ts'
 export {
   bigIntReplacer,
   bigIntReviver,
@@ -48,4 +48,4 @@ export {
   networkInfo,
   toObject,
   validateContractType,
-} from './utils.js'
+} from './utils.ts'
