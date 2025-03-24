@@ -25,13 +25,13 @@
     "./dist/**"
   ],
   "devDependencies": {
-    "@eslint/js": "9.22.0",
+    "@eslint/js": "9.23.0",
     "@types/jest": "29.5.14",
-    "@types/node": "22.13.10",
+    "@types/node": "22.13.11",
     "@types/yargs": "17.0.33",
-    "eslint": "9.22.0",
+    "eslint": "9.23.0",
     "eslint-config-prettier": "10.1.1",
-    "eslint-import-resolver-typescript": "3.8.5",
+    "eslint-import-resolver-typescript": "4.2.2",
     "eslint-plugin-import": "2.31.0",
     "eslint-plugin-prettier": "5.2.3",
     "ethers-abitype": "1.0.3",
@@ -41,10 +41,10 @@
     "ts-jest": "29.2.6",
     "tsx": "4.19.3",
     "typescript": "5.8.2",
-    "typescript-eslint": "8.26.1"
+    "typescript-eslint": "8.27.0"
   },
   "dependencies": {
-    "@inquirer/prompts": "7.3.3",
+    "@inquirer/prompts": "7.4.0",
     "@solana/web3.js": "1.98.0",
     "@xlabs-xyz/ledger-signer-ethers-v6": "^0.0.1",
     "abitype": "1.0.8",

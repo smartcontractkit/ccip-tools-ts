@@ -19,16 +19,16 @@ import {
   fetchRequestsForSender,
   getSomeBlockNumberBefore,
   lazyCached,
-} from '../lib/index.js'
-import type { Providers } from '../providers.js'
-import { Format } from './types.js'
+} from '../lib/index.ts'
+import type { Providers } from '../providers.ts'
+import { Format } from './types.ts'
 import {
   getWallet,
   prettyCommit,
   prettyRequest,
   selectRequest,
   withDateTimestamp,
-} from './utils.js'
+} from './utils.ts'
 
 export async function manualExec(
   providers: Providers,
@@ -111,13 +111,9 @@ export async function manualExec(
   })
 
   if (argv.estimateGasLimit != null) {
-    let estimated = await estimateExecGasForRequest(
-      source,
-      dest,
-      request.lane.onRamp,
-      request.message,
-      { offRamp: await offRampContract.getAddress() },
-    )
+    let estimated = await estimateExecGasForRequest(dest, request, {
+      offRamp: await offRampContract.getAddress(),
+    })
     console.info('Estimated gasLimit override:', estimated)
     estimated += Math.ceil(estimated * (argv.estimateGasLimit / 100))
     if (request.message.gasLimit >= estimated) {

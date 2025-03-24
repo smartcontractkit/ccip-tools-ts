@@ -5,7 +5,7 @@ import {
   encodeSourceTokenData,
   parseExtraArgs,
   parseSourceTokenData,
-} from './types.js'
+} from './types.ts'
 
 describe('encodeExtraArgs', () => {
   it('should encode v2 args', () => {

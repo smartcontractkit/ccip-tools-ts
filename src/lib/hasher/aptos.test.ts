@@ -1,6 +1,6 @@
 import { hexlify, toUtf8Bytes, zeroPadValue } from 'ethers'
-import { type CCIPMessage, type CCIPVersion } from '../types.js'
-import { hashAptosMessage, hashAptosMetadata } from './aptos.js'
+import type { CCIPMessage, CCIPVersion } from '../types.ts'
+import { hashAptosMessage, hashAptosMetadata } from './aptos.ts'
 
 describe('aptos hasher', () => {
   // Aptos encoding tests mimic the Move test: https://github.com/smartcontractkit/chainlink-internal-integrations/blob/develop/aptos/contracts/ccip/sources/offramp.move#L1517

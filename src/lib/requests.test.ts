@@ -61,9 +61,9 @@ import {
   fetchCCIPMessagesInTx,
   fetchRequestsForSender,
   getOnRampLane,
-} from './requests.js'
-import { type Lane, CCIPContractType, CCIPVersion, CCIP_ABIs } from './types.js'
-import { bigIntReplacer, lazyCached } from './utils.js'
+} from './requests.ts'
+import { type Lane, CCIPContractType, CCIPVersion, CCIP_ABIs } from './types.ts'
+import { bigIntReplacer, lazyCached } from './utils.ts'
 
 const topic0 = lazyCached(
   `Interface ${CCIPContractType.OnRamp} ${CCIPVersion.V1_6}`,

@@ -9,8 +9,8 @@ import {
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
-import Router from '../abi/Router.js'
-import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.js'
+import Router from '../abi/Router.ts'
+import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
 import {
   type CCIPContract,
   type CCIPExecution,
@@ -22,7 +22,7 @@ import {
   CCIPVersion,
   CCIP_ABIs,
   ExecutionState,
-} from './types.js'
+} from './types.ts'
 import {
   blockRangeGenerator,
   chainNameFromSelector,
@@ -31,7 +31,7 @@ import {
   lazyCached,
   toObject,
   validateContractType,
-} from './utils.js'
+} from './utils.ts'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds

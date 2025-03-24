@@ -24,7 +24,7 @@ import {
   defaultAbiCoder,
   parseExtraArgs,
   parseSourceTokenData,
-} from './types.js'
+} from './types.ts'
 import {
   blockRangeGenerator,
   chainNameFromSelector,
@@ -32,7 +32,7 @@ import {
   lazyCached,
   toObject,
   validateContractType,
-} from './utils.js'
+} from './utils.ts'
 
 async function getOnRampInterface(
   source: Provider,
@@ -153,6 +153,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
       messageId: data.messageId as string,
       sequenceNumber: data.sequenceNumber as bigint,
       nonce: data.nonce as bigint,
+      sourceChainSelector: data.sourceChainSelector as bigint,
     }
   }
   if (data.gasLimit == null) {

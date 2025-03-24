@@ -1,9 +1,9 @@
 // For reference implementation, see https://github.com/smartcontractkit/ccip/blob/ccip-develop/core/services/ocr2/plugins/ccip/merklemulti/merkle_multi_test.go
 import { concat, keccak256 } from 'ethers'
 
-import { testVectors } from './__mocks__/merklemultiTestVectors.js'
-import { ZERO_HASH, hashInternal } from './common.js'
-import { Proof, Tree, verifyComputeRoot } from './merklemulti.js'
+import { testVectors } from './__mocks__/merklemultiTestVectors.ts'
+import { ZERO_HASH, hashInternal } from './common.ts'
+import { Proof, Tree, verifyComputeRoot } from './merklemulti.ts'
 // import { CombinationGenerator } from './utils'
 
 const a = keccak256('0x0a')

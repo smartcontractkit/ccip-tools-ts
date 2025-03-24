@@ -1,6 +1,6 @@
 import type { Network, Provider } from 'ethers'
 
-import { CCIPContractType, CCIPVersion } from './types.js'
+import { CCIPContractType, CCIPVersion } from './types.ts'
 import {
   bigIntReplacer,
   bigIntReviver,
@@ -15,7 +15,7 @@ import {
   lazyCached,
   networkInfo,
   validateContractType,
-} from './utils.js'
+} from './utils.ts'
 
 let provider: jest.Mocked<Provider>
 

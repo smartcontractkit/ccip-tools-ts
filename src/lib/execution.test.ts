@@ -37,8 +37,8 @@ import {
   discoverOffRamp,
   fetchExecutionReceipts,
   validateOffRamp,
-} from './execution.js'
-import { getLeafHasher } from './hasher/index.js'
+} from './execution.ts'
+import { getLeafHasher } from './hasher/index.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
@@ -47,8 +47,8 @@ import {
   CCIPVersion,
   CCIP_ABIs,
   ExecutionState,
-} from './types.js'
-import { chainSelectorFromId, lazyCached } from './utils.js'
+} from './types.ts'
+import { chainSelectorFromId, lazyCached } from './utils.ts'
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -68,9 +68,10 @@ describe('calculateManualExecProof', () => {
         messageId: ZeroHash,
         sequenceNumber: 1n,
         nonce: 1n,
+        sourceChainSelector: lane.sourceChainSelector,
       },
       messageId: ZeroHash,
-      sourceChainSelector: chainSelectorFromId(11155111),
+      sourceChainSelector: lane.sourceChainSelector,
       sender: '0x0000000000000000000000000000000000000001',
       receiver: '0x0000000000000000000000000000000000000002',
       data: '0x',
@@ -88,9 +89,10 @@ describe('calculateManualExecProof', () => {
         messageId: ZeroHash,
         sequenceNumber: 2n,
         nonce: 2n,
+        sourceChainSelector: lane.sourceChainSelector,
       },
       messageId: ZeroHash,
-      sourceChainSelector: chainSelectorFromId(11155111),
+      sourceChainSelector: lane.sourceChainSelector,
       sender: '0x0000000000000000000000000000000000000011',
       receiver: '0x0000000000000000000000000000000000000012',
       data: '0x',

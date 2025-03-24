@@ -1,15 +1,8 @@
-import {
-  type JsonRpcApiProvider,
-  type Provider,
-  getAddress,
-  hexlify,
-  randomBytes,
-  toBeHex,
-} from 'ethers'
+import { type JsonRpcApiProvider, getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
-import { discoverOffRamp, validateOffRamp } from './execution.js'
-import { estimateExecGasForRequest } from './gas.js'
-import { CCIPContractType, CCIPVersion } from './types.js'
+import { discoverOffRamp, validateOffRamp } from './execution.ts'
+import { estimateExecGasForRequest } from './gas.ts'
+import { CCIPContractType, CCIPVersion } from './types.ts'
 
 jest.mock('./execution.js')
 
@@ -44,10 +37,13 @@ beforeEach(() => {
 })
 
 describe('estimateExecGasForRequest', () => {
+  const sourceChainSelector = 1n,
+    destChainSelector = 10n
+
   it('should estimate 1.2 gas correctly', async () => {
     const onRamp = getAddress(hexlify(randomBytes(20)))
     const destTokenAddress = getAddress(hexlify(randomBytes(20)))
-    const request = {
+    const message = {
       sender: getAddress(hexlify(randomBytes(20))),
       receiver: '0x00bb',
       data: '0xdaad',
@@ -60,12 +56,19 @@ describe('estimateExecGasForRequest', () => {
       getPoolBySourceToken: jest.fn(() => getAddress(hexlify(randomBytes(20)))),
     }
     ;(validateOffRamp as jest.Mock).mockResolvedValue(offRamp)
+    const lane = {
+      sourceChainSelector,
+      destChainSelector,
+      onRamp,
+      version: CCIPVersion.V1_2,
+    }
 
     const result = await estimateExecGasForRequest(
-      mockProvider as unknown as Provider,
       mockProvider as unknown as JsonRpcApiProvider,
-      onRamp,
-      request,
+      {
+        lane,
+        message,
+      },
       hints,
     )
 
@@ -73,7 +76,7 @@ describe('estimateExecGasForRequest', () => {
     expect(mockProvider.send).toHaveBeenCalledWith('eth_estimateGas', [
       expect.objectContaining({
         from: router,
-        to: request.receiver,
+        to: message.receiver,
         data: expect.stringMatching(/^0x85572ffb/),
       }),
       'latest',
@@ -93,12 +96,19 @@ describe('estimateExecGasForRequest', () => {
   it('should estimate 1.5 gas correctly', async () => {
     const onRamp = '0xOnRamp15'
     const destTokenAddress = getAddress(hexlify(randomBytes(20)))
-    const request = {
+    const message = {
       sender: getAddress(hexlify(randomBytes(20))),
       receiver: '0x00dd',
       data: '0xdaad',
       tokenAmounts: [{ destTokenAddress, amount: 1000n }],
     }
+    const lane = {
+      sourceChainSelector,
+      destChainSelector,
+      onRamp,
+      version: CCIPVersion.V1_5,
+    }
+
     const router = getAddress(hexlify(randomBytes(20)))
     const offRamp = {
       getDynamicConfig: jest.fn(() => ({ router })),
@@ -110,18 +120,16 @@ describe('estimateExecGasForRequest', () => {
     )
     mockProvider.send.mockReturnValueOnce(toBeHex(46_000))
 
-    const result = await estimateExecGasForRequest(
-      mockProvider as unknown as Provider,
-      mockProvider as unknown as JsonRpcApiProvider,
-      onRamp,
-      request,
-    )
+    const result = await estimateExecGasForRequest(mockProvider as unknown as JsonRpcApiProvider, {
+      lane,
+      message,
+    })
 
     expect(result).toBe(25700) // 46000 - (21000 - 700)
     expect(mockProvider.send).toHaveBeenCalledWith('eth_estimateGas', [
       expect.objectContaining({
         from: router,
-        to: request.receiver,
+        to: message.receiver,
         data: expect.stringMatching(/^0x85572ffb/),
       }),
       'latest',

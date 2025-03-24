@@ -1,7 +1,7 @@
 import type { Provider } from 'ethers'
 
-import { fetchCommitReport } from './commits.js'
-import { type Lane, CCIPContractType, CCIPVersion } from './types.js'
+import { fetchCommitReport } from './commits.ts'
+import { type Lane, CCIPContractType, CCIPVersion } from './types.ts'
 
 const mockProvider = {
   get provider() {

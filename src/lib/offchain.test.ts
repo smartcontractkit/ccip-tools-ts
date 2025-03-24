@@ -1,9 +1,9 @@
 import { Interface, getAddress, hexlify, id, keccak256, randomBytes } from 'ethers'
 
-import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.js'
-import { LBTC_EVENT, fetchOffchainTokenData } from './offchain.js'
-import { type CCIPRequest, defaultAbiCoder } from './types.js'
-import { lazyCached } from './utils.js'
+import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.ts'
+import { LBTC_EVENT, fetchOffchainTokenData } from './offchain.ts'
+import { type CCIPRequest, defaultAbiCoder } from './types.ts'
+import { lazyCached } from './utils.ts'
 
 const origFetch = global.fetch
 

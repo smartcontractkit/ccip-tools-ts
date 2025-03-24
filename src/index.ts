@@ -15,9 +15,9 @@ import {
   showLaneConfigs,
   showRequests,
   showSupportedTokens,
-} from './commands/index.js'
-import { logParsedError } from './commands/utils.js'
-import { Providers } from './providers.js'
+} from './commands/index.ts'
+import { logParsedError } from './commands/utils.ts'
+import { Providers } from './providers.ts'
 
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail

@@ -1,8 +1,8 @@
 import { Contract, ZeroAddress, hexlify, isHexString, toUtf8Bytes, zeroPadValue } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
-import TokenABI from '../abi/BurnMintERC677Token.js'
-import RouterABI from '../abi/Router.js'
+import TokenABI from '../abi/BurnMintERC677Token.ts'
+import RouterABI from '../abi/Router.ts'
 import {
   bigIntReplacer,
   chainIdFromName,
@@ -11,16 +11,17 @@ import {
   encodeExtraArgs,
   estimateExecGasForRequest,
   fetchCCIPMessagesInTx,
-} from '../lib/index.js'
-import type { Providers } from '../providers.js'
-import { Format } from './types.js'
+  getOnRampLane,
+} from '../lib/index.ts'
+import type { Providers } from '../providers.ts'
+import { Format } from './types.ts'
 import {
   getWallet,
   parseTokenAmounts,
   prettyRequest,
   sourceToDestTokenAmounts,
   withDateTimestamp,
-} from './utils.js'
+} from './utils.ts'
 
 type AnyMessage = Parameters<TypedContract<typeof RouterABI>['ccipSend']>[1]
 
@@ -70,18 +71,17 @@ export async function sendMessage(
       source,
       dest: await providers.forChainId(destChainId),
     })
+    const [lane] = await getOnRampLane(source, onRampAddress, destSelector)
 
-    const estimated = await estimateExecGasForRequest(
-      source,
-      await providers.forChainId(destChainId),
-      onRampAddress,
-      {
+    const estimated = await estimateExecGasForRequest(await providers.forChainId(destChainId), {
+      lane,
+      message: {
         sender: await wallet.getAddress(),
         receiver,
         data,
         tokenAmounts: destTokenAmounts,
       },
-    )
+    })
     console.log('Estimated gasLimit:', estimated)
     argv.gasLimit = Math.ceil(estimated * (1 + argv.estimateGasLimit / 100))
   }
