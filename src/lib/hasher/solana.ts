@@ -31,7 +31,7 @@ export const hashSolanaMessage = (
 ): string => {
   const innerHash = concat([
     encode('bytes32', message.header.messageId),
-    encodeSolanaAddress(message.receiver),
+    zeroPadValue(message.receiver, 32),
     encode('uint64', message.header.sequenceNumber),
     encode('uint256', message.gasLimit),
     encode('uint64', message.header.nonce),
@@ -42,7 +42,7 @@ export const hashSolanaMessage = (
     ...message.tokenAmounts.map((token) =>
       concat([
         encodeSolanaAddress(token.sourcePoolAddress),
-        encodeSolanaAddress(token.destTokenAddress),
+        zeroPadValue(token.destTokenAddress, 32),
         encode('uint32', token.destGasAmount),
         encode('bytes', token.extraData),
         encode('uint256', token.amount),
