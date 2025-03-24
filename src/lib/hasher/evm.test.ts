@@ -33,7 +33,7 @@ describe('EVM leaf hasher', () => {
       ],
       sourceTokenData: [],
       messageId: header.messageId,
-    } as CCIPMessage<CCIPVersion.V1_5>
+    } as CCIPMessage<typeof CCIPVersion.V1_5>
 
     const msgHash = hasher(message)
     expect(msgHash).toBe('0x46ad031bfb052db2e4a2514fed8dc480b98e5ce4acb55d5640d91407e0d8a3e9')
@@ -55,7 +55,7 @@ describe('EVM leaf hasher', () => {
     }
     const extraArgs =
       '0x181dcf100000000000000000000000000000000000000000000000005eb3e65ecb9fb54e0000000000000000000000000000000000000000000000000000000000000001'
-    const message: CCIPMessage<CCIPVersion.V1_6> = {
+    const message: CCIPMessage<typeof CCIPVersion.V1_6> = {
       header,
       sender: '0x00000000000000000000000021aa8a422bfb1a82e254331259c1cbbea7408b44',
       receiver: '0x56ad368c27ab9a428e9992c3843c79a35830794a',

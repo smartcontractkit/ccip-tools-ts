@@ -109,7 +109,7 @@ export async function sendMessage(
   // make sure to approve once per token, for the total amount (including fee, if needed)
   const amountsToApprove = tokenAmounts.reduce(
     (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
-    <Record<string, bigint>>{},
+    {} as Record<string, bigint>,
   )
   if (message.feeToken !== ZeroAddress) {
     amountsToApprove[message.feeToken as string] =

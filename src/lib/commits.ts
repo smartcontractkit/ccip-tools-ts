@@ -78,8 +78,8 @@ export async function fetchCommitReport(
         try {
           const [staticConfig] = await getContractProperties(
             [log.address, commitStoreInterface, dest] as unknown as CCIPContract<
-              CCIPContractType.CommitStore,
-              CCIPVersion.V1_2 | CCIPVersion.V1_5
+              typeof CCIPContractType.CommitStore,
+              typeof CCIPVersion.V1_2 | typeof CCIPVersion.V1_5
             >,
             'getStaticConfig',
           )

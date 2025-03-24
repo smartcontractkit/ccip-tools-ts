@@ -7,8 +7,8 @@ export const getV16AptosLeafHasher =
     sourceChainSelector: bigint,
     destChainSelector: bigint,
     onRamp: string,
-  ): LeafHasher<CCIPVersion.V1_6> =>
-  (message: CCIPMessage<CCIPVersion.V1_6>): string =>
+  ): LeafHasher<typeof CCIPVersion.V1_6> =>
+  (message: CCIPMessage<typeof CCIPVersion.V1_6>): string =>
     hashAptosMessage(message, hashAptosMetadata(sourceChainSelector, destChainSelector, onRamp))
 
 const encode = (target: string, value: string | bigint | number) =>
@@ -26,7 +26,7 @@ const encodeRawBytes = (value: string): string => {
 }
 
 export const hashAptosMessage = (
-  message: CCIPMessage<CCIPVersion.V1_6>,
+  message: CCIPMessage<typeof CCIPVersion.V1_6>,
   metadataHash: string,
 ): string => {
   const innerHash = concat([

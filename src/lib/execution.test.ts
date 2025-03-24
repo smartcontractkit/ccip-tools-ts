@@ -55,14 +55,14 @@ beforeEach(() => {
 })
 
 describe('calculateManualExecProof', () => {
-  const lane: Lane<CCIPVersion.V1_5> = {
+  const lane: Lane<typeof CCIPVersion.V1_5> = {
     sourceChainSelector: chainSelectorFromId(11155111),
     destChainSelector: chainSelectorFromId(421614),
     onRamp: '0x0000000000000000000000000000000000000007',
     version: CCIPVersion.V1_5,
   }
   const hasher = getLeafHasher(lane)
-  const messages: CCIPMessage<CCIPVersion.V1_5>[] = [
+  const messages: CCIPMessage<typeof CCIPVersion.V1_5>[] = [
     {
       header: {
         messageId: ZeroHash,

@@ -72,7 +72,7 @@ export async function showLaneConfigs(
     onRampRouter = dynamicConfig.router as string
   } else {
     const [sequenceNumber, allowlistEnabled, onRampRouter_] = await (
-      onRampContract as CCIPContract<CCIPContractType.OnRamp, CCIPVersion.V1_6>
+      onRampContract as CCIPContract<typeof CCIPContractType.OnRamp, typeof CCIPVersion.V1_6>
     ).getDestChainConfig(lane.destChainSelector)
     onRampRouter = onRampRouter_ as string
     destChainConfig = { sequenceNumber, allowlistEnabled, router: onRampRouter }
@@ -161,7 +161,7 @@ export async function showLaneConfigs(
   } else {
     sourceChainConfig = toObject(
       await (
-        offRampContract as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_6>
+        offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_6>
       ).getSourceChainConfig(lane.sourceChainSelector),
     )
     offRampRouter = sourceChainConfig.router as string

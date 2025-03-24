@@ -8,7 +8,7 @@ export function getV12LeafHasher(
   sourceChainSelector: bigint,
   destChainSelector: bigint,
   onRamp: string,
-): LeafHasher<CCIPVersion.V1_2 | CCIPVersion.V1_5> {
+): LeafHasher<typeof CCIPVersion.V1_2 | typeof CCIPVersion.V1_5> {
   const metadataHash = keccak256(
     concat([
       METADATA_PREFIX_1_2,
@@ -18,7 +18,7 @@ export function getV12LeafHasher(
     ]),
   )
 
-  return (message: CCIPMessage<CCIPVersion.V1_2 | CCIPVersion.V1_5>): string => {
+  return (message: CCIPMessage<typeof CCIPVersion.V1_2 | typeof CCIPVersion.V1_5>): string => {
     const encodedTokens = defaultAbiCoder.encode(
       ['tuple(address token, uint256 amount)[]'],
       [message.tokenAmounts],
@@ -79,7 +79,7 @@ export function getV16LeafHasher(
   sourceChainSelector: bigint,
   destChainSelector: bigint,
   onRamp: string,
-): LeafHasher<CCIPVersion.V1_6> {
+): LeafHasher<typeof CCIPVersion.V1_6> {
   const metadataInput = concat([
     ANY_2_EVM_MESSAGE_HASH,
     toBeHex(sourceChainSelector, 32),
@@ -87,7 +87,7 @@ export function getV16LeafHasher(
     keccak256(zeroPadValue(onRamp, 32)),
   ])
 
-  return (message: CCIPMessage<CCIPVersion.V1_6>): string => {
+  return (message: CCIPMessage<typeof CCIPVersion.V1_6>): string => {
     const encodedTokens = defaultAbiCoder.encode(
       [
         'tuple(bytes sourcePoolAddress, address destTokenAddress, uint32 destGasAmount, bytes extraData, uint256 amount)[]',
