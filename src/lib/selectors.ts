@@ -306,6 +306,7 @@ const selectors: Selectors = {
   '98864': { selector: 3743020999916460931n, name: 'plume-devnet' },
   '98865': { selector: 3208172210661564830n },
   '98866': { selector: 17912061998839310979n, name: 'plume-mainnet' },
+  '98867': { selector: 13874588925447303949n, name: 'plume-testnet-sepolia' },
   '167000': { selector: 16468599424800719238n, name: 'ethereum-mainnet-taiko-1' },
   '167009': {
     selector: 7248756420937879088n,
