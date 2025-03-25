@@ -2,6 +2,20 @@ import { type Addressable, type Log, EventFragment, Interface, keccak256 } from 
 
 import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.ts'
 import {
+  type AttestationClient,
+  LBTCAttestationClient,
+  USDCAttestationClient,
+} from './attestation/index.ts'
+import {
+  getLBTCDepositHashes,
+  isBurnedEvent,
+  isLBTCEvent,
+  isTransferEvent,
+  isUSDCEvent,
+} from './events/index.ts'
+import type { ChainEvent } from './events/types.ts'
+
+import {
   type CCIPMessage,
   type CCIPRequest,
   type SourceTokenData,
@@ -203,6 +217,7 @@ async function getLbtcTokenData(
 }
 
 /**
+ * @deprecated Use fetchOffchainTokenDataV2 instead
  * Fetch offchain token data for all transfers in request
  *
  * @param request - Request (or subset of) to fetch offchainTokenData for
@@ -256,4 +271,134 @@ export async function fetchOffchainTokenData(
     }
   }
   return offchainTokenData
+}
+
+// ----- Logic Replication using a chain agnostic input -----
+export type FetchOffchainTokenDataInput = {
+  sourceChainSelector: bigint
+  ccipLog: Pick<ChainEvent, 'id' | 'index'>
+  txLogs: ChainEvent[]
+  sourceTokenDatas: SourceTokenData[]
+}
+
+/**
+ * Fetches attestations for all token transfers in request
+ * If the request is a <1.6 request, build input.sourceTokenData parsing message.sourceTokenData with @parseSourceTokenData
+ */
+export async function fetchOffchainTokenDataV2(
+  input: FetchOffchainTokenDataInput,
+): Promise<string[]> {
+  const { isTestnet } = networkInfo(input.sourceChainSelector)
+  const usdcAttClient = new USDCAttestationClient(isTestnet)
+  const lbtcAttClient = new LBTCAttestationClient(isTestnet)
+
+  // there's a chance there are other CCIPSendRequested in same tx,
+  // and they may contain USDC transfers as well, so we select
+  // any possible USDC logs after that and before our CCIPSendRequested
+  const usdcRelevantLogs = filterTxLogs(input.ccipLog, input.txLogs)
+  const usdAtts = await getUsdcOffchainData(usdcAttClient, input.sourceTokenDatas, usdcRelevantLogs)
+  // TODO: Should we use filtered logs for lbtc as well?
+  const lbtcAtts = await getLbtcOffchainData(lbtcAttClient, input.sourceTokenDatas, input.txLogs)
+
+  const offchainTokenData = input.sourceTokenDatas.map((_, i) => {
+    if (usdAtts[i]) return usdAtts[i]
+    if (lbtcAtts[i]) return lbtcAtts[i]
+    return '0x'
+  })
+
+  return offchainTokenData
+}
+
+const filterTxLogs = (
+  ccipLog: Pick<ChainEvent, 'id' | 'index'>,
+  logs: ChainEvent[],
+): ChainEvent[] => {
+  const prevCcipRequestIdx =
+    logs.find(({ id, index }) => id === ccipLog.id && index < ccipLog.index)?.index ?? -1
+  return logs.filter(({ index }) => prevCcipRequestIdx < index && index < ccipLog.index)
+}
+
+const getUsdcOffchainData = async (
+  attClient: AttestationClient,
+  sourceTokenDatas: SourceTokenData[],
+  events: ChainEvent[],
+): Promise<(string | undefined)[]> => {
+  const attestations: (string | undefined)[] = []
+
+  const messageSentPerTokenAndPool = events.reduce((acc, event, i, arr) => {
+    // for our MessageSent of interest (USDC-like), the token is the contract
+    // which emitted a (burn) Transfer immediately before this event, and the pool emitted a Burned
+    // event 2 events after
+    const transferEvent = arr[i - 1]
+    const poolEvent = arr[i + 2]
+    if (!isUSDCEvent(event) || !isTransferEvent(transferEvent) || !isBurnedEvent(poolEvent))
+      return acc
+
+    const token = transferEvent.address
+    const pool = poolEvent.address
+    acc.set(token, [...(acc.get(token) ?? []), event])
+    acc.set(pool, [...(acc.get(pool) ?? []), event])
+
+    return acc
+  }, new Map<string | Addressable, (typeof events)[number][]>())
+
+  for (const [i, data] of sourceTokenDatas.entries()) {
+    const sourcePoolAddress = data.sourcePoolAddress
+
+    // what if there are more USDC transfers of this same token after this one?
+    const tokenTransfersCountAfter = sourceTokenDatas.filter(
+      (d, j) => d.sourcePoolAddress === sourcePoolAddress && j > i,
+    ).length
+
+    let messageSentLog: (typeof events)[number] | undefined
+    const messageSents = messageSentPerTokenAndPool.get(sourcePoolAddress)
+    if (messageSents) {
+      // look from the end (near our request), but skip MessageSents for further transfers
+      messageSentLog = messageSents[messageSents.length - 1 - tokenTransfersCountAfter]
+    }
+
+    let tokenData: string | undefined
+    if (messageSentLog) {
+      try {
+        // TODO: This probably need to be abstracted per chain
+        const message = defaultAbiCoder.decode(USDC_EVENT.inputs, messageSentLog.data)[0] as string
+        const { attestation } = await attClient.getAttestation(message)
+        tokenData = defaultAbiCoder.encode(
+          ['tuple(bytes message, bytes attestation)'],
+          [{ message, attestation }],
+        )
+      } catch (_) {
+        // maybe not a USDC transfer
+      }
+    }
+    attestations.push(tokenData)
+  }
+
+  return attestations
+}
+
+const getLbtcOffchainData = (
+  attClient: AttestationClient,
+  tokenData: SourceTokenData[],
+  events: ChainEvent[],
+): Promise<(string | undefined)[]> => {
+  const lbtcDepositHashes = new Set(
+    events.filter((event) => isLBTCEvent(event)).map(getLBTCDepositHashes),
+  )
+
+  return Promise.all(
+    tokenData.map(async ({ extraData }) => {
+      // Attestation is required when SourceTokenData.extraData is 32 bytes long ('0x' + 64 hex chars)
+      // otherwise attestation is not required
+      if (lbtcDepositHashes.has(extraData)) {
+        try {
+          const { attestation } = await attClient.getAttestation(extraData)
+          return attestation
+        } catch (_) {
+          // fallback: undefined
+          return undefined
+        }
+      }
+    }),
+  )
 }
