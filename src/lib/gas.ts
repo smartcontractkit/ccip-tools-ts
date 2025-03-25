@@ -75,11 +75,11 @@ export async function estimateExecGasForRequest(
   let destRouter
   if (lane.version < CCIPVersion.V1_6) {
     ;({ router: destRouter } = await (
-      offRamp as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_5>
+      offRamp as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_5>
     ).getDynamicConfig())
   } else {
     ;({ router: destRouter } = await (
-      offRamp as CCIPContract<CCIPContractType.OffRamp, CCIPVersion.V1_6>
+      offRamp as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_6>
     ).getSourceChainConfig(lane.sourceChainSelector))
   }
 

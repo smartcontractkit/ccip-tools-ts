@@ -1,4 +1,5 @@
 import {
+  type Abi,
   type AbiParameterToPrimitiveType,
   type AbiParametersToPrimitiveTypes,
   type ExtractAbiEvent,
@@ -6,8 +7,8 @@ import {
   parseAbi,
 } from 'abitype'
 import { type Addressable, type Log, type Result, AbiCoder, concat, dataSlice, id } from 'ethers'
-
 import type { TypedContract } from 'ethers-abitype'
+
 import CommitStore_1_2_ABI from '../abi/CommitStore_1_2.ts'
 import CommitStore_1_5_ABI from '../abi/CommitStore_1_5.ts'
 import EVM2EVMOffRamp_1_2_ABI from '../abi/OffRamp_1_2.ts'
@@ -20,17 +21,19 @@ import OnRamp_1_6_ABI from '../abi/OnRamp_1_6.ts'
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
 
-export enum CCIPVersion {
-  V1_2 = '1.2.0',
-  V1_5 = '1.5.0',
-  V1_6 = '1.6.0',
-}
+export const CCIPVersion = {
+  V1_2: '1.2.0',
+  V1_5: '1.5.0',
+  V1_6: '1.6.0',
+} as const
+export type CCIPVersion = (typeof CCIPVersion)[keyof typeof CCIPVersion]
 
-export enum CCIPContractType {
-  OnRamp = 'OnRamp',
-  OffRamp = 'OffRamp',
-  CommitStore = 'CommitStore',
-}
+export const CCIPContractType = {
+  OnRamp: 'OnRamp',
+  OffRamp: 'OffRamp',
+  CommitStore: 'CommitStore',
+} as const
+export type CCIPContractType = (typeof CCIPContractType)[keyof typeof CCIPContractType]
 
 export const CCIP_ABIs = {
   [CCIPContractType.OnRamp]: {
@@ -48,7 +51,7 @@ export const CCIP_ABIs = {
     [CCIPVersion.V1_5]: CommitStore_1_5_ABI,
     [CCIPVersion.V1_2]: CommitStore_1_2_ABI,
   },
-} as const
+} as const satisfies Record<CCIPContractType, Record<CCIPVersion, Abi>>
 
 export type CCIPContract<T extends CCIPContractType, V extends CCIPVersion> = TypedContract<
   (typeof CCIP_ABIs)[T][V]
@@ -93,8 +96,8 @@ type EVM2AnyMessageSent = CleanAddressable<
 
 // v1.2-v1.5 | v1.6 Message, with decoded gasLimit, sourceTokenData and tokenAmounts.destGasAmount
 export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
-  | CCIPVersion.V1_2
-  | CCIPVersion.V1_5
+  | typeof CCIPVersion.V1_2
+  | typeof CCIPVersion.V1_5
   ? Omit<EVM2AnyMessageRequested, 'tokenAmounts'> & {
       header: {
         messageId: string
@@ -129,17 +132,18 @@ export interface CCIPCommit {
   log: Log_
 }
 
-export enum ExecutionState {
-  Success = 2,
-  Failed,
-}
+export const ExecutionState = {
+  Success: 2,
+  Failed: 3,
+} as const
+export type ExecutionState = (typeof ExecutionState)[keyof typeof ExecutionState]
 
 export type ExecutionReceipt = (Omit<
   AbiParameterToPrimitiveType<{
     // hack: trick abitypes into giving us the struct equivalent types, to cast from Result
     type: SolidityTuple
     components: ExtractAbiEvent<
-      (typeof CCIP_ABIs)[CCIPContractType.OffRamp][CCIPVersion.V1_5],
+      (typeof CCIP_ABIs)[typeof CCIPContractType.OffRamp][typeof CCIPVersion.V1_5],
       'ExecutionStateChanged'
     >['inputs']
   }>,
@@ -151,7 +155,7 @@ export type ExecutionReceipt = (Omit<
         // hack: trick abitypes into giving us the struct equivalent types, to cast from Result
         type: SolidityTuple
         components: ExtractAbiEvent<
-          (typeof CCIP_ABIs)[CCIPContractType.OffRamp][CCIPVersion.V1_6],
+          (typeof CCIP_ABIs)[typeof CCIPContractType.OffRamp][typeof CCIPVersion.V1_6],
           'ExecutionStateChanged'
         >['inputs']
       }>,

@@ -8,7 +8,7 @@ describe('aptos hasher', () => {
     const msgId = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
     const metadataHash = '0xaabbccddeeff00112233445566778899aabbccddeeff00112233445566778899'
 
-    const msg: CCIPMessage<CCIPVersion.V1_6> = {
+    const msg: CCIPMessage<typeof CCIPVersion.V1_6> = {
       header: {
         messageId: msgId,
         sequenceNumber: 42n,

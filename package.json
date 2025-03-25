@@ -66,12 +66,21 @@
     "printWidth": 100
   },
   "jest": {
-    "preset": "ts-jest/presets/default-esm",
+    "preset": "ts-jest/presets/js-with-ts-esm",
     "modulePathIgnorePatterns": [
       "<rootDir>/dist/"
     ],
     "moduleNameMapper": {
-      "^(\\.{1,2}/.*)\\.js$": "$1"
+      "(.+)\\.[jt]s$": "$1"
+    },
+    "transform": {
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "useESM": true,
+          "isolatedModules": true
+        }
+      ]
     },
     "collectCoverage": true
   }

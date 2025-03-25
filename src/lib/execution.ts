@@ -63,7 +63,7 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
     const msg = { ...message }
     if (lane.version >= CCIPVersion.V1_6) {
       msg.sender = zeroPadValue(msg.sender, 32)
-      msg.tokenAmounts = (msg as CCIPMessage<CCIPVersion.V1_6>).tokenAmounts.map(
+      msg.tokenAmounts = (msg as CCIPMessage<typeof CCIPVersion.V1_6>).tokenAmounts.map(
         ({ sourcePoolAddress, ...rest }) => ({
           ...rest,
           sourcePoolAddress: zeroPadValue(sourcePoolAddress, 32),
@@ -117,7 +117,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
   runner: ContractRunner,
   address: string,
   lane: Lane<V>,
-): Promise<CCIPContract<CCIPContractType.OffRamp, V> | undefined> {
+): Promise<CCIPContract<typeof CCIPContractType.OffRamp, V> | undefined> {
   const [version] = await validateContractType(runner.provider!, address, CCIPContractType.OffRamp)
   if (version !== lane.version) return
 
@@ -125,7 +125,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
     address,
     getOffRampInterface(version),
     runner,
-  ) as unknown as CCIPContract<CCIPContractType.OffRamp, typeof version>
+  ) as unknown as CCIPContract<typeof CCIPContractType.OffRamp, typeof version>
 
   let sourceChainSelector, onRamp
   if (lane.version < CCIPVersion.V1_6) {
@@ -145,7 +145,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
   }
 
   if (lane.sourceChainSelector === sourceChainSelector && lane.onRamp === onRamp) {
-    return offRampContract as unknown as CCIPContract<CCIPContractType.OffRamp, V>
+    return offRampContract as unknown as CCIPContract<typeof CCIPContractType.OffRamp, V>
   }
 }
 
@@ -165,7 +165,7 @@ export async function discoverOffRamp<V extends CCIPVersion>(
   runner: ContractRunner,
   lane: Lane<V>,
   hints?: { fromBlock?: number; page?: number },
-): Promise<CCIPContract<CCIPContractType.OffRamp, V>> {
+): Promise<CCIPContract<typeof CCIPContractType.OffRamp, V>> {
   const dest = runner.provider!
   // we use Router interface to find a router, and from there find the OffRamp,
   // because these events are more frequent than some low-activity OffRamp's
@@ -271,7 +271,7 @@ async function getOffRampStaticConfig(dest: ContractRunner, address: string) {
     address,
     getOffRampInterface(version),
     dest,
-  ) as unknown as CCIPContract<CCIPContractType.OffRamp, typeof version>
+  ) as unknown as CCIPContract<typeof CCIPContractType.OffRamp, typeof version>
   const [staticConfig] = await getContractProperties(offRampContract, 'getStaticConfig')
   return [toObject(staticConfig), offRampContract] as const
 }
@@ -337,7 +337,8 @@ export async function* fetchExecutionReceipts(
       topics.push(
         null,
         requests.map(
-          ({ message }) => (message as CCIPMessage<CCIPVersion.V1_2 | CCIPVersion.V1_5>).messageId,
+          ({ message }) =>
+            (message as CCIPMessage<typeof CCIPVersion.V1_2 | typeof CCIPVersion.V1_5>).messageId,
         ),
       )
     } else if (requests.every(({ lane }) => lane.version >= CCIPVersion.V1_6)) {
@@ -346,12 +347,17 @@ export async function* fetchExecutionReceipts(
         Array.from(
           new Set(
             requests.map(({ message }) =>
-              toBeHex((message as CCIPMessage<CCIPVersion.V1_6>).header.sourceChainSelector, 32),
+              toBeHex(
+                (message as CCIPMessage<typeof CCIPVersion.V1_6>).header.sourceChainSelector,
+                32,
+              ),
             ),
           ),
         ),
         null,
-        requests.map(({ message }) => (message as CCIPMessage<CCIPVersion.V1_6>).header.messageId),
+        requests.map(
+          ({ message }) => (message as CCIPMessage<typeof CCIPVersion.V1_6>).header.messageId,
+        ),
       )
     }
 
