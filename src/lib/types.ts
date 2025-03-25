@@ -95,8 +95,8 @@ type EVM2AnyMessageSent = CleanAddressable<
 >
 
 export type TokenAmounts<V extends CCIPVersion = CCIPVersion> = V extends
-  | CCIPVersion.V1_2
-  | CCIPVersion.V1_5
+  | typeof CCIPVersion.V1_2
+  | typeof CCIPVersion.V1_5
   ? TokenAmounts_v1_5
   : TokenAmounts_v1_6
 
