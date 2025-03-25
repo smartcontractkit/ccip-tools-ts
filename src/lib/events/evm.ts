@@ -1,9 +1,11 @@
 import { type Log, EventFragment, Interface } from 'ethers'
-import TokenPoolABI from '../../abi/BurnMintTokenPool_1_5_1.js'
-import { lazyCached } from '../utils.js'
-import { type ChainEvent } from './types.js'
+import TokenPoolABI from '../../abi/BurnMintTokenPool_1_5_1.ts'
+import { lazyCached } from '../utils.ts'
+import type { ChainEvent } from './types.ts'
 
-export const toChainEventFromEVM = (event: Log): ChainEvent => {
+export const toChainEventFromEVM = (
+  event: Pick<Log, 'topics' | 'index' | 'address' | 'data'>,
+): ChainEvent => {
   return {
     id: event.topics[0],
     index: event.index,

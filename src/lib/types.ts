@@ -100,9 +100,9 @@ export type TokenAmounts<V extends CCIPVersion = CCIPVersion> = V extends
   ? TokenAmounts_v1_5
   : TokenAmounts_v1_6
 
-type TokenAmounts_v1_5 = (EVM2AnyMessageRequested['tokenAmounts'][number] &
+type TokenAmounts_v1_5 = readonly (EVM2AnyMessageRequested['tokenAmounts'][number] &
   Partial<SourceTokenData>)[]
-type TokenAmounts_v1_6 = (EVM2AnyMessageSent['tokenAmounts'][number] & Partial<SourceTokenData>)[]
+type TokenAmounts_v1_6 = readonly (EVM2AnyMessageSent['tokenAmounts'][number] & SourceTokenData)[]
 
 // v1.2-v1.5 | v1.6 Message, with decoded gasLimit, sourceTokenData and tokenAmounts.destGasAmount
 export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends

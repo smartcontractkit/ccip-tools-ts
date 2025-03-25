@@ -1,4 +1,4 @@
-export { type ChainEvent } from './types.js'
-export { toChainEventFromAptos } from './aptos.js'
-export { toChainEventFromEVM } from './evm.js'
-export * from './events.js'
+export { type ChainEvent } from './types.ts'
+export { toChainEventFromAptos } from './aptos.ts'
+export { toChainEventFromEVM } from './evm.ts'
+export * from './events.ts'

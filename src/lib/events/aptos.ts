@@ -1,4 +1,4 @@
-import { type ChainEvent } from './types.js'
+import type { ChainEvent } from './types.ts'
 
 // Reference https://github.com/aptos-labs/aptos-ts-sdk/blob/main/src/types/generated/operations.ts#L432
 // We should get this from the aptos-ts-sdk
