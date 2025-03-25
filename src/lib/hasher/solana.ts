@@ -9,8 +9,8 @@ export const getV16SolanaLeafHasher =
     sourceChainSelector: bigint,
     destChainSelector: bigint,
     onRamp: string,
-  ): LeafHasher<CCIPVersion.V1_6> =>
-  (message: CCIPMessage<CCIPVersion.V1_6>): string =>
+  ): LeafHasher<typeof CCIPVersion.V1_6> =>
+  (message: CCIPMessage<typeof CCIPVersion.V1_6>): string =>
     hashSolanaMessage(message, hashSolanaMetadata(sourceChainSelector, destChainSelector, onRamp))
 
 const encode = (target: string, value: string | bigint | number) =>
@@ -25,7 +25,7 @@ const encodeSolanaAddress = (address: string): Uint8Array => {
 }
 
 export const hashSolanaMessage = (
-  message: CCIPMessage<CCIPVersion.V1_6>,
+  message: CCIPMessage<typeof CCIPVersion.V1_6>,
   metadataHash: string,
 ): string => {
   const innerHash = concat([
@@ -40,10 +40,10 @@ export const hashSolanaMessage = (
     encode('uint256', message.tokenAmounts.length),
     ...message.tokenAmounts.map((token) =>
       concat([
-        encodeSolanaAddress(token.sourcePoolAddress),
-        zeroPadValue(token.destTokenAddress, 32),
-        encode('uint32', token.destGasAmount),
-        encode('bytes', token.extraData),
+        encodeSolanaAddress(token.sourcePoolAddress ?? ''),
+        zeroPadValue(token.destTokenAddress ?? '', 32),
+        encode('uint32', token.destGasAmount ?? ''),
+        encode('bytes', token.extraData ?? ''),
         encode('uint256', token.amount),
       ]),
     ),
