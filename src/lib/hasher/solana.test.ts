@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 import { PublicKey } from '@solana/web3.js'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
 import { hashSolanaMessage, hashSolanaMetadata } from './solana.ts'

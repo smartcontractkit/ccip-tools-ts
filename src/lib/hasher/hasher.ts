@@ -1,9 +1,9 @@
-import { isAptosChain, isSolanaChain } from '../selectors.js'
-import { type Lane, CCIPVersion } from '../types.js'
-import { getV16AptosLeafHasher } from './aptos.js'
-import { type LeafHasher } from './common.js'
-import { getV12LeafHasher, getV16LeafHasher } from './evm.js'
-import { getV16SolanaLeafHasher } from './solana.js'
+import { isAptosChain, isSolanaChain } from '../selectors.ts'
+import { type Lane, CCIPVersion } from '../types.ts'
+import { getV16AptosLeafHasher } from './aptos.ts'
+import type { LeafHasher } from './common.ts'
+import { getV12LeafHasher, getV16LeafHasher } from './evm.ts'
+import { getV16SolanaLeafHasher } from './solana.ts'
 
 // Factory function that returns the right encoder based on the version of the lane
 export function getLeafHasher<V extends CCIPVersion = CCIPVersion>({
