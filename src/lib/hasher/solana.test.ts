@@ -1,9 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 import { PublicKey } from '@solana/web3.js'
-import { hexlify, toUtf8Bytes } from 'ethers'
-import { type CCIPMessage, type CCIPVersion } from '../types.js'
-import { hashSolanaMessage, hashSolanaMetadata } from './solana.js'
+import type { CCIPMessage, CCIPVersion } from '../types.ts'
+import { hashSolanaMessage, hashSolanaMetadata } from './solana.ts'
 
 describe('solana hasher', () => {
   it('should hash Solana msg', () => {
