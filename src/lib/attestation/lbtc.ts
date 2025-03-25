@@ -1,4 +1,4 @@
-import { type Attestation, type AttestationClient } from './client'
+import type { Attestation, AttestationClient } from './client.ts'
 
 const LOMBARD_API_URL = {
   mainnet: 'https://mainnet.prod.lombard.finance',

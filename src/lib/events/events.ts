@@ -4,8 +4,8 @@ import {
   isEVMLBTCEvent,
   isEVMTransferEvent,
   isEVMUSDCEvent,
-} from './evm'
-import { type ChainEvent } from './types'
+} from './evm.ts'
+import type { ChainEvent } from './types.ts'
 
 export const isUSDCEvent = (event: ChainEvent): boolean => {
   return isEVMUSDCEvent(event) // || isAptosUSDCEvent(event) ...

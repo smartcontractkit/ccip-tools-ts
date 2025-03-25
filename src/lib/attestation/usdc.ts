@@ -1,4 +1,4 @@
-import { type Attestation, type AttestationClient } from './client'
+import type { Attestation, AttestationClient } from './client.ts'
 
 // Docs: https://developers.circle.com/api-reference/stablecoins/common/get-attestation
 const CIRCLE_API_URL = {

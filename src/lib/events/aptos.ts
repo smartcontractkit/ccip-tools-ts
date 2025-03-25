@@ -23,3 +23,24 @@ export const toChainEventFromAptos = (event: AptosEvent): ChainEvent => {
     indexedArgs: [],
   }
 }
+
+// TODO: Build specific USDC and LBTC event identification fns
+export const isAptosUSDCEvent = (_event: ChainEvent): boolean => {
+  return false
+}
+
+export const isAptosTransferEvent = (_event: ChainEvent): boolean => {
+  return false
+}
+
+export const isAptosBurnedEvent = (_event: ChainEvent): boolean => {
+  return false
+}
+
+export const isAptosLBTCEvent = (_event: ChainEvent): boolean => {
+  return false
+}
+
+export const getEVMLBTCDepositHashes = (_event: ChainEvent): string => {
+  return ''
+}
