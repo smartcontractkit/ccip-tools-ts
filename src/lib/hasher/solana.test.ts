@@ -9,7 +9,7 @@ describe('solana hasher', () => {
 
     const solanaKey = new PublicKey('HXoMKDD4hb6VvrgrTZ6kpvJELQrVs4ABgZKTwa1yJNgb')
 
-    const msg: CCIPMessage<CCIPVersion.V1_6> = {
+    const msg: CCIPMessage<typeof CCIPVersion.V1_6> = {
       header: {
         messageId: msgId,
         sequenceNumber: 386n,
