@@ -245,6 +245,7 @@ const selectors: Selectors = {
   },
   '16600': { selector: 16088006396410204581n, name: '0g-testnet-newton' },
   '17000': { selector: 7717148896336251131n, name: 'ethereum-testnet-holesky' },
+  '31337': { selector: 7759470850252068959n, name: 'anvil-devnet' },
   '33111': { selector: 9900119385908781505n, name: 'apechain-testnet-curtis' },
   '33139': { selector: 14894068710063348487n, name: 'apechain-mainnet' },
   '34443': { selector: 7264351850409363825n, name: 'ethereum-mainnet-mode-1' },

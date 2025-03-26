@@ -7,6 +7,7 @@ import { type Schema, serialize } from 'borsh'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
 import type { LeafHasher } from './common.ts'
 
+// Message types from https://github.com/smartcontractkit/chainlink-ccip/blob/main/chains/solana/contracts/programs/ccip-offramp/src/messages.rs
 /**
  * RampMessageHeader
  * - message_id: fixed 32 bytes array.
