@@ -1,4 +1,4 @@
-type Selectors = Record<number, { readonly selector: bigint; readonly name?: string }>
+type Selectors = Record<string, { readonly selector: bigint; readonly name?: string }>
 
 const selectors: Selectors = {
   // generate:
@@ -245,6 +245,7 @@ const selectors: Selectors = {
   },
   '16600': { selector: 16088006396410204581n, name: '0g-testnet-newton' },
   '17000': { selector: 7717148896336251131n, name: 'ethereum-testnet-holesky' },
+  '31337': { selector: 7759470850252068959n, name: 'anvil-devnet' },
   '33111': { selector: 9900119385908781505n, name: 'apechain-testnet-curtis' },
   '33139': { selector: 14894068710063348487n, name: 'apechain-mainnet' },
   '34443': { selector: 7264351850409363825n, name: 'ethereum-mainnet-mode-1' },
@@ -400,8 +401,35 @@ export const aptosSelectors: Selectors = {
   // end:generate
 }
 
+export const solanaSelectors: Selectors = {
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors_solana.yml')
+  //   .then((res) => res.text())
+  //   .then((body) => require('yaml').parse(body, { intAsBigInt: true }).selectors)
+  //   .then((obj) => require('util').inspect(obj).split('\n').slice(1, -1))
+  '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d': {
+    name: 'solana-mainnet',
+    selector: 124615329519749607n,
+  },
+  '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY': {
+    name: 'solana-testnet',
+    selector: 6302590918974934319n,
+  },
+  EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG: {
+    name: 'solana-devnet',
+    selector: 16423721717087811551n,
+  },
+  // end:generate
+}
+
 export const isAptosChain = (selector: bigint): boolean => {
   return Object.values(aptosSelectors).some((aptosSelector) => aptosSelector.selector === selector)
+}
+
+export const isSolanaChain = (selector: bigint): boolean => {
+  return Object.values(solanaSelectors).some(
+    (solanaSelector) => solanaSelector.selector === selector,
+  )
 }
 
 export default selectors
