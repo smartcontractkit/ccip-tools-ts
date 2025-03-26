@@ -315,6 +315,8 @@ function convertCCIPMessageToRampMessage(
       }
     }
 
+    const bnVal = new BN(token.amount.toString())
+    const leBytes = bnVal.toArrayLike(Buffer, 'le', 32)
     return new Any2SVMTokenTransfer({
       source_pool_address: token.sourcePoolAddress
         ? hexStringToUint8Array(token.sourcePoolAddress)
@@ -323,7 +325,7 @@ function convertCCIPMessageToRampMessage(
       dest_gas_amount: Number(token.destGasAmount),
       extra_data: token.extraData ? hexStringToUint8Array(token.extraData) : new Uint8Array(),
       amount: new CrossChainAmount({
-        le_bytes: hexStringToUint8Array(token.amount.toString(16)),
+        le_bytes: leBytes,
       }),
     })
   })

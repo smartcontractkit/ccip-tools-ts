@@ -1,6 +1,6 @@
 import { PublicKey } from '@solana/web3.js'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
-import { hashSolanaMessage, hashSolanaMetadata, getV16SolanaLeafHasher } from './solana.ts'
+import { getV16SolanaLeafHasher, hashSolanaMessage, hashSolanaMetadata } from './solana.ts'
 
 describe('solana hasher', () => {
   const msgId = '0xcdad95e113e35cf691295c1f42455d41062ba9a1b96a6280c1a5a678ef801721'
@@ -40,7 +40,7 @@ describe('solana hasher', () => {
     const msg = createSampleMessage()
 
     const hash = hashSolanaMessage(msg, metadataHash)
-    expect(hash).toEqual('16fd024b9a050576c22c9bfdcd5a7bcbc1c39096d60eabadef5bcad8414f3c6b')
+    expect(hash).toEqual('cb5ba35920890620e4d94a66c5fbdd226de9029805d6a044eb3ae984080a3564')
   })
 
   it('should hash Solana metadata', () => {
@@ -48,9 +48,10 @@ describe('solana hasher', () => {
     const dest = 987654321n
     const onrampKey = new PublicKey('HXoMKDD4hb6VvrgrTZ6kpvJELQrVs4ABgZKTwa1yJNgb')
     const onramp = onrampKey.toBase58()
+    const msg = createSampleMessage()
 
-    const hash = hashSolanaMetadata(source, dest, onramp)
-    expect(hash).toEqual('16fd024b9a050576c22c9bfdcd5a7bcbc1c39096d60eabadef5bcad8414f3c6b')
+    const hash = hashSolanaMetadata(msg, source, dest, onramp)
+    expect(hash).toEqual('99e5bf068bd15148d144201a266e8b644307e77034b6eae3ee4b5b75a4427199')
   })
 
   it('should correctly hash with getV16SolanaLeafHasher', () => {
@@ -59,15 +60,13 @@ describe('solana hasher', () => {
     const destChainSelector = 16015286601757825753n
     const onrampKey = new PublicKey('HXoMKDD4hb6VvrgrTZ6kpvJELQrVs4ABgZKTwa1yJNgb')
     const onramp = onrampKey.toBase58()
+    const msg = createSampleMessage()
 
     // Get the hasher function
     const hasher = getV16SolanaLeafHasher(sourceChainSelector, destChainSelector, onramp)
 
-    // Create a sample message
-    const msg = createSampleMessage()
-
     // Calculate the expected hash manually
-    const metadataHash = hashSolanaMetadata(sourceChainSelector, destChainSelector, onramp)
+    const metadataHash = hashSolanaMetadata(msg, sourceChainSelector, destChainSelector, onramp)
     const expectedHash = hashSolanaMessage(msg, metadataHash)
 
     // Get the hash using the hasher
