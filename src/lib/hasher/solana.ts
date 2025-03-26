@@ -380,8 +380,8 @@ export const hashSolanaMetadata = (
 ): string => {
   const header = new RampMessageHeader({
     message_id: hexStringToUint8Array(message.header.messageId),
-    source_chain_selector: new BN(sourceChainSelector),
-    dest_chain_selector: new BN(destChainSelector),
+    source_chain_selector: new BN(sourceChainSelector.toString()),
+    dest_chain_selector: new BN(destChainSelector.toString()),
     sequence_number: new BN(message.header.sequenceNumber.toString()),
     nonce: new BN(message.header.nonce.toString()),
   })
@@ -401,7 +401,7 @@ export const hashSolanaMetadata = (
   })
 
   const report = new ExecutionReportSingleChain({
-    source_chain_selector: new BN(sourceChainSelector),
+    source_chain_selector: new BN(sourceChainSelector.toString()),
     message: rampMessage,
     offchain_token_data: [],
     proofs: [],
