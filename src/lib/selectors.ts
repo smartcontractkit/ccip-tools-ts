@@ -427,7 +427,7 @@ export const isAptosChain = (selector: bigint): boolean => {
 }
 
 export const isSolanaChain = (selector: bigint): boolean => {
-  return Object.values(aptosSelectors).some(
+  return Object.values(solanaSelectors).some(
     (solanaSelector) => solanaSelector.selector === selector,
   )
 }
