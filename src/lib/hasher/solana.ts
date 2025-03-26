@@ -247,7 +247,7 @@ const schema: Schema = new Map([
   ...CrossChainAmountSchema,
   ...Any2SVMTokenTransferSchema,
   ...Any2SVMRampMessageSchema,
-  ...ExecutionReportSingleChainSchema
+  ...ExecutionReportSingleChainSchema,
 ])
 
 /**
@@ -267,7 +267,10 @@ export const getV16SolanaLeafHasher =
     onRamp: string,
   ): LeafHasher<typeof CCIPVersion.V1_6> =>
   (message: CCIPMessage<typeof CCIPVersion.V1_6>): string =>
-    hashSolanaMessage(message, hashSolanaMetadata(sourceChainSelector, destChainSelector, onRamp))
+    hashSolanaMessage(
+      message,
+      hashSolanaMetadata(message, sourceChainSelector, destChainSelector, onRamp),
+    )
 
 // --- Helper: convert a hex string to Uint8Array ---
 function hexStringToUint8Array(hex: string): Uint8Array {
@@ -370,20 +373,17 @@ export const hashSolanaMessage = (
 }
 
 export const hashSolanaMetadata = (
+  message: CCIPMessage<typeof CCIPVersion.V1_6>,
   sourceChainSelector: bigint,
   destChainSelector: bigint,
   onRamp: string,
 ): string => {
-  const sourceChainSelectorBN = new BN(sourceChainSelector.toString())
-  const destChainSelectorBN = new BN(destChainSelector.toString())
-
-  // TODO update values
   const header = new RampMessageHeader({
-    message_id: new Uint8Array(32),
-    source_chain_selector: sourceChainSelectorBN,
-    dest_chain_selector: destChainSelectorBN,
-    sequence_number: new BN(0),
-    nonce: new BN(0),
+    message_id: hexStringToUint8Array(message.header.messageId),
+    source_chain_selector: new BN(sourceChainSelector),
+    dest_chain_selector: new BN(destChainSelector),
+    sequence_number: new BN(message.header.sequenceNumber.toString()),
+    nonce: new BN(message.header.nonce.toString()),
   })
 
   const extra_args = new Any2SVMRampExtraArgs({
@@ -401,7 +401,7 @@ export const hashSolanaMetadata = (
   })
 
   const report = new ExecutionReportSingleChain({
-    source_chain_selector: sourceChainSelectorBN,
+    source_chain_selector: new BN(sourceChainSelector),
     message: rampMessage,
     offchain_token_data: [],
     proofs: [],
