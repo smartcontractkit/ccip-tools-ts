@@ -39,8 +39,8 @@ function serializeRampMessage(message: CCIPMessage<typeof CCIPVersion.V1_6>): Bu
   // Write data length + data
   const dataSizeBuffer = Buffer.alloc(2)
   dataSizeBuffer.writeUInt16BE(message.data.length)
-  buffers.push(dataSizeBuffer)
-  buffers.push(Buffer.from(message.data))
+  const buffer = Buffer.from(message.data, 'utf8')
+  buffers.push(Buffer.from(buffer.toString('base64')))
 
   // Write receiver
   buffers.push(Buffer.from(message.receiver))
@@ -297,15 +297,15 @@ export const hashSolanaMetadata = (
 
   const rampMessage: CCIPMessage<typeof CCIPVersion.V1_6> = {
     header,
-    sender: '',
-    data: '',
+    sender: message.sender,
+    data: message.data,
     receiver: onRamp,
     extraArgs: encodeExtraArgs(extraArgs),
-    feeToken: '',
-    feeTokenAmount: 0n,
-    feeValueJuels: 0n,
-    tokenAmounts: [],
-    gasLimit: 0n,
+    feeToken: message.feeToken,
+    feeTokenAmount: message.feeTokenAmount,
+    feeValueJuels: message.feeValueJuels,
+    tokenAmounts: message.tokenAmounts,
+    gasLimit: message.gasLimit,
   }
 
   return hashAnyToSVMMessage(rampMessage, onRamp).toString('hex')
