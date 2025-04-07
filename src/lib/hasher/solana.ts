@@ -272,17 +272,12 @@ export const hashSolanaMetadata = (
     nonce: BigInt(message.header.nonce.toString()),
   }
 
-  const extraArgs = {
-    computeUnits: 0,
-    isWritableBitmap: BigInt(0),
-  }
-
   const rampMessage: CCIPMessage<typeof CCIPVersion.V1_6> = {
     header,
     sender: message.sender,
     data: message.data,
     receiver: onRamp,
-    extraArgs: encodeExtraArgs(extraArgs),
+    extraArgs: encodeExtraArgs(parseExtraArgs(message.extraArgs) as SVMExtraArgsV1),
     feeToken: message.feeToken,
     feeTokenAmount: message.feeTokenAmount,
     feeValueJuels: message.feeValueJuels,
