@@ -270,7 +270,7 @@ export const hashSolanaMessage = (
   const combined = Buffer.concat([Buffer.from(metadataHash, 'hex'), encodedReport])
   console.debug('v1.6 hashSolanaMessage:', {
     messageId: message.header.messageId,
-    encodedReport,
+    report,
     combined,
   })
   return keccak256(combined)
