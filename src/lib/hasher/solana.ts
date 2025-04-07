@@ -1,176 +1,23 @@
-import { keccak256 } from 'js-sha3'
-import type { CCIPMessage, CCIPVersion } from '../types.ts'
+import { decodeBase58, keccak256 } from 'ethers'
+import type { CCIPMessage, CCIPVersion, SVMExtraArgsV1 } from '../types.ts'
+import { bigintToLeBytes } from '../utils.ts'
 import type { LeafHasher } from './common.ts'
 
-// Message types from https://github.com/smartcontractkit/chainlink-ccip/blob/main/chains/solana/contracts/programs/ccip-offramp/src/messages.rs
-/**
- * RampMessageHeader
- * - messageId: fixed 32 bytes array as hex string
- * - sourceChainSelector, destChainSelector, sequenceNumber, nonce: u64 values as bigint
- */
-class RampMessageHeader {
-  messageId: string
+type CCIPExecutionReportV1_6 = {
   sourceChainSelector: bigint
-  destChainSelector: bigint
-  sequenceNumber: bigint
-  nonce: bigint
-
-  constructor(fields: {
-    messageId: string
-    sourceChainSelector: bigint
-    destChainSelector: bigint
-    sequenceNumber: bigint
-    nonce: bigint
-  }) {
-    this.messageId = fields.messageId
-    this.sourceChainSelector = fields.sourceChainSelector
-    this.destChainSelector = fields.destChainSelector
-    this.sequenceNumber = fields.sequenceNumber
-    this.nonce = fields.nonce
-  }
-}
-
-/**
- * Any2SVMRampExtraArgs
- * - computeUnits: u32
- * - isWritableBitmap: u64 as bigint
- */
-class Any2SVMRampExtraArgs {
-  computeUnits: number
-  isWritableBitmap: bigint
-
-  constructor(fields: { computeUnits: number; isWritableBitmap: bigint }) {
-    this.computeUnits = fields.computeUnits
-    this.isWritableBitmap = fields.isWritableBitmap
-  }
-}
-
-/**
- * Any2SVMTokenTransfer
- * - sourcePoolAddress: Vec<u8> as Uint8Array
- * - destTokenAddress: Pubkey (32 bytes) as Uint8Array
- * - destGasAmount: u32
- * - extraData: Vec<u8> as Uint8Array
- * - amount: u256 as bigint
- */
-class Any2SVMTokenTransfer {
-  sourcePoolAddress: Uint8Array
-  destTokenAddress: Uint8Array
-  destGasAmount: number
-  extraData: Uint8Array
-  amount: bigint
-
-  constructor(fields: {
-    sourcePoolAddress: Uint8Array
-    destTokenAddress: Uint8Array
-    destGasAmount: number
-    extraData: Uint8Array
-    amount: bigint
-  }) {
-    this.sourcePoolAddress = fields.sourcePoolAddress
-    this.destTokenAddress = fields.destTokenAddress
-    this.destGasAmount = fields.destGasAmount
-    this.extraData = fields.extraData
-    this.amount = fields.amount
-  }
-}
-
-/**
- * Any2SVMRampMessage
- * - header: RampMessageHeader
- * - sender: Vec<u8> as Uint8Array
- * - data: Vec<u8> as Uint8Array
- * - tokenReceiver: Pubkey (32 bytes) as Uint8Array
- * - tokenAmounts: array of Any2SVMTokenTransfer
- * - extraArgs: Any2SVMRampExtraArgs
- */
-class Any2SVMRampMessage {
-  header: RampMessageHeader
-  sender: Uint8Array
-  data: Uint8Array
-  tokenReceiver: Uint8Array
-  tokenAmounts: Any2SVMTokenTransfer[]
-  extraArgs: Any2SVMRampExtraArgs
-
-  constructor(fields: {
-    header: RampMessageHeader
-    sender: Uint8Array
-    data: Uint8Array
-    tokenReceiver: Uint8Array
-    tokenAmounts: Any2SVMTokenTransfer[]
-    extraArgs: Any2SVMRampExtraArgs
-  }) {
-    this.header = fields.header
-    this.sender = fields.sender
-    this.data = fields.data
-    this.tokenReceiver = fields.tokenReceiver
-    this.tokenAmounts = fields.tokenAmounts
-    this.extraArgs = fields.extraArgs
-  }
-}
-
-/**
- * ExecutionReportSingleChain
- * - sourceChainSelector: u64 as bigint
- * - message: Any2SVMRampMessage
- * - offchainTokenData: Vec<Vec<u8>> represented as an array of Uint8Array
- * - proofs: Vec<[u8; 32]> represented as an array of Uint8Array (each of length 32)
- */
-class ExecutionReportSingleChain {
-  sourceChainSelector: bigint
-  message: Any2SVMRampMessage
+  message: CCIPMessage<typeof CCIPVersion.V1_6>
   offchainTokenData: Uint8Array[]
   proofs: Uint8Array[]
-
-  constructor(fields: {
-    sourceChainSelector: bigint
-    message: Any2SVMRampMessage
-    offchainTokenData: Uint8Array[]
-    proofs: Uint8Array[]
-  }) {
-    this.sourceChainSelector = fields.sourceChainSelector
-    this.message = fields.message
-    this.offchainTokenData = fields.offchainTokenData
-    this.proofs = fields.proofs
-  }
 }
 
-// Helper function to convert bigint to little-endian bytes
-function bigintToLeBytes(value: bigint, byteLength: number): Buffer {
-  const buffer = Buffer.alloc(byteLength)
-  let remaining = value
-  for (let i = 0; i < byteLength; i++) {
-    buffer[i] = Number(remaining & 0xffn)
-    remaining = remaining >> 8n
-  }
-  return buffer
-}
-
-// Helper function to convert u256 to little-endian bytes (matching Go's ToLittleEndianU256)
-function u256ToLeBytes(value: bigint): Buffer {
-  const buffer = Buffer.alloc(32)
-  let remaining = value
-  for (let i = 0; i < 32; i++) {
-    buffer[i] = Number(remaining & 0xffn)
-    remaining = remaining >> 8n
-  }
-  return buffer
-}
-
-/**
- * Serializes an Any2SVMRampExtraArgs into a Buffer
- */
-function serializeExtraArgs(extraArgs: Any2SVMRampExtraArgs): Buffer {
+function serializeExtraArgs(extraArgs: SVMExtraArgsV1): Buffer {
   const buffer = Buffer.alloc(12) // 4 bytes for compute_units + 8 bytes for is_writable_bitmap
   buffer.writeUInt32LE(extraArgs.computeUnits) // Changed to LE to match Go
   bigintToLeBytes(extraArgs.isWritableBitmap, 8).copy(buffer, 4)
   return buffer
 }
 
-/**
- * Serializes an Any2SVMRampMessage into a Buffer
- */
-function serializeRampMessage(message: Any2SVMRampMessage): Buffer {
+function serializeRampMessage(message: CCIPMessage<typeof CCIPVersion.V1_6>): Buffer {
   const buffers: Buffer[] = []
 
   // Write header
@@ -200,10 +47,14 @@ function serializeRampMessage(message: Any2SVMRampMessage): Buffer {
   const extraArgsBuffer = serializeExtraArgs(message.extraArgs)
   buffers.push(extraArgsBuffer)
 
+  console.log('serializeRampMessage', {
+    buffers,
+  })
+
   return Buffer.concat(buffers)
 }
 
-function serializeHeader(header: RampMessageHeader): Buffer {
+function serializeHeader(header: CCIPMessage<typeof CCIPVersion.V1_6>['header']): Buffer {
   const buffer = Buffer.alloc(32 + 8 * 4) // 32 bytes for message_id + 8 bytes each for 4 u64 values
   Buffer.from(header.messageId.replace('0x', ''), 'hex').copy(buffer, 0)
   bigintToLeBytes(header.sourceChainSelector, 8).copy(buffer, 32)
@@ -213,7 +64,9 @@ function serializeHeader(header: RampMessageHeader): Buffer {
   return buffer
 }
 
-function serializeTokenAmounts(tokenAmounts: Any2SVMTokenTransfer[]): Buffer {
+function serializeTokenAmounts(
+  tokenAmounts: CCIPMessage<typeof CCIPVersion.V1_6>['tokenAmounts'],
+): Buffer {
   const buffers: Buffer[] = []
 
   // Write array length
@@ -234,7 +87,7 @@ function serializeTokenAmounts(tokenAmounts: Any2SVMTokenTransfer[]): Buffer {
 
     // Write dest gas amount
     const destGasAmountBuffer = Buffer.alloc(4)
-    destGasAmountBuffer.writeUInt32LE(token.destGasAmount)
+    destGasAmountBuffer.writeUInt32LE(Number(token.destGasAmount))
     buffers.push(destGasAmountBuffer)
 
     // Write extra data length + data
@@ -243,14 +96,13 @@ function serializeTokenAmounts(tokenAmounts: Any2SVMTokenTransfer[]): Buffer {
     buffers.push(extraDataLen)
     buffers.push(Buffer.from(token.extraData))
 
-    // Write amount as little-endian bytes (using u256ToLeBytes to match Go)
-    buffers.push(u256ToLeBytes(token.amount))
+    buffers.push(bigintToLeBytes(token.amount, 32))
   }
 
   return Buffer.concat(buffers)
 }
 
-function encodeExecutionReportSingleChain(report: ExecutionReportSingleChain): Buffer {
+function encodeCCIPExecutionReportV1_6(report: CCIPExecutionReportV1_6): Buffer {
   const buffers: Buffer[] = []
 
   // Write source chain selector
@@ -315,63 +167,8 @@ function parseExtraArgs(extraArgs: string): { computeUnits: number; isWritableBi
   }
 }
 
-function convertCCIPMessageToRampMessage(
-  message: CCIPMessage<typeof CCIPVersion.V1_6>,
-): Any2SVMRampMessage {
-  const header = new RampMessageHeader({
-    messageId: message.header.messageId,
-    sourceChainSelector: BigInt(message.header.sourceChainSelector.toString()),
-    destChainSelector: BigInt(message.header.destChainSelector.toString()),
-    sequenceNumber: BigInt(message.header.sequenceNumber.toString()),
-    nonce: BigInt(message.header.nonce.toString()),
-  })
-
-  const sender = message.sender ? hexStringToUint8Array(message.sender) : new Uint8Array()
-  const data = message.data ? hexStringToUint8Array(message.data) : new Uint8Array()
-
-  // Validate receiver length
-  const receiverHex = message.receiver.replace('0x', '')
-  if (receiverHex.length !== 64) {
-    throw new Error(`invalid receiver length: ${receiverHex.length}`)
-  }
-  const tokenReceiver = new Uint8Array(Buffer.from(receiverHex, 'hex'))
-
-  const tokenAmounts = message.tokenAmounts.map((token) => {
-    // Validate token address length
-    const destTokenAddressHex = token.destTokenAddress.replace('0x', '')
-    if (destTokenAddressHex.length !== 64) {
-      throw new Error(`invalid DestTokenAddress length: ${destTokenAddressHex.length}`)
-    }
-
-    return new Any2SVMTokenTransfer({
-      sourcePoolAddress: token.sourcePoolAddress
-        ? hexStringToUint8Array(token.sourcePoolAddress)
-        : new Uint8Array(),
-      destTokenAddress: new Uint8Array(Buffer.from(destTokenAddressHex, 'hex')),
-      destGasAmount: Number(token.destGasAmount),
-      extraData: token.extraData ? hexStringToUint8Array(token.extraData) : new Uint8Array(),
-      amount: BigInt(token.amount.toString()),
-    })
-  })
-
-  const { computeUnits, isWritableBitmap } = parseExtraArgs(message.extraArgs)
-  const extraArgs = new Any2SVMRampExtraArgs({
-    computeUnits,
-    isWritableBitmap,
-  })
-
-  return new Any2SVMRampMessage({
-    header,
-    sender,
-    data,
-    tokenReceiver,
-    tokenAmounts,
-    extraArgs,
-  })
-}
-
 function hashAnyToSVMMessage(
-  message: Any2SVMRampMessage,
+  message: CCIPMessage<typeof CCIPVersion.V1_6>,
   onRamp: string,
   msgAccounts: Uint8Array[] = [],
 ): Buffer {
@@ -460,7 +257,7 @@ export const getV16SolanaLeafHasher =
     )
 
 /**
- * hashSolanaMessage uses the internal encoder (encodeExecutionReportSingleChain)
+ * hashSolanaMessage uses the internal encoder (encodeCCIPExecutionReportV1_6)
  * to serialize a report containing the CCIP message and then combines it with
  * the metadata hash.
  *
@@ -472,16 +269,20 @@ export const hashSolanaMessage = (
   message: CCIPMessage<typeof CCIPVersion.V1_6>,
   metadataHash: string,
 ): string => {
-  const rampMessage = convertCCIPMessageToRampMessage(message)
-  const report = new ExecutionReportSingleChain({
+  const report = {
     sourceChainSelector: BigInt(message.header.sourceChainSelector.toString()),
-    message: rampMessage,
+    message,
     offchainTokenData: [],
     proofs: [],
-  })
+  }
 
-  const encodedReport = encodeExecutionReportSingleChain(report)
+  const encodedReport = encodeCCIPExecutionReportV1_6(report)
   const combined = Buffer.concat([Buffer.from(metadataHash, 'hex'), encodedReport])
+  console.debug('v1.6 hashSolanaMessage:', {
+    messageId: message.header.messageId,
+    encodedReport,
+    combined,
+  })
   return keccak256(combined)
 }
 
@@ -491,27 +292,47 @@ export const hashSolanaMetadata = (
   destChainSelector: bigint,
   onRamp: string,
 ): string => {
-  const header = new RampMessageHeader({
+  const header = {
     messageId: message.header.messageId,
     sourceChainSelector: BigInt(sourceChainSelector.toString()),
     destChainSelector: BigInt(destChainSelector.toString()),
     sequenceNumber: BigInt(message.header.sequenceNumber.toString()),
     nonce: BigInt(message.header.nonce.toString()),
-  })
+  }
 
-  const extraArgs = new Any2SVMRampExtraArgs({
+  const extraArgs = {
     computeUnits: 0,
     isWritableBitmap: BigInt(0),
-  })
+  }
 
-  const rampMessage = new Any2SVMRampMessage({
+  const rampMessage = {
     header,
     sender: new Uint8Array(),
     data: new Uint8Array(),
     tokenReceiver: Buffer.from(onRamp.replace('0x', ''), 'hex'),
     tokenAmounts: [],
     extraArgs,
-  })
+  }
 
   return hashAnyToSVMMessage(rampMessage, onRamp).toString('hex')
+}
+
+// Helper function to convert a Solana base58 address to Uint8Array
+function solanaAddressToUint8Array(address: string): Uint8Array {
+  try {
+    const decoded = decodeBase58(address)
+    return new Uint8Array(32).fill(0).map((_, i) => Number((decoded >> BigInt(i * 8)) & 0xffn))
+  } catch (_) {
+    throw new Error(`invalid Solana address: ${address}`)
+  }
+}
+
+// Helper function to check if a string is a Solana address
+function isSolanaAddress(address: string): boolean {
+  try {
+    const decoded = decodeBase58(address)
+    return decoded.toString().length === 32
+  } catch {
+    return false
+  }
 }

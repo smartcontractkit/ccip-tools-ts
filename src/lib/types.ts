@@ -17,6 +17,7 @@ import OffRamp_1_6_ABI from '../abi/OffRamp_1_6.ts'
 import EVM2EVMOnRamp_1_2_ABI from '../abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from '../abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from '../abi/OnRamp_1_6.ts'
+import { bigintToLeBytes } from './utils.ts'
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
@@ -94,7 +95,6 @@ type EVM2AnyMessageSent = CleanAddressable<
   >[2]
 >
 
-// v1.2-v1.5 | v1.6 Message, with decoded gasLimit, sourceTokenData and tokenAmounts.destGasAmount
 export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
   | typeof CCIPVersion.V1_2
   | typeof CCIPVersion.V1_5
@@ -171,13 +171,20 @@ export interface CCIPExecution {
 
 const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'
 const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'
+const SVMExtraArgsTag = id('CCIP SVMExtraArgsV1').substring(0, 10) as '0x1f3b3aba'
 const EVMExtraArgsV1 = 'tuple(uint256 gasLimit)'
 const EVMExtraArgsV2 = 'tuple(uint256 gasLimit, bool allowOutOfOrderExecution)'
+const SVMExtraArgsV1 = 'tuple(uint32 computeUnits, uint64 isWritableBitmap)'
+
 export interface EVMExtraArgsV1 {
   gasLimit?: bigint
 }
 export interface EVMExtraArgsV2 extends EVMExtraArgsV1 {
   allowOutOfOrderExecution: boolean
+}
+export interface SVMExtraArgsV1 {
+  computeUnits: number
+  isWritableBitmap: bigint
 }
 
 const DEFAULT_GAS_LIMIT = 200_000n
@@ -186,10 +193,15 @@ const DEFAULT_GAS_LIMIT = 200_000n
  * Encodes extra arguments for CCIP messages.
  * args.allowOutOfOrderExecution enforces ExtraArgsV2 (v1.5+)
  **/
-export function encodeExtraArgs(args: EVMExtraArgsV1 | EVMExtraArgsV2): string {
+export function encodeExtraArgs(args: EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1): string {
   if ('allowOutOfOrderExecution' in args) {
     if (args.gasLimit == null) args.gasLimit = DEFAULT_GAS_LIMIT
     return concat([EVMExtraArgsV2Tag, defaultAbiCoder.encode([EVMExtraArgsV2], [args])])
+  } else if ('computeUnits' in args) {
+    const buffer = Buffer.alloc(12)
+    buffer.writeUInt32LE(args.computeUnits)
+    bigintToLeBytes(args.isWritableBitmap, 8).copy(buffer, 4)
+    return concat([SVMExtraArgsTag, buffer])
   } else if (args.gasLimit != null) {
     return concat([EVMExtraArgsV1Tag, defaultAbiCoder.encode([EVMExtraArgsV1], [args])])
   }
@@ -202,8 +214,8 @@ export function encodeExtraArgs(args: EVMExtraArgsV1 | EVMExtraArgsV2): string {
  * @returns extra arguments object if found
  **/
 export function parseExtraArgs(data: string):
-  | ((EVMExtraArgsV1 | EVMExtraArgsV2) & {
-      _tag: 'EVMExtraArgsV1' | 'EVMExtraArgsV2'
+  | ((EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1) & {
+      _tag: 'EVMExtraArgsV1' | 'EVMExtraArgsV2' | 'SVMExtraArgsV1'
     })
   | undefined {
   if (data === '0x') return { _tag: 'EVMExtraArgsV1' }
@@ -214,6 +226,12 @@ export function parseExtraArgs(data: string):
   if (data.startsWith(EVMExtraArgsV2Tag)) {
     const args = defaultAbiCoder.decode([EVMExtraArgsV2], dataSlice(data, 4))
     return { ...(args[0] as Result).toObject(), _tag: 'EVMExtraArgsV2' }
+  }
+  if (data.startsWith(SVMExtraArgsTag)) {
+    const buffer = Buffer.from(data.slice(4), 'hex')
+    const computeUnits = buffer.readUInt32LE(0)
+    const isWritableBitmap = BigInt(buffer.readBigUInt64LE(4))
+    return { computeUnits, isWritableBitmap, _tag: 'SVMExtraArgsV1' }
   }
 }
 

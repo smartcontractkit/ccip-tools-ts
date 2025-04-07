@@ -363,3 +363,13 @@ export function decodeAddress(address: string): string {
     ? getAddress('0x' + address.slice(-40))
     : address
 }
+
+export function bigintToLeBytes(value: bigint, length: number): Buffer {
+  const buffer = Buffer.alloc(length)
+  let remaining = value
+  for (let i = 0; i < length; i++) {
+    buffer[i] = Number(remaining & 0xffn)
+    remaining >>= 8n
+  }
+  return buffer
+}
