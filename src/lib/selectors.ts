@@ -63,6 +63,7 @@ const selectors: Selectors = {
     selector: 7613811247471741961n,
     name: 'ethereum-mainnet-hashkey-1',
   },
+  '185': { selector: 17164792800244661392n, name: 'mint-mainnet' },
   '195': {
     selector: 2066098519157881736n,
     name: 'ethereum-testnet-sepolia-xlayer-1',
@@ -135,6 +136,7 @@ const selectors: Selectors = {
     selector: 1948510578179542068n,
     name: 'bitcoin-testnet-bsquared-1',
   },
+  '1135': { selector: 15293031020466096408n, name: 'lisk-mainnet' },
   '1284': { selector: 1252863800116739621n, name: 'polkadot-mainnet-moonbeam' },
   '1285': { selector: 1355020143337428062n, name: 'kusama-mainnet-moonriver' },
   '1287': {
@@ -154,6 +156,7 @@ const selectors: Selectors = {
     name: 'ethereum-testnet-goerli-polygon-zkevm-1',
   },
   '1513': { selector: 4237030917318060427n, name: 'story-testnet' },
+  '1687': { selector: 10749384167430721561n, name: 'mint-testnet' },
   '1868': { selector: 12505351618335765396n, name: 'soneium-mainnet' },
   '1907': { selector: 4874388048629246000n, name: 'bitcichain-mainnet' },
   '1908': { selector: 4888058894222120000n, name: 'bitcichain-testnet' },
@@ -185,6 +188,7 @@ const selectors: Selectors = {
     selector: 8901520481741771655n,
     name: 'ethereum-testnet-holesky-fraxtal-1',
   },
+  '2741': { selector: 3577778157919314504n, name: 'abstract-mainnet' },
   '2810': {
     selector: 8304510386741731151n,
     name: 'ethereum-testnet-holesky-morph-1',
@@ -215,6 +219,7 @@ const selectors: Selectors = {
     selector: 8236463271206331221n,
     name: 'ethereum-testnet-sepolia-mantle-1',
   },
+  '5330': { selector: 470401360549526817n, name: 'superseed-mainnet' },
   '5611': {
     selector: 13274425992935471758n,
     name: 'binance_smart_chain-testnet-opbnb-1',
@@ -227,6 +232,7 @@ const selectors: Selectors = {
     selector: 8871595565390010547n,
     name: 'gnosis_chain-testnet-chiado',
   },
+  '11124': { selector: 16235373811196386733n, name: 'abstract-testnet' },
   '12324': {
     selector: 3162193654116181371n,
     name: 'ethereum-mainnet-arbitrum-1-l3x-1',
@@ -271,6 +277,7 @@ const selectors: Selectors = {
     selector: 17198166215261833993n,
     name: 'ethereum-mainnet-zircuit-1',
   },
+  '53302': { selector: 13694007683517087973n, name: 'superseed-testnet' },
   '57054': { selector: 3676871237479449268n, name: 'sonic-testnet-blaze' },
   '57073': { selector: 3461204551265785888n, name: 'ethereum-mainnet-ink-1' },
   '59140': {
@@ -370,6 +377,7 @@ const selectors: Selectors = {
     selector: 1010349088906777999n,
     name: 'ethereum-mainnet-arbitrum-1-treasure-1',
   },
+  '7777777': { selector: 3555797439612589184n, name: 'zora-mainnet' },
   '11155111': { selector: 16015286601757825753n, name: 'ethereum-testnet-sepolia' },
   '11155420': {
     selector: 5224473277236331295n,
@@ -386,6 +394,7 @@ const selectors: Selectors = {
     selector: 2027362563942762617n,
     name: 'ethereum-testnet-sepolia-blast-1',
   },
+  '999999999': { selector: 16244020411108056671n, name: 'zora-testnet' },
   // end:generate
 }
 
