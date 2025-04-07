@@ -184,7 +184,8 @@ describe('MessageHasher', () => {
           destExecData: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABX5A=',
           extraData: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABI=',
           destGasAmount: BigInt(0),
-      }],
+        },
+      ],
       gasLimit: BigInt(32),
       feeToken: '0x097d90c9d3e0b50ca60e1ae45f6a81010f9fb534',
       feeTokenAmount: BigInt('157848216053394'),
@@ -200,6 +201,7 @@ describe('MessageHasher', () => {
 
     const finalHash = hashSolanaMessage(message, metadataHash)
 
-    expect(finalHash).toMatch(/^0x[0-9a-f]+$/)
+    // from a test in Go
+    expect(finalHash).toBe('0xc3d05e33227a50e103192a0a3d24b29857e8d45c80022b8251ff523f13dee9f3')
   })
 })
