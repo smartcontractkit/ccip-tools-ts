@@ -200,12 +200,21 @@ export function encodeExtraArgs(args: EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtra
     if (args.gasLimit == null) args.gasLimit = DEFAULT_GAS_LIMIT
     return concat([EVMExtraArgsV2Tag, defaultAbiCoder.encode([EVMExtraArgsV2], [args])])
   } else if ('accounts' in args) {
-    const buffer = Buffer.alloc(12 + 32 * args.accounts.length)
-    buffer.writeUInt32LE(args.computeUnits)
-    bigintToLeBytes(args.isWritableBitmap, 8).copy(buffer, 4)
-    buffer.write(args.tokenReceiver, 12)
+    // Borsh serialization for SVM extra args
+    if (!args.accounts) args.accounts = []
+    const buffer = Buffer.alloc(4 + 8 + 32 + 4 + 32 * args.accounts.length)
+    let offset = 0
+    buffer.writeUInt32LE(args.computeUnits, offset)
+    offset += 4
+    bigintToLeBytes(args.isWritableBitmap, 8).copy(buffer, offset)
+    offset += 8
+    buffer.write(args.tokenReceiver, offset, 32, 'hex')
+    offset += 32
+    buffer.writeUInt32LE(args.accounts.length, offset)
+    offset += 4
     for (const account of args.accounts) {
-      buffer.write(account, 12 + 32)
+      buffer.write(account, offset, 32, 'hex')
+      offset += 32
     }
     return concat([SVMExtraArgsTag, buffer])
   } else if (args.gasLimit != null) {

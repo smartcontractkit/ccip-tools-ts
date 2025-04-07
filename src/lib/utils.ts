@@ -364,12 +364,16 @@ export function decodeAddress(address: string): string {
     : address
 }
 
-export function bigintToLeBytes(value: bigint, length: number): Buffer {
+export function bigintToLeBytes(value: bigint | undefined, length: number): Buffer {
+  if (value === undefined) {
+    return Buffer.alloc(length, 0)
+  }
   const buffer = Buffer.alloc(length)
   let remaining = value
   for (let i = 0; i < length; i++) {
-    buffer[i] = Number(remaining & 0xffn)
-    remaining >>= 8n
+    const byte = BigInt.asUintN(8, remaining) // Extract lowest 8 bits as unsigned integer
+    buffer.writeUInt8(Number(byte), i)
+    remaining = remaining >> 8n
   }
   return buffer
 }
