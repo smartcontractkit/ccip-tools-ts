@@ -16,13 +16,6 @@ type CCIPExecutionReportV1_6 = {
   proofs: Uint8Array[]
 }
 
-function serializeExtraArgs(extraArgs: SVMExtraArgsV1): Buffer {
-  const buffer = Buffer.alloc(12) // 4 bytes for compute_units + 8 bytes for is_writable_bitmap
-  buffer.writeUInt32LE(extraArgs.computeUnits) // Changed to LE to match Go
-  bigintToLeBytes(extraArgs.isWritableBitmap, 8).copy(buffer, 4)
-  return buffer
-}
-
 function serializeRampMessage(message: CCIPMessage<typeof CCIPVersion.V1_6>): Buffer {
   const buffers: Buffer[] = []
 
@@ -193,15 +186,14 @@ function hashAnyToSVMMessage(
 
   // Write extra args
   const extraArgs = parseExtraArgs(message.extraArgs)
-  if (!extraArgs || extraArgs._tag !== 'SVMExtraArgsV1') {
-    throw new Error('Invalid extra args format')
-  }
-  const svmExtraArgs = extraArgs as SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' }
-  const extraArgsBuffer = serializeExtraArgs({
+  const svmExtraArgs = extraArgs as SVMExtraArgsV1
+  const extraArgsBuffer = encodeExtraArgs({
     computeUnits: svmExtraArgs.computeUnits,
     isWritableBitmap: svmExtraArgs.isWritableBitmap,
+    tokenReceiver: svmExtraArgs.tokenReceiver,
+    accounts: svmExtraArgs.accounts,
   })
-  buffers.push(extraArgsBuffer)
+  buffers.push(Buffer.from(extraArgsBuffer))
 
   // Write nonce
   const nonceBuffer = bigintToLeBytes(message.header.nonce, 8)

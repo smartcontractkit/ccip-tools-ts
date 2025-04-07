@@ -185,6 +185,8 @@ export interface EVMExtraArgsV2 extends EVMExtraArgsV1 {
 export interface SVMExtraArgsV1 {
   computeUnits: number
   isWritableBitmap: bigint
+  tokenReceiver: string
+  accounts: string[]
 }
 
 const DEFAULT_GAS_LIMIT = 200_000n
@@ -197,10 +199,14 @@ export function encodeExtraArgs(args: EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtra
   if ('allowOutOfOrderExecution' in args) {
     if (args.gasLimit == null) args.gasLimit = DEFAULT_GAS_LIMIT
     return concat([EVMExtraArgsV2Tag, defaultAbiCoder.encode([EVMExtraArgsV2], [args])])
-  } else if ('computeUnits' in args) {
-    const buffer = Buffer.alloc(12)
+  } else if ('accounts' in args) {
+    const buffer = Buffer.alloc(12 + 32 * args.accounts.length)
     buffer.writeUInt32LE(args.computeUnits)
     bigintToLeBytes(args.isWritableBitmap, 8).copy(buffer, 4)
+    buffer.write(args.tokenReceiver, 12)
+    for (const account of args.accounts) {
+      buffer.write(account, 12 + 32)
+    }
     return concat([SVMExtraArgsTag, buffer])
   } else if (args.gasLimit != null) {
     return concat([EVMExtraArgsV1Tag, defaultAbiCoder.encode([EVMExtraArgsV1], [args])])
