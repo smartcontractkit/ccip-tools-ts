@@ -1,4 +1,4 @@
-import { keccak256 } from 'ethers'
+import { encodeBase58, keccak256 } from 'ethers'
 import {
   type CCIPMessage,
   type CCIPVersion,
@@ -229,7 +229,6 @@ function hashAnyToSVMMessage(
     buffers.push(accountBuffer)
   }
 
-  // Use legacy Keccak-256 (same as Go's sha3.NewLegacyKeccak256())
   const combined = Buffer.concat(buffers)
   return Buffer.from(keccak256(combined), 'hex')
 }
@@ -246,15 +245,6 @@ export const getV16SolanaLeafHasher =
       hashSolanaMetadata(message, sourceChainSelector, destChainSelector, onRamp),
     )
 
-/**
- * hashSolanaMessage uses the internal encoder (encodeCCIPExecutionReportV1_6)
- * to serialize a report containing the CCIP message and then combines it with
- * the metadata hash.
- *
- * @param message - the CCIPMessage (V1_6) to hash.
- * @param metadataHash - a hex string computed by hashSolanaMetadata.
- * @returns a hex string representing the final hash.
- */
 export const hashSolanaMessage = (
   message: CCIPMessage<typeof CCIPVersion.V1_6>,
   metadataHash: string,
@@ -308,5 +298,5 @@ export const hashSolanaMetadata = (
     gasLimit: message.gasLimit,
   }
 
-  return hashAnyToSVMMessage(rampMessage, onRamp).toString('hex')
+  return hashAnyToSVMMessage(rampMessage, onRamp, message.extraArgs.accounts).toString('hex')
 }
