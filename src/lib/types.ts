@@ -185,38 +185,53 @@ export interface EVMExtraArgsV2 extends EVMExtraArgsV1 {
 export interface SVMExtraArgsV1 {
   computeUnits: number
   isWritableBitmap: bigint
-  tokenReceiver: string
+  tokenReceiver?: string
   accounts: string[]
 }
 
 const DEFAULT_GAS_LIMIT = 200_000n
 
 /**
+ * Serializes SVM extra args using Borsh serialization format
+ * @param args - SVM extra args to serialize
+ * @returns Buffer containing serialized data
+ */
+function serializeSVMExtraArgs(args: Partial<SVMExtraArgsV1>): Buffer {
+  const computeUnits = args.computeUnits ?? 0
+  const isWritableBitmap = args.isWritableBitmap ?? 0n
+  const tokenReceiver = args.tokenReceiver ?? '0'.repeat(64) // 32 bytes in hex
+  const accounts = args.accounts ?? []
+
+  const buffer = Buffer.alloc(4 + 8 + 32 + 4 + 32 * accounts.length)
+
+  let offset = 0
+  buffer.writeUInt32LE(computeUnits, offset)
+  offset += 4
+  bigintToLeBytes(isWritableBitmap, 8).copy(buffer, offset)
+  offset += 8
+  buffer.write(tokenReceiver, offset, 32, 'hex')
+  offset += 32
+  buffer.writeUInt32LE(accounts.length, offset)
+  offset += 4
+  for (const account of accounts) {
+    buffer.write(account ?? '0'.repeat(64), offset, 32, 'hex')
+    offset += 32
+  }
+  return buffer
+}
+
+
+/**
  * Encodes extra arguments for CCIP messages.
  * args.allowOutOfOrderExecution enforces ExtraArgsV2 (v1.5+)
  **/
 export function encodeExtraArgs(args: EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1): string {
+  if (!args) return '0x'
   if ('allowOutOfOrderExecution' in args) {
     if (args.gasLimit == null) args.gasLimit = DEFAULT_GAS_LIMIT
     return concat([EVMExtraArgsV2Tag, defaultAbiCoder.encode([EVMExtraArgsV2], [args])])
   } else if ('accounts' in args) {
-    // Borsh serialization for SVM extra args
-    if (!args.accounts) args.accounts = []
-    const buffer = Buffer.alloc(4 + 8 + 32 + 4 + 32 * args.accounts.length)
-    let offset = 0
-    buffer.writeUInt32LE(args.computeUnits, offset)
-    offset += 4
-    bigintToLeBytes(args.isWritableBitmap, 8).copy(buffer, offset)
-    offset += 8
-    buffer.write(args.tokenReceiver, offset, 32, 'hex')
-    offset += 32
-    buffer.writeUInt32LE(args.accounts.length, offset)
-    offset += 4
-    for (const account of args.accounts) {
-      buffer.write(account, offset, 32, 'hex')
-      offset += 32
-    }
-    return concat([SVMExtraArgsTag, buffer])
+    return concat([SVMExtraArgsTag, serializeSVMExtraArgs(args)])
   } else if (args.gasLimit != null) {
     return concat([EVMExtraArgsV1Tag, defaultAbiCoder.encode([EVMExtraArgsV1], [args])])
   }
