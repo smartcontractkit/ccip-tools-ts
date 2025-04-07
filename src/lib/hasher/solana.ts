@@ -1,5 +1,11 @@
-import { decodeBase58, keccak256 } from 'ethers'
-import type { CCIPMessage, CCIPVersion, SVMExtraArgsV1 } from '../types.ts'
+import { keccak256 } from 'ethers'
+import {
+  type CCIPMessage,
+  type CCIPVersion,
+  type SVMExtraArgsV1,
+  encodeExtraArgs,
+  parseExtraArgs,
+} from '../types.ts'
 import { bigintToLeBytes } from '../utils.ts'
 import type { LeafHasher } from './common.ts'
 
@@ -36,15 +42,23 @@ function serializeRampMessage(message: CCIPMessage<typeof CCIPVersion.V1_6>): Bu
   buffers.push(dataSizeBuffer)
   buffers.push(Buffer.from(message.data))
 
-  // Write token receiver
-  buffers.push(Buffer.from(message.tokenReceiver))
+  // Write receiver
+  buffers.push(Buffer.from(message.receiver))
 
   // Write token amounts
   const tokenAmountsBuffer = serializeTokenAmounts(message.tokenAmounts)
   buffers.push(tokenAmountsBuffer)
 
   // Write extra args
-  const extraArgsBuffer = serializeExtraArgs(message.extraArgs)
+  const extraArgs = parseExtraArgs(message.extraArgs)
+  if (!extraArgs || extraArgs._tag !== 'SVMExtraArgsV1') {
+    throw new Error('Invalid extra args format')
+  }
+  const svmExtraArgs = extraArgs as SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' }
+  const extraArgsBuffer = serializeExtraArgs({
+    computeUnits: svmExtraArgs.computeUnits,
+    isWritableBitmap: svmExtraArgs.isWritableBitmap,
+  })
   buffers.push(extraArgsBuffer)
 
   console.log('serializeRampMessage', {
@@ -136,37 +150,6 @@ function encodeCCIPExecutionReportV1_6(report: CCIPExecutionReportV1_6): Buffer 
   return Buffer.concat(buffers)
 }
 
-// Helper function to convert a hex string to Uint8Array
-function hexStringToUint8Array(hex: string): Uint8Array {
-  const hexWithoutPrefix = hex.replace('0x', '')
-  const buffer = Buffer.from(hexWithoutPrefix, 'hex')
-  return new Uint8Array(buffer)
-}
-
-function parseExtraArgs(extraArgs: string): { computeUnits: number; isWritableBitmap: bigint } {
-  // Remove '0x' prefix and the tag (0x1f3b3aba)
-  const data = extraArgs.slice(10)
-
-  // Parse the data according to the format:
-  // - offset to the data (32 bytes)
-  // - compute_units (32 bytes)
-  // - array length (32 bytes)
-  // - array data...
-  const computeUnitsHex = data.slice(64, 128)
-  const isWritableBitmapHex = data.slice(128, 192)
-
-  // Parse compute units as a 32-bit number (little-endian)
-  const computeUnits = parseInt(computeUnitsHex.slice(-8), 16)
-
-  // Parse is_writable_bitmap as a 64-bit number (little-endian)
-  const isWritableBitmap = BigInt(`0x${isWritableBitmapHex.slice(-16)}`)
-
-  return {
-    computeUnits,
-    isWritableBitmap,
-  }
-}
-
 function hashAnyToSVMMessage(
   message: CCIPMessage<typeof CCIPVersion.V1_6>,
   onRamp: string,
@@ -201,16 +184,24 @@ function hashAnyToSVMMessage(
   const messageId = Buffer.from(message.header.messageId.replace('0x', ''), 'hex')
   buffers.push(messageId)
 
-  // Write token receiver
-  const tokenReceiver = Buffer.from(message.tokenReceiver)
-  buffers.push(tokenReceiver)
+  // Write receiver
+  const receiver = Buffer.from(message.receiver)
+  buffers.push(receiver)
 
   // Write sequence number
   const seqBuffer = bigintToLeBytes(message.header.sequenceNumber, 8)
   buffers.push(seqBuffer)
 
   // Write extra args
-  const extraArgsBuffer = serializeExtraArgs(message.extraArgs)
+  const extraArgs = parseExtraArgs(message.extraArgs)
+  if (!extraArgs || extraArgs._tag !== 'SVMExtraArgsV1') {
+    throw new Error('Invalid extra args format')
+  }
+  const svmExtraArgs = extraArgs as SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' }
+  const extraArgsBuffer = serializeExtraArgs({
+    computeUnits: svmExtraArgs.computeUnits,
+    isWritableBitmap: svmExtraArgs.isWritableBitmap,
+  })
   buffers.push(extraArgsBuffer)
 
   // Write nonce
@@ -305,34 +296,18 @@ export const hashSolanaMetadata = (
     isWritableBitmap: BigInt(0),
   }
 
-  const rampMessage = {
+  const rampMessage: CCIPMessage<typeof CCIPVersion.V1_6> = {
     header,
-    sender: new Uint8Array(),
-    data: new Uint8Array(),
-    tokenReceiver: Buffer.from(onRamp.replace('0x', ''), 'hex'),
+    sender: '',
+    data: '',
+    receiver: onRamp,
+    extraArgs: encodeExtraArgs(extraArgs),
+    feeToken: '',
+    feeTokenAmount: 0n,
+    feeValueJuels: 0n,
     tokenAmounts: [],
-    extraArgs,
+    gasLimit: 0n,
   }
 
   return hashAnyToSVMMessage(rampMessage, onRamp).toString('hex')
-}
-
-// Helper function to convert a Solana base58 address to Uint8Array
-function solanaAddressToUint8Array(address: string): Uint8Array {
-  try {
-    const decoded = decodeBase58(address)
-    return new Uint8Array(32).fill(0).map((_, i) => Number((decoded >> BigInt(i * 8)) & 0xffn))
-  } catch (_) {
-    throw new Error(`invalid Solana address: ${address}`)
-  }
-}
-
-// Helper function to check if a string is a Solana address
-function isSolanaAddress(address: string): boolean {
-  try {
-    const decoded = decodeBase58(address)
-    return decoded.toString().length === 32
-  } catch {
-    return false
-  }
 }
