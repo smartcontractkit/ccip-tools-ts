@@ -139,7 +139,7 @@ describe('MessageHasher', () => {
       sender: '7oZnxiocDK1aa9XAQC3CZ1VHKFkKwLuwRK8NddhU3FT2',
       receiver: '0xb8697ccb48fc82ccc6cc7fe5ec2bf6f3c4a20b90',
       data: '0x48617264636f6465642074657374206d65737361676520f09f9a80',
-      extraArgs: '0x181dcf10400d030000000000000000000000000000',
+      extraArgs: '0x1f3b3aba400d030000000000000000000000000000',
       tokenAmounts: [],
       gasLimit: BigInt(200000),
       feeToken: 'So11111111111111111111111111111111111111112',

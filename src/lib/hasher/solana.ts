@@ -49,20 +49,19 @@ function serializeRampMessage(message: CCIPMessage<typeof CCIPVersion.V1_6>): Bu
   const tokenAmountsBuffer = serializeTokenAmounts(message.tokenAmounts)
   buffers.push(tokenAmountsBuffer)
 
-  // Write extra args
   const extraArgs = parseExtraArgs(message.extraArgs)
-  if (!extraArgs || extraArgs._tag !== 'SVMExtraArgsV1') {
-    throw new Error('Invalid extra args format')
-  }
-  const svmExtraArgs = extraArgs as SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' }
-  const extraArgsBuffer = serializeExtraArgs({
-    computeUnits: svmExtraArgs.computeUnits,
-    isWritableBitmap: svmExtraArgs.isWritableBitmap,
-  })
+  const extraArgsBuffer = Buffer.from(encodeExtraArgs(extraArgs as SVMExtraArgsV1))
   buffers.push(extraArgsBuffer)
 
   console.log('serializeRampMessage', {
     buffers,
+    extraArgsBuffer,
+    extraArgs,
+    message,
+    headerBuffer,
+    senderSizeBuffer,
+    dataSizeBuffer,
+    tokenAmountsBuffer,
   })
 
   return Buffer.concat(buffers)
