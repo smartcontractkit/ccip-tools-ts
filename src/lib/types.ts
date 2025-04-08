@@ -261,7 +261,19 @@ export function parseExtraArgs(data: string):
     const buffer = Buffer.from(data.slice(4), 'hex')
     const computeUnits = buffer.readUInt32LE(0)
     const isWritableBitmap = BigInt(buffer.readBigUInt64LE(4))
-    return { computeUnits, isWritableBitmap, _tag: 'SVMExtraArgsV1' }
+    const tokenReceiver = buffer.slice(12, 44).toString('hex')
+    const accountsLength = buffer.readUInt32LE(44)
+    const accounts: string[] = []
+    let offset = 48
+    for (let i = 0; i < accountsLength; i++) {
+      accounts.push(buffer.slice(offset, offset + 32).toString('hex'))
+      offset += 32
+    }
+    return { computeUnits, isWritableBitmap, tokenReceiver, accounts, _tag: 'SVMExtraArgsV1' }
+  }
+  // Handle solana->evm case
+  if (data.startsWith('0x181dcf10')) {
+    return { _tag: 'EVMExtraArgsV1' }
   }
 }
 
