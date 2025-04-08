@@ -7,6 +7,7 @@ import {
   Contract,
   Result,
   dataLength,
+  decodeBase58 as ethersDecodeBase58,
   getAddress,
   isHexString,
 } from 'ethers'
@@ -376,4 +377,26 @@ export function bigintToLeBytes(value: bigint | undefined, length: number): Buff
     remaining = remaining >> 8n
   }
   return buffer
+}
+
+export function bigintToBeBytes(value: bigint, size: number): Buffer {
+  const buffer = Buffer.alloc(size)
+  let remaining = value
+  for (let i = size - 1; i >= 0; i--) {
+    buffer[i] = Number(remaining & BigInt(0xff))
+    remaining >>= BigInt(8)
+  }
+  return buffer
+}
+
+export function decodeBase58(input: string): Uint8Array {
+  const bigintValue = ethersDecodeBase58(input)
+  const hex = bigintValue.toString(16)
+  const hexPadded = hex.length % 2 === 0 ? hex : '0' + hex
+  const byteLength = hexPadded.length / 2
+  const bytes = new Uint8Array(byteLength)
+  for (let i = 0; i < byteLength; i++) {
+    bytes[i] = parseInt(hexPadded.slice(i * 2, i * 2 + 2), 16)
+  }
+  return bytes
 }

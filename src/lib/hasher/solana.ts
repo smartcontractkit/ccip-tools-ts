@@ -1,12 +1,11 @@
-import { encodeBase58, keccak256 } from 'ethers'
+import { keccak256 } from 'ethers'
 import {
   type CCIPMessage,
   type CCIPVersion,
   type SVMExtraArgsV1,
-  encodeExtraArgs,
   parseExtraArgs,
 } from '../types.ts'
-import { bigintToLeBytes } from '../utils.ts'
+import { bigintToBeBytes, decodeBase58 } from '../utils.ts'
 import type { LeafHasher } from './common.ts'
 
 type CCIPExecutionReportV1_6 = {
@@ -25,13 +24,13 @@ function serializeRampMessage(message: CCIPMessage<typeof CCIPVersion.V1_6>): Bu
 
   // Write sender length + data
   const senderSizeBuffer = Buffer.alloc(2)
-  senderSizeBuffer.writeUInt16BE(message.sender.length)
+  senderSizeBuffer.writeUInt16BE(message.sender.replace('0x', '').length / 2)
   buffers.push(senderSizeBuffer)
-  buffers.push(Buffer.from(message.sender))
+  buffers.push(Buffer.from(message.sender.replace('0x', ''), 'hex'))
 
   // Write data length + data
-  const dataSizeBuffer = Buffer.alloc(2)
   const data = Buffer.from(message.data.replace('0x', ''), 'base64')
+  const dataSizeBuffer = Buffer.alloc(2)
   dataSizeBuffer.writeUInt16BE(data.length)
   buffers.push(dataSizeBuffer)
   buffers.push(data)
@@ -61,14 +60,15 @@ function serializeRampMessage(message: CCIPMessage<typeof CCIPVersion.V1_6>): Bu
   return Buffer.concat(buffers)
 }
 
-function serializeHeader(header: CCIPMessage<typeof CCIPVersion.V1_6>['header']): Buffer {
-  const buffer = Buffer.alloc(32 + 8 * 4) // 32 bytes for message_id + 8 bytes each for 4 u64 values
-  Buffer.from(header.messageId.replace('0x', ''), 'hex').copy(buffer, 0)
-  bigintToLeBytes(header.sourceChainSelector, 8).copy(buffer, 32)
-  bigintToLeBytes(header.destChainSelector, 8).copy(buffer, 40)
-  bigintToLeBytes(header.sequenceNumber, 8).copy(buffer, 48)
-  bigintToLeBytes(header.nonce, 8).copy(buffer, 56)
-  return buffer
+export function serializeHeader(header: CCIPMessage<typeof CCIPVersion.V1_6>['header']): Buffer {
+  const buffers: Buffer[] = []
+  const nonceSizeBuffer = Buffer.alloc(2)
+  nonceSizeBuffer.writeUInt16BE(8)
+  buffers.push(nonceSizeBuffer)
+  buffers.push(bigintToBeBytes(header.nonce, 8))
+  buffers.push(bigintToBeBytes(header.sourceChainSelector, 8))
+  buffers.push(bigintToBeBytes(header.destChainSelector, 8))
+  return Buffer.concat(buffers)
 }
 
 function serializeTokenAmounts(
@@ -78,7 +78,7 @@ function serializeTokenAmounts(
 
   // Write array length
   const lengthBuffer = Buffer.alloc(4)
-  lengthBuffer.writeUInt32LE(tokenAmounts.length)
+  lengthBuffer.writeUInt32BE(tokenAmounts.length)
   buffers.push(lengthBuffer)
 
   // Write each token amount
@@ -86,22 +86,23 @@ function serializeTokenAmounts(
     // Write source pool address length + data
     const sourcePoolAddressLen = Buffer.alloc(4)
     const sourcePoolAddress = Buffer.from(token.sourcePoolAddress.replace('0x', ''), 'hex')
-    sourcePoolAddressLen.writeUInt32LE(sourcePoolAddress.length)
+    sourcePoolAddressLen.writeUInt32BE(sourcePoolAddress.length)
     buffers.push(sourcePoolAddressLen)
     buffers.push(sourcePoolAddress)
 
     // Write dest token address
-    buffers.push(Buffer.from(token.destTokenAddress))
+    const destTokenAddressBytes = decodeBase58(token.destTokenAddress)
+    buffers.push(Buffer.from(destTokenAddressBytes))
 
     // Write dest gas amount
     const destGasAmountBuffer = Buffer.alloc(4)
-    destGasAmountBuffer.writeUInt32LE(Number(token.destGasAmount))
+    destGasAmountBuffer.writeUInt32BE(Number(token.destGasAmount))
     buffers.push(destGasAmountBuffer)
 
     // Write extra data length + data
     const extraDataLen = Buffer.alloc(4)
     const extraData = Buffer.from(token.extraData, 'base64')
-    extraDataLen.writeUInt32LE(extraData.length)
+    extraDataLen.writeUInt32BE(extraData.length)
     buffers.push(extraDataLen)
     buffers.push(extraData)
 
@@ -110,7 +111,7 @@ function serializeTokenAmounts(
     buffers.push(destExecData)
 
     // Write amount
-    buffers.push(bigintToLeBytes(token.amount, 32))
+    buffers.push(bigintToBeBytes(token.amount, 32))
   }
 
   return Buffer.concat(buffers)
@@ -120,7 +121,7 @@ function encodeCCIPExecutionReportV1_6(report: CCIPExecutionReportV1_6): Buffer 
   const buffers: Buffer[] = []
 
   // Write source chain selector
-  const sourceChainBuffer = bigintToLeBytes(report.sourceChainSelector, 8)
+  const sourceChainBuffer = bigintToBeBytes(report.sourceChainSelector, 8)
   buffers.push(sourceChainBuffer)
 
   // Write message
@@ -150,7 +151,7 @@ function encodeCCIPExecutionReportV1_6(report: CCIPExecutionReportV1_6): Buffer 
   return Buffer.concat(buffers)
 }
 
-function hashAnyToSVMMessage(
+export function hashAnyToSVMMessage(
   message: CCIPMessage<typeof CCIPVersion.V1_6>,
   onRamp: string,
   msgAccounts: Uint8Array[] = [],
@@ -166,53 +167,52 @@ function hashAnyToSVMMessage(
   buffers.push(messageType)
 
   // Write source chain selector
-  const sourceChainBuffer = bigintToLeBytes(message.header.sourceChainSelector, 8)
+  const sourceChainBuffer = bigintToBeBytes(message.header.sourceChainSelector, 8)
   buffers.push(sourceChainBuffer)
 
   // Write dest chain selector
-  const destChainBuffer = bigintToLeBytes(message.header.destChainSelector, 8)
+  const destChainBuffer = bigintToBeBytes(message.header.destChainSelector, 8)
   buffers.push(destChainBuffer)
 
   // Write onRamp size and data
-  const onRampData = Buffer.from(onRamp)
+  const onRampBytes = decodeBase58(onRamp)
   const onRampSizeBuffer = Buffer.alloc(2)
-  onRampSizeBuffer.writeUInt16BE(onRampData.length)
+  onRampSizeBuffer.writeUInt16BE(onRampBytes.length)
   buffers.push(onRampSizeBuffer)
-  buffers.push(onRampData)
+  buffers.push(Buffer.from(onRampBytes))
 
   // Write message ID
   const messageId = Buffer.from(message.header.messageId.replace('0x', ''), 'hex')
   buffers.push(messageId)
 
-  // Write receiver
-  const receiver = Buffer.from(message.receiver)
-  buffers.push(receiver)
+  // Write token receiver
+  const tokenReceiverBytes = decodeBase58(message.receiver)
+  buffers.push(Buffer.from(tokenReceiverBytes))
 
   // Write sequence number
-  const seqBuffer = bigintToLeBytes(message.header.sequenceNumber, 8)
+  const seqBuffer = bigintToBeBytes(message.header.sequenceNumber, 8)
   buffers.push(seqBuffer)
 
-  // Write extra args
-  const extraArgs = parseExtraArgs(message.extraArgs)
-  const svmExtraArgs = extraArgs as SVMExtraArgsV1
-  const extraArgsBuffer = encodeExtraArgs({
-    computeUnits: svmExtraArgs.computeUnits,
-    isWritableBitmap: svmExtraArgs.isWritableBitmap,
-    tokenReceiver: svmExtraArgs.tokenReceiver,
-    accounts: svmExtraArgs.accounts,
-  })
-  buffers.push(Buffer.from(extraArgsBuffer.replace('0x', ''), 'hex'))
+  // Write extra args - use the raw extra args since they're already properly encoded
+  const extraArgsBuffer = Buffer.from(message.extraArgs.replace('0x', ''), 'hex')
+  buffers.push(extraArgsBuffer)
 
   // Write nonce
-  const nonceBuffer = bigintToLeBytes(message.header.nonce, 8)
+  const nonceBuffer = bigintToBeBytes(message.header.nonce, 8)
   buffers.push(nonceBuffer)
 
-  // Write sender
-  const sender = Buffer.from(message.sender)
-  buffers.push(sender)
+  // Write sender size and data
+  const senderBytes = Buffer.from(message.sender.replace('0x', ''), 'hex')
+  const senderSizeBuffer = Buffer.alloc(2)
+  senderSizeBuffer.writeUInt16BE(senderBytes.length)
+  buffers.push(senderSizeBuffer)
+  buffers.push(senderBytes)
 
-  // Write data
+  // Write data length + data
   const data = Buffer.from(message.data.replace('0x', ''), 'base64')
+  const dataSizeBuffer = Buffer.alloc(2)
+  dataSizeBuffer.writeUInt16BE(data.length)
+  buffers.push(dataSizeBuffer)
   buffers.push(data)
 
   // Write token amounts
@@ -220,9 +220,9 @@ function hashAnyToSVMMessage(
   buffers.push(tokenAmountsBuffer)
 
   // Write accounts
-  const accountsBuffer = Buffer.alloc(4)
-  accountsBuffer.writeUInt32LE(msgAccounts.length)
-  buffers.push(accountsBuffer)
+  const accountsLengthBuffer = Buffer.alloc(4)
+  accountsLengthBuffer.writeUInt32LE(msgAccounts.length)
+  buffers.push(accountsLengthBuffer)
   for (const account of msgAccounts) {
     buffers.push(Buffer.from(account))
   }
@@ -282,8 +282,11 @@ export const hashSolanaMessage = (
   }
 
   const encodedReport = encodeCCIPExecutionReportV1_6(report)
-  const combined = Buffer.concat([Buffer.from(metadataHash, 'hex'), encodedReport])
-  console.debug('v1.6 hashSolanaMessage:', {
+  const combined = Buffer.concat([
+    Buffer.from(metadataHash.replace('0x', ''), 'hex'),
+    encodedReport,
+  ])
+  console.log('v1.6 hashSolanaMessage:', {
     messageId: message.header.messageId,
     report,
     combined,
@@ -299,10 +302,11 @@ export const hashSolanaMetadata = (
 ): string => {
   const header = {
     messageId: message.header.messageId,
-    sourceChainSelector: BigInt(sourceChainSelector.toString()),
-    destChainSelector: BigInt(destChainSelector.toString()),
+    sourceChainSelector: message.header.sourceChainSelector,
+    destChainSelector: message.header.destChainSelector,
     sequenceNumber: BigInt(message.header.sequenceNumber.toString()),
     nonce: BigInt(message.header.nonce.toString()),
+    onRamp: onRamp,
   }
 
   const rampMessage: CCIPMessage<typeof CCIPVersion.V1_6> = {
@@ -327,5 +331,43 @@ export const hashSolanaMetadata = (
   const svmExtraArgs = extraArgs as SVMExtraArgsV1
   const accounts = svmExtraArgs.accounts || []
   const accountBuffers = accounts.map((account) => Buffer.from(account.replace('0x', ''), 'hex'))
-  return hashAnyToSVMMessage(rampMessage, onRamp, accountBuffers).toString('hex')
+  return '0x' + hashAnyToSVMMessage(rampMessage, onRamp, accountBuffers).toString('hex')
+}
+
+export function hashSVMToAnyMessage(message: CCIPMessage<typeof CCIPVersion.V1_6>): Buffer {
+  const buffers: Buffer[] = []
+  // Write message header
+  const headerBuffer = serializeHeader(message.header)
+  buffers.push(headerBuffer)
+
+  // Write sender length + data
+  const senderSizeBuffer = Buffer.alloc(2)
+  senderSizeBuffer.writeUInt16BE(message.sender.replace('0x', '').length / 2)
+  buffers.push(senderSizeBuffer)
+  buffers.push(Buffer.from(message.sender.replace('0x', ''), 'hex'))
+
+  // Write data length + data
+  const data = Buffer.from(message.data.replace('0x', ''), 'base64')
+  const dataSizeBuffer = Buffer.alloc(2)
+  dataSizeBuffer.writeUInt16BE(data.length)
+  buffers.push(dataSizeBuffer)
+  buffers.push(data)
+
+  // Write receiver
+  buffers.push(Buffer.from(message.receiver))
+
+  // Write token amounts
+  const tokenAmountsBuffer = serializeTokenAmounts(message.tokenAmounts)
+  buffers.push(tokenAmountsBuffer)
+
+  // Write extra arguments
+  const extraArgs = parseExtraArgs(message.extraArgs)
+  const extraArgsBuffer = Buffer.from(message.extraArgs.replace('0x', ''), 'hex')
+  buffers.push(extraArgsBuffer)
+
+  // Write accounts
+  for (const account of msgAccounts) {
+    buffers.push(account)
+  }
+  return Buffer.concat(buffers)
 }
