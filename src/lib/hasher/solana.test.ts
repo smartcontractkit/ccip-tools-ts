@@ -5,39 +5,6 @@ import { type CCIPMessage, CCIPVersion } from '../types.ts'
 import { getV16SolanaLeafHasher } from './solana.ts'
 
 describe('MessageHasher', () => {
-  // it('should handle a message solana->evm', () => {
-  //   const message = {
-  //     header: {
-  //       messageId: '0x68acd1941a62d6c8c6558c6a718941a362298e6ab462e4ac5efe18adaf79826f',
-  //       sourceChainSelector: BigInt('16423721717087811551'),
-  //       destChainSelector: BigInt('16015286601757825753'),
-  //       sequenceNumber: BigInt('22'),
-  //       nonce: BigInt('22'),
-  //       onRamp: '7oZnxiocDK1aa9XAQC3CZ1VHKFkKwLuwRK8NddhU3FT2',
-  //     },
-  //     sender: '7oZnxiocDK1aa9XAQC3CZ1VHKFkKwLuwRK8NddhU3FT2',
-  //     receiver: '0xb8697ccb48fc82ccc6cc7fe5ec2bf6f3c4a20b90',
-  //     data: '0x48617264636f6465642074657374206d65737361676520f09f9a80',
-  //     extraArgs: '0x181dcf10400d030000000000000000000000000000',
-  //     tokenAmounts: [],
-  //     gasLimit: BigInt(200000),
-  //     feeToken: 'So11111111111111111111111111111111111111112',
-  //     feeTokenAmount: BigInt(0),
-  //     feeValueJuels: BigInt(0),
-  //   }
-
-  //   const hasher = getV16SolanaLeafHasher(
-  //     message.header.sourceChainSelector,
-  //     message.header.destChainSelector,
-  //     message.header.onRamp,
-  //   )
-
-  //   const finalHash = hasher(message)
-
-  //   // The hash should be a valid hex string
-  //   expect(finalHash).toMatch(/^0x[0-9a-f]+$/)
-  // })
-
   // https://github.com/smartcontractkit/chainlink-ccip/blob/34a541118d89c346e2c642b089a63c3f2b2df320/chains/solana/utils/ccip/ccip_messages_test.go#L28
   it('should handle a message evm->solana', () => {
     const extraArgs = encodeExtraArgs({
