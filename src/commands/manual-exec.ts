@@ -110,7 +110,7 @@ export async function manualExec(
     page: argv.page,
   })
 
-  if (argv.estimateGasLimit != null) {
+  if (argv.estimateGasLimit != null && 'gasLimit' in request.message) {
     let estimated = await estimateExecGasForRequest(dest, request, {
       offRamp: await offRampContract.getAddress(),
     })
@@ -173,7 +173,9 @@ export async function manualExec(
       [
         {
           sourceChainSelector: request.lane.sourceChainSelector,
-          messages: execReport.messages as CCIPMessage<typeof CCIPVersion.V1_6>[],
+          messages: execReport.messages as (CCIPMessage<typeof CCIPVersion.V1_6> & {
+            gasLimit: bigint
+          })[],
           proofs: execReport.proofs,
           proofFlagBits: execReport.proofFlagBits,
           offchainTokenData: execReport.offchainTokenData,
@@ -353,7 +355,9 @@ export async function manualExecSenderQueue(
         [
           {
             sourceChainSelector: firstRequest.lane.sourceChainSelector,
-            messages: execReport.messages as CCIPMessage<typeof CCIPVersion.V1_6>[],
+            messages: execReport.messages as (CCIPMessage<typeof CCIPVersion.V1_6> & {
+              gasLimit: bigint
+            })[],
             proofs: execReport.proofs,
             proofFlagBits: execReport.proofFlagBits,
             offchainTokenData: execReport.offchainTokenData,

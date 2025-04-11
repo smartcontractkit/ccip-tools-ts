@@ -84,7 +84,7 @@ export async function selectRequest(
         description:
           `sender =\t\t${req.message.sender}
 receiver =\t\t${req.message.receiver}
-gasLimit =\t\t${req.message.gasLimit}
+gasLimit =\t\t${(req.message as { gasLimit: bigint }).gasLimit}
 tokenTransfers =\t[${req.message.tokenAmounts.map((ta) => ('token' in ta ? ta.token : ta.destTokenAddress)).join(',')}]` +
           ('lane' in req
             ? `\ndestination =\t\t${chainNameFromId(chainIdFromSelector(req.lane.destChainSelector))} [${chainIdFromSelector(req.lane.destChainSelector)}]`
@@ -226,7 +226,11 @@ export async function prettyRequest(source: Provider, request: CCIPRequest) {
     receiver: request.message.receiver,
     sequenceNumber: Number(request.message.header.sequenceNumber),
     nonce: nonce === 0 ? '0 => allow out-of-order exec' : nonce,
-    gasLimit: Number(request.message.gasLimit),
+    ...('gasLimit' in request.message
+      ? { gasLimit: Number(request.message.gasLimit) }
+      : 'computeUnits' in request.message
+        ? { computeUnits: Number(request.message.computeUnits) }
+        : {}),
     transactionHash: request.log.transactionHash,
     logIndex: request.log.index,
     blockNumber: request.log.blockNumber,

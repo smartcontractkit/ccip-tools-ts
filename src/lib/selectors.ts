@@ -1,4 +1,4 @@
-type Selectors = Record<number, { readonly selector: bigint; readonly name?: string }>
+type Selectors = Record<string, { readonly selector: bigint; readonly name?: string }>
 
 const selectors: Selectors = {
   // generate:
@@ -63,6 +63,7 @@ const selectors: Selectors = {
     selector: 7613811247471741961n,
     name: 'ethereum-mainnet-hashkey-1',
   },
+  '185': { selector: 17164792800244661392n, name: 'mint-mainnet' },
   '195': {
     selector: 2066098519157881736n,
     name: 'ethereum-testnet-sepolia-xlayer-1',
@@ -135,6 +136,7 @@ const selectors: Selectors = {
     selector: 1948510578179542068n,
     name: 'bitcoin-testnet-bsquared-1',
   },
+  '1135': { selector: 15293031020466096408n, name: 'lisk-mainnet' },
   '1284': { selector: 1252863800116739621n, name: 'polkadot-mainnet-moonbeam' },
   '1285': { selector: 1355020143337428062n, name: 'kusama-mainnet-moonriver' },
   '1287': {
@@ -154,6 +156,9 @@ const selectors: Selectors = {
     name: 'ethereum-testnet-goerli-polygon-zkevm-1',
   },
   '1513': { selector: 4237030917318060427n, name: 'story-testnet' },
+  '1687': { selector: 10749384167430721561n, name: 'mint-testnet' },
+  '1740': { selector: 6286293440461807648n, name: 'metal-testnet' },
+  '1750': { selector: 13447077090413146373n, name: 'metal-mainnet' },
   '1868': { selector: 12505351618335765396n, name: 'soneium-mainnet' },
   '1907': { selector: 4874388048629246000n, name: 'bitcichain-mainnet' },
   '1908': { selector: 4888058894222120000n, name: 'bitcichain-testnet' },
@@ -185,6 +190,7 @@ const selectors: Selectors = {
     selector: 8901520481741771655n,
     name: 'ethereum-testnet-holesky-fraxtal-1',
   },
+  '2741': { selector: 3577778157919314504n, name: 'abstract-mainnet' },
   '2810': {
     selector: 8304510386741731151n,
     name: 'ethereum-testnet-holesky-morph-1',
@@ -215,11 +221,14 @@ const selectors: Selectors = {
     selector: 8236463271206331221n,
     name: 'ethereum-testnet-sepolia-mantle-1',
   },
+  '5330': { selector: 470401360549526817n, name: 'superseed-mainnet' },
   '5611': {
     selector: 13274425992935471758n,
     name: 'binance_smart_chain-testnet-opbnb-1',
   },
   '6342': { selector: 2443239559770384419n, name: 'megaeth-testnet' },
+  '6900': { selector: 17349189558768828726n, name: 'nibiru-mainnet' },
+  '6930': { selector: 305104239123120457n, name: 'nibiru-testnet' },
   '8453': { selector: 15971525489660198786n, name: 'ethereum-mainnet-base-1' },
   '9559': { selector: 1113014352258747600n, name: 'neonlink-testnet' },
   '10143': { selector: 2183018362218727504n, name: 'monad-testnet' },
@@ -227,6 +236,7 @@ const selectors: Selectors = {
     selector: 8871595565390010547n,
     name: 'gnosis_chain-testnet-chiado',
   },
+  '11124': { selector: 16235373811196386733n, name: 'abstract-testnet' },
   '12324': {
     selector: 3162193654116181371n,
     name: 'ethereum-mainnet-arbitrum-1-l3x-1',
@@ -245,6 +255,7 @@ const selectors: Selectors = {
   },
   '16600': { selector: 16088006396410204581n, name: '0g-testnet-newton' },
   '17000': { selector: 7717148896336251131n, name: 'ethereum-testnet-holesky' },
+  '31337': { selector: 7759470850252068959n, name: 'anvil-devnet' },
   '33111': { selector: 9900119385908781505n, name: 'apechain-testnet-curtis' },
   '33139': { selector: 14894068710063348487n, name: 'apechain-mainnet' },
   '34443': { selector: 7264351850409363825n, name: 'ethereum-mainnet-mode-1' },
@@ -257,6 +268,7 @@ const selectors: Selectors = {
     name: 'ethereum-mainnet-arbitrum-1',
   },
   '42220': { selector: 1346049177634351622n, name: 'celo-mainnet' },
+  '42793': { selector: 13624601974233774587n, name: 'etherlink-mainnet' },
   '43111': { selector: 1804312132722180201n, name: 'hemi-mainnet' },
   '43113': { selector: 14767482510784806043n, name: 'avalanche-testnet-fuji' },
   '43114': { selector: 6433500567565415381n, name: 'avalanche-mainnet' },
@@ -270,6 +282,7 @@ const selectors: Selectors = {
     selector: 17198166215261833993n,
     name: 'ethereum-mainnet-zircuit-1',
   },
+  '53302': { selector: 13694007683517087973n, name: 'superseed-testnet' },
   '57054': { selector: 3676871237479449268n, name: 'sonic-testnet-blaze' },
   '57073': { selector: 3461204551265785888n, name: 'ethereum-mainnet-ink-1' },
   '59140': {
@@ -307,6 +320,7 @@ const selectors: Selectors = {
   '98865': { selector: 3208172210661564830n },
   '98866': { selector: 17912061998839310979n, name: 'plume-mainnet' },
   '98867': { selector: 13874588925447303949n, name: 'plume-testnet-sepolia' },
+  '128123': { selector: 1910019406958449359n, name: 'etherlink-testnet' },
   '167000': { selector: 16468599424800719238n, name: 'ethereum-mainnet-taiko-1' },
   '167009': {
     selector: 7248756420937879088n,
@@ -369,6 +383,7 @@ const selectors: Selectors = {
     selector: 1010349088906777999n,
     name: 'ethereum-mainnet-arbitrum-1-treasure-1',
   },
+  '7777777': { selector: 3555797439612589184n, name: 'zora-mainnet' },
   '11155111': { selector: 16015286601757825753n, name: 'ethereum-testnet-sepolia' },
   '11155420': {
     selector: 5224473277236331295n,
@@ -385,6 +400,7 @@ const selectors: Selectors = {
     selector: 2027362563942762617n,
     name: 'ethereum-testnet-sepolia-blast-1',
   },
+  '999999999': { selector: 16244020411108056671n, name: 'zora-testnet' },
   // end:generate
 }
 
@@ -400,8 +416,35 @@ export const aptosSelectors: Selectors = {
   // end:generate
 }
 
+export const solanaSelectors: Selectors = {
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors_solana.yml')
+  //   .then((res) => res.text())
+  //   .then((body) => require('yaml').parse(body, { intAsBigInt: true }).selectors)
+  //   .then((obj) => require('util').inspect(obj).split('\n').slice(1, -1))
+  '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d': {
+    name: 'solana-mainnet',
+    selector: 124615329519749607n,
+  },
+  '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY': {
+    name: 'solana-testnet',
+    selector: 6302590918974934319n,
+  },
+  EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG: {
+    name: 'solana-devnet',
+    selector: 16423721717087811551n,
+  },
+  // end:generate
+}
+
 export const isAptosChain = (selector: bigint): boolean => {
   return Object.values(aptosSelectors).some((aptosSelector) => aptosSelector.selector === selector)
+}
+
+export const isSolanaChain = (selector: bigint): boolean => {
+  return Object.values(solanaSelectors).some(
+    (solanaSelector) => solanaSelector.selector === selector,
+  )
 }
 
 export default selectors

@@ -41,12 +41,18 @@ type Any2EVMMessage = Parameters<TypedContract<typeof RouterABI>['routeMessage']
 /**
  * Estimate CCIP gasLimit needed to execute a request on a contract receiver
  *
- * @param source - Provider for the source chain
  * @param dest - Provider for the destination chain
- * @param onRamp - onRamp contract address
  * @param request - CCIP request info
+ * @param request.lane - Lane info
+ * @param request.message - Message info
+ * @param request.message.sender - sender address
+ * @param request.message.receiver - receiver address
+ * @param request.message.data - encoded receiver data per dest network encoding
+ * @param request.message.tokenAmounts - token and amounts
+ * @param request.message.tokenAmounts.*.destTokenAddress - destination token address, encoded as per dest network
+ * @param request.message.tokenAmounts.*.amount - token amount, bigint of smallest token units
  * @param hints - hints for the offRamp contract (optional, to skip offramp discovery)
- * @returns estimated gasLimit
+ * @returns estimated gasLimit as bigint
  **/
 export async function estimateExecGasForRequest(
   dest: JsonRpcApiProvider,

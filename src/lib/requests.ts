@@ -13,6 +13,7 @@ import {
 } from 'ethers'
 import yaml from 'yaml'
 
+import { parseExtraArgs, parseSourceTokenData } from './extra-args.ts'
 import {
   type CCIPContract,
   type CCIPMessage,
@@ -22,8 +23,6 @@ import {
   CCIPVersion,
   CCIP_ABIs,
   defaultAbiCoder,
-  parseExtraArgs,
-  parseSourceTokenData,
 } from './types.ts'
 import {
   blockRangeGenerator,
@@ -156,8 +155,10 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
       sourceChainSelector: data.sourceChainSelector as bigint,
     }
   }
-  if (data.gasLimit == null) {
-    data.gasLimit = parseExtraArgs(data.extraArgs as string)!.gasLimit!
+  if (data.gasLimit == null && data.computeUnits == null) {
+    const parsed = parseExtraArgs(data.extraArgs as string)!
+    const { _tag, ...rest } = parsed
+    Object.assign(data, rest)
   }
   return data as CCIPMessage
 }

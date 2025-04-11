@@ -2,13 +2,16 @@ import type { Abi } from 'abitype'
 import {
   type Addressable,
   type BaseContract,
+  type BigNumberish,
   type InterfaceAbi,
   type Provider,
   Contract,
   Result,
   dataLength,
   getAddress,
+  hexlify,
   isHexString,
+  toBeArray,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
@@ -362,4 +365,18 @@ export function decodeAddress(address: string): string {
     address.startsWith('0x000000000000000000000000')
     ? getAddress('0x' + address.slice(-40))
     : address
+}
+
+export function toLeHex(_value: BigNumberish, width?: number): string {
+  let value = toBeArray(_value).reverse()
+  if (width == null) {
+    // pass
+  } else if (value.length > width) {
+    throw new Error(`Value ${_value} is too big for ${width} bytes`)
+  } else if (width > value.length) {
+    const val = new Uint8Array(width).fill(0)
+    val.set(value, 0)
+    value = val
+  }
+  return hexlify(value)
 }

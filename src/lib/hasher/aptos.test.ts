@@ -1,4 +1,5 @@
 import { hexlify, toUtf8Bytes, zeroPadValue } from 'ethers'
+import { encodeExtraArgs } from '../extra-args.ts'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
 import { hashAptosMessage, hashAptosMetadata } from './aptos.ts'
 
@@ -19,8 +20,7 @@ describe('aptos hasher', () => {
       sender: '0x8765432109fedcba8765432109fedcba87654321',
       data: hexlify(toUtf8Bytes('sample message data')),
       receiver: zeroPadValue('0x1234', 32),
-      gasLimit: 500000n,
-      extraArgs: '',
+      extraArgs: encodeExtraArgs({ gasLimit: 500000n }),
       feeToken: '',
       feeTokenAmount: 0n,
       feeValueJuels: 0n,

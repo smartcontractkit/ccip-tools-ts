@@ -1,7 +1,8 @@
 // For reference implementation, see https://github.com/smartcontractkit/ccip/blob/ccip-develop/core/services/ocr2/plugins/ccip/hasher/leaf_hasher.go
 import { concat, id, keccak256, toBeHex, zeroPadValue } from 'ethers'
+import { parseExtraArgs } from '../extra-args.ts'
 import { type CCIPMessage, type CCIPVersion, defaultAbiCoder } from '../types.ts'
-import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from './common.ts'
+import { type LeafHasher, LEAF_DOMAIN_SEPARATOR, getAddressBytes, getDataBytes } from './common.ts'
 
 const METADATA_PREFIX_1_2 = id('EVM2EVMMessageHashV2')
 export function getV12LeafHasher(
@@ -88,11 +89,23 @@ export function getV16LeafHasher(
   ])
 
   return (message: CCIPMessage<typeof CCIPVersion.V1_6>): string => {
+    const parsedArgs = parseExtraArgs(message.extraArgs)
+    if (
+      !parsedArgs ||
+      (parsedArgs._tag !== 'EVMExtraArgsV1' && parsedArgs._tag !== 'EVMExtraArgsV2')
+    )
+      throw new Error('Invalid extraArgs, not EVMExtraArgsV1|2')
     const encodedTokens = defaultAbiCoder.encode(
       [
         'tuple(bytes sourcePoolAddress, address destTokenAddress, uint32 destGasAmount, bytes extraData, uint256 amount)[]',
       ],
-      [message.tokenAmounts],
+      [
+        message.tokenAmounts.map((ta) => ({
+          ...ta,
+          sourcePoolAddress: getAddressBytes(ta.sourcePoolAddress),
+          extraData: getDataBytes(ta.extraData),
+        })),
+      ],
     )
 
     const fixedSizeValues = defaultAbiCoder.encode(
@@ -107,7 +120,7 @@ export function getV16LeafHasher(
         message.header.messageId,
         message.receiver,
         message.header.sequenceNumber,
-        message.gasLimit,
+        parsedArgs.gasLimit,
         message.header.nonce,
       ],
     )
@@ -125,8 +138,8 @@ export function getV16LeafHasher(
         zeroPadValue(LEAF_DOMAIN_SEPARATOR, 32),
         keccak256(metadataInput),
         keccak256(fixedSizeValues),
-        keccak256(message.sender),
-        keccak256(message.data),
+        keccak256(getAddressBytes(message.sender)),
+        keccak256(getDataBytes(message.data)),
         keccak256(encodedTokens),
       ],
     )

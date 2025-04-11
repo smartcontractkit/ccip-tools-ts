@@ -1,4 +1,4 @@
-import { concat, hexlify, keccak256, toBeHex } from 'ethers'
+import { concat, decodeBase58, decodeBase64, getBytes, hexlify, keccak256, toBeHex } from 'ethers'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
 
 export type LeafHasher<V extends CCIPVersion = CCIPVersion> = (message: CCIPMessage<V>) => string
@@ -19,4 +19,20 @@ export function hashInternal(a: string, b: string): string {
   }
   const combinedData = concat([INTERNAL_DOMAIN_SEPARATOR, a, b])
   return keccak256(combinedData)
+}
+
+export function getAddressBytes(address: string): Uint8Array {
+  if (address.startsWith('0x')) {
+    return getBytes(address)
+  } else {
+    return getBytes(toBeHex(decodeBase58(address), 32))
+  }
+}
+
+export function getDataBytes(data: string): Uint8Array {
+  if (data.startsWith('0x')) {
+    return getBytes(data)
+  } else {
+    return decodeBase64(data)
+  }
 }
