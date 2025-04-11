@@ -33,7 +33,7 @@ export const hashAptosMessage = (
     encode('bytes32', message.header.messageId),
     zeroPadValue(message.receiver, 32),
     encode('uint64', message.header.sequenceNumber),
-    encode('uint256', message.gasLimit),
+    encode('uint256', (message as unknown as { gasLimit: bigint }).gasLimit), // TODO: fix aptos->solana, computeUnits
     encode('uint64', message.header.nonce),
   ])
 
