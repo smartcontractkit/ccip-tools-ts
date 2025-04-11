@@ -2,14 +2,16 @@ import type { Abi } from 'abitype'
 import {
   type Addressable,
   type BaseContract,
+  type BigNumberish,
   type InterfaceAbi,
   type Provider,
   Contract,
   Result,
   dataLength,
-  decodeBase58 as ethersDecodeBase58,
   getAddress,
+  hexlify,
   isHexString,
+  toBeArray,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
@@ -365,38 +367,16 @@ export function decodeAddress(address: string): string {
     : address
 }
 
-export function bigintToLeBytes(value: bigint | undefined, length: number): Buffer {
-  if (value === undefined) {
-    return Buffer.alloc(length, 0)
+export function toLeHex(_value: BigNumberish, width?: number): string {
+  let value = toBeArray(_value).reverse()
+  if (width == null) {
+    // pass
+  } else if (value.length > width) {
+    throw new Error(`Value ${_value} is too big for ${width} bytes`)
+  } else if (width > value.length) {
+    const val = new Uint8Array(width).fill(0)
+    val.set(value, 0)
+    value = val
   }
-  const buffer = Buffer.alloc(length)
-  let remaining = value
-  for (let i = 0; i < length; i++) {
-    const byte = BigInt.asUintN(8, remaining) // Extract lowest 8 bits as unsigned integer
-    buffer.writeUInt8(Number(byte), i)
-    remaining = remaining >> 8n
-  }
-  return buffer
-}
-
-export function bigintToBeBytes(value: bigint, size: number): Buffer {
-  const buffer = Buffer.alloc(size)
-  let remaining = value
-  for (let i = size - 1; i >= 0; i--) {
-    buffer[i] = Number(remaining & BigInt(0xff))
-    remaining >>= BigInt(8)
-  }
-  return buffer
-}
-
-export function decodeBase58(input: string): Uint8Array {
-  const bigintValue = ethersDecodeBase58(input)
-  const hex = bigintValue.toString(16)
-  const hexPadded = hex.length % 2 === 0 ? hex : '0' + hex
-  const byteLength = hexPadded.length / 2
-  const bytes = new Uint8Array(byteLength)
-  for (let i = 0; i < byteLength; i++) {
-    bytes[i] = parseInt(hexPadded.slice(i * 2, i * 2 + 2), 16)
-  }
-  return bytes
+  return hexlify(value)
 }
