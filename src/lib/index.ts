@@ -19,8 +19,6 @@ export {
   type CCIPMessage,
   type CCIPRequest,
   type CommitReport,
-  type EVMExtraArgsV1,
-  type EVMExtraArgsV2,
   type ExecutionReceipt,
   type Lane,
   type NetworkInfo,
@@ -28,9 +26,13 @@ export {
   CCIPVersion,
   ExecutionState,
   defaultAbiCoder,
+} from './types.ts'
+export {
+  type EVMExtraArgsV1,
+  type EVMExtraArgsV2,
   encodeExtraArgs,
   parseExtraArgs,
-} from './types.ts'
+} from './extra-args.ts'
 export {
   bigIntReplacer,
   bigIntReviver,
