@@ -29,7 +29,7 @@ export function parseBytes({ data, selector }: { data: string; selector?: string
         if (extraArgs) {
           const { _tag, ...rest } = extraArgs
           return `${_tag}(${Object.entries(rest)
-            .map(([k, v]) => `${k}=${v}`)
+            .map(([k, v]) => `${k}=${v as string}`)
             .join(', ')})`
         }
       }

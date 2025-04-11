@@ -224,7 +224,7 @@ describe('discoverOffRamp', () => {
       return provider
     },
     getBlockNumber: jest.fn(() => Promise.resolve(22050)),
-    getLogs: jest.fn(() => Promise.resolve(<unknown[]>[])),
+    getLogs: jest.fn(() => Promise.resolve([] as unknown[])),
     getNetwork: jest.fn(() => ({ chainId: 10n })),
   }
 
@@ -290,7 +290,7 @@ describe('fetchExecutionReceipts', () => {
       return dest
     },
     getBlockNumber: jest.fn(() => Promise.resolve(22050)),
-    getLogs: jest.fn(() => Promise.resolve(<unknown[]>[])),
+    getLogs: jest.fn(() => Promise.resolve([] as unknown[])),
     getBlock: jest.fn(() => Promise.resolve({ timestamp: 123456 })),
     getNetwork: jest.fn(() => ({ chainId: 10n })),
   }

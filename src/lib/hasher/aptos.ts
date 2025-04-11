@@ -1,4 +1,5 @@
 import { concat, id, keccak256, zeroPadValue } from 'ethers'
+import { parseExtraArgs } from '../extra-args.ts'
 import { type CCIPMessage, type CCIPVersion, defaultAbiCoder } from '../types.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from './common.ts'
 
@@ -29,11 +30,15 @@ export const hashAptosMessage = (
   message: CCIPMessage<typeof CCIPVersion.V1_6>,
   metadataHash: string,
 ): string => {
+  const parsedArgs = parseExtraArgs(message.extraArgs)
+  if (!parsedArgs || (parsedArgs._tag !== 'EVMExtraArgsV1' && parsedArgs._tag !== 'EVMExtraArgsV2'))
+    throw new Error('Invalid extraArgs, not EVMExtraArgsV1|2')
+
   const innerHash = concat([
     encode('bytes32', message.header.messageId),
     zeroPadValue(message.receiver, 32),
     encode('uint64', message.header.sequenceNumber),
-    encode('uint256', (message as unknown as { gasLimit: bigint }).gasLimit), // TODO: fix aptos->solana, computeUnits
+    encode('uint256', parsedArgs.gasLimit!), // TODO: fix aptos->solana, computeUnits
     encode('uint64', message.header.nonce),
   ])
 
