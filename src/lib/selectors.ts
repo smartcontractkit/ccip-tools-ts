@@ -5,7 +5,7 @@ const selectors: Selectors = {
   // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors.yml')
   //   .then((res) => res.text())
   //   .then((body) => require('yaml').parse(body, { intAsBigInt: true }).selectors)
-  //   .then((obj) => require('util').inspect(obj).split('\n').slice(1, -1))
+  //   .then((obj) => [...require('util').inspect(obj).split('\n').slice(1, -1), ','])
   '1': { selector: 5009297550715157269n, name: 'ethereum-mainnet' },
   '10': {
     selector: 3734403246176062136n,
@@ -226,10 +226,12 @@ const selectors: Selectors = {
     selector: 13274425992935471758n,
     name: 'binance_smart_chain-testnet-opbnb-1',
   },
+  '5668': { selector: 8911150974185440581n, name: 'nexon-dev' },
   '6342': { selector: 2443239559770384419n, name: 'megaeth-testnet' },
   '6900': { selector: 17349189558768828726n, name: 'nibiru-mainnet' },
   '6930': { selector: 305104239123120457n, name: 'nibiru-testnet' },
   '8453': { selector: 15971525489660198786n, name: 'ethereum-mainnet-base-1' },
+  '9000': { selector: 344208382356656551n, name: 'ondo-testnet' },
   '9559': { selector: 1113014352258747600n, name: 'neonlink-testnet' },
   '10143': { selector: 2183018362218727504n, name: 'monad-testnet' },
   '10200': {
@@ -298,8 +300,10 @@ const selectors: Selectors = {
     selector: 3777822886988675105n,
     name: 'ethereum-testnet-sepolia-metis-1',
   },
+  '60118': { selector: 15758750456714168963n, name: 'nexon-mainnet-lith' },
   '60808': { selector: 3849287863852499584n, name: 'bitcoin-mainnet-bob-1' },
   '61166': { selector: 5214452172935136222n, name: 'treasure-mainnet' },
+  '68414': { selector: 12657445206920369324n, name: 'nexon-mainnet-henesys' },
   '76578': { selector: 781901677223027175n },
   '80001': { selector: 12532609583862916517n, name: 'polygon-testnet-mumbai' },
   '80002': { selector: 16281711391670634445n, name: 'polygon-testnet-amoy' },
@@ -368,12 +372,14 @@ const selectors: Selectors = {
   },
   '743111': { selector: 16126893759944359622n, name: 'hemi-testnet-sepolia' },
   '763373': { selector: 9763904284804119144n, name: 'ink-testnet-sepolia' },
+  '807424': { selector: 14632960069656270105n, name: 'nexon-qa' },
   '808813': {
     selector: 5535534526963509396n,
     name: 'bitcoin-testnet-sepolia-bob-1',
   },
   '810180': { selector: 4350319965322101699n, name: 'zklink_nova-mainnet' },
   '810181': { selector: 5837261596322416298n, name: 'zklink_nova-testnet' },
+  '847799': { selector: 5556806327594153475n, name: 'nexon-stage' },
   '978657': {
     selector: 10443705513486043421n,
     name: 'ethereum-testnet-sepolia-arbitrum-1-treasure-1',
@@ -400,28 +406,28 @@ const selectors: Selectors = {
     selector: 2027362563942762617n,
     name: 'ethereum-testnet-sepolia-blast-1',
   },
+  '728126428': { selector: 1546563616611573946n, name: 'tron-mainnet-evm' },
   '999999999': { selector: 16244020411108056671n, name: 'zora-testnet' },
+  '2494104990': { selector: 13231703482326770598n, name: 'tron-testnet-shasta-evm' },
+  '3448148188': { selector: 2052925811360307749n, name: 'tron-testnet-nile-evm' },
   // end:generate
-}
 
-export const aptosSelectors: Selectors = {
   // generate:
   // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors_aptos.yml')
   //   .then((res) => res.text())
   //   .then((body) => require('yaml').parse(body, { intAsBigInt: true }).selectors)
-  //   .then((obj) => require('util').inspect(obj).split('\n').slice(1, -1))
-  '1': { name: 'aptos-mainnet', selector: 4741433654826277614n },
-  '2': { name: 'aptos-testnet', selector: 743186221051783445n },
-  '4': { name: 'aptos-localnet', selector: 4457093679053095497n },
+  //   .then((obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [`aptos:${k}`, v])))
+  //   .then((obj) => [...require('util').inspect(obj).split('\n').slice(1, -1), ','])
+  'aptos:1': { name: 'aptos-mainnet', selector: 4741433654826277614n },
+  'aptos:2': { name: 'aptos-testnet', selector: 743186221051783445n },
+  'aptos:4': { name: 'aptos-localnet', selector: 4457093679053095497n },
   // end:generate
-}
 
-export const solanaSelectors: Selectors = {
   // generate:
   // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors_solana.yml')
   //   .then((res) => res.text())
   //   .then((body) => require('yaml').parse(body, { intAsBigInt: true }).selectors)
-  //   .then((obj) => require('util').inspect(obj).split('\n').slice(1, -1))
+  //   .then((obj) => [...require('util').inspect(obj).split('\n').slice(1, -1), ','])
   '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d': {
     name: 'solana-mainnet',
     selector: 124615329519749607n,
@@ -435,16 +441,6 @@ export const solanaSelectors: Selectors = {
     selector: 16423721717087811551n,
   },
   // end:generate
-}
-
-export const isAptosChain = (selector: bigint): boolean => {
-  return Object.values(aptosSelectors).some((aptosSelector) => aptosSelector.selector === selector)
-}
-
-export const isSolanaChain = (selector: bigint): boolean => {
-  return Object.values(solanaSelectors).some(
-    (solanaSelector) => solanaSelector.selector === selector,
-  )
 }
 
 export default selectors

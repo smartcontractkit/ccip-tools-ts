@@ -24,6 +24,7 @@ export {
   type NetworkInfo,
   CCIPContractType,
   CCIPVersion,
+  ChainFamily,
   ExecutionState,
   defaultAbiCoder,
 } from './types.ts'

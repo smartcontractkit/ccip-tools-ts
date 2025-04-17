@@ -8,6 +8,8 @@ import {
   Contract,
   Interface,
   ZeroAddress,
+  getUint,
+  hexlify,
   isBytesLike,
   isHexString,
 } from 'ethers'
@@ -18,6 +20,7 @@ import {
   type CCIPContract,
   type CCIPMessage,
   type CCIPRequest,
+  type ChainFamily,
   type Lane,
   CCIPContractType,
   CCIPVersion,
@@ -28,7 +31,9 @@ import {
   blockRangeGenerator,
   chainNameFromSelector,
   decodeAddress,
+  getDataBytes,
   lazyCached,
+  networkInfo,
   toObject,
   validateContractType,
 } from './utils.ts'
@@ -123,8 +128,14 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
   if (typeof data !== 'object' || typeof data?.sender !== 'string' || !data.sender.startsWith('0x'))
     throw new Error('unknown message format: ' + JSON.stringify(data))
 
+  let destFamily: ChainFamily | undefined
+  if (data.header) {
+    destFamily = networkInfo(
+      (data.header as { destChainSelector: bigint }).destChainSelector,
+    ).family
+  }
   // conversions to make any message version be compatible with latest v1.6
-  data.tokenAmounts = (data.tokenAmounts as Record<string, string | bigint>[]).map(
+  data.tokenAmounts = (data.tokenAmounts as Record<string, string | bigint | number>[]).map(
     (tokenAmount, i) => {
       if (data.sourceTokenData) {
         try {
@@ -136,17 +147,17 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
           console.debug('legacy sourceTokenData:', i, (data.sourceTokenData as string[])[i])
         }
       }
-      if (tokenAmount.destExecData) {
-        tokenAmount.destGasAmount = defaultAbiCoder.decode(
-          ['uint32'],
-          tokenAmount.destExecData as string,
-        )[0] as bigint
+      if (typeof tokenAmount.destExecData === 'string' && tokenAmount.destGasAmount == null) {
+        tokenAmount.destGasAmount = getUint(hexlify(getDataBytes(tokenAmount.destExecData)))
       }
-      tokenAmount.destTokenAddress = decodeAddress(tokenAmount.destTokenAddress as string)
+      tokenAmount.destTokenAddress = decodeAddress(
+        tokenAmount.destTokenAddress as string,
+        destFamily,
+      )
       return tokenAmount
     },
   )
-  data.receiver = decodeAddress(data.receiver as string)
+  data.receiver = decodeAddress(data.receiver as string, destFamily)
   if (!data.header) {
     data.header = {
       messageId: data.messageId as string,

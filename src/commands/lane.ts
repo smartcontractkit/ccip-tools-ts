@@ -9,7 +9,6 @@ import {
   type CCIPVersion,
   CCIPContractType,
   bigIntReplacer,
-  chainIdFromName,
   chainIdFromSelector,
   chainNameFromSelector,
   chainSelectorFromId,
@@ -17,6 +16,7 @@ import {
   discoverOffRamp,
   getOnRampLane,
   getTypeAndVersion,
+  networkInfo,
   toObject,
   validateContractType,
 } from '../lib/index.ts'
@@ -28,8 +28,8 @@ export async function showLaneConfigs(
   providers: Providers,
   argv: { source: string; onramp_or_router: string; dest: string; format: Format; page: number },
 ) {
-  const sourceChainId = isNaN(+argv.source) ? chainIdFromName(argv.source) : +argv.source
-  const destChainId = isNaN(+argv.dest) ? chainIdFromName(argv.dest) : +argv.dest
+  const sourceChainId = networkInfo(argv.source).chainId
+  const destChainId = networkInfo(argv.dest).chainId
   const source = await providers.forChainId(sourceChainId)
   const [onrampOrRouterType, , onrampOrRouterTnV] = await getTypeAndVersion(
     source,
@@ -207,7 +207,7 @@ export async function showLaneConfigs(
         ...(sourceChainConfig
           ? {
               ...sourceChainConfig,
-              onRamp: decodeAddress(sourceChainConfig.onRamp),
+              onRamp: decodeAddress(sourceChainConfig.onRamp, networkInfo(sourceChainId).family),
             }
           : {}),
       })

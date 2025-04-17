@@ -399,7 +399,7 @@ export async function sourceToDestTokenAmounts<S extends { token: string }>(
           typeof TokenPoolABI
         >
         const remoteToken = await pool.getRemoteToken(destSelector)
-        const destToken = decodeAddress(remoteToken)
+        const destToken = decodeAddress(remoteToken, networkInfo(destSelector).family)
         if (destToken === ZeroAddress)
           throw new Error(
             `Dest "${destName}" not supported by tokenPool ${pools[i] as string} for token ${token}`,

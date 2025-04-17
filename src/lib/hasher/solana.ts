@@ -12,8 +12,8 @@ import {
 
 import { parseExtraArgs } from '../extra-args.ts'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
-import { toLeHex } from '../utils.ts'
-import { type LeafHasher, getAddressBytes, getDataBytes } from './common.ts'
+import { getAddressBytes, getDataBytes, toLeHex } from '../utils.ts'
+import type { LeafHasher } from './common.ts'
 
 const SvmExtraArgsSchema = {
   struct: {

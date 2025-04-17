@@ -1,5 +1,5 @@
-import { isAptosChain, isSolanaChain } from '../selectors.ts'
-import { type Lane, CCIPVersion } from '../types.ts'
+import { type Lane, CCIPVersion, ChainFamily } from '../types.ts'
+import { networkInfo } from '../utils.ts'
 import { getV16AptosLeafHasher } from './aptos.ts'
 import type { LeafHasher } from './common.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './evm.ts'
@@ -17,13 +17,13 @@ export function getLeafHasher<V extends CCIPVersion = CCIPVersion>({
     case CCIPVersion.V1_5:
       return getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher<V>
     case CCIPVersion.V1_6:
-      if (isAptosChain(destChainSelector)) {
+      if (networkInfo(destChainSelector).family === ChainFamily.Aptos) {
         return getV16AptosLeafHasher(
           sourceChainSelector,
           destChainSelector,
           onRamp,
         ) as LeafHasher<V>
-      } else if (isSolanaChain(destChainSelector)) {
+      } else if (networkInfo(destChainSelector).family === ChainFamily.Solana) {
         return getV16SolanaLeafHasher(
           sourceChainSelector,
           destChainSelector,

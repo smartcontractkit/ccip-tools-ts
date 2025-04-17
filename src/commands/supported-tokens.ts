@@ -42,7 +42,6 @@ import TokenAdminRegistryABI from '../abi/TokenAdminRegistry_1_5.ts'
 import {
   bigIntReplacer,
   chainIdFromName,
-  chainNameFromId,
   chainNameFromSelector,
   chainSelectorFromId,
   decodeAddress,
@@ -50,6 +49,7 @@ import {
   getOnRampLane,
   getProviderNetwork,
   getTypeAndVersion,
+  networkInfo,
 } from '../lib/index.ts'
 import type { Providers } from '../providers.ts'
 import { Format } from './types.ts'
@@ -209,14 +209,13 @@ async function getRegistryContract(
  */
 async function* fetchAllRegisteredTokens(
   registry: TypedContract<typeof TokenAdminRegistryABI>,
-  sourceChainId: number,
   batchSize = BATCH_SIZE,
 ) {
   let startIndex = 0
   let tokensBatch
 
   console.debug(
-    `[INFO] Fetching all registered tokens from "${chainNameFromId(sourceChainId)}" using TokenAdminRegistry ${await registry.getAddress()}`,
+    `[INFO] Fetching all registered tokens using TokenAdminRegistry ${await registry.getAddress()}`,
   )
 
   do {
@@ -349,8 +348,16 @@ export function prettySupportedToken(token: CCIPSupportedToken) {
     decimals: token.decimals,
     pool: token.pool,
     'pool.typeAndVersion': token.poolTypeAndVersion,
-    remoteToken: decodeAddress(token.poolDetails.remoteToken),
-    ...formatArray('remotePools', token.poolDetails.remotePools.map(decodeAddress)),
+    remoteToken: decodeAddress(
+      token.poolDetails.remoteToken,
+      networkInfo(token.poolDetails.remoteChainSelector).family,
+    ),
+    ...formatArray(
+      'remotePools',
+      token.poolDetails.remotePools.map((pool) =>
+        decodeAddress(pool, networkInfo(token.poolDetails.remoteChainSelector).family),
+      ),
+    ),
     ...(!token.poolDetails.outboundRateLimiter.isEnabled
       ? { 'rateLimiters.outbound': 'disabled' }
       : {
@@ -420,13 +427,13 @@ export async function showSupportedTokens(
 ) {
   console.log('[INFO] Starting token discovery for cross-chain transfers')
 
-  const { sourceChainId, sourceProvider, destSelector } = await parseLaneRouter(providers, argv)
+  const { sourceProvider, destSelector } = await parseLaneRouter(providers, argv)
 
   const registry = await getRegistryContract(sourceProvider, argv.router, destSelector)
 
   let totalTokens = 0,
     supportedTokens = 0
-  for await (const tokenBatch of fetchAllRegisteredTokens(registry, sourceChainId)) {
+  for await (const tokenBatch of fetchAllRegisteredTokens(registry)) {
     totalTokens += tokenBatch.length
 
     const tokenPools = await findSupportedTokens(registry, tokenBatch, destSelector)

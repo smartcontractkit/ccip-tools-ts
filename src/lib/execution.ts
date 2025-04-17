@@ -29,6 +29,7 @@ import {
   decodeAddress,
   getContractProperties,
   lazyCached,
+  networkInfo,
   toObject,
   validateContractType,
 } from './utils.ts'
@@ -141,7 +142,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
       },
     )
     sourceChainSelector = lane.sourceChainSelector
-    onRamp = decodeAddress(sourceConfig.onRamp)
+    onRamp = decodeAddress(sourceConfig.onRamp, networkInfo(sourceChainSelector).family)
   }
 
   if (lane.sourceChainSelector === sourceChainSelector && lane.onRamp === onRamp) {
