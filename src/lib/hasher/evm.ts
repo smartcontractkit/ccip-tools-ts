@@ -2,7 +2,7 @@
 import { concat, id, keccak256, toBeHex, zeroPadValue } from 'ethers'
 import { parseExtraArgs } from '../extra-args.ts'
 import { type CCIPMessage, type CCIPVersion, defaultAbiCoder } from '../types.ts'
-import { getAddressBytes, getDataBytes } from '../utils.ts'
+import { getDataBytes } from '../utils.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from './common.ts'
 
 const METADATA_PREFIX_1_2 = id('EVM2EVMMessageHashV2')
@@ -103,7 +103,7 @@ export function getV16LeafHasher(
       [
         message.tokenAmounts.map((ta) => ({
           ...ta,
-          sourcePoolAddress: getAddressBytes(ta.sourcePoolAddress),
+          sourcePoolAddress: getDataBytes(ta.sourcePoolAddress),
           extraData: getDataBytes(ta.extraData),
         })),
       ],
@@ -139,7 +139,7 @@ export function getV16LeafHasher(
         zeroPadValue(LEAF_DOMAIN_SEPARATOR, 32),
         keccak256(metadataInput),
         keccak256(fixedSizeValues),
-        keccak256(getAddressBytes(message.sender)),
+        keccak256(getDataBytes(message.sender)),
         keccak256(getDataBytes(message.data)),
         keccak256(encodedTokens),
       ],

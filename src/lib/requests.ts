@@ -116,7 +116,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
           fragment.inputs.filter((p) => !p.indexed),
           data,
         )[0] as Result
-        if (!isHexString(result?.sender)) throw new Error('next')
+        if (typeof result?.sender != 'string') throw new Error('next')
         break
       } catch (_) {
         // try next fragment
@@ -125,11 +125,23 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
     if (!isHexString(result?.sender)) throw new Error('could not decode CCIPMessage')
     data = resultsToMessage(result)
   }
-  if (typeof data !== 'object' || typeof data?.sender !== 'string' || !data.sender.startsWith('0x'))
+  if (typeof data !== 'object' || typeof data?.sender !== 'string')
     throw new Error('unknown message format: ' + JSON.stringify(data))
 
+  if (!data.header) {
+    data.header = {
+      messageId: data.messageId as string,
+      sequenceNumber: data.sequenceNumber as bigint,
+      nonce: data.nonce as bigint,
+      sourceChainSelector: data.sourceChainSelector as bigint,
+    }
+  }
+
+  const sourceFamily = networkInfo(
+    (data.header as { sourceChainSelector: bigint }).sourceChainSelector,
+  ).family
   let destFamily: ChainFamily | undefined
-  if (data.header) {
+  if ((data.header as { destChainSelector: bigint } | undefined)?.destChainSelector) {
     destFamily = networkInfo(
       (data.header as { destChainSelector: bigint }).destChainSelector,
     ).family
@@ -150,6 +162,10 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
       if (typeof tokenAmount.destExecData === 'string' && tokenAmount.destGasAmount == null) {
         tokenAmount.destGasAmount = getUint(hexlify(getDataBytes(tokenAmount.destExecData)))
       }
+      tokenAmount.sourcePoolAddress = decodeAddress(
+        tokenAmount.sourcePoolAddress as string,
+        sourceFamily,
+      )
       tokenAmount.destTokenAddress = decodeAddress(
         tokenAmount.destTokenAddress as string,
         destFamily,
@@ -157,15 +173,9 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
       return tokenAmount
     },
   )
+  data.sender = decodeAddress(data.sender, sourceFamily)
+  data.feeToken = decodeAddress(data.feeToken as string, sourceFamily)
   data.receiver = decodeAddress(data.receiver as string, destFamily)
-  if (!data.header) {
-    data.header = {
-      messageId: data.messageId as string,
-      sequenceNumber: data.sequenceNumber as bigint,
-      nonce: data.nonce as bigint,
-      sourceChainSelector: data.sourceChainSelector as bigint,
-    }
-  }
   if (data.gasLimit == null && data.computeUnits == null) {
     const parsed = parseExtraArgs(data.extraArgs as string)!
     const { _tag, ...rest } = parsed

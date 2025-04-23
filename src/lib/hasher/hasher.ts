@@ -16,21 +16,27 @@ export function getLeafHasher<V extends CCIPVersion = CCIPVersion>({
     case CCIPVersion.V1_2:
     case CCIPVersion.V1_5:
       return getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher<V>
-    case CCIPVersion.V1_6:
-      if (networkInfo(destChainSelector).family === ChainFamily.Aptos) {
-        return getV16AptosLeafHasher(
-          sourceChainSelector,
-          destChainSelector,
-          onRamp,
-        ) as LeafHasher<V>
-      } else if (networkInfo(destChainSelector).family === ChainFamily.Solana) {
-        return getV16SolanaLeafHasher(
-          sourceChainSelector,
-          destChainSelector,
-          onRamp,
-        ) as LeafHasher<V>
+    case CCIPVersion.V1_6: {
+      const { family } = networkInfo(destChainSelector)
+      switch (family) {
+        case ChainFamily.Solana:
+          return getV16SolanaLeafHasher(
+            sourceChainSelector,
+            destChainSelector,
+            onRamp,
+          ) as LeafHasher<V>
+        case ChainFamily.Aptos:
+          return getV16AptosLeafHasher(
+            sourceChainSelector,
+            destChainSelector,
+            onRamp,
+          ) as LeafHasher<V>
+        case ChainFamily.EVM:
+          return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher<V>
+        default:
+          throw new Error(`Unsupported destination chain family: ${family as string}`)
       }
-      return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher<V>
+    }
     default:
       throw new Error(`Unsupported CCIP version: ${version}`)
   }

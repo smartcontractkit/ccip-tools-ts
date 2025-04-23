@@ -387,12 +387,8 @@ export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFam
       bytes = getAddress(bytes)
       break
     case ChainFamily.Aptos:
-      if (dataLength(bytes) !== 32)
-        throw new Error(`Invalid address length: ${bytes} => ${bytes.length} != 32`)
       break
     case ChainFamily.Solana:
-      if (dataLength(bytes) !== 32)
-        throw new Error(`Invalid address length: ${bytes} => ${bytes.length} != 32`)
       bytes = encodeBase58(bytes)
       break
     default:
@@ -436,8 +432,6 @@ export function getAddressBytes(address: BytesLike): Uint8Array {
       bytes.slice(-20).some((b) => b !== 0)
     ) {
       bytes = bytes.slice(-20)
-    } else if (bytes.slice(20).every((b) => b === 0) && bytes.slice(0, 20).some((b) => b !== 0)) {
-      bytes = bytes.slice(0, 20)
     }
   }
   return bytes
