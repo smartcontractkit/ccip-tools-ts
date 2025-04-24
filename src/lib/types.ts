@@ -58,12 +58,22 @@ export type CCIPContract<T extends CCIPContractType, V extends CCIPVersion> = Ty
   (typeof CCIP_ABIs)[T][V]
 >
 
-export interface NetworkInfo {
-  chainId: number
+export const ChainFamily = {
+  EVM: 'evm',
+  Solana: 'solana',
+  Aptos: 'aptos',
+} as const
+export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
+
+export type NetworkInfo = {
   chainSelector: bigint
   name: string
   isTestnet: boolean
-}
+} & (
+  | { family: typeof ChainFamily.EVM; chainId: number }
+  | { family: typeof ChainFamily.Solana; chainId: string }
+  | { family: typeof ChainFamily.Aptos; chainId: `aptos:${number}` }
+)
 
 export interface Lane<V extends CCIPVersion = CCIPVersion> {
   sourceChainSelector: bigint

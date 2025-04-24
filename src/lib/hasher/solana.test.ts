@@ -1,10 +1,23 @@
 import { encodeBase64, toBigInt } from 'ethers'
 import { encodeExtraArgs } from '../extra-args.ts'
 import { decodeMessage } from '../requests.ts'
+import SELECTORS from '../selectors.ts'
 import { type CCIPMessage, CCIPVersion } from '../types.ts'
 import { getV16SolanaLeafHasher } from './solana.ts'
 
 describe('MessageHasher', () => {
+  beforeAll(() => {
+    Object.assign(SELECTORS, {
+      solanaLocalGenesisHash: {
+        name: 'solana-localnet',
+        selector: 78n,
+      },
+      'aptos:11': {
+        name: 'aptos-zetanet',
+        selector: 67n,
+      },
+    })
+  })
   // https://github.com/smartcontractkit/chainlink-ccip/blob/34a541118d89c346e2c642b089a63c3f2b2df320/chains/solana/utils/ccip/ccip_messages_test.go#L28
   it('should handle a message evm->solana', () => {
     const extraArgs = encodeExtraArgs({

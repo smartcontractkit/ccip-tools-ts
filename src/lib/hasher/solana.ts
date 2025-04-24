@@ -12,8 +12,8 @@ import {
 
 import { parseExtraArgs } from '../extra-args.ts'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
-import { toLeHex } from '../utils.ts'
-import { type LeafHasher, getAddressBytes, getDataBytes } from './common.ts'
+import { getAddressBytes, getDataBytes, toLeHex } from '../utils.ts'
+import type { LeafHasher } from './common.ts'
 
 const SvmExtraArgsSchema = {
   struct: {
@@ -64,26 +64,26 @@ export function getV16SolanaLeafHasher(
       })),
       true,
     )
-    return keccak256(
-      concat([
-        ZeroHash,
-        toUtf8Bytes('Any2SVMMessageHashV1'),
-        toBeHex(sourceChainSelector, 8),
-        toBeHex(destChainSelector, 8),
-        toBeHex(dataLength(onRampBytes), 2),
-        onRampBytes,
-        message.header.messageId,
-        tokenReceiver,
-        toBeHex(message.header.sequenceNumber, 8),
-        any2SVMExtraArgsBorshEncoded,
-        toBeHex(message.header.nonce, 8),
-        toBeHex(dataLength(sender), 2),
-        sender,
-        toBeHex(dataLength(dataBytes), 2),
-        dataBytes,
-        tokenAmountsEncoded,
-        ...parsedArgs.accounts.map((a) => toBeHex(decodeBase58(a), 32)),
-      ]),
-    )
+    const packedValues = [
+      ZeroHash,
+      toUtf8Bytes('Any2SVMMessageHashV1'),
+      toBeHex(sourceChainSelector, 8),
+      toBeHex(destChainSelector, 8),
+      toBeHex(dataLength(onRampBytes), 2),
+      onRampBytes,
+      message.header.messageId,
+      tokenReceiver,
+      toBeHex(message.header.sequenceNumber, 8),
+      any2SVMExtraArgsBorshEncoded,
+      toBeHex(message.header.nonce, 8),
+      toBeHex(dataLength(sender), 2),
+      sender,
+      toBeHex(dataLength(dataBytes), 2),
+      dataBytes,
+      tokenAmountsEncoded,
+      ...parsedArgs.accounts.map((a) => toBeHex(decodeBase58(a), 32)),
+    ]
+    console.debug('v1.6 solana leafHasher', packedValues)
+    return keccak256(concat(packedValues))
   }
 }

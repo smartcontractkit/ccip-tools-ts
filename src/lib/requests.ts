@@ -8,6 +8,8 @@ import {
   Contract,
   Interface,
   ZeroAddress,
+  getUint,
+  hexlify,
   isBytesLike,
   isHexString,
 } from 'ethers'
@@ -18,6 +20,7 @@ import {
   type CCIPContract,
   type CCIPMessage,
   type CCIPRequest,
+  type ChainFamily,
   type Lane,
   CCIPContractType,
   CCIPVersion,
@@ -28,7 +31,9 @@ import {
   blockRangeGenerator,
   chainNameFromSelector,
   decodeAddress,
+  getDataBytes,
   lazyCached,
+  networkInfo,
   toObject,
   validateContractType,
 } from './utils.ts'
@@ -111,7 +116,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
           fragment.inputs.filter((p) => !p.indexed),
           data,
         )[0] as Result
-        if (!isHexString(result?.sender)) throw new Error('next')
+        if (typeof result?.sender != 'string') throw new Error('next')
         break
       } catch (_) {
         // try next fragment
@@ -120,11 +125,29 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
     if (!isHexString(result?.sender)) throw new Error('could not decode CCIPMessage')
     data = resultsToMessage(result)
   }
-  if (typeof data !== 'object' || typeof data?.sender !== 'string' || !data.sender.startsWith('0x'))
+  if (typeof data !== 'object' || typeof data?.sender !== 'string')
     throw new Error('unknown message format: ' + JSON.stringify(data))
 
+  if (!data.header) {
+    data.header = {
+      messageId: data.messageId as string,
+      sequenceNumber: data.sequenceNumber as bigint,
+      nonce: data.nonce as bigint,
+      sourceChainSelector: data.sourceChainSelector as bigint,
+    }
+  }
+
+  const sourceFamily = networkInfo(
+    (data.header as { sourceChainSelector: bigint }).sourceChainSelector,
+  ).family
+  let destFamily: ChainFamily | undefined
+  if ((data.header as { destChainSelector: bigint } | undefined)?.destChainSelector) {
+    destFamily = networkInfo(
+      (data.header as { destChainSelector: bigint }).destChainSelector,
+    ).family
+  }
   // conversions to make any message version be compatible with latest v1.6
-  data.tokenAmounts = (data.tokenAmounts as Record<string, string | bigint>[]).map(
+  data.tokenAmounts = (data.tokenAmounts as Record<string, string | bigint | number>[]).map(
     (tokenAmount, i) => {
       if (data.sourceTokenData) {
         try {
@@ -136,25 +159,23 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
           console.debug('legacy sourceTokenData:', i, (data.sourceTokenData as string[])[i])
         }
       }
-      if (tokenAmount.destExecData) {
-        tokenAmount.destGasAmount = defaultAbiCoder.decode(
-          ['uint32'],
-          tokenAmount.destExecData as string,
-        )[0] as bigint
+      if (typeof tokenAmount.destExecData === 'string' && tokenAmount.destGasAmount == null) {
+        tokenAmount.destGasAmount = getUint(hexlify(getDataBytes(tokenAmount.destExecData)))
       }
-      tokenAmount.destTokenAddress = decodeAddress(tokenAmount.destTokenAddress as string)
+      tokenAmount.sourcePoolAddress = decodeAddress(
+        tokenAmount.sourcePoolAddress as string,
+        sourceFamily,
+      )
+      tokenAmount.destTokenAddress = decodeAddress(
+        tokenAmount.destTokenAddress as string,
+        destFamily,
+      )
       return tokenAmount
     },
   )
-  data.receiver = decodeAddress(data.receiver as string)
-  if (!data.header) {
-    data.header = {
-      messageId: data.messageId as string,
-      sequenceNumber: data.sequenceNumber as bigint,
-      nonce: data.nonce as bigint,
-      sourceChainSelector: data.sourceChainSelector as bigint,
-    }
-  }
+  data.sender = decodeAddress(data.sender, sourceFamily)
+  data.feeToken = decodeAddress(data.feeToken as string, sourceFamily)
+  data.receiver = decodeAddress(data.receiver as string, destFamily)
   if (data.gasLimit == null && data.computeUnits == null) {
     const parsed = parseExtraArgs(data.extraArgs as string)!
     const { _tag, ...rest } = parsed

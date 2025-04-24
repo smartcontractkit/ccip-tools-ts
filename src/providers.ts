@@ -138,11 +138,11 @@ export class Providers {
             )
               .then(({ chainId }) => {
                 if (chainId in this.#promisesCallbacks) {
-                  const [resolve] = this.#promisesCallbacks[chainId]
-                  delete this.#promisesCallbacks[chainId]
+                  const [resolve] = this.#promisesCallbacks[+chainId]
+                  delete this.#promisesCallbacks[+chainId]
                   resolve(provider)
                 } else if (!(chainId in this.#providersPromises)) {
-                  this.#providersPromises[chainId] = Promise.resolve(provider)
+                  this.#providersPromises[+chainId] = Promise.resolve(provider)
                 } else {
                   throw new Error(`Raced by a faster provider`)
                 }
@@ -177,7 +177,9 @@ export class Providers {
    * @param chainId - chainId to get a provider for
    * @returns Promise for a provider for the given chainId
    **/
-  async forChainId(chainId: number): Promise<JsonRpcApiProvider> {
+  async forChainId(chainId: number | string): Promise<JsonRpcApiProvider> {
+    if (typeof chainId === 'string') throw new Error('non-EVM chains are not supported yet')
+
     if (chainId in this.#providersPromises) return this.#providersPromises[chainId]
     if (this.completed === true)
       throw new Error(

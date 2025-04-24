@@ -3,20 +3,32 @@ import {
   type Addressable,
   type BaseContract,
   type BigNumberish,
+  type BytesLike,
   type InterfaceAbi,
   type Provider,
   Contract,
   Result,
   dataLength,
+  decodeBase58,
+  decodeBase64,
+  encodeBase58,
   getAddress,
+  getBytes,
   hexlify,
-  isHexString,
+  isBytesLike,
   toBeArray,
+  toBeHex,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import SELECTORS from './selectors.ts'
-import { type NetworkInfo, CCIPContractType, CCIPVersion, VersionedContractABI } from './types.ts'
+import {
+  type NetworkInfo,
+  CCIPContractType,
+  CCIPVersion,
+  ChainFamily,
+  VersionedContractABI,
+} from './types.ts'
 
 /**
  * Returns *some* block number with timestamp prior to `timestamp`
@@ -246,58 +258,65 @@ export async function validateContractType(
   return [version, typeAndVersion]
 }
 
-export function chainNameFromId(id: number): string {
+export function chainNameFromId(id: NetworkInfo['chainId']): string {
   if (!SELECTORS[id].name) throw new Error(`No name for chain with id = ${id}`)
   return SELECTORS[id].name
 }
 
-export function chainSelectorFromId(id: number): bigint {
+export function chainSelectorFromId(id: NetworkInfo['chainId']): bigint {
   return SELECTORS[id].selector
 }
 
-export function chainIdFromSelector(selector: bigint): number {
-  const id = lazyCached(`chainIdFromSelector ${selector}`, () => {
+export function chainIdFromSelector(selector: bigint): NetworkInfo['chainId'] {
+  return lazyCached(`chainIdFromSelector ${selector}`, () => {
     for (const id in SELECTORS) {
       if (SELECTORS[id].selector === selector) {
-        return Number(id)
+        return isNaN(Number(id)) ? id : Number(id)
       }
     }
+    throw new Error(`Selector not found: ${selector}`)
   })
-  if (id === undefined) throw new Error(`Selector not found: ${selector}`)
-  return id
 }
 
 export const chainNameFromSelector = (selector: bigint) =>
   chainNameFromId(chainIdFromSelector(selector))
 
-export function chainIdFromName(name: string): number {
-  const id = lazyCached(`chainIdFromName ${name}`, () => {
+export function chainIdFromName(name: string): NetworkInfo['chainId'] {
+  return lazyCached(`chainIdFromName ${name}`, () => {
     for (const id in SELECTORS) {
       if (SELECTORS[id].name === name) {
-        return Number(id)
+        return isNaN(Number(id)) ? id : Number(id)
       }
     }
+    throw new Error(`Chain name not found: ${name}`)
   })
-  if (id === undefined) throw new Error(`Chain name not found: ${name}`)
-  return id
 }
 
-export function networkInfo(selectorOrId: bigint | number): NetworkInfo {
-  let chainId: number, chainSelector: bigint
-  if (typeof selectorOrId === 'number') {
-    chainId = selectorOrId
+export function networkInfo(selectorOrIdOrName: bigint | number | string): NetworkInfo {
+  let chainId: NetworkInfo['chainId'], chainSelector: bigint
+  if (typeof selectorOrIdOrName === 'bigint') {
+    chainSelector = selectorOrIdOrName
+    chainId = chainIdFromSelector(chainSelector)
+  } else if (selectorOrIdOrName.toString() in SELECTORS) {
+    chainId = selectorOrIdOrName
     chainSelector = chainSelectorFromId(chainId)
   } else {
-    chainSelector = selectorOrId
-    chainId = chainIdFromSelector(chainSelector)
+    chainId = chainIdFromName(selectorOrIdOrName.toString())
+    chainSelector = chainSelectorFromId(chainId)
   }
-  const name = chainNameFromId(chainId)
+  const name = chainNameFromSelector(chainSelector)
+  const family = name.startsWith('solana-')
+    ? ChainFamily.Solana
+    : name.startsWith('aptos-')
+      ? ChainFamily.Aptos
+      : ChainFamily.EVM
   return {
     chainId,
     chainSelector,
     name,
+    family,
     isTestnet: !name.includes('-mainnet'),
-  }
+  } as NetworkInfo
 }
 
 export async function getProviderNetwork(provider: Provider): Promise<NetworkInfo> {
@@ -359,12 +378,23 @@ export function toObject<T>(obj: T | Result): T {
 /**
  * Decode address from a 32-byte hex string
  **/
-export function decodeAddress(address: string): string {
-  return isHexString(address) &&
-    dataLength(address) === 32 &&
-    address.startsWith('0x000000000000000000000000')
-    ? getAddress('0x' + address.slice(-40))
-    : address
+export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFamily.EVM): string {
+  let bytes = hexlify(getAddressBytes(address))
+  switch (family) {
+    case ChainFamily.EVM:
+      if (dataLength(bytes) !== 20)
+        throw new Error(`Invalid address length: ${bytes} => ${bytes.length} != 20`)
+      bytes = getAddress(bytes)
+      break
+    case ChainFamily.Aptos:
+      break
+    case ChainFamily.Solana:
+      bytes = encodeBase58(bytes)
+      break
+    default:
+      throw new Error(`Unsupported address family: ${family as string}`)
+  }
+  return bytes
 }
 
 export function toLeHex(_value: BigNumberish, width?: number): string {
@@ -379,4 +409,30 @@ export function toLeHex(_value: BigNumberish, width?: number): string {
     value = val
   }
   return hexlify(value)
+}
+
+export function getDataBytes(data: BytesLike): Uint8Array {
+  if (isBytesLike(data)) {
+    return getBytes(data)
+  } else {
+    return decodeBase64(data)
+  }
+}
+
+export function getAddressBytes(address: BytesLike): Uint8Array {
+  let bytes: Uint8Array
+  if (isBytesLike(address)) {
+    bytes = getBytes(address)
+  } else {
+    bytes = getBytes(toBeHex(decodeBase58(address), 32))
+  }
+  if (bytes.length > 20) {
+    if (
+      bytes.slice(0, bytes.length - 20).every((b) => b === 0) &&
+      bytes.slice(-20).some((b) => b !== 0)
+    ) {
+      bytes = bytes.slice(-20)
+    }
+  }
+  return bytes
 }

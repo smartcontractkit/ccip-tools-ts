@@ -1,6 +1,6 @@
 import type { Network, Provider } from 'ethers'
 
-import { CCIPContractType, CCIPVersion } from './types.ts'
+import { CCIPContractType, CCIPVersion, ChainFamily } from './types.ts'
 import {
   bigIntReplacer,
   bigIntReviver,
@@ -146,6 +146,7 @@ describe('networkInfo', () => {
       chainId: 1,
       chainSelector: 5009297550715157269n,
       name: 'ethereum-mainnet',
+      family: ChainFamily.EVM,
       isTestnet: false,
     })
 
@@ -153,6 +154,7 @@ describe('networkInfo', () => {
       chainId: 421614,
       chainSelector: 3478487238524512106n,
       name: 'ethereum-testnet-sepolia-arbitrum-1',
+      family: ChainFamily.EVM,
       isTestnet: true,
     })
   })
@@ -167,6 +169,7 @@ describe('getProviderNetwork', () => {
       chainId: 1,
       chainSelector: 5009297550715157269n,
       name: 'ethereum-mainnet',
+      family: ChainFamily.EVM,
       isTestnet: false,
     })
   })

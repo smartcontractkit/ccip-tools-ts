@@ -7,6 +7,7 @@ import {
   getBytes,
   hexlify,
   randomBytes,
+  toBeHex,
 } from 'ethers'
 
 let rampAddress: string
@@ -14,9 +15,12 @@ let rampAddress: string
 function mockedMessage(seqNum: number) {
   return {
     messageId: `0xMessageId${seqNum}`,
-    sender: '0xSender',
+    sender: '0x0000000000000000000000000000000000000045',
+    feeToken: '0x0000000000000000000000000000000000008916',
+    receiver: toBeHex(456, 32),
     sequenceNumber: BigInt(seqNum),
     tokenAmounts: [{ token: '0xtoken', amount: 123n }],
+    sourceChainSelector: 16015286601757825753n,
     sourceTokenData: [
       '0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000005a51fc6c00000000000000000000000000000000000000000000000000000000000000200000000000000000000000006987756a2fc8e4f3f0a5e026cb200cc2b5221b1f0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000cc44ff0e5a1fc9a6f3224ef0f47f0c03b3f8eaee0000000000000000000000000000000000000000000000000000000000000020d8e78c2c6144d59c308cee0365b6d223a9cea73dd7a46e990505271b4abb47b4',
     ],
@@ -74,6 +78,9 @@ beforeEach(() => {
   jest.clearAllMocks()
   rampAddress = getAddress(hexlify(randomBytes(20)))
   mockedContract.getAddress.mockReturnValue(rampAddress)
+})
+afterEach(() => {
+  jest.restoreAllMocks()
 })
 
 describe('getOnRampLane', () => {
@@ -160,9 +167,7 @@ describe('fetchCCIPMessagesInTx', () => {
     } as unknown as TransactionReceipt
     mockedContract.typeAndVersion.mockReturnValueOnce(`UnknownContract ${CCIPVersion.V1_2}`)
     mockedContract.typeAndVersion.mockReturnValueOnce(`${CCIPContractType.OffRamp} 1.0.0`)
-    mockedContract.typeAndVersion.mockReturnValueOnce(
-      `${CCIPContractType.OffRamp} ${CCIPVersion.V1_2}`,
-    )
+
     await expect(fetchCCIPMessagesInTx(mockTx)).rejects.toThrow(
       'Could not find any CCIPSendRequested message in tx: 0x123',
     )
@@ -305,9 +310,6 @@ describe('fetchAllMessagesInBatch', () => {
 })
 
 describe('fetchRequestsForSender', () => {
-  afterEach(() => {
-    jest.restoreAllMocks()
-  })
   it('should yield requests for a sender', async () => {
     mockedProvider.getLogs.mockResolvedValue([])
     const someMessage = mockedMessage(18)
@@ -320,7 +322,7 @@ describe('fetchRequestsForSender', () => {
 
     const mockRequest = {
       log: { address: '0xOnRamp', topics: [topic0], blockNumber: 11 },
-      message: { sender: '0xSender' },
+      message: { sender: '0x0000000000000000000000000000000000000045' },
       lane: {
         version: CCIPVersion.V1_5,
       } as Lane,
