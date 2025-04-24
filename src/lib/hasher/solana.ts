@@ -5,6 +5,7 @@ import {
   dataLength,
   decodeBase58,
   getBytes,
+  hexlify,
   keccak256,
   toBeHex,
   toUtf8Bytes,
@@ -50,6 +51,7 @@ export function getV16SolanaLeafHasher(
 
     const dataBytes = getDataBytes(message.data)
     const onRampBytes = getAddressBytes(onRamp)
+    const receiver = getAddressBytes(message.receiver)
     const tokenReceiver = getAddressBytes(parsedArgs.tokenReceiver)
     const sender = getAddressBytes(message.sender)
 
@@ -81,6 +83,7 @@ export function getV16SolanaLeafHasher(
       toBeHex(dataLength(dataBytes), 2),
       dataBytes,
       tokenAmountsEncoded,
+      ...[receiver].filter((a) => hexlify(a) !== ZeroHash),
       ...parsedArgs.accounts.map((a) => toBeHex(decodeBase58(a), 32)),
     ]
     console.debug('v1.6 solana leafHasher', packedValues)

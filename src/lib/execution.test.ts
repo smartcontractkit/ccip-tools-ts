@@ -161,6 +161,52 @@ describe('calculateManualExecProof', () => {
       /^Merkle root created from send events doesn't match ReportAccepted merkle root: expected=0xMerkleRoot, got=0x.*/,
     )
   })
+
+  describe('calculate manual execution proof for v1.6', () => {
+    const merkleRoot1_6 = '0xdd90b4c5787af181896f4b8cd7ff54e875c9ae940aec6cb52a83a6c8535affa7'
+    const messages1_6: CCIPMessage<typeof CCIPVersion.V1_6>[] = [
+      {
+        data: 'SGVsbG8gV29ybGQ=',
+        header: {
+          nonce: 0n,
+          messageId: '0x0fc6a9112085da645b3a2ac94c10e1a1761d3998649e1223fd62aa260fa5d8dc',
+          sequenceNumber: 491n,
+          destChainSelector: 16423721717087811551n,
+          sourceChainSelector: 16015286601757825753n,
+        },
+        sender: '0x9d087fC03ae39b088326b67fA3C788236645b717',
+        accounts: [
+          '9XDoTJ5mYNnxqdtWV5dA583VCiGUhmL3oEMWirqys3tF',
+          'CB7ptrDkY9EgwqHoJwa3TF8u4rhwYmTob2YqzaSpPMtE',
+        ],
+        feeToken: '0x779877A7B0D9E8603169DdbD7836e478b4624789',
+        receiver: 'BqmcnLFSbKwyMEgi7VhVeJCis1wW26VySztF34CJrKFq',
+        extraArgs:
+          '0x1f3b3aba00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000030d4000000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000027e9b64cb72241a9053e1e3d7c80002e6b03dfcebe50c282201c6bf9794c8d4f4a608150a5cc4840ff37e559cef8b10c3b0647ca4c4be3e782709b68fdf49032b',
+        computeUnits: 200000n,
+        tokenAmounts: [],
+        feeValueJuels: 4500000000522683n,
+        tokenReceiver: '11111111111111111111111111111111',
+        feeTokenAmount: 4500000000522683n,
+        accountIsWritableBitmap: 3n,
+        allowOutOfOrderExecution: true,
+      },
+    ] as unknown as CCIPMessage<typeof CCIPVersion.V1_6>[]
+
+    const lane1_6: Lane<typeof CCIPVersion.V1_6> = {
+      sourceChainSelector: 16015286601757825753n,
+      destChainSelector: 16423721717087811551n,
+      onRamp: '0x32f88479dc6e9eebe603ee032161387b96337fff',
+      version: CCIPVersion.V1_6,
+    }
+
+    it('should calculate manual execution proof for 1.6 solana  correctly', () => {
+      const messageIds1_6 = [messages1_6[0].header.messageId]
+      expect(() =>
+        calculateManualExecProof(messages1_6, lane1_6, messageIds1_6, merkleRoot1_6),
+      ).not.toThrow()
+    })
+  })
 })
 
 describe('validateOffRamp', () => {
