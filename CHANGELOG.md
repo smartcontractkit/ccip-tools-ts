@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2025-04-24
+- fix an edge case for solana hasher (#28)
+
 ## [0.2.2] - 2025-04-23
 - `--wallet ledger:<n>` supports an integer as wallet index on standard Ethereum derivation path (#24)
 - Fixes for Solana leafhasher (#27)
