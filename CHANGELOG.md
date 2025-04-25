@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2025-04-25
+- fix zero-padding of source addreses on calculateManualExecProof (#29)
+
 ## [0.2.3] - 2025-04-24
 - fix an edge case for solana hasher (#28)
 
