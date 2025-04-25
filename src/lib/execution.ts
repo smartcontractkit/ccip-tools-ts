@@ -5,7 +5,6 @@ import {
   Contract,
   Interface,
   toBeHex,
-  zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
@@ -60,24 +59,13 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
   const seen = new Set<string>()
 
   messagesInBatch.forEach((message, index) => {
-    // messages on dest side needs to encode source addresses
-    const msg = { ...message }
-    if (lane.version >= CCIPVersion.V1_6) {
-      msg.sender = zeroPadValue(msg.sender, 32)
-      msg.tokenAmounts = (msg as CCIPMessage<typeof CCIPVersion.V1_6>).tokenAmounts.map(
-        ({ sourcePoolAddress, ...rest }) => ({
-          ...rest,
-          sourcePoolAddress: zeroPadValue(sourcePoolAddress, 32),
-        }),
-      )
-    }
     // Hash leaf node
-    leaves.push(hasher(msg))
-    const msgId = msg.header.messageId
+    leaves.push(hasher(message))
+    const msgId = message.header.messageId
     seen.add(msgId)
     // Find the providng leaf index with the matching sequence number
     if (messageIds.includes(msgId)) {
-      messages.push(msg)
+      messages.push(message)
       prove.push(index)
     }
   })
