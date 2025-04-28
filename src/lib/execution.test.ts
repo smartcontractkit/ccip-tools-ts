@@ -200,7 +200,7 @@ describe('calculateManualExecProof', () => {
       version: CCIPVersion.V1_6,
     }
 
-    it('should calculate manual execution proof for 1.6 solana  correctly', () => {
+    it('should calculate manual execution proof for 1.6 solana correctly', () => {
       const messageIds1_6 = [messages1_6[0].header.messageId]
       const result = calculateManualExecProof(messages1_6, lane1_6, messageIds1_6, merkleRoot1_6)
 
