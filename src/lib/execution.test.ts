@@ -162,7 +162,7 @@ describe('calculateManualExecProof', () => {
     )
   })
 
-  describe('calculate manual execution proof for v1.6', () => {
+  describe('calculate manual execution proof for v1.6 EVM->SVM', () => {
     const merkleRoot1_6 = '0xdd90b4c5787af181896f4b8cd7ff54e875c9ae940aec6cb52a83a6c8535affa7'
     const messages1_6: CCIPMessage<typeof CCIPVersion.V1_6>[] = [
       {
@@ -197,6 +197,58 @@ describe('calculateManualExecProof', () => {
       sourceChainSelector: 16015286601757825753n,
       destChainSelector: 16423721717087811551n,
       onRamp: '0x32f88479dc6e9eebe603ee032161387b96337fff',
+      version: CCIPVersion.V1_6,
+    }
+
+    it('should calculate manual execution proof for 1.6 solana correctly', () => {
+      const messageIds1_6 = [messages1_6[0].header.messageId]
+      const result = calculateManualExecProof(messages1_6, lane1_6, messageIds1_6, merkleRoot1_6)
+
+      expect(result).toEqual({
+        messages: messages1_6,
+        proofs: [],
+        proofFlagBits: 0n,
+      })
+    })
+  })
+
+  describe('calculate manual execution proof for v1.6 SVM->EVM', () => {
+    const merkleRoot1_6 = '0xec1e5b01b20770547bc99aea8924e19019a4fce50f1287500acdd2b26a5e840c'
+    const messages1_6: CCIPMessage<typeof CCIPVersion.V1_6>[] = [
+      {
+        data: '0x4920616d206120434349502074657374206d657373616765',
+        header: {
+          nonce: 0n,
+          messageId: '0xc6c76e6efff57774cc0ae8f6c4138e11cd26a3e13a41d19ef74f6b9182bd8684',
+          sequenceNumber: 1821n,
+          destChainSelector: 16015286601757825753n,
+          sourceChainSelector: 16423721717087811551n,
+        },
+        sender: '7oZnxiocDK1aa9XAQC3CZ1VHKFkKwLuwRK8NddhU3FT2',
+        feeToken: 'So11111111111111111111111111111111111111112',
+        gasLimit: 0n,
+        receiver: '0xbd27CdAB5c9109B3390B25b4Dff7d970918cc550',
+        extraArgs: '0x181dcf100000000000000000000000000000000001',
+        tokenAmounts: [
+          {
+            amount: 1000000000n,
+            extraData: '0x0000000000000000000000000000000000000000000000000000000000000009',
+            destExecData: '0x000493e0',
+            destTokenAddress: '0x316496C5dA67D052235B9952bc42db498d6c520b',
+            sourcePoolAddress: 'DJqV7aFn32Un1M7j2dwVDc77jXZiUXoufJyHhEqoEY6x',
+            destGasAmount: 300000n,
+          },
+        ],
+        feeValueJuels: 50000000000n,
+        feeTokenAmount: 5n,
+        allowOutOfOrderExecution: true,
+      },
+    ] as unknown as CCIPMessage<typeof CCIPVersion.V1_6>[]
+
+    const lane1_6: Lane<typeof CCIPVersion.V1_6> = {
+      sourceChainSelector: 16423721717087811551n,
+      destChainSelector: 16015286601757825753n,
+      onRamp: 'Ccip8ZTcM2qHjVt8FYHtuCAqjc637yLKnsJ5q5r2e6eL',
       version: CCIPVersion.V1_6,
     }
 
