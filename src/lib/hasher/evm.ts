@@ -1,5 +1,5 @@
 // For reference implementation, see https://github.com/smartcontractkit/ccip/blob/ccip-develop/core/services/ocr2/plugins/ccip/hasher/leaf_hasher.go
-import { concat, id, keccak256, toBeHex, zeroPadValue } from 'ethers'
+import { concat, hexlify, id, keccak256, toBeHex, zeroPadValue } from 'ethers'
 import { parseExtraArgs } from '../extra-args.ts'
 import { type CCIPMessage, type CCIPVersion, defaultAbiCoder } from '../types.ts'
 import { getAddressBytes, getDataBytes } from '../utils.ts'
@@ -96,17 +96,16 @@ export function getV16LeafHasher(
       (parsedArgs._tag !== 'EVMExtraArgsV1' && parsedArgs._tag !== 'EVMExtraArgsV2')
     )
       throw new Error('Invalid extraArgs, not EVMExtraArgsV1|2')
+    message.tokenAmounts.forEach((ta) => {
+      // change the original message object, so this is returned massaged in `calculateManualExecProof` result
+      ta.sourcePoolAddress = zeroPadValue(getAddressBytes(ta.sourcePoolAddress), 32)
+      ta.extraData = hexlify(getDataBytes(ta.extraData))
+    })
     const encodedTokens = defaultAbiCoder.encode(
       [
         'tuple(bytes sourcePoolAddress, address destTokenAddress, uint32 destGasAmount, bytes extraData, uint256 amount)[]',
       ],
-      [
-        message.tokenAmounts.map((ta) => ({
-          ...ta,
-          sourcePoolAddress: zeroPadValue(getAddressBytes(ta.sourcePoolAddress), 32),
-          extraData: getDataBytes(ta.extraData),
-        })),
-      ],
+      [message.tokenAmounts],
     )
 
     const fixedSizeValues = defaultAbiCoder.encode(
@@ -126,6 +125,9 @@ export function getV16LeafHasher(
       ],
     )
 
+    // change passed object's `sender` property
+    message.sender = zeroPadValue(getAddressBytes(message.sender), 32)
+
     const packedValues = defaultAbiCoder.encode(
       [
         'bytes32 leafDomainSeparator',
@@ -139,7 +141,7 @@ export function getV16LeafHasher(
         zeroPadValue(LEAF_DOMAIN_SEPARATOR, 32),
         keccak256(metadataInput),
         keccak256(fixedSizeValues),
-        keccak256(zeroPadValue(getAddressBytes(message.sender), 32)),
+        keccak256(message.sender),
         keccak256(getDataBytes(message.data)),
         keccak256(encodedTokens),
       ],
