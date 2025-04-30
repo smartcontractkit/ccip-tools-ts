@@ -59,13 +59,13 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
   const seen = new Set<string>()
 
   messagesInBatch.forEach((message, index) => {
+    const msg = { ...message, tokenAmounts: message.tokenAmounts.map((ta) => ({ ...ta })) }
     // Hash leaf node
-    leaves.push(hasher(message))
-    const msgId = message.header.messageId
-    seen.add(msgId)
-    // Find the providng leaf index with the matching sequence number
-    if (messageIds.includes(msgId)) {
-      messages.push(message)
+    leaves.push(hasher(msg))
+    seen.add(message.header.messageId)
+    // Find the proving leaf index with the matching sequence number
+    if (messageIds.includes(message.header.messageId)) {
+      messages.push(msg)
       prove.push(index)
     }
   })

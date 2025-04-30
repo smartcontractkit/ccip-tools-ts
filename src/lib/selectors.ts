@@ -310,6 +310,7 @@ const selectors: Selectors = {
   '80069': { selector: 7728255861635209484n, name: 'berachain-testnet-bepolia' },
   '80084': { selector: 8999465244383784164n, name: 'berachain-testnet-bartio' },
   '80085': { selector: 12336603543561911511n, name: 'berachain-testnet-artio' },
+  '80087': { selector: 2285225387454015855n, name: 'zero-g-testnet-galileo' },
   '80094': { selector: 1294465214383781161n, name: 'berachain-mainnet' },
   '81457': { selector: 4411394078118774322n, name: 'ethereum-mainnet-blast-1' },
   '84531': {

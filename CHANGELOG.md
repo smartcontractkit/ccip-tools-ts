@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2025-04-29
+- regression: change source addresses for EVMv1.6 calculateManualExecProof (#31)
+
 ## [0.2.5] - 2025-04-28
 - fix decoding of solana addresses in EVMv1.6 hasher (#30)
 

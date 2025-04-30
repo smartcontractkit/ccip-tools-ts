@@ -29,6 +29,7 @@ import {
   type Provider,
   Interface,
   ZeroHash,
+  getAddress,
   hexlify,
   randomBytes,
 } from 'ethers'
@@ -39,6 +40,7 @@ import {
   validateOffRamp,
 } from './execution.ts'
 import { getLeafHasher } from './hasher/index.ts'
+import { decodeMessage } from './requests.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
@@ -162,7 +164,58 @@ describe('calculateManualExecProof', () => {
     )
   })
 
-  describe('calculate manual execution proof for v1.6 EVM->SVM', () => {
+  it('should calculate manual execution proof for v1.6 EVM->EVM', () => {
+    const merkleRoot1_6 = '0x1b708ef99ebc240fe6e55d126944a56503eae87436319494edff8f4902175172'
+    const messages1_6: CCIPMessage<typeof CCIPVersion.V1_6>[] = [
+      decodeMessage({
+        data: '0x68656c6c6f',
+        header: {
+          nonce: 1040,
+          messageId: '0x4b42209c9cb8255171d0575555d6168824112e3b905f4bd06554bd5322fed40e',
+          sequenceNumber: 1073,
+          destChainSelector: 16281711391670634445n,
+          sourceChainSelector: 3478487238524512106n,
+        },
+        sender: '0x79de45bbbbbbd1bd179352aa5e7836a32285e8bd',
+        feeToken: '0xe591bf0a0cf924a0674d7792db046b23cebf5f34',
+        receiver: '0x00000000000000000000000095b9e79a732c0e03d04a41c30c9df7852a3d8da4',
+        extraArgs:
+          '0x181dcf100000000000000000000000000000000000000000000000000000000000030d400000000000000000000000000000000000000000000000000000000000000000',
+        tokenAmounts: [
+          {
+            amount: 1,
+            extraData: '0x0000000000000000000000000000000000000000000000000000000000000012',
+            destExecData: '0x000000000000000000000000000000000000000000000000000000000001e848',
+            destTokenAddress: '0x000000000000000000000000a4c9e2108ca478de0b91c7d9ba034bbc93c22ecc',
+            sourcePoolAddress: '0x3915fd663c32e56771d14dff40031e13956a0909',
+          },
+        ],
+        feeValueJuels: 1165428296631803n,
+        feeTokenAmount: 7474222373173n,
+      }),
+    ] as CCIPMessage<typeof CCIPVersion.V1_6>[]
+
+    const lane1_6: Lane<typeof CCIPVersion.V1_6> = {
+      sourceChainSelector: messages1_6[0].header.sourceChainSelector,
+      destChainSelector: messages1_6[0].header.destChainSelector,
+      onRamp: getAddress('0xfd04bd4cf2e51ed6c57183768d270539127b9143'),
+      version: CCIPVersion.V1_6,
+    }
+
+    const messageIds1_6 = [messages1_6[0].header.messageId]
+    const result = calculateManualExecProof(messages1_6, lane1_6, messageIds1_6, merkleRoot1_6)
+
+    expect(result).toMatchObject({ proofs: [], proofFlagBits: 0n })
+    expect(result.messages).toHaveLength(1)
+    // sender and sourcePoolAddress should be left-zero-padded 32B hex strings
+    expect(result.messages[0].sender).toMatch(/^0x0{24}[a-z0-9]{40}$/)
+    expect(result.messages[0].tokenAmounts[0].sourcePoolAddress).toMatch(/^0x0{24}[a-z0-9]{40}$/)
+    // receiver should be checksummed 20B hex address
+    expect(result.messages[0].receiver).toEqual('0x95b9e79A732C0E03d04a41c30C9DF7852a3D8Da4')
+    expect(result.messages[0]).toHaveProperty('gasLimit', 200000n)
+  })
+
+  it('should calculate manual execution proof for v1.6 EVM->SVM', () => {
     const merkleRoot1_6 = '0xdd90b4c5787af181896f4b8cd7ff54e875c9ae940aec6cb52a83a6c8535affa7'
     const messages1_6: CCIPMessage<typeof CCIPVersion.V1_6>[] = [
       {
@@ -200,19 +253,17 @@ describe('calculateManualExecProof', () => {
       version: CCIPVersion.V1_6,
     }
 
-    it('should calculate manual execution proof for 1.6 solana correctly', () => {
-      const messageIds1_6 = [messages1_6[0].header.messageId]
-      const result = calculateManualExecProof(messages1_6, lane1_6, messageIds1_6, merkleRoot1_6)
+    const messageIds1_6 = [messages1_6[0].header.messageId]
+    const result = calculateManualExecProof(messages1_6, lane1_6, messageIds1_6, merkleRoot1_6)
 
-      expect(result).toEqual({
-        messages: messages1_6,
-        proofs: [],
-        proofFlagBits: 0n,
-      })
+    expect(result).toEqual({
+      messages: messages1_6,
+      proofs: [],
+      proofFlagBits: 0n,
     })
   })
 
-  describe('calculate manual execution proof for v1.6 SVM->EVM', () => {
+  it('should calculate manual execution proof for v1.6 SVM->EVM', () => {
     const merkleRoot1_6 = '0xec1e5b01b20770547bc99aea8924e19019a4fce50f1287500acdd2b26a5e840c'
     const messages1_6: CCIPMessage<typeof CCIPVersion.V1_6>[] = [
       {
@@ -252,12 +303,11 @@ describe('calculateManualExecProof', () => {
       version: CCIPVersion.V1_6,
     }
 
-    it('should calculate manual execution proof for 1.6 solana  correctly', () => {
-      const messageIds1_6 = [messages1_6[0].header.messageId]
-      expect(() =>
-        calculateManualExecProof(messages1_6, lane1_6, messageIds1_6, merkleRoot1_6),
-      ).not.toThrow()
-    })
+    const messageIds1_6 = [messages1_6[0].header.messageId]
+    const result = calculateManualExecProof(messages1_6, lane1_6, messageIds1_6, merkleRoot1_6)
+    expect(result).toMatchObject({ proofs: [], proofFlagBits: 0n })
+    expect(result.messages).toHaveLength(1)
+    expect(result.messages[0].sender).toMatch(/^0x[a-z0-9]{64}$/)
   })
 })
 
