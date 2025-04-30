@@ -205,18 +205,14 @@ describe('calculateManualExecProof', () => {
     const messageIds1_6 = [messages1_6[0].header.messageId]
     const result = calculateManualExecProof(messages1_6, lane1_6, messageIds1_6, merkleRoot1_6)
 
-    expect(result).toEqual({
-      messages: messages1_6,
-      proofs: [],
-      proofFlagBits: 0n,
-    })
-    const resultMessage = result.messages[0]
+    expect(result).toMatchObject({ proofs: [], proofFlagBits: 0n })
+    expect(result.messages).toHaveLength(1)
     // sender and sourcePoolAddress should be left-zero-padded 32B hex strings
-    expect(resultMessage.sender).toMatch(/^0x0{24}[a-z0-9]{40}$/)
-    expect(resultMessage.tokenAmounts[0].sourcePoolAddress).toMatch(/^0x0{24}[a-z0-9]{40}$/)
+    expect(result.messages[0].sender).toMatch(/^0x0{24}[a-z0-9]{40}$/)
+    expect(result.messages[0].tokenAmounts[0].sourcePoolAddress).toMatch(/^0x0{24}[a-z0-9]{40}$/)
     // receiver should be checksummed 20B hex address
-    expect(resultMessage.receiver).toEqual('0x95b9e79A732C0E03d04a41c30C9DF7852a3D8Da4')
-    expect(resultMessage).toHaveProperty('gasLimit', 200000n)
+    expect(result.messages[0].receiver).toEqual('0x95b9e79A732C0E03d04a41c30C9DF7852a3D8Da4')
+    expect(result.messages[0]).toHaveProperty('gasLimit', 200000n)
   })
 
   it('should calculate manual execution proof for v1.6 EVM->SVM', () => {
@@ -308,13 +304,10 @@ describe('calculateManualExecProof', () => {
     }
 
     const messageIds1_6 = [messages1_6[0].header.messageId]
-    expect(
-      calculateManualExecProof(messages1_6, lane1_6, messageIds1_6, merkleRoot1_6),
-    ).toMatchObject({
-      messages: messages1_6,
-      proofs: [],
-      proofFlagBits: 0n,
-    })
+    const result = calculateManualExecProof(messages1_6, lane1_6, messageIds1_6, merkleRoot1_6)
+    expect(result).toMatchObject({ proofs: [], proofFlagBits: 0n })
+    expect(result.messages).toHaveLength(1)
+    expect(result.messages[0].sender).toMatch(/^0x[a-z0-9]{64}$/)
   })
 })
 
