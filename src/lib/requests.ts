@@ -17,7 +17,7 @@ import yaml from 'yaml'
 
 import { parseExtraArgs, parseSourceTokenData } from './extra-args.ts'
 import {
-  type CCIPContract,
+  type CCIPContractEVM,
   type CCIPMessage,
   type CCIPRequest,
   type ChainFamily,
@@ -55,11 +55,13 @@ async function getOnRampInterface(
 export async function getOnRampLane(source: Provider, address: string, destChainSelector?: bigint) {
   return lazyCached(`OnRamp ${address} lane`, async () => {
     const [iface, version] = await getOnRampInterface(source, address)
-    const onRampContract = new Contract(address, iface, source) as unknown as CCIPContract<
+    const onRampContract = new Contract(address, iface, source) as unknown as CCIPContractEVM<
       typeof CCIPContractType.OnRamp,
       typeof version
     >
     const staticConfig = toObject(await onRampContract.getStaticConfig())
+
+    let destRouter = ZeroAddress
     if (!('destChainSelector' in staticConfig)) {
       if (!destChainSelector) {
         throw new Error('destChainSelector is required for v1.6 OnRamp')
@@ -71,7 +73,9 @@ export async function getOnRampLane(source: Provider, address: string, destChain
         )
       }
     } else {
+      const dynamicConfig = await onRampContract.getDynamicConfig()
       destChainSelector = staticConfig.destChainSelector
+      destRouter = dynamicConfig.router
     }
     return [
       {
@@ -80,9 +84,10 @@ export async function getOnRampLane(source: Provider, address: string, destChain
         onRamp: address,
         version,
       },
+      destRouter,
       onRampContract,
     ] as {
-      [V in CCIPVersion]: readonly [Lane<V>, CCIPContract<typeof CCIPContractType.OnRamp, V>]
+      [V in CCIPVersion]: readonly [Lane<V>, string, CCIPContractEVM<typeof CCIPContractType.OnRamp, V>]
     }[CCIPVersion]
   })
 }

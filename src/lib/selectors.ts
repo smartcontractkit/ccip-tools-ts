@@ -116,6 +116,8 @@ const selectors: Selectors = {
     name: 'ethereum-mainnet-worldchain-1',
   },
   '592': { selector: 6422105447186081193n, name: 'polkadot-mainnet-astar' },
+  '678': { selector: 9107126442626377432n, name: 'janction-mainnet' },
+  '679': { selector: 5059197667603797935n, name: 'janction-testnet-sepolia' },
   '919': {
     selector: 829525985033418733n,
     name: 'ethereum-testnet-sepolia-mode-1',
@@ -276,6 +278,7 @@ const selectors: Selectors = {
   '43114': { selector: 6433500567565415381n, name: 'avalanche-mainnet' },
   '44787': { selector: 3552045678561919002n, name: 'celo-testnet-alfajores' },
   '45439': { selector: 8446413392851542429n, name: 'private-testnet-opala' },
+  '47763': { selector: 7222032299962346917n, name: 'neox-mainnet' },
   '48899': {
     selector: 4562743618362911021n,
     name: 'ethereum-testnet-sepolia-zircuit-1',
@@ -396,6 +399,7 @@ const selectors: Selectors = {
     selector: 5224473277236331295n,
     name: 'ethereum-testnet-sepolia-optimism-1',
   },
+  '12227332': { selector: 2217764097022649312n, name: 'neox-testnet-t4' },
   '21000000': { selector: 9043146809313071210n, name: 'corn-mainnet' },
   '21000001': {
     selector: 1467427327723633929n,

@@ -47,6 +47,7 @@
     "@inquirer/prompts": "7.5.0",
     "@xlabs-xyz/ledger-signer-ethers-v6": "^0.0.1",
     "@coral-xyz/anchor": "0.29.0",
+    "@solana/spl-token": "0.4.13",
     "abitype": "1.0.8",
     "borsh": "^2.0.0",
     "ethers": "6.13.7",

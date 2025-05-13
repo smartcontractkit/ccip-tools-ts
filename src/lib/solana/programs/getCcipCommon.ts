@@ -1,8 +1,7 @@
 import { Program } from '@coral-xyz/anchor'
 import type { Connection } from '@solana/web3.js'
 import { PublicKey } from '@solana/web3.js'
-import type { SupportedSolanaCCIPVersion } from './versioning'
-import { CCIP_SOLANA_VERSION_MAP } from './versioning'
+import { CCIP_SOLANA_VERSION_MAP, type SupportedSolanaCCIPVersion } from './versioning'
 
 export const getCcipCommon = ({
   ccipVersion,

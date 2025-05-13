@@ -16,7 +16,7 @@ import TokenABI from '../abi/BurnMintERC677Token.ts'
 import RouterABI from '../abi/Router.ts'
 import { discoverOffRamp, validateOffRamp } from './execution.ts'
 import {
-  type CCIPContract,
+  type CCIPContractEVM,
   type CCIPContractType,
   type CCIPMessage,
   type Lane,
@@ -81,11 +81,11 @@ export async function estimateExecGasForRequest(
   let destRouter
   if (lane.version < CCIPVersion.V1_6) {
     ;({ router: destRouter } = await (
-      offRamp as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_5>
+      offRamp as CCIPContractEVM<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_5>
     ).getDynamicConfig())
   } else {
     ;({ router: destRouter } = await (
-      offRamp as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_6>
+      offRamp as CCIPContractEVM<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_6>
     ).getSourceChainConfig(lane.sourceChainSelector))
   }
 
