@@ -160,7 +160,7 @@ export async function discoverOffRamp<V extends CCIPVersion>(
     const staticConfig = await getOffRampStaticConfig(source, sourceOffRamp.offRamp as string)
     const destinationOnRamp: string = staticConfig[0].onRamp
 
-    const [reverseLane, destinationRouter, remoteOnRampContract] = await getOnRampLane(
+    const [, destinationRouter, ] = await getOnRampLane(
       destination,
       destinationOnRamp,
       lane.destChainSelector,
