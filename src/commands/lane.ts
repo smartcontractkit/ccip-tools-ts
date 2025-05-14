@@ -48,7 +48,7 @@ export async function showLaneConfigs(
   } else {
     throw new Error(`Unknown contract type for onramp_or_router: ${onrampOrRouterTnV}`)
   }
-  const [lane, onRampContract] = await getOnRampLane(
+  const [lane, , onRampContract] = await getOnRampLane(
     source,
     onramp,
     chainSelectorFromId(destChainId),
@@ -68,6 +68,7 @@ export async function showLaneConfigs(
   const staticConfig = toObject(await onRampContract.getStaticConfig())
   const dynamicConfig = toObject(await onRampContract.getDynamicConfig())
   let onRampRouter, destChainConfig
+  let router
   if ('router' in dynamicConfig) {
     onRampRouter = dynamicConfig.router as string
   } else {
@@ -78,7 +79,8 @@ export async function showLaneConfigs(
     destChainConfig = { sequenceNumber, allowlistEnabled, router: onRampRouter }
   }
   if (onRampRouter !== ZeroAddress) {
-    const router = new Contract(onRampRouter, RouterABI, source) as unknown as TypedContract<
+
+    router = new Contract(onRampRouter, RouterABI, source) as unknown as TypedContract<
       typeof RouterABI
     >
     const onRampInRouter = (await router.getOnRamp(lane.destChainSelector)) as string
@@ -144,8 +146,13 @@ export async function showLaneConfigs(
       break
   }
 
+  if (router === undefined) {
+    throw new Error(`Cannot discover offramp without access to router contract`)
+  }
+
   const dest = await providers.forChainId(chainIdFromSelector(lane.destChainSelector))
-  const offRampContract = await discoverOffRamp(dest, lane, { page: argv.page })
+  
+  const offRampContract = await discoverOffRamp(router, source,  dest, lane)
   const offRamp = await offRampContract.getAddress()
   const [offVersion, offTnV] = await validateContractType(dest, offRamp, CCIPContractType.OffRamp)
   console.info('OffRamp:', offRamp, 'is', offTnV)

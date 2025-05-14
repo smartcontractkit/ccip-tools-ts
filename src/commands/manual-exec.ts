@@ -1,3 +1,4 @@
+import { discoverOffRampLegacy } from '../lib/execution.ts'
 import {
   type CCIPContract,
   type CCIPContractType,
@@ -8,7 +9,6 @@ import {
   bigIntReplacer,
   calculateManualExecProof,
   chainIdFromSelector,
-  discoverOffRamp,
   estimateExecGasForRequest,
   fetchAllMessagesInBatch,
   fetchCCIPMessageInLog,
@@ -105,7 +105,7 @@ export async function manualExec(
   const execReport = { ...manualExecReport, offchainTokenData: [offchainTokenData] }
 
   const wallet = (await getWallet(argv)).connect(dest)
-  const offRampContract = await discoverOffRamp(wallet, request.lane, {
+  const offRampContract = await discoverOffRampLegacy(wallet, request.lane, {
     fromBlock: commit.log.blockNumber,
     page: argv.page,
   })
@@ -285,7 +285,7 @@ export async function manualExecSenderQueue(
 
   const wallet = (await getWallet(argv)).connect(dest)
 
-  const offRampContract = await discoverOffRamp(wallet, firstRequest.lane, {
+  const offRampContract = await discoverOffRampLegacy(wallet, firstRequest.lane, {
     fromBlock: destFromBlock,
     page: argv.page,
   })

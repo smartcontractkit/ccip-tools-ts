@@ -14,7 +14,7 @@ import type { TypedContract } from 'ethers-abitype'
 
 import TokenABI from '../abi/BurnMintERC677Token.ts'
 import RouterABI from '../abi/Router.ts'
-import { discoverOffRamp, validateOffRamp } from './execution.ts'
+import { discoverOffRampLegacy, validateOffRamp } from './execution.ts'
 import {
   type CCIPContract,
   type CCIPContractType,
@@ -76,7 +76,7 @@ export async function estimateExecGasForRequest(
         `Invalid offRamp for "${networkInfo(lane.sourceChainSelector).name}" -> "${networkInfo(lane.destChainSelector).name}" (onRamp=${lane.onRamp}) lane`,
       )
   } else {
-    offRamp = await discoverOffRamp(dest, lane, hints)
+    offRamp = await discoverOffRampLegacy(dest, lane, hints)
   }
   let destRouter
   if (lane.version < CCIPVersion.V1_6) {
