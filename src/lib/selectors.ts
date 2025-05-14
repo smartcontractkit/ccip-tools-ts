@@ -125,6 +125,7 @@ const selectors: Selectors = {
   '998': { selector: 4286062357653186312n, name: 'hyperliquid-testnet' },
   '999': { selector: 2442541497099098535n, name: 'hyperliquid-mainnet' },
   '1029': { selector: 4459371029167934217n, name: 'bittorrent_chain-testnet' },
+  '1030': { selector: 3358365939762719202n, name: 'conflux-mainnet' },
   '1088': { selector: 8805746078405598895n, name: 'ethereum-mainnet-metis-1' },
   '1101': {
     selector: 4348158687435793198n,
@@ -232,6 +233,7 @@ const selectors: Selectors = {
   '6342': { selector: 2443239559770384419n, name: 'megaeth-testnet' },
   '6900': { selector: 17349189558768828726n, name: 'nibiru-mainnet' },
   '6930': { selector: 305104239123120457n, name: 'nibiru-testnet' },
+  '7000': { selector: 10817664450262215148n, name: 'zetachain-mainnet' },
   '8453': { selector: 15971525489660198786n, name: 'ethereum-mainnet-base-1' },
   '9000': { selector: 344208382356656551n, name: 'ondo-testnet' },
   '9559': { selector: 1113014352258747600n, name: 'neonlink-testnet' },

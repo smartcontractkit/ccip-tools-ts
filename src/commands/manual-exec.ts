@@ -1,4 +1,9 @@
+import type { JsonRpcApiProvider, Provider } from 'ethers'
 import { discoverOffRampLegacy } from '../lib/execution.ts'
+import { clusterApiUrl, Connection, Connection as SolanaConnection, VersionedTransaction } from '@solana/web3.js'
+import { Keypair } from '@solana/web3.js';
+import fs from 'fs';
+import path from 'path';
 import {
   type CCIPContract,
   type CCIPContractType,
@@ -9,6 +14,7 @@ import {
   bigIntReplacer,
   calculateManualExecProof,
   chainIdFromSelector,
+  chainNameFromSelector,
   estimateExecGasForRequest,
   fetchAllMessagesInBatch,
   fetchCCIPMessageInLog,
@@ -20,6 +26,7 @@ import {
   getSomeBlockNumberBefore,
   lazyCached,
 } from '../lib/index.ts'
+import { getClusterUrlByChainSelectorName, isSupportedSolanaCluster } from '../lib/solana/getClusterByChainSelectorName.ts'
 import type { Providers } from '../providers.ts'
 import { Format } from './types.ts'
 import {
@@ -29,6 +36,9 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
+import { manualExecuteWithSolanaDestination as buildManualExecutionTxWithSolanaDestination } from '../lib/solana/manuallyExecuteSolana.ts'
+import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
+
 
 export async function manualExec(
   providers: Providers,
@@ -41,6 +51,8 @@ export async function manualExec(
     format: Format
     page: number
     wallet?: string
+    offramp?: string
+    root?: string
   },
 ) {
   const tx = await providers.getTxReceipt(txHash)
@@ -65,134 +77,202 @@ export async function manualExec(
       break
   }
 
-  const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
+  const chainId = chainIdFromSelector(request.lane.destChainSelector)
+  const chainName = chainNameFromSelector(request.lane.destChainSelector)
+  if (typeof chainId === 'string' && isSupportedSolanaCluster(chainName)) {
 
-  const commit = await fetchCommitReport(dest, request, { page: argv.page })
-  switch (argv.format) {
-    case Format.log:
-      console.log(
-        'commit =',
-        withDateTimestamp({
-          ...commit,
-          timestamp: (await dest.getBlock(commit.log.blockNumber))!.timestamp,
-        }),
-      )
-      break
-    case Format.pretty:
-      await prettyCommit(dest, commit, request)
-      break
-    case Format.json:
-      console.info(JSON.stringify(commit, bigIntReplacer, 2))
-      break
-  }
-
-  const requestsInBatch = await fetchAllMessagesInBatch(
-    source,
-    request.lane.destChainSelector,
-    request.log,
-    commit.report,
-    { page: argv.page },
-  )
-
-  const manualExecReport = calculateManualExecProof(
-    requestsInBatch.map(({ message }) => message),
-    request.lane,
-    [request.message.header.messageId],
-    commit.report.merkleRoot,
-  )
-
-  const offchainTokenData = await fetchOffchainTokenData(request)
-  const execReport = { ...manualExecReport, offchainTokenData: [offchainTokenData] }
-
-  const wallet = (await getWallet(argv)).connect(dest)
-  const offRampContract = await discoverOffRampLegacy(wallet, request.lane, {
-    fromBlock: commit.log.blockNumber,
-    page: argv.page,
-  })
-
-  if (argv.estimateGasLimit != null && 'gasLimit' in request.message) {
-    let estimated = await estimateExecGasForRequest(dest, request, {
-      offRamp: await offRampContract.getAddress(),
-    })
-    console.info('Estimated gasLimit override:', estimated)
-    estimated += Math.ceil(estimated * (argv.estimateGasLimit / 100))
-    if (request.message.gasLimit >= estimated) {
-      console.warn(
-        'Estimated +',
-        argv.estimateGasLimit,
-        '% margin =',
-        estimated,
-        '< original gasLimit =',
-        request.message.gasLimit,
-        '. Leaving unchanged.',
-      )
-    } else {
-      argv.gasLimit = estimated
+    if (argv.offramp === undefined || argv.root === undefined) {
+      throw new Error("Automated discovery not supported yet for SVM: You must provide an offramp address and merkle root.")
     }
-  }
 
-  console.debug('manualExecReport:', { ...manualExecReport, root: commit.report.merkleRoot })
-  let manualExecTx
-  if (request.lane.version === CCIPVersion.V1_2) {
-    const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit ?? 0))
-    manualExecTx = await (
-      offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_2>
-    ).manuallyExecute(
-      execReport as {
-        offchainTokenData: string[][]
-        messages: CCIPMessage<typeof CCIPVersion.V1_2>[]
-        proofs: string[]
-        proofFlagBits: bigint
-      },
-      gasOverrides,
+    const destination = new Connection(getClusterUrlByChainSelectorName(chainName))
+    const transaction = await buildManualExecutionTxWithSolanaDestination(
+      source,
+      destination,
+      request as CCIPRequest<SupportedSolanaCCIPVersion>,
+      argv.offramp,
+      tx.from,
+      argv.root,
+      undefined,
+      argv.page
     )
-  } else if (request.lane.version === CCIPVersion.V1_5) {
-    const gasOverrides = manualExecReport.messages.map((message) => ({
-      receiverExecutionGasLimit: BigInt(argv.gasLimit ?? 0),
-      tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
-    }))
-    manualExecTx = await (
-      offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_5>
-    ).manuallyExecute(
-      execReport as {
-        offchainTokenData: string[][]
-        messages: CCIPMessage<typeof CCIPVersion.V1_5>[]
-        proofs: string[]
-        proofFlagBits: bigint
-      },
-      gasOverrides,
-    )
-  } /* v1.6 */ else {
-    const gasOverrides = manualExecReport.messages.map((message) => ({
-      receiverExecutionGasLimit: BigInt(argv.gasLimit ?? 0),
-      tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
-    }))
-    manualExecTx = await (
-      offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_6>
-    ).manuallyExecute(
-      [
-        {
-          sourceChainSelector: request.lane.sourceChainSelector,
-          messages: execReport.messages as (CCIPMessage<typeof CCIPVersion.V1_6> & {
-            gasLimit: bigint
-          })[],
-          proofs: execReport.proofs,
-          proofFlagBits: execReport.proofFlagBits,
-          offchainTokenData: execReport.offchainTokenData,
-        },
-      ],
-      [gasOverrides],
-    )
-  }
+    await doManuallyExecuteSolana(destination, transaction)
+  } else {
+    const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
+    await manualExecEvmDestination(source, dest, request, argv)
+  } 
+}
 
-  console.log(
-    '🚀 manualExec tx =',
-    manualExecTx.hash,
-    'to offRamp =',
-    manualExecTx.to,
-    'gasLimit =',
-    Number(manualExecTx.gasLimit),
-  )
+async function doManuallyExecuteSolana(connection: SolanaConnection, transaction: VersionedTransaction) {
+    // TODO replace with cmdline args
+    const homeDir = process.env.HOME || process.env.USERPROFILE;
+    const keypairPath = path.join(homeDir as string, '.config', 'solana', 'id.json');
+
+    // Read and parse the secret key
+    const secretKeyString = fs.readFileSync(keypairPath, 'utf8');
+    const secretKey = Uint8Array.from(JSON.parse(secretKeyString));
+
+    // Create a Keypair instance
+    const payer = Keypair.fromSecretKey(secretKey);
+
+    transaction.sign([payer]);
+
+    const signature = await connection.sendTransaction(transaction);
+
+    const latestBlockhash = await connection.getLatestBlockhash();
+    await connection.confirmTransaction(
+      {
+        signature,
+        blockhash: latestBlockhash.blockhash,
+        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+      },
+      'confirmed'
+    );
+
+    console.log('🚀 solana manual execution complete')
+}
+
+async function manualExecEvmDestination(
+  source: Provider,
+  dest: JsonRpcApiProvider,
+  request: CCIPRequest<CCIPVersion>,
+  argv: {
+    gasLimit?: number
+    estimateGasLimit?: number
+    tokensGasLimit?: number
+    logIndex?: number
+    format: Format
+    page: number
+    wallet?: string
+    offramp?: string
+  },
+) {
+    const commit = await fetchCommitReport(dest, request, { page: argv.page })
+    switch (argv.format) {
+        case Format.log:
+            console.log(
+                'commit =',
+                withDateTimestamp({
+                    ...commit,
+                    timestamp: (await dest.getBlock(commit.log.blockNumber))!.timestamp,
+                })
+            )
+            break
+        case Format.pretty:
+            await prettyCommit(dest, commit, request)
+            break
+        case Format.json:
+            console.info(JSON.stringify(commit, bigIntReplacer, 2))
+            break
+    }
+
+    const requestsInBatch = await fetchAllMessagesInBatch(
+        source,
+        request.lane.destChainSelector,
+        request.log,
+        commit.report,
+        { page: argv.page }
+    )
+
+    const manualExecReport = calculateManualExecProof(
+        requestsInBatch.map(({ message }) => message),
+        request.lane,
+        [request.message.header.messageId],
+        commit.report.merkleRoot
+    )
+
+    const offchainTokenData = await fetchOffchainTokenData(request)
+    const execReport = { ...manualExecReport, offchainTokenData: [offchainTokenData] }
+
+    const wallet = (await getWallet(argv)).connect(dest)
+    const offRampContract = await discoverOffRampLegacy(wallet, request.lane, {
+        fromBlock: commit.log.blockNumber,
+        page: argv.page,
+    })
+
+    if (argv.estimateGasLimit != null && 'gasLimit' in request.message) {
+        let estimated = await estimateExecGasForRequest(dest, request, {
+            offRamp: await offRampContract.getAddress(),
+        })
+        console.info('Estimated gasLimit override:', estimated)
+        estimated += Math.ceil(estimated * (argv.estimateGasLimit / 100))
+        if (request.message.gasLimit >= estimated) {
+            console.warn(
+                'Estimated +',
+                argv.estimateGasLimit,
+                '% margin =',
+                estimated,
+                '< original gasLimit =',
+                request.message.gasLimit,
+                '. Leaving unchanged.'
+            )
+        } else {
+            argv.gasLimit = estimated
+        }
+    }
+
+    console.debug('manualExecReport:', { ...manualExecReport, root: commit.report.merkleRoot })
+    let manualExecTx
+    if (request.lane.version === CCIPVersion.V1_2) {
+        const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit ?? 0))
+        manualExecTx = await (
+            offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_2>
+        ).manuallyExecute(
+            execReport as {
+                offchainTokenData: string[][]
+                messages: CCIPMessage<typeof CCIPVersion.V1_2>[]
+                proofs: string[]
+                proofFlagBits: bigint
+            },
+            gasOverrides
+        )
+    } else if (request.lane.version === CCIPVersion.V1_5) {
+        const gasOverrides = manualExecReport.messages.map((message) => ({
+            receiverExecutionGasLimit: BigInt(argv.gasLimit ?? 0),
+            tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
+        }))
+        manualExecTx = await (
+            offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_5>
+        ).manuallyExecute(
+            execReport as {
+                offchainTokenData: string[][]
+                messages: CCIPMessage<typeof CCIPVersion.V1_5>[]
+                proofs: string[]
+                proofFlagBits: bigint
+            },
+            gasOverrides
+        )
+    } /* v1.6 */ else {
+        const gasOverrides = manualExecReport.messages.map((message) => ({
+            receiverExecutionGasLimit: BigInt(argv.gasLimit ?? 0),
+            tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
+        }))
+        manualExecTx = await (
+            offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_6>
+        ).manuallyExecute(
+            [
+                {
+                    sourceChainSelector: request.lane.sourceChainSelector,
+                    messages: execReport.messages as (CCIPMessage<typeof CCIPVersion.V1_6> & {
+                        gasLimit: bigint
+                    })[],
+                    proofs: execReport.proofs,
+                    proofFlagBits: execReport.proofFlagBits,
+                    offchainTokenData: execReport.offchainTokenData,
+                },
+            ],
+            [gasOverrides]
+        )
+    }
+
+    console.log(
+        '🚀 manualExec tx =',
+        manualExecTx.hash,
+        'to offRamp =',
+        manualExecTx.to,
+        'gasLimit =',
+        Number(manualExecTx.gasLimit)
+    )
 }
 
 export async function manualExecSenderQueue(

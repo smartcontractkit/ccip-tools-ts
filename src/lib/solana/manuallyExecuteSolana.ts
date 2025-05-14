@@ -1,37 +1,67 @@
-import { BorshCoder } from '@coral-xyz/anchor'
+import { BN, BorshCoder } from '@coral-xyz/anchor'
 import { clusterApiUrl, Connection, PublicKey } from '@solana/web3.js'
 import { TransactionMessage, VersionedTransaction } from '@solana/web3.js'
 import { ComputeBudgetProgram } from '@solana/web3.js'
-import { CCIPVersion } from '../types.ts'
-import { success } from '@chainlink/chain-agnostic'
-import { Features, WalletCoordinator } from '@chainlink/wallet'
-import type {
-  ManuallyExecuteSolanaInputs,
-  ManuallyExecuteSolanaOutput,
-} from '../../../features'
+import { CCIPVersion, type ExecutionReport } from '../types.ts'
 import { getCcipOfframp } from './programs/getCcipOfframp'
 import { getManuallyExecuteInputs } from './getManuallyExecuteInputs'
 import { simulateManuallyExecute } from './simulateManuallyExecute'
+import type { CCIPRequest } from '../../../dist/lib/types'
+import type { Provider } from 'ethers'
+import { fetchAllMessagesInBatch } from '../requests.ts'
+import { calculateManualExecProof } from '../execution.ts'
+import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
 
-export async function executeFeature(
-  args: ManuallyExecuteSolanaInputs,
-): ManuallyExecuteSolanaOutput {
-  const {
-    offrampAddress,
-    executionReport: executionReportRaw,
-    cluster,
-    root,
-    destChainSelectorName,
-    senderAddress,
-    computeUnitsOverride,
-  } = args
-  const connection = new Connection(clusterApiUrl(cluster))
+
+export async function manualExecuteWithSolanaDestination<V extends SupportedSolanaCCIPVersion>(
+  source: Provider,
+  destination: Connection,
+  ccip_request: CCIPRequest<V>,
+  offrampAddress: string,
+  senderAddress: string,
+  root: string,
+  computeUnitsOverride: number | undefined,
+  page: number
+): Promise<VersionedTransaction> {
 
   const offrampProgram = getCcipOfframp({
     ccipVersion: CCIPVersion.V1_6,
     address: offrampAddress,
-    connection,
+    connection: destination,
   })
+
+ 
+  const offrampPubkey = new PublicKey(offrampAddress)
+  const [commitReportAccount] = PublicKey.findProgramAddressSync(
+    [Buffer.from("commit_report"), BN(ccip_request.lane.sourceChainSelector.toString()).toArrayLike(Buffer, 'le', 8), Buffer.from(root, "hex")],
+    offrampPubkey,
+  )
+  const commit_report = await offrampProgram.account.commit_report.fetch(commitReportAccount)
+
+    const requestsInBatch = await fetchAllMessagesInBatch(
+        source,
+        ccip_request.lane.destChainSelector,
+        ccip_request.log,
+        { minSeqNr: commit_report.minMsgNr, maxSeqNr: commit_report.maxMsgNr},
+        { page }
+    )
+
+    const manualExecReport = calculateManualExecProof(
+        requestsInBatch.map(({ message }) => message),
+        ccip_request.lane,
+        [ccip_request.message.header.messageId],
+        commit_report.merkleRoot
+    )
+
+    const executionReportRaw: ExecutionReport = {
+      message: ccip_request.message,
+      // TODO: Figure out where to obtain these from. Args? offchainTokenData
+      // isn't really supported.
+      offchainTokenData: [], 
+      proofs: [],
+      sourceChainSelector: ccip_request.lane.sourceChainSelector
+    }
+
 
   const {
     executionReport,
@@ -41,7 +71,7 @@ export async function executeFeature(
     addressLookupTableAccounts,
   } = await getManuallyExecuteInputs({
     executionReportRaw,
-    connection,
+    connection: destination,
     offrampProgram,
     root,
     senderAddress,
@@ -64,11 +94,11 @@ export async function executeFeature(
 
   const manualExecuteInstructions = anchorTx.instructions
 
-  const { blockhash } = await connection.getLatestBlockhash()
+  const { blockhash } = await destination.getLatestBlockhash()
 
   const computeUnits = await simulateManuallyExecute({
     instructions: manualExecuteInstructions,
-    connection,
+    connection: destination,
     payerKey: new PublicKey(senderAddress),
     blockhash,
     addressLookupTableAccounts,
@@ -95,28 +125,6 @@ export async function executeFeature(
     Buffer.from(tx.serialize().buffer).toString('base64'),
   )
 
-  const walletFilter = {
-    chainFamily: 'solana' as const,
-    chainSelectorName: destChainSelectorName,
-    address: senderAddress,
-  }
-  const walletCoordinator = WalletCoordinator.getInstance()
-  const submitTransactionFeature = walletCoordinator.getFeature(
-    walletFilter,
-    Features.SendSolanaTransaction,
-    {
-      chainSelectorName: destChainSelectorName,
-      transaction: tx,
-    },
-  )
-
-  if (!submitTransactionFeature.success) {
-    throw new Error(submitTransactionFeature.error)
-  }
-
-  return submitTransactionFeature.executeFeature()
+  return tx
 }
 
-export default function getFeature(args: ManuallyExecuteSolanaInputs) {
-  return success(() => executeFeature(args))
-}
