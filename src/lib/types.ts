@@ -68,13 +68,11 @@ export type CCIPContract =
   | {
       family: typeof ChainFamily.EVM,
       type: CCIPContractType
-      version: CCIPVersion
       contract: CCIPContractEVM<CCIPContractType, CCIPVersion>
     }
   | {
       family: 'solana'
       type: SolanaCCIPIdl
-      version: SupportedSolanaCCIPVersion
       program: CCIPContractSolana<SolanaCCIPIdl, SupportedSolanaCCIPVersion>
   }
 

@@ -1,3 +1,4 @@
+import { Connection as SolanaConnection} from '@solana/web3.js'
 import {
   type ContractRunner,
   type EventFragment,
@@ -12,7 +13,9 @@ import Router from '../abi/Router.ts'
 import RouterABI from '../abi/Router.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
 import {
+    type CCIPContract,
   type CCIPContractEVM,
+  type CCIPContractSolana,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
@@ -21,6 +24,7 @@ import {
   CCIPContractType,
   CCIPVersion,
   CCIP_ABIs,
+  ChainFamily,
   ExecutionState,
 } from './types.ts'
 import {
@@ -34,6 +38,7 @@ import {
   validateContractType,
 } from './utils.ts'
 import { getOnRampLane } from './requests.ts'
+import { SolanaCCIPIdl, type SupportedSolanaCCIPVersion } from './solana/programs/versioning.ts'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
@@ -146,10 +151,55 @@ export async function discoverOffRamp<V extends CCIPVersion>(
       typeof RouterABI
     >,
   source: Provider,
+  destination: Provider | SolanaConnection, // SVM supported
+  lane: Lane<V>,
+): Promise<CCIPContract> {
+  if (destination instanceof SolanaConnection) {
+    const svmOfframp = await discoverOffRampSVM()
+
+    const offramp: CCIPContract = {
+      family: ChainFamily.Solana,
+      type: SolanaCCIPIdl.OffRamp,
+      program: svmOfframp as CCIPContractSolana<SolanaCCIPIdl, SupportedSolanaCCIPVersion>
+    }
+
+    return offramp
+
+  } else {
+    const evmOfframp = await discoverOffRampEVM(sourceRouterContract, source, destination, lane)
+    const offramp: CCIPContract = {
+      family: ChainFamily.EVM,
+      type: CCIPContractType.OffRamp,
+      contract: evmOfframp as unknown as CCIPContractEVM<CCIPContractType, CCIPVersion>,
+      
+    }
+    return offramp
+  }
+
+}
+
+async function discoverOffRampSVM<V extends SupportedSolanaCCIPVersion>(
+  _sourceRouterContract: TypedContract<
+      typeof RouterABI
+    >,
+  _source: Provider,
+  _destination: SolanaConnection,
+  _lane: Lane<V>,
+  
+) :Promise<CCIPContractSolana<typeof SolanaCCIPIdl.OffRamp, V>> {
+  throw new Error(
+    `Offramp discovery on SVM is not yet implemented"`,
+  )
+}
+
+async function discoverOffRampEVM<V extends CCIPVersion>(
+  sourceRouterContract: TypedContract<
+      typeof RouterABI
+    >,
+  source: Provider,
   destination: Provider,
   lane: Lane<V>,
 ): Promise<CCIPContractEVM<typeof CCIPContractType.OffRamp, V>> {
-
   const sourceOffRamps = await sourceRouterContract.getOffRamps()
   var destinationRouterAddresses = new Set<string>()
 

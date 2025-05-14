@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-base-to-string */
-import { Contract, ZeroAddress } from 'ethers'
+import { Contract, JsonRpcApiProvider, ZeroAddress } from 'ethers'
+import { clusterApiUrl, Connection as SolanaConnection } from '@solana/web3.js'
 import type { TypedContract } from 'ethers-abitype'
 
 import FeeQuoterABI from '../abi/FeeQuoter_1_6.ts'
@@ -7,7 +8,9 @@ import RouterABI from '../abi/Router.ts'
 import {
   type CCIPContract,
   type CCIPVersion,
+  type Lane,
   CCIPContractType,
+  ChainFamily,
   bigIntReplacer,
   chainIdFromSelector,
   chainNameFromSelector,
@@ -23,6 +26,8 @@ import {
 import type { Providers } from '../providers.ts'
 import { Format } from './types.ts'
 import { formatDuration, prettyLane } from './utils.ts'
+import { getClusterUrlByChainSelectorName, isSupportedSolanaCluster } from '../lib/solana/getClusterByChainSelectorName.ts'
+import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
 
 export async function showLaneConfigs(
   providers: Providers,
@@ -150,89 +155,122 @@ export async function showLaneConfigs(
     throw new Error(`Cannot discover offramp without access to router contract`)
   }
 
-  const dest = await providers.forChainId(chainIdFromSelector(lane.destChainSelector))
-  
-  const offRampContract = await discoverOffRamp(router, source,  dest, lane)
-  const offRamp = await offRampContract.getAddress()
-  const [offVersion, offTnV] = await validateContractType(dest, offRamp, CCIPContractType.OffRamp)
-  console.info('OffRamp:', offRamp, 'is', offTnV)
-  if (offVersion !== lane.version) {
-    console.warn(`OffRamp=${offRamp} is not v${lane.version}`)
-  }
-
-  const offStaticConfig = toObject(await offRampContract.getStaticConfig())
-  const offDynamicConfig = toObject(await offRampContract.getDynamicConfig())
-  let offRampRouter, sourceChainConfig
-  if ('router' in offDynamicConfig) {
-    offRampRouter = offDynamicConfig.router as string
+  const chainId = chainIdFromSelector(lane.destChainSelector)
+  const chainName = chainNameFromSelector(lane.destChainSelector)
+  if (typeof chainId === 'string' && isSupportedSolanaCluster(chainName)) {
+    await ShowLaneConfigsDestSVM(router, source, lane as Lane<SupportedSolanaCCIPVersion>, chainName)
   } else {
-    sourceChainConfig = toObject(
-      await (
-        offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_6>
-      ).getSourceChainConfig(lane.sourceChainSelector),
-    )
-    offRampRouter = sourceChainConfig.router as string
-  }
-  if (offRampRouter !== ZeroAddress) {
-    const router = new Contract(offRampRouter, RouterABI, dest) as unknown as TypedContract<
-      typeof RouterABI
-    >
-    const offRamps = await router.getOffRamps()
-    if (
-      !offRamps.some(
-        ({ sourceChainSelector, offRamp: addr }) =>
-          sourceChainSelector === lane.sourceChainSelector && addr === offRamp,
-      )
-    ) {
-      console.warn(
-        `OffRamp=${offRamp} is not registered in Router=${offRampRouter} for source="${chainNameFromSelector(lane.sourceChainSelector)}"; instead, have=${offRamps
-          .filter(({ sourceChainSelector }) => sourceChainSelector === lane.sourceChainSelector)
-          .map(({ offRamp }) => offRamp)
-          .join(', ')}`,
-      )
-    }
-  }
-
-  switch (argv.format) {
-    case Format.log:
-      console.log('OffRamp configs:', {
-        staticConfig: offStaticConfig,
-        dynamicConfig: offDynamicConfig,
-        ...(sourceChainConfig ? { sourceChainConfig } : {}),
-      })
-      break
-    case Format.pretty:
-      console.table({
-        typeAndVersion: (await getTypeAndVersion(offRampContract))[2],
-        ...offStaticConfig,
-        ...{
-          ...offDynamicConfig,
-          permissionLessExecutionThresholdSeconds: formatDuration(
-            Number(offDynamicConfig.permissionLessExecutionThresholdSeconds),
-          ),
-        },
-        ...(sourceChainConfig
-          ? {
-              ...sourceChainConfig,
-              onRamp: decodeAddress(sourceChainConfig.onRamp, networkInfo(sourceChainId).family),
-            }
-          : {}),
-      })
-      break
-    case Format.json:
-      console.log(
-        JSON.stringify(
-          {
-            offRamp: {
-              staticConfig: offStaticConfig,
-              dynamicConfig: offDynamicConfig,
-              ...(sourceChainConfig ? { sourceChainConfig } : {}),
-            },
-          },
-          bigIntReplacer,
-          2,
-        ),
-      )
-      break
-  }
+    const dest = await providers.forChainId(chainIdFromSelector(lane.destChainSelector))
+    await ShowLaneConfigsDestEVM(router, source, dest, lane, argv, sourceChainId)
+  } 
+  
 }
+
+async function ShowLaneConfigsDestSVM<V extends SupportedSolanaCCIPVersion>(
+  router: TypedContract<typeof RouterABI>,
+  source: JsonRpcApiProvider,
+  lane: Lane<V>,
+  chainName: string) {
+    const clusterUrl = getClusterUrlByChainSelectorName(chainName)
+    const dest = new SolanaConnection(clusterUrl)
+    let offRampContract = await discoverOffRamp(router, source, dest, lane)
+    console.debug("Contract: ", offRampContract)
+}
+
+
+async function ShowLaneConfigsDestEVM<V extends CCIPVersion>(router: TypedContract<typeof RouterABI>,
+  source: JsonRpcApiProvider,
+  dest:JsonRpcApiProvider,
+  lane: Lane<V>,
+  argv: { source: string; onramp_or_router: string; dest: string; format: Format; page: number },
+  sourceChainId: string | number)
+{
+    let offRampContract = await discoverOffRamp(router, source, dest, lane)
+
+    if (offRampContract.family !== ChainFamily.EVM) {
+      throw new Error("Invalid contract")
+    }
+
+    const offRampContractEVM = offRampContract.contract
+    
+    const offRamp = await offRampContractEVM.getAddress()
+    const [offVersion, offTnV] = await validateContractType(dest, offRamp, CCIPContractType.OffRamp)
+    console.info('OffRamp:', offRamp, 'is', offTnV)
+    if (offVersion !== lane.version) {
+        console.warn(`OffRamp=${offRamp} is not v${lane.version}`)
+    }
+
+    const offStaticConfig = toObject(await offRampContractEVM.getStaticConfig())
+    const offDynamicConfig = toObject(await offRampContractEVM.getDynamicConfig())
+    let offRampRouter, sourceChainConfig
+    if ('router' in offDynamicConfig) {
+        offRampRouter = offDynamicConfig.router as string
+    } else {
+        sourceChainConfig = toObject(
+            await (
+                offRampContractEVM as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_6>
+            ).getSourceChainConfig(lane.sourceChainSelector)
+        )
+        offRampRouter = sourceChainConfig.router as string
+    }
+    if (offRampRouter !== ZeroAddress) {
+        const router = new Contract(offRampRouter, RouterABI, dest) as unknown as TypedContract<
+            typeof RouterABI
+        >
+        const offRamps = await router.getOffRamps()
+        if (!offRamps.some(
+            ({ sourceChainSelector, offRamp: addr }) => sourceChainSelector === lane.sourceChainSelector && addr === offRamp
+        )) {
+            console.warn(
+                `OffRamp=${offRamp} is not registered in Router=${offRampRouter} for source="${chainNameFromSelector(lane.sourceChainSelector)}"; instead, have=${offRamps
+                    .filter(({ sourceChainSelector }) => sourceChainSelector === lane.sourceChainSelector)
+                    .map(({ offRamp }) => offRamp)
+                    .join(', ')}`
+            )
+        }
+    }
+
+    switch (argv.format) {
+        case Format.log:
+            console.log('OffRamp configs:', {
+                staticConfig: offStaticConfig,
+                dynamicConfig: offDynamicConfig,
+                ...(sourceChainConfig ? { sourceChainConfig } : {}),
+            })
+            break
+        case Format.pretty:
+            console.table({
+                typeAndVersion: (await getTypeAndVersion(offRampContractEVM))[2],
+                ...offStaticConfig,
+                ...{
+                    ...offDynamicConfig,
+                    permissionLessExecutionThresholdSeconds: formatDuration(
+                        Number(offDynamicConfig.permissionLessExecutionThresholdSeconds)
+                    ),
+                },
+                ...(sourceChainConfig
+                    ? {
+                        ...sourceChainConfig,
+                        onRamp: decodeAddress(sourceChainConfig.onRamp, networkInfo(sourceChainId).family),
+                    }
+                    : {}),
+            })
+            break
+        case Format.json:
+            console.log(
+                JSON.stringify(
+                    {
+                        offRamp: {
+                            staticConfig: offStaticConfig,
+                            dynamicConfig: offDynamicConfig,
+                            ...(sourceChainConfig ? { sourceChainConfig } : {}),
+                        },
+                    },
+                    bigIntReplacer,
+                    2
+                )
+            )
+            break
+    }
+}
+
