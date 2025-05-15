@@ -44,8 +44,9 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-import { manualExecuteWithSolanaDestination as buildManualExecutionTxWithSolanaDestination } from '../lib/solana/manuallyExecuteSolana.ts'
+import { buildManualExecutionTxWithSolanaDestination } from '../lib/solana/manuallyExecuteSolana.ts'
 import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
+import { AnchorProvider, Wallet } from '@coral-xyz/anchor'
 
 export async function manualExec(
   providers: Providers,
@@ -59,7 +60,7 @@ export async function manualExec(
     page: number
     wallet?: string
     offramp?: string
-    root?: string
+    commitReportAddress?: string
   },
 ) {
   const tx = await providers.getTxReceipt(txHash)
@@ -87,24 +88,37 @@ export async function manualExec(
   const chainId = chainIdFromSelector(request.lane.destChainSelector)
   const chainName = chainNameFromSelector(request.lane.destChainSelector)
   if (typeof chainId === 'string' && isSupportedSolanaCluster(chainName)) {
-    if (argv.offramp === undefined || argv.root === undefined) {
+    if (argv.offramp === undefined || argv.commitReportAddress === undefined) {
       throw new Error(
-        'Automated discovery not supported yet for SVM: You must provide an offramp address and merkle root.',
+        'Automated discovery not supported yet for SVM: You must provide an offramp address and commit report address.',
       )
     }
 
-    const destination = new Connection(getClusterUrlByChainSelectorName(chainName))
+    // TODO replace with cmdline args
+    const homeDir = process.env.HOME || process.env.USERPROFILE
+    const keypairPath = path.join(homeDir as string, '.config', 'solana', 'id.json')
+
+    // Read and parse the secret key
+    const secretKeyString = fs.readFileSync(keypairPath, 'utf8')
+    const secretKey = Uint8Array.from(JSON.parse(secretKeyString))
+
+    const keypair = Keypair.fromSecretKey(secretKey)
+    const wallet = new Wallet(keypair)
+    const connection = new Connection(getClusterUrlByChainSelectorName(chainName))
+    const anchorProvider = new AnchorProvider(connection, wallet, {
+      commitment: "processed",
+    });
     const transaction = await buildManualExecutionTxWithSolanaDestination(
       source,
-      destination,
+      anchorProvider,
       request as CCIPRequest<SupportedSolanaCCIPVersion>,
       argv.offramp,
       tx.from,
-      argv.root,
+      argv.commitReportAddress,
       undefined,
       argv.page,
     )
-    await doManuallyExecuteSolana(destination, transaction)
+    await doManuallyExecuteSolana(keypair, anchorProvider, transaction)
   } else {
     const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
     await manualExecEvmDestination(source, dest, request, argv)
@@ -112,26 +126,17 @@ export async function manualExec(
 }
 
 async function doManuallyExecuteSolana(
-  connection: SolanaConnection,
+  payer: Keypair,
+  destination: AnchorProvider,
   transaction: VersionedTransaction,
 ) {
-  // TODO replace with cmdline args
-  const homeDir = process.env.HOME || process.env.USERPROFILE
-  const keypairPath = path.join(homeDir as string, '.config', 'solana', 'id.json')
-
-  // Read and parse the secret key
-  const secretKeyString = fs.readFileSync(keypairPath, 'utf8')
-  const secretKey = Uint8Array.from(JSON.parse(secretKeyString))
-
-  // Create a Keypair instance
-  const payer = Keypair.fromSecretKey(secretKey)
 
   transaction.sign([payer])
 
-  const signature = await connection.sendTransaction(transaction)
+  const signature = await destination.connection.sendTransaction(transaction)
 
-  const latestBlockhash = await connection.getLatestBlockhash()
-  await connection.confirmTransaction(
+  const latestBlockhash = await destination.connection.getLatestBlockhash()
+  await destination.connection.confirmTransaction(
     {
       signature,
       blockhash: latestBlockhash.blockhash,

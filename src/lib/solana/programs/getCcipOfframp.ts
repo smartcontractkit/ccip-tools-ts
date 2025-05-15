@@ -1,4 +1,4 @@
-import { Program } from '@coral-xyz/anchor'
+import { AnchorProvider, Program } from '@coral-xyz/anchor'
 import type { Connection } from '@solana/web3.js'
 import { PublicKey } from '@solana/web3.js'
 import type { SupportedSolanaCCIPVersion } from './versioning'
@@ -8,16 +8,16 @@ import { CCIP_SOLANA_VERSION_MAP } from './versioning'
 export const getCcipOfframp = ({
   ccipVersion,
   address,
-  connection,
+  provider,
 }: {
   ccipVersion: SupportedSolanaCCIPVersion
   address: string
-  connection: Connection
+  provider: AnchorProvider
 }) => {
   const program = new Program(
-    CCIP_SOLANA_VERSION_MAP[ccipVersion][SolanaCCIPIdl.OffRamp].idl,
+    CCIP_SOLANA_VERSION_MAP[ccipVersion][SolanaCCIPIdl.OffRamp],
     new PublicKey(address),
-    { connection },
+    provider,
   )
 
   return program

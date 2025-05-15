@@ -1,5 +1,5 @@
-import { BN, BorshCoder } from '@coral-xyz/anchor'
-import { clusterApiUrl, Connection, PublicKey } from '@solana/web3.js'
+import { AccountClient, AnchorProvider, BorshCoder } from '@coral-xyz/anchor'
+import { clusterApiUrl, Connection, Keypair, PublicKey } from '@solana/web3.js'
 import { TransactionMessage, VersionedTransaction } from '@solana/web3.js'
 import { ComputeBudgetProgram } from '@solana/web3.js'
 import { CCIPVersion, type ExecutionReport } from '../types.ts'
@@ -7,68 +7,75 @@ import { getCcipOfframp } from './programs/getCcipOfframp'
 import { getManuallyExecuteInputs } from './getManuallyExecuteInputs'
 import { simulateManuallyExecute } from './simulateManuallyExecute'
 import type { CCIPRequest } from '../../../dist/lib/types'
-import type { Provider } from 'ethers'
+import { decodeBase58, type Numeric, type Provider } from 'ethers'
 import { fetchAllMessagesInBatch } from '../requests.ts'
 import { calculateManualExecProof } from '../execution.ts'
 import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
+import bs58  from 'bs58'
 
-export async function manualExecuteWithSolanaDestination<V extends SupportedSolanaCCIPVersion>(
-  source: Provider,
-  destination: Connection,
-  ccip_request: CCIPRequest<V>,
+export async function buildManualExecutionTxWithSolanaDestination <V extends SupportedSolanaCCIPVersion>(
+  sourceProvider: Provider,
+  destinationProvider: AnchorProvider,
+  ccipRequest: CCIPRequest<V>,
   offrampAddress: string,
   senderAddress: string,
-  root: string,
+  commitReportAddress: string,
   computeUnitsOverride: number | undefined,
   page: number,
 ): Promise<VersionedTransaction> {
-  const offrampProgram = getCcipOfframp({
-    ccipVersion: CCIPVersion.V1_6,
-    address: offrampAddress,
-    connection: destination,
-  })
 
   const offrampPubkey = new PublicKey(offrampAddress)
-  const [commitReportAccount] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from('commit_report'),
-      BN(ccip_request.lane.sourceChainSelector.toString()).toArrayLike(Buffer, 'le', 8),
-      Buffer.from(root, 'hex'),
-    ],
-    offrampPubkey,
-  )
-  const commit_report = await offrampProgram.account.commit_report.fetch(commitReportAccount)
+  console.debug("Pubkey: ", offrampPubkey, "base58: ", offrampPubkey.toBase58())
+  
+  const offrampProgram = getCcipOfframp({
+    ccipVersion: CCIPVersion.V1_6,
+    address: "offVkroQ4wYMv6QFPBvJazAx2p8BnLh7sJRdyQ5GYfx",
+    provider: destinationProvider,
+  })
+
+  const TnV = await offrampProgram.methods.typeVersion()
+    .accounts({})
+    .signers([])
+    .view()
+
+  if (TnV != "ccip-offramp 0.1.0-dev") {
+    throw new Error("Unsupported offramp version: ", TnV)
+  }
+
+  const commitReport = await offrampProgram.account.commitReport.fetch(commitReportAddress)
+  console.debug(commitReport)
+  console.debug(commitReport.minMsgNr.toNumber())
+  console.debug(commitReport.maxMsgNr.toNumber())
 
   const requestsInBatch = await fetchAllMessagesInBatch(
-    source,
-    ccip_request.lane.destChainSelector,
-    ccip_request.log,
-    { minSeqNr: commit_report.minMsgNr, maxSeqNr: commit_report.maxMsgNr },
+    sourceProvider,
+    ccipRequest.lane.destChainSelector,
+    ccipRequest.log,
+    { minSeqNr: commitReport.minMsgNr, maxSeqNr: commitReport.maxMsgNr },
     { page },
   )
 
   const manualExecReport = calculateManualExecProof(
     requestsInBatch.map(({ message }) => message),
-    ccip_request.lane,
-    [ccip_request.message.header.messageId],
-    commit_report.merkleRoot,
+    ccipRequest.lane,
+    [ccipRequest.message.header.messageId],
+    commitReport.merkleRoot,
   )
 
   const executionReportRaw: ExecutionReport = {
-    message: ccip_request.message,
-    // TODO: Figure out where to obtain these from. Args? offchainTokenData
-    // isn't really supported.
+    message: ccipRequest.message,
+    // OffchainTokenData not supported for manual exec yet.
     offchainTokenData: [],
-    proofs: [],
-    sourceChainSelector: ccip_request.lane.sourceChainSelector,
+    proofs: manualExecReport.proofs,
+    sourceChainSelector: ccipRequest.lane.sourceChainSelector,
   }
 
   const { executionReport, tokenIndexes, accounts, remainingAccounts, addressLookupTableAccounts } =
     await getManuallyExecuteInputs({
       executionReportRaw,
-      connection: destination,
+      connection: destinationProvider,
       offrampProgram,
-      root,
+      root: manualExecReport.root,
       senderAddress,
     })
 
@@ -86,11 +93,11 @@ export async function manualExecuteWithSolanaDestination<V extends SupportedSola
 
   const manualExecuteInstructions = anchorTx.instructions
 
-  const { blockhash } = await destination.getLatestBlockhash()
+  const { blockhash } = await destinationProvider.getLatestBlockhash()
 
   const computeUnits = await simulateManuallyExecute({
     instructions: manualExecuteInstructions,
-    connection: destination,
+    connection: destinationProvider,
     payerKey: new PublicKey(senderAddress),
     blockhash,
     addressLookupTableAccounts,

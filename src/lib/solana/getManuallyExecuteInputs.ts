@@ -1,4 +1,3 @@
-import { BN } from '@coral-xyz/anchor'
 import type { Connection } from '@solana/web3.js'
 import { PublicKey, SystemProgram, SYSVAR_INSTRUCTIONS_PUBKEY } from '@solana/web3.js'
 import type { ExecutionReport } from '../types.ts'
@@ -8,6 +7,7 @@ import { deriveAccounts } from './deriveAccounts'
 import { deriveTokenAccounts } from './deriveTokenAccounts'
 import type { MessageWithAccounts } from './utils'
 import { isMessageWithAccounts } from './utils'
+import { BN } from 'bn.js'
 
 function base64ToBuffer(base64: string): Buffer {
   return Buffer.from(base64, 'base64')

@@ -1,4 +1,3 @@
-import { BN } from '@coral-xyz/anchor'
 import { ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import type { AccountMeta, AddressLookupTableAccount, Connection } from '@solana/web3.js'
 import { PublicKey } from '@solana/web3.js'
@@ -7,6 +6,7 @@ import { getCcipCommon } from './programs/getCcipCommon'
 import type { OfframpProgram } from './programs/getCcipOfframp'
 import { getTokenPoolAccountsLookupTable } from './getTokenPoolAccountsLookupTable'
 import type { MessageWithAccounts } from './utils'
+import { BN } from "bn.js"
 
 type BuildTokenAccountsParams = {
   connection: Connection

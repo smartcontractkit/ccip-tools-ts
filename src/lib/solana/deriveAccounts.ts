@@ -2,7 +2,7 @@ import type { Connection } from '@solana/web3.js'
 import { PublicKey } from '@solana/web3.js'
 import { ethers } from 'ethers'
 import { getReferenceAddresses } from './getReferenceAddresses'
-import { BN } from '@coral-xyz/anchor'
+import { BN } from "bn.js"
 
 type ReferenceAddressesAccounts = {
   allowedOfframpPubKey: PublicKey
