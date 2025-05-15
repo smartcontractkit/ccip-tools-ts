@@ -167,14 +167,21 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
       if (typeof tokenAmount.destExecData === 'string' && tokenAmount.destGasAmount == null) {
         tokenAmount.destGasAmount = getUint(hexlify(getDataBytes(tokenAmount.destExecData)))
       }
-      tokenAmount.sourcePoolAddress = decodeAddress(
-        tokenAmount.sourcePoolAddress as string,
-        sourceFamily,
-      )
-      tokenAmount.destTokenAddress = decodeAddress(
-        tokenAmount.destTokenAddress as string,
-        destFamily,
-      )
+
+      if (tokenAmount.sourcePoolAddress) {
+        tokenAmount.sourcePoolAddress = decodeAddress(
+          tokenAmount.sourcePoolAddress as string,
+          sourceFamily,
+        )
+      }
+
+      if (tokenAmount.destTokenAddress) {
+        tokenAmount.destTokenAddress = decodeAddress(
+          tokenAmount.destTokenAddress as string,
+          destFamily,
+        )
+      }
+
       return tokenAmount
     },
   )
