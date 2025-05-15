@@ -9,6 +9,7 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 
 import Router from '../abi/Router.ts'
+import RouterABI from '../abi/Router.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
 import {
   type CCIPContract,
@@ -32,6 +33,7 @@ import {
   toObject,
   validateContractType,
 } from './utils.ts'
+import { getOnRampLane } from './requests.ts'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
@@ -138,6 +140,57 @@ export async function validateOffRamp<V extends CCIPVersion>(
   }
 }
 
+export async function discoverOffRamp<V extends CCIPVersion>(
+  sourceRouterContract: TypedContract<
+      typeof RouterABI
+    >,
+  source: Provider,
+  destination: Provider,
+  lane: Lane<V>,
+): Promise<CCIPContract<typeof CCIPContractType.OffRamp, V>> {
+
+  const sourceOffRamps = await sourceRouterContract.getOffRamps()
+  var destinationRouterAddresses = new Set<string>()
+
+  // We're looking at the lane "backwards" (i.e. query offramps with a source that's the dest for this lane)
+  const sourceOffRampsForLane = sourceOffRamps.filter((offramp) => offramp.sourceChainSelector === lane.destChainSelector)
+  for (const sourceOffRamp of sourceOffRampsForLane) {
+
+    const staticConfig = await getOffRampStaticConfig(source, sourceOffRamp.offRamp as string)
+    const destinationOnRamp: string = staticConfig[0].onRamp
+
+    const [, destinationRouter, ] = await getOnRampLane(
+      destination,
+      destinationOnRamp,
+      lane.destChainSelector,
+    )
+
+    destinationRouterAddresses.add(destinationRouter)
+
+  }
+
+  for (const destinationRouterAddress of destinationRouterAddresses) {
+    const destinationRouterContract = new Contract(destinationRouterAddress, RouterABI, destination) as unknown as TypedContract<
+      typeof RouterABI
+    >
+
+    const destinationOffRamps = await destinationRouterContract.getOffRamps()
+    const destinationOffRampsForLane = destinationOffRamps.filter((offramp) => offramp.sourceChainSelector === lane.sourceChainSelector)
+
+    for (const destinationOffRamp of destinationOffRampsForLane) {
+      const contract = await validateOffRamp<V>(destination, destinationOffRamp.offRamp as string, lane)
+      if (contract) {
+        console.debug('Found offRamp', destinationOffRamp.offRamp as string, 'for lane', lane)
+        return contract
+      }
+    }
+  }
+    
+  throw new Error(
+    `Could not find OffRamp on "${chainNameFromSelector(lane.destChainSelector)}" for OnRamp=${lane.onRamp} on "${chainNameFromSelector(lane.sourceChainSelector)}"`,
+  )
+}
+
 /**
  * Discover an OffRamp for a given lane (source, dest, onRamp)
  * It paginates on dest chain's logs, looking for OffRamp's ExecutionStateChanged events or
@@ -150,7 +203,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
  * @param hints.page - getLogs pagination range param
  * @returns Typed OffRamp contract
  **/
-export async function discoverOffRamp<V extends CCIPVersion>(
+export async function discoverOffRampLegacy<V extends CCIPVersion>(
   runner: ContractRunner,
   lane: Lane<V>,
   hints?: { fromBlock?: number; page?: number },

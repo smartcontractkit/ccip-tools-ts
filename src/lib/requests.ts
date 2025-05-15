@@ -60,6 +60,8 @@ export async function getOnRampLane(source: Provider, address: string, destChain
       typeof version
     >
     const staticConfig = toObject(await onRampContract.getStaticConfig())
+
+    let destRouter = ZeroAddress
     if (!('destChainSelector' in staticConfig)) {
       if (!destChainSelector) {
         throw new Error('destChainSelector is required for v1.6 OnRamp')
@@ -71,7 +73,9 @@ export async function getOnRampLane(source: Provider, address: string, destChain
         )
       }
     } else {
+      const dynamicConfig = await onRampContract.getDynamicConfig()
       destChainSelector = staticConfig.destChainSelector
+      destRouter = dynamicConfig.router
     }
     return [
       {
@@ -80,9 +84,10 @@ export async function getOnRampLane(source: Provider, address: string, destChain
         onRamp: address,
         version,
       },
+      destRouter,
       onRampContract,
     ] as {
-      [V in CCIPVersion]: readonly [Lane<V>, CCIPContract<typeof CCIPContractType.OnRamp, V>]
+      [V in CCIPVersion]: readonly [Lane<V>, string, CCIPContractEVM<typeof CCIPContractType.OnRamp, V>]
     }[CCIPVersion]
   })
 }

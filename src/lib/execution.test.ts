@@ -35,7 +35,7 @@ import {
 } from 'ethers'
 import {
   calculateManualExecProof,
-  discoverOffRamp,
+  discoverOffRampLegacy,
   fetchExecutionReceipts,
   validateOffRamp,
 } from './execution.ts'
@@ -397,7 +397,7 @@ describe('discoverOffRamp', () => {
     })
     const hints = { fromBlock: 50 }
 
-    const result = await discoverOffRamp(provider as unknown as ContractRunner, lane, hints)
+    const result = await discoverOffRampLegacy(provider as unknown as ContractRunner, lane, hints)
 
     expect(result).toMatchObject({ runner: provider })
     expect(provider.getLogs).toHaveBeenNthCalledWith(
@@ -420,7 +420,7 @@ describe('discoverOffRamp', () => {
       onRamp: hexlify(randomBytes(20)),
     })
 
-    await expect(discoverOffRamp(provider as unknown as ContractRunner, lane)).rejects.toThrow(
+    await expect(discoverOffRampLegacy(provider as unknown as ContractRunner, lane)).rejects.toThrow(
       /Could not find OffRamp on "ethereum-testnet-sepolia-arbitrum-1" for OnRamp=0x[a-zA-Z0-9]{40} on "ethereum-testnet-sepolia"/,
     )
   })
