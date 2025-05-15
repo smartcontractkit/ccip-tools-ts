@@ -24,3 +24,23 @@ export const getCcipOfframp = ({
 }
 
 export type OfframpProgram = Awaited<ReturnType<typeof getCcipOfframp>>
+
+export const getCcipOfframpReadOnly = ({
+  ccipVersion,
+  address,
+  connection,
+}: {
+  ccipVersion: SupportedSolanaCCIPVersion
+  address: string
+  connection: Connection
+}) => {
+  const program = new Program(
+    CCIP_SOLANA_VERSION_MAP[ccipVersion][SolanaCCIPIdl.OffRamp],
+    new PublicKey(address),
+    { connection },
+  )
+
+  return program
+}
+
+export type OfframpProgramReadOnly = Awaited<ReturnType<typeof getCcipOfframpReadOnly>>

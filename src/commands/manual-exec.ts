@@ -59,8 +59,7 @@ export async function manualExec(
     format: Format
     page: number
     wallet?: string
-    offramp?: string
-    commitReportAddress?: string
+    solanaTxSig: string
   },
 ) {
   const tx = await providers.getTxReceipt(txHash)
@@ -88,9 +87,9 @@ export async function manualExec(
   const chainId = chainIdFromSelector(request.lane.destChainSelector)
   const chainName = chainNameFromSelector(request.lane.destChainSelector)
   if (typeof chainId === 'string' && isSupportedSolanaCluster(chainName)) {
-    if (argv.offramp === undefined || argv.commitReportAddress === undefined) {
+    if (argv.solanaTxSig === undefined) {
       throw new Error(
-        'Automated discovery not supported yet for SVM: You must provide an offramp address and commit report address.',
+        'Automated discovery not supported yet for SVM: You must provide the solana TX signature.',
       )
     }
 
@@ -106,17 +105,13 @@ export async function manualExec(
     const wallet = new Wallet(keypair)
     const connection = new Connection(getClusterUrlByChainSelectorName(chainName))
     const anchorProvider = new AnchorProvider(connection, wallet, {
-      commitment: "processed",
-    });
+      commitment: 'processed',
+    })
     const transaction = await buildManualExecutionTxWithSolanaDestination(
-      source,
       anchorProvider,
       request as CCIPRequest<SupportedSolanaCCIPVersion>,
-      argv.offramp,
-      tx.from,
-      argv.commitReportAddress,
+      argv.solanaTxSig,
       undefined,
-      argv.page,
     )
     await doManuallyExecuteSolana(keypair, anchorProvider, transaction)
   } else {
@@ -130,7 +125,6 @@ async function doManuallyExecuteSolana(
   destination: AnchorProvider,
   transaction: VersionedTransaction,
 ) {
-
   transaction.sign([payer])
 
   const signature = await destination.connection.sendTransaction(transaction)

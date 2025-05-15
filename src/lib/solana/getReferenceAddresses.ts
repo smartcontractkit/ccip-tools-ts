@@ -1,7 +1,7 @@
 import type { Connection } from '@solana/web3.js'
 import { PublicKey } from '@solana/web3.js'
 import { CCIPVersion } from '../types.ts'
-import { getCcipOfframp } from './programs/getCcipOfframp'
+import { getCcipOfframpReadOnly } from './programs/getCcipOfframp'
 
 export const getReferenceAddresses = async ({
   connection,
@@ -20,7 +20,7 @@ export const getReferenceAddresses = async ({
     throw new Error(`Reference addresses account not found at ${referenceAddressesId}`)
   }
 
-  const program = getCcipOfframp({
+  const program = getCcipOfframpReadOnly({
     ccipVersion: CCIPVersion.V1_6,
     address: offrampProgramPubkey.toBase58(),
     connection,

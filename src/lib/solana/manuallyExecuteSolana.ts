@@ -1,88 +1,89 @@
-import { AccountClient, AnchorProvider, BorshCoder } from '@coral-xyz/anchor'
-import { clusterApiUrl, Connection, Keypair, PublicKey } from '@solana/web3.js'
+import { AnchorProvider, BorshCoder, type Instruction } from '@coral-xyz/anchor'
+import {
+  PublicKey,
+  type GetVersionedTransactionConfig,
+  type PartiallyDecodedInstruction,
+} from '@solana/web3.js'
 import { TransactionMessage, VersionedTransaction } from '@solana/web3.js'
 import { ComputeBudgetProgram } from '@solana/web3.js'
-import { CCIPVersion, type ExecutionReport } from '../types.ts'
+import { CCIPVersion, normalizeExecutionReport, type ExecutionReport } from '../types.ts'
 import { getCcipOfframp } from './programs/getCcipOfframp'
 import { getManuallyExecuteInputs } from './getManuallyExecuteInputs'
 import { simulateManuallyExecute } from './simulateManuallyExecute'
 import type { CCIPRequest } from '../../../dist/lib/types'
-import { decodeBase58, type Numeric, type Provider } from 'ethers'
-import { fetchAllMessagesInBatch } from '../requests.ts'
-import { calculateManualExecProof } from '../execution.ts'
 import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
-import bs58  from 'bs58'
+import { CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
 
-export async function buildManualExecutionTxWithSolanaDestination <V extends SupportedSolanaCCIPVersion>(
-  sourceProvider: Provider,
+export async function buildManualExecutionTxWithSolanaDestination<
+  V extends SupportedSolanaCCIPVersion,
+>(
   destinationProvider: AnchorProvider,
   ccipRequest: CCIPRequest<V>,
-  offrampAddress: string,
-  senderAddress: string,
-  commitReportAddress: string,
+  solanaTxSignature: string,
   computeUnitsOverride: number | undefined,
-  page: number,
 ): Promise<VersionedTransaction> {
+  var config: GetVersionedTransactionConfig = {
+    maxSupportedTransactionVersion: 0,
+  }
 
-  const offrampPubkey = new PublicKey(offrampAddress)
-  console.debug("Pubkey: ", offrampPubkey, "base58: ", offrampPubkey.toBase58())
-  
+  const transaction = await destinationProvider.connection.getParsedTransaction(
+    solanaTxSignature,
+    config,
+  )
+
+  if (transaction === null) {
+    throw new Error('Could not parse destination transaction')
+  }
+
+  const instructions = transaction.transaction.message.instructions
+  const executeInstruction = instructions[1] as PartiallyDecodedInstruction
+  const offrampAddress = executeInstruction.programId
+
   const offrampProgram = getCcipOfframp({
     ccipVersion: CCIPVersion.V1_6,
-    address: "offVkroQ4wYMv6QFPBvJazAx2p8BnLh7sJRdyQ5GYfx",
+    address: offrampAddress.toBase58(),
     provider: destinationProvider,
   })
 
-  const TnV = await offrampProgram.methods.typeVersion()
-    .accounts({})
-    .signers([])
-    .view()
+  const TnV = await offrampProgram.methods.typeVersion().accounts({}).signers([]).view()
 
-  if (TnV != "ccip-offramp 0.1.0-dev") {
-    throw new Error("Unsupported offramp version: ", TnV)
+  if (TnV != 'ccip-offramp 0.1.0-dev') {
+    throw new Error('Unsupported offramp version: ', TnV)
   }
 
+  const commitReportAddress: PublicKey = executeInstruction.accounts[3]
   const commitReport = await offrampProgram.account.commitReport.fetch(commitReportAddress)
-  console.debug(commitReport)
-  console.debug(commitReport.minMsgNr.toNumber())
-  console.debug(commitReport.maxMsgNr.toNumber())
+  // console.debug('Merkle root: ', commitReport.merkleRoot)
+  const rootString = '0x' + Buffer.from(commitReport.merkleRoot).toString('hex')
+  // console.debug('Merkle root string:', rootString)
 
-  const requestsInBatch = await fetchAllMessagesInBatch(
-    sourceProvider,
-    ccipRequest.lane.destChainSelector,
-    ccipRequest.log,
-    { minSeqNr: commitReport.minMsgNr, maxSeqNr: commitReport.maxMsgNr },
-    { page },
+  const coder = new BorshCoder(CCIP_OFFRAMP_IDL)
+  const decodedData = coder.instruction.decode(executeInstruction.data, 'base58') as Instruction
+  const executionReportDecoded = coder.types.decode(
+    'ExecutionReportSingleChain',
+    decodedData.data.rawExecutionReport,
   )
 
-  const manualExecReport = calculateManualExecProof(
-    requestsInBatch.map(({ message }) => message),
-    ccipRequest.lane,
-    [ccipRequest.message.header.messageId],
-    commitReport.merkleRoot,
-  )
-
-  const executionReportRaw: ExecutionReport = {
+  const executionReportRaw: ExecutionReport = normalizeExecutionReport({
     message: ccipRequest.message,
-    // OffchainTokenData not supported for manual exec yet.
-    offchainTokenData: [],
-    proofs: manualExecReport.proofs,
-    sourceChainSelector: ccipRequest.lane.sourceChainSelector,
-  }
+    offchainTokenData: executionReportDecoded.offchainTokenData.map((data: Buffer) => '0x' + data.toString('hex')),
+    proofs: executionReportDecoded.proofs,
+    sourceChainSelector: ccipRequest.message.header.sourceChainSelector,
+  })
 
+  console.debug(executionReportRaw)
+
+  const payerAddress = destinationProvider.wallet.publicKey.toBase58()
   const { executionReport, tokenIndexes, accounts, remainingAccounts, addressLookupTableAccounts } =
     await getManuallyExecuteInputs({
       executionReportRaw,
-      connection: destinationProvider,
+      connection: destinationProvider.connection,
       offrampProgram,
-      root: manualExecReport.root,
-      senderAddress,
+      root: rootString,
+      senderAddress: payerAddress,
     })
 
-  const coder = new BorshCoder(offrampProgram.idl)
-
   const serializedReport = coder.types.encode('ExecutionReportSingleChain', executionReport)
-
   const serializedTokenIndexes = Buffer.from(tokenIndexes)
 
   const anchorTx = await offrampProgram.methods
@@ -93,16 +94,17 @@ export async function buildManualExecutionTxWithSolanaDestination <V extends Sup
 
   const manualExecuteInstructions = anchorTx.instructions
 
-  const { blockhash } = await destinationProvider.getLatestBlockhash()
+  const { blockhash } = await destinationProvider.connection.getLatestBlockhash()
 
-  const computeUnits = await simulateManuallyExecute({
-    instructions: manualExecuteInstructions,
-    connection: destinationProvider,
-    payerKey: new PublicKey(senderAddress),
-    blockhash,
-    addressLookupTableAccounts,
-    computeUnitsOverride,
-  })
+  // const computeUnits = await simulateManuallyExecute({
+  //   instructions: manualExecuteInstructions,
+  //   connection: destinationProvider.connection,
+  //   payerKey: destinationProvider.wallet.publicKey,
+  //   blockhash,
+  //   addressLookupTableAccounts,
+  //   computeUnitsOverride,
+  // })
+  const computeUnits = 1070146
   const computeUnitsWithBuffer = Math.ceil(computeUnits * 1.1)
   const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
     units: computeUnitsOverride || computeUnitsWithBuffer,
@@ -112,14 +114,14 @@ export async function buildManualExecutionTxWithSolanaDestination <V extends Sup
   const finalInstructions = [computeBudgetIx, ...manualExecuteInstructions]
 
   const message = new TransactionMessage({
-    payerKey: new PublicKey(senderAddress),
+    payerKey: destinationProvider.wallet.publicKey,
     recentBlockhash: blockhash,
     instructions: finalInstructions,
   })
   const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
   const tx = new VersionedTransaction(messageV0)
 
-  console.info('Serialized transaction:', Buffer.from(tx.serialize().buffer).toString('base64'))
+  console.debug('Serialized transaction:', Buffer.from(tx.serialize().buffer).toString('base64'))
 
   return tx
 }

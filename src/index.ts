@@ -22,7 +22,7 @@ import { Providers } from './providers.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.2.6-2f6eeb0'
+const VERSION = '0.2.6-2f7e602'
 // generate:end
 
 async function main() {
@@ -129,15 +129,10 @@ async function main() {
               describe:
                 'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar; also supports `ledger[:<derivationPath>]` hardwallet',
             },
-            offramp: {
+            'solana-tx-sig': {
               type: 'string',
               describe:
-                'Offramp address for the message. Necessary only for Solana as destination, ignored otherwise.'
-            },
-            'commit-report-address': {
-              type: 'string',
-              describe:
-                'Solana commit report address. Necessary only for Solana as destination, ignored otherwise. Can be obtained from the failed TX.'
+                'Failing Solana transaction hash. Will be discovered automatically eventually, but must be provided for now when Solana is destination.',
             },
             'sender-queue': {
               type: 'boolean',

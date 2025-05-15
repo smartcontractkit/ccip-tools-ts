@@ -57,8 +57,7 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
 ): {
   messages: CCIPMessage<V>[]
   proofs: string[]
-  proofFlagBits: bigint,
-  root: string
+  proofFlagBits: bigint
 } {
   const leaves: string[] = []
   const hasher = getLeafHasher(lane)
@@ -99,7 +98,6 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
     messages,
     proofs: proof.hashes,
     proofFlagBits: proofFlagsToBits(proof.sourceFlags),
-    root: tree.root(),
   }
   return offRampProof
 }

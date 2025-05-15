@@ -2,11 +2,11 @@ import { ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import type { AccountMeta, AddressLookupTableAccount, Connection } from '@solana/web3.js'
 import { PublicKey } from '@solana/web3.js'
 import { CCIPVersion } from '../types.ts'
-import { getCcipCommon } from './programs/getCcipCommon'
+import { getCcipCommonReadOnly } from './programs/getCcipCommon'
 import type { OfframpProgram } from './programs/getCcipOfframp'
 import { getTokenPoolAccountsLookupTable } from './getTokenPoolAccountsLookupTable'
 import type { MessageWithAccounts } from './utils'
-import { BN } from "bn.js"
+import { BN } from 'bn.js'
 
 type BuildTokenAccountsParams = {
   connection: Connection
@@ -104,7 +104,7 @@ async function getWritableIndexes(
   routerPubkey: PublicKey,
 ): Promise<boolean[]> {
   // 1. Create program instance
-  const program = getCcipCommon({
+  const program = getCcipCommonReadOnly({
     ccipVersion: CCIPVersion.V1_6,
     address: routerPubkey.toBase58(),
     connection,

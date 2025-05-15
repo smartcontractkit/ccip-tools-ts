@@ -354,7 +354,6 @@ export async function fetchAllMessagesInBatch(
   const initFromBlock = Math.max(1, Math.trunc(sendBlock - eventsBatchSize / 2 + 1))
   const initToBlock = Math.min(latestBlock, initFromBlock + eventsBatchSize - 1)
   const events = await getDecodedEvents(initFromBlock, initToBlock)
-  console.debug(events)
 
   // page back if needed
   for (const { fromBlock, toBlock } of blockRangeGenerator(
@@ -362,12 +361,11 @@ export async function fetchAllMessagesInBatch(
     eventsBatchSize,
   )) {
     if (
-      events[0] === undefined || events[0].message.header.sequenceNumber <= min ||
+      events[0].message.header.sequenceNumber <= min ||
       (initToBlock - toBlock) / eventsBatchSize > maxPageCount
     )
       break
     const newEvents = await getDecodedEvents(fromBlock, toBlock)
-    console.debug(newEvents)
     events.unshift(...newEvents)
   }
 
@@ -377,7 +375,7 @@ export async function fetchAllMessagesInBatch(
     eventsBatchSize,
   )) {
     if (
-      events[events.length - 1] === undefined || events[events.length - 1].message.header.sequenceNumber >= max ||
+      events[events.length - 1].message.header.sequenceNumber >= max ||
       (fromBlock - initToBlock) / eventsBatchSize > maxPageCount
     )
       break
