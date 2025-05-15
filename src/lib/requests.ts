@@ -87,7 +87,11 @@ export async function getOnRampLane(source: Provider, address: string, destChain
       destRouter,
       onRampContract,
     ] as {
-      [V in CCIPVersion]: readonly [Lane<V>, string, CCIPContractEVM<typeof CCIPContractType.OnRamp, V>]
+      [V in CCIPVersion]: readonly [
+        Lane<V>,
+        string,
+        CCIPContractEVM<typeof CCIPContractType.OnRamp, V>,
+      ]
     }[CCIPVersion]
   })
 }

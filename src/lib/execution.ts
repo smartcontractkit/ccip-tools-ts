@@ -1,4 +1,4 @@
-import { Connection as SolanaConnection} from '@solana/web3.js'
+import { Connection as SolanaConnection } from '@solana/web3.js'
 import {
   type ContractRunner,
   type EventFragment,
@@ -13,7 +13,7 @@ import Router from '../abi/Router.ts'
 import RouterABI from '../abi/Router.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
 import {
-    type CCIPContract,
+  type CCIPContract,
   type CCIPContractEVM,
   type CCIPContractSolana,
   type CCIPExecution,
@@ -115,7 +115,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
   lane: Lane<V>,
 ): Promise<CCIPContractEVM<typeof CCIPContractType.OffRamp, V> | undefined> {
   const [version] = await validateContractType(runner.provider!, address, CCIPContractType.OffRamp)
-  console.debug("Lane: ", lane, ", Version: ", version)
+  console.debug('Lane: ', lane, ', Version: ', version)
   if (version !== lane.version) return
 
   const offRampContract = new Contract(
@@ -147,9 +147,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
 }
 
 export async function discoverOffRamp<V extends CCIPVersion>(
-  sourceRouterContract: TypedContract<
-      typeof RouterABI
-    >,
+  sourceRouterContract: TypedContract<typeof RouterABI>,
   source: Provider,
   destination: Provider | SolanaConnection, // SVM supported
   lane: Lane<V>,
@@ -160,42 +158,32 @@ export async function discoverOffRamp<V extends CCIPVersion>(
     const offramp: CCIPContract = {
       family: ChainFamily.Solana,
       type: SolanaCCIPIdl.OffRamp,
-      program: svmOfframp as CCIPContractSolana<SolanaCCIPIdl, SupportedSolanaCCIPVersion>
+      program: svmOfframp as CCIPContractSolana<SolanaCCIPIdl, SupportedSolanaCCIPVersion>,
     }
 
     return offramp
-
   } else {
     const evmOfframp = await discoverOffRampEVM(sourceRouterContract, source, destination, lane)
     const offramp: CCIPContract = {
       family: ChainFamily.EVM,
       type: CCIPContractType.OffRamp,
       contract: evmOfframp as unknown as CCIPContractEVM<CCIPContractType, CCIPVersion>,
-      
     }
     return offramp
   }
-
 }
 
 async function discoverOffRampSVM<V extends SupportedSolanaCCIPVersion>(
-  _sourceRouterContract: TypedContract<
-      typeof RouterABI
-    >,
+  _sourceRouterContract: TypedContract<typeof RouterABI>,
   _source: Provider,
   _destination: SolanaConnection,
   _lane: Lane<V>,
-  
-) :Promise<CCIPContractSolana<typeof SolanaCCIPIdl.OffRamp, V>> {
-  throw new Error(
-    `Offramp discovery on SVM is not yet implemented"`,
-  )
+): Promise<CCIPContractSolana<typeof SolanaCCIPIdl.OffRamp, V>> {
+  throw new Error(`Offramp discovery on SVM is not yet implemented"`)
 }
 
 async function discoverOffRampEVM<V extends CCIPVersion>(
-  sourceRouterContract: TypedContract<
-      typeof RouterABI
-    >,
+  sourceRouterContract: TypedContract<typeof RouterABI>,
   source: Provider,
   destination: Provider,
   lane: Lane<V>,
@@ -204,39 +192,47 @@ async function discoverOffRampEVM<V extends CCIPVersion>(
   var destinationRouterAddresses = new Set<string>()
 
   // We're looking at the lane "backwards" (i.e. query offramps with a source that's the dest for this lane)
-  const sourceOffRampsForLane = sourceOffRamps.filter((offramp) => offramp.sourceChainSelector === lane.destChainSelector)
+  const sourceOffRampsForLane = sourceOffRamps.filter(
+    (offramp) => offramp.sourceChainSelector === lane.destChainSelector,
+  )
   for (const sourceOffRamp of sourceOffRampsForLane) {
-
     const staticConfig = await getOffRampStaticConfig(source, sourceOffRamp.offRamp as string)
     const destinationOnRamp: string = staticConfig[0].onRamp
 
-    const [, destinationRouter, ] = await getOnRampLane(
+    const [, destinationRouter] = await getOnRampLane(
       destination,
       destinationOnRamp,
       lane.destChainSelector,
     )
 
     destinationRouterAddresses.add(destinationRouter)
-
   }
 
   for (const destinationRouterAddress of destinationRouterAddresses) {
-    const destinationRouterContract = new Contract(destinationRouterAddress, RouterABI, destination) as unknown as TypedContract<
-      typeof RouterABI
-    >
+    const destinationRouterContract = new Contract(
+      destinationRouterAddress,
+      RouterABI,
+      destination,
+    ) as unknown as TypedContract<typeof RouterABI>
 
     const destinationOffRamps = await destinationRouterContract.getOffRamps()
-    const destinationOffRampsForLane = destinationOffRamps.filter((offramp) => offramp.sourceChainSelector === lane.sourceChainSelector)
+    const destinationOffRampsForLane = destinationOffRamps.filter(
+      (offramp) => offramp.sourceChainSelector === lane.sourceChainSelector,
+    )
 
     for (const destinationOffRamp of destinationOffRampsForLane) {
-      const contract = await validateOffRamp<V>(destination, destinationOffRamp.offRamp as string, lane)
+      const contract = await validateOffRamp<V>(
+        destination,
+        destinationOffRamp.offRamp as string,
+        lane,
+      )
       if (contract) {
         console.debug('Found offRamp', destinationOffRamp.offRamp as string, 'for lane', lane)
         return contract
       }
     }
   }
-    
+
   throw new Error(
     `Could not find OffRamp on "${chainNameFromSelector(lane.destChainSelector)}" for OnRamp=${lane.onRamp} on "${chainNameFromSelector(lane.sourceChainSelector)}"`,
   )

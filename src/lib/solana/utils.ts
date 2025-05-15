@@ -11,8 +11,6 @@ export function isMessageWithAccounts(
   message: ExecutionReport['message'],
 ): message is MessageWithAccounts {
   return (
-    'tokenReceiver' in message &&
-    'computeUnits' in message &&
-    'accountIsWritableBitmap' in message
+    'tokenReceiver' in message && 'computeUnits' in message && 'accountIsWritableBitmap' in message
   )
 }

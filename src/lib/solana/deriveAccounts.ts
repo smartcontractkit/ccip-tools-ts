@@ -4,7 +4,6 @@ import { ethers } from 'ethers'
 import { getReferenceAddresses } from './getReferenceAddresses'
 import { BN } from '@coral-xyz/anchor'
 
-
 type ReferenceAddressesAccounts = {
   allowedOfframpPubKey: PublicKey
   rmnRemoteCursesPubKey: PublicKey
@@ -42,11 +41,7 @@ export const getReferenceAddressesAccounts = async ({
   })
 
   const [allowedOfframpPubKey] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from('allowed_offramp'),
-      sourceChainSelectorBuffer,
-      offrampProgramPubkey.toBuffer(),
-    ],
+    [Buffer.from('allowed_offramp'), sourceChainSelectorBuffer, offrampProgramPubkey.toBuffer()],
     referenceAddresses.router,
   )
 
@@ -84,9 +79,11 @@ export const deriveAccounts = async ({
   root: string
   receiver: string
 }): Promise<DerivedAccounts> => {
-  const sourceChainSelectorBuffer = new BN(
-    sourceChainSelector.toString(),
-  ).toArrayLike(Buffer, 'le', 8)
+  const sourceChainSelectorBuffer = new BN(sourceChainSelector.toString()).toArrayLike(
+    Buffer,
+    'le',
+    8,
+  )
 
   const [configPubKey] = PublicKey.findProgramAddressSync(
     [Buffer.from('config')],
@@ -115,10 +112,7 @@ export const deriveAccounts = async ({
   )
 
   const [externalExecutionConfigPubKey] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from('external_execution_config'),
-      new PublicKey(receiver).toBuffer(),
-    ],
+    [Buffer.from('external_execution_config'), new PublicKey(receiver).toBuffer()],
     offrampProgramPubkey,
   )
 

@@ -7,12 +7,9 @@ type SupportedCluster = 'mainnet-beta' | 'devnet'
 
 export const isSupportedSolanaCluster = (
   selector: string,
-): selector is keyof typeof selectorToClusterMap =>
-  selector in selectorToClusterMap
+): selector is keyof typeof selectorToClusterMap => selector in selectorToClusterMap
 
-export const getClusterByChainSelectorName = (
-  selector: string,
-): SupportedCluster => {
+export const getClusterByChainSelectorName = (selector: string): SupportedCluster => {
   if (!isSupportedSolanaCluster(selector)) {
     throw new Error(`Unsupported chain selector name: ${selector}`)
   }
@@ -20,9 +17,7 @@ export const getClusterByChainSelectorName = (
   return selectorToClusterMap[selector]
 }
 
-export const getClusterUrlByChainSelectorName = (
-  selector: string,
-) => {
+export const getClusterUrlByChainSelectorName = (selector: string) => {
   const cluster = getClusterByChainSelectorName(selector)
   return `https://api.${cluster}.solana.com`
 }

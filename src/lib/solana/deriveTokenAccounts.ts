@@ -1,10 +1,6 @@
 import { BN } from '@coral-xyz/anchor'
 import { ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token'
-import type {
-  AccountMeta,
-  AddressLookupTableAccount,
-  Connection,
-} from '@solana/web3.js'
+import type { AccountMeta, AddressLookupTableAccount, Connection } from '@solana/web3.js'
 import { PublicKey } from '@solana/web3.js'
 import { CCIPVersion } from '../types.ts'
 import { getCcipCommon } from './programs/getCcipCommon'
@@ -120,9 +116,7 @@ async function getWritableIndexes(
     routerPubkey,
   )
 
-  const tokenAdminRegistry = await program.account.tokenAdminRegistry.fetch(
-    tokenAdminRegistryPda,
-  )
+  const tokenAdminRegistry = await program.account.tokenAdminRegistry.fetch(tokenAdminRegistryPda)
 
   // Convert the two u128 values to a single 256-bit number
   const writableBits = new BN(tokenAdminRegistry.writableIndexes[0])
@@ -133,20 +127,12 @@ async function getWritableIndexes(
   return Array.from(binaryString).map((bit) => bit === '1')
 }
 
-export async function deriveTokenAccounts(
-  params: BuildTokenAccountsParams,
-): Promise<{
+export async function deriveTokenAccounts(params: BuildTokenAccountsParams): Promise<{
   tokenAccounts: AccountMeta[]
   addressLookupTableAccounts: AddressLookupTableAccount[]
   tokenIndexes: number[]
 }> {
-  const {
-    connection,
-    offrampProgram,
-    routerProgramPubkey,
-    message,
-    remainingAccounts,
-  } = params
+  const { connection, offrampProgram, routerProgramPubkey, message, remainingAccounts } = params
 
   const tokenIndexes: number[] = []
   const tokenAccounts: AccountMeta[] = []

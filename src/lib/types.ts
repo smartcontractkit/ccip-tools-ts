@@ -19,7 +19,11 @@ import EVM2EVMOnRamp_1_5_ABI from '../abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from '../abi/OnRamp_1_6.ts'
 import type { SourceTokenData, parseExtraArgs } from './extra-args.ts'
 import type { Program } from '@coral-xyz/anchor'
-import type { CCIP_SOLANA_VERSION_MAP, SolanaCCIPIdl, SupportedSolanaCCIPVersion } from './solana/programs/versioning.ts'
+import type {
+  CCIP_SOLANA_VERSION_MAP,
+  SolanaCCIPIdl,
+  SupportedSolanaCCIPVersion,
+} from './solana/programs/versioning.ts'
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
@@ -60,13 +64,14 @@ export type CCIPContractEVM<T extends CCIPContractType, V extends CCIPVersion> =
   (typeof CCIP_ABIs)[T][V]
 >
 
-export type CCIPContractSolana<T extends SolanaCCIPIdl, V extends SupportedSolanaCCIPVersion> = Program<
-  (typeof CCIP_SOLANA_VERSION_MAP)[V][T]
->
+export type CCIPContractSolana<
+  T extends SolanaCCIPIdl,
+  V extends SupportedSolanaCCIPVersion,
+> = Program<(typeof CCIP_SOLANA_VERSION_MAP)[V][T]>
 
 export type CCIPContract =
   | {
-      family: typeof ChainFamily.EVM,
+      family: typeof ChainFamily.EVM
       type: CCIPContractType
       contract: CCIPContractEVM<CCIPContractType, CCIPVersion>
     }
@@ -74,7 +79,7 @@ export type CCIPContract =
       family: 'solana'
       type: SolanaCCIPIdl
       program: CCIPContractSolana<SolanaCCIPIdl, SupportedSolanaCCIPVersion>
-  }
+    }
 
 export const ChainFamily = {
   EVM: 'evm',

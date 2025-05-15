@@ -5,11 +5,7 @@ import type {
   PublicKey,
   AddressLookupTableAccount,
 } from '@solana/web3.js'
-import {
-  ComputeBudgetProgram,
-  TransactionMessage,
-  VersionedTransaction,
-} from '@solana/web3.js'
+import { ComputeBudgetProgram, TransactionMessage, VersionedTransaction } from '@solana/web3.js'
 
 export const simulateManuallyExecute = async ({
   instructions,
@@ -49,10 +45,7 @@ export const simulateManuallyExecute = async ({
       sigVerify: false,
     }
 
-    const simulation = await connection.simulateTransaction(
-      simulationTx,
-      config,
-    )
+    const simulation = await connection.simulateTransaction(simulationTx, config)
 
     console.info('Simulation results:', {
       logs: simulation.value.logs,
@@ -62,9 +55,7 @@ export const simulateManuallyExecute = async ({
     })
 
     if (simulation.value.err) {
-      throw new Error(
-        `Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`,
-      )
+      throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`)
     }
 
     return simulation.value.unitsConsumed || 0

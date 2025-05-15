@@ -1,10 +1,6 @@
 import { BN } from '@coral-xyz/anchor'
 import type { Connection } from '@solana/web3.js'
-import {
-  PublicKey,
-  SystemProgram,
-  SYSVAR_INSTRUCTIONS_PUBKEY,
-} from '@solana/web3.js'
+import { PublicKey, SystemProgram, SYSVAR_INSTRUCTIONS_PUBKEY } from '@solana/web3.js'
 import type { ExecutionReport } from '../types.ts'
 import type { OfframpProgram } from './programs/getCcipOfframp'
 import { getAddressLookupTableAccount } from './getAddressLookupTableAccount'
@@ -56,18 +52,14 @@ export async function getManuallyExecuteInputs({
 
   const executionReport = getExecutionReport(executionReportRaw, message)
 
-  const {
-    accounts,
-    remainingAccounts,
-    addressLookupTableAccounts,
-    tokenIndexes,
-  } = await getAccounts({
-    derivedAccounts,
-    offrampProgram,
-    senderAddress,
-    message,
-    connection,
-  })
+  const { accounts, remainingAccounts, addressLookupTableAccounts, tokenIndexes } =
+    await getAccounts({
+      derivedAccounts,
+      offrampProgram,
+      senderAddress,
+      message,
+      connection,
+    })
 
   return {
     executionReport,
@@ -78,20 +70,13 @@ export async function getManuallyExecuteInputs({
   }
 }
 
-function getExecutionReport(
-  executionReportRaw: ExecutionReport,
-  message: MessageWithAccounts,
-) {
+function getExecutionReport(executionReportRaw: ExecutionReport, message: MessageWithAccounts) {
   return {
-    sourceChainSelector: new BN(
-      executionReportRaw.sourceChainSelector.toString(),
-    ),
+    sourceChainSelector: new BN(executionReportRaw.sourceChainSelector.toString()),
     message: {
       header: {
         messageId: hexToBuffer(message.header.messageId),
-        sourceChainSelector: new BN(
-          message.header.sourceChainSelector.toString(),
-        ),
+        sourceChainSelector: new BN(message.header.sourceChainSelector.toString()),
         destChainSelector: new BN(message.header.destChainSelector.toString()),
         sequenceNumber: new BN(message.header.sequenceNumber.toString()),
         nonce: new BN(message.header.nonce.toString()),
@@ -105,18 +90,12 @@ function getExecutionReport(
         destGasAmount: new BN(token.destGasAmount?.toString() || '0'),
         extraData: base64ToBuffer(token.extraData || ''),
         amount: {
-          leBytes: new BN(token.amount.toString()).toArrayLike(
-            Buffer,
-            'le',
-            32,
-          ),
+          leBytes: new BN(token.amount.toString()).toArrayLike(Buffer, 'le', 32),
         },
       })),
       extraArgs: {
         computeUnits: new BN(message.computeUnits?.toString() || '0'),
-        isWritableBitmap: new BN(
-          message.accountIsWritableBitmap?.toString() || '0',
-        ),
+        isWritableBitmap: new BN(message.accountIsWritableBitmap?.toString() || '0'),
       },
     },
     offchainTokenData: executionReportRaw.offchainTokenData.map(hexToBuffer),
@@ -167,9 +146,7 @@ async function getAccounts({
 
   const remainingAccounts =
     message.accounts?.reduce((acc, pubkey, index) => {
-      const writableBitmap = new BN(
-        message.accountIsWritableBitmap?.toString() || '0',
-      )
+      const writableBitmap = new BN(message.accountIsWritableBitmap?.toString() || '0')
       return [
         ...acc,
         {
@@ -193,10 +170,7 @@ async function getAccounts({
     remainingAccounts,
   })
 
-  const remainingAccountsWithTokenAccounts = [
-    ...remainingAccounts,
-    ...tokenAccounts,
-  ]
+  const remainingAccountsWithTokenAccounts = [...remainingAccounts, ...tokenAccounts]
 
   const offrampAddressLookupTableAccount = await getAddressLookupTableAccount({
     connection,

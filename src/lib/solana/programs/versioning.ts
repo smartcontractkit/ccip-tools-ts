@@ -11,8 +11,7 @@ export const SolanaCCIPIdl = {
   Router: 'Router',
   Common: 'Common',
 } as const
-export type SolanaCCIPIdl = (typeof SolanaCCIPIdl )[keyof typeof SolanaCCIPIdl]
-
+export type SolanaCCIPIdl = (typeof SolanaCCIPIdl)[keyof typeof SolanaCCIPIdl]
 
 type SolanaVersionMap = Record<SupportedSolanaCCIPVersion, Record<SolanaCCIPIdl, Idl>>
 
@@ -21,5 +20,5 @@ export const CCIP_SOLANA_VERSION_MAP = {
     [SolanaCCIPIdl.OffRamp]: CCIP_OFFRAMP_IDL_V1_6_0,
     [SolanaCCIPIdl.Router]: CCIP_ROUTER_IDL_V1_6_0,
     [SolanaCCIPIdl.Common]: CCIP_COMMON_IDL_V1_6_0,
-    },
+  },
 } as const satisfies SolanaVersionMap

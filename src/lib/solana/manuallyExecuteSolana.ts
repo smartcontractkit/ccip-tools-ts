@@ -12,7 +12,6 @@ import { fetchAllMessagesInBatch } from '../requests.ts'
 import { calculateManualExecProof } from '../execution.ts'
 import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
 
-
 export async function manualExecuteWithSolanaDestination<V extends SupportedSolanaCCIPVersion>(
   source: Provider,
   destination: Connection,
@@ -21,68 +20,61 @@ export async function manualExecuteWithSolanaDestination<V extends SupportedSola
   senderAddress: string,
   root: string,
   computeUnitsOverride: number | undefined,
-  page: number
+  page: number,
 ): Promise<VersionedTransaction> {
-
   const offrampProgram = getCcipOfframp({
     ccipVersion: CCIPVersion.V1_6,
     address: offrampAddress,
     connection: destination,
   })
 
- 
   const offrampPubkey = new PublicKey(offrampAddress)
   const [commitReportAccount] = PublicKey.findProgramAddressSync(
-    [Buffer.from("commit_report"), BN(ccip_request.lane.sourceChainSelector.toString()).toArrayLike(Buffer, 'le', 8), Buffer.from(root, "hex")],
+    [
+      Buffer.from('commit_report'),
+      BN(ccip_request.lane.sourceChainSelector.toString()).toArrayLike(Buffer, 'le', 8),
+      Buffer.from(root, 'hex'),
+    ],
     offrampPubkey,
   )
   const commit_report = await offrampProgram.account.commit_report.fetch(commitReportAccount)
 
-    const requestsInBatch = await fetchAllMessagesInBatch(
-        source,
-        ccip_request.lane.destChainSelector,
-        ccip_request.log,
-        { minSeqNr: commit_report.minMsgNr, maxSeqNr: commit_report.maxMsgNr},
-        { page }
-    )
+  const requestsInBatch = await fetchAllMessagesInBatch(
+    source,
+    ccip_request.lane.destChainSelector,
+    ccip_request.log,
+    { minSeqNr: commit_report.minMsgNr, maxSeqNr: commit_report.maxMsgNr },
+    { page },
+  )
 
-    const manualExecReport = calculateManualExecProof(
-        requestsInBatch.map(({ message }) => message),
-        ccip_request.lane,
-        [ccip_request.message.header.messageId],
-        commit_report.merkleRoot
-    )
+  const manualExecReport = calculateManualExecProof(
+    requestsInBatch.map(({ message }) => message),
+    ccip_request.lane,
+    [ccip_request.message.header.messageId],
+    commit_report.merkleRoot,
+  )
 
-    const executionReportRaw: ExecutionReport = {
-      message: ccip_request.message,
-      // TODO: Figure out where to obtain these from. Args? offchainTokenData
-      // isn't really supported.
-      offchainTokenData: [], 
-      proofs: [],
-      sourceChainSelector: ccip_request.lane.sourceChainSelector
-    }
+  const executionReportRaw: ExecutionReport = {
+    message: ccip_request.message,
+    // TODO: Figure out where to obtain these from. Args? offchainTokenData
+    // isn't really supported.
+    offchainTokenData: [],
+    proofs: [],
+    sourceChainSelector: ccip_request.lane.sourceChainSelector,
+  }
 
-
-  const {
-    executionReport,
-    tokenIndexes,
-    accounts,
-    remainingAccounts,
-    addressLookupTableAccounts,
-  } = await getManuallyExecuteInputs({
-    executionReportRaw,
-    connection: destination,
-    offrampProgram,
-    root,
-    senderAddress,
-  })
+  const { executionReport, tokenIndexes, accounts, remainingAccounts, addressLookupTableAccounts } =
+    await getManuallyExecuteInputs({
+      executionReportRaw,
+      connection: destination,
+      offrampProgram,
+      root,
+      senderAddress,
+    })
 
   const coder = new BorshCoder(offrampProgram.idl)
 
-  const serializedReport = coder.types.encode(
-    'ExecutionReportSingleChain',
-    executionReport,
-  )
+  const serializedReport = coder.types.encode('ExecutionReportSingleChain', executionReport)
 
   const serializedTokenIndexes = Buffer.from(tokenIndexes)
 
@@ -120,11 +112,7 @@ export async function manualExecuteWithSolanaDestination<V extends SupportedSola
   const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
   const tx = new VersionedTransaction(messageV0)
 
-  console.info(
-    'Serialized transaction:',
-    Buffer.from(tx.serialize().buffer).toString('base64'),
-  )
+  console.info('Serialized transaction:', Buffer.from(tx.serialize().buffer).toString('base64'))
 
   return tx
 }
-

@@ -18,8 +18,7 @@ const getTokenPoolAdminRegistryLookupTablePubkey = async ({
     routerPubkey,
   )
 
-  const tokenAdminRegistryInfo =
-    await connection.getAccountInfo(tokenAdminRegistry)
+  const tokenAdminRegistryInfo = await connection.getAccountInfo(tokenAdminRegistry)
 
   if (!tokenAdminRegistryInfo) {
     throw new Error(`Token admin registry not found for ${mint.toBase58()}`)
@@ -48,12 +47,11 @@ export async function getTokenPoolAccountsLookupTable({
   routerPubkey: PublicKey
   mint: PublicKey
 }): Promise<AddressLookupTableAccount> {
-  const lookupTableAccountPubkey =
-    await getTokenPoolAdminRegistryLookupTablePubkey({
-      connection,
-      mint,
-      routerPubkey,
-    })
+  const lookupTableAccountPubkey = await getTokenPoolAdminRegistryLookupTablePubkey({
+    connection,
+    mint,
+    routerPubkey,
+  })
 
   const addressLookupTableAccount = await getAddressLookupTableAccount({
     connection,

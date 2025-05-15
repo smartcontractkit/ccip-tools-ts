@@ -309,9 +309,7 @@ export const CCIP_OFFRAMP_IDL = {
           name: 'sourceChain',
           isMut: true,
           isSigner: false,
-          docs: [
-            'Adding a chain selector implies initializing the state for a new chain',
-          ],
+          docs: ['Adding a chain selector implies initializing the state for a new chain'],
         },
         {
           name: 'config',
@@ -1316,9 +1314,7 @@ export const CCIP_OFFRAMP_IDL = {
     },
     {
       name: 'GasPriceUpdate',
-      docs: [
-        'Gas price for a given chain in USD; its value may contain tightly packed fields.',
-      ],
+      docs: ['Gas price for a given chain in USD; its value may contain tightly packed fields.'],
       type: {
         kind: 'struct',
         fields: [

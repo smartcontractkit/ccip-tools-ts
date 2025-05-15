@@ -17,9 +17,7 @@ export const getReferenceAddresses = async ({
   )
 
   if (!referenceAddressesAccount) {
-    throw new Error(
-      `Reference addresses account not found at ${referenceAddressesId}`,
-    )
+    throw new Error(`Reference addresses account not found at ${referenceAddressesId}`)
   }
 
   const program = getCcipOfframp({
