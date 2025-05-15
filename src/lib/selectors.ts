@@ -116,6 +116,8 @@ const selectors: Selectors = {
     name: 'ethereum-mainnet-worldchain-1',
   },
   '592': { selector: 6422105447186081193n, name: 'polkadot-mainnet-astar' },
+  '678': { selector: 9107126442626377432n, name: 'janction-mainnet' },
+  '679': { selector: 5059197667603797935n, name: 'janction-testnet-sepolia' },
   '919': {
     selector: 829525985033418733n,
     name: 'ethereum-testnet-sepolia-mode-1',
@@ -123,6 +125,7 @@ const selectors: Selectors = {
   '998': { selector: 4286062357653186312n, name: 'hyperliquid-testnet' },
   '999': { selector: 2442541497099098535n, name: 'hyperliquid-mainnet' },
   '1029': { selector: 4459371029167934217n, name: 'bittorrent_chain-testnet' },
+  '1030': { selector: 3358365939762719202n, name: 'conflux-mainnet' },
   '1088': { selector: 8805746078405598895n, name: 'ethereum-mainnet-metis-1' },
   '1101': {
     selector: 4348158687435793198n,
@@ -230,6 +233,7 @@ const selectors: Selectors = {
   '6342': { selector: 2443239559770384419n, name: 'megaeth-testnet' },
   '6900': { selector: 17349189558768828726n, name: 'nibiru-mainnet' },
   '6930': { selector: 305104239123120457n, name: 'nibiru-testnet' },
+  '7000': { selector: 10817664450262215148n, name: 'zetachain-mainnet' },
   '8453': { selector: 15971525489660198786n, name: 'ethereum-mainnet-base-1' },
   '9000': { selector: 344208382356656551n, name: 'ondo-testnet' },
   '9559': { selector: 1113014352258747600n, name: 'neonlink-testnet' },
@@ -276,6 +280,7 @@ const selectors: Selectors = {
   '43114': { selector: 6433500567565415381n, name: 'avalanche-mainnet' },
   '44787': { selector: 3552045678561919002n, name: 'celo-testnet-alfajores' },
   '45439': { selector: 8446413392851542429n, name: 'private-testnet-opala' },
+  '47763': { selector: 7222032299962346917n, name: 'neox-mainnet' },
   '48899': {
     selector: 4562743618362911021n,
     name: 'ethereum-testnet-sepolia-zircuit-1',
@@ -396,6 +401,7 @@ const selectors: Selectors = {
     selector: 5224473277236331295n,
     name: 'ethereum-testnet-sepolia-optimism-1',
   },
+  '12227332': { selector: 2217764097022649312n, name: 'neox-testnet-t4' },
   '21000000': { selector: 9043146809313071210n, name: 'corn-mainnet' },
   '21000001': {
     selector: 1467427327723633929n,
