@@ -2,7 +2,7 @@ import { type Provider, type Result, Interface } from 'ethers'
 
 import {
   type CCIPCommit,
-  type CCIPContract,
+  type CCIPContractEVM,
   type CommitReport,
   type Lane,
   CCIPContractType,
@@ -77,7 +77,7 @@ export async function fetchCommitReport(
       if (lane.version < CCIPVersion.V1_6) {
         try {
           const [staticConfig] = await getContractProperties(
-            [log.address, commitStoreInterface, dest] as unknown as CCIPContract<
+            [log.address, commitStoreInterface, dest] as unknown as CCIPContractEVM<
               typeof CCIPContractType.CommitStore,
               typeof CCIPVersion.V1_2 | typeof CCIPVersion.V1_5
             >,

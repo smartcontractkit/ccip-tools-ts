@@ -22,7 +22,7 @@ import { Providers } from './providers.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.2.6-1630b9e'
+const VERSION = '0.2.6-2f7e602'
 // generate:end
 
 async function main() {
@@ -128,6 +128,11 @@ async function main() {
               type: 'string',
               describe:
                 'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar; also supports `ledger[:<derivationPath>]` hardwallet',
+            },
+            'solana-offramp': {
+              type: 'string',
+              describe:
+                'Solana offramp. Must be provided for when Solana is destination, until automated discovery is implemented.',
             },
             'sender-queue': {
               type: 'boolean',

@@ -1,3 +1,14 @@
+import type { JsonRpcApiProvider, Provider } from 'ethers'
+import { discoverOffRamp } from '../lib/execution.ts'
+import {
+  clusterApiUrl,
+  Connection,
+  Connection as SolanaConnection,
+  VersionedTransaction,
+} from '@solana/web3.js'
+import { Keypair } from '@solana/web3.js'
+import fs from 'fs'
+import path from 'path'
 import {
   type CCIPContract,
   type CCIPContractType,
@@ -8,7 +19,7 @@ import {
   bigIntReplacer,
   calculateManualExecProof,
   chainIdFromSelector,
-  discoverOffRamp,
+  chainNameFromSelector,
   estimateExecGasForRequest,
   fetchAllMessagesInBatch,
   fetchCCIPMessageInLog,
@@ -20,6 +31,10 @@ import {
   getSomeBlockNumberBefore,
   lazyCached,
 } from '../lib/index.ts'
+import {
+  getClusterUrlByChainSelectorName,
+  isSupportedSolanaCluster,
+} from '../lib/solana/getClusterByChainSelectorName.ts'
 import type { Providers } from '../providers.ts'
 import { Format } from './types.ts'
 import {
@@ -29,6 +44,9 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
+import { buildManualExecutionTxWithSolanaDestination } from '../lib/solana/manuallyExecuteSolana.ts'
+import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
+import { AnchorProvider, Wallet } from '@coral-xyz/anchor'
 
 export async function manualExec(
   providers: Providers,
@@ -41,6 +59,7 @@ export async function manualExec(
     format: Format
     page: number
     wallet?: string
+    solanaOfframp: string
   },
 ) {
   const tx = await providers.getTxReceipt(txHash)
@@ -65,8 +84,79 @@ export async function manualExec(
       break
   }
 
-  const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
+  const chainId = chainIdFromSelector(request.lane.destChainSelector)
+  const chainName = chainNameFromSelector(request.lane.destChainSelector)
+  if (typeof chainId === 'string' && isSupportedSolanaCluster(chainName)) {
+    if (argv.solanaOfframp === undefined) {
+      throw new Error(
+        'Automated offramp discovery not supported yet for SVM: You must provide the offramp address with the --solana-offramp argument.',
+      )
+    }
 
+    // TODO replace with cmdline args
+    const homeDir = process.env.HOME || process.env.USERPROFILE
+    const keypairPath = path.join(homeDir as string, '.config', 'solana', 'id.json')
+
+    // Read and parse the secret key
+    const secretKeyString = fs.readFileSync(keypairPath, 'utf8')
+    const secretKey = Uint8Array.from(JSON.parse(secretKeyString))
+
+    const keypair = Keypair.fromSecretKey(secretKey)
+    const wallet = new Wallet(keypair)
+    const connection = new Connection(getClusterUrlByChainSelectorName(chainName))
+    const anchorProvider = new AnchorProvider(connection, wallet, {
+      commitment: 'processed',
+    })
+    const transaction = await buildManualExecutionTxWithSolanaDestination(
+      anchorProvider,
+      request as CCIPRequest<SupportedSolanaCCIPVersion>,
+      argv.solanaOfframp,
+      undefined,
+    )
+    await doManuallyExecuteSolana(keypair, anchorProvider, transaction)
+  } else {
+    const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
+    await manualExecEvmDestination(source, dest, request, argv)
+  }
+}
+
+async function doManuallyExecuteSolana(
+  payer: Keypair,
+  destination: AnchorProvider,
+  transaction: VersionedTransaction,
+) {
+  transaction.sign([payer])
+
+  const signature = await destination.connection.sendTransaction(transaction)
+
+  const latestBlockhash = await destination.connection.getLatestBlockhash()
+  await destination.connection.confirmTransaction(
+    {
+      signature,
+      blockhash: latestBlockhash.blockhash,
+      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+    },
+    'confirmed',
+  )
+
+  console.log('🚀 solana manual execution complete')
+}
+
+async function manualExecEvmDestination(
+  source: Provider,
+  dest: JsonRpcApiProvider,
+  request: CCIPRequest<CCIPVersion>,
+  argv: {
+    gasLimit?: number
+    estimateGasLimit?: number
+    tokensGasLimit?: number
+    logIndex?: number
+    format: Format
+    page: number
+    wallet?: string
+    offramp?: string
+  },
+) {
   const commit = await fetchCommitReport(dest, request, { page: argv.page })
   switch (argv.format) {
     case Format.log:

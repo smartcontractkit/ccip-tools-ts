@@ -1,3 +1,4 @@
+import { Connection as SolanaConnection } from '@solana/web3.js'
 import {
   type ContractRunner,
   type EventFragment,
@@ -9,9 +10,12 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 
 import Router from '../abi/Router.ts'
+import RouterABI from '../abi/Router.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
 import {
   type CCIPContract,
+  type CCIPContractEVM,
+  type CCIPContractSolana,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
@@ -20,6 +24,7 @@ import {
   CCIPContractType,
   CCIPVersion,
   CCIP_ABIs,
+  ChainFamily,
   ExecutionState,
 } from './types.ts'
 import {
@@ -32,6 +37,8 @@ import {
   toObject,
   validateContractType,
 } from './utils.ts'
+import { getOnRampLane } from './requests.ts'
+import { SolanaCCIPIdl, type SupportedSolanaCCIPVersion } from './solana/programs/versioning.ts'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
@@ -50,7 +57,8 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
 ): {
   messages: CCIPMessage<V>[]
   proofs: string[]
-  proofFlagBits: bigint
+  proofFlagBits: bigint,
+  merkleRoot: string
 } {
   const leaves: string[] = []
   const hasher = getLeafHasher(lane)
@@ -91,6 +99,7 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
     messages,
     proofs: proof.hashes,
     proofFlagBits: proofFlagsToBits(proof.sourceFlags),
+    merkleRoot: tree.root()
   }
   return offRampProof
 }
@@ -106,7 +115,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
   runner: ContractRunner,
   address: string,
   lane: Lane<V>,
-): Promise<CCIPContract<typeof CCIPContractType.OffRamp, V> | undefined> {
+): Promise<CCIPContractEVM<typeof CCIPContractType.OffRamp, V> | undefined> {
   const [version] = await validateContractType(runner.provider!, address, CCIPContractType.OffRamp)
   if (version !== lane.version) return
 
@@ -114,7 +123,7 @@ export async function validateOffRamp<V extends CCIPVersion>(
     address,
     getOffRampInterface(version),
     runner,
-  ) as unknown as CCIPContract<typeof CCIPContractType.OffRamp, typeof version>
+  ) as unknown as CCIPContractEVM<typeof CCIPContractType.OffRamp, typeof version>
 
   let sourceChainSelector, onRamp
   if (lane.version < CCIPVersion.V1_6) {
@@ -134,9 +143,10 @@ export async function validateOffRamp<V extends CCIPVersion>(
   }
 
   if (lane.sourceChainSelector === sourceChainSelector && lane.onRamp === onRamp) {
-    return offRampContract as unknown as CCIPContract<typeof CCIPContractType.OffRamp, V>
+    return offRampContract as unknown as CCIPContractEVM<typeof CCIPContractType.OffRamp, V>
   }
 }
+
 
 /**
  * Discover an OffRamp for a given lane (source, dest, onRamp)
@@ -154,7 +164,7 @@ export async function discoverOffRamp<V extends CCIPVersion>(
   runner: ContractRunner,
   lane: Lane<V>,
   hints?: { fromBlock?: number; page?: number },
-): Promise<CCIPContract<typeof CCIPContractType.OffRamp, V>> {
+): Promise<CCIPContractEVM<typeof CCIPContractType.OffRamp, V>> {
   const dest = runner.provider!
   // we use Router interface to find a router, and from there find the OffRamp,
   // because these events are more frequent than some low-activity OffRamp's
@@ -260,7 +270,7 @@ async function getOffRampStaticConfig(dest: ContractRunner, address: string) {
     address,
     getOffRampInterface(version),
     dest,
-  ) as unknown as CCIPContract<typeof CCIPContractType.OffRamp, typeof version>
+  ) as unknown as CCIPContractEVM<typeof CCIPContractType.OffRamp, typeof version>
   const [staticConfig] = await getContractProperties(offRampContract, 'getStaticConfig')
   return [toObject(staticConfig), offRampContract] as const
 }

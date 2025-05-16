@@ -420,7 +420,9 @@ describe('discoverOffRamp', () => {
       onRamp: hexlify(randomBytes(20)),
     })
 
-    await expect(discoverOffRamp(provider as unknown as ContractRunner, lane)).rejects.toThrow(
+    await expect(
+      discoverOffRamp(provider as unknown as ContractRunner, lane),
+    ).rejects.toThrow(
       /Could not find OffRamp on "ethereum-testnet-sepolia-arbitrum-1" for OnRamp=0x[a-zA-Z0-9]{40} on "ethereum-testnet-sepolia"/,
     )
   })
