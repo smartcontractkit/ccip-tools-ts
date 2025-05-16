@@ -28,6 +28,7 @@ import { calculateManualExecProof } from '../execution.ts'
 import path from 'path'
 import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
 import { EXECUTION_BUFFER_IDL } from './programs/1.6.0/EXECUTION_BUFFER.ts'
+import { randomBytes } from 'crypto'
 
 export async function buildManualExecutionTxWithSolanaDestination<
   V extends SupportedSolanaCCIPVersion,
@@ -113,7 +114,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
 
   if (transaction.serialize().length > 1232 || forceBuffer) {
     console.log(
-      `Execute report will be pre-buffered through the buffering contract ${bufferProgramAddress}`,
+      `Execute report will be pre-buffered through the buffering contract ${bufferProgramAddress}. This may take some time`,
     )
     return bufferedTransactions(
       destinationProvider,
@@ -172,14 +173,16 @@ async function bufferedTransactions(
   blockhash: string,
   addressLookupTableAccounts: AddressLookupTableAccount[],
 ): Promise<VersionedTransaction[]> {
-  // Arbitrary value as long as it's consistent for this attempt.
-  const randomBytes = new Uint8Array(32)
-  crypto.getRandomValues(randomBytes)
+  // Arbitrary as long as there's consistency for all translations.
   const bufferId = {
-    bytes: Array.from(randomBytes),
+    bytes: Array.from(randomBytes(32)),
   }
   const [bufferAddress] = PublicKey.findProgramAddressSync(
-    [Buffer.from('execution_buffer'), destinationProvider.wallet.publicKey.toBuffer(), randomBytes],
+    [
+      Buffer.from('execution_buffer'),
+      destinationProvider.wallet.publicKey.toBuffer(),
+      Buffer.from(bufferId.bytes),
+    ],
     new PublicKey(bufferProgramAddress),
   )
 
