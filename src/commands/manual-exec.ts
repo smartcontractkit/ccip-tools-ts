@@ -59,7 +59,7 @@ export async function manualExec(
     format: Format
     page: number
     wallet?: string
-    solanaTxSig: string
+    solanaOfframp: string
   },
 ) {
   const tx = await providers.getTxReceipt(txHash)
@@ -87,9 +87,9 @@ export async function manualExec(
   const chainId = chainIdFromSelector(request.lane.destChainSelector)
   const chainName = chainNameFromSelector(request.lane.destChainSelector)
   if (typeof chainId === 'string' && isSupportedSolanaCluster(chainName)) {
-    if (argv.solanaTxSig === undefined) {
+    if (argv.solanaOfframp === undefined) {
       throw new Error(
-        'Automated discovery not supported yet for SVM: You must provide the solana TX signature.',
+        'Automated offramp discovery not supported yet for SVM: You must provide the offramp address with the --solana-offramp argument.',
       )
     }
 
@@ -110,7 +110,7 @@ export async function manualExec(
     const transaction = await buildManualExecutionTxWithSolanaDestination(
       anchorProvider,
       request as CCIPRequest<SupportedSolanaCCIPVersion>,
-      argv.solanaTxSig,
+      argv.solanaOfframp,
       undefined,
     )
     await doManuallyExecuteSolana(keypair, anchorProvider, transaction)

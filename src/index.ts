@@ -129,10 +129,10 @@ async function main() {
               describe:
                 'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar; also supports `ledger[:<derivationPath>]` hardwallet',
             },
-            'solana-tx-sig': {
+            'solana-offramp': {
               type: 'string',
               describe:
-                'Failing Solana transaction hash. Will be discovered automatically eventually, but must be provided for now when Solana is destination.',
+                'Solana offramp. Must be provided for now when Solana is destination.',
             },
             'sender-queue': {
               type: 'boolean',

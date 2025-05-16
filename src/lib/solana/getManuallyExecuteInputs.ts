@@ -14,7 +14,6 @@ function base64ToBuffer(base64: string): Buffer {
 }
 
 function hexToBuffer(hex: string): Buffer {
-  console.debug(hex)
   const cleanHex = hex.replace('0x', '')
   // trim hex incorrectly formatted with leading zeros - should be fixed in ccip-tools-ts
   const trimmedHex = cleanHex.replace(/^0+/, '')

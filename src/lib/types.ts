@@ -208,6 +208,9 @@ export type ExecutionReport = {
   sourceChainSelector: bigint
 }
 
+// Execution reports can be generated in different couple ways, depending on whether the message
+// was parsed from EVM or from solana logs. This function ensures that they both result
+// in the same encoding (some values are b64 when parsed from a SVM context and hex from EVM.)
 export function normalizeExecutionReport(report: ExecutionReport): ExecutionReport {
   const isHex = (str: string): boolean => {
     return /^0x[0-9a-fA-F]*$/.test(str)
