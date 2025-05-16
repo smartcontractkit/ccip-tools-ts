@@ -1,0 +1,24 @@
+import type { Idl } from '@coral-xyz/anchor'
+import { CCIPVersion } from '../../types.ts'
+import { CCIP_COMMON_IDL as CCIP_COMMON_IDL_V1_6_0 } from './1.6.0/CCIP_COMMON'
+import { CCIP_OFFRAMP_IDL as CCIP_OFFRAMP_IDL_V1_6_0 } from './1.6.0/CCIP_OFFRAMP'
+import { CCIP_ROUTER_IDL as CCIP_ROUTER_IDL_V1_6_0 } from './1.6.0/CCIP_ROUTER'
+
+export type SupportedSolanaCCIPVersion = typeof CCIPVersion.V1_6
+
+export const SolanaCCIPIdl = {
+  OffRamp: 'OffRamp',
+  Router: 'Router',
+  Common: 'Common',
+} as const
+export type SolanaCCIPIdl = (typeof SolanaCCIPIdl)[keyof typeof SolanaCCIPIdl]
+
+type SolanaVersionMap = Record<SupportedSolanaCCIPVersion, Record<SolanaCCIPIdl, Idl>>
+
+export const CCIP_SOLANA_VERSION_MAP = {
+  [CCIPVersion.V1_6]: {
+    [SolanaCCIPIdl.OffRamp]: CCIP_OFFRAMP_IDL_V1_6_0,
+    [SolanaCCIPIdl.Router]: CCIP_ROUTER_IDL_V1_6_0,
+    [SolanaCCIPIdl.Common]: CCIP_COMMON_IDL_V1_6_0,
+  },
+} as const satisfies SolanaVersionMap
