@@ -1,3 +1,11 @@
+import type { JsonRpcApiProvider, Provider } from 'ethers'
+import { discoverOffRamp } from '../lib/execution.ts'
+import {
+  VersionedTransaction,
+  type GetVersionedTransactionConfig,
+  type ParsedTransactionWithMeta,
+} from '@solana/web3.js'
+import { Keypair } from '@solana/web3.js'
 import {
   type CCIPContract,
   type CCIPContractType,
@@ -8,7 +16,7 @@ import {
   bigIntReplacer,
   calculateManualExecProof,
   chainIdFromSelector,
-  discoverOffRamp,
+  chainNameFromSelector,
   estimateExecGasForRequest,
   fetchAllMessagesInBatch,
   fetchCCIPMessageInLog,
@@ -20,6 +28,7 @@ import {
   getSomeBlockNumberBefore,
   lazyCached,
 } from '../lib/index.ts'
+import { isSupportedSolanaCluster } from '../lib/solana/getClusterByChainSelectorName.ts'
 import type { Providers } from '../providers.ts'
 import { Format } from './types.ts'
 import {
@@ -29,6 +38,12 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
+import {
+  buildManualExecutionTxWithSolanaDestination,
+  newAnchorProvider,
+} from '../lib/solana/manuallyExecuteSolana.ts'
+import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
+import { AnchorProvider } from '@coral-xyz/anchor'
 
 export async function manualExec(
   providers: Providers,
@@ -41,6 +56,7 @@ export async function manualExec(
     format: Format
     page: number
     wallet?: string
+    solanaOfframp?: string
   },
 ) {
   const tx = await providers.getTxReceipt(txHash)
@@ -65,8 +81,74 @@ export async function manualExec(
       break
   }
 
-  const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
+  const chainId = chainIdFromSelector(request.lane.destChainSelector)
+  const chainName = chainNameFromSelector(request.lane.destChainSelector)
+  if (typeof chainId === 'string' && isSupportedSolanaCluster(chainName)) {
+    if (argv.solanaOfframp === undefined) {
+      throw new Error(
+        'Automated offramp discovery not supported yet for SVM: You must provide the offramp address with the --solana-offramp argument.',
+      )
+    }
 
+    const { anchorProvider, keypair } = newAnchorProvider(chainName)
+    const transaction = await buildManualExecutionTxWithSolanaDestination(
+      anchorProvider,
+      request as CCIPRequest<SupportedSolanaCCIPVersion>,
+      argv.solanaOfframp,
+      undefined,
+    )
+    await doManuallyExecuteSolana(keypair, anchorProvider, transaction, chainName)
+  } else {
+    const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
+    await manualExecEvmDestination(source, dest, request, argv)
+  }
+}
+
+async function doManuallyExecuteSolana(
+  payer: Keypair,
+  destination: AnchorProvider,
+  transaction: VersionedTransaction,
+  cluster: string,
+) {
+  transaction.sign([payer])
+
+  const signature = await destination.connection.sendTransaction(transaction)
+  const latestBlockhash = await destination.connection.getLatestBlockhash()
+  await destination.connection.confirmTransaction(
+    {
+      signature,
+      blockhash: latestBlockhash.blockhash,
+      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+    },
+    'confirmed',
+  )
+
+  const url_terminator_map: Record<string, string> = {
+    'solana-devnet': 'devnet',
+    'solana-mainnet': '',
+    'solana-testnet': 'testnet',
+  }
+  const url_terminator = url_terminator_map[cluster] ?? cluster
+  console.log(
+    `🚀 Solana manualExec transaction confirmed: https://explorer.solana.com/tx/${signature}?cluster=${url_terminator}`,
+  )
+}
+
+async function manualExecEvmDestination(
+  source: Provider,
+  dest: JsonRpcApiProvider,
+  request: CCIPRequest<CCIPVersion>,
+  argv: {
+    gasLimit?: number
+    estimateGasLimit?: number
+    tokensGasLimit?: number
+    logIndex?: number
+    format: Format
+    page: number
+    wallet?: string
+    offramp?: string
+  },
+) {
   const commit = await fetchCommitReport(dest, request, { page: argv.page })
   switch (argv.format) {
     case Format.log:

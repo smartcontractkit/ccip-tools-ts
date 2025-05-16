@@ -18,6 +18,12 @@ import EVM2EVMOnRamp_1_2_ABI from '../abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from '../abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from '../abi/OnRamp_1_6.ts'
 import type { SourceTokenData, parseExtraArgs } from './extra-args.ts'
+import type { Program } from '@coral-xyz/anchor'
+import type {
+  CCIP_SOLANA_VERSION_MAP,
+  SolanaCCIPIdl,
+  SupportedSolanaCCIPVersion,
+} from './solana/programs/versioning.ts'
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
@@ -54,9 +60,26 @@ export const CCIP_ABIs = {
   },
 } as const satisfies Record<CCIPContractType, Record<CCIPVersion, Abi>>
 
-export type CCIPContract<T extends CCIPContractType, V extends CCIPVersion> = TypedContract<
+export type CCIPContractEVM<T extends CCIPContractType, V extends CCIPVersion> = TypedContract<
   (typeof CCIP_ABIs)[T][V]
 >
+
+export type CCIPContractSolana<
+  T extends SolanaCCIPIdl,
+  V extends SupportedSolanaCCIPVersion,
+> = Program<(typeof CCIP_SOLANA_VERSION_MAP)[V][T]>
+
+export type CCIPContract =
+  | {
+      family: typeof ChainFamily.EVM
+      type: CCIPContractType
+      contract: CCIPContractEVM<CCIPContractType, CCIPVersion>
+    }
+  | {
+      family: typeof ChainFamily.Solana
+      type: SolanaCCIPIdl
+      program: CCIPContractSolana<SolanaCCIPIdl, SupportedSolanaCCIPVersion>
+    }
 
 export const ChainFamily = {
   EVM: 'evm',
@@ -176,4 +199,53 @@ export interface CCIPExecution {
   receipt: ExecutionReceipt
   log: Log_
   timestamp: number
+}
+
+export type ExecutionReport = {
+  message: CCIPMessage<typeof CCIPVersion.V1_6>
+  offchainTokenData: string[]
+  proofs: string[]
+  sourceChainSelector: bigint
+}
+
+// Execution reports can be generated in different ways, depending on whether the message
+// was parsed from EVM or from solana logs. This function ensures that they both result
+// in the same encoding (some values are b64 when parsed from a SVM context and hex from EVM.)
+export function normalizeExecutionReport(report: ExecutionReport): ExecutionReport {
+  const isHex = (str: string): boolean => {
+    return /^0x[0-9a-fA-F]*$/.test(str)
+  }
+
+  const hexToBase64 = (hex: string): string => {
+    const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex
+    const buffer = Buffer.from(cleanHex, 'hex')
+    return buffer.toString('base64')
+  }
+
+  return {
+    ...report,
+    message: {
+      ...report.message,
+      data: isHex(report.message.data) ? hexToBase64(report.message.data) : report.message.data,
+      tokenAmounts: report.message.tokenAmounts.map((amount) => normalizeTokenAmount(amount)),
+    },
+  }
+}
+
+type TokenAmount = EVM2AnyMessageSent['tokenAmounts'][number] & SourceTokenData
+
+export function normalizeTokenAmount(data: TokenAmount): TokenAmount {
+  const isHex = (str: string): boolean => /^0x[0-9a-fA-F]*$/.test(str)
+
+  const hexToBase64 = (hex: string): string => {
+    const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex
+    const buffer = Buffer.from(cleanHex, 'hex')
+    return buffer.toString('base64')
+  }
+
+  return {
+    ...data,
+    extraData: isHex(data.extraData) ? hexToBase64(data.extraData) : data.extraData,
+    destExecData: isHex(data.destExecData) ? hexToBase64(data.destExecData) : data.destExecData,
+  }
 }

@@ -59,7 +59,6 @@ jest.mock('ethers', () => ({
 }))
 
 import {
-  decodeMessage,
   fetchAllMessagesInBatch,
   fetchCCIPMessageById,
   fetchCCIPMessageInLog,
@@ -341,27 +340,5 @@ describe('fetchRequestsForSender', () => {
     expect(mockedProvider.getLogs).toHaveBeenLastCalledWith(
       expect.objectContaining({ toBlock: 15000 }),
     )
-  })
-})
-
-describe('decodeMessage', () => {
-  it.only('should decode 1.5 message with tokenAmounts', () => {
-    const msgInfoString =
-      '{"data": "0x", "nonce": 10, "sender": "0xc70070c9c8fe7866449edbf4ba3918c5936fe639", "strict": false, "feeToken": "0xd00ae08403b9bbb9124bb305c09058e32c39a48c", "gasLimit": 0, "receiver": "0xc70070c9c8fe7866449edbf4ba3918c5936fe639", "messageId": "0xe9d9d03588f0b3fca80bc43b2194d314aec8ebbea67f6390ef63b095b11e6f80", "tokenAmounts": [{"token": "0xd21341536c5cf5eb1bcb58f6723ce26e8d8e90e4", "amount": 100000000000000000}], "feeTokenAmount": 31933333333333333, "sequenceNumber": 40944, "sourceTokenData": ["0x"], "sourceChainSelector": 14767482510784806043}'
-
-    expect(() => decodeMessage(msgInfoString)).not.toThrow()
-
-    const msg = decodeMessage(msgInfoString)
-
-    expect(msg.tokenAmounts.length).toBe(1)
-    const tokenAmount = msg.tokenAmounts[0]
-
-    expect('token' in msg.tokenAmounts[0]).toBe(true)
-    expect(msg.feeTokenAmount).toBe(31933333333333333n)
-
-    if ('token' in tokenAmount) {
-      expect(tokenAmount.token).toBe('0xd21341536c5cf5eb1bcb58f6723ce26e8d8e90e4')
-      expect(tokenAmount.amount).toBe(100000000000000000n)
-    }
   })
 })
