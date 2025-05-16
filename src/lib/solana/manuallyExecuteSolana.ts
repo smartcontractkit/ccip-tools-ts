@@ -1,6 +1,14 @@
+import {
+  AddressLookupTableAccount,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  TransactionInstruction,
+  type AccountMeta,
+} from '@solana/web3.js'
 import fs from 'fs'
 import path from 'path'
-import { AnchorProvider, BorshCoder, Wallet } from '@coral-xyz/anchor'
+import { AnchorProvider, BorshCoder, Program, Wallet } from '@coral-xyz/anchor'
 import {
   ComputeBudgetProgram,
   Connection,
@@ -17,6 +25,8 @@ import { getCcipOfframp } from './programs/getCcipOfframp'
 import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
 import { simulateManuallyExecute } from './simulateManuallyExecute'
 import { normalizeExecutionReportForSolana } from './utils.ts'
+import { EXECUTION_BUFFER_IDL } from './programs/1.6.0/EXECUTION_BUFFER.ts'
+import { randomBytes } from 'crypto'
 
 export async function buildManualExecutionTxWithSolanaDestination<
   V extends SupportedSolanaCCIPVersion,
@@ -24,8 +34,10 @@ export async function buildManualExecutionTxWithSolanaDestination<
   destinationProvider: AnchorProvider,
   ccipRequest: CCIPRequest<V>,
   offrampAddress: string,
+  bufferProgramAddress: string,
+  forceBuffer: boolean,
   computeUnitsOverride: number | undefined,
-): Promise<VersionedTransaction> {
+): Promise<VersionedTransaction[]> {
   const offrampProgram = getCcipOfframp({
     ccipVersion: CCIPVersion.V1_6,
     address: offrampAddress,
@@ -96,7 +108,26 @@ export async function buildManualExecutionTxWithSolanaDestination<
     instructions: finalInstructions,
   })
   const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
-  return new VersionedTransaction(messageV0)
+  const transaction = new VersionedTransaction(messageV0)
+
+  if (transaction.serialize().length > 1232 || forceBuffer) {
+    console.log(
+      `Execute report will be pre-buffered through the buffering contract ${bufferProgramAddress}. This may take some time.`,
+    )
+    return bufferedTransactions(
+      destinationProvider,
+      bufferProgramAddress,
+      serializedReport,
+      serializedTokenIndexes,
+      accounts,
+      remainingAccounts,
+      computeBudgetIx,
+      blockhash,
+      addressLookupTableAccounts,
+    )
+  }
+
+  return [transaction]
 }
 
 export function newAnchorProvider(chainName: string, keypairFile: string | undefined) {
@@ -121,4 +152,122 @@ export function newAnchorProvider(chainName: string, keypairFile: string | undef
     commitment: 'processed',
   })
   return { anchorProvider, keypair }
+}
+
+type ManualExecAccounts = {
+  config: PublicKey
+  referenceAddresses: PublicKey
+  sourceChain: PublicKey
+  commitReport: PublicKey
+  offramp: PublicKey
+  allowedOfframp: PublicKey
+  rmnRemote: PublicKey
+  rmnRemoteCurses: PublicKey
+  rmnRemoteConfig: PublicKey
+  authority: PublicKey
+  systemProgram: PublicKey
+  sysvarInstructions: PublicKey
+}
+
+async function bufferedTransactions(
+  destinationProvider: AnchorProvider,
+  bufferProgramAddress: string,
+  serializedReport: Buffer,
+  serializedTokenIndexes: Buffer<ArrayBuffer>,
+  originalManualExecAccounts: ManualExecAccounts,
+  originalManualExecRemainingAccounts: AccountMeta[],
+  computeBudgetIx: TransactionInstruction,
+  blockhash: string,
+  addressLookupTableAccounts: AddressLookupTableAccount[],
+): Promise<VersionedTransaction[]> {
+  // Arbitrary as long as there's consistency for all translations.
+  const bufferId = {
+    bytes: Array.from(randomBytes(32)),
+  }
+  const [bufferAddress] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from('execution_buffer'),
+      destinationProvider.wallet.publicKey.toBuffer(),
+      Buffer.from(bufferId.bytes),
+    ],
+    new PublicKey(bufferProgramAddress),
+  )
+
+  const hexBytes = '0x' + bufferId.bytes.map((b) => b.toString(16).padStart(2, '0')).join('')
+  console.log(
+    `The bufferID is ${hexBytes}, and the PDA address for the buffer is ${bufferAddress.toString()}. If this buffering process is aborted, remember to manually close the account to recover any spent funds.`,
+  )
+
+  const chunkSize = 800
+
+  const bufferingProgram = new Program(
+    EXECUTION_BUFFER_IDL,
+    new PublicKey(bufferProgramAddress),
+    destinationProvider,
+  )
+
+  let transactions: VersionedTransaction[] = []
+
+  const bufferingAccounts = {
+    bufferedReport: bufferAddress,
+    authority: destinationProvider.wallet.publicKey,
+    systemProgram: SystemProgram.programId,
+  }
+  const initTx = await bufferingProgram.methods
+    .initializeExecutionReportBuffer(bufferId)
+    .accounts(bufferingAccounts)
+    .transaction()
+  transactions.push(toVersionedTransaction(initTx, destinationProvider.wallet.publicKey, blockhash))
+
+  for (let i = 0; i < serializedReport.length; i += chunkSize) {
+    const end = Math.min(i + chunkSize, serializedReport.length)
+    const chunk: Buffer = serializedReport.subarray(i, end)
+
+    const appendTx = await bufferingProgram.methods
+      .appendExecutionReportData(bufferId, chunk)
+      .accounts(bufferingAccounts)
+      .transaction()
+    transactions.push(
+      toVersionedTransaction(appendTx, destinationProvider.wallet.publicKey, blockhash),
+    )
+  }
+
+  const executeTx = await bufferingProgram.methods
+    .manuallyExecuteBuffered(bufferId, serializedTokenIndexes)
+    .accounts({
+      ...originalManualExecAccounts,
+      bufferedReport: bufferAddress,
+    })
+    .remainingAccounts(originalManualExecRemainingAccounts)
+    .transaction()
+
+  const executeTxInstructions = executeTx.instructions
+
+  // Add compute budget instruction at the beginning of instructions
+  const finalInstructions = [computeBudgetIx, ...executeTxInstructions]
+
+  const message = new TransactionMessage({
+    payerKey: destinationProvider.wallet.publicKey,
+    recentBlockhash: blockhash,
+    instructions: finalInstructions,
+  })
+  const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
+  transactions.push(new VersionedTransaction(messageV0))
+
+  return transactions
+}
+
+function toVersionedTransaction(
+  tx: Transaction,
+  payerKey: PublicKey,
+  blockhash: string,
+): VersionedTransaction {
+  const instructions = tx.instructions
+
+  const message = new TransactionMessage({
+    payerKey,
+    recentBlockhash: blockhash,
+    instructions,
+  })
+  return new VersionedTransaction(message.compileToV0Message())
 }

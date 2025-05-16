@@ -1,7 +1,11 @@
 import type { AnchorProvider } from '@coral-xyz/anchor'
-import type { Keypair, VersionedTransaction } from '@solana/web3.js'
 import type { JsonRpcApiProvider, Provider } from 'ethers'
 import { discoverOffRamp } from '../lib/execution.ts'
+import {
+  type Keypair,
+  type TransactionSignature,
+  type VersionedTransaction,
+} from '@solana/web3.js'
 import {
   type CCIPContract,
   type CCIPContractType,
@@ -39,6 +43,7 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
+import { waitForFinalization } from '../lib/solana/utils.ts'
 
 export async function manualExec(
   providers: Providers,
@@ -53,6 +58,8 @@ export async function manualExec(
     wallet?: string
     solanaOfframp?: string
     solanaKeypair?: string
+    solanaBufferAddress: string
+    solanaForceBuffer: boolean
   },
 ) {
   const tx = await providers.getTxReceipt(txHash)
@@ -87,13 +94,15 @@ export async function manualExec(
     }
 
     const { anchorProvider, keypair } = newAnchorProvider(chainName, argv.solanaKeypair)
-    const transaction = await buildManualExecutionTxWithSolanaDestination(
+    const transactions = await buildManualExecutionTxWithSolanaDestination(
       anchorProvider,
       request as CCIPRequest<SupportedSolanaCCIPVersion>,
       argv.solanaOfframp,
+      argv.solanaBufferAddress,
+      argv.solanaForceBuffer,
       undefined,
     )
-    await doManuallyExecuteSolana(keypair, anchorProvider, transaction, chainName)
+    await doManuallyExecuteSolana(keypair, anchorProvider, transactions, chainName)
   } else {
     const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
     await manualExecEvmDestination(source, dest, request, argv)
@@ -103,21 +112,27 @@ export async function manualExec(
 async function doManuallyExecuteSolana(
   payer: Keypair,
   destination: AnchorProvider,
-  transaction: VersionedTransaction,
+  transactions: VersionedTransaction[],
   cluster: string,
 ) {
-  transaction.sign([payer])
+  let signature!: TransactionSignature
 
-  const signature = await destination.connection.sendTransaction(transaction)
-  const latestBlockhash = await destination.connection.getLatestBlockhash()
-  await destination.connection.confirmTransaction(
-    {
-      signature,
-      blockhash: latestBlockhash.blockhash,
-      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-    },
-    'confirmed',
-  )
+  for (const transaction of transactions) {
+    transaction.sign([payer])
+
+    signature = await destination.connection.sendTransaction(transaction)
+    const latestBlockhash = await destination.connection.getLatestBlockhash()
+
+    await destination.connection.confirmTransaction(
+      {
+        signature,
+        blockhash: latestBlockhash.blockhash,
+        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+      },
+      'confirmed',
+    )
+    await waitForFinalization(destination.connection, signature)
+  }
 
   const url_terminator_map: Record<string, string> = {
     'solana-devnet': 'devnet',
