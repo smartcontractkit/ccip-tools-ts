@@ -28,9 +28,7 @@ import {
   getSomeBlockNumberBefore,
   lazyCached,
 } from '../lib/index.ts'
-import {
-  isSupportedSolanaCluster,
-} from '../lib/solana/getClusterByChainSelectorName.ts'
+import { isSupportedSolanaCluster } from '../lib/solana/getClusterByChainSelectorName.ts'
 import type { Providers } from '../providers.ts'
 import { Format } from './types.ts'
 import {
@@ -40,9 +38,12 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-import { buildManualExecutionTxWithSolanaDestination, newAnchorProvider } from '../lib/solana/manuallyExecuteSolana.ts'
+import {
+  buildManualExecutionTxWithSolanaDestination,
+  newAnchorProvider,
+} from '../lib/solana/manuallyExecuteSolana.ts'
 import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
-import { AnchorProvider, } from '@coral-xyz/anchor'
+import { AnchorProvider } from '@coral-xyz/anchor'
 
 export async function manualExec(
   providers: Providers,
@@ -122,9 +123,15 @@ async function doManuallyExecuteSolana(
     'confirmed',
   )
 
-  const url_terminator_map: Record<string, string> = { "solana-devnet": "devnet", "solana-mainnet": "", "solana-testnet": "testnet"};
-  const url_terminator = url_terminator_map[cluster] ?? cluster;
-  console.log(`🚀 Solana manualExec transaction confirmed: https://explorer.solana.com/tx/${signature}?cluster=${url_terminator}`);
+  const url_terminator_map: Record<string, string> = {
+    'solana-devnet': 'devnet',
+    'solana-mainnet': '',
+    'solana-testnet': 'testnet',
+  }
+  const url_terminator = url_terminator_map[cluster] ?? cluster
+  console.log(
+    `🚀 Solana manualExec transaction confirmed: https://explorer.solana.com/tx/${signature}?cluster=${url_terminator}`,
+  )
 }
 
 async function manualExecEvmDestination(

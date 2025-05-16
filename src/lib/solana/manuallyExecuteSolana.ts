@@ -1,11 +1,13 @@
 import { AnchorProvider, BorshCoder, Wallet } from '@coral-xyz/anchor'
-import {
-    Connection,
-    Keypair,
-} from '@solana/web3.js'
+import { Connection, Keypair } from '@solana/web3.js'
 import { TransactionMessage, VersionedTransaction } from '@solana/web3.js'
 import { ComputeBudgetProgram } from '@solana/web3.js'
-import { CCIPVersion, normalizeExecutionReport, type CCIPMessage, type ExecutionReport } from '../types.ts'
+import {
+  CCIPVersion,
+  normalizeExecutionReport,
+  type CCIPMessage,
+  type ExecutionReport,
+} from '../types.ts'
 import { getCcipOfframp } from './programs/getCcipOfframp'
 import { getManuallyExecuteInputs } from './getManuallyExecuteInputs'
 import { simulateManuallyExecute } from './simulateManuallyExecute'
@@ -37,19 +39,19 @@ export async function buildManualExecutionTxWithSolanaDestination<
     throw new Error('Unsupported offramp version: ', TnV)
   }
 
-  const {proofs, merkleRoot} = calculateManualExecProof([ccipRequest.message], ccipRequest.lane, [ccipRequest.message.header.messageId])
+  const { proofs, merkleRoot } = calculateManualExecProof([ccipRequest.message], ccipRequest.lane, [
+    ccipRequest.message.header.messageId,
+  ])
   const executionReportRaw: ExecutionReport = normalizeExecutionReport({
     sourceChainSelector: BigInt(ccipRequest.lane.sourceChainSelector),
-    message: ccipRequest.message as CCIPMessage<
-      typeof CCIPVersion.V1_6
-    >,
+    message: ccipRequest.message as CCIPMessage<typeof CCIPVersion.V1_6>,
     proofs,
     // Offchain token data is unsupported for manual exec
-    offchainTokenData: [ '0x' ],
+    offchainTokenData: ['0x'],
   })
 
   const payerAddress = destinationProvider.wallet.publicKey.toBase58()
-  
+
   const { executionReport, tokenIndexes, accounts, remainingAccounts, addressLookupTableAccounts } =
     await getManuallyExecuteInputs({
       executionReportRaw,
@@ -99,17 +101,16 @@ export async function buildManualExecutionTxWithSolanaDestination<
 }
 
 export function newAnchorProvider(chainName: string) {
-    const homeDir = process.env.HOME || process.env.USERPROFILE
-    const keypairPath = path.join(homeDir as string, '.config', 'solana', 'id.json')
-    const secretKeyString = fs.readFileSync(keypairPath, 'utf8')
-    const secretKey = Uint8Array.from(JSON.parse(secretKeyString))
+  const homeDir = process.env.HOME || process.env.USERPROFILE
+  const keypairPath = path.join(homeDir as string, '.config', 'solana', 'id.json')
+  const secretKeyString = fs.readFileSync(keypairPath, 'utf8')
+  const secretKey = Uint8Array.from(JSON.parse(secretKeyString))
 
-    const keypair = Keypair.fromSecretKey(secretKey)
-    const wallet = new Wallet(keypair)
-    const connection = new Connection(getClusterUrlByChainSelectorName(chainName))
-    const anchorProvider = new AnchorProvider(connection, wallet, {
-        commitment: 'processed',
-    })
-    return { anchorProvider, keypair }
+  const keypair = Keypair.fromSecretKey(secretKey)
+  const wallet = new Wallet(keypair)
+  const connection = new Connection(getClusterUrlByChainSelectorName(chainName))
+  const anchorProvider = new AnchorProvider(connection, wallet, {
+    commitment: 'processed',
+  })
+  return { anchorProvider, keypair }
 }
-

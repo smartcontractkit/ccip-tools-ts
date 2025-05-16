@@ -50,7 +50,7 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
 ): {
   messages: CCIPMessage<V>[]
   proofs: string[]
-  proofFlagBits: bigint,
+  proofFlagBits: bigint
   merkleRoot: string
 } {
   const leaves: string[] = []
@@ -92,7 +92,7 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
     messages,
     proofs: proof.hashes,
     proofFlagBits: proofFlagsToBits(proof.sourceFlags),
-    merkleRoot: tree.root()
+    merkleRoot: tree.root(),
   }
   return offRampProof
 }
@@ -139,7 +139,6 @@ export async function validateOffRamp<V extends CCIPVersion>(
     return offRampContract as unknown as CCIPContractEVM<typeof CCIPContractType.OffRamp, V>
   }
 }
-
 
 /**
  * Discover an OffRamp for a given lane (source, dest, onRamp)
