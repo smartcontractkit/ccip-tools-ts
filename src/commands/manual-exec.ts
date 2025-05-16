@@ -1,6 +1,8 @@
 import type { JsonRpcApiProvider, Provider } from 'ethers'
 import { discoverOffRamp } from '../lib/execution.ts'
 import {
+  Connection,
+  sendAndConfirmTransaction,
   VersionedTransaction,
   type GetVersionedTransactionConfig,
   type ParsedTransactionWithMeta,
@@ -57,6 +59,8 @@ export async function manualExec(
     page: number
     wallet?: string
     solanaOfframp?: string
+    solanaBufferAddress: string
+    solanaForceBuffer: boolean
   },
 ) {
   const tx = await providers.getTxReceipt(txHash)
@@ -91,13 +95,15 @@ export async function manualExec(
     }
 
     const { anchorProvider, keypair } = newAnchorProvider(chainName)
-    const transaction = await buildManualExecutionTxWithSolanaDestination(
+    const transactions = await buildManualExecutionTxWithSolanaDestination(
       anchorProvider,
       request as CCIPRequest<SupportedSolanaCCIPVersion>,
       argv.solanaOfframp,
+      argv.solanaBufferAddress,
+      argv.solanaForceBuffer,
       undefined,
     )
-    await doManuallyExecuteSolana(keypair, anchorProvider, transaction, chainName)
+    await doManuallyExecuteSolana(keypair, anchorProvider, transactions, chainName)
   } else {
     const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
     await manualExecEvmDestination(source, dest, request, argv)
@@ -107,21 +113,46 @@ export async function manualExec(
 async function doManuallyExecuteSolana(
   payer: Keypair,
   destination: AnchorProvider,
-  transaction: VersionedTransaction,
+  transactions: VersionedTransaction[],
   cluster: string,
 ) {
-  transaction.sign([payer])
+  async function waitForFinalization(
+    connection: Connection,
+    signature: string,
+    intervalMs = 500,
+    maxAttempts = 100,
+  ): Promise<void> {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const status = await connection.getSignatureStatuses([signature])
+      const info = status.value[0]
 
-  const signature = await destination.connection.sendTransaction(transaction)
-  const latestBlockhash = await destination.connection.getLatestBlockhash()
-  await destination.connection.confirmTransaction(
-    {
-      signature,
-      blockhash: latestBlockhash.blockhash,
-      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-    },
-    'confirmed',
-  )
+      if (info?.confirmationStatus === 'finalized') {
+        return
+      }
+      await new Promise((res) => setTimeout(res, intervalMs))
+    }
+
+    throw new Error(`Transaction ${signature} not finalized after timeout`)
+  }
+
+  var signature
+
+  for (const transaction of transactions) {
+    transaction.sign([payer])
+
+    signature = await destination.connection.sendTransaction(transaction)
+    const latestBlockhash = await destination.connection.getLatestBlockhash()
+
+    await destination.connection.confirmTransaction(
+      {
+        signature,
+        blockhash: latestBlockhash.blockhash,
+        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+      },
+      'confirmed',
+    )
+    await waitForFinalization(destination.connection, signature)
+  }
 
   const url_terminator_map: Record<string, string> = {
     'solana-devnet': 'devnet',
