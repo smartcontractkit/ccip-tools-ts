@@ -1,14 +1,11 @@
 import type { JsonRpcApiProvider, Provider } from 'ethers'
 import { discoverOffRamp } from '../lib/execution.ts'
 import {
-  clusterApiUrl,
-  Connection,
-  Connection as SolanaConnection,
   VersionedTransaction,
+  type GetVersionedTransactionConfig,
+  type ParsedTransactionWithMeta,
 } from '@solana/web3.js'
 import { Keypair } from '@solana/web3.js'
-import fs from 'fs'
-import path from 'path'
 import {
   type CCIPContract,
   type CCIPContractType,
@@ -32,7 +29,6 @@ import {
   lazyCached,
 } from '../lib/index.ts'
 import {
-  getClusterUrlByChainSelectorName,
   isSupportedSolanaCluster,
 } from '../lib/solana/getClusterByChainSelectorName.ts'
 import type { Providers } from '../providers.ts'
@@ -44,9 +40,9 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-import { buildManualExecutionTxWithSolanaDestination } from '../lib/solana/manuallyExecuteSolana.ts'
+import { buildManualExecutionTxWithSolanaDestination, newAnchorProvider } from '../lib/solana/manuallyExecuteSolana.ts'
 import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
-import { AnchorProvider, Wallet } from '@coral-xyz/anchor'
+import { AnchorProvider, } from '@coral-xyz/anchor'
 
 export async function manualExec(
   providers: Providers,
@@ -59,7 +55,7 @@ export async function manualExec(
     format: Format
     page: number
     wallet?: string
-    solanaOfframp: string
+    solanaOfframp?: string
   },
 ) {
   const tx = await providers.getTxReceipt(txHash)
@@ -93,27 +89,14 @@ export async function manualExec(
       )
     }
 
-    // TODO replace with cmdline args
-    const homeDir = process.env.HOME || process.env.USERPROFILE
-    const keypairPath = path.join(homeDir as string, '.config', 'solana', 'id.json')
-
-    // Read and parse the secret key
-    const secretKeyString = fs.readFileSync(keypairPath, 'utf8')
-    const secretKey = Uint8Array.from(JSON.parse(secretKeyString))
-
-    const keypair = Keypair.fromSecretKey(secretKey)
-    const wallet = new Wallet(keypair)
-    const connection = new Connection(getClusterUrlByChainSelectorName(chainName))
-    const anchorProvider = new AnchorProvider(connection, wallet, {
-      commitment: 'processed',
-    })
+    const { anchorProvider, keypair } = newAnchorProvider(chainName)
     const transaction = await buildManualExecutionTxWithSolanaDestination(
       anchorProvider,
       request as CCIPRequest<SupportedSolanaCCIPVersion>,
       argv.solanaOfframp,
       undefined,
     )
-    await doManuallyExecuteSolana(keypair, anchorProvider, transaction)
+    await doManuallyExecuteSolana(keypair, anchorProvider, transaction, chainName)
   } else {
     const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
     await manualExecEvmDestination(source, dest, request, argv)
@@ -124,11 +107,11 @@ async function doManuallyExecuteSolana(
   payer: Keypair,
   destination: AnchorProvider,
   transaction: VersionedTransaction,
+  cluster: string,
 ) {
   transaction.sign([payer])
 
   const signature = await destination.connection.sendTransaction(transaction)
-
   const latestBlockhash = await destination.connection.getLatestBlockhash()
   await destination.connection.confirmTransaction(
     {
@@ -139,7 +122,9 @@ async function doManuallyExecuteSolana(
     'confirmed',
   )
 
-  console.log('🚀 solana manual execution complete')
+  const url_terminator_map: Record<string, string> = { "solana-devnet": "devnet", "solana-mainnet": "", "solana-testnet": "testnet"};
+  const url_terminator = url_terminator_map[cluster] ?? cluster;
+  console.log(`🚀 Solana manualExec transaction confirmed: https://explorer.solana.com/tx/${signature}?cluster=${url_terminator}`);
 }
 
 async function manualExecEvmDestination(

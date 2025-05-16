@@ -1,4 +1,3 @@
-import { Connection as SolanaConnection } from '@solana/web3.js'
 import {
   type ContractRunner,
   type EventFragment,
@@ -10,12 +9,9 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 
 import Router from '../abi/Router.ts'
-import RouterABI from '../abi/Router.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
 import {
-  type CCIPContract,
   type CCIPContractEVM,
-  type CCIPContractSolana,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
@@ -24,7 +20,6 @@ import {
   CCIPContractType,
   CCIPVersion,
   CCIP_ABIs,
-  ChainFamily,
   ExecutionState,
 } from './types.ts'
 import {
@@ -37,8 +32,6 @@ import {
   toObject,
   validateContractType,
 } from './utils.ts'
-import { getOnRampLane } from './requests.ts'
-import { SolanaCCIPIdl, type SupportedSolanaCCIPVersion } from './solana/programs/versioning.ts'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds

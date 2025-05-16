@@ -1,8 +1,7 @@
-import { AnchorProvider, BorshCoder, type Instruction } from '@coral-xyz/anchor'
+import { AnchorProvider, BorshCoder, Wallet } from '@coral-xyz/anchor'
 import {
-  PublicKey,
-  type GetVersionedTransactionConfig,
-  type PartiallyDecodedInstruction,
+    Connection,
+    Keypair,
 } from '@solana/web3.js'
 import { TransactionMessage, VersionedTransaction } from '@solana/web3.js'
 import { ComputeBudgetProgram } from '@solana/web3.js'
@@ -13,8 +12,10 @@ import { simulateManuallyExecute } from './simulateManuallyExecute'
 import type { CCIPRequest } from '../../../dist/lib/types'
 import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
 import { CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
-import { BN } from 'bn.js'
+import fs from 'fs'
 import { calculateManualExecProof } from '../execution.ts'
+import path from 'path'
+import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
 
 export async function buildManualExecutionTxWithSolanaDestination<
   V extends SupportedSolanaCCIPVersion,
@@ -94,7 +95,21 @@ export async function buildManualExecutionTxWithSolanaDestination<
     instructions: finalInstructions,
   })
   const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
-  const tx = new VersionedTransaction(messageV0)
-
-  return tx
+  return new VersionedTransaction(messageV0)
 }
+
+export function newAnchorProvider(chainName: string) {
+    const homeDir = process.env.HOME || process.env.USERPROFILE
+    const keypairPath = path.join(homeDir as string, '.config', 'solana', 'id.json')
+    const secretKeyString = fs.readFileSync(keypairPath, 'utf8')
+    const secretKey = Uint8Array.from(JSON.parse(secretKeyString))
+
+    const keypair = Keypair.fromSecretKey(secretKey)
+    const wallet = new Wallet(keypair)
+    const connection = new Connection(getClusterUrlByChainSelectorName(chainName))
+    const anchorProvider = new AnchorProvider(connection, wallet, {
+        commitment: 'processed',
+    })
+    return { anchorProvider, keypair }
+}
+
