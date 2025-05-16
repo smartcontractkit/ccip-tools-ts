@@ -134,6 +134,17 @@ async function main() {
               describe:
                 'Solana offramp. Must be provided for when Solana is destination, until automated discovery is implemented.',
             },
+            'solana-buffer-address': {
+              type: 'string',
+              describe:
+                'Solana buffering contract address. Will be used when a manual exec TX is too large, or when forced with the "--solana-force-buffer" flag.',
+              default: 'Buff7ufrtmskFnHtGd9LXaWSAjX6wAMQ2q2s2WSWoSGS',
+            },
+            'solana-force-buffer': {
+              type: 'boolean',
+              describe: 'Forces the usage of a buffering contract for Solana manual execution.',
+              default: false,
+            },
             'sender-queue': {
               type: 'boolean',
               describe: 'Execute all messages in sender queue, starting with the provided tx',
