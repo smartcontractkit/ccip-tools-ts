@@ -1,7 +1,14 @@
-import type { Connection } from '@solana/web3.js'
-import { PublicKey } from '@solana/web3.js'
+import { type Connection, PublicKey } from '@solana/web3.js'
 import { CCIPVersion } from '../types.ts'
 import { getCcipOfframpReadOnly } from './programs/getCcipOfframp'
+
+type ReferenceAddresses = {
+  version: number
+  router: PublicKey
+  feeQuoter: PublicKey
+  offrampLookupTable: PublicKey
+  rmnRemote: PublicKey
+}
 
 export const getReferenceAddresses = async ({
   connection,
@@ -26,7 +33,7 @@ export const getReferenceAddresses = async ({
     connection,
   })
 
-  const account = program.coder.accounts.decode(
+  const account: ReferenceAddresses = program.coder.accounts.decode(
     'ReferenceAddresses',
     referenceAddressesAccount.data,
   )

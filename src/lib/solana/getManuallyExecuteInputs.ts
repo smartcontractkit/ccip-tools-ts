@@ -1,13 +1,16 @@
-import type { Connection } from '@solana/web3.js'
-import { PublicKey, SystemProgram, SYSVAR_INSTRUCTIONS_PUBKEY } from '@solana/web3.js'
+import {
+  type Connection,
+  PublicKey,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
+  SystemProgram,
+} from '@solana/web3.js'
+import { BN } from 'bn.js'
 import type { ExecutionReport } from '../types.ts'
-import type { OfframpProgram } from './programs/getCcipOfframp'
-import { getAddressLookupTableAccount } from './getAddressLookupTableAccount'
 import { deriveAccounts } from './deriveAccounts'
 import { deriveTokenAccounts } from './deriveTokenAccounts'
-import type { MessageWithAccounts } from './utils'
-import { isMessageWithAccounts } from './utils'
-import { BN } from 'bn.js'
+import { getAddressLookupTableAccount } from './getAddressLookupTableAccount'
+import type { OfframpProgram } from './programs/getCcipOfframp'
+import { type MessageWithAccounts, isMessageWithAccounts } from './utils'
 
 function base64ToBuffer(base64: string): Buffer {
   return Buffer.from(base64, 'base64')
@@ -83,7 +86,7 @@ function getExecutionReport(executionReportRaw: ExecutionReport, message: Messag
       },
       sender: hexToBuffer(message.sender),
       data: base64ToBuffer(message.data),
-      tokenReceiver: new PublicKey(message.tokenReceiver as string),
+      tokenReceiver: new PublicKey(message.tokenReceiver),
       tokenAmounts: message.tokenAmounts.map((token) => ({
         sourcePoolAddress: hexToBuffer(token.sourcePoolAddress),
         destTokenAddress: new PublicKey(token.destTokenAddress),

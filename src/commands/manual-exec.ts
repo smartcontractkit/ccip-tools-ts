@@ -1,11 +1,7 @@
+import type { AnchorProvider } from '@coral-xyz/anchor'
+import type { Keypair, VersionedTransaction } from '@solana/web3.js'
 import type { JsonRpcApiProvider, Provider } from 'ethers'
 import { discoverOffRamp } from '../lib/execution.ts'
-import {
-  VersionedTransaction,
-  type GetVersionedTransactionConfig,
-  type ParsedTransactionWithMeta,
-} from '@solana/web3.js'
-import { Keypair } from '@solana/web3.js'
 import {
   type CCIPContract,
   type CCIPContractType,
@@ -29,6 +25,11 @@ import {
   lazyCached,
 } from '../lib/index.ts'
 import { isSupportedSolanaCluster } from '../lib/solana/getClusterByChainSelectorName.ts'
+import {
+  buildManualExecutionTxWithSolanaDestination,
+  newAnchorProvider,
+} from '../lib/solana/manuallyExecuteSolana.ts'
+import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
 import type { Providers } from '../providers.ts'
 import { Format } from './types.ts'
 import {
@@ -38,12 +39,6 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-import {
-  buildManualExecutionTxWithSolanaDestination,
-  newAnchorProvider,
-} from '../lib/solana/manuallyExecuteSolana.ts'
-import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
-import { AnchorProvider } from '@coral-xyz/anchor'
 
 export async function manualExec(
   providers: Providers,

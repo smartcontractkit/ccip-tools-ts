@@ -1,8 +1,7 @@
-import type { AddressLookupTableAccount, Connection } from '@solana/web3.js'
-import { PublicKey } from '@solana/web3.js'
+import { type AddressLookupTableAccount, type Connection, PublicKey } from '@solana/web3.js'
 import { CCIPVersion } from '../types.ts'
-import { getCcipCommonReadOnly } from './programs/getCcipCommon'
 import { getAddressLookupTableAccount } from './getAddressLookupTableAccount.ts'
+import { getCcipCommonReadOnly } from './programs/getCcipCommon'
 
 const getTokenPoolAdminRegistryLookupTablePubkey = async ({
   connection,
@@ -30,12 +29,11 @@ const getTokenPoolAdminRegistryLookupTablePubkey = async ({
     connection,
   })
 
-  const tokenAdminRegistryData = program.coder.accounts.decode(
-    'tokenAdminRegistry',
-    tokenAdminRegistryInfo.data,
-  )
+  const tokenAdminRegistryData: {
+    lookupTable: PublicKey
+  } = program.coder.accounts.decode('tokenAdminRegistry', tokenAdminRegistryInfo.data)
 
-  return tokenAdminRegistryData.lookupTable as PublicKey
+  return tokenAdminRegistryData.lookupTable
 }
 
 export async function getTokenPoolAccountsLookupTable({

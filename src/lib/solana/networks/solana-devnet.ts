@@ -1,5 +1,3 @@
-import { type NetworkInfo } from '../../../types'
-
 export const solanaDevnet = {
   name: 'Solana Devnet',
   chainId: 2303460267, // fake chainId used in Atlas
@@ -27,4 +25,4 @@ export const solanaDevnet = {
   isPrivate: false,
   safeVaultSupported: false,
   rpcProxyUrl: 'solana/devnet',
-} as const satisfies NetworkInfo
+} as const

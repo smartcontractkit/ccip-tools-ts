@@ -1,5 +1,3 @@
-import { type NetworkInfo } from '../../../types'
-
 export const solana = {
   name: 'Solana',
   chainId: 2961997552, //fake chain ID used in atlas
@@ -27,4 +25,4 @@ export const solana = {
   isPrivate: false,
   safeVaultSupported: false,
   rpcProxyUrl: 'solana/mainnet',
-} as const satisfies NetworkInfo
+} as const

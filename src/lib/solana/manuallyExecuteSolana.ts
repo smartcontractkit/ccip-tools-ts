@@ -1,23 +1,27 @@
+import fs from 'fs'
+import path from 'path'
 import { AnchorProvider, BorshCoder, Wallet } from '@coral-xyz/anchor'
-import { Connection, Keypair } from '@solana/web3.js'
-import { TransactionMessage, VersionedTransaction } from '@solana/web3.js'
-import { ComputeBudgetProgram } from '@solana/web3.js'
 import {
+  ComputeBudgetProgram,
+  Connection,
+  Keypair,
+  TransactionMessage,
+  VersionedTransaction,
+} from '@solana/web3.js'
+import { calculateManualExecProof } from '../execution.ts'
+import {
+  type CCIPMessage,
+  type CCIPRequest,
+  type ExecutionReport,
   CCIPVersion,
   normalizeExecutionReport,
-  type CCIPMessage,
-  type ExecutionReport,
 } from '../types.ts'
-import { getCcipOfframp } from './programs/getCcipOfframp'
-import { getManuallyExecuteInputs } from './getManuallyExecuteInputs'
-import { simulateManuallyExecute } from './simulateManuallyExecute'
-import type { CCIPRequest } from '../../../dist/lib/types'
-import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
-import { CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
-import fs from 'fs'
-import { calculateManualExecProof } from '../execution.ts'
-import path from 'path'
 import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
+import { getManuallyExecuteInputs } from './getManuallyExecuteInputs'
+import { CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
+import { getCcipOfframp } from './programs/getCcipOfframp'
+import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
+import { simulateManuallyExecute } from './simulateManuallyExecute'
 
 export async function buildManualExecutionTxWithSolanaDestination<
   V extends SupportedSolanaCCIPVersion,
@@ -33,10 +37,10 @@ export async function buildManualExecutionTxWithSolanaDestination<
     provider: destinationProvider,
   })
 
-  const TnV = await offrampProgram.methods.typeVersion().accounts({}).signers([]).view()
+  const TnV = (await offrampProgram.methods.typeVersion().accounts({}).signers([]).view()) as string
 
   if (TnV != 'ccip-offramp 0.1.0-dev') {
-    throw new Error('Unsupported offramp version: ', TnV)
+    throw new Error(`Unsupported offramp version: ${TnV}`)
   }
 
   const { proofs, merkleRoot } = calculateManualExecProof([ccipRequest.message], ccipRequest.lane, [
@@ -104,7 +108,7 @@ export function newAnchorProvider(chainName: string) {
   const homeDir = process.env.HOME || process.env.USERPROFILE
   const keypairPath = path.join(homeDir as string, '.config', 'solana', 'id.json')
   const secretKeyString = fs.readFileSync(keypairPath, 'utf8')
-  const secretKey = Uint8Array.from(JSON.parse(secretKeyString))
+  const secretKey = Uint8Array.from(JSON.parse(secretKeyString) as number[])
 
   const keypair = Keypair.fromSecretKey(secretKey)
   const wallet = new Wallet(keypair)
