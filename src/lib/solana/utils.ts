@@ -1,4 +1,5 @@
-import type { ExecutionReport } from '../types.ts'
+import type { SourceTokenData } from '../extra-args.ts'
+import type { EVM2AnyMessageSent, ExecutionReport } from '../types.ts'
 
 export type MessageWithAccounts = ExecutionReport['message'] & {
   tokenReceiver: string
@@ -13,4 +14,42 @@ export function isMessageWithAccounts(
   return (
     'tokenReceiver' in message && 'computeUnits' in message && 'accountIsWritableBitmap' in message
   )
+}
+
+function hexToBase64(hex: string): string {
+  const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex
+  const buffer = Buffer.from(cleanHex, 'hex')
+  return buffer.toString('base64')
+}
+
+// Execution reports can be generated in different ways, depending on whether the message
+// was parsed from EVM or from solana logs. This function ensures that they both result
+// in the same encoding (some values are b64 when parsed from a SVM context and hex from EVM.)
+export function normalizeExecutionReportForSolana(report: ExecutionReport): ExecutionReport {
+  const isHex = (str: string): boolean => {
+    return /^0x[0-9a-fA-F]*$/.test(str)
+  }
+
+  return {
+    ...report,
+    message: {
+      ...report.message,
+      data: isHex(report.message.data) ? hexToBase64(report.message.data) : report.message.data,
+      tokenAmounts: report.message.tokenAmounts.map((amount) =>
+        normalizeTokenAmountForSolana(amount),
+      ),
+    },
+  }
+}
+
+type TokenAmount = EVM2AnyMessageSent['tokenAmounts'][number] & SourceTokenData
+
+export function normalizeTokenAmountForSolana(data: TokenAmount): TokenAmount {
+  const isHex = (str: string): boolean => /^0x[0-9a-fA-F]*$/.test(str)
+
+  return {
+    ...data,
+    extraData: isHex(data.extraData) ? hexToBase64(data.extraData) : data.extraData,
+    destExecData: isHex(data.destExecData) ? hexToBase64(data.destExecData) : data.destExecData,
+  }
 }

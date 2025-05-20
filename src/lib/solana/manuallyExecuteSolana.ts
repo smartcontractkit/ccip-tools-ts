@@ -9,19 +9,14 @@ import {
   VersionedTransaction,
 } from '@solana/web3.js'
 import { calculateManualExecProof } from '../execution.ts'
-import {
-  type CCIPMessage,
-  type CCIPRequest,
-  type ExecutionReport,
-  CCIPVersion,
-  normalizeExecutionReport,
-} from '../types.ts'
+import { type CCIPMessage, type CCIPRequest, type ExecutionReport, CCIPVersion } from '../types.ts'
 import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
 import { getManuallyExecuteInputs } from './getManuallyExecuteInputs'
 import { CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
 import { getCcipOfframp } from './programs/getCcipOfframp'
 import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
 import { simulateManuallyExecute } from './simulateManuallyExecute'
+import { normalizeExecutionReportForSolana } from './utils.ts'
 
 export async function buildManualExecutionTxWithSolanaDestination<
   V extends SupportedSolanaCCIPVersion,
@@ -46,7 +41,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
   const { proofs, merkleRoot } = calculateManualExecProof([ccipRequest.message], ccipRequest.lane, [
     ccipRequest.message.header.messageId,
   ])
-  const executionReportRaw: ExecutionReport = normalizeExecutionReport({
+  const executionReportRaw: ExecutionReport = normalizeExecutionReportForSolana({
     sourceChainSelector: BigInt(ccipRequest.lane.sourceChainSelector),
     message: ccipRequest.message as CCIPMessage<typeof CCIPVersion.V1_6>,
     proofs,

@@ -122,7 +122,7 @@ type EVM2AnyMessageRequested = CleanAddressable<
 >
 
 // v1.6+ Message
-type EVM2AnyMessageSent = CleanAddressable<
+export type EVM2AnyMessageSent = CleanAddressable<
   AbiParametersToPrimitiveTypes<
     ExtractAbiEvent<typeof OnRamp_1_6_ABI, 'CCIPMessageSent'>['inputs']
   >[2]
@@ -206,46 +206,4 @@ export type ExecutionReport = {
   offchainTokenData: string[]
   proofs: string[]
   sourceChainSelector: bigint
-}
-
-// Execution reports can be generated in different ways, depending on whether the message
-// was parsed from EVM or from solana logs. This function ensures that they both result
-// in the same encoding (some values are b64 when parsed from a SVM context and hex from EVM.)
-export function normalizeExecutionReport(report: ExecutionReport): ExecutionReport {
-  const isHex = (str: string): boolean => {
-    return /^0x[0-9a-fA-F]*$/.test(str)
-  }
-
-  const hexToBase64 = (hex: string): string => {
-    const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex
-    const buffer = Buffer.from(cleanHex, 'hex')
-    return buffer.toString('base64')
-  }
-
-  return {
-    ...report,
-    message: {
-      ...report.message,
-      data: isHex(report.message.data) ? hexToBase64(report.message.data) : report.message.data,
-      tokenAmounts: report.message.tokenAmounts.map((amount) => normalizeTokenAmount(amount)),
-    },
-  }
-}
-
-type TokenAmount = EVM2AnyMessageSent['tokenAmounts'][number] & SourceTokenData
-
-export function normalizeTokenAmount(data: TokenAmount): TokenAmount {
-  const isHex = (str: string): boolean => /^0x[0-9a-fA-F]*$/.test(str)
-
-  const hexToBase64 = (hex: string): string => {
-    const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex
-    const buffer = Buffer.from(cleanHex, 'hex')
-    return buffer.toString('base64')
-  }
-
-  return {
-    ...data,
-    extraData: isHex(data.extraData) ? hexToBase64(data.extraData) : data.extraData,
-    destExecData: isHex(data.destExecData) ? hexToBase64(data.destExecData) : data.destExecData,
-  }
 }
