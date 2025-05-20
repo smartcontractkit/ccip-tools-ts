@@ -52,6 +52,7 @@ export async function manualExec(
     page: number
     wallet?: string
     solanaOfframp?: string
+    solanaKeypair?: string
   },
 ) {
   const tx = await providers.getTxReceipt(txHash)
@@ -85,7 +86,7 @@ export async function manualExec(
       )
     }
 
-    const { anchorProvider, keypair } = newAnchorProvider(chainName)
+    const { anchorProvider, keypair } = newAnchorProvider(chainName, argv.solanaKeypair)
     const transaction = await buildManualExecutionTxWithSolanaDestination(
       anchorProvider,
       request as CCIPRequest<SupportedSolanaCCIPVersion>,

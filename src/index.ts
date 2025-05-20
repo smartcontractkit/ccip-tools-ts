@@ -134,6 +134,11 @@ async function main() {
               describe:
                 'Solana offramp. Must be provided for when Solana is destination, until automated discovery is implemented.',
             },
+            'solana-keypair': {
+              type: 'string',
+              describe:
+                'Location of the solana keypair to use for manual execution. Defaults to ~/.config/solana/id.json',
+            },
             'sender-queue': {
               type: 'boolean',
               describe: 'Execute all messages in sender queue, starting with the provided tx',

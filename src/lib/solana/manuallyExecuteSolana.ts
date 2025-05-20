@@ -99,9 +99,18 @@ export async function buildManualExecutionTxWithSolanaDestination<
   return new VersionedTransaction(messageV0)
 }
 
-export function newAnchorProvider(chainName: string) {
-  const homeDir = process.env.HOME || process.env.USERPROFILE
-  const keypairPath = path.join(homeDir as string, '.config', 'solana', 'id.json')
+export function newAnchorProvider(chainName: string, keypairFile: string | undefined) {
+  let keypairPath: string
+
+  if (keypairFile === undefined) {
+    const homeDir = process.env.HOME || process.env.USERPROFILE
+    keypairPath = path.join(homeDir as string, '.config', 'solana', 'id.json')
+  } else {
+    keypairPath = keypairFile
+  }
+
+  console.log('Using keypair file ', keypairPath)
+
   const secretKeyString = fs.readFileSync(keypairPath, 'utf8')
   const secretKey = Uint8Array.from(JSON.parse(secretKeyString) as number[])
 
