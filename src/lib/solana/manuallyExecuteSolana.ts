@@ -23,7 +23,7 @@ import { getManuallyExecuteInputs } from './getManuallyExecuteInputs'
 import { CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
 import { getCcipOfframp } from './programs/getCcipOfframp'
 import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
-import { simulateManuallyExecute } from './simulateManuallyExecute'
+import { simulateUnitsConsumed } from './simulateManuallyExecute'
 import { normalizeExecutionReportForSolana } from './utils.ts'
 import { EXECUTION_BUFFER_IDL } from './programs/1.6.0/EXECUTION_BUFFER.ts'
 import { randomBytes } from 'crypto'
@@ -86,7 +86,24 @@ export async function buildManualExecutionTxWithSolanaDestination<
 
   const { blockhash } = await destinationProvider.connection.getLatestBlockhash()
 
-  const computeUnits = await simulateManuallyExecute({
+  if (forceBuffer) {
+    console.log(
+      `Execute report will be pre-buffered through the buffering contract ${bufferProgramAddress}. This may take some time.`,
+    )
+    return bufferedTransactions(
+      destinationProvider,
+      bufferProgramAddress,
+      serializedReport,
+      serializedTokenIndexes,
+      accounts,
+      remainingAccounts,
+      computeUnitsOverride,
+      blockhash,
+      addressLookupTableAccounts,
+    )
+  }
+
+  const computeUnits = await simulateUnitsConsumed({
     instructions: manualExecuteInstructions,
     connection: destinationProvider.connection,
     payerKey: destinationProvider.wallet.publicKey,
@@ -109,23 +126,6 @@ export async function buildManualExecutionTxWithSolanaDestination<
   })
   const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
   const transaction = new VersionedTransaction(messageV0)
-
-  if (transaction.serialize().length > 1232 || forceBuffer) {
-    console.log(
-      `Execute report will be pre-buffered through the buffering contract ${bufferProgramAddress}. This may take some time.`,
-    )
-    return bufferedTransactions(
-      destinationProvider,
-      bufferProgramAddress,
-      serializedReport,
-      serializedTokenIndexes,
-      accounts,
-      remainingAccounts,
-      computeBudgetIx,
-      blockhash,
-      addressLookupTableAccounts,
-    )
-  }
 
   return [transaction]
 }
@@ -176,7 +176,7 @@ async function bufferedTransactions(
   serializedTokenIndexes: Buffer<ArrayBuffer>,
   originalManualExecAccounts: ManualExecAccounts,
   originalManualExecRemainingAccounts: AccountMeta[],
-  computeBudgetIx: TransactionInstruction,
+  computeUnitsOverride: number | undefined,
   blockhash: string,
   addressLookupTableAccounts: AddressLookupTableAccount[],
 ): Promise<VersionedTransaction[]> {
@@ -242,9 +242,17 @@ async function bufferedTransactions(
     .transaction()
 
   const executeTxInstructions = executeTx.instructions
+  let finalInstructions: TransactionInstruction[]
 
-  // Add compute budget instruction at the beginning of instructions
-  const finalInstructions = [computeBudgetIx, ...executeTxInstructions]
+  if (computeUnitsOverride !== undefined) {
+    // Add compute budget instruction at the beginning of instructions
+    const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
+      units: computeUnitsOverride,
+    })
+    finalInstructions = [computeBudgetIx, ...executeTxInstructions]
+  } else {
+    finalInstructions = executeTxInstructions
+  }
 
   const message = new TransactionMessage({
     payerKey: destinationProvider.wallet.publicKey,

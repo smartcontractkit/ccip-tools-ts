@@ -150,6 +150,11 @@ async function main() {
               describe: 'Forces the usage of a buffering contract for Solana manual execution.',
               default: false,
             },
+            'solana-cu-limit': {
+              type: 'number',
+              describe:
+                "Overrides Solana manual execution CU limit. Likely necessary for buffered transactions as they aren't estimated.",
+            },
             'sender-queue': {
               type: 'boolean',
               describe: 'Execute all messages in sender queue, starting with the provided tx',
