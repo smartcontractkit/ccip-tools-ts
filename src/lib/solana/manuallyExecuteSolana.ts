@@ -8,7 +8,7 @@ import {
 } from '@solana/web3.js'
 import fs from 'fs'
 import path from 'path'
-import { AnchorProvider, BorshCoder, Program, Wallet } from '@coral-xyz/anchor'
+import { AnchorProvider, BorshCoder, Program, Wallet, type Idl } from '@coral-xyz/anchor'
 import {
   ComputeBudgetProgram,
   Connection,
@@ -16,6 +16,7 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from '@solana/web3.js'
+import type { Layout } from 'buffer-layout'
 import { calculateManualExecProof } from '../execution.ts'
 import { type CCIPMessage, type CCIPRequest, type ExecutionReport, CCIPVersion } from '../types.ts'
 import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
@@ -27,6 +28,39 @@ import { simulateUnitsConsumed } from './simulateManuallyExecute'
 import { normalizeExecutionReportForSolana } from './utils.ts'
 import { EXECUTION_BUFFER_IDL } from './programs/1.6.0/EXECUTION_BUFFER.ts'
 import { randomBytes } from 'crypto'
+import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types'
+
+class ExtendedBorshTypesCoder<N extends string = string> extends BorshTypesCoder<N> {
+  public constructor(idl: Idl) {
+    super(idl)
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  public override encode<T = any>(typeName: N, type: T): Buffer {
+    const buffer = Buffer.alloc(3000) // TODO: use a tighter buffer.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+    const layout: Layout<any> | undefined = (this as any).typeLayouts.get(typeName)
+    if (!layout) {
+      throw new Error(`Unknown type: ${typeName}`)
+    }
+    const len = layout.encode(type, buffer)
+
+    return buffer.slice(0, len)
+  }
+}
+
+class AlteredBorshCoder<A extends string = string, T extends string = string> extends BorshCoder<
+  A,
+  T
+> {
+  constructor(idl: Idl) {
+    super(idl)
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
+    const self = this as any
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    self.types = new ExtendedBorshTypesCoder(idl)
+  }
+}
 
 export async function buildManualExecutionTxWithSolanaDestination<
   V extends SupportedSolanaCCIPVersion,
@@ -72,17 +106,11 @@ export async function buildManualExecutionTxWithSolanaDestination<
       senderAddress: payerAddress,
     })
 
-  const coder = new BorshCoder(CCIP_OFFRAMP_IDL)
+  const coder = new AlteredBorshCoder(CCIP_OFFRAMP_IDL)
+  console.log('About to encode exec report...')
   const serializedReport = coder.types.encode('ExecutionReportSingleChain', executionReport)
+  console.log('Encoded exec report.')
   const serializedTokenIndexes = Buffer.from(tokenIndexes)
-
-  const anchorTx = await offrampProgram.methods
-    .manuallyExecute(serializedReport, serializedTokenIndexes)
-    .accounts(accounts)
-    .remainingAccounts(remainingAccounts)
-    .transaction()
-
-  const manualExecuteInstructions = anchorTx.instructions
 
   const { blockhash } = await destinationProvider.connection.getLatestBlockhash()
 
@@ -102,6 +130,14 @@ export async function buildManualExecutionTxWithSolanaDestination<
       addressLookupTableAccounts,
     )
   }
+
+  const anchorTx = await offrampProgram.methods
+    .manuallyExecute(serializedReport, serializedTokenIndexes)
+    .accounts(accounts)
+    .remainingAccounts(remainingAccounts)
+    .transaction()
+
+  const manualExecuteInstructions = anchorTx.instructions
 
   const computeUnits = await simulateUnitsConsumed({
     instructions: manualExecuteInstructions,
@@ -206,7 +242,7 @@ async function bufferedTransactions(
     destinationProvider,
   )
 
-  let transactions: VersionedTransaction[] = []
+  const transactions: VersionedTransaction[] = []
 
   const bufferingAccounts = {
     bufferedReport: bufferAddress,
