@@ -92,7 +92,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
     message: ccipRequest.message as CCIPMessage<typeof CCIPVersion.V1_6>,
     proofs,
     // Offchain token data is unsupported for manual exec
-    offchainTokenData: ['0x'],
+    offchainTokenData: new Array(ccipRequest.message.tokenAmounts.length).fill('0x'),
   })
 
   const payerAddress = destinationProvider.wallet.publicKey.toBase58()
@@ -107,9 +107,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
     })
 
   const coder = new AlteredBorshCoder(CCIP_OFFRAMP_IDL)
-  console.log('About to encode exec report...')
   const serializedReport = coder.types.encode('ExecutionReportSingleChain', executionReport)
-  console.log('Encoded exec report.')
   const serializedTokenIndexes = Buffer.from(tokenIndexes)
 
   const { blockhash } = await destinationProvider.connection.getLatestBlockhash()

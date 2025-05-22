@@ -120,7 +120,6 @@ async function doManuallyExecuteSolana(
     signature = await destination.connection.sendTransaction(transaction)
     const latestBlockhash = await destination.connection.getLatestBlockhash()
 
-    console.log('About to confirm a tx...')
     await destination.connection.confirmTransaction(
       {
         signature,
