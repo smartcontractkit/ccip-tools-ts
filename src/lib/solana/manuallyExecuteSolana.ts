@@ -1,6 +1,14 @@
+import {
+  AddressLookupTableAccount,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  TransactionInstruction,
+  type AccountMeta,
+} from '@solana/web3.js'
 import fs from 'fs'
 import path from 'path'
-import { AnchorProvider, BorshCoder, Wallet } from '@coral-xyz/anchor'
+import { AnchorProvider, BorshCoder, Program, Wallet, type Idl } from '@coral-xyz/anchor'
 import {
   ComputeBudgetProgram,
   Connection,
@@ -8,6 +16,7 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from '@solana/web3.js'
+import type { Layout } from 'buffer-layout'
 import { calculateManualExecProof } from '../execution.ts'
 import { type CCIPMessage, type CCIPRequest, type ExecutionReport, CCIPVersion } from '../types.ts'
 import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
@@ -15,8 +24,43 @@ import { getManuallyExecuteInputs } from './getManuallyExecuteInputs'
 import { CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
 import { getCcipOfframp } from './programs/getCcipOfframp'
 import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
-import { simulateManuallyExecute } from './simulateManuallyExecute'
+import { simulateUnitsConsumed } from './simulateManuallyExecute'
 import { normalizeExecutionReportForSolana } from './utils.ts'
+import { EXECUTION_BUFFER_IDL } from './programs/1.6.0/EXECUTION_BUFFER.ts'
+import { randomBytes } from 'crypto'
+import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types'
+
+class ExtendedBorshTypesCoder<N extends string = string> extends BorshTypesCoder<N> {
+  public constructor(idl: Idl) {
+    super(idl)
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  public override encode<T = any>(typeName: N, type: T): Buffer {
+    const buffer = Buffer.alloc(3000) // TODO: use a tighter buffer.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+    const layout: Layout<any> | undefined = (this as any).typeLayouts.get(typeName)
+    if (!layout) {
+      throw new Error(`Unknown type: ${typeName}`)
+    }
+    const len = layout.encode(type, buffer)
+
+    return buffer.slice(0, len)
+  }
+}
+
+class AlteredBorshCoder<A extends string = string, T extends string = string> extends BorshCoder<
+  A,
+  T
+> {
+  constructor(idl: Idl) {
+    super(idl)
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
+    const self = this as any
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    self.types = new ExtendedBorshTypesCoder(idl)
+  }
+}
 
 export async function buildManualExecutionTxWithSolanaDestination<
   V extends SupportedSolanaCCIPVersion,
@@ -24,8 +68,10 @@ export async function buildManualExecutionTxWithSolanaDestination<
   destinationProvider: AnchorProvider,
   ccipRequest: CCIPRequest<V>,
   offrampAddress: string,
+  bufferProgramAddress: string,
+  forceBuffer: boolean,
   computeUnitsOverride: number | undefined,
-): Promise<VersionedTransaction> {
+): Promise<VersionedTransaction[]> {
   const offrampProgram = getCcipOfframp({
     ccipVersion: CCIPVersion.V1_6,
     address: offrampAddress,
@@ -46,7 +92,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
     message: ccipRequest.message as CCIPMessage<typeof CCIPVersion.V1_6>,
     proofs,
     // Offchain token data is unsupported for manual exec
-    offchainTokenData: ['0x'],
+    offchainTokenData: new Array(ccipRequest.message.tokenAmounts.length).fill('0x'),
   })
 
   const payerAddress = destinationProvider.wallet.publicKey.toBase58()
@@ -60,9 +106,28 @@ export async function buildManualExecutionTxWithSolanaDestination<
       senderAddress: payerAddress,
     })
 
-  const coder = new BorshCoder(CCIP_OFFRAMP_IDL)
+  const coder = new AlteredBorshCoder(CCIP_OFFRAMP_IDL)
   const serializedReport = coder.types.encode('ExecutionReportSingleChain', executionReport)
   const serializedTokenIndexes = Buffer.from(tokenIndexes)
+
+  const { blockhash } = await destinationProvider.connection.getLatestBlockhash()
+
+  if (forceBuffer) {
+    console.log(
+      `Execute report will be pre-buffered through the buffering contract ${bufferProgramAddress}. This may take some time.`,
+    )
+    return bufferedTransactions(
+      destinationProvider,
+      bufferProgramAddress,
+      serializedReport,
+      serializedTokenIndexes,
+      accounts,
+      remainingAccounts,
+      computeUnitsOverride,
+      blockhash,
+      addressLookupTableAccounts,
+    )
+  }
 
   const anchorTx = await offrampProgram.methods
     .manuallyExecute(serializedReport, serializedTokenIndexes)
@@ -72,9 +137,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
 
   const manualExecuteInstructions = anchorTx.instructions
 
-  const { blockhash } = await destinationProvider.connection.getLatestBlockhash()
-
-  const computeUnits = await simulateManuallyExecute({
+  const computeUnits = await simulateUnitsConsumed({
     instructions: manualExecuteInstructions,
     connection: destinationProvider.connection,
     payerKey: destinationProvider.wallet.publicKey,
@@ -96,7 +159,9 @@ export async function buildManualExecutionTxWithSolanaDestination<
     instructions: finalInstructions,
   })
   const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
-  return new VersionedTransaction(messageV0)
+  const transaction = new VersionedTransaction(messageV0)
+
+  return [transaction]
 }
 
 export function newAnchorProvider(chainName: string, keypairFile: string | undefined) {
@@ -121,4 +186,130 @@ export function newAnchorProvider(chainName: string, keypairFile: string | undef
     commitment: 'processed',
   })
   return { anchorProvider, keypair }
+}
+
+type ManualExecAccounts = {
+  config: PublicKey
+  referenceAddresses: PublicKey
+  sourceChain: PublicKey
+  commitReport: PublicKey
+  offramp: PublicKey
+  allowedOfframp: PublicKey
+  rmnRemote: PublicKey
+  rmnRemoteCurses: PublicKey
+  rmnRemoteConfig: PublicKey
+  authority: PublicKey
+  systemProgram: PublicKey
+  sysvarInstructions: PublicKey
+}
+
+async function bufferedTransactions(
+  destinationProvider: AnchorProvider,
+  bufferProgramAddress: string,
+  serializedReport: Buffer,
+  serializedTokenIndexes: Buffer<ArrayBuffer>,
+  originalManualExecAccounts: ManualExecAccounts,
+  originalManualExecRemainingAccounts: AccountMeta[],
+  computeUnitsOverride: number | undefined,
+  blockhash: string,
+  addressLookupTableAccounts: AddressLookupTableAccount[],
+): Promise<VersionedTransaction[]> {
+  // Arbitrary as long as there's consistency for all translations.
+  const bufferId = {
+    bytes: Array.from(randomBytes(32)),
+  }
+  const [bufferAddress] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from('execution_buffer'),
+      destinationProvider.wallet.publicKey.toBuffer(),
+      Buffer.from(bufferId.bytes),
+    ],
+    new PublicKey(bufferProgramAddress),
+  )
+
+  const hexBytes = '0x' + bufferId.bytes.map((b) => b.toString(16).padStart(2, '0')).join('')
+  console.log(
+    `The bufferID is ${hexBytes}, and the PDA address for the buffer is ${bufferAddress.toString()}. If this buffering process is aborted, remember to manually close the account to recover any spent funds.`,
+  )
+
+  const chunkSize = 800
+
+  const bufferingProgram = new Program(
+    EXECUTION_BUFFER_IDL,
+    new PublicKey(bufferProgramAddress),
+    destinationProvider,
+  )
+
+  const transactions: VersionedTransaction[] = []
+
+  const bufferingAccounts = {
+    bufferedReport: bufferAddress,
+    authority: destinationProvider.wallet.publicKey,
+    systemProgram: SystemProgram.programId,
+  }
+  const initTx = await bufferingProgram.methods
+    .initializeExecutionReportBuffer(bufferId)
+    .accounts(bufferingAccounts)
+    .transaction()
+  transactions.push(toVersionedTransaction(initTx, destinationProvider.wallet.publicKey, blockhash))
+
+  for (let i = 0; i < serializedReport.length; i += chunkSize) {
+    const end = Math.min(i + chunkSize, serializedReport.length)
+    const chunk: Buffer = serializedReport.subarray(i, end)
+
+    const appendTx = await bufferingProgram.methods
+      .appendExecutionReportData(bufferId, chunk)
+      .accounts(bufferingAccounts)
+      .transaction()
+    transactions.push(
+      toVersionedTransaction(appendTx, destinationProvider.wallet.publicKey, blockhash),
+    )
+  }
+
+  const executeTx = await bufferingProgram.methods
+    .manuallyExecuteBuffered(bufferId, serializedTokenIndexes)
+    .accounts({
+      ...originalManualExecAccounts,
+      bufferedReport: bufferAddress,
+    })
+    .remainingAccounts(originalManualExecRemainingAccounts)
+    .transaction()
+
+  const executeTxInstructions = executeTx.instructions
+  let finalInstructions: TransactionInstruction[]
+
+  if (computeUnitsOverride !== undefined) {
+    // Add compute budget instruction at the beginning of instructions
+    const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
+      units: computeUnitsOverride,
+    })
+    finalInstructions = [computeBudgetIx, ...executeTxInstructions]
+  } else {
+    finalInstructions = executeTxInstructions
+  }
+
+  const message = new TransactionMessage({
+    payerKey: destinationProvider.wallet.publicKey,
+    recentBlockhash: blockhash,
+    instructions: finalInstructions,
+  })
+  const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
+  transactions.push(new VersionedTransaction(messageV0))
+
+  return transactions
+}
+
+function toVersionedTransaction(
+  tx: Transaction,
+  payerKey: PublicKey,
+  blockhash: string,
+): VersionedTransaction {
+  const instructions = tx.instructions
+
+  const message = new TransactionMessage({
+    payerKey,
+    recentBlockhash: blockhash,
+    instructions,
+  })
+  return new VersionedTransaction(message.compileToV0Message())
 }

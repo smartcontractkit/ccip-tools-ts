@@ -1,5 +1,6 @@
 import type { SourceTokenData } from '../extra-args.ts'
 import type { EVM2AnyMessageSent, ExecutionReport } from '../types.ts'
+import { Connection } from '@solana/web3.js'
 
 export type MessageWithAccounts = ExecutionReport['message'] & {
   tokenReceiver: string
@@ -52,4 +53,23 @@ export function normalizeTokenAmountForSolana(data: TokenAmount): TokenAmount {
     extraData: isHex(data.extraData) ? hexToBase64(data.extraData) : data.extraData,
     destExecData: isHex(data.destExecData) ? hexToBase64(data.destExecData) : data.destExecData,
   }
+}
+
+export async function waitForFinalization(
+  connection: Connection,
+  signature: string,
+  intervalMs = 500,
+  maxAttempts = 100,
+): Promise<void> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const status = await connection.getSignatureStatuses([signature])
+    const info = status.value[0]
+
+    if (info?.confirmationStatus === 'finalized') {
+      return
+    }
+    await new Promise((res) => setTimeout(res, intervalMs))
+  }
+
+  throw new Error(`Transaction ${signature} not finalized after timeout`)
 }

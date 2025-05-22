@@ -7,7 +7,7 @@ import type {
 } from '@solana/web3.js'
 import { ComputeBudgetProgram, TransactionMessage, VersionedTransaction } from '@solana/web3.js'
 
-export const simulateManuallyExecute = async ({
+export const simulateUnitsConsumed = async ({
   instructions,
   connection,
   payerKey,
