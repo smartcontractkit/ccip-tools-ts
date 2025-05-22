@@ -150,6 +150,12 @@ async function main() {
               describe: 'Forces the usage of a buffering contract for Solana manual execution.',
               default: false,
             },
+            'solana-force-lookup-table': {
+              type: 'boolean',
+              describe:
+                'Forces the creation & usage of an ad-hoc lookup table for Solana manual execution.',
+              default: false,
+            },
             'solana-cu-limit': {
               type: 'number',
               describe:

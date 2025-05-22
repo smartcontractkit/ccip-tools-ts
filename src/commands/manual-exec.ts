@@ -56,6 +56,7 @@ export async function manualExec(
     solanaKeypair?: string
     solanaBufferAddress: string
     solanaForceBuffer: boolean
+    solanaForceLookupTable: boolean
     solanaCuLimit?: number
   },
 ) {
@@ -97,6 +98,7 @@ export async function manualExec(
       argv.solanaOfframp,
       argv.solanaBufferAddress,
       argv.solanaForceBuffer,
+      argv.solanaForceLookupTable,
       argv.solanaCuLimit,
     )
     await doManuallyExecuteSolana(keypair, anchorProvider, transactions, chainName)
@@ -128,7 +130,7 @@ async function doManuallyExecuteSolana(
       },
       'confirmed',
     )
-    console.log(`Waiting for finalization of ${signature}...`)
+    console.log(`Waiting for finalization of ${signature} ...`)
     await waitForFinalization(destination.connection, signature)
   }
 
