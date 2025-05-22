@@ -1,18 +1,18 @@
-import {
-  AddressLookupTableAccount,
-  PublicKey,
-  SystemProgram,
-  Transaction,
-  TransactionInstruction,
-  type AccountMeta,
-} from '@solana/web3.js'
+import { randomBytes } from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { AnchorProvider, BorshCoder, Program, Wallet, type Idl } from '@coral-xyz/anchor'
+import { type Idl, AnchorProvider, BorshCoder, Program, Wallet } from '@coral-xyz/anchor'
+import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types'
 import {
+  type AccountMeta,
+  type AddressLookupTableAccount,
+  type Transaction,
+  type TransactionInstruction,
   ComputeBudgetProgram,
   Connection,
   Keypair,
+  PublicKey,
+  SystemProgram,
   TransactionMessage,
   VersionedTransaction,
 } from '@solana/web3.js'
@@ -20,15 +20,13 @@ import type { Layout } from 'buffer-layout'
 import { calculateManualExecProof } from '../execution.ts'
 import { type CCIPMessage, type CCIPRequest, type ExecutionReport, CCIPVersion } from '../types.ts'
 import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
-import { getManuallyExecuteInputs } from './getManuallyExecuteInputs'
+import { getManuallyExecuteInputs } from './getManuallyExecuteInputs.ts'
 import { CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
-import { getCcipOfframp } from './programs/getCcipOfframp'
-import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
-import { simulateUnitsConsumed } from './simulateManuallyExecute'
-import { normalizeExecutionReportForSolana } from './utils.ts'
 import { EXECUTION_BUFFER_IDL } from './programs/1.6.0/EXECUTION_BUFFER.ts'
-import { randomBytes } from 'crypto'
-import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types'
+import { getCcipOfframp } from './programs/getCcipOfframp.ts'
+import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
+import { simulateUnitsConsumed } from './simulateManuallyExecute.ts'
+import { normalizeExecutionReportForSolana } from './utils.ts'
 
 class ExtendedBorshTypesCoder<N extends string = string> extends BorshTypesCoder<N> {
   public constructor(idl: Idl) {
@@ -92,7 +90,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
     message: ccipRequest.message as CCIPMessage<typeof CCIPVersion.V1_6>,
     proofs,
     // Offchain token data is unsupported for manual exec
-    offchainTokenData: new Array(ccipRequest.message.tokenAmounts.length).fill('0x'),
+    offchainTokenData: new Array(ccipRequest.message.tokenAmounts.length).fill('0x') as string[],
   })
 
   const payerAddress = destinationProvider.wallet.publicKey.toBase58()
