@@ -1,7 +1,12 @@
 import type { AnchorProvider } from '@coral-xyz/anchor'
+import {
+  type Keypair,
+  type TransactionSignature,
+  type VersionedTransaction,
+  SendTransactionError,
+} from '@solana/web3.js'
 import type { JsonRpcApiProvider, Provider } from 'ethers'
 import { discoverOffRamp } from '../lib/execution.ts'
-import { type Keypair, type TransactionSignature, type VersionedTransaction } from '@solana/web3.js'
 import {
   type CCIPContract,
   type CCIPContractType,
@@ -30,6 +35,7 @@ import {
   newAnchorProvider,
 } from '../lib/solana/manuallyExecuteSolana.ts'
 import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
+import { waitForFinalization } from '../lib/solana/utils.ts'
 import type { Providers } from '../providers.ts'
 import { Format } from './types.ts'
 import {
@@ -39,7 +45,6 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-import { waitForFinalization } from '../lib/solana/utils.ts'
 
 export async function manualExec(
   providers: Providers,
@@ -108,6 +113,16 @@ export async function manualExec(
   }
 }
 
+function isCannotCloseTableUntilDeactivated(e: SendTransactionError): boolean {
+  // Lookup Tables are first deactivated and then closed. There has to be a cool-down period
+  // between the two operations. If the table is closed before it is fully deactivated, the
+  // transaction will fail. The cool-down period is ~4mins (more precisely, ~513 blocks), see
+  // https://solana.com/vi/developers/courses/program-optimization/lookup-tables#deactivate-a-lookup-table
+  return !!e.logs?.some((log) =>
+    log.includes("Program log: Table cannot be closed until it's fully deactivated in "),
+  )
+}
+
 async function doManuallyExecuteSolana(
   payer: Keypair,
   destination: AnchorProvider,
@@ -117,21 +132,54 @@ async function doManuallyExecuteSolana(
   let signature!: TransactionSignature
 
   for (const transaction of transactions) {
-    transaction.sign([payer])
+    // Refresh the blockhash for each transaction, as the blockhash is only valid for a short time
+    // and we spend a lot of time waiting for finalization of the previous transactions.
+    async function attempt() {
+      transaction.message.recentBlockhash = (
+        await destination.connection.getLatestBlockhash()
+      ).blockhash
 
-    signature = await destination.connection.sendTransaction(transaction)
-    const latestBlockhash = await destination.connection.getLatestBlockhash()
+      transaction.sign([payer])
 
-    await destination.connection.confirmTransaction(
-      {
-        signature,
-        blockhash: latestBlockhash.blockhash,
-        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-      },
-      'confirmed',
-    )
-    console.log(`Waiting for finalization of ${signature} ...`)
-    await waitForFinalization(destination.connection, signature)
+      signature = await destination.connection.sendTransaction(transaction)
+      const latestBlockhash = await destination.connection.getLatestBlockhash()
+
+      console.log(`Confirming ${signature} ...`)
+      await destination.connection.confirmTransaction(
+        {
+          signature,
+          blockhash: latestBlockhash.blockhash,
+          lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+        },
+        'confirmed',
+      )
+      console.log(`Waiting for finalization of ${signature} ...`)
+      await waitForFinalization(destination.connection, signature)
+    }
+
+    async function attemptWithRetry(currentAttempt: number, maxAttempts: number) {
+      try {
+        await attempt()
+      } catch (e) {
+        if (
+          currentAttempt <= maxAttempts &&
+          e instanceof SendTransactionError &&
+          isCannotCloseTableUntilDeactivated(e)
+        ) {
+          const waitTimeSeconds = 30 // the maxAttempts * waitTimeSeconds should be greater than the cool-down period
+          console.error(
+            `Closing of lookup table failed (attempt ${currentAttempt} of ${maxAttempts}) because it has recently been deactivated and the cool-down period has not completed.\nWaiting ${waitTimeSeconds}s before retrying ...`,
+          )
+          await new Promise((resolve) => setTimeout(resolve, waitTimeSeconds * 1000))
+          await attemptWithRetry(currentAttempt + 1, maxAttempts)
+        } else {
+          console.error(`Transaction failed (attempt ${currentAttempt} of ${maxAttempts}):`, e)
+          throw e
+        }
+      }
+    }
+
+    await attemptWithRetry(1, 10)
   }
 
   const url_terminator_map: Record<string, string> = {
