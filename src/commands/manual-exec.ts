@@ -1,10 +1,5 @@
 import type { AnchorProvider } from '@coral-xyz/anchor'
-import {
-  type Keypair,
-  type TransactionSignature,
-  type VersionedTransaction,
-  SendTransactionError,
-} from '@solana/web3.js'
+import { type Keypair, type TransactionSignature, SendTransactionError } from '@solana/web3.js'
 import type { JsonRpcApiProvider, Provider } from 'ethers'
 import { discoverOffRamp } from '../lib/execution.ts'
 import {
@@ -31,6 +26,7 @@ import {
 } from '../lib/index.ts'
 import { isSupportedSolanaCluster } from '../lib/solana/getClusterByChainSelectorName.ts'
 import {
+  type ManualExecTxs,
   buildManualExecutionTxWithSolanaDestination,
   newAnchorProvider,
 } from '../lib/solana/manuallyExecuteSolana.ts'
@@ -126,12 +122,21 @@ function isCannotCloseTableUntilDeactivated(e: SendTransactionError): boolean {
 async function doManuallyExecuteSolana(
   payer: Keypair,
   destination: AnchorProvider,
-  transactions: VersionedTransaction[],
+  manualExecTxs: ManualExecTxs,
   cluster: string,
 ) {
+  const url_terminator_map: Record<string, string> = {
+    'solana-devnet': 'devnet',
+    'solana-mainnet': '',
+    'solana-testnet': 'testnet',
+  }
+  const url_terminator = url_terminator_map[cluster] ?? cluster
+
   let signature!: TransactionSignature
 
-  for (const transaction of transactions) {
+  const N = manualExecTxs.transactions.length
+
+  for (const [i, transaction] of manualExecTxs.transactions.entries()) {
     // Refresh the blockhash for each transaction, as the blockhash is only valid for a short time
     // and we spend a lot of time waiting for finalization of the previous transactions.
     async function attempt() {
@@ -144,7 +149,7 @@ async function doManuallyExecuteSolana(
       signature = await destination.connection.sendTransaction(transaction)
       const latestBlockhash = await destination.connection.getLatestBlockhash()
 
-      console.log(`Confirming ${signature} ...`)
+      console.log(`Confirming tx #${i + 1} of ${N}: ${signature} ...`)
       await destination.connection.confirmTransaction(
         {
           signature,
@@ -153,8 +158,18 @@ async function doManuallyExecuteSolana(
         },
         'confirmed',
       )
-      console.log(`Waiting for finalization of ${signature} ...`)
+      console.log(`Waiting for finalization #${i + 1} of ${N} ...`)
       await waitForFinalization(destination.connection, signature)
+
+      if (i == manualExecTxs.manualExecIdx) {
+        console.log(
+          `✅🚀🚀🚀 Solana manualExec transaction finalized: https://explorer.solana.com/tx/${signature}?cluster=${url_terminator} 🚀🚀🚀`,
+        )
+      } else {
+        console.log(
+          `✅ Solana transaction finalized: https://explorer.solana.com/tx/${signature}?cluster=${url_terminator}`,
+        )
+      }
     }
 
     async function attemptWithRetry(currentAttempt: number, maxAttempts: number) {
@@ -181,16 +196,6 @@ async function doManuallyExecuteSolana(
 
     await attemptWithRetry(1, 10)
   }
-
-  const url_terminator_map: Record<string, string> = {
-    'solana-devnet': 'devnet',
-    'solana-mainnet': '',
-    'solana-testnet': 'testnet',
-  }
-  const url_terminator = url_terminator_map[cluster] ?? cluster
-  console.log(
-    `🚀 Solana manualExec transaction confirmed: https://explorer.solana.com/tx/${signature}?cluster=${url_terminator}`,
-  )
 }
 
 async function manualExecEvmDestination(

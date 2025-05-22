@@ -67,6 +67,8 @@ type ManualExecAlt = {
   closeTxs: web3.VersionedTransaction[]
 }
 
+export type ManualExecTxs = { transactions: VersionedTransaction[]; manualExecIdx: number }
+
 export async function buildManualExecutionTxWithSolanaDestination<
   V extends SupportedSolanaCCIPVersion,
 >(
@@ -77,7 +79,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
   forceBuffer: boolean,
   forceLookupTable: boolean,
   computeUnitsOverride: number | undefined,
-): Promise<VersionedTransaction[]> {
+): Promise<ManualExecTxs> {
   const offrampProgram = getCcipOfframp({
     ccipVersion: CCIPVersion.V1_6,
     address: offrampAddress,
@@ -238,10 +240,13 @@ export async function buildManualExecutionTxWithSolanaDestination<
   const transaction = new VersionedTransaction(messageV0)
 
   if (alt) {
-    return [...alt.initialTxs, transaction, ...alt.closeTxs]
+    return {
+      transactions: [...alt.initialTxs, transaction, ...alt.closeTxs],
+      manualExecIdx: alt.initialTxs.length,
+    }
   }
 
-  return [transaction]
+  return { transactions: [transaction], manualExecIdx: 0 }
 }
 
 export function newAnchorProvider(chainName: string, keypairFile: string | undefined) {
@@ -294,7 +299,7 @@ async function bufferedTransactions(
   blockhash: string,
   addressLookupTableAccounts: AddressLookupTableAccount[],
   alt: ManualExecAlt | undefined,
-): Promise<VersionedTransaction[]> {
+): Promise<ManualExecTxs> {
   // Arbitrary as long as there's consistency for all translations.
   const bufferId = {
     bytes: Array.from(randomBytes(32)),
@@ -385,10 +390,16 @@ async function bufferedTransactions(
   bufferedExecTxs.push(new VersionedTransaction(messageV0))
 
   if (alt) {
-    return [...alt.initialTxs, ...bufferedExecTxs, ...alt.closeTxs]
+    return {
+      transactions: [...alt.initialTxs, ...bufferedExecTxs, ...alt.closeTxs],
+      manualExecIdx: alt.initialTxs.length + bufferedExecTxs.length - 1,
+    }
   }
 
-  return bufferedExecTxs
+  return {
+    transactions: bufferedExecTxs,
+    manualExecIdx: bufferedExecTxs.length - 1,
+  }
 }
 
 function toVersionedTransaction(
