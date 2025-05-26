@@ -22,7 +22,7 @@ import { Providers } from './providers.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.2.6-d4c4aa9'
+const VERSION = '0.2.6-c810a2b'
 // generate:end
 
 async function main() {
@@ -148,6 +148,12 @@ async function main() {
             'solana-force-buffer': {
               type: 'boolean',
               describe: 'Forces the usage of a buffering contract for Solana manual execution.',
+              default: false,
+            },
+            'solana-force-lookup-table': {
+              type: 'boolean',
+              describe:
+                'Forces the creation & usage of an ad-hoc lookup table for Solana manual execution.',
               default: false,
             },
             'solana-cu-limit': {

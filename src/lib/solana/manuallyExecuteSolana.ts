@@ -1,18 +1,19 @@
-import {
-  AddressLookupTableAccount,
-  PublicKey,
-  SystemProgram,
-  Transaction,
-  TransactionInstruction,
-  type AccountMeta,
-} from '@solana/web3.js'
+import { randomBytes } from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { AnchorProvider, BorshCoder, Program, Wallet, type Idl } from '@coral-xyz/anchor'
+import { type Idl, type web3, AnchorProvider, BorshCoder, Program, Wallet } from '@coral-xyz/anchor'
+import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types'
 import {
+  type AccountMeta,
+  type Transaction,
+  type TransactionInstruction,
+  AddressLookupTableAccount,
+  AddressLookupTableProgram,
   ComputeBudgetProgram,
   Connection,
   Keypair,
+  PublicKey,
+  SystemProgram,
   TransactionMessage,
   VersionedTransaction,
 } from '@solana/web3.js'
@@ -20,15 +21,13 @@ import type { Layout } from 'buffer-layout'
 import { calculateManualExecProof } from '../execution.ts'
 import { type CCIPMessage, type CCIPRequest, type ExecutionReport, CCIPVersion } from '../types.ts'
 import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
-import { getManuallyExecuteInputs } from './getManuallyExecuteInputs'
+import { getManuallyExecuteInputs } from './getManuallyExecuteInputs.ts'
 import { CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
-import { getCcipOfframp } from './programs/getCcipOfframp'
-import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
-import { simulateUnitsConsumed } from './simulateManuallyExecute'
-import { normalizeExecutionReportForSolana } from './utils.ts'
 import { EXECUTION_BUFFER_IDL } from './programs/1.6.0/EXECUTION_BUFFER.ts'
-import { randomBytes } from 'crypto'
-import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types'
+import { getCcipOfframp } from './programs/getCcipOfframp.ts'
+import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
+import { simulateUnitsConsumed } from './simulateManuallyExecute.ts'
+import { normalizeExecutionReportForSolana } from './utils.ts'
 
 class ExtendedBorshTypesCoder<N extends string = string> extends BorshTypesCoder<N> {
   public constructor(idl: Idl) {
@@ -62,6 +61,14 @@ class AlteredBorshCoder<A extends string = string, T extends string = string> ex
   }
 }
 
+type ManualExecAlt = {
+  addressLookupTableAccount: AddressLookupTableAccount
+  initialTxs: web3.VersionedTransaction[]
+  closeTxs: web3.VersionedTransaction[]
+}
+
+export type ManualExecTxs = { transactions: VersionedTransaction[]; manualExecIdx: number }
+
 export async function buildManualExecutionTxWithSolanaDestination<
   V extends SupportedSolanaCCIPVersion,
 >(
@@ -70,8 +77,9 @@ export async function buildManualExecutionTxWithSolanaDestination<
   offrampAddress: string,
   bufferProgramAddress: string,
   forceBuffer: boolean,
+  forceLookupTable: boolean,
   computeUnitsOverride: number | undefined,
-): Promise<VersionedTransaction[]> {
+): Promise<ManualExecTxs> {
   const offrampProgram = getCcipOfframp({
     ccipVersion: CCIPVersion.V1_6,
     address: offrampAddress,
@@ -92,10 +100,10 @@ export async function buildManualExecutionTxWithSolanaDestination<
     message: ccipRequest.message as CCIPMessage<typeof CCIPVersion.V1_6>,
     proofs,
     // Offchain token data is unsupported for manual exec
-    offchainTokenData: new Array(ccipRequest.message.tokenAmounts.length).fill('0x'),
+    offchainTokenData: new Array(ccipRequest.message.tokenAmounts.length).fill('0x') as string[],
   })
 
-  const payerAddress = destinationProvider.wallet.publicKey.toBase58()
+  const payerAddress = destinationProvider.wallet.publicKey
 
   const { executionReport, tokenIndexes, accounts, remainingAccounts, addressLookupTableAccounts } =
     await getManuallyExecuteInputs({
@@ -103,7 +111,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
       connection: destinationProvider.connection,
       offrampProgram,
       root: merkleRoot,
-      senderAddress: payerAddress,
+      senderAddress: payerAddress.toBase58(),
     })
 
   const coder = new AlteredBorshCoder(CCIP_OFFRAMP_IDL)
@@ -111,6 +119,75 @@ export async function buildManualExecutionTxWithSolanaDestination<
   const serializedTokenIndexes = Buffer.from(tokenIndexes)
 
   const { blockhash } = await destinationProvider.connection.getLatestBlockhash()
+
+  console.log('ForceLookupTable', forceLookupTable)
+
+  const alt: ManualExecAlt | undefined = !forceLookupTable
+    ? undefined
+    : await (async () => {
+        const recentSlot = await destinationProvider.connection.getSlot('finalized')
+
+        const [createIx, altAddr] = AddressLookupTableProgram.createLookupTable({
+          authority: payerAddress,
+          payer: payerAddress,
+          recentSlot,
+        })
+        console.log('Using Address Lookup Table', altAddr.toBase58())
+
+        const addresses = [...Object.values(accounts), ...remainingAccounts.map((a) => a.pubkey)]
+
+        if (addresses.length > 256) {
+          throw new Error(
+            `The number of addresses (${addresses.length}) exceeds the maximum limit imposed by Solana of 256 for Address Lookup Tables`,
+          )
+        }
+
+        // 1232 bytes is the max size of a transaction, 32 bytes used for each address.
+        // Setting a max of 30 addresses per transaction to avoid exceeding the limit.
+        // 1232 / 32 = 38.5, so we set it to 30 to be safe.
+        const maxAddressesPerTx = 30
+        const extendIxs: TransactionInstruction[] = []
+        for (let i = 0; i < addresses.length; i += maxAddressesPerTx) {
+          const end = Math.min(i + maxAddressesPerTx, addresses.length)
+          const addressesChunk = addresses.slice(i, end)
+          const extendIx = AddressLookupTableProgram.extendLookupTable({
+            payer: payerAddress,
+            authority: payerAddress,
+            lookupTable: altAddr,
+            addresses: addressesChunk,
+          })
+          extendIxs.push(extendIx)
+        }
+
+        const deactivateIx = AddressLookupTableProgram.deactivateLookupTable({
+          lookupTable: altAddr,
+          authority: payerAddress,
+        })
+
+        const closeIx = AddressLookupTableProgram.closeLookupTable({
+          authority: payerAddress,
+          lookupTable: altAddr,
+          recipient: payerAddress,
+        })
+
+        return {
+          addressLookupTableAccount: new AddressLookupTableAccount({
+            key: altAddr,
+            state: {
+              deactivationSlot: BigInt(0),
+              lastExtendedSlot: recentSlot,
+              lastExtendedSlotStartIndex: 0,
+              addresses,
+            },
+          }),
+          initialTxs: [createIx, ...extendIxs].map((ix) =>
+            toVersionedTransaction(ix, payerAddress, blockhash),
+          ),
+          closeTxs: [deactivateIx, closeIx].map((ix) =>
+            toVersionedTransaction(ix, payerAddress, blockhash),
+          ),
+        }
+      })()
 
   if (forceBuffer) {
     console.log(
@@ -126,6 +203,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
       computeUnitsOverride,
       blockhash,
       addressLookupTableAccounts,
+      alt,
     )
   }
 
@@ -161,7 +239,14 @@ export async function buildManualExecutionTxWithSolanaDestination<
   const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
   const transaction = new VersionedTransaction(messageV0)
 
-  return [transaction]
+  if (alt) {
+    return {
+      transactions: [...alt.initialTxs, transaction, ...alt.closeTxs],
+      manualExecIdx: alt.initialTxs.length,
+    }
+  }
+
+  return { transactions: [transaction], manualExecIdx: 0 }
 }
 
 export function newAnchorProvider(chainName: string, keypairFile: string | undefined) {
@@ -213,7 +298,8 @@ async function bufferedTransactions(
   computeUnitsOverride: number | undefined,
   blockhash: string,
   addressLookupTableAccounts: AddressLookupTableAccount[],
-): Promise<VersionedTransaction[]> {
+  alt: ManualExecAlt | undefined,
+): Promise<ManualExecTxs> {
   // Arbitrary as long as there's consistency for all translations.
   const bufferId = {
     bytes: Array.from(randomBytes(32)),
@@ -240,7 +326,7 @@ async function bufferedTransactions(
     destinationProvider,
   )
 
-  const transactions: VersionedTransaction[] = []
+  const bufferedExecTxs: VersionedTransaction[] = []
 
   const bufferingAccounts = {
     bufferedReport: bufferAddress,
@@ -251,7 +337,9 @@ async function bufferedTransactions(
     .initializeExecutionReportBuffer(bufferId)
     .accounts(bufferingAccounts)
     .transaction()
-  transactions.push(toVersionedTransaction(initTx, destinationProvider.wallet.publicKey, blockhash))
+  bufferedExecTxs.push(
+    toVersionedTransaction(initTx, destinationProvider.wallet.publicKey, blockhash),
+  )
 
   for (let i = 0; i < serializedReport.length; i += chunkSize) {
     const end = Math.min(i + chunkSize, serializedReport.length)
@@ -261,7 +349,7 @@ async function bufferedTransactions(
       .appendExecutionReportData(bufferId, chunk)
       .accounts(bufferingAccounts)
       .transaction()
-    transactions.push(
+    bufferedExecTxs.push(
       toVersionedTransaction(appendTx, destinationProvider.wallet.publicKey, blockhash),
     )
   }
@@ -293,18 +381,33 @@ async function bufferedTransactions(
     recentBlockhash: blockhash,
     instructions: finalInstructions,
   })
-  const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
-  transactions.push(new VersionedTransaction(messageV0))
 
-  return transactions
+  const altAccs = [...addressLookupTableAccounts]
+  if (alt) {
+    altAccs.push(alt.addressLookupTableAccount)
+  }
+  const messageV0 = message.compileToV0Message(altAccs)
+  bufferedExecTxs.push(new VersionedTransaction(messageV0))
+
+  if (alt) {
+    return {
+      transactions: [...alt.initialTxs, ...bufferedExecTxs, ...alt.closeTxs],
+      manualExecIdx: alt.initialTxs.length + bufferedExecTxs.length - 1,
+    }
+  }
+
+  return {
+    transactions: bufferedExecTxs,
+    manualExecIdx: bufferedExecTxs.length - 1,
+  }
 }
 
 function toVersionedTransaction(
-  tx: Transaction,
+  input: Transaction | TransactionInstruction,
   payerKey: PublicKey,
   blockhash: string,
 ): VersionedTransaction {
-  const instructions = tx.instructions
+  const instructions: TransactionInstruction[] = isTransaction(input) ? input.instructions : [input]
 
   const message = new TransactionMessage({
     payerKey,
@@ -312,4 +415,8 @@ function toVersionedTransaction(
     instructions,
   })
   return new VersionedTransaction(message.compileToV0Message())
+}
+
+function isTransaction(input: Transaction | TransactionInstruction): input is Transaction {
+  return (input as Transaction).signatures !== undefined
 }
