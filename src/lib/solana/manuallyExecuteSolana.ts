@@ -6,7 +6,7 @@ import {
   TransactionInstruction,
   type AccountMeta,
 } from '@solana/web3.js'
-import fs from 'fs'
+import fs, { access } from 'fs'
 import path from 'path'
 import { AnchorProvider, BorshCoder, Program, Wallet, type Idl } from '@coral-xyz/anchor'
 import {
@@ -26,8 +26,6 @@ import { getCcipOfframp } from './programs/getCcipOfframp'
 import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
 import { simulateUnitsConsumed } from './simulateManuallyExecute'
 import { normalizeExecutionReportForSolana } from './utils.ts'
-import { EXECUTION_BUFFER_IDL } from './programs/1.6.0/EXECUTION_BUFFER.ts'
-import { randomBytes } from 'crypto'
 import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types'
 
 class ExtendedBorshTypesCoder<N extends string = string> extends BorshTypesCoder<N> {
@@ -68,8 +66,8 @@ export async function buildManualExecutionTxWithSolanaDestination<
   destinationProvider: AnchorProvider,
   ccipRequest: CCIPRequest<V>,
   offrampAddress: string,
-  bufferProgramAddress: string,
   forceBuffer: boolean,
+  clearBufferFirst: boolean,
   computeUnitsOverride: number | undefined,
 ): Promise<VersionedTransaction[]> {
   const offrampProgram = getCcipOfframp({
@@ -114,11 +112,11 @@ export async function buildManualExecutionTxWithSolanaDestination<
 
   if (forceBuffer) {
     console.log(
-      `Execute report will be pre-buffered through the buffering contract ${bufferProgramAddress}. This may take some time.`,
+      `Execute report will be pre-buffered through the offramp. This may take some time.`,
     )
     return bufferedTransactions(
       destinationProvider,
-      bufferProgramAddress,
+      offrampAddress,
       serializedReport,
       serializedTokenIndexes,
       accounts,
@@ -126,6 +124,8 @@ export async function buildManualExecutionTxWithSolanaDestination<
       computeUnitsOverride,
       blockhash,
       addressLookupTableAccounts,
+      merkleRoot,
+      clearBufferFirst
     )
   }
 
@@ -205,60 +205,63 @@ type ManualExecAccounts = {
 
 async function bufferedTransactions(
   destinationProvider: AnchorProvider,
-  bufferProgramAddress: string,
+  offrampAddress: string,
   serializedReport: Buffer,
   serializedTokenIndexes: Buffer<ArrayBuffer>,
-  originalManualExecAccounts: ManualExecAccounts,
-  originalManualExecRemainingAccounts: AccountMeta[],
+  manualExecAccounts: ManualExecAccounts,
+  manualExecRemainingAccounts: AccountMeta[],
   computeUnitsOverride: number | undefined,
   blockhash: string,
   addressLookupTableAccounts: AddressLookupTableAccount[],
+  merkleRoot: string,
+  clearBufferFirst: boolean,
 ): Promise<VersionedTransaction[]> {
+  const offrampProgram = getCcipOfframp({
+    ccipVersion: CCIPVersion.V1_6,
+    address: offrampAddress,
+    provider: destinationProvider,
+  })
+  
   // Arbitrary as long as there's consistency for all translations.
-  const bufferId = {
-    bytes: Array.from(randomBytes(32)),
-  }
+  const bufferId =  Buffer.from(merkleRoot.replace(/^0x/, ''), 'hex')
+  
   const [bufferAddress] = PublicKey.findProgramAddressSync(
     [
-      Buffer.from('execution_buffer'),
+      Buffer.from('execution_report_buffer'),
+      bufferId,
       destinationProvider.wallet.publicKey.toBuffer(),
-      Buffer.from(bufferId.bytes),
     ],
-    new PublicKey(bufferProgramAddress),
+    new PublicKey(offrampAddress),
   )
 
-  const hexBytes = '0x' + bufferId.bytes.map((b) => b.toString(16).padStart(2, '0')).join('')
   console.log(
-    `The bufferID is ${hexBytes}, and the PDA address for the buffer is ${bufferAddress.toString()}. If this buffering process is aborted, remember to manually close the account to recover any spent funds.`,
+    `The bufferID is ${merkleRoot}, and the PDA address for the buffer is ${bufferAddress.toString()}. If this buffering process is aborted, remember to manually close the account to recover any spent funds.`,
   )
 
   const chunkSize = 800
 
-  const bufferingProgram = new Program(
-    EXECUTION_BUFFER_IDL,
-    new PublicKey(bufferProgramAddress),
-    destinationProvider,
-  )
-
   const transactions: VersionedTransaction[] = []
 
+  if (clearBufferFirst) {
+    const clearTx = await offrampProgram.methods.closeExecutionReportBuffer(bufferId).accounts({
+            executionReportBuffer: bufferAddress,
+            authority: destinationProvider.wallet.publicKey,
+        }).transaction()
+      transactions.push(toVersionedTransaction(clearTx, destinationProvider.wallet.publicKey, blockhash))
+  }
+  
   const bufferingAccounts = {
-    bufferedReport: bufferAddress,
+    executionReportBuffer: bufferAddress,
+    config: manualExecAccounts.config,
     authority: destinationProvider.wallet.publicKey,
     systemProgram: SystemProgram.programId,
   }
-  const initTx = await bufferingProgram.methods
-    .initializeExecutionReportBuffer(bufferId)
-    .accounts(bufferingAccounts)
-    .transaction()
-  transactions.push(toVersionedTransaction(initTx, destinationProvider.wallet.publicKey, blockhash))
-
   for (let i = 0; i < serializedReport.length; i += chunkSize) {
     const end = Math.min(i + chunkSize, serializedReport.length)
     const chunk: Buffer = serializedReport.subarray(i, end)
 
-    const appendTx = await bufferingProgram.methods
-      .appendExecutionReportData(bufferId, chunk)
+    const appendTx = await offrampProgram.methods
+      .bufferExecutionReport(bufferId, serializedReport.length, chunk, i/chunkSize)
       .accounts(bufferingAccounts)
       .transaction()
     transactions.push(
@@ -266,26 +269,28 @@ async function bufferedTransactions(
     )
   }
 
-  const executeTx = await bufferingProgram.methods
-    .manuallyExecuteBuffered(bufferId, serializedTokenIndexes)
-    .accounts({
-      ...originalManualExecAccounts,
-      bufferedReport: bufferAddress,
+  manualExecRemainingAccounts.push({
+      pubkey: new PublicKey(bufferAddress),
+      isWritable: true,
+      isSigner: false,
     })
-    .remainingAccounts(originalManualExecRemainingAccounts)
+
+  const executeTx = await offrampProgram.methods
+    .manuallyExecute(Buffer.alloc(0), serializedTokenIndexes)
+    .accounts(manualExecAccounts)
+    .remainingAccounts(manualExecRemainingAccounts)
     .transaction()
 
-  const executeTxInstructions = executeTx.instructions
-  let finalInstructions: TransactionInstruction[]
 
+  let finalInstructions: TransactionInstruction[]
   if (computeUnitsOverride !== undefined) {
     // Add compute budget instruction at the beginning of instructions
     const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
       units: computeUnitsOverride,
     })
-    finalInstructions = [computeBudgetIx, ...executeTxInstructions]
+    finalInstructions = [computeBudgetIx, ...executeTx.instructions]
   } else {
-    finalInstructions = executeTxInstructions
+    finalInstructions = executeTx.instructions
   }
 
   const message = new TransactionMessage({
@@ -294,7 +299,8 @@ async function bufferedTransactions(
     instructions: finalInstructions,
   })
   const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
-  transactions.push(new VersionedTransaction(messageV0))
+  const execTransaction = new VersionedTransaction(messageV0)
+  transactions.push(execTransaction)
 
   return transactions
 }

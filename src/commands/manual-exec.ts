@@ -54,8 +54,8 @@ export async function manualExec(
     wallet?: string
     solanaOfframp?: string
     solanaKeypair?: string
-    solanaBufferAddress: string
     solanaForceBuffer: boolean
+    solanaClearBufferFirst: boolean
     solanaCuLimit?: number
   },
 ) {
@@ -95,8 +95,8 @@ export async function manualExec(
       anchorProvider,
       request as CCIPRequest<SupportedSolanaCCIPVersion>,
       argv.solanaOfframp,
-      argv.solanaBufferAddress,
       argv.solanaForceBuffer,
+      argv.solanaClearBufferFirst,
       argv.solanaCuLimit,
     )
     await doManuallyExecuteSolana(keypair, anchorProvider, transactions, chainName)
@@ -117,17 +117,9 @@ async function doManuallyExecuteSolana(
   for (const transaction of transactions) {
     transaction.sign([payer])
 
+    const base64 = Buffer.from(transaction.serialize()).toString('base64')
+    console.log(`Serialized: ${base64}`)
     signature = await destination.connection.sendTransaction(transaction)
-    const latestBlockhash = await destination.connection.getLatestBlockhash()
-
-    await destination.connection.confirmTransaction(
-      {
-        signature,
-        blockhash: latestBlockhash.blockhash,
-        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-      },
-      'confirmed',
-    )
     console.log(`Waiting for finalization of ${signature}...`)
     await waitForFinalization(destination.connection, signature)
   }
