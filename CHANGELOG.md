@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2025-05-29
+- fix: decoding of very old v1.2 messages (#33)
+
 ## [0.2.6] - 2025-04-29
 - regression: change source addresses for EVMv1.6 calculateManualExecProof (#31)
 
