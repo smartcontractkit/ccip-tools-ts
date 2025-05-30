@@ -13,14 +13,12 @@ export const simulateUnitsConsumed = async ({
   instructions,
   connection,
   payerKey,
-  blockhash,
   addressLookupTableAccounts = [],
   computeUnitsOverride,
 }: {
   instructions: TransactionInstruction[]
   connection: Connection
   payerKey: PublicKey
-  blockhash: string
   addressLookupTableAccounts?: AddressLookupTableAccount[]
   computeUnitsOverride?: number
 }): Promise<number> => {
@@ -34,7 +32,7 @@ export const simulateUnitsConsumed = async ({
     // Create message with compute budget instruction
     const message = new TransactionMessage({
       payerKey,
-      recentBlockhash: blockhash,
+      recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
       instructions: [computeBudgetIx, ...instructions],
     })
 

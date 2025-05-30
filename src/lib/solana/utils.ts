@@ -1,4 +1,4 @@
-import type { Connection } from '@solana/web3.js'
+import { type Connection } from '@solana/web3.js'
 import type { SourceTokenData } from '../extra-args.ts'
 import type { EVM2AnyMessageSent, ExecutionReport } from '../types.ts'
 
@@ -59,7 +59,7 @@ export async function waitForFinalization(
   connection: Connection,
   signature: string,
   intervalMs = 500,
-  maxAttempts = 100,
+  maxAttempts = 1000,
 ): Promise<void> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const status = await connection.getSignatureStatuses([signature])

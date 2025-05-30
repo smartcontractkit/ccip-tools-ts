@@ -1,5 +1,9 @@
 import type { AnchorProvider } from '@coral-xyz/anchor'
-import { type Keypair, type TransactionSignature, SendTransactionError } from '@solana/web3.js'
+import {
+  type Keypair,
+  type TransactionSignature,
+  SendTransactionError,
+} from '@solana/web3.js'
 import type { JsonRpcApiProvider, Provider } from 'ethers'
 import { discoverOffRamp } from '../lib/execution.ts'
 import {
@@ -56,9 +60,9 @@ export async function manualExec(
     wallet?: string
     solanaOfframp?: string
     solanaKeypair?: string
-    solanaBufferAddress: string
     solanaForceBuffer: boolean
     solanaForceLookupTable: boolean
+    solanaClearBufferFirst: boolean
     solanaCuLimit?: number
   },
 ) {
@@ -98,9 +102,9 @@ export async function manualExec(
       anchorProvider,
       request as CCIPRequest<SupportedSolanaCCIPVersion>,
       argv.solanaOfframp,
-      argv.solanaBufferAddress,
       argv.solanaForceBuffer,
       argv.solanaForceLookupTable,
+      argv.solanaClearBufferFirst,
       argv.solanaCuLimit,
     )
     await doManuallyExecuteSolana(keypair, anchorProvider, transactions, chainName)
