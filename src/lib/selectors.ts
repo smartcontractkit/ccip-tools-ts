@@ -260,6 +260,7 @@ const selectors: Selectors = {
     name: 'ethereum-testnet-sepolia-immutable-zkevm-1',
   },
   '16600': { selector: 16088006396410204581n, name: '0g-testnet-newton' },
+  '16601': { selector: 2131427466778448014n, name: '0g-testnet-galileo' },
   '17000': { selector: 7717148896336251131n, name: 'ethereum-testnet-holesky' },
   '31337': { selector: 7759470850252068959n, name: 'anvil-devnet' },
   '33111': { selector: 9900119385908781505n, name: 'apechain-testnet-curtis' },
@@ -281,6 +282,7 @@ const selectors: Selectors = {
   '44787': { selector: 3552045678561919002n, name: 'celo-testnet-alfajores' },
   '45439': { selector: 8446413392851542429n, name: 'private-testnet-opala' },
   '47763': { selector: 7222032299962346917n, name: 'neox-mainnet' },
+  '48898': { selector: 13781831279385219069n, name: 'zircuit-testnet-garfield' },
   '48899': {
     selector: 4562743618362911021n,
     name: 'ethereum-testnet-sepolia-zircuit-1',
@@ -331,6 +333,7 @@ const selectors: Selectors = {
   '98866': { selector: 17912061998839310979n, name: 'plume-mainnet' },
   '98867': { selector: 13874588925447303949n, name: 'plume-testnet-sepolia' },
   '128123': { selector: 1910019406958449359n, name: 'etherlink-testnet' },
+  '129399': { selector: 9090863410735740267n, name: 'polygon-testnet-tatara' },
   '167000': { selector: 16468599424800719238n, name: 'ethereum-mainnet-taiko-1' },
   '167009': {
     selector: 7248756420937879088n,
@@ -377,6 +380,7 @@ const selectors: Selectors = {
     name: 'ethereum-testnet-sepolia-polygon-validium-1',
   },
   '743111': { selector: 16126893759944359622n, name: 'hemi-testnet-sepolia' },
+  '747474': { selector: 2459028469735686113n, name: 'polygon-mainnet-katana' },
   '763373': { selector: 9763904284804119144n, name: 'ink-testnet-sepolia' },
   '807424': { selector: 14632960069656270105n, name: 'nexon-qa' },
   '808813': {
