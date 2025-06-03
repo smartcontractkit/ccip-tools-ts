@@ -82,8 +82,10 @@ export async function retrySendTransaction(
   let lastError: unknown
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
+      const base64 = Buffer.from(transaction.serialize()).toString('base64')
+      console.log(`Sending transaction, attempt ${attempt + 1}. Serialized: ${base64}`)
       const sig = await connection.sendTransaction(transaction)
-      console.log(`Sent transaction ${sig}, attempt ${attempt + 1}`)
+      console.log(`Sent transaction ${sig}`)
       return sig
     } catch (err) {
       lastError = err
