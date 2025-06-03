@@ -1,6 +1,6 @@
 import type { SourceTokenData } from '../extra-args.ts'
 import type { EVM2AnyMessageSent, ExecutionReport } from '../types.ts'
-import { Connection } from '@solana/web3.js'
+import { Connection, VersionedTransaction } from '@solana/web3.js'
 
 export type MessageWithAccounts = ExecutionReport['message'] & {
   tokenReceiver: string
@@ -59,7 +59,7 @@ export async function waitForFinalization(
   connection: Connection,
   signature: string,
   intervalMs = 500,
-  maxAttempts = 100,
+  maxAttempts = 1000,
 ): Promise<void> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const status = await connection.getSignatureStatuses([signature])
@@ -72,4 +72,25 @@ export async function waitForFinalization(
   }
 
   throw new Error(`Transaction ${signature} not finalized after timeout`)
+}
+
+export async function retrySendTransaction(
+  connection: Connection,
+  transaction: VersionedTransaction,
+  maxRetries = 5,
+): Promise<string> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const sig = await connection.sendTransaction(transaction)
+      console.log(`Sent transaction ${sig}, attempt ${attempt + 1}`)
+      return sig
+    } catch (err) {
+      lastError = err
+      console.error(`Send attempt ${attempt + 1} failed: ${err}`)
+      await new Promise((res) => setTimeout(res, 1000 * (attempt + 1))) // Exponential backoff
+    }
+  }
+
+  throw new Error(`Failed to send transaction after ${maxRetries} attempts: ${lastError}`)
 }

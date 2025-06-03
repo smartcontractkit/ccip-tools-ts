@@ -1,7 +1,12 @@
 import type { AnchorProvider } from '@coral-xyz/anchor'
 import type { JsonRpcApiProvider, Provider } from 'ethers'
 import { discoverOffRamp } from '../lib/execution.ts'
-import { type Keypair, type TransactionSignature, type VersionedTransaction } from '@solana/web3.js'
+import {
+  TransactionMessage,
+  VersionedTransaction,
+  type Keypair,
+  type TransactionSignature,
+} from '@solana/web3.js'
 import {
   type CCIPContract,
   type CCIPContractType,
@@ -26,8 +31,9 @@ import {
 } from '../lib/index.ts'
 import { isSupportedSolanaCluster } from '../lib/solana/getClusterByChainSelectorName.ts'
 import {
-  buildManualExecutionTxWithSolanaDestination,
+  buildManualExecutionTxDataWithSolanaDestination,
   newAnchorProvider,
+  type QueuedTransaction,
 } from '../lib/solana/manuallyExecuteSolana.ts'
 import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
 import type { Providers } from '../providers.ts'
@@ -39,7 +45,7 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-import { waitForFinalization } from '../lib/solana/utils.ts'
+import { retrySendTransaction, waitForFinalization } from '../lib/solana/utils.ts'
 
 export async function manualExec(
   providers: Providers,
@@ -91,7 +97,7 @@ export async function manualExec(
     }
 
     const { anchorProvider, keypair } = newAnchorProvider(chainName, argv.solanaKeypair)
-    const transactions = await buildManualExecutionTxWithSolanaDestination(
+    const transactions = await buildManualExecutionTxDataWithSolanaDestination(
       anchorProvider,
       request as CCIPRequest<SupportedSolanaCCIPVersion>,
       argv.solanaOfframp,
@@ -109,27 +115,33 @@ export async function manualExec(
 async function doManuallyExecuteSolana(
   payer: Keypair,
   destination: AnchorProvider,
-  transactions: VersionedTransaction[],
+  queuedTxs: QueuedTransaction[],
   cluster: string,
 ) {
   let signature!: TransactionSignature
 
-  for (const transaction of transactions) {
-    transaction.sign([payer])
+  for (const queued of queuedTxs) {
+    const { blockhash } = await destination.connection.getLatestBlockhash()
 
-    const base64 = Buffer.from(transaction.serialize()).toString('base64')
-    console.log(`Serialized: ${base64}`)
-    signature = await destination.connection.sendTransaction(transaction)
-    console.log(`Waiting for finalization of ${signature}...`)
+    const message = new TransactionMessage({
+      payerKey: payer.publicKey,
+      recentBlockhash: blockhash,
+      instructions: queued.instructions,
+    }).compileToV0Message(queued.addressLookupTableAccounts)
+
+    const tx = new VersionedTransaction(message)
+    tx.sign([payer])
+
+    const signature = await retrySendTransaction(destination.connection, tx)
     await waitForFinalization(destination.connection, signature)
   }
-
   const url_terminator_map: Record<string, string> = {
     'solana-devnet': 'devnet',
     'solana-mainnet': '',
     'solana-testnet': 'testnet',
   }
   const url_terminator = url_terminator_map[cluster] ?? cluster
+
   console.log(
     `🚀 Solana manualExec transaction confirmed: https://explorer.solana.com/tx/${signature}?cluster=${url_terminator}`,
   )

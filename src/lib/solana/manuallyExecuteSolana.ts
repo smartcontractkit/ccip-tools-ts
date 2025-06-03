@@ -2,20 +2,13 @@ import {
   AddressLookupTableAccount,
   PublicKey,
   SystemProgram,
-  Transaction,
   TransactionInstruction,
   type AccountMeta,
 } from '@solana/web3.js'
-import fs, { access } from 'fs'
+import fs from 'fs'
 import path from 'path'
-import { AnchorProvider, BorshCoder, Program, Wallet, type Idl } from '@coral-xyz/anchor'
-import {
-  ComputeBudgetProgram,
-  Connection,
-  Keypair,
-  TransactionMessage,
-  VersionedTransaction,
-} from '@solana/web3.js'
+import { AnchorProvider, BorshCoder, Wallet, type Idl } from '@coral-xyz/anchor'
+import { ComputeBudgetProgram, Connection, Keypair } from '@solana/web3.js'
 import type { Layout } from 'buffer-layout'
 import { calculateManualExecProof } from '../execution.ts'
 import { type CCIPMessage, type CCIPRequest, type ExecutionReport, CCIPVersion } from '../types.ts'
@@ -35,7 +28,7 @@ class ExtendedBorshTypesCoder<N extends string = string> extends BorshTypesCoder
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   public override encode<T = any>(typeName: N, type: T): Buffer {
-    const buffer = Buffer.alloc(3000) // TODO: use a tighter buffer.
+    const buffer = Buffer.alloc(32000) // TODO: use a tighter buffer.
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const layout: Layout<any> | undefined = (this as any).typeLayouts.get(typeName)
     if (!layout) {
@@ -60,7 +53,12 @@ class AlteredBorshCoder<A extends string = string, T extends string = string> ex
   }
 }
 
-export async function buildManualExecutionTxWithSolanaDestination<
+export type QueuedTransaction = {
+  instructions: TransactionInstruction[]
+  addressLookupTableAccounts?: AddressLookupTableAccount[]
+}
+
+export async function buildManualExecutionTxDataWithSolanaDestination<
   V extends SupportedSolanaCCIPVersion,
 >(
   destinationProvider: AnchorProvider,
@@ -69,7 +67,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
   forceBuffer: boolean,
   clearBufferFirst: boolean,
   computeUnitsOverride: number | undefined,
-): Promise<VersionedTransaction[]> {
+): Promise<QueuedTransaction[]> {
   const offrampProgram = getCcipOfframp({
     ccipVersion: CCIPVersion.V1_6,
     address: offrampAddress,
@@ -77,14 +75,14 @@ export async function buildManualExecutionTxWithSolanaDestination<
   })
 
   const TnV = (await offrampProgram.methods.typeVersion().accounts({}).signers([]).view()) as string
-
-  if (TnV != 'ccip-offramp 0.1.0-dev') {
+  if (TnV !== 'ccip-offramp 0.1.0-dev') {
     throw new Error(`Unsupported offramp version: ${TnV}`)
   }
 
   const { proofs, merkleRoot } = calculateManualExecProof([ccipRequest.message], ccipRequest.lane, [
     ccipRequest.message.header.messageId,
   ])
+
   const executionReportRaw: ExecutionReport = normalizeExecutionReportForSolana({
     sourceChainSelector: BigInt(ccipRequest.lane.sourceChainSelector),
     message: ccipRequest.message as CCIPMessage<typeof CCIPVersion.V1_6>,
@@ -108,13 +106,9 @@ export async function buildManualExecutionTxWithSolanaDestination<
   const serializedReport = coder.types.encode('ExecutionReportSingleChain', executionReport)
   const serializedTokenIndexes = Buffer.from(tokenIndexes)
 
-  const { blockhash } = await destinationProvider.connection.getLatestBlockhash()
-
   if (forceBuffer) {
-    console.log(
-      `Execute report will be pre-buffered through the offramp. This may take some time.`,
-    )
-    return bufferedTransactions(
+    console.log(`Execute report will be pre-buffered through the offramp. This may take some time.`)
+    return bufferedTransactionData(
       destinationProvider,
       offrampAddress,
       serializedReport,
@@ -122,10 +116,9 @@ export async function buildManualExecutionTxWithSolanaDestination<
       accounts,
       remainingAccounts,
       computeUnitsOverride,
-      blockhash,
       addressLookupTableAccounts,
       merkleRoot,
-      clearBufferFirst
+      clearBufferFirst,
     )
   }
 
@@ -141,27 +134,21 @@ export async function buildManualExecutionTxWithSolanaDestination<
     instructions: manualExecuteInstructions,
     connection: destinationProvider.connection,
     payerKey: destinationProvider.wallet.publicKey,
-    blockhash,
     addressLookupTableAccounts,
     computeUnitsOverride,
   })
+
   const computeUnitsWithBuffer = Math.ceil(computeUnits * 1.1)
   const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
     units: computeUnitsOverride || computeUnitsWithBuffer,
   })
 
-  // Add compute budget instruction at the beginning of instructions
-  const finalInstructions = [computeBudgetIx, ...manualExecuteInstructions]
-
-  const message = new TransactionMessage({
-    payerKey: destinationProvider.wallet.publicKey,
-    recentBlockhash: blockhash,
-    instructions: finalInstructions,
-  })
-  const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
-  const transaction = new VersionedTransaction(messageV0)
-
-  return [transaction]
+  return [
+    {
+      instructions: [computeBudgetIx, ...manualExecuteInstructions],
+      addressLookupTableAccounts,
+    },
+  ]
 }
 
 export function newAnchorProvider(chainName: string, keypairFile: string | undefined) {
@@ -203,7 +190,7 @@ type ManualExecAccounts = {
   sysvarInstructions: PublicKey
 }
 
-async function bufferedTransactions(
+export async function bufferedTransactionData(
   destinationProvider: AnchorProvider,
   offrampAddress: string,
   serializedReport: Buffer,
@@ -211,20 +198,19 @@ async function bufferedTransactions(
   manualExecAccounts: ManualExecAccounts,
   manualExecRemainingAccounts: AccountMeta[],
   computeUnitsOverride: number | undefined,
-  blockhash: string,
   addressLookupTableAccounts: AddressLookupTableAccount[],
   merkleRoot: string,
   clearBufferFirst: boolean,
-): Promise<VersionedTransaction[]> {
+): Promise<QueuedTransaction[]> {
   const offrampProgram = getCcipOfframp({
     ccipVersion: CCIPVersion.V1_6,
     address: offrampAddress,
     provider: destinationProvider,
   })
-  
-  // Arbitrary as long as there's consistency for all translations.
-  const bufferId =  Buffer.from(merkleRoot.replace(/^0x/, ''), 'hex')
-  
+
+  // Arbitrary as long as there's consistency for all transactions.
+  const bufferId = Buffer.from(merkleRoot.replace(/^0x/, ''), 'hex')
+
   const [bufferAddress] = PublicKey.findProgramAddressSync(
     [
       Buffer.from('execution_report_buffer'),
@@ -239,41 +225,49 @@ async function bufferedTransactions(
   )
 
   const chunkSize = 800
-
-  const transactions: VersionedTransaction[] = []
+  const txQueue: QueuedTransaction[] = []
 
   if (clearBufferFirst) {
-    const clearTx = await offrampProgram.methods.closeExecutionReportBuffer(bufferId).accounts({
-            executionReportBuffer: bufferAddress,
-            authority: destinationProvider.wallet.publicKey,
-        }).transaction()
-      transactions.push(toVersionedTransaction(clearTx, destinationProvider.wallet.publicKey, blockhash))
+    const clearTx = await offrampProgram.methods
+      .closeExecutionReportBuffer(bufferId)
+      .accounts({
+        executionReportBuffer: bufferAddress,
+        authority: destinationProvider.wallet.publicKey,
+      })
+      .transaction()
+
+    txQueue.push({
+      instructions: clearTx.instructions,
+    })
   }
-  
+
   const bufferingAccounts = {
     executionReportBuffer: bufferAddress,
     config: manualExecAccounts.config,
     authority: destinationProvider.wallet.publicKey,
     systemProgram: SystemProgram.programId,
   }
+
   for (let i = 0; i < serializedReport.length; i += chunkSize) {
     const end = Math.min(i + chunkSize, serializedReport.length)
     const chunk: Buffer = serializedReport.subarray(i, end)
 
     const appendTx = await offrampProgram.methods
-      .bufferExecutionReport(bufferId, serializedReport.length, chunk, i/chunkSize)
+      .bufferExecutionReport(bufferId, serializedReport.length, chunk, i / chunkSize)
       .accounts(bufferingAccounts)
       .transaction()
-    transactions.push(
-      toVersionedTransaction(appendTx, destinationProvider.wallet.publicKey, blockhash),
-    )
+
+    txQueue.push({
+      instructions: appendTx.instructions,
+    })
   }
 
+  // Add buffer PDA to execution remaining accounts
   manualExecRemainingAccounts.push({
-      pubkey: new PublicKey(bufferAddress),
-      isWritable: true,
-      isSigner: false,
-    })
+    pubkey: new PublicKey(bufferAddress),
+    isWritable: true,
+    isSigner: false,
+  })
 
   const executeTx = await offrampProgram.methods
     .manuallyExecute(Buffer.alloc(0), serializedTokenIndexes)
@@ -281,41 +275,16 @@ async function bufferedTransactions(
     .remainingAccounts(manualExecRemainingAccounts)
     .transaction()
 
+  const computeBudgetIx = computeUnitsOverride
+    ? ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitsOverride })
+    : null
 
-  let finalInstructions: TransactionInstruction[]
-  if (computeUnitsOverride !== undefined) {
-    // Add compute budget instruction at the beginning of instructions
-    const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
-      units: computeUnitsOverride,
-    })
-    finalInstructions = [computeBudgetIx, ...executeTx.instructions]
-  } else {
-    finalInstructions = executeTx.instructions
-  }
-
-  const message = new TransactionMessage({
-    payerKey: destinationProvider.wallet.publicKey,
-    recentBlockhash: blockhash,
-    instructions: finalInstructions,
+  txQueue.push({
+    instructions: computeBudgetIx
+      ? [computeBudgetIx, ...executeTx.instructions]
+      : executeTx.instructions,
+    addressLookupTableAccounts,
   })
-  const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
-  const execTransaction = new VersionedTransaction(messageV0)
-  transactions.push(execTransaction)
 
-  return transactions
-}
-
-function toVersionedTransaction(
-  tx: Transaction,
-  payerKey: PublicKey,
-  blockhash: string,
-): VersionedTransaction {
-  const instructions = tx.instructions
-
-  const message = new TransactionMessage({
-    payerKey,
-    recentBlockhash: blockhash,
-    instructions,
-  })
-  return new VersionedTransaction(message.compileToV0Message())
+  return txQueue
 }
