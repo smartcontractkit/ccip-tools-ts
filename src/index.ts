@@ -7,7 +7,9 @@ import { hideBin } from 'yargs/helpers'
 
 import {
   Format,
+  applyChainUpdates,
   estimateGas,
+  generateApplyChainUpdatesCalldata,
   manualExec,
   manualExecSenderQueue,
   parseBytes,
@@ -22,7 +24,7 @@ import { Providers } from './providers.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.2.6-1630b9e'
+const VERSION = '0.2.6-3391414'
 // generate:end
 
 async function main() {
@@ -390,6 +392,61 @@ async function main() {
             if (!logParsedError(err)) console.error(err)
           })
           .finally(() => providers.destroy())
+      },
+    )
+    .command(
+      'applyChainUpdates <source> <pool> <json_args>',
+      'apply chain updates to a token pool using a JSON file to pass arguments',
+      (yargs) =>
+        yargs
+          .positional('source', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Source chain name or id to apply updates on',
+            example: 'ethereum-testnet-sepolia',
+          })
+          .positional('pool', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Token pool address to apply updates to',
+            coerce: getAddress,
+          })
+          .positional('json_args', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Path to a JSON file containing chain updates arguments',
+          })
+          .options({
+            wallet: {
+              type: 'string',
+              describe:
+                'Encrypted wallet json file path; password will be prompted if not provided in USER_KEY_PASSWORD envvar',
+            },
+          }),
+      async (argv) => {
+        const providers = new Providers(argv)
+        return applyChainUpdates(providers, argv)
+          .catch((err) => {
+            process.exitCode = 1
+            if (!logParsedError(err)) console.error(err)
+          })
+          .finally(() => providers.destroy())
+      },
+    )
+    .command(
+      'generateApplyChainUpdatesCalldata <json_args>',
+      'generate calldata for applyChainUpdates function, using a JSON file to pass arguments. Useful for working with multisig wallets',
+      (yargs) =>
+        yargs.positional('json_args', {
+          type: 'string',
+          demandOption: true,
+          describe: 'Path to a JSON file containing chain updates arguments',
+        }),
+      async (argv) => {
+        return generateApplyChainUpdatesCalldata(argv).catch((err) => {
+          process.exitCode = 1
+          if (!logParsedError(err)) console.error(err)
+        })
       },
     )
     .demandCommand()

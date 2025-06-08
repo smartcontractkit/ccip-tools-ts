@@ -1,0 +1,20 @@
+{
+    "remoteChainSelectorsToRemove": [],
+    "chainsToAdd": [
+        {
+            "remoteChainSelector": "",
+            "remotePoolAddresses": [],
+            "remoteTokenAddress": "",
+            "outboundRateLimiterConfig": {
+                "isEnabled": false,
+                "capacity": "0",
+                "rate": "0"
+            },
+            "inboundRateLimiterConfig": {
+                "isEnabled": false,
+                "capacity": "0",
+                "rate": "0"
+            }
+        }
+    ]
+}
