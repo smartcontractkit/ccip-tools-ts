@@ -9,7 +9,7 @@ import { Format } from './types.ts'
 import { getWallet } from './utils.ts'
 import type { TypedContract } from 'ethers-abitype'
 
-interface ChainToAdd {
+type ChainToAdd = {
   remoteChainSelector: bigint
   remotePoolAddresses: string[]
   remoteTokenAddress: string
@@ -25,12 +25,63 @@ interface ChainToAdd {
   }
 }
 
+/**
+ * @description Checks if a given string is in a valid Solana address Base58 format.
+ *
+ * Solana addresses are 32-byte arrays encoded with the Bitcoin Base58 alphabet, resulting
+ * in ASCII text strings of 32-44 characters. This function only validates the character
+ * pattern and length.
+ *
+ * @warning Since this function depends on user's input only, it:
+ * - DOES NOT validate if the address is a valid ed25519 public key
+ * - DOES NOT validate checksum (typos cannot be detected)
+ * - Single character typos, reversed characters, and case errors may still pass
+ *
+ * @param address - A string representing a Solana address in Base58 format.
+ * @returns {boolean} - Returns true if the address is valid, false otherwise.
+ */
 function isSolanaAddress(address: string): boolean {
   const SOLANA_ADDRESS_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
 
   return SOLANA_ADDRESS_REGEX.test(address)
 }
 
+/**
+ * @description Converts a Solana address from Base58 format to a 32-byte hex string which CCIP expects.
+ *
+ * If the address is not valid or cannot be decoded to 32 bytes, it returns the original address.
+ *
+ * @param address - A string representing a Solana address in Base58 format.
+ * @returns {string} - Returns the address as a 32-byte hex string prefixed with '0x'.
+ */
+function convertSolanaAddressToBytes32Hex(address: string): string {
+  try {
+    const decoded = bs58.decode(address)
+    if (decoded.length !== 32) {
+      console.warn(
+        `⚠️  Invalid Solana address: "${address}" decoded to ${decoded.length} bytes, expected 32 bytes.`,
+      )
+      return address // Return original address if length is not 32 bytes
+    } else {
+      const hexAddress = '0x' + Buffer.from(decoded).toString('hex')
+      console.warn('Converted Solana Base58 address to 32 bytes hex:', hexAddress)
+      return hexAddress
+    }
+  } catch (error) {
+    console.warn(`⚠️  Error converting Solana address "${address}":`, error)
+    return address // Return original address in case of error
+  }
+}
+
+/**
+ * @description Generates calldata for the `applyChainUpdates` function of the TokenPool.sol smart contract.
+ *
+ * This function is useful if you work with multisig wallets.
+ *
+ * @param argv.json_args - Path to a JSON file containing chain updates arguments.
+ * @param argv.format - The format in which to display the output (log, pretty, or json).
+ * @returns {calldata: string, remoteChainSelectorsToRemove: bigint[], chainsToAdd: ChainToAdd[]}
+ */
 export async function generateApplyChainUpdatesCalldata(argv: {
   json_args: string // Path to a JSON file containing chain updates arguments
   format: Format
@@ -39,6 +90,9 @@ export async function generateApplyChainUpdatesCalldata(argv: {
   remoteChainSelectorsToRemove: bigint[]
   chainsToAdd: ChainToAdd[]
 }> {
+  // ================================================================
+  // │              Extract Arguments from JSON File                │
+  // ================================================================
   const argsContent = await readFile(argv.json_args, 'utf-8')
   const args = JSON.parse(argsContent)
 
@@ -58,26 +112,24 @@ export async function generateApplyChainUpdatesCalldata(argv: {
 
   chainsToAdd = chainsToAdd.map((chain) => ({
     ...chain,
-    remotePoolAddresses: chain.remotePoolAddresses.map((addr: string) => {
-      if (isSolanaAddress(addr)) {
-        console.warn('\nDetected Solana pool address:', addr)
-        const hexAddr = '0x' + Buffer.from(bs58.decode(addr)).toString('hex')
-
-        console.warn('Converted Solana Base58 address to 32 bytes hex:', hexAddr)
-        return hexAddr
+    remotePoolAddresses: chain.remotePoolAddresses.map((address: string) => {
+      if (isSolanaAddress(address)) {
+        console.warn('\nDetected Solana pool address:', address)
+        return convertSolanaAddressToBytes32Hex(address)
       }
-      return addr
+      return address
     }),
     remoteTokenAddress: isSolanaAddress(chain.remoteTokenAddress)
       ? (() => {
           console.warn('\nDetected Solana token address:', chain.remoteTokenAddress)
-          const hexAddr = '0x' + Buffer.from(bs58.decode(chain.remoteTokenAddress)).toString('hex')
-          console.warn('Converted Solana Base58 address to 32 bytes hex:', hexAddr)
-          return hexAddr
+          return convertSolanaAddressToBytes32Hex(chain.remoteTokenAddress)
         })()
       : chain.remoteTokenAddress,
   }))
 
+  // ================================================================
+  // │                     Generate Calldata                        │
+  // ================================================================
   const poolContractInterface = new Interface(TokenPoolABI)
 
   const calldata = poolContractInterface.encodeFunctionData('applyChainUpdates', [
@@ -85,11 +137,14 @@ export async function generateApplyChainUpdatesCalldata(argv: {
     chainsToAdd,
   ])
 
+  // ================================================================
+  // │                     Display Arguments                        │
+  // ================================================================
   switch (argv.format) {
     case Format.log:
       console.log({
         remoteChainSelectorsToRemove,
-        chainsToAdd: chainsToAdd.map((chain) => ({
+        chainsToAdd: chainsToAdd.map((chain: ChainToAdd) => ({
           ...chain,
           remotePoolAddresses: chain.remotePoolAddresses.join(', '),
         })),
@@ -100,7 +155,7 @@ export async function generateApplyChainUpdatesCalldata(argv: {
       console.table(remoteChainSelectorsToRemove.map((selector) => ({ selector })))
 
       console.log('\nchainsToAdd:')
-      chainsToAdd.forEach((chain, i) => {
+      chainsToAdd.forEach((chain: ChainToAdd, i: number) => {
         console.log(`\nChain at index[${i}]:`)
         console.table({
           remoteChainSelector: chain.remoteChainSelector,
@@ -135,6 +190,17 @@ export async function generateApplyChainUpdatesCalldata(argv: {
   return { calldata, remoteChainSelectorsToRemove, chainsToAdd }
 }
 
+/**
+ * @description Calls the `applyChainUpdates` function of the TokenPool.sol smart contract.
+ *
+ * @param providers - An instance of Providers to get the correct chain provider.
+ * @param argv.source - The source chain's EIP-155 chainID or string chain name.
+ * @param argv.pool - The address of the TokenPool.sol smart contract.
+ * @param argv.json_args - Path to a JSON file containing chain updates arguments.
+ * @param argv.format - The format in which to display the output (log, pretty, or json).
+ * @param argv.wallet - Optional wallet address to use for signing the transaction.
+ * @returns {Promise<void>}
+ */
 export async function applyChainUpdates(
   providers: Providers,
   argv: {
@@ -164,7 +230,9 @@ export async function applyChainUpdates(
     chainsToAdd,
   )
 
-  // Validate calldata
+  // ================================================================
+  // │                     Validate Calldata                        │
+  // ================================================================
   if (calldata !== txRequest.data) {
     console.warn('\n⚠️  WARNING: Calldata mismatch detected!')
     console.warn('Generated calldata differs from the one displayed in terminal.')
@@ -191,8 +259,11 @@ export async function applyChainUpdates(
     console.log('✅ Calldata validation passed')
   }
 
-  // Estimate gas
+  // ================================================================
+  // │                        Estimate Gas                          │
+  // ================================================================
   let gasEstimate
+  console.log('\nEstimating gas for the transaction...')
   try {
     gasEstimate = await source.estimateGas({
       to: txRequest.to,
@@ -204,6 +275,9 @@ export async function applyChainUpdates(
     console.warn(`⚠️  Gas estimation failed`)
   }
 
+  // ================================================================
+  // │                 Display Transaction Preview                  │
+  // ================================================================
   console.log('\nTransaction Preview:')
   switch (argv.format) {
     case Format.log:
@@ -242,7 +316,10 @@ export async function applyChainUpdates(
       break
   }
 
-  // Simulation
+  // ================================================================
+  // │                        Tx Simulation                         │
+  // ================================================================
+  console.log('\nSimulating transaction to check for potential errors...')
   try {
     await poolContract.applyChainUpdates.staticCall(remoteChainSelectorsToRemove, chainsToAdd)
   } catch (error) {
@@ -251,7 +328,9 @@ export async function applyChainUpdates(
     )
   }
 
-  // Ask for confirmation
+  // ================================================================
+  // │                      User Confirmation                       │
+  // ================================================================
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -265,7 +344,9 @@ export async function applyChainUpdates(
     return
   }
 
-  // Execute the transaction
+  // ================================================================
+  // │                     Execute Transaction                      │
+  // ================================================================
   console.log('\nExecuting transaction...')
 
   try {
