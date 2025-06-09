@@ -1,5 +1,4 @@
-import type { PublicKey } from '@solana/web3.js'
-import type { Connection } from '@solana/web3.js'
+import type { Connection, PublicKey } from '@solana/web3.js'
 
 export async function getAddressLookupTableAccount({
   connection,

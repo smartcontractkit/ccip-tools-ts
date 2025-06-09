@@ -22,7 +22,7 @@ import { Providers } from './providers.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.2.6-48a0e6b'
+const VERSION = '0.2.6-d8154ad'
 // generate:end
 
 async function main() {

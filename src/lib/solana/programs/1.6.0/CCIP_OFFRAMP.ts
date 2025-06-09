@@ -1,5 +1,5 @@
 // built from https://github.com/smartcontractkit/chainlink-ccip/tree/main/chains/solana/contracts/programs/ccip-offramp
-import { type Idl } from '@coral-xyz/anchor'
+import type { Idl } from '@coral-xyz/anchor'
 
 export const CCIP_OFFRAMP_IDL = {
   version: '0.1.0-dev',

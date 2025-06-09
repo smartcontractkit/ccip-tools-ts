@@ -1,3 +1,4 @@
+import type { Program } from '@coral-xyz/anchor'
 import {
   type Abi,
   type AbiParameterToPrimitiveType,
@@ -18,7 +19,6 @@ import EVM2EVMOnRamp_1_2_ABI from '../abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from '../abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from '../abi/OnRamp_1_6.ts'
 import type { SourceTokenData, parseExtraArgs } from './extra-args.ts'
-import type { Program } from '@coral-xyz/anchor'
 import type {
   CCIP_SOLANA_VERSION_MAP,
   SolanaCCIPIdl,

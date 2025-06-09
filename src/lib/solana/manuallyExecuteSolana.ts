@@ -29,7 +29,6 @@ import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
 import { simulateUnitsConsumed } from './simulateManuallyExecute.ts'
 import { normalizeExecutionReportForSolana } from './utils.ts'
 
-
 class ExtendedBorshTypesCoder<N extends string = string> extends BorshTypesCoder<N> {
   public constructor(idl: Idl) {
     super(idl)
