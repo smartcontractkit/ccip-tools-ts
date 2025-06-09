@@ -5,7 +5,7 @@ import {
   CCIP_SOLANA_VERSION_MAP,
   SolanaCCIPIdl,
   type SupportedSolanaCCIPVersion,
-} from './versioning'
+} from './versioning.ts'
 
 export const getCcipCommonReadOnly = ({
   ccipVersion,

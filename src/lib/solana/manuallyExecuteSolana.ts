@@ -2,7 +2,7 @@ import { randomBytes } from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { type Idl, type web3, AnchorProvider, BorshCoder, Program, Wallet } from '@coral-xyz/anchor'
-import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types'
+import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types.js'
 import {
   type AccountMeta,
   type Transaction,
@@ -28,6 +28,7 @@ import { getCcipOfframp } from './programs/getCcipOfframp.ts'
 import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
 import { simulateUnitsConsumed } from './simulateManuallyExecute.ts'
 import { normalizeExecutionReportForSolana } from './utils.ts'
+
 
 class ExtendedBorshTypesCoder<N extends string = string> extends BorshTypesCoder<N> {
   public constructor(idl: Idl) {

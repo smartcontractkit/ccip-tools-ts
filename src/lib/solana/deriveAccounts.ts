@@ -1,7 +1,7 @@
 import type { Connection } from '@solana/web3.js'
 import { PublicKey } from '@solana/web3.js'
 import { ethers } from 'ethers'
-import { getReferenceAddresses } from './getReferenceAddresses'
+import { getReferenceAddresses } from './getReferenceAddresses.ts'
 import { BN } from 'bn.js'
 
 type ReferenceAddressesAccounts = {

@@ -171,6 +171,8 @@ const selectors: Selectors = {
   },
   '2020': { selector: 6916147374840168594n, name: 'ronin-mainnet' },
   '2021': { selector: 13116810400804392105n, name: 'ronin-testnet-saigon' },
+  '2023': { selector: 3260900564719373474n, name: 'private-testnet-granite' },
+  '2024': { selector: 6915682381028791124n, name: 'private-testnet-andesite' },
   '2031': {
     selector: 8175830712062617656n,
     name: 'polkadot-mainnet-centrifuge',
@@ -333,10 +335,7 @@ const selectors: Selectors = {
   '98866': { selector: 17912061998839310979n, name: 'plume-mainnet' },
   '98867': { selector: 13874588925447303949n, name: 'plume-testnet-sepolia' },
   '128123': { selector: 1910019406958449359n, name: 'etherlink-testnet' },
-  '129399': {
-    selector: 9090863410735740267n,
-    name: 'polygon-testnet-katana-tatara',
-  },
+  '129399': { selector: 9090863410735740267n, name: 'polygon-testnet-tatara' },
   '167000': { selector: 16468599424800719238n, name: 'ethereum-mainnet-taiko-1' },
   '167009': {
     selector: 7248756420937879088n,
@@ -383,6 +382,7 @@ const selectors: Selectors = {
     name: 'ethereum-testnet-sepolia-polygon-validium-1',
   },
   '743111': { selector: 16126893759944359622n, name: 'hemi-testnet-sepolia' },
+  '747474': { selector: 2459028469735686113n, name: 'polygon-mainnet-katana' },
   '763373': { selector: 9763904284804119144n, name: 'ink-testnet-sepolia' },
   '807424': { selector: 14632960069656270105n, name: 'nexon-qa' },
   '808813': {
