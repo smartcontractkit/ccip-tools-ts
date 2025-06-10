@@ -1,8 +1,7 @@
-import type { Connection } from '@solana/web3.js'
-import { PublicKey } from '@solana/web3.js'
-import { ethers } from 'ethers'
-import { getReferenceAddresses } from './getReferenceAddresses'
+import { type Connection, PublicKey } from '@solana/web3.js'
 import { BN } from 'bn.js'
+import { ethers } from 'ethers'
+import { getReferenceAddresses } from './getReferenceAddresses.ts'
 
 type ReferenceAddressesAccounts = {
   allowedOfframpPubKey: PublicKey

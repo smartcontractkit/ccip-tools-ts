@@ -1,6 +1,6 @@
+import type { Connection } from '@solana/web3.js'
 import type { SourceTokenData } from '../extra-args.ts'
 import type { EVM2AnyMessageSent, ExecutionReport } from '../types.ts'
-import { Connection } from '@solana/web3.js'
 
 export type MessageWithAccounts = ExecutionReport['message'] & {
   tokenReceiver: string

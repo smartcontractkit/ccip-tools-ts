@@ -1,12 +1,16 @@
 import { ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token'
-import type { AccountMeta, AddressLookupTableAccount, Connection } from '@solana/web3.js'
-import { PublicKey } from '@solana/web3.js'
-import { CCIPVersion } from '../types.ts'
-import { getCcipCommonReadOnly } from './programs/getCcipCommon'
-import type { OfframpProgram } from './programs/getCcipOfframp'
-import { getTokenPoolAccountsLookupTable } from './getTokenPoolAccountsLookupTable'
-import type { MessageWithAccounts } from './utils'
+import {
+  type AccountMeta,
+  type AddressLookupTableAccount,
+  type Connection,
+  PublicKey,
+} from '@solana/web3.js'
 import { BN } from 'bn.js'
+import { CCIPVersion } from '../types.ts'
+import { getTokenPoolAccountsLookupTable } from './getTokenPoolAccountsLookupTable.ts'
+import { getCcipCommonReadOnly } from './programs/getCcipCommon.ts'
+import type { OfframpProgram } from './programs/getCcipOfframp.ts'
+import type { MessageWithAccounts } from './utils.ts'
 
 type BuildTokenAccountsParams = {
   connection: Connection
