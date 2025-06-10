@@ -4,7 +4,7 @@ import {
   type SupportedSolanaCCIPVersion,
   CCIP_SOLANA_VERSION_MAP,
   SolanaCCIPIdl,
-} from './versioning'
+} from './versioning.ts'
 
 export const getCcipRouter = ({
   ccipVersion,
