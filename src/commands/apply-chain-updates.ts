@@ -263,7 +263,7 @@ export async function applyChainUpdates(
   // │                        Estimate Gas                          │
   // ================================================================
   let gasEstimate
-  console.log('\nEstimating gas for the transaction...')
+  console.log('\n⏳ Estimating gas for the transaction...')
   try {
     gasEstimate = await source.estimateGas({
       to: txRequest.to,
@@ -271,6 +271,7 @@ export async function applyChainUpdates(
       from: signerAddress,
       value: txRequest.value,
     })
+    console.log('✅ Gas estimation successful!')
   } catch (error) {
     console.warn(`⚠️  Gas estimation failed`)
   }
@@ -294,7 +295,7 @@ export async function applyChainUpdates(
         network: `${network.name} (${network.chainId})`,
         pool: argv.pool,
         signer: signerAddress,
-        estimatedGas: gasEstimate,
+        estimatedGas: gasEstimate?.toString(),
       })
       break
     case Format.json:
@@ -319,12 +320,13 @@ export async function applyChainUpdates(
   // ================================================================
   // │                        Tx Simulation                         │
   // ================================================================
-  console.log('\nSimulating transaction to check for potential errors...')
+  console.log('\n⏳ Simulating transaction to check for potential errors...')
   try {
     await poolContract.applyChainUpdates.staticCall(remoteChainSelectorsToRemove, chainsToAdd)
+    console.log('✅ Transaction simulation successful! No errors detected.')
   } catch (error) {
     console.warn(
-      `Transaction would likely fail with the following error message:\n ${error.message}`,
+      `⚠️ Transaction would likely fail with the following error message:\n ${error.message}`,
     )
   }
 
@@ -347,7 +349,7 @@ export async function applyChainUpdates(
   // ================================================================
   // │                     Execute Transaction                      │
   // ================================================================
-  console.log('\nExecuting transaction...')
+  console.log('\n⏳ Executing transaction...')
 
   try {
     const txResponse = await poolContract.applyChainUpdates(
