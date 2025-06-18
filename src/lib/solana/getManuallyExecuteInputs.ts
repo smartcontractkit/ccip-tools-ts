@@ -6,11 +6,11 @@ import {
 } from '@solana/web3.js'
 import { BN } from 'bn.js'
 import type { ExecutionReport } from '../types.ts'
-import { deriveAccounts } from './deriveAccounts'
-import { deriveTokenAccounts } from './deriveTokenAccounts'
-import { getAddressLookupTableAccount } from './getAddressLookupTableAccount'
-import type { OfframpProgram } from './programs/getCcipOfframp'
-import { type MessageWithAccounts, isMessageWithAccounts } from './utils'
+import { deriveAccounts } from './deriveAccounts.ts'
+import { deriveTokenAccounts } from './deriveTokenAccounts.ts'
+import { getAddressLookupTableAccount } from './getAddressLookupTableAccount.ts'
+import type { OfframpProgram } from './programs/getCcipOfframp.ts'
+import { type MessageWithAccounts, isMessageWithAccounts } from './utils.ts'
 
 function base64ToBuffer(base64: string): Buffer {
   return Buffer.from(base64, 'base64')
@@ -134,21 +134,10 @@ async function getAccounts({
     sysvarInstructions: SYSVAR_INSTRUCTIONS_PUBKEY,
   }
 
-  const remainingAccountsDefault = [
-    {
-      pubkey: new PublicKey(message.receiver),
-      isWritable: false,
-      isSigner: false,
-    },
-    {
-      pubkey: derivedAccounts.externalExecutionConfigPubKey,
-      isWritable: false,
-      isSigner: false,
-    },
-  ]
+  console.log("Message accounts:", message.accounts)
 
   const remainingAccounts =
-    message.accounts?.reduce((acc, pubkey, index) => {
+    message.accounts?.reduce((acc: { pubkey: PublicKey; isWritable: boolean; isSigner: boolean }[], pubkey: string, index: number) => {
       const writableBitmap = new BN(message.accountIsWritableBitmap?.toString() || '0')
       return [
         ...acc,
@@ -158,7 +147,7 @@ async function getAccounts({
           isSigner: false,
         },
       ]
-    }, remainingAccountsDefault) ?? remainingAccountsDefault
+    }, [] as { pubkey: PublicKey; isWritable: boolean; isSigner: boolean }[]) ?? []
 
   const {
     tokenAccounts,

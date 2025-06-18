@@ -1,7 +1,7 @@
 import { type AddressLookupTableAccount, type Connection, PublicKey } from '@solana/web3.js'
 import { CCIPVersion } from '../types.ts'
 import { getAddressLookupTableAccount } from './getAddressLookupTableAccount.ts'
-import { getCcipCommonReadOnly } from './programs/getCcipCommon'
+import { getCcipCommonReadOnly } from './programs/getCcipCommon.ts'
 
 const getTokenPoolAdminRegistryLookupTablePubkey = async ({
   connection,
@@ -20,7 +20,7 @@ const getTokenPoolAdminRegistryLookupTablePubkey = async ({
   const tokenAdminRegistryInfo = await connection.getAccountInfo(tokenAdminRegistry)
 
   if (!tokenAdminRegistryInfo) {
-    throw new Error(`Token admin registry not found for ${mint.toBase58()}`)
+    throw new Error(`Token admin registry not found for ${mint.toBase58()} and TokenAdminRegistry ${tokenAdminRegistry.toBase58()}, router: ${routerPubkey.toBase58()}`)
   }
 
   const program = getCcipCommonReadOnly({

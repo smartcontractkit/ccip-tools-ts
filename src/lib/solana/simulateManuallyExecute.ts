@@ -1,13 +1,15 @@
-import type {
-  Connection,
-  SimulateTransactionConfig,
-  TransactionInstruction,
-  PublicKey,
-  AddressLookupTableAccount,
+import {
+  type AddressLookupTableAccount,
+  type Connection,
+  type PublicKey,
+  type SimulateTransactionConfig,
+  type TransactionInstruction,
+  ComputeBudgetProgram,
+  TransactionMessage,
+  VersionedTransaction,
 } from '@solana/web3.js'
-import { ComputeBudgetProgram, TransactionMessage, VersionedTransaction } from '@solana/web3.js'
 
-export const simulateManuallyExecute = async ({
+export const simulateUnitsConsumed = async ({
   instructions,
   connection,
   payerKey,
