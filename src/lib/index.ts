@@ -14,7 +14,7 @@ export {
 } from './requests.ts'
 export {
   type CCIPCommit,
-  type CCIPContract,
+  type CCIPContractEVM as CCIPContract,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,

@@ -17,7 +17,7 @@ import yaml from 'yaml'
 
 import { parseExtraArgs, parseSourceTokenData } from './extra-args.ts'
 import {
-  type CCIPContract,
+  type CCIPContractEVM,
   type CCIPMessage,
   type CCIPRequest,
   type ChainFamily,
@@ -55,7 +55,7 @@ async function getOnRampInterface(
 export async function getOnRampLane(source: Provider, address: string, destChainSelector?: bigint) {
   return lazyCached(`OnRamp ${address} lane`, async () => {
     const [iface, version] = await getOnRampInterface(source, address)
-    const onRampContract = new Contract(address, iface, source) as unknown as CCIPContract<
+    const onRampContract = new Contract(address, iface, source) as unknown as CCIPContractEVM<
       typeof CCIPContractType.OnRamp,
       typeof version
     >
@@ -82,7 +82,7 @@ export async function getOnRampLane(source: Provider, address: string, destChain
       },
       onRampContract,
     ] as {
-      [V in CCIPVersion]: readonly [Lane<V>, CCIPContract<typeof CCIPContractType.OnRamp, V>]
+      [V in CCIPVersion]: readonly [Lane<V>, CCIPContractEVM<typeof CCIPContractType.OnRamp, V>]
     }[CCIPVersion]
   })
 }
@@ -162,21 +162,14 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
       if (typeof tokenAmount.destExecData === 'string' && tokenAmount.destGasAmount == null) {
         tokenAmount.destGasAmount = getUint(hexlify(getDataBytes(tokenAmount.destExecData)))
       }
-
-      if (tokenAmount.sourcePoolAddress) {
-        tokenAmount.sourcePoolAddress = decodeAddress(
-          tokenAmount.sourcePoolAddress as string,
-          sourceFamily,
-        )
-      }
-
-      if (tokenAmount.destTokenAddress) {
-        tokenAmount.destTokenAddress = decodeAddress(
-          tokenAmount.destTokenAddress as string,
-          destFamily,
-        )
-      }
-
+      tokenAmount.sourcePoolAddress = decodeAddress(
+        tokenAmount.sourcePoolAddress as string,
+        sourceFamily,
+      )
+      tokenAmount.destTokenAddress = decodeAddress(
+        tokenAmount.destTokenAddress as string,
+        destFamily,
+      )
       return tokenAmount
     },
   )

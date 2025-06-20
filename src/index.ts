@@ -22,7 +22,7 @@ import { Providers } from './providers.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.2.7-3391414'
+const VERSION = '0.2.7-f8caa7f'
 // generate:end
 
 async function main() {
@@ -128,6 +128,38 @@ async function main() {
               type: 'string',
               describe:
                 'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar; also supports `ledger[:<derivationPath>]` hardwallet',
+            },
+            'solana-offramp': {
+              type: 'string',
+              describe:
+                'Solana offramp. Must be provided for when Solana is destination, until automated discovery is implemented.',
+            },
+            'solana-keypair': {
+              type: 'string',
+              describe:
+                'Location of the solana keypair to use for manual execution. Defaults to ~/.config/solana/id.json',
+            },
+            'solana-buffer-address': {
+              type: 'string',
+              describe:
+                'Solana buffering contract address. Will be used when a manual exec TX is too large, or when forced with the "--solana-force-buffer" flag.',
+              default: 'Buff7ufrtmskFnHtGd9LXaWSAjX6wAMQ2q2s2WSWoSGS',
+            },
+            'solana-force-buffer': {
+              type: 'boolean',
+              describe: 'Forces the usage of a buffering contract for Solana manual execution.',
+              default: false,
+            },
+            'solana-force-lookup-table': {
+              type: 'boolean',
+              describe:
+                'Forces the creation & usage of an ad-hoc lookup table for Solana manual execution.',
+              default: false,
+            },
+            'solana-cu-limit': {
+              type: 'number',
+              describe:
+                "Overrides Solana manual execution CU limit. Likely necessary for buffered transactions as they aren't estimated.",
             },
             'sender-queue': {
               type: 'boolean',
