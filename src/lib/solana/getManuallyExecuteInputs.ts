@@ -134,20 +134,27 @@ async function getAccounts({
     sysvarInstructions: SYSVAR_INSTRUCTIONS_PUBKEY,
   }
 
-  console.log("Message accounts:", message.accounts)
+  console.log('Message accounts:', message.accounts)
 
   const remainingAccounts =
-    message.accounts?.reduce((acc: { pubkey: PublicKey; isWritable: boolean; isSigner: boolean }[], pubkey: string, index: number) => {
-      const writableBitmap = new BN(message.accountIsWritableBitmap?.toString() || '0')
-      return [
-        ...acc,
-        {
-          pubkey: new PublicKey(pubkey),
-          isWritable: writableBitmap.and(new BN(1).shln(index)).gt(new BN(0)),
-          isSigner: false,
-        },
-      ]
-    }, [] as { pubkey: PublicKey; isWritable: boolean; isSigner: boolean }[]) ?? []
+    message.accounts?.reduce(
+      (
+        acc: { pubkey: PublicKey; isWritable: boolean; isSigner: boolean }[],
+        pubkey: string,
+        index: number,
+      ) => {
+        const writableBitmap = new BN(message.accountIsWritableBitmap?.toString() || '0')
+        return [
+          ...acc,
+          {
+            pubkey: new PublicKey(pubkey),
+            isWritable: writableBitmap.and(new BN(1).shln(index)).gt(new BN(0)),
+            isSigner: false,
+          },
+        ]
+      },
+      [] as { pubkey: PublicKey; isWritable: boolean; isSigner: boolean }[],
+    ) ?? []
 
   const {
     tokenAccounts,
