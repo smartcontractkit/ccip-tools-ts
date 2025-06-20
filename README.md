@@ -93,6 +93,16 @@ the provided message, and executing all of the eligible ones. By default, only p
 can take some time, specially for older messages, as it needs to scan the source and dest networks
 since request, to find messages and their execution state.
 
+
+#### Solana Special Cases
+
+`--solana-force-buffer` to force using a buffer for messages too large to fit in a single transaction
+
+`--solana-force-lookup-table` creates a lookup table for all the accounts used in the message, to fit in the transaction
+
+`--solana-cu-limit <compute_units>` overrides compute units value if the default is not enough, it's a special param for solana, you can not use override gas
+
+
 ### `send`
 
 ```sh
