@@ -59,6 +59,7 @@ jest.mock('ethers', () => ({
 }))
 
 import {
+  decodeMessage,
   fetchAllMessagesInBatch,
   fetchCCIPMessageById,
   fetchCCIPMessageInLog,
