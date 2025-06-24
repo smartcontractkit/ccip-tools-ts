@@ -1,3 +1,7 @@
+import type { AnchorProvider } from '@coral-xyz/anchor'
+import { type Keypair, type TransactionSignature, SendTransactionError } from '@solana/web3.js'
+import type { JsonRpcApiProvider, Provider } from 'ethers'
+import { discoverOffRamp } from '../lib/execution.ts'
 import {
   type CCIPContract,
   type CCIPContractType,
@@ -8,7 +12,7 @@ import {
   bigIntReplacer,
   calculateManualExecProof,
   chainIdFromSelector,
-  discoverOffRamp,
+  chainNameFromSelector,
   estimateExecGasForRequest,
   fetchAllMessagesInBatch,
   fetchCCIPMessageInLog,
@@ -20,6 +24,14 @@ import {
   getSomeBlockNumberBefore,
   lazyCached,
 } from '../lib/index.ts'
+import { isSupportedSolanaCluster } from '../lib/solana/getClusterByChainSelectorName.ts'
+import {
+  type ManualExecTxs,
+  buildManualExecutionTxWithSolanaDestination,
+  newAnchorProvider,
+} from '../lib/solana/manuallyExecuteSolana.ts'
+import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
+import { waitForFinalization } from '../lib/solana/utils.ts'
 import type { Providers } from '../providers.ts'
 import { Format } from './types.ts'
 import {
@@ -41,6 +53,12 @@ export async function manualExec(
     format: Format
     page: number
     wallet?: string
+    solanaOfframp?: string
+    solanaKeypair?: string
+    solanaBufferAddress: string
+    solanaForceBuffer: boolean
+    solanaForceLookupTable: boolean
+    solanaCuLimit?: number
   },
 ) {
   const tx = await providers.getTxReceipt(txHash)
@@ -65,8 +83,136 @@ export async function manualExec(
       break
   }
 
-  const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
+  const chainId = chainIdFromSelector(request.lane.destChainSelector)
+  const chainName = chainNameFromSelector(request.lane.destChainSelector)
+  if (typeof chainId === 'string' && isSupportedSolanaCluster(chainName)) {
+    if (argv.solanaOfframp === undefined) {
+      throw new Error(
+        'Automated offramp discovery not supported yet for SVM: You must provide the offramp address with the --solana-offramp argument.',
+      )
+    }
 
+    const { anchorProvider, keypair } = newAnchorProvider(chainName, argv.solanaKeypair)
+    const transactions = await buildManualExecutionTxWithSolanaDestination(
+      anchorProvider,
+      request as CCIPRequest<SupportedSolanaCCIPVersion>,
+      argv.solanaOfframp,
+      argv.solanaBufferAddress,
+      argv.solanaForceBuffer,
+      argv.solanaForceLookupTable,
+      argv.solanaCuLimit,
+    )
+    await doManuallyExecuteSolana(keypair, anchorProvider, transactions, chainName)
+  } else {
+    const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
+    await manualExecEvmDestination(source, dest, request, argv)
+  }
+}
+
+function isCannotCloseTableUntilDeactivated(e: SendTransactionError): boolean {
+  // Lookup Tables are first deactivated and then closed. There has to be a cool-down period
+  // between the two operations. If the table is closed before it is fully deactivated, the
+  // transaction will fail. The cool-down period is ~4mins (more precisely, ~513 blocks), see
+  // https://solana.com/vi/developers/courses/program-optimization/lookup-tables#deactivate-a-lookup-table
+  return !!e.logs?.some((log) =>
+    log.includes("Program log: Table cannot be closed until it's fully deactivated in "),
+  )
+}
+
+async function doManuallyExecuteSolana(
+  payer: Keypair,
+  destination: AnchorProvider,
+  manualExecTxs: ManualExecTxs,
+  cluster: string,
+) {
+  const url_terminator_map: Record<string, string> = {
+    'solana-devnet': 'devnet',
+    'solana-mainnet': '',
+    'solana-testnet': 'testnet',
+  }
+  const url_terminator = url_terminator_map[cluster] ?? cluster
+
+  let signature!: TransactionSignature
+
+  const N = manualExecTxs.transactions.length
+
+  for (const [i, transaction] of manualExecTxs.transactions.entries()) {
+    // Refresh the blockhash for each transaction, as the blockhash is only valid for a short time
+    // and we spend a lot of time waiting for finalization of the previous transactions.
+    async function attempt() {
+      transaction.message.recentBlockhash = (
+        await destination.connection.getLatestBlockhash()
+      ).blockhash
+
+      transaction.sign([payer])
+
+      signature = await destination.connection.sendTransaction(transaction)
+      const latestBlockhash = await destination.connection.getLatestBlockhash()
+
+      console.log(`Confirming tx #${i + 1} of ${N}: ${signature} ...`)
+      await destination.connection.confirmTransaction(
+        {
+          signature,
+          blockhash: latestBlockhash.blockhash,
+          lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+        },
+        'confirmed',
+      )
+      console.log(`Waiting for finalization #${i + 1} of ${N} ...`)
+      await waitForFinalization(destination.connection, signature)
+
+      if (i == manualExecTxs.manualExecIdx) {
+        console.log(
+          `✅🚀🚀🚀 Solana manualExec transaction finalized: https://explorer.solana.com/tx/${signature}?cluster=${url_terminator} 🚀🚀🚀`,
+        )
+      } else {
+        console.log(
+          `✅ Solana transaction finalized: https://explorer.solana.com/tx/${signature}?cluster=${url_terminator}`,
+        )
+      }
+    }
+
+    async function attemptWithRetry(currentAttempt: number, maxAttempts: number) {
+      try {
+        await attempt()
+      } catch (e) {
+        if (
+          currentAttempt <= maxAttempts &&
+          e instanceof SendTransactionError &&
+          isCannotCloseTableUntilDeactivated(e)
+        ) {
+          const waitTimeSeconds = 30 // the maxAttempts * waitTimeSeconds should be greater than the cool-down period
+          console.error(
+            `Closing of lookup table failed (attempt ${currentAttempt} of ${maxAttempts}) because it has recently been deactivated and the cool-down period has not completed.\nWaiting ${waitTimeSeconds}s before retrying ...`,
+          )
+          await new Promise((resolve) => setTimeout(resolve, waitTimeSeconds * 1000))
+          await attemptWithRetry(currentAttempt + 1, maxAttempts)
+        } else {
+          console.error(`Transaction failed (attempt ${currentAttempt} of ${maxAttempts}):`, e)
+          throw e
+        }
+      }
+    }
+
+    await attemptWithRetry(1, 10)
+  }
+}
+
+async function manualExecEvmDestination(
+  source: Provider,
+  dest: JsonRpcApiProvider,
+  request: CCIPRequest<CCIPVersion>,
+  argv: {
+    gasLimit?: number
+    estimateGasLimit?: number
+    tokensGasLimit?: number
+    logIndex?: number
+    format: Format
+    page: number
+    wallet?: string
+    offramp?: string
+  },
+) {
   const commit = await fetchCommitReport(dest, request, { page: argv.page })
   switch (argv.format) {
     case Format.log:

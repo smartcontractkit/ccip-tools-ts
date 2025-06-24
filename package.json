@@ -25,6 +25,7 @@
     "./dist/**"
   ],
   "devDependencies": {
+    "@types/bn.js": "^5.1.6",
     "@eslint/js": "9.27.0",
     "@types/jest": "29.5.14",
     "@types/node": "22.15.26",
@@ -33,7 +34,7 @@
     "eslint-config-prettier": "10.1.5",
     "eslint-import-resolver-typescript": "4.4.1",
     "eslint-plugin-import": "2.31.0",
-    "eslint-plugin-prettier": "5.4.0",
+    "eslint-plugin-prettier": "5.2.6",
     "ethers-abitype": "1.0.3",
     "glob": "11.0.2",
     "jest": "29.7.0",
@@ -44,10 +45,15 @@
     "typescript-eslint": "8.33.0"
   },
   "dependencies": {
+    "@coral-xyz/anchor": "0.29.0",
     "@inquirer/prompts": "7.5.3",
+    "@solana/spl-token": "0.4.13",
     "@xlabs-xyz/ledger-signer-ethers-v6": "^0.0.1",
     "abitype": "1.0.8",
+    "bn.js": "^5.2.2",
     "borsh": "^2.0.0",
+    "bs58": "^6.0.0",
+    "buffer-layout": "^1.2.2",
     "ethers": "6.14.3",
     "tslib": "2.8.1",
     "yaml": "2.8.0",

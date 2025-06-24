@@ -1,3 +1,4 @@
+import type { Program } from '@coral-xyz/anchor'
 import {
   type Abi,
   type AbiParameterToPrimitiveType,
@@ -18,6 +19,11 @@ import EVM2EVMOnRamp_1_2_ABI from '../abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from '../abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from '../abi/OnRamp_1_6.ts'
 import type { SourceTokenData, parseExtraArgs } from './extra-args.ts'
+import type {
+  CCIP_SOLANA_VERSION_MAP,
+  SolanaCCIPIdl,
+  SupportedSolanaCCIPVersion,
+} from './solana/programs/versioning.ts'
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
@@ -54,9 +60,26 @@ export const CCIP_ABIs = {
   },
 } as const satisfies Record<CCIPContractType, Record<CCIPVersion, Abi>>
 
-export type CCIPContract<T extends CCIPContractType, V extends CCIPVersion> = TypedContract<
+export type CCIPContractEVM<T extends CCIPContractType, V extends CCIPVersion> = TypedContract<
   (typeof CCIP_ABIs)[T][V]
 >
+
+export type CCIPContractSolana<
+  T extends SolanaCCIPIdl,
+  V extends SupportedSolanaCCIPVersion,
+> = Program<(typeof CCIP_SOLANA_VERSION_MAP)[V][T]>
+
+export type CCIPContract =
+  | {
+      family: typeof ChainFamily.EVM
+      type: CCIPContractType
+      contract: CCIPContractEVM<CCIPContractType, CCIPVersion>
+    }
+  | {
+      family: typeof ChainFamily.Solana
+      type: SolanaCCIPIdl
+      program: CCIPContractSolana<SolanaCCIPIdl, SupportedSolanaCCIPVersion>
+    }
 
 export const ChainFamily = {
   EVM: 'evm',
@@ -99,7 +122,7 @@ type EVM2AnyMessageRequested = CleanAddressable<
 >
 
 // v1.6+ Message
-type EVM2AnyMessageSent = CleanAddressable<
+export type EVM2AnyMessageSent = CleanAddressable<
   AbiParametersToPrimitiveTypes<
     ExtractAbiEvent<typeof OnRamp_1_6_ABI, 'CCIPMessageSent'>['inputs']
   >[2]
@@ -176,4 +199,11 @@ export interface CCIPExecution {
   receipt: ExecutionReceipt
   log: Log_
   timestamp: number
+}
+
+export type ExecutionReport = {
+  message: CCIPMessage<typeof CCIPVersion.V1_6>
+  offchainTokenData: string[]
+  proofs: string[]
+  sourceChainSelector: bigint
 }
