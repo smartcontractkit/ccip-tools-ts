@@ -19,6 +19,7 @@ import {
 } from '@solana/web3.js'
 import type { Layout } from 'buffer-layout'
 import { calculateManualExecProof } from '../execution.ts'
+import { fetchOffchainTokenData } from '../offchain.ts'
 import { type CCIPMessage, type CCIPRequest, type ExecutionReport, CCIPVersion } from '../types.ts'
 import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
 import { getManuallyExecuteInputs } from './getManuallyExecuteInputs.ts'
@@ -28,7 +29,6 @@ import { getCcipOfframp } from './programs/getCcipOfframp.ts'
 import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
 import { simulateUnitsConsumed } from './simulateManuallyExecute.ts'
 import { normalizeExecutionReportForSolana } from './utils.ts'
-import { fetchOffchainTokenData } from '../offchain.ts'
 
 class ExtendedBorshTypesCoder<N extends string = string> extends BorshTypesCoder<N> {
   public constructor(idl: Idl) {

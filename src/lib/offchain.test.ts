@@ -1,11 +1,16 @@
-import { Interface, getAddress, hexlify, id, keccak256, randomBytes } from 'ethers'
 import bs58 from 'bs58'
+import { Interface, getAddress, hexlify, id, keccak256, randomBytes } from 'ethers'
 
 import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.ts'
 import { type CCIPRequest, defaultAbiCoder } from './types.ts'
 import { lazyCached } from './utils.ts'
 
 const origFetch = global.fetch
+
+interface DecodedCctpData {
+  message: string
+  attestation: string
+}
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -390,7 +395,10 @@ describe('fetchSolanaOffchainTokenData', () => {
     const result = await fetchSolanaOffchainTokenData(mockRequest as any)
 
     // Decode and inspect the ABI-encoded result
-    const decoded = defaultAbiCoder.decode(['tuple(bytes message, bytes attestation)'], result[0])
+    const decoded = defaultAbiCoder.decode(
+      ['tuple(bytes message, bytes attestation)'],
+      result[0],
+    ) as unknown as [DecodedCctpData]
 
     // Verify the structure
     expect(decoded[0]).toHaveProperty('message')
@@ -1013,7 +1021,10 @@ describe('encodeOffchainTokenData', () => {
 
     const result = encodeOffchainTokenData(EVM_TESTNET_SELECTOR, '0x', '0x')
 
-    const decoded = defaultAbiCoder.decode(['tuple(bytes message, bytes attestation)'], result)
+    const decoded = defaultAbiCoder.decode(
+      ['tuple(bytes message, bytes attestation)'],
+      result,
+    ) as unknown as [DecodedCctpData]
 
     expect(decoded[0].message).toBe('0x')
     expect(decoded[0].attestation).toBe('0x')

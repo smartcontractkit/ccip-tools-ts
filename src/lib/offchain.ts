@@ -1,15 +1,18 @@
-import { type Addressable, type Log, EventFragment, Interface, keccak256 } from 'ethers'
-import * as borsh from 'borsh'
 import { Connection, PublicKey } from '@solana/web3.js'
-import { getClusterUrlByChainSelectorName } from './solana/getClusterByChainSelectorName.ts'
-import type { CcipCctpMessageSentEvent } from './solana/types.ts'
-import { computeAnchorEventDiscriminant } from './solana/utils.ts'
-import { isSupportedSolanaCluster } from './solana/getClusterByChainSelectorName.ts'
+import * as borsh from 'borsh'
+import { type Addressable, type Log, EventFragment, Interface, keccak256 } from 'ethers'
+
 import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.ts'
 import { type SourceTokenData, parseSourceTokenData } from './extra-args.ts'
+import { chainNameFromSelector } from './index.ts'
+import {
+  getClusterUrlByChainSelectorName,
+  isSupportedSolanaCluster,
+} from './solana/getClusterByChainSelectorName.ts'
+import type { CcipCctpMessageSentEvent } from './solana/types.ts'
+import { computeAnchorEventDiscriminant } from './solana/utils.ts'
 import { type CCIPMessage, type CCIPRequest, defaultAbiCoder } from './types.ts'
 import { lazyCached, networkInfo } from './utils.ts'
-import { chainNameFromSelector } from './index.ts'
 const TokenPoolInterface = lazyCached(
   `Interface BurnMintTokenPool 1.5.1`,
   () => new Interface(TokenPoolABI),
@@ -504,6 +507,7 @@ function parseCcipCctpEvent(buffer: Buffer): CcipCctpMessageSentEvent | null {
       messageSentBytes,
     }
   } catch (error) {
+    console.debug('🔍 Solana CCTP: Failed to parse CcipCctpMessageSentEvent buffer:', error)
     return null
   }
 }
