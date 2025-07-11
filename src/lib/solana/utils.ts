@@ -77,7 +77,7 @@ export async function waitForFinalization(
 
 /**
  * Computes 8-byte Anchor event discriminant from event name
- * 
+ *
  * @param eventName - Anchor event name (e.g., "CcipCctpMessageSentEvent")
  * @returns buffer consisting of SHA256("event:{eventName}") truncated to first 8 bytes
  */

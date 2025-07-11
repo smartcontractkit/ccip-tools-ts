@@ -40,7 +40,7 @@ describe('fetchOffchainTokenData', () => {
     const mockRequest = {
       lane: {
         sourceChainSelector: 16015286601757825753n,
-        destChainSelector: 16015286601757825753n
+        destChainSelector: 16015286601757825753n,
       },
       message: {
         tokenAmounts: [{ token: usdcToken, sourcePoolAddress, amount: 100n }],
@@ -107,7 +107,7 @@ describe('fetchOffchainTokenData', () => {
     const mockRequest = {
       lane: {
         sourceChainSelector: 16015286601757825753n,
-        destChainSelector: 16015286601757825753n
+        destChainSelector: 16015286601757825753n,
       },
       message: {
         tokenAmounts: [{ token: usdcToken, sourcePoolAddress, amount: 100n }],
@@ -319,13 +319,13 @@ describe('fetchSolanaOffchainTokenData', () => {
 
   // Mock Solana Web3 to prevent real RPC calls
   const mockConnection = {
-    getTransaction: jest.fn()
+    getTransaction: jest.fn(),
   }
   const mockSolanaWeb3 = {
     Connection: jest.fn(() => mockConnection),
     PublicKey: jest.fn((bytes: any) => ({
-      toString: () => bs58.encode(Buffer.from(bytes))
-    }))
+      toString: () => bs58.encode(Buffer.from(bytes)),
+    })),
   }
 
   beforeAll(() => {
@@ -356,10 +356,10 @@ describe('fetchSolanaOffchainTokenData', () => {
       meta: {
         logMessages: [
           // Mock a program data log that will be parsed as a CCTP event
-          "Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw=="
+          'Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw==',
         ],
-        err: null
-      }
+        err: null,
+      },
     })
 
     const { fetchSolanaOffchainTokenData } = await import('./offchain.ts')
@@ -367,7 +367,8 @@ describe('fetchSolanaOffchainTokenData', () => {
     // Use real Circle API values from the actual Solana CCTP transaction
     // https://explorer.solana.com/tx/3k81TLhJuhwB8fvurCwyMPHXR3k9Tmtqe2ZrUQ8e3rMxk9fWFJT2xVHGgKJg1785FkJcaiQkthY4m86JrESGPhMY?cluster=devnet
     const expectedMessageHash = '0xcda5c1abd6640256fd2c837447c355fad6ed7fe6a32880076ad32e6f5821ed1a'
-    const expectedAttestation = '0x6e70be5cacd093bca66e53837c51543d1829ee065dd6dfe085f3b706b16d56b80a01c3564a53f8864f1d4c1990298558ec45a93331d423d1bd8f964232d65fba1c0a65d1c09e05a1c059e7114c56a24dffbe155a86bc9a9377a20d4460be109d547df9a132d46ec632ae8976f6bfe6739bd25cb47a79bf0d77d6860d709aa62cf81b'
+    const expectedAttestation =
+      '0x6e70be5cacd093bca66e53837c51543d1829ee065dd6dfe085f3b706b16d56b80a01c3564a53f8864f1d4c1990298558ec45a93331d423d1bd8f964232d65fba1c0a65d1c09e05a1c059e7114c56a24dffbe155a86bc9a9377a20d4460be109d547df9a132d46ec632ae8976f6bfe6739bd25cb47a79bf0d77d6860d709aa62cf81b'
 
     // mock real attestation return
     mockedFetchJson.mockResolvedValueOnce({
@@ -389,10 +390,7 @@ describe('fetchSolanaOffchainTokenData', () => {
     const result = await fetchSolanaOffchainTokenData(mockRequest as any)
 
     // Decode and inspect the ABI-encoded result
-    const decoded = defaultAbiCoder.decode(
-      ['tuple(bytes message, bytes attestation)'],
-      result[0],
-    )
+    const decoded = defaultAbiCoder.decode(['tuple(bytes message, bytes attestation)'], result[0])
 
     // Verify the structure
     expect(decoded[0]).toHaveProperty('message')
@@ -405,7 +403,7 @@ describe('fetchSolanaOffchainTokenData', () => {
     // Verify it's the actual message from the real Solana transaction
     const expectedMessageBytes = Buffer.from(
       'AAAAAAAAAAUAAAAAAAAAAAAAcrumX8lDQZpa1ZAEL9Z8l5H9AVrPU6VMyCPtuP+Bue1yLgAAAAAAAAAAAAAAAJ87hnnHPC/vi1m080RNThVvtwqlAAAAAAAAAAAAAAAAvSfNq1yRCbM5CyW03/fZcJGMxVAAAAAAO0Qss5EhV/E6kz0BNCgtAytf/s0Botvxt3kGCN8ALqcAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC8POk+EYwosdiROyhgxs5wu4nhPwHzJzOFm1MxIADj1M=',
-      'base64'
+      'base64',
     )
     const expectedMessageHex = '0x' + expectedMessageBytes.toString('hex')
     expect(decoded[0].message).toBe(expectedMessageHex)
@@ -416,12 +414,12 @@ describe('fetchSolanaOffchainTokenData', () => {
     // Verify Solana RPC was called
     expect(mockConnection.getTransaction).toHaveBeenCalledWith('solana-tx-hash', {
       commitment: 'finalized',
-      maxSupportedTransactionVersion: 0
+      maxSupportedTransactionVersion: 0,
     })
 
     // Verify Circle API was called with the correct message hash
     expect(mockedFetch).toHaveBeenCalledWith(
-      `https://iris-api-sandbox.circle.com/v1/attestations/${expectedMessageHash}`
+      `https://iris-api-sandbox.circle.com/v1/attestations/${expectedMessageHash}`,
     )
   })
 
@@ -429,13 +427,13 @@ describe('fetchSolanaOffchainTokenData', () => {
     mockConnection.getTransaction.mockResolvedValue({
       meta: {
         logMessages: [
-          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]",
-          "Program log: Instruction: Transfer",
-          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success"
+          'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]',
+          'Program log: Instruction: Transfer',
+          'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
           // No "Program data:" logs with CCTP events
         ],
-        err: null
-      }
+        err: null,
+      },
     })
 
     const { fetchSolanaOffchainTokenData } = await import('./offchain.ts')
@@ -452,7 +450,7 @@ describe('fetchSolanaOffchainTokenData', () => {
     // Verify Solana RPC was called
     expect(mockConnection.getTransaction).toHaveBeenCalledWith('solana-tx-hash-no-cctp', {
       commitment: 'finalized',
-      maxSupportedTransactionVersion: 0
+      maxSupportedTransactionVersion: 0,
     })
   })
 
@@ -461,16 +459,16 @@ describe('fetchSolanaOffchainTokenData', () => {
     mockConnection.getTransaction.mockResolvedValue({
       meta: {
         logMessages: [
-          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]",
-          "Program log: Instruction: Transfer",
-          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
+          'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]',
+          'Program log: Instruction: Transfer',
+          'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
           // First CCTP event
-          "Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw==",
+          'Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw==',
           // Second CCTP event (duplicate for testing)
-          "Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw=="
+          'Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw==',
         ],
-        err: null
-      }
+        err: null,
+      },
     })
 
     const { fetchSolanaOffchainTokenData } = await import('./offchain.ts')
@@ -488,7 +486,7 @@ describe('fetchSolanaOffchainTokenData', () => {
     // Verify Solana RPC was called
     expect(mockConnection.getTransaction).toHaveBeenCalledWith('solana-tx-hash-multiple', {
       commitment: 'finalized',
-      maxSupportedTransactionVersion: 0
+      maxSupportedTransactionVersion: 0,
     })
   })
 
@@ -498,14 +496,14 @@ describe('fetchSolanaOffchainTokenData', () => {
       meta: {
         logMessages: [
           // Mock a program data log that will be parsed as a CCTP event
-          "Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw=="
+          'Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw==',
         ],
-        err: null
-      }
+        err: null,
+      },
     })
 
     const { fetchSolanaOffchainTokenData } = await import('./offchain.ts')
-    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => { })
+    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
 
     // Mock fetch to fail for this test
     mockedFetchJson.mockRejectedValueOnce(new Error('API is down'))
@@ -531,7 +529,7 @@ describe('fetchSolanaOffchainTokenData', () => {
     // Verify Solana RPC was called
     expect(mockConnection.getTransaction).toHaveBeenCalledWith('solana-tx-hash-fail', {
       commitment: 'finalized',
-      maxSupportedTransactionVersion: 0
+      maxSupportedTransactionVersion: 0,
     })
 
     consoleWarnSpy.mockRestore()
@@ -560,18 +558,18 @@ describe('fetchSolanaOffchainTokenData', () => {
       meta: {
         logMessages: [
           // Mock a program data log that will be parsed as a CCTP event
-          "Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw=="
+          'Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw==',
         ],
-        err: null
-      }
+        err: null,
+      },
     })
 
     const { fetchSolanaOffchainTokenData } = await import('./offchain.ts')
-    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => { })
+    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
 
     // Mock Circle API to return incomplete status (will cause getUsdcAttestation to throw)
     mockedFetchJson.mockResolvedValueOnce({
-      status: 'incomplete'
+      status: 'incomplete',
     })
 
     const mockRequest = {
@@ -595,7 +593,7 @@ describe('fetchSolanaOffchainTokenData', () => {
     // Verify Solana RPC was called
     expect(mockConnection.getTransaction).toHaveBeenCalledWith('solana-tx-hash-pending', {
       commitment: 'finalized',
-      maxSupportedTransactionVersion: 0
+      maxSupportedTransactionVersion: 0,
     })
 
     consoleWarnSpy.mockRestore()
@@ -606,83 +604,83 @@ describe('parseCcipCctpEvents', () => {
   const SOLANA_DEVNET_SELECTOR = 16423721717087811551n
 
   const mockConnection = {
-    getTransaction: jest.fn()
+    getTransaction: jest.fn(),
   }
 
   const mockSolanaWeb3 = {
     Connection: jest.fn(() => mockConnection),
     PublicKey: jest.fn((bytes: any) => ({
-      toString: () => bs58.encode(Buffer.from(bytes))
-    }))
+      toString: () => bs58.encode(Buffer.from(bytes)),
+    })),
   }
 
   // Real tx logs from https://explorer.solana.com/tx/3k81TLhJuhwB8fvurCwyMPHXR3k9Tmtqe2ZrUQ8e3rMxk9fWFJT2xVHGgKJg1785FkJcaiQkthY4m86JrESGPhMY?cluster=devnet
   const realSolanaLogMessages = [
-    "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]",
-    "Program log: Instruction: ApproveChecked",
-    "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4456 of 400000 compute units",
-    "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
-    "Program CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P invoke [1]",
-    "Program log: Instruction: CcipSend",
-    "Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 invoke [2]",
-    "Program log: Instruction: VerifyNotCursed",
-    "Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 consumed 6856 of 334355 compute units",
-    "Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 success",
-    "Program FeeQRpcGNfzR76kX7uCKhAfGtripotrJEuxbxaVPtV3P invoke [2]",
-    "Program log: Instruction: GetFee",
-    "Program FeeQRpcGNfzR76kX7uCKhAfGtripotrJEuxbxaVPtV3P consumed 42625 of 283953 compute units",
-    "Program return: FeeQRpcGNfzR76kX7uCKhAfGtripotrJEuxbxaVPtV3P BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAARAAAAOgDAAAVAAAAGB3PEEANAwAAAAAAAAAAAAAAAAAAQA0DAAAAAAAAAAAAAAAAAAAA",
-    "Program FeeQRpcGNfzR76kX7uCKhAfGtripotrJEuxbxaVPtV3P success",
-    "Program 11111111111111111111111111111111 invoke [2]",
-    "Program 11111111111111111111111111111111 success",
-    "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]",
-    "Program log: Instruction: SyncNative",
-    "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 3045 of 236593 compute units",
-    "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
-    "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]",
-    "Program log: Instruction: TransferChecked",
-    "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 6290 of 229827 compute units",
-    "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
-    "Program CCitPr8yZbN8zEBEdwju8bnGgKMYcz6XSTbU61CMedj invoke [2]",
-    "Program log: Instruction: LockOrBurnTokens",
-    "Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 invoke [3]",
-    "Program log: Instruction: VerifyNotCursed",
-    "Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 consumed 6856 of 141854 compute units",
-    "Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 success",
-    "Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 invoke [3]",
-    "Program log: Instruction: DepositForBurnWithCaller",
-    "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [4]",
-    "Program log: Instruction: Burn",
-    "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4753 of 99677 compute units",
-    "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
-    "Program CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd invoke [4]",
-    "Program log: Instruction: SendMessageWithCaller",
-    "Program 11111111111111111111111111111111 invoke [5]",
-    "Program 11111111111111111111111111111111 success",
-    "Program CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd consumed 16752 of 89165 compute units",
-    "Program return: CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd u3IAAAAAAAA=",
-    "Program CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd success",
-    "Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 invoke [4]",
-    "Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 consumed 3632 of 68445 compute units",
-    "Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 success",
-    "Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 consumed 61831 of 124597 compute units",
-    "Program return: CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 u3IAAAAAAAA=",
-    "Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 success",
-    "Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw==",
-    "Program data: zyX7mu/lDkO0EMhfhz9z8NpxfMBabv1pr0AmN8PWxO7HlMQB6EyxngIAAAAAAAAAO0Qss5EhV/E6kz0BNCgtAytf/s0Botvxt3kGCN8ALqc=",
-    "Program CCitPr8yZbN8zEBEdwju8bnGgKMYcz6XSTbU61CMedj consumed 147198 of 207001 compute units",
-    "Program return: CCitPr8yZbN8zEBEdwju8bnGgKMYcz6XSTbU61CMedj IAAAAAAAAAAAAAAAAAAAABx9SxlssMewHXQ/vGEWqQI3nHI4QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAU=",
-    "Program CCitPr8yZbN8zEBEdwju8bnGgKMYcz6XSTbU61CMedj success",
-    "Program data: F01Jt3u5cznZGtnJT7pB3hAAAAAAAAAAo8UDYQrKqyx5ETU5ZS7RudurUBqArrxw9lzKnQYVdRHfN+OU4sfs49ka2clPukHeEAAAAAAAAAAKAAAAAAAAAI7+9vnm//kSmiTiIHPweCZoZb2Aw76BMKL4l6s/XTZeAAAAACAAAAAAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUBUAAAAYHc8QQA0DAAAAAAAAAAAAAAAAAAAGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAAQEAAACyj5pu4elxk1FJg6M6L9oSK+l+h7GziUa6ZHUBTaWBEyAAAAAAAAAAAAAAAAAAAAAcfUsZbLDHsB10P7xhFqkCN5xyOEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAByuwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-    "Program CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P consumed 341826 of 395544 compute units",
-    "Program return: CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P o8UDYQrKqyx5ETU5ZS7RudurUBqArrxw9lzKnQYVdRE=",
-    "Program CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P success"
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]',
+    'Program log: Instruction: ApproveChecked',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4456 of 400000 compute units',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+    'Program CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P invoke [1]',
+    'Program log: Instruction: CcipSend',
+    'Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 invoke [2]',
+    'Program log: Instruction: VerifyNotCursed',
+    'Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 consumed 6856 of 334355 compute units',
+    'Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 success',
+    'Program FeeQRpcGNfzR76kX7uCKhAfGtripotrJEuxbxaVPtV3P invoke [2]',
+    'Program log: Instruction: GetFee',
+    'Program FeeQRpcGNfzR76kX7uCKhAfGtripotrJEuxbxaVPtV3P consumed 42625 of 283953 compute units',
+    'Program return: FeeQRpcGNfzR76kX7uCKhAfGtripotrJEuxbxaVPtV3P BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAARAAAAOgDAAAVAAAAGB3PEEANAwAAAAAAAAAAAAAAAAAAQA0DAAAAAAAAAAAAAAAAAAAA',
+    'Program FeeQRpcGNfzR76kX7uCKhAfGtripotrJEuxbxaVPtV3P success',
+    'Program 11111111111111111111111111111111 invoke [2]',
+    'Program 11111111111111111111111111111111 success',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]',
+    'Program log: Instruction: SyncNative',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 3045 of 236593 compute units',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]',
+    'Program log: Instruction: TransferChecked',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 6290 of 229827 compute units',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+    'Program CCitPr8yZbN8zEBEdwju8bnGgKMYcz6XSTbU61CMedj invoke [2]',
+    'Program log: Instruction: LockOrBurnTokens',
+    'Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 invoke [3]',
+    'Program log: Instruction: VerifyNotCursed',
+    'Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 consumed 6856 of 141854 compute units',
+    'Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 success',
+    'Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 invoke [3]',
+    'Program log: Instruction: DepositForBurnWithCaller',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [4]',
+    'Program log: Instruction: Burn',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4753 of 99677 compute units',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+    'Program CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd invoke [4]',
+    'Program log: Instruction: SendMessageWithCaller',
+    'Program 11111111111111111111111111111111 invoke [5]',
+    'Program 11111111111111111111111111111111 success',
+    'Program CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd consumed 16752 of 89165 compute units',
+    'Program return: CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd u3IAAAAAAAA=',
+    'Program CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd success',
+    'Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 invoke [4]',
+    'Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 consumed 3632 of 68445 compute units',
+    'Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 success',
+    'Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 consumed 61831 of 124597 compute units',
+    'Program return: CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 u3IAAAAAAAA=',
+    'Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 success',
+    'Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw==',
+    'Program data: zyX7mu/lDkO0EMhfhz9z8NpxfMBabv1pr0AmN8PWxO7HlMQB6EyxngIAAAAAAAAAO0Qss5EhV/E6kz0BNCgtAytf/s0Botvxt3kGCN8ALqc=',
+    'Program CCitPr8yZbN8zEBEdwju8bnGgKMYcz6XSTbU61CMedj consumed 147198 of 207001 compute units',
+    'Program return: CCitPr8yZbN8zEBEdwju8bnGgKMYcz6XSTbU61CMedj IAAAAAAAAAAAAAAAAAAAABx9SxlssMewHXQ/vGEWqQI3nHI4QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAU=',
+    'Program CCitPr8yZbN8zEBEdwju8bnGgKMYcz6XSTbU61CMedj success',
+    'Program data: F01Jt3u5cznZGtnJT7pB3hAAAAAAAAAAo8UDYQrKqyx5ETU5ZS7RudurUBqArrxw9lzKnQYVdRHfN+OU4sfs49ka2clPukHeEAAAAAAAAAAKAAAAAAAAAI7+9vnm//kSmiTiIHPweCZoZb2Aw76BMKL4l6s/XTZeAAAAACAAAAAAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUBUAAAAYHc8QQA0DAAAAAAAAAAAAAAAAAAAGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAAQEAAACyj5pu4elxk1FJg6M6L9oSK+l+h7GziUa6ZHUBTaWBEyAAAAAAAAAAAAAAAAAAAAAcfUsZbLDHsB10P7xhFqkCN5xyOEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAByuwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+    'Program CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P consumed 341826 of 395544 compute units',
+    'Program return: CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P o8UDYQrKqyx5ETU5ZS7RudurUBqArrxw9lzKnQYVdRE=',
+    'Program CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P success',
   ]
 
   const mockSolanaTransaction = {
     meta: {
       logMessages: realSolanaLogMessages,
-      err: null
+      err: null,
     },
   }
 
@@ -700,7 +698,7 @@ describe('parseCcipCctpEvents', () => {
 
     const result = await parseCcipCctpEvents(
       '3k81TLhJuhwB8fvurCwyMPHXR3k9Tmtqe2ZrUQ8e3rMxk9fWFJT2xVHGgKJg1785FkJcaiQkthY4m86JrESGPhMY',
-      SOLANA_DEVNET_SELECTOR
+      SOLANA_DEVNET_SELECTOR,
     )
 
     expect(result).toHaveLength(1) // Should find exactly 1 CCTP event
@@ -712,8 +710,8 @@ describe('parseCcipCctpEvents', () => {
       eventAddress: 'C68qsUiKJyGD3SxWjN6pSkH9jwVJfrDvQDaGeGBzPueG',
       messageSentBytes: Buffer.from(
         'AAAAAAAAAAUAAAAAAAAAAAAAcrumX8lDQZpa1ZAEL9Z8l5H9AVrPU6VMyCPtuP+Bue1yLgAAAAAAAAAAAAAAAJ87hnnHPC/vi1m080RNThVvtwqlAAAAAAAAAAAAAAAAvSfNq1yRCbM5CyW03/fZcJGMxVAAAAAAO0Qss5EhV/E6kz0BNCgtAytf/s0Botvxt3kGCN8ALqcAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC8POk+EYwosdiROyhgxs5wu4nhPwHzJzOFm1MxIADj1M=',
-        'base64'
-      )
+        'base64',
+      ),
     })
 
     // Verify RPC call
@@ -721,8 +719,8 @@ describe('parseCcipCctpEvents', () => {
       '3k81TLhJuhwB8fvurCwyMPHXR3k9Tmtqe2ZrUQ8e3rMxk9fWFJT2xVHGgKJg1785FkJcaiQkthY4m86JrESGPhMY',
       {
         commitment: 'finalized',
-        maxSupportedTransactionVersion: 0
-      }
+        maxSupportedTransactionVersion: 0,
+      },
     )
   })
 
@@ -730,23 +728,23 @@ describe('parseCcipCctpEvents', () => {
     mockConnection.getTransaction.mockResolvedValueOnce(null)
     const { parseCcipCctpEvents } = await import('./offchain.ts')
 
-    await expect(parseCcipCctpEvents('invalid-tx-signature', SOLANA_DEVNET_SELECTOR))
-      .rejects.toThrow('Transaction not found: invalid-tx-signature')
+    await expect(
+      parseCcipCctpEvents('invalid-tx-signature', SOLANA_DEVNET_SELECTOR),
+    ).rejects.toThrow('Transaction not found: invalid-tx-signature')
   })
-
 
   it('should return empty array when no program data logs found', async () => {
     const transactionWithoutProgramData = {
       ...mockSolanaTransaction,
       meta: {
         logMessages: [
-          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]",
-          "Program log: Instruction: Transfer",
-          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success"
+          'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]',
+          'Program log: Instruction: Transfer',
+          'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
           // No "Program data:" logs
         ],
-        err: null
-      }
+        err: null,
+      },
     }
 
     mockConnection.getTransaction.mockResolvedValueOnce(transactionWithoutProgramData)
@@ -756,18 +754,17 @@ describe('parseCcipCctpEvents', () => {
     expect(result).toEqual([])
   })
 
-
   it('should return empty array when no CCTP events found', async () => {
     const transactionWithoutCCTP = {
       ...mockSolanaTransaction,
       meta: {
         logMessages: [
-          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]",
-          "Program data: zyX7mu/lDkO0EMhfhz9z8NpxfMBabv1pr0AmN8PWxO7HlMQB6EyxngIAAAAAAAAAO0Qss5EhV/E6kz0BNCgtAytf/s0Botvxt3kGCN8ALqc=", // Non-CCTP event
-          "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success"
+          'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]',
+          'Program data: zyX7mu/lDkO0EMhfhz9z8NpxfMBabv1pr0AmN8PWxO7HlMQB6EyxngIAAAAAAAAAO0Qss5EhV/E6kz0BNCgtAytf/s0Botvxt3kGCN8ALqc=', // Non-CCTP event
+          'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
         ],
-        err: null
-      }
+        err: null,
+      },
     }
 
     mockConnection.getTransaction.mockResolvedValueOnce(transactionWithoutCCTP)
@@ -777,7 +774,6 @@ describe('parseCcipCctpEvents', () => {
     expect(result).toEqual([])
   })
 
-
   it('should handle multiple CCTP events', async () => {
     const transactionWithMultipleCCTP = {
       ...mockSolanaTransaction,
@@ -785,10 +781,10 @@ describe('parseCcipCctpEvents', () => {
         logMessages: [
           ...realSolanaLogMessages,
           // Add another CCTP event (duplicate original one for testing purposes)
-          "Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw=="
+          'Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw==',
         ],
-        err: null
-      }
+        err: null,
+      },
     }
 
     mockConnection.getTransaction.mockResolvedValueOnce(transactionWithMultipleCCTP)
@@ -805,8 +801,8 @@ describe('parseCcipCctpEvents', () => {
       eventAddress: 'C68qsUiKJyGD3SxWjN6pSkH9jwVJfrDvQDaGeGBzPueG',
       messageSentBytes: Buffer.from(
         'AAAAAAAAAAUAAAAAAAAAAAAAcrumX8lDQZpa1ZAEL9Z8l5H9AVrPU6VMyCPtuP+Bue1yLgAAAAAAAAAAAAAAAJ87hnnHPC/vi1m080RNThVvtwqlAAAAAAAAAAAAAAAAvSfNq1yRCbM5CyW03/fZcJGMxVAAAAAAO0Qss5EhV/E6kz0BNCgtAytf/s0Botvxt3kGCN8ALqcAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC8POk+EYwosdiROyhgxs5wu4nhPwHzJzOFm1MxIADj1M=',
-        'base64'
-      )
+        'base64',
+      ),
     }
 
     // Assert that both found events match the expected object
@@ -814,23 +810,22 @@ describe('parseCcipCctpEvents', () => {
     expect(result[1]).toMatchObject(expectedCctpEvent)
   })
 
-
   it('should handle malformed data gracefully', async () => {
     const transactionWithMalformedData = {
       ...mockSolanaTransaction,
       meta: {
         logMessages: [
           // This will fail Base64 decoding
-          "Program data: invalid_base64_data!!!",
+          'Program data: invalid_base64_data!!!',
           // This is valid Base64 but not a CCTP event (wrong discriminator)
-          "Program data: AQIDBAUGBwgJCg==",
+          'Program data: AQIDBAUGBwgJCg==',
           // This is 4 bytes, less than 8 needed for discriminator
-          "Program data: VGVzdA==",
+          'Program data: VGVzdA==',
           // This is the actual, valid CCTP event
-          "Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw=="
+          'Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw==',
         ],
-        err: null
-      }
+        err: null,
+      },
     }
 
     mockConnection.getTransaction.mockResolvedValueOnce(transactionWithMalformedData)
@@ -842,7 +837,6 @@ describe('parseCcipCctpEvents', () => {
     expect(result).toHaveLength(1)
   })
 
-
   it('should handle transaction with no meta', async () => {
     const transactionWithoutMeta = {
       meta: null,
@@ -851,8 +845,9 @@ describe('parseCcipCctpEvents', () => {
     mockConnection.getTransaction.mockResolvedValueOnce(transactionWithoutMeta)
     const { parseCcipCctpEvents } = await import('./offchain.ts')
 
-    await expect(parseCcipCctpEvents('tx-without-meta', SOLANA_DEVNET_SELECTOR))
-      .rejects.toThrow('Transaction not found: tx-without-meta')
+    await expect(parseCcipCctpEvents('tx-without-meta', SOLANA_DEVNET_SELECTOR)).rejects.toThrow(
+      'Transaction not found: tx-without-meta',
+    )
   })
 })
 
@@ -880,7 +875,9 @@ describe('getUsdcAttestation', () => {
     mockedFetchJson.mockResolvedValue(completeResponse)
 
     await getUsdcAttestation(messageHex, false)
-    expect(mockedFetch).toHaveBeenCalledWith(`https://iris-api.circle.com/v1/attestations/${msgHash}`)
+    expect(mockedFetch).toHaveBeenCalledWith(
+      `https://iris-api.circle.com/v1/attestations/${msgHash}`,
+    )
   })
 
   it('should call the testnet Circle API when isTestnet is true', async () => {
@@ -891,7 +888,9 @@ describe('getUsdcAttestation', () => {
     mockedFetchJson.mockResolvedValue(completeResponse)
 
     await getUsdcAttestation(messageHex, true)
-    expect(mockedFetch).toHaveBeenCalledWith(`https://iris-api-sandbox.circle.com/v1/attestations/${msgHash}`)
+    expect(mockedFetch).toHaveBeenCalledWith(
+      `https://iris-api-sandbox.circle.com/v1/attestations/${msgHash}`,
+    )
   })
 
   it('should correctly fetch complete attestation for a real Solana CCTP message', async () => {
@@ -904,7 +903,8 @@ describe('getUsdcAttestation', () => {
     )
     const messageHex = '0x' + messageBytes.toString('hex')
     const expectedMessageHash = '0xcda5c1abd6640256fd2c837447c355fad6ed7fe6a32880076ad32e6f5821ed1a'
-    const expectedAttestation = '0x6e70be5cacd093bca66e53837c51543d1829ee065dd6dfe085f3b706b16d56b80a01c3564a53f8864f1d4c1990298558ec45a93331d423d1bd8f964232d65fba1c0a65d1c09e05a1c059e7114c56a24dffbe155a86bc9a9377a20d4460be109d547df9a132d46ec632ae8976f6bfe6739bd25cb47a79bf0d77d6860d709aa62cf81b'
+    const expectedAttestation =
+      '0x6e70be5cacd093bca66e53837c51543d1829ee065dd6dfe085f3b706b16d56b80a01c3564a53f8864f1d4c1990298558ec45a93331d423d1bd8f964232d65fba1c0a65d1c09e05a1c059e7114c56a24dffbe155a86bc9a9377a20d4460be109d547df9a132d46ec632ae8976f6bfe6739bd25cb47a79bf0d77d6860d709aa62cf81b'
 
     mockedFetchJson.mockResolvedValue({
       status: 'complete',
@@ -915,10 +915,11 @@ describe('getUsdcAttestation', () => {
     // Verify the correct URL was called and the correct attestation was returned
     const result = await getUsdcAttestation(messageHex, true)
     expect(keccak256(messageHex)).toBe(expectedMessageHash)
-    expect(mockedFetch).toHaveBeenCalledWith(`https://iris-api-sandbox.circle.com/v1/attestations/${expectedMessageHash}`)
+    expect(mockedFetch).toHaveBeenCalledWith(
+      `https://iris-api-sandbox.circle.com/v1/attestations/${expectedMessageHash}`,
+    )
     expect(result).toBe(expectedAttestation)
   })
-
 
   it('should throw an error if the Circle API response for a Solana CCTP message is not "complete"', async () => {
     const { getUsdcAttestation } = await import('./offchain.ts')
@@ -952,10 +953,7 @@ describe('encodeOffchainTokenData', () => {
     expect(result).toMatch(/^0x[0-9a-fA-F]+$/)
 
     // Decode and verify structure
-    const decoded = defaultAbiCoder.decode(
-      ['tuple(bytes message, bytes attestation)'],
-      result
-    )
+    const decoded = defaultAbiCoder.decode(['tuple(bytes message, bytes attestation)'], result)
 
     expect(decoded[0]).toHaveProperty('message', mockMessage)
     expect(decoded[0]).toHaveProperty('attestation', mockAttestation)
@@ -983,11 +981,11 @@ describe('encodeOffchainTokenData', () => {
       struct: {
         message: {
           struct: {
-            data: { array: { type: 'u8' } }
-          }
+            data: { array: { type: 'u8' } },
+          },
         },
-        attestation: { array: { type: 'u8' } }
-      }
+        attestation: { array: { type: 'u8' } },
+      },
     }
 
     // Should be able to deserialize without throwing
@@ -1015,15 +1013,11 @@ describe('encodeOffchainTokenData', () => {
 
     const result = encodeOffchainTokenData(EVM_TESTNET_SELECTOR, '0x', '0x')
 
-    const decoded = defaultAbiCoder.decode(
-      ['tuple(bytes message, bytes attestation)'],
-      result
-    )
+    const decoded = defaultAbiCoder.decode(['tuple(bytes message, bytes attestation)'], result)
 
     expect(decoded[0].message).toBe('0x')
     expect(decoded[0].attestation).toBe('0x')
   })
-
 
   it('should handle empty message and attestation for Solana', async () => {
     const { encodeOffchainTokenData } = await import('./offchain.ts')
@@ -1046,11 +1040,11 @@ describe('encodeOffchainTokenData', () => {
       struct: {
         message: {
           struct: {
-            data: { array: { type: 'u8' } }
-          }
+            data: { array: { type: 'u8' } },
+          },
         },
-        attestation: { array: { type: 'u8' } }
-      }
+        attestation: { array: { type: 'u8' } },
+      },
     }
 
     const decoded = deserialize(schema, resultBuffer)
@@ -1066,7 +1060,6 @@ describe('encodeOffchainTokenData', () => {
     expect(typedDecoded.message.data).toEqual([])
     expect(typedDecoded.attestation).toEqual([])
   })
-
 
   it('should throw error for invalid hex strings', async () => {
     const { encodeOffchainTokenData } = await import('./offchain.ts')
