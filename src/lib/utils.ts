@@ -259,12 +259,16 @@ export async function validateContractType(
 }
 
 export function chainNameFromId(id: NetworkInfo['chainId']): string {
-  if (!SELECTORS[id].name) throw new Error(`No name for chain with id = ${id}`)
-  return SELECTORS[id].name
+  const entry = SELECTORS[id]
+  if (!entry) throw new Error(`Chain ID not found: ${id}`)
+  if (!entry.name) throw new Error(`No name for chain with id = ${id}`)
+  return entry.name
 }
 
 export function chainSelectorFromId(id: NetworkInfo['chainId']): bigint {
-  return SELECTORS[id].selector
+  const entry = SELECTORS[id]
+  if (!entry) throw new Error(`Chain ID not found: ${id}`)
+  return entry.selector
 }
 
 export function chainIdFromSelector(selector: bigint): NetworkInfo['chainId'] {
@@ -292,24 +296,21 @@ export function chainIdFromName(name: string): NetworkInfo['chainId'] {
   })
 }
 
+/**
+ * Converts a chain selector, chain ID, or chain name to complete network information
+ *
+ * @param selectorOrIdOrName - Can be:
+ *   - Chain selector as bigint or numeric string
+ *   - Chain ID as number or string (EVM: "1", Aptos: "aptos:1", Solana: base58)
+ *   - Chain name as string ("ethereum-mainnet")
+ * @returns Complete NetworkInfo object
+ */
 export function networkInfo(selectorOrIdOrName: bigint | number | string): NetworkInfo {
-  let chainId: NetworkInfo['chainId'], chainSelector: bigint
-  if (typeof selectorOrIdOrName === 'bigint') {
-    chainSelector = selectorOrIdOrName
-    chainId = chainIdFromSelector(chainSelector)
-  } else if (selectorOrIdOrName.toString() in SELECTORS) {
-    chainId = selectorOrIdOrName
-    chainSelector = chainSelectorFromId(chainId)
-  } else {
-    chainId = chainIdFromName(selectorOrIdOrName.toString())
-    chainSelector = chainSelectorFromId(chainId)
-  }
+  const { chainId, chainSelector } = resolveChainIdentifiers(selectorOrIdOrName)
+
   const name = chainNameFromSelector(chainSelector)
-  const family = name.startsWith('solana-')
-    ? ChainFamily.Solana
-    : name.startsWith('aptos-')
-      ? ChainFamily.Aptos
-      : ChainFamily.EVM
+  const family = getChainFamily(name)
+
   return {
     chainId,
     chainSelector,
@@ -317,6 +318,104 @@ export function networkInfo(selectorOrIdOrName: bigint | number | string): Netwo
     family,
     isTestnet: !name.includes('-mainnet'),
   } as NetworkInfo
+}
+
+/**
+ * Helper function to resolve input to chainId and chainSelector
+ */
+function resolveChainIdentifiers(input: bigint | number | string): {
+  chainId: NetworkInfo['chainId']
+  chainSelector: bigint
+} {
+  // Handle bigint selector
+  if (typeof input === 'bigint') {
+    return {
+      chainSelector: input,
+      chainId: chainIdFromSelector(input),
+    }
+  }
+
+  // Handle number (EVM chain ID)
+  if (typeof input === 'number') {
+    return {
+      chainId: input,
+      chainSelector: chainSelectorFromId(input),
+    }
+  }
+
+  // Handle string inputs
+  return resolveStringInput(input)
+}
+
+/**
+ * Resolves string input which could be selector, chain ID, or chain name
+ */
+function resolveStringInput(input: string): {
+  chainId: NetworkInfo['chainId']
+  chainSelector: bigint
+} {
+  // Try as direct chain ID first (handles Aptos/Solana IDs)
+  if (input in SELECTORS) {
+    return {
+      chainId: input,
+      chainSelector: chainSelectorFromId(input),
+    }
+  }
+
+  // Try as numeric value (selector or EVM chain ID)
+  if (/^\d+$/.test(input)) {
+    return resolveNumericString(input)
+  }
+
+  // Fall back to chain name lookup
+  const chainId = chainIdFromName(input)
+  return {
+    chainId,
+    chainSelector: chainSelectorFromId(chainId),
+  }
+}
+
+/**
+ * Resolves numeric string - could be selector or EVM chain ID
+ */
+function resolveNumericString(input: string): {
+  chainId: NetworkInfo['chainId']
+  chainSelector: bigint
+} {
+  const bigIntValue = BigInt(input)
+
+  // Try as selector first
+  try {
+    return {
+      chainSelector: bigIntValue,
+      chainId: chainIdFromSelector(bigIntValue),
+    }
+  } catch {
+    // If not a valid selector, try as EVM chain ID
+    const numValue = Number(input)
+    if (numValue.toString() in SELECTORS) {
+      return {
+        chainId: numValue,
+        chainSelector: chainSelectorFromId(numValue),
+      }
+    }
+
+    // Not found as either, treat as chain name
+    const chainId = chainIdFromName(input)
+    return {
+      chainId,
+      chainSelector: chainSelectorFromId(chainId),
+    }
+  }
+}
+
+/**
+ * Determines chain family from chain name
+ */
+function getChainFamily(name: string): ChainFamily {
+  if (name.startsWith('solana-')) return ChainFamily.Solana
+  if (name.startsWith('aptos-')) return ChainFamily.Aptos
+  return ChainFamily.EVM
 }
 
 export async function getProviderNetwork(provider: Provider): Promise<NetworkInfo> {
@@ -435,4 +534,33 @@ export function getAddressBytes(address: BytesLike): Uint8Array {
     }
   }
   return bytes
+}
+
+/**
+ * Converts snake_case strings to camelCase
+ */
+export function toCamelCase(str: string): string {
+  return str.replace(/_([a-zA-Z])/g, (_, letter: string) => letter.toUpperCase())
+}
+
+/**
+ * Recursively converts all snake_case keys in an object to camelCase
+ * Only converts keys that actually have snake_case format
+ */
+export function convertKeysToCamelCase(obj: unknown): unknown {
+  if (obj === null || typeof obj !== 'object') {
+    return obj
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(convertKeysToCamelCase)
+  }
+
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    // Only convert keys that contain underscores
+    const camelKey = key.includes('_') ? toCamelCase(key) : key
+    result[camelKey] = convertKeysToCamelCase(value)
+  }
+  return result
 }

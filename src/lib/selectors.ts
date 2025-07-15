@@ -118,6 +118,7 @@ const selectors: Selectors = {
   '592': { selector: 6422105447186081193n, name: 'polkadot-mainnet-astar' },
   '678': { selector: 9107126442626377432n, name: 'janction-mainnet' },
   '679': { selector: 5059197667603797935n, name: 'janction-testnet-sepolia' },
+  '682': { selector: 6260932437388305511n, name: 'private-testnet-obsidian' },
   '919': {
     selector: 829525985033418733n,
     name: 'ethereum-testnet-sepolia-mode-1',

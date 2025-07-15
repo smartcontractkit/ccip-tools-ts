@@ -130,6 +130,7 @@ describe('calculateManualExecProof', () => {
       messages: messages.slice(0, 1),
       proofs: ['0xf3393e4a9c575ef46c2bfd3e614cb84d994a0504fddafa609c070d0c2a8d79d8'],
       proofFlagBits: 0n,
+      merkleRoot: '0xd055c6a2bf69febaeae385fc855d732a2ed0d0fd14612d1fd45e0b83059b2876',
     })
   })
 
@@ -144,6 +145,7 @@ describe('calculateManualExecProof', () => {
       messages: batch,
       proofs: [],
       proofFlagBits: 0n,
+      merkleRoot: '0xa09a81a044318270c0fa19edae902bb43f0c60aab8567986b190eb5b2eefda1f',
     })
   })
 
@@ -260,6 +262,7 @@ describe('calculateManualExecProof', () => {
       messages: messages1_6,
       proofs: [],
       proofFlagBits: 0n,
+      merkleRoot: '0xdd90b4c5787af181896f4b8cd7ff54e875c9ae940aec6cb52a83a6c8535affa7',
     })
   })
 

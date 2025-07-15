@@ -28,8 +28,10 @@ import {
   defaultAbiCoder,
 } from './types.ts'
 import {
+  bigIntReplacer,
   blockRangeGenerator,
   chainNameFromSelector,
+  convertKeysToCamelCase,
   decodeAddress,
   getDataBytes,
   lazyCached,
@@ -107,6 +109,8 @@ const ccipMessagesTopicHashes = new Set(ccipMessagesFragments.map((fragment) => 
 export function decodeMessage(data: string | Uint8Array | Record<string, unknown>): CCIPMessage {
   if (typeof data === 'string' && data.startsWith('{')) {
     data = yaml.parse(data, { intAsBigInt: true }) as Record<string, unknown>
+    // Convert snake_case keys to camelCase after YAML parsing
+    data = convertKeysToCamelCase(data) as Record<string, unknown>
   }
   if (isBytesLike(data)) {
     let result: Result | undefined
@@ -126,7 +130,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
     data = resultsToMessage(result)
   }
   if (typeof data !== 'object' || typeof data?.sender !== 'string')
-    throw new Error('unknown message format: ' + JSON.stringify(data))
+    throw new Error('unknown message format: ' + JSON.stringify(data, bigIntReplacer))
 
   if (!data.header) {
     data.header = {
@@ -162,14 +166,19 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
       if (typeof tokenAmount.destExecData === 'string' && tokenAmount.destGasAmount == null) {
         tokenAmount.destGasAmount = getUint(hexlify(getDataBytes(tokenAmount.destExecData)))
       }
-      tokenAmount.sourcePoolAddress = decodeAddress(
-        tokenAmount.sourcePoolAddress as string,
-        sourceFamily,
-      )
-      tokenAmount.destTokenAddress = decodeAddress(
-        tokenAmount.destTokenAddress as string,
-        destFamily,
-      )
+      // Can be undefined if the message is from before v1.5 and failed to parse sourceTokenData
+      if (tokenAmount.sourcePoolAddress) {
+        tokenAmount.sourcePoolAddress = decodeAddress(
+          tokenAmount.sourcePoolAddress as string,
+          sourceFamily,
+        )
+      }
+      if (tokenAmount.destTokenAddress) {
+        tokenAmount.destTokenAddress = decodeAddress(
+          tokenAmount.destTokenAddress as string,
+          destFamily,
+        )
+      }
       return tokenAmount
     },
   )

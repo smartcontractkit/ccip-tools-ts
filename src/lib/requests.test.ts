@@ -168,6 +168,8 @@ describe('fetchCCIPMessagesInTx', () => {
     } as unknown as TransactionReceipt
     mockedContract.typeAndVersion.mockReturnValueOnce(`UnknownContract ${CCIPVersion.V1_2}`)
     mockedContract.typeAndVersion.mockReturnValueOnce(`${CCIPContractType.OffRamp} 1.0.0`)
+    // Add a third mock to make sure the third log also fails validation
+    mockedContract.typeAndVersion.mockReturnValueOnce(`${CCIPContractType.OffRamp} 1.0.0`)
 
     await expect(fetchCCIPMessagesInTx(mockTx)).rejects.toThrow(
       'Could not find any CCIPSendRequested message in tx: 0x123',
@@ -347,7 +349,7 @@ describe('fetchRequestsForSender', () => {
 describe('decodeMessage', () => {
   it('should decode 1.5 message with tokenAmounts', () => {
     const msgInfoString =
-      '{"data": "0x", "nonce": 10, "sender": "0xc70070c9c8fe7866449edbf4ba3918c5936fe639", "strict": false, "feeToken": "0xd00ae08403b9bbb9124bb305c09058e32c39a48c", "gasLimit": 0, "receiver": "0xc70070c9c8fe7866449edbf4ba3918c5936fe639", "messageId": "0xe9d9d03588f0b3fca80bc43b2194d314aec8ebbea67f6390ef63b095b11e6f80", "tokenAmounts": [{"token": "0xd21341536c5cf5eb1bcb58f6723ce26e8d8e90e4", "amount": 100000000000000000}], "feeTokenAmount": 31933333333333333, "sequenceNumber": 40944, "sourceTokenData": ["0x"], "sourceChainSelector": 14767482510784806043}'
+      '{"data": "0x0000000000000000000000002cac89abf06dbe5d3a059517053b7144074e1ce50000000000000000000000002cac89abf06dbe5d3a059517053b7144074e1ce500000000000000000000000000000000000000000000000048810ec3e431431f0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000493e0", "nonce": 3, "sender": "0xac82b70d55dcf33d8c3d62cc9469d4b1797def66", "strict": false, "feeToken": "0x779877a7b0d9e8603169ddbd7836e478b4624789", "gasLimit": 300000, "receiver": "0xc1ca35997dd2c981c7ade0c73bd8628079fd0a4e", "messageId": "0x6c8899267b18796eb04f563d6966ed36772f44480924a4b0035f4b8253cdd6a8", "tokenAmounts": [{"token": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238", "amount": 1}], "feeTokenAmount": 43716430206517156, "sequenceNumber": 2662, "sourceTokenData": ["0x000000000000000000000000000000000000000000000000000000000003fc650000000000000000000000000000000000000000000000000000000000000000"], "sourceChainSelector": 16015286601757825753}'
 
     expect(() => decodeMessage(msgInfoString)).not.toThrow()
 
@@ -357,11 +359,27 @@ describe('decodeMessage', () => {
     const tokenAmount = msg.tokenAmounts[0]
 
     expect('token' in msg.tokenAmounts[0]).toBe(true)
-    expect(msg.feeTokenAmount).toBe(31933333333333333n)
-
+    expect(msg.feeTokenAmount).toBe(43716430206517156n)
     if ('token' in tokenAmount) {
-      expect(tokenAmount.token).toBe('0xd21341536c5cf5eb1bcb58f6723ce26e8d8e90e4')
-      expect(tokenAmount.amount).toBe(100000000000000000n)
+      expect(tokenAmount.token).toBe('0x1c7d4b196cb0c7b01d743fbc6116a902379c7238')
     }
+    expect(tokenAmount.amount).toBe(1n)
+  })
+
+  it('should decode 1.6 message from Aptos with snake case formats', () => {
+    const msgInfoString =
+      '{"data": "0x12345678", "header": {"nonce": "2", "messageId": "0xab3fbecd2bd0eee8c384c3c5665681bfc932072201d3fb959a54c2d73b5aa2e9", "sequenceNumber": "3", "destChainSelector": "16015286601757825753", "sourceChainSelector": "743186221051783445"}, "sender": "0xccccc17bdf9f47952c2207e683f1c716058b455220641ce5efaa5062a237509e", "feeToken": "0x8873d0d9aa0e1d7bf7a42de620906d51f535314c72f27032bcaaf5519a22fec9", "gasLimit": 200000, "receiver": "0x90392a1e8a941098a3c75e0bdb172cfde7e4f1f4", "extraArgs": "0x181dcf10400d03000000000000000000000000000000000000000000000000000000000000", "tokenAmounts": [{"amount": "100000000", "extra_data": "0x0000000000000000000000000000000000000000000000000000000000000008", "dest_exec_data": "0x905f0100", "dest_token_address": "0x000000000000000000000000316496c5da67d052235b9952bc42db498d6c520b", "source_pool_address": "0x65ad4cb3142cab5100a4eeed34e2005cbb1fcae42fc688e3c96b0c33ae16e6b9"}], "feeValueJuels": "52761740000000000", "feeTokenAmount": "5322165", "allowOutOfOrderExecution": false}'
+
+    expect(() => decodeMessage(msgInfoString)).not.toThrow()
+
+    const msg = decodeMessage(msgInfoString)
+
+    expect(msg.tokenAmounts.length).toBe(1)
+    const tokenAmount = msg.tokenAmounts[0]
+
+    expect(tokenAmount.destTokenAddress).toBe('0x316496C5dA67D052235B9952bc42db498d6c520b')
+    expect(tokenAmount.sourcePoolAddress).toBe(
+      '0x65ad4cb3142cab5100a4eeed34e2005cbb1fcae42fc688e3c96b0c33ae16e6b9',
+    )
   })
 })
