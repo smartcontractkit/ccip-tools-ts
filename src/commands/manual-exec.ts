@@ -3,6 +3,7 @@ import { type Keypair, type TransactionSignature, SendTransactionError } from '@
 import type { JsonRpcApiProvider, Provider } from 'ethers'
 import { discoverOffRamp } from '../lib/execution.ts'
 import {
+  type CCIPCommit,
   type CCIPContract,
   type CCIPContractType,
   type CCIPMessage,
@@ -405,16 +406,25 @@ export async function manualExecSenderQueue(
   console.info(requestsPending.length, `requests eligible for manualExec`)
   if (!requestsPending.length) return
 
-  const batches = []
+  const maxExecsInBatch = 1
+  const batches: (readonly [
+    CCIPCommit,
+    Omit<CCIPRequest<CCIPVersion>, 'tx' | 'timestamp'>[],
+    string[],
+  ])[] = []
   let startBlock = destFromBlock
-  let lastCommitMax = 0n
   for (const request of requestsPending) {
-    if (request.message.header.sequenceNumber <= lastCommitMax) {
+    if (
+      batches.length > 0 &&
+      request.message.header.sequenceNumber <= batches[batches.length - 1][0].report.maxSeqNr
+    ) {
+      if (batches[batches.length - 1][2].length >= maxExecsInBatch) {
+        batches.push([batches[batches.length - 1][0], batches[batches.length - 1][1], []])
+      }
       batches[batches.length - 1][2].push(request.message.header.messageId)
       continue
     }
     const commit = await fetchCommitReport(dest, request, { startBlock, page: argv.page })
-    lastCommitMax = commit.report.maxSeqNr
     startBlock = commit.log.blockNumber + 1
 
     const batch = await fetchAllMessagesInBatch(
@@ -436,6 +446,7 @@ export async function manualExecSenderQueue(
     page: argv.page,
   })
 
+  let nonce = await wallet.getNonce()
   for (const [i, [commit, batch, msgIdsToExec]] of batches.entries()) {
     const manualExecReport = calculateManualExecProof(
       batch.map(({ message }) => message),
@@ -473,6 +484,7 @@ export async function manualExecSenderQueue(
           proofFlagBits: bigint
         },
         gasOverrides,
+        { nonce: nonce++, gasLimit: argv.gasLimit ? argv.gasLimit : undefined },
       )
     } else if (firstRequest.lane.version === CCIPVersion.V1_5) {
       const gasOverrides = manualExecReport.messages.map((message) => ({
@@ -489,6 +501,7 @@ export async function manualExecSenderQueue(
           proofFlagBits: bigint
         },
         gasOverrides,
+        { nonce: nonce++, gasLimit: argv.gasLimit ? argv.gasLimit : undefined },
       )
     } /* v1.6 */ else {
       const gasOverrides = manualExecReport.messages.map((message) => ({
@@ -510,6 +523,7 @@ export async function manualExecSenderQueue(
           },
         ],
         [gasOverrides],
+        { nonce: nonce++, gasLimit: argv.gasLimit ? argv.gasLimit : undefined },
       )
     }
 
