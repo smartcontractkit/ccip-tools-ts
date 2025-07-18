@@ -368,7 +368,7 @@ describe('decodeMessage', () => {
 })
 
 describe('Solana CCIP Message Parsing', () => {
-  it('should correctly parse CCIPMessageSent event from Solana', async () => {
+  it('should correctly parse CCIPMessageSent event from Solana', () => {
     // Mock transaction signature and slot
     const signature =
       '4PJ8xD1ip6Limj49cdH6kqQHK2yGbqFj3ZgyySuNDHx2xppBVMDdFth9ArJwWb6GN5GFxZyWFDJiN8rKqRuXsA84'

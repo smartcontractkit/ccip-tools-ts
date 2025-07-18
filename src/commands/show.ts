@@ -104,7 +104,7 @@ async function showSolanaRequests(
 ) {
   // Parse CCIP events from transaction (if any)
   const { parsedTransaction } = await providers.getSolanaTransaction(signature)
-  const ccipMessages = await fetchSolanaCCIPMessagesInTx(signature, parsedTransaction)
+  const ccipMessages = fetchSolanaCCIPMessagesInTx(signature, parsedTransaction)
 
   // We expect to find exactly 1 message for Solana
   if (ccipMessages.length === 0) {

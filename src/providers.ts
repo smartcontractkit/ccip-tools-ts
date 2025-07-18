@@ -1,12 +1,12 @@
 import { readFile } from 'node:fs/promises'
 
+import { Connection } from '@solana/web3.js'
 import {
   type JsonRpcApiProvider,
   type TransactionReceipt,
   JsonRpcProvider,
   WebSocketProvider,
 } from 'ethers'
-import { Connection } from '@solana/web3.js'
 
 import { chainNameFromId, getProviderNetwork } from './lib/index.ts'
 

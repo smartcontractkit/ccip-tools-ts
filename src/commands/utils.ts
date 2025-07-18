@@ -214,7 +214,7 @@ export async function prettyRequest(source: Provider | null, request: CCIPReques
   const chainInfo = networkInfo(request.lane.sourceChainSelector)
   switch (chainInfo.family) {
     case ChainFamily.Solana:
-      await prettyRequestSolana(request)
+      prettyRequestSolana(request)
       break
     default:
       // For EVM requests, we need a provider
@@ -269,7 +269,7 @@ async function prettyRequestEVM(source: Provider, request: CCIPRequest) {
   })
 }
 
-export async function prettyRequestSolana(request: CCIPRequest) {
+export function prettyRequestSolana(request: CCIPRequest) {
   prettyLane(request.lane)
   console.info('Request (source):')
 

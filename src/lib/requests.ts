@@ -1,3 +1,4 @@
+import { type ParsedTransactionWithMeta, PublicKey } from '@solana/web3.js'
 import {
   type EventFragment,
   type Log,
@@ -16,6 +17,7 @@ import {
 import yaml from 'yaml'
 
 import { parseExtraArgs, parseSourceTokenData } from './extra-args.ts'
+import { computeAnchorEventDiscriminant } from './solana/utils.ts'
 import {
   type CCIPContractEVM,
   type CCIPMessage,
@@ -412,9 +414,6 @@ export async function* fetchRequestsForSender(
 }
 
 // ============= SOLANA FUNCTIONS =============
-import type { ParsedTransactionWithMeta } from '@solana/web3.js'
-import { PublicKey } from '@solana/web3.js'
-import { computeAnchorEventDiscriminant } from './solana/utils.ts'
 const CCIP_MESSAGE_SENT_DISCRIMINATOR = computeAnchorEventDiscriminant('CCIPMessageSent')
 
 /**
@@ -423,10 +422,10 @@ const CCIP_MESSAGE_SENT_DISCRIMINATOR = computeAnchorEventDiscriminant('CCIPMess
  * @param transaction - Parsed Solana transaction
  * @returns CCIP messages in the transaction
  **/
-export async function fetchSolanaCCIPMessagesInTx(
+export function fetchSolanaCCIPMessagesInTx(
   signature: string,
   transaction: ParsedTransactionWithMeta,
-): Promise<CCIPRequest[]> {
+): CCIPRequest[] {
   // Look for "Program data:" logs which contain the CCIP event data
   const programDataLogs =
     transaction.meta?.logMessages?.filter((log) => log.startsWith('Program data: ')) || []
@@ -480,7 +479,7 @@ export async function fetchSolanaCCIPMessagesInTx(
           ccipRequests.push(ccipRequest)
         }
       }
-    } catch (error) {
+    } catch (_) {
       // Skip non relevant logs
     }
   }
@@ -681,7 +680,28 @@ export function parseCCIPMessageSentEvent(
         topics: [], // Solana events don't have topics like EVM
         data: eventData.toString('base64'),
       },
-      tx: { hash: signature, blockNumber: slot } as any,
+      tx: {
+        hash: signature,
+        blockNumber: slot,
+        logs: [],
+        from: routerAddress,
+        to: null,
+        contractAddress: null,
+        gasUsed: 0n,
+        gasPrice: 0n,
+        cumulativeGasUsed: 0n,
+        effectiveGasPrice: 0n,
+        logsBloom: '',
+        status: null,
+        type: 0,
+        byzantium: false,
+        index: 0,
+        provider: null,
+        getBlock: () => null,
+        confirmations: () => 0,
+        wait: () => null,
+        toJSON: () => ({}),
+      } as unknown as TransactionReceipt,
       timestamp: 0, // Will be set by caller
     }
 
