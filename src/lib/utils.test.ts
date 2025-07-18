@@ -10,10 +10,12 @@ import {
   chainNameFromId,
   chainNameFromSelector,
   chainSelectorFromId,
+  convertKeysToCamelCase,
   getProviderNetwork,
   getSomeBlockNumberBefore,
   lazyCached,
   networkInfo,
+  toCamelCase,
   validateContractType,
 } from './utils.ts'
 
@@ -114,11 +116,19 @@ describe('chainNameFromId', () => {
   it('should return the chain name for a given id', () => {
     expect(chainNameFromId(1)).toBe('ethereum-mainnet')
   })
+
+  it('should throw error for invalid chain ID', () => {
+    expect(() => chainNameFromId(999999)).toThrow('Chain ID not found: 999999')
+  })
 })
 
 describe('chainSelectorFromId', () => {
   it('should return the chain selector for a given id', () => {
     expect(chainSelectorFromId(1)).toBe(5009297550715157269n)
+  })
+
+  it('should throw error for invalid chain ID', () => {
+    expect(() => chainSelectorFromId(999999)).toThrow('Chain ID not found: 999999')
   })
 })
 
@@ -141,21 +151,257 @@ describe('chainIdFromName', () => {
 })
 
 describe('networkInfo', () => {
-  it('should return the network info for a given selector or id', () => {
-    expect(networkInfo(1)).toEqual({
-      chainId: 1,
-      chainSelector: 5009297550715157269n,
-      name: 'ethereum-mainnet',
-      family: ChainFamily.EVM,
-      isTestnet: false,
+  describe('bigint selector input', () => {
+    it('should handle EVM chain selector as bigint', () => {
+      expect(networkInfo(5009297550715157269n)).toEqual({
+        chainId: 1,
+        chainSelector: 5009297550715157269n,
+        name: 'ethereum-mainnet',
+        family: ChainFamily.EVM,
+        isTestnet: false,
+      })
     })
 
-    expect(networkInfo(3478487238524512106n)).toEqual({
-      chainId: 421614,
-      chainSelector: 3478487238524512106n,
-      name: 'ethereum-testnet-sepolia-arbitrum-1',
-      family: ChainFamily.EVM,
-      isTestnet: true,
+    it('should handle Aptos chain selector as bigint', () => {
+      expect(networkInfo(4741433654826277614n)).toEqual({
+        chainId: 'aptos:1',
+        chainSelector: 4741433654826277614n,
+        name: 'aptos-mainnet',
+        family: ChainFamily.Aptos,
+        isTestnet: false,
+      })
+    })
+
+    it('should handle Solana chain selector as bigint', () => {
+      expect(networkInfo(124615329519749607n)).toEqual({
+        chainId: '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
+        chainSelector: 124615329519749607n,
+        name: 'solana-mainnet',
+        family: ChainFamily.Solana,
+        isTestnet: false,
+      })
+    })
+
+    it('should handle testnet chain selector as bigint', () => {
+      expect(networkInfo(3478487238524512106n)).toEqual({
+        chainId: 421614,
+        chainSelector: 3478487238524512106n,
+        name: 'ethereum-testnet-sepolia-arbitrum-1',
+        family: ChainFamily.EVM,
+        isTestnet: true,
+      })
+    })
+  })
+
+  describe('number chain ID input', () => {
+    it('should handle EVM chain ID as number', () => {
+      expect(networkInfo(1)).toEqual({
+        chainId: 1,
+        chainSelector: 5009297550715157269n,
+        name: 'ethereum-mainnet',
+        family: ChainFamily.EVM,
+        isTestnet: false,
+      })
+    })
+
+    it('should handle BSC chain ID as number', () => {
+      expect(networkInfo(56)).toEqual({
+        chainId: 56,
+        chainSelector: 11344663589394136015n,
+        name: 'binance_smart_chain-mainnet',
+        family: ChainFamily.EVM,
+        isTestnet: false,
+      })
+    })
+
+    it('should handle testnet chain ID as number', () => {
+      expect(networkInfo(97)).toEqual({
+        chainId: 97,
+        chainSelector: 13264668187771770619n,
+        name: 'binance_smart_chain-testnet',
+        family: ChainFamily.EVM,
+        isTestnet: true,
+      })
+    })
+  })
+
+  describe('string chain ID input', () => {
+    it('should handle EVM chain ID as string', () => {
+      expect(networkInfo('1')).toEqual({
+        chainId: '1',
+        chainSelector: 5009297550715157269n,
+        name: 'ethereum-mainnet',
+        family: ChainFamily.EVM,
+        isTestnet: false,
+      })
+    })
+
+    it('should handle Aptos chain ID as string', () => {
+      expect(networkInfo('aptos:1')).toEqual({
+        chainId: 'aptos:1',
+        chainSelector: 4741433654826277614n,
+        name: 'aptos-mainnet',
+        family: ChainFamily.Aptos,
+        isTestnet: false,
+      })
+    })
+
+    it('should handle Aptos testnet chain ID as string', () => {
+      expect(networkInfo('aptos:2')).toEqual({
+        chainId: 'aptos:2',
+        chainSelector: 743186221051783445n,
+        name: 'aptos-testnet',
+        family: ChainFamily.Aptos,
+        isTestnet: true,
+      })
+    })
+
+    it('should handle Solana chain ID as string', () => {
+      expect(networkInfo('5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d')).toEqual({
+        chainId: '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
+        chainSelector: 124615329519749607n,
+        name: 'solana-mainnet',
+        family: ChainFamily.Solana,
+        isTestnet: false,
+      })
+    })
+
+    it('should handle Solana testnet chain ID as string', () => {
+      expect(networkInfo('4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY')).toEqual({
+        chainId: '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY',
+        chainSelector: 6302590918974934319n,
+        name: 'solana-testnet',
+        family: ChainFamily.Solana,
+        isTestnet: true,
+      })
+    })
+  })
+
+  describe('string selector input', () => {
+    it('should handle selector as string when valid selector exists', () => {
+      expect(networkInfo('3478487238524512106')).toEqual({
+        chainId: 421614,
+        chainSelector: 3478487238524512106n,
+        name: 'ethereum-testnet-sepolia-arbitrum-1',
+        family: ChainFamily.EVM,
+        isTestnet: true,
+      })
+    })
+
+    it('should handle EVM chain ID as string when not a valid selector', () => {
+      expect(networkInfo('56')).toEqual({
+        chainId: '56',
+        chainSelector: 11344663589394136015n,
+        name: 'binance_smart_chain-mainnet',
+        family: ChainFamily.EVM,
+        isTestnet: false,
+      })
+    })
+
+    it('should handle Aptos chain ID as string when not a valid selector', () => {
+      expect(networkInfo('aptos:2')).toEqual({
+        chainId: 'aptos:2',
+        chainSelector: 743186221051783445n,
+        name: 'aptos-testnet',
+        family: ChainFamily.Aptos,
+        isTestnet: true,
+      })
+    })
+  })
+
+  describe('string chain name input', () => {
+    it('should handle EVM chain name', () => {
+      expect(networkInfo('ethereum-mainnet')).toEqual({
+        chainId: 1,
+        chainSelector: 5009297550715157269n,
+        name: 'ethereum-mainnet',
+        family: ChainFamily.EVM,
+        isTestnet: false,
+      })
+    })
+
+    it('should handle Aptos chain name', () => {
+      expect(networkInfo('aptos-mainnet')).toEqual({
+        chainId: 'aptos:1',
+        chainSelector: 4741433654826277614n,
+        name: 'aptos-mainnet',
+        family: ChainFamily.Aptos,
+        isTestnet: false,
+      })
+    })
+
+    it('should handle Solana chain name', () => {
+      expect(networkInfo('solana-mainnet')).toEqual({
+        chainId: '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
+        chainSelector: 124615329519749607n,
+        name: 'solana-mainnet',
+        family: ChainFamily.Solana,
+        isTestnet: false,
+      })
+    })
+
+    it('should handle EVM testnet chain name', () => {
+      expect(networkInfo('binance_smart_chain-testnet')).toEqual({
+        chainId: 97,
+        chainSelector: 13264668187771770619n,
+        name: 'binance_smart_chain-testnet',
+        family: ChainFamily.EVM,
+        isTestnet: true,
+      })
+    })
+  })
+
+  describe('edge cases and error handling', () => {
+    it('should throw error for invalid selector', () => {
+      expect(() => networkInfo(999999999999999999n)).toThrow('Selector not found')
+    })
+
+    it('should throw error for invalid chain ID', () => {
+      expect(() => networkInfo(999999)).toThrow('Chain ID not found: 999999')
+    })
+
+    it('should throw error for invalid chain name', () => {
+      expect(() => networkInfo('invalid-chain-name')).toThrow('Chain name not found')
+    })
+
+    it('should throw error for numeric string that is neither selector nor chain ID nor name', () => {
+      expect(() => networkInfo('999999999999999999')).toThrow('Chain name not found')
+    })
+
+    it('should handle large numeric strings gracefully', () => {
+      // This should fall back to chain name lookup and fail gracefully
+      expect(() => networkInfo('99999999999999999999999999999')).toThrow('Chain name not found')
+    })
+
+    it('should handle empty string', () => {
+      expect(() => networkInfo('')).toThrow('Chain name not found')
+    })
+
+    it('should handle zero values', () => {
+      expect(() => networkInfo(0)).toThrow('Chain ID not found: 0')
+      expect(() => networkInfo(0n)).toThrow('Selector not found')
+      expect(() => networkInfo('0')).toThrow('Chain name not found')
+    })
+  })
+
+  describe('isTestnet detection', () => {
+    it('should correctly identify mainnet chains', () => {
+      expect(networkInfo('ethereum-mainnet').isTestnet).toBe(false)
+      expect(networkInfo('aptos-mainnet').isTestnet).toBe(false)
+      expect(networkInfo('solana-mainnet').isTestnet).toBe(false)
+      expect(networkInfo('binance_smart_chain-mainnet').isTestnet).toBe(false)
+    })
+
+    it('should correctly identify testnet chains', () => {
+      expect(networkInfo('aptos-testnet').isTestnet).toBe(true)
+      expect(networkInfo('solana-testnet').isTestnet).toBe(true)
+      expect(networkInfo('binance_smart_chain-testnet').isTestnet).toBe(true)
+      expect(networkInfo('ethereum-testnet-sepolia-arbitrum-1').isTestnet).toBe(true)
+    })
+
+    it('should correctly identify devnet/localnet as testnet', () => {
+      expect(networkInfo('solana-devnet').isTestnet).toBe(true)
+      expect(networkInfo('aptos-localnet').isTestnet).toBe(true)
     })
   })
 })
@@ -222,5 +468,158 @@ describe('bigIntReviver', () => {
     const json = '{"value":"1"}'
     const obj = JSON.parse(json, bigIntReviver)
     expect(obj).toEqual({ value: 1n })
+  })
+})
+
+describe('toCamelCase', () => {
+  it('should convert snake_case to camelCase', () => {
+    expect(toCamelCase('snake_case')).toBe('snakeCase')
+    expect(toCamelCase('foo_bar')).toBe('fooBar')
+    expect(toCamelCase('test_string_here')).toBe('testStringHere')
+    expect(toCamelCase('source_token_data')).toBe('sourceTokenData')
+    expect(toCamelCase('dest_token_address')).toBe('destTokenAddress')
+  })
+
+  it('should handle single underscore', () => {
+    expect(toCamelCase('a_b')).toBe('aB')
+    expect(toCamelCase('_start')).toBe('Start')
+  })
+
+  it('should handle strings without underscores', () => {
+    expect(toCamelCase('nounderscores')).toBe('nounderscores')
+    expect(toCamelCase('CamelCase')).toBe('CamelCase')
+    expect(toCamelCase('already')).toBe('already')
+  })
+
+  it('should handle empty string', () => {
+    expect(toCamelCase('')).toBe('')
+  })
+
+  it('should handle multiple consecutive underscores', () => {
+    expect(toCamelCase('test__double')).toBe('test_Double')
+    expect(toCamelCase('a___b')).toBe('a__B')
+  })
+})
+
+describe('convertKeysToCamelCase', () => {
+  it('should convert snake_case keys in simple objects', () => {
+    const input = {
+      snake_case: 'value1',
+      another_key: 'value2',
+      normalKey: 'value3',
+    }
+    const expected = {
+      snakeCase: 'value1',
+      anotherKey: 'value2',
+      normalKey: 'value3',
+    }
+    expect(convertKeysToCamelCase(input)).toEqual(expected)
+  })
+
+  it('should handle nested objects', () => {
+    const input = {
+      normalKey2: 'value1',
+      outer_key: {
+        inner_key: 'value',
+        another_inner: {
+          deep_key: 'deep_value',
+        },
+      },
+      normal_key: 'value',
+    }
+    const expected = {
+      outerKey: {
+        innerKey: 'value',
+        anotherInner: {
+          deepKey: 'deep_value',
+        },
+      },
+      normalKey: 'value',
+      normalKey2: 'value1',
+    }
+    expect(convertKeysToCamelCase(input)).toEqual(expected)
+  })
+
+  it('should handle arrays', () => {
+    const input = {
+      token_amounts: [
+        { source_token: 'token1', dest_token: 'token2' },
+        { source_token: 'token3', dest_token: 'token4' },
+      ],
+    }
+    const expected = {
+      tokenAmounts: [
+        { sourceToken: 'token1', destToken: 'token2' },
+        { sourceToken: 'token3', destToken: 'token4' },
+      ],
+    }
+    expect(convertKeysToCamelCase(input)).toEqual(expected)
+  })
+
+  it('should handle primitive values', () => {
+    expect(convertKeysToCamelCase(null)).toBe(null)
+    expect(convertKeysToCamelCase(undefined)).toBe(undefined)
+    expect(convertKeysToCamelCase('string')).toBe('string')
+    expect(convertKeysToCamelCase(123)).toBe(123)
+    expect(convertKeysToCamelCase(true)).toBe(true)
+    expect(convertKeysToCamelCase(123n)).toBe(123n)
+  })
+
+  it('should handle arrays of primitives', () => {
+    const input = ['a', 'b', 'c']
+    expect(convertKeysToCamelCase(input)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('should only convert keys with underscores', () => {
+    const input = {
+      normalKey: 'value1',
+      snake_case_key: 'value2',
+      camelCaseKey: 'value3',
+      PascalCaseKey: 'value4',
+    }
+    const expected = {
+      normalKey: 'value1',
+      snakeCaseKey: 'value2',
+      camelCaseKey: 'value3',
+      PascalCaseKey: 'value4',
+    }
+    expect(convertKeysToCamelCase(input)).toEqual(expected)
+  })
+
+  it('should handle complex nested structure', () => {
+    const input = {
+      user_info: {
+        first_name: 'John',
+        last_name: 'Doe',
+        contact_details: {
+          email_address: 'john@example.com',
+          phone_number: '123-456-7890',
+        },
+      },
+      data_items: [
+        { item_name: 'item1', item_value: 100 },
+        { item_name: 'item2', item_value: 200 },
+      ],
+    }
+    const expected = {
+      userInfo: {
+        firstName: 'John',
+        lastName: 'Doe',
+        contactDetails: {
+          emailAddress: 'john@example.com',
+          phoneNumber: '123-456-7890',
+        },
+      },
+      dataItems: [
+        { itemName: 'item1', itemValue: 100 },
+        { itemName: 'item2', itemValue: 200 },
+      ],
+    }
+    expect(convertKeysToCamelCase(input)).toEqual(expected)
+  })
+
+  it('should handle empty objects and arrays', () => {
+    expect(convertKeysToCamelCase({})).toEqual({})
+    expect(convertKeysToCamelCase([])).toEqual([])
   })
 })
