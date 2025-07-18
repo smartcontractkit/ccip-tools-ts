@@ -120,8 +120,6 @@ async function showSolanaRequests(
 
   // Try to fetch commit report and execution receipts from destination chain
   const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
-
-  // Fetch and display commit report
   const startBlock = await getSomeBlockNumberBefore(dest, request.timestamp)
   try {
     const commit = await fetchCommitReport(dest, request, { page: argv.page, startBlock })
@@ -148,11 +146,9 @@ async function showSolanaRequests(
     )
   }
 
-  // Fetch and display execution receipts
   await displayExecutionReceipts(dest, request, startBlock, argv)
 }
 
-// Add this new function:
 async function displayRequest(
   request: CCIPRequest,
   argv: { format: Format },
