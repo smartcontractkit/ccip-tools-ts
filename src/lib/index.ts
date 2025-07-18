@@ -11,6 +11,7 @@ export {
   fetchCCIPMessagesInTx,
   fetchRequestsForSender,
   getOnRampLane,
+  fetchSolanaCCIPMessagesInTx,
 } from './requests.ts'
 export {
   type CCIPCommit,

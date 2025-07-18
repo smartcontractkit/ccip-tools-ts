@@ -1,6 +1,7 @@
 import type { Connection } from '@solana/web3.js'
 import type { SourceTokenData } from '../extra-args.ts'
 import type { EVM2AnyMessageSent, ExecutionReport } from '../types.ts'
+import { createHash } from 'crypto'
 
 export type MessageWithAccounts = ExecutionReport['message'] & {
   tokenReceiver: string
@@ -72,4 +73,17 @@ export async function waitForFinalization(
   }
 
   throw new Error(`Transaction ${signature} not finalized after timeout`)
+}
+
+/**
+ * Computes 8-byte Anchor event discriminant from event name
+ *
+ * @param eventName - Anchor event name (e.g., "CcipCctpMessageSentEvent")
+ * @returns buffer consisting of SHA256("event:{eventName}") truncated to first 8 bytes
+ */
+export function computeAnchorEventDiscriminant(eventName: string): Buffer {
+  const hash = createHash('sha256')
+  hash.update(`event:${eventName}`)
+  const fullHash = hash.digest()
+  return fullHash.subarray(0, 8)
 }
