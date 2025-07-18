@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
-import bs58 from 'bs58'
 import { password, select } from '@inquirer/prompts'
 import { LedgerSigner } from '@xlabs-xyz/ledger-signer-ethers-v6'
+import bs58 from 'bs58'
 import {
   type Addressable,
   type Provider,
@@ -44,7 +44,7 @@ import {
   parseWithFragment,
   recursiveParseError,
 } from '../lib/index.ts'
-import { ChainFamily } from '../lib/types'
+import { ChainFamily } from '../lib/types.ts'
 
 export async function getWallet(argv?: { wallet?: string }): Promise<Signer> {
   if ((argv?.wallet ?? '').startsWith('ledger')) {

@@ -10,8 +10,8 @@ export {
   fetchCCIPMessageInLog,
   fetchCCIPMessagesInTx,
   fetchRequestsForSender,
-  getOnRampLane,
   fetchSolanaCCIPMessagesInTx,
+  getOnRampLane,
 } from './requests.ts'
 export {
   type CCIPCommit,

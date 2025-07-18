@@ -66,6 +66,7 @@ import {
   fetchCCIPMessagesInTx,
   fetchRequestsForSender,
   getOnRampLane,
+  parseCCIPMessageSentEvent,
 } from './requests.ts'
 import { type Lane, CCIPContractType, CCIPVersion, CCIP_ABIs } from './types.ts'
 import { bigIntReplacer, lazyCached } from './utils.ts'
@@ -366,7 +367,6 @@ describe('decodeMessage', () => {
   })
 })
 
-import { parseCCIPMessageSentEvent, parseGasLimitFromExtraArgs } from './requests.ts'
 describe('Solana CCIP Message Parsing', () => {
   it('should correctly parse CCIPMessageSent event from Solana', async () => {
     // Mock transaction signature and slot

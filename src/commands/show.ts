@@ -1,4 +1,4 @@
-import { isHexString, type Provider } from 'ethers'
+import { type Provider, isHexString } from 'ethers'
 
 import {
   type CCIPRequest,
@@ -159,10 +159,11 @@ async function displayRequest(
   sourceProvider?: Provider,
 ) {
   switch (argv.format) {
-    case Format.log:
+    case Format.log: {
       const logPrefix = 'log' in request ? `message ${request.log.index} = ` : 'message = '
       console.log(logPrefix, withDateTimestamp(request))
       break
+    }
     case Format.pretty:
       await prettyRequest(sourceProvider || null, request)
       break
