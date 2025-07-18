@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 
+import { Connection } from '@solana/web3.js'
 import {
   type JsonRpcApiProvider,
   type TransactionReceipt,
@@ -97,6 +98,44 @@ export class Providers {
   }
 
   /**
+   * Get Solana transaction from available Solana RPCs
+   * @param signature - Solana transaction signature
+   * @returns Promise for the transaction details with connection
+   */
+  async getSolanaTransaction(signature: string) {
+    const endpoints = await this.#endpoints
+    const solanaRpcs = [...endpoints].filter((rpc) => rpc.includes('solana'))
+
+    if (solanaRpcs.length === 0) {
+      throw new Error('No Solana RPC endpoint found in configuration')
+    }
+
+    // Try all Solana RPCs and return first successful result
+    return Promise.any(
+      solanaRpcs.map((solanaRpc) =>
+        withTimeout(
+          (async () => {
+            const connection = new Connection(solanaRpc, 'finalized')
+            const parsedTransaction = await connection.getParsedTransaction(signature, {
+              commitment: 'finalized',
+              maxSupportedTransactionVersion: 0,
+            })
+
+            if (!parsedTransaction) {
+              throw new Error(`Solana transaction=${signature} not found on "${solanaRpc}"`)
+            }
+
+            return { parsedTransaction, connection, rpc: solanaRpc }
+          })(),
+          30e3,
+          `Timeout fetching Solana tx=${signature} from "${solanaRpc}"`,
+          this.destroyed,
+        ),
+      ),
+    )
+  }
+
+  /**
    * Trigger fetching providers from RPC endpoints, with their networks in parallel
    **/
   #loadProviders(): Promise<(readonly [provider: JsonRpcApiProvider, endpoint: string])[]> {
@@ -105,55 +144,57 @@ export class Providers {
     const readyPromises: Promise<unknown>[] = []
     return (this.#providersList = this.#endpoints
       .then((rpcs) =>
-        [...rpcs].map((endpoint) => {
-          let provider: JsonRpcApiProvider
-          let providerReady: Promise<JsonRpcApiProvider>
-          if (endpoint.startsWith('ws')) {
-            const provider_ = new WebSocketProvider(endpoint)
-            providerReady = new Promise((resolve, reject) => {
-              provider_.websocket.onerror = reject
-              provider_
-                ._waitUntilReady()
-                .then(() => resolve(provider_))
-                .catch(reject)
-            })
-            provider = provider_
-          } else if (endpoint.startsWith('http')) {
-            provider = new JsonRpcProvider(endpoint)
-            providerReady = Promise.resolve(provider)
-          } else {
-            throw new Error(
-              `Unknown JSON RPC protocol in endpoint (should be wss?:// or https?://): ${endpoint}`,
-            )
-          }
-
-          void this.destroyed.then(() => provider.destroy()) // schedule cleanup
-          readyPromises.push(
-            // wait for connection and check network in background
-            withTimeout(
-              providerReady.then((provider) => getProviderNetwork(provider)),
-              30e3,
-              undefined,
-              this.destroyed,
-            )
-              .then(({ chainId }) => {
-                if (chainId in this.#promisesCallbacks) {
-                  const [resolve] = this.#promisesCallbacks[+chainId]
-                  delete this.#promisesCallbacks[+chainId]
-                  resolve(provider)
-                } else if (!(chainId in this.#providersPromises)) {
-                  this.#providersPromises[+chainId] = Promise.resolve(provider)
-                } else {
-                  throw new Error(`Raced by a faster provider`)
-                }
+        [...rpcs]
+          .filter((endpoint) => !endpoint.includes('solana')) // Exclude Solana RPCs
+          .map((endpoint) => {
+            let provider: JsonRpcApiProvider
+            let providerReady: Promise<JsonRpcApiProvider>
+            if (endpoint.startsWith('ws')) {
+              const provider_ = new WebSocketProvider(endpoint)
+              providerReady = new Promise((resolve, reject) => {
+                provider_.websocket.onerror = reject
+                provider_
+                  ._waitUntilReady()
+                  .then(() => resolve(provider_))
+                  .catch(reject)
               })
-              .catch((_reason) => {
-                // destroy earlier if provider failed to connect, or if raced
-                provider.destroy()
-              }),
-          )
-          return [provider, endpoint] as const
-        }),
+              provider = provider_
+            } else if (endpoint.startsWith('http')) {
+              provider = new JsonRpcProvider(endpoint)
+              providerReady = Promise.resolve(provider)
+            } else {
+              throw new Error(
+                `Unknown JSON RPC protocol in endpoint (should be wss?:// or https?://): ${endpoint}`,
+              )
+            }
+
+            void this.destroyed.then(() => provider.destroy()) // schedule cleanup
+            readyPromises.push(
+              // wait for connection and check network in background
+              withTimeout(
+                providerReady.then((provider) => getProviderNetwork(provider)),
+                30e3,
+                undefined,
+                this.destroyed,
+              )
+                .then(({ chainId }) => {
+                  if (chainId in this.#promisesCallbacks) {
+                    const [resolve] = this.#promisesCallbacks[+chainId]
+                    delete this.#promisesCallbacks[+chainId]
+                    resolve(provider)
+                  } else if (!(chainId in this.#providersPromises)) {
+                    this.#providersPromises[+chainId] = Promise.resolve(provider)
+                  } else {
+                    throw new Error(`Raced by a faster provider`)
+                  }
+                })
+                .catch((_reason) => {
+                  // destroy earlier if provider failed to connect, or if raced
+                  provider.destroy()
+                }),
+            )
+            return [provider, endpoint] as const
+          }),
       )
       .finally(() => {
         void Promise.allSettled(readyPromises).then(() => {

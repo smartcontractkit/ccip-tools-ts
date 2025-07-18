@@ -1,3 +1,4 @@
+import { type ParsedTransactionWithMeta, PublicKey } from '@solana/web3.js'
 import {
   type EventFragment,
   type Log,
@@ -16,6 +17,7 @@ import {
 import yaml from 'yaml'
 
 import { parseExtraArgs, parseSourceTokenData } from './extra-args.ts'
+import { computeAnchorEventDiscriminant } from './solana/utils.ts'
 import {
   type CCIPContractEVM,
   type CCIPMessage,
@@ -418,4 +420,357 @@ export async function* fetchRequestsForSender(
       yield { lane: firstRequest.lane, message, log }
     }
   }
+}
+
+// ============= SOLANA FUNCTIONS =============
+const CCIP_MESSAGE_SENT_DISCRIMINATOR = computeAnchorEventDiscriminant('CCIPMessageSent')
+
+/**
+ * Fetch all CCIP messages in a Solana transaction
+ * @param signature - Solana transaction signature
+ * @param transaction - Parsed Solana transaction
+ * @returns CCIP messages in the transaction
+ **/
+export function fetchSolanaCCIPMessagesInTx(
+  signature: string,
+  transaction: ParsedTransactionWithMeta,
+): CCIPRequest[] {
+  // Look for "Program data:" logs which contain the CCIP event data
+  const programDataLogs =
+    transaction.meta?.logMessages?.filter((log) => log.startsWith('Program data: ')) || []
+
+  if (programDataLogs.length === 0) {
+    throw new Error(`Could not find any CCIP program data logs in Solana tx: ${signature}`)
+  }
+
+  // Extract CCIP router address from the last "Program return:" log
+  // Format: "Program return: [RouterAddress] [Base64MessageId]"
+  let ccipRouterAddress: string | null = null
+
+  if (transaction.meta?.logMessages) {
+    // Find all program return logs
+    const programReturnLogs = transaction.meta.logMessages.filter((log) =>
+      log.startsWith('Program return: '),
+    )
+
+    // Use the last one (final return from the CCIP Router)
+    if (programReturnLogs.length > 0) {
+      const lastReturnLog = programReturnLogs[programReturnLogs.length - 1]
+      const parts = lastReturnLog.replace('Program return: ', '').split(' ')
+      if (parts.length >= 1) {
+        ccipRouterAddress = parts[0]
+      }
+    }
+  }
+
+  if (!ccipRouterAddress) {
+    throw new Error(`Could not extract CCIP Router address from Solana tx: ${signature}`)
+  }
+
+  // Parse each program data log to find CCIP events
+  const ccipRequests: CCIPRequest[] = []
+  for (const log of programDataLogs) {
+    try {
+      // Extract the base64 data directly
+      const eventDataBuffer = Buffer.from(log.replace('Program data: ', ''), 'base64')
+
+      // Check if it's a CCIPMessageSent event by discriminator and we need to parse it
+      if (eventDataBuffer.length >= 8) {
+        const discriminator = eventDataBuffer.subarray(0, 8)
+        if (discriminator.equals(CCIP_MESSAGE_SENT_DISCRIMINATOR)) {
+          const ccipRequest = parseCCIPMessageSentEvent(
+            eventDataBuffer,
+            signature,
+            transaction.slot,
+            ccipRouterAddress,
+          )
+          ccipRequest.timestamp = transaction.blockTime || 0
+          ccipRequests.push(ccipRequest)
+        }
+      }
+    } catch (_) {
+      // Skip non relevant logs
+    }
+  }
+
+  if (ccipRequests.length === 0) {
+    throw new Error(`Could not parse any CCIP events in Solana tx: ${signature}`)
+  }
+
+  return ccipRequests
+}
+
+// TODO: We should replicate the general decoder we did in Go for o11y and handle these cases.
+/**
+ * Parse a CCIP MessageSent event from Solana program data (without discriminator)
+ * @param eventData - Binary event data without the 8-byte discriminator
+ * @param signature - Solana transaction signature
+ * @param slot - Solana block slot number
+ * @returns Parsed CCIPRequest object
+ */
+export function parseCCIPMessageSentEvent(
+  eventData: Buffer,
+  signature: string,
+  slot: number,
+  routerAddress: string,
+): CCIPRequest {
+  try {
+    // Structure of CCIPMessageSent event:
+    // ┌─ discriminator: 8b
+    // ├─ destChainSelector: u64
+    // ├─ sequenceNumber: u64
+    // └─ message {
+    //    ├─ header {
+    //    │  ├─ messageId: 32 bytes
+    //    │  ├─ sourceChainSelector: u64
+    //    │  ├─ destChainSelector: u64
+    //    │  ├─ sequenceNumber: u64
+    //    │  └─ nonce: u64
+    //    │ }
+    //    ├─ sender: PublicKey (32 bytes)
+    //    ├─ data: bytes (u32 len + data)
+    //    ├─ receiver: bytes (u32 len + data)
+    //    ├─ extraArgs: bytes (u32 len + data)
+    //    ├─ feeToken: PublicKey (32 bytes)
+    //    ├─ tokenAmounts: vec<TokenTransfer> {
+    //    │  ├─ length: u32
+    //    │  └─ for each token: {
+    //    │     ├─ sourcePoolAddress: PublicKey (32 bytes)
+    //    │     ├─ destTokenAddress: bytes (u32 len + data)
+    //    │     ├─ extraData: bytes (u32 len + data)
+    //    │     ├─ amount: 32 bytes (little-endian)
+    //    │     └─ destExecData: bytes (u32 len + data)
+    //    │  }
+    //    │ }
+    //    ├─ feeTokenAmount: 32 bytes (little-endian)
+    //    └─ feeValueJuels: 32 bytes (little-endian)
+
+    let offset = 0
+
+    // Skip discriminator (already verified by caller)
+    offset += 8
+
+    // ----- PARSE INITIAL EVENT FIELDS -----
+    const destChainSelector = eventData.readBigUInt64LE(offset)
+    offset += 8
+
+    //const sequenceNumber = eventData.readBigUInt64LE(offset) unused but left for clarity.
+    offset += 8
+
+    // ----- PARSE MESSAGE HEADER -----
+    const messageIdBuffer = eventData.subarray(offset, offset + 32)
+    offset += 32
+
+    const sourceChainSelector = eventData.readBigUInt64LE(offset)
+    offset += 8
+
+    const headerDestChainSelector = eventData.readBigUInt64LE(offset)
+    offset += 8
+
+    const headerSequenceNumber = eventData.readBigUInt64LE(offset)
+    offset += 8
+
+    const nonce = eventData.readBigUInt64LE(offset)
+    offset += 8
+
+    // ----- PARSE MESSAGE -----
+    const senderBuffer = eventData.subarray(offset, offset + 32)
+    const sender = new PublicKey(senderBuffer).toString()
+    offset += 32
+
+    const dataLength = eventData.readUInt32LE(offset)
+    offset += 4
+    const dataBuffer = eventData.subarray(offset, offset + dataLength)
+    offset += dataLength
+
+    const receiverLength = eventData.readUInt32LE(offset)
+    offset += 4
+    const receiverBuffer = eventData.subarray(offset, offset + receiverLength)
+    offset += receiverLength
+
+    const extraArgsLength = eventData.readUInt32LE(offset)
+    offset += 4
+    const extraArgsBuffer = eventData.subarray(offset, offset + extraArgsLength)
+    offset += extraArgsLength
+
+    const feeTokenBuffer = eventData.subarray(offset, offset + 32)
+    const feeToken = new PublicKey(feeTokenBuffer).toString()
+    offset += 32
+
+    // ----- PARSE TOKEN AMOUNTS -----
+    const tokenAmountsCount = eventData.readUInt32LE(offset)
+    offset += 4
+
+    const tokenAmounts: Array<{
+      sourcePoolAddress: string
+      destTokenAddress: string
+      extraData: string
+      amount: bigint
+      destExecData: string
+      destGasAmount: bigint
+    }> = []
+
+    for (let i = 0; i < tokenAmountsCount; i++) {
+      const sourcePoolBuffer = eventData.subarray(offset, offset + 32)
+      const sourcePoolAddress = new PublicKey(sourcePoolBuffer).toString()
+      offset += 32
+
+      const destTokenAddressLength = eventData.readUInt32LE(offset)
+      offset += 4
+      const destTokenAddressBuffer = eventData.subarray(offset, offset + destTokenAddressLength)
+      offset += destTokenAddressLength
+
+      const taExtraDataLength = eventData.readUInt32LE(offset)
+      offset += 4
+      const taExtraDataBuffer = eventData.subarray(offset, offset + taExtraDataLength)
+      offset += taExtraDataLength
+
+      const amountBuffer = eventData.subarray(offset, offset + 32)
+      const amount = parseCrossChainAmount(amountBuffer)
+      offset += 32
+
+      const destExecDataLength = eventData.readUInt32LE(offset)
+      offset += 4
+      const destExecDataBuffer = eventData.subarray(offset, offset + destExecDataLength)
+      offset += destExecDataLength
+
+      tokenAmounts.push({
+        sourcePoolAddress,
+        destTokenAddress: '0x' + Buffer.from(destTokenAddressBuffer).toString('hex'),
+        extraData: '0x' + Buffer.from(taExtraDataBuffer).toString('hex'),
+        amount,
+        destExecData: '0x' + Buffer.from(destExecDataBuffer).toString('hex'),
+        destGasAmount: parseDestGasAmount(destExecDataBuffer),
+      })
+    }
+
+    // ----- PARSE FEE FIELDS -----
+    const feeTokenAmountBuffer = eventData.subarray(offset, offset + 32)
+    const feeTokenAmount = parseCrossChainAmount(feeTokenAmountBuffer)
+    offset += 32
+
+    const feeValueJuelsBuffer = eventData.subarray(offset, offset + 32)
+    const feeValueJuels = parseCrossChainAmount(feeValueJuelsBuffer)
+    offset += 32
+
+    // ----- CREATE CCIP MESSAGE AND REQUEST OBJECTS -----
+    const ccipMessage: CCIPMessage = {
+      header: {
+        messageId: '0x' + Buffer.from(messageIdBuffer).toString('hex'),
+        sourceChainSelector,
+        destChainSelector: headerDestChainSelector,
+        sequenceNumber: headerSequenceNumber,
+        nonce,
+      },
+      sender,
+      receiver: '0x' + Buffer.from(receiverBuffer).toString('hex'),
+      data: '0x' + Buffer.from(dataBuffer).toString('hex'),
+      tokenAmounts,
+      gasLimit: parseGasLimitFromExtraArgs(extraArgsBuffer),
+      feeToken,
+      feeTokenAmount,
+      feeValueJuels,
+      extraArgs: '0x' + Buffer.from(extraArgsBuffer).toString('hex'),
+    }
+
+    const ccipRequest: CCIPRequest = {
+      lane: {
+        sourceChainSelector,
+        destChainSelector,
+        onRamp: routerAddress,
+        version: CCIPVersion.V1_6,
+      },
+      message: ccipMessage,
+      log: {
+        index: 0, // Solana doesn't have log indices like EVM
+        address: routerAddress,
+        transactionHash: signature,
+        blockNumber: slot,
+        topics: [], // Solana events don't have topics like EVM
+        data: eventData.toString('base64'),
+      },
+      tx: {
+        hash: signature,
+        blockNumber: slot,
+        logs: [],
+        from: routerAddress,
+        to: null,
+        contractAddress: null,
+        gasUsed: 0n,
+        gasPrice: 0n,
+        cumulativeGasUsed: 0n,
+        effectiveGasPrice: 0n,
+        logsBloom: '',
+        status: null,
+        type: 0,
+        byzantium: false,
+        index: 0,
+        provider: null,
+        getBlock: () => null,
+        confirmations: () => 0,
+        wait: () => null,
+        toJSON: () => ({}),
+      } as unknown as TransactionReceipt,
+      timestamp: 0, // Will be set by caller
+    }
+
+    return ccipRequest
+  } catch (error) {
+    throw new Error(
+      `Failed to parse Solana CCIP event: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
+/**
+ * Parse destination gas amount from destExecData buffer
+ * @param buffer - Buffer containing the destExecData
+ * @returns The gas amount as a bigint
+ */
+function parseDestGasAmount(buffer: Buffer): bigint {
+  // Solana CCIP format for destExecData is a uint32 gas limit
+  // The first byte is the data length
+  try {
+    if (buffer.length >= 4) {
+      return BigInt(buffer.readUInt32LE(0))
+    }
+  } catch (e) {
+    console.debug('Failed to parse destGasAmount:', e)
+  }
+
+  // Fallback to zero if we can't parse it
+  return 0n
+}
+
+/**
+ * Parse CrossChainAmount from buffer (little-endian byte array)
+ * @param buffer - 32-byte buffer containing the CrossChainAmount
+ * @returns The parsed amount as a bigint
+ */
+function parseCrossChainAmount(buffer: Buffer): bigint {
+  let result = 0n
+  for (let i = 0; i < buffer.length; i++) {
+    result += BigInt(buffer[i]) * 256n ** BigInt(i)
+  }
+  return result
+}
+
+/**
+ * Parse gas limit from extraArgs buffer containing a Borsh-serialized GenericExtraArgsV2 struct
+ * @param extraArgsBuffer - The buffer containing the extraArgs data
+ * @returns The parsed gas limit as a bigint
+ */
+export function parseGasLimitFromExtraArgs(extraArgsBuffer: Buffer): bigint {
+  // Format: [tag (4 bytes)][gas_limit (16 bytes u128)][allow_out_of_order_execution (1 byte bool)]
+  if (extraArgsBuffer.length < 21) {
+    return 0n
+  }
+
+  // Parse the gas_limit as a u128 in little-endian format
+  let gasLimit = 0n
+  for (let i = 0; i < 16; i++) {
+    gasLimit += BigInt(extraArgsBuffer[4 + i]) * 256n ** BigInt(i)
+  }
+
+  return gasLimit
 }

@@ -16,7 +16,7 @@ import {
   showRequests,
   showSupportedTokens,
 } from './commands/index.ts'
-import { logParsedError } from './commands/utils.ts'
+import { logParsedError, validateSupportedTxHash } from './commands/utils.ts'
 import { Providers } from './providers.ts'
 
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
@@ -83,7 +83,7 @@ async function main() {
                 'Search by messageId instead of tx_hash; requires specifying source network (by id or name)',
             },
           })
-          .check(({ tx_hash }) => isHexString(tx_hash, 32)),
+          .check(({ tx_hash }) => validateSupportedTxHash(tx_hash)),
       async (argv) => {
         const providers = new Providers(argv)
         return showRequests(providers, argv.tx_hash, argv)

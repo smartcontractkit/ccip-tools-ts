@@ -77,6 +77,8 @@
       "<rootDir>/dist/"
     ],
     "moduleNameMapper": {
+      "^@solana/web3\\.js$": "@solana/web3.js",
+      "^bn\\.js$": "bn.js",
       "(.+)\\.[jt]s$": "$1"
     },
     "transform": {

@@ -10,6 +10,7 @@ export {
   fetchCCIPMessageInLog,
   fetchCCIPMessagesInTx,
   fetchRequestsForSender,
+  fetchSolanaCCIPMessagesInTx,
   getOnRampLane,
 } from './requests.ts'
 export {
