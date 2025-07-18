@@ -419,18 +419,17 @@ const CCIP_MESSAGE_SENT_DISCRIMINATOR = computeAnchorEventDiscriminant('CCIPMess
 
 /**
  * Fetch all CCIP messages in a Solana transaction
- * @param signature - Solana transaction signature  
+ * @param signature - Solana transaction signature
  * @param transaction - Parsed Solana transaction
- * @returns CCIP messages in the transaction 
+ * @returns CCIP messages in the transaction
  **/
 export async function fetchSolanaCCIPMessagesInTx(
   signature: string,
-  transaction: ParsedTransactionWithMeta
+  transaction: ParsedTransactionWithMeta,
 ): Promise<CCIPRequest[]> {
   // Look for "Program data:" logs which contain the CCIP event data
-  const programDataLogs = transaction.meta?.logMessages?.filter(log =>
-    log.startsWith('Program data: ')
-  ) || []
+  const programDataLogs =
+    transaction.meta?.logMessages?.filter((log) => log.startsWith('Program data: ')) || []
 
   if (programDataLogs.length === 0) {
     throw new Error(`Could not find any CCIP program data logs in Solana tx: ${signature}`)
@@ -438,20 +437,20 @@ export async function fetchSolanaCCIPMessagesInTx(
 
   // Extract CCIP router address from the last "Program return:" log
   // Format: "Program return: [RouterAddress] [Base64MessageId]"
-  let ccipRouterAddress: string | null = null;
+  let ccipRouterAddress: string | null = null
 
   if (transaction.meta?.logMessages) {
     // Find all program return logs
-    const programReturnLogs = transaction.meta.logMessages.filter(log =>
-      log.startsWith('Program return: ')
-    );
+    const programReturnLogs = transaction.meta.logMessages.filter((log) =>
+      log.startsWith('Program return: '),
+    )
 
     // Use the last one (final return from the CCIP Router)
     if (programReturnLogs.length > 0) {
-      const lastReturnLog = programReturnLogs[programReturnLogs.length - 1];
-      const parts = lastReturnLog.replace('Program return: ', '').split(' ');
+      const lastReturnLog = programReturnLogs[programReturnLogs.length - 1]
+      const parts = lastReturnLog.replace('Program return: ', '').split(' ')
       if (parts.length >= 1) {
-        ccipRouterAddress = parts[0];
+        ccipRouterAddress = parts[0]
       }
     }
   }
@@ -471,7 +470,12 @@ export async function fetchSolanaCCIPMessagesInTx(
       if (eventDataBuffer.length >= 8) {
         const discriminator = eventDataBuffer.subarray(0, 8)
         if (discriminator.equals(CCIP_MESSAGE_SENT_DISCRIMINATOR)) {
-          const ccipRequest = parseCCIPMessageSentEvent(eventDataBuffer, signature, transaction.slot, ccipRouterAddress)
+          const ccipRequest = parseCCIPMessageSentEvent(
+            eventDataBuffer,
+            signature,
+            transaction.slot,
+            ccipRouterAddress,
+          )
           ccipRequest.timestamp = transaction.blockTime || 0
           ccipRequests.push(ccipRequest)
         }
@@ -500,20 +504,20 @@ export function parseCCIPMessageSentEvent(
   eventData: Buffer,
   signature: string,
   slot: number,
-  routerAddress: string
+  routerAddress: string,
 ): CCIPRequest {
   try {
     // Structure of CCIPMessageSent event:
     // ┌─ discriminator: 8b
-    // ├─ destChainSelector: u64 
-    // ├─ sequenceNumber: u64 
+    // ├─ destChainSelector: u64
+    // ├─ sequenceNumber: u64
     // └─ message {
     //    ├─ header {
     //    │  ├─ messageId: 32 bytes
-    //    │  ├─ sourceChainSelector: u64 
-    //    │  ├─ destChainSelector: u64 
-    //    │  ├─ sequenceNumber: u64 
-    //    │  └─ nonce: u64 
+    //    │  ├─ sourceChainSelector: u64
+    //    │  ├─ destChainSelector: u64
+    //    │  ├─ sequenceNumber: u64
+    //    │  └─ nonce: u64
     //    │ }
     //    ├─ sender: PublicKey (32 bytes)
     //    ├─ data: bytes (u32 len + data)
@@ -521,7 +525,7 @@ export function parseCCIPMessageSentEvent(
     //    ├─ extraArgs: bytes (u32 len + data)
     //    ├─ feeToken: PublicKey (32 bytes)
     //    ├─ tokenAmounts: vec<TokenTransfer> {
-    //    │  ├─ length: u32 
+    //    │  ├─ length: u32
     //    │  └─ for each token: {
     //    │     ├─ sourcePoolAddress: PublicKey (32 bytes)
     //    │     ├─ destTokenAddress: bytes (u32 len + data)
@@ -590,12 +594,12 @@ export function parseCCIPMessageSentEvent(
     offset += 4
 
     const tokenAmounts: Array<{
-      sourcePoolAddress: string;
-      destTokenAddress: string;
-      extraData: string;
-      amount: bigint;
-      destExecData: string;
-      destGasAmount: bigint;
+      sourcePoolAddress: string
+      destTokenAddress: string
+      extraData: string
+      amount: bigint
+      destExecData: string
+      destGasAmount: bigint
     }> = []
 
     for (let i = 0; i < tokenAmountsCount; i++) {
@@ -682,9 +686,10 @@ export function parseCCIPMessageSentEvent(
     }
 
     return ccipRequest
-
   } catch (error) {
-    throw new Error(`Failed to parse Solana CCIP event: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(
+      `Failed to parse Solana CCIP event: ${error instanceof Error ? error.message : String(error)}`,
+    )
   }
 }
 
@@ -698,14 +703,14 @@ function parseDestGasAmount(buffer: Buffer): bigint {
   // The first byte is the data length
   try {
     if (buffer.length >= 4) {
-      return BigInt(buffer.readUInt32LE(0));
+      return BigInt(buffer.readUInt32LE(0))
     }
   } catch (e) {
-    console.debug('Failed to parse destGasAmount:', e);
+    console.debug('Failed to parse destGasAmount:', e)
   }
 
   // Fallback to zero if we can't parse it
-  return 0n;
+  return 0n
 }
 
 /**
@@ -716,7 +721,7 @@ function parseDestGasAmount(buffer: Buffer): bigint {
 function parseCrossChainAmount(buffer: Buffer): bigint {
   let result = 0n
   for (let i = 0; i < buffer.length; i++) {
-    result += BigInt(buffer[i]) * (256n ** BigInt(i))
+    result += BigInt(buffer[i]) * 256n ** BigInt(i)
   }
   return result
 }
@@ -729,14 +734,14 @@ function parseCrossChainAmount(buffer: Buffer): bigint {
 export function parseGasLimitFromExtraArgs(extraArgsBuffer: Buffer): bigint {
   // Format: [tag (4 bytes)][gas_limit (16 bytes u128)][allow_out_of_order_execution (1 byte bool)]
   if (extraArgsBuffer.length < 21) {
-    return 0n;
+    return 0n
   }
 
   // Parse the gas_limit as a u128 in little-endian format
-  let gasLimit = 0n;
+  let gasLimit = 0n
   for (let i = 0; i < 16; i++) {
-    gasLimit += BigInt(extraArgsBuffer[4 + i]) * (256n ** BigInt(i));
+    gasLimit += BigInt(extraArgsBuffer[4 + i]) * 256n ** BigInt(i)
   }
 
-  return gasLimit;
+  return gasLimit
 }

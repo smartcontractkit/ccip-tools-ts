@@ -99,12 +99,12 @@ export class Providers {
 
   /**
    * Get Solana transaction from available Solana RPCs
-   * @param signature - Solana transaction signature  
+   * @param signature - Solana transaction signature
    * @returns Promise for the transaction details with connection
    */
   async getSolanaTransaction(signature: string) {
     const endpoints = await this.#endpoints
-    const solanaRpcs = [...endpoints].filter(rpc => rpc.includes('solana'))
+    const solanaRpcs = [...endpoints].filter((rpc) => rpc.includes('solana'))
 
     if (solanaRpcs.length === 0) {
       throw new Error('No Solana RPC endpoint found in configuration')
@@ -118,7 +118,7 @@ export class Providers {
             const connection = new Connection(solanaRpc, 'finalized')
             const parsedTransaction = await connection.getParsedTransaction(signature, {
               commitment: 'finalized',
-              maxSupportedTransactionVersion: 0
+              maxSupportedTransactionVersion: 0,
             })
 
             if (!parsedTransaction) {
@@ -129,9 +129,9 @@ export class Providers {
           })(),
           30e3,
           `Timeout fetching Solana tx=${signature} from "${solanaRpc}"`,
-          this.destroyed
-        )
-      )
+          this.destroyed,
+        ),
+      ),
     )
   }
 
@@ -145,7 +145,7 @@ export class Providers {
     return (this.#providersList = this.#endpoints
       .then((rpcs) =>
         [...rpcs]
-          .filter(endpoint => !endpoint.includes('solana')) // Exclude Solana RPCs
+          .filter((endpoint) => !endpoint.includes('solana')) // Exclude Solana RPCs
           .map((endpoint) => {
             let provider: JsonRpcApiProvider
             let providerReady: Promise<JsonRpcApiProvider>

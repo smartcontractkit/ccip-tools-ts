@@ -44,7 +44,7 @@ import {
   parseWithFragment,
   recursiveParseError,
 } from '../lib/index.ts'
-import { ChainFamily } from '../lib/types';
+import { ChainFamily } from '../lib/types'
 
 export async function getWallet(argv?: { wallet?: string }): Promise<Signer> {
   if ((argv?.wallet ?? '').startsWith('ledger')) {
@@ -211,17 +211,17 @@ export function formatDuration(secs: number) {
 
 export async function prettyRequest(source: Provider | null, request: CCIPRequest) {
   // route to the appropriate implementation based on chain family
-  const chainInfo = networkInfo(request.lane.sourceChainSelector);
+  const chainInfo = networkInfo(request.lane.sourceChainSelector)
   switch (chainInfo.family) {
     case ChainFamily.Solana:
-      await prettyRequestSolana(request);
-      break;
+      await prettyRequestSolana(request)
+      break
     default:
       // For EVM requests, we need a provider
       if (!source) {
-        throw new Error('Provider is required for EVM requests');
+        throw new Error('Provider is required for EVM requests')
       }
-      await prettyRequestEVM(source, request);
+      await prettyRequestEVM(source, request)
   }
 }
 
@@ -273,48 +273,53 @@ export async function prettyRequestSolana(request: CCIPRequest) {
   prettyLane(request.lane)
   console.info('Request (source):')
 
-  //TODO: We should replicate what we did for o11y, read TP PDAs and extract Metaplex Metadata here. Using these hardcoded maps for now. 
-  const knownTokens: Record<string, { symbol: string, decimals: number }> = {
-    'So11111111111111111111111111111111111111112': { symbol: 'SOL', decimals: 9 },
+  //TODO: We should replicate what we did for o11y, read TP PDAs and extract Metaplex Metadata here. Using these hardcoded maps for now.
+  const knownTokens: Record<string, { symbol: string; decimals: number }> = {
+    So11111111111111111111111111111111111111112: { symbol: 'SOL', decimals: 9 },
     '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU': { symbol: 'USDC', decimals: 6 }, // devnet
-    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': { symbol: 'USDC', decimals: 6 }, // mainnet
-  };
+    EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: { symbol: 'USDC', decimals: 6 }, // mainnet
+  }
 
   // Pool-specific token mapping
-  const knownPools: Record<string, { symbol: string, decimals: number }> = {
+  const knownPools: Record<string, { symbol: string; decimals: number }> = {
     // CCTP Devnet TP
-    'D22aGkYvJiFJ9tpxUV1RUWkNUy4FSUBk2NAvwQQD2G9Y': { symbol: 'USDC', decimals: 6 },
-  };
+    D22aGkYvJiFJ9tpxUV1RUWkNUy4FSUBk2NAvwQQD2G9Y: { symbol: 'USDC', decimals: 6 },
+  }
 
   const nonce = Number(request.message.header.nonce)
 
-  const feeTokenInfo = knownTokens[request.message.feeToken] || { symbol: 'Unknown', decimals: 0 };
-  const formattedFee = feeTokenInfo.decimals > 0
-    ? `${formatUnits(request.message.feeTokenAmount, feeTokenInfo.decimals)} ${feeTokenInfo.symbol}`
-    : `${request.message.feeTokenAmount} ${feeTokenInfo.symbol}`;
+  const feeTokenInfo = knownTokens[request.message.feeToken] || { symbol: 'Unknown', decimals: 0 }
+  const formattedFee =
+    feeTokenInfo.decimals > 0
+      ? `${formatUnits(request.message.feeTokenAmount, feeTokenInfo.decimals)} ${feeTokenInfo.symbol}`
+      : `${request.message.feeTokenAmount} ${feeTokenInfo.symbol}`
 
-  const formattedTokens = request.message.tokenAmounts.map(ta => {
+  const formattedTokens = request.message.tokenAmounts.map((ta) => {
+    const destTokenAddr =
+      typeof ta.destTokenAddress === 'string'
+        ? decodeAddress(ta.destTokenAddress, networkInfo(request.lane.destChainSelector).family)
+        : 'unknown'
 
-    const destTokenAddr = typeof ta.destTokenAddress === 'string'
-      ? decodeAddress(ta.destTokenAddress, networkInfo(request.lane.destChainSelector).family)
-      : 'unknown';
+    const srcPoolAddr =
+      'sourcePoolAddress' in ta && typeof ta.sourcePoolAddress === 'string'
+        ? ta.sourcePoolAddress
+        : 'unknown'
 
-    const srcPoolAddr = 'sourcePoolAddress' in ta && typeof ta.sourcePoolAddress === 'string'
-      ? ta.sourcePoolAddress
-      : 'unknown';
-
-    let amount = ta.amount.toString();
+    let amount = ta.amount.toString()
     if (srcPoolAddr !== 'unknown' && knownPools[srcPoolAddr]) {
-      const poolInfo = knownPools[srcPoolAddr];
-      amount = `${formatUnits(ta.amount, poolInfo.decimals)} ${poolInfo.symbol}`;
+      const poolInfo = knownPools[srcPoolAddr]
+      amount = `${formatUnits(ta.amount, poolInfo.decimals)} ${poolInfo.symbol}`
     }
-    return `${amount} from ${srcPoolAddr} of ${destTokenAddr}`;
-  });
+    return `${amount} from ${srcPoolAddr} of ${destTokenAddr}`
+  })
 
   console.table({
     messageId: request.message.header.messageId,
     sender: request.message.sender,
-    receiver: decodeAddress(request.message.receiver, networkInfo(request.lane.destChainSelector).family),
+    receiver: decodeAddress(
+      request.message.receiver,
+      networkInfo(request.lane.destChainSelector).family,
+    ),
     sequenceNumber: Number(request.message.header.sequenceNumber),
     nonce: nonce === 0 ? '0 => allow out-of-order exec' : nonce,
     ...('gasLimit' in request.message
@@ -447,7 +452,7 @@ export async function sourceToDestTokenAmounts<S extends { token: string }>(
   if (lane.version < CCIPVersion.V1_5) {
     throw new Error('Deprecated lane version: ' + lane.version)
   } else {
-    ; ({ tokenAdminRegistry: tokenAdminRegistryAddress } = await (
+    ;({ tokenAdminRegistry: tokenAdminRegistryAddress } = await (
       onRamp as CCIPContract<
         typeof CCIPContractType.OnRamp,
         typeof CCIPVersion.V1_5 | typeof CCIPVersion.V1_6
@@ -509,8 +514,8 @@ export function validateSupportedTxHash(tx_hash: string): boolean {
 
   throw new Error(
     'Only EVM and Solana transactions are currently supported.\n' +
-    'Transaction hash must be a valid format:\n' +
-    '  • EVM: 32-byte hex string (0x...)\n' +
-    '  • Solana: base58 signature (64 bytes when decoded)'
+      'Transaction hash must be a valid format:\n' +
+      '  • EVM: 32-byte hex string (0x...)\n' +
+      '  • Solana: base58 signature (64 bytes when decoded)',
   )
 }

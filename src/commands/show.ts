@@ -11,7 +11,7 @@ import {
   fetchCommitReport,
   fetchExecutionReceipts,
   fetchSolanaCCIPMessagesInTx,
-  getSomeBlockNumberBefore
+  getSomeBlockNumberBefore,
 } from '../lib/index.ts'
 import type { Providers } from '../providers.ts'
 import { Format } from './types.ts'
@@ -28,14 +28,13 @@ export async function showRequests(
   txHash: string,
   argv: { logIndex?: number; idFromSource?: string; format: Format; page: number },
 ) {
-
   // messageId not yet implemented for Solana
   if (argv.idFromSource) {
     const sourceNetwork = argv.idFromSource.toLowerCase()
     if (sourceNetwork.includes('solana')) {
       throw new Error(
         `Message ID search is not yet supported for Solana networks.\n` +
-        `Please use show with Solana transaction signature instead`
+          `Please use show with Solana transaction signature instead`,
       )
     }
   }
@@ -144,7 +143,9 @@ async function showSolanaRequests(
         break
     }
   } catch (error) {
-    console.warn(`Could not fetch commit report: ${error instanceof Error ? error.message : String(error)}`)
+    console.warn(
+      `Could not fetch commit report: ${error instanceof Error ? error.message : String(error)}`,
+    )
   }
 
   // Fetch and display execution receipts
@@ -155,7 +156,7 @@ async function showSolanaRequests(
 async function displayRequest(
   request: CCIPRequest,
   argv: { format: Format },
-  sourceProvider?: Provider
+  sourceProvider?: Provider,
 ) {
   switch (argv.format) {
     case Format.log:
@@ -175,7 +176,7 @@ async function displayExecutionReceipts(
   dest: Provider,
   request: CCIPRequest,
   fromBlock: number | undefined,
-  argv: { format: Format; page: number }
+  argv: { format: Format; page: number },
 ) {
   let found = false
   for await (const receipt of fetchExecutionReceipts(dest, [request], {
