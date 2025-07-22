@@ -11,7 +11,7 @@ import {
   U32,
   U64,
 } from '@aptos-labs/ts-sdk'
-import type { CCIPMessage, ExecutionReport } from '../types'
+import type { CCIPMessage, ExecutionReport } from '../types.ts'
 
 const hexStringToVectorU8 = (hexString: string) => {
   if (!hexString || hexString === '0x') {

@@ -8,11 +8,11 @@ import {
   NetworkToNetworkName,
 } from '@aptos-labs/ts-sdk'
 import { createSurfClient } from '@thalalabs/surf'
-import { calculateManualExecProof } from '../execution'
-import { parseExtraArgs } from '../extra-args'
-import { type CCIPRequest, type ExecutionReport, CCIPVersion } from './../types'
-import { CreateAptosOffRampABI } from './abi/offramp'
-import { serializeExecutionReport } from './bcs'
+import { calculateManualExecProof } from '../execution.ts'
+import { parseExtraArgs } from '../extra-args.ts'
+import { type CCIPRequest, type ExecutionReport, CCIPVersion } from './../types.ts'
+import { CreateAptosOffRampABI } from './abi/offramp.ts'
+import { serializeExecutionReport } from './bcs.ts'
 
 export const newAptosClient = (chainName: string): Aptos => {
   const network: Network = NetworkToNetworkName[chainName.split('-')[1]]
