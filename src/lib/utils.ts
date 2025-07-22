@@ -412,7 +412,7 @@ function resolveNumericString(input: string): {
 /**
  * Determines chain family from chain name
  */
-function getChainFamily(name: string): ChainFamily {
+export function getChainFamily(name: string): ChainFamily {
   if (name.startsWith('solana-')) return ChainFamily.Solana
   if (name.startsWith('aptos-')) return ChainFamily.Aptos
   return ChainFamily.EVM
