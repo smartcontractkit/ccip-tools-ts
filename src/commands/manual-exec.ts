@@ -40,7 +40,14 @@ import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioni
 import { waitForFinalization } from '../lib/solana/utils.ts'
 import { getChainFamily } from '../lib/utils.ts'
 import type { Providers } from '../providers.ts'
-import { Format } from './types.ts'
+import {
+  type AptosManualExecCommandArgs,
+  type ManualExecCommandArgs,
+  type SolanaManualExecCommandArgs,
+  Format,
+  isAptosManualExecCommandArgs,
+  isSolanaManualExecCommandArgs,
+} from './types.ts'
 import {
   getWallet,
   prettyCommit,
@@ -48,27 +55,6 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-
-type ManualExecCommandArgs = {
-  gasLimit?: number
-  estimateGasLimit?: number
-  tokensGasLimit?: number
-  logIndex?: number
-  format: Format
-  page: number
-  wallet?: string
-
-  // Solana
-  solanaOfframp?: string
-  solanaKeypair?: string
-  solanaBufferAddress: string
-  solanaForceBuffer: boolean
-  solanaForceLookupTable: boolean
-  solanaCuLimit?: number
-
-  // Aptos
-  aptosOfframp?: string
-}
 
 export async function manualExec(
   providers: Providers,
@@ -104,11 +90,21 @@ export async function manualExec(
   if (typeof chainId === 'string') {
     switch (family) {
       case ChainFamily.Aptos:
-        await aptosManualExecution(argv, chainName, request)
+        if (isAptosManualExecCommandArgs(argv)) {
+          await aptosManualExecution(argv, chainName, request)
+        } else {
+          throw new Error(
+            'Invalid Aptos Manual Execution Arguments: You must provide the offramp address with the --aptos-offramp argument and the private key with the --aptos-private-key argument',
+          )
+        }
         break
       case ChainFamily.Solana:
-        if (isSupportedSolanaCluster(chainName)) {
+        if (isSupportedSolanaCluster(chainName) && isSolanaManualExecCommandArgs(argv)) {
           await solanaManualExecution(argv, chainName, request)
+        } else {
+          throw new Error(
+            'Invalid Solana Manual Execution Arguments: You must provide the offramp address with the --solana-offramp argument and the keypair with the --solana-keypair argument',
+          )
         }
         break
       default: {
@@ -120,7 +116,7 @@ export async function manualExec(
 }
 
 async function aptosManualExecution(
-  argv: ManualExecCommandArgs,
+  argv: AptosManualExecCommandArgs,
   chainName: string,
   request: CCIPRequest<CCIPVersion>,
 ): Promise<void> {
@@ -132,11 +128,17 @@ async function aptosManualExecution(
     )
   }
 
-  await buildManualExecutionTxWithAptosDestination(aptosClient, request, argv.aptosOfframp)
+  if (!argv.aptosPrivateKey) {
+    throw new Error(
+      'Unable to send Aptos Transaction, no private key has been provided: You must provide the private key with either the --aptos-private-key argument.',
+    )
+  }
+
+  await buildManualExecutionTxWithAptosDestination(aptosClient, request, argv)
 }
 
 async function solanaManualExecution(
-  argv: ManualExecCommandArgs,
+  argv: SolanaManualExecCommandArgs,
   chainName: string,
   request: CCIPRequest<CCIPVersion>,
 ): Promise<void> {

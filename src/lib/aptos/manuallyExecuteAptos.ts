@@ -8,6 +8,7 @@ import {
   NetworkToNetworkName,
 } from '@aptos-labs/ts-sdk'
 import { createSurfClient } from '@thalalabs/surf'
+import type { AptosManualExecCommandArgs } from '../../commands/types.ts'
 import { calculateManualExecProof } from '../execution.ts'
 import { parseExtraArgs } from '../extra-args.ts'
 import { type CCIPRequest, type ExecutionReport, CCIPVersion } from './../types.ts'
@@ -72,7 +73,7 @@ const possibleErrorReasons = (errorVmStatus: string) => {
 export const buildManualExecutionTxWithAptosDestination = async (
   aptosClient: Aptos,
   request: CCIPRequest,
-  offRampAddress: string,
+  argv: AptosManualExecCommandArgs,
 ): Promise<void> => {
   // Before we do anything, we need to make sure the request is at least CCIP 1.6, we'll assert here just for typescript safety
   assertCCIPVersionAtLeast1_6(request)
@@ -87,11 +88,14 @@ export const buildManualExecutionTxWithAptosDestination = async (
   const executionReportSerialized = constructAptosExecutionReportFromRequest(request)
 
   // We'll use a TypeScript bindings to handle interacting with the offramp contract, not the raw client just to make it easier to work with.
-  const offRampClient = createSurfClient(aptosClient).useABI(CreateAptosOffRampABI(offRampAddress))
+  const offRampClient = createSurfClient(aptosClient).useABI(
+    CreateAptosOffRampABI(argv.aptosOfframp),
+  )
 
-  const privateKey = process.env.USER_KEY
-  if (!privateKey) {
-    throw new Error('Unable to send Aptos Transaction, no private key has been provided')
+  if (!argv.aptosPrivateKey) {
+    throw new Error(
+      'Unable to send Aptos Transaction, no private key has been provided: You must provide the private key with either the --aptos-private-key argument.',
+    )
   }
 
   // Step 4 - Manually Execute the Transaction
@@ -100,7 +104,7 @@ export const buildManualExecutionTxWithAptosDestination = async (
       typeArguments: [],
       functionArguments: [executionReportSerialized],
       account: Account.fromPrivateKey({
-        privateKey: new Ed25519PrivateKey(privateKey, false),
+        privateKey: new Ed25519PrivateKey(argv.aptosPrivateKey, false),
       }),
       isSimulation: false,
     })

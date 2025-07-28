@@ -166,6 +166,10 @@ async function main() {
               describe:
                 'Aptos offramp. Must be provided for when Aptos is destination, until automated discovery is implemented',
             },
+            'aptos-private-key': {
+              type: 'string',
+              describe: 'Aptos private key to use for manual execution',
+            },
             'sender-queue': {
               type: 'boolean',
               describe: 'Execute all messages in sender queue, starting with the provided tx',
