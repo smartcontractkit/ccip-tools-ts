@@ -240,6 +240,8 @@ const selectors: Selectors = {
   '8453': { selector: 15971525489660198786n, name: 'ethereum-mainnet-base-1' },
   '9000': { selector: 344208382356656551n, name: 'ondo-testnet' },
   '9559': { selector: 1113014352258747600n, name: 'neonlink-testnet' },
+  '9745': { selector: 9335212494177455608n, name: 'plasma-mainnet' },
+  '9746': { selector: 3967220077692964309n, name: 'plasma-testnet' },
   '10143': { selector: 2183018362218727504n, name: 'monad-testnet' },
   '10200': {
     selector: 8871595565390010547n,
@@ -378,6 +380,7 @@ const selectors: Selectors = {
   },
   '595581': { selector: 7837562506228496256n, name: 'avalanche-testnet-nexon' },
   '686868': { selector: 5269261765892944301n, name: 'bitcoin-testnet-merlin' },
+  '688688': { selector: 4012524741200567430n, name: 'pharos-testnet' },
   '717160': {
     selector: 4418231248214522936n,
     name: 'ethereum-testnet-sepolia-polygon-validium-1',
@@ -408,6 +411,7 @@ const selectors: Selectors = {
     selector: 5224473277236331295n,
     name: 'ethereum-testnet-sepolia-optimism-1',
   },
+  '12052024': { selector: 4827185390138236183n, name: 'memento-testnet' },
   '12227332': { selector: 2217764097022649312n, name: 'neox-testnet-t4' },
   '21000000': { selector: 9043146809313071210n, name: 'corn-mainnet' },
   '21000001': {
