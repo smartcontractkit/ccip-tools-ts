@@ -48,6 +48,7 @@
     "@coral-xyz/anchor": "0.29.0",
     "@inquirer/prompts": "7.6.0",
     "@solana/spl-token": "0.4.13",
+    "@solana/web3.js": "^1.98.2",
     "@xlabs-xyz/ledger-signer-ethers-v6": "^0.0.1",
     "abitype": "1.0.8",
     "bn.js": "^5.2.2",
@@ -77,6 +78,8 @@
       "<rootDir>/dist/"
     ],
     "moduleNameMapper": {
+      "^@solana/web3\\.js$": "@solana/web3.js",
+      "^bn\\.js$": "bn.js",
       "(.+)\\.[jt]s$": "$1"
     },
     "transform": {

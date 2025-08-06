@@ -18,7 +18,8 @@ import {
 } from '@solana/web3.js'
 import type { Layout } from 'buffer-layout'
 import { calculateManualExecProof } from '../execution.ts'
-import {type CCIPRequest, type ExecutionReport } from '../types.ts'
+import { fetchOffchainTokenData } from '../offchain.ts'
+import type { CCIPRequest, ExecutionReport } from '../types.ts'
 import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
 import { getManuallyExecuteInputs } from './getManuallyExecuteInputs.ts'
 import { getCcipOfframp } from './programs/getCcipOfframp.ts'
@@ -97,8 +98,8 @@ export async function buildManualExecutionTxWithSolanaDestination<
     sourceChainSelector: BigInt(ccipRequest.lane.sourceChainSelector),
     message: ccipRequest.message,
     proofs,
-    // Offchain token data is unsupported for manual exec
-    offchainTokenData: new Array(ccipRequest.message.tokenAmounts.length).fill('0x') as string[],
+    // Offchain token data is only supported for single USDC CCTP transfer
+    offchainTokenData: await fetchOffchainTokenData(ccipRequest),
   })
 
   const payerAddress = destinationProvider.wallet.publicKey

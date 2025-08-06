@@ -1,10 +1,18 @@
+import { Connection, PublicKey } from '@solana/web3.js'
+import * as borsh from 'borsh'
 import { type Addressable, type Log, EventFragment, Interface, keccak256 } from 'ethers'
 
 import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.ts'
 import { type SourceTokenData, parseSourceTokenData } from './extra-args.ts'
+import { chainNameFromSelector } from './index.ts'
+import {
+  getClusterUrlByChainSelectorName,
+  isSupportedSolanaCluster,
+} from './solana/getClusterByChainSelectorName.ts'
+import type { CcipCctpMessageSentEvent } from './solana/types.ts'
+import { computeAnchorEventDiscriminant } from './solana/utils.ts'
 import { type CCIPMessage, type CCIPRequest, defaultAbiCoder } from './types.ts'
 import { lazyCached, networkInfo } from './utils.ts'
-
 const TokenPoolInterface = lazyCached(
   `Interface BurnMintTokenPool 1.5.1`,
   () => new Interface(TokenPoolABI),
@@ -17,6 +25,8 @@ const TRANSFER_EVENT = EventFragment.from('Transfer(address from, address to, ui
 export const LBTC_EVENT = EventFragment.from(
   'DepositToBridge(address fromAddress, bytes32 toAddress, bytes32 payloadHash, bytes payload)',
 )
+
+const CCIP_CCTP_EVENT_DISCRIMINATOR = computeAnchorEventDiscriminant('CcipCctpMessageSentEvent')
 
 const CIRCLE_API_URL = {
   mainnet: 'https://iris-api.circle.com/v1',
@@ -45,7 +55,7 @@ type LombardAttestationsResponse = { attestations: Array<LombardAttestation> }
  * @param isTestnet - true if this was from a testnet
  * @returns USDC/CCTP attestation bytes
  */
-async function getUsdcAttestation(message: string, isTestnet: boolean): Promise<string> {
+export async function getUsdcAttestation(message: string, isTestnet: boolean): Promise<string> {
   const msgHash = keccak256(message)
 
   const circleApiBaseUrl = isTestnet ? CIRCLE_API_URL.testnet : CIRCLE_API_URL.mainnet
@@ -69,6 +79,7 @@ async function getUsdcTokenData(
   tokenAmounts: CCIPMessage['tokenAmounts'],
   allLogsInRequest: Pick<Log, 'topics' | 'address' | 'data'>[],
   isTestnet: boolean,
+  destChainSelector: bigint,
 ): Promise<(string | undefined)[]> {
   const attestations: (string | undefined)[] = []
 
@@ -111,10 +122,7 @@ async function getUsdcTokenData(
       try {
         const message = defaultAbiCoder.decode(USDC_EVENT.inputs, messageSentLog.data)[0] as string
         const attestation = await getUsdcAttestation(message, isTestnet)
-        tokenData = defaultAbiCoder.encode(
-          ['tuple(bytes message, bytes attestation)'],
-          [{ message, attestation }],
-        )
+        tokenData = encodeOffchainTokenData(destChainSelector, message, attestation)
       } catch (_) {
         // maybe not a USDC transfer
       }
@@ -198,12 +206,58 @@ async function getLbtcTokenData(
 }
 
 /**
+ * Fetches offchain token data for cross-chain token transfers
+ *
+ * This is the main entry point for fetching attestations and encoding offchain data
+ * required for CCIP token transfers (e.g., CCTP).
+ *
+ * Routes to chain-specific implementations based on the source chain type:
+ * - Solana sources → fetchSolanaOffchainTokenData(...)
+ * - EVM sources → fetchEVMOffchainTokenData(...)
+ *
+ * Output encoding depends on destination chain:
+ * - EVM destinations → ABI-encoded tuple
+ * - Solana destinations → Borsh-encoded struct
+ *
+ * @param request.tx - Transaction to analyze
+ * @param request.lane - Source and destination chain selectors
+ * @param request.message - CCIP message with token transfer details
+ * @param request.log - Specific log entry that triggered this request
+ * @returns Array of encoded offchain token data
+ *
+ * @throws Error if transaction parsing or attestation fetching fails
+ *
+ * @example
+ * Solana → EVM transfer
+ * const data = await fetchOffchainTokenData({
+ *   lane: { sourceChainSelector: 16423721717087811551n, destChainSelector: 1n },
+ *   message: { tokenAmounts: [...] },
+ *   log: { transactionHash: "3k81..." },
+ *   tx: { logs: [...] }
+ * })
+ */
+export async function fetchOffchainTokenData(
+  request: Pick<CCIPRequest, 'tx' | 'lane'> & {
+    message: CCIPMessage
+    log: Pick<CCIPRequest['log'], 'topics' | 'index' | 'transactionHash'>
+  },
+): Promise<string[]> {
+  const sourceChainName = chainNameFromSelector(request.lane.sourceChainSelector)
+  if (isSupportedSolanaCluster(sourceChainName)) {
+    return await fetchSolanaOffchainTokenData(request)
+  }
+
+  // EVM by default
+  return await fetchEVMOffchainTokenData(request)
+}
+
+/**
  * Fetch offchain token data for all transfers in request
  *
  * @param request - Request (or subset of) to fetch offchainTokenData for
  * @returns Array of byte arrays, one per transfer in request
  */
-export async function fetchOffchainTokenData(
+async function fetchEVMOffchainTokenData(
   request: Pick<CCIPRequest, 'tx' | 'lane'> & {
     message: CCIPMessage
     log: Pick<CCIPRequest['log'], 'topics' | 'index'>
@@ -228,6 +282,7 @@ export async function fetchOffchainTokenData(
     request.message.tokenAmounts,
     usdcRequestLogs,
     isTestnet,
+    request.lane.destChainSelector,
   )
   let lbtcTokenData: (string | undefined)[] = []
   try {
@@ -251,4 +306,275 @@ export async function fetchOffchainTokenData(
     }
   }
   return offchainTokenData
+}
+
+/**
+ * Analyzes a Solana transaction to extract CcipCctpMessageSentEvent, fetch Circle attestation,
+ * and encode the data in the format required by the destination chain.
+ *
+ * @param request - CCIP request containing transaction data and chain routing info
+ * @returns Array of encoded offchain token data (only one supported for Solana right now)
+ *
+ * @throws Error if transaction hash is missing or CcipCctpMessageSentEvent parsing fails
+ *
+ * @example
+ * const tokenData = await fetchSolanaOffchainTokenData({
+ *   lane: { sourceChainSelector: ..., destChainSelector: ... },
+ *   message: { ... },
+ *   log: { transactionHash: "3k81TLhJuhwB8fvurCwyMPHXR3k9Tmtqe2ZrUQ8e3rMxk9fWFJT2xVHGgKJg1785FkJcaiQkthY4m86JrESGPhMY" },
+ *   tx: { logs: [...] }
+ * })
+ */
+export async function fetchSolanaOffchainTokenData(
+  request: Pick<CCIPRequest, 'tx' | 'lane'> & {
+    message: CCIPMessage
+    log: Pick<CCIPRequest['log'], 'topics' | 'index' | 'transactionHash'>
+  },
+): Promise<string[]> {
+  const { isTestnet } = networkInfo(request.lane.sourceChainSelector)
+  const txSignature = request.log.transactionHash
+  if (!txSignature) {
+    throw new Error('Transaction hash not found for OffchainTokenData parsing')
+  }
+
+  // Parse Solana transaction to find CCTP event
+  const cctpEvents = await parseCcipCctpEvents(txSignature, request.lane.sourceChainSelector)
+  const offchainTokenData: string[] = ['0x']
+
+  // If no CcipCctpMessageSentEvent found, return defaults so we don't block execution
+  if (cctpEvents.length === 0) {
+    return offchainTokenData
+  }
+
+  // Currently, we only support ONE token per transfer
+  if (cctpEvents.length > 1) {
+    throw new Error(
+      `Expected only 1 CcipCctpMessageSentEvent, found ${cctpEvents.length} in transaction ${txSignature}.`,
+    )
+  }
+
+  // NOTE: assuming USDC token is the first (and only) token in the CCIP message, we will process the CCTP event.
+  // If later multi-token transfers support is added, we need to add more info in order to match each token with it's event and offchainTokenData.
+  const cctpEvent = cctpEvents[0]
+  if (cctpEvent) {
+    try {
+      // Extract message bytes to fetch circle's attestation and then encode offchainTokenData.
+      const messageHex = '0x' + Buffer.from(cctpEvent.messageSentBytes).toString('hex') // 0x must be prepended before calling keccak ethers.js func.
+      const attestation = await getUsdcAttestation(messageHex, isTestnet)
+
+      offchainTokenData[0] = encodeOffchainTokenData(
+        request.lane.destChainSelector,
+        messageHex,
+        attestation,
+      )
+    } catch (error) {
+      console.warn(`❌ Solana CCTP: Failed to fetch attestation for ${txSignature}:`, error)
+    }
+  }
+
+  return offchainTokenData
+}
+
+/**
+ * Parses CcipCctpMessageSentEvent from a Solana transaction by analyzing program logs
+ *
+ * @param txSignature - Solana transaction signature to analyze
+ * @param sourceChainSelector - Source chain selector to determine RPC endpoint
+ * @returns Array of parsed CcipCctpMessageSentEvent found in the transaction (only 1 supported though)
+ *
+ * @throws Error if transaction is not found or RPC fails
+ *
+ * @example
+ * const events = await parseSolanaCctpEvents(
+ *   '3k81TLhJuhwB8fvurCwyMPHXR3k9Tmtqe2ZrUQ8e3rMxk9fWFJT2xVHGgKJg1785FkJcaiQkthY4m86JrESGPhMY',
+ *   16423721717087811551n // Solana Devnet
+ * )
+ */
+export async function parseCcipCctpEvents(
+  txSignature: string,
+  sourceChainSelector: bigint,
+): Promise<CcipCctpMessageSentEvent[]> {
+  // Fetch transaction details using Solana RPC
+  const sourceChainName = chainNameFromSelector(sourceChainSelector)
+  const connection = new Connection(getClusterUrlByChainSelectorName(sourceChainName))
+  const tx = await connection.getTransaction(txSignature, {
+    commitment: 'finalized',
+    maxSupportedTransactionVersion: 0,
+  })
+  if (!tx || !tx.meta) {
+    throw new Error(`Transaction not found: ${txSignature}`)
+  }
+
+  // Look for "Program data:" logs which contain the event data
+  const programDataLogs =
+    tx.meta.logMessages?.filter((log) => log.startsWith('Program data: ')) || []
+
+  // Parse each program data log to find CCTP events
+  const cctpEvents: CcipCctpMessageSentEvent[] = []
+  for (const log of programDataLogs) {
+    try {
+      // Remove prefix and parse as base64 data
+      const eventData = Buffer.from(log.replace('Program data: ', ''), 'base64')
+
+      // Check if it's a CcipCctpMessageSentEvent by looking in it's discriminator before trying to fully parse
+      if (eventData.length >= 8) {
+        const discriminator = eventData.subarray(0, 8)
+        if (discriminator.equals(CCIP_CCTP_EVENT_DISCRIMINATOR)) {
+          const event = parseCcipCctpEvent(eventData)
+          if (event) {
+            cctpEvents.push(event)
+          }
+        }
+      }
+    } catch (error) {
+      // Invalid or non-CCTP events
+      console.debug(
+        `🔍 Solana CCTP: Skipped program data log in transaction ${txSignature}:`,
+        error,
+      )
+    }
+  }
+
+  return cctpEvents
+}
+
+/**
+ * Parses a CcipCctpMessageSentEvent from a Solana program data buffer
+ *
+ * @param buffer - Raw buffer containing the event data
+ * @returns Parsed CCTP event object or null if parsing fails
+ *
+ * @see https://github.com/smartcontractkit/chainlink-ccip/blob/fc205e32dfa66cb5aa6a97e196792a3e813c1787/chains/solana/contracts/target/idl/cctp_token_pool.json#L1191-L1230
+ */
+function parseCcipCctpEvent(buffer: Buffer): CcipCctpMessageSentEvent | null {
+  try {
+    // Structure of CcipCctpMessageSentEvent is the following:
+    // discriminator: 8 bytes
+    // originalSender: 32 bytes (PublicKey)
+    // remoteChainSelector: 8 bytes (u64)
+    // msgTotalNonce: 8 bytes (u64)
+    // eventAddress: 32 bytes (PublicKey)
+    // sourceDomain: 4 bytes (u32)
+    // cctpNonce: 8 bytes (u64)
+    // messageSentBytes: variable length (bytes)
+
+    // Minimum size: 8 (discriminator) + 92 (fixed fields) = 100
+    if (buffer.length < 100) {
+      return null
+    }
+
+    let offset = 0
+
+    // Skip discriminator (already verified by caller)
+    offset += 8
+
+    // Parse the event fields
+    const originalSender = new PublicKey(buffer.subarray(offset, offset + 32)).toString()
+    offset += 32
+
+    const remoteChainSelector = buffer.readBigUInt64LE(offset)
+    offset += 8
+
+    const msgTotalNonce = buffer.readBigUInt64LE(offset)
+    offset += 8
+
+    const eventAddress = new PublicKey(buffer.subarray(offset, offset + 32)).toString()
+    offset += 32
+
+    const sourceDomain = buffer.readUInt32LE(offset)
+    offset += 4
+
+    const cctpNonce = buffer.readBigUInt64LE(offset)
+    offset += 8
+
+    // Parse messageSentBytes (length-prefixed)
+    if (offset + 4 > buffer.length) return null
+
+    const messageLength = buffer.readUInt32LE(offset)
+    offset += 4
+
+    if (offset + messageLength > buffer.length) return null
+
+    const messageSentBytes = buffer.subarray(offset, offset + messageLength)
+
+    return {
+      originalSender,
+      remoteChainSelector,
+      msgTotalNonce,
+      eventAddress,
+      sourceDomain,
+      cctpNonce,
+      messageSentBytes,
+    }
+  } catch (error) {
+    console.debug('🔍 Solana CCTP: Failed to parse CcipCctpMessageSentEvent buffer:', error)
+    return null
+  }
+}
+
+// https://github.com/smartcontractkit/chainlink-ccip/blob/bf22fbf2d7b828dd48440061b92d33f946d1712e/chains/solana/contracts/target/idl/cctp_token_pool.json#L1071-L1088
+const MessageAndAttestationSchema = {
+  struct: {
+    message: {
+      struct: {
+        data: { array: { type: 'u8' } }, // bytes as u8 array
+      },
+    },
+    attestation: { array: { type: 'u8' } }, // bytes as u8 array
+  },
+}
+
+function isValidHex(hex: string): boolean {
+  if (!hex.startsWith('0x')) return false
+  const hexPattern = /^0x[0-9a-fA-F]*$/
+  return hexPattern.test(hex) && hex.length % 2 === 0
+}
+
+/**
+ * Encodes CCTP message and attestation
+ *
+ * @param destChainSelector - Target chain selector (determines encoding format)
+ * @param message - CCTP message as hex string (e.g., "0x123...")
+ * @param attestation - Circle API attestation as hex string
+ * @returns Encoded data - ABI tuple for EVM, Borsh-encoded for Solana
+ *
+ * @example
+ *
+ * const solanaData = encodeOffchainTokenData(16423721717087811551n, "0x123...", "0xabc...")
+ */
+export function encodeOffchainTokenData(
+  destChainSelector: bigint,
+  message: string,
+  attestation: string,
+): string {
+  if (!isValidHex(message)) {
+    throw new Error(`Invalid hex string for message: ${message}`)
+  }
+  if (!isValidHex(attestation)) {
+    throw new Error(`Invalid hex string for attestation: ${attestation}`)
+  }
+  const destChainName = chainNameFromSelector(destChainSelector)
+
+  // The `0x` prefix must be removed from hex strings before converting to a Buffer.
+  const messageBuffer = Buffer.from(message.slice(2), 'hex')
+  const attestationBuffer = Buffer.from(attestation.slice(2), 'hex')
+
+  // Solana destination: use Borsh encoding
+  if (isSupportedSolanaCluster(destChainName)) {
+    const messageAndAttestation = {
+      message: {
+        data: Array.from(messageBuffer), // u8 array
+      },
+      attestation: Array.from(attestationBuffer), // u8 array
+    }
+
+    const encoded = borsh.serialize(MessageAndAttestationSchema, messageAndAttestation)
+    return '0x' + Buffer.from(encoded).toString('hex')
+  }
+
+  // EVM destination default: use ABI encoding
+  return defaultAbiCoder.encode(
+    ['tuple(bytes message, bytes attestation)'],
+    [{ message, attestation }],
+  )
 }
