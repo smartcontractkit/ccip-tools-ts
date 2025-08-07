@@ -2,7 +2,7 @@ import { Connection, PublicKey } from '@solana/web3.js'
 import * as borsh from 'borsh'
 import { type Addressable, type Log, EventFragment, Interface, keccak256 } from 'ethers'
 
-import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.ts'
+import TokenPoolABI from '../abi/BurnMintTokenPool_1_6_1.ts'
 import { type SourceTokenData, parseSourceTokenData } from './extra-args.ts'
 import { chainNameFromSelector } from './index.ts'
 import {
@@ -14,10 +14,10 @@ import { computeAnchorEventDiscriminant } from './solana/utils.ts'
 import { type CCIPMessage, type CCIPRequest, defaultAbiCoder } from './types.ts'
 import { lazyCached, networkInfo } from './utils.ts'
 const TokenPoolInterface = lazyCached(
-  `Interface BurnMintTokenPool 1.5.1`,
+  `Interface BurnMintTokenPool 1.6.1`,
   () => new Interface(TokenPoolABI),
 )
-const BURNED_EVENT = TokenPoolInterface.getEvent('Burned')!
+const BURNED_EVENT = TokenPoolInterface.getEvent('LockedOrBurned')!
 
 const USDC_EVENT = EventFragment.from('MessageSent(bytes message)')
 const TRANSFER_EVENT = EventFragment.from('Transfer(address from, address to, uint256 value)')

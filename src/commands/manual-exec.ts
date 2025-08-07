@@ -1,9 +1,5 @@
 import type { AnchorProvider } from '@coral-xyz/anchor'
-import {
-  type Keypair,
-  type TransactionSignature,
-  SendTransactionError,
-} from '@solana/web3.js'
+import { type Keypair, type TransactionSignature, SendTransactionError } from '@solana/web3.js'
 import type { JsonRpcApiProvider, Provider } from 'ethers'
 import { discoverOffRamp } from '../lib/execution.ts'
 import {
@@ -151,7 +147,22 @@ async function doManuallyExecuteSolana(
 
       transaction.sign([payer])
 
-      signature = await destination.connection.sendTransaction(transaction)
+      try {
+        signature = await destination.connection.sendTransaction(transaction)
+      } catch (e) {
+        if (
+          e instanceof SendTransactionError &&
+          e.logs?.some((log) =>
+            log.includes('Error Code: ExecutionReportBufferAlreadyContainsChunk.'),
+          )
+        ) {
+          console.warn(`Skipping tx ${i + 1} of ${N} because a chunk is already in the buffer.`)
+          return
+        } else {
+          throw e
+        }
+      }
+
       const latestBlockhash = await destination.connection.getLatestBlockhash()
 
       console.log(`Confirming tx #${i + 1} of ${N}: ${signature} ...`)

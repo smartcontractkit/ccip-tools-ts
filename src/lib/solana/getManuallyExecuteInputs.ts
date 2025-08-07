@@ -1,8 +1,4 @@
-import {
-  type AccountMeta,
-  type Connection,
-  PublicKey,
-} from '@solana/web3.js'
+import { type AccountMeta, type Connection, PublicKey } from '@solana/web3.js'
 import { BN } from 'bn.js'
 import type { ExecutionReport } from '../types.ts'
 import type { OfframpProgram } from './programs/getCcipOfframp.ts'
@@ -29,17 +25,16 @@ export async function getManuallyExecuteInputs({
   offrampProgram,
   root,
   senderAddress,
-  buffered
+  buffered,
 }: {
   executionReportRaw: ExecutionReport
   connection: Connection
   offrampProgram: OfframpProgram
   root: string
-  senderAddress: string,
+  senderAddress: string
   buffered: boolean
 }) {
   const message = executionReportRaw.message
-
 
   if (!isMessageWithAccounts(message)) {
     throw new Error('Invalid message')
@@ -53,23 +48,25 @@ export async function getManuallyExecuteInputs({
     isSigner: false,
     isWritable: false,
   }
-  
+
   const messageAccountMetas = message.accounts!.map((acc, index) => {
     const bitmap = BigInt(message.accountIsWritableBitmap?.toString() || '0')
     const isWritable = (bitmap & (1n << BigInt(index))) !== 0n
-    
+
     return {
       pubkey: new PublicKey(acc),
       isSigner: false,
       isWritable,
     }
   })
-  
+
   // Prepend receiver to messaging accounts
   const messagingAccounts = [receiverAccountMeta, ...messageAccountMetas]
-  const tokenTransferAndOffchainData: Array<IdlTypes<typeof CCIP_OFFRAMP_IDL>['TokenTransferAndOffchainData']> = message.tokenAmounts.map((token, idx) => ({
-      data: hexToBuffer(executionReportRaw.offchainTokenData[idx] || '0x'),
-      transfer: {
+  const tokenTransferAndOffchainData: Array<
+    IdlTypes<typeof CCIP_OFFRAMP_IDL>['TokenTransferAndOffchainData']
+  > = message.tokenAmounts.map((token, idx) => ({
+    data: hexToBuffer(executionReportRaw.offchainTokenData[idx] || '0x'),
+    transfer: {
       sourcePoolAddress: hexToBuffer(token.sourcePoolAddress),
       destTokenAddress: new PublicKey(token.destTokenAddress),
       destGasAmount: Number(token.destGasAmount),
@@ -77,31 +74,34 @@ export async function getManuallyExecuteInputs({
       amount: {
         leBytes: Array.from(new BN(token.amount.toString()).toArrayLike(Buffer, 'le', 32)),
       },
-    }
+    },
   }))
-  
-  let bufferId;
+
+  let bufferId
   if (buffered) {
-  // Use merkleRoot for bufferId. This is arbitrary, but easy to track.
+    // Use merkleRoot for bufferId. This is arbitrary, but easy to track.
     bufferId = Buffer.from(root.replace(/^0x/, ''), 'hex')
   } else {
     bufferId = Buffer.alloc(32)
   }
-  
+
   const originalSender = hexToBuffer(message.sender)
-  const { accounts, addressLookupTableAccounts: addressLookupTables, tokenIndexes } =
-    await autoDeriveExecutionAccounts({
-      offrampProgram,
-      originalSender,
-      transmitter: new PublicKey(senderAddress),
-      messagingAccounts,
-      sourceChainSelector: executionReportRaw.sourceChainSelector,
-      tokenTransferAndOffchainData,
-      merkleRoot: hexToBuffer(root),
-      bufferId,
-      tokenReceiver: new PublicKey(message.tokenReceiver),
-      connection,
-    })
+  const {
+    accounts,
+    addressLookupTableAccounts: addressLookupTables,
+    tokenIndexes,
+  } = await autoDeriveExecutionAccounts({
+    offrampProgram,
+    originalSender,
+    transmitter: new PublicKey(senderAddress),
+    messagingAccounts,
+    sourceChainSelector: executionReportRaw.sourceChainSelector,
+    tokenTransferAndOffchainData,
+    merkleRoot: hexToBuffer(root),
+    bufferId,
+    tokenReceiver: new PublicKey(message.tokenReceiver),
+    connection,
+  })
 
   return {
     executionReport,
@@ -160,7 +160,9 @@ async function autoDeriveExecutionAccounts({
   transmitter: PublicKey
   messagingAccounts: Array<IdlTypes<typeof CCIP_OFFRAMP_IDL>['CcipAccountMeta']>
   sourceChainSelector: bigint
-  tokenTransferAndOffchainData: Array<IdlTypes<typeof CCIP_OFFRAMP_IDL>['TokenTransferAndOffchainData']>
+  tokenTransferAndOffchainData: Array<
+    IdlTypes<typeof CCIP_OFFRAMP_IDL>['TokenTransferAndOffchainData']
+  >
   merkleRoot: Buffer
   bufferId: Buffer
   tokenReceiver: PublicKey
@@ -173,49 +175,59 @@ async function autoDeriveExecutionAccounts({
   let stage = 'Start'
   let tokenIndex = 0
   const tokenTransferStartRegex = /^TokenTransferStaticAccounts\/\d+\/0$/
-  
+
   const [configPDA] = PublicKey.findProgramAddressSync(
     [Buffer.from('config')],
     offrampProgram.programId,
   )
 
-  
   while (true) {
     let params = {
-          executeCaller: transmitter,
-          messageAccounts: messagingAccounts,
-          sourceChainSelector: new BN(sourceChainSelector.toString()),
-          originalSender: originalSender,
-          tokenTransfers: tokenTransferAndOffchainData,
-          merkleRoot: Array.from(merkleRoot),
-          bufferId: bufferId,
-          tokenReceiver,
-      
+      executeCaller: transmitter,
+      messageAccounts: messagingAccounts,
+      sourceChainSelector: new BN(sourceChainSelector.toString()),
+      originalSender: originalSender,
+      tokenTransfers: tokenTransferAndOffchainData,
+      merkleRoot: Array.from(merkleRoot),
+      bufferId: bufferId,
+      tokenReceiver,
     }
-    
-    // Execute as a view call to get the response
-        const response: IdlTypes<typeof CCIP_OFFRAMP_IDL>['DeriveAccountsResponse'] = await offrampProgram.methods
-      .deriveAccountsExecute(
-          params,
-          stage,
-      )
-      .accounts({
-        config: configPDA,
-      })
-      .remainingAccounts(askWith)
-      .view()
 
-   
+    // Workarounds for tx-too-large issues during account derivation
+    if (/BuildDynamicAccounts/.test(stage)) {
+      params.messageAccounts = [] // omit messaging accounts
+    } else {
+      params.tokenTransfers = tokenTransferAndOffchainData.map((tt) => ({
+        ...tt,
+        data: Buffer.from([]), // omit offchain token data
+      }))
+    }
+
+    // Execute as a view call to get the response
+    const response: IdlTypes<typeof CCIP_OFFRAMP_IDL>['DeriveAccountsResponse'] =
+      await offrampProgram.methods
+        .deriveAccountsExecute(params, stage)
+        .accounts({
+          config: configPDA,
+        })
+        .remainingAccounts(askWith)
+        .view()
+        .catch((error) => {
+          console.error('Error deriving accounts:', error)
+          console.error('Params:', params)
+          throw new Error(`Failed to derive accounts: ${error.message}`)
+        })
+
     // Check if we're at the start of a token transfer
     const isStartOfToken = tokenTransferStartRegex.test(response.currentStage)
     if (isStartOfToken) {
       const numKnownAccounts = 12
       tokenIndices.push(tokenIndex - numKnownAccounts)
     }
-    
+
     // Update token index
     tokenIndex += response.accountsToSave.length
-    
+
     // Collect the derived accounts
     for (const meta of response.accountsToSave) {
       derivedAccounts.push({
@@ -224,25 +236,25 @@ async function autoDeriveExecutionAccounts({
         isSigner: meta.isSigner,
       })
     }
-    
+
     // Prepare askWith for next iteration
     askWith = response.askAgainWith.map((meta) => ({
       pubkey: meta.pubkey,
       isWritable: meta.isWritable,
       isSigner: meta.isSigner,
     }))
-    
+
     // Collect lookup tables
     lookupTables.push(...response.lookUpTablesToSave)
-    
+
     // Check if derivation is complete
     if (!response.nextStage || response.nextStage.length === 0) {
       break
     }
-    
+
     stage = response.nextStage
   }
-  
+
   return {
     accounts: derivedAccounts,
     addressLookupTableAccounts: lookupTables,
