@@ -1,7 +1,7 @@
 import { Contract, Interface } from 'ethers'
 import { readFile } from 'fs/promises'
 import { createInterface } from 'readline/promises'
-import bs58 from 'bs58'
+import { PublicKey } from '@solana/web3.js'
 import TokenPoolABI from '../abi/TokenPool.ts'
 import { bigIntReplacer, chainIdFromName, getProviderNetwork } from '../lib/utils.ts'
 import type { Providers } from '../providers.ts'
@@ -26,51 +26,45 @@ type ChainToAdd = {
 }
 
 /**
- * @description Checks if a given string is in a valid Solana address Base58 format.
- *
- * Solana addresses are 32-byte arrays encoded with the Bitcoin Base58 alphabet, resulting
- * in ASCII text strings of 32-44 characters. This function only validates the character
- * pattern and length.
- *
- * @warning Since this function depends on user's input only, it:
- * - DOES NOT validate if the address is a valid ed25519 public key
- * - DOES NOT validate checksum (typos cannot be detected)
- * - Single character typos, reversed characters, and case errors may still pass
- *
- * @param address - A string representing a Solana address in Base58 format.
- * @returns {boolean} - Returns true if the address is valid, false otherwise.
+ * Detects if an address looks like a Solana address (Base58 format, 32-44 chars)
  */
-function isSolanaAddress(address: string): boolean {
+function looksLikeSolanaAddress(address: string): boolean {
+  // Solana addresses are Base58 and typically 32-44 characters
   const SOLANA_ADDRESS_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
-
   return SOLANA_ADDRESS_REGEX.test(address)
 }
 
 /**
- * @description Converts a Solana address from Base58 format to a 32-byte hex string which CCIP expects.
- *
- * If the address is not valid or cannot be decoded to 32 bytes, it returns the original address.
- *
- * @param address - A string representing a Solana address in Base58 format.
- * @returns {string} - Returns the address as a 32-byte hex string prefixed with '0x'.
+ * Best-effort Solana address encoder: if the input looks like and is a valid Solana address,
+ * returns a 32-byte 0x-prefixed hex string; otherwise returns the original input.
+ * Only processes addresses that pass the Solana format check to avoid noise.
  */
-function convertSolanaAddressToBytes32Hex(address: string): string {
-  try {
-    const decoded = bs58.decode(address)
-    if (decoded.length !== 32) {
-      console.warn(
-        `⚠️  Invalid Solana address: "${address}" decoded to ${decoded.length} bytes, expected 32 bytes.`,
-      )
-      return address // Return original address if length is not 32 bytes
-    } else {
-      const hexAddress = '0x' + Buffer.from(decoded).toString('hex')
-      console.warn('Converted Solana Base58 address to 32 bytes hex:', hexAddress)
-      return hexAddress
-    }
-  } catch (error) {
-    console.warn(`⚠️  Error converting Solana address "${address}":`, error)
-    return address // Return original address in case of error
+function tryEncodeSolanaAddressToBytes32(address: string): string {
+  // Skip processing if it doesn't look like a Solana address
+  if (!looksLikeSolanaAddress(address)) {
+    return address
   }
+
+  console.log(`\nℹ️  Detected potential Solana address, attempting to convert it to bytes32`)
+
+
+  try {
+    const pubkey = new PublicKey(address)
+
+    // Check if the public key is on the ed25519 curve and warn if not
+    if (!PublicKey.isOnCurve(pubkey.toBytes())) {
+      console.warn(`⚠️  Warning: Solana address "${address}" is not on the ed25519 curve (likely a PDA or invalid input)`)
+    }
+
+    const convertedAddress = '0x' + Buffer.from(pubkey.toBuffer()).toString('hex')
+    console.log(`✅ Converted Solana address: ${address} → ${convertedAddress}`)
+
+    return convertedAddress
+  } catch (error) {
+    console.warn(`⚠️  Invalid Solana address "${address}": ${error}`)
+  }
+
+  return address
 }
 
 /**
@@ -109,19 +103,10 @@ export async function generateApplyChainUpdatesCalldata(argv: {
 
   chainsToAdd = chainsToAdd.map((chain) => ({
     ...chain,
-    remotePoolAddresses: chain.remotePoolAddresses.map((address: string) => {
-      if (isSolanaAddress(address)) {
-        console.warn('\nDetected Solana pool address:', address)
-        return convertSolanaAddressToBytes32Hex(address)
-      }
-      return address
-    }),
-    remoteTokenAddress: isSolanaAddress(chain.remoteTokenAddress)
-      ? (() => {
-          console.warn('\nDetected Solana token address:', chain.remoteTokenAddress)
-          return convertSolanaAddressToBytes32Hex(chain.remoteTokenAddress)
-        })()
-      : chain.remoteTokenAddress,
+    remotePoolAddresses: chain.remotePoolAddresses.map((address: string) =>
+      tryEncodeSolanaAddressToBytes32(address),
+    ),
+    remoteTokenAddress: tryEncodeSolanaAddressToBytes32(chain.remoteTokenAddress),
   }))
 
   // ================================================================
@@ -322,8 +307,9 @@ export async function applyChainUpdates(
     await poolContract.applyChainUpdates.staticCall(remoteChainSelectorsToRemove, chainsToAdd)
     console.log('✅ Transaction simulation successful! No errors detected.')
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     console.warn(
-      `⚠️ Transaction would likely fail with the following error message:\n ${error.message}`,
+      `⚠️ Transaction would likely fail with the following error message:\n ${errorMessage}`,
     )
   }
 
@@ -364,6 +350,7 @@ export async function applyChainUpdates(
       console.log(`Effective gas price: ${receipt.gasPrice}`)
     }
   } catch (error) {
-    throw new Error(`Transaction execution failed: ${error.message}`)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    throw new Error(`Transaction execution failed: ${errorMessage}`)
   }
 }
