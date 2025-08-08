@@ -96,18 +96,15 @@ export async function generateApplyChainUpdatesCalldata(argv: {
   const argsContent = await readFile(argv.json_args, 'utf-8')
   const args = JSON.parse(argsContent)
 
-  const remoteChainSelectorsToRemove = Array.isArray(args)
-    ? args[0]
-    : args.remoteChainSelectorsToRemove || []
+  const remoteChainSelectorsToRemove = args.remoteChainSelectorsToRemove || []
+  let chainsToAdd = args.chainsToAdd || []
 
-  let chainsToAdd = Array.isArray(args) ? args[1] : args.chainsToAdd || []
+  if (!Array.isArray(remoteChainSelectorsToRemove)) {
+    throw new Error('remoteChainSelectorsToRemove must be an array')
+  }
 
-  if (!Array.isArray(remoteChainSelectorsToRemove) || !Array.isArray(chainsToAdd)) {
-    throw new Error(
-      'Invalid JSON format. Expected either:\n' +
-        '1. Array format: [remoteChainSelectorsToRemove[], chainsToAdd[]]\n' +
-        '2. Object format: { remoteChainSelectorsToRemove: [], chainsToAdd: [] }',
-    )
+  if (!Array.isArray(chainsToAdd)) {
+    throw new Error('chainsToAdd must be an array')
   }
 
   chainsToAdd = chainsToAdd.map((chain) => ({
