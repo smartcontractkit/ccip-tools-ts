@@ -16,13 +16,14 @@ import {
   showRequests,
   showSupportedTokens,
 } from './commands/index.ts'
+import { isTxHash } from './commands/manual-exec.ts'
 import { logParsedError } from './commands/utils.ts'
 import { Providers } from './providers.ts'
 
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.2.8-a3d212b'
+const VERSION = '0.2.8-b783665'
 // generate:end
 
 async function main() {
@@ -134,6 +135,11 @@ async function main() {
               describe:
                 'Solana offramp. Must be provided for when Solana is destination, until automated discovery is implemented.',
             },
+            'solana-router': {
+              type: 'string',
+              describe:
+                'Solana router. Must be provided for when Solana is source, until automated discovery is implemented.',
+            },
             'solana-keypair': {
               type: 'string',
               describe:
@@ -171,7 +177,7 @@ async function main() {
               implies: 'sender-queue',
             },
           })
-          .check(({ tx_hash }) => isHexString(tx_hash, 32)),
+          .check(({ tx_hash }) => isTxHash(tx_hash)),
       async (argv) => {
         const providers = new Providers(argv)
         return (
