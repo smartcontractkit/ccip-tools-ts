@@ -236,7 +236,7 @@ async function getLbtcTokenData(
  *   tx: { logs: [...] }
  * })
  */
-export async function fetchOffchainTokenData(
+export function fetchOffchainTokenData(
   request: Pick<CCIPRequest, 'tx' | 'lane'> & {
     message: CCIPMessage
     log: Pick<CCIPRequest['log'], 'topics' | 'index' | 'transactionHash'>
@@ -244,11 +244,11 @@ export async function fetchOffchainTokenData(
 ): Promise<string[]> {
   const sourceChainName = chainNameFromSelector(request.lane.sourceChainSelector)
   if (isSupportedSolanaCluster(sourceChainName)) {
-    return await fetchSolanaOffchainTokenData(request)
+    return fetchSolanaOffchainTokenData(request)
   }
 
   // EVM by default
-  return await fetchEVMOffchainTokenData(request)
+  return fetchEVMOffchainTokenData(request)
 }
 
 /**
@@ -331,6 +331,16 @@ export async function fetchSolanaOffchainTokenData(
     log: Pick<CCIPRequest['log'], 'topics' | 'index' | 'transactionHash'>
   },
 ): Promise<string[]> {
+  if (request.message.tokenAmounts.length > 1) {
+    throw new Error(
+      `Expected at most 1 token transfer, found ${request.message.tokenAmounts.length}`,
+    )
+  }
+
+  if (request.message.tokenAmounts.length === 0) {
+    return []
+  }
+
   const { isTestnet } = networkInfo(request.lane.sourceChainSelector)
   const txSignature = request.log.transactionHash
   if (!txSignature) {
