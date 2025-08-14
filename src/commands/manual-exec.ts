@@ -279,7 +279,11 @@ export function isTxHash(hash: string): boolean {
 }
 
 function isBase58String(value: string, length: number): boolean {
-  return bs58.decode(value).length === length
+  try {
+    return bs58.decode(value).length === length
+  } catch {
+    return false
+  }
 }
 
 async function doManuallyExecuteSolana(

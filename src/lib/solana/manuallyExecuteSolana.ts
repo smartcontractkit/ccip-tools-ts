@@ -20,6 +20,7 @@ import type { Layout } from 'buffer-layout'
 import { calculateManualExecProof } from '../execution.ts'
 import { fetchOffchainTokenData } from '../offchain.ts'
 import type { CCIPRequest, ExecutionReport } from '../types.ts'
+import { getAddressLookupTableAccount } from './getAddressLookupTableAccount.ts'
 import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
 import { getManuallyExecuteInputs } from './getManuallyExecuteInputs.ts'
 import { getCcipOfframp } from './programs/getCcipOfframp.ts'
@@ -30,7 +31,6 @@ import {
 } from './programs/versioning.ts'
 import { simulateUnitsConsumed } from './simulateManuallyExecute.ts'
 import { normalizeExecutionReportForSolana } from './utils.ts'
-import { getAddressLookupTableAccount } from './getAddressLookupTableAccount.ts'
 
 class ExtendedBorshTypesCoder<N extends string = string> extends BorshTypesCoder<N> {
   public constructor(idl: Idl) {
@@ -91,7 +91,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
 
   const TnV = (await offrampProgram.methods.typeVersion().accounts({}).signers([]).view()) as string
   // TODO update
-  if (TnV !== 'ccip-offramp 0.1.1-dev') {
+  if (!TnV.startsWith('ccip-offramp 0.1.1')) {
     throw new Error(`Unsupported offramp version: ${TnV}`)
   }
 
@@ -119,7 +119,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
       buffered: forceBuffer,
     })
 
-  let addressLookupTableAccounts = await Promise.all(
+  const addressLookupTableAccounts = await Promise.all(
     addressLookupTables.map(async (acc) => {
       return await getAddressLookupTableAccount({
         connection: destinationProvider.connection,
@@ -247,17 +247,21 @@ export async function buildManualExecutionTxWithSolanaDestination<
 
   const manualExecuteInstructions = anchorTx.instructions
 
-  const computeUnits = await simulateUnitsConsumed({
-    instructions: manualExecuteInstructions,
-    connection: destinationProvider.connection,
-    payerKey: destinationProvider.wallet.publicKey,
-    addressLookupTableAccounts,
-    computeUnitsOverride,
-  })
+  const computeUnits =
+    computeUnitsOverride || // short-circuit: don't simulate if override is set
+    Math.ceil(
+      1.1 *
+        (await simulateUnitsConsumed({
+          instructions: manualExecuteInstructions,
+          connection: destinationProvider.connection,
+          payerKey: destinationProvider.wallet.publicKey,
+          addressLookupTableAccounts,
+          computeUnitsOverride,
+        })),
+    )
 
-  const computeUnitsWithBuffer = Math.ceil(computeUnits * 1.1)
   const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
-    units: computeUnitsOverride || computeUnitsWithBuffer,
+    units: computeUnits,
   })
 
   // Add compute budget instruction at the beginning of instructions
@@ -380,7 +384,7 @@ export async function bufferedTransactionData(
       toVersionedTransaction(appendTx, destinationProvider.wallet.publicKey, blockhash),
     )
   }
-  console.log(accounts)
+
   const executeTx = await offrampProgram.methods
     .manuallyExecute(Buffer.alloc(0), serializedTokenIndexes)
     // TODO: Maybe use raw TX construction to make this a bit cleaner,

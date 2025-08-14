@@ -1,10 +1,10 @@
+import type { IdlTypes } from '@coral-xyz/anchor'
 import { type AccountMeta, type Connection, PublicKey } from '@solana/web3.js'
 import { BN } from 'bn.js'
 import type { ExecutionReport } from '../types.ts'
+import type { CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
 import type { OfframpProgram } from './programs/getCcipOfframp.ts'
 import { type MessageWithAccounts, isMessageWithAccounts } from './utils.ts'
-import { CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
-import type { IdlTypes } from '@coral-xyz/anchor'
 
 function base64ToBuffer(base64: string): Buffer {
   return Buffer.from(base64, 'base64')
@@ -42,13 +42,6 @@ export async function getManuallyExecuteInputs({
 
   const executionReport = getExecutionReport(executionReportRaw, message)
 
-  // Convert message.receiver to AccountMeta and prepend to messaging accounts
-  const receiverAccountMeta = {
-    pubkey: new PublicKey(message.receiver),
-    isSigner: false,
-    isWritable: false,
-  }
-
   const messageAccountMetas = message.accounts!.map((acc, index) => {
     const bitmap = BigInt(message.accountIsWritableBitmap?.toString() || '0')
     const isWritable = (bitmap & (1n << BigInt(index))) !== 0n
@@ -60,8 +53,21 @@ export async function getManuallyExecuteInputs({
     }
   })
 
+  // Convert message.receiver to AccountMeta and prepend to messaging accounts
+  const receiverAccountMeta = {
+    pubkey: new PublicKey(message.receiver),
+    isSigner: false,
+    isWritable: false,
+  }
+  const defaultPubkey = new PublicKey(0)
+
+  console.debug('Message receiver:', message.receiver)
+
   // Prepend receiver to messaging accounts
-  const messagingAccounts = [receiverAccountMeta, ...messageAccountMetas]
+  const messagingAccounts: Array<AccountMeta> =
+    message.receiver !== defaultPubkey.toBase58()
+      ? [receiverAccountMeta, ...messageAccountMetas]
+      : [] // on plain token transfers, there are no messaging accounts
   const tokenTransferAndOffchainData: Array<
     IdlTypes<typeof CCIP_OFFRAMP_IDL>['TokenTransferAndOffchainData']
   > = message.tokenAmounts.map((token, idx) => ({
@@ -228,6 +234,8 @@ async function autoDeriveExecutionAccounts({
     // Update token index
     tokenIndex += response.accountsToSave.length
 
+    console.debug('After stage', stage, 'tokenIndices', tokenIndices, 'nextTokenIndex', tokenIndex)
+
     // Collect the derived accounts
     for (const meta of response.accountsToSave) {
       derivedAccounts.push({
@@ -254,6 +262,10 @@ async function autoDeriveExecutionAccounts({
 
     stage = response.nextStage
   }
+
+  console.debug('Resulting derived accounts:', derivedAccounts)
+  console.debug('Resulting derived address lookup tables:', lookupTables)
+  console.debug('Resulting derived token indexes:', tokenIndices)
 
   return {
     accounts: derivedAccounts,
