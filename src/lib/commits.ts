@@ -120,7 +120,6 @@ function resultsToCommitReport<V extends CCIPVersion = CCIPVersion>(
       onRampAddress: lane.onRamp,
     }
   } else {
-    console.log('Inside resultsToCommitReport for 1.6', result.toObject())
     const normalizedOnramp = normalizeOnrampAddress(lane.onRamp)
     const res = [...(result[0] as Result[]), ...(result[1] as Result[])].find(
       (r) =>

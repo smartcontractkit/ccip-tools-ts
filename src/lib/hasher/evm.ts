@@ -90,7 +90,7 @@ export function getV16LeafHasher(
   ])
 
   return (message: CCIPMessage<typeof CCIPVersion.V1_6>): string => {
-    console.log('Message', message)
+    console.info('Message', message)
     const parsedArgs = parseExtraArgs(message.extraArgs)
     if (
       !parsedArgs ||
@@ -107,23 +107,6 @@ export function getV16LeafHasher(
         'tuple(bytes sourcePoolAddress, address destTokenAddress, uint32 destGasAmount, bytes extraData, uint256 amount)[]',
       ],
       [message.tokenAmounts],
-    )
-
-    console.log(
-      'message.header.messageId',
-      message.header.messageId,
-      '\n',
-      'message.receiver',
-      message.receiver,
-      '\n',
-      'message.header.sequenceNumber',
-      message.header.sequenceNumber,
-      '\n',
-      'parsedArgs.gasLimit',
-      parsedArgs.gasLimit,
-      '\n',
-      'message.header.nonce',
-      message.header.nonce,
     )
 
     const fixedSizeValues = defaultAbiCoder.encode(

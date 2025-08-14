@@ -178,7 +178,7 @@ async function fetchSolanaCCIPMessage(
   for (const event of events) {
     if (event.name === 'CCIPMessageSent') {
       const eventData = event.data as unknown as CcipMessageSentEvent
-      console.log(eventData)
+      console.debug('Event data:', eventData)
 
       const extraArgs = parseExtraArgs(bytesToHexString(eventData.message.extraArgs))
       if (extraArgs?._tag != 'EVMExtraArgsV2') {
