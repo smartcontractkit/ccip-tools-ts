@@ -90,7 +90,7 @@ export function getV16LeafHasher(
   ])
 
   return (message: CCIPMessage<typeof CCIPVersion.V1_6>): string => {
-    console.info('Message', message)
+    console.debug('Message', message)
     const parsedArgs = parseExtraArgs(message.extraArgs)
     if (
       !parsedArgs ||

@@ -60,7 +60,7 @@ export async function waitForFinalization(
   connection: Connection,
   signature: string,
   intervalMs = 500,
-  maxAttempts = 1000,
+  maxAttempts = 500,
 ): Promise<void> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const status = await connection.getSignatureStatuses([signature])
