@@ -1,3 +1,4 @@
+import { bs58 } from '@coral-xyz/anchor/dist/cjs/utils/bytes/index'
 import { type Provider, type Result, Interface, isHexString } from 'ethers'
 
 import {
@@ -15,7 +16,6 @@ import {
   getSomeBlockNumberBefore,
   lazyCached,
 } from './utils.ts'
-import { bs58 } from '@coral-xyz/anchor/dist/cjs/utils/bytes/index'
 
 /**
  * Look for a CommitReport at dest for given CCIP request

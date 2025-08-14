@@ -1112,9 +1112,7 @@
           "name": "feeTokenUserAssociatedAccount",
           "isMut": false,
           "isSigner": false,
-          "docs": [
-            "If paying with native SOL, this must be the zero address."
-          ]
+          "docs": ["If paying with native SOL, this must be the zero address."]
         },
         {
           "name": "feeTokenReceiver",
@@ -1184,10 +1182,7 @@
         }
       ],
       "returns": {
-        "array": [
-          "u8",
-          32
-        ]
+        "array": ["u8", 32]
       }
     },
     {
@@ -1430,10 +1425,7 @@
           {
             "name": "messageId",
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "array": ["u8", 32]
             }
           },
           {
@@ -1595,10 +1587,7 @@
           {
             "name": "leBytes",
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "array": ["u8", 32]
             }
           }
         ]
@@ -1712,16 +1701,12 @@
           },
           {
             "name": "currentStage",
-            "docs": [
-              "Identifies the derivation stage."
-            ],
+            "docs": ["Identifies the derivation stage."],
             "type": "string"
           },
           {
             "name": "nextStage",
-            "docs": [
-              "Identifies the next derivation stage. If empty, the derivation is complete."
-            ],
+            "docs": ["Identifies the next derivation stage. If empty, the derivation is complete."],
             "type": "string"
           }
         ]

@@ -1,6 +1,4 @@
 import { type Connection, PublicKey } from '@solana/web3.js'
-import { BN } from 'bn.js'
-import { ethers } from 'ethers'
 import { getReferenceAddresses } from './getReferenceAddresses.ts'
 
 type ReferenceAddressesAccounts = {
@@ -55,4 +53,3 @@ export const getReferenceAddressesAccounts = async ({
     router: referenceAddresses.router,
   }
 }
-

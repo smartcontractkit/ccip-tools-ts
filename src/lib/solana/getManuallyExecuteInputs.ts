@@ -188,7 +188,7 @@ async function autoDeriveExecutionAccounts({
   )
 
   while (true) {
-    let params = {
+    const params = {
       executeCaller: transmitter,
       messageAccounts: messagingAccounts,
       sourceChainSelector: new BN(sourceChainSelector.toString()),
@@ -210,19 +210,22 @@ async function autoDeriveExecutionAccounts({
     }
 
     // Execute as a view call to get the response
-    const response: IdlTypes<typeof CCIP_OFFRAMP_IDL>['DeriveAccountsResponse'] =
-      await offrampProgram.methods
-        .deriveAccountsExecute(params, stage)
-        .accounts({
-          config: configPDA,
-        })
-        .remainingAccounts(askWith)
-        .view()
-        .catch((error) => {
-          console.error('Error deriving accounts:', error)
-          console.error('Params:', params)
+    const response = (await offrampProgram.methods
+      .deriveAccountsExecute(params, stage)
+      .accounts({
+        config: configPDA,
+      })
+      .remainingAccounts(askWith)
+      .view()
+      .catch((error) => {
+        console.error('Error deriving accounts:', error)
+        console.error('Params:', params)
+        if (error instanceof Error) {
           throw new Error(`Failed to derive accounts: ${error.message}`)
-        })
+        } else {
+          throw new Error(`Failed to derive accounts, with oddly-typed error: ${error}`)
+        }
+      })) as IdlTypes<typeof CCIP_OFFRAMP_IDL>['DeriveAccountsResponse']
 
     // Check if we're at the start of a token transfer
     const isStartOfToken = tokenTransferStartRegex.test(response.currentStage)
