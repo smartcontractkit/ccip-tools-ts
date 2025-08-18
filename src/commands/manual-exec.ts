@@ -24,6 +24,7 @@ import {
   fetchRequestsForSender,
   getSomeBlockNumberBefore,
   lazyCached,
+  parseExtraArgs,
 } from '../lib/index.ts'
 import { isSupportedSolanaCluster } from '../lib/solana/getClusterByChainSelectorName.ts'
 import {
@@ -478,10 +479,31 @@ export async function manualExecSenderQueue(
       }),
     )
     const execReport = { ...manualExecReport, offchainTokenData }
+    const getGasLimitOverride = (message: { gasLimit: bigint } | { extraArgs: string }): bigint => {
+      if (argv.gasLimit != null) {
+        const argvGasLimit = BigInt(argv.gasLimit)
+        let msgGasLimit
+        if ('gasLimit' in message) {
+          msgGasLimit = message.gasLimit
+        } else {
+          const parsedArgs = parseExtraArgs(message.extraArgs)
+          if (!parsedArgs || !('gasLimit' in parsedArgs) || !parsedArgs.gasLimit) {
+            throw new Error(`Missing gasLimit argument`)
+          }
+          msgGasLimit = BigInt(parsedArgs.gasLimit)
+        }
+        if (argvGasLimit > msgGasLimit) {
+          return argvGasLimit
+        }
+      }
+      return 0n
+    }
 
     let manualExecTx
     if (firstRequest.lane.version === CCIPVersion.V1_2) {
-      const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit ?? 0))
+      const gasOverrides = manualExecReport.messages.map((message) =>
+        getGasLimitOverride(message as CCIPMessage<typeof CCIPVersion.V1_2>),
+      )
       manualExecTx = await (
         offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_2>
       ).manuallyExecute(
@@ -496,7 +518,9 @@ export async function manualExecSenderQueue(
       )
     } else if (firstRequest.lane.version === CCIPVersion.V1_5) {
       const gasOverrides = manualExecReport.messages.map((message) => ({
-        receiverExecutionGasLimit: BigInt(argv.gasLimit ?? 0),
+        receiverExecutionGasLimit: getGasLimitOverride(
+          message as CCIPMessage<typeof CCIPVersion.V1_5>,
+        ),
         tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
       }))
       manualExecTx = await (
@@ -513,7 +537,9 @@ export async function manualExecSenderQueue(
       )
     } /* v1.6 */ else {
       const gasOverrides = manualExecReport.messages.map((message) => ({
-        receiverExecutionGasLimit: BigInt(argv.gasLimit ?? 0),
+        receiverExecutionGasLimit: getGasLimitOverride(
+          message as CCIPMessage<typeof CCIPVersion.V1_6>,
+        ),
         tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
       }))
       manualExecTx = await (
