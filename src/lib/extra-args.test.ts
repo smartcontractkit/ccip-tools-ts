@@ -40,6 +40,26 @@ describe('parseExtraArgs', () => {
     expect(res).toEqual({ _tag: 'EVMExtraArgsV2', gasLimit: 11n, allowOutOfOrderExecution: true })
   })
 
+  it('should parse Solana extraArgs case', () => {
+    const res = parseExtraArgs('0x181dcf10400d030000000000000000000000000000')
+    expect(res).toEqual({
+      _tag: 'EVMExtraArgsV2',
+      gasLimit: 200000n,
+      allowOutOfOrderExecution: false,
+    })
+  })
+
+  it('should parse new Aptos extraArgs case', () => {
+    const res = parseExtraArgs(
+      '0x181dcf10e09304000000000000000000000000000000000000000000000000000000000000',
+    )
+    expect(res).toEqual({
+      _tag: 'EVMExtraArgsV2',
+      gasLimit: 300000n,
+      allowOutOfOrderExecution: false,
+    })
+  })
+
   it('should return v1 on empty data', () => {
     const res = parseExtraArgs('0x')
     expect(res).toEqual({ _tag: 'EVMExtraArgsV1' })

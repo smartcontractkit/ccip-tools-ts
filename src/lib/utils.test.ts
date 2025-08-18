@@ -11,6 +11,7 @@ import {
   chainNameFromSelector,
   chainSelectorFromId,
   convertKeysToCamelCase,
+  decodeAddress,
   getProviderNetwork,
   getSomeBlockNumberBefore,
   lazyCached,
@@ -147,6 +148,178 @@ describe('chainNameFromSelector', () => {
 describe('chainIdFromName', () => {
   it('should return the chain id for a given name', () => {
     expect(chainIdFromName('ethereum-mainnet')).toBe(1)
+  })
+})
+
+describe('decodeAddress', () => {
+  describe('EVM addresses', () => {
+    it('should decode standard EVM addresses', () => {
+      const address = '0x1234567890abcdef1234567890abcdef12345678'
+      const decoded = decodeAddress(address)
+      expect(decoded).toEqual('0x1234567890AbcdEF1234567890aBcdef12345678')
+    })
+
+    it('should decode EVM addresses with explicit family', () => {
+      const address = '0xa0b86a33e6427bcfb6ecccfb7acfb5d7896b46ad'
+      const decoded = decodeAddress(address, ChainFamily.EVM)
+      expect(decoded).toEqual('0xa0B86A33E6427bcFb6EccCfb7ACfB5d7896b46AD')
+    })
+
+    it('should handle lowercase EVM addresses', () => {
+      const address = '0xabcdef1234567890abcdef1234567890abcdef12'
+      const decoded = decodeAddress(address, ChainFamily.EVM)
+      expect(decoded).toEqual('0xabCDEF1234567890ABcDEF1234567890aBCDeF12')
+    })
+
+    it('should handle 32-byte padded EVM addresses', () => {
+      const paddedAddress = '0x0000000000000000000000001234567890abcdef1234567890abcdef12345678'
+      const decoded = decodeAddress(paddedAddress, ChainFamily.EVM)
+      expect(decoded).toEqual('0x1234567890AbcdEF1234567890aBcdef12345678')
+    })
+
+    it('should handle Uint8Array input for EVM addresses', () => {
+      const addressBytes = new Uint8Array([
+        0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd,
+        0xef, 0x12, 0x34, 0x56, 0x78,
+      ])
+      const decoded = decodeAddress(addressBytes, ChainFamily.EVM)
+      expect(decoded).toEqual('0x1234567890AbcdEF1234567890aBcdef12345678')
+    })
+
+    it('should throw error for invalid EVM address length', () => {
+      const invalidAddress = '0x1234567890abcdef'
+      expect(() => decodeAddress(invalidAddress, ChainFamily.EVM)).toThrow('Invalid address length')
+    })
+
+    it('should throw error for too long EVM address without proper padding', () => {
+      const tooLongAddress =
+        '0x123456789012345678901234567890123456789012345678901234567890123456789012345678'
+      expect(() => decodeAddress(tooLongAddress, ChainFamily.EVM)).toThrow('Invalid address length')
+    })
+  })
+
+  describe('Solana addresses', () => {
+    it('should decode Solana addresses to Base58', () => {
+      // 32-byte Solana address in hex
+      const solanaBytes = new Uint8Array(32).fill(1) // Simple test bytes
+      const decoded = decodeAddress(solanaBytes, ChainFamily.Solana)
+      // Should return Base58 encoded string
+      expect(typeof decoded).toBe('string')
+      expect(decoded.length).toBeGreaterThan(0)
+    })
+
+    it('should handle 32-byte hex Solana addresses', () => {
+      const solanaBytes = new Uint8Array(32).fill(2) // Different test bytes
+      const decoded = decodeAddress(solanaBytes, ChainFamily.Solana)
+      expect(typeof decoded).toBe('string')
+      expect(decoded.length).toBeGreaterThan(0)
+    })
+
+    it('should handle Base58 string input for Solana', () => {
+      const base58Address = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d'
+      const decoded = decodeAddress(base58Address, ChainFamily.Solana)
+      expect(typeof decoded).toBe('string')
+      expect(decoded).toBe(base58Address)
+    })
+
+    it('should handle hex string for Solana addresses', () => {
+      const hexAddress = '0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20'
+      const decoded = decodeAddress(hexAddress, ChainFamily.Solana)
+      expect(typeof decoded).toBe('string')
+      expect(decoded.length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('Aptos addresses', () => {
+    it('should decode Aptos addresses as hex', () => {
+      const aptosAddress = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+      const decoded = decodeAddress(aptosAddress, ChainFamily.Aptos)
+      expect(decoded).toBe('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
+    })
+
+    it('should handle shorter Aptos addresses', () => {
+      const aptosAddress = '0x1'
+      let decoded = decodeAddress(aptosAddress, ChainFamily.Aptos)
+      expect(decoded).toBe('0x0000000000000000000000000000000000000000000000000000000000000001')
+
+      const aptosToken = '0xa'
+      decoded = decodeAddress(aptosToken, ChainFamily.Aptos)
+      expect(decoded).toBe('0x000000000000000000000000000000000000000000000000000000000000000a')
+    })
+
+    it('should handle Uint8Array for Aptos addresses', () => {
+      const aptosBytes = new Uint8Array([0x12, 0x34, 0x56, 0x78])
+      const decoded = decodeAddress(aptosBytes, ChainFamily.Aptos)
+      expect(decoded).toBe('0x0000000000000000000000000000000000000000000000000000000012345678')
+    })
+  })
+
+  describe('default behavior', () => {
+    it('should default to EVM family when not specified', () => {
+      const address = '0x1234567890abcdef1234567890abcdef12345678'
+      const decoded = decodeAddress(address)
+      expect(decoded).toEqual('0x1234567890AbcdEF1234567890aBcdef12345678')
+    })
+  })
+
+  describe('error handling', () => {
+    it('should throw error for unsupported chain family', () => {
+      const address = '0x1234567890abcdef1234567890abcdef12345678'
+      expect(() => decodeAddress(address, 'bitcoin' as ChainFamily)).toThrow(
+        'Unsupported address family: bitcoin',
+      )
+    })
+
+    it('should handle empty bytes', () => {
+      const emptyBytes = new Uint8Array(0)
+      expect(() => decodeAddress(emptyBytes, ChainFamily.EVM)).toThrow()
+    })
+
+    it('should handle null/undefined input gracefully', () => {
+      expect(() => decodeAddress(null as any, ChainFamily.EVM)).toThrow()
+      expect(() => decodeAddress(undefined as any, ChainFamily.EVM)).toThrow()
+    })
+  })
+
+  describe('edge cases', () => {
+    it('should handle zero address for EVM', () => {
+      const zeroAddress = '0x0000000000000000000000000000000000000000'
+      const decoded = decodeAddress(zeroAddress, ChainFamily.EVM)
+      expect(decoded).toBe('0x0000000000000000000000000000000000000000')
+    })
+
+    it('should handle maximum EVM address', () => {
+      const maxAddress = '0xffffffffffffffffffffffffffffffffffffffff'
+      const decoded = decodeAddress(maxAddress, ChainFamily.EVM)
+      expect(decoded).toBe('0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF')
+    })
+
+    it('should handle 32-byte zero-padded addresses correctly', () => {
+      const paddedZeroAddress = '0x0000000000000000000000000000000000000000000000000000000000000000'
+      expect(() => decodeAddress(paddedZeroAddress, ChainFamily.EVM)).toThrow(
+        'Invalid address length',
+      )
+    })
+
+    it('should handle mixed case hex input', () => {
+      const mixedCaseAddress = '0xAbCdEf1234567890ABCDEF1234567890abcdef12'
+      const decoded = decodeAddress(mixedCaseAddress, ChainFamily.EVM)
+      expect(decoded).toEqual('0xabCDEF1234567890ABcDEF1234567890aBCDeF12')
+    })
+
+    it('should handle different byte lengths for non-EVM chains', () => {
+      // Test with different byte lengths for Aptos
+      const shortBytes = new Uint8Array([0x01])
+      const decodedShort = decodeAddress(shortBytes, ChainFamily.Aptos)
+      expect(decodedShort).toBe(
+        '0x0000000000000000000000000000000000000000000000000000000000000001',
+      )
+
+      // Test with longer bytes for Aptos
+      const longBytes = new Uint8Array(64).fill(0xaa)
+      const decodedLong = decodeAddress(longBytes, ChainFamily.Aptos)
+      expect(decodedLong.length).toBeGreaterThan(2) // Should be more than '0x'
+    })
   })
 })
 
