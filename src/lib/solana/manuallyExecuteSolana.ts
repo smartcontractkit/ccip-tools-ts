@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { type Idl, type web3, AnchorProvider, BorshCoder, Wallet } from '@coral-xyz/anchor'
+import { type Idl, type web3, AnchorProvider, BorshCoder, Program, Wallet } from '@coral-xyz/anchor'
 import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types.js'
 import {
   type AccountMeta,
@@ -23,7 +23,7 @@ import type { CCIPRequest, ExecutionReport } from '../types.ts'
 import { getAddressLookupTableAccount } from './getAddressLookupTableAccount.ts'
 import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
 import { getManuallyExecuteInputs } from './getManuallyExecuteInputs.ts'
-import { getCcipOfframp } from './programs/getCcipOfframp.ts'
+import { getCcipOfframp, type OfframpProgram } from './programs/getCcipOfframp.ts'
 import {
   type SupportedSolanaCCIPVersion,
   CCIP_SOLANA_VERSION_MAP,
@@ -223,27 +223,12 @@ export async function buildManualExecutionTxWithSolanaDestination<
     )
   }
 
-  const anchorTx = await offrampProgram.methods
-    .manuallyExecute(serializedReport, serializedTokenIndexes)
-    // TODO: Maybe use raw TX construction to make this a bit cleaner,
-    // so that in case the arguments on the IDL change, there's no need
-    // to update this.
-    .accounts({
-      config: accounts[0].pubkey,
-      referenceAddresses: accounts[1].pubkey,
-      sourceChain: accounts[2].pubkey,
-      commitReport: accounts[3].pubkey,
-      offramp: accounts[4].pubkey,
-      allowedOfframp: accounts[5].pubkey,
-      authority: accounts[6].pubkey,
-      systemProgram: accounts[7].pubkey,
-      sysvarInstructions: accounts[8].pubkey,
-      rmnRemote: accounts[9].pubkey,
-      rmnRemoteCurses: accounts[10].pubkey,
-      rmnRemoteConfig: accounts[11].pubkey,
-    })
-    .remainingAccounts(accounts)
-    .transaction()
+  const anchorTx = await manualExecAnchorTx(
+    offrampProgram,
+    serializedReport,
+    serializedTokenIndexes,
+    accounts,
+  )
 
   const manualExecuteInstructions = anchorTx.instructions
 
@@ -283,6 +268,37 @@ export async function buildManualExecutionTxWithSolanaDestination<
   }
 
   return { transactions: [transaction], manualExecIdx: 0 }
+}
+
+function manualExecAnchorTx(
+  offrampProgram: OfframpProgram,
+  serializedReport: Buffer<ArrayBufferLike>,
+  serializedTokenIndexes: Buffer<ArrayBuffer>,
+  accounts: web3.AccountMeta[],
+): Promise<web3.Transaction> {
+  return (
+    offrampProgram.methods
+      .manuallyExecute(serializedReport, serializedTokenIndexes)
+      // TODO: Maybe use raw TX construction to make this a bit cleaner,
+      // so that in case the arguments on the IDL change, there's no need
+      // to update this.
+      .accounts({
+        config: accounts[0].pubkey,
+        referenceAddresses: accounts[1].pubkey,
+        sourceChain: accounts[2].pubkey,
+        commitReport: accounts[3].pubkey,
+        offramp: accounts[4].pubkey,
+        allowedOfframp: accounts[5].pubkey,
+        authority: accounts[6].pubkey,
+        systemProgram: accounts[7].pubkey,
+        sysvarInstructions: accounts[8].pubkey,
+        rmnRemote: accounts[9].pubkey,
+        rmnRemoteCurses: accounts[10].pubkey,
+        rmnRemoteConfig: accounts[11].pubkey,
+      })
+      .remainingAccounts(accounts.slice(12))
+      .transaction()
+  )
 }
 
 export function newAnchorProvider(chainName: string, keypairFile: string | undefined) {
@@ -385,27 +401,12 @@ export async function bufferedTransactionData(
     )
   }
 
-  const executeTx = await offrampProgram.methods
-    .manuallyExecute(Buffer.alloc(0), serializedTokenIndexes)
-    // TODO: Maybe use raw TX construction to make this a bit cleaner,
-    // so that in case the arguments on the IDL change, there's no need
-    // to update this.
-    .accounts({
-      config: accounts[0].pubkey,
-      referenceAddresses: accounts[1].pubkey,
-      sourceChain: accounts[2].pubkey,
-      commitReport: accounts[3].pubkey,
-      offramp: accounts[4].pubkey,
-      allowedOfframp: accounts[5].pubkey,
-      authority: accounts[6].pubkey,
-      systemProgram: accounts[7].pubkey,
-      sysvarInstructions: accounts[8].pubkey,
-      rmnRemote: accounts[9].pubkey,
-      rmnRemoteCurses: accounts[10].pubkey,
-      rmnRemoteConfig: accounts[11].pubkey,
-    })
-    .remainingAccounts(accounts.slice(12))
-    .transaction()
+  const executeTx = await manualExecAnchorTx(
+    offrampProgram,
+    serializedReport,
+    serializedTokenIndexes,
+    accounts,
+  )
 
   const computeBudgetIx = computeUnitsOverride
     ? ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitsOverride })

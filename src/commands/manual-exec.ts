@@ -189,6 +189,8 @@ async function fetchSolanaCCIPMessage(
         throw new Error(`Invalid extraArgs, not EVMExtraArgsV2`)
       }
 
+      // This is a hacky workaround of shoving the Solana message into an EVM-shaped object, as most of
+      // the code in this repo expects EVM-specific objects.
       return {
         lane: {
           sourceChainSelector,

@@ -2,7 +2,8 @@ import { Connection, PublicKey } from '@solana/web3.js'
 import * as borsh from 'borsh'
 import { type Addressable, type Log, EventFragment, Interface, keccak256 } from 'ethers'
 
-import TokenPoolABI from '../abi/BurnMintTokenPool_1_6_1.ts'
+import TokenPoolABI_1_5 from '../abi/BurnMintTokenPool_1_5_1.ts'
+import TokenPoolABI_1_6 from '../abi/BurnMintTokenPool_1_6_1.ts'
 import { type SourceTokenData, parseSourceTokenData } from './extra-args.ts'
 import { chainNameFromSelector } from './index.ts'
 import {
@@ -13,11 +14,18 @@ import type { CcipCctpMessageSentEvent } from './solana/types.ts'
 import { computeAnchorEventDiscriminant } from './solana/utils.ts'
 import { type CCIPMessage, type CCIPRequest, defaultAbiCoder } from './types.ts'
 import { lazyCached, networkInfo } from './utils.ts'
-const TokenPoolInterface = lazyCached(
-  `Interface BurnMintTokenPool 1.6.1`,
-  () => new Interface(TokenPoolABI),
+
+const TokenPoolInterface_1_5 = lazyCached(
+  `Interface BurnMintTokenPool 1.5.1`,
+  () => new Interface(TokenPoolABI_1_5),
 )
-const BURNED_EVENT = TokenPoolInterface.getEvent('LockedOrBurned')!
+const TokenPoolInterface_1_6 = lazyCached(
+  `Interface BurnMintTokenPool 1.6.1`,
+  () => new Interface(TokenPoolABI_1_6),
+)
+const BURNED_EVENT_1_5 = TokenPoolInterface_1_5.getEvent('Burned')!
+const BURNED_EVENT_1_6 = TokenPoolInterface_1_6.getEvent('LockedOrBurned')!
+const BURNED_EVENT_TOPIC_HASHES = new Set([BURNED_EVENT_1_5.topicHash, BURNED_EVENT_1_6.topicHash])
 
 const USDC_EVENT = EventFragment.from('MessageSent(bytes message)')
 const TRANSFER_EVENT = EventFragment.from('Transfer(address from, address to, uint256 value)')
@@ -92,9 +100,10 @@ async function getUsdcTokenData(
     if (
       log.topics[0] !== USDC_EVENT.topicHash ||
       transferLog?.topics?.[0] !== TRANSFER_EVENT.topicHash ||
-      poolLog?.topics?.[0] !== BURNED_EVENT.topicHash
-    )
+      !BURNED_EVENT_TOPIC_HASHES.has(poolLog?.topics?.[0])
+    ) {
       return acc
+    }
     const token = transferLog.address
     const pool = poolLog.address
     acc.set(token, [...(acc.get(token) ?? []), log])
