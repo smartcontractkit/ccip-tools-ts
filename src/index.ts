@@ -161,6 +161,15 @@ async function main() {
               describe:
                 "Overrides Solana manual execution CU limit. Likely necessary for buffered transactions as they aren't estimated.",
             },
+            'aptos-offramp': {
+              type: 'string',
+              describe:
+                'Aptos offramp. Must be provided for when Aptos is destination, until automated discovery is implemented',
+            },
+            'aptos-private-key': {
+              type: 'string',
+              describe: 'Aptos private key to use for manual execution',
+            },
             'sender-queue': {
               type: 'boolean',
               describe: 'Execute all messages in sender queue, starting with the provided tx',
@@ -214,7 +223,6 @@ async function main() {
             receiver: {
               type: 'string',
               describe: 'Receiver of the message; defaults to the sender wallet address',
-              coerce: getAddress,
             },
             data: {
               type: 'string',

@@ -1,6 +1,10 @@
 import type { AnchorProvider } from '@coral-xyz/anchor'
 import { type Keypair, type TransactionSignature, SendTransactionError } from '@solana/web3.js'
 import type { JsonRpcApiProvider, Provider } from 'ethers'
+import {
+  buildManualExecutionTxWithAptosDestination,
+  newAptosClient,
+} from '../lib/aptos/manuallyExecuteAptos.ts'
 import { discoverOffRamp } from '../lib/execution.ts'
 import {
   type CCIPCommit,
@@ -9,6 +13,7 @@ import {
   type CCIPMessage,
   type CCIPRequest,
   CCIPVersion,
+  ChainFamily,
   ExecutionState,
   bigIntReplacer,
   calculateManualExecProof,
@@ -34,8 +39,16 @@ import {
 } from '../lib/solana/manuallyExecuteSolana.ts'
 import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
 import { waitForFinalization } from '../lib/solana/utils.ts'
+import { getChainFamily } from '../lib/utils.ts'
 import type { Providers } from '../providers.ts'
-import { Format } from './types.ts'
+import {
+  type AptosManualExecCommandArgs,
+  type ManualExecCommandArgs,
+  type SolanaManualExecCommandArgs,
+  Format,
+  isAptosManualExecCommandArgs,
+  isSolanaManualExecCommandArgs,
+} from './types.ts'
 import {
   getWallet,
   prettyCommit,
@@ -51,21 +64,7 @@ const MAX_PENDING_TXS = 25
 export async function manualExec(
   providers: Providers,
   txHash: string,
-  argv: {
-    gasLimit?: number
-    estimateGasLimit?: number
-    tokensGasLimit?: number
-    logIndex?: number
-    format: Format
-    page: number
-    wallet?: string
-    solanaOfframp?: string
-    solanaKeypair?: string
-    solanaBufferAddress: string
-    solanaForceBuffer: boolean
-    solanaForceLookupTable: boolean
-    solanaCuLimit?: number
-  },
+  argv: ManualExecCommandArgs,
 ) {
   const tx = await providers.getTxReceipt(txHash)
   const source = tx.provider
@@ -91,28 +90,80 @@ export async function manualExec(
 
   const chainId = chainIdFromSelector(request.lane.destChainSelector)
   const chainName = chainNameFromSelector(request.lane.destChainSelector)
-  if (typeof chainId === 'string' && isSupportedSolanaCluster(chainName)) {
-    if (argv.solanaOfframp === undefined) {
-      throw new Error(
-        'Automated offramp discovery not supported yet for SVM: You must provide the offramp address with the --solana-offramp argument.',
-      )
-    }
+  const family = getChainFamily(chainName)
 
-    const { anchorProvider, keypair } = newAnchorProvider(chainName, argv.solanaKeypair)
-    const transactions = await buildManualExecutionTxWithSolanaDestination(
-      anchorProvider,
-      request as CCIPRequest<SupportedSolanaCCIPVersion>,
-      argv.solanaOfframp,
-      argv.solanaBufferAddress,
-      argv.solanaForceBuffer,
-      argv.solanaForceLookupTable,
-      argv.solanaCuLimit,
-    )
-    await doManuallyExecuteSolana(keypair, anchorProvider, transactions, chainName)
-  } else {
-    const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
-    await manualExecEvmDestination(source, dest, request, argv)
+  if (typeof chainId === 'string') {
+    switch (family) {
+      case ChainFamily.Aptos:
+        if (isAptosManualExecCommandArgs(argv)) {
+          await aptosManualExecution(argv, chainName, request)
+        } else {
+          throw new Error(
+            'Invalid Aptos Manual Execution Arguments: You must provide the offramp address with the --aptos-offramp argument and the private key with the --aptos-private-key argument',
+          )
+        }
+        break
+      case ChainFamily.Solana:
+        if (isSupportedSolanaCluster(chainName) && isSolanaManualExecCommandArgs(argv)) {
+          await solanaManualExecution(argv, chainName, request)
+        } else {
+          throw new Error(
+            'Invalid Solana Manual Execution Arguments: You must provide the offramp address with the --solana-offramp argument and the keypair with the --solana-keypair argument',
+          )
+        }
+        break
+      default: {
+        const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
+        await manualExecEvmDestination(source, dest, request, argv)
+      }
+    }
   }
+}
+
+async function aptosManualExecution(
+  argv: AptosManualExecCommandArgs,
+  chainName: string,
+  request: CCIPRequest<CCIPVersion>,
+): Promise<void> {
+  const aptosClient = newAptosClient(chainName)
+
+  if (!argv.aptosOfframp) {
+    throw new Error(
+      'Automated offramp discovery not supported yet for Aptos: You must provide the offramp address with the --aptos-offramp argument.',
+    )
+  }
+
+  if (!argv.aptosPrivateKey) {
+    throw new Error(
+      'Unable to send Aptos Transaction, no private key has been provided: You must provide the private key with either the --aptos-private-key argument.',
+    )
+  }
+
+  await buildManualExecutionTxWithAptosDestination(aptosClient, request, argv)
+}
+
+async function solanaManualExecution(
+  argv: SolanaManualExecCommandArgs,
+  chainName: string,
+  request: CCIPRequest<CCIPVersion>,
+): Promise<void> {
+  if (argv.solanaOfframp === undefined) {
+    throw new Error(
+      'Automated offramp discovery not supported yet for SVM: You must provide the offramp address with the --solana-offramp argument.',
+    )
+  }
+
+  const { anchorProvider, keypair } = newAnchorProvider(chainName, argv.solanaKeypair)
+  const transactions = await buildManualExecutionTxWithSolanaDestination(
+    anchorProvider,
+    request as CCIPRequest<SupportedSolanaCCIPVersion>,
+    argv.solanaOfframp,
+    argv.solanaBufferAddress,
+    argv.solanaForceBuffer,
+    argv.solanaForceLookupTable,
+    argv.solanaCuLimit,
+  )
+  await doManuallyExecuteSolana(keypair, anchorProvider, transactions, chainName)
 }
 
 function isCannotCloseTableUntilDeactivated(e: SendTransactionError): boolean {
