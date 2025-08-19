@@ -8,6 +8,7 @@ import { hideBin } from 'yargs/helpers'
 import {
   Format,
   estimateGas,
+  getUSDCAttestationStatusV1,
   manualExec,
   manualExecSenderQueue,
   parseBytes,
@@ -417,6 +418,34 @@ async function main() {
       async (argv) => {
         const providers = new Providers(argv)
         return showSupportedTokens(providers, argv)
+          .catch((err) => {
+            process.exitCode = 1
+            if (!logParsedError(err)) console.error(err)
+          })
+          .finally(() => providers.destroy())
+      },
+    )
+    .command(
+      'getUSDCAttestationStatusV1 <tx_hash>',
+      'Get attestation status for a USDC transfer given the source transaction hash',
+      (yargs) =>
+        yargs
+          .positional('tx_hash', {
+            type: 'string',
+            demandOption: true,
+            describe: 'transaction hash of the USDC transfer',
+          })
+          .options({
+            wallet: {
+              type: 'string',
+              describe:
+                'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar',
+            },
+          })
+          .check(({ tx_hash }) => isHexString(tx_hash, 32)),
+      async (argv) => {
+        const providers = new Providers(argv)
+        return getUSDCAttestationStatusV1(providers, argv.tx_hash, argv)
           .catch((err) => {
             process.exitCode = 1
             if (!logParsedError(err)) console.error(err)

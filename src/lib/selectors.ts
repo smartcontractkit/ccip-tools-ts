@@ -422,6 +422,7 @@ const selectors: Selectors = {
     selector: 5224473277236331295n,
     name: 'ethereum-testnet-sepolia-optimism-1',
   },
+  '12052024': { selector: 4827185390138236183n, name: 'memento-testnet' },
   '12227332': { selector: 2217764097022649312n, name: 'neox-testnet-t4' },
   '21000000': { selector: 9043146809313071210n, name: 'corn-mainnet' },
   '21000001': {
