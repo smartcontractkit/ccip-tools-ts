@@ -18,6 +18,7 @@ import {
   isBytesLike,
   toBeArray,
   toBeHex,
+  zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
@@ -478,22 +479,41 @@ export function toObject<T>(obj: T | Result): T {
  * Decode address from a 32-byte hex string
  **/
 export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFamily.EVM): string {
-  let bytes = hexlify(getAddressBytes(address))
   switch (family) {
-    case ChainFamily.EVM:
+    case ChainFamily.EVM: {
+      const bytes = hexlify(getAddressBytes(address))
       if (dataLength(bytes) !== 20)
         throw new Error(`Invalid address length: ${bytes} => ${bytes.length} != 20`)
-      bytes = getAddress(bytes)
-      break
-    case ChainFamily.Aptos:
-      break
-    case ChainFamily.Solana:
-      bytes = encodeBase58(bytes)
-      break
+      return getAddress(bytes)
+    }
+    case ChainFamily.Aptos: {
+      let aptosBytes: Uint8Array
+      if (typeof address === 'string' && address.startsWith('0x')) {
+        // Handle hex strings, including odd-length ones like '0x1'
+        let normalizedAddress = address
+        if (address.length % 2 === 1) {
+          // Pad odd-length hex strings with leading zero
+          normalizedAddress = '0x0' + address.slice(2)
+        }
+        aptosBytes = getBytes(normalizedAddress)
+      } else if (isBytesLike(address)) {
+        aptosBytes = getBytes(address)
+      } else {
+        aptosBytes = getBytes(toBeHex(decodeBase58(address), 32))
+      }
+      // Always return a 32-byte hex string for Aptos addresses
+      if (aptosBytes.length <= 32) {
+        return zeroPadValue(hexlify(aptosBytes), 32)
+      }
+      // If longer than 32 bytes, take the last 32 bytes
+      return hexlify(aptosBytes.slice(-32))
+    }
+    case ChainFamily.Solana: {
+      return encodeBase58(getAddressBytes(address))
+    }
     default:
       throw new Error(`Unsupported address family: ${family as string}`)
   }
-  return bytes
 }
 
 export function toLeHex(_value: BigNumberish, width?: number): string {

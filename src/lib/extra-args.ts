@@ -98,30 +98,46 @@ export function parseExtraArgs(
   | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
   | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
   | undefined {
-  if (data === '0x') return { _tag: 'EVMExtraArgsV1' }
-  if (data.startsWith(EVMExtraArgsV1Tag)) {
-    const args = defaultAbiCoder.decode([EVMExtraArgsV1], dataSlice(data, 4))
-    return { ...((args[0] as Result).toObject() as EVMExtraArgsV1), _tag: 'EVMExtraArgsV1' }
-  }
-  if (data.startsWith(EVMExtraArgsV2Tag)) {
-    if (dataLength(data) === 4 + 16 + 1) {
-      // Solana-generated EVMExtraArgsV2
-      return {
-        _tag: 'EVMExtraArgsV2',
-        gasLimit: toBigInt(getBytes(dataSlice(data, 4, 4 + 16)).reverse()), // from Uint128LE
-        allowOutOfOrderExecution: dataSlice(data, 4 + 16, 4 + 16 + 1) === '0x01',
-      }
+  try {
+    if (data === '0x') return { _tag: 'EVMExtraArgsV1' }
+    if (!data || data === '') return undefined
+
+    if (data.startsWith(EVMExtraArgsV1Tag)) {
+      const args = defaultAbiCoder.decode([EVMExtraArgsV1], dataSlice(data, 4))
+      return { ...((args[0] as Result).toObject() as EVMExtraArgsV1), _tag: 'EVMExtraArgsV1' }
     }
-    const args = defaultAbiCoder.decode([EVMExtraArgsV2], dataSlice(data, 4))
-    return { ...((args[0] as Result).toObject() as EVMExtraArgsV2), _tag: 'EVMExtraArgsV2' }
-  }
-  if (data.startsWith(SVMExtraArgsTag)) {
-    const args = defaultAbiCoder.decode([SVMExtraArgsV1], dataSlice(data, 4))
-    const parsed = (args[0] as Result).toObject() as SVMExtraArgsV1
-    parsed.computeUnits = Number(parsed.computeUnits)
-    parsed.tokenReceiver = encodeBase58(parsed.tokenReceiver)
-    parsed.accounts = parsed.accounts.map((a: string) => encodeBase58(a))
-    return { ...parsed, _tag: 'SVMExtraArgsV1' }
+    if (data.startsWith(EVMExtraArgsV2Tag)) {
+      if (dataLength(data) === 4 + 16 + 1) {
+        // Solana-generated EVMExtraArgsV2 (21 bytes total)
+        return {
+          _tag: 'EVMExtraArgsV2',
+          gasLimit: toBigInt(getBytes(dataSlice(data, 4, 4 + 16)).reverse()), // from Uint128LE
+          allowOutOfOrderExecution: dataSlice(data, 4 + 16, 4 + 16 + 1) === '0x01',
+        }
+      }
+      if (dataLength(data) === 4 + 32 + 1) {
+        // Another Solana/Aptos variant (37 bytes total: 4 tag + 32 gasLimit + 1 allowOOOE)
+        return {
+          _tag: 'EVMExtraArgsV2',
+          gasLimit: toBigInt(getBytes(dataSlice(data, 4, 4 + 32)).reverse()), // from little-endian
+          allowOutOfOrderExecution: dataSlice(data, 4 + 32, 4 + 32 + 1) === '0x01',
+        }
+      }
+      const args = defaultAbiCoder.decode([EVMExtraArgsV2], dataSlice(data, 4))
+      return { ...((args[0] as Result).toObject() as EVMExtraArgsV2), _tag: 'EVMExtraArgsV2' }
+    }
+    if (data.startsWith(SVMExtraArgsTag)) {
+      const args = defaultAbiCoder.decode([SVMExtraArgsV1], dataSlice(data, 4))
+      const parsed = (args[0] as Result).toObject() as SVMExtraArgsV1
+      parsed.computeUnits = Number(parsed.computeUnits)
+      parsed.tokenReceiver = encodeBase58(parsed.tokenReceiver)
+      parsed.accounts = parsed.accounts.map((a: string) => encodeBase58(a))
+      return { ...parsed, _tag: 'SVMExtraArgsV1' }
+    }
+    return undefined
+  } catch (_error) {
+    // Handle any parsing errors gracefully
+    return undefined
   }
 }
 

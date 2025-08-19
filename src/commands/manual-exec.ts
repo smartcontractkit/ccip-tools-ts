@@ -55,6 +55,10 @@ import {
 
 Error.stackTraceLimit = Infinity
 
+const MAX_QUEUE = 1000
+const MAX_EXECS_IN_BATCH = 1
+const MAX_PENDING_TXS = 25
+
 export async function manualExec(
   providers: Providers,
   txHash: string,
@@ -564,6 +568,7 @@ export async function manualExecSenderQueue(
   const requests: Omit<CCIPRequest, 'timestamp' | 'tx'>[] = []
   for await (const request of fetchRequestsForSender(source, firstRequest)) {
     requests.push(request)
+    if (requests.length >= MAX_QUEUE) break
   }
   console.info('Found', requests.length, `requests for "${firstRequest.message.sender}"`)
 
@@ -589,48 +594,51 @@ export async function manualExecSenderQueue(
   console.info(requestsPending.length, `requests eligible for manualExec`)
   if (!requestsPending.length) return
 
-  const maxExecsInBatch = 1
-  const batches: (readonly [
-    CCIPCommit,
-    Omit<CCIPRequest<CCIPVersion>, 'tx' | 'timestamp'>[],
-    string[],
-  ])[] = []
-  let startBlock = destFromBlock
-  for (const request of requestsPending) {
-    if (
-      batches.length > 0 &&
-      request.message.header.sequenceNumber <= batches[batches.length - 1][0].report.maxSeqNr
-    ) {
-      if (batches[batches.length - 1][2].length >= maxExecsInBatch) {
-        batches.push([batches[batches.length - 1][0], batches[batches.length - 1][1], []])
-      }
-      batches[batches.length - 1][2].push(request.message.header.messageId)
-      continue
-    }
-    const commit = await fetchCommitReport(dest, request, { startBlock, page: argv.page })
-    startBlock = commit.log.blockNumber + 1
-
-    const batch = await fetchAllMessagesInBatch(
-      source,
-      request.lane.destChainSelector,
-      request.log,
-      commit.report,
-      { page: argv.page },
-    )
-    const msgIdsToExec = [request.message.header.messageId]
-    batches.push([commit, batch, msgIdsToExec] as const)
-  }
-  console.info('Got', batches.length, 'batches to execute')
-
   const wallet = (await getWallet(argv)).connect(dest)
-
   const offRampContract = await discoverOffRamp(wallet, firstRequest.lane, {
     fromBlock: destFromBlock,
     page: argv.page,
   })
-
   let nonce = await wallet.getNonce()
-  for (const [i, [commit, batch, msgIdsToExec]] of batches.entries()) {
+
+  let startBlock = destFromBlock
+  let lastBatch:
+    | readonly [CCIPCommit, Omit<CCIPRequest<CCIPVersion>, 'tx' | 'timestamp'>[]]
+    | undefined
+  const txsPending = []
+  for (let i = 0; i < requestsPending.length; ) {
+    let commit, batch
+    if (
+      !lastBatch ||
+      requestsPending[i].message.header.sequenceNumber > lastBatch[0].report.maxSeqNr
+    ) {
+      commit = await fetchCommitReport(dest, requestsPending[i], {
+        startBlock,
+        page: argv.page,
+      })
+      startBlock = commit.log.blockNumber + 1
+
+      batch = await fetchAllMessagesInBatch(
+        source,
+        requestsPending[i].lane.destChainSelector,
+        requestsPending[i].log,
+        commit.report,
+        { page: argv.page },
+      )
+      lastBatch = [commit, batch]
+    } else {
+      ;[commit, batch] = lastBatch
+    }
+
+    const msgIdsToExec = [] as string[]
+    while (
+      i < requestsPending.length &&
+      requestsPending[i].message.header.sequenceNumber <= commit.report.maxSeqNr &&
+      msgIdsToExec.length < MAX_EXECS_IN_BATCH
+    ) {
+      msgIdsToExec.push(requestsPending[i++].message.header.messageId)
+    }
+
     const manualExecReport = calculateManualExecProof(
       batch.map(({ message }) => message),
       firstRequest.lane,
@@ -653,10 +661,31 @@ export async function manualExecSenderQueue(
       }),
     )
     const execReport = { ...manualExecReport, offchainTokenData }
+    const getGasLimitOverride = (message: { gasLimit: bigint } | { extraArgs: string }): bigint => {
+      if (argv.gasLimit != null) {
+        const argvGasLimit = BigInt(argv.gasLimit)
+        let msgGasLimit
+        if ('gasLimit' in message) {
+          msgGasLimit = message.gasLimit
+        } else {
+          const parsedArgs = parseExtraArgs(message.extraArgs)
+          if (!parsedArgs || !('gasLimit' in parsedArgs) || !parsedArgs.gasLimit) {
+            throw new Error(`Missing gasLimit argument`)
+          }
+          msgGasLimit = BigInt(parsedArgs.gasLimit)
+        }
+        if (argvGasLimit > msgGasLimit) {
+          return argvGasLimit
+        }
+      }
+      return 0n
+    }
 
     let manualExecTx
     if (firstRequest.lane.version === CCIPVersion.V1_2) {
-      const gasOverrides = manualExecReport.messages.map(() => BigInt(argv.gasLimit ?? 0))
+      const gasOverrides = manualExecReport.messages.map((message) =>
+        getGasLimitOverride(message as CCIPMessage<typeof CCIPVersion.V1_2>),
+      )
       manualExecTx = await (
         offRampContract as CCIPContract<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_2>
       ).manuallyExecute(
@@ -671,7 +700,9 @@ export async function manualExecSenderQueue(
       )
     } else if (firstRequest.lane.version === CCIPVersion.V1_5) {
       const gasOverrides = manualExecReport.messages.map((message) => ({
-        receiverExecutionGasLimit: BigInt(argv.gasLimit ?? 0),
+        receiverExecutionGasLimit: getGasLimitOverride(
+          message as CCIPMessage<typeof CCIPVersion.V1_5>,
+        ),
         tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
       }))
       manualExecTx = await (
@@ -688,7 +719,9 @@ export async function manualExecSenderQueue(
       )
     } /* v1.6 */ else {
       const gasOverrides = manualExecReport.messages.map((message) => ({
-        receiverExecutionGasLimit: BigInt(argv.gasLimit ?? 0),
+        receiverExecutionGasLimit: getGasLimitOverride(
+          message as CCIPMessage<typeof CCIPVersion.V1_6>,
+        ),
         tokenGasOverrides: message.tokenAmounts.map(() => BigInt(argv.tokensGasLimit ?? 0)),
       }))
       manualExecTx = await (
@@ -710,8 +743,15 @@ export async function manualExecSenderQueue(
       )
     }
 
+    const toExec = requestsPending[i - 1] // log only request data for last msg in msgIdsToExec
     console.log(
-      `[${i + 1} of ${batches.length}, ${batch.length} msgs]`,
+      `🚀 [${i}/${requestsPending.length}, ${batch.length} batch, ${msgIdsToExec.length} to exec]`,
+      'source tx =',
+      toExec.log.transactionHash,
+      'msgId =',
+      toExec.message.header.messageId,
+      'nonce =',
+      toExec.message.header.nonce,
       'manualExec tx =',
       manualExecTx.hash,
       'to =',
@@ -719,5 +759,16 @@ export async function manualExecSenderQueue(
       'gasLimit =',
       manualExecTx.gasLimit,
     )
+    txsPending.push(manualExecTx)
+    if (txsPending.length >= MAX_PENDING_TXS) {
+      console.debug(
+        'awaiting',
+        txsPending.length,
+        'txs:',
+        txsPending.map((tx) => tx.hash),
+      )
+      await txsPending[txsPending.length - 1].wait()
+      txsPending.length = 0
+    }
   }
 }

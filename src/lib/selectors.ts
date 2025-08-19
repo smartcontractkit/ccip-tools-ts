@@ -21,6 +21,8 @@ const selectors: Selectors = {
     name: 'polkadot-testnet-darwinia-pangoro',
   },
   '46': { selector: 8866418665544333000n, name: 'polkadot-mainnet-darwinia' },
+  '50': { selector: 17673274061779414707n, name: 'xdc-mainnet' },
+  '51': { selector: 3017758115101368649n, name: 'xdc-testnet' },
   '52': {
     selector: 1761333065194157300n,
     name: 'coinex_smart_chain-mainnet',
