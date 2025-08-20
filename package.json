@@ -79,6 +79,7 @@
       "<rootDir>/dist/"
     ],
     "moduleNameMapper": {
+      "^@coral-xyz/anchor$": "@coral-xyz/anchor",
       "^@solana/web3\\.js$": "@solana/web3.js",
       "^bn\\.js$": "bn.js",
       "(.+)\\.[jt]s$": "$1"

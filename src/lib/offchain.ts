@@ -1,3 +1,4 @@
+import { BorshCoder, EventParser } from '@coral-xyz/anchor'
 import { Connection, PublicKey } from '@solana/web3.js'
 import * as borsh from 'borsh'
 import { type Addressable, type Log, EventFragment, Interface, keccak256 } from 'ethers'
@@ -10,8 +11,8 @@ import {
   getClusterUrlByChainSelectorName,
   isSupportedSolanaCluster,
 } from './solana/getClusterByChainSelectorName.ts'
+import { CCIP_CCTP_TOKEN_POOL_IDL } from './solana/programs/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
 import type { CcipCctpMessageSentEvent } from './solana/types.ts'
-import { computeAnchorEventDiscriminant } from './solana/utils.ts'
 import { type CCIPMessage, type CCIPRequest, defaultAbiCoder } from './types.ts'
 import { lazyCached, networkInfo } from './utils.ts'
 
@@ -33,8 +34,6 @@ const TRANSFER_EVENT = EventFragment.from('Transfer(address from, address to, ui
 export const LBTC_EVENT = EventFragment.from(
   'DepositToBridge(address fromAddress, bytes32 toAddress, bytes32 payloadHash, bytes payload)',
 )
-
-const CCIP_CCTP_EVENT_DISCRIMINATOR = computeAnchorEventDiscriminant('CcipCctpMessageSentEvent')
 
 const CIRCLE_API_URL = {
   mainnet: 'https://iris-api.circle.com/v1',
@@ -314,6 +313,8 @@ async function fetchEVMOffchainTokenData(
       offchainTokenData[i] = lbtcTokenData[i] as string
     }
   }
+
+  console.debug('Got EVM offchain token data', offchainTokenData)
   return offchainTokenData
 }
 
@@ -340,9 +341,9 @@ export async function fetchSolanaOffchainTokenData(
     log: Pick<CCIPRequest['log'], 'topics' | 'index' | 'transactionHash'>
   },
 ): Promise<string[]> {
-  if (request.message.tokenAmounts.length > 1) {
+  if (request.message.tokenAmounts === undefined || request.message.tokenAmounts.length > 1) {
     throw new Error(
-      `Expected at most 1 token transfer, found ${request.message.tokenAmounts.length}`,
+      `Expected at most 1 token transfer, found ${request.message.tokenAmounts?.length}`,
     )
   }
 
@@ -391,6 +392,8 @@ export async function fetchSolanaOffchainTokenData(
     }
   }
 
+  console.debug('Got Solana offchain token data', offchainTokenData)
+
   return offchainTokenData
 }
 
@@ -424,111 +427,48 @@ export async function parseCcipCctpEvents(
     throw new Error(`Transaction not found: ${txSignature}`)
   }
 
-  // Look for "Program data:" logs which contain the event data
-  const programDataLogs =
-    tx.meta.logMessages?.filter((log) => log.startsWith('Program data: ')) || []
-
-  // Parse each program data log to find CCTP events
-  const cctpEvents: CcipCctpMessageSentEvent[] = []
-  for (const log of programDataLogs) {
-    try {
-      // Remove prefix and parse as base64 data
-      const eventData = Buffer.from(log.replace('Program data: ', ''), 'base64')
-
-      // Check if it's a CcipCctpMessageSentEvent by looking in it's discriminator before trying to fully parse
-      if (eventData.length >= 8) {
-        const discriminator = eventData.subarray(0, 8)
-        if (discriminator.equals(CCIP_CCTP_EVENT_DISCRIMINATOR)) {
-          const event = parseCcipCctpEvent(eventData)
-          if (event) {
-            cctpEvents.push(event)
-          }
-        }
-      }
-    } catch (error) {
-      // Invalid or non-CCTP events
-      console.debug(
-        `🔍 Solana CCTP: Skipped program data log in transaction ${txSignature}:`,
-        error,
-      )
-    }
+  if (!tx.meta.logMessages?.length) {
+    throw new Error(`Transaction has no logs: ${txSignature}`)
   }
 
-  return cctpEvents
+  const cctpPoolAddress = getCctpPoolAddress(tx.meta.logMessages)
+  if (!cctpPoolAddress) {
+    return []
+  }
+  const eventParser = new EventParser(
+    new PublicKey(cctpPoolAddress),
+    new BorshCoder(CCIP_CCTP_TOKEN_POOL_IDL),
+  )
+
+  const events: CcipCctpMessageSentEvent[] = Array.from(eventParser.parseLogs(tx.meta.logMessages))
+    .filter((event) => event.name === 'CcipCctpMessageSentEvent')
+    .map((event) => event.data as unknown as CcipCctpMessageSentEvent)
+  return events
 }
 
-/**
- * Parses a CcipCctpMessageSentEvent from a Solana program data buffer
- *
- * @param buffer - Raw buffer containing the event data
- * @returns Parsed CCTP event object or null if parsing fails
- *
- * @see https://github.com/smartcontractkit/chainlink-ccip/blob/fc205e32dfa66cb5aa6a97e196792a3e813c1787/chains/solana/contracts/target/idl/cctp_token_pool.json#L1191-L1230
- */
-function parseCcipCctpEvent(buffer: Buffer): CcipCctpMessageSentEvent | null {
-  try {
-    // Structure of CcipCctpMessageSentEvent is the following:
-    // discriminator: 8 bytes
-    // originalSender: 32 bytes (PublicKey)
-    // remoteChainSelector: 8 bytes (u64)
-    // msgTotalNonce: 8 bytes (u64)
-    // eventAddress: 32 bytes (PublicKey)
-    // sourceDomain: 4 bytes (u32)
-    // cctpNonce: 8 bytes (u64)
-    // messageSentBytes: variable length (bytes)
-
-    // Minimum size: 8 (discriminator) + 92 (fixed fields) = 100
-    if (buffer.length < 100) {
-      return null
-    }
-
-    let offset = 0
-
-    // Skip discriminator (already verified by caller)
-    offset += 8
-
-    // Parse the event fields
-    const originalSender = new PublicKey(buffer.subarray(offset, offset + 32)).toString()
-    offset += 32
-
-    const remoteChainSelector = buffer.readBigUInt64LE(offset)
-    offset += 8
-
-    const msgTotalNonce = buffer.readBigUInt64LE(offset)
-    offset += 8
-
-    const eventAddress = new PublicKey(buffer.subarray(offset, offset + 32)).toString()
-    offset += 32
-
-    const sourceDomain = buffer.readUInt32LE(offset)
-    offset += 4
-
-    const cctpNonce = buffer.readBigUInt64LE(offset)
-    offset += 8
-
-    // Parse messageSentBytes (length-prefixed)
-    if (offset + 4 > buffer.length) return null
-
-    const messageLength = buffer.readUInt32LE(offset)
-    offset += 4
-
-    if (offset + messageLength > buffer.length) return null
-
-    const messageSentBytes = buffer.subarray(offset, offset + messageLength)
-
-    return {
-      originalSender,
-      remoteChainSelector,
-      msgTotalNonce,
-      eventAddress,
-      sourceDomain,
-      cctpNonce,
-      messageSentBytes,
-    }
-  } catch (error) {
-    console.debug('🔍 Solana CCTP: Failed to parse CcipCctpMessageSentEvent buffer:', error)
+function getCctpPoolAddress(logs: string[]): string | null {
+  // Example logs include lines like the following (though the indexes of the "invoke [1]" are unreliable):
+  // "Program <POOL ADDRESS HERE, THIS IS WHAT WE'RE LOOKING FOR> invoke [1]",
+  // "Program log: Instruction: LockOrBurnTokens",
+  const candidateIx = logs.indexOf('Program log: Instruction: LockOrBurnTokens')
+  if (candidateIx < 1) {
     return null
   }
+
+  const candidateAddress = logs[candidateIx - 1].split(' ')[1]
+
+  if (!candidateAddress.toLowerCase().startsWith('ccitp')) {
+    // The vanity address of the pool includes "ccitp" (case-insensitive) as a prefix
+    return null
+  }
+
+  // basic sanity check that we have the pool address: The pool returns a value, so the logs should show that
+  const sanityCheck = logs.find((log) => log.startsWith(`Program return: ${candidateAddress} `))
+  if (!sanityCheck) {
+    return null
+  }
+
+  return candidateAddress
 }
 
 // https://github.com/smartcontractkit/chainlink-ccip/blob/bf22fbf2d7b828dd48440061b92d33f946d1712e/chains/solana/contracts/target/idl/cctp_token_pool.json#L1071-L1088

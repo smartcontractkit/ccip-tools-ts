@@ -1,7 +1,7 @@
 import bs58 from 'bs58'
 import { Interface, getAddress, hexlify, id, keccak256, randomBytes } from 'ethers'
 
-import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.ts'
+import TokenPoolABI from '../abi/BurnMintTokenPool_1_6_1.ts'
 import { type CCIPRequest, defaultAbiCoder } from './types.ts'
 import { lazyCached } from './utils.ts'
 
@@ -17,10 +17,10 @@ beforeEach(() => {
 })
 
 const TokenPoolInterface = lazyCached(
-  `Interface BurnMintTokenPool 1.5.1`,
+  `Interface BurnMintTokenPool 1.6.1`,
   () => new Interface(TokenPoolABI),
 )
-const BURNED_EVENT = TokenPoolInterface.getEvent('Burned')!
+const BURNED_EVENT = TokenPoolInterface.getEvent('LockedOrBurned')!
 
 describe('fetchOffchainTokenData', () => {
   const MESSAGE_SENT_TOPIC0 = id('MessageSent(bytes)')
@@ -361,7 +361,67 @@ describe('fetchSolanaOffchainTokenData', () => {
       meta: {
         logMessages: [
           // Mock a program data log that will be parsed as a CCTP event
-          'Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw==',
+          [
+            'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]',
+            'Program log: Instruction: ApproveChecked',
+            'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4456 of 400000 compute units',
+            'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+            'Program CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P invoke [1]',
+            'Program log: Instruction: CcipSend',
+            'Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 invoke [2]',
+            'Program log: Instruction: VerifyNotCursed',
+            'Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 consumed 6856 of 334355 compute units',
+            'Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 success',
+            'Program FeeQRpcGNfzR76kX7uCKhAfGtripotrJEuxbxaVPtV3P invoke [2]',
+            'Program log: Instruction: GetFee',
+            'Program FeeQRpcGNfzR76kX7uCKhAfGtripotrJEuxbxaVPtV3P consumed 42625 of 283953 compute units',
+            'Program return: FeeQRpcGNfzR76kX7uCKhAfGtripotrJEuxbxaVPtV3P BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAARAAAAOgDAAAVAAAAGB3PEEANAwAAAAAAAAAAAAAAAAAAQA0DAAAAAAAAAAAAAAAAAAAA',
+            'Program FeeQRpcGNfzR76kX7uCKhAfGtripotrJEuxbxaVPtV3P success',
+            'Program 11111111111111111111111111111111 invoke [2]',
+            'Program 11111111111111111111111111111111 success',
+            'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]',
+            'Program log: Instruction: SyncNative',
+            'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 3045 of 236593 compute units',
+            'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+            'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]',
+            'Program log: Instruction: TransferChecked',
+            'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 6290 of 229827 compute units',
+            'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+            'Program CCitPr8yZbN8zEBEdwju8bnGgKMYcz6XSTbU61CMedj invoke [2]',
+            'Program log: Instruction: LockOrBurnTokens',
+            'Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 invoke [3]',
+            'Program log: Instruction: VerifyNotCursed',
+            'Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 consumed 6856 of 141854 compute units',
+            'Program RmnVVyLZ7o9vZoBC1vCpBsh4SDDGCGPppyZioGp3gT9 success',
+            'Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 invoke [3]',
+            'Program log: Instruction: DepositForBurnWithCaller',
+            'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [4]',
+            'Program log: Instruction: Burn',
+            'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4753 of 99677 compute units',
+            'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+            'Program CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd invoke [4]',
+            'Program log: Instruction: SendMessageWithCaller',
+            'Program 11111111111111111111111111111111 invoke [5]',
+            'Program 11111111111111111111111111111111 success',
+            'Program CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd consumed 16752 of 89165 compute units',
+            'Program return: CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd u3IAAAAAAAA=',
+            'Program CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd success',
+            'Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 invoke [4]',
+            'Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 consumed 3632 of 68445 compute units',
+            'Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 success',
+            'Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 consumed 61831 of 124597 compute units',
+            'Program return: CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 u3IAAAAAAAA=',
+            'Program CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3 success',
+            'Program data: 0WywRxX2Q1KO/vb55v/5Epok4iBz8HgmaGW9gMO+gTCi+JerP102Xtka2clPukHeCgAAAAAAAACkwVPwDpULPHlT2lBv0eNESJ65K1dixlBl19Zw8nc3QQUAAAC7cgAAAAAAAPgAAAAAAAAAAAAABQAAAAAAAAAAAAByu6ZfyUNBmlrVkAQv1nyXkf0BWs9TpUzII+24/4G57XIuAAAAAAAAAAAAAAAAnzuGecc8L++LWbTzRE1OFW+3CqUAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupwAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALw86T4RjCix2JE7KGDGznC7ieE/AfMnM4WbUzEgAOPUw==',
+            'Program data: zyX7mu/lDkO0EMhfhz9z8NpxfMBabv1pr0AmN8PWxO7HlMQB6EyxngIAAAAAAAAAO0Qss5EhV/E6kz0BNCgtAytf/s0Botvxt3kGCN8ALqc=',
+            'Program CCitPr8yZbN8zEBEdwju8bnGgKMYcz6XSTbU61CMedj consumed 147198 of 207001 compute units',
+            'Program return: CCitPr8yZbN8zEBEdwju8bnGgKMYcz6XSTbU61CMedj IAAAAAAAAAAAAAAAAAAAABx9SxlssMewHXQ/vGEWqQI3nHI4QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAU=',
+            'Program CCitPr8yZbN8zEBEdwju8bnGgKMYcz6XSTbU61CMedj success',
+            'Program data: F01Jt3u5cznZGtnJT7pB3hAAAAAAAAAAo8UDYQrKqyx5ETU5ZS7RudurUBqArrxw9lzKnQYVdRHfN+OU4sfs49ka2clPukHeEAAAAAAAAAAKAAAAAAAAAI7+9vnm//kSmiTiIHPweCZoZb2Aw76BMKL4l6s/XTZeAAAAACAAAAAAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUBUAAAAYHc8QQA0DAAAAAAAAAAAAAAAAAAAGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAAQEAAACyj5pu4elxk1FJg6M6L9oSK+l+h7GziUa6ZHUBTaWBEyAAAAAAAAAAAAAAAAAAAAAcfUsZbLDHsB10P7xhFqkCN5xyOEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAByuwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+            'Program CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P consumed 341826 of 395544 compute units',
+            'Program return: CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P o8UDYQrKqyx5ETU5ZS7RudurUBqArrxw9lzKnQYVdRE=',
+            'Program CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P success',
+          ],
         ],
         err: null,
       },
