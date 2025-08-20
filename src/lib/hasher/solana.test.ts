@@ -1,9 +1,12 @@
+import util from 'node:util'
 import { encodeBase64, toBigInt } from 'ethers'
 import { encodeExtraArgs } from '../extra-args.ts'
 import { decodeMessage } from '../requests.ts'
 import SELECTORS from '../selectors.ts'
 import { type CCIPMessage, CCIPVersion } from '../types.ts'
 import { getV16SolanaLeafHasher } from './solana.ts'
+
+util.inspect.defaultOptions.maxArrayLength = null
 
 describe('MessageHasher', () => {
   beforeAll(() => {
@@ -13,7 +16,7 @@ describe('MessageHasher', () => {
         selector: 78n,
       },
       'aptos:11': {
-        name: 'aptos-zetanet',
+        name: 'test-zetanet',
         selector: 67n,
       },
     })
