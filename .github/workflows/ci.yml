@@ -26,24 +26,33 @@ jobs:
       run: npm run lint && npm run typecheck
 
     - name: Run tests with coverage
-      run: npm test -- --coverage | tee coverage-summary.txt
+      run: |
+        set -o pipefail
+        npm test -- --coverage 2>&1 | tee coverage-summary.txt
 
     - name: Upload coverage report
+      if: "always() && hashFiles('coverage/**') != ''"
       uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
       with:
         name: coverage-report
         path: coverage
 
     - name: Post or update PR comment with coverage summary
+      if: always()
       uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
       with:
         script: |
           const fs = require('fs');
-          const coverageSummary = fs.readFileSync('coverage-summary.txt', 'utf8').split('\n').slice(4).join('\n');
+          let coverageSummary = fs.readFileSync('coverage-summary.txt', 'utf8').split('\n')
+          coverageSummary = coverageSummary.slice(coverageSummary.findIndex(line => line.match(/^-+\|[-|]*$/))).join('\n');
+          if (coverageSummary.trim().length === 0) {
+            console.log('No coverage data found');
+            process.exit(1);
+          }
           const prNumber = context.payload.pull_request ? context.payload.pull_request.number : null;
 
           if (prNumber) {
-            const commentBody = `## Coverage Report\n\n\`\`\`\n${coverageSummary}\n\`\`\``;
+            const commentBody = `## Coverage Report\n\n\`\`\`\n${coverageSummary}\`\`\``;
             const { data: comments } = await github.rest.issues.listComments({
               ...context.repo,
               issue_number: prNumber,
