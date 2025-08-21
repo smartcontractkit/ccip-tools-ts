@@ -1,7 +1,6 @@
-import { randomBytes } from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { type Idl, type web3, AnchorProvider, BorshCoder, Program, Wallet } from '@coral-xyz/anchor'
+import { type Idl, type web3, AnchorProvider, BorshCoder, Wallet } from '@coral-xyz/anchor'
 import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types.js'
 import {
   type AccountMeta,
@@ -19,15 +18,14 @@ import {
 } from '@solana/web3.js'
 import type { Layout } from 'buffer-layout'
 import { calculateManualExecProof } from '../execution.ts'
-import { type CCIPMessage, type CCIPRequest, type ExecutionReport, CCIPVersion } from '../types.ts'
+import {type CCIPRequest, type ExecutionReport } from '../types.ts'
 import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
 import { getManuallyExecuteInputs } from './getManuallyExecuteInputs.ts'
-import { CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
-import { EXECUTION_BUFFER_IDL } from './programs/1.6.0/EXECUTION_BUFFER.ts'
 import { getCcipOfframp } from './programs/getCcipOfframp.ts'
-import type { SupportedSolanaCCIPVersion } from './programs/versioning.ts'
+import { type SupportedSolanaCCIPVersion, CCIP_SOLANA_VERSION_MAP, SolanaCCIPIdl } from './programs/versioning.ts'
 import { simulateUnitsConsumed } from './simulateManuallyExecute.ts'
 import { normalizeExecutionReportForSolana } from './utils.ts'
+import { getAddressLookupTableAccount } from './getAddressLookupTableAccount.ts'
 
 class ExtendedBorshTypesCoder<N extends string = string> extends BorshTypesCoder<N> {
   public constructor(idl: Idl) {
@@ -36,7 +34,7 @@ class ExtendedBorshTypesCoder<N extends string = string> extends BorshTypesCoder
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   public override encode<T = any>(typeName: N, type: T): Buffer {
-    const buffer = Buffer.alloc(3000) // TODO: use a tighter buffer.
+    const buffer = Buffer.alloc(32000) // TODO: use a tighter buffer.
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const layout: Layout<any> | undefined = (this as any).typeLayouts.get(typeName)
     if (!layout) {
@@ -75,29 +73,29 @@ export async function buildManualExecutionTxWithSolanaDestination<
   destinationProvider: AnchorProvider,
   ccipRequest: CCIPRequest<V>,
   offrampAddress: string,
-  bufferProgramAddress: string,
   forceBuffer: boolean,
   forceLookupTable: boolean,
+  clearBufferFirst: boolean,
   computeUnitsOverride: number | undefined,
 ): Promise<ManualExecTxs> {
   const offrampProgram = getCcipOfframp({
-    ccipVersion: CCIPVersion.V1_6,
+    ccipVersion: ccipRequest.lane.version as SupportedSolanaCCIPVersion,
     address: offrampAddress,
     provider: destinationProvider,
   })
 
   const TnV = (await offrampProgram.methods.typeVersion().accounts({}).signers([]).view()) as string
-
-  if (TnV != 'ccip-offramp 0.1.0-dev') {
+  if (TnV !== 'ccip-offramp 0.1.0-dev') {
     throw new Error(`Unsupported offramp version: ${TnV}`)
   }
 
   const { proofs, merkleRoot } = calculateManualExecProof([ccipRequest.message], ccipRequest.lane, [
     ccipRequest.message.header.messageId,
   ])
+
   const executionReportRaw: ExecutionReport = normalizeExecutionReportForSolana({
     sourceChainSelector: BigInt(ccipRequest.lane.sourceChainSelector),
-    message: ccipRequest.message as CCIPMessage<typeof CCIPVersion.V1_6>,
+    message: ccipRequest.message,
     proofs,
     // Offchain token data is unsupported for manual exec
     offchainTokenData: new Array(ccipRequest.message.tokenAmounts.length).fill('0x') as string[],
@@ -105,22 +103,28 @@ export async function buildManualExecutionTxWithSolanaDestination<
 
   const payerAddress = destinationProvider.wallet.publicKey
 
-  const { executionReport, tokenIndexes, accounts, remainingAccounts, addressLookupTableAccounts } =
+  const { executionReport, tokenIndexes, accounts, addressLookupTables} =
     await getManuallyExecuteInputs({
       executionReportRaw,
       connection: destinationProvider.connection,
       offrampProgram,
       root: merkleRoot,
       senderAddress: payerAddress.toBase58(),
+      buffered: forceBuffer
     })
 
-  const coder = new AlteredBorshCoder(CCIP_OFFRAMP_IDL)
+  let addressLookupTableAccounts = await Promise.all(addressLookupTables.map(async (acc) => {
+    return await getAddressLookupTableAccount({
+      connection: destinationProvider.connection,
+      lookupTablePubKey: acc,
+    })
+  }))
+
+  const coder = new AlteredBorshCoder(CCIP_SOLANA_VERSION_MAP[ccipRequest.lane.version as SupportedSolanaCCIPVersion][SolanaCCIPIdl.OffRamp])
   const serializedReport = coder.types.encode('ExecutionReportSingleChain', executionReport)
   const serializedTokenIndexes = Buffer.from(tokenIndexes)
 
   const { blockhash } = await destinationProvider.connection.getLatestBlockhash()
-
-  console.log('ForceLookupTable', forceLookupTable)
 
   const alt: ManualExecAlt | undefined = !forceLookupTable
     ? undefined
@@ -134,7 +138,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
         })
         console.log('Using Address Lookup Table', altAddr.toBase58())
 
-        const addresses = [...Object.values(accounts), ...remainingAccounts.map((a) => a.pubkey)]
+        const addresses = accounts.map((a) => a.pubkey)
 
         if (addresses.length > 256) {
           throw new Error(
@@ -190,27 +194,43 @@ export async function buildManualExecutionTxWithSolanaDestination<
       })()
 
   if (forceBuffer) {
-    console.log(
-      `Execute report will be pre-buffered through the buffering contract ${bufferProgramAddress}. This may take some time.`,
-    )
-    return bufferedTransactions(
+    console.log(`Execute report will be pre-buffered through the offramp. This may take some time.`)
+    return bufferedTransactionData(
       destinationProvider,
-      bufferProgramAddress,
+      offrampAddress,
       serializedReport,
       serializedTokenIndexes,
       accounts,
-      remainingAccounts,
       computeUnitsOverride,
       blockhash,
       addressLookupTableAccounts,
       alt,
+      merkleRoot,
+      clearBufferFirst,
+      ccipRequest.lane.version as SupportedSolanaCCIPVersion,
     )
   }
 
   const anchorTx = await offrampProgram.methods
     .manuallyExecute(serializedReport, serializedTokenIndexes)
-    .accounts(accounts)
-    .remainingAccounts(remainingAccounts)
+    // TODO: Maybe use raw TX construction to make this a bit cleaner,
+    // so that in case the arguments on the IDL change, there's no need
+    // to update this.
+    .accounts({
+      config: accounts[0].pubkey,
+      referenceAddresses: accounts[1].pubkey,
+      sourceChain: accounts[2].pubkey,
+      commitReport: accounts[3].pubkey,
+      offramp: accounts[4].pubkey,
+      allowedOfframp: accounts[5].pubkey,
+      authority: accounts[6].pubkey,
+      systemProgram: accounts[7].pubkey,
+      sysvarInstructions: accounts[8].pubkey,
+      rmnRemote: accounts[9].pubkey,
+      rmnRemoteCurses: accounts[10].pubkey,
+      rmnRemoteConfig: accounts[11].pubkey,
+    })
+    .remainingAccounts(accounts)
     .transaction()
 
   const manualExecuteInstructions = anchorTx.instructions
@@ -219,10 +239,10 @@ export async function buildManualExecutionTxWithSolanaDestination<
     instructions: manualExecuteInstructions,
     connection: destinationProvider.connection,
     payerKey: destinationProvider.wallet.publicKey,
-    blockhash,
     addressLookupTableAccounts,
     computeUnitsOverride,
   })
+
   const computeUnitsWithBuffer = Math.ceil(computeUnits * 1.1)
   const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
     units: computeUnitsOverride || computeUnitsWithBuffer,
@@ -273,108 +293,113 @@ export function newAnchorProvider(chainName: string, keypairFile: string | undef
   return { anchorProvider, keypair }
 }
 
-type ManualExecAccounts = {
-  config: PublicKey
-  referenceAddresses: PublicKey
-  sourceChain: PublicKey
-  commitReport: PublicKey
-  offramp: PublicKey
-  allowedOfframp: PublicKey
-  rmnRemote: PublicKey
-  rmnRemoteCurses: PublicKey
-  rmnRemoteConfig: PublicKey
-  authority: PublicKey
-  systemProgram: PublicKey
-  sysvarInstructions: PublicKey
-}
-
-async function bufferedTransactions(
+export async function bufferedTransactionData(
   destinationProvider: AnchorProvider,
-  bufferProgramAddress: string,
+  offrampAddress: string,
   serializedReport: Buffer,
   serializedTokenIndexes: Buffer<ArrayBuffer>,
-  originalManualExecAccounts: ManualExecAccounts,
-  originalManualExecRemainingAccounts: AccountMeta[],
+  accounts: AccountMeta[],
   computeUnitsOverride: number | undefined,
   blockhash: string,
   addressLookupTableAccounts: AddressLookupTableAccount[],
   alt: ManualExecAlt | undefined,
+  merkleRoot: string,
+  clearBufferFirst: boolean,
+  ccipVersion: SupportedSolanaCCIPVersion,
 ): Promise<ManualExecTxs> {
-  // Arbitrary as long as there's consistency for all translations.
-  const bufferId = {
-    bytes: Array.from(randomBytes(32)),
-  }
+  const offrampProgram = getCcipOfframp({
+    ccipVersion,
+    address: offrampAddress,
+    provider: destinationProvider,
+  })
+
+  // Use merkleRoot for bufferId. This is arbitrary, but easy to track.
+  const bufferId = Buffer.from(merkleRoot.replace(/^0x/, ''), 'hex')
+
   const [bufferAddress] = PublicKey.findProgramAddressSync(
     [
-      Buffer.from('execution_buffer'),
+      Buffer.from('execution_report_buffer'),
+      bufferId,
       destinationProvider.wallet.publicKey.toBuffer(),
-      Buffer.from(bufferId.bytes),
+
     ],
-    new PublicKey(bufferProgramAddress),
+    new PublicKey(offrampAddress),
   )
 
-  const hexBytes = '0x' + bufferId.bytes.map((b) => b.toString(16).padStart(2, '0')).join('')
+  const [configPDA] = PublicKey.findProgramAddressSync(
+    [Buffer.from('config')],
+    offrampProgram.programId,
+  )
+
   console.log(
-    `The bufferID is ${hexBytes}, and the PDA address for the buffer is ${bufferAddress.toString()}. If this buffering process is aborted, remember to manually close the account to recover any spent funds.`,
+    `The bufferID is ${merkleRoot}, and the PDA address for the buffer is ${bufferAddress.toString()}. If this buffering process is aborted, remember to manually close the account to recover any spent funds.`,
   )
 
   const chunkSize = 800
-
-  const bufferingProgram = new Program(
-    EXECUTION_BUFFER_IDL,
-    new PublicKey(bufferProgramAddress),
-    destinationProvider,
-  )
-
   const bufferedExecTxs: VersionedTransaction[] = []
 
   const bufferingAccounts = {
-    bufferedReport: bufferAddress,
+    executionReportBuffer: bufferAddress,
+    config: configPDA,
     authority: destinationProvider.wallet.publicKey,
     systemProgram: SystemProgram.programId,
   }
-  const initTx = await bufferingProgram.methods
-    .initializeExecutionReportBuffer(bufferId)
-    .accounts(bufferingAccounts)
-    .transaction()
-  bufferedExecTxs.push(
-    toVersionedTransaction(initTx, destinationProvider.wallet.publicKey, blockhash),
-  )
 
+  if (clearBufferFirst) {
+    const clearTx = await offrampProgram.methods
+      .closeExecutionReportBuffer(bufferId)
+      .accounts(bufferingAccounts)
+      .transaction()
+
+    bufferedExecTxs.push(
+      toVersionedTransaction(clearTx, destinationProvider.wallet.publicKey, blockhash),
+    )
+  }
+
+
+  const numChunks = Math.ceil(serializedReport.length / chunkSize)
   for (let i = 0; i < serializedReport.length; i += chunkSize) {
     const end = Math.min(i + chunkSize, serializedReport.length)
     const chunk: Buffer = serializedReport.subarray(i, end)
 
-    const appendTx = await bufferingProgram.methods
-      .appendExecutionReportData(bufferId, chunk)
+    const appendTx = await offrampProgram.methods
+      .bufferExecutionReport(bufferId, serializedReport.length, chunk, i / chunkSize, numChunks)
       .accounts(bufferingAccounts)
       .transaction()
     bufferedExecTxs.push(
       toVersionedTransaction(appendTx, destinationProvider.wallet.publicKey, blockhash),
     )
   }
-
-  const executeTx = await bufferingProgram.methods
-    .manuallyExecuteBuffered(bufferId, serializedTokenIndexes)
+  console.log(accounts)
+  const executeTx = await offrampProgram.methods
+    .manuallyExecute(Buffer.alloc(0), serializedTokenIndexes)
+    // TODO: Maybe use raw TX construction to make this a bit cleaner,
+    // so that in case the arguments on the IDL change, there's no need
+    // to update this.
     .accounts({
-      ...originalManualExecAccounts,
-      bufferedReport: bufferAddress,
+      config: accounts[0].pubkey,
+      referenceAddresses: accounts[1].pubkey,
+      sourceChain: accounts[2].pubkey,
+      commitReport: accounts[3].pubkey,
+      offramp: accounts[4].pubkey,
+      allowedOfframp: accounts[5].pubkey,
+      authority: accounts[6].pubkey,
+      systemProgram: accounts[7].pubkey,
+      sysvarInstructions: accounts[8].pubkey,
+      rmnRemote: accounts[9].pubkey,
+      rmnRemoteCurses: accounts[10].pubkey,
+      rmnRemoteConfig: accounts[11].pubkey,
     })
-    .remainingAccounts(originalManualExecRemainingAccounts)
+    .remainingAccounts(accounts.slice(12))
     .transaction()
 
-  const executeTxInstructions = executeTx.instructions
-  let finalInstructions: TransactionInstruction[]
+  const computeBudgetIx = computeUnitsOverride
+    ? ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitsOverride })
+    : null
 
-  if (computeUnitsOverride !== undefined) {
-    // Add compute budget instruction at the beginning of instructions
-    const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
-      units: computeUnitsOverride,
-    })
-    finalInstructions = [computeBudgetIx, ...executeTxInstructions]
-  } else {
-    finalInstructions = executeTxInstructions
-  }
+  const finalInstructions = computeBudgetIx
+    ? [computeBudgetIx, ...executeTx.instructions]
+    : executeTx.instructions
 
   const message = new TransactionMessage({
     payerKey: destinationProvider.wallet.publicKey,

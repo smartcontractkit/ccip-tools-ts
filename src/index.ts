@@ -139,21 +139,20 @@ async function main() {
               describe:
                 'Location of the solana keypair to use for manual execution. Defaults to ~/.config/solana/id.json',
             },
-            'solana-buffer-address': {
-              type: 'string',
-              describe:
-                'Solana buffering contract address. Will be used when a manual exec TX is too large, or when forced with the "--solana-force-buffer" flag.',
-              default: 'Buff7ufrtmskFnHtGd9LXaWSAjX6wAMQ2q2s2WSWoSGS',
-            },
             'solana-force-buffer': {
               type: 'boolean',
-              describe: 'Forces the usage of a buffering contract for Solana manual execution.',
+              describe: 'Forces the usage of buffering for Solana manual execution.',
               default: false,
             },
             'solana-force-lookup-table': {
               type: 'boolean',
               describe:
                 'Forces the creation & usage of an ad-hoc lookup table for Solana manual execution.',
+              default: false,
+            },
+            'solana-clear-buffer-first': {
+              type: 'boolean',
+              describe: 'Forces clearing the buffer (if a previous attempt was aborted).',
               default: false,
             },
             'solana-cu-limit': {
