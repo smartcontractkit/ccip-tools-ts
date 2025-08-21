@@ -379,6 +379,80 @@ const LOG_MESSAGES_WITH_CCTP_EVENT = [
   'Program CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P success',
 ]
 
+const LOG_MESSAGES_WITH_NON_CCTP_TOKEN = [
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]',
+  'Program log: Instruction: ApproveChecked',
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4455 of 400000 compute units',
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+  'Program Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C invoke [1]',
+  'Program log: Instruction: CcipSend',
+  'Program RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7 invoke [2]',
+  'Program log: Instruction: VerifyNotCursed',
+  'Program RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7 consumed 6856 of 335561 compute units',
+  'Program RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7 success',
+  'Program FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi invoke [2]',
+  'Program log: Instruction: GetFee',
+  'Program FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi consumed 45947 of 278613 compute units',
+  'Program return: FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEMKC0AAAAAAAA+CBb50UsAAAAAAAAAAAABAAAAIAAAAJBfAQAVAAAAGB3PEAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAEA',
+  'Program FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi success',
+  'Program 11111111111111111111111111111111 invoke [2]',
+  'Program 11111111111111111111111111111111 success',
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]',
+  'Program log: Instruction: SyncNative',
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 3045 of 227673 compute units',
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+  'Program 11111111111111111111111111111111 invoke [2]',
+  'Program 11111111111111111111111111111111 success',
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]',
+  'Program log: Instruction: TransferChecked',
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 6263 of 215991 compute units',
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+  'Program tttpKBqrXCCgKn8Rm5bcJtLBKfpZX16V3ENucSuP1RS invoke [2]',
+  'Program log: Instruction: LockOrBurnTokens',
+  'Program RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7 invoke [3]',
+  'Program log: Instruction: VerifyNotCursed',
+  'Program RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7 consumed 6856 of 158311 compute units',
+  'Program RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7 success',
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [3]',
+  'Program log: Instruction: Burn',
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4707 of 148994 compute units',
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+  'Program data: zyX7mu/lDkOLgXnm9UdYCwoKHi07pQa/nTf2ULpiTFxW6h51FScPZRAnAAAAAAAADUtKF/xy7vqrTJS0fkv8L5qhgeHFQgq9hAS4RVQFe5g=',
+  'Program tttpKBqrXCCgKn8Rm5bcJtLBKfpZX16V3ENucSuP1RS consumed 55756 of 197679 compute units',
+  'Program return: tttpKBqrXCCgKn8Rm5bcJtLBKfpZX16V3ENucSuP1RS IAAAAAAAAAAAAAAAAAAAADjSVsiL0nyElynucrp8QTLKxWpHIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAG',
+  'Program tttpKBqrXCCgKn8Rm5bcJtLBKfpZX16V3ENucSuP1RS success',
+  'Program data: F01Jt3u5czn7lo8DcJEVuIcAAAAAAAAAk9ihk3guFtAaepRPGc9kqrVLlMjJjgMpfT0QhrWKIfnfN+OU4sfs4/uWjwNwkRW4hwAAAAAAAAAAAAAAAAAAAI7+9vnm//kSmiTiIHPweCZoZb2Aw76BMKL4l6s/XTZeAAAAACAAAAAAAAAAAAAAAAAAAACHAOnKjlD6M3WajAkw+lJJXEa/qBUAAAAYHc8QAAAAAAAAAAAAAAAAAAAAAAEGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAAQEAAADWVyAwzvWkxPKUnYwShKT1O2fikfHbs2R/smOfX3zzGiAAAAAAAAAAAAAAAAAAAAA40lbIi9J8hJcp7nK6fEEyysVqRyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABhAnAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAABX5AMKC0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA+CBb50UsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  'Program Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C consumed 260290 of 395545 compute units',
+  'Program return: Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C k9ihk3guFtAaepRPGc9kqrVLlMjJjgMpfT0QhrWKIfk=',
+  'Program Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C success',
+]
+
+const LOG_MESSAGES_WITH_NO_TOKENS = [
+  'Program Ccip8ZTcM2qHjVt8FYHtuCAqjc637yLKnsJ5q5r2e6eL invoke [1]',
+  'Program log: Instruction: CcipSend',
+  'Program RmnAZiCJdaYtwR1f634Ba7yNJXuK3pS6kHuX4FgNgX8 invoke [2]',
+  'Program log: Instruction: VerifyNotCursed',
+  'Program RmnAZiCJdaYtwR1f634Ba7yNJXuK3pS6kHuX4FgNgX8 consumed 5356 of 357799 compute units',
+  'Program RmnAZiCJdaYtwR1f634Ba7yNJXuK3pS6kHuX4FgNgX8 success',
+  'Program FeeQhewH1cd6ZyHqhfMiKAQntgzPT6bWwK26cJ5qSFo6 invoke [2]',
+  'Program log: Instruction: GetFee',
+  'Program FeeQhewH1cd6ZyHqhfMiKAQntgzPT6bWwK26cJ5qSFo6 consumed 26291 of 347823 compute units',
+  'Program return: FeeQhewH1cd6ZyHqhfMiKAQntgzPT6bWwK26cJ5qSFo6 BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAGCSAoAAAAAAAAa7BmdYxEAAAAAAAAAAAAAAAAAFQAAABgdzxAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAABAA==',
+  'Program FeeQhewH1cd6ZyHqhfMiKAQntgzPT6bWwK26cJ5qSFo6 success',
+  'Program 11111111111111111111111111111111 invoke [2]',
+  'Program 11111111111111111111111111111111 success',
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]',
+  'Program log: Instruction: SyncNative',
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 3045 of 316923 compute units',
+  'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+  'Program data: F01Jt3u5cznZGtnJT7pB3sYIAAAAAAAALDJaqIc6iH7uQDQflveID88orTwzH3cETudEKbJOM+LfN+OU4sfs49ka2clPukHexggAAAAAAAAAAAAAAAAAAI7+9vnm//kSmiTiIHPweCZoZb2Aw76BMKL4l6s/XTZeDgAAAG1zZyBTT0wgdG8gRVRIIAAAAAAAAAAAAAAAAAAAAL0nzatckQmzOQsltN/32XCRjMVQFQAAABgdzxAAAAAAAAAAAAAAAAAAAAAAAQabiFf+q4GE+2h/Y0YYwDXaxDncGus7VZig8AAAAAABAAAAAIJICgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABrsGZ1jEQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+  'Program Ccip8ZTcM2qHjVt8FYHtuCAqjc637yLKnsJ5q5r2e6eL consumed 90323 of 400000 compute units',
+  'Program return: Ccip8ZTcM2qHjVt8FYHtuCAqjc637yLKnsJ5q5r2e6eL LDJaqIc6iH7uQDQflveID88orTwzH3cETudEKbJOM+I=',
+  'Program Ccip8ZTcM2qHjVt8FYHtuCAqjc637yLKnsJ5q5r2e6eL success',
+  'Program ComputeBudget111111111111111111111111111111 invoke [1]',
+  'Program ComputeBudget111111111111111111111111111111 success',
+]
+
 describe('fetchSolanaOffchainTokenData', () => {
   const SOLANA_DEVNET_SELECTOR = 16423721717087811551n
   const EVM_TESTNET_SELECTOR = 16015286601757825753n
@@ -495,17 +569,12 @@ describe('fetchSolanaOffchainTokenData', () => {
     )
   })
 
-  it('should return default token data if no CCTP events are found', async () => {
+  it('should return default token data if there is no token transfer', async () => {
     const { fetchSolanaOffchainTokenData } = await import('./offchain.ts')
 
     mockConnection.getTransaction.mockResolvedValue({
       meta: {
-        logMessages: [
-          'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]',
-          'Program log: Instruction: Transfer',
-          'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
-          // No "Program data:" logs with CCTP events
-        ],
+        logMessages: LOG_MESSAGES_WITH_NO_TOKENS,
         err: null,
       },
     })
@@ -513,14 +582,40 @@ describe('fetchSolanaOffchainTokenData', () => {
     const mockRequest = {
       lane: { sourceChainSelector: SOLANA_DEVNET_SELECTOR },
       message: {},
+      log: { transactionHash: 'solana-tx-hash-no-tokens' },
+    }
+
+    const result = await fetchSolanaOffchainTokenData(mockRequest as any)
+    expect(result).toEqual([])
+
+    // Verify Solana RPC was not called, as it short-circuits when there are no token transfers
+    expect(mockConnection.getTransaction).not.toHaveBeenCalled()
+  })
+
+  it('should return default token data if there is a token transfer but no CCTP events are found', async () => {
+    const { fetchSolanaOffchainTokenData } = await import('./offchain.ts')
+
+    mockConnection.getTransaction.mockResolvedValue({
+      meta: {
+        logMessages: LOG_MESSAGES_WITH_NON_CCTP_TOKEN,
+        err: null,
+      },
+    })
+
+    const mockRequest = {
+      lane: { sourceChainSelector: SOLANA_DEVNET_SELECTOR },
+      message: { tokenAmounts: [{}] },
       log: { transactionHash: 'solana-tx-hash-no-cctp' },
     }
 
     const result = await fetchSolanaOffchainTokenData(mockRequest as any)
     expect(result).toEqual(['0x'])
 
-    // Verify Solana RPC was not called, as it short-circuits when there are no token transfers
-    expect(mockConnection.getTransaction).not.toHaveBeenCalled()
+    // Verify Solana RPC was called
+    expect(mockConnection.getTransaction).toHaveBeenCalledWith('solana-tx-hash-no-cctp', {
+      commitment: 'finalized',
+      maxSupportedTransactionVersion: 0,
+    })
   })
 
   it('should throw an error if there is more than one token transferred', async () => {

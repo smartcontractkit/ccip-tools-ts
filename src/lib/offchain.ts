@@ -344,7 +344,7 @@ export async function fetchSolanaOffchainTokenData(
   },
 ): Promise<string[]> {
   if (request.message.tokenAmounts === undefined || request.message.tokenAmounts.length === 0) {
-    return ['0x']
+    return []
   }
 
   if (request.message.tokenAmounts.length > 1) {
@@ -451,8 +451,6 @@ export async function parseCcipCctpEvents(
     new PublicKey(cctpPoolAddress),
     new BorshCoder(cctpPoolProgram.idl),
   )
-
-  console.debug('Got events:', Array.from(eventParser.parseLogs(tx.meta.logMessages)))
 
   const events: CcipCctpMessageSentEvent[] = Array.from(eventParser.parseLogs(tx.meta.logMessages))
     .filter((event) => event.name === 'CcipCctpMessageSentEvent')
