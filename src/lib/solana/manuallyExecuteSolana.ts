@@ -90,7 +90,8 @@ export async function buildManualExecutionTxWithSolanaDestination<
   })
 
   const TnV = (await offrampProgram.methods.typeVersion().accounts({}).signers([]).view()) as string
-  if (TnV !== 'ccip-offramp 0.1.1') {
+  const supportedOfframpVersions = new Set(['ccip-offramp 0.1.1', 'ccip-offramp 0.1.1-dev'])
+  if (!supportedOfframpVersions.has(TnV)) {
     throw new Error(`Unsupported offramp version: ${TnV}`)
   }
 

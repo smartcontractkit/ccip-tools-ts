@@ -4,8 +4,6 @@ import { type Addressable, type Log, EventFragment, Interface, keccak256 } from 
 
 import TokenPoolABI_1_5 from '../abi/BurnMintTokenPool_1_5_1.ts'
 import TokenPoolABI_1_6 from '../abi/BurnMintTokenPool_1_6_1.ts'
-import cctpPoolIdl from '../idl/cctp_token_pool.json'
-import type { CctpTokenPool } from '../idl/cctp_token_pool.ts'
 import { type SourceTokenData, parseSourceTokenData } from './extra-args.ts'
 import { chainNameFromSelector } from './index.ts'
 import {
@@ -443,7 +441,7 @@ export async function parseCcipCctpEvents(
   // as is the keypair used
   const { anchorProvider } = newAnchorProvider('solana-devnet', undefined, Keypair.generate())
   const cctpPoolProgram = new Program(
-    cctpPoolIdl as CctpTokenPool,
+    CCIP_CCTP_TOKEN_POOL_IDL,
     new PublicKey(cctpPoolAddress),
     anchorProvider,
   )

@@ -7,8 +7,6 @@ import {
 } from '@solana/web3.js'
 import bs58 from 'bs58'
 import type { JsonRpcApiProvider, Provider } from 'ethers'
-import routerIdl from '../idl/ccip_router.json'
-import type { CcipRouter } from '../idl/ccip_router.ts'
 import { discoverOffRamp } from '../lib/execution.ts'
 import {
   type CCIPCommit,
@@ -40,6 +38,7 @@ import {
   buildManualExecutionTxWithSolanaDestination,
   newAnchorProvider,
 } from '../lib/solana/manuallyExecuteSolana.ts'
+import { CCIP_ROUTER_IDL } from '../lib/solana/programs/1.6.0/CCIP_ROUTER.ts'
 import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
 import type { CcipMessageSentEvent } from '../lib/solana/types.ts'
 import { waitForFinalization } from '../lib/solana/utils.ts'
@@ -176,7 +175,7 @@ async function fetchSolanaCCIPMessage(
   }
 
   const routerPubkey = new PublicKey(argv.solanaRouter)
-  const routerProgram = new Program(routerIdl as CcipRouter, routerPubkey, anchorProvider)
+  const routerProgram = new Program(CCIP_ROUTER_IDL, routerPubkey, anchorProvider)
   const eventParser = new EventParser(routerPubkey, new BorshCoder(routerProgram.idl))
   const events = eventParser.parseLogs(logs)
   for (const event of events) {
