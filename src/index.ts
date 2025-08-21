@@ -1,7 +1,7 @@
 #!/usr/bin/env -S npx tsx
 import util from 'util'
 
-import { ZeroAddress, getAddress, isHexString } from 'ethers'
+import { ZeroAddress, getAddress } from 'ethers'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
@@ -16,14 +16,13 @@ import {
   showRequests,
   showSupportedTokens,
 } from './commands/index.ts'
-import { isTxHash } from './commands/manual-exec.ts'
-import { logParsedError } from './commands/utils.ts'
+import { logParsedError, validateSupportedTxHash } from './commands/utils.ts'
 import { Providers } from './providers.ts'
 
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.2.8-86a2b4a'
+const VERSION = '0.2.9-096f1b5'
 // generate:end
 
 async function main() {
@@ -84,7 +83,7 @@ async function main() {
                 'Search by messageId instead of tx_hash; requires specifying source network (by id or name)',
             },
           })
-          .check(({ tx_hash }) => isHexString(tx_hash, 32)),
+          .check(({ tx_hash }) => validateSupportedTxHash(tx_hash)),
       async (argv) => {
         const providers = new Providers(argv)
         return showRequests(providers, argv.tx_hash, argv)
@@ -177,7 +176,7 @@ async function main() {
               implies: 'sender-queue',
             },
           })
-          .check(({ tx_hash }) => isTxHash(tx_hash)),
+          .check(({ tx_hash }) => validateSupportedTxHash(tx_hash)),
       async (argv) => {
         const providers = new Providers(argv)
         return (

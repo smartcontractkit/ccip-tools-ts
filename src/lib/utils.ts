@@ -416,6 +416,7 @@ function resolveNumericString(input: string): {
 function getChainFamily(name: string): ChainFamily {
   if (name.startsWith('solana-')) return ChainFamily.Solana
   if (name.startsWith('aptos-')) return ChainFamily.Aptos
+  if (name.startsWith('test-')) return ChainFamily.Test
   return ChainFamily.EVM
 }
 
@@ -510,6 +511,9 @@ export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFam
     }
     case ChainFamily.Solana: {
       return encodeBase58(getAddressBytes(address))
+    }
+    case ChainFamily.Test: {
+      return hexlify(getBytes(address))
     }
     default:
       throw new Error(`Unsupported address family: ${family as string}`)

@@ -6,7 +6,7 @@ import {
   SendTransactionError,
 } from '@solana/web3.js'
 import bs58 from 'bs58'
-import { type JsonRpcApiProvider, type Provider, isHexString } from 'ethers'
+import type { JsonRpcApiProvider, Provider } from 'ethers'
 import routerIdl from '../idl/ccip_router.json'
 import type { CcipRouter } from '../idl/ccip_router.ts'
 import { discoverOffRamp } from '../lib/execution.ts'
@@ -103,7 +103,7 @@ export async function manualExec(
       break
     case Format.pretty:
       try {
-        await prettyRequest(source!, request)
+        await prettyRequest(source, request)
       } catch {
         console.error(
           'Failed to pretty print request - this is normal if the source chain is non-EVM',
@@ -276,12 +276,6 @@ function isCannotCloseTableUntilDeactivated(e: SendTransactionError): boolean {
   return !!e.logs?.some((log) =>
     log.includes("Program log: Table cannot be closed until it's fully deactivated in "),
   )
-}
-
-export function isTxHash(hash: string): boolean {
-  // EVM uses 32-byte hex strings for transaction hashes
-  // SVM uses 64-byte base58 strings for transaction hashes
-  return isHexString(hash, 32) || isBase58String(hash, 64)
 }
 
 function isBase58String(value: string, length: number): boolean {
