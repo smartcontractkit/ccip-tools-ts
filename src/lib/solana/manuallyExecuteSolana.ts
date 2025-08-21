@@ -23,7 +23,7 @@ import type { CCIPRequest, ExecutionReport } from '../types.ts'
 import { getAddressLookupTableAccount } from './getAddressLookupTableAccount.ts'
 import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
 import { getManuallyExecuteInputs } from './getManuallyExecuteInputs.ts'
-import { getCcipOfframp, type OfframpProgram } from './programs/getCcipOfframp.ts'
+import { type OfframpProgram, getCcipOfframp } from './programs/getCcipOfframp.ts'
 import {
   type SupportedSolanaCCIPVersion,
   CCIP_SOLANA_VERSION_MAP,
@@ -301,22 +301,22 @@ function manualExecAnchorTx(
   )
 }
 
-export function newAnchorProvider(chainName: string, keypairFile: string | undefined) {
+export function newAnchorProvider(chainName: string, keypairFile?: string, keypair?: Keypair) {
   let keypairPath: string
 
-  if (keypairFile === undefined) {
+  if (keypairFile) {
+    keypairPath = keypairFile
+  } else {
     const homeDir = process.env.HOME || process.env.USERPROFILE
     keypairPath = path.join(homeDir as string, '.config', 'solana', 'id.json')
-  } else {
-    keypairPath = keypairFile
   }
 
-  console.log('Using keypair file ', keypairPath)
+  if (!keypair) {
+    const secretKeyString = fs.readFileSync(keypairPath, 'utf8')
+    const secretKey = Uint8Array.from(JSON.parse(secretKeyString) as number[])
+    keypair = Keypair.fromSecretKey(secretKey)
+  }
 
-  const secretKeyString = fs.readFileSync(keypairPath, 'utf8')
-  const secretKey = Uint8Array.from(JSON.parse(secretKeyString) as number[])
-
-  const keypair = Keypair.fromSecretKey(secretKey)
   const wallet = new Wallet(keypair)
   const connection = new Connection(getClusterUrlByChainSelectorName(chainName))
   const anchorProvider = new AnchorProvider(connection, wallet, {

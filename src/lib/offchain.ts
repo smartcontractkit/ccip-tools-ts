@@ -1,18 +1,20 @@
-import { BorshCoder, EventParser } from '@coral-xyz/anchor'
-import { Connection, PublicKey } from '@solana/web3.js'
-import * as borsh from 'borsh'
+import { BorshCoder, EventParser, Program } from '@coral-xyz/anchor'
+import { Connection, Keypair, PublicKey } from '@solana/web3.js'
 import { type Addressable, type Log, EventFragment, Interface, keccak256 } from 'ethers'
 
 import TokenPoolABI_1_5 from '../abi/BurnMintTokenPool_1_5_1.ts'
 import TokenPoolABI_1_6 from '../abi/BurnMintTokenPool_1_6_1.ts'
+import cctpPoolIdl from '../idl/cctp_token_pool.json'
+import type { CctpTokenPool } from '../idl/cctp_token_pool.ts'
 import { type SourceTokenData, parseSourceTokenData } from './extra-args.ts'
 import { chainNameFromSelector } from './index.ts'
 import {
   getClusterUrlByChainSelectorName,
   isSupportedSolanaCluster,
 } from './solana/getClusterByChainSelectorName.ts'
-import { CCIP_CCTP_TOKEN_POOL_IDL } from './solana/programs/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
-import type { CcipCctpMessageSentEvent } from './solana/types.ts'
+import { newAnchorProvider } from './solana/manuallyExecuteSolana.ts'
+import { CCIP_CCTP_TOKEN_POOL_IDL } from './solana/programs/1.6.0/CCIP_CCTP_TOKEN_POOL.ts' // TODO this seems duplicated
+import type { CcipCctpMessageAndAttestation, CcipCctpMessageSentEvent } from './solana/types.ts'
 import { type CCIPMessage, type CCIPRequest, defaultAbiCoder } from './types.ts'
 import { lazyCached, networkInfo } from './utils.ts'
 
@@ -341,14 +343,14 @@ export async function fetchSolanaOffchainTokenData(
     log: Pick<CCIPRequest['log'], 'topics' | 'index' | 'transactionHash'>
   },
 ): Promise<string[]> {
-  if (request.message.tokenAmounts === undefined || request.message.tokenAmounts.length > 1) {
+  if (request.message.tokenAmounts === undefined || request.message.tokenAmounts.length === 0) {
+    return ['0x']
+  }
+
+  if (request.message.tokenAmounts.length > 1) {
     throw new Error(
       `Expected at most 1 token transfer, found ${request.message.tokenAmounts?.length}`,
     )
-  }
-
-  if (request.message.tokenAmounts.length === 0) {
-    return []
   }
 
   const { isTestnet } = networkInfo(request.lane.sourceChainSelector)
@@ -363,6 +365,7 @@ export async function fetchSolanaOffchainTokenData(
 
   // If no CcipCctpMessageSentEvent found, return defaults so we don't block execution
   if (cctpEvents.length === 0) {
+    console.debug('No events')
     return offchainTokenData
   }
 
@@ -435,10 +438,21 @@ export async function parseCcipCctpEvents(
   if (!cctpPoolAddress) {
     return []
   }
+
+  // the anchor provider is just to instantiate the event parser, so the devnet env is actually irrelevant,
+  // as is the keypair used
+  const { anchorProvider } = newAnchorProvider('solana-devnet', undefined, Keypair.generate())
+  const cctpPoolProgram = new Program(
+    cctpPoolIdl as CctpTokenPool,
+    new PublicKey(cctpPoolAddress),
+    anchorProvider,
+  )
   const eventParser = new EventParser(
     new PublicKey(cctpPoolAddress),
-    new BorshCoder(CCIP_CCTP_TOKEN_POOL_IDL),
+    new BorshCoder(cctpPoolProgram.idl),
   )
+
+  console.debug('Got events:', Array.from(eventParser.parseLogs(tx.meta.logMessages)))
 
   const events: CcipCctpMessageSentEvent[] = Array.from(eventParser.parseLogs(tx.meta.logMessages))
     .filter((event) => event.name === 'CcipCctpMessageSentEvent')
@@ -469,18 +483,6 @@ function getCctpPoolAddress(logs: string[]): string | null {
   }
 
   return candidateAddress
-}
-
-// https://github.com/smartcontractkit/chainlink-ccip/blob/bf22fbf2d7b828dd48440061b92d33f946d1712e/chains/solana/contracts/target/idl/cctp_token_pool.json#L1071-L1088
-const MessageAndAttestationSchema = {
-  struct: {
-    message: {
-      struct: {
-        data: { array: { type: 'u8' } }, // bytes as u8 array
-      },
-    },
-    attestation: { array: { type: 'u8' } }, // bytes as u8 array
-  },
 }
 
 function isValidHex(hex: string): boolean {
@@ -520,14 +522,15 @@ export function encodeOffchainTokenData(
 
   // Solana destination: use Borsh encoding
   if (isSupportedSolanaCluster(destChainName)) {
-    const messageAndAttestation = {
+    const messageAndAttestation: CcipCctpMessageAndAttestation = {
       message: {
-        data: Array.from(messageBuffer), // u8 array
+        data: messageBuffer, // u8 array
       },
-      attestation: Array.from(attestationBuffer), // u8 array
+      attestation: attestationBuffer, // u8 array
     }
 
-    const encoded = borsh.serialize(MessageAndAttestationSchema, messageAndAttestation)
+    const borshCoder = new BorshCoder(CCIP_CCTP_TOKEN_POOL_IDL)
+    const encoded = borshCoder.types.encode('MessageAndAttestation', messageAndAttestation)
     return '0x' + Buffer.from(encoded).toString('hex')
   }
 

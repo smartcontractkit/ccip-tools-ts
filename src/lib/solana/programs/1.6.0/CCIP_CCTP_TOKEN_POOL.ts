@@ -48,4 +48,36 @@ export const CCIP_CCTP_TOKEN_POOL_IDL = {
       ],
     },
   ],
+  types: [
+    {
+      name: 'CctpMessage',
+      type: {
+        kind: 'struct',
+        fields: [
+          {
+            name: 'data',
+            type: 'bytes',
+          },
+        ],
+      },
+    },
+    {
+      name: 'MessageAndAttestation',
+      type: {
+        kind: 'struct',
+        fields: [
+          {
+            name: 'message',
+            type: {
+              defined: 'CctpMessage',
+            },
+          },
+          {
+            name: 'attestation',
+            type: 'bytes',
+          },
+        ],
+      },
+    },
+  ],
 } as const satisfies Idl

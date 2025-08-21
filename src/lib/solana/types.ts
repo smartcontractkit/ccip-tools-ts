@@ -1,13 +1,21 @@
+import type { BN } from '@coral-xyz/anchor'
 import type { PublicKey } from '@solana/web3.js'
 
 export interface CcipCctpMessageSentEvent {
-  originalSender: string // PublicKey as string
-  remoteChainSelector: bigint
-  msgTotalNonce: bigint
-  eventAddress: string // PublicKey as string
+  originalSender: PublicKey
+  remoteChainSelector: BN
+  msgTotalNonce: BN
+  eventAddress: PublicKey
   sourceDomain: number
-  cctpNonce: bigint
+  cctpNonce: BN
   messageSentBytes: Uint8Array
+}
+
+export interface CcipCctpMessageAndAttestation {
+  message: {
+    data: Uint8Array
+  }
+  attestation: Uint8Array
 }
 
 export interface CcipMessageSentEvent {
