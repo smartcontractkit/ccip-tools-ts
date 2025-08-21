@@ -83,13 +83,8 @@ export async function getManuallyExecuteInputs({
     },
   }))
 
-  let bufferId
-  if (buffered) {
-    // Use merkleRoot for bufferId. This is arbitrary, but easy to track.
-    bufferId = Buffer.from(root.replace(/^0x/, ''), 'hex')
-  } else {
-    bufferId = Buffer.alloc(32)
-  }
+  // Use merkleRoot for bufferId. This is arbitrary, but easy to track.
+  const bufferId = buffered ? Buffer.from(root.replace(/^0x/, ''), 'hex') : Buffer.from([])
 
   const originalSender = hexToBuffer(message.sender)
   const {

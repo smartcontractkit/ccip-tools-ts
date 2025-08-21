@@ -90,8 +90,7 @@ export async function buildManualExecutionTxWithSolanaDestination<
   })
 
   const TnV = (await offrampProgram.methods.typeVersion().accounts({}).signers([]).view()) as string
-  // TODO update
-  if (!TnV.startsWith('ccip-offramp 0.1.1')) {
+  if (TnV !== 'ccip-offramp 0.1.1') {
     throw new Error(`Unsupported offramp version: ${TnV}`)
   }
 
@@ -403,7 +402,7 @@ export async function bufferedTransactionData(
 
   const executeTx = await manualExecAnchorTx(
     offrampProgram,
-    serializedReport,
+    Buffer.from([]), // when the report is in a buffer PDA, there's no report to set in the ix data
     serializedTokenIndexes,
     accounts,
   )
