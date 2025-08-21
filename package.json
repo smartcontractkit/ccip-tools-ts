@@ -48,6 +48,7 @@
     "@coral-xyz/anchor": "0.29.0",
     "@inquirer/prompts": "7.8.3",
     "@solana/spl-token": "0.4.13",
+    "@solana/web3.js": "^1.98.2",
     "@xlabs-xyz/ledger-signer-ethers-v6": "^0.0.1",
     "abitype": "1.0.9",
     "bn.js": "^5.2.2",
@@ -55,6 +56,7 @@
     "bs58": "^6.0.0",
     "buffer-layout": "^1.2.2",
     "ethers": "6.15.0",
+    "ts-node": "^10.9.2",
     "tslib": "2.8.1",
     "yaml": "2.8.1",
     "yargs": "18.0.0"

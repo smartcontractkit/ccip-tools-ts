@@ -1,7 +1,7 @@
 #!/usr/bin/env -S npx tsx
 import util from 'util'
 
-import { ZeroAddress, getAddress, isHexString } from 'ethers'
+import { ZeroAddress, getAddress } from 'ethers'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
@@ -22,7 +22,7 @@ import { Providers } from './providers.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.2.9-096f1b5'
+const VERSION = '0.2.9-cb5d61d'
 // generate:end
 
 async function main() {
@@ -134,26 +134,30 @@ async function main() {
               describe:
                 'Solana offramp. Must be provided for when Solana is destination, until automated discovery is implemented.',
             },
+            'solana-router': {
+              type: 'string',
+              describe:
+                'Solana router. Must be provided for when Solana is source, until automated discovery is implemented.',
+            },
             'solana-keypair': {
               type: 'string',
               describe:
                 'Location of the solana keypair to use for manual execution. Defaults to ~/.config/solana/id.json',
             },
-            'solana-buffer-address': {
-              type: 'string',
-              describe:
-                'Solana buffering contract address. Will be used when a manual exec TX is too large, or when forced with the "--solana-force-buffer" flag.',
-              default: 'Buff7ufrtmskFnHtGd9LXaWSAjX6wAMQ2q2s2WSWoSGS',
-            },
             'solana-force-buffer': {
               type: 'boolean',
-              describe: 'Forces the usage of a buffering contract for Solana manual execution.',
+              describe: 'Forces the usage of buffering for Solana manual execution.',
               default: false,
             },
             'solana-force-lookup-table': {
               type: 'boolean',
               describe:
                 'Forces the creation & usage of an ad-hoc lookup table for Solana manual execution.',
+              default: false,
+            },
+            'solana-clear-buffer-first': {
+              type: 'boolean',
+              describe: 'Forces clearing the buffer (if a previous attempt was aborted).',
               default: false,
             },
             'solana-cu-limit': {
@@ -172,7 +176,7 @@ async function main() {
               implies: 'sender-queue',
             },
           })
-          .check(({ tx_hash }) => isHexString(tx_hash, 32)),
+          .check(({ tx_hash }) => validateSupportedTxHash(tx_hash)),
       async (argv) => {
         const providers = new Providers(argv)
         return (

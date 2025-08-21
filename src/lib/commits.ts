@@ -1,4 +1,5 @@
-import { type Provider, type Result, Interface } from 'ethers'
+import { bs58 } from '@coral-xyz/anchor/dist/cjs/utils/bytes/index'
+import { type Provider, type Result, Interface, isHexString } from 'ethers'
 
 import {
   type CCIPCommit,
@@ -71,7 +72,7 @@ export async function fetchCommitReport(
       if (!decoded) continue
       const report = resultsToCommitReport(decoded.args, lane)
       if (!report) continue
-      // fetch first ComitReport log (of any CommitStore) which has our desired interval
+      // fetch first CommitReport log (of any CommitStore) which has our desired interval
       if (report.minSeqNr > header.sequenceNumber || header.sequenceNumber > report.maxSeqNr)
         continue
       if (lane.version < CCIPVersion.V1_6) {
@@ -119,10 +120,11 @@ function resultsToCommitReport<V extends CCIPVersion = CCIPVersion>(
       onRampAddress: lane.onRamp,
     }
   } else {
+    const normalizedOnramp = normalizeOnrampAddress(lane.onRamp)
     const res = [...(result[0] as Result[]), ...(result[1] as Result[])].find(
       (r) =>
         r.sourceChainSelector === lane.sourceChainSelector &&
-        (r.onRampAddress as string).toLowerCase().endsWith(lane.onRamp.slice(2).toLowerCase()),
+        (r.onRampAddress as string).toLowerCase().endsWith(normalizedOnramp),
     )
     if (!res) return
     return {
@@ -130,4 +132,20 @@ function resultsToCommitReport<V extends CCIPVersion = CCIPVersion>(
       onRampAddress: lane.onRamp,
     } as CommitReport
   }
+}
+
+function normalizeOnrampAddress(onRamp: string): string {
+  if (onRamp.startsWith('0x')) {
+    return onRamp.slice(2).toLowerCase()
+  }
+
+  if (isHexString(onRamp)) {
+    return onRamp.toLowerCase()
+  }
+
+  const bs58decoded = bs58.decode(onRamp)
+  if (bs58decoded.length !== 32) {
+    throw Error(`Invalid onramp address ${onRamp} - it is neither hex nor a Solana address`)
+  }
+  return bs58decoded.toString('hex')
 }

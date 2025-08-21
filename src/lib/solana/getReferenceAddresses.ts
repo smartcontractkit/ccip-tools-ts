@@ -34,7 +34,7 @@ export const getReferenceAddresses = async ({
   })
 
   const account: ReferenceAddresses = program.coder.accounts.decode(
-    'ReferenceAddresses',
+    'referenceAddresses',
     referenceAddressesAccount.data,
   )
 
