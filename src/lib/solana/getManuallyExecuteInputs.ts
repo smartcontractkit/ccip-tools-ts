@@ -1,14 +1,8 @@
-import {
-  type Connection,
-  PublicKey,
-  SYSVAR_INSTRUCTIONS_PUBKEY,
-  SystemProgram,
-} from '@solana/web3.js'
+import type { IdlTypes } from '@coral-xyz/anchor'
+import { type AccountMeta, type Connection, PublicKey } from '@solana/web3.js'
 import { BN } from 'bn.js'
 import type { ExecutionReport } from '../types.ts'
-import { deriveAccounts } from './deriveAccounts.ts'
-import { deriveTokenAccounts } from './deriveTokenAccounts.ts'
-import { getAddressLookupTableAccount } from './getAddressLookupTableAccount.ts'
+import type { CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
 import type { OfframpProgram } from './programs/getCcipOfframp.ts'
 import { type MessageWithAccounts, isMessageWithAccounts } from './utils.ts'
 
@@ -31,23 +25,16 @@ export async function getManuallyExecuteInputs({
   offrampProgram,
   root,
   senderAddress,
+  buffered,
 }: {
   executionReportRaw: ExecutionReport
   connection: Connection
   offrampProgram: OfframpProgram
   root: string
   senderAddress: string
+  buffered: boolean
 }) {
-  const offrampProgramPubkey = offrampProgram.programId
   const message = executionReportRaw.message
-
-  const derivedAccounts = await deriveAccounts({
-    connection,
-    offrampProgramPubkey,
-    sourceChainSelector: executionReportRaw.sourceChainSelector,
-    root,
-    receiver: message.receiver,
-  })
 
   if (!isMessageWithAccounts(message)) {
     throw new Error('Invalid message')
@@ -55,21 +42,73 @@ export async function getManuallyExecuteInputs({
 
   const executionReport = getExecutionReport(executionReportRaw, message)
 
-  const { accounts, remainingAccounts, addressLookupTableAccounts, tokenIndexes } =
-    await getAccounts({
-      derivedAccounts,
-      offrampProgram,
-      senderAddress,
-      message,
-      connection,
-    })
+  const messageAccountMetas = message.accounts!.map((acc, index) => {
+    const bitmap = BigInt(message.accountIsWritableBitmap?.toString() || '0')
+    const isWritable = (bitmap & (1n << BigInt(index))) !== 0n
+
+    return {
+      pubkey: new PublicKey(acc),
+      isSigner: false,
+      isWritable,
+    }
+  })
+
+  // Convert message.receiver to AccountMeta and prepend to messaging accounts
+  const receiverAccountMeta = {
+    pubkey: new PublicKey(message.receiver),
+    isSigner: false,
+    isWritable: false,
+  }
+  const defaultPubkey = new PublicKey(0)
+
+  console.debug('Message receiver:', message.receiver)
+
+  // Prepend receiver to messaging accounts
+  const messagingAccounts: Array<AccountMeta> =
+    message.receiver !== defaultPubkey.toBase58()
+      ? [receiverAccountMeta, ...messageAccountMetas]
+      : [] // on plain token transfers, there are no messaging accounts
+  const tokenTransferAndOffchainData: Array<
+    IdlTypes<typeof CCIP_OFFRAMP_IDL>['TokenTransferAndOffchainData']
+  > = message.tokenAmounts.map((token, idx) => ({
+    data: hexToBuffer(executionReportRaw.offchainTokenData[idx] || '0x'),
+    transfer: {
+      sourcePoolAddress: hexToBuffer(token.sourcePoolAddress),
+      destTokenAddress: new PublicKey(token.destTokenAddress),
+      destGasAmount: Number(token.destGasAmount),
+      extraData: base64ToBuffer(token.extraData || ''),
+      amount: {
+        leBytes: Array.from(new BN(token.amount.toString()).toArrayLike(Buffer, 'le', 32)),
+      },
+    },
+  }))
+
+  // Use merkleRoot for bufferId. This is arbitrary, but easy to track.
+  const bufferId = buffered ? Buffer.from(root.replace(/^0x/, ''), 'hex') : Buffer.from([])
+
+  const originalSender = hexToBuffer(message.sender)
+  const {
+    accounts,
+    addressLookupTableAccounts: addressLookupTables,
+    tokenIndexes,
+  } = await autoDeriveExecutionAccounts({
+    offrampProgram,
+    originalSender,
+    transmitter: new PublicKey(senderAddress),
+    messagingAccounts,
+    sourceChainSelector: executionReportRaw.sourceChainSelector,
+    tokenTransferAndOffchainData,
+    merkleRoot: hexToBuffer(root),
+    bufferId,
+    tokenReceiver: new PublicKey(message.tokenReceiver),
+    connection,
+  })
 
   return {
     executionReport,
     tokenIndexes,
     accounts,
-    remainingAccounts,
-    addressLookupTableAccounts,
+    addressLookupTables,
   }
 }
 
@@ -93,7 +132,7 @@ function getExecutionReport(executionReportRaw: ExecutionReport, message: Messag
         destGasAmount: new BN(token.destGasAmount?.toString() || '0'),
         extraData: base64ToBuffer(token.extraData || ''),
         amount: {
-          leBytes: new BN(token.amount.toString()).toArrayLike(Buffer, 'le', 32),
+          leBytes: Array.from(new BN(token.amount.toString()).toArrayLike(Buffer, 'le', 32)),
         },
       })),
       extraArgs: {
@@ -106,85 +145,129 @@ function getExecutionReport(executionReportRaw: ExecutionReport, message: Messag
   }
 }
 
-async function getAccounts({
-  derivedAccounts,
+async function autoDeriveExecutionAccounts({
   offrampProgram,
-  senderAddress,
-  message,
-  connection,
+  originalSender,
+  transmitter,
+  messagingAccounts,
+  sourceChainSelector,
+  tokenTransferAndOffchainData,
+  merkleRoot,
+  bufferId,
+  tokenReceiver,
 }: {
-  derivedAccounts: Awaited<ReturnType<typeof deriveAccounts>>
   offrampProgram: OfframpProgram
-  senderAddress: string
-  message: MessageWithAccounts
+  originalSender: Buffer
+  transmitter: PublicKey
+  messagingAccounts: Array<IdlTypes<typeof CCIP_OFFRAMP_IDL>['CcipAccountMeta']>
+  sourceChainSelector: bigint
+  tokenTransferAndOffchainData: Array<
+    IdlTypes<typeof CCIP_OFFRAMP_IDL>['TokenTransferAndOffchainData']
+  >
+  merkleRoot: Buffer
+  bufferId: Buffer
+  tokenReceiver: PublicKey
   connection: Connection
 }) {
-  const accounts = {
-    config: derivedAccounts.configPubKey,
-    referenceAddresses: derivedAccounts.referenceAddressesPubKey,
-    sourceChain: derivedAccounts.sourceChainPubKey,
-    commitReport: derivedAccounts.commitReportPubKey,
-    offramp: offrampProgram.programId,
-    allowedOfframp: derivedAccounts.allowedOfframpPubKey,
-    rmnRemote: derivedAccounts.rmnRemotePubKey,
-    rmnRemoteCurses: derivedAccounts.rmnRemoteCursesPubKey,
-    rmnRemoteConfig: derivedAccounts.rmnRemoteConfigPubKey,
-    authority: new PublicKey(senderAddress),
-    systemProgram: SystemProgram.programId,
-    sysvarInstructions: SYSVAR_INSTRUCTIONS_PUBKEY,
+  const derivedAccounts: AccountMeta[] = []
+  const lookupTables: PublicKey[] = []
+  const tokenIndices: number[] = []
+  let askWith: AccountMeta[] = []
+  let stage = 'Start'
+  let tokenIndex = 0
+  const tokenTransferStartRegex = /^TokenTransferStaticAccounts\/\d+\/0$/
+
+  const [configPDA] = PublicKey.findProgramAddressSync(
+    [Buffer.from('config')],
+    offrampProgram.programId,
+  )
+
+  while (true) {
+    const params = {
+      executeCaller: transmitter,
+      messageAccounts: messagingAccounts,
+      sourceChainSelector: new BN(sourceChainSelector.toString()),
+      originalSender: originalSender,
+      tokenTransfers: tokenTransferAndOffchainData,
+      merkleRoot: Array.from(merkleRoot),
+      bufferId: bufferId,
+      tokenReceiver,
+    }
+
+    // Workarounds for tx-too-large issues during account derivation
+    if (/BuildDynamicAccounts/.test(stage)) {
+      params.messageAccounts = [] // omit messaging accounts
+    } else {
+      params.tokenTransfers = tokenTransferAndOffchainData.map((tt) => ({
+        ...tt,
+        data: Buffer.from([]), // omit offchain token data
+      }))
+    }
+
+    // Execute as a view call to get the response
+    const response = (await offrampProgram.methods
+      .deriveAccountsExecute(params, stage)
+      .accounts({
+        config: configPDA,
+      })
+      .remainingAccounts(askWith)
+      .view()
+      .catch((error) => {
+        console.error('Error deriving accounts:', error)
+        console.error('Params:', params)
+        if (error instanceof Error) {
+          throw new Error(`Failed to derive accounts: ${error.message}`)
+        } else {
+          throw new Error(`Failed to derive accounts, with oddly-typed error: ${error}`)
+        }
+      })) as IdlTypes<typeof CCIP_OFFRAMP_IDL>['DeriveAccountsResponse']
+
+    // Check if we're at the start of a token transfer
+    const isStartOfToken = tokenTransferStartRegex.test(response.currentStage)
+    if (isStartOfToken) {
+      const numKnownAccounts = 12
+      tokenIndices.push(tokenIndex - numKnownAccounts)
+    }
+
+    // Update token index
+    tokenIndex += response.accountsToSave.length
+
+    console.debug('After stage', stage, 'tokenIndices', tokenIndices, 'nextTokenIndex', tokenIndex)
+
+    // Collect the derived accounts
+    for (const meta of response.accountsToSave) {
+      derivedAccounts.push({
+        pubkey: meta.pubkey,
+        isWritable: meta.isWritable,
+        isSigner: meta.isSigner,
+      })
+    }
+
+    // Prepare askWith for next iteration
+    askWith = response.askAgainWith.map((meta) => ({
+      pubkey: meta.pubkey,
+      isWritable: meta.isWritable,
+      isSigner: meta.isSigner,
+    }))
+
+    // Collect lookup tables
+    lookupTables.push(...response.lookUpTablesToSave)
+
+    // Check if derivation is complete
+    if (!response.nextStage || response.nextStage.length === 0) {
+      break
+    }
+
+    stage = response.nextStage
   }
 
-  console.log('Message accounts:', message.accounts)
-
-  const remainingAccounts =
-    message.accounts?.reduce(
-      (
-        acc: { pubkey: PublicKey; isWritable: boolean; isSigner: boolean }[],
-        pubkey: string,
-        index: number,
-      ) => {
-        const writableBitmap = new BN(message.accountIsWritableBitmap?.toString() || '0')
-        return [
-          ...acc,
-          {
-            pubkey: new PublicKey(pubkey),
-            isWritable: writableBitmap.and(new BN(1).shln(index)).gt(new BN(0)),
-            isSigner: false,
-          },
-        ]
-      },
-      [] as { pubkey: PublicKey; isWritable: boolean; isSigner: boolean }[],
-    ) ?? []
-
-  const {
-    tokenAccounts,
-    addressLookupTableAccounts: tokenPoolAddressLookupTableAccounts,
-    tokenIndexes,
-  } = await deriveTokenAccounts({
-    connection,
-    offrampProgram,
-    routerProgramPubkey: derivedAccounts.router,
-    feeQuoterPubkey: derivedAccounts.feeQuoter,
-    message,
-    remainingAccounts,
-  })
-
-  const remainingAccountsWithTokenAccounts = [...remainingAccounts, ...tokenAccounts]
-
-  const offrampAddressLookupTableAccount = await getAddressLookupTableAccount({
-    connection,
-    lookupTablePubKey: derivedAccounts.offrampLookupTable,
-  })
-
-  const addressLookupTableAccounts = [
-    ...tokenPoolAddressLookupTableAccounts,
-    offrampAddressLookupTableAccount,
-  ]
+  console.debug('Resulting derived accounts:', derivedAccounts)
+  console.debug('Resulting derived address lookup tables:', lookupTables)
+  console.debug('Resulting derived token indexes:', tokenIndices)
 
   return {
-    accounts,
-    remainingAccounts: remainingAccountsWithTokenAccounts,
-    addressLookupTableAccounts,
-    tokenIndexes,
+    accounts: derivedAccounts,
+    addressLookupTableAccounts: lookupTables,
+    tokenIndexes: Buffer.from(tokenIndices),
   }
 }

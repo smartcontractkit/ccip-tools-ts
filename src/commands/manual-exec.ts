@@ -1,5 +1,11 @@
-import type { AnchorProvider } from '@coral-xyz/anchor'
-import { type Keypair, type TransactionSignature, SendTransactionError } from '@solana/web3.js'
+import { type AnchorProvider, BorshCoder, EventParser, Program } from '@coral-xyz/anchor'
+import {
+  type Keypair,
+  type TransactionSignature,
+  PublicKey,
+  SendTransactionError,
+} from '@solana/web3.js'
+import bs58 from 'bs58'
 import type { JsonRpcApiProvider, Provider } from 'ethers'
 import { discoverOffRamp } from '../lib/execution.ts'
 import {
@@ -32,7 +38,9 @@ import {
   buildManualExecutionTxWithSolanaDestination,
   newAnchorProvider,
 } from '../lib/solana/manuallyExecuteSolana.ts'
+import { CCIP_ROUTER_IDL } from '../lib/solana/programs/1.6.0/CCIP_ROUTER.ts'
 import type { SupportedSolanaCCIPVersion } from '../lib/solana/programs/versioning.ts'
+import type { CcipMessageSentEvent } from '../lib/solana/types.ts'
 import { waitForFinalization } from '../lib/solana/utils.ts'
 import type { Providers } from '../providers.ts'
 import { Format } from './types.ts'
@@ -43,6 +51,8 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
+
+Error.stackTraceLimit = Infinity
 
 const MAX_QUEUE = 1000
 const MAX_EXECS_IN_BATCH = 1
@@ -60,21 +70,30 @@ export async function manualExec(
     page: number
     wallet?: string
     solanaOfframp?: string
+    solanaRouter?: string
     solanaKeypair?: string
-    solanaBufferAddress: string
     solanaForceBuffer: boolean
     solanaForceLookupTable: boolean
+    solanaClearBufferFirst: boolean
     solanaCuLimit?: number
   },
 ) {
-  const tx = await providers.getTxReceipt(txHash)
-  const source = tx.provider
+  let request: CCIPRequest
+  let source: Provider | null
 
-  let request
-  if (argv.logIndex != null) {
-    request = await fetchCCIPMessageInLog(tx, argv.logIndex)
+  if (isBase58String(txHash, 64)) {
+    // Handle SVM transaction hash
+    source = null
+    request = await fetchSolanaCCIPMessage(txHash, argv)
   } else {
-    request = await selectRequest(await fetchCCIPMessagesInTx(tx), 'to execute')
+    const tx = await providers.getTxReceipt(txHash)
+    source = tx.provider
+
+    if (argv.logIndex != null) {
+      request = await fetchCCIPMessageInLog(tx, argv.logIndex)
+    } else {
+      request = await selectRequest(await fetchCCIPMessagesInTx(tx), 'to execute')
+    }
   }
 
   switch (argv.format) {
@@ -82,7 +101,13 @@ export async function manualExec(
       console.log(`message ${request.log.index} =`, withDateTimestamp(request))
       break
     case Format.pretty:
-      await prettyRequest(source, request)
+      try {
+        await prettyRequest(source, request)
+      } catch {
+        console.error(
+          'Failed to pretty print request - this is normal if the source chain is non-EVM',
+        )
+      }
       break
     case Format.json:
       console.info(JSON.stringify(request, bigIntReplacer, 2))
@@ -103,9 +128,9 @@ export async function manualExec(
       anchorProvider,
       request as CCIPRequest<SupportedSolanaCCIPVersion>,
       argv.solanaOfframp,
-      argv.solanaBufferAddress,
       argv.solanaForceBuffer,
       argv.solanaForceLookupTable,
+      argv.solanaClearBufferFirst,
       argv.solanaCuLimit,
     )
     await doManuallyExecuteSolana(keypair, anchorProvider, transactions, chainName)
@@ -113,6 +138,133 @@ export async function manualExec(
     const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
     await manualExecEvmDestination(source, dest, request, argv)
   }
+}
+async function fetchSolanaCCIPMessage(
+  txHash: string,
+  argv: { solanaKeypair?: string; solanaRouter?: string },
+): Promise<CCIPRequest> {
+  const promises = ['solana-mainnet', 'solana-devnet'].map(async (chainName) => {
+    const { anchorProvider } = newAnchorProvider(chainName, argv.solanaKeypair)
+    const tx = await anchorProvider.connection.getParsedTransaction(txHash, {
+      maxSupportedTransactionVersion: 0,
+    })
+    return { tx, chainName, anchorProvider }
+  })
+
+  const match = (await Promise.all(promises)).find(({ tx }) => tx != null)
+  if (!match) {
+    throw new Error(`No matching Solana transaction found for: ${txHash}`)
+  }
+  const { tx, chainName, anchorProvider } = match
+
+  const sourceChainSelector = {
+    'solana-devnet': 16423721717087811551n,
+    'solana-mainnet': 124615329519749607n,
+  }[chainName]
+  if (!sourceChainSelector) {
+    throw new Error(`Unsupported Solana chain: ${chainName}`)
+  }
+
+  const logs = tx?.meta?.logMessages
+  if (!logs || logs.length === 0) {
+    throw new Error(`No logs found for ${chainName} transaction: ${txHash}`)
+  }
+
+  if (!argv.solanaRouter) {
+    throw new Error(`Missing Solana router address: ${argv.solanaRouter}`)
+  }
+
+  const routerPubkey = new PublicKey(argv.solanaRouter)
+  const routerProgram = new Program(CCIP_ROUTER_IDL, routerPubkey, anchorProvider)
+  const eventParser = new EventParser(routerPubkey, new BorshCoder(routerProgram.idl))
+  const events = eventParser.parseLogs(logs)
+  for (const event of events) {
+    if (event.name === 'CCIPMessageSent') {
+      const eventData = event.data as unknown as CcipMessageSentEvent
+      console.debug('Event data:', eventData)
+
+      const extraArgs = parseExtraArgs(bytesToHexString(eventData.message.extraArgs))
+      if (extraArgs?._tag != 'EVMExtraArgsV2') {
+        throw new Error(`Invalid extraArgs, not EVMExtraArgsV2`)
+      }
+
+      // This is a hacky workaround of shoving the Solana message into an EVM-shaped object, as most of
+      // the code in this repo expects EVM-specific objects.
+      return {
+        lane: {
+          sourceChainSelector,
+          destChainSelector: BigInt(eventData.destChainSelector),
+          onRamp: routerProgram.programId.toBase58(),
+          version: CCIPVersion.V1_6,
+        },
+        message: {
+          sourceChainSelector,
+          sender: eventData.message.sender.toBase58(),
+          receiver: bytesToHexString(eventData.message.receiver.subarray(12, 32)),
+          sequenceNumber: BigInt(eventData.sequenceNumber),
+          gasLimit: extraArgs.gasLimit ?? 0n,
+          strict: false, // TODO: get this from the event if available
+          nonce: BigInt(eventData.message.header.nonce),
+          feeToken: eventData.message.feeToken.toBase58(),
+          feeTokenAmount: -1n, // not needed here, just writing a placeholder
+          data: bytesToHexString(eventData.message.data),
+          extraArgs: bytesToHexString(eventData.message.extraArgs),
+          tokenAmounts: eventData.message.tokenAmounts.map((ta) => ({
+            sourcePoolAddress: ta.sourcePoolAddress.toBase58(),
+            destTokenAddress: bytesToHexString(ta.destTokenAddress.subarray(12, 32)),
+            extraData: bytesToHexString(ta.extraData),
+            destExecData: bytesToHexString(ta.destExecData),
+            destGasAmount: beBytesToBigInt(ta.destExecData),
+            token: bytesToHexString(ta.destTokenAddress.subarray(12, 32)),
+            amount: leBytesToBigInt(ta.amount.leBytes),
+          })),
+          sourceTokenData: [], // TODO
+          messageId: bytesToHexString(eventData.message.header.messageId),
+          header: {
+            messageId: bytesToHexString(eventData.message.header.messageId),
+            destChainSelector: BigInt(eventData.message.header.destChainSelector),
+            sequenceNumber: BigInt(eventData.sequenceNumber),
+            nonce: BigInt(eventData.message.header.nonce),
+            sourceChainSelector: BigInt(eventData.message.header.sourceChainSelector),
+          },
+        },
+        log: {
+          topics: [],
+          index: 0,
+          address: '',
+          data: '',
+          blockNumber: 0,
+          transactionHash: txHash,
+        },
+        tx: {
+          logs: [],
+          from: undefined,
+        },
+        timestamp: tx.blockTime ?? 0,
+      }
+    }
+  }
+
+  throw new Error(`No matching event found for Solana transaction: ${txHash}`)
+}
+
+function bytesToHexString(bytes: Uint8Array): string {
+  return '0x' + Buffer.from(bytes).toString('hex')
+}
+
+function leBytesToBigInt(bytes: Uint8Array): bigint {
+  let result = 0n
+  for (let i = 0; i < bytes.length; i++) {
+    result |= BigInt(bytes[i]) << (8n * BigInt(i))
+  }
+  return result
+}
+function beBytesToBigInt(bytes: Uint8Array): bigint {
+  let result = 0n
+  for (let i = 0; i < bytes.length; i++) {
+    result |= BigInt(bytes[i]) << (8n * BigInt(bytes.length - 1 - i))
+  }
+  return result
 }
 
 function isCannotCloseTableUntilDeactivated(e: SendTransactionError): boolean {
@@ -123,6 +275,14 @@ function isCannotCloseTableUntilDeactivated(e: SendTransactionError): boolean {
   return !!e.logs?.some((log) =>
     log.includes("Program log: Table cannot be closed until it's fully deactivated in "),
   )
+}
+
+function isBase58String(value: string, length: number): boolean {
+  try {
+    return bs58.decode(value).length === length
+  } catch {
+    return false
+  }
 }
 
 async function doManuallyExecuteSolana(
@@ -152,7 +312,22 @@ async function doManuallyExecuteSolana(
 
       transaction.sign([payer])
 
-      signature = await destination.connection.sendTransaction(transaction)
+      try {
+        signature = await destination.connection.sendTransaction(transaction)
+      } catch (e) {
+        if (
+          e instanceof SendTransactionError &&
+          e.logs?.some((log) =>
+            log.includes('Error Code: ExecutionReportBufferAlreadyContainsChunk.'),
+          )
+        ) {
+          console.warn(`Skipping tx ${i + 1} of ${N} because a chunk is already in the buffer.`)
+          return
+        } else {
+          throw e
+        }
+      }
+
       const latestBlockhash = await destination.connection.getLatestBlockhash()
 
       console.log(`Confirming tx #${i + 1} of ${N}: ${signature} ...`)
@@ -205,7 +380,7 @@ async function doManuallyExecuteSolana(
 }
 
 async function manualExecEvmDestination(
-  source: Provider,
+  source: Provider | null, // null identifies non-evm chains (e.g. Solana)
   dest: JsonRpcApiProvider,
   request: CCIPRequest<CCIPVersion>,
   argv: {
@@ -238,13 +413,15 @@ async function manualExecEvmDestination(
       break
   }
 
-  const requestsInBatch = await fetchAllMessagesInBatch(
-    source,
-    request.lane.destChainSelector,
-    request.log,
-    commit.report,
-    { page: argv.page },
-  )
+  const requestsInBatch = source
+    ? await fetchAllMessagesInBatch(
+        source,
+        request.lane.destChainSelector,
+        request.log,
+        commit.report,
+        { page: argv.page },
+      )
+    : [request]
 
   const manualExecReport = calculateManualExecProof(
     requestsInBatch.map(({ message }) => message),
