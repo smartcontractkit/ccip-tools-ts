@@ -1,4 +1,4 @@
-import type { Idl } from '@coral-xyz/anchor/dist/cjs/idl'
+import type { Idl } from '@coral-xyz/anchor'
 
 export const CCIP_ROUTER_IDL = {
   version: '0.1.0-dev',

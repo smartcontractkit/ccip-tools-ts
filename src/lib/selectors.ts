@@ -437,6 +437,7 @@ const selectors: Selectors = {
   '728126428': { selector: 1546563616611573946n, name: 'tron-mainnet-evm' },
   '999999999': { selector: 16244020411108056671n, name: 'zora-testnet' },
   '2494104990': { selector: 13231703482326770598n, name: 'tron-testnet-shasta-evm' },
+  '3360022319': { selector: 13231703482326770600n, name: 'tron-devnet-evm' },
   '3448148188': { selector: 2052925811360307749n, name: 'tron-testnet-nile-evm' },
   // end:generate
 

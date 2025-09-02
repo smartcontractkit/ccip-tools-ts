@@ -1,7 +1,7 @@
 import type { Idl } from '@coral-xyz/anchor'
 
 export const CCIP_COMMON_IDL = {
-  version: '0.1.0-dev',
+  version: '0.1.1',
   name: 'ccip_common',
   instructions: [],
   accounts: [
@@ -35,6 +35,10 @@ export const CCIP_COMMON_IDL = {
           {
             name: 'mint',
             type: 'publicKey',
+          },
+          {
+            name: 'supportsAutoDerivation',
+            type: 'bool',
           },
         ],
       },
