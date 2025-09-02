@@ -1,7 +1,7 @@
 import type { Idl } from '@coral-xyz/anchor'
 
 export const CCIP_CCTP_TOKEN_POOL_IDL = {
-  version: '0.1.0-dev',
+  version: '0.1.1',
   name: 'cctp_token_pool',
   instructions: [
     // Add instructions as needed
