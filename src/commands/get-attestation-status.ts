@@ -1,38 +1,7 @@
+import { bigIntReplacer, getUsdcAttestationV2 } from '../lib/index.ts'
 import type { Providers } from '../providers.ts'
 import { Format } from './types.ts'
-
-// TypeScript interfaces for Circle CCTP API response
-interface CircleDecodedMessageBody {
-  burnToken: string
-  mintRecipient: string
-  amount: string
-  messageSender: string
-}
-
-interface CircleDecodedMessage {
-  sourceDomain: string
-  destinationDomain: string
-  nonce: string
-  sender: string
-  recipient: string
-  destinationCaller: string
-  messageBody: string
-  decodedMessageBody?: CircleDecodedMessageBody
-}
-
-interface CircleMessage {
-  attestation?: string
-  message: string
-  eventNonce: string
-  cctpVersion: number
-  status: string
-  decodedMessage?: CircleDecodedMessage
-  delayReason?: string | null
-}
-
-interface CircleApiResponse {
-  messages: CircleMessage[]
-}
+import { withDateTimestamp } from './utils.ts'
 
 // Circle CCTP Domain ID mapping based on https://developers.circle.com/cctp/cctp-supported-blockchains#cctp-v2-supported-domains
 const CHAIN_ID_TO_CIRCLE_DOMAIN: Record<number, number> = {
@@ -102,69 +71,100 @@ export async function getUSDCAttestationStatus(
     }
   }
 
-  console.log(`Transaction Hash: ${txHash}`)
-  if (chainId !== undefined) {
-    console.log(`Network Chain ID: ${chainId}`)
-  }
-  console.log(`Circle Domain ID: ${sourceDomainId}`)
-
   // Call the new Circle API v2
   const apiUrl = `https://iris-api.circle.com/v2/messages/${sourceDomainId}?transactionHash=${txHash}`
-  console.log(`Fetching from: ${apiUrl}`)
 
   try {
-    const response = await fetch(apiUrl, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    })
+    const data = await getUsdcAttestationV2(sourceDomainId, txHash)
 
-    if (!response.ok) {
-      throw new Error(`API request failed with status ${response.status}: ${response.statusText}`)
-    }
+    switch (argv.format) {
+      case Format.log:
+        console.log(
+          'attestation_status =',
+          withDateTimestamp({
+            txHash,
+            sourceDomainId,
+            chainId,
+            messages: data.messages,
+            timestamp: Date.now() / 1000, // Current timestamp in seconds
+          }),
+        )
+        break
 
-    const data = (await response.json()) as CircleApiResponse
-
-    console.log('\n=== Circle CCTP Attestation Status ===')
-
-    if (data.messages && data.messages.length > 0) {
-      data.messages.forEach((message, index) => {
-        console.log(`\nMessage ${index + 1}:`)
-        console.log(`  Status: ${message.status}`)
-        console.log(`  Event Nonce: ${message.eventNonce}`)
-        console.log(`  CCTP Version: ${message.cctpVersion}`)
-
-        if (message.decodedMessage) {
-          console.log(`  Source Domain: ${message.decodedMessage.sourceDomain}`)
-          console.log(`  Destination Domain: ${message.decodedMessage.destinationDomain}`)
-          console.log(`  Sender: ${message.decodedMessage.sender}`)
-          console.log(`  Recipient: ${message.decodedMessage.recipient}`)
-          console.log(`  Destination Caller: ${message.decodedMessage.destinationCaller}`)
-
-          if (message.decodedMessage.decodedMessageBody) {
-            const body = message.decodedMessage.decodedMessageBody
-            console.log(`  Burn Token: ${body.burnToken}`)
-            console.log(`  Mint Recipient: ${body.mintRecipient}`)
-            console.log(`  Amount: ${body.amount}`)
-            console.log(`  Message Sender: ${body.messageSender}`)
-          }
+      case Format.pretty:
+        console.log('\n=== Circle CCTP Attestation Status ===')
+        console.log(`Fetching from: ${apiUrl}`)
+        console.log(`Transaction Hash: ${txHash}`)
+        if (chainId !== undefined) {
+          console.log(`Network Chain ID: ${chainId}`)
         }
+        console.log(`Circle Domain ID: ${sourceDomainId}`)
 
-        if (message.attestation) {
-          console.log(`  Attestation: ${message.attestation}`)
+        if (data.messages && data.messages.length > 0) {
+          // Create table data for each message
+          data.messages.forEach((message, index) => {
+            console.log(`\n📄 Message ${index + 1}:`)
+
+            // Basic message info table
+            const messageInfo = {
+              Status: message.status,
+              'Event Nonce': message.eventNonce,
+              'CCTP Version': message.cctpVersion,
+              'Delay Reason': message.delayReason || 'None',
+            }
+            console.table(messageInfo)
+
+            // Decoded message table
+            if (message.decodedMessage) {
+              console.log('\n🔍 Decoded Message:')
+              const decodedInfo = {
+                'Source Domain': message.decodedMessage.sourceDomain,
+                'Destination Domain': message.decodedMessage.destinationDomain,
+                Sender: message.decodedMessage.sender,
+                Recipient: message.decodedMessage.recipient,
+                'Destination Caller': message.decodedMessage.destinationCaller,
+              }
+              console.table(decodedInfo)
+
+              // Token transfer details table
+              if (message.decodedMessage.decodedMessageBody) {
+                console.log('\n💰 Token Transfer Details:')
+                const body = message.decodedMessage.decodedMessageBody
+                const tokenInfo = {
+                  'Burn Token': body.burnToken,
+                  'Mint Recipient': body.mintRecipient,
+                  Amount: body.amount,
+                  'Message Sender': body.messageSender,
+                }
+                console.table(tokenInfo)
+              }
+            }
+
+            // Attestation info
+            if (message.attestation) {
+              console.log('\n🔐 Attestation:')
+              console.log(`${message.attestation}`)
+            }
+          })
+        } else {
+          console.log('❌ No messages found for this transaction.')
         }
+        break
 
-        if (message.delayReason) {
-          console.log(`  Delay Reason: ${message.delayReason}`)
-        }
-      })
-    } else {
-      console.log('No messages found for this transaction.')
-    }
-
-    // Also output raw JSON for debugging if requested
-    if (argv.format === Format.json) {
-      console.log('\n=== Raw JSON Response ===')
-      console.log(JSON.stringify(data, null, 2))
+      case Format.json:
+        console.info(
+          JSON.stringify(
+            {
+              txHash,
+              sourceDomainId,
+              chainId,
+              ...data,
+            },
+            bigIntReplacer,
+            2,
+          ),
+        )
+        break
     }
   } catch (error) {
     console.error('Error fetching attestation status:', error)

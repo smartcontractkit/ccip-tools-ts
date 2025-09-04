@@ -9,6 +9,7 @@ import {
   encodeOffchainTokenData,
   fetchOffchainTokenData,
   getUsdcAttestation,
+  getUsdcAttestationV2,
 } from './offchain.ts'
 import type { CcipCctpMessageSentEvent } from './solana/types.ts'
 import { type CCIPRequest, defaultAbiCoder } from './types.ts'
@@ -1228,6 +1229,172 @@ describe('getUsdcAttestation', () => {
     await expect(getUsdcAttestation(messageHex, true)).rejects.toThrow(
       'Could not fetch USDC attestation. Response: ' + JSON.stringify(pendingResponse, null, 2),
     )
+  })
+})
+
+describe('getUsdcAttestationV2', () => {
+  const mockedFetchJson = jest.fn()
+  const mockedFetch = jest.fn(() =>
+    Promise.resolve({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: mockedFetchJson,
+    }),
+  )
+
+  beforeAll(() => {
+    global.fetch = mockedFetch as any
+  })
+
+  afterEach(() => {
+    jest.clearAllMocks()
+  })
+
+  afterAll(() => {
+    global.fetch = origFetch
+  })
+
+  it('should fetch attestation status from Circle API v2 with real transaction data', async () => {
+    const transactionHash = '0xcad22cb982dbe5822d5a9e32e4699ddce89090164fe634d3a572161c10d1d68c'
+    const sourceDomainId = 7 // Polygon PoS
+
+    // Mock the real API response for this tx
+    const mockApiResponse = {
+      messages: [
+        {
+          attestation:
+            '0x31288fbeb9f4d8c6f839d5aeaf9982ef7a373263b431e1cd498e9a46514f01dc119a0f0f05808d998eaed5119df9bd94319f53a17a91558a444d54653b3f43e21c83a8d78d03f39f980b7348e2dc9f12b2db82ab80033226948b99b8e7d7f423847f8a4a944648b71c84fd97aec76efebcb7ba9fda8466b1895ab6f20b20e6c32f1c',
+          message:
+            '0x0000000000000007000000010000000000056bb40000000000000000000000009daf8c91aefae50b9c0e69629d3f6ca40ca3b3fe0000000000000000000000006b25532e1060ce10cc3b0a99e5683b91bfde69820000000000000000000000005931822f394babc2aacf4588e98fc77a9f5aa8c9000000000000000000000000000000003c499c542cef5e3811e1192ce70d8cc03d5c33590000000000000000000000005f2f4771b7dc7e2f7e9c1308b154e1e8957ecab000000000000000000000000000000000000000000000000000000000000f42400000000000000000000000005931822f394babc2aacf4588e98fc77a9f5aa8c9',
+          eventNonce: '355252',
+          cctpVersion: 1,
+          status: 'complete',
+          decodedMessage: {
+            sourceDomain: '7',
+            destinationDomain: '1',
+            nonce: '355252',
+            sender: '0x9daf8c91aefae50b9c0e69629d3f6ca40ca3b3fe',
+            recipient: '0x6b25532e1060ce10cc3b0a99e5683b91bfde6982',
+            destinationCaller: '0x5931822f394babc2aacf4588e98fc77a9f5aa8c9',
+            messageBody:
+              '0x000000000000000000000000000000003c499c542cef5e3811e1192ce70d8cc03d5c33590000000000000000000000005f2f4771b7dc7e2f7e9c1308b154e1e8957ecab000000000000000000000000000000000000000000000000000000000000f42400000000000000000000000005931822f394babc2aacf4588e98fc77a9f5aa8c9',
+            decodedMessageBody: {
+              burnToken: '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359',
+              mintRecipient: '0x5f2f4771b7dc7e2f7e9c1308b154e1e8957ecab0',
+              amount: '1000000',
+              messageSender: '0x5931822f394babc2aacf4588e98fc77a9f5aa8c9',
+            },
+          },
+          delayReason: null,
+        },
+      ],
+    }
+
+    mockedFetchJson.mockResolvedValue(mockApiResponse)
+
+    const result = await getUsdcAttestationV2(sourceDomainId, transactionHash)
+
+    // Verify the correct API endpoint was called
+    expect(mockedFetch).toHaveBeenCalledWith(
+      `https://iris-api.circle.com/v2/messages/${sourceDomainId}?transactionHash=${transactionHash}`,
+      {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      },
+    )
+
+    // Verify the response structure and data
+    expect(result).toEqual(mockApiResponse)
+    expect(result.messages).toHaveLength(1)
+
+    const message = result.messages[0]
+    expect(message.status).toBe('complete')
+    expect(message.eventNonce).toBe('355252')
+    expect(message.cctpVersion).toBe(1)
+    expect(message.delayReason).toBeNull()
+    expect(message.attestation).toBe(
+      '0x31288fbeb9f4d8c6f839d5aeaf9982ef7a373263b431e1cd498e9a46514f01dc119a0f0f05808d998eaed5119df9bd94319f53a17a91558a444d54653b3f43e21c83a8d78d03f39f980b7348e2dc9f12b2db82ab80033226948b99b8e7d7f423847f8a4a944648b71c84fd97aec76efebcb7ba9fda8466b1895ab6f20b20e6c32f1c',
+    )
+
+    // Verify decoded message data
+    expect(message.decodedMessage).toBeDefined()
+    expect(message.decodedMessage!.sourceDomain).toBe('7')
+    expect(message.decodedMessage!.destinationDomain).toBe('1')
+    expect(message.decodedMessage!.sender).toBe('0x9daf8c91aefae50b9c0e69629d3f6ca40ca3b3fe')
+    expect(message.decodedMessage!.recipient).toBe('0x6b25532e1060ce10cc3b0a99e5683b91bfde6982')
+
+    // Verify token transfer details
+    expect(message.decodedMessage!.decodedMessageBody).toBeDefined()
+    expect(message.decodedMessage!.decodedMessageBody!.burnToken).toBe(
+      '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359',
+    )
+    expect(message.decodedMessage!.decodedMessageBody!.amount).toBe('1000000')
+  })
+
+  it('should handle API error responses', async () => {
+    const sourceDomainId = 7
+    const transactionHash = '0xinvalidhash'
+
+    // Mock fetch to return a 404 response
+    mockedFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      json: mockedFetchJson,
+    })
+
+    await expect(getUsdcAttestationV2(sourceDomainId, transactionHash)).rejects.toThrow(
+      'API request failed with status 404: Not Found',
+    )
+  })
+
+  it('should handle pending attestation status', async () => {
+    const sourceDomainId = 7
+    const transactionHash = '0xpendingtransaction'
+
+    const mockPendingResponse = {
+      messages: [
+        {
+          message: '0x123456',
+          eventNonce: '123',
+          cctpVersion: 1,
+          status: 'pending_confirmations',
+          decodedMessage: {
+            sourceDomain: '7',
+            destinationDomain: '1',
+            nonce: '123',
+            sender: '0x1234567890123456789012345678901234567890',
+            recipient: '0x0987654321098765432109876543210987654321',
+            destinationCaller: '0x1111111111111111111111111111111111111111',
+            messageBody: '0x',
+          },
+          delayReason: null,
+        },
+      ],
+    }
+
+    mockedFetchJson.mockResolvedValue(mockPendingResponse)
+
+    const result = await getUsdcAttestationV2(sourceDomainId, transactionHash)
+
+    expect(result.messages[0].status).toBe('pending_confirmations')
+    expect(result.messages[0]).not.toHaveProperty('attestation')
+  })
+
+  it('should handle empty messages array', async () => {
+    const sourceDomainId = 7
+    const transactionHash = '0xnotfound'
+
+    const mockEmptyResponse = {
+      messages: [],
+    }
+
+    mockedFetchJson.mockResolvedValue(mockEmptyResponse)
+
+    const result = await getUsdcAttestationV2(sourceDomainId, transactionHash)
+
+    expect(result.messages).toHaveLength(0)
   })
 })
 

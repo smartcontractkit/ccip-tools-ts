@@ -49,6 +49,39 @@ type AttestationResponse =
   | { status: 'pending_confirmations' }
   | { status: 'complete'; attestation: string }
 
+// TypeScript interfaces for Circle CCTP API v2 response
+interface CircleDecodedMessageBody {
+  burnToken: string
+  mintRecipient: string
+  amount: string
+  messageSender: string
+}
+
+interface CircleDecodedMessage {
+  sourceDomain: string
+  destinationDomain: string
+  nonce: string
+  sender: string
+  recipient: string
+  destinationCaller: string
+  messageBody: string
+  decodedMessageBody?: CircleDecodedMessageBody
+}
+
+interface CircleMessage {
+  attestation?: string
+  message: string
+  eventNonce: string
+  cctpVersion: number
+  status: string
+  decodedMessage?: CircleDecodedMessage
+  delayReason?: string | null
+}
+
+interface CircleApiV2Response {
+  messages: CircleMessage[]
+}
+
 type LombardAttestation =
   | { status: 'NOTARIZATION_STATUS_SESSION_APPROVED'; message_hash: string; attestation: string }
   | { status: string; message_hash: string }
@@ -72,6 +105,30 @@ export async function getUsdcAttestation(message: string, isTestnet: boolean): P
     throw new Error('Could not fetch USDC attestation. Response: ' + JSON.stringify(json, null, 2))
   }
   return json.attestation
+}
+
+/**
+ * Fetches USDC attestation status using Circle's CCTP v2 API
+ *
+ * @param sourceDomainId - Circle CCTP source domain ID
+ * @param transactionHash - Transaction hash of the USDC transfer
+ * @returns Circle API response with attestation status and details
+ */
+export async function getUsdcAttestationV2(
+  sourceDomainId: number,
+  transactionHash: string,
+): Promise<CircleApiV2Response> {
+  const apiUrl = `https://iris-api.circle.com/v2/messages/${sourceDomainId}?transactionHash=${transactionHash}`
+  const response = await fetch(apiUrl, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!response.ok) {
+    throw new Error(
+      `USDC attestation v2 request failed with status ${response.status}: ${response.statusText}`,
+    )
+  }
+  return (await response.json()) as CircleApiV2Response
 }
 
 /**
