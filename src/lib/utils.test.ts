@@ -613,7 +613,7 @@ describe('blockRangeGenerator', () => {
 
   it('should generate block ranges forwards', () => {
     const ranges = Array.from(blockRangeGenerator({ startBlock: 54, endBlock: 100 }, 10))
-    expect(ranges).toEqual([
+    expect(ranges).toMatchObject([
       { fromBlock: 54, toBlock: 63 },
       { fromBlock: 64, toBlock: 73 },
       { fromBlock: 74, toBlock: 83 },

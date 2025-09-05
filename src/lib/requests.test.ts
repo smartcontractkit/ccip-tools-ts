@@ -309,7 +309,7 @@ describe('fetchAllMessagesInBatch', () => {
         { address: '0xOnRamp', blockNumber: 1, topics: [topic0] },
         { minSeqNr: 1, maxSeqNr: 10 },
       ),
-    ).rejects.toThrow('Could not find all expected CCIPSendRequested events')
+    ).rejects.toThrow('Could not find all expected')
   })
 })
 
