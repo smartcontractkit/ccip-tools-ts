@@ -451,11 +451,20 @@ async function main() {
                 'Circle CCTP source domain ID (if not provided, will be determined automatically from the transaction network)',
               example: '7',
             },
+            'api-version': {
+              type: 'string',
+              choices: ['v1', 'v2'],
+              default: 'v2',
+              describe: 'Circle CCTP API version to use',
+            },
           })
           .check(({ tx_hash }) => validateSupportedTxHash(tx_hash)),
       async (argv) => {
         const providers = new Providers(argv)
-        return getUSDCAttestationStatus(providers, argv.tx_hash, argv)
+        return getUSDCAttestationStatus(providers, argv.tx_hash, {
+          ...argv,
+          apiVersion: argv.apiVersion as 'v1' | 'v2',
+        })
           .catch((err) => {
             process.exitCode = 1
             if (!logParsedError(err)) console.error(err)

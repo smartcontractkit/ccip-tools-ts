@@ -1,4 +1,10 @@
-import { bigIntReplacer, getUsdcAttestationV2 } from '../lib/index.ts'
+import { EventFragment, type TransactionReceipt } from 'ethers'
+import {
+  bigIntReplacer,
+  defaultAbiCoder,
+  getUsdcAttestation,
+  getUsdcAttestationV2,
+} from '../lib/index.ts'
 import type { Providers } from '../providers.ts'
 import { Format } from './types.ts'
 import { withDateTimestamp } from './utils.ts'
@@ -35,6 +41,42 @@ const CHAIN_ID_TO_CIRCLE_DOMAIN: Record<number, number> = {
   51: 50, // XDC Apothem
 }
 
+// USDC MessageSent event for extracting the message from logs (v1 API)
+const USDC_EVENT = EventFragment.from('MessageSent(bytes message)')
+
+// Type definitions for Circle API responses
+interface CircleDecodedMessageBody {
+  burnToken: string
+  mintRecipient: string
+  amount: string
+  messageSender: string
+}
+
+interface CircleDecodedMessage {
+  sourceDomain: string
+  destinationDomain: string
+  nonce: string
+  sender: string
+  recipient: string
+  destinationCaller: string
+  messageBody: string
+  decodedMessageBody?: CircleDecodedMessageBody
+}
+
+interface CircleMessage {
+  attestation?: string
+  message: string
+  eventNonce: string
+  cctpVersion: number
+  status: string
+  decodedMessage?: CircleDecodedMessage
+  delayReason?: string | null
+}
+
+interface CircleApiResponse {
+  messages: CircleMessage[]
+}
+
 export async function getUSDCAttestationStatus(
   providers: Providers,
   txHash: string,
@@ -42,6 +84,7 @@ export async function getUSDCAttestationStatus(
     format: Format
     wallet?: string
     sourceDomainId?: number
+    apiVersion?: 'v1' | 'v2'
   },
 ) {
   const receipt = await providers.getTxReceipt(txHash)
@@ -71,11 +114,24 @@ export async function getUSDCAttestationStatus(
     }
   }
 
-  // Call the new Circle API v2
-  const apiUrl = `https://iris-api.circle.com/v2/messages/${sourceDomainId}?transactionHash=${txHash}`
+  const apiVersion = argv.apiVersion || 'v2'
 
   try {
-    const data = await getUsdcAttestationV2(sourceDomainId, txHash)
+    let data: CircleApiResponse
+
+    if (apiVersion === 'v2') {
+      // Call the new Circle API v2
+      data = await getUsdcAttestationV2(sourceDomainId, txHash)
+    } else {
+      // v1 API - extract message from transaction logs
+      // Make sure we have chainId for determining testnet status
+      if (chainId === undefined) {
+        const network = await source.getNetwork()
+        chainId = Number(network.chainId)
+      }
+
+      data = await fetchUsdcAttestationV1(receipt, chainId)
+    }
 
     switch (argv.format) {
       case Format.log:
@@ -93,62 +149,70 @@ export async function getUSDCAttestationStatus(
 
       case Format.pretty:
         console.log('\n=== Circle CCTP Attestation Status ===')
-        console.log(`Fetching from: ${apiUrl}`)
+        console.log(`API Version: ${apiVersion}`)
+        if (apiVersion === 'v2') {
+          console.log(
+            `Fetching from: https://iris-api.circle.com/v2/messages/${sourceDomainId}?transactionHash=${txHash}`,
+          )
+        } else {
+          console.log(`Using v1 API with message extraction from transaction logs`)
+        }
         console.log(`Transaction Hash: ${txHash}`)
         if (chainId !== undefined) {
           console.log(`Network Chain ID: ${chainId}`)
         }
         console.log(`Circle Domain ID: ${sourceDomainId}`)
 
-        if (data.messages && data.messages.length > 0) {
-          // Create table data for each message
-          data.messages.forEach((message, index) => {
-            console.log(`\n📄 Message ${index + 1}:`)
-
-            // Basic message info table
-            const messageInfo = {
-              Status: message.status,
-              'Event Nonce': message.eventNonce,
-              'CCTP Version': message.cctpVersion,
-              'Delay Reason': message.delayReason || 'None',
-            }
-            console.table(messageInfo)
-
-            // Decoded message table
-            if (message.decodedMessage) {
-              console.log('\n🔍 Decoded Message:')
-              const decodedInfo = {
-                'Source Domain': message.decodedMessage.sourceDomain,
-                'Destination Domain': message.decodedMessage.destinationDomain,
-                Sender: message.decodedMessage.sender,
-                Recipient: message.decodedMessage.recipient,
-                'Destination Caller': message.decodedMessage.destinationCaller,
-              }
-              console.table(decodedInfo)
-
-              // Token transfer details table
-              if (message.decodedMessage.decodedMessageBody) {
-                console.log('\n💰 Token Transfer Details:')
-                const body = message.decodedMessage.decodedMessageBody
-                const tokenInfo = {
-                  'Burn Token': body.burnToken,
-                  'Mint Recipient': body.mintRecipient,
-                  Amount: body.amount,
-                  'Message Sender': body.messageSender,
-                }
-                console.table(tokenInfo)
-              }
-            }
-
-            // Attestation info
-            if (message.attestation) {
-              console.log('\n🔐 Attestation:')
-              console.log(`${message.attestation}`)
-            }
-          })
-        } else {
+        if (!data.messages || data.messages.length === 0) {
           console.log('❌ No messages found for this transaction.')
+          break
         }
+
+        // Create table data for each message
+        data.messages.forEach((message: CircleMessage, index: number) => {
+          console.log(`\n📄 Message ${index + 1}:`)
+
+          // Basic message info table
+          const messageInfo = {
+            Status: message.status,
+            'Event Nonce': message.eventNonce,
+            'CCTP Version': message.cctpVersion,
+            'Delay Reason': message.delayReason || 'None',
+          }
+          console.table(messageInfo)
+
+          // Decoded message table
+          if (message.decodedMessage) {
+            console.log('\n🔍 Decoded Message:')
+            const decodedInfo = {
+              'Source Domain': message.decodedMessage.sourceDomain,
+              'Destination Domain': message.decodedMessage.destinationDomain,
+              Sender: message.decodedMessage.sender,
+              Recipient: message.decodedMessage.recipient,
+              'Destination Caller': message.decodedMessage.destinationCaller,
+            }
+            console.table(decodedInfo)
+          }
+
+          // Token transfer details table
+          if (message.decodedMessage?.decodedMessageBody) {
+            console.log('\n💰 Token Transfer Details:')
+            const body = message.decodedMessage.decodedMessageBody
+            const tokenInfo = {
+              'Burn Token': body.burnToken,
+              'Mint Recipient': body.mintRecipient,
+              Amount: body.amount,
+              'Message Sender': body.messageSender,
+            }
+            console.table(tokenInfo)
+          }
+
+          // Attestation info
+          if (message.attestation) {
+            console.log('\n🔐 Attestation:')
+            console.log(`${message.attestation}`)
+          }
+        })
         break
 
       case Format.json:
@@ -158,6 +222,7 @@ export async function getUSDCAttestationStatus(
               txHash,
               sourceDomainId,
               chainId,
+              apiVersion,
               ...data,
             },
             bigIntReplacer,
@@ -169,5 +234,44 @@ export async function getUSDCAttestationStatus(
   } catch (error) {
     console.error('Error fetching attestation status:', error)
     throw error
+  }
+}
+
+/**
+ * Fetches USDC attestation using v1 API by extracting message from transaction logs
+ */
+async function fetchUsdcAttestationV1(
+  receipt: TransactionReceipt,
+  chainId: number,
+): Promise<CircleApiResponse> {
+  // Determine if testnet based on known testnet chain IDs
+  // Mainnet chain IDs that support CCTP
+  const mainnetChainIds = new Set([
+    1, 43114, 10, 42161, 8453, 137, 1829, 59144, 81457, 146, 480, 1329, 56,
+  ])
+  const isTestnet = !mainnetChainIds.has(chainId)
+
+  // Find USDC MessageSent event in transaction logs
+  const messageSentLog = receipt.logs.find((log) => log.topics[0] === USDC_EVENT.topicHash)
+
+  if (!messageSentLog) {
+    throw new Error('USDC MessageSent event not found in transaction logs')
+  }
+
+  // Extract the message bytes from the event data
+  const message = defaultAbiCoder.decode(USDC_EVENT.inputs, messageSentLog.data)[0] as string
+  const attestation = await getUsdcAttestation(message, isTestnet)
+
+  // Format data to match v2 response structure to make outputting a bit easier
+  return {
+    messages: [
+      {
+        message: message,
+        attestation: attestation,
+        status: 'complete',
+        eventNonce: 'N/A',
+        cctpVersion: 1,
+      },
+    ],
   }
 }
