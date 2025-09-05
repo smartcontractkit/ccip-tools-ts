@@ -62,7 +62,9 @@ export async function getSomeBlockNumberBefore(
       Math.trunc(beforeBlockNumber - (beforeTimestamp - timestamp) / estimatedBlockTime) -
         10 ** iter,
     )
-    beforeTimestamp = (await provider.getBlock(beforeBlockNumber))!.timestamp
+    const beforeBlock = await provider.getBlock(beforeBlockNumber)
+    if (!beforeBlock) throw new Error(`Could not fetch block=${beforeBlockNumber}`)
+    beforeTimestamp = beforeBlock.timestamp
     estimatedBlockTime = (now - beforeTimestamp) / (currentBlockNumber - beforeBlockNumber)
   }
 
@@ -442,6 +444,7 @@ export function* blockRangeGenerator(
       yield {
         fromBlock,
         toBlock: Math.min(params.endBlock, fromBlock + stepSize - 1),
+        progress: `${Math.trunc(((fromBlock - params.startBlock) / (params.endBlock - params.startBlock)) * 10000) / 100}%`,
       }
     }
   } else {

@@ -274,6 +274,7 @@ const selectors: Selectors = {
   },
   '16600': { selector: 16088006396410204581n, name: '0g-testnet-newton' },
   '16601': { selector: 2131427466778448014n, name: '0g-testnet-galileo' },
+  '16661': { selector: 4426351306075016396n, name: '0g-mainnet' },
   '17000': { selector: 7717148896336251131n, name: 'ethereum-testnet-holesky' },
   '31337': { selector: 7759470850252068959n, name: 'anvil-devnet' },
   '33111': { selector: 9900119385908781505n, name: 'apechain-testnet-curtis' },
@@ -437,6 +438,7 @@ const selectors: Selectors = {
   '728126428': { selector: 1546563616611573946n, name: 'tron-mainnet-evm' },
   '999999999': { selector: 16244020411108056671n, name: 'zora-testnet' },
   '2494104990': { selector: 13231703482326770598n, name: 'tron-testnet-shasta-evm' },
+  '3360022319': { selector: 13231703482326770600n, name: 'tron-devnet-evm' },
   '3448148188': { selector: 2052925811360307749n, name: 'tron-testnet-nile-evm' },
   // end:generate
 

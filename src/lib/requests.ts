@@ -307,7 +307,6 @@ export async function fetchCCIPMessageById(
 
 // Number of blocks to expand the search window for logs
 const BLOCK_LOG_WINDOW_SIZE = 5000
-const MAX_PAGES = 10
 
 // Helper function to find the sequence number from CCIPSendRequested event logs
 export async function fetchAllMessagesInBatch(
@@ -319,10 +318,7 @@ export async function fetchAllMessagesInBatch(
     topics: [topic0],
   }: Pick<Log, 'address' | 'blockNumber' | 'topics'>,
   { minSeqNr, maxSeqNr }: { minSeqNr: Numeric; maxSeqNr: Numeric },
-  {
-    page: eventsBatchSize = BLOCK_LOG_WINDOW_SIZE,
-    maxPageCount = MAX_PAGES,
-  }: { page?: number; maxPageCount?: number } = {},
+  { page: eventsBatchSize = BLOCK_LOG_WINDOW_SIZE }: { page?: number } = {},
 ): Promise<Omit<CCIPRequest, 'tx' | 'timestamp'>[]> {
   const min = Number(minSeqNr)
   const max = Number(maxSeqNr)
@@ -362,11 +358,7 @@ export async function fetchAllMessagesInBatch(
     { endBlock: initFromBlock - 1 },
     eventsBatchSize,
   )) {
-    if (
-      events[0].message.header.sequenceNumber <= min ||
-      (initToBlock - toBlock) / eventsBatchSize > maxPageCount
-    )
-      break
+    if (events[0].message.header.sequenceNumber <= min) break
     const newEvents = await getDecodedEvents(fromBlock, toBlock)
     events.unshift(...newEvents)
   }
@@ -376,17 +368,15 @@ export async function fetchAllMessagesInBatch(
     { startBlock: initToBlock + 1, endBlock: latestBlock },
     eventsBatchSize,
   )) {
-    if (
-      events[events.length - 1].message.header.sequenceNumber >= max ||
-      (fromBlock - initToBlock) / eventsBatchSize > maxPageCount
-    )
-      break
+    if (events[events.length - 1].message.header.sequenceNumber >= max) break
     const newEvents = await getDecodedEvents(fromBlock, toBlock)
     events.push(...newEvents)
   }
 
   if (events.length != max - min + 1) {
-    throw new Error('Could not find all expected CCIPSendRequested events')
+    throw new Error(
+      `Could not find all expected request events: from=${sendBlock}, wanted=[${min}..${max}:${max - min + 1}], got=[${events.map((e) => Number(e.message.header.sequenceNumber)).join(',')}]`,
+    )
   }
   return events
 }
