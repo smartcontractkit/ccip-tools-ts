@@ -10,8 +10,7 @@ import { Format } from './types.ts'
 import { withDateTimestamp } from './utils.ts'
 
 // Circle CCTP Domain ID mapping based on https://developers.circle.com/cctp/cctp-supported-blockchains#cctp-v2-supported-domains
-const CHAIN_ID_TO_CIRCLE_DOMAIN: Record<number, number> = {
-  // Mainnet
+const MAINNET_CHAIN_ID_TO_CIRCLE_DOMAIN: Record<number, number> = {
   1: 0, // Ethereum
   43114: 1, // Avalanche
   10: 2, // OP Mainnet
@@ -25,8 +24,9 @@ const CHAIN_ID_TO_CIRCLE_DOMAIN: Record<number, number> = {
   480: 14, // World Chain
   1329: 16, // Sei
   56: 17, // BNB Smart Chain
+}
 
-  // Testnet
+const TESTNET_CHAIN_ID_TO_CIRCLE_DOMAIN: Record<number, number> = {
   421614: 3, // Arbitrum Sepolia
   43113: 1, // Avalanche Fuji
   84532: 6, // Base Sepolia
@@ -39,6 +39,11 @@ const CHAIN_ID_TO_CIRCLE_DOMAIN: Record<number, number> = {
   1919: 10, // Unichain Sepolia
   4801: 14, // World Chain Sepolia
   51: 50, // XDC Apothem
+}
+
+const CHAIN_ID_TO_CIRCLE_DOMAIN = {
+  ...MAINNET_CHAIN_ID_TO_CIRCLE_DOMAIN,
+  ...TESTNET_CHAIN_ID_TO_CIRCLE_DOMAIN,
 }
 
 // USDC MessageSent event for extracting the message from logs (v1 API)
@@ -115,16 +120,12 @@ export async function getUSDCAttestationStatus(
   }
 
   const apiVersion = argv.apiVersion || 'v2'
-
   try {
     let data: CircleApiResponse
 
     if (apiVersion === 'v2') {
-      // Call the new Circle API v2
       data = await getUsdcAttestationV2(sourceDomainId, txHash)
     } else {
-      // v1 API - extract message from transaction logs
-      // Make sure we have chainId for determining testnet status
       if (chainId === undefined) {
         const network = await source.getNetwork()
         chainId = Number(network.chainId)
@@ -244,16 +245,10 @@ async function fetchUsdcAttestationV1(
   receipt: TransactionReceipt,
   chainId: number,
 ): Promise<CircleApiResponse> {
-  // Determine if testnet based on known testnet chain IDs
-  // Mainnet chain IDs that support CCTP
-  const mainnetChainIds = new Set([
-    1, 43114, 10, 42161, 8453, 137, 1829, 59144, 81457, 146, 480, 1329, 56,
-  ])
-  const isTestnet = !mainnetChainIds.has(chainId)
+  const isTestnet = chainId in TESTNET_CHAIN_ID_TO_CIRCLE_DOMAIN
 
   // Find USDC MessageSent event in transaction logs
   const messageSentLog = receipt.logs.find((log) => log.topics[0] === USDC_EVENT.topicHash)
-
   if (!messageSentLog) {
     throw new Error('USDC MessageSent event not found in transaction logs')
   }
