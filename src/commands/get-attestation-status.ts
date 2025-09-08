@@ -1,4 +1,4 @@
-import { EventFragment, type TransactionReceipt } from 'ethers'
+import { type TransactionReceipt, EventFragment } from 'ethers'
 import {
   bigIntReplacer,
   defaultAbiCoder,
