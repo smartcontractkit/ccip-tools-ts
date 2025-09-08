@@ -1345,7 +1345,7 @@ describe('getUsdcAttestationV2', () => {
     })
 
     await expect(getUsdcAttestationV2(sourceDomainId, transactionHash)).rejects.toThrow(
-      'API request failed with status 404: Not Found',
+      'USDC attestation v2 request failed with status 404: Not Found',
     )
   })
 
