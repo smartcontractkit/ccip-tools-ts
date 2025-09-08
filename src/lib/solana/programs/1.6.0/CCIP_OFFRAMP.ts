@@ -2,7 +2,7 @@
 import type { Idl } from '@coral-xyz/anchor'
 
 export const CCIP_OFFRAMP_IDL = {
-  version: '0.1.0-dev',
+  version: '0.1.1',
   name: 'ccip_offramp',
   constants: [
     {

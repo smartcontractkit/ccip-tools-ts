@@ -1,4 +1,4 @@
-import { bs58 } from '@coral-xyz/anchor/dist/cjs/utils/bytes/index'
+import { bs58 } from '@coral-xyz/anchor/dist/cjs/utils/bytes/index.js'
 import { type Provider, type Result, Interface, isHexString } from 'ethers'
 
 import {
