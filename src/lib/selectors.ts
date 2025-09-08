@@ -274,6 +274,7 @@ const selectors: Selectors = {
   },
   '16600': { selector: 16088006396410204581n, name: '0g-testnet-newton' },
   '16601': { selector: 2131427466778448014n, name: '0g-testnet-galileo' },
+  '16661': { selector: 4426351306075016396n, name: '0g-mainnet' },
   '17000': { selector: 7717148896336251131n, name: 'ethereum-testnet-holesky' },
   '31337': { selector: 7759470850252068959n, name: 'anvil-devnet' },
   '33111': { selector: 9900119385908781505n, name: 'apechain-testnet-curtis' },

@@ -1,8 +1,8 @@
 import fs from 'fs'
 import path from 'path'
 import { type Idl, type web3, AnchorProvider, BorshCoder } from '@coral-xyz/anchor'
-import Wallet from '@coral-xyz/anchor/dist/esm/nodewallet.js'
 import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types.js'
+import Wallet from '@coral-xyz/anchor/dist/cjs/nodewallet.js'
 import {
   type AccountMeta,
   type Transaction,
