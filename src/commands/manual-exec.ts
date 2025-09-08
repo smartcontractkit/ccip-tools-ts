@@ -15,7 +15,6 @@ import {
   type CCIPMessage,
   type CCIPRequest,
   CCIPVersion,
-  ExecutionState,
   bigIntReplacer,
   calculateManualExecProof,
   chainIdFromSelector,
@@ -25,7 +24,6 @@ import {
   fetchCCIPMessageInLog,
   fetchCCIPMessagesInTx,
   fetchCommitReport,
-  fetchExecutionReceipts,
   fetchOffchainTokenData,
   fetchRequestsForSender,
   getSomeBlockNumberBefore,
@@ -566,48 +564,24 @@ export async function manualExecSenderQueue(
     if (requests.length >= MAX_QUEUE) break
   }
   console.info('Found', requests.length, `requests for "${firstRequest.message.sender}"`)
+  if (!requests.length) return
 
-  const destFromBlock = await getSomeBlockNumberBefore(dest, firstRequest.timestamp)
-  const lastExecState = new Map<string, ExecutionState>()
-  const firstExecBlock = new Map<string, number>()
-  let offRamp: string
-  for await (const { receipt, log } of fetchExecutionReceipts(dest, requests, {
-    fromBlock: destFromBlock,
-    page: argv.page,
-  })) {
-    lastExecState.set(receipt.messageId, receipt.state)
-    if (!firstExecBlock.has(receipt.messageId))
-      firstExecBlock.set(receipt.messageId, log.blockNumber)
-    offRamp ??= log.address
-  }
-
-  const requestsPending = requests.filter(({ message }) =>
-    argv.execFailed
-      ? lastExecState.get(message.header.messageId) !== ExecutionState.Success
-      : !lastExecState.has(message.header.messageId),
-  )
-  console.info(requestsPending.length, `requests eligible for manualExec`)
-  if (!requestsPending.length) return
-
+  let startBlock = await getSomeBlockNumberBefore(dest, firstRequest.timestamp)
   const wallet = (await getWallet(argv)).connect(dest)
   const offRampContract = await discoverOffRamp(wallet, firstRequest.lane, {
-    fromBlock: destFromBlock,
+    fromBlock: startBlock,
     page: argv.page,
   })
   let nonce = await wallet.getNonce()
 
-  let startBlock = destFromBlock
   let lastBatch:
     | readonly [CCIPCommit, Omit<CCIPRequest<CCIPVersion>, 'tx' | 'timestamp'>[]]
     | undefined
   const txsPending = []
-  for (let i = 0; i < requestsPending.length; ) {
+  for (let i = 0; i < requests.length; ) {
     let commit, batch
-    if (
-      !lastBatch ||
-      requestsPending[i].message.header.sequenceNumber > lastBatch[0].report.maxSeqNr
-    ) {
-      commit = await fetchCommitReport(dest, requestsPending[i], {
+    if (!lastBatch || requests[i].message.header.sequenceNumber > lastBatch[0].report.maxSeqNr) {
+      commit = await fetchCommitReport(dest, requests[i], {
         startBlock,
         page: argv.page,
       })
@@ -615,8 +589,8 @@ export async function manualExecSenderQueue(
 
       batch = await fetchAllMessagesInBatch(
         source,
-        requestsPending[i].lane.destChainSelector,
-        requestsPending[i].log,
+        requests[i].lane.destChainSelector,
+        requests[i].log,
         commit.report,
         { page: argv.page },
       )
@@ -627,11 +601,11 @@ export async function manualExecSenderQueue(
 
     const msgIdsToExec = [] as string[]
     while (
-      i < requestsPending.length &&
-      requestsPending[i].message.header.sequenceNumber <= commit.report.maxSeqNr &&
+      i < requests.length &&
+      requests[i].message.header.sequenceNumber <= commit.report.maxSeqNr &&
       msgIdsToExec.length < MAX_EXECS_IN_BATCH
     ) {
-      msgIdsToExec.push(requestsPending[i++].message.header.messageId)
+      msgIdsToExec.push(requests[i++].message.header.messageId)
     }
 
     const manualExecReport = calculateManualExecProof(
@@ -738,9 +712,9 @@ export async function manualExecSenderQueue(
       )
     }
 
-    const toExec = requestsPending[i - 1] // log only request data for last msg in msgIdsToExec
+    const toExec = requests[i - 1] // log only request data for last msg in msgIdsToExec
     console.log(
-      `🚀 [${i}/${requestsPending.length}, ${batch.length} batch, ${msgIdsToExec.length} to exec]`,
+      `🚀 [${i}/${requests.length}, ${batch.length} batch, ${msgIdsToExec.length} to exec]`,
       'source tx =',
       toExec.log.transactionHash,
       'msgId =',
