@@ -8,6 +8,7 @@ import { hideBin } from 'yargs/helpers'
 import {
   Format,
   estimateGas,
+  getUSDCAttestationStatus,
   manualExec,
   manualExecSenderQueue,
   parseBytes,
@@ -421,6 +422,49 @@ async function main() {
       async (argv) => {
         const providers = new Providers(argv)
         return showSupportedTokens(providers, argv)
+          .catch((err) => {
+            process.exitCode = 1
+            if (!logParsedError(err)) console.error(err)
+          })
+          .finally(() => providers.destroy())
+      },
+    )
+    .command(
+      'getUSDCAttestationStatus <tx_hash>',
+      'Get attestation status for a USDC transfer given the source transaction hash',
+      (yargs) =>
+        yargs
+          .positional('tx_hash', {
+            type: 'string',
+            demandOption: true,
+            describe: 'transaction hash of the USDC transfer',
+          })
+          .options({
+            wallet: {
+              type: 'string',
+              describe:
+                'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar',
+            },
+            'source-domain-id': {
+              type: 'number',
+              describe:
+                'Circle CCTP source domain ID (if not provided, will be determined automatically from the transaction network)',
+              example: '7',
+            },
+            'api-version': {
+              type: 'string',
+              choices: ['v1', 'v2'],
+              default: 'v2',
+              describe: 'Circle CCTP API version to use',
+            },
+          })
+          .check(({ tx_hash }) => validateSupportedTxHash(tx_hash)),
+      async (argv) => {
+        const providers = new Providers(argv)
+        return getUSDCAttestationStatus(providers, argv.tx_hash, {
+          ...argv,
+          apiVersion: argv.apiVersion as 'v1' | 'v2',
+        })
           .catch((err) => {
             process.exitCode = 1
             if (!logParsedError(err)) console.error(err)
