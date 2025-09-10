@@ -179,6 +179,7 @@ const selectors: Selectors = {
   '2021': { selector: 13116810400804392105n, name: 'ronin-testnet-saigon' },
   '2023': { selector: 3260900564719373474n, name: 'private-testnet-granite' },
   '2024': { selector: 6915682381028791124n, name: 'private-testnet-andesite' },
+  '2025': { selector: 15513093881969820114n, name: 'dtcc-testnet-andesite' },
   '2031': {
     selector: 8175830712062617656n,
     name: 'polkadot-mainnet-centrifuge',
