@@ -9,14 +9,13 @@ import {
   Contract,
   Interface,
   ZeroAddress,
-  getUint,
-  hexlify,
   isBytesLike,
   isHexString,
 } from 'ethers'
 import yaml from 'yaml'
 
 import { parseExtraArgs, parseSourceTokenData } from './extra-args.ts'
+import { getDestExecDataParser } from './hasher/hasher.ts'
 import { computeAnchorEventDiscriminant } from './solana/utils.ts'
 import {
   type CCIPContractEVM,
@@ -35,7 +34,6 @@ import {
   chainNameFromSelector,
   convertKeysToCamelCase,
   decodeAddress,
-  getDataBytes,
   lazyCached,
   networkInfo,
   toObject,
@@ -152,6 +150,11 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
       (data.header as { destChainSelector: bigint }).destChainSelector,
     ).family
   }
+
+  const sourceChainSelector =
+    (data.header as { sourceChainSelector?: bigint })?.sourceChainSelector ||
+    (data.sourceChainSelector as bigint)
+  const destExecDataParser = getDestExecDataParser(sourceChainSelector)
   // conversions to make any message version be compatible with latest v1.6
   data.tokenAmounts = (data.tokenAmounts as Record<string, string | bigint | number>[]).map(
     (tokenAmount, i) => {
@@ -166,7 +169,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
         }
       }
       if (typeof tokenAmount.destExecData === 'string' && tokenAmount.destGasAmount == null) {
-        tokenAmount.destGasAmount = getUint(hexlify(getDataBytes(tokenAmount.destExecData)))
+        tokenAmount.destGasAmount = destExecDataParser(tokenAmount.destExecData)
       }
       // Can be undefined if the message is from before v1.5 and failed to parse sourceTokenData
       if (tokenAmount.sourcePoolAddress) {

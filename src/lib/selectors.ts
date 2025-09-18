@@ -127,6 +127,8 @@ const selectors: Selectors = {
     selector: 829525985033418733n,
     name: 'ethereum-testnet-sepolia-mode-1',
   },
+  '945': { selector: 2177900824115119161n, name: 'bittensor-testnet' },
+  '964': { selector: 2135107236357186872n, name: 'bittensor-mainnet' },
   '998': { selector: 4286062357653186312n, name: 'hyperliquid-testnet' },
   '999': { selector: 2442541497099098535n, name: 'hyperliquid-mainnet' },
   '1001': { selector: 2624132734533621656n, name: 'kaia-testnet-kairos' },
@@ -418,6 +420,7 @@ const selectors: Selectors = {
     selector: 1010349088906777999n,
     name: 'ethereum-mainnet-arbitrum-1-treasure-1',
   },
+  '2019775': { selector: 945045181441419236n, name: 'jovay-testnet' },
   '7777777': { selector: 3555797439612589184n, name: 'zora-mainnet' },
   '11155111': { selector: 16015286601757825753n, name: 'ethereum-testnet-sepolia' },
   '11155420': {
