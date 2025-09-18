@@ -312,6 +312,24 @@ describe('calculateManualExecProof', () => {
     expect(result.messages).toHaveLength(1)
     expect(result.messages[0].sender).toMatch(/^0x[a-z0-9]{64}$/)
   })
+
+  it('should calculate Aptos root correctly', () => {
+    const msgInfoString =
+      '{"data":"0x","header":{"nonce":"0","messageId":"0x7f7a0c384b0cbd3be3970dd8ffae9bfdfed006a77aa556bbbad46838c79113f5","sequenceNumber":"27","destChainSelector":"5009297550715157269","sourceChainSelector":"4741433654826277614"},"sender":"0x54ab6c204931fd1ea9d767b37a8dc885b80fe145826da2e99d0b05583f67326","feeToken":"0xa","gasLimit":0,"receiver":"0x579479f60048761de23c1ab9fe7f8dc6f55e65d9","extraArgs":"0x181dcf10000000000000000000000000000000000000000000000000000000000000000001","tokenAmounts":[{"amount":"36660000","extra_data":"0x0000000000000000000000000000000000000000000000000000000000000008","dest_exec_data":"0x905f0100","dest_token_address":"0x000000000000000000000000004e9c3ef86bc1ca1f0bb5c7662861ee93350568","source_pool_address":"0x80ab5314fa37a0c2e10bc490acd7ca83898119accaebac9e7bba61f1f164b8ed"}],"feeValueJuels":"63754600000000000","feeTokenAmount":"33856319","allowOutOfOrderExecution":false}'
+    expect(() => decodeMessage(msgInfoString)).not.toThrow()
+
+    const message = decodeMessage(msgInfoString)
+    const expectedRoot = '0xf52a1a13d9416aac1cf860635d2e3f7b4287a52a5de10ba8c22181b42f8dd9ae'
+    const lane: Lane<typeof CCIPVersion.V1_6> = {
+      sourceChainSelector: 4741433654826277614n,
+      destChainSelector: 5009297550715157269n,
+      onRamp: '0x20f808de3375db34d17cc946ec6b43fc26962f6afa125182dc903359756caf6b',
+      version: CCIPVersion.V1_6,
+    }
+    const messageId = '0x7f7a0c384b0cbd3be3970dd8ffae9bfdfed006a77aa556bbbad46838c79113f5'
+    const result = calculateManualExecProof([message], lane, [messageId])
+    expect(result.merkleRoot).toEqual(expectedRoot)
+  })
 })
 
 describe('validateOffRamp', () => {

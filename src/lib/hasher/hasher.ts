@@ -1,5 +1,7 @@
+import { Deserializer, Hex } from '@aptos-labs/ts-sdk'
+import { getUint, hexlify } from 'ethers'
 import { type Lane, CCIPVersion, ChainFamily } from '../types.ts'
-import { networkInfo } from '../utils.ts'
+import { getDataBytes, networkInfo } from '../utils.ts'
 import { getV16AptosLeafHasher } from './aptos.ts'
 import type { LeafHasher } from './common.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './evm.ts'
@@ -39,5 +41,23 @@ export function getLeafHasher<V extends CCIPVersion = CCIPVersion>({
     }
     default:
       throw new Error(`Unsupported CCIP version: ${version}`)
+  }
+}
+
+export function getDestExecDataParser(sourceChainSelector: bigint) {
+  const { family } = networkInfo(sourceChainSelector)
+
+  switch (family) {
+    case ChainFamily.EVM:
+    case ChainFamily.Solana: // TODO: Solana might have a different way to parse destExecData
+      return (destExecData: string) => getUint(hexlify(getDataBytes(destExecData)))
+    case ChainFamily.Aptos:
+      return (destExecData: string) => {
+        const bytes = Hex.fromHexString(destExecData).toUint8Array()
+        const deserializer = new Deserializer(bytes)
+        return deserializer.deserializeU32()
+      }
+    default:
+      return (destExecData: string) => getUint(hexlify(getDataBytes(destExecData)))
   }
 }
