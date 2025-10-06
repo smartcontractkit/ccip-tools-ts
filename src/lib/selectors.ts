@@ -244,6 +244,7 @@ const selectors: Selectors = {
   },
   '5668': { selector: 8911150974185440581n, name: 'nexon-dev' },
   '6342': { selector: 2443239559770384419n, name: 'megaeth-testnet' },
+  '6398': { selector: 379340054879810246n, name: 'everclear-testnet-sepolia' },
   '6900': { selector: 17349189558768828726n, name: 'nibiru-mainnet' },
   '6930': { selector: 305104239123120457n, name: 'nibiru-testnet' },
   '7000': { selector: 10817664450262215148n, name: 'zetachain-mainnet' },
@@ -279,6 +280,7 @@ const selectors: Selectors = {
   '16601': { selector: 2131427466778448014n, name: '0g-testnet-galileo' },
   '16661': { selector: 4426351306075016396n, name: '0g-mainnet' },
   '17000': { selector: 7717148896336251131n, name: 'ethereum-testnet-holesky' },
+  '25327': { selector: 9723842205701363942n, name: 'everclear-mainnet' },
   '31337': { selector: 7759470850252068959n, name: 'anvil-devnet' },
   '33111': { selector: 9900119385908781505n, name: 'apechain-testnet-curtis' },
   '33139': { selector: 14894068710063348487n, name: 'apechain-mainnet' },
@@ -421,6 +423,7 @@ const selectors: Selectors = {
     name: 'ethereum-mainnet-arbitrum-1-treasure-1',
   },
   '2019775': { selector: 945045181441419236n, name: 'jovay-testnet' },
+  '5734951': { selector: 1523760397290643893n, name: 'jovay-mainnet' },
   '7777777': { selector: 3555797439612589184n, name: 'zora-mainnet' },
   '11155111': { selector: 16015286601757825753n, name: 'ethereum-testnet-sepolia' },
   '11155420': {
