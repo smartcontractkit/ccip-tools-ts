@@ -563,8 +563,6 @@ export async function manualExecSenderQueue(
     requests.push(request)
     if (requests.length >= MAX_QUEUE) break
   }
-  console.info('Found', requests.length, `requests for "${firstRequest.message.sender}"`)
-  if (!requests.length) return
 
   let startBlock = await getSomeBlockNumberBefore(dest, firstRequest.timestamp)
   const wallet = (await getWallet(argv)).connect(dest)
@@ -572,6 +570,23 @@ export async function manualExecSenderQueue(
     fromBlock: startBlock,
     page: argv.page,
   })
+  const senderNonce = await offRampContract.getSenderNonce(firstRequest.message.sender)
+  const origRequestsCnt = requests.length,
+    last = requests[requests.length - 1]
+  while (requests.length && requests[0].message.header.sequenceNumber <= senderNonce) {
+    requests.shift()
+  }
+  console.info(
+    'Found',
+    requests.length,
+    `requests for "${firstRequest.message.sender}", removed `,
+    origRequestsCnt - requests.length,
+    'already executed before senderNonce =',
+    senderNonce,
+    '. Last source txHash =',
+    last.log.transactionHash,
+  )
+  if (!requests.length) return
   let nonce = await wallet.getNonce()
 
   let lastBatch:
