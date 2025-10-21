@@ -1,360 +1,340 @@
-import fs from 'fs'
-import path from 'path'
-import { type Idl, type web3, AnchorProvider, BorshCoder, Wallet } from '@coral-xyz/anchor'
-import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types.js'
+import { type AnchorProvider, Program } from '@coral-xyz/anchor'
 import {
   type AccountMeta,
+  type Connection,
+  type SimulateTransactionConfig,
   type Transaction,
   type TransactionInstruction,
   AddressLookupTableAccount,
   AddressLookupTableProgram,
   ComputeBudgetProgram,
-  Connection,
-  Keypair,
   PublicKey,
+  SendTransactionError,
   SystemProgram,
+  TransactionExpiredBlockheightExceededError,
   TransactionMessage,
   VersionedTransaction,
 } from '@solana/web3.js'
-import type { Layout } from 'buffer-layout'
-import { calculateManualExecProof } from '../execution.ts'
-import { fetchOffchainTokenData } from '../offchain.ts'
-import type { CCIPRequest, ExecutionReport } from '../types.ts'
-import { getAddressLookupTableAccount } from './getAddressLookupTableAccount.ts'
-import { getClusterUrlByChainSelectorName } from './getClusterByChainSelectorName.ts'
+import { hexlify } from 'ethers'
+
+import type { ChainTransaction } from '../chain.ts'
+import type { ExecutionReport } from '../types.ts'
+import { sleep } from '../utils.ts'
 import { getManuallyExecuteInputs } from './getManuallyExecuteInputs.ts'
-import { type OfframpProgram, getCcipOfframp } from './programs/getCcipOfframp.ts'
-import {
-  type SupportedSolanaCCIPVersion,
-  CCIP_SOLANA_VERSION_MAP,
-  SolanaCCIPIdl,
-} from './programs/versioning.ts'
-import { simulateUnitsConsumed } from './simulateManuallyExecute.ts'
-import { normalizeExecutionReportForSolana } from './utils.ts'
+import './patchBorsh.ts'
+import { IDL as CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
+import type { CCIPMessage_V1_6_Solana } from './types.ts'
+import { bytesToBuffer } from './utils.ts'
 
-class ExtendedBorshTypesCoder<N extends string = string> extends BorshTypesCoder<N> {
-  public constructor(idl: Idl) {
-    super(idl)
-  }
+type ExecStepTx = [reason: string, transactions: VersionedTransaction]
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  public override encode<T = any>(typeName: N, type: T): Buffer {
-    const buffer = Buffer.alloc(32000) // TODO: use a tighter buffer.
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-    const layout: Layout<any> | undefined = (this as any).typeLayouts.get(typeName)
-    if (!layout) {
-      throw new Error(`Unknown type: ${typeName}`)
-    }
-    const len = layout.encode(type, buffer)
-
-    return buffer.slice(0, len)
-  }
-}
-
-class AlteredBorshCoder<A extends string = string, T extends string = string> extends BorshCoder<
-  A,
-  T
-> {
-  constructor(idl: Idl) {
-    super(idl)
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
-    const self = this as any
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    self.types = new ExtendedBorshTypesCoder(idl)
-  }
-}
-
-type ManualExecAlt = {
+type ExecAlt = {
   addressLookupTableAccount: AddressLookupTableAccount
-  initialTxs: web3.VersionedTransaction[]
-  closeTxs: web3.VersionedTransaction[]
+  initialTxs: ExecStepTx[]
+  finalTxs: ExecStepTx[]
 }
 
-export type ManualExecTxs = { transactions: VersionedTransaction[]; manualExecIdx: number }
+export async function executeReport({
+  offrampProgram,
+  execReport,
+  ...opts
+}: {
+  offrampProgram: Program<typeof CCIP_OFFRAMP_IDL>
+  execReport: ExecutionReport<CCIPMessage_V1_6_Solana>
+  gasLimit?: number
+  forceLookupTable?: boolean
+  forceBuffer?: boolean
+  clearBufferFirst?: boolean
+}): Promise<Pick<ChainTransaction, 'hash'>> {
+  const provider = offrampProgram.provider as AnchorProvider
+  const wallet = provider.wallet
+  const connection = provider.connection
 
-export async function buildManualExecutionTxWithSolanaDestination<
-  V extends SupportedSolanaCCIPVersion,
->(
-  destinationProvider: AnchorProvider,
-  ccipRequest: CCIPRequest<V>,
-  offrampAddress: string,
-  forceBuffer: boolean,
-  forceLookupTable: boolean,
-  clearBufferFirst: boolean,
-  computeUnitsOverride: number | undefined,
-): Promise<ManualExecTxs> {
-  const offrampProgram = getCcipOfframp({
-    ccipVersion: ccipRequest.lane.version as SupportedSolanaCCIPVersion,
-    address: offrampAddress,
-    provider: destinationProvider,
-  })
+  const execTxs = await buildExecTxToSolana(offrampProgram, execReport, opts?.gasLimit, opts)
 
-  const TnV = (await offrampProgram.methods.typeVersion().accounts({}).signers([]).view()) as string
-  const supportedOfframpVersions = new Set(['ccip-offramp 0.1.1', 'ccip-offramp 0.1.1-dev'])
-  if (!supportedOfframpVersions.has(TnV)) {
-    throw new Error(`Unsupported offramp version: ${TnV}`)
+  let execTxSignature: string, signature: string
+  for (const [i, [reason, transaction]] of execTxs.entries()) {
+    // Refresh the blockhash for each transaction, as the blockhash is only valid for a short time
+    // and we spend a lot of time waiting for finalization of the previous transactions.
+    transaction.message.recentBlockhash = (await connection.getLatestBlockhash()).blockhash
+
+    const signed = await wallet.signTransaction(transaction)
+
+    try {
+      signature = await connection.sendTransaction(signed)
+
+      if (reason === 'exec') execTxSignature = signature
+    } catch (e) {
+      if (
+        e instanceof SendTransactionError &&
+        e.logs?.some((log) =>
+          log.includes('Error Code: ExecutionReportBufferAlreadyContainsChunk.'),
+        )
+      ) {
+        console.warn(
+          `Skipping tx ${i + 1} of ${execTxs.length} because a chunk is already in the buffer.`,
+        )
+        continue
+      } else {
+        throw e
+      }
+    }
+
+    console.debug(`Confirming tx #${i + 1} of ${execTxs.length}: ${signature} (${reason})...`)
+    for (let currentAttempt = 0; ; currentAttempt++) {
+      try {
+        const latestBlockhash = await connection.getLatestBlockhash()
+        await connection.confirmTransaction(
+          {
+            signature,
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+          },
+          'confirmed',
+        )
+        break
+      } catch (e) {
+        if (currentAttempt < 5 && e instanceof TransactionExpiredBlockheightExceededError) {
+          await sleep(1000)
+        } else {
+          throw e
+        }
+      }
+    }
   }
 
-  const { proofs, merkleRoot } = calculateManualExecProof([ccipRequest.message], ccipRequest.lane, [
-    ccipRequest.message.header.messageId,
-  ])
+  return { hash: execTxSignature! }
+}
 
-  const executionReportRaw: ExecutionReport = normalizeExecutionReportForSolana({
-    sourceChainSelector: BigInt(ccipRequest.lane.sourceChainSelector),
-    message: ccipRequest.message,
-    proofs,
-    // Offchain token data is only supported for single USDC CCTP transfer
-    offchainTokenData: await fetchOffchainTokenData(ccipRequest),
+async function buildExecTxToSolana(
+  offrampProgram: Program<typeof CCIP_OFFRAMP_IDL>,
+  execReport: ExecutionReport<CCIPMessage_V1_6_Solana>,
+  computeUnitsOverride: number | undefined,
+  opts?: { forceLookupTable?: boolean; forceBuffer?: boolean; clearBufferFirst?: boolean },
+): Promise<ExecStepTx[]> {
+  const provider = offrampProgram.provider as AnchorProvider
+  offrampProgram = new Program(CCIP_OFFRAMP_IDL, offrampProgram.programId, provider)
+  const payerAddress = provider.wallet.publicKey
+
+  let bufferId
+  if (opts?.forceBuffer) {
+    // Use messageId for bufferId. This is arbitrary, but easy to track.
+    bufferId = bytesToBuffer(execReport.message.header.messageId)
+  }
+
+  const {
+    executionReport: preparedReport,
+    tokenIndexes,
+    accounts,
+    addressLookupTables,
+  } = await getManuallyExecuteInputs({
+    execReport,
+    offrampProgram,
+    transmitter: payerAddress.toBase58(),
+    bufferId,
   })
-
-  const payerAddress = destinationProvider.wallet.publicKey
-
-  const { executionReport, tokenIndexes, accounts, addressLookupTables } =
-    await getManuallyExecuteInputs({
-      executionReportRaw,
-      connection: destinationProvider.connection,
-      offrampProgram,
-      root: merkleRoot,
-      senderAddress: payerAddress.toBase58(),
-      buffered: forceBuffer,
-    })
 
   const addressLookupTableAccounts = await Promise.all(
     addressLookupTables.map(async (acc) => {
-      return await getAddressLookupTableAccount({
-        connection: destinationProvider.connection,
-        lookupTablePubKey: acc,
-      })
+      const lookupTableAccountInfo = await provider.connection.getAddressLookupTable(acc)
+
+      if (!lookupTableAccountInfo.value) {
+        throw new Error(`Lookup table account not found: ${acc.toBase58()}`)
+      }
+
+      return lookupTableAccountInfo.value
     }),
   )
 
-  const coder = new AlteredBorshCoder(
-    CCIP_SOLANA_VERSION_MAP[ccipRequest.lane.version as SupportedSolanaCCIPVersion][
-      SolanaCCIPIdl.OffRamp
-    ],
+  let serializedReport = offrampProgram.coder.types.encode(
+    'ExecutionReportSingleChain',
+    preparedReport,
   )
-  const serializedReport = coder.types.encode('ExecutionReportSingleChain', executionReport)
-  const serializedTokenIndexes = Buffer.from(tokenIndexes)
 
-  const { blockhash } = await destinationProvider.connection.getLatestBlockhash()
+  const { blockhash: recentBlockhash } = await provider.connection.getLatestBlockhash()
 
-  const alt: ManualExecAlt | undefined = !forceLookupTable
-    ? undefined
-    : await (async () => {
-        const recentSlot = await destinationProvider.connection.getSlot('finalized')
-
-        const [createIx, altAddr] = AddressLookupTableProgram.createLookupTable({
-          authority: payerAddress,
-          payer: payerAddress,
-          recentSlot,
-        })
-        console.log('Using Address Lookup Table', altAddr.toBase58())
-
-        const addresses = accounts.map((a) => a.pubkey)
-
-        if (addresses.length > 256) {
-          throw new Error(
-            `The number of addresses (${addresses.length}) exceeds the maximum limit imposed by Solana of 256 for Address Lookup Tables`,
-          )
-        }
-
-        // 1232 bytes is the max size of a transaction, 32 bytes used for each address.
-        // Setting a max of 30 addresses per transaction to avoid exceeding the limit.
-        // 1232 / 32 = 38.5, so we set it to 30 to be safe.
-        const maxAddressesPerTx = 30
-        const extendIxs: TransactionInstruction[] = []
-        for (let i = 0; i < addresses.length; i += maxAddressesPerTx) {
-          const end = Math.min(i + maxAddressesPerTx, addresses.length)
-          const addressesChunk = addresses.slice(i, end)
-          const extendIx = AddressLookupTableProgram.extendLookupTable({
-            payer: payerAddress,
-            authority: payerAddress,
-            lookupTable: altAddr,
-            addresses: addressesChunk,
-          })
-          extendIxs.push(extendIx)
-        }
-
-        const deactivateIx = AddressLookupTableProgram.deactivateLookupTable({
-          lookupTable: altAddr,
-          authority: payerAddress,
-        })
-
-        const closeIx = AddressLookupTableProgram.closeLookupTable({
-          authority: payerAddress,
-          lookupTable: altAddr,
-          recipient: payerAddress,
-        })
-
-        return {
-          addressLookupTableAccount: new AddressLookupTableAccount({
-            key: altAddr,
-            state: {
-              deactivationSlot: BigInt(0),
-              lastExtendedSlot: recentSlot,
-              lastExtendedSlotStartIndex: 0,
-              addresses,
-            },
-          }),
-          initialTxs: [createIx, ...extendIxs].map((ix) =>
-            toVersionedTransaction(ix, payerAddress, blockhash),
-          ),
-          closeTxs: [deactivateIx, closeIx].map((ix) =>
-            toVersionedTransaction(ix, payerAddress, blockhash),
-          ),
-        }
-      })()
-
-  if (forceBuffer) {
-    console.log(`Execute report will be pre-buffered through the offramp. This may take some time.`)
-    return bufferedTransactionData(
-      destinationProvider,
-      offrampAddress,
-      serializedReport,
-      serializedTokenIndexes,
-      accounts,
-      computeUnitsOverride,
-      blockhash,
-      addressLookupTableAccounts,
-      alt,
-      merkleRoot,
-      clearBufferFirst,
-      ccipRequest.lane.version as SupportedSolanaCCIPVersion,
-    )
+  let alt
+  if (opts?.forceLookupTable) {
+    alt = await buildLookupTableTxs(provider, accounts)
+    addressLookupTableAccounts.push(alt.addressLookupTableAccount)
   }
 
-  const anchorTx = await manualExecAnchorTx(
-    offrampProgram,
-    serializedReport,
-    serializedTokenIndexes,
-    accounts,
-  )
-
-  const manualExecuteInstructions = anchorTx.instructions
-
-  const computeUnits =
-    computeUnitsOverride || // short-circuit: don't simulate if override is set
-    Math.ceil(
-      1.1 *
-        (await simulateUnitsConsumed({
-          instructions: manualExecuteInstructions,
-          connection: destinationProvider.connection,
-          payerKey: destinationProvider.wallet.publicKey,
-          addressLookupTableAccounts,
-          computeUnitsOverride,
-        })),
+  const transactions: ExecStepTx[] = []
+  if (bufferId) {
+    console.log(`Execute report will be pre-buffered through the offramp. This may take some time.`)
+    transactions.push(
+      ...(await bufferedTransactionData(
+        offrampProgram,
+        serializedReport,
+        recentBlockhash,
+        bufferId,
+        opts,
+      )),
     )
+    serializedReport = Buffer.from([]) // clear 1st param to manuallyExecute method if buffered
+  }
 
-  const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
-    units: computeUnits,
-  })
+  const execTx = await offrampProgram.methods
+    .manuallyExecute(serializedReport, tokenIndexes)
+    .accounts({
+      config: accounts[0].pubkey,
+      referenceAddresses: accounts[1].pubkey,
+      sourceChain: accounts[2].pubkey,
+      commitReport: accounts[3].pubkey,
+      offramp: accounts[4].pubkey,
+      allowedOfframp: accounts[5].pubkey,
+      authority: accounts[6].pubkey,
+      systemProgram: accounts[7].pubkey,
+      sysvarInstructions: accounts[8].pubkey,
+      rmnRemote: accounts[9].pubkey,
+      rmnRemoteCurses: accounts[10].pubkey,
+      rmnRemoteConfig: accounts[11].pubkey,
+    })
+    .remainingAccounts(accounts.slice(12))
+    .transaction()
+
+  computeUnitsOverride ||= Math.ceil(
+    1.1 *
+      (await simulateUnitsConsumed({
+        instructions: execTx.instructions,
+        connection: provider.connection,
+        payerKey: provider.wallet.publicKey,
+        addressLookupTableAccounts,
+        computeUnitsOverride,
+      })),
+  )
 
   // Add compute budget instruction at the beginning of instructions
-  const finalInstructions = [computeBudgetIx, ...manualExecuteInstructions]
+  execTx.instructions.unshift(
+    ComputeBudgetProgram.setComputeUnitLimit({
+      units: computeUnitsOverride,
+    }),
+  )
 
-  const message = new TransactionMessage({
-    payerKey: destinationProvider.wallet.publicKey,
-    recentBlockhash: blockhash,
-    instructions: finalInstructions,
-  })
-  const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
-  const transaction = new VersionedTransaction(messageV0)
+  // actual exec tx
+  transactions.push([
+    'exec',
+    toVersionedTransaction(
+      execTx.instructions,
+      provider.wallet.publicKey,
+      recentBlockhash,
+      addressLookupTableAccounts,
+    ),
+  ])
 
   if (alt) {
-    return {
-      transactions: [...alt.initialTxs, transaction, ...alt.closeTxs],
-      manualExecIdx: alt.initialTxs.length,
-    }
+    transactions.unshift(...alt.initialTxs)
+    transactions.push(...alt.finalTxs)
   }
 
-  return { transactions: [transaction], manualExecIdx: 0 }
+  return transactions
 }
 
-function manualExecAnchorTx(
-  offrampProgram: OfframpProgram,
-  serializedReport: Buffer<ArrayBufferLike>,
-  serializedTokenIndexes: Buffer<ArrayBuffer>,
-  accounts: web3.AccountMeta[],
-): Promise<web3.Transaction> {
-  return (
-    offrampProgram.methods
-      .manuallyExecute(serializedReport, serializedTokenIndexes)
-      // TODO: Maybe use raw TX construction to make this a bit cleaner,
-      // so that in case the arguments on the IDL change, there's no need
-      // to update this.
-      .accounts({
-        config: accounts[0].pubkey,
-        referenceAddresses: accounts[1].pubkey,
-        sourceChain: accounts[2].pubkey,
-        commitReport: accounts[3].pubkey,
-        offramp: accounts[4].pubkey,
-        allowedOfframp: accounts[5].pubkey,
-        authority: accounts[6].pubkey,
-        systemProgram: accounts[7].pubkey,
-        sysvarInstructions: accounts[8].pubkey,
-        rmnRemote: accounts[9].pubkey,
-        rmnRemoteCurses: accounts[10].pubkey,
-        rmnRemoteConfig: accounts[11].pubkey,
-      })
-      .remainingAccounts(accounts.slice(12))
-      .transaction()
-  )
-}
+async function buildLookupTableTxs(
+  provider: AnchorProvider,
+  accounts: readonly AccountMeta[],
+): Promise<ExecAlt> {
+  const recentSlot = await provider.connection.getSlot('finalized')
 
-export function newAnchorProvider(chainName: string, keypairFile?: string, keypair?: Keypair) {
-  let keypairPath: string
-
-  if (keypairFile) {
-    keypairPath = keypairFile
-  } else {
-    const homeDir = process.env.HOME || process.env.USERPROFILE
-    keypairPath = path.join(homeDir as string, '.config', 'solana', 'id.json')
-  }
-
-  if (!keypair) {
-    const secretKeyString = fs.readFileSync(keypairPath, 'utf8')
-    const secretKey = Uint8Array.from(JSON.parse(secretKeyString) as number[])
-    keypair = Keypair.fromSecretKey(secretKey)
-  }
-
-  const wallet = new Wallet(keypair)
-  const connection = new Connection(getClusterUrlByChainSelectorName(chainName))
-  const anchorProvider = new AnchorProvider(connection, wallet, {
-    commitment: 'processed',
+  const [createIx, altAddr] = AddressLookupTableProgram.createLookupTable({
+    authority: provider.wallet.publicKey,
+    payer: provider.wallet.publicKey,
+    recentSlot,
   })
-  return { anchorProvider, keypair }
+  console.log('Using Address Lookup Table', altAddr.toBase58())
+
+  const addresses = accounts.map((a) => a.pubkey)
+
+  if (addresses.length > 256) {
+    throw new Error(
+      `The number of addresses (${addresses.length}) exceeds the maximum limit imposed by Solana of 256 for Address Lookup Tables`,
+    )
+  }
+
+  // 1232 bytes is the max size of a transaction, 32 bytes used for each address.
+  // 1232 / 32 ~= 38.5
+  const firstChunkLength = 28
+  const maxAddressesPerTx = 35
+  const extendIxs: TransactionInstruction[] = []
+  const ranges: [number, number][] = []
+  for (
+    let [start, end] = [0, firstChunkLength];
+    start < addresses.length;
+    [start, end] = [end, end + maxAddressesPerTx]
+  ) {
+    const addressesChunk = addresses.slice(start, end)
+    const extendIx = AddressLookupTableProgram.extendLookupTable({
+      payer: provider.wallet.publicKey,
+      authority: provider.wallet.publicKey,
+      lookupTable: altAddr,
+      addresses: addressesChunk,
+    })
+    extendIxs.push(extendIx)
+    ranges.push([start, start + addressesChunk.length - 1])
+  }
+
+  const deactivateIx = AddressLookupTableProgram.deactivateLookupTable({
+    lookupTable: altAddr,
+    authority: provider.wallet.publicKey,
+  })
+
+  // disable closeTx, to be cleaned in SolanaChain.cleanUpBuffers
+  // const closeIx = AddressLookupTableProgram.closeLookupTable({
+  //   authority: provider.wallet.publicKey,
+  //   recipient: provider.wallet.publicKey,
+  //   lookupTable: altAddr,
+  // })
+
+  const { blockhash: recentBlockhash } = await provider.connection.getLatestBlockhash()
+
+  return {
+    addressLookupTableAccount: new AddressLookupTableAccount({
+      key: altAddr,
+      state: {
+        deactivationSlot: BigInt(0),
+        lastExtendedSlot: recentSlot,
+        lastExtendedSlotStartIndex: 0,
+        addresses,
+      },
+    }),
+    initialTxs: [
+      // first extendIx fits in create tx
+      [
+        `lookup[create + 0..${ranges[0][1]}]`,
+        toVersionedTransaction(
+          [createIx, extendIxs[0]],
+          provider.wallet.publicKey,
+          recentBlockhash,
+        ),
+      ],
+      ...extendIxs
+        .slice(1)
+        .map<ExecStepTx>((ix, i) => [
+          `lookup[${ranges[i + 1][0]}..${ranges[i + 1][1]}]`,
+          toVersionedTransaction([ix], provider.wallet.publicKey, recentBlockhash),
+        ]),
+    ],
+    finalTxs: [
+      [
+        `lookup[deactivate]`,
+        toVersionedTransaction([deactivateIx], provider.wallet.publicKey, recentBlockhash),
+      ],
+    ],
+  }
 }
 
-export async function bufferedTransactionData(
-  destinationProvider: AnchorProvider,
-  offrampAddress: string,
+async function bufferedTransactionData(
+  offrampProgram: Program<typeof CCIP_OFFRAMP_IDL>,
   serializedReport: Buffer,
-  serializedTokenIndexes: Buffer<ArrayBuffer>,
-  accounts: AccountMeta[],
-  computeUnitsOverride: number | undefined,
-  blockhash: string,
-  addressLookupTableAccounts: AddressLookupTableAccount[],
-  alt: ManualExecAlt | undefined,
-  merkleRoot: string,
-  clearBufferFirst: boolean,
-  ccipVersion: SupportedSolanaCCIPVersion,
-): Promise<ManualExecTxs> {
-  const offrampProgram = getCcipOfframp({
-    ccipVersion,
-    address: offrampAddress,
-    provider: destinationProvider,
-  })
-
-  // Use merkleRoot for bufferId. This is arbitrary, but easy to track.
-  const bufferId = Buffer.from(merkleRoot.replace(/^0x/, ''), 'hex')
+  recentBlockhash: string,
+  bufferId: Buffer,
+  opts?: { clearBufferFirst?: boolean },
+): Promise<ExecStepTx[]> {
+  const provider = offrampProgram.provider as AnchorProvider
 
   const [bufferAddress] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from('execution_report_buffer'),
-      bufferId,
-      destinationProvider.wallet.publicKey.toBuffer(),
-    ],
-    new PublicKey(offrampAddress),
+    [Buffer.from('execution_report_buffer'), bufferId, provider.wallet.publicKey.toBuffer()],
+    offrampProgram.programId,
   )
 
   const [configPDA] = PublicKey.findProgramAddressSync(
@@ -363,28 +343,29 @@ export async function bufferedTransactionData(
   )
 
   console.log(
-    `The bufferID is ${merkleRoot}, and the PDA address for the buffer is ${bufferAddress.toString()}. If this buffering process is aborted, remember to manually close the account to recover any spent funds.`,
+    `The bufferID is ${hexlify(bufferId)}, and the PDA address for the buffer is ${bufferAddress.toString()}\nIf this buffering process is aborted, remember to cleanUp the account to recover locked rent.`,
   )
 
   const chunkSize = 800
-  const bufferedExecTxs: VersionedTransaction[] = []
+  const bufferedExecTxs: ExecStepTx[] = []
 
   const bufferingAccounts = {
     executionReportBuffer: bufferAddress,
     config: configPDA,
-    authority: destinationProvider.wallet.publicKey,
+    authority: provider.wallet.publicKey,
     systemProgram: SystemProgram.programId,
   }
 
-  if (clearBufferFirst) {
+  if (opts?.clearBufferFirst) {
     const clearTx = await offrampProgram.methods
       .closeExecutionReportBuffer(bufferId)
       .accounts(bufferingAccounts)
       .transaction()
 
-    bufferedExecTxs.push(
-      toVersionedTransaction(clearTx, destinationProvider.wallet.publicKey, blockhash),
-    )
+    bufferedExecTxs.push([
+      'buffering[clear]',
+      toVersionedTransaction(clearTx, provider.wallet.publicKey, recentBlockhash),
+    ])
   }
 
   const numChunks = Math.ceil(serializedReport.length / chunkSize)
@@ -396,67 +377,82 @@ export async function bufferedTransactionData(
       .bufferExecutionReport(bufferId, serializedReport.length, chunk, i / chunkSize, numChunks)
       .accounts(bufferingAccounts)
       .transaction()
-    bufferedExecTxs.push(
-      toVersionedTransaction(appendTx, destinationProvider.wallet.publicKey, blockhash),
-    )
+    bufferedExecTxs.push([
+      `buffering[${i / chunkSize}=${end - i}B]`,
+      toVersionedTransaction(appendTx, provider.wallet.publicKey, recentBlockhash),
+    ])
   }
 
-  const executeTx = await manualExecAnchorTx(
-    offrampProgram,
-    Buffer.from([]), // when the report is in a buffer PDA, there's no report to set in the ix data
-    serializedTokenIndexes,
-    accounts,
-  )
-
-  const computeBudgetIx = computeUnitsOverride
-    ? ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitsOverride })
-    : null
-
-  const finalInstructions = computeBudgetIx
-    ? [computeBudgetIx, ...executeTx.instructions]
-    : executeTx.instructions
-
-  const message = new TransactionMessage({
-    payerKey: destinationProvider.wallet.publicKey,
-    recentBlockhash: blockhash,
-    instructions: finalInstructions,
-  })
-
-  const altAccs = [...addressLookupTableAccounts]
-  if (alt) {
-    altAccs.push(alt.addressLookupTableAccount)
-  }
-  const messageV0 = message.compileToV0Message(altAccs)
-  bufferedExecTxs.push(new VersionedTransaction(messageV0))
-
-  if (alt) {
-    return {
-      transactions: [...alt.initialTxs, ...bufferedExecTxs, ...alt.closeTxs],
-      manualExecIdx: alt.initialTxs.length + bufferedExecTxs.length - 1,
-    }
-  }
-
-  return {
-    transactions: bufferedExecTxs,
-    manualExecIdx: bufferedExecTxs.length - 1,
-  }
+  return bufferedExecTxs
 }
 
 function toVersionedTransaction(
-  input: Transaction | TransactionInstruction,
+  input: Transaction | TransactionInstruction[],
   payerKey: PublicKey,
-  blockhash: string,
+  recentBlockhash: string,
+  addressLookupTableAccounts?: AddressLookupTableAccount[],
 ): VersionedTransaction {
-  const instructions: TransactionInstruction[] = isTransaction(input) ? input.instructions : [input]
+  const instructions: TransactionInstruction[] = Array.isArray(input) ? input : input.instructions
 
-  const message = new TransactionMessage({
-    payerKey,
-    recentBlockhash: blockhash,
-    instructions,
-  })
-  return new VersionedTransaction(message.compileToV0Message())
+  const message = new TransactionMessage({ payerKey, recentBlockhash, instructions })
+  return new VersionedTransaction(message.compileToV0Message(addressLookupTableAccounts))
 }
 
-function isTransaction(input: Transaction | TransactionInstruction): input is Transaction {
-  return (input as Transaction).signatures !== undefined
+const simulateUnitsConsumed = async ({
+  instructions,
+  connection,
+  payerKey,
+  addressLookupTableAccounts = [],
+  computeUnitsOverride,
+}: {
+  instructions: TransactionInstruction[]
+  connection: Connection
+  payerKey: PublicKey
+  addressLookupTableAccounts?: AddressLookupTableAccount[]
+  computeUnitsOverride?: number
+}): Promise<number> => {
+  try {
+    // Add max compute units for simulation
+    const maxComputeUnits = 1_400_000
+    const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
+      units: computeUnitsOverride || maxComputeUnits,
+    })
+
+    // Create message with compute budget instruction
+    const message = new TransactionMessage({
+      payerKey,
+      recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
+      instructions: [computeBudgetIx, ...instructions],
+    })
+
+    const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
+    const simulationTx = new VersionedTransaction(messageV0)
+
+    const config: SimulateTransactionConfig = {
+      commitment: 'confirmed',
+      replaceRecentBlockhash: true,
+      sigVerify: false,
+    }
+
+    const simulation = await connection.simulateTransaction(simulationTx, config)
+
+    console.info('Simulation results:', {
+      logs: simulation.value.logs,
+      unitsConsumed: simulation.value.unitsConsumed,
+      returnData: simulation.value.returnData,
+      err: simulation.value.err,
+    })
+
+    if (simulation.value.err) {
+      throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`)
+    }
+
+    return simulation.value.unitsConsumed || 0
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      throw new Error(`Transaction simulation error: ${error.message}`)
+    }
+
+    throw new Error('Transaction simulation error: Unknown error occurred')
+  }
 }

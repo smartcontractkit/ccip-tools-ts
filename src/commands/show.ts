@@ -1,90 +1,113 @@
-import { type Provider, isHexString } from 'ethers'
+import type { Argv } from 'yargs'
 
+import type { GlobalOpts } from '../index.ts'
+import { discoverOffRamp } from '../lib/execution.ts'
 import {
   type CCIPRequest,
+  ChainFamily,
   bigIntReplacer,
-  chainIdFromName,
-  chainIdFromSelector,
   fetchCCIPMessageById,
-  fetchCCIPMessageInLog,
   fetchCCIPMessagesInTx,
   fetchCommitReport,
   fetchExecutionReceipts,
-  fetchSolanaCCIPMessagesInTx,
-  getSomeBlockNumberBefore,
+  networkInfo,
 } from '../lib/index.ts'
-import type { Providers } from '../providers.ts'
+import { fetchChainsFromRpcs } from '../providers.ts'
 import { Format } from './types.ts'
 import {
+  // XPromise,
+  logParsedError,
   prettyCommit,
   prettyReceipt,
   prettyRequest,
   selectRequest,
+  validateSupportedTxHash,
   withDateTimestamp,
 } from './utils.ts'
 
-export async function showRequests(
-  providers: Providers,
-  txHash: string,
-  argv: { logIndex?: number; idFromSource?: string; format: Format; page: number },
+export const command = ['show <tx_hash>', '* <tx_hash>']
+export const describe = 'Show details of a CCIP request'
+
+export const builder = (yargs: Argv) =>
+  yargs
+    .positional('tx_hash', {
+      type: 'string',
+      demandOption: true,
+      describe: 'transaction hash of the request (source) message',
+    })
+    .options({
+      'log-index': {
+        type: 'number',
+        describe: 'Log index of message to select to know more, instead of prompting',
+      },
+      'id-from-source': {
+        type: 'string',
+        describe:
+          'Search by messageId instead of tx_hash; requires specifying source network (by id or name)',
+      },
+    })
+    .check(({ tx_hash }) => validateSupportedTxHash(tx_hash))
+
+export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
+  let destroy
+  const destroy$ = new Promise((resolve) => {
+    destroy = resolve
+  })
+  return showRequests(argv, destroy$)
+    .catch((err) => {
+      process.exitCode = 1
+      if (!logParsedError(err)) console.error(err)
+    })
+    .finally(destroy)
+}
+
+async function showRequests(
+  argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts,
+  destroy: Promise<unknown>,
 ) {
+  let source, getChain, tx, request: CCIPRequest
   // messageId not yet implemented for Solana
   if (argv.idFromSource) {
-    const sourceNetwork = argv.idFromSource.toLowerCase()
-    if (sourceNetwork.includes('solana')) {
+    getChain = fetchChainsFromRpcs(argv, undefined, destroy)
+    const sourceNetwork = networkInfo(argv.idFromSource)
+    if (sourceNetwork.family === ChainFamily.Solana) {
       throw new Error(
         `Message ID search is not yet supported for Solana networks.\n` +
           `Please use show with Solana transaction signature instead`,
       )
     }
+    source = await getChain(sourceNetwork.chainId)
+    request = await fetchCCIPMessageById(source, argv.tx_hash, argv)
+  } else {
+    const [getChain_, tx$] = fetchChainsFromRpcs(argv, argv.tx_hash, destroy)
+    getChain = getChain_
+    tx = await tx$
+    source = tx.chain
+    request = await selectRequest(await fetchCCIPMessagesInTx(tx), 'to know more', argv)
   }
 
-  // detect txHash type and route accordingly
-  // TODO: we may want to provide more arguments and be able to determine more reliably
-  if (isHexString(txHash, 32)) {
-    return showEVMRequests(providers, txHash, argv)
-  } else {
-    return showSolanaRequests(providers, txHash, argv)
-  }
-}
-
-async function showEVMRequests(
-  providers: Providers,
-  txHash: string,
-  argv: { logIndex?: number; idFromSource?: string; format: Format; page: number },
-) {
-  let source: Provider, request: CCIPRequest
-  if (argv.idFromSource) {
-    const sourceChainId = isNaN(+argv.idFromSource)
-      ? chainIdFromName(argv.idFromSource)
-      : +argv.idFromSource
-    source = await providers.forChainId(sourceChainId)
-    request = await fetchCCIPMessageById(source, txHash)
-  } else {
-    const tx = await providers.getTxReceipt(txHash)
-    source = tx.provider
-
-    if (argv.logIndex != null) {
-      request = await fetchCCIPMessageInLog(tx, argv.logIndex)
-    } else {
-      request = await selectRequest(await fetchCCIPMessagesInTx(tx), 'to know more')
+  switch (argv.format) {
+    case Format.log: {
+      const logPrefix = 'log' in request ? `message ${request.log.index} = ` : 'message = '
+      console.log(logPrefix, withDateTimestamp(request))
+      break
     }
+    case Format.pretty:
+      await prettyRequest(source, request)
+      break
+    case Format.json:
+      console.info(JSON.stringify(request, bigIntReplacer, 2))
+      break
   }
 
-  await displayRequest(request, argv, source)
+  const dest = await getChain(request.lane.destChainSelector)
+  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+  const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
 
-  const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
-
-  const commit = await fetchCommitReport(dest, request, { page: argv.page })
+  const commit = await fetchCommitReport(dest, commitStore, request, argv)
   switch (argv.format) {
     case Format.log:
-      console.log(
-        'commit =',
-        withDateTimestamp({
-          ...commit,
-          timestamp: (await dest.getBlock(commit.log.blockNumber))!.timestamp,
-        }),
-      )
+      console.log('commit =', commit)
       break
     case Format.pretty:
       await prettyCommit(dest, commit, request)
@@ -94,92 +117,17 @@ async function showEVMRequests(
       break
   }
 
-  await displayExecutionReceipts(dest, request, commit.log.blockNumber, argv)
-}
-
-async function showSolanaRequests(
-  providers: Providers,
-  signature: string,
-  argv: { logIndex?: number; idFromSource?: string; format: Format; page: number },
-) {
-  // Parse CCIP events from transaction (if any)
-  const { parsedTransaction } = await providers.getSolanaTransaction(signature)
-  const ccipMessages = fetchSolanaCCIPMessagesInTx(signature, parsedTransaction)
-
-  // We expect to find exactly 1 message for Solana
-  if (ccipMessages.length === 0) {
-    throw new Error('No CCIP messages found in this Solana transaction')
-  }
-  if (ccipMessages.length > 1) {
-    console.warn(`Expected to find 1 CCIP message, found ${ccipMessages.length}. Using first one.`)
-  }
-
-  const request = ccipMessages[0]
-
-  await displayRequest(request, argv)
-
-  // Try to fetch commit report and execution receipts from destination chain
-  const dest = await providers.forChainId(chainIdFromSelector(request.lane.destChainSelector))
-  const startBlock = await getSomeBlockNumberBefore(dest, request.timestamp)
-  try {
-    const commit = await fetchCommitReport(dest, request, { page: argv.page, startBlock })
-    switch (argv.format) {
-      case Format.log:
-        console.log(
-          'commit =',
-          withDateTimestamp({
-            ...commit,
-            timestamp: (await dest.getBlock(commit.log.blockNumber))!.timestamp,
-          }),
-        )
-        break
-      case Format.pretty:
-        await prettyCommit(dest, commit, request)
-        break
-      case Format.json:
-        console.info(JSON.stringify(commit, bigIntReplacer, 2))
-        break
-    }
-  } catch (error) {
-    console.warn(
-      `Could not fetch commit report: ${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
-
-  await displayExecutionReceipts(dest, request, startBlock, argv)
-}
-
-async function displayRequest(
-  request: CCIPRequest,
-  argv: { format: Format },
-  sourceProvider?: Provider,
-) {
-  switch (argv.format) {
-    case Format.log: {
-      const logPrefix = 'log' in request ? `message ${request.log.index} = ` : 'message = '
-      console.log(logPrefix, withDateTimestamp(request))
-      break
-    }
-    case Format.pretty:
-      await prettyRequest(sourceProvider || null, request)
-      break
-    case Format.json:
-      console.info(JSON.stringify(request, bigIntReplacer, 2))
-      break
-  }
-}
-
-async function displayExecutionReceipts(
-  dest: Provider,
-  request: CCIPRequest,
-  fromBlock: number | undefined,
-  argv: { format: Format; page: number },
-) {
   let found = false
-  for await (const receipt of fetchExecutionReceipts(dest, [request], {
-    fromBlock,
-    page: argv.page,
-  })) {
+  for await (const receipt of fetchExecutionReceipts(
+    dest,
+    offRamp,
+    new Set([request.message.header.messageId]),
+    {
+      startBlock: commit.log.blockNumber,
+      page: argv.page,
+      commit: commit.report,
+    },
+  )) {
     switch (argv.format) {
       case Format.log:
         console.log('receipt =', withDateTimestamp(receipt))
@@ -189,7 +137,7 @@ async function displayExecutionReceipts(
         prettyReceipt(
           receipt,
           request,
-          (await dest.getTransaction(receipt.log.transactionHash))?.from,
+          (await dest.getTransaction(receipt.log.transactionHash).catch(() => null))?.from,
         )
         break
       case Format.json:

@@ -1,4 +1,5 @@
 import { type Connection, PublicKey } from '@solana/web3.js'
+
 import { getReferenceAddresses } from './getReferenceAddresses.ts'
 
 type ReferenceAddressesAccounts = {

@@ -1,6 +1,7 @@
 import { ZeroAddress, getBigInt } from 'ethers'
+
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
-import { getV12LeafHasher, getV16LeafHasher } from './evm.ts'
+import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 
 describe('EVM leaf hasher', () => {
   it('should hash v1.5 msg', () => {

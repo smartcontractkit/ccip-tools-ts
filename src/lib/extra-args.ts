@@ -1,89 +1,45 @@
-import {
-  type Result,
-  concat,
-  dataLength,
-  dataSlice,
-  decodeBase58,
-  encodeBase58,
-  getBytes,
-  id,
-  toBeHex,
-  toBigInt,
-} from 'ethers'
+import { type BytesLike, type Result, id } from 'ethers'
 
+import { type ChainStatic, ChainFamily } from './chain.ts'
+import { supportedChains } from './supported-chains.ts'
 import { defaultAbiCoder } from './types.ts'
-import { toLeHex } from './utils.ts'
 
-const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'
-const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'
-const SVMExtraArgsTag = id('CCIP SVMExtraArgsV1').substring(0, 10) as '0x1f3b3aba'
+export const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'
+export const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'
+export const SVMExtraArgsTag = id('CCIP SVMExtraArgsV1').substring(0, 10) as '0x1f3b3aba'
 
 const EVMExtraArgsV1 = 'tuple(uint256 gasLimit)'
 const EVMExtraArgsV2 = 'tuple(uint256 gasLimit, bool allowOutOfOrderExecution)'
 const SVMExtraArgsV1 =
   'tuple(uint32 computeUnits, uint64 accountIsWritableBitmap, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] accounts)'
 
-export interface EVMExtraArgsV1 {
-  gasLimit?: bigint
+export type EVMExtraArgsV1 = {
+  gasLimit: bigint
 }
-export interface EVMExtraArgsV2 extends EVMExtraArgsV1 {
+export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
   allowOutOfOrderExecution: boolean
 }
-export interface SVMExtraArgsV1 {
-  computeUnits: number
+export type SVMExtraArgsV1 = {
+  computeUnits: bigint
   accountIsWritableBitmap: bigint
   allowOutOfOrderExecution: boolean
   tokenReceiver: string
   accounts: string[]
 }
 
-const DEFAULT_GAS_LIMIT = 200_000n
+export type ExtraArgs = EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1
 
 /**
  * Encodes extra arguments for CCIP messages.
- * args.allowOutOfOrderExecution enforces ExtraArgsV2 (v1.5+)
+ * The args are *to* a dest network, but are encoded as a message *from* some source chain
  **/
 export function encodeExtraArgs(
   args: EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1,
-  from: 'evm' | 'solana' = 'evm',
+  from: ChainFamily = ChainFamily.EVM,
 ): string {
-  if (from === 'solana') {
-    if (!('allowOutOfOrderExecution' in args) || 'computeUnits' in args)
-      throw new Error('Solana can only encode EVMExtraArgsV2')
-    if (args.gasLimit == null) args.gasLimit = DEFAULT_GAS_LIMIT
-    const gasLimitUint128Le = toLeHex(args.gasLimit, 16)
-    return concat([
-      EVMExtraArgsV2Tag,
-      gasLimitUint128Le,
-      args.allowOutOfOrderExecution ? '0x01' : '0x00',
-    ])
-  }
-  if (!args) return '0x'
-  if ('computeUnits' in args) {
-    return concat([
-      SVMExtraArgsTag,
-      defaultAbiCoder.encode(
-        [SVMExtraArgsV1],
-        [
-          {
-            ...args,
-            tokenReceiver: args.tokenReceiver.startsWith('0x')
-              ? args.tokenReceiver
-              : toBeHex(decodeBase58(args.tokenReceiver), 32),
-            accounts: args.accounts.map((a) =>
-              a.startsWith('0x') ? a : toBeHex(decodeBase58(a), 32),
-            ),
-          },
-        ],
-      ),
-    ])
-  } else if ('allowOutOfOrderExecution' in args) {
-    if (args.gasLimit == null) args.gasLimit = DEFAULT_GAS_LIMIT
-    return concat([EVMExtraArgsV2Tag, defaultAbiCoder.encode([EVMExtraArgsV2], [args])])
-  } else if (args.gasLimit != null) {
-    return concat([EVMExtraArgsV1Tag, defaultAbiCoder.encode([EVMExtraArgsV1], [args])])
-  }
-  return '0x'
+  const chain = (supportedChains as Partial<Record<ChainFamily, ChainStatic>>)[from]
+  if (!chain) throw new Error(`Unsupported chain family: ${from}`)
+  return chain.encodeExtraArgs(args)
 }
 
 /**
@@ -92,58 +48,32 @@ export function encodeExtraArgs(
  * @returns extra arguments object if found
  **/
 export function parseExtraArgs(
-  data: string,
+  data: BytesLike,
+  from?: ChainFamily,
 ):
   | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
   | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
   | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
   | undefined {
-  try {
-    if (data === '0x') return { _tag: 'EVMExtraArgsV1' }
-    if (!data || data === '') return undefined
-
-    if (data.startsWith(EVMExtraArgsV1Tag)) {
-      const args = defaultAbiCoder.decode([EVMExtraArgsV1], dataSlice(data, 4))
-      return { ...((args[0] as Result).toObject() as EVMExtraArgsV1), _tag: 'EVMExtraArgsV1' }
-    }
-    if (data.startsWith(EVMExtraArgsV2Tag)) {
-      if (dataLength(data) === 4 + 16 + 1) {
-        // Solana-generated EVMExtraArgsV2 (21 bytes total)
-        return {
-          _tag: 'EVMExtraArgsV2',
-          gasLimit: toBigInt(getBytes(dataSlice(data, 4, 4 + 16)).reverse()), // from Uint128LE
-          allowOutOfOrderExecution: dataSlice(data, 4 + 16, 4 + 16 + 1) === '0x01',
-        }
-      }
-      if (dataLength(data) === 4 + 32 + 1) {
-        // Another Solana/Aptos variant (37 bytes total: 4 tag + 32 gasLimit + 1 allowOOOE)
-        return {
-          _tag: 'EVMExtraArgsV2',
-          gasLimit: toBigInt(getBytes(dataSlice(data, 4, 4 + 32)).reverse()), // from little-endian
-          allowOutOfOrderExecution: dataSlice(data, 4 + 32, 4 + 32 + 1) === '0x01',
-        }
-      }
-      const args = defaultAbiCoder.decode([EVMExtraArgsV2], dataSlice(data, 4))
-      return { ...((args[0] as Result).toObject() as EVMExtraArgsV2), _tag: 'EVMExtraArgsV2' }
-    }
-    if (data.startsWith(SVMExtraArgsTag)) {
-      const args = defaultAbiCoder.decode([SVMExtraArgsV1], dataSlice(data, 4))
-      const parsed = (args[0] as Result).toObject() as SVMExtraArgsV1
-      parsed.computeUnits = Number(parsed.computeUnits)
-      parsed.tokenReceiver = encodeBase58(parsed.tokenReceiver)
-      parsed.accounts = parsed.accounts.map((a: string) => encodeBase58(a))
-      return { ...parsed, _tag: 'SVMExtraArgsV1' }
-    }
-    return undefined
-  } catch (_error) {
-    // Handle any parsing errors gracefully
-    return undefined
+  if (!data || data === '') return
+  let chains
+  if (from) {
+    const chain = (supportedChains as Partial<Record<ChainFamily, ChainStatic>>)[from]
+    if (!chain) throw new Error(`Unsupported chain family: ${from}`)
+    chains = [chain]
+  } else {
+    chains = Object.values(supportedChains)
   }
+  for (const chain of chains) {
+    const decoded = chain.decodeExtraArgs(data)
+    if (decoded) return decoded
+  }
+  throw new Error(`Could not parse extraArgs from "${from}"`)
 }
 
 const SourceTokenData =
   'tuple(bytes sourcePoolAddress, bytes destTokenAddress, bytes extraData, uint64 destGasAmount)'
-export interface SourceTokenData {
+export type SourceTokenData = {
   sourcePoolAddress: string
   destTokenAddress: string
   extraData: string

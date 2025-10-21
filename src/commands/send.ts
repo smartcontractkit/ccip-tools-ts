@@ -1,86 +1,213 @@
-import { Contract, ZeroAddress, hexlify, isHexString, toUtf8Bytes, zeroPadValue } from 'ethers'
-import type { TypedContract } from 'ethers-abitype'
+import { type BytesLike, dataLength, toUtf8Bytes } from 'ethers'
+import type { Argv } from 'yargs'
 
-import TokenABI from '../abi/BurnMintERC677Token.ts'
-import RouterABI from '../abi/Router.ts'
+import type { GlobalOpts } from '../index.ts'
+import type { EVMChain } from '../lib/evm/index.ts'
+import type { ExtraArgs } from '../lib/extra-args.ts'
 import {
+  type CCIPVersion,
+  ChainFamily,
   bigIntReplacer,
-  chainIdFromName,
-  chainNameFromId,
-  chainSelectorFromId,
-  encodeExtraArgs,
   estimateExecGasForRequest,
   fetchCCIPMessagesInTx,
-  getOnRampLane,
+  networkInfo,
 } from '../lib/index.ts'
-import type { Providers } from '../providers.ts'
+import type { AnyMessage } from '../lib/types.ts'
+import { fetchChainsFromRpcs } from '../providers.ts'
 import { Format } from './types.ts'
 import {
-  getWallet,
+  logParsedError,
   parseTokenAmounts,
   prettyRequest,
   sourceToDestTokenAmounts,
   withDateTimestamp,
 } from './utils.ts'
+import { getDataBytes } from '../lib/utils.ts'
 
-type AnyMessage = Parameters<TypedContract<typeof RouterABI>['ccipSend']>[1]
+export const command = 'send <source> <router> <dest>'
+export const describe = 'Send a CCIP message from router on source to dest'
 
-export async function sendMessage(
-  providers: Providers,
-  argv: {
-    source: string
-    dest: string
-    router: string
-    receiver?: string
-    data?: string
-    gasLimit?: number
-    estimateGasLimit?: number
-    allowOutOfOrderExec?: boolean
-    feeToken?: string
-    transferTokens?: string[]
-    format: Format
-    wallet?: string
-  },
+export const builder = (yargs: Argv) =>
+  yargs
+    .positional('source', {
+      type: 'string',
+      demandOption: true,
+      describe: 'source network, chainId or name',
+      example: 'ethereum-testnet-sepolia',
+    })
+    .positional('router', {
+      type: 'string',
+      demandOption: true,
+      describe: 'router contract address on source',
+    })
+    .positional('dest', {
+      type: 'string',
+      demandOption: true,
+      describe: 'destination network, chainId or name',
+      example: 'ethereum-testnet-sepolia-arbitrum-1',
+    })
+    .options({
+      receiver: {
+        alias: 'R',
+        type: 'string',
+        describe:
+          'Receiver of the message; defaults to the sender wallet address if same network family',
+      },
+      data: {
+        alias: 'd',
+        type: 'string',
+        describe: 'Data to send in the message (non-hex will be utf-8 encoded)',
+        example: '0x1234',
+      },
+      'gas-limit': {
+        alias: ['L', 'compute-units'],
+        type: 'number',
+        describe:
+          'Gas limit for receiver callback execution; defaults to default configured on ramps',
+        default: 0,
+      },
+      'estimate-gas-limit': {
+        type: 'number',
+        describe:
+          'Estimate gas limit for receiver callback execution; argument is a % margin to add to the estimate',
+        example: '10',
+        conflicts: 'gas-limit',
+      },
+      'allow-out-of-order-exec': {
+        alias: 'ooo',
+        type: 'boolean',
+        describe:
+          'Allow execution of messages out of order (i.e. sender nonce not enforced, only v1.5+ lanes, mandatory for some dests)',
+      },
+      'fee-token': {
+        type: 'string',
+        describe:
+          'Address of the fee token (e.g. LINK address on source); if not provided, will pay in native',
+      },
+      'transfer-tokens': {
+        alias: 't',
+        type: 'array',
+        string: true,
+        describe: 'List of token amounts (on source) to transfer to the receiver',
+        example: '0xtoken=0.1',
+      },
+      wallet: {
+        alias: 'w',
+        type: 'string',
+        describe:
+          'Encrypted wallet json file path; password will be prompted if not provided in USER_KEY_PASSWORD envvar',
+      },
+      'token-receiver': {
+        type: 'string',
+        describe: "Address of the Solana's token receiver (if different than program's receiver",
+      },
+      account: {
+        type: 'array',
+        string: true,
+        describe:
+          "List of accounts needed by Solana's receiver program; append `=rw` to specify account as writable; can be specified multiple times",
+        example: 'requiredPdaAddress=rw',
+      },
+    })
+    .check(
+      ({ 'transfer-tokens': transferTokens }) =>
+        !transferTokens || transferTokens.every((t) => /^[^=]+=\d+(\.\d+)?$/.test(t)),
+    )
+
+export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
+  let destroy
+  const destroy$ = new Promise((resolve) => {
+    destroy = resolve
+  })
+  return sendMessage(argv, destroy$)
+    .catch((err) => {
+      process.exitCode = 1
+      if (!logParsedError(err)) console.error(err)
+    })
+    .finally(destroy)
+}
+
+async function sendMessage(
+  argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts,
+  destroy: Promise<unknown>,
 ) {
-  const sourceChainId = isNaN(+argv.source) ? chainIdFromName(argv.source) : +argv.source
-  const source = await providers.forChainId(sourceChainId)
-  const wallet = (await getWallet(argv)).connect(source)
+  const sourceNetwork = networkInfo(argv.source)
+  const destNetwork = networkInfo(argv.dest)
+  const getChain = fetchChainsFromRpcs(argv, undefined, destroy)
+  const source = await getChain(sourceNetwork.name)
+  const sender = await source.getWallet(argv)
 
-  const destChainId = isNaN(+argv.dest) ? chainIdFromName(argv.dest) : +argv.dest
-  const destSelector = chainSelectorFromId(destChainId)
-
-  const router = new Contract(argv.router, RouterABI, wallet) as unknown as TypedContract<
-    typeof RouterABI
-  >
-
-  let tokenAmounts: { token: string; amount: bigint }[] = []
-  if (argv.transferTokens) {
-    tokenAmounts = await parseTokenAmounts(source, argv.transferTokens)
+  let data: BytesLike
+  if (argv.data) {
+    try {
+      data = getDataBytes(argv.data)
+    } catch (_) {
+      data = toUtf8Bytes(argv.data)
+    }
+  } else {
+    data = '0x'
   }
 
-  const receiver = argv.receiver ?? (await wallet.getAddress())
-  const data = !argv.data
-    ? '0x'
-    : isHexString(argv.data)
-      ? argv.data
-      : hexlify(toUtf8Bytes(argv.data))
+  const tokenAmounts: { token: string; amount: bigint }[] = argv.transferTokens?.length
+    ? await parseTokenAmounts(source, argv.transferTokens)
+    : []
+
+  let receiver = argv.receiver
+  let tokenReceiver
+  let accounts,
+    accountIsWritableBitmap = 0n
+  if (destNetwork.family === ChainFamily.Solana) {
+    if (argv.tokenReceiver) tokenReceiver = argv.tokenReceiver
+    else if (!tokenAmounts.length) {
+      tokenReceiver = '11111111111111111111111111111111'
+    } else if (!dataLength(data)) {
+      // sending tokens without data, i.e. not for a receiver contract
+      tokenReceiver = receiver
+      receiver = '11111111111111111111111111111111'
+    } else {
+      throw new Error('--token-receiver is required when sending tokens with data')
+    }
+
+    if (argv.account) {
+      accounts = argv.account.map((account, i) => {
+        if (account.endsWith('=rw')) {
+          accountIsWritableBitmap |= 1n << BigInt(i)
+          account = account.substring(0, account.length - 3)
+        }
+        return account
+      })
+    } else accounts = [] as string[]
+  } else if (argv.tokenReceiver || argv.account?.length) {
+    throw new Error('--token-receiver and --account intended only for Solana dest')
+  }
+
+  if (!receiver) {
+    if (sourceNetwork.family !== destNetwork.family)
+      throw new Error('--receiver is required when sending to a different chain family')
+    receiver = sender
+  }
 
   if (argv.estimateGasLimit != null) {
-    const [destTokenAmounts, onRampAddress] = await sourceToDestTokenAmounts(tokenAmounts, {
-      router: argv.router,
+    if (destNetwork.family !== ChainFamily.EVM)
+      throw new Error(`Estimating gasLimit supported only on EVM, got=${destNetwork.family}`)
+    const dest = (await getChain(destNetwork.chainSelector)) as unknown as EVMChain
+    const onRamp = await source.getOnRampForRouter(argv.router, destNetwork.chainSelector)
+    const lane = {
+      sourceChainSelector: source.network.chainSelector,
+      destChainSelector: destNetwork.chainSelector,
+      onRamp,
+      version: (await source.typeAndVersion(onRamp))[1] as CCIPVersion,
+    }
+    const destTokenAmounts = await sourceToDestTokenAmounts(
       source,
-      dest: await providers.forChainId(destChainId),
-    })
-    const [lane] = await getOnRampLane(source, onRampAddress, destSelector)
+      destNetwork.chainSelector,
+      onRamp,
+      tokenAmounts,
+    )
 
-    const estimated = await estimateExecGasForRequest(await providers.forChainId(destChainId), {
+    const estimated = await estimateExecGasForRequest(source, dest, {
       lane,
-      message: {
-        sender: await wallet.getAddress(),
-        receiver,
-        data,
-        tokenAmounts: destTokenAmounts,
-      },
+      message: { sender, receiver, data, tokenAmounts: destTokenAmounts },
     })
     console.log('Estimated gasLimit:', estimated)
     argv.gasLimit = Math.ceil(estimated * (1 + argv.estimateGasLimit / 100))
@@ -92,64 +219,30 @@ export async function sendMessage(
     ...(argv.allowOutOfOrderExec != null
       ? { allowOutOfOrderExecution: argv.allowOutOfOrderExec }
       : {}),
-    ...(argv.gasLimit != null ? { gasLimit: BigInt(argv.gasLimit) } : {}),
+    ...(destNetwork.family === ChainFamily.Solana
+      ? { computeUnits: BigInt(argv.gasLimit) }
+      : { gasLimit: BigInt(argv.gasLimit) }),
+    ...(tokenReceiver ? { tokenReceiver } : {}),
+    ...(accounts ? { accounts, accountIsWritableBitmap } : {}),
   }
 
   const message: AnyMessage = {
-    receiver: zeroPadValue(receiver, 32), // receiver must be 32B value-encoded
+    receiver,
     data,
-    extraArgs: encodeExtraArgs(extraArgs),
-    feeToken: argv.feeToken || ZeroAddress, // feeToken==ZeroAddress means native
+    extraArgs: extraArgs as ExtraArgs,
+    feeToken: argv.feeToken, // feeToken==ZeroAddress means native
     tokenAmounts,
   }
 
+  await source.typeAndVersion(argv.router)
   // calculate fee
-  const fee = await router.getFee(destSelector, message)
+  const fee = await source.getFee(argv.router, destNetwork.chainSelector, message)
 
-  // make sure to approve once per token, for the total amount (including fee, if needed)
-  const amountsToApprove = tokenAmounts.reduce(
-    (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
-    {} as Record<string, bigint>,
-  )
-  if (message.feeToken !== ZeroAddress) {
-    amountsToApprove[message.feeToken as string] =
-      (amountsToApprove[message.feeToken as string] ?? 0n) + fee
-  }
-
-  // approve all tokens (including fee token) in parallel
-  let nonce = await source.getTransactionCount(await wallet.getAddress())
-  await Promise.all(
-    Object.entries(amountsToApprove).map(async ([token, amount]) => {
-      const contract = new Contract(token, TokenABI, wallet) as unknown as TypedContract<
-        typeof TokenABI
-      >
-      const allowance = await contract.allowance(await wallet.getAddress(), argv.router)
-      if (allowance < amount) {
-        // optimization: hardcode nonce and gasLimit to send all approvals in parallel without estimating
-        const tx = await contract.approve(argv.router, amount, { nonce: nonce++, gasLimit: 50_000 })
-        console.log('Approving', amount, token, 'for', argv.router, '=', tx.hash)
-        await tx.wait(1, 60_000)
-      }
-    }),
-  )
-
-  const tx = await router.ccipSend(destSelector, message, {
-    nonce: nonce++,
-    // if native fee, include it in value; otherwise, it's transferedFrom feeToken
-    ...(message.feeToken === ZeroAddress ? { value: fee } : {}),
-  })
-  console.log(
-    'Sending message to',
-    receiver,
-    '@',
-    chainNameFromId(destChainId),
-    ', tx_hash =',
-    tx.hash,
-  )
+  const tx = await source.sendMessage(argv.router, destNetwork.chainSelector, { ...message, fee })
+  console.log('🚀 Sending message to', receiver, '@', destNetwork.name, ', tx_hash =>', tx.hash)
 
   // print CCIPRequest from tx receipt
-  const receipt = (await tx.wait(1, 60_000))!
-  const request = (await fetchCCIPMessagesInTx(receipt))[0]
+  const request = (await fetchCCIPMessagesInTx(tx))[0]
 
   switch (argv.format) {
     case Format.log:

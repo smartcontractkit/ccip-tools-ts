@@ -3,7 +3,6 @@ import { PublicKey } from '@solana/web3.js'
 import { deserialize } from 'borsh'
 import { Interface, getAddress, hexlify, id, keccak256, randomBytes } from 'ethers'
 
-import TokenPoolABI from '../abi/BurnMintTokenPool_1_6_1.ts'
 import {
   LBTC_EVENT,
   encodeOffchainTokenData,
@@ -13,6 +12,7 @@ import {
 import type { CcipCctpMessageSentEvent } from './solana/types.ts'
 import { type CCIPRequest, defaultAbiCoder } from './types.ts'
 import { lazyCached } from './utils.ts'
+import TokenPoolABI from '../abi/BurnMintTokenPool_1_6_1.ts'
 
 const origFetch = global.fetch
 

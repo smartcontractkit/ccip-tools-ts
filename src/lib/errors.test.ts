@@ -1,4 +1,5 @@
 import { ErrorFragment, EventFragment, FunctionFragment, Result } from 'ethers'
+
 import { getErrorData, parseWithFragment, recursiveParseError } from './errors.ts'
 import { chainSelectorFromId } from './utils.ts'
 

@@ -2,6 +2,8 @@
 import { Contract, ZeroAddress } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
+import { Format } from './types.ts'
+import { formatDuration, prettyLane } from './utils.ts'
 import FeeQuoterABI from '../abi/FeeQuoter_1_6.ts'
 import RouterABI from '../abi/Router.ts'
 import {
@@ -14,15 +16,9 @@ import {
   chainSelectorFromId,
   decodeAddress,
   discoverOffRamp,
-  getOnRampLane,
-  getTypeAndVersion,
   networkInfo,
   toObject,
-  validateContractType,
 } from '../lib/index.ts'
-import type { Providers } from '../providers.ts'
-import { Format } from './types.ts'
-import { formatDuration, prettyLane } from './utils.ts'
 
 export async function showLaneConfigs(
   providers: Providers,

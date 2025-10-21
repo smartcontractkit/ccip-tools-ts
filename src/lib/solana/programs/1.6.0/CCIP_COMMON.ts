@@ -1,7 +1,112 @@
-import type { Idl } from '@coral-xyz/anchor'
+// generate:
+// fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/main/chains/solana/contracts/target/types/ccip_common.ts')
+//   .then((res) => res.text())
+//   .then((text) => text.trim())
+export type CcipCommon = {
+  version: '0.1.1'
+  name: 'ccip_common'
+  instructions: []
+  accounts: [
+    {
+      name: 'tokenAdminRegistry'
+      type: {
+        kind: 'struct'
+        fields: [
+          {
+            name: 'version'
+            type: 'u8'
+          },
+          {
+            name: 'administrator'
+            type: 'publicKey'
+          },
+          {
+            name: 'pendingAdministrator'
+            type: 'publicKey'
+          },
+          {
+            name: 'lookupTable'
+            type: 'publicKey'
+          },
+          {
+            name: 'writableIndexes'
+            type: {
+              array: ['u128', 2]
+            }
+          },
+          {
+            name: 'mint'
+            type: 'publicKey'
+          },
+          {
+            name: 'supportsAutoDerivation'
+            type: 'bool'
+          },
+        ]
+      }
+    },
+  ]
+  errors: [
+    {
+      code: 10000
+      name: 'InvalidSequenceInterval'
+      msg: 'The given sequence interval is invalid'
+    },
+    {
+      code: 10001
+      name: 'InvalidInputsPoolAccounts'
+      msg: 'Invalid pool accounts'
+    },
+    {
+      code: 10002
+      name: 'InvalidInputsTokenAccounts'
+      msg: 'Invalid token accounts'
+    },
+    {
+      code: 10003
+      name: 'InvalidInputsTokenAdminRegistryAccounts'
+      msg: 'Invalid Token Admin Registry account'
+    },
+    {
+      code: 10004
+      name: 'InvalidInputsLookupTableAccounts'
+      msg: 'Invalid LookupTable account'
+    },
+    {
+      code: 10005
+      name: 'InvalidInputsLookupTableAccountWritable'
+      msg: 'Invalid LookupTable account writable access'
+    },
+    {
+      code: 10006
+      name: 'InvalidInputsPoolSignerAccounts'
+      msg: 'Invalid pool signer account'
+    },
+    {
+      code: 10007
+      name: 'InvalidChainFamilySelector'
+      msg: 'Invalid chain family selector'
+    },
+    {
+      code: 10008
+      name: 'InvalidEncoding'
+      msg: 'Invalid encoding'
+    },
+    {
+      code: 10009
+      name: 'InvalidEVMAddress'
+      msg: 'Invalid EVM address'
+    },
+    {
+      code: 10010
+      name: 'InvalidSVMAddress'
+      msg: 'Invalid SVM address'
+    },
+  ]
+}
 
-export const CCIP_COMMON_IDL = {
-  version: '0.1.0-dev',
+export const IDL: CcipCommon = {
+  version: '0.1.1',
   name: 'ccip_common',
   instructions: [],
   accounts: [
@@ -35,6 +140,10 @@ export const CCIP_COMMON_IDL = {
           {
             name: 'mint',
             type: 'publicKey',
+          },
+          {
+            name: 'supportsAutoDerivation',
+            type: 'bool',
           },
         ],
       },
@@ -97,4 +206,5 @@ export const CCIP_COMMON_IDL = {
       msg: 'Invalid SVM address',
     },
   ],
-} as const satisfies Idl
+}
+// generate:end

@@ -1,59 +1,18 @@
-import { createHash } from 'crypto'
-import type { Connection } from '@solana/web3.js'
-import type { SourceTokenData } from '../extra-args.ts'
-import type { EVM2AnyMessageSent, ExecutionReport } from '../types.ts'
+import {
+  type Commitment,
+  type Connection,
+  type Signer,
+  type Transaction,
+  PublicKey,
+  TransactionMessage,
+  VersionedTransaction,
+} from '@solana/web3.js'
+import type { BytesLike } from 'ethers'
 
-export type MessageWithAccounts = ExecutionReport['message'] & {
-  tokenReceiver: string
-  computeUnits?: string | number | bigint
-  accountIsWritableBitmap?: string | number | bigint
-  accounts?: string[]
-}
+import { getDataBytes, sleep } from '../utils.ts'
 
-export function isMessageWithAccounts(
-  message: ExecutionReport['message'],
-): message is MessageWithAccounts {
-  return (
-    'tokenReceiver' in message && 'computeUnits' in message && 'accountIsWritableBitmap' in message
-  )
-}
-
-function hexToBase64(hex: string): string {
-  const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex
-  const buffer = Buffer.from(cleanHex, 'hex')
-  return buffer.toString('base64')
-}
-
-// Execution reports can be generated in different ways, depending on whether the message
-// was parsed from EVM or from solana logs. This function ensures that they both result
-// in the same encoding (some values are b64 when parsed from a SVM context and hex from EVM.)
-export function normalizeExecutionReportForSolana(report: ExecutionReport): ExecutionReport {
-  const isHex = (str: string): boolean => {
-    return /^0x[0-9a-fA-F]*$/.test(str)
-  }
-
-  return {
-    ...report,
-    message: {
-      ...report.message,
-      data: isHex(report.message.data) ? hexToBase64(report.message.data) : report.message.data,
-      tokenAmounts: report.message.tokenAmounts.map((amount) =>
-        normalizeTokenAmountForSolana(amount),
-      ),
-    },
-  }
-}
-
-type TokenAmount = EVM2AnyMessageSent['tokenAmounts'][number] & SourceTokenData
-
-export function normalizeTokenAmountForSolana(data: TokenAmount): TokenAmount {
-  const isHex = (str: string): boolean => /^0x[0-9a-fA-F]*$/.test(str)
-
-  return {
-    ...data,
-    extraData: isHex(data.extraData) ? hexToBase64(data.extraData) : data.extraData,
-    destExecData: isHex(data.destExecData) ? hexToBase64(data.destExecData) : data.destExecData,
-  }
+export function bytesToBuffer(bytes: BytesLike): Buffer {
+  return Buffer.from(getDataBytes(bytes).buffer)
 }
 
 export async function waitForFinalization(
@@ -69,21 +28,61 @@ export async function waitForFinalization(
     if (info?.confirmationStatus === 'finalized') {
       return
     }
-    await new Promise((res) => setTimeout(res, intervalMs))
+    await sleep(intervalMs)
   }
 
   throw new Error(`Transaction ${signature} not finalized after timeout`)
 }
 
+export function camelToSnakeCase(str: string): string {
+  return str
+    .replace(/([A-Z]+)([A-Z][a-z]|$)/g, (_, p1: string, p2: string) => {
+      if (p2) {
+        return `_${p1.slice(0, -1).toLowerCase()}_${p2.toLowerCase()}`
+      }
+      return `_${p1.toLowerCase()}`
+    })
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/^_/, '')
+}
+
 /**
- * Computes 8-byte Anchor event discriminant from event name
- *
- * @param eventName - Anchor event name (e.g., "CcipCctpMessageSentEvent")
- * @returns buffer consisting of SHA256("event:{eventName}") truncated to first 8 bytes
+ * Used as `provider` in anchor's `Program` constructor, to support `.view()` simulations
+ * @param connection - Connection to the Solana network
+ * @param feePayer - Fee payer for the simulated transaction
+ * @returns Value returned by the simulated method
  */
-export function computeAnchorEventDiscriminant(eventName: string): Buffer {
-  const hash = createHash('sha256')
-  hash.update(`event:${eventName}`)
-  const fullHash = hash.digest()
-  return fullHash.subarray(0, 8)
+export function simulationProvider(
+  connection: Connection,
+  feePayer: PublicKey = new PublicKey('11111111111111111111111111111112'),
+) {
+  return {
+    connection,
+    simulate: async (
+      tx: Transaction | VersionedTransaction,
+      _signers?: Signer[],
+      commitment: Commitment = 'confirmed',
+    ) => {
+      if (!('message' in tx)) {
+        const message = new TransactionMessage({
+          payerKey: feePayer,
+          recentBlockhash: '11111111111111111111111111111112',
+          instructions: tx.instructions,
+        })
+        tx = new VersionedTransaction(message.compileToV0Message())
+      }
+      const result = await connection.simulateTransaction(tx, {
+        commitment,
+        replaceRecentBlockhash: true,
+        sigVerify: false,
+      })
+
+      if (result.value.err) {
+        throw new Error(`Simulation failed: ${JSON.stringify(result.value.err)}`)
+      }
+
+      return result.value
+    },
+  }
 }

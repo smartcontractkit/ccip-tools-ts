@@ -1,80 +1,28 @@
-import { readFile } from 'node:fs/promises'
-import { password, select } from '@inquirer/prompts'
-import { LedgerSigner } from '@xlabs-xyz/ledger-signer-ethers-v6'
+import { select } from '@inquirer/prompts'
 import bs58 from 'bs58'
-import {
-  type Addressable,
-  type Provider,
-  type Signer,
-  BaseWallet,
-  Contract,
-  Result,
-  SigningKey,
-  Wallet,
-  ZeroAddress,
-  dataSlice,
-  formatUnits,
-  hexlify,
-  isHexString,
-  parseUnits,
-} from 'ethers'
-import type { TypedContract } from 'ethers-abitype'
+import { Result, dataSlice, formatUnits, isBytesLike, isHexString, parseUnits } from 'ethers'
 
-import TokenABI from '../abi/BurnMintERC677Token.ts'
-import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.ts'
-import RouterABI from '../abi/Router.ts'
-import TokenAdminRegistry from '../abi/TokenAdminRegistry_1_5.ts'
+import type { Chain } from '../lib/chain.ts'
 import {
   type CCIPCommit,
-  type CCIPContract,
-  type CCIPContractType,
   type CCIPExecution,
   type CCIPRequest,
   type Lane,
-  CCIPVersion,
   ExecutionState,
   chainIdFromSelector,
   chainNameFromId,
-  decodeAddress,
-  getContractProperties,
   getErrorData,
-  getOnRampLane,
-  getProviderNetwork,
   networkInfo,
   parseWithFragment,
   recursiveParseError,
 } from '../lib/index.ts'
-import { ChainFamily } from '../lib/types.ts'
-
-export async function getWallet(argv?: { wallet?: string }): Promise<Signer> {
-  if ((argv?.wallet ?? '').startsWith('ledger')) {
-    let derivationPath = argv!.wallet!.split(':')[1]
-    if (derivationPath && !isNaN(Number(derivationPath)))
-      derivationPath = `m/44'/60'/${derivationPath}'/0/0`
-    const ledger = await LedgerSigner.create(null, derivationPath)
-    console.info('Ledger connected:', await ledger.getAddress(), `at "${ledger.path}"`)
-    return ledger
-  }
-  if (argv?.wallet) {
-    let pw = process.env['USER_KEY_PASSWORD']
-    if (!pw) pw = await password({ message: 'Enter password for json wallet' })
-    return Wallet.fromEncryptedJson(await readFile(argv.wallet, 'utf8'), pw)
-  }
-  const keyFromEnv = process.env['USER_KEY'] || process.env['OWNER_KEY']
-  if (keyFromEnv) {
-    return new BaseWallet(
-      new SigningKey(hexlify((keyFromEnv.startsWith('0x') ? '' : '0x') + keyFromEnv)),
-    )
-  }
-  throw new Error(
-    'Could not get wallet; please, set USER_KEY envvar as a hex-encoded private key, or --wallet option',
-  )
-}
 
 export async function selectRequest(
   requests: readonly CCIPRequest[],
   promptSuffix?: string,
+  hints?: { logIndex?: number },
 ): Promise<CCIPRequest> {
+  if (hints?.logIndex != null) requests = requests.filter((req) => req.log.index === hints.logIndex)
   if (requests.length === 1) return requests[0]
   const answer = await select({
     message: `${requests.length} messageIds found; select one${promptSuffix ? ' ' + promptSuffix : ''}`,
@@ -121,20 +69,15 @@ export function prettyLane(lane: Lane) {
 }
 
 async function formatToken(
-  source: Provider,
+  source: Chain,
   ta: { amount: bigint } & ({ token: string } | { sourcePoolAddress: string }),
 ): Promise<string> {
   let token
   if ('token' in ta) token = ta.token
   else {
-    ;[token] = await getContractProperties([ta.sourcePoolAddress, TokenPoolABI, source], 'getToken')
+    token = await source.getTokenForTokenPool(ta.sourcePoolAddress)
   }
-  const [decimals_, symbol] = await getContractProperties(
-    [token, TokenABI, source],
-    'decimals',
-    'symbol',
-  )
-  const decimals = Number(decimals_)
+  const { symbol, decimals } = await source.getTokenInfo(token)
   return `${formatUnits(ta.amount, decimals)} ${symbol}`
 }
 
@@ -209,33 +152,43 @@ export function formatDuration(secs: number) {
     .join('')
 }
 
-export async function prettyRequest(source: Provider | null, request: CCIPRequest) {
-  // route to the appropriate implementation based on chain family
-  const chainInfo = networkInfo(request.lane.sourceChainSelector)
-  switch (chainInfo.family) {
-    case ChainFamily.Solana:
-      prettyRequestSolana(request)
-      break
-    default:
-      // For EVM requests, we need a provider
-      if (!source) {
-        throw new Error('Provider is required for EVM requests')
-      }
-      await prettyRequestEVM(source, request)
+function omit<T extends Record<string, unknown>, K extends string>(
+  obj: T,
+  ...keys: K[]
+): Omit<T, K> {
+  const result = { ...obj }
+  for (const key of keys) {
+    delete result[key]
   }
+  return result
 }
 
-async function prettyRequestEVM(source: Provider, request: CCIPRequest) {
+export async function prettyRequest(source: Chain, request: CCIPRequest) {
   prettyLane(request.lane)
   console.info('Request (source):')
 
   let finalized
   try {
-    finalized = await source.getBlock('finalized')
+    finalized = await source.getBlockTimestamp('finalized')
   } catch (_) {
     // no finalized tag support
   }
   const nonce = Number(request.message.header.nonce)
+
+  const rest = omit(
+    request.message,
+    'header',
+    'sender',
+    'receiver',
+    'tokenAmounts',
+    'data',
+    'feeToken',
+    'feeTokenAmount',
+    'sourceTokenData',
+    'sourceChainSelector',
+    'extraArgs',
+    'accounts',
+  )
   console.table({
     messageId: request.message.header.messageId,
     ...(request.tx.from ? { origin: request.tx.from } : {}),
@@ -254,8 +207,8 @@ async function prettyRequestEVM(source: Provider, request: CCIPRequest) {
     timestamp: `${formatDate(request.timestamp)} (${formatDuration(Date.now() / 1e3 - request.timestamp)} ago)`,
     finalized:
       finalized &&
-      (finalized.timestamp < request.timestamp
-        ? formatDuration(request.timestamp - finalized.timestamp) + ' left'
+      (finalized < request.timestamp
+        ? formatDuration(request.timestamp - finalized) + ' left'
         : true),
     fee: await formatToken(source, {
       token: request.message.feeToken,
@@ -266,93 +219,84 @@ async function prettyRequestEVM(source: Provider, request: CCIPRequest) {
       await Promise.all(request.message.tokenAmounts.map(formatToken.bind(null, source))),
     ),
     ...formatData('data', request.message.data),
-  })
-}
-
-export function prettyRequestSolana(request: CCIPRequest) {
-  prettyLane(request.lane)
-  console.info('Request (source):')
-
-  //TODO: We should replicate what we did for o11y, read TP PDAs and extract Metaplex Metadata here. Using these hardcoded maps for now.
-  const knownTokens: Record<string, { symbol: string; decimals: number }> = {
-    So11111111111111111111111111111111111111112: { symbol: 'SOL', decimals: 9 },
-    '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU': { symbol: 'USDC', decimals: 6 }, // devnet
-    EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: { symbol: 'USDC', decimals: 6 }, // mainnet
-  }
-
-  // Pool-specific token mapping
-  const knownPools: Record<string, { symbol: string; decimals: number }> = {
-    // CCTP Devnet TP
-    D22aGkYvJiFJ9tpxUV1RUWkNUy4FSUBk2NAvwQQD2G9Y: { symbol: 'USDC', decimals: 6 },
-  }
-
-  const nonce = Number(request.message.header.nonce)
-
-  const feeTokenInfo = knownTokens[request.message.feeToken] || { symbol: 'Unknown', decimals: 0 }
-  const formattedFee =
-    feeTokenInfo.decimals > 0
-      ? `${formatUnits(request.message.feeTokenAmount, feeTokenInfo.decimals)} ${feeTokenInfo.symbol}`
-      : `${request.message.feeTokenAmount} ${feeTokenInfo.symbol}`
-
-  const formattedTokens = request.message.tokenAmounts.map((ta) => {
-    const destTokenAddr =
-      typeof ta.destTokenAddress === 'string'
-        ? decodeAddress(ta.destTokenAddress, networkInfo(request.lane.destChainSelector).family)
-        : 'unknown'
-
-    const srcPoolAddr =
-      'sourcePoolAddress' in ta && typeof ta.sourcePoolAddress === 'string'
-        ? ta.sourcePoolAddress
-        : 'unknown'
-
-    let amount = ta.amount.toString()
-    if (srcPoolAddr !== 'unknown' && knownPools[srcPoolAddr]) {
-      const poolInfo = knownPools[srcPoolAddr]
-      amount = `${formatUnits(ta.amount, poolInfo.decimals)} ${poolInfo.symbol}`
-    }
-    return `${amount} from ${srcPoolAddr} of ${destTokenAddr}`
-  })
-
-  console.table({
-    messageId: request.message.header.messageId,
-    sender: request.message.sender,
-    receiver: decodeAddress(
-      request.message.receiver,
-      networkInfo(request.lane.destChainSelector).family,
-    ),
-    sequenceNumber: Number(request.message.header.sequenceNumber),
-    nonce: nonce === 0 ? '0 => allow out-of-order exec' : nonce,
-    ...('gasLimit' in request.message
-      ? { gasLimit: Number(request.message.gasLimit) }
-      : 'computeUnits' in request.message
-        ? { computeUnits: Number(request.message.computeUnits) }
-        : {}),
-    transactionHash: request.log.transactionHash,
-    blockNumber: request.log.blockNumber,
-    timestamp: `${formatDate(request.timestamp)} (${formatDuration(Date.now() / 1e3 - request.timestamp)} ago)`,
-    fee: formattedFee,
-    ...formatArray('tokens', formattedTokens),
-    ...formatData('data', request.message.data),
+    ...('accounts' in request.message ? formatArray('accounts', request.message.accounts) : {}),
+    ...rest,
   })
 }
 
 export async function prettyCommit(
-  dest: Provider,
+  dest: Chain,
   commit: CCIPCommit,
   request: { timestamp: number },
 ) {
   console.info('Commit (dest):')
-  const timestamp = (await dest.getBlock(commit.log.blockNumber))!.timestamp
+  const timestamp = await dest.getBlockTimestamp(commit.log.blockNumber)
   console.table({
     merkleRoot: commit.report.merkleRoot,
     min: Number(commit.report.minSeqNr),
     max: Number(commit.report.maxSeqNr),
-    origin: (await dest.getTransaction(commit.log.transactionHash))?.from,
+    origin: (await dest.getTransaction(commit.log.transactionHash)).from,
     contract: commit.log.address,
     transactionHash: commit.log.transactionHash,
     blockNumber: commit.log.blockNumber,
     timestamp: `${formatDate(timestamp)} (${formatDuration(timestamp - request.timestamp)} after request)`,
   })
+}
+
+/**
+ * Add line breaks to a string to fit within a specified column width
+ * @param text - The input string to wrap
+ * @param maxWidth - Maximum column width before wrapping
+ * @param threshold - Percentage of maxWidth to look back for spaces (default 0.1 = 10%)
+ * @returns The wrapped string with line breaks inserted
+ */
+function wrapText(text: string, maxWidth: number, threshold: number = 0.1): string[] {
+  const lines: string[] = []
+
+  // First split by existing line breaks
+  const existingLines = text.split('\n')
+
+  for (const line of existingLines) {
+    const words = line.split(' ')
+    let currentLine = ''
+
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word
+
+      if (testLine.length <= maxWidth) {
+        currentLine = testLine
+      } else {
+        if (currentLine) {
+          lines.push(currentLine)
+          currentLine = word
+        } else {
+          // Word is longer than maxWidth, break it
+          const thresholdDistance = Math.floor(maxWidth * threshold)
+          let remaining = word
+
+          while (remaining.length > maxWidth) {
+            let breakPoint = maxWidth
+            // Look for a good break point within threshold distance
+            for (let i = maxWidth - thresholdDistance; i < maxWidth; i++) {
+              if (remaining[i] === '-' || remaining[i] === '_') {
+                breakPoint = i + 1
+                break
+              }
+            }
+            lines.push(remaining.substring(0, breakPoint))
+            remaining = remaining.substring(breakPoint)
+          }
+          currentLine = remaining
+        }
+      }
+    }
+
+    if (currentLine) {
+      lines.push(currentLine)
+    }
+  }
+
+  return lines
 }
 
 export function prettyReceipt(
@@ -362,10 +306,20 @@ export function prettyReceipt(
 ) {
   console.table({
     state: receipt.receipt.state === ExecutionState.Success ? '✅ success' : '❌ failed',
-    ...formatData('returnData', receipt.receipt.returnData, true),
+    ...(receipt.receipt.state !== ExecutionState.Success ||
+    (receipt.receipt.returnData && receipt.receipt.returnData !== '0x')
+      ? isBytesLike(receipt.receipt.returnData)
+        ? formatData('returnData', receipt.receipt.returnData, true)
+        : Object.fromEntries(
+            wrapText(
+              receipt.receipt.returnData,
+              Math.max(100, +(process.env.COLUMNS || 80) * 0.9),
+            ).map((l, i) => [i ? ' '.repeat(i) : 'returnData', l]),
+          )
+      : {}),
     ...(receipt.receipt.gasUsed ? { gasUsed: Number(receipt.receipt.gasUsed) } : {}),
     ...(origin ? { origin } : {}),
-    offRamp: receipt.log.address,
+    contract: receipt.log.address,
     transactionHash: receipt.log.transactionHash,
     logIndex: receipt.log.index,
     blockNumber: receipt.log.blockNumber,
@@ -406,11 +360,11 @@ export function logParsedError(err: unknown): boolean {
 /**
  * Parse `--transfer-tokens token1=amount1 token2=amount2 ...` into `{ token, amount }[]`
  **/
-export async function parseTokenAmounts(source: Provider, transferTokens: readonly string[]) {
+export async function parseTokenAmounts(source: Chain, transferTokens: readonly string[]) {
   return Promise.all(
     transferTokens.map(async (tokenAmount) => {
       const [token, amount_] = tokenAmount.split('=')
-      const [decimals] = await getContractProperties([token, TokenABI, source], 'decimals')
+      const { decimals } = await source.getTokenInfo(token)
       const amount = parseUnits(amount_, decimals)
       return { token, amount }
     }),
@@ -433,66 +387,23 @@ export async function* yieldResolved<T>(promises: readonly Promise<T>[]): AsyncG
   }
 }
 
-export async function sourceToDestTokenAmounts<S extends { token: string }>(
+export async function sourceToDestTokenAmounts<S extends { token: string; amount: bigint }>(
+  source: Chain,
+  destChainSelector: bigint,
+  onRamp: string,
   sourceTokenAmounts: readonly S[],
-  { router: routerAddress, source, dest }: { router: string; source: Provider; dest: Provider },
-): Promise<[(Omit<S, 'token'> & { destTokenAddress: string })[], string]> {
-  const { name: sourceName } = await getProviderNetwork(source)
-  const { chainSelector: destSelector, name: destName } = await getProviderNetwork(dest)
-
-  const router = new Contract(routerAddress, RouterABI, source) as unknown as TypedContract<
-    typeof RouterABI
-  >
-  const onRampAddress = (await router.getOnRamp(destSelector)) as string
-  if (!onRampAddress || onRampAddress === ZeroAddress)
-    throw new Error(`No "${sourceName}" -> "${destName}" lane on ${routerAddress}`)
-  const [lane, onRamp] = await getOnRampLane(source, onRampAddress, destSelector)
-
-  let tokenAdminRegistryAddress
-  if (lane.version < CCIPVersion.V1_5) {
-    throw new Error('Deprecated lane version: ' + lane.version)
-  } else {
-    ;({ tokenAdminRegistry: tokenAdminRegistryAddress } = await (
-      onRamp as CCIPContract<
-        typeof CCIPContractType.OnRamp,
-        typeof CCIPVersion.V1_5 | typeof CCIPVersion.V1_6
-      >
-    ).getStaticConfig())
-  }
-  const tokenAdminRegistry = new Contract(
-    tokenAdminRegistryAddress,
-    TokenAdminRegistry,
-    source,
-  ) as unknown as TypedContract<typeof TokenAdminRegistry>
-
-  let pools: readonly (string | Addressable)[] = []
-  if (sourceTokenAmounts.length) {
-    pools = await tokenAdminRegistry.getPools(sourceTokenAmounts.map(({ token }) => token))
-    const missing = sourceTokenAmounts.filter((_, i) => (pools[i] as string).match(/^0x0+$/))
-    if (missing.length) {
-      throw new Error(
-        `Token${missing.length > 1 ? 's' : ''} not supported: ${missing.map(({ token }) => token).join(', ')}`,
+): Promise<(Omit<S, 'token'> & { sourcePoolAddress: string; destTokenAddress: string })[]> {
+  const tokenAdminRegistry = await source.getTokenAdminRegistryForOnRamp(onRamp)
+  return Promise.all(
+    sourceTokenAmounts.map(async ({ token, ...rest }) => {
+      const sourcePoolAddress = await source.getTokenPoolForToken(tokenAdminRegistry, token)
+      const destTokenAddress = await source.getRemoteTokenForTokenPool(
+        sourcePoolAddress,
+        destChainSelector,
       )
-    }
-  }
-
-  return [
-    await Promise.all(
-      sourceTokenAmounts.map(async ({ token, ...ta }, i) => {
-        const pool = new Contract(pools[i], TokenPoolABI, source) as unknown as TypedContract<
-          typeof TokenPoolABI
-        >
-        const remoteToken = await pool.getRemoteToken(destSelector)
-        const destToken = decodeAddress(remoteToken, networkInfo(destSelector).family)
-        if (destToken === ZeroAddress)
-          throw new Error(
-            `Dest "${destName}" not supported by tokenPool ${pools[i] as string} for token ${token}`,
-          )
-        return { ...ta, destTokenAddress: destToken }
-      }),
-    ),
-    onRampAddress,
-  ]
+      return { ...rest, sourcePoolAddress, destTokenAddress }
+    }),
+  )
 }
 
 /**

@@ -1,4 +1,3 @@
-import type { Program } from '@coral-xyz/anchor'
 import {
   type Abi,
   type AbiParameterToPrimitiveType,
@@ -7,9 +6,9 @@ import {
   type SolidityTuple,
   parseAbi,
 } from 'abitype'
-import { type Addressable, type Log, AbiCoder } from 'ethers'
-import type { TypedContract } from 'ethers-abitype'
+import { type BytesLike, type Log, AbiCoder } from 'ethers'
 
+import type { ChainFamily, ChainTransaction } from './chain.ts'
 import CommitStore_1_2_ABI from '../abi/CommitStore_1_2.ts'
 import CommitStore_1_5_ABI from '../abi/CommitStore_1_5.ts'
 import EVM2EVMOffRamp_1_2_ABI from '../abi/OffRamp_1_2.ts'
@@ -18,12 +17,58 @@ import OffRamp_1_6_ABI from '../abi/OffRamp_1_6.ts'
 import EVM2EVMOnRamp_1_2_ABI from '../abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from '../abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from '../abi/OnRamp_1_6.ts'
-import type { SourceTokenData, parseExtraArgs } from './extra-args.ts'
 import type {
-  CCIP_SOLANA_VERSION_MAP,
-  SolanaCCIPIdl,
-  SupportedSolanaCCIPVersion,
-} from './solana/programs/versioning.ts'
+  CCIPMessage_EVM,
+  CCIPMessage_V1_2_EVM,
+  CCIPMessage_V1_5_EVM,
+  CCIPMessage_V1_6_EVM,
+} from './evm/messages.ts'
+import type { ExtraArgs } from './extra-args.ts'
+import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
+// v1.6 Base type from EVM contains the intersection of all other CCIPMessage v1.6 types
+export type { CCIPMessage_V1_6 } from './evm/messages.ts'
+
+/**
+ * DeepReadonly is a type that recursively makes all properties of an object readonly.
+ */
+export type DeepReadonly<T> = Readonly<{
+  [K in keyof T]: T[K] extends number | string | symbol // Is it a primitive? Then make it readonly
+    ? Readonly<T[K]>
+    : // Is it an array of items? Then make the array readonly and the item as well
+      T[K] extends Array<infer A>
+      ? Readonly<Array<DeepReadonly<A>>>
+      : // It is some other object, make it readonly as well
+        DeepReadonly<T[K]>
+}>
+
+/**
+ * "Fix" for intersecting types containing arrays: A[] & B[] => (A & B)[]
+ * Usually, if you intersect { arr: A[] } & { arr: B[] }, arr will have type A[] & B[],
+ * i.e. all/each *index* of A[] and B[] should be present in the intersection, with quite undefined
+ * types of the elements themselves, oftentimes assigning only one of A or B to the element type;
+ * This converts deeply to (A & B)[], i.e. each *element* should have all properties of A & B
+ */
+export type MergeArrayElements<T, U> = {
+  [K in keyof (T & U)]: K extends keyof T & keyof U
+    ? T[K] extends unknown[]
+      ? U[K] extends unknown[]
+        ? (T[K][number] & U[K][number])[] // Intersect element types, both rw: A[] & B[] => (A & B)[]
+        : U[K] extends readonly unknown[]
+          ? readonly (T[K][number] & U[K][number])[] // Intersect element types, 2nd ro
+          : never
+      : T[K] extends readonly unknown[]
+        ? U[K] extends readonly unknown[]
+          ? readonly (T[K][number] & U[K][number])[] // Intersect element types, 1st or both ro
+          : never
+        : U[K] extends readonly unknown[]
+          ? never
+          : MergeArrayElements<T[K], U[K]> // Recurse deeper
+    : K extends keyof T
+      ? T[K]
+      : K extends keyof U
+        ? U[K]
+        : never
+}
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
@@ -60,44 +105,19 @@ export const CCIP_ABIs = {
   },
 } as const satisfies Record<CCIPContractType, Record<CCIPVersion, Abi>>
 
-export type CCIPContractEVM<T extends CCIPContractType, V extends CCIPVersion> = TypedContract<
-  (typeof CCIP_ABIs)[T][V]
->
+type ChainFamilyWithId<F extends ChainFamily> = F extends typeof ChainFamily.EVM
+  ? { family: typeof ChainFamily.EVM; chainId: number }
+  : F extends typeof ChainFamily.Solana
+    ? { family: typeof ChainFamily.Solana; chainId: string }
+    : F extends typeof ChainFamily.Aptos
+      ? { family: typeof ChainFamily.Aptos; chainId: `aptos:${number}` }
+      : never
 
-export type CCIPContractSolana<
-  T extends SolanaCCIPIdl,
-  V extends SupportedSolanaCCIPVersion,
-> = Program<(typeof CCIP_SOLANA_VERSION_MAP)[V][T]>
-
-export type CCIPContract =
-  | {
-      family: typeof ChainFamily.EVM
-      type: CCIPContractType
-      contract: CCIPContractEVM<CCIPContractType, CCIPVersion>
-    }
-  | {
-      family: typeof ChainFamily.Solana
-      type: SolanaCCIPIdl
-      program: CCIPContractSolana<SolanaCCIPIdl, SupportedSolanaCCIPVersion>
-    }
-
-export const ChainFamily = {
-  EVM: 'evm',
-  Solana: 'solana',
-  Aptos: 'aptos',
-  Test: 'test',
-} as const
-export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
-
-export type NetworkInfo = {
+export type NetworkInfo<F extends ChainFamily = ChainFamily> = {
   chainSelector: bigint
   name: string
   isTestnet: boolean
-} & (
-  | { family: typeof ChainFamily.EVM; chainId: number }
-  | { family: typeof ChainFamily.Solana; chainId: string }
-  | { family: typeof ChainFamily.Aptos; chainId: `aptos:${number}` }
-)
+} & ChainFamilyWithId<F>
 
 export interface Lane<V extends CCIPVersion = CCIPVersion> {
   sourceChainSelector: bigint
@@ -106,47 +126,16 @@ export interface Lane<V extends CCIPVersion = CCIPVersion> {
   version: V
 }
 
-// addresses often come as `string | Addressable`, this type cleans them up to just `string`
-type CleanAddressable<T> = T extends string | Addressable
-  ? string
-  : T extends Record<string, unknown>
-    ? { [K in keyof T]: CleanAddressable<T[K]> }
-    : T extends readonly unknown[]
-      ? readonly CleanAddressable<T[number]>[]
-      : T
-
-// v1.2-v1.5 Message ()
-type EVM2AnyMessageRequested = CleanAddressable<
-  AbiParametersToPrimitiveTypes<
-    ExtractAbiEvent<typeof EVM2EVMOnRamp_1_5_ABI, 'CCIPSendRequested'>['inputs']
-  >[0]
->
-
-// v1.6+ Message
-export type EVM2AnyMessageSent = CleanAddressable<
-  AbiParametersToPrimitiveTypes<
-    ExtractAbiEvent<typeof OnRamp_1_6_ABI, 'CCIPMessageSent'>['inputs']
-  >[2]
->
-
 export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
   | typeof CCIPVersion.V1_2
   | typeof CCIPVersion.V1_5
-  ? Omit<EVM2AnyMessageRequested, 'tokenAmounts'> & {
-      header: {
-        messageId: string
-        sequenceNumber: bigint
-        nonce: bigint
-        sourceChainSelector: bigint
-      }
-      tokenAmounts: readonly (EVM2AnyMessageRequested['tokenAmounts'][number] &
-        Partial<SourceTokenData>)[]
-    }
-  : Omit<EVM2AnyMessageSent, 'tokenAmounts'> & {
-      tokenAmounts: readonly (EVM2AnyMessageSent['tokenAmounts'][number] & SourceTokenData)[]
-    } & Omit<NonNullable<ReturnType<typeof parseExtraArgs>>, '_tag'>
+  ? CCIPMessage_EVM<V>
+  : CCIPMessage_V1_6_EVM | CCIPMessage_V1_6_Solana
 
-type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'data' | 'blockNumber' | 'transactionHash'>
+export type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'blockNumber' | 'transactionHash'> & {
+  data: unknown
+  tx?: ChainTransaction
+}
 
 export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
   lane: Lane<V>
@@ -166,6 +155,7 @@ export interface CCIPCommit {
 }
 
 export const ExecutionState = {
+  InProgress: 1,
   Success: 2,
   Failed: 3,
 } as const
@@ -202,9 +192,23 @@ export interface CCIPExecution {
   timestamp: number
 }
 
-export type ExecutionReport = {
-  message: CCIPMessage<typeof CCIPVersion.V1_6>
-  offchainTokenData: string[]
-  proofs: string[]
-  sourceChainSelector: bigint
+export type OffchainTokenData = { _tag: string; [k: string]: BytesLike } | undefined
+
+export type ExecutionReport<M extends CCIPMessage = CCIPMessage> = {
+  message: M
+  proofs: readonly BytesLike[]
+  proofFlagBits: bigint
+  merkleRoot: string
+  offchainTokenData: readonly OffchainTokenData[]
+}
+
+/**
+ * A message to be sent to another network
+ */
+export type AnyMessage = {
+  receiver: BytesLike
+  data: BytesLike
+  extraArgs: ExtraArgs
+  tokenAmounts?: readonly { token: string; amount: bigint }[]
+  feeToken?: string
 }

@@ -1,10 +1,11 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument,@typescript-eslint/no-unsafe-member-access */
+// @ts-check
 import eslint from '@eslint/js'
+import { defineConfig } from 'eslint/config'
 import importPlugin from 'eslint-plugin-import'
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
-import tseslint, { configs as tseslintConfigs } from 'typescript-eslint'
+import { configs as tseslintConfigs } from 'typescript-eslint'
 
-export default tseslint.config(
+export default defineConfig(
   eslint.configs.recommended,
   eslintPluginPrettierRecommended,
   importPlugin.flatConfigs.recommended,
@@ -14,7 +15,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['*.js'],
+          allowDefaultProject: ['*.js', '*.mjs'],
         },
         tsconfigRootDir: import.meta.dirname,
       },
@@ -61,12 +62,14 @@ export default tseslint.config(
           project: ['tsconfig.json'],
         },
       },
-      'import/extensions': ['.ts', '.js'],
+      'import/extensions': ['.ts', '.js', '.mjs'],
     },
     rules: {
       'import/order': [
         'warn',
         {
+          groups: ['builtin', 'external', 'internal', ['parent', 'sibling', 'index']],
+          'newlines-between': 'always',
           named: { enabled: true, import: true, export: true, types: 'types-first' },
           alphabetize: { order: 'asc' },
         },

@@ -1,7 +1,7 @@
 import { dataLength, isBytesLike, isHexString } from 'ethers'
 
-import { parseExtraArgs, parseWithFragment, recursiveParseError } from '../lib/index.ts'
 import { formatResult } from './utils.ts'
+import { parseExtraArgs, parseWithFragment, recursiveParseError } from '../lib/index.ts'
 
 export function parseBytes({ data, selector }: { data: string; selector?: string }) {
   let parsed

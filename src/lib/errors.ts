@@ -12,40 +12,26 @@ import {
   isHexString,
 } from 'ethers'
 
+import { CCIP_ABIs, defaultAbiCoder } from './types.ts'
 import Token from '../abi/BurnMintERC677Token.ts'
 import BurnMintTokenPool from '../abi/BurnMintTokenPool_1_5_1.ts'
 import FeeQuoter from '../abi/FeeQuoter_1_6.ts'
 import LockReleaseTokenPool from '../abi/LockReleaseTokenPool_1_5_1.ts'
 import Router from '../abi/Router.ts'
 import TokenAdminRegistry from '../abi/TokenAdminRegistry_1_5.ts'
-import { CCIP_ABIs, defaultAbiCoder } from './types.ts'
-import { lazyCached } from './utils.ts'
 
 const ifaces: Record<string, Interface> = {
-  Router: lazyCached('Interface Router', () => new Interface(Router)),
-  Token: lazyCached(`Interface Token`, () => new Interface(Token)),
-  TokenAdminRegistry: lazyCached(
-    `Interface TokenAdminRegistry 1.5`,
-    () => new Interface(TokenAdminRegistry),
-  ),
-  FeeQuoter: lazyCached(`Interface FeeQuoter 1.6`, () => new Interface(FeeQuoter)),
-  BurnMintTokenPool: lazyCached(
-    `Interface BurnMintTokenPool 1.5.1`,
-    () => new Interface(BurnMintTokenPool),
-  ),
-  LockReleaseTokenPool: lazyCached(
-    `Interface LockReleaseTokenPool 1.5.1`,
-    () => new Interface(LockReleaseTokenPool),
-  ),
+  Router: new Interface(Router),
+  Token: new Interface(Token),
+  TokenAdminRegistry: new Interface(TokenAdminRegistry),
+  FeeQuoter: new Interface(FeeQuoter),
+  BurnMintTokenPool: new Interface(BurnMintTokenPool),
+  LockReleaseTokenPool: new Interface(LockReleaseTokenPool),
   ...Object.fromEntries(
     Object.entries(CCIP_ABIs)
       .map(([type_, obj]) =>
         Object.entries(obj).map(
-          ([version, abi]) =>
-            [
-              `${type_}_${version}`,
-              lazyCached(`Interface ${type_} ${version}`, () => new Interface(abi as InterfaceAbi)),
-            ] as const,
+          ([version, abi]) => [`${type_}_${version}`, new Interface(abi as InterfaceAbi)] as const,
         ),
       )
       .flat(1),

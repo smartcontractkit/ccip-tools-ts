@@ -1,22 +1,19 @@
-import type { BN } from '@coral-xyz/anchor'
 import type { PublicKey } from '@solana/web3.js'
 
-export interface CcipCctpMessageSentEvent {
-  originalSender: PublicKey
-  remoteChainSelector: BN
-  msgTotalNonce: BN
-  eventAddress: PublicKey
-  sourceDomain: number
-  cctpNonce: BN
-  messageSentBytes: Uint8Array
-}
+import type { SVMExtraArgsV1, SourceTokenData } from '../extra-args.ts'
+import type { CCIPMessage_V1_6, MergeArrayElements } from '../types.ts'
 
-export interface CcipCctpMessageAndAttestation {
-  message: {
-    data: Uint8Array
+export type CCIPMessage_V1_6_Solana = MergeArrayElements<
+  CCIPMessage_V1_6 & SVMExtraArgsV1,
+  {
+    // SourceTokenData adds `destGasAmount` (decoded from source's `destExecData`);
+    // not sure why they kept the "gas" name in Solana, but let's just be keep consistent
+    tokenAmounts: readonly SourceTokenData[]
   }
-  attestation: Uint8Array
-}
+>
+
+declare const _test: CCIPMessage_V1_6_Solana
+// _test.tokenAmounts[0].
 
 export interface CcipMessageSentEvent {
   destChainSelector: bigint
