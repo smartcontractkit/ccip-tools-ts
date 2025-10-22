@@ -2,7 +2,14 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import util from 'node:util'
 
-import { type Idl, AnchorProvider, BorshCoder, Program, Wallet } from '@coral-xyz/anchor'
+import {
+  type Idl,
+  type IdlTypes,
+  AnchorProvider,
+  BorshCoder,
+  Program,
+  Wallet,
+} from '@coral-xyz/anchor'
 import {
   type Commitment,
   type ConfirmedSignatureInfo,
@@ -77,7 +84,7 @@ import { IDL as CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './programs/1.6.0/CCIP_ROUTER.ts'
 import { ccipSend, getFee } from './send.ts'
 import type { CCIPMessage_V1_6_Solana } from './types.ts'
-import { bytesToBuffer, simulationProvider } from './utils.ts'
+import { bytesToBuffer, getErrorFromLogs, parseSolanaLogs, simulationProvider } from './utils.ts'
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
 const offrampCoder = new BorshCoder(CCIP_OFFRAMP_IDL)
@@ -89,10 +96,14 @@ const tokenPoolCoder = new BorshCoder({
 })
 const commonCoder = new BorshCoder(CCIP_COMMON_IDL)
 
-type BigNum = { leBytes: number[] }
 interface ParsedTokenInfo {
   symbol?: string
   decimals: number
+}
+
+// hardcoded symbols for tokens without metadata
+const unknownTokens: { [mint: string]: string } = {
+  '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU': 'USDC', // devnet
 }
 
 // some circular specialized types, but all good with proper references
@@ -112,74 +123,6 @@ const OffRampsDiscriminants = Object.fromEntries(
     name,
   ]),
 )
-
-/**
- * Utility function to parse Solana logs with proper address and topic extraction.
- *
- * Solana logs are structured as a stack-based execution trace:
- * - "Program <address> invoke [<depth>]" - Program call starts
- * - "Program log: <data>" - Program emitted a log message
- * - "Program data: <base64>" - Program emitted structured data (Anchor events)
- * - "Program <address> success/failed" - Program call ends
- *
- * This function:
- * 1. Tracks the program call stack to determine which program emitted each log
- * 2. Extracts the first 8 bytes from base64 "Program data:" logs as topics (event discriminants)
- * 3. Converts logs to EVM-compatible Log_ format for CCIP compatibility
- * 4. Returns ALL logs from the transaction - filtering should be done by the caller
- *
- * @param logMessages - Array of log messages from Solana transaction
- * @param blockNumber - Block number (slot) of the transaction
- * @param transactionHash - Transaction signature/hash
- * @returns Array of parsed Log_ objects from all programs in the transaction
- */
-function parseSolanaLogs(transactionHash: string, tx: VersionedTransactionResponse): Log_[] {
-  const logs: Log_[] = []
-  const programStack: string[] = []
-
-  for (let i = 0; i < tx.meta!.logMessages!.length; i++) {
-    const logMessage = tx.meta!.logMessages![i]
-
-    // Track program calls and returns to maintain the address stack
-    let match
-    if ((match = logMessage.match(/^Program (\w+) invoke\b/))) {
-      programStack.push(match[1])
-    } else if ((match = logMessage.match(/^Program (\w+) (success|failed)\b/))) {
-      // Pop from stack when program returns
-      programStack.pop()
-    } else if ((match = logMessage.match(/^Program (log|data): /))) {
-      // Extract the actual log data
-      const logData = logMessage.slice(match[0].length)
-      const currentProgram = programStack[programStack.length - 1]
-      let topics: string[] = []
-
-      if (logMessage.startsWith('Program data: ')) {
-        try {
-          // Try to decode base64 and extract first 8 bytes as topic
-          const base64Data = logData
-          const buffer = Buffer.from(base64Data, 'base64')
-          if (buffer.length >= 8) {
-            topics = [dataSlice(buffer, 0, 8)]
-          }
-        } catch {
-          // If base64 decoding fails, leave topics empty
-        }
-      }
-      // For regular log messages, use the current program on stack
-      logs.push({
-        topics,
-        index: i,
-        address: currentProgram,
-        data: logData,
-        blockNumber: tx.slot,
-        transactionHash,
-        ...(tx.blockTime ? { timestamp: new Date(tx.blockTime * 1000) } : {}),
-      })
-    }
-  }
-
-  return logs
-}
 
 export class SolanaChain implements Chain {
   readonly network: NetworkInfo<typeof ChainFamily.Solana>
@@ -335,19 +278,25 @@ export class SolanaChain implements Chain {
         [tx.slot],
         Promise.resolve(tx.blockTime),
       )
+    } else {
+      tx.blockTime = await this.getBlockTimestamp(tx.slot)
     }
 
     // Parse logs from transaction using helper function
-    const logs_ = tx.meta?.logMessages?.length ? parseSolanaLogs(hash, tx) : []
-
-    const blockTime = await this.getBlockTimestamp(tx.slot)
+    const logs_: Log_[] = tx.meta?.logMessages?.length
+      ? parseSolanaLogs(tx.meta?.logMessages).map((l) => ({
+          ...l,
+          transactionHash: hash,
+          blockNumber: tx.slot,
+        }))
+      : []
 
     const chainTx: SolanaTransaction = {
       chain: this,
       hash,
       logs: [] as SolanaLog[],
       blockNumber: tx.slot,
-      timestamp: blockTime,
+      timestamp: tx.blockTime,
       from: tx.transaction.message.staticAccountKeys[0].toString(),
       error: tx.meta?.err,
       tx, // specialized solana transaction
@@ -628,7 +577,7 @@ export class SolanaChain implements Chain {
     if (typeof mintInfo.value.data === 'object' && 'parsed' in mintInfo.value.data) {
       const parsed = mintInfo.value.data.parsed as { info: ParsedTokenInfo }
       const data = parsed.info
-      let symbol = data.symbol || 'UNKNOWN'
+      let symbol = data.symbol || unknownTokens[token] || 'UNKNOWN'
 
       // If symbol is missing or 'UNKNOWN', try to fetch from Metaplex metadata
       if (!data.symbol || symbol === 'UNKNOWN') {
@@ -731,29 +680,8 @@ export class SolanaChain implements Chain {
     // Now decode the SVM2AnyRampMessage struct using BorshCoder
     const messageBytes = eventDataBuffer.subarray(offset)
 
-    const message: {
-      header: {
-        messageId: number[]
-        sourceChainSelector: BN
-        destChainSelector: BN
-        sequenceNumber: BN
-        nonce: BN
-      }
-      sender: PublicKey
-      data: Buffer
-      receiver: Buffer
-      extraArgs: Buffer
-      feeToken: PublicKey
-      feeTokenAmount: BigNum
-      feeValueJuels: BigNum
-      tokenAmounts: {
-        amount: BigNum
-        destExecData: Buffer
-        destTokenAddress: Buffer
-        extraData: Buffer
-        sourcePoolAddress: PublicKey
-      }[]
-    } = routerCoder.types.decode('SVM2AnyRampMessage', messageBytes)
+    const message: IdlTypes<typeof CCIP_ROUTER_IDL>['SVM2AnyRampMessage'] =
+      routerCoder.types.decode('SVM2AnyRampMessage', messageBytes)
 
     // Convert BN/number types to bigints
     const sourceChainSelector = BigInt(message.header.sourceChainSelector.toString())
@@ -769,19 +697,17 @@ export class SolanaChain implements Chain {
     // TODO: extract this into a proper normalize/decode/reencode data utility
     const msgData = destNetwork.family === ChainFamily.Solana ? encodeBase64(data_) : hexlify(data_)
     const receiver = decodeAddress(message.receiver, destNetwork.family)
-    const extraArgs = hexlify(message.extraArgs)
     const feeToken = message.feeToken.toString()
 
     // Process token amounts
     const tokenAmounts = message.tokenAmounts.map((ta) => ({
-      sourcePoolAddress: ta.sourcePoolAddress.toString(),
+      sourcePoolAddress: ta.sourcePoolAddress.toBase58(),
       destTokenAddress: decodeAddress(ta.destTokenAddress, destNetwork.family),
       extraData: hexlify(ta.extraData),
       amount: leToBigInt(ta.amount.leBytes),
       destExecData: hexlify(ta.destExecData),
-      // destGasAmount is encoded as BE uint32; present only in messages *to* EVM (EVMExtraArgsV2)
-      // FIXME: adjust when we need to support to other networks
-      destGasAmount: ta.destExecData.length === 4 ? toBigInt(ta.destExecData) : 0n,
+      // destGasAmount is encoded as BE uint32;
+      destGasAmount: toBigInt(ta.destExecData),
     }))
 
     // Convert fee amounts from CrossChainAmount format
@@ -789,17 +715,8 @@ export class SolanaChain implements Chain {
     const feeValueJuels = leToBigInt(message.feeValueJuels.leBytes)
 
     // Parse gas limit from extraArgs
-    const extraArgsBuffer = message.extraArgs
-    let gasLimit = 0n
-    if (message.extraArgs.length >= 21) {
-      // Parse the gas_limit as a u128 in little-endian format, skipping the 4-byte tag
-      for (let i = 0; i < 16; i++) {
-        gasLimit += BigInt(message.extraArgs[4 + i]) * 256n ** BigInt(i)
-      }
-    }
-
-    const allowOutOfOrderExecution =
-      extraArgsBuffer.length >= 21 ? Boolean(message.extraArgs[20]) : false
+    const extraArgs = hexlify(message.extraArgs)
+    const parsed = this.decodeExtraArgs(extraArgs)
 
     return {
       header: {
@@ -817,8 +734,7 @@ export class SolanaChain implements Chain {
       feeTokenAmount,
       feeValueJuels,
       extraArgs,
-      gasLimit,
-      allowOutOfOrderExecution,
+      ...parsed,
     } as CCIPMessage<typeof CCIPVersion.V1_6>
   }
 
@@ -853,13 +769,12 @@ export class SolanaChain implements Chain {
   }
 
   static encodeExtraArgs(args: ExtraArgs): string {
-    if (!('allowOutOfOrderExecution' in args) || 'computeUnits' in args)
-      throw new Error('Solana can only encode EVMExtraArgsV2')
+    if ('computeUnits' in args) throw new Error('Solana can only encode EVMExtraArgsV2')
     const gasLimitUint128Le = toLeArray(args.gasLimit, 16)
     return concat([
       EVMExtraArgsV2Tag,
       gasLimitUint128Le,
-      args.allowOutOfOrderExecution ? '0x01' : '0x00',
+      'allowOutOfOrderExecution' in args && args.allowOutOfOrderExecution ? '0x01' : '0x00',
     ])
   }
 
@@ -990,38 +905,7 @@ export class SolanaChain implements Chain {
       if (laterReceiptLog) {
         return // ignore intermediary state (InProgress=1) if we can find a later receipt
       } else if (state !== ExecutionState.Success) {
-        const lastLog = log.tx.logs[log.tx.logs.length - 1]
-        // collect all logs from the last program execution (the one which failed)
-        const lastProgramLogs = log.tx.logs
-          .reduceRight(
-            (acc, l) =>
-              !acc.length || (l.address === acc[0].address && l.index === acc[0].index - 1)
-                ? [l, ...acc]
-                : acc,
-            [] as Log_[],
-          )
-          .map(({ data }) => data as string)
-          .reduceRight(
-            (acc, l) =>
-              l.endsWith(':') && acc.length ? [`${l} ${acc[0]}`, ...acc.slice(1)] : [l, ...acc],
-            [] as string[],
-          ) // cosmetic: join lines ending in ':' with next
-        returnData = `${lastLog.address} failed: ${lastProgramLogs.join('\n')}`
-        try {
-          // convert number[]s (common in solana logs) into slightly more readable 0x-bytearrays
-          returnData = returnData.replace(/\[(\d{1,3}, ){3,}\d+\]/g, (m) =>
-            hexlify(
-              new Uint8Array(
-                m
-                  .substring(1, m.length - 1)
-                  .split(', ')
-                  .map((x) => parseInt(x)),
-              ),
-            ),
-          )
-        } catch (_) {
-          // pass
-        }
+        returnData = getErrorFromLogs(log.tx.logs)
       } else if (log.tx.error) {
         returnData = log.tx.error
         state = ExecutionState.Failed

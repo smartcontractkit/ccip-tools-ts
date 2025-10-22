@@ -1,7 +1,12 @@
 import util from 'util'
 
 import { type AnchorProvider, type IdlTypes, Program } from '@coral-xyz/anchor'
-import { NATIVE_MINT } from '@solana/spl-token'
+import {
+  NATIVE_MINT,
+  createApproveInstruction,
+  getAccount,
+  getAssociatedTokenAddressSync,
+} from '@solana/spl-token'
 import {
   type AccountMeta,
   type AddressLookupTableAccount,
@@ -18,7 +23,7 @@ import { SolanaChain } from './index.ts'
 import type { AnyMessage } from '../types.ts'
 import { toLeArray } from '../utils.ts'
 import { IDL as CCIP_ROUTER_IDL } from './programs/1.6.0/CCIP_ROUTER.ts'
-import { bytesToBuffer, simulationProvider } from './utils.ts'
+import { bytesToBuffer, simulateUnitsConsumed, simulationProvider } from './utils.ts'
 
 function anyToSvmMessage(message: AnyMessage): IdlTypes<typeof CCIP_ROUTER_IDL>['SVM2AnyMessage'] {
   const feeTokenPubkey = message.feeToken ? new PublicKey(message.feeToken) : PublicKey.default
@@ -146,7 +151,7 @@ async function deriveAccountsCcipSend({
 }) {
   const connection = router.provider.connection
   const derivedAccounts: AccountMeta[] = []
-  const lookupTableAccounts: AddressLookupTableAccount[] = []
+  const addressLookupTableAccounts: AddressLookupTableAccount[] = []
   const tokenIndices: number[] = []
   let askWith: AccountMeta[] = []
   let stage = 'Start'
@@ -213,14 +218,14 @@ async function deriveAccountsCcipSend({
     )
 
     // Collect lookup tables
-    lookupTableAccounts.push(...lookupTableAccounts)
+    addressLookupTableAccounts.push(...lookupTableAccounts)
 
     stage = response.nextStage
   } while (stage?.length)
 
   return {
     accounts: derivedAccounts,
-    lookupTableAccounts,
+    addressLookupTableAccounts,
     tokenIndexes: Buffer.from(tokenIndices),
   }
 }
@@ -229,7 +234,7 @@ export async function ccipSend(
   router: Program<typeof CCIP_ROUTER_IDL>,
   destChainSelector: bigint,
   message: AnyMessage,
-  computeUnitLimit = 250_000,
+  computeUnitLimit?: number,
 ) {
   const connection = router.provider.connection
   let wallet
@@ -238,7 +243,16 @@ export async function ccipSend(
   }
   const svmMessage = anyToSvmMessage(message)
 
-  const { lookupTableAccounts, accounts, tokenIndexes } = await deriveAccountsCcipSend({
+  for (const { token, amount } of svmMessage.tokenAmounts) {
+    await approveRouterSpender(
+      router.provider as AnchorProvider,
+      token,
+      router.programId,
+      BigInt(amount.toString()),
+    )
+  }
+
+  const { addressLookupTableAccounts, accounts, tokenIndexes } = await deriveAccountsCcipSend({
     router,
     destChainSelector,
     sender: wallet.publicKey,
@@ -273,21 +287,94 @@ export async function ccipSend(
   const { blockhash: recentBlockhash } =
     await router.provider.connection.getLatestBlockhash('confirmed')
 
+  if (!computeUnitLimit) {
+    const simulated = await simulateUnitsConsumed({
+      connection,
+      payerKey: wallet.publicKey,
+      instructions: [ix],
+      addressLookupTableAccounts,
+    })
+    console.debug('ccipSend simulation:', simulated, 'CUs')
+    if (simulated > 200000) computeUnitLimit = Math.ceil(simulated * 1.1)
+  }
+
   const txMsg = new TransactionMessage({
     payerKey: wallet.publicKey,
     recentBlockhash,
     instructions: [
-      ComputeBudgetProgram.setComputeUnitLimit({
-        units: computeUnitLimit,
-      }),
+      ...(computeUnitLimit
+        ? [ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit })]
+        : []),
       ix,
     ],
   })
-  const messageV0 = txMsg.compileToV0Message(lookupTableAccounts)
+  const messageV0 = txMsg.compileToV0Message(addressLookupTableAccounts)
   const tx = new VersionedTransaction(messageV0)
 
   const signed = await wallet.signTransaction(tx)
   const hash = await connection.sendTransaction(signed)
   await connection.confirmTransaction(hash, 'confirmed')
   return { hash }
+}
+
+async function approveRouterSpender(
+  provider: AnchorProvider,
+  mint: PublicKey,
+  router: PublicKey,
+  amount?: bigint,
+) {
+  const wallet = provider.wallet
+  const connection = provider.connection
+
+  // spender is a Router PDA
+  const [spender] = PublicKey.findProgramAddressSync([Buffer.from('fee_billing_signer')], router)
+
+  // Get the user's associated token account for this mint
+  const userTokenAccount = getAssociatedTokenAddressSync(mint, wallet.publicKey)
+
+  // Get the current account info to check existing delegation
+  const accountInfo = await getAccount(connection, userTokenAccount)
+
+  // Check if we need to approve
+  const needsApproval =
+    !accountInfo.delegate ||
+    !accountInfo.delegate.equals(spender) ||
+    (amount !== undefined && accountInfo.delegatedAmount < amount)
+
+  if (needsApproval) {
+    // Approve the spender to use tokens from the user's account
+    const approveAmount = amount ?? BigInt(Number.MAX_SAFE_INTEGER)
+
+    const approveIx = createApproveInstruction(
+      userTokenAccount,
+      spender,
+      wallet.publicKey,
+      approveAmount,
+    )
+
+    const approveTx = new VersionedTransaction(
+      new TransactionMessage({
+        payerKey: wallet.publicKey,
+        recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
+        instructions: [approveIx],
+      }).compileToV0Message(),
+    )
+
+    const signed = await wallet.signTransaction(approveTx)
+    const hash = await connection.sendTransaction(signed)
+
+    console.info(
+      'Approved router',
+      router.toBase58(),
+      'to spend up to',
+      approveAmount,
+      'of',
+      mint.toBase58(),
+      'tokens:',
+      hash,
+    )
+    await connection.confirmTransaction(hash, 'confirmed')
+
+    return { hash }
+  }
 }

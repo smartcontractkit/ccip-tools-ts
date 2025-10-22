@@ -216,8 +216,8 @@ async function sendMessage(
   // `--allow-out-of-order-exec` forces EVMExtraArgsV2, which shouldn't work on v1.2 lanes;
   // otherwise, fallsback to EVMExtraArgsV1 (compatible with v1.2 & v1.5)
   const extraArgs = {
-    ...(argv.allowOutOfOrderExec != null
-      ? { allowOutOfOrderExecution: argv.allowOutOfOrderExec }
+    ...(argv.allowOutOfOrderExec != null || destNetwork.family !== ChainFamily.EVM
+      ? { allowOutOfOrderExecution: !!argv.allowOutOfOrderExec }
       : {}),
     ...(destNetwork.family === ChainFamily.Solana
       ? { computeUnits: BigInt(argv.gasLimit) }
