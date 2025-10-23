@@ -23,10 +23,13 @@ type EVM2AnyMessageRequested = CleanAddressable<
 >
 
 // v1.6+ Message Base (all other dests share this intersection)
-export type CCIPMessage_V1_6 = CleanAddressable<
-  AbiParametersToPrimitiveTypes<
-    ExtractAbiEvent<typeof OnRamp_1_6_ABI, 'CCIPMessageSent'>['inputs']
-  >[2]
+export type CCIPMessage_V1_6 = MergeArrayElements<
+  CleanAddressable<
+    AbiParametersToPrimitiveTypes<
+      ExtractAbiEvent<typeof OnRamp_1_6_ABI, 'CCIPMessageSent'>['inputs']
+    >[2]
+  >,
+  { tokenAmounts: readonly SourceTokenData[] }
 >
 
 export type CCIPMessage_V1_5_EVM = MergeArrayElements<
@@ -42,10 +45,7 @@ export type CCIPMessage_V1_2_EVM = EVM2AnyMessageRequested & {
 }
 
 // v1.6 EVM specialization, extends CCIPMessage_V1_6, plus EVMExtraArgsV2 and tokenAmounts.*.destGasAmount
-export type CCIPMessage_V1_6_EVM = MergeArrayElements<
-  CCIPMessage_V1_6 & EVMExtraArgsV2,
-  { tokenAmounts: readonly SourceTokenData[] }
->
+export type CCIPMessage_V1_6_EVM = CCIPMessage_V1_6 & EVMExtraArgsV2
 
 export type CCIPMessage_EVM<V extends CCIPVersion = CCIPVersion> = V extends typeof CCIPVersion.V1_2
   ? CCIPMessage_V1_2_EVM

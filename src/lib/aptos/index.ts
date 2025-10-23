@@ -57,6 +57,7 @@ import {
   parseTypeAndVersion,
   toLeArray,
 } from '../utils.ts'
+import { getAptosLeafHasher } from './hasher.ts'
 import { getTokenInfo } from './token.ts'
 
 const eventToHandler = {
@@ -454,7 +455,7 @@ class AptosChain implements Chain {
       case EVMExtraArgsV2Tag: {
         switch (dataLength(data)) {
           case 4 + 32 + 1:
-            // Another Solana/Aptos variant (37 bytes total: 4 tag + 32 gasLimit + 1 allowOOOE)
+            // Aptos serialization of EVMExtraArgsV2: 37 bytes total: 4 tag + 32 LE gasLimit + 1 allowOOOE
             return {
               _tag: 'EVMExtraArgsV2',
               gasLimit: leToBigInt(dataSlice(data, 4, 4 + 32)),
@@ -527,10 +528,7 @@ class AptosChain implements Chain {
   }
 
   static getDestLeafHasher(lane: Lane): LeafHasher {
-    // if (lane.version === CCIPVersion.V1_6) {
-    //   return getV16AptosLeafHasher(lane.sourceChainSelector, lane.destChainSelector, lane.onRamp)
-    // }
-    throw new Error(`Unsupported CCIP version for Aptos: ${lane.version}`)
+    return getAptosLeafHasher(lane)
   }
 
   getFee(_router: string, _destChainSelector: bigint, _message: AnyMessage): Promise<bigint> {

@@ -707,7 +707,7 @@ export class EVMChain implements Chain {
       case CCIPVersion.V1_6:
         return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher
       default:
-        throw new Error(`Unsupported version: ${version as string}`)
+        throw new Error(`Unsupported hasher version for EVM: ${version as string}`)
     }
   }
 
