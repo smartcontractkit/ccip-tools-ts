@@ -311,6 +311,18 @@ export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFam
   return chain.getAddress(address)
 }
 
+/**
+ * Version of decodeAddress which is aware of custom cross-chain OnRamp formats
+ **/
+export function decodeOnRampAddress(
+  address: BytesLike,
+  family: ChainFamily = ChainFamily.EVM,
+): string {
+  let decoded = decodeAddress(address, family)
+  if (family === ChainFamily.Aptos) decoded += '::onramp'
+  return decoded
+}
+
 export function leToBigInt(data: BytesLike | readonly number[]): bigint {
   if (Array.isArray(data)) data = new Uint8Array(data)
   return toBigInt(getBytes(data as BytesLike).reverse())
@@ -323,8 +335,10 @@ export function toLeArray(value: BigNumberish, width?: Numeric): Uint8Array {
 export function getDataBytes(data: BytesLike): Uint8Array {
   if (isBytesLike(data)) {
     return getBytes(data)
-  } else {
+  } else if (/^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/.test(data)) {
     return decodeBase64(data)
+  } else {
+    throw new Error(`Unsupported data format: ${data as string}`)
   }
 }
 

@@ -23,7 +23,7 @@ import { SolanaChain } from './index.ts'
 import type { AnyMessage } from '../types.ts'
 import { toLeArray } from '../utils.ts'
 import { IDL as CCIP_ROUTER_IDL } from './programs/1.6.0/CCIP_ROUTER.ts'
-import { bytesToBuffer, simulateUnitsConsumed, simulationProvider } from './utils.ts'
+import { bytesToBuffer, simulateTransaction, simulationProvider } from './utils.ts'
 
 function anyToSvmMessage(message: AnyMessage): IdlTypes<typeof CCIP_ROUTER_IDL>['SVM2AnyMessage'] {
   const feeTokenPubkey = message.feeToken ? new PublicKey(message.feeToken) : PublicKey.default
@@ -159,9 +159,15 @@ async function deriveAccountsCcipSend({
 
   const [configPDA] = PublicKey.findProgramAddressSync([Buffer.from('config')], router.programId)
 
+  // copy of router which avoids signing every simulation
+  const readOnlyRouter = new Program(
+    router.idl,
+    router.programId,
+    simulationProvider(connection, sender),
+  )
   do {
     // Create the transaction instruction for the deriveAccountsCcipSend method
-    const response = (await router.methods
+    const response = (await readOnlyRouter.methods
       .deriveAccountsCcipSend(
         {
           destChainSelector: new BN(destChainSelector.toString()),
@@ -288,12 +294,15 @@ export async function ccipSend(
     await router.provider.connection.getLatestBlockhash('confirmed')
 
   if (!computeUnitLimit) {
-    const simulated = await simulateUnitsConsumed({
-      connection,
-      payerKey: wallet.publicKey,
-      instructions: [ix],
-      addressLookupTableAccounts,
-    })
+    const simulated =
+      (
+        await simulateTransaction({
+          connection,
+          payerKey: wallet.publicKey,
+          instructions: [ix],
+          addressLookupTableAccounts,
+        })
+      ).unitsConsumed || 0
     console.debug('ccipSend simulation:', simulated, 'CUs')
     if (simulated > 200000) computeUnitLimit = Math.ceil(simulated * 1.1)
   }
@@ -312,14 +321,23 @@ export async function ccipSend(
   const tx = new VersionedTransaction(messageV0)
 
   const signed = await wallet.signTransaction(tx)
-  const hash = await connection.sendTransaction(signed)
-  await connection.confirmTransaction(hash, 'confirmed')
+  let hash
+  for (let attempt = 0; ; attempt++) {
+    try {
+      hash = await connection.sendTransaction(signed)
+      await connection.confirmTransaction(hash, 'confirmed')
+      break
+    } catch (error) {
+      if (attempt >= 3) throw error
+      console.error(`sendTransaction failed attempt=${attempt + 1}/3:`, error)
+    }
+  }
   return { hash }
 }
 
 async function approveRouterSpender(
   provider: AnchorProvider,
-  mint: PublicKey,
+  token: PublicKey,
   router: PublicKey,
   amount?: bigint,
 ) {
@@ -330,7 +348,7 @@ async function approveRouterSpender(
   const [spender] = PublicKey.findProgramAddressSync([Buffer.from('fee_billing_signer')], router)
 
   // Get the user's associated token account for this mint
-  const userTokenAccount = getAssociatedTokenAddressSync(mint, wallet.publicKey)
+  const userTokenAccount = getAssociatedTokenAddressSync(token, wallet.publicKey)
 
   // Get the current account info to check existing delegation
   const accountInfo = await getAccount(connection, userTokenAccount)
@@ -343,14 +361,9 @@ async function approveRouterSpender(
 
   if (needsApproval) {
     // Approve the spender to use tokens from the user's account
-    const approveAmount = amount ?? BigInt(Number.MAX_SAFE_INTEGER)
+    amount ??= BigInt(Number.MAX_SAFE_INTEGER)
 
-    const approveIx = createApproveInstruction(
-      userTokenAccount,
-      spender,
-      wallet.publicKey,
-      approveAmount,
-    )
+    const approveIx = createApproveInstruction(userTokenAccount, spender, wallet.publicKey, amount)
 
     const approveTx = new VersionedTransaction(
       new TransactionMessage({
@@ -359,18 +372,17 @@ async function approveRouterSpender(
         instructions: [approveIx],
       }).compileToV0Message(),
     )
-
     const signed = await wallet.signTransaction(approveTx)
     const hash = await connection.sendTransaction(signed)
 
-    console.info(
-      'Approved router',
-      router.toBase58(),
-      'to spend up to',
-      approveAmount,
+    console.log(
+      'Approving',
+      amount,
       'of',
-      mint.toBase58(),
-      'tokens:',
+      token.toBase58(),
+      'tokens for router',
+      router.toBase58(),
+      '=>',
       hash,
     )
     await connection.confirmTransaction(hash, 'confirmed')

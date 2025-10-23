@@ -22,7 +22,7 @@ import { getManuallyExecuteInputs } from './getManuallyExecuteInputs.ts'
 import './patchBorsh.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
 import type { CCIPMessage_V1_6_Solana } from './types.ts'
-import { bytesToBuffer, simulateUnitsConsumed } from './utils.ts'
+import { bytesToBuffer, simulateTransaction } from './utils.ts'
 
 type ExecStepTx = [reason: string, transactions: VersionedTransaction]
 
@@ -193,13 +193,15 @@ async function buildExecTxToSolana(
 
   computeUnitsOverride ||= Math.ceil(
     1.1 *
-      (await simulateUnitsConsumed({
-        instructions: execTx.instructions,
-        connection: provider.connection,
-        payerKey: provider.wallet.publicKey,
-        addressLookupTableAccounts,
-        computeUnitsOverride,
-      })),
+      ((
+        await simulateTransaction({
+          instructions: execTx.instructions,
+          connection: provider.connection,
+          payerKey: provider.wallet.publicKey,
+          addressLookupTableAccounts,
+          computeUnitsOverride,
+        })
+      ).unitsConsumed || 0),
   )
 
   // Add compute budget instruction at the beginning of instructions

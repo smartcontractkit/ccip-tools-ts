@@ -50,6 +50,7 @@ import type {
 import {
   convertKeysToCamelCase,
   decodeAddress,
+  decodeOnRampAddress,
   getDataBytes,
   leToBigInt,
   networkInfo,
@@ -171,12 +172,12 @@ class AptosChain implements Chain {
       from: tx.sender,
       timestamp: +tx.timestamp / 1e6,
       logs: tx.events.map((event, index) => ({
-        address: event.type.split('::')[0],
+        address: event.type.slice(0, event.type.lastIndexOf('::')),
         transactionHash: hash,
         index,
         blockNumber: +tx.version,
         data: event.data as unknown,
-        topics: [event.type.slice(event.type.indexOf('::') + 2)],
+        topics: [event.type.slice(event.type.lastIndexOf('::') + 2)],
       })),
     }
   }
@@ -186,7 +187,7 @@ class AptosChain implements Chain {
     if (!opts.address || !opts.address.includes('::'))
       throw new Error('address with module is required')
     if (opts.topics?.length !== 1 || typeof opts.topics[0] !== 'string')
-      throw new Error('single str topic is required')
+      throw new Error('single string topic required')
     let eventHandlerField = opts.topics[0]
     if (!eventHandlerField.includes('/')) {
       eventHandlerField = (eventToHandler as Record<string, string>)[eventHandlerField]
@@ -410,7 +411,7 @@ class AptosChain implements Chain {
     })
   }
 
-  getWallet(opts?: { wallet?: string }): Promise<string> {
+  getWalletAddress(opts?: { wallet?: string }): Promise<string> {
     return Promise.resolve(this._getWallet(opts).publicKey.toString())
   }
 
@@ -487,7 +488,10 @@ class AptosChain implements Chain {
       ) as CommitReport[]
     ).map((c) => ({
       ...c,
-      onRampAddress: decodeAddress(c.onRampAddress, networkInfo(c.sourceChainSelector).family),
+      onRampAddress: decodeOnRampAddress(
+        c.onRampAddress,
+        networkInfo(c.sourceChainSelector).family,
+      ),
     }))
     if (lane) {
       commits = commits.filter(

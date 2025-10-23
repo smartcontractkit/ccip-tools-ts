@@ -170,7 +170,7 @@ export interface Chain<F extends ChainFamily = ChainFamily> {
    * @param opts.wallet - cli or environmental parameters to help pick a wallet
    * @returns address of fetched (and stored internally) account
    */
-  getWallet(opts?: { wallet?: string }): Promise<string>
+  getWalletAddress(opts?: { wallet?: unknown }): Promise<string>
   /**
    * Fetch the current fee for a given intended message
    * @param router - router address on this chain

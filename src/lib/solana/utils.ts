@@ -1,8 +1,5 @@
-import util from 'util'
-
 import {
   type AddressLookupTableAccount,
-  type Commitment,
   type Connection,
   type Signer,
   type SimulateTransactionConfig,
@@ -118,7 +115,7 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
 }
 
 export function getErrorFromLogs(
-  logs_: readonly string[] | readonly ParsedLog[] | null,
+  logs_: readonly string[] | readonly Pick<Log_, 'address' | 'index' | 'data'>[] | null,
 ): string | undefined {
   if (!logs_?.length) return
   let logs
@@ -134,9 +131,9 @@ export function getErrorFromLogs(
         !acc.length || (l.address === acc[0].address && l.index === acc[0].index - 1)
           ? [l, ...acc]
           : acc,
-      [] as ParsedLog[],
+      [] as Pick<Log_, 'address' | 'index' | 'data'>[],
     )
-    .map(({ data }) => data)
+    .map(({ data }) => data as string)
     .reduceRight(
       (acc, l) =>
         l.endsWith(':') && acc.length ? [`${l} ${acc[0]}`, ...acc.slice(1)] : [l, ...acc],
@@ -161,6 +158,72 @@ export function getErrorFromLogs(
   return returnData
 }
 
+export async function simulateTransaction({
+  connection,
+  payerKey,
+  computeUnitsOverride,
+  ...rest
+}: {
+  connection: Connection
+  payerKey: PublicKey
+  computeUnitsOverride?: number
+  addressLookupTableAccounts?: AddressLookupTableAccount[]
+} & ({ instructions: TransactionInstruction[] } | { tx: Transaction | VersionedTransaction })) {
+  // Add max compute units for simulation
+  const maxComputeUnits = 1_400_000
+  const recentBlockhash = '11111111111111111111111111111112'
+  const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
+    units: computeUnitsOverride || maxComputeUnits,
+  })
+
+  let tx: VersionedTransaction
+  if (!('tx' in rest)) {
+    // Create message with compute budget instruction
+    const message = new TransactionMessage({
+      payerKey,
+      recentBlockhash,
+      instructions: [computeBudgetIx, ...rest.instructions],
+    })
+
+    const messageV0 = message.compileToV0Message(rest.addressLookupTableAccounts)
+    tx = new VersionedTransaction(messageV0)
+  } else if (!('version' in rest.tx)) {
+    // Create message with compute budget instruction
+    const message = new TransactionMessage({
+      payerKey,
+      recentBlockhash,
+      instructions: [computeBudgetIx, ...rest.tx.instructions],
+    })
+
+    const messageV0 = message.compileToV0Message(rest.addressLookupTableAccounts)
+    tx = new VersionedTransaction(messageV0)
+  } else {
+    tx = rest.tx
+  }
+
+  const config: SimulateTransactionConfig = {
+    commitment: 'confirmed',
+    replaceRecentBlockhash: true,
+    sigVerify: false,
+  }
+
+  const result = await connection.simulateTransaction(tx, config)
+
+  if (result.value.err) {
+    console.debug('Simulation results:', {
+      logs: result.value.logs,
+      unitsConsumed: result.value.unitsConsumed,
+      returnData: result.value.returnData,
+      err: result.value.err,
+    })
+    throw new Error(
+      `Simulation failed: ${getErrorFromLogs(result.value.logs) || JSON.stringify(result.value.err)}`,
+    )
+  }
+
+  return result.value
+}
+
 /**
  * Used as `provider` in anchor's `Program` constructor, to support `.view()` simulations
  * without * requiring a full AnchorProvider with wallet
@@ -174,96 +237,14 @@ export function simulationProvider(
 ) {
   return {
     connection,
-    simulate: async (
-      tx: Transaction | VersionedTransaction,
-      _signers?: Signer[],
-      commitment: Commitment = 'confirmed',
-    ) => {
-      if (!('message' in tx)) {
-        const message = new TransactionMessage({
-          payerKey: feePayer,
-          recentBlockhash: '11111111111111111111111111111112',
-          instructions: tx.instructions,
-        })
-        tx = new VersionedTransaction(message.compileToV0Message())
-      }
-      const result = await connection.simulateTransaction(tx, {
-        commitment,
-        replaceRecentBlockhash: true,
-        sigVerify: false,
-      })
-
-      if (result.value.err) {
-        console.debug('Simulation results:', {
-          logs: result.value.logs,
-          unitsConsumed: result.value.unitsConsumed,
-          returnData: result.value.returnData,
-          err: result.value.err,
-        })
-        throw new Error(
-          `Simulation failed: ${getErrorFromLogs(result.value.logs) || JSON.stringify(result.value.err)}`,
-        )
-      }
-
-      return result.value
+    wallet: {
+      publicKey: feePayer,
     },
-  }
-}
-
-export async function simulateUnitsConsumed({
-  connection,
-  payerKey,
-  instructions,
-  addressLookupTableAccounts,
-  computeUnitsOverride,
-}: {
-  connection: Connection
-  payerKey: PublicKey
-  instructions: TransactionInstruction[]
-  addressLookupTableAccounts?: AddressLookupTableAccount[]
-  computeUnitsOverride?: number
-}): Promise<number> {
-  try {
-    // Add max compute units for simulation
-    const maxComputeUnits = 1_400_000
-    const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
-      units: computeUnitsOverride || maxComputeUnits,
-    })
-
-    // Create message with compute budget instruction
-    const message = new TransactionMessage({
-      payerKey,
-      recentBlockhash: '11111111111111111111111111111112',
-      instructions: [computeBudgetIx, ...instructions],
-    })
-
-    const messageV0 = message.compileToV0Message(addressLookupTableAccounts)
-    const simulationTx = new VersionedTransaction(messageV0)
-
-    const config: SimulateTransactionConfig = {
-      commitment: 'confirmed',
-      replaceRecentBlockhash: true,
-      sigVerify: false,
-    }
-
-    const result = await connection.simulateTransaction(simulationTx, config)
-
-    console.debug('Simulation results:', {
-      logs: result.value.logs,
-      unitsConsumed: result.value.unitsConsumed,
-      returnData: result.value.returnData,
-      err: result.value.err,
-    })
-
-    if (result.value.err) {
-      throw new Error(
-        `Simulation failed: ${getErrorFromLogs(result.value.logs) || JSON.stringify(result.value.err)}`,
-      )
-    }
-
-    return result.value.unitsConsumed || 0
-  } catch (error: unknown) {
-    if (error instanceof Error) throw error
-    throw new Error(`Transaction simulation error: Unknown error occurred: ${util.inspect(error)}`)
+    simulate: async (tx: Transaction | VersionedTransaction, _signers?: Signer[]) =>
+      simulateTransaction({
+        connection,
+        payerKey: feePayer,
+        tx,
+      }),
   }
 }

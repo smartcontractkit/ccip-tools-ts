@@ -59,9 +59,10 @@ export const builder = (yargs: Argv) =>
         conflicts: 'gas-limit',
       },
       wallet: {
+        alias: 'w',
         type: 'string',
         describe:
-          'Encrypted wallet json file path; password will be prompted if not available in USER_KEY_PASSWORD envvar; also supports `ledger[:<derivationPath>]` hardwallet',
+          'Wallet to send transactions with; pass `ledger[:index_or_derivation]` to use Ledger USB hardware wallet, or private key in `USER_KEY` environment variable',
       },
       'force-buffer': {
         type: 'boolean',
@@ -89,6 +90,7 @@ export const builder = (yargs: Argv) =>
     })
 
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
+  if (!argv.wallet) argv.wallet = process.env['USER_KEY'] || process.env['OWNER_KEY']
   let destroy
   const destroy$ = new Promise((resolve) => {
     destroy = resolve

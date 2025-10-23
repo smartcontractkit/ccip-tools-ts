@@ -83,8 +83,8 @@ export async function fetchCCIPMessagesInTx(tx: ChainTransaction): Promise<CCIPR
     let lane
     const message = (source.constructor as ChainStatic).decodeMessage(log)
     if (!message) continue
-    const [_, version] = await source.typeAndVersion(log.address)
     if ('destChainSelector' in message.header) {
+      const [_, version] = await source.typeAndVersion(log.address)
       lane = {
         sourceChainSelector: message.header.sourceChainSelector,
         destChainSelector: message.header.destChainSelector,

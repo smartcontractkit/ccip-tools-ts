@@ -17,7 +17,7 @@
     "generate": "node ./generate.cjs `grep -lrn '^\\s*//\\s*generate\\b' ./src/*`",
     "build": "npm run clean && npm run generate && tsc -p ./tsconfig.build.json && npm run make-script",
     "make-script": "sed -e '1s|#!/.*|#!/usr/bin/env node|' ./dist/index.js > ./dist/ccip-tools-ts && chmod +x ./dist/ccip-tools-ts && rm -v ./dist/index.js",
-    "start": "./src/index.ts -v send solana-devnet Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C ethereum-testnet-sepolia -t 4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU=0.14 -R 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 --ooo",
+    "start": "./src/index.ts -v --wallet ledger send solana-devnet Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C ethereum-testnet-sepolia -t 4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU=0.18 -d \"hello from ccip-tools-ts\" -R 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 --ooo",
     "clean": "rm -rfv ./dist ./coverage",
     "prepare": "npm run build"
   },
@@ -25,12 +25,12 @@
     "./dist/**"
   ],
   "devDependencies": {
-    "@eslint/js": "9.37.0",
+    "@eslint/js": "9.38.0",
     "@types/bn.js": "^5.2.0",
     "@types/jest": "30.0.0",
-    "@types/node": "24.7.2",
+    "@types/node": "24.9.1",
     "@types/yargs": "17.0.33",
-    "eslint": "9.37.0",
+    "eslint": "9.38.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-import-resolver-typescript": "4.4.4",
     "eslint-plugin-import": "2.32.0",
@@ -42,15 +42,17 @@
     "ts-jest": "29.4.5",
     "tsx": "4.20.6",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.46.1"
+    "typescript-eslint": "8.46.2"
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^5.1.1",
     "@coral-xyz/anchor": "^0.29.0",
+    "@ethers-ext/signer-ledger": "^6.0.0-beta.1",
     "@inquirer/prompts": "7.9.0",
+    "@ledgerhq/hw-app-solana": "^7.5.5",
+    "@ledgerhq/hw-transport-node-hid": "^6.29.13",
     "@solana/spl-token": "0.4.14",
     "@solana/web3.js": "^1.98.4",
-    "@xlabs-xyz/ledger-signer-ethers-v6": "^0.0.1",
     "abitype": "1.1.1",
     "bn.js": "^5.2.2",
     "borsh": "^2.0.0",
@@ -62,11 +64,6 @@
     "tslib": "2.8.1",
     "yaml": "2.8.1",
     "yargs": "18.0.0"
-  },
-  "overrides": {
-    "@xlabs-xyz/ledger-signer-ethers-v6": {
-      "ethers": "$ethers"
-    }
   },
   "prettier": {
     "trailingComma": "all",

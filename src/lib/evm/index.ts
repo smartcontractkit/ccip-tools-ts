@@ -1,14 +1,12 @@
-import { readFile } from 'node:fs/promises'
 import util from 'node:util'
 
-import { password } from '@inquirer/prompts'
-import { LedgerSigner } from '@xlabs-xyz/ledger-signer-ethers-v6'
 import { parseAbi } from 'abitype'
 import {
   type BytesLike,
   type EventFragment,
   type JsonRpcApiProvider,
   type Log,
+  type Provider,
   type Result,
   type Signer,
   type TransactionReceipt,
@@ -17,7 +15,6 @@ import {
   Interface,
   JsonRpcProvider,
   SigningKey,
-  Wallet,
   WebSocketProvider,
   ZeroAddress,
   concat,
@@ -84,6 +81,7 @@ import {
 import {
   blockRangeGenerator,
   decodeAddress,
+  decodeOnRampAddress,
   getAddressBytes,
   getDataBytes,
   getSomeBlockNumberBefore,
@@ -166,43 +164,38 @@ export class EVMChain implements Chain {
     })
     this.getTokenForTokenPool = moize(this.getTokenForTokenPool.bind(this))
     this.getTokenInfo = moize(this.getTokenInfo.bind(this))
-    this._getWallet = moize(this._getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
+    this.getWallet = moize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
   }
 
   [util.inspect.custom]() {
     return `${this.constructor.name}{${this.network.name}}`
   }
 
-  async _getWallet({ wallet }: { wallet?: string } = {}): Promise<Signer> {
-    if ((wallet ?? '').startsWith('ledger')) {
-      let derivationPath = wallet!.split(':')[1]
-      if (derivationPath && !isNaN(Number(derivationPath)))
-        derivationPath = `m/44'/60'/${derivationPath}'/0/0`
-      const ledger = await LedgerSigner.create(this.provider, derivationPath)
-      console.info('Ledger connected:', await ledger.getAddress(), `at "${ledger.path}"`)
-      return ledger
-    }
-    if (wallet) {
-      let pw = process.env['USER_KEY_PASSWORD']
-      if (!pw) pw = await password({ message: 'Enter password for json wallet' })
-      return (await Wallet.fromEncryptedJson(await readFile(wallet, 'utf8'), pw)).connect(
-        this.provider,
-      )
-    }
-    const keyFromEnv = process.env['USER_KEY'] || process.env['OWNER_KEY']
-    if (keyFromEnv) {
-      return new BaseWallet(
-        new SigningKey((keyFromEnv.startsWith('0x') ? '' : '0x') + keyFromEnv),
-        this.provider,
-      )
-    }
-    throw new Error(
-      'Could not get wallet; please, set USER_KEY envvar as a hex-encoded private key, or --wallet option',
-    )
+  // overwrite EVMChain.getWallet to implement custom wallet loading
+  // some signers don't like to be `.connect`ed, so pass provider as first param
+  static getWallet(_provider: Provider, _opts: { wallet?: unknown }): Promise<Signer> {
+    throw new Error('static EVM wallet loading not available')
   }
 
-  async getWallet(opts?: { wallet?: string }): Promise<string> {
-    return (await this._getWallet(opts)).getAddress()
+  // cached wallet/signer getter
+  async getWallet(opts: { wallet?: unknown } = {}): Promise<Signer> {
+    try {
+      if (typeof opts.wallet === 'string') {
+        return Promise.resolve(
+          new BaseWallet(
+            new SigningKey((opts.wallet.startsWith('0x') ? '' : '0x') + opts.wallet),
+            this.provider,
+          ),
+        )
+      }
+    } catch (_) {
+      // pass
+    }
+    return (this.constructor as typeof EVMChain).getWallet(this.provider, opts)
+  }
+
+  async getWalletAddress(opts?: { wallet?: string }): Promise<string> {
+    return (await this.getWallet(opts)).getAddress()
   }
 
   static async _getProvider(url: string): Promise<JsonRpcApiProvider> {
@@ -424,15 +417,12 @@ export class EVMChain implements Chain {
       for (const c of [...(result[0] as Result[]), ...(result[1] as Result[])]) {
         // if ccip>=v1.6 and lane is provided, use it to filter reports; otherwise, include all
         if (lane && c.sourceChainSelector !== lane.sourceChainSelector) continue
-        const onRampAddress = decodeAddress(
+        const onRampAddress = decodeOnRampAddress(
           c.onRampAddress as string,
           networkInfo(c.sourceChainSelector as bigint).family,
         )
         if (lane && onRampAddress !== lane.onRamp) continue
-        reports.push({
-          ...c.toObject(),
-          onRampAddress,
-        } as CommitReport)
+        reports.push({ ...c.toObject(), onRampAddress } as CommitReport)
       }
       if (reports.length) return reports
     }
@@ -653,7 +643,7 @@ export class EVMChain implements Chain {
           this.provider,
         ) as unknown as TypedContract<typeof offRampABI>
         const { onRamp } = await contract.getSourceChainConfig(sourceChainSelector)
-        return decodeAddress(onRamp, networkInfo(sourceChainSelector).family)
+        return decodeOnRampAddress(onRamp, networkInfo(sourceChainSelector).family)
       }
       default:
         throw new Error(`Unsupported version: ${version}`)
@@ -798,14 +788,6 @@ export class EVMChain implements Chain {
       (this.constructor as typeof EVMChain).encodeExtraArgs(message.extraArgs),
     )
 
-    // return router.getFee(destChainSelector, {
-    //   receiver: zeroPadValue(message.receiver, 32),
-    //   data: hexlify(message.data),
-    //   tokenAmounts: message.tokenAmounts ?? [],
-    //   feeToken: message.feeToken ?? ZeroAddress,
-    //   extraArgs: hexlify((this.constructor as typeof EVMChain).encodeExtraArgs(message.extraArgs)),
-    // })
-
     // make sure to approve once per token, for the total amount (including fee, if needed)
     const amountsToApprove = (message.tokenAmounts ?? []).reduce(
       (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
@@ -814,10 +796,10 @@ export class EVMChain implements Chain {
     if (feeToken !== ZeroAddress)
       amountsToApprove[feeToken] = (amountsToApprove[feeToken] ?? 0n) + message.fee
 
-    const wallet = await this._getWallet() // moized wallet arg (if called previously)
+    const wallet = await this.getWallet() // moized wallet arg (if called previously)
 
     // approve all tokens (including fee token) in parallel
-    let nonce = await this.provider.getTransactionCount(await this.getWallet())
+    let nonce = await this.provider.getTransactionCount(await this.getWalletAddress())
     await Promise.all(
       Object.entries(amountsToApprove).map(async ([token, amount]) => {
         const contract = new Contract(token, Token_ABI, wallet) as unknown as TypedContract<
@@ -830,7 +812,7 @@ export class EVMChain implements Chain {
             nonce: nonce++,
             gasLimit: 100_000,
           })
-          console.log('Approving', amount, token, 'for', router_, '=>', tx.hash)
+          console.log('Approving', amount, 'of', token, 'tokens for router', router_, '=>', tx.hash)
           await tx.wait(1, 60_000)
         }
       }),
@@ -871,7 +853,7 @@ export class EVMChain implements Chain {
     if (!type.includes('OffRamp') || Object.values<string>(CCIPVersion).includes(version))
       throw new Error(`Invalid OffRamp=${offRamp} type or version: "${typeAndVersion}"`)
 
-    const wallet = await this._getWallet(opts)
+    const wallet = await this.getWallet(opts)
 
     let manualExecTx
     const offchainTokenData = execReport.offchainTokenData.map(encodeEVMOffchainTokenData)

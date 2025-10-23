@@ -95,17 +95,17 @@ export const builder = (yargs: Argv) =>
         alias: 'w',
         type: 'string',
         describe:
-          'Encrypted wallet json file path; password will be prompted if not provided in USER_KEY_PASSWORD envvar',
+          'Wallet to send transactions with; pass `ledger[:index_or_derivation]` to use Ledger USB hardware wallet, or private key in `USER_KEY` environment variable',
       },
       'token-receiver': {
         type: 'string',
-        describe: "Address of the Solana's token receiver (if different than program's receiver",
+        describe: "Address of the Solana tokenReceiver (if different than program's receiver)",
       },
       account: {
         type: 'array',
         string: true,
         describe:
-          "List of accounts needed by Solana's receiver program; append `=rw` to specify account as writable; can be specified multiple times",
+          'List of accounts needed by Solana receiver program; append `=rw` to specify account as writable; can be specified multiple times',
         example: 'requiredPdaAddress=rw',
       },
     })
@@ -135,7 +135,7 @@ async function sendMessage(
   const destNetwork = networkInfo(argv.dest)
   const getChain = fetchChainsFromRpcs(argv, undefined, destroy)
   const source = await getChain(sourceNetwork.name)
-  const sender = await source.getWallet(argv)
+  const sender = await source.getWalletAddress(argv)
 
   let data: BytesLike
   if (argv.data) {
@@ -239,7 +239,14 @@ async function sendMessage(
   const fee = await source.getFee(argv.router, destNetwork.chainSelector, message)
 
   const tx = await source.sendMessage(argv.router, destNetwork.chainSelector, { ...message, fee })
-  console.log('🚀 Sending message to', receiver, '@', destNetwork.name, ', tx_hash =>', tx.hash)
+  console.log(
+    '🚀 Sending message to',
+    tokenReceiver || receiver,
+    '@',
+    destNetwork.name,
+    ', tx =>',
+    tx.hash,
+  )
 
   // print CCIPRequest from tx receipt
   const request = (await fetchCCIPMessagesInTx(tx))[0]

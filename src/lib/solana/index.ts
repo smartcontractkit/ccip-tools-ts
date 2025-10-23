@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises'
-import path from 'node:path'
 import util from 'node:util'
 
 import {
@@ -67,6 +65,7 @@ import {
 import {
   createRateLimitedFetch,
   decodeAddress,
+  decodeOnRampAddress,
   getDataBytes,
   leToBigInt,
   networkInfo,
@@ -168,7 +167,7 @@ export class SolanaChain implements Chain {
         onExpire: ([, before]) => !before,
       },
     )
-    this._getWallet = moize(this._getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
+    this.getWallet = moize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
   }
 
   [util.inspect.custom]() {
@@ -217,35 +216,33 @@ export class SolanaChain implements Chain {
     // The memoized functions will be garbage collected when the instance is destroyed
   }
 
-  // cached
-  async _getWallet({ wallet }: { wallet?: string } = {}): Promise<Wallet> {
-    if (!wallet) {
-      wallet = process.env['USER_KEY'] || process.env['OWNER_KEY']
-      if (!wallet) {
-        wallet = path.join(
-          (process.env['HOME'] || process.env['USERPROFILE']) as string,
-          '.config',
-          'solana',
-          'id.json',
-        )
-      }
-    }
-    let keypair
-    if (wallet && wallet.endsWith('.json')) {
-      keypair = Uint8Array.from(JSON.parse(await readFile(wallet, 'utf8')) as number[])
-    } else if (wallet && wallet.startsWith('0x')) {
-      keypair = getBytes(wallet)
-    } else if (wallet) {
-      keypair = bs58.decode(wallet)
-    }
-    if (!keypair) {
-      throw new Error(`Invalid solana wallet: ${wallet}`)
-    }
-    return new Wallet(Keypair.fromSecretKey(keypair))
+  static getWallet(_opts?: { wallet?: unknown }): Promise<Wallet> {
+    throw new Error('Wallet not implemented')
   }
 
-  async getWallet(opts?: { wallet?: string }): Promise<string> {
-    return (await this._getWallet(opts)).publicKey.toBase58()
+  /**
+   * Load wallet
+   * @param opts - options to load wallet
+   * @param opts.wallet - private key as 0x or base58 string, or async getter function resolving to
+   *   Wallet instance
+   * @returns Wallet, after caching in instance
+   */
+  async getWallet(opts: { wallet?: unknown } = {}): Promise<Wallet> {
+    try {
+      if (typeof opts.wallet === 'string')
+        return new Wallet(
+          Keypair.fromSecretKey(
+            opts.wallet.startsWith('0x') ? getBytes(opts.wallet) : bs58.decode(opts.wallet),
+          ),
+        )
+    } catch (_) {
+      // pass
+    }
+    return (this.constructor as typeof SolanaChain).getWallet(opts)
+  }
+
+  async getWalletAddress(opts?: { wallet?: unknown }): Promise<string> {
+    return (await this.getWallet(opts)).publicKey.toBase58()
   }
 
   // cached
@@ -660,7 +657,12 @@ export class SolanaChain implements Chain {
 
   static decodeMessage({ data }: { data: unknown }): CCIPMessage | undefined {
     if (!data || typeof data !== 'string') return undefined
-    const eventDataBuffer = bytesToBuffer(data)
+    let eventDataBuffer
+    try {
+      eventDataBuffer = bytesToBuffer(data)
+    } catch (_) {
+      return
+    }
 
     const disc = dataSlice(eventDataBuffer, 0, 8)
     if (disc !== eventDiscriminant('CCIPMessageSent')) return
@@ -717,6 +719,8 @@ export class SolanaChain implements Chain {
     // Parse gas limit from extraArgs
     const extraArgs = hexlify(message.extraArgs)
     const parsed = this.decodeExtraArgs(extraArgs)
+    if (!parsed) throw new Error('Invalid extraArgs: ' + extraArgs)
+    const { _tag, ...rest } = parsed
 
     return {
       header: {
@@ -734,7 +738,7 @@ export class SolanaChain implements Chain {
       feeTokenAmount,
       feeValueJuels,
       extraArgs,
-      ...parsed,
+      ...rest,
     } as CCIPMessage<typeof CCIPVersion.V1_6>
   }
 
@@ -826,7 +830,7 @@ export class SolanaChain implements Chain {
     const sourceChainSelector = BigInt(merkleRootData.sourceChainSelector.toString())
 
     // Convert the onRampAddress from bytes to the proper format
-    const onRampAddress = decodeAddress(
+    const onRampAddress = decodeOnRampAddress(
       merkleRootData.onRampAddress,
       networkInfo(sourceChainSelector).family,
     )
@@ -1012,7 +1016,7 @@ export class SolanaChain implements Chain {
     message: AnyMessage & { fee: bigint },
     opts?: { wallet?: string },
   ): Promise<ChainTransaction> {
-    const wallet = await this._getWallet(opts)
+    const wallet = await this.getWallet(opts)
 
     const router = new Program(
       CCIP_ROUTER_IDL,
@@ -1043,7 +1047,7 @@ export class SolanaChain implements Chain {
       throw new Error("ExecutionReport's message not for Solana")
     const execReport = execReport_ as ExecutionReport<CCIPMessage_V1_6_Solana>
 
-    const wallet = await this._getWallet(opts)
+    const wallet = await this.getWallet(opts)
     const provider = new AnchorProvider(this.connection, wallet, { commitment: this.commitment })
     const offrampProgram = new Program(CCIP_OFFRAMP_IDL, new PublicKey(offRamp), provider)
 
@@ -1061,7 +1065,7 @@ export class SolanaChain implements Chain {
    *   before returning from this method
    */
   async cleanUpBuffers(opts?: { wallet?: string; dontWait?: boolean }): Promise<void> {
-    const wallet = await this._getWallet(opts)
+    const wallet = await this.getWallet(opts)
     const provider = new AnchorProvider(this.connection, wallet, { commitment: this.commitment })
     console.debug(
       'Starting cleaning up buffers and lookup tables for account',
