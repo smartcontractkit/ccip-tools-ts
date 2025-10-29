@@ -842,12 +842,9 @@ export class SolanaChain implements Chain {
       throw new Error('Log data is missing or not a string')
     }
 
-    const eventDataBuffer = bytesToBuffer(log.data)
-
     // Verify the discriminant matches ExecutionStateChanged
-    const expectedDiscriminant = eventDiscriminant('ExecutionStateChanged')
-    const actualDiscriminant = hexlify(eventDataBuffer.subarray(0, 8))
-    if (actualDiscriminant !== expectedDiscriminant) return
+    if (log.topics[0] !== eventDiscriminant('ExecutionStateChanged')) return
+    const eventDataBuffer = bytesToBuffer(log.data)
 
     // Note: We manually decode the event fields rather than using BorshCoder
     // since ExecutionStateChanged is an event, not a defined type

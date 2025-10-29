@@ -1,3 +1,4 @@
+import { dataLength } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -25,12 +26,12 @@ import {
   withDateTimestamp,
 } from './utils.ts'
 
-export const command = ['show <tx_hash>', '* <tx_hash>']
+export const command = ['show <tx-hash>', '* <tx-hash>']
 export const describe = 'Show details of a CCIP request'
 
 export const builder = (yargs: Argv) =>
   yargs
-    .positional('tx_hash', {
+    .positional('tx-hash', {
       type: 'string',
       demandOption: true,
       describe: 'transaction hash of the request (source) message',
@@ -46,7 +47,7 @@ export const builder = (yargs: Argv) =>
           'Search by messageId instead of tx_hash; requires specifying source network (by id or name)',
       },
     })
-    .check(({ tx_hash }) => validateSupportedTxHash(tx_hash))
+    .check(({ 'tx-hash': txHash }) => validateSupportedTxHash(txHash))
 
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
   let destroy
@@ -77,26 +78,32 @@ async function showRequests(
       )
     }
     source = await getChain(sourceNetwork.chainId)
-    request = await fetchCCIPMessageById(source, argv.tx_hash, argv)
+    request = await fetchCCIPMessageById(source, argv.txHash, argv)
   } else {
-    const [getChain_, tx$] = fetchChainsFromRpcs(argv, argv.tx_hash, destroy)
+    const [getChain_, tx$] = fetchChainsFromRpcs(argv, argv.txHash, destroy)
     getChain = getChain_
     tx = await tx$
     source = tx.chain
     request = await selectRequest(await fetchCCIPMessagesInTx(tx), 'to know more', argv)
   }
 
+  const offchainTokenData = await source.fetchOffchainTokenData(request)
+
   switch (argv.format) {
     case Format.log: {
-      const logPrefix = 'log' in request ? `message ${request.log.index} = ` : 'message = '
-      console.log(logPrefix, withDateTimestamp(request))
+      console.log(
+        `message ${request.log.index} =`,
+        withDateTimestamp(request),
+        '\nattestations =',
+        offchainTokenData,
+      )
       break
     }
     case Format.pretty:
-      await prettyRequest(source, request)
+      await prettyRequest(source, request, offchainTokenData)
       break
     case Format.json:
-      console.info(JSON.stringify(request, bigIntReplacer, 2))
+      console.info(JSON.stringify({ ...request, offchainTokenData }, bigIntReplacer, 2))
       break
   }
 

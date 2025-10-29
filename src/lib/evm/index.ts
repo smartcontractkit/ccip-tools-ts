@@ -3,7 +3,6 @@ import util from 'node:util'
 import { parseAbi } from 'abitype'
 import {
   type BytesLike,
-  type EventFragment,
   type JsonRpcApiProvider,
   type Log,
   type Provider,
@@ -30,7 +29,15 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 import moize from 'moize'
 
-import { DEFAULT_GAS_LIMIT, defaultAbiCoder, interfaces } from './const.ts'
+import {
+  DEFAULT_GAS_LIMIT,
+  commitsFragments,
+  defaultAbiCoder,
+  getAllFragmentsMatchingEvents,
+  interfaces,
+  receiptsFragments,
+  requestsFragments,
+} from './const.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { type CCIPMessage_V1_6_EVM, parseSourceTokenData } from './messages.ts'
 import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
@@ -80,23 +87,6 @@ import {
 } from '../utils.ts'
 import { parseError } from './errors.ts'
 import { supportedChains } from '../supported-chains.ts'
-
-function getAllFragmentsMatchingEvents(
-  events: readonly string[],
-): Record<`0x${string}`, EventFragment> {
-  const fragments: Record<string, EventFragment> = {}
-  for (const iface of Object.values(interfaces)) {
-    for (const event of events) {
-      const fragment = iface.getEvent(event)
-      if (fragment) fragments[fragment.topicHash] ??= fragment
-    }
-  }
-  return fragments
-}
-
-const requestsFragments = getAllFragmentsMatchingEvents(['CCIPSendRequested', 'CCIPMessageSent'])
-const commitsFragments = getAllFragmentsMatchingEvents(['ReportAccepted', 'CommitReportAccepted'])
-const receiptsFragments = getAllFragmentsMatchingEvents(['ExecutionStateChanged'])
 
 const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 const EVMExtraArgsV1 = 'tuple(uint256 gasLimit)'

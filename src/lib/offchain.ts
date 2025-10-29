@@ -69,13 +69,13 @@ export async function getLbtcAttestation(payloadHash: string, isTestnet: boolean
     )
   }
   if (
-    attestation.status === 'NOTARIZATION_STATUS_SESSION_APPROVED' &&
-    'attestation' in attestation
+    attestation.status !== 'NOTARIZATION_STATUS_SESSION_APPROVED' ||
+    !('attestation' in attestation)
   ) {
-    return attestation.attestation
+    throw new Error(
+      'LBTC attestation is not approved or invalid. Response: ' +
+        JSON.stringify(attestation, null, 2),
+    )
   }
-  throw new Error(
-    'LBTC attestation is not approved or invalid. Response: ' +
-      JSON.stringify(attestation, null, 2),
-  )
+  return attestation.attestation
 }

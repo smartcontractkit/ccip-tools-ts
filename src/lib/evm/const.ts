@@ -1,4 +1,4 @@
-import { AbiCoder, Interface } from 'ethers'
+import { type EventFragment, AbiCoder, Interface } from 'ethers'
 
 import Token_ABI from '../../abi/BurnMintERC677Token.ts'
 import CommitStore_1_2_ABI from '../../abi/CommitStore_1_2.ts'
@@ -37,3 +37,25 @@ export const interfaces = {
   EVM2EVMOnRamp_v1_5: new Interface(EVM2EVMOnRamp_1_5_ABI),
   OnRamp_v1_6: new Interface(OnRamp_1_6_ABI),
 } as const
+
+export function getAllFragmentsMatchingEvents(
+  events: readonly string[],
+): Record<`0x${string}`, EventFragment> {
+  const fragments: Record<string, EventFragment> = {}
+  for (const iface of Object.values(interfaces)) {
+    for (const event of events) {
+      const fragment = iface.getEvent(event)
+      if (fragment) fragments[fragment.topicHash] ??= fragment
+    }
+  }
+  return fragments
+}
+export const requestsFragments = getAllFragmentsMatchingEvents([
+  'CCIPSendRequested',
+  'CCIPMessageSent',
+])
+export const commitsFragments = getAllFragmentsMatchingEvents([
+  'ReportAccepted',
+  'CommitReportAccepted',
+])
+export const receiptsFragments = getAllFragmentsMatchingEvents(['ExecutionStateChanged'])

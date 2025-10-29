@@ -93,14 +93,18 @@ export async function fetchSolanaOffchainTokenData(
   // If later multi-token transfers support is added, we need to add more info in order to match each token with it's event and offchainTokenData.
   const cctpEvent = cctpEvents[0]
   if (cctpEvent) {
+    const message = hexlify(cctpEvent.messageSentBytes)
     try {
       // Extract message bytes to fetch circle's attestation and then encode offchainTokenData.
-      const message = hexlify(cctpEvent.messageSentBytes)
       const attestation = await getUsdcAttestation(message, isTestnet)
 
       offchainTokenData[0] = { _tag: 'usdc', message, attestation }
     } catch (error) {
-      console.warn(`❌ Solana CCTP: Failed to fetch attestation for ${txSignature}:`, error)
+      console.warn(
+        `❌ Solana CCTP: Failed to fetch attestation for ${txSignature}:`,
+        message,
+        error,
+      )
     }
   }
 

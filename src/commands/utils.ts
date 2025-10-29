@@ -1,6 +1,6 @@
 import { select } from '@inquirer/prompts'
 import bs58 from 'bs58'
-import { Result, formatUnits, isBytesLike, isHexString, parseUnits } from 'ethers'
+import { Result, formatUnits, hexlify, isBytesLike, isHexString, parseUnits } from 'ethers'
 
 import type { Chain, ChainStatic } from '../lib/chain.ts'
 import {
@@ -15,6 +15,7 @@ import {
   recursiveParseError,
 } from '../lib/index.ts'
 import { supportedChains } from '../lib/supported-chains.ts'
+import type { OffchainTokenData } from '../lib/types.ts'
 
 export async function selectRequest(
   requests: readonly CCIPRequest[],
@@ -162,7 +163,11 @@ function omit<T extends Record<string, unknown>, K extends string>(
   return result
 }
 
-export async function prettyRequest(source: Chain, request: CCIPRequest) {
+export async function prettyRequest(
+  source: Chain,
+  request: CCIPRequest,
+  offchainTokenData?: OffchainTokenData[],
+) {
   prettyLane(request.lane)
   console.info('Request (source):')
 
@@ -221,6 +226,20 @@ export async function prettyRequest(source: Chain, request: CCIPRequest) {
     ...('accounts' in request.message ? formatArray('accounts', request.message.accounts) : {}),
     ...rest,
   })
+
+  if (!offchainTokenData?.length || offchainTokenData.every((d) => !d)) return
+  console.info('Attestations:')
+  for (const attestation of offchainTokenData) {
+    const { _tag: type, ...rest } = attestation!
+    console.table({
+      type,
+      ...Object.fromEntries(
+        Object.entries(rest)
+          .map(([key, value]) => Object.entries(formatData(key, hexlify(value))))
+          .flat(1),
+      ),
+    })
+  }
 }
 
 export async function prettyCommit(
@@ -308,15 +327,17 @@ export function prettyReceipt(
     ...(receipt.receipt.state !== ExecutionState.Success ||
     (receipt.receipt.returnData && receipt.receipt.returnData !== '0x')
       ? isBytesLike(receipt.receipt.returnData)
-        ? formatData('returnData', receipt.receipt.returnData, true)
-        : receipt.receipt.returnData
+        ? formatData('returnData', hexlify(receipt.receipt.returnData), true)
+        : typeof receipt.receipt.returnData === 'string'
           ? Object.fromEntries(
               wrapText(
                 receipt.receipt.returnData,
                 Math.max(100, +(process.env.COLUMNS || 80) * 0.9),
               ).map((l, i) => [!i ? 'returnData' : ' '.repeat(i), l]),
             )
-          : {}
+          : typeof receipt.receipt.returnData === 'object'
+            ? receipt.receipt.returnData
+            : {}
       : {}),
     ...(receipt.receipt.gasUsed ? { gasUsed: Number(receipt.receipt.gasUsed) } : {}),
     ...(origin ? { origin } : {}),

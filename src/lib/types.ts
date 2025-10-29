@@ -120,7 +120,7 @@ export type ExecutionReceipt = {
   state: ExecutionState
   sourceChainSelector?: bigint
   messageHash?: string
-  returnData?: string
+  returnData?: unknown
   gasUsed?: bigint
 }
 

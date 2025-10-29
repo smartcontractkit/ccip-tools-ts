@@ -3,7 +3,7 @@ import { type Addressable, type Log, EventFragment } from 'ethers'
 import { getLbtcAttestation, getUsdcAttestation } from '../offchain.ts'
 import type { CCIPMessage, CCIPRequest, OffchainTokenData } from '../types.ts'
 import { networkInfo } from '../utils.ts'
-import { defaultAbiCoder, interfaces } from './const.ts'
+import { defaultAbiCoder, interfaces, requestsFragments } from './const.ts'
 import { type SourceTokenData, parseSourceTokenData } from './messages.ts'
 
 const BURNED_EVENT_1_5 = interfaces.TokenPool_v1_5.getEvent('Burned')!
@@ -24,18 +24,18 @@ export const LBTC_EVENT = EventFragment.from(
  * @returns Array of byte arrays, one per transfer in request
  */
 export async function fetchEVMOffchainTokenData(
-  request: Pick<CCIPRequest, 'tx' | 'lane'> & {
+  request: Pick<CCIPRequest, 'tx'> & {
     message: CCIPMessage
-    log: Pick<CCIPRequest['log'], 'topics' | 'index'>
+    log: Pick<CCIPRequest['log'], 'index'>
   },
 ): Promise<OffchainTokenData[]> {
-  const { isTestnet } = networkInfo(request.lane.sourceChainSelector)
+  const { isTestnet } = networkInfo(request.message.header.sourceChainSelector)
   // there's a chance there are other CCIPSendRequested in same tx,
   // and they may contain USDC transfers as well, so we select
   // any USDC logs after that and before our CCIPSendRequested
   const prevCcipRequestIdx =
     request.tx.logs.find(
-      ({ topics, index }) => topics[0] === request.log.topics[0] && index < request.log.index,
+      ({ topics, index }) => topics[0] in requestsFragments && index < request.log.index,
     )?.index ?? -1
   const usdcRequestLogs = request.tx.logs.filter(
     ({ index }) => prevCcipRequestIdx < index && index < request.log.index,
@@ -51,11 +51,11 @@ export async function fetchEVMOffchainTokenData(
   )
   let lbtcTokenData: OffchainTokenData[] = []
   try {
-    let tokenAmounts
+    let tokenAmounts: readonly SourceTokenData[]
     if ('sourceTokenData' in request.message) {
       tokenAmounts = request.message.sourceTokenData.map(parseSourceTokenData)
     } else {
-      tokenAmounts = request.message.tokenAmounts as readonly SourceTokenData[]
+      tokenAmounts = request.message.tokenAmounts
     }
     //for lbtc we distinguish logs by hash in event, so we can pass all of them
     lbtcTokenData = await getLbtcTokenData(tokenAmounts, request.tx.logs as Log[], isTestnet)
@@ -71,7 +71,6 @@ export async function fetchEVMOffchainTokenData(
     }
   }
 
-  console.debug('Got EVM offchain token data', offchainTokenData)
   return offchainTokenData
 }
 
@@ -136,8 +135,9 @@ async function getUsdcTokenData(
 
     let tokenData: OffchainTokenData
     if (messageSentLog) {
+      let message
       try {
-        const message = defaultAbiCoder.decode(USDC_EVENT.inputs, messageSentLog.data)[0] as string
+        message = defaultAbiCoder.decode(USDC_EVENT.inputs, messageSentLog.data)[0] as string
         const attestation = await getUsdcAttestation(message, isTestnet)
         tokenData = {
           _tag: 'usdc',
@@ -145,8 +145,9 @@ async function getUsdcTokenData(
           attestation,
         }
         // encoding of OffchainTokenData to be done as part of Chain.executeReceipt
-      } catch (_) {
-        // maybe not a USDC transfer
+      } catch (err) {
+        // maybe not a USDC transfer, or not ready
+        console.warn(`❌ EVM CCTP: Failed to fetch attestation for message:`, message, err)
       }
     }
     attestations.push(tokenData)
@@ -175,9 +176,9 @@ async function getLbtcTokenData(
       if (lbtcDepositHashes.has(extraData)) {
         try {
           const attestation = await getLbtcAttestation(extraData, isTestnet)
-          return { _tag: 'lbtc', attestation }
-        } catch (_) {
-          // fallback: undefined
+          return { _tag: 'lbtc', attestation, extraData }
+        } catch (err) {
+          console.warn(`❌ EVM LBTC: Failed to fetch attestation for message:`, extraData, err)
         }
       }
     }),
