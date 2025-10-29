@@ -283,10 +283,12 @@ const selectors: Selectors = {
   '16661': { selector: 4426351306075016396n, name: '0g-mainnet' },
   '17000': { selector: 7717148896336251131n, name: 'ethereum-testnet-holesky' },
   '25327': { selector: 9723842205701363942n, name: 'everclear-mainnet' },
+  '26888': { selector: 7051849327615092843n, name: 'ab-testnet' },
   '31337': { selector: 7759470850252068959n, name: 'anvil-devnet' },
   '33111': { selector: 9900119385908781505n, name: 'apechain-testnet-curtis' },
   '33139': { selector: 14894068710063348487n, name: 'apechain-mainnet' },
   '34443': { selector: 7264351850409363825n, name: 'ethereum-mainnet-mode-1' },
+  '36888': { selector: 4829375610284793157n, name: 'ab-mainnet' },
   '37111': {
     selector: 6827576821754315911n,
     name: 'ethereum-testnet-sepolia-lens-1',
