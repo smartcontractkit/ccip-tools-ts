@@ -3,40 +3,14 @@ import {
   type ErrorFragment,
   type EventFragment,
   type FunctionFragment,
-  type InterfaceAbi,
   type Result,
-  Interface,
   dataLength,
   dataSlice,
   isBytesLike,
   isHexString,
 } from 'ethers'
 
-import { CCIP_ABIs, defaultAbiCoder } from './types.ts'
-import Token from '../abi/BurnMintERC677Token.ts'
-import BurnMintTokenPool from '../abi/BurnMintTokenPool_1_5_1.ts'
-import FeeQuoter from '../abi/FeeQuoter_1_6.ts'
-import LockReleaseTokenPool from '../abi/LockReleaseTokenPool_1_5_1.ts'
-import Router from '../abi/Router.ts'
-import TokenAdminRegistry from '../abi/TokenAdminRegistry_1_5.ts'
-
-const ifaces: Record<string, Interface> = {
-  Router: new Interface(Router),
-  Token: new Interface(Token),
-  TokenAdminRegistry: new Interface(TokenAdminRegistry),
-  FeeQuoter: new Interface(FeeQuoter),
-  BurnMintTokenPool: new Interface(BurnMintTokenPool),
-  LockReleaseTokenPool: new Interface(LockReleaseTokenPool),
-  ...Object.fromEntries(
-    Object.entries(CCIP_ABIs)
-      .map(([type_, obj]) =>
-        Object.entries(obj).map(
-          ([version, abi]) => [`${type_}_${version}`, new Interface(abi as InterfaceAbi)] as const,
-        ),
-      )
-      .flat(1),
-  ),
-}
+import { defaultAbiCoder, interfaces } from './const.ts'
 
 /**
  * Get error data from an error object, if possible
@@ -94,7 +68,7 @@ export function parseWithFragment(
     }
   }
   let res: readonly [ErrorFragment | FunctionFragment | EventFragment, string] | undefined
-  for (const [name, iface] of Object.entries(ifaces)) {
+  for (const [name, iface] of Object.entries(interfaces)) {
     try {
       const error = iface.getError(selector)
       if (error) {
@@ -186,4 +160,40 @@ export function recursiveParseError(
     }
   }
   return res
+}
+
+export function parseError(err: unknown): Record<string, unknown> | undefined {
+  if (!err) return
+  if (isHexString(err)) return Object.fromEntries(recursiveParseError('revert', err))
+  if (typeof err !== 'object') return
+  // ethers tx/simulation/call errors
+  const err_ = err as {
+    shortMessage?: string
+    message?: string
+    transaction?: { to: string; data: string }
+  }
+  const shortMessage = err_.shortMessage || err_.message
+  const transaction = err_.transaction
+  if (!shortMessage || !transaction?.data) return
+
+  const invocation_ = (err as { invocation: { method: string; args: Result } | null }).invocation
+  let method, invocation
+  if (invocation_) {
+    const { method: method_, args, ...rest } = invocation_
+    method = method_
+    invocation = { ...rest, args }
+  } else {
+    method = dataSlice(transaction.data, 0, 4)
+    const func = parseWithFragment(method)?.[0]
+    if (func) method = func.name
+  }
+  let reason
+  const errorData = getErrorData(err)
+  if (errorData) reason = Object.fromEntries(recursiveParseError('revert', errorData))
+  return {
+    method,
+    error: shortMessage,
+    ...reason,
+    call: { ...transaction, ...invocation },
+  }
 }

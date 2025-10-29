@@ -12,7 +12,7 @@ import {
   toBigInt,
 } from 'ethers'
 
-import { type Chain, type ChainStatic, ChainFamily } from './chain.ts'
+import { type Chain, ChainFamily } from './chain.ts'
 import SELECTORS from './selectors.ts'
 import { supportedChains } from './supported-chains.ts'
 import type { NetworkInfo } from './types.ts'
@@ -306,7 +306,7 @@ export function toObject<T>(obj: T | Result): T {
  * Decode address from a 32-byte hex string
  **/
 export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFamily.EVM): string {
-  const chain = (supportedChains as Partial<Record<ChainFamily, ChainStatic>>)[family]
+  const chain = supportedChains[family]
   if (!chain) throw new Error(`Unsupported chain family: ${family}`)
   return chain.getAddress(address)
 }
@@ -332,10 +332,17 @@ export function toLeArray(value: BigNumberish, width?: Numeric): Uint8Array {
   return getBytes(toBeHex(value, width)).reverse()
 }
 
+export function isBase64(data: unknown): data is string {
+  return (
+    typeof data === 'string' &&
+    /^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/.test(data)
+  )
+}
+
 export function getDataBytes(data: BytesLike): Uint8Array {
   if (isBytesLike(data)) {
     return getBytes(data)
-  } else if (/^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/.test(data)) {
+  } else if (isBase64(data)) {
     return decodeBase64(data)
   } else {
     throw new Error(`Unsupported data format: ${data as string}`)

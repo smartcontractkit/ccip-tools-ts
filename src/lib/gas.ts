@@ -16,9 +16,10 @@ import type { TypedContract } from 'ethers-abitype'
 import type { Chain } from './chain.ts'
 import TokenABI from '../abi/BurnMintERC677Token.ts'
 import RouterABI from '../abi/Router.ts'
+import { defaultAbiCoder } from './evm/const.ts'
 import type { EVMChain } from './evm/index.ts'
 import { discoverOffRamp } from './execution.ts'
-import { type Lane, defaultAbiCoder } from './types.ts'
+import type { Lane } from './types.ts'
 
 const BALANCES_SLOT = 0
 const ccipReceive = FunctionFragment.from({

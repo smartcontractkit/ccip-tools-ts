@@ -1,12 +1,17 @@
 export default [
-  // generate: fetch('https://raw.githubusercontent.com/smartcontractkit/chainlink-ccip/refs/heads/main/chains/evm/gobindings/generated/v1_6_1/burn_mint_token_pool/burn_mint_token_pool.go').then((res) => res.text()).then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1]).then((abi) => JSON.parse(abi.replace(/\\"/g, '"'))).then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1)).then((result) => console.log("=================\n",result.join('\n')))
+  // generate:
+  // fetch('https://raw.githubusercontent.com/smartcontractkit/chainlink-ccip/refs/heads/main/chains/evm/gobindings/generated/v1_6_1/lock_release_token_pool/lock_release_token_pool.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   {
     type: 'constructor',
     inputs: [
       {
         name: 'token',
         type: 'address',
-        internalType: 'contractIBurnMintERC20',
+        internalType: 'contractIERC20',
       },
       {
         name: 'localTokenDecimals',
@@ -220,6 +225,13 @@ export default [
   },
   {
     type: 'function',
+    name: 'getRebalancer',
+    inputs: [],
+    outputs: [{ name: '', type: 'address', internalType: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     name: 'getRemotePools',
     inputs: [
       {
@@ -379,6 +391,13 @@ export default [
     inputs: [],
     outputs: [{ name: '', type: 'address', internalType: 'address' }],
     stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'provideLiquidity',
+    inputs: [{ name: 'amount', type: 'uint256', internalType: 'uint256' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
   },
   {
     type: 'function',
@@ -563,6 +582,13 @@ export default [
   },
   {
     type: 'function',
+    name: 'setRebalancer',
+    inputs: [{ name: 'rebalancer', type: 'address', internalType: 'address' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     name: 'setRouter',
     inputs: [{ name: 'newRouter', type: 'address', internalType: 'address' }],
     outputs: [],
@@ -577,6 +603,16 @@ export default [
   },
   {
     type: 'function',
+    name: 'transferLiquidity',
+    inputs: [
+      { name: 'from', type: 'address', internalType: 'address' },
+      { name: 'amount', type: 'uint256', internalType: 'uint256' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     name: 'transferOwnership',
     inputs: [{ name: 'to', type: 'address', internalType: 'address' }],
     outputs: [],
@@ -588,6 +624,13 @@ export default [
     inputs: [],
     outputs: [{ name: '', type: 'string', internalType: 'string' }],
     stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'withdrawLiquidity',
+    inputs: [{ name: 'amount', type: 'uint256', internalType: 'uint256' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
   },
   {
     type: 'event',
@@ -769,6 +812,63 @@ export default [
   },
   {
     type: 'event',
+    name: 'LiquidityAdded',
+    inputs: [
+      {
+        name: 'provider',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'amount',
+        type: 'uint256',
+        indexed: true,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'LiquidityRemoved',
+    inputs: [
+      {
+        name: 'provider',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'amount',
+        type: 'uint256',
+        indexed: true,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'LiquidityTransferred',
+    inputs: [
+      {
+        name: 'from',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'amount',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
     name: 'LockedOrBurned',
     inputs: [
       {
@@ -867,6 +967,25 @@ export default [
     inputs: [
       {
         name: 'rateLimitAdmin',
+        type: 'address',
+        indexed: false,
+        internalType: 'address',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'RebalancerSet',
+    inputs: [
+      {
+        name: 'oldRebalancer',
+        type: 'address',
+        indexed: false,
+        internalType: 'address',
+      },
+      {
+        name: 'newRebalancer',
         type: 'address',
         indexed: false,
         internalType: 'address',
@@ -1013,6 +1132,7 @@ export default [
       },
     ],
   },
+  { type: 'error', name: 'InsufficientLiquidity', inputs: [] },
   {
     type: 'error',
     name: 'InvalidDecimalArgs',
@@ -1163,4 +1283,5 @@ export default [
     inputs: [{ name: 'caller', type: 'address', internalType: 'address' }],
   },
   { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
-]
+  // generate:end
+] as const

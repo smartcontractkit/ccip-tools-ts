@@ -1,4 +1,4 @@
-import util from 'node:util'
+import util from 'util'
 
 import {
   type Idl,
@@ -39,13 +39,7 @@ import {
 } from 'ethers'
 import moize, { type Moized } from 'moize'
 
-import {
-  type Chain,
-  type ChainStatic,
-  type ChainTransaction,
-  type LogFilter,
-  ChainFamily,
-} from '../chain.ts'
+import { type Chain, type ChainTransaction, type LogFilter, ChainFamily } from '../chain.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import {
@@ -84,6 +78,7 @@ import { IDL as CCIP_ROUTER_IDL } from './programs/1.6.0/CCIP_ROUTER.ts'
 import { ccipSend, getFee } from './send.ts'
 import type { CCIPMessage_V1_6_Solana } from './types.ts'
 import { bytesToBuffer, getErrorFromLogs, parseSolanaLogs, simulationProvider } from './utils.ts'
+import { supportedChains } from '../supported-chains.ts'
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
 const offrampCoder = new BorshCoder(CCIP_OFFRAMP_IDL)
@@ -115,13 +110,6 @@ type SolanaTransaction = ChainTransaction & {
 function eventDiscriminant(eventName: string): string {
   return dataSlice(sha256(toUtf8Bytes(`event:${eventName}`)), 0, 8)
 }
-
-const OffRampsDiscriminants = Object.fromEntries(
-  ['ExecutionStateChanged', 'CommitReportAccepted', 'Transmitted'].map((name) => [
-    eventDiscriminant(name),
-    name,
-  ]),
-)
 
 export class SolanaChain implements Chain {
   readonly network: NetworkInfo<typeof ChainFamily.Solana>
@@ -407,7 +395,7 @@ export class SolanaChain implements Chain {
       opts.address = PublicKey.findProgramAddressSync(
         [
           Buffer.from('commit_report'),
-          Buffer.from(toLeArray(opts.commit.sourceChainSelector, 8)),
+          toLeArray(opts.commit.sourceChainSelector, 8),
           bytesToBuffer(opts.commit.merkleRoot),
         ],
         new PublicKey(programAddr),
@@ -483,32 +471,32 @@ export class SolanaChain implements Chain {
     return router.toBase58()
   }
 
-  async getOffRampsForRouter(router: string, _sourceChainSelector: bigint): Promise<string[]> {
-    const router_ = new PublicKey(router)
-    const program = new Program(CCIP_ROUTER_IDL, router_, {
+  async getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]> {
+    const program = new Program(CCIP_ROUTER_IDL, new PublicKey(router), {
       connection: this.connection,
     })
 
-    const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], router_)
+    const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], program.programId)
     const configAccount = await this.connection.getAccountInfo(configPda)
 
-    // Decode the config account using the program's coder
+    // feeQuoter is present in router's config, and has a DestChainState account which is updated by
+    // the offramps, so we can use it to narrow the search for the offramp
     const { feeQuoter }: { feeQuoter: PublicKey } = program.coder.accounts.decode(
       'config',
       configAccount!.data,
     )
 
-    for (const { signature } of await this.connection.getSignaturesForAddress(
+    const [feeQuoterDestChainStateAccountAddress] = PublicKey.findProgramAddressSync(
+      [Buffer.from('dest_chain'), toLeArray(sourceChainSelector, 8)],
       feeQuoter,
-      { limit: 1000 },
-      'confirmed',
-    )) {
-      const tx = await this.getTransaction(signature)
-      for (const log of tx.logs) {
-        if (OffRampsDiscriminants[log.topics[0]]) {
-          return [log.address]
-        }
-      }
+    )
+
+    for await (const log of this.getLogs({
+      anyProgram: true,
+      address: feeQuoterDestChainStateAccountAddress.toBase58(),
+      topics: ['ExecutionStateChanged', 'CommitReportAccepted', 'Transmitted'],
+    })) {
+      return [log.address] // assume single offramp per router/deployment on Solana
     }
     throw new Error(`Could not find OffRamp events in feeQuoter=${feeQuoter.toString()} txs`)
   }
@@ -518,14 +506,13 @@ export class SolanaChain implements Chain {
   }
 
   async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
-    const offRamp_ = new PublicKey(offRamp)
-    const program = new Program(CCIP_OFFRAMP_IDL as Idl, offRamp_, {
+    const program = new Program(CCIP_OFFRAMP_IDL as Idl, new PublicKey(offRamp), {
       connection: this.connection,
     })
 
     const [statePda] = PublicKey.findProgramAddressSync(
       [Buffer.from('source_chain_state'), toLeArray(sourceChainSelector, 8)],
-      offRamp_,
+      program.programId,
     )
     const stateAccount = await this.connection.getAccountInfo(statePda)
 
@@ -791,9 +778,7 @@ export class SolanaChain implements Chain {
       throw new Error('Log data is missing or not a string')
     }
 
-    const eventDataBuffer = log.data.startsWith('0x')
-      ? Buffer.from(log.data.slice(2), 'hex')
-      : Buffer.from(log.data, 'base64')
+    const eventDataBuffer = bytesToBuffer(log.data)
 
     // Verify the discriminant matches CommitReportAccepted
     const expectedDiscriminant = eventDiscriminant('CommitReportAccepted')
@@ -835,15 +820,9 @@ export class SolanaChain implements Chain {
       networkInfo(sourceChainSelector).family,
     )
     if (lane) {
-      if (sourceChainSelector !== lane.sourceChainSelector) {
-        throw new Error(
-          `Source chain selector mismatch. Expected ${lane.sourceChainSelector}, got ${sourceChainSelector}`,
-        )
-      }
+      if (sourceChainSelector !== lane.sourceChainSelector) return
       // Verify the onRampAddress matches our lane
-      if (onRampAddress !== lane.onRamp) {
-        throw new Error(`OnRamp address mismatch. Expected ${lane.onRamp}, got ${onRampAddress}`)
-      }
+      if (onRampAddress !== lane.onRamp) return
     }
 
     return [
@@ -863,9 +842,7 @@ export class SolanaChain implements Chain {
       throw new Error('Log data is missing or not a string')
     }
 
-    const eventDataBuffer = log.data.startsWith('0x')
-      ? Buffer.from(log.data.slice(2), 'hex')
-      : Buffer.from(log.data, 'base64')
+    const eventDataBuffer = bytesToBuffer(log.data)
 
     // Verify the discriminant matches ExecutionStateChanged
     const expectedDiscriminant = eventDiscriminant('ExecutionStateChanged')
@@ -897,7 +874,7 @@ export class SolanaChain implements Chain {
     // Decode state enum (MessageExecutionState)
     // Enum discriminant is a single byte: Untouched=0, InProgress=1, Success=2, Failure=3
     let state = eventDataBuffer.readUInt8(offset) as ExecutionState
-    let returnData
+    let returnData: string | undefined
     if (log.tx) {
       // use only last receipt per tx+message (i.e. skip intermediary InProgress=1 states for Solana)
       const laterReceiptLog = log.tx.logs
@@ -911,7 +888,7 @@ export class SolanaChain implements Chain {
       } else if (state !== ExecutionState.Success) {
         returnData = getErrorFromLogs(log.tx.logs)
       } else if (log.tx.error) {
-        returnData = log.tx.error
+        returnData = util.inspect(log.tx.error)
         state = ExecutionState.Failed
       }
     }
@@ -923,7 +900,7 @@ export class SolanaChain implements Chain {
       messageHash,
       state,
       returnData,
-    } as ExecutionReceipt
+    }
   }
 
   static getAddress(bytes: BytesLike): string {
@@ -1052,7 +1029,11 @@ export class SolanaChain implements Chain {
     const offrampProgram = new Program(CCIP_OFFRAMP_IDL, new PublicKey(offRamp), provider)
 
     const rep = await executeReport({ offrampProgram, execReport, ...opts })
-    await this.cleanUpBuffers(opts)
+    try {
+      await this.cleanUpBuffers(opts)
+    } catch (err) {
+      console.warn('Error while trying to clean up buffers:', err)
+    }
     return rep
   }
 
@@ -1260,6 +1241,21 @@ export class SolanaChain implements Chain {
 
     await Promise.allSettled(pendingPromises)
   }
+
+  static parseError(error: unknown) {
+    if (!error) return
+    if (Array.isArray(error)) {
+      if (error.every((e) => typeof e === 'string')) return getErrorFromLogs(error)
+      else if (error.every((e) => typeof e === 'object' && 'data' in e && 'address' in e))
+        return getErrorFromLogs(error as Log_[])
+    } else if (typeof error === 'object') {
+      if ('logs' in error) return getErrorFromLogs(error.logs as Log_[] | string[])
+      else if ('transactionLogs' in error && 'transactionMessage' in error) {
+        const parsed = getErrorFromLogs(error.transactionLogs as Log_[] | string[])
+        if (parsed) return { message: error.transactionMessage, ...parsed }
+      }
+    }
+  }
 }
 
-const _solanaChain: ChainStatic = SolanaChain
+supportedChains[ChainFamily.Solana] = SolanaChain

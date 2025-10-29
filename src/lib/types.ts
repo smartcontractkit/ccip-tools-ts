@@ -1,28 +1,9 @@
-import {
-  type Abi,
-  type AbiParameterToPrimitiveType,
-  type AbiParametersToPrimitiveTypes,
-  type ExtractAbiEvent,
-  type SolidityTuple,
-  parseAbi,
-} from 'abitype'
-import { type BytesLike, type Log, AbiCoder } from 'ethers'
+import type { AbiParametersToPrimitiveTypes, ExtractAbiEvent } from 'abitype'
+import type { BytesLike, Log } from 'ethers'
 
 import type { ChainFamily, ChainTransaction } from './chain.ts'
-import CommitStore_1_2_ABI from '../abi/CommitStore_1_2.ts'
-import CommitStore_1_5_ABI from '../abi/CommitStore_1_5.ts'
-import EVM2EVMOffRamp_1_2_ABI from '../abi/OffRamp_1_2.ts'
-import EVM2EVMOffRamp_1_5_ABI from '../abi/OffRamp_1_5.ts'
-import OffRamp_1_6_ABI from '../abi/OffRamp_1_6.ts'
-import EVM2EVMOnRamp_1_2_ABI from '../abi/OnRamp_1_2.ts'
-import EVM2EVMOnRamp_1_5_ABI from '../abi/OnRamp_1_5.ts'
-import OnRamp_1_6_ABI from '../abi/OnRamp_1_6.ts'
-import type {
-  CCIPMessage_EVM,
-  CCIPMessage_V1_2_EVM,
-  CCIPMessage_V1_5_EVM,
-  CCIPMessage_V1_6_EVM,
-} from './evm/messages.ts'
+import type OffRamp_1_6_ABI from '../abi/OffRamp_1_6.ts'
+import type { CCIPMessage_EVM, CCIPMessage_V1_6_EVM } from './evm/messages.ts'
 import type { ExtraArgs } from './extra-args.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
 // v1.6 Base type from EVM contains the intersection of all other CCIPMessage v1.6 types
@@ -42,7 +23,7 @@ export type DeepReadonly<T> = Readonly<{
 }>
 
 /**
- * "Fix" for intersecting types containing arrays: A[] & B[] => (A & B)[]
+ * "Fix" for deeply intersecting types containing arrays: A[] & B[] => (A & B)[]
  * Usually, if you intersect { arr: A[] } & { arr: B[] }, arr will have type A[] & B[],
  * i.e. all/each *index* of A[] and B[] should be present in the intersection, with quite undefined
  * types of the elements themselves, oftentimes assigning only one of A or B to the element type;
@@ -70,40 +51,12 @@ export type MergeArrayElements<T, U> = {
         : never
 }
 
-export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
-export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
-
 export const CCIPVersion = {
   V1_2: '1.2.0',
   V1_5: '1.5.0',
   V1_6: '1.6.0',
 } as const
 export type CCIPVersion = (typeof CCIPVersion)[keyof typeof CCIPVersion]
-
-export const CCIPContractType = {
-  OnRamp: 'OnRamp',
-  OffRamp: 'OffRamp',
-  CommitStore: 'CommitStore',
-} as const
-export type CCIPContractType = (typeof CCIPContractType)[keyof typeof CCIPContractType]
-
-export const CCIP_ABIs = {
-  [CCIPContractType.OnRamp]: {
-    [CCIPVersion.V1_6]: OnRamp_1_6_ABI,
-    [CCIPVersion.V1_5]: EVM2EVMOnRamp_1_5_ABI,
-    [CCIPVersion.V1_2]: EVM2EVMOnRamp_1_2_ABI,
-  },
-  [CCIPContractType.OffRamp]: {
-    [CCIPVersion.V1_6]: OffRamp_1_6_ABI,
-    [CCIPVersion.V1_5]: EVM2EVMOffRamp_1_5_ABI,
-    [CCIPVersion.V1_2]: EVM2EVMOffRamp_1_2_ABI,
-  },
-  [CCIPContractType.CommitStore]: {
-    [CCIPVersion.V1_6]: OffRamp_1_6_ABI,
-    [CCIPVersion.V1_5]: CommitStore_1_5_ABI,
-    [CCIPVersion.V1_2]: CommitStore_1_2_ABI,
-  },
-} as const satisfies Record<CCIPContractType, Record<CCIPVersion, Abi>>
 
 type ChainFamilyWithId<F extends ChainFamily> = F extends typeof ChainFamily.EVM
   ? { family: typeof ChainFamily.EVM; chainId: number }
@@ -161,30 +114,15 @@ export const ExecutionState = {
 } as const
 export type ExecutionState = (typeof ExecutionState)[keyof typeof ExecutionState]
 
-export type ExecutionReceipt = (Omit<
-  AbiParameterToPrimitiveType<{
-    // hack: trick abitypes into giving us the struct equivalent types, to cast from Result
-    type: SolidityTuple
-    components: ExtractAbiEvent<
-      (typeof CCIP_ABIs)[typeof CCIPContractType.OffRamp][typeof CCIPVersion.V1_5],
-      'ExecutionStateChanged'
-    >['inputs']
-  }>,
-  'state'
-> & { state: ExecutionState }) &
-  Partial<
-    Pick<
-      AbiParameterToPrimitiveType<{
-        // hack: trick abitypes into giving us the struct equivalent types, to cast from Result
-        type: SolidityTuple
-        components: ExtractAbiEvent<
-          (typeof CCIP_ABIs)[typeof CCIPContractType.OffRamp][typeof CCIPVersion.V1_6],
-          'ExecutionStateChanged'
-        >['inputs']
-      }>,
-      'gasUsed' | 'messageHash' | 'sourceChainSelector'
-    >
-  >
+export type ExecutionReceipt = {
+  messageId: string
+  sequenceNumber: bigint
+  state: ExecutionState
+  sourceChainSelector?: bigint
+  messageHash?: string
+  returnData?: string
+  gasUsed?: bigint
+}
 
 export interface CCIPExecution {
   receipt: ExecutionReceipt

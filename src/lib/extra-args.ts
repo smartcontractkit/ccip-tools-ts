@@ -1,8 +1,7 @@
-import { type BytesLike, type Result, id } from 'ethers'
+import { type BytesLike, id } from 'ethers'
 
-import { type ChainStatic, ChainFamily } from './chain.ts'
+import { ChainFamily } from './chain.ts'
 import { supportedChains } from './supported-chains.ts'
-import { defaultAbiCoder } from './types.ts'
 
 export const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'
 export const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'
@@ -37,7 +36,7 @@ export function encodeExtraArgs(
   args: EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1,
   from: ChainFamily = ChainFamily.EVM,
 ): string {
-  const chain = (supportedChains as Partial<Record<ChainFamily, ChainStatic>>)[from]
+  const chain = supportedChains[from]
   if (!chain) throw new Error(`Unsupported chain family: ${from}`)
   return chain.encodeExtraArgs(args)
 }
@@ -58,7 +57,7 @@ export function parseExtraArgs(
   if (!data || data === '') return
   let chains
   if (from) {
-    const chain = (supportedChains as Partial<Record<ChainFamily, ChainStatic>>)[from]
+    const chain = supportedChains[from]
     if (!chain) throw new Error(`Unsupported chain family: ${from}`)
     chains = [chain]
   } else {
@@ -69,22 +68,4 @@ export function parseExtraArgs(
     if (decoded) return decoded
   }
   throw new Error(`Could not parse extraArgs from "${from}"`)
-}
-
-const SourceTokenData =
-  'tuple(bytes sourcePoolAddress, bytes destTokenAddress, bytes extraData, uint64 destGasAmount)'
-export type SourceTokenData = {
-  sourcePoolAddress: string
-  destTokenAddress: string
-  extraData: string
-  destGasAmount: bigint
-}
-
-/**
- * parse <=v1.5 `message.sourceTokenData`;
- * v1.6+ already contains this in `message.tokenAmounts`
- */
-export function parseSourceTokenData(data: string): SourceTokenData {
-  const decoded = defaultAbiCoder.decode([SourceTokenData], data)
-  return (decoded[0] as Result).toObject() as SourceTokenData
 }

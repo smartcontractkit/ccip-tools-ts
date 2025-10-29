@@ -7,9 +7,7 @@ import { formatDuration, prettyLane } from './utils.ts'
 import FeeQuoterABI from '../abi/FeeQuoter_1_6.ts'
 import RouterABI from '../abi/Router.ts'
 import {
-  type CCIPContract,
   type CCIPVersion,
-  CCIPContractType,
   bigIntReplacer,
   chainIdFromSelector,
   chainNameFromSelector,

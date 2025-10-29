@@ -12,7 +12,6 @@ import {
   type TransactionReceipt,
   BaseWallet,
   Contract,
-  Interface,
   JsonRpcProvider,
   SigningKey,
   WebSocketProvider,
@@ -31,29 +30,21 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 import moize from 'moize'
 
-import { DEFAULT_GAS_LIMIT, defaultAbiCoder } from './const.ts'
+import { DEFAULT_GAS_LIMIT, defaultAbiCoder, interfaces } from './const.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
-import type { CCIPMessage_V1_6_EVM } from './messages.ts'
+import { type CCIPMessage_V1_6_EVM, parseSourceTokenData } from './messages.ts'
 import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
-import Token_ABI from '../../abi/BurnMintERC677Token.ts'
-import TokenPool_ABI from '../../abi/BurnMintTokenPool_1_5_1.ts'
-import CommitStore_1_2_ABI from '../../abi/CommitStore_1_2.ts'
-import CommitStore_1_5_ABI from '../../abi/CommitStore_1_5.ts'
+import type Token_ABI from '../../abi/BurnMintERC677Token.ts'
+import type TokenPool_ABI from '../../abi/LockReleaseTokenPool_1_6_1.ts'
 import EVM2EVMOffRamp_1_2_ABI from '../../abi/OffRamp_1_2.ts'
 import EVM2EVMOffRamp_1_5_ABI from '../../abi/OffRamp_1_5.ts'
 import OffRamp_1_6_ABI from '../../abi/OffRamp_1_6.ts'
 import EVM2EVMOnRamp_1_2_ABI from '../../abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from '../../abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from '../../abi/OnRamp_1_6.ts'
-import Router_ABI from '../../abi/Router.ts'
-import TokenAdminRegistry_1_5_ABI from '../../abi/TokenAdminRegistry_1_5.ts'
-import {
-  type Chain,
-  type ChainStatic,
-  type ChainTransaction,
-  type LogFilter,
-  ChainFamily,
-} from '../chain.ts'
+import type Router_ABI from '../../abi/Router.ts'
+import type TokenAdminRegistry_1_5_ABI from '../../abi/TokenAdminRegistry_1_5.ts'
+import { type Chain, type ChainTransaction, type LogFilter, ChainFamily } from '../chain.ts'
 import {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
@@ -61,7 +52,6 @@ import {
   EVMExtraArgsV1Tag,
   EVMExtraArgsV2Tag,
   SVMExtraArgsTag,
-  parseSourceTokenData,
 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import {
@@ -88,30 +78,14 @@ import {
   networkInfo,
   parseTypeAndVersion,
 } from '../utils.ts'
-
-const OnRamp_1_2_Interface = new Interface(EVM2EVMOnRamp_1_2_ABI)
-const OnRamp_1_5_Interface = new Interface(EVM2EVMOnRamp_1_5_ABI)
-const OnRamp_1_6_Interface = new Interface(OnRamp_1_6_ABI)
-const OffRamp_1_2_Interface = new Interface(EVM2EVMOffRamp_1_2_ABI)
-const OffRamp_1_5_Interface = new Interface(EVM2EVMOffRamp_1_5_ABI)
-const OffRamp_1_6_Interface = new Interface(OffRamp_1_6_ABI)
-const CommitStore_1_2_Interface = new Interface(CommitStore_1_2_ABI)
-const CommitStore_1_5_Interface = new Interface(CommitStore_1_5_ABI)
+import { parseError } from './errors.ts'
+import { supportedChains } from '../supported-chains.ts'
 
 function getAllFragmentsMatchingEvents(
   events: readonly string[],
 ): Record<`0x${string}`, EventFragment> {
   const fragments: Record<string, EventFragment> = {}
-  for (const iface of [
-    OnRamp_1_6_Interface,
-    OnRamp_1_5_Interface,
-    OnRamp_1_2_Interface,
-    OffRamp_1_6_Interface,
-    OffRamp_1_5_Interface,
-    OffRamp_1_2_Interface,
-    CommitStore_1_5_Interface,
-    CommitStore_1_2_Interface,
-  ]) {
+  for (const iface of Object.values(interfaces)) {
     for (const event of events) {
       const fragment = iface.getEvent(event)
       if (fragment) fragments[fragment.topicHash] ??= fragment
@@ -315,7 +289,8 @@ export class EVMChain implements Chain {
     if (!isBytesLike(log.data)) throw new Error(`invalid data=${util.inspect(log.data)}`)
     const fragment = requestsFragments[log.topics[0] as `0x${string}`]
     if (!fragment) return
-    const result = OnRamp_1_6_Interface.decodeEventLog(fragment, log.data, log.topics)
+    // we don't actually use Interface instance here, `decodeEventLog` is mostly static when given a fragment
+    const result = interfaces.OnRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
     const message = resultsToMessage(result)
     if (!isHexString(message?.sender, 20)) throw new Error('could not decode CCIPMessage')
 
@@ -400,7 +375,7 @@ export class EVMChain implements Chain {
     const isCcipV15 = fragment.name === 'ReportAccepted'
     // CCIP<=1.5 doesn't have lane info in event, so we need lane to be provided (e.g. from CommitStore's configs)
     if (isCcipV15 && !lane) throw new Error('decoding commits from CCIP<=v1.5 requires lane')
-    let result = OffRamp_1_6_Interface.decodeEventLog(fragment, log.data, log.topics)
+    let result = interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
     if (result.length === 1) result = result[0] as Result
     if (isCcipV15) {
       return [
@@ -435,7 +410,7 @@ export class EVMChain implements Chain {
     if (!isBytesLike(log.data)) throw new Error(`invalid data=${util.inspect(log.data)}`)
     const fragment = receiptsFragments[log.topics[0] as `0x${string}`]
     if (!fragment) return
-    const result = OffRamp_1_6_Interface.decodeEventLog(fragment, log.data, log.topics)
+    const result = interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
     return {
       ...result.toObject(),
       // ...(fragment.inputs.filter((p) => p.indexed).map((p, i) => [p.name, log.topics[i+1]] as const)).
@@ -602,9 +577,11 @@ export class EVMChain implements Chain {
   }
 
   async getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]> {
-    const contract = new Contract(router, Router_ABI, this.provider) as unknown as TypedContract<
-      typeof Router_ABI
-    >
+    const contract = new Contract(
+      router,
+      interfaces.Router,
+      this.provider,
+    ) as unknown as TypedContract<typeof Router_ABI>
     const offRamps = await contract.getOffRamps()
     return offRamps
       .filter((offRamp) => offRamp.sourceChainSelector === sourceChainSelector)
@@ -612,9 +589,11 @@ export class EVMChain implements Chain {
   }
 
   async getOnRampForRouter(router: string, destChainSelector: bigint): Promise<string> {
-    const contract = new Contract(router, Router_ABI, this.provider) as unknown as TypedContract<
-      typeof Router_ABI
-    >
+    const contract = new Contract(
+      router,
+      interfaces.Router,
+      this.provider,
+    ) as unknown as TypedContract<typeof Router_ABI>
     return contract.getOnRamp(destChainSelector) as Promise<string>
   }
 
@@ -678,16 +657,18 @@ export class EVMChain implements Chain {
   async getTokenForTokenPool(tokenPool: string): Promise<string> {
     const contract = new Contract(
       tokenPool,
-      TokenPool_ABI,
+      interfaces.TokenPool_v1_6,
       this.provider,
     ) as unknown as TypedContract<typeof TokenPool_ABI>
     return contract.getToken() as Promise<string>
   }
 
   async getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }> {
-    const contract = new Contract(token, Token_ABI, this.provider) as unknown as TypedContract<
-      typeof Token_ABI
-    >
+    const contract = new Contract(
+      token,
+      interfaces.Token,
+      this.provider,
+    ) as unknown as TypedContract<typeof Token_ABI>
     const [symbol, decimals] = await Promise.all([contract.symbol(), contract.decimals()])
     return { symbol, decimals: Number(decimals) }
   }
@@ -737,7 +718,7 @@ export class EVMChain implements Chain {
   async getTokenPoolForToken(registry: string, token: string): Promise<string> {
     const contract = new Contract(
       registry,
-      TokenAdminRegistry_1_5_ABI,
+      interfaces.TokenAdminRegistry,
       this.provider,
     ) as unknown as TypedContract<typeof TokenAdminRegistry_1_5_ABI>
     const tokenPool = await contract.getPool(token)
@@ -752,7 +733,7 @@ export class EVMChain implements Chain {
   ): Promise<string> {
     const contract = new Contract(
       tokenPool,
-      TokenPool_ABI,
+      interfaces.TokenPool_v1_6,
       this.provider,
     ) as unknown as TypedContract<typeof TokenPool_ABI>
     const remoteToken = await contract.getRemoteToken(remoteChainSelector)
@@ -764,9 +745,11 @@ export class EVMChain implements Chain {
   }
 
   async getFee(router_: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint> {
-    const router = new Contract(router_, Router_ABI, this.provider) as unknown as TypedContract<
-      typeof Router_ABI
-    >
+    const router = new Contract(
+      router_,
+      interfaces.Router,
+      this.provider,
+    ) as unknown as TypedContract<typeof Router_ABI>
     return router.getFee(destChainSelector, {
       receiver: zeroPadValue(getAddressBytes(message.receiver), 32),
       data: hexlify(message.data),
@@ -802,7 +785,7 @@ export class EVMChain implements Chain {
     let nonce = await this.provider.getTransactionCount(await this.getWalletAddress())
     await Promise.all(
       Object.entries(amountsToApprove).map(async ([token, amount]) => {
-        const contract = new Contract(token, Token_ABI, wallet) as unknown as TypedContract<
+        const contract = new Contract(token, interfaces.Token, wallet) as unknown as TypedContract<
           typeof Token_ABI
         >
         const allowance = await contract.allowance(await wallet.getAddress(), router_)
@@ -818,7 +801,7 @@ export class EVMChain implements Chain {
       }),
     )
 
-    const router = new Contract(router_, Router_ABI, wallet) as unknown as TypedContract<
+    const router = new Contract(router_, interfaces.Router, wallet) as unknown as TypedContract<
       typeof Router_ABI
     >
     const tx = await router.ccipSend(
@@ -948,6 +931,10 @@ export class EVMChain implements Chain {
 
     return manualExecTx
   }
+
+  static parseError(error: unknown) {
+    return parseError(error)
+  }
 }
 
-const _evmChain: ChainStatic = EVMChain
+supportedChains[ChainFamily.EVM] = EVMChain

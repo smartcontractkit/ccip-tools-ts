@@ -1,18 +1,13 @@
-import { type Addressable, type Log, EventFragment, Interface } from 'ethers'
+import { type Addressable, type Log, EventFragment } from 'ethers'
 
-import TokenPool_1_5_ABI from '../../abi/BurnMintTokenPool_1_5_1.ts'
-import TokenPool_1_6_ABI from '../../abi/BurnMintTokenPool_1_6_1.ts'
-import { type SourceTokenData, parseSourceTokenData } from '../extra-args.ts'
 import { getLbtcAttestation, getUsdcAttestation } from '../offchain.ts'
 import type { CCIPMessage, CCIPRequest, OffchainTokenData } from '../types.ts'
 import { networkInfo } from '../utils.ts'
-import { defaultAbiCoder } from './const.ts'
+import { defaultAbiCoder, interfaces } from './const.ts'
+import { type SourceTokenData, parseSourceTokenData } from './messages.ts'
 
-const TokenPool_1_5_Interface = new Interface(TokenPool_1_5_ABI)
-const TokenPool_1_6_Interface = new Interface(TokenPool_1_6_ABI)
-
-const BURNED_EVENT_1_5 = TokenPool_1_5_Interface.getEvent('Burned')!
-const BURNED_EVENT_1_6 = TokenPool_1_6_Interface.getEvent('LockedOrBurned')!
+const BURNED_EVENT_1_5 = interfaces.TokenPool_v1_5.getEvent('Burned')!
+const BURNED_EVENT_1_6 = interfaces.TokenPool_v1_6.getEvent('LockedOrBurned')!
 const BURNED_EVENT_TOPIC_HASHES = new Set([BURNED_EVENT_1_5.topicHash, BURNED_EVENT_1_6.topicHash])
 
 const USDC_EVENT = EventFragment.from('MessageSent(bytes message)')

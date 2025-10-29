@@ -7,10 +7,11 @@ import {
   type TransactionInstruction,
   ComputeBudgetProgram,
   PublicKey,
+  SendTransactionError,
   TransactionMessage,
   VersionedTransaction,
 } from '@solana/web3.js'
-import { type BytesLike, dataSlice, hexlify } from 'ethers'
+import { type BytesLike, dataLength, dataSlice, hexlify } from 'ethers'
 
 import type { Log_ } from '../types.ts'
 import { getDataBytes, sleep } from '../utils.ts'
@@ -91,10 +92,9 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
 
       if (log.startsWith('Program data: ')) {
         try {
-          // Try to decode base64 and extract first 8 bytes as topic
-          const base64Data = logData
-          const buffer = Buffer.from(base64Data, 'base64')
-          if (buffer.length >= 8) {
+          // Try to decode base64 and extract first 8 bytes as topic/discriminant
+          const buffer = getDataBytes(logData)
+          if (dataLength(buffer) >= 8) {
             topics = [dataSlice(buffer, 0, 8)]
           }
         } catch {
@@ -115,47 +115,65 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
 }
 
 export function getErrorFromLogs(
-  logs_: readonly string[] | readonly Pick<Log_, 'address' | 'index' | 'data'>[] | null,
-): string | undefined {
+  logs_: readonly string[] | readonly Pick<Log_, 'address' | 'index' | 'data' | 'topics'>[] | null,
+): { program: string; [k: string]: string } | undefined {
   if (!logs_?.length) return
   let logs
   if (logs_.every((l) => typeof l === 'string')) logs = parseSolanaLogs(logs_)
   else logs = logs_
-  let returnData
 
   const lastLog = logs[logs.length - 1]
   // collect all logs from the last program execution (the one which failed)
   const lastProgramLogs = logs
     .reduceRight(
       (acc, l) =>
-        !acc.length || (l.address === acc[0].address && l.index === acc[0].index - 1)
-          ? [l, ...acc]
-          : acc,
+        // if acc is empty (i.e. on last log), or it is emitted by the same program and not a Program data:
+        !acc.length || (l.address === acc[0].address && !l.topics?.length) ? [l, ...acc] : acc,
       [] as Pick<Log_, 'address' | 'index' | 'data'>[],
     )
     .map(({ data }) => data as string)
     .reduceRight(
       (acc, l) =>
-        l.endsWith(':') && acc.length ? [`${l} ${acc[0]}`, ...acc.slice(1)] : [l, ...acc],
+        l.endsWith(':') && acc.length
+          ? [`${l} ${acc[0]}`, ...acc.slice(1)]
+          : l.split(': ').length > 1 && l.split('. ').length > 1
+            ? [...l.replace(/\.$/, '').split('. '), ...acc]
+            : [l, ...acc],
       [] as string[],
     ) // cosmetic: join lines ending in ':' with next
-  returnData = `${lastLog.address} failed: ${lastProgramLogs.join('\n')}`
-  try {
-    // convert number[]s (common in solana logs) into slightly more readable 0x-bytearrays
-    returnData = returnData.replace(/\[(\d{1,3}, ){3,}\d+\]/g, (m) =>
-      hexlify(
-        new Uint8Array(
-          m
-            .substring(1, m.length - 1)
-            .split(', ')
-            .map((x) => +x),
-        ),
+    .map((l) => {
+      try {
+        // convert number[]s (common in solana logs) into slightly more readable 0x-bytearrays
+        return l.replace(/\[(\d{1,3}, ){3,}\d+\]/g, (m) =>
+          hexlify(
+            new Uint8Array(
+              m
+                .substring(1, m.length - 1)
+                .split(', ')
+                .map((x) => +x),
+            ),
+          ),
+        )
+      } catch (_) {
+        return l
+      }
+    })
+  if (lastProgramLogs.every((l) => l.indexOf(': ') >= 0)) {
+    return {
+      program: lastLog.address,
+      ...Object.fromEntries(
+        lastProgramLogs.map((l) => [
+          l.substring(0, l.indexOf(': ')),
+          l.substring(l.indexOf(': ') + 2),
+        ]),
       ),
-    )
-  } catch (_) {
-    // pass
+    }
+  } else {
+    return {
+      program: lastLog.address,
+      error: lastProgramLogs.join('\n'),
+    }
   }
-  return returnData
 }
 
 export async function simulateTransaction({
@@ -216,9 +234,13 @@ export async function simulateTransaction({
       returnData: result.value.returnData,
       err: result.value.err,
     })
-    throw new Error(
-      `Simulation failed: ${getErrorFromLogs(result.value.logs) || JSON.stringify(result.value.err)}`,
-    )
+    // same error sendTransaction sends, to be catched up
+    throw new SendTransactionError({
+      action: 'simulate',
+      signature: '',
+      transactionMessage: JSON.stringify(result.value.err),
+      logs: result.value.logs!,
+    })
   }
 
   return result.value

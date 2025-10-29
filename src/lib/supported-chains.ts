@@ -1,10 +1,4 @@
-import { AptosChain } from './aptos/index.ts'
-import { type ChainStatic, ChainFamily } from './chain.ts'
-import { EVMChain } from './evm/index.ts'
-import { SolanaChain } from './solana/index.ts'
+import type { ChainFamily, ChainStatic } from './chain.ts'
 
-export const supportedChains = {
-  [ChainFamily.Aptos]: AptosChain,
-  [ChainFamily.EVM]: EVMChain,
-  [ChainFamily.Solana]: SolanaChain,
-} as const satisfies Partial<Record<ChainFamily, ChainStatic>>
+// global record; can be mutated when implementing or extending a Chain family support
+export const supportedChains: Partial<Record<ChainFamily, ChainStatic>> = {}

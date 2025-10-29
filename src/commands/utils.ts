@@ -1,8 +1,8 @@
 import { select } from '@inquirer/prompts'
 import bs58 from 'bs58'
-import { Result, dataSlice, formatUnits, isBytesLike, isHexString, parseUnits } from 'ethers'
+import { Result, formatUnits, isBytesLike, isHexString, parseUnits } from 'ethers'
 
-import type { Chain } from '../lib/chain.ts'
+import type { Chain, ChainStatic } from '../lib/chain.ts'
 import {
   type CCIPCommit,
   type CCIPExecution,
@@ -11,11 +11,10 @@ import {
   ExecutionState,
   chainIdFromSelector,
   chainNameFromId,
-  getErrorData,
   networkInfo,
-  parseWithFragment,
   recursiveParseError,
 } from '../lib/index.ts'
+import { supportedChains } from '../lib/supported-chains.ts'
 
 export async function selectRequest(
   requests: readonly CCIPRequest[],
@@ -310,12 +309,14 @@ export function prettyReceipt(
     (receipt.receipt.returnData && receipt.receipt.returnData !== '0x')
       ? isBytesLike(receipt.receipt.returnData)
         ? formatData('returnData', receipt.receipt.returnData, true)
-        : Object.fromEntries(
-            wrapText(
-              receipt.receipt.returnData,
-              Math.max(100, +(process.env.COLUMNS || 80) * 0.9),
-            ).map((l, i) => [i ? ' '.repeat(i) : 'returnData', l]),
-          )
+        : receipt.receipt.returnData
+          ? Object.fromEntries(
+              wrapText(
+                receipt.receipt.returnData,
+                Math.max(100, +(process.env.COLUMNS || 80) * 0.9),
+              ).map((l, i) => [!i ? 'returnData' : ' '.repeat(i), l]),
+            )
+          : {}
       : {}),
     ...(receipt.receipt.gasUsed ? { gasUsed: Number(receipt.receipt.gasUsed) } : {}),
     ...(origin ? { origin } : {}),
@@ -328,33 +329,24 @@ export function prettyReceipt(
 }
 
 export function logParsedError(err: unknown): boolean {
-  if (!err || typeof err !== 'object') return false
-  const shortMessage = (err as { shortMessage: string }).shortMessage
-  const transaction = (err as { transaction: { to: string; data: string } }).transaction
-  if (!shortMessage || !transaction?.data) return false
-
-  const invocation_ = (err as { invocation: { method: string; args: Result } | null }).invocation
-  let method, invocation
-  if (invocation_) {
-    const { method: method_, args, ...rest } = invocation_
-    method = method_
-    invocation = { ...rest, args }
-  } else {
-    method = dataSlice(transaction.data, 0, 4)
-    const func = parseWithFragment(method)?.[0]
-    if (func) method = func.name
+  for (const chain of Object.values<ChainStatic>(supportedChains)) {
+    const parsed = chain.parseError?.(err)
+    if (parsed) {
+      const { method, Instruction: instruction, ...rest } = parsed
+      if (method || instruction) {
+        console.error(
+          `🛑 Failed to call "${(method || instruction) as string}"`,
+          ...Object.entries(rest)
+            .map(([k, e]) => [`\n${k.substring(0, 1).toUpperCase()}${k.substring(1)} =`, e])
+            .flat(1),
+        )
+      } else {
+        console.error('🛑 Error:', parsed)
+      }
+      return true
+    }
   }
-  const reason: unknown[] = []
-  const errorData = getErrorData(err)
-  if (errorData) {
-    // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-    reason.push(...recursiveParseError('Revert', errorData).map(([k, e]) => `\n${k} = ${e}`))
-  }
-  console.error(`🛑 Failed to call "${method}"\nError =`, shortMessage, ...reason, '\nCall =', {
-    ...transaction,
-    ...invocation,
-  })
-  return true
+  return false
 }
 
 /**

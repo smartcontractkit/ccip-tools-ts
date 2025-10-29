@@ -59,6 +59,7 @@ import {
 } from '../utils.ts'
 import { getAptosLeafHasher } from './hasher.ts'
 import { getTokenInfo } from './token.ts'
+import { supportedChains } from '../supported-chains.ts'
 
 const eventToHandler = {
   CCIPMessageSent: 'OnRampState/ccip_message_sent_events',
@@ -66,7 +67,7 @@ const eventToHandler = {
   ExecutionStateChanged: 'OffRampState/execution_state_changed_events',
 } as const
 
-class AptosChain implements Chain {
+export class AptosChain implements Chain {
   readonly network: NetworkInfo<typeof ChainFamily.Aptos>
   readonly provider: Aptos
 
@@ -107,7 +108,7 @@ class AptosChain implements Chain {
         maxArgs: 1,
       },
     )
-    this._getWallet = moize(this._getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
+    this.getWallet = moize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
   }
 
   [util.inspect.custom]() {
@@ -396,7 +397,7 @@ class AptosChain implements Chain {
     throw lastErr ?? new Error(`Could not view 'get_token' in ${tokenPool}`)
   }
 
-  _getWallet({ wallet }: { wallet?: string } = {}): Account {
+  getWallet({ wallet }: { wallet?: string } = {}): Account {
     return Account.fromPrivateKey({
       privateKey: new Ed25519PrivateKey(
         wallet ||
@@ -413,7 +414,7 @@ class AptosChain implements Chain {
   }
 
   getWalletAddress(opts?: { wallet?: string }): Promise<string> {
-    return Promise.resolve(this._getWallet(opts).publicKey.toString())
+    return Promise.resolve(this.getWallet(opts).publicKey.toString())
   }
 
   // Static methods for decoding
@@ -559,7 +560,4 @@ class AptosChain implements Chain {
   }
 }
 
-// Export singleton pattern similar to other chains
-const _aptosChain = new WeakMap<NetworkInfo, AptosChain>()
-
-export { AptosChain }
+supportedChains[ChainFamily.Aptos] = AptosChain

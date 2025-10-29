@@ -1,4 +1,4 @@
-import type { IdlTypes, Program } from '@coral-xyz/anchor'
+import { type IdlTypes, Program } from '@coral-xyz/anchor'
 import { type AccountMeta, PublicKey } from '@solana/web3.js'
 import BN from 'bn.js'
 
@@ -7,7 +7,7 @@ import { getDataBytes, toLeArray } from '../utils.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
 import type { IDL as CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
 import type { CCIPMessage_V1_6_Solana } from './types.ts'
-import { bytesToBuffer } from './utils.ts'
+import { bytesToBuffer, simulationProvider } from './utils.ts'
 
 export async function getManuallyExecuteInputs({
   execReport,
@@ -184,8 +184,14 @@ async function autoDeriveExecutionAccounts({
       }))
     }
 
+    // copy of Program which avoids signing every simulation
+    const readOnlyProgram = new Program(
+      offrampProgram.idl,
+      offrampProgram.programId,
+      simulationProvider(offrampProgram.provider.connection, transmitter),
+    )
     // Execute as a view call to get the response
-    const response = (await offrampProgram.methods
+    const response = (await readOnlyProgram.methods
       .deriveAccountsExecute(params, stage)
       .accounts({
         config: configPDA,

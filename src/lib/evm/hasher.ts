@@ -7,6 +7,7 @@ import { getAddressBytes, getDataBytes, networkInfo } from '../utils.ts'
 import { defaultAbiCoder } from './const.ts'
 
 const METADATA_PREFIX_1_2 = id('EVM2EVMMessageHashV2')
+
 export function getV12LeafHasher(
   sourceChainSelector: bigint,
   destChainSelector: bigint,
@@ -78,6 +79,7 @@ export function getV12LeafHasher(
 }
 
 const ANY_2_EVM_MESSAGE_HASH = id('Any2EVMMessageHashV1')
+
 export function getV16LeafHasher(
   sourceChainSelector: bigint,
   destChainSelector: bigint,

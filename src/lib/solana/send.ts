@@ -159,15 +159,15 @@ async function deriveAccountsCcipSend({
 
   const [configPDA] = PublicKey.findProgramAddressSync([Buffer.from('config')], router.programId)
 
-  // copy of router which avoids signing every simulation
-  const readOnlyRouter = new Program(
+  // read-only copy of router which avoids signing every simulation
+  const roProgram = new Program(
     router.idl,
     router.programId,
     simulationProvider(connection, sender),
   )
   do {
     // Create the transaction instruction for the deriveAccountsCcipSend method
-    const response = (await readOnlyRouter.methods
+    const response = (await roProgram.methods
       .deriveAccountsCcipSend(
         {
           destChainSelector: new BN(destChainSelector.toString()),

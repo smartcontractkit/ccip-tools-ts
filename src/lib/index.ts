@@ -1,6 +1,6 @@
 export { type Chain, type ChainStatic, ChainFamily } from './chain.ts'
 export { fetchCommitReport } from './commits.ts'
-export { getErrorData, parseWithFragment, recursiveParseError } from './errors.ts'
+export { getErrorData, parseWithFragment, recursiveParseError } from './evm/errors.ts'
 export { calculateManualExecProof, discoverOffRamp, fetchExecutionReceipts } from './execution.ts'
 export {
   type EVMExtraArgsV1,
@@ -25,10 +25,8 @@ export {
   type ExecutionReceipt,
   type Lane,
   type NetworkInfo,
-  CCIPContractType,
   CCIPVersion,
   ExecutionState,
-  defaultAbiCoder,
 } from './types.ts'
 export {
   bigIntReplacer,
