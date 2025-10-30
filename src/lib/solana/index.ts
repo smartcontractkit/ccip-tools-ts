@@ -42,6 +42,7 @@ import moize, { type Moized } from 'moize'
 import { type Chain, type ChainTransaction, type LogFilter, ChainFamily } from '../chain.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
   type CCIPMessage,
@@ -67,8 +68,8 @@ import {
   sleep,
   toLeArray,
 } from '../utils.ts'
+import { executeReport } from './exec.ts'
 import { getV16SolanaLeafHasher } from './hasher.ts'
-import { executeReport } from './manuallyExecuteSolana.ts'
 import { fetchSolanaOffchainTokenData } from './offchain.ts'
 import { IDL as BASE_TOKEN_POOL } from './programs/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as BURN_MINT_TOKEN_POOL } from './programs/1.6.0/BURN_MINT_TOKEN_POOL.ts'
@@ -78,7 +79,6 @@ import { IDL as CCIP_ROUTER_IDL } from './programs/1.6.0/CCIP_ROUTER.ts'
 import { ccipSend, getFee } from './send.ts'
 import type { CCIPMessage_V1_6_Solana } from './types.ts'
 import { bytesToBuffer, getErrorFromLogs, parseSolanaLogs, simulationProvider } from './utils.ts'
-import { supportedChains } from '../supported-chains.ts'
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
 const offrampCoder = new BorshCoder(CCIP_OFFRAMP_IDL)
@@ -112,6 +112,7 @@ function eventDiscriminant(eventName: string): string {
 }
 
 export class SolanaChain implements Chain {
+  static readonly family = ChainFamily.Solana
   readonly network: NetworkInfo<typeof ChainFamily.Solana>
   readonly connection: Connection
   readonly commitment: Commitment = 'confirmed'
@@ -159,7 +160,7 @@ export class SolanaChain implements Chain {
   }
 
   [util.inspect.custom]() {
-    return `${this.constructor.name}{${this.network.name}}`
+    return `${this.constructor.name} { ${this.network.name} }`
   }
 
   static _getConnection(url: string): Connection {
@@ -871,7 +872,7 @@ export class SolanaChain implements Chain {
     // Decode state enum (MessageExecutionState)
     // Enum discriminant is a single byte: Untouched=0, InProgress=1, Success=2, Failure=3
     let state = eventDataBuffer.readUInt8(offset) as ExecutionState
-    let returnData: string | undefined
+    let returnData
     if (log.tx) {
       // use only last receipt per tx+message (i.e. skip intermediary InProgress=1 states for Solana)
       const laterReceiptLog = log.tx.logs

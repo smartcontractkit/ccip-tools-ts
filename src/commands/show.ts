@@ -1,4 +1,3 @@
-import { dataLength } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'

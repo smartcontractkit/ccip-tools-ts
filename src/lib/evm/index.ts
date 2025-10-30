@@ -106,7 +106,8 @@ function resultsToMessage(result: Result): Record<string, unknown> {
   } as unknown as CCIPMessage
 }
 
-export class EVMChain implements Chain {
+export class EVMChain implements Chain<typeof ChainFamily.EVM> {
+  static readonly family = ChainFamily.EVM
   readonly network: NetworkInfo<typeof ChainFamily.EVM>
   readonly provider: JsonRpcApiProvider
 
@@ -132,7 +133,7 @@ export class EVMChain implements Chain {
   }
 
   [util.inspect.custom]() {
-    return `${this.constructor.name}{${this.network.name}}`
+    return `${this.constructor.name} { ${this.network.name} }`
   }
 
   // overwrite EVMChain.getWallet to implement custom wallet loading

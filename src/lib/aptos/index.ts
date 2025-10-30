@@ -67,7 +67,8 @@ const eventToHandler = {
   ExecutionStateChanged: 'OffRampState/execution_state_changed_events',
 } as const
 
-export class AptosChain implements Chain {
+export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
+  static readonly family = ChainFamily.Aptos
   readonly network: NetworkInfo<typeof ChainFamily.Aptos>
   readonly provider: Aptos
 
@@ -83,6 +84,11 @@ export class AptosChain implements Chain {
     this._getTxByVersion = moize(this._getTxByVersion.bind(this), {
       maxSize: 100,
       maxArgs: 1,
+    })
+    this.typeAndVersion = moize(this.typeAndVersion.bind(this), {
+      maxSize: 100,
+      maxArgs: 1,
+      maxAge: 60e3, // 1min
     })
     this.getTransaction = moize(this.getTransaction.bind(this), { maxSize: 100, maxArgs: 1 })
     this.getTokenForTokenPool = moize(this.getTokenForTokenPool.bind(this), {
@@ -112,7 +118,7 @@ export class AptosChain implements Chain {
   }
 
   [util.inspect.custom]() {
-    return `${this.constructor.name}{${this.network.name}}`
+    return `${this.constructor.name} { ${this.network.name} }`
   }
 
   static async fromUrl(url: string | Network): Promise<AptosChain> {
@@ -178,7 +184,7 @@ export class AptosChain implements Chain {
         transactionHash: hash,
         index,
         blockNumber: +tx.version,
-        data: event.data as unknown,
+        data: event.data as Record<string, unknown>,
         topics: [event.type.slice(event.type.lastIndexOf('::') + 2)],
       })),
     }
@@ -195,14 +201,12 @@ export class AptosChain implements Chain {
       eventHandlerField = (eventToHandler as Record<string, string>)[eventHandlerField]
       if (!eventHandlerField) throw new Error(`Unknown topic event handler="${opts.topics[0]}"`)
     }
-    const stateAddr = (
-      await this.provider.view({
-        payload: {
-          function:
-            `${opts.address}::get_state_address` as `0x${string}::${string}::get_state_address`,
-        },
-      })
-    )[0] as string
+    const [stateAddr] = await this.provider.view<[string]>({
+      payload: {
+        function:
+          `${opts.address}::get_state_address` as `0x${string}::${string}::get_state_address`,
+      },
+    })
 
     type ResEvent = AptosEvent & { version: string }
     let eventsIter
@@ -283,7 +287,7 @@ export class AptosChain implements Chain {
         index: +ev.sequence_number,
         blockNumber: +ev.version,
         transactionHash: (await this._getTxByVersion(+ev.version)).hash,
-        data: ev.data as unknown,
+        data: ev.data as Record<string, unknown>,
       }
     }
   }
@@ -294,13 +298,12 @@ export class AptosChain implements Chain {
     | [type_: string, version: string, typeAndVersion: string]
     | [type_: string, version: string, typeAndVersion: string, suffix: string]
   > {
-    const typeAndVersion = (
-      await this.provider.view({
-        payload: {
-          function: `${address}::type_and_version` as `${string}::${string}::type_and_version`,
-        },
-      })
-    )[0] as string
+    const [typeAndVersion] = await this.provider.view<[string]>({
+      payload: {
+        function: `${address}::type_and_version` as `${string}::${string}::type_and_version`,
+      },
+    })
+
     return parseTypeAndVersion(typeAndVersion)
   }
 
@@ -322,15 +325,13 @@ export class AptosChain implements Chain {
   }
 
   async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
-    const sourceChainConfig = (
-      await this.provider.view({
-        payload: {
-          function:
-            `${offRamp.includes('::') ? offRamp : offRamp + '::offramp'}::get_source_chain_config` as `${string}::${string}::get_source_chain_config`,
-          functionArguments: [sourceChainSelector],
-        },
-      })
-    )[0] as { on_ramp: string }
+    const [sourceChainConfig] = await this.provider.view<[{ on_ramp: string }]>({
+      payload: {
+        function:
+          `${offRamp.includes('::') ? offRamp : offRamp + '::offramp'}::get_source_chain_config` as `${string}::${string}::get_source_chain_config`,
+        functionArguments: [sourceChainSelector],
+      },
+    })
     return decodeAddress(sourceChainConfig.on_ramp, networkInfo(sourceChainSelector).family)
   }
 
@@ -345,12 +346,12 @@ export class AptosChain implements Chain {
     let lastErr
     for (const name of modulesNames) {
       try {
-        const res = await this.provider.view({
+        const res = await this.provider.view<[string]>({
           payload: {
             function: `${tokenPool}::${name}::get_token`,
           },
         })
-        return res[0] as string
+        return res[0]
       } catch (err) {
         lastErr = err as Error
       }
@@ -363,14 +364,14 @@ export class AptosChain implements Chain {
   }
 
   async getTokenPoolForToken(registry: string, token: string): Promise<string> {
-    const res = await this.provider.view({
+    const res = await this.provider.view<[string]>({
       payload: {
         function:
           `${registry.includes('::') ? registry : registry + '::token_admin_registry'}::get_pool` as `${string}::${string}::get_pool`,
         functionArguments: [token],
       },
     })
-    return res[0] as string
+    return res[0]
   }
 
   async getRemoteTokenForTokenPool(
@@ -383,13 +384,13 @@ export class AptosChain implements Chain {
     let lastErr
     for (const name of modulesNames) {
       try {
-        const res = await this.provider.view({
+        const res = await this.provider.view<[BytesLike]>({
           payload: {
             function: `${tokenPool}::${name}::get_remote_token`,
             functionArguments: [remoteChainSelector],
           },
         })
-        return decodeAddress(res[0] as string, networkInfo(remoteChainSelector).family)
+        return decodeAddress(res[0], networkInfo(remoteChainSelector).family)
       } catch (err) {
         lastErr = err as Error
       }

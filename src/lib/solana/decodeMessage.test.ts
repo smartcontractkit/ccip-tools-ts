@@ -1,5 +1,6 @@
-import { SolanaChain } from './index.ts'
+import '../index.ts'
 import type { CCIPMessage, CCIPVersion, Log_ } from '../types.ts'
+import { SolanaChain } from './index.ts'
 
 describe('SolanaChain.decodeMessage', () => {
   it('should correctly decode CCIPMessageSent event from Solana log', () => {
@@ -25,15 +26,13 @@ describe('SolanaChain.decodeMessage', () => {
       '0xc8cad4f80de5b5c436c102beedfb2bef0797169730c340c1c2147c70ea7e05c0',
     )
     expect(message.header.sourceChainSelector).toBe(16423721717087811551n) // Solana Devnet
-    expect((message.header as any).destChainSelector).toBe(16015286601757825753n) // Ethereum Sepolia
+    expect(message.header.destChainSelector).toBe(16015286601757825753n) // Ethereum Sepolia
     expect(message.header.sequenceNumber).toBe(2151n)
     expect(message.header.nonce).toBe(0n)
 
     // ----- MESSAGE -----
     expect(message.sender).toBe('6oFoex6ZdFuMcb7X3HHBKpqZUkEAyFAjwjTD8swn8iWA')
-    expect(message.receiver.toLowerCase()).toBe(
-      '0x000000000000000000000000bd27cdab5c9109b3390b25b4dff7d970918cc550',
-    )
+    expect(message.receiver.toLowerCase()).toBe('0xbd27cdab5c9109b3390b25b4dff7d970918cc550')
     expect(message.data).toBe('0x')
 
     // ----- TOKEN AMOUNTS -----
@@ -41,26 +40,24 @@ describe('SolanaChain.decodeMessage', () => {
     const tokenAmount = message.tokenAmounts[0]
 
     expect(tokenAmount.sourcePoolAddress).toBe('D22aGkYvJiFJ9tpxUV1RUWkNUy4FSUBk2NAvwQQD2G9Y')
-    expect((tokenAmount as any).destTokenAddress.toLowerCase()).toBe(
-      '0x0000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c7238',
+    expect(tokenAmount.destTokenAddress.toLowerCase()).toBe(
+      '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
     )
     expect(tokenAmount.amount).toBe(10000n)
-    expect((tokenAmount as any).extraData.toLowerCase()).toBe(
+    expect(tokenAmount.extraData.toLowerCase()).toBe(
       '0x000000000000000000000000000000000000000000000000000000000000a45b0000000000000000000000000000000000000000000000000000000000000005',
     )
-    expect((tokenAmount as any).destExecData.toLowerCase()).toBe('0x00030d40')
-    expect((tokenAmount as any).destGasAmount).toBe(1074594560n)
+    expect(tokenAmount.destExecData.toLowerCase()).toBe('0x00030d40')
+    expect(tokenAmount.destGasAmount).toBe(200000n)
 
     // ----- FEE FIELDS -----
     expect(message.feeToken).toBe('So11111111111111111111111111111111111111112')
     expect(message.feeTokenAmount).toBe(41032n)
-    expect((message as any).feeValueJuels).toBe(422097000000000n)
+    expect(message.feeValueJuels).toBe(422097000000000n)
 
     // ----- EXTRA ARGS -----
-    expect((message as any).extraArgs.toLowerCase()).toBe(
-      '0x181dcf107fc9120000000000000000000000000001',
-    )
-    expect((message as any).gasLimit).toBe(1231231n)
+    expect(message.extraArgs.toLowerCase()).toBe('0x181dcf107fc9120000000000000000000000000001')
+    expect('gasLimit' in message && message.gasLimit).toBe(1231231n)
   })
 
   it('should throw error for invalid log data', () => {
@@ -73,9 +70,7 @@ describe('SolanaChain.decodeMessage', () => {
       transactionHash: '0x123',
     }
 
-    expect(() => SolanaChain.decodeMessage(invalidLog)).toThrow(
-      'Failed to decode message from log:',
-    )
+    expect(SolanaChain.decodeMessage(invalidLog)).toBeUndefined()
   })
 
   it('should throw error for missing log data', () => {
@@ -88,8 +83,6 @@ describe('SolanaChain.decodeMessage', () => {
       transactionHash: '0x123',
     }
 
-    expect(() => SolanaChain.decodeMessage(invalidLog)).toThrow(
-      'Failed to decode message from log:',
-    )
+    expect(SolanaChain.decodeMessage(invalidLog)).toBeUndefined()
   })
 })

@@ -59,17 +59,17 @@ export const CCIPVersion = {
 export type CCIPVersion = (typeof CCIPVersion)[keyof typeof CCIPVersion]
 
 type ChainFamilyWithId<F extends ChainFamily> = F extends typeof ChainFamily.EVM
-  ? { family: typeof ChainFamily.EVM; chainId: number }
+  ? { readonly family: typeof ChainFamily.EVM; readonly chainId: number }
   : F extends typeof ChainFamily.Solana
-    ? { family: typeof ChainFamily.Solana; chainId: string }
+    ? { readonly family: typeof ChainFamily.Solana; readonly chainId: string }
     : F extends typeof ChainFamily.Aptos
-      ? { family: typeof ChainFamily.Aptos; chainId: `aptos:${number}` }
+      ? { readonly family: typeof ChainFamily.Aptos; readonly chainId: `aptos:${number}` }
       : never
 
 export type NetworkInfo<F extends ChainFamily = ChainFamily> = {
-  chainSelector: bigint
-  name: string
-  isTestnet: boolean
+  readonly chainSelector: bigint
+  readonly name: string
+  readonly isTestnet: boolean
 } & ChainFamilyWithId<F>
 
 export interface Lane<V extends CCIPVersion = CCIPVersion> {
@@ -86,7 +86,7 @@ export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
   : CCIPMessage_V1_6_EVM | CCIPMessage_V1_6_Solana
 
 export type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'blockNumber' | 'transactionHash'> & {
-  data: unknown
+  data: BytesLike | Record<string, unknown>
   tx?: ChainTransaction
 }
 
@@ -120,7 +120,7 @@ export type ExecutionReceipt = {
   state: ExecutionState
   sourceChainSelector?: bigint
   messageHash?: string
-  returnData?: unknown
+  returnData?: BytesLike | Record<string, string>
   gasUsed?: bigint
 }
 

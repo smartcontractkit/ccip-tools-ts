@@ -210,12 +210,13 @@ export interface Chain<F extends ChainFamily = ChainFamily> {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-export type ChainStatic = Function & {
+export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
+  readonly family: F
   /**
    * async constructor: builds a Chain from a rpc endpoint url
    * @param url - rpc endpoint url
    */
-  fromUrl(url: string): Promise<Chain>
+  fromUrl(url: string): Promise<Chain<F>>
   /**
    * Used for an optimization at init time, where we race fetching transactions before the networks
    * are known; should return a tuple with 2 promises: first one should (if possible) resolve to a
@@ -223,7 +224,7 @@ export type ChainStatic = Function & {
    * @param url - rpc endpoint url
    * @param txHash - transaction hash
    */
-  txFromUrl(url: string, txHash: string): [Promise<Chain>, Promise<ChainTransaction>]
+  txFromUrl(url: string, txHash: string): [Promise<Chain<F>>, Promise<ChainTransaction>]
   /**
    * Try to decode a CCIP message *from* a log/event *originated* from this *source* chain,
    * but which may *target* other dest chain families
