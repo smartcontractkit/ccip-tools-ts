@@ -140,6 +140,7 @@ export class SolanaChain implements Chain {
       updateCacheForKey: (key) => typeof key[key.length - 1] !== 'number',
     })
     this.getTransaction = moize(this.getTransaction.bind(this), { maxSize: 100, maxArgs: 1 })
+    this.getWallet = moize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
     this.getTokenForTokenPool = moize(this.getTokenForTokenPool.bind(this))
     this.getTokenInfo = moize(this.getTokenInfo.bind(this))
     this._getSignaturesForAddress = moize(
@@ -159,7 +160,14 @@ export class SolanaChain implements Chain {
         onExpire: ([, before]) => !before,
       },
     )
-    this.getWallet = moize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
+    // cache account info for 30 seconds
+    this.connection.getAccountInfo = moize(this.connection.getAccountInfo.bind(this.connection), {
+      maxSize: 100,
+      maxArgs: 2,
+      maxAge: 30e3,
+      transformArgs: ([address, commitment]) =>
+        [(address as PublicKey).toString(), commitment] as const,
+    })
   }
 
   [util.inspect.custom]() {
@@ -1254,11 +1262,11 @@ export class SolanaChain implements Chain {
       else if (error.every((e) => typeof e === 'object' && 'data' in e && 'address' in e))
         return getErrorFromLogs(error as Log_[])
     } else if (typeof error === 'object') {
-      if ('logs' in error) return getErrorFromLogs(error.logs as Log_[] | string[])
-      else if ('transactionLogs' in error && 'transactionMessage' in error) {
+      if ('transactionLogs' in error && 'transactionMessage' in error) {
         const parsed = getErrorFromLogs(error.transactionLogs as Log_[] | string[])
         if (parsed) return { message: error.transactionMessage, ...parsed }
       }
+      if ('logs' in error) return getErrorFromLogs(error.logs as Log_[] | string[])
     }
   }
 }

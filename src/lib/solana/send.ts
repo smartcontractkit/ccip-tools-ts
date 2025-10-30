@@ -80,8 +80,19 @@ export async function getFee(
     feeQuoter,
   )
 
+  if (
+    message.feeToken &&
+    message.feeToken !== PublicKey.default.toBase58() &&
+    message.feeToken !== linkTokenMint.toBase58()
+  ) {
+    console.warn('feeToken is not default nor link =', linkTokenMint.toBase58())
+  }
+
   // Convert feeToken to PublicKey (default to native SOL if not specified)
-  const feeTokenPubkey = message.feeToken ? new PublicKey(message.feeToken) : NATIVE_MINT
+  const feeTokenPubkey =
+    message.feeToken && message.feeToken !== PublicKey.default.toBase58()
+      ? new PublicKey(message.feeToken)
+      : NATIVE_MINT
 
   const [feeQuoterBillingTokenConfigPda] = PublicKey.findProgramAddressSync(
     [Buffer.from('fee_billing_token_config'), feeTokenPubkey.toBuffer()],
@@ -248,7 +259,6 @@ export async function ccipSend(
   if (!(wallet = (router.provider as AnchorProvider).wallet)) {
     throw new Error('ccipSend called without signer wallet')
   }
-  const svmMessage = anyToSvmMessage(message)
 
   const amountsToApprove = (message.tokenAmounts ?? []).reduce(
     (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
@@ -264,11 +274,12 @@ export async function ccipSend(
         router.provider as AnchorProvider,
         new PublicKey(token),
         router.programId,
-        opts?.approveMax ? undefined : BigInt(amount.toString()),
+        opts?.approveMax ? undefined : amount,
       ),
     ),
   )
 
+  const svmMessage = anyToSvmMessage(message)
   const { addressLookupTableAccounts, accounts, tokenIndexes } = await deriveAccountsCcipSend({
     router,
     destChainSelector,
@@ -278,7 +289,7 @@ export async function ccipSend(
 
   const ix = await router.methods
     .ccipSend(new BN(destChainSelector), svmMessage, tokenIndexes)
-    .accounts({
+    .accountsStrict({
       config: accounts[0].pubkey,
       destChainState: accounts[1].pubkey,
       nonce: accounts[2].pubkey,
@@ -355,14 +366,24 @@ async function approveRouterSpender(
   const wallet = provider.wallet
   const connection = provider.connection
 
+  // Get the current account info to check existing delegation (or create if needed)
+  const mintInfo = await provider.connection.getAccountInfo(token)
+  if (!mintInfo) throw new Error(`Mint ${token.toBase58()} not found`)
+  const associatedTokenAccount = getAssociatedTokenAddressSync(
+    token,
+    wallet.publicKey,
+    undefined,
+    mintInfo.owner,
+  )
+  const accountInfo = await getAccount(
+    provider.connection,
+    associatedTokenAccount,
+    undefined,
+    mintInfo.owner,
+  )
+
   // spender is a Router PDA
   const [spender] = PublicKey.findProgramAddressSync([Buffer.from('fee_billing_signer')], router)
-
-  // Get the user's associated token account for this mint
-  const userTokenAccount = getAssociatedTokenAddressSync(token, wallet.publicKey)
-
-  // Get the current account info to check existing delegation
-  const accountInfo = await getAccount(connection, userTokenAccount)
 
   // Check if we need to approve
   const needsApproval =
@@ -373,10 +394,12 @@ async function approveRouterSpender(
   if (needsApproval) {
     // Approve the spender to use tokens from the user's account
     const approveIx = createApproveInstruction(
-      userTokenAccount,
+      accountInfo.address,
       spender,
       wallet.publicKey,
       amount ?? BigInt(Number.MAX_SAFE_INTEGER),
+      undefined,
+      mintInfo.owner,
     )
 
     const approveTx = new VersionedTransaction(
