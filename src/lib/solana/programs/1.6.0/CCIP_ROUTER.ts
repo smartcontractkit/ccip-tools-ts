@@ -1,7 +1,12 @@
 // generate:
 // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/main/chains/solana/contracts/target/types/ccip_router.ts')
 //   .then((res) => res.text())
-//   .then((text) => text.trim())
+//   .then((text) => text.trim().split('\n'))
+//   .then((lines) => lines.map((l, i, arr) => {
+//     if (!l.match(/.?\bisMut.?:/) || !arr[i - 1].includes('feeTokenUserAssociatedAccount')) return l;
+//     if (l.match(/.?\bisMut.?: false/)) return l.replace('false', 'true');
+//     else throw new Error('isMut is already true, no need for this workaround anymore');
+//   }))
 export type CcipRouter = {
   version: '0.1.1'
   name: 'ccip_router'
@@ -1114,7 +1119,7 @@ export type CcipRouter = {
         },
         {
           name: 'feeTokenUserAssociatedAccount'
-          isMut: false
+          isMut: true
           isSigner: false
           docs: ['If paying with native SOL, this must be the zero address.']
         },
@@ -3445,7 +3450,7 @@ export const IDL: CcipRouter = {
         },
         {
           name: 'feeTokenUserAssociatedAccount',
-          isMut: false,
+          isMut: true,
           isSigner: false,
           docs: ['If paying with native SOL, this must be the zero address.'],
         },
