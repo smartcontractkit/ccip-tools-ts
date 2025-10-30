@@ -108,6 +108,10 @@ export const builder = (yargs: Argv) =>
           'List of accounts needed by Solana receiver program; append `=rw` to specify account as writable; can be specified multiple times',
         example: 'requiredPdaAddress=rw',
       },
+      'only-get-fee': {
+        type: 'boolean',
+        describe: 'Fetch and print the fee for the transaction, then exit',
+      },
     })
     .check(
       ({ 'transfer-tokens': transferTokens }) =>
@@ -237,6 +241,11 @@ async function sendMessage(
   await source.typeAndVersion(argv.router)
   // calculate fee
   const fee = await source.getFee(argv.router, destNetwork.chainSelector, message)
+
+  if (argv.onlyGetFee) {
+    console.log('Fee:', fee)
+    return
+  }
 
   const tx = await source.sendMessage(argv.router, destNetwork.chainSelector, { ...message, fee })
   console.log(

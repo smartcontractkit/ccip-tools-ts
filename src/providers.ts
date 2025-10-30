@@ -2,9 +2,21 @@ import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import util from 'util'
 
+import {
+  type AccountAddress,
+  type AnyRawTransaction,
+  Account,
+  AccountAuthenticatorEd25519,
+  AuthenticationKey,
+  Ed25519PrivateKey,
+  Ed25519PublicKey,
+  Ed25519Signature,
+  generateSigningMessageForTransaction,
+} from '@aptos-labs/ts-sdk'
 import { Wallet as SolanaWallet } from '@coral-xyz/anchor'
 import { LedgerSigner } from '@ethers-ext/signer-ledger'
 import { password } from '@inquirer/prompts'
+import AptosLedger from '@ledgerhq/hw-app-aptos'
 import SolanaLedger from '@ledgerhq/hw-app-solana'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
 import {
@@ -16,13 +28,26 @@ import {
   Transaction,
 } from '@solana/web3.js'
 import bs58 from 'bs58'
-import { type Provider, type Signer, BaseWallet, SigningKey, Wallet, getBytes } from 'ethers'
+import {
+  type BytesLike,
+  type Provider,
+  type Signer,
+  BaseWallet,
+  SigningKey,
+  Wallet,
+  getBytes,
+} from 'ethers'
 
-import type { Chain, ChainGetter, ChainTransaction } from './lib/chain.ts'
-import { EVMChain } from './lib/evm/index.ts'
-import { networkInfo } from './lib/index.ts'
-import { SolanaChain } from './lib/solana/index.ts'
-import { supportedChains } from './lib/supported-chains.ts'
+import {
+  type Chain,
+  type ChainGetter,
+  type ChainTransaction,
+  AptosChain,
+  EVMChain,
+  SolanaChain,
+  networkInfo,
+  supportedChains,
+} from './lib/index.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
 
@@ -162,6 +187,78 @@ SolanaChain.getWallet = async function loadSolanaWallet({
       walletOpt.startsWith('0x') ? getBytes(walletOpt) : bs58.decode(walletOpt),
     ),
   )
+}
+
+// A LedgerSigner object represents a signer for a private key on a Ledger hardware wallet.
+// This object is initialized alongside a LedgerClient connection, and can be used to sign
+// transactions via a ledger hardware wallet.
+export class AptosLedgerSigner {
+  hdPath: string
+  readonly client: AptosLedger
+  readonly publicKey: Ed25519PublicKey
+  readonly accountAddress: AccountAddress
+
+  private constructor(ledgerClient: AptosLedger, hdPath: string, publicKey: BytesLike) {
+    this.client = ledgerClient
+    this.hdPath = hdPath
+    this.publicKey = new Ed25519PublicKey(publicKey)
+    const authKey = AuthenticationKey.fromPublicKey({
+      publicKey: this.publicKey,
+    })
+    this.accountAddress = authKey.derivedAddress()
+  }
+
+  static async create(derivationPath: string) {
+    const transport = await HIDTransport.create()
+    const client = new AptosLedger(transport)
+    const { publicKey } = await client.getAddress(derivationPath)
+    return new AptosLedgerSigner(client, derivationPath, publicKey)
+  }
+
+  // Prompts user to sign associated transaction on their Ledger hardware wallet.
+  async signTransaction(txn: AnyRawTransaction) {
+    const signingMessage = generateSigningMessageForTransaction(txn)
+
+    // This line prompts the user to sign the transaction on their Ledger hardware wallet
+    const { signature } = await this.client.signTransaction(
+      this.hdPath,
+      Buffer.from(signingMessage),
+    )
+    return new AccountAuthenticatorEd25519(this.publicKey, new Ed25519Signature(signature))
+  }
+
+  // Terminates the LedgerClient connection.
+  async close() {
+    await this.client.transport.close()
+  }
+}
+
+AptosChain.getWallet = async function loadAptosWallet({
+  wallet: walletOpt,
+}: {
+  wallet?: unknown
+}): Promise<Account> {
+  if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
+  if (typeof walletOpt !== 'string')
+    throw new Error(`Invalid wallet option: ${util.inspect(walletOpt)}`)
+  if ((walletOpt ?? '').startsWith('ledger')) {
+    let derivationPath = walletOpt.split(':')[1] ?? '0'
+    if (!derivationPath) derivationPath = "m/44'/637'/0'/0'/0'"
+    else if (!isNaN(Number(derivationPath))) derivationPath = `m/44'/637'/${derivationPath}'/0'/0'`
+    const signer = await AptosLedgerSigner.create(derivationPath)
+    console.info(
+      'Ledger connected:',
+      signer.accountAddress.toStringLong(),
+      ', derivationPath:',
+      signer.hdPath,
+    )
+    return signer as unknown as Account
+  } else if (walletOpt) {
+    return Account.fromPrivateKey({
+      privateKey: new Ed25519PrivateKey(walletOpt, false),
+    })
+  }
+  throw new Error('Wallet not specified')
 }
 
 export function fetchChainsFromRpcs(

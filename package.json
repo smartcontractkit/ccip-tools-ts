@@ -49,6 +49,7 @@
     "@coral-xyz/anchor": "^0.29.0",
     "@ethers-ext/signer-ledger": "^6.0.0-beta.1",
     "@inquirer/prompts": "7.9.0",
+    "@ledgerhq/hw-app-aptos": "^6.34.8",
     "@ledgerhq/hw-app-solana": "^7.5.5",
     "@ledgerhq/hw-transport-node-hid": "^6.29.13",
     "@solana/spl-token": "0.4.14",

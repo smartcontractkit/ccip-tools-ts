@@ -18,6 +18,7 @@ import {
   dataSlice,
   decodeBase64,
   hexlify,
+  isBytesLike,
   isHexString,
   zeroPadValue,
 } from 'ethers'
@@ -398,24 +399,22 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
     throw lastErr ?? new Error(`Could not view 'get_token' in ${tokenPool}`)
   }
 
-  getWallet({ wallet }: { wallet?: string } = {}): Account {
-    return Account.fromPrivateKey({
-      privateKey: new Ed25519PrivateKey(
-        wallet ||
-          process.env['OWNER_KEY'] ||
-          process.env['USER_KEY'] ||
-          (() => {
-            throw new Error(
-              'Unable to send Aptos Transaction, no private key has been provided: You must provide the private key with on USER_KEY env var.',
-            )
-          })(),
-        false,
-      ),
-    })
+  static getWallet(_opts: { wallet?: unknown } = {}): Promise<Account> {
+    return Promise.reject(new Error('TODO according to your environment'))
   }
 
-  getWalletAddress(opts?: { wallet?: string }): Promise<string> {
-    return Promise.resolve(this.getWallet(opts).publicKey.toString())
+  // cached
+  async getWallet(opts: { wallet?: unknown } = {}): Promise<Account> {
+    if (isBytesLike(opts.wallet)) {
+      return Account.fromPrivateKey({
+        privateKey: new Ed25519PrivateKey(opts.wallet, false),
+      })
+    }
+    return (this.constructor as typeof AptosChain).getWallet(opts)
+  }
+
+  async getWalletAddress(opts?: { wallet?: string }): Promise<string> {
+    return (await this.getWallet(opts)).accountAddress.toString()
   }
 
   // Static methods for decoding
@@ -533,18 +532,17 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
     return getAptosLeafHasher(lane)
   }
 
-  getFee(_router: string, _destChainSelector: bigint, _message: AnyMessage): Promise<bigint> {
+  async getFee(_router: string, _destChainSelector: bigint, _message: AnyMessage): Promise<bigint> {
     // TODO: Implement actual Aptos fee calculation
     throw new Error('getFee not implemented for Aptos')
   }
 
-  sendMessage(
+  async sendMessage(
     _router: string,
     _destChainSelector: bigint,
     _message: AnyMessage & { fee: bigint },
   ): Promise<ChainTransaction> {
-    // TODO: Implement actual Aptos message sending
-    throw new Error('sendMessage not implemented for Aptos')
+    const wallet = await this.getWallet()
   }
 
   fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {

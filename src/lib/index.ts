@@ -1,5 +1,11 @@
 export { AptosChain } from './aptos/index.ts'
-export { type Chain, type ChainStatic, ChainFamily } from './chain.ts'
+export {
+  type Chain,
+  type ChainGetter,
+  type ChainStatic,
+  type ChainTransaction,
+  ChainFamily,
+} from './chain.ts'
 export { fetchCommitReport } from './commits.ts'
 export { getErrorData, parseWithFragment, recursiveParseError } from './evm/errors.ts'
 export { EVMChain } from './evm/index.ts'
@@ -19,6 +25,7 @@ export {
   fetchRequestsForSender,
 } from './requests.ts'
 export { SolanaChain } from './solana/index.ts'
+export { supportedChains } from './supported-chains.ts'
 export {
   type CCIPCommit,
   type CCIPExecution,
