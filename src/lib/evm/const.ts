@@ -19,6 +19,7 @@ import TokenAdminRegistry_ABI from '../../abi/TokenAdminRegistry_1_5.ts'
 export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
 
 export const DEFAULT_GAS_LIMIT = 200_000n
+export const DEFAULT_APPROVE_GAS_LIMIT = 120_000n
 
 export const interfaces = {
   Router: new Interface(Router_ABI),

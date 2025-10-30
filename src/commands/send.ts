@@ -1,4 +1,4 @@
-import { type BytesLike, dataLength, toUtf8Bytes } from 'ethers'
+import { type BytesLike, dataLength, formatUnits, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -112,6 +112,10 @@ export const builder = (yargs: Argv) =>
         type: 'boolean',
         describe: 'Fetch and print the fee for the transaction, then exit',
       },
+      'approve-max': {
+        type: 'boolean',
+        describe: 'Approve the maximum amount of tokens to transfer',
+      },
     })
     .check(
       ({ 'transfer-tokens': transferTokens }) =>
@@ -139,7 +143,6 @@ async function sendMessage(
   const destNetwork = networkInfo(argv.dest)
   const getChain = fetchChainsFromRpcs(argv, undefined, destroy)
   const source = await getChain(sourceNetwork.name)
-  const sender = await source.getWalletAddress(argv)
 
   let data: BytesLike
   if (argv.data) {
@@ -188,7 +191,7 @@ async function sendMessage(
   if (!receiver) {
     if (sourceNetwork.family !== destNetwork.family)
       throw new Error('--receiver is required when sending to a different chain family')
-    receiver = sender
+    receiver = await source.getWalletAddress(argv)
   }
 
   if (argv.estimateGasLimit != null) {
@@ -211,7 +214,12 @@ async function sendMessage(
 
     const estimated = await estimateExecGasForRequest(source, dest, {
       lane,
-      message: { sender, receiver, data, tokenAmounts: destTokenAmounts },
+      message: {
+        sender: await source.getWalletAddress(argv),
+        receiver,
+        data,
+        tokenAmounts: destTokenAmounts,
+      },
     })
     console.log('Estimated gasLimit:', estimated)
     argv.gasLimit = Math.ceil(estimated * (1 + argv.estimateGasLimit / 100))
@@ -238,16 +246,27 @@ async function sendMessage(
     tokenAmounts,
   }
 
-  await source.typeAndVersion(argv.router)
   // calculate fee
   const fee = await source.getFee(argv.router, destNetwork.chainSelector, message)
+  const nativeToken = await source.getNativeTokenForRouter(argv.router)
+  const { symbol: nativeTokenSymbol, decimals: nativeDecimals } =
+    await source.getTokenInfo(nativeToken)
 
-  if (argv.onlyGetFee) {
-    console.log('Fee:', fee)
-    return
-  }
+  console.info(
+    'Fee:',
+    fee,
+    '=',
+    formatUnits(fee, nativeDecimals),
+    nativeTokenSymbol.startsWith('W') ? nativeTokenSymbol.substring(1) : nativeTokenSymbol,
+  )
+  if (argv.onlyGetFee) return
 
-  const tx = await source.sendMessage(argv.router, destNetwork.chainSelector, { ...message, fee })
+  const tx = await source.sendMessage(
+    argv.router,
+    destNetwork.chainSelector,
+    { ...message, fee },
+    argv,
+  )
   console.log(
     '🚀 Sending message to',
     tokenReceiver || receiver,

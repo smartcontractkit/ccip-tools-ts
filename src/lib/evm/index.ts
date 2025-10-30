@@ -30,6 +30,7 @@ import type { TypedContract } from 'ethers-abitype'
 import moize from 'moize'
 
 import {
+  DEFAULT_APPROVE_GAS_LIMIT,
   DEFAULT_GAS_LIMIT,
   commitsFragments,
   defaultAbiCoder,
@@ -108,6 +109,8 @@ function resultsToMessage(result: Result): Record<string, unknown> {
 
 export class EVMChain implements Chain<typeof ChainFamily.EVM> {
   static readonly family = ChainFamily.EVM
+  static readonly decimals = 18
+
   readonly network: NetworkInfo<typeof ChainFamily.EVM>
   readonly provider: JsonRpcApiProvider
 
@@ -128,6 +131,10 @@ export class EVMChain implements Chain<typeof ChainFamily.EVM> {
         typeof args[0] !== 'string' ? [(args[0] as TransactionReceipt).hash] : (args as string[]),
     })
     this.getTokenForTokenPool = moize(this.getTokenForTokenPool.bind(this))
+    this.getNativeTokenForRouter = moize(this.getNativeTokenForRouter.bind(this), {
+      maxArgs: 1,
+      isPromise: true,
+    })
     this.getTokenInfo = moize(this.getTokenInfo.bind(this))
     this.getWallet = moize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
   }
@@ -567,6 +574,15 @@ export class EVMChain implements Chain<typeof ChainFamily.EVM> {
     return router as string
   }
 
+  async getNativeTokenForRouter(router: string): Promise<string> {
+    const contract = new Contract(
+      router,
+      interfaces.Router,
+      this.provider,
+    ) as unknown as TypedContract<typeof Router_ABI>
+    return contract.getWrappedNative() as Promise<string>
+  }
+
   async getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]> {
     const contract = new Contract(
       router,
@@ -754,6 +770,7 @@ export class EVMChain implements Chain<typeof ChainFamily.EVM> {
     router_: string,
     destChainSelector: bigint,
     message: AnyMessage & { fee: bigint },
+    opts?: { wallet?: unknown; approveMax?: boolean },
   ): Promise<ChainTransaction> {
     const feeToken = message.feeToken ?? ZeroAddress
     const receiver = zeroPadValue(getAddressBytes(message.receiver), 32)
@@ -770,7 +787,7 @@ export class EVMChain implements Chain<typeof ChainFamily.EVM> {
     if (feeToken !== ZeroAddress)
       amountsToApprove[feeToken] = (amountsToApprove[feeToken] ?? 0n) + message.fee
 
-    const wallet = await this.getWallet() // moized wallet arg (if called previously)
+    const wallet = await this.getWallet(opts) // moized wallet arg (if called previously)
 
     // approve all tokens (including fee token) in parallel
     let nonce = await this.provider.getTransactionCount(await this.getWalletAddress())
@@ -781,12 +798,14 @@ export class EVMChain implements Chain<typeof ChainFamily.EVM> {
         >
         const allowance = await contract.allowance(await wallet.getAddress(), router_)
         if (allowance < amount) {
+          const amnt = opts?.approveMax ? 2n ** 256n - 1n : amount
           // optimization: hardcode nonce and gasLimit to send all approvals in parallel without estimating
-          const tx = await contract.approve(router_, amount, {
+          console.info('Approving', amnt, 'of', token, 'tokens for router', router_)
+          const tx = await contract.approve(router_, amnt, {
             nonce: nonce++,
-            gasLimit: 100_000,
+            gasLimit: DEFAULT_APPROVE_GAS_LIMIT,
           })
-          console.log('Approving', amount, 'of', token, 'tokens for router', router_, '=>', tx.hash)
+          console.info('=>', tx.hash)
           await tx.wait(1, 60_000)
         }
       }),

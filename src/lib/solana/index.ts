@@ -8,6 +8,7 @@ import {
   Program,
   Wallet,
 } from '@coral-xyz/anchor'
+import { NATIVE_MINT } from '@solana/spl-token'
 import {
   type Commitment,
   type ConfirmedSignatureInfo,
@@ -113,6 +114,8 @@ function eventDiscriminant(eventName: string): string {
 
 export class SolanaChain implements Chain {
   static readonly family = ChainFamily.Solana
+  static readonly decimals = 9
+
   readonly network: NetworkInfo<typeof ChainFamily.Solana>
   readonly connection: Connection
   readonly commitment: Commitment = 'confirmed'
@@ -470,6 +473,10 @@ export class SolanaChain implements Chain {
       referenceAddressesPda.data,
     )
     return router.toBase58()
+  }
+
+  getNativeTokenForRouter(_router: string): Promise<string> {
+    return Promise.resolve(NATIVE_MINT.toBase58())
   }
 
   async getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]> {
@@ -989,7 +996,7 @@ export class SolanaChain implements Chain {
     router_: string,
     destChainSelector: bigint,
     message: AnyMessage & { fee: bigint },
-    opts?: { wallet?: string },
+    opts?: { wallet?: unknown; approveMax?: boolean },
   ): Promise<ChainTransaction> {
     const wallet = await this.getWallet(opts)
 
@@ -998,7 +1005,7 @@ export class SolanaChain implements Chain {
       new PublicKey(router_),
       new AnchorProvider(this.connection, wallet, { commitment: this.commitment }),
     )
-    const { hash } = await ccipSend(router, destChainSelector, message)
+    const { hash } = await ccipSend(router, destChainSelector, message, undefined, opts)
     return this.getTransaction(hash)
   }
 

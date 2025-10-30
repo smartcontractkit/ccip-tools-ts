@@ -70,6 +70,8 @@ const eventToHandler = {
 
 export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
   static readonly family = ChainFamily.Aptos
+  static readonly decimals = 8
+
   readonly network: NetworkInfo<typeof ChainFamily.Aptos>
   readonly provider: Aptos
 
@@ -317,6 +319,10 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
     return Promise.resolve(offRamp.split('::')[0] + '::router')
   }
 
+  getNativeTokenForRouter(_router: string): Promise<string> {
+    return Promise.resolve('0x1')
+  }
+
   getOffRampsForRouter(router: string, _sourceChainSelector: bigint): Promise<string[]> {
     return Promise.resolve([router.split('::')[0] + '::offramp'])
   }
@@ -541,8 +547,9 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
     _router: string,
     _destChainSelector: bigint,
     _message: AnyMessage & { fee: bigint },
+    opts?: { wallet?: unknown },
   ): Promise<ChainTransaction> {
-    const wallet = await this.getWallet()
+    const wallet = await this.getWallet(opts)
   }
 
   fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {

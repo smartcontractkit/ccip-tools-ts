@@ -104,6 +104,12 @@ export interface Chain<F extends ChainFamily = ChainFamily> {
    */
   getRouterForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string>
   /**
+   * Get the native token address for a Router
+   * @param router - router contract address
+   * @returns native token address (usually wrapped)
+   */
+  getNativeTokenForRouter(router: string): Promise<string>
+  /**
    * Fetch the OffRamps allowlisted in a Router
    * Used to discover OffRamp connected to an OnRamp
    * @param router - Router contract address
@@ -183,11 +189,14 @@ export interface Chain<F extends ChainFamily = ChainFamily> {
    * @param router - router address on this chain
    * @param destChainSelector - dest network selector
    * @param message - message to send
+   * @param opts.wallet - cli or environmental parameters to help pick a wallet
+   * @param opts.approveMax - approve the maximum amount of tokens to transfer
    */
   sendMessage(
     router: string,
     destChainSelector: bigint,
     message: AnyMessage & { fee: bigint },
+    opts?: { wallet?: unknown; approveMax?: boolean },
   ): Promise<ChainTransaction>
   /**
    * Fetch supported offchain token data for a request from this network
@@ -212,6 +221,7 @@ export interface Chain<F extends ChainFamily = ChainFamily> {
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
 export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
   readonly family: F
+  readonly decimals: number
   /**
    * async constructor: builds a Chain from a rpc endpoint url
    * @param url - rpc endpoint url

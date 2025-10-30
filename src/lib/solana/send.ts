@@ -239,8 +239,9 @@ async function deriveAccountsCcipSend({
 export async function ccipSend(
   router: Program<typeof CCIP_ROUTER_IDL>,
   destChainSelector: bigint,
-  message: AnyMessage,
+  message: AnyMessage & { fee: bigint },
   computeUnitLimit?: number,
+  opts?: { approveMax?: boolean },
 ) {
   const connection = router.provider.connection
   let wallet
@@ -249,14 +250,24 @@ export async function ccipSend(
   }
   const svmMessage = anyToSvmMessage(message)
 
-  for (const { token, amount } of svmMessage.tokenAmounts) {
-    await approveRouterSpender(
-      router.provider as AnchorProvider,
-      token,
-      router.programId,
-      BigInt(amount.toString()),
-    )
+  const amountsToApprove = (message.tokenAmounts ?? []).reduce(
+    (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
+    {} as Record<string, bigint>,
+  )
+  if (message.feeToken && message.feeToken !== PublicKey.default.toBase58()) {
+    amountsToApprove[message.feeToken] = (amountsToApprove[message.feeToken] ?? 0n) + message.fee
   }
+
+  await Promise.all(
+    Object.entries(amountsToApprove).map(([token, amount]) =>
+      approveRouterSpender(
+        router.provider as AnchorProvider,
+        new PublicKey(token),
+        router.programId,
+        opts?.approveMax ? undefined : BigInt(amount.toString()),
+      ),
+    ),
+  )
 
   const { addressLookupTableAccounts, accounts, tokenIndexes } = await deriveAccountsCcipSend({
     router,
@@ -357,13 +368,16 @@ async function approveRouterSpender(
   const needsApproval =
     !accountInfo.delegate ||
     !accountInfo.delegate.equals(spender) ||
-    (amount !== undefined && accountInfo.delegatedAmount < amount)
+    (amount != null && accountInfo.delegatedAmount < amount)
 
   if (needsApproval) {
     // Approve the spender to use tokens from the user's account
-    amount ??= BigInt(Number.MAX_SAFE_INTEGER)
-
-    const approveIx = createApproveInstruction(userTokenAccount, spender, wallet.publicKey, amount)
+    const approveIx = createApproveInstruction(
+      userTokenAccount,
+      spender,
+      wallet.publicKey,
+      amount ?? BigInt(Number.MAX_SAFE_INTEGER),
+    )
 
     const approveTx = new VersionedTransaction(
       new TransactionMessage({
@@ -372,19 +386,18 @@ async function approveRouterSpender(
         instructions: [approveIx],
       }).compileToV0Message(),
     )
-    const signed = await wallet.signTransaction(approveTx)
-    const hash = await connection.sendTransaction(signed)
-
-    console.log(
+    console.info(
       'Approving',
-      amount,
+      amount ?? BigInt(Number.MAX_SAFE_INTEGER),
       'of',
       token.toBase58(),
       'tokens for router',
       router.toBase58(),
-      '=>',
-      hash,
     )
+    const signed = await wallet.signTransaction(approveTx)
+    const hash = await connection.sendTransaction(signed)
+
+    console.info('=>', hash)
     await connection.confirmTransaction(hash, 'confirmed')
 
     return { hash }
