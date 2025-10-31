@@ -1,6 +1,16 @@
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
+import { Format } from './types.ts'
+import {
+  logParsedError,
+  prettyCommit,
+  prettyReceipt,
+  prettyRequest,
+  selectRequest,
+  validateSupportedTxHash,
+  withDateTimestamp,
+} from './utils.ts'
 import { discoverOffRamp } from '../lib/execution.ts'
 import {
   type CCIPRequest,
@@ -12,18 +22,7 @@ import {
   fetchExecutionReceipts,
   networkInfo,
 } from '../lib/index.ts'
-import { fetchChainsFromRpcs } from '../providers.ts'
-import { Format } from './types.ts'
-import {
-  // XPromise,
-  logParsedError,
-  prettyCommit,
-  prettyReceipt,
-  prettyRequest,
-  selectRequest,
-  validateSupportedTxHash,
-  withDateTimestamp,
-} from './utils.ts'
+import { fetchChainsFromRpcs } from '../providers/index.ts'
 
 export const command = ['show <tx-hash>', '* <tx-hash>']
 export const describe = 'Show details of a CCIP request'

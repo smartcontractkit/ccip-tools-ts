@@ -1,0 +1,98 @@
+import util from 'util'
+
+import {
+  type AccountAddress,
+  type AnyRawTransaction,
+  Account,
+  AccountAuthenticatorEd25519,
+  AuthenticationKey,
+  Ed25519PrivateKey,
+  Ed25519PublicKey,
+  Ed25519Signature,
+  generateSigningMessageForTransaction,
+} from '@aptos-labs/ts-sdk'
+import AptosLedger from '@ledgerhq/hw-app-aptos'
+import HIDTransport from '@ledgerhq/hw-transport-node-hid'
+import { type BytesLike, getBytes } from 'ethers'
+
+import type { AptosAsyncAccount } from '../lib/aptos/types.ts'
+import { AptosChain } from '../lib/index.ts'
+
+// A LedgerSigner object represents a signer for a private key on a Ledger hardware wallet.
+// This object is initialized alongside a LedgerClient connection, and can be used to sign
+// transactions via a ledger hardware wallet.
+export class AptosLedgerSigner implements AptosAsyncAccount {
+  derivationPath: string
+  readonly client: AptosLedger
+  readonly publicKey: Ed25519PublicKey
+  readonly accountAddress: AccountAddress
+
+  private constructor(ledgerClient: AptosLedger, derivationPath: string, publicKey: BytesLike) {
+    this.client = ledgerClient
+    this.derivationPath = derivationPath
+    this.publicKey = new Ed25519PublicKey(publicKey)
+    const authKey = AuthenticationKey.fromPublicKey({
+      publicKey: this.publicKey,
+    })
+    this.accountAddress = authKey.derivedAddress()
+  }
+
+  static async create(derivationPath: string) {
+    const transport = await HIDTransport.create()
+    const client = new AptosLedger(transport)
+    const { publicKey } = await client.getAddress(derivationPath)
+    return new AptosLedgerSigner(client, derivationPath, publicKey)
+  }
+
+  // Prompts user to sign associated transaction on their Ledger hardware wallet.
+  async signTransactionWithAuthenticator(txn: AnyRawTransaction) {
+    const signingMessage = generateSigningMessageForTransaction(txn)
+
+    const signature = await this.sign(signingMessage)
+    return new AccountAuthenticatorEd25519(this.publicKey, signature)
+  }
+
+  // Sign a message - returns just the signature
+  async sign(message: BytesLike): Promise<Ed25519Signature> {
+    const messageBytes = getBytes(message)
+    // This line prompts the user to sign the transaction on their Ledger hardware wallet
+    const { signature } = await this.client.signTransaction(
+      this.derivationPath,
+      Buffer.from(messageBytes),
+    )
+    return new Ed25519Signature(signature)
+  }
+
+  // Terminates the LedgerClient connection.
+  async close() {
+    await this.client.transport.close()
+  }
+}
+
+AptosChain.getWallet = async function loadAptosWallet({
+  wallet: walletOpt,
+}: {
+  wallet?: unknown
+}): Promise<AptosAsyncAccount> {
+  if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
+  if (typeof walletOpt !== 'string')
+    throw new Error(`Invalid wallet option: ${util.inspect(walletOpt)}`)
+  if ((walletOpt ?? '').startsWith('ledger')) {
+    let derivationPath = walletOpt.split(':')[1]
+    if (!derivationPath) derivationPath = "m/44'/637'/0'/0'/0'"
+    else if (!isNaN(Number(derivationPath))) derivationPath = `m/44'/637'/${derivationPath}'/0'/0'`
+    const signer = await AptosLedgerSigner.create(derivationPath)
+    console.info(
+      'Ledger connected:',
+      signer.accountAddress.toStringLong(),
+      ', derivationPath:',
+      signer.derivationPath,
+    )
+    return signer
+  } else if (walletOpt) {
+    return Account.fromPrivateKey({
+      privateKey: new Ed25519PrivateKey(walletOpt, false),
+    })
+  }
+  throw new Error('Wallet not specified')
+}

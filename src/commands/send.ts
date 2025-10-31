@@ -2,6 +2,14 @@ import { type BytesLike, dataLength, formatUnits, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
+import { Format } from './types.ts'
+import {
+  logParsedError,
+  parseTokenAmounts,
+  prettyRequest,
+  sourceToDestTokenAmounts,
+  withDateTimestamp,
+} from './utils.ts'
 import type { EVMChain } from '../lib/evm/index.ts'
 import type { ExtraArgs } from '../lib/extra-args.ts'
 import {
@@ -13,16 +21,8 @@ import {
   networkInfo,
 } from '../lib/index.ts'
 import type { AnyMessage } from '../lib/types.ts'
-import { fetchChainsFromRpcs } from '../providers.ts'
-import { Format } from './types.ts'
-import {
-  logParsedError,
-  parseTokenAmounts,
-  prettyRequest,
-  sourceToDestTokenAmounts,
-  withDateTimestamp,
-} from './utils.ts'
 import { getDataBytes } from '../lib/utils.ts'
+import { fetchChainsFromRpcs } from '../providers/index.ts'
 
 export const command = 'send <source> <router> <dest>'
 export const describe = 'Send a CCIP message from router on source to dest'
