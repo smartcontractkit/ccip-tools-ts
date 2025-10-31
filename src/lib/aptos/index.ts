@@ -38,18 +38,18 @@ import {
 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
-import type {
-  AnyMessage,
-  CCIPMessage,
-  CCIPRequest,
+import {
+  type AnyMessage,
+  type CCIPMessage,
+  type CCIPRequest,
+  type CommitReport,
+  type ExecutionReceipt,
+  type ExecutionReport,
+  type Lane,
+  type Log_,
+  type NetworkInfo,
+  type OffchainTokenData,
   CCIPVersion,
-  CommitReport,
-  ExecutionReceipt,
-  ExecutionReport,
-  Lane,
-  Log_,
-  NetworkInfo,
-  OffchainTokenData,
 } from '../types.ts'
 import {
   convertKeysToCamelCase,
@@ -62,7 +62,12 @@ import {
 } from '../utils.ts'
 import { getAptosLeafHasher } from './hasher.ts'
 import { getTokenInfo } from './token.ts'
-import { type AptosAsyncAccount, EVMExtraArgsV2codec, SVMExtraArgsV1codec } from './types.ts'
+import {
+  type AptosAsyncAccount,
+  EVMExtraArgsV2Codec,
+  ExecutionReportCodec,
+  SVMExtraArgsV1Codec,
+} from './types.ts'
 
 const eventToHandler = {
   CCIPMessageSent: 'OnRampState/ccip_message_sent_events',
@@ -462,7 +467,7 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
       tag = dataSlice(data, 0, 4)
     switch (tag) {
       case EVMExtraArgsV2Tag: {
-        const parsed = EVMExtraArgsV2codec.parse(getBytes(dataSlice(data, 4)))
+        const parsed = EVMExtraArgsV2Codec.parse(getBytes(dataSlice(data, 4)))
         // Aptos serialization of EVMExtraArgsV2: 37 bytes total: 4 tag + 32 LE gasLimit + 1 allowOOOE
         return {
           _tag: 'EVMExtraArgsV2',
@@ -471,7 +476,7 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
         }
       }
       case SVMExtraArgsTag: {
-        const parsed = SVMExtraArgsV1codec.parse(getBytes(dataSlice(data, 4)))
+        const parsed = SVMExtraArgsV1Codec.parse(getBytes(dataSlice(data, 4)))
         // Aptos serialization of SVMExtraArgsV1: 13 bytes total: 4 tag + 8 LE computeUnits
         return {
           _tag: 'SVMExtraArgsV1',
@@ -489,11 +494,11 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
 
   static encodeExtraArgs(extraArgs: ExtraArgs): string {
     if ('gasLimit' in extraArgs && 'allowOutOfOrderExecution' in extraArgs)
-      return concat([EVMExtraArgsV2Tag, EVMExtraArgsV2codec.serialize(extraArgs).toBytes()])
+      return concat([EVMExtraArgsV2Tag, EVMExtraArgsV2Codec.serialize(extraArgs).toBytes()])
     else if ('computeUnits' in extraArgs)
       return concat([
         SVMExtraArgsTag,
-        SVMExtraArgsV1codec.serialize({
+        SVMExtraArgsV1Codec.serialize({
           ...extraArgs,
           computeUnits: Number(extraArgs.computeUnits),
           tokenReceiver: getAddressBytes(extraArgs.tokenReceiver),
@@ -579,12 +584,123 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
-  executeReport(
-    _offRamp: string,
-    _execReport: ExecutionReport,
-    _opts?: { wallet?: string; gasLimit?: number; tokensGasLimit?: number },
-  ) {
-    return Promise.reject(new Error('not yet implemented'))
+  async executeReport(
+    offRamp: string,
+    execReport: ExecutionReport,
+    opts?: { wallet?: string; gasLimit?: number; tokensGasLimit?: number },
+  ): Promise<ChainTransaction> {
+    const [type, version, typeAndVersion] = await this.typeAndVersion(offRamp)
+    if (!type.includes('OffRamp') || !Object.values<string>(CCIPVersion).includes(version))
+      throw new Error(`Invalid OffRamp=${offRamp} type or version: "${typeAndVersion}"`)
+
+    const account = await this.getWallet(opts)
+
+    // Prepare offchain token data - for now, just empty bytes for each token
+    const offchainTokenData = execReport.offchainTokenData.map((data) => {
+      if (data?._tag === 'usdc') {
+        // For USDC, we need to encode message and attestation
+        // This is a simplified version - actual implementation may vary
+        return Array.from(
+          getBytes(concat([getDataBytes(data.message), getDataBytes(data.attestation)])),
+        )
+      } else if (data?._tag === 'lbtc') {
+        return Array.from(getBytes(data.attestation))
+      }
+      return []
+    })
+
+    // Prepare proofs as byte arrays
+    const proofs = execReport.proofs.map((proof) => Array.from(getBytes(proof)))
+
+    // Prepare the message for Aptos
+    const message = execReport.message
+    const senderBytes = Array.from(getBytes(zeroPadValue(getDataBytes(message.sender), 32)))
+    const receiverBytes = Array.from(getBytes(zeroPadValue(getDataBytes(message.receiver), 32)))
+    const dataBytes = Array.from(getBytes(message.data))
+
+    // Prepare token amounts - extract token address properly
+    const tokenAddresses: string[] = []
+    const tokenAmountValues: string[] = []
+
+    for (const ta of message.tokenAmounts) {
+      // Handle different token amount structures
+      if ('token' in ta) {
+        tokenAddresses.push(ta.token)
+        tokenAmountValues.push(ta.amount.toString())
+      } else if ('destTokenAddress' in ta) {
+        tokenAddresses.push(ta.destTokenAddress)
+        tokenAmountValues.push(ta.amount.toString())
+      }
+    }
+    if (!('allowOutOfOrderExecution' in message && 'gasLimit' in message)) {
+      throw new Error('allowOutOfOrderExecution is required')
+    }
+
+    const serialized = ExecutionReportCodec.serialize({
+      sourceChainSelector: message.header.sourceChainSelector,
+      messageId: getBytes(message.header.messageId),
+      headerSourceChainSelector: message.header.sourceChainSelector,
+      destChainSelector: message.header.destChainSelector,
+      sequenceNumber: message.header.sequenceNumber,
+      nonce: message.header.nonce,
+      sender: getAddressBytes(message.sender),
+      data: getBytes(message.data),
+      receiver: getAddressBytes(message.receiver),
+      gasLimit: message.gasLimit,
+      tokenAmounts: message.tokenAmounts.map((ta) => ({
+        sourcePoolAddress: getAddressBytes(ta.sourcePoolAddress),
+        destTokenAddress: getAddressBytes(ta.destTokenAddress),
+        destGasAmount: Number(ta.destGasAmount),
+        extraData: getBytes(ta.extraData),
+        amount: ta.amount,
+      })),
+      offchainTokenData: execReport.offchainTokenData.map(() => []),
+      proofs: execReport.proofs.map((p) => getBytes(p)),
+    }).toBytes()
+
+    // Build the transaction to call manually_execute
+    // The function signature should be something like:
+    // public entry fun manually_execute(
+    //     caller: &signer,
+    //     merkle_root: vector<u8>,
+    //     proofs: vector<vector<u8>>,
+    //     proof_flag_bits: u256,
+    //     message_id: vector<u8>,
+    //     source_chain_selector: u64,
+    //     dest_chain_selector: u64,
+    //     sequence_number: u64,
+    //     nonce: u64,
+    //     sender: vector<u8>,
+    //     receiver: vector<u8>,
+    //     data: vector<u8>,
+    //     token_addresses: vector<address>,
+    //     token_amounts: vector<u256>,
+    //     offchain_token_data: vector<vector<u8>>,
+    //     gas_limit: u256
+    // )
+    const transaction = await this.provider.transaction.build.simple({
+      sender: account.accountAddress,
+      data: {
+        function:
+          `${offRamp.includes('::') ? offRamp : offRamp + '::offramp'}::manually_execute` as `${string}::${string}::${string}`,
+        functionArguments: [serialized],
+      },
+    })
+
+    // Sign and submit the transaction
+    const signed = await account.signTransactionWithAuthenticator(transaction)
+    const pendingTxn = await this.provider.transaction.submit.simple({
+      transaction,
+      senderAuthenticator: signed,
+    })
+
+    // Wait for the transaction to be confirmed
+    const { hash } = await this.provider.waitForTransaction({
+      transactionHash: pendingTxn.hash,
+    })
+
+    // Return the ChainTransaction by fetching it
+    return this.getTransaction(hash)
   }
 }
 
