@@ -1,10 +1,18 @@
 import { hexlify, toUtf8Bytes, zeroPadValue } from 'ethers'
 
+import '../index.ts'
 import { encodeExtraArgs } from '../extra-args.ts'
 import { hashAptosMetadata, hashV16AptosMessage } from './hasher.ts'
+import { encodeRawBytes } from './utils.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 
 describe('aptos hasher', () => {
+  it('should encode raw bytes properly', () => {
+    expect(hexlify(encodeRawBytes('0xbeef'))).toBe(
+      '0x0000000000000000000000000000000000000000000000000000000000000002beef000000000000000000000000000000000000000000000000000000000000',
+    )
+  })
+
   // Aptos encoding tests mimic the Move test: https://github.com/smartcontractkit/chainlink-internal-integrations/blob/develop/aptos/contracts/ccip/sources/offramp.move#L1517
   it('should hash Aptos msg', () => {
     const messageId = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'

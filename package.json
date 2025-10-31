@@ -52,6 +52,7 @@
     "@ledgerhq/hw-app-aptos": "^6.34.8",
     "@ledgerhq/hw-app-solana": "^7.5.5",
     "@ledgerhq/hw-transport-node-hid": "^6.29.13",
+    "@mysten/bcs": "^1.9.2",
     "@solana/spl-token": "0.4.14",
     "@solana/web3.js": "^1.98.4",
     "abitype": "1.1.1",

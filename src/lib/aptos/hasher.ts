@@ -1,19 +1,10 @@
-import {
-  type BigNumberish,
-  type BytesLike,
-  concat,
-  dataLength,
-  id,
-  keccak256,
-  toBeHex,
-  zeroPadBytes,
-  zeroPadValue,
-} from 'ethers'
+import { concat, id, keccak256, zeroPadValue } from 'ethers'
 
 import { parseExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import { getAddressBytes, networkInfo } from '../utils.ts'
+import { encodeNumber, encodeRawBytes } from './utils.ts'
 
 export function getAptosLeafHasher<V extends CCIPVersion = CCIPVersion>({
   sourceChainSelector,
@@ -36,22 +27,6 @@ export function getAptosLeafHasher<V extends CCIPVersion = CCIPVersion>({
       throw new Error(`Unsupported hasher version for Aptos: ${version as string}`)
   }
 }
-
-/**
- * Encodes a numeric value as a 32-byte hex string.
- * @param value Numeric value to encode.
- * @returns 32-byte hex string representation of the value.
- */
-const encodeNumber = (value: BigNumberish): string => toBeHex(value, 32)
-
-/**
- * Encodes dynamic bytes without the struct offset prefix.
- */
-const encodeRawBytes = (value: BytesLike): string =>
-  concat([
-    encodeNumber(dataLength(value)),
-    zeroPadBytes(value, Math.ceil(dataLength(value) / 32) * 32),
-  ])
 
 export function hashV16AptosMessage(
   message: CCIPMessage_V1_6 | CCIPMessage<typeof CCIPVersion.V1_6>,

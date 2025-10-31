@@ -17,6 +17,7 @@ import {
   dataLength,
   dataSlice,
   decodeBase64,
+  getBytes,
   hexlify,
   isBytesLike,
   isHexString,
@@ -25,6 +26,7 @@ import {
 import moize from 'moize'
 import yaml from 'yaml'
 
+import { ccipSend, getFee } from './send.ts'
 import { type Chain, type ChainTransaction, type LogFilter, ChainFamily } from '../chain.ts'
 import {
   type EVMExtraArgsV1,
@@ -32,9 +34,10 @@ import {
   type ExtraArgs,
   type SVMExtraArgsV1,
   EVMExtraArgsV2Tag,
+  SVMExtraArgsTag,
 } from '../extra-args.ts'
-// import { getV16AptosLeafHasher } from '../hasher/aptos.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { supportedChains } from '../supported-chains.ts'
 import type {
   AnyMessage,
   CCIPMessage,
@@ -52,15 +55,14 @@ import {
   convertKeysToCamelCase,
   decodeAddress,
   decodeOnRampAddress,
+  getAddressBytes,
   getDataBytes,
-  leToBigInt,
   networkInfo,
   parseTypeAndVersion,
-  toLeArray,
 } from '../utils.ts'
 import { getAptosLeafHasher } from './hasher.ts'
 import { getTokenInfo } from './token.ts'
-import { supportedChains } from '../supported-chains.ts'
+import { type AptosAsyncAccount, EVMExtraArgsV2codec, SVMExtraArgsV1codec } from './types.ts'
 
 const eventToHandler = {
   CCIPMessageSent: 'OnRampState/ccip_message_sent_events',
@@ -320,7 +322,7 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
   }
 
   getNativeTokenForRouter(_router: string): Promise<string> {
-    return Promise.resolve('0x1')
+    return Promise.resolve('0xa')
   }
 
   getOffRampsForRouter(router: string, _sourceChainSelector: bigint): Promise<string[]> {
@@ -405,12 +407,12 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
     throw lastErr ?? new Error(`Could not view 'get_token' in ${tokenPool}`)
   }
 
-  static getWallet(_opts: { wallet?: unknown } = {}): Promise<Account> {
+  static getWallet(_opts: { wallet?: unknown } = {}): Promise<AptosAsyncAccount> {
     return Promise.reject(new Error('TODO according to your environment'))
   }
 
   // cached
-  async getWallet(opts: { wallet?: unknown } = {}): Promise<Account> {
+  async getWallet(opts: { wallet?: unknown } = {}): Promise<AptosAsyncAccount> {
     if (isBytesLike(opts.wallet)) {
       return Account.fromPrivateKey({
         privateKey: new Ed25519PrivateKey(opts.wallet, false),
@@ -419,7 +421,7 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
     return (this.constructor as typeof AptosChain).getWallet(opts)
   }
 
-  async getWalletAddress(opts?: { wallet?: string }): Promise<string> {
+  async getWalletAddress(opts?: { wallet?: unknown }): Promise<string> {
     return (await this.getWallet(opts)).accountAddress.toString()
   }
 
@@ -460,29 +462,45 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
       tag = dataSlice(data, 0, 4)
     switch (tag) {
       case EVMExtraArgsV2Tag: {
-        switch (dataLength(data)) {
-          case 4 + 32 + 1:
-            // Aptos serialization of EVMExtraArgsV2: 37 bytes total: 4 tag + 32 LE gasLimit + 1 allowOOOE
-            return {
-              _tag: 'EVMExtraArgsV2',
-              gasLimit: leToBigInt(dataSlice(data, 4, 4 + 32)),
-              allowOutOfOrderExecution: data[4 + 32] == 1,
-            }
-          default:
-            throw new Error(`Unsupported EVMExtraArgsV2 length: ${dataLength(data)}`)
+        const parsed = EVMExtraArgsV2codec.parse(getBytes(dataSlice(data, 4)))
+        // Aptos serialization of EVMExtraArgsV2: 37 bytes total: 4 tag + 32 LE gasLimit + 1 allowOOOE
+        return {
+          _tag: 'EVMExtraArgsV2',
+          ...parsed,
+          gasLimit: BigInt(parsed.gasLimit),
+        }
+      }
+      case SVMExtraArgsTag: {
+        const parsed = SVMExtraArgsV1codec.parse(getBytes(dataSlice(data, 4)))
+        // Aptos serialization of SVMExtraArgsV1: 13 bytes total: 4 tag + 8 LE computeUnits
+        return {
+          _tag: 'SVMExtraArgsV1',
+          ...parsed,
+          computeUnits: BigInt(parsed.computeUnits),
+          accountIsWritableBitmap: BigInt(parsed.accountIsWritableBitmap),
+          tokenReceiver: decodeAddress(new Uint8Array(parsed.tokenReceiver), ChainFamily.Solana),
+          accounts: parsed.accounts.map((account) =>
+            decodeAddress(new Uint8Array(account), ChainFamily.Solana),
+          ),
         }
       }
     }
   }
 
   static encodeExtraArgs(extraArgs: ExtraArgs): string {
-    if (!('gasLimit' in extraArgs && 'allowOutOfOrderExecution' in extraArgs))
-      throw new Error('Aptos can only encode EVMExtraArgsV2')
-    return concat([
-      EVMExtraArgsV2Tag,
-      toLeArray(extraArgs.gasLimit ?? 200_000n, 32),
-      extraArgs.allowOutOfOrderExecution ? '0x01' : '0x00',
-    ])
+    if ('gasLimit' in extraArgs && 'allowOutOfOrderExecution' in extraArgs)
+      return concat([EVMExtraArgsV2Tag, EVMExtraArgsV2codec.serialize(extraArgs).toBytes()])
+    else if ('computeUnits' in extraArgs)
+      return concat([
+        SVMExtraArgsTag,
+        SVMExtraArgsV1codec.serialize({
+          ...extraArgs,
+          computeUnits: Number(extraArgs.computeUnits),
+          tokenReceiver: getAddressBytes(extraArgs.tokenReceiver),
+          accounts: extraArgs.accounts.map(getAddressBytes),
+        }).toBytes(),
+      ])
+    throw new Error('Aptos can only encode EVMExtraArgsV2 & SVMExtraArgsV1')
   }
 
   static decodeCommits({ data }: Log_, lane?: Lane): CommitReport[] | undefined {
@@ -538,18 +556,22 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
     return getAptosLeafHasher(lane)
   }
 
-  async getFee(_router: string, _destChainSelector: bigint, _message: AnyMessage): Promise<bigint> {
-    // TODO: Implement actual Aptos fee calculation
-    throw new Error('getFee not implemented for Aptos')
+  async getFee(router: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint> {
+    return getFee(this.provider, router, destChainSelector, message)
   }
 
   async sendMessage(
-    _router: string,
-    _destChainSelector: bigint,
-    _message: AnyMessage & { fee: bigint },
-    opts?: { wallet?: unknown },
+    router: string,
+    destChainSelector: bigint,
+    message: AnyMessage & { fee: bigint },
+    opts?: { wallet?: unknown; approveMax?: boolean },
   ): Promise<ChainTransaction> {
-    const wallet = await this.getWallet(opts)
+    const account = await this.getWallet(opts)
+
+    const hash = await ccipSend(this.provider, account, router, destChainSelector, message)
+
+    // Return the ChainTransaction by fetching it
+    return this.getTransaction(hash)
   }
 
   fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {

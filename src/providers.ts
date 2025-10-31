@@ -38,6 +38,7 @@ import {
   getBytes,
 } from 'ethers'
 
+import type { AptosAsyncAccount } from './lib/aptos/types.ts'
 import {
   type Chain,
   type ChainGetter,
@@ -193,14 +194,14 @@ SolanaChain.getWallet = async function loadSolanaWallet({
 // This object is initialized alongside a LedgerClient connection, and can be used to sign
 // transactions via a ledger hardware wallet.
 export class AptosLedgerSigner {
-  hdPath: string
+  derivationPath: string
   readonly client: AptosLedger
   readonly publicKey: Ed25519PublicKey
   readonly accountAddress: AccountAddress
 
-  private constructor(ledgerClient: AptosLedger, hdPath: string, publicKey: BytesLike) {
+  private constructor(ledgerClient: AptosLedger, derivationPath: string, publicKey: BytesLike) {
     this.client = ledgerClient
-    this.hdPath = hdPath
+    this.derivationPath = derivationPath
     this.publicKey = new Ed25519PublicKey(publicKey)
     const authKey = AuthenticationKey.fromPublicKey({
       publicKey: this.publicKey,
@@ -216,15 +217,22 @@ export class AptosLedgerSigner {
   }
 
   // Prompts user to sign associated transaction on their Ledger hardware wallet.
-  async signTransaction(txn: AnyRawTransaction) {
+  async signTransactionWithAuthenticator(txn: AnyRawTransaction) {
     const signingMessage = generateSigningMessageForTransaction(txn)
 
+    const signature = await this.sign(signingMessage)
+    return new AccountAuthenticatorEd25519(this.publicKey, signature)
+  }
+
+  // Sign a message - returns just the signature
+  async sign(message: BytesLike): Promise<Ed25519Signature> {
+    const messageBytes = getBytes(message)
     // This line prompts the user to sign the transaction on their Ledger hardware wallet
     const { signature } = await this.client.signTransaction(
-      this.hdPath,
-      Buffer.from(signingMessage),
+      this.derivationPath,
+      Buffer.from(messageBytes),
     )
-    return new AccountAuthenticatorEd25519(this.publicKey, new Ed25519Signature(signature))
+    return new Ed25519Signature(signature)
   }
 
   // Terminates the LedgerClient connection.
@@ -237,7 +245,7 @@ AptosChain.getWallet = async function loadAptosWallet({
   wallet: walletOpt,
 }: {
   wallet?: unknown
-}): Promise<Account> {
+}): Promise<AptosAsyncAccount> {
   if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
   if (typeof walletOpt !== 'string')
     throw new Error(`Invalid wallet option: ${util.inspect(walletOpt)}`)
@@ -250,9 +258,9 @@ AptosChain.getWallet = async function loadAptosWallet({
       'Ledger connected:',
       signer.accountAddress.toStringLong(),
       ', derivationPath:',
-      signer.hdPath,
+      signer.derivationPath,
     )
-    return signer as unknown as Account
+    return signer
   } else if (walletOpt) {
     return Account.fromPrivateKey({
       privateKey: new Ed25519PrivateKey(walletOpt, false),
