@@ -843,7 +843,7 @@ export class EVMChain implements Chain<typeof ChainFamily.EVM> {
     opts?: { wallet?: string; gasLimit?: number; tokensGasLimit?: number },
   ) {
     const [type, version, typeAndVersion] = await this.typeAndVersion(offRamp)
-    if (!type.includes('OffRamp') || Object.values<string>(CCIPVersion).includes(version))
+    if (!type.includes('OffRamp') || !Object.values<string>(CCIPVersion).includes(version))
       throw new Error(`Invalid OffRamp=${offRamp} type or version: "${typeAndVersion}"`)
 
     const wallet = await this.getWallet(opts)

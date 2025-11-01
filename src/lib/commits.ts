@@ -2,8 +2,9 @@ import type { Chain, ChainStatic } from './chain.ts'
 import { type CCIPCommit, type Lane, CCIPVersion } from './types.ts'
 
 /**
- * Look for a CommitReport at dest for given CCIP request
- * If hints are provided, use commitBlock(Number) and commitStore(Address) to narrow filtering
+ * Look for a CommitReport at dest for given CCIPRequest
+ * Provides a basic/generic implementation, but subclasses of Chain may override with more specific
+ * logic in Chain.fetchCommitReport method
  *
  * @param dest - Destination network provider
  * @param request - CCIP request info
@@ -32,6 +33,7 @@ export async function fetchCommitReport(
   })) {
     const report = (dest.constructor as ChainStatic).decodeCommits(log, lane)?.[0]
     if (!report || report.maxSeqNr < header.sequenceNumber) continue
+    // since we walk forward from some startBlock/startTime, give up if we find a newer report
     if (report.minSeqNr > header.sequenceNumber) break
     return { report, log }
   }

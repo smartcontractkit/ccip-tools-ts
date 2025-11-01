@@ -92,12 +92,12 @@ export const discoverOffRamp = moize(
 )
 
 /**
- * Fetch ExecutionReceipts for given requests
+ * Generic implementation for fetching ExecutionReceipts for given requests
  * If more than one request is given, may yield them interleaved
  * Completes as soon as there's no more work to be done
  * 2 possible behaviors:
- * - if `hints.fromBlock` is given, pages forward from that block up;
- *   completes when success (final) receipt is found for all requests (or reach latest)
+ * - if `startBlock|startTime` is given, pages forward from that block up;
+ *   completes when success (final) receipt is found for all requests (or reach latest block)
  * - otherwise, pages backwards and returns only the most recent receipt per request;
  *   completes when receipts for all requests were seen
  *
@@ -113,7 +113,7 @@ export async function* fetchExecutionReceipts(
   offRamp: string,
   messageIds: Set<string>,
   hints?: { startBlock?: number; startTime?: number; page?: number; commit?: CommitReport },
-): AsyncGenerator<CCIPExecution, void, unknown> {
+): AsyncGenerator<CCIPExecution> {
   const onlyLast = !hints?.startBlock && !hints?.startTime // backwards
   for await (const log of dest.getLogs({
     ...hints,

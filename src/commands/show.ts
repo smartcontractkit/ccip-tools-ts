@@ -142,7 +142,8 @@ async function showRequests(
         prettyReceipt(
           receipt,
           request,
-          (await dest.getTransaction(receipt.log.transactionHash).catch(() => null))?.from,
+          receipt.log.tx?.from ??
+            (await dest.getTransaction(receipt.log.transactionHash).catch(() => null))?.from,
         )
         break
       case Format.json:

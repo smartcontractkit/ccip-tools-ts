@@ -410,13 +410,17 @@ export function parseTypeAndVersion(
       `Invalid typeAndVersion: "${typeAndVersion}", len=${typeAndVersion.length}, hex=0x${Buffer.from(typeAndVersion).toString('hex')}`,
     )
   const [_, typeRaw, version] = match
-  const type_ = typeRaw
-    .split('-')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()) // kebabToPascal
-    .join('')
-    .replace(/ramp\b/, 'Ramp') // CcipOfframp -> CcipOffRamp
-  if (!match[3]) return [type_, version, typeAndVersion]
-  else return [type_, version, typeAndVersion, match[3]]
+  // some string normalization
+  const type = typeRaw
+    .replaceAll(/-(\w)/g, (_, w: string) => w.toUpperCase()) // kebabToPascal
+    .replace(/ccip/gi, 'CCIP')
+    .replace(
+      /(o)(n|ff)(ramp)\b/gi,
+      (_, o: string, n: string, ramp: string) =>
+        `${o.toUpperCase()}${n.toLowerCase()}${ramp.charAt(0).toUpperCase()}${ramp.slice(1).toLowerCase()}`,
+    ) // ccipOfframp -> CCIPOffRamp
+  if (!match[3]) return [type, version, typeAndVersion]
+  else return [type, version, typeAndVersion, match[3]]
 }
 
 export function createRateLimitedFetch({
