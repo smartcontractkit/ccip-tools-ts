@@ -40,12 +40,13 @@ import {
 } from 'ethers'
 import moize, { type Moized } from 'moize'
 
-import { type Chain, type ChainTransaction, type LogFilter, ChainFamily } from '../chain.ts'
+import { type ChainTransaction, type LogFilter, Chain, ChainFamily } from '../chain.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
+  type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
   type CommitReport,
@@ -112,7 +113,7 @@ function eventDiscriminant(eventName: string): string {
   return dataSlice(sha256(toUtf8Bytes(`event:${eventName}`)), 0, 8)
 }
 
-export class SolanaChain implements Chain {
+export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   static readonly family = ChainFamily.Solana
   static readonly decimals = 9
 
@@ -126,6 +127,8 @@ export class SolanaChain implements Chain {
   ) => Promise<ConfirmedSignatureInfo[]>
 
   constructor(connection: Connection, network: NetworkInfo) {
+    super()
+
     if (network.family !== ChainFamily.Solana) {
       throw new Error(`Invalid network family for SolanaChain: ${network.family}`)
     }
@@ -168,10 +171,6 @@ export class SolanaChain implements Chain {
       transformArgs: ([address, commitment]) =>
         [(address as PublicKey).toString(), commitment] as const,
     })
-  }
-
-  [util.inspect.custom]() {
-    return `${this.constructor.name} { ${this.network.name} }`
   }
 
   static _getConnection(url: string): Connection {
@@ -386,32 +385,21 @@ export class SolanaChain implements Chain {
    * @param opts.address - Program address to filter logs by (required for Solana)
    * @param opts.topics - Array of topics to filter logs by (optional);
    *   either 0x-8B discriminants or event names
-   * @param.opts.anyProgram - a special option to allow querying by address of interest, but
-   *   yielding matching logs from any program address
+   * @param.opts.programs - a special option to allow querying by address of interest, but
+   *   yielding matching logs from specific (string address) program or any (true)
    * @param opts.commit - Special param for fetching ExecutionReceipts, to narrow down the search
    * @returns AsyncIterableIterator of parsed Log_ objects
    */
   async *getLogs(
-    opts: LogFilter & { anyProgram?: boolean; commit?: CommitReport },
+    opts: LogFilter & { programs?: string[] | true; commit?: CommitReport },
   ): AsyncGenerator<Log_ & { tx: SolanaTransaction }> {
-    let programAddr
+    let programs
     if (!opts.address) {
       throw new Error('Program address is required for Solana log filtering')
-    } else if (!opts.anyProgram) {
-      programAddr = opts.address
-    }
-    if (opts.topics?.length === 1 && opts.topics[0] === 'ExecutionStateChanged' && opts.commit) {
-      // special case: if looking for receipts for a known commit, narrow down search using
-      // commit_report PDA address, but still filter by offRamp program address
-      programAddr = opts.address // offRamp
-      opts.address = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from('commit_report'),
-          toLeArray(opts.commit.sourceChainSelector, 8),
-          bytesToBuffer(opts.commit.merkleRoot),
-        ],
-        new PublicKey(programAddr),
-      )[0].toBase58()
+    } else if (!opts.programs) {
+      programs = [opts.address]
+    } else {
+      programs = opts.programs
     }
     if (opts.topics?.length) {
       if (!opts.topics.every((topic) => typeof topic === 'string'))
@@ -427,7 +415,7 @@ export class SolanaChain implements Chain {
       for (const log of tx.logs) {
         // Filter and yield logs from the specified program, and which match event discriminant or log prefix
         if (
-          (programAddr && log.address !== programAddr) ||
+          (programs !== true && !programs.includes(log.address)) ||
           (opts.topics?.length &&
             !(opts.topics as string[]).some(
               (t) =>
@@ -508,7 +496,7 @@ export class SolanaChain implements Chain {
     )
 
     for await (const log of this.getLogs({
-      anyProgram: true,
+      programs: true,
       address: feeQuoterDestChainStateAccountAddress.toBase58(),
       topics: ['ExecutionStateChanged', 'CommitReportAccepted', 'Transmitted'],
     })) {
@@ -1140,7 +1128,7 @@ export class SolanaChain implements Chain {
         'Instruction: CreateLookupTable',
         'Instruction: DeactivateLookupTable',
       ],
-      anyProgram: true,
+      programs: true,
     })) {
       const tx = log.tx
       switch (log.data) {
@@ -1267,6 +1255,44 @@ export class SolanaChain implements Chain {
         if (parsed) return { message: error.transactionMessage, ...parsed }
       }
       if ('logs' in error) return getErrorFromLogs(error.logs as Log_[] | string[])
+    }
+  }
+
+  // specialized override with stricter address-of-interest
+  async *fetchExecutionReceipts(
+    offRamp: string,
+    messageIds: Set<string>,
+    hints?: { startBlock?: number; startTime?: number; page?: number; commit?: CommitReport },
+  ): AsyncGenerator<CCIPExecution> {
+    if (!hints?.commit) {
+      // if no commit, fall back to generic implementation
+      yield* super.fetchExecutionReceipts(offRamp, messageIds, hints)
+      return
+    }
+    // otherwise, use `commit_report` PDA as more specialized address
+    const [commitReportPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from('commit_report'),
+        toLeArray(hints.commit.sourceChainSelector, 8),
+        bytesToBuffer(hints.commit.merkleRoot),
+      ],
+      new PublicKey(offRamp),
+    )
+    // rest is similar to generic implemenetation
+    const onlyLast = !hints?.startBlock && !hints?.startTime // backwards
+    for await (const log of this.getLogs({
+      ...hints,
+      programs: [offRamp],
+      address: commitReportPda.toBase58(),
+      topics: ['ExecutionStateChanged'],
+    })) {
+      const receipt = (this.constructor as typeof SolanaChain).decodeReceipt(log)
+      if (!receipt || !messageIds.has(receipt.messageId)) continue
+      if (onlyLast || receipt.state === ExecutionState.Success) messageIds.delete(receipt.messageId)
+
+      const timestamp = await this.getBlockTimestamp(log.blockNumber)
+      yield { receipt, log, timestamp }
+      if (!messageIds.size) break
     }
   }
 }

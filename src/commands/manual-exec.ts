@@ -18,7 +18,6 @@ import {
   estimateExecGasForRequest,
   fetchAllMessagesInBatch,
   fetchCCIPMessagesInTx,
-  fetchCommitReport,
 } from '../lib/index.ts'
 import type { CCIPRequest, CCIPVersion, ExecutionReport } from '../lib/types.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
@@ -133,7 +132,7 @@ async function manualExec(
   const dest = await getChain(request.lane.destChainSelector)
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
   const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
-  const commit = await fetchCommitReport(dest, commitStore, request, argv)
+  const commit = await dest.fetchCommitReport(commitStore, request, argv)
 
   switch (argv.format) {
     case Format.log:

@@ -52,7 +52,7 @@ import EVM2EVMOnRamp_1_5_ABI from '../../abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from '../../abi/OnRamp_1_6.ts'
 import type Router_ABI from '../../abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from '../../abi/TokenAdminRegistry_1_5.ts'
-import { type Chain, type ChainTransaction, type LogFilter, ChainFamily } from '../chain.ts'
+import { type ChainTransaction, type LogFilter, Chain, ChainFamily } from '../chain.ts'
 import {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
@@ -107,7 +107,7 @@ function resultsToMessage(result: Result): Record<string, unknown> {
   } as unknown as CCIPMessage
 }
 
-export class EVMChain implements Chain<typeof ChainFamily.EVM> {
+export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   static readonly family = ChainFamily.EVM
   static readonly decimals = 18
 
@@ -115,6 +115,8 @@ export class EVMChain implements Chain<typeof ChainFamily.EVM> {
   readonly provider: JsonRpcApiProvider
 
   constructor(provider: JsonRpcApiProvider, network: NetworkInfo) {
+    super()
+
     if (network.family !== ChainFamily.EVM)
       throw new Error(`Invalid network family for EVMChain: ${network.family}`)
     this.network = network
@@ -137,10 +139,6 @@ export class EVMChain implements Chain<typeof ChainFamily.EVM> {
     })
     this.getTokenInfo = moize(this.getTokenInfo.bind(this))
     this.getWallet = moize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
-  }
-
-  [util.inspect.custom]() {
-    return `${this.constructor.name} { ${this.network.name} }`
   }
 
   // overwrite EVMChain.getWallet to implement custom wallet loading

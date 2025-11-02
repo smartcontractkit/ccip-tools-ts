@@ -253,7 +253,7 @@ export async function prettyCommit(
     merkleRoot: commit.report.merkleRoot,
     min: Number(commit.report.minSeqNr),
     max: Number(commit.report.maxSeqNr),
-    origin: (await dest.getTransaction(commit.log.transactionHash)).from,
+    origin: commit.log.tx?.from ?? (await dest.getTransaction(commit.log.transactionHash)).from,
     contract: commit.log.address,
     transactionHash: commit.log.transactionHash,
     blockNumber: commit.log.blockNumber,

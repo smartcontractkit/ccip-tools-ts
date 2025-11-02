@@ -1,15 +1,12 @@
 import util from 'node:util'
 
 import {
-  type Event as AptosEvent,
-  type UserTransactionResponse,
   Account,
   Aptos,
   AptosConfig,
   Ed25519PrivateKey,
   Network,
   TransactionResponseType,
-  getAptosFullNode,
 } from '@aptos-labs/ts-sdk'
 import {
   type BytesLike,
@@ -27,7 +24,7 @@ import moize from 'moize'
 import yaml from 'yaml'
 
 import { ccipSend, getFee } from './send.ts'
-import { type Chain, type ChainTransaction, type LogFilter, ChainFamily } from '../chain.ts'
+import { type ChainTransaction, type LogFilter, Chain, ChainFamily } from '../chain.ts'
 import {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
@@ -38,18 +35,18 @@ import {
 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
-import {
-  type AnyMessage,
-  type CCIPMessage,
-  type CCIPRequest,
-  type CommitReport,
-  type ExecutionReceipt,
-  type ExecutionReport,
-  type Lane,
-  type Log_,
-  type NetworkInfo,
-  type OffchainTokenData,
+import type {
+  AnyMessage,
+  CCIPMessage,
+  CCIPRequest,
   CCIPVersion,
+  CommitReport,
+  ExecutionReceipt,
+  ExecutionReport,
+  Lane,
+  Log_,
+  NetworkInfo,
+  OffchainTokenData,
 } from '../types.ts'
 import {
   convertKeysToCamelCase,
@@ -60,22 +57,14 @@ import {
   networkInfo,
   parseTypeAndVersion,
 } from '../utils.ts'
+import { executeReport } from './exec.ts'
 import { getAptosLeafHasher } from './hasher.ts'
+import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
 import { getTokenInfo } from './token.ts'
-import {
-  type AptosAsyncAccount,
-  EVMExtraArgsV2Codec,
-  ExecutionReportCodec,
-  SVMExtraArgsV1Codec,
-} from './types.ts'
+import { type AptosAsyncAccount, EVMExtraArgsV2Codec, SVMExtraArgsV1Codec } from './types.ts'
+import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 
-const eventToHandler = {
-  CCIPMessageSent: 'OnRampState/ccip_message_sent_events',
-  CommitReportAccepted: 'OffRampState/commit_report_accepted_events',
-  ExecutionStateChanged: 'OffRampState/execution_state_changed_events',
-} as const
-
-export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
+export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   static readonly family = ChainFamily.Aptos
   static readonly decimals = 8
 
@@ -86,15 +75,13 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
   _getAccountModulesNames: (address: string) => Promise<string[]>
 
   constructor(provider: Aptos, network: NetworkInfo) {
+    super()
+
     if (network.family !== ChainFamily.Aptos) {
       throw new Error(`Invalid network family: ${network.family}, expected ${ChainFamily.Aptos}`)
     }
     this.provider = provider
     this.network = network
-    this._getTxByVersion = moize(this._getTxByVersion.bind(this), {
-      maxSize: 100,
-      maxArgs: 1,
-    })
     this.typeAndVersion = moize(this.typeAndVersion.bind(this), {
       maxSize: 100,
       maxArgs: 1,
@@ -119,16 +106,17 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
         this.provider
           .getAccountModules({ accountAddress: address })
           .then((modules) => modules.map(({ abi }) => abi!.name)),
-      {
-        maxSize: 100,
-        maxArgs: 1,
-      },
+      { maxSize: 100, maxArgs: 1 },
     )
     this.getWallet = moize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
-  }
-
-  [util.inspect.custom]() {
-    return `${this.constructor.name} { ${this.network.name} }`
+    this.provider.getTransactionByVersion = moize(
+      this.provider.getTransactionByVersion.bind(this.provider),
+      {
+        maxSize: 100,
+        isPromise: true,
+        transformArgs: ([arg]) => [(arg as { ledgerVersion: number }).ledgerVersion],
+      },
+    )
   }
 
   static async fromUrl(url: string | Network): Promise<AptosChain> {
@@ -159,147 +147,42 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
     // Nothing to cleanup for Aptos implementation
   }
 
-  private async _getTxByVersion(version: number): Promise<UserTransactionResponse> {
-    const tx = await this.provider.getTransactionByVersion({
-      ledgerVersion: version,
-    })
-    if (tx.type !== TransactionResponseType.User)
-      throw new Error(`Unexpected transaction type="${tx.type}"`)
-    return tx
-  }
-
   async getBlockTimestamp(version: number | 'finalized'): Promise<number> {
-    if (version === 'finalized') {
-      const info = await this.provider.getLedgerInfo()
-      version = +info.ledger_version
-    }
-    const tx = await this._getTxByVersion(version)
-    return +tx.timestamp / 1e6
+    return getVersionTimestamp(this.provider, version)
   }
 
-  async getTransaction(hash: string): Promise<ChainTransaction> {
-    const tx = await this.provider.getTransactionByHash({
-      transactionHash: hash,
-    })
+  async getTransaction(hashOrVersion: string | number): Promise<ChainTransaction> {
+    let tx
+    if (isHexString(hashOrVersion, 32)) {
+      tx = await this.provider.getTransactionByHash({
+        transactionHash: hashOrVersion,
+      })
+    } else if (!isNaN(+hashOrVersion)) {
+      tx = await getUserTxByVersion(this.provider, +hashOrVersion)
+    } else {
+      throw new Error(`Invalid transaction hash or version: ${hashOrVersion}`)
+    }
     if (tx.type !== TransactionResponseType.User) throw new Error('Invalid transaction type')
 
     return {
       chain: this,
-      hash,
+      hash: tx.hash,
       blockNumber: +tx.version,
       from: tx.sender,
       timestamp: +tx.timestamp / 1e6,
       logs: tx.events.map((event, index) => ({
         address: event.type.slice(0, event.type.lastIndexOf('::')),
-        transactionHash: hash,
+        transactionHash: tx.hash,
         index,
-        blockNumber: +tx.version,
+        blockNumber: +tx.version, // we use version as Aptos' blockNumber, as blockHeight isn't very useful
         data: event.data as Record<string, unknown>,
         topics: [event.type.slice(event.type.lastIndexOf('::') + 2)],
       })),
     }
   }
 
-  async *getLogs(opts: LogFilter): AsyncIterableIterator<Log_> {
-    const limit = 100
-    if (!opts.address || !opts.address.includes('::'))
-      throw new Error('address with module is required')
-    if (opts.topics?.length !== 1 || typeof opts.topics[0] !== 'string')
-      throw new Error('single string topic required')
-    let eventHandlerField = opts.topics[0]
-    if (!eventHandlerField.includes('/')) {
-      eventHandlerField = (eventToHandler as Record<string, string>)[eventHandlerField]
-      if (!eventHandlerField) throw new Error(`Unknown topic event handler="${opts.topics[0]}"`)
-    }
-    const [stateAddr] = await this.provider.view<[string]>({
-      payload: {
-        function:
-          `${opts.address}::get_state_address` as `0x${string}::${string}::get_state_address`,
-      },
-    })
-
-    type ResEvent = AptosEvent & { version: string }
-    let eventsIter
-    let cont = true
-    if (opts.startBlock || opts.startTime) {
-      // forward, collect all events in an array; or maybe in the future, binary-search
-      // sequence number matching start conditions to then paginate forward
-      let start
-      const eventsArr: ResEvent[] = []
-      eventsIter = eventsArr
-      while (cont) {
-        const { data }: { data: ResEvent[] } = await getAptosFullNode({
-          aptosConfig: this.provider.config,
-          originMethod: 'getEventsByEventHandle',
-          path: `accounts/${stateAddr}/events/${opts.address}::${eventHandlerField}`,
-          params: { start, limit },
-        })
-
-        if (!data.length) break
-        else if (start === 1) cont = false
-        else start = Math.max(+data[0].sequence_number - limit, 1)
-
-        let checkTime
-        if (opts.startTime) {
-          const oldest = await this.getBlockTimestamp(+data[0].version)
-          if (oldest < opts.startTime) checkTime = opts.startTime
-        }
-
-        for (const ev of data.reverse()) {
-          if (opts.endBlock && +ev.version > opts.endBlock) continue
-          if (opts.startBlock && +ev.version < opts.startBlock) {
-            cont = false
-            break
-          }
-          if (checkTime) {
-            const timestamp = await this.getBlockTimestamp(+ev.version)
-            if (timestamp < checkTime) {
-              cont = false
-              break
-            }
-          }
-          eventsArr.unshift(ev)
-        }
-      }
-    } else {
-      // backwards, just paginate down to lowest sequence number
-      eventsIter = async function* (this: AptosChain) {
-        let start
-        const eventsArr: ResEvent[] = []
-        eventsIter = eventsArr
-        while (cont) {
-          const { data } = await getAptosFullNode<object, ResEvent[]>({
-            aptosConfig: this.provider.config,
-            originMethod: 'getEventsByEventHandle',
-            path: `accounts/${stateAddr}/events/${opts.address}::${eventHandlerField}`,
-            params: { start, limit },
-          })
-
-          if (!data.length) break
-          else if (start === 1) cont = false
-          else start = Math.max(+data[0].sequence_number - limit, 1)
-
-          for (const ev of data.reverse()) {
-            if (opts.endBlock && +ev.version > opts.endBlock) continue
-            if (+ev.sequence_number <= 1) cont = false
-            yield ev
-          }
-        }
-      }.call(this)
-    }
-
-    let topics
-    for await (const ev of eventsIter) {
-      topics ??= [ev.type.slice(ev.type.lastIndexOf('::') + 2)]
-      yield {
-        address: opts.address,
-        topics,
-        index: +ev.sequence_number,
-        blockNumber: +ev.version,
-        transactionHash: (await this._getTxByVersion(+ev.version)).hash,
-        data: ev.data as Record<string, unknown>,
-      }
-    }
+  async *getLogs(opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<Log_> {
+    yield* streamAptosLogs(this.provider, opts)
   }
 
   async typeAndVersion(
@@ -587,120 +470,23 @@ export class AptosChain implements Chain<typeof ChainFamily.Aptos> {
   async executeReport(
     offRamp: string,
     execReport: ExecutionReport,
-    opts?: { wallet?: string; gasLimit?: number; tokensGasLimit?: number },
-  ): Promise<ChainTransaction> {
-    const [type, version, typeAndVersion] = await this.typeAndVersion(offRamp)
-    if (!type.includes('OffRamp') || !Object.values<string>(CCIPVersion).includes(version))
-      throw new Error(`Invalid OffRamp=${offRamp} type or version: "${typeAndVersion}"`)
-
+    opts?: { wallet?: unknown; gasLimit?: number },
+  ): Promise<{ hash: string }> {
     const account = await this.getWallet(opts)
 
-    // Prepare offchain token data - for now, just empty bytes for each token
-    const offchainTokenData = execReport.offchainTokenData.map((data) => {
-      if (data?._tag === 'usdc') {
-        // For USDC, we need to encode message and attestation
-        // This is a simplified version - actual implementation may vary
-        return Array.from(
-          getBytes(concat([getDataBytes(data.message), getDataBytes(data.attestation)])),
-        )
-      } else if (data?._tag === 'lbtc') {
-        return Array.from(getBytes(data.attestation))
-      }
-      return []
-    })
-
-    // Prepare proofs as byte arrays
-    const proofs = execReport.proofs.map((proof) => Array.from(getBytes(proof)))
-
-    // Prepare the message for Aptos
-    const message = execReport.message
-    const senderBytes = Array.from(getBytes(zeroPadValue(getDataBytes(message.sender), 32)))
-    const receiverBytes = Array.from(getBytes(zeroPadValue(getDataBytes(message.receiver), 32)))
-    const dataBytes = Array.from(getBytes(message.data))
-
-    // Prepare token amounts - extract token address properly
-    const tokenAddresses: string[] = []
-    const tokenAmountValues: string[] = []
-
-    for (const ta of message.tokenAmounts) {
-      // Handle different token amount structures
-      if ('token' in ta) {
-        tokenAddresses.push(ta.token)
-        tokenAmountValues.push(ta.amount.toString())
-      } else if ('destTokenAddress' in ta) {
-        tokenAddresses.push(ta.destTokenAddress)
-        tokenAmountValues.push(ta.amount.toString())
-      }
-    }
-    if (!('allowOutOfOrderExecution' in message && 'gasLimit' in message)) {
-      throw new Error('allowOutOfOrderExecution is required')
+    if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
+      throw new Error('Aptos expects EVMExtraArgsV2 reports')
     }
 
-    const serialized = ExecutionReportCodec.serialize({
-      sourceChainSelector: message.header.sourceChainSelector,
-      messageId: getBytes(message.header.messageId),
-      headerSourceChainSelector: message.header.sourceChainSelector,
-      destChainSelector: message.header.destChainSelector,
-      sequenceNumber: message.header.sequenceNumber,
-      nonce: message.header.nonce,
-      sender: getAddressBytes(message.sender),
-      data: getBytes(message.data),
-      receiver: getAddressBytes(message.receiver),
-      gasLimit: message.gasLimit,
-      tokenAmounts: message.tokenAmounts.map((ta) => ({
-        sourcePoolAddress: getAddressBytes(ta.sourcePoolAddress),
-        destTokenAddress: getAddressBytes(ta.destTokenAddress),
-        destGasAmount: Number(ta.destGasAmount),
-        extraData: getBytes(ta.extraData),
-        amount: ta.amount,
-      })),
-      offchainTokenData: execReport.offchainTokenData.map(() => []),
-      proofs: execReport.proofs.map((p) => getBytes(p)),
-    }).toBytes()
+    const hash = await executeReport(
+      this.provider,
+      account,
+      offRamp,
+      execReport as ExecutionReport<CCIPMessage_V1_6_EVM>,
+      opts,
+    )
 
-    // Build the transaction to call manually_execute
-    // The function signature should be something like:
-    // public entry fun manually_execute(
-    //     caller: &signer,
-    //     merkle_root: vector<u8>,
-    //     proofs: vector<vector<u8>>,
-    //     proof_flag_bits: u256,
-    //     message_id: vector<u8>,
-    //     source_chain_selector: u64,
-    //     dest_chain_selector: u64,
-    //     sequence_number: u64,
-    //     nonce: u64,
-    //     sender: vector<u8>,
-    //     receiver: vector<u8>,
-    //     data: vector<u8>,
-    //     token_addresses: vector<address>,
-    //     token_amounts: vector<u256>,
-    //     offchain_token_data: vector<vector<u8>>,
-    //     gas_limit: u256
-    // )
-    const transaction = await this.provider.transaction.build.simple({
-      sender: account.accountAddress,
-      data: {
-        function:
-          `${offRamp.includes('::') ? offRamp : offRamp + '::offramp'}::manually_execute` as `${string}::${string}::${string}`,
-        functionArguments: [serialized],
-      },
-    })
-
-    // Sign and submit the transaction
-    const signed = await account.signTransactionWithAuthenticator(transaction)
-    const pendingTxn = await this.provider.transaction.submit.simple({
-      transaction,
-      senderAuthenticator: signed,
-    })
-
-    // Wait for the transaction to be confirmed
-    const { hash } = await this.provider.waitForTransaction({
-      transactionHash: pendingTxn.hash,
-    })
-
-    // Return the ChainTransaction by fetching it
-    return this.getTransaction(hash)
+    return { hash }
   }
 }
 

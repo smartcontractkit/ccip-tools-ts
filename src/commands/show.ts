@@ -18,8 +18,6 @@ import {
   bigIntReplacer,
   fetchCCIPMessageById,
   fetchCCIPMessagesInTx,
-  fetchCommitReport,
-  fetchExecutionReceipts,
   networkInfo,
 } from '../lib/index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
@@ -109,7 +107,7 @@ async function showRequests(
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
   const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
 
-  const commit = await fetchCommitReport(dest, commitStore, request, argv)
+  const commit = await dest.fetchCommitReport(commitStore, request, argv)
   switch (argv.format) {
     case Format.log:
       console.log('commit =', commit)
@@ -123,8 +121,7 @@ async function showRequests(
   }
 
   let found = false
-  for await (const receipt of fetchExecutionReceipts(
-    dest,
+  for await (const receipt of dest.fetchExecutionReceipts(
     offRamp,
     new Set([request.message.header.messageId]),
     {

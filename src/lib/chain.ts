@@ -1,9 +1,15 @@
+import util from 'util'
+
 import type { BytesLike } from 'ethers'
 
+import { fetchCommitReport } from './commits.ts'
+import { fetchExecutionReceipts } from './execution.ts'
 import type { EVMExtraArgsV1, EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1 } from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
 import type {
   AnyMessage,
+  CCIPCommit,
+  CCIPExecution,
   CCIPMessage,
   CCIPRequest,
   CommitReport,
@@ -43,21 +49,30 @@ export type ChainTransaction = {
   error?: unknown
 }
 
-export interface Chain<F extends ChainFamily = ChainFamily> {
-  readonly network: NetworkInfo<F>
-  destroy(): Promise<void>
+/**
+ * Works like an interface for a base Chain class, but provides implementation (which can be
+ * specialized) for some basic methods
+ */
+export abstract class Chain<F extends ChainFamily = ChainFamily> {
+  abstract readonly network: NetworkInfo<F>
+  abstract destroy?(): Promise<void>
+
+  [util.inspect.custom]() {
+    return `${this.constructor.name} { ${this.network.name} }`
+  }
+
   /**
    * Fetch the timestamp of a given block
    * @param block - block number or 'finalized'
    * @returns timestamp of the block, in seconds
    */
-  getBlockTimestamp(block: number | 'finalized'): Promise<number>
+  abstract getBlockTimestamp(block: number | 'finalized'): Promise<number>
   /**
    * Fetch a transaction by its hash
    * @param hash - transaction hash
    * @returns generic transaction details
    */
-  getTransaction(hash: string): Promise<ChainTransaction>
+  abstract getTransaction(hash: string): Promise<ChainTransaction>
   /**
    * An async generator that yields logs based on the provided options.
    * @param opts - options object
@@ -75,13 +90,13 @@ export interface Chain<F extends ChainFamily = ChainFamily> {
    * @param opts.page - if provided, try to use this page/range for batches
    * @returns an async iterable iterator of logs
    */
-  getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
+  abstract getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
   /**
    * Fetch the typeAndVersion tag of a given CCIP contract
    * @param address - CCIP contract address
    * @returns typeAndVersion tag, validated and split
    */
-  typeAndVersion(
+  abstract typeAndVersion(
     address: string,
   ): Promise<
     | [type_: string, version: string, typeAndVersion: string]
@@ -95,20 +110,20 @@ export interface Chain<F extends ChainFamily = ChainFamily> {
    * @param destChainSelector - destination chain selector
    * @returns Router address
    */
-  getRouterForOnRamp(onRamp: string, destChainSelector: bigint): Promise<string>
+  abstract getRouterForOnRamp(onRamp: string, destChainSelector: bigint): Promise<string>
   /**
    * Fetch the Router address set in OffRamp config
    * @param offRamp - OffRamp contract address
    * @param sourceChainSelector - source chain selector
    * @returns Router address
    */
-  getRouterForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string>
+  abstract getRouterForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string>
   /**
    * Get the native token address for a Router
    * @param router - router contract address
    * @returns native token address (usually wrapped)
    */
-  getNativeTokenForRouter(router: string): Promise<string>
+  abstract getNativeTokenForRouter(router: string): Promise<string>
   /**
    * Fetch the OffRamps allowlisted in a Router
    * Used to discover OffRamp connected to an OnRamp
@@ -116,14 +131,14 @@ export interface Chain<F extends ChainFamily = ChainFamily> {
    * @param sourceChainSelector - source chain selector
    * @returns array of OffRamp addresses
    */
-  getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]>
+  abstract getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]>
   /**
    * Fetch the OnRamp registered in a Router for a destination chain
    * @param router - Router contract address
    * @param destChainSelector - destination chain selector
    * @returns OnRamp addresses
    */
-  getOnRampForRouter(router: string, destChainSelector: bigint): Promise<string>
+  abstract getOnRampForRouter(router: string, destChainSelector: bigint): Promise<string>
   /**
    * Fetch the OnRamp address set in OffRamp config
    * Used to discover OffRamp connected to an OnRamp
@@ -131,59 +146,62 @@ export interface Chain<F extends ChainFamily = ChainFamily> {
    * @param sourceChainSelector - source chain selector
    * @returns OnRamp address
    */
-  getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string>
+  abstract getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string>
   /**
    * Fetch the CommitStore set in OffRamp config (CCIP<=v1.5)
    * For CCIP>=v1.6, it should return the offRamp address
    * @param offRamp - OffRamp contract address
    * @returns CommitStore address
    */
-  getCommitStoreForOffRamp(offRamp: string): Promise<string>
+  abstract getCommitStoreForOffRamp(offRamp: string): Promise<string>
   /**
    * Fetch the TokenPool's token/mint
    * @param tokenPool - TokenPool address
    * @returns Token or mint address
    */
-  getTokenForTokenPool(tokenPool: string): Promise<string>
+  abstract getTokenForTokenPool(tokenPool: string): Promise<string>
   /**
    * Fetch token metadata
    * @param token - Token address
    * @returns Token symbol and decimals
    */
-  getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }>
+  abstract getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }>
   /**
    * Fetch TokenAdminRegistry configured in a given OnRamp
    * Needed to map a source token to its dest counterparts
    * @param onRamp - OnRamp address
    */
-  getTokenAdminRegistryForOnRamp(onRamp: string): Promise<string>
+  abstract getTokenAdminRegistryForOnRamp(onRamp: string): Promise<string>
   /**
    * Fetch TokenPool address for a given Token in a TokenAdminRegistry
    * Needed to map a source token to its dest counterparts
    * @param registry - TokenAdminRegistry contract address
    * @param token - Token address
    */
-  getTokenPoolForToken(registry: string, token: string): Promise<string>
+  abstract getTokenPoolForToken(registry: string, token: string): Promise<string>
   /**
    * Fetch remote token address for a given TokenPool and remote network
    * Needed to map a source token to its dest counterparts
    * @param tokenPool - TokenPool address to fetch remote lanes from
    * @param remoteChainSelector - remote network for which this TP has a lane with
    */
-  getRemoteTokenForTokenPool(tokenPool: string, remoteChainSelector: bigint): Promise<string>
+  abstract getRemoteTokenForTokenPool(
+    tokenPool: string,
+    remoteChainSelector: bigint,
+  ): Promise<string>
   /**
    * Build, derive, load or fetch a wallet for this instance which will be used in any tx send operation
    * @param opts.wallet - cli or environmental parameters to help pick a wallet
    * @returns address of fetched (and stored internally) account
    */
-  getWalletAddress(opts?: { wallet?: unknown }): Promise<string>
+  abstract getWalletAddress(opts?: { wallet?: unknown }): Promise<string>
   /**
    * Fetch the current fee for a given intended message
    * @param router - router address on this chain
    * @param destChainSelector - dest network selector
    * @param message - message to send
    */
-  getFee(router: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint>
+  abstract getFee(router: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint>
   /**
    * Send a CCIP message through a router using loaded wallet
    * @param router - router address on this chain
@@ -192,7 +210,7 @@ export interface Chain<F extends ChainFamily = ChainFamily> {
    * @param opts.wallet - cli or environmental parameters to help pick a wallet
    * @param opts.approveMax - approve the maximum amount of tokens to transfer
    */
-  sendMessage(
+  abstract sendMessage(
     router: string,
     destChainSelector: bigint,
     message: AnyMessage & { fee: bigint },
@@ -203,7 +221,7 @@ export interface Chain<F extends ChainFamily = ChainFamily> {
    * @param request - CCIP request, with tx, logs and message
    * @returns array with one offchain token data for each token transfer in request
    */
-  fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]>
+  abstract fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]>
   /**
    * Execute messages in report in an offRamp
    * @param offRamp - offRamp address on this dest chain
@@ -211,11 +229,40 @@ export interface Chain<F extends ChainFamily = ChainFamily> {
    * @param opts - general options for execution
    * @returns transaction hash of the execution
    */
-  executeReport(
+  abstract executeReport(
     offRamp: string,
     execReport: ExecutionReport,
     opts?: Record<string, unknown>,
   ): Promise<Pick<ChainTransaction, 'hash'>>
+
+  /**
+   * Look for a CommitReport at dest for given CCIP request
+   * May be specialized by some subclasses
+   *
+   * @param dest - Destination network provider
+   * @param request - CCIP request info
+   * @param hints - Additional filtering hints
+   * @returns CCIP commit info
+   **/
+  async fetchCommitReport(
+    commitStore: string,
+    request: {
+      lane: Lane
+      message: { header: { sequenceNumber: bigint } }
+      timestamp?: number
+    },
+    hints?: { startBlock?: number; page?: number },
+  ): Promise<CCIPCommit> {
+    return fetchCommitReport(this, commitStore, request, hints)
+  }
+
+  async *fetchExecutionReceipts(
+    offRamp: string,
+    messageIds: Set<string>,
+    hints?: { startBlock?: number; startTime?: number; page?: number; commit?: CommitReport },
+  ): AsyncGenerator<CCIPExecution> {
+    yield* fetchExecutionReceipts(this, offRamp, messageIds, hints)
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
