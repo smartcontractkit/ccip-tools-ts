@@ -149,22 +149,22 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   // cached wallet/signer getter
   async getWallet(opts: { wallet?: unknown } = {}): Promise<Signer> {
-    try {
-      if (typeof opts.wallet === 'string') {
+    if (typeof opts.wallet === 'string') {
+      try {
         return Promise.resolve(
           new BaseWallet(
             new SigningKey((opts.wallet.startsWith('0x') ? '' : '0x') + opts.wallet),
             this.provider,
           ),
         )
+      } catch (_) {
+        // pass
       }
-    } catch (_) {
-      // pass
     }
     return (this.constructor as typeof EVMChain).getWallet(this.provider, opts)
   }
 
-  async getWalletAddress(opts?: { wallet?: string }): Promise<string> {
+  async getWalletAddress(opts?: { wallet?: unknown }): Promise<string> {
     return (await this.getWallet(opts)).getAddress()
   }
 
@@ -840,10 +840,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     execReport: ExecutionReport,
     opts?: { wallet?: string; gasLimit?: number; tokensGasLimit?: number },
   ) {
-    const [type, version, typeAndVersion] = await this.typeAndVersion(offRamp)
-    if (!type.includes('OffRamp') || !Object.values<string>(CCIPVersion).includes(version))
-      throw new Error(`Invalid OffRamp=${offRamp} type or version: "${typeAndVersion}"`)
-
+    const [_, version] = await this.typeAndVersion(offRamp)
     const wallet = await this.getWallet(opts)
 
     let manualExecTx
@@ -896,7 +893,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         // normalize message
         const sender = zeroPadValue(getAddressBytes(execReport.message.sender), 32)
         const tokenAmounts = (execReport.message as CCIPMessage_V1_6_EVM).tokenAmounts.map(
-          (ta: CCIPMessage_V1_6_EVM['tokenAmounts'][number]) => ({
+          (ta) => ({
             ...ta,
             sourcePoolAddress: zeroPadValue(getAddressBytes(ta.sourcePoolAddress), 32),
             extraData: hexlify(getDataBytes(ta.extraData)),
@@ -936,8 +933,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       default:
         throw new Error(`Unsupported version: ${version}`)
     }
-
-    return manualExecTx
+    const receipt = await this.provider.waitForTransaction(manualExecTx.hash, 1, 1e60)
+    if (!receipt?.hash) throw new Error(`Could not confirm exec tx: ${manualExecTx.hash}`)
+    if (!receipt.status) throw new Error(`Exec transaction reverted: ${manualExecTx.hash}`)
+    return this.getTransaction(receipt)
   }
 
   static parseError(error: unknown) {

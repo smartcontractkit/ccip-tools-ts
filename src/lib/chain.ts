@@ -233,7 +233,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     offRamp: string,
     execReport: ExecutionReport,
     opts?: Record<string, unknown>,
-  ): Promise<Pick<ChainTransaction, 'hash'>>
+  ): Promise<ChainTransaction>
 
   /**
    * Look for a CommitReport at dest for given CCIP request

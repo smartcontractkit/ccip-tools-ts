@@ -471,7 +471,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     offRamp: string,
     execReport: ExecutionReport,
     opts?: { wallet?: unknown; gasLimit?: number },
-  ): Promise<{ hash: string }> {
+  ): Promise<ChainTransaction> {
     const account = await this.getWallet(opts)
 
     if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
@@ -486,7 +486,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       opts,
     )
 
-    return { hash }
+    return this.getTransaction(hash)
   }
 }
 

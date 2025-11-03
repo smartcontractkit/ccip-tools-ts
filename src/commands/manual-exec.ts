@@ -5,6 +5,7 @@ import { Format } from './types.ts'
 import {
   logParsedError,
   prettyCommit,
+  prettyReceipt,
   prettyRequest,
   selectRequest,
   withDateTimestamp,
@@ -12,6 +13,7 @@ import {
 import type { EVMChain } from '../lib/evm/index.ts'
 import { discoverOffRamp } from '../lib/execution.ts'
 import {
+  type ChainStatic,
   ChainFamily,
   bigIntReplacer,
   calculateManualExecProof,
@@ -175,7 +177,7 @@ async function manualExec(
 
     let estimated = await estimateExecGasForRequest(
       source,
-      dest as EVMChain,
+      dest as unknown as EVMChain,
       request as CCIPRequest<typeof CCIPVersion.V1_5 | typeof CCIPVersion.V1_6>,
     )
     console.info('Estimated gasLimit override:', estimated)
@@ -198,7 +200,33 @@ async function manualExec(
   const manualExecTx = await dest.executeReport(offRamp, execReport, argv)
 
   console.log('🚀 manualExec tx =', manualExecTx.hash, 'to offRamp =', offRamp)
-  // }
+
+  let found = false
+  for (const log of manualExecTx.logs) {
+    const execReceipt = (dest.constructor as ChainStatic).decodeReceipt(log)
+    if (!execReceipt) continue
+    const timestamp = await dest.getBlockTimestamp(log.blockNumber)
+    const receipt = { receipt: execReceipt, log, timestamp }
+    switch (argv.format) {
+      case Format.log:
+        console.log('receipt =', withDateTimestamp(receipt))
+        break
+      case Format.pretty:
+        if (!found) console.info('Receipts (dest):')
+        prettyReceipt(
+          receipt,
+          request,
+          receipt.log.tx?.from ??
+            (await dest.getTransaction(receipt.log.transactionHash).catch(() => null))?.from,
+        )
+        break
+      case Format.json:
+        console.info(JSON.stringify(execReceipt, bigIntReplacer, 2))
+        break
+    }
+    found = true
+  }
+  if (!found) throw new Error(`Could not find receipt in tx logs`)
 }
 
 /*

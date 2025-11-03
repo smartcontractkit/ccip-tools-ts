@@ -1020,7 +1020,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       clearBufferFirst?: boolean
       dontWait?: boolean
     },
-  ): Promise<Pick<ChainTransaction, 'hash'>> {
+  ): Promise<ChainTransaction> {
     if (!('computeUnits' in execReport_.message))
       throw new Error("ExecutionReport's message not for Solana")
     const execReport = execReport_ as ExecutionReport<CCIPMessage_V1_6_Solana>
@@ -1035,7 +1035,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     } catch (err) {
       console.warn('Error while trying to clean up buffers:', err)
     }
-    return rep
+    return this.getTransaction(rep.hash)
   }
 
   /**
