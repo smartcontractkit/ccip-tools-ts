@@ -58,10 +58,7 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
     .finally(destroy)
 }
 
-async function showRequests(
-  argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts,
-  destroy: Promise<unknown>,
-) {
+async function showRequests(argv: Parameters<typeof handler>[0], destroy: Promise<unknown>) {
   let source, getChain, tx, request: CCIPRequest
   // messageId not yet implemented for Solana
   if (argv.idFromSource) {

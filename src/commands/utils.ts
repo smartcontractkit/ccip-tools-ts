@@ -1,6 +1,15 @@
 import { select } from '@inquirer/prompts'
 import bs58 from 'bs58'
-import { Result, formatUnits, hexlify, isBytesLike, isHexString, parseUnits } from 'ethers'
+import {
+  dataLength,
+  formatUnits,
+  getBytes,
+  hexlify,
+  isBytesLike,
+  isHexString,
+  parseUnits,
+  toUtf8String,
+} from 'ethers'
 
 import type { Chain, ChainStatic } from '../lib/chain.ts'
 import {
@@ -12,7 +21,6 @@ import {
   chainIdFromSelector,
   chainNameFromId,
   networkInfo,
-  recursiveParseError,
 } from '../lib/index.ts'
 import { supportedChains } from '../lib/supported-chains.ts'
 import type { OffchainTokenData } from '../lib/types.ts'
@@ -86,15 +94,28 @@ export function formatArray<T>(name: string, values: readonly T[]): Record<strin
   return Object.fromEntries(values.map((v, i) => [`${name}[${i}]`, v] as const))
 }
 
+// join truthy property names, separated by a dot
+function j(...args: string[]): string {
+  return args.filter(Boolean).join('.')
+}
+
 function formatData(name: string, data: string, parseError = false): Record<string, string> {
   if (parseError) {
-    const res: Record<string, string> = {}
-    for (const [key, error] of recursiveParseError(name, data)) {
-      if (isHexString(error)) Object.assign(res, formatData(key, error))
-      else res[key] = error as string
+    let parsed
+    for (const chain of Object.values(supportedChains)) {
+      parsed = chain.parse?.(data)
+      if (parsed) break
     }
-    return res
+    if (parsed) {
+      const res: Record<string, string> = {}
+      for (const [key, error] of Object.entries(parsed)) {
+        if (isHexString(error)) Object.assign(res, formatData(j(name, key), error))
+        else res[j(name, key)] = error as string
+      }
+      return res
+    }
   }
+  if (!isHexString(data)) return { [name]: data }
   const split = []
   if (data.length <= 66) split.push(data)
   else
@@ -102,36 +123,6 @@ function formatData(name: string, data: string, parseError = false): Record<stri
       split.unshift(data.substring(Math.max(i - 64, 0), i))
     }
   return formatArray(name, split)
-}
-
-export function formatResult(
-  result: unknown,
-  parseValue?: (val: unknown, key: string | number) => unknown,
-): unknown {
-  if (!(result instanceof Result)) return result
-  try {
-    const res = result.toObject()
-    if (!(Object.keys(res)[0] ?? '').match(/^[a-z]/)) throw new Error('Not an object')
-    for (const [k, v] of Object.entries(res)) {
-      if (v instanceof Result) {
-        res[k] = formatResult(v, parseValue)
-      } else if (parseValue) {
-        res[k] = parseValue(v, k)
-      }
-    }
-    return res
-  } catch (_) {
-    const res = result.toArray()
-    for (let i = 0; i < res.length; i++) {
-      const v = res[i] as unknown
-      if (v instanceof Result) {
-        res[i] = formatResult(v, parseValue)
-      } else if (parseValue) {
-        res[i] = parseValue(v, i)
-      }
-    }
-    return res
-  }
 }
 
 function formatDate(timestamp: number) {
@@ -193,7 +184,7 @@ export async function prettyRequest(
     'extraArgs',
     'accounts',
   )
-  console.table({
+  prettyTable({
     messageId: request.message.header.messageId,
     ...(request.tx.from ? { origin: request.tx.from } : {}),
     sender: request.message.sender,
@@ -222,7 +213,11 @@ export async function prettyRequest(
       'tokens',
       await Promise.all(request.message.tokenAmounts.map(formatToken.bind(null, source))),
     ),
-    ...formatData('data', request.message.data),
+    ...(isBytesLike(request.message.data) &&
+    dataLength(request.message.data) > 0 &&
+    getBytes(request.message.data).every((b) => 32 <= b && b <= 126) // printable characters
+      ? { data: toUtf8String(request.message.data) }
+      : formatData('data', request.message.data)),
     ...('accounts' in request.message ? formatArray('accounts', request.message.accounts) : {}),
     ...rest,
   })
@@ -231,7 +226,7 @@ export async function prettyRequest(
   console.info('Attestations:')
   for (const attestation of offchainTokenData) {
     const { _tag: type, ...rest } = attestation!
-    console.table({
+    prettyTable({
       type,
       ...Object.fromEntries(
         Object.entries(rest)
@@ -249,7 +244,7 @@ export async function prettyCommit(
 ) {
   console.info('Commit (dest):')
   const timestamp = await dest.getBlockTimestamp(commit.log.blockNumber)
-  console.table({
+  prettyTable({
     merkleRoot: commit.report.merkleRoot,
     min: Number(commit.report.minSeqNr),
     max: Number(commit.report.maxSeqNr),
@@ -317,27 +312,42 @@ function wrapText(text: string, maxWidth: number, threshold: number = 0.1): stri
   return lines
 }
 
+export function prettyTable(
+  args: Record<string, unknown>,
+  opts = { parseErrorKeys: ['returnData'], spcount: 0 },
+) {
+  const out: (readonly [string, unknown])[] = []
+  for (const [key, value] of Object.entries(args)) {
+    if (isBytesLike(value)) {
+      let parseError
+      if (opts.parseErrorKeys.includes(key)) parseError = true
+      out.push(...Object.entries(formatData(key, hexlify(value), parseError)))
+    } else if (typeof value === 'string') {
+      out.push(
+        ...wrapText(value, Math.max(100, +(process.env.COLUMNS || 80) * 0.9)).map(
+          (l, i) => [!i ? key : ' '.repeat(opts.spcount++), l] as const,
+        ),
+      )
+    } else if (Array.isArray(value)) {
+      if (value.length <= 1) out.push([key, value[0] as unknown])
+      else out.push(...value.map((v, i) => [`${key}[${i}]`, v as unknown] as const))
+    } else if (value && typeof value === 'object') {
+      out.push(...Object.entries(value).map(([k, v]) => [`${key}.${k}`, v] as const))
+    } else out.push([key, value])
+  }
+  return console.table(Object.fromEntries(out))
+}
+
 export function prettyReceipt(
   receipt: CCIPExecution,
   request: { timestamp: number },
   origin?: string,
 ) {
-  console.table({
+  prettyTable({
     state: receipt.receipt.state === ExecutionState.Success ? '✅ success' : '❌ failed',
     ...(receipt.receipt.state !== ExecutionState.Success ||
     (receipt.receipt.returnData && receipt.receipt.returnData !== '0x')
-      ? isBytesLike(receipt.receipt.returnData)
-        ? formatData('returnData', hexlify(receipt.receipt.returnData), true)
-        : typeof receipt.receipt.returnData === 'string'
-          ? Object.fromEntries(
-              wrapText(
-                receipt.receipt.returnData,
-                Math.max(100, +(process.env.COLUMNS || 80) * 0.9),
-              ).map((l, i) => [!i ? 'returnData' : ' '.repeat(i), l]),
-            )
-          : typeof receipt.receipt.returnData === 'object'
-            ? receipt.receipt.returnData
-            : {}
+      ? { returnData: receipt.receipt.returnData }
       : {}),
     ...(receipt.receipt.gasUsed ? { gasUsed: Number(receipt.receipt.gasUsed) } : {}),
     ...(origin ? { origin } : {}),
@@ -351,21 +361,20 @@ export function prettyReceipt(
 
 export function logParsedError(err: unknown): boolean {
   for (const chain of Object.values<ChainStatic>(supportedChains)) {
-    const parsed = chain.parseError?.(err)
-    if (parsed) {
-      const { method, Instruction: instruction, ...rest } = parsed
-      if (method || instruction) {
-        console.error(
-          `🛑 Failed to call "${(method || instruction) as string}"`,
-          ...Object.entries(rest)
-            .map(([k, e]) => [`\n${k.substring(0, 1).toUpperCase()}${k.substring(1)} =`, e])
-            .flat(1),
-        )
-      } else {
-        console.error('🛑 Error:', parsed)
-      }
-      return true
+    const parsed = chain.parse?.(err)
+    if (!parsed) continue
+    const { method, Instruction: instruction, ...rest } = parsed
+    if (method || instruction) {
+      console.error(
+        `🛑 Failed to call "${(method || instruction) as string}"`,
+        ...Object.entries(rest)
+          .map(([k, e]) => [`\n${k.substring(0, 1).toUpperCase()}${k.substring(1)} =`, e])
+          .flat(1),
+      )
+    } else {
+      console.error('🛑 Error:', parsed)
     }
+    return true
   }
   return false
 }

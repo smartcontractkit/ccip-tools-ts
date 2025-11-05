@@ -63,7 +63,7 @@ async function main() {
     })
     .commandDir('commands', {
       extensions: ['ts'],
-      include: /\b(show|send|manual-exec|get-attestation-status)\.ts$/,
+      include: /\b(show|send|manual-exec|parse)\.ts$/,
     })
     .command(
       'estimateGas <source> <router> <dest>',
@@ -126,32 +126,6 @@ async function main() {
             if (!logParsedError(err)) console.error(err)
           })
           .finally(() => providers.destroy())
-      },
-    )
-    .command(
-      ['parseBytes <data>', 'parseData <data>', 'parse <data>'],
-      'try to parse and print errors, revert reasons or function call data',
-      (yargs) =>
-        yargs
-          .positional('data', {
-            type: 'string',
-            demandOption: true,
-            describe: 'router contract address on source',
-          })
-          .options({
-            selector: {
-              type: 'string',
-              describe: 'Event, Error, Function name or topicHash to parse data as',
-            },
-          })
-          .alias({ event: 'selector' }),
-      (argv) => {
-        try {
-          parseBytes(argv)
-        } catch (err) {
-          process.exitCode = 1
-          console.error(err)
-        }
       },
     )
     .command(

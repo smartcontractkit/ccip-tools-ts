@@ -86,7 +86,7 @@ import {
   networkInfo,
   parseTypeAndVersion,
 } from '../utils.ts'
-import { parseError } from './errors.ts'
+import { parseData } from './errors.ts'
 import { supportedChains } from '../supported-chains.ts'
 
 const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
@@ -939,8 +939,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return this.getTransaction(receipt)
   }
 
-  static parseError(error: unknown) {
-    return parseError(error)
+  static parse(data: unknown) {
+    return parseData(data)
   }
 }
 

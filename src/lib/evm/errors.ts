@@ -3,14 +3,17 @@ import {
   type ErrorFragment,
   type EventFragment,
   type FunctionFragment,
-  type Result,
+  Result,
   dataLength,
   dataSlice,
+  hexlify,
   isBytesLike,
   isHexString,
 } from 'ethers'
 
 import { defaultAbiCoder, interfaces } from './const.ts'
+import { ChainFamily } from '../chain.ts'
+import { parseExtraArgs } from '../extra-args.ts'
 
 /**
  * Get error data from an error object, if possible
@@ -113,6 +116,11 @@ export function parseWithFragment(
   return res
 }
 
+// join truthy property names, separated by a dot
+function j(...args: string[]): string {
+  return args.filter(Boolean).join('.')
+}
+
 /**
  * Recursively parse error data, returning an array of key/value pairs, where key is the path to
  * error, and error maybe an error description or format, or the raw data if not parsable.
@@ -123,51 +131,57 @@ export function parseWithFragment(
  **/
 export function recursiveParseError(
   key: string,
-  data: string,
+  data: unknown,
 ): (readonly [key: string, error: unknown])[] {
+  if (data instanceof Result) {
+    if (data.length === 0) return key ? [[key, data.toArray()]] : []
+    let kv: ReturnType<typeof recursiveParseError>
+    try {
+      kv = Object.entries(data.toObject()).map(([k, v]) => [j(key, k), v])
+    } catch (_) {
+      kv = data.toArray().map((v, i) => [j(key, `[${i}]`), v])
+    }
+    return kv.reduce(
+      (acc, [k, v]) => [...acc, ...recursiveParseError(k, v)],
+      [] as ReturnType<typeof recursiveParseError>,
+    )
+  }
   if (!isBytesLike(data) || [0, 20, 32].includes(dataLength(data))) {
     return [[key, data]]
   }
-  const parsed = parseWithFragment(data)
+  try {
+    const parsed = parseExtraArgs(data, ChainFamily.EVM)
+    if (parsed) {
+      const { _tag, ...rest } = parsed
+      return [[key, _tag], ...Object.entries(rest).map(([k, v]) => [j(key, k), v] as const)]
+    }
+  } catch (_) {
+    // pass
+  }
+  const parsed = parseWithFragment(hexlify(data))
   if (!parsed?.[2]) return [[key, data]]
-  const [fragment, contractName, args] = parsed
-  const res = [
-    [key, `${contractName.replace(/_\d\.\d.*$/, '')} ${fragment.format('full')}`],
-  ] as ReturnType<typeof recursiveParseError>
+  const [fragment, _, args] = parsed
+  const desc = fragment.format('full')
+  key = desc.split(' ')[0]
+  const res = [[key, desc.substring(key.length + 1)]] as ReturnType<typeof recursiveParseError>
   if (fragment.name === 'ReceiverError' && args.err === '0x') {
     res.push([`${key}.err`, '0x [possibly out-of-gas or abi.decode error]'])
     return res
   }
-  try {
-    const argsObj = args.toObject()
-    if (!(Object.keys(argsObj)[0] ?? '').match(/^[a-z]/)) throw new Error('Not an object')
-    for (const [k, v] of Object.entries(argsObj)) {
-      if (isHexString(v)) {
-        res.push(...recursiveParseError(`${key}.${k}`, v))
-      } else {
-        res.push([`${key}.${k}`, v])
-      }
-    }
-  } catch (_) {
-    const argsArr = args.toArray()
-    for (let i = 0; i < argsArr.length; i++) {
-      const v: unknown = argsArr[i]
-      if (isHexString(v)) {
-        res.push(...recursiveParseError(`${key}[${i}]`, v))
-      } else {
-        res.push([`${key}[${i}]`, v])
-      }
-    }
-  }
+  res.push(...recursiveParseError('', args))
   return res
 }
 
-export function parseError(err: unknown): Record<string, unknown> | undefined {
-  if (!err) return
-  if (isHexString(err)) return Object.fromEntries(recursiveParseError('revert', err))
-  if (typeof err !== 'object') return
+export function parseData(data: unknown): Record<string, unknown> | undefined {
+  if (!data) return
+  if (isHexString(data)) {
+    const parsed = recursiveParseError('', data)
+    if (parsed.length === 1 && parsed[0][1] === data) return
+    return Object.fromEntries(parsed)
+  }
+  if (typeof data !== 'object') return
   // ethers tx/simulation/call errors
-  const err_ = err as {
+  const err_ = data as {
     shortMessage?: string
     message?: string
     transaction?: { to: string; data: string }
@@ -176,19 +190,17 @@ export function parseError(err: unknown): Record<string, unknown> | undefined {
   const transaction = err_.transaction
   if (!shortMessage || !transaction?.data) return
 
-  const invocation_ = (err as { invocation: { method: string; args: Result } | null }).invocation
   let method, invocation
+  const invocation_ = (data as { invocation: { method: string; args: Result } | null }).invocation
   if (invocation_) {
-    const { method: method_, args, ...rest } = invocation_
-    method = method_
-    invocation = { ...rest, args }
+    ;({ method, ...invocation } = invocation_)
   } else {
     method = dataSlice(transaction.data, 0, 4)
     const func = parseWithFragment(method)?.[0]
     if (func) method = func.name
   }
   let reason
-  const errorData = getErrorData(err)
+  const errorData = getErrorData(data)
   if (errorData) reason = Object.fromEntries(recursiveParseError('revert', errorData))
   return {
     method,

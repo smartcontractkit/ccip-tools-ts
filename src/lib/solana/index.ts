@@ -1243,18 +1243,23 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     await Promise.allSettled(pendingPromises)
   }
 
-  static parseError(error: unknown) {
-    if (!error) return
-    if (Array.isArray(error)) {
-      if (error.every((e) => typeof e === 'string')) return getErrorFromLogs(error)
-      else if (error.every((e) => typeof e === 'object' && 'data' in e && 'address' in e))
-        return getErrorFromLogs(error as Log_[])
-    } else if (typeof error === 'object') {
-      if ('transactionLogs' in error && 'transactionMessage' in error) {
-        const parsed = getErrorFromLogs(error.transactionLogs as Log_[] | string[])
-        if (parsed) return { message: error.transactionMessage, ...parsed }
+  static parse(data: unknown) {
+    if (!data) return
+    if (Array.isArray(data)) {
+      if (data.every((e) => typeof e === 'string')) return getErrorFromLogs(data)
+      else if (data.every((e) => typeof e === 'object' && 'data' in e && 'address' in e))
+        return getErrorFromLogs(data as Log_[])
+    } else if (typeof data === 'object') {
+      if ('transactionLogs' in data && 'transactionMessage' in data) {
+        const parsed = getErrorFromLogs(data.transactionLogs as Log_[] | string[])
+        if (parsed) return { message: data.transactionMessage, ...parsed }
       }
-      if ('logs' in error) return getErrorFromLogs(error.logs as Log_[] | string[])
+      if ('logs' in data) return getErrorFromLogs(data.logs as Log_[] | string[])
+    } else if (typeof data === 'string') {
+      const parsedExtraArgs = this.decodeExtraArgs(getDataBytes(data))
+      if (parsedExtraArgs) return parsedExtraArgs
+      const parsedMessage = this.decodeMessage({ data })
+      if (parsedMessage) return parsedMessage
     }
   }
 

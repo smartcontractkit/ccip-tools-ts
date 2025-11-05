@@ -488,6 +488,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
 
     return this.getTransaction(hash)
   }
+
+  static parse(data: unknown) {
+    if (isBytesLike(data)) {
+      const parsedExtraArgs = this.decodeExtraArgs(data)
+      if (parsedExtraArgs) return parsedExtraArgs
+    }
+  }
 }
 
 supportedChains[ChainFamily.Aptos] = AptosChain

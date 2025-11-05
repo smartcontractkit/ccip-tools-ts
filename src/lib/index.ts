@@ -6,7 +6,6 @@ export {
   type ChainTransaction,
   ChainFamily,
 } from './chain.ts'
-export { getErrorData, parseWithFragment, recursiveParseError } from './evm/errors.ts'
 export { EVMChain } from './evm/index.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
 export {
