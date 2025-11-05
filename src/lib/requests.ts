@@ -231,20 +231,22 @@ export async function* fetchRequestsForSender(
   sender: string,
   filter: Pick<LogFilter, 'address' | 'startBlock' | 'startTime' | 'endBlock'>,
 ): AsyncGenerator<Omit<CCIPRequest, 'tx' | 'timestamp'>, void, unknown> {
-  for await (const log of source.getLogs({
+  const filterWithSender = {
     ...filter,
+    sender, // some chain families may use this to look for account lookup/narrow down the search
     topics: ['CCIPSendRequested', 'CCIPMessageSent'],
-  })) {
+  }
+  for await (const log of source.getLogs(filterWithSender)) {
     const message = (source.constructor as ChainStatic).decodeMessage(log)
     if (message?.sender !== sender) continue
     let destChainSelector, version
     if ('destChainSelector' in message.header) {
       destChainSelector = message.header.destChainSelector
       ;[, version] = await source.typeAndVersion(log.address)
-    } else if (source.network.family !== ChainFamily.EVM) {
-      throw new Error(`Unsupported network family: ${source.network.family}`)
-    } else {
+    } else if (source.network.family === ChainFamily.EVM) {
       ;({ destChainSelector, version } = await (source as EVMChain).getLaneForOnRamp(log.address))
+    } else {
+      throw new Error(`Unsupported network family: ${source.network.family}`)
     }
     yield {
       lane: {

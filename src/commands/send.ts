@@ -114,7 +114,8 @@ export const builder = (yargs: Argv) =>
       },
       'approve-max': {
         type: 'boolean',
-        describe: 'Approve the maximum amount of tokens to transfer',
+        describe:
+          "Approve the maximum amount of tokens to transfer; default=false approves only what's needed",
       },
     })
     .check(
@@ -191,7 +192,7 @@ async function sendMessage(
   if (!receiver) {
     if (sourceNetwork.family !== destNetwork.family)
       throw new Error('--receiver is required when sending to a different chain family')
-    receiver = await source.getWalletAddress(argv)
+    receiver = await source.getWalletAddress(argv) // send to self if same family
   }
 
   if (argv.estimateGasLimit != null) {

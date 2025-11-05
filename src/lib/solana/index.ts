@@ -391,10 +391,14 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @returns AsyncIterableIterator of parsed Log_ objects
    */
   async *getLogs(
-    opts: LogFilter & { programs?: string[] | true; commit?: CommitReport },
+    opts: LogFilter & { sender?: string; programs?: string[] | true; commit?: CommitReport },
   ): AsyncGenerator<Log_ & { tx: SolanaTransaction }> {
-    let programs
-    if (!opts.address) {
+    let programs: true | string[]
+    if (opts.sender && !opts.address) {
+      // specialization for fetching txs/requests for a given account of interest without a programID
+      opts.address = opts.sender
+      programs = true
+    } else if (!opts.address) {
       throw new Error('Program address is required for Solana log filtering')
     } else if (!opts.programs) {
       programs = [opts.address]
@@ -1001,7 +1005,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       new PublicKey(router_),
       new AnchorProvider(this.connection, wallet, { commitment: this.commitment }),
     )
-    const { hash } = await ccipSend(router, destChainSelector, message, undefined, opts)
+    const { hash } = await ccipSend(router, destChainSelector, message, opts)
     return this.getTransaction(hash)
   }
 

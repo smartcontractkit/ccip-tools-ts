@@ -11,6 +11,7 @@ import {
   type AccountMeta,
   type AddressLookupTableAccount,
   type Connection,
+  type TransactionInstruction,
   ComputeBudgetProgram,
   PublicKey,
   TransactionMessage,
@@ -247,11 +248,55 @@ async function deriveAccountsCcipSend({
   }
 }
 
+async function simulateAndSendTxs(
+  connection: Connection,
+  feePayer: AnchorProvider['wallet'],
+  instructions: TransactionInstruction[],
+  addressLookupTableAccounts?: AddressLookupTableAccount[],
+) {
+  let computeUnitLimit
+  const simulated =
+    (
+      await simulateTransaction({
+        connection,
+        payerKey: feePayer.publicKey,
+        instructions,
+        addressLookupTableAccounts,
+      })
+    ).unitsConsumed || 0
+  if (simulated > 200000) computeUnitLimit = Math.ceil(simulated * 1.1)
+
+  const txMsg = new TransactionMessage({
+    payerKey: feePayer.publicKey,
+    recentBlockhash: (await connection.getLatestBlockhash('confirmed')).blockhash,
+    instructions: [
+      ...(computeUnitLimit
+        ? [ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit })]
+        : []),
+      ...instructions,
+    ],
+  })
+  const messageV0 = txMsg.compileToV0Message(addressLookupTableAccounts)
+  const tx = new VersionedTransaction(messageV0)
+
+  const signed = await feePayer.signTransaction(tx)
+  let hash
+  for (let attempt = 0; ; attempt++) {
+    try {
+      hash = await connection.sendTransaction(signed)
+      await connection.confirmTransaction(hash, 'confirmed')
+      return hash
+    } catch (error) {
+      if (attempt >= 3) throw error
+      console.error(`sendTransaction failed attempt=${attempt + 1}/3:`, error)
+    }
+  }
+}
+
 export async function ccipSend(
   router: Program<typeof CCIP_ROUTER_IDL>,
   destChainSelector: bigint,
   message: AnyMessage & { fee: bigint },
-  computeUnitLimit?: number,
   opts?: { approveMax?: boolean },
 ) {
   const connection = router.provider.connection
@@ -268,16 +313,17 @@ export async function ccipSend(
     amountsToApprove[message.feeToken] = (amountsToApprove[message.feeToken] ?? 0n) + message.fee
   }
 
-  await Promise.all(
-    Object.entries(amountsToApprove).map(([token, amount]) =>
-      approveRouterSpender(
-        router.provider as AnchorProvider,
-        new PublicKey(token),
-        router.programId,
-        opts?.approveMax ? undefined : amount,
-      ),
-    ),
-  )
+  const approveIxs = []
+  for (const [token, amount] of Object.entries(amountsToApprove)) {
+    const approveIx = await approveRouterSpender(
+      connection,
+      wallet.publicKey,
+      new PublicKey(token),
+      router.programId,
+      opts?.approveMax ? undefined : amount,
+    )
+    if (approveIx) approveIxs.push(approveIx)
+  }
 
   const svmMessage = anyToSvmMessage(message)
   const { addressLookupTableAccounts, accounts, tokenIndexes } = await deriveAccountsCcipSend({
@@ -287,7 +333,7 @@ export async function ccipSend(
     message: svmMessage,
   })
 
-  const ix = await router.methods
+  const sendIx = await router.methods
     .ccipSend(new BN(destChainSelector), svmMessage, tokenIndexes)
     .accountsStrict({
       config: accounts[0].pubkey,
@@ -312,71 +358,48 @@ export async function ccipSend(
     .remainingAccounts(accounts.slice(18))
     .instruction()
 
-  const { blockhash: recentBlockhash } =
-    await router.provider.connection.getLatestBlockhash('confirmed')
-
-  if (!computeUnitLimit) {
-    const simulated =
-      (
-        await simulateTransaction({
-          connection,
-          payerKey: wallet.publicKey,
-          instructions: [ix],
-          addressLookupTableAccounts,
-        })
-      ).unitsConsumed || 0
-    console.debug('ccipSend simulation:', simulated, 'CUs')
-    if (simulated > 200000) computeUnitLimit = Math.ceil(simulated * 1.1)
-  }
-
-  const txMsg = new TransactionMessage({
-    payerKey: wallet.publicKey,
-    recentBlockhash,
-    instructions: [
-      ...(computeUnitLimit
-        ? [ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit })]
-        : []),
-      ix,
-    ],
-  })
-  const messageV0 = txMsg.compileToV0Message(addressLookupTableAccounts)
-  const tx = new VersionedTransaction(messageV0)
-
-  const signed = await wallet.signTransaction(tx)
   let hash
-  for (let attempt = 0; ; attempt++) {
-    try {
-      hash = await connection.sendTransaction(signed)
-      await connection.confirmTransaction(hash, 'confirmed')
-      break
-    } catch (error) {
-      if (attempt >= 3) throw error
-      console.error(`sendTransaction failed attempt=${attempt + 1}/3:`, error)
-    }
+  try {
+    // first try to serialize and send a single tx containing approve and send ixs
+    hash = await simulateAndSendTxs(
+      connection,
+      wallet,
+      [...approveIxs, sendIx],
+      addressLookupTableAccounts,
+    )
+  } catch (err) {
+    if (
+      !approveIxs.length ||
+      !(err instanceof Error) ||
+      !['encoding overruns Uint8Array', 'too large'].some((e) => err.message.includes(e))
+    )
+      throw err
+    // if serialization fails, send approve txs separately
+    for (const approveIx of approveIxs) await simulateAndSendTxs(connection, wallet, [approveIx])
+    hash = await simulateAndSendTxs(connection, wallet, [sendIx], addressLookupTableAccounts)
   }
+
   return { hash }
 }
 
 async function approveRouterSpender(
-  provider: AnchorProvider,
+  connection: Connection,
+  owner: PublicKey,
   token: PublicKey,
   router: PublicKey,
   amount?: bigint,
-) {
-  const wallet = provider.wallet
-  const connection = provider.connection
-
+): Promise<TransactionInstruction | undefined> {
   // Get the current account info to check existing delegation (or create if needed)
-  const mintInfo = await provider.connection.getAccountInfo(token)
+  const mintInfo = await connection.getAccountInfo(token)
   if (!mintInfo) throw new Error(`Mint ${token.toBase58()} not found`)
   const associatedTokenAccount = getAssociatedTokenAddressSync(
     token,
-    wallet.publicKey,
+    owner,
     undefined,
     mintInfo.owner,
   )
   const accountInfo = await getAccount(
-    provider.connection,
+    connection,
     associatedTokenAccount,
     undefined,
     mintInfo.owner,
@@ -391,38 +414,23 @@ async function approveRouterSpender(
     !accountInfo.delegate.equals(spender) ||
     (amount != null && accountInfo.delegatedAmount < amount)
 
-  if (needsApproval) {
-    // Approve the spender to use tokens from the user's account
-    const approveIx = createApproveInstruction(
-      accountInfo.address,
-      spender,
-      wallet.publicKey,
-      amount ?? BigInt(Number.MAX_SAFE_INTEGER),
-      undefined,
-      mintInfo.owner,
-    )
-
-    const approveTx = new VersionedTransaction(
-      new TransactionMessage({
-        payerKey: wallet.publicKey,
-        recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
-        instructions: [approveIx],
-      }).compileToV0Message(),
-    )
-    console.info(
-      'Approving',
-      amount ?? BigInt(Number.MAX_SAFE_INTEGER),
-      'of',
-      token.toBase58(),
-      'tokens for router',
-      router.toBase58(),
-    )
-    const signed = await wallet.signTransaction(approveTx)
-    const hash = await connection.sendTransaction(signed)
-
-    console.info('=>', hash)
-    await connection.confirmTransaction(hash, 'confirmed')
-
-    return { hash }
-  }
+  if (!needsApproval) return
+  // Approve the spender to use tokens from the user's account
+  const approveIx = createApproveInstruction(
+    accountInfo.address,
+    spender,
+    owner,
+    amount ?? BigInt(Number.MAX_SAFE_INTEGER),
+    undefined,
+    mintInfo.owner,
+  )
+  console.info(
+    'Approving',
+    amount ?? BigInt(Number.MAX_SAFE_INTEGER),
+    'of',
+    token.toBase58(),
+    'tokens for router',
+    router.toBase58(),
+  )
+  return approveIx
 }
