@@ -3,42 +3,49 @@ import { parseExtraArgs } from '../extra-args/index.ts'
 import { type CCIPMessage, type CCIPVersion, defaultAbiCoder } from '../types.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from './common.ts'
 
-export const getV16AptosLeafHasher =
+export const getV16SuiLeafHasher =
   (
     sourceChainSelector: bigint,
     destChainSelector: bigint,
     onRamp: string,
   ): LeafHasher<typeof CCIPVersion.V1_6> =>
   (message: CCIPMessage<typeof CCIPVersion.V1_6>): string =>
-    hashAptosMessage(message, hashAptosMetadata(sourceChainSelector, destChainSelector, onRamp))
+    hashSuiMessage(message, hashSuiMetadata(sourceChainSelector, destChainSelector, onRamp))
 
 const encode = (target: string, value: string | bigint | number) =>
   defaultAbiCoder.encode([target], [value])
 
-/**
- * Encodes dynamic bytes without the extra length prefix.
- * The default ABI encoding for type "bytes" is: 32-byte length prefix + the actual data padded.
- * This helper strips the 32-byte length prefix, mimicking the Move implementation.
- */
-const encodeRawBytes = (value: string): string => {
-  const encoded = encode('bytes', value)
-  // Remove "0x" and skip the first 64 hex characters (32 bytes of length)
-  return '0x' + encoded.slice(66)
+// Encode bytes without offset pointer (matches Move's eth_abi::encode_bytes behavior)
+const encodeBytes = (value: string): string => {
+  const hexValue = value.startsWith('0x') ? value.slice(2) : value
+  const byteLength = hexValue.length / 2
+
+  // Encode length as u256
+  const lengthHex = BigInt(byteLength).toString(16).padStart(64, '0')
+
+  // Padding to 32-byte alignment
+  const paddingNeeded = (32 - (byteLength % 32)) % 32
+  const paddingHex = '0'.repeat(paddingNeeded * 2)
+
+  return '0x' + lengthHex + hexValue + paddingHex
 }
 
-export const hashAptosMessage = (
+export const hashSuiMessage = (
   message: CCIPMessage<typeof CCIPVersion.V1_6>,
   metadataHash: string,
 ): string => {
   const parsedArgs = parseExtraArgs(message.extraArgs)
-  if (!parsedArgs || (parsedArgs._tag !== 'EVMExtraArgsV1' && parsedArgs._tag !== 'EVMExtraArgsV2'))
-    throw new Error('Invalid extraArgs, not EVMExtraArgsV1|2')
+
+  if (!parsedArgs || parsedArgs._tag !== 'SUIExtraArgsV1') {
+    throw new Error('Invalid extraArgs for Sui message, must be SUIExtraArgsV1')
+  }
 
   const innerHash = concat([
     encode('bytes32', message.header.messageId),
     zeroPadValue(message.receiver, 32),
     encode('uint64', message.header.sequenceNumber),
-    encode('uint256', parsedArgs.gasLimit!), // TODO: fix aptos->solana, computeUnits
+    encode('uint256', parsedArgs.gasLimit),
+    zeroPadValue(parsedArgs.tokenReceiver, 32),
     encode('uint64', message.header.nonce),
   ])
 
@@ -46,10 +53,10 @@ export const hashAptosMessage = (
     encode('uint256', message.tokenAmounts.length),
     ...message.tokenAmounts.map((token) =>
       concat([
-        encodeRawBytes(token.sourcePoolAddress),
+        encodeBytes(token.sourcePoolAddress),
         zeroPadValue(token.destTokenAddress, 32),
         encode('uint32', token.destGasAmount),
-        encodeRawBytes(token.extraData),
+        encodeBytes(token.extraData),
         encode('uint256', token.amount),
       ]),
     ),
@@ -67,12 +74,12 @@ export const hashAptosMessage = (
   return keccak256(outerHash)
 }
 
-export const hashAptosMetadata = (
+export const hashSuiMetadata = (
   sourceChainSelector: bigint,
   destChainSelector: bigint,
   onRamp: string,
 ): string => {
-  const versionHash = id('Any2AptosMessageHashV1')
+  const versionHash = id('Any2SuiMessageHashV1')
   const encodedSource = encode('uint64', sourceChainSelector)
   const encodedDest = encode('uint64', destChainSelector)
   const onrampHash = keccak256(onRamp)

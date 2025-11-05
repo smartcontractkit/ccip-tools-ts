@@ -18,7 +18,7 @@ import OffRamp_1_6_ABI from '../abi/OffRamp_1_6.ts'
 import EVM2EVMOnRamp_1_2_ABI from '../abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from '../abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from '../abi/OnRamp_1_6.ts'
-import type { SourceTokenData, parseExtraArgs } from './extra-args.ts'
+import type { SourceTokenData, parseExtraArgs } from './extra-args/index.ts'
 import type {
   CCIP_SOLANA_VERSION_MAP,
   SolanaCCIPIdl,
@@ -85,6 +85,7 @@ export const ChainFamily = {
   EVM: 'evm',
   Solana: 'solana',
   Aptos: 'aptos',
+  Sui: 'sui',
   Test: 'test',
 } as const
 export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
@@ -97,6 +98,7 @@ export type NetworkInfo = {
   | { family: typeof ChainFamily.EVM; chainId: number }
   | { family: typeof ChainFamily.Solana; chainId: string }
   | { family: typeof ChainFamily.Aptos; chainId: `aptos:${number}` }
+  | { family: typeof ChainFamily.Sui; chainId: string }
 )
 
 export interface Lane<V extends CCIPVersion = CCIPVersion> {

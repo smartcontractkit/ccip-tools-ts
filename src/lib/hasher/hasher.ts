@@ -6,6 +6,7 @@ import { getV16AptosLeafHasher } from './aptos.ts'
 import type { LeafHasher } from './common.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './evm.ts'
 import { getV16SolanaLeafHasher } from './solana.ts'
+import { getV16SuiLeafHasher } from './sui.ts'
 
 // Factory function that returns the right encoder based on the version of the lane
 export function getLeafHasher<V extends CCIPVersion = CCIPVersion>({
@@ -33,6 +34,12 @@ export function getLeafHasher<V extends CCIPVersion = CCIPVersion>({
             destChainSelector,
             onRamp,
           ) as LeafHasher<V>
+        case ChainFamily.Sui:
+          return getV16SuiLeafHasher(
+            sourceChainSelector,
+            destChainSelector,
+            onRamp,
+          ) as LeafHasher<V>
         case ChainFamily.EVM:
           return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher<V>
         default:
@@ -52,6 +59,7 @@ export function getDestExecDataParser(sourceChainSelector: bigint) {
     case ChainFamily.Solana: // TODO: Solana might have a different way to parse destExecData
       return (destExecData: string) => getUint(hexlify(getDataBytes(destExecData)))
     case ChainFamily.Aptos:
+    case ChainFamily.Sui:
       return (destExecData: string) => {
         const bytes = Hex.fromHexString(destExecData).toUint8Array()
         const deserializer = new Deserializer(bytes)

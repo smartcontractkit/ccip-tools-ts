@@ -4,7 +4,7 @@ import { type Addressable, type Log, EventFragment, Interface, keccak256 } from 
 
 import TokenPoolABI_1_5 from '../abi/BurnMintTokenPool_1_5_1.ts'
 import TokenPoolABI_1_6 from '../abi/BurnMintTokenPool_1_6_1.ts'
-import { type SourceTokenData, parseSourceTokenData } from './extra-args.ts'
+import { type SourceTokenData, parseSourceTokenData } from './extra-args/index.ts'
 import { chainNameFromSelector } from './index.ts'
 import {
   getClusterUrlByChainSelectorName,

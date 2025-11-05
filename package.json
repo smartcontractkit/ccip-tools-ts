@@ -48,6 +48,7 @@
     "@aptos-labs/ts-sdk": "5.0.0",
     "@coral-xyz/anchor": "0.29.0",
     "@inquirer/prompts": "7.8.4",
+    "@mysten/sui": "^1.44.0",
     "@solana/spl-token": "0.4.14",
     "@solana/web3.js": "^1.98.4",
     "@xlabs-xyz/ledger-signer-ethers-v6": "^0.0.1",

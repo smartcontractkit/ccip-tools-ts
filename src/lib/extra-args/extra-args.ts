@@ -11,8 +11,9 @@ import {
   toBigInt,
 } from 'ethers'
 
-import { defaultAbiCoder } from './types.ts'
-import { toLeHex } from './utils.ts'
+import { defaultAbiCoder } from '../types.ts'
+import { toLeHex } from '../utils.ts'
+import { decodeSuiExtraArgs, SUIExtraArgsV1Tag, type SUIExtraArgsV1 } from './sui.ts'
 
 const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'
 const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'
@@ -97,6 +98,7 @@ export function parseExtraArgs(
   | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
   | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
   | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
+  | (SUIExtraArgsV1 & { _tag: 'SUIExtraArgsV1' })
   | undefined {
   try {
     if (data === '0x') return { _tag: 'EVMExtraArgsV1' }
@@ -133,6 +135,10 @@ export function parseExtraArgs(
       parsed.tokenReceiver = encodeBase58(parsed.tokenReceiver)
       parsed.accounts = parsed.accounts.map((a: string) => encodeBase58(a))
       return { ...parsed, _tag: 'SVMExtraArgsV1' }
+    }
+    if (data.startsWith(SUIExtraArgsV1Tag)) {
+      const suiArgs = decodeSuiExtraArgs(data)
+      return { ...suiArgs, _tag: 'SUIExtraArgsV1' }
     }
     return undefined
   } catch (_error) {

@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import type { Connection } from '@solana/web3.js'
-import type { SourceTokenData } from '../extra-args.ts'
+import type { SourceTokenData } from '../extra-args/index.ts'
 import type { EVM2AnyMessageSent, ExecutionReport } from '../types.ts'
 
 export type MessageWithAccounts = ExecutionReport['message'] & {
