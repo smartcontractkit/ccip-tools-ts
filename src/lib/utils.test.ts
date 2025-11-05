@@ -1,6 +1,7 @@
-import type { Network, Provider } from 'ethers'
+import type { Provider } from 'ethers'
 
-import { CCIPContractType, CCIPVersion, ChainFamily } from './types.ts'
+import { ChainFamily } from './chain.ts'
+import { CCIPContractType, CCIPVersion } from './types.ts'
 import {
   bigIntReplacer,
   bigIntReviver,
@@ -12,12 +13,9 @@ import {
   chainSelectorFromId,
   convertKeysToCamelCase,
   decodeAddress,
-  getProviderNetwork,
   getSomeBlockNumberBefore,
-  lazyCached,
   networkInfo,
   toCamelCase,
-  validateContractType,
 } from './utils.ts'
 
 let provider: jest.Mocked<Provider>
@@ -70,46 +68,6 @@ describe('getSomeBlockNumberBefore', () => {
     expect(blockNumber).toBeLessThanOrEqual(800)
     expect(blockNumber).toBeGreaterThanOrEqual(790)
     expect(provider.getBlock(blockNumber).timestamp).toBeLessThanOrEqual(targetTs)
-  })
-})
-
-describe('lazyCached', () => {
-  it('should cache and return the same value for a given key', () => {
-    let value: Date | undefined
-    const cache = new Map<string, unknown>()
-    const factory = jest.fn(() => {
-      const obj = new Date()
-      if (!value) value = obj
-      return obj
-    })
-
-    lazyCached('key', factory, cache)
-    expect(value).toBeDefined()
-    const result = lazyCached('key', factory, cache)
-    expect(result).toBe(value)
-    expect(factory).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe('validateContractType', () => {
-  it('should return the type and version of the contract', async () => {
-    const [version] = await validateContractType(provider, '0x123', CCIPContractType.OnRamp)
-    expect(version).toBe(CCIPVersion.V1_2)
-  })
-
-  it('should return base version of -dev contracts', async () => {
-    mockedContract.typeAndVersion.mockResolvedValueOnce(
-      `${CCIPContractType.OffRamp} ${CCIPVersion.V1_5}-dev`,
-    )
-    const [version] = await validateContractType(provider, '0x124', CCIPContractType.OffRamp)
-    expect(version).toBe(CCIPVersion.V1_5)
-  })
-
-  it('should throw on contracts not implementing interface', async () => {
-    mockedContract.typeAndVersion.mockRejectedValueOnce({ code: 'BAD_DATA' })
-    await expect(validateContractType(provider, '0x125', CCIPContractType.OnRamp)).rejects.toThrow(
-      '0x125 not a CCIP contract on "ethereum-mainnet"',
-    )
   })
 })
 
@@ -575,21 +533,6 @@ describe('networkInfo', () => {
     it('should correctly identify devnet/localnet as testnet', () => {
       expect(networkInfo('solana-devnet').isTestnet).toBe(true)
       expect(networkInfo('aptos-localnet').isTestnet).toBe(true)
-    })
-  })
-})
-
-describe('getProviderNetwork', () => {
-  it('should return the network info for the provider', async () => {
-    provider.getNetwork.mockResolvedValue({ chainId: 1n } as Network)
-
-    const info = await getProviderNetwork(provider)
-    expect(info).toEqual({
-      chainId: 1,
-      chainSelector: 5009297550715157269n,
-      name: 'ethereum-mainnet',
-      family: ChainFamily.EVM,
-      isTestnet: false,
     })
   })
 })

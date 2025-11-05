@@ -33,27 +33,21 @@ import {
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
+import { Format } from './types.ts'
+import { formatArray, formatDuration, yieldResolved } from './utils.ts'
 import TokenABI from '../abi/BurnMintERC677Token.ts'
 import TokenPool_1_5_ABI from '../abi/LockReleaseTokenPool_1_5.ts'
 import TokenPool_1_5_1_ABI from '../abi/LockReleaseTokenPool_1_5_1.ts'
 import RouterABI from '../abi/Router.ts'
 import TokenAdminRegistryABI from '../abi/TokenAdminRegistry_1_5.ts'
-
 import {
   bigIntReplacer,
   chainIdFromName,
   chainNameFromSelector,
   chainSelectorFromId,
   decodeAddress,
-  getContractProperties,
-  getOnRampLane,
-  getProviderNetwork,
-  getTypeAndVersion,
   networkInfo,
 } from '../lib/index.ts'
-import type { Providers } from '../providers.ts'
-import { Format } from './types.ts'
-import { formatArray, formatDuration, yieldResolved } from './utils.ts'
 
 /**
  * Maximum tokens per registry request.

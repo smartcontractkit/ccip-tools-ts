@@ -14,10 +14,10 @@
     "lint": "prettier --check ./src && eslint ./src",
     "lint:fix": "prettier --write ./src && eslint --fix ./src",
     "typecheck": "tsc --noEmit",
-    "generate": "node ./generate.cjs ./src/abi/* ./src/lib/selectors.ts ./src/index.ts",
+    "generate": "node ./generate.cjs `grep -lrn '^\\s*//\\s*generate\\b' ./src/*`",
     "build": "npm run clean && npm run generate && tsc -p ./tsconfig.build.json && npm run make-script",
     "make-script": "sed -e '1s|#!/.*|#!/usr/bin/env node|' ./dist/index.js > ./dist/ccip-tools-ts && chmod +x ./dist/ccip-tools-ts && rm -v ./dist/index.js",
-    "start": "tsx src",
+    "start": "tsx ./src/index.ts",
     "clean": "rm -rfv ./dist ./coverage",
     "prepare": "npm run build"
   },
@@ -25,47 +25,47 @@
     "./dist/**"
   ],
   "devDependencies": {
-    "@eslint/js": "9.35.0",
+    "@eslint/js": "9.38.0",
     "@types/bn.js": "^5.2.0",
     "@types/jest": "30.0.0",
-    "@types/node": "24.3.1",
-    "@types/yargs": "17.0.33",
-    "eslint": "9.35.0",
+    "@types/node": "24.9.2",
+    "@types/yargs": "17.0.34",
+    "eslint": "9.38.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-import-resolver-typescript": "4.4.4",
     "eslint-plugin-import": "2.32.0",
     "eslint-plugin-prettier": "5.5.4",
     "ethers-abitype": "1.0.3",
     "glob": "11.0.3",
-    "jest": "30.1.3",
+    "jest": "30.2.0",
     "prettier": "3.6.2",
-    "ts-jest": "29.4.1",
-    "tsx": "4.20.5",
-    "typescript": "5.9.2",
-    "typescript-eslint": "8.43.0"
+    "ts-jest": "29.4.5",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.46.2"
   },
   "dependencies": {
-    "@aptos-labs/ts-sdk": "5.0.0",
-    "@coral-xyz/anchor": "0.29.0",
-    "@inquirer/prompts": "7.8.4",
+    "@aptos-labs/ts-sdk": "^5.1.1",
+    "@coral-xyz/anchor": "^0.29.0",
+    "@ethers-ext/signer-ledger": "^6.0.0-beta.1",
+    "@inquirer/prompts": "7.9.0",
+    "@ledgerhq/hw-app-aptos": "^6.34.8",
+    "@ledgerhq/hw-app-solana": "^7.5.5",
+    "@ledgerhq/hw-transport-node-hid": "^6.29.13",
+    "@mysten/bcs": "^1.9.2",
     "@solana/spl-token": "0.4.14",
     "@solana/web3.js": "^1.98.4",
-    "@xlabs-xyz/ledger-signer-ethers-v6": "^0.0.1",
-    "abitype": "1.1.0",
+    "abitype": "1.1.1",
     "bn.js": "^5.2.2",
     "borsh": "^2.0.0",
     "bs58": "^6.0.0",
     "buffer-layout": "^1.2.2",
     "ethers": "6.15.0",
+    "moize": "^6.1.6",
     "ts-node": "^10.9.2",
     "tslib": "2.8.1",
     "yaml": "2.8.1",
     "yargs": "18.0.0"
-  },
-  "overrides": {
-    "@xlabs-xyz/ledger-signer-ethers-v6": {
-      "ethers": "$ethers"
-    }
   },
   "prettier": {
     "trailingComma": "all",
@@ -82,7 +82,7 @@
     "moduleNameMapper": {
       "^@solana/web3\\.js$": "@solana/web3.js",
       "^bn\\.js$": "bn.js",
-      "(.+)\\.[jt]s$": "$1"
+      "(.+)\\.ts$": "$1"
     },
     "transform": {
       "^.+\\.ts$": [

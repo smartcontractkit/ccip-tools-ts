@@ -1,8 +1,9 @@
 import {
-  type JsonRpcApiProvider,
+  type BytesLike,
   Contract,
   FunctionFragment,
   concat,
+  formatUnits,
   getNumber,
   hexlify,
   randomBytes,
@@ -12,18 +13,13 @@ import {
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
+import type { Chain } from './chain.ts'
 import TokenABI from '../abi/BurnMintERC677Token.ts'
 import RouterABI from '../abi/Router.ts'
-import { discoverOffRamp, validateOffRamp } from './execution.ts'
-import {
-  type CCIPContractEVM,
-  type CCIPContractType,
-  type CCIPMessage,
-  type Lane,
-  CCIPVersion,
-  defaultAbiCoder,
-} from './types.ts'
-import { networkInfo } from './utils.ts'
+import { defaultAbiCoder } from './evm/const.ts'
+import type { EVMChain } from './evm/index.ts'
+import { discoverOffRamp } from './execution.ts'
+import type { Lane } from './types.ts'
 
 const BALANCES_SLOT = 0
 const ccipReceive = FunctionFragment.from({
@@ -45,61 +41,52 @@ type Any2EVMMessage = Parameters<TypedContract<typeof RouterABI>['routeMessage']
  * @param request - CCIP request info
  * @param request.lane - Lane info
  * @param request.message - Message info
- * @param request.message.sender - sender address
- * @param request.message.receiver - receiver address
- * @param request.message.data - encoded receiver data per dest network encoding
- * @param request.message.tokenAmounts - token and amounts
- * @param request.message.tokenAmounts.*.destTokenAddress - destination token address, encoded as per dest network
- * @param request.message.tokenAmounts.*.amount - token amount, bigint of smallest token units
- * @param hints - hints for the offRamp contract (optional, to skip offramp discovery)
  * @returns estimated gasLimit as bigint
  **/
 export async function estimateExecGasForRequest(
-  dest: JsonRpcApiProvider,
+  source: Chain,
+  dest: EVMChain,
   request: {
     lane: Lane
-    message: Pick<CCIPMessage, 'sender' | 'receiver' | 'data'> & {
-      tokenAmounts: readonly Pick<
-        CCIPMessage['tokenAmounts'][number],
-        'destTokenAddress' | 'amount'
-      >[]
+    message: {
+      sender: string
+      receiver: string
+      data: BytesLike
+      tokenAmounts: readonly {
+        sourcePoolAddress: string
+        destTokenAddress: string
+        amount: bigint
+      }[]
     }
   },
-  hints?: { offRamp?: string; page?: number },
 ) {
-  let offRamp
-  const lane = request.lane
-  if (hints?.offRamp) {
-    offRamp = await validateOffRamp(dest, hints.offRamp, lane)
-    if (!offRamp)
-      throw new Error(
-        `Invalid offRamp for "${networkInfo(lane.sourceChainSelector).name}" -> "${networkInfo(lane.destChainSelector).name}" (onRamp=${lane.onRamp}) lane`,
-      )
-  } else {
-    offRamp = await discoverOffRamp(dest, lane, hints)
-  }
-  let destRouter
-  if (lane.version < CCIPVersion.V1_6) {
-    ;({ router: destRouter } = await (
-      offRamp as CCIPContractEVM<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_5>
-    ).getDynamicConfig())
-  } else {
-    ;({ router: destRouter } = await (
-      offRamp as CCIPContractEVM<typeof CCIPContractType.OffRamp, typeof CCIPVersion.V1_6>
-    ).getSourceChainConfig(lane.sourceChainSelector))
-  }
+  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+  const destRouter = await dest.getRouterForOffRamp(offRamp, request.lane.sourceChainSelector)
 
-  const destTokenAmounts = []
-  for (const { destTokenAddress: token, amount } of request.message.tokenAmounts) {
-    if (!token) throw new Error('legacy <1.5 tokenPools not supported')
-    destTokenAmounts.push({ token, amount })
-  }
+  const destTokenAmounts = await Promise.all(
+    request.message.tokenAmounts.map(async (ta) => {
+      if (!('destTokenAddress' in ta)) throw new Error('legacy <1.5 tokenPools not supported')
+      const [{ decimals: sourceDecimals }, { decimals: destDecimals }] = await Promise.all([
+        source
+          .getTokenForTokenPool(ta.sourcePoolAddress)
+          .then((token) => source.getTokenInfo(token)),
+        dest.getTokenInfo(ta.destTokenAddress),
+      ])
+      const destAmount =
+        (ta.amount * 10n ** BigInt(destDecimals - sourceDecimals + 36)) / 10n ** 36n
+      if (destAmount === 0n)
+        throw new Error(
+          `not enough decimals=${destDecimals} for token=${ta.destTokenAddress} on dest=${dest.network.name} to express ${formatUnits(ta.amount, sourceDecimals)}`,
+        )
+      return { token: ta.destTokenAddress, amount: destAmount }
+    }),
+  )
 
   const message: Any2EVMMessage = {
     messageId: hexlify(randomBytes(32)),
     sender: zeroPadValue(request.message.sender, 32),
-    data: request.message.data,
-    sourceChainSelector: lane.sourceChainSelector,
+    data: hexlify(request.message.data),
+    sourceChainSelector: request.lane.sourceChainSelector,
     destTokenAmounts,
   }
 
@@ -133,7 +120,7 @@ export async function estimateExecGasForRequest(
 
   return (
     getNumber(
-      (await dest.send('eth_estimateGas', [
+      (await dest.provider.send('eth_estimateGas', [
         {
           from: destRouter,
           to: request.message.receiver,

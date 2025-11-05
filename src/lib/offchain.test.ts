@@ -3,17 +3,11 @@ import { PublicKey } from '@solana/web3.js'
 import { deserialize } from 'borsh'
 import { Interface, getAddress, hexlify, id, keccak256, randomBytes } from 'ethers'
 
+import { getUsdcAttestation } from './offchain.ts'
+import type { CCIPRequest } from './types.ts'
 import TokenPoolABI from '../abi/BurnMintTokenPool_1_6_1.ts'
-import {
-  LBTC_EVENT,
-  encodeOffchainTokenData,
-  fetchOffchainTokenData,
-  getUsdcAttestation,
-  getUsdcAttestationV2,
-} from './offchain.ts'
-import type { CcipCctpMessageSentEvent } from './solana/types.ts'
-import { type CCIPRequest, defaultAbiCoder } from './types.ts'
-import { lazyCached } from './utils.ts'
+import { defaultAbiCoder } from './evm/const.ts'
+import { fetchEVMOffchainTokenData } from './evm/offchain.ts'
 
 const origFetch = global.fetch
 
@@ -26,10 +20,7 @@ beforeEach(() => {
   jest.clearAllMocks()
 })
 
-const TokenPoolInterface = lazyCached(
-  `Interface BurnMintTokenPool 1.6.1`,
-  () => new Interface(TokenPoolABI),
-)
+const TokenPoolInterface = new Interface(TokenPoolABI)
 const BURNED_EVENT = TokenPoolInterface.getEvent('LockedOrBurned')!
 
 describe('fetchOffchainTokenData', () => {
@@ -78,7 +69,7 @@ describe('fetchOffchainTokenData', () => {
       },
     }
 
-    const result = await fetchOffchainTokenData(mockRequest as unknown as CCIPRequest)
+    const result = await fetchEVMOffchainTokenData(mockRequest as unknown as CCIPRequest)
     expect(result).toHaveLength(1)
     expect(result[0]).toMatch(/^0x.*1337.*a77e57a71090/)
   })

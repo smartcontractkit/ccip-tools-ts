@@ -1,11 +1,6 @@
 import { ZeroAddress, hexlify, isHexString, toUtf8Bytes } from 'ethers'
 
-import {
-  chainIdFromName,
-  chainSelectorFromId,
-  estimateExecGasForRequest,
-  getOnRampLane,
-} from '../lib/index.ts'
+import { chainIdFromName, chainSelectorFromId, estimateExecGasForRequest } from '../lib/index.ts'
 import type { Providers } from '../providers.ts'
 import { parseTokenAmounts, sourceToDestTokenAmounts } from './utils.ts'
 
