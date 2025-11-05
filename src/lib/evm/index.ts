@@ -933,7 +933,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       default:
         throw new Error(`Unsupported version: ${version}`)
     }
-    const receipt = await this.provider.waitForTransaction(manualExecTx.hash, 1, 1e60)
+    const receipt = await this.provider.waitForTransaction(manualExecTx.hash, 1, 60e3)
     if (!receipt?.hash) throw new Error(`Could not confirm exec tx: ${manualExecTx.hash}`)
     if (!receipt.status) throw new Error(`Exec transaction reverted: ${manualExecTx.hash}`)
     return this.getTransaction(receipt)

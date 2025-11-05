@@ -44,7 +44,7 @@ export const builder = (yargs: Argv) =>
         describe: 'Log index of message to execute (if more than one in request tx)',
       },
       'gas-limit': {
-        alias: ['-L', '--compute-units'],
+        alias: ['L', 'compute-units'],
         type: 'number',
         describe: 'Override gas limit or compute units for receivers callback (0 keeps original)',
       },
