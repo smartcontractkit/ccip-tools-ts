@@ -1,5 +1,5 @@
 import { hexlify, toUtf8Bytes, zeroPadValue } from 'ethers'
-import { encodeExtraArgs } from '../extra-args/index.ts'
+import { encodeExtraArgs } from '../extra-args.ts'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
 import { hashAptosMessage, hashAptosMetadata } from './aptos.ts'
 

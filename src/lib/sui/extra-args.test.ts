@@ -1,5 +1,5 @@
 import { bcs } from '@mysten/sui/bcs'
-import { SUIExtraArgsV1Tag, decodeSuiExtraArgs } from './sui.ts'
+import { SUIExtraArgsV1Tag, decodeSuiExtraArgs } from './extra-args.ts'
 
 const toHexBytes = (hex: string): number[] => {
   return Array.from(Buffer.from(hex, 'hex'))

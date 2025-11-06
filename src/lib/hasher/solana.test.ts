@@ -1,6 +1,6 @@
 import util from 'node:util'
 import { encodeBase64, toBigInt } from 'ethers'
-import { encodeExtraArgs } from '../extra-args/index.ts'
+import { encodeExtraArgs } from '../extra-args.ts'
 import { decodeMessage } from '../requests.ts'
 import SELECTORS from '../selectors.ts'
 import { type CCIPMessage, CCIPVersion } from '../types.ts'

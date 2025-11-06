@@ -34,7 +34,7 @@ export {
   type EVMExtraArgsV2,
   encodeExtraArgs,
   parseExtraArgs,
-} from './extra-args/index.ts'
+} from './extra-args.ts'
 export {
   bigIntReplacer,
   bigIntReviver,

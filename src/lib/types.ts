@@ -18,7 +18,7 @@ import OffRamp_1_6_ABI from '../abi/OffRamp_1_6.ts'
 import EVM2EVMOnRamp_1_2_ABI from '../abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from '../abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from '../abi/OnRamp_1_6.ts'
-import type { SourceTokenData, parseExtraArgs } from './extra-args/index.ts'
+import type { SourceTokenData, parseExtraArgs } from './extra-args.ts'
 import type {
   CCIP_SOLANA_VERSION_MAP,
   SolanaCCIPIdl,

@@ -10,10 +10,9 @@ import {
   toBeHex,
   toBigInt,
 } from 'ethers'
-
-import { defaultAbiCoder } from '../types.ts'
-import { toLeHex } from '../utils.ts'
-import { decodeSuiExtraArgs, SUIExtraArgsV1Tag, type SUIExtraArgsV1 } from './sui.ts'
+import { type SUIExtraArgsV1, SUIExtraArgsV1Tag, decodeSuiExtraArgs } from './sui/extra-args.ts'
+import { defaultAbiCoder } from './types.ts'
+import { toLeHex } from './utils.ts'
 
 const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'
 const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'

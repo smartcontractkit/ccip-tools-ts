@@ -14,7 +14,7 @@ import {
 } from 'ethers'
 import yaml from 'yaml'
 
-import { parseExtraArgs, parseSourceTokenData } from './extra-args/index.ts'
+import { parseExtraArgs, parseSourceTokenData } from './extra-args.ts'
 import { getDestExecDataParser } from './hasher/hasher.ts'
 import { computeAnchorEventDiscriminant } from './solana/utils.ts'
 import {

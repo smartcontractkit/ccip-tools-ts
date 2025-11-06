@@ -1,6 +1,6 @@
 // For reference implementation, see https://github.com/smartcontractkit/ccip/blob/ccip-develop/core/services/ocr2/plugins/ccip/hasher/leaf_hasher.go
 import { concat, hexlify, id, keccak256, toBeHex, zeroPadValue } from 'ethers'
-import { parseExtraArgs } from '../extra-args/index.ts'
+import { parseExtraArgs } from '../extra-args.ts'
 import { type CCIPMessage, type CCIPVersion, defaultAbiCoder } from '../types.ts'
 import { getAddressBytes, getDataBytes } from '../utils.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from './common.ts'

@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals'
 import { bcs } from '@mysten/sui/bcs'
 import { zeroPadValue } from 'ethers'
-import { SUIExtraArgsV1Tag } from '../extra-args/sui.ts'
+import { SUIExtraArgsV1Tag } from '../sui/extra-args.ts'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
 import { getV16SuiLeafHasher, hashSuiMessage, hashSuiMetadata } from './sui.ts'
 

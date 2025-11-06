@@ -1,5 +1,5 @@
 import { concat, id, keccak256, zeroPadValue } from 'ethers'
-import { parseExtraArgs } from '../extra-args/index.ts'
+import { parseExtraArgs } from '../extra-args.ts'
 import { type CCIPMessage, type CCIPVersion, defaultAbiCoder } from '../types.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from './common.ts'
 

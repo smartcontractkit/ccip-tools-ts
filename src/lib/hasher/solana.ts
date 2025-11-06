@@ -11,7 +11,7 @@ import {
   toUtf8Bytes,
 } from 'ethers'
 
-import { parseExtraArgs } from '../extra-args/index.ts'
+import { parseExtraArgs } from '../extra-args.ts'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
 import { getAddressBytes, getDataBytes, toLeHex } from '../utils.ts'
 import type { LeafHasher } from './common.ts'
