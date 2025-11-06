@@ -407,6 +407,7 @@ const selectors: Selectors = {
   '595581': { selector: 7837562506228496256n, name: 'avalanche-testnet-nexon' },
   '686868': { selector: 5269261765892944301n, name: 'bitcoin-testnet-merlin' },
   '688688': { selector: 4012524741200567430n, name: 'pharos-testnet' },
+  '688689': { selector: 16098325658947243212n, name: 'pharos-atlantic-testnet' },
   '717160': {
     selector: 4418231248214522936n,
     name: 'ethereum-testnet-sepolia-polygon-validium-1',
