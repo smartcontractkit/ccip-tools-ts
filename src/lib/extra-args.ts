@@ -10,7 +10,7 @@ import {
   toBeHex,
   toBigInt,
 } from 'ethers'
-
+import { type SUIExtraArgsV1, SUIExtraArgsV1Tag, decodeSuiExtraArgs } from './sui/extra-args.ts'
 import { defaultAbiCoder } from './types.ts'
 import { toLeHex } from './utils.ts'
 
@@ -97,6 +97,7 @@ export function parseExtraArgs(
   | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
   | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
   | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
+  | (SUIExtraArgsV1 & { _tag: 'SUIExtraArgsV1' })
   | undefined {
   try {
     if (data === '0x') return { _tag: 'EVMExtraArgsV1' }
@@ -133,6 +134,10 @@ export function parseExtraArgs(
       parsed.tokenReceiver = encodeBase58(parsed.tokenReceiver)
       parsed.accounts = parsed.accounts.map((a: string) => encodeBase58(a))
       return { ...parsed, _tag: 'SVMExtraArgsV1' }
+    }
+    if (data.startsWith(SUIExtraArgsV1Tag)) {
+      const suiArgs = decodeSuiExtraArgs(data)
+      return { ...suiArgs, _tag: 'SUIExtraArgsV1' }
     }
     return undefined
   } catch (_error) {

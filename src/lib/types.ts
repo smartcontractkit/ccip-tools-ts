@@ -85,6 +85,7 @@ export const ChainFamily = {
   EVM: 'evm',
   Solana: 'solana',
   Aptos: 'aptos',
+  Sui: 'sui',
   Test: 'test',
 } as const
 export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
@@ -97,6 +98,7 @@ export type NetworkInfo = {
   | { family: typeof ChainFamily.EVM; chainId: number }
   | { family: typeof ChainFamily.Solana; chainId: string }
   | { family: typeof ChainFamily.Aptos; chainId: `aptos:${number}` }
+  | { family: typeof ChainFamily.Sui; chainId: string }
 )
 
 export interface Lane<V extends CCIPVersion = CCIPVersion> {
