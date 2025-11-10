@@ -240,7 +240,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     const modulesNames = (await this._getAccountModulesNames(tokenPool))
       .reverse()
       .filter((name) => name.endsWith('token_pool'))
-    let lastErr
+    let firstErr
     for (const name of modulesNames) {
       try {
         const res = await this.provider.view<[string]>({
@@ -250,10 +250,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         })
         return res[0]
       } catch (err) {
-        lastErr = err as Error
+        firstErr ??= err as Error
       }
     }
-    throw lastErr ?? new Error(`Could not view 'get_token' in ${tokenPool}`)
+    throw firstErr ?? new Error(`Could not view 'get_token' in ${tokenPool}`)
   }
 
   getTokenAdminRegistryForOnRamp(onRamp: string): Promise<string> {
@@ -278,7 +278,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     const modulesNames = (await this._getAccountModulesNames(tokenPool))
       .reverse()
       .filter((name) => name.endsWith('token_pool'))
-    let lastErr
+    let firstErr
     for (const name of modulesNames) {
       try {
         const res = await this.provider.view<[BytesLike]>({
@@ -289,10 +289,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         })
         return decodeAddress(res[0], networkInfo(remoteChainSelector).family)
       } catch (err) {
-        lastErr = err as Error
+        firstErr ??= err as Error
       }
     }
-    throw lastErr ?? new Error(`Could not view 'get_token' in ${tokenPool}`)
+    throw firstErr ?? new Error(`Could not view 'get_remote_token' in ${tokenPool}`)
   }
 
   static getWallet(_opts: { wallet?: unknown } = {}): Promise<AptosAsyncAccount> {
