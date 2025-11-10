@@ -94,7 +94,7 @@ export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
   lane: Lane<V>
   message: CCIPMessage<V>
   log: Log_
-  tx: { logs: readonly Log_[]; from?: string }
+  tx: { logs: readonly Log_[]; from?: string; error?: unknown }
   timestamp: number
 }
 

@@ -1,3 +1,5 @@
+import util from 'util'
+
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -99,6 +101,7 @@ async function showRequests(argv: Parameters<typeof handler>[0], destroy: Promis
       console.info(JSON.stringify({ ...request, offchainTokenData }, bigIntReplacer, 2))
       break
   }
+  if (request.tx.error) throw new Error(`Request tx reverted: ${util.inspect(request.tx.error)}`)
 
   const dest = await getChain(request.lane.destChainSelector)
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
