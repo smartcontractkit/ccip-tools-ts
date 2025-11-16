@@ -26,12 +26,11 @@ import yaml from 'yaml'
 import { ccipSend, getFee } from './send.ts'
 import { type ChainTransaction, type LogFilter, Chain, ChainFamily } from '../chain.ts'
 import {
-  type EVMExtraArgsV1,
   type EVMExtraArgsV2,
   type ExtraArgs,
   type SVMExtraArgsV1,
   EVMExtraArgsV2Tag,
-  SVMExtraArgsTag,
+  SVMExtraArgsV1Tag,
 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
@@ -339,10 +338,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return msg
   }
 
+  // decodes an Aptos-generated extraArgs, destinated *to* other chains (EVM, Solana, etc)
   static decodeExtraArgs(
     extraArgs: BytesLike,
   ):
-    | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
     | undefined {
@@ -358,7 +357,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
           gasLimit: BigInt(parsed.gasLimit),
         }
       }
-      case SVMExtraArgsTag: {
+      case SVMExtraArgsV1Tag: {
         const parsed = SVMExtraArgsV1Codec.parse(getBytes(dataSlice(data, 4)))
         // Aptos serialization of SVMExtraArgsV1: 13 bytes total: 4 tag + 8 LE computeUnits
         return {
@@ -375,12 +374,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     }
   }
 
+  // encodes extraArgs destinated *to other* chains (EVM, Solana, etc), using Aptos-specific encoding (i.e. *from* Aptos)
   static encodeExtraArgs(extraArgs: ExtraArgs): string {
     if ('gasLimit' in extraArgs && 'allowOutOfOrderExecution' in extraArgs)
       return concat([EVMExtraArgsV2Tag, EVMExtraArgsV2Codec.serialize(extraArgs).toBytes()])
     else if ('computeUnits' in extraArgs)
       return concat([
-        SVMExtraArgsTag,
+        SVMExtraArgsV1Tag,
         SVMExtraArgsV1Codec.serialize({
           ...extraArgs,
           computeUnits: Number(extraArgs.computeUnits),

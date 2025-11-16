@@ -56,10 +56,13 @@ import { type ChainTransaction, type LogFilter, Chain, ChainFamily } from '../ch
 import {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
+  type ExtraArgs,
   type SVMExtraArgsV1,
+  type SuiExtraArgsV1,
   EVMExtraArgsV1Tag,
   EVMExtraArgsV2Tag,
-  SVMExtraArgsTag,
+  SVMExtraArgsV1Tag,
+  SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import {
@@ -90,10 +93,13 @@ import { parseData } from './errors.ts'
 import { supportedChains } from '../supported-chains.ts'
 
 const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
+
 const EVMExtraArgsV1 = 'tuple(uint256 gasLimit)'
 const EVMExtraArgsV2 = 'tuple(uint256 gasLimit, bool allowOutOfOrderExecution)'
 const SVMExtraArgsV1 =
   'tuple(uint32 computeUnits, uint64 accountIsWritableBitmap, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] accounts)'
+const SuiExtraArgsV1 =
+  'tuple(uint256 gasLimit, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] receiverObjectIds)'
 
 function resultsToMessage(result: Result): Record<string, unknown> {
   if (result.message) result = result.message as Result
@@ -420,6 +426,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
+    | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
     | undefined {
     const data = getDataBytes(extraArgs),
       tag = dataSlice(data, 0, 4)
@@ -432,23 +439,32 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const args = defaultAbiCoder.decode([EVMExtraArgsV2], dataSlice(data, 4))
         return { ...((args[0] as Result).toObject() as EVMExtraArgsV2), _tag: 'EVMExtraArgsV2' }
       }
-      case SVMExtraArgsTag: {
+      case SVMExtraArgsV1Tag: {
         const args = defaultAbiCoder.decode([SVMExtraArgsV1], dataSlice(data, 4))
         const parsed = (args[0] as Result).toObject() as SVMExtraArgsV1
         parsed.tokenReceiver = encodeBase58(parsed.tokenReceiver)
         parsed.accounts = parsed.accounts.map((a: string) => encodeBase58(a))
         return { ...parsed, _tag: 'SVMExtraArgsV1' }
       }
+      case SuiExtraArgsV1Tag: {
+        const args = defaultAbiCoder.decode([SuiExtraArgsV1], dataSlice(data, 4))
+        const parsed = (args[0] as Result).toObject() as SuiExtraArgsV1
+        return {
+          ...parsed,
+          receiverObjectIds: Array.from<string>(parsed.receiverObjectIds),
+          _tag: 'SuiExtraArgsV1',
+        }
+      }
       default:
         return undefined
     }
   }
 
-  static encodeExtraArgs(args: EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1): string {
+  static encodeExtraArgs(args: ExtraArgs): string {
     if (!args) return '0x'
     if ('computeUnits' in args) {
       return concat([
-        SVMExtraArgsTag,
+        SVMExtraArgsV1Tag,
         defaultAbiCoder.encode(
           [SVMExtraArgsV1],
           [
@@ -456,6 +472,20 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
               ...args,
               tokenReceiver: getAddressBytes(args.tokenReceiver),
               accounts: args.accounts.map((a) => getAddressBytes(a)),
+            },
+          ],
+        ),
+      ])
+    } else if ('receiverObjectIds' in args) {
+      return concat([
+        SuiExtraArgsV1Tag,
+        defaultAbiCoder.encode(
+          [SuiExtraArgsV1],
+          [
+            {
+              ...args,
+              tokenReceiver: zeroPadValue(getAddressBytes(args.tokenReceiver), 32),
+              receiverObjectIds: args.receiverObjectIds.map((a) => getDataBytes(a)),
             },
           ],
         ),

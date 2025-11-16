@@ -4,7 +4,13 @@ import type { BytesLike } from 'ethers'
 
 import { fetchCommitReport } from './commits.ts'
 import { fetchExecutionReceipts } from './execution.ts'
-import type { EVMExtraArgsV1, EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1 } from './extra-args.ts'
+import type {
+  EVMExtraArgsV1,
+  EVMExtraArgsV2,
+  ExtraArgs,
+  SVMExtraArgsV1,
+  SuiExtraArgsV1,
+} from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
 import type {
   AnyMessage,
@@ -25,6 +31,7 @@ export const ChainFamily = {
   EVM: 'evm',
   Solana: 'solana',
   Aptos: 'aptos',
+  Sui: 'sui',
   Test: 'test',
 } as const
 export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
@@ -302,6 +309,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
     | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
+    | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
     | undefined
   encodeExtraArgs(extraArgs: ExtraArgs): string
   /**

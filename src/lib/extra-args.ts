@@ -5,16 +5,13 @@ import { supportedChains } from './supported-chains.ts'
 
 export const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'
 export const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'
-export const SVMExtraArgsTag = id('CCIP SVMExtraArgsV1').substring(0, 10) as '0x1f3b3aba'
-
-const EVMExtraArgsV1 = 'tuple(uint256 gasLimit)'
-const EVMExtraArgsV2 = 'tuple(uint256 gasLimit, bool allowOutOfOrderExecution)'
-const SVMExtraArgsV1 =
-  'tuple(uint32 computeUnits, uint64 accountIsWritableBitmap, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] accounts)'
+export const SVMExtraArgsV1Tag = id('CCIP SVMExtraArgsV1').substring(0, 10) as '0x1f3b3aba'
+export const SuiExtraArgsV1Tag = id('CCIP SuiExtraArgsV1').substring(0, 10) as '0x21ea4ca9'
 
 export type EVMExtraArgsV1 = {
   gasLimit: bigint
 }
+// aka GenericExtraArgsV2
 export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
   allowOutOfOrderExecution: boolean
 }
@@ -25,17 +22,19 @@ export type SVMExtraArgsV1 = {
   tokenReceiver: string
   accounts: string[]
 }
+export type SuiExtraArgsV1 = EVMExtraArgsV2 & {
+  tokenReceiver: string
+  receiverObjectIds: string[]
+}
 
-export type ExtraArgs = EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1
+export type ExtraArgs = EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1 | SuiExtraArgsV1
 
 /**
  * Encodes extra arguments for CCIP messages.
- * The args are *to* a dest network, but are encoded as a message *from* some source chain
+ * The args are *to* a dest network, but are encoded as a message *from* this source chain
+ * e.g. Solana uses Borsh to encode extraArgs in its produced requests, even those targetting EVM
  **/
-export function encodeExtraArgs(
-  args: EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1,
-  from: ChainFamily = ChainFamily.EVM,
-): string {
+export function encodeExtraArgs(args: ExtraArgs, from: ChainFamily = ChainFamily.EVM): string {
   const chain = supportedChains[from]
   if (!chain) throw new Error(`Unsupported chain family: ${from}`)
   return chain.encodeExtraArgs(args)
@@ -53,6 +52,7 @@ export function parseExtraArgs(
   | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
   | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
   | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
+  | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
   | undefined {
   if (!data || data === '') return
   let chains

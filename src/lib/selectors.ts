@@ -129,6 +129,7 @@ const selectors: Selectors = {
   },
   '945': { selector: 2177900824115119161n, name: 'bittensor-testnet' },
   '964': { selector: 2135107236357186872n, name: 'bittensor-mainnet' },
+  '988': { selector: 16978377838628290997n, name: 'stable-mainnet' },
   '998': { selector: 4286062357653186312n, name: 'hyperliquid-testnet' },
   '999': { selector: 2442541497099098535n, name: 'hyperliquid-mainnet' },
   '1001': { selector: 2624132734533621656n, name: 'kaia-testnet-kairos' },
@@ -192,6 +193,7 @@ const selectors: Selectors = {
     name: 'polkadot-testnet-centrifuge-altair',
   },
   '2129': { selector: 12168171414969487009n, name: 'memento-testnet' },
+  '2201': { selector: 11793402411494852765n, name: 'stable-testnet' },
   '2221': { selector: 2110537777356199208n, name: 'kava-testnet' },
   '2222': { selector: 7550000543357438061n, name: 'kava-mainnet' },
   '2358': {
@@ -225,6 +227,7 @@ const selectors: Selectors = {
     selector: 5298399861320400553n,
     name: 'ethereum-testnet-sepolia-lisk-1',
   },
+  '4326': { selector: 6093540873831549674n, name: 'megaeth-mainnet' },
   '4801': {
     selector: 5299555114858065850n,
     name: 'ethereum-testnet-sepolia-worldchain-1',
@@ -245,6 +248,7 @@ const selectors: Selectors = {
   },
   '5668': { selector: 8911150974185440581n, name: 'nexon-dev' },
   '6342': { selector: 2443239559770384419n, name: 'megaeth-testnet' },
+  '6343': { selector: 18241817625092392675n, name: 'megaeth-testnet-2' },
   '6398': { selector: 379340054879810246n, name: 'everclear-testnet-sepolia' },
   '6900': { selector: 17349189558768828726n, name: 'nibiru-mainnet' },
   '6930': { selector: 305104239123120457n, name: 'nibiru-testnet' },
@@ -368,6 +372,10 @@ const selectors: Selectors = {
     selector: 9873759436596923887n,
     name: 'ethereum-testnet-hoodi-taiko',
   },
+  '167013': {
+    selector: 15858691699034549072n,
+    name: 'ethereum-testnet-hoodi-taiko-1',
+  },
   '192940': { selector: 7189150270347329685n, name: 'mind-testnet' },
   '200810': {
     selector: 3789623672476206327n,
@@ -406,6 +414,7 @@ const selectors: Selectors = {
   '595581': { selector: 7837562506228496256n, name: 'avalanche-testnet-nexon' },
   '686868': { selector: 5269261765892944301n, name: 'bitcoin-testnet-merlin' },
   '688688': { selector: 4012524741200567430n, name: 'pharos-testnet' },
+  '688689': { selector: 16098325658947243212n, name: 'pharos-atlantic-testnet' },
   '717160': {
     selector: 4418231248214522936n,
     name: 'ethereum-testnet-sepolia-polygon-validium-1',

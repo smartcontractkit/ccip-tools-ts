@@ -12,12 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Check out repository
-      uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871  # v4.2.1
+      uses: actions/checkout@v5.0.0
 
     - name: Set up Node.js
-      uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6  # v4.0.4
+      uses: actions/setup-node@v6.0.0
       with:
-        node-version: 20
+        node-version: 24
 
     - name: Install dependencies and build
       run: npm ci
@@ -32,14 +32,14 @@ jobs:
 
     - name: Upload coverage report
       if: "always() && hashFiles('coverage/**') != ''"
-      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+      uses: actions/upload-artifact@v5.0.0
       with:
         name: coverage-report
         path: coverage
 
     - name: Post or update PR comment with coverage summary
       if: always()
-      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+      uses: actions/github-script@v8.0.0
       with:
         script: |
           const fs = require('fs');

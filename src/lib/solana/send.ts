@@ -429,7 +429,7 @@ async function approveRouterSpender(
     amount ?? BigInt(Number.MAX_SAFE_INTEGER),
     'of',
     token.toBase58(),
-    'tokens for router',
+    'tokens to router',
     router.toBase58(),
   )
   return approveIx

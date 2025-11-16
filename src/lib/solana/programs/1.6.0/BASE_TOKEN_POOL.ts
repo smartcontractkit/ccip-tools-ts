@@ -3,7 +3,7 @@
 //   .then((res) => res.text())
 //   .then((text) => text.trim())
 export type BaseTokenPool = {
-  version: '0.1.1'
+  version: '1.6.0'
   name: 'base_token_pool'
   instructions: []
   types: [
@@ -868,7 +868,7 @@ export type BaseTokenPool = {
 }
 
 export const IDL: BaseTokenPool = {
-  version: '0.1.1',
+  version: '1.6.0',
   name: 'base_token_pool',
   instructions: [],
   types: [

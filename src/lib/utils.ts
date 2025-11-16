@@ -246,6 +246,7 @@ function resolveNumericString(input: string): {
 function getChainFamily(name: string): ChainFamily {
   if (name.startsWith('solana-')) return ChainFamily.Solana
   if (name.startsWith('aptos-')) return ChainFamily.Aptos
+  if (name.startsWith('sui-')) return ChainFamily.Sui
   if (name.startsWith('test-')) return ChainFamily.Test
   return ChainFamily.EVM
 }

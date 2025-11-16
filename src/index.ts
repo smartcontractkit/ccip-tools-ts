@@ -17,7 +17,7 @@ import { logParsedError } from './commands/utils.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.2.11-869a810'
+const VERSION = '0.2.12-782136c'
 // generate:end
 
 const globalOpts = {

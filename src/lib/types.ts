@@ -6,6 +6,7 @@ import type OffRamp_1_6_ABI from '../abi/OffRamp_1_6.ts'
 import type { CCIPMessage_EVM, CCIPMessage_V1_6_EVM } from './evm/messages.ts'
 import type { ExtraArgs } from './extra-args.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
+import type { CCIPMessage_V1_6_Sui } from './sui/types.ts'
 // v1.6 Base type from EVM contains the intersection of all other CCIPMessage v1.6 types
 export type { CCIPMessage_V1_6 } from './evm/messages.ts'
 
@@ -59,11 +60,11 @@ export const CCIPVersion = {
 export type CCIPVersion = (typeof CCIPVersion)[keyof typeof CCIPVersion]
 
 type ChainFamilyWithId<F extends ChainFamily> = F extends typeof ChainFamily.EVM
-  ? { readonly family: typeof ChainFamily.EVM; readonly chainId: number }
+  ? { readonly family: F; readonly chainId: number }
   : F extends typeof ChainFamily.Solana
-    ? { readonly family: typeof ChainFamily.Solana; readonly chainId: string }
-    : F extends typeof ChainFamily.Aptos
-      ? { readonly family: typeof ChainFamily.Aptos; readonly chainId: `aptos:${number}` }
+    ? { readonly family: F; readonly chainId: string }
+    : F extends typeof ChainFamily.Aptos | typeof ChainFamily.Sui
+      ? { readonly family: F; readonly chainId: `${F}:${number}` }
       : never
 
 export type NetworkInfo<F extends ChainFamily = ChainFamily> = {
@@ -83,7 +84,7 @@ export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
   | typeof CCIPVersion.V1_2
   | typeof CCIPVersion.V1_5
   ? CCIPMessage_EVM<V>
-  : CCIPMessage_V1_6_EVM | CCIPMessage_V1_6_Solana
+  : CCIPMessage_V1_6_EVM | CCIPMessage_V1_6_Solana | CCIPMessage_V1_6_Sui
 
 export type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'blockNumber' | 'transactionHash'> & {
   data: BytesLike | Record<string, unknown>

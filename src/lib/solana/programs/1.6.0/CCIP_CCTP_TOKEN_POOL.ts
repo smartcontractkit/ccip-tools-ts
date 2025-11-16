@@ -3,7 +3,7 @@
 //   .then((res) => res.text())
 //   .then((text) => text.trim())
 export type CctpTokenPool = {
-  version: '0.1.1'
+  version: '1.6.0'
   name: 'cctp_token_pool'
   instructions: [
     {
@@ -1376,7 +1376,7 @@ export type CctpTokenPool = {
 }
 
 export const IDL: CctpTokenPool = {
-  version: '0.1.1',
+  version: '1.6.0',
   name: 'cctp_token_pool',
   instructions: [
     {
