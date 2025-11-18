@@ -21,6 +21,7 @@ export {
   fetchCCIPMessageById,
   fetchCCIPMessagesInTx,
   fetchRequestsForSender,
+  sourceToDestTokenAmounts,
 } from './requests.ts'
 export { SolanaChain } from './solana/index.ts'
 export { supportedChains } from './supported-chains.ts'

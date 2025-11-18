@@ -4,6 +4,7 @@ import {
   type Idl,
   type IdlTypes,
   AnchorProvider,
+  BorshAccountsCoder,
   BorshCoder,
   Program,
   Wallet,
@@ -40,9 +41,17 @@ import {
 } from 'ethers'
 import moize, { type Moized } from 'moize'
 
-import { type ChainTransaction, type LogFilter, Chain, ChainFamily } from '../chain.ts'
+import {
+  type ChainTransaction,
+  type LogFilter,
+  type RateLimiterState,
+  type TokenPoolRemote,
+  Chain,
+  ChainFamily,
+} from '../chain.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import SELECTORS from '../selectors.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
@@ -75,6 +84,7 @@ import { getV16SolanaLeafHasher } from './hasher.ts'
 import { fetchSolanaOffchainTokenData } from './offchain.ts'
 import { IDL as BASE_TOKEN_POOL } from './programs/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as BURN_MINT_TOKEN_POOL } from './programs/1.6.0/BURN_MINT_TOKEN_POOL.ts'
+import { IDL as CCIP_CCTP_TOKEN_POOL } from './programs/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
 import { IDL as CCIP_COMMON_IDL } from './programs/1.6.0/CCIP_COMMON.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './programs/1.6.0/CCIP_ROUTER.ts'
@@ -90,9 +100,16 @@ const tokenPoolCoder = new BorshCoder({
   events: BASE_TOKEN_POOL.events,
   errors: [...BASE_TOKEN_POOL.errors, ...BURN_MINT_TOKEN_POOL.errors],
 })
+const cctpTokenPoolCoder = new BorshCoder({
+  ...CCIP_CCTP_TOKEN_POOL,
+  types: [...BASE_TOKEN_POOL.types, ...CCIP_CCTP_TOKEN_POOL.types],
+  events: [...BASE_TOKEN_POOL.events, ...CCIP_CCTP_TOKEN_POOL.events],
+  errors: [...BASE_TOKEN_POOL.errors, ...CCIP_CCTP_TOKEN_POOL.errors],
+})
 const commonCoder = new BorshCoder(CCIP_COMMON_IDL)
 
 interface ParsedTokenInfo {
+  name?: string
   symbol?: string
   decimals: number
 }
@@ -181,7 +198,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     const config: ConnectionConfig = { commitment: 'confirmed' }
-    if (url.includes('.solana.com')) config.fetch = createRateLimitedFetch() // public nodes
+    if (url.includes('.solana.com')) {
+      config.fetch = createRateLimitedFetch() // public nodes
+      console.warn('Using rate-limited fetch for public solana nodes, commands may be slow')
+    }
 
     return new Connection(url, config)
   }
@@ -485,14 +505,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     })
 
     const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], program.programId)
-    const configAccount = await this.connection.getAccountInfo(configPda)
 
     // feeQuoter is present in router's config, and has a DestChainState account which is updated by
     // the offramps, so we can use it to narrow the search for the offramp
-    const { feeQuoter }: { feeQuoter: PublicKey } = program.coder.accounts.decode(
-      'config',
-      configAccount!.data,
-    )
+    const { feeQuoter } = await program.account.config.fetch(configPda)
 
     const [feeQuoterDestChainStateAccountAddress] = PublicKey.findProgramAddressSync(
       [Buffer.from('dest_chain'), toLeArray(sourceChainSelector, 8)],
@@ -514,7 +530,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
-    const program = new Program(CCIP_OFFRAMP_IDL as Idl, new PublicKey(offRamp), {
+    const program = new Program(CCIP_OFFRAMP_IDL, new PublicKey(offRamp), {
       connection: this.connection,
     })
 
@@ -522,15 +538,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       [Buffer.from('source_chain_state'), toLeArray(sourceChainSelector, 8)],
       program.programId,
     )
-    const stateAccount = await this.connection.getAccountInfo(statePda)
 
     // Decode the config account using the program's coder
     const {
       config: { onRamp },
-    }: { config: { onRamp: { bytes: number[]; len: number } } } = program.coder.accounts.decode(
-      'sourceChain',
-      stateAccount!.data,
-    )
+    } = await program.account.sourceChain.fetch(statePda)
     return decodeAddress(
       new Uint8Array(onRamp.bytes.slice(0, onRamp.len)),
       networkInfo(sourceChainSelector).family,
@@ -551,7 +563,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return config.mint.toString()
   }
 
-  async getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }> {
+  async getTokenInfo(token: string): Promise<{ name?: string; symbol: string; decimals: number }> {
     const mint = new PublicKey(token)
     const mintInfo = await this.connection.getParsedAccountInfo(mint)
 
@@ -570,21 +582,28 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       const parsed = mintInfo.value.data.parsed as { info: ParsedTokenInfo }
       const data = parsed.info
       let symbol = data.symbol || unknownTokens[token] || 'UNKNOWN'
+      let name = data.name
 
-      // If symbol is missing or 'UNKNOWN', try to fetch from Metaplex metadata
-      if (!data.symbol || symbol === 'UNKNOWN') {
+      // If symbol or name is missing, try to fetch from Metaplex metadata
+      if (!data.symbol || symbol === 'UNKNOWN' || !data.name) {
         try {
-          const metadataSymbol = await this._fetchTokenMetadataSymbol(mint)
-          if (metadataSymbol) {
-            symbol = metadataSymbol
+          const metadata = await this._fetchTokenMetadata(mint)
+          if (metadata) {
+            if (metadata.symbol && (!data.symbol || symbol === 'UNKNOWN')) {
+              symbol = metadata.symbol
+            }
+            if (metadata.name && !name) {
+              name = metadata.name
+            }
           }
         } catch (error) {
-          // Metaplex metadata fetch failed, keep the default symbol
+          // Metaplex metadata fetch failed, keep the default values
           console.debug(`Failed to fetch Metaplex metadata for token ${token}:`, error)
         }
       }
 
       return {
+        name,
         symbol,
         decimals: data.decimals,
       }
@@ -593,7 +612,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
   }
 
-  async _fetchTokenMetadataSymbol(mintPublicKey: PublicKey): Promise<string | null> {
+  async _fetchTokenMetadata(
+    mintPublicKey: PublicKey,
+  ): Promise<{ name: string; symbol: string } | null> {
     try {
       // Token Metadata Program ID
       const TOKEN_METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
@@ -633,6 +654,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       const nameLength = data.readUInt32LE(offset)
       offset += 4
       if (nameLength > 200 || offset + nameLength > data.length) return null
+      const nameBytes = data.subarray(offset, offset + nameLength)
+      const name = nameBytes.toString('utf8').replace(/\0/g, '').trim()
       offset += nameLength
 
       // Parse symbol (variable length string)
@@ -643,7 +666,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
       const symbolBytes = data.subarray(offset, offset + symbolLength)
       const symbol = symbolBytes.toString('utf8').replace(/\0/g, '').trim()
-      return symbol || null
+
+      return name || symbol ? { name, symbol } : null
     } catch (error) {
       console.debug('Error fetching token metadata:', error)
       return null
@@ -921,68 +945,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return getV16SolanaLeafHasher(lane)
   }
 
-  getTokenAdminRegistryForOnRamp(onRamp: string): Promise<string> {
+  getTokenAdminRegistryFor(address: string): Promise<string> {
     // Solana implements TokenAdminRegistry in the Router/OnRamp program
-    return Promise.resolve(onRamp)
-  }
-
-  async getTokenPoolForToken(registry: string, token: string): Promise<string> {
-    const registry_ = new PublicKey(registry)
-
-    const [tokenAdminRegistryAddr] = PublicKey.findProgramAddressSync(
-      [Buffer.from('token_admin_registry'), new PublicKey(token).toBuffer()],
-      registry_,
-    )
-    const tokenAdminRegistry = await this.connection.getAccountInfo(tokenAdminRegistryAddr)
-    if (!tokenAdminRegistry)
-      throw new Error(
-        `TokenAdminRegistry info not found at ${tokenAdminRegistryAddr.toBase58()} for registry=${registry} and token=${token}`,
-      )
-
-    const { lookupTable: lookupTableAddr }: { lookupTable: PublicKey } =
-      commonCoder.accounts.decode('tokenAdminRegistry', tokenAdminRegistry.data)
-    const lookupTable = await this.connection.getAddressLookupTable(lookupTableAddr)
-    if (!lookupTable?.value)
-      throw new Error(
-        `TokenAdminRegistry lookupTable not found at ${tokenAdminRegistryAddr.toBase58()} for registry=${registry} and token=${token}`,
-      )
-    // tokenPool program is [2], token pool state PDA is [3] (used as sourcePoolAddress),
-    // token program is [6], token/mint is [7]
-    return lookupTable.value.state.addresses[3].toString()
-  }
-
-  async getRemoteTokenForTokenPool(
-    tokenPool: string,
-    remoteChainSelector: bigint,
-  ): Promise<string> {
-    // `tokenPool` is actually a State PDA in the tokenPoolProgram, for a given token/mint
-    const tokenPoolState = await this.connection.getAccountInfo(new PublicKey(tokenPool))
-    if (!tokenPoolState) throw new Error(`TokenPool State PDA not found at ${tokenPool}`)
-    const tokenPoolProgram = tokenPoolState.owner
-    const { config }: { config: { mint: PublicKey } } = tokenPoolCoder.accounts.decode(
-      'state',
-      tokenPoolState.data,
-    )
-
-    // remote "lane" info for this TP is stored in a ChainConfig PDA also owned by the
-    // tokenPoolProgram, indexed by remoteSelector and token/mint
-    const [chainConfigAddr] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from('ccip_tokenpool_chainconfig'),
-        toLeArray(remoteChainSelector, 8),
-        config.mint.toBuffer(),
-      ],
-      tokenPoolProgram,
-    )
-    const chainConfig = await this.connection.getAccountInfo(chainConfigAddr)
-    if (!chainConfig)
-      throw new Error(
-        `ChainConfig not found at ${chainConfigAddr.toBase58()} for tokenPool=${tokenPool} and remoteNetwork=${networkInfo(remoteChainSelector).name}`,
-      )
-    const { base }: { base: { remote: { tokenAddress: { address: Buffer } } } } =
-      tokenPoolCoder.accounts.decode('chainConfig', chainConfig.data)
-
-    return decodeAddress(base.remote.tokenAddress.address, networkInfo(remoteChainSelector).family)
+    return Promise.resolve(address)
   }
 
   /**
@@ -1303,6 +1268,276 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       yield { receipt, log, timestamp }
       if (!messageIds.size) break
     }
+  }
+
+  async getRegistryTokenConfig(
+    registry: string,
+    token: string,
+  ): Promise<{
+    administrator: string
+    pendingAdministrator?: string
+    tokenPool?: string
+  }> {
+    const registry_ = new PublicKey(registry)
+    const tokenMint = new PublicKey(token)
+
+    const [tokenAdminRegistryAddr] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token_admin_registry'), tokenMint.toBuffer()],
+      registry_,
+    )
+
+    const tokenAdminRegistry = await this.connection.getAccountInfo(tokenAdminRegistryAddr)
+    if (!tokenAdminRegistry)
+      throw new Error(`Token ${token} is not configured in registry ${registry}`)
+
+    const decoded: {
+      bump: number
+      version: number
+      administrator: PublicKey
+      pendingAdministrator: PublicKey
+      lookupTable: PublicKey
+    } = commonCoder.accounts.decode('tokenAdminRegistry', tokenAdminRegistry.data)
+
+    const config: {
+      administrator: string
+      pendingAdministrator?: string
+      tokenPool?: string
+    } = {
+      administrator: decoded.administrator.toBase58(),
+    }
+
+    // Check if pendingAdministrator is set (not system program address)
+    if (
+      decoded.pendingAdministrator &&
+      !decoded.pendingAdministrator.equals(SystemProgram.programId) &&
+      !decoded.pendingAdministrator.equals(PublicKey.default)
+    ) {
+      config.pendingAdministrator = decoded.pendingAdministrator.toBase58()
+    }
+
+    // Get token pool from lookup table if available
+    try {
+      const lookupTable = await this.connection.getAddressLookupTable(decoded.lookupTable)
+      if (lookupTable?.value) {
+        // tokenPool state PDA is at index [3]
+        const tokenPoolAddress = lookupTable.value.state.addresses[3]
+        if (tokenPoolAddress) {
+          config.tokenPool = tokenPoolAddress.toBase58()
+        }
+      }
+    } catch (_err) {
+      // Token pool may not be configured yet
+    }
+    return config
+  }
+
+  async getTokenPoolConfigs(tokenPool: string): Promise<{
+    token: string
+    router: string
+    typeAndVersion?: string
+  }> {
+    let typeAndVersion
+    try {
+      ;[, , typeAndVersion] = await this.typeAndVersion(tokenPool)
+    } catch (_) {
+      // TokenPool may not have a typeAndVersion
+    }
+
+    // `tokenPool` is actually a State PDA in the tokenPoolProgram
+    const tokenPoolState = await this.connection.getAccountInfo(new PublicKey(tokenPool))
+    if (!tokenPoolState) throw new Error(`TokenPool State PDA not found at ${tokenPool}`)
+
+    const { config }: { config: { mint: PublicKey; router: PublicKey } } =
+      tokenPoolCoder.accounts.decode('state', tokenPoolState.data)
+
+    return {
+      token: config.mint.toBase58(),
+      router: config.router.toBase58(),
+      typeAndVersion,
+    }
+  }
+
+  async getTokenPoolRemotes(
+    tokenPool: string,
+    remoteChainSelector?: bigint,
+  ): Promise<Record<string, TokenPoolRemote>> {
+    // `tokenPool` is actually a State PDA in the tokenPoolProgram
+    const tokenPoolState = await this.connection.getAccountInfo(new PublicKey(tokenPool))
+    if (!tokenPoolState) throw new Error(`TokenPool State PDA not found at ${tokenPool}`)
+
+    const tokenPoolProgram = tokenPoolState.owner
+
+    const { config }: { config: { mint: PublicKey; router: PublicKey } } =
+      tokenPoolCoder.accounts.decode('state', tokenPoolState.data)
+
+    // Get all supported chains by fetching ChainConfig PDAs
+    // We need to scan for all ChainConfig accounts owned by this token pool program
+    const remotes: Record<string, TokenPoolRemote> = {}
+
+    // Fetch all ChainConfig accounts for this token pool
+    let selectors: { selector: bigint }[] = Object.values(SELECTORS)
+    let accounts
+    if (remoteChainSelector) {
+      selectors = [{ selector: remoteChainSelector }]
+      const [chainConfigAddr] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('ccip_tokenpool_chainconfig'),
+          toLeArray(remoteChainSelector, 8),
+          config.mint.toBuffer(),
+        ],
+        tokenPoolProgram,
+      )
+      const chainConfigAcc = await this.connection.getAccountInfo(chainConfigAddr)
+      if (!chainConfigAcc)
+        throw new Error(
+          `ChainConfig not found at ${chainConfigAddr.toBase58()} for tokenPool=${tokenPool} and remoteNetwork=${networkInfo(remoteChainSelector).name}`,
+        )
+      accounts = [
+        {
+          pubkey: chainConfigAddr,
+          account: chainConfigAcc,
+        },
+      ]
+    } else
+      accounts = await this.connection.getProgramAccounts(tokenPoolProgram, {
+        filters: [
+          {
+            memcmp: {
+              offset: 0,
+              bytes: encodeBase58(BorshAccountsCoder.accountDiscriminator('ChainConfig')),
+            },
+          },
+        ],
+      })
+
+    for (const acc of accounts) {
+      try {
+        let base: {
+          remote: {
+            poolAddresses: { address: Buffer }[]
+            tokenAddress: { address: Buffer }
+            decimals: number
+          }
+          inboundRateLimit: {
+            tokens: BN
+            lastUpdated: BN
+            cfg: {
+              enabled: boolean
+              capacity: BN
+              rate: BN
+            }
+          }
+          outboundRateLimit: {
+            tokens: BN
+            lastUpdated: BN
+            cfg: {
+              enabled: boolean
+              capacity: BN
+              rate: BN
+            }
+          }
+        }
+        try {
+          ;({ base } = tokenPoolCoder.accounts.decode('chainConfig', acc.account.data))
+        } catch (_) {
+          ;({ base } = cctpTokenPoolCoder.accounts.decode('chainConfig', acc.account.data))
+        }
+
+        let remoteChainSelector
+        // test all selectors, to find the correct seed
+        for (const { selector } of Object.values(selectors)) {
+          const [chainConfigAddr] = PublicKey.findProgramAddressSync(
+            [
+              Buffer.from('ccip_tokenpool_chainconfig'),
+              toLeArray(selector, 8),
+              config.mint.toBuffer(),
+            ],
+            tokenPoolProgram,
+          )
+          if (chainConfigAddr.equals(acc.pubkey)) {
+            remoteChainSelector = selector
+            break
+          }
+        }
+        if (!remoteChainSelector) continue
+
+        const remoteNetwork = networkInfo(remoteChainSelector)
+
+        const remoteToken = decodeAddress(base.remote.tokenAddress.address, remoteNetwork.family)
+
+        const remotePools = base.remote.poolAddresses.map((pool) =>
+          decodeAddress(pool.address, remoteNetwork.family),
+        )
+
+        let inboundRateLimiterState: RateLimiterState = null
+        if (base.inboundRateLimit.cfg.enabled) {
+          inboundRateLimiterState = {
+            tokens: BigInt(base.inboundRateLimit.tokens.toString()),
+            capacity: BigInt(base.inboundRateLimit.cfg.capacity.toString()),
+            rate: BigInt(base.inboundRateLimit.cfg.rate.toString()),
+          }
+          const cur =
+            inboundRateLimiterState.tokens +
+            inboundRateLimiterState.rate *
+              BigInt(Math.floor(Date.now() / 1000) - base.inboundRateLimit.lastUpdated.toNumber())
+          if (cur < inboundRateLimiterState.capacity) inboundRateLimiterState.tokens = cur
+          else inboundRateLimiterState.tokens = inboundRateLimiterState.capacity
+        }
+
+        let outboundRateLimiterState: RateLimiterState = null
+        if (base.outboundRateLimit.cfg.enabled) {
+          outboundRateLimiterState = {
+            tokens: BigInt(base.outboundRateLimit.tokens.toString()),
+            capacity: BigInt(base.outboundRateLimit.cfg.capacity.toString()),
+            rate: BigInt(base.outboundRateLimit.cfg.rate.toString()),
+          }
+          const cur =
+            outboundRateLimiterState.tokens +
+            outboundRateLimiterState.rate *
+              BigInt(Math.floor(Date.now() / 1000) - base.outboundRateLimit.lastUpdated.toNumber())
+          if (cur < outboundRateLimiterState.capacity) outboundRateLimiterState.tokens = cur
+          else outboundRateLimiterState.tokens = outboundRateLimiterState.capacity
+        }
+
+        remotes[remoteNetwork.name] = {
+          remoteToken,
+          remotePools,
+          inboundRateLimiterState,
+          outboundRateLimiterState,
+        }
+      } catch (err) {
+        console.warn('Failed to decode ChainConfig account:', err)
+      }
+    }
+
+    return remotes
+  }
+
+  async getSupportedTokens(router: string): Promise<string[]> {
+    // `mint` offset in TokenAdminRegistry account data; more robust against changes in layout
+    const mintOffset = 8 + 1 + 32 + 32 + 32 + 16 * 2 // = 137
+    const router_ = new PublicKey(router)
+    const res = []
+    for (const acc of await this.connection.getProgramAccounts(router_, {
+      filters: [
+        {
+          memcmp: {
+            offset: 0,
+            bytes: encodeBase58(BorshAccountsCoder.accountDiscriminator('TokenAdminRegistry')),
+          },
+        },
+      ],
+    })) {
+      if (!acc.account.data || acc.account.data.length < mintOffset + 32) continue
+      const mint = new PublicKey(acc.account.data.subarray(mintOffset, mintOffset + 32))
+      const [derivedPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('token_admin_registry'), mint.toBuffer()],
+        router_,
+      )
+      if (!acc.pubkey.equals(derivedPda)) continue
+      res.push(mint.toBase58())
+    }
+    return res
   }
 }
 

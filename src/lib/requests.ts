@@ -260,3 +260,36 @@ export async function* fetchRequestsForSender(
     }
   }
 }
+
+/**
+ * Map source `token` to `sourcePoolAddress + destTokenAddress`
+ * @param source - source chain
+ * @param destChainSelector - dest network
+ * @param onRamp - contract address
+ * @param sourceTokenAmounts - usually `{ token, amount }`
+ * @returns - { sourcePoolAddress, destTokenAddress, ...rest } objects
+ */
+export async function sourceToDestTokenAmounts<S extends { token: string }>(
+  source: Chain,
+  destChainSelector: bigint,
+  onRamp: string,
+  sourceTokenAmounts: readonly S[],
+): Promise<(Omit<S, 'token'> & { sourcePoolAddress: string; destTokenAddress: string })[]> {
+  const tokenAdminRegistry = await source.getTokenAdminRegistryFor(onRamp)
+  return Promise.all(
+    sourceTokenAmounts.map(async ({ token, ...rest }) => {
+      const { tokenPool: sourcePoolAddress } = await source.getRegistryTokenConfig(
+        tokenAdminRegistry,
+        token,
+      )
+      if (!sourcePoolAddress)
+        throw new Error(`Token=${token} not found in registry=${tokenAdminRegistry}`)
+      const remotes = await source.getTokenPoolRemotes(sourcePoolAddress, destChainSelector)
+      return {
+        ...rest,
+        sourcePoolAddress,
+        destTokenAddress: remotes[networkInfo(destChainSelector).name].remoteToken,
+      }
+    }),
+  )
+}

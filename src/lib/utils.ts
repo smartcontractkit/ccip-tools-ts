@@ -309,7 +309,7 @@ export function toObject<T>(obj: T | Result): T {
 export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFamily.EVM): string {
   const chain = supportedChains[family]
   if (!chain) throw new Error(`Unsupported chain family: ${family}`)
-  return chain.getAddress(address)
+  return chain.getAddress(getAddressBytes(address))
 }
 
 /**
@@ -471,13 +471,13 @@ export function createRateLimitedFetch({
         // Wait for rate limit before making request
         await waitForRateLimit()
         recordRequest()
-        console.debug('__fetching', input, init?.body)
+        // console.debug('__fetching', input, init?.body)
 
         const response = await fetch(input, init)
 
         // If response is successful, return it
         if (response.ok) {
-          console.debug('__fetch succeeded', input, response.status, init?.body)
+          console.debug('fetched', input, response.status, init?.body)
           return response
         }
 
@@ -487,10 +487,10 @@ export function createRateLimitedFetch({
         }
 
         // For other non-2xx responses, don't retry
-        console.debug('__fetch non-retryable error', input, response.status, init?.body)
+        console.debug('fetch non-retryable error', input, response.status, init?.body)
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       } catch (error) {
-        console.debug('__fetch errored', attempt, error, input, init?.body)
+        console.debug('fetch errored', attempt, error, input, init?.body)
         lastError = error instanceof Error ? error : new Error(String(error))
 
         // Only retry on rate limit errors

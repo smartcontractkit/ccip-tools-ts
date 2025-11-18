@@ -56,6 +56,19 @@ export type ChainTransaction = {
   error?: unknown
 }
 
+export type RateLimiterState = {
+  tokens: bigint
+  capacity: bigint
+  rate: bigint
+} | null
+
+export type TokenPoolRemote = {
+  remoteToken: string
+  remotePools: string[]
+  inboundRateLimiterState: RateLimiterState
+  outboundRateLimiterState: RateLimiterState
+}
+
 /**
  * Works like an interface for a base Chain class, but provides implementation (which can be
  * specialized) for some basic methods
@@ -170,32 +183,15 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Fetch token metadata
    * @param token - Token address
-   * @returns Token symbol and decimals
+   * @returns Token symbol and decimals, and optionally name
    */
-  abstract getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }>
+  abstract getTokenInfo(token: string): Promise<{ symbol: string; decimals: number; name?: string }>
   /**
-   * Fetch TokenAdminRegistry configured in a given OnRamp
+   * Fetch TokenAdminRegistry configured in a given OnRamp, Router, etc
    * Needed to map a source token to its dest counterparts
-   * @param onRamp - OnRamp address
+   * @param onRamp - Some contract for which we can fetch a TokenAdminRegistry
    */
-  abstract getTokenAdminRegistryForOnRamp(onRamp: string): Promise<string>
-  /**
-   * Fetch TokenPool address for a given Token in a TokenAdminRegistry
-   * Needed to map a source token to its dest counterparts
-   * @param registry - TokenAdminRegistry contract address
-   * @param token - Token address
-   */
-  abstract getTokenPoolForToken(registry: string, token: string): Promise<string>
-  /**
-   * Fetch remote token address for a given TokenPool and remote network
-   * Needed to map a source token to its dest counterparts
-   * @param tokenPool - TokenPool address to fetch remote lanes from
-   * @param remoteChainSelector - remote network for which this TP has a lane with
-   */
-  abstract getRemoteTokenForTokenPool(
-    tokenPool: string,
-    remoteChainSelector: bigint,
-  ): Promise<string>
+  abstract getTokenAdminRegistryFor(address: string): Promise<string>
   /**
    * Build, derive, load or fetch a wallet for this instance which will be used in any tx send operation
    * @param opts.wallet - cli or environmental parameters to help pick a wallet
@@ -263,6 +259,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     return fetchCommitReport(this, commitStore, request, hints)
   }
 
+  /**
+   * Default/generic implementation of fetchExecutionReceipts
+   * @param offRamp - Off-ramp address
+   * @param messageIds - Set of message IDs to fetch receipts for
+   * @param hints - Additional filtering hints
+   * @returns Async generator of CCIP execution receipts
+   */
   async *fetchExecutionReceipts(
     offRamp: string,
     messageIds: Set<string>,
@@ -270,6 +273,49 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   ): AsyncGenerator<CCIPExecution> {
     yield* fetchExecutionReceipts(this, offRamp, messageIds, hints)
   }
+
+  /**
+   * List tokens supported by given TokenAdminRegistry contract
+   * @param address - Usually TokenAdminRegistry, but chain may support receiving Router, OnRamp, etc
+   * @param opts.page - Page range, if needed
+   * @retursn array of supported token addresses
+   */
+  abstract getSupportedTokens(address: string, opts?: { page?: number }): Promise<string[]>
+
+  /**
+   * Get TokenConfig for a given token address in a TokenAdminRegistry
+   * @param address - TokenAdminRegistry contract address
+   * @param token - Token address
+   */
+  abstract getRegistryTokenConfig(
+    registry: string,
+    token: string,
+  ): Promise<{
+    administrator: string
+    pendingAdministrator?: string
+    tokenPool?: string
+  }>
+
+  /**
+   * Get TokenPool state and configurations
+   * @param tokenPool - Token pool address
+   */
+  abstract getTokenPoolConfigs(tokenPool: string): Promise<{
+    token: string
+    router: string
+    typeAndVersion?: string
+  }>
+
+  /**
+   * Get TokenPool remote configurations
+   * @param tokenPool - Token pool address
+   * @param remoteChainSelector - If provided, only return remotes for the specified chain (may error if remote not supported)
+   * @param Record of network *names* and remote configurations (remoteToken, remotePools, rateLimitStates)
+   */
+  abstract getTokenPoolRemotes(
+    tokenPool: string,
+    remoteChainSelector?: bigint,
+  ): Promise<Record<string, TokenPoolRemote>>
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type

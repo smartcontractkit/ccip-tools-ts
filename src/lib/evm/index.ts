@@ -6,12 +6,12 @@ import {
   type JsonRpcApiProvider,
   type Log,
   type Provider,
-  type Result,
   type Signer,
   type TransactionReceipt,
   BaseWallet,
   Contract,
   JsonRpcProvider,
+  Result,
   SigningKey,
   WebSocketProvider,
   ZeroAddress,
@@ -40,9 +40,14 @@ import {
   requestsFragments,
 } from './const.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
-import { type CCIPMessage_V1_6_EVM, parseSourceTokenData } from './messages.ts'
+import {
+  type CCIPMessage_V1_6_EVM,
+  type CleanAddressable,
+  parseSourceTokenData,
+} from './messages.ts'
 import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
 import type Token_ABI from '../../abi/BurnMintERC677Token.ts'
+import type TokenPool_1_5_ABI from '../../abi/LockReleaseTokenPool_1_5.ts'
 import type TokenPool_ABI from '../../abi/LockReleaseTokenPool_1_6_1.ts'
 import EVM2EVMOffRamp_1_2_ABI from '../../abi/OffRamp_1_2.ts'
 import EVM2EVMOffRamp_1_5_ABI from '../../abi/OffRamp_1_5.ts'
@@ -52,7 +57,13 @@ import EVM2EVMOnRamp_1_5_ABI from '../../abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from '../../abi/OnRamp_1_6.ts'
 import type Router_ABI from '../../abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from '../../abi/TokenAdminRegistry_1_5.ts'
-import { type ChainTransaction, type LogFilter, Chain, ChainFamily } from '../chain.ts'
+import {
+  type ChainTransaction,
+  type LogFilter,
+  type TokenPoolRemote,
+  Chain,
+  ChainFamily,
+} from '../chain.ts'
 import {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
@@ -100,6 +111,14 @@ const SVMExtraArgsV1 =
   'tuple(uint32 computeUnits, uint64 accountIsWritableBitmap, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] accounts)'
 const SuiExtraArgsV1 =
   'tuple(uint256 gasLimit, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] receiverObjectIds)'
+
+function resultToObject<T>(o: T): T {
+  return o instanceof Promise
+    ? (o.then(resultToObject) as T)
+    : o instanceof Result
+      ? (o.toObject() as T)
+      : o
+}
 
 function resultsToMessage(result: Result): Record<string, unknown> {
   if (result.message) result = result.message as Result
@@ -698,14 +717,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return contract.getToken() as Promise<string>
   }
 
-  async getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }> {
+  async getTokenInfo(token: string): Promise<{ decimals: number; symbol: string; name: string }> {
     const contract = new Contract(
       token,
       interfaces.Token,
       this.provider,
     ) as unknown as TypedContract<typeof Token_ABI>
-    const [symbol, decimals] = await Promise.all([contract.symbol(), contract.decimals()])
-    return { symbol, decimals: Number(decimals) }
+    const [symbol, decimals, name] = await Promise.all([
+      contract.symbol(),
+      contract.decimals(),
+      contract.name(),
+    ])
+    return { symbol, decimals: Number(decimals), name }
   }
 
   static getDestLeafHasher({
@@ -727,56 +750,38 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  async getTokenAdminRegistryForOnRamp(onRamp: string): Promise<string> {
-    const [, version] = await this.typeAndVersion(onRamp)
-    let contract
-    switch (version) {
-      case CCIPVersion.V1_5:
-        contract = new Contract(
-          onRamp,
-          EVM2EVMOnRamp_1_5_ABI,
-          this.provider,
-        ) as unknown as TypedContract<typeof EVM2EVMOnRamp_1_5_ABI>
-        break
-      case CCIPVersion.V1_6:
-        contract = new Contract(onRamp, OnRamp_1_6_ABI, this.provider) as unknown as TypedContract<
-          typeof OnRamp_1_6_ABI
-        >
-        break
-      default:
-        throw new Error(`Unsupported version: ${version}`)
+  async getTokenAdminRegistryFor(address: string): Promise<string> {
+    // eslint-disable-next-line prefer-const
+    let [type, version, typeAndVersion] = await this.typeAndVersion(address)
+    if (type === 'TokenAdminRegistry') {
+      return address
+    } else if (type === 'Router') {
+      // when given a router, we take any onRamp we can find, as usually they all use same registry
+      const someOtherNetwork = this.network.isTestnet
+        ? this.network.name === 'ethereum-testnet-sepolia'
+          ? 'avalanche-testnet-fuji'
+          : 'ethereum-testnet-sepolia'
+        : this.network.name === 'ethereum-mainnet'
+          ? 'avalanche-mainnet'
+          : 'ethereum-mainnet'
+      address = await this.getOnRampForRouter(address, networkInfo(someOtherNetwork).chainSelector)
+      ;[type, version] = await this.typeAndVersion(address)
+    } else if (!type.includes('Ramp')) {
+      throw new Error(`Not a Router, Ramp or TokenAdminRegistry: ${address} is "${typeAndVersion}"`)
     }
-    const { tokenAdminRegistry } = await contract.getStaticConfig() // TODO: memoize
+    const contract = new Contract(
+      address,
+      version < CCIPVersion.V1_6
+        ? type.includes('OnRamp')
+          ? interfaces.EVM2EVMOnRamp_v1_5
+          : interfaces.EVM2EVMOffRamp_v1_5
+        : type.includes('OnRamp')
+          ? interfaces.OnRamp_v1_6
+          : interfaces.OffRamp_v1_6,
+      this.provider,
+    ) as unknown as TypedContract<typeof OnRamp_1_6_ABI>
+    const { tokenAdminRegistry } = await contract.getStaticConfig()
     return tokenAdminRegistry as string
-  }
-
-  async getTokenPoolForToken(registry: string, token: string): Promise<string> {
-    const contract = new Contract(
-      registry,
-      interfaces.TokenAdminRegistry,
-      this.provider,
-    ) as unknown as TypedContract<typeof TokenAdminRegistry_1_5_ABI>
-    const tokenPool = await contract.getPool(token)
-    if (!tokenPool || tokenPool === ZeroAddress)
-      throw new Error(`TokenPool not registered for token ${token} in registry ${registry}`)
-    return tokenPool as string
-  }
-
-  async getRemoteTokenForTokenPool(
-    tokenPool: string,
-    remoteChainSelector: bigint,
-  ): Promise<string> {
-    const contract = new Contract(
-      tokenPool,
-      interfaces.TokenPool_v1_6,
-      this.provider,
-    ) as unknown as TypedContract<typeof TokenPool_ABI>
-    const remoteToken = await contract.getRemoteToken(remoteChainSelector)
-    if (!remoteToken || remoteToken === ZeroAddress)
-      throw new Error(
-        `RemoteToken not registered for token pool ${tokenPool} on chain ${remoteChainSelector}`,
-      )
-    return decodeAddress(remoteToken, networkInfo(remoteChainSelector).family)
   }
 
   async getFee(router_: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint> {
@@ -971,6 +976,157 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   static parse(data: unknown) {
     return parseData(data)
+  }
+
+  /**
+   * Get the supported tokens for a given contract address
+   *
+   * @param address Router, OnRamp, OffRamp or TokenAdminRegistry contract
+   * @returns An array of supported token addresses.
+   */
+  async getSupportedTokens(registry: string, opts?: { page?: number }): Promise<string[]> {
+    const contract = new Contract(
+      registry,
+      interfaces.TokenAdminRegistry,
+      this.provider,
+    ) as unknown as TypedContract<typeof TokenAdminRegistry_1_5_ABI>
+
+    const limit = (opts?.page ?? 1000) || Number.MAX_SAFE_INTEGER
+    const res = []
+    let page
+    do {
+      page = await contract.getAllConfiguredTokens(BigInt(res.length), BigInt(limit))
+      res.push(...page)
+    } while (page.length === limit)
+    return res as string[]
+  }
+
+  async getRegistryTokenConfig(
+    registry: string,
+    token: string,
+  ): Promise<{
+    administrator: string
+    pendingAdministrator?: string
+    tokenPool?: string
+  }> {
+    const contract = new Contract(
+      registry,
+      interfaces.TokenAdminRegistry,
+      this.provider,
+    ) as unknown as TypedContract<typeof TokenAdminRegistry_1_5_ABI>
+
+    const config = (await resultToObject(contract.getTokenConfig(token))) as CleanAddressable<
+      Partial<Awaited<ReturnType<(typeof contract)['getTokenConfig']>>>
+    >
+    if (!config.administrator || config.administrator === ZeroAddress)
+      throw new Error(`Token ${token} is not configured in registry ${registry}`)
+    if (!config.pendingAdministrator || config.pendingAdministrator === ZeroAddress)
+      delete config.pendingAdministrator
+    if (!config.tokenPool || config.tokenPool === ZeroAddress) delete config.tokenPool
+    return {
+      ...config,
+      administrator: config.administrator,
+    }
+  }
+
+  async getTokenPoolConfigs(tokenPool: string): Promise<{
+    token: string
+    router: string
+    typeAndVersion: string
+  }> {
+    const [_, , typeAndVersion] = await this.typeAndVersion(tokenPool)
+
+    const contract = new Contract(
+      tokenPool,
+      interfaces.TokenPool_v1_6,
+      this.provider,
+    ) as unknown as TypedContract<typeof TokenPool_ABI>
+
+    const token = contract.getToken()
+    const router = contract.getRouter()
+    return Promise.all([token, router]).then(([token, router]) => {
+      return {
+        token: token as string,
+        router: router as string,
+        typeAndVersion,
+      }
+    })
+  }
+
+  async getTokenPoolRemotes(
+    tokenPool: string,
+    remoteChainSelector?: bigint,
+  ): Promise<Record<string, TokenPoolRemote>> {
+    const [_, version] = await this.typeAndVersion(tokenPool)
+
+    let supportedChains: Promise<NetworkInfo[]>
+    if (remoteChainSelector) supportedChains = Promise.resolve([networkInfo(remoteChainSelector)])
+
+    let remotePools: Promise<string[][]>
+    let contract
+    if (version < '1.5.1') {
+      const contract_ = new Contract(
+        tokenPool,
+        interfaces.TokenPool_v1_5,
+        this.provider,
+      ) as unknown as TypedContract<typeof TokenPool_1_5_ABI>
+      contract = contract_
+      supportedChains ??= contract.getSupportedChains().then((chains) => chains.map(networkInfo))
+      remotePools = supportedChains.then((chains) =>
+        Promise.all(
+          chains.map((chain) =>
+            contract_
+              .getRemotePool(chain.chainSelector)
+              .then((remotePool) => [decodeAddress(remotePool, chain.family)]),
+          ),
+        ),
+      )
+    } else {
+      const contract_ = new Contract(
+        tokenPool,
+        interfaces.TokenPool_v1_6,
+        this.provider,
+      ) as unknown as TypedContract<typeof TokenPool_ABI>
+      contract = contract_
+      supportedChains ??= contract.getSupportedChains().then((chains) => chains.map(networkInfo))
+      remotePools = supportedChains.then((chains) =>
+        Promise.all(
+          chains.map((chain) =>
+            contract_
+              .getRemotePools(chain.chainSelector)
+              .then((pools) => pools.map((remotePool) => decodeAddress(remotePool, chain.family))),
+          ),
+        ),
+      )
+    }
+    const remoteInfo = supportedChains.then((chains) =>
+      Promise.all(
+        chains.map((chain) =>
+          Promise.all([
+            contract.getRemoteToken(chain.chainSelector),
+            resultToObject(contract.getCurrentInboundRateLimiterState(chain.chainSelector)),
+            resultToObject(contract.getCurrentOutboundRateLimiterState(chain.chainSelector)),
+          ] as const),
+        ),
+      ),
+    )
+    return Promise.all([supportedChains, remotePools, remoteInfo]).then(
+      ([supportedChains, remotePools, remoteInfo]) =>
+        Object.fromEntries(
+          supportedChains.map(
+            (chain, i) =>
+              [
+                chain.name,
+                {
+                  remoteToken: decodeAddress(remoteInfo[i][0], chain.family),
+                  remotePools: remotePools[i].map((pool) => decodeAddress(pool, chain.family)),
+                  inboundRateLimiterState: remoteInfo[i][1].isEnabled ? remoteInfo[i][1] : null,
+                  outboundRateLimiterState: remoteInfo[i][2].isEnabled ? remoteInfo[i][2] : null,
+                },
+              ] as const,
+          ),
+        ),
+    )
   }
 }
 

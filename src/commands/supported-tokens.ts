@@ -23,434 +23,212 @@
  * @module supported-tokens
  */
 
-/* eslint-disable @typescript-eslint/no-base-to-string */
-import {
-  type Addressable,
-  type JsonRpcApiProvider,
-  Contract,
-  ZeroAddress,
-  formatUnits,
-} from 'ethers'
-import type { TypedContract } from 'ethers-abitype'
+import { search } from '@inquirer/prompts'
+import { formatUnits } from 'ethers'
+import type { Argv } from 'yargs'
 
 import { Format } from './types.ts'
-import { formatArray, formatDuration, yieldResolved } from './utils.ts'
-import TokenABI from '../abi/BurnMintERC677Token.ts'
-import TokenPool_1_5_ABI from '../abi/LockReleaseTokenPool_1_5.ts'
-import TokenPool_1_5_1_ABI from '../abi/LockReleaseTokenPool_1_5_1.ts'
-import RouterABI from '../abi/Router.ts'
-import TokenAdminRegistryABI from '../abi/TokenAdminRegistry_1_5.ts'
-import {
-  bigIntReplacer,
-  chainIdFromName,
-  chainNameFromSelector,
-  chainSelectorFromId,
-  decodeAddress,
-  networkInfo,
-} from '../lib/index.ts'
+import { formatDuration, logParsedError, prettyTable } from './utils.ts'
+import type { GlobalOpts } from '../index.ts'
+import type { Chain, RateLimiterState } from '../lib/chain.ts'
+import { bigIntReplacer, decodeAddress, networkInfo } from '../lib/index.ts'
+import { fetchChainsFromRpcs } from '../providers/index.ts'
 
-/**
- * Maximum tokens per registry request.
- */
-const BATCH_SIZE = 100
+export const command = ['getSupportedTokens <source> <address> [token]']
+export const describe =
+  'List supported tokens in a given Router/OnRamp/TokenAdminRegistry, and/or show info about token/pool'
 
-type TokenPoolContract =
-  | TypedContract<typeof TokenPool_1_5_ABI>
-  | TypedContract<typeof TokenPool_1_5_1_ABI>
+export const builder = (yargs: Argv) =>
+  yargs
+    .positional('source', {
+      type: 'string',
+      demandOption: true,
+      describe: 'source network, chainId or name',
+      example: 'ethereum-testnet-sepolia',
+    })
+    .positional('address', {
+      type: 'string',
+      demandOption: true,
+      describe: 'router/onramp/tokenAdminRegistry/tokenPool contract address on source',
+    })
+    .positional('token', {
+      type: 'string',
+      demandOption: false,
+      describe:
+        'If address is router/onramp/tokenAdminRegistry, token may be used to pre-select a token from the supported list',
+    })
 
-// Extended token info with pool details for CCIP
-interface CCIPSupportedToken {
-  name: string
-  symbol: string
-  decimals: number
-  token: string
-  pool: string
-  poolTypeAndVersion: string
-  poolDetails: TokenPoolLane
+export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
+  let destroy
+  const destroy$ = new Promise((resolve) => {
+    destroy = resolve
+  })
+  return getSupportedTokens(argv, destroy$)
+    .catch((err) => {
+      process.exitCode = 1
+      if (!logParsedError(err)) console.error(err)
+    })
+    .finally(destroy)
 }
 
-// First, let's add the necessary types
-interface TokenBucket {
-  tokens: bigint // amount
-  lastUpdated: number
-  isEnabled: boolean
-  capacity: bigint
-  rate: bigint
-}
-
-interface TokenPoolLane {
-  remoteToken: string
-  remotePools: readonly string[]
-  outboundRateLimiter: TokenBucket
-  inboundRateLimiter: TokenBucket
-  remoteChainSelector: bigint
-}
-
-/**
- * Fetches detailed information about a token pool
- *
- * Retrieves:
- * - Remote token address
- * - Associated remote pools
- * - Rate limiter configurations (inbound/outbound)
- * - Pool type and version information
- *
- * @param poolInfo - Pool contract and metadata
- * @param destSelector - Destination chain selector
- * @returns Pool details or null if fetching fails
- */
-async function getPoolLaneDetails(
-  contract: TokenPoolContract,
-  destSelector: bigint,
-): Promise<TokenPoolLane> {
-  const [remoteToken, remotePools, outboundState, inboundState] = await Promise.all([
-    contract.getRemoteToken(destSelector),
-    'getRemotePools' in contract
-      ? contract.getRemotePools(destSelector)
-      : contract.getRemotePool(destSelector).then((pool) => [pool]),
-    contract.getCurrentOutboundRateLimiterState(destSelector),
-    contract.getCurrentInboundRateLimiterState(destSelector),
-  ])
-
-  return {
-    remoteToken: remoteToken.toString(),
-    remotePools,
-    outboundRateLimiter: {
-      tokens: outboundState.tokens,
-      lastUpdated: Number(outboundState.lastUpdated),
-      isEnabled: outboundState.isEnabled,
-      capacity: outboundState.capacity,
-      rate: outboundState.rate,
-    },
-    inboundRateLimiter: {
-      tokens: inboundState.tokens,
-      lastUpdated: Number(inboundState.lastUpdated),
-      isEnabled: inboundState.isEnabled,
-      capacity: inboundState.capacity,
-      rate: inboundState.rate,
-    },
-    remoteChainSelector: destSelector,
-  }
-}
-
-/**
- * Resolves chain identifiers and initializes required providers.
- *
- * @throws {Error} If chain identifiers are invalid or providers unavailable
- */
-async function parseLaneRouter(
-  providers: Providers,
-  argv: { source: string; dest: string; router: string },
-) {
-  const sourceChainId = isNaN(+argv.source) ? chainIdFromName(argv.source) : +argv.source
-  const sourceProvider = await providers.forChainId(sourceChainId)
-
-  const destChainId = isNaN(+argv.dest) ? chainIdFromName(argv.dest) : +argv.dest
-  const destSelector = chainSelectorFromId(destChainId)
-
-  return { sourceChainId, destChainId, sourceProvider, destSelector }
-}
-
-/**
- * Retrieves the TokenAdminRegistry contract from the onRamp's configuration.
- *
- * @throws {Error} If using deprecated CCIP version
- */
-async function getRegistryContract(
-  sourceProvider: JsonRpcApiProvider,
-  router: string,
-  destSelector: bigint,
-) {
-  const routerContract = new Contract(
-    router,
-    RouterABI,
-    sourceProvider,
-  ) as unknown as TypedContract<typeof RouterABI>
-
-  // Get onRamp address from router
-  const onRampAddress = (await routerContract.getOnRamp(destSelector)) as string
-
-  if (onRampAddress === ZeroAddress) {
-    throw new Error(
-      `Lane "${(await getProviderNetwork(sourceProvider)).name}" -> "${chainNameFromSelector(destSelector)}" is not supported by router ${await routerContract.getAddress()}`,
-    )
+async function getSupportedTokens(argv: Parameters<typeof handler>[0], destroy: Promise<unknown>) {
+  const sourceNetwork = networkInfo(argv.source)
+  const getChain = fetchChainsFromRpcs(argv, undefined, destroy)
+  const source = await getChain(sourceNetwork.name)
+  let type
+  try {
+    ;[type] = await source.typeAndVersion(argv.address)
+  } catch (_) {
+    // ignore
   }
 
-  const [lane, onRampContract] = await getOnRampLane(sourceProvider, onRampAddress, destSelector)
-  if ('applyPoolUpdates' in onRampContract) {
-    throw new Error(`Deprecated CCIP onRamp version: ${lane.version}`) // v1.2
+  let info, tokenPool, poolConfigs, registry, registryConfig
+  if (
+    typeof type !== 'string' ||
+    !['Router', 'Ramp', 'TokenAdminRegistry'].some((c) => type.includes(c)) ||
+    argv.token
+  ) {
+    if (!argv.token) {
+      // tokenPool
+      tokenPool = argv.address
+      poolConfigs = await source.getTokenPoolConfigs(tokenPool)
+      registry = await source.getTokenAdminRegistryFor(poolConfigs.router)
+      ;[info, registryConfig] = await Promise.all([
+        source.getTokenInfo(poolConfigs.token),
+        source.getRegistryTokenConfig(registry, poolConfigs.token),
+      ])
+    } else {
+      // router|ramp|registry + token
+      ;[info, registry] = await Promise.all([
+        source.getTokenInfo(argv.token),
+        source.getTokenAdminRegistryFor(argv.address),
+      ])
+      registryConfig = await source.getRegistryTokenConfig(registry, argv.token)
+      tokenPool = registryConfig.tokenPool
+      if (!tokenPool)
+        throw new Error(
+          `TokenPool not set in tokenAdminRegistry=${registry} for token=${argv.token}`,
+        )
+      poolConfigs = await source.getTokenPoolConfigs(tokenPool)
+    }
+
+    if (argv.format === Format.json) {
+      console.log(JSON.stringify({ ...info, tokenPool, ...poolConfigs }, bigIntReplacer, 2))
+      return
+    } else if (argv.format === Format.log) {
+      console.log('Token:', decodeAddress(argv.address, source.network.family), info)
+      console.log('Token Pool:', tokenPool)
+      console.log('Pool Configs:', poolConfigs)
+      return
+    }
+  } else {
+    // router + interactive list
+    registry = await source.getTokenAdminRegistryFor(argv.address)
+    info = await listTokens(source, registry, argv)
+    if (!info) return // format != pretty
+    registryConfig = await source.getRegistryTokenConfig(registry, info.token)
+    tokenPool = registryConfig.tokenPool
+    if (!tokenPool)
+      throw new Error(`TokenPool not set in tokenAdminRegistry=${registry} for token=${info.token}`)
+    poolConfigs = await source.getTokenPoolConfigs(tokenPool)
   }
-  const staticConfig = await onRampContract.getStaticConfig()
-  const registryAddress = staticConfig.tokenAdminRegistry as string
-  const [, , typeAndVersion] = await getTypeAndVersion(sourceProvider, registryAddress)
+  const remotes = await source.getTokenPoolRemotes(tokenPool)
 
-  console.info('[INFO] Using', typeAndVersion, 'at', registryAddress, 'from router', router)
-
-  return new Contract(
-    registryAddress,
-    TokenAdminRegistryABI,
-    sourceProvider,
-  ) as unknown as TypedContract<typeof TokenAdminRegistryABI>
-}
-
-/**
- * Fetches all registered tokens using pagination to handle large sets. Yield batches.
- *
- * Performance Notes:
- * - Uses BATCH_SIZE to limit request size
- * - Implements pagination to handle any number of tokens
- * - Memory-efficient through incremental processing
- */
-async function* fetchAllRegisteredTokens(
-  registry: TypedContract<typeof TokenAdminRegistryABI>,
-  batchSize = BATCH_SIZE,
-) {
-  let startIndex = 0
-  let tokensBatch
-
-  console.debug(
-    `[INFO] Fetching all registered tokens using TokenAdminRegistry ${await registry.getAddress()}`,
-  )
-
-  do {
-    console.debug(`[INFO] Fetching batch: offset=${startIndex}, limit=${batchSize}`)
-    tokensBatch = await registry.getAllConfiguredTokens(BigInt(startIndex), BigInt(batchSize))
-    yield tokensBatch
-    startIndex += tokensBatch.length
-  } while (tokensBatch.length === batchSize)
-}
-
-/**
- * Identifies supported tokens for cross-chain transfer
- *
- * Process:
- * 1. Fetches pool addresses for tokens
- * 2. Validates pool contracts and versions
- * 3. Checks destination chain support
- * 4. Collects pool information for supported tokens
- *
- * @param registry - Token registry contract
- * @param allTokens - List of token addresses to check
- * @param sourceProvider - Source chain provider
- * @param destSelector - Destination chain selector
- * @returns Mapping of token addresses to their pool information
- */
-async function findSupportedTokens(
-  registry: TypedContract<typeof TokenAdminRegistryABI>,
-  tokensBatch: readonly (string | Addressable)[],
-  destSelector: bigint,
-): Promise<Record<string, TokenPoolContract>> {
-  const sourceProvider = registry.runner!.provider!
-  const tokenToPoolInfo: Record<string, TokenPoolContract> = {}
-
-  const rawPoolsChunk = await registry.getPools([...tokensBatch])
-
-  // Filter out zero addresses and map to corresponding tokens
-  const validPools = rawPoolsChunk
-    .map((pool, idx) => ({
-      pool: pool.toString(),
-      token: tokensBatch[idx].toString(),
-    }))
-    .filter(({ pool }) => pool !== ZeroAddress)
-
-  await Promise.allSettled(
-    validPools.map(async ({ token, pool }) => {
-      const [, version, typeAndVersion] = await getTypeAndVersion(sourceProvider, pool)
-      let contract: TokenPoolContract
-      switch (version) {
-        case '1.5.0':
-          contract = new Contract(
-            pool,
-            TokenPool_1_5_ABI,
-            sourceProvider,
-          ) as unknown as TypedContract<typeof TokenPool_1_5_ABI>
-          break
-        case '1.5.1':
-        case '1.6.0': // SiloedLockReleaseTokenPool 1.6 is compatible with 1.5.1 functions we need
-          contract = new Contract(
-            pool,
-            TokenPool_1_5_1_ABI,
-            sourceProvider,
-          ) as unknown as TypedContract<typeof TokenPool_1_5_1_ABI>
-          break
-        default:
-          console.debug(`[ERROR] Unsupported pool version: ${typeAndVersion} for pool ${pool}`)
-          throw new Error(`Unsupported pool version: ${version}`)
-      }
-
-      if (await contract.isSupportedChain(destSelector)) {
-        tokenToPoolInfo[token] = contract
-      }
+  prettyTable({
+    network: source.network.name,
+    token: poolConfigs.token,
+    symbol: info.symbol,
+    name: info.name,
+    decimals: info.decimals,
+    tokenPool,
+    typeAndVersion: poolConfigs.typeAndVersion,
+    router: poolConfigs.router,
+    tokenAdminRegistry: registry,
+    administrator: registryConfig.administrator,
+    ...(registryConfig.pendingAdministrator && {
+      pendingAdministrator: registryConfig.pendingAdministrator,
     }),
-  )
-
-  return tokenToPoolInfo
+  })
+  const remotesLen = Object.keys(remotes).length
+  if (remotesLen > 0) console.info('Remotes [', remotesLen, ']:')
+  for (const [network, remote] of Object.entries(remotes))
+    prettyTable({
+      remoteNetwork: network,
+      remoteToken: remote.remoteToken,
+      remotePool: remote.remotePools,
+      inbound: prettyRateLimiter(remote.inboundRateLimiterState, info),
+      outbound: prettyRateLimiter(remote.outboundRateLimiterState, info),
+    })
 }
 
-/**
- * Gathers detailed information about supported tokens and their pools
- *
- * Collects:
- * - Token metadata (name, symbol, decimals)
- * - Pool configuration and status
- * - Rate limiter settings
- * - Remote token and pool information
- *
- * @param tokenPool - Mapping of tokens to their pool information
- * @param sourceProvider - Source chain provider
- * @param destSelector - Destination chain selector
- * @returns Array of token details or error information
- */
-async function fetchSupportedTokenDetails(
-  token: string,
-  pool: TokenPoolContract,
-  destSelector: bigint,
-): Promise<CCIPSupportedToken> {
-  const erc20 = new Contract(token, TokenABI, pool.runner!.provider) as unknown as TypedContract<
-    typeof TokenABI
-  >
-  const [name, symbol, decimalsBI] = await getContractProperties(
-    erc20,
-    'name',
-    'symbol',
-    'decimals',
-  )
-  const poolDetails = await getPoolLaneDetails(pool, destSelector)
-
-  const decimals = Number(decimalsBI)
-
-  console.debug(
-    `[INFO] Successfully fetched details for token ${name} (${symbol}) at ${token} | pool ${await pool.getAddress()}`,
-  )
-
-  return {
-    name,
-    symbol,
-    decimals,
-    token,
-    pool: await pool.getAddress(),
-    poolTypeAndVersion: (await getTypeAndVersion(pool))[2],
-    poolDetails,
+async function listTokens(source: Chain, registry: string, argv: GlobalOpts) {
+  const tokens = await source.getSupportedTokens(registry)
+  const infos: { token: string; symbol: string; decimals: number; name?: string }[] = []
+  const batch = 500
+  for (let i = 0; i < tokens.length; i += batch) {
+    const infos_ = (
+      await Promise.all(
+        tokens.slice(i, i + batch).map((token) =>
+          source.getTokenInfo(token).then(
+            (info) => {
+              const res = { token, ...info }
+              if (argv.format === Format.log) {
+                // Format.log prints out-of-order, as it fetches data, concurrently
+                console.info(token, '=', info)
+              }
+              return res
+            },
+            (err) => {
+              console.debug(`getTokenInfo errored`, token, err)
+            },
+          ),
+        ),
+      )
+    ).filter((e) => e !== undefined)
+    if (argv.format === Format.json) {
+      // Format.json keeps order, prints newline-separated objects
+      for (const info of infos_) {
+        console.log(JSON.stringify(info))
+      }
+    }
+    infos.push(...infos_)
   }
-}
+  if (argv.format !== Format.pretty) return // Format.pretty interactive search and details
 
-export function prettySupportedToken(token: CCIPSupportedToken) {
-  console.table({
-    address: token.token,
-    symbol: token.symbol,
-    name: token.name,
-    decimals: token.decimals,
-    pool: token.pool,
-    'pool.typeAndVersion': token.poolTypeAndVersion,
-    remoteToken: decodeAddress(
-      token.poolDetails.remoteToken,
-      networkInfo(token.poolDetails.remoteChainSelector).family,
-    ),
-    ...formatArray(
-      'remotePools',
-      token.poolDetails.remotePools.map((pool) =>
-        decodeAddress(pool, networkInfo(token.poolDetails.remoteChainSelector).family),
-      ),
-    ),
-    ...(!token.poolDetails.outboundRateLimiter.isEnabled
-      ? { 'rateLimiters.outbound': 'disabled' }
-      : {
-          'rateLimiters.outbound.tokens': formatUnits(
-            token.poolDetails.outboundRateLimiter.tokens,
-            token.decimals,
-          ),
-          'rateLimiters.outbound.capacity': formatUnits(
-            token.poolDetails.outboundRateLimiter.capacity,
-            token.decimals,
-          ),
-          'rateLimiters.outbound.rate': formatUnits(
-            token.poolDetails.outboundRateLimiter.rate,
-            token.decimals,
-          ),
-          'rateLimiters.outbound.timeToRefill': formatDuration(
-            Number(token.poolDetails.outboundRateLimiter.capacity) /
-              Number(token.poolDetails.outboundRateLimiter.rate),
-          ),
-        }),
-    ...(!token.poolDetails.inboundRateLimiter.isEnabled
-      ? { 'rateLimiters.inbound': 'disabled' }
-      : {
-          'rateLimiters.inbound.tokens': formatUnits(
-            token.poolDetails.inboundRateLimiter.tokens,
-            token.decimals,
-          ),
-          'rateLimiters.inbound.capacity': formatUnits(
-            token.poolDetails.inboundRateLimiter.capacity,
-            token.decimals,
-          ),
-          'rateLimiters.inbound.rate': formatUnits(
-            token.poolDetails.inboundRateLimiter.rate,
-            token.decimals,
-          ),
-          'rateLimiters.inbound.timeToRefill': formatDuration(
-            Number(token.poolDetails.inboundRateLimiter.capacity) /
-              Number(token.poolDetails.inboundRateLimiter.rate),
-          ),
-        }),
+  return search({
+    message: 'Select a token to know more:',
+    pageSize: 20,
+    source: (term) => {
+      const filtered = infos.filter(
+        (info) =>
+          !term ||
+          `${info.token} ${info.symbol} ${info.name ?? ''} ${info.decimals}`
+            .toLowerCase()
+            .includes(term.toLowerCase()),
+      )
+      const symbolPad = Math.min(Math.max(...filtered.map(({ symbol }) => symbol.length)), 10)
+      const decimalsPad = Math.max(...filtered.map(({ decimals }) => decimals.toString().length))
+      return filtered.map((info, i) => ({
+        name: `${info.token}\t[${info.decimals.toString().padStart(decimalsPad)}] ${info.symbol.padEnd(symbolPad)}\t${info.name ?? ''}`,
+        value: info,
+        short: `${info.token} [${info.symbol}]`,
+        description: `${i + 1} / ${filtered.length} / ${tokens.length}`,
+      }))
+    },
   })
 }
 
-/**
- * Main entry point for token discovery process.
- *
- * Process Flow:
- * 1. Chain setup and validation
- * 2. Registry contract initialization
- * 3. Token discovery and filtering
- * 4. Detailed information gathering
- * 5. Result compilation and reporting
- *
- * Error Handling:
- * - Critical errors (chain/contract setup) halt the process
- * - Non-critical errors (individual tokens) are collected and reported
- * - Comprehensive error reporting for debugging
- *
- * Output Formats:
- * - json: Machine-readable complete output
- * - log: Basic console logging
- * - pretty: Formatted human-readable output
- */
-export async function showSupportedTokens(
-  providers: Providers,
-  argv: { source: string; router: string; dest: string; format: Format },
+function prettyRateLimiter(
+  state: RateLimiterState,
+  { decimals, symbol }: { decimals: number; symbol: string },
 ) {
-  console.log('[INFO] Starting token discovery for cross-chain transfers')
-
-  const { sourceProvider, destSelector } = await parseLaneRouter(providers, argv)
-
-  const registry = await getRegistryContract(sourceProvider, argv.router, destSelector)
-
-  let totalTokens = 0,
-    supportedTokens = 0
-  for await (const tokenBatch of fetchAllRegisteredTokens(registry)) {
-    totalTokens += tokenBatch.length
-
-    const tokenPools = await findSupportedTokens(registry, tokenBatch, destSelector)
-    supportedTokens += Object.keys(tokenPools).length
-
-    for await (const tokenDetails of yieldResolved(
-      Object.entries(tokenPools).map(([token, pool]) =>
-        fetchSupportedTokenDetails(token, pool, destSelector),
-      ),
-    )) {
-      switch (argv.format) {
-        case Format.pretty:
-          prettySupportedToken(tokenDetails)
-          break
-        case Format.log:
-          console.log(tokenDetails)
-          break
-        case Format.json:
-          console.log(JSON.stringify(tokenDetails, bigIntReplacer, 2))
-          break
-      }
-    }
+  if (!state) return null
+  return {
+    capacity: formatUnits(state.capacity, decimals) + ' ' + symbol,
+    tokens: `${formatUnits(state.tokens, decimals)} (${Math.round((Number(state.tokens) / Number(state.capacity)) * 100)}%)`,
+    rate: `${formatUnits(state.rate, decimals)}/s (0-to-full in ${formatDuration(Number(state.capacity / state.rate))})`,
+    ...(state.tokens < state.capacity && {
+      timeToFull: formatDuration(Number(state.capacity - state.tokens) / Number(state.rate)),
+    }),
   }
-
-  console.info('Summary: totalTokens =', totalTokens, ', supportedTokens =', supportedTokens)
 }

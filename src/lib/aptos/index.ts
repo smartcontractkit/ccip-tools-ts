@@ -24,7 +24,13 @@ import moize from 'moize'
 import yaml from 'yaml'
 
 import { ccipSend, getFee } from './send.ts'
-import { type ChainTransaction, type LogFilter, Chain, ChainFamily } from '../chain.ts'
+import {
+  type ChainTransaction,
+  type LogFilter,
+  type TokenPoolRemote,
+  Chain,
+  ChainFamily,
+} from '../chain.ts'
 import {
   type EVMExtraArgsV2,
   type ExtraArgs,
@@ -70,7 +76,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   readonly network: NetworkInfo<typeof ChainFamily.Aptos>
   readonly provider: Aptos
 
-  getTokenInfo: (token: string) => Promise<{ symbol: string; decimals: number }>
+  getTokenInfo: (token: string) => Promise<{ symbol: string; decimals: number; name?: string }>
   _getAccountModulesNames: (address: string) => Promise<string[]>
 
   constructor(provider: Aptos, network: NetworkInfo) {
@@ -94,10 +100,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     this.getTokenInfo = moize((token) => getTokenInfo(this.provider, token), {
       maxSize: 100,
       maxArgs: 1,
-    })
-    this.getTokenPoolForToken = moize(this.getTokenPoolForToken.bind(this), {
-      maxSize: 100,
-      maxArgs: 2,
     })
 
     this._getAccountModulesNames = moize(
@@ -255,43 +257,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     throw firstErr ?? new Error(`Could not view 'get_token' in ${tokenPool}`)
   }
 
-  getTokenAdminRegistryForOnRamp(onRamp: string): Promise<string> {
-    return Promise.resolve(onRamp.split('::')[0] + '::token_admin_registry')
-  }
-
-  async getTokenPoolForToken(registry: string, token: string): Promise<string> {
-    const res = await this.provider.view<[string]>({
-      payload: {
-        function:
-          `${registry.includes('::') ? registry : registry + '::token_admin_registry'}::get_pool` as `${string}::${string}::get_pool`,
-        functionArguments: [token],
-      },
-    })
-    return res[0]
-  }
-
-  async getRemoteTokenForTokenPool(
-    tokenPool: string,
-    remoteChainSelector: bigint,
-  ): Promise<string> {
-    const modulesNames = (await this._getAccountModulesNames(tokenPool))
-      .reverse()
-      .filter((name) => name.endsWith('token_pool'))
-    let firstErr
-    for (const name of modulesNames) {
-      try {
-        const res = await this.provider.view<[BytesLike]>({
-          payload: {
-            function: `${tokenPool}::${name}::get_remote_token`,
-            functionArguments: [remoteChainSelector],
-          },
-        })
-        return decodeAddress(res[0], networkInfo(remoteChainSelector).family)
-      } catch (err) {
-        firstErr ??= err as Error
-      }
-    }
-    throw firstErr ?? new Error(`Could not view 'get_remote_token' in ${tokenPool}`)
+  getTokenAdminRegistryFor(address: string): Promise<string> {
+    return Promise.resolve(address.split('::')[0] + '::token_admin_registry')
   }
 
   static getWallet(_opts: { wallet?: unknown } = {}): Promise<AptosAsyncAccount> {
@@ -494,6 +461,184 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       const parsedExtraArgs = this.decodeExtraArgs(data)
       if (parsedExtraArgs) return parsedExtraArgs
     }
+  }
+
+  async getSupportedTokens(address: string, opts?: { page?: number }): Promise<string[]> {
+    const res = []
+    let page,
+      nextKey = '0x0',
+      hasMore
+    do {
+      ;[page, nextKey, hasMore] = await this.provider.view<[string[], string, boolean]>({
+        payload: {
+          function:
+            `${address.split('::')[0] + '::token_admin_registry'}::get_all_configured_tokens` as `${string}::${string}::get_all_configured_tokens`,
+          functionArguments: [nextKey, (opts?.page ?? 1000) || Number.MAX_SAFE_INTEGER],
+        },
+      })
+      res.push(...page)
+    } while (hasMore)
+    return page
+  }
+
+  async getRegistryTokenConfig(
+    registry: string,
+    token: string,
+  ): Promise<{
+    administrator: string
+    pendingAdministrator?: string
+    tokenPool?: string
+  }> {
+    const [tokenPool, administrator, pendingAdministrator] = await this.provider.view<
+      [string, string, string]
+    >({
+      payload: {
+        function:
+          `${registry.includes('::') ? registry : registry + '::token_admin_registry'}::get_token_config` as `${string}::${string}::get_token_config`,
+        functionArguments: [token],
+      },
+    })
+    if (administrator.match(/^0x0*$/))
+      throw new Error(`Token=${token} not registered in registry=${registry}`)
+    return {
+      administrator,
+      ...(!pendingAdministrator.match(/^0x0*$/) && { pendingAdministrator }),
+      ...(!tokenPool.match(/^0x0*$/) && { tokenPool }),
+    }
+  }
+
+  async getTokenPoolConfigs(tokenPool: string): Promise<{
+    token: string
+    router: string
+    typeAndVersion?: string
+  }> {
+    const modulesNames = (await this._getAccountModulesNames(tokenPool))
+      .reverse()
+      .filter((name) => name.endsWith('token_pool'))
+    let firstErr
+    for (const name of modulesNames) {
+      try {
+        const [typeAndVersion, token, router] = await Promise.all([
+          this.typeAndVersion(`${tokenPool}::${name}`),
+          this.provider.view<[string]>({
+            payload: {
+              function: `${tokenPool}::${name}::get_token`,
+              functionArguments: [],
+            },
+          }),
+          this.provider.view<[string]>({
+            payload: {
+              function: `${tokenPool}::${name}::get_router`,
+              functionArguments: [],
+            },
+          }),
+        ])
+        return {
+          token: token[0],
+          router: router[0],
+          typeAndVersion: typeAndVersion[2],
+        }
+      } catch (err) {
+        firstErr ??= err as Error
+      }
+    }
+    throw firstErr ?? new Error(`Could not get tokenPool configs from ${tokenPool}`)
+  }
+
+  async getTokenPoolRemotes(
+    tokenPool: string,
+    remoteChainSelector?: bigint,
+  ): Promise<Record<string, TokenPoolRemote>> {
+    type RawRateLimiterState_ = {
+      capacity: string
+      is_enabled: boolean
+      last_updated: string
+      rate: string
+      tokens: string
+    }
+    const modulesNames = (await this._getAccountModulesNames(tokenPool))
+      .reverse()
+      .filter((name) => name.endsWith('token_pool'))
+    let firstErr
+    for (const name of modulesNames) {
+      try {
+        const [supportedChains] = remoteChainSelector
+          ? [[remoteChainSelector]]
+          : await this.provider.view<[string[]]>({
+              payload: {
+                function: `${tokenPool}::${name}::get_supported_chains`,
+                functionArguments: [],
+              },
+            })
+        return Object.fromEntries(
+          await Promise.all(
+            supportedChains.map(networkInfo).map(async (chain) => {
+              const remoteToken$ = this.provider.view<[BytesLike]>({
+                payload: {
+                  function: `${tokenPool}::${name}::get_remote_token`,
+                  functionArguments: [chain.chainSelector],
+                },
+              })
+              const remotePools$ = this.provider.view<[BytesLike[]]>({
+                payload: {
+                  function: `${tokenPool}::${name}::get_remote_pools`,
+                  functionArguments: [chain.chainSelector],
+                },
+              })
+              const inboundRateLimiterState$ = this.provider.view<[RawRateLimiterState_]>({
+                payload: {
+                  function: `${tokenPool}::${name}::get_current_inbound_rate_limiter_state`,
+                  functionArguments: [chain.chainSelector],
+                },
+              })
+              const outboundRateLimiterState$ = this.provider.view<[RawRateLimiterState_]>({
+                payload: {
+                  function: `${tokenPool}::${name}::get_current_outbound_rate_limiter_state`,
+                  functionArguments: [chain.chainSelector],
+                },
+              })
+              const [
+                [remoteToken],
+                [remotePools],
+                [inboundRateLimiterState],
+                [outboundRateLimiterState],
+              ] = await Promise.all([
+                remoteToken$,
+                remotePools$,
+                inboundRateLimiterState$,
+                outboundRateLimiterState$,
+              ])
+              return [
+                chain.name,
+                {
+                  remoteToken: decodeAddress(remoteToken, chain.family),
+                  remotePools: remotePools.map((pool) => decodeAddress(pool, chain.family)),
+                  inboundRateLimiterState: inboundRateLimiterState.is_enabled
+                    ? {
+                        capacity: BigInt(inboundRateLimiterState.capacity),
+                        lastUpdated: Number(inboundRateLimiterState.last_updated),
+                        rate: BigInt(inboundRateLimiterState.rate),
+                        tokens: BigInt(inboundRateLimiterState.tokens),
+                      }
+                    : null,
+                  outboundRateLimiterState: outboundRateLimiterState.is_enabled
+                    ? {
+                        capacity: BigInt(outboundRateLimiterState.capacity),
+                        lastUpdated: Number(outboundRateLimiterState.last_updated),
+                        rate: BigInt(outboundRateLimiterState.rate),
+                        tokens: BigInt(outboundRateLimiterState.tokens),
+                      }
+                    : null,
+                },
+              ] as const
+            }),
+          ),
+        )
+      } catch (err) {
+        firstErr ??= err as Error
+      }
+    }
+    throw firstErr ?? new Error(`Could not view 'get_remote_token' in ${tokenPool}`)
   }
 }
 

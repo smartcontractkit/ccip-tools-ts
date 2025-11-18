@@ -1,5 +1,4 @@
 import { select } from '@inquirer/prompts'
-import bs58 from 'bs58'
 import {
   dataLength,
   formatUnits,
@@ -131,6 +130,7 @@ function formatDate(timestamp: number) {
 
 export function formatDuration(secs: number) {
   if (secs < 0) secs = -secs
+  if (secs >= 118 && Math.floor(secs) % 60 >= 58) secs += 60 - (secs % 60) // round up 58+s
   const time = {
     d: Math.floor(secs / 86400),
     h: Math.floor(secs / 3600) % 24,
@@ -321,7 +321,8 @@ export function prettyTable(
     if (isBytesLike(value)) {
       let parseError
       if (opts.parseErrorKeys.includes(key)) parseError = true
-      out.push(...Object.entries(formatData(key, hexlify(value), parseError)))
+      if (dataLength(value) <= 32 && !parseError) out.push([key, value])
+      else out.push(...Object.entries(formatData(key, hexlify(value), parseError)))
     } else if (typeof value === 'string') {
       out.push(
         ...wrapText(value, Math.max(100, +(process.env.COLUMNS || 80) * 0.9)).map(
@@ -407,48 +408,4 @@ export async function* yieldResolved<T>(promises: readonly Promise<T>[]): AsyncG
     map.delete(p)
     yield res
   }
-}
-
-export async function sourceToDestTokenAmounts<S extends { token: string; amount: bigint }>(
-  source: Chain,
-  destChainSelector: bigint,
-  onRamp: string,
-  sourceTokenAmounts: readonly S[],
-): Promise<(Omit<S, 'token'> & { sourcePoolAddress: string; destTokenAddress: string })[]> {
-  const tokenAdminRegistry = await source.getTokenAdminRegistryForOnRamp(onRamp)
-  return Promise.all(
-    sourceTokenAmounts.map(async ({ token, ...rest }) => {
-      const sourcePoolAddress = await source.getTokenPoolForToken(tokenAdminRegistry, token)
-      const destTokenAddress = await source.getRemoteTokenForTokenPool(
-        sourcePoolAddress,
-        destChainSelector,
-      )
-      return { ...rest, sourcePoolAddress, destTokenAddress }
-    }),
-  )
-}
-
-/**
- * Validate transaction hash - supports EVM and Solana formats
- * @param tx_hash - Transaction hash to validate
- * @returns true if valid, throws Error if invalid
- */
-export function validateSupportedTxHash(tx_hash: string): boolean {
-  // EVM transaction hash (hex, 32 bytes)
-  if (isHexString(tx_hash, 32)) return true
-
-  // Solana transaction signature (base58, exactly 64 bytes when decoded)
-  try {
-    const decoded = bs58.decode(tx_hash)
-    if (decoded.length === 64) return true
-  } catch {
-    // Invalid base58 or decoding error
-  }
-
-  throw new Error(
-    'Only EVM and Solana transactions are currently supported.\n' +
-      'Transaction hash must be a valid format:\n' +
-      '  • EVM: 32-byte hex string (0x...)\n' +
-      '  • Solana: base58 signature (64 bytes when decoded)',
-  )
 }

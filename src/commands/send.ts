@@ -3,13 +3,7 @@ import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
 import { Format } from './types.ts'
-import {
-  logParsedError,
-  parseTokenAmounts,
-  prettyRequest,
-  sourceToDestTokenAmounts,
-  withDateTimestamp,
-} from './utils.ts'
+import { logParsedError, parseTokenAmounts, prettyRequest, withDateTimestamp } from './utils.ts'
 import type { EVMChain } from '../lib/evm/index.ts'
 import type { ExtraArgs } from '../lib/extra-args.ts'
 import {
@@ -19,6 +13,7 @@ import {
   estimateExecGasForRequest,
   fetchCCIPMessagesInTx,
   networkInfo,
+  sourceToDestTokenAmounts,
 } from '../lib/index.ts'
 import type { AnyMessage } from '../lib/types.ts'
 import { getDataBytes } from '../lib/utils.ts'
@@ -112,6 +107,10 @@ export const builder = (yargs: Argv) =>
         type: 'boolean',
         describe: 'Fetch and print the fee for the transaction, then exit',
       },
+      'only-estimate': {
+        type: 'boolean',
+        describe: 'Only estimate dest exec gasLimit',
+      },
       'approve-max': {
         type: 'boolean',
         describe:
@@ -195,7 +194,8 @@ async function sendMessage(
     receiver = await source.getWalletAddress(argv) // send to self if same family
   }
 
-  if (argv.estimateGasLimit != null) {
+  if (argv.estimateGasLimit != null || argv.onlyEstimate) {
+    // TODO: implement for all chain families
     if (destNetwork.family !== ChainFamily.EVM)
       throw new Error(`Estimating gasLimit supported only on EVM, got=${destNetwork.family}`)
     const dest = (await getChain(destNetwork.chainSelector)) as unknown as EVMChain
@@ -223,7 +223,8 @@ async function sendMessage(
       },
     })
     console.log('Estimated gasLimit:', estimated)
-    argv.gasLimit = Math.ceil(estimated * (1 + argv.estimateGasLimit / 100))
+    argv.gasLimit = Math.ceil(estimated * (1 + (argv.estimateGasLimit ?? 0) / 100))
+    if (argv.onlyEstimate) return
   }
 
   // `--allow-out-of-order-exec` forces EVMExtraArgsV2, which shouldn't work on v1.2 lanes;

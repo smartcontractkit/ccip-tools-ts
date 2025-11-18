@@ -104,18 +104,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  getTokenAdminRegistryForOnRamp(_onRamp: string): Promise<string> {
-    return Promise.reject(new Error('Not implemented'))
-  }
-
-  async getTokenPoolForToken(_registry: string, _token: string): Promise<string> {
-    return Promise.reject(new Error('Not implemented'))
-  }
-
-  async getRemoteTokenForTokenPool(
-    _tokenPool: string,
-    _remoteChainSelector: bigint,
-  ): Promise<string> {
+  getTokenAdminRegistryFor(_address: string): Promise<string> {
     return Promise.reject(new Error('Not implemented'))
   }
 
@@ -191,6 +180,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       const parsedExtraArgs = this.decodeExtraArgs(data)
       if (parsedExtraArgs) return parsedExtraArgs
     }
+  }
+
+  async getSupportedTokens(_address: string): Promise<string[]> {
+    return Promise.reject(new Error('Not implemented'))
   }
 }
 

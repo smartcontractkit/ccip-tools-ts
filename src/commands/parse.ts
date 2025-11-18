@@ -25,7 +25,7 @@ export function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & Glob
   }
 }
 
-export function parseBytes(argv: Parameters<typeof handler>[0]) {
+function parseBytes(argv: Parameters<typeof handler>[0]) {
   let parsed
   for (const chain of Object.values(supportedChains)) {
     try {

@@ -10,7 +10,6 @@ import {
   prettyReceipt,
   prettyRequest,
   selectRequest,
-  validateSupportedTxHash,
   withDateTimestamp,
 } from './utils.ts'
 import { discoverOffRamp } from '../lib/execution.ts'
@@ -45,7 +44,6 @@ export const builder = (yargs: Argv) =>
           'Search by messageId instead of tx_hash; requires specifying source network (by id or name)',
       },
     })
-    .check(({ 'tx-hash': txHash }) => validateSupportedTxHash(txHash))
 
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
   let destroy

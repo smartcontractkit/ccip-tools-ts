@@ -8,7 +8,7 @@ import type { CCIPVersion, MergeArrayElements } from '../types.ts'
 import { defaultAbiCoder } from './const.ts'
 
 // addresses often come as `string | Addressable`, this type cleans them up to just `string`
-type CleanAddressable<T> = T extends string | Addressable
+export type CleanAddressable<T> = T extends string | Addressable
   ? string
   : T extends Record<string, unknown>
     ? { [K in keyof T]: CleanAddressable<T[K]> }

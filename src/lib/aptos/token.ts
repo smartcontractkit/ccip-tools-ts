@@ -3,7 +3,7 @@ import type { Aptos } from '@aptos-labs/ts-sdk'
 export async function getTokenInfo(
   provider: Aptos,
   token: string,
-): Promise<{ symbol: string; decimals: number }> {
+): Promise<{ name?: string; symbol: string; decimals: number }> {
   let lastErr: Error | undefined
 
   // First, try to get info from Fungible Asset metadata resource
@@ -12,9 +12,14 @@ export async function getTokenInfo(
     const metadataResource = resources.find((r) => r.type === '0x1::fungible_asset::Metadata')
 
     if (metadataResource?.data) {
-      const metadata = metadataResource.data as { symbol?: string; decimals?: number }
+      const metadata = metadataResource.data as {
+        name?: string
+        symbol?: string
+        decimals?: number
+      }
       if (metadata.symbol !== undefined && metadata.decimals !== undefined) {
         return {
+          name: metadata.name,
           symbol: metadata.symbol,
           decimals: metadata.decimals,
         }
@@ -40,7 +45,21 @@ export async function getTokenInfo(
       },
     })
 
+    let name: string | undefined
+    try {
+      const nameRes = await provider.view({
+        payload: {
+          function: '0x1::coin::name',
+          typeArguments: [token],
+        },
+      })
+      name = nameRes[0] as string
+    } catch {
+      // name function not available, continue without it
+    }
+
     return {
+      name,
       symbol: symbolRes[0] as string,
       decimals: decimalsRes[0] as number,
     }
@@ -68,7 +87,20 @@ export async function getTokenInfo(
         },
       })
 
+      let name: string | undefined
+      try {
+        const nameRes = await provider.view({
+          payload: {
+            function: `${token}::${moduleName}::name`,
+          },
+        })
+        name = nameRes[0] as string
+      } catch {
+        // name function not available, continue without it
+      }
+
       return {
+        name,
         symbol: symbolRes[0] as string,
         decimals: decimalsRes[0] as number,
       }
@@ -93,7 +125,20 @@ export async function getTokenInfo(
         },
       })
 
+      let name: string | undefined
+      try {
+        const nameRes = await provider.view({
+          payload: {
+            function: `${token}::${pattern}::name`,
+          },
+        })
+        name = nameRes[0] as string
+      } catch {
+        // name function not available, continue without it
+      }
+
       return {
+        name,
         symbol: symbolRes[0] as string,
         decimals: decimalsRes[0] as number,
       }
