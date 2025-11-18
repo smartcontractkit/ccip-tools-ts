@@ -480,6 +480,17 @@ const selectors: Selectors = {
   // end:generate
 
   // generate:
+  // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors_sui.yml')
+  //   .then((res) => res.text())
+  //   .then((body) => require('yaml').parse(body, { intAsBigInt: true }).selectors)
+  //   .then((obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [`sui:${k}`, v])))
+  //   .then((obj) => [...require('util').inspect(obj).split('\n').slice(1, -1), ','])
+  'sui:1': { name: 'sui-mainnet', selector: 17529533435026248318n },
+  'sui:2': { name: 'sui-testnet', selector: 9762610643973837292n },
+  'sui:4': { name: 'sui-localnet', selector: 18395503381733958356n },
+  // end:generate
+
+  // generate:
   // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors_solana.yml')
   //   .then((res) => res.text())
   //   .then((body) => require('yaml').parse(body, { intAsBigInt: true }).selectors)

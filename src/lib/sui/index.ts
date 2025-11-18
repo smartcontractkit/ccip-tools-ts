@@ -185,6 +185,18 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   async getSupportedTokens(_address: string): Promise<string[]> {
     return Promise.reject(new Error('Not implemented'))
   }
+
+  async getRegistryTokenConfig(_address: string, _tokenName: string): Promise<never> {
+    return Promise.reject(new Error('Not implemented'))
+  }
+
+  async getTokenPoolConfigs(_tokenPool: string): Promise<never> {
+    return Promise.reject(new Error('Not implemented'))
+  }
+
+  async getTokenPoolRemotes(_tokenPool: string): Promise<never> {
+    return Promise.reject(new Error('Not implemented'))
+  }
 }
 
 supportedChains[ChainFamily.Sui] = SuiChain
