@@ -11,6 +11,9 @@ export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
 export {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
+  type ExtraArgs,
+  type SVMExtraArgsV1,
+  type SuiExtraArgsV1,
   encodeExtraArgs,
   parseExtraArgs,
 } from './extra-args.ts'

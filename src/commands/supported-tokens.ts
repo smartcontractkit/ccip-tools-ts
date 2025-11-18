@@ -116,7 +116,7 @@ async function getSupportedTokens(argv: Parameters<typeof handler>[0], destroy: 
       console.log(JSON.stringify({ ...info, tokenPool, ...poolConfigs }, bigIntReplacer, 2))
       return
     } else if (argv.format === Format.log) {
-      console.log('Token:', decodeAddress(argv.address, source.network.family), info)
+      console.log('Token:', poolConfigs.token, info)
       console.log('Token Pool:', tokenPool)
       console.log('Pool Configs:', poolConfigs)
       return
@@ -135,7 +135,7 @@ async function getSupportedTokens(argv: Parameters<typeof handler>[0], destroy: 
   const remotes = await source.getTokenPoolRemotes(tokenPool)
 
   prettyTable({
-    network: source.network.name,
+    network: `${source.network.name} [${source.network.chainSelector}]`,
     token: poolConfigs.token,
     symbol: info.symbol,
     name: info.name,
@@ -153,7 +153,7 @@ async function getSupportedTokens(argv: Parameters<typeof handler>[0], destroy: 
   if (remotesLen > 0) console.info('Remotes [', remotesLen, ']:')
   for (const [network, remote] of Object.entries(remotes))
     prettyTable({
-      remoteNetwork: network,
+      remoteNetwork: `${network} [${networkInfo(network).chainSelector}]`,
       remoteToken: remote.remoteToken,
       remotePool: remote.remotePools,
       inbound: prettyRateLimiter(remote.inboundRateLimiterState, info),

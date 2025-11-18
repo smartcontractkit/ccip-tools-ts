@@ -248,7 +248,7 @@ async function deriveAccountsCcipSend({
   }
 }
 
-async function simulateAndSendTxs(
+export async function simulateAndSendTxs(
   connection: Connection,
   feePayer: AnchorProvider['wallet'],
   instructions: TransactionInstruction[],
