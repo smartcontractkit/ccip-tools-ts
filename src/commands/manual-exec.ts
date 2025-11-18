@@ -148,13 +148,9 @@ async function manualExec(
       break
   }
 
-  const requestsInBatch =
-    commit.report.minSeqNr === commit.report.maxSeqNr
-      ? [request]
-      : await fetchAllMessagesInBatch(source, request, commit.report, argv)
-
+  const messagesInBatch = await fetchAllMessagesInBatch(source, request, commit.report, argv)
   const execReportProof = calculateManualExecProof(
-    requestsInBatch.map(({ message }) => message),
+    messagesInBatch,
     request.lane,
     request.message.header.messageId,
     commit.report.merkleRoot,

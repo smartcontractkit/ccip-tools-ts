@@ -156,29 +156,30 @@ export async function fetchCCIPMessageById(
 const BLOCK_LOG_WINDOW_SIZE = 5000
 
 // Helper function to find the sequence number from CCIPSendRequested event logs
-export async function fetchAllMessagesInBatch(
+export async function fetchAllMessagesInBatch<R extends Omit<CCIPRequest, 'tx' | 'timestamp'>>(
   source: Chain,
-  request: Omit<CCIPRequest, 'tx' | 'timestamp'>,
-  { minSeqNr: min, maxSeqNr: max }: { minSeqNr: bigint; maxSeqNr: bigint },
+  request: R,
+  { minSeqNr, maxSeqNr }: { minSeqNr: bigint; maxSeqNr: bigint },
   { page: eventsBatchSize = BLOCK_LOG_WINDOW_SIZE }: { page?: number } = {},
-): Promise<Omit<CCIPRequest, 'tx' | 'timestamp'>[]> {
-  if (min === max) return [request]
+): Promise<R['message'][]> {
+  if (minSeqNr === maxSeqNr) return [request.message]
 
   const filter: LogFilter = {
     page: eventsBatchSize,
     topics: [request.log.topics[0]],
     address: request.log.address,
   }
-  if (request.message.header.sequenceNumber === max) filter.endBlock = request.log.blockNumber
+  if (request.message.header.sequenceNumber === maxSeqNr) filter.endBlock = request.log.blockNumber
   else
     // start proportionally before send request block, including case when seqNum==min => startBlock
     filter.startBlock =
       request.log.blockNumber -
       Math.ceil(
-        (Number(request.message.header.sequenceNumber - min) / Number(max - min)) * eventsBatchSize,
+        (Number(request.message.header.sequenceNumber - minSeqNr) / Number(maxSeqNr - minSeqNr)) *
+          eventsBatchSize,
       )
 
-  const events: Omit<CCIPRequest, 'tx' | 'timestamp'>[] = []
+  const messages: R['message'][] = []
   if (filter.startBlock) {
     // forward
     let backwardsBefore, backwardsEndBlock
@@ -192,11 +193,11 @@ export async function fetchAllMessagesInBatch(
           message.header.destChainSelector !== request.lane.destChainSelector)
       )
         continue
-      if (message.header.sequenceNumber < min) continue
-      events.push({ lane: request.lane, message, log })
-      if (message.header.sequenceNumber >= max) break
+      if (message.header.sequenceNumber < minSeqNr) continue
+      messages.push(message)
+      if (message.header.sequenceNumber >= maxSeqNr) break
     }
-    if (events.length && events[0].message.header.sequenceNumber > min) {
+    if (messages.length && messages[0].header.sequenceNumber > minSeqNr) {
       // still work to be done backwards
       delete filter['startBlock']
       filter['endBlock'] = backwardsEndBlock
@@ -213,17 +214,17 @@ export async function fetchAllMessagesInBatch(
           message.header.destChainSelector !== request.lane.destChainSelector)
       )
         continue
-      events.unshift({ lane: request.lane, message, log })
-      if (message.header.sequenceNumber <= min) break
+      messages.unshift(message)
+      if (message.header.sequenceNumber <= minSeqNr) break
     }
   }
 
-  if (events.length != Number(max - min) + 1) {
+  if (messages.length != Number(maxSeqNr - minSeqNr) + 1) {
     throw new Error(
-      `Could not find all expected request events: from=${request.log.blockNumber}, wanted=[${Number(min)}..${Number(max)}:${Number(max - min) + 1}], got=[${events.map((e) => Number(e.message.header.sequenceNumber)).join(',')}]`,
+      `Could not find all expected request events: from=${request.log.blockNumber}, wanted=[${Number(minSeqNr)}..${Number(maxSeqNr)}:${Number(maxSeqNr - minSeqNr) + 1}], got=[${messages.map((e) => Number(e.header.sequenceNumber)).join(',')}]`,
     )
   }
-  return events
+  return messages
 }
 
 export async function* fetchRequestsForSender(

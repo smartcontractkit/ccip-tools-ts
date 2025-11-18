@@ -57,7 +57,7 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
 }
 
 export const discoverOffRamp = moize(
-  async function (source: Chain, dest: Chain, onRamp: string): Promise<string> {
+  async function discoverOffRamp_(source: Chain, dest: Chain, onRamp: string): Promise<string> {
     const sourceRouter = await source.getRouterForOnRamp(onRamp, dest.network.chainSelector)
     const sourceOffRamps = await source.getOffRampsForRouter(
       sourceRouter,
