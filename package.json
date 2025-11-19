@@ -10,6 +10,10 @@
   "module": "dist/lib/index.js",
   "types": "dist/lib/index.d.ts",
   "bin": "dist/ccip-tools-ts",
+  "exports": {
+    ".": "./dist/lib/index.js",
+    "./src/*": "./src/*"
+  },
   "scripts": {
     "test": "jest",
     "lint": "prettier --check ./src && eslint ./src",
@@ -23,7 +27,11 @@
     "prepare": "npm run build"
   },
   "files": [
-    "./dist/**"
+    "dist",
+    "src",
+    "!src/**/*.test.*",
+    "!src/**/__tests__",
+    "!src/**/__mocks__"
   ],
   "devDependencies": {
     "@eslint/js": "9.39.1",
@@ -68,6 +76,9 @@
     "tslib": "2.8.1",
     "yaml": "2.8.1",
     "yargs": "18.0.0"
+  },
+  "overrides": {
+    "axios": "^1.13.2"
   },
   "prettier": {
     "trailingComma": "all",
