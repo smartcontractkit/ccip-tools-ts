@@ -18,10 +18,10 @@ import { SolanaChain } from '../lib/index.ts'
 
 export class LedgerSolanaWallet {
   publicKey: PublicKey
-  wallet: SolanaLedger
+  wallet: SolanaLedger.default
   path: string
 
-  private constructor(solanaLW: SolanaLedger, pubKey: PublicKey, path: string) {
+  private constructor(solanaLW: SolanaLedger.default, pubKey: PublicKey, path: string) {
     this.wallet = solanaLW
     this.publicKey = pubKey
     this.path = path
@@ -29,8 +29,8 @@ export class LedgerSolanaWallet {
 
   static async create(path: string) {
     try {
-      const transport = await HIDTransport.create()
-      const solana = new SolanaLedger(transport)
+      const transport = await HIDTransport.default.create()
+      const solana = new SolanaLedger.default(transport)
       const { address } = await solana.getAddress(path, false)
       const pubkey = new PublicKey(address)
       console.info('Ledger connected:', pubkey.toBase58(), `, derivationPath:`, path)

@@ -23,11 +23,15 @@ import { AptosChain } from '../lib/index.ts'
 // transactions via a ledger hardware wallet.
 export class AptosLedgerSigner implements AptosAsyncAccount {
   derivationPath: string
-  readonly client: AptosLedger
+  readonly client: AptosLedger.default
   readonly publicKey: Ed25519PublicKey
   readonly accountAddress: AccountAddress
 
-  private constructor(ledgerClient: AptosLedger, derivationPath: string, publicKey: BytesLike) {
+  private constructor(
+    ledgerClient: AptosLedger.default,
+    derivationPath: string,
+    publicKey: BytesLike,
+  ) {
     this.client = ledgerClient
     this.derivationPath = derivationPath
     this.publicKey = new Ed25519PublicKey(publicKey)
@@ -38,8 +42,8 @@ export class AptosLedgerSigner implements AptosAsyncAccount {
   }
 
   static async create(derivationPath: string) {
-    const transport = await HIDTransport.create()
-    const client = new AptosLedger(transport)
+    const transport = await HIDTransport.default.create()
+    const client = new AptosLedger.default(transport)
     const { publicKey } = await client.getAddress(derivationPath)
     return new AptosLedgerSigner(client, derivationPath, publicKey)
   }

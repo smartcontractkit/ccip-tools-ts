@@ -86,30 +86,33 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     }
     this.provider = provider
     this.network = network
-    this.typeAndVersion = moize(this.typeAndVersion.bind(this), {
+    this.typeAndVersion = moize.default(this.typeAndVersion.bind(this), {
       maxSize: 100,
       maxArgs: 1,
       maxAge: 60e3, // 1min
     })
-    this.getTransaction = moize(this.getTransaction.bind(this), { maxSize: 100, maxArgs: 1 })
-    this.getTokenForTokenPool = moize(this.getTokenForTokenPool.bind(this), {
+    this.getTransaction = moize.default(this.getTransaction.bind(this), {
       maxSize: 100,
       maxArgs: 1,
     })
-    this.getTokenInfo = moize((token) => getTokenInfo(this.provider, token), {
+    this.getTokenForTokenPool = moize.default(this.getTokenForTokenPool.bind(this), {
+      maxSize: 100,
+      maxArgs: 1,
+    })
+    this.getTokenInfo = moize.default((token) => getTokenInfo(this.provider, token), {
       maxSize: 100,
       maxArgs: 1,
     })
 
-    this._getAccountModulesNames = moize(
+    this._getAccountModulesNames = moize.default(
       (address) =>
         this.provider
           .getAccountModules({ accountAddress: address })
           .then((modules) => modules.map(({ abi }) => abi!.name)),
       { maxSize: 100, maxArgs: 1 },
     )
-    this.getWallet = moize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
-    this.provider.getTransactionByVersion = moize(
+    this.getWallet = moize.default(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
+    this.provider.getTransactionByVersion = moize.default(
       this.provider.getTransactionByVersion.bind(this.provider),
       {
         maxSize: 100,

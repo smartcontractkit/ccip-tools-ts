@@ -31,7 +31,7 @@ export async function cleanUpBuffers(
 
   const seenAccs = new Set<string>()
   const pendingPromises = []
-  const getCurrentSlot = moize(
+  const getCurrentSlot = moize.default(
     async () => {
       let lastErr
       for (let i = 0; i < 10; i++) {

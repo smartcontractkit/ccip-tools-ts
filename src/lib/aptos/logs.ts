@@ -75,7 +75,7 @@ async function* fetchEventsForward(
   stateAddr: string,
   limit = 100,
 ): AsyncGenerator<ResEvent> {
-  const fetchBatch = moize(
+  const fetchBatch = moize.default(
     async (start?: number) => {
       const { data }: { data: ResEvent[] } = await getAptosFullNode({
         aptosConfig: provider.config,

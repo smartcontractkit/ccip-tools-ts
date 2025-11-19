@@ -27,7 +27,7 @@ import {
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
-import moize from 'moize'
+import moize, { type Key } from 'moize'
 
 import {
   DEFAULT_APPROVE_GAS_LIMIT,
@@ -147,23 +147,25 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.network = network
     this.provider = provider
 
-    this.typeAndVersion = moize(this.typeAndVersion.bind(this))
-    this.getBlockTimestamp = moize(this.getBlockTimestamp.bind(this), {
+    this.typeAndVersion = moize.default(this.typeAndVersion.bind(this))
+    this.getBlockTimestamp = moize.default(this.getBlockTimestamp.bind(this), {
       maxSize: 100,
-      updateCacheForKey: (key) => typeof key[key.length - 1] !== 'number',
+      updateCacheForKey: (key: Key[]) => typeof key[key.length - 1] !== 'number',
     })
-    this.getTransaction = moize(this.getTransaction.bind(this), {
+    this.getTransaction = moize.default(this.getTransaction.bind(this), {
       maxSize: 100,
-      transformArgs: (args) =>
-        typeof args[0] !== 'string' ? [(args[0] as TransactionReceipt).hash] : (args as string[]),
+      transformArgs: (args: Key[]) =>
+        typeof args[0] !== 'string'
+          ? [(args[0] as unknown as TransactionReceipt).hash]
+          : (args as unknown as string[]),
     })
-    this.getTokenForTokenPool = moize(this.getTokenForTokenPool.bind(this))
-    this.getNativeTokenForRouter = moize(this.getNativeTokenForRouter.bind(this), {
+    this.getTokenForTokenPool = moize.default(this.getTokenForTokenPool.bind(this))
+    this.getNativeTokenForRouter = moize.default(this.getNativeTokenForRouter.bind(this), {
       maxArgs: 1,
       isPromise: true,
     })
-    this.getTokenInfo = moize(this.getTokenInfo.bind(this))
-    this.getWallet = moize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
+    this.getTokenInfo = moize.default(this.getTokenInfo.bind(this))
+    this.getWallet = moize.default(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
   }
 
   // overwrite EVMChain.getWallet to implement custom wallet loading

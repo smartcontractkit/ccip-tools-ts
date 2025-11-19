@@ -150,17 +150,23 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     this.connection = connection
 
     // Memoize expensive operations
-    this.typeAndVersion = moize(this.typeAndVersion.bind(this), { maxArgs: 1, isPromise: true })
-    this.getBlockTimestamp = moize(this.getBlockTimestamp.bind(this), {
+    this.typeAndVersion = moize.default(this.typeAndVersion.bind(this), {
+      maxArgs: 1,
+      isPromise: true,
+    })
+    this.getBlockTimestamp = moize.default(this.getBlockTimestamp.bind(this), {
       isPromise: true,
       maxSize: 100,
       updateCacheForKey: (key) => typeof key[key.length - 1] !== 'number',
     })
-    this.getTransaction = moize(this.getTransaction.bind(this), { maxSize: 100, maxArgs: 1 })
-    this.getWallet = moize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
-    this.getTokenForTokenPool = moize(this.getTokenForTokenPool.bind(this))
-    this.getTokenInfo = moize(this.getTokenInfo.bind(this))
-    this._getSignaturesForAddress = moize(
+    this.getTransaction = moize.default(this.getTransaction.bind(this), {
+      maxSize: 100,
+      maxArgs: 1,
+    })
+    this.getWallet = moize.default(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
+    this.getTokenForTokenPool = moize.default(this.getTokenForTokenPool.bind(this))
+    this.getTokenInfo = moize.default(this.getTokenInfo.bind(this))
+    this._getSignaturesForAddress = moize.default(
       (programId: string, before?: string) =>
         this.connection.getSignaturesForAddress(
           new PublicKey(programId),
@@ -178,13 +184,16 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       },
     )
     // cache account info for 30 seconds
-    this.connection.getAccountInfo = moize(this.connection.getAccountInfo.bind(this.connection), {
-      maxSize: 100,
-      maxArgs: 2,
-      maxAge: 30e3,
-      transformArgs: ([address, commitment]) =>
-        [(address as PublicKey).toString(), commitment] as const,
-    })
+    this.connection.getAccountInfo = moize.default(
+      this.connection.getAccountInfo.bind(this.connection),
+      {
+        maxSize: 100,
+        maxArgs: 2,
+        maxAge: 30e3,
+        transformArgs: ([address, commitment]) =>
+          [(address as PublicKey).toString(), commitment] as const,
+      },
+    )
   }
 
   static _getConnection(url: string): Connection {
