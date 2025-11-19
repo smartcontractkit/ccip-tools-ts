@@ -1,7 +1,9 @@
 import { ZeroAddress, getBigInt } from 'ethers'
 
-import type { CCIPMessage, CCIPVersion } from '../types.ts'
+import '../index.ts'
+import type { CCIPMessage, CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
+import type { CCIPMessage_V1_6_EVM } from './messages.ts'
 
 describe('EVM leaf hasher', () => {
   it('should hash v1.5 msg', () => {
@@ -56,7 +58,7 @@ describe('EVM leaf hasher', () => {
     }
     const extraArgs =
       '0x181dcf100000000000000000000000000000000000000000000000005eb3e65ecb9fb54e0000000000000000000000000000000000000000000000000000000000000001'
-    const message: CCIPMessage<typeof CCIPVersion.V1_6> = {
+    const message: CCIPMessage_V1_6 = {
       header,
       sender: '0x00000000000000000000000021aa8a422bfb1a82e254331259c1cbbea7408b44',
       receiver: '0x56ad368c27ab9a428e9992c3843c79a35830794a',
@@ -125,7 +127,7 @@ describe('EVM leaf hasher', () => {
       ].map((ta) => ({ ...ta, destGasAmount: getBigInt(ta.destExecData) })),
     }
 
-    const msgHash = hasher(message)
+    const msgHash = hasher(message as CCIPMessage_V1_6_EVM)
     expect(msgHash).toBe('0xd56d9f4c0b0bb9cb8c83aeb676a02d5666583eee7d6d4660c87a06a9b36aa352')
   })
 })

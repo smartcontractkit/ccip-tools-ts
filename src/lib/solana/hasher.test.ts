@@ -49,7 +49,7 @@ describe('MessageHasher', () => {
       feeValueJuels: 0n,
       feeTokenAmount: 0n,
       extraArgs: '', // decoded extraArgs below
-      computeUnits: 1_000,
+      computeUnits: 1_000n,
       accountIsWritableBitmap: 1n,
       allowOutOfOrderExecution: false,
       tokenReceiver: 'DS2tt4BX7YwCw7yrDNwbAdnYrxjeCPeGJbHmZEYC8RTb',
@@ -102,7 +102,7 @@ describe('MessageHasher', () => {
           destGasAmount: 320000n,
         },
       ],
-      computeUnits: 100000,
+      computeUnits: 100_000n,
       accountIsWritableBitmap: 3n,
       allowOutOfOrderExecution: true,
       tokenReceiver: '9e9yTkeXWKbhnTTRqeLnZtAQBCttFKP9Wwk2Scmefdgo',

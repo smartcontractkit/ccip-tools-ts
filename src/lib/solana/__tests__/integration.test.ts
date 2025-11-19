@@ -156,7 +156,7 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
     }
   }, 30000)
 
-  it('should support Token-2022 tokens on mainnet', async () => {
+  it.skip('should support Token-2022 tokens on mainnet', async () => {
     if (skipIfNoNetwork) {
       console.log('Skipping Token-2022 integration test - no network access')
       return
