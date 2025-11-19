@@ -94,14 +94,12 @@
     ],
     "moduleNameMapper": {
       "^@solana/web3\\.js$": "@solana/web3.js",
-      "^bn\\.js$": "bn.js",
-      "(.+)\\.ts$": "$1"
+      "^bn\\.js$": "bn.js"
     },
     "transform": {
       "^.+\\.ts$": [
         "ts-jest",
         {
-          "useESM": true,
           "tsconfig": "tsconfig.test.json"
         }
       ]
