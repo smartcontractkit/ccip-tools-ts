@@ -93,9 +93,9 @@ export function fetchChainsFromRpcs(
         pendingPromises.push(
           chain$.then((chain) => {
             if (chain.network.name in chains && !(chain.network.name in chainsCbs))
-              return chain.destroy() // lost race
+              return chain.destroy?.() // lost race
             void destroy?.finally(() => {
-              void chain.destroy() // cleanup
+              void chain.destroy?.() // cleanup
             })
             if (!(chain.network.name in chains)) {
               chains[chain.network.name] = Promise.resolve(chain)

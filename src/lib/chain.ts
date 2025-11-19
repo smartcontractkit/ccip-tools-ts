@@ -343,7 +343,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * @param log - Chain generic log
    * @returns decoded CCIP message with merged extraArgs
    */
-  decodeMessage(log: Log_): CCIPMessage | undefined
+  decodeMessage(log: Pick<Log_, 'data'>): CCIPMessage | undefined
   /**
    * Try to decode an extraArgs array serialized for this chain family
    * @param extraArgs - extra args bytes (Uint8Array, HexString or base64)

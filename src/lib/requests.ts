@@ -1,5 +1,6 @@
 import util from 'util'
 
+import { isBytesLike, toBigInt } from 'ethers'
 import yaml from 'yaml'
 
 import {
@@ -13,50 +14,92 @@ import type { EVMChain } from './evm/index.ts'
 import { parseExtraArgs } from './extra-args.ts'
 import { supportedChains } from './supported-chains.ts'
 import type { CCIPMessage, CCIPRequest, CCIPVersion, Log_ } from './types.ts'
-import { convertKeysToCamelCase, decodeAddress, networkInfo } from './utils.ts'
+import { convertKeysToCamelCase, decodeAddress, leToBigInt, networkInfo } from './utils.ts'
+
+function decodeJsonMessage(data: Record<string, unknown>) {
+  if (!data || typeof data != 'object') throw new Error(`invalid msg: ${util.inspect(data)}`)
+  if (data.message) data = data.message as Record<string, unknown>
+  let data_ = data as Record<string, unknown> & {
+    header: {
+      dest_chain_selector?: string
+      destChainSelector?: string
+      sourceChainSelector?: string
+      source_chain_selector?: string
+    }
+    sourceChainSelector?: string
+    extraArgs?: string
+    tokenAmounts: {
+      destExecData: string
+      destGasAmount?: bigint
+    }[]
+  }
+  const sourceChainSelector =
+    data_.header.sourceChainSelector ??
+    data_.header.source_chain_selector ??
+    data_.sourceChainSelector
+  if (!sourceChainSelector) throw new Error(`invalid msg: ${util.inspect(data)}`)
+  const sourceNetwork = networkInfo(sourceChainSelector)
+  if (!data_.header) {
+    const header = {
+      sourceChainSelector: data_.sourceChainSelector,
+      messageId: data_.messageId,
+      nonce: data_.nonce,
+      sequenceNumber: data_.sequenceNumber,
+    }
+    data_.header = header
+  }
+
+  const destChainSelector = data_.header.dest_chain_selector ?? data_.header.destChainSelector
+  if (destChainSelector) {
+    const destFamily = networkInfo(destChainSelector).family
+    data_ = convertKeysToCamelCase(data_, (v, k) =>
+      typeof v === 'string' && v.match(/^\d+$/)
+        ? BigInt(v)
+        : k === 'receiver' || k === 'destTokenAddress'
+          ? decodeAddress(v as string, destFamily)
+          : v,
+    ) as typeof data_
+  }
+
+  for (const ta of data_.tokenAmounts) {
+    if (ta.destGasAmount != null || ta.destExecData == null) continue
+    switch (sourceNetwork.family) {
+      // EVM & Solana encode destExecData as big-endian
+      case ChainFamily.EVM:
+      case ChainFamily.Solana:
+        ta.destGasAmount = toBigInt(ta.destExecData)
+        break
+      // Aptos & Sui, as little-endian
+      default:
+        ta.destGasAmount = leToBigInt(ta.destExecData)
+    }
+  }
+
+  if (data_.extraArgs) {
+    const extraArgs = parseExtraArgs(data_.extraArgs ?? '', sourceNetwork.family)
+    if (extraArgs) {
+      const { _tag, ...rest } = extraArgs
+      Object.assign(data_, rest)
+    }
+  }
+  return data_ as unknown as CCIPMessage
+}
 
 /**
  * Decodes hex strings, bytearrays, JSON strings and raw objects as CCIPMessages
  * Does minimal validation, but converts objects in the format expected by ccip-tools-ts
  **/
 export function decodeMessage(data: string | Uint8Array | Record<string, unknown>): CCIPMessage {
-  if (typeof data === 'string' && data.startsWith('{')) {
-    data = yaml.parse(data, { intAsBigInt: true }) as Record<string, unknown>
-    if (!data || typeof data != 'object') throw new Error(`invalid msg: ${util.inspect(data)}`)
-    if (data.message) data = data.message as Record<string, unknown>
-    let data_ = data as Record<string, unknown> & {
-      header: {
-        dest_chain_selector?: string
-        destChainSelector?: string
-        sourceChainSelector?: string
-      }
-      sourceChainSelector?: string
-      extraArgs?: string
-    }
-
-    const destChainSelector = data_.header.dest_chain_selector ?? data_.header.destChainSelector
-    if (destChainSelector) {
-      const dest = networkInfo(destChainSelector)
-      data_ = convertKeysToCamelCase(data_, (v, k) =>
-        typeof v === 'string' && v.match(/^\d+$/)
-          ? BigInt(v)
-          : k === 'receiver' || k === 'destTokenAddress'
-            ? decodeAddress(v as string, dest.family)
-            : v,
-      ) as typeof data_
-    }
-    if (data_.extraArgs) {
-      const extraArgs = parseExtraArgs(
-        data_.extraArgs ?? '',
-        networkInfo((data_.header.sourceChainSelector ?? data_.sourceChainSelector)!).family,
-      )
-      if (extraArgs) {
-        const { _tag, ...rest } = extraArgs
-        Object.assign(data_, rest)
-      }
-    }
-    return data_ as unknown as CCIPMessage
+  if (
+    (typeof data === 'string' && data.startsWith('{')) ||
+    (typeof data === 'object' && data !== null && !isBytesLike(data))
+  ) {
+    if (typeof data === 'string')
+      data = yaml.parse(data, { intAsBigInt: true }) as Record<string, unknown>
+    return decodeJsonMessage(data)
   }
+
+  // try bytearray decoding on each supported chain
   for (const chain of Object.values(supportedChains)) {
     try {
       const decoded = chain.decodeMessage({ data } as unknown as Log_)

@@ -306,14 +306,30 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  static decodeMessage(log: { topics: readonly string[]; data: unknown }): CCIPMessage | undefined {
+  static decodeMessage(log: {
+    topics?: readonly string[]
+    data: unknown
+  }): CCIPMessage | undefined {
     if (!isBytesLike(log.data)) throw new Error(`invalid data=${util.inspect(log.data)}`)
-    const fragment = requestsFragments[log.topics[0] as `0x${string}`]
-    if (!fragment) return
-    // we don't actually use Interface instance here, `decodeEventLog` is mostly static when given a fragment
-    const result = interfaces.OnRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
-    const message = resultsToMessage(result)
-    if (!isHexString(message?.sender, 20)) throw new Error('could not decode CCIPMessage')
+    let fragments
+    if (log.topics?.[0]) {
+      fragments = [requestsFragments[log.topics[0] as `0x${string}`]]
+      if (!fragments[0]) return
+    } else {
+      fragments = Object.values(requestsFragments)
+    }
+    let message
+    for (const fragment of fragments) {
+      try {
+        // we don't actually use Interface instance here, `decodeEventLog` is mostly static when given a fragment
+        const result = interfaces.OnRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
+        message = resultsToMessage(result)
+      } catch (_) {
+        // try next fragment
+      }
+    }
+    if (!message) return
+    if (!isHexString(message.sender, 20)) throw new Error('could not decode CCIPMessage')
 
     if (!message.header) {
       // CCIPMessage_V1_2_EVM
@@ -337,15 +353,21 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     // conversions to make any message version be compatible with latest v1.6
     message.tokenAmounts = (message.tokenAmounts as Record<string, string | bigint | number>[]).map(
       (tokenAmount, i) => {
-        if (message.sourceTokenData) {
+        if ('sourceTokenData' in message) {
           // CCIPMessage_V1_2_EVM
           try {
             tokenAmount = {
-              ...parseSourceTokenData((message.sourceTokenData as string[])[i]),
+              ...parseSourceTokenData(
+                (message as { sourceTokenData: string[] }).sourceTokenData[i],
+              ),
               ...tokenAmount,
             }
           } catch (_) {
-            console.debug('legacy sourceTokenData:', i, (message.sourceTokenData as string[])[i])
+            console.debug(
+              'legacy sourceTokenData:',
+              i,
+              (message as { sourceTokenData: string[] }).sourceTokenData[i],
+            )
           }
         }
         if (typeof tokenAmount.destExecData === 'string' && tokenAmount.destGasAmount == null) {

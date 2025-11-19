@@ -21,7 +21,6 @@ import {
   zeroPadValue,
 } from 'ethers'
 import moize from 'moize'
-import yaml from 'yaml'
 
 import { ccipSend, getFee } from './send.ts'
 import {
@@ -44,7 +43,6 @@ import type {
   AnyMessage,
   CCIPMessage,
   CCIPRequest,
-  CCIPVersion,
   CommitReport,
   ExecutionReceipt,
   ExecutionReport,
@@ -68,6 +66,7 @@ import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs
 import { getTokenInfo } from './token.ts'
 import { type AptosAsyncAccount, EVMExtraArgsV2Codec, SVMExtraArgsV1Codec } from './types.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
+import { decodeMessage } from '../requests.ts'
 
 export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   static readonly family = ChainFamily.Aptos
@@ -280,29 +279,17 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   // Static methods for decoding
-  static decodeMessage(log: Log_): CCIPMessage | undefined {
-    let { data } = log
-    if (typeof data === 'string' && data.startsWith('{'))
-      data = yaml.parse(data, { intAsBigInt: true }) as Record<string, unknown>
-    if (!data || typeof data != 'object') throw new Error(`invalid aptos log: ${util.inspect(log)}`)
-    const data_ = data as {
-      message: Record<string, unknown> & { header: { dest_chain_selector: string } }
-    }
-    if (!data_.message) return
-    const dest = networkInfo(BigInt(data_.message.header.dest_chain_selector))
-    const msg = convertKeysToCamelCase(data_.message, (v, k) =>
-      typeof v === 'string' && v.match(/^\d+$/)
-        ? BigInt(v)
-        : k === 'receiver' || k === 'destTokenAddress'
-          ? decodeAddress(v as string, dest.family)
-          : v,
-    ) as CCIPMessage<typeof CCIPVersion.V1_6>
-    const extraArgs = this.decodeExtraArgs(msg.extraArgs)
-    if (extraArgs) {
-      const { _tag, ...rest } = extraArgs
-      Object.assign(msg, rest)
-    }
-    return msg
+  static decodeMessage(log: {
+    data: BytesLike | Record<string, unknown>
+  }): CCIPMessage | undefined {
+    const { data } = log
+    if (
+      (typeof data !== 'string' || !data.startsWith('{')) &&
+      (typeof data !== 'object' || data == null || isBytesLike(data))
+    )
+      throw new Error(`invalid log data: ${util.inspect(log)}`)
+    // offload massaging to generic decodeJsonMessage
+    return decodeMessage(data)
   }
 
   // decodes an Aptos-generated extraArgs, destinated *to* other chains (EVM, Solana, etc)
