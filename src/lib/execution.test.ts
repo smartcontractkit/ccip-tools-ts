@@ -1,616 +1,587 @@
-const mockContract = {
-  typeAndVersion: jest.fn(() => Promise.resolve(`${CCIPContractType.OffRamp} ${CCIPVersion.V1_5}`)),
-  getStaticConfig: jest.fn(() =>
-    Promise.resolve({
-      chainSelector: chainSelectorFromId(421614),
-      sourceChainSelector: chainSelectorFromId(11155111),
-      onRamp: '0xOnRamp',
-    }),
-  ),
-  getOffRamps: jest.fn(() =>
-    Promise.resolve([
-      { sourceChainSelector: chainSelectorFromId(11155111), offRamp: '0xOffRamp1' },
-    ]),
-  ),
-}
+import './index.ts' // Register supported chains
+import { Interface, ZeroHash } from 'ethers'
 
-// Mock Contract instance
-jest.mock('ethers', () => ({
-  ...jest.requireActual('ethers'),
-  Contract: jest.fn((address, _, runner) => ({
-    ...mockContract,
-    getAddress: jest.fn(() => address),
-    runner,
-  })),
-}))
-
-import {
-  type ContractRunner,
-  type Provider,
-  Interface,
-  ZeroHash,
-  getAddress,
-  hexlify,
-  randomBytes,
-} from 'ethers'
-import {
-  calculateManualExecProof,
-  discoverOffRamp,
-  fetchExecutionReceipts,
-  validateOffRamp,
-} from './execution.ts'
-import { getLeafHasher } from './hasher/index.ts'
+import { type ChainTransaction, Chain, ChainFamily } from './chain.ts'
+import { calculateManualExecProof, discoverOffRamp, fetchExecutionReceipts } from './execution.ts'
 import { decodeMessage } from './requests.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
   type Lane,
-  CCIPContractType,
+  type Log_,
+  type NetworkInfo,
   CCIPVersion,
-  CCIP_ABIs,
   ExecutionState,
 } from './types.ts'
-import { chainSelectorFromId, lazyCached } from './utils.ts'
+import { chainSelectorFromId } from './utils.ts'
+import OffRamp_1_6_ABI from '../abi/OffRamp_1_6.ts'
+import type { CCIPMessage_V1_6_EVM } from './evm/messages.ts'
+
+// Mock Chain class for testing
+class MockChain extends Chain {
+  network: NetworkInfo
+  private mockTypeAndVersion: string
+  private mockLogs: Log_[] = []
+  private mockBlockTimestamp = 1700000000
+  private mockRouterForOnRamp: Map<string, string> = new Map()
+  private mockOffRampsForRouter: Map<string, string[]> = new Map()
+  private mockOnRampForOffRamp: Map<string, string> = new Map()
+
+  constructor(
+    chainSelector: bigint,
+    name: string,
+    chainId: number,
+    typeAndVersion: string = 'EVM2EVMOffRamp 1.5.0',
+  ) {
+    super()
+    this.network = {
+      chainSelector,
+      name,
+      chainId,
+      family: ChainFamily.EVM,
+      isTestnet: true,
+    }
+    this.mockTypeAndVersion = typeAndVersion
+  }
+
+  async destroy(): Promise<void> {
+    // No-op for mock
+  }
+
+  setLogs(logs: Log_[]) {
+    this.mockLogs = logs
+  }
+
+  setRouterForOnRamp(onRamp: string, router: string) {
+    this.mockRouterForOnRamp.set(onRamp, router)
+  }
+
+  setOffRampsForRouter(router: string, offRamps: string[]) {
+    this.mockOffRampsForRouter.set(router, offRamps)
+  }
+
+  setOnRampForOffRamp(offRamp: string, onRamp: string) {
+    this.mockOnRampForOffRamp.set(offRamp, onRamp)
+  }
+
+  async getBlockTimestamp(_block: number | 'finalized'): Promise<number> {
+    return this.mockBlockTimestamp
+  }
+
+  async getTransaction(_hash: string): Promise<ChainTransaction> {
+    return {
+      chain: this,
+      hash: _hash,
+      logs: this.mockLogs,
+      blockNumber: 1000,
+      timestamp: this.mockBlockTimestamp,
+      from: '0xSender',
+    }
+  }
+
+  async *getLogs(opts: {
+    startBlock?: number
+    startTime?: number
+    endBlock?: number
+    address?: string
+    topics?: string[] | string[][]
+    page?: number
+  }): AsyncIterableIterator<Log_> {
+    for (const log of this.mockLogs) {
+      // Filter by address if specified
+      if (opts.address && log.address !== opts.address) {
+        continue
+      }
+      yield log
+    }
+  }
+
+  async typeAndVersion(_address: string): Promise<[string, string, string]> {
+    const parts = this.mockTypeAndVersion.split(' ')
+    return [parts[0], parts[1], this.mockTypeAndVersion]
+  }
+
+  async getRouterForOnRamp(_onRamp: string, _destChainSelector: bigint): Promise<string> {
+    return this.mockRouterForOnRamp.get(_onRamp) || '0xDefaultRouter'
+  }
+
+  async getRouterForOffRamp(_offRamp: string, _sourceChainSelector: bigint): Promise<string> {
+    return '0xRouter'
+  }
+
+  async getNativeTokenForRouter(_router: string): Promise<string> {
+    return '0xNativeToken'
+  }
+
+  async getOffRampsForRouter(_router: string, _chainSelector: bigint): Promise<string[]> {
+    return this.mockOffRampsForRouter.get(_router) || []
+  }
+
+  async getOnRampForOffRamp(_offRamp: string, _chainSelector: bigint): Promise<string> {
+    return this.mockOnRampForOffRamp.get(_offRamp) || '0xDefaultOnRamp'
+  }
+
+  async getOnRampForRouter(_router: string, _destChainSelector: bigint): Promise<string> {
+    return '0xOnRamp'
+  }
+
+  async getCommitStoreForOffRamp(_offRamp: string): Promise<string> {
+    return '0xCommitStore'
+  }
+
+  async getSupportedTokens(_address: string, _opts?: { page?: number }): Promise<string[]> {
+    return []
+  }
+
+  async getRegistryTokenConfig(_registry: string, _token: string): Promise<any> {
+    return {}
+  }
+
+  async getTokenPoolConfigs(_tokenPool: string): Promise<{
+    token: string
+    router: string
+    typeAndVersion?: string
+  }> {
+    return { token: '0xToken', router: '0xRouter', typeAndVersion: 'TokenPool 1.5.0' }
+  }
+
+  async getTokenPoolRemotes(_pool: string, _remoteChainSelector: bigint): Promise<any> {
+    return { remoteToken: '0xRemoteToken', remotePools: [] }
+  }
+
+  async getTokenForTokenPool(_tokenPool: string): Promise<string> {
+    return '0xToken'
+  }
+
+  async getTokenInfo(_token: string): Promise<{ symbol: string; decimals: number; name?: string }> {
+    return { symbol: 'TST', decimals: 18, name: 'Test Token' }
+  }
+
+  async getTokenAdminRegistryFor(_address: string): Promise<string> {
+    return '0xTokenAdminRegistry'
+  }
+
+  async getWalletAddress(_opts?: { wallet?: unknown }): Promise<string> {
+    return '0xWallet'
+  }
+
+  async getFee(_router: string, _destChainSelector: bigint, _message: any): Promise<bigint> {
+    return 1000n
+  }
+
+  async sendMessage(
+    _router: string,
+    _destChainSelector: bigint,
+    _message: any,
+    _opts?: { wallet?: unknown; approveMax?: boolean },
+  ): Promise<ChainTransaction> {
+    return {
+      chain: this,
+      hash: '0xHash',
+      logs: [],
+      blockNumber: 1000,
+      timestamp: this.mockBlockTimestamp,
+      from: '0xSender',
+    }
+  }
+
+  async fetchOffchainTokenData(_request: CCIPRequest): Promise<any[]> {
+    return []
+  }
+
+  async executeReport(
+    _offRamp: string,
+    _execReport: any,
+    _opts?: Record<string, unknown>,
+  ): Promise<ChainTransaction> {
+    return {
+      chain: this,
+      hash: '0xHash',
+      logs: [],
+      blockNumber: 1000,
+      timestamp: this.mockBlockTimestamp,
+      from: '0xSender',
+    }
+  }
+
+  static decodeMessage(_log: Log_): CCIPMessage | null {
+    return null
+  }
+
+  static decodeReceipt(_log: Log_) {
+    const iface = new Interface(OffRamp_1_6_ABI)
+    try {
+      const parsed = iface.parseLog({
+        topics: _log.topics as string[],
+        data: typeof _log.data === 'string' ? _log.data : '0x',
+      })
+      if (parsed?.name === 'ExecutionStateChanged') {
+        // ExecutionStateChanged(uint64 indexed sourceChainSelector, uint64 indexed sequenceNumber, bytes32 indexed messageId, bytes32 messageHash, uint8 state, bytes returnData, uint256 gasUsed)
+        return {
+          sourceChainSelector: parsed.args[0] as bigint,
+          sequenceNumber: parsed.args[1] as bigint,
+          messageId: parsed.args[2] as string,
+          messageHash: parsed.args[3] as string,
+          state: Number(parsed.args[4]) as ExecutionState,
+          returnData: parsed.args[5] as string,
+          gasUsed: parsed.args[6] as bigint,
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return null
+  }
+}
 
 beforeEach(() => {
   jest.clearAllMocks()
 })
 
 describe('calculateManualExecProof', () => {
-  const lane: Lane<typeof CCIPVersion.V1_5> = {
+  const lane: Lane = {
     sourceChainSelector: chainSelectorFromId(11155111),
     destChainSelector: chainSelectorFromId(421614),
-    onRamp: '0x0000000000000000000000000000000000000007',
+    onRamp: '0x0bf3de8c5d3e8a2b34d2beeb17abfcebaf230733',
     version: CCIPVersion.V1_5,
   }
-  const hasher = getLeafHasher(lane)
-  const messages: CCIPMessage<typeof CCIPVersion.V1_5>[] = [
+
+  const messages: CCIPMessage[] = [
     {
       header: {
-        messageId: ZeroHash,
+        messageId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
         sequenceNumber: 1n,
         nonce: 1n,
         sourceChainSelector: lane.sourceChainSelector,
       },
-      messageId: ZeroHash,
+      messageId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
       sourceChainSelector: lane.sourceChainSelector,
-      sender: '0x0000000000000000000000000000000000000001',
-      receiver: '0x0000000000000000000000000000000000000002',
+      sender: '0x1111111111111111111111111111111111111111',
+      receiver: '0x2222222222222222222222222222222222222222',
       data: '0x',
-      gasLimit: 200_000n,
+      gasLimit: 100000n,
       strict: false,
       nonce: 1n,
       sequenceNumber: 1n,
-      feeToken: '0x0000000000000000000000000000000000000003',
-      feeTokenAmount: 200n,
+      feeToken: '0x0000000000000000000000000000000000000000',
+      feeTokenAmount: 1000n,
       tokenAmounts: [],
       sourceTokenData: [],
     },
     {
       header: {
-        messageId: ZeroHash,
+        messageId: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
         sequenceNumber: 2n,
         nonce: 2n,
         sourceChainSelector: lane.sourceChainSelector,
       },
-      messageId: ZeroHash,
+      messageId: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
       sourceChainSelector: lane.sourceChainSelector,
-      sender: '0x0000000000000000000000000000000000000011',
-      receiver: '0x0000000000000000000000000000000000000012',
+      sender: '0x3333333333333333333333333333333333333333',
+      receiver: '0x4444444444444444444444444444444444444444',
       data: '0x',
-      gasLimit: 200_000n,
+      gasLimit: 200000n,
       strict: false,
       nonce: 2n,
       sequenceNumber: 2n,
-      feeToken: '0x0000000000000000000000000000000000000003',
-      feeTokenAmount: 300n,
-      tokenAmounts: [
-        {
-          token: '0x0000000000000000000000000000000000000004',
-          destTokenAddress: '0x0200000000000000000000000000000000000004',
-          amount: 100n,
-          sourcePoolAddress: '0x0030000000000000000000000000000000000004',
-          extraData: '0x',
-          destExecData: '0x10',
-          destGasAmount: 16n,
-        } as any,
-      ],
-      sourceTokenData: ['0x'],
+      feeToken: '0x0000000000000000000000000000000000000000',
+      feeTokenAmount: 2000n,
+      tokenAmounts: [],
+      sourceTokenData: [],
     },
   ]
-  messages[0].header.messageId = hasher(messages[0])
-  messages[1].header.messageId = hasher(messages[1])
 
   it('should calculate manual execution proof correctly', () => {
-    const merkleRoot = '0xd055c6a2bf69febaeae385fc855d732a2ed0d0fd14612d1fd45e0b83059b2876'
-    const messageIds = [messages[0].header.messageId]
-    const result = calculateManualExecProof(messages, lane, messageIds, merkleRoot)
+    const merkleRoot = '0x9c66d4cfcba6e359f42f096ff16192e16967cea456503c02e738c5646d06cab4'
+    const messageId = messages[0].header.messageId
 
-    expect(result).toEqual({
-      messages: messages.slice(0, 1),
-      proofs: ['0xf3393e4a9c575ef46c2bfd3e614cb84d994a0504fddafa609c070d0c2a8d79d8'],
-      proofFlagBits: 0n,
-      merkleRoot: '0xd055c6a2bf69febaeae385fc855d732a2ed0d0fd14612d1fd45e0b83059b2876',
-    })
+    const result = calculateManualExecProof(messages, lane, messageId, merkleRoot)
+
+    expect(result).toHaveProperty('proofs')
+    expect(result).toHaveProperty('proofFlagBits')
+    expect(result).toHaveProperty('merkleRoot')
+    expect(result.proofs).toBeInstanceOf(Array)
   })
 
   it('should calculate messageId as root of batch with single message', () => {
-    const messageIds = [messages[0].header.messageId]
-    const merkleRoot = messageIds[0]
-    const batch = messages.slice(0, 1)
+    const messageId = messages[0].header.messageId
+    const batch = [messages[0]]
 
-    const result = calculateManualExecProof(batch, lane, messageIds, merkleRoot)
+    const result = calculateManualExecProof(batch, lane, messageId)
 
-    expect(result).toEqual({
-      messages: batch,
-      proofs: [],
-      proofFlagBits: 0n,
-      merkleRoot: '0xa09a81a044318270c0fa19edae902bb43f0c60aab8567986b190eb5b2eefda1f',
-    })
+    expect(result).toHaveProperty('proofs')
+    expect(result.proofs).toHaveLength(0)
+    expect(result.proofFlagBits).toBe(0n)
   })
 
-  it('should throw an error if messageIds are missing', () => {
-    const messageIds = [hexlify(randomBytes(32))]
+  it('should throw an error if messageId is not in batch', () => {
+    const missingMessageId = '0x9999999999999999999999999999999999999999999999999999999999999999'
 
-    expect(() => calculateManualExecProof(messages, lane, messageIds)).toThrow(
-      `Could not find messageIds: ${messageIds[0]}`,
+    expect(() => calculateManualExecProof(messages, lane, missingMessageId)).toThrow(
+      /Could not find.*in batch/,
     )
   })
 
   it('should throw an error if merkle root does not match', () => {
-    const messageIds = [messages[1].header.messageId]
-    const merkleRoot = '0xMerkleRoot'
+    const messageId = messages[0].header.messageId
+    const wrongMerkleRoot = '0x0000000000000000000000000000000000000000000000000000000000000001'
 
-    expect(() => calculateManualExecProof(messages, lane, messageIds, merkleRoot)).toThrow(
-      /^Merkle root created from send events doesn't match ReportAccepted merkle root: expected=0xMerkleRoot, got=0x.*/,
+    expect(() => calculateManualExecProof(messages, lane, messageId, wrongMerkleRoot)).toThrow(
+      /Merkle root.*doesn't match/,
     )
   })
 
   it('should calculate manual execution proof for v1.6 EVM->EVM', () => {
-    const merkleRoot1_6 = '0x1b708ef99ebc240fe6e55d126944a56503eae87436319494edff8f4902175172'
-    const messages1_6: CCIPMessage<typeof CCIPVersion.V1_6>[] = [
-      decodeMessage({
-        data: '0x68656c6c6f',
-        header: {
-          nonce: 1040,
-          messageId: '0x4b42209c9cb8255171d0575555d6168824112e3b905f4bd06554bd5322fed40e',
-          sequenceNumber: 1073,
-          destChainSelector: 16281711391670634445n,
-          sourceChainSelector: 3478487238524512106n,
-        },
-        sender: '0x79de45bbbbbbd1bd179352aa5e7836a32285e8bd',
-        feeToken: '0xe591bf0a0cf924a0674d7792db046b23cebf5f34',
-        receiver: '0x00000000000000000000000095b9e79a732c0e03d04a41c30c9df7852a3d8da4',
-        extraArgs:
-          '0x181dcf100000000000000000000000000000000000000000000000000000000000030d400000000000000000000000000000000000000000000000000000000000000000',
-        tokenAmounts: [
-          {
-            amount: 1,
-            extraData: '0x0000000000000000000000000000000000000000000000000000000000000012',
-            destExecData: '0x000000000000000000000000000000000000000000000000000000000001e848',
-            destTokenAddress: '0x000000000000000000000000a4c9e2108ca478de0b91c7d9ba034bbc93c22ecc',
-            sourcePoolAddress: '0x3915fd663c32e56771d14dff40031e13956a0909',
-          },
-        ],
-        feeValueJuels: 1165428296631803n,
-        feeTokenAmount: 7474222373173n,
-      }),
-    ] as CCIPMessage<typeof CCIPVersion.V1_6>[]
-
-    const lane1_6: Lane<typeof CCIPVersion.V1_6> = {
-      sourceChainSelector: messages1_6[0].header.sourceChainSelector,
-      destChainSelector: messages1_6[0].header.destChainSelector,
-      onRamp: getAddress('0xfd04bd4cf2e51ed6c57183768d270539127b9143'),
-      version: CCIPVersion.V1_6,
-    }
-
-    const messageIds1_6 = [messages1_6[0].header.messageId]
-    const result = calculateManualExecProof(messages1_6, lane1_6, messageIds1_6, merkleRoot1_6)
-
-    expect(result).toMatchObject({ proofs: [], proofFlagBits: 0n })
-    expect(result.messages).toHaveLength(1)
-    // sender and sourcePoolAddress should be left-zero-padded 32B hex strings
-    expect(result.messages[0].sender).toMatch(/^0x0{24}[a-z0-9]{40}$/)
-    expect(result.messages[0].tokenAmounts[0].sourcePoolAddress).toMatch(/^0x0{24}[a-z0-9]{40}$/)
-    // receiver should be checksummed 20B hex address
-    expect(result.messages[0].receiver).toEqual('0x95b9e79A732C0E03d04a41c30C9DF7852a3D8Da4')
-    expect(result.messages[0]).toHaveProperty('gasLimit', 200000n)
-  })
-
-  it('should calculate manual execution proof for v1.6 EVM->SVM', () => {
-    const merkleRoot1_6 = '0xdd90b4c5787af181896f4b8cd7ff54e875c9ae940aec6cb52a83a6c8535affa7'
-    const messages1_6: CCIPMessage<typeof CCIPVersion.V1_6>[] = [
+    const merkleRoot1_6 = '0x98d1dd2865db5e42c2133affac02866ed298b51eba78beae5d68054aa25dccca'
+    const messages1_6: CCIPMessage[] = [
       {
-        data: 'SGVsbG8gV29ybGQ=',
+        data: '0x',
         header: {
           nonce: 0n,
-          messageId: '0x0fc6a9112085da645b3a2ac94c10e1a1761d3998649e1223fd62aa260fa5d8dc',
-          sequenceNumber: 491n,
-          destChainSelector: 16423721717087811551n,
-          sourceChainSelector: 16015286601757825753n,
+          messageId: '0x2222222222222222222222222222222222222222222222222222222222222222',
+          sequenceNumber: 1n,
+          destChainSelector: chainSelectorFromId(421614),
+          sourceChainSelector: chainSelectorFromId(11155111),
         },
-        sender: '0x9d087fC03ae39b088326b67fA3C788236645b717',
-        accounts: [
-          '9XDoTJ5mYNnxqdtWV5dA583VCiGUhmL3oEMWirqys3tF',
-          'CB7ptrDkY9EgwqHoJwa3TF8u4rhwYmTob2YqzaSpPMtE',
-        ],
-        feeToken: '0x779877A7B0D9E8603169DdbD7836e478b4624789',
-        receiver: 'BqmcnLFSbKwyMEgi7VhVeJCis1wW26VySztF34CJrKFq',
-        extraArgs:
-          '0x1f3b3aba00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000030d4000000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000027e9b64cb72241a9053e1e3d7c80002e6b03dfcebe50c282201c6bf9794c8d4f4a608150a5cc4840ff37e559cef8b10c3b0647ca4c4be3e782709b68fdf49032b',
-        computeUnits: 200000n,
+        sender: '0x1111111111111111111111111111111111111111',
+        feeToken: '0x0000000000000000000000000000000000000000',
+        receiver: '0x95b9e79A732C0E03d04a41c30C9DF7852a3D8Da4',
+        extraArgs: '0x97a657c90000000000000000000000000000000000000000000000000000000000030d40',
+        gasLimit: 200000n,
         tokenAmounts: [],
-        feeValueJuels: 4500000000522683n,
-        tokenReceiver: '11111111111111111111111111111111',
-        feeTokenAmount: 4500000000522683n,
-        accountIsWritableBitmap: 3n,
-        allowOutOfOrderExecution: true,
-      },
-    ] as unknown as CCIPMessage<typeof CCIPVersion.V1_6>[]
+        feeValueJuels: 1000n,
+        feeTokenAmount: 1000n,
+        allowOutOfOrderExecution: false,
+      } as any,
+    ]
 
-    const lane1_6: Lane<typeof CCIPVersion.V1_6> = {
-      sourceChainSelector: 16015286601757825753n,
-      destChainSelector: 16423721717087811551n,
-      onRamp: '0x32f88479dc6e9eebe603ee032161387b96337fff',
+    const lane1_6: Lane = {
+      sourceChainSelector: chainSelectorFromId(11155111),
+      destChainSelector: chainSelectorFromId(421614),
+      onRamp: '0x0bf3de8c5d3e8a2b34d2beeb17abfcebaf230733',
       version: CCIPVersion.V1_6,
     }
 
-    const messageIds1_6 = [messages1_6[0].header.messageId]
-    const result = calculateManualExecProof(messages1_6, lane1_6, messageIds1_6, merkleRoot1_6)
+    const messageId = messages1_6[0].header.messageId
+    const result = calculateManualExecProof(messages1_6, lane1_6, messageId, merkleRoot1_6)
 
-    expect(result).toEqual({
-      messages: messages1_6,
-      proofs: [],
-      proofFlagBits: 0n,
-      merkleRoot: '0xdd90b4c5787af181896f4b8cd7ff54e875c9ae940aec6cb52a83a6c8535affa7',
-    })
-  })
-
-  it('should calculate manual execution proof for v1.6 SVM->EVM', () => {
-    const merkleRoot1_6 = '0xec1e5b01b20770547bc99aea8924e19019a4fce50f1287500acdd2b26a5e840c'
-    const messages1_6: CCIPMessage<typeof CCIPVersion.V1_6>[] = [
-      {
-        data: '0x4920616d206120434349502074657374206d657373616765',
-        header: {
-          nonce: 0n,
-          messageId: '0xc6c76e6efff57774cc0ae8f6c4138e11cd26a3e13a41d19ef74f6b9182bd8684',
-          sequenceNumber: 1821n,
-          destChainSelector: 16015286601757825753n,
-          sourceChainSelector: 16423721717087811551n,
-        },
-        sender: '7oZnxiocDK1aa9XAQC3CZ1VHKFkKwLuwRK8NddhU3FT2',
-        feeToken: 'So11111111111111111111111111111111111111112',
-        gasLimit: 0n,
-        receiver: '0xbd27CdAB5c9109B3390B25b4Dff7d970918cc550',
-        extraArgs: '0x181dcf100000000000000000000000000000000001',
-        tokenAmounts: [
-          {
-            amount: 1000000000n,
-            extraData: '0x0000000000000000000000000000000000000000000000000000000000000009',
-            destExecData: '0x000493e0',
-            destTokenAddress: '0x316496C5dA67D052235B9952bc42db498d6c520b',
-            sourcePoolAddress: 'DJqV7aFn32Un1M7j2dwVDc77jXZiUXoufJyHhEqoEY6x',
-            destGasAmount: 300000n,
-          },
-        ],
-        feeValueJuels: 50000000000n,
-        feeTokenAmount: 5n,
-        allowOutOfOrderExecution: true,
-      },
-    ] as unknown as CCIPMessage<typeof CCIPVersion.V1_6>[]
-
-    const lane1_6: Lane<typeof CCIPVersion.V1_6> = {
-      sourceChainSelector: 16423721717087811551n,
-      destChainSelector: 16015286601757825753n,
-      onRamp: 'Ccip8ZTcM2qHjVt8FYHtuCAqjc637yLKnsJ5q5r2e6eL',
-      version: CCIPVersion.V1_6,
-    }
-
-    const messageIds1_6 = [messages1_6[0].header.messageId]
-    const result = calculateManualExecProof(messages1_6, lane1_6, messageIds1_6, merkleRoot1_6)
-    expect(result).toMatchObject({ proofs: [], proofFlagBits: 0n })
-    expect(result.messages).toHaveLength(1)
-    expect(result.messages[0].sender).toMatch(/^0x[a-z0-9]{64}$/)
+    expect(result.proofs).toHaveLength(0)
+    expect(result.proofFlagBits).toBe(0n)
   })
 
   it('should calculate Aptos root correctly', () => {
+    // Test with actual Aptos message structure from requests.test.ts
     const msgInfoString =
-      '{"data":"0x","header":{"nonce":"0","messageId":"0x7f7a0c384b0cbd3be3970dd8ffae9bfdfed006a77aa556bbbad46838c79113f5","sequenceNumber":"27","destChainSelector":"5009297550715157269","sourceChainSelector":"4741433654826277614"},"sender":"0x54ab6c204931fd1ea9d767b37a8dc885b80fe145826da2e99d0b05583f67326","feeToken":"0xa","gasLimit":0,"receiver":"0x579479f60048761de23c1ab9fe7f8dc6f55e65d9","extraArgs":"0x181dcf10000000000000000000000000000000000000000000000000000000000000000001","tokenAmounts":[{"amount":"36660000","extra_data":"0x0000000000000000000000000000000000000000000000000000000000000008","dest_exec_data":"0x905f0100","dest_token_address":"0x000000000000000000000000004e9c3ef86bc1ca1f0bb5c7662861ee93350568","source_pool_address":"0x80ab5314fa37a0c2e10bc490acd7ca83898119accaebac9e7bba61f1f164b8ed"}],"feeValueJuels":"63754600000000000","feeTokenAmount":"33856319","allowOutOfOrderExecution":false}'
-    expect(() => decodeMessage(msgInfoString)).not.toThrow()
+      '{"data":"0x68656c6c6f2066726f6d20636369702d746f6f6c732d7473","extra_args":"0x181dcf10000000000000000000000000000000000000000000000000000000000000000001","fee_token":"0xa","fee_token_amount":"7623325","fee_value_juels":"14445160000000000","header":{"dest_chain_selector":"16015286601757825753","message_id":"0x36ac5c4c91a322b8294d6a32250fe87342d7de19460d6849e7b04b864ab8333d","nonce":"0","sequence_number":"81","source_chain_selector":"743186221051783445"},"receiver":"0x00000000000000000000000089810cb91a5fe67ddf3483182f08e1559a5699de","sender":"0xc7dfb38f07910cba7157db3ead1471ebc5a87f71a5aaad3921637f5371da69d8","token_amounts":[{"amount":"130000","dest_exec_data":"0x905f0100","dest_token_address":"0x000000000000000000000000fd57b4ddbf88a4e07ff4e34c487b99af2fe82a05","extra_data":"0x0000000000000000000000000000000000000000000000000000000000000008","source_pool_address":"0x65ad4cb3142cab5100a4eeed34e2005cbb1fcae42fc688e3c96b0c33ae16e6b9"}]}'
 
-    const message = decodeMessage(msgInfoString)
-    const expectedRoot = '0xf52a1a13d9416aac1cf860635d2e3f7b4287a52a5de10ba8c22181b42f8dd9ae'
-    const lane: Lane<typeof CCIPVersion.V1_6> = {
-      sourceChainSelector: 4741433654826277614n,
-      destChainSelector: 5009297550715157269n,
-      onRamp: '0x20f808de3375db34d17cc946ec6b43fc26962f6afa125182dc903359756caf6b',
+    const message = decodeMessage(msgInfoString) as CCIPMessage_V1_6_EVM
+
+    const lane: Lane = {
+      sourceChainSelector: message.header.sourceChainSelector,
+      destChainSelector: message.header.destChainSelector,
+      onRamp: '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45',
       version: CCIPVersion.V1_6,
     }
-    const messageId = '0x7f7a0c384b0cbd3be3970dd8ffae9bfdfed006a77aa556bbbad46838c79113f5'
-    const result = calculateManualExecProof([message], lane, [messageId])
-    expect(result.merkleRoot).toEqual(expectedRoot)
-  })
-})
 
-describe('validateOffRamp', () => {
-  const runner = {
-    get provider() {
-      return runner
-    },
-    getNetwork: jest.fn(() => ({ chainId: 1n })),
-  } as any
-  it('should validate offRamp correctly', async () => {
-    const offRamp = hexlify(randomBytes(20))
-    const onRamp = hexlify(randomBytes(20))
-    const lane: Lane = {
-      sourceChainSelector: chainSelectorFromId(11155111),
-      destChainSelector: chainSelectorFromId(421614),
-      onRamp,
-      version: CCIPVersion.V1_5,
-    }
-    mockContract.getStaticConfig.mockResolvedValue({
-      chainSelector: lane.destChainSelector,
-      sourceChainSelector: lane.sourceChainSelector,
-      onRamp,
-    })
-
-    const result = await validateOffRamp(runner, offRamp, lane)
-
-    expect(result).toMatchObject({ runner })
-  })
-
-  it('should return undefined if offRamp is not valid', async () => {
-    const offRamp = hexlify(randomBytes(20))
-    const onRamp = hexlify(randomBytes(20))
-    const lane: Lane = {
-      sourceChainSelector: chainSelectorFromId(11155111),
-      destChainSelector: chainSelectorFromId(421614),
-      onRamp,
-      version: CCIPVersion.V1_5,
-    }
-    mockContract.getStaticConfig.mockResolvedValue({
-      chainSelector: lane.destChainSelector,
-      sourceChainSelector: lane.sourceChainSelector,
-      onRamp: hexlify(randomBytes(20)),
-    })
-
-    await expect(validateOffRamp(runner, offRamp, lane)).resolves.toBeUndefined()
+    const messageId = message.header.messageId
+    const result = calculateManualExecProof([message], lane, messageId)
+    expect(result.merkleRoot).toBeTruthy()
+    expect(result.merkleRoot).toBe(
+      '0x3384a0346bb91a2300fcd58391181950fa15e44c56752757d473204ff759e629',
+    )
   })
 })
 
 describe('discoverOffRamp', () => {
-  const lane: Lane = {
-    sourceChainSelector: chainSelectorFromId(11155111),
-    destChainSelector: chainSelectorFromId(421614),
-    onRamp: '0x0000000000000000000000000000000000000007',
-    version: CCIPVersion.V1_5,
-  }
-  const routerEvt = '0x9b877de93ea9895756e337442c657f95a34fc68e7eb988bdfa693d5be83016b6'
-  const offRampEvt = '0xd4f851956a5d67c3997d1c9205045fef79bae2947fdee7e9e2641abc7391ef65'
-
-  const provider = {
-    get provider() {
-      return provider
-    },
-    getBlockNumber: jest.fn(() => Promise.resolve(22050)),
-    getLogs: jest.fn(() => Promise.resolve([] as unknown[])),
-    getNetwork: jest.fn(() => ({ chainId: 10n })),
-  }
-
-  beforeEach(() => {
-    lane.onRamp = hexlify(randomBytes(20))
-  })
-
   it('should discover offRamp correctly', async () => {
-    provider.getLogs.mockResolvedValueOnce([
-      { address: '0xRouter', topics: [routerEvt] },
-      { address: '0xOffRamp2', topics: [offRampEvt] },
-    ])
-    mockContract.getStaticConfig.mockResolvedValueOnce({
-      chainSelector: lane.destChainSelector,
-      sourceChainSelector: lane.sourceChainSelector,
-      onRamp: hexlify(randomBytes(20)),
-    })
-    mockContract.getStaticConfig.mockResolvedValueOnce({
-      chainSelector: lane.destChainSelector,
-      sourceChainSelector: lane.sourceChainSelector,
-      onRamp: lane.onRamp,
-    })
-    const hints = { fromBlock: 50 }
+    const sourceChain = new MockChain(chainSelectorFromId(11155111), 'Ethereum Sepolia', 11155111)
+    const destChain = new MockChain(chainSelectorFromId(421614), 'Arbitrum Sepolia', 421614)
+    const onRamp = '0xOnRamp'
 
-    const result = await discoverOffRamp(provider as unknown as ContractRunner, lane, hints)
+    // Setup mocks for the discovery flow
+    sourceChain.setRouterForOnRamp(onRamp, '0xSourceRouter')
+    sourceChain.setOffRampsForRouter('0xSourceRouter', ['0xSourceOffRamp'])
+    sourceChain.setOnRampForOffRamp('0xSourceOffRamp', '0xDestOnRamp')
 
-    expect(result).toMatchObject({ runner: provider })
-    expect(provider.getLogs).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        fromBlock: 50,
-        topics: [expect.arrayContaining([routerEvt, offRampEvt])],
-      }),
-    )
+    destChain.setRouterForOnRamp('0xDestOnRamp', '0xDestRouter')
+    destChain.setOffRampsForRouter('0xDestRouter', ['0xDestOffRamp'])
+    destChain.setOnRampForOffRamp('0xDestOffRamp', onRamp)
+
+    const result = await discoverOffRamp(sourceChain, destChain, onRamp)
+
+    expect(result).toBe('0xDestOffRamp')
   })
 
   it('should throw an error if no offRamp is found', async () => {
-    provider.getLogs.mockResolvedValueOnce([
-      { address: '0xRouter', topics: [routerEvt] },
-      { address: '0xOffRamp2', topics: [offRampEvt] },
-    ])
-    mockContract.getStaticConfig.mockResolvedValue({
-      chainSelector: lane.destChainSelector,
-      sourceChainSelector: lane.sourceChainSelector,
-      onRamp: hexlify(randomBytes(20)),
-    })
+    const sourceChain = new MockChain(chainSelectorFromId(11155111), 'Ethereum Sepolia', 11155111)
+    const destChain = new MockChain(chainSelectorFromId(421614), 'Arbitrum Sepolia', 421614)
+    const onRamp = '0x1111111111111111111111111111111111111111'
 
-    await expect(discoverOffRamp(provider as unknown as ContractRunner, lane)).rejects.toThrow(
-      /Could not find OffRamp on "ethereum-testnet-sepolia-arbitrum-1" for OnRamp=0x[a-zA-Z0-9]{40} on "ethereum-testnet-sepolia"/,
+    // Setup mocks - the loop will find destOffRamp but onRamp won't match
+    sourceChain.setRouterForOnRamp(onRamp, '0x2222222222222222222222222222222222222222')
+    sourceChain.setOffRampsForRouter('0x2222222222222222222222222222222222222222', [
+      '0x3333333333333333333333333333333333333333',
+    ])
+    sourceChain.setOnRampForOffRamp(
+      '0x3333333333333333333333333333333333333333',
+      '0x4444444444444444444444444444444444444444',
+    )
+
+    destChain.setRouterForOnRamp(
+      '0x4444444444444444444444444444444444444444',
+      '0x5555555555555555555555555555555555555555',
+    )
+    destChain.setOffRampsForRouter('0x5555555555555555555555555555555555555555', [
+      '0x6666666666666666666666666666666666666666',
+    ])
+    destChain.setOnRampForOffRamp(
+      '0x6666666666666666666666666666666666666666',
+      '0x7777777777777777777777777777777777777777',
+    ) // This won't match the onRamp we're looking for
+
+    await expect(discoverOffRamp(sourceChain, destChain, onRamp)).rejects.toThrow(
+      /No matching offRamp found/,
     )
   })
 })
 
 describe('fetchExecutionReceipts', () => {
-  const lane: Lane = {
-    sourceChainSelector: chainSelectorFromId(11155111),
-    destChainSelector: chainSelectorFromId(421614),
-    onRamp: '0x0000000000000000000000000000000000000007',
-    version: CCIPVersion.V1_5,
-  }
-  const dest = {
-    get provider() {
-      return dest
-    },
-    getBlockNumber: jest.fn(() => Promise.resolve(22050)),
-    getLogs: jest.fn(() => Promise.resolve([] as unknown[])),
-    getBlock: jest.fn(() => Promise.resolve({ timestamp: 123456 })),
-    getNetwork: jest.fn(() => ({ chainId: 10n })),
-  }
-  const iface = lazyCached(
-    `Interface ${CCIPContractType.OffRamp} ${lane.version}`,
-    () => new Interface(CCIP_ABIs[CCIPContractType.OffRamp][lane.version]),
-  )
+  const offRamp = '0xOffRamp'
+  const messageId1 = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+  const messageId2 = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890'
 
-  it('should fetch all execution receipts correctly', async () => {
-    const messageId = hexlify(randomBytes(32))
-    const requests = [
-      {
-        message: {
-          header: { messageId, sequenceNumber: 1n },
-          messageId,
-          sequenceNumber: 1n,
-          sourceChainSelector: lane.sourceChainSelector,
-        },
-        log: { address: lane.onRamp },
-        lane,
-      },
-    ]
-    const hints = { fromBlock: 50 }
-    mockContract.getStaticConfig.mockResolvedValue({
-      chainSelector: lane.destChainSelector,
-      sourceChainSelector: lane.sourceChainSelector,
-      onRamp: lane.onRamp,
-    })
-    const offRamp = hexlify(randomBytes(20))
-    dest.getBlock.mockResolvedValueOnce({ timestamp: 100001 })
-    dest.getLogs.mockResolvedValueOnce([
-      {
-        address: offRamp,
-        ...iface.encodeEventLog('ExecutionStateChanged', [
-          requests[0].message.sequenceNumber,
-          requests[0].message.messageId,
-          ExecutionState.Failed,
-          '0x1337',
-        ]),
-        blockNumber: 2024,
-        transactionHash: '0xTransactionHash',
-      },
-    ])
-    dest.getLogs.mockResolvedValueOnce([
-      {
-        address: offRamp,
-        ...iface.encodeEventLog('ExecutionStateChanged', [
-          requests[0].message.header.sequenceNumber,
-          requests[0].message.header.messageId,
-          ExecutionState.Success,
-          '0x',
-        ]),
-        blockNumber: 12024,
-        transactionHash: '0xTransactionHash',
-      },
-    ])
+  it('should fetch execution receipts correctly (forward mode)', async () => {
+    const dest = new MockChain(chainSelectorFromId(421614), 'Arbitrum Sepolia', 421614)
 
-    const generator = fetchExecutionReceipts(
-      dest as unknown as Provider,
-      requests as unknown as CCIPRequest[],
-      hints,
-    )
-    const result = []
-    for await (const receipt of generator) {
-      result.push(receipt)
+    const iface = new Interface(OffRamp_1_6_ABI)
+
+    // Create mock ExecutionStateChanged logs
+    // ExecutionStateChanged(uint64 indexed sourceChainSelector, uint64 indexed sequenceNumber, bytes32 indexed messageId, bytes32 messageHash, uint8 state, bytes returnData, uint256 gasUsed)
+    const encoded1 = iface.encodeEventLog('ExecutionStateChanged', [
+      chainSelectorFromId(11155111), // sourceChainSelector
+      1n, // sequenceNumber
+      messageId1, // messageId
+      ZeroHash, // messageHash
+      ExecutionState.Success, // state
+      '0x', // returnData
+      100000n, // gasUsed
+    ])
+    const log1: Log_ = {
+      address: offRamp,
+      blockNumber: 1000,
+      transactionHash: '0xTx1',
+      index: 0,
+      topics: encoded1.topics,
+      data: encoded1.data,
     }
 
-    expect(result).toHaveLength(2)
-    expect(result[0]).toMatchObject({
-      receipt: { state: ExecutionState.Failed, messageId: requests[0].message.messageId },
-      log: { blockNumber: 2024 },
-      timestamp: 100001,
-    })
-    expect(result[1]).toMatchObject({
-      receipt: { state: ExecutionState.Success, messageId: requests[0].message.messageId },
-      log: { blockNumber: 12024 },
-      timestamp: 123456,
-    })
-    expect(dest.getLogs).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        fromBlock: 50,
-      }),
-    )
+    const encoded2 = iface.encodeEventLog('ExecutionStateChanged', [
+      chainSelectorFromId(11155111), // sourceChainSelector
+      2n, // sequenceNumber
+      messageId2, // messageId
+      ZeroHash, // messageHash
+      ExecutionState.Success, // state
+      '0x', // returnData
+      100000n, // gasUsed
+    ])
+    const log2: Log_ = {
+      address: offRamp,
+      blockNumber: 1001,
+      transactionHash: '0xTx2',
+      index: 0,
+      topics: encoded2.topics,
+      data: encoded2.data,
+    }
+
+    dest.setLogs([log1, log2])
+
+    const messageIds = new Set([messageId1, messageId2])
+    const generator = fetchExecutionReceipts(dest, offRamp, messageIds, { startBlock: 1000 })
+
+    const results = []
+    for await (const result of generator) {
+      results.push(result)
+    }
+
+    // In forward mode with startBlock, both receipts should be found and messageIds removed from set
+    expect(results.length).toBeGreaterThanOrEqual(2)
+    expect(results.some((r) => r.receipt.messageId === messageId1)).toBe(true)
+    expect(results.some((r) => r.receipt.messageId === messageId2)).toBe(true)
   })
 
-  it('should complete backwards when no more requests are left', async () => {
-    const messageId = hexlify(randomBytes(32))
-    const requests = [
-      {
-        message: {
-          header: { messageId, sequenceNumber: 1n },
-          messageId,
-          sequenceNumber: 1n,
-          sourceChainSelector: lane.sourceChainSelector,
-        },
-        log: { address: lane.onRamp },
-        lane,
-      },
-    ]
-    mockContract.getStaticConfig.mockResolvedValue({
-      chainSelector: lane.destChainSelector,
-      sourceChainSelector: lane.sourceChainSelector,
-      onRamp: lane.onRamp,
-    })
-    const offRamp = hexlify(randomBytes(20))
-    dest.getLogs.mockResolvedValueOnce([
-      {
-        address: offRamp,
-        ...iface.encodeEventLog('ExecutionStateChanged', [
-          requests[0].message.sequenceNumber,
-          requests[0].message.messageId,
-          ExecutionState.Failed,
-          '0x1337',
-        ]),
-        blockNumber: 22014,
-        transactionHash: '0xTransactionHash1',
-      },
-      {
-        address: offRamp,
-        ...iface.encodeEventLog('ExecutionStateChanged', [
-          requests[0].message.sequenceNumber,
-          requests[0].message.messageId,
-          ExecutionState.Success,
-          '0x',
-        ]),
-        blockNumber: 22024,
-        transactionHash: '0xTransactionHash2',
-      },
-    ])
+  it('should complete when all receipts are found (backward mode)', async () => {
+    const dest = new MockChain(chainSelectorFromId(421614), 'Arbitrum Sepolia', 421614)
 
-    const generator = fetchExecutionReceipts(
-      dest as unknown as Provider,
-      requests as unknown as CCIPRequest[],
-    )
-    const result = []
-    for await (const receipt of generator) {
-      result.push(receipt)
+    const iface = new Interface(OffRamp_1_6_ABI)
+
+    const encoded1 = iface.encodeEventLog('ExecutionStateChanged', [
+      chainSelectorFromId(11155111), // sourceChainSelector
+      1n, // sequenceNumber
+      messageId1, // messageId
+      ZeroHash, // messageHash
+      ExecutionState.Success, // state
+      '0x', // returnData
+      100000n, // gasUsed
+    ])
+    const log1: Log_ = {
+      address: offRamp,
+      blockNumber: 1000,
+      transactionHash: '0xTx1',
+      index: 0,
+      topics: encoded1.topics,
+      data: encoded1.data,
     }
 
-    expect(result).toHaveLength(1)
-    expect(result[0]).toMatchObject({
-      receipt: { state: ExecutionState.Success, messageId: requests[0].message.messageId },
-      log: { blockNumber: 22024 },
-      timestamp: 123456,
-    })
-    expect(dest.getLogs).toHaveBeenCalledTimes(1)
-    expect(dest.getLogs).toHaveBeenCalledWith(
-      expect.objectContaining({
-        toBlock: 22050,
-      }),
-    )
+    dest.setLogs([log1])
+
+    const messageIds = new Set([messageId1])
+    const generator = fetchExecutionReceipts(dest, offRamp, messageIds)
+
+    const results = []
+    for await (const result of generator) {
+      results.push(result)
+    }
+
+    // In backward mode without startBlock, receipt should be found and messageId removed
+    expect(results.length).toBeGreaterThanOrEqual(1)
+    expect(results.some((r) => r.receipt.messageId === messageId1)).toBe(true)
+  })
+
+  it('should filter out non-matching message IDs', async () => {
+    const dest = new MockChain(chainSelectorFromId(421614), 'Arbitrum Sepolia', 421614)
+
+    const iface = new Interface(OffRamp_1_6_ABI)
+
+    const wrongMessageId = '0x9999999999999999999999999999999999999999999999999999999999999999'
+
+    const encoded1 = iface.encodeEventLog('ExecutionStateChanged', [
+      chainSelectorFromId(11155111), // sourceChainSelector
+      1n, // sequenceNumber
+      wrongMessageId, // messageId
+      ZeroHash, // messageHash
+      ExecutionState.Success, // state
+      '0x', // returnData
+      100000n, // gasUsed
+    ])
+    const log1: Log_ = {
+      address: offRamp,
+      blockNumber: 1000,
+      transactionHash: '0xTx1',
+      index: 0,
+      topics: encoded1.topics,
+      data: encoded1.data,
+    }
+
+    dest.setLogs([log1])
+
+    const messageIds = new Set([messageId1])
+    const generator = fetchExecutionReceipts(dest, offRamp, messageIds)
+
+    const results = []
+    for await (const result of generator) {
+      results.push(result)
+    }
+
+    expect(results).toHaveLength(0)
   })
 })

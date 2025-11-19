@@ -1,80 +1,35 @@
-import { readFile } from 'node:fs/promises'
-import { password, select } from '@inquirer/prompts'
-import { LedgerSigner } from '@xlabs-xyz/ledger-signer-ethers-v6'
-import bs58 from 'bs58'
+import { select } from '@inquirer/prompts'
 import {
-  type Addressable,
-  type Provider,
-  type Signer,
-  BaseWallet,
-  Contract,
-  Result,
-  SigningKey,
-  Wallet,
-  ZeroAddress,
-  dataSlice,
+  dataLength,
   formatUnits,
+  getBytes,
   hexlify,
+  isBytesLike,
   isHexString,
   parseUnits,
+  toUtf8String,
 } from 'ethers'
-import type { TypedContract } from 'ethers-abitype'
 
-import TokenABI from '../abi/BurnMintERC677Token.ts'
-import TokenPoolABI from '../abi/BurnMintTokenPool_1_5_1.ts'
-import RouterABI from '../abi/Router.ts'
-import TokenAdminRegistry from '../abi/TokenAdminRegistry_1_5.ts'
+import type { Chain, ChainStatic } from '../lib/chain.ts'
 import {
   type CCIPCommit,
-  type CCIPContract,
-  type CCIPContractType,
   type CCIPExecution,
   type CCIPRequest,
   type Lane,
-  CCIPVersion,
   ExecutionState,
   chainIdFromSelector,
   chainNameFromId,
-  decodeAddress,
-  getContractProperties,
-  getErrorData,
-  getOnRampLane,
-  getProviderNetwork,
   networkInfo,
-  parseWithFragment,
-  recursiveParseError,
 } from '../lib/index.ts'
-import { ChainFamily } from '../lib/types.ts'
-
-export async function getWallet(argv?: { wallet?: string }): Promise<Signer> {
-  if ((argv?.wallet ?? '').startsWith('ledger')) {
-    let derivationPath = argv!.wallet!.split(':')[1]
-    if (derivationPath && !isNaN(Number(derivationPath)))
-      derivationPath = `m/44'/60'/${derivationPath}'/0/0`
-    const ledger = await LedgerSigner.create(null, derivationPath)
-    console.info('Ledger connected:', await ledger.getAddress(), `at "${ledger.path}"`)
-    return ledger
-  }
-  if (argv?.wallet) {
-    let pw = process.env['USER_KEY_PASSWORD']
-    if (!pw) pw = await password({ message: 'Enter password for json wallet' })
-    return Wallet.fromEncryptedJson(await readFile(argv.wallet, 'utf8'), pw)
-  }
-  const keyFromEnv = process.env['USER_KEY'] || process.env['OWNER_KEY']
-  if (keyFromEnv) {
-    return new BaseWallet(
-      new SigningKey(hexlify((keyFromEnv.startsWith('0x') ? '' : '0x') + keyFromEnv)),
-    )
-  }
-  throw new Error(
-    'Could not get wallet; please, set USER_KEY envvar as a hex-encoded private key, or --wallet option',
-  )
-}
+import { supportedChains } from '../lib/supported-chains.ts'
+import type { OffchainTokenData } from '../lib/types.ts'
 
 export async function selectRequest(
   requests: readonly CCIPRequest[],
   promptSuffix?: string,
+  hints?: { logIndex?: number },
 ): Promise<CCIPRequest> {
+  if (hints?.logIndex != null) requests = requests.filter((req) => req.log.index === hints.logIndex)
   if (requests.length === 1) return requests[0]
   const answer = await select({
     message: `${requests.length} messageIds found; select one${promptSuffix ? ' ' + promptSuffix : ''}`,
@@ -121,20 +76,15 @@ export function prettyLane(lane: Lane) {
 }
 
 async function formatToken(
-  source: Provider,
+  source: Chain,
   ta: { amount: bigint } & ({ token: string } | { sourcePoolAddress: string }),
 ): Promise<string> {
   let token
   if ('token' in ta) token = ta.token
   else {
-    ;[token] = await getContractProperties([ta.sourcePoolAddress, TokenPoolABI, source], 'getToken')
+    token = await source.getTokenForTokenPool(ta.sourcePoolAddress)
   }
-  const [decimals_, symbol] = await getContractProperties(
-    [token, TokenABI, source],
-    'decimals',
-    'symbol',
-  )
-  const decimals = Number(decimals_)
+  const { symbol, decimals } = await source.getTokenInfo(token)
   return `${formatUnits(ta.amount, decimals)} ${symbol}`
 }
 
@@ -143,15 +93,28 @@ export function formatArray<T>(name: string, values: readonly T[]): Record<strin
   return Object.fromEntries(values.map((v, i) => [`${name}[${i}]`, v] as const))
 }
 
+// join truthy property names, separated by a dot
+function j(...args: string[]): string {
+  return args.filter(Boolean).join('.')
+}
+
 function formatData(name: string, data: string, parseError = false): Record<string, string> {
   if (parseError) {
-    const res: Record<string, string> = {}
-    for (const [key, error] of recursiveParseError(name, data)) {
-      if (isHexString(error)) Object.assign(res, formatData(key, error))
-      else res[key] = error as string
+    let parsed
+    for (const chain of Object.values(supportedChains)) {
+      parsed = chain.parse?.(data)
+      if (parsed) break
     }
-    return res
+    if (parsed) {
+      const res: Record<string, string> = {}
+      for (const [key, error] of Object.entries(parsed)) {
+        if (isHexString(error)) Object.assign(res, formatData(j(name, key), error))
+        else res[j(name, key)] = error as string
+      }
+      return res
+    }
   }
+  if (!isHexString(data)) return { [name]: data }
   const split = []
   if (data.length <= 66) split.push(data)
   else
@@ -161,42 +124,13 @@ function formatData(name: string, data: string, parseError = false): Record<stri
   return formatArray(name, split)
 }
 
-export function formatResult(
-  result: unknown,
-  parseValue?: (val: unknown, key: string | number) => unknown,
-): unknown {
-  if (!(result instanceof Result)) return result
-  try {
-    const res = result.toObject()
-    if (!(Object.keys(res)[0] ?? '').match(/^[a-z]/)) throw new Error('Not an object')
-    for (const [k, v] of Object.entries(res)) {
-      if (v instanceof Result) {
-        res[k] = formatResult(v, parseValue)
-      } else if (parseValue) {
-        res[k] = parseValue(v, k)
-      }
-    }
-    return res
-  } catch (_) {
-    const res = result.toArray()
-    for (let i = 0; i < res.length; i++) {
-      const v = res[i] as unknown
-      if (v instanceof Result) {
-        res[i] = formatResult(v, parseValue)
-      } else if (parseValue) {
-        res[i] = parseValue(v, i)
-      }
-    }
-    return res
-  }
-}
-
 function formatDate(timestamp: number) {
   return new Date(timestamp * 1e3).toISOString().substring(0, 19).replace('T', ' ')
 }
 
 export function formatDuration(secs: number) {
   if (secs < 0) secs = -secs
+  if (secs >= 118 && Math.floor(secs) % 60 >= 58) secs += 60 - (secs % 60) // round up 58+s
   const time = {
     d: Math.floor(secs / 86400),
     h: Math.floor(secs / 3600) % 24,
@@ -209,34 +143,48 @@ export function formatDuration(secs: number) {
     .join('')
 }
 
-export async function prettyRequest(source: Provider | null, request: CCIPRequest) {
-  // route to the appropriate implementation based on chain family
-  const chainInfo = networkInfo(request.lane.sourceChainSelector)
-  switch (chainInfo.family) {
-    case ChainFamily.Solana:
-      prettyRequestSolana(request)
-      break
-    default:
-      // For EVM requests, we need a provider
-      if (!source) {
-        throw new Error('Provider is required for EVM requests')
-      }
-      await prettyRequestEVM(source, request)
+function omit<T extends Record<string, unknown>, K extends string>(
+  obj: T,
+  ...keys: K[]
+): Omit<T, K> {
+  const result = { ...obj }
+  for (const key of keys) {
+    delete result[key]
   }
+  return result
 }
 
-async function prettyRequestEVM(source: Provider, request: CCIPRequest) {
+export async function prettyRequest(
+  source: Chain,
+  request: CCIPRequest,
+  offchainTokenData?: OffchainTokenData[],
+) {
   prettyLane(request.lane)
   console.info('Request (source):')
 
   let finalized
   try {
-    finalized = await source.getBlock('finalized')
+    finalized = await source.getBlockTimestamp('finalized')
   } catch (_) {
     // no finalized tag support
   }
   const nonce = Number(request.message.header.nonce)
-  console.table({
+
+  const rest = omit(
+    request.message,
+    'header',
+    'sender',
+    'receiver',
+    'tokenAmounts',
+    'data',
+    'feeToken',
+    'feeTokenAmount',
+    'sourceTokenData',
+    'sourceChainSelector',
+    'extraArgs',
+    'accounts',
+  )
+  prettyTable({
     messageId: request.message.header.messageId,
     ...(request.tx.from ? { origin: request.tx.from } : {}),
     sender: request.message.sender,
@@ -254,8 +202,8 @@ async function prettyRequestEVM(source: Provider, request: CCIPRequest) {
     timestamp: `${formatDate(request.timestamp)} (${formatDuration(Date.now() / 1e3 - request.timestamp)} ago)`,
     finalized:
       finalized &&
-      (finalized.timestamp < request.timestamp
-        ? formatDuration(request.timestamp - finalized.timestamp) + ' left'
+      (finalized < request.timestamp
+        ? formatDuration(request.timestamp - finalized) + ' left'
         : true),
     fee: await formatToken(source, {
       token: request.message.feeToken,
@@ -265,89 +213,42 @@ async function prettyRequestEVM(source: Provider, request: CCIPRequest) {
       'tokens',
       await Promise.all(request.message.tokenAmounts.map(formatToken.bind(null, source))),
     ),
-    ...formatData('data', request.message.data),
+    ...(isBytesLike(request.message.data) &&
+    dataLength(request.message.data) > 0 &&
+    getBytes(request.message.data).every((b) => 32 <= b && b <= 126) // printable characters
+      ? { data: toUtf8String(request.message.data) }
+      : formatData('data', request.message.data)),
+    ...('accounts' in request.message ? formatArray('accounts', request.message.accounts) : {}),
+    ...rest,
   })
-}
 
-export function prettyRequestSolana(request: CCIPRequest) {
-  prettyLane(request.lane)
-  console.info('Request (source):')
-
-  //TODO: We should replicate what we did for o11y, read TP PDAs and extract Metaplex Metadata here. Using these hardcoded maps for now.
-  const knownTokens: Record<string, { symbol: string; decimals: number }> = {
-    So11111111111111111111111111111111111111112: { symbol: 'SOL', decimals: 9 },
-    '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU': { symbol: 'USDC', decimals: 6 }, // devnet
-    EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: { symbol: 'USDC', decimals: 6 }, // mainnet
+  if (!offchainTokenData?.length || offchainTokenData.every((d) => !d)) return
+  console.info('Attestations:')
+  for (const attestation of offchainTokenData) {
+    const { _tag: type, ...rest } = attestation!
+    prettyTable({
+      type,
+      ...Object.fromEntries(
+        Object.entries(rest)
+          .map(([key, value]) => Object.entries(formatData(key, hexlify(value))))
+          .flat(1),
+      ),
+    })
   }
-
-  // Pool-specific token mapping
-  const knownPools: Record<string, { symbol: string; decimals: number }> = {
-    // CCTP Devnet TP
-    D22aGkYvJiFJ9tpxUV1RUWkNUy4FSUBk2NAvwQQD2G9Y: { symbol: 'USDC', decimals: 6 },
-  }
-
-  const nonce = Number(request.message.header.nonce)
-
-  const feeTokenInfo = knownTokens[request.message.feeToken] || { symbol: 'Unknown', decimals: 0 }
-  const formattedFee =
-    feeTokenInfo.decimals > 0
-      ? `${formatUnits(request.message.feeTokenAmount, feeTokenInfo.decimals)} ${feeTokenInfo.symbol}`
-      : `${request.message.feeTokenAmount} ${feeTokenInfo.symbol}`
-
-  const formattedTokens = request.message.tokenAmounts.map((ta) => {
-    const destTokenAddr =
-      typeof ta.destTokenAddress === 'string'
-        ? decodeAddress(ta.destTokenAddress, networkInfo(request.lane.destChainSelector).family)
-        : 'unknown'
-
-    const srcPoolAddr =
-      'sourcePoolAddress' in ta && typeof ta.sourcePoolAddress === 'string'
-        ? ta.sourcePoolAddress
-        : 'unknown'
-
-    let amount = ta.amount.toString()
-    if (srcPoolAddr !== 'unknown' && knownPools[srcPoolAddr]) {
-      const poolInfo = knownPools[srcPoolAddr]
-      amount = `${formatUnits(ta.amount, poolInfo.decimals)} ${poolInfo.symbol}`
-    }
-    return `${amount} from ${srcPoolAddr} of ${destTokenAddr}`
-  })
-
-  console.table({
-    messageId: request.message.header.messageId,
-    sender: request.message.sender,
-    receiver: decodeAddress(
-      request.message.receiver,
-      networkInfo(request.lane.destChainSelector).family,
-    ),
-    sequenceNumber: Number(request.message.header.sequenceNumber),
-    nonce: nonce === 0 ? '0 => allow out-of-order exec' : nonce,
-    ...('gasLimit' in request.message
-      ? { gasLimit: Number(request.message.gasLimit) }
-      : 'computeUnits' in request.message
-        ? { computeUnits: Number(request.message.computeUnits) }
-        : {}),
-    transactionHash: request.log.transactionHash,
-    blockNumber: request.log.blockNumber,
-    timestamp: `${formatDate(request.timestamp)} (${formatDuration(Date.now() / 1e3 - request.timestamp)} ago)`,
-    fee: formattedFee,
-    ...formatArray('tokens', formattedTokens),
-    ...formatData('data', request.message.data),
-  })
 }
 
 export async function prettyCommit(
-  dest: Provider,
+  dest: Chain,
   commit: CCIPCommit,
   request: { timestamp: number },
 ) {
   console.info('Commit (dest):')
-  const timestamp = (await dest.getBlock(commit.log.blockNumber))!.timestamp
-  console.table({
+  const timestamp = await dest.getBlockTimestamp(commit.log.blockNumber)
+  prettyTable({
     merkleRoot: commit.report.merkleRoot,
     min: Number(commit.report.minSeqNr),
     max: Number(commit.report.maxSeqNr),
-    origin: (await dest.getTransaction(commit.log.transactionHash))?.from,
+    origin: commit.log.tx?.from ?? (await dest.getTransaction(commit.log.transactionHash)).from,
     contract: commit.log.address,
     transactionHash: commit.log.transactionHash,
     blockNumber: commit.log.blockNumber,
@@ -355,17 +256,103 @@ export async function prettyCommit(
   })
 }
 
+/**
+ * Add line breaks to a string to fit within a specified column width
+ * @param text - The input string to wrap
+ * @param maxWidth - Maximum column width before wrapping
+ * @param threshold - Percentage of maxWidth to look back for spaces (default 0.1 = 10%)
+ * @returns The wrapped string with line breaks inserted
+ */
+function wrapText(text: string, maxWidth: number, threshold: number = 0.1): string[] {
+  const lines: string[] = []
+
+  // First split by existing line breaks
+  const existingLines = text.split('\n')
+
+  for (const line of existingLines) {
+    const words = line.split(' ')
+    let currentLine = ''
+
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word
+
+      if (testLine.length <= maxWidth) {
+        currentLine = testLine
+      } else {
+        if (currentLine) {
+          lines.push(currentLine)
+          currentLine = word
+        } else {
+          // Word is longer than maxWidth, break it
+          const thresholdDistance = Math.floor(maxWidth * threshold)
+          let remaining = word
+
+          while (remaining.length > maxWidth) {
+            let breakPoint = maxWidth
+            // Look for a good break point within threshold distance
+            for (let i = maxWidth - thresholdDistance; i < maxWidth; i++) {
+              if (remaining[i] === '-' || remaining[i] === '_') {
+                breakPoint = i + 1
+                break
+              }
+            }
+            lines.push(remaining.substring(0, breakPoint))
+            remaining = remaining.substring(breakPoint)
+          }
+          currentLine = remaining
+        }
+      }
+    }
+
+    if (currentLine) {
+      lines.push(currentLine)
+    }
+  }
+
+  return lines
+}
+
+export function prettyTable(
+  args: Record<string, unknown>,
+  opts = { parseErrorKeys: ['returnData'], spcount: 0 },
+) {
+  const out: (readonly [string, unknown])[] = []
+  for (const [key, value] of Object.entries(args)) {
+    if (isBytesLike(value)) {
+      let parseError
+      if (opts.parseErrorKeys.includes(key)) parseError = true
+      if (dataLength(value) <= 32 && !parseError) out.push([key, value])
+      else out.push(...Object.entries(formatData(key, hexlify(value), parseError)))
+    } else if (typeof value === 'string') {
+      out.push(
+        ...wrapText(value, Math.max(100, +(process.env.COLUMNS || 80) * 0.9)).map(
+          (l, i) => [!i ? key : ' '.repeat(opts.spcount++), l] as const,
+        ),
+      )
+    } else if (Array.isArray(value)) {
+      if (value.length <= 1) out.push([key, value[0] as unknown])
+      else out.push(...value.map((v, i) => [`${key}[${i}]`, v as unknown] as const))
+    } else if (value && typeof value === 'object') {
+      out.push(...Object.entries(value).map(([k, v]) => [`${key}.${k}`, v] as const))
+    } else out.push([key, value])
+  }
+  return console.table(Object.fromEntries(out))
+}
+
 export function prettyReceipt(
   receipt: CCIPExecution,
   request: { timestamp: number },
   origin?: string,
 ) {
-  console.table({
+  prettyTable({
     state: receipt.receipt.state === ExecutionState.Success ? '✅ success' : '❌ failed',
-    ...formatData('returnData', receipt.receipt.returnData, true),
+    ...(receipt.receipt.state !== ExecutionState.Success ||
+    (receipt.receipt.returnData && receipt.receipt.returnData !== '0x')
+      ? { returnData: receipt.receipt.returnData }
+      : {}),
     ...(receipt.receipt.gasUsed ? { gasUsed: Number(receipt.receipt.gasUsed) } : {}),
     ...(origin ? { origin } : {}),
-    offRamp: receipt.log.address,
+    contract: receipt.log.address,
     transactionHash: receipt.log.transactionHash,
     logIndex: receipt.log.index,
     blockNumber: receipt.log.blockNumber,
@@ -374,43 +361,33 @@ export function prettyReceipt(
 }
 
 export function logParsedError(err: unknown): boolean {
-  if (!err || typeof err !== 'object') return false
-  const shortMessage = (err as { shortMessage: string }).shortMessage
-  const transaction = (err as { transaction: { to: string; data: string } }).transaction
-  if (!shortMessage || !transaction?.data) return false
-
-  const invocation_ = (err as { invocation: { method: string; args: Result } | null }).invocation
-  let method, invocation
-  if (invocation_) {
-    const { method: method_, args, ...rest } = invocation_
-    method = method_
-    invocation = { ...rest, args }
-  } else {
-    method = dataSlice(transaction.data, 0, 4)
-    const func = parseWithFragment(method)?.[0]
-    if (func) method = func.name
+  for (const chain of Object.values<ChainStatic>(supportedChains)) {
+    const parsed = chain.parse?.(err)
+    if (!parsed) continue
+    const { method, Instruction: instruction, ...rest } = parsed
+    if (method || instruction) {
+      console.error(
+        `🛑 Failed to call "${(method || instruction) as string}"`,
+        ...Object.entries(rest)
+          .map(([k, e]) => [`\n${k.substring(0, 1).toUpperCase()}${k.substring(1)} =`, e])
+          .flat(1),
+      )
+    } else {
+      console.error('🛑 Error:', parsed)
+    }
+    return true
   }
-  const reason: unknown[] = []
-  const errorData = getErrorData(err)
-  if (errorData) {
-    // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-    reason.push(...recursiveParseError('Revert', errorData).map(([k, e]) => `\n${k} = ${e}`))
-  }
-  console.error(`🛑 Failed to call "${method}"\nError =`, shortMessage, ...reason, '\nCall =', {
-    ...transaction,
-    ...invocation,
-  })
-  return true
+  return false
 }
 
 /**
  * Parse `--transfer-tokens token1=amount1 token2=amount2 ...` into `{ token, amount }[]`
  **/
-export async function parseTokenAmounts(source: Provider, transferTokens: readonly string[]) {
+export async function parseTokenAmounts(source: Chain, transferTokens: readonly string[]) {
   return Promise.all(
     transferTokens.map(async (tokenAmount) => {
       const [token, amount_] = tokenAmount.split('=')
-      const [decimals] = await getContractProperties([token, TokenABI, source], 'decimals')
+      const { decimals } = await source.getTokenInfo(token)
       const amount = parseUnits(amount_, decimals)
       return { token, amount }
     }),
@@ -431,91 +408,4 @@ export async function* yieldResolved<T>(promises: readonly Promise<T>[]): AsyncG
     map.delete(p)
     yield res
   }
-}
-
-export async function sourceToDestTokenAmounts<S extends { token: string }>(
-  sourceTokenAmounts: readonly S[],
-  { router: routerAddress, source, dest }: { router: string; source: Provider; dest: Provider },
-): Promise<[(Omit<S, 'token'> & { destTokenAddress: string })[], string]> {
-  const { name: sourceName } = await getProviderNetwork(source)
-  const { chainSelector: destSelector, name: destName } = await getProviderNetwork(dest)
-
-  const router = new Contract(routerAddress, RouterABI, source) as unknown as TypedContract<
-    typeof RouterABI
-  >
-  const onRampAddress = (await router.getOnRamp(destSelector)) as string
-  if (!onRampAddress || onRampAddress === ZeroAddress)
-    throw new Error(`No "${sourceName}" -> "${destName}" lane on ${routerAddress}`)
-  const [lane, onRamp] = await getOnRampLane(source, onRampAddress, destSelector)
-
-  let tokenAdminRegistryAddress
-  if (lane.version < CCIPVersion.V1_5) {
-    throw new Error('Deprecated lane version: ' + lane.version)
-  } else {
-    ;({ tokenAdminRegistry: tokenAdminRegistryAddress } = await (
-      onRamp as CCIPContract<
-        typeof CCIPContractType.OnRamp,
-        typeof CCIPVersion.V1_5 | typeof CCIPVersion.V1_6
-      >
-    ).getStaticConfig())
-  }
-  const tokenAdminRegistry = new Contract(
-    tokenAdminRegistryAddress,
-    TokenAdminRegistry,
-    source,
-  ) as unknown as TypedContract<typeof TokenAdminRegistry>
-
-  let pools: readonly (string | Addressable)[] = []
-  if (sourceTokenAmounts.length) {
-    pools = await tokenAdminRegistry.getPools(sourceTokenAmounts.map(({ token }) => token))
-    const missing = sourceTokenAmounts.filter((_, i) => (pools[i] as string).match(/^0x0+$/))
-    if (missing.length) {
-      throw new Error(
-        `Token${missing.length > 1 ? 's' : ''} not supported: ${missing.map(({ token }) => token).join(', ')}`,
-      )
-    }
-  }
-
-  return [
-    await Promise.all(
-      sourceTokenAmounts.map(async ({ token, ...ta }, i) => {
-        const pool = new Contract(pools[i], TokenPoolABI, source) as unknown as TypedContract<
-          typeof TokenPoolABI
-        >
-        const remoteToken = await pool.getRemoteToken(destSelector)
-        const destToken = decodeAddress(remoteToken, networkInfo(destSelector).family)
-        if (destToken === ZeroAddress)
-          throw new Error(
-            `Dest "${destName}" not supported by tokenPool ${pools[i] as string} for token ${token}`,
-          )
-        return { ...ta, destTokenAddress: destToken }
-      }),
-    ),
-    onRampAddress,
-  ]
-}
-
-/**
- * Validate transaction hash - supports EVM and Solana formats
- * @param tx_hash - Transaction hash to validate
- * @returns true if valid, throws Error if invalid
- */
-export function validateSupportedTxHash(tx_hash: string): boolean {
-  // EVM transaction hash (hex, 32 bytes)
-  if (isHexString(tx_hash, 32)) return true
-
-  // Solana transaction signature (base58, exactly 64 bytes when decoded)
-  try {
-    const decoded = bs58.decode(tx_hash)
-    if (decoded.length === 64) return true
-  } catch {
-    // Invalid base58 or decoding error
-  }
-
-  throw new Error(
-    'Only EVM and Solana transactions are currently supported.\n' +
-      'Transaction hash must be a valid format:\n' +
-      '  • EVM: 32-byte hex string (0x...)\n' +
-      '  • Solana: base58 signature (64 bytes when decoded)',
-  )
 }

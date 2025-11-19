@@ -129,6 +129,7 @@ const selectors: Selectors = {
   },
   '945': { selector: 2177900824115119161n, name: 'bittensor-testnet' },
   '964': { selector: 2135107236357186872n, name: 'bittensor-mainnet' },
+  '988': { selector: 16978377838628290997n, name: 'stable-mainnet' },
   '998': { selector: 4286062357653186312n, name: 'hyperliquid-testnet' },
   '999': { selector: 2442541497099098535n, name: 'hyperliquid-mainnet' },
   '1001': { selector: 2624132734533621656n, name: 'kaia-testnet-kairos' },
@@ -192,6 +193,7 @@ const selectors: Selectors = {
     name: 'polkadot-testnet-centrifuge-altair',
   },
   '2129': { selector: 12168171414969487009n, name: 'memento-testnet' },
+  '2201': { selector: 11793402411494852765n, name: 'stable-testnet' },
   '2221': { selector: 2110537777356199208n, name: 'kava-testnet' },
   '2222': { selector: 7550000543357438061n, name: 'kava-mainnet' },
   '2358': {
@@ -225,6 +227,7 @@ const selectors: Selectors = {
     selector: 5298399861320400553n,
     name: 'ethereum-testnet-sepolia-lisk-1',
   },
+  '4326': { selector: 6093540873831549674n, name: 'megaeth-mainnet' },
   '4801': {
     selector: 5299555114858065850n,
     name: 'ethereum-testnet-sepolia-worldchain-1',
@@ -369,6 +372,10 @@ const selectors: Selectors = {
     selector: 9873759436596923887n,
     name: 'ethereum-testnet-hoodi-taiko',
   },
+  '167013': {
+    selector: 15858691699034549072n,
+    name: 'ethereum-testnet-hoodi-taiko-1',
+  },
   '192940': { selector: 7189150270347329685n, name: 'mind-testnet' },
   '200810': {
     selector: 3789623672476206327n,
@@ -470,6 +477,17 @@ const selectors: Selectors = {
   'aptos:1': { name: 'aptos-mainnet', selector: 4741433654826277614n },
   'aptos:2': { name: 'aptos-testnet', selector: 743186221051783445n },
   'aptos:4': { name: 'aptos-localnet', selector: 4457093679053095497n },
+  // end:generate
+
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors_sui.yml')
+  //   .then((res) => res.text())
+  //   .then((body) => require('yaml').parse(body, { intAsBigInt: true }).selectors)
+  //   .then((obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [`sui:${k}`, v])))
+  //   .then((obj) => [...require('util').inspect(obj).split('\n').slice(1, -1), ','])
+  'sui:1': { name: 'sui-mainnet', selector: 17529533435026248318n },
+  'sui:2': { name: 'sui-testnet', selector: 9762610643973837292n },
+  'sui:4': { name: 'sui-localnet', selector: 18395503381733958356n },
   // end:generate
 
   // generate:
