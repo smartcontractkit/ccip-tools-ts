@@ -415,56 +415,77 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   static decodeCommits(
-    log: { topics: readonly string[]; data: unknown },
+    log: { topics?: readonly string[]; data: unknown },
     lane?: Omit<Lane, 'destChainSelector'>,
   ): CommitReport[] | undefined {
     if (!isBytesLike(log.data)) throw new Error(`invalid data=${util.inspect(log.data)}`)
-    const fragment = commitsFragments[log.topics[0] as `0x${string}`]
-    if (!fragment) return
-    const isCcipV15 = fragment.name === 'ReportAccepted'
-    // CCIP<=1.5 doesn't have lane info in event, so we need lane to be provided (e.g. from CommitStore's configs)
-    if (isCcipV15 && !lane) throw new Error('decoding commits from CCIP<=v1.5 requires lane')
-    let result = interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
-    if (result.length === 1) result = result[0] as Result
-    if (isCcipV15) {
-      return [
-        {
-          merkleRoot: result.merkleRoot as string,
-          minSeqNr: (result.interval as Result).min as bigint,
-          maxSeqNr: (result.interval as Result).max as bigint,
-          sourceChainSelector: lane!.sourceChainSelector,
-          onRampAddress: lane!.onRamp,
-        },
-      ]
-    } else {
-      const reports: CommitReport[] = []
-      for (const c of [...(result[0] as Result[]), ...(result[1] as Result[])]) {
-        // if ccip>=v1.6 and lane is provided, use it to filter reports; otherwise, include all
-        if (lane && c.sourceChainSelector !== lane.sourceChainSelector) continue
-        const onRampAddress = decodeOnRampAddress(
-          c.onRampAddress as string,
-          networkInfo(c.sourceChainSelector as bigint).family,
-        )
-        if (lane && onRampAddress !== lane.onRamp) continue
-        reports.push({ ...c.toObject(), onRampAddress } as CommitReport)
+    let fragments
+    if (log.topics?.[0]) {
+      const fragment = commitsFragments[log.topics[0] as `0x${string}`]
+      if (!fragment) return
+      const isCcipV15 = fragment.name === 'ReportAccepted'
+      // CCIP<=1.5 doesn't have lane info in event, so we need lane to be provided (e.g. from CommitStore's configs)
+      if (isCcipV15 && !lane) throw new Error('decoding commits from CCIP<=v1.5 requires lane')
+      fragments = [fragment]
+    } else fragments = Object.values(commitsFragments)
+    for (const fragment of fragments) {
+      let result
+      try {
+        result = interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
+      } catch (_) {
+        continue
       }
-      if (reports.length) return reports
+      if (result.length === 1) result = result[0] as Result
+      const isCcipV15 = fragment.name === 'ReportAccepted'
+      if (isCcipV15) {
+        return [
+          {
+            merkleRoot: result.merkleRoot as string,
+            minSeqNr: (result.interval as Result).min as bigint,
+            maxSeqNr: (result.interval as Result).max as bigint,
+            sourceChainSelector: lane!.sourceChainSelector,
+            onRampAddress: lane!.onRamp,
+          },
+        ]
+      } else {
+        const reports: CommitReport[] = []
+        for (const c of [...(result[0] as Result[]), ...(result[1] as Result[])]) {
+          // if ccip>=v1.6 and lane is provided, use it to filter reports; otherwise, include all
+          if (lane && c.sourceChainSelector !== lane.sourceChainSelector) continue
+          const onRampAddress = decodeOnRampAddress(
+            c.onRampAddress as string,
+            networkInfo(c.sourceChainSelector as bigint).family,
+          )
+          if (lane && onRampAddress !== lane.onRamp) continue
+          reports.push({ ...c.toObject(), onRampAddress } as CommitReport)
+        }
+        if (reports.length) return reports
+      }
     }
   }
 
   static decodeReceipt(log: {
-    topics: readonly string[]
+    topics?: readonly string[]
     data: unknown
   }): ExecutionReceipt | undefined {
     if (!isBytesLike(log.data)) throw new Error(`invalid data=${util.inspect(log.data)}`)
-    const fragment = receiptsFragments[log.topics[0] as `0x${string}`]
-    if (!fragment) return
-    const result = interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
-    return {
-      ...result.toObject(),
-      // ...(fragment.inputs.filter((p) => p.indexed).map((p, i) => [p.name, log.topics[i+1]] as const)).
-      state: Number(result.state as bigint) as ExecutionState,
-    } as ExecutionReceipt
+    let fragments
+    if (log.topics?.[0]) {
+      fragments = [receiptsFragments[log.topics[0] as `0x${string}`]]
+      if (!fragments[0]) return
+    } else fragments = Object.values(receiptsFragments)
+    for (const fragment of fragments) {
+      try {
+        const result = interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
+        return {
+          ...result.toObject(),
+          // ...(fragment.inputs.filter((p) => p.indexed).map((p, i) => [p.name, log.topics[i+1]] as const)).
+          state: Number(result.state as bigint) as ExecutionState,
+        } as ExecutionReceipt
+      } catch (_) {
+        // continue
+      }
+    }
   }
 
   static decodeExtraArgs(

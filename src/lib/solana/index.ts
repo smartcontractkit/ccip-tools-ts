@@ -8,6 +8,7 @@ import {
   BorshCoder,
   Program,
   Wallet,
+  eventDiscriminator,
 } from '@coral-xyz/anchor'
 import { NATIVE_MINT } from '@solana/spl-token'
 import {
@@ -33,9 +34,7 @@ import {
   getBytes,
   hexlify,
   isHexString,
-  sha256,
   toBigInt,
-  toUtf8Bytes,
 } from 'ethers'
 import moize, { type Moized } from 'moize'
 
@@ -53,6 +52,7 @@ import SELECTORS from '../selectors.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
+  type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
@@ -123,8 +123,8 @@ type SolanaTransaction = ChainTransaction & {
   logs: SolanaLog[]
 }
 
-function eventDiscriminant(eventName: string): string {
-  return dataSlice(sha256(toUtf8Bytes(`event:${eventName}`)), 0, 8)
+function hexDiscriminator(eventName: string): string {
+  return hexlify(eventDiscriminator(eventName))
 }
 
 export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
@@ -422,7 +422,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         throw new Error('Topics must be strings')
       // append events discriminants (if not 0x-8B already), but keep OG topics
       opts.topics.push(
-        ...opts.topics.filter((t) => !isHexString(t, 8)).map((t) => eventDiscriminant(t)),
+        ...opts.topics.filter((t) => !isHexString(t, 8)).map((t) => hexDiscriminator(t)),
       )
     }
 
@@ -676,7 +676,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     const disc = dataSlice(eventDataBuffer, 0, 8)
-    if (disc !== eventDiscriminant('CCIPMessageSent')) return
+    if (disc !== hexDiscriminator('CCIPMessageSent')) return
 
     // Use module-level BorshCoder for decoding structs
 
@@ -786,7 +786,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   static decodeCommits(
-    log: Log_,
+    log: Pick<Log_, 'data'>,
     lane?: Omit<Lane, 'destChainSelector'>,
   ): CommitReport[] | undefined {
     // Check if this is a CommitReportAccepted event by looking at the discriminant
@@ -797,7 +797,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const eventDataBuffer = bytesToBuffer(log.data)
 
     // Verify the discriminant matches CommitReportAccepted
-    const expectedDiscriminant = eventDiscriminant('CommitReportAccepted')
+    const expectedDiscriminant = hexDiscriminator('CommitReportAccepted')
     const actualDiscriminant = hexlify(eventDataBuffer.subarray(0, 8))
     if (actualDiscriminant !== expectedDiscriminant) return
 
@@ -852,14 +852,15 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     ]
   }
 
-  static decodeReceipt(log: Log_): ExecutionReceipt | undefined {
+  static decodeReceipt(log: Pick<Log_, 'data' | 'tx' | 'index'>): ExecutionReceipt | undefined {
     // Check if this is a ExecutionStateChanged event by looking at the discriminant
     if (!log.data || typeof log.data !== 'string') {
       throw new Error('Log data is missing or not a string')
     }
 
     // Verify the discriminant matches ExecutionStateChanged
-    if (log.topics[0] !== eventDiscriminant('ExecutionStateChanged')) return
+    if (dataSlice(getDataBytes(log.data), 0, 8) !== hexDiscriminator('ExecutionStateChanged'))
+      return
     const eventDataBuffer = bytesToBuffer(log.data)
 
     // Note: We manually decode the event fields rather than using BorshCoder

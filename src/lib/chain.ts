@@ -356,13 +356,13 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * @param lane - if passed, filter or validate reports by lane
    * @returns Array of commit reports contained in the log
    */
-  decodeCommits(log: Log_, lane?: Lane): CommitReport[] | undefined
+  decodeCommits(log: Pick<Log_, 'data'>, lane?: Lane): CommitReport[] | undefined
   /**
    * Decode a receipt (ExecutioStateChanged) event
    * @param log - Chain generic log
    * @returns ExecutionReceipt or undefined if not a recognized receipt
    */
-  decodeReceipt(log: Log_): ExecutionReceipt | undefined
+  decodeReceipt(log: Pick<Log_, 'data'>): ExecutionReceipt | undefined
   /**
    * Receive a bytes array and try to decode and normalize it as an address of this chain family
    * @param bytes - Bytes array (Uint8Array, HexString or Base64)

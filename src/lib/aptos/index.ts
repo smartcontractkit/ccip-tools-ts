@@ -340,7 +340,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     throw new Error('Aptos can only encode EVMExtraArgsV2 & SVMExtraArgsV1')
   }
 
-  static decodeCommits({ data }: Log_, lane?: Lane): CommitReport[] | undefined {
+  static decodeCommits({ data }: Pick<Log_, 'data'>, lane?: Lane): CommitReport[] | undefined {
     if (!data || typeof data != 'object') throw new Error('invalid aptos log')
     const data_ = data as { blessed_merkle_roots: unknown[]; unblessed_merkle_roots: unknown[] }
     if (!data_.blessed_merkle_roots) return
@@ -365,7 +365,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return commits
   }
 
-  static decodeReceipt({ data }: Log_): ExecutionReceipt | undefined {
+  static decodeReceipt({ data }: Pick<Log_, 'data'>): ExecutionReceipt | undefined {
     if (!data || typeof data != 'object') throw new Error('invalid aptos log')
     const data_ = data as { message_id: string; state: number }
     if (!data_.message_id || !data_.state) return
