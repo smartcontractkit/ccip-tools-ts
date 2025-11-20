@@ -328,14 +328,6 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    */
   fromUrl(url: string): Promise<Chain<F>>
   /**
-   * Used for an optimization at init time, where we race fetching transactions before the networks
-   * are known; should return a tuple with 2 promises: first one should (if possible) resolve to a
-   * Chain for this `url` regardless of tx; 2nd one is the racing promise, to return tx ASAP
-   * @param url - rpc endpoint url
-   * @param txHash - transaction hash
-   */
-  txFromUrl(url: string, txHash: string): [Promise<Chain<F>>, Promise<ChainTransaction>]
-  /**
    * Try to decode a CCIP message *from* a log/event *originated* from this *source* chain,
    * but which may *target* other dest chain families
    * iow: the parsing is specific to this chain family, but content may be intended to alien chains

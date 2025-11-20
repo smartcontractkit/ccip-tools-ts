@@ -72,22 +72,23 @@ export function fetchChainsFromRpcs(
 
   const init$ = collectEndpoints(argv).then((endpoints) => {
     const pendingPromises: Promise<unknown>[] = []
+    let txFound = false
     for (const C of Object.values(supportedChains)) {
       for (const url of endpoints) {
-        let chain$: Promise<Chain>, tx$
+        const chain$ = C.fromUrl(url)
         if (txHash) {
-          ;[chain$, tx$] = C.txFromUrl(url, txHash)
+          const tx$ = chain$.then((chain) => chain.getTransaction(txHash))
           void tx$.then(
             ({ chain }) => {
-              // in case tx is found, overwrite chain with the one which found this tx
+              if (txFound) return
+              txFound = true
+              // in case tx is found, prefer it over any previously found chain
               chains[chain.network.name] = chain$
               delete chainsCbs[chain.network.name]
             },
             () => {},
           )
           txs.push(tx$)
-        } else {
-          chain$ = C.fromUrl(url)
         }
 
         pendingPromises.push(

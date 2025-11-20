@@ -138,14 +138,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return new AptosChain(provider, networkInfo(`aptos:${await provider.getChainId()}`))
   }
 
-  static txFromUrl(url: string, txHash: string): [Promise<AptosChain>, Promise<ChainTransaction>] {
-    const chainPromise = AptosChain.fromUrl(url)
-    const txPromise = isHexString(txHash, 32)
-      ? chainPromise.then(async (chain) => chain.getTransaction(txHash))
-      : Promise.reject(new Error(`Invalid transaction hash: ${txHash}`))
-    return [chainPromise, txPromise]
-  }
-
   async destroy(): Promise<void> {
     // Nothing to cleanup for Aptos implementation
   }

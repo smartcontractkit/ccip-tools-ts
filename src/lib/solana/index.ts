@@ -222,20 +222,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return this.fromConnection(connection)
   }
 
-  static txFromUrl(url: string, txHash: string): [Promise<SolanaChain>, Promise<ChainTransaction>] {
-    const connection = this._getConnection(url)
-    const chain$ = this.fromConnection(connection)
-    const txHash$ = !isHexString(txHash)
-      ? Promise.resolve(txHash)
-      : Promise.reject(new Error(`Invalid solana txHash: ${txHash}`)) // fail early
-
-    const txPromise = Promise.all([txHash$, chain$]).then(async ([txHash, chain]) => {
-      return chain.getTransaction(txHash)
-    })
-
-    return [chain$, txPromise]
-  }
-
   async destroy(): Promise<void> {
     // Solana Connection doesn't have an explicit destroy method
     // The memoized functions will be garbage collected when the instance is destroyed

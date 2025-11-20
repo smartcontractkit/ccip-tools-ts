@@ -8,6 +8,7 @@ import {
   type Provider,
   type Signer,
   type TransactionReceipt,
+  AbstractSigner,
   BaseWallet,
   Contract,
   JsonRpcProvider,
@@ -140,10 +141,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   readonly provider: JsonRpcApiProvider
 
   constructor(provider: JsonRpcApiProvider, network: NetworkInfo) {
-    super()
-
     if (network.family !== ChainFamily.EVM)
       throw new Error(`Invalid network family for EVMChain: ${network.family}`)
+    super()
+
     this.network = network
     this.provider = provider
 
@@ -176,7 +177,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   // cached wallet/signer getter
   async getWallet(opts: { wallet?: unknown } = {}): Promise<Signer> {
-    if (typeof opts.wallet === 'string') {
+    if (
+      typeof opts.wallet === 'number' ||
+      (typeof opts.wallet === 'string' && opts.wallet.match(/^(\d+|0x[a-fA-F0-9]{40})$/))
+    ) {
+      // if given a number, numeric string or address, use ethers `provider.getSigner` (e.g. geth or MM)
+      return this.provider.getSigner(
+        typeof opts.wallet === 'string' && opts.wallet.match(/^0x[a-fA-F0-9]{40}$/)
+          ? opts.wallet
+          : Number(opts.wallet),
+      )
+    } else if (typeof opts.wallet === 'string') {
+      // support receiving private key directly (not recommended)
       try {
         return Promise.resolve(
           new BaseWallet(
@@ -187,8 +199,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       } catch (_) {
         // pass
       }
+    } else if (opts.wallet instanceof AbstractSigner) {
+      // if given a signer, return/cache it
+      return opts.wallet
     }
     return (this.constructor as typeof EVMChain).getWallet(this.provider, opts)
+  }
+
+  /**
+   * Expose ethers provider's `listAccounts`, if provider supports it
+   */
+  async listAccounts(): Promise<string[]> {
+    return (await this.provider.listAccounts()).map(({ address }) => address)
   }
 
   async getWalletAddress(opts?: { wallet?: unknown }): Promise<string> {
@@ -230,24 +252,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   static async fromUrl(url: string): Promise<EVMChain> {
     return this.fromProvider(await this._getProvider(url))
-  }
-
-  static txFromUrl(url: string, txHash: string): [Promise<EVMChain>, Promise<ChainTransaction>] {
-    const provider$ = this._getProvider(url)
-    const chain$ = provider$.then((provider) => this.fromProvider(provider))
-    return [
-      chain$,
-      (isHexString(txHash, 32)
-        ? Promise.resolve(txHash)
-        : Promise.reject(new Error(`Invalid transaction hash: ${txHash}`))
-      ).then(async (txHash) => {
-        const tx = await (await provider$).getTransactionReceipt(txHash)
-        if (!tx) throw new Error(`Transaction not found: ${txHash} in ${url}`)
-        const chain = await chain$
-        const timestamp = await chain.getBlockTimestamp(tx.blockNumber)
-        return Object.assign(tx, { chain, timestamp })
-      }),
-    ]
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await

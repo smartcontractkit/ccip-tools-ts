@@ -1,4 +1,4 @@
-import { type BytesLike, isBytesLike, isHexString } from 'ethers'
+import { type BytesLike, isBytesLike } from 'ethers'
 
 import { AptosChain } from '../aptos/index.ts'
 import { type ChainTransaction, type LogFilter, Chain, ChainFamily } from '../chain.ts'
@@ -31,14 +31,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   static async fromUrl(_url: string): Promise<SuiChain> {
     return Promise.reject(new Error('Not implemented'))
-  }
-
-  static txFromUrl(url: string, txHash: string): [Promise<SuiChain>, Promise<ChainTransaction>] {
-    const chainPromise = SuiChain.fromUrl(url)
-    const txPromise = isHexString(txHash, 32)
-      ? chainPromise.then(async (chain) => chain.getTransaction(txHash))
-      : Promise.reject(new Error(`Invalid transaction hash: ${txHash}`))
-    return [chainPromise, txPromise]
   }
 
   async destroy(): Promise<void> {
