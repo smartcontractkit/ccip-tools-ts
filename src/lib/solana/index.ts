@@ -205,7 +205,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     const config: ConnectionConfig = { commitment: 'confirmed' }
     if (url.includes('.solana.com')) {
-      config.fetch = createRateLimitedFetch() // public nodes
+      config.fetch = createRateLimitedFetch({
+        maxRequests: 35,
+        maxRetries: 3,
+        windowMs: 11e3,
+      }) // public nodes
       console.warn('Using rate-limited fetch for public solana nodes, commands may be slow')
     }
 
@@ -1024,6 +1028,73 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       const parsedMessage = this.decodeMessage({ data })
       if (parsedMessage) return parsedMessage
     }
+  }
+
+  /**
+   * Solana optimization: we use getProgramAccounts with
+   */
+  async fetchCommitReport(
+    commitStore: string,
+    request: {
+      lane: Lane
+      message: { header: { sequenceNumber: bigint } }
+      timestamp?: number
+    },
+    hints?: { startBlock?: number; page?: number },
+  ): Promise<CCIPCommit> {
+    const commitsAroundSeqNum = await this.connection.getProgramAccounts(
+      new PublicKey(commitStore),
+      {
+        filters: [
+          {
+            memcmp: {
+              offset: 0,
+              bytes: encodeBase58(BorshAccountsCoder.accountDiscriminator('CommitReport')),
+            },
+          },
+          {
+            memcmp: {
+              offset: 8 + 1,
+              bytes: encodeBase58(toLeArray(request.lane.sourceChainSelector, 8)),
+            },
+          },
+          // dirty trick: memcmp report.min with msg.sequenceNumber's without least-significant byte;
+          // this should be ~256 around seqNum, i.e. big chance of a match
+          {
+            memcmp: {
+              offset: 8 + 1 + 8 + 32 + 8 + 1,
+              bytes: encodeBase58(toLeArray(request.message.header.sequenceNumber, 8).slice(1)),
+            },
+          },
+        ],
+      },
+    )
+    for (const acc of commitsAroundSeqNum) {
+      // const merkleRoot = acc.account.data.subarray(8 + 1 + 8, 8 + 1 + 8 + 32)
+      const minSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8)
+      const maxSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8 + 8)
+      if (
+        minSeqNr > request.message.header.sequenceNumber ||
+        maxSeqNr < request.message.header.sequenceNumber
+      )
+        continue
+      // we have all the commit report info, but we also need log details (txHash, etc)
+      for await (const log of this.getLogs({
+        startTime: 1, // just to force getting the oldest log first
+        programs: [commitStore],
+        address: acc.pubkey.toBase58(),
+        topics: ['CommitReportAccepted'],
+      })) {
+        // first yielded log should be commit (which created this PDA)
+        const report = (this.constructor as typeof SolanaChain).decodeCommits(
+          log,
+          request.lane,
+        )?.[0]
+        if (report) return { report, log }
+      }
+    }
+    // in case we can't find it, fallback to generic iterating txs
+    return super.fetchCommitReport(commitStore, request, hints)
   }
 
   // specialized override with stricter address-of-interest
