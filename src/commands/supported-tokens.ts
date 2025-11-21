@@ -75,34 +75,38 @@ async function getSupportedTokens(argv: Parameters<typeof handler>[0], destroy: 
   const sourceNetwork = networkInfo(argv.source)
   const getChain = fetchChainsFromRpcs(argv, undefined, destroy)
   const source = await getChain(sourceNetwork.name)
-  let type
+  let registry
   try {
-    ;[type] = await source.typeAndVersion(argv.address)
+    registry = await source.getTokenAdminRegistryFor(argv.address)
   } catch (_) {
     // ignore
   }
 
-  let info, tokenPool, poolConfigs, registry, registryConfig
-  if (
-    typeof type !== 'string' ||
-    !['Router', 'Ramp', 'TokenAdminRegistry'].some((c) => type.includes(c)) ||
-    argv.token
-  ) {
+  let info, tokenPool, poolConfigs, registryConfig
+  if (registry && !argv.token) {
+    // router + interactive list
+    info = await listTokens(source, registry, argv)
+    if (!info) return // format != pretty
+    registryConfig = await source.getRegistryTokenConfig(registry, info.token)
+    tokenPool = registryConfig.tokenPool
+    if (!tokenPool)
+      throw new Error(`TokenPool not set in tokenAdminRegistry=${registry} for token=${info.token}`)
+    poolConfigs = await source.getTokenPoolConfigs(tokenPool)
+  } else {
     if (!argv.token) {
       // tokenPool
       tokenPool = argv.address
       poolConfigs = await source.getTokenPoolConfigs(tokenPool)
-      registry = await source.getTokenAdminRegistryFor(poolConfigs.router)
+      registry ??= await source.getTokenAdminRegistryFor(poolConfigs.router)
       ;[info, registryConfig] = await Promise.all([
         source.getTokenInfo(poolConfigs.token),
         source.getRegistryTokenConfig(registry, poolConfigs.token),
       ])
     } else {
+      registry ??= await source.getTokenAdminRegistryFor(argv.address)
       // router|ramp|registry + token
-      ;[info, registry] = await Promise.all([
-        source.getTokenInfo(argv.token),
-        source.getTokenAdminRegistryFor(argv.address),
-      ])
+      info = await source.getTokenInfo(argv.token)
+
       registryConfig = await source.getRegistryTokenConfig(registry, argv.token)
       tokenPool = registryConfig.tokenPool
       if (!tokenPool)
@@ -121,16 +125,6 @@ async function getSupportedTokens(argv: Parameters<typeof handler>[0], destroy: 
       console.log('Pool Configs:', poolConfigs)
       return
     }
-  } else {
-    // router + interactive list
-    registry = await source.getTokenAdminRegistryFor(argv.address)
-    info = await listTokens(source, registry, argv)
-    if (!info) return // format != pretty
-    registryConfig = await source.getRegistryTokenConfig(registry, info.token)
-    tokenPool = registryConfig.tokenPool
-    if (!tokenPool)
-      throw new Error(`TokenPool not set in tokenAdminRegistry=${registry} for token=${info.token}`)
-    poolConfigs = await source.getTokenPoolConfigs(tokenPool)
   }
   const remotes = await source.getTokenPoolRemotes(tokenPool)
 

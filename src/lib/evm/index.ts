@@ -167,6 +167,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     })
     this.getTokenInfo = moize.default(this.getTokenInfo.bind(this))
     this.getWallet = moize.default(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
+    this.getTokenAdminRegistryFor = moize.default(this.getTokenAdminRegistryFor.bind(this), {
+      isPromise: true,
+      maxArgs: 1,
+    })
   }
 
   // overwrite EVMChain.getWallet to implement custom wallet loading

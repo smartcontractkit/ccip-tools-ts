@@ -934,9 +934,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return getV16SolanaLeafHasher(lane)
   }
 
-  getTokenAdminRegistryFor(address: string): Promise<string> {
+  async getTokenAdminRegistryFor(address: string): Promise<string> {
+    const [type] = await this.typeAndVersion(address)
+    if (!type.includes('Router')) throw new Error(`Not a Router: ${address} is ${type}`)
     // Solana implements TokenAdminRegistry in the Router/OnRamp program
-    return Promise.resolve(address)
+    return address
   }
 
   /**

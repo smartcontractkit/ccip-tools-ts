@@ -260,8 +260,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     throw firstErr ?? new Error(`Could not view 'get_token' in ${tokenPool}`)
   }
 
-  getTokenAdminRegistryFor(address: string): Promise<string> {
-    return Promise.resolve(address.split('::')[0] + '::token_admin_registry')
+  async getTokenAdminRegistryFor(address: string): Promise<string> {
+    const registry = address.split('::')[0] + '::token_admin_registry'
+    const [type] = await this.typeAndVersion(registry)
+    if (type !== 'TokenAdminRegistry') {
+      throw new Error(`Expected ${registry} to have TokenAdminRegistry type, got=${type}`)
+    }
+    return registry
   }
 
   static getWallet(_opts: { wallet?: unknown } = {}): Promise<AptosAsyncAccount> {
