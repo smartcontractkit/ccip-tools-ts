@@ -298,7 +298,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     )
       throw new Error(`invalid log data: ${util.inspect(log)}`)
     // offload massaging to generic decodeJsonMessage
-    return decodeMessage(data)
+    try {
+      return decodeMessage(data)
+    } catch (_) {
+      // return undefined
+    }
   }
 
   // decodes an Aptos-generated extraArgs, destinated *to* other chains (EVM, Solana, etc)
