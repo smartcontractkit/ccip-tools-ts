@@ -3,8 +3,6 @@ import {
   type BigNumberish,
   type BytesLike,
   type Numeric,
-  type Provider,
-  Result,
   decodeBase64,
   getBytes,
   isBytesLike,
@@ -20,23 +18,24 @@ import type { NetworkInfo } from './types.ts'
 /**
  * Returns *some* block number with timestamp prior to `timestamp`
  *
- * @param provider - provider to search blocks on
+ * @param getBlockTimestamp - function to get block timestamp
+ * @param recentBlockNumber - a block guaranteed to be after `timestamp` (e.g. latest)
  * @param timestamp - target timestamp
- * @param precision - returned blockNumber should be within this many blocks from target
+ * @param precision - returned blockNumber should be within this many blocks before timestamp
  * @returns blockNumber of a block at provider which is close but before target timestamp
  **/
 export async function getSomeBlockNumberBefore(
-  provider: Provider,
+  getBlockTimestamp: (blockNumber: number) => Promise<number>,
+  recentBlockNumber: number,
   timestamp: number,
   precision = 10,
 ): Promise<number> {
-  const currentBlockNumber = await provider.getBlockNumber()
-  let beforeBlockNumber = Math.max(1, currentBlockNumber - precision * 1000)
-  let beforeTimestamp = (await provider.getBlock(beforeBlockNumber))!.timestamp
+  let beforeBlockNumber = Math.max(1, recentBlockNumber - precision * 1000)
+  let beforeTimestamp = await getBlockTimestamp(beforeBlockNumber)
 
   const now = Math.trunc(Date.now() / 1000)
-  let estimatedBlockTime = (now - beforeTimestamp) / (currentBlockNumber - beforeBlockNumber),
-    afterBlockNumber = currentBlockNumber,
+  let estimatedBlockTime = (now - beforeTimestamp) / (recentBlockNumber - beforeBlockNumber),
+    afterBlockNumber = recentBlockNumber,
     afterTimestamp = now
 
   // first, go back looking for a block prior to our target timestamp
@@ -48,10 +47,8 @@ export async function getSomeBlockNumberBefore(
       Math.trunc(beforeBlockNumber - (beforeTimestamp - timestamp) / estimatedBlockTime) -
         10 ** iter,
     )
-    const beforeBlock = await provider.getBlock(beforeBlockNumber)
-    if (!beforeBlock) throw new Error(`Could not fetch block=${beforeBlockNumber}`)
-    beforeTimestamp = beforeBlock.timestamp
-    estimatedBlockTime = (now - beforeTimestamp) / (currentBlockNumber - beforeBlockNumber)
+    beforeTimestamp = await getBlockTimestamp(beforeBlockNumber)
+    estimatedBlockTime = (now - beforeTimestamp) / (recentBlockNumber - beforeBlockNumber)
   }
 
   if (beforeTimestamp > timestamp) {
@@ -70,7 +67,7 @@ export async function getSomeBlockNumberBefore(
     if (pivot === afterBlockNumber) {
       pivot--
     }
-    const pivotTimestamp = (await provider.getBlock(pivot))!.timestamp
+    const pivotTimestamp = await getBlockTimestamp(pivot)
     if (pivotTimestamp > timestamp) {
       afterBlockNumber = pivot
       afterTimestamp = pivotTimestamp
@@ -258,9 +255,9 @@ const BLOCK_RANGE = 10_000
  * Otherwise, moves backwards down to genesis (you probably want to break/return before that)
  **/
 export function* blockRangeGenerator(
-  params: { endBlock: number; startBlock?: number } | { singleBlock: number },
-  stepSize = BLOCK_RANGE,
+  params: { page?: number } & ({ endBlock: number; startBlock?: number } | { singleBlock: number }),
 ) {
+  const stepSize = params.page ?? BLOCK_RANGE
   if ('singleBlock' in params) {
     yield { fromBlock: params.singleBlock, toBlock: params.singleBlock }
   } else if ('startBlock' in params && params.startBlock) {
@@ -293,14 +290,6 @@ export function bigIntReviver(_key: string, value: unknown): unknown {
     return BigInt(value)
   }
   return value
-}
-
-/**
- * When decoding structs, we often get Results which don't support `<string> in` operator, so we need to convert them to proper objects first
- **/
-export function toObject<T>(obj: T | Result): T {
-  if (obj instanceof Result) return obj.toObject() as T
-  return obj
 }
 
 /**

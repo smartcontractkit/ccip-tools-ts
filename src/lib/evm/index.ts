@@ -299,7 +299,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       filter.topics = [Array.from(topics)]
     }
     if (!filter.startBlock && filter.startTime) {
-      filter.startBlock = await getSomeBlockNumberBefore(this.provider, filter.startTime)
+      filter.startBlock = await getSomeBlockNumberBefore(
+        this.getBlockTimestamp.bind(this),
+        endBlock,
+        filter.startTime,
+      )
     }
     for (const blockRange of blockRangeGenerator({ ...filter, endBlock })) {
       const logs = await this.provider.getLogs({
