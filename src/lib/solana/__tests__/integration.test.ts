@@ -1,3 +1,6 @@
+import assert from 'node:assert/strict'
+import { before, describe, it } from 'node:test'
+
 import { Connection, PublicKey } from '@solana/web3.js'
 
 import { ChainFamily } from '../../chain.ts'
@@ -11,7 +14,7 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
   // Skip these tests in CI or if no network access
   const skipIfNoNetwork = process.env.CI || process.env.SKIP_INTEGRATION_TESTS
 
-  beforeAll(async () => {
+  before(async () => {
     if (skipIfNoNetwork) {
       return
     }
@@ -28,72 +31,82 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
     }
 
     solanaChain = new SolanaChain(connection, mockNetworkInfo)
-  }, 30000) // 30 second timeout for network setup
+  })
 
-  it('should fetch WMTX token info with symbol from Metaplex metadata fallback', async () => {
-    if (skipIfNoNetwork) {
-      console.log('Skipping integration test - no network access')
-      return
-    }
-
-    const wmtxToken = 'WMTXyYKUMTG3VuZA5beXuHVRLpyTwwaoP7h2i8YpuRH'
-
-    try {
-      const result = await solanaChain.getTokenInfo(wmtxToken)
-
-      console.log(`Token info for ${wmtxToken}:`, result)
-
-      // Verify the expected symbol
-      expect(result.symbol).toBe('WMTX')
-      expect(typeof result.decimals).toBe('number')
-      expect(result.decimals).toBeGreaterThanOrEqual(0)
-    } catch (error) {
-      console.error('Integration test failed:', error)
-      throw error
-    }
-  }, 30000) // 30 second timeout for network call
-
-  it('should demonstrate fallback flow by first checking SPL token data', async () => {
-    if (skipIfNoNetwork) {
-      console.log('Skipping integration test - no network access')
-      return
-    }
-
-    const wmtxToken = 'WMTXyYKUMTG3VuZA5beXuHVRLpyTwwaoP7h2i8YpuRH'
-    const mintPublicKey = new PublicKey(wmtxToken)
-
-    try {
-      // First check what the raw SPL token info contains
-      const mintInfo = await connection.getParsedAccountInfo(mintPublicKey)
-
-      if (
-        mintInfo.value &&
-        typeof mintInfo.value.data === 'object' &&
-        'parsed' in mintInfo.value.data
-      ) {
-        const parsed = mintInfo.value.data.parsed as { info: { symbol?: string; decimals: number } }
-        console.log('Raw SPL token info:', parsed.info)
-
-        // If SPL token doesn't have symbol, our implementation should fallback to Metaplex
-        if (!parsed.info.symbol) {
-          console.log('SPL token info missing symbol - fallback to Metaplex should occur')
-        } else {
-          console.log('SPL token info has symbol:', parsed.info.symbol)
-        }
+  it(
+    'should fetch WMTX token info with symbol from Metaplex metadata fallback',
+    { timeout: 30000 },
+    async () => {
+      if (skipIfNoNetwork) {
+        console.log('Skipping integration test - no network access')
+        return
       }
 
-      // Now test our implementation
-      const result = await solanaChain.getTokenInfo(wmtxToken)
-      console.log('Final result from getTokenInfo:', result)
+      const wmtxToken = 'WMTXyYKUMTG3VuZA5beXuHVRLpyTwwaoP7h2i8YpuRH'
 
-      expect(result.symbol).toBe('WMTX')
-    } catch (error) {
-      console.error('Fallback demonstration failed:', error)
-      throw error
-    }
-  }, 30000)
+      try {
+        const result = await solanaChain.getTokenInfo(wmtxToken)
 
-  it('should verify metadata PDA derivation is correct', async () => {
+        console.log(`Token info for ${wmtxToken}:`, result)
+
+        // Verify the expected symbol
+        assert.equal(result.symbol, 'WMTX')
+        assert.equal(typeof result.decimals, 'number')
+        assert.ok(result.decimals >= 0)
+      } catch (error) {
+        console.error('Integration test failed:', error)
+        throw error
+      }
+    },
+  )
+
+  it(
+    'should demonstrate fallback flow by first checking SPL token data',
+    { timeout: 30000 },
+    async () => {
+      if (skipIfNoNetwork) {
+        console.log('Skipping integration test - no network access')
+        return
+      }
+
+      const wmtxToken = 'WMTXyYKUMTG3VuZA5beXuHVRLpyTwwaoP7h2i8YpuRH'
+      const mintPublicKey = new PublicKey(wmtxToken)
+
+      try {
+        // First check what the raw SPL token info contains
+        const mintInfo = await connection.getParsedAccountInfo(mintPublicKey)
+
+        if (
+          mintInfo.value &&
+          typeof mintInfo.value.data === 'object' &&
+          'parsed' in mintInfo.value.data
+        ) {
+          const parsed = mintInfo.value.data.parsed as {
+            info: { symbol?: string; decimals: number }
+          }
+          console.log('Raw SPL token info:', parsed.info)
+
+          // If SPL token doesn't have symbol, our implementation should fallback to Metaplex
+          if (!parsed.info.symbol) {
+            console.log('SPL token info missing symbol - fallback to Metaplex should occur')
+          } else {
+            console.log('SPL token info has symbol:', parsed.info.symbol)
+          }
+        }
+
+        // Now test our implementation
+        const result = await solanaChain.getTokenInfo(wmtxToken)
+        console.log('Final result from getTokenInfo:', result)
+
+        assert.equal(result.symbol, 'WMTX')
+      } catch (error) {
+        console.error('Fallback demonstration failed:', error)
+        throw error
+      }
+    },
+  )
+
+  it('should verify metadata PDA derivation is correct', { timeout: 30000 }, async () => {
     if (skipIfNoNetwork) {
       console.log('Skipping integration test - no network access')
       return
@@ -120,21 +133,21 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
         console.log('Metadata account owner:', metadataAccount.owner.toString())
 
         // Verify it's owned by the Token Metadata Program
-        expect(metadataAccount.owner.toString()).toBe(TOKEN_METADATA_PROGRAM_ID.toString())
+        assert.equal(metadataAccount.owner.toString(), TOKEN_METADATA_PROGRAM_ID.toString())
       } else {
         console.log('No metadata account found at derived PDA')
       }
 
       // Our implementation should still work regardless
       const result = await solanaChain.getTokenInfo(wmtxToken)
-      expect(result.symbol).toBe('WMTX')
+      assert.equal(result.symbol, 'WMTX')
     } catch (error) {
       console.error('PDA derivation test failed:', error)
       throw error
     }
-  }, 30000)
+  })
 
-  it('should handle network errors gracefully', async () => {
+  it('should handle network errors gracefully', { timeout: 30000 }, async () => {
     if (skipIfNoNetwork) {
       console.log('Skipping integration test - no network access')
       return
@@ -148,15 +161,15 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
       console.log('Result for SOL native mint:', result)
 
       // Should get some result, even if fallback fails
-      expect(typeof result.symbol).toBe('string')
-      expect(typeof result.decimals).toBe('number')
+      assert.equal(typeof result.symbol, 'string')
+      assert.equal(typeof result.decimals, 'number')
     } catch (error) {
       console.error('Network error handling test:', error)
       // This is acceptable - some tokens might not be parseable
     }
-  }, 30000)
+  })
 
-  it.skip('should support Token-2022 tokens on mainnet', async () => {
+  it.skip('should support Token-2022 tokens on mainnet', { timeout: 30000 }, async () => {
     if (skipIfNoNetwork) {
       console.log('Skipping Token-2022 integration test - no network access')
       return
@@ -188,11 +201,11 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
       console.log(`Token-2022 info for ${pyusdToken}:`, result)
 
       // PYUSD should have proper symbol and 6 decimals
-      expect(typeof result.symbol).toBe('string')
-      expect(result.symbol.length).toBeGreaterThan(0)
-      expect(result.symbol).not.toBe('UNKNOWN')
-      expect(typeof result.decimals).toBe('number')
-      expect(result.decimals).toBeGreaterThanOrEqual(0)
+      assert.equal(typeof result.symbol, 'string')
+      assert.ok(result.symbol.length > 0)
+      assert.notEqual(result.symbol, 'UNKNOWN')
+      assert.equal(typeof result.decimals, 'number')
+      assert.ok(result.decimals >= 0)
     } catch (error) {
       console.error('Token-2022 integration test failed:', error)
       // If this specific token doesn't work, that's okay - the important thing
@@ -201,5 +214,5 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
         throw new Error('Token-2022 support is not working - got Invalid SPL token error')
       }
     }
-  }, 30000)
+  })
 })

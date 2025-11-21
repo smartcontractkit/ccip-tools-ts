@@ -1,4 +1,7 @@
 import './index.ts' // Register supported chains
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
 import { Interface, ZeroHash } from 'ethers'
 
 import { type ChainTransaction, Chain, ChainFamily } from './chain.ts'
@@ -13,7 +16,7 @@ import {
   CCIPVersion,
   ExecutionState,
 } from './types.ts'
-import { chainSelectorFromId } from './utils.ts'
+import { networkInfo } from './utils.ts'
 import OffRamp_1_6_ABI from '../abi/OffRamp_1_6.ts'
 import type { CCIPMessage_V1_6_EVM } from './evm/messages.ts'
 
@@ -234,14 +237,10 @@ class MockChain extends Chain {
   }
 }
 
-beforeEach(() => {
-  jest.clearAllMocks()
-})
-
 describe('calculateManualExecProof', () => {
   const lane: Lane = {
-    sourceChainSelector: chainSelectorFromId(11155111),
-    destChainSelector: chainSelectorFromId(421614),
+    sourceChainSelector: networkInfo(11155111).chainSelector,
+    destChainSelector: networkInfo(421614).chainSelector,
     onRamp: '0x0bf3de8c5d3e8a2b34d2beeb17abfcebaf230733',
     version: CCIPVersion.V1_5,
   }
@@ -297,10 +296,10 @@ describe('calculateManualExecProof', () => {
 
     const result = calculateManualExecProof(messages, lane, messageId, merkleRoot)
 
-    expect(result).toHaveProperty('proofs')
-    expect(result).toHaveProperty('proofFlagBits')
-    expect(result).toHaveProperty('merkleRoot')
-    expect(result.proofs).toBeInstanceOf(Array)
+    assert.ok(result.proofs)
+    assert.ok(result.proofFlagBits !== undefined)
+    assert.ok(result.merkleRoot)
+    assert.ok(Array.isArray(result.proofs))
   })
 
   it('should calculate messageId as root of batch with single message', () => {
@@ -309,15 +308,16 @@ describe('calculateManualExecProof', () => {
 
     const result = calculateManualExecProof(batch, lane, messageId)
 
-    expect(result).toHaveProperty('proofs')
-    expect(result.proofs).toHaveLength(0)
-    expect(result.proofFlagBits).toBe(0n)
+    assert.ok(result.proofs)
+    assert.equal(result.proofs.length, 0)
+    assert.equal(result.proofFlagBits, 0n)
   })
 
   it('should throw an error if messageId is not in batch', () => {
     const missingMessageId = '0x9999999999999999999999999999999999999999999999999999999999999999'
 
-    expect(() => calculateManualExecProof(messages, lane, missingMessageId)).toThrow(
+    assert.throws(
+      () => calculateManualExecProof(messages, lane, missingMessageId),
       /Could not find.*in batch/,
     )
   })
@@ -326,7 +326,8 @@ describe('calculateManualExecProof', () => {
     const messageId = messages[0].header.messageId
     const wrongMerkleRoot = '0x0000000000000000000000000000000000000000000000000000000000000001'
 
-    expect(() => calculateManualExecProof(messages, lane, messageId, wrongMerkleRoot)).toThrow(
+    assert.throws(
+      () => calculateManualExecProof(messages, lane, messageId, wrongMerkleRoot),
       /Merkle root.*doesn't match/,
     )
   })
@@ -340,8 +341,8 @@ describe('calculateManualExecProof', () => {
           nonce: 0n,
           messageId: '0x2222222222222222222222222222222222222222222222222222222222222222',
           sequenceNumber: 1n,
-          destChainSelector: chainSelectorFromId(421614),
-          sourceChainSelector: chainSelectorFromId(11155111),
+          destChainSelector: networkInfo(421614).chainSelector,
+          sourceChainSelector: networkInfo(11155111).chainSelector,
         },
         sender: '0x1111111111111111111111111111111111111111',
         feeToken: '0x0000000000000000000000000000000000000000',
@@ -356,8 +357,8 @@ describe('calculateManualExecProof', () => {
     ]
 
     const lane1_6: Lane = {
-      sourceChainSelector: chainSelectorFromId(11155111),
-      destChainSelector: chainSelectorFromId(421614),
+      sourceChainSelector: networkInfo(11155111).chainSelector,
+      destChainSelector: networkInfo(421614).chainSelector,
       onRamp: '0x0bf3de8c5d3e8a2b34d2beeb17abfcebaf230733',
       version: CCIPVersion.V1_6,
     }
@@ -365,8 +366,8 @@ describe('calculateManualExecProof', () => {
     const messageId = messages1_6[0].header.messageId
     const result = calculateManualExecProof(messages1_6, lane1_6, messageId, merkleRoot1_6)
 
-    expect(result.proofs).toHaveLength(0)
-    expect(result.proofFlagBits).toBe(0n)
+    assert.equal(result.proofs.length, 0)
+    assert.equal(result.proofFlagBits, 0n)
   })
 
   it('should calculate Aptos root correctly', () => {
@@ -385,8 +386,9 @@ describe('calculateManualExecProof', () => {
 
     const messageId = message.header.messageId
     const result = calculateManualExecProof([message], lane, messageId)
-    expect(result.merkleRoot).toBeTruthy()
-    expect(result.merkleRoot).toBe(
+    assert.ok(result.merkleRoot)
+    assert.equal(
+      result.merkleRoot,
       '0x3384a0346bb91a2300fcd58391181950fa15e44c56752757d473204ff759e629',
     )
   })
@@ -394,8 +396,12 @@ describe('calculateManualExecProof', () => {
 
 describe('discoverOffRamp', () => {
   it('should discover offRamp correctly', async () => {
-    const sourceChain = new MockChain(chainSelectorFromId(11155111), 'Ethereum Sepolia', 11155111)
-    const destChain = new MockChain(chainSelectorFromId(421614), 'Arbitrum Sepolia', 421614)
+    const sourceChain = new MockChain(
+      networkInfo(11155111).chainSelector,
+      'Ethereum Sepolia',
+      11155111,
+    )
+    const destChain = new MockChain(networkInfo(421614).chainSelector, 'Arbitrum Sepolia', 421614)
     const onRamp = '0xOnRamp'
 
     // Setup mocks for the discovery flow
@@ -409,12 +415,16 @@ describe('discoverOffRamp', () => {
 
     const result = await discoverOffRamp(sourceChain, destChain, onRamp)
 
-    expect(result).toBe('0xDestOffRamp')
+    assert.equal(result, '0xDestOffRamp')
   })
 
   it('should throw an error if no offRamp is found', async () => {
-    const sourceChain = new MockChain(chainSelectorFromId(11155111), 'Ethereum Sepolia', 11155111)
-    const destChain = new MockChain(chainSelectorFromId(421614), 'Arbitrum Sepolia', 421614)
+    const sourceChain = new MockChain(
+      networkInfo(11155111).chainSelector,
+      'Ethereum Sepolia',
+      11155111,
+    )
+    const destChain = new MockChain(networkInfo(421614).chainSelector, 'Arbitrum Sepolia', 421614)
     const onRamp = '0x1111111111111111111111111111111111111111'
 
     // Setup mocks - the loop will find destOffRamp but onRamp won't match
@@ -439,7 +449,8 @@ describe('discoverOffRamp', () => {
       '0x7777777777777777777777777777777777777777',
     ) // This won't match the onRamp we're looking for
 
-    await expect(discoverOffRamp(sourceChain, destChain, onRamp)).rejects.toThrow(
+    await assert.rejects(
+      async () => await discoverOffRamp(sourceChain, destChain, onRamp),
       /No matching offRamp found/,
     )
   })
@@ -451,14 +462,14 @@ describe('fetchExecutionReceipts', () => {
   const messageId2 = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890'
 
   it('should fetch execution receipts correctly (forward mode)', async () => {
-    const dest = new MockChain(chainSelectorFromId(421614), 'Arbitrum Sepolia', 421614)
+    const dest = new MockChain(networkInfo(421614).chainSelector, 'Arbitrum Sepolia', 421614)
 
     const iface = new Interface(OffRamp_1_6_ABI)
 
     // Create mock ExecutionStateChanged logs
     // ExecutionStateChanged(uint64 indexed sourceChainSelector, uint64 indexed sequenceNumber, bytes32 indexed messageId, bytes32 messageHash, uint8 state, bytes returnData, uint256 gasUsed)
     const encoded1 = iface.encodeEventLog('ExecutionStateChanged', [
-      chainSelectorFromId(11155111), // sourceChainSelector
+      networkInfo(11155111).chainSelector, // sourceChainSelector
       1n, // sequenceNumber
       messageId1, // messageId
       ZeroHash, // messageHash
@@ -476,7 +487,7 @@ describe('fetchExecutionReceipts', () => {
     }
 
     const encoded2 = iface.encodeEventLog('ExecutionStateChanged', [
-      chainSelectorFromId(11155111), // sourceChainSelector
+      networkInfo(11155111).chainSelector, // sourceChainSelector
       2n, // sequenceNumber
       messageId2, // messageId
       ZeroHash, // messageHash
@@ -504,18 +515,18 @@ describe('fetchExecutionReceipts', () => {
     }
 
     // In forward mode with startBlock, both receipts should be found and messageIds removed from set
-    expect(results.length).toBeGreaterThanOrEqual(2)
-    expect(results.some((r) => r.receipt.messageId === messageId1)).toBe(true)
-    expect(results.some((r) => r.receipt.messageId === messageId2)).toBe(true)
+    assert.ok(results.length >= 2)
+    assert.ok(results.some((r) => r.receipt.messageId === messageId1))
+    assert.ok(results.some((r) => r.receipt.messageId === messageId2))
   })
 
   it('should complete when all receipts are found (backward mode)', async () => {
-    const dest = new MockChain(chainSelectorFromId(421614), 'Arbitrum Sepolia', 421614)
+    const dest = new MockChain(networkInfo(421614).chainSelector, 'Arbitrum Sepolia', 421614)
 
     const iface = new Interface(OffRamp_1_6_ABI)
 
     const encoded1 = iface.encodeEventLog('ExecutionStateChanged', [
-      chainSelectorFromId(11155111), // sourceChainSelector
+      networkInfo(11155111).chainSelector, // sourceChainSelector
       1n, // sequenceNumber
       messageId1, // messageId
       ZeroHash, // messageHash
@@ -543,19 +554,19 @@ describe('fetchExecutionReceipts', () => {
     }
 
     // In backward mode without startBlock, receipt should be found and messageId removed
-    expect(results.length).toBeGreaterThanOrEqual(1)
-    expect(results.some((r) => r.receipt.messageId === messageId1)).toBe(true)
+    assert.ok(results.length >= 1)
+    assert.ok(results.some((r) => r.receipt.messageId === messageId1))
   })
 
   it('should filter out non-matching message IDs', async () => {
-    const dest = new MockChain(chainSelectorFromId(421614), 'Arbitrum Sepolia', 421614)
+    const dest = new MockChain(networkInfo(421614).chainSelector, 'Arbitrum Sepolia', 421614)
 
     const iface = new Interface(OffRamp_1_6_ABI)
 
     const wrongMessageId = '0x9999999999999999999999999999999999999999999999999999999999999999'
 
     const encoded1 = iface.encodeEventLog('ExecutionStateChanged', [
-      chainSelectorFromId(11155111), // sourceChainSelector
+      networkInfo(11155111).chainSelector, // sourceChainSelector
       1n, // sequenceNumber
       wrongMessageId, // messageId
       ZeroHash, // messageHash
@@ -582,6 +593,6 @@ describe('fetchExecutionReceipts', () => {
       results.push(result)
     }
 
-    expect(results).toHaveLength(0)
+    assert.equal(results.length, 0)
   })
 })

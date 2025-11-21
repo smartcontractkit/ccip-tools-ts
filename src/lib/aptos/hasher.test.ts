@@ -1,14 +1,18 @@
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
 import { hexlify, toUtf8Bytes, zeroPadValue } from 'ethers'
 
-import '../index.ts'
+import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import { encodeExtraArgs } from '../extra-args.ts'
+import '../index.ts'
 import { hashAptosMetadata, hashV16AptosMessage } from './hasher.ts'
 import { encodeRawBytes } from './utils.ts'
-import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 
 describe('aptos hasher', () => {
   it('should encode raw bytes properly', () => {
-    expect(hexlify(encodeRawBytes('0xbeef'))).toBe(
+    assert.equal(
+      hexlify(encodeRawBytes('0xbeef')),
       '0x0000000000000000000000000000000000000000000000000000000000000002beef000000000000000000000000000000000000000000000000000000000000',
     )
   })
@@ -56,7 +60,8 @@ describe('aptos hasher', () => {
       allowOutOfOrderExecution: false,
     }
 
-    expect(hashV16AptosMessage(msg, metadataHash)).toBe(
+    assert.equal(
+      hashV16AptosMessage(msg, metadataHash),
       '0xc8d6cf666864a60dd6ecd89e5c294734c53b3218d3f83d2d19a3c3f9e200e00d',
     )
   })
@@ -66,7 +71,8 @@ describe('aptos hasher', () => {
     const dest = 987654321n
     const onramp = hexlify(toUtf8Bytes('source-onramp-address'))
 
-    expect(hashAptosMetadata(source, dest, onramp)).toBe(
+    assert.equal(
+      hashAptosMetadata(source, dest, onramp),
       '0x812acb01df318f85be452cf6664891cf5481a69dac01e0df67102a295218dd17',
     )
   })

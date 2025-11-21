@@ -1,12 +1,14 @@
-import { describe, expect, it } from '@jest/globals'
+import assert from 'node:assert'
+import { describe, it } from 'node:test'
+
 import { zeroPadValue } from 'ethers'
 
-import '../index.ts'
+import { ChainFamily } from '../chain.ts'
 import { encodeExtraArgs } from '../extra-args.ts'
+import '../index.ts'
 import { type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import { getSuiLeafHasher, hashSuiMetadata, hashV16SuiMessage } from './hasher.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
-import { ChainFamily } from '../chain.ts'
 
 describe('Sui hasher', () => {
   describe('test_calculate_metadata_hash', () => {
@@ -20,7 +22,7 @@ describe('Sui hasher', () => {
       const expectedMetadataHash =
         '0xb62ec658417caa5bcc6ff1d8c45f8b1cb52e1b0ed71603a04b250b107ed836d9'
 
-      expect(metadataHash).toBe(expectedMetadataHash)
+      assert.strictEqual(metadataHash, expectedMetadataHash)
     })
 
     it('should produce different hash when source chain selector changes', () => {
@@ -36,12 +38,12 @@ describe('Sui hasher', () => {
         onRamp,
       )
 
-      expect(metadataHash).not.toBe(metadataHashDifferentSource)
+      assert.notStrictEqual(metadataHash, metadataHashDifferentSource)
 
       // Expected value from Move test
       const expectedMetadataHashDifferentSource =
         '0x89da72ab93f7bd546d60b58a1e1b5f628fd456fe163614ff1e31a2413ca1b55a'
-      expect(metadataHashDifferentSource).toBe(expectedMetadataHashDifferentSource)
+      assert.strictEqual(metadataHashDifferentSource, expectedMetadataHashDifferentSource)
     })
 
     it('should produce different hash when destination chain selector changes', () => {
@@ -57,7 +59,7 @@ describe('Sui hasher', () => {
         onRamp,
       )
 
-      expect(metadataHash).not.toBe(metadataHashDifferentDest)
+      assert.notStrictEqual(metadataHash, metadataHashDifferentDest)
     })
 
     it('should produce different hash when on_ramp changes', () => {
@@ -74,7 +76,7 @@ describe('Sui hasher', () => {
         differentOnRamp,
       )
 
-      expect(metadataHash).not.toBe(metadataHashDifferentOnRamp)
+      assert.notStrictEqual(metadataHash, metadataHashDifferentOnRamp)
     })
   })
 
@@ -126,7 +128,7 @@ describe('Sui hasher', () => {
       const expectedHashNoTokens =
         '0x9f9be87e216efa0b1571131d9295e3802c5c9a3d6e369d230c72520a2e854a9e'
 
-      expect(messageHash).toBe(expectedHashNoTokens)
+      assert.strictEqual(messageHash, expectedHashNoTokens)
     })
 
     it('should match expected message hash with tokens', () => {
@@ -180,7 +182,7 @@ describe('Sui hasher', () => {
       const expectedHashWithTokens =
         '0xd183d22cb0b713da1b6b42d9c35cc9e1268257ff703c6579d6aa68fdfb1ff4b2'
 
-      expect(messageHash).toBe(expectedHashWithTokens)
+      assert.strictEqual(messageHash, expectedHashWithTokens)
     })
   })
 
@@ -234,7 +236,7 @@ describe('Sui hasher', () => {
       // Should match the expected hash from Move test
       const expectedHashNoTokens =
         '0x9f9be87e216efa0b1571131d9295e3802c5c9a3d6e369d230c72520a2e854a9e'
-      expect(hash).toBe(expectedHashNoTokens)
+      assert.strictEqual(hash, expectedHashNoTokens)
     })
   })
 })

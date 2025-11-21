@@ -1,4 +1,7 @@
 import './index.ts' // Register supported chains
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
 import { Interface } from 'ethers'
 
 import { type ChainTransaction, Chain, ChainFamily } from './chain.ts'
@@ -328,10 +331,6 @@ class MockChain extends Chain {
 }
 
 describe('fetchCommitReport', () => {
-  beforeEach(() => {
-    jest.clearAllMocks()
-  })
-
   it('should return first matching commit report for v1.2', async () => {
     const dest = new MockChain(
       11155111n, // Sepolia
@@ -376,15 +375,15 @@ describe('fetchCommitReport', () => {
     const hints = { startBlock: 12345 }
     const result = await fetchCommitReport(dest, '0xCommitStore', request, hints)
 
-    expect(result).toMatchObject({
-      report: {
-        minSeqNr: 1n,
-        maxSeqNr: 2n,
-        merkleRoot: '0x1234000000000000000000000000000000000000000000000000000000000000',
-        sourceChainSelector: lane.sourceChainSelector,
-        onRampAddress: lane.onRamp,
-      },
-    })
+    assert.ok(result.report)
+    assert.equal(result.report.minSeqNr, 1n)
+    assert.equal(result.report.maxSeqNr, 2n)
+    assert.equal(
+      result.report.merkleRoot,
+      '0x1234000000000000000000000000000000000000000000000000000000000000',
+    )
+    assert.equal(result.report.sourceChainSelector, lane.sourceChainSelector)
+    assert.equal(result.report.onRampAddress, lane.onRamp)
   })
 
   it('should throw when no matching commit found in range for v1.2', async () => {
@@ -432,8 +431,9 @@ describe('fetchCommitReport', () => {
 
     const hints = { startBlock: 12345 }
 
-    await expect(fetchCommitReport(dest, '0xCommitStore', request, hints)).rejects.toThrow(
-      'Could not find commit after 12345 for sequenceNumber=1',
+    await assert.rejects(
+      async () => await fetchCommitReport(dest, '0xCommitStore', request, hints),
+      /Could not find commit after 12345 for sequenceNumber=1/,
     )
   })
 
@@ -485,15 +485,15 @@ describe('fetchCommitReport', () => {
     const hints = { startBlock: 12345 }
     const result = await fetchCommitReport(dest, '0xOffRamp', request, hints)
 
-    expect(result).toMatchObject({
-      report: {
-        minSeqNr: 3n,
-        maxSeqNr: 8n,
-        merkleRoot: '0x1234000000000000000000000000000000000000000000000000000000000000',
-        sourceChainSelector: lane.sourceChainSelector,
-        onRampAddress: '0x00000000000000000000000000004f6e52616d70',
-      },
-    })
+    assert.ok(result.report)
+    assert.equal(result.report.minSeqNr, 3n)
+    assert.equal(result.report.maxSeqNr, 8n)
+    assert.equal(
+      result.report.merkleRoot,
+      '0x1234000000000000000000000000000000000000000000000000000000000000',
+    )
+    assert.equal(result.report.sourceChainSelector, lane.sourceChainSelector)
+    assert.equal(result.report.onRampAddress, '0x00000000000000000000000000004f6e52616d70')
   })
 
   it('should stop searching when minSeqNr is greater than requested sequenceNumber', async () => {
@@ -542,8 +542,9 @@ describe('fetchCommitReport', () => {
 
     const hints = { startBlock: 12345 }
 
-    await expect(fetchCommitReport(dest, '0xOffRamp', request, hints)).rejects.toThrow(
-      'Could not find commit after 12345 for sequenceNumber=5',
+    await assert.rejects(
+      async () => await fetchCommitReport(dest, '0xOffRamp', request, hints),
+      /Could not find commit after 12345 for sequenceNumber=5/,
     )
   })
 
@@ -618,13 +619,13 @@ describe('fetchCommitReport', () => {
     const hints = { startBlock: 12345 }
     const result = await fetchCommitReport(dest, '0xOffRamp', request, hints)
 
-    expect(result).toMatchObject({
-      report: {
-        minSeqNr: 4n,
-        maxSeqNr: 10n,
-        merkleRoot: '0xbbbb000000000000000000000000000000000000000000000000000000000000',
-      },
-    })
+    assert.ok(result.report)
+    assert.equal(result.report.minSeqNr, 4n)
+    assert.equal(result.report.maxSeqNr, 10n)
+    assert.equal(
+      result.report.merkleRoot,
+      '0xbbbb000000000000000000000000000000000000000000000000000000000000',
+    )
   })
 
   it('should use startTime when startBlock is not provided', async () => {
@@ -673,12 +674,12 @@ describe('fetchCommitReport', () => {
     // No hints provided, should use timestamp
     const result = await fetchCommitReport(dest, '0xOffRamp', request)
 
-    expect(result).toMatchObject({
-      report: {
-        minSeqNr: 1n,
-        maxSeqNr: 5n,
-        merkleRoot: '0xcccc000000000000000000000000000000000000000000000000000000000000',
-      },
-    })
+    assert.ok(result.report)
+    assert.equal(result.report.minSeqNr, 1n)
+    assert.equal(result.report.maxSeqNr, 5n)
+    assert.equal(
+      result.report.merkleRoot,
+      '0xcccc000000000000000000000000000000000000000000000000000000000000',
+    )
   })
 })
