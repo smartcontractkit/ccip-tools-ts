@@ -169,7 +169,7 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
     }
   })
 
-  it.skip('should support Token-2022 tokens on mainnet', { timeout: 30000 }, async () => {
+  it('should support Token-2022 tokens on mainnet', { timeout: 30000 }, async () => {
     if (skipIfNoNetwork) {
       console.log('Skipping Token-2022 integration test - no network access')
       return
