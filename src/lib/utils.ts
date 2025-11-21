@@ -9,6 +9,7 @@ import {
   toBeHex,
   toBigInt,
 } from 'ethers'
+import moize from 'moize'
 
 import { type Chain, ChainFamily } from './chain.ts'
 import SELECTORS from './selectors.ts'
@@ -90,163 +91,63 @@ export async function getSomeBlockNumberBefore(
   return beforeBlockNumber
 }
 
-export function chainNameFromId(id: NetworkInfo['chainId']): string {
-  const entry = SELECTORS[id]
-  if (!entry) throw new Error(`Chain ID not found: ${id}`)
-  if (!entry.name) throw new Error(`No name for chain with id = ${id}`)
-  return entry.name
-}
-
-export function chainSelectorFromId(id: NetworkInfo['chainId']): bigint {
-  const entry = SELECTORS[id]
-  if (!entry) throw new Error(`Chain ID not found: ${id}`)
-  return entry.selector
-}
-
-export function chainIdFromSelector(selector: bigint): NetworkInfo['chainId'] {
-  for (const id in SELECTORS) {
-    if (SELECTORS[id].selector === selector) {
-      return isNaN(Number(id)) ? id : Number(id)
-    }
-  }
-  throw new Error(`Selector not found: ${selector}`)
-}
-
-export const chainNameFromSelector = (selector: bigint) =>
-  chainNameFromId(chainIdFromSelector(selector))
-
-export function chainIdFromName(name: string): NetworkInfo['chainId'] {
-  for (const id in SELECTORS) {
-    if (SELECTORS[id].name === name) {
-      return isNaN(Number(id)) ? id : Number(id)
-    }
-  }
-  throw new Error(`Chain name not found: ${name}`)
-}
+// memoized so we always output the same object for a given chainId
+const networkInfoFromChainId = moize.default((chainId: NetworkInfo['chainId']): NetworkInfo => {
+  const sel = SELECTORS[chainId]
+  if (!sel?.name) throw new Error(`Chain not found: ${chainId}`)
+  return {
+    chainId: isNaN(+chainId) ? chainId : +chainId,
+    chainSelector: sel.selector,
+    name: sel.name,
+    family: sel.family,
+    isTestnet: !sel.name.includes('-mainnet'),
+  } as NetworkInfo
+})
 
 /**
  * Converts a chain selector, chain ID, or chain name to complete network information
  *
  * @param selectorOrIdOrName - Can be:
  *   - Chain selector as bigint or numeric string
- *   - Chain ID as number or string (EVM: "1", Aptos: "aptos:1", Solana: base58)
+ *   - Chain ID as number, bigint or string (EVM: "1", Aptos: "aptos:1", Solana: genesisHash)
  *   - Chain name as string ("ethereum-mainnet")
  * @returns Complete NetworkInfo object
  */
-export function networkInfo(selectorOrIdOrName: bigint | number | string): NetworkInfo {
-  const { chainId, chainSelector } = resolveChainIdentifiers(selectorOrIdOrName)
-
-  const name = chainNameFromSelector(chainSelector)
-  const family = getChainFamily(name)
-
-  return {
-    chainId,
-    chainSelector,
-    name,
-    family,
-    isTestnet: !name.includes('-mainnet'),
-  } as NetworkInfo
-}
-
-/**
- * Helper function to resolve input to chainId and chainSelector
- */
-function resolveChainIdentifiers(input: bigint | number | string): {
-  chainId: NetworkInfo['chainId']
-  chainSelector: bigint
-} {
-  // Handle bigint selector
-  if (typeof input === 'bigint') {
-    return {
-      chainSelector: input,
-      chainId: chainIdFromSelector(input),
+export const networkInfo = moize.default(function networkInfo_(
+  selectorOrIdOrName: bigint | number | string,
+): NetworkInfo {
+  let chainId
+  if (typeof selectorOrIdOrName === 'number') {
+    chainId = selectorOrIdOrName
+  } else if (typeof selectorOrIdOrName === 'string' && selectorOrIdOrName.match(/^\d+$/)) {
+    selectorOrIdOrName = BigInt(selectorOrIdOrName)
+  }
+  if (typeof selectorOrIdOrName === 'bigint') {
+    // maybe we got a number deserialized as bigint
+    if (selectorOrIdOrName.toString() in SELECTORS) {
+      chainId = Number(selectorOrIdOrName)
+    } else {
+      for (const id in SELECTORS) {
+        if (SELECTORS[id].selector === selectorOrIdOrName) {
+          chainId = id
+          break
+        }
+      }
+      if (!chainId) throw new Error(`Selector not found: ${selectorOrIdOrName}`)
     }
-  }
-
-  // Handle number (EVM chain ID)
-  if (typeof input === 'number') {
-    return {
-      chainId: input,
-      chainSelector: chainSelectorFromId(input),
-    }
-  }
-
-  // Handle string inputs
-  return resolveStringInput(input)
-}
-
-/**
- * Resolves string input which could be selector, chain ID, or chain name
- */
-function resolveStringInput(input: string): {
-  chainId: NetworkInfo['chainId']
-  chainSelector: bigint
-} {
-  // Try as direct chain ID first (handles Aptos/Solana IDs)
-  if (input in SELECTORS) {
-    return {
-      chainId: input,
-      chainSelector: chainSelectorFromId(input),
-    }
-  }
-
-  // Try as numeric value (selector or EVM chain ID)
-  if (/^\d+$/.test(input)) {
-    return resolveNumericString(input)
-  }
-
-  // Fall back to chain name lookup
-  const chainId = chainIdFromName(input)
-  return {
-    chainId,
-    chainSelector: chainSelectorFromId(chainId),
-  }
-}
-
-/**
- * Resolves numeric string - could be selector or EVM chain ID
- */
-function resolveNumericString(input: string): {
-  chainId: NetworkInfo['chainId']
-  chainSelector: bigint
-} {
-  const bigIntValue = BigInt(input)
-
-  // Try as selector first
-  try {
-    return {
-      chainSelector: bigIntValue,
-      chainId: chainIdFromSelector(bigIntValue),
-    }
-  } catch {
-    // If not a valid selector, try as EVM chain ID
-    const numValue = Number(input)
-    if (numValue.toString() in SELECTORS) {
-      return {
-        chainId: numValue,
-        chainSelector: chainSelectorFromId(numValue),
+  } else if (typeof selectorOrIdOrName === 'string') {
+    if (selectorOrIdOrName.includes('-')) {
+      for (const id in SELECTORS) {
+        if (SELECTORS[id].name === selectorOrIdOrName) {
+          chainId = id
+          break
+        }
       }
     }
-
-    // Not found as either, treat as chain name
-    const chainId = chainIdFromName(input)
-    return {
-      chainId,
-      chainSelector: chainSelectorFromId(chainId),
-    }
+    chainId ??= selectorOrIdOrName
   }
-}
-
-/**
- * Determines chain family from chain name
- */
-function getChainFamily(name: string): ChainFamily {
-  if (name.startsWith('solana-')) return ChainFamily.Solana
-  if (name.startsWith('aptos-')) return ChainFamily.Aptos
-  if (name.startsWith('sui-')) return ChainFamily.Sui
-  if (name.startsWith('test-')) return ChainFamily.Test
-  return ChainFamily.EVM
-}
+  return networkInfoFromChainId(chainId as string | number)
+})
 
 const BLOCK_RANGE = 10_000
 /**
