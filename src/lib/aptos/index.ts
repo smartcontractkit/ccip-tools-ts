@@ -79,11 +79,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   _getAccountModulesNames: (address: string) => Promise<string[]>
 
   constructor(provider: Aptos, network: NetworkInfo) {
-    super()
-
     if (network.family !== ChainFamily.Aptos) {
       throw new Error(`Invalid network family: ${network.family}, expected ${ChainFamily.Aptos}`)
     }
+    super()
+
     this.provider = provider
     this.network = network
     this.typeAndVersion = moize.default(this.typeAndVersion.bind(this), {
@@ -122,9 +122,19 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     )
   }
 
-  static async fromUrl(url: string | Network): Promise<AptosChain> {
-    let network
-    if (Object.values(Network).includes(url as Network)) network = url as Network
+  static async fromProvider(provider: Aptos): Promise<AptosChain> {
+    return new AptosChain(provider, networkInfo(`aptos:${await provider.getChainId()}`))
+  }
+
+  static async fromAptosConfig(config: AptosConfig): Promise<AptosChain> {
+    const provider = new Aptos(config)
+    return this.fromProvider(provider)
+  }
+
+  static async fromUrl(url: string | Network, network?: Network): Promise<AptosChain> {
+    if (network) {
+      // pass
+    } else if (Object.values(Network).includes(url as Network)) network = url as Network
     else if (url.includes('mainnet')) network = Network.MAINNET
     else if (url.includes('testnet')) network = Network.TESTNET
     else if (url.includes('local')) network = Network.LOCAL
@@ -134,8 +144,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       fullnode: url.includes('://') ? url : undefined,
       // indexer: url.includes('://') ? `${url}/v1/graphql` : undefined,
     })
-    const provider = new Aptos(config)
-    return new AptosChain(provider, networkInfo(`aptos:${await provider.getChainId()}`))
+    return this.fromAptosConfig(config)
   }
 
   async destroy(): Promise<void> {
