@@ -15,13 +15,12 @@ import AptosLedger from '@ledgerhq/hw-app-aptos'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
 import { type BytesLike, getBytes } from 'ethers'
 
-import type { AptosAsyncAccount } from '../lib/aptos/types.ts'
 import { AptosChain } from '../lib/index.ts'
 
 // A LedgerSigner object represents a signer for a private key on a Ledger hardware wallet.
 // This object is initialized alongside a LedgerClient connection, and can be used to sign
 // transactions via a ledger hardware wallet.
-export class AptosLedgerSigner implements AptosAsyncAccount {
+export class AptosLedgerSigner /*implements AptosAsyncAccount*/ {
   derivationPath: string
   readonly client: AptosLedger.default
   readonly publicKey: Ed25519PublicKey
@@ -73,11 +72,7 @@ export class AptosLedgerSigner implements AptosAsyncAccount {
   }
 }
 
-AptosChain.getWallet = async function loadAptosWallet({
-  wallet: walletOpt,
-}: {
-  wallet?: unknown
-}): Promise<AptosAsyncAccount> {
+AptosChain.getWallet = async function loadAptosWallet({ wallet: walletOpt }: { wallet?: unknown }) {
   if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
   if (typeof walletOpt !== 'string')
     throw new Error(`Invalid wallet option: ${util.inspect(walletOpt)}`)

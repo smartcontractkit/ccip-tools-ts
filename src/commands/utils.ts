@@ -10,17 +10,18 @@ import {
   toUtf8String,
 } from 'ethers'
 
-import type { Chain, ChainStatic } from '../lib/chain.ts'
 import {
   type CCIPCommit,
   type CCIPExecution,
   type CCIPRequest,
+  type Chain,
+  type ChainStatic,
   type Lane,
+  type OffchainTokenData,
   ExecutionState,
   networkInfo,
+  supportedChains,
 } from '../lib/index.ts'
-import { supportedChains } from '../lib/supported-chains.ts'
-import type { OffchainTokenData } from '../lib/types.ts'
 
 export async function selectRequest(
   requests: readonly CCIPRequest[],

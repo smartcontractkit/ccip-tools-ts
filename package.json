@@ -95,6 +95,7 @@
     "exclude": [
       "src/abi",
       "src/lib/solana/programs",
+      "src/lib/selectors.ts",
       "**/*.test.ts",
       "**/__tests__/**",
       "**/__mocks__/**",

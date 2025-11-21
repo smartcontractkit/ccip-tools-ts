@@ -12,11 +12,11 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-import { discoverOffRamp } from '../lib/execution.ts'
 import {
   type CCIPRequest,
   ChainFamily,
   bigIntReplacer,
+  discoverOffRamp,
   fetchCCIPMessageById,
   fetchCCIPMessagesInTx,
   networkInfo,

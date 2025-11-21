@@ -30,8 +30,7 @@ import type { Argv } from 'yargs'
 import { Format } from './types.ts'
 import { formatDuration, logParsedError, prettyTable } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
-import type { Chain, RateLimiterState } from '../lib/chain.ts'
-import { bigIntReplacer, networkInfo } from '../lib/index.ts'
+import { type Chain, type RateLimiterState, bigIntReplacer, networkInfo } from '../lib/index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
 export const command = ['getSupportedTokens <source> <address> [token]']

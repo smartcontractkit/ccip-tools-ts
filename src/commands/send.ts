@@ -4,19 +4,19 @@ import type { Argv } from 'yargs'
 import type { GlobalOpts } from '../index.ts'
 import { Format } from './types.ts'
 import { logParsedError, parseTokenAmounts, prettyRequest, withDateTimestamp } from './utils.ts'
-import type { EVMChain } from '../lib/evm/index.ts'
-import type { ExtraArgs } from '../lib/extra-args.ts'
 import {
+  type AnyMessage,
   type CCIPVersion,
+  type EVMChain,
+  type ExtraArgs,
   ChainFamily,
   bigIntReplacer,
   estimateExecGasForRequest,
   fetchCCIPMessagesInTx,
+  getDataBytes,
   networkInfo,
   sourceToDestTokenAmounts,
 } from '../lib/index.ts'
-import type { AnyMessage } from '../lib/types.ts'
-import { getDataBytes } from '../lib/utils.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
 export const command = 'send <source> <router> <dest>'

@@ -10,18 +10,20 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-import type { EVMChain } from '../lib/evm/index.ts'
-import { discoverOffRamp } from '../lib/execution.ts'
 import {
+  type CCIPRequest,
+  type CCIPVersion,
   type ChainStatic,
+  type EVMChain,
+  type ExecutionReport,
   ChainFamily,
   bigIntReplacer,
   calculateManualExecProof,
+  discoverOffRamp,
   estimateExecGasForRequest,
   fetchAllMessagesInBatch,
   fetchCCIPMessagesInTx,
 } from '../lib/index.ts'
-import type { CCIPRequest, CCIPVersion, ExecutionReport } from '../lib/types.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
 // const MAX_QUEUE = 1000
