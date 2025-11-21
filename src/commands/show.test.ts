@@ -398,3 +398,135 @@ describe('e2e command show EVM', () => {
     },
   )
 })
+
+describe('e2e command show Solana', () => {
+  // Test transaction hash
+  const TX_HASH =
+    '5kNwdda31bfY2rA8pt2xGpdptTWzDqSxkHae2FqE1RQKbA2Wi3ikC8SZDZdjxwmjpHLNQHWYAKkr6gp2mz2HJ9iS'
+  const MESSAGE_ID = '0x941411a3d6b5e4d7350a2113207976614e6327c3e56a479e266ec57fef61961b'
+  const SENDER = 'DWBXvezhcEadofmf9obkgsMeZnGoDiSBE5Vpc1CPs8fu'
+  const RECEIVER = '0xAB4f961939BFE6A93567cC57C59eEd7084CE2131'
+  const ONRAMP = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C'
+  const OFFRAMP = '0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0'
+
+  it(
+    'should show complete CCIP transaction details Solana to EVM',
+    { timeout: 120000 },
+    async () => {
+      const args = buildShowArgs(TX_HASH)
+      const result = await spawnCLI(args, 120000)
+
+      assert.equal(result.exitCode, 0)
+      const output = result.stdout
+
+      // Lane information
+      assert.match(output, /name.*solana-devnet.*ethereum-testnet-sepolia/i)
+      assert.match(output, /chainId.*EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG.*11155111/)
+      assert.match(output, /chainSelector.*16423721717087811551n?.*16015286601757825753n?/)
+      assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
+
+      // Request information
+      assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
+      assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
+      assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
+      assert.match(output, new RegExp(`receiver.*${RECEIVER}`))
+      assert.match(output, /sequenceNumber.*1975n?/)
+      assert.match(output, /nonce.*0n?.*allow out-of-order/)
+      assert.match(output, /gasLimit.*0n?/)
+      assert.match(output, /finalized.*true/)
+      assert.match(output, /fee.*\bSOL/)
+      assert.match(output, /tokens.*0\.017 USDC/)
+      assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
+      assert.match(output, /data.*hello from ccip-tools-ts\b/)
+      assert.match(output, /allowOutOfOrderExecution.*true\b/)
+
+      // Commit information
+      assert.match(output, /Commit.*dest/i)
+      assert.match(
+        output,
+        /merkleRoot.*0xc14e80512b09a884f491fd2c258d75861e9b0ed8c375b7c306470aad38397613/i,
+      )
+      assert.match(output, /min.*1975/)
+      assert.match(output, /max.*1975/)
+      assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
+      assert.match(
+        output,
+        /transactionHash.*0xb51f2c20a273438fb3e08765b8cc95eb1c3f6f84d5b0257a212c47039300dcd4/i,
+      )
+
+      // Receipts information
+      assert.match(output, /Receipts.*dest/i)
+      assert.match(output, /state.*success/i)
+      assert.match(
+        output,
+        /transactionHash.*0x35f262d6c6de2466ab99b7c6e710bb92c546568c4f660aa9d8b65820cec2840b/i,
+      )
+    },
+  )
+})
+
+describe('e2e command show Aptos', () => {
+  // Test transaction hash
+  const TX_HASH = '0xfe068c795491d52c548a50f4e6a378a4c837d6cbfcf322e1acfe121f2fe735b4'
+  const MESSAGE_ID = '0x36ac5c4c91a322b8294d6a32250fe87342d7de19460d6849e7b04b864ab8333d'
+  const SENDER = '0xc7dfb38f07910cba7157db3ead1471ebc5a87f71a5aaad3921637f5371da69d8'
+  const RECEIVER = '0x89810cb91a5fe67dDf3483182f08e1559A5699De'
+  const ONRAMP = '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45'
+  const OFFRAMP = '0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0'
+
+  it(
+    'should show complete CCIP transaction details Aptos to EVM',
+    { timeout: 120000 },
+    async () => {
+      const args = buildShowArgs(TX_HASH)
+      const result = await spawnCLI(args, 120000)
+
+      assert.equal(result.exitCode, 0, `stdout: ${result.stdout}\nstderr: ${result.stderr}`)
+      const output = result.stdout
+
+      // Lane information
+      assert.match(output, /name.*aptos-testnet.*ethereum-testnet-sepolia/i)
+      assert.match(output, /chainId.*aptos:2.*11155111/)
+      assert.match(output, /chainSelector.*743186221051783445n?.*16015286601757825753n?/)
+      assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
+
+      // Request information
+      assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
+      assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
+      assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
+      assert.match(output, new RegExp(`receiver.*${RECEIVER}`))
+      assert.match(output, /sequenceNumber.*81n?/)
+      assert.match(output, /nonce.*0n?.*allow out-of-order/)
+      assert.match(output, /gasLimit.*0n?/)
+      assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
+      assert.match(output, /finalized.*true/)
+      assert.match(output, /fee.*\bAPT/)
+      assert.match(output, /tokens.*0\.0013 CCIP-BnM/)
+      assert.match(output, /data.*hello from ccip-tools-ts\b/)
+      assert.match(output, /allowOutOfOrderExecution.*true\b/)
+
+      // Commit information
+      assert.match(output, /Commit.*dest/i)
+      assert.match(
+        output,
+        /merkleRoot.*0x3384a0346bb91a2300fcd58391181950fa15e44c56752757d473204ff759e629/i,
+      )
+      assert.match(output, /min.*81/)
+      assert.match(output, /max.*81/)
+      assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
+      assert.match(
+        output,
+        /transactionHash.*0x68996294653de4757c1cd9a68f948e05304821ac3f1a887944b01c9e0a493f1d/i,
+      )
+
+      // Receipts information
+      assert.match(output, /Receipts.*dest/i)
+      assert.match(output, /state.*success/i)
+      assert.match(output, /gasUsed.*79399/i)
+      assert.match(
+        output,
+        /transactionHash.*0x55e31c81a43af256ced95fbcbaabde3ea6ea0f287cb20af1ad61e0e845a211a3/i,
+      )
+    },
+  )
+})
