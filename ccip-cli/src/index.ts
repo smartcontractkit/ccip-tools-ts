@@ -47,7 +47,7 @@ export type GlobalOpts = InferredOptionTypes<typeof globalOpts>
 
 async function main() {
   await yargs(hideBin(process.argv))
-    .scriptName(process.env.CCIP_CLI_NAME || 'ccip-cli')
+    .scriptName(process.env.CLI_NAME || 'ccip-cli')
     .env('CCIP')
     .options(globalOpts)
     .middleware((argv) => {

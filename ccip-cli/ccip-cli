@@ -3,7 +3,7 @@
 SCRIPT_DIR="$(CDPATH="" cd -P "$(dirname -- "$0")" && pwd -P)"
 NODE_VERSION="$(node --version | sed 's/v//' | cut -d'.' -f1)"
 
-export CCIP_CLI_NAME="$(basename -- "$0")"
+export CLI_NAME="$(basename -- "$0")"
 
 if [ ! -f "$SCRIPT_DIR/src/index.ts" ]; then
   exec node "$SCRIPT_DIR/dist/index.js" "$@"
