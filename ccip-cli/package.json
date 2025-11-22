@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck",
     "build": "npm run clean && tsc -p ./tsconfig.build.json && npm run make-script",
-    "make-script": "cp -v ./src/ccip-cli ./dist/ && find ./dist -type f -name \"*.js\" -exec sed -i '' -e 's|@chainlink/ccip-tools-ts/src/.*\\.ts|@chainlink/ccip-tools-ts|g' {} +",
+    "make-script": "cp -v ./src/ccip-cli ./dist/ && find ./dist -type f -name \"*.js\" -exec sed -i.bkp 's|@chainlink/ccip-tools-ts/src/.*\\.ts|@chainlink/ccip-tools-ts|g' {} + && find ./dist -type f -name \"*.bkp\" -delete",
     "start": "./src/ccip-cli",
     "clean": "rm -rfv ./dist",
     "prepare": "npm run build"
