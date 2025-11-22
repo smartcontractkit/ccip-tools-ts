@@ -4,8 +4,8 @@ import { dataSlice, hexlify } from 'ethers'
 import moize from 'moize'
 
 import { sleep } from '../utils.ts'
+import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import type { SolanaChain } from './index.ts'
-import { IDL as CCIP_OFFRAMP_IDL } from './programs/1.6.0/CCIP_OFFRAMP.ts'
 import { simulateAndSendTxs } from './send.ts'
 
 /**

@@ -3,7 +3,7 @@
   "src": ["src"],
   "exclude": [
     "**/abi",
-    "**/solana/programs",
+    "**/idl",
     "**/selectors.ts",
     "**/*.test.ts",
     "**/__tests__",
