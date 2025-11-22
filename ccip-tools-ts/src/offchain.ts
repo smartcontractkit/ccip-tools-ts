@@ -47,7 +47,12 @@ export async function getUsdcAttestation(message: string, isTestnet: boolean): P
  * @param isTestnet - true if this was from a testnet
  * @returns LBTC attestation bytes
  */
-export async function getLbtcAttestation(payloadHash: string, isTestnet: boolean): Promise<string> {
+export async function getLbtcAttestation(
+  payloadHash: string,
+  isTestnet: boolean,
+): Promise<{
+  attestation: string
+}> {
   const lbtcApiBaseUrl = isTestnet ? LOMBARD_API_URL.testnet : LOMBARD_API_URL.mainnet
   const res = await fetch(`${lbtcApiBaseUrl}/api/bridge/v1/deposits/getByHash`, {
     method: 'POST',
@@ -77,5 +82,5 @@ export async function getLbtcAttestation(payloadHash: string, isTestnet: boolean
         JSON.stringify(attestation, null, 2),
     )
   }
-  return attestation.attestation
+  return attestation
 }

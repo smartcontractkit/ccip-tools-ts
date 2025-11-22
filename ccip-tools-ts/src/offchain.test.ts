@@ -157,7 +157,7 @@ describe('getLbtcAttestation', () => {
       method: 'POST',
       body: JSON.stringify({ messageHash: [approvedPayloadHash1] }),
     })
-    assert.equal(result, approvedPayloadAttestation1)
+    assert.equal(result.attestation, approvedPayloadAttestation1)
   })
 
   it('should call mainnet API when isTestnet is false', async () => {
@@ -172,7 +172,7 @@ describe('getLbtcAttestation', () => {
       method: 'POST',
       body: JSON.stringify({ messageHash: [approvedPayloadHash1] }),
     })
-    assert.equal(result, approvedPayloadAttestation1)
+    assert.equal(result.attestation, approvedPayloadAttestation1)
   })
 
   it('should throw error if attestation is not found', async () => {
@@ -212,6 +212,6 @@ describe('getLbtcAttestation', () => {
   it('should handle multiple attestations and return correct one', async () => {
     const result = await getLbtcAttestation(approvedPayloadHash2, true)
 
-    assert.equal(result, approvedPayloadAttestation2)
+    assert.equal(result.attestation, approvedPayloadAttestation2)
   })
 })

@@ -226,14 +226,7 @@ export async function prettyRequest(
   console.info('Attestations:')
   for (const attestation of offchainTokenData) {
     const { _tag: type, ...rest } = attestation!
-    prettyTable({
-      type,
-      ...Object.fromEntries(
-        Object.entries(rest)
-          .map(([key, value]) => Object.entries(formatData(key, hexlify(value))))
-          .flat(1),
-      ),
-    })
+    prettyTable({ type, ...rest })
   }
 }
 

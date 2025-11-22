@@ -16,6 +16,10 @@ const TRANSFER_EVENT = EventFragment.from('Transfer(address from, address to, ui
 export const LBTC_EVENT = EventFragment.from(
   'DepositToBridge(address fromAddress, bytes32 toAddress, bytes32 payloadHash, bytes payload)',
 )
+export const LBTC_EVENT_V2 = EventFragment.from(
+  'DepositToBridge(address fromAddress, bytes32 toAddress, bytes32 payloadHash)',
+)
+const LBTC_EVENTS_HASHES = new Set([LBTC_EVENT.topicHash, LBTC_EVENT_V2.topicHash])
 
 /**
  * Fetch offchain token data for all transfers in request
@@ -166,7 +170,7 @@ async function getLbtcTokenData(
 ): Promise<OffchainTokenData[]> {
   const lbtcDepositHashes = new Set(
     allLogsInRequest
-      .filter(({ topics }) => topics[0] === LBTC_EVENT.topicHash)
+      .filter(({ topics }) => LBTC_EVENTS_HASHES.has(topics[0]))
       .map(({ topics }) => topics[3]),
   )
   return Promise.all(
@@ -175,8 +179,7 @@ async function getLbtcTokenData(
       // otherwise attestation is not required
       if (lbtcDepositHashes.has(extraData)) {
         try {
-          const attestation = await getLbtcAttestation(extraData, isTestnet)
-          return { _tag: 'lbtc', attestation, extraData }
+          return { _tag: 'lbtc', extraData, ...(await getLbtcAttestation(extraData, isTestnet)) }
         } catch (err) {
           console.warn(`❌ EVM LBTC: Failed to fetch attestation for message:`, extraData, err)
         }
