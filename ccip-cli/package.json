@@ -28,21 +28,21 @@
     "!**/__mocks__"
   ],
   "devDependencies": {
-    "@eslint/js": "9.39.1",
+    "@eslint/js": "^9.39.1",
     "@types/node": "24.10.1",
     "@types/yargs": "17.0.35",
-    "eslint": "9.39.1",
+    "eslint": "^9.39.1",
     "eslint-config-prettier": "10.1.8",
     "eslint-import-resolver-typescript": "4.4.4",
-    "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-prettier": "5.5.4",
-    "prettier": "3.6.2",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-prettier": "^5.5.4",
+    "prettier": "^3.6.2",
     "tsx": "4.20.6",
     "typescript": "5.9.3",
     "typescript-eslint": "8.47.0"
   },
   "dependencies": {
-    "@aptos-labs/ts-sdk": "^5.1.4",
+    "@aptos-labs/ts-sdk": "^5.1.5",
     "@chainlink/ccip-tools-ts": "^0.90.0",
     "@coral-xyz/anchor": "^0.29.0",
     "@ethers-ext/signer-ledger": "^6.0.0-beta.1",
@@ -51,6 +51,7 @@
     "@ledgerhq/hw-app-solana": "^7.6.0",
     "@ledgerhq/hw-transport-node-hid": "^6.29.14",
     "@solana/web3.js": "^1.98.4",
+    "bs58": "^6.0.0",
     "ethers": "6.15.0",
     "yargs": "18.0.0"
   }
