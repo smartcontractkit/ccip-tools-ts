@@ -1,5 +1,14 @@
 import util from 'util'
 
+import {
+  type CCIPRequest,
+  ChainFamily,
+  bigIntReplacer,
+  discoverOffRamp,
+  fetchCCIPMessageById,
+  fetchCCIPMessagesInTx,
+  networkInfo,
+} from '@chainlink/ccip-tools-ts/src/index.ts'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -12,15 +21,6 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-import {
-  type CCIPRequest,
-  ChainFamily,
-  bigIntReplacer,
-  discoverOffRamp,
-  fetchCCIPMessageById,
-  fetchCCIPMessagesInTx,
-  networkInfo,
-} from '../lib/index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
 export const command = ['show <tx-hash>', '* <tx-hash>']

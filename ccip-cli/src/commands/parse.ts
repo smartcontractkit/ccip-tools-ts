@@ -1,9 +1,9 @@
+import { bigIntReplacer, supportedChains } from '@chainlink/ccip-tools-ts/src/index.ts'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
 import { Format } from './types.ts'
 import { prettyTable } from './utils.ts'
-import { bigIntReplacer, supportedChains } from '../lib/index.ts'
 
 export const command = ['parse <data>', 'parseBytes <data>', 'parseData <data>']
 export const describe =

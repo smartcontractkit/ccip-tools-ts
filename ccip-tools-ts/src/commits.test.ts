@@ -6,6 +6,8 @@ import { Interface } from 'ethers'
 
 import { type ChainTransaction, Chain, ChainFamily } from './chain.ts'
 import { fetchCommitReport } from './commits.ts'
+import CommitStore_1_2_ABI from './evm/abi/CommitStore_1_2.ts'
+import OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
@@ -16,8 +18,6 @@ import {
   type NetworkInfo,
   CCIPVersion,
 } from './types.ts'
-import CommitStore_1_2_ABI from '../abi/CommitStore_1_2.ts'
-import OffRamp_1_6_ABI from '../abi/OffRamp_1_6.ts'
 
 // Mock Chain class for testing
 class MockChain extends Chain {

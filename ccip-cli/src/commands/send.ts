@@ -1,9 +1,3 @@
-import { type BytesLike, dataLength, formatUnits, toUtf8Bytes } from 'ethers'
-import type { Argv } from 'yargs'
-
-import type { GlobalOpts } from '../index.ts'
-import { Format } from './types.ts'
-import { logParsedError, parseTokenAmounts, prettyRequest, withDateTimestamp } from './utils.ts'
 import {
   type AnyMessage,
   type CCIPVersion,
@@ -16,7 +10,13 @@ import {
   getDataBytes,
   networkInfo,
   sourceToDestTokenAmounts,
-} from '../lib/index.ts'
+} from '@chainlink/ccip-tools-ts/src/index.ts'
+import { type BytesLike, dataLength, formatUnits, toUtf8Bytes } from 'ethers'
+import type { Argv } from 'yargs'
+
+import type { GlobalOpts } from '../index.ts'
+import { Format } from './types.ts'
+import { logParsedError, parseTokenAmounts, prettyRequest, withDateTimestamp } from './utils.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
 export const command = 'send <source> <router> <dest>'

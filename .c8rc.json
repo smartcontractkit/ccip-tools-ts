@@ -1,0 +1,19 @@
+{
+  "all": true,
+  "src": ["src"],
+  "exclude": [
+    "**/abi",
+    "**/solana/programs",
+    "**/selectors.ts",
+    "**/*.test.ts",
+    "**/__tests__",
+    "**/__mocks__",
+    "**/dist",
+    ".coverage",
+    ".c8_output"
+  ],
+  "reporter": ["text", "lcov", "html"],
+  "temp-directory": "./.c8_output",
+  "report-dir": "./.coverage",
+  "clean": true
+}

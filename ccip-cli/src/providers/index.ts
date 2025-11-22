@@ -1,15 +1,16 @@
 import { readFile } from 'node:fs/promises'
 
-import './aptos.ts'
-import './evm.ts'
-import './solana.ts'
 import {
   type Chain,
   type ChainGetter,
   type ChainTransaction,
   networkInfo,
   supportedChains,
-} from '../lib/index.ts'
+} from '@chainlink/ccip-tools-ts/src/index.ts'
+
+import './aptos.ts'
+import './evm.ts'
+import './solana.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
 

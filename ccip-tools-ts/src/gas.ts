@@ -14,8 +14,8 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 
 import type { Chain } from './chain.ts'
-import TokenABI from '../abi/BurnMintERC677Token.ts'
-import RouterABI from '../abi/Router.ts'
+import TokenABI from './evm/abi/BurnMintERC677Token.ts'
+import RouterABI from './evm/abi/Router.ts'
 import { defaultAbiCoder } from './evm/const.ts'
 import type { EVMChain } from './evm/index.ts'
 import { discoverOffRamp } from './execution.ts'

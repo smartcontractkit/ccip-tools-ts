@@ -1,5 +1,5 @@
-#!/usr/bin/env -S npx tsx
-import util from 'util'
+#!/usr/bin/env node
+import util from 'node:util'
 
 import yargs, { type InferredOptionTypes } from 'yargs'
 import { hideBin } from 'yargs/helpers'
@@ -9,7 +9,7 @@ import { Format } from './commands/index.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.2.12-1eb99b6'
+const VERSION = '0.90.0-278411e'
 // generate:end
 
 const globalOpts = {
@@ -46,6 +46,7 @@ export type GlobalOpts = InferredOptionTypes<typeof globalOpts>
 
 async function main() {
   await yargs(hideBin(process.argv))
+    .scriptName(process.env.CCIP_CLI_NAME || 'ccip-cli')
     .env('CCIP')
     .options(globalOpts)
     .middleware((argv) => {
@@ -54,7 +55,7 @@ async function main() {
       }
     })
     .commandDir('commands', {
-      extensions: ['ts'],
+      extensions: [new URL(import.meta.url).pathname.split('.').pop()!],
       exclude: /\.test\.ts$/,
     })
     .demandCommand()

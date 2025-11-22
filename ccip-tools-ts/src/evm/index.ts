@@ -1,4 +1,4 @@
-import util from 'node:util'
+import util from 'util'
 
 import { parseAbi } from 'abitype'
 import {
@@ -31,34 +31,6 @@ import type { TypedContract } from 'ethers-abitype'
 import moize, { type Key } from 'moize'
 
 import {
-  DEFAULT_APPROVE_GAS_LIMIT,
-  DEFAULT_GAS_LIMIT,
-  commitsFragments,
-  defaultAbiCoder,
-  getAllFragmentsMatchingEvents,
-  interfaces,
-  receiptsFragments,
-  requestsFragments,
-} from './const.ts'
-import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
-import {
-  type CCIPMessage_V1_6_EVM,
-  type CleanAddressable,
-  parseSourceTokenData,
-} from './messages.ts'
-import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
-import type Token_ABI from '../../abi/BurnMintERC677Token.ts'
-import type TokenPool_1_5_ABI from '../../abi/LockReleaseTokenPool_1_5.ts'
-import type TokenPool_ABI from '../../abi/LockReleaseTokenPool_1_6_1.ts'
-import EVM2EVMOffRamp_1_2_ABI from '../../abi/OffRamp_1_2.ts'
-import EVM2EVMOffRamp_1_5_ABI from '../../abi/OffRamp_1_5.ts'
-import OffRamp_1_6_ABI from '../../abi/OffRamp_1_6.ts'
-import EVM2EVMOnRamp_1_2_ABI from '../../abi/OnRamp_1_2.ts'
-import EVM2EVMOnRamp_1_5_ABI from '../../abi/OnRamp_1_5.ts'
-import OnRamp_1_6_ABI from '../../abi/OnRamp_1_6.ts'
-import type Router_ABI from '../../abi/Router.ts'
-import type TokenAdminRegistry_1_5_ABI from '../../abi/TokenAdminRegistry_1_5.ts'
-import {
   type ChainTransaction,
   type LogFilter,
   type TokenPoolRemote,
@@ -76,7 +48,7 @@ import {
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
-import type { LeafHasher } from '../hasher/common.ts'
+import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
   type CCIPMessage,
@@ -101,8 +73,36 @@ import {
   networkInfo,
   parseTypeAndVersion,
 } from '../utils.ts'
+import type Token_ABI from './abi/BurnMintERC677Token.ts'
+import type TokenPool_1_5_ABI from './abi/LockReleaseTokenPool_1_5.ts'
+import type TokenPool_ABI from './abi/LockReleaseTokenPool_1_6_1.ts'
+import EVM2EVMOffRamp_1_2_ABI from './abi/OffRamp_1_2.ts'
+import EVM2EVMOffRamp_1_5_ABI from './abi/OffRamp_1_5.ts'
+import OffRamp_1_6_ABI from './abi/OffRamp_1_6.ts'
+import EVM2EVMOnRamp_1_2_ABI from './abi/OnRamp_1_2.ts'
+import EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
+import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
+import type Router_ABI from './abi/Router.ts'
+import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
+import {
+  DEFAULT_APPROVE_GAS_LIMIT,
+  DEFAULT_GAS_LIMIT,
+  commitsFragments,
+  defaultAbiCoder,
+  getAllFragmentsMatchingEvents,
+  interfaces,
+  receiptsFragments,
+  requestsFragments,
+} from './const.ts'
 import { parseData } from './errors.ts'
-import { supportedChains } from '../supported-chains.ts'
+import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
+import {
+  type CCIPMessage_V1_6_EVM,
+  type CleanAddressable,
+  parseSourceTokenData,
+} from './messages.ts'
+import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
+import type { LeafHasher } from '../hasher/common.ts'
 
 const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 
@@ -919,8 +919,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ...(feeToken === ZeroAddress ? { value: message.fee } : {}),
       },
     )
-    const receipt = (await tx.wait(1))!
-    return this.getTransaction(receipt)
+    const receipt = await tx.wait(1)
+    return this.getTransaction(receipt!)
   }
 
   fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {

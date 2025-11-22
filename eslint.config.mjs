@@ -15,7 +15,7 @@ export default defineConfig(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['*.js', '*.mjs'],
+          allowDefaultProject: ['*.js', '*.mjs', '.cjs'],
         },
         tsconfigRootDir: import.meta.dirname,
       },
@@ -39,7 +39,7 @@ export default defineConfig(
   },
   {
     // Apply these settings to test files
-    files: ['**/*.test.ts', '**/*.spec.ts', 'tests/**/*.ts'],
+    files: ['**/*.test.ts', '**/*.spec.ts', '**/tests/**/*.ts', '**/__tests__/**/*.ts'],
     rules: {
       // Disable specific rules for test files
       '@typescript-eslint/no-explicit-any': 'off',
@@ -66,7 +66,7 @@ export default defineConfig(
           project: ['tsconfig.json'],
         },
       },
-      'import/extensions': ['.ts', '.js', '.mjs'],
+      'import/extensions': ['.ts', '.js', '.mjs', '.cjs'],
     },
     rules: {
       'import/order': [

@@ -1,15 +1,3 @@
-import type { Argv } from 'yargs'
-
-import type { GlobalOpts } from '../index.ts'
-import { Format } from './types.ts'
-import {
-  logParsedError,
-  prettyCommit,
-  prettyReceipt,
-  prettyRequest,
-  selectRequest,
-  withDateTimestamp,
-} from './utils.ts'
 import {
   type CCIPRequest,
   type CCIPVersion,
@@ -23,7 +11,19 @@ import {
   estimateExecGasForRequest,
   fetchAllMessagesInBatch,
   fetchCCIPMessagesInTx,
-} from '../lib/index.ts'
+} from '@chainlink/ccip-tools-ts/src/index.ts'
+import type { Argv } from 'yargs'
+
+import type { GlobalOpts } from '../index.ts'
+import { Format } from './types.ts'
+import {
+  logParsedError,
+  prettyCommit,
+  prettyReceipt,
+  prettyRequest,
+  selectRequest,
+  withDateTimestamp,
+} from './utils.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
 // const MAX_QUEUE = 1000

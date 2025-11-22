@@ -1,4 +1,4 @@
-import util from 'node:util'
+import util from 'util'
 
 import {
   Account,

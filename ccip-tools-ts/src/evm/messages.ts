@@ -1,10 +1,10 @@
 import type { AbiParametersToPrimitiveTypes, ExtractAbiEvent } from 'abitype'
 import type { Addressable, Result } from 'ethers'
 
-import type EVM2EVMOnRamp_1_5_ABI from '../../abi/OnRamp_1_5.ts'
-import type OnRamp_1_6_ABI from '../../abi/OnRamp_1_6.ts'
 import type { EVMExtraArgsV2 } from '../extra-args.ts'
 import type { CCIPVersion, MergeArrayElements } from '../types.ts'
+import type EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
+import type OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import { defaultAbiCoder } from './const.ts'
 
 // addresses often come as `string | Addressable`, this type cleans them up to just `string`

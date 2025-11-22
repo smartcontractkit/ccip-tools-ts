@@ -2,12 +2,11 @@ import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import util from 'util'
 
+import { EVMChain } from '@chainlink/ccip-tools-ts/src/index.ts'
 import { LedgerSigner } from '@ethers-ext/signer-ledger'
 import { password } from '@inquirer/prompts'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
 import { type Provider, type Signer, BaseWallet, SigningKey, Wallet } from 'ethers'
-
-import { EVMChain } from '../lib/index.ts'
 
 // monkey-patch @ethers-ext/signer-ledger to preserve path when `.connect`ing provider
 Object.assign(LedgerSigner.prototype, {

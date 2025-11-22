@@ -2,7 +2,7 @@ import type { AbiParametersToPrimitiveTypes, ExtractAbiEvent } from 'abitype'
 import type { BytesLike, Log } from 'ethers'
 
 import type { ChainFamily, ChainTransaction } from './chain.ts'
-import type OffRamp_1_6_ABI from '../abi/OffRamp_1_6.ts'
+import type OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
 import type { CCIPMessage_EVM, CCIPMessage_V1_6_EVM } from './evm/messages.ts'
 import type { ExtraArgs } from './extra-args.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'

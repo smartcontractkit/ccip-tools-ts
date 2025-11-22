@@ -1,0 +1,14 @@
+#!/bin/sh
+
+SCRIPT_DIR="$(CDPATH="" cd -P "$(dirname -- "$0")" && pwd -P)"
+NODE_VERSION="$(node --version | sed 's/v//' | cut -d'.' -f1)"
+
+export CCIP_CLI_NAME="$(basename -- "$0")"
+
+if [ ! -f "$SCRIPT_DIR/index.ts" ]; then
+  exec node "$SCRIPT_DIR/index.js" "$@"
+elif [ "$NODE_VERSION" -ge 23 ]; then
+  exec node "$SCRIPT_DIR/index.ts" "$@"
+else
+  exec npx tsx "$SCRIPT_DIR/index.ts" "$@"
+fi

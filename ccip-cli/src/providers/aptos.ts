@@ -11,11 +11,10 @@ import {
   Ed25519Signature,
   generateSigningMessageForTransaction,
 } from '@aptos-labs/ts-sdk'
+import { AptosChain } from '@chainlink/ccip-tools-ts/src/index.ts'
 import AptosLedger from '@ledgerhq/hw-app-aptos'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
 import { type BytesLike, getBytes } from 'ethers'
-
-import { AptosChain } from '../lib/index.ts'
 
 // A LedgerSigner object represents a signer for a private key on a Ledger hardware wallet.
 // This object is initialized alongside a LedgerClient connection, and can be used to sign

@@ -5,6 +5,8 @@ import { describe, it } from 'node:test'
 import { Interface, ZeroHash } from 'ethers'
 
 import { type ChainTransaction, Chain, ChainFamily } from './chain.ts'
+import OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
+import type { CCIPMessage_V1_6_EVM } from './evm/messages.ts'
 import { calculateManualExecProof, discoverOffRamp, fetchExecutionReceipts } from './execution.ts'
 import { decodeMessage } from './requests.ts'
 import {
@@ -17,8 +19,6 @@ import {
   ExecutionState,
 } from './types.ts'
 import { networkInfo } from './utils.ts'
-import OffRamp_1_6_ABI from '../abi/OffRamp_1_6.ts'
-import type { CCIPMessage_V1_6_EVM } from './evm/messages.ts'
 
 // Mock Chain class for testing
 class MockChain extends Chain {
