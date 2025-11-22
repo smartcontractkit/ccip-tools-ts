@@ -146,7 +146,7 @@ export function recursiveParseError(
       [] as ReturnType<typeof recursiveParseError>,
     )
   }
-  if (!isBytesLike(data) || [0, 20, 32].includes(dataLength(data))) {
+  if (!isBytesLike(data) || [0, 20].includes(dataLength(data))) {
     return [[key, data]]
   }
   try {
@@ -159,12 +159,13 @@ export function recursiveParseError(
     // pass
   }
   const parsed = parseWithFragment(hexlify(data))
-  if (!parsed?.[2]) return [[key, data]]
+  if (!parsed) return [[key, data]]
   const [fragment, _, args] = parsed
   const desc = fragment.format('full')
   key = desc.split(' ')[0]
   const res = [[key, desc.substring(key.length + 1)]] as ReturnType<typeof recursiveParseError>
-  if (fragment.name === 'ReceiverError' && args.err === '0x') {
+  if (!args) return res
+  if (['ReceiverError', 'TokenHandlingError'].includes(fragment.name) && args.err === '0x') {
     res.push([`${key}.err`, '0x [possibly out-of-gas or abi.decode error]'])
     return res
   }

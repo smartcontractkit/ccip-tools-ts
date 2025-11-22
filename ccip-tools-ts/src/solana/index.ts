@@ -1014,21 +1014,25 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   static parse(data: unknown) {
     if (!data) return
-    if (Array.isArray(data)) {
-      if (data.every((e) => typeof e === 'string')) return getErrorFromLogs(data)
-      else if (data.every((e) => typeof e === 'object' && 'data' in e && 'address' in e))
-        return getErrorFromLogs(data as Log_[])
-    } else if (typeof data === 'object') {
-      if ('transactionLogs' in data && 'transactionMessage' in data) {
-        const parsed = getErrorFromLogs(data.transactionLogs as Log_[] | string[])
-        if (parsed) return { message: data.transactionMessage, ...parsed }
+    try {
+      if (Array.isArray(data)) {
+        if (data.every((e) => typeof e === 'string')) return getErrorFromLogs(data)
+        else if (data.every((e) => typeof e === 'object' && 'data' in e && 'address' in e))
+          return getErrorFromLogs(data as Log_[])
+      } else if (typeof data === 'object') {
+        if ('transactionLogs' in data && 'transactionMessage' in data) {
+          const parsed = getErrorFromLogs(data.transactionLogs as Log_[] | string[])
+          if (parsed) return { message: data.transactionMessage, ...parsed }
+        }
+        if ('logs' in data) return getErrorFromLogs(data.logs as Log_[] | string[])
+      } else if (typeof data === 'string') {
+        const parsedExtraArgs = this.decodeExtraArgs(getDataBytes(data))
+        if (parsedExtraArgs) return parsedExtraArgs
+        const parsedMessage = this.decodeMessage({ data })
+        if (parsedMessage) return parsedMessage
       }
-      if ('logs' in data) return getErrorFromLogs(data.logs as Log_[] | string[])
-    } else if (typeof data === 'string') {
-      const parsedExtraArgs = this.decodeExtraArgs(getDataBytes(data))
-      if (parsedExtraArgs) return parsedExtraArgs
-      const parsedMessage = this.decodeMessage({ data })
-      if (parsedMessage) return parsedMessage
+    } catch (_) {
+      // Ignore errors during parsing
     }
   }
 

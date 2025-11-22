@@ -21,6 +21,12 @@ export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
 export const DEFAULT_GAS_LIMIT = 200_000n
 export const DEFAULT_APPROVE_GAS_LIMIT = 120_000n
 
+const customErrors = [
+  'error NoContract()',
+  'error NoGasForCallExactCheck()',
+  'error NotEnoughGasForCall()',
+] as const
+
 export const interfaces = {
   Router: new Interface(Router_ABI),
   Token: new Interface(Token_ABI),
@@ -37,6 +43,7 @@ export const interfaces = {
   OnRamp_v1_6: new Interface(OnRamp_1_6_ABI),
   EVM2EVMOnRamp_v1_5: new Interface(EVM2EVMOnRamp_1_5_ABI),
   EVM2EVMOnRamp_v1_2: new Interface(EVM2EVMOnRamp_1_2_ABI),
+  Custom: new Interface(customErrors),
 } as const
 
 export function getAllFragmentsMatchingEvents(

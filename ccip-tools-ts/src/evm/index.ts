@@ -310,6 +310,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       )
     }
     for (const blockRange of blockRangeGenerator({ ...filter, endBlock })) {
+      console.debug('evm getLogs:', {
+        ...blockRange,
+        ...(filter.address ? { address: filter.address } : {}),
+        ...(filter.topics?.length ? { topics: filter.topics } : {}),
+      })
       const logs = await this.provider.getLogs({
         ...blockRange,
         ...(filter.address ? { address: filter.address } : {}),
