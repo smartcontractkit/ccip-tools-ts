@@ -33,13 +33,16 @@ export default defineConfig(
       ],
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/consistent-type-imports': ['warn', { fixStyle: 'inline-type-imports' }],
-      '@typescript-eslint/consistent-type-exports': 'warn',
+      '@typescript-eslint/consistent-type-exports': [
+        'warn',
+        { fixMixedExportsWithInlineTypeSpecifier: true },
+      ],
       '@typescript-eslint/no-import-type-side-effects': 'warn',
     },
   },
   {
     // Apply these settings to test files
-    files: ['**/*.test.ts', '**/*.spec.ts', '**/tests/**/*.ts', '**/__tests__/**/*.ts'],
+    files: ['**/*.test.ts', '**/__tests__/**/*.ts', '**/__mocks__/**/*.ts'],
     rules: {
       // Disable specific rules for test files
       '@typescript-eslint/no-explicit-any': 'off',
@@ -72,7 +75,7 @@ export default defineConfig(
       'import/order': [
         'warn',
         {
-          groups: ['builtin', 'external', 'internal', ['parent', 'sibling', 'index']],
+          groups: ['builtin', ['external', 'internal'], ['parent', 'sibling', 'index']],
           'newlines-between': 'always',
           named: { enabled: true, import: true, export: true, types: 'types-first' },
           alphabetize: { order: 'asc' },
