@@ -23,7 +23,7 @@ jobs:
       run: npm ci
 
     - name: Run lint
-      run: npm run lint && npm run typecheck
+      run: npm run check
 
     - name: Run tests with coverage
       run: |

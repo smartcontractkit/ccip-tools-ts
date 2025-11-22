@@ -29,7 +29,7 @@ jobs:
       run: npm ci
 
     - name: Run lint
-      run: npm run lint
+      run: npm run check
 
     - name: Run tests
       run: npm test
@@ -50,4 +50,9 @@ jobs:
         run: npm install -g npm@latest
 
       - run: npm ci
-      - run: npm publish --verbose
+
+      - name: Publish @chainlink/ccip-tools-ts
+        run: npm -w ccip-tools-ts publish --verbose
+
+      - name: Publish @chainlink/ccip-cli
+        run: npm -w ccip-cli publish --verbose
