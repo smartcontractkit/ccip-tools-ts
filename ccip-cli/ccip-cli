@@ -5,10 +5,10 @@ NODE_VERSION="$(node --version | sed 's/v//' | cut -d'.' -f1)"
 
 export CCIP_CLI_NAME="$(basename -- "$0")"
 
-if [ ! -f "$SCRIPT_DIR/index.ts" ]; then
-  exec node "$SCRIPT_DIR/index.js" "$@"
+if [ ! -f "$SCRIPT_DIR/src/index.ts" ]; then
+  exec node "$SCRIPT_DIR/dist/index.js" "$@"
 elif [ "$NODE_VERSION" -ge 23 ]; then
-  exec node "$SCRIPT_DIR/index.ts" "$@"
+  exec node "$SCRIPT_DIR/src/index.ts" "$@"
 else
-  exec npx tsx "$SCRIPT_DIR/index.ts" "$@"
+  exec npx tsx "$SCRIPT_DIR/src/index.ts" "$@"
 fi

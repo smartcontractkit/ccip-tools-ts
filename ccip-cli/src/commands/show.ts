@@ -36,12 +36,12 @@ export const builder = (yargs: Argv) =>
     .options({
       'log-index': {
         type: 'number',
-        describe: 'Log index of message to select to know more, instead of prompting',
+        describe:
+          'Pre-select a message request by logIndex, if more than one in tx; by default, a selection menu is shown',
       },
       'id-from-source': {
         type: 'string',
-        describe:
-          'Search by messageId instead of tx_hash; requires specifying source network (by id or name)',
+        describe: 'Search by messageId instead of txHash; requires specifying source network',
       },
     })
 

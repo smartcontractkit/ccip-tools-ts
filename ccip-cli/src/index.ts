@@ -33,6 +33,7 @@ const globalOpts = {
   },
   verbose: {
     alias: 'v',
+    describe: 'enable debug logging',
     type: 'boolean',
   },
   page: {
@@ -56,7 +57,7 @@ async function main() {
     })
     .commandDir('commands', {
       extensions: [new URL(import.meta.url).pathname.split('.').pop()!],
-      exclude: /\.test\.ts$/,
+      exclude: /\.test\.[tj]s$/,
     })
     .demandCommand()
     .strict()
