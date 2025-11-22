@@ -3,5 +3,6 @@ dist/
 *.tsbuildinfo
 .direnv/
 .env*
-coverage
 coverage-summary.txt
+.coverage
+.c8_output

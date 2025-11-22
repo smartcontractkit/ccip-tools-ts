@@ -28,14 +28,14 @@ jobs:
     - name: Run tests with coverage
       run: |
         set -o pipefail
-        npm test -- --coverage 2>&1 | tee coverage-summary.txt
+        npm test 2>&1 | tee coverage-summary.txt
 
     - name: Upload coverage report
-      if: "always() && hashFiles('coverage/**') != ''"
+      if: "always() && hashFiles('.coverage/**') != ''"
       uses: actions/upload-artifact@v5.0.0
       with:
         name: coverage-report
-        path: coverage
+        path: .coverage
 
     - name: Post or update PR comment with coverage summary
       if: always()
@@ -44,7 +44,7 @@ jobs:
         script: |
           const fs = require('fs');
           let coverageSummary = fs.readFileSync('coverage-summary.txt', 'utf8').split('\n')
-          coverageSummary = coverageSummary.slice(coverageSummary.findIndex(line => line.match(/^-+\|[-|]*$/))).join('\n');
+          coverageSummary = coverageSummary.slice(coverageSummary.findIndex(line => line.match(/^ℹ/))).join('\n');
           if (coverageSummary.trim().length === 0) {
             console.log('No coverage data found');
             process.exit(1);

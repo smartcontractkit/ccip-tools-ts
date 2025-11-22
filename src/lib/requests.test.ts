@@ -1,3 +1,6 @@
+import assert from 'node:assert/strict'
+import { afterEach, beforeEach, describe, it, mock } from 'node:test'
+
 import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
 import './index.ts' // Import to ensure chains are loaded
@@ -36,10 +39,10 @@ const mockNetwork = networkInfo('ethereum-testnet-sepolia')
 
 class MockChain {
   network = mockNetwork
-  typeAndVersion = jest.fn(() =>
+  typeAndVersion = mock.fn(() =>
     Promise.resolve(['OnRamp', CCIPVersion.V1_2, `OnRamp ${CCIPVersion.V1_2}`]),
   )
-  getLogs = jest.fn<any, [LogFilter], any>((opts: LogFilter) => {
+  getLogs = mock.fn((opts: LogFilter) => {
     const logs: Log_[] = [
       {
         address: opts.address ?? rampAddress,
@@ -56,7 +59,7 @@ class MockChain {
       }
     })()
   })
-  getTransaction = jest.fn((hash: string) =>
+  getTransaction = mock.fn((hash: string) =>
     Promise.resolve({
       chain: this as unknown as Chain,
       hash,
@@ -66,8 +69,8 @@ class MockChain {
       from: '0x0000000000000000000000000000000000000001',
     } as ChainTransaction),
   )
-  getBlockTimestamp = jest.fn(() => Promise.resolve(1234567890))
-  static decodeMessage = jest.fn(
+  getBlockTimestamp = mock.fn(() => Promise.resolve(1234567890))
+  static decodeMessage = mock.fn(
     (log: { topics: readonly string[]; data: unknown }): CCIPMessage | undefined => {
       if (typeof log.data === 'object' && log.data && 'messageId' in log.data) {
         const dataObj = log.data as {
@@ -106,7 +109,7 @@ class MockChain {
       return undefined
     },
   )
-  getLaneForOnRamp = jest.fn((onRamp: string) =>
+  getLaneForOnRamp = mock.fn((onRamp: string) =>
     Promise.resolve({
       sourceChainSelector: 16015286601757825753n,
       destChainSelector: 1n,
@@ -119,17 +122,26 @@ class MockChain {
 const mockedChain = new MockChain()
 
 beforeEach(() => {
-  jest.clearAllMocks()
+  mockedChain.typeAndVersion.mock.resetCalls()
+  mockedChain.getLogs.mock.resetCalls()
+  mockedChain.getTransaction.mock.resetCalls()
+  mockedChain.getBlockTimestamp.mock.resetCalls()
+  MockChain.decodeMessage.mock.resetCalls()
+  mockedChain.getLaneForOnRamp.mock.resetCalls()
+
   rampAddress = getAddress(hexlify(randomBytes(20)))
-  mockedChain.typeAndVersion.mockResolvedValue([
-    'OnRamp',
-    CCIPVersion.V1_2,
-    `OnRamp ${CCIPVersion.V1_2}`,
-  ])
+  mockedChain.typeAndVersion.mock.mockImplementation(() =>
+    Promise.resolve(['OnRamp', CCIPVersion.V1_2, `OnRamp ${CCIPVersion.V1_2}`]),
+  )
 })
 
 afterEach(() => {
-  jest.restoreAllMocks()
+  mockedChain.typeAndVersion.mock.restore()
+  mockedChain.getLogs.mock.restore()
+  mockedChain.getTransaction.mock.restore()
+  mockedChain.getBlockTimestamp.mock.restore()
+  MockChain.decodeMessage.mock.restore()
+  mockedChain.getLaneForOnRamp.mock.restore()
 })
 
 describe('fetchCCIPMessagesInTx', () => {
@@ -153,19 +165,15 @@ describe('fetchCCIPMessagesInTx', () => {
     }
 
     const result = await fetchCCIPMessagesInTx(mockTx)
-    expect(result).toHaveLength(1)
-    expect(result[0]).toMatchObject({
-      message: {
-        header: { sequenceNumber: 1n },
-      },
-      timestamp: 1234567890,
-      tx: mockTx,
-      lane: { version: CCIPVersion.V1_2 },
-    })
+    assert.equal(result.length, 1)
+    assert.equal(result[0].message.header.sequenceNumber, 1n)
+    assert.equal(result[0].timestamp, 1234567890)
+    assert.equal(result[0].tx, mockTx)
+    assert.equal(result[0].lane.version, CCIPVersion.V1_2)
   })
 
   it('should throw an error if no CCIPSendRequested message found', async () => {
-    MockChain.decodeMessage.mockReturnValue(undefined)
+    MockChain.decodeMessage.mock.mockImplementation(() => undefined)
 
     const mockTx: ChainTransaction = {
       chain: mockedChain as unknown as Chain,
@@ -193,12 +201,13 @@ describe('fetchCCIPMessagesInTx', () => {
       from: '0x0000000000000000000000000000000000000001',
     }
 
-    await expect(fetchCCIPMessagesInTx(mockTx)).rejects.toThrow(
-      'Could not find any CCIPSendRequested message in tx: 0x123',
+    await assert.rejects(
+      async () => await fetchCCIPMessagesInTx(mockTx),
+      /Could not find any CCIPSendRequested message in tx: 0x123/,
     )
 
     // Restore mock
-    MockChain.decodeMessage.mockImplementation(
+    MockChain.decodeMessage.mock.mockImplementation(
       (log: { topics: readonly string[]; data: unknown }) => {
         if (typeof log.data === 'object' && log.data && 'messageId' in log.data) {
           const dataObj = log.data as {
@@ -243,7 +252,7 @@ describe('fetchCCIPMessagesInTx', () => {
 describe('fetchCCIPMessageById', () => {
   it('should return a CCIP request by messageId', async () => {
     const msg = mockedMessage(1)
-    mockedChain.getLogs.mockReturnValueOnce(
+    mockedChain.getLogs.mock.mockImplementationOnce(() =>
       (async function* () {
         yield {
           address: rampAddress,
@@ -257,18 +266,16 @@ describe('fetchCCIPMessageById', () => {
     )
 
     const result = await fetchCCIPMessageById(mockedChain as unknown as Chain, '0xMessageId1')
-    expect(result).toMatchObject({
-      log: { index: 1 },
-      message: {},
-      timestamp: 1234567890,
-      lane: { version: CCIPVersion.V1_2 },
-    })
+    assert.equal(result.log.index, 1)
+    assert.ok(result.message)
+    assert.equal(result.timestamp, 1234567890)
+    assert.equal(result.lane.version, CCIPVersion.V1_2)
   })
 
   it('should throw an error if no request found for the messageId', async () => {
-    MockChain.decodeMessage.mockReturnValue(undefined)
+    MockChain.decodeMessage.mock.mockImplementation(() => undefined)
 
-    mockedChain.getLogs.mockReturnValueOnce(
+    mockedChain.getLogs.mock.mockImplementationOnce(() =>
       (async function* () {
         yield {
           address: rampAddress,
@@ -281,12 +288,13 @@ describe('fetchCCIPMessageById', () => {
       })(),
     )
 
-    await expect(
-      fetchCCIPMessageById(mockedChain as unknown as Chain, '0xMessageId1'),
-    ).rejects.toThrow('Could not find a CCIPSendRequested message with messageId: 0xMessageId1')
+    await assert.rejects(
+      async () => await fetchCCIPMessageById(mockedChain as unknown as Chain, '0xMessageId1'),
+      /Could not find a CCIPSendRequested message with messageId: 0xMessageId1/,
+    )
 
     // Restore mock
-    MockChain.decodeMessage.mockImplementation(
+    MockChain.decodeMessage.mock.mockImplementation(
       (log: { topics: readonly string[]; data: unknown }) => {
         if (typeof log.data === 'object' && log.data && 'messageId' in log.data) {
           const dataObj = log.data as {
@@ -374,10 +382,8 @@ describe('fetchAllMessagesInBatch', () => {
       maxSeqNr: 9n,
     })
 
-    expect(result).toHaveLength(1)
-    expect(result[0]).toMatchObject({
-      header: { sequenceNumber: 9n },
-    })
+    assert.equal(result.length, 1)
+    assert.equal(result[0].header.sequenceNumber, 9n)
   })
 
   it('should throw an error if not all expected events are found', async () => {
@@ -419,18 +425,20 @@ describe('fetchAllMessagesInBatch', () => {
       },
     }
 
-    mockedChain.getLogs.mockImplementation((_opts: LogFilter) => {
-      return (async function* () {
+    mockedChain.getLogs.mock.mockImplementation((_opts: LogFilter) =>
+      (async function* () {
         // Return empty to trigger error
-      })()
-    })
+      })(),
+    )
 
-    await expect(
-      fetchAllMessagesInBatch(mockedChain as unknown as Chain, mockRequest, {
-        minSeqNr: 1n,
-        maxSeqNr: 10n,
-      }),
-    ).rejects.toThrow('Could not find all expected')
+    await assert.rejects(
+      async () =>
+        await fetchAllMessagesInBatch(mockedChain as unknown as Chain, mockRequest, {
+          minSeqNr: 1n,
+          maxSeqNr: 10n,
+        }),
+      /Could not find all expected/,
+    )
   })
 })
 
@@ -440,8 +448,8 @@ describe('fetchRequestsForSender', () => {
     const someOtherMessage = mockedMessage(18)
     someOtherMessage.sender = '0xUnknownSender'
 
-    mockedChain.getLogs.mockImplementationOnce((_opts: LogFilter) => {
-      return (async function* () {
+    mockedChain.getLogs.mock.mockImplementationOnce((_opts: LogFilter) =>
+      (async function* () {
         yield {
           address: rampAddress,
           topics: [topic0],
@@ -466,8 +474,8 @@ describe('fetchRequestsForSender', () => {
           transactionHash: '0x125',
           index: 0,
         } as Log_
-      })()
-    })
+      })(),
+    )
 
     const res: Omit<CCIPRequest, 'tx' | 'timestamp'>[] = []
     const generator = fetchRequestsForSender(mockedChain as unknown as Chain, sender, {
@@ -479,7 +487,7 @@ describe('fetchRequestsForSender', () => {
       res.push(req)
     }
 
-    expect(res).toHaveLength(2) // Only messages with matching sender
+    assert.equal(res.length, 2) // Only messages with matching sender
   })
 })
 
@@ -488,18 +496,18 @@ describe('decodeMessage', () => {
     const msgInfoString =
       '{"data": "0x", "nonce": 10, "sender": "0xc70070c9c8fe7866449edbf4ba3918c5936fe639", "strict": false, "feeToken": "0xd00ae08403b9bbb9124bb305c09058e32c39a48c", "gasLimit": 0, "receiver": "0xc70070c9c8fe7866449edbf4ba3918c5936fe639", "messageId": "0xe9d9d03588f0b3fca80bc43b2194d314aec8ebbea67f6390ef63b095b11e6f80", "tokenAmounts": [{"token": "0xd21341536c5cf5eb1bcb58f6723ce26e8d8e90e4", "amount": 100000000000000000}], "feeTokenAmount": 31933333333333333, "sequenceNumber": 40944, "sourceTokenData": ["0x"], "sourceChainSelector": 14767482510784806043, "header": {"messageId": "0xe9d9d03588f0b3fca80bc43b2194d314aec8ebbea67f6390ef63b095b11e6f80", "sourceChainSelector": 14767482510784806043, "sequenceNumber": 40944, "nonce": 10}}'
 
-    expect(() => decodeMessage(msgInfoString)).not.toThrow()
+    assert.doesNotThrow(() => decodeMessage(msgInfoString))
 
     const msg = decodeMessage(msgInfoString)
-    expect(msg.tokenAmounts.length).toBe(1)
+    assert.equal(msg.tokenAmounts.length, 1)
     const tokenAmount = msg.tokenAmounts[0]
 
-    expect('token' in msg.tokenAmounts[0]).toBe(true)
-    expect(msg.feeTokenAmount).toBe(31933333333333333n)
+    assert.ok('token' in msg.tokenAmounts[0])
+    assert.equal(msg.feeTokenAmount, 31933333333333333n)
 
     if ('token' in tokenAmount) {
-      expect(tokenAmount.token.toLowerCase()).toBe('0xd21341536c5cf5eb1bcb58f6723ce26e8d8e90e4')
-      expect(tokenAmount.amount).toBe(100000000000000000n)
+      assert.equal(tokenAmount.token.toLowerCase(), '0xd21341536c5cf5eb1bcb58f6723ce26e8d8e90e4')
+      assert.equal(tokenAmount.amount, 100000000000000000n)
     }
   })
 
@@ -507,18 +515,19 @@ describe('decodeMessage', () => {
     const msgInfoString =
       '{"message": {"data": "0x12345678", "header": {"nonce": "2", "messageId": "0xab3fbecd2bd0eee8c384c3c5665681bfc932072201d3fb959a54c2d73b5aa2e9", "sequenceNumber": "3", "dest_chain_selector": "16015286601757825753", "sourceChainSelector": "743186221051783445"}, "sender": "0xccccc17bdf9f47952c2207e683f1c716058b455220641ce5efaa5062a237509e", "feeToken": "0x8873d0d9aa0e1d7bf7a42de620906d51f535314c72f27032bcaaf5519a22fec9", "gasLimit": 200000, "receiver": "0x90392a1e8a941098a3c75e0bdb172cfde7e4f1f4", "extraArgs": "0x181dcf10400d03000000000000000000000000000000000000000000000000000000000000", "tokenAmounts": [{"amount": "100000000", "extra_data": "0x0000000000000000000000000000000000000000000000000000000000000008", "dest_exec_data": "0x905f0100", "dest_token_address": "0x000000000000000000000000316496c5da67d052235b9952bc42db498d6c520b", "source_pool_address": "0x65ad4cb3142cab5100a4eeed34e2005cbb1fcae42fc688e3c96b0c33ae16e6b9"}], "feeValueJuels": "52761740000000000", "feeTokenAmount": "5322165", "allowOutOfOrderExecution": false}}'
 
-    expect(() => decodeMessage(msgInfoString)).not.toThrow()
+    assert.doesNotThrow(() => decodeMessage(msgInfoString))
 
     const msg = decodeMessage(msgInfoString)
 
-    expect(msg.tokenAmounts.length).toBe(1)
+    assert.equal(msg.tokenAmounts.length, 1)
     const tokenAmount = msg.tokenAmounts[0]
 
     if ('destTokenAddress' in tokenAmount) {
-      expect(tokenAmount.destTokenAddress).toBe('0x316496C5dA67D052235B9952bc42db498d6c520b')
+      assert.equal(tokenAmount.destTokenAddress, '0x316496C5dA67D052235B9952bc42db498d6c520b')
     }
     if ('sourcePoolAddress' in tokenAmount) {
-      expect(tokenAmount.sourcePoolAddress).toBe(
+      assert.equal(
+        tokenAmount.sourcePoolAddress,
         '0x65ad4cb3142cab5100a4eeed34e2005cbb1fcae42fc688e3c96b0c33ae16e6b9',
       )
     }

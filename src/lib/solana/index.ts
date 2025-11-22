@@ -8,6 +8,7 @@ import {
   BorshCoder,
   Program,
   Wallet,
+  eventDiscriminator,
 } from '@coral-xyz/anchor'
 import { NATIVE_MINT } from '@solana/spl-token'
 import {
@@ -33,9 +34,7 @@ import {
   getBytes,
   hexlify,
   isHexString,
-  sha256,
   toBigInt,
-  toUtf8Bytes,
 } from 'ethers'
 import moize, { type Moized } from 'moize'
 
@@ -53,6 +52,7 @@ import SELECTORS from '../selectors.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
+  type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
@@ -123,8 +123,8 @@ type SolanaTransaction = ChainTransaction & {
   logs: SolanaLog[]
 }
 
-function eventDiscriminant(eventName: string): string {
-  return dataSlice(sha256(toUtf8Bytes(`event:${eventName}`)), 0, 8)
+function hexDiscriminator(eventName: string): string {
+  return hexlify(eventDiscriminator(eventName))
 }
 
 export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
@@ -205,7 +205,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     const config: ConnectionConfig = { commitment: 'confirmed' }
     if (url.includes('.solana.com')) {
-      config.fetch = createRateLimitedFetch() // public nodes
+      config.fetch = createRateLimitedFetch({
+        maxRequests: 35,
+        maxRetries: 3,
+        windowMs: 11e3,
+      }) // public nodes
       console.warn('Using rate-limited fetch for public solana nodes, commands may be slow')
     }
 
@@ -220,20 +224,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   static async fromUrl(url: string): Promise<SolanaChain> {
     const connection = this._getConnection(url)
     return this.fromConnection(connection)
-  }
-
-  static txFromUrl(url: string, txHash: string): [Promise<SolanaChain>, Promise<ChainTransaction>] {
-    const connection = this._getConnection(url)
-    const chain$ = this.fromConnection(connection)
-    const txHash$ = !isHexString(txHash)
-      ? Promise.resolve(txHash)
-      : Promise.reject(new Error(`Invalid solana txHash: ${txHash}`)) // fail early
-
-    const txPromise = Promise.all([txHash$, chain$]).then(async ([txHash, chain]) => {
-      return chain.getTransaction(txHash)
-    })
-
-    return [chain$, txPromise]
   }
 
   async destroy(): Promise<void> {
@@ -436,7 +426,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         throw new Error('Topics must be strings')
       // append events discriminants (if not 0x-8B already), but keep OG topics
       opts.topics.push(
-        ...opts.topics.filter((t) => !isHexString(t, 8)).map((t) => eventDiscriminant(t)),
+        ...opts.topics.filter((t) => !isHexString(t, 8)).map((t) => hexDiscriminator(t)),
       )
     }
 
@@ -690,7 +680,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     const disc = dataSlice(eventDataBuffer, 0, 8)
-    if (disc !== eventDiscriminant('CCIPMessageSent')) return
+    if (disc !== hexDiscriminator('CCIPMessageSent')) return
 
     // Use module-level BorshCoder for decoding structs
 
@@ -800,7 +790,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   static decodeCommits(
-    log: Log_,
+    log: Pick<Log_, 'data'>,
     lane?: Omit<Lane, 'destChainSelector'>,
   ): CommitReport[] | undefined {
     // Check if this is a CommitReportAccepted event by looking at the discriminant
@@ -811,7 +801,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const eventDataBuffer = bytesToBuffer(log.data)
 
     // Verify the discriminant matches CommitReportAccepted
-    const expectedDiscriminant = eventDiscriminant('CommitReportAccepted')
+    const expectedDiscriminant = hexDiscriminator('CommitReportAccepted')
     const actualDiscriminant = hexlify(eventDataBuffer.subarray(0, 8))
     if (actualDiscriminant !== expectedDiscriminant) return
 
@@ -866,14 +856,15 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     ]
   }
 
-  static decodeReceipt(log: Log_): ExecutionReceipt | undefined {
+  static decodeReceipt(log: Pick<Log_, 'data' | 'tx' | 'index'>): ExecutionReceipt | undefined {
     // Check if this is a ExecutionStateChanged event by looking at the discriminant
     if (!log.data || typeof log.data !== 'string') {
       throw new Error('Log data is missing or not a string')
     }
 
     // Verify the discriminant matches ExecutionStateChanged
-    if (log.topics[0] !== eventDiscriminant('ExecutionStateChanged')) return
+    if (dataSlice(getDataBytes(log.data), 0, 8) !== hexDiscriminator('ExecutionStateChanged'))
+      return
     const eventDataBuffer = bytesToBuffer(log.data)
 
     // Note: We manually decode the event fields rather than using BorshCoder
@@ -943,9 +934,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return getV16SolanaLeafHasher(lane)
   }
 
-  getTokenAdminRegistryFor(address: string): Promise<string> {
+  async getTokenAdminRegistryFor(address: string): Promise<string> {
+    const [type] = await this.typeAndVersion(address)
+    if (!type.includes('Router')) throw new Error(`Not a Router: ${address} is ${type}`)
     // Solana implements TokenAdminRegistry in the Router/OnRamp program
-    return Promise.resolve(address)
+    return address
   }
 
   /**
@@ -1037,6 +1030,73 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       const parsedMessage = this.decodeMessage({ data })
       if (parsedMessage) return parsedMessage
     }
+  }
+
+  /**
+   * Solana optimization: we use getProgramAccounts with
+   */
+  async fetchCommitReport(
+    commitStore: string,
+    request: {
+      lane: Lane
+      message: { header: { sequenceNumber: bigint } }
+      timestamp?: number
+    },
+    hints?: { startBlock?: number; page?: number },
+  ): Promise<CCIPCommit> {
+    const commitsAroundSeqNum = await this.connection.getProgramAccounts(
+      new PublicKey(commitStore),
+      {
+        filters: [
+          {
+            memcmp: {
+              offset: 0,
+              bytes: encodeBase58(BorshAccountsCoder.accountDiscriminator('CommitReport')),
+            },
+          },
+          {
+            memcmp: {
+              offset: 8 + 1,
+              bytes: encodeBase58(toLeArray(request.lane.sourceChainSelector, 8)),
+            },
+          },
+          // dirty trick: memcmp report.min with msg.sequenceNumber's without least-significant byte;
+          // this should be ~256 around seqNum, i.e. big chance of a match
+          {
+            memcmp: {
+              offset: 8 + 1 + 8 + 32 + 8 + 1,
+              bytes: encodeBase58(toLeArray(request.message.header.sequenceNumber, 8).slice(1)),
+            },
+          },
+        ],
+      },
+    )
+    for (const acc of commitsAroundSeqNum) {
+      // const merkleRoot = acc.account.data.subarray(8 + 1 + 8, 8 + 1 + 8 + 32)
+      const minSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8)
+      const maxSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8 + 8)
+      if (
+        minSeqNr > request.message.header.sequenceNumber ||
+        maxSeqNr < request.message.header.sequenceNumber
+      )
+        continue
+      // we have all the commit report info, but we also need log details (txHash, etc)
+      for await (const log of this.getLogs({
+        startTime: 1, // just to force getting the oldest log first
+        programs: [commitStore],
+        address: acc.pubkey.toBase58(),
+        topics: ['CommitReportAccepted'],
+      })) {
+        // first yielded log should be commit (which created this PDA)
+        const report = (this.constructor as typeof SolanaChain).decodeCommits(
+          log,
+          request.lane,
+        )?.[0]
+        if (report) return { report, log }
+      }
+    }
+    // in case we can't find it, fallback to generic iterating txs
+    return super.fetchCommitReport(commitStore, request, hints)
   }
 
   // specialized override with stricter address-of-interest

@@ -1,12 +1,15 @@
+import assert from 'node:assert/strict'
+import { beforeEach, describe, it, mock } from 'node:test'
+
 import { type Connection, PublicKey } from '@solana/web3.js'
 
 import { ChainFamily } from '../../chain.ts'
 import { SolanaChain } from '../index.ts'
 
 // Create mock functions
-const mockGetAccountInfo = jest.fn()
-const mockGetParsedAccountInfo = jest.fn()
-const mockGetGenesisHash = jest.fn()
+const mockGetAccountInfo = mock.fn(() => null as any)
+const mockGetParsedAccountInfo = mock.fn(() => null as any)
+const mockGetGenesisHash = mock.fn(() => null as any)
 
 // Mock connection for testing
 const mockConnection = {
@@ -27,10 +30,10 @@ describe('SolanaChain getTokenInfo', () => {
   let solanaChain: SolanaChain
 
   beforeEach(() => {
-    jest.clearAllMocks()
-    mockGetAccountInfo.mockResolvedValue(null)
-    mockGetParsedAccountInfo.mockResolvedValue(null)
-    mockGetGenesisHash.mockResolvedValue('test-genesis-hash')
+    mock.restoreAll()
+    mockGetAccountInfo.mock.mockImplementation(async () => null)
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => null)
+    mockGetGenesisHash.mock.mockImplementation(async () => 'test-genesis-hash')
     solanaChain = new SolanaChain(mockConnection, mockNetworkInfo)
   })
 
@@ -49,14 +52,12 @@ describe('SolanaChain getTokenInfo', () => {
       },
     }
 
-    mockGetParsedAccountInfo.mockResolvedValue(mockMintInfo)
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => mockMintInfo)
 
     const result = await solanaChain.getTokenInfo('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')
 
-    expect(result).toEqual({
-      symbol: 'USDC',
-      decimals: 6,
-    })
+    assert.equal(result.symbol, 'USDC')
+    assert.equal(result.decimals, 6)
   })
 
   it('should fallback to Metaplex metadata when SPL token symbol is missing', async () => {
@@ -104,14 +105,14 @@ describe('SolanaChain getTokenInfo', () => {
       data: mockMetadataBuffer,
     }
 
-    mockGetParsedAccountInfo.mockResolvedValue(mockMintInfo)
-    mockGetAccountInfo.mockResolvedValue(mockMetadataAccount)
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => mockMintInfo)
+    mockGetAccountInfo.mock.mockImplementation(async () => mockMetadataAccount)
 
     const result = await solanaChain.getTokenInfo('So11111111111111111111111111111111111111112')
 
-    expect(result.symbol).toBe('TEST')
-    expect(result.decimals).toBe(9)
-    expect(result.name).toBe('Test Token')
+    assert.equal(result.symbol, 'TEST')
+    assert.equal(result.decimals, 9)
+    assert.equal(result.name, 'Test Token')
   })
 
   it('should fallback to Metaplex metadata when SPL token symbol is UNKNOWN', async () => {
@@ -159,14 +160,14 @@ describe('SolanaChain getTokenInfo', () => {
       data: mockMetadataBuffer,
     }
 
-    mockGetParsedAccountInfo.mockResolvedValue(mockMintInfo)
-    mockGetAccountInfo.mockResolvedValue(mockMetadataAccount)
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => mockMintInfo)
+    mockGetAccountInfo.mock.mockImplementation(async () => mockMetadataAccount)
 
     const result = await solanaChain.getTokenInfo('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
 
-    expect(result.symbol).toBe('REAL')
-    expect(result.decimals).toBe(9)
-    expect(result.name).toBe('Real Token Name')
+    assert.equal(result.symbol, 'REAL')
+    assert.equal(result.decimals, 9)
+    assert.equal(result.name, 'Real Token Name')
   })
 
   it('should return UNKNOWN when both SPL token and metadata fail', async () => {
@@ -184,15 +185,13 @@ describe('SolanaChain getTokenInfo', () => {
       },
     }
 
-    mockGetParsedAccountInfo.mockResolvedValue(mockMintInfo)
-    mockGetAccountInfo.mockResolvedValue(null) // No metadata account
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => mockMintInfo)
+    mockGetAccountInfo.mock.mockImplementation(async () => null) // No metadata account
 
     const result = await solanaChain.getTokenInfo('Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB')
 
-    expect(result).toEqual({
-      symbol: 'UNKNOWN',
-      decimals: 6,
-    })
+    assert.equal(result.symbol, 'UNKNOWN')
+    assert.equal(result.decimals, 6)
   })
 
   it('should handle metadata parsing errors gracefully', async () => {
@@ -214,21 +213,21 @@ describe('SolanaChain getTokenInfo', () => {
       data: Buffer.from('invalid metadata'),
     }
 
-    mockGetParsedAccountInfo.mockResolvedValue(mockMintInfo)
-    mockGetAccountInfo.mockResolvedValue(mockMetadataAccount)
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => mockMintInfo)
+    mockGetAccountInfo.mock.mockImplementation(async () => mockMetadataAccount)
 
     const result = await solanaChain.getTokenInfo('7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs')
 
-    expect(result).toEqual({
-      symbol: 'UNKNOWN',
-      decimals: 9,
-    })
+    assert.equal(result.symbol, 'UNKNOWN')
+    assert.equal(result.decimals, 9)
   })
 
   it('should throw error for invalid SPL token', async () => {
-    mockGetParsedAccountInfo.mockResolvedValue(null)
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => null)
 
-    await expect(solanaChain.getTokenInfo('InvalidTokenAddress')).rejects.toThrow()
+    await assert.rejects(async () => {
+      await solanaChain.getTokenInfo('InvalidTokenAddress')
+    })
   })
 
   it('should throw error for non-spl-token program', async () => {
@@ -240,11 +239,17 @@ describe('SolanaChain getTokenInfo', () => {
       },
     }
 
-    mockGetParsedAccountInfo.mockResolvedValue(mockMintInfo)
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => mockMintInfo)
 
-    await expect(
-      solanaChain.getTokenInfo('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU'),
-    ).rejects.toThrow('Invalid SPL token')
+    await assert.rejects(
+      async () => {
+        await solanaChain.getTokenInfo('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU')
+      },
+      (error: Error) => {
+        assert.ok(error.message.includes('Invalid SPL token'))
+        return true
+      },
+    )
   })
 
   it('should support Token-2022 tokens', async () => {
@@ -262,14 +267,12 @@ describe('SolanaChain getTokenInfo', () => {
       },
     }
 
-    mockGetParsedAccountInfo.mockResolvedValue(mockToken2022Info)
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => mockToken2022Info)
 
     const result = await solanaChain.getTokenInfo('2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo')
 
-    expect(result).toEqual({
-      symbol: 'TOKEN22',
-      decimals: 8,
-    })
+    assert.equal(result.symbol, 'TOKEN22')
+    assert.equal(result.decimals, 8)
   })
 
   it('should fallback to Metaplex metadata for Token-2022 when symbol missing', async () => {
@@ -317,14 +320,14 @@ describe('SolanaChain getTokenInfo', () => {
       data: mockMetadataBuffer,
     }
 
-    mockGetParsedAccountInfo.mockResolvedValue(mockToken2022Info)
-    mockGetAccountInfo.mockResolvedValue(mockMetadataAccount)
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => mockToken2022Info)
+    mockGetAccountInfo.mock.mockImplementation(async () => mockMetadataAccount)
 
     const result = await solanaChain.getTokenInfo('9vMJfxuKxXBoEa7rM12mYLMwTacLMLDJqHozw96WQL8i')
 
-    expect(result.symbol).toBe('T22')
-    expect(result.decimals).toBe(6)
-    expect(result.name).toBe('Token-2022 Asset')
+    assert.equal(result.symbol, 'T22')
+    assert.equal(result.decimals, 6)
+    assert.equal(result.name, 'Token-2022 Asset')
   })
 })
 
@@ -332,10 +335,10 @@ describe('SolanaChain getTokenInfo - Integration Demo', () => {
   let solanaChain: SolanaChain
 
   beforeEach(() => {
-    jest.clearAllMocks()
-    mockGetAccountInfo.mockResolvedValue(null)
-    mockGetParsedAccountInfo.mockResolvedValue(null)
-    mockGetGenesisHash.mockResolvedValue('test-genesis-hash')
+    mock.restoreAll()
+    mockGetAccountInfo.mock.mockImplementation(async () => null)
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => null)
+    mockGetGenesisHash.mock.mockImplementation(async () => 'test-genesis-hash')
     solanaChain = new SolanaChain(mockConnection, mockNetworkInfo)
   })
 
@@ -355,12 +358,12 @@ describe('SolanaChain getTokenInfo - Integration Demo', () => {
       },
     }
 
-    mockGetParsedAccountInfo.mockResolvedValue(splTokenWithSymbol)
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => splTokenWithSymbol)
 
     const result1 = await solanaChain.getTokenInfo('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')
 
-    expect(result1.symbol).toBe('USDC')
-    expect(result1.decimals).toBe(9)
+    assert.equal(result1.symbol, 'USDC')
+    assert.equal(result1.decimals, 9)
     // getAccountInfo is wrapped by moize, so we can't easily check if it was called
     // The important thing is the result is correct
 
@@ -409,13 +412,13 @@ describe('SolanaChain getTokenInfo - Integration Demo', () => {
       data: mockMetadataBuffer,
     }
 
-    mockGetParsedAccountInfo.mockResolvedValue(splTokenWithoutSymbol)
-    mockGetAccountInfo.mockResolvedValue(mockMetadataAccount)
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => splTokenWithoutSymbol)
+    mockGetAccountInfo.mock.mockImplementation(async () => mockMetadataAccount)
 
     const result2 = await solanaChain.getTokenInfo('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU')
 
-    expect(result2.symbol).toBe('FBT')
-    expect(result2.decimals).toBe(6)
+    assert.equal(result2.symbol, 'FBT')
+    assert.equal(result2.decimals, 6)
 
     // Verify that the metadata PDA was correctly calculated
     const tokenMint = new PublicKey('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU')
@@ -425,7 +428,13 @@ describe('SolanaChain getTokenInfo - Integration Demo', () => {
       metaplexProgramId,
     )[0]
 
-    expect(mockGetAccountInfo).toHaveBeenCalledWith(expectedMetadataPDA)
+    // mockGetAccountInfo may be called multiple times due to memoization cache misses
+    assert.ok(mockGetAccountInfo.mock.calls.length >= 1)
+    // Find the call with the expectedMetadataPDA
+    const callWithPDA = mockGetAccountInfo.mock.calls.find((call: any) =>
+      call.arguments[0].equals(expectedMetadataPDA),
+    )
+    assert.ok(callWithPDA, 'Expected metadata PDA should have been called')
   })
 })
 
@@ -439,9 +448,9 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const encoded = SolanaChain.encodeExtraArgs(args)
 
     // Should start with EVMExtraArgsV2Tag (0x181dcf10)
-    expect(encoded.startsWith('0x181dcf10')).toBe(true)
+    assert.equal(encoded.startsWith('0x181dcf10'), true)
     // Should be 21 bytes total: 4 bytes tag + 16 bytes gasLimit (uint128LE) + 1 byte allowOOOE
-    expect(encoded.length).toBe(2 + 21 * 2) // 0x + 21 bytes * 2 hex chars
+    assert.equal(encoded.length, 2 + 21 * 2) // 0x + 21 bytes * 2 hex chars
   })
 
   it('should encode EVMExtraArgsV2 with default gasLimit when not specified', () => {
@@ -453,13 +462,13 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const encoded = SolanaChain.encodeExtraArgs(args)
 
     // Should start with EVMExtraArgsV2Tag
-    expect(encoded.startsWith('0x181dcf10')).toBe(true)
+    assert.equal(encoded.startsWith('0x181dcf10'), true)
 
     // Should be 21 bytes total
-    expect(encoded.length).toBe(2 + 21 * 2)
+    assert.equal(encoded.length, 2 + 21 * 2)
 
     // Should end with 0x00 for allowOutOfOrderExecution: false
-    expect(encoded.endsWith('00')).toBe(true)
+    assert.equal(encoded.endsWith('00'), true)
   })
 
   it('should encode EVMExtraArgsV1 with only gasLimit (converted to V2)', () => {
@@ -470,7 +479,7 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const encoded = SolanaChain.encodeExtraArgs(args)
 
     // Should start with EVMExtraArgsV2Tag (Solana always produces V2)
-    expect(encoded.startsWith('0x181dcf10')).toBe(true)
+    assert.equal(encoded.startsWith('0x181dcf10'), true)
   })
 
   it('should handle large gas limits correctly', () => {
@@ -481,8 +490,8 @@ describe('SolanaChain.encodeExtraArgs', () => {
 
     const encoded = SolanaChain.encodeExtraArgs(args)
 
-    expect(encoded.startsWith('0x181dcf10')).toBe(true)
-    expect(encoded.length).toBe(2 + 21 * 2)
+    assert.equal(encoded.startsWith('0x181dcf10'), true)
+    assert.equal(encoded.length, 2 + 21 * 2)
   })
 
   it('should encode with allowOutOfOrderExecution true', () => {
@@ -493,7 +502,7 @@ describe('SolanaChain.encodeExtraArgs', () => {
 
     const encoded = SolanaChain.encodeExtraArgs(args)
 
-    expect(encoded.endsWith('01')).toBe(true)
+    assert.equal(encoded.endsWith('01'), true)
   })
 
   it('should be compatible with SolanaChain.decodeExtraArgs', () => {
@@ -505,9 +514,9 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const encoded = SolanaChain.encodeExtraArgs(originalArgs)
     const decoded = SolanaChain.decodeExtraArgs(encoded)
 
-    expect(decoded?._tag).toBe('EVMExtraArgsV2')
-    expect(decoded?.gasLimit).toBe(originalArgs.gasLimit)
-    expect(decoded?.allowOutOfOrderExecution).toBe(originalArgs.allowOutOfOrderExecution)
+    assert.equal(decoded?._tag, 'EVMExtraArgsV2')
+    assert.equal(decoded?.gasLimit, originalArgs.gasLimit)
+    assert.equal(decoded?.allowOutOfOrderExecution, originalArgs.allowOutOfOrderExecution)
   })
 
   it('should encode with minimum gasLimit value', () => {
@@ -519,7 +528,7 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const encoded = SolanaChain.encodeExtraArgs(args)
     const decoded = SolanaChain.decodeExtraArgs(encoded)
 
-    expect(decoded?.gasLimit).toBe(1n)
+    assert.equal(decoded?.gasLimit, 1n)
   })
 
   it('should encode empty args object by using defaults', () => {
@@ -531,8 +540,8 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const encoded = SolanaChain.encodeExtraArgs(args)
     const decoded = SolanaChain.decodeExtraArgs(encoded)
 
-    expect(decoded).toBeDefined()
-    expect(decoded?.gasLimit).toBe(200000n)
+    assert.ok(decoded)
+    assert.equal(decoded?.gasLimit, 200000n)
   })
 
   it('should maintain encoding consistency across multiple calls', () => {
@@ -544,7 +553,7 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const encoded1 = SolanaChain.encodeExtraArgs(args)
     const encoded2 = SolanaChain.encodeExtraArgs(args)
 
-    expect(encoded1).toBe(encoded2)
+    assert.equal(encoded1, encoded2)
   })
 
   it('should produce Solana-style EVMExtraArgsV2 format (21 bytes)', () => {
@@ -556,12 +565,12 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const encoded = SolanaChain.encodeExtraArgs(args)
 
     // Verify total length is 21 bytes (42 hex chars + 0x prefix)
-    expect(encoded.length).toBe(44)
+    assert.equal(encoded.length, 44)
 
     const decoded = SolanaChain.decodeExtraArgs(encoded)
-    expect(decoded?._tag).toBe('EVMExtraArgsV2')
-    expect(decoded?.gasLimit).toBe(500000n)
-    expect(decoded?.allowOutOfOrderExecution).toBe(true)
+    assert.equal(decoded?._tag, 'EVMExtraArgsV2')
+    assert.equal(decoded?.gasLimit, 500000n)
+    assert.equal(decoded?.allowOutOfOrderExecution, true)
   })
 
   it('should produce valid extra args for CCIP message creation', () => {
@@ -577,9 +586,9 @@ describe('SolanaChain.encodeExtraArgs', () => {
 
     // Verify it can be decoded
     const decoded = SolanaChain.decodeExtraArgs(encoded)
-    expect(decoded).toBeDefined()
-    expect(decoded?.gasLimit).toBe(gasLimit)
-    expect(decoded?.allowOutOfOrderExecution).toBe(allowOutOfOrder)
+    assert.ok(decoded)
+    assert.equal(decoded?.gasLimit, gasLimit)
+    assert.equal(decoded?.allowOutOfOrderExecution, allowOutOfOrder)
   })
 
   it('should demonstrate usage pattern for cross-chain messaging', () => {
@@ -592,9 +601,9 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const encodedExtraArgs = SolanaChain.encodeExtraArgs(messageExtraArgs)
 
     // Verify the encoded args can be used in a CCIP message
-    expect(encodedExtraArgs).toMatch(/^0x181dcf10[0-9a-f]{34}$/)
+    assert.match(encodedExtraArgs, /^0x181dcf10[0-9a-f]{34}$/)
 
     const parsed = SolanaChain.decodeExtraArgs(encodedExtraArgs)
-    expect(parsed?._tag).toBe('EVMExtraArgsV2')
+    assert.equal(parsed?._tag, 'EVMExtraArgsV2')
   })
 })

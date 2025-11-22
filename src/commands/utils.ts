@@ -17,8 +17,6 @@ import {
   type CCIPRequest,
   type Lane,
   ExecutionState,
-  chainIdFromSelector,
-  chainNameFromId,
   networkInfo,
 } from '../lib/index.ts'
 import { supportedChains } from '../lib/supported-chains.ts'
@@ -43,7 +41,7 @@ receiver =\t\t${req.message.receiver}
 gasLimit =\t\t${(req.message as { gasLimit: bigint }).gasLimit}
 tokenTransfers =\t[${req.message.tokenAmounts.map((ta) => ('token' in ta ? ta.token : ta.destTokenAddress)).join(',')}]` +
           ('lane' in req
-            ? `\ndestination =\t\t${chainNameFromId(chainIdFromSelector(req.lane.destChainSelector))} [${chainIdFromSelector(req.lane.destChainSelector)}]`
+            ? `\ndestination =\t\t${networkInfo(req.lane.destChainSelector).name} [${networkInfo(req.lane.destChainSelector).chainId}]`
             : ''),
       })),
       {

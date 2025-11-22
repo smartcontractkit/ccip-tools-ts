@@ -3,14 +3,13 @@ import {
   type BigNumberish,
   type BytesLike,
   type Numeric,
-  type Provider,
-  Result,
   decodeBase64,
   getBytes,
   isBytesLike,
   toBeHex,
   toBigInt,
 } from 'ethers'
+import moize from 'moize'
 
 import { type Chain, ChainFamily } from './chain.ts'
 import SELECTORS from './selectors.ts'
@@ -20,23 +19,24 @@ import type { NetworkInfo } from './types.ts'
 /**
  * Returns *some* block number with timestamp prior to `timestamp`
  *
- * @param provider - provider to search blocks on
+ * @param getBlockTimestamp - function to get block timestamp
+ * @param recentBlockNumber - a block guaranteed to be after `timestamp` (e.g. latest)
  * @param timestamp - target timestamp
- * @param precision - returned blockNumber should be within this many blocks from target
+ * @param precision - returned blockNumber should be within this many blocks before timestamp
  * @returns blockNumber of a block at provider which is close but before target timestamp
  **/
 export async function getSomeBlockNumberBefore(
-  provider: Provider,
+  getBlockTimestamp: (blockNumber: number) => Promise<number>,
+  recentBlockNumber: number,
   timestamp: number,
   precision = 10,
 ): Promise<number> {
-  const currentBlockNumber = await provider.getBlockNumber()
-  let beforeBlockNumber = Math.max(1, currentBlockNumber - precision * 1000)
-  let beforeTimestamp = (await provider.getBlock(beforeBlockNumber))!.timestamp
+  let beforeBlockNumber = Math.max(1, recentBlockNumber - precision * 1000)
+  let beforeTimestamp = await getBlockTimestamp(beforeBlockNumber)
 
   const now = Math.trunc(Date.now() / 1000)
-  let estimatedBlockTime = (now - beforeTimestamp) / (currentBlockNumber - beforeBlockNumber),
-    afterBlockNumber = currentBlockNumber,
+  let estimatedBlockTime = (now - beforeTimestamp) / (recentBlockNumber - beforeBlockNumber),
+    afterBlockNumber = recentBlockNumber,
     afterTimestamp = now
 
   // first, go back looking for a block prior to our target timestamp
@@ -48,10 +48,8 @@ export async function getSomeBlockNumberBefore(
       Math.trunc(beforeBlockNumber - (beforeTimestamp - timestamp) / estimatedBlockTime) -
         10 ** iter,
     )
-    const beforeBlock = await provider.getBlock(beforeBlockNumber)
-    if (!beforeBlock) throw new Error(`Could not fetch block=${beforeBlockNumber}`)
-    beforeTimestamp = beforeBlock.timestamp
-    estimatedBlockTime = (now - beforeTimestamp) / (currentBlockNumber - beforeBlockNumber)
+    beforeTimestamp = await getBlockTimestamp(beforeBlockNumber)
+    estimatedBlockTime = (now - beforeTimestamp) / (recentBlockNumber - beforeBlockNumber)
   }
 
   if (beforeTimestamp > timestamp) {
@@ -70,7 +68,7 @@ export async function getSomeBlockNumberBefore(
     if (pivot === afterBlockNumber) {
       pivot--
     }
-    const pivotTimestamp = (await provider.getBlock(pivot))!.timestamp
+    const pivotTimestamp = await getBlockTimestamp(pivot)
     if (pivotTimestamp > timestamp) {
       afterBlockNumber = pivot
       afterTimestamp = pivotTimestamp
@@ -93,163 +91,63 @@ export async function getSomeBlockNumberBefore(
   return beforeBlockNumber
 }
 
-export function chainNameFromId(id: NetworkInfo['chainId']): string {
-  const entry = SELECTORS[id]
-  if (!entry) throw new Error(`Chain ID not found: ${id}`)
-  if (!entry.name) throw new Error(`No name for chain with id = ${id}`)
-  return entry.name
-}
-
-export function chainSelectorFromId(id: NetworkInfo['chainId']): bigint {
-  const entry = SELECTORS[id]
-  if (!entry) throw new Error(`Chain ID not found: ${id}`)
-  return entry.selector
-}
-
-export function chainIdFromSelector(selector: bigint): NetworkInfo['chainId'] {
-  for (const id in SELECTORS) {
-    if (SELECTORS[id].selector === selector) {
-      return isNaN(Number(id)) ? id : Number(id)
-    }
-  }
-  throw new Error(`Selector not found: ${selector}`)
-}
-
-export const chainNameFromSelector = (selector: bigint) =>
-  chainNameFromId(chainIdFromSelector(selector))
-
-export function chainIdFromName(name: string): NetworkInfo['chainId'] {
-  for (const id in SELECTORS) {
-    if (SELECTORS[id].name === name) {
-      return isNaN(Number(id)) ? id : Number(id)
-    }
-  }
-  throw new Error(`Chain name not found: ${name}`)
-}
+// memoized so we always output the same object for a given chainId
+const networkInfoFromChainId = moize.default((chainId: NetworkInfo['chainId']): NetworkInfo => {
+  const sel = SELECTORS[chainId]
+  if (!sel?.name) throw new Error(`Chain not found: ${chainId}`)
+  return {
+    chainId: isNaN(+chainId) ? chainId : +chainId,
+    chainSelector: sel.selector,
+    name: sel.name,
+    family: sel.family,
+    isTestnet: !sel.name.includes('-mainnet'),
+  } as NetworkInfo
+})
 
 /**
  * Converts a chain selector, chain ID, or chain name to complete network information
  *
  * @param selectorOrIdOrName - Can be:
  *   - Chain selector as bigint or numeric string
- *   - Chain ID as number or string (EVM: "1", Aptos: "aptos:1", Solana: base58)
+ *   - Chain ID as number, bigint or string (EVM: "1", Aptos: "aptos:1", Solana: genesisHash)
  *   - Chain name as string ("ethereum-mainnet")
  * @returns Complete NetworkInfo object
  */
-export function networkInfo(selectorOrIdOrName: bigint | number | string): NetworkInfo {
-  const { chainId, chainSelector } = resolveChainIdentifiers(selectorOrIdOrName)
-
-  const name = chainNameFromSelector(chainSelector)
-  const family = getChainFamily(name)
-
-  return {
-    chainId,
-    chainSelector,
-    name,
-    family,
-    isTestnet: !name.includes('-mainnet'),
-  } as NetworkInfo
-}
-
-/**
- * Helper function to resolve input to chainId and chainSelector
- */
-function resolveChainIdentifiers(input: bigint | number | string): {
-  chainId: NetworkInfo['chainId']
-  chainSelector: bigint
-} {
-  // Handle bigint selector
-  if (typeof input === 'bigint') {
-    return {
-      chainSelector: input,
-      chainId: chainIdFromSelector(input),
+export const networkInfo = moize.default(function networkInfo_(
+  selectorOrIdOrName: bigint | number | string,
+): NetworkInfo {
+  let chainId
+  if (typeof selectorOrIdOrName === 'number') {
+    chainId = selectorOrIdOrName
+  } else if (typeof selectorOrIdOrName === 'string' && selectorOrIdOrName.match(/^\d+$/)) {
+    selectorOrIdOrName = BigInt(selectorOrIdOrName)
+  }
+  if (typeof selectorOrIdOrName === 'bigint') {
+    // maybe we got a number deserialized as bigint
+    if (selectorOrIdOrName.toString() in SELECTORS) {
+      chainId = Number(selectorOrIdOrName)
+    } else {
+      for (const id in SELECTORS) {
+        if (SELECTORS[id].selector === selectorOrIdOrName) {
+          chainId = id
+          break
+        }
+      }
+      if (!chainId) throw new Error(`Selector not found: ${selectorOrIdOrName}`)
     }
-  }
-
-  // Handle number (EVM chain ID)
-  if (typeof input === 'number') {
-    return {
-      chainId: input,
-      chainSelector: chainSelectorFromId(input),
-    }
-  }
-
-  // Handle string inputs
-  return resolveStringInput(input)
-}
-
-/**
- * Resolves string input which could be selector, chain ID, or chain name
- */
-function resolveStringInput(input: string): {
-  chainId: NetworkInfo['chainId']
-  chainSelector: bigint
-} {
-  // Try as direct chain ID first (handles Aptos/Solana IDs)
-  if (input in SELECTORS) {
-    return {
-      chainId: input,
-      chainSelector: chainSelectorFromId(input),
-    }
-  }
-
-  // Try as numeric value (selector or EVM chain ID)
-  if (/^\d+$/.test(input)) {
-    return resolveNumericString(input)
-  }
-
-  // Fall back to chain name lookup
-  const chainId = chainIdFromName(input)
-  return {
-    chainId,
-    chainSelector: chainSelectorFromId(chainId),
-  }
-}
-
-/**
- * Resolves numeric string - could be selector or EVM chain ID
- */
-function resolveNumericString(input: string): {
-  chainId: NetworkInfo['chainId']
-  chainSelector: bigint
-} {
-  const bigIntValue = BigInt(input)
-
-  // Try as selector first
-  try {
-    return {
-      chainSelector: bigIntValue,
-      chainId: chainIdFromSelector(bigIntValue),
-    }
-  } catch {
-    // If not a valid selector, try as EVM chain ID
-    const numValue = Number(input)
-    if (numValue.toString() in SELECTORS) {
-      return {
-        chainId: numValue,
-        chainSelector: chainSelectorFromId(numValue),
+  } else if (typeof selectorOrIdOrName === 'string') {
+    if (selectorOrIdOrName.includes('-')) {
+      for (const id in SELECTORS) {
+        if (SELECTORS[id].name === selectorOrIdOrName) {
+          chainId = id
+          break
+        }
       }
     }
-
-    // Not found as either, treat as chain name
-    const chainId = chainIdFromName(input)
-    return {
-      chainId,
-      chainSelector: chainSelectorFromId(chainId),
-    }
+    chainId ??= selectorOrIdOrName
   }
-}
-
-/**
- * Determines chain family from chain name
- */
-function getChainFamily(name: string): ChainFamily {
-  if (name.startsWith('solana-')) return ChainFamily.Solana
-  if (name.startsWith('aptos-')) return ChainFamily.Aptos
-  if (name.startsWith('sui-')) return ChainFamily.Sui
-  if (name.startsWith('test-')) return ChainFamily.Test
-  return ChainFamily.EVM
-}
+  return networkInfoFromChainId(chainId as string | number)
+})
 
 const BLOCK_RANGE = 10_000
 /**
@@ -258,9 +156,9 @@ const BLOCK_RANGE = 10_000
  * Otherwise, moves backwards down to genesis (you probably want to break/return before that)
  **/
 export function* blockRangeGenerator(
-  params: { endBlock: number; startBlock?: number } | { singleBlock: number },
-  stepSize = BLOCK_RANGE,
+  params: { page?: number } & ({ endBlock: number; startBlock?: number } | { singleBlock: number }),
 ) {
+  const stepSize = params.page ?? BLOCK_RANGE
   if ('singleBlock' in params) {
     yield { fromBlock: params.singleBlock, toBlock: params.singleBlock }
   } else if ('startBlock' in params && params.startBlock) {
@@ -293,14 +191,6 @@ export function bigIntReviver(_key: string, value: unknown): unknown {
     return BigInt(value)
   }
   return value
-}
-
-/**
- * When decoding structs, we often get Results which don't support `<string> in` operator, so we need to convert them to proper objects first
- **/
-export function toObject<T>(obj: T | Result): T {
-  if (obj instanceof Result) return obj.toObject() as T
-  return obj
 }
 
 /**

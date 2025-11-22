@@ -40,16 +40,4 @@ export {
   CCIPVersion,
   ExecutionState,
 } from './types.ts'
-export {
-  bigIntReplacer,
-  bigIntReviver,
-  chainIdFromName,
-  chainIdFromSelector,
-  chainNameFromId,
-  chainNameFromSelector,
-  chainSelectorFromId,
-  decodeAddress,
-  getSomeBlockNumberBefore,
-  networkInfo,
-  toObject,
-} from './utils.ts'
+export { bigIntReplacer, bigIntReviver, decodeAddress, networkInfo } from './utils.ts'

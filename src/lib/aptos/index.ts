@@ -79,11 +79,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   _getAccountModulesNames: (address: string) => Promise<string[]>
 
   constructor(provider: Aptos, network: NetworkInfo) {
-    super()
-
     if (network.family !== ChainFamily.Aptos) {
       throw new Error(`Invalid network family: ${network.family}, expected ${ChainFamily.Aptos}`)
     }
+    super()
+
     this.provider = provider
     this.network = network
     this.typeAndVersion = moize.default(this.typeAndVersion.bind(this), {
@@ -122,9 +122,19 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     )
   }
 
-  static async fromUrl(url: string | Network): Promise<AptosChain> {
-    let network
-    if (Object.values(Network).includes(url as Network)) network = url as Network
+  static async fromProvider(provider: Aptos): Promise<AptosChain> {
+    return new AptosChain(provider, networkInfo(`aptos:${await provider.getChainId()}`))
+  }
+
+  static async fromAptosConfig(config: AptosConfig): Promise<AptosChain> {
+    const provider = new Aptos(config)
+    return this.fromProvider(provider)
+  }
+
+  static async fromUrl(url: string | Network, network?: Network): Promise<AptosChain> {
+    if (network) {
+      // pass
+    } else if (Object.values(Network).includes(url as Network)) network = url as Network
     else if (url.includes('mainnet')) network = Network.MAINNET
     else if (url.includes('testnet')) network = Network.TESTNET
     else if (url.includes('local')) network = Network.LOCAL
@@ -134,16 +144,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       fullnode: url.includes('://') ? url : undefined,
       // indexer: url.includes('://') ? `${url}/v1/graphql` : undefined,
     })
-    const provider = new Aptos(config)
-    return new AptosChain(provider, networkInfo(`aptos:${await provider.getChainId()}`))
-  }
-
-  static txFromUrl(url: string, txHash: string): [Promise<AptosChain>, Promise<ChainTransaction>] {
-    const chainPromise = AptosChain.fromUrl(url)
-    const txPromise = isHexString(txHash, 32)
-      ? chainPromise.then(async (chain) => chain.getTransaction(txHash))
-      : Promise.reject(new Error(`Invalid transaction hash: ${txHash}`))
-    return [chainPromise, txPromise]
+    return this.fromAptosConfig(config)
   }
 
   async destroy(): Promise<void> {
@@ -259,8 +260,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     throw firstErr ?? new Error(`Could not view 'get_token' in ${tokenPool}`)
   }
 
-  getTokenAdminRegistryFor(address: string): Promise<string> {
-    return Promise.resolve(address.split('::')[0] + '::token_admin_registry')
+  async getTokenAdminRegistryFor(address: string): Promise<string> {
+    const registry = address.split('::')[0] + '::token_admin_registry'
+    const [type] = await this.typeAndVersion(registry)
+    if (type !== 'TokenAdminRegistry') {
+      throw new Error(`Expected ${registry} to have TokenAdminRegistry type, got=${type}`)
+    }
+    return registry
   }
 
   static getWallet(_opts: { wallet?: unknown } = {}): Promise<AptosAsyncAccount> {
@@ -292,7 +298,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     )
       throw new Error(`invalid log data: ${util.inspect(log)}`)
     // offload massaging to generic decodeJsonMessage
-    return decodeMessage(data)
+    try {
+      return decodeMessage(data)
+    } catch (_) {
+      // return undefined
+    }
   }
 
   // decodes an Aptos-generated extraArgs, destinated *to* other chains (EVM, Solana, etc)
@@ -348,7 +358,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     throw new Error('Aptos can only encode EVMExtraArgsV2 & SVMExtraArgsV1')
   }
 
-  static decodeCommits({ data }: Log_, lane?: Lane): CommitReport[] | undefined {
+  static decodeCommits({ data }: Pick<Log_, 'data'>, lane?: Lane): CommitReport[] | undefined {
     if (!data || typeof data != 'object') throw new Error('invalid aptos log')
     const data_ = data as { blessed_merkle_roots: unknown[]; unblessed_merkle_roots: unknown[] }
     if (!data_.blessed_merkle_roots) return
@@ -373,7 +383,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return commits
   }
 
-  static decodeReceipt({ data }: Log_): ExecutionReceipt | undefined {
+  static decodeReceipt({ data }: Pick<Log_, 'data'>): ExecutionReceipt | undefined {
     if (!data || typeof data != 'object') throw new Error('invalid aptos log')
     const data_ = data as { message_id: string; state: number }
     if (!data_.message_id || !data_.state) return

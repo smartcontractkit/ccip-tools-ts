@@ -34,8 +34,8 @@ function decodeJsonMessage(data: Record<string, unknown>) {
     }[]
   }
   const sourceChainSelector =
-    data_.header.sourceChainSelector ??
-    data_.header.source_chain_selector ??
+    data_.header?.sourceChainSelector ??
+    data_.header?.source_chain_selector ??
     data_.sourceChainSelector
   if (!sourceChainSelector) throw new Error(`invalid msg: ${util.inspect(data)}`)
   const sourceNetwork = networkInfo(sourceChainSelector)

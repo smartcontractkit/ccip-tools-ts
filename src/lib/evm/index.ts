@@ -8,6 +8,7 @@ import {
   type Provider,
   type Signer,
   type TransactionReceipt,
+  AbstractSigner,
   BaseWallet,
   Contract,
   JsonRpcProvider,
@@ -140,10 +141,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   readonly provider: JsonRpcApiProvider
 
   constructor(provider: JsonRpcApiProvider, network: NetworkInfo) {
-    super()
-
     if (network.family !== ChainFamily.EVM)
       throw new Error(`Invalid network family for EVMChain: ${network.family}`)
+    super()
+
     this.network = network
     this.provider = provider
 
@@ -166,6 +167,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     })
     this.getTokenInfo = moize.default(this.getTokenInfo.bind(this))
     this.getWallet = moize.default(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
+    this.getTokenAdminRegistryFor = moize.default(this.getTokenAdminRegistryFor.bind(this), {
+      isPromise: true,
+      maxArgs: 1,
+    })
   }
 
   // overwrite EVMChain.getWallet to implement custom wallet loading
@@ -176,7 +181,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   // cached wallet/signer getter
   async getWallet(opts: { wallet?: unknown } = {}): Promise<Signer> {
-    if (typeof opts.wallet === 'string') {
+    if (
+      typeof opts.wallet === 'number' ||
+      (typeof opts.wallet === 'string' && opts.wallet.match(/^(\d+|0x[a-fA-F0-9]{40})$/))
+    ) {
+      // if given a number, numeric string or address, use ethers `provider.getSigner` (e.g. geth or MM)
+      return this.provider.getSigner(
+        typeof opts.wallet === 'string' && opts.wallet.match(/^0x[a-fA-F0-9]{40}$/)
+          ? opts.wallet
+          : Number(opts.wallet),
+      )
+    } else if (typeof opts.wallet === 'string') {
+      // support receiving private key directly (not recommended)
       try {
         return Promise.resolve(
           new BaseWallet(
@@ -187,8 +203,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       } catch (_) {
         // pass
       }
+    } else if (opts.wallet instanceof AbstractSigner) {
+      // if given a signer, return/cache it
+      return opts.wallet
     }
     return (this.constructor as typeof EVMChain).getWallet(this.provider, opts)
+  }
+
+  /**
+   * Expose ethers provider's `listAccounts`, if provider supports it
+   */
+  async listAccounts(): Promise<string[]> {
+    return (await this.provider.listAccounts()).map(({ address }) => address)
   }
 
   async getWalletAddress(opts?: { wallet?: unknown }): Promise<string> {
@@ -230,24 +256,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   static async fromUrl(url: string): Promise<EVMChain> {
     return this.fromProvider(await this._getProvider(url))
-  }
-
-  static txFromUrl(url: string, txHash: string): [Promise<EVMChain>, Promise<ChainTransaction>] {
-    const provider$ = this._getProvider(url)
-    const chain$ = provider$.then((provider) => this.fromProvider(provider))
-    return [
-      chain$,
-      (isHexString(txHash, 32)
-        ? Promise.resolve(txHash)
-        : Promise.reject(new Error(`Invalid transaction hash: ${txHash}`))
-      ).then(async (txHash) => {
-        const tx = await (await provider$).getTransactionReceipt(txHash)
-        if (!tx) throw new Error(`Transaction not found: ${txHash} in ${url}`)
-        const chain = await chain$
-        const timestamp = await chain.getBlockTimestamp(tx.blockNumber)
-        return Object.assign(tx, { chain, timestamp })
-      }),
-    ]
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
@@ -295,7 +303,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       filter.topics = [Array.from(topics)]
     }
     if (!filter.startBlock && filter.startTime) {
-      filter.startBlock = await getSomeBlockNumberBefore(this.provider, filter.startTime)
+      filter.startBlock = await getSomeBlockNumberBefore(
+        this.getBlockTimestamp.bind(this),
+        endBlock,
+        filter.startTime,
+      )
     }
     for (const blockRange of blockRangeGenerator({ ...filter, endBlock })) {
       const logs = await this.provider.getLogs({
@@ -411,56 +423,77 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   static decodeCommits(
-    log: { topics: readonly string[]; data: unknown },
+    log: { topics?: readonly string[]; data: unknown },
     lane?: Omit<Lane, 'destChainSelector'>,
   ): CommitReport[] | undefined {
     if (!isBytesLike(log.data)) throw new Error(`invalid data=${util.inspect(log.data)}`)
-    const fragment = commitsFragments[log.topics[0] as `0x${string}`]
-    if (!fragment) return
-    const isCcipV15 = fragment.name === 'ReportAccepted'
-    // CCIP<=1.5 doesn't have lane info in event, so we need lane to be provided (e.g. from CommitStore's configs)
-    if (isCcipV15 && !lane) throw new Error('decoding commits from CCIP<=v1.5 requires lane')
-    let result = interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
-    if (result.length === 1) result = result[0] as Result
-    if (isCcipV15) {
-      return [
-        {
-          merkleRoot: result.merkleRoot as string,
-          minSeqNr: (result.interval as Result).min as bigint,
-          maxSeqNr: (result.interval as Result).max as bigint,
-          sourceChainSelector: lane!.sourceChainSelector,
-          onRampAddress: lane!.onRamp,
-        },
-      ]
-    } else {
-      const reports: CommitReport[] = []
-      for (const c of [...(result[0] as Result[]), ...(result[1] as Result[])]) {
-        // if ccip>=v1.6 and lane is provided, use it to filter reports; otherwise, include all
-        if (lane && c.sourceChainSelector !== lane.sourceChainSelector) continue
-        const onRampAddress = decodeOnRampAddress(
-          c.onRampAddress as string,
-          networkInfo(c.sourceChainSelector as bigint).family,
-        )
-        if (lane && onRampAddress !== lane.onRamp) continue
-        reports.push({ ...c.toObject(), onRampAddress } as CommitReport)
+    let fragments
+    if (log.topics?.[0]) {
+      const fragment = commitsFragments[log.topics[0] as `0x${string}`]
+      if (!fragment) return
+      const isCcipV15 = fragment.name === 'ReportAccepted'
+      // CCIP<=1.5 doesn't have lane info in event, so we need lane to be provided (e.g. from CommitStore's configs)
+      if (isCcipV15 && !lane) throw new Error('decoding commits from CCIP<=v1.5 requires lane')
+      fragments = [fragment]
+    } else fragments = Object.values(commitsFragments)
+    for (const fragment of fragments) {
+      let result
+      try {
+        result = interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
+      } catch (_) {
+        continue
       }
-      if (reports.length) return reports
+      if (result.length === 1) result = result[0] as Result
+      const isCcipV15 = fragment.name === 'ReportAccepted'
+      if (isCcipV15) {
+        return [
+          {
+            merkleRoot: result.merkleRoot as string,
+            minSeqNr: (result.interval as Result).min as bigint,
+            maxSeqNr: (result.interval as Result).max as bigint,
+            sourceChainSelector: lane!.sourceChainSelector,
+            onRampAddress: lane!.onRamp,
+          },
+        ]
+      } else {
+        const reports: CommitReport[] = []
+        for (const c of [...(result[0] as Result[]), ...(result[1] as Result[])]) {
+          // if ccip>=v1.6 and lane is provided, use it to filter reports; otherwise, include all
+          if (lane && c.sourceChainSelector !== lane.sourceChainSelector) continue
+          const onRampAddress = decodeOnRampAddress(
+            c.onRampAddress as string,
+            networkInfo(c.sourceChainSelector as bigint).family,
+          )
+          if (lane && onRampAddress !== lane.onRamp) continue
+          reports.push({ ...c.toObject(), onRampAddress } as CommitReport)
+        }
+        if (reports.length) return reports
+      }
     }
   }
 
   static decodeReceipt(log: {
-    topics: readonly string[]
+    topics?: readonly string[]
     data: unknown
   }): ExecutionReceipt | undefined {
     if (!isBytesLike(log.data)) throw new Error(`invalid data=${util.inspect(log.data)}`)
-    const fragment = receiptsFragments[log.topics[0] as `0x${string}`]
-    if (!fragment) return
-    const result = interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
-    return {
-      ...result.toObject(),
-      // ...(fragment.inputs.filter((p) => p.indexed).map((p, i) => [p.name, log.topics[i+1]] as const)).
-      state: Number(result.state as bigint) as ExecutionState,
-    } as ExecutionReceipt
+    let fragments
+    if (log.topics?.[0]) {
+      fragments = [receiptsFragments[log.topics[0] as `0x${string}`]]
+      if (!fragments[0]) return
+    } else fragments = Object.values(receiptsFragments)
+    for (const fragment of fragments) {
+      try {
+        const result = interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
+        return {
+          ...result.toObject(),
+          // ...(fragment.inputs.filter((p) => p.indexed).map((p, i) => [p.name, log.topics[i+1]] as const)).
+          state: Number(result.state as bigint) as ExecutionState,
+        } as ExecutionReceipt
+      } catch (_) {
+        // continue
+      }
+    }
   }
 
   static decodeExtraArgs(

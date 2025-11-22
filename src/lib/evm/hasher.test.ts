@@ -1,7 +1,10 @@
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
 import { ZeroAddress, getBigInt } from 'ethers'
 
-import '../index.ts'
 import type { CCIPMessage, CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
+import '../index.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import type { CCIPMessage_V1_6_EVM } from './messages.ts'
 
@@ -39,7 +42,7 @@ describe('EVM leaf hasher', () => {
     } as CCIPMessage<typeof CCIPVersion.V1_5>
 
     const msgHash = hasher(message)
-    expect(msgHash).toBe('0x46ad031bfb052db2e4a2514fed8dc480b98e5ce4acb55d5640d91407e0d8a3e9')
+    assert.equal(msgHash, '0x46ad031bfb052db2e4a2514fed8dc480b98e5ce4acb55d5640d91407e0d8a3e9')
   })
 
   it('should hash v1.6 msg', () => {
@@ -128,6 +131,6 @@ describe('EVM leaf hasher', () => {
     }
 
     const msgHash = hasher(message as CCIPMessage_V1_6_EVM)
-    expect(msgHash).toBe('0xd56d9f4c0b0bb9cb8c83aeb676a02d5666583eee7d6d4660c87a06a9b36aa352')
+    assert.equal(msgHash, '0xd56d9f4c0b0bb9cb8c83aeb676a02d5666583eee7d6d4660c87a06a9b36aa352')
   })
 })

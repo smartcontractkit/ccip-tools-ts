@@ -1,9 +1,12 @@
-// For reference implementation, see https://github.com/smartcontractkit/ccip/blob/ccip-develop/core/services/ocr2/plugins/ccip/merklemulti/merkle_multi_test.go
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
 import { concat, keccak256 } from 'ethers'
 
 import { testVectors } from './__mocks__/merklemultiTestVectors.ts'
 import { ZERO_HASH, hashInternal } from './common.ts'
 import { Proof, Tree, verifyComputeRoot } from './merklemulti.ts'
+
 // import { CombinationGenerator } from './utils'
 
 const a = keccak256('0x0a')
@@ -81,59 +84,60 @@ describe('Merkle multi basic tests', () => {
     try {
       const proof = new Proof(proofs, sourceFlags)
       verifyComputeRoot(leaves, proof)
+      assert.fail('Expected an error to be thrown')
     } catch (err: unknown) {
-      expect((err as Error).message).toEqual('proof source flags 1 != proof hashes 2')
+      assert.equal((err as Error).message, 'proof source flags 1 != proof hashes 2')
     }
   })
 
   it('should correctly pad tree layers', () => {
     const tr4 = new Tree([a, b, c])
-    expect(tr4.layers[0].length).toEqual(4)
+    assert.equal(tr4.layers[0].length, 4)
 
     const tr8 = new Tree([a, b, c, d, e])
-    expect(tr8.layers[0].length).toEqual(6)
-    expect(tr8.layers[1].length).toEqual(4)
+    assert.equal(tr8.layers[0].length, 6)
+    assert.equal(tr8.layers[1].length, 4)
 
     const expected = hashInternal(
       hashInternal(hashInternal(a, b), hashInternal(c, d)),
       hashInternal(hashInternal(e, ZERO_HASH), ZERO_HASH),
     )
 
-    expect(tr8.root()).toEqual(expected)
+    assert.equal(tr8.root(), expected)
 
     const p = tr8.prove([0])
     const h = verifyComputeRoot([a], p)
-    expect(h).toEqual(tr8.root())
+    assert.equal(h, tr8.root())
   })
 
   it('should test MerkleMulti proof second preimage', () => {
     // Create a Merkle tree with leaves 'a' and 'b'
     const tr = new Tree([a, b])
-    expect(tr).not.toBeNull()
+    assert.ok(tr)
 
     // Generate a proof for the first leaf (index 0)
     const pr = tr.prove([0])
-    expect(pr).not.toBeNull()
+    assert.ok(pr)
 
     // Verify the proof to get the root
     const proofResult = verifyComputeRoot([a], pr)
 
     // Ensure the computed root matches the original tree's root
-    expect(proofResult).toEqual(tr.root())
+    assert.equal(proofResult, tr.root())
 
     // Create another Merkle tree with a combined hash of 'a' and 'b'
     const combinedHash = keccak256(concat([a, b]))
     const tr2 = new Tree([combinedHash])
-    expect(tr2).not.toBeNull()
+    assert.ok(tr2)
 
     // Ensure the root of the second tree is not equal to the root of the first tree
-    expect(tr2.root()).not.toEqual(tr.root())
+    assert.notEqual(tr2.root(), tr.root())
   })
 
   it('should correctly create a tree', () => {
     testVectors.forEach((test) => {
       const tr = new Tree(test.AllLeafs)
-      expect(tr.root()).toEqual(test.ExpectedRoot)
+      assert.equal(tr.root(), test.ExpectedRoot)
     })
   })
 
@@ -143,7 +147,7 @@ describe('Merkle multi basic tests', () => {
         test.ProofLeaves,
         new Proof(test.ProofHashes, test.ProofFlags),
       )
-      expect(computedRoot).toEqual(test.ExpectedRoot)
+      assert.equal(computedRoot, test.ExpectedRoot)
     })
   })
 })
@@ -168,7 +172,7 @@ describe('Merkle multi proof for trees of various sizes', () => {
   for (let length = 1; length <= leafHashes.length; length++) {
     it(`should compute Merkle root for tree of size ${length}`, () => {
       const tr = new Tree(leafHashes.slice(0, length))
-      expect(tr.root()).toEqual(expectedRoots[length - 1])
+      assert.equal(tr.root(), expectedRoots[length - 1])
 
       for (let k = 1; k <= length; k++) {
         const gen = new CombinationGenerator(length, k)
@@ -179,7 +183,7 @@ describe('Merkle multi proof for trees of various sizes', () => {
           const leavesToProve = leaveIndices.map((idx: number) => leafHashes[idx])
 
           const root = verifyComputeRoot(leavesToProve, proof)
-          expect(root).toEqual(expectedRoots[length - 1])
+          assert.equal(root, expectedRoots[length - 1])
         }
       }
     })

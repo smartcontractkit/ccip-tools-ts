@@ -32,7 +32,6 @@ export const ChainFamily = {
   Solana: 'solana',
   Aptos: 'aptos',
   Sui: 'sui',
-  Test: 'test',
 } as const
 export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
 
@@ -328,14 +327,6 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    */
   fromUrl(url: string): Promise<Chain<F>>
   /**
-   * Used for an optimization at init time, where we race fetching transactions before the networks
-   * are known; should return a tuple with 2 promises: first one should (if possible) resolve to a
-   * Chain for this `url` regardless of tx; 2nd one is the racing promise, to return tx ASAP
-   * @param url - rpc endpoint url
-   * @param txHash - transaction hash
-   */
-  txFromUrl(url: string, txHash: string): [Promise<Chain<F>>, Promise<ChainTransaction>]
-  /**
    * Try to decode a CCIP message *from* a log/event *originated* from this *source* chain,
    * but which may *target* other dest chain families
    * iow: the parsing is specific to this chain family, but content may be intended to alien chains
@@ -364,13 +355,13 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * @param lane - if passed, filter or validate reports by lane
    * @returns Array of commit reports contained in the log
    */
-  decodeCommits(log: Log_, lane?: Lane): CommitReport[] | undefined
+  decodeCommits(log: Pick<Log_, 'data'>, lane?: Lane): CommitReport[] | undefined
   /**
    * Decode a receipt (ExecutioStateChanged) event
    * @param log - Chain generic log
    * @returns ExecutionReceipt or undefined if not a recognized receipt
    */
-  decodeReceipt(log: Log_): ExecutionReceipt | undefined
+  decodeReceipt(log: Pick<Log_, 'data'>): ExecutionReceipt | undefined
   /**
    * Receive a bytes array and try to decode and normalize it as an address of this chain family
    * @param bytes - Bytes array (Uint8Array, HexString or Base64)

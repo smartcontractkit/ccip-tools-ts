@@ -55,6 +55,7 @@ async function main() {
     })
     .commandDir('commands', {
       extensions: ['ts'],
+      exclude: /\.test\.ts$/,
     })
     .demandCommand()
     .strict()

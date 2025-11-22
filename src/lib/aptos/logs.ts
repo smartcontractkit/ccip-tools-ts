@@ -34,7 +34,10 @@ export async function getVersionTimestamp(
 ): Promise<number> {
   if (version === 'finalized') {
     const info = await provider.getLedgerInfo()
-    version = +info.ledger_version
+    const tx = await provider.getTransactionByVersion({
+      ledgerVersion: +info.ledger_version,
+    })
+    return +(tx as UserTransactionResponse).timestamp / 1e6
   }
   const tx = await getUserTxByVersion(provider, version)
   return +tx.timestamp / 1e6

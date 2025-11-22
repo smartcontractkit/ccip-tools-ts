@@ -1,3 +1,5 @@
+import assert from 'node:assert'
+import { before, describe, it } from 'node:test'
 import util from 'node:util'
 
 import { encodeBase64, toBigInt } from 'ethers'
@@ -10,7 +12,7 @@ import type { CCIPMessage_V1_6_Solana } from './types.ts'
 util.inspect.defaultOptions.maxArrayLength = null
 
 describe('MessageHasher', () => {
-  beforeAll(() => {
+  before(async () => {
     Object.assign(SELECTORS, {
       solanaLocalGenesisHash: {
         name: 'solana-localnet',
@@ -23,7 +25,7 @@ describe('MessageHasher', () => {
     })
   })
   // https://github.com/smartcontractkit/chainlink-ccip/blob/34a541118d89c346e2c642b089a63c3f2b2df320/chains/solana/utils/ccip/ccip_messages_test.go#L28
-  it('should handle a message to solana', () => {
+  it('should handle a message to solana', async () => {
     const message = {
       sender: '0x0102030000000000000000000000000000000000000000000000000000000000',
       data: encodeBase64('0x040506'),
@@ -70,10 +72,13 @@ describe('MessageHasher', () => {
 
     const finalHash = hasher(message)
 
-    expect(finalHash).toBe('0xbd8025f7b32386d93be284b6b4eb6f36c7b46ea157c0228f00ccba38fe7a448e')
+    assert.strictEqual(
+      finalHash,
+      '0xbd8025f7b32386d93be284b6b4eb6f36c7b46ea157c0228f00ccba38fe7a448e',
+    )
   })
 
-  it('should handle a real evm->solana', () => {
+  it('should handle a real evm->solana', async () => {
     // https://sepolia.etherscan.io/tx/0xeadc3927a3b6dd10be68a5d3c7a488cf3d99cd8d645ae196406267c833e3e638
     const message = {
       header: {
@@ -124,6 +129,9 @@ describe('MessageHasher', () => {
 
     const finalHash = hasher(message)
 
-    expect(finalHash).toBe('0x7a498ae46f8f32c55958a0ca3d3c1cf40ab28ded8fa36bfc3faa9ec3fc46a731')
+    assert.strictEqual(
+      finalHash,
+      '0x7a498ae46f8f32c55958a0ca3d3c1cf40ab28ded8fa36bfc3faa9ec3fc46a731',
+    )
   })
 })
