@@ -87,6 +87,16 @@ const selectors: Selectors = {
     name: 'polkadot-testnet-astar-shibuya',
     family: 'evm',
   },
+  '85': {
+    selector: 3558960680482140165n,
+    name: 'gate-chain-testnet-meteora',
+    family: 'evm',
+  },
+  '86': {
+    selector: 9688382747979139404n,
+    name: 'gate-chain-mainnet',
+    family: 'evm',
+  },
   '97': {
     selector: 13264668187771770619n,
     name: 'binance_smart_chain-testnet',
@@ -702,6 +712,16 @@ const selectors: Selectors = {
   '9746': {
     selector: 3967220077692964309n,
     name: 'plasma-testnet',
+    family: 'evm',
+  },
+  '10087': {
+    selector: 3667207123485082040n,
+    name: 'gate-layer-testnet',
+    family: 'evm',
+  },
+  '10088': {
+    selector: 9373518659714509671n,
+    name: 'gate-layer-mainnet',
     family: 'evm',
   },
   '10143': {
