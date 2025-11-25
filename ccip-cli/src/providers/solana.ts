@@ -1,6 +1,6 @@
 import util from 'util'
 
-import { SolanaChain } from '@chainlink/ccip-tools-ts/src/index.ts'
+import { SolanaChain } from '@chainlink/ccip-sdk/src/index.ts'
 import { Wallet as SolanaWallet } from '@coral-xyz/anchor'
 import SolanaLedger from '@ledgerhq/hw-app-solana'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'

@@ -1,5 +1,5 @@
 {
-  "name": "@chainlink/ccip-tools-ts",
+  "name": "@chainlink/ccip-sdk",
   "version": "0.90.0",
   "description": "SDK/Library to interact with CCIP",
   "author": "Chainlink devs",

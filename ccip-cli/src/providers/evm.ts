@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import util from 'util'
 
-import { EVMChain } from '@chainlink/ccip-tools-ts/src/index.ts'
+import { EVMChain } from '@chainlink/ccip-sdk/src/index.ts'
 import { LedgerSigner } from '@ethers-ext/signer-ledger'
 import { password } from '@inquirer/prompts'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'

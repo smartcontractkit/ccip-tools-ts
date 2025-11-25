@@ -11,7 +11,7 @@ import {
   estimateExecGasForRequest,
   fetchAllMessagesInBatch,
   fetchCCIPMessagesInTx,
-} from '@chainlink/ccip-tools-ts/src/index.ts'
+} from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'

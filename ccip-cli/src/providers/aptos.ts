@@ -11,7 +11,7 @@ import {
   Ed25519Signature,
   generateSigningMessageForTransaction,
 } from '@aptos-labs/ts-sdk'
-import { AptosChain } from '@chainlink/ccip-tools-ts/src/index.ts'
+import { AptosChain } from '@chainlink/ccip-sdk/src/index.ts'
 import AptosLedger from '@ledgerhq/hw-app-aptos'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
 import { type BytesLike, getBytes } from 'ethers'

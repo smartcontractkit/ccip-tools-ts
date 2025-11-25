@@ -28,7 +28,7 @@ import {
   type RateLimiterState,
   bigIntReplacer,
   networkInfo,
-} from '@chainlink/ccip-tools-ts/src/index.ts'
+} from '@chainlink/ccip-sdk/src/index.ts'
 import { search } from '@inquirer/prompts'
 import { formatUnits } from 'ethers'
 import type { Argv } from 'yargs'

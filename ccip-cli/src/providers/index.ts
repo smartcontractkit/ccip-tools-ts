@@ -6,7 +6,7 @@ import {
   type ChainTransaction,
   networkInfo,
   supportedChains,
-} from '@chainlink/ccip-tools-ts/src/index.ts'
+} from '@chainlink/ccip-sdk/src/index.ts'
 
 import './aptos.ts'
 import './evm.ts'

@@ -10,7 +10,7 @@ import {
   getDataBytes,
   networkInfo,
   sourceToDestTokenAmounts,
-} from '@chainlink/ccip-tools-ts/src/index.ts'
+} from '@chainlink/ccip-sdk/src/index.ts'
 import { type BytesLike, dataLength, formatUnits, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
 

@@ -1,5 +1,5 @@
 {
-  "name": "@chainlink/ccip-tools-ts-monorepo",
+  "name": "@chainlink/ccip-tools-ts",
   "version": "0.90.0",
   "description": "CLI and library to interact with CCIP",
   "author": "Chainlink devs",
@@ -7,18 +7,18 @@
   "repository": "git://github.com/smartcontractkit/ccip-tools-ts.git",
   "type": "module",
   "workspaces": [
-    "ccip-tools-ts",
+    "ccip-sdk",
     "ccip-cli"
   ],
   "scripts": {
     "test": "npm run clean:coverage && c8 npm test --workspaces",
-    "test:unit": "npm run clean:coverage && c8 npm test -w ccip-tools-ts",
+    "test:unit": "npm run clean:coverage && c8 npm test -w ccip-sdk",
     "test:e2e": "npm run clean:coverage && c8 npm test -w ccip-cli",
     "lint": "npm run lint --workspaces",
     "lint:fix": "npm run lint:fix --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "check": "npm run check --workspaces",
-    "generate": "node ./generate.cjs `grep -lrn '^\\s*//\\s*generate\\b' ./ccip-tools-ts/src ./ccip-cli/src`",
+    "generate": "node ./generate.cjs `grep -lrn '^\\s*//\\s*generate\\b' ./ccip-sdk/src ./ccip-cli/src`",
     "clean:coverage": "rm -rfv ./.coverage ./.c8_output",
     "clean": "npm run clean:coverage && npm run clean --workspaces",
     "build": "npm run clean && npm run generate && npm run build --workspaces",

@@ -1,4 +1,4 @@
-import { bigIntReplacer, supportedChains } from '@chainlink/ccip-tools-ts/src/index.ts'
+import { bigIntReplacer, supportedChains } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
