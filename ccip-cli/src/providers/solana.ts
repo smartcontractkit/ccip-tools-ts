@@ -1,4 +1,5 @@
-import util from 'util'
+import { existsSync, readFileSync } from 'node:fs'
+import util from 'node:util'
 
 import { SolanaChain } from '@chainlink/ccip-sdk/src/index.ts'
 import { Wallet as SolanaWallet } from '@coral-xyz/anchor'
@@ -13,7 +14,7 @@ import {
   Transaction,
 } from '@solana/web3.js'
 import bs58 from 'bs58'
-import { getBytes } from 'ethers'
+import { getBytes, hexlify } from 'ethers'
 
 export class LedgerSolanaWallet {
   publicKey: PublicKey
@@ -72,19 +73,21 @@ export class LedgerSolanaWallet {
 SolanaChain.getWallet = async function loadSolanaWallet({
   wallet: walletOpt,
 }: { wallet?: unknown } = {}): Promise<SolanaWallet> {
-  if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
+  if (!walletOpt)
+    walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY'] || '~/.config/solana/id.json'
+  let wallet: string
   if (typeof walletOpt !== 'string')
     throw new Error(`Invalid wallet option: ${util.inspect(walletOpt)}`)
-  if ((walletOpt ?? '').startsWith('ledger')) {
+  wallet = walletOpt
+  if (walletOpt === 'ledger' || walletOpt.startsWith('ledger:')) {
     let derivationPath = walletOpt.split(':')[1]
     if (!derivationPath) derivationPath = "44'/501'/0'"
     else if (!isNaN(Number(derivationPath))) derivationPath = `44'/501'/${derivationPath}'`
-    const wallet = await LedgerSolanaWallet.create(derivationPath)
-    return wallet as SolanaWallet
+    return (await LedgerSolanaWallet.create(derivationPath)) as SolanaWallet
+  } else if (existsSync(walletOpt)) {
+    wallet = hexlify(new Uint8Array(JSON.parse(readFileSync(walletOpt, 'utf8'))))
   }
   return new SolanaWallet(
-    Keypair.fromSecretKey(
-      walletOpt.startsWith('0x') ? getBytes(walletOpt) : bs58.decode(walletOpt),
-    ),
+    Keypair.fromSecretKey(wallet.startsWith('0x') ? getBytes(wallet) : bs58.decode(wallet)),
   )
 }

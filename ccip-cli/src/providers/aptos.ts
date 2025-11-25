@@ -1,4 +1,5 @@
-import util from 'util'
+import { existsSync, readFileSync } from 'node:fs'
+import util from 'node:util'
 
 import {
   type AccountAddress,
@@ -14,7 +15,7 @@ import {
 import { AptosChain } from '@chainlink/ccip-sdk/src/index.ts'
 import AptosLedger from '@ledgerhq/hw-app-aptos'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
-import { type BytesLike, getBytes } from 'ethers'
+import { type BytesLike, getBytes, hexlify } from 'ethers'
 
 // A LedgerSigner object represents a signer for a private key on a Ledger hardware wallet.
 // This object is initialized alongside a LedgerClient connection, and can be used to sign
@@ -87,9 +88,12 @@ AptosChain.getWallet = async function loadAptosWallet({ wallet: walletOpt }: { w
       signer.derivationPath,
     )
     return signer
-  } else if (walletOpt) {
+  } else if (existsSync(walletOpt)) {
+    walletOpt = hexlify(readFileSync(walletOpt, 'utf8').trim())
+  }
+  if (walletOpt) {
     return Account.fromPrivateKey({
-      privateKey: new Ed25519PrivateKey(walletOpt, false),
+      privateKey: new Ed25519PrivateKey(walletOpt as string, false),
     })
   }
   throw new Error('Wallet not specified')
