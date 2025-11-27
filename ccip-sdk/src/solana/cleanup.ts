@@ -188,7 +188,11 @@ export async function cleanUpBuffers(
         } else if (info.value.state.deactivationSlot < 2n ** 63n) {
           // non-deactivated have deactivationSlot=MAX_UINT64
           pendingPromises.push(closeAlt(lookupTable, Number(info.value.state.deactivationSlot)))
-        } else {
+        } else if (
+          info.value.state.addresses.length >= 18 &&
+          info.value.state.addresses[6].equals(wallet.publicKey)
+        ) {
+          // the conditions above match for ALTs created for ccip manualExec
           const deactivateIx = AddressLookupTableProgram.deactivateLookupTable({
             authority: wallet.publicKey,
             lookupTable: lookupTable,

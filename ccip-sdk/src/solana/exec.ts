@@ -25,7 +25,7 @@ import { getDataBytes, sleep, toLeArray } from '../utils.ts'
 import { bytesToBuffer, simulateTransaction, simulationProvider } from './utils.ts'
 import './patchBorsh.ts'
 
-type ExecStepTx = [reason: string, transactions: VersionedTransaction]
+type ExecStepTx = readonly [reason: string, transactions: VersionedTransaction]
 
 type ExecAlt = {
   addressLookupTableAccount: AddressLookupTableAccount
@@ -43,7 +43,7 @@ export async function executeReport({
   gasLimit?: number
   forceLookupTable?: boolean
   forceBuffer?: boolean
-  clearBufferFirst?: boolean
+  clearLeftoverAccounts?: boolean
 }): Promise<Pick<ChainTransaction, 'hash'>> {
   const provider = offrampProgram.provider as AnchorProvider
   const wallet = provider.wallet
@@ -109,7 +109,7 @@ async function buildExecTxToSolana(
   offrampProgram: Program<typeof CCIP_OFFRAMP_IDL>,
   execReport: ExecutionReport<CCIPMessage_V1_6_Solana>,
   computeUnitsOverride: number | undefined,
-  opts?: { forceLookupTable?: boolean; forceBuffer?: boolean; clearBufferFirst?: boolean },
+  opts?: { forceLookupTable?: boolean; forceBuffer?: boolean; clearLeftoverAccounts?: boolean },
 ): Promise<ExecStepTx[]> {
   const provider = offrampProgram.provider as AnchorProvider
   offrampProgram = new Program(CCIP_OFFRAMP_IDL, offrampProgram.programId, provider)
@@ -329,7 +329,7 @@ async function bufferedTransactionData(
   serializedReport: Buffer,
   recentBlockhash: string,
   bufferId: Buffer,
-  opts?: { clearBufferFirst?: boolean },
+  opts?: { clearLeftoverAccounts?: boolean },
 ): Promise<ExecStepTx[]> {
   const provider = offrampProgram.provider as AnchorProvider
 
@@ -357,7 +357,7 @@ async function bufferedTransactionData(
     systemProgram: SystemProgram.programId,
   }
 
-  if (opts?.clearBufferFirst) {
+  if (opts?.clearLeftoverAccounts) {
     const clearTx = await offrampProgram.methods
       .closeExecutionReportBuffer(bufferId)
       .accounts(bufferingAccounts)

@@ -75,9 +75,10 @@ export const builder = (yargs: Argv) =>
         type: 'boolean',
         describe: 'Forces the creation & usage of an ad-hoc lookup table for Solana execution.',
       },
-      'clear-buffer-first': {
+      'clear-leftover-accounts': {
         type: 'boolean',
-        describe: 'Forces clearing the buffer (if a previous attempt was aborted).',
+        describe:
+          'Clears buffers (if a previous attempt was aborted) or any ALT owned by this sender.',
       },
       'sender-queue': {
         type: 'boolean',

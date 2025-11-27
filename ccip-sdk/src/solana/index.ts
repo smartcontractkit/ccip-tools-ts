@@ -977,7 +977,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       gasLimit?: number
       forceLookupTable?: boolean
       forceBuffer?: boolean
-      clearBufferFirst?: boolean
+      clearLeftoverAccounts?: boolean
       dontWait?: boolean
     },
   ): Promise<ChainTransaction> {
@@ -990,10 +990,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const offrampProgram = new Program(CCIP_OFFRAMP_IDL, new PublicKey(offRamp), provider)
 
     const rep = await executeReport({ offrampProgram, execReport, ...opts })
-    try {
-      await this.cleanUpBuffers(opts)
-    } catch (err) {
-      console.warn('Error while trying to clean up buffers:', err)
+    if (opts?.clearLeftoverAccounts) {
+      try {
+        await this.cleanUpBuffers(opts)
+      } catch (err) {
+        console.warn('Error while trying to clean up buffers:', err)
+      }
     }
     return this.getTransaction(rep.hash)
   }
