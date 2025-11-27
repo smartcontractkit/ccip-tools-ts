@@ -1,3 +1,5 @@
+import util from 'util'
+
 import bs58 from 'bs58'
 import {
   type BigNumberish,
@@ -230,13 +232,16 @@ export function isBase64(data: unknown): data is string {
   )
 }
 
-export function getDataBytes(data: BytesLike): Uint8Array {
+export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
+  if (Array.isArray(data)) {
+    return new Uint8Array(data)
+  }
   if (isBytesLike(data)) {
     return getBytes(data)
   } else if (isBase64(data)) {
     return decodeBase64(data)
   } else {
-    throw new Error(`Unsupported data format: ${data as string}`)
+    throw new Error(`Unsupported data format: ${util.inspect(data)}`)
   }
 }
 
