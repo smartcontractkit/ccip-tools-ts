@@ -34,7 +34,7 @@ jobs:
     - name: Run tests
       run: npm test
 
-  publish-npm:
+  publish-sdk:
     needs: build-and-test
     runs-on: ubuntu-latest
     environment: publish
@@ -53,6 +53,23 @@ jobs:
 
       - name: Publish @chainlink/ccip-sdk
         run: npm -w ccip-sdk publish --access public --verbose
+
+  publish-cli:
+    needs: publish-sdk
+    runs-on: ubuntu-latest
+    environment: publish
+    steps:
+      - uses: actions/checkout@v5.0.0
+      - uses: actions/setup-node@v6.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+
+      # Ensure npm 11.5.1 or later is installed
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - run: npm ci
 
       - name: Publish @chainlink/ccip-cli
         run: npm -w ccip-cli publish --access public --verbose

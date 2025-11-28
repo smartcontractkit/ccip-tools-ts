@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-cli",
-  "version": "0.90.1",
+  "version": "0.90.2",
   "description": "CCIP Command Line Interface, based on @chainlink/ccip-sdk",
   "author": "Chainlink devs",
   "license": "MIT",
