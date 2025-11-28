@@ -221,7 +221,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   abstract sendMessage(
     router: string,
     destChainSelector: bigint,
-    message: AnyMessage & { fee: bigint },
+    message: AnyMessage & { fee?: bigint },
     opts?: { wallet?: unknown; approveMax?: boolean },
   ): Promise<ChainTransaction>
   /**

@@ -890,9 +890,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   async sendMessage(
     router_: string,
     destChainSelector: bigint,
-    message: AnyMessage & { fee: bigint },
+    message: AnyMessage & { fee?: bigint },
     opts?: { wallet?: unknown; approveMax?: boolean },
   ): Promise<ChainTransaction> {
+    if (!message.fee) message.fee = await this.getFee(router_, destChainSelector, message)
     const feeToken = message.feeToken ?? ZeroAddress
     const receiver = zeroPadValue(getAddressBytes(message.receiver), 32)
     const data = hexlify(message.data)

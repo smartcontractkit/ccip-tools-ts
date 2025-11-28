@@ -954,9 +954,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async sendMessage(
     router_: string,
     destChainSelector: bigint,
-    message: AnyMessage & { fee: bigint },
+    message: AnyMessage & { fee?: bigint },
     opts?: { wallet?: unknown; approveMax?: boolean },
   ): Promise<ChainTransaction> {
+    if (!message.fee) message.fee = await this.getFee(router_, destChainSelector, message)
     const wallet = await this.getWallet(opts)
 
     const router = new Program(
@@ -964,7 +965,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       new PublicKey(router_),
       new AnchorProvider(this.connection, wallet, { commitment: this.commitment }),
     )
-    const { hash } = await ccipSend(router, destChainSelector, message, opts)
+    const { hash } = await ccipSend(
+      router,
+      destChainSelector,
+      message as AnyMessage & { fee: bigint },
+      opts,
+    )
     return this.getTransaction(hash)
   }
 
