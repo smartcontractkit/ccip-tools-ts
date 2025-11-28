@@ -165,6 +165,10 @@ class MockChain extends Chain {
     return 1000n
   }
 
+  async listFeeTokens() {
+    return {}
+  }
+
   async sendMessage(
     _router: string,
     _destChainSelector: bigint,

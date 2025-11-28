@@ -26,6 +26,7 @@ import { ccipSend, getFee } from './send.ts'
 import {
   type ChainTransaction,
   type LogFilter,
+  type TokenInfo,
   type TokenPoolRemote,
   Chain,
   ChainFamily,
@@ -75,7 +76,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   readonly network: NetworkInfo<typeof ChainFamily.Aptos>
   readonly provider: Aptos
 
-  getTokenInfo: (token: string) => Promise<{ symbol: string; decimals: number; name?: string }>
+  getTokenInfo: (token: string) => Promise<TokenInfo>
   _getAccountModulesNames: (address: string) => Promise<string[]>
 
   constructor(provider: Aptos, network: NetworkInfo) {
@@ -639,6 +640,20 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       }
     }
     throw firstErr ?? new Error(`Could not view 'get_remote_token' in ${tokenPool}`)
+  }
+
+  async listFeeTokens(router: string): Promise<Record<string, TokenInfo>> {
+    const [feeTokens] = await this.provider.view<[string[]]>({
+      payload: {
+        function:
+          `${router.split('::')[0] + '::fee_quoter'}::get_fee_tokens` as `${string}::${string}::get_fee_tokens`,
+      },
+    })
+    return Object.fromEntries(
+      await Promise.all(
+        feeTokens.map(async (token) => [token, await this.getTokenInfo(token)] as const),
+      ),
+    )
   }
 }
 

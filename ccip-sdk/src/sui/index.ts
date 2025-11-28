@@ -189,6 +189,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   async getTokenPoolRemotes(_tokenPool: string): Promise<never> {
     return Promise.reject(new Error('Not implemented'))
   }
+
+  async listFeeTokens(_router: string): Promise<never> {
+    return Promise.reject(new Error('Not implemented'))
+  }
 }
 
 supportedChains[ChainFamily.Sui] = SuiChain

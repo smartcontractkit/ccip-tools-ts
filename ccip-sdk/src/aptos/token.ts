@@ -1,9 +1,8 @@
 import type { Aptos } from '@aptos-labs/ts-sdk'
 
-export async function getTokenInfo(
-  provider: Aptos,
-  token: string,
-): Promise<{ name?: string; symbol: string; decimals: number }> {
+import type { TokenInfo } from '../chain.ts'
+
+export async function getTokenInfo(provider: Aptos, token: string): Promise<TokenInfo> {
   let lastErr: Error | undefined
 
   // First, try to get info from Fungible Asset metadata resource

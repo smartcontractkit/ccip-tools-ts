@@ -42,6 +42,7 @@ import {
   type ChainTransaction,
   type LogFilter,
   type RateLimiterState,
+  type TokenInfo,
   type TokenPoolRemote,
   Chain,
   ChainFamily,
@@ -194,6 +195,14 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           [(address as PublicKey).toString(), commitment] as const,
       },
     )
+
+    this._getRouterConfig = moize.default(this._getRouterConfig.bind(this), {
+      maxArgs: 1,
+    })
+
+    this.listFeeTokens = moize.default(this.listFeeTokens.bind(this), {
+      maxArgs: 1,
+    })
   }
 
   static _getConnection(url: string): Connection {
@@ -206,7 +215,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const config: ConnectionConfig = { commitment: 'confirmed' }
     if (url.includes('.solana.com')) {
       config.fetch = createRateLimitedFetch({
-        maxRequests: 35,
+        maxRequests: 10,
         maxRetries: 3,
         windowMs: 11e3,
       }) // public nodes
@@ -496,15 +505,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   async getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]> {
-    const program = new Program(CCIP_ROUTER_IDL, new PublicKey(router), {
-      connection: this.connection,
-    })
-
-    const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], program.programId)
-
     // feeQuoter is present in router's config, and has a DestChainState account which is updated by
     // the offramps, so we can use it to narrow the search for the offramp
-    const { feeQuoter } = await program.account.config.fetch(configPda)
+    const { feeQuoter } = await this._getRouterConfig(router)
 
     const [feeQuoterDestChainStateAccountAddress] = PublicKey.findProgramAddressSync(
       [Buffer.from('dest_chain'), toLeArray(sourceChainSelector, 8)],
@@ -559,7 +562,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return config.mint.toString()
   }
 
-  async getTokenInfo(token: string): Promise<{ name?: string; symbol: string; decimals: number }> {
+  async getTokenInfo(token: string): Promise<TokenInfo> {
     const mint = new PublicKey(token)
     const mintInfo = await this.connection.getParsedAccountInfo(mint)
 
@@ -1408,6 +1411,43 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       res.push(mint.toBase58())
     }
     return res
+  }
+
+  async listFeeTokens(router: string): Promise<Record<string, TokenInfo>> {
+    const { feeQuoter } = await this._getRouterConfig(router)
+    const tokenConfigs = await this.connection.getProgramAccounts(feeQuoter, {
+      filters: [
+        {
+          memcmp: {
+            offset: 0,
+            bytes: encodeBase58(
+              BorshAccountsCoder.accountDiscriminator('BillingTokenConfigWrapper'),
+            ),
+          },
+        },
+      ],
+    })
+    return Object.fromEntries(
+      await Promise.all(
+        tokenConfigs.map(async (acc) => {
+          const token = new PublicKey(acc.account.data.subarray(10, 10 + 32))
+          return [token.toBase58(), await this.getTokenInfo(token.toBase58())] as const
+        }),
+      ),
+    )
+  }
+
+  // cached
+  async _getRouterConfig(router: string) {
+    const program = new Program(CCIP_ROUTER_IDL, new PublicKey(router), {
+      connection: this.connection,
+    })
+
+    const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], program.programId)
+
+    // feeQuoter is present in router's config, and has a DestChainState account which is updated by
+    // the offramps, so we can use it to narrow the search for the offramp
+    return program.account.config.fetch(configPda)
   }
 }
 

@@ -55,6 +55,12 @@ export type ChainTransaction = {
   error?: unknown
 }
 
+export type TokenInfo = {
+  readonly symbol: string
+  readonly decimals: number
+  readonly name?: string
+}
+
 export type RateLimiterState = {
   tokens: bigint
   capacity: bigint
@@ -184,7 +190,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param token - Token address
    * @returns Token symbol and decimals, and optionally name
    */
-  abstract getTokenInfo(token: string): Promise<{ symbol: string; decimals: number; name?: string }>
+  abstract getTokenInfo(token: string): Promise<TokenInfo>
   /**
    * Fetch TokenAdminRegistry configured in a given OnRamp, Router, etc
    * Needed to map a source token to its dest counterparts
@@ -315,6 +321,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     tokenPool: string,
     remoteChainSelector?: bigint,
   ): Promise<Record<string, TokenPoolRemote>>
+
+  /**
+   * Fetch list and info of supported feeTokens
+   * @param router address on this chain
+   * @returns mapping of token addresses to respective TokenInfo objects
+   */
+  abstract listFeeTokens(router: string): Promise<Record<string, TokenInfo>>
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type

@@ -48,6 +48,7 @@ import {
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
+import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
@@ -74,6 +75,7 @@ import {
   parseTypeAndVersion,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
+import type FeeQuoter_ABI from './abi/FeeQuoter_1_6.ts'
 import type TokenPool_1_5_ABI from './abi/LockReleaseTokenPool_1_5.ts'
 import type TokenPool_ABI from './abi/LockReleaseTokenPool_1_6_1.ts'
 import EVM2EVMOffRamp_1_2_ABI from './abi/OffRamp_1_2.ts'
@@ -102,7 +104,6 @@ import {
   parseSourceTokenData,
 } from './messages.ts'
 import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
-import type { LeafHasher } from '../hasher/common.ts'
 
 const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 
@@ -812,22 +813,25 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
+  async _getSomeOnRampFor(router: string): Promise<string> {
+    // when given a router, we take any onRamp we can find, as usually they all use same registry
+    const someOtherNetwork = this.network.isTestnet
+      ? this.network.name === 'ethereum-testnet-sepolia'
+        ? 'avalanche-testnet-fuji'
+        : 'ethereum-testnet-sepolia'
+      : this.network.name === 'ethereum-mainnet'
+        ? 'avalanche-mainnet'
+        : 'ethereum-mainnet'
+    return this.getOnRampForRouter(router, networkInfo(someOtherNetwork).chainSelector)
+  }
+
   async getTokenAdminRegistryFor(address: string): Promise<string> {
-    // eslint-disable-next-line prefer-const
     let [type, version, typeAndVersion] = await this.typeAndVersion(address)
     if (type === 'TokenAdminRegistry') {
       return address
     } else if (type === 'Router') {
-      // when given a router, we take any onRamp we can find, as usually they all use same registry
-      const someOtherNetwork = this.network.isTestnet
-        ? this.network.name === 'ethereum-testnet-sepolia'
-          ? 'avalanche-testnet-fuji'
-          : 'ethereum-testnet-sepolia'
-        : this.network.name === 'ethereum-mainnet'
-          ? 'avalanche-mainnet'
-          : 'ethereum-mainnet'
-      address = await this.getOnRampForRouter(address, networkInfo(someOtherNetwork).chainSelector)
-      ;[type, version] = await this.typeAndVersion(address)
+      address = await this._getSomeOnRampFor(address)
+      ;[type, version, typeAndVersion] = await this.typeAndVersion(address)
     } else if (!type.includes('Ramp')) {
       throw new Error(`Not a Router, Ramp or TokenAdminRegistry: ${address} is "${typeAndVersion}"`)
     }
@@ -841,9 +845,31 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ? interfaces.OnRamp_v1_6
           : interfaces.OffRamp_v1_6,
       this.provider,
-    ) as unknown as TypedContract<typeof OnRamp_1_6_ABI>
+    ) as unknown as TypedContract<typeof OnRamp_1_6_ABI | typeof OffRamp_1_6_ABI>
     const { tokenAdminRegistry } = await contract.getStaticConfig()
     return tokenAdminRegistry as string
+  }
+
+  async getFeeQuoterFor(address: string): Promise<string> {
+    let [type, version, typeAndVersion] = await this.typeAndVersion(address)
+    if (type === 'FeeQuoter') {
+      return address
+    } else if (type === 'Router') {
+      address = await this._getSomeOnRampFor(address)
+      ;[type, version, typeAndVersion] = await this.typeAndVersion(address)
+    } else if (!type.includes('Ramp')) {
+      throw new Error(`Not a Router, Ramp or FeeQuoter: ${address} is "${typeAndVersion}"`)
+    }
+    if (version < CCIPVersion.V1_6)
+      throw new Error(`Version < v1.6 doesn't have feeQuoter: got=${version}`)
+
+    const contract = new Contract(
+      address,
+      type.includes('OnRamp') ? interfaces.OnRamp_v1_6 : interfaces.OffRamp_v1_6,
+      this.provider,
+    ) as unknown as TypedContract<typeof OnRamp_1_6_ABI | typeof OffRamp_1_6_ABI>
+    const { feeQuoter } = await contract.getDynamicConfig()
+    return feeQuoter as string
   }
 
   async getFee(router_: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint> {
@@ -1188,6 +1214,47 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
               ] as const,
           ),
         ),
+    )
+  }
+  async listFeeTokens(router: string) {
+    const onRamp = await this._getSomeOnRampFor(router)
+    const [_, version] = await this.typeAndVersion(onRamp)
+    let tokens
+    let onRampABI
+    switch (version) {
+      case CCIPVersion.V1_2:
+        onRampABI = EVM2EVMOnRamp_1_2_ABI
+      // falls through
+      case CCIPVersion.V1_5: {
+        onRampABI ??= EVM2EVMOnRamp_1_5_ABI
+        const contract = new Contract(onRamp, onRampABI, this.provider) as unknown as TypedContract<
+          typeof onRampABI
+        >
+        tokens = await Promise.all([
+          this.getNativeTokenForRouter(router),
+          contract.getStaticConfig().then(({ linkToken }) => linkToken),
+        ])
+        break
+      }
+      case CCIPVersion.V1_6: {
+        const feeQuoter = await this.getFeeQuoterFor(onRamp)
+        const contract = new Contract(
+          feeQuoter,
+          interfaces.FeeQuoter,
+          this.provider,
+        ) as unknown as TypedContract<typeof FeeQuoter_ABI>
+        tokens = await contract.getFeeTokens()
+        break
+      }
+      default:
+        throw new Error(`Unsupported version: ${version}`)
+    }
+    return Object.fromEntries(
+      await Promise.all(
+        tokens.map(
+          async (token) => [token as string, await this.getTokenInfo(token as string)] as const,
+        ),
+      ),
     )
   }
 }

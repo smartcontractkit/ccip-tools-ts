@@ -4,7 +4,10 @@ export {
   type ChainGetter,
   type ChainStatic,
   type ChainTransaction,
+  type LogFilter,
   type RateLimiterState,
+  type TokenInfo,
+  type TokenPoolRemote,
   ChainFamily,
 } from './chain.ts'
 export { EVMChain } from './evm/index.ts'
