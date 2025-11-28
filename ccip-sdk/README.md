@@ -105,5 +105,5 @@ const tx = await source.sendMessage(
   { ...message, fee },
   { wallet: process.env['SOLANA_PRIVATE_KEY'] },
 )
-const messageId = (await fetchCCIPMessagesInTx(tx))[0].header.messageId
+const messageId = (await fetchCCIPMessagesInTx(tx))[0].message.header.messageId
 ```

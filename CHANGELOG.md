@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.90.0] - 2025-11-28 - Pre-release
+- Major overhaul of the tool, split into [ccip-sdk](./ccip-sdk) and [ccip-cli](./ccip-cli) packages
+- SDK now exposes Chain family specific classes, with initial full support to EVM, Solana and Aptos
+- NodeJS specific bits moved out of SDK and into the CLI, SDK now is environment agnostic
+- CLI implements Ledger support for all 3 chains
+- See each package's README for more details
+
 ## [0.2.9] - 2025-08-20
 - aptos: improved some utilities for Aptos chain family (#50)
 - fix: `manualExec --sender-queue` for large queues (#51)
