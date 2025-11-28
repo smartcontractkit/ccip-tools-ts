@@ -52,7 +52,7 @@ jobs:
       - run: npm ci
 
       - name: Publish @chainlink/ccip-sdk
-        run: npm -w ccip-sdk publish --verbose
+        run: npm -w ccip-sdk publish --access public --verbose
 
       - name: Publish @chainlink/ccip-cli
-        run: npm -w ccip-cli publish --verbose
+        run: npm -w ccip-cli publish --access public --verbose
