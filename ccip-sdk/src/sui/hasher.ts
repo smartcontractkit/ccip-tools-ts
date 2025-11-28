@@ -1,7 +1,7 @@
 import { concat, id, keccak256, zeroPadValue } from 'ethers'
 
 import { encodeNumber, encodeRawBytes } from '../aptos/utils.ts'
-import { parseExtraArgs } from '../extra-args.ts'
+import { decodeExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
@@ -36,7 +36,7 @@ export function hashV16SuiMessage(
   if ('tokenReceiver' in message) {
     ;({ tokenReceiver, gasLimit } = message)
   } else {
-    const parsedArgs = parseExtraArgs(message.extraArgs)
+    const parsedArgs = decodeExtraArgs(message.extraArgs)
     if (!parsedArgs || parsedArgs._tag !== 'SuiExtraArgsV1')
       throw new Error('Invalid extraArgs for Sui message, must be SUIExtraArgsV1')
     ;({ tokenReceiver, gasLimit } = parsedArgs)

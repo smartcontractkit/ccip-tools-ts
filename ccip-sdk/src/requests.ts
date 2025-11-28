@@ -11,7 +11,7 @@ import {
   ChainFamily,
 } from './chain.ts'
 import type { EVMChain } from './evm/index.ts'
-import { parseExtraArgs } from './extra-args.ts'
+import { decodeExtraArgs } from './extra-args.ts'
 import { supportedChains } from './supported-chains.ts'
 import type { CCIPMessage, CCIPRequest, CCIPVersion, Log_ } from './types.ts'
 import { convertKeysToCamelCase, decodeAddress, leToBigInt, networkInfo } from './utils.ts'
@@ -76,7 +76,7 @@ function decodeJsonMessage(data: Record<string, unknown>) {
   }
 
   if (data_.extraArgs) {
-    const extraArgs = parseExtraArgs(data_.extraArgs ?? '', sourceNetwork.family)
+    const extraArgs = decodeExtraArgs(data_.extraArgs ?? '', sourceNetwork.family)
     if (extraArgs) {
       const { _tag, ...rest } = extraArgs
       Object.assign(data_, rest)
@@ -116,7 +116,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
  * @param tx - TransactionReceipt to search in
  * @returns CCIP messages in the transaction (at least one)
  **/
-export async function fetchCCIPMessagesInTx(tx: ChainTransaction): Promise<CCIPRequest[]> {
+export async function fetchCCIPRequestsInTx(tx: ChainTransaction): Promise<CCIPRequest[]> {
   const source = tx.chain
   const txHash = tx.hash
   const timestamp = tx.timestamp

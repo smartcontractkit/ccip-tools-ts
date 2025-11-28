@@ -13,7 +13,7 @@ import {
 
 import { defaultAbiCoder, interfaces } from './const.ts'
 import { ChainFamily } from '../chain.ts'
-import { parseExtraArgs } from '../extra-args.ts'
+import { decodeExtraArgs } from '../extra-args.ts'
 
 /**
  * Get error data from an error object, if possible
@@ -150,7 +150,7 @@ export function recursiveParseError(
     return [[key, data]]
   }
   try {
-    const parsed = parseExtraArgs(data, ChainFamily.EVM)
+    const parsed = decodeExtraArgs(data, ChainFamily.EVM)
     if (parsed) {
       const { _tag, ...rest } = parsed
       return [[key, _tag], ...Object.entries(rest).map(([k, v]) => [j(key, k), v] as const)]

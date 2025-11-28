@@ -1,6 +1,6 @@
 import { concat, id, keccak256, toBeHex, zeroPadValue } from 'ethers'
 
-import { parseExtraArgs } from '../extra-args.ts'
+import { decodeExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
 import type { CCIPMessage, CCIPVersion, DeepReadonly } from '../types.ts'
 import { getAddressBytes, getDataBytes, networkInfo } from '../utils.ts'
@@ -94,7 +94,7 @@ export function getV16LeafHasher(
 
   return (message: DeepReadonly<CCIPMessage<typeof CCIPVersion.V1_6>>): string => {
     console.debug('Message', message)
-    const parsedArgs = parseExtraArgs(
+    const parsedArgs = decodeExtraArgs(
       message.extraArgs,
       networkInfo(message.header.sourceChainSelector).family,
     )

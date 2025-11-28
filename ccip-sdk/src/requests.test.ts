@@ -9,7 +9,7 @@ import {
   decodeMessage,
   fetchAllMessagesInBatch,
   fetchCCIPMessageById,
-  fetchCCIPMessagesInTx,
+  fetchCCIPRequestsInTx,
   fetchRequestsForSender,
 } from './requests.ts'
 import { type CCIPMessage, type CCIPRequest, type Lane, type Log_, CCIPVersion } from './types.ts'
@@ -164,7 +164,7 @@ describe('fetchCCIPMessagesInTx', () => {
       from: '0x0000000000000000000000000000000000000001',
     }
 
-    const result = await fetchCCIPMessagesInTx(mockTx)
+    const result = await fetchCCIPRequestsInTx(mockTx)
     assert.equal(result.length, 1)
     assert.equal(result[0].message.header.sequenceNumber, 1n)
     assert.equal(result[0].timestamp, 1234567890)
@@ -202,7 +202,7 @@ describe('fetchCCIPMessagesInTx', () => {
     }
 
     await assert.rejects(
-      async () => await fetchCCIPMessagesInTx(mockTx),
+      async () => await fetchCCIPRequestsInTx(mockTx),
       /Could not find any CCIPSendRequested message in tx: 0x123/,
     )
 

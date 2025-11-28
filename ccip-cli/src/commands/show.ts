@@ -6,7 +6,7 @@ import {
   bigIntReplacer,
   discoverOffRamp,
   fetchCCIPMessageById,
-  fetchCCIPMessagesInTx,
+  fetchCCIPRequestsInTx,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
@@ -77,7 +77,7 @@ async function showRequests(argv: Parameters<typeof handler>[0], destroy: Promis
     getChain = getChain_
     tx = await tx$
     source = tx.chain
-    request = await selectRequest(await fetchCCIPMessagesInTx(tx), 'to know more', argv)
+    request = await selectRequest(await fetchCCIPRequestsInTx(tx), 'to know more', argv)
   }
 
   const offchainTokenData = await source.fetchOffchainTokenData(request)

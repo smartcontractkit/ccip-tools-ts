@@ -45,7 +45,7 @@ export function encodeExtraArgs(args: ExtraArgs, from: ChainFamily = ChainFamily
  * @param data - extra arguments bytearray data
  * @returns extra arguments object if found
  **/
-export function parseExtraArgs(
+export function decodeExtraArgs(
   data: BytesLike,
   from?: ChainFamily,
 ):

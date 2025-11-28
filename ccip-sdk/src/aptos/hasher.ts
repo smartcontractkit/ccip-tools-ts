@@ -1,6 +1,6 @@
 import { concat, id, keccak256, zeroPadValue } from 'ethers'
 
-import { parseExtraArgs } from '../extra-args.ts'
+import { decodeExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import { getAddressBytes, networkInfo } from '../utils.ts'
@@ -34,7 +34,7 @@ export function hashV16AptosMessage(
 ): string {
   let gasLimit
   if (!('gasLimit' in message)) {
-    const parsedArgs = parseExtraArgs(
+    const parsedArgs = decodeExtraArgs(
       message.extraArgs,
       networkInfo(message.header.sourceChainSelector).family,
     )

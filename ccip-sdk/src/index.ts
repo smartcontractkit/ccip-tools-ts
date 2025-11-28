@@ -18,15 +18,15 @@ export {
   type ExtraArgs,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
+  decodeExtraArgs,
   encodeExtraArgs,
-  parseExtraArgs,
 } from './extra-args.ts'
 export { estimateExecGasForRequest } from './gas.ts'
 export {
   decodeMessage,
   fetchAllMessagesInBatch,
   fetchCCIPMessageById,
-  fetchCCIPMessagesInTx,
+  fetchCCIPRequestsInTx,
   fetchRequestsForSender,
   sourceToDestTokenAmounts,
 } from './requests.ts'

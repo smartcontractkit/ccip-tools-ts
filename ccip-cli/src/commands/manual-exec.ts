@@ -10,7 +10,7 @@ import {
   discoverOffRamp,
   estimateExecGasForRequest,
   fetchAllMessagesInBatch,
-  fetchCCIPMessagesInTx,
+  fetchCCIPRequestsInTx,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
@@ -118,7 +118,7 @@ async function manualExec(
   const [getChain, tx$] = fetchChainsFromRpcs(argv, argv.txHash, destroy)
   const tx = await tx$
   const source = tx.chain
-  const request = await selectRequest(await fetchCCIPMessagesInTx(tx), 'to know more', argv)
+  const request = await selectRequest(await fetchCCIPRequestsInTx(tx), 'to know more', argv)
 
   switch (argv.format) {
     case Format.log: {

@@ -11,7 +11,7 @@ import {
   zeroPadValue,
 } from 'ethers'
 
-import { parseExtraArgs } from '../extra-args.ts'
+import { decodeExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/index.ts'
 import { type CCIPMessage, type DeepReadonly, type Lane, CCIPVersion } from '../types.ts'
 import { getAddressBytes, getDataBytes, networkInfo, toLeArray } from '../utils.ts'
@@ -51,7 +51,7 @@ export function getV16SolanaLeafHasher(lane: Lane): LeafHasher<typeof CCIPVersio
         accounts: message.accounts,
       }
     } else {
-      parsedArgs = parseExtraArgs(message.extraArgs, networkInfo(lane.sourceChainSelector).family)
+      parsedArgs = decodeExtraArgs(message.extraArgs, networkInfo(lane.sourceChainSelector).family)
       if (!parsedArgs || parsedArgs._tag !== 'SVMExtraArgsV1')
         throw new Error('Invalid extraArgs, not SVMExtraArgsV1')
     }

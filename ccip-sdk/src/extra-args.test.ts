@@ -6,7 +6,7 @@ import { dataSlice, getNumber } from 'ethers'
 // Import index.ts to ensure all Chain classes are loaded and registered
 import './index.ts'
 import { ChainFamily } from './chain.ts'
-import { encodeExtraArgs, parseExtraArgs } from './extra-args.ts'
+import { decodeExtraArgs, encodeExtraArgs } from './extra-args.ts'
 
 describe('encodeExtraArgs', () => {
   describe('EVM extra args', () => {
@@ -79,7 +79,7 @@ describe('encodeExtraArgs', () => {
 describe('parseExtraArgs', () => {
   describe('EVM extra args', () => {
     it('should parse v1 args', () => {
-      const res = parseExtraArgs(
+      const res = decodeExtraArgs(
         '0x97a657c9000000000000000000000000000000000000000000000000000000000000000a',
         ChainFamily.EVM,
       )
@@ -87,7 +87,7 @@ describe('parseExtraArgs', () => {
     })
 
     it('should parse v2 args with allowOutOfOrderExecution true', () => {
-      const res = parseExtraArgs(
+      const res = decodeExtraArgs(
         '0x181dcf10000000000000000000000000000000000000000000000000000000000000000b0000000000000000000000000000000000000000000000000000000000000001',
         ChainFamily.EVM,
       )
@@ -99,7 +99,7 @@ describe('parseExtraArgs', () => {
     })
 
     it('should parse v2 args with allowOutOfOrderExecution false', () => {
-      const res = parseExtraArgs(
+      const res = decodeExtraArgs(
         '0x181dcf10000000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000',
         ChainFamily.EVM,
       )
@@ -113,7 +113,10 @@ describe('parseExtraArgs', () => {
 
   describe('Solana extra args (compact encoding)', () => {
     it('should parse Solana-encoded extraArgs case', () => {
-      const res = parseExtraArgs('0x181dcf10400d030000000000000000000000000000', ChainFamily.Solana)
+      const res = decodeExtraArgs(
+        '0x181dcf10400d030000000000000000000000000000',
+        ChainFamily.Solana,
+      )
       assert.deepEqual(res, {
         _tag: 'EVMExtraArgsV2',
         gasLimit: 200000n,
@@ -124,7 +127,7 @@ describe('parseExtraArgs', () => {
 
   describe('Aptos extra args (compact encoding)', () => {
     it('should parse Aptos-encoded extraArgs case', () => {
-      const res = parseExtraArgs(
+      const res = decodeExtraArgs(
         '0x181dcf10e09304000000000000000000000000000000000000000000000000000000000000',
         ChainFamily.Aptos,
       )
@@ -138,14 +141,17 @@ describe('parseExtraArgs', () => {
 
   describe('auto-detect chain family', () => {
     it('should auto-detect EVM v1 args', () => {
-      const res = parseExtraArgs(
+      const res = decodeExtraArgs(
         '0x97a657c9000000000000000000000000000000000000000000000000000000000000000a',
       )
       assert.deepEqual(res, { _tag: 'EVMExtraArgsV1', gasLimit: 10n })
     })
 
     it('should auto-detect Solana-encoded v2 args', () => {
-      const res = parseExtraArgs('0x181dcf10400d030000000000000000000000000000', ChainFamily.Solana)
+      const res = decodeExtraArgs(
+        '0x181dcf10400d030000000000000000000000000000',
+        ChainFamily.Solana,
+      )
       assert.deepEqual(res, {
         _tag: 'EVMExtraArgsV2',
         gasLimit: 200000n,
@@ -154,11 +160,11 @@ describe('parseExtraArgs', () => {
     })
 
     it('should throw on unknown tag', () => {
-      assert.throws(() => parseExtraArgs('0x12345678'), /Could not parse extraArgs/)
+      assert.throws(() => decodeExtraArgs('0x12345678'), /Could not parse extraArgs/)
     })
 
     it('should throw on empty data', () => {
-      assert.throws(() => parseExtraArgs('0x'))
+      assert.throws(() => decodeExtraArgs('0x'))
     })
   })
 
@@ -166,28 +172,28 @@ describe('parseExtraArgs', () => {
     it('should round-trip EVM v1 args', () => {
       const original = { gasLimit: 123_456n }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
-      const decoded = parseExtraArgs(encoded, ChainFamily.EVM)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM)
       assert.deepEqual(decoded, { ...original, _tag: 'EVMExtraArgsV1' })
     })
 
     it('should round-trip EVM v2 args', () => {
       const original = { gasLimit: 250_000n, allowOutOfOrderExecution: true }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
-      const decoded = parseExtraArgs(encoded, ChainFamily.EVM)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM)
       assert.deepEqual(decoded, { ...original, _tag: 'EVMExtraArgsV2' })
     })
 
     it('should round-trip Solana-encoded v2 args', () => {
       const original = { gasLimit: 500_000n, allowOutOfOrderExecution: true }
       const encoded = encodeExtraArgs(original, ChainFamily.Solana)
-      const decoded = parseExtraArgs(encoded, ChainFamily.Solana)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.Solana)
       assert.deepEqual(decoded, { ...original, _tag: 'EVMExtraArgsV2' })
     })
 
     it('should round-trip Aptos-encoded v2 args', () => {
       const original = { gasLimit: 300_000n, allowOutOfOrderExecution: false }
       const encoded = encodeExtraArgs(original, ChainFamily.Aptos)
-      const decoded = parseExtraArgs(encoded, ChainFamily.Aptos)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.Aptos)
       assert.deepEqual(decoded, { ...original, _tag: 'EVMExtraArgsV2' })
     })
   })

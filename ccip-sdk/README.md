@@ -89,7 +89,7 @@ console.log(messages[0])
 
 ### Sending a message
 ```ts
-import { SolanaChain, AnyMessage, fetchCCIPMessagesInTx, networkInfo } from '@chainlink/ccip-sdk'
+import { SolanaChain, AnyMessage, fetchCCIPRequestsInTx, networkInfo } from '@chainlink/ccip-sdk'
 const source = await SolanaChain.fromUrl('https://api.mainnet-beta.solana.com')
 const router = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C' // https://docs.chain.link/ccip/directory/mainnet
 const dest = networkInfo('ethereum-mainnet')
@@ -105,5 +105,5 @@ const tx = await source.sendMessage(
   { ...message, fee },
   { wallet: process.env['SOLANA_PRIVATE_KEY'] },
 )
-const messageId = (await fetchCCIPMessagesInTx(tx))[0].message.header.messageId
+const messageId = (await fetchCCIPRequestsInTx(tx))[0].message.header.messageId
 ```
