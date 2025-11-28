@@ -88,6 +88,19 @@ async function getSupportedTokens(argv: Parameters<typeof handler>[0], destroy: 
 
   let info, tokenPool, poolConfigs, registryConfig
   if (registry && !argv.token) {
+    const feeTokens = await source.listFeeTokens(argv.address)
+    switch (argv.format) {
+      case Format.pretty:
+        console.info('Fee Tokens:')
+        console.table(feeTokens)
+        break
+      case Format.json:
+        console.log(JSON.stringify(feeTokens, null, 2))
+        break
+      default:
+        console.log('feeTokens:', feeTokens)
+    }
+
     // router + interactive list
     info = await listTokens(source, registry, argv)
     if (!info) return // format != pretty

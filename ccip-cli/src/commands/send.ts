@@ -1,6 +1,7 @@
 import {
   type AnyMessage,
   type CCIPVersion,
+  type ChainStatic,
   type EVMChain,
   type ExtraArgs,
   ChainFamily,
@@ -77,7 +78,7 @@ export const builder = (yargs: Argv) =>
       'fee-token': {
         type: 'string',
         describe:
-          'Address of the fee token (e.g. LINK address on source); if not provided, will pay in native',
+          'Address or symbol of the fee token (e.g. LINK address on source); if not provided, will pay in native',
       },
       'transfer-tokens': {
         alias: 't',
@@ -240,26 +241,46 @@ async function sendMessage(
     ...(accounts ? { accounts, accountIsWritableBitmap } : {}),
   }
 
+  let feeToken, feeTokenInfo
+  if (argv.feeToken) {
+    try {
+      feeToken = (source.constructor as ChainStatic).getAddress(argv.feeToken)
+      feeTokenInfo = await source.getTokenInfo(feeToken)
+    } catch (_) {
+      const feeTokens = await source.listFeeTokens(argv.router)
+      console.debug('supported feeTokens:', feeTokens)
+      for (const [token, info] of Object.entries(feeTokens)) {
+        if (info.symbol === 'UNKNOWN' || info.symbol !== argv.feeToken) continue
+        feeToken = token
+        feeTokenInfo = info
+        break
+      }
+      if (!feeTokenInfo) throw new Error(`Fee token "${argv.feeToken}" not found`)
+    }
+  } else {
+    const nativeToken = await source.getNativeTokenForRouter(argv.router)
+    feeTokenInfo = await source.getTokenInfo(nativeToken)
+  }
+
   const message: AnyMessage = {
     receiver,
     data,
     extraArgs: extraArgs as ExtraArgs,
-    feeToken: argv.feeToken, // feeToken==ZeroAddress means native
+    feeToken, // feeToken==ZeroAddress means native
     tokenAmounts,
   }
 
   // calculate fee
   const fee = await source.getFee(argv.router, destNetwork.chainSelector, message)
-  const nativeToken = await source.getNativeTokenForRouter(argv.router)
-  const { symbol: nativeTokenSymbol, decimals: nativeDecimals } =
-    await source.getTokenInfo(nativeToken)
 
   console.info(
     'Fee:',
     fee,
     '=',
-    formatUnits(fee, nativeDecimals),
-    nativeTokenSymbol.startsWith('W') ? nativeTokenSymbol.substring(1) : nativeTokenSymbol,
+    formatUnits(fee, feeTokenInfo.decimals),
+    !argv.feeToken && feeTokenInfo.symbol.startsWith('W')
+      ? feeTokenInfo.symbol.substring(1)
+      : feeTokenInfo.symbol,
   )
   if (argv.onlyGetFee) return
 
