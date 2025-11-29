@@ -649,7 +649,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     throw firstErr ?? new Error(`Could not view 'get_remote_token' in ${tokenPool}`)
   }
 
-  async listFeeTokens(router: string): Promise<Record<string, TokenInfo>> {
+  async getFeeTokens(router: string): Promise<Record<string, TokenInfo>> {
     const [feeTokens] = await this.provider.view<[string[]]>({
       payload: {
         function:

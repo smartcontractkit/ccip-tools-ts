@@ -247,7 +247,7 @@ async function sendMessage(
       feeToken = (source.constructor as ChainStatic).getAddress(argv.feeToken)
       feeTokenInfo = await source.getTokenInfo(feeToken)
     } catch (_) {
-      const feeTokens = await source.listFeeTokens(argv.router)
+      const feeTokens = await source.getFeeTokens(argv.router)
       console.debug('supported feeTokens:', feeTokens)
       for (const [token, info] of Object.entries(feeTokens)) {
         if (info.symbol === 'UNKNOWN' || info.symbol !== argv.feeToken) continue

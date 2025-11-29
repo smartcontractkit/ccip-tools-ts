@@ -172,6 +172,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       isPromise: true,
       maxArgs: 1,
     })
+    this.getFeeTokens = moize.default(this.getFeeTokens.bind(this), { isPromise: true, maxArgs: 1 })
   }
 
   // overwrite EVMChain.getWallet to implement custom wallet loading
@@ -1217,7 +1218,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ),
     )
   }
-  async listFeeTokens(router: string) {
+  async getFeeTokens(router: string) {
     const onRamp = await this._getSomeOnRampFor(router)
     const [_, version] = await this.typeAndVersion(onRamp)
     let tokens

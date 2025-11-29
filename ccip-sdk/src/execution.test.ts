@@ -172,7 +172,7 @@ class MockChain extends Chain {
     return 1000n
   }
 
-  async listFeeTokens() {
+  async getFeeTokens() {
     return {}
   }
 
