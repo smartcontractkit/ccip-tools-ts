@@ -295,7 +295,7 @@ export function convertKeysToCamelCase(
   return converted
 }
 
-export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms).unref())
 
 export function parseTypeAndVersion(
   typeAndVersion: string,
