@@ -419,12 +419,19 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   async sendMessage(
     router: string,
     destChainSelector: bigint,
-    message: AnyMessage & { fee: bigint },
+    message: AnyMessage & { fee?: bigint },
     opts?: { wallet?: unknown; approveMax?: boolean },
   ): Promise<ChainTransaction> {
+    if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
     const account = await this.getWallet(opts)
 
-    const hash = await ccipSend(this.provider, account, router, destChainSelector, message)
+    const hash = await ccipSend(
+      this.provider,
+      account,
+      router,
+      destChainSelector,
+      message as AnyMessage & { fee: bigint },
+    )
 
     // Return the ChainTransaction by fetching it
     return this.getTransaction(hash)
@@ -642,7 +649,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     throw firstErr ?? new Error(`Could not view 'get_remote_token' in ${tokenPool}`)
   }
 
-  async listFeeTokens(router: string): Promise<Record<string, TokenInfo>> {
+  async getFeeTokens(router: string): Promise<Record<string, TokenInfo>> {
     const [feeTokens] = await this.provider.view<[string[]]>({
       payload: {
         function:

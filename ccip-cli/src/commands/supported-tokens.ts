@@ -88,7 +88,7 @@ async function getSupportedTokens(argv: Parameters<typeof handler>[0], destroy: 
 
   let info, tokenPool, poolConfigs, registryConfig
   if (registry && !argv.token) {
-    const feeTokens = await source.listFeeTokens(argv.address)
+    const feeTokens = await source.getFeeTokens(argv.address)
     switch (argv.format) {
       case Format.pretty:
         console.info('Fee Tokens:')

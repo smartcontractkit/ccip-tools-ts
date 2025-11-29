@@ -200,7 +200,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       maxArgs: 1,
     })
 
-    this.listFeeTokens = moize.default(this.listFeeTokens.bind(this), {
+    this.getFeeTokens = moize.default(this.getFeeTokens.bind(this), {
       maxArgs: 1,
     })
   }
@@ -954,9 +954,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async sendMessage(
     router_: string,
     destChainSelector: bigint,
-    message: AnyMessage & { fee: bigint },
+    message: AnyMessage & { fee?: bigint },
     opts?: { wallet?: unknown; approveMax?: boolean },
   ): Promise<ChainTransaction> {
+    if (!message.fee) message.fee = await this.getFee(router_, destChainSelector, message)
     const wallet = await this.getWallet(opts)
 
     const router = new Program(
@@ -964,7 +965,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       new PublicKey(router_),
       new AnchorProvider(this.connection, wallet, { commitment: this.commitment }),
     )
-    const { hash } = await ccipSend(router, destChainSelector, message, opts)
+    const { hash } = await ccipSend(
+      router,
+      destChainSelector,
+      message as AnyMessage & { fee: bigint },
+      opts,
+    )
     return this.getTransaction(hash)
   }
 
@@ -1413,7 +1419,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return res
   }
 
-  async listFeeTokens(router: string): Promise<Record<string, TokenInfo>> {
+  async getFeeTokens(router: string): Promise<Record<string, TokenInfo>> {
     const { feeQuoter } = await this._getRouterConfig(router)
     const tokenConfigs = await this.connection.getProgramAccounts(feeQuoter, {
       filters: [
@@ -1430,8 +1436,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return Object.fromEntries(
       await Promise.all(
         tokenConfigs.map(async (acc) => {
-          const token = new PublicKey(acc.account.data.subarray(10, 10 + 32))
-          return [token.toBase58(), await this.getTokenInfo(token.toBase58())] as const
+          const token = new PublicKey(acc.account.data.subarray(10, 10 + 32)).toBase58()
+          return [token, await this.getTokenInfo(token)] as const
         }),
       ),
     )

@@ -14,10 +14,10 @@ compatible RPCs for each involved network.
 To install it from latest NpmJS release, do:
 
 ```sh
-npm install -g @smartcontractkit/ccip-cli
+npm install -g @chainlink/ccip-cli
 ccip-cli --help
 # or
-npx @smartcontractkit/ccip-cli --help
+npx @chainlink/ccip-cli --help
 ```
 
 Or run it directly from github or a local clone of the repo (useful for local development):
@@ -29,8 +29,6 @@ npm install  # install dependencies
 ./ccip-cli/ccip-cli --help  # shell script to run `ccip-cli/src/index.ts`
 # or
 npx /path/to/repo/ccip-tools-ts/ccip-cli --help  # run from local repo directly
-# or
-npx github:smartcontractkit/ccip-tools-ts/tree/main/ccip-cli --help  # or with npx from github
 ```
 
 > [!NOTE]

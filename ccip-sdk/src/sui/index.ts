@@ -190,7 +190,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  async listFeeTokens(_router: string): Promise<never> {
+  async getFeeTokens(_router: string): Promise<never> {
     return Promise.reject(new Error('Not implemented'))
   }
 }

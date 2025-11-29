@@ -41,7 +41,7 @@ export type LogFilter = {
   endBlock?: number
   endBefore?: string
   address?: string
-  topics?: string[] | string[][]
+  topics?: (string | string[])[]
   page?: number
 }
 
@@ -80,7 +80,7 @@ export type TokenPoolRemote = {
  */
 export abstract class Chain<F extends ChainFamily = ChainFamily> {
   abstract readonly network: NetworkInfo<F>
-  abstract destroy?(): Promise<void>
+  destroy?(): void | Promise<void>
 
   [util.inspect.custom]() {
     return `${this.constructor.name} { ${this.network.name} }`
@@ -221,7 +221,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   abstract sendMessage(
     router: string,
     destChainSelector: bigint,
-    message: AnyMessage & { fee: bigint },
+    message: AnyMessage & { fee?: bigint },
     opts?: { wallet?: unknown; approveMax?: boolean },
   ): Promise<ChainTransaction>
   /**
@@ -327,7 +327,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param router address on this chain
    * @returns mapping of token addresses to respective TokenInfo objects
    */
-  abstract listFeeTokens(router: string): Promise<Record<string, TokenInfo>>
+  abstract getFeeTokens(router: string): Promise<Record<string, TokenInfo>>
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
