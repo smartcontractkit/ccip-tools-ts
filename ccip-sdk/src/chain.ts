@@ -41,7 +41,7 @@ export type LogFilter = {
   endBlock?: number
   endBefore?: string
   address?: string
-  topics?: string[] | string[][]
+  topics?: (string | string[])[]
   page?: number
 }
 

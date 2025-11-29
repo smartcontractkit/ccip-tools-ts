@@ -3,6 +3,7 @@ import util from 'util'
 import { parseAbi } from 'abitype'
 import {
   type BytesLike,
+  type Interface,
   type JsonRpcApiProvider,
   type Log,
   type Provider,
@@ -65,12 +66,10 @@ import {
   CCIPVersion,
 } from '../types.ts'
 import {
-  blockRangeGenerator,
   decodeAddress,
   decodeOnRampAddress,
   getAddressBytes,
   getDataBytes,
-  getSomeBlockNumberBefore,
   networkInfo,
   parseTypeAndVersion,
 } from '../utils.ts'
@@ -91,13 +90,13 @@ import {
   DEFAULT_GAS_LIMIT,
   commitsFragments,
   defaultAbiCoder,
-  getAllFragmentsMatchingEvents,
   interfaces,
   receiptsFragments,
   requestsFragments,
 } from './const.ts'
 import { parseData } from './errors.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
+import { getEvmLogs } from './logs.ts'
 import {
   type CCIPMessage_V1_6_EVM,
   type CleanAddressable,
@@ -140,6 +139,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   readonly network: NetworkInfo<typeof ChainFamily.EVM>
   readonly provider: JsonRpcApiProvider
+  readonly destroy$: Promise<void>
 
   constructor(provider: JsonRpcApiProvider, network: NetworkInfo) {
     if (network.family !== ChainFamily.EVM)
@@ -148,11 +148,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     this.network = network
     this.provider = provider
+    this.destroy$ = new Promise<void>((resolve) => (this.destroy = resolve))
+    void this.destroy$.finally(() => provider.destroy())
 
     this.typeAndVersion = moize.default(this.typeAndVersion.bind(this))
-    this.getBlockTimestamp = moize.default(this.getBlockTimestamp.bind(this), {
+    this.provider.getBlock = moize.default(provider.getBlock.bind(provider), {
       maxSize: 100,
-      updateCacheForKey: (key: Key[]) => typeof key[key.length - 1] !== 'number',
+      maxArgs: 1,
+      isPromise: true,
+      updateCacheForKey: ([block]) => typeof block !== 'number',
     })
     this.getTransaction = moize.default(this.getTransaction.bind(this), {
       maxSize: 100,
@@ -260,13 +264,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return this.fromProvider(await this._getProvider(url))
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async destroy(): Promise<void> {
-    this.provider.destroy()
-  }
-
   async getBlockTimestamp(block: number | 'finalized'): Promise<number> {
-    const res = await this.provider.getBlock(block)
+    const res = await this.provider.getBlock(block) // cached
     if (!res) throw new Error(`Block not found: ${block}`)
     return res.timestamp
   }
@@ -286,45 +285,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return chainTx
   }
 
-  async *getLogs(filter: LogFilter): AsyncIterableIterator<Log> {
-    const endBlock = filter.endBlock ?? (await this.provider.getBlockNumber())
-    if (
-      filter.topics?.length &&
-      filter.topics.every((t: string | string[]): t is string => typeof t === 'string')
-    ) {
-      const topics = new Set(
-        filter.topics
-          .filter(isHexString)
-          .concat(Object.keys(getAllFragmentsMatchingEvents(filter.topics)) as `0x${string}`[])
-          .flat(),
-      )
-      if (!topics.size) {
-        // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-        throw new Error(`Could not find matching topics: ${filter.topics}`)
-      }
-      filter.topics = [Array.from(topics)]
-    }
-    if (!filter.startBlock && filter.startTime) {
-      filter.startBlock = await getSomeBlockNumberBefore(
-        this.getBlockTimestamp.bind(this),
-        endBlock,
-        filter.startTime,
-      )
-    }
-    for (const blockRange of blockRangeGenerator({ ...filter, endBlock })) {
-      console.debug('evm getLogs:', {
-        ...blockRange,
-        ...(filter.address ? { address: filter.address } : {}),
-        ...(filter.topics?.length ? { topics: filter.topics } : {}),
-      })
-      const logs = await this.provider.getLogs({
-        ...blockRange,
-        ...(filter.address ? { address: filter.address } : {}),
-        ...(filter.topics?.length ? { topics: filter.topics } : {}),
-      })
-      if (!filter.startBlock) logs.reverse()
-      yield* logs
-    }
+  async *getLogs(filter: LogFilter & { onlyFallback?: boolean }): AsyncIterableIterator<Log> {
+    yield* getEvmLogs(this.provider, filter, this.destroy$)
   }
 
   static decodeMessage(log: {
@@ -1222,20 +1184,30 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const onRamp = await this._getSomeOnRampFor(router)
     const [_, version] = await this.typeAndVersion(onRamp)
     let tokens
-    let onRampABI
+    let onRampIface: Interface
     switch (version) {
       case CCIPVersion.V1_2:
-        onRampABI = EVM2EVMOnRamp_1_2_ABI
+        onRampIface = interfaces.EVM2EVMOnRamp_v1_2
       // falls through
       case CCIPVersion.V1_5: {
-        onRampABI ??= EVM2EVMOnRamp_1_5_ABI
-        const contract = new Contract(onRamp, onRampABI, this.provider) as unknown as TypedContract<
-          typeof onRampABI
-        >
-        tokens = await Promise.all([
-          this.getNativeTokenForRouter(router),
-          contract.getStaticConfig().then(({ linkToken }) => linkToken),
-        ])
+        onRampIface ??= interfaces.EVM2EVMOnRamp_v1_5
+        const fragment = onRampIface.getEvent('FeeConfigSet')!
+        const tokens_ = new Set()
+        for await (const log of this.getLogs({
+          address: onRamp,
+          topics: [fragment.topicHash],
+          startBlock: 1,
+          onlyFallback: true,
+        })) {
+          ;(
+            onRampIface.decodeEventLog(fragment, log.data, log.topics) as unknown as {
+              feeConfig: { token: string; enabled: boolean }[]
+            }
+          ).feeConfig.forEach(({ token, enabled }) =>
+            enabled ? tokens_.add(token) : tokens_.delete(token),
+          )
+        }
+        tokens = Array.from(tokens_)
         break
       }
       case CCIPVersion.V1_6: {
