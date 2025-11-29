@@ -416,7 +416,7 @@ describe('e2e command show Solana', () => {
       const args = buildShowArgs(TX_HASH)
       const result = await spawnCLI(args, 120000)
 
-      assert.equal(result.exitCode, 0)
+      assert.equal(result.exitCode, 0, result.stdout + result.stderr)
       const output = result.stdout
 
       // Lane information
@@ -439,6 +439,10 @@ describe('e2e command show Solana', () => {
       assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
       assert.match(output, /data.*hello from ccip-tools-ts\b/)
       assert.match(output, /allowOutOfOrderExecution.*true\b/)
+
+      // USDC attestation
+      assert.match(output, /Attestations:/i)
+      assert.match(output, /type.*\busdc\b/i)
 
       // Commit information
       assert.match(output, /Commit.*dest/i)

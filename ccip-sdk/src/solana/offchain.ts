@@ -1,5 +1,7 @@
-import { type BN, BorshCoder, EventParser } from '@coral-xyz/anchor'
-import { type Connection, PublicKey } from '@solana/web3.js'
+import util from 'util'
+
+import { type BN, BorshCoder } from '@coral-xyz/anchor'
+import type { Connection, PublicKey } from '@solana/web3.js'
 import { hexlify } from 'ethers'
 
 import { getUsdcAttestation } from '../offchain.ts'
@@ -7,7 +9,8 @@ import type { CCIPMessage, CCIPRequest, OffchainTokenData } from '../types.ts'
 import { networkInfo } from '../utils.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
-import { bytesToBuffer } from './utils.ts'
+import type { SolanaLog, SolanaTransaction } from './index.ts'
+import { bytesToBuffer, hexDiscriminator } from './utils.ts'
 
 interface CcipCctpMessageSentEvent {
   originalSender: PublicKey
@@ -28,7 +31,7 @@ interface CcipCctpMessageAndAttestation {
 const cctpTokenPoolCoder = new BorshCoder({
   ...CCTP_TOKEN_POOL,
   types: [...BASE_TOKEN_POOL.types, ...CCTP_TOKEN_POOL.types],
-  events: BASE_TOKEN_POOL.events,
+  events: [...BASE_TOKEN_POOL.events, ...CCTP_TOKEN_POOL.events],
   errors: [...BASE_TOKEN_POOL.errors, ...CCTP_TOKEN_POOL.errors],
 })
 
@@ -53,7 +56,7 @@ export async function fetchSolanaOffchainTokenData(
   connection: Connection,
   request: Pick<CCIPRequest, 'tx' | 'lane'> & {
     message: CCIPMessage
-    log: Pick<CCIPRequest['log'], 'topics' | 'index' | 'transactionHash'>
+    log: Pick<CCIPRequest['log'], 'topics' | 'index' | 'transactionHash' | 'address'>
   },
 ): Promise<OffchainTokenData[]> {
   if (request.message.tokenAmounts === undefined || request.message.tokenAmounts.length === 0) {
@@ -68,17 +71,29 @@ export async function fetchSolanaOffchainTokenData(
 
   const { isTestnet } = networkInfo(request.lane.sourceChainSelector)
   const txSignature = request.log.transactionHash
-  if (!txSignature) {
-    throw new Error('Transaction hash not found for OffchainTokenData parsing')
-  }
 
   // Parse Solana transaction to find CCTP event
-  const cctpEvents = await parseCcipCctpEvents(connection, txSignature)
+  const tx = request.tx as SolanaTransaction
+  const log = request.log as SolanaLog
+  const logMessages = tx.tx.meta!.logMessages!
+  // there may have multiple ccipSend calls in same tx;
+  // use `invoke [level]` to filter only logs inside this call
+  const requestInvokeIdx = logMessages.findLastIndex(
+    (l, i) => i < log.index && l === `Program ${request.log.address} invoke [${log.level}]`,
+  )
+  const cctpEvents = []
+  for (const l of tx.logs) {
+    if (requestInvokeIdx >= l.index || l.index >= log.index) continue
+    if (l.topics[0] !== hexDiscriminator('CcipCctpMessageSentEvent')) continue
+    const decoded = cctpTokenPoolCoder.events.decode(l.data)
+    if (!decoded) throw new Error(`Failed to decode CCTP event: ${util.inspect(l)}`)
+    cctpEvents.push(decoded.data as unknown as CcipCctpMessageSentEvent)
+  }
   const offchainTokenData: OffchainTokenData[] = request.message.tokenAmounts.map(() => undefined)
 
   // If no CcipCctpMessageSentEvent found, return defaults so we don't block execution
   if (cctpEvents.length === 0) {
-    console.debug('No events')
+    console.debug('No USDC/CCTP events found')
     return offchainTokenData
   }
 
@@ -111,76 +126,6 @@ export async function fetchSolanaOffchainTokenData(
   console.debug('Got Solana offchain token data', offchainTokenData)
 
   return offchainTokenData
-}
-
-/**
- * Parses CcipCctpMessageSentEvent from a Solana transaction by analyzing program logs
- *
- * @param txSignature - Solana transaction signature to analyze
- * @param sourceChainSelector - Source chain selector to determine RPC endpoint
- * @returns Array of parsed CcipCctpMessageSentEvent found in the transaction (only 1 supported though)
- *
- * @throws Error if transaction is not found or RPC fails
- *
- * @example
- * const events = await parseSolanaCctpEvents(
- *   '3k81TLhJuhwB8fvurCwyMPHXR3k9Tmtqe2ZrUQ8e3rMxk9fWFJT2xVHGgKJg1785FkJcaiQkthY4m86JrESGPhMY',
- *   16423721717087811551n // Solana Devnet
- * )
- */
-async function parseCcipCctpEvents(
-  connection: Connection,
-  txSignature: string,
-): Promise<CcipCctpMessageSentEvent[]> {
-  // Fetch transaction details using Solana RPC
-  const tx = await connection.getTransaction(txSignature, {
-    commitment: 'finalized',
-    maxSupportedTransactionVersion: 0,
-  })
-  if (!tx || !tx.meta) {
-    throw new Error(`Transaction not found: ${txSignature}`)
-  }
-
-  if (!tx.meta.logMessages?.length) {
-    throw new Error(`Transaction has no logs: ${txSignature}`)
-  }
-
-  const cctpPoolAddress = getCctpPoolAddress(tx.meta.logMessages)
-  if (!cctpPoolAddress) {
-    return []
-  }
-
-  const eventParser = new EventParser(new PublicKey(cctpPoolAddress), cctpTokenPoolCoder)
-
-  const events: CcipCctpMessageSentEvent[] = Array.from(eventParser.parseLogs(tx.meta.logMessages))
-    .filter((event) => event.name === 'CcipCctpMessageSentEvent')
-    .map((event) => event.data as unknown as CcipCctpMessageSentEvent)
-  return events
-}
-
-function getCctpPoolAddress(logs: string[]): string | null {
-  // Example logs include lines like the following (though the indexes of the "invoke [1]" are unreliable):
-  // "Program <POOL ADDRESS HERE, THIS IS WHAT WE'RE LOOKING FOR> invoke [1]",
-  // "Program log: Instruction: LockOrBurnTokens",
-  const candidateIx = logs.indexOf('Program log: Instruction: LockOrBurnTokens')
-  if (candidateIx < 1) {
-    return null
-  }
-
-  const candidateAddress = logs[candidateIx - 1].split(' ')[1]
-
-  if (!candidateAddress.toLowerCase().startsWith('ccitp')) {
-    // The vanity address of the pool includes "ccitp" (case-insensitive) as a prefix
-    return null
-  }
-
-  // basic sanity check that we have the pool address: The pool returns a value, so the logs should show that
-  const sanityCheck = logs.find((log) => log.startsWith(`Program return: ${candidateAddress} `))
-  if (!sanityCheck) {
-    return null
-  }
-
-  return candidateAddress
 }
 
 /**

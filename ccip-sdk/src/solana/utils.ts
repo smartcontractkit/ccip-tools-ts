@@ -1,3 +1,4 @@
+import { eventDiscriminator } from '@coral-xyz/anchor'
 import {
   type AddressLookupTableAccount,
   type Connection,
@@ -15,6 +16,10 @@ import { type BytesLike, dataLength, dataSlice, hexlify } from 'ethers'
 
 import type { Log_ } from '../types.ts'
 import { getDataBytes, sleep } from '../utils.ts'
+
+export function hexDiscriminator(eventName: string): string {
+  return hexlify(eventDiscriminator(eventName))
+}
 
 export function bytesToBuffer(bytes: BytesLike): Buffer {
   return Buffer.from(getDataBytes(bytes).buffer)
@@ -52,7 +57,10 @@ export function camelToSnakeCase(str: string): string {
     .replace(/^_/, '')
 }
 
-type ParsedLog = Pick<Log_, 'topics' | 'index' | 'address' | 'data'> & { data: string }
+type ParsedLog = Pick<Log_, 'topics' | 'index' | 'address' | 'data'> & {
+  data: string
+  level: number
+}
 
 /**
  * Utility function to parse Solana logs with proper address and topic extraction.
@@ -107,6 +115,7 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
         index: i,
         address: currentProgram,
         data: logData,
+        level: programStack.length,
       })
     }
   }

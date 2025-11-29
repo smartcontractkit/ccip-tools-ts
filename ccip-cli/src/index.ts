@@ -67,4 +67,12 @@ async function main() {
     .parse()
 }
 
-await main()
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const later = setTimeout(() => {}, 2 ** 31 - 1) // keep event-loop alive
+  await main()
+    .catch((err) => {
+      console.error(err)
+      throw err
+    })
+    .finally(() => clearTimeout(later))
+}

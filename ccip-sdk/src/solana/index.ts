@@ -8,7 +8,6 @@ import {
   BorshCoder,
   Program,
   Wallet,
-  eventDiscriminator,
 } from '@coral-xyz/anchor'
 import { NATIVE_MINT } from '@solana/spl-token'
 import {
@@ -62,6 +61,7 @@ import {
   type ExecutionReport,
   type Lane,
   type Log_,
+  type MergeArrayElements,
   type NetworkInfo,
   type OffchainTokenData,
   CCIPVersion,
@@ -88,7 +88,13 @@ import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import { fetchSolanaOffchainTokenData } from './offchain.ts'
 import { ccipSend, getFee } from './send.ts'
 import type { CCIPMessage_V1_6_Solana } from './types.ts'
-import { bytesToBuffer, getErrorFromLogs, parseSolanaLogs, simulationProvider } from './utils.ts'
+import {
+  bytesToBuffer,
+  getErrorFromLogs,
+  hexDiscriminator,
+  parseSolanaLogs,
+  simulationProvider,
+} from './utils.ts'
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
 const offrampCoder = new BorshCoder(CCIP_OFFRAMP_IDL)
@@ -118,15 +124,14 @@ const unknownTokens: { [mint: string]: string } = {
 }
 
 // some circular specialized types, but all good with proper references
-type SolanaLog = Log_ & { tx: SolanaTransaction }
-type SolanaTransaction = ChainTransaction & {
-  tx: VersionedTransactionResponse
-  logs: SolanaLog[]
-}
-
-function hexDiscriminator(eventName: string): string {
-  return hexlify(eventDiscriminator(eventName))
-}
+export type SolanaLog = Log_ & { tx: SolanaTransaction; data: string; level: number }
+export type SolanaTransaction = MergeArrayElements<
+  ChainTransaction,
+  {
+    tx: VersionedTransactionResponse
+    logs: readonly SolanaLog[]
+  }
+>
 
 export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   static readonly family = ChainFamily.Solana
@@ -304,7 +309,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     // Parse logs from transaction using helper function
-    const logs_: Log_[] = tx.meta?.logMessages?.length
+    const logs_ = tx.meta?.logMessages?.length
       ? parseSolanaLogs(tx.meta?.logMessages).map((l) => ({
           ...l,
           transactionHash: hash,
