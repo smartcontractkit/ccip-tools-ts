@@ -219,11 +219,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     const config: ConnectionConfig = { commitment: 'confirmed' }
     if (url.includes('.solana.com')) {
-      config.fetch = createRateLimitedFetch({
-        maxRequests: 10,
-        maxRetries: 3,
-        windowMs: 11e3,
-      }) // public nodes
+      config.fetch = createRateLimitedFetch() // public nodes
       console.warn('Using rate-limited fetch for public solana nodes, commands may be slow')
     }
 

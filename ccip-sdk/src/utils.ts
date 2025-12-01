@@ -320,13 +320,17 @@ export function parseTypeAndVersion(
 }
 
 export function createRateLimitedFetch({
-  maxRequests = Number(process.env['RL_MAX_REQUESTS'] || 2),
-  windowMs = Number(process.env['RL_WINDOW_MS'] || 10000),
+  maxRequests = Number(process.env['RL_MAX_REQUESTS'] || 40),
+  windowMs = Number(process.env['RL_WINDOW_MS'] || 11e3),
   maxRetries = Number(process.env['RL_MAX_RETRIES'] || 5),
 }: { maxRequests?: number; windowMs?: number; maxRetries?: number } = {}): typeof fetch {
   // Custom fetch implementation with retry logic and rate limiting
   // Per-instance state
   const requestQueue: Array<{ timestamp: number }> = []
+  const methodRateLimits: Record<
+    string,
+    { limit: number; remaining: number; queue: Array<{ timestamp: number }> }
+  > = {}
 
   const isRateLimited = (): boolean => {
     const now = Date.now()
@@ -337,7 +341,31 @@ export function createRateLimitedFetch({
     return requestQueue.length >= maxRequests
   }
 
-  const waitForRateLimit = async (): Promise<void> => {
+  const isMethodRateLimited = (method: string): boolean => {
+    const methodLimit = methodRateLimits[method]
+    if (!methodLimit) return false
+
+    const now = Date.now()
+    // Remove old requests outside the window
+    while (methodLimit.queue.length > 0 && now - methodLimit.queue[0].timestamp > windowMs) {
+      methodLimit.queue.shift()
+    }
+    return methodLimit.queue.length >= methodLimit.limit
+  }
+
+  const waitForRateLimit = async (method?: string): Promise<void> => {
+    // Wait for method-specific rate limit if applicable
+    if (method && methodRateLimits[method]) {
+      while (isMethodRateLimited(method)) {
+        const oldestRequest = methodRateLimits[method].queue[0]
+        const waitTime = windowMs - (Date.now() - oldestRequest.timestamp)
+        if (waitTime > 0) {
+          await sleep(waitTime + 100) // Add small buffer
+        }
+      }
+    }
+
+    // Wait for global rate limit
     while (isRateLimited()) {
       const oldestRequest = requestQueue[0]
       const waitTime = windowMs - (Date.now() - oldestRequest.timestamp)
@@ -347,8 +375,39 @@ export function createRateLimitedFetch({
     }
   }
 
-  const recordRequest = (): void => {
-    requestQueue.push({ timestamp: Date.now() })
+  const recordRequest = (method?: string): void => {
+    const timestamp = Date.now()
+    requestQueue.push({ timestamp })
+    if (method && methodRateLimits[method]) {
+      methodRateLimits[method].queue.push({ timestamp })
+    }
+  }
+
+  const updateMethodRateLimits = (response: Response, method?: string): void => {
+    if (!method) return
+
+    const limit = Number(response.headers.get('x-ratelimit-method-limit'))
+    const remaining = Number(response.headers.get('x-ratelimit-method-remaining'))
+
+    if (isNaN(limit) || isNaN(remaining)) return
+    if (!methodRateLimits[method]) {
+      methodRateLimits[method] = { limit, remaining, queue: [] }
+    } else {
+      methodRateLimits[method].limit = limit
+      methodRateLimits[method].remaining = remaining
+    }
+  }
+
+  const extractMethod = (init?: RequestInit): string | undefined => {
+    if (!init?.body || (typeof init.body !== 'string' && typeof init.body !== 'object')) return
+    try {
+      const parsed = (typeof init.body === 'string' ? JSON.parse(init.body) : init.body) as {
+        method?: string
+      }
+      if (parsed && typeof parsed.method === 'string') return parsed.method
+    } catch {
+      // Not JSON or no method field
+    }
   }
 
   const isRateLimitError = (error: unknown): boolean => {
@@ -360,15 +419,19 @@ export function createRateLimitedFetch({
 
   return async (input, init?) => {
     let lastError: Error | null = null
+    const method = extractMethod(init)
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         // Wait for rate limit before making request
-        await waitForRateLimit()
-        recordRequest()
+        await waitForRateLimit(method)
+        recordRequest(method)
         // console.debug('__fetching', input, init?.body)
 
         const response = await fetch(input, init)
+
+        // Update method rate limits from response headers
+        updateMethodRateLimits(response, method)
 
         // If response is successful, return it
         if (response.ok) {
