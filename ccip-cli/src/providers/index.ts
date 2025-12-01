@@ -48,7 +48,7 @@ export function fetchChainsFromRpcs(
   argv: { rpcs?: string[]; 'rpcs-file'?: string },
   txHash: string,
   destroy?: Promise<unknown>,
-): [ChainGetter, Promise<ChainTransaction>]
+): [ChainGetter, Promise<[Chain, ChainTransaction]>]
 
 /**
  * Receives a list of rpcs and/or rpcs file, and loads them all concurrently
@@ -69,7 +69,7 @@ export function fetchChainsFromRpcs(
     readonly [resolve: (value: Chain) => void, reject: (reason?: unknown) => void]
   > = {}
   let finished = false
-  const txs: Promise<ChainTransaction>[] = []
+  const txs: Promise<[Chain, ChainTransaction]>[] = []
 
   const init$ = collectEndpoints(argv).then((endpoints) => {
     const pendingPromises: Promise<unknown>[] = []
@@ -78,9 +78,11 @@ export function fetchChainsFromRpcs(
       for (const url of endpoints) {
         const chain$ = C.fromUrl(url)
         if (txHash) {
-          const tx$ = chain$.then((chain) => chain.getTransaction(txHash))
+          const tx$ = chain$.then((chain) =>
+            chain.getTransaction(txHash).then<[Chain, ChainTransaction]>((tx) => [chain, tx]),
+          )
           void tx$.then(
-            ({ chain }) => {
+            ([chain]) => {
               if (txFound) return
               txFound = true
               // in case tx is found, prefer it over any previously found chain

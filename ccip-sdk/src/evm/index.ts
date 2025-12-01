@@ -31,13 +31,7 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 import moize, { type Key } from 'moize'
 
-import {
-  type ChainTransaction,
-  type LogFilter,
-  type TokenPoolRemote,
-  Chain,
-  ChainFamily,
-} from '../chain.ts'
+import { type LogFilter, type TokenPoolRemote, Chain } from '../chain.ts'
 import {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
@@ -55,6 +49,7 @@ import {
   type AnyMessage,
   type CCIPMessage,
   type CCIPRequest,
+  type ChainTransaction,
   type CommitReport,
   type ExecutionReceipt,
   type ExecutionReport,
@@ -64,6 +59,7 @@ import {
   type NetworkInfo,
   type OffchainTokenData,
   CCIPVersion,
+  ChainFamily,
 } from '../types.ts'
 import {
   decodeAddress,

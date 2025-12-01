@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
 import './index.ts' // Import to ensure chains are loaded
-import type { Chain, ChainTransaction, LogFilter } from './chain.ts'
+import type { Chain, LogFilter } from './chain.ts'
 import {
   decodeMessage,
   fetchAllMessagesInBatch,
@@ -12,7 +12,14 @@ import {
   fetchCCIPRequestsInTx,
   fetchRequestsForSender,
 } from './requests.ts'
-import { type CCIPMessage, type CCIPRequest, type Lane, type Log_, CCIPVersion } from './types.ts'
+import {
+  type CCIPMessage,
+  type CCIPRequest,
+  type ChainTransaction,
+  type Lane,
+  type Log_,
+  CCIPVersion,
+} from './types.ts'
 import { bigIntReplacer, networkInfo } from './utils.ts'
 
 let rampAddress: string
@@ -147,7 +154,6 @@ afterEach(() => {
 describe('fetchCCIPMessagesInTx', () => {
   it('should return CCIP requests', async () => {
     const mockTx: ChainTransaction = {
-      chain: mockedChain as unknown as Chain,
       hash: '0x123',
       logs: [
         {
@@ -164,10 +170,9 @@ describe('fetchCCIPMessagesInTx', () => {
       from: '0x0000000000000000000000000000000000000001',
     }
 
-    const result = await fetchCCIPRequestsInTx(mockTx)
+    const result = await fetchCCIPRequestsInTx(mockedChain as unknown as Chain, mockTx)
     assert.equal(result.length, 1)
     assert.equal(result[0].message.header.sequenceNumber, 1n)
-    assert.equal(result[0].timestamp, 1234567890)
     assert.equal(result[0].tx, mockTx)
     assert.equal(result[0].lane.version, CCIPVersion.V1_2)
   })
@@ -176,7 +181,6 @@ describe('fetchCCIPMessagesInTx', () => {
     MockChain.decodeMessage.mock.mockImplementation(() => undefined)
 
     const mockTx: ChainTransaction = {
-      chain: mockedChain as unknown as Chain,
       hash: '0x123',
       logs: [
         {
@@ -202,7 +206,7 @@ describe('fetchCCIPMessagesInTx', () => {
     }
 
     await assert.rejects(
-      async () => await fetchCCIPRequestsInTx(mockTx),
+      async () => await fetchCCIPRequestsInTx(mockedChain as unknown as Chain, mockTx),
       /Could not find any CCIPSendRequested message in tx: 0x123/,
     )
 
@@ -268,7 +272,7 @@ describe('fetchCCIPMessageById', () => {
     const result = await fetchCCIPMessageById(mockedChain as unknown as Chain, '0xMessageId1')
     assert.equal(result.log.index, 1)
     assert.ok(result.message)
-    assert.equal(result.timestamp, 1234567890)
+    assert.equal(result.tx.timestamp, 1234567890)
     assert.equal(result.lane.version, CCIPVersion.V1_2)
   })
 

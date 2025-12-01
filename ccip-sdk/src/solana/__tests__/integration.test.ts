@@ -3,7 +3,7 @@ import { before, describe, it } from 'node:test'
 
 import { Connection, PublicKey } from '@solana/web3.js'
 
-import { ChainFamily } from '../../chain.ts'
+import { ChainFamily } from '../../types.ts'
 import { SolanaChain } from '../index.ts'
 
 // Integration test for real Solana mainnet token

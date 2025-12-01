@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
 import './index.ts'
-import { ChainFamily } from './chain.ts'
+import { ChainFamily } from './types.ts'
 import {
   bigIntReplacer,
   bigIntReviver,

@@ -2,6 +2,7 @@ import util from 'util'
 
 import {
   type CCIPRequest,
+  type ChainTransaction,
   ChainFamily,
   bigIntReplacer,
   discoverOffRamp,
@@ -59,7 +60,7 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
 }
 
 async function showRequests(argv: Parameters<typeof handler>[0], destroy: Promise<unknown>) {
-  let source, getChain, tx, request: CCIPRequest
+  let source, getChain, tx: ChainTransaction, request: CCIPRequest
   // messageId not yet implemented for Solana
   if (argv.idFromSource) {
     getChain = fetchChainsFromRpcs(argv, undefined, destroy)
@@ -75,9 +76,8 @@ async function showRequests(argv: Parameters<typeof handler>[0], destroy: Promis
   } else {
     const [getChain_, tx$] = fetchChainsFromRpcs(argv, argv.txHash, destroy)
     getChain = getChain_
-    tx = await tx$
-    source = tx.chain
-    request = await selectRequest(await fetchCCIPRequestsInTx(tx), 'to know more', argv)
+    ;[source, tx] = await tx$
+    request = await selectRequest(await fetchCCIPRequestsInTx(source, tx), 'to know more', argv)
   }
 
   const offchainTokenData = await source.fetchOffchainTokenData(request)
@@ -119,15 +119,7 @@ async function showRequests(argv: Parameters<typeof handler>[0], destroy: Promis
   }
 
   let found = false
-  for await (const receipt of dest.fetchExecutionReceipts(
-    offRamp,
-    new Set([request.message.header.messageId]),
-    {
-      startBlock: commit.log.blockNumber,
-      page: argv.page,
-      commit: commit.report,
-    },
-  )) {
+  for await (const receipt of dest.fetchExecutionReceipts(offRamp, request, commit, argv)) {
     switch (argv.format) {
       case Format.log:
         console.log('receipt =', withDateTimestamp(receipt))

@@ -116,9 +116,8 @@ async function manualExec(
 ) {
   // messageId not yet implemented for Solana
   const [getChain, tx$] = fetchChainsFromRpcs(argv, argv.txHash, destroy)
-  const tx = await tx$
-  const source = tx.chain
-  const request = await selectRequest(await fetchCCIPRequestsInTx(tx), 'to know more', argv)
+  const [source, tx] = await tx$
+  const request = await selectRequest(await fetchCCIPRequestsInTx(source, tx), 'to know more', argv)
 
   switch (argv.format) {
     case Format.log: {

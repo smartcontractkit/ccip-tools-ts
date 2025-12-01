@@ -1,9 +1,9 @@
 import util from 'util'
 
 import type { BytesLike } from 'ethers'
+import type { PickDeep } from 'type-fest'
 
 import { fetchCommitReport } from './commits.ts'
-import { fetchExecutionReceipts } from './execution.ts'
 import type {
   EVMExtraArgsV1,
   EVMExtraArgsV2,
@@ -12,28 +12,23 @@ import type {
   SuiExtraArgsV1,
 } from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
-import type {
-  AnyMessage,
-  CCIPCommit,
-  CCIPExecution,
-  CCIPMessage,
-  CCIPRequest,
-  CommitReport,
-  ExecutionReceipt,
-  ExecutionReport,
-  Lane,
-  Log_,
-  NetworkInfo,
-  OffchainTokenData,
+import {
+  type AnyMessage,
+  type CCIPCommit,
+  type CCIPExecution,
+  type CCIPMessage,
+  type CCIPRequest,
+  type ChainFamily,
+  type ChainTransaction,
+  type CommitReport,
+  type ExecutionReceipt,
+  type ExecutionReport,
+  type Lane,
+  type Log_,
+  type NetworkInfo,
+  type OffchainTokenData,
+  ExecutionState,
 } from './types.ts'
-
-export const ChainFamily = {
-  EVM: 'evm',
-  Solana: 'solana',
-  Aptos: 'aptos',
-  Sui: 'sui',
-} as const
-export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
 
 export type LogFilter = {
   startBlock?: number
@@ -43,16 +38,6 @@ export type LogFilter = {
   address?: string
   topics?: (string | string[])[]
   page?: number
-}
-
-export type ChainTransaction = {
-  chain: Chain
-  hash: string
-  logs: readonly Log_[]
-  blockNumber: number
-  timestamp: number
-  from: string
-  error?: unknown
 }
 
 export type TokenInfo = {
@@ -251,11 +236,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    **/
   async fetchCommitReport(
     commitStore: string,
-    request: {
-      lane: Lane
-      message: { header: { sequenceNumber: bigint } }
-      timestamp?: number
-    },
+    request: PickDeep<CCIPRequest, 'lane' | 'message.header.sequenceNumber' | 'tx.timestamp'>,
     hints?: { startBlock?: number; page?: number },
   ): Promise<CCIPCommit> {
     return fetchCommitReport(this, commitStore, request, hints)
@@ -270,10 +251,25 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   async *fetchExecutionReceipts(
     offRamp: string,
-    messageIds: Set<string>,
-    hints?: { startBlock?: number; startTime?: number; page?: number; commit?: CommitReport },
-  ): AsyncGenerator<CCIPExecution> {
-    yield* fetchExecutionReceipts(this, offRamp, messageIds, hints)
+    request: PickDeep<CCIPRequest, 'message.header.messageId' | 'tx.timestamp'>,
+    commit?: CCIPCommit,
+    hints?: { page?: number },
+  ): AsyncIterableIterator<CCIPExecution> {
+    const onlyLast = !commit?.log.blockNumber && !request.tx.timestamp // backwards
+    for await (const log of this.getLogs({
+      startBlock: commit?.log.blockNumber,
+      startTime: request.tx.timestamp,
+      ...hints,
+      address: offRamp,
+      topics: ['ExecutionStateChanged'],
+    })) {
+      const receipt = (this.constructor as ChainStatic).decodeReceipt(log)
+      if (!receipt || receipt.messageId !== request.message.header.messageId) continue
+
+      const timestamp = log.tx?.timestamp ?? (await this.getBlockTimestamp(log.blockNumber))
+      yield { receipt, log, timestamp }
+      if (onlyLast || receipt.state === ExecutionState.Success) break
+    }
   }
 
   /**

@@ -4,19 +4,21 @@ import { describe, it } from 'node:test'
 
 import { Interface } from 'ethers'
 
-import { type ChainTransaction, Chain, ChainFamily } from './chain.ts'
+import { Chain } from './chain.ts'
 import { fetchCommitReport } from './commits.ts'
 import CommitStore_1_2_ABI from './evm/abi/CommitStore_1_2.ts'
 import OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
+  type ChainTransaction,
   type CommitReport,
   type ExecutionState,
   type Lane,
   type Log_,
   type NetworkInfo,
   CCIPVersion,
+  ChainFamily,
 } from './types.ts'
 
 // Mock Chain class for testing
@@ -57,7 +59,6 @@ class MockChain extends Chain {
 
   async getTransaction(_hash: string): Promise<ChainTransaction> {
     return {
-      chain: this,
       hash: _hash,
       logs: this.mockLogs,
       blockNumber: 1000,
@@ -176,7 +177,6 @@ class MockChain extends Chain {
     _opts?: { wallet?: unknown; approveMax?: boolean },
   ): Promise<ChainTransaction> {
     return {
-      chain: this,
       hash: '0xHash',
       logs: [],
       blockNumber: 1000,
@@ -195,7 +195,6 @@ class MockChain extends Chain {
     _opts?: Record<string, unknown>,
   ): Promise<ChainTransaction> {
     return {
-      chain: this,
       hash: '0xHash',
       logs: [],
       blockNumber: 1000,
@@ -373,7 +372,7 @@ describe('fetchCommitReport', () => {
     const request = {
       lane,
       message: { header: { sequenceNumber: 1n } } as any,
-      timestamp: 1700000000,
+      tx: { timestamp: 1700000000 },
     }
 
     const hints = { startBlock: 12345 }
@@ -430,7 +429,7 @@ describe('fetchCommitReport', () => {
     const request = {
       lane,
       message: { header: { sequenceNumber: 1n } } as any,
-      timestamp: 1700000000,
+      tx: { timestamp: 1700000000 },
     }
 
     const hints = { startBlock: 12345 }
@@ -483,7 +482,7 @@ describe('fetchCommitReport', () => {
     const request = {
       lane,
       message: { header: { sequenceNumber: 4n } } as any,
-      timestamp: 1700000000,
+      tx: { timestamp: 1700000000 },
     }
 
     const hints = { startBlock: 12345 }
@@ -541,7 +540,7 @@ describe('fetchCommitReport', () => {
     const request = {
       lane,
       message: { header: { sequenceNumber: 5n } } as any,
-      timestamp: 1700000000,
+      tx: { timestamp: 1700000000 },
     }
 
     const hints = { startBlock: 12345 }
@@ -617,7 +616,7 @@ describe('fetchCommitReport', () => {
     const request = {
       lane,
       message: { header: { sequenceNumber: 5n } } as any,
-      timestamp: 1700000000,
+      tx: { timestamp: 1700000000 },
     }
 
     const hints = { startBlock: 12345 }
@@ -672,7 +671,7 @@ describe('fetchCommitReport', () => {
     const request = {
       lane,
       message: { header: { sequenceNumber: 3n } } as any,
-      timestamp: requestTimestamp,
+      tx: { timestamp: requestTimestamp },
     }
 
     // No hints provided, should use timestamp

@@ -3,10 +3,11 @@ import moize from 'moize'
 import type { Chain, ChainStatic } from './chain.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
 import {
+  type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
+  type CCIPRequest,
   type CCIPVersion,
-  type CommitReport,
   type ExecutionReport,
   type Lane,
   ExecutionState,
@@ -111,21 +112,23 @@ export const discoverOffRamp = moize.default(
 export async function* fetchExecutionReceipts(
   dest: Chain,
   offRamp: string,
-  messageIds: Set<string>,
-  hints?: { startBlock?: number; startTime?: number; page?: number; commit?: CommitReport },
+  request: CCIPRequest,
+  commit?: CCIPCommit,
+  hints?: { page?: number },
 ): AsyncGenerator<CCIPExecution> {
-  const onlyLast = !hints?.startBlock && !hints?.startTime // backwards
+  const onlyLast = !commit?.log.blockNumber && !request.tx.timestamp // backwards
   for await (const log of dest.getLogs({
+    startBlock: commit?.log.blockNumber,
+    startTime: request.tx.timestamp,
     ...hints,
     address: offRamp,
     topics: ['ExecutionStateChanged'],
   })) {
     const receipt = (dest.constructor as ChainStatic).decodeReceipt(log)
-    if (!receipt || !messageIds.has(receipt.messageId)) continue
-    if (onlyLast || receipt.state === ExecutionState.Success) messageIds.delete(receipt.messageId)
+    if (!receipt || receipt.messageId !== request.message.header.messageId) continue
 
-    const timestamp = await dest.getBlockTimestamp(log.blockNumber)
+    const timestamp = log.tx?.timestamp ?? (await dest.getBlockTimestamp(log.blockNumber))
     yield { receipt, log, timestamp }
-    if (!messageIds.size) break
+    if (onlyLast || receipt.state === ExecutionState.Success) break
   }
 }

@@ -21,6 +21,7 @@ import {
   parseUnits,
   toUtf8String,
 } from 'ethers'
+import type { PickDeep } from 'type-fest'
 
 export async function selectRequest(
   requests: readonly CCIPRequest[],
@@ -55,10 +56,13 @@ tokenTransfers =\t[${req.message.tokenAmounts.map((ta) => ('token' in ta ? ta.to
   return requests[answer]
 }
 
-export function withDateTimestamp<T extends { readonly timestamp: number }>(
-  obj: T,
-): Omit<T, 'timestamp'> & { timestamp: Date } {
-  return { ...obj, timestamp: new Date(obj.timestamp * 1e3) }
+export function withDateTimestamp<
+  T extends { readonly timestamp: number } | { readonly tx: { readonly timestamp: number } },
+>(obj: T): Omit<T, 'timestamp'> & { timestamp: Date } {
+  return {
+    ...obj,
+    timestamp: new Date(('timestamp' in obj ? obj.timestamp : obj.tx.timestamp) * 1e3),
+  }
 }
 
 export function prettyLane(lane: Lane) {
@@ -199,11 +203,11 @@ export async function prettyRequest(
     transactionHash: request.log.transactionHash,
     logIndex: request.log.index,
     blockNumber: request.log.blockNumber,
-    timestamp: `${formatDate(request.timestamp)} (${formatDuration(Date.now() / 1e3 - request.timestamp)} ago)`,
+    timestamp: `${formatDate(request.tx.timestamp)} (${formatDuration(Date.now() / 1e3 - request.tx.timestamp)} ago)`,
     finalized:
       finalized &&
-      (finalized < request.timestamp
-        ? formatDuration(request.timestamp - finalized) + ' left'
+      (finalized < request.tx.timestamp
+        ? formatDuration(request.tx.timestamp - finalized) + ' left'
         : true),
     fee: await formatToken(source, {
       token: request.message.feeToken,
@@ -233,7 +237,7 @@ export async function prettyRequest(
 export async function prettyCommit(
   dest: Chain,
   commit: CCIPCommit,
-  request: { timestamp: number },
+  request: PickDeep<CCIPRequest, 'tx.timestamp'>,
 ) {
   console.info('Commit (dest):')
   const timestamp = await dest.getBlockTimestamp(commit.log.blockNumber)
@@ -245,7 +249,7 @@ export async function prettyCommit(
     contract: commit.log.address,
     transactionHash: commit.log.transactionHash,
     blockNumber: commit.log.blockNumber,
-    timestamp: `${formatDate(timestamp)} (${formatDuration(timestamp - request.timestamp)} after request)`,
+    timestamp: `${formatDate(timestamp)} (${formatDuration(timestamp - request.tx.timestamp)} after request)`,
   })
 }
 
@@ -334,7 +338,7 @@ export function prettyTable(
 
 export function prettyReceipt(
   receipt: CCIPExecution,
-  request: { timestamp: number },
+  request: PickDeep<CCIPRequest, 'tx.timestamp'>,
   origin?: string,
 ) {
   prettyTable({
@@ -349,7 +353,7 @@ export function prettyReceipt(
     transactionHash: receipt.log.transactionHash,
     logIndex: receipt.log.index,
     blockNumber: receipt.log.blockNumber,
-    timestamp: `${formatDate(receipt.timestamp)} (${formatDuration(receipt.timestamp - request.timestamp)} after request)`,
+    timestamp: `${formatDate(receipt.timestamp)} (${formatDuration(receipt.timestamp - request.tx.timestamp)} after request)`,
   })
 }
 

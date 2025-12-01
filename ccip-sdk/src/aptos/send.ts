@@ -1,9 +1,8 @@
 import type { Aptos } from '@aptos-labs/ts-sdk'
 import { getBytes, zeroPadValue } from 'ethers'
 
-import { ChainFamily } from '../chain.ts'
 import { encodeExtraArgs } from '../extra-args.ts'
-import type { AnyMessage } from '../types.ts'
+import { type AnyMessage, ChainFamily } from '../types.ts'
 import { getDataBytes } from '../utils.ts'
 import type { AptosAsyncAccount } from './types.ts'
 

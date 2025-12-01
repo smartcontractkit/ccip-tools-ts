@@ -2,21 +2,23 @@ import './index.ts' // Register supported chains
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Interface, ZeroHash } from 'ethers'
+import { Interface } from 'ethers'
 
-import { type ChainTransaction, Chain, ChainFamily } from './chain.ts'
+import { Chain } from './chain.ts'
 import OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
 import type { CCIPMessage_V1_6_EVM } from './evm/messages.ts'
-import { calculateManualExecProof, discoverOffRamp, fetchExecutionReceipts } from './execution.ts'
+import { calculateManualExecProof, discoverOffRamp } from './execution.ts'
 import { decodeMessage } from './requests.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
+  type ChainTransaction,
+  type ExecutionState,
   type Lane,
   type Log_,
   type NetworkInfo,
   CCIPVersion,
-  ExecutionState,
+  ChainFamily,
 } from './types.ts'
 import { networkInfo } from './utils.ts'
 
@@ -73,7 +75,6 @@ class MockChain extends Chain {
 
   async getTransaction(_hash: string): Promise<ChainTransaction> {
     return {
-      chain: this,
       hash: _hash,
       logs: this.mockLogs,
       blockNumber: 1000,
@@ -183,7 +184,6 @@ class MockChain extends Chain {
     _opts?: { wallet?: unknown; approveMax?: boolean },
   ): Promise<ChainTransaction> {
     return {
-      chain: this,
       hash: '0xHash',
       logs: [],
       blockNumber: 1000,
@@ -202,7 +202,6 @@ class MockChain extends Chain {
     _opts?: Record<string, unknown>,
   ): Promise<ChainTransaction> {
     return {
-      chain: this,
       hash: '0xHash',
       logs: [],
       blockNumber: 1000,
@@ -457,146 +456,5 @@ describe('discoverOffRamp', () => {
       async () => await discoverOffRamp(sourceChain, destChain, onRamp),
       /No matching offRamp found/,
     )
-  })
-})
-
-describe('fetchExecutionReceipts', () => {
-  const offRamp = '0xOffRamp'
-  const messageId1 = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
-  const messageId2 = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890'
-
-  it('should fetch execution receipts correctly (forward mode)', async () => {
-    const dest = new MockChain(networkInfo(421614).chainSelector, 'Arbitrum Sepolia', 421614)
-
-    const iface = new Interface(OffRamp_1_6_ABI)
-
-    // Create mock ExecutionStateChanged logs
-    // ExecutionStateChanged(uint64 indexed sourceChainSelector, uint64 indexed sequenceNumber, bytes32 indexed messageId, bytes32 messageHash, uint8 state, bytes returnData, uint256 gasUsed)
-    const encoded1 = iface.encodeEventLog('ExecutionStateChanged', [
-      networkInfo(11155111).chainSelector, // sourceChainSelector
-      1n, // sequenceNumber
-      messageId1, // messageId
-      ZeroHash, // messageHash
-      ExecutionState.Success, // state
-      '0x', // returnData
-      100000n, // gasUsed
-    ])
-    const log1: Log_ = {
-      address: offRamp,
-      blockNumber: 1000,
-      transactionHash: '0xTx1',
-      index: 0,
-      topics: encoded1.topics,
-      data: encoded1.data,
-    }
-
-    const encoded2 = iface.encodeEventLog('ExecutionStateChanged', [
-      networkInfo(11155111).chainSelector, // sourceChainSelector
-      2n, // sequenceNumber
-      messageId2, // messageId
-      ZeroHash, // messageHash
-      ExecutionState.Success, // state
-      '0x', // returnData
-      100000n, // gasUsed
-    ])
-    const log2: Log_ = {
-      address: offRamp,
-      blockNumber: 1001,
-      transactionHash: '0xTx2',
-      index: 0,
-      topics: encoded2.topics,
-      data: encoded2.data,
-    }
-
-    dest.setLogs([log1, log2])
-
-    const messageIds = new Set([messageId1, messageId2])
-    const generator = fetchExecutionReceipts(dest, offRamp, messageIds, { startBlock: 1000 })
-
-    const results = []
-    for await (const result of generator) {
-      results.push(result)
-    }
-
-    // In forward mode with startBlock, both receipts should be found and messageIds removed from set
-    assert.ok(results.length >= 2)
-    assert.ok(results.some((r) => r.receipt.messageId === messageId1))
-    assert.ok(results.some((r) => r.receipt.messageId === messageId2))
-  })
-
-  it('should complete when all receipts are found (backward mode)', async () => {
-    const dest = new MockChain(networkInfo(421614).chainSelector, 'Arbitrum Sepolia', 421614)
-
-    const iface = new Interface(OffRamp_1_6_ABI)
-
-    const encoded1 = iface.encodeEventLog('ExecutionStateChanged', [
-      networkInfo(11155111).chainSelector, // sourceChainSelector
-      1n, // sequenceNumber
-      messageId1, // messageId
-      ZeroHash, // messageHash
-      ExecutionState.Success, // state
-      '0x', // returnData
-      100000n, // gasUsed
-    ])
-    const log1: Log_ = {
-      address: offRamp,
-      blockNumber: 1000,
-      transactionHash: '0xTx1',
-      index: 0,
-      topics: encoded1.topics,
-      data: encoded1.data,
-    }
-
-    dest.setLogs([log1])
-
-    const messageIds = new Set([messageId1])
-    const generator = fetchExecutionReceipts(dest, offRamp, messageIds)
-
-    const results = []
-    for await (const result of generator) {
-      results.push(result)
-    }
-
-    // In backward mode without startBlock, receipt should be found and messageId removed
-    assert.ok(results.length >= 1)
-    assert.ok(results.some((r) => r.receipt.messageId === messageId1))
-  })
-
-  it('should filter out non-matching message IDs', async () => {
-    const dest = new MockChain(networkInfo(421614).chainSelector, 'Arbitrum Sepolia', 421614)
-
-    const iface = new Interface(OffRamp_1_6_ABI)
-
-    const wrongMessageId = '0x9999999999999999999999999999999999999999999999999999999999999999'
-
-    const encoded1 = iface.encodeEventLog('ExecutionStateChanged', [
-      networkInfo(11155111).chainSelector, // sourceChainSelector
-      1n, // sequenceNumber
-      wrongMessageId, // messageId
-      ZeroHash, // messageHash
-      ExecutionState.Success, // state
-      '0x', // returnData
-      100000n, // gasUsed
-    ])
-    const log1: Log_ = {
-      address: offRamp,
-      blockNumber: 1000,
-      transactionHash: '0xTx1',
-      index: 0,
-      topics: encoded1.topics,
-      data: encoded1.data,
-    }
-
-    dest.setLogs([log1])
-
-    const messageIds = new Set([messageId1])
-    const generator = fetchExecutionReceipts(dest, offRamp, messageIds)
-
-    const results = []
-    for await (const result of generator) {
-      results.push(result)
-    }
-
-    assert.equal(results.length, 0)
   })
 })

@@ -5,8 +5,8 @@ import { dataSlice, getNumber } from 'ethers'
 
 // Import index.ts to ensure all Chain classes are loaded and registered
 import './index.ts'
-import { ChainFamily } from './chain.ts'
 import { decodeExtraArgs, encodeExtraArgs } from './extra-args.ts'
+import { ChainFamily } from './types.ts'
 
 describe('encodeExtraArgs', () => {
   describe('EVM extra args', () => {

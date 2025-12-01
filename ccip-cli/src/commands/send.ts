@@ -300,7 +300,7 @@ async function sendMessage(
   )
 
   // print CCIPRequest from tx receipt
-  const request = (await fetchCCIPRequestsInTx(tx))[0]
+  const request = (await fetchCCIPRequestsInTx(source, tx))[0]
 
   switch (argv.format) {
     case Format.log:

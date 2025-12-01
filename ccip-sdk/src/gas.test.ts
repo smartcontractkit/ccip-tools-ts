@@ -3,9 +3,8 @@ import { after, beforeEach, describe, it, mock } from 'node:test'
 
 import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
-import { ChainFamily } from './chain.ts'
 import { estimateExecGasForRequest } from './gas.ts'
-import { CCIPVersion } from './types.ts'
+import { CCIPVersion, ChainFamily } from './types.ts'
 
 // Test doubles - we create mock chain objects that implement the minimal interface needed
 // The discoverOffRamp function performs a complex cross-check between chains, so we need

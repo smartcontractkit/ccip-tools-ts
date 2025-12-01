@@ -1,7 +1,7 @@
 import { type BytesLike, id } from 'ethers'
 
-import { ChainFamily } from './chain.ts'
 import { supportedChains } from './supported-chains.ts'
+import { ChainFamily } from './types.ts'
 
 export const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'
 export const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'

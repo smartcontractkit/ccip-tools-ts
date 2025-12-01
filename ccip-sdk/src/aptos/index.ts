@@ -23,14 +23,7 @@ import {
 import moize from 'moize'
 
 import { ccipSend, getFee } from './send.ts'
-import {
-  type ChainTransaction,
-  type LogFilter,
-  type TokenInfo,
-  type TokenPoolRemote,
-  Chain,
-  ChainFamily,
-} from '../chain.ts'
+import { type LogFilter, type TokenInfo, type TokenPoolRemote, Chain } from '../chain.ts'
 import {
   type EVMExtraArgsV2,
   type ExtraArgs,
@@ -40,17 +33,19 @@ import {
 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
-import type {
-  AnyMessage,
-  CCIPMessage,
-  CCIPRequest,
-  CommitReport,
-  ExecutionReceipt,
-  ExecutionReport,
-  Lane,
-  Log_,
-  NetworkInfo,
-  OffchainTokenData,
+import {
+  type AnyMessage,
+  type CCIPMessage,
+  type CCIPRequest,
+  type ChainTransaction,
+  type CommitReport,
+  type ExecutionReceipt,
+  type ExecutionReport,
+  type Lane,
+  type Log_,
+  type NetworkInfo,
+  type OffchainTokenData,
+  ChainFamily,
 } from '../types.ts'
 import {
   convertKeysToCamelCase,
@@ -170,7 +165,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     if (tx.type !== TransactionResponseType.User) throw new Error('Invalid transaction type')
 
     return {
-      chain: this,
       hash: tx.hash,
       blockNumber: +tx.version,
       from: tx.sender,

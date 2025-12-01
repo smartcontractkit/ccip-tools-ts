@@ -36,15 +36,15 @@ import {
   toBigInt,
 } from 'ethers'
 import moize, { type Moized } from 'moize'
+import type { PickDeep } from 'type-fest'
 
 import {
-  type ChainTransaction,
+  type ChainStatic,
   type LogFilter,
   type RateLimiterState,
   type TokenInfo,
   type TokenPoolRemote,
   Chain,
-  ChainFamily,
 } from '../chain.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
@@ -56,6 +56,7 @@ import {
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
+  type ChainTransaction,
   type CommitReport,
   type ExecutionReceipt,
   type ExecutionReport,
@@ -65,6 +66,7 @@ import {
   type NetworkInfo,
   type OffchainTokenData,
   CCIPVersion,
+  ChainFamily,
   ExecutionState,
 } from '../types.ts'
 import {
@@ -314,7 +316,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       : []
 
     const chainTx: SolanaTransaction = {
-      chain: this,
       hash,
       logs: [] as SolanaLog[],
       blockNumber: tx.slot,
@@ -1053,11 +1054,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    */
   async fetchCommitReport(
     commitStore: string,
-    request: {
-      lane: Lane
-      message: { header: { sequenceNumber: bigint } }
-      timestamp?: number
-    },
+    request: PickDeep<CCIPRequest, 'lane' | 'message.header.sequenceNumber' | 'tx.timestamp'>,
     hints?: { startBlock?: number; page?: number },
   ): Promise<CCIPCommit> {
     const commitsAroundSeqNum = await this.connection.getProgramAccounts(
@@ -1118,38 +1115,40 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   // specialized override with stricter address-of-interest
   async *fetchExecutionReceipts(
     offRamp: string,
-    messageIds: Set<string>,
-    hints?: { startBlock?: number; startTime?: number; page?: number; commit?: CommitReport },
-  ): AsyncGenerator<CCIPExecution> {
-    if (!hints?.commit) {
+    request: CCIPRequest,
+    commit?: CCIPCommit,
+    hints?: { page?: number },
+  ): AsyncIterableIterator<CCIPExecution> {
+    if (!commit) {
       // if no commit, fall back to generic implementation
-      yield* super.fetchExecutionReceipts(offRamp, messageIds, hints)
+      yield* super.fetchExecutionReceipts(offRamp, request, commit, hints)
       return
     }
     // otherwise, use `commit_report` PDA as more specialized address
     const [commitReportPda] = PublicKey.findProgramAddressSync(
       [
         Buffer.from('commit_report'),
-        toLeArray(hints.commit.sourceChainSelector, 8),
-        bytesToBuffer(hints.commit.merkleRoot),
+        toLeArray(commit.report.sourceChainSelector, 8),
+        bytesToBuffer(commit.report.merkleRoot),
       ],
       new PublicKey(offRamp),
     )
     // rest is similar to generic implemenetation
-    const onlyLast = !hints?.startBlock && !hints?.startTime // backwards
+    const onlyLast = !commit.log.blockNumber && !request.tx.timestamp // backwards
     for await (const log of this.getLogs({
+      startBlock: commit?.log.blockNumber,
+      startTime: request.tx.timestamp,
       ...hints,
       programs: [offRamp],
       address: commitReportPda.toBase58(),
       topics: ['ExecutionStateChanged'],
     })) {
-      const receipt = (this.constructor as typeof SolanaChain).decodeReceipt(log)
-      if (!receipt || !messageIds.has(receipt.messageId)) continue
-      if (onlyLast || receipt.state === ExecutionState.Success) messageIds.delete(receipt.messageId)
+      const receipt = (this.constructor as ChainStatic).decodeReceipt(log)
+      if (!receipt || receipt.messageId !== request.message.header.messageId) continue
 
-      const timestamp = await this.getBlockTimestamp(log.blockNumber)
+      const timestamp = log.tx?.timestamp ?? (await this.getBlockTimestamp(log.blockNumber))
       yield { receipt, log, timestamp }
-      if (!messageIds.size) break
+      if (onlyLast || receipt.state === ExecutionState.Success) break
     }
   }
 

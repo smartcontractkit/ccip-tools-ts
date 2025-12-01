@@ -1,4 +1,4 @@
-import type { ChainFamily } from './chain.ts'
+import type { ChainFamily } from './types.ts'
 
 type Selectors = Record<
   string,

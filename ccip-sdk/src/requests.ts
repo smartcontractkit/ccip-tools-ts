@@ -3,17 +3,18 @@ import util from 'util'
 import { isBytesLike, toBigInt } from 'ethers'
 import yaml from 'yaml'
 
-import {
-  type Chain,
-  type ChainStatic,
-  type ChainTransaction,
-  type LogFilter,
-  ChainFamily,
-} from './chain.ts'
+import type { Chain, ChainStatic, LogFilter } from './chain.ts'
 import type { EVMChain } from './evm/index.ts'
 import { decodeExtraArgs } from './extra-args.ts'
 import { supportedChains } from './supported-chains.ts'
-import type { CCIPMessage, CCIPRequest, CCIPVersion, Log_ } from './types.ts'
+import {
+  type CCIPMessage,
+  type CCIPRequest,
+  type CCIPVersion,
+  type ChainTransaction,
+  type Log_,
+  ChainFamily,
+} from './types.ts'
 import { convertKeysToCamelCase, decodeAddress, leToBigInt, networkInfo } from './utils.ts'
 
 function decodeJsonMessage(data: Record<string, unknown>) {
@@ -116,10 +117,11 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
  * @param tx - TransactionReceipt to search in
  * @returns CCIP messages in the transaction (at least one)
  **/
-export async function fetchCCIPRequestsInTx(tx: ChainTransaction): Promise<CCIPRequest[]> {
-  const source = tx.chain
+export async function fetchCCIPRequestsInTx(
+  source: Chain,
+  tx: ChainTransaction,
+): Promise<CCIPRequest[]> {
   const txHash = tx.hash
-  const timestamp = tx.timestamp
 
   const requests: CCIPRequest[] = []
   for (const log of tx.logs) {
@@ -139,7 +141,7 @@ export async function fetchCCIPRequestsInTx(tx: ChainTransaction): Promise<CCIPR
     } else {
       lane = await (source as EVMChain).getLaneForOnRamp(log.address)
     }
-    requests.push({ lane, message, log, tx, timestamp })
+    requests.push({ lane, message, log, tx })
   }
   if (!requests.length) {
     throw new Error(`Could not find any CCIPSendRequested message in tx: ${txHash}`)
@@ -189,7 +191,6 @@ export async function fetchCCIPMessageById(
       message,
       log,
       tx,
-      timestamp: tx.timestamp,
     }
   }
   throw new Error('Could not find a CCIPSendRequested message with messageId: ' + messageId)

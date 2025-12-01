@@ -1,20 +1,22 @@
 import { type BytesLike, isBytesLike } from 'ethers'
 
 import { AptosChain } from '../aptos/index.ts'
-import { type ChainTransaction, type LogFilter, Chain, ChainFamily } from '../chain.ts'
+import { type LogFilter, Chain } from '../chain.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
-import type {
-  AnyMessage,
-  CCIPRequest,
-  CommitReport,
-  ExecutionReceipt,
-  ExecutionReport,
-  Lane,
-  Log_,
-  NetworkInfo,
-  OffchainTokenData,
+import {
+  type AnyMessage,
+  type CCIPRequest,
+  type ChainTransaction,
+  type CommitReport,
+  type ExecutionReceipt,
+  type ExecutionReport,
+  type Lane,
+  type Log_,
+  type NetworkInfo,
+  type OffchainTokenData,
+  ChainFamily,
 } from '../types.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
 

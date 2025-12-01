@@ -16,11 +16,10 @@ import {
 import BN from 'bn.js'
 import { hexlify } from 'ethers'
 
-import type { ExecutionReport } from '../types.ts'
+import type { ChainTransaction, ExecutionReport } from '../types.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
 import type { CCIPMessage_V1_6_Solana } from './types.ts'
-import type { ChainTransaction } from '../chain.ts'
 import { getDataBytes, sleep, toLeArray } from '../utils.ts'
 import { bytesToBuffer, simulateTransaction, simulationProvider } from './utils.ts'
 import './patchBorsh.ts'

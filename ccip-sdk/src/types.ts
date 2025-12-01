@@ -1,7 +1,6 @@
 import type { AbiParametersToPrimitiveTypes, ExtractAbiEvent } from 'abitype'
 import type { BytesLike, Log } from 'ethers'
 
-import type { ChainFamily, ChainTransaction } from './chain.ts'
 import type OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
 import type { CCIPMessage_EVM, CCIPMessage_V1_6_EVM } from './evm/messages.ts'
 import type { ExtraArgs } from './extra-args.ts'
@@ -9,19 +8,6 @@ import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
 import type { CCIPMessage_V1_6_Sui } from './sui/types.ts'
 // v1.6 Base type from EVM contains the intersection of all other CCIPMessage v1.6 types
 export type { CCIPMessage_V1_6 } from './evm/messages.ts'
-
-/**
- * DeepReadonly is a type that recursively makes all properties of an object readonly.
- */
-export type DeepReadonly<T> = Readonly<{
-  [K in keyof T]: T[K] extends number | string | symbol // Is it a primitive? Then make it readonly
-    ? Readonly<T[K]>
-    : // Is it an array of items? Then make the array readonly and the item as well
-      T[K] extends Array<infer A>
-      ? Readonly<Array<DeepReadonly<A>>>
-      : // It is some other object, make it readonly as well
-        DeepReadonly<T[K]>
-}>
 
 /**
  * "Fix" for deeply intersecting types containing arrays: A[] & B[] => (A & B)[]
@@ -51,6 +37,14 @@ export type MergeArrayElements<T, U> = {
         ? U[K]
         : never
 }
+
+export const ChainFamily = {
+  EVM: 'evm',
+  Solana: 'solana',
+  Aptos: 'aptos',
+  Sui: 'sui',
+} as const
+export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
 
 export const CCIPVersion = {
   V1_2: '1.2.0',
@@ -91,12 +85,20 @@ export type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'blockNumber' | 't
   tx?: ChainTransaction
 }
 
+export type ChainTransaction = {
+  hash: string
+  logs: readonly Log_[]
+  blockNumber: number
+  timestamp: number
+  from: string
+  error?: unknown
+}
+
 export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
   lane: Lane<V>
   message: CCIPMessage<V>
   log: Log_
-  tx: { logs: readonly Log_[]; from?: string; error?: unknown }
-  timestamp: number
+  tx: { logs: readonly Log_[]; timestamp: number; from?: string; error?: unknown }
 }
 
 export type CommitReport = AbiParametersToPrimitiveTypes<

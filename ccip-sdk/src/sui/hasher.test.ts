@@ -3,10 +3,9 @@ import { describe, it } from 'node:test'
 
 import { zeroPadValue } from 'ethers'
 
-import { ChainFamily } from '../chain.ts'
 import { encodeExtraArgs } from '../extra-args.ts'
 import '../index.ts'
-import { type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
+import { type CCIPMessage_V1_6, CCIPVersion, ChainFamily } from '../types.ts'
 import { getSuiLeafHasher, hashSuiMetadata, hashV16SuiMessage } from './hasher.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
 

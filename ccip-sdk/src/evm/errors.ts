@@ -12,8 +12,8 @@ import {
 } from 'ethers'
 
 import { defaultAbiCoder, interfaces } from './const.ts'
-import { ChainFamily } from '../chain.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
+import { ChainFamily } from '../types.ts'
 
 /**
  * Get error data from an error object, if possible

@@ -3,12 +3,10 @@ export {
   type Chain,
   type ChainGetter,
   type ChainStatic,
-  type ChainTransaction,
   type LogFilter,
   type RateLimiterState,
   type TokenInfo,
   type TokenPoolRemote,
-  ChainFamily,
 } from './chain.ts'
 export { EVMChain } from './evm/index.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
@@ -39,6 +37,7 @@ export {
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
+  type ChainTransaction,
   type CommitReport,
   type ExecutionReceipt,
   type ExecutionReport,
@@ -46,6 +45,7 @@ export {
   type NetworkInfo,
   type OffchainTokenData,
   CCIPVersion,
+  ChainFamily,
   ExecutionState,
 } from './types.ts'
 export { bigIntReplacer, bigIntReviver, decodeAddress, getDataBytes, networkInfo } from './utils.ts'

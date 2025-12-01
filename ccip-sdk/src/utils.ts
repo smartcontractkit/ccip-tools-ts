@@ -13,10 +13,10 @@ import {
 } from 'ethers'
 import moize from 'moize'
 
-import { type Chain, ChainFamily } from './chain.ts'
+import type { Chain } from './chain.ts'
 import SELECTORS from './selectors.ts'
 import { supportedChains } from './supported-chains.ts'
-import type { NetworkInfo } from './types.ts'
+import { type NetworkInfo, ChainFamily } from './types.ts'
 
 /**
  * Returns *some* block number with timestamp prior to `timestamp`

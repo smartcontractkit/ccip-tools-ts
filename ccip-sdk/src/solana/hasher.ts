@@ -10,10 +10,11 @@ import {
   toUtf8Bytes,
   zeroPadValue,
 } from 'ethers'
+import type { ReadonlyDeep } from 'type-fest'
 
 import { decodeExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/index.ts'
-import { type CCIPMessage, type DeepReadonly, type Lane, CCIPVersion } from '../types.ts'
+import { type CCIPMessage, type Lane, CCIPVersion } from '../types.ts'
 import { getAddressBytes, getDataBytes, networkInfo, toLeArray } from '../utils.ts'
 
 const SvmExtraArgsSchema = {
@@ -41,7 +42,7 @@ export function getV16SolanaLeafHasher(lane: Lane): LeafHasher<typeof CCIPVersio
   if (lane.version !== CCIPVersion.V1_6)
     throw new Error(`Unsupported lane version: ${lane.version}`)
 
-  return (message: DeepReadonly<CCIPMessage<typeof CCIPVersion.V1_6>>): string => {
+  return (message: ReadonlyDeep<CCIPMessage<typeof CCIPVersion.V1_6>>): string => {
     let parsedArgs
     if ('accountIsWritableBitmap' in message) {
       parsedArgs = {
