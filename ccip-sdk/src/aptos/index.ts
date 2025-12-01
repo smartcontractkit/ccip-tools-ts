@@ -190,18 +190,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     yield* streamAptosLogs(this.provider, opts)
   }
 
-  async typeAndVersion(
-    address: string,
-  ): Promise<
-    | [type_: string, version: string, typeAndVersion: string]
-    | [type_: string, version: string, typeAndVersion: string, suffix: string]
-  > {
+  async typeAndVersion(address: string) {
+    // requires address with `::<module>` suffix
     const [typeAndVersion] = await this.provider.view<[string]>({
       payload: {
         function: `${address}::type_and_version` as `${string}::${string}::type_and_version`,
       },
     })
-
     return parseTypeAndVersion(typeAndVersion)
   }
 

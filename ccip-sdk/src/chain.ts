@@ -123,10 +123,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract typeAndVersion(
     address: string,
-  ): Promise<
-    | [type_: string, version: string, typeAndVersion: string]
-    | [type_: string, version: string, typeAndVersion: string, suffix: string]
-  >
+  ): Promise<[type: string, version: string, typeAndVersion: string, suffix?: string]>
 
   /**
    * Fetch the Router address set in OnRamp config

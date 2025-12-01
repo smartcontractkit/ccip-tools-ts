@@ -305,7 +305,7 @@ export function parseTypeAndVersion(
     throw new Error(
       `Invalid typeAndVersion: "${typeAndVersion}", len=${typeAndVersion.length}, hex=0x${Buffer.from(typeAndVersion).toString('hex')}`,
     )
-  const [_, typeRaw, version] = match
+  const [, typeRaw, version] = match
   // some string normalization
   const type = typeRaw
     .replaceAll(/-(\w)/g, (_, w: string) => w.toUpperCase()) // kebabToPascal
