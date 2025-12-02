@@ -20,7 +20,7 @@ import {
   isHexString,
   zeroPadValue,
 } from 'ethers'
-import moize from 'moize'
+import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { ccipSend, getFee } from './send.ts'
@@ -91,38 +91,38 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
 
     this.provider = provider
     this.network = network
-    this.typeAndVersion = moize.default(this.typeAndVersion.bind(this), {
+    this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
       maxSize: 100,
       maxArgs: 1,
-      maxAge: 60e3, // 1min
+      expires: 60e3, // 1min
     })
-    this.getTransaction = moize.default(this.getTransaction.bind(this), {
-      maxSize: 100,
-      maxArgs: 1,
-    })
-    this.getTokenForTokenPool = moize.default(this.getTokenForTokenPool.bind(this), {
+    this.getTransaction = memoize(this.getTransaction.bind(this), {
       maxSize: 100,
       maxArgs: 1,
     })
-    this.getTokenInfo = moize.default((token) => getTokenInfo(this.provider, token), {
+    this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this), {
+      maxSize: 100,
+      maxArgs: 1,
+    })
+    this.getTokenInfo = memoize((token) => getTokenInfo(this.provider, token), {
       maxSize: 100,
       maxArgs: 1,
     })
 
-    this._getAccountModulesNames = moize.default(
+    this._getAccountModulesNames = memoize(
       (address) =>
         this.provider
           .getAccountModules({ accountAddress: address })
           .then((modules) => modules.map(({ abi }) => abi!.name)),
       { maxSize: 100, maxArgs: 1 },
     )
-    this.getWallet = moize.default(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
-    this.provider.getTransactionByVersion = moize.default(
+    this.getWallet = memoize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
+    this.provider.getTransactionByVersion = memoize(
       this.provider.getTransactionByVersion.bind(this.provider),
       {
         maxSize: 100,
-        isPromise: true,
-        transformArgs: ([arg]) => [(arg as { ledgerVersion: number }).ledgerVersion],
+        async: true,
+        transformKey: ([arg]) => [(arg as { ledgerVersion: number }).ledgerVersion],
       },
     )
   }

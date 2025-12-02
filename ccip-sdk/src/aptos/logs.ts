@@ -5,7 +5,7 @@ import {
   TransactionResponseType,
   getAptosFullNode,
 } from '@aptos-labs/ts-sdk'
-import moize from 'moize'
+import { memoize } from 'micro-memoize'
 
 import type { LogFilter } from '../chain.ts'
 import type { Log_ } from '../types.ts'
@@ -78,7 +78,7 @@ async function* fetchEventsForward(
   stateAddr: string,
   limit = 100,
 ): AsyncGenerator<ResEvent> {
-  const fetchBatch = moize.default(
+  const fetchBatch = memoize(
     async (start?: number) => {
       const { data }: { data: ResEvent[] } = await getAptosFullNode({
         aptosConfig: provider.config,
@@ -86,7 +86,7 @@ async function* fetchEventsForward(
         path: `accounts/${stateAddr}/events/${opts.address}::${eventHandlerField}`,
         params: { start, limit },
       })
-      if (!start) fetchBatch.set([+data[0].sequence_number], data)
+      if (!start) fetchBatch.cache.set([+data[0].sequence_number], Promise.resolve(data))
       return data
     },
     { maxArgs: 1, maxSize: 100 },

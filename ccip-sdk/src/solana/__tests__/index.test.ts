@@ -364,9 +364,6 @@ describe('SolanaChain getTokenInfo - Integration Demo', () => {
 
     assert.equal(result1.symbol, 'USDC')
     assert.equal(result1.decimals, 9)
-    // getAccountInfo is wrapped by moize, so we can't easily check if it was called
-    // The important thing is the result is correct
-
     // Test Case 2: SPL token missing symbol - should fallback to Metaplex
     const splTokenWithoutSymbol = {
       value: {

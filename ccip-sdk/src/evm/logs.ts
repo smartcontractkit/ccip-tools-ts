@@ -7,7 +7,7 @@ import {
   JsonRpcProvider,
   isHexString,
 } from 'ethers'
-import moize from 'moize'
+import { memoize } from 'micro-memoize'
 
 import type { LogFilter } from '../chain.ts'
 import { blockRangeGenerator, getSomeBlockNumberBefore } from '../utils.ts'
@@ -16,7 +16,7 @@ import { getAllFragmentsMatchingEvents } from './const.ts'
 const MAX_PARALLEL_JOBS = 24
 const PER_REQUEST_TIMEOUT = 5000
 
-const getFallbackRpcsList = moize.default(
+const getFallbackRpcsList = memoize(
   async () => {
     const response = await fetch('https://chainlist.org/rpcs.json')
     const data = await response.json()
@@ -26,7 +26,7 @@ const getFallbackRpcsList = moize.default(
       explorers: { url: string }[]
     }[]
   },
-  { isPromise: true },
+  { async: true },
 )
 
 // like Promise.any, but receives Promise factories and spawn a maximum number of them in parallel

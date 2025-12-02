@@ -1,4 +1,4 @@
-import moize from 'moize'
+import { memoize } from 'micro-memoize'
 
 import type { Chain, ChainStatic } from './chain.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
@@ -57,7 +57,7 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
   }
 }
 
-export const discoverOffRamp = moize.default(
+export const discoverOffRamp = memoize(
   async function discoverOffRamp_(source: Chain, dest: Chain, onRamp: string): Promise<string> {
     const sourceRouter = await source.getRouterForOnRamp(onRamp, dest.network.chainSelector)
     const sourceOffRamps = await source.getOffRampsForRouter(
@@ -84,11 +84,8 @@ export const discoverOffRamp = moize.default(
     throw new Error(`No matching offRamp found for "${onRamp}" on "${dest.network.name}"`)
   },
   {
-    transformArgs: ([source, dest, onRamp]) => [
-      (source as Chain).network.chainSelector,
-      (dest as Chain).network.chainSelector,
-      onRamp as string,
-    ],
+    transformKey: ([source, dest, onRamp]) =>
+      [source.network.chainSelector, dest.network.chainSelector, onRamp] as const,
   },
 )
 

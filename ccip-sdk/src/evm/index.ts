@@ -30,7 +30,7 @@ import {
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
-import moize, { type Key } from 'moize'
+import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { type LogFilter, type TokenPoolRemote, Chain } from '../chain.ts'
@@ -159,32 +159,33 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.destroy$ = new Promise<void>((resolve) => (this.destroy = resolve))
     void this.destroy$.finally(() => provider.destroy())
 
-    this.typeAndVersion = moize.default(this.typeAndVersion.bind(this))
-    this.provider.getBlock = moize.default(provider.getBlock.bind(provider), {
+    this.typeAndVersion = memoize(this.typeAndVersion.bind(this))
+
+    this.provider.getBlock = memoize(provider.getBlock.bind(provider), {
       maxSize: 100,
       maxArgs: 1,
-      isPromise: true,
-      updateCacheForKey: ([block]) => typeof block !== 'number',
+      async: true,
+      forceUpdate: ([block]) => typeof block !== 'number',
     })
-    this.getTransaction = moize.default(this.getTransaction.bind(this), {
+    this.getTransaction = memoize(this.getTransaction.bind(this), {
       maxSize: 100,
-      transformArgs: (args: Key[]) =>
+      transformKey: (args) =>
         typeof args[0] !== 'string'
           ? [(args[0] as unknown as TransactionReceipt).hash]
           : (args as unknown as string[]),
     })
-    this.getTokenForTokenPool = moize.default(this.getTokenForTokenPool.bind(this))
-    this.getNativeTokenForRouter = moize.default(this.getNativeTokenForRouter.bind(this), {
+    this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this))
+    this.getNativeTokenForRouter = memoize(this.getNativeTokenForRouter.bind(this), {
       maxArgs: 1,
-      isPromise: true,
+      async: true,
     })
-    this.getTokenInfo = moize.default(this.getTokenInfo.bind(this))
-    this.getWallet = moize.default(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
-    this.getTokenAdminRegistryFor = moize.default(this.getTokenAdminRegistryFor.bind(this), {
-      isPromise: true,
+    this.getTokenInfo = memoize(this.getTokenInfo.bind(this))
+    this.getWallet = memoize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
+    this.getTokenAdminRegistryFor = memoize(this.getTokenAdminRegistryFor.bind(this), {
+      async: true,
       maxArgs: 1,
     })
-    this.getFeeTokens = moize.default(this.getFeeTokens.bind(this), { isPromise: true, maxArgs: 1 })
+    this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { async: true, maxArgs: 1 })
   }
 
   // overwrite EVMChain.getWallet to implement custom wallet loading

@@ -35,7 +35,7 @@ import {
   isHexString,
   toBigInt,
 } from 'ethers'
-import moize, { type Moized } from 'moize'
+import { type Memoized, memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import {
@@ -167,23 +167,23 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     this.connection = connection
 
     // Memoize expensive operations
-    this.typeAndVersion = moize.default(this.typeAndVersion.bind(this), {
+    this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
       maxArgs: 1,
-      isPromise: true,
+      async: true,
     })
-    this.getBlockTimestamp = moize.default(this.getBlockTimestamp.bind(this), {
-      isPromise: true,
+    this.getBlockTimestamp = memoize(this.getBlockTimestamp.bind(this), {
+      async: true,
       maxSize: 100,
-      updateCacheForKey: (key) => typeof key[key.length - 1] !== 'number',
+      forceUpdate: (key) => typeof key[key.length - 1] !== 'number',
     })
-    this.getTransaction = moize.default(this.getTransaction.bind(this), {
+    this.getTransaction = memoize(this.getTransaction.bind(this), {
       maxSize: 100,
       maxArgs: 1,
     })
-    this.getWallet = moize.default(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
-    this.getTokenForTokenPool = moize.default(this.getTokenForTokenPool.bind(this))
-    this.getTokenInfo = moize.default(this.getTokenInfo.bind(this))
-    this._getSignaturesForAddress = moize.default(
+    this.getWallet = memoize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
+    this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this))
+    this.getTokenInfo = memoize(this.getTokenInfo.bind(this))
+    const getSignaturesForAddress = memoize(
       (programId: string, before?: string) =>
         this.connection.getSignaturesForAddress(
           new PublicKey(programId),
@@ -192,33 +192,27 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         ),
       {
         maxSize: 100,
-        maxAge: 60000,
+        expires: 60000,
         maxArgs: 2,
         isPromise: true,
         updateExpire: true,
         // only expire undefined before (i.e. recent getSignaturesForAddress calls)
-        onExpire: ([, before]) => !before,
       },
     )
+    getSignaturesForAddress.cache.on('delete', (ev) => !ev.key[1])
+    this._getSignaturesForAddress = getSignaturesForAddress
     // cache account info for 30 seconds
-    this.connection.getAccountInfo = moize.default(
-      this.connection.getAccountInfo.bind(this.connection),
-      {
-        maxSize: 100,
-        maxArgs: 2,
-        maxAge: 30e3,
-        transformArgs: ([address, commitment]) =>
-          [(address as PublicKey).toString(), commitment] as const,
-      },
-    )
-
-    this._getRouterConfig = moize.default(this._getRouterConfig.bind(this), {
-      maxArgs: 1,
+    this.connection.getAccountInfo = memoize(this.connection.getAccountInfo.bind(this.connection), {
+      maxSize: 100,
+      maxArgs: 2,
+      expires: 30e3,
+      transformKey: ([address, commitment]) =>
+        [(address as PublicKey).toString(), commitment] as const,
     })
 
-    this.getFeeTokens = moize.default(this.getFeeTokens.bind(this), {
-      maxArgs: 1,
-    })
+    this._getRouterConfig = memoize(this._getRouterConfig.bind(this), { maxArgs: 1 })
+
+    this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { maxArgs: 1 })
   }
 
   static _getConnection(url: string): Connection {
@@ -302,10 +296,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     })
     if (!tx) throw new Error(`Transaction not found: ${hash}`)
     if (tx.blockTime) {
-      ;(this.getBlockTimestamp as Moized<typeof this.getBlockTimestamp>).set(
-        [tx.slot],
-        Promise.resolve(tx.blockTime),
-      )
+      ;(
+        this.getBlockTimestamp as Memoized<typeof this.getBlockTimestamp, { async: true }>
+      ).cache.set([tx.slot], Promise.resolve(tx.blockTime))
     } else {
       tx.blockTime = await this.getBlockTimestamp(tx.slot)
     }

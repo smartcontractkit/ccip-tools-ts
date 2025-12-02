@@ -1,7 +1,7 @@
 import { type AnchorProvider, Program } from '@coral-xyz/anchor'
 import { AddressLookupTableProgram, PublicKey, SystemProgram } from '@solana/web3.js'
 import { dataSlice, hexlify } from 'ethers'
-import moize from 'moize'
+import { memoize } from 'micro-memoize'
 
 import { sleep } from '../utils.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
@@ -30,7 +30,7 @@ export async function cleanUpBuffers(
 
   const seenAccs = new Set<string>()
   const pendingPromises = []
-  const getCurrentSlot = moize.default(
+  const getCurrentSlot = memoize(
     async () => {
       let lastErr
       for (let i = 0; i < 10; i++) {
@@ -44,7 +44,7 @@ export async function cleanUpBuffers(
       }
       throw lastErr
     },
-    { maxAge: 1000, isPromise: true },
+    { maxAge: 1000, async: true },
   )
 
   const closeAlt = async (lookupTable: PublicKey, deactivationSlot: number) => {

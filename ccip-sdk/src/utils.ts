@@ -11,7 +11,7 @@ import {
   toBeHex,
   toBigInt,
 } from 'ethers'
-import moize from 'moize'
+import { memoize } from 'micro-memoize'
 
 import type { Chain } from './chain.ts'
 import SELECTORS from './selectors.ts'
@@ -94,7 +94,7 @@ export async function getSomeBlockNumberBefore(
 }
 
 // memoized so we always output the same object for a given chainId
-const networkInfoFromChainId = moize.default((chainId: NetworkInfo['chainId']): NetworkInfo => {
+const networkInfoFromChainId = memoize((chainId: NetworkInfo['chainId']): NetworkInfo => {
   const sel = SELECTORS[chainId]
   if (!sel?.name) throw new Error(`Chain not found: ${chainId}`)
   return {
@@ -115,7 +115,7 @@ const networkInfoFromChainId = moize.default((chainId: NetworkInfo['chainId']): 
  *   - Chain name as string ("ethereum-mainnet")
  * @returns Complete NetworkInfo object
  */
-export const networkInfo = moize.default(function networkInfo_(
+export const networkInfo = memoize(function networkInfo_(
   selectorOrIdOrName: bigint | number | string,
 ): NetworkInfo {
   let chainId
