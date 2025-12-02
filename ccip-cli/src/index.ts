@@ -74,5 +74,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.error(err)
       throw err
     })
-    .finally(() => clearTimeout(later))
+    .finally(() => {
+      clearTimeout(later)
+      setTimeout(() => {
+        util.inspect.defaultOptions.depth = 2
+        console.debug(
+          'Pending handles after main completion:',
+          (process as any)._getActiveHandles().length, // eslint-disable-line
+        )
+        process.exit()
+      }, 5e3).unref()
+    })
 }

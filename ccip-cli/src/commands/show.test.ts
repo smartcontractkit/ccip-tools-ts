@@ -350,7 +350,7 @@ describe('e2e command show EVM', () => {
       const args = buildShowArgs(TX_HASH)
       const result = await spawnCLI(args, 120000)
 
-      assert.equal(result.exitCode, 0)
+      assert.equal(result.exitCode, 0, result.stdout + result.stderr)
       const output = result.stdout
 
       // Lane information

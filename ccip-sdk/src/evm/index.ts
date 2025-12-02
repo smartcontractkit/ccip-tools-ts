@@ -1286,7 +1286,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           null,
           request.message.header.messageId,
         ],
-        onlyFallback: false,
+        // onlyFallback: false,
       }
     } else /* >= V1.6 */ {
       opts_ = {
@@ -1297,7 +1297,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           null,
           request.message.header.messageId,
         ],
-        onlyFallback: false,
+        // onlyFallback: false,
       }
     }
     yield* super.fetchExecutionReceipts(offRamp, request, commit, opts_)

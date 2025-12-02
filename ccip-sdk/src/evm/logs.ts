@@ -1,10 +1,16 @@
 import util from 'util'
 
-import { type JsonRpcApiProvider, type Log, JsonRpcProvider, isHexString } from 'ethers'
+import {
+  type JsonRpcApiProvider,
+  type Log,
+  FetchRequest,
+  JsonRpcProvider,
+  isHexString,
+} from 'ethers'
 import moize from 'moize'
 
 import type { LogFilter } from '../chain.ts'
-import { blockRangeGenerator, getSomeBlockNumberBefore, sleep } from '../utils.ts'
+import { blockRangeGenerator, getSomeBlockNumberBefore } from '../utils.ts'
 import { getAllFragmentsMatchingEvents } from './const.ts'
 
 const MAX_PARALLEL_JOBS = 24
@@ -98,7 +104,7 @@ async function getFallbackArchiveLogs(
       toBlock: filter.endBlock ?? 'latest',
     })
   }
-  let cancel: (_?: unknown) => void
+  let cancel!: (_?: unknown) => void
   let cancel$ = new Promise<unknown>((resolve) => (cancel = resolve))
   if (destroy) cancel$ = Promise.race([destroy, cancel$])
 
@@ -107,14 +113,24 @@ async function getFallbackArchiveLogs(
     .then((rpcs) => {
       const rpc = rpcs.find(({ chainId: id }) => id === chainId)
       if (!rpc) throw new Error(`No RPC found for chainId=${chainId}`)
-      return rpc.rpc.map(({ url }) => url).filter((url) => url.match(/^https?:\/\//))
+      return Array.from(
+        new Set(rpc.rpc.map(({ url }) => url).filter((url) => url.match(/^https?:\/\//))),
+      )
     })
     .then((urls) =>
       anyPromiseMax(
         urls.map((url) => async () => {
-          const provider = new JsonRpcProvider(url, chainId)
-          void Promise.race([sleep(PER_REQUEST_TIMEOUT), cancel$]).finally(() => {
-            if (url !== winner) provider.destroy()
+          const fetchReq = new FetchRequest(url)
+          fetchReq.timeout = PER_REQUEST_TIMEOUT
+          const provider = new JsonRpcProvider(fetchReq, chainId)
+          void cancel$.finally(() => {
+            if (url === winner) return
+            provider.destroy()
+            try {
+              fetchReq.cancel()
+            } catch (_) {
+              // ignore
+            }
           })
           return [
             provider,
@@ -146,6 +162,7 @@ async function getFallbackArchiveLogs(
         cancel$,
       ),
     )
+    .finally(cancel)
   archiveRpcs[chainId] = providerLogs$.then(([provider]) => provider) // cache provider
   archiveRpcs[chainId].catch(() => {
     delete archiveRpcs[chainId]
@@ -173,7 +190,7 @@ export async function* getEvmLogs(
   const endBlock = filter.endBlock ?? (await provider.getBlockNumber())
   if (
     filter.topics?.length &&
-    filter.topics.every((t: string | string[]): t is string => typeof t === 'string')
+    filter.topics.every((t: string | string[] | null): t is string => typeof t === 'string')
   ) {
     const topics = new Set(
       filter.topics
