@@ -5,6 +5,12 @@ import yargs, { type InferredOptionTypes } from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
 import { Format } from './commands/index.ts'
+import * as manualExec from './commands/manual-exec.ts'
+import * as parse from './commands/parse.ts'
+import * as send from './commands/send.ts'
+import * as sendMultiple from './commands/send-multiple.ts'
+import * as show from './commands/show.ts'
+import * as supportedTokens from './commands/supported-tokens.ts'
 
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
@@ -53,10 +59,12 @@ async function main() {
         console.debug = () => {}
       }
     })
-    .commandDir('commands', {
-      extensions: ['ts'],
-      exclude: /\.test\.ts$/,
-    })
+    .command(show)
+    .command(send)
+    .command(sendMultiple)
+    .command(manualExec)
+    .command(parse)
+    .command(supportedTokens)
     .demandCommand()
     .strict()
     .help()
