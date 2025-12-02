@@ -8,7 +8,7 @@ import type { Chain, LogFilter } from './chain.ts'
 import {
   decodeMessage,
   fetchAllMessagesInBatch,
-  fetchCCIPMessageById,
+  fetchCCIPRequestById,
   fetchCCIPRequestsInTx,
   fetchRequestsForSender,
 } from './requests.ts'
@@ -269,7 +269,7 @@ describe('fetchCCIPMessageById', () => {
       })(),
     )
 
-    const result = await fetchCCIPMessageById(mockedChain as unknown as Chain, '0xMessageId1')
+    const result = await fetchCCIPRequestById(mockedChain as unknown as Chain, '0xMessageId1')
     assert.equal(result.log.index, 1)
     assert.ok(result.message)
     assert.equal(result.tx.timestamp, 1234567890)
@@ -293,7 +293,7 @@ describe('fetchCCIPMessageById', () => {
     )
 
     await assert.rejects(
-      async () => await fetchCCIPMessageById(mockedChain as unknown as Chain, '0xMessageId1'),
+      async () => await fetchCCIPRequestById(mockedChain as unknown as Chain, '0xMessageId1'),
       /Could not find a CCIPSendRequested message with messageId: 0xMessageId1/,
     )
 

@@ -1,12 +1,12 @@
 export { AptosChain } from './aptos/index.ts'
-export {
-  type Chain,
-  type ChainGetter,
-  type ChainStatic,
-  type LogFilter,
-  type RateLimiterState,
-  type TokenInfo,
-  type TokenPoolRemote,
+export type {
+  Chain,
+  ChainGetter,
+  ChainStatic,
+  LogFilter,
+  RateLimiterState,
+  TokenInfo,
+  TokenPoolRemote,
 } from './chain.ts'
 export { EVMChain } from './evm/index.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
@@ -20,14 +20,7 @@ export {
   encodeExtraArgs,
 } from './extra-args.ts'
 export { estimateExecGasForRequest } from './gas.ts'
-export {
-  decodeMessage,
-  fetchAllMessagesInBatch,
-  fetchCCIPMessageById,
-  fetchCCIPRequestsInTx,
-  fetchRequestsForSender,
-  sourceToDestTokenAmounts,
-} from './requests.ts'
+export { decodeMessage, fetchRequestsForSender, sourceToDestTokenAmounts } from './requests.ts'
 export { SolanaChain } from './solana/index.ts'
 export { SuiChain } from './sui/index.ts'
 export { supportedChains } from './supported-chains.ts'

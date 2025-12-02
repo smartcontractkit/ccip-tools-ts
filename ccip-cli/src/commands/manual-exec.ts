@@ -9,8 +9,6 @@ import {
   calculateManualExecProof,
   discoverOffRamp,
   estimateExecGasForRequest,
-  fetchAllMessagesInBatch,
-  fetchCCIPRequestsInTx,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
@@ -117,7 +115,7 @@ async function manualExec(
   // messageId not yet implemented for Solana
   const [getChain, tx$] = fetchChainsFromRpcs(argv, argv.txHash, destroy)
   const [source, tx] = await tx$
-  const request = await selectRequest(await fetchCCIPRequestsInTx(source, tx), 'to know more', argv)
+  const request = await selectRequest(await source.fetchRequestsInTx(tx), 'to know more', argv)
 
   switch (argv.format) {
     case Format.log: {
@@ -150,7 +148,7 @@ async function manualExec(
       break
   }
 
-  const messagesInBatch = await fetchAllMessagesInBatch(source, request, commit.report, argv)
+  const messagesInBatch = await source.fetchAllMessagesInBatch(request, commit.report, argv)
   const execReportProof = calculateManualExecProof(
     messagesInBatch,
     request.lane,

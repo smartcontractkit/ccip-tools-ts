@@ -1,6 +1,7 @@
 import util from 'util'
 
 import { isBytesLike, toBigInt } from 'ethers'
+import type { PickDeep } from 'type-fest'
 import yaml from 'yaml'
 
 import type { Chain, ChainStatic, LogFilter } from './chain.ts'
@@ -114,8 +115,9 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
 
 /**
  * Fetch all CCIP messages in a transaction
- * @param tx - TransactionReceipt to search in
- * @returns CCIP messages in the transaction (at least one)
+ * @param source - Chain
+ * @param tx - ChainTransaction to search in
+ * @returns CCIP requests (messages) in the transaction (at least one)
  **/
 export async function fetchCCIPRequestsInTx(
   source: Chain,
@@ -157,17 +159,17 @@ export async function fetchCCIPRequestsInTx(
  * @param source - Provider to fetch logs from
  * @param messageId - messageId to search for
  * @param hints - Optional hints for pagination
+ * @param hints.address - onRamp address
  * @returns CCIPRequest with given messageId
  **/
-export async function fetchCCIPMessageById(
+export async function fetchCCIPRequestById(
   source: Chain,
   messageId: string,
-  hints?: { page?: number; onRamp?: string },
+  hints?: { page?: number; address?: string },
 ): Promise<CCIPRequest> {
   for await (const log of source.getLogs({
-    ...hints,
-    ...(hints?.onRamp ? { address: hints.onRamp } : {}),
     topics: ['CCIPSendRequested', 'CCIPMessageSent'],
+    ...hints,
   })) {
     const message = (source.constructor as ChainStatic).decodeMessage(log)
     if (message?.header.messageId !== messageId) continue
@@ -175,12 +177,10 @@ export async function fetchCCIPMessageById(
     if ('destChainSelector' in message.header) {
       destChainSelector = message.header.destChainSelector
       ;[, version] = await source.typeAndVersion(log.address)
-    } else if (source.network.family !== ChainFamily.EVM) {
-      throw new Error(`Unsupported network family: ${source.network.family}`)
     } else {
       ;({ destChainSelector, version } = await (source as EVMChain).getLaneForOnRamp(log.address))
     }
-    const tx = await source.getTransaction(log.transactionHash)
+    const tx = log.tx ?? (await source.getTransaction(log.transactionHash))
     return {
       lane: {
         sourceChainSelector: source.network.chainSelector,
@@ -199,19 +199,33 @@ export async function fetchCCIPMessageById(
 // Number of blocks to expand the search window for logs
 const BLOCK_LOG_WINDOW_SIZE = 5000
 
-// Helper function to find the sequence number from CCIPSendRequested event logs
-export async function fetchAllMessagesInBatch<R extends Omit<CCIPRequest, 'tx' | 'timestamp'>>(
-  source: Chain,
+/**
+ * Fetches all CCIP messages contained in a given commit batch
+ * @param source - The source chain
+ * @param request - The request
+ * @param param2
+ * @param param3
+ * @returns
+ */
+export async function fetchAllMessagesInBatch<
+  C extends Chain,
+  R extends PickDeep<
+    CCIPRequest,
+    'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+  >,
+>(
+  source: C,
   request: R,
   { minSeqNr, maxSeqNr }: { minSeqNr: bigint; maxSeqNr: bigint },
-  { page: eventsBatchSize = BLOCK_LOG_WINDOW_SIZE }: { page?: number } = {},
+  opts: Parameters<C['getLogs']>[0] = { page: BLOCK_LOG_WINDOW_SIZE },
 ): Promise<R['message'][]> {
   if (minSeqNr === maxSeqNr) return [request.message]
 
-  const filter: LogFilter = {
-    page: eventsBatchSize,
+  const filter = {
+    page: BLOCK_LOG_WINDOW_SIZE,
     topics: [request.log.topics[0]],
     address: request.log.address,
+    ...opts,
   }
   if (request.message.header.sequenceNumber === maxSeqNr) filter.endBlock = request.log.blockNumber
   else
@@ -220,7 +234,7 @@ export async function fetchAllMessagesInBatch<R extends Omit<CCIPRequest, 'tx' |
       request.log.blockNumber -
       Math.ceil(
         (Number(request.message.header.sequenceNumber - minSeqNr) / Number(maxSeqNr - minSeqNr)) *
-          eventsBatchSize,
+          filter.page,
       )
 
   const messages: R['message'][] = []

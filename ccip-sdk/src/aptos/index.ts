@@ -21,6 +21,7 @@ import {
   zeroPadValue,
 } from 'ethers'
 import moize from 'moize'
+import type { PickDeep } from 'type-fest'
 
 import { ccipSend, getFee } from './send.ts'
 import { type LogFilter, type TokenInfo, type TokenPoolRemote, Chain } from '../chain.ts'
@@ -62,7 +63,12 @@ import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs
 import { getTokenInfo } from './token.ts'
 import { type AptosAsyncAccount, EVMExtraArgsV2Codec, SVMExtraArgsV1Codec } from './types.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import { decodeMessage } from '../requests.ts'
+import {
+  decodeMessage,
+  fetchAllMessagesInBatch,
+  fetchCCIPRequestById,
+  fetchCCIPRequestsInTx,
+} from '../requests.ts'
 
 export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   static readonly family = ChainFamily.Aptos
@@ -143,10 +149,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return this.fromAptosConfig(config)
   }
 
-  async destroy(): Promise<void> {
-    // Nothing to cleanup for Aptos implementation
-  }
-
   async getBlockTimestamp(version: number | 'finalized'): Promise<number> {
     return getVersionTimestamp(this.provider, version)
   }
@@ -182,6 +184,35 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
 
   async *getLogs(opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<Log_> {
     yield* streamAptosLogs(this.provider, opts)
+  }
+
+  async fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+    return fetchCCIPRequestsInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
+  }
+
+  override async fetchRequestById(
+    messageId: string,
+    onRamp?: string,
+    opts?: { page?: number },
+  ): Promise<CCIPRequest> {
+    if (!onRamp) throw new Error('onRamp is required')
+    return fetchCCIPRequestById(this, messageId, {
+      address: await this.getOnRampForRouter(onRamp, 0n),
+      ...opts,
+    })
+  }
+
+  async fetchAllMessagesInBatch<
+    R extends PickDeep<
+      CCIPRequest,
+      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+    >,
+  >(
+    request: R,
+    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    opts?: { page?: number },
+  ): Promise<R['message'][]> {
+    return fetchAllMessagesInBatch(this, request, commit, opts)
   }
 
   async typeAndVersion(address: string) {

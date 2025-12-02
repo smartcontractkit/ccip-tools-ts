@@ -3,11 +3,8 @@ import util from 'util'
 import {
   type CCIPRequest,
   type ChainTransaction,
-  ChainFamily,
   bigIntReplacer,
   discoverOffRamp,
-  fetchCCIPMessageById,
-  fetchCCIPRequestsInTx,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
@@ -42,7 +39,8 @@ export const builder = (yargs: Argv) =>
       },
       'id-from-source': {
         type: 'string',
-        describe: 'Search by messageId instead of txHash; requires specifying source network',
+        describe:
+          'Search by messageId instead of txHash; requires `[onRamp@]sourceNetwork` (onRamp address may be required in some chains)',
       },
     })
 
@@ -64,20 +62,20 @@ async function showRequests(argv: Parameters<typeof handler>[0], destroy: Promis
   // messageId not yet implemented for Solana
   if (argv.idFromSource) {
     getChain = fetchChainsFromRpcs(argv, undefined, destroy)
-    const sourceNetwork = networkInfo(argv.idFromSource)
-    if (sourceNetwork.family === ChainFamily.Solana) {
-      throw new Error(
-        `Message ID search is not yet supported for Solana networks.\n` +
-          `Please use show with Solana transaction signature instead`,
-      )
-    }
+    let idFromSource, onRamp
+    if (argv.idFromSource.includes('@')) {
+      ;[onRamp, idFromSource] = argv.idFromSource.split('@')
+    } else idFromSource = argv.idFromSource
+    const sourceNetwork = networkInfo(idFromSource)
     source = await getChain(sourceNetwork.chainId)
-    request = await fetchCCIPMessageById(source, argv.txHash, argv)
+    if (!source.fetchRequestById)
+      throw new Error(`fetchRequestById not implemented for ${source.constructor.name}`)
+    request = await source.fetchRequestById(argv.txHash, onRamp, argv)
   } else {
     const [getChain_, tx$] = fetchChainsFromRpcs(argv, argv.txHash, destroy)
     getChain = getChain_
     ;[source, tx] = await tx$
-    request = await selectRequest(await fetchCCIPRequestsInTx(source, tx), 'to know more', argv)
+    request = await selectRequest(await source.fetchRequestsInTx(tx), 'to know more', argv)
   }
 
   const offchainTokenData = await source.fetchOffchainTokenData(request)

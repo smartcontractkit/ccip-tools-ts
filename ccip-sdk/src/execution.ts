@@ -120,9 +120,9 @@ export async function* fetchExecutionReceipts(
   for await (const log of dest.getLogs({
     startBlock: commit?.log.blockNumber,
     startTime: request.tx.timestamp,
-    ...hints,
     address: offRamp,
     topics: ['ExecutionStateChanged'],
+    ...hints,
   })) {
     const receipt = (dest.constructor as ChainStatic).decodeReceipt(log)
     if (!receipt || receipt.messageId !== request.message.header.messageId) continue

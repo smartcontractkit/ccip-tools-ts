@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { Interface } from 'ethers'
+import type { PickDeep } from 'type-fest'
 
 import { Chain } from './chain.ts'
 import { fetchCommitReport } from './commits.ts'
@@ -45,10 +46,6 @@ class MockChain extends Chain {
     this.mockTypeAndVersion = typeAndVersion
   }
 
-  async destroy(): Promise<void> {
-    // No-op for mock
-  }
-
   setLogs(logs: Log_[]) {
     this.mockLogs = logs
   }
@@ -65,6 +62,23 @@ class MockChain extends Chain {
       timestamp: this.mockBlockTimestamp,
       from: '0xSender',
     }
+  }
+
+  override async fetchRequestsInTx(_tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+    return []
+  }
+
+  override async fetchAllMessagesInBatch<
+    R extends PickDeep<
+      CCIPRequest,
+      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+    >,
+  >(
+    _request: R,
+    _commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    _opts?: { page?: number },
+  ): Promise<R['message'][]> {
+    return []
   }
 
   async *getLogs(opts: {

@@ -7,7 +7,6 @@ import {
   ChainFamily,
   bigIntReplacer,
   estimateExecGasForRequest,
-  fetchCCIPRequestsInTx,
   getDataBytes,
   networkInfo,
   sourceToDestTokenAmounts,
@@ -300,7 +299,7 @@ async function sendMessage(
   )
 
   // print CCIPRequest from tx receipt
-  const request = (await fetchCCIPRequestsInTx(source, tx))[0]
+  const request = (await source.fetchRequestsInTx(tx))[0]
 
   switch (argv.format) {
     case Format.log:

@@ -39,7 +39,6 @@ import moize, { type Moized } from 'moize'
 import type { PickDeep } from 'type-fest'
 
 import {
-  type ChainStatic,
   type LogFilter,
   type RateLimiterState,
   type TokenInfo,
@@ -97,6 +96,11 @@ import {
   parseSolanaLogs,
   simulationProvider,
 } from './utils.ts'
+import {
+  fetchAllMessagesInBatch,
+  fetchCCIPRequestById,
+  fetchCCIPRequestsInTx,
+} from '../requests.ts'
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
 const offrampCoder = new BorshCoder(CCIP_OFFRAMP_IDL)
@@ -236,11 +240,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   static async fromUrl(url: string): Promise<SolanaChain> {
     const connection = this._getConnection(url)
     return this.fromConnection(connection)
-  }
-
-  async destroy(): Promise<void> {
-    // Solana Connection doesn't have an explicit destroy method
-    // The memoized functions will be garbage collected when the instance is destroyed
   }
 
   static getWallet(_opts?: { wallet?: unknown }): Promise<Wallet> {
@@ -457,6 +456,43 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         yield Object.assign(log, { timestamp: new Date(tx.timestamp * 1000) })
       }
     }
+  }
+
+  async fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+    return fetchCCIPRequestsInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
+  }
+
+  override fetchRequestById(
+    messageId: string,
+    onRamp?: string,
+    opts?: { page?: number },
+  ): Promise<CCIPRequest> {
+    if (!onRamp) throw new Error('onRamp is required')
+    return fetchCCIPRequestById(this, messageId, { address: onRamp, ...opts })
+  }
+
+  async fetchAllMessagesInBatch<
+    R extends PickDeep<
+      CCIPRequest,
+      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+    >,
+  >(
+    request: R,
+    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    opts?: { page?: number },
+  ): Promise<R['message'][]> {
+    const [destChainStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('dest_chain_state'), toLeArray(request.lane.destChainSelector, 8)],
+      new PublicKey(request.log.address),
+    )
+    // fetchAllMessagesInBatch pass opts back to getLogs; use it to narrow getLogs filter only to
+    // txs touching destChainStatePda
+    const opts_: Parameters<SolanaChain['getLogs']>[0] = {
+      ...opts,
+      programs: [request.log.address],
+      address: destChainStatePda.toBase58(),
+    }
+    return fetchAllMessagesInBatch(this, request, commit, opts_)
   }
 
   async typeAndVersion(address: string) {
@@ -1052,7 +1088,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   /**
    * Solana optimization: we use getProgramAccounts with
    */
-  async fetchCommitReport(
+  override async fetchCommitReport(
     commitStore: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.sequenceNumber' | 'tx.timestamp'>,
     hints?: { startBlock?: number; page?: number },
@@ -1113,43 +1149,30 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   // specialized override with stricter address-of-interest
-  async *fetchExecutionReceipts(
+  override async *fetchExecutionReceipts(
     offRamp: string,
-    request: CCIPRequest,
+    request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
-    hints?: { page?: number },
+    opts?: { page?: number },
   ): AsyncIterableIterator<CCIPExecution> {
-    if (!commit) {
-      // if no commit, fall back to generic implementation
-      yield* super.fetchExecutionReceipts(offRamp, request, commit, hints)
-      return
+    let opts_: Parameters<SolanaChain['getLogs']>[0] | undefined = opts
+    if (commit) {
+      // if we know of commit, use `commit_report` PDA as more specialized address
+      const [commitReportPda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('commit_report'),
+          toLeArray(request.lane.sourceChainSelector, 8),
+          bytesToBuffer(commit.report.merkleRoot),
+        ],
+        new PublicKey(offRamp),
+      )
+      opts_ = {
+        ...opts,
+        programs: [offRamp],
+        address: commitReportPda.toBase58(),
+      }
     }
-    // otherwise, use `commit_report` PDA as more specialized address
-    const [commitReportPda] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from('commit_report'),
-        toLeArray(commit.report.sourceChainSelector, 8),
-        bytesToBuffer(commit.report.merkleRoot),
-      ],
-      new PublicKey(offRamp),
-    )
-    // rest is similar to generic implemenetation
-    const onlyLast = !commit.log.blockNumber && !request.tx.timestamp // backwards
-    for await (const log of this.getLogs({
-      startBlock: commit?.log.blockNumber,
-      startTime: request.tx.timestamp,
-      ...hints,
-      programs: [offRamp],
-      address: commitReportPda.toBase58(),
-      topics: ['ExecutionStateChanged'],
-    })) {
-      const receipt = (this.constructor as ChainStatic).decodeReceipt(log)
-      if (!receipt || receipt.messageId !== request.message.header.messageId) continue
-
-      const timestamp = log.tx?.timestamp ?? (await this.getBlockTimestamp(log.blockNumber))
-      yield { receipt, log, timestamp }
-      if (onlyLast || receipt.state === ExecutionState.Success) break
-    }
+    yield* super.fetchExecutionReceipts(offRamp, request, commit, opts_)
   }
 
   async getRegistryTokenConfig(

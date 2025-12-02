@@ -13,6 +13,7 @@
     "rewriteRelativeImportExtensions": true,
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "noImplicitOverride": true
   }
 }

@@ -36,7 +36,7 @@ export type LogFilter = {
   endBlock?: number
   endBefore?: string
   address?: string
-  topics?: (string | string[])[]
+  topics?: (string | string[] | null)[]
   page?: number
 }
 
@@ -101,10 +101,49 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @returns an async iterable iterator of logs
    */
   abstract getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
+
   /**
-   * Fetch the typeAndVersion tag of a given CCIP contract
+   * Fetch all CCIP requests in a transaction
+   * @param tx - ChainTransaction or txHash to fetch requests from
+   * @returns CCIP messages in the transaction (at least one)
+   **/
+  abstract fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]>
+
+  /**
+   * Scan for a CCIP request by message ID
+   * @param messageId - message ID to fetch request for
+   * @param onRamp - address may be required in some implementations, and throw if missing
+   * @returns CCIPRequest
+   **/
+  fetchRequestById?(
+    messageId: string,
+    onRamp?: string,
+    opts?: { page?: number },
+  ): Promise<CCIPRequest>
+
+  /**
+   * Fetches all CCIP messages contained in a given commit batch
+   * @param request - CCIPRequest to fetch batch for
+   * @param commit - CommitReport range (min, max)
+   * @param opts.page - pagination width
+   */
+  abstract fetchAllMessagesInBatch<
+    R extends PickDeep<
+      CCIPRequest,
+      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+    >,
+  >(
+    request: R,
+    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    opts?: { page?: number },
+  ): Promise<R['message'][]>
+  /**
+   * Fetch typeAndVersion for a given CCIP contract address
    * @param address - CCIP contract address
-   * @returns typeAndVersion tag, validated and split
+   * @returns type - parsed type of the contract, e.g. `OnRamp`
+   * @returns version - parsed version of the contract, e.g. `1.6.0`
+   * @returns typeAndVersion - original (unparsed) typeAndVersion() string
+   * @returns suffix - suffix of the version, if any (e.g. `-dev`)
    */
   abstract typeAndVersion(
     address: string,
@@ -230,9 +269,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * May be specialized by some subclasses
    *
    * @param dest - Destination network provider
-   * @param request - CCIP request info
+   * @param request - CCIPRequest to get commit info for
    * @param hints - Additional filtering hints
-   * @returns CCIP commit info
+   * @returns CCIPCommit info, or reject if none found
    **/
   async fetchCommitReport(
     commitStore: string,
@@ -245,13 +284,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Default/generic implementation of fetchExecutionReceipts
    * @param offRamp - Off-ramp address
-   * @param messageIds - Set of message IDs to fetch receipts for
+   * @param request - CCIPRequest to get execution receipts for
+   * @param commit - CCIPCommit info to help narrowing search for executions
    * @param hints - Additional filtering hints
-   * @returns Async generator of CCIP execution receipts
+   * @returns Async generator of CCIPExecution receipts
    */
   async *fetchExecutionReceipts(
     offRamp: string,
-    request: PickDeep<CCIPRequest, 'message.header.messageId' | 'tx.timestamp'>,
+    request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
     hints?: { page?: number },
   ): AsyncIterableIterator<CCIPExecution> {

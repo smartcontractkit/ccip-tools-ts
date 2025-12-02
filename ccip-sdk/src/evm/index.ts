@@ -25,11 +25,13 @@ import {
   hexlify,
   isBytesLike,
   isHexString,
+  toBeHex,
   toBigInt,
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 import moize, { type Key } from 'moize'
+import type { PickDeep } from 'type-fest'
 
 import { type LogFilter, type TokenPoolRemote, Chain } from '../chain.ts'
 import {
@@ -47,6 +49,8 @@ import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
+  type CCIPCommit,
+  type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
   type ChainTransaction,
@@ -99,6 +103,11 @@ import {
   parseSourceTokenData,
 } from './messages.ts'
 import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
+import {
+  fetchAllMessagesInBatch,
+  fetchCCIPRequestById,
+  fetchCCIPRequestsInTx,
+} from '../requests.ts'
 
 const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 
@@ -283,6 +292,48 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   async *getLogs(filter: LogFilter & { onlyFallback?: boolean }): AsyncIterableIterator<Log> {
     yield* getEvmLogs(this.provider, filter, this.destroy$)
+  }
+
+  async fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+    return fetchCCIPRequestsInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
+  }
+
+  override fetchRequestById(
+    messageId: string,
+    onRamp?: string,
+    opts?: { page?: number },
+  ): Promise<CCIPRequest> {
+    return fetchCCIPRequestById(this, messageId, { address: onRamp, ...opts })
+  }
+
+  async fetchAllMessagesInBatch<
+    R extends PickDeep<
+      CCIPRequest,
+      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+    >,
+  >(
+    request: R,
+    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    opts?: { page?: number },
+  ): Promise<R['message'][]> {
+    let opts_: Parameters<EVMChain['getLogs']>[0] | undefined
+    if (request.lane.version >= CCIPVersion.V1_6) {
+      // specialized getLogs filter for v1.6 CCIPMessageSent events, to filter by dest
+      opts_ = {
+        ...opts,
+        topics: [request.log.topics[0], toBeHex(request.lane.destChainSelector, 32)],
+      }
+    }
+    return fetchAllMessagesInBatch(this, request, commit, opts_)
+  }
+
+  async typeAndVersion(address: string) {
+    const contract = new Contract(
+      address,
+      VersionedContractABI,
+      this.provider,
+    ) as unknown as TypedContract<typeof VersionedContractABI>
+    return parseTypeAndVersion(await contract.typeAndVersion())
   }
 
   static decodeMessage(log: {
@@ -551,15 +602,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       }
     }
     return getAddress(hexlify(bytes))
-  }
-
-  async typeAndVersion(address: string) {
-    const contract = new Contract(
-      address,
-      VersionedContractABI,
-      this.provider,
-    ) as unknown as TypedContract<typeof VersionedContractABI>
-    return parseTypeAndVersion(await contract.typeAndVersion())
   }
 
   async getLaneForOnRamp(onRamp: string): Promise<Lane> {
@@ -1176,6 +1218,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ),
     )
   }
+
   async getFeeTokens(router: string) {
     const onRamp = await this._getSomeOnRampFor(router)
     const [_, version] = await this.typeAndVersion(onRamp)
@@ -1226,6 +1269,38 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ),
       ),
     )
+  }
+
+  override async *fetchExecutionReceipts(
+    offRamp: string,
+    request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,
+    commit?: CCIPCommit,
+    opts?: { page?: number },
+  ): AsyncIterableIterator<CCIPExecution> {
+    let opts_: Parameters<EVMChain['getLogs']>[0] | undefined = opts
+    if (request.lane.version < CCIPVersion.V1_6) {
+      opts_ = {
+        ...opts,
+        topics: [
+          interfaces.EVM2EVMOffRamp_v1_5.getEvent('ExecutionStateChanged')!.topicHash,
+          null,
+          request.message.header.messageId,
+        ],
+        onlyFallback: false,
+      }
+    } else /* >= V1.6 */ {
+      opts_ = {
+        ...opts,
+        topics: [
+          interfaces.OffRamp_v1_6.getEvent('ExecutionStateChanged')!.topicHash,
+          toBeHex(request.lane.sourceChainSelector, 32),
+          null,
+          request.message.header.messageId,
+        ],
+        onlyFallback: false,
+      }
+    }
+    yield* super.fetchExecutionReceipts(offRamp, request, commit, opts_)
   }
 }
 

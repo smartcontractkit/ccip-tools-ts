@@ -80,30 +80,29 @@ EVMChain.getWallet = async function(opts?: { provider?: Provider, wallet?: unkno
 
 ### Fetching details of a custom message, per transaction
 ```ts
-import { AptosChain, fetchCCIPMessagesInTx } from '@chainlink/ccip-sdk'
+import { AptosChain } from '@chainlink/ccip-sdk'
 const source = await AptosChain.fromUrl('mainnet')
-const tx = await source.getTransaction('0xTransactionHash')
-const messages = await fetchCCIPMessagesInTx(tx)
-console.log(messages[0])
+const requests = await source.fetchRequestsInTx('0xTransactionHash')
+console.log(requests[0])
 ```
 
 ### Sending a message
 ```ts
-import { SolanaChain, AnyMessage, fetchCCIPRequestsInTx, networkInfo } from '@chainlink/ccip-sdk'
+import { type AnyMessage, SolanaChain, networkInfo } from '@chainlink/ccip-sdk'
 const source = await SolanaChain.fromUrl('https://api.mainnet-beta.solana.com')
 const router = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C' // https://docs.chain.link/ccip/directory/mainnet
-const dest = networkInfo('ethereum-mainnet')
+const dest = networkInfo('ethereum-mainnet').chainSelector
 const message: AnyMessage = {
   receiver: '0xReceiverAddress',
   data: '0xbeef',
   extraArgs: { gasLimit: 250000, allowOutOfOrderExecution: true },
 }
-const fee = await source.getFee(router, dest.chainSelector, message)
+const fee = await source.getFee(router, dest, message)
 const tx = await source.sendMessage(
   router,
-  dest.chainSelector,
+  dest,
   { ...message, fee },
   { wallet: process.env['SOLANA_PRIVATE_KEY'] },
 )
-const messageId = (await fetchCCIPRequestsInTx(tx))[0].message.header.messageId
+const messageId = (await source.fetchRequestsInTx(tx))[0].message.header.messageId
 ```

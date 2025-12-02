@@ -1,4 +1,5 @@
 import { type BytesLike, isBytesLike } from 'ethers'
+import type { PickDeep } from 'type-fest'
 
 import { AptosChain } from '../aptos/index.ts'
 import { type LogFilter, Chain } from '../chain.ts'
@@ -35,10 +36,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  async destroy(): Promise<void> {
-    // Nothing to cleanup for Aptos implementation
-  }
-
   async getBlockTimestamp(_version: number | 'finalized'): Promise<number> {
     return Promise.reject(new Error('Not implemented'))
   }
@@ -51,6 +48,23 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   async *getLogs(_opts: LogFilter & { versionAsHash?: boolean }) {
     await Promise.resolve()
     throw new Error('Not implemented')
+  }
+
+  override async fetchRequestsInTx(_tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+    return Promise.reject(new Error('Not implemented'))
+  }
+
+  override async fetchAllMessagesInBatch<
+    R extends PickDeep<
+      CCIPRequest,
+      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+    >,
+  >(
+    _request: R,
+    _commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    _opts?: { page?: number },
+  ): Promise<R['message'][]> {
+    return Promise.reject(new Error('Not implemented'))
   }
 
   async typeAndVersion(
