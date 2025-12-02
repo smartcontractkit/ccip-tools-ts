@@ -78,7 +78,7 @@ EVMChain.getWallet = async function(opts?: { provider?: Provider, wallet?: unkno
 
 ## Recipes
 
-### Fetching details of a custom message, per transaction
+### Fetching details of a CCIP message
 ```ts
 import { AptosChain } from '@chainlink/ccip-sdk'
 const source = await AptosChain.fromUrl('mainnet')

@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+# [0.91.0] - 2025-12-02 - Pre-release
+- `Chain.sendMessage` now calls `getFee` by itself, if not provided
+- Fix USDC/CCTP attestation fetching in Solana
+- `CCIPRequest` loses `timestamp` property, available in `tx.timestamp` instead
+- Rename `Chain.listFeeTokens` to `getFeeTokens`, fix for v1.5 lanes
+- Move `fetchCCIPRequestsInTx` function to `Chain.fetchRequestsInTx` method
+- Move `fetchAllMessagesInBatch` function to `Chain.fetchAllMessagesInBatch` method
+
 ## [0.90.0] - 2025-11-28 - Pre-release
 - Major overhaul of the tool, split into [ccip-sdk](./ccip-sdk) and [ccip-cli](./ccip-cli) packages
 - SDK now exposes Chain family specific classes, with initial full support to EVM, Solana and Aptos
