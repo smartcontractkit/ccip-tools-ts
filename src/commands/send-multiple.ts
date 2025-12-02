@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { checkbox, confirm, input } from '@inquirer/prompts'
+import { confirm, input } from '@inquirer/prompts'
+import * as readline from 'node:readline'
 import { formatEther, hexlify, isHexString, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
 import yaml from 'yaml'
@@ -167,23 +168,153 @@ async function getRouterForChain(
   return routerEntry ? routerEntry[0] : null
 }
 
+type ChainChoice = { chainId: string; name: string; selector: bigint }
+
+/**
+ * Custom interactive chain selector with:
+ * - Real-time type-to-filter
+ * - Right arrow to select/deselect
+ * - Up/Down to navigate
+ * - Enter to confirm
+ */
 async function selectChainsInteractive(
-  availableChains: { chainId: string; name: string; selector: bigint }[],
-  prompt: string,
-): Promise<{ chainId: string; name: string; selector: bigint }[]> {
-  const choices = availableChains.map((chain) => ({
-    name: `${chain.name} (${chain.chainId})`,
-    value: chain.chainId,
-  }))
+  availableChains: ChainChoice[],
+  promptLabel: string,
+): Promise<ChainChoice[]> {
+  return new Promise((resolve) => {
+    const selected = new Set<string>()
+    let filter = ''
+    let cursorIndex = 0
+    const pageSize = 15
 
-  const selectedIds = await checkbox({
-    message: prompt,
-    choices,
-    pageSize: 20,
-    loop: true,
+    // Enable raw mode for keypress detection
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true)
+    }
+    process.stdin.resume()
+
+    const getFilteredChains = () => {
+      const term = filter.toLowerCase()
+      return term
+        ? availableChains.filter(
+            (c) =>
+              c.name.toLowerCase().includes(term) ||
+              c.chainId.toLowerCase().includes(term),
+          )
+        : availableChains
+    }
+
+    const render = () => {
+      // Clear screen and move to top
+      process.stdout.write('\x1B[2J\x1B[H')
+
+      // Header
+      console.log(`\n${promptLabel}`)
+      console.log('─'.repeat(60))
+      console.log('  Type to filter │ → select │ ↑↓ navigate │ Enter confirm')
+      console.log('─'.repeat(60))
+
+      // Show selected chains
+      if (selected.size > 0) {
+        console.log(`\n✅ Selected (${selected.size}):`)
+        const selectedChains = availableChains.filter((c) => selected.has(c.chainId))
+        selectedChains.forEach((c) => console.log(`   • ${c.name}`))
+      }
+
+      // Filter input
+      console.log(`\n🔍 Filter: ${filter}█`)
+
+      // Filtered list
+      const filtered = getFilteredChains()
+      console.log(`\n   Showing ${Math.min(filtered.length, pageSize)} of ${filtered.length} chains:\n`)
+
+      // Ensure cursor is in bounds
+      if (cursorIndex >= filtered.length) cursorIndex = Math.max(0, filtered.length - 1)
+
+      // Calculate visible window
+      const startIndex = Math.max(0, Math.min(cursorIndex - Math.floor(pageSize / 2), filtered.length - pageSize))
+      const endIndex = Math.min(startIndex + pageSize, filtered.length)
+
+      // Render visible items
+      for (let i = startIndex; i < endIndex; i++) {
+        const chain = filtered[i]
+        const isSelected = selected.has(chain.chainId)
+        const isCursor = i === cursorIndex
+        const prefix = isCursor ? '❯' : ' '
+        const check = isSelected ? '✓' : ' '
+        const highlight = isCursor ? '\x1B[36m' : '' // Cyan for cursor
+        const reset = '\x1B[0m'
+        console.log(`${prefix} [${check}] ${highlight}${chain.name}${reset} (${chain.chainId})`)
+      }
+
+      if (filtered.length === 0) {
+        console.log('   No chains match your filter')
+      }
+    }
+
+    const handleKeypress = (key: Buffer) => {
+      const keyStr = key.toString()
+      const filtered = getFilteredChains()
+
+      // Handle special keys
+      if (keyStr === '\x03') {
+        // Ctrl+C - exit
+        cleanup()
+        process.exit(0)
+      } else if (keyStr === '\r' || keyStr === '\n') {
+        // Enter - confirm selection
+        cleanup()
+        const result = availableChains.filter((c) => selected.has(c.chainId))
+        resolve(result)
+        return
+      } else if (keyStr === '\x1B[A') {
+        // Up arrow
+        cursorIndex = Math.max(0, cursorIndex - 1)
+      } else if (keyStr === '\x1B[B') {
+        // Down arrow
+        cursorIndex = Math.min(filtered.length - 1, cursorIndex + 1)
+      } else if (keyStr === '\x1B[C') {
+        // Right arrow - toggle selection
+        if (filtered.length > 0 && cursorIndex < filtered.length) {
+          const chain = filtered[cursorIndex]
+          if (selected.has(chain.chainId)) {
+            selected.delete(chain.chainId)
+          } else {
+            selected.add(chain.chainId)
+          }
+        }
+      } else if (keyStr === '\x1B[D') {
+        // Left arrow - deselect if selected
+        if (filtered.length > 0 && cursorIndex < filtered.length) {
+          const chain = filtered[cursorIndex]
+          selected.delete(chain.chainId)
+        }
+      } else if (keyStr === '\x7F' || keyStr === '\b') {
+        // Backspace
+        filter = filter.slice(0, -1)
+        cursorIndex = 0
+      } else if (keyStr.length === 1 && keyStr >= ' ' && keyStr <= '~') {
+        // Printable character - add to filter
+        filter += keyStr
+        cursorIndex = 0
+      }
+
+      render()
+    }
+
+    const cleanup = () => {
+      process.stdin.removeListener('data', handleKeypress)
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(false)
+      }
+      process.stdin.pause()
+      // Clear and show final state
+      process.stdout.write('\x1B[2J\x1B[H')
+    }
+
+    process.stdin.on('data', handleKeypress)
+    render()
   })
-
-  return availableChains.filter((chain) => selectedIds.includes(chain.chainId))
 }
 
 async function sendMultiple(
