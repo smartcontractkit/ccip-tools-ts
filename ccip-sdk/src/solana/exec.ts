@@ -22,7 +22,6 @@ import { encodeSolanaOffchainTokenData } from './offchain.ts'
 import type { CCIPMessage_V1_6_Solana } from './types.ts'
 import { getDataBytes, sleep, toLeArray } from '../utils.ts'
 import { bytesToBuffer, simulateTransaction, simulationProvider } from './utils.ts'
-import './patchBorsh.ts'
 
 type ExecStepTx = readonly [reason: string, transactions: VersionedTransaction]
 

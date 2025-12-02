@@ -101,6 +101,7 @@ import {
   fetchCCIPRequestById,
   fetchCCIPRequestsInTx,
 } from '../requests.ts'
+import { patchBorsh } from './patchBorsh.ts'
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
 const offrampCoder = new BorshCoder(CCIP_OFFRAMP_IDL)
@@ -140,6 +141,10 @@ export type SolanaTransaction = MergeArrayElements<
 >
 
 export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
+  static {
+    patchBorsh()
+    supportedChains[ChainFamily.Solana] = SolanaChain
+  }
   static readonly family = ChainFamily.Solana
   static readonly decimals = 9
 
@@ -1479,5 +1484,3 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return program.account.config.fetch(configPda)
   }
 }
-
-supportedChains[ChainFamily.Solana] = SolanaChain

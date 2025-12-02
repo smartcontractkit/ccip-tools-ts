@@ -71,6 +71,9 @@ import {
 } from '../requests.ts'
 
 export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
+  static {
+    supportedChains[ChainFamily.Aptos] = AptosChain
+  }
   static readonly family = ChainFamily.Aptos
   static readonly decimals = 8
 
@@ -683,5 +686,3 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     )
   }
 }
-
-supportedChains[ChainFamily.Aptos] = AptosChain

@@ -1,4 +1,3 @@
-export { AptosChain } from './aptos/index.ts'
 export type {
   Chain,
   ChainGetter,
@@ -8,7 +7,6 @@ export type {
   TokenInfo,
   TokenPoolRemote,
 } from './chain.ts'
-export { EVMChain } from './evm/index.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
 export {
   type EVMExtraArgsV1,
@@ -21,9 +19,6 @@ export {
 } from './extra-args.ts'
 export { estimateExecGasForRequest } from './gas.ts'
 export { decodeMessage, fetchRequestsForSender, sourceToDestTokenAmounts } from './requests.ts'
-export { SolanaChain } from './solana/index.ts'
-export { SuiChain } from './sui/index.ts'
-export { supportedChains } from './supported-chains.ts'
 export {
   type AnyMessage,
   type CCIPCommit,
@@ -42,3 +37,11 @@ export {
   ExecutionState,
 } from './types.ts'
 export { bigIntReplacer, bigIntReviver, decodeAddress, getDataBytes, networkInfo } from './utils.ts'
+
+// chains
+import { AptosChain } from './aptos/index.ts'
+import { EVMChain } from './evm/index.ts'
+import { SolanaChain } from './solana/index.ts'
+import { SuiChain } from './sui/index.ts'
+export { AptosChain, EVMChain, SolanaChain, SuiChain }
+export { supportedChains } from './supported-chains.ts'

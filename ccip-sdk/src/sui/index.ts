@@ -22,6 +22,9 @@ import {
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
 
 export class SuiChain extends Chain<typeof ChainFamily.Sui> {
+  static {
+    supportedChains[ChainFamily.Sui] = SuiChain
+  }
   static readonly family = ChainFamily.Sui
   static readonly decimals = 8
 
@@ -210,5 +213,3 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new Error('Not implemented'))
   }
 }
-
-supportedChains[ChainFamily.Sui] = SuiChain

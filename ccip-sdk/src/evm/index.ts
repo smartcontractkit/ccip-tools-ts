@@ -139,6 +139,9 @@ function resultsToMessage(result: Result): Record<string, unknown> {
 }
 
 export class EVMChain extends Chain<typeof ChainFamily.EVM> {
+  static {
+    supportedChains[ChainFamily.EVM] = EVMChain
+  }
   static readonly family = ChainFamily.EVM
   static readonly decimals = 18
 
@@ -1303,5 +1306,3 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     yield* super.fetchExecutionReceipts(offRamp, request, commit, opts_)
   }
 }
-
-supportedChains[ChainFamily.EVM] = EVMChain
