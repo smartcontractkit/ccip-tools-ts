@@ -1,0 +1,1 @@
+(eval):1: no such file or directory: /Users/joaomoreira/ccip-tools-ts/ccip-cli/node_modules/.bin/tsc

@@ -1,0 +1,20 @@
+
+> @chainlink/ccip-sdk@0.90.0 build
+> npm run clean && tsc -p ./tsconfig.build.json
+
+
+> @chainlink/ccip-sdk@0.90.0 clean
+> rm -rfv ./dist
+
+
+> @chainlink/ccip-cli@0.90.0 build
+> npm run clean && tsc -p ./tsconfig.build.json && npm run patch-dist
+
+
+> @chainlink/ccip-cli@0.90.0 clean
+> rm -rfv ./dist
+
+
+> @chainlink/ccip-cli@0.90.0 patch-dist
+> chmod +x ./dist/index.js && find ./dist -type f -name "*.js" -exec sed -i.bkp 's|@chainlink/ccip-sdk/src/.*\.ts|@chainlink/ccip-sdk|g' {} + && find ./dist -type f -name "*.bkp" -delete
+

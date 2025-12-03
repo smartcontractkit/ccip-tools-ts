@@ -1,0 +1,691 @@
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'yargs@18.0.0',
+npm WARN EBADENGINE   required: { node: '^20.19.0 || ^22.12.0 || >=23' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'yargs-parser@22.0.0',
+npm WARN EBADENGINE   required: { node: '^20.19.0 || ^22.12.0 || >=23' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@aptos-labs/aptos-client@2.0.0',
+npm WARN EBADENGINE   required: { node: '>=20.0.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@aptos-labs/ts-sdk@5.1.5',
+npm WARN EBADENGINE   required: { node: '>=20.0.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@eslint/config-array@0.21.1',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@eslint/config-helpers@0.4.2',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@eslint/core@0.17.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@eslint/eslintrc@3.3.1',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@eslint/js@9.39.1',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@eslint/object-schema@2.1.7',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@eslint/plugin-kit@0.4.1',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@humanfs/core@0.19.1',
+npm WARN EBADENGINE   required: { node: '>=18.18.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@humanfs/node@0.16.7',
+npm WARN EBADENGINE   required: { node: '>=18.18.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@humanwhocodes/retry@0.4.3',
+npm WARN EBADENGINE   required: { node: '>=18.18' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/ansi@2.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/checkbox@5.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/confirm@6.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/core@11.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/editor@5.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/expand@5.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/external-editor@2.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/figures@2.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/input@5.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/number@4.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/password@5.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/prompts@8.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/rawlist@5.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/search@4.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/select@5.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@inquirer/type@4.0.1',
+npm WARN EBADENGINE   required: { node: '>=23.5.0 || ^22.13.0 || ^21.7.0 || ^20.12.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@isaacs/balanced-match@4.0.1',
+npm WARN EBADENGINE   required: { node: '20 || >=22' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@isaacs/brace-expansion@5.0.0',
+npm WARN EBADENGINE   required: { node: '20 || >=22' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@solana/codecs-core@2.3.0',
+npm WARN EBADENGINE   required: { node: '>=20.18.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@solana/codecs-numbers@2.3.0',
+npm WARN EBADENGINE   required: { node: '>=20.18.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@solana/errors@2.3.0',
+npm WARN EBADENGINE   required: { node: '>=20.18.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'commander@14.0.2',
+npm WARN EBADENGINE   required: { node: '>=20' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@typescript-eslint/eslint-plugin@8.47.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@typescript-eslint/parser@8.47.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@typescript-eslint/project-service@8.47.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@typescript-eslint/scope-manager@8.47.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@typescript-eslint/tsconfig-utils@8.47.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@typescript-eslint/type-utils@8.47.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@typescript-eslint/types@8.47.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@typescript-eslint/typescript-estree@8.47.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@typescript-eslint/utils@8.47.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@typescript-eslint/visitor-keys@8.47.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'cliui@9.0.1',
+npm WARN EBADENGINE   required: { node: '>=20' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'eslint@9.39.1',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'eslint-scope@8.4.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'eslint-visitor-keys@4.2.1',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'espree@10.4.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'glob@13.0.0',
+npm WARN EBADENGINE   required: { node: '20 || >=22' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'minimatch@10.1.1',
+npm WARN EBADENGINE   required: { node: '20 || >=22' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'lru-cache@11.2.2',
+npm WARN EBADENGINE   required: { node: '20 || >=22' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'mute-stream@3.0.0',
+npm WARN EBADENGINE   required: { node: '^20.17.0 || >=22.9.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'path-scurry@2.0.1',
+npm WARN EBADENGINE   required: { node: '20 || >=22' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'typescript-eslint@8.47.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.13.0', npm: '8.19.3' }
+npm WARN EBADENGINE }
+
+> @chainlink/ccip-tools-ts@0.90.0 prepare
+> npm run build
+
+
+> @chainlink/ccip-tools-ts@0.90.0 build
+> npm run clean && npm run generate && npm run build --workspaces
+
+
+> @chainlink/ccip-tools-ts@0.90.0 clean
+> npm run clean:coverage && npm run clean --workspaces
+
+
+> @chainlink/ccip-tools-ts@0.90.0 clean:coverage
+> rm -rfv ./.coverage ./.c8_output
+
+
+> @chainlink/ccip-sdk@0.90.0 clean
+> rm -rfv ./dist
+
+./dist/extra-args.d.ts.map
+./dist/hasher/hasher.js.map
+./dist/hasher/hasher.d.ts.map
+./dist/hasher/merklemulti.js
+./dist/hasher/common.d.ts
+./dist/hasher/merklemulti.d.ts
+./dist/hasher/hasher.d.ts
+./dist/hasher/merklemulti.d.ts.map
+./dist/hasher/index.js
+./dist/hasher/merklemulti.js.map
+./dist/hasher/common.d.ts.map
+./dist/hasher/hasher.js
+./dist/hasher/index.js.map
+./dist/hasher/common.js
+./dist/hasher/index.d.ts
+./dist/hasher/common.js.map
+./dist/hasher/index.d.ts.map
+./dist/hasher
+./dist/sui/hasher.js.map
+./dist/sui/types.js
+./dist/sui/hasher.d.ts.map
+./dist/sui/types.js.map
+./dist/sui/types.d.ts
+./dist/sui/hasher.d.ts
+./dist/sui/index.js
+./dist/sui/hasher.js
+./dist/sui/index.js.map
+./dist/sui/types.d.ts.map
+./dist/sui/index.d.ts
+./dist/sui/index.d.ts.map
+./dist/sui
+./dist/selectors.d.ts.map
+./dist/chain.js
+./dist/commits.js.map
+./dist/gas.js.map
+./dist/types.js
+./dist/selectors.js
+./dist/types.js.map
+./dist/supported-chains.js
+./dist/chain.d.ts.map
+./dist/requests.d.ts.map
+./dist/execution.js.map
+./dist/gas.d.ts
+./dist/execution.d.ts.map
+./dist/types.d.ts
+./dist/selectors.d.ts
+./dist/commits.js
+./dist/commits.d.ts
+./dist/solana/idl/1.6.0/BASE_TOKEN_POOL.d.ts.map
+./dist/solana/idl/1.6.0/CCIP_COMMON.d.ts
+./dist/solana/idl/1.6.0/CCIP_OFFRAMP.d.ts.map
+./dist/solana/idl/1.6.0/CCIP_OFFRAMP.js
+./dist/solana/idl/1.6.0/CCIP_COMMON.d.ts.map
+./dist/solana/idl/1.6.0/BURN_MINT_TOKEN_POOL.d.ts.map
+./dist/solana/idl/1.6.0/BASE_TOKEN_POOL.js.map
+./dist/solana/idl/1.6.0/BURN_MINT_TOKEN_POOL.js.map
+./dist/solana/idl/1.6.0/CCIP_ROUTER.d.ts.map
+./dist/solana/idl/1.6.0/CCIP_CCTP_TOKEN_POOL.js.map
+./dist/solana/idl/1.6.0/BASE_TOKEN_POOL.d.ts
+./dist/solana/idl/1.6.0/CCIP_OFFRAMP.js.map
+./dist/solana/idl/1.6.0/BURN_MINT_TOKEN_POOL.js
+./dist/solana/idl/1.6.0/CCIP_COMMON.js.map
+./dist/solana/idl/1.6.0/CCIP_ROUTER.d.ts
+./dist/solana/idl/1.6.0/BASE_TOKEN_POOL.js
+./dist/solana/idl/1.6.0/CCIP_OFFRAMP.d.ts
+./dist/solana/idl/1.6.0/CCIP_CCTP_TOKEN_POOL.d.ts.map
+./dist/solana/idl/1.6.0/CCIP_COMMON.js
+./dist/solana/idl/1.6.0/CCIP_CCTP_TOKEN_POOL.js
+./dist/solana/idl/1.6.0/CCIP_CCTP_TOKEN_POOL.d.ts
+./dist/solana/idl/1.6.0/CCIP_ROUTER.js
+./dist/solana/idl/1.6.0/CCIP_ROUTER.js.map
+./dist/solana/idl/1.6.0/BURN_MINT_TOKEN_POOL.d.ts
+./dist/solana/idl/1.6.0
+./dist/solana/idl
+./dist/solana/patchBorsh.d.ts
+./dist/solana/exec.js
+./dist/solana/send.js
+./dist/solana/send.js.map
+./dist/solana/hasher.js.map
+./dist/solana/cleanup.js
+./dist/solana/types.js
+./dist/solana/hasher.d.ts.map
+./dist/solana/types.js.map
+./dist/solana/exec.d.ts
+./dist/solana/types.d.ts
+./dist/solana/send.d.ts.map
+./dist/solana/patchBorsh.js.map
+./dist/solana/hasher.d.ts
+./dist/solana/index.js
+./dist/solana/offchain.d.ts.map
+./dist/solana/patchBorsh.js
+./dist/solana/send.d.ts
+./dist/solana/hasher.js
+./dist/solana/cleanup.d.ts
+./dist/solana/utils.d.ts
+./dist/solana/offchain.js.map
+./dist/solana/utils.d.ts.map
+./dist/solana/offchain.js
+./dist/solana/offchain.d.ts
+./dist/solana/index.js.map
+./dist/solana/utils.js
+./dist/solana/utils.js.map
+./dist/solana/types.d.ts.map
+./dist/solana/cleanup.js.map
+./dist/solana/index.d.ts
+./dist/solana/exec.js.map
+./dist/solana/cleanup.d.ts.map
+./dist/solana/exec.d.ts.map
+./dist/solana/index.d.ts.map
+./dist/solana/patchBorsh.d.ts.map
+./dist/solana
+./dist/extra-args.js.map
+./dist/index.js
+./dist/offchain.d.ts.map
+./dist/supported-chains.d.ts
+./dist/extra-args.js
+./dist/selectors.js.map
+./dist/execution.js
+./dist/gas.js
+./dist/requests.js
+./dist/aptos/logs.d.ts.map
+./dist/aptos/exec.js
+./dist/aptos/send.js
+./dist/aptos/send.js.map
+./dist/aptos/hasher.js.map
+./dist/aptos/types.js
+./dist/aptos/hasher.d.ts.map
+./dist/aptos/types.js.map
+./dist/aptos/logs.d.ts
+./dist/aptos/token.d.ts
+./dist/aptos/exec.d.ts
+./dist/aptos/types.d.ts
+./dist/aptos/send.d.ts.map
+./dist/aptos/hasher.d.ts
+./dist/aptos/index.js
+./dist/aptos/send.d.ts
+./dist/aptos/token.d.ts.map
+./dist/aptos/token.js
+./dist/aptos/hasher.js
+./dist/aptos/utils.d.ts
+./dist/aptos/utils.d.ts.map
+./dist/aptos/index.js.map
+./dist/aptos/logs.js
+./dist/aptos/utils.js
+./dist/aptos/utils.js.map
+./dist/aptos/logs.js.map
+./dist/aptos/types.d.ts.map
+./dist/aptos/index.d.ts
+./dist/aptos/token.js.map
+./dist/aptos/exec.js.map
+./dist/aptos/exec.d.ts.map
+./dist/aptos/index.d.ts.map
+./dist/aptos
+./dist/chain.d.ts
+./dist/utils.d.ts
+./dist/offchain.js.map
+./dist/utils.d.ts.map
+./dist/requests.d.ts
+./dist/supported-chains.js.map
+./dist/offchain.js
+./dist/offchain.d.ts
+./dist/index.js.map
+./dist/evm/const.d.ts
+./dist/evm/hasher.js.map
+./dist/evm/hasher.d.ts.map
+./dist/evm/errors.d.ts
+./dist/evm/errors.js.map
+./dist/evm/hasher.d.ts
+./dist/evm/messages.d.ts
+./dist/evm/messages.d.ts.map
+./dist/evm/index.js
+./dist/evm/offchain.d.ts.map
+./dist/evm/errors.d.ts.map
+./dist/evm/abi/CommitStore_1_5.d.ts
+./dist/evm/abi/OnRamp_1_5.d.ts
+./dist/evm/abi/TokenAdminRegistry_1_5.d.ts
+./dist/evm/abi/OnRamp_1_2.d.ts.map
+./dist/evm/abi/OffRamp_1_5.d.ts.map
+./dist/evm/abi/FeeQuoter_1_6.d.ts
+./dist/evm/abi/OnRamp_1_5.js.map
+./dist/evm/abi/Router.d.ts.map
+./dist/evm/abi/LockReleaseTokenPool_1_6_1.js.map
+./dist/evm/abi/TokenAdminRegistry_1_5.js.map
+./dist/evm/abi/OffRamp_1_5.js
+./dist/evm/abi/LockReleaseTokenPool_1_5.js.map
+./dist/evm/abi/LockReleaseTokenPool_1_5_1.d.ts
+./dist/evm/abi/CommitStore_1_2.js
+./dist/evm/abi/CommitStore_1_2.js.map
+./dist/evm/abi/LockReleaseTokenPool_1_6_1.js
+./dist/evm/abi/OffRamp_1_6.js.map
+./dist/evm/abi/LockReleaseTokenPool_1_6_1.d.ts.map
+./dist/evm/abi/FeeQuoter_1_6.js.map
+./dist/evm/abi/BurnMintERC677Token.d.ts.map
+./dist/evm/abi/OnRamp_1_5.js
+./dist/evm/abi/OffRamp_1_2.js.map
+./dist/evm/abi/OffRamp_1_6.d.ts
+./dist/evm/abi/OnRamp_1_5.d.ts.map
+./dist/evm/abi/OnRamp_1_2.d.ts
+./dist/evm/abi/CommitStore_1_2.d.ts
+./dist/evm/abi/OffRamp_1_2.d.ts.map
+./dist/evm/abi/BurnMintERC677Token.js
+./dist/evm/abi/Router.js.map
+./dist/evm/abi/LockReleaseTokenPool_1_6_1.d.ts
+./dist/evm/abi/CommitStore_1_2.d.ts.map
+./dist/evm/abi/OffRamp_1_5.d.ts
+./dist/evm/abi/Router.js
+./dist/evm/abi/OffRamp_1_5.js.map
+./dist/evm/abi/BurnMintERC677Token.d.ts
+./dist/evm/abi/LockReleaseTokenPool_1_5.js
+./dist/evm/abi/OnRamp_1_2.js
+./dist/evm/abi/LockReleaseTokenPool_1_5_1.js.map
+./dist/evm/abi/LockReleaseTokenPool_1_5_1.d.ts.map
+./dist/evm/abi/TokenAdminRegistry_1_5.d.ts.map
+./dist/evm/abi/OnRamp_1_6.js
+./dist/evm/abi/OffRamp_1_6.d.ts.map
+./dist/evm/abi/OnRamp_1_6.js.map
+./dist/evm/abi/OffRamp_1_6.js
+./dist/evm/abi/LockReleaseTokenPool_1_5.d.ts.map
+./dist/evm/abi/Router.d.ts
+./dist/evm/abi/TokenAdminRegistry_1_5.js
+./dist/evm/abi/OffRamp_1_2.js
+./dist/evm/abi/OnRamp_1_2.js.map
+./dist/evm/abi/LockReleaseTokenPool_1_5.d.ts
+./dist/evm/abi/OnRamp_1_6.d.ts.map
+./dist/evm/abi/FeeQuoter_1_6.d.ts.map
+./dist/evm/abi/CommitStore_1_5.js
+./dist/evm/abi/FeeQuoter_1_6.js
+./dist/evm/abi/LockReleaseTokenPool_1_5_1.js
+./dist/evm/abi/CommitStore_1_5.js.map
+./dist/evm/abi/OnRamp_1_6.d.ts
+./dist/evm/abi/CommitStore_1_5.d.ts.map
+./dist/evm/abi/BurnMintERC677Token.js.map
+./dist/evm/abi/OffRamp_1_2.d.ts
+./dist/evm/abi
+./dist/evm/hasher.js
+./dist/evm/errors.js
+./dist/evm/offchain.js.map
+./dist/evm/const.js
+./dist/evm/offchain.js
+./dist/evm/offchain.d.ts
+./dist/evm/index.js.map
+./dist/evm/const.js.map
+./dist/evm/index.d.ts
+./dist/evm/messages.js.map
+./dist/evm/messages.js
+./dist/evm/const.d.ts.map
+./dist/evm/index.d.ts.map
+./dist/evm
+./dist/utils.js
+./dist/utils.js.map
+./dist/extra-args.d.ts
+./dist/types.d.ts.map
+./dist/gas.d.ts.map
+./dist/index.d.ts
+./dist/requests.js.map
+./dist/supported-chains.d.ts.map
+./dist/execution.d.ts
+./dist/commits.d.ts.map
+./dist/index.d.ts.map
+./dist/chain.js.map
+./dist
+
+> @chainlink/ccip-cli@0.90.0 clean
+> rm -rfv ./dist
+
+./dist/providers/solana.d.ts.map
+./dist/providers/solana.js.map
+./dist/providers/solana.js
+./dist/providers/solana.d.ts
+./dist/providers/evm.d.ts.map
+./dist/providers/aptos.d.ts.map
+./dist/providers/aptos.js
+./dist/providers/index.js
+./dist/providers/evm.js
+./dist/providers/evm.js.map
+./dist/providers/index.js.map
+./dist/providers/aptos.d.ts
+./dist/providers/aptos.js.map
+./dist/providers/index.d.ts
+./dist/providers/index.d.ts.map
+./dist/providers/evm.d.ts
+./dist/providers
+./dist/index.js
+./dist/index.js.map
+./dist/commands/send.js
+./dist/commands/send-multiple.js
+./dist/commands/send-multiple.d.ts.map
+./dist/commands/send.js.map
+./dist/commands/types.js
+./dist/commands/parse.d.ts
+./dist/commands/types.js.map
+./dist/commands/types.d.ts
+./dist/commands/manual-exec.js
+./dist/commands/send.d.ts.map
+./dist/commands/show.js
+./dist/commands/show.d.ts.map
+./dist/commands/supported-tokens.js
+./dist/commands/send-multiple.d.ts
+./dist/commands/parse.js.map
+./dist/commands/index.js
+./dist/commands/manual-exec.d.ts.map
+./dist/commands/send.d.ts
+./dist/commands/supported-tokens.js.map
+./dist/commands/parse.js
+./dist/commands/show.js.map
+./dist/commands/utils.d.ts
+./dist/commands/utils.d.ts.map
+./dist/commands/manual-exec.js.map
+./dist/commands/index.js.map
+./dist/commands/manual-exec.d.ts
+./dist/commands/supported-tokens.d.ts.map
+./dist/commands/utils.js
+./dist/commands/utils.js.map
+./dist/commands/supported-tokens.d.ts
+./dist/commands/types.d.ts.map
+./dist/commands/index.d.ts
+./dist/commands/send-multiple.js.map
+./dist/commands/show.d.ts
+./dist/commands/parse.d.ts.map
+./dist/commands/index.d.ts.map
+./dist/commands
+./dist/index.d.ts
+./dist/index.d.ts.map
+./dist
+
+> @chainlink/ccip-tools-ts@0.90.0 generate
+> node ./generate.cjs `grep -lrn '^\s*//\s*generate\b' ./ccip-sdk/src ./ccip-cli/src`
+
+generated ccip-cli/src/index.ts
+up-to-date ccip-sdk/src/evm/abi/TokenAdminRegistry_1_5.ts
+up-to-date ccip-sdk/src/evm/abi/LockReleaseTokenPool_1_6_1.ts
+up-to-date ccip-sdk/src/solana/idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts
+up-to-date ccip-sdk/src/solana/idl/1.6.0/CCIP_COMMON.ts
+up-to-date ccip-sdk/src/solana/idl/1.6.0/BASE_TOKEN_POOL.ts
+up-to-date ccip-sdk/src/evm/abi/Router.ts
+up-to-date ccip-sdk/src/solana/idl/1.6.0/CCIP_ROUTER.ts
+up-to-date ccip-sdk/src/solana/idl/1.6.0/CCIP_OFFRAMP.ts
+up-to-date ccip-sdk/src/evm/abi/LockReleaseTokenPool_1_5.ts
+up-to-date ccip-sdk/src/solana/idl/1.6.0/BURN_MINT_TOKEN_POOL.ts
+up-to-date ccip-sdk/src/evm/abi/FeeQuoter_1_6.ts
+up-to-date ccip-sdk/src/evm/abi/CommitStore_1_2.ts
+up-to-date ccip-sdk/src/evm/abi/CommitStore_1_5.ts
+up-to-date ccip-sdk/src/evm/abi/BurnMintERC677Token.ts
+up-to-date ccip-sdk/src/evm/abi/OnRamp_1_6.ts
+up-to-date ccip-sdk/src/evm/abi/OffRamp_1_5.ts
+up-to-date ccip-sdk/src/evm/abi/LockReleaseTokenPool_1_5_1.ts
+up-to-date ccip-sdk/src/evm/abi/OnRamp_1_2.ts
+up-to-date ccip-sdk/src/evm/abi/OffRamp_1_6.ts
+up-to-date ccip-sdk/src/evm/abi/OffRamp_1_2.ts
+up-to-date ccip-sdk/src/evm/abi/OnRamp_1_5.ts
+up-to-date ccip-sdk/src/selectors.ts
+
+> @chainlink/ccip-sdk@0.90.0 build
+> npm run clean && tsc -p ./tsconfig.build.json
+
+
+> @chainlink/ccip-sdk@0.90.0 clean
+> rm -rfv ./dist
+
+
+> @chainlink/ccip-cli@0.90.0 build
+> npm run clean && tsc -p ./tsconfig.build.json && npm run patch-dist
+
+
+> @chainlink/ccip-cli@0.90.0 clean
+> rm -rfv ./dist
+
+
+> @chainlink/ccip-cli@0.90.0 patch-dist
+> chmod +x ./dist/index.js && find ./dist -type f -name "*.js" -exec sed -i.bkp 's|@chainlink/ccip-sdk/src/.*\.ts|@chainlink/ccip-sdk|g' {} + && find ./dist -type f -name "*.bkp" -delete
+
+
+added 2 packages, changed 1 package, and audited 618 packages in 12s
+
+199 packages are looking for funding
+  run `npm fund` for details
+
+5 high severity vulnerabilities
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
