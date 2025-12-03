@@ -897,7 +897,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
     opts?: { wallet?: unknown; approveMax?: boolean },
-  ): Promise<ChainTransaction> {
+  ): Promise<CCIPRequest> {
     if (!message.fee) message.fee = await this.getFee(router_, destChainSelector, message)
     const feeToken = message.feeToken ?? ZeroAddress
     const receiver = zeroPadValue(getAddressBytes(message.receiver), 32)
@@ -957,7 +957,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       },
     )
     const receipt = await tx.wait(1)
-    return this.getTransaction(receipt!)
+    return (await this.fetchRequestsInTx(await this.getTransaction(receipt!)))[0]
   }
 
   fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {

@@ -197,14 +197,8 @@ class MockChain extends Chain {
     _destChainSelector: bigint,
     _message: any,
     _opts?: { wallet?: unknown; approveMax?: boolean },
-  ): Promise<ChainTransaction> {
-    return {
-      hash: '0xHash',
-      logs: [],
-      blockNumber: 1000,
-      timestamp: this.mockBlockTimestamp,
-      from: '0xSender',
-    }
+  ): Promise<CCIPRequest> {
+    return Promise.reject(new Error('not implemented'))
   }
 
   async fetchOffchainTokenData(_request: CCIPRequest): Promise<any[]> {

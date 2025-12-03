@@ -98,11 +98,12 @@ const message: AnyMessage = {
   extraArgs: { gasLimit: 250000, allowOutOfOrderExecution: true },
 }
 const fee = await source.getFee(router, dest, message)
-const tx = await source.sendMessage(
+const request = await source.sendMessage(
   router,
   dest,
   { ...message, fee },
   { wallet: process.env['SOLANA_PRIVATE_KEY'] },
 )
-const messageId = (await source.fetchRequestsInTx(tx))[0].message.header.messageId
+const messageId = request.message.header.messageId
+const txHash = request.tx.hash
 ```

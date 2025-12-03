@@ -244,7 +244,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
     opts?: { wallet?: unknown; approveMax?: boolean },
-  ): Promise<ChainTransaction>
+  ): Promise<CCIPRequest>
   /**
    * Fetch supported offchain token data for a request from this network
    * @param request - CCIP request, with tx, logs and message

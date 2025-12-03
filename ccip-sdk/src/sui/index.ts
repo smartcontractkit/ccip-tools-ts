@@ -166,7 +166,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     _destChainSelector: bigint,
     _message: AnyMessage & { fee: bigint },
     _opts?: { wallet?: unknown; approveMax?: boolean },
-  ): Promise<ChainTransaction> {
+  ): Promise<CCIPRequest> {
     return Promise.reject(new Error('Not implemented'))
   }
 

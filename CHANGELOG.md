@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 # [0.91.0] - 2025-12-02 - Pre-release
-- `Chain.sendMessage` now calls `getFee` by itself, if not provided
+- `Chain.sendMessage` now calls `getFee` by itself, if not provided; it also returns a `CCIPRequest`
 - Fix USDC/CCTP attestation fetching in Solana
 - `CCIPRequest` loses `timestamp` property, available in `tx.timestamp` instead
 - Rename `Chain.listFeeTokens` to `getFeeTokens`, fix for v1.5 lanes

@@ -283,7 +283,7 @@ async function sendMessage(
   )
   if (argv.onlyGetFee) return
 
-  const tx = await source.sendMessage(
+  const request = await source.sendMessage(
     argv.router,
     destNetwork.chainSelector,
     { ...message, fee },
@@ -295,11 +295,10 @@ async function sendMessage(
     '@',
     destNetwork.name,
     ', tx =>',
-    tx.hash,
+    request.tx.hash,
+    ', messageId =>',
+    request.message.header.messageId,
   )
-
-  // print CCIPRequest from tx receipt
-  const request = (await source.fetchRequestsInTx(tx))[0]
 
   switch (argv.format) {
     case Format.log:

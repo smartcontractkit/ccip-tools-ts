@@ -444,7 +444,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
     opts?: { wallet?: unknown; approveMax?: boolean },
-  ): Promise<ChainTransaction> {
+  ): Promise<CCIPRequest> {
     if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
     const account = await this.getWallet(opts)
 
@@ -457,7 +457,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     )
 
     // Return the ChainTransaction by fetching it
-    return this.getTransaction(hash)
+    return (await this.fetchRequestsInTx(await this.getTransaction(hash)))[0]
   }
 
   fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {

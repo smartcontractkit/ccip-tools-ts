@@ -98,7 +98,7 @@ export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
   lane: Lane<V>
   message: CCIPMessage<V>
   log: Log_
-  tx: { logs: readonly Log_[]; timestamp: number; from?: string; error?: unknown }
+  tx: Pick<ChainTransaction, 'hash' | 'logs' | 'blockNumber' | 'timestamp' | 'from' | 'error'>
 }
 
 export type CommitReport = AbiParametersToPrimitiveTypes<

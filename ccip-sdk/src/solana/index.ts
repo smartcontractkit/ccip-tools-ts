@@ -992,7 +992,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
     opts?: { wallet?: unknown; approveMax?: boolean },
-  ): Promise<ChainTransaction> {
+  ): Promise<CCIPRequest> {
     if (!message.fee) message.fee = await this.getFee(router_, destChainSelector, message)
     const wallet = await this.getWallet(opts)
 
@@ -1007,7 +1007,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       message as AnyMessage & { fee: bigint },
       opts,
     )
-    return this.getTransaction(hash)
+    return (await this.fetchRequestsInTx(await this.getTransaction(hash)))[0]
   }
 
   async fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
