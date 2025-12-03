@@ -33,7 +33,6 @@ export {
   type NetworkInfo,
   type OffchainTokenData,
   CCIPVersion,
-  ChainFamily,
   ExecutionState,
 } from './types.ts'
 export { bigIntReplacer, bigIntReviver, decodeAddress, getDataBytes, networkInfo } from './utils.ts'
@@ -43,5 +42,14 @@ import { AptosChain } from './aptos/index.ts'
 import { EVMChain } from './evm/index.ts'
 import { SolanaChain } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
-export { AptosChain, EVMChain, SolanaChain, SuiChain }
+import { ChainFamily } from './types.ts'
+export { AptosChain, ChainFamily, EVMChain, SolanaChain, SuiChain }
+// use `supportedChains` to override/register derived classes, if needed
 export { supportedChains } from './supported-chains.ts'
+// import `allSupportedChains` to get them all registered, in tree-shaken environments
+export const allSupportedChains = {
+  [ChainFamily.EVM]: EVMChain,
+  [ChainFamily.Solana]: SolanaChain,
+  [ChainFamily.Aptos]: AptosChain,
+  [ChainFamily.Sui]: SuiChain,
+}
