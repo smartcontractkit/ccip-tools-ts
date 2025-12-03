@@ -76,6 +76,12 @@ EVMChain.getWallet = async function(opts?: { provider?: Provider, wallet?: unkno
 > [!TIP]
 > For EVMChain on Browsers, there's no need to override like the above, since providing a `{ wallet: number | address }` option object will make it create a signer from `provider.getSigner(number)`, which should load the account from the browser's wallet extension.
 
+## Tree-shakers
+
+If you're using a tree-shaking bundler, make sure to `import { allSupportedChains } from '@chainlink/ccip-sdk'`,
+or only the chains you want to support, e.g. `import { EVMChain, SolanaChain } from '@chainlink/ccip-sdk'`.
+This should ensure those chain family implementations are registered and used by utility functions.
+
 ## Recipes
 
 ### Fetching details of a CCIP message
