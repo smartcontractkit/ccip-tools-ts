@@ -299,9 +299,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     for await (const log of this.getLogs({
       startBlock: commit?.log.blockNumber,
       startTime: request.tx.timestamp,
-      ...hints,
       address: offRamp,
       topics: ['ExecutionStateChanged'],
+      ...hints,
     })) {
       const receipt = (this.constructor as ChainStatic).decodeReceipt(log)
       if (!receipt || receipt.messageId !== request.message.header.messageId) continue
