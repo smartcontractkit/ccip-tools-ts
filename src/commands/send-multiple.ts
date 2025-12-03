@@ -370,28 +370,56 @@ async function sendMultiple(
   console.log('\n✅ Selected DESTINATION chains:')
   destChains.forEach((c, i) => console.log(`  ${i + 1}. ${c.name}`))
 
-  // Build routes
-  const routes = sourceChains.flatMap((source) =>
-    destChains.map((dest) => ({ source, dest })),
-  )
+  // Step 3: Ask about bidirectional messaging
+  console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  console.log('STEP 3: Bidirectional Messaging')
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
 
-  console.log(`\n📬 Total messages to send: ${routes.length}`)
+  const bidirectional = await confirm({
+    message: 'Send messages in both directions? (source→dest AND dest→source)',
+    default: false,
+  })
+
+  // Build routes
+  const routes: { source: ChainChoice; dest: ChainChoice }[] = []
+
+  // Forward routes: source → dest
+  for (const source of sourceChains) {
+    for (const dest of destChains) {
+      routes.push({ source, dest })
+    }
+  }
+
+  // Reverse routes: dest → source (if bidirectional)
+  if (bidirectional) {
+    for (const dest of destChains) {
+      for (const source of sourceChains) {
+        routes.push({ source: dest, dest: source })
+      }
+    }
+  }
+
+  console.log(`\n📬 Total messages to send: ${routes.length}${bidirectional ? ' (bidirectional)' : ''}`)
+  console.log('\nRoutes:')
   routes.forEach((r, i) => console.log(`  ${i + 1}. ${r.source.name} → ${r.dest.name}`))
 
-  // Step 3: Check balances and fetch info
+  // Step 4: Check balances and fetch info
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-  console.log('STEP 3: Checking chains and fetching deployment info')
+  console.log('STEP 4: Checking chains and fetching deployment info')
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
+
+  // Collect all unique source chains from routes (includes dest chains if bidirectional)
+  const allSourceChains = [...new Map(routes.map((r) => [r.source.chainId, r.source])).values()]
 
   // Build RPC list from deployments
   const rpcs: string[] = []
-  for (const source of sourceChains) {
-    const rpc = await getRpcForChain(deploymentsPath, source.selector, isTestnet)
+  for (const chain of allSourceChains) {
+    const rpc = await getRpcForChain(deploymentsPath, chain.selector, isTestnet)
     if (rpc) {
       rpcs.push(rpc)
-      console.log(`✓ ${source.name}: ${rpc.substring(0, 50)}...`)
+      console.log(`✓ ${chain.name}: ${rpc.substring(0, 50)}...`)
     } else {
-      console.log(`❌ ${source.name}: No RPC found`)
+      console.log(`❌ ${chain.name}: No RPC found`)
     }
   }
 
@@ -425,7 +453,7 @@ async function sendMultiple(
 
   // Send messages
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-  console.log('STEP 4: Sending Messages')
+  console.log('STEP 5: Sending Messages')
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
 
   const results: { route: typeof routes[0]; success: boolean; messageId?: string; error?: string }[] = []
