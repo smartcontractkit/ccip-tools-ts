@@ -1,7 +1,7 @@
 import { type BytesLike, isBytesLike } from 'ethers'
 import type { PickDeep } from 'type-fest'
 import { beginCell, Cell } from '@ton/core'
-import { GenericExtraArgsV2, } from '../extra-args.ts'
+import { GenericExtraArgsV2 } from '../extra-args.ts'
 import type { ExtraArgs } from '../extra-args.ts'
 import { type LogFilter, Chain } from '../chain.ts'
 import type { LeafHasher } from '../hasher/common.ts'
@@ -132,19 +132,19 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     throw new Error('Not implemented')
   }
 
-  /**  
-   * Encodes extra args from TON messages into BOC serialization format.  
-   *   
-   * @param args - Extra arguments containing gas limit and execution flags  
-   * @returns Hex string of BOC-encoded extra args (0x-prefixed)  
+  /**
+   * Encodes extra args from TON messages into BOC serialization format.
+   *
+   * @param args - Extra arguments containing gas limit and execution flags
+   * @returns Hex string of BOC-encoded extra args (0x-prefixed)
    */
   static encodeExtraArgs(args: ExtraArgs): string {
     if (!args) return '0x'
     if ('gasLimit' in args && 'allowOutOfOrderExecution' in args) {
       const cell = beginCell()
-        .storeUint(GENERIC_V2_EXTRA_ARGS_TAG, 32) // magic tag  
-        .storeUint(args.gasLimit, 256) // gasLimit  
-        .storeBit(args.allowOutOfOrderExecution) // bool  
+        .storeUint(GENERIC_V2_EXTRA_ARGS_TAG, 32) // magic tag
+        .storeUint(args.gasLimit, 256) // gasLimit
+        .storeBit(args.allowOutOfOrderExecution) // bool
         .endCell()
 
       // Return full BOC including headers
@@ -153,13 +153,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return '0x'
   }
 
-  /**  
-   * Decodes BOC-encoded extra arguments from TON messages  
-   * Parses the BOC format and extracts extra args, validating the magic tag  
-   * to ensure correct type. Returns undefined if parsing fails or tag doesn't match.  
-   *   
-   * @param extraArgs - BOC-encoded extra args as hex string or bytes  
-   * @returns Decoded GenericExtraArgsV2 object or undefined if invalid  
+  /**
+   * Decodes BOC-encoded extra arguments from TON messages
+   * Parses the BOC format and extracts extra args, validating the magic tag
+   * to ensure correct type. Returns undefined if parsing fails or tag doesn't match.
+   *
+   * @param extraArgs - BOC-encoded extra args as hex string or bytes
+   * @returns Decoded GenericExtraArgsV2 object or undefined if invalid
    */
   static decodeExtraArgs(
     extraArgs: BytesLike,
@@ -167,11 +167,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const data = Buffer.from(getDataBytes(extraArgs))
 
     try {
-      // Parse BOC format to extract cell data  
+      // Parse BOC format to extract cell data
       const cell = Cell.fromBoc(data)[0]
       const slice = cell.beginParse()
 
-      // Load and verify magic tag to ensure correct extra args type  
+      // Load and verify magic tag to ensure correct extra args type
       const magicTag = slice.loadUint(32)
       if (magicTag !== GENERIC_V2_EXTRA_ARGS_TAG) return undefined
 
@@ -181,7 +181,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         allowOutOfOrderExecution: slice.loadBit(),
       }
     } catch {
-      // Return undefined for any parsing errors (invalid BOC, malformed data, etc.)  
+      // Return undefined for any parsing errors (invalid BOC, malformed data, etc.)
       return undefined
     }
   }

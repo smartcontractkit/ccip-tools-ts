@@ -5,17 +5,17 @@ import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.t
 import { networkInfo } from '../utils.ts'
 import { hexToBuffer, toBigInt, tryParseCell, sha256 } from './utils.ts'
 
-// Convert LEAF_DOMAIN_SEPARATOR from hex string to Buffer for cell storage  
+// Convert LEAF_DOMAIN_SEPARATOR from hex string to Buffer for cell storage
 const LEAF_DOMAIN_BUFFER = Buffer.from(LEAF_DOMAIN_SEPARATOR.slice(2).padStart(64, '0'), 'hex')
 
-/**  
- * Creates a leaf hasher for TON messages  
- *   
+/**
+ * Creates a leaf hasher for TON messages
+ *
  * @param sourceChainSelector
  * @param destChainSelector
- * @param onRamp - as hex string  
- * @param version - CCIP version (only v1.6 supported for TON)  
- * @returns A LeafHasher function that computes message hashes for TON  
+ * @param onRamp - as hex string
+ * @param version - CCIP version (only v1.6 supported for TON)
+ * @returns A LeafHasher function that computes message hashes for TON
  */
 export function getTONLeafHasher<V extends CCIPVersion = CCIPVersion>({
   sourceChainSelector,
@@ -32,31 +32,31 @@ export function getTONLeafHasher<V extends CCIPVersion = CCIPVersion>({
     throw new Error(`TON only supports CCIP v1.6, got: ${version}`)
   }
 
-  // Pre-compute metadata hash once for all messages using this hasher  
+  // Pre-compute metadata hash once for all messages using this hasher
   const metadataHash = hashTONMetadata(sourceChainSelector, destChainSelector, onRamp)
 
-  // Return the actual hashing function that will be called for each message  
+  // Return the actual hashing function that will be called for each message
   return ((message: CCIPMessage<typeof CCIPVersion.V1_6>): string => {
     return hashV16TONMessage(message, metadataHash)
   }) as LeafHasher<V>
 }
 
-/**  
- * Creates a hash that uniquely identifies the message lane configuration  
- * (source chain, destination chain, and onRamp address). 
- * Following the TON implementation from chainlink-ton repo.  
- *   
- * @param sourceChainSelector 
- * @param destChainSelector 
- * @param onRamp 
- * @returns SHA256 hash of the metadata as hex string  
+/**
+ * Creates a hash that uniquely identifies the message lane configuration
+ * (source chain, destination chain, and onRamp address).
+ * Following the TON implementation from chainlink-ton repo.
+ *
+ * @param sourceChainSelector
+ * @param destChainSelector
+ * @param onRamp
+ * @returns SHA256 hash of the metadata as hex string
  */
 export const hashTONMetadata = (
   sourceChainSelector: bigint,
   destChainSelector: bigint,
   onRamp: string,
 ): string => {
-  // Domain separator for TON messages  
+  // Domain separator for TON messages
   const versionHash = BigInt(sha256(Buffer.from('Any2TVMMessageHashV1')))
   const onRampBytes = hexToBuffer(onRamp)
 
@@ -66,29 +66,23 @@ export const hashTONMetadata = (
     .storeUint(sourceChainSelector, 64)
     .storeUint(destChainSelector, 64)
     .storeRef(
-      beginCell()
-        .storeUint(BigInt(onRampBytes.length), 8)
-        .storeBuffer(onRampBytes)
-        .endCell(),
+      beginCell().storeUint(BigInt(onRampBytes.length), 8).storeBuffer(onRampBytes).endCell(),
     )
     .endCell()
 
-  // Return cell hash as hex string (excludes BOC headers)  
+  // Return cell hash as hex string (excludes BOC headers)
   return '0x' + metadataCell.hash().toString('hex')
 }
 
-/**  
- * Computes the full message hash for a CCIP v1.6 TON message  
- * Follows the chainlink-ton's Any2TVMRampMessage.generateMessageId()  
- *   
- * @param message - CCIP message to hash  
- * @param metadataHash - Pre-computed metadata hash from hashTONMetadata()  
- * @returns SHA256 hash of the complete message as hex string  
+/**
+ * Computes the full message hash for a CCIP v1.6 TON message
+ * Follows the chainlink-ton's Any2TVMRampMessage.generateMessageId()
+ *
+ * @param message - CCIP message to hash
+ * @param metadataHash - Pre-computed metadata hash from hashTONMetadata()
+ * @returns SHA256 hash of the complete message as hex string
  */
-function hashV16TONMessage(
-  message: CCIPMessage_V1_6,
-  metadataHash: string,
-): string {
+function hashV16TONMessage(message: CCIPMessage_V1_6, metadataHash: string): string {
   // Extract gas limit from message
   let gasLimit: bigint
   const embeddedGasLimit = (message as Partial<{ gasLimit: bigint }>).gasLimit
@@ -106,7 +100,7 @@ function hashV16TONMessage(
     gasLimit = parsedArgs.gasLimit || 0n
   }
 
-  // Build header cell containing header routing information  
+  // Build header cell containing header routing information
   const headerCell = beginCell()
     .storeUint(toBigInt(message.header.messageId), 256)
     .storeAddress(Address.parse(message.receiver))
@@ -115,14 +109,14 @@ function hashV16TONMessage(
     .storeUint(toBigInt(message.header.nonce), 64)
     .endCell()
 
-  // Build sender cell with address bytes  
+  // Build sender cell with address bytes
   const senderBytes = hexToBuffer(message.sender)
   const senderCell = beginCell()
     .storeUint(BigInt(senderBytes.length), 8)
     .storeBuffer(senderBytes)
     .endCell()
 
-  // Build token amounts cell if tokens are being transferred  
+  // Build token amounts cell if tokens are being transferred
   const tokenAmountsCell =
     message.tokenAmounts.length > 0 ? buildTokenAmountsCell(message.tokenAmounts) : null
 
@@ -136,25 +130,25 @@ function hashV16TONMessage(
     .storeMaybeRef(tokenAmountsCell)
     .endCell()
 
-  // Return cell hash as hex string  
+  // Return cell hash as hex string
   return '0x' + messageCell.hash().toString('hex')
 }
 
-// Type alias for token amount entries in CCIP messages  
+// Type alias for token amount entries in CCIP messages
 type TokenAmount = CCIPMessage_V1_6['tokenAmounts'][number]
 
-/**  
- * Creates a nested cell structure for token amounts, where each token  
- * transfer is stored as a reference cell containing source pool, destination,  
- * amount, and extra data.  
- *   
- * @param tokenAmounts - Array of token transfer details  
- * @returns Cell containing all token transfer information  
+/**
+ * Creates a nested cell structure for token amounts, where each token
+ * transfer is stored as a reference cell containing source pool, destination,
+ * amount, and extra data.
+ *
+ * @param tokenAmounts - Array of token transfer details
+ * @returns Cell containing all token transfer information
  */
 function buildTokenAmountsCell(tokenAmounts: readonly TokenAmount[]): Cell {
   const builder = beginCell()
 
-  // Process each token transfer  
+  // Process each token transfer
   for (const ta of tokenAmounts) {
     const sourcePoolBytes = hexToBuffer(ta.sourcePoolAddress)
 
@@ -165,7 +159,7 @@ function buildTokenAmountsCell(tokenAmounts: readonly TokenAmount[]): Cell {
       0n
     const amount = toBigInt(amountSource)
 
-    // Store each token transfer as a reference cell  
+    // Store each token transfer as a reference cell
     builder.storeRef(
       beginCell()
         .storeRef(

@@ -4,7 +4,12 @@ import { extractMagicTag } from './ton/utils.ts'
 import { dataSlice, getNumber } from 'ethers'
 // Import index.ts to ensure all Chain classes are loaded and registered
 import './index.ts'
-import { EVMExtraArgsV2Tag, GenericExtraArgsV2, decodeExtraArgs, encodeExtraArgs } from './extra-args.ts'
+import {
+  EVMExtraArgsV2Tag,
+  GenericExtraArgsV2,
+  decodeExtraArgs,
+  encodeExtraArgs,
+} from './extra-args.ts'
 import { ChainFamily } from './types.ts'
 
 describe('encodeExtraArgs', () => {
@@ -285,5 +290,4 @@ describe('parseExtraArgs', () => {
       assert.notEqual(evmEncoded, tonEncoded)
     })
   })
-
 })
