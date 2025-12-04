@@ -42,7 +42,7 @@
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-prettier": "^5.5.4",
     "ethers-abitype": "1.0.3",
-    "prettier": "^3.7.3",
+    "prettier": "^3.7.4",
     "typescript": "5.9.3",
     "typescript-eslint": "8.48.1"
   },
@@ -53,11 +53,11 @@
     "@mysten/sui": "^1.45.2",
     "@solana/spl-token": "0.4.14",
     "@solana/web3.js": "^1.98.4",
-    "abitype": "1.2.0",
+    "abitype": "1.2.1",
     "bn.js": "^5.2.2",
     "borsh": "^2.0.0",
     "bs58": "^6.0.0",
-    "ethers": "6.15.0",
+    "ethers": "6.16.0",
     "micro-memoize": "^5.1.1",
     "type-fest": "^5.3.0",
     "yaml": "2.8.2"

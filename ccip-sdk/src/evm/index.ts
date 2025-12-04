@@ -285,7 +285,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const timestamp = await this.getBlockTimestamp(tx.blockNumber)
     const chainTx = {
       ...tx,
-      chain: this,
       timestamp,
       logs: [] as Log_[],
     }
@@ -325,7 +324,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       // specialized getLogs filter for v1.6 CCIPMessageSent events, to filter by dest
       opts_ = {
         ...opts,
-        topics: [request.log.topics[0], toBeHex(request.lane.destChainSelector, 32)],
+        topics: [[request.log.topics[0]], [toBeHex(request.lane.destChainSelector, 32)]],
       }
     }
     return fetchAllMessagesInBatch(this, request, commit, opts_)
