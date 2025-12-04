@@ -8,9 +8,9 @@ import type {
   EVMExtraArgsV1,
   EVMExtraArgsV2,
   ExtraArgs,
+  GenericExtraArgsV2,
   SVMExtraArgsV1,
   SuiExtraArgsV1,
-  GenericExtraArgsV2,
 } from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
 import {

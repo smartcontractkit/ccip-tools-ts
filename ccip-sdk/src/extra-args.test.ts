@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { extractMagicTag } from './ton/utils.ts'
+
 import { dataSlice, getNumber } from 'ethers'
+
 // Import index.ts to ensure all Chain classes are loaded and registered
 import './index.ts'
 import {
@@ -10,6 +11,7 @@ import {
   decodeExtraArgs,
   encodeExtraArgs,
 } from './extra-args.ts'
+import { extractMagicTag } from './ton/utils.ts'
 import { ChainFamily } from './types.ts'
 
 describe('encodeExtraArgs', () => {

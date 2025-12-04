@@ -1,9 +1,10 @@
-import { Address, beginCell, Cell } from '@ton/core'
+import { type Cell, Address, beginCell } from '@ton/core'
+
 import { decodeExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import { networkInfo } from '../utils.ts'
-import { hexToBuffer, toBigInt, tryParseCell, sha256 } from './utils.ts'
+import { hexToBuffer, sha256, toBigInt, tryParseCell } from './utils.ts'
 
 // Convert LEAF_DOMAIN_SEPARATOR from hex string to Buffer for cell storage
 const LEAF_DOMAIN_BUFFER = Buffer.from(LEAF_DOMAIN_SEPARATOR.slice(2).padStart(64, '0'), 'hex')

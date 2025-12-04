@@ -1,13 +1,14 @@
+import { Cell, beginCell } from '@ton/core'
 import { type BytesLike, isBytesLike } from 'ethers'
 import type { PickDeep } from 'type-fest'
-import { beginCell, Cell } from '@ton/core'
-import { GenericExtraArgsV2 } from '../extra-args.ts'
-import type { ExtraArgs } from '../extra-args.ts'
+
 import { type LogFilter, Chain } from '../chain.ts'
+import { type ExtraArgs, GenericExtraArgsV2 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
+  type CCIPMessage_V1_6,
   type CCIPRequest,
   type ChainTransaction,
   type CommitReport,
@@ -17,7 +18,6 @@ import {
   type Log_,
   type NetworkInfo,
   type OffchainTokenData,
-  type CCIPMessage_V1_6,
   ChainFamily,
 } from '../types.ts'
 import { getDataBytes } from '../utils.ts'
@@ -194,7 +194,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     throw new Error('Not implemented')
   }
 
-  static getAddress(bytes: BytesLike): string {
+  static getAddress(_bytes: BytesLike): string {
     throw new Error('Not implemented')
   }
 
