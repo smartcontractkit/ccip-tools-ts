@@ -43,6 +43,7 @@ export const ChainFamily = {
   Solana: 'solana',
   Aptos: 'aptos',
   Sui: 'sui',
+  TON: 'ton',
 } as const
 export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
 

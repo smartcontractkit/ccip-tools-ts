@@ -7,6 +7,7 @@ export const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '
 export const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'
 export const SVMExtraArgsV1Tag = id('CCIP SVMExtraArgsV1').substring(0, 10) as '0x1f3b3aba'
 export const SuiExtraArgsV1Tag = id('CCIP SuiExtraArgsV1').substring(0, 10) as '0x21ea4ca9'
+export const GenericExtraArgsV2 = EVMExtraArgsV2Tag
 
 export type EVMExtraArgsV1 = {
   gasLimit: bigint
@@ -27,7 +28,10 @@ export type SuiExtraArgsV1 = EVMExtraArgsV2 & {
   receiverObjectIds: string[]
 }
 
-export type ExtraArgs = EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1 | SuiExtraArgsV1
+// Same structure as EVMExtraArgsV2. TON calls it GenericExtraArgsV2
+export type GenericExtraArgsV2 = EVMExtraArgsV2
+
+export type ExtraArgs = EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1 | SuiExtraArgsV1 | GenericExtraArgsV2
 
 /**
  * Encodes extra arguments for CCIP messages.
@@ -53,6 +57,7 @@ export function decodeExtraArgs(
   | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
   | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
   | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
+  | (GenericExtraArgsV2 & { _tag: 'GenericExtraArgsV2' })
   | undefined {
   if (!data || data === '') return
   let chains

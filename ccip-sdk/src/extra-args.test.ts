@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-
+import { extractMagicTag } from './ton/utils.ts'
 import { dataSlice, getNumber } from 'ethers'
-
 // Import index.ts to ensure all Chain classes are loaded and registered
 import './index.ts'
-import { decodeExtraArgs, encodeExtraArgs } from './extra-args.ts'
+import { EVMExtraArgsV2Tag, GenericExtraArgsV2, decodeExtraArgs, encodeExtraArgs } from './extra-args.ts'
 import { ChainFamily } from './types.ts'
 
 describe('encodeExtraArgs', () => {
@@ -74,6 +73,27 @@ describe('encodeExtraArgs', () => {
       assert.equal(encoded.length, 2 + 2 * (4 + 32 + 1)) // Much shorter than EVM encoding
     })
   })
+  describe('TON extra args', () => {
+    it('should encode GenericExtraArgsV2', () => {
+      const encoded = encodeExtraArgs(
+        { gasLimit: 400_000n, allowOutOfOrderExecution: true },
+        ChainFamily.TON,
+      )
+
+      assert.equal(extractMagicTag(encoded), GenericExtraArgsV2)
+      assert.ok(encoded.length > 10)
+    })
+
+    it('should encode GenericExtraArgsV2 with allowOutOfOrderExecution false', () => {
+      const encoded = encodeExtraArgs(
+        { gasLimit: 500_000n, allowOutOfOrderExecution: false },
+        ChainFamily.TON,
+      )
+
+      assert.equal(extractMagicTag(encoded), GenericExtraArgsV2)
+      assert.ok(encoded.length > 10)
+    })
+  })
 })
 
 describe('parseExtraArgs', () => {
@@ -138,6 +158,33 @@ describe('parseExtraArgs', () => {
       })
     })
   })
+  describe('TON extra args (TLB encoding)', () => {
+    it('should parse GenericExtraArgsV2', () => {
+      const encoded = encodeExtraArgs(
+        { gasLimit: 400_000n, allowOutOfOrderExecution: true },
+        ChainFamily.TON,
+      )
+      const res = decodeExtraArgs(encoded, ChainFamily.TON)
+      assert.deepEqual(res, {
+        _tag: 'GenericExtraArgsV2',
+        gasLimit: 400000n,
+        allowOutOfOrderExecution: true,
+      })
+    })
+
+    it('should parse GenericExtraArgsV2 with allowOutOfOrderExecution false', () => {
+      const encoded = encodeExtraArgs(
+        { gasLimit: 500_000n, allowOutOfOrderExecution: false },
+        ChainFamily.TON,
+      )
+      const res = decodeExtraArgs(encoded, ChainFamily.TON)
+      assert.deepEqual(res, {
+        _tag: 'GenericExtraArgsV2',
+        gasLimit: 500000n,
+        allowOutOfOrderExecution: false,
+      })
+    })
+  })
 
   describe('auto-detect chain family', () => {
     it('should auto-detect EVM v1 args', () => {
@@ -196,6 +243,13 @@ describe('parseExtraArgs', () => {
       const decoded = decodeExtraArgs(encoded, ChainFamily.Aptos)
       assert.deepEqual(decoded, { ...original, _tag: 'EVMExtraArgsV2' })
     })
+
+    it('should round-trip TON GenericExtraArgsV2', () => {
+      const original = { gasLimit: 400_000n, allowOutOfOrderExecution: true }
+      const encoded = encodeExtraArgs(original, ChainFamily.TON)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.TON)
+      assert.deepEqual(decoded, { ...original, _tag: 'GenericExtraArgsV2' })
+    })
   })
 
   describe('encoding format differences', () => {
@@ -220,5 +274,16 @@ describe('parseExtraArgs', () => {
       // But different lengths
       assert.ok(evmEncoded.length > aptosEncoded.length)
     })
+
+    it('should produce different encodings for EVM vs TON', () => {
+      const args = { gasLimit: 300_000n, allowOutOfOrderExecution: false }
+      const evmEncoded = encodeExtraArgs(args, ChainFamily.EVM)
+      const tonEncoded = encodeExtraArgs(args, ChainFamily.TON)
+
+      assert.equal(evmEncoded.substring(0, 10), EVMExtraArgsV2Tag)
+      assert.equal(extractMagicTag(tonEncoded), GenericExtraArgsV2)
+      assert.notEqual(evmEncoded, tonEncoded)
+    })
   })
+
 })

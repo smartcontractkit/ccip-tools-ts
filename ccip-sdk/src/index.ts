@@ -14,6 +14,7 @@ export {
   type ExtraArgs,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
+  type GenericExtraArgsV2,
   decodeExtraArgs,
   encodeExtraArgs,
 } from './extra-args.ts'
@@ -42,8 +43,9 @@ import { AptosChain } from './aptos/index.ts'
 import { EVMChain } from './evm/index.ts'
 import { SolanaChain } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
+import { TONChain } from './ton/index.ts'
 import { ChainFamily } from './types.ts'
-export { AptosChain, ChainFamily, EVMChain, SolanaChain, SuiChain }
+export { AptosChain, ChainFamily, EVMChain, SolanaChain, SuiChain, TONChain }
 // use `supportedChains` to override/register derived classes, if needed
 export { supportedChains } from './supported-chains.ts'
 // import `allSupportedChains` to get them all registered, in tree-shaken environments
@@ -52,4 +54,5 @@ export const allSupportedChains = {
   [ChainFamily.Solana]: SolanaChain,
   [ChainFamily.Aptos]: AptosChain,
   [ChainFamily.Sui]: SuiChain,
+  [ChainFamily.TON]: TONChain,
 }
