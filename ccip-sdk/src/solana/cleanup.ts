@@ -6,7 +6,7 @@ import { memoize } from 'micro-memoize'
 import { sleep } from '../utils.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import type { SolanaChain } from './index.ts'
-import { simulateAndSendTxs } from './send.ts'
+import { simulateAndSendTxs } from './utils.ts'
 
 /**
  * Clean up and recycle buffers and Address Lookup Tables owned by wallet
@@ -19,7 +19,7 @@ import { simulateAndSendTxs } from './send.ts'
 export async function cleanUpBuffers(
   provider: AnchorProvider,
   getLogs: SolanaChain['getLogs'],
-  opts?: { dontWait?: boolean },
+  opts?: { waitDeactivation?: boolean },
 ): Promise<void> {
   const connection = provider.connection
   const wallet = provider.wallet
@@ -53,7 +53,7 @@ export async function cleanUpBuffers(
     while (!sig) {
       const delta = deactivationSlot + 513 - (await getCurrentSlot())
       if (delta > 0) {
-        if (opts?.dontWait) {
+        if (!opts?.waitDeactivation) {
           console.warn(
             'Skipping: lookup table',
             altAddr,
@@ -80,7 +80,7 @@ export async function cleanUpBuffers(
         lookupTable,
       })
       try {
-        sig = await simulateAndSendTxs(connection, wallet, [closeIx])
+        sig = await simulateAndSendTxs(connection, wallet, { instructions: [closeIx] })
         console.info('🗑️  Closed lookup table', altAddr, ': tx =>', sig)
       } catch (err) {
         const info = await connection.getAddressLookupTable(lookupTable)
@@ -198,7 +198,9 @@ export async function cleanUpBuffers(
           })
 
           try {
-            const sig = await simulateAndSendTxs(connection, wallet, [deactivateIx])
+            const sig = await simulateAndSendTxs(connection, wallet, {
+              instructions: [deactivateIx],
+            })
             console.info('⤵️  Deactivated lookup table', lookupTable.toBase58(), ': tx =>', sig)
             pendingPromises.push(closeAlt(lookupTable, await getCurrentSlot()))
           } catch (err) {

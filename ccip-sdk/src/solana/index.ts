@@ -7,7 +7,7 @@ import {
   BorshAccountsCoder,
   BorshCoder,
   Program,
-  Wallet,
+  Wallet as AnchorWallet,
 } from '@coral-xyz/anchor'
 import { NATIVE_MINT } from '@solana/spl-token'
 import {
@@ -79,7 +79,7 @@ import {
   toLeArray,
 } from '../utils.ts'
 import { cleanUpBuffers } from './cleanup.ts'
-import { executeReport } from './exec.ts'
+import { generateUnsignedExecuteReport } from './exec.ts'
 import { getV16SolanaLeafHasher } from './hasher.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as BURN_MINT_TOKEN_POOL } from './idl/1.6.0/BURN_MINT_TOKEN_POOL.ts'
@@ -87,13 +87,14 @@ import { IDL as CCIP_CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import { fetchSolanaOffchainTokenData } from './offchain.ts'
-import { ccipSend, getFee } from './send.ts'
-import type { CCIPMessage_V1_6_Solana } from './types.ts'
+import { generateUnsignedCcipSend, getFee } from './send.ts'
+import type { CCIPMessage_V1_6_Solana, UnsignedTx, Wallet } from './types.ts'
 import {
   bytesToBuffer,
   getErrorFromLogs,
   hexDiscriminator,
   parseSolanaLogs,
+  simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
 import {
@@ -255,7 +256,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async getWallet(opts: { wallet?: unknown } = {}): Promise<Wallet> {
     try {
       if (typeof opts.wallet === 'string')
-        return new Wallet(
+        return new AnchorWallet(
           Keypair.fromSecretKey(
             opts.wallet.startsWith('0x') ? getBytes(opts.wallet) : bs58.decode(opts.wallet),
           ),
@@ -987,26 +988,52 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return getFee(this.connection, router, destChainSelector, message)
   }
 
-  async sendMessage(
-    router_: string,
+  /**
+   * Raw/unsigned version of [[sendMessage]]
+   *
+   * @param sender - sender/feePayer address
+   * @param router - router address
+   * @param destChainSelector - destination chain selector
+   * @param message - AnyMessage to send (with or without fee)
+   * @param opts.approveMax - approve max amount of tokens if needed, instead of only what's needed
+   * @returns  instructions - array of instructions; `ccipSend` is last, after any approval
+   *   lookupTables - array of lookup tables for `ccipSend` call
+   *   mainIndex - instructions.length - 1
+   */
+  async generateUnsignedSendMessage(
+    sender: string,
+    router: string,
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
-    opts?: { wallet?: unknown; approveMax?: boolean },
-  ): Promise<CCIPRequest> {
-    if (!message.fee) message.fee = await this.getFee(router_, destChainSelector, message)
-    const wallet = await this.getWallet(opts)
-
-    const router = new Program(
-      CCIP_ROUTER_IDL,
-      new PublicKey(router_),
-      new AnchorProvider(this.connection, wallet, { commitment: this.commitment }),
-    )
-    const { hash } = await ccipSend(
-      router,
+    opts?: { approveMax?: boolean },
+  ): Promise<UnsignedTx> {
+    if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
+    return generateUnsignedCcipSend(
+      this.connection,
+      new PublicKey(sender),
+      new PublicKey(router),
       destChainSelector,
       message as AnyMessage & { fee: bigint },
       opts,
     )
+  }
+
+  async sendMessage(
+    router: string,
+    destChainSelector: bigint,
+    message: AnyMessage & { fee?: bigint },
+    opts?: { wallet?: unknown; approveMax?: boolean },
+  ): Promise<CCIPRequest> {
+    const wallet = await this.getWallet(opts)
+    const unsigned = await this.generateUnsignedSendMessage(
+      wallet.publicKey.toBase58(),
+      router,
+      destChainSelector,
+      message,
+      opts,
+    )
+
+    const hash = await simulateAndSendTxs(this.connection, wallet, unsigned)
     return (await this.fetchRequestsInTx(await this.getTransaction(hash)))[0]
   }
 
@@ -1014,48 +1041,96 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return fetchSolanaOffchainTokenData(this.connection, request)
   }
 
-  async executeReport(
+  /**
+   * Raw/unsigned version of [[executeReport]]
+   * @param payer - payer address of the execution transaction
+   * @param offRamp - OffRamp contract address
+   * @param execReport_ - ExecutionReport of a dest=Solana message
+   * @param opts.forceBuffer - Whether to force the use of a buffer account
+   * @param opts.forceLookupTable - Whether to force creation of a lookup table for the call
+   * @returns instructions - array of instructions to execute the report
+   *   lookupTables - array of lookup tables for `manuallyExecute` call
+   *   mainIndex - index of the `manuallyExecute` instruction in the array; last unless
+   *   forceLookupTable is set, in which case last is ALT deactivation tx, and manuallyExecute is
+   *   second to last
+   */
+  async generateUnsignedExecuteReport(
+    payer: string,
     offRamp: string,
     execReport_: ExecutionReport,
+    opts?: { forceBuffer?: boolean; forceLookupTable?: boolean },
+  ): Promise<UnsignedTx> {
+    if (!('computeUnits' in execReport_.message))
+      throw new Error("ExecutionReport's message not for Solana")
+    const execReport = execReport_ as ExecutionReport<CCIPMessage_V1_6_Solana>
+    const offRamp_ = new PublicKey(offRamp)
+    return generateUnsignedExecuteReport(
+      this.connection,
+      new PublicKey(payer),
+      offRamp_,
+      execReport,
+      opts,
+    )
+  }
+
+  async executeReport(
+    offRamp: string,
+    execReport: ExecutionReport,
     opts?: {
       wallet?: string
       gasLimit?: number
       forceLookupTable?: boolean
       forceBuffer?: boolean
-      clearLeftoverAccounts?: boolean
-      dontWait?: boolean
+      waitDeactivation?: boolean
     },
   ): Promise<ChainTransaction> {
-    if (!('computeUnits' in execReport_.message))
-      throw new Error("ExecutionReport's message not for Solana")
-    const execReport = execReport_ as ExecutionReport<CCIPMessage_V1_6_Solana>
-
     const wallet = await this.getWallet(opts)
-    const provider = new AnchorProvider(this.connection, wallet, { commitment: this.commitment })
-    const offrampProgram = new Program(CCIP_OFFRAMP_IDL, new PublicKey(offRamp), provider)
 
-    const rep = await executeReport({ offrampProgram, execReport, ...opts })
-    if (opts?.clearLeftoverAccounts) {
+    let hash
+    do {
       try {
-        await this.cleanUpBuffers(opts)
+        const unsigned = await this.generateUnsignedExecuteReport(
+          wallet.publicKey.toBase58(),
+          offRamp,
+          execReport,
+          opts,
+        )
+        hash = await simulateAndSendTxs(this.connection, wallet, unsigned, opts?.gasLimit)
       } catch (err) {
-        console.warn('Error while trying to clean up buffers:', err)
+        if (
+          !(err instanceof Error) ||
+          !['encoding overruns Uint8Array', 'too large'].some((e) => err.message.includes(e))
+        )
+          throw err
+        // in case of failure to serialize a report, first try buffering (because it gets
+        // auto-closed upon successful execution), then ALTs (need a grace period ~3min after
+        // deactivation before they can be closed/recycled)
+        if (!opts?.forceBuffer) opts = { ...opts, forceBuffer: true }
+        else if (!opts?.forceLookupTable) opts = { ...opts, forceLookupTable: true }
+        else throw err
       }
+    } while (!hash)
+
+    try {
+      await this.cleanUpBuffers(opts)
+    } catch (err) {
+      console.warn('Error while trying to clean up buffers:', err)
     }
-    return this.getTransaction(rep.hash)
+    return this.getTransaction(hash)
   }
 
   /**
    * Clean up and recycle buffers and address lookup tables owned by wallet
-   * CAUTION: this will close ANY lookup table owned by this wallet
    * @param wallet - wallet options
-   * @param dontWait - Whether to skip waiting for lookup table deactivation cool down period
-   *   (513 slots) to pass before closing; by default, we deactivate (if needed) and wait to close
-   *   before returning from this method
+   * @param waitDeactivation - Whether to wait for lookup table deactivation cool down period
+   *   (513 slots) to pass before closing; by default, we deactivate (if needed) and move on, to
+   *   close other ready ALTs
    */
-  async cleanUpBuffers(opts?: { wallet?: string; dontWait?: boolean }): Promise<void> {
+  async cleanUpBuffers(opts?: { wallet?: unknown; waitDeactivation?: boolean }): Promise<void> {
     const wallet = await this.getWallet(opts)
-    const provider = new AnchorProvider(this.connection, wallet, { commitment: this.commitment })
+    const provider = new AnchorProvider(this.connection, wallet as AnchorWallet, {
+      commitment: this.commitment,
+    })
     await cleanUpBuffers(provider, this.getLogs.bind(this), opts)
   }
 
