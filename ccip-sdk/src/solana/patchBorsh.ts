@@ -14,6 +14,10 @@ function sighash(nameSpace: string, ixName: string): Buffer {
 }
 
 let patched = false
+/**
+ * Patches BorshTypesCoder to ensure correct buffer allocation for large messages.
+ * Should be called before encoding Solana CCIP messages.
+ */
 export function patchBorsh() {
   if (patched) return
   patched = true

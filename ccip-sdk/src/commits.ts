@@ -9,6 +9,7 @@ import { type CCIPCommit, type CCIPRequest, CCIPVersion } from './types.ts'
  * logic in Chain.fetchCommitReport method
  *
  * @param dest - Destination network provider
+ * @param commitStore - Commit store address
  * @param request - CCIP request info
  * @param hints - Additional filtering hints
  * @returns CCIP commit info

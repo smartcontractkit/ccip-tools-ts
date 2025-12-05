@@ -9,6 +9,13 @@ import { defaultAbiCoder } from './const.ts'
 
 const METADATA_PREFIX_1_2 = id('EVM2EVMMessageHashV2')
 
+/**
+ * Creates a leaf hasher for v1.2/v1.5 EVM CCIP messages.
+ * @param sourceChainSelector - Source chain selector.
+ * @param destChainSelector - Destination chain selector.
+ * @param onRamp - OnRamp contract address.
+ * @returns Leaf hasher function.
+ */
 export function getV12LeafHasher(
   sourceChainSelector: bigint,
   destChainSelector: bigint,
@@ -81,6 +88,13 @@ export function getV12LeafHasher(
 
 const ANY_2_EVM_MESSAGE_HASH = id('Any2EVMMessageHashV1')
 
+/**
+ * Creates a leaf hasher for v1.6 EVM CCIP messages.
+ * @param sourceChainSelector - Source chain selector.
+ * @param destChainSelector - Destination chain selector.
+ * @param onRamp - OnRamp contract address.
+ * @returns Leaf hasher function.
+ */
 export function getV16LeafHasher(
   sourceChainSelector: bigint,
   destChainSelector: bigint,

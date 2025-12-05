@@ -6,6 +6,11 @@ import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.t
 import { getAddressBytes, networkInfo } from '../utils.ts'
 import { encodeNumber, encodeRawBytes } from './utils.ts'
 
+/**
+ * Creates a leaf hasher for Aptos CCIP messages.
+ * @param lane - Lane configuration with selectors and onRamp.
+ * @returns Leaf hasher function for the specified version.
+ */
 export function getAptosLeafHasher<V extends CCIPVersion = CCIPVersion>({
   sourceChainSelector,
   destChainSelector,
@@ -28,6 +33,12 @@ export function getAptosLeafHasher<V extends CCIPVersion = CCIPVersion>({
   }
 }
 
+/**
+ * Computes the leaf hash for a v1.6 Aptos CCIP message.
+ * @param message - CCIP message to hash.
+ * @param metadataHash - Pre-computed metadata hash for the lane.
+ * @returns Keccak256 hash of the message.
+ */
 export function hashV16AptosMessage(
   message: CCIPMessage_V1_6 | CCIPMessage<typeof CCIPVersion.V1_6>,
   metadataHash: string,
@@ -78,6 +89,13 @@ export function hashV16AptosMessage(
   return keccak256(outerHash)
 }
 
+/**
+ * Computes the metadata hash for Aptos CCIP lane.
+ * @param sourceChainSelector - Source chain selector.
+ * @param destChainSelector - Destination chain selector.
+ * @param onRamp - OnRamp address.
+ * @returns Keccak256 hash of the lane metadata.
+ */
 export const hashAptosMetadata = (
   sourceChainSelector: bigint,
   destChainSelector: bigint,

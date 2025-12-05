@@ -23,6 +23,13 @@ import {
 } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
+/**
+ * Prompts user to select a CCIP request from a list.
+ * @param requests - List of CCIP requests to choose from.
+ * @param promptSuffix - Optional suffix for the prompt message.
+ * @param hints - Optional hints for pre-filtering requests.
+ * @returns Selected CCIP request.
+ */
 export async function selectRequest(
   requests: readonly CCIPRequest[],
   promptSuffix?: string,
@@ -56,6 +63,11 @@ tokenTransfers =\t[${req.message.tokenAmounts.map((ta) => ('token' in ta ? ta.to
   return requests[answer]
 }
 
+/**
+ * Converts a Unix timestamp to a Date object.
+ * @param obj - Object with timestamp property.
+ * @returns Object with Date timestamp.
+ */
 export function withDateTimestamp<
   T extends { readonly timestamp: number } | { readonly tx: { readonly timestamp: number } },
 >(obj: T): Omit<T, 'timestamp'> & { timestamp: Date } {
@@ -65,6 +77,10 @@ export function withDateTimestamp<
   }
 }
 
+/**
+ * Prints lane information in a human-readable format.
+ * @param lane - Lane configuration.
+ */
 export function prettyLane(lane: Lane) {
   console.info('Lane:')
   const source = networkInfo(lane.sourceChainSelector),
@@ -90,6 +106,12 @@ async function formatToken(
   return `${formatUnits(ta.amount, decimals)} ${symbol}`
 }
 
+/**
+ * Formats an array into a record with indexed keys.
+ * @param name - Base name for the keys.
+ * @param values - Array values to format.
+ * @returns Record with indexed keys.
+ */
 export function formatArray<T>(name: string, values: readonly T[]): Record<string, T> {
   if (values.length <= 1) return { [name]: values[0] }
   return Object.fromEntries(values.map((v, i) => [`${name}[${i}]`, v] as const))
@@ -130,6 +152,11 @@ function formatDate(timestamp: number) {
   return new Date(timestamp * 1e3).toISOString().substring(0, 19).replace('T', ' ')
 }
 
+/**
+ * Formats duration in seconds to human-readable string.
+ * @param secs - Duration in seconds.
+ * @returns Formatted duration string (e.g., "1h 30m").
+ */
 export function formatDuration(secs: number) {
   if (secs < 0) secs = -secs
   if (secs >= 3540 && Math.floor(secs) % 60 >= 50)
@@ -158,6 +185,12 @@ function omit<T extends Record<string, unknown>, K extends string>(
   return result
 }
 
+/**
+ * Prints a CCIP request in a human-readable format.
+ * @param source - Source chain instance.
+ * @param request - CCIP request to print.
+ * @param offchainTokenData - Optional offchain token data.
+ */
 export async function prettyRequest(
   source: Chain,
   request: CCIPRequest,
@@ -234,6 +267,12 @@ export async function prettyRequest(
   }
 }
 
+/**
+ * Prints a CCIP commit in a human-readable format.
+ * @param dest - Destination chain instance.
+ * @param commit - CCIP commit to print.
+ * @param request - CCIP request for timestamp comparison.
+ */
 export async function prettyCommit(
   dest: Chain,
   commit: CCIPCommit,
@@ -309,6 +348,11 @@ function wrapText(text: string, maxWidth: number, threshold: number = 0.1): stri
   return lines
 }
 
+/**
+ * Prints a formatted table of key-value pairs.
+ * @param args - Key-value pairs to print.
+ * @param opts - Formatting options.
+ */
 export function prettyTable(
   args: Record<string, unknown>,
   opts = { parseErrorKeys: ['returnData'], spcount: 0 },
@@ -336,6 +380,12 @@ export function prettyTable(
   return console.table(Object.fromEntries(out))
 }
 
+/**
+ * Prints a CCIP execution receipt in a human-readable format.
+ * @param receipt - CCIP execution receipt to print.
+ * @param request - CCIP request for timestamp comparison.
+ * @param origin - Optional transaction origin address.
+ */
 export function prettyReceipt(
   receipt: CCIPExecution,
   request: PickDeep<CCIPRequest, 'tx.timestamp'>,
@@ -357,6 +407,11 @@ export function prettyReceipt(
   })
 }
 
+/**
+ * Logs a parsed error message if the error can be decoded.
+ * @param err - Error to parse and log.
+ * @returns True if error was successfully parsed and logged.
+ */
 export function logParsedError(err: unknown): boolean {
   for (const chain of Object.values<ChainStatic>(supportedChains)) {
     const parsed = chain.parse?.(err)
