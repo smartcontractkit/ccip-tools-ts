@@ -21,6 +21,7 @@ import {
   ChainFamily,
 } from '../types.ts'
 import { getDataBytes } from '../utils.ts'
+import { getTONLeafHasher } from './hasher.ts'
 
 type CCIPMessage_V1_6_TON = CCIPMessage_V1_6 & GenericExtraArgsV2
 const GENERIC_V2_EXTRA_ARGS_TAG = Number.parseInt(GenericExtraArgsV2, 16)
@@ -34,9 +35,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
   readonly network: NetworkInfo<typeof ChainFamily.TON>
 
-  constructor() {
+  constructor(network: NetworkInfo<typeof ChainFamily.TON>) {
     super()
-    throw new Error('Not implemented')
+
+    this.network = network
   }
 
   static async fromUrl(_url: string): Promise<TONChain> {
@@ -198,8 +200,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     throw new Error('Not implemented')
   }
 
-  static getDestLeafHasher(_lane: Lane): LeafHasher {
-    throw new Error('Not implemented')
+  static getDestLeafHasher(lane: Lane): LeafHasher {
+    return getTONLeafHasher(lane)
   }
 
   async getFee(_router: string, _destChainSelector: bigint, _message: AnyMessage): Promise<bigint> {
