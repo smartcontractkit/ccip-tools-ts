@@ -16,17 +16,27 @@ import {
 import bs58 from 'bs58'
 import { getBytes, hexlify } from 'ethers'
 
+/** Ledger hardware wallet signer for Solana. */
 export class LedgerSolanaWallet {
   publicKey: PublicKey
   wallet: SolanaLedger.default
   path: string
 
+  /**
+   * Private constructor - use static `create` method instead.
+   * @internal
+   */
   private constructor(solanaLW: SolanaLedger.default, pubKey: PublicKey, path: string) {
     this.wallet = solanaLW
     this.publicKey = pubKey
     this.path = path
   }
 
+  /**
+   * Creates a new LedgerSolanaWallet instance.
+   * @param path - BIP44 derivation path.
+   * @returns A new LedgerSolanaWallet instance.
+   */
   static async create(path: string) {
     try {
       const transport = await HIDTransport.default.create()
@@ -41,6 +51,11 @@ export class LedgerSolanaWallet {
     }
   }
 
+  /**
+   * Signs a transaction with the Ledger device.
+   * @param tx - Transaction to sign.
+   * @returns Signed transaction.
+   */
   async signTransaction<T extends Transaction | VersionedTransaction>(tx: T) {
     console.debug('Ledger: Request to sign message from', this.publicKey.toBase58())
     // serializeMessage on v0, serialize on v1
@@ -56,6 +71,11 @@ export class LedgerSolanaWallet {
     return tx
   }
 
+  /**
+   * Signs multiple transactions with the Ledger device.
+   * @param txs - Transactions to sign.
+   * @returns Signed transactions.
+   */
   async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]) {
     console.info('Signing multiple transactions with Ledger')
     const signedTxs: T[] = []
@@ -65,6 +85,7 @@ export class LedgerSolanaWallet {
     return signedTxs
   }
 
+  /** Payer property - not available on Ledger. */
   get payer(): Keypair {
     throw new Error('Payer method not available on Ledger')
   }

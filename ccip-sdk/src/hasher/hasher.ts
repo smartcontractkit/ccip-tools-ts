@@ -3,7 +3,11 @@ import type { CCIPVersion, Lane } from '../types.ts'
 import { networkInfo } from '../utils.ts'
 import type { LeafHasher } from './common.ts'
 
-// Factory function that returns the right encoder based on the version of the lane
+/**
+ * Factory function that returns the right encoder based on the version of the lane.
+ * @param lane - Lane configuration.
+ * @returns Leaf hasher function for the destination chain.
+ */
 export function getLeafHasher<V extends CCIPVersion = CCIPVersion>(lane: Lane<V>): LeafHasher<V> {
   const destFamily = networkInfo(lane.destChainSelector).family
   const chain = supportedChains[destFamily]

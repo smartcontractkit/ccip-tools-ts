@@ -173,6 +173,11 @@ export function recursiveParseError(
   return res
 }
 
+/**
+ * Parses error data and transaction responses to extract human-readable info.
+ * @param data - Raw error data or transaction response.
+ * @returns Parsed error information or undefined.
+ */
 export function parseData(data: unknown): Record<string, unknown> | undefined {
   if (!data) return
   if (isHexString(data)) {

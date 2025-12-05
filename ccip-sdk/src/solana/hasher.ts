@@ -38,6 +38,11 @@ const SvmTokenAmountsSchema = {
   },
 } as const
 
+/**
+ * Creates a leaf hasher for Solana v1.6 CCIP messages.
+ * @param lane - Lane configuration.
+ * @returns Leaf hasher function for Solana messages.
+ */
 export function getV16SolanaLeafHasher(lane: Lane): LeafHasher<typeof CCIPVersion.V1_6> {
   if (lane.version !== CCIPVersion.V1_6)
     throw new Error(`Unsupported lane version: ${lane.version}`)

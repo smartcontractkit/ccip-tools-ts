@@ -153,15 +153,13 @@ export async function fetchCCIPRequestsInTx(
 }
 
 /**
- * Fetch a CCIP message by its messageId
- * Can be slow due to having to paginate backwards through logs
- *
- * @param source - Provider to fetch logs from
- * @param messageId - messageId to search for
- * @param hints - Optional hints for pagination
- * @param hints.address - onRamp address
- * @returns CCIPRequest with given messageId
- **/
+ * Fetch a CCIP message by its messageId.
+ * Can be slow due to having to paginate backwards through logs.
+ * @param source - Provider to fetch logs from.
+ * @param messageId - MessageId to search for.
+ * @param hints - Optional hints for pagination (e.g., `address` for onRamp, `page` for pagination size).
+ * @returns CCIPRequest with given messageId.
+ */
 export async function fetchCCIPRequestById(
   source: Chain,
   messageId: string,
@@ -200,12 +198,12 @@ export async function fetchCCIPRequestById(
 const BLOCK_LOG_WINDOW_SIZE = 5000
 
 /**
- * Fetches all CCIP messages contained in a given commit batch
- * @param source - The source chain
- * @param request - The request
- * @param param2
- * @param param3
- * @returns
+ * Fetches all CCIP messages contained in a given commit batch.
+ * @param source - The source chain.
+ * @param request - The CCIP request containing lane and message info.
+ * @param seqNrRange - Object containing minSeqNr and maxSeqNr for the batch range.
+ * @param opts - Optional log filtering parameters.
+ * @returns Array of messages in the batch.
  */
 export async function fetchAllMessagesInBatch<
   C extends Chain,
@@ -285,6 +283,13 @@ export async function fetchAllMessagesInBatch<
   return messages
 }
 
+/**
+ * Fetches CCIP requests originated by a specific sender.
+ * @param source - Source chain instance.
+ * @param sender - Sender address.
+ * @param filter - Log filter options.
+ * @returns Async generator of CCIP requests.
+ */
 export async function* fetchRequestsForSender(
   source: Chain,
   sender: string,
@@ -321,12 +326,12 @@ export async function* fetchRequestsForSender(
 }
 
 /**
- * Map source `token` to `sourcePoolAddress + destTokenAddress`
- * @param source - source chain
- * @param destChainSelector - dest network
- * @param onRamp - contract address
- * @param sourceTokenAmounts - usually `{ token, amount }`
- * @returns - { sourcePoolAddress, destTokenAddress, ...rest } objects
+ * Map source `token` to `sourcePoolAddress + destTokenAddress`.
+ * @param source - Source chain.
+ * @param destChainSelector - Destination network selector.
+ * @param onRamp - Contract address.
+ * @param sourceTokenAmounts - Array of token amounts, usually containing `token` and `amount` properties.
+ * @returns Array of objects with `sourcePoolAddress`, `destTokenAddress`, and remaining properties.
  */
 export async function sourceToDestTokenAmounts<S extends { token: string }>(
   source: Chain,

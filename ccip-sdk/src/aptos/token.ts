@@ -2,6 +2,12 @@ import type { Aptos } from '@aptos-labs/ts-sdk'
 
 import type { TokenInfo } from '../chain.ts'
 
+/**
+ * Retrieves token metadata (symbol and decimals) from Aptos.
+ * @param provider - Aptos provider instance.
+ * @param token - Token address.
+ * @returns Token information with symbol and decimals.
+ */
 export async function getTokenInfo(provider: Aptos, token: string): Promise<TokenInfo> {
   let lastErr: Error | undefined
 

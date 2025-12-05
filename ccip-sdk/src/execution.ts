@@ -17,8 +17,8 @@ import {
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
  *
  * @param messagesInBatch - Array containing all messages in batch, ordered
- * @param lane - Arguments for leafeHasher (lane info)
- * @param messageIds - list of messages (from batch) to prove for manual execution
+ * @param lane - Arguments for leafHasher (lane info)
+ * @param messageId - Message ID to prove for manual execution
  * @param merkleRoot - Optional merkleRoot of the CommitReport, for validation
  * @returns ManualExec report arguments
  **/
@@ -90,22 +90,22 @@ export const discoverOffRamp = memoize(
 )
 
 /**
- * Generic implementation for fetching ExecutionReceipts for given requests
- * If more than one request is given, may yield them interleaved
- * Completes as soon as there's no more work to be done
- * 2 possible behaviors:
+ * Generic implementation for fetching ExecutionReceipts for given requests.
+ * If more than one request is given, may yield them interleaved.
+ * Completes as soon as there's no more work to be done.
+ *
+ * Two possible behaviors:
  * - if `startBlock|startTime` is given, pages forward from that block up;
  *   completes when success (final) receipt is found for all requests (or reach latest block)
  * - otherwise, pages backwards and returns only the most recent receipt per request;
  *   completes when receipts for all requests were seen
  *
- * @param dest - provider to page through
- * @param requests - CCIP requests to search executions for
- * @param hints.fromBlock - A block from where to start paging forward;
- *  otherwise, page backwards and completes on first (most recent) receipt
- * @param hints.page - getLogs pagination range param
- * @param hints.commit - Special param to help narrow down search on suppported chains (e.g. Solana)
- **/
+ * @param dest - Provider to page through.
+ * @param offRamp - OffRamp contract address.
+ * @param request - CCIP request to search executions for.
+ * @param commit - Optional commit info to narrow down search.
+ * @param hints - Optional hints (e.g., `page` for getLogs pagination range).
+ */
 export async function* fetchExecutionReceipts(
   dest: Chain,
   offRamp: string,
