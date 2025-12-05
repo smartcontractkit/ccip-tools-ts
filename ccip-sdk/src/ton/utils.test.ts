@@ -1,0 +1,143 @@
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
+import { beginCell } from '@ton/core'
+
+import { extractMagicTag, hexToBuffer, sha256, toBigInt, tryParseCell } from './utils.ts'
+import {
+  EVMExtraArgsV1Tag,
+  GenericExtraArgsV2,
+  SVMExtraArgsV1Tag,
+  SuiExtraArgsV1Tag,
+} from '../extra-args.ts'
+
+describe('TON utils', () => {
+  describe('sha256', () => {
+    it('should compute SHA256 hash of data', () => {
+      const data = new Uint8Array([1, 2, 3, 4])
+      const hash = sha256(data)
+      assert.match(hash, /^0x[a-f0-9]{64}$/)
+      assert.equal(hash, '0x9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a')
+    })
+
+    it('should handle empty data', () => {
+      const hash = sha256(new Uint8Array())
+      assert.equal(hash, '0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
+    })
+  })
+
+  describe('hexToBuffer', () => {
+    it('should convert hex string with 0x prefix', () => {
+      const buffer = hexToBuffer('0x48656c6c6f')
+      assert.deepEqual(buffer, Buffer.from('Hello'))
+    })
+
+    it('should convert hex string without 0x prefix', () => {
+      const buffer = hexToBuffer('48656c6c6f')
+      assert.deepEqual(buffer, Buffer.from('Hello'))
+    })
+
+    it('should handle uppercase 0X prefix', () => {
+      const buffer = hexToBuffer('0X48656c6c6f')
+      assert.deepEqual(buffer, Buffer.from('Hello'))
+    })
+
+    it('should return empty buffer for empty input', () => {
+      const buffer = hexToBuffer('')
+      assert.deepEqual(buffer, Buffer.alloc(0))
+    })
+
+    it('should return empty buffer for just 0x', () => {
+      const buffer = hexToBuffer('0x')
+      assert.deepEqual(buffer, Buffer.alloc(0))
+    })
+  })
+
+  describe('toBigInt', () => {
+    it('should return bigint unchanged', () => {
+      const result = toBigInt(123n)
+      assert.equal(result, 123n)
+    })
+
+    it('should convert number to bigint', () => {
+      const result = toBigInt(123)
+      assert.equal(result, 123n)
+    })
+
+    it('should convert string to bigint', () => {
+      const result = toBigInt('123')
+      assert.equal(result, 123n)
+    })
+
+    it('should convert hex string to bigint', () => {
+      const result = toBigInt('0x7b')
+      assert.equal(result, 123n)
+    })
+  })
+
+  describe('tryParseCell', () => {
+    it('should parse valid BOC format', () => {
+      const cell = beginCell().storeUint(0x12345678, 32).endCell()
+
+      const bocHex = '0x' + cell.toBoc().toString('hex')
+      const parsed = tryParseCell(bocHex)
+
+      assert.equal(parsed.beginParse().loadUint(32), 0x12345678)
+    })
+
+    it('should fall back to raw bytes for invalid BOC', () => {
+      const rawHex = '0x48656c6c6f' // "Hello" in hex
+      const cell = tryParseCell(rawHex)
+
+      assert.deepEqual(cell.beginParse().loadBuffer(5), Buffer.from('Hello'))
+    })
+
+    it('should return empty cell for empty input', () => {
+      const cell = tryParseCell('')
+      const slice = cell.beginParse()
+      assert.equal(slice.remainingBits, 0)
+      assert.equal(slice.remainingRefs, 0)
+    })
+  })
+
+  describe('extractMagicTag', () => {
+    it('should extract magic tag from BOC', () => {
+      const cell = beginCell()
+        .storeUint(Number(GenericExtraArgsV2), 32)
+        .storeUint(123456, 256)
+        .storeBit(true)
+        .endCell()
+
+      const bocHex = '0x' + cell.toBoc().toString('hex')
+      const tag = extractMagicTag(bocHex)
+
+      assert.equal(tag, '0x181dcf10')
+    })
+
+    it('should pad tag to 8 hex digits', () => {
+      const cell = beginCell().storeUint(0x123, 32).endCell()
+
+      const bocHex = '0x' + cell.toBoc().toString('hex')
+      const tag = extractMagicTag(bocHex)
+
+      assert.equal(tag, '0x00000123')
+    })
+
+    it('should handle different tag values', () => {
+      const testCases = [
+        { input: Number(EVMExtraArgsV1Tag), expected: '0x97a657c9' },
+        { input: Number(SuiExtraArgsV1Tag), expected: '0x21ea4ca9' },
+        { input: Number(SVMExtraArgsV1Tag), expected: '0x1f3b3aba' },
+      ]
+
+      for (const testCase of testCases) {
+        const cell = beginCell().storeUint(testCase.input, 32).endCell()
+
+        const bocHex = '0x' + cell.toBoc().toString('hex')
+        const tag = extractMagicTag(bocHex)
+
+        assert.equal(tag, testCase.expected)
+      }
+    })
+  })
+})
