@@ -8,7 +8,6 @@ import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
-  type CCIPMessage_V1_6,
   type CCIPRequest,
   type ChainTransaction,
   type CommitReport,
@@ -22,8 +21,8 @@ import {
 } from '../types.ts'
 import { getDataBytes } from '../utils.ts'
 import { getTONLeafHasher } from './hasher.ts'
+import type { CCIPMessage_V1_6_TON } from './types.ts'
 
-type CCIPMessage_V1_6_TON = CCIPMessage_V1_6 & GenericExtraArgsV2
 const GENERIC_V2_EXTRA_ARGS_TAG = Number.parseInt(GenericExtraArgsV2, 16)
 
 export class TONChain extends Chain<typeof ChainFamily.TON> {

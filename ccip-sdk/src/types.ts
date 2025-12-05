@@ -6,6 +6,7 @@ import type { CCIPMessage_EVM, CCIPMessage_V1_6_EVM } from './evm/messages.ts'
 import type { ExtraArgs } from './extra-args.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
 import type { CCIPMessage_V1_6_Sui } from './sui/types.ts'
+import type { CCIPMessage_V1_6_TON } from './ton/types.ts'
 // v1.6 Base type from EVM contains the intersection of all other CCIPMessage v1.6 types
 export type { CCIPMessage_V1_6 } from './evm/messages.ts'
 
@@ -79,7 +80,7 @@ export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
   | typeof CCIPVersion.V1_2
   | typeof CCIPVersion.V1_5
   ? CCIPMessage_EVM<V>
-  : CCIPMessage_V1_6_EVM | CCIPMessage_V1_6_Solana | CCIPMessage_V1_6_Sui
+  : CCIPMessage_V1_6_EVM | CCIPMessage_V1_6_Solana | CCIPMessage_V1_6_Sui | CCIPMessage_V1_6_TON
 
 export type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'blockNumber' | 'transactionHash'> & {
   data: BytesLike | Record<string, unknown>
