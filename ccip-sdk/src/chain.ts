@@ -8,6 +8,7 @@ import type {
   EVMExtraArgsV1,
   EVMExtraArgsV2,
   ExtraArgs,
+  GenericExtraArgsV2,
   SVMExtraArgsV1,
   SuiExtraArgsV1,
 } from './extra-args.ts'
@@ -393,6 +394,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
     | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
+    | (GenericExtraArgsV2 & { _tag: 'GenericExtraArgsV2' })
     | undefined
   encodeExtraArgs(extraArgs: ExtraArgs): string
   /**

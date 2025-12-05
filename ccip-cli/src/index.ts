@@ -52,7 +52,7 @@ async function main() {
     .options(globalOpts)
     .middleware((argv) => {
       if (!argv.verbose) {
-        console.debug = () => {}
+        console.debug = () => { }
       }
     })
     .commandDir('commands', {
@@ -68,7 +68,7 @@ async function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const later = setTimeout(() => {}, 2 ** 31 - 1) // keep event-loop alive
+  const later = setTimeout(() => { }, 2 ** 31 - 1) // keep event-loop alive
   await main()
     .catch((err) => {
       console.error(err)
