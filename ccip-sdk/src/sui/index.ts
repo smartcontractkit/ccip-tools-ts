@@ -4,6 +4,7 @@ import type { PickDeep } from 'type-fest'
 import { AptosChain } from '../aptos/index.ts'
 import { type LogFilter, Chain } from '../chain.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1 } from '../extra-args.ts'
+import { getSuiLeafHasher } from './hasher.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -30,9 +31,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   readonly network: NetworkInfo<typeof ChainFamily.Sui>
 
-  constructor() {
+  constructor(network: NetworkInfo<typeof ChainFamily.Sui>) {
     super()
-    throw new Error('Not implemented')
+
+    this.network = network
   }
 
   static async fromUrl(_url: string): Promise<SuiChain> {
@@ -153,8 +155,8 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return AptosChain.getAddress(bytes)
   }
 
-  static getDestLeafHasher(_lane: Lane): LeafHasher {
-    throw new Error('Not implemented')
+  static getDestLeafHasher(lane: Lane): LeafHasher {
+    return getSuiLeafHasher(lane)
   }
 
   async getFee(_router: string, _destChainSelector: bigint, _message: AnyMessage): Promise<bigint> {

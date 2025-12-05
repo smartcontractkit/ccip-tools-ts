@@ -9,7 +9,7 @@ import { Format } from './commands/index.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.91.0-2ab536e'
+const VERSION = '0.91.0-52e5884'
 // generate:end
 
 const globalOpts = {
@@ -52,7 +52,7 @@ async function main() {
     .options(globalOpts)
     .middleware((argv) => {
       if (!argv.verbose) {
-        console.debug = () => {}
+        console.debug = () => { }
       }
     })
     .commandDir('commands', {
@@ -68,7 +68,7 @@ async function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const later = setTimeout(() => {}, 2 ** 31 - 1) // keep event-loop alive
+  const later = setTimeout(() => { }, 2 ** 31 - 1) // keep event-loop alive
   await main()
     .catch((err) => {
       console.error(err)
