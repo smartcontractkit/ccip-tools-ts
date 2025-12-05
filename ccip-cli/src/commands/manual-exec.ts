@@ -22,7 +22,7 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-import { fetchChainsFromRpcs } from '../providers/index.ts'
+import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 
 // const MAX_QUEUE = 1000
 // const MAX_EXECS_IN_BATCH = 1
@@ -92,7 +92,6 @@ export const builder = (yargs: Argv) =>
     })
 
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
-  if (!argv.wallet) argv.wallet = process.env['USER_KEY'] || process.env['OWNER_KEY']
   let destroy
   const destroy$ = new Promise((resolve) => {
     destroy = resolve
@@ -193,7 +192,8 @@ async function manualExec(
     }
   }
 
-  const manualExecTx = await dest.executeReport(offRamp, execReport, argv)
+  const [, wallet] = await loadChainWallet(dest, argv)
+  const manualExecTx = await dest.executeReport(offRamp, execReport, { ...argv, wallet })
 
   console.log('🚀 manualExec tx =', manualExecTx.hash, 'to offRamp =', offRamp)
 

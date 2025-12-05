@@ -1,11 +1,17 @@
-import { type AnchorProvider, Program } from '@coral-xyz/anchor'
-import { AddressLookupTableProgram, PublicKey, SystemProgram } from '@solana/web3.js'
+import { type Wallet as AnchorWallet, AnchorProvider, Program } from '@coral-xyz/anchor'
+import {
+  type Connection,
+  AddressLookupTableProgram,
+  PublicKey,
+  SystemProgram,
+} from '@solana/web3.js'
 import { dataSlice, hexlify } from 'ethers'
 import { memoize } from 'micro-memoize'
 
 import { sleep } from '../utils.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import type { SolanaChain } from './index.ts'
+import type { Wallet } from './types.ts'
 import { simulateAndSendTxs } from './utils.ts'
 
 /**
@@ -17,12 +23,11 @@ import { simulateAndSendTxs } from './utils.ts'
  *   before returning from this method
  */
 export async function cleanUpBuffers(
-  provider: AnchorProvider,
+  connection: Connection,
+  wallet: Wallet,
   getLogs: SolanaChain['getLogs'],
   opts?: { waitDeactivation?: boolean },
 ): Promise<void> {
-  const connection = provider.connection
-  const wallet = provider.wallet
   console.debug(
     'Starting cleaning up buffers and lookup tables for account',
     wallet.publicKey.toString(),
@@ -113,7 +118,11 @@ export async function cleanUpBuffers(
           .map(({ data }) => Buffer.from(data.subarray(8 + 4, 8 + 4 + 32)))
 
         for (const bufferId of bufferIds) {
-          const offrampProgram = new Program(CCIP_OFFRAMP_IDL, new PublicKey(log.address), provider)
+          const offrampProgram = new Program(
+            CCIP_OFFRAMP_IDL,
+            new PublicKey(log.address),
+            new AnchorProvider(connection, wallet as AnchorWallet, { commitment: 'confirmed' }),
+          )
 
           const [executionReportBuffer] = PublicKey.findProgramAddressSync(
             [Buffer.from('execution_report_buffer'), bufferId, wallet.publicKey.toBuffer()],

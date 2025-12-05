@@ -6,15 +6,11 @@ import {
   type Interface,
   type JsonRpcApiProvider,
   type Log,
-  type Provider,
   type Signer,
   type TransactionReceipt,
-  AbstractSigner,
-  BaseWallet,
   Contract,
   JsonRpcProvider,
   Result,
-  SigningKey,
   WebSocketProvider,
   ZeroAddress,
   concat,
@@ -138,6 +134,15 @@ function resultsToMessage(result: Result): Record<string, unknown> {
   } as unknown as CCIPMessage
 }
 
+function isSigner(wallet: unknown): wallet is Signer {
+  return (
+    typeof wallet === 'object' &&
+    wallet !== null &&
+    'signTransaction' in wallet &&
+    'getAddress' in wallet
+  )
+}
+
 export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   static {
     supportedChains[ChainFamily.EVM] = EVMChain
@@ -180,7 +185,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       async: true,
     })
     this.getTokenInfo = memoize(this.getTokenInfo.bind(this))
-    this.getWallet = memoize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
     this.getTokenAdminRegistryFor = memoize(this.getTokenAdminRegistryFor.bind(this), {
       async: true,
       maxArgs: 1,
@@ -188,52 +192,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { async: true, maxArgs: 1 })
   }
 
-  // overwrite EVMChain.getWallet to implement custom wallet loading
-  // some signers don't like to be `.connect`ed, so pass provider as first param
-  static getWallet(_provider: Provider, _opts: { wallet?: unknown }): Promise<Signer> {
-    throw new Error('static EVM wallet loading not available')
-  }
-
-  // cached wallet/signer getter
-  async getWallet(opts: { wallet?: unknown } = {}): Promise<Signer> {
-    if (
-      typeof opts.wallet === 'number' ||
-      (typeof opts.wallet === 'string' && opts.wallet.match(/^(\d+|0x[a-fA-F0-9]{40})$/))
-    ) {
-      // if given a number, numeric string or address, use ethers `provider.getSigner` (e.g. geth or MM)
-      return this.provider.getSigner(
-        typeof opts.wallet === 'string' && opts.wallet.match(/^0x[a-fA-F0-9]{40}$/)
-          ? opts.wallet
-          : Number(opts.wallet),
-      )
-    } else if (typeof opts.wallet === 'string') {
-      // support receiving private key directly (not recommended)
-      try {
-        return Promise.resolve(
-          new BaseWallet(
-            new SigningKey((opts.wallet.startsWith('0x') ? '' : '0x') + opts.wallet),
-            this.provider,
-          ),
-        )
-      } catch (_) {
-        // pass
-      }
-    } else if (opts.wallet instanceof AbstractSigner) {
-      // if given a signer, return/cache it
-      return opts.wallet
-    }
-    return (this.constructor as typeof EVMChain).getWallet(this.provider, opts)
-  }
-
   /**
    * Expose ethers provider's `listAccounts`, if provider supports it
    */
   async listAccounts(): Promise<string[]> {
     return (await this.provider.listAccounts()).map(({ address }) => address)
-  }
-
-  async getWalletAddress(opts?: { wallet?: unknown }): Promise<string> {
-    return (await this.getWallet(opts)).getAddress()
   }
 
   static async _getProvider(url: string): Promise<JsonRpcApiProvider> {
@@ -895,7 +858,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     router_: string,
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
-    opts?: { wallet?: unknown; approveMax?: boolean },
+    opts: { wallet: unknown; approveMax?: boolean },
   ): Promise<CCIPRequest> {
     if (!message.fee) message.fee = await this.getFee(router_, destChainSelector, message)
     const feeToken = message.feeToken ?? ZeroAddress
@@ -913,10 +876,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (feeToken !== ZeroAddress)
       amountsToApprove[feeToken] = (amountsToApprove[feeToken] ?? 0n) + message.fee
 
-    const wallet = await this.getWallet(opts) // moized wallet arg (if called previously)
+    const wallet = opts.wallet
+    if (!isSigner(wallet)) throw new Error(`Wallet must be a Signer, got=${util.inspect(wallet)}`)
 
     // approve all tokens (including fee token) in parallel
-    let nonce = await this.provider.getTransactionCount(await this.getWalletAddress())
+    let nonce = await this.provider.getTransactionCount(await wallet.getAddress())
     await Promise.all(
       Object.entries(amountsToApprove).map(async ([token, amount]) => {
         const contract = new Contract(token, interfaces.Token, wallet) as unknown as TypedContract<
@@ -966,10 +930,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   async executeReport(
     offRamp: string,
     execReport: ExecutionReport,
-    opts?: { wallet?: string; gasLimit?: number; tokensGasLimit?: number },
+    opts: { wallet: unknown; gasLimit?: number; tokensGasLimit?: number },
   ) {
     const [_, version] = await this.typeAndVersion(offRamp)
-    const wallet = await this.getWallet(opts)
+    const wallet = opts.wallet
+    if (!isSigner(wallet)) throw new Error(`Wallet must be a Signer, got=${util.inspect(wallet)}`)
 
     let manualExecTx
     const offchainTokenData = execReport.offchainTokenData.map(encodeEVMOffchainTokenData)

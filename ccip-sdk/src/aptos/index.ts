@@ -1,13 +1,6 @@
 import util from 'util'
 
-import {
-  Account,
-  Aptos,
-  AptosConfig,
-  Ed25519PrivateKey,
-  Network,
-  TransactionResponseType,
-} from '@aptos-labs/ts-sdk'
+import { Aptos, AptosConfig, Network, TransactionResponseType } from '@aptos-labs/ts-sdk'
 import {
   type BytesLike,
   concat,
@@ -61,7 +54,7 @@ import { executeReport } from './exec.ts'
 import { getAptosLeafHasher } from './hasher.ts'
 import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
 import { getTokenInfo } from './token.ts'
-import { type AptosAsyncAccount, EVMExtraArgsV2Codec, SVMExtraArgsV1Codec } from './types.ts'
+import { EVMExtraArgsV2Codec, SVMExtraArgsV1Codec, isAptosAccount } from './types.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import {
   decodeMessage,
@@ -116,7 +109,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
           .then((modules) => modules.map(({ abi }) => abi!.name)),
       { maxSize: 100, maxArgs: 1 },
     )
-    this.getWallet = memoize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
     this.provider.getTransactionByVersion = memoize(
       this.provider.getTransactionByVersion.bind(this.provider),
       {
@@ -292,25 +284,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     }
     return registry
   }
-
-  static getWallet(_opts: { wallet?: unknown } = {}): Promise<AptosAsyncAccount> {
-    return Promise.reject(new Error('TODO according to your environment'))
-  }
-
-  // cached
-  async getWallet(opts: { wallet?: unknown } = {}): Promise<AptosAsyncAccount> {
-    if (isBytesLike(opts.wallet)) {
-      return Account.fromPrivateKey({
-        privateKey: new Ed25519PrivateKey(opts.wallet, false),
-      })
-    }
-    return (this.constructor as typeof AptosChain).getWallet(opts)
-  }
-
-  async getWalletAddress(opts?: { wallet?: unknown }): Promise<string> {
-    return (await this.getWallet(opts)).accountAddress.toString()
-  }
-
   // Static methods for decoding
   static decodeMessage(log: {
     data: BytesLike | Record<string, unknown>
@@ -446,7 +419,12 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     opts?: { wallet?: unknown; approveMax?: boolean },
   ): Promise<CCIPRequest> {
     if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
-    const account = await this.getWallet(opts)
+    const account = opts?.wallet
+    if (!isAptosAccount(account)) {
+      throw new Error(
+        `${this.constructor.name}.sendMessage requires an Aptos account wallet, got=${util.inspect(opts?.wallet)}`,
+      )
+    }
 
     const hash = await ccipSend(
       this.provider,
@@ -470,7 +448,12 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     execReport: ExecutionReport,
     opts?: { wallet?: unknown; gasLimit?: number },
   ): Promise<ChainTransaction> {
-    const account = await this.getWallet(opts)
+    const account = opts?.wallet
+    if (!isAptosAccount(account)) {
+      throw new Error(
+        `${this.constructor.name}.sendMessage requires an Aptos account wallet, got=${util.inspect(opts?.wallet)}`,
+      )
+    }
 
     if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
       throw new Error('Aptos expects EVMExtraArgsV2 reports')

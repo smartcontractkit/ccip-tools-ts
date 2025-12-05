@@ -219,12 +219,6 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getTokenAdminRegistryFor(address: string): Promise<string>
   /**
-   * Build, derive, load or fetch a wallet for this instance which will be used in any tx send operation
-   * @param opts.wallet - cli or environmental parameters to help pick a wallet
-   * @returns address of fetched (and stored internally) account
-   */
-  abstract getWalletAddress(opts?: { wallet?: unknown }): Promise<string>
-  /**
    * Fetch the current fee for a given intended message
    * @param router - router address on this chain
    * @param destChainSelector - dest network selector
@@ -236,14 +230,15 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param router - router address on this chain
    * @param destChainSelector - dest network selector
    * @param message - message to send
-   * @param opts.wallet - cli or environmental parameters to help pick a wallet
+   * @param opts.wallet - chain-specific wallet or signer instance, to sign transactions
    * @param opts.approveMax - approve the maximum amount of tokens to transfer
+   * @returns CCIPRequest object with info of the sent message
    */
   abstract sendMessage(
     router: string,
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
-    opts?: { wallet?: unknown; approveMax?: boolean },
+    opts: { wallet: unknown; approveMax?: boolean },
   ): Promise<CCIPRequest>
   /**
    * Fetch supported offchain token data for a request from this network
@@ -256,12 +251,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param offRamp - offRamp address on this dest chain
    * @param execReport - execution report containing messages to execute, proofs and offchainTokenData
    * @param opts - general options for execution
-   * @returns transaction hash of the execution
+   * @param opts.wallet - chain-specific wallet or signer instance, to sign transactions
+   * @returns transaction of the execution
    */
   abstract executeReport(
     offRamp: string,
     execReport: ExecutionReport,
-    opts?: Record<string, unknown>,
+    opts: { wallet: unknown; [opts: string]: unknown },
   ): Promise<ChainTransaction>
 
   /**

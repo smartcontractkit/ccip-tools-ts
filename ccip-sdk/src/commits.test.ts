@@ -172,10 +172,6 @@ class MockChain extends Chain {
     return '0xTokenAdminRegistry'
   }
 
-  async getWalletAddress(_opts?: { wallet?: unknown }): Promise<string> {
-    return '0xWallet'
-  }
-
   async getFee(_router: string, _destChainSelector: bigint, _message: any): Promise<bigint> {
     return 1000n
   }

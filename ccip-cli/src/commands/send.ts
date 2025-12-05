@@ -17,7 +17,7 @@ import type { Argv } from 'yargs'
 import type { GlobalOpts } from '../index.ts'
 import { Format } from './types.ts'
 import { logParsedError, parseTokenAmounts, prettyRequest, withDateTimestamp } from './utils.ts'
-import { fetchChainsFromRpcs } from '../providers/index.ts'
+import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 
 export const command = 'send <source> <router> <dest>'
 export const describe = 'Send a CCIP message from router on source to dest'
@@ -188,10 +188,12 @@ async function sendMessage(
     throw new Error('--token-receiver and --account intended only for Solana dest')
   }
 
+  let walletAddress, wallet
   if (!receiver) {
     if (sourceNetwork.family !== destNetwork.family)
       throw new Error('--receiver is required when sending to a different chain family')
-    receiver = await source.getWalletAddress(argv) // send to self if same family
+    ;[walletAddress, wallet] = await loadChainWallet(source, argv)
+    receiver = walletAddress // send to self if same family
   }
 
   if (argv.estimateGasLimit != null || argv.onlyEstimate) {
@@ -213,10 +215,11 @@ async function sendMessage(
       tokenAmounts,
     )
 
+    if (!walletAddress) [walletAddress, wallet] = await loadChainWallet(source, argv)
     const estimated = await estimateExecGasForRequest(source, dest, {
       lane,
       message: {
-        sender: await source.getWalletAddress(argv),
+        sender: walletAddress,
         receiver,
         data,
         tokenAmounts: destTokenAmounts,
@@ -283,11 +286,12 @@ async function sendMessage(
   )
   if (argv.onlyGetFee) return
 
+  if (!walletAddress) [walletAddress, wallet] = await loadChainWallet(source, argv)
   const request = await source.sendMessage(
     argv.router,
     destNetwork.chainSelector,
     { ...message, fee },
-    argv,
+    { ...argv, wallet },
   )
   console.log(
     '🚀 Sending message to',

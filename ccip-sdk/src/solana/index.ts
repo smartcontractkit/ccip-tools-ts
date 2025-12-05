@@ -1,14 +1,6 @@
 import util from 'util'
 
-import {
-  type Idl,
-  type IdlTypes,
-  AnchorProvider,
-  BorshAccountsCoder,
-  BorshCoder,
-  Program,
-  Wallet as AnchorWallet,
-} from '@coral-xyz/anchor'
+import { type Idl, type IdlTypes, BorshAccountsCoder, BorshCoder, Program } from '@coral-xyz/anchor'
 import { NATIVE_MINT } from '@solana/spl-token'
 import {
   type Commitment,
@@ -16,7 +8,6 @@ import {
   type ConnectionConfig,
   type VersionedTransactionResponse,
   Connection,
-  Keypair,
   PublicKey,
   SYSVAR_CLOCK_PUBKEY,
   SystemProgram,
@@ -30,7 +21,6 @@ import {
   dataSlice,
   encodeBase58,
   encodeBase64,
-  getBytes,
   hexlify,
   isHexString,
   toBigInt,
@@ -88,7 +78,7 @@ import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import { fetchSolanaOffchainTokenData } from './offchain.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
-import type { CCIPMessage_V1_6_Solana, UnsignedTx, Wallet } from './types.ts'
+import { type CCIPMessage_V1_6_Solana, type UnsignedTx, isWallet } from './types.ts'
 import {
   bytesToBuffer,
   getErrorFromLogs,
@@ -181,7 +171,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       maxSize: 100,
       maxArgs: 1,
     })
-    this.getWallet = memoize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
     this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this))
     this.getTokenInfo = memoize(this.getTokenInfo.bind(this))
     const getSignaturesForAddress = memoize(
@@ -240,35 +229,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   static async fromUrl(url: string): Promise<SolanaChain> {
     const connection = this._getConnection(url)
     return this.fromConnection(connection)
-  }
-
-  static getWallet(_opts?: { wallet?: unknown }): Promise<Wallet> {
-    throw new Error('Wallet not implemented')
-  }
-
-  /**
-   * Load wallet
-   * @param opts - options to load wallet
-   * @param opts.wallet - private key as 0x or base58 string, or async getter function resolving to
-   *   Wallet instance
-   * @returns Wallet, after caching in instance
-   */
-  async getWallet(opts: { wallet?: unknown } = {}): Promise<Wallet> {
-    try {
-      if (typeof opts.wallet === 'string')
-        return new AnchorWallet(
-          Keypair.fromSecretKey(
-            opts.wallet.startsWith('0x') ? getBytes(opts.wallet) : bs58.decode(opts.wallet),
-          ),
-        )
-    } catch (_) {
-      // pass
-    }
-    return (this.constructor as typeof SolanaChain).getWallet(opts)
-  }
-
-  async getWalletAddress(opts?: { wallet?: unknown }): Promise<string> {
-    return (await this.getWallet(opts)).publicKey.toBase58()
   }
 
   // cached
@@ -1022,9 +982,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     router: string,
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
-    opts?: { wallet?: unknown; approveMax?: boolean },
+    opts: { wallet: unknown; approveMax?: boolean },
   ): Promise<CCIPRequest> {
-    const wallet = await this.getWallet(opts)
+    const wallet = opts.wallet
+    if (!isWallet(wallet)) throw new Error(`Expected Wallet, got=${util.inspect(wallet)}`)
     const unsigned = await this.generateUnsignedSendMessage(
       wallet.publicKey.toBase58(),
       router,
@@ -1076,15 +1037,16 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async executeReport(
     offRamp: string,
     execReport: ExecutionReport,
-    opts?: {
-      wallet?: string
+    opts: {
+      wallet: unknown
       gasLimit?: number
       forceLookupTable?: boolean
       forceBuffer?: boolean
       waitDeactivation?: boolean
     },
   ): Promise<ChainTransaction> {
-    const wallet = await this.getWallet(opts)
+    const wallet = opts.wallet
+    if (!isWallet(wallet)) throw new Error(`Expected Wallet, got=${util.inspect(wallet)}`)
 
     let hash
     do {
@@ -1126,12 +1088,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *   (513 slots) to pass before closing; by default, we deactivate (if needed) and move on, to
    *   close other ready ALTs
    */
-  async cleanUpBuffers(opts?: { wallet?: unknown; waitDeactivation?: boolean }): Promise<void> {
-    const wallet = await this.getWallet(opts)
-    const provider = new AnchorProvider(this.connection, wallet as AnchorWallet, {
-      commitment: this.commitment,
-    })
-    await cleanUpBuffers(provider, this.getLogs.bind(this), opts)
+  async cleanUpBuffers(opts: { wallet: unknown; waitDeactivation?: boolean }): Promise<void> {
+    const wallet = opts.wallet
+    if (!isWallet(wallet)) throw new Error(`Expected Wallet, got=${util.inspect(wallet)}`)
+    await cleanUpBuffers(this.connection, wallet, this.getLogs.bind(this), opts)
   }
 
   static parse(data: unknown) {

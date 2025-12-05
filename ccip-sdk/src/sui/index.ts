@@ -121,10 +121,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  async getWalletAddress(_opts?: { wallet?: unknown }): Promise<string> {
-    return Promise.reject(new Error('Not implemented'))
-  }
-
   // Static methods for decoding
   static decodeMessage(_log: Log_): CCIPMessage_V1_6_Sui | undefined {
     throw new Error('Not implemented')
