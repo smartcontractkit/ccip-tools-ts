@@ -31,6 +31,11 @@ import { fetchChainsFromRpcs } from '../providers/index.ts'
 export const command = 'manualExec <tx-hash>'
 export const describe = 'Execute manually pending or failed messages'
 
+/**
+ * Yargs builder for the manual-exec command.
+ * @param yargs - Yargs instance.
+ * @returns Configured yargs instance with command options.
+ */
 export const builder = (yargs: Argv) =>
   yargs
     .positional('tx-hash', {
@@ -91,6 +96,10 @@ export const builder = (yargs: Argv) =>
       },
     })
 
+/**
+ * Handler for the manual-exec command.
+ * @param argv - Command line arguments.
+ */
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
   if (!argv.wallet) argv.wallet = process.env['USER_KEY'] || process.env['OWNER_KEY']
   let destroy

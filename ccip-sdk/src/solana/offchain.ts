@@ -38,19 +38,10 @@ const cctpTokenPoolCoder = new BorshCoder({
 /**
  * Analyzes a Solana transaction to extract CcipCctpMessageSentEvent, fetch Circle attestation,
  * and encode the data in the format required by the destination chain.
- *
- * @param request - CCIP request containing transaction data and chain routing info
- * @returns Array of encoded offchain token data (only one supported for Solana right now)
- *
- * @throws Error if transaction hash is missing or CcipCctpMessageSentEvent parsing fails
- *
- * @example
- * const tokenData = await fetchSolanaOffchainTokenData({
- *   lane: { sourceChainSelector: ..., destChainSelector: ... },
- *   message: { ... },
- *   log: { transactionHash: "3k81TLhJuhwB8fvurCwyMPHXR3k9Tmtqe2ZrUQ8e3rMxk9fWFJT2xVHGgKJg1785FkJcaiQkthY4m86JrESGPhMY" },
- *   tx: { logs: [...] }
- * })
+ * @param connection - Solana connection instance.
+ * @param request - CCIP request containing transaction data and chain routing info.
+ * @returns Array of encoded offchain token data (only one supported for Solana right now).
+ * @throws Error if transaction hash is missing or CcipCctpMessageSentEvent parsing fails.
  */
 export async function fetchSolanaOffchainTokenData(
   connection: Connection,

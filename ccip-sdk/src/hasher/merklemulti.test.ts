@@ -27,8 +27,8 @@ class CombinationGenerator {
 
   /**
    * Creates a new CombinationGenerator instance.
-   * @param n Total number of elements to choose from.
-   * @param k Size of each combination.
+   * @param n - Total number of elements to choose from.
+   * @param k - Size of each combination.
    */
   constructor(n: number, k: number) {
     this.n = n

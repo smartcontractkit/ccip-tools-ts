@@ -46,6 +46,11 @@ export const interfaces = {
   Custom: new Interface(customErrors),
 } as const
 
+/**
+ * Gets all event fragments matching the given event names.
+ * @param events - Event names to match.
+ * @returns Map of topic hash to event fragment.
+ */
 export function getAllFragmentsMatchingEvents(
   events: readonly string[],
 ): Record<`0x${string}`, EventFragment> {

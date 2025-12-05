@@ -70,6 +70,9 @@ import {
   fetchCCIPRequestsInTx,
 } from '../requests.ts'
 
+/**
+ * Aptos chain implementation supporting Aptos networks.
+ */
 export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   static {
     supportedChains[ChainFamily.Aptos] = AptosChain
@@ -83,6 +86,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   getTokenInfo: (token: string) => Promise<TokenInfo>
   _getAccountModulesNames: (address: string) => Promise<string[]>
 
+  /**
+   * Creates a new AptosChain instance.
+   * @param provider - Aptos SDK provider instance.
+   * @param network - Network information for this chain.
+   */
   constructor(provider: Aptos, network: NetworkInfo) {
     if (network.family !== ChainFamily.Aptos) {
       throw new Error(`Invalid network family: ${network.family}, expected ${ChainFamily.Aptos}`)
@@ -127,15 +135,31 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     )
   }
 
+  /**
+   * Creates an AptosChain instance from an existing Aptos provider.
+   * @param provider - Aptos SDK provider instance.
+   * @returns A new AptosChain instance.
+   */
   static async fromProvider(provider: Aptos): Promise<AptosChain> {
     return new AptosChain(provider, networkInfo(`aptos:${await provider.getChainId()}`))
   }
 
+  /**
+   * Creates an AptosChain instance from an Aptos configuration.
+   * @param config - Aptos configuration object.
+   * @returns A new AptosChain instance.
+   */
   static async fromAptosConfig(config: AptosConfig): Promise<AptosChain> {
     const provider = new Aptos(config)
     return this.fromProvider(provider)
   }
 
+  /**
+   * Creates an AptosChain instance from a URL or network identifier.
+   * @param url - RPC URL or Aptos Network enum value.
+   * @param network - Optional network specification.
+   * @returns A new AptosChain instance.
+   */
   static async fromUrl(url: string | Network, network?: Network): Promise<AptosChain> {
     if (network) {
       // pass
@@ -152,10 +176,12 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return this.fromAptosConfig(config)
   }
 
+  /** {@inheritDoc Chain.getBlockTimestamp} */
   async getBlockTimestamp(version: number | 'finalized'): Promise<number> {
     return getVersionTimestamp(this.provider, version)
   }
 
+  /** {@inheritDoc Chain.getTransaction} */
   async getTransaction(hashOrVersion: string | number): Promise<ChainTransaction> {
     let tx
     if (isHexString(hashOrVersion, 32)) {
@@ -185,14 +211,17 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     }
   }
 
+  /** {@inheritDoc Chain.getLogs} */
   async *getLogs(opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<Log_> {
     yield* streamAptosLogs(this.provider, opts)
   }
 
+  /** {@inheritDoc Chain.fetchRequestsInTx} */
   async fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
     return fetchCCIPRequestsInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
   }
 
+  /** {@inheritDoc Chain.fetchRequestById} */
   override async fetchRequestById(
     messageId: string,
     onRamp?: string,
@@ -205,6 +234,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     })
   }
 
+  /** {@inheritDoc Chain.fetchAllMessagesInBatch} */
   async fetchAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
@@ -218,6 +248,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return fetchAllMessagesInBatch(this, request, commit, opts)
   }
 
+  /** {@inheritDoc Chain.typeAndVersion} */
   async typeAndVersion(address: string) {
     // requires address with `::<module>` suffix
     const [typeAndVersion] = await this.provider.view<[string]>({
@@ -228,27 +259,33 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return parseTypeAndVersion(typeAndVersion)
   }
 
+  /** {@inheritDoc Chain.getRouterForOnRamp} */
   getRouterForOnRamp(onRamp: string, _destChainSelector: bigint): Promise<string> {
     // router is same package as onramp, changing only module
     return Promise.resolve(onRamp.split('::')[0] + '::router')
   }
 
+  /** {@inheritDoc Chain.getRouterForOffRamp} */
   getRouterForOffRamp(offRamp: string, _sourceChainSelector: bigint): Promise<string> {
     return Promise.resolve(offRamp.split('::')[0] + '::router')
   }
 
+  /** {@inheritDoc Chain.getNativeTokenForRouter} */
   getNativeTokenForRouter(_router: string): Promise<string> {
     return Promise.resolve('0xa')
   }
 
+  /** {@inheritDoc Chain.getOffRampsForRouter} */
   getOffRampsForRouter(router: string, _sourceChainSelector: bigint): Promise<string[]> {
     return Promise.resolve([router.split('::')[0] + '::offramp'])
   }
 
+  /** {@inheritDoc Chain.getOnRampForRouter} */
   getOnRampForRouter(router: string, _destChainSelector: bigint): Promise<string> {
     return Promise.resolve(router.split('::')[0] + '::onramp')
   }
 
+  /** {@inheritDoc Chain.getOnRampForOffRamp} */
   async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
     const [sourceChainConfig] = await this.provider.view<[{ on_ramp: string }]>({
       payload: {
@@ -260,10 +297,12 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return decodeAddress(sourceChainConfig.on_ramp, networkInfo(sourceChainSelector).family)
   }
 
+  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
   getCommitStoreForOffRamp(offRamp: string): Promise<string> {
     return Promise.resolve(offRamp.split('::')[0] + '::offramp')
   }
 
+  /** {@inheritDoc Chain.getTokenForTokenPool} */
   async getTokenForTokenPool(tokenPool: string): Promise<string> {
     const modulesNames = (await this._getAccountModulesNames(tokenPool))
       .reverse()
@@ -284,6 +323,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     throw firstErr ?? new Error(`Could not view 'get_token' in ${tokenPool}`)
   }
 
+  /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
   async getTokenAdminRegistryFor(address: string): Promise<string> {
     const registry = address.split('::')[0] + '::token_admin_registry'
     const [type] = await this.typeAndVersion(registry)
@@ -293,11 +333,20 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return registry
   }
 
+  /**
+   * Static wallet loader - override to implement custom wallet loading.
+   * @param _opts - Wallet loading options.
+   * @throws Error by default - must be overridden.
+   */
   static getWallet(_opts: { wallet?: unknown } = {}): Promise<AptosAsyncAccount> {
     return Promise.reject(new Error('TODO according to your environment'))
   }
 
-  // cached
+  /**
+   * Loads a wallet for signing transactions.
+   * @param opts - Wallet loading options, supports private key as bytes.
+   * @returns Aptos account instance.
+   */
   async getWallet(opts: { wallet?: unknown } = {}): Promise<AptosAsyncAccount> {
     if (isBytesLike(opts.wallet)) {
       return Account.fromPrivateKey({
@@ -307,11 +356,16 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return (this.constructor as typeof AptosChain).getWallet(opts)
   }
 
+  /** {@inheritDoc Chain.getWalletAddress} */
   async getWalletAddress(opts?: { wallet?: unknown }): Promise<string> {
     return (await this.getWallet(opts)).accountAddress.toString()
   }
 
-  // Static methods for decoding
+  /**
+   * Decodes a CCIP message from an Aptos log event.
+   * @param log - Log with data field.
+   * @returns Decoded CCIPMessage or undefined if not valid.
+   */
   static decodeMessage(log: {
     data: BytesLike | Record<string, unknown>
   }): CCIPMessage | undefined {
@@ -329,7 +383,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     }
   }
 
-  // decodes an Aptos-generated extraArgs, destinated *to* other chains (EVM, Solana, etc)
+  /**
+   * Decodes extra arguments from Aptos CCIP messages.
+   * @param extraArgs - Encoded extra arguments bytes.
+   * @returns Decoded extra arguments or undefined if unknown format.
+   */
   static decodeExtraArgs(
     extraArgs: BytesLike,
   ):
@@ -365,7 +423,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     }
   }
 
-  // encodes extraArgs destinated *to other* chains (EVM, Solana, etc), using Aptos-specific encoding (i.e. *from* Aptos)
+  /**
+   * Encodes extra arguments for Aptos CCIP messages.
+   * @param extraArgs - Extra arguments to encode.
+   * @returns Encoded extra arguments as hex string.
+   */
   static encodeExtraArgs(extraArgs: ExtraArgs): string {
     if ('gasLimit' in extraArgs && 'allowOutOfOrderExecution' in extraArgs)
       return concat([EVMExtraArgsV2Tag, EVMExtraArgsV2Codec.serialize(extraArgs).toBytes()])
@@ -382,6 +444,12 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     throw new Error('Aptos can only encode EVMExtraArgsV2 & SVMExtraArgsV1')
   }
 
+  /**
+   * Decodes commit reports from an Aptos log event.
+   * @param log - Log with data field.
+   * @param lane - Lane info for filtering.
+   * @returns Array of CommitReport or undefined if not valid.
+   */
   static decodeCommits({ data }: Pick<Log_, 'data'>, lane?: Lane): CommitReport[] | undefined {
     if (!data || typeof data != 'object') throw new Error('invalid aptos log')
     const data_ = data as { blessed_merkle_roots: unknown[]; unblessed_merkle_roots: unknown[] }
@@ -407,6 +475,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return commits
   }
 
+  /**
+   * Decodes an execution receipt from an Aptos log event.
+   * @param log - Log with data field.
+   * @returns ExecutionReceipt or undefined if not valid.
+   */
   static decodeReceipt({ data }: Pick<Log_, 'data'>): ExecutionReceipt | undefined {
     if (!data || typeof data != 'object') throw new Error('invalid aptos log')
     const data_ = data as { message_id: string; state: number }
@@ -416,6 +489,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     ) as ExecutionReceipt
   }
 
+  /**
+   * Converts bytes to an Aptos address.
+   * @param bytes - Bytes to convert.
+   * @returns Aptos address (0x-prefixed hex, 32 bytes padded).
+   */
   static getAddress(bytes: BytesLike): string {
     let suffix = ''
     if (typeof bytes === 'string' && !bytes.startsWith('0x')) {
@@ -431,14 +509,21 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return zeroPadValue(bytes, 32) + suffix
   }
 
+  /**
+   * Gets the leaf hasher for Aptos destination chains.
+   * @param lane - Lane configuration.
+   * @returns Leaf hasher function.
+   */
   static getDestLeafHasher(lane: Lane): LeafHasher {
     return getAptosLeafHasher(lane)
   }
 
+  /** {@inheritDoc Chain.getFee} */
   async getFee(router: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint> {
     return getFee(this.provider, router, destChainSelector, message)
   }
 
+  /** {@inheritDoc Chain.sendMessage} */
   async sendMessage(
     router: string,
     destChainSelector: bigint,
@@ -460,11 +545,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return (await this.fetchRequestsInTx(await this.getTransaction(hash)))[0]
   }
 
+  /** {@inheritDoc Chain.fetchOffchainTokenData} */
   fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
     // default offchain token data
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
+  /** {@inheritDoc Chain.executeReport} */
   async executeReport(
     offRamp: string,
     execReport: ExecutionReport,
@@ -487,6 +574,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return this.getTransaction(hash)
   }
 
+  /**
+   * Parses raw Aptos data into typed structures.
+   * @param data - Raw data to parse.
+   * @returns Parsed data or undefined.
+   */
   static parse(data: unknown) {
     if (isBytesLike(data)) {
       const parsedExtraArgs = this.decodeExtraArgs(data)
@@ -494,6 +586,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     }
   }
 
+  /** {@inheritDoc Chain.getSupportedTokens} */
   async getSupportedTokens(address: string, opts?: { page?: number }): Promise<string[]> {
     const res = []
     let page,
@@ -512,6 +605,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return page
   }
 
+  /** {@inheritDoc Chain.getRegistryTokenConfig} */
   async getRegistryTokenConfig(
     registry: string,
     token: string,
@@ -538,6 +632,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     }
   }
 
+  /** {@inheritDoc Chain.getTokenPoolConfigs} */
   async getTokenPoolConfigs(tokenPool: string): Promise<{
     token: string
     router: string
@@ -576,6 +671,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     throw firstErr ?? new Error(`Could not get tokenPool configs from ${tokenPool}`)
   }
 
+  /** {@inheritDoc Chain.getTokenPoolRemotes} */
   async getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
@@ -672,6 +768,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     throw firstErr ?? new Error(`Could not view 'get_remote_token' in ${tokenPool}`)
   }
 
+  /** {@inheritDoc Chain.getFeeTokens} */
   async getFeeTokens(router: string): Promise<Record<string, TokenInfo>> {
     const [feeTokens] = await this.provider.view<[string[]]>({
       payload: {

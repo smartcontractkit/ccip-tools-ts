@@ -51,6 +51,14 @@ function messageArgs(
   ]
 }
 
+/**
+ * Gets the fee for sending a CCIP message on Aptos.
+ * @param provider - Aptos provider instance.
+ * @param router - Router module address.
+ * @param destChainSelector - Destination chain selector.
+ * @param message - CCIP message to send.
+ * @returns Fee amount in native tokens.
+ */
 export async function getFee(
   provider: Aptos,
   router: string,
@@ -71,6 +79,16 @@ export async function getFee(
   return BigInt(fee)
 }
 
+/**
+ * Sends a CCIP message through the Aptos router.
+ * @param provider - Aptos provider instance.
+ * @param account - Account to sign the transaction.
+ * @param router - Router module address.
+ * @param destChainSelector - Destination chain selector.
+ * @param message - CCIP message with fee.
+ * @param _opts - Optional parameters.
+ * @returns Transaction hash.
+ */
 export async function ccipSend(
   provider: Aptos,
   account: AptosAsyncAccount,

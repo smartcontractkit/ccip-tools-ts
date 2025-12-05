@@ -35,14 +35,12 @@ const ccipReceive = FunctionFragment.from({
 type Any2EVMMessage = Parameters<TypedContract<typeof RouterABI>['routeMessage']>[0]
 
 /**
- * Estimate CCIP gasLimit needed to execute a request on a contract receiver
- *
- * @param dest - Provider for the destination chain
- * @param request - CCIP request info
- * @param request.lane - Lane info
- * @param request.message - Message info
- * @returns estimated gasLimit as bigint
- **/
+ * Estimate CCIP gasLimit needed to execute a request on a contract receiver.
+ * @param source - Provider for the source chain.
+ * @param dest - Provider for the destination chain.
+ * @param request - CCIP request info containing `lane` and `message` details.
+ * @returns Estimated gasLimit as bigint.
+ */
 export async function estimateExecGasForRequest(
   source: Chain,
   dest: EVMChain,

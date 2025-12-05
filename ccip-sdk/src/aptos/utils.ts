@@ -9,7 +9,7 @@ import {
 
 /**
  * Encodes a numeric value as a 32-byte hex string.
- * @param value Numeric value to encode.
+ * @param value - Numeric value to encode.
  * @returns 32-byte hex string representation of the value.
  */
 export const encodeNumber = (value: BigNumberish): string => toBeHex(value, 32)
