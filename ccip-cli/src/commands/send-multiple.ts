@@ -530,7 +530,10 @@ async function sendMultiple(
 
   if (successful.length > 0) {
     console.log('\nSuccessful messages:')
-    successful.forEach((r) => console.log(`  ${r.route.source.name} → ${r.route.dest.name}: ${r.messageId}`))
+    successful.forEach((r) => {
+      const explorerUrl = `https://ccip.chain.link/#/side-drawer/msg/${r.messageId}`
+      console.log(`  ${r.route.source.name} → ${r.route.dest.name}: ${explorerUrl}`)
+    })
   }
 
   if (failed.length > 0) {
