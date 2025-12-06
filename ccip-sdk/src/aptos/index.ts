@@ -1,6 +1,13 @@
 import util from 'util'
 
-import { Aptos, AptosConfig, Network, TransactionResponseType } from '@aptos-labs/ts-sdk'
+import {
+  Aptos,
+  AptosConfig,
+  Deserializer,
+  Network,
+  SimpleTransaction,
+  TransactionResponseType,
+} from '@aptos-labs/ts-sdk'
 import {
   type BytesLike,
   concat,
@@ -14,9 +21,9 @@ import {
   zeroPadValue,
 } from 'ethers'
 import { memoize } from 'micro-memoize'
-import type { PickDeep } from 'type-fest'
+import type { PickDeep, SetRequired } from 'type-fest'
 
-import { ccipSend, getFee } from './send.ts'
+import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { type LogFilter, type TokenInfo, type TokenPoolRemote, Chain } from '../chain.ts'
 import {
   type EVMExtraArgsV2,
@@ -50,7 +57,7 @@ import {
   networkInfo,
   parseTypeAndVersion,
 } from '../utils.ts'
-import { executeReport } from './exec.ts'
+import { generateUnsignedExecuteReport } from './exec.ts'
 import { getAptosLeafHasher } from './hasher.ts'
 import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
 import { getTokenInfo } from './token.ts'
@@ -412,29 +419,62 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return getFee(this.provider, router, destChainSelector, message)
   }
 
+  // generate raw/unsigned `ccip_send` transaction
+  async generateUnsignedSendMessage(
+    sender: string,
+    router: string,
+    destChainSelector: bigint,
+    message: AnyMessage & { fee?: bigint },
+    opts: { approveMax?: boolean },
+  ): Promise<Uint8Array[]> {
+    if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
+    return Promise.all([
+      generateUnsignedCcipSend(
+        this.provider,
+        sender,
+        router,
+        destChainSelector,
+        message as SetRequired<typeof message, 'fee'>,
+        opts,
+      ),
+    ])
+  }
+
   async sendMessage(
     router: string,
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
-    opts?: { wallet?: unknown; approveMax?: boolean },
+    opts: { wallet: unknown; approveMax?: boolean },
   ): Promise<CCIPRequest> {
-    if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
-    const account = opts?.wallet
+    const account = opts.wallet
     if (!isAptosAccount(account)) {
       throw new Error(
-        `${this.constructor.name}.sendMessage requires an Aptos account wallet, got=${util.inspect(opts?.wallet)}`,
+        `${this.constructor.name}.sendMessage requires an Aptos account wallet, got=${util.inspect(opts.wallet)}`,
       )
     }
 
-    const hash = await ccipSend(
-      this.provider,
-      account,
+    const [unsignedBytes] = await this.generateUnsignedSendMessage(
+      account.accountAddress.toString(),
       router,
       destChainSelector,
-      message as AnyMessage & { fee: bigint },
+      message,
+      opts,
     )
+    const unsigned = SimpleTransaction.deserialize(new Deserializer(unsignedBytes))
 
-    // Return the ChainTransaction by fetching it
+    // Sign and submit the transaction
+    const signed = await account.signTransactionWithAuthenticator(unsigned)
+    const pendingTxn = await this.provider.transaction.submit.simple({
+      transaction: unsigned,
+      senderAuthenticator: signed,
+    })
+
+    // Wait for the transaction to be confirmed
+    const { hash } = await this.provider.waitForTransaction({
+      transactionHash: pendingTxn.hash,
+    })
+
+    // Return the CCIPRequest by fetching it
     return (await this.fetchRequestsInTx(await this.getTransaction(hash)))[0]
   }
 
@@ -443,30 +483,59 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
+  // generate raw/unsigned `manually_execute` transaction data
+  async generateUnsignedExecuteReport(
+    payer: string,
+    offRamp: string,
+    execReport: ExecutionReport,
+    opts: { gasLimit?: number },
+  ): Promise<Uint8Array[]> {
+    if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
+      throw new Error('Aptos expects EVMExtraArgsV2 reports')
+    }
+
+    return Promise.all([
+      generateUnsignedExecuteReport(
+        this.provider,
+        payer,
+        offRamp,
+        execReport as ExecutionReport<CCIPMessage_V1_6_EVM>,
+        opts,
+      ),
+    ])
+  }
+
   async executeReport(
     offRamp: string,
     execReport: ExecutionReport,
-    opts?: { wallet?: unknown; gasLimit?: number },
+    opts: { wallet: unknown; gasLimit?: number },
   ): Promise<ChainTransaction> {
-    const account = opts?.wallet
+    const account = opts.wallet
     if (!isAptosAccount(account)) {
       throw new Error(
         `${this.constructor.name}.sendMessage requires an Aptos account wallet, got=${util.inspect(opts?.wallet)}`,
       )
     }
 
-    if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
-      throw new Error('Aptos expects EVMExtraArgsV2 reports')
-    }
-
-    const hash = await executeReport(
-      this.provider,
-      account,
+    const [unsignedBytes] = await this.generateUnsignedExecuteReport(
+      account.accountAddress.toString(),
       offRamp,
-      execReport as ExecutionReport<CCIPMessage_V1_6_EVM>,
+      execReport,
       opts,
     )
+    const unsigned = SimpleTransaction.deserialize(new Deserializer(unsignedBytes))
 
+    // Sign and submit the transaction
+    const signed = await account.signTransactionWithAuthenticator(unsigned)
+    const pendingTxn = await this.provider.transaction.submit.simple({
+      transaction: unsigned,
+      senderAuthenticator: signed,
+    })
+
+    // Wait for the transaction to be confirmed
+    const { hash } = await this.provider.waitForTransaction({
+      transactionHash: pendingTxn.hash,
+    })
     return this.getTransaction(hash)
   }
 

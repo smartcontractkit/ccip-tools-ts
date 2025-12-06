@@ -295,7 +295,9 @@ async function sendMessage(
   )
   console.log(
     '🚀 Sending message to',
-    tokenReceiver || receiver,
+    tokenReceiver && tokenReceiver !== '11111111111111111111111111111111'
+      ? tokenReceiver
+      : receiver,
     '@',
     destNetwork.name,
     ', tx =>',

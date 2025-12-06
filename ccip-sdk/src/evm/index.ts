@@ -8,6 +8,7 @@ import {
   type Log,
   type Signer,
   type TransactionReceipt,
+  type TransactionRequest,
   Contract,
   JsonRpcProvider,
   Result,
@@ -27,7 +28,7 @@ import {
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 import { memoize } from 'micro-memoize'
-import type { PickDeep } from 'type-fest'
+import type { PickDeep, SetRequired } from 'type-fest'
 
 import { type LogFilter, type TokenPoolRemote, Chain } from '../chain.ts'
 import {
@@ -82,7 +83,6 @@ import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import type Router_ABI from './abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
 import {
-  DEFAULT_APPROVE_GAS_LIMIT,
   DEFAULT_GAS_LIMIT,
   commitsFragments,
   defaultAbiCoder,
@@ -854,13 +854,24 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     })
   }
 
-  async sendMessage(
-    router_: string,
+  /**
+   * Generate unsigned txs for ccipSend'ing a message
+   * @param sender - sender address
+   * @param router - address of the Router contract
+   * @param destChainSelector - chainSelector of destination chain
+   * @param message - AnyMessage to send; if `fee` is not present, it'll be calculated
+   * @param opts.approveMax - if tokens approvals are needed, opt into approving maximum allowance
+   * @returns Array containing 0 or more unsigned token approvals txs (if needed at the time of
+   *   generation), followed by a ccipSend TransactionRequest
+   */
+  async generateUnsignedSendMessage(
+    sender: string,
+    router: string,
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
-    opts: { wallet: unknown; approveMax?: boolean },
-  ): Promise<CCIPRequest> {
-    if (!message.fee) message.fee = await this.getFee(router_, destChainSelector, message)
+    opts?: { approveMax?: boolean },
+  ): Promise<{ from: string; to: string; data: string }[]> {
+    if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
     const feeToken = message.feeToken ?? ZeroAddress
     const receiver = zeroPadValue(getAddressBytes(message.receiver), 32)
     const data = hexlify(message.data)
@@ -876,35 +887,28 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (feeToken !== ZeroAddress)
       amountsToApprove[feeToken] = (amountsToApprove[feeToken] ?? 0n) + message.fee
 
-    const wallet = opts.wallet
-    if (!isSigner(wallet)) throw new Error(`Wallet must be a Signer, got=${util.inspect(wallet)}`)
-
-    // approve all tokens (including fee token) in parallel
-    let nonce = await this.provider.getTransactionCount(await wallet.getAddress())
-    await Promise.all(
-      Object.entries(amountsToApprove).map(async ([token, amount]) => {
-        const contract = new Contract(token, interfaces.Token, wallet) as unknown as TypedContract<
-          typeof Token_ABI
-        >
-        const allowance = await contract.allowance(await wallet.getAddress(), router_)
-        if (allowance < amount) {
+    const approveTxs = (
+      await Promise.all(
+        Object.entries(amountsToApprove).map(async ([token, amount]) => {
+          const contract = new Contract(
+            token,
+            interfaces.Token,
+            this.provider,
+          ) as unknown as TypedContract<typeof Token_ABI>
+          const allowance = await contract.allowance(sender, router)
+          if (allowance >= amount) return
           const amnt = opts?.approveMax ? 2n ** 256n - 1n : amount
-          // optimization: hardcode nonce and gasLimit to send all approvals in parallel without estimating
-          console.info('Approving', amnt, 'of', token, 'tokens for router', router_)
-          const tx = await contract.approve(router_, amnt, {
-            nonce: nonce++,
-            gasLimit: DEFAULT_APPROVE_GAS_LIMIT,
-          })
-          console.info('=>', tx.hash)
-          await tx.wait(1, 60_000)
-        }
-      }),
-    )
+          return contract.approve.populateTransaction(router, amnt, { from: sender })
+        }),
+      )
+    ).filter((tx) => tx != null)
 
-    const router = new Contract(router_, interfaces.Router, wallet) as unknown as TypedContract<
-      typeof Router_ABI
-    >
-    const tx = await router.ccipSend(
+    const contract = new Contract(
+      router,
+      interfaces.Router,
+      this.provider,
+    ) as unknown as TypedContract<typeof Router_ABI>
+    const sendTx = await contract.ccipSend.populateTransaction(
       destChainSelector,
       {
         receiver,
@@ -914,27 +918,81 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         feeToken,
       },
       {
-        nonce: nonce++,
+        from: sender,
         // if native fee, include it in value; otherwise, it's transferedFrom feeToken
-        ...(feeToken === ZeroAddress ? { value: message.fee } : {}),
+        ...(feeToken === ZeroAddress && { value: message.fee }),
       },
     )
-    const receipt = await tx.wait(1)
-    return (await this.fetchRequestsInTx(await this.getTransaction(receipt!)))[0]
+    const txRequests = [...approveTxs, sendTx]
+    return txRequests as SetRequired<(typeof txRequests)[number], 'from'>[]
+  }
+
+  async sendMessage(
+    router_: string,
+    destChainSelector: bigint,
+    message: AnyMessage & { fee?: bigint },
+    opts: { wallet: unknown; approveMax?: boolean },
+  ): Promise<CCIPRequest> {
+    const wallet = opts.wallet
+    if (!isSigner(wallet)) throw new Error(`Wallet must be a Signer, got=${util.inspect(wallet)}`)
+
+    const sender = await wallet.getAddress()
+    const txs = await this.generateUnsignedSendMessage(
+      sender,
+      router_,
+      destChainSelector,
+      message,
+      opts,
+    )
+    const approveTxs = txs.slice(0, txs.length - 1)
+    let sendTx: TransactionRequest = txs[txs.length - 1]
+
+    // approve all tokens (including feeToken, if needed) in parallel
+    let nonce = await this.provider.getTransactionCount(sender)
+    const responses = await Promise.all(
+      approveTxs.map(async (tx: TransactionRequest) => {
+        tx.nonce = nonce++
+        tx = await wallet.populateTransaction(tx)
+        tx.from = undefined
+        const signed = await wallet.signTransaction(tx)
+        const response = await this.provider.broadcastTransaction(signed)
+        console.debug('approve =>', response.hash)
+        return response
+      }),
+    )
+    if (responses.length) await responses[responses.length - 1].wait(1, 60_000) // wait last tx nonce to be mined
+
+    sendTx.nonce = nonce++
+    // sendTx.gasLimit = await this.provider.estimateGas(sendTx)
+    sendTx = await wallet.populateTransaction(sendTx)
+    sendTx.from = undefined // some signers don't like receiving pre-populated `from`
+    const signed = await wallet.signTransaction(sendTx)
+    const response = await this.provider.broadcastTransaction(signed)
+    console.debug('ccipSend =>', response.hash)
+    await response.wait(1, 60_000)
+    return (await this.fetchRequestsInTx(await this.getTransaction(response.hash)))[0]
   }
 
   fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
     return fetchEVMOffchainTokenData(request)
   }
 
-  async executeReport(
+  /**
+   * Generate unsigned tx to manuallyExecute a message
+   * @param _payer - not used in EVM
+   * @param offRamp - address of the OffRamp contract
+   * @param execReport - execution report
+   * @param opts.gasLimit - gasLimitOverride for the ccipReceive call
+   * @param opts.tokensGasLimit - tokensGasLimitOverride for the tokenPool.mintOrRelease call
+   * @returns array containing one unsigned `manuallyExecute` TransactionRequest object
+   */
+  async generateUnsignedExecuteReport(
+    _payer: string,
     offRamp: string,
     execReport: ExecutionReport,
-    opts: { wallet: unknown; gasLimit?: number; tokensGasLimit?: number },
-  ) {
+    opts: { gasLimit?: number; tokensGasLimit?: number },
+  ): Promise<[{ to: string; data: string }]> {
     const [_, version] = await this.typeAndVersion(offRamp)
-    const wallet = opts.wallet
-    if (!isSigner(wallet)) throw new Error(`Wallet must be a Signer, got=${util.inspect(wallet)}`)
 
     let manualExecTx
     const offchainTokenData = execReport.offchainTokenData.map(encodeEVMOffchainTokenData)
@@ -944,10 +1002,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const contract = new Contract(
           offRamp,
           EVM2EVMOffRamp_1_2_ABI,
-          wallet,
+          this.provider,
         ) as unknown as TypedContract<typeof EVM2EVMOffRamp_1_2_ABI>
         const gasOverride = BigInt(opts?.gasLimit ?? 0)
-        manualExecTx = await contract.manuallyExecute(
+        manualExecTx = await contract.manuallyExecute.populateTransaction(
           {
             ...execReport,
             proofs: execReport.proofs.map((d) => hexlify(d)),
@@ -962,9 +1020,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const contract = new Contract(
           offRamp,
           EVM2EVMOffRamp_1_5_ABI,
-          wallet,
+          this.provider,
         ) as unknown as TypedContract<typeof EVM2EVMOffRamp_1_5_ABI>
-        manualExecTx = await contract.manuallyExecute(
+        manualExecTx = await contract.manuallyExecute.populateTransaction(
           {
             ...execReport,
             proofs: execReport.proofs.map((d) => hexlify(d)),
@@ -997,10 +1055,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           sender,
           tokenAmounts,
         }
-        const contract = new Contract(offRamp, OffRamp_1_6_ABI, wallet) as unknown as TypedContract<
-          typeof OffRamp_1_6_ABI
-        >
-        manualExecTx = await contract.manuallyExecute(
+        const contract = new Contract(
+          offRamp,
+          OffRamp_1_6_ABI,
+          this.provider,
+        ) as unknown as TypedContract<typeof OffRamp_1_6_ABI>
+        manualExecTx = await contract.manuallyExecute.populateTransaction(
           [
             {
               ...execReport,
@@ -1026,9 +1086,31 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       default:
         throw new Error(`Unsupported version: ${version}`)
     }
-    const receipt = await this.provider.waitForTransaction(manualExecTx.hash, 1, 60e3)
-    if (!receipt?.hash) throw new Error(`Could not confirm exec tx: ${manualExecTx.hash}`)
-    if (!receipt.status) throw new Error(`Exec transaction reverted: ${manualExecTx.hash}`)
+    return [manualExecTx]
+  }
+
+  async executeReport(
+    offRamp: string,
+    execReport: ExecutionReport,
+    opts: { wallet: unknown; gasLimit?: number; tokensGasLimit?: number },
+  ) {
+    const wallet = opts.wallet
+    if (!isSigner(wallet)) throw new Error(`Wallet must be a Signer, got=${util.inspect(wallet)}`)
+
+    let [unsignedTx]: [TransactionRequest] = await this.generateUnsignedExecuteReport(
+      await wallet.getAddress(),
+      offRamp,
+      execReport,
+      opts,
+    )
+    unsignedTx = await wallet.populateTransaction(unsignedTx)
+    unsignedTx.from = undefined // some signers don't like receiving pre-populated `from`
+    const signed = await wallet.signTransaction(unsignedTx)
+    const response = await this.provider.broadcastTransaction(signed)
+    console.debug('ccipSend =>', response.hash)
+    const receipt = await response.wait(1, 60_000)
+    if (!receipt?.hash) throw new Error(`Could not confirm exec tx: ${response.hash}`)
+    if (!receipt.status) throw new Error(`Exec transaction reverted: ${response.hash}`)
     return this.getTransaction(receipt)
   }
 

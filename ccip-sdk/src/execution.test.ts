@@ -11,10 +11,12 @@ import type { CCIPMessage_V1_6_EVM } from './evm/messages.ts'
 import { calculateManualExecProof, discoverOffRamp } from './execution.ts'
 import { decodeMessage } from './requests.ts'
 import {
+  type AnyMessage,
   type CCIPMessage,
   type CCIPRequest,
   type ChainTransaction,
   type CommitReport,
+  type ExecutionReport,
   type ExecutionState,
   type Lane,
   type Log_,
@@ -192,6 +194,16 @@ class MockChain extends Chain {
     return {}
   }
 
+  generateUnsignedSendMessage(
+    _sender: string,
+    _router: string,
+    _destChainSelector: bigint,
+    _message: AnyMessage & { fee?: bigint },
+    _opts?: { approveMax?: boolean },
+  ): Promise<unknown> {
+    return Promise.reject(new Error('not implemented'))
+  }
+
   async sendMessage(
     _router: string,
     _destChainSelector: bigint,
@@ -203,6 +215,15 @@ class MockChain extends Chain {
 
   async fetchOffchainTokenData(_request: CCIPRequest): Promise<any[]> {
     return []
+  }
+
+  override generateUnsignedExecuteReport(
+    _payer: string,
+    _offRamp: string,
+    _execReport: ExecutionReport,
+    _opts: object,
+  ): Promise<unknown> {
+    return Promise.reject(new Error('not implemented'))
   }
 
   async executeReport(

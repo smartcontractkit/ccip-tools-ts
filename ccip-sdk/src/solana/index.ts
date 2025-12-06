@@ -26,7 +26,7 @@ import {
   toBigInt,
 } from 'ethers'
 import { type Memoized, memoize } from 'micro-memoize'
-import type { PickDeep } from 'type-fest'
+import type { PickDeep, SetRequired } from 'type-fest'
 
 import {
   type LogFilter,
@@ -973,7 +973,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       new PublicKey(sender),
       new PublicKey(router),
       destChainSelector,
-      message as AnyMessage & { fee: bigint },
+      message as SetRequired<typeof message, 'fee'>,
       opts,
     )
   }

@@ -1,7 +1,7 @@
-import type { Aptos } from '@aptos-labs/ts-sdk'
+import { type Aptos, AccountAddress } from '@aptos-labs/ts-sdk'
 
 import type { ExecutionReport } from '../types.ts'
-import { type AptosAsyncAccount, serializeExecutionReport } from './types.ts'
+import { serializeExecutionReport } from './types.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 
 /**
@@ -14,9 +14,9 @@ import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
  * @param opts - options like gasLimit override
  * @returns exec txHash
  */
-export async function executeReport(
+export async function generateUnsignedExecuteReport(
   provider: Aptos,
-  account: AptosAsyncAccount,
+  payer: string,
   offRamp: string,
   execReport: ExecutionReport<CCIPMessage_V1_6_EVM>,
   opts?: { gasLimit?: number },
@@ -45,7 +45,7 @@ export async function executeReport(
   //     gas_limit: u256
   // )
   const transaction = await provider.transaction.build.simple({
-    sender: account.accountAddress,
+    sender: AccountAddress.fromString(payer),
     data: {
       function:
         `${offRamp.includes('::') ? offRamp : offRamp + '::offramp'}::manually_execute` as `${string}::${string}::${string}`,
@@ -54,16 +54,5 @@ export async function executeReport(
     options: { maxGasAmount: opts?.gasLimit },
   })
 
-  // Sign and submit the transaction
-  const signed = await account.signTransactionWithAuthenticator(transaction)
-  const pendingTxn = await provider.transaction.submit.simple({
-    transaction,
-    senderAuthenticator: signed,
-  })
-
-  // Wait for the transaction to be confirmed
-  const { hash } = await provider.waitForTransaction({
-    transactionHash: pendingTxn.hash,
-  })
-  return hash
+  return transaction.bcsToBytes()
 }

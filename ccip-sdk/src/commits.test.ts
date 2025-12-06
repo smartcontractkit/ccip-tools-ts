@@ -10,10 +10,12 @@ import { fetchCommitReport } from './commits.ts'
 import CommitStore_1_2_ABI from './evm/abi/CommitStore_1_2.ts'
 import OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
 import {
+  type AnyMessage,
   type CCIPMessage,
   type CCIPRequest,
   type ChainTransaction,
   type CommitReport,
+  type ExecutionReport,
   type ExecutionState,
   type Lane,
   type Log_,
@@ -180,6 +182,16 @@ class MockChain extends Chain {
     return {}
   }
 
+  generateUnsignedSendMessage(
+    _sender: string,
+    _router: string,
+    _destChainSelector: bigint,
+    _message: AnyMessage & { fee?: bigint },
+    _opts?: { approveMax?: boolean },
+  ): Promise<unknown> {
+    return Promise.reject(new Error('not implemented'))
+  }
+
   async sendMessage(
     _router: string,
     _destChainSelector: bigint,
@@ -191,6 +203,15 @@ class MockChain extends Chain {
 
   async fetchOffchainTokenData(_request: CCIPRequest): Promise<any[]> {
     return []
+  }
+
+  override generateUnsignedExecuteReport(
+    _payer: string,
+    _offRamp: string,
+    _execReport: ExecutionReport,
+    _opts: object,
+  ): Promise<unknown> {
+    return Promise.reject(new Error('not implemented'))
   }
 
   async executeReport(
