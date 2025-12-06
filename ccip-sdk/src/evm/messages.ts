@@ -7,7 +7,7 @@ import type EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
 import type OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import { defaultAbiCoder } from './const.ts'
 
-// addresses often come as `string | Addressable`, this type cleans them up to just `string`
+/** Utility type that cleans up address types to just `string`. */
 export type CleanAddressable<T> = T extends string | Addressable
   ? string
   : T extends Record<string, unknown>
@@ -23,7 +23,7 @@ type EVM2AnyMessageRequested = CleanAddressable<
   >[0]
 >
 
-// v1.6+ Message Base (all other dests share this intersection)
+/** v1.6+ Message Base type (all other destinations share this intersection). */
 export type CCIPMessage_V1_6 = MergeArrayElements<
   CleanAddressable<
     AbiParametersToPrimitiveTypes<
@@ -33,6 +33,7 @@ export type CCIPMessage_V1_6 = MergeArrayElements<
   { tokenAmounts: readonly SourceTokenData[] }
 >
 
+/** CCIP v1.5 EVM message type. */
 export type CCIPMessage_V1_5_EVM = MergeArrayElements<
   EVM2AnyMessageRequested,
   {
@@ -41,13 +42,15 @@ export type CCIPMessage_V1_5_EVM = MergeArrayElements<
   }
 >
 
+/** CCIP v1.2 EVM message type. */
 export type CCIPMessage_V1_2_EVM = EVM2AnyMessageRequested & {
   header: Omit<CCIPMessage_V1_6['header'], 'destChainSelector'>
 }
 
-// v1.6 EVM specialization, extends CCIPMessage_V1_6, plus EVMExtraArgsV2 and tokenAmounts.*.destGasAmount
+/** v1.6 EVM specialization with EVMExtraArgsV2 and tokenAmounts.*.destGasAmount. */
 export type CCIPMessage_V1_6_EVM = CCIPMessage_V1_6 & EVMExtraArgsV2
 
+/** Union type for CCIP EVM messages across versions. */
 export type CCIPMessage_EVM<V extends CCIPVersion = CCIPVersion> = V extends typeof CCIPVersion.V1_2
   ? CCIPMessage_V1_2_EVM
   : V extends typeof CCIPVersion.V1_5
@@ -56,6 +59,7 @@ export type CCIPMessage_EVM<V extends CCIPVersion = CCIPVersion> = V extends typ
 
 const SourceTokenData =
   'tuple(bytes sourcePoolAddress, bytes destTokenAddress, bytes extraData, uint64 destGasAmount)'
+/** Token transfer data in a CCIP message. */
 export type SourceTokenData = {
   sourcePoolAddress: string
   destTokenAddress: string
@@ -64,8 +68,10 @@ export type SourceTokenData = {
 }
 
 /**
- * parse <=v1.5 `message.sourceTokenData`;
- * v1.6+ already contains this in `message.tokenAmounts`
+ * Parses v1.5 and earlier `message.sourceTokenData`.
+ * Version 1.6+ already contains this in `message.tokenAmounts`.
+ * @param data - The source token data string to parse.
+ * @returns The parsed SourceTokenData object.
  */
 export function parseSourceTokenData(data: string): SourceTokenData {
   const decoded = defaultAbiCoder.decode([SourceTokenData], data)

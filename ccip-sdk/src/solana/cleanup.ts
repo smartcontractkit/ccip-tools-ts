@@ -15,12 +15,13 @@ import type { Wallet } from './types.ts'
 import { simulateAndSendTxs } from './utils.ts'
 
 /**
- * Clean up and recycle buffers and Address Lookup Tables owned by wallet
- * @param provider - AnchorProvider with connection and wallet
- * @param getLogs - SolanaChain-compatible getLogs function (to scan for Buffers and ALTs)
- * @param opts.dontWait - Whether to skip waiting for lookup table deactivation cool down period
- *   (513 slots) to pass before closing; by default, we deactivate (if needed) and wait to close
- *   before returning from this method
+ * Clean up and recycle buffers and Address Lookup Tables owned by wallet.
+ * @param connection - Solana connection instance.
+ * @param wallet - Wallet instance to sign txs.
+ * @param getLogs - SolanaChain-compatible getLogs function (to scan for Buffers and ALTs).
+ * @param opts - Optional parameters. Set `dontWait` to skip waiting for lookup table deactivation
+ *   cool down period (513 slots) to pass before closing; by default, we deactivate (if needed)
+ *   and wait to close before returning from this method.
  */
 export async function cleanUpBuffers(
   connection: Connection,

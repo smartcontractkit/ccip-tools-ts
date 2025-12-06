@@ -8,7 +8,7 @@ import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
  * Executes as single message report in offramp
  *
  * @param provider - Aptos provider instance
- * @param account - async Account
+ * @param payer - async Account
  * @param offRamp - Offramp contract address (with or without `::offramp` suffix)
  * @param execReport - Aptos uses EVMExtraArgsV2, so same message as EVM v1.6
  * @param opts - options like gasLimit override

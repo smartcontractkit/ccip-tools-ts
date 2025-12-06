@@ -181,6 +181,12 @@ export function* blockRangeGenerator(
   }
 }
 
+/**
+ * JSON replacer function that converts BigInt values to strings.
+ * @param _key - Property key (unused).
+ * @param value - Value to transform.
+ * @returns String representation if BigInt, otherwise unchanged value.
+ */
 export function bigIntReplacer(_key: string, value: unknown): unknown {
   if (typeof value === 'bigint') {
     return value.toString()
@@ -188,6 +194,12 @@ export function bigIntReplacer(_key: string, value: unknown): unknown {
   return value
 }
 
+/**
+ * JSON reviver function that converts numeric strings back to BigInt.
+ * @param _key - Property key (unused).
+ * @param value - Value to transform.
+ * @returns BigInt if numeric string, otherwise unchanged value.
+ */
 export function bigIntReviver(_key: string, value: unknown): unknown {
   if (typeof value === 'string' && /^\d+$/.test(value)) {
     return BigInt(value)
@@ -216,15 +228,31 @@ export function decodeOnRampAddress(
   return decoded
 }
 
+/**
+ * Converts little-endian bytes to BigInt.
+ * @param data - Little-endian byte data.
+ * @returns BigInt value.
+ */
 export function leToBigInt(data: BytesLike | readonly number[]): bigint {
   if (Array.isArray(data)) data = new Uint8Array(data)
   return toBigInt(getBytes(data as BytesLike).reverse())
 }
 
+/**
+ * Converts a BigNumber to little-endian byte array.
+ * @param value - Numeric value to convert.
+ * @param width - Optional byte width for padding.
+ * @returns Little-endian Uint8Array.
+ */
 export function toLeArray(value: BigNumberish, width?: Numeric): Uint8Array {
   return toBeArray(value, width).reverse()
 }
 
+/**
+ * Checks if the given data is a valid Base64 encoded string.
+ * @param data - Data to check.
+ * @returns True if valid Base64 string.
+ */
 export function isBase64(data: unknown): data is string {
   return (
     typeof data === 'string' &&
@@ -232,6 +260,11 @@ export function isBase64(data: unknown): data is string {
   )
 }
 
+/**
+ * Converts various data formats to Uint8Array.
+ * @param data - Bytes, number array, or Base64 string.
+ * @returns Uint8Array representation.
+ */
 export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
   if (Array.isArray(data)) {
     return new Uint8Array(data)
@@ -245,6 +278,11 @@ export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
   }
 }
 
+/**
+ * Extracts address bytes, handling both hex and Base58 formats.
+ * @param address - Address in hex or Base58 format.
+ * @returns Address bytes as Uint8Array.
+ */
 export function getAddressBytes(address: BytesLike): Uint8Array {
   let bytes: Uint8Array
   if (isBytesLike(address)) {
@@ -295,8 +333,18 @@ export function convertKeysToCamelCase(
   return converted
 }
 
+/**
+ * Promise-based sleep utility.
+ * @param ms - Duration in milliseconds.
+ * @returns Promise that resolves after the specified duration.
+ */
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms).unref())
 
+/**
+ * Parses a typeAndVersion string into its components.
+ * @param typeAndVersion - String in format "TypeName vX.Y.Z".
+ * @returns Tuple of [type, version, original, suffix?].
+ */
 export function parseTypeAndVersion(
   typeAndVersion: string,
 ): Awaited<ReturnType<Chain['typeAndVersion']>> {
@@ -319,6 +367,11 @@ export function parseTypeAndVersion(
   else return [type, version, typeAndVersion, match[3]]
 }
 
+/**
+ * Creates a rate-limited fetch function with retry logic.
+ * Configurable via maxRequests, windowMs, and maxRetries options.
+ * @returns Rate-limited fetch function.
+ */
 export function createRateLimitedFetch({
   maxRequests = Number(process.env['RL_MAX_REQUESTS'] || 40),
   windowMs = Number(process.env['RL_WINDOW_MS'] || 11e3),

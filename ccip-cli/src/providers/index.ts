@@ -144,6 +144,12 @@ export function fetchChainsFromRpcs(
   }
 }
 
+/**
+ * Load chain-specific wallet for given chain
+ * @param chain - Chain instance to load wallet for
+ * @param opts - Wallet options (as passed from yargs argv)
+ * @returns Promise to chain-specific wallet instance
+ */
 export async function loadChainWallet(chain: Chain, opts: { wallet?: unknown }) {
   let wallet
   switch (chain.network.family) {

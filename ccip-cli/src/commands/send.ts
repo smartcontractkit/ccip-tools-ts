@@ -22,6 +22,11 @@ import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 export const command = 'send <source> <router> <dest>'
 export const describe = 'Send a CCIP message from router on source to dest'
 
+/**
+ * Yargs builder for the send command.
+ * @param yargs - Yargs instance.
+ * @returns Configured yargs instance with command options.
+ */
 export const builder = (yargs: Argv) =>
   yargs
     .positional('source', {
@@ -122,6 +127,10 @@ export const builder = (yargs: Argv) =>
         !transferTokens || transferTokens.every((t) => /^[^=]+=\d+(\.\d+)?$/.test(t)),
     )
 
+/**
+ * Handler for the send command.
+ * @param argv - Command line arguments.
+ */
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
   let destroy
   const destroy$ = new Promise((resolve) => {

@@ -24,7 +24,7 @@ Object.assign(LedgerSigner.prototype, {
 /**
  * Overwrite EVMChain.getWallet to support reading private key from file, env var or Ledger
  * @param provider - provider instance to be connected to signers
- * @param opts.wallet - wallet options (as passed to yargs argv)
+ * @param wallet - wallet options (as passed to yargs argv)
  * @returns Promise to Signer instance
  */
 export async function loadEvmWallet(

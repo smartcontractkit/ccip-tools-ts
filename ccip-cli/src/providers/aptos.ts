@@ -16,15 +16,21 @@ import AptosLedger from '@ledgerhq/hw-app-aptos'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
 import { type BytesLike, getBytes, hexlify } from 'ethers'
 
-// A LedgerSigner object represents a signer for a private key on a Ledger hardware wallet.
-// This object is initialized alongside a LedgerClient connection, and can be used to sign
-// transactions via a ledger hardware wallet.
+/**
+ * A LedgerSigner object represents a signer for a private key on a Ledger hardware wallet.
+ * This object is initialized alongside a LedgerClient connection, and can be used to sign
+ * transactions via a ledger hardware wallet.
+ */
 export class AptosLedgerSigner /*implements AptosAsyncAccount*/ {
   derivationPath: string
   readonly client: AptosLedger.default
   readonly publicKey: Ed25519PublicKey
   readonly accountAddress: AccountAddress
 
+  /**
+   * Private constructor - use static `create` method instead.
+   * @internal
+   */
   private constructor(
     ledgerClient: AptosLedger.default,
     derivationPath: string,
@@ -39,6 +45,11 @@ export class AptosLedgerSigner /*implements AptosAsyncAccount*/ {
     this.accountAddress = authKey.derivedAddress()
   }
 
+  /**
+   * Creates a new AptosLedgerSigner instance.
+   * @param derivationPath - BIP44 derivation path.
+   * @returns A new AptosLedgerSigner instance.
+   */
   static async create(derivationPath: string) {
     const transport = await HIDTransport.default.create()
     const client = new AptosLedger.default(transport)
@@ -46,7 +57,11 @@ export class AptosLedgerSigner /*implements AptosAsyncAccount*/ {
     return new AptosLedgerSigner(client, derivationPath, publicKey)
   }
 
-  // Prompts user to sign associated transaction on their Ledger hardware wallet.
+  /**
+   * Prompts user to sign associated transaction on their Ledger hardware wallet.
+   * @param txn - Raw transaction to sign.
+   * @returns Account authenticator with the signature.
+   */
   async signTransactionWithAuthenticator(txn: AnyRawTransaction) {
     const signingMessage = generateSigningMessageForTransaction(txn)
 
@@ -54,7 +69,11 @@ export class AptosLedgerSigner /*implements AptosAsyncAccount*/ {
     return new AccountAuthenticatorEd25519(this.publicKey, signature)
   }
 
-  // Sign a message - returns just the signature
+  /**
+   * Signs a message - returns just the signature.
+   * @param message - Message bytes to sign.
+   * @returns Ed25519 signature.
+   */
   async sign(message: BytesLike): Promise<Ed25519Signature> {
     const messageBytes = getBytes(message)
     // This line prompts the user to sign the transaction on their Ledger hardware wallet
@@ -65,7 +84,9 @@ export class AptosLedgerSigner /*implements AptosAsyncAccount*/ {
     return new Ed25519Signature(signature)
   }
 
-  // Terminates the LedgerClient connection.
+  /**
+   * Terminates the LedgerClient connection.
+   */
   async close() {
     await this.client.transport.close()
   }
@@ -73,7 +94,7 @@ export class AptosLedgerSigner /*implements AptosAsyncAccount*/ {
 
 /**
  * Loads an Aptos wallet from the provided options.
- * @param opts.wallet - wallet options (as passed from yargs argv)
+ * @param wallet - wallet options (as passed from yargs argv)
  * @returns Promise to AptosAsyncAccount instance
  */
 export async function loadAptosWallet({ wallet: walletOpt }: { wallet?: unknown }) {

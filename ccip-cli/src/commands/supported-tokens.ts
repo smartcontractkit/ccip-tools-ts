@@ -19,8 +19,6 @@
  * - Individual token failures don't halt the process
  * - Errors are collected and reported comprehensively
  * - Detailed error reporting for debugging
- *
- * @module supported-tokens
  */
 
 import {
@@ -42,6 +40,11 @@ export const command = ['getSupportedTokens <source> <address> [token]']
 export const describe =
   'List supported tokens in a given Router/OnRamp/TokenAdminRegistry, and/or show info about token/pool'
 
+/**
+ * Yargs builder for the supported-tokens command.
+ * @param yargs - Yargs instance.
+ * @returns Configured yargs instance with command options.
+ */
 export const builder = (yargs: Argv) =>
   yargs
     .positional('source', {
@@ -62,6 +65,10 @@ export const builder = (yargs: Argv) =>
         'If address is router/onramp/tokenAdminRegistry, token may be used to pre-select a token from the supported list',
     })
 
+/**
+ * Handler for the supported-tokens command.
+ * @param argv - Command line arguments.
+ */
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
   let destroy
   const destroy$ = new Promise((resolve) => {

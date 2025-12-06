@@ -18,14 +18,31 @@ import type { Log_ } from '../types.ts'
 import { getDataBytes, sleep } from '../utils.ts'
 import type { UnsignedTx, Wallet } from './types.ts'
 
+/**
+ * Generates a hex-encoded discriminator for a Solana event.
+ * @param eventName - Name of the event.
+ * @returns Hex-encoded discriminator string.
+ */
 export function hexDiscriminator(eventName: string): string {
   return hexlify(eventDiscriminator(eventName))
 }
 
+/**
+ * Converts bytes to a Node.js Buffer.
+ * @param bytes - Bytes to convert.
+ * @returns Node.js Buffer.
+ */
 export function bytesToBuffer(bytes: BytesLike): Buffer {
   return Buffer.from(getDataBytes(bytes).buffer)
 }
 
+/**
+ * Waits for a Solana transaction to reach finalized status.
+ * @param connection - Solana connection instance.
+ * @param signature - Transaction signature to wait for.
+ * @param intervalMs - Polling interval in milliseconds.
+ * @param maxAttempts - Maximum polling attempts before timeout.
+ */
 export async function waitForFinalization(
   connection: Connection,
   signature: string,
@@ -45,6 +62,11 @@ export async function waitForFinalization(
   throw new Error(`Transaction ${signature} not finalized after timeout`)
 }
 
+/**
+ * Converts a camelCase string to snake_case.
+ * @param str - String to convert.
+ * @returns snake_case formatted string.
+ */
 export function camelToSnakeCase(str: string): string {
   return str
     .replace(/([A-Z]+)([A-Z][a-z]|$)/g, (_, p1: string, p2: string) => {
@@ -124,6 +146,11 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
   return results
 }
 
+/**
+ * Extracts error information from Solana transaction logs.
+ * @param logs_ - Raw log strings or parsed log objects.
+ * @returns Parsed error info with program and error details.
+ */
 export function getErrorFromLogs(
   logs_: readonly string[] | readonly Pick<Log_, 'address' | 'index' | 'data' | 'topics'>[] | null,
 ): { program: string; [k: string]: string } | undefined {
@@ -186,6 +213,11 @@ export function getErrorFromLogs(
   }
 }
 
+/**
+ * Simulates a Solana transaction to estimate compute units.
+ * @param params - Simulation parameters including connection and payer.
+ * @returns Simulation result with estimated compute units.
+ */
 export async function simulateTransaction({
   connection,
   payerKey,
@@ -285,10 +317,11 @@ export function simulationProvider(
  * Sign, simulate, send and confirm as many instructions as possible on each transaction
  * @param connection - Solana Connection
  * @param wallet - Wallet to sign and pay for txs
- * @param instructions - Instructions to send; they may not fit all in a single
- *   transaction, in which case they will be split into multiple transactions
- * @param mainIndex - Index of the main instruction
- * @param lookupTables - lookupTables to be used for main instruction
+ * @param unsignedTx - instructions to sign and send
+ *   - instructions - Instructions to send; they may not fit all in a single transaction,
+ *       in which case they will be split into multiple transactions
+ *   - mainIndex - Index of the main instruction
+ *   - lookupTables - lookupTables to be used for main instruction
  * @param computeUnits - max computeUnits limit to be used for main instruction
  * @returns - signature of successful transaction including main instruction
  */

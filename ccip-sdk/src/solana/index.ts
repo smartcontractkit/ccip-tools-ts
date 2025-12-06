@@ -121,8 +121,9 @@ const unknownTokens: { [mint: string]: string } = {
   '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU': 'USDC', // devnet
 }
 
-// some circular specialized types, but all good with proper references
+/** Solana-specific log structure with transaction reference and log level. */
 export type SolanaLog = Log_ & { tx: SolanaTransaction; data: string; level: number }
+/** Solana-specific transaction structure with versioned transaction response. */
 export type SolanaTransaction = MergeArrayElements<
   ChainTransaction,
   {
@@ -131,6 +132,9 @@ export type SolanaTransaction = MergeArrayElements<
   }
 >
 
+/**
+ * Solana chain implementation supporting Solana networks.
+ */
 export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   static {
     patchBorsh()
@@ -148,6 +152,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     before?: string,
   ) => Promise<ConfirmedSignatureInfo[]>
 
+  /**
+   * Creates a new SolanaChain instance.
+   * @param connection - Solana connection instance.
+   * @param network - Network information for this chain.
+   */
   constructor(connection: Connection, network: NetworkInfo) {
     super()
 
@@ -205,6 +214,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { maxArgs: 1 })
   }
 
+  /**
+   * Creates a Solana connection from a URL.
+   * @param url - RPC endpoint URL (https://, http://, wss://, or ws://).
+   * @returns Solana Connection instance.
+   */
   static _getConnection(url: string): Connection {
     if (!url.startsWith('http') && !url.startsWith('ws')) {
       throw new Error(
@@ -221,17 +235,28 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return new Connection(url, config)
   }
 
+  /**
+   * Creates a SolanaChain instance from an existing connection.
+   * @param connection - Solana Connection instance.
+   * @returns A new SolanaChain instance.
+   */
   static async fromConnection(connection: Connection): Promise<SolanaChain> {
     // Get genesis hash to use as chainId
     return new SolanaChain(connection, networkInfo(await connection.getGenesisHash()))
   }
 
+  /**
+   * Creates a SolanaChain instance from an RPC URL.
+   * @param url - RPC endpoint URL.
+   * @returns A new SolanaChain instance.
+   */
   static async fromUrl(url: string): Promise<SolanaChain> {
     const connection = this._getConnection(url)
     return this.fromConnection(connection)
   }
 
   // cached
+  /** {@inheritDoc Chain.getBlockTimestamp} */
   async getBlockTimestamp(block: number | 'finalized'): Promise<number> {
     if (block === 'finalized') {
       const slot = await this.connection.getSlot('finalized')
@@ -249,7 +274,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return blockTime
   }
 
-  // cached
+  /** {@inheritDoc Chain.getTransaction} */
   async getTransaction(hash: string): Promise<SolanaTransaction> {
     const tx = await this.connection.getTransaction(hash, {
       commitment: 'confirmed',
@@ -287,7 +312,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return chainTx
   }
 
-  // implements inner paging logic for this.getLogs
+  /**
+   * Internal method to get transactions for an address with pagination.
+   * @param opts - Log filter options.
+   * @returns Async generator of Solana transactions.
+   */
   async *_getTransactionsForAddress(
     opts: Omit<LogFilter, 'topics'>,
   ): AsyncGenerator<SolanaTransaction> {
@@ -363,17 +392,16 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *   * Fetches signatures in reverse chronological order (newest first)
    *   * Returns logs in reverse chronological order (newest first)
    *
-   * @param opts - Log filter options
-   * @param opts.startBlock - Starting slot number (inclusive)
-   * @param opts.startTime - Starting Unix timestamp (inclusive)
-   * @param opts.endBlock - Ending slot number (inclusive)
-   * @param opts.address - Program address to filter logs by (required for Solana)
-   * @param opts.topics - Array of topics to filter logs by (optional);
-   *   either 0x-8B discriminants or event names
-   * @param.opts.programs - a special option to allow querying by address of interest, but
-   *   yielding matching logs from specific (string address) program or any (true)
-   * @param opts.commit - Special param for fetching ExecutionReceipts, to narrow down the search
-   * @returns AsyncIterableIterator of parsed Log_ objects
+   * @param opts - Log filter options containing:
+   *   - `startBlock`: Starting slot number (inclusive)
+   *   - `startTime`: Starting Unix timestamp (inclusive)
+   *   - `endBlock`: Ending slot number (inclusive)
+   *   - `address`: Program address to filter logs by (required for Solana)
+   *   - `topics`: Array of topics to filter logs by (optional); either 0x-8B discriminants or event names
+   *   - `programs`: Special option to allow querying by address of interest, but yielding matching
+   *     logs from specific (string address) program or any (true)
+   *   - `commit`: Special param for fetching ExecutionReceipts, to narrow down the search
+   * @returns AsyncIterableIterator of parsed Log_ objects.
    */
   async *getLogs(
     opts: LogFilter & { sender?: string; programs?: string[] | true; commit?: CommitReport },
@@ -417,10 +445,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
   }
 
+  /** {@inheritDoc Chain.fetchRequestsInTx} */
   async fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
     return fetchCCIPRequestsInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
   }
 
+  /** {@inheritDoc Chain.fetchRequestById} */
   override fetchRequestById(
     messageId: string,
     onRamp?: string,
@@ -430,6 +460,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return fetchCCIPRequestById(this, messageId, { address: onRamp, ...opts })
   }
 
+  /** {@inheritDoc Chain.fetchAllMessagesInBatch} */
   async fetchAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
@@ -454,6 +485,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return fetchAllMessagesInBatch(this, request, commit, opts_)
   }
 
+  /** {@inheritDoc Chain.typeAndVersion} */
   async typeAndVersion(address: string) {
     const program = new Program(
       CCIP_OFFRAMP_IDL, // `typeVersion` schema should be the same
@@ -471,10 +503,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return res
   }
 
+  /** {@inheritDoc Chain.getRouterForOnRamp} */
   getRouterForOnRamp(onRamp: string, _destChainSelector: bigint): Promise<string> {
     return Promise.resolve(onRamp) // Solana's router is also the onRamp
   }
 
+  /** {@inheritDoc Chain.getRouterForOffRamp} */
   async getRouterForOffRamp(offRamp: string, _sourceChainSelector: bigint): Promise<string> {
     const offRamp_ = new PublicKey(offRamp)
     const program = new Program(CCIP_OFFRAMP_IDL as Idl, offRamp_, {
@@ -497,10 +531,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return router.toBase58()
   }
 
+  /** {@inheritDoc Chain.getNativeTokenForRouter} */
   getNativeTokenForRouter(_router: string): Promise<string> {
     return Promise.resolve(NATIVE_MINT.toBase58())
   }
 
+  /** {@inheritDoc Chain.getOffRampsForRouter} */
   async getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]> {
     // feeQuoter is present in router's config, and has a DestChainState account which is updated by
     // the offramps, so we can use it to narrow the search for the offramp
@@ -521,10 +557,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     throw new Error(`Could not find OffRamp events in feeQuoter=${feeQuoter.toString()} txs`)
   }
 
+  /** {@inheritDoc Chain.getOnRampForRouter} */
   getOnRampForRouter(router: string, _destChainSelector: bigint): Promise<string> {
     return Promise.resolve(router) // solana's Router is also the OnRamp
   }
 
+  /** {@inheritDoc Chain.getOnRampForOffRamp} */
   async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
     const program = new Program(CCIP_OFFRAMP_IDL, new PublicKey(offRamp), {
       connection: this.connection,
@@ -545,10 +583,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     )
   }
 
+  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
   getCommitStoreForOffRamp(offRamp: string): Promise<string> {
     return Promise.resolve(offRamp) // Solana supports only CCIP>=1.6, for which OffRamp and CommitStore are the same
   }
 
+  /** {@inheritDoc Chain.getTokenForTokenPool} */
   async getTokenForTokenPool(tokenPool: string): Promise<string> {
     const tokenPoolInfo = await this.connection.getAccountInfo(new PublicKey(tokenPool))
     if (!tokenPoolInfo) throw new Error(`TokenPool info not found: ${tokenPool}`)
@@ -559,6 +599,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return config.mint.toString()
   }
 
+  /** {@inheritDoc Chain.getTokenInfo} */
   async getTokenInfo(token: string): Promise<TokenInfo> {
     const mint = new PublicKey(token)
     const mintInfo = await this.connection.getParsedAccountInfo(mint)
@@ -608,6 +649,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
   }
 
+  /**
+   * Fetches token metadata from Metaplex.
+   * @param mintPublicKey - Token mint public key.
+   * @returns Token name and symbol, or null if not found.
+   */
   async _fetchTokenMetadata(
     mintPublicKey: PublicKey,
   ): Promise<{ name: string; symbol: string } | null> {
@@ -670,6 +716,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
   }
 
+  /**
+   * Decodes a CCIP message from a Solana log event.
+   * @param log - Log with data field.
+   * @returns Decoded CCIPMessage or undefined if not valid.
+   */
   static decodeMessage({ data }: { data: unknown }): CCIPMessage | undefined {
     if (!data || typeof data !== 'string') return undefined
     let eventDataBuffer
@@ -757,6 +808,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     } as CCIPMessage<typeof CCIPVersion.V1_6>
   }
 
+  /**
+   * Decodes extra arguments from Solana CCIP messages.
+   * @param extraArgs - Encoded extra arguments bytes.
+   * @returns Decoded EVMExtraArgsV2 or undefined if unknown format.
+   */
   static decodeExtraArgs(
     extraArgs: BytesLike,
   ): (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' }) | undefined {
@@ -779,6 +835,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
   }
 
+  /**
+   * Encodes extra arguments for Solana CCIP messages.
+   * @param args - Extra arguments to encode.
+   * @returns Encoded extra arguments as hex string.
+   */
   static encodeExtraArgs(args: ExtraArgs): string {
     if ('computeUnits' in args) throw new Error('Solana can only encode EVMExtraArgsV2')
     const gasLimitUint128Le = toLeArray(args.gasLimit, 16)
@@ -789,6 +850,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     ])
   }
 
+  /**
+   * Decodes commit reports from a Solana log event.
+   * @param log - Log with data field.
+   * @param lane - Lane info for filtering.
+   * @returns Array of CommitReport or undefined if not valid.
+   */
   static decodeCommits(
     log: Pick<Log_, 'data'>,
     lane?: Omit<Lane, 'destChainSelector'>,
@@ -856,6 +923,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     ]
   }
 
+  /**
+   * Decodes an execution receipt from a Solana log event.
+   * @param log - Log with data, tx, and index fields.
+   * @returns ExecutionReceipt or undefined if not valid.
+   */
   static decodeReceipt(log: Pick<Log_, 'data' | 'tx' | 'index'>): ExecutionReceipt | undefined {
     // Check if this is a ExecutionStateChanged event by looking at the discriminant
     if (!log.data || typeof log.data !== 'string') {
@@ -921,6 +993,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
   }
 
+  /**
+   * Converts bytes to a Solana address (Base58).
+   * @param bytes - Bytes to convert.
+   * @returns Base58-encoded Solana address.
+   */
   static getAddress(bytes: BytesLike): string {
     try {
       if (typeof bytes === 'string' && bs58.decode(bytes).length === 32) return bytes
@@ -930,10 +1007,16 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return encodeBase58(getDataBytes(bytes))
   }
 
+  /**
+   * Gets the leaf hasher for Solana destination chains.
+   * @param lane - Lane configuration.
+   * @returns Leaf hasher function.
+   */
   static getDestLeafHasher(lane: Lane): LeafHasher<typeof CCIPVersion.V1_6> {
     return getV16SolanaLeafHasher(lane)
   }
 
+  /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
   async getTokenAdminRegistryFor(address: string): Promise<string> {
     const [type] = await this.typeAndVersion(address)
     if (!type.includes('Router')) throw new Error(`Not a Router: ${address} is ${type}`)
@@ -941,9 +1024,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return address
   }
 
-  /**
-   * Get the fee required to send a CCIP message from the Solana router.
-   */
+  /** {@inheritDoc Chain.getFee} */
   getFee(router: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint> {
     return getFee(this.connection, router, destChainSelector, message)
   }
@@ -955,8 +1036,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @param router - router address
    * @param destChainSelector - destination chain selector
    * @param message - AnyMessage to send (with or without fee)
-   * @param opts.approveMax - approve max amount of tokens if needed, instead of only what's needed
-   * @returns  instructions - array of instructions; `ccipSend` is last, after any approval
+   * @param approveMax - approve max amount of tokens if needed, instead of only what's needed
+   * @returns instructions - array of instructions; `ccipSend` is last, after any approval
    *   lookupTables - array of lookup tables for `ccipSend` call
    *   mainIndex - instructions.length - 1
    */
@@ -978,6 +1059,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     )
   }
 
+  /** {@inheritDoc Chain.sendMessage} */
   async sendMessage(
     router: string,
     destChainSelector: bigint,
@@ -998,6 +1080,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return (await this.fetchRequestsInTx(await this.getTransaction(hash)))[0]
   }
 
+  /** {@inheritDoc Chain.fetchOffchainTokenData} */
   async fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
     return fetchSolanaOffchainTokenData(this.connection, request)
   }
@@ -1007,8 +1090,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @param payer - payer address of the execution transaction
    * @param offRamp - OffRamp contract address
    * @param execReport_ - ExecutionReport of a dest=Solana message
-   * @param opts.forceBuffer - Whether to force the use of a buffer account
-   * @param opts.forceLookupTable - Whether to force creation of a lookup table for the call
+   * @param opts - execute report options
+   *   - forceBuffer - Whether to force the use of a buffer account
+   *   - forceLookupTable - Whether to force creation of a lookup table for the call
    * @returns instructions - array of instructions to execute the report
    *   lookupTables - array of lookup tables for `manuallyExecute` call
    *   mainIndex - index of the `manuallyExecute` instruction in the array; last unless
@@ -1034,6 +1118,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     )
   }
 
+  /** {@inheritDoc Chain.executeReport} */
   async executeReport(
     offRamp: string,
     execReport: ExecutionReport,
@@ -1083,10 +1168,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /**
    * Clean up and recycle buffers and address lookup tables owned by wallet
-   * @param wallet - wallet options
-   * @param waitDeactivation - Whether to wait for lookup table deactivation cool down period
-   *   (513 slots) to pass before closing; by default, we deactivate (if needed) and move on, to
-   *   close other ready ALTs
+   * @param opts - cleanUp options
+   *   - wallet - wallet instance to sign txs
+   *   - waitDeactivation - Whether to wait for lookup table deactivation cool down period
+   *       (513 slots) to pass before closing; by default, we deactivate (if needed) and move on, to
+   *       close other ready ALTs
    */
   async cleanUpBuffers(opts: { wallet: unknown; waitDeactivation?: boolean }): Promise<void> {
     const wallet = opts.wallet
@@ -1094,6 +1180,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     await cleanUpBuffers(this.connection, wallet, this.getLogs.bind(this), opts)
   }
 
+  /**
+   * Parses raw Solana data into typed structures.
+   * @param data - Raw data to parse.
+   * @returns Parsed data or undefined.
+   */
   static parse(data: unknown) {
     if (!data) return
     try {
@@ -1181,7 +1272,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return super.fetchCommitReport(commitStore, request, hints)
   }
 
-  // specialized override with stricter address-of-interest
+  /** {@inheritDoc Chain.fetchExecutionReceipts} */
   override async *fetchExecutionReceipts(
     offRamp: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,
@@ -1208,6 +1299,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     yield* super.fetchExecutionReceipts(offRamp, request, commit, opts_)
   }
 
+  /** {@inheritDoc Chain.getRegistryTokenConfig} */
   async getRegistryTokenConfig(
     registry: string,
     token: string,
@@ -1263,6 +1355,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return config
   }
 
+  /** {@inheritDoc Chain.getTokenPoolConfigs} */
   async getTokenPoolConfigs(tokenPool: string): Promise<{
     token: string
     router: string
@@ -1292,6 +1385,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
   }
 
+  /** {@inheritDoc Chain.getTokenPoolRemotes} */
   async getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
@@ -1448,6 +1542,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return remotes
   }
 
+  /** {@inheritDoc Chain.getSupportedTokens} */
   async getSupportedTokens(router: string): Promise<string[]> {
     // `mint` offset in TokenAdminRegistry account data; more robust against changes in layout
     const mintOffset = 8 + 1 + 32 + 32 + 32 + 16 * 2 // = 137
@@ -1475,6 +1570,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return res
   }
 
+  /** {@inheritDoc Chain.getFeeTokens} */
   async getFeeTokens(router: string): Promise<Record<string, TokenInfo>> {
     const { feeQuoter } = await this._getRouterConfig(router)
     const tokenConfigs = await this.connection.getProgramAccounts(feeQuoter, {
@@ -1499,7 +1595,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     )
   }
 
-  // cached
+  /**
+   * Gets the router configuration from the Config PDA.
+   * @param router - Router program address.
+   * @returns Router configuration including feeQuoter.
+   */
   async _getRouterConfig(router: string) {
     const program = new Program(CCIP_ROUTER_IDL, new PublicKey(router), {
       connection: this.connection,

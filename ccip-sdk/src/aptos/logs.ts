@@ -16,6 +16,12 @@ const eventToHandler = {
   ExecutionStateChanged: 'OffRampState/execution_state_changed_events',
 } as const
 
+/**
+ * Fetches a user transaction by its version number.
+ * @param provider - Aptos provider instance.
+ * @param version - Transaction version number.
+ * @returns User transaction response.
+ */
 export async function getUserTxByVersion(
   provider: Aptos,
   version: number,
@@ -28,6 +34,12 @@ export async function getUserTxByVersion(
   return tx
 }
 
+/**
+ * Gets the timestamp for a given transaction version.
+ * @param provider - Aptos provider instance.
+ * @param version - Version number or 'finalized'.
+ * @returns Timestamp in seconds.
+ */
 export async function getVersionTimestamp(
   provider: Aptos,
   version: number | 'finalized',
@@ -165,6 +177,12 @@ async function* fetchEventsBackward(
   } while (cont)
 }
 
+/**
+ * Streams logs from the Aptos blockchain based on filter options.
+ * @param provider - Aptos provider instance.
+ * @param opts - Log filter options.
+ * @returns Async generator of log entries.
+ */
 export async function* streamAptosLogs(
   provider: Aptos,
   opts: LogFilter & { versionAsHash?: boolean },

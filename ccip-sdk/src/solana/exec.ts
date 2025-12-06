@@ -24,6 +24,18 @@ type ExecAlt = {
   finalIxs: TransactionInstruction[]
 }
 
+/**
+ * Generate unsigned tx to execute a CCIP report on Solana.
+ * @param connection - Connection to the Solana network.
+ * @param payer - Payer of the transaction.
+ * @param offramp - Address of the OffRamp contract.
+ * @param execReport - Execution report.
+ * @param opts - Options for txs to be generated
+ *   - forceBuffer - Sends report in chunks for buffering in offRamp before execution
+ *   - forceLookupTable - Creates lookup table for execution transaction, and deactivates in the end
+ *   - clearLeftoverAccounts - Resets buffer before filling it in
+ * @returns Transaction hash of the execution.
+ */
 export async function generateUnsignedExecuteReport(
   connection: Connection,
   payer: PublicKey,

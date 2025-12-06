@@ -46,6 +46,14 @@ function anyToSvmMessage(message: AnyMessage): IdlTypes<typeof CCIP_ROUTER_IDL>[
   return svmMessage
 }
 
+/**
+ * Gets the fee for sending a CCIP message on Solana.
+ * @param connection - Solana connection instance.
+ * @param router - Router program address.
+ * @param destChainSelector - Destination chain selector.
+ * @param message - CCIP message to send.
+ * @returns Fee amount in native tokens.
+ */
 export async function getFee(
   connection: Connection,
   router: string,
@@ -239,6 +247,16 @@ async function deriveAccountsCcipSend({
   }
 }
 
+/**
+ * Generates unsigned instructions for sending a message with CCIP on Solana
+ * @param connection - Solana connection instance.
+ * @param sender - Wallet to pay transaction fees.
+ * @param router - Router program instance.
+ * @param destChainSelector - Destination chain selector.
+ * @param message - CCIP message with fee.
+ * @param opts - Optional parameters for approval.
+ * @returns Solana unsigned txs (instructions and lookup tables)
+ */
 export async function generateUnsignedCcipSend(
   connection: Connection,
   sender: PublicKey,

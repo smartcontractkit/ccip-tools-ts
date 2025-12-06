@@ -9,6 +9,11 @@ export const command = ['parse <data>', 'parseBytes <data>', 'parseData <data>']
 export const describe =
   'Try to parse and print errors, revert reasons or function call or event data'
 
+/**
+ * Yargs builder for the parse command.
+ * @param yargs - Yargs instance.
+ * @returns Configured yargs instance with command options.
+ */
 export const builder = (yargs: Argv) =>
   yargs.positional('data', {
     type: 'string',
@@ -16,6 +21,10 @@ export const builder = (yargs: Argv) =>
     describe: 'router contract address on source',
   })
 
+/**
+ * Handler for the parse command.
+ * @param argv - Command line arguments.
+ */
 export function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
   try {
     parseBytes(argv)

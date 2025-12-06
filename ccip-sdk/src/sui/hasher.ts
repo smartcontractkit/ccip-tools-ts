@@ -6,6 +6,11 @@ import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
 
+/**
+ * Creates a leaf hasher for Sui CCIP messages.
+ * @param lane - Lane configuration with selectors and onRamp.
+ * @returns Leaf hasher function for the specified version.
+ */
 export function getSuiLeafHasher<V extends CCIPVersion = CCIPVersion>({
   sourceChainSelector,
   destChainSelector,
@@ -28,6 +33,12 @@ export function getSuiLeafHasher<V extends CCIPVersion = CCIPVersion>({
   }
 }
 
+/**
+ * Computes the leaf hash for a v1.6 Sui CCIP message.
+ * @param message - CCIP message to hash.
+ * @param metadataHash - Pre-computed metadata hash for the lane.
+ * @returns Keccak256 hash of the message.
+ */
 export function hashV16SuiMessage(
   message: CCIPMessage_V1_6 | CCIPMessage_V1_6_Sui,
   metadataHash: string,
@@ -76,6 +87,13 @@ export function hashV16SuiMessage(
   return keccak256(outerHash)
 }
 
+/**
+ * Computes the metadata hash for Sui CCIP lane.
+ * @param sourceChainSelector - Source chain selector.
+ * @param destChainSelector - Destination chain selector.
+ * @param onRamp - OnRamp address.
+ * @returns Keccak256 hash of the lane metadata.
+ */
 export const hashSuiMetadata = (
   sourceChainSelector: bigint,
   destChainSelector: bigint,
