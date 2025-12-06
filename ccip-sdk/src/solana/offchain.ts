@@ -1,12 +1,10 @@
-import util from 'util'
-
 import { type BN, BorshCoder } from '@coral-xyz/anchor'
 import type { Connection, PublicKey } from '@solana/web3.js'
 import { hexlify } from 'ethers'
 
 import { getUsdcAttestation } from '../offchain.ts'
 import type { CCIPMessage, CCIPRequest, OffchainTokenData } from '../types.ts'
-import { networkInfo } from '../utils.ts'
+import { networkInfo, util } from '../utils.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
 import type { SolanaLog, SolanaTransaction } from './index.ts'

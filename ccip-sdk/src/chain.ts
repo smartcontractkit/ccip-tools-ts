@@ -1,5 +1,3 @@
-import util from 'util'
-
 import type { BytesLike } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
@@ -29,6 +27,7 @@ import {
   type OffchainTokenData,
   ExecutionState,
 } from './types.ts'
+import { util } from './utils.ts'
 
 /**
  * Filter options for getLogs queries across chains.

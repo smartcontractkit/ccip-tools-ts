@@ -1,5 +1,3 @@
-import util from 'util'
-
 import {
   Aptos,
   AptosConfig,
@@ -56,6 +54,7 @@ import {
   getDataBytes,
   networkInfo,
   parseTypeAndVersion,
+  util,
 } from '../utils.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { getAptosLeafHasher } from './hasher.ts'
@@ -591,7 +590,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     const account = opts.wallet
     if (!isAptosAccount(account)) {
       throw new Error(
-        `${this.constructor.name}.sendMessage requires an Aptos account wallet, got=${util.inspect(opts?.wallet)}`,
+        `${this.constructor.name}.sendMessage requires an Aptos account wallet, got=${util.inspect(opts.wallet)}`,
       )
     }
 

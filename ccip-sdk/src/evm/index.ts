@@ -1,5 +1,3 @@
-import util from 'util'
-
 import { parseAbi } from 'abitype'
 import {
   type BytesLike,
@@ -69,6 +67,7 @@ import {
   getDataBytes,
   networkInfo,
   parseTypeAndVersion,
+  util,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
 import type FeeQuoter_ABI from './abi/FeeQuoter_1_6.ts'

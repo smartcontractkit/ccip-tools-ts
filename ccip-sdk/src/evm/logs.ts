@@ -1,5 +1,3 @@
-import util from 'util'
-
 import {
   type JsonRpcApiProvider,
   type Log,
@@ -10,7 +8,7 @@ import {
 import { memoize } from 'micro-memoize'
 
 import type { LogFilter } from '../chain.ts'
-import { blockRangeGenerator, getSomeBlockNumberBefore } from '../utils.ts'
+import { blockRangeGenerator, getSomeBlockNumberBefore, util } from '../utils.ts'
 import { getAllFragmentsMatchingEvents } from './const.ts'
 
 const MAX_PARALLEL_JOBS = 24

@@ -1,5 +1,4 @@
 import { Buffer } from 'buffer'
-import util from 'util'
 
 import bs58 from 'bs58'
 import {
@@ -520,3 +519,26 @@ export function createRateLimitedFetch({
     throw lastError || new Error('Request failed after all retries')
   }
 }
+
+// barebones `node:util` backfill, if needed
+const util =
+  'util' in globalThis
+    ? (
+        globalThis as unknown as {
+          util: {
+            inspect: ((v: unknown) => string) & {
+              custom: symbol
+              defaultOptions: Record<string, unknown>
+            }
+          }
+        }
+      ).util
+    : {
+        inspect: Object.assign((v: unknown) => JSON.stringify(v), {
+          custom: Symbol('custom'),
+          defaultOptions: {
+            depth: 2,
+          } as Record<string, unknown>,
+        }),
+      }
+export { util }

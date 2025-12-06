@@ -1,5 +1,4 @@
 import { Buffer } from 'buffer'
-import util from 'util'
 
 import { type Idl, type IdlTypes, BorshAccountsCoder, BorshCoder, Program } from '@coral-xyz/anchor'
 import { NATIVE_MINT } from '@solana/spl-token'
@@ -68,6 +67,7 @@ import {
   networkInfo,
   parseTypeAndVersion,
   toLeArray,
+  util,
 } from '../utils.ts'
 import { cleanUpBuffers } from './cleanup.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
