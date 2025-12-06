@@ -1,117 +1,37 @@
 import { type AnchorProvider, type IdlTypes, Program } from '@coral-xyz/anchor'
 import {
   type AccountMeta,
-  type Transaction,
+  type Connection,
   type TransactionInstruction,
   AddressLookupTableAccount,
   AddressLookupTableProgram,
-  ComputeBudgetProgram,
   PublicKey,
-  SendTransactionError,
   SystemProgram,
-  TransactionExpiredBlockheightExceededError,
-  TransactionMessage,
-  VersionedTransaction,
 } from '@solana/web3.js'
 import BN from 'bn.js'
 import { hexlify } from 'ethers'
 
-import type { ChainTransaction, ExecutionReport } from '../types.ts'
+import type { ExecutionReport } from '../types.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
-import type { CCIPMessage_V1_6_Solana } from './types.ts'
-import { getDataBytes, sleep, toLeArray } from '../utils.ts'
-import { bytesToBuffer, simulateTransaction, simulationProvider } from './utils.ts'
-
-type ExecStepTx = readonly [reason: string, transactions: VersionedTransaction]
+import type { CCIPMessage_V1_6_Solana, UnsignedTx } from './types.ts'
+import { getDataBytes, toLeArray } from '../utils.ts'
+import { bytesToBuffer, simulationProvider } from './utils.ts'
 
 type ExecAlt = {
-  addressLookupTableAccount: AddressLookupTableAccount
-  initialTxs: ExecStepTx[]
-  finalTxs: ExecStepTx[]
+  initialIxs: TransactionInstruction[]
+  lookupTable: AddressLookupTableAccount
+  finalIxs: TransactionInstruction[]
 }
 
-export async function executeReport({
-  offrampProgram,
-  execReport,
-  ...opts
-}: {
-  offrampProgram: Program<typeof CCIP_OFFRAMP_IDL>
-  execReport: ExecutionReport<CCIPMessage_V1_6_Solana>
-  gasLimit?: number
-  forceLookupTable?: boolean
-  forceBuffer?: boolean
-  clearLeftoverAccounts?: boolean
-}): Promise<Pick<ChainTransaction, 'hash'>> {
-  const provider = offrampProgram.provider as AnchorProvider
-  const wallet = provider.wallet
-  const connection = provider.connection
-
-  const execTxs = await buildExecTxToSolana(offrampProgram, execReport, opts?.gasLimit, opts)
-
-  let execTxSignature: string, signature: string
-  for (const [i, [reason, transaction]] of execTxs.entries()) {
-    // Refresh the blockhash for each transaction, as the blockhash is only valid for a short time
-    // and we spend a lot of time waiting for finalization of the previous transactions.
-    transaction.message.recentBlockhash = (await connection.getLatestBlockhash()).blockhash
-
-    const signed = await wallet.signTransaction(transaction)
-
-    try {
-      signature = await connection.sendTransaction(signed)
-
-      if (reason === 'exec') execTxSignature = signature
-    } catch (e) {
-      if (
-        e instanceof SendTransactionError &&
-        e.logs?.some((log) =>
-          log.includes('Error Code: ExecutionReportBufferAlreadyContainsChunk.'),
-        )
-      ) {
-        console.warn(
-          `Skipping tx ${i + 1} of ${execTxs.length} because a chunk is already in the buffer.`,
-        )
-        continue
-      } else {
-        throw e
-      }
-    }
-
-    console.debug(`Confirming tx #${i + 1} of ${execTxs.length}: ${signature} (${reason})...`)
-    for (let currentAttempt = 0; ; currentAttempt++) {
-      try {
-        const latestBlockhash = await connection.getLatestBlockhash()
-        await connection.confirmTransaction(
-          {
-            signature,
-            blockhash: latestBlockhash.blockhash,
-            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-          },
-          'confirmed',
-        )
-        break
-      } catch (e) {
-        if (currentAttempt < 5 && e instanceof TransactionExpiredBlockheightExceededError) {
-          await sleep(1000)
-        } else {
-          throw e
-        }
-      }
-    }
-  }
-
-  return { hash: execTxSignature! }
-}
-
-async function buildExecTxToSolana(
-  offrampProgram: Program<typeof CCIP_OFFRAMP_IDL>,
+export async function generateUnsignedExecuteReport(
+  connection: Connection,
+  payer: PublicKey,
+  offramp: PublicKey,
   execReport: ExecutionReport<CCIPMessage_V1_6_Solana>,
-  computeUnitsOverride: number | undefined,
   opts?: { forceLookupTable?: boolean; forceBuffer?: boolean; clearLeftoverAccounts?: boolean },
-): Promise<ExecStepTx[]> {
-  const provider = offrampProgram.provider as AnchorProvider
-  offrampProgram = new Program(CCIP_OFFRAMP_IDL, offrampProgram.programId, provider)
-  const payerAddress = provider.wallet.publicKey
+): Promise<UnsignedTx> {
+  const program = new Program(CCIP_OFFRAMP_IDL, offramp, { connection })
 
   let bufferId
   if (opts?.forceBuffer) {
@@ -126,14 +46,14 @@ async function buildExecTxToSolana(
     addressLookupTables,
   } = await getManuallyExecuteInputs({
     execReport,
-    offrampProgram,
-    transmitter: payerAddress.toBase58(),
+    offrampProgram: program,
+    transmitter: payer.toBase58(),
     bufferId,
   })
 
   const addressLookupTableAccounts = await Promise.all(
     addressLookupTables.map(async (acc) => {
-      const lookupTableAccountInfo = await provider.connection.getAddressLookupTable(acc)
+      const lookupTableAccountInfo = await connection.getAddressLookupTable(acc)
 
       if (!lookupTableAccountInfo.value) {
         throw new Error(`Lookup table account not found: ${acc.toBase58()}`)
@@ -143,35 +63,26 @@ async function buildExecTxToSolana(
     }),
   )
 
-  let serializedReport = offrampProgram.coder.types.encode(
-    'ExecutionReportSingleChain',
-    preparedReport,
-  )
-
-  const { blockhash: recentBlockhash } = await provider.connection.getLatestBlockhash()
+  let serializedReport = program.coder.types.encode('ExecutionReportSingleChain', preparedReport)
 
   let alt
   if (opts?.forceLookupTable) {
-    alt = await buildLookupTableTxs(provider, accounts)
-    addressLookupTableAccounts.push(alt.addressLookupTableAccount)
+    alt = await buildLookupTableIxs(
+      connection,
+      payer,
+      accounts.map((acc) => acc.pubkey),
+    )
+    addressLookupTableAccounts.push(alt.lookupTable)
   }
 
-  const transactions: ExecStepTx[] = []
+  const instructions: TransactionInstruction[] = []
   if (bufferId) {
     console.log(`Execute report will be pre-buffered through the offramp. This may take some time.`)
-    transactions.push(
-      ...(await bufferedTransactionData(
-        offrampProgram,
-        serializedReport,
-        recentBlockhash,
-        bufferId,
-        opts,
-      )),
-    )
+    instructions.push(...(await bufferedTransactionData(program, serializedReport, bufferId, opts)))
     serializedReport = Buffer.from([]) // clear 1st param to manuallyExecute method if buffered
   }
 
-  const execTx = await offrampProgram.methods
+  const execIx = await program.methods
     .manuallyExecute(serializedReport, tokenIndexes)
     .accounts({
       config: accounts[0].pubkey,
@@ -188,61 +99,39 @@ async function buildExecTxToSolana(
       rmnRemoteConfig: accounts[11].pubkey,
     })
     .remainingAccounts(accounts.slice(12))
-    .transaction()
-
-  computeUnitsOverride ||= Math.ceil(
-    1.1 *
-      ((
-        await simulateTransaction({
-          instructions: execTx.instructions,
-          connection: provider.connection,
-          payerKey: provider.wallet.publicKey,
-          addressLookupTableAccounts,
-          computeUnitsOverride,
-        })
-      ).unitsConsumed || 0),
-  )
-
-  // Add compute budget instruction at the beginning of instructions
-  execTx.instructions.unshift(
-    ComputeBudgetProgram.setComputeUnitLimit({
-      units: computeUnitsOverride,
-    }),
-  )
+    .instruction()
 
   // actual exec tx
-  transactions.push([
-    'exec',
-    toVersionedTransaction(
-      execTx.instructions,
-      provider.wallet.publicKey,
-      recentBlockhash,
-      addressLookupTableAccounts,
-    ),
-  ])
+  let execIndex = instructions.length
+  instructions.push(execIx)
 
+  // "sandwich" instructions with ALT create+extend, then deactivate
   if (alt) {
-    transactions.unshift(...alt.initialTxs)
-    transactions.push(...alt.finalTxs)
+    instructions.unshift(...alt.initialIxs)
+    execIndex += alt.initialIxs.length
+    instructions.push(...alt.finalIxs)
   }
 
-  return transactions
+  return {
+    instructions,
+    lookupTables: addressLookupTableAccounts,
+    mainIndex: execIndex,
+  }
 }
 
-async function buildLookupTableTxs(
-  provider: AnchorProvider,
-  accounts: readonly AccountMeta[],
+async function buildLookupTableIxs(
+  connection: Connection,
+  authority: PublicKey,
+  addresses: PublicKey[],
 ): Promise<ExecAlt> {
-  const recentSlot = await provider.connection.getSlot('finalized')
+  const recentSlot = await connection.getSlot('confirmed')
 
   const [createIx, altAddr] = AddressLookupTableProgram.createLookupTable({
-    authority: provider.wallet.publicKey,
-    payer: provider.wallet.publicKey,
+    authority,
+    payer: authority,
     recentSlot,
   })
   console.log('Using Address Lookup Table', altAddr.toBase58())
-
-  const addresses = accounts.map((a) => a.pubkey)
 
   if (addresses.length > 256) {
     throw new Error(
@@ -255,7 +144,6 @@ async function buildLookupTableTxs(
   const firstChunkLength = 28
   const maxAddressesPerTx = 35
   const extendIxs: TransactionInstruction[] = []
-  const ranges: [number, number][] = []
   for (
     let [start, end] = [0, firstChunkLength];
     start < addresses.length;
@@ -263,18 +151,17 @@ async function buildLookupTableTxs(
   ) {
     const addressesChunk = addresses.slice(start, end)
     const extendIx = AddressLookupTableProgram.extendLookupTable({
-      payer: provider.wallet.publicKey,
-      authority: provider.wallet.publicKey,
+      authority,
+      payer: authority,
       lookupTable: altAddr,
       addresses: addressesChunk,
     })
     extendIxs.push(extendIx)
-    ranges.push([start, start + addressesChunk.length - 1])
   }
 
   const deactivateIx = AddressLookupTableProgram.deactivateLookupTable({
     lookupTable: altAddr,
-    authority: provider.wallet.publicKey,
+    authority,
   })
 
   // disable closeTx, to be cleaned in SolanaChain.cleanUpBuffers
@@ -284,51 +171,27 @@ async function buildLookupTableTxs(
   //   lookupTable: altAddr,
   // })
 
-  const { blockhash: recentBlockhash } = await provider.connection.getLatestBlockhash()
-
   return {
-    addressLookupTableAccount: new AddressLookupTableAccount({
+    lookupTable: new AddressLookupTableAccount({
       key: altAddr,
       state: {
-        deactivationSlot: BigInt(0),
+        deactivationSlot: 2n ** 64n - 1n,
         lastExtendedSlot: recentSlot,
         lastExtendedSlotStartIndex: 0,
         addresses,
       },
     }),
-    initialTxs: [
-      // first extendIx fits in create tx
-      [
-        `lookup[create + 0..${ranges[0][1]}]`,
-        toVersionedTransaction(
-          [createIx, extendIxs[0]],
-          provider.wallet.publicKey,
-          recentBlockhash,
-        ),
-      ],
-      ...extendIxs
-        .slice(1)
-        .map<ExecStepTx>((ix, i) => [
-          `lookup[${ranges[i + 1][0]}..${ranges[i + 1][1]}]`,
-          toVersionedTransaction([ix], provider.wallet.publicKey, recentBlockhash),
-        ]),
-    ],
-    finalTxs: [
-      [
-        `lookup[deactivate]`,
-        toVersionedTransaction([deactivateIx], provider.wallet.publicKey, recentBlockhash),
-      ],
-    ],
+    initialIxs: [createIx, ...extendIxs],
+    finalIxs: [deactivateIx],
   }
 }
 
 async function bufferedTransactionData(
   offrampProgram: Program<typeof CCIP_OFFRAMP_IDL>,
   serializedReport: Buffer,
-  recentBlockhash: string,
   bufferId: Buffer,
   opts?: { clearLeftoverAccounts?: boolean },
-): Promise<ExecStepTx[]> {
+): Promise<TransactionInstruction[]> {
   const provider = offrampProgram.provider as AnchorProvider
 
   const [bufferAddress] = PublicKey.findProgramAddressSync(
@@ -346,7 +209,7 @@ async function bufferedTransactionData(
   )
 
   const chunkSize = 800
-  const bufferedExecTxs: ExecStepTx[] = []
+  const bufferedExecIxs: TransactionInstruction[] = []
 
   const bufferingAccounts = {
     executionReportBuffer: bufferAddress,
@@ -356,15 +219,12 @@ async function bufferedTransactionData(
   }
 
   if (opts?.clearLeftoverAccounts) {
-    const clearTx = await offrampProgram.methods
-      .closeExecutionReportBuffer(bufferId)
-      .accounts(bufferingAccounts)
-      .transaction()
-
-    bufferedExecTxs.push([
-      'buffering[clear]',
-      toVersionedTransaction(clearTx, provider.wallet.publicKey, recentBlockhash),
-    ])
+    bufferedExecIxs.push(
+      await offrampProgram.methods
+        .closeExecutionReportBuffer(bufferId)
+        .accounts(bufferingAccounts)
+        .instruction(),
+    )
   }
 
   const numChunks = Math.ceil(serializedReport.length / chunkSize)
@@ -372,29 +232,15 @@ async function bufferedTransactionData(
     const end = Math.min(i + chunkSize, serializedReport.length)
     const chunk: Buffer = serializedReport.subarray(i, end)
 
-    const appendTx = await offrampProgram.methods
-      .bufferExecutionReport(bufferId, serializedReport.length, chunk, i / chunkSize, numChunks)
-      .accounts(bufferingAccounts)
-      .transaction()
-    bufferedExecTxs.push([
-      `buffering[${i / chunkSize}=${end - i}B]`,
-      toVersionedTransaction(appendTx, provider.wallet.publicKey, recentBlockhash),
-    ])
+    bufferedExecIxs.push(
+      await offrampProgram.methods
+        .bufferExecutionReport(bufferId, serializedReport.length, chunk, i / chunkSize, numChunks)
+        .accounts(bufferingAccounts)
+        .instruction(),
+    )
   }
 
-  return bufferedExecTxs
-}
-
-function toVersionedTransaction(
-  input: Transaction | TransactionInstruction[],
-  payerKey: PublicKey,
-  recentBlockhash: string,
-  addressLookupTableAccounts?: AddressLookupTableAccount[],
-): VersionedTransaction {
-  const instructions: TransactionInstruction[] = Array.isArray(input) ? input : input.instructions
-
-  const message = new TransactionMessage({ payerKey, recentBlockhash, instructions })
-  return new VersionedTransaction(message.compileToV0Message(addressLookupTableAccounts))
+  return bufferedExecIxs
 }
 
 async function getManuallyExecuteInputs({

@@ -219,12 +219,6 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getTokenAdminRegistryFor(address: string): Promise<string>
   /**
-   * Build, derive, load or fetch a wallet for this instance which will be used in any tx send operation
-   * @param opts.wallet - cli or environmental parameters to help pick a wallet
-   * @returns address of fetched (and stored internally) account
-   */
-  abstract getWalletAddress(opts?: { wallet?: unknown }): Promise<string>
-  /**
    * Fetch the current fee for a given intended message
    * @param router - router address on this chain
    * @param destChainSelector - dest network selector
@@ -232,18 +226,35 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getFee(router: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint>
   /**
-   * Send a CCIP message through a router using loaded wallet
+   * Generate unsigned txs for ccipSend'ing a message
+   * @param sender - sender address
+   * @param router - address of the Router contract
+   * @param destChainSelector - chainSelector of destination chain
+   * @param message - AnyMessage to send; if `fee` is not present, it'll be calculated
+   * @param opts.approveMax - if tokens approvals are needed, opt into approving maximum allowance
+   * @returns chain-family specific unsigned txs
+   */
+  abstract generateUnsignedSendMessage(
+    sender: string,
+    router: string,
+    destChainSelector: bigint,
+    message: AnyMessage & { fee?: bigint },
+    opts?: { approveMax?: boolean },
+  ): Promise<unknown>
+  /**
+   * Send a CCIP message through a router using provided wallet
    * @param router - router address on this chain
    * @param destChainSelector - dest network selector
    * @param message - message to send
-   * @param opts.wallet - cli or environmental parameters to help pick a wallet
+   * @param opts.wallet - chain-specific wallet or signer instance, to sign transactions
    * @param opts.approveMax - approve the maximum amount of tokens to transfer
+   * @returns CCIPRequest object with info of the sent message
    */
   abstract sendMessage(
     router: string,
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
-    opts?: { wallet?: unknown; approveMax?: boolean },
+    opts: { wallet: unknown; approveMax?: boolean },
   ): Promise<CCIPRequest>
   /**
    * Fetch supported offchain token data for a request from this network
@@ -252,16 +263,45 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]>
   /**
+   * Generate unsigned tx to manuallyExecute a message
+   * @param payer - address which will be used to transmit the report tx
+   * @param offRamp - address of the OffRamp contract
+   * @param execReport - execution report
+   * @param opts.gasLimit - gasLimit or computeUnits limit override for the ccipReceive call
+   * @param opts.tokensGasLimit - For EVM, overrides gasLimit on tokenpPool call
+   * @param opts.forceBuffer - For Solana, send report in chunks to OffRamp, to later execute
+   * @param opts.forceLookupTable - For Solana, create and extend addresses in a lookup table before executing
+   * @returns array containing one unsigned `manuallyExecute` TransactionRequest object
+   */
+  abstract generateUnsignedExecuteReport(
+    payer: string,
+    offRamp: string,
+    execReport: ExecutionReport,
+    opts: {
+      gasLimit?: number
+      tokensGasLimit?: number
+      forceBuffer?: boolean
+      forceLookupTable?: boolean
+    },
+  ): Promise<unknown>
+  /**
    * Execute messages in report in an offRamp
    * @param offRamp - offRamp address on this dest chain
    * @param execReport - execution report containing messages to execute, proofs and offchainTokenData
-   * @param opts - general options for execution
-   * @returns transaction hash of the execution
+   * @param opts - general options for execution (see [[generateUnsignedExecuteReport]])
+   * @param opts.wallet - chain-specific wallet or signer instance, to sign transactions
+   * @returns transaction of the execution
    */
   abstract executeReport(
     offRamp: string,
     execReport: ExecutionReport,
-    opts?: Record<string, unknown>,
+    opts: {
+      wallet: unknown
+      gasLimit?: number
+      tokensGasLimit?: number
+      forceBuffer?: boolean
+      forceLookupTable?: boolean
+    },
   ): Promise<ChainTransaction>
 
   /**

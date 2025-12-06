@@ -4,13 +4,15 @@ import {
   type Chain,
   type ChainGetter,
   type ChainTransaction,
+  type EVMChain,
+  ChainFamily,
   networkInfo,
   supportedChains,
 } from '@chainlink/ccip-sdk/src/index.ts'
 
-import './aptos.ts'
-import './evm.ts'
-import './solana.ts'
+import { loadAptosWallet } from './aptos.ts'
+import { loadEvmWallet } from './evm.ts'
+import { loadSolanaWallet } from './solana.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
 
@@ -139,5 +141,22 @@ export function fetchChainsFromRpcs(
   } else {
     void init$.catch(() => {})
     return chainGetter
+  }
+}
+
+export async function loadChainWallet(chain: Chain, opts: { wallet?: unknown }) {
+  let wallet
+  switch (chain.network.family) {
+    case ChainFamily.EVM:
+      wallet = await loadEvmWallet((chain as EVMChain).provider, opts)
+      return [await wallet.getAddress(), wallet] as const
+    case ChainFamily.Solana:
+      wallet = await loadSolanaWallet(opts)
+      return [wallet.publicKey.toBase58(), wallet] as const
+    case ChainFamily.Aptos:
+      wallet = await loadAptosWallet(opts)
+      return [wallet.accountAddress.toString(), wallet] as const
+    default:
+      throw new Error(`Unsupported chain family: ${chain.network.family}`)
   }
 }

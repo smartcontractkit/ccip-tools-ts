@@ -1,10 +1,9 @@
-import type { Aptos } from '@aptos-labs/ts-sdk'
+import { type Aptos, AccountAddress } from '@aptos-labs/ts-sdk'
 import { getBytes, zeroPadValue } from 'ethers'
 
 import { encodeExtraArgs } from '../extra-args.ts'
 import { type AnyMessage, ChainFamily } from '../types.ts'
 import { getDataBytes } from '../utils.ts'
-import type { AptosAsyncAccount } from './types.ts'
 
 export const DEFAULT_FEE_TOKEN = '0xa'
 
@@ -71,14 +70,14 @@ export async function getFee(
   return BigInt(fee)
 }
 
-export async function ccipSend(
+export async function generateUnsignedCcipSend(
   provider: Aptos,
-  account: AptosAsyncAccount,
+  sender: string,
   router: string,
   destChainSelector: bigint,
   message: AnyMessage & { fee: bigint },
   _opts?: { approveMax?: boolean },
-): Promise<string> {
+): Promise<Uint8Array> {
   // Build and submit the transaction
   // Call ccip_send entry function with signature:
   // public entry fun ccip_send(
@@ -94,7 +93,7 @@ export async function ccipSend(
   //     extra_args: vector<u8>
   // )
   const transaction = await provider.transaction.build.simple({
-    sender: account.accountAddress,
+    sender: AccountAddress.fromString(sender),
     data: {
       function:
         `${router.includes('::') ? router : router + '::router'}::ccip_send` as `${string}::${string}::${string}`,
@@ -102,18 +101,5 @@ export async function ccipSend(
     },
   })
 
-  // Sign and submit the transaction
-  const signed = await account.signTransactionWithAuthenticator(transaction)
-  const pendingTxn = await provider.transaction.submit.simple({
-    transaction,
-    senderAuthenticator: signed,
-  })
-
-  // Wait for the transaction to be confirmed
-  const { hash } = await provider.waitForTransaction({
-    transactionHash: pendingTxn.hash,
-  })
-
-  // Return the transaction hash
-  return hash
+  return transaction.bcsToBytes()
 }

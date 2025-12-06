@@ -36,7 +36,7 @@
     "eslint-import-resolver-typescript": "4.4.4",
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-prettier": "^5.5.4",
-    "prettier": "^3.7.3",
+    "prettier": "^3.7.4",
     "tsx": "4.21.0",
     "typescript": "5.9.3",
     "typescript-eslint": "8.48.1"
@@ -46,13 +46,13 @@
     "@chainlink/ccip-sdk": "^0.91.0",
     "@coral-xyz/anchor": "^0.29.0",
     "@ethers-ext/signer-ledger": "^6.0.0-beta.1",
-    "@inquirer/prompts": "8.0.1",
+    "@inquirer/prompts": "8.0.2",
     "@ledgerhq/hw-app-aptos": "^6.34.9",
     "@ledgerhq/hw-app-solana": "^7.6.0",
     "@ledgerhq/hw-transport-node-hid": "^6.29.14",
     "@solana/web3.js": "^1.98.4",
     "bs58": "^6.0.0",
-    "ethers": "6.15.0",
+    "ethers": "6.16.0",
     "type-fest": "^5.3.0",
     "yargs": "18.0.0"
   }

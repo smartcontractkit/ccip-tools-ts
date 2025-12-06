@@ -1,6 +1,6 @@
 import util from 'util'
 
-import { type AnchorProvider, type IdlTypes, Program } from '@coral-xyz/anchor'
+import { type IdlTypes, Program } from '@coral-xyz/anchor'
 import {
   NATIVE_MINT,
   createApproveInstruction,
@@ -12,10 +12,7 @@ import {
   type AddressLookupTableAccount,
   type Connection,
   type TransactionInstruction,
-  ComputeBudgetProgram,
   PublicKey,
-  TransactionMessage,
-  VersionedTransaction,
 } from '@solana/web3.js'
 import BN from 'bn.js'
 import { zeroPadValue } from 'ethers'
@@ -24,7 +21,8 @@ import { SolanaChain } from './index.ts'
 import type { AnyMessage } from '../types.ts'
 import { toLeArray } from '../utils.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
-import { bytesToBuffer, simulateTransaction, simulationProvider } from './utils.ts'
+import type { UnsignedTx } from './types.ts'
+import { bytesToBuffer, simulationProvider } from './utils.ts'
 
 function anyToSvmMessage(message: AnyMessage): IdlTypes<typeof CCIP_ROUTER_IDL>['SVM2AnyMessage'] {
   const feeTokenPubkey = message.feeToken ? new PublicKey(message.feeToken) : PublicKey.default
@@ -129,7 +127,7 @@ export async function getFee(
     .map((pubkey) => ({ pubkey, isWritable: false, isSigner: false }))
 
   // Call getFee method
-  const result: unknown = await program.methods
+  const result = (await program.methods
     .getFee(new BN(destChainSelector), svmMessage)
     .accounts({
       config: configPda,
@@ -141,13 +139,13 @@ export async function getFee(
       feeQuoterLinkTokenConfig: feeQuoterLinkTokenConfigPda,
     })
     .remainingAccounts(remainingAccounts)
-    .view()
+    .view()) as IdlTypes<typeof CCIP_ROUTER_IDL>['GetFeeResult']
 
-  if (!(result as { amount?: BN })?.amount) {
+  if (!result?.amount) {
     throw new Error(`Invalid fee result from router: ${util.inspect(result)}`)
   }
 
-  return BigInt((result as { amount: BN }).amount.toString())
+  return BigInt(result.amount.toString())
 }
 
 async function deriveAccountsCcipSend({
@@ -170,16 +168,9 @@ async function deriveAccountsCcipSend({
   let tokenIndex = 0
 
   const [configPDA] = PublicKey.findProgramAddressSync([Buffer.from('config')], router.programId)
-
-  // read-only copy of router which avoids signing every simulation
-  const roProgram = new Program(
-    router.idl,
-    router.programId,
-    simulationProvider(connection, sender),
-  )
   do {
     // Create the transaction instruction for the deriveAccountsCcipSend method
-    const response = (await roProgram.methods
+    const response = (await router.methods
       .deriveAccountsCcipSend(
         {
           destChainSelector: new BN(destChainSelector.toString()),
@@ -248,63 +239,14 @@ async function deriveAccountsCcipSend({
   }
 }
 
-export async function simulateAndSendTxs(
+export async function generateUnsignedCcipSend(
   connection: Connection,
-  feePayer: AnchorProvider['wallet'],
-  instructions: TransactionInstruction[],
-  addressLookupTableAccounts?: AddressLookupTableAccount[],
-) {
-  let computeUnitLimit
-  const simulated =
-    (
-      await simulateTransaction({
-        connection,
-        payerKey: feePayer.publicKey,
-        instructions,
-        addressLookupTableAccounts,
-      })
-    ).unitsConsumed || 0
-  if (simulated > 200000) computeUnitLimit = Math.ceil(simulated * 1.1)
-
-  const txMsg = new TransactionMessage({
-    payerKey: feePayer.publicKey,
-    recentBlockhash: (await connection.getLatestBlockhash('confirmed')).blockhash,
-    instructions: [
-      ...(computeUnitLimit
-        ? [ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit })]
-        : []),
-      ...instructions,
-    ],
-  })
-  const messageV0 = txMsg.compileToV0Message(addressLookupTableAccounts)
-  const tx = new VersionedTransaction(messageV0)
-
-  const signed = await feePayer.signTransaction(tx)
-  let hash
-  for (let attempt = 0; ; attempt++) {
-    try {
-      hash = await connection.sendTransaction(signed)
-      await connection.confirmTransaction(hash, 'confirmed')
-      return hash
-    } catch (error) {
-      if (attempt >= 3) throw error
-      console.error(`sendTransaction failed attempt=${attempt + 1}/3:`, error)
-    }
-  }
-}
-
-export async function ccipSend(
-  router: Program<typeof CCIP_ROUTER_IDL>,
+  sender: PublicKey,
+  router: PublicKey,
   destChainSelector: bigint,
   message: AnyMessage & { fee: bigint },
   opts?: { approveMax?: boolean },
-) {
-  const connection = router.provider.connection
-  let wallet
-  if (!(wallet = (router.provider as AnchorProvider).wallet)) {
-    throw new Error('ccipSend called without signer wallet')
-  }
-
+): Promise<UnsignedTx> {
   const amountsToApprove = (message.tokenAmounts ?? []).reduce(
     (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
     {} as Record<string, bigint>,
@@ -312,14 +254,15 @@ export async function ccipSend(
   if (message.feeToken && message.feeToken !== PublicKey.default.toBase58()) {
     amountsToApprove[message.feeToken] = (amountsToApprove[message.feeToken] ?? 0n) + message.fee
   }
+  const program = new Program(CCIP_ROUTER_IDL, router, simulationProvider(connection, sender))
 
   const approveIxs = []
   for (const [token, amount] of Object.entries(amountsToApprove)) {
     const approveIx = await approveRouterSpender(
       connection,
-      wallet.publicKey,
+      sender,
       new PublicKey(token),
-      router.programId,
+      router,
       opts?.approveMax ? undefined : amount,
     )
     if (approveIx) approveIxs.push(approveIx)
@@ -327,13 +270,13 @@ export async function ccipSend(
 
   const svmMessage = anyToSvmMessage(message)
   const { addressLookupTableAccounts, accounts, tokenIndexes } = await deriveAccountsCcipSend({
-    router,
+    router: program,
     destChainSelector,
-    sender: wallet.publicKey,
+    sender,
     message: svmMessage,
   })
 
-  const sendIx = await router.methods
+  const sendIx = await program.methods
     .ccipSend(new BN(destChainSelector), svmMessage, tokenIndexes)
     .accountsStrict({
       config: accounts[0].pubkey,
@@ -357,29 +300,11 @@ export async function ccipSend(
     })
     .remainingAccounts(accounts.slice(18))
     .instruction()
-
-  let hash
-  try {
-    // first try to serialize and send a single tx containing approve and send ixs
-    hash = await simulateAndSendTxs(
-      connection,
-      wallet,
-      [...approveIxs, sendIx],
-      addressLookupTableAccounts,
-    )
-  } catch (err) {
-    if (
-      !approveIxs.length ||
-      !(err instanceof Error) ||
-      !['encoding overruns Uint8Array', 'too large'].some((e) => err.message.includes(e))
-    )
-      throw err
-    // if serialization fails, send approve txs separately
-    for (const approveIx of approveIxs) await simulateAndSendTxs(connection, wallet, [approveIx])
-    hash = await simulateAndSendTxs(connection, wallet, [sendIx], addressLookupTableAccounts)
+  return {
+    mainIndex: approveIxs.length,
+    instructions: [...approveIxs, sendIx],
+    lookupTables: addressLookupTableAccounts,
   }
-
-  return { hash }
 }
 
 async function approveRouterSpender(

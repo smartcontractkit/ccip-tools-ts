@@ -1,12 +1,18 @@
-import { type AnchorProvider, Program } from '@coral-xyz/anchor'
-import { AddressLookupTableProgram, PublicKey, SystemProgram } from '@solana/web3.js'
+import { type Wallet as AnchorWallet, AnchorProvider, Program } from '@coral-xyz/anchor'
+import {
+  type Connection,
+  AddressLookupTableProgram,
+  PublicKey,
+  SystemProgram,
+} from '@solana/web3.js'
 import { dataSlice, hexlify } from 'ethers'
 import { memoize } from 'micro-memoize'
 
 import { sleep } from '../utils.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import type { SolanaChain } from './index.ts'
-import { simulateAndSendTxs } from './send.ts'
+import type { Wallet } from './types.ts'
+import { simulateAndSendTxs } from './utils.ts'
 
 /**
  * Clean up and recycle buffers and Address Lookup Tables owned by wallet
@@ -17,12 +23,11 @@ import { simulateAndSendTxs } from './send.ts'
  *   before returning from this method
  */
 export async function cleanUpBuffers(
-  provider: AnchorProvider,
+  connection: Connection,
+  wallet: Wallet,
   getLogs: SolanaChain['getLogs'],
-  opts?: { dontWait?: boolean },
+  opts?: { waitDeactivation?: boolean },
 ): Promise<void> {
-  const connection = provider.connection
-  const wallet = provider.wallet
   console.debug(
     'Starting cleaning up buffers and lookup tables for account',
     wallet.publicKey.toString(),
@@ -53,7 +58,7 @@ export async function cleanUpBuffers(
     while (!sig) {
       const delta = deactivationSlot + 513 - (await getCurrentSlot())
       if (delta > 0) {
-        if (opts?.dontWait) {
+        if (!opts?.waitDeactivation) {
           console.warn(
             'Skipping: lookup table',
             altAddr,
@@ -80,7 +85,7 @@ export async function cleanUpBuffers(
         lookupTable,
       })
       try {
-        sig = await simulateAndSendTxs(connection, wallet, [closeIx])
+        sig = await simulateAndSendTxs(connection, wallet, { instructions: [closeIx] })
         console.info('🗑️  Closed lookup table', altAddr, ': tx =>', sig)
       } catch (err) {
         const info = await connection.getAddressLookupTable(lookupTable)
@@ -113,7 +118,11 @@ export async function cleanUpBuffers(
           .map(({ data }) => Buffer.from(data.subarray(8 + 4, 8 + 4 + 32)))
 
         for (const bufferId of bufferIds) {
-          const offrampProgram = new Program(CCIP_OFFRAMP_IDL, new PublicKey(log.address), provider)
+          const offrampProgram = new Program(
+            CCIP_OFFRAMP_IDL,
+            new PublicKey(log.address),
+            new AnchorProvider(connection, wallet as AnchorWallet, { commitment: 'confirmed' }),
+          )
 
           const [executionReportBuffer] = PublicKey.findProgramAddressSync(
             [Buffer.from('execution_report_buffer'), bufferId, wallet.publicKey.toBuffer()],
@@ -198,7 +207,9 @@ export async function cleanUpBuffers(
           })
 
           try {
-            const sig = await simulateAndSendTxs(connection, wallet, [deactivateIx])
+            const sig = await simulateAndSendTxs(connection, wallet, {
+              instructions: [deactivateIx],
+            })
             console.info('⤵️  Deactivated lookup table', lookupTable.toBase58(), ': tx =>', sig)
             pendingPromises.push(closeAlt(lookupTable, await getCurrentSlot()))
           } catch (err) {

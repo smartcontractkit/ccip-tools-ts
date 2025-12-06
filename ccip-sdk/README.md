@@ -55,26 +55,29 @@ constructor from the specific library provider (e.g. `EVMChain.fromProvider(prov
 
 ## Wallet
 
-Most chain families classes have a *cached* `getWallet` method, which handles creating a signer or
-wallet from raw private keys. They receive a generic `{ wallet?: unknown }` object, which may be
-passed from other methods, or CLI's `argv` options, to aid in wallet creation.
+Transaction-sending high-level methods, namely `Chain.sendMessage` and `Chain.executeReport`,
+require a `wallet` property in last `opts` parameter. This is marked as `unknown` in generic Chain
+abstract class, but required to be an asynchronous signer wallet respective to each chain family:
 
-If they can't, users may override the *static* `getWallet` function (with parameters depending on
-chain family implementation), which is called to try to construct a wallet or signer instead.
-This can be used to extend the library to create signers according to each environment, without
-requiring a full class inheritance.
+- `EVMChain` requires an `ethers` `Signer`
+- `SolanaChain` requires an `anchor` `Wallet`
+- `AptosChain` requires an `aptos-ts-sdk` `Account`
 
-Example:
-```ts
-import { EVMChain } from '@chainlink/ccip-sdk'
+These signers are used in the simplest way possible (i.e. using address accessors where needed,
+and `async signTransaction`-like methods), so developers may be able to easily inject their own
+implementations, to get called or intercept signature requests by these methods.
 
-EVMChain.getWallet = async function(opts?: { provider?: Provider, wallet?: unknown }): Promise<Signer> {
-  // instantiate Signer
-}
-```
+Optionally, `sendMessage` and `executeReport` also have companion `generateUnsignedSendMessage` and
+`generateUnsignedExecuteReport` methods, returning chain-family-specific unsigned data, which one
+can use to sign and send the transactions manually.
+
+Notice that these are lower-level methods, and require the developer to handle the signing and
+sending of the transactions themselves, skipping niceties from the higher-level methods, like
+retries, gas estimation and transactions batching.
 
 > [!TIP]
-> For EVMChain on Browsers, there's no need to override like the above, since providing a `{ wallet: number | address }` option object will make it create a signer from `provider.getSigner(number)`, which should load the account from the browser's wallet extension.
+> For EVMChain on Browsers, one can use `chain.provider.getSigner(numberOrAddress)` to fetch a
+provider-backed signer from compatible wallets, like Metamask.
 
 ## Tree-shakers
 

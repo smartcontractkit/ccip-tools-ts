@@ -20,6 +20,16 @@ export type AptosAsyncAccount = {
   ) => Promise<AccountAuthenticator> | AccountAuthenticator
 }
 
+export function isAptosAccount(account: unknown): account is AptosAsyncAccount {
+  return (
+    typeof account === 'object' &&
+    account !== null &&
+    'publicKey' in account &&
+    'accountAddress' in account &&
+    'signTransactionWithAuthenticator' in account
+  )
+}
+
 export const EVMExtraArgsV2Codec = bcs.struct('EVMExtraArgsV2', {
   gasLimit: bcs.u256(),
   allowOutOfOrderExecution: bcs.bool(),

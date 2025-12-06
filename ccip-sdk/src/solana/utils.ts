@@ -16,6 +16,7 @@ import { type BytesLike, dataLength, dataSlice, hexlify } from 'ethers'
 
 import type { Log_ } from '../types.ts'
 import { getDataBytes, sleep } from '../utils.ts'
+import type { UnsignedTx, Wallet } from './types.ts'
 
 export function hexDiscriminator(eventName: string): string {
   return hexlify(eventDiscriminator(eventName))
@@ -278,4 +279,83 @@ export function simulationProvider(
         tx,
       }),
   }
+}
+
+/**
+ * Sign, simulate, send and confirm as many instructions as possible on each transaction
+ * @param connection - Solana Connection
+ * @param wallet - Wallet to sign and pay for txs
+ * @param instructions - Instructions to send; they may not fit all in a single
+ *   transaction, in which case they will be split into multiple transactions
+ * @param mainIndex - Index of the main instruction
+ * @param lookupTables - lookupTables to be used for main instruction
+ * @param computeUnits - max computeUnits limit to be used for main instruction
+ * @returns - signature of successful transaction including main instruction
+ */
+export async function simulateAndSendTxs(
+  connection: Connection,
+  wallet: Wallet,
+  { instructions, mainIndex, lookupTables }: UnsignedTx,
+  computeUnits?: number,
+): Promise<string> {
+  let mainHash: string
+  for (
+    let [start, end] = [0, instructions.length];
+    start < instructions.length;
+    [start, end] = [end, instructions.length]
+  ) {
+    let computeUnitLimit, lastErr, addressLookupTableAccounts, ixs, includesMain
+    do {
+      ixs = instructions.slice(start, end)
+      includesMain = mainIndex != null && start <= mainIndex && mainIndex < end
+      addressLookupTableAccounts = includesMain ? lookupTables : undefined
+
+      try {
+        const simulated =
+          (
+            await simulateTransaction({
+              connection,
+              payerKey: wallet.publicKey,
+              instructions: ixs,
+              addressLookupTableAccounts,
+            })
+          ).unitsConsumed || 0
+
+        if (simulated <= 200000) {
+          computeUnitLimit = undefined
+        } else if (!includesMain || computeUnits == null || simulated <= computeUnits) {
+          computeUnitLimit = Math.ceil(simulated * 1.1)
+        } else {
+          throw new Error(
+            `Main simulation exceeds specified computeUnits limit. simulated=${simulated}, limit=${computeUnits}`,
+          )
+        }
+        break
+      } catch (err) {
+        lastErr = err
+        end-- // truncate until finding a slice which fits (both computeUnits and tx size limits)
+      }
+    } while (end > start)
+    if (end <= start) throw lastErr
+
+    const blockhash = await connection.getLatestBlockhash('confirmed')
+    const txMsg = new TransactionMessage({
+      payerKey: wallet.publicKey,
+      recentBlockhash: blockhash.blockhash,
+      instructions: [
+        ...(computeUnitLimit
+          ? [ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit })]
+          : []),
+        ...ixs,
+      ],
+    })
+    const messageV0 = txMsg.compileToV0Message(addressLookupTableAccounts)
+    const tx = new VersionedTransaction(messageV0)
+
+    const signed = await wallet.signTransaction(tx)
+    const signature = await connection.sendTransaction(signed)
+    await connection.confirmTransaction({ signature, ...blockhash }, 'confirmed')
+    if (includesMain) mainHash = signature
+  }
+  return mainHash!
 }

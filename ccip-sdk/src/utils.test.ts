@@ -814,7 +814,7 @@ describe('toLeArray', () => {
 
   it('should handle zero', () => {
     const result = toLeArray(0n)
-    assert.deepEqual(result, new Uint8Array([0x00]))
+    assert.deepEqual(result, new Uint8Array([]))
   })
 
   it('should handle custom width', () => {

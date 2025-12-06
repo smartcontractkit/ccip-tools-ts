@@ -121,10 +121,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  async getWalletAddress(_opts?: { wallet?: unknown }): Promise<string> {
-    return Promise.reject(new Error('Not implemented'))
-  }
-
   // Static methods for decoding
   static decodeMessage(_log: Log_): CCIPMessage_V1_6_Sui | undefined {
     throw new Error('Not implemented')
@@ -163,6 +159,16 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new Error('Not implemented'))
   }
 
+  override generateUnsignedSendMessage(
+    _sender: string,
+    _router: string,
+    _destChainSelector: bigint,
+    _message: AnyMessage & { fee?: bigint },
+    _opts?: { approveMax?: boolean },
+  ): Promise<unknown> {
+    return Promise.reject(new Error('Not implemented'))
+  }
+
   async sendMessage(
     _router: string,
     _destChainSelector: bigint,
@@ -178,6 +184,15 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
     // default offchain token data
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
+  }
+
+  override generateUnsignedExecuteReport(
+    _payer: string,
+    _offRamp: string,
+    _execReport: ExecutionReport,
+    _opts: object,
+  ): Promise<unknown> {
+    return Promise.reject(new Error('Not implemented'))
   }
 
   async executeReport(

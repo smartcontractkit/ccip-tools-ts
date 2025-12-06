@@ -1,8 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import util from 'node:util'
 
-import { SolanaChain } from '@chainlink/ccip-sdk/src/index.ts'
-import { Wallet as SolanaWallet } from '@coral-xyz/anchor'
+import { Wallet as AnchorWallet } from '@coral-xyz/anchor'
 import SolanaLedger from '@ledgerhq/hw-app-solana'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
 import {
@@ -70,9 +69,14 @@ export class LedgerSolanaWallet {
   }
 }
 
-SolanaChain.getWallet = async function loadSolanaWallet({
+/**
+ * Loads a Solana wallet from a file or Ledger device.
+ * @param opts.wallet - wallet options (as passed to yargs argv)
+ * @returns Promise to Anchor Wallet instance
+ */
+export async function loadSolanaWallet({
   wallet: walletOpt,
-}: { wallet?: unknown } = {}): Promise<SolanaWallet> {
+}: { wallet?: unknown } = {}): Promise<AnchorWallet> {
   if (!walletOpt)
     walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY'] || '~/.config/solana/id.json'
   let wallet: string
@@ -83,11 +87,11 @@ SolanaChain.getWallet = async function loadSolanaWallet({
     let derivationPath = walletOpt.split(':')[1]
     if (!derivationPath) derivationPath = "44'/501'/0'"
     else if (!isNaN(Number(derivationPath))) derivationPath = `44'/501'/${derivationPath}'`
-    return (await LedgerSolanaWallet.create(derivationPath)) as SolanaWallet
+    return (await LedgerSolanaWallet.create(derivationPath)) as AnchorWallet
   } else if (existsSync(walletOpt)) {
     wallet = hexlify(new Uint8Array(JSON.parse(readFileSync(walletOpt, 'utf8'))))
   }
-  return new SolanaWallet(
+  return new AnchorWallet(
     Keypair.fromSecretKey(wallet.startsWith('0x') ? getBytes(wallet) : bs58.decode(wallet)),
   )
 }
