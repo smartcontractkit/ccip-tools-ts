@@ -1,6 +1,9 @@
 ---
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
@@ -37,40 +40,80 @@ jobs:
         name: coverage-report
         path: .coverage
 
-    - name: Post or update PR comment with coverage summary
+    - name: Upload coverage summary
       if: always()
+      uses: actions/upload-artifact@v5.0.0
+      with:
+        name: coverage-summary
+        path: coverage-summary.txt
+
+  coverage-comment:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+
+    # This job needs to be able to comment on PRs
+    permissions:
+      contents: read
+      pull-requests: write
+
+    # Only run on pull_request events (skip on push to main)
+    if: github.event_name == 'pull_request'
+
+    steps:
+    - name: Download coverage summary
+      uses: actions/download-artifact@v5.0.0
+      with:
+        name: coverage-summary
+        path: .
+
+    - name: Post or update PR comment with coverage summary
       uses: actions/github-script@v8.0.0
       with:
         script: |
           const fs = require('fs');
-          let coverageSummary = fs.readFileSync('coverage-summary.txt', 'utf8').split('\n')
-          coverageSummary = coverageSummary.slice(coverageSummary.findIndex(line => line.match(/^ℹ/))).join('\n');
+
+          let coverageSummary = fs.readFileSync('coverage-summary.txt', 'utf8').split('\n');
+          coverageSummary = coverageSummary.slice(
+            coverageSummary.findIndex(line => line.match(/^ℹ/))
+          ).join('\n');
+
           if (coverageSummary.trim().length === 0) {
             console.log('No coverage data found');
             process.exit(1);
           }
-          const prNumber = context.payload.pull_request ? context.payload.pull_request.number : null;
 
-          if (prNumber) {
-            const commentBody = `## Coverage Report\n\n\`\`\`\n${coverageSummary}\`\`\``;
-            const { data: comments } = await github.rest.issues.listComments({
+          const prNumber = context.payload.pull_request
+            ? context.payload.pull_request.number
+            : null;
+
+          if (!prNumber) {
+            console.log('No PR number found, skipping comment.');
+            return;
+          }
+
+          const commentBody = `## Coverage Report\n\n\`\`\`\n${coverageSummary}\n\`\`\``;
+
+          const { data: comments } = await github.rest.issues.listComments({
+            ...context.repo,
+            issue_number: prNumber,
+          });
+
+          const botComment = comments.find(
+            comment =>
+              comment.user.login === 'github-actions[bot]' &&
+              comment.body.includes('## Coverage Report')
+          );
+
+          if (botComment) {
+            await github.rest.issues.updateComment({
+              ...context.repo,
+              comment_id: botComment.id,
+              body: commentBody,
+            });
+          } else {
+            await github.rest.issues.createComment({
               ...context.repo,
               issue_number: prNumber,
+              body: commentBody,
             });
-
-            const botComment = comments.find(comment => comment.user.login === 'github-actions[bot]' && comment.body.includes('## Coverage Report'));
-
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                ...context.repo,
-                comment_id: botComment.id,
-                body: commentBody,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                ...context.repo,
-                issue_number: prNumber,
-                body: commentBody,
-              });
-            }
           }
