@@ -373,9 +373,9 @@ export function parseTypeAndVersion(
  * @returns Rate-limited fetch function.
  */
 export function createRateLimitedFetch({
-  maxRequests = Number(process.env['RL_MAX_REQUESTS'] || 40),
-  windowMs = Number(process.env['RL_WINDOW_MS'] || 11e3),
-  maxRetries = Number(process.env['RL_MAX_RETRIES'] || 5),
+  maxRequests = 40,
+  windowMs = 11e3,
+  maxRetries = 5,
 }: { maxRequests?: number; windowMs?: number; maxRetries?: number } = {}): typeof fetch {
   // Custom fetch implementation with retry logic and rate limiting
   // Per-instance state
