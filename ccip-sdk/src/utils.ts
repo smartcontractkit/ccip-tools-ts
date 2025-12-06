@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer'
 import util from 'util'
 
 import bs58 from 'bs58'

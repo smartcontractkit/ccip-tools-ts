@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { type Wallet as AnchorWallet, AnchorProvider, Program } from '@coral-xyz/anchor'
 import {
   type Connection,

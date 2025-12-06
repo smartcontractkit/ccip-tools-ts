@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { type AnchorProvider, type IdlTypes, Program } from '@coral-xyz/anchor'
 import {
   type AccountMeta,

@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer'
 import util from 'util'
 
 import { type Idl, type IdlTypes, BorshAccountsCoder, BorshCoder, Program } from '@coral-xyz/anchor'
