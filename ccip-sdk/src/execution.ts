@@ -10,12 +10,14 @@ import {
   type CCIPVersion,
   type ExecutionReport,
   type Lane,
+  type WithLogger,
   ExecutionState,
 } from './types.ts'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
  *
+ * @param ctx - Context for logging
  * @param messagesInBatch - Array containing all messages in batch, ordered
  * @param lane - Arguments for leafHasher (lane info)
  * @param messageId - Message ID to prove for manual execution
@@ -23,12 +25,13 @@ import {
  * @returns ManualExec report arguments
  **/
 export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
+  ctx: WithLogger,
   messagesInBatch: readonly CCIPMessage<V>[],
   lane: Lane<V>,
   messageId: string,
   merkleRoot?: string,
 ): Omit<ExecutionReport, 'offchainTokenData' | 'message'> {
-  const hasher = getLeafHasher(lane)
+  const hasher = getLeafHasher(lane, ctx)
 
   const msgIdx = messagesInBatch.findIndex((message) => message.header.messageId === messageId)
   if (msgIdx < 0) {
@@ -58,7 +61,12 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
 }
 
 export const discoverOffRamp = memoize(
-  async function discoverOffRamp_(source: Chain, dest: Chain, onRamp: string): Promise<string> {
+  async function discoverOffRamp_(
+    source: Chain,
+    dest: Chain,
+    onRamp: string,
+    { logger = console }: WithLogger = {},
+  ): Promise<string> {
     const sourceRouter = await source.getRouterForOnRamp(onRamp, dest.network.chainSelector)
     const sourceOffRamps = await source.getOffRampsForRouter(
       sourceRouter,
@@ -71,7 +79,7 @@ export const discoverOffRamp = memoize(
       for (const offRamp of destOffRamps) {
         const offRampsOnRamp = await dest.getOnRampForOffRamp(offRamp, source.network.chainSelector)
         if (offRampsOnRamp === onRamp) {
-          console.debug(
+          logger.debug(
             'discoverOffRamp: found, from',
             { sourceRouter, sourceOffRamps, destOnRamp, destOffRamps, offRampsOnRamp },
             '=',

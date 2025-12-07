@@ -57,6 +57,7 @@ import {
   type Log_,
   type NetworkInfo,
   type OffchainTokenData,
+  type WithLogger,
   CCIPVersion,
   ChainFamily,
 } from '../types.ts'
@@ -153,8 +154,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   static readonly family = ChainFamily.EVM
   static readonly decimals = 18
 
-  readonly network: NetworkInfo<typeof ChainFamily.EVM>
-  readonly provider: JsonRpcApiProvider
+  provider: JsonRpcApiProvider
   readonly destroy$: Promise<void>
 
   /**
@@ -162,12 +162,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param provider - JSON-RPC provider for the EVM network.
    * @param network - Network information for this chain.
    */
-  constructor(provider: JsonRpcApiProvider, network: NetworkInfo) {
-    if (network.family !== ChainFamily.EVM)
-      throw new Error(`Invalid network family for EVMChain: ${network.family}`)
-    super()
+  constructor(provider: JsonRpcApiProvider, network: NetworkInfo, ctx?: WithLogger) {
+    super(network, ctx)
 
-    this.network = network
     this.provider = provider
     this.destroy$ = new Promise<void>((resolve) => (this.destroy = resolve))
     void this.destroy$.finally(() => provider.destroy())
@@ -239,11 +236,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /**
    * Creates an EVMChain instance from an existing provider.
    * @param provider - JSON-RPC provider instance.
+   * @param ctx - context containing logger.
    * @returns A new EVMChain instance.
    */
-  static async fromProvider(provider: JsonRpcApiProvider): Promise<EVMChain> {
+  static async fromProvider(provider: JsonRpcApiProvider, ctx?: WithLogger): Promise<EVMChain> {
     try {
-      return new EVMChain(provider, networkInfo(Number((await provider.getNetwork()).chainId)))
+      return new EVMChain(provider, networkInfo(Number((await provider.getNetwork()).chainId)), ctx)
     } catch (err) {
       provider.destroy()
       throw err
@@ -253,10 +251,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /**
    * Creates an EVMChain instance from an RPC URL.
    * @param url - WebSocket (wss://) or HTTP (https://) endpoint URL.
+   * @param ctx - context containing logger.
    * @returns A new EVMChain instance.
    */
-  static async fromUrl(url: string): Promise<EVMChain> {
-    return this.fromProvider(await this._getProvider(url))
+  static async fromUrl(url: string, ctx?: WithLogger): Promise<EVMChain> {
+    return this.fromProvider(await this._getProvider(url), ctx)
   }
 
   /** {@inheritDoc Chain.getBlockTimestamp} */
@@ -283,7 +282,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /** {@inheritDoc Chain.getLogs} */
   async *getLogs(filter: LogFilter & { onlyFallback?: boolean }): AsyncIterableIterator<Log> {
-    yield* getEvmLogs(this.provider, filter, this.destroy$)
+    yield* getEvmLogs(filter, this)
   }
 
   /** {@inheritDoc Chain.fetchRequestsInTx} */
@@ -394,11 +393,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
               ...tokenAmount,
             }
           } catch (_) {
-            console.debug(
-              'legacy sourceTokenData:',
-              i,
-              (message as { sourceTokenData: string[] }).sourceTokenData[i],
-            )
+            // legacy sourceTokenData
           }
         }
         if (typeof tokenAmount.destExecData === 'string' && tokenAmount.destGasAmount == null) {
@@ -841,12 +836,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param lane - Lane configuration.
    * @returns Leaf hasher function.
    */
-  static getDestLeafHasher({
-    sourceChainSelector,
-    destChainSelector,
-    onRamp,
-    version,
-  }: Lane): LeafHasher {
+  static getDestLeafHasher(
+    { sourceChainSelector, destChainSelector, onRamp, version }: Lane,
+    opts?: WithLogger,
+  ): LeafHasher {
     switch (version) {
       case CCIPVersion.V1_2:
       case CCIPVersion.V1_5:
@@ -854,7 +847,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           throw new Error(`Unsupported source chain: ${sourceChainSelector}`)
         return getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher
       case CCIPVersion.V1_6:
-        return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher
+        return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp, opts) as LeafHasher
       default:
         throw new Error(`Unsupported hasher version for EVM: ${version as string}`)
     }
@@ -1049,7 +1042,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         tx.from = undefined
         const signed = await wallet.signTransaction(tx)
         const response = await this.provider.broadcastTransaction(signed)
-        console.debug('approve =>', response.hash)
+        this.logger.debug('approve =>', response.hash)
         return response
       }),
     )
@@ -1061,14 +1054,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     sendTx.from = undefined // some signers don't like receiving pre-populated `from`
     const signed = await wallet.signTransaction(sendTx)
     const response = await this.provider.broadcastTransaction(signed)
-    console.debug('ccipSend =>', response.hash)
+    this.logger.debug('ccipSend =>', response.hash)
     await response.wait(1, 60_000)
     return (await this.fetchRequestsInTx(await this.getTransaction(response.hash)))[0]
   }
 
   /** {@inheritDoc Chain.fetchOffchainTokenData} */
   fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
-    return fetchEVMOffchainTokenData(request)
+    return fetchEVMOffchainTokenData(request, this)
   }
 
   /**
@@ -1201,7 +1194,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     unsignedTx.from = undefined // some signers don't like receiving pre-populated `from`
     const signed = await wallet.signTransaction(unsignedTx)
     const response = await this.provider.broadcastTransaction(signed)
-    console.debug('ccipSend =>', response.hash)
+    this.logger.debug('ccipSend =>', response.hash)
     const receipt = await response.wait(1, 60_000)
     if (!receipt?.hash) throw new Error(`Could not confirm exec tx: ${response.hash}`)
     if (!receipt.status) throw new Error(`Exec transaction reverted: ${response.hash}`)

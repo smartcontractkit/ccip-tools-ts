@@ -51,11 +51,6 @@ async function main() {
     .scriptName(process.env.CLI_NAME || 'ccip-cli')
     .env('CCIP')
     .options(globalOpts)
-    .middleware((argv) => {
-      if (!argv.verbose) {
-        console.debug = () => {}
-      }
-    })
     .commandDir('commands', {
       extensions: [new URL(import.meta.url).pathname.split('.').pop()!],
       exclude: /\.test\.[tj]s$/,

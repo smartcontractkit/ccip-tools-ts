@@ -14,7 +14,7 @@ import type { ReadonlyDeep } from 'type-fest'
 
 import { decodeExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/index.ts'
-import { type CCIPMessage, type Lane, CCIPVersion } from '../types.ts'
+import { type CCIPMessage, type Lane, type WithLogger, CCIPVersion } from '../types.ts'
 import { getAddressBytes, getDataBytes, networkInfo, toLeArray } from '../utils.ts'
 
 const SvmExtraArgsSchema = {
@@ -43,7 +43,10 @@ const SvmTokenAmountsSchema = {
  * @param lane - Lane configuration.
  * @returns Leaf hasher function for Solana messages.
  */
-export function getV16SolanaLeafHasher(lane: Lane): LeafHasher<typeof CCIPVersion.V1_6> {
+export function getV16SolanaLeafHasher(
+  lane: Lane,
+  { logger = console }: WithLogger = {},
+): LeafHasher<typeof CCIPVersion.V1_6> {
   if (lane.version !== CCIPVersion.V1_6)
     throw new Error(`Unsupported lane version: ${lane.version}`)
 
@@ -101,7 +104,7 @@ export function getV16SolanaLeafHasher(lane: Lane): LeafHasher<typeof CCIPVersio
       ...[receiver].filter((a) => hexlify(a) !== ZeroHash),
       ...parsedArgs.accounts.map((a) => zeroPadValue(bs58.decode(a), 32)),
     ]
-    console.debug(
+    logger.debug(
       'v1.6 solana leafHasher',
       packedValues.map((o) => (o instanceof Uint8Array ? `[${o.length}]:${hexlify(o)}` : o)),
     )

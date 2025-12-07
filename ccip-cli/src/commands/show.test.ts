@@ -75,7 +75,7 @@ function buildShowArgs(txHash: string, ...additionalArgs: string[]): string[] {
     '-r',
     ...RPCS,
     '--rpcs-file',
-    '.gitignore', // Disable rpcs file loading
+    'package.json', // Disable rpcs file loading
     ...additionalArgs,
   ]
 }
@@ -198,7 +198,7 @@ describe('e2e command show EVM', () => {
       }
 
       // Should have parsed at least one JSON object
-      assert.ok(jsonObjects.length > 0)
+      assert.ok(jsonObjects.length > 0, result.stdout + result.stderr)
 
       // Verify messageId is in the output
       assert.match(result.stdout, /"messageId"/)

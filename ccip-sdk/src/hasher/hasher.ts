@@ -1,5 +1,5 @@
 import { supportedChains } from '../supported-chains.ts'
-import type { CCIPVersion, Lane } from '../types.ts'
+import type { CCIPVersion, Lane, WithLogger } from '../types.ts'
 import { networkInfo } from '../utils.ts'
 import type { LeafHasher } from './common.ts'
 
@@ -8,9 +8,12 @@ import type { LeafHasher } from './common.ts'
  * @param lane - Lane configuration.
  * @returns Leaf hasher function for the destination chain.
  */
-export function getLeafHasher<V extends CCIPVersion = CCIPVersion>(lane: Lane<V>): LeafHasher<V> {
+export function getLeafHasher<V extends CCIPVersion = CCIPVersion>(
+  lane: Lane<V>,
+  ctx: WithLogger,
+): LeafHasher<V> {
   const destFamily = networkInfo(lane.destChainSelector).family
   const chain = supportedChains[destFamily]
   if (!chain) throw new Error(`Unsupported chain family: ${destFamily}`)
-  return chain.getDestLeafHasher(lane) as LeafHasher<V>
+  return chain.getDestLeafHasher(lane, ctx) as LeafHasher<V>
 }

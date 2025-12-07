@@ -16,7 +16,7 @@ import {
 } from '@solana/web3.js'
 import { type BytesLike, dataLength, dataSlice, hexlify } from 'ethers'
 
-import type { Log_ } from '../types.ts'
+import type { Log_, WithLogger } from '../types.ts'
 import { getDataBytes, sleep } from '../utils.ts'
 import type { UnsignedTx, Wallet } from './types.ts'
 
@@ -220,17 +220,18 @@ export function getErrorFromLogs(
  * @param params - Simulation parameters including connection and payer.
  * @returns Simulation result with estimated compute units.
  */
-export async function simulateTransaction({
-  connection,
-  payerKey,
-  computeUnitsOverride,
-  ...rest
-}: {
-  connection: Connection
-  payerKey: PublicKey
-  computeUnitsOverride?: number
-  addressLookupTableAccounts?: AddressLookupTableAccount[]
-} & ({ instructions: TransactionInstruction[] } | { tx: Transaction | VersionedTransaction })) {
+export async function simulateTransaction(
+  { connection, logger = console }: { connection: Connection } & WithLogger,
+  {
+    payerKey,
+    computeUnitsOverride,
+    ...rest
+  }: {
+    payerKey: PublicKey
+    computeUnitsOverride?: number
+    addressLookupTableAccounts?: AddressLookupTableAccount[]
+  } & ({ instructions: TransactionInstruction[] } | { tx: Transaction | VersionedTransaction }),
+) {
   // Add max compute units for simulation
   const maxComputeUnits = 1_400_000
   const recentBlockhash = '11111111111111111111111111111112'
@@ -272,7 +273,7 @@ export async function simulateTransaction({
   const result = await connection.simulateTransaction(tx, config)
 
   if (result.value.err) {
-    console.debug('Simulation results:', {
+    logger.debug('Simulation results:', {
       logs: result.value.logs,
       unitsConsumed: result.value.unitsConsumed,
       returnData: result.value.returnData,
@@ -293,22 +294,21 @@ export async function simulateTransaction({
 /**
  * Used as `provider` in anchor's `Program` constructor, to support `.view()` simulations
  * without * requiring a full AnchorProvider with wallet
- * @param connection - Connection to the Solana network
+ * @param ctx - Context object containing connection and logger
  * @param feePayer - Fee payer for the simulated transaction
  * @returns Value returned by the simulated method
  */
 export function simulationProvider(
-  connection: Connection,
+  ctx: { connection: Connection } & WithLogger,
   feePayer: PublicKey = new PublicKey('11111111111111111111111111111112'),
 ) {
   return {
-    connection,
+    connection: ctx.connection,
     wallet: {
       publicKey: feePayer,
     },
     simulate: async (tx: Transaction | VersionedTransaction, _signers?: Signer[]) =>
-      simulateTransaction({
-        connection,
+      simulateTransaction(ctx, {
         payerKey: feePayer,
         tx,
       }),
@@ -317,7 +317,7 @@ export function simulationProvider(
 
 /**
  * Sign, simulate, send and confirm as many instructions as possible on each transaction
- * @param connection - Solana Connection
+ * @param ctx - Context object containing connection and logger
  * @param wallet - Wallet to sign and pay for txs
  * @param unsignedTx - instructions to sign and send
  *   - instructions - Instructions to send; they may not fit all in a single transaction,
@@ -328,11 +328,12 @@ export function simulationProvider(
  * @returns - signature of successful transaction including main instruction
  */
 export async function simulateAndSendTxs(
-  connection: Connection,
+  ctx: { connection: Connection } & WithLogger,
   wallet: Wallet,
   { instructions, mainIndex, lookupTables }: UnsignedTx,
   computeUnits?: number,
 ): Promise<string> {
+  const { connection } = ctx
   let mainHash: string
   for (
     let [start, end] = [0, instructions.length];
@@ -348,8 +349,7 @@ export async function simulateAndSendTxs(
       try {
         const simulated =
           (
-            await simulateTransaction({
-              connection,
+            await simulateTransaction(ctx, {
               payerKey: wallet.publicKey,
               instructions: ixs,
               addressLookupTableAccounts,

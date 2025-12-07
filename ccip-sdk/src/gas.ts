@@ -58,7 +58,7 @@ export async function estimateExecGasForRequest(
     }
   },
 ) {
-  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
   const destRouter = await dest.getRouterForOffRamp(offRamp, request.lane.sourceChainSelector)
 
   const destTokenAmounts = await Promise.all(

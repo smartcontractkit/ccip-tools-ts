@@ -18,6 +18,7 @@ import {
   type Log_,
   type NetworkInfo,
   type OffchainTokenData,
+  type WithLogger,
   ChainFamily,
 } from '../types.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
@@ -33,16 +34,12 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   static readonly family = ChainFamily.Sui
   static readonly decimals = 8
 
-  readonly network: NetworkInfo<typeof ChainFamily.Sui>
-
   /**
    * Creates a new SuiChain instance.
    * @param network - Sui network configuration.
    */
-  constructor(network: NetworkInfo<typeof ChainFamily.Sui>) {
-    super()
-
-    this.network = network
+  constructor(network: NetworkInfo<typeof ChainFamily.Sui>, ctx?: WithLogger) {
+    super(network, ctx)
   }
 
   /**
@@ -50,7 +47,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @param _url - RPC endpoint URL.
    * @returns A new SuiChain instance.
    */
-  static async fromUrl(_url: string): Promise<SuiChain> {
+  static async fromUrl(_url: string, _ctx?: WithLogger): Promise<SuiChain> {
     return Promise.reject(new Error('Not implemented'))
   }
 

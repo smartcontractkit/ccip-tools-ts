@@ -44,6 +44,7 @@ import {
   type Log_,
   type NetworkInfo,
   type OffchainTokenData,
+  type WithLogger,
   ChainFamily,
 } from '../types.ts'
 import {
@@ -79,8 +80,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   static readonly family = ChainFamily.Aptos
   static readonly decimals = 8
 
-  readonly network: NetworkInfo<typeof ChainFamily.Aptos>
-  readonly provider: Aptos
+  provider: Aptos
 
   getTokenInfo: (token: string) => Promise<TokenInfo>
   _getAccountModulesNames: (address: string) => Promise<string[]>
@@ -90,14 +90,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @param provider - Aptos SDK provider instance.
    * @param network - Network information for this chain.
    */
-  constructor(provider: Aptos, network: NetworkInfo) {
-    if (network.family !== ChainFamily.Aptos) {
-      throw new Error(`Invalid network family: ${network.family}, expected ${ChainFamily.Aptos}`)
-    }
-    super()
+  constructor(provider: Aptos, network: NetworkInfo, ctx?: WithLogger) {
+    super(network, ctx)
 
     this.provider = provider
-    this.network = network
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
       maxSize: 100,
       maxArgs: 1,
@@ -136,42 +132,48 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   /**
    * Creates an AptosChain instance from an existing Aptos provider.
    * @param provider - Aptos SDK provider instance.
+   * @param ctx - context containing logger.
    * @returns A new AptosChain instance.
    */
-  static async fromProvider(provider: Aptos): Promise<AptosChain> {
-    return new AptosChain(provider, networkInfo(`aptos:${await provider.getChainId()}`))
+  static async fromProvider(provider: Aptos, ctx?: WithLogger): Promise<AptosChain> {
+    return new AptosChain(provider, networkInfo(`aptos:${await provider.getChainId()}`), ctx)
   }
 
   /**
    * Creates an AptosChain instance from an Aptos configuration.
    * @param config - Aptos configuration object.
+   * @param ctx - context containing logger.
    * @returns A new AptosChain instance.
    */
-  static async fromAptosConfig(config: AptosConfig): Promise<AptosChain> {
+  static async fromAptosConfig(config: AptosConfig, ctx?: WithLogger): Promise<AptosChain> {
     const provider = new Aptos(config)
-    return this.fromProvider(provider)
+    return this.fromProvider(provider, ctx)
   }
 
   /**
    * Creates an AptosChain instance from a URL or network identifier.
-   * @param url - RPC URL or Aptos Network enum value.
-   * @param network - Optional network specification.
+   * @param url - RPC URL, Aptos Network enum value or [fullNodeUrl, Network] tuple.
+   * @param ctx - context containing logger
    * @returns A new AptosChain instance.
    */
-  static async fromUrl(url: string | Network, network?: Network): Promise<AptosChain> {
-    if (network) {
-      // pass
+  static async fromUrl(
+    url: string | Network | readonly [string, Network],
+    ctx?: WithLogger,
+  ): Promise<AptosChain> {
+    let network: Network
+    if (Array.isArray(url)) {
+      ;[url, network] = url
     } else if (Object.values(Network).includes(url as Network)) network = url as Network
     else if (url.includes('mainnet')) network = Network.MAINNET
     else if (url.includes('testnet')) network = Network.TESTNET
     else if (url.includes('local')) network = Network.LOCAL
-    else throw new Error(`Unknown Aptos network: ${url}`)
+    else throw new Error(`Unknown Aptos network: ${util.inspect(url)}`)
     const config: AptosConfig = new AptosConfig({
       network,
-      fullnode: url.includes('://') ? url : undefined,
+      fullnode: typeof url === 'string' && url.includes('://') ? url : undefined,
       // indexer: url.includes('://') ? `${url}/v1/graphql` : undefined,
     })
-    return this.fromAptosConfig(config)
+    return this.fromAptosConfig(config, ctx)
   }
 
   /** {@inheritDoc Chain.getBlockTimestamp} */

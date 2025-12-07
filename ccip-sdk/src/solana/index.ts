@@ -54,6 +54,7 @@ import {
   type MergeArrayElements,
   type NetworkInfo,
   type OffchainTokenData,
+  type WithLogger,
   CCIPVersion,
   ChainFamily,
   ExecutionState,
@@ -144,9 +145,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   static readonly family = ChainFamily.Solana
   static readonly decimals = 9
 
-  readonly network: NetworkInfo<typeof ChainFamily.Solana>
-  readonly connection: Connection
-  readonly commitment: Commitment = 'confirmed'
+  connection: Connection
+  commitment: Commitment = 'confirmed'
 
   _getSignaturesForAddress: (
     programId: string,
@@ -158,13 +158,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @param connection - Solana connection instance.
    * @param network - Network information for this chain.
    */
-  constructor(connection: Connection, network: NetworkInfo) {
-    super()
+  constructor(connection: Connection, network: NetworkInfo, ctx?: WithLogger) {
+    super(network, ctx)
 
-    if (network.family !== ChainFamily.Solana) {
-      throw new Error(`Invalid network family for SolanaChain: ${network.family}`)
-    }
-    this.network = network
     this.connection = connection
 
     // Memoize expensive operations
@@ -218,9 +214,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   /**
    * Creates a Solana connection from a URL.
    * @param url - RPC endpoint URL (https://, http://, wss://, or ws://).
+   * @param ctx - context containing logger.
    * @returns Solana Connection instance.
    */
-  static _getConnection(url: string): Connection {
+  static _getConnection(url: string, ctx?: WithLogger): Connection {
+    const { logger = console } = ctx ?? {}
     if (!url.startsWith('http') && !url.startsWith('ws')) {
       throw new Error(
         `Invalid Solana RPC URL format (should be https://, http://, wss://, or ws://): ${url}`,
@@ -229,8 +227,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     const config: ConnectionConfig = { commitment: 'confirmed' }
     if (url.includes('.solana.com')) {
-      config.fetch = createRateLimitedFetch() // public nodes
-      console.warn('Using rate-limited fetch for public solana nodes, commands may be slow')
+      config.fetch = createRateLimitedFetch(undefined, ctx) // public nodes
+      logger.warn('Using rate-limited fetch for public solana nodes, commands may be slow')
     }
 
     return new Connection(url, config)
@@ -239,21 +237,23 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   /**
    * Creates a SolanaChain instance from an existing connection.
    * @param connection - Solana Connection instance.
+   * @param ctx - context containing logger.
    * @returns A new SolanaChain instance.
    */
-  static async fromConnection(connection: Connection): Promise<SolanaChain> {
+  static async fromConnection(connection: Connection, ctx?: WithLogger): Promise<SolanaChain> {
     // Get genesis hash to use as chainId
-    return new SolanaChain(connection, networkInfo(await connection.getGenesisHash()))
+    return new SolanaChain(connection, networkInfo(await connection.getGenesisHash()), ctx)
   }
 
   /**
    * Creates a SolanaChain instance from an RPC URL.
    * @param url - RPC endpoint URL.
+   * @param ctx - context containing logger.
    * @returns A new SolanaChain instance.
    */
-  static async fromUrl(url: string): Promise<SolanaChain> {
-    const connection = this._getConnection(url)
-    return this.fromConnection(connection)
+  static async fromUrl(url: string, ctx?: WithLogger): Promise<SolanaChain> {
+    const connection = this._getConnection(url, ctx)
+    return this.fromConnection(connection, ctx)
   }
 
   // cached
@@ -491,7 +491,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const program = new Program(
       CCIP_OFFRAMP_IDL, // `typeVersion` schema should be the same
       new PublicKey(address),
-      simulationProvider(this.connection),
+      simulationProvider(this),
     )
 
     // Create the typeVersion instruction
@@ -636,7 +636,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           }
         } catch (error) {
           // Metaplex metadata fetch failed, keep the default values
-          console.debug(`Failed to fetch Metaplex metadata for token ${token}:`, error)
+          this.logger.debug(`Failed to fetch Metaplex metadata for token ${token}:`, error)
         }
       }
 
@@ -712,7 +712,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
       return name || symbol ? { name, symbol } : null
     } catch (error) {
-      console.debug('Error fetching token metadata:', error)
+      this.logger.debug('Error fetching token metadata:', error)
       return null
     }
   }
@@ -1013,8 +1013,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @param lane - Lane configuration.
    * @returns Leaf hasher function.
    */
-  static getDestLeafHasher(lane: Lane): LeafHasher<typeof CCIPVersion.V1_6> {
-    return getV16SolanaLeafHasher(lane)
+  static getDestLeafHasher(lane: Lane, ctx: WithLogger): LeafHasher<typeof CCIPVersion.V1_6> {
+    return getV16SolanaLeafHasher(lane, ctx)
   }
 
   /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
@@ -1027,7 +1027,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /** {@inheritDoc Chain.getFee} */
   getFee(router: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint> {
-    return getFee(this.connection, router, destChainSelector, message)
+    return getFee(this, router, destChainSelector, message)
   }
 
   /**
@@ -1051,7 +1051,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   ): Promise<UnsignedTx> {
     if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
     return generateUnsignedCcipSend(
-      this.connection,
+      this,
       new PublicKey(sender),
       new PublicKey(router),
       destChainSelector,
@@ -1077,13 +1077,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       opts,
     )
 
-    const hash = await simulateAndSendTxs(this.connection, wallet, unsigned)
+    const hash = await simulateAndSendTxs(this, wallet, unsigned)
     return (await this.fetchRequestsInTx(await this.getTransaction(hash)))[0]
   }
 
   /** {@inheritDoc Chain.fetchOffchainTokenData} */
   async fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
-    return fetchSolanaOffchainTokenData(this.connection, request)
+    return fetchSolanaOffchainTokenData(request, this)
   }
 
   /**
@@ -1110,13 +1110,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       throw new Error("ExecutionReport's message not for Solana")
     const execReport = execReport_ as ExecutionReport<CCIPMessage_V1_6_Solana>
     const offRamp_ = new PublicKey(offRamp)
-    return generateUnsignedExecuteReport(
-      this.connection,
-      new PublicKey(payer),
-      offRamp_,
-      execReport,
-      opts,
-    )
+    return generateUnsignedExecuteReport(this, new PublicKey(payer), offRamp_, execReport, opts)
   }
 
   /** {@inheritDoc Chain.executeReport} */
@@ -1143,7 +1137,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           execReport,
           opts,
         )
-        hash = await simulateAndSendTxs(this.connection, wallet, unsigned, opts?.gasLimit)
+        hash = await simulateAndSendTxs(this, wallet, unsigned, opts?.gasLimit)
       } catch (err) {
         if (
           !(err instanceof Error) ||
@@ -1162,7 +1156,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     try {
       await this.cleanUpBuffers(opts)
     } catch (err) {
-      console.warn('Error while trying to clean up buffers:', err)
+      this.logger.warn('Error while trying to clean up buffers:', err)
     }
     return this.getTransaction(hash)
   }
@@ -1178,7 +1172,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async cleanUpBuffers(opts: { wallet: unknown; waitDeactivation?: boolean }): Promise<void> {
     const wallet = opts.wallet
     if (!isWallet(wallet)) throw new Error(`Expected Wallet, got=${util.inspect(wallet)}`)
-    await cleanUpBuffers(this.connection, wallet, this.getLogs.bind(this), opts)
+    await cleanUpBuffers(this, wallet, this.getLogs.bind(this), opts)
   }
 
   /**
@@ -1536,7 +1530,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           outboundRateLimiterState,
         }
       } catch (err) {
-        console.warn('Failed to decode ChainConfig account:', err)
+        this.logger.warn('Failed to decode ChainConfig account:', err)
       }
     }
 

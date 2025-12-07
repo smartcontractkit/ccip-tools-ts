@@ -1,9 +1,9 @@
 import { type BN, BorshCoder } from '@coral-xyz/anchor'
-import type { Connection, PublicKey } from '@solana/web3.js'
+import type { PublicKey } from '@solana/web3.js'
 import { hexlify } from 'ethers'
 
 import { getUsdcAttestation } from '../offchain.ts'
-import type { CCIPMessage, CCIPRequest, OffchainTokenData } from '../types.ts'
+import type { CCIPMessage, CCIPRequest, OffchainTokenData, WithLogger } from '../types.ts'
 import { networkInfo, util } from '../utils.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
@@ -36,17 +36,17 @@ const cctpTokenPoolCoder = new BorshCoder({
 /**
  * Analyzes a Solana transaction to extract CcipCctpMessageSentEvent, fetch Circle attestation,
  * and encode the data in the format required by the destination chain.
- * @param connection - Solana connection instance.
  * @param request - CCIP request containing transaction data and chain routing info.
+ * @param logger - Logger instance for logging messages.
  * @returns Array of encoded offchain token data (only one supported for Solana right now).
  * @throws Error if transaction hash is missing or CcipCctpMessageSentEvent parsing fails.
  */
 export async function fetchSolanaOffchainTokenData(
-  connection: Connection,
   request: Pick<CCIPRequest, 'tx' | 'lane'> & {
     message: CCIPMessage
     log: Pick<CCIPRequest['log'], 'topics' | 'index' | 'transactionHash' | 'address'>
   },
+  { logger = console }: WithLogger = {},
 ): Promise<OffchainTokenData[]> {
   if (request.message.tokenAmounts === undefined || request.message.tokenAmounts.length === 0) {
     return []
@@ -82,7 +82,7 @@ export async function fetchSolanaOffchainTokenData(
 
   // If no CcipCctpMessageSentEvent found, return defaults so we don't block execution
   if (cctpEvents.length === 0) {
-    console.debug('No USDC/CCTP events found')
+    logger.debug('No USDC/CCTP events found')
     return offchainTokenData
   }
 
@@ -104,15 +104,11 @@ export async function fetchSolanaOffchainTokenData(
 
       offchainTokenData[0] = { _tag: 'usdc', message, attestation }
     } catch (error) {
-      console.warn(
-        `❌ Solana CCTP: Failed to fetch attestation for ${txSignature}:`,
-        message,
-        error,
-      )
+      logger.warn(`❌ Solana CCTP: Failed to fetch attestation for ${txSignature}:`, message, error)
     }
   }
 
-  console.debug('Got Solana offchain token data', offchainTokenData)
+  logger.debug('Got Solana offchain token data', offchainTokenData)
 
   return offchainTokenData
 }

@@ -3,7 +3,7 @@ import type { ReadonlyDeep } from 'type-fest'
 
 import { decodeExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
-import type { CCIPMessage, CCIPVersion } from '../types.ts'
+import type { CCIPMessage, CCIPVersion, WithLogger } from '../types.ts'
 import { getAddressBytes, getDataBytes, networkInfo } from '../utils.ts'
 import { defaultAbiCoder } from './const.ts'
 
@@ -99,6 +99,7 @@ export function getV16LeafHasher(
   sourceChainSelector: bigint,
   destChainSelector: bigint,
   onRamp: string,
+  { logger = console }: WithLogger = {},
 ): LeafHasher<typeof CCIPVersion.V1_6> {
   const metadataInput = concat([
     ANY_2_EVM_MESSAGE_HASH,
@@ -108,7 +109,7 @@ export function getV16LeafHasher(
   ])
 
   return (message: ReadonlyDeep<CCIPMessage<typeof CCIPVersion.V1_6>>): string => {
-    console.debug('Message', message)
+    logger.debug('Message', message)
     const parsedArgs = decodeExtraArgs(
       message.extraArgs,
       networkInfo(message.header.sourceChainSelector).family,
@@ -168,7 +169,7 @@ export function getV16LeafHasher(
       ],
     )
 
-    console.debug('v1.6 leafHasher:', {
+    logger.debug('v1.6 leafHasher:', {
       messageId: message.header.messageId,
       encodedTokens,
       fixedSizeValues,

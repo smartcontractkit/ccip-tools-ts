@@ -13,8 +13,33 @@ import {
 import { loadAptosWallet } from './aptos.ts'
 import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
+import type { Ctx } from '../commands/index.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
+
+const signalToPromiseMap = new WeakMap<AbortSignal, Promise<void>>()
+function signalToPromise(signal: AbortSignal) {
+  let promise = signalToPromiseMap.get(signal)
+  if (!promise) {
+    signalToPromiseMap.set(
+      signal,
+      (promise = new Promise((_, reject) => {
+        signal.throwIfAborted()
+        signal.addEventListener(
+          'abort',
+          () =>
+            reject(
+              signal.reason instanceof Error
+                ? signal.reason
+                : new Error(`Aborted: ${signal.reason as string}`),
+            ),
+          { once: true },
+        )
+      })),
+    )
+  }
+  return promise
+}
 
 async function collectEndpoints({
   rpcs,
@@ -42,29 +67,29 @@ async function collectEndpoints({
 }
 
 export function fetchChainsFromRpcs(
+  ctx: Ctx,
   argv: { rpcs?: string[]; 'rpcs-file'?: string },
-  txHash?: undefined,
-  destroy?: Promise<unknown>,
 ): ChainGetter
 export function fetchChainsFromRpcs(
+  ctx: Ctx,
   argv: { rpcs?: string[]; 'rpcs-file'?: string },
   txHash: string,
-  destroy?: Promise<unknown>,
 ): [ChainGetter, Promise<[Chain, ChainTransaction]>]
 
 /**
  * Receives a list of rpcs and/or rpcs file, and loads them all concurrently
  * Returns a ChainGetter function and optinoally a ChainTransaction promise
+ * @param ctx - Context object containing destroy$ promise and logger properties
  * @param argv - Options containing rpcs (list) and/or rpcs file
  * @param txHash - Optional txHash to fetch concurrently; causes the function to return a [ChainGetter, Promise<ChainTransaction>]
- * @param destroy - A promise to signal when to stop fetching chains
  * @returns a ChainGetter (alone if no txHash was provided), or a tuple of [ChainGetter, Promise<ChainTransaction>]
  */
 export function fetchChainsFromRpcs(
+  ctx: Ctx,
   argv: { rpcs?: string[]; 'rpcs-file'?: string },
   txHash?: string,
-  destroy?: Promise<unknown>,
 ) {
+  const { destroy$ } = ctx
   const chains: Record<string, Promise<Chain>> = {}
   const chainsCbs: Record<
     string,
@@ -78,7 +103,7 @@ export function fetchChainsFromRpcs(
     let txFound = false
     for (const C of Object.values(supportedChains)) {
       for (const url of endpoints) {
-        const chain$ = C.fromUrl(url)
+        const chain$ = C.fromUrl(url, ctx)
         if (txHash) {
           const tx$ = chain$.then((chain) =>
             chain.getTransaction(txHash).then<[Chain, ChainTransaction]>((tx) => [chain, tx]),
@@ -100,7 +125,7 @@ export function fetchChainsFromRpcs(
           chain$.then((chain) => {
             if (chain.network.name in chains && !(chain.network.name in chainsCbs))
               return chain.destroy?.() // lost race
-            void destroy?.finally(() => {
+            destroy$.addEventListener('abort', () => {
               void chain.destroy?.() // cleanup
             })
             if (!(chain.network.name in chains)) {
@@ -114,7 +139,7 @@ export function fetchChainsFromRpcs(
       }
     }
     const res = Promise.allSettled(pendingPromises)
-    void (destroy ? Promise.race([res, destroy]) : res).finally(() => {
+    void (destroy$ ? Promise.race([res, signalToPromise(destroy$)]) : res).finally(() => {
       finished = true
       Object.entries(chainsCbs).forEach(([name, [_, reject]]) =>
         reject(new Error(`No provider/chain found for network=${name}`)),

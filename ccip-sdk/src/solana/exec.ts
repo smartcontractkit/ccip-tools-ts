@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer'
 
-import { type AnchorProvider, type IdlTypes, Program } from '@coral-xyz/anchor'
+import { type IdlTypes, Program } from '@coral-xyz/anchor'
 import {
   type AccountMeta,
   type Connection,
@@ -13,12 +13,12 @@ import {
 import BN from 'bn.js'
 import { hexlify } from 'ethers'
 
-import type { ExecutionReport } from '../types.ts'
+import type { ExecutionReport, WithLogger } from '../types.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
 import type { CCIPMessage_V1_6_Solana, UnsignedTx } from './types.ts'
 import { getDataBytes, toLeArray } from '../utils.ts'
-import { bytesToBuffer, simulationProvider } from './utils.ts'
+import { bytesToBuffer } from './utils.ts'
 
 type ExecAlt = {
   initialIxs: TransactionInstruction[]
@@ -28,7 +28,7 @@ type ExecAlt = {
 
 /**
  * Generate unsigned tx to execute a CCIP report on Solana.
- * @param connection - Connection to the Solana network.
+ * @param ctx - Context containing connection and logger
  * @param payer - Payer of the transaction.
  * @param offramp - Address of the OffRamp contract.
  * @param execReport - Execution report.
@@ -39,13 +39,14 @@ type ExecAlt = {
  * @returns Transaction hash of the execution.
  */
 export async function generateUnsignedExecuteReport(
-  connection: Connection,
+  ctx: { connection: Connection } & WithLogger,
   payer: PublicKey,
   offramp: PublicKey,
   execReport: ExecutionReport<CCIPMessage_V1_6_Solana>,
   opts?: { forceLookupTable?: boolean; forceBuffer?: boolean; clearLeftoverAccounts?: boolean },
 ): Promise<UnsignedTx> {
-  const program = new Program(CCIP_OFFRAMP_IDL, offramp, { connection })
+  const { connection, logger = console } = ctx
+  const program = new Program(CCIP_OFFRAMP_IDL, offramp, ctx)
 
   let bufferId
   if (opts?.forceBuffer) {
@@ -59,10 +60,11 @@ export async function generateUnsignedExecuteReport(
     accounts,
     addressLookupTables,
   } = await getManuallyExecuteInputs({
+    payer,
+    offramp: program,
     execReport,
-    offrampProgram: program,
-    transmitter: payer.toBase58(),
     bufferId,
+    logger,
   })
 
   const addressLookupTableAccounts = await Promise.all(
@@ -82,7 +84,7 @@ export async function generateUnsignedExecuteReport(
   let alt
   if (opts?.forceLookupTable) {
     alt = await buildLookupTableIxs(
-      connection,
+      ctx,
       payer,
       accounts.map((acc) => acc.pubkey),
     )
@@ -91,8 +93,12 @@ export async function generateUnsignedExecuteReport(
 
   const instructions: TransactionInstruction[] = []
   if (bufferId) {
-    console.log(`Execute report will be pre-buffered through the offramp. This may take some time.`)
-    instructions.push(...(await bufferedTransactionData(program, serializedReport, bufferId, opts)))
+    logger.info(`Execute report will be pre-buffered through the offramp. This may take some time.`)
+    const bufferingIxs = await bufferedTransactionData(payer, program, serializedReport, bufferId, {
+      logger,
+      ...opts,
+    })
+    instructions.push(...bufferingIxs)
     serializedReport = Buffer.from([]) // clear 1st param to manuallyExecute method if buffered
   }
 
@@ -134,7 +140,7 @@ export async function generateUnsignedExecuteReport(
 }
 
 async function buildLookupTableIxs(
-  connection: Connection,
+  { connection, logger = console }: { connection: Connection } & WithLogger,
   authority: PublicKey,
   addresses: PublicKey[],
 ): Promise<ExecAlt> {
@@ -145,7 +151,7 @@ async function buildLookupTableIxs(
     payer: authority,
     recentSlot,
   })
-  console.log('Using Address Lookup Table', altAddr.toBase58())
+  logger.info('Using Address Lookup Table', altAddr.toBase58())
 
   if (addresses.length > 256) {
     throw new Error(
@@ -201,24 +207,23 @@ async function buildLookupTableIxs(
 }
 
 async function bufferedTransactionData(
-  offrampProgram: Program<typeof CCIP_OFFRAMP_IDL>,
+  payer: PublicKey,
+  offramp: Program<typeof CCIP_OFFRAMP_IDL>,
   serializedReport: Buffer,
   bufferId: Buffer,
-  opts?: { clearLeftoverAccounts?: boolean },
+  {
+    logger = console,
+    clearLeftoverAccounts,
+  }: { clearLeftoverAccounts?: boolean } & WithLogger = {},
 ): Promise<TransactionInstruction[]> {
-  const provider = offrampProgram.provider as AnchorProvider
-
   const [bufferAddress] = PublicKey.findProgramAddressSync(
-    [Buffer.from('execution_report_buffer'), bufferId, provider.wallet.publicKey.toBuffer()],
-    offrampProgram.programId,
+    [Buffer.from('execution_report_buffer'), bufferId, payer.toBuffer()],
+    offramp.programId,
   )
 
-  const [configPDA] = PublicKey.findProgramAddressSync(
-    [Buffer.from('config')],
-    offrampProgram.programId,
-  )
+  const [configPDA] = PublicKey.findProgramAddressSync([Buffer.from('config')], offramp.programId)
 
-  console.log(
+  logger.info(
     `The bufferID is ${hexlify(bufferId)}, and the PDA address for the buffer is ${bufferAddress.toString()}\nIf this buffering process is aborted, remember to cleanUp the account to recover locked rent.`,
   )
 
@@ -228,13 +233,13 @@ async function bufferedTransactionData(
   const bufferingAccounts = {
     executionReportBuffer: bufferAddress,
     config: configPDA,
-    authority: provider.wallet.publicKey,
+    authority: payer,
     systemProgram: SystemProgram.programId,
   }
 
-  if (opts?.clearLeftoverAccounts) {
+  if (clearLeftoverAccounts) {
     bufferedExecIxs.push(
-      await offrampProgram.methods
+      await offramp.methods
         .closeExecutionReportBuffer(bufferId)
         .accounts(bufferingAccounts)
         .instruction(),
@@ -247,7 +252,7 @@ async function bufferedTransactionData(
     const chunk: Buffer = serializedReport.subarray(i, end)
 
     bufferedExecIxs.push(
-      await offrampProgram.methods
+      await offramp.methods
         .bufferExecutionReport(bufferId, serializedReport.length, chunk, i / chunkSize, numChunks)
         .accounts(bufferingAccounts)
         .instruction(),
@@ -258,16 +263,17 @@ async function bufferedTransactionData(
 }
 
 async function getManuallyExecuteInputs({
+  payer,
+  offramp,
   execReport,
-  offrampProgram,
-  transmitter,
   bufferId,
+  ...ctx
 }: {
+  payer: PublicKey
+  offramp: Program<typeof CCIP_OFFRAMP_IDL>
   execReport: ExecutionReport<CCIPMessage_V1_6_Solana>
-  offrampProgram: Program<typeof CCIP_OFFRAMP_IDL>
-  transmitter: string
   bufferId?: Buffer
-}) {
+} & WithLogger) {
   const executionReport = prepareExecutionReport(execReport)
 
   const messageAccountMetas = execReport.message.accounts.map((acc, index) => {
@@ -287,8 +293,6 @@ async function getManuallyExecuteInputs({
     isSigner: false,
     isWritable: false,
   }
-
-  console.debug('Message receiver:', execReport.message.receiver)
 
   // Prepend receiver to messaging accounts
   const messagingAccounts: AccountMeta[] =
@@ -315,15 +319,16 @@ async function getManuallyExecuteInputs({
     addressLookupTableAccounts: addressLookupTables,
     tokenIndexes,
   } = await autoDeriveExecutionAccounts({
-    offrampProgram,
+    offramp,
     originalSender: bytesToBuffer(execReport.message.sender),
-    transmitter: new PublicKey(transmitter),
+    payer,
     messagingAccounts,
     sourceChainSelector: execReport.message.header.sourceChainSelector,
     tokenTransferAndOffchainData,
     merkleRoot: bytesToBuffer(execReport.merkleRoot),
     bufferId,
     tokenReceiver: new PublicKey(execReport.message.tokenReceiver),
+    ...ctx,
   })
 
   return {
@@ -376,19 +381,20 @@ function prepareExecutionReport({
 }
 
 async function autoDeriveExecutionAccounts({
-  offrampProgram,
+  offramp,
   originalSender,
-  transmitter,
+  payer,
   messagingAccounts,
   sourceChainSelector,
   tokenTransferAndOffchainData,
   merkleRoot,
   tokenReceiver,
   bufferId,
+  logger = console,
 }: {
-  offrampProgram: Program<typeof CCIP_OFFRAMP_IDL>
+  offramp: Program<typeof CCIP_OFFRAMP_IDL>
   originalSender: Buffer
-  transmitter: PublicKey
+  payer: PublicKey
   messagingAccounts: IdlTypes<typeof CCIP_OFFRAMP_IDL>['CcipAccountMeta'][]
   sourceChainSelector: bigint
   tokenTransferAndOffchainData: Array<
@@ -397,7 +403,7 @@ async function autoDeriveExecutionAccounts({
   merkleRoot: Buffer
   tokenReceiver: PublicKey
   bufferId?: Buffer
-}) {
+} & WithLogger) {
   const derivedAccounts: AccountMeta[] = []
   const lookupTables: PublicKey[] = []
   const tokenIndices: number[] = []
@@ -405,14 +411,11 @@ async function autoDeriveExecutionAccounts({
   let stage = 'Start'
   let tokenIndex = 0
 
-  const [configPDA] = PublicKey.findProgramAddressSync(
-    [Buffer.from('config')],
-    offrampProgram.programId,
-  )
+  const [configPDA] = PublicKey.findProgramAddressSync([Buffer.from('config')], offramp.programId)
 
   while (true) {
     const params: IdlTypes<typeof CCIP_OFFRAMP_IDL>['DeriveAccountsExecuteParams'] = {
-      executeCaller: transmitter,
+      executeCaller: payer,
       messageAccounts: messagingAccounts,
       sourceChainSelector: new BN(sourceChainSelector.toString()),
       originalSender: originalSender,
@@ -432,14 +435,8 @@ async function autoDeriveExecutionAccounts({
       }))
     }
 
-    // copy of Program which avoids signing every simulation
-    const readOnlyProgram = new Program(
-      offrampProgram.idl,
-      offrampProgram.programId,
-      simulationProvider(offrampProgram.provider.connection, transmitter),
-    )
     // Execute as a view call to get the response
-    const response = (await readOnlyProgram.methods
+    const response = (await offramp.methods
       .deriveAccountsExecute(params, stage)
       .accounts({
         config: configPDA,
@@ -447,8 +444,8 @@ async function autoDeriveExecutionAccounts({
       .remainingAccounts(askWith)
       .view()
       .catch((error: unknown) => {
-        console.error('Error deriving accounts:', error)
-        console.error('Params:', params)
+        logger.error('Error deriving accounts:', error)
+        logger.error('Params:', params)
         throw error as Error
       })) as IdlTypes<typeof CCIP_OFFRAMP_IDL>['DeriveAccountsResponse']
 
@@ -462,7 +459,7 @@ async function autoDeriveExecutionAccounts({
     // Update token index
     tokenIndex += response.accountsToSave.length
 
-    console.debug('After stage', stage, 'tokenIndices', tokenIndices, 'nextTokenIndex', tokenIndex)
+    logger.debug('After stage', stage, 'tokenIndices', tokenIndices, 'nextTokenIndex', tokenIndex)
 
     // Collect the derived accounts
     for (const meta of response.accountsToSave) {
@@ -491,9 +488,9 @@ async function autoDeriveExecutionAccounts({
     stage = response.nextStage
   }
 
-  console.debug('Resulting derived accounts:', derivedAccounts)
-  console.debug('Resulting derived address lookup tables:', lookupTables)
-  console.debug('Resulting derived token indexes:', tokenIndices)
+  logger.debug('Resulting derived accounts:', derivedAccounts)
+  logger.debug('Resulting derived address lookup tables:', lookupTables)
+  logger.debug('Resulting derived token indexes:', tokenIndices)
 
   return {
     accounts: derivedAccounts,

@@ -2,8 +2,8 @@ import { bigIntReplacer, supportedChains } from '@chainlink/ccip-sdk/src/index.t
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
-import { Format } from './types.ts'
-import { prettyTable } from './utils.ts'
+import { type Ctx, Format } from './types.ts'
+import { getCtx, prettyTable } from './utils.ts'
 
 export const command = ['parse <data>', 'parseBytes <data>', 'parseData <data>']
 export const describe =
@@ -26,15 +26,17 @@ export const builder = (yargs: Argv) =>
  * @param argv - Command line arguments.
  */
 export function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
+  const [, ctx] = getCtx(argv)
   try {
-    parseBytes(argv)
+    parseBytes(ctx, argv)
   } catch (err) {
     process.exitCode = 1
-    console.error(err)
+    ctx.logger.error(err)
   }
 }
 
-function parseBytes(argv: Parameters<typeof handler>[0]) {
+function parseBytes(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
+  const { logger } = ctx
   let parsed
   for (const chain of Object.values(supportedChains)) {
     try {
@@ -48,14 +50,14 @@ function parseBytes(argv: Parameters<typeof handler>[0]) {
 
   switch (argv.format) {
     case Format.log: {
-      console.log(`parsed =`, parsed)
+      logger.log(`parsed =`, parsed)
       break
     }
     case Format.pretty:
-      prettyTable(parsed)
+      prettyTable.call(ctx, parsed)
       break
     case Format.json:
-      console.info(JSON.stringify(parsed, bigIntReplacer, 2))
+      logger.info(JSON.stringify(parsed, bigIntReplacer, 2))
       break
   }
 }

@@ -20,7 +20,6 @@ import {
   type ExecutionState,
   type Lane,
   type Log_,
-  type NetworkInfo,
   CCIPVersion,
   ChainFamily,
 } from './types.ts'
@@ -28,7 +27,7 @@ import { networkInfo } from './utils.ts'
 
 // Mock Chain class for testing
 class MockChain extends Chain {
-  network: NetworkInfo
+  static family = ChainFamily.EVM
   private mockTypeAndVersion: string
   private mockLogs: Log_[] = []
   private mockBlockTimestamp = 1700000000
@@ -36,20 +35,8 @@ class MockChain extends Chain {
   private mockOffRampsForRouter: Map<string, string[]> = new Map()
   private mockOnRampForOffRamp: Map<string, string> = new Map()
 
-  constructor(
-    chainSelector: bigint,
-    name: string,
-    chainId: number,
-    typeAndVersion: string = 'EVM2EVMOffRamp 1.5.0',
-  ) {
-    super()
-    this.network = {
-      chainSelector,
-      name,
-      chainId,
-      family: ChainFamily.EVM,
-      isTestnet: true,
-    }
+  constructor(chainId: number, typeAndVersion: string = 'EVM2EVMOffRamp 1.5.0') {
+    super(networkInfo(chainId))
     this.mockTypeAndVersion = typeAndVersion
   }
 
@@ -327,7 +314,13 @@ describe('calculateManualExecProof', () => {
     const merkleRoot = '0x9c66d4cfcba6e359f42f096ff16192e16967cea456503c02e738c5646d06cab4'
     const messageId = messages[0].header.messageId
 
-    const result = calculateManualExecProof(messages, lane, messageId, merkleRoot)
+    const result = calculateManualExecProof(
+      { logger: console },
+      messages,
+      lane,
+      messageId,
+      merkleRoot,
+    )
 
     assert.ok(result.proofs)
     assert.ok(result.proofFlagBits !== undefined)
@@ -339,7 +332,7 @@ describe('calculateManualExecProof', () => {
     const messageId = messages[0].header.messageId
     const batch = [messages[0]]
 
-    const result = calculateManualExecProof(batch, lane, messageId)
+    const result = calculateManualExecProof({ logger: console }, batch, lane, messageId)
 
     assert.ok(result.proofs)
     assert.equal(result.proofs.length, 0)
@@ -350,7 +343,7 @@ describe('calculateManualExecProof', () => {
     const missingMessageId = '0x9999999999999999999999999999999999999999999999999999999999999999'
 
     assert.throws(
-      () => calculateManualExecProof(messages, lane, missingMessageId),
+      () => calculateManualExecProof({ logger: console }, messages, lane, missingMessageId),
       /Could not find.*in batch/,
     )
   })
@@ -360,7 +353,8 @@ describe('calculateManualExecProof', () => {
     const wrongMerkleRoot = '0x0000000000000000000000000000000000000000000000000000000000000001'
 
     assert.throws(
-      () => calculateManualExecProof(messages, lane, messageId, wrongMerkleRoot),
+      () =>
+        calculateManualExecProof({ logger: console }, messages, lane, messageId, wrongMerkleRoot),
       /Merkle root.*doesn't match/,
     )
   })
@@ -397,7 +391,13 @@ describe('calculateManualExecProof', () => {
     }
 
     const messageId = messages1_6[0].header.messageId
-    const result = calculateManualExecProof(messages1_6, lane1_6, messageId, merkleRoot1_6)
+    const result = calculateManualExecProof(
+      { logger: console },
+      messages1_6,
+      lane1_6,
+      messageId,
+      merkleRoot1_6,
+    )
 
     assert.equal(result.proofs.length, 0)
     assert.equal(result.proofFlagBits, 0n)
@@ -418,7 +418,7 @@ describe('calculateManualExecProof', () => {
     }
 
     const messageId = message.header.messageId
-    const result = calculateManualExecProof([message], lane, messageId)
+    const result = calculateManualExecProof({ logger: console }, [message], lane, messageId)
     assert.ok(result.merkleRoot)
     assert.equal(
       result.merkleRoot,
@@ -429,12 +429,8 @@ describe('calculateManualExecProof', () => {
 
 describe('discoverOffRamp', () => {
   it('should discover offRamp correctly', async () => {
-    const sourceChain = new MockChain(
-      networkInfo(11155111).chainSelector,
-      'Ethereum Sepolia',
-      11155111,
-    )
-    const destChain = new MockChain(networkInfo(421614).chainSelector, 'Arbitrum Sepolia', 421614)
+    const sourceChain = new MockChain(11155111)
+    const destChain = new MockChain(421614)
     const onRamp = '0xOnRamp'
 
     // Setup mocks for the discovery flow
@@ -452,12 +448,8 @@ describe('discoverOffRamp', () => {
   })
 
   it('should throw an error if no offRamp is found', async () => {
-    const sourceChain = new MockChain(
-      networkInfo(11155111).chainSelector,
-      'Ethereum Sepolia',
-      11155111,
-    )
-    const destChain = new MockChain(networkInfo(421614).chainSelector, 'Arbitrum Sepolia', 421614)
+    const sourceChain = new MockChain(11155111)
+    const destChain = new MockChain(421614)
     const onRamp = '0x1111111111111111111111111111111111111111'
 
     // Setup mocks - the loop will find destOffRamp but onRamp won't match

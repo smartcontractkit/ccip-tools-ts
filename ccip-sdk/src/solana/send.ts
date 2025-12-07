@@ -18,7 +18,7 @@ import BN from 'bn.js'
 import { zeroPadValue } from 'ethers'
 
 import { SolanaChain } from './index.ts'
-import type { AnyMessage } from '../types.ts'
+import type { AnyMessage, WithLogger } from '../types.ts'
 import { toLeArray, util } from '../utils.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import type { UnsignedTx } from './types.ts'
@@ -48,23 +48,20 @@ function anyToSvmMessage(message: AnyMessage): IdlTypes<typeof CCIP_ROUTER_IDL>[
 
 /**
  * Gets the fee for sending a CCIP message on Solana.
- * @param connection - Solana connection instance.
+ * @param ctx - Context object containing the Solana connection and logger.
  * @param router - Router program address.
  * @param destChainSelector - Destination chain selector.
  * @param message - CCIP message to send.
  * @returns Fee amount in native tokens.
  */
 export async function getFee(
-  connection: Connection,
+  ctx: { connection: Connection } & WithLogger,
   router: string,
   destChainSelector: bigint,
   message: AnyMessage,
 ): Promise<bigint> {
-  const program = new Program(
-    CCIP_ROUTER_IDL,
-    new PublicKey(router),
-    simulationProvider(connection),
-  )
+  const { connection, logger = console } = ctx
+  const program = new Program(CCIP_ROUTER_IDL, new PublicKey(router), simulationProvider(ctx))
 
   // Get router config to find feeQuoter
   const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], program.programId)
@@ -92,7 +89,7 @@ export async function getFee(
     message.feeToken !== PublicKey.default.toBase58() &&
     message.feeToken !== linkTokenMint.toBase58()
   ) {
-    console.warn('feeToken is not default nor link =', linkTokenMint.toBase58())
+    logger.warn('feeToken is not default nor link =', linkTokenMint.toBase58())
   }
 
   // Convert feeToken to PublicKey (default to native SOL if not specified)
@@ -249,7 +246,7 @@ async function deriveAccountsCcipSend({
 
 /**
  * Generates unsigned instructions for sending a message with CCIP on Solana
- * @param connection - Solana connection instance.
+ * @param ctx - Context containing connection and logger.
  * @param sender - Wallet to pay transaction fees.
  * @param router - Router program instance.
  * @param destChainSelector - Destination chain selector.
@@ -258,7 +255,7 @@ async function deriveAccountsCcipSend({
  * @returns Solana unsigned txs (instructions and lookup tables)
  */
 export async function generateUnsignedCcipSend(
-  connection: Connection,
+  ctx: { connection: Connection } & WithLogger,
   sender: PublicKey,
   router: PublicKey,
   destChainSelector: bigint,
@@ -272,12 +269,12 @@ export async function generateUnsignedCcipSend(
   if (message.feeToken && message.feeToken !== PublicKey.default.toBase58()) {
     amountsToApprove[message.feeToken] = (amountsToApprove[message.feeToken] ?? 0n) + message.fee
   }
-  const program = new Program(CCIP_ROUTER_IDL, router, simulationProvider(connection, sender))
+  const program = new Program(CCIP_ROUTER_IDL, router, simulationProvider(ctx, sender))
 
   const approveIxs = []
   for (const [token, amount] of Object.entries(amountsToApprove)) {
     const approveIx = await approveRouterSpender(
-      connection,
+      ctx,
       sender,
       new PublicKey(token),
       router,
@@ -326,7 +323,7 @@ export async function generateUnsignedCcipSend(
 }
 
 async function approveRouterSpender(
-  connection: Connection,
+  { connection, logger = console }: { connection: Connection } & WithLogger,
   owner: PublicKey,
   token: PublicKey,
   router: PublicKey,
@@ -367,7 +364,7 @@ async function approveRouterSpender(
     undefined,
     mintInfo.owner,
   )
-  console.info(
+  logger.info(
     'Approving',
     amount ?? BigInt(Number.MAX_SAFE_INTEGER),
     'of',

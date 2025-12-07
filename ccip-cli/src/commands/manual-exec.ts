@@ -13,8 +13,9 @@ import {
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
-import { Format } from './types.ts'
+import { type Ctx, Format } from './types.ts'
 import {
+  getCtx,
   logParsedError,
   prettyCommit,
   prettyReceipt,
@@ -101,63 +102,62 @@ export const builder = (yargs: Argv) =>
  * @param argv - Command line arguments.
  */
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
-  let destroy
-  const destroy$ = new Promise((resolve) => {
-    destroy = resolve
-  })
+  const [controller, ctx] = getCtx(argv)
   // argv.senderQueue
   //   ? manualExecSenderQueue(providers, argv.tx_hash, argv)
   //   : manualExec(argv, destroy$)
-  return manualExec(argv, destroy$)
+  return manualExec(ctx, argv)
     .catch((err) => {
       process.exitCode = 1
-      if (!logParsedError(err)) console.error(err)
+      if (!logParsedError.call(ctx, err)) ctx.logger.error(err)
     })
-    .finally(destroy)
+    .finally(() => controller.abort('Exited'))
 }
 
 async function manualExec(
+  ctx: Ctx,
   argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts,
-  destroy: Promise<unknown>,
 ) {
+  const { logger } = ctx
   // messageId not yet implemented for Solana
-  const [getChain, tx$] = fetchChainsFromRpcs(argv, argv.txHash, destroy)
+  const [getChain, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHash)
   const [source, tx] = await tx$
   const request = await selectRequest(await source.fetchRequestsInTx(tx), 'to know more', argv)
 
   switch (argv.format) {
     case Format.log: {
       const logPrefix = 'log' in request ? `message ${request.log.index} = ` : 'message = '
-      console.log(logPrefix, withDateTimestamp(request))
+      logger.log(logPrefix, withDateTimestamp(request))
       break
     }
     case Format.pretty:
-      await prettyRequest(source, request)
+      await prettyRequest.call(ctx, source, request)
       break
     case Format.json:
-      console.info(JSON.stringify(request, bigIntReplacer, 2))
+      logger.info(JSON.stringify(request, bigIntReplacer, 2))
       break
   }
 
   const dest = await getChain(request.lane.destChainSelector)
-  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
   const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
   const commit = await dest.fetchCommitReport(commitStore, request, argv)
 
   switch (argv.format) {
     case Format.log:
-      console.log('commit =', commit)
+      logger.log('commit =', commit)
       break
     case Format.pretty:
-      await prettyCommit(dest, commit, request)
+      await prettyCommit.call(ctx, dest, commit, request)
       break
     case Format.json:
-      console.info(JSON.stringify(commit, bigIntReplacer, 2))
+      logger.info(JSON.stringify(commit, bigIntReplacer, 2))
       break
   }
 
   const messagesInBatch = await source.fetchAllMessagesInBatch(request, commit.report, argv)
   const execReportProof = calculateManualExecProof(
+    dest,
     messagesInBatch,
     request.lane,
     request.message.header.messageId,
@@ -184,10 +184,10 @@ async function manualExec(
       dest as unknown as EVMChain,
       request as CCIPRequest<typeof CCIPVersion.V1_5 | typeof CCIPVersion.V1_6>,
     )
-    console.info('Estimated gasLimit override:', estimated)
+    logger.info('Estimated gasLimit override:', estimated)
     estimated += Math.ceil((estimated * argv.estimateGasLimit) / 100)
     if (request.message.gasLimit >= estimated) {
-      console.warn(
+      logger.warn(
         'Estimated +',
         argv.estimateGasLimit,
         '% margin =',
@@ -204,7 +204,7 @@ async function manualExec(
   const [, wallet] = await loadChainWallet(dest, argv)
   const manualExecTx = await dest.executeReport(offRamp, execReport, { ...argv, wallet })
 
-  console.log('🚀 manualExec tx =', manualExecTx.hash, 'to offRamp =', offRamp)
+  logger.info('🚀 manualExec tx =', manualExecTx.hash, 'to offRamp =', offRamp)
 
   let found = false
   for (const log of manualExecTx.logs) {
@@ -214,11 +214,12 @@ async function manualExec(
     const receipt = { receipt: execReceipt, log, timestamp }
     switch (argv.format) {
       case Format.log:
-        console.log('receipt =', withDateTimestamp(receipt))
+        logger.log('receipt =', withDateTimestamp(receipt))
         break
       case Format.pretty:
-        if (!found) console.info('Receipts (dest):')
-        prettyReceipt(
+        if (!found) logger.info('Receipts (dest):')
+        prettyReceipt.call(
+          ctx,
           receipt,
           request,
           receipt.log.tx?.from ??
@@ -226,7 +227,7 @@ async function manualExec(
         )
         break
       case Format.json:
-        console.info(JSON.stringify(execReceipt, bigIntReplacer, 2))
+        logger.info(JSON.stringify(execReceipt, bigIntReplacer, 2))
         break
     }
     found = true

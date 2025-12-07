@@ -19,32 +19,20 @@ import {
   type ExecutionState,
   type Lane,
   type Log_,
-  type NetworkInfo,
   CCIPVersion,
   ChainFamily,
 } from './types.ts'
+import { networkInfo } from './utils.ts'
 
 // Mock Chain class for testing
 class MockChain extends Chain {
-  network: NetworkInfo
+  static family = ChainFamily.EVM
   private mockTypeAndVersion: string
   private mockLogs: Log_[] = []
   private mockBlockTimestamp = 1700000000
 
-  constructor(
-    chainSelector: bigint,
-    name: string,
-    chainId: number,
-    typeAndVersion: string = 'EVM2EVMOffRamp 1.5.0',
-  ) {
-    super()
-    this.network = {
-      chainSelector,
-      name,
-      chainId,
-      family: ChainFamily.EVM,
-      isTestnet: true,
-    }
+  constructor(chainId: number, typeAndVersion: string = 'EVM2EVMOffRamp 1.5.0') {
+    super(networkInfo(chainId))
     this.mockTypeAndVersion = typeAndVersion
   }
 
@@ -360,12 +348,7 @@ class MockChain extends Chain {
 
 describe('fetchCommitReport', () => {
   it('should return first matching commit report for v1.2', async () => {
-    const dest = new MockChain(
-      11155111n, // Sepolia
-      'Ethereum Sepolia',
-      11155111,
-      'EVM2EVMOffRamp 1.2.0',
-    )
+    const dest = new MockChain(11155111, 'EVM2EVMOffRamp 1.2.0')
 
     const iface = new Interface(CommitStore_1_2_ABI)
     const encoded = iface.encodeEventLog('ReportAccepted', [
@@ -415,7 +398,7 @@ describe('fetchCommitReport', () => {
   })
 
   it('should throw when no matching commit found in range for v1.2', async () => {
-    const dest = new MockChain(11155111n, 'Ethereum Sepolia', 11155111, 'EVM2EVMOffRamp 1.2.0')
+    const dest = new MockChain(11155111, 'EVM2EVMOffRamp 1.2.0')
 
     const iface = new Interface(CommitStore_1_2_ABI)
 
@@ -466,7 +449,7 @@ describe('fetchCommitReport', () => {
   })
 
   it('should return v1.6 commit report', async () => {
-    const dest = new MockChain(11155111n, 'Ethereum Sepolia', 11155111, 'OffRamp 1.6.0')
+    const dest = new MockChain(11155111, 'OffRamp 1.6.0')
 
     const iface = new Interface(OffRamp_1_6_ABI)
 
@@ -525,7 +508,7 @@ describe('fetchCommitReport', () => {
   })
 
   it('should stop searching when minSeqNr is greater than requested sequenceNumber', async () => {
-    const dest = new MockChain(11155111n, 'Ethereum Sepolia', 11155111, 'OffRamp 1.6.0')
+    const dest = new MockChain(11155111, 'OffRamp 1.6.0')
 
     const iface = new Interface(OffRamp_1_6_ABI)
 
@@ -577,7 +560,7 @@ describe('fetchCommitReport', () => {
   })
 
   it('should skip commits where maxSeqNr is less than requested sequenceNumber', async () => {
-    const dest = new MockChain(11155111n, 'Ethereum Sepolia', 11155111, 'OffRamp 1.6.0')
+    const dest = new MockChain(11155111, 'OffRamp 1.6.0')
 
     const iface = new Interface(OffRamp_1_6_ABI)
 
@@ -657,7 +640,7 @@ describe('fetchCommitReport', () => {
   })
 
   it('should use startTime when startBlock is not provided', async () => {
-    const dest = new MockChain(11155111n, 'Ethereum Sepolia', 11155111, 'OffRamp 1.6.0')
+    const dest = new MockChain(11155111, 'OffRamp 1.6.0')
 
     const iface = new Interface(OffRamp_1_6_ABI)
     const encoded = iface.encodeEventLog('CommitReportAccepted', [
