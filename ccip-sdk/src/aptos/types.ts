@@ -11,7 +11,7 @@ import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import type { ExecutionReport } from '../types.ts'
 import { getAddressBytes } from '../utils.ts'
 
-// Aptos Account is synchronous; this specialisation adds async signTransactionWithAuthenticator
+/** Aptos account type with async transaction signing capability. */
 export type AptosAsyncAccount = {
   publicKey: AccountPublicKey
   accountAddress: AccountAddress
@@ -57,6 +57,11 @@ export const ExecutionReportCodec = bcs.struct('ExecutionReport', {
   proofs: bcs.vector(bcs.fixedArray(32, bcs.u8())),
 })
 
+/**
+ * Serializes an execution report for Aptos using BCS encoding.
+ * @param execReport - Execution report to serialize.
+ * @returns BCS-encoded bytes.
+ */
 export function serializeExecutionReport(
   execReport: ExecutionReport<CCIPMessage_V1_6_EVM>,
 ): Uint8Array {

@@ -24,6 +24,11 @@ import { fetchChainsFromRpcs } from '../providers/index.ts'
 export const command = ['show <tx-hash>', '* <tx-hash>']
 export const describe = 'Show details of a CCIP request'
 
+/**
+ * Yargs builder for the show command.
+ * @param yargs - Yargs instance.
+ * @returns Configured yargs instance with command options.
+ */
 export const builder = (yargs: Argv) =>
   yargs
     .positional('tx-hash', {
@@ -44,6 +49,10 @@ export const builder = (yargs: Argv) =>
       },
     })
 
+/**
+ * Handler for the show command.
+ * @param argv - Command line arguments.
+ */
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
   let destroy
   const destroy$ = new Promise((resolve) => {

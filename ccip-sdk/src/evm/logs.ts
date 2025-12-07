@@ -81,8 +81,7 @@ const archiveRpcs: Record<number, Promise<JsonRpcApiProvider>> = {}
 /**
  * Like provider.getLogs, but from a public list of archive nodes and wide range, races the first to reply
  * @param chainId - The chain ID of the network to query
- * @param address - The address to filter logs by
- * @param topics - The topics to filter logs by
+ * @param filter - Log filter options
  * @param destroy - An optional promise that, when resolved, cancels the requests
  * @returns Array of Logs
  */
@@ -171,16 +170,15 @@ async function getFallbackArchiveLogs(
 }
 
 /**
- * Implements Chain.getLogs for EVM
- * If !(filter.startBlock|startTime), walks backwards from endBlock, otherwise forward from then
- * @param provider - JsonRpcApiProvider
- * @param filter - chain.LogFilter
- * @param filter.onlyFallback - If default=undefined, paginate main provider only by filter.page;
- *   If provided and false, first try whole range with main provider, then fallback to some archive
- *   provider (which may accept wide ranges), then paginate; if true, don't paginate (throw if can't
- *   fetch wide range from either provider)
- * @param destroy - Cancel all requests if this promise resolves
- * @returns async iterator of logs
+ * Implements Chain.getLogs for EVM.
+ * If !(filter.startBlock|startTime), walks backwards from endBlock, otherwise forward from then.
+ * @param provider - JsonRpcApiProvider.
+ * @param filter - Chain LogFilter. The `onlyFallback` option controls pagination behavior:
+ *   - If undefined (default): paginate main provider only by filter.page
+ *   - If false: first try whole range with main provider, then fallback to archive provider
+ *   - If true: don't paginate (throw if can't fetch wide range from either provider)
+ * @param destroy - Cancel all requests if this promise resolves.
+ * @returns Async iterator of logs.
  */
 export async function* getEvmLogs(
   provider: JsonRpcApiProvider,

@@ -138,6 +138,9 @@ function resultsToMessage(result: Result): Record<string, unknown> {
   } as unknown as CCIPMessage
 }
 
+/**
+ * EVM chain implementation supporting Ethereum-compatible networks.
+ */
 export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   static {
     supportedChains[ChainFamily.EVM] = EVMChain
@@ -149,6 +152,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   readonly provider: JsonRpcApiProvider
   readonly destroy$: Promise<void>
 
+  /**
+   * Creates a new EVMChain instance.
+   * @param provider - JSON-RPC provider for the EVM network.
+   * @param network - Network information for this chain.
+   */
   constructor(provider: JsonRpcApiProvider, network: NetworkInfo) {
     if (network.family !== ChainFamily.EVM)
       throw new Error(`Invalid network family for EVMChain: ${network.family}`)
@@ -188,13 +196,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { async: true, maxArgs: 1 })
   }
 
-  // overwrite EVMChain.getWallet to implement custom wallet loading
-  // some signers don't like to be `.connect`ed, so pass provider as first param
+  /**
+   * Static wallet loader - override to implement custom wallet loading.
+   * @param _provider - Provider instance.
+   * @param _opts - Wallet loading options.
+   * @throws Error by default - must be overridden.
+   */
   static getWallet(_provider: Provider, _opts: { wallet?: unknown }): Promise<Signer> {
     throw new Error('static EVM wallet loading not available')
   }
 
-  // cached wallet/signer getter
+  /** {@inheritDoc Chain.getWalletAddress} */
   async getWallet(opts: { wallet?: unknown } = {}): Promise<Signer> {
     if (
       typeof opts.wallet === 'number' ||
@@ -232,10 +244,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return (await this.provider.listAccounts()).map(({ address }) => address)
   }
 
+  /** {@inheritDoc Chain.getWalletAddress} */
   async getWalletAddress(opts?: { wallet?: unknown }): Promise<string> {
     return (await this.getWallet(opts)).getAddress()
   }
 
+  /**
+   * Creates a JSON-RPC provider from a URL.
+   * @param url - WebSocket (wss://) or HTTP (https://) endpoint URL.
+   * @returns A ready JSON-RPC provider.
+   */
   static async _getProvider(url: string): Promise<JsonRpcApiProvider> {
     let provider: JsonRpcApiProvider
     let providerReady: Promise<JsonRpcApiProvider>
@@ -260,6 +278,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return providerReady
   }
 
+  /**
+   * Creates an EVMChain instance from an existing provider.
+   * @param provider - JSON-RPC provider instance.
+   * @returns A new EVMChain instance.
+   */
   static async fromProvider(provider: JsonRpcApiProvider): Promise<EVMChain> {
     try {
       return new EVMChain(provider, networkInfo(Number((await provider.getNetwork()).chainId)))
@@ -269,16 +292,23 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
+  /**
+   * Creates an EVMChain instance from an RPC URL.
+   * @param url - WebSocket (wss://) or HTTP (https://) endpoint URL.
+   * @returns A new EVMChain instance.
+   */
   static async fromUrl(url: string): Promise<EVMChain> {
     return this.fromProvider(await this._getProvider(url))
   }
 
+  /** {@inheritDoc Chain.getBlockTimestamp} */
   async getBlockTimestamp(block: number | 'finalized'): Promise<number> {
     const res = await this.provider.getBlock(block) // cached
     if (!res) throw new Error(`Block not found: ${block}`)
     return res.timestamp
   }
 
+  /** {@inheritDoc Chain.getTransaction} */
   async getTransaction(hash: string | TransactionReceipt): Promise<ChainTransaction> {
     const tx = typeof hash === 'string' ? await this.provider.getTransactionReceipt(hash) : hash
     if (!tx) throw new Error(`Transaction not found: ${hash as string}`)
@@ -294,14 +324,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return chainTx
   }
 
+  /** {@inheritDoc Chain.getLogs} */
   async *getLogs(filter: LogFilter & { onlyFallback?: boolean }): AsyncIterableIterator<Log> {
     yield* getEvmLogs(this.provider, filter, this.destroy$)
   }
 
+  /** {@inheritDoc Chain.fetchRequestsInTx} */
   async fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
     return fetchCCIPRequestsInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
   }
 
+  /** {@inheritDoc Chain.fetchRequestById} */
   override fetchRequestById(
     messageId: string,
     onRamp?: string,
@@ -310,6 +343,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return fetchCCIPRequestById(this, messageId, { address: onRamp, ...opts })
   }
 
+  /** {@inheritDoc Chain.fetchAllMessagesInBatch} */
   async fetchAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
@@ -331,6 +365,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return fetchAllMessagesInBatch(this, request, commit, opts_)
   }
 
+  /** {@inheritDoc Chain.typeAndVersion} */
   async typeAndVersion(address: string) {
     const contract = new Contract(
       address,
@@ -340,6 +375,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return parseTypeAndVersion(await contract.typeAndVersion())
   }
 
+  /**
+   * Decodes a CCIP message from a log event.
+   * @param log - Log event with topics and data.
+   * @returns Decoded CCIPMessage or undefined if not a valid CCIP message.
+   */
   static decodeMessage(log: {
     topics?: readonly string[]
     data: unknown
@@ -442,6 +482,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return message as CCIPMessage
   }
 
+  /**
+   * Decodes commit reports from a log event.
+   * @param log - Log event with topics and data.
+   * @param lane - Lane info (required for CCIP v1.5 and earlier).
+   * @returns Array of CommitReport or undefined if not a valid commit event.
+   */
   static decodeCommits(
     log: { topics?: readonly string[]; data: unknown },
     lane?: Omit<Lane, 'destChainSelector'>,
@@ -492,6 +538,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
+  /**
+   * Decodes an execution receipt from a log event.
+   * @param log - Log event with topics and data.
+   * @returns ExecutionReceipt or undefined if not a valid execution event.
+   */
   static decodeReceipt(log: {
     topics?: readonly string[]
     data: unknown
@@ -516,6 +567,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
+  /**
+   * Decodes extra arguments from a CCIP message.
+   * @param extraArgs - Encoded extra arguments bytes.
+   * @returns Decoded extra arguments with tag, or undefined if unknown format.
+   */
   static decodeExtraArgs(
     extraArgs: BytesLike,
   ):
@@ -556,6 +612,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
+  /**
+   * Encodes extra arguments for a CCIP message.
+   * @param args - Extra arguments to encode.
+   * @returns Encoded extra arguments as hex string.
+   */
   static encodeExtraArgs(args: ExtraArgs): string {
     if (!args) return '0x'
     if ('computeUnits' in args) {
@@ -595,6 +656,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return '0x'
   }
 
+  /**
+   * Converts bytes to a checksummed EVM address.
+   * @param bytes - Bytes to convert (must be 20 bytes or 32 bytes with leading zeros).
+   * @returns Checksummed EVM address.
+   */
   static getAddress(bytes: BytesLike): string {
     bytes = getBytes(bytes)
     if (bytes.length < 20) throw new Error(`Invalid address: ${hexlify(bytes)}`)
@@ -608,6 +674,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return getAddress(hexlify(bytes))
   }
 
+  /**
+   * Gets lane configuration from an OnRamp contract.
+   * @param onRamp - OnRamp contract address.
+   * @returns Lane configuration.
+   */
   async getLaneForOnRamp(onRamp: string): Promise<Lane> {
     const [, version] = await this.typeAndVersion(onRamp)
     const onRampABI = version === CCIPVersion.V1_2 ? EVM2EVMOnRamp_1_2_ABI : EVM2EVMOnRamp_1_5_ABI
@@ -628,6 +699,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
+  /** {@inheritDoc Chain.getRouterForOnRamp} */
   async getRouterForOnRamp(onRamp: string, destChainSelector: bigint): Promise<string> {
     const [, version] = await this.typeAndVersion(onRamp)
     let onRampABI
@@ -656,6 +728,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
+  /** {@inheritDoc Chain.getRouterForOffRamp} */
   async getRouterForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
     const [, version] = await this.typeAndVersion(offRamp)
     let offRampABI, router
@@ -689,6 +762,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return router as string
   }
 
+  /** {@inheritDoc Chain.getNativeTokenForRouter} */
   async getNativeTokenForRouter(router: string): Promise<string> {
     const contract = new Contract(
       router,
@@ -698,6 +772,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return contract.getWrappedNative() as Promise<string>
   }
 
+  /** {@inheritDoc Chain.getOffRampsForRouter} */
   async getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]> {
     const contract = new Contract(
       router,
@@ -710,6 +785,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       .map(({ offRamp }) => offRamp) as string[]
   }
 
+  /** {@inheritDoc Chain.getOnRampForRouter} */
   async getOnRampForRouter(router: string, destChainSelector: bigint): Promise<string> {
     const contract = new Contract(
       router,
@@ -719,6 +795,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return contract.getOnRamp(destChainSelector) as Promise<string>
   }
 
+  /** {@inheritDoc Chain.getOnRampForOffRamp} */
   async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
     const [, version] = await this.typeAndVersion(offRamp)
     let offRampABI
@@ -751,6 +828,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
+  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
   async getCommitStoreForOffRamp(offRamp: string): Promise<string> {
     const [, version] = await this.typeAndVersion(offRamp)
     let offRampABI
@@ -776,6 +854,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
+  /** {@inheritDoc Chain.getTokenForTokenPool} */
   async getTokenForTokenPool(tokenPool: string): Promise<string> {
     const contract = new Contract(
       tokenPool,
@@ -785,6 +864,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return contract.getToken() as Promise<string>
   }
 
+  /** {@inheritDoc Chain.getTokenInfo} */
   async getTokenInfo(token: string): Promise<{ decimals: number; symbol: string; name: string }> {
     const contract = new Contract(
       token,
@@ -799,6 +879,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return { symbol, decimals: Number(decimals), name }
   }
 
+  /**
+   * Gets the leaf hasher for computing Merkle proofs on the destination chain.
+   * @param lane - Lane configuration.
+   * @returns Leaf hasher function.
+   */
   static getDestLeafHasher({
     sourceChainSelector,
     destChainSelector,
@@ -818,6 +903,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
+  /**
+   * Gets any available OnRamp for the given router.
+   * @param router - Router contract address.
+   * @returns OnRamp contract address.
+   */
   async _getSomeOnRampFor(router: string): Promise<string> {
     // when given a router, we take any onRamp we can find, as usually they all use same registry
     const someOtherNetwork = this.network.isTestnet
@@ -830,6 +920,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return this.getOnRampForRouter(router, networkInfo(someOtherNetwork).chainSelector)
   }
 
+  /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
   async getTokenAdminRegistryFor(address: string): Promise<string> {
     let [type, version, typeAndVersion] = await this.typeAndVersion(address)
     if (type === 'TokenAdminRegistry') {
@@ -855,6 +946,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return tokenAdminRegistry as string
   }
 
+  /**
+   * Gets the FeeQuoter contract address for a given Router or Ramp.
+   * @param address - Router or Ramp contract address.
+   * @returns FeeQuoter contract address.
+   */
   async getFeeQuoterFor(address: string): Promise<string> {
     let [type, version, typeAndVersion] = await this.typeAndVersion(address)
     if (type === 'FeeQuoter') {
@@ -877,6 +973,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return feeQuoter as string
   }
 
+  /** {@inheritDoc Chain.getFee} */
   async getFee(router_: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint> {
     const router = new Contract(
       router_,
@@ -892,6 +989,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     })
   }
 
+  /** {@inheritDoc Chain.sendMessage} */
   async sendMessage(
     router_: string,
     destChainSelector: bigint,
@@ -960,10 +1058,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return (await this.fetchRequestsInTx(await this.getTransaction(receipt!)))[0]
   }
 
+  /** {@inheritDoc Chain.fetchOffchainTokenData} */
   fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
     return fetchEVMOffchainTokenData(request)
   }
 
+  /** {@inheritDoc Chain.executeReport} */
   async executeReport(
     offRamp: string,
     execReport: ExecutionReport,
@@ -1068,14 +1168,19 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return this.getTransaction(receipt)
   }
 
+  /**
+   * Parses raw data into typed structures.
+   * @param data - Raw data to parse.
+   * @returns Parsed data.
+   */
   static parse(data: unknown) {
     return parseData(data)
   }
 
   /**
-   * Get the supported tokens for a given contract address
-   *
-   * @param address Router, OnRamp, OffRamp or TokenAdminRegistry contract
+   * Get the supported tokens for a given contract address.
+   * @param registry - Router, OnRamp, OffRamp or TokenAdminRegistry contract address.
+   * @param opts - Optional parameters.
    * @returns An array of supported token addresses.
    */
   async getSupportedTokens(registry: string, opts?: { page?: number }): Promise<string[]> {
@@ -1095,6 +1200,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return res as string[]
   }
 
+  /** {@inheritDoc Chain.getRegistryTokenConfig} */
   async getRegistryTokenConfig(
     registry: string,
     token: string,
@@ -1123,6 +1229,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
+  /** {@inheritDoc Chain.getTokenPoolConfigs} */
   async getTokenPoolConfigs(tokenPool: string): Promise<{
     token: string
     router: string
@@ -1147,6 +1254,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     })
   }
 
+  /** {@inheritDoc Chain.getTokenPoolRemotes} */
   async getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
@@ -1223,6 +1331,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     )
   }
 
+  /** {@inheritDoc Chain.getFeeTokens} */
   async getFeeTokens(router: string) {
     const onRamp = await this._getSomeOnRampFor(router)
     const [_, version] = await this.typeAndVersion(onRamp)
@@ -1275,6 +1384,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     )
   }
 
+  /** {@inheritDoc Chain.fetchExecutionReceipts} */
   override async *fetchExecutionReceipts(
     offRamp: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,

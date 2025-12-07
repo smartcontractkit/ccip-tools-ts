@@ -31,6 +31,11 @@ type ExecAlt = {
   finalTxs: ExecStepTx[]
 }
 
+/**
+ * Executes a CCIP execution report on Solana.
+ * @param params - Execution parameters including offramp program and report.
+ * @returns Transaction hash of the execution.
+ */
 export async function executeReport({
   offrampProgram,
   execReport,

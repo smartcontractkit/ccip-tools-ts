@@ -2,7 +2,9 @@
 import eslint from '@eslint/js'
 import { defineConfig } from 'eslint/config'
 import importPlugin from 'eslint-plugin-import'
+import jsdoc from 'eslint-plugin-jsdoc'
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
+import tsdoc from 'eslint-plugin-tsdoc'
 import { configs as tseslintConfigs } from 'typescript-eslint'
 
 export default defineConfig(
@@ -83,6 +85,64 @@ export default defineConfig(
       ],
       'import/no-duplicates': ['warn', { 'prefer-inline': true }],
       'import/extensions': ['warn', 'always', { ignorePackages: true, checkTypeImports: true }],
+    },
+  },
+  // TSDoc syntax validation (applies to all TS files)
+  {
+    plugins: { tsdoc },
+    rules: {
+      'tsdoc/syntax': 'error', // Enforced - all syntax issues have been fixed
+    },
+  },
+  // JSDoc completeness enforcement (both packages, exclude tests)
+  {
+    files: ['ccip-sdk/src/**/*.ts', 'ccip-cli/src/**/*.ts'],
+    ignores: ['**/*.test.ts', '**/__tests__/**', '**/__mocks__/**', '**/idl/**'],
+    plugins: { jsdoc },
+    rules: {
+      // DISABLE type-related rules (TypeScript handles types)
+      'jsdoc/require-param-type': 'off',
+      'jsdoc/require-returns-type': 'off',
+      'jsdoc/no-types': 'error', // Forbid @param {string} - prevents drift
+      'jsdoc/check-tag-names': 'off', // Defer to tsdoc/syntax
+
+      // COMPLETENESS rules (start as warnings)
+      'jsdoc/require-jsdoc': [
+        'error',
+        {
+          require: {
+            FunctionDeclaration: false, // Use contexts for exports only
+            MethodDefinition: true,
+            ClassDeclaration: true,
+            ArrowFunctionExpression: false,
+            FunctionExpression: false,
+          },
+          contexts: [
+            'ExportNamedDeclaration > FunctionDeclaration',
+            'ExportNamedDeclaration > TSInterfaceDeclaration',
+            'ExportNamedDeclaration > TSTypeAliasDeclaration',
+            'ExportNamedDeclaration > VariableDeclaration > VariableDeclarator > ArrowFunctionExpression',
+          ],
+        },
+      ],
+      'jsdoc/require-description': 'error',
+
+      // Validation rules - ensure existing @param tags are correct
+      // checkDestructured: false - TypeScript types document structure, JSDoc provides meaning
+      'jsdoc/check-param-names': ['error', { checkDestructured: false }],
+      'jsdoc/require-param-name': 'error',
+      'jsdoc/no-blank-blocks': 'error', // Prevent empty /** */ stubs
+
+      // Note: require-param/returns are OFF because TSDoc's {@inheritDoc} inline tag
+      // is not recognized by eslint-plugin-jsdoc's exemptedBy mechanism.
+      // TypeDoc will still inherit full documentation from base classes.
+      // Use tsdoc/syntax to validate documentation syntax.
+      'jsdoc/require-param': 'off',
+      'jsdoc/require-param-description': 'off',
+      'jsdoc/require-returns': 'off',
+      'jsdoc/require-returns-description': 'off',
+
+      // Formatting handled by Prettier - no JSDoc formatting rules needed
     },
   },
 )

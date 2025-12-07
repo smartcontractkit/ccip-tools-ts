@@ -31,32 +31,62 @@ import {
   ExecutionState,
 } from './types.ts'
 
+/**
+ * Filter options for log queries across chains.
+ */
 export type LogFilter = {
+  /** Starting block number (inclusive). */
   startBlock?: number
+  /** Starting Unix timestamp (inclusive). */
   startTime?: number
+  /** Ending block number (inclusive). */
   endBlock?: number
+  /** Optional hint signature for end of iteration. */
   endBefore?: string
+  /** Contract address to filter logs by. */
   address?: string
+  /** Topics to filter logs by. */
   topics?: (string | string[] | null)[]
+  /** Page size for pagination. */
   page?: number
 }
 
+/**
+ * Token metadata information.
+ */
 export type TokenInfo = {
+  /** Token symbol (e.g., "LINK"). */
   readonly symbol: string
+  /** Number of decimals for the token. */
   readonly decimals: number
+  /** Optional human-readable token name. */
   readonly name?: string
 }
 
+/**
+ * Rate limiter state for token pool configurations.
+ * Null if rate limiting is disabled.
+ */
 export type RateLimiterState = {
+  /** Current token balance in the rate limiter bucket. */
   tokens: bigint
+  /** Maximum capacity of the rate limiter bucket. */
   capacity: bigint
+  /** Rate at which tokens are replenished. */
   rate: bigint
 } | null
 
+/**
+ * Remote token pool configuration for a specific chain.
+ */
 export type TokenPoolRemote = {
+  /** Address of the remote token on the destination chain. */
   remoteToken: string
+  /** Addresses of remote token pools. */
   remotePools: string[]
+  /** Inbound rate limiter state for tokens coming into this chain. */
   inboundRateLimiterState: RateLimiterState
+  /** Outbound rate limiter state for tokens leaving this chain. */
   outboundRateLimiterState: RateLimiterState
 }
 
@@ -66,8 +96,10 @@ export type TokenPoolRemote = {
  */
 export abstract class Chain<F extends ChainFamily = ChainFamily> {
   abstract readonly network: NetworkInfo<F>
+  /** Cleanup method to release resources (e.g., close connections). */
   destroy?(): void | Promise<void>
 
+  /** Custom inspector for Node.js util.inspect. */
   [util.inspect.custom]() {
     return `${this.constructor.name} { ${this.network.name} }`
   }
@@ -86,20 +118,20 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   abstract getTransaction(hash: string): Promise<ChainTransaction>
   /**
    * An async generator that yields logs based on the provided options.
-   * @param opts - options object
-   * @param opts.startBlock - if provided, fetch and generate logs forward starting from this block;
-   *   otherwise, returns logs backwards in time from endBlock;
-   *   optionally, startTime may be provided to fetch logs forward starting from this time;
-   * @param opts.endBlock - if omitted, use latest block
-   * @param opts.endBefore - optional hint signature for end of iteration, instead of endBlock
-   * @param opts.address - if provided, fetch logs for this address only (may be required in some
-   *   networks/implementations)
-   * @param opts.topics - if provided, fetch logs for these topics only;
-   *   if string[], it's assumed to be a list of topic0s (i.e. string[] or string[][0], event_ids);
-   *   some networks/implementations may not be able to filter topics other than topic0s, so one may
-   *   want to assume those are optimization hints, instead of hard filters, and verify results
-   * @param opts.page - if provided, try to use this page/range for batches
-   * @returns an async iterable iterator of logs
+   * @param opts - Options object containing:
+   *   - `startBlock`: if provided, fetch and generate logs forward starting from this block;
+   *     otherwise, returns logs backwards in time from endBlock;
+   *     optionally, startTime may be provided to fetch logs forward starting from this time
+   *   - `endBlock`: if omitted, use latest block
+   *   - `endBefore`: optional hint signature for end of iteration, instead of endBlock
+   *   - `address`: if provided, fetch logs for this address only (may be required in some
+   *     networks/implementations)
+   *   - `topics`: if provided, fetch logs for these topics only;
+   *     if string[], it's assumed to be a list of topic0s (i.e. string[] or string[][0], event_ids);
+   *     some networks/implementations may not be able to filter topics other than topic0s, so one may
+   *     want to assume those are optimization hints, instead of hard filters, and verify results
+   *   - `page`: if provided, try to use this page/range for batches
+   * @returns An async iterable iterator of logs.
    */
   abstract getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
 
@@ -123,10 +155,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   ): Promise<CCIPRequest>
 
   /**
-   * Fetches all CCIP messages contained in a given commit batch
-   * @param request - CCIPRequest to fetch batch for
-   * @param commit - CommitReport range (min, max)
-   * @param opts.page - pagination width
+   * Fetches all CCIP messages contained in a given commit batch.
+   * @param request - CCIPRequest to fetch batch for.
+   * @param commit - CommitReport range (min, max).
+   * @param opts - Optional parameters (e.g., `page` for pagination width).
    */
   abstract fetchAllMessagesInBatch<
     R extends PickDeep<
@@ -195,10 +227,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string>
   /**
-   * Fetch the CommitStore set in OffRamp config (CCIP<=v1.5)
-   * For CCIP>=v1.6, it should return the offRamp address
-   * @param offRamp - OffRamp contract address
-   * @returns CommitStore address
+   * Fetch the CommitStore set in OffRamp config (CCIP v1.5 and earlier).
+   * For CCIP v1.6 and later, it should return the offRamp address.
+   * @param offRamp - OffRamp contract address.
+   * @returns CommitStore address.
    */
   abstract getCommitStoreForOffRamp(offRamp: string): Promise<string>
   /**
@@ -220,9 +252,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getTokenAdminRegistryFor(address: string): Promise<string>
   /**
-   * Build, derive, load or fetch a wallet for this instance which will be used in any tx send operation
-   * @param opts.wallet - cli or environmental parameters to help pick a wallet
-   * @returns address of fetched (and stored internally) account
+   * Build, derive, load or fetch a wallet for this instance which will be used in any tx send operation.
+   * @param opts - Options containing `wallet` parameter for cli or environmental parameters to help pick a wallet.
+   * @returns Address of fetched (and stored internally) account.
    */
   abstract getWalletAddress(opts?: { wallet?: unknown }): Promise<string>
   /**
@@ -233,12 +265,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getFee(router: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint>
   /**
-   * Send a CCIP message through a router using loaded wallet
-   * @param router - router address on this chain
-   * @param destChainSelector - dest network selector
-   * @param message - message to send
-   * @param opts.wallet - cli or environmental parameters to help pick a wallet
-   * @param opts.approveMax - approve the maximum amount of tokens to transfer
+   * Send a CCIP message through a router using loaded wallet.
+   * @param router - Router address on this chain.
+   * @param destChainSelector - Destination network selector.
+   * @param message - Message to send.
+   * @param opts - Optional parameters:
+   *   - `wallet`: cli or environmental parameters to help pick a wallet
+   *   - `approveMax`: approve the maximum amount of tokens to transfer
    */
   abstract sendMessage(
     router: string,
@@ -269,7 +302,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Look for a CommitReport at dest for given CCIP request
    * May be specialized by some subclasses
    *
-   * @param dest - Destination network provider
+   * @param commitStore - Commit store address
    * @param request - CCIPRequest to get commit info for
    * @param hints - Additional filtering hints
    * @returns CCIPCommit info, or reject if none found
@@ -314,10 +347,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
-   * List tokens supported by given TokenAdminRegistry contract
-   * @param address - Usually TokenAdminRegistry, but chain may support receiving Router, OnRamp, etc
-   * @param opts.page - Page range, if needed
-   * @retursn array of supported token addresses
+   * List tokens supported by given TokenAdminRegistry contract.
+   * @param address - Usually TokenAdminRegistry, but chain may support receiving Router, OnRamp, etc.
+   * @param opts - Optional parameters (e.g., `page` for pagination range).
+   * @returns Array of supported token addresses.
    */
   abstract getSupportedTokens(address: string, opts?: { page?: number }): Promise<string[]>
 
@@ -346,10 +379,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }>
 
   /**
-   * Get TokenPool remote configurations
-   * @param tokenPool - Token pool address
-   * @param remoteChainSelector - If provided, only return remotes for the specified chain (may error if remote not supported)
-   * @param Record of network *names* and remote configurations (remoteToken, remotePools, rateLimitStates)
+   * Get TokenPool remote configurations.
+   * @param tokenPool - Token pool address.
+   * @param remoteChainSelector - If provided, only return remotes for the specified chain (may error if remote not supported).
+   * @returns Record of network names and remote configurations (remoteToken, remotePools, rateLimitStates).
    */
   abstract getTokenPoolRemotes(
     tokenPool: string,
@@ -357,13 +390,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   ): Promise<Record<string, TokenPoolRemote>>
 
   /**
-   * Fetch list and info of supported feeTokens
-   * @param router address on this chain
-   * @returns mapping of token addresses to respective TokenInfo objects
+   * Fetch list and info of supported feeTokens.
+   * @param router - Router address on this chain.
+   * @returns Mapping of token addresses to respective TokenInfo objects.
    */
   abstract getFeeTokens(router: string): Promise<Record<string, TokenInfo>>
 }
 
+/** Static methods and properties available on Chain class constructors. */
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
 export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
   readonly family: F
@@ -424,10 +458,11 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
   getDestLeafHasher(lane: Lane): LeafHasher
   /**
    * Try to parse an error or bytearray generated by this chain family
-   * @param error - catched object, string or bytearray
+   * @param data - Caught object, string or bytearray
    * @returns Ordered record with messages/properties, or undefined if not a recognized error
    */
   parse?(data: unknown): Record<string, unknown> | undefined | null
 }
 
+/** Function type for getting a Chain instance by ID, selector, or name. */
 export type ChainGetter = (idOrSelectorOrName: number | string | bigint) => Promise<Chain>
