@@ -10,12 +10,14 @@ import { SolanaChain } from '../index.ts'
 const mockGetAccountInfo = mock.fn(() => null as any)
 const mockGetParsedAccountInfo = mock.fn(() => null as any)
 const mockGetGenesisHash = mock.fn(() => null as any)
+const mockGetSignaturesForAddress = mock.fn(() => null as any)
 
 // Mock connection for testing
 const mockConnection = {
   getGenesisHash: mockGetGenesisHash,
   getParsedAccountInfo: mockGetParsedAccountInfo,
   getAccountInfo: mockGetAccountInfo,
+  getSignaturesForAddress: mockGetSignaturesForAddress,
 } as unknown as Connection
 
 const mockNetworkInfo = {

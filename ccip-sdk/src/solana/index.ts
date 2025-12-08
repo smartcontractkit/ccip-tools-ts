@@ -4,8 +4,9 @@ import { type Idl, type IdlTypes, BorshAccountsCoder, BorshCoder, Program } from
 import { NATIVE_MINT } from '@solana/spl-token'
 import {
   type Commitment,
-  type ConfirmedSignatureInfo,
   type ConnectionConfig,
+  type Finality,
+  type SignaturesForAddressOptions,
   type VersionedTransactionResponse,
   Connection,
   PublicKey,
@@ -148,11 +149,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   connection: Connection
   commitment: Commitment = 'confirmed'
 
-  _getSignaturesForAddress: (
-    programId: string,
-    before?: string,
-  ) => Promise<ConfirmedSignatureInfo[]>
-
   /**
    * Creates a new SolanaChain instance.
    * @param connection - Solana connection instance.
@@ -179,24 +175,27 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     })
     this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this))
     this.getTokenInfo = memoize(this.getTokenInfo.bind(this))
-    const getSignaturesForAddress = memoize(
-      (programId: string, before?: string) =>
-        this.connection.getSignaturesForAddress(
-          new PublicKey(programId),
-          { limit: 1000, before },
-          'confirmed',
-        ),
+    this.connection.getSignaturesForAddress = memoize(
+      this.connection.getSignaturesForAddress.bind(this.connection),
       {
         maxSize: 100,
-        expires: 60000,
-        maxArgs: 2,
-        isPromise: true,
-        updateExpire: true,
-        // only expire undefined before (i.e. recent getSignaturesForAddress calls)
+        async: true,
+        // if options.before is defined, caches for long, otherwise for short (recent signatures)
+        expires: (key) => (key[1] ? 2 ** 31 - 1 : 5e3),
+        transformKey: ([address, options, commitment]: [
+          address: PublicKey,
+          options?: SignaturesForAddressOptions,
+          commitment?: Finality,
+        ]) =>
+          [
+            address.toBase58(),
+            options?.before,
+            options?.until,
+            options?.limit,
+            commitment,
+          ] as const,
       },
     )
-    getSignaturesForAddress.cache.on('delete', (ev) => !ev.key[1])
-    this._getSignaturesForAddress = getSignaturesForAddress
     // cache account info for 30 seconds
     this.connection.getAccountInfo = memoize(this.connection.getAccountInfo.bind(this.connection), {
       maxSize: 100,
@@ -209,6 +208,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     this._getRouterConfig = memoize(this._getRouterConfig.bind(this), { maxArgs: 1 })
 
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { maxArgs: 1 })
+    this.getOffRampsForRouter = memoize(this.getOffRampsForRouter.bind(this), { maxArgs: 1 })
   }
 
   /**
@@ -318,58 +318,65 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @param opts - Log filter options.
    * @returns Async generator of Solana transactions.
    */
-  async *_getTransactionsForAddress(
+  async *getTransactionsForAddress(
     opts: Omit<LogFilter, 'topics'>,
   ): AsyncGenerator<SolanaTransaction> {
     if (!opts.address) throw new Error('Program address is required for Solana log filtering')
 
     let allSignatures
+    const limit = Math.min(opts?.page || 1000, 1000)
     if (opts.startBlock || opts.startTime) {
       // forward collect all matching sigs in array
-      const allSigs: { signature: string; slot: number; blockTime?: number | null }[] = []
-      let batch: Awaited<ReturnType<typeof this.connection.getSignaturesForAddress>> | undefined,
-        popped = false
-      while (!popped && (batch?.length ?? true)) {
-        batch = await this._getSignaturesForAddress(
-          opts.address,
-          allSigs[allSigs.length - 1]?.signature,
+      allSignatures = [] as Awaited<ReturnType<typeof this.connection.getSignaturesForAddress>>
+      let batch: typeof allSignatures
+      do {
+        batch = await this.connection.getSignaturesForAddress(
+          new PublicKey(opts.address),
+          { limit, before: allSignatures[allSignatures.length - 1]?.signature },
+          'confirmed',
         )
+
         while (
           batch.length > 0 &&
           (batch[batch.length - 1].slot < (opts.startBlock || 0) ||
             (batch[batch.length - 1].blockTime || -1) < (opts.startTime || 0))
         ) {
-          batch.pop() // pop tail of txs which are older than requested start
-          popped = true
+          batch.length-- // truncate tail of txs which are older than requested start
         }
-        allSigs.push(...batch)
-      }
-      allSigs.reverse()
+
+        allSignatures.push(...batch) // concat in descending order
+      } while (batch.length >= limit)
+
+      allSignatures.reverse()
+
       while (
         opts.endBlock &&
-        allSigs.length > 0 &&
-        allSigs[allSigs.length - 1].slot > opts.endBlock
+        allSignatures.length > 0 &&
+        allSignatures[allSignatures.length - 1].slot > opts.endBlock
       ) {
-        allSigs.pop() // pop head (after reverse) of txs which are newer than requested end
+        allSignatures.length-- // truncate head (after reverse) of txs newer than requested end
       }
-      allSignatures = allSigs
     } else {
       allSignatures = async function* (this: SolanaChain) {
-        let batch: { signature: string; slot: number; blockTime?: number | null }[] | undefined
-        while (batch?.length ?? true) {
-          batch = await this._getSignaturesForAddress(
-            opts.address!,
-            batch?.length
-              ? batch[batch.length - 1].signature
-              : opts.endBefore
-                ? opts.endBefore
-                : undefined,
+        let batch: Awaited<ReturnType<typeof this.connection.getSignaturesForAddress>> | undefined
+        do {
+          batch = await this.connection.getSignaturesForAddress(
+            new PublicKey(opts.address!),
+            {
+              limit,
+              before: batch?.length
+                ? batch[batch.length - 1].signature
+                : opts.endBefore
+                  ? opts.endBefore
+                  : undefined,
+            },
+            'confirmed',
           )
           for (const sig of batch) {
             if (opts.endBlock && sig.slot > opts.endBlock) continue
             yield sig
           }
-        }
+        } while (batch.length >= limit)
       }.call(this) // generate backwards until depleting getSignaturesForAddress
     }
 
@@ -429,7 +436,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     // Process signatures and yield logs
-    for await (const tx of this._getTransactionsForAddress(opts)) {
+    for await (const tx of this.getTransactionsForAddress(opts)) {
       for (const log of tx.logs) {
         // Filter and yield logs from the specified program, and which match event discriminant or log prefix
         if (
@@ -441,7 +448,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
             ))
         )
           continue
-        yield Object.assign(log, { timestamp: new Date(tx.timestamp * 1000) })
+        yield log
       }
     }
   }
@@ -724,33 +731,20 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    */
   static decodeMessage({ data }: { data: unknown }): CCIPMessage | undefined {
     if (!data || typeof data !== 'string') return undefined
-    let eventDataBuffer
+
+    // Verify the discriminant matches CCIPMessageSent
     try {
-      eventDataBuffer = bytesToBuffer(data)
+      if (dataSlice(getDataBytes(data), 0, 8) !== hexDiscriminator('CCIPMessageSent')) return
     } catch (_) {
       return
     }
 
-    const disc = dataSlice(eventDataBuffer, 0, 8)
-    if (disc !== hexDiscriminator('CCIPMessageSent')) return
-
-    // Use module-level BorshCoder for decoding structs
-
-    // Manually parse event header (discriminator + event-level fields)
-    let offset = 8
-
-    // Parse event-level fields
-    const _destChainSelector = eventDataBuffer.readBigUInt64LE(offset)
-    offset += 8
-
-    const _sequenceNumber = eventDataBuffer.readBigUInt64LE(offset)
-    offset += 8
-
-    // Now decode the SVM2AnyRampMessage struct using BorshCoder
-    const messageBytes = eventDataBuffer.subarray(offset)
-
-    const message: IdlTypes<typeof CCIP_ROUTER_IDL>['SVM2AnyRampMessage'] =
-      routerCoder.types.decode('SVM2AnyRampMessage', messageBytes)
+    const decoded = routerCoder.events.decode<
+      (typeof CCIP_ROUTER_IDL)['events'][number] & { name: 'CCIPMessageSent' },
+      IdlTypes<typeof CCIP_ROUTER_IDL>
+    >(data)
+    if (decoded?.name !== 'CCIPMessageSent') return
+    const message = decoded.data.message
 
     // Convert BN/number types to bigints
     const sourceChainSelector = BigInt(message.header.sourceChainSelector.toString())
@@ -866,45 +860,27 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       throw new Error('Log data is missing or not a string')
     }
 
-    const eventDataBuffer = bytesToBuffer(log.data)
-
-    // Verify the discriminant matches CommitReportAccepted
-    const expectedDiscriminant = hexDiscriminator('CommitReportAccepted')
-    const actualDiscriminant = hexlify(eventDataBuffer.subarray(0, 8))
-    if (actualDiscriminant !== expectedDiscriminant) return
-
-    // Skip the 8-byte discriminant and decode the event data manually
-    let offset = 8
-
-    // Decode Option<MerkleRoot> - first byte indicates Some(1) or None(0)
-    const hasValue = eventDataBuffer.readUInt8(offset)
-    offset += 1
-    if (!hasValue) return []
-
-    // Decode MerkleRoot struct using the types decoder
-    // We need to read the remaining bytes as a MerkleRoot struct
-    const merkleRootBytes = eventDataBuffer.subarray(offset)
-
-    type MerkleRootData = {
-      sourceChainSelector: BN
-      onRampAddress: Buffer
-      minSeqNr: BN
-      maxSeqNr: BN
-      merkleRoot: number[]
+    try {
+      // Verify the discriminant matches CommitReportAccepted
+      if (dataSlice(getDataBytes(log.data), 0, 8) !== hexDiscriminator('CommitReportAccepted'))
+        return
+    } catch (_) {
+      return
     }
 
-    const merkleRootData: MerkleRootData = offrampCoder.types.decode('MerkleRoot', merkleRootBytes)
-
-    if (!merkleRootData) {
-      throw new Error('Failed to decode MerkleRoot data')
-    }
+    const decoded = offrampCoder.events.decode<
+      (typeof CCIP_OFFRAMP_IDL)['events'][number] & { name: 'CommitReportAccepted' },
+      IdlTypes<typeof CCIP_OFFRAMP_IDL>
+    >(log.data)
+    if (decoded?.name !== 'CommitReportAccepted' || !decoded.data?.merkleRoot) return
+    const merkleRoot = decoded.data.merkleRoot
 
     // Verify the source chain selector matches our lane
-    const sourceChainSelector = BigInt(merkleRootData.sourceChainSelector.toString())
+    const sourceChainSelector = BigInt(merkleRoot.sourceChainSelector.toString())
 
     // Convert the onRampAddress from bytes to the proper format
     const onRampAddress = decodeOnRampAddress(
-      merkleRootData.onRampAddress,
+      merkleRoot.onRampAddress,
       networkInfo(sourceChainSelector).family,
     )
     if (lane) {
@@ -917,9 +893,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       {
         sourceChainSelector,
         onRampAddress,
-        minSeqNr: BigInt(merkleRootData.minSeqNr.toString()),
-        maxSeqNr: BigInt(merkleRootData.maxSeqNr.toString()),
-        merkleRoot: hexlify(new Uint8Array(merkleRootData.merkleRoot)),
+        minSeqNr: BigInt(merkleRoot.minSeqNr.toString()),
+        maxSeqNr: BigInt(merkleRoot.maxSeqNr.toString()),
+        merkleRoot: hexlify(getDataBytes(merkleRoot.merkleRoot)),
       },
     ]
   }
@@ -935,36 +911,32 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       throw new Error('Log data is missing or not a string')
     }
 
-    // Verify the discriminant matches ExecutionStateChanged
-    if (dataSlice(getDataBytes(log.data), 0, 8) !== hexDiscriminator('ExecutionStateChanged'))
+    try {
+      // Verify the discriminant matches ExecutionStateChanged
+      if (dataSlice(getDataBytes(log.data), 0, 8) !== hexDiscriminator('ExecutionStateChanged'))
+        return
+    } catch (_) {
       return
-    const eventDataBuffer = bytesToBuffer(log.data)
+    }
 
-    // Note: We manually decode the event fields rather than using BorshCoder
-    // since ExecutionStateChanged is an event, not a defined type
-
-    // Skip the 8-byte discriminant and manually decode the event fields
-    let offset = 8
-
-    // Decode sourceChainSelector (u64)
-    const sourceChainSelector = eventDataBuffer.readBigUInt64LE(offset)
-    offset += 8
-
-    // Decode sequenceNumber (u64)
-    const sequenceNumber = eventDataBuffer.readBigUInt64LE(offset)
-    offset += 8
-
-    // Decode messageId ([u8; 32])
-    const messageId = hexlify(eventDataBuffer.subarray(offset, offset + 32))
-    offset += 32
-
-    // Decode messageHash ([u8; 32])
-    const messageHash = hexlify(eventDataBuffer.subarray(offset, offset + 32))
-    offset += 32
+    const decoded = offrampCoder.events.decode<
+      (typeof CCIP_OFFRAMP_IDL)['events'][number] & { name: 'ExecutionStateChanged' },
+      IdlTypes<typeof CCIP_OFFRAMP_IDL>
+    >(log.data)
+    if (decoded?.name !== 'ExecutionStateChanged') return
+    const messageId = hexlify(getDataBytes(decoded.data.messageId))
 
     // Decode state enum (MessageExecutionState)
     // Enum discriminant is a single byte: Untouched=0, InProgress=1, Success=2, Failure=3
-    let state = eventDataBuffer.readUInt8(offset) as ExecutionState
+    let state: ExecutionState
+    if (decoded.data.state.inProgress) {
+      state = ExecutionState.InProgress
+    } else if (decoded.data.state.success) {
+      state = ExecutionState.Success
+    } else if (decoded.data.state.failure) {
+      state = ExecutionState.Failed
+    } else throw new Error(`Invalid ExecutionState: ${util.inspect(decoded.data.state)}`)
+
     let returnData
     if (log.tx) {
       // use only last receipt per tx+message (i.e. skip intermediary InProgress=1 states for Solana)
@@ -985,10 +957,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     return {
-      sourceChainSelector,
-      sequenceNumber,
+      sourceChainSelector: BigInt(decoded.data.sourceChainSelector.toString()),
+      sequenceNumber: BigInt(decoded.data.sequenceNumber.toString()),
       messageId,
-      messageHash,
+      messageHash: hexlify(getDataBytes(decoded.data.messageHash)),
       state,
       returnData,
     }
@@ -1228,8 +1200,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
               bytes: encodeBase58(toLeArray(request.lane.sourceChainSelector, 8)),
             },
           },
-          // dirty trick: memcmp report.min with msg.sequenceNumber's without least-significant byte;
-          // this should be ~256 around seqNum, i.e. big chance of a match
+          // hack: memcmp report.min with msg.sequenceNumber's without least-significant byte;
+          // this should be ~256 around seqNum, i.e. big chance of a match; requires PDAs to be alive
           {
             memcmp: {
               offset: 8 + 1 + 8 + 32 + 8 + 1,
