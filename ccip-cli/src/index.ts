@@ -9,7 +9,7 @@ import { Format } from './commands/index.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.91.0-4f5a327'
+const VERSION = '0.91.0-25e7a4b'
 // generate:end
 
 const globalOpts = {

@@ -20,8 +20,11 @@ import {
   ChainFamily,
 } from '../types.ts'
 import { getDataBytes } from '../utils.ts'
+// import { parseTONLogs } from './utils.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import type { CCIPMessage_V1_6_TON } from './types.ts'
+import { TonConnect } from '@tonconnect/sdk'
+import { executeReport } from './exec.ts'
 
 const GENERIC_V2_EXTRA_ARGS_TAG = Number.parseInt(GenericExtraArgsV2, 16)
 
@@ -48,8 +51,17 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  async getTransaction(_hash: string | number): Promise<ChainTransaction> {
-    return Promise.reject(new Error('Not implemented'))
+  async getTransaction(hash: string): Promise<ChainTransaction> {
+    // TODO: Implement full transaction fetching when TON provider is available
+    // For now, return minimal structure for executeReport flow
+    // The hash from TonConnect is the BOC of the signed transaction
+    return {
+      hash,
+      logs: [],
+      blockNumber: 0,
+      timestamp: Math.floor(Date.now() / 1000),
+      from: 'unknown',
+    }
   }
 
   // eslint-disable-next-line require-yield
@@ -126,6 +138,29 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
   async getWalletAddress(_opts?: { wallet?: unknown }): Promise<string> {
     return Promise.reject(new Error('Not implemented'))
+  }
+
+  static getWallet(_opts: { wallet?: unknown } = {}): Promise<any> {
+    throw new Error('static TON wallet loading not available')
+  }
+
+  async getWallet(opts: { wallet?: unknown } = {}): Promise<TonConnect> {
+    // Handle TonConnect instance if provided
+    if (opts.wallet instanceof TonConnect) {
+      return opts.wallet
+    }
+
+    // TonConnect doesn't support raw private key wallet creation
+    // Users must provide a pre-configured TonConnect instance
+    if (typeof opts.wallet === 'string') {
+      throw new Error(
+        'TON requires a TonConnect instance. Raw private key support is not available. ' +
+          'Create a TonConnect instance and pass it as opts.wallet.',
+      )
+    }
+
+    // Delegate to static method (for CLI overrides)
+    return (this.constructor as typeof TONChain).getWallet(opts)
   }
 
   // Static methods for decoding
@@ -225,11 +260,25 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   async executeReport(
-    _offRamp: string,
-    _execReport: ExecutionReport,
-    _opts?: { wallet?: unknown; gasLimit?: number },
+    offRamp: string,
+    execReport: ExecutionReport,
+    opts?: { wallet?: unknown; gasLimit?: number },
   ): Promise<ChainTransaction> {
-    return Promise.reject(new Error('Not implemented'))
+    const tonConnect = await this.getWallet(opts)
+
+    // Validate TON message format
+    if (!('gasLimit' in execReport.message && 'allowOutOfOrderExecution' in execReport.message)) {
+      throw new Error('TON expects GenericExtraArgsV2 reports')
+    }
+
+    const result = await executeReport(
+      tonConnect,
+      offRamp,
+      execReport as ExecutionReport<CCIPMessage_V1_6_TON>,
+      opts,
+    )
+
+    return this.getTransaction(result.hash)
   }
 
   static parse(data: unknown) {
