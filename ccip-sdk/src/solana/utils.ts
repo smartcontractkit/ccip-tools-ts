@@ -18,7 +18,7 @@ import { type BytesLike, dataLength, dataSlice, hexlify } from 'ethers'
 
 import type { Log_, WithLogger } from '../types.ts'
 import { getDataBytes, sleep } from '../utils.ts'
-import type { UnsignedTx, Wallet } from './types.ts'
+import type { UnsignedSolanaTx, Wallet } from './types.ts'
 
 /**
  * Generates a hex-encoded discriminator for a Solana event.
@@ -330,7 +330,7 @@ export function simulationProvider(
 export async function simulateAndSendTxs(
   ctx: { connection: Connection } & WithLogger,
   wallet: Wallet,
-  { instructions, mainIndex, lookupTables }: UnsignedTx,
+  { instructions, mainIndex, lookupTables }: Omit<UnsignedSolanaTx, 'family'>,
   computeUnits?: number,
 ): Promise<string> {
   const { connection } = ctx

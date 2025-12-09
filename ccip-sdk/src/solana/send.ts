@@ -18,10 +18,10 @@ import BN from 'bn.js'
 import { zeroPadValue } from 'ethers'
 
 import { SolanaChain } from './index.ts'
-import type { AnyMessage, WithLogger } from '../types.ts'
+import { type AnyMessage, type WithLogger, ChainFamily } from '../types.ts'
 import { toLeArray, util } from '../utils.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
-import type { UnsignedTx } from './types.ts'
+import type { UnsignedSolanaTx } from './types.ts'
 import { bytesToBuffer, simulationProvider } from './utils.ts'
 
 function anyToSvmMessage(message: AnyMessage): IdlTypes<typeof CCIP_ROUTER_IDL>['SVM2AnyMessage'] {
@@ -261,7 +261,7 @@ export async function generateUnsignedCcipSend(
   destChainSelector: bigint,
   message: AnyMessage & { fee: bigint },
   opts?: { approveMax?: boolean },
-): Promise<UnsignedTx> {
+): Promise<UnsignedSolanaTx> {
   const amountsToApprove = (message.tokenAmounts ?? []).reduce(
     (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
     {} as Record<string, bigint>,
@@ -316,6 +316,7 @@ export async function generateUnsignedCcipSend(
     .remainingAccounts(accounts.slice(18))
     .instruction()
   return {
+    family: ChainFamily.Solana,
     mainIndex: approveIxs.length,
     instructions: [...approveIxs, sendIx],
     lookupTables: addressLookupTableAccounts,

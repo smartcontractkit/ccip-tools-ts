@@ -81,7 +81,7 @@ import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import { fetchSolanaOffchainTokenData } from './offchain.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
-import { type CCIPMessage_V1_6_Solana, type UnsignedTx, isWallet } from './types.ts'
+import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
   bytesToBuffer,
   getErrorFromLogs,
@@ -1020,7 +1020,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
     opts?: { approveMax?: boolean },
-  ): Promise<UnsignedTx> {
+  ): Promise<UnsignedSolanaTx> {
     if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
     return generateUnsignedCcipSend(
       this,
@@ -1077,7 +1077,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     offRamp: string,
     execReport_: ExecutionReport,
     opts?: { forceBuffer?: boolean; forceLookupTable?: boolean },
-  ): Promise<UnsignedTx> {
+  ): Promise<UnsignedSolanaTx> {
     if (!('computeUnits' in execReport_.message))
       throw new Error("ExecutionReport's message not for Solana")
     const execReport = execReport_ as ExecutionReport<CCIPMessage_V1_6_Solana>

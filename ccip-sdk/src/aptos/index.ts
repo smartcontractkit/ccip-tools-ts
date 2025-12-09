@@ -61,7 +61,12 @@ import { generateUnsignedExecuteReport } from './exec.ts'
 import { getAptosLeafHasher } from './hasher.ts'
 import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
 import { getTokenInfo } from './token.ts'
-import { EVMExtraArgsV2Codec, SVMExtraArgsV1Codec, isAptosAccount } from './types.ts'
+import {
+  type UnsignedAptosTx,
+  EVMExtraArgsV2Codec,
+  SVMExtraArgsV1Codec,
+  isAptosAccount,
+} from './types.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import {
   decodeMessage,
@@ -502,18 +507,20 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
     opts: { approveMax?: boolean },
-  ): Promise<Uint8Array[]> {
+  ): Promise<UnsignedAptosTx> {
     if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
-    return Promise.all([
-      generateUnsignedCcipSend(
-        this.provider,
-        sender,
-        router,
-        destChainSelector,
-        message as SetRequired<typeof message, 'fee'>,
-        opts,
-      ),
-    ])
+    const tx = await generateUnsignedCcipSend(
+      this.provider,
+      sender,
+      router,
+      destChainSelector,
+      message as SetRequired<typeof message, 'fee'>,
+      opts,
+    )
+    return {
+      family: ChainFamily.Aptos,
+      transactions: [tx],
+    }
   }
 
   /** {@inheritDoc Chain.sendMessage} */
@@ -530,14 +537,14 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       )
     }
 
-    const [unsignedBytes] = await this.generateUnsignedSendMessage(
+    const unsignedTx = await this.generateUnsignedSendMessage(
       account.accountAddress.toString(),
       router,
       destChainSelector,
       message,
       opts,
     )
-    const unsigned = SimpleTransaction.deserialize(new Deserializer(unsignedBytes))
+    const unsigned = SimpleTransaction.deserialize(new Deserializer(unsignedTx.transactions[0]))
 
     // Sign and submit the transaction
     const signed = await account.signTransactionWithAuthenticator(unsigned)
@@ -567,20 +574,22 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     offRamp: string,
     execReport: ExecutionReport,
     opts: { gasLimit?: number },
-  ): Promise<Uint8Array[]> {
+  ): Promise<UnsignedAptosTx> {
     if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
       throw new Error('Aptos expects EVMExtraArgsV2 reports')
     }
 
-    return Promise.all([
-      generateUnsignedExecuteReport(
-        this.provider,
-        payer,
-        offRamp,
-        execReport as ExecutionReport<CCIPMessage_V1_6_EVM>,
-        opts,
-      ),
-    ])
+    const tx = await generateUnsignedExecuteReport(
+      this.provider,
+      payer,
+      offRamp,
+      execReport as ExecutionReport<CCIPMessage_V1_6_EVM>,
+      opts,
+    )
+    return {
+      family: ChainFamily.Aptos,
+      transactions: [tx],
+    }
   }
 
   /** {@inheritDoc Chain.executeReport} */
@@ -596,13 +605,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       )
     }
 
-    const [unsignedBytes] = await this.generateUnsignedExecuteReport(
+    const unsignedTx = await this.generateUnsignedExecuteReport(
       account.accountAddress.toString(),
       offRamp,
       execReport,
       opts,
     )
-    const unsigned = SimpleTransaction.deserialize(new Deserializer(unsignedBytes))
+    const unsigned = SimpleTransaction.deserialize(new Deserializer(unsignedTx.transactions[0]))
 
     // Sign and submit the transaction
     const signed = await account.signTransactionWithAuthenticator(unsigned)

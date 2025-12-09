@@ -13,10 +13,10 @@ import {
 import BN from 'bn.js'
 import { hexlify } from 'ethers'
 
-import type { ExecutionReport, WithLogger } from '../types.ts'
+import { type ExecutionReport, type WithLogger, ChainFamily } from '../types.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
-import type { CCIPMessage_V1_6_Solana, UnsignedTx } from './types.ts'
+import type { CCIPMessage_V1_6_Solana, UnsignedSolanaTx } from './types.ts'
 import { getDataBytes, toLeArray } from '../utils.ts'
 import { bytesToBuffer } from './utils.ts'
 
@@ -44,7 +44,7 @@ export async function generateUnsignedExecuteReport(
   offramp: PublicKey,
   execReport: ExecutionReport<CCIPMessage_V1_6_Solana>,
   opts?: { forceLookupTable?: boolean; forceBuffer?: boolean; clearLeftoverAccounts?: boolean },
-): Promise<UnsignedTx> {
+): Promise<UnsignedSolanaTx> {
   const { connection, logger = console } = ctx
   const program = new Program(CCIP_OFFRAMP_IDL, offramp, ctx)
 
@@ -133,6 +133,7 @@ export async function generateUnsignedExecuteReport(
   }
 
   return {
+    family: ChainFamily.Solana,
     instructions,
     lookupTables: addressLookupTableAccounts,
     mainIndex: execIndex,

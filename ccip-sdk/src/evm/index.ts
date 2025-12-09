@@ -105,6 +105,14 @@ import {
   fetchCCIPRequestsInTx,
 } from '../requests.ts'
 
+/**
+ * Type representing a set of unsigned EVM transactions
+ */
+export type UnsignedEVMTx = {
+  family: typeof ChainFamily.EVM
+  transactions: Pick<TransactionRequest, 'from' | 'to' | 'data'>[]
+}
+
 const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 
 const EVMExtraArgsV1 = 'tuple(uint256 gasLimit)'
@@ -955,7 +963,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
     opts?: { approveMax?: boolean },
-  ): Promise<{ from: string; to: string; data: string }[]> {
+  ): Promise<UnsignedEVMTx> {
     if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
     const feeToken = message.feeToken ?? ZeroAddress
     const receiver = zeroPadValue(getAddressBytes(message.receiver), 32)
@@ -1008,8 +1016,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ...(feeToken === ZeroAddress && { value: message.fee }),
       },
     )
-    const txRequests = [...approveTxs, sendTx]
-    return txRequests as SetRequired<(typeof txRequests)[number], 'from'>[]
+    const txRequests = [...approveTxs, sendTx] as SetRequired<typeof sendTx, 'from'>[]
+    return {
+      family: ChainFamily.EVM,
+      transactions: txRequests,
+    }
   }
 
   /** {@inheritDoc Chain.sendMessage} */
@@ -1030,8 +1041,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       message,
       opts,
     )
-    const approveTxs = txs.slice(0, txs.length - 1)
-    let sendTx: TransactionRequest = txs[txs.length - 1]
+    const approveTxs = txs.transactions.slice(0, txs.transactions.length - 1)
+    let sendTx: TransactionRequest = txs.transactions[txs.transactions.length - 1]
 
     // approve all tokens (including feeToken, if needed) in parallel
     let nonce = await this.provider.getTransactionCount(sender)
@@ -1077,7 +1088,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     offRamp: string,
     execReport: ExecutionReport,
     opts: { gasLimit?: number; tokensGasLimit?: number },
-  ): Promise<[{ to: string; data: string }]> {
+  ): Promise<UnsignedEVMTx> {
     const [_, version] = await this.typeAndVersion(offRamp)
 
     let manualExecTx
@@ -1172,7 +1183,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       default:
         throw new Error(`Unsupported version: ${version}`)
     }
-    return [manualExecTx]
+    return { family: ChainFamily.EVM, transactions: [manualExecTx] }
   }
 
   /** {@inheritDoc Chain.executeReport} */
@@ -1184,13 +1195,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const wallet = opts.wallet
     if (!isSigner(wallet)) throw new Error(`Wallet must be a Signer, got=${util.inspect(wallet)}`)
 
-    let [unsignedTx]: [TransactionRequest] = await this.generateUnsignedExecuteReport(
+    const unsignedTxs = await this.generateUnsignedExecuteReport(
       await wallet.getAddress(),
       offRamp,
       execReport,
       opts,
     )
-    unsignedTx = await wallet.populateTransaction(unsignedTx)
+    const unsignedTx = await wallet.populateTransaction(unsignedTxs.transactions[0])
     unsignedTx.from = undefined // some signers don't like receiving pre-populated `from`
     const signed = await wallet.signTransaction(unsignedTx)
     const response = await this.provider.broadcastTransaction(signed)

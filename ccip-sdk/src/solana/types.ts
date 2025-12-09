@@ -7,7 +7,7 @@ import type {
 } from '@solana/web3.js'
 
 import type { SVMExtraArgsV1 } from '../extra-args.ts'
-import type { CCIPMessage_V1_6 } from '../types.ts'
+import type { CCIPMessage_V1_6, ChainFamily } from '../types.ts'
 
 /** Solana-specific CCIP v1.6 message type with SVM extra args. */
 export type CCIPMessage_V1_6_Solana = CCIPMessage_V1_6 & SVMExtraArgsV1
@@ -18,7 +18,8 @@ export type CCIPMessage_V1_6_Solana = CCIPMessage_V1_6 & SVMExtraArgsV1
  * mainIndex - index of the main instruction in the array
  * lookupTables - array of lookupTables to be used in *main* transaction
  */
-export type UnsignedTx = {
+export type UnsignedSolanaTx = {
+  family: typeof ChainFamily.Solana
   instructions: TransactionInstruction[]
   mainIndex?: number
   lookupTables?: AddressLookupTableAccount[]

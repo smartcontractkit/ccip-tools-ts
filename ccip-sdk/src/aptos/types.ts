@@ -8,7 +8,7 @@ import { bcs } from '@mysten/bcs'
 import { getBytes } from 'ethers'
 
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import type { ExecutionReport } from '../types.ts'
+import type { ChainFamily, ExecutionReport } from '../types.ts'
 import { getAddressBytes } from '../utils.ts'
 
 /** Aptos account type with async transaction signing capability. */
@@ -98,4 +98,12 @@ export function serializeExecutionReport(
     offchainTokenData: execReport.offchainTokenData.map(() => []),
     proofs: execReport.proofs.map((p) => getBytes(p)),
   }).toBytes()
+}
+
+/**
+ * Unsigned Aptos transactions, BCS-serialized.
+ */
+export type UnsignedAptosTx = {
+  family: typeof ChainFamily.Aptos
+  transactions: [Uint8Array]
 }

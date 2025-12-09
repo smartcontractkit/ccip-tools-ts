@@ -176,7 +176,7 @@ class MockChain extends Chain {
     _destChainSelector: bigint,
     _message: AnyMessage & { fee?: bigint },
     _opts?: { approveMax?: boolean },
-  ): Promise<unknown> {
+  ): Promise<never> {
     return Promise.reject(new Error('not implemented'))
   }
 
@@ -198,7 +198,7 @@ class MockChain extends Chain {
     _offRamp: string,
     _execReport: ExecutionReport,
     _opts: object,
-  ): Promise<unknown> {
+  ): Promise<never> {
     return Promise.reject(new Error('not implemented'))
   }
 

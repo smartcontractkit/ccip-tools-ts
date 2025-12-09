@@ -229,7 +229,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     _destChainSelector: bigint,
     _message: AnyMessage & { fee?: bigint },
     _opts?: { approveMax?: boolean },
-  ): Promise<unknown> {
+  ): Promise<never> {
     return Promise.reject(new Error('Not implemented'))
   }
 
@@ -258,7 +258,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     _offRamp: string,
     _execReport: ExecutionReport,
     _opts: object,
-  ): Promise<unknown> {
+  ): Promise<never> {
     return Promise.reject(new Error('Not implemented'))
   }
 

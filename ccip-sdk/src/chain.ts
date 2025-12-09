@@ -1,7 +1,9 @@
 import type { BytesLike } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
+import type { UnsignedAptosTx } from './aptos/types.ts'
 import { fetchCommitReport } from './commits.ts'
+import type { UnsignedEVMTx } from './evm/index.ts'
 import type {
   EVMExtraArgsV1,
   EVMExtraArgsV2,
@@ -10,6 +12,7 @@ import type {
   SuiExtraArgsV1,
 } from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
+import type { UnsignedSolanaTx } from './solana/types.ts'
 import {
   type AnyMessage,
   type CCIPCommit,
@@ -88,6 +91,16 @@ export type TokenPoolRemote = {
   inboundRateLimiterState: RateLimiterState
   /** Outbound rate limiter state for tokens leaving this chain. */
   outboundRateLimiterState: RateLimiterState
+}
+
+/**
+ * Maps chain family to respective unsigned transaction type.
+ */
+export type UnsignedTx = {
+  [ChainFamily.EVM]: UnsignedEVMTx
+  [ChainFamily.Solana]: UnsignedSolanaTx
+  [ChainFamily.Aptos]: UnsignedAptosTx
+  [ChainFamily.Sui]: never // TODO
 }
 
 /**
@@ -286,7 +299,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
     opts?: { approveMax?: boolean },
-  ): Promise<unknown>
+  ): Promise<UnsignedTx[F]>
   /**
    * Send a CCIP message through a router using provided wallet.
    * @param router - Router address on this chain.
@@ -317,7 +330,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param tokensGasLimit - For EVM, overrides gasLimit on tokenpPool call
    * @param forceBuffer - For Solana, send report in chunks to OffRamp, to later execute
    * @param forceLookupTable - For Solana, create and extend addresses in a lookup table before executing
-   * @returns array containing one unsigned `manuallyExecute` TransactionRequest object
+   * @returns chain-family specific unsigned txs
    */
   abstract generateUnsignedExecuteReport(
     payer: string,
@@ -329,7 +342,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       forceBuffer?: boolean
       forceLookupTable?: boolean
     },
-  ): Promise<unknown>
+  ): Promise<UnsignedTx[F]>
   /**
    * Execute messages in report in an offRamp
    * @param offRamp - offRamp address on this dest chain
