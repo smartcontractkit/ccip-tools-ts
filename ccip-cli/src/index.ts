@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import { realpathSync } from 'fs'
 import util from 'node:util'
+import { pathToFileURL } from 'url'
 
 import yargs, { type InferredOptionTypes } from 'yargs'
 import { hideBin } from 'yargs/helpers'
@@ -63,7 +65,13 @@ async function main() {
     .parse()
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+function wasCalledAsScript() {
+  const realPath = realpathSync(process.argv[1])
+  const realPathAsUrl = pathToFileURL(realPath).href
+  return import.meta.url === realPathAsUrl
+}
+
+if (import.meta?.main || wasCalledAsScript()) {
   const later = setTimeout(() => {}, 2 ** 31 - 1) // keep event-loop alive
   await main()
     .catch((err) => {
