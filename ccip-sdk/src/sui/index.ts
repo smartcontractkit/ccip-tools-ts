@@ -213,7 +213,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @param lane - Lane configuration.
    * @returns Leaf hasher function.
    */
-  static getDestLeafHasher(lane: Lane): LeafHasher {
+  static getDestLeafHasher(lane: Lane, _ctx?: WithLogger): LeafHasher {
     return getSuiLeafHasher(lane)
   }
 

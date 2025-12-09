@@ -985,7 +985,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @param lane - Lane configuration.
    * @returns Leaf hasher function.
    */
-  static getDestLeafHasher(lane: Lane, ctx: WithLogger): LeafHasher<typeof CCIPVersion.V1_6> {
+  static getDestLeafHasher(lane: Lane, ctx?: WithLogger): LeafHasher<typeof CCIPVersion.V1_6> {
     return getV16SolanaLeafHasher(lane, ctx)
   }
 

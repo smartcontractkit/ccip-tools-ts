@@ -842,11 +842,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /**
    * Gets the leaf hasher for computing Merkle proofs on the destination chain.
    * @param lane - Lane configuration.
+   * @param ctx - Context object containing logger.
    * @returns Leaf hasher function.
    */
   static getDestLeafHasher(
     { sourceChainSelector, destChainSelector, onRamp, version }: Lane,
-    opts?: WithLogger,
+    ctx?: WithLogger,
   ): LeafHasher {
     switch (version) {
       case CCIPVersion.V1_2:
@@ -855,7 +856,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           throw new Error(`Unsupported source chain: ${sourceChainSelector}`)
         return getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher
       case CCIPVersion.V1_6:
-        return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp, opts) as LeafHasher
+        return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp, ctx) as LeafHasher
       default:
         throw new Error(`Unsupported hasher version for EVM: ${version as string}`)
     }

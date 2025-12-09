@@ -157,11 +157,11 @@ async function manualExec(
 
   const messagesInBatch = await source.fetchAllMessagesInBatch(request, commit.report, argv)
   const execReportProof = calculateManualExecProof(
-    dest,
     messagesInBatch,
     request.lane,
     request.message.header.messageId,
     commit.report.merkleRoot,
+    dest,
   )
 
   const offchainTokenData = await source.fetchOffchainTokenData(request)

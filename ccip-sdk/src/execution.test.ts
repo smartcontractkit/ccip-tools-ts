@@ -314,13 +314,9 @@ describe('calculateManualExecProof', () => {
     const merkleRoot = '0x9c66d4cfcba6e359f42f096ff16192e16967cea456503c02e738c5646d06cab4'
     const messageId = messages[0].header.messageId
 
-    const result = calculateManualExecProof(
-      { logger: console },
-      messages,
-      lane,
-      messageId,
-      merkleRoot,
-    )
+    const result = calculateManualExecProof(messages, lane, messageId, merkleRoot, {
+      logger: console,
+    })
 
     assert.ok(result.proofs)
     assert.ok(result.proofFlagBits !== undefined)
@@ -332,7 +328,7 @@ describe('calculateManualExecProof', () => {
     const messageId = messages[0].header.messageId
     const batch = [messages[0]]
 
-    const result = calculateManualExecProof({ logger: console }, batch, lane, messageId)
+    const result = calculateManualExecProof(batch, lane, messageId, undefined, { logger: console })
 
     assert.ok(result.proofs)
     assert.equal(result.proofs.length, 0)
@@ -343,7 +339,8 @@ describe('calculateManualExecProof', () => {
     const missingMessageId = '0x9999999999999999999999999999999999999999999999999999999999999999'
 
     assert.throws(
-      () => calculateManualExecProof({ logger: console }, messages, lane, missingMessageId),
+      () =>
+        calculateManualExecProof(messages, lane, missingMessageId, undefined, { logger: console }),
       /Could not find.*in batch/,
     )
   })
@@ -354,7 +351,7 @@ describe('calculateManualExecProof', () => {
 
     assert.throws(
       () =>
-        calculateManualExecProof({ logger: console }, messages, lane, messageId, wrongMerkleRoot),
+        calculateManualExecProof(messages, lane, messageId, wrongMerkleRoot, { logger: console }),
       /Merkle root.*doesn't match/,
     )
   })
@@ -391,13 +388,9 @@ describe('calculateManualExecProof', () => {
     }
 
     const messageId = messages1_6[0].header.messageId
-    const result = calculateManualExecProof(
-      { logger: console },
-      messages1_6,
-      lane1_6,
-      messageId,
-      merkleRoot1_6,
-    )
+    const result = calculateManualExecProof(messages1_6, lane1_6, messageId, merkleRoot1_6, {
+      logger: console,
+    })
 
     assert.equal(result.proofs.length, 0)
     assert.equal(result.proofFlagBits, 0n)
@@ -418,7 +411,9 @@ describe('calculateManualExecProof', () => {
     }
 
     const messageId = message.header.messageId
-    const result = calculateManualExecProof({ logger: console }, [message], lane, messageId)
+    const result = calculateManualExecProof([message], lane, messageId, undefined, {
+      logger: console,
+    })
     assert.ok(result.merkleRoot)
     assert.equal(
       result.merkleRoot,

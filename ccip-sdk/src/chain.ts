@@ -517,6 +517,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
   /**
    * Create a leaf hasher for this dest chain and lane
    * @param lane - source, dest and onramp lane info
+   * @param ctx - context object containing logger
    * @returns LeafHasher is a function that takes a message and returns a hash of it
    */
   getDestLeafHasher(lane: Lane, ctx?: WithLogger): LeafHasher

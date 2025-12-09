@@ -491,7 +491,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @param lane - Lane configuration.
    * @returns Leaf hasher function.
    */
-  static getDestLeafHasher(lane: Lane): LeafHasher {
+  static getDestLeafHasher(lane: Lane, _ctx?: WithLogger): LeafHasher {
     return getAptosLeafHasher(lane)
   }
 

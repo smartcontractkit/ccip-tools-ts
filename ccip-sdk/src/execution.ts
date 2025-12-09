@@ -17,19 +17,19 @@ import {
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
  *
- * @param ctx - Context for logging
  * @param messagesInBatch - Array containing all messages in batch, ordered
  * @param lane - Arguments for leafHasher (lane info)
  * @param messageId - Message ID to prove for manual execution
  * @param merkleRoot - Optional merkleRoot of the CommitReport, for validation
+ * @param ctx - Context for logging
  * @returns ManualExec report arguments
  **/
 export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
-  ctx: WithLogger,
   messagesInBatch: readonly CCIPMessage<V>[],
   lane: Lane<V>,
   messageId: string,
   merkleRoot?: string,
+  ctx?: WithLogger,
 ): Omit<ExecutionReport, 'offchainTokenData' | 'message'> {
   const hasher = getLeafHasher(lane, ctx)
 
