@@ -57,19 +57,39 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   *
+   * Creates a TONChain instance from an RPC URL.
+   * Verifies the connection and detects the network.
    */
   static async fromUrl(url: string): Promise<TONChain> {
+    // Validate URL format for TON endpoints
+    if (
+      !url.includes('toncenter') &&
+      !url.includes('ton') &&
+      !url.includes('localhost') &&
+      !url.includes('127.0.0.1')
+    ) {
+      throw new Error(`Invalid TON RPC URL: ${url}`)
+    }
+
     const client = new TonClient({ endpoint: url })
+
+    // Verify connection by making an actual RPC call
+    try {
+      await client.getMasterchainInfo()
+    } catch (error) {
+      throw new Error(
+        `Failed to connect to TON endpoint ${url}: ${error instanceof Error ? error.message : error}`,
+      )
+    }
 
     // Detect network from URL
     let networkId: string
     if (url.includes('testnet')) {
       networkId = 'ton-testnet'
-    } else if (url.includes('mainnet') || url.includes('toncenter.com/api')) {
-      networkId = 'ton-mainnet'
+    } else if (url.includes('sandbox') || url.includes('localhost') || url.includes('127.0.0.1')) {
+      networkId = 'ton-localnet'
     } else {
-      // Default to mainnet for unknown URLs
+      // Default to mainnet for production endpoints
       networkId = 'ton-mainnet'
     }
 

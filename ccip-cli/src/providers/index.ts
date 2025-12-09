@@ -11,6 +11,7 @@ import {
 import './aptos.ts'
 import './evm.ts'
 import './solana.ts'
+import './ton.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
 
@@ -89,7 +90,7 @@ export function fetchChainsFromRpcs(
               chains[chain.network.name] = chain$
               delete chainsCbs[chain.network.name]
             },
-            () => {},
+            () => { },
           )
           txs.push(tx$)
         }
@@ -137,7 +138,7 @@ export function fetchChainsFromRpcs(
   if (txHash) {
     return [chainGetter, init$]
   } else {
-    void init$.catch(() => {})
+    void init$.catch(() => { })
     return chainGetter
   }
 }
