@@ -143,12 +143,15 @@ export function fetchChainsFromRpcs(
       }
     }
     const res = Promise.allSettled(pendingPromises)
-    void (destroy$ ? Promise.race([res, signalToPromise(destroy$)]) : res).finally(() => {
-      finished = true
-      Object.entries(chainsCbs).forEach(([name, [_, reject]]) =>
-        reject(new CCIPRpcNotFoundError(name)),
-      )
-    })
+    void (destroy$ ? Promise.race([res, signalToPromise(destroy$)]) : res)
+      .catch(() => {})
+      .finally(() => {
+        if (finished) return
+        finished = true
+        Object.entries(chainsCbs).forEach(([name, [_, reject]]) =>
+          reject(new CCIPRpcNotFoundError(name)),
+        )
+      })
     return Promise.any(txs)
   })
 

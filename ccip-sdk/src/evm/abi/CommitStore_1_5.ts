@@ -1,6 +1,6 @@
 export default [
   // generate:
-  // fetch('https://github.com/smartcontractkit/ccip/raw/release/2.14.0-ccip1.5/core/gethwrappers/ccip/generated/commit_store/commit_store.go')
+  // fetch('https://github.com/smartcontractkit/ccip/raw/release/2.17.0-ccip1.5/core/gethwrappers/ccip/generated/commit_store/commit_store.go')
   //   .then((res) => res.text())
   //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
   //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))

@@ -13,6 +13,7 @@ import OffRamp_1_6_ABI from './abi/OffRamp_1_6.ts'
 import EVM2EVMOnRamp_1_2_ABI from './abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
+import PriceRegistry_1_2_ABI from './abi/PriceRegistry_1_2.ts'
 import Router_ABI from './abi/Router.ts'
 import TokenAdminRegistry_ABI from './abi/TokenAdminRegistry_1_5.ts'
 
@@ -43,6 +44,7 @@ export const interfaces = {
   OnRamp_v1_6: new Interface(OnRamp_1_6_ABI),
   EVM2EVMOnRamp_v1_5: new Interface(EVM2EVMOnRamp_1_5_ABI),
   EVM2EVMOnRamp_v1_2: new Interface(EVM2EVMOnRamp_1_2_ABI),
+  PriceRegistry_v1_2: new Interface(PriceRegistry_1_2_ABI),
   Custom: new Interface(customErrors),
 } as const
 
