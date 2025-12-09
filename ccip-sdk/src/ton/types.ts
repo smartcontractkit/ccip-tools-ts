@@ -19,10 +19,6 @@ export interface TONWallet {
   keyPair: KeyPair
 }
 
-/**
- * Result of executeReport containing transaction identification info
- */
-
 // asSnakeData helper for encoding variable-length arrays
 function asSnakeData<T>(array: T[], builderFn: (item: T) => Builder): Cell {
   const cells: Builder[] = []
