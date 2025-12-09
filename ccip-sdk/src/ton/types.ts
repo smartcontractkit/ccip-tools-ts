@@ -4,6 +4,9 @@ import type { BytesLike } from 'ethers'
 import type { GenericExtraArgsV2 } from '../extra-args.ts'
 import type { CCIPMessage_V1_6, ExecutionReport } from '../types.ts'
 
+/**
+ *
+ */
 export type CCIPMessage_V1_6_TON = CCIPMessage_V1_6 & GenericExtraArgsV2
 
 // asSnakeData helper for encoding variable-length arrays
@@ -46,6 +49,9 @@ function convertProofsToBigInt(proofs: readonly BytesLike[]): bigint[] {
   })
 }
 
+/**
+ *
+ */
 export function serializeExecutionReport(execReport: ExecutionReport<CCIPMessage_V1_6_TON>): Cell {
   return beginCell()
     .storeUint(execReport.message.header.sourceChainSelector, 64)

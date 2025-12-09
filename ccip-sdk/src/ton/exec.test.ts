@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+
 import { Cell, beginCell, toNano } from '@ton/core'
+
 import { executeReport } from './exec.ts'
 import type { ExecutionReport } from '../types.ts'
 import type { CCIPMessage_V1_6_TON } from './types.ts'

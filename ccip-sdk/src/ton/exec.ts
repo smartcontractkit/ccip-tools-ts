@@ -1,9 +1,12 @@
 import { beginCell, toNano } from '@ton/core'
-import type { ExecutionReport } from '../types.ts'
-import type { CCIPMessage_V1_6_TON } from './types.ts'
-import { serializeExecutionReport } from './types.ts'
-import { TonConnect } from '@tonconnect/sdk'
+import type { TonConnect } from '@tonconnect/sdk'
 
+import type { ExecutionReport } from '../types.ts'
+import { type CCIPMessage_V1_6_TON, serializeExecutionReport } from './types.ts'
+
+/**
+ *
+ */
 export async function executeReport(
   tonConnect: TonConnect,
   offRamp: string,

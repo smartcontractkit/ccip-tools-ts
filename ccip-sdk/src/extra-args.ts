@@ -57,17 +57,15 @@ export type SuiExtraArgsV1 = EVMExtraArgsV2 & {
 }
 
 // Same structure as EVMExtraArgsV2. TON calls it GenericExtraArgsV2
+/**
+ *
+ */
 export type GenericExtraArgsV2 = EVMExtraArgsV2
 
 /**
  * Union type of all supported extra arguments formats.
  */
-export type ExtraArgs =
-  | EVMExtraArgsV1
-  | EVMExtraArgsV2
-  | SVMExtraArgsV1
-  | SuiExtraArgsV1
-  | GenericExtraArgsV2
+export type ExtraArgs = EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1 | SuiExtraArgsV1
 
 /**
  * Encodes extra arguments for CCIP messages.
