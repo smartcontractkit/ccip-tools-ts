@@ -1,4 +1,6 @@
 import { type Builder, Address, Cell, beginCell } from '@ton/core'
+import type { KeyPair } from '@ton/crypto'
+import type { WalletContractV4 } from '@ton/ton'
 import type { BytesLike } from 'ethers'
 
 import type { GenericExtraArgsV2 } from '../extra-args.ts'
@@ -8,6 +10,18 @@ import type { CCIPMessage_V1_6, ExecutionReport } from '../types.ts'
  *
  */
 export type CCIPMessage_V1_6_TON = CCIPMessage_V1_6 & GenericExtraArgsV2
+
+/**
+ * TON wallet with keypair for signing transactions
+ */
+export interface TONWallet {
+  contract: WalletContractV4
+  keyPair: KeyPair
+}
+
+/**
+ * Result of executeReport containing transaction identification info
+ */
 
 // asSnakeData helper for encoding variable-length arrays
 function asSnakeData<T>(array: T[], builderFn: (item: T) => Builder): Cell {

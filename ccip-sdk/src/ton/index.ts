@@ -1,6 +1,8 @@
-import { Cell, beginCell } from '@ton/core'
-import { TonConnect } from '@tonconnect/sdk'
+import { Address, Cell, beginCell } from '@ton/core'
+import { keyPairFromSecretKey, mnemonicToPrivateKey } from '@ton/crypto'
+import { TonClient, WalletContractV4 } from '@ton/ton'
 import { type BytesLike, isBytesLike } from 'ethers'
+import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { type LogFilter, Chain } from '../chain.ts'
@@ -20,11 +22,11 @@ import {
   type OffchainTokenData,
   ChainFamily,
 } from '../types.ts'
-import { getDataBytes } from '../utils.ts'
+import { getDataBytes, networkInfo } from '../utils.ts'
 // import { parseTONLogs } from './utils.ts'
 import { executeReport } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
-import type { CCIPMessage_V1_6_TON } from './types.ts'
+import type { CCIPMessage_V1_6_TON, TONWallet } from './types.ts'
 
 const GENERIC_V2_EXTRA_ARGS_TAG = Number.parseInt(GenericExtraArgsV2, 16)
 
@@ -39,21 +41,40 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   static readonly decimals = 8
 
   readonly network: NetworkInfo<typeof ChainFamily.TON>
+  readonly provider: TonClient
 
   /**
    *
    */
-  constructor(network: NetworkInfo<typeof ChainFamily.TON>) {
+  constructor(client: TonClient, network: NetworkInfo<typeof ChainFamily.TON>) {
     super()
-
+    this.provider = client
     this.network = network
+
+    this.getTransaction = memoize(this.getTransaction.bind(this), {
+      maxSize: 100,
+    })
   }
 
   /**
    *
    */
-  static async fromUrl(_url: string): Promise<TONChain> {
-    return Promise.reject(new Error('Not implemented'))
+  static async fromUrl(url: string): Promise<TONChain> {
+    const client = new TonClient({ endpoint: url })
+
+    // Detect network from URL
+    let networkId: string
+    if (url.includes('testnet')) {
+      networkId = 'ton-testnet'
+    } else if (url.includes('mainnet') || url.includes('toncenter.com/api')) {
+      networkId = 'ton-mainnet'
+    } else {
+      // Default to mainnet for unknown URLs
+      networkId = 'ton-mainnet'
+    }
+
+    const network = networkInfo(networkId) as NetworkInfo<typeof ChainFamily.TON>
+    return new TONChain(client, network)
   }
 
   /**
@@ -64,18 +85,40 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
+   * Fetches a transaction by its hash.
    *
+   * TON transactions are identified by (address, lt, hash).
+   * Expected format: "workchain:address:lt:hash"
+   * Example: "0:abc123...def:12345:abc123...def"
+   *
+   * @param hash - Transaction identifier in format "workchain:address:lt:hash"
+   * @returns ChainTransaction with transaction details
    */
   async getTransaction(hash: string): Promise<ChainTransaction> {
-    // TODO: Implement full transaction fetching when TON provider is available
-    // For now, return minimal structure for executeReport flow
-    // The hash from TonConnect is the BOC of the signed transaction
+    const parts = hash.split(':')
+
+    if (parts.length !== 4) {
+      throw new Error(
+        `Invalid TON transaction hash format: "${hash}". Expected "workchain:address:lt:hash"`,
+      )
+    }
+
+    const address = Address.parseRaw(`${parts[0]}:${parts[1]}`)
+    const lt = parts[2]
+    const txHash = parts[3]
+
+    const tx = await this.provider.getTransaction(address, lt, txHash)
+
+    if (!tx) {
+      throw new Error(`Transaction not found: ${hash}`)
+    }
+
     return {
       hash,
-      logs: [],
-      blockNumber: 0,
-      timestamp: Math.floor(Date.now() / 1000),
-      from: 'unknown',
+      logs: [], // TODO
+      blockNumber: Number(tx.lt),
+      timestamp: tx.now,
+      from: address.toString(),
     }
   }
 
@@ -207,21 +250,58 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   *
+   * Loads a TON wallet from various input formats.
    */
-  async getWallet(opts: { wallet?: unknown } = {}): Promise<TonConnect> {
-    // Handle TonConnect instance if provided
-    if (opts.wallet instanceof TonConnect) {
-      return opts.wallet
+  async getWallet(opts: { wallet?: unknown } = {}): Promise<TONWallet> {
+    // Handle private key string (hex or base64)
+    if (typeof opts.wallet === 'string') {
+      // Try mnemonic phrase first (space-separated words)
+      const words = opts.wallet.trim().split(/\s+/)
+      if (words.length >= 12 && words.length <= 24) {
+        const keyPair = await mnemonicToPrivateKey(words)
+        const contract = WalletContractV4.create({
+          workchain: 0,
+          publicKey: keyPair.publicKey,
+        })
+        return { contract, keyPair }
+      }
+
+      // Try hex or base64 secret key (64 bytes)
+      let secretKey: Buffer
+
+      if (opts.wallet.startsWith('0x')) {
+        secretKey = Buffer.from(opts.wallet.slice(2), 'hex')
+      } else {
+        try {
+          secretKey = Buffer.from(opts.wallet, 'base64')
+          if (secretKey.length !== 64) {
+            secretKey = Buffer.from(opts.wallet, 'hex')
+          }
+        } catch {
+          secretKey = Buffer.from(opts.wallet, 'hex')
+        }
+      }
+
+      if (secretKey.length === 64) {
+        const keyPair = keyPairFromSecretKey(secretKey)
+        const contract = WalletContractV4.create({
+          workchain: 0,
+          publicKey: keyPair.publicKey,
+        })
+        return { contract, keyPair }
+      }
+
+      throw new Error('Invalid key format. Expected 64-byte secret key or mnemonic phrase.')
     }
 
-    // TonConnect doesn't support raw private key wallet creation
-    // Users must provide a pre-configured TonConnect instance
-    if (typeof opts.wallet === 'string') {
-      throw new Error(
-        'TON requires a TonConnect instance. Raw private key support is not available. ' +
-          'Create a TonConnect instance and pass it as opts.wallet.',
-      )
+    // Handle TONWallet instance directly
+    if (
+      opts.wallet &&
+      typeof opts.wallet === 'object' &&
+      'contract' in opts.wallet &&
+      'keyPair' in opts.wallet
+    ) {
+      return opts.wallet as TONWallet
     }
 
     // Delegate to static method (for CLI overrides)
@@ -356,15 +436,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     execReport: ExecutionReport,
     opts?: { wallet?: unknown; gasLimit?: number },
   ): Promise<ChainTransaction> {
-    const tonConnect = await this.getWallet(opts)
-
-    // Validate TON message format
-    if (!('gasLimit' in execReport.message && 'allowOutOfOrderExecution' in execReport.message)) {
-      throw new Error('TON expects GenericExtraArgsV2 reports')
-    }
+    const wallet = await this.getWallet(opts)
 
     const result = await executeReport(
-      tonConnect,
+      this.provider,
+      wallet,
       offRamp,
       execReport as ExecutionReport<CCIPMessage_V1_6_TON>,
       opts,

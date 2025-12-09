@@ -70,7 +70,9 @@ type ChainFamilyWithId<F extends ChainFamily> = F extends typeof ChainFamily.EVM
     ? { readonly family: F; readonly chainId: string }
     : F extends typeof ChainFamily.Aptos | typeof ChainFamily.Sui
       ? { readonly family: F; readonly chainId: `${F}:${number}` }
-      : never
+      : F extends typeof ChainFamily.TON
+        ? { readonly family: F; readonly chainId: number }
+        : never
 
 /**
  * Network information including chain selector and metadata.

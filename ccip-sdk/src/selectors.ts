@@ -1335,6 +1335,29 @@ const selectors: Selectors = {
     family: 'sui',
   },
   // end:generate
+
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors_ton.yml')
+  //   .then((res) => res.text())
+  //   .then((body) => require('yaml').parse(body, { intAsBigInt: true }).selectors)
+  //   .then((obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [`ton:${k}`, { ...v, family: 'ton' }])))
+  //   .then((obj) => [...require('util').inspect(obj).split('\n').slice(1, -1), ','])
+  '-239': {
+    name: 'ton-mainnet',
+    selector: 16448340667252469081n,
+    family: 'ton',
+  },
+  '-3': {
+    name: 'ton-testnet',
+    selector: 1399300952838017768n,
+    family: 'ton',
+  },
+  '-217': {
+    name: 'ton-localnet',
+    selector: 13879075125137744094n,
+    family: 'ton',
+  },
 }
+// end:generate
 
 export default selectors

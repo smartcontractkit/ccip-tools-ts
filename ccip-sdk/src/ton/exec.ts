@@ -1,14 +1,16 @@
-import { beginCell, toNano } from '@ton/core'
-import type { TonConnect } from '@tonconnect/sdk'
+import { Address, beginCell, toNano } from '@ton/core'
+import { type TonClient, internal } from '@ton/ton'
 
 import type { ExecutionReport } from '../types.ts'
-import { type CCIPMessage_V1_6_TON, serializeExecutionReport } from './types.ts'
+import { type CCIPMessage_V1_6_TON, type TONWallet, serializeExecutionReport } from './types.ts'
+import { waitForTransaction } from './utils.ts'
 
 /**
  *
  */
 export async function executeReport(
-  tonConnect: TonConnect,
+  client: TonClient,
+  wallet: TONWallet,
   offRamp: string,
   execReport: ExecutionReport<CCIPMessage_V1_6_TON>,
   opts?: { gasLimit?: number },
@@ -27,20 +29,30 @@ export async function executeReport(
     .storeCoins(gasOverride) // gasOverride (optional, 0 = no override)
     .endCell()
 
-  const bocHex = '0x' + payload.toBoc().toString('hex')
+  // Open wallet and send transaction
+  const openedWallet = client.open(wallet.contract)
+  const seqno = await openedWallet.getSeqno()
+  const walletAddress = wallet.contract.address
 
-  // Send transaction via TonConnect
-  const transaction = {
-    validUntil: Math.floor(Date.now() / 1000) + 300,
+  await openedWallet.sendTransfer({
+    seqno,
+    secretKey: wallet.keyPair.secretKey,
     messages: [
-      {
-        address: offRamp,
-        amount: toNano('0.5').toString(), // Base fee for manual execution
-        payload: bocHex,
-      },
+      internal({
+        to: offRamp,
+        value: toNano('0.5'),
+        body: payload,
+      }),
     ],
-  }
+  })
 
-  const result = await tonConnect.sendTransaction(transaction)
-  return { hash: result.boc }
+  // Wait for transaction to be confirmed
+  const offRampAddress = Address.parse(offRamp)
+  const txInfo = await waitForTransaction(client, walletAddress, seqno, offRampAddress)
+
+  // Return composite hash in format "workchain:address:lt:hash"
+  // we use toRawString() to get "workchain:addr" format
+  return {
+    hash: `${walletAddress.toRawString()}:${txInfo.lt}:${txInfo.hash}`,
+  }
 }
