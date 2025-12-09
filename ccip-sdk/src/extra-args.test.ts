@@ -7,7 +7,7 @@ import { dataSlice, getNumber } from 'ethers'
 import './index.ts'
 import {
   EVMExtraArgsV2Tag,
-  GenericExtraArgsV2,
+  GenericExtraArgsV2Tag,
   decodeExtraArgs,
   encodeExtraArgs,
 } from './extra-args.ts'
@@ -87,7 +87,7 @@ describe('encodeExtraArgs', () => {
         ChainFamily.TON,
       )
 
-      assert.equal(extractMagicTag(encoded), GenericExtraArgsV2)
+      assert.equal(extractMagicTag(encoded), GenericExtraArgsV2Tag)
       assert.ok(encoded.length > 10)
     })
 
@@ -97,7 +97,7 @@ describe('encodeExtraArgs', () => {
         ChainFamily.TON,
       )
 
-      assert.equal(extractMagicTag(encoded), GenericExtraArgsV2)
+      assert.equal(extractMagicTag(encoded), GenericExtraArgsV2Tag)
       assert.ok(encoded.length > 10)
     })
   })
@@ -288,7 +288,7 @@ describe('parseExtraArgs', () => {
       const tonEncoded = encodeExtraArgs(args, ChainFamily.TON)
 
       assert.equal(evmEncoded.substring(0, 10), EVMExtraArgsV2Tag)
-      assert.equal(extractMagicTag(tonEncoded), GenericExtraArgsV2)
+      assert.equal(extractMagicTag(tonEncoded), GenericExtraArgsV2Tag)
       assert.notEqual(evmEncoded, tonEncoded)
     })
   })

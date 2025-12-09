@@ -2,11 +2,12 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { beginCell } from '@ton/core'
+import { sha256, toBigInt } from 'ethers'
 
-import { extractMagicTag, hexToBuffer, sha256, toBigInt, tryParseCell } from './utils.ts'
+import { extractMagicTag, hexToBuffer, tryParseCell } from './utils.ts'
 import {
   EVMExtraArgsV1Tag,
-  GenericExtraArgsV2,
+  GenericExtraArgsV2Tag,
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
@@ -103,7 +104,7 @@ describe('TON utils', () => {
   describe('extractMagicTag', () => {
     it('should extract magic tag from BOC', () => {
       const cell = beginCell()
-        .storeUint(Number(GenericExtraArgsV2), 32)
+        .storeUint(Number(GenericExtraArgsV2Tag), 32)
         .storeUint(123456, 256)
         .storeBit(true)
         .endCell()

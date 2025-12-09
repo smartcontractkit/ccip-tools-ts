@@ -92,7 +92,7 @@ describe('TON hasher', () => {
     it('should hash message with tokens', () => {
       const tokenAmounts: CCIPMessage_V1_6['tokenAmounts'] = [
         {
-          sourcePoolAddress: '0:' + '4'.repeat(64),
+          sourcePoolAddress: '0x123456789abcdef123456789abcdef123456789a',
           destTokenAddress: '0:' + '5'.repeat(64),
           extraData: '0x',
           destGasAmount: 1000n,

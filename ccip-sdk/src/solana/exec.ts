@@ -20,8 +20,8 @@ import type { ChainTransaction, ExecutionReport } from '../types.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
 import type { CCIPMessage_V1_6_Solana } from './types.ts'
-import { getDataBytes, sleep, toLeArray } from '../utils.ts'
-import { bytesToBuffer, simulateTransaction, simulationProvider } from './utils.ts'
+import { bytesToBuffer, getDataBytes, sleep, toLeArray } from '../utils.ts'
+import { simulateTransaction, simulationProvider } from './utils.ts'
 
 type ExecStepTx = readonly [reason: string, transactions: VersionedTransaction]
 

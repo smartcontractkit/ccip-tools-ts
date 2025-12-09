@@ -22,9 +22,9 @@ import { zeroPadValue } from 'ethers'
 
 import { SolanaChain } from './index.ts'
 import type { AnyMessage } from '../types.ts'
-import { toLeArray } from '../utils.ts'
+import { bytesToBuffer, toLeArray } from '../utils.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
-import { bytesToBuffer, simulateTransaction, simulationProvider } from './utils.ts'
+import { simulateTransaction, simulationProvider } from './utils.ts'
 
 function anyToSvmMessage(message: AnyMessage): IdlTypes<typeof CCIP_ROUTER_IDL>['SVM2AnyMessage'] {
   const feeTokenPubkey = message.feeToken ? new PublicKey(message.feeToken) : PublicKey.default

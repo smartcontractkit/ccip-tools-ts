@@ -69,6 +69,7 @@ import {
   ExecutionState,
 } from '../types.ts'
 import {
+  bytesToBuffer,
   createRateLimitedFetch,
   decodeAddress,
   decodeOnRampAddress,
@@ -89,13 +90,7 @@ import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import { fetchSolanaOffchainTokenData } from './offchain.ts'
 import { ccipSend, getFee } from './send.ts'
 import type { CCIPMessage_V1_6_Solana } from './types.ts'
-import {
-  bytesToBuffer,
-  getErrorFromLogs,
-  hexDiscriminator,
-  parseSolanaLogs,
-  simulationProvider,
-} from './utils.ts'
+import { getErrorFromLogs, hexDiscriminator, parseSolanaLogs, simulationProvider } from './utils.ts'
 import {
   fetchAllMessagesInBatch,
   fetchCCIPRequestById,

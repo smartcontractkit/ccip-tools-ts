@@ -11,7 +11,7 @@ export const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '
 export const SVMExtraArgsV1Tag = id('CCIP SVMExtraArgsV1').substring(0, 10) as '0x1f3b3aba'
 /** Tag identifier for SuiExtraArgsV1 encoding. */
 export const SuiExtraArgsV1Tag = id('CCIP SuiExtraArgsV1').substring(0, 10) as '0x21ea4ca9'
-export const GenericExtraArgsV2 = EVMExtraArgsV2Tag
+export const GenericExtraArgsV2Tag = EVMExtraArgsV2Tag
 
 /**
  * EVM extra arguments version 1 with gas limit only.

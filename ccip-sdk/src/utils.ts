@@ -279,6 +279,15 @@ export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
 }
 
 /**
+ * Converts bytes to a Node.js Buffer.
+ * @param bytes - Bytes to convert (hex string, Uint8Array, Base64, etc).
+ * @returns Node.js Buffer.
+ */
+export function bytesToBuffer(bytes: BytesLike | readonly number[]): Buffer {
+  return Buffer.from(getDataBytes(bytes))
+}
+
+/**
  * Extracts address bytes, handling both hex and Base58 formats.
  * @param address - Address in hex or Base58 format.
  * @returns Address bytes as Uint8Array.
@@ -338,7 +347,7 @@ export function convertKeysToCamelCase(
  * @param ms - Duration in milliseconds.
  * @returns Promise that resolves after the specified duration.
  */
-export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms).unref())
+export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
  * Parses a typeAndVersion string into its components.

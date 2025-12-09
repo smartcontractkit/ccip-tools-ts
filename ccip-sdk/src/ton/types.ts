@@ -1,10 +1,11 @@
 import { type Builder, Address, Cell, beginCell } from '@ton/core'
 import type { KeyPair } from '@ton/crypto'
 import type { WalletContractV4 } from '@ton/ton'
-import type { BytesLike } from 'ethers'
+import { toBigInt } from 'ethers'
 
 import type { GenericExtraArgsV2 } from '../extra-args.ts'
 import type { CCIPMessage_V1_6, ExecutionReport } from '../types.ts'
+import { bytesToBuffer } from '../utils.ts'
 
 /**
  *
@@ -47,18 +48,6 @@ function asSnakeData<T>(array: T[], builderFn: (item: T) => Builder): Cell {
   return current
 }
 
-function convertProofsToBigInt(proofs: readonly BytesLike[]): bigint[] {
-  return proofs.map((proof) => {
-    if (typeof proof === 'string') {
-      return BigInt(proof.startsWith('0x') ? proof : '0x' + proof)
-    }
-    if (proof instanceof Uint8Array) {
-      return BigInt('0x' + Buffer.from(proof).toString('hex'))
-    }
-    throw new Error(`Unsupported proof type: ${typeof proof}`)
-  })
-}
-
 /**
  *
  */
@@ -68,7 +57,7 @@ export function serializeExecutionReport(execReport: ExecutionReport<CCIPMessage
     .storeRef(asSnakeData([execReport.message], serializeMessage))
     .storeRef(Cell.EMPTY)
     .storeRef(
-      asSnakeData(convertProofsToBigInt(execReport.proofs), (proof: bigint) => {
+      asSnakeData(execReport.proofs.map(toBigInt), (proof: bigint) => {
         return beginCell().storeUint(proof, 256)
       }),
     )
@@ -98,12 +87,12 @@ function serializeHeader(header: CCIPMessage_V1_6['header']): Builder {
 }
 
 function serializeSender(sender: string): Builder {
-  const senderBytes = Buffer.from(sender.slice(2), 'hex')
+  const senderBytes = bytesToBuffer(sender)
   return beginCell().storeUint(senderBytes.length, 8).storeBuffer(senderBytes)
 }
 
 function serializeData(data: string): Builder {
-  return beginCell().storeBuffer(Buffer.from(data.slice(2), 'hex'))
+  return beginCell().storeBuffer(bytesToBuffer(data))
 }
 
 function serializeTokenAmounts(tokenAmounts: CCIPMessage_V1_6['tokenAmounts']): Builder {
@@ -114,11 +103,7 @@ function serializeTokenAmounts(tokenAmounts: CCIPMessage_V1_6['tokenAmounts']): 
         .storeRef(serializeSourcePool(ta.sourcePoolAddress))
         .storeAddress(Address.parse(ta.destTokenAddress))
         .storeUint(BigInt(ta.amount), 256)
-        .storeRef(
-          beginCell()
-            .storeBuffer(Buffer.from(ta.extraData.slice(2), 'hex'))
-            .endCell(),
-        )
+        .storeRef(beginCell().storeBuffer(bytesToBuffer(ta.extraData)).endCell())
         .endCell(),
     )
   }
@@ -126,6 +111,6 @@ function serializeTokenAmounts(tokenAmounts: CCIPMessage_V1_6['tokenAmounts']): 
 }
 
 function serializeSourcePool(address: string): Builder {
-  const bytes = Buffer.from(address.slice(2), 'hex')
+  const bytes = bytesToBuffer(address)
   return beginCell().storeUint(bytes.length, 8).storeBuffer(bytes)
 }

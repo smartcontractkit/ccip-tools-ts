@@ -1,35 +1,24 @@
-import { createHash } from 'crypto'
-
 import { type Address, Cell, beginCell } from '@ton/core'
 import type { TonClient } from '@ton/ton'
 
-import { sleep } from '../utils.ts'
-
-/**
- * Computes SHA256 hash of data and returns as hex string
- * Used throughout TON hasher for domain separation and message hashing
- */
-export const sha256 = (data: Uint8Array): string => {
-  return '0x' + createHash('sha256').update(data).digest('hex')
-}
+import { bytesToBuffer, sleep } from '../utils.ts'
 
 /**
  * Converts hex string to Buffer, handling 0x prefix normalization
  * Returns empty buffer for empty input
  */
 export const hexToBuffer = (value: string): Buffer => {
-  const normalized = value.startsWith('0x') || value.startsWith('0X') ? value.slice(2) : value
-  return normalized.length === 0 ? Buffer.alloc(0) : Buffer.from(normalized, 'hex')
-}
-
-/**
- * Converts various numeric types to BigInt for TON's big integer operations
- * Used throughout the hasher for chain selectors, amounts, and sequence numbers
- */
-export const toBigInt = (value: bigint | number | string): bigint => {
-  if (typeof value === 'bigint') return value
-  if (typeof value === 'number') return BigInt(value)
-  return BigInt(value)
+  if (!value || value === '0x' || value === '0X') return Buffer.alloc(0)
+  // Normalize to lowercase 0x prefix for bytesToBuffer/getDataBytes
+  let normalized: string
+  if (value.startsWith('0x')) {
+    normalized = value
+  } else if (value.startsWith('0X')) {
+    normalized = `0x${value.slice(2)}`
+  } else {
+    normalized = `0x${value}`
+  }
+  return bytesToBuffer(normalized)
 }
 
 /**

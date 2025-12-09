@@ -6,7 +6,7 @@ import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { type LogFilter, Chain } from '../chain.ts'
-import { type ExtraArgs, GenericExtraArgsV2 } from '../extra-args.ts'
+import { type ExtraArgs, type GenericExtraArgsV2, GenericExtraArgsV2Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -28,7 +28,7 @@ import { executeReport } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import type { CCIPMessage_V1_6_TON, TONWallet } from './types.ts'
 
-const GENERIC_V2_EXTRA_ARGS_TAG = Number.parseInt(GenericExtraArgsV2, 16)
+const GENERIC_V2_EXTRA_ARGS_TAG = Number.parseInt(GenericExtraArgsV2Tag, 16)
 
 /**
  *
