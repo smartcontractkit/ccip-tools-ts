@@ -283,7 +283,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     })
     if (!tx) throw new Error(`Transaction not found: ${hash}`)
     if (tx.blockTime) {
-      ; (
+      ;(
         this.getBlockTimestamp as Memoized<typeof this.getBlockTimestamp, { async: true }>
       ).cache.set([tx.slot], Promise.resolve(tx.blockTime))
     } else {
@@ -293,10 +293,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     // Parse logs from transaction using helper function
     const logs_ = tx.meta?.logMessages?.length
       ? parseSolanaLogs(tx.meta?.logMessages).map((l) => ({
-        ...l,
-        transactionHash: hash,
-        blockNumber: tx.slot,
-      }))
+          ...l,
+          transactionHash: hash,
+          blockNumber: tx.slot,
+        }))
       : []
 
     const chainTx: SolanaTransaction = {
@@ -1434,9 +1434,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           }
         }
         try {
-          ; ({ base } = tokenPoolCoder.accounts.decode('chainConfig', acc.account.data))
+          ;({ base } = tokenPoolCoder.accounts.decode('chainConfig', acc.account.data))
         } catch (_) {
-          ; ({ base } = cctpTokenPoolCoder.accounts.decode('chainConfig', acc.account.data))
+          ;({ base } = cctpTokenPoolCoder.accounts.decode('chainConfig', acc.account.data))
         }
 
         let remoteChainSelector
@@ -1475,7 +1475,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           const cur =
             inboundRateLimiterState.tokens +
             inboundRateLimiterState.rate *
-            BigInt(Math.floor(Date.now() / 1000) - base.inboundRateLimit.lastUpdated.toNumber())
+              BigInt(Math.floor(Date.now() / 1000) - base.inboundRateLimit.lastUpdated.toNumber())
           if (cur < inboundRateLimiterState.capacity) inboundRateLimiterState.tokens = cur
           else inboundRateLimiterState.tokens = inboundRateLimiterState.capacity
         }
@@ -1490,7 +1490,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           const cur =
             outboundRateLimiterState.tokens +
             outboundRateLimiterState.rate *
-            BigInt(Math.floor(Date.now() / 1000) - base.outboundRateLimit.lastUpdated.toNumber())
+              BigInt(Math.floor(Date.now() / 1000) - base.outboundRateLimit.lastUpdated.toNumber())
           if (cur < outboundRateLimiterState.capacity) outboundRateLimiterState.tokens = cur
           else outboundRateLimiterState.tokens = outboundRateLimiterState.capacity
         }

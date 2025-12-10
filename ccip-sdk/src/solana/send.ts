@@ -19,7 +19,7 @@ import { zeroPadValue } from 'ethers'
 
 import { SolanaChain } from './index.ts'
 import { type AnyMessage, type WithLogger, ChainFamily } from '../types.ts'
-import { toLeArray, util, bytesToBuffer, } from '../utils.ts'
+import { bytesToBuffer, toLeArray, util } from '../utils.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import type { UnsignedSolanaTx } from './types.ts'
 import { simulationProvider } from './utils.ts'
