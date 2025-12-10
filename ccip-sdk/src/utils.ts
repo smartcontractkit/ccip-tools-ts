@@ -8,7 +8,7 @@ import {
   decodeBase64,
   getBytes,
   isBytesLike,
-  toBeArray,
+  toBeHex,
   toBigInt,
 } from 'ethers'
 import { memoize } from 'micro-memoize'
@@ -48,7 +48,7 @@ export async function getSomeBlockNumberBefore(
     beforeBlockNumber = Math.max(
       1,
       Math.trunc(beforeBlockNumber - (beforeTimestamp - timestamp) / estimatedBlockTime) -
-        10 ** iter,
+      10 ** iter,
     )
     beforeTimestamp = await getBlockTimestamp(beforeBlockNumber)
     estimatedBlockTime = (now - beforeTimestamp) / (recentBlockNumber - beforeBlockNumber)
@@ -245,7 +245,7 @@ export function leToBigInt(data: BytesLike | readonly number[]): bigint {
  * @returns Little-endian Uint8Array.
  */
 export function toLeArray(value: BigNumberish, width?: Numeric): Uint8Array {
-  return toBeArray(value, width).reverse()
+  return getBytes(toBeHex(value, width)).reverse()
 }
 
 /**
@@ -536,21 +536,21 @@ export function createRateLimitedFetch(
 const util =
   'util' in globalThis
     ? (
-        globalThis as unknown as {
-          util: {
-            inspect: ((v: unknown) => string) & {
-              custom: symbol
-              defaultOptions: Record<string, unknown>
-            }
+      globalThis as unknown as {
+        util: {
+          inspect: ((v: unknown) => string) & {
+            custom: symbol
+            defaultOptions: Record<string, unknown>
           }
         }
-      ).util
-    : {
-        inspect: Object.assign((v: unknown) => JSON.stringify(v), {
-          custom: Symbol('custom'),
-          defaultOptions: {
-            depth: 2,
-          } as Record<string, unknown>,
-        }),
       }
+    ).util
+    : {
+      inspect: Object.assign((v: unknown) => JSON.stringify(v), {
+        custom: Symbol('custom'),
+        defaultOptions: {
+          depth: 2,
+        } as Record<string, unknown>,
+      }),
+    }
 export { util }
