@@ -81,7 +81,7 @@ describe('encodeExtraArgs', () => {
     })
   })
   describe('TON extra args', () => {
-    it('should encode GenericExtraArgsV2', () => {
+    it('should encode EVMExtraArgsV2', () => {
       const encoded = encodeExtraArgs(
         { gasLimit: 400_000n, allowOutOfOrderExecution: true },
         ChainFamily.TON,
@@ -166,27 +166,27 @@ describe('parseExtraArgs', () => {
     })
   })
   describe('TON extra args (TLB encoding)', () => {
-    it('should parse GenericExtraArgsV2', () => {
+    it('should parse EVMExtraArgsV2 (GenericExtraArgsV2)', () => {
       const encoded = encodeExtraArgs(
         { gasLimit: 400_000n, allowOutOfOrderExecution: true },
         ChainFamily.TON,
       )
       const res = decodeExtraArgs(encoded, ChainFamily.TON)
       assert.deepEqual(res, {
-        _tag: 'GenericExtraArgsV2',
+        _tag: 'EVMExtraArgsV2',
         gasLimit: 400000n,
         allowOutOfOrderExecution: true,
       })
     })
 
-    it('should parse GenericExtraArgsV2 with allowOutOfOrderExecution false', () => {
+    it('should parse EVMExtraArgsV2 (GenericExtraArgsV2) with allowOutOfOrderExecution false', () => {
       const encoded = encodeExtraArgs(
         { gasLimit: 500_000n, allowOutOfOrderExecution: false },
         ChainFamily.TON,
       )
       const res = decodeExtraArgs(encoded, ChainFamily.TON)
       assert.deepEqual(res, {
-        _tag: 'GenericExtraArgsV2',
+        _tag: 'EVMExtraArgsV2',
         gasLimit: 500000n,
         allowOutOfOrderExecution: false,
       })
@@ -251,11 +251,11 @@ describe('parseExtraArgs', () => {
       assert.deepEqual(decoded, { ...original, _tag: 'EVMExtraArgsV2' })
     })
 
-    it('should round-trip TON GenericExtraArgsV2', () => {
+    it('should round-trip TON EVMExtraArgsV2', () => {
       const original = { gasLimit: 400_000n, allowOutOfOrderExecution: true }
       const encoded = encodeExtraArgs(original, ChainFamily.TON)
       const decoded = decodeExtraArgs(encoded, ChainFamily.TON)
-      assert.deepEqual(decoded, { ...original, _tag: 'GenericExtraArgsV2' })
+      assert.deepEqual(decoded, { ...original, _tag: 'EVMExtraArgsV2' })
     })
   })
 
