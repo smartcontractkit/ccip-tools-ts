@@ -20,7 +20,7 @@ TONChain.getWallet = async function loadTONWallet({
       workchain: 0,
       publicKey: keyPair.publicKey,
     })
-    return { contract, keyPair } // Now properly typed as TONWallet
+    return { contract, keyPair }
   }
 
   // Handle hex private key
