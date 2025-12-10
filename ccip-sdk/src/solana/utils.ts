@@ -1,5 +1,3 @@
-import { Buffer } from 'buffer'
-
 import { eventDiscriminator } from '@coral-xyz/anchor'
 import {
   type AddressLookupTableAccount,

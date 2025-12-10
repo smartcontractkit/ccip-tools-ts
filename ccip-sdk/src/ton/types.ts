@@ -7,9 +7,7 @@ import type { GenericExtraArgsV2 } from '../extra-args.ts'
 import type { CCIPMessage_V1_6, ExecutionReport } from '../types.ts'
 import { bytesToBuffer } from '../utils.ts'
 
-/**
- *
- */
+/** TON-specific CCIP v1.6 message type with GenericExtraArgsV2 (gasLimit + allowOutOfOrderExecution). */
 export type CCIPMessage_V1_6_TON = CCIPMessage_V1_6 & GenericExtraArgsV2
 
 /**
@@ -49,7 +47,9 @@ function asSnakeData<T>(array: T[], builderFn: (item: T) => Builder): Cell {
 }
 
 /**
- *
+ * Serializes an execution report into a TON Cell for OffRamp execution.
+ * @param execReport - Execution report containing message, proofs, and proof flag bits.
+ * @returns BOC-serialized Cell containing the execution report.
  */
 export function serializeExecutionReport(execReport: ExecutionReport<CCIPMessage_V1_6_TON>): Cell {
   return beginCell()

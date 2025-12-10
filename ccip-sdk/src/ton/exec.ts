@@ -6,7 +6,16 @@ import { type CCIPMessage_V1_6_TON, type TONWallet, serializeExecutionReport } f
 import { waitForTransaction } from './utils.ts'
 
 /**
+ * Executes a CCIP message on the TON OffRamp contract.
+ * Serializes the execution report, constructs the OffRamp_ManuallyExecute message,
+ * sends the transaction via the wallet, and waits for confirmation.
  *
+ * @param client - TonClient instance for RPC calls.
+ * @param wallet - TON wallet with contract and keypair for signing.
+ * @param offRamp - OffRamp contract address.
+ * @param execReport - Execution report containing the CCIP message and proofs.
+ * @param opts - Optional execution options. Gas limit override for execution (0 = no override).
+ * @returns Transaction hash in format "workchain:address:lt:hash".
  */
 export async function executeReport(
   client: TonClient,

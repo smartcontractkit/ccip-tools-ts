@@ -20,6 +20,7 @@ import {
   type Log_,
   type NetworkInfo,
   type OffchainTokenData,
+  type WithLogger,
   ChainFamily,
 } from '../types.ts'
 import { getDataBytes, networkInfo } from '../utils.ts'
@@ -31,25 +32,26 @@ import type { CCIPMessage_V1_6_TON, TONWallet } from './types.ts'
 const GENERIC_V2_EXTRA_ARGS_TAG = Number.parseInt(GenericExtraArgsV2Tag, 16)
 
 /**
- *
+ * TON chain implementation supporting TON networks.
  */
 export class TONChain extends Chain<typeof ChainFamily.TON> {
   static {
     supportedChains[ChainFamily.TON] = TONChain
   }
   static readonly family = ChainFamily.TON
-  static readonly decimals = 8
+  static readonly decimals = 9 // TON uses 9 decimals (nanotons)
 
-  readonly network: NetworkInfo<typeof ChainFamily.TON>
   readonly provider: TonClient
 
   /**
-   *
+   * Creates a new TONChain instance.
+   * @param client - TonClient instance.
+   * @param network - Network information for this chain.
+   * @param ctx - Context containing logger.
    */
-  constructor(client: TonClient, network: NetworkInfo<typeof ChainFamily.TON>) {
-    super()
+  constructor(client: TonClient, network: NetworkInfo, ctx?: WithLogger) {
+    super(network, ctx)
     this.provider = client
-    this.network = network
 
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       maxSize: 100,
@@ -59,8 +61,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   /**
    * Creates a TONChain instance from an RPC URL.
    * Verifies the connection and detects the network.
+   * @param url - RPC endpoint URL.
+   * @param ctx - Context containing logger.
+   * @returns A new TONChain instance.
    */
-  static async fromUrl(url: string): Promise<TONChain> {
+  static async fromUrl(url: string, ctx?: WithLogger): Promise<TONChain> {
     // Validate URL format for TON endpoints
     if (
       !url.includes('toncenter') &&
@@ -77,9 +82,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     try {
       await client.getMasterchainInfo()
     } catch (error) {
-      throw new Error(
-        `Failed to connect to TON endpoint ${url}: ${error instanceof Error ? error.message : error}`,
-      )
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Failed to connect to TON endpoint ${url}: ${message}`)
     }
 
     // Detect network from URL
@@ -93,13 +97,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       networkId = 'ton-mainnet'
     }
 
-    const network = networkInfo(networkId) as NetworkInfo<typeof ChainFamily.TON>
-    return new TONChain(client, network)
+    return new TONChain(client, networkInfo(networkId), ctx)
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getBlockTimestamp} */
   async getBlockTimestamp(_version: number | 'finalized'): Promise<number> {
     return Promise.reject(new Error('Not implemented'))
   }
@@ -142,24 +143,19 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
   }
 
-  /**
-   *
-   */
-  async *getLogs(_opts: LogFilter & { versionAsHash?: boolean }) {
+  /** {@inheritDoc Chain.getLogs} */
+  async *getLogs(_opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<Log_> {
     await Promise.resolve()
     throw new Error('Not implemented')
+    yield undefined as never
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.fetchRequestsInTx} */
   override async fetchRequestsInTx(_tx: string | ChainTransaction): Promise<CCIPRequest[]> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.fetchAllMessagesInBatch} */
   override async fetchAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
@@ -173,9 +169,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.typeAndVersion} */
   async typeAndVersion(
     _address: string,
   ): Promise<
@@ -185,92 +179,69 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getRouterForOnRamp} */
   getRouterForOnRamp(_onRamp: string, _destChainSelector: bigint): Promise<string> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getRouterForOffRamp} */
   getRouterForOffRamp(_offRamp: string, _sourceChainSelector: bigint): Promise<string> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getNativeTokenForRouter} */
   getNativeTokenForRouter(_router: string): Promise<string> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getOffRampsForRouter} */
   getOffRampsForRouter(_router: string, _sourceChainSelector: bigint): Promise<string[]> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getOnRampForRouter} */
   getOnRampForRouter(_router: string, _destChainSelector: bigint): Promise<string> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getOnRampForOffRamp} */
   async getOnRampForOffRamp(_offRamp: string, _sourceChainSelector: bigint): Promise<string> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
   getCommitStoreForOffRamp(_offRamp: string): Promise<string> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getTokenForTokenPool} */
   async getTokenForTokenPool(_tokenPool: string): Promise<string> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getTokenInfo} */
   async getTokenInfo(_token: string): Promise<{ symbol: string; decimals: number }> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
   getTokenAdminRegistryFor(_address: string): Promise<string> {
     return Promise.reject(new Error('Not implemented'))
   }
 
   /**
-   *
+   * Static wallet loading not available for TON.
+   * @param _opts - Wallet options (unused).
+   * @returns Never resolves, always throws.
    */
-  async getWalletAddress(_opts?: { wallet?: unknown }): Promise<string> {
-    return Promise.reject(new Error('Not implemented'))
-  }
-
-  /**
-   *
-   */
-  static getWallet(_opts: { wallet?: unknown } = {}): Promise<any> {
+  static getWallet(_opts: { wallet?: unknown } = {}): Promise<TONWallet> {
     throw new Error('static TON wallet loading not available')
   }
 
   /**
    * Loads a TON wallet from various input formats.
+   * @param opts - Wallet options (mnemonic, secret key, or TONWallet instance).
+   * @returns TONWallet instance.
    */
   async getWallet(opts: { wallet?: unknown } = {}): Promise<TONWallet> {
     // Handle private key string (hex or base64)
@@ -330,7 +301,9 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
   // Static methods for decoding
   /**
-   *
+   * Decodes a CCIP message from a TON log event.
+   * @param _log - Log with data field.
+   * @returns Decoded CCIPMessage or undefined if not valid.
    */
   static decodeMessage(_log: Log_): CCIPMessage_V1_6_TON | undefined {
     throw new Error('Not implemented')
@@ -391,43 +364,60 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   *
+   * Decodes commit reports from a TON log event.
+   * @param _log - Log with data field.
+   * @param _lane - Lane info for filtering.
+   * @returns Array of CommitReport or undefined if not valid.
    */
   static decodeCommits(_log: Log_, _lane?: Lane): CommitReport[] | undefined {
     throw new Error('Not implemented')
   }
 
   /**
-   *
+   * Decodes an execution receipt from a TON log event.
+   * @param _log - Log with data field.
+   * @returns ExecutionReceipt or undefined if not valid.
    */
   static decodeReceipt(_log: Log_): ExecutionReceipt | undefined {
     throw new Error('Not implemented')
   }
 
   /**
-   *
+   * Converts bytes to a TON address.
+   * @param _bytes - Bytes to convert.
+   * @returns TON address string.
    */
   static getAddress(_bytes: BytesLike): string {
     throw new Error('Not implemented')
   }
 
   /**
-   *
+   * Gets the leaf hasher for TON destination chains.
+   * @param lane - Lane configuration.
+   * @param _ctx - Context containing logger.
+   * @returns Leaf hasher function.
    */
-  static getDestLeafHasher(lane: Lane): LeafHasher {
+  static getDestLeafHasher(lane: Lane, _ctx?: WithLogger): LeafHasher {
     return getTONLeafHasher(lane)
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getFee} */
   async getFee(_router: string, _destChainSelector: bigint, _message: AnyMessage): Promise<bigint> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.generateUnsignedSendMessage} */
+  generateUnsignedSendMessage(
+    _sender: string,
+    _router: string,
+    _destChainSelector: bigint,
+    _message: AnyMessage & { fee?: bigint },
+    _opts?: { approveMax?: boolean },
+  ): Promise<never> {
+    return Promise.reject(new Error('Not implemented'))
+  }
+
+  /** {@inheritDoc Chain.sendMessage} */
   async sendMessage(
     _router: string,
     _destChainSelector: bigint,
@@ -437,9 +427,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.fetchOffchainTokenData} */
   fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
     if (!('receiverObjectIds' in request.message)) {
       throw new Error('Invalid message, not v1.6 TON')
@@ -448,9 +436,17 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.generateUnsignedExecuteReport} */
+  generateUnsignedExecuteReport(
+    _payer: string,
+    _offRamp: string,
+    _execReport: ExecutionReport,
+    _opts?: { wallet?: unknown; gasLimit?: number },
+  ): Promise<never> {
+    return Promise.reject(new Error('Not implemented'))
+  }
+
+  /** {@inheritDoc Chain.executeReport} */
   async executeReport(
     offRamp: string,
     execReport: ExecutionReport,
@@ -470,7 +466,9 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   *
+   * Parses raw TON data into typed structures.
+   * @param data - Raw data to parse.
+   * @returns Parsed data or undefined.
    */
   static parse(data: unknown) {
     if (isBytesLike(data)) {
@@ -479,37 +477,27 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getSupportedTokens} */
   async getSupportedTokens(_address: string): Promise<string[]> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getRegistryTokenConfig} */
   async getRegistryTokenConfig(_address: string, _tokenName: string): Promise<never> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getTokenPoolConfigs} */
   async getTokenPoolConfigs(_tokenPool: string): Promise<never> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getTokenPoolRemotes} */
   async getTokenPoolRemotes(_tokenPool: string): Promise<never> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   *
-   */
+  /** {@inheritDoc Chain.getFeeTokens} */
   async getFeeTokens(_router: string): Promise<never> {
     return Promise.reject(new Error('Not implemented'))
   }

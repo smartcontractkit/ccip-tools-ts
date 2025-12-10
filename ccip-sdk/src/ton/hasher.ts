@@ -11,13 +11,11 @@ import { hexToBuffer, tryParseCell } from './utils.ts'
 const LEAF_DOMAIN_BUFFER = Buffer.from(LEAF_DOMAIN_SEPARATOR.slice(2).padStart(64, '0'), 'hex')
 
 /**
- * Creates a leaf hasher for TON messages
+ * Creates a leaf hasher for TON messages.
  *
- * @param sourceChainSelector
- * @param destChainSelector
- * @param onRamp - as hex string
- * @param version - CCIP version (only v1.6 supported for TON)
- * @returns A LeafHasher function that computes message hashes for TON
+ * @param lane - Lane configuration containing sourceChainSelector, destChainSelector,
+ *   onRamp (as hex string), and version (only v1.6 supported for TON).
+ * @returns A LeafHasher function that computes message hashes for TON.
  */
 export function getTONLeafHasher<V extends CCIPVersion = CCIPVersion>({
   sourceChainSelector,
@@ -48,10 +46,10 @@ export function getTONLeafHasher<V extends CCIPVersion = CCIPVersion>({
  * (source chain, destination chain, and onRamp address).
  * Following the TON implementation from chainlink-ton repo.
  *
- * @param sourceChainSelector
- * @param destChainSelector
- * @param onRamp
- * @returns SHA256 hash of the metadata as hex string
+ * @param sourceChainSelector - Source chain selector.
+ * @param destChainSelector - Destination chain selector.
+ * @param onRamp - OnRamp address as hex string.
+ * @returns SHA256 hash of the metadata as hex string.
  */
 export const hashTONMetadata = (
   sourceChainSelector: bigint,

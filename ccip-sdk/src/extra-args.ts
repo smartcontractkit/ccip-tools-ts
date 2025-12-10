@@ -56,9 +56,9 @@ export type SuiExtraArgsV1 = EVMExtraArgsV2 & {
   receiverObjectIds: string[]
 }
 
-// Same structure as EVMExtraArgsV2. TON calls it GenericExtraArgsV2
 /**
- *
+ * Tag identifier for GenericExtraArgsV2 encoding.
+ * Uses the same tag as EVMExtraArgsV2 since they share the same structure.
  */
 export type GenericExtraArgsV2 = EVMExtraArgsV2
 
