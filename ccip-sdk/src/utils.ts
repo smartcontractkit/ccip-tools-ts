@@ -48,7 +48,7 @@ export async function getSomeBlockNumberBefore(
     beforeBlockNumber = Math.max(
       1,
       Math.trunc(beforeBlockNumber - (beforeTimestamp - timestamp) / estimatedBlockTime) -
-        10 ** iter,
+      10 ** iter,
     )
     beforeTimestamp = await getBlockTimestamp(beforeBlockNumber)
     estimatedBlockTime = (now - beforeTimestamp) / (recentBlockNumber - beforeBlockNumber)
@@ -347,7 +347,7 @@ export function convertKeysToCamelCase(
  * @param ms - Duration in milliseconds.
  * @returns Promise that resolves after the specified duration.
  */
-export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms).unref)
 
 /**
  * Parses a typeAndVersion string into its components.
@@ -536,21 +536,21 @@ export function createRateLimitedFetch(
 const util =
   'util' in globalThis
     ? (
-        globalThis as unknown as {
-          util: {
-            inspect: ((v: unknown) => string) & {
-              custom: symbol
-              defaultOptions: Record<string, unknown>
-            }
+      globalThis as unknown as {
+        util: {
+          inspect: ((v: unknown) => string) & {
+            custom: symbol
+            defaultOptions: Record<string, unknown>
           }
         }
-      ).util
-    : {
-        inspect: Object.assign((v: unknown) => JSON.stringify(v), {
-          custom: Symbol('custom'),
-          defaultOptions: {
-            depth: 2,
-          } as Record<string, unknown>,
-        }),
       }
+    ).util
+    : {
+      inspect: Object.assign((v: unknown) => JSON.stringify(v), {
+        custom: Symbol('custom'),
+        defaultOptions: {
+          depth: 2,
+        } as Record<string, unknown>,
+      }),
+    }
 export { util }
