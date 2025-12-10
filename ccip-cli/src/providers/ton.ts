@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { TONChain } from '@chainlink/ccip-sdk/src/index.ts'
+import type { TONWallet } from '@chainlink/ccip-sdk/src/ton/types.ts'
 import { keyPairFromSecretKey, mnemonicToPrivateKey } from '@ton/crypto'
 import { WalletContractV4 } from '@ton/ton'
-import type { TONWallet } from '../../../ccip-sdk/src/ton/types.ts'
 
 TONChain.getWallet = async function loadTONWallet({
     wallet
