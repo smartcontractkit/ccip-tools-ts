@@ -116,7 +116,7 @@ export function fetchChainsFromRpcs(
               chains[chain.network.name] = chain$
               delete chainsCbs[chain.network.name]
             },
-            () => { },
+            () => {},
           )
           txs.push(tx$)
         }
@@ -164,7 +164,7 @@ export function fetchChainsFromRpcs(
   if (txHash) {
     return [chainGetter, init$]
   } else {
-    void init$.catch(() => { })
+    void init$.catch(() => {})
     return chainGetter
   }
 }
