@@ -3,7 +3,7 @@ import type { KeyPair } from '@ton/crypto'
 import type { WalletContractV4 } from '@ton/ton'
 import { toBigInt } from 'ethers'
 
-import type { EVMExtraArgsV2 } from '../../dist/extra-args.js'
+import type { EVMExtraArgsV2 } from '../extra-args.ts'
 import type { CCIPMessage_V1_6, ChainFamily, ExecutionReport } from '../types.ts'
 import { bytesToBuffer } from '../utils.ts'
 
