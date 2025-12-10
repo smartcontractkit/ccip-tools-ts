@@ -4,6 +4,9 @@ import {
   type ChainStatic,
   type EVMChain,
   type ExtraArgs,
+  CCIPArgumentInvalidError,
+  CCIPChainFamilyUnsupportedError,
+  CCIPTokenNotFoundError,
   ChainFamily,
   bigIntReplacer,
   estimateExecGasForRequest,
@@ -185,7 +188,10 @@ async function sendMessage(
       tokenReceiver = receiver
       receiver = '11111111111111111111111111111111'
     } else {
-      throw new Error('--token-receiver is required when sending tokens with data')
+      throw new CCIPArgumentInvalidError(
+        'token-receiver',
+        'required when sending tokens with data to Solana',
+      )
     }
 
     if (argv.account) {
@@ -198,13 +204,16 @@ async function sendMessage(
       })
     } else accounts = [] as string[]
   } else if (argv.tokenReceiver || argv.account?.length) {
-    throw new Error('--token-receiver and --account intended only for Solana dest')
+    throw new CCIPArgumentInvalidError(
+      'token-receiver/account',
+      'only valid for Solana destination',
+    )
   }
 
   let walletAddress, wallet
   if (!receiver) {
     if (sourceNetwork.family !== destNetwork.family)
-      throw new Error('--receiver is required when sending to a different chain family')
+      throw new CCIPArgumentInvalidError('receiver', 'required for cross-family transfers')
     ;[walletAddress, wallet] = await loadChainWallet(source, argv)
     receiver = walletAddress // send to self if same family
   }
@@ -212,7 +221,9 @@ async function sendMessage(
   if (argv.estimateGasLimit != null || argv.onlyEstimate) {
     // TODO: implement for all chain families
     if (destNetwork.family !== ChainFamily.EVM)
-      throw new Error(`Estimating gasLimit supported only on EVM, got=${destNetwork.family}`)
+      throw new CCIPChainFamilyUnsupportedError(destNetwork.family, {
+        context: { feature: 'gas estimation' },
+      })
     const dest = (await getChain(destNetwork.chainSelector)) as unknown as EVMChain
     const onRamp = await source.getOnRampForRouter(argv.router, destNetwork.chainSelector)
     const lane = {
@@ -270,7 +281,7 @@ async function sendMessage(
         feeTokenInfo = info
         break
       }
-      if (!feeTokenInfo) throw new Error(`Fee token "${argv.feeToken}" not found`)
+      if (!feeTokenInfo) throw new CCIPTokenNotFoundError(argv.feeToken)
     }
   } else {
     const nativeToken = await source.getNativeTokenForRouter(argv.router)

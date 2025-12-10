@@ -1,8 +1,8 @@
-import util from 'util'
-
 import {
   type CCIPRequest,
   type ChainTransaction,
+  CCIPExecTxRevertedError,
+  CCIPNotImplementedError,
   bigIntReplacer,
   discoverOffRamp,
   networkInfo,
@@ -77,7 +77,7 @@ async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
     const sourceNetwork = networkInfo(idFromSource)
     source = await getChain(sourceNetwork.chainId)
     if (!source.fetchRequestById)
-      throw new Error(`fetchRequestById not implemented for ${source.constructor.name}`)
+      throw new CCIPNotImplementedError(`fetchRequestById for ${source.constructor.name}`)
     request = await source.fetchRequestById(argv.txHash, onRamp, argv)
   } else {
     const [getChain_, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHash)
@@ -105,7 +105,10 @@ async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
       logger.info(JSON.stringify({ ...request, offchainTokenData }, bigIntReplacer, 2))
       break
   }
-  if (request.tx.error) throw new Error(`Request tx reverted: ${util.inspect(request.tx.error)}`)
+  if (request.tx.error)
+    throw new CCIPExecTxRevertedError(request.log.transactionHash, {
+      context: { error: request.tx.error },
+    })
 
   const dest = await getChain(request.lane.destChainSelector)
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)

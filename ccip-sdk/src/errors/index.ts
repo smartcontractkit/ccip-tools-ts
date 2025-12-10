@@ -56,6 +56,7 @@ export {
   CCIPLegacyTokenPoolsUnsupportedError,
   CCIPTokenDecimalsInsufficientError,
   CCIPTokenNotConfiguredError,
+  CCIPTokenNotFoundError,
   CCIPTokenNotInRegistryError,
 } from './specialized.ts'
 
@@ -66,7 +67,11 @@ export { CCIPContractNotRouterError, CCIPContractTypeInvalidError } from './spec
 export { CCIPWalletInvalidError, CCIPWalletNotSignerError } from './specialized.ts'
 
 // Specialized errors - Execution
-export { CCIPExecTxNotConfirmedError, CCIPExecTxRevertedError } from './specialized.ts'
+export {
+  CCIPExecTxNotConfirmedError,
+  CCIPExecTxRevertedError,
+  CCIPReceiptNotFoundError,
+} from './specialized.ts'
 
 // Specialized errors - Attestation (USDC/LBTC)
 export {
@@ -136,6 +141,7 @@ export { CCIPBorshMethodUnknownError, CCIPBorshTypeUnknownError } from './specia
 export {
   CCIPBlockBeforeTimestampNotFoundError,
   CCIPDataFormatUnsupportedError,
+  CCIPDataParseError,
   CCIPHttpError,
   CCIPLogDataInvalidError,
   CCIPLogTopicsNotFoundError,
@@ -152,6 +158,9 @@ export { CCIPAddressInvalidEvmError } from './specialized.ts'
 
 // Specialized errors - Source Chain
 export { CCIPSourceChainUnsupportedError } from './specialized.ts'
+
+// Specialized errors - CLI & Validation
+export { CCIPArgumentInvalidError } from './specialized.ts'
 
 // Recovery hints
 export { DEFAULT_RECOVERY_HINTS, getDefaultRecovery } from './recovery.ts'

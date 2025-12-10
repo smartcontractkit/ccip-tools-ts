@@ -8,6 +8,8 @@ import {
   type ChainStatic,
   type Lane,
   type OffchainTokenData,
+  CCIPError,
+  CCIPErrorCode,
   ExecutionState,
   networkInfo,
   supportedChains,
@@ -63,7 +65,7 @@ tokenTransfers =\t[${req.message.tokenAmounts.map((ta) => ('token' in ta ? ta.to
       },
     ],
   })
-  if (answer < 0) throw new Error('User requested exit')
+  if (answer < 0) throw new CCIPError(CCIPErrorCode.UNKNOWN, 'User requested exit')
   return requests[answer]
 }
 

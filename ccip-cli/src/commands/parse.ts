@@ -1,4 +1,8 @@
-import { bigIntReplacer, supportedChains } from '@chainlink/ccip-sdk/src/index.ts'
+import {
+  CCIPDataParseError,
+  bigIntReplacer,
+  supportedChains,
+} from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -46,7 +50,7 @@ function parseBytes(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
       // pass
     }
   }
-  if (!parsed) throw new Error('Unknown data')
+  if (!parsed) throw new CCIPDataParseError(argv.data)
 
   switch (argv.format) {
     case Format.log: {

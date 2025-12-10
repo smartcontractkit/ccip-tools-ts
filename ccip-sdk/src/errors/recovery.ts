@@ -57,6 +57,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   ADDRESS_INVALID_EVM: 'Invalid EVM address. Must be 20 bytes.',
   ADDRESS_INVALID_APTOS: 'Invalid Aptos address. Must be 32 bytes or less.',
 
+  TOKEN_NOT_FOUND: 'Token not found in supported tokens list. Verify the token address or symbol.',
   TOKEN_NOT_IN_REGISTRY: 'Token not found in TokenAdminRegistry.',
   TOKEN_NOT_CONFIGURED: 'Token is not configured in the registry.',
   TOKEN_NOT_REGISTERED: 'Token is not registered in the TokenAdminRegistry.',
@@ -72,6 +73,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   EXEC_TX_NOT_CONFIRMED: 'Transaction was not confirmed. Check status and retry.',
   EXEC_TX_REVERTED: 'Transaction reverted. Check the receiver contract.',
   EXECUTION_STATE_INVALID: 'Invalid execution state returned from contract.',
+  RECEIPT_NOT_FOUND: 'Receipt not found in transaction logs. Wait and retry.',
 
   USDC_ATTESTATION_FAILED: 'USDC attestation not ready. Wait and retry (10-30 min typical).',
   LBTC_ATTESTATION_ERROR: 'LBTC attestation fetch failed. Wait and retry.',
@@ -96,8 +98,11 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   RPC_NOT_FOUND: 'No RPC endpoint found. Configure an RPC URL.',
 
   DATA_FORMAT_UNSUPPORTED: 'Unsupported data format. Use hex, bytes, or base64.',
+  DATA_PARSE_FAILED: 'Could not parse the provided data. Verify the format.',
   BORSH_TYPE_UNKNOWN: 'Unknown Borsh type in schema.',
   BORSH_METHOD_UNKNOWN: 'Unknown Borsh method.',
+
+  ARGUMENT_INVALID: 'Check the command-line argument format and requirements.',
 
   NOT_IMPLEMENTED: 'This feature is not yet implemented.',
   UNKNOWN: 'An unknown error occurred. Check the error details.',

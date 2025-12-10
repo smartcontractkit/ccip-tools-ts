@@ -1367,6 +1367,62 @@ export class CCIPBorshMethodUnknownError extends CCIPError {
   }
 }
 
+// CLI & Validation
+
+/** Thrown when CLI argument is invalid. */
+export class CCIPArgumentInvalidError extends CCIPError {
+  override readonly name = 'CCIPArgumentInvalidError'
+  /** Creates an argument invalid error. */
+  constructor(argument: string, reason: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.ARGUMENT_INVALID, `Invalid argument "${argument}": ${reason}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, argument, reason },
+    })
+  }
+}
+
+/** Thrown when execution receipt not found in tx logs. Transient: receipt may not be indexed yet. */
+export class CCIPReceiptNotFoundError extends CCIPError {
+  override readonly name = 'CCIPReceiptNotFoundError'
+  /** Creates a receipt not found error. */
+  constructor(txHash: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.RECEIPT_NOT_FOUND, `Could not find receipt in tx logs: ${txHash}`, {
+      ...options,
+      isTransient: true,
+      retryAfterMs: 5000,
+      context: { ...options?.context, txHash },
+    })
+  }
+}
+
+/** Thrown when data cannot be parsed. */
+export class CCIPDataParseError extends CCIPError {
+  override readonly name = 'CCIPDataParseError'
+  /** Creates a data parse error. */
+  constructor(data: string, options?: CCIPErrorOptions) {
+    const truncated = data.length > 66 ? `${data.slice(0, 66)}...` : data
+    super(CCIPErrorCode.DATA_PARSE_FAILED, `Could not parse data: ${truncated}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, data },
+    })
+  }
+}
+
+/** Thrown when token not found in supported tokens list. */
+export class CCIPTokenNotFoundError extends CCIPError {
+  override readonly name = 'CCIPTokenNotFoundError'
+  /** Creates a token not found error. */
+  constructor(token: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.TOKEN_NOT_FOUND, `Token not found: ${token}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, token },
+    })
+  }
+}
+
 // Solana-specific (additional)
 
 /** Thrown when router config not found at PDA. */

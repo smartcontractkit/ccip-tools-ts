@@ -39,6 +39,9 @@ export {
 } from './types.ts'
 export { bigIntReplacer, bigIntReviver, decodeAddress, getDataBytes, networkInfo } from './utils.ts'
 
+// errors
+export * from './errors/index.ts'
+
 // chains
 import { AptosChain } from './aptos/index.ts'
 import { EVMChain } from './evm/index.ts'

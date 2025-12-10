@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
-import util from 'node:util'
 
+import { CCIPArgumentInvalidError, CCIPNotImplementedError } from '@chainlink/ccip-sdk/src/index.ts'
 import { Wallet as AnchorWallet } from '@coral-xyz/anchor'
 import SolanaLedger from '@ledgerhq/hw-app-solana'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
@@ -86,7 +86,7 @@ export class LedgerSolanaWallet {
 
   /** Payer property - not available on Ledger. */
   get payer(): Keypair {
-    throw new Error('Payer method not available on Ledger')
+    throw new CCIPNotImplementedError('payer for Ledger')
   }
 }
 
@@ -101,8 +101,7 @@ export async function loadSolanaWallet({
   if (!walletOpt)
     walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY'] || '~/.config/solana/id.json'
   let wallet: string
-  if (typeof walletOpt !== 'string')
-    throw new Error(`Invalid wallet option: ${util.inspect(walletOpt)}`)
+  if (typeof walletOpt !== 'string') throw new CCIPArgumentInvalidError('wallet', String(walletOpt))
   wallet = walletOpt
   if (walletOpt === 'ledger' || walletOpt.startsWith('ledger:')) {
     let derivationPath = walletOpt.split(':')[1]
