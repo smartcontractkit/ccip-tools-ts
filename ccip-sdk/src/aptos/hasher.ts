@@ -1,5 +1,9 @@
 import { concat, id, keccak256, zeroPadValue } from 'ethers'
 
+import {
+  CCIPAptosHasherVersionUnsupportedError,
+  CCIPExtraArgsInvalidError,
+} from '../errors/index.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
@@ -29,7 +33,7 @@ export function getAptosLeafHasher<V extends CCIPVersion = CCIPVersion>({
       return ((message: CCIPMessage<typeof CCIPVersion.V1_6>): string =>
         hashV16AptosMessage(message, metadataHash)) as LeafHasher<V>
     default:
-      throw new Error(`Unsupported hasher version for Aptos: ${version as string}`)
+      throw new CCIPAptosHasherVersionUnsupportedError(version as string)
   }
 }
 
@@ -50,7 +54,7 @@ export function hashV16AptosMessage(
       networkInfo(message.header.sourceChainSelector).family,
     )
     if (!parsedArgs || !('gasLimit' in parsedArgs))
-      throw new Error('Invalid extraArgs, not EVMExtraArgsV1|2')
+      throw new CCIPExtraArgsInvalidError('Aptos', message.extraArgs)
     gasLimit = parsedArgs.gasLimit
   } else {
     gasLimit = message.gasLimit

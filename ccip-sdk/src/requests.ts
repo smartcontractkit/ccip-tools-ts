@@ -3,6 +3,15 @@ import type { PickDeep } from 'type-fest'
 import yaml from 'yaml'
 
 import type { Chain, ChainStatic, LogFilter } from './chain.ts'
+import {
+  CCIPMessageBatchIncompleteError,
+  CCIPMessageDecodeError,
+  CCIPMessageIdNotFoundError,
+  CCIPMessageInvalidError,
+  CCIPMessageNotFoundInTxError,
+  CCIPNetworkFamilyUnsupportedError,
+  CCIPTokenNotInRegistryError,
+} from './errors/index.ts'
 import type { EVMChain } from './evm/index.ts'
 import { decodeExtraArgs } from './extra-args.ts'
 import { supportedChains } from './supported-chains.ts'
@@ -14,10 +23,10 @@ import {
   type Log_,
   ChainFamily,
 } from './types.ts'
-import { convertKeysToCamelCase, decodeAddress, leToBigInt, networkInfo, util } from './utils.ts'
+import { convertKeysToCamelCase, decodeAddress, leToBigInt, networkInfo } from './utils.ts'
 
 function decodeJsonMessage(data: Record<string, unknown>) {
-  if (!data || typeof data != 'object') throw new Error(`invalid msg: ${util.inspect(data)}`)
+  if (!data || typeof data != 'object') throw new CCIPMessageInvalidError(data)
   if (data.message) data = data.message as Record<string, unknown>
   let data_ = data as Record<string, unknown> & {
     header: {
@@ -37,7 +46,7 @@ function decodeJsonMessage(data: Record<string, unknown>) {
     data_.header?.sourceChainSelector ??
     data_.header?.source_chain_selector ??
     data_.sourceChainSelector
-  if (!sourceChainSelector) throw new Error(`invalid msg: ${util.inspect(data)}`)
+  if (!sourceChainSelector) throw new CCIPMessageInvalidError(data)
   const sourceNetwork = networkInfo(sourceChainSelector)
   if (!data_.header) {
     const header = {
@@ -108,7 +117,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
       // continue
     }
   }
-  throw new Error('Failed to decode message')
+  throw new CCIPMessageDecodeError()
 }
 
 /**
@@ -137,14 +146,14 @@ export async function fetchCCIPRequestsInTx(
         version: version as CCIPVersion,
       }
     } else if (source.network.family !== ChainFamily.EVM) {
-      throw new Error(`Unsupported network family: ${source.network.family}`)
+      throw new CCIPNetworkFamilyUnsupportedError(source.network.family)
     } else {
       lane = await (source as EVMChain).getLaneForOnRamp(log.address)
     }
     requests.push({ lane, message, log, tx })
   }
   if (!requests.length) {
-    throw new Error(`Could not find any CCIPSendRequested message in tx: ${txHash}`)
+    throw new CCIPMessageNotFoundInTxError(txHash)
   }
 
   return requests
@@ -189,7 +198,7 @@ export async function fetchCCIPRequestById(
       tx,
     }
   }
-  throw new Error('Could not find a CCIPSendRequested message with messageId: ' + messageId)
+  throw new CCIPMessageIdNotFoundError(messageId)
 }
 
 // Number of blocks to expand the search window for logs
@@ -274,8 +283,9 @@ export async function fetchAllMessagesInBatch<
   }
 
   if (messages.length != Number(maxSeqNr - minSeqNr) + 1) {
-    throw new Error(
-      `Could not find all expected request events: from=${request.log.blockNumber}, wanted=[${Number(minSeqNr)}..${Number(maxSeqNr)}:${Number(maxSeqNr - minSeqNr) + 1}], got=[${messages.map((e) => Number(e.header.sequenceNumber)).join(',')}]`,
+    throw new CCIPMessageBatchIncompleteError(
+      { min: minSeqNr, max: maxSeqNr },
+      messages.map((e) => e.header.sequenceNumber),
     )
   }
   return messages
@@ -308,7 +318,7 @@ export async function* fetchRequestsForSender(
     } else if (source.network.family === ChainFamily.EVM) {
       ;({ destChainSelector, version } = await (source as EVMChain).getLaneForOnRamp(log.address))
     } else {
-      throw new Error(`Unsupported network family: ${source.network.family}`)
+      throw new CCIPNetworkFamilyUnsupportedError(source.network.family)
     }
     yield {
       lane: {
@@ -344,8 +354,7 @@ export async function sourceToDestTokenAmounts<S extends { token: string }>(
         tokenAdminRegistry,
         token,
       )
-      if (!sourcePoolAddress)
-        throw new Error(`Token=${token} not found in registry=${tokenAdminRegistry}`)
+      if (!sourcePoolAddress) throw new CCIPTokenNotInRegistryError(token, tokenAdminRegistry)
       const remotes = await source.getTokenPoolRemotes(sourcePoolAddress, destChainSelector)
       return {
         ...rest,

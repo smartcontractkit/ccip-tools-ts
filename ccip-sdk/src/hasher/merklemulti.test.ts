@@ -86,7 +86,7 @@ describe('Merkle multi basic tests', () => {
       verifyComputeRoot(leaves, proof)
       assert.fail('Expected an error to be thrown')
     } catch (err: unknown) {
-      assert.equal((err as Error).message, 'proof source flags 1 != proof hashes 2')
+      assert.equal((err as Error).message, 'Proof source flags 1 != proof hashes 2')
     }
   })
 

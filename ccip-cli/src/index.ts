@@ -11,7 +11,7 @@ import { Format } from './commands/index.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.91.0-0161da7'
+const VERSION = '0.91.1-e1fb60a'
 // generate:end
 
 const globalOpts = {

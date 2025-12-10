@@ -4,6 +4,7 @@ import { BorshInstructionCoder } from '@coral-xyz/anchor'
 import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types.js'
 import { sha256, toUtf8Bytes } from 'ethers'
 
+import { CCIPBorshMethodUnknownError, CCIPBorshTypeUnknownError } from '../errors/index.ts'
 import { snakeToCamel } from '../utils.ts'
 import { camelToSnakeCase } from './utils.ts'
 
@@ -30,7 +31,7 @@ export function patchBorsh() {
         name,
       )
       if (!layout) {
-        throw new Error(`Unknown type: ${name}`)
+        throw new CCIPBorshTypeUnknownError(name)
       }
       let buffer = Buffer.alloc(512)
       let len
@@ -61,7 +62,7 @@ export function patchBorsh() {
         methodName,
       )
       if (!layout) {
-        throw new Error(`Unknown method: ${methodName}`)
+        throw new CCIPBorshMethodUnknownError(methodName)
       }
       let buffer = Buffer.alloc(512)
       let len

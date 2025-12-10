@@ -14,6 +14,10 @@ import {
 } from '@solana/web3.js'
 import { dataLength, dataSlice, hexlify } from 'ethers'
 
+import {
+  CCIPSolanaComputeUnitsExceededError,
+  CCIPTransactionNotFinalizedError,
+} from '../errors/index.ts'
 import type { Log_, WithLogger } from '../types.ts'
 import { getDataBytes, sleep } from '../utils.ts'
 import type { UnsignedSolanaTx, Wallet } from './types.ts'
@@ -50,7 +54,7 @@ export async function waitForFinalization(
     await sleep(intervalMs)
   }
 
-  throw new Error(`Transaction ${signature} not finalized after timeout`)
+  throw new CCIPTransactionNotFinalizedError(signature)
 }
 
 /**
@@ -350,9 +354,7 @@ export async function simulateAndSendTxs(
         } else if (!includesMain || computeUnits == null || simulated <= computeUnits) {
           computeUnitLimit = Math.ceil(simulated * 1.1)
         } else {
-          throw new Error(
-            `Main simulation exceeds specified computeUnits limit. simulated=${simulated}, limit=${computeUnits}`,
-          )
+          throw new CCIPSolanaComputeUnitsExceededError(simulated, computeUnits)
         }
         break
       } catch (err) {

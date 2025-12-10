@@ -8,6 +8,11 @@ import {
 import { memoize } from 'micro-memoize'
 
 import type { LogFilter } from '../chain.ts'
+import {
+  CCIPAptosAddressModuleRequiredError,
+  CCIPAptosTopicInvalidError,
+  CCIPAptosTransactionTypeUnexpectedError,
+} from '../errors/index.ts'
 import type { Log_ } from '../types.ts'
 
 const eventToHandler = {
@@ -30,7 +35,7 @@ export async function getUserTxByVersion(
     ledgerVersion: version,
   })
   if (tx.type !== TransactionResponseType.User)
-    throw new Error(`Unexpected transaction type="${tx.type}"`)
+    throw new CCIPAptosTransactionTypeUnexpectedError(tx.type)
   return tx
 }
 
@@ -188,14 +193,13 @@ export async function* streamAptosLogs(
   opts: LogFilter & { versionAsHash?: boolean },
 ): AsyncGenerator<Log_> {
   const limit = 100
-  if (!opts.address || !opts.address.includes('::'))
-    throw new Error('address with module is required')
+  if (!opts.address || !opts.address.includes('::')) throw new CCIPAptosAddressModuleRequiredError()
   if (opts.topics?.length !== 1 || typeof opts.topics[0] !== 'string')
-    throw new Error('single string topic required')
+    throw new CCIPAptosTopicInvalidError()
   let eventHandlerField = opts.topics[0]
   if (!eventHandlerField.includes('/')) {
     eventHandlerField = (eventToHandler as Record<string, string>)[eventHandlerField]
-    if (!eventHandlerField) throw new Error(`Unknown topic event handler="${opts.topics[0]}"`)
+    if (!eventHandlerField) throw new CCIPAptosTopicInvalidError(opts.topics[0])
   }
   const [stateAddr] = await provider.view<[string]>({
     payload: {

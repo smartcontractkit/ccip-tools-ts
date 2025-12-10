@@ -2,6 +2,11 @@ import { type BN, BorshCoder } from '@coral-xyz/anchor'
 import type { PublicKey } from '@solana/web3.js'
 import { hexlify } from 'ethers'
 
+import {
+  CCIPCctpDecodeError,
+  CCIPCctpMultipleEventsError,
+  CCIPDataFormatUnsupportedError,
+} from '../errors/index.ts'
 import { getUsdcAttestation } from '../offchain.ts'
 import type { CCIPMessage, CCIPRequest, OffchainTokenData, WithLogger } from '../types.ts'
 import { bytesToBuffer, networkInfo, util } from '../utils.ts'
@@ -53,7 +58,7 @@ export async function fetchSolanaOffchainTokenData(
   }
 
   if (request.message.tokenAmounts.length > 1) {
-    throw new Error(
+    throw new CCIPDataFormatUnsupportedError(
       `Expected at most 1 token transfer, found ${request.message.tokenAmounts?.length}`,
     )
   }
@@ -75,7 +80,7 @@ export async function fetchSolanaOffchainTokenData(
     if (requestInvokeIdx >= l.index || l.index >= log.index) continue
     if (l.topics[0] !== hexDiscriminator('CcipCctpMessageSentEvent')) continue
     const decoded = cctpTokenPoolCoder.events.decode(l.data)
-    if (!decoded) throw new Error(`Failed to decode CCTP event: ${util.inspect(l)}`)
+    if (!decoded) throw new CCIPCctpDecodeError(util.inspect(l))
     cctpEvents.push(decoded.data as unknown as CcipCctpMessageSentEvent)
   }
   const offchainTokenData: OffchainTokenData[] = request.message.tokenAmounts.map(() => undefined)
@@ -88,9 +93,7 @@ export async function fetchSolanaOffchainTokenData(
 
   // Currently, we only support ONE token per transfer
   if (cctpEvents.length > 1) {
-    throw new Error(
-      `Expected only 1 CcipCctpMessageSentEvent, found ${cctpEvents.length} in transaction ${txSignature}.`,
-    )
+    throw new CCIPCctpMultipleEventsError(cctpEvents.length, txSignature)
   }
 
   // NOTE: assuming USDC token is the first (and only) token in the CCIP message, we will process the CCTP event.

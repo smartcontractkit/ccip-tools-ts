@@ -1,6 +1,7 @@
 import { concat, id, keccak256, zeroPadValue } from 'ethers'
 
 import { encodeNumber, encodeRawBytes } from '../aptos/utils.ts'
+import { CCIPExtraArgsInvalidError, CCIPSuiHasherVersionUnsupportedError } from '../errors/index.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
@@ -29,7 +30,7 @@ export function getSuiLeafHasher<V extends CCIPVersion = CCIPVersion>({
       return ((message: CCIPMessage<typeof CCIPVersion.V1_6>): string =>
         hashV16SuiMessage(message, metadataHash)) as LeafHasher<V>
     default:
-      throw new Error(`Unsupported hasher version for Sui: ${version as string}`)
+      throw new CCIPSuiHasherVersionUnsupportedError(version as string)
   }
 }
 
@@ -49,7 +50,7 @@ export function hashV16SuiMessage(
   } else {
     const parsedArgs = decodeExtraArgs(message.extraArgs)
     if (!parsedArgs || parsedArgs._tag !== 'SuiExtraArgsV1')
-      throw new Error('Invalid extraArgs for Sui message, must be SUIExtraArgsV1')
+      throw new CCIPExtraArgsInvalidError('Sui', message.extraArgs)
     ;({ tokenReceiver, gasLimit } = parsedArgs)
   }
 

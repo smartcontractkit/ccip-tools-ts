@@ -1,5 +1,3 @@
-import { Buffer } from 'buffer'
-
 import bs58 from 'bs58'
 import {
   type BigNumberish,
@@ -14,6 +12,15 @@ import {
 import { memoize } from 'micro-memoize'
 
 import type { Chain } from './chain.ts'
+import {
+  CCIPBlockBeforeTimestampNotFoundError,
+  CCIPChainFamilyUnsupportedError,
+  CCIPChainNotFoundError,
+  CCIPDataFormatUnsupportedError,
+  CCIPError,
+  CCIPHttpError,
+  CCIPTypeVersionInvalidError,
+} from './errors/index.ts'
 import SELECTORS from './selectors.ts'
 import { supportedChains } from './supported-chains.ts'
 import { type NetworkInfo, type WithLogger, ChainFamily } from './types.ts'
@@ -55,7 +62,7 @@ export async function getSomeBlockNumberBefore(
   }
 
   if (beforeTimestamp > timestamp) {
-    throw new Error(`Could not find a block prior to timestamp=${timestamp}`)
+    throw new CCIPBlockBeforeTimestampNotFoundError(timestamp)
   }
 
   // now, bin-search based on timestamp proportions, looking for
@@ -96,7 +103,7 @@ export async function getSomeBlockNumberBefore(
 // memoized so we always output the same object for a given chainId
 const networkInfoFromChainId = memoize((chainId: NetworkInfo['chainId']): NetworkInfo => {
   const sel = SELECTORS[chainId]
-  if (!sel?.name) throw new Error(`Chain not found: ${chainId}`)
+  if (!sel?.name) throw new CCIPChainNotFoundError(chainId)
   return {
     chainId: isNaN(+chainId) ? chainId : +chainId,
     chainSelector: sel.selector,
@@ -138,7 +145,7 @@ export const networkInfo = memoize(function networkInfo_(
           break
         }
       }
-      if (!chainId) throw new Error(`Selector not found: ${selectorOrIdOrName}`)
+      if (!chainId) throw new CCIPChainNotFoundError(selectorOrIdOrName)
     }
   } else if (typeof selectorOrIdOrName === 'string') {
     if (selectorOrIdOrName.includes('-', 1)) {
@@ -215,7 +222,7 @@ export function bigIntReviver(_key: string, value: unknown): unknown {
  **/
 export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFamily.EVM): string {
   const chain = supportedChains[family]
-  if (!chain) throw new Error(`Unsupported chain family: ${family}`)
+  if (!chain) throw new CCIPChainFamilyUnsupportedError(family)
   return chain.getAddress(getAddressBytes(address))
 }
 
@@ -276,7 +283,7 @@ export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
   } else if (isBase64(data)) {
     return decodeBase64(data)
   } else {
-    throw new Error(`Unsupported data format: ${util.inspect(data)}`)
+    throw new CCIPDataFormatUnsupportedError(util.inspect(data))
   }
 }
 
@@ -360,10 +367,7 @@ export function parseTypeAndVersion(
   typeAndVersion: string,
 ): Awaited<ReturnType<Chain['typeAndVersion']>> {
   const match = typeAndVersion.match(/^(\w.+\S)\s+v?(\d+\.\d+(?:\.\d+)?)([^\d.].*)?$/)
-  if (!match)
-    throw new Error(
-      `Invalid typeAndVersion: "${typeAndVersion}", len=${typeAndVersion.length}, hex=0x${Buffer.from(typeAndVersion).toString('hex')}`,
-    )
+  if (!match) throw new CCIPTypeVersionInvalidError(typeAndVersion)
   const [, typeRaw, version] = match
   // some string normalization
   const type = typeRaw
@@ -508,15 +512,15 @@ export function createRateLimitedFetch(
 
         // For 429 responses, throw an error to trigger retry
         if (response.status === 429) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+          throw new CCIPHttpError(response.status, response.statusText)
         }
 
         // For other non-2xx responses, don't retry
         logger.debug('fetch non-retryable error', input, response.status, init?.body)
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        throw new CCIPHttpError(response.status, response.statusText)
       } catch (error) {
         logger.debug('fetch errored', attempt, error, input, init?.body)
-        lastError = error instanceof Error ? error : new Error(String(error))
+        lastError = error instanceof Error ? error : CCIPError.from(error, 'HTTP_ERROR')
 
         // Only retry on rate limit errors
         if (!isRateLimitError(lastError)) {
@@ -530,7 +534,7 @@ export function createRateLimitedFetch(
       }
     }
 
-    throw lastError || new Error('Request failed after all retries')
+    throw lastError || CCIPError.from('Request failed after all retries', 'HTTP_ERROR')
   }
 }
 

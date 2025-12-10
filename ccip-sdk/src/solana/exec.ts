@@ -13,6 +13,7 @@ import {
 import BN from 'bn.js'
 import { hexlify } from 'ethers'
 
+import { CCIPSolanaLookupTableNotFoundError } from '../errors/index.ts'
 import { type ExecutionReport, type WithLogger, ChainFamily } from '../types.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
@@ -71,7 +72,7 @@ export async function generateUnsignedExecuteReport(
       const lookupTableAccountInfo = await connection.getAddressLookupTable(acc)
 
       if (!lookupTableAccountInfo.value) {
-        throw new Error(`Lookup table account not found: ${acc.toBase58()}`)
+        throw new CCIPSolanaLookupTableNotFoundError(acc.toBase58())
       }
 
       return lookupTableAccountInfo.value
@@ -154,8 +155,8 @@ async function buildLookupTableIxs(
   logger.info('Using Address Lookup Table', altAddr.toBase58())
 
   if (addresses.length > 256) {
-    throw new Error(
-      `The number of addresses (${addresses.length}) exceeds the maximum limit imposed by Solana of 256 for Address Lookup Tables`,
+    throw new CCIPSolanaLookupTableNotFoundError(
+      `addresses count ${addresses.length} exceeds Solana limit of 256 for Address Lookup Tables`,
     )
   }
 

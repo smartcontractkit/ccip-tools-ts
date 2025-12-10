@@ -30,6 +30,26 @@ import type { PickDeep, SetRequired } from 'type-fest'
 
 import { type LogFilter, type TokenPoolRemote, Chain } from '../chain.ts'
 import {
+  CCIPAddressInvalidEvmError,
+  CCIPBlockNotFoundError,
+  CCIPContractNotRouterError,
+  CCIPContractTypeInvalidError,
+  CCIPDataFormatUnsupportedError,
+  CCIPExecTxNotConfirmedError,
+  CCIPExecTxRevertedError,
+  CCIPExtraArgsParseError,
+  CCIPHasherVersionUnsupportedError,
+  CCIPLogDataInvalidError,
+  CCIPMessageDecodeError,
+  CCIPSourceChainUnsupportedError,
+  CCIPTokenNotConfiguredError,
+  CCIPTransactionNotFoundError,
+  CCIPVersionFeatureUnavailableError,
+  CCIPVersionRequiresLaneError,
+  CCIPVersionUnsupportedError,
+  CCIPWalletInvalidError,
+} from '../errors/index.ts'
+import {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
   type ExtraArgs,
@@ -68,7 +88,6 @@ import {
   getDataBytes,
   networkInfo,
   parseTypeAndVersion,
-  util,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
 import type FeeQuoter_ABI from './abi/FeeQuoter_1_6.ts'
@@ -234,9 +253,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       provider = new JsonRpcProvider(url)
       providerReady = Promise.resolve(provider)
     } else {
-      throw new Error(
-        `Unknown JSON RPC protocol in endpoint (should be wss?:// or https?://): ${url}`,
-      )
+      throw new CCIPDataFormatUnsupportedError(url)
     }
     return providerReady
   }
@@ -269,14 +286,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /** {@inheritDoc Chain.getBlockTimestamp} */
   async getBlockTimestamp(block: number | 'finalized'): Promise<number> {
     const res = await this.provider.getBlock(block) // cached
-    if (!res) throw new Error(`Block not found: ${block}`)
+    if (!res) throw new CCIPBlockNotFoundError(block)
     return res.timestamp
   }
 
   /** {@inheritDoc Chain.getTransaction} */
   async getTransaction(hash: string | TransactionReceipt): Promise<ChainTransaction> {
     const tx = typeof hash === 'string' ? await this.provider.getTransactionReceipt(hash) : hash
-    if (!tx) throw new Error(`Transaction not found: ${hash as string}`)
+    if (!tx) throw new CCIPTransactionNotFoundError(hash as string)
     const timestamp = await this.getBlockTimestamp(tx.blockNumber)
     const chainTx = {
       ...tx,
@@ -348,7 +365,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     topics?: readonly string[]
     data: unknown
   }): CCIPMessage | undefined {
-    if (!isBytesLike(log.data)) throw new Error(`invalid data=${util.inspect(log.data)}`)
+    if (!isBytesLike(log.data)) throw new CCIPLogDataInvalidError(log.data)
     let fragments
     if (log.topics?.[0]) {
       fragments = [requestsFragments[log.topics[0] as `0x${string}`]]
@@ -367,7 +384,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       }
     }
     if (!message) return
-    if (!isHexString(message.sender, 20)) throw new Error('could not decode CCIPMessage')
+    if (!isHexString(message.sender, 20)) throw new CCIPMessageDecodeError('invalid sender')
 
     if (!message.header) {
       // CCIPMessage_V1_2_EVM
@@ -430,7 +447,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (message.extraArgs) {
       // v1.6+
       const parsed = this.decodeExtraArgs(message.extraArgs as string)
-      if (!parsed) throw new Error(`Unknown extraArgs: ${message.extraArgs as string}`)
+      if (!parsed) throw new CCIPExtraArgsParseError(message.extraArgs as string)
       const { _tag, ...rest } = parsed
       // merge parsed extraArgs to any family in message root object
       Object.assign(message, rest)
@@ -452,14 +469,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     log: { topics?: readonly string[]; data: unknown },
     lane?: Omit<Lane, 'destChainSelector'>,
   ): CommitReport[] | undefined {
-    if (!isBytesLike(log.data)) throw new Error(`invalid data=${util.inspect(log.data)}`)
+    if (!isBytesLike(log.data)) throw new CCIPLogDataInvalidError(log.data)
     let fragments
     if (log.topics?.[0]) {
       const fragment = commitsFragments[log.topics[0] as `0x${string}`]
       if (!fragment) return
       const isCcipV15 = fragment.name === 'ReportAccepted'
       // CCIP<=1.5 doesn't have lane info in event, so we need lane to be provided (e.g. from CommitStore's configs)
-      if (isCcipV15 && !lane) throw new Error('decoding commits from CCIP<=v1.5 requires lane')
+      if (isCcipV15 && !lane) throw new CCIPVersionRequiresLaneError('v1.5')
       fragments = [fragment]
     } else fragments = Object.values(commitsFragments)
     for (const fragment of fragments) {
@@ -507,7 +524,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     topics?: readonly string[]
     data: unknown
   }): ExecutionReceipt | undefined {
-    if (!isBytesLike(log.data)) throw new Error(`invalid data=${util.inspect(log.data)}`)
+    if (!isBytesLike(log.data)) throw new CCIPLogDataInvalidError(log.data)
     let fragments
     if (log.topics?.[0]) {
       fragments = [receiptsFragments[log.topics[0] as `0x${string}`]]
@@ -623,12 +640,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    */
   static getAddress(bytes: BytesLike): string {
     bytes = getBytes(bytes)
-    if (bytes.length < 20) throw new Error(`Invalid address: ${hexlify(bytes)}`)
+    if (bytes.length < 20) throw new CCIPAddressInvalidEvmError(hexlify(bytes))
     else if (bytes.length > 20) {
       if (bytes.slice(0, bytes.length - 20).every((b) => b === 0)) {
         bytes = bytes.slice(-20)
       } else {
-        throw new Error(`Invalid address: ${hexlify(bytes)}`)
+        throw new CCIPAddressInvalidEvmError(hexlify(bytes))
       }
     }
     return getAddress(hexlify(bytes))
@@ -648,9 +665,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     // TODO: memo this call
     const staticConfig = await contract.getStaticConfig()
     if (!staticConfig.destChainSelector)
-      throw new Error(
-        `No destChainSelector in OnRamp.staticConfig: ${JSON.stringify(staticConfig)}`,
-      )
+      throw new CCIPContractTypeInvalidError(onRamp, 'missing destChainSelector', ['OnRamp'])
     return {
       sourceChainSelector: this.network.chainSelector,
       destChainSelector: staticConfig.destChainSelector,
@@ -684,7 +699,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         return router as string
       }
       default:
-        throw new Error(`Unsupported version: ${version}`)
+        throw new CCIPVersionUnsupportedError(version)
     }
   }
 
@@ -717,7 +732,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         break
       }
       default:
-        throw new Error(`Unsupported version: ${version}`)
+        throw new CCIPVersionUnsupportedError(version)
     }
     return router as string
   }
@@ -784,7 +799,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         return decodeOnRampAddress(onRamp, networkInfo(sourceChainSelector).family)
       }
       default:
-        throw new Error(`Unsupported version: ${version}`)
+        throw new CCIPVersionUnsupportedError(version)
     }
   }
 
@@ -810,7 +825,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         return offRamp
       }
       default:
-        throw new Error(`Unsupported version: ${version}`)
+        throw new CCIPVersionUnsupportedError(version)
     }
   }
 
@@ -853,12 +868,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       case CCIPVersion.V1_2:
       case CCIPVersion.V1_5:
         if (networkInfo(sourceChainSelector).family !== ChainFamily.EVM)
-          throw new Error(`Unsupported source chain: ${sourceChainSelector}`)
+          throw new CCIPSourceChainUnsupportedError(sourceChainSelector)
         return getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher
       case CCIPVersion.V1_6:
         return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp, ctx) as LeafHasher
       default:
-        throw new Error(`Unsupported hasher version for EVM: ${version as string}`)
+        throw new CCIPHasherVersionUnsupportedError('EVM', version as string)
     }
   }
 
@@ -888,7 +903,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       address = await this._getSomeOnRampFor(address)
       ;[type, version, typeAndVersion] = await this.typeAndVersion(address)
     } else if (!type.includes('Ramp')) {
-      throw new Error(`Not a Router, Ramp or TokenAdminRegistry: ${address} is "${typeAndVersion}"`)
+      throw new CCIPContractNotRouterError(address, typeAndVersion)
     }
     const contract = new Contract(
       address,
@@ -918,10 +933,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       address = await this._getSomeOnRampFor(address)
       ;[type, version, typeAndVersion] = await this.typeAndVersion(address)
     } else if (!type.includes('Ramp')) {
-      throw new Error(`Not a Router, Ramp or FeeQuoter: ${address} is "${typeAndVersion}"`)
+      throw new CCIPContractNotRouterError(address, typeAndVersion)
     }
     if (version < CCIPVersion.V1_6)
-      throw new Error(`Version < v1.6 doesn't have feeQuoter: got=${version}`)
+      throw new CCIPVersionFeatureUnavailableError('feeQuoter', version, 'v1.6')
 
     const contract = new Contract(
       address,
@@ -1032,7 +1047,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     opts: { wallet: unknown; approveMax?: boolean },
   ): Promise<CCIPRequest> {
     const wallet = opts.wallet
-    if (!isSigner(wallet)) throw new Error(`Wallet must be a Signer, got=${util.inspect(wallet)}`)
+    if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
 
     const sender = await wallet.getAddress()
     const txs = await this.generateUnsignedSendMessage(
@@ -1182,7 +1197,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         break
       }
       default:
-        throw new Error(`Unsupported version: ${version}`)
+        throw new CCIPVersionUnsupportedError(version)
     }
     return { family: ChainFamily.EVM, transactions: [manualExecTx] }
   }
@@ -1194,7 +1209,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     opts: { wallet: unknown; gasLimit?: number; tokensGasLimit?: number },
   ) {
     const wallet = opts.wallet
-    if (!isSigner(wallet)) throw new Error(`Wallet must be a Signer, got=${util.inspect(wallet)}`)
+    if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
 
     const unsignedTxs = await this.generateUnsignedExecuteReport(
       await wallet.getAddress(),
@@ -1208,8 +1223,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const response = await this.provider.broadcastTransaction(signed)
     this.logger.debug('ccipSend =>', response.hash)
     const receipt = await response.wait(1, 60_000)
-    if (!receipt?.hash) throw new Error(`Could not confirm exec tx: ${response.hash}`)
-    if (!receipt.status) throw new Error(`Exec transaction reverted: ${response.hash}`)
+    if (!receipt?.hash) throw new CCIPExecTxNotConfirmedError(response.hash)
+    if (!receipt.status) throw new CCIPExecTxRevertedError(response.hash)
     return this.getTransaction(receipt)
   }
 
@@ -1264,7 +1279,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       Partial<Awaited<ReturnType<(typeof contract)['getTokenConfig']>>>
     >
     if (!config.administrator || config.administrator === ZeroAddress)
-      throw new Error(`Token ${token} is not configured in registry ${registry}`)
+      throw new CCIPTokenNotConfiguredError(token, registry)
     if (!config.pendingAdministrator || config.pendingAdministrator === ZeroAddress)
       delete config.pendingAdministrator
     if (!config.tokenPool || config.tokenPool === ZeroAddress) delete config.tokenPool
@@ -1418,7 +1433,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         break
       }
       default:
-        throw new Error(`Unsupported version: ${version}`)
+        throw new CCIPVersionUnsupportedError(version)
     }
     return Object.fromEntries(
       await Promise.all(

@@ -12,6 +12,10 @@ import {
 } from 'ethers'
 import type { ReadonlyDeep } from 'type-fest'
 
+import {
+  CCIPExtraArgsInvalidError,
+  CCIPSolanaLaneVersionUnsupportedError,
+} from '../errors/index.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/index.ts'
 import { type CCIPMessage, type Lane, type WithLogger, CCIPVersion } from '../types.ts'
@@ -48,7 +52,7 @@ export function getV16SolanaLeafHasher(
   { logger = console }: WithLogger = {},
 ): LeafHasher<typeof CCIPVersion.V1_6> {
   if (lane.version !== CCIPVersion.V1_6)
-    throw new Error(`Unsupported lane version: ${lane.version}`)
+    throw new CCIPSolanaLaneVersionUnsupportedError(lane.version)
 
   return (message: ReadonlyDeep<CCIPMessage<typeof CCIPVersion.V1_6>>): string => {
     let parsedArgs
@@ -62,7 +66,7 @@ export function getV16SolanaLeafHasher(
     } else {
       parsedArgs = decodeExtraArgs(message.extraArgs, networkInfo(lane.sourceChainSelector).family)
       if (!parsedArgs || parsedArgs._tag !== 'SVMExtraArgsV1')
-        throw new Error('Invalid extraArgs, not SVMExtraArgsV1')
+        throw new CCIPExtraArgsInvalidError('SVM', message.extraArgs)
     }
 
     const any2SVMExtraArgsBorshEncoded = borshSerialize(SvmExtraArgsSchema, parsedArgs, true)

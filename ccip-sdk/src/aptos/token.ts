@@ -1,6 +1,7 @@
 import type { Aptos } from '@aptos-labs/ts-sdk'
 
 import type { TokenInfo } from '../chain.ts'
+import { CCIPError } from '../errors/CCIPError.ts'
 
 /**
  * Retrieves token metadata (symbol and decimals) from Aptos.
@@ -152,5 +153,8 @@ export async function getTokenInfo(provider: Aptos, token: string): Promise<Toke
     }
   }
 
-  throw lastErr ?? new Error(`Could not view token info for ${token}`)
+  throw CCIPError.from(
+    lastErr ?? `Could not view token info for ${token}`,
+    'TOKEN_POOL_INFO_NOT_FOUND',
+  )
 }

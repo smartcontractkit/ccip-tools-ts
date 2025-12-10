@@ -1,6 +1,7 @@
 import { concat, id, keccak256, toBeHex, zeroPadValue } from 'ethers'
 import type { ReadonlyDeep } from 'type-fest'
 
+import { CCIPExtraArgsInvalidError } from '../errors/index.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
 import type { CCIPMessage, CCIPVersion, WithLogger } from '../types.ts'
@@ -118,7 +119,7 @@ export function getV16LeafHasher(
       !parsedArgs ||
       (parsedArgs._tag !== 'EVMExtraArgsV1' && parsedArgs._tag !== 'EVMExtraArgsV2')
     )
-      throw new Error('Invalid extraArgs, not EVMExtraArgsV1|2')
+      throw new CCIPExtraArgsInvalidError('EVM', message.extraArgs)
     const tokenAmounts = message.tokenAmounts.map((ta) => ({
       ...ta,
       sourcePoolAddress: zeroPadValue(getAddressBytes(ta.sourcePoolAddress), 32),
