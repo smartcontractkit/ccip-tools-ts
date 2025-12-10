@@ -13,6 +13,7 @@ import {
 import { loadAptosWallet } from './aptos.ts'
 import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
+import { loadTonWallet } from './ton.ts'
 import type { Ctx } from '../commands/index.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
@@ -187,6 +188,9 @@ export async function loadChainWallet(chain: Chain, opts: { wallet?: unknown }) 
     case ChainFamily.Aptos:
       wallet = await loadAptosWallet(opts)
       return [wallet.accountAddress.toString(), wallet] as const
+    case ChainFamily.TON:
+      wallet = await loadTonWallet(opts)
+      return [wallet.contract.address.toString(), wallet] as const
     default:
       throw new Error(`Unsupported chain family: ${chain.network.family}`)
   }

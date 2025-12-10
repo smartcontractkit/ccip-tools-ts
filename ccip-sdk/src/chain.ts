@@ -14,6 +14,7 @@ import type {
 } from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
 import type { UnsignedSolanaTx } from './solana/types.ts'
+import type { UnsignedTONTx } from './ton/types.ts'
 import {
   type AnyMessage,
   type CCIPCommit,
@@ -101,8 +102,8 @@ export type UnsignedTx = {
   [ChainFamily.EVM]: UnsignedEVMTx
   [ChainFamily.Solana]: UnsignedSolanaTx
   [ChainFamily.Aptos]: UnsignedAptosTx
+  [ChainFamily.TON]: UnsignedTONTx
   [ChainFamily.Sui]: never // TODO
-  [ChainFamily.TON]: never // TODO
 }
 
 /**

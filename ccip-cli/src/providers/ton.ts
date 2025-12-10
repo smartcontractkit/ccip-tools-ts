@@ -1,20 +1,26 @@
 import { existsSync, readFileSync } from 'node:fs'
+import util from 'node:util'
 
-import { TONChain } from '@chainlink/ccip-sdk/src/index.ts'
 import type { TONWallet } from '@chainlink/ccip-sdk/src/ton/types.ts'
 import { keyPairFromSecretKey, mnemonicToPrivateKey } from '@ton/crypto'
 import { WalletContractV4 } from '@ton/ton'
 
-TONChain.getWallet = async function loadTONWallet({
-  wallet,
+/**
+ * Loads a TON wallet from the provided options.
+ * @param wallet - wallet options (as passed from yargs argv)
+ * @returns Promise to TONWallet instance
+ */
+export async function loadTonWallet({
+  wallet: walletOpt,
 }: { wallet?: unknown } = {}): Promise<TONWallet> {
-  if (!wallet) wallet = process.env['USER_KEY'] || process.env['OWNER_KEY']
+  if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
 
-  if (typeof wallet !== 'string') throw new Error(`Invalid wallet option: ${String(wallet)}`)
+  if (typeof walletOpt !== 'string')
+    throw new Error(`Invalid wallet option: ${util.inspect(walletOpt)}`)
 
   // Handle mnemonic phrase
-  if (wallet.includes(' ')) {
-    const mnemonic = wallet.trim().split(' ')
+  if (walletOpt.includes(' ')) {
+    const mnemonic = walletOpt.trim().split(' ')
     const keyPair = await mnemonicToPrivateKey(mnemonic)
     const contract = WalletContractV4.create({
       workchain: 0,
@@ -24,8 +30,8 @@ TONChain.getWallet = async function loadTONWallet({
   }
 
   // Handle hex private key
-  if (wallet.startsWith('0x')) {
-    const secretKey = Buffer.from(wallet.slice(2), 'hex')
+  if (walletOpt.startsWith('0x')) {
+    const secretKey = Buffer.from(walletOpt.slice(2), 'hex')
     if (secretKey.length === 32) {
       throw new Error(
         'Invalid private key: 32-byte seeds not supported. Use 64-byte secret key or mnemonic.',
@@ -43,8 +49,8 @@ TONChain.getWallet = async function loadTONWallet({
   }
 
   // Handle file path
-  if (existsSync(wallet)) {
-    const content = readFileSync(wallet, 'utf8').trim()
+  if (existsSync(walletOpt)) {
+    const content = readFileSync(walletOpt, 'utf8').trim()
     const secretKey = Buffer.from(content.startsWith('0x') ? content.slice(2) : content, 'hex')
     if (secretKey.length !== 64) {
       throw new Error('Invalid private key in file: must be 64 bytes')
@@ -54,7 +60,7 @@ TONChain.getWallet = async function loadTONWallet({
       workchain: 0,
       publicKey: keyPair.publicKey,
     })
-    return { contract, keyPair } as TONWallet
+    return { contract, keyPair }
   }
 
   throw new Error('Wallet not specified')

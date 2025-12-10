@@ -4,11 +4,14 @@ import type { WalletContractV4 } from '@ton/ton'
 import { toBigInt } from 'ethers'
 
 import type { GenericExtraArgsV2 } from '../extra-args.ts'
-import type { CCIPMessage_V1_6, ExecutionReport } from '../types.ts'
+import type { CCIPMessage_V1_6, ChainFamily, ExecutionReport } from '../types.ts'
 import { bytesToBuffer } from '../utils.ts'
 
 /** TON-specific CCIP v1.6 message type with GenericExtraArgsV2 (gasLimit + allowOutOfOrderExecution). */
 export type CCIPMessage_V1_6_TON = CCIPMessage_V1_6 & GenericExtraArgsV2
+
+/** Opcode for OffRamp_ManuallyExecute message on TON */
+export const MANUALLY_EXECUTE_OPCODE = 0xa00785cf
 
 /**
  * TON wallet with keypair for signing transactions
@@ -16,6 +19,36 @@ export type CCIPMessage_V1_6_TON = CCIPMessage_V1_6 & GenericExtraArgsV2
 export interface TONWallet {
   contract: WalletContractV4
   keyPair: KeyPair
+}
+
+/**
+ * Unsigned TON transaction data.
+ * Contains all information needed to construct and sign a transaction.
+ */
+export type UnsignedTONTx = {
+  family: typeof ChainFamily.TON
+  /** Target contract address */
+  to: string
+  /** Amount of TON to send (in nanotons) */
+  value: bigint
+  /** Message payload as BOC-serialized Cell */
+  body: Cell
+}
+
+/** Typeguard for TON Wallet */
+export function isTONWallet(wallet: unknown): wallet is TONWallet {
+  return (
+    typeof wallet === 'object' &&
+    wallet !== null &&
+    'contract' in wallet &&
+    'keyPair' in wallet &&
+    typeof wallet.contract === 'object' &&
+    wallet.contract !== null &&
+    'address' in wallet.contract &&
+    typeof wallet.keyPair === 'object' &&
+    wallet.keyPair !== null &&
+    'secretKey' in wallet.keyPair
+  )
 }
 
 // asSnakeData helper for encoding variable-length arrays

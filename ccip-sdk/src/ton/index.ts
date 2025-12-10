@@ -1,6 +1,5 @@
 import { Address, Cell, beginCell } from '@ton/core'
-import { keyPairFromSecretKey, mnemonicToPrivateKey } from '@ton/crypto'
-import { TonClient, WalletContractV4 } from '@ton/ton'
+import { TonClient, internal } from '@ton/ton'
 import { type BytesLike, isBytesLike } from 'ethers'
 import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
@@ -23,11 +22,12 @@ import {
   type WithLogger,
   ChainFamily,
 } from '../types.ts'
-import { getDataBytes, networkInfo } from '../utils.ts'
+import { getDataBytes, networkInfo, util } from '../utils.ts'
 // import { parseTONLogs } from './utils.ts'
-import { executeReport } from './exec.ts'
+import { generateUnsignedExecuteReport as generateUnsignedExecuteReportImpl } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
-import type { CCIPMessage_V1_6_TON, TONWallet } from './types.ts'
+import { type CCIPMessage_V1_6_TON, type UnsignedTONTx, isTONWallet } from './types.ts'
+import { waitForTransaction } from './utils.ts'
 
 const GENERIC_V2_EXTRA_ARGS_TAG = Number.parseInt(GenericExtraArgsV2Tag, 16)
 
@@ -229,76 +229,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /**
-   * Static wallet loading not available for TON.
-   * @param _opts - Wallet options (unused).
-   * @returns Never resolves, always throws.
-   */
-  static getWallet(_opts: { wallet?: unknown } = {}): Promise<TONWallet> {
-    throw new Error('static TON wallet loading not available')
-  }
-
-  /**
-   * Loads a TON wallet from various input formats.
-   * @param opts - Wallet options (mnemonic, secret key, or TONWallet instance).
-   * @returns TONWallet instance.
-   */
-  async getWallet(opts: { wallet?: unknown } = {}): Promise<TONWallet> {
-    // Handle private key string (hex or base64)
-    if (typeof opts.wallet === 'string') {
-      // Try mnemonic phrase first (space-separated words)
-      const words = opts.wallet.trim().split(/\s+/)
-      if (words.length >= 12 && words.length <= 24) {
-        const keyPair = await mnemonicToPrivateKey(words)
-        const contract = WalletContractV4.create({
-          workchain: 0,
-          publicKey: keyPair.publicKey,
-        })
-        return { contract, keyPair }
-      }
-
-      // Try hex or base64 secret key (64 bytes)
-      let secretKey: Buffer
-
-      if (opts.wallet.startsWith('0x')) {
-        secretKey = Buffer.from(opts.wallet.slice(2), 'hex')
-      } else {
-        try {
-          secretKey = Buffer.from(opts.wallet, 'base64')
-          if (secretKey.length !== 64) {
-            secretKey = Buffer.from(opts.wallet, 'hex')
-          }
-        } catch {
-          secretKey = Buffer.from(opts.wallet, 'hex')
-        }
-      }
-
-      if (secretKey.length === 64) {
-        const keyPair = keyPairFromSecretKey(secretKey)
-        const contract = WalletContractV4.create({
-          workchain: 0,
-          publicKey: keyPair.publicKey,
-        })
-        return { contract, keyPair }
-      }
-
-      throw new Error('Invalid key format. Expected 64-byte secret key or mnemonic phrase.')
-    }
-
-    // Handle TONWallet instance directly
-    if (
-      opts.wallet &&
-      typeof opts.wallet === 'object' &&
-      'contract' in opts.wallet &&
-      'keyPair' in opts.wallet
-    ) {
-      return opts.wallet as TONWallet
-    }
-
-    // Delegate to static method (for CLI overrides)
-    return (this.constructor as typeof TONChain).getWallet(opts)
-  }
-
   // Static methods for decoding
   /**
    * Decodes a CCIP message from a TON log event.
@@ -439,30 +369,76 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   /** {@inheritDoc Chain.generateUnsignedExecuteReport} */
   generateUnsignedExecuteReport(
     _payer: string,
-    _offRamp: string,
-    _execReport: ExecutionReport,
-    _opts?: { wallet?: unknown; gasLimit?: number },
-  ): Promise<never> {
-    return Promise.reject(new Error('Not implemented'))
+    offRamp: string,
+    execReport: ExecutionReport,
+    opts?: { gasLimit?: number },
+  ): Promise<UnsignedTONTx> {
+    if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
+      throw new Error('TON expects GenericExtraArgsV2 reports')
+    }
+
+    const unsigned = generateUnsignedExecuteReportImpl(
+      offRamp,
+      execReport as ExecutionReport<CCIPMessage_V1_6_TON>,
+      opts,
+    )
+
+    return Promise.resolve({
+      family: ChainFamily.TON,
+      to: unsigned.to,
+      value: unsigned.value,
+      body: unsigned.body,
+    })
   }
 
   /** {@inheritDoc Chain.executeReport} */
   async executeReport(
     offRamp: string,
     execReport: ExecutionReport,
-    opts?: { wallet?: unknown; gasLimit?: number },
+    opts: { wallet: unknown; gasLimit?: number },
   ): Promise<ChainTransaction> {
-    const wallet = await this.getWallet(opts)
+    const wallet = opts.wallet
+    if (!isTONWallet(wallet)) {
+      throw new Error(
+        `${this.constructor.name}.executeReport requires a TON wallet, got=${util.inspect(wallet)}`,
+      )
+    }
 
-    const result = await executeReport(
-      this.provider,
-      wallet,
+    const unsigned = await this.generateUnsignedExecuteReport(
+      wallet.contract.address.toString(),
       offRamp,
       execReport as ExecutionReport<CCIPMessage_V1_6_TON>,
       opts,
     )
 
-    return this.getTransaction(result.hash)
+    // Open wallet and send transaction using the unsigned data
+    const openedWallet = this.provider.open(wallet.contract)
+    const seqno = await openedWallet.getSeqno()
+
+    await openedWallet.sendTransfer({
+      seqno,
+      secretKey: wallet.keyPair.secretKey,
+      messages: [
+        internal({
+          to: unsigned.to,
+          value: unsigned.value,
+          body: unsigned.body,
+        }),
+      ],
+    })
+
+    // Wait for transaction to be confirmed
+    const offRampAddress = Address.parse(offRamp)
+    const txInfo = await waitForTransaction(
+      this.provider,
+      wallet.contract.address,
+      seqno,
+      offRampAddress,
+    )
+
+    // Return composite hash in format "workchain:address:lt:hash"
+    const hash = `${wallet.contract.address.toRawString()}:${txInfo.lt}:${txInfo.hash}`
+    return this.getTransaction(hash)
   }
 
   /**
