@@ -7,7 +7,6 @@ import { ChainFamily } from './types.ts'
 export const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'
 /** Tag identifier for EVMExtraArgsV2 encoding. */
 export const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'
-export const GenericExtraArgsV2Tag = EVMExtraArgsV2Tag
 /** Tag identifier for SVMExtraArgsV1 encoding. */
 export const SVMExtraArgsV1Tag = id('CCIP SVMExtraArgsV1').substring(0, 10) as '0x1f3b3aba'
 /** Tag identifier for SuiExtraArgsV1 encoding. */
@@ -55,12 +54,6 @@ export type SuiExtraArgsV1 = EVMExtraArgsV2 & {
   /** Object IDs required for the receiver. */
   receiverObjectIds: string[]
 }
-
-/**
- * Tag identifier for GenericExtraArgsV2 encoding.
- * Uses the same tag as EVMExtraArgsV2 since they share the same structure.
- */
-export type GenericExtraArgsV2 = EVMExtraArgsV2
 
 /**
  * Union type of all supported extra arguments formats.

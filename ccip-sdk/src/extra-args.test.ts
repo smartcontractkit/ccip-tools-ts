@@ -5,12 +5,7 @@ import { dataSlice, getNumber } from 'ethers'
 
 // Import index.ts to ensure all Chain classes are loaded and registered
 import './index.ts'
-import {
-  EVMExtraArgsV2Tag,
-  GenericExtraArgsV2Tag,
-  decodeExtraArgs,
-  encodeExtraArgs,
-} from './extra-args.ts'
+import { EVMExtraArgsV2Tag, decodeExtraArgs, encodeExtraArgs } from './extra-args.ts'
 import { extractMagicTag } from './ton/utils.ts'
 import { ChainFamily } from './types.ts'
 
@@ -81,23 +76,23 @@ describe('encodeExtraArgs', () => {
     })
   })
   describe('TON extra args', () => {
-    it('should encode EVMExtraArgsV2', () => {
+    it('should encode EVMExtraArgsV2 (GenericExtraArgsV2)', () => {
       const encoded = encodeExtraArgs(
         { gasLimit: 400_000n, allowOutOfOrderExecution: true },
         ChainFamily.TON,
       )
 
-      assert.equal(extractMagicTag(encoded), GenericExtraArgsV2Tag)
+      assert.equal(extractMagicTag(encoded), EVMExtraArgsV2Tag)
       assert.ok(encoded.length > 10)
     })
 
-    it('should encode GenericExtraArgsV2 with allowOutOfOrderExecution false', () => {
+    it('should encode EVMExtraArgsV2 (GenericExtraArgsV2) with allowOutOfOrderExecution false', () => {
       const encoded = encodeExtraArgs(
         { gasLimit: 500_000n, allowOutOfOrderExecution: false },
         ChainFamily.TON,
       )
 
-      assert.equal(extractMagicTag(encoded), GenericExtraArgsV2Tag)
+      assert.equal(extractMagicTag(encoded), EVMExtraArgsV2Tag)
       assert.ok(encoded.length > 10)
     })
   })
@@ -288,7 +283,7 @@ describe('parseExtraArgs', () => {
       const tonEncoded = encodeExtraArgs(args, ChainFamily.TON)
 
       assert.equal(evmEncoded.substring(0, 10), EVMExtraArgsV2Tag)
-      assert.equal(extractMagicTag(tonEncoded), GenericExtraArgsV2Tag)
+      assert.equal(extractMagicTag(tonEncoded), EVMExtraArgsV2Tag)
       assert.notEqual(evmEncoded, tonEncoded)
     })
   })

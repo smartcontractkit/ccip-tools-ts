@@ -3,12 +3,12 @@ import type { KeyPair } from '@ton/crypto'
 import type { WalletContractV4 } from '@ton/ton'
 import { toBigInt } from 'ethers'
 
-import type { GenericExtraArgsV2 } from '../extra-args.ts'
+import type { EVMExtraArgsV2 } from '../../dist/extra-args.js'
 import type { CCIPMessage_V1_6, ChainFamily, ExecutionReport } from '../types.ts'
 import { bytesToBuffer } from '../utils.ts'
 
-/** TON-specific CCIP v1.6 message type with GenericExtraArgsV2 (gasLimit + allowOutOfOrderExecution). */
-export type CCIPMessage_V1_6_TON = CCIPMessage_V1_6 & GenericExtraArgsV2
+/** TON-specific CCIP v1.6 message type with EVMExtraArgsV2 (GenericExtraArgsV2) */
+export type CCIPMessage_V1_6_TON = CCIPMessage_V1_6 & EVMExtraArgsV2
 
 /** Opcode for OffRamp_ManuallyExecute message on TON */
 export const MANUALLY_EXECUTE_OPCODE = 0xa00785cf

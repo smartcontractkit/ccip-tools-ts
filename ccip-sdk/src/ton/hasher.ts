@@ -95,7 +95,9 @@ function hashV16TONMessage(message: CCIPMessage_V1_6, metadataHash: string): str
       networkInfo(message.header.sourceChainSelector).family,
     )
     if (!parsedArgs || parsedArgs._tag !== 'EVMExtraArgsV2') {
-      throw new Error('Invalid extraArgs for TON message, must be GenericExtraArgsV2')
+      throw new Error(
+        'Invalid extraArgs for TON message, must be EVMExtraArgsV2 (GenericExtraArgsV2)',
+      )
     }
     gasLimit = parsedArgs.gasLimit || 0n
   }

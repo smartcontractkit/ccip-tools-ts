@@ -5,7 +5,7 @@ import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { type LogFilter, Chain } from '../chain.ts'
-import { type EVMExtraArgsV2, type ExtraArgs, GenericExtraArgsV2Tag } from '../extra-args.ts'
+import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -28,8 +28,6 @@ import { generateUnsignedExecuteReport as generateUnsignedExecuteReportImpl } fr
 import { getTONLeafHasher } from './hasher.ts'
 import { type CCIPMessage_V1_6_TON, type UnsignedTONTx, isTONWallet } from './types.ts'
 import { waitForTransaction } from './utils.ts'
-
-const GENERIC_V2_EXTRA_ARGS_TAG = Number.parseInt(GenericExtraArgsV2Tag, 16)
 
 /**
  * TON chain implementation supporting TON networks.
@@ -253,7 +251,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     if (!args) return '0x'
     if ('gasLimit' in args && 'allowOutOfOrderExecution' in args) {
       const cell = beginCell()
-        .storeUint(GENERIC_V2_EXTRA_ARGS_TAG, 32) // magic tag
+        .storeUint(Number(EVMExtraArgsV2Tag), 32) // magic tag
         .storeUint(args.gasLimit, 256) // gasLimit
         .storeBit(args.allowOutOfOrderExecution) // bool
         .endCell()
@@ -269,12 +267,12 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * Parses the BOC format and extracts extra args, validating the magic tag
    * to ensure correct type. Returns undefined if parsing fails or tag doesn't match.
    *
-   * Currently only supports GenericExtraArgsV2 (EVMExtraArgsV2) encoding since TON
+   * Currently only supports EVMExtraArgsV2 (GenericExtraArgsV2) encoding since TON
    * lanes are only connected to EVM chains. When new lanes are planned to be added,
    * this should be extended to support them (eg. Solana and SVMExtraArgsV1)
    *
    * @param extraArgs - BOC-encoded extra args as hex string or bytes
-   * @returns Decoded GenericExtraArgsV2 object or undefined if invalid
+   * @returns Decoded EVMExtraArgsV2 (GenericExtraArgsV2) object or undefined if invalid
    */
   static decodeExtraArgs(
     extraArgs: BytesLike,
@@ -288,7 +286,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
       // Load and verify magic tag to ensure correct extra args type
       const magicTag = slice.loadUint(32)
-      if (magicTag !== GENERIC_V2_EXTRA_ARGS_TAG) return undefined
+      if (magicTag !== Number(EVMExtraArgsV2Tag)) return undefined
 
       return {
         _tag: 'EVMExtraArgsV2',
@@ -382,7 +380,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     opts?: { gasLimit?: number },
   ): Promise<UnsignedTONTx> {
     if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
-      throw new Error('TON expects GenericExtraArgsV2 reports')
+      throw new Error('TON expects EVMExtraArgsV2 (GenericExtraArgsV2) reports')
     }
 
     const unsigned = generateUnsignedExecuteReportImpl(
