@@ -10,7 +10,7 @@ TONChain.getWallet = async function loadTONWallet({
 }: { wallet?: unknown } = {}): Promise<TONWallet> {
   if (!wallet) wallet = process.env['USER_KEY'] || process.env['OWNER_KEY']
 
-  if (typeof wallet !== 'string') throw new Error(`Invalid wallet option: ${wallet}`)
+  if (typeof wallet !== 'string') throw new Error(`Invalid wallet option: ${String(wallet)}`)
 
   // Handle mnemonic phrase
   if (wallet.includes(' ')) {
