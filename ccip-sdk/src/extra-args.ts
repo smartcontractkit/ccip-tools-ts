@@ -7,11 +7,11 @@ import { ChainFamily } from './types.ts'
 export const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'
 /** Tag identifier for EVMExtraArgsV2 encoding. */
 export const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'
+export const GenericExtraArgsV2Tag = EVMExtraArgsV2Tag
 /** Tag identifier for SVMExtraArgsV1 encoding. */
 export const SVMExtraArgsV1Tag = id('CCIP SVMExtraArgsV1').substring(0, 10) as '0x1f3b3aba'
 /** Tag identifier for SuiExtraArgsV1 encoding. */
 export const SuiExtraArgsV1Tag = id('CCIP SuiExtraArgsV1').substring(0, 10) as '0x21ea4ca9'
-export const GenericExtraArgsV2Tag = EVMExtraArgsV2Tag
 
 /**
  * EVM extra arguments version 1 with gas limit only.
@@ -92,7 +92,6 @@ export function decodeExtraArgs(
   | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
   | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
   | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
-  | (GenericExtraArgsV2 & { _tag: 'GenericExtraArgsV2' })
   | undefined {
   if (!data || data === '') return
   let chains

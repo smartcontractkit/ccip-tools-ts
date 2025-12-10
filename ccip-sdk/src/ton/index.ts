@@ -5,7 +5,7 @@ import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { type LogFilter, Chain } from '../chain.ts'
-import { type ExtraArgs, type GenericExtraArgsV2, GenericExtraArgsV2Tag } from '../extra-args.ts'
+import { type EVMExtraArgsV2, type ExtraArgs, GenericExtraArgsV2Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -242,6 +242,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   /**
    * Encodes extra args from TON messages into BOC serialization format.
    *
+   * Currently only supports GenericExtraArgsV2 (EVMExtraArgsV2) encoding since TON
+   * lanes are only connected to EVM chains. When new lanes are planned to be added,
+   * this should be extended to support them (eg. Solana and SVMExtraArgsV1)
+   *
    * @param args - Extra arguments containing gas limit and execution flags
    * @returns Hex string of BOC-encoded extra args (0x-prefixed)
    */
@@ -261,16 +265,20 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * Decodes BOC-encoded extra arguments from TON messages
+   * Decodes BOC-encoded extra arguments from TON messages.
    * Parses the BOC format and extracts extra args, validating the magic tag
    * to ensure correct type. Returns undefined if parsing fails or tag doesn't match.
+   *
+   * Currently only supports GenericExtraArgsV2 (EVMExtraArgsV2) encoding since TON
+   * lanes are only connected to EVM chains. When new lanes are planned to be added,
+   * this should be extended to support them (eg. Solana and SVMExtraArgsV1)
    *
    * @param extraArgs - BOC-encoded extra args as hex string or bytes
    * @returns Decoded GenericExtraArgsV2 object or undefined if invalid
    */
   static decodeExtraArgs(
     extraArgs: BytesLike,
-  ): (GenericExtraArgsV2 & { _tag: 'GenericExtraArgsV2' }) | undefined {
+  ): (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' }) | undefined {
     const data = Buffer.from(getDataBytes(extraArgs))
 
     try {
@@ -283,7 +291,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       if (magicTag !== GENERIC_V2_EXTRA_ARGS_TAG) return undefined
 
       return {
-        _tag: 'GenericExtraArgsV2',
+        _tag: 'EVMExtraArgsV2',
         gasLimit: slice.loadUintBig(256),
         allowOutOfOrderExecution: slice.loadBit(),
       }
