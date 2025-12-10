@@ -8,7 +8,7 @@ import { bcs } from '@mysten/bcs'
 import { getBytes } from 'ethers'
 
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import type { ExecutionReport } from '../types.ts'
+import type { ChainFamily, ExecutionReport } from '../types.ts'
 import { getAddressBytes } from '../utils.ts'
 
 /** Aptos account type with async transaction signing capability. */
@@ -18,6 +18,17 @@ export type AptosAsyncAccount = {
   signTransactionWithAuthenticator: (
     transaction: AnyRawTransaction,
   ) => Promise<AccountAuthenticator> | AccountAuthenticator
+}
+
+/** Typeguard for an aptos-ts-sdk-like Account */
+export function isAptosAccount(account: unknown): account is AptosAsyncAccount {
+  return (
+    typeof account === 'object' &&
+    account !== null &&
+    'publicKey' in account &&
+    'accountAddress' in account &&
+    'signTransactionWithAuthenticator' in account
+  )
 }
 
 export const EVMExtraArgsV2Codec = bcs.struct('EVMExtraArgsV2', {
@@ -87,4 +98,12 @@ export function serializeExecutionReport(
     offchainTokenData: execReport.offchainTokenData.map(() => []),
     proofs: execReport.proofs.map((p) => getBytes(p)),
   }).toBytes()
+}
+
+/**
+ * Unsigned Aptos transactions, BCS-serialized.
+ */
+export type UnsignedAptosTx = {
+  family: typeof ChainFamily.Aptos
+  transactions: [Uint8Array]
 }

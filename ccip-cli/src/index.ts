@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import { realpathSync } from 'fs'
 import util from 'node:util'
+import { pathToFileURL } from 'url'
 
 import yargs, { type InferredOptionTypes } from 'yargs'
 import { hideBin } from 'yargs/helpers'
@@ -9,7 +11,7 @@ import { Format } from './commands/index.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.91.0-4bae2ee'
+const VERSION = '0.91.0-0161da7'
 // generate:end
 
 const globalOpts = {
@@ -51,11 +53,6 @@ async function main() {
     .scriptName(process.env.CLI_NAME || 'ccip-cli')
     .env('CCIP')
     .options(globalOpts)
-    .middleware((argv) => {
-      if (!argv.verbose) {
-        console.debug = () => {}
-      }
-    })
     .commandDir('commands', {
       extensions: [new URL(import.meta.url).pathname.split('.').pop()!],
       exclude: /\.test\.[tj]s$/,
@@ -68,8 +65,14 @@ async function main() {
     .parse()
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const later = setTimeout(() => {}, 2 ** 31 - 1) // keep event-loop alive
+function wasCalledAsScript() {
+  const realPath = realpathSync(process.argv[1])
+  const realPathAsUrl = pathToFileURL(realPath).href
+  return import.meta.url === realPathAsUrl
+}
+
+if (import.meta?.main || wasCalledAsScript()) {
+  const later = setTimeout(() => { }, 2 ** 31 - 1) // keep event-loop alive
   await main()
     .catch((err) => {
       console.error(err)

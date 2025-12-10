@@ -26,9 +26,8 @@ Or run it directly from github or a local clone of the repo (useful for local de
 git clone https://github.com/smartcontractkit/ccip-tools-ts
 cd ccip-tools-ts
 npm install  # install dependencies
-./ccip-cli/ccip-cli --help  # shell script to run `ccip-cli/src/index.ts`
-# or
-npx /path/to/repo/ccip-tools-ts/ccip-cli --help  # run from local repo directly
+./ccip-cli/ccip-cli --help  # shell script to run `./ccip-cli/src/index.ts`
+alias ccip-cli="$PWD/ccip-cli/ccip-cli"  # optional, to run from local repo directly from anywhere
 ```
 
 > [!NOTE]
@@ -45,14 +44,27 @@ npx /path/to/repo/ccip-tools-ts/ccip-cli --help  # run from local repo directly
 All commands require a list of RPCs endpoints for the networks of interest (source and destination).
 Both `http[s]` and `ws[s]` (websocket) URLs are supported.
 
-This list can be passed in the command line, through the `-r/--rpcs` option, and are merged with
-those fetched from the rpcs file (`--rpcs-file`, default=`./.env`), which may contain multiple
-endpoints, one per line, with any prefix or suffix (only URLs are parsed).
+This list can be passed in the command line, through the `-r/--rpcs` option; it may be passed
+multiple times, e.g. `-r <source_rpc> -r <dest_rpc>`, and are merged with those fetched from the
+rpcs file (`--rpcs-file`, default=`./.env`), which may contain multiple endpoints, one per line,
+with any prefix or suffix (only URLs are parsed).
+
 The default filename is just for compatibility with previous tools, and isn't required to be an
 actual env file. `.txt`, `.csv` or `.json` arrays should work out of the box.
-`RPC_*` environment variables are also ingested.
 
-Once the list is gathered, the CLI connects to all RPCs in parallel on startup and uses the fastest
+Example `.env` file:
+
+```
+https://eth-sepolia.g.alchemy.com/v2/demo
+ARB_SEPOLIA_RPC: https://arbitrum-sepolia.drpc.org
+RPC_AVALANCHE_TESTNET=https://avalanche-fuji-c-chain-rpc.publicnode.com
+https://api.devnet.solana.com  # solana devnet public rpc
+https://api.testnet.aptoslabs.com/v1  // `testnet` only would also work
+```
+
+Environment variables starting with `RPC_` are also ingested. Suffix is not relevant.
+
+Once the list is gathered, CLI connects to all RPCs in parallel on startup and uses the fastest
 to reply for each network.
 
 ## Wallet
@@ -73,6 +85,15 @@ a Ledger USB device. The derivation path defaults to Ledger Live derivations on 
 network, and passing an index selects an account of this derivation:
 E.g. `--wallet ledger:1` uses derivation `m/44'/60'/1'/0/0` for EVM accounts
 
+## Chain names and selectors
+
+Where required, networks can be referred by name or selector from [chain-selectors](https://github.com/smartcontractkit/chain-selectors).
+ChainIDs follow this pattern:
+
+- `EVM`: numeric chain id; e.g. `1` for `ethereum-mainnet`.
+- `Solana`: genesis hash; e.g. `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d` for `solana-mainnet`
+- `Aptos`, `Sui`: numeric chain id, prefixed with chain family and colon: e.g `aptos:1` for `aptos-mainnet`
+
 ## Quick command reference:
 
 ### Common options
@@ -87,7 +108,7 @@ don't support large ranges)
 ### `show` (default command)
 
 ```sh
-./ccip-cli [show] <request_transaction_hash> [--log-index num]
+ccip-cli [show] <request_transaction_hash> [--log-index num]
 ```
 
 Receives a transaction containing a `CCIPSendRequested` (<=v1.5) or `CCIPMessageSent` (>=1.6) event.
@@ -103,7 +124,7 @@ Receipts until a `success` receipt or latest block is hit.
 ### `manualExec`
 
 ```sh
-./ccip-cli manualExec <request_transaction_hash> [--gas-limit num] [--tokens-gas-limit num]
+ccip-cli manualExec <request_transaction_hash> [--gas-limit num] [--tokens-gas-limit num]
 ```
 
 Try to manually execute the message in source transaction. If more than one found, user is prompted
@@ -139,7 +160,7 @@ to be cleared.
 
 #### Example
 ```sh
-./ccip-cli manualExec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b \
+ccip-cli manualExec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b \
   --wallet ledger \
   --compute-units 500000 \
   --force-buffer \
@@ -149,7 +170,7 @@ to be cleared.
 ### `send`
 
 ```sh
-./ccip-cli send 11155111 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 ethereum-testnet-sepolia-arbitrum-1 \
+ccip-cli send 11155111 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 ethereum-testnet-sepolia-arbitrum-1 \
     --receiver 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
     --data 'hello world' \
     --gas-limit 300000 \
@@ -192,7 +213,7 @@ either transfer or fee tokens. Default behavior is to approve the strictly neede
 ### `parse`
 
 ```sh
-./ccip-cli parse 0xbf16aab6000000000000000000000000779877a7b0d9e8603169ddbd7836e478b4624789
+ccip-cli parse 0xbf16aab6000000000000000000000000779877a7b0d9e8603169ddbd7836e478b4624789
 
 Error: EVM2EVMOnRamp_1.2.0.UnsupportedToken(address)
 Args: { token: '0x779877A7B0D9E8603169DdbD7836e478b4624789' }
@@ -205,9 +226,9 @@ It'll recursively try to decode `returnData` and `error` arguments.
 ### `getSupportedTokens`
 
 ```sh
-./ccip-cli getSupportedTokens <source> <router>  # lists supported tokens
-./ccip-cli getSupportedTokens <source> <router> [token]  # show token and pool details for this token
-./ccip-cli getSupportedTokens <source> <tokenPool>  # same as above, for the pool directly
+ccip-cli getSupportedTokens <source> <router>  # lists supported tokens
+ccip-cli getSupportedTokens <source> <router> [token]  # show token and pool details for this token
+ccip-cli getSupportedTokens <source> <tokenPool>  # same as above, for the pool directly
 ```
 
 Source is the network to be queried, as chainID or name.
@@ -226,7 +247,7 @@ chains and its rate limits state.
 
 ```sh
 # Check tokens supported for transfer from Ethereum to Polygon
-./ccip-cli getSupportedTokens ethereum-mainnet 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D
+ccip-cli getSupportedTokens ethereum-mainnet 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D
 ```
 
 #### Output Format Options

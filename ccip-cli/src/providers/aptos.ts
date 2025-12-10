@@ -12,7 +12,6 @@ import {
   Ed25519Signature,
   generateSigningMessageForTransaction,
 } from '@aptos-labs/ts-sdk'
-import { AptosChain } from '@chainlink/ccip-sdk/src/index.ts'
 import AptosLedger from '@ledgerhq/hw-app-aptos'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
 import { type BytesLike, getBytes, hexlify } from 'ethers'
@@ -93,7 +92,12 @@ export class AptosLedgerSigner /*implements AptosAsyncAccount*/ {
   }
 }
 
-AptosChain.getWallet = async function loadAptosWallet({ wallet: walletOpt }: { wallet?: unknown }) {
+/**
+ * Loads an Aptos wallet from the provided options.
+ * @param wallet - wallet options (as passed from yargs argv)
+ * @returns Promise to AptosAsyncAccount instance
+ */
+export async function loadAptosWallet({ wallet: walletOpt }: { wallet?: unknown }) {
   if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
   if (typeof walletOpt !== 'string')
     throw new Error(`Invalid wallet option: ${util.inspect(walletOpt)}`)

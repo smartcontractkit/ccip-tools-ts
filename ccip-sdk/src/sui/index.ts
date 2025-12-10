@@ -18,6 +18,7 @@ import {
   type Log_,
   type NetworkInfo,
   type OffchainTokenData,
+  type WithLogger,
   ChainFamily,
 } from '../types.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
@@ -33,16 +34,12 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   static readonly family = ChainFamily.Sui
   static readonly decimals = 8
 
-  readonly network: NetworkInfo<typeof ChainFamily.Sui>
-
   /**
    * Creates a new SuiChain instance.
    * @param network - Sui network configuration.
    */
-  constructor(network: NetworkInfo<typeof ChainFamily.Sui>) {
-    super()
-
-    this.network = network
+  constructor(network: NetworkInfo<typeof ChainFamily.Sui>, ctx?: WithLogger) {
+    super(network, ctx)
   }
 
   /**
@@ -50,7 +47,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @param _url - RPC endpoint URL.
    * @returns A new SuiChain instance.
    */
-  static async fromUrl(_url: string): Promise<SuiChain> {
+  static async fromUrl(_url: string, _ctx?: WithLogger): Promise<SuiChain> {
     return Promise.reject(new Error('Not implemented'))
   }
 
@@ -150,11 +147,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new Error('Not implemented'))
   }
 
-  /** {@inheritDoc Chain.getWalletAddress} */
-  async getWalletAddress(_opts?: { wallet?: unknown }): Promise<string> {
-    return Promise.reject(new Error('Not implemented'))
-  }
-
+  // Static methods for decoding
   /**
    * Decodes a CCIP message from a Sui log event.
    * @param _log - Log event data.
@@ -220,12 +213,23 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @param lane - Lane configuration.
    * @returns Leaf hasher function.
    */
-  static getDestLeafHasher(lane: Lane): LeafHasher {
+  static getDestLeafHasher(lane: Lane, _ctx?: WithLogger): LeafHasher {
     return getSuiLeafHasher(lane)
   }
 
   /** {@inheritDoc Chain.getFee} */
   async getFee(_router: string, _destChainSelector: bigint, _message: AnyMessage): Promise<bigint> {
+    return Promise.reject(new Error('Not implemented'))
+  }
+
+  /** {@inheritDoc Chain.generateUnsignedSendMessage} */
+  override generateUnsignedSendMessage(
+    _sender: string,
+    _router: string,
+    _destChainSelector: bigint,
+    _message: AnyMessage & { fee?: bigint },
+    _opts?: { approveMax?: boolean },
+  ): Promise<never> {
     return Promise.reject(new Error('Not implemented'))
   }
 
@@ -246,6 +250,16 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
     // default offchain token data
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
+  }
+
+  /** {@inheritDoc Chain.generateUnsignedExecuteReport} */
+  override generateUnsignedExecuteReport(
+    _payer: string,
+    _offRamp: string,
+    _execReport: ExecutionReport,
+    _opts: object,
+  ): Promise<never> {
+    return Promise.reject(new Error('Not implemented'))
   }
 
   /** {@inheritDoc Chain.executeReport} */

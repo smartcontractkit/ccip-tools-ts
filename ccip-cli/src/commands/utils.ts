@@ -1,3 +1,5 @@
+import { Console } from 'node:console'
+
 import {
   type CCIPCommit,
   type CCIPExecution,
@@ -22,6 +24,8 @@ import {
   toUtf8String,
 } from 'ethers'
 import type { PickDeep } from 'type-fest'
+
+import type { Ctx } from './types.ts'
 
 /**
  * Prompts user to select a CCIP request from a list.
@@ -81,11 +85,11 @@ export function withDateTimestamp<
  * Prints lane information in a human-readable format.
  * @param lane - Lane configuration.
  */
-export function prettyLane(lane: Lane) {
-  console.info('Lane:')
+export function prettyLane(this: Ctx, lane: Lane) {
+  this.logger.info('Lane:')
   const source = networkInfo(lane.sourceChainSelector),
     dest = networkInfo(lane.destChainSelector)
-  console.table({
+  this.logger.table({
     name: { source: source.name, dest: dest.name },
     chainId: { source: source.chainId, dest: dest.chainId },
     chainSelector: { source: source.chainSelector, dest: dest.chainSelector },
@@ -192,12 +196,13 @@ function omit<T extends Record<string, unknown>, K extends string>(
  * @param offchainTokenData - Optional offchain token data.
  */
 export async function prettyRequest(
+  this: Ctx,
   source: Chain,
   request: CCIPRequest,
   offchainTokenData?: OffchainTokenData[],
 ) {
-  prettyLane(request.lane)
-  console.info('Request (source):')
+  prettyLane.call(this, request.lane)
+  this.logger.info('Request (source):')
 
   let finalized
   try {
@@ -221,7 +226,7 @@ export async function prettyRequest(
     'extraArgs',
     'accounts',
   )
-  prettyTable({
+  prettyTable.call(this, {
     messageId: request.message.header.messageId,
     ...(request.tx.from ? { origin: request.tx.from } : {}),
     sender: request.message.sender,
@@ -260,10 +265,10 @@ export async function prettyRequest(
   })
 
   if (!offchainTokenData?.length || offchainTokenData.every((d) => !d)) return
-  console.info('Attestations:')
+  this.logger.info('Attestations:')
   for (const attestation of offchainTokenData) {
     const { _tag: type, ...rest } = attestation!
-    prettyTable({ type, ...rest })
+    prettyTable.call(this, { type, ...rest })
   }
 }
 
@@ -274,13 +279,14 @@ export async function prettyRequest(
  * @param request - CCIP request for timestamp comparison.
  */
 export async function prettyCommit(
+  this: Ctx,
   dest: Chain,
   commit: CCIPCommit,
   request: PickDeep<CCIPRequest, 'tx.timestamp'>,
 ) {
-  console.info('Commit (dest):')
+  this.logger.info('Commit (dest):')
   const timestamp = await dest.getBlockTimestamp(commit.log.blockNumber)
-  prettyTable({
+  prettyTable.call(this, {
     merkleRoot: commit.report.merkleRoot,
     min: Number(commit.report.minSeqNr),
     max: Number(commit.report.maxSeqNr),
@@ -354,6 +360,7 @@ function wrapText(text: string, maxWidth: number, threshold: number = 0.1): stri
  * @param opts - Formatting options.
  */
 export function prettyTable(
+  this: Ctx,
   args: Record<string, unknown>,
   opts = { parseErrorKeys: ['returnData'], spcount: 0 },
 ) {
@@ -377,7 +384,7 @@ export function prettyTable(
       out.push(...Object.entries(value).map(([k, v]) => [`${key}.${k}`, v] as const))
     } else out.push([key, value])
   }
-  return console.table(Object.fromEntries(out))
+  return this.logger.table(Object.fromEntries(out))
 }
 
 /**
@@ -387,11 +394,12 @@ export function prettyTable(
  * @param origin - Optional transaction origin address.
  */
 export function prettyReceipt(
+  this: Ctx,
   receipt: CCIPExecution,
   request: PickDeep<CCIPRequest, 'tx.timestamp'>,
   origin?: string,
 ) {
-  prettyTable({
+  prettyTable.call(this, {
     state: receipt.receipt.state === ExecutionState.Success ? '✅ success' : '❌ failed',
     ...(receipt.receipt.state !== ExecutionState.Success ||
     (receipt.receipt.returnData && receipt.receipt.returnData !== '0x')
@@ -412,20 +420,20 @@ export function prettyReceipt(
  * @param err - Error to parse and log.
  * @returns True if error was successfully parsed and logged.
  */
-export function logParsedError(err: unknown): boolean {
+export function logParsedError(this: Ctx, err: unknown): boolean {
   for (const chain of Object.values<ChainStatic>(supportedChains)) {
     const parsed = chain.parse?.(err)
     if (!parsed) continue
     const { method, Instruction: instruction, ...rest } = parsed
     if (method || instruction) {
-      console.error(
+      this.logger.error(
         `🛑 Failed to call "${(method || instruction) as string}"`,
         ...Object.entries(rest)
           .map(([k, e]) => [`\n${k.substring(0, 1).toUpperCase()}${k.substring(1)} =`, e])
           .flat(1),
       )
     } else {
-      console.error('🛑 Error:', parsed)
+      this.logger.error('🛑 Error:', parsed)
     }
     return true
   }
@@ -460,4 +468,23 @@ export async function* yieldResolved<T>(promises: readonly Promise<T>[]): AsyncG
     map.delete(p)
     yield res
   }
+}
+
+/**
+ * Create context for command execution
+ * @param argv - yargs argv containing verbose flag
+ * @returns AbortController and context object with destroy$ signal and logger
+ */
+export function getCtx(argv: { verbose?: boolean }): [controller: AbortController, ctx: Ctx] {
+  const controller = new AbortController()
+  const destroy$ = controller.signal
+
+  const logger = new Console(process.stdout, process.stderr, true)
+  if (argv.verbose) {
+    logger.debug('Verbose mode enabled')
+  } else {
+    logger.debug = () => {}
+  }
+
+  return [controller, { destroy$, logger }]
 }

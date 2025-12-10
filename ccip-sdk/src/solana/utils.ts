@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { eventDiscriminator } from '@coral-xyz/anchor'
 import {
   type AddressLookupTableAccount,
@@ -14,8 +16,9 @@ import {
 } from '@solana/web3.js'
 import { dataLength, dataSlice, hexlify } from 'ethers'
 
-import type { Log_ } from '../types.ts'
+import type { Log_, WithLogger } from '../types.ts'
 import { getDataBytes, sleep } from '../utils.ts'
+import type { UnsignedSolanaTx, Wallet } from './types.ts'
 
 /**
  * Generates a hex-encoded discriminator for a Solana event.
@@ -208,17 +211,18 @@ export function getErrorFromLogs(
  * @param params - Simulation parameters including connection and payer.
  * @returns Simulation result with estimated compute units.
  */
-export async function simulateTransaction({
-  connection,
-  payerKey,
-  computeUnitsOverride,
-  ...rest
-}: {
-  connection: Connection
-  payerKey: PublicKey
-  computeUnitsOverride?: number
-  addressLookupTableAccounts?: AddressLookupTableAccount[]
-} & ({ instructions: TransactionInstruction[] } | { tx: Transaction | VersionedTransaction })) {
+export async function simulateTransaction(
+  { connection, logger = console }: { connection: Connection } & WithLogger,
+  {
+    payerKey,
+    computeUnitsOverride,
+    ...rest
+  }: {
+    payerKey: PublicKey
+    computeUnitsOverride?: number
+    addressLookupTableAccounts?: AddressLookupTableAccount[]
+  } & ({ instructions: TransactionInstruction[] } | { tx: Transaction | VersionedTransaction }),
+) {
   // Add max compute units for simulation
   const maxComputeUnits = 1_400_000
   const recentBlockhash = '11111111111111111111111111111112'
@@ -260,7 +264,7 @@ export async function simulateTransaction({
   const result = await connection.simulateTransaction(tx, config)
 
   if (result.value.err) {
-    console.debug('Simulation results:', {
+    logger.debug('Simulation results:', {
       logs: result.value.logs,
       unitsConsumed: result.value.unitsConsumed,
       returnData: result.value.returnData,
@@ -281,24 +285,103 @@ export async function simulateTransaction({
 /**
  * Used as `provider` in anchor's `Program` constructor, to support `.view()` simulations
  * without * requiring a full AnchorProvider with wallet
- * @param connection - Connection to the Solana network
+ * @param ctx - Context object containing connection and logger
  * @param feePayer - Fee payer for the simulated transaction
  * @returns Value returned by the simulated method
  */
 export function simulationProvider(
-  connection: Connection,
+  ctx: { connection: Connection } & WithLogger,
   feePayer: PublicKey = new PublicKey('11111111111111111111111111111112'),
 ) {
   return {
-    connection,
+    connection: ctx.connection,
     wallet: {
       publicKey: feePayer,
     },
     simulate: async (tx: Transaction | VersionedTransaction, _signers?: Signer[]) =>
-      simulateTransaction({
-        connection,
+      simulateTransaction(ctx, {
         payerKey: feePayer,
         tx,
       }),
   }
+}
+
+/**
+ * Sign, simulate, send and confirm as many instructions as possible on each transaction
+ * @param ctx - Context object containing connection and logger
+ * @param wallet - Wallet to sign and pay for txs
+ * @param unsignedTx - instructions to sign and send
+ *   - instructions - Instructions to send; they may not fit all in a single transaction,
+ *       in which case they will be split into multiple transactions
+ *   - mainIndex - Index of the main instruction
+ *   - lookupTables - lookupTables to be used for main instruction
+ * @param computeUnits - max computeUnits limit to be used for main instruction
+ * @returns - signature of successful transaction including main instruction
+ */
+export async function simulateAndSendTxs(
+  ctx: { connection: Connection } & WithLogger,
+  wallet: Wallet,
+  { instructions, mainIndex, lookupTables }: Omit<UnsignedSolanaTx, 'family'>,
+  computeUnits?: number,
+): Promise<string> {
+  const { connection } = ctx
+  let mainHash: string
+  for (
+    let [start, end] = [0, instructions.length];
+    start < instructions.length;
+    [start, end] = [end, instructions.length]
+  ) {
+    let computeUnitLimit, lastErr, addressLookupTableAccounts, ixs, includesMain
+    do {
+      ixs = instructions.slice(start, end)
+      includesMain = mainIndex != null && start <= mainIndex && mainIndex < end
+      addressLookupTableAccounts = includesMain ? lookupTables : undefined
+
+      try {
+        const simulated =
+          (
+            await simulateTransaction(ctx, {
+              payerKey: wallet.publicKey,
+              instructions: ixs,
+              addressLookupTableAccounts,
+            })
+          ).unitsConsumed || 0
+
+        if (simulated <= 200000) {
+          computeUnitLimit = undefined
+        } else if (!includesMain || computeUnits == null || simulated <= computeUnits) {
+          computeUnitLimit = Math.ceil(simulated * 1.1)
+        } else {
+          throw new Error(
+            `Main simulation exceeds specified computeUnits limit. simulated=${simulated}, limit=${computeUnits}`,
+          )
+        }
+        break
+      } catch (err) {
+        lastErr = err
+        end-- // truncate until finding a slice which fits (both computeUnits and tx size limits)
+      }
+    } while (end > start)
+    if (end <= start) throw lastErr
+
+    const blockhash = await connection.getLatestBlockhash('confirmed')
+    const txMsg = new TransactionMessage({
+      payerKey: wallet.publicKey,
+      recentBlockhash: blockhash.blockhash,
+      instructions: [
+        ...(computeUnitLimit
+          ? [ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit })]
+          : []),
+        ...ixs,
+      ],
+    })
+    const messageV0 = txMsg.compileToV0Message(addressLookupTableAccounts)
+    const tx = new VersionedTransaction(messageV0)
+
+    const signed = await wallet.signTransaction(tx)
+    const signature = await connection.sendTransaction(signed)
+    await connection.confirmTransaction({ signature, ...blockhash }, 'confirmed')
+    if (includesMain) mainHash = signature
+  }
+  return mainHash!
 }

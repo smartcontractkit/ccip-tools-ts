@@ -10,8 +10,9 @@ import {
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
-import { Format } from './types.ts'
+import { type Ctx, Format } from './types.ts'
 import {
+  getCtx,
   logParsedError,
   prettyCommit,
   prettyReceipt,
@@ -54,23 +55,21 @@ export const builder = (yargs: Argv) =>
  * @param argv - Command line arguments.
  */
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
-  let destroy
-  const destroy$ = new Promise((resolve) => {
-    destroy = resolve
-  })
-  return showRequests(argv, destroy$)
+  const [controller, ctx] = getCtx(argv)
+  return showRequests(ctx, argv)
     .catch((err) => {
       process.exitCode = 1
-      if (!logParsedError(err)) console.error(err)
+      if (!logParsedError.call(ctx, err)) ctx.logger.error(err)
     })
-    .finally(destroy)
+    .finally(() => controller.abort('Exited'))
 }
 
-async function showRequests(argv: Parameters<typeof handler>[0], destroy: Promise<unknown>) {
+async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
+  const { logger } = ctx
   let source, getChain, tx: ChainTransaction, request: CCIPRequest
   // messageId not yet implemented for Solana
   if (argv.idFromSource) {
-    getChain = fetchChainsFromRpcs(argv, undefined, destroy)
+    getChain = fetchChainsFromRpcs(ctx, argv)
     let idFromSource, onRamp
     if (argv.idFromSource.includes('@')) {
       ;[onRamp, idFromSource] = argv.idFromSource.split('@')
@@ -81,7 +80,7 @@ async function showRequests(argv: Parameters<typeof handler>[0], destroy: Promis
       throw new Error(`fetchRequestById not implemented for ${source.constructor.name}`)
     request = await source.fetchRequestById(argv.txHash, onRamp, argv)
   } else {
-    const [getChain_, tx$] = fetchChainsFromRpcs(argv, argv.txHash, destroy)
+    const [getChain_, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHash)
     getChain = getChain_
     ;[source, tx] = await tx$
     request = await selectRequest(await source.fetchRequestsInTx(tx), 'to know more', argv)
@@ -91,7 +90,7 @@ async function showRequests(argv: Parameters<typeof handler>[0], destroy: Promis
 
   switch (argv.format) {
     case Format.log: {
-      console.log(
+      logger.log(
         `message ${request.log.index} =`,
         withDateTimestamp(request),
         '\nattestations =',
@@ -100,28 +99,28 @@ async function showRequests(argv: Parameters<typeof handler>[0], destroy: Promis
       break
     }
     case Format.pretty:
-      await prettyRequest(source, request, offchainTokenData)
+      await prettyRequest.call(ctx, source, request, offchainTokenData)
       break
     case Format.json:
-      console.info(JSON.stringify({ ...request, offchainTokenData }, bigIntReplacer, 2))
+      logger.info(JSON.stringify({ ...request, offchainTokenData }, bigIntReplacer, 2))
       break
   }
   if (request.tx.error) throw new Error(`Request tx reverted: ${util.inspect(request.tx.error)}`)
 
   const dest = await getChain(request.lane.destChainSelector)
-  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
   const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
 
   const commit = await dest.fetchCommitReport(commitStore, request, argv)
   switch (argv.format) {
     case Format.log:
-      console.log('commit =', commit)
+      logger.log('commit =', commit)
       break
     case Format.pretty:
-      await prettyCommit(dest, commit, request)
+      await prettyCommit.call(ctx, dest, commit, request)
       break
     case Format.json:
-      console.info(JSON.stringify(commit, bigIntReplacer, 2))
+      logger.info(JSON.stringify(commit, bigIntReplacer, 2))
       break
   }
 
@@ -129,11 +128,12 @@ async function showRequests(argv: Parameters<typeof handler>[0], destroy: Promis
   for await (const receipt of dest.fetchExecutionReceipts(offRamp, request, commit, argv)) {
     switch (argv.format) {
       case Format.log:
-        console.log('receipt =', withDateTimestamp(receipt))
+        logger.log('receipt =', withDateTimestamp(receipt))
         break
       case Format.pretty:
-        if (!found) console.info('Receipts (dest):')
-        prettyReceipt(
+        if (!found) logger.info('Receipts (dest):')
+        prettyReceipt.call(
+          ctx,
           receipt,
           request,
           receipt.log.tx?.from ??
@@ -141,10 +141,10 @@ async function showRequests(argv: Parameters<typeof handler>[0], destroy: Promis
         )
         break
       case Format.json:
-        console.info(JSON.stringify(receipt, bigIntReplacer, 2))
+        logger.info(JSON.stringify(receipt, bigIntReplacer, 2))
         break
     }
     found = true
   }
-  if (!found) console.warn(`No execution receipt found for request`)
+  if (!found) logger.warn(`No execution receipt found for request`)
 }

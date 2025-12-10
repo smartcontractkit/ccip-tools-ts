@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { BorshInstructionCoder } from '@coral-xyz/anchor'
 import { BorshTypesCoder } from '@coral-xyz/anchor/dist/cjs/coder/borsh/types.js'
 import { sha256, toUtf8Bytes } from 'ethers'

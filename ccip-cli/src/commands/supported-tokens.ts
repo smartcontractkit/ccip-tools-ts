@@ -31,8 +31,8 @@ import { search } from '@inquirer/prompts'
 import { formatUnits } from 'ethers'
 import type { Argv } from 'yargs'
 
-import { Format } from './types.ts'
-import { formatDuration, logParsedError, prettyTable } from './utils.ts'
+import { type Ctx, Format } from './types.ts'
+import { formatDuration, getCtx, logParsedError, prettyTable } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
@@ -70,21 +70,19 @@ export const builder = (yargs: Argv) =>
  * @param argv - Command line arguments.
  */
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
-  let destroy
-  const destroy$ = new Promise((resolve) => {
-    destroy = resolve
-  })
-  return getSupportedTokens(argv, destroy$)
+  const [controller, ctx] = getCtx(argv)
+  return getSupportedTokens(ctx, argv)
     .catch((err) => {
       process.exitCode = 1
-      if (!logParsedError(err)) console.error(err)
+      if (!logParsedError.call(ctx, err)) ctx.logger.error(err)
     })
-    .finally(destroy)
+    .finally(() => controller.abort('Exited'))
 }
 
-async function getSupportedTokens(argv: Parameters<typeof handler>[0], destroy: Promise<unknown>) {
+async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
+  const { logger } = ctx
   const sourceNetwork = networkInfo(argv.source)
-  const getChain = fetchChainsFromRpcs(argv, undefined, destroy)
+  const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
   let registry
   try {
@@ -98,18 +96,18 @@ async function getSupportedTokens(argv: Parameters<typeof handler>[0], destroy: 
     const feeTokens = await source.getFeeTokens(argv.address)
     switch (argv.format) {
       case Format.pretty:
-        console.info('Fee Tokens:')
-        console.table(feeTokens)
+        logger.info('Fee Tokens:')
+        logger.table(feeTokens)
         break
       case Format.json:
-        console.log(JSON.stringify(feeTokens, null, 2))
+        logger.log(JSON.stringify(feeTokens, null, 2))
         break
       default:
-        console.log('feeTokens:', feeTokens)
+        logger.log('feeTokens:', feeTokens)
     }
 
     // router + interactive list
-    info = await listTokens(source, registry, argv)
+    info = await listTokens(ctx, source, registry, argv)
     if (!info) return // format != pretty
     registryConfig = await source.getRegistryTokenConfig(registry, info.token)
     tokenPool = registryConfig.tokenPool
@@ -141,18 +139,18 @@ async function getSupportedTokens(argv: Parameters<typeof handler>[0], destroy: 
     }
 
     if (argv.format === Format.json) {
-      console.log(JSON.stringify({ ...info, tokenPool, ...poolConfigs }, bigIntReplacer, 2))
+      logger.log(JSON.stringify({ ...info, tokenPool, ...poolConfigs }, bigIntReplacer, 2))
       return
     } else if (argv.format === Format.log) {
-      console.log('Token:', poolConfigs.token, info)
-      console.log('Token Pool:', tokenPool)
-      console.log('Pool Configs:', poolConfigs)
+      logger.log('Token:', poolConfigs.token, info)
+      logger.log('Token Pool:', tokenPool)
+      logger.log('Pool Configs:', poolConfigs)
       return
     }
   }
   const remotes = await source.getTokenPoolRemotes(tokenPool)
 
-  prettyTable({
+  prettyTable.call(ctx, {
     network: `${source.network.name} [${source.network.chainSelector}]`,
     token: poolConfigs.token,
     symbol: info.symbol,
@@ -168,9 +166,9 @@ async function getSupportedTokens(argv: Parameters<typeof handler>[0], destroy: 
     }),
   })
   const remotesLen = Object.keys(remotes).length
-  if (remotesLen > 0) console.info('Remotes [', remotesLen, ']:')
+  if (remotesLen > 0) logger.info('Remotes [', remotesLen, ']:')
   for (const [network, remote] of Object.entries(remotes))
-    prettyTable({
+    prettyTable.call(ctx, {
       remoteNetwork: `${network} [${networkInfo(network).chainSelector}]`,
       remoteToken: remote.remoteToken,
       remotePool: remote.remotePools,
@@ -179,7 +177,7 @@ async function getSupportedTokens(argv: Parameters<typeof handler>[0], destroy: 
     })
 }
 
-async function listTokens(source: Chain, registry: string, argv: GlobalOpts) {
+async function listTokens({ logger }: Ctx, source: Chain, registry: string, argv: GlobalOpts) {
   const tokens = await source.getSupportedTokens(registry)
   const infos: { token: string; symbol: string; decimals: number; name?: string }[] = []
   const batch = 500
@@ -192,12 +190,12 @@ async function listTokens(source: Chain, registry: string, argv: GlobalOpts) {
               const res = { token, ...info }
               if (argv.format === Format.log) {
                 // Format.log prints out-of-order, as it fetches data, concurrently
-                console.info(token, '=', info)
+                logger.info(token, '=', info)
               }
               return res
             },
             (err) => {
-              console.debug(`getTokenInfo errored`, token, err)
+              logger.debug(`getTokenInfo errored`, token, err)
             },
           ),
         ),
@@ -206,7 +204,7 @@ async function listTokens(source: Chain, registry: string, argv: GlobalOpts) {
     if (argv.format === Format.json) {
       // Format.json keeps order, prints newline-separated objects
       for (const info of infos_) {
-        console.log(JSON.stringify(info))
+        logger.log(JSON.stringify(info))
       }
     }
     infos.push(...infos_)

@@ -1,5 +1,3 @@
-import util from 'util'
-
 import { isBytesLike, toBigInt } from 'ethers'
 import type { PickDeep } from 'type-fest'
 import yaml from 'yaml'
@@ -16,7 +14,7 @@ import {
   type Log_,
   ChainFamily,
 } from './types.ts'
-import { convertKeysToCamelCase, decodeAddress, leToBigInt, networkInfo } from './utils.ts'
+import { convertKeysToCamelCase, decodeAddress, leToBigInt, networkInfo, util } from './utils.ts'
 
 function decodeJsonMessage(data: Record<string, unknown>) {
   if (!data || typeof data != 'object') throw new Error(`invalid msg: ${util.inspect(data)}`)

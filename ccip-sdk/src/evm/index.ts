@@ -1,20 +1,15 @@
-import util from 'util'
-
 import { parseAbi } from 'abitype'
 import {
   type BytesLike,
   type Interface,
   type JsonRpcApiProvider,
   type Log,
-  type Provider,
   type Signer,
   type TransactionReceipt,
-  AbstractSigner,
-  BaseWallet,
+  type TransactionRequest,
   Contract,
   JsonRpcProvider,
   Result,
-  SigningKey,
   WebSocketProvider,
   ZeroAddress,
   concat,
@@ -31,7 +26,7 @@ import {
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 import { memoize } from 'micro-memoize'
-import type { PickDeep } from 'type-fest'
+import type { PickDeep, SetRequired } from 'type-fest'
 
 import { type LogFilter, type TokenPoolRemote, Chain } from '../chain.ts'
 import {
@@ -62,6 +57,7 @@ import {
   type Log_,
   type NetworkInfo,
   type OffchainTokenData,
+  type WithLogger,
   CCIPVersion,
   ChainFamily,
 } from '../types.ts'
@@ -72,6 +68,7 @@ import {
   getDataBytes,
   networkInfo,
   parseTypeAndVersion,
+  util,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
 import type FeeQuoter_ABI from './abi/FeeQuoter_1_6.ts'
@@ -86,7 +83,6 @@ import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import type Router_ABI from './abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
 import {
-  DEFAULT_APPROVE_GAS_LIMIT,
   DEFAULT_GAS_LIMIT,
   commitsFragments,
   defaultAbiCoder,
@@ -108,6 +104,14 @@ import {
   fetchCCIPRequestById,
   fetchCCIPRequestsInTx,
 } from '../requests.ts'
+
+/**
+ * Type representing a set of unsigned EVM transactions
+ */
+export type UnsignedEVMTx = {
+  family: typeof ChainFamily.EVM
+  transactions: Pick<TransactionRequest, 'from' | 'to' | 'data'>[]
+}
 
 const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 
@@ -138,6 +142,16 @@ function resultsToMessage(result: Result): Record<string, unknown> {
   } as unknown as CCIPMessage
 }
 
+/** typeguard for ethers Signer interface (used for `wallet`s)  */
+function isSigner(wallet: unknown): wallet is Signer {
+  return (
+    typeof wallet === 'object' &&
+    wallet !== null &&
+    'signTransaction' in wallet &&
+    'getAddress' in wallet
+  )
+}
+
 /**
  * EVM chain implementation supporting Ethereum-compatible networks.
  */
@@ -148,8 +162,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   static readonly family = ChainFamily.EVM
   static readonly decimals = 18
 
-  readonly network: NetworkInfo<typeof ChainFamily.EVM>
-  readonly provider: JsonRpcApiProvider
+  provider: JsonRpcApiProvider
   readonly destroy$: Promise<void>
 
   /**
@@ -157,12 +170,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param provider - JSON-RPC provider for the EVM network.
    * @param network - Network information for this chain.
    */
-  constructor(provider: JsonRpcApiProvider, network: NetworkInfo) {
-    if (network.family !== ChainFamily.EVM)
-      throw new Error(`Invalid network family for EVMChain: ${network.family}`)
-    super()
+  constructor(provider: JsonRpcApiProvider, network: NetworkInfo, ctx?: WithLogger) {
+    super(network, ctx)
 
-    this.network = network
     this.provider = provider
     this.destroy$ = new Promise<void>((resolve) => (this.destroy = resolve))
     void this.destroy$.finally(() => provider.destroy())
@@ -188,7 +198,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       async: true,
     })
     this.getTokenInfo = memoize(this.getTokenInfo.bind(this))
-    this.getWallet = memoize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
     this.getTokenAdminRegistryFor = memoize(this.getTokenAdminRegistryFor.bind(this), {
       async: true,
       maxArgs: 1,
@@ -197,56 +206,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Static wallet loader - override to implement custom wallet loading.
-   * @param _provider - Provider instance.
-   * @param _opts - Wallet loading options.
-   * @throws Error by default - must be overridden.
-   */
-  static getWallet(_provider: Provider, _opts: { wallet?: unknown }): Promise<Signer> {
-    throw new Error('static EVM wallet loading not available')
-  }
-
-  /** {@inheritDoc Chain.getWalletAddress} */
-  async getWallet(opts: { wallet?: unknown } = {}): Promise<Signer> {
-    if (
-      typeof opts.wallet === 'number' ||
-      (typeof opts.wallet === 'string' && opts.wallet.match(/^(\d+|0x[a-fA-F0-9]{40})$/))
-    ) {
-      // if given a number, numeric string or address, use ethers `provider.getSigner` (e.g. geth or MM)
-      return this.provider.getSigner(
-        typeof opts.wallet === 'string' && opts.wallet.match(/^0x[a-fA-F0-9]{40}$/)
-          ? opts.wallet
-          : Number(opts.wallet),
-      )
-    } else if (typeof opts.wallet === 'string') {
-      // support receiving private key directly (not recommended)
-      try {
-        return Promise.resolve(
-          new BaseWallet(
-            new SigningKey((opts.wallet.startsWith('0x') ? '' : '0x') + opts.wallet),
-            this.provider,
-          ),
-        )
-      } catch (_) {
-        // pass
-      }
-    } else if (opts.wallet instanceof AbstractSigner) {
-      // if given a signer, return/cache it
-      return opts.wallet
-    }
-    return (this.constructor as typeof EVMChain).getWallet(this.provider, opts)
-  }
-
-  /**
    * Expose ethers provider's `listAccounts`, if provider supports it
    */
   async listAccounts(): Promise<string[]> {
     return (await this.provider.listAccounts()).map(({ address }) => address)
-  }
-
-  /** {@inheritDoc Chain.getWalletAddress} */
-  async getWalletAddress(opts?: { wallet?: unknown }): Promise<string> {
-    return (await this.getWallet(opts)).getAddress()
   }
 
   /**
@@ -281,11 +244,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /**
    * Creates an EVMChain instance from an existing provider.
    * @param provider - JSON-RPC provider instance.
+   * @param ctx - context containing logger.
    * @returns A new EVMChain instance.
    */
-  static async fromProvider(provider: JsonRpcApiProvider): Promise<EVMChain> {
+  static async fromProvider(provider: JsonRpcApiProvider, ctx?: WithLogger): Promise<EVMChain> {
     try {
-      return new EVMChain(provider, networkInfo(Number((await provider.getNetwork()).chainId)))
+      return new EVMChain(provider, networkInfo(Number((await provider.getNetwork()).chainId)), ctx)
     } catch (err) {
       provider.destroy()
       throw err
@@ -295,10 +259,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /**
    * Creates an EVMChain instance from an RPC URL.
    * @param url - WebSocket (wss://) or HTTP (https://) endpoint URL.
+   * @param ctx - context containing logger.
    * @returns A new EVMChain instance.
    */
-  static async fromUrl(url: string): Promise<EVMChain> {
-    return this.fromProvider(await this._getProvider(url))
+  static async fromUrl(url: string, ctx?: WithLogger): Promise<EVMChain> {
+    return this.fromProvider(await this._getProvider(url), ctx)
   }
 
   /** {@inheritDoc Chain.getBlockTimestamp} */
@@ -315,7 +280,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const timestamp = await this.getBlockTimestamp(tx.blockNumber)
     const chainTx = {
       ...tx,
-      chain: this,
       timestamp,
       logs: [] as Log_[],
     }
@@ -326,7 +290,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /** {@inheritDoc Chain.getLogs} */
   async *getLogs(filter: LogFilter & { onlyFallback?: boolean }): AsyncIterableIterator<Log> {
-    yield* getEvmLogs(this.provider, filter, this.destroy$)
+    yield* getEvmLogs(filter, this)
   }
 
   /** {@inheritDoc Chain.fetchRequestsInTx} */
@@ -359,7 +323,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       // specialized getLogs filter for v1.6 CCIPMessageSent events, to filter by dest
       opts_ = {
         ...opts,
-        topics: [request.log.topics[0], toBeHex(request.lane.destChainSelector, 32)],
+        topics: [[request.log.topics[0]], [toBeHex(request.lane.destChainSelector, 32)]],
       }
     }
     return fetchAllMessagesInBatch(this, request, commit, opts_)
@@ -437,11 +401,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
               ...tokenAmount,
             }
           } catch (_) {
-            console.debug(
-              'legacy sourceTokenData:',
-              i,
-              (message as { sourceTokenData: string[] }).sourceTokenData[i],
-            )
+            // legacy sourceTokenData
           }
         }
         if (typeof tokenAmount.destExecData === 'string' && tokenAmount.destGasAmount == null) {
@@ -882,14 +842,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /**
    * Gets the leaf hasher for computing Merkle proofs on the destination chain.
    * @param lane - Lane configuration.
+   * @param ctx - Context object containing logger.
    * @returns Leaf hasher function.
    */
-  static getDestLeafHasher({
-    sourceChainSelector,
-    destChainSelector,
-    onRamp,
-    version,
-  }: Lane): LeafHasher {
+  static getDestLeafHasher(
+    { sourceChainSelector, destChainSelector, onRamp, version }: Lane,
+    ctx?: WithLogger,
+  ): LeafHasher {
     switch (version) {
       case CCIPVersion.V1_2:
       case CCIPVersion.V1_5:
@@ -897,7 +856,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           throw new Error(`Unsupported source chain: ${sourceChainSelector}`)
         return getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher
       case CCIPVersion.V1_6:
-        return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher
+        return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp, ctx) as LeafHasher
       default:
         throw new Error(`Unsupported hasher version for EVM: ${version as string}`)
     }
@@ -989,14 +948,24 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     })
   }
 
-  /** {@inheritDoc Chain.sendMessage} */
-  async sendMessage(
-    router_: string,
+  /**
+   * Generate unsigned txs for ccipSend'ing a message
+   * @param sender - sender address
+   * @param router - address of the Router contract
+   * @param destChainSelector - chainSelector of destination chain
+   * @param message - AnyMessage to send; if `fee` is not present, it'll be calculated
+   * @param approveMax - if tokens approvals are needed, opt into approving maximum allowance
+   * @returns Array containing 0 or more unsigned token approvals txs (if needed at the time of
+   *   generation), followed by a ccipSend TransactionRequest
+   */
+  async generateUnsignedSendMessage(
+    sender: string,
+    router: string,
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
-    opts?: { wallet?: unknown; approveMax?: boolean },
-  ): Promise<CCIPRequest> {
-    if (!message.fee) message.fee = await this.getFee(router_, destChainSelector, message)
+    opts?: { approveMax?: boolean },
+  ): Promise<UnsignedEVMTx> {
+    if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
     const feeToken = message.feeToken ?? ZeroAddress
     const receiver = zeroPadValue(getAddressBytes(message.receiver), 32)
     const data = hexlify(message.data)
@@ -1012,34 +981,28 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (feeToken !== ZeroAddress)
       amountsToApprove[feeToken] = (amountsToApprove[feeToken] ?? 0n) + message.fee
 
-    const wallet = await this.getWallet(opts) // moized wallet arg (if called previously)
-
-    // approve all tokens (including fee token) in parallel
-    let nonce = await this.provider.getTransactionCount(await this.getWalletAddress())
-    await Promise.all(
-      Object.entries(amountsToApprove).map(async ([token, amount]) => {
-        const contract = new Contract(token, interfaces.Token, wallet) as unknown as TypedContract<
-          typeof Token_ABI
-        >
-        const allowance = await contract.allowance(await wallet.getAddress(), router_)
-        if (allowance < amount) {
+    const approveTxs = (
+      await Promise.all(
+        Object.entries(amountsToApprove).map(async ([token, amount]) => {
+          const contract = new Contract(
+            token,
+            interfaces.Token,
+            this.provider,
+          ) as unknown as TypedContract<typeof Token_ABI>
+          const allowance = await contract.allowance(sender, router)
+          if (allowance >= amount) return
           const amnt = opts?.approveMax ? 2n ** 256n - 1n : amount
-          // optimization: hardcode nonce and gasLimit to send all approvals in parallel without estimating
-          console.info('Approving', amnt, 'of', token, 'tokens for router', router_)
-          const tx = await contract.approve(router_, amnt, {
-            nonce: nonce++,
-            gasLimit: DEFAULT_APPROVE_GAS_LIMIT,
-          })
-          console.info('=>', tx.hash)
-          await tx.wait(1, 60_000)
-        }
-      }),
-    )
+          return contract.approve.populateTransaction(router, amnt, { from: sender })
+        }),
+      )
+    ).filter((tx) => tx != null)
 
-    const router = new Contract(router_, interfaces.Router, wallet) as unknown as TypedContract<
-      typeof Router_ABI
-    >
-    const tx = await router.ccipSend(
+    const contract = new Contract(
+      router,
+      interfaces.Router,
+      this.provider,
+    ) as unknown as TypedContract<typeof Router_ABI>
+    const sendTx = await contract.ccipSend.populateTransaction(
       destChainSelector,
       {
         receiver,
@@ -1049,28 +1012,85 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         feeToken,
       },
       {
-        nonce: nonce++,
+        from: sender,
         // if native fee, include it in value; otherwise, it's transferedFrom feeToken
-        ...(feeToken === ZeroAddress ? { value: message.fee } : {}),
+        ...(feeToken === ZeroAddress && { value: message.fee }),
       },
     )
-    const receipt = await tx.wait(1)
-    return (await this.fetchRequestsInTx(await this.getTransaction(receipt!)))[0]
+    const txRequests = [...approveTxs, sendTx] as SetRequired<typeof sendTx, 'from'>[]
+    return {
+      family: ChainFamily.EVM,
+      transactions: txRequests,
+    }
+  }
+
+  /** {@inheritDoc Chain.sendMessage} */
+  async sendMessage(
+    router_: string,
+    destChainSelector: bigint,
+    message: AnyMessage & { fee?: bigint },
+    opts: { wallet: unknown; approveMax?: boolean },
+  ): Promise<CCIPRequest> {
+    const wallet = opts.wallet
+    if (!isSigner(wallet)) throw new Error(`Wallet must be a Signer, got=${util.inspect(wallet)}`)
+
+    const sender = await wallet.getAddress()
+    const txs = await this.generateUnsignedSendMessage(
+      sender,
+      router_,
+      destChainSelector,
+      message,
+      opts,
+    )
+    const approveTxs = txs.transactions.slice(0, txs.transactions.length - 1)
+    let sendTx: TransactionRequest = txs.transactions[txs.transactions.length - 1]
+
+    // approve all tokens (including feeToken, if needed) in parallel
+    let nonce = await this.provider.getTransactionCount(sender)
+    const responses = await Promise.all(
+      approveTxs.map(async (tx: TransactionRequest) => {
+        tx.nonce = nonce++
+        tx = await wallet.populateTransaction(tx)
+        tx.from = undefined
+        const signed = await wallet.signTransaction(tx)
+        const response = await this.provider.broadcastTransaction(signed)
+        this.logger.debug('approve =>', response.hash)
+        return response
+      }),
+    )
+    if (responses.length) await responses[responses.length - 1].wait(1, 60_000) // wait last tx nonce to be mined
+
+    sendTx.nonce = nonce++
+    // sendTx.gasLimit = await this.provider.estimateGas(sendTx)
+    sendTx = await wallet.populateTransaction(sendTx)
+    sendTx.from = undefined // some signers don't like receiving pre-populated `from`
+    const signed = await wallet.signTransaction(sendTx)
+    const response = await this.provider.broadcastTransaction(signed)
+    this.logger.debug('ccipSend =>', response.hash)
+    await response.wait(1, 60_000)
+    return (await this.fetchRequestsInTx(await this.getTransaction(response.hash)))[0]
   }
 
   /** {@inheritDoc Chain.fetchOffchainTokenData} */
   fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
-    return fetchEVMOffchainTokenData(request)
+    return fetchEVMOffchainTokenData(request, this)
   }
 
-  /** {@inheritDoc Chain.executeReport} */
-  async executeReport(
+  /**
+   * Generate unsigned tx to manuallyExecute a message
+   * @param _payer - not used in EVM
+   * @param offRamp - address of the OffRamp contract
+   * @param execReport - execution report
+   * @param opts - gas limit overrides for ccipReceive and tokenPool calls options
+   * @returns array containing one unsigned `manuallyExecute` TransactionRequest object
+   */
+  async generateUnsignedExecuteReport(
+    _payer: string,
     offRamp: string,
     execReport: ExecutionReport,
-    opts?: { wallet?: string; gasLimit?: number; tokensGasLimit?: number },
-  ) {
+    opts: { gasLimit?: number; tokensGasLimit?: number },
+  ): Promise<UnsignedEVMTx> {
     const [_, version] = await this.typeAndVersion(offRamp)
-    const wallet = await this.getWallet(opts)
 
     let manualExecTx
     const offchainTokenData = execReport.offchainTokenData.map(encodeEVMOffchainTokenData)
@@ -1080,10 +1100,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const contract = new Contract(
           offRamp,
           EVM2EVMOffRamp_1_2_ABI,
-          wallet,
+          this.provider,
         ) as unknown as TypedContract<typeof EVM2EVMOffRamp_1_2_ABI>
         const gasOverride = BigInt(opts?.gasLimit ?? 0)
-        manualExecTx = await contract.manuallyExecute(
+        manualExecTx = await contract.manuallyExecute.populateTransaction(
           {
             ...execReport,
             proofs: execReport.proofs.map((d) => hexlify(d)),
@@ -1098,9 +1118,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const contract = new Contract(
           offRamp,
           EVM2EVMOffRamp_1_5_ABI,
-          wallet,
+          this.provider,
         ) as unknown as TypedContract<typeof EVM2EVMOffRamp_1_5_ABI>
-        manualExecTx = await contract.manuallyExecute(
+        manualExecTx = await contract.manuallyExecute.populateTransaction(
           {
             ...execReport,
             proofs: execReport.proofs.map((d) => hexlify(d)),
@@ -1133,10 +1153,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           sender,
           tokenAmounts,
         }
-        const contract = new Contract(offRamp, OffRamp_1_6_ABI, wallet) as unknown as TypedContract<
-          typeof OffRamp_1_6_ABI
-        >
-        manualExecTx = await contract.manuallyExecute(
+        const contract = new Contract(
+          offRamp,
+          OffRamp_1_6_ABI,
+          this.provider,
+        ) as unknown as TypedContract<typeof OffRamp_1_6_ABI>
+        manualExecTx = await contract.manuallyExecute.populateTransaction(
           [
             {
               ...execReport,
@@ -1162,9 +1184,32 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       default:
         throw new Error(`Unsupported version: ${version}`)
     }
-    const receipt = await this.provider.waitForTransaction(manualExecTx.hash, 1, 60e3)
-    if (!receipt?.hash) throw new Error(`Could not confirm exec tx: ${manualExecTx.hash}`)
-    if (!receipt.status) throw new Error(`Exec transaction reverted: ${manualExecTx.hash}`)
+    return { family: ChainFamily.EVM, transactions: [manualExecTx] }
+  }
+
+  /** {@inheritDoc Chain.executeReport} */
+  async executeReport(
+    offRamp: string,
+    execReport: ExecutionReport,
+    opts: { wallet: unknown; gasLimit?: number; tokensGasLimit?: number },
+  ) {
+    const wallet = opts.wallet
+    if (!isSigner(wallet)) throw new Error(`Wallet must be a Signer, got=${util.inspect(wallet)}`)
+
+    const unsignedTxs = await this.generateUnsignedExecuteReport(
+      await wallet.getAddress(),
+      offRamp,
+      execReport,
+      opts,
+    )
+    const unsignedTx = await wallet.populateTransaction(unsignedTxs.transactions[0])
+    unsignedTx.from = undefined // some signers don't like receiving pre-populated `from`
+    const signed = await wallet.signTransaction(unsignedTx)
+    const response = await this.provider.broadcastTransaction(signed)
+    this.logger.debug('ccipSend =>', response.hash)
+    const receipt = await response.wait(1, 60_000)
+    if (!receipt?.hash) throw new Error(`Could not confirm exec tx: ${response.hash}`)
+    if (!receipt.status) throw new Error(`Exec transaction reverted: ${response.hash}`)
     return this.getTransaction(receipt)
   }
 

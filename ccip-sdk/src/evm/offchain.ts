@@ -1,7 +1,7 @@
 import { type Addressable, type Log, EventFragment } from 'ethers'
 
 import { getLbtcAttestation, getUsdcAttestation } from '../offchain.ts'
-import type { CCIPMessage, CCIPRequest, OffchainTokenData } from '../types.ts'
+import type { CCIPMessage, CCIPRequest, OffchainTokenData, WithLogger } from '../types.ts'
 import { networkInfo } from '../utils.ts'
 import { defaultAbiCoder, interfaces, requestsFragments } from './const.ts'
 import { type SourceTokenData, parseSourceTokenData } from './messages.ts'
@@ -32,6 +32,7 @@ export async function fetchEVMOffchainTokenData(
     message: CCIPMessage
     log: Pick<CCIPRequest['log'], 'index'>
   },
+  ctx: WithLogger,
 ): Promise<OffchainTokenData[]> {
   const { isTestnet } = networkInfo(request.message.header.sourceChainSelector)
   // there's a chance there are other CCIPSendRequested in same tx,
@@ -52,6 +53,7 @@ export async function fetchEVMOffchainTokenData(
     request.message.tokenAmounts,
     usdcRequestLogs,
     isTestnet,
+    ctx,
   )
   let lbtcTokenData: OffchainTokenData[] = []
   try {
@@ -62,7 +64,7 @@ export async function fetchEVMOffchainTokenData(
       tokenAmounts = request.message.tokenAmounts
     }
     //for lbtc we distinguish logs by hash in event, so we can pass all of them
-    lbtcTokenData = await getLbtcTokenData(tokenAmounts, request.tx.logs as Log[], isTestnet)
+    lbtcTokenData = await getLbtcTokenData(tokenAmounts, request.tx.logs as Log[], isTestnet, ctx)
   } catch (_) {
     // pass
   }
@@ -104,6 +106,7 @@ async function getUsdcTokenData(
   tokenAmounts: CCIPMessage['tokenAmounts'],
   allLogsInRequest: Pick<Log, 'topics' | 'address' | 'data'>[],
   isTestnet: boolean,
+  { logger = console }: WithLogger = {},
 ): Promise<OffchainTokenData[]> {
   const attestations: OffchainTokenData[] = []
 
@@ -156,7 +159,7 @@ async function getUsdcTokenData(
         // encoding of OffchainTokenData to be done as part of Chain.executeReceipt
       } catch (err) {
         // maybe not a USDC transfer, or not ready
-        console.warn(`❌ EVM CCTP: Failed to fetch attestation for message:`, message, err)
+        logger.warn(`❌ EVM CCTP: Failed to fetch attestation for message:`, message, err)
       }
     }
     attestations.push(tokenData)
@@ -172,6 +175,7 @@ async function getLbtcTokenData(
   tokenAmounts: readonly SourceTokenData[],
   allLogsInRequest: readonly Pick<Log, 'topics' | 'address' | 'data'>[],
   isTestnet: boolean,
+  { logger = console }: WithLogger = {},
 ): Promise<OffchainTokenData[]> {
   const lbtcDepositHashes = new Set(
     allLogsInRequest
@@ -186,7 +190,7 @@ async function getLbtcTokenData(
         try {
           return { _tag: 'lbtc', extraData, ...(await getLbtcAttestation(extraData, isTestnet)) }
         } catch (err) {
-          console.warn(`❌ EVM LBTC: Failed to fetch attestation for message:`, extraData, err)
+          logger.warn(`❌ EVM LBTC: Failed to fetch attestation for message:`, extraData, err)
         }
       }
     }),

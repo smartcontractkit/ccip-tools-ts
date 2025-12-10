@@ -1,9 +1,9 @@
-import util from 'util'
-
 import type { BytesLike } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
+import type { UnsignedAptosTx } from './aptos/types.ts'
 import { fetchCommitReport } from './commits.ts'
+import type { UnsignedEVMTx } from './evm/index.ts'
 import type {
   EVMExtraArgsV1,
   EVMExtraArgsV2,
@@ -13,6 +13,7 @@ import type {
   SuiExtraArgsV1,
 } from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
+import type { UnsignedSolanaTx } from './solana/types.ts'
 import {
   type AnyMessage,
   type CCIPCommit,
@@ -26,13 +27,16 @@ import {
   type ExecutionReport,
   type Lane,
   type Log_,
+  type Logger,
   type NetworkInfo,
   type OffchainTokenData,
+  type WithLogger,
   ExecutionState,
 } from './types.ts'
+import { util } from './utils.ts'
 
 /**
- * Filter options for log queries across chains.
+ * Filter options for getLogs queries across chains.
  */
 export type LogFilter = {
   /** Starting block number (inclusive). */
@@ -91,11 +95,34 @@ export type TokenPoolRemote = {
 }
 
 /**
+ * Maps chain family to respective unsigned transaction type.
+ */
+export type UnsignedTx = {
+  [ChainFamily.EVM]: UnsignedEVMTx
+  [ChainFamily.Solana]: UnsignedSolanaTx
+  [ChainFamily.Aptos]: UnsignedAptosTx
+  [ChainFamily.Sui]: never // TODO
+}
+
+/**
  * Works like an interface for a base Chain class, but provides implementation (which can be
  * specialized) for some basic methods
  */
 export abstract class Chain<F extends ChainFamily = ChainFamily> {
-  abstract readonly network: NetworkInfo<F>
+  readonly network: NetworkInfo<F>
+  logger: Logger
+
+  /**
+   * Base constructor for Chain class.
+   * @param network - NetworkInfo object for the Chain instance
+   */
+  constructor(network: NetworkInfo, { logger = console }: WithLogger = {}) {
+    if (network.family !== (this.constructor as ChainStatic).family)
+      throw new Error(`Invalid network family for ${this.constructor.name}: ${network.family}`)
+    this.network = network as NetworkInfo<F>
+    this.logger = logger
+  }
+
   /** Cleanup method to release resources (e.g., close connections). */
   destroy?(): void | Promise<void>
 
@@ -252,12 +279,6 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getTokenAdminRegistryFor(address: string): Promise<string>
   /**
-   * Build, derive, load or fetch a wallet for this instance which will be used in any tx send operation.
-   * @param opts - Options containing `wallet` parameter for cli or environmental parameters to help pick a wallet.
-   * @returns Address of fetched (and stored internally) account.
-   */
-  abstract getWalletAddress(opts?: { wallet?: unknown }): Promise<string>
-  /**
    * Fetch the current fee for a given intended message
    * @param router - router address on this chain
    * @param destChainSelector - dest network selector
@@ -265,7 +286,23 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getFee(router: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint>
   /**
-   * Send a CCIP message through a router using loaded wallet.
+   * Generate unsigned txs for ccipSend'ing a message
+   * @param sender - sender address
+   * @param router - address of the Router contract
+   * @param destChainSelector - chainSelector of destination chain
+   * @param message - AnyMessage to send; if `fee` is not present, it'll be calculated
+   * @param approveMax - if tokens approvals are needed, opt into approving maximum allowance
+   * @returns chain-family specific unsigned txs
+   */
+  abstract generateUnsignedSendMessage(
+    sender: string,
+    router: string,
+    destChainSelector: bigint,
+    message: AnyMessage & { fee?: bigint },
+    opts?: { approveMax?: boolean },
+  ): Promise<UnsignedTx[F]>
+  /**
+   * Send a CCIP message through a router using provided wallet.
    * @param router - Router address on this chain.
    * @param destChainSelector - Destination network selector.
    * @param message - Message to send.
@@ -277,7 +314,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     router: string,
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
-    opts?: { wallet?: unknown; approveMax?: boolean },
+    opts: { wallet: unknown; approveMax?: boolean },
   ): Promise<CCIPRequest>
   /**
    * Fetch supported offchain token data for a request from this network
@@ -286,16 +323,45 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]>
   /**
+   * Generate unsigned tx to manuallyExecute a message
+   * @param payer - address which will be used to transmit the report tx
+   * @param offRamp - address of the OffRamp contract
+   * @param execReport - execution report
+   * @param gasLimit - gasLimit or computeUnits limit override for the ccipReceive call
+   * @param tokensGasLimit - For EVM, overrides gasLimit on tokenpPool call
+   * @param forceBuffer - For Solana, send report in chunks to OffRamp, to later execute
+   * @param forceLookupTable - For Solana, create and extend addresses in a lookup table before executing
+   * @returns chain-family specific unsigned txs
+   */
+  abstract generateUnsignedExecuteReport(
+    payer: string,
+    offRamp: string,
+    execReport: ExecutionReport,
+    opts: {
+      gasLimit?: number
+      tokensGasLimit?: number
+      forceBuffer?: boolean
+      forceLookupTable?: boolean
+    },
+  ): Promise<UnsignedTx[F]>
+  /**
    * Execute messages in report in an offRamp
    * @param offRamp - offRamp address on this dest chain
    * @param execReport - execution report containing messages to execute, proofs and offchainTokenData
-   * @param opts - general options for execution
-   * @returns transaction hash of the execution
+   * @param opts - general options for execution (see [[generateUnsignedExecuteReport]])
+   * @param wallet - chain-specific wallet or signer instance, to sign transactions
+   * @returns transaction of the execution
    */
   abstract executeReport(
     offRamp: string,
     execReport: ExecutionReport,
-    opts?: Record<string, unknown>,
+    opts: {
+      wallet: unknown
+      gasLimit?: number
+      tokensGasLimit?: number
+      forceBuffer?: boolean
+      forceLookupTable?: boolean
+    },
   ): Promise<ChainTransaction>
 
   /**
@@ -406,7 +472,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * async constructor: builds a Chain from a rpc endpoint url
    * @param url - rpc endpoint url
    */
-  fromUrl(url: string): Promise<Chain<F>>
+  fromUrl(url: string, ctx?: WithLogger): Promise<Chain<F>>
   /**
    * Try to decode a CCIP message *from* a log/event *originated* from this *source* chain,
    * but which may *target* other dest chain families
@@ -453,9 +519,10 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
   /**
    * Create a leaf hasher for this dest chain and lane
    * @param lane - source, dest and onramp lane info
+   * @param ctx - context object containing logger
    * @returns LeafHasher is a function that takes a message and returns a hash of it
    */
-  getDestLeafHasher(lane: Lane): LeafHasher
+  getDestLeafHasher(lane: Lane, ctx?: WithLogger): LeafHasher
   /**
    * Try to parse an error or bytearray generated by this chain family
    * @param data - Caught object, string or bytearray

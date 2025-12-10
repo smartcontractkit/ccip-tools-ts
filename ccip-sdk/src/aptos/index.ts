@@ -1,11 +1,9 @@
-import util from 'util'
-
 import {
-  Account,
   Aptos,
   AptosConfig,
-  Ed25519PrivateKey,
+  Deserializer,
   Network,
+  SimpleTransaction,
   TransactionResponseType,
 } from '@aptos-labs/ts-sdk'
 import {
@@ -21,9 +19,9 @@ import {
   zeroPadValue,
 } from 'ethers'
 import { memoize } from 'micro-memoize'
-import type { PickDeep } from 'type-fest'
+import type { PickDeep, SetRequired } from 'type-fest'
 
-import { ccipSend, getFee } from './send.ts'
+import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { type LogFilter, type TokenInfo, type TokenPoolRemote, Chain } from '../chain.ts'
 import {
   type EVMExtraArgsV2,
@@ -46,6 +44,7 @@ import {
   type Log_,
   type NetworkInfo,
   type OffchainTokenData,
+  type WithLogger,
   ChainFamily,
 } from '../types.ts'
 import {
@@ -56,12 +55,18 @@ import {
   getDataBytes,
   networkInfo,
   parseTypeAndVersion,
+  util,
 } from '../utils.ts'
-import { executeReport } from './exec.ts'
+import { generateUnsignedExecuteReport } from './exec.ts'
 import { getAptosLeafHasher } from './hasher.ts'
 import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
 import { getTokenInfo } from './token.ts'
-import { type AptosAsyncAccount, EVMExtraArgsV2Codec, SVMExtraArgsV1Codec } from './types.ts'
+import {
+  type UnsignedAptosTx,
+  EVMExtraArgsV2Codec,
+  SVMExtraArgsV1Codec,
+  isAptosAccount,
+} from './types.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import {
   decodeMessage,
@@ -80,8 +85,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   static readonly family = ChainFamily.Aptos
   static readonly decimals = 8
 
-  readonly network: NetworkInfo<typeof ChainFamily.Aptos>
-  readonly provider: Aptos
+  provider: Aptos
 
   getTokenInfo: (token: string) => Promise<TokenInfo>
   _getAccountModulesNames: (address: string) => Promise<string[]>
@@ -91,14 +95,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @param provider - Aptos SDK provider instance.
    * @param network - Network information for this chain.
    */
-  constructor(provider: Aptos, network: NetworkInfo) {
-    if (network.family !== ChainFamily.Aptos) {
-      throw new Error(`Invalid network family: ${network.family}, expected ${ChainFamily.Aptos}`)
-    }
-    super()
+  constructor(provider: Aptos, network: NetworkInfo, ctx?: WithLogger) {
+    super(network, ctx)
 
     this.provider = provider
-    this.network = network
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
       maxSize: 100,
       maxArgs: 1,
@@ -124,7 +124,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
           .then((modules) => modules.map(({ abi }) => abi!.name)),
       { maxSize: 100, maxArgs: 1 },
     )
-    this.getWallet = memoize(this.getWallet.bind(this), { maxSize: 1, maxArgs: 0 })
     this.provider.getTransactionByVersion = memoize(
       this.provider.getTransactionByVersion.bind(this.provider),
       {
@@ -138,42 +137,48 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   /**
    * Creates an AptosChain instance from an existing Aptos provider.
    * @param provider - Aptos SDK provider instance.
+   * @param ctx - context containing logger.
    * @returns A new AptosChain instance.
    */
-  static async fromProvider(provider: Aptos): Promise<AptosChain> {
-    return new AptosChain(provider, networkInfo(`aptos:${await provider.getChainId()}`))
+  static async fromProvider(provider: Aptos, ctx?: WithLogger): Promise<AptosChain> {
+    return new AptosChain(provider, networkInfo(`aptos:${await provider.getChainId()}`), ctx)
   }
 
   /**
    * Creates an AptosChain instance from an Aptos configuration.
    * @param config - Aptos configuration object.
+   * @param ctx - context containing logger.
    * @returns A new AptosChain instance.
    */
-  static async fromAptosConfig(config: AptosConfig): Promise<AptosChain> {
+  static async fromAptosConfig(config: AptosConfig, ctx?: WithLogger): Promise<AptosChain> {
     const provider = new Aptos(config)
-    return this.fromProvider(provider)
+    return this.fromProvider(provider, ctx)
   }
 
   /**
    * Creates an AptosChain instance from a URL or network identifier.
-   * @param url - RPC URL or Aptos Network enum value.
-   * @param network - Optional network specification.
+   * @param url - RPC URL, Aptos Network enum value or [fullNodeUrl, Network] tuple.
+   * @param ctx - context containing logger
    * @returns A new AptosChain instance.
    */
-  static async fromUrl(url: string | Network, network?: Network): Promise<AptosChain> {
-    if (network) {
-      // pass
+  static async fromUrl(
+    url: string | Network | readonly [string, Network],
+    ctx?: WithLogger,
+  ): Promise<AptosChain> {
+    let network: Network
+    if (Array.isArray(url)) {
+      ;[url, network] = url
     } else if (Object.values(Network).includes(url as Network)) network = url as Network
     else if (url.includes('mainnet')) network = Network.MAINNET
     else if (url.includes('testnet')) network = Network.TESTNET
     else if (url.includes('local')) network = Network.LOCAL
-    else throw new Error(`Unknown Aptos network: ${url}`)
+    else throw new Error(`Unknown Aptos network: ${util.inspect(url)}`)
     const config: AptosConfig = new AptosConfig({
       network,
-      fullnode: url.includes('://') ? url : undefined,
+      fullnode: typeof url === 'string' && url.includes('://') ? url : undefined,
       // indexer: url.includes('://') ? `${url}/v1/graphql` : undefined,
     })
-    return this.fromAptosConfig(config)
+    return this.fromAptosConfig(config, ctx)
   }
 
   /** {@inheritDoc Chain.getBlockTimestamp} */
@@ -334,34 +339,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /**
-   * Static wallet loader - override to implement custom wallet loading.
-   * @param _opts - Wallet loading options.
-   * @throws Error by default - must be overridden.
-   */
-  static getWallet(_opts: { wallet?: unknown } = {}): Promise<AptosAsyncAccount> {
-    return Promise.reject(new Error('TODO according to your environment'))
-  }
-
-  /**
-   * Loads a wallet for signing transactions.
-   * @param opts - Wallet loading options, supports private key as bytes.
-   * @returns Aptos account instance.
-   */
-  async getWallet(opts: { wallet?: unknown } = {}): Promise<AptosAsyncAccount> {
-    if (isBytesLike(opts.wallet)) {
-      return Account.fromPrivateKey({
-        privateKey: new Ed25519PrivateKey(opts.wallet, false),
-      })
-    }
-    return (this.constructor as typeof AptosChain).getWallet(opts)
-  }
-
-  /** {@inheritDoc Chain.getWalletAddress} */
-  async getWalletAddress(opts?: { wallet?: unknown }): Promise<string> {
-    return (await this.getWallet(opts)).accountAddress.toString()
-  }
-
-  /**
    * Decodes a CCIP message from an Aptos log event.
    * @param log - Log with data field.
    * @returns Decoded CCIPMessage or undefined if not valid.
@@ -514,7 +491,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @param lane - Lane configuration.
    * @returns Leaf hasher function.
    */
-  static getDestLeafHasher(lane: Lane): LeafHasher {
+  static getDestLeafHasher(lane: Lane, _ctx?: WithLogger): LeafHasher {
     return getAptosLeafHasher(lane)
   }
 
@@ -523,25 +500,65 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return getFee(this.provider, router, destChainSelector, message)
   }
 
+  /** generate raw/unsigned `ccip_send` transaction */
+  async generateUnsignedSendMessage(
+    sender: string,
+    router: string,
+    destChainSelector: bigint,
+    message: AnyMessage & { fee?: bigint },
+    opts: { approveMax?: boolean },
+  ): Promise<UnsignedAptosTx> {
+    if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
+    const tx = await generateUnsignedCcipSend(
+      this.provider,
+      sender,
+      router,
+      destChainSelector,
+      message as SetRequired<typeof message, 'fee'>,
+      opts,
+    )
+    return {
+      family: ChainFamily.Aptos,
+      transactions: [tx],
+    }
+  }
+
   /** {@inheritDoc Chain.sendMessage} */
   async sendMessage(
     router: string,
     destChainSelector: bigint,
     message: AnyMessage & { fee?: bigint },
-    opts?: { wallet?: unknown; approveMax?: boolean },
+    opts: { wallet: unknown; approveMax?: boolean },
   ): Promise<CCIPRequest> {
-    if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
-    const account = await this.getWallet(opts)
+    const account = opts.wallet
+    if (!isAptosAccount(account)) {
+      throw new Error(
+        `${this.constructor.name}.sendMessage requires an Aptos account wallet, got=${util.inspect(opts.wallet)}`,
+      )
+    }
 
-    const hash = await ccipSend(
-      this.provider,
-      account,
+    const unsignedTx = await this.generateUnsignedSendMessage(
+      account.accountAddress.toString(),
       router,
       destChainSelector,
-      message as AnyMessage & { fee: bigint },
+      message,
+      opts,
     )
+    const unsigned = SimpleTransaction.deserialize(new Deserializer(unsignedTx.transactions[0]))
 
-    // Return the ChainTransaction by fetching it
+    // Sign and submit the transaction
+    const signed = await account.signTransactionWithAuthenticator(unsigned)
+    const pendingTxn = await this.provider.transaction.submit.simple({
+      transaction: unsigned,
+      senderAuthenticator: signed,
+    })
+
+    // Wait for the transaction to be confirmed
+    const { hash } = await this.provider.waitForTransaction({
+      transactionHash: pendingTxn.hash,
+    })
+
+    // Return the CCIPRequest by fetching it
     return (await this.fetchRequestsInTx(await this.getTransaction(hash)))[0]
   }
 
@@ -551,26 +568,62 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
-  /** {@inheritDoc Chain.executeReport} */
-  async executeReport(
+  /** generate raw/unsigned `manually_execute` transaction data */
+  async generateUnsignedExecuteReport(
+    payer: string,
     offRamp: string,
     execReport: ExecutionReport,
-    opts?: { wallet?: unknown; gasLimit?: number },
-  ): Promise<ChainTransaction> {
-    const account = await this.getWallet(opts)
-
+    opts: { gasLimit?: number },
+  ): Promise<UnsignedAptosTx> {
     if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
       throw new Error('Aptos expects EVMExtraArgsV2 reports')
     }
 
-    const hash = await executeReport(
+    const tx = await generateUnsignedExecuteReport(
       this.provider,
-      account,
+      payer,
       offRamp,
       execReport as ExecutionReport<CCIPMessage_V1_6_EVM>,
       opts,
     )
+    return {
+      family: ChainFamily.Aptos,
+      transactions: [tx],
+    }
+  }
 
+  /** {@inheritDoc Chain.executeReport} */
+  async executeReport(
+    offRamp: string,
+    execReport: ExecutionReport,
+    opts: { wallet: unknown; gasLimit?: number },
+  ): Promise<ChainTransaction> {
+    const account = opts.wallet
+    if (!isAptosAccount(account)) {
+      throw new Error(
+        `${this.constructor.name}.sendMessage requires an Aptos account wallet, got=${util.inspect(opts.wallet)}`,
+      )
+    }
+
+    const unsignedTx = await this.generateUnsignedExecuteReport(
+      account.accountAddress.toString(),
+      offRamp,
+      execReport,
+      opts,
+    )
+    const unsigned = SimpleTransaction.deserialize(new Deserializer(unsignedTx.transactions[0]))
+
+    // Sign and submit the transaction
+    const signed = await account.signTransactionWithAuthenticator(unsigned)
+    const pendingTxn = await this.provider.transaction.submit.simple({
+      transaction: unsigned,
+      senderAuthenticator: signed,
+    })
+
+    // Wait for the transaction to be confirmed
+    const { hash } = await this.provider.waitForTransaction({
+      transactionHash: pendingTxn.hash,
+    })
     return this.getTransaction(hash)
   }
 

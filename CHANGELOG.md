@@ -6,13 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-# [0.91.0] - 2025-12-02 - Pre-release
+# [0.91.0] - 2025-12-08 - Pre-release
 - `Chain.sendMessage` now calls `getFee` by itself, if not provided; it also returns a `CCIPRequest`
 - Fix USDC/CCTP attestation fetching in Solana
 - `CCIPRequest` loses `timestamp` property, available in `tx.timestamp` instead
 - Rename `Chain.listFeeTokens` to `getFeeTokens`, fix for v1.5 lanes
 - Move `fetchCCIPRequestsInTx` function to `Chain.fetchRequestsInTx` method
+- Move `fetchCCIPRequestById` function to `Chain.fetchRequestById` method; it now can optionally receive OnRamp address to narrow search, required in non-EVM chains (which can't scan the all addresses at once); cli's `show --id-from-source` receives `<address>@<network>` onramp address format in these cases
 - Move `fetchAllMessagesInBatch` function to `Chain.fetchAllMessagesInBatch` method
+- `getWallet` static and cached methods are removed; `wallet` compatible signer instance should be passed directly as option to the read-write methods, `sendMessage` and `executeReport`
+- Chains now expose `generateUnsignedSendMessage` and `generateUnsignedExecuteReport`, which expose raw/unsigned tx data for `sendMessage` and `executeReport` respectively, in case one needs to sign and broadcast manually
+- All methods which logs now may receive a `{ logger }` context object, to inject a logger other than `console`
+- Remove some more node-isms from SDK
 
 ## [0.90.0] - 2025-11-28 - Pre-release
 - Major overhaul of the tool, split into [ccip-sdk](./ccip-sdk) and [ccip-cli](./ccip-cli) packages

@@ -1,5 +1,3 @@
-import util from 'util'
-
 import {
   type JsonRpcApiProvider,
   type Log,
@@ -10,8 +8,9 @@ import {
 import { memoize } from 'micro-memoize'
 
 import type { LogFilter } from '../chain.ts'
-import { blockRangeGenerator, getSomeBlockNumberBefore } from '../utils.ts'
+import { blockRangeGenerator, getSomeBlockNumberBefore, util } from '../utils.ts'
 import { getAllFragmentsMatchingEvents } from './const.ts'
+import type { WithLogger } from '../types.ts'
 
 const MAX_PARALLEL_JOBS = 24
 const PER_REQUEST_TIMEOUT = 5000
@@ -82,7 +81,7 @@ const archiveRpcs: Record<number, Promise<JsonRpcApiProvider>> = {}
  * Like provider.getLogs, but from a public list of archive nodes and wide range, races the first to reply
  * @param chainId - The chain ID of the network to query
  * @param filter - Log filter options
- * @param destroy - An optional promise that, when resolved, cancels the requests
+ * @param destroy$ - An optional promise that, when resolved, cancels the requests
  * @returns Array of Logs
  */
 async function getFallbackArchiveLogs(
@@ -93,7 +92,7 @@ async function getFallbackArchiveLogs(
     startBlock?: number
     endBlock?: number | 'latest'
   },
-  destroy?: Promise<unknown>,
+  { logger = console, destroy$ }: { destroy$?: Promise<unknown> } & WithLogger = {},
 ) {
   const provider = archiveRpcs[chainId]
   if (provider != null) {
@@ -105,7 +104,7 @@ async function getFallbackArchiveLogs(
   }
   let cancel!: (_?: unknown) => void
   let cancel$ = new Promise<unknown>((resolve) => (cancel = resolve))
-  if (destroy) cancel$ = Promise.race([destroy, cancel$])
+  if (destroy$) cancel$ = Promise.race([destroy$, cancel$])
 
   let winner: string
   const providerLogs$ = getFallbackRpcsList()
@@ -141,7 +140,7 @@ async function getFallbackArchiveLogs(
               })
               .then((logs) => {
                 if (!logs.length) throw new Error('No logs found')
-                console.debug(
+                logger.debug(
                   'getFallbackArchiveLogs raced',
                   url,
                   'from',
@@ -172,19 +171,18 @@ async function getFallbackArchiveLogs(
 /**
  * Implements Chain.getLogs for EVM.
  * If !(filter.startBlock|startTime), walks backwards from endBlock, otherwise forward from then.
- * @param provider - JsonRpcApiProvider.
  * @param filter - Chain LogFilter. The `onlyFallback` option controls pagination behavior:
  *   - If undefined (default): paginate main provider only by filter.page
  *   - If false: first try whole range with main provider, then fallback to archive provider
  *   - If true: don't paginate (throw if can't fetch wide range from either provider)
- * @param destroy - Cancel all requests if this promise resolves.
+ * @param ctx - Context object containing provider, logger and destry$ notify promise
  * @returns Async iterator of logs.
  */
 export async function* getEvmLogs(
-  provider: JsonRpcApiProvider,
   filter: LogFilter & { onlyFallback?: boolean },
-  destroy?: Promise<unknown>,
+  ctx: { provider: JsonRpcApiProvider; destroy$?: Promise<unknown> } & WithLogger,
 ): AsyncIterableIterator<Log> {
+  const { provider, logger = console } = ctx
   const endBlock = filter.endBlock ?? (await provider.getBlockNumber())
   if (
     filter.topics?.length &&
@@ -206,6 +204,7 @@ export async function* getEvmLogs(
       async (block: number | 'finalized') => (await provider.getBlock(block))!.timestamp, // cached
       endBlock,
       filter.startTime,
+      ctx,
     )
   }
   if (filter.onlyFallback != null && filter.address && filter.topics?.length) {
@@ -226,7 +225,7 @@ export async function* getEvmLogs(
             startBlock: filter.startBlock ?? 1,
             endBlock: filter.endBlock ?? 'latest',
           },
-          destroy,
+          ctx,
         )
       } catch (err) {
         if (filter.onlyFallback === true) throw err
@@ -240,7 +239,7 @@ export async function* getEvmLogs(
   }
   // paginate only if filter.onlyFallback is nullish
   for (const blockRange of blockRangeGenerator({ ...filter, endBlock })) {
-    console.debug('evm getLogs:', {
+    logger.debug('evm getLogs:', {
       ...blockRange,
       ...(filter.address ? { address: filter.address } : {}),
       ...(filter.topics?.length ? { topics: filter.topics } : {}),

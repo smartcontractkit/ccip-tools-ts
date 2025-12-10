@@ -1,29 +1,39 @@
-import { type AnchorProvider, Program } from '@coral-xyz/anchor'
-import { AddressLookupTableProgram, PublicKey, SystemProgram } from '@solana/web3.js'
+import { Buffer } from 'buffer'
+
+import { type Wallet as AnchorWallet, AnchorProvider, Program } from '@coral-xyz/anchor'
+import {
+  type Connection,
+  AddressLookupTableProgram,
+  PublicKey,
+  SystemProgram,
+} from '@solana/web3.js'
 import { dataSlice, hexlify } from 'ethers'
 import { memoize } from 'micro-memoize'
 
 import { sleep } from '../utils.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import type { SolanaChain } from './index.ts'
-import { simulateAndSendTxs } from './send.ts'
+import type { Wallet } from './types.ts'
+import { simulateAndSendTxs } from './utils.ts'
+import type { WithLogger } from '../types.ts'
 
 /**
  * Clean up and recycle buffers and Address Lookup Tables owned by wallet.
- * @param provider - AnchorProvider with connection and wallet.
+ * @param ctx - Context object containing the Solana connection instance and logger.
+ * @param wallet - Wallet instance to sign txs.
  * @param getLogs - SolanaChain-compatible getLogs function (to scan for Buffers and ALTs).
- * @param opts - Optional parameters. Set `dontWait` to skip waiting for lookup table deactivation
+ * @param opts - Optional parameters. Set `waitDeactivation` to wait for lookup table deactivation
  *   cool down period (513 slots) to pass before closing; by default, we deactivate (if needed)
- *   and wait to close before returning from this method.
+ *   and leave close to be done in the future.
  */
 export async function cleanUpBuffers(
-  provider: AnchorProvider,
+  ctx: { connection: Connection } & WithLogger,
+  wallet: Wallet,
   getLogs: SolanaChain['getLogs'],
-  opts?: { dontWait?: boolean },
+  opts?: { waitDeactivation?: boolean },
 ): Promise<void> {
-  const connection = provider.connection
-  const wallet = provider.wallet
-  console.debug(
+  const { connection, logger = console } = ctx
+  logger.debug(
     'Starting cleaning up buffers and lookup tables for account',
     wallet.publicKey.toString(),
   )
@@ -38,7 +48,7 @@ export async function cleanUpBuffers(
           return await connection.getSlot()
         } catch (err) {
           lastErr = err
-          console.warn('Failed to get current slot', i, err)
+          logger.warn('Failed to get current slot', i, err)
           await sleep(500)
         }
       }
@@ -53,8 +63,8 @@ export async function cleanUpBuffers(
     while (!sig) {
       const delta = deactivationSlot + 513 - (await getCurrentSlot())
       if (delta > 0) {
-        if (opts?.dontWait) {
-          console.warn(
+        if (!opts?.waitDeactivation) {
+          logger.warn(
             'Skipping: lookup table',
             altAddr,
             'not yet ready for close until',
@@ -63,7 +73,7 @@ export async function cleanUpBuffers(
           )
           return
         }
-        console.debug(
+        logger.debug(
           'Waiting for slot',
           deactivationSlot + 513,
           'to be reached in',
@@ -80,14 +90,14 @@ export async function cleanUpBuffers(
         lookupTable,
       })
       try {
-        sig = await simulateAndSendTxs(connection, wallet, [closeIx])
-        console.info('🗑️  Closed lookup table', altAddr, ': tx =>', sig)
+        sig = await simulateAndSendTxs(ctx, wallet, { instructions: [closeIx] })
+        logger.info('🗑️  Closed lookup table', altAddr, ': tx =>', sig)
       } catch (err) {
         const info = await connection.getAddressLookupTable(lookupTable)
         if (!info?.value) break
         else if (info.value.state.deactivationSlot < 2n ** 63n)
           deactivationSlot = Number(info.value.state.deactivationSlot)
-        console.warn('Failed to close lookup table', altAddr, err)
+        logger.warn('Failed to close lookup table', altAddr, err)
       }
     }
   }
@@ -113,7 +123,11 @@ export async function cleanUpBuffers(
           .map(({ data }) => Buffer.from(data.subarray(8 + 4, 8 + 4 + 32)))
 
         for (const bufferId of bufferIds) {
-          const offrampProgram = new Program(CCIP_OFFRAMP_IDL, new PublicKey(log.address), provider)
+          const offrampProgram = new Program(
+            CCIP_OFFRAMP_IDL,
+            new PublicKey(log.address),
+            new AnchorProvider(connection, wallet as AnchorWallet, { commitment: 'confirmed' }),
+          )
 
           const [executionReportBuffer] = PublicKey.findProgramAddressSync(
             [Buffer.from('execution_report_buffer'), bufferId, wallet.publicKey.toBuffer()],
@@ -124,7 +138,7 @@ export async function cleanUpBuffers(
 
           const accInfo = await connection.getAccountInfo(executionReportBuffer)
           if (!accInfo) {
-            console.debug(
+            logger.debug(
               'Buffer with bufferId',
               hexlify(bufferId),
               'at',
@@ -147,7 +161,7 @@ export async function cleanUpBuffers(
               .closeExecutionReportBuffer(bufferId)
               .accounts(bufferingAccounts)
               .rpc()
-            console.info(
+            logger.info(
               '🗑️  Closed bufferId',
               hexlify(bufferId),
               'at',
@@ -156,7 +170,7 @@ export async function cleanUpBuffers(
               sig,
             )
           } catch (err) {
-            console.warn(
+            logger.warn(
               'Failed to close bufferId',
               hexlify(bufferId),
               'at',
@@ -176,9 +190,9 @@ export async function cleanUpBuffers(
         const info = await connection.getAddressLookupTable(lookupTable)
         if (!info?.value) {
           alreadyClosed++ // assume we're done when we hit Nth closed ALT; maybe add an option to keep going?
-          console.debug('Lookup table', lookupTable.toBase58(), 'already closed')
+          logger.debug('Lookup table', lookupTable.toBase58(), 'already closed')
         } else if (info.value.state.authority?.toBase58() !== wallet.publicKey.toBase58()) {
-          console.debug(
+          logger.debug(
             'Lookup table',
             lookupTable.toBase58(),
             'not owned by us, but by',
@@ -198,11 +212,13 @@ export async function cleanUpBuffers(
           })
 
           try {
-            const sig = await simulateAndSendTxs(connection, wallet, [deactivateIx])
-            console.info('⤵️  Deactivated lookup table', lookupTable.toBase58(), ': tx =>', sig)
+            const sig = await simulateAndSendTxs(ctx, wallet, {
+              instructions: [deactivateIx],
+            })
+            logger.info('⤵️  Deactivated lookup table', lookupTable.toBase58(), ': tx =>', sig)
             pendingPromises.push(closeAlt(lookupTable, await getCurrentSlot()))
           } catch (err) {
-            console.warn('Failed to deactivate lookup table', lookupTable.toBase58(), err)
+            logger.warn('Failed to deactivate lookup table', lookupTable.toBase58(), err)
           }
         }
         break // case

@@ -1,4 +1,4 @@
-import util from 'util'
+import { Buffer } from 'buffer'
 
 import bs58 from 'bs58'
 import {
@@ -8,7 +8,7 @@ import {
   decodeBase64,
   getBytes,
   isBytesLike,
-  toBeHex,
+  toBeArray,
   toBigInt,
 } from 'ethers'
 import { memoize } from 'micro-memoize'
@@ -16,7 +16,7 @@ import { memoize } from 'micro-memoize'
 import type { Chain } from './chain.ts'
 import SELECTORS from './selectors.ts'
 import { supportedChains } from './supported-chains.ts'
-import { type NetworkInfo, ChainFamily } from './types.ts'
+import { type NetworkInfo, type WithLogger, ChainFamily } from './types.ts'
 
 /**
  * Returns *some* block number with timestamp prior to `timestamp`
@@ -31,7 +31,7 @@ export async function getSomeBlockNumberBefore(
   getBlockTimestamp: (blockNumber: number) => Promise<number>,
   recentBlockNumber: number,
   timestamp: number,
-  precision = 10,
+  { precision = 10, logger = console }: { precision?: number } & WithLogger = {},
 ): Promise<number> {
   let beforeBlockNumber = Math.max(1, recentBlockNumber - precision * 1000)
   let beforeTimestamp = await getBlockTimestamp(beforeBlockNumber)
@@ -78,7 +78,7 @@ export async function getSomeBlockNumberBefore(
       beforeBlockNumber = pivot
       beforeTimestamp = pivotTimestamp
     }
-    console.debug('getSomeBlockNumberBefore: searching block before', {
+    logger.debug('getSomeBlockNumberBefore: searching block before', {
       beforeBlockNumber,
       beforeTimestamp,
       pivot,
@@ -245,7 +245,7 @@ export function leToBigInt(data: BytesLike | readonly number[]): bigint {
  * @returns Little-endian Uint8Array.
  */
 export function toLeArray(value: BigNumberish, width?: Numeric): Uint8Array {
-  return getBytes(toBeHex(value, width)).reverse()
+  return toBeArray(value, width).reverse()
 }
 
 /**
@@ -381,11 +381,14 @@ export function parseTypeAndVersion(
  * Configurable via maxRequests, windowMs, and maxRetries options.
  * @returns Rate-limited fetch function.
  */
-export function createRateLimitedFetch({
-  maxRequests = Number(process.env['RL_MAX_REQUESTS'] || 40),
-  windowMs = Number(process.env['RL_WINDOW_MS'] || 11e3),
-  maxRetries = Number(process.env['RL_MAX_RETRIES'] || 5),
-}: { maxRequests?: number; windowMs?: number; maxRetries?: number } = {}): typeof fetch {
+export function createRateLimitedFetch(
+  {
+    maxRequests = 40,
+    windowMs = 11e3,
+    maxRetries = 5,
+  }: { maxRequests?: number; windowMs?: number; maxRetries?: number } = {},
+  { logger = console }: WithLogger = {},
+): typeof fetch {
   // Custom fetch implementation with retry logic and rate limiting
   // Per-instance state
   const requestQueue: Array<{ timestamp: number }> = []
@@ -488,7 +491,7 @@ export function createRateLimitedFetch({
         // Wait for rate limit before making request
         await waitForRateLimit(method)
         recordRequest(method)
-        // console.debug('__fetching', input, init?.body)
+        // logger.debug('__fetching', input, init?.body)
 
         const response = await fetch(input, init)
 
@@ -497,7 +500,7 @@ export function createRateLimitedFetch({
 
         // If response is successful, return it
         if (response.ok) {
-          console.debug('fetched', input, response.status, init?.body)
+          logger.debug('fetched', input, response.status, init?.body)
           return response
         }
 
@@ -507,10 +510,10 @@ export function createRateLimitedFetch({
         }
 
         // For other non-2xx responses, don't retry
-        console.debug('fetch non-retryable error', input, response.status, init?.body)
+        logger.debug('fetch non-retryable error', input, response.status, init?.body)
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       } catch (error) {
-        console.debug('fetch errored', attempt, error, input, init?.body)
+        logger.debug('fetch errored', attempt, error, input, init?.body)
         lastError = error instanceof Error ? error : new Error(String(error))
 
         // Only retry on rate limit errors
@@ -528,3 +531,26 @@ export function createRateLimitedFetch({
     throw lastError || new Error('Request failed after all retries')
   }
 }
+
+// barebones `node:util` backfill, if needed
+const util =
+  'util' in globalThis
+    ? (
+        globalThis as unknown as {
+          util: {
+            inspect: ((v: unknown) => string) & {
+              custom: symbol
+              defaultOptions: Record<string, unknown>
+            }
+          }
+        }
+      ).util
+    : {
+        inspect: Object.assign((v: unknown) => JSON.stringify(v), {
+          custom: Symbol('custom'),
+          defaultOptions: {
+            depth: 2,
+          } as Record<string, unknown>,
+        }),
+      }
+export { util }

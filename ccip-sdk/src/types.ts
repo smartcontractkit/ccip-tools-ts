@@ -11,6 +11,23 @@ import type { CCIPMessage_V1_6_TON } from './ton/types.ts'
 export type { CCIPMessage_V1_6 } from './evm/messages.ts'
 
 /**
+ * Logger interface for logging messages (compatible with console)
+ */
+export type Logger = {
+  debug: (...args: unknown[]) => void
+  info: (...args: unknown[]) => void
+  warn: (...args: unknown[]) => void
+  error: (...args: unknown[]) => void
+}
+
+/**
+ * An options object which may have a logger
+ */
+export type WithLogger = {
+  logger?: Logger
+}
+
+/**
  * "Fix" for deeply intersecting types containing arrays: converts `A[] & B[]` to `(A & B)[]`.
  * Usually, if you intersect `\{ arr: A[] \} & \{ arr: B[] \}`, arr will have type `A[] & B[]`,
  * i.e. all/each *index* of A[] and B[] should be present in the intersection, with quite undefined

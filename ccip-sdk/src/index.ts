@@ -31,8 +31,10 @@ export {
   type ExecutionReceipt,
   type ExecutionReport,
   type Lane,
+  type Logger,
   type NetworkInfo,
   type OffchainTokenData,
+  type WithLogger,
   CCIPVersion,
   ExecutionState,
 } from './types.ts'

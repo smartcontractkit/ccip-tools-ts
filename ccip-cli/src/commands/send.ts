@@ -15,9 +15,15 @@ import { type BytesLike, dataLength, formatUnits, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
-import { Format } from './types.ts'
-import { logParsedError, parseTokenAmounts, prettyRequest, withDateTimestamp } from './utils.ts'
-import { fetchChainsFromRpcs } from '../providers/index.ts'
+import { type Ctx, Format } from './types.ts'
+import {
+  getCtx,
+  logParsedError,
+  parseTokenAmounts,
+  prettyRequest,
+  withDateTimestamp,
+} from './utils.ts'
+import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 
 export const command = 'send <source> <router> <dest>'
 export const describe = 'Send a CCIP message from router on source to dest'
@@ -132,25 +138,23 @@ export const builder = (yargs: Argv) =>
  * @param argv - Command line arguments.
  */
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
-  let destroy
-  const destroy$ = new Promise((resolve) => {
-    destroy = resolve
-  })
-  return sendMessage(argv, destroy$)
+  const [controller, ctx] = getCtx(argv)
+  return sendMessage(ctx, argv)
     .catch((err) => {
       process.exitCode = 1
-      if (!logParsedError(err)) console.error(err)
+      if (!logParsedError.call(ctx, err)) ctx.logger.error(err)
     })
-    .finally(destroy)
+    .finally(() => controller.abort('Exited'))
 }
 
 async function sendMessage(
+  ctx: Ctx,
   argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts,
-  destroy: Promise<unknown>,
 ) {
+  const { logger } = ctx
   const sourceNetwork = networkInfo(argv.source)
   const destNetwork = networkInfo(argv.dest)
-  const getChain = fetchChainsFromRpcs(argv, undefined, destroy)
+  const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
 
   let data: BytesLike
@@ -197,10 +201,12 @@ async function sendMessage(
     throw new Error('--token-receiver and --account intended only for Solana dest')
   }
 
+  let walletAddress, wallet
   if (!receiver) {
     if (sourceNetwork.family !== destNetwork.family)
       throw new Error('--receiver is required when sending to a different chain family')
-    receiver = await source.getWalletAddress(argv) // send to self if same family
+    ;[walletAddress, wallet] = await loadChainWallet(source, argv)
+    receiver = walletAddress // send to self if same family
   }
 
   if (argv.estimateGasLimit != null || argv.onlyEstimate) {
@@ -222,16 +228,17 @@ async function sendMessage(
       tokenAmounts,
     )
 
+    if (!walletAddress) [walletAddress, wallet] = await loadChainWallet(source, argv)
     const estimated = await estimateExecGasForRequest(source, dest, {
       lane,
       message: {
-        sender: await source.getWalletAddress(argv),
+        sender: walletAddress,
         receiver,
         data,
         tokenAmounts: destTokenAmounts,
       },
     })
-    console.log('Estimated gasLimit:', estimated)
+    logger.log('Estimated gasLimit:', estimated)
     argv.gasLimit = Math.ceil(estimated * (1 + (argv.estimateGasLimit ?? 0) / 100))
     if (argv.onlyEstimate) return
   }
@@ -256,7 +263,7 @@ async function sendMessage(
       feeTokenInfo = await source.getTokenInfo(feeToken)
     } catch (_) {
       const feeTokens = await source.getFeeTokens(argv.router)
-      console.debug('supported feeTokens:', feeTokens)
+      logger.debug('supported feeTokens:', feeTokens)
       for (const [token, info] of Object.entries(feeTokens)) {
         if (info.symbol === 'UNKNOWN' || info.symbol !== argv.feeToken) continue
         feeToken = token
@@ -281,7 +288,7 @@ async function sendMessage(
   // calculate fee
   const fee = await source.getFee(argv.router, destNetwork.chainSelector, message)
 
-  console.info(
+  logger.info(
     'Fee:',
     fee,
     '=',
@@ -292,15 +299,18 @@ async function sendMessage(
   )
   if (argv.onlyGetFee) return
 
+  if (!walletAddress) [walletAddress, wallet] = await loadChainWallet(source, argv)
   const request = await source.sendMessage(
     argv.router,
     destNetwork.chainSelector,
     { ...message, fee },
-    argv,
+    { ...argv, wallet },
   )
-  console.log(
+  logger.info(
     '🚀 Sending message to',
-    tokenReceiver || receiver,
+    tokenReceiver && tokenReceiver !== '11111111111111111111111111111111'
+      ? tokenReceiver
+      : receiver,
     '@',
     destNetwork.name,
     ', tx =>',
@@ -311,13 +321,13 @@ async function sendMessage(
 
   switch (argv.format) {
     case Format.log:
-      console.log(`message ${request.log.index} =`, withDateTimestamp(request))
+      logger.log(`message ${request.log.index} =`, withDateTimestamp(request))
       break
     case Format.pretty:
-      await prettyRequest(source, request)
+      await prettyRequest.call(ctx, source, request)
       break
     case Format.json:
-      console.info(JSON.stringify(request, bigIntReplacer, 2))
+      logger.info(JSON.stringify(request, bigIntReplacer, 2))
       break
   }
 }
