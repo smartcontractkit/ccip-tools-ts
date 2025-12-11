@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { ZeroAddress, concat, zeroPadValue, toBeHex } from 'ethers'
+import { ZeroAddress, concat, toBeHex, zeroPadValue } from 'ethers'
 
 import { EVMChain } from './index.ts'
-import { interfaces } from './const.ts'
 import {
   EVMExtraArgsV1Tag,
   EVMExtraArgsV2Tag,
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
-import { defaultAbiCoder } from './const.ts'
+import { defaultAbiCoder, interfaces } from './const.ts'
 import { CCIPVersion, ExecutionState } from '../types.ts'
 
 import '../index.ts'
@@ -140,7 +139,10 @@ describe('EVMChain.decodeMessage', () => {
       const result = EVMChain.decodeMessage({ topics: encoded.topics, data: encoded.data })
 
       assert.ok(result)
-      assert.equal((result as { allowOutOfOrderExecution?: boolean }).allowOutOfOrderExecution, true)
+      assert.equal(
+        (result as { allowOutOfOrderExecution?: boolean }).allowOutOfOrderExecution,
+        true,
+      )
     })
   })
 
@@ -187,7 +189,10 @@ describe('EVMChain.decodeMessage', () => {
       assert.equal(result.header.sequenceNumber, 500n)
       assert.equal(result.header.nonce, 10n)
       assert.equal(result.header.sourceChainSelector, sourceChainSelector)
-      assert.equal((result.header as { destChainSelector?: bigint }).destChainSelector, destChainSelector)
+      assert.equal(
+        (result.header as { destChainSelector?: bigint }).destChainSelector,
+        destChainSelector,
+      )
       assert.equal(result.data, '0xabcd')
     })
 
@@ -432,10 +437,7 @@ describe('EVMChain.decodeCommits', () => {
       ])
 
       const lane = { sourceChainSelector, onRamp: testAddresses.onRamp, version: CCIPVersion.V1_5 }
-      const result = EVMChain.decodeCommits(
-        { topics: encoded.topics, data: encoded.data },
-        lane,
-      )
+      const result = EVMChain.decodeCommits({ topics: encoded.topics, data: encoded.data }, lane)
 
       assert.ok(result)
       assert.equal(result.length, 1)
@@ -561,11 +563,12 @@ describe('EVMChain.decodeCommits', () => {
         emptyPriceUpdates,
       ])
 
-      const lane = { sourceChainSelector: targetChainSelector, onRamp: testAddresses.onRamp, version: CCIPVersion.V1_6 }
-      const result = EVMChain.decodeCommits(
-        { topics: encoded.topics, data: encoded.data },
-        lane,
-      )
+      const lane = {
+        sourceChainSelector: targetChainSelector,
+        onRamp: testAddresses.onRamp,
+        version: CCIPVersion.V1_6,
+      }
+      const result = EVMChain.decodeCommits({ topics: encoded.topics, data: encoded.data }, lane)
 
       assert.ok(result)
       assert.equal(result.length, 1)
@@ -589,11 +592,12 @@ describe('EVMChain.decodeCommits', () => {
         emptyPriceUpdates,
       ])
 
-      const lane = { sourceChainSelector: 999n, onRamp: testAddresses.other, version: CCIPVersion.V1_6 }
-      const result = EVMChain.decodeCommits(
-        { topics: encoded.topics, data: encoded.data },
-        lane,
-      )
+      const lane = {
+        sourceChainSelector: 999n,
+        onRamp: testAddresses.other,
+        version: CCIPVersion.V1_6,
+      }
+      const result = EVMChain.decodeCommits({ topics: encoded.topics, data: encoded.data }, lane)
 
       assert.equal(result, undefined)
     })
@@ -792,7 +796,10 @@ describe('EVMChain.decodeExtraArgs', () => {
 
       assert.ok(result)
       assert.equal(result._tag, 'EVMExtraArgsV2')
-      assert.equal((result as { allowOutOfOrderExecution: boolean }).allowOutOfOrderExecution, false)
+      assert.equal(
+        (result as { allowOutOfOrderExecution: boolean }).allowOutOfOrderExecution,
+        false,
+      )
     })
   })
 
