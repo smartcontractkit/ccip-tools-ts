@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { beginCell } from '@ton/core'
-import { sha256, toBigInt } from 'ethers'
+import { toBigInt } from 'ethers'
 
 import { extractMagicTag, hexToBuffer, tryParseCell } from './utils.ts'
 import {
@@ -13,20 +13,6 @@ import {
 } from '../extra-args.ts'
 
 describe('TON utils', () => {
-  describe('sha256', () => {
-    it('should compute SHA256 hash of data', () => {
-      const data = new Uint8Array([1, 2, 3, 4])
-      const hash = sha256(data)
-      assert.match(hash, /^0x[a-f0-9]{64}$/)
-      assert.equal(hash, '0x9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a')
-    })
-
-    it('should handle empty data', () => {
-      const hash = sha256(new Uint8Array())
-      assert.equal(hash, '0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
-    })
-  })
-
   describe('hexToBuffer', () => {
     it('should convert hex string with 0x prefix', () => {
       const buffer = hexToBuffer('0x48656c6c6f')

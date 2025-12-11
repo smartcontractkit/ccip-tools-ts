@@ -2,13 +2,13 @@ import { type Cell, Address, beginCell } from '@ton/core'
 import { sha256, toBigInt } from 'ethers'
 
 import { decodeExtraArgs } from '../extra-args.ts'
-import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
+import type { LeafHasher } from '../hasher/common.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import { networkInfo } from '../utils.ts'
 import { hexToBuffer, tryParseCell } from './utils.ts'
 
-// Convert LEAF_DOMAIN_SEPARATOR from hex string to Buffer for cell storage
-const LEAF_DOMAIN_BUFFER = Buffer.from(LEAF_DOMAIN_SEPARATOR.slice(2).padStart(64, '0'), 'hex')
+// TON uses 256 bits (32 bytes) of zeros as leaf domain separator
+const TON_LEAF_DOMAIN_SEPARATOR = 0n
 
 /**
  * Creates a leaf hasher for TON messages.
@@ -123,8 +123,9 @@ function hashV16TONMessage(message: CCIPMessage_V1_6, metadataHash: string): str
     message.tokenAmounts.length > 0 ? buildTokenAmountsCell(message.tokenAmounts) : null
 
   // Assemble the complete message cell
+  // LEAF_DOMAIN_SEPARATOR (256 bits) + metadataHash (256 bits) + refs
   const messageCell = beginCell()
-    .storeBuffer(LEAF_DOMAIN_BUFFER)
+    .storeUint(TON_LEAF_DOMAIN_SEPARATOR, 256)
     .storeUint(toBigInt(metadataHash), 256)
     .storeRef(headerCell)
     .storeRef(senderCell)
