@@ -81,15 +81,15 @@ export const CCIPVersion = {
 export type CCIPVersion = (typeof CCIPVersion)[keyof typeof CCIPVersion]
 
 /** Helper type that maps chain family to its chain ID format. */
-type ChainFamilyWithId<F extends ChainFamily> = F extends typeof ChainFamily.EVM
+type ChainFamilyWithId<F extends ChainFamily> = F extends
+  | typeof ChainFamily.EVM
+  | typeof ChainFamily.TON
   ? { readonly family: F; readonly chainId: number }
   : F extends typeof ChainFamily.Solana
     ? { readonly family: F; readonly chainId: string }
     : F extends typeof ChainFamily.Aptos | typeof ChainFamily.Sui
       ? { readonly family: F; readonly chainId: `${F}:${number}` }
-      : F extends typeof ChainFamily.TON
-        ? { readonly family: F; readonly chainId: number }
-        : never
+      : never
 
 /**
  * Network information including chain selector and metadata.

@@ -118,14 +118,17 @@ const networkInfoFromChainId = memoize((chainId: NetworkInfo['chainId']): Networ
 export const networkInfo = memoize(function networkInfo_(
   selectorOrIdOrName: bigint | number | string,
 ): NetworkInfo {
-  let chainId
+  let chainId, match
   if (typeof selectorOrIdOrName === 'number') {
     chainId = selectorOrIdOrName
-  } else if (typeof selectorOrIdOrName === 'string' && selectorOrIdOrName.match(/^\d+$/)) {
-    selectorOrIdOrName = BigInt(selectorOrIdOrName)
+  } else if (
+    typeof selectorOrIdOrName === 'string' &&
+    (match = selectorOrIdOrName.match(/^(-?\d+)n?$/))
+  ) {
+    selectorOrIdOrName = BigInt(match[1])
   }
   if (typeof selectorOrIdOrName === 'bigint') {
-    // maybe we got a number deserialized as bigint
+    // maybe we got a chainId deserialized as bigint
     if (selectorOrIdOrName.toString() in SELECTORS) {
       chainId = Number(selectorOrIdOrName)
     } else {
@@ -138,7 +141,7 @@ export const networkInfo = memoize(function networkInfo_(
       if (!chainId) throw new Error(`Selector not found: ${selectorOrIdOrName}`)
     }
   } else if (typeof selectorOrIdOrName === 'string') {
-    if (selectorOrIdOrName.includes('-')) {
+    if (selectorOrIdOrName.includes('-', 1)) {
       for (const id in SELECTORS) {
         if (SELECTORS[id].name === selectorOrIdOrName) {
           chainId = id
