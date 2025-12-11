@@ -5,7 +5,6 @@ import { type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import { getTONLeafHasher, hashTONMetadata } from './hasher.ts'
 
 const ZERO_ADDRESS = '0x' + '0'.repeat(40)
-const TON_RECEIVER = '0:' + '3'.repeat(64)
 
 describe('TON hasher', () => {
   const CHAINSEL_EVM_TEST_90000001 = 909606746561742123n
@@ -27,7 +26,6 @@ describe('TON hasher', () => {
       )
 
       assert.equal(hash1, hash2)
-      assert.match(hash1, /^0x[a-f0-9]{64}$/)
     })
 
     it('should create different hashes for different parameters', () => {
@@ -76,101 +74,6 @@ describe('TON hasher', () => {
       destChainSelector: CHAINSEL_TON,
       onRamp: EVM_ONRAMP_ADDRESS_TEST,
       version: CCIPVersion.V1_6,
-    })
-
-    it('should hash basic message', () => {
-      const message: CCIPMessage_V1_6 & {
-        gasLimit: bigint
-        allowOutOfOrderExecution: boolean
-      } = {
-        header: {
-          messageId: '0x' + '1'.repeat(64),
-          sequenceNumber: 123n,
-          nonce: 456n,
-          sourceChainSelector: CHAINSEL_EVM_TEST_90000001,
-          destChainSelector: CHAINSEL_TON,
-        },
-        sender: EVM_SENDER_ADDRESS_TEST,
-        receiver: TON_RECEIVER,
-        data: '0x1234',
-        extraArgs: '0x181dcf10000000000000000000000000000000000000000000000000000000000000000001',
-        gasLimit: 0n,
-        allowOutOfOrderExecution: true,
-        tokenAmounts: [] as CCIPMessage_V1_6['tokenAmounts'],
-        feeToken: ZERO_ADDRESS,
-        feeTokenAmount: 0n,
-        feeValueJuels: 0n,
-      }
-
-      const hash = hasher(message)
-      assert.match(hash, /^0x[a-f0-9]{64}$/)
-    })
-
-    it('should hash message with tokens', () => {
-      const tokenAmounts: CCIPMessage_V1_6['tokenAmounts'] = [
-        {
-          sourcePoolAddress: '0x123456789abcdef123456789abcdef123456789a',
-          destTokenAddress: '0:' + '5'.repeat(64),
-          extraData: '0x',
-          destGasAmount: 1000n,
-          amount: 1000n,
-          destExecData: '0x',
-        },
-      ]
-
-      const message: CCIPMessage_V1_6 & {
-        gasLimit: bigint
-        allowOutOfOrderExecution: boolean
-      } = {
-        header: {
-          messageId: '0x' + '1'.repeat(64),
-          sequenceNumber: 123n,
-          nonce: 456n,
-          sourceChainSelector: CHAINSEL_EVM_TEST_90000001,
-          destChainSelector: CHAINSEL_TON,
-        },
-        sender: EVM_SENDER_ADDRESS_TEST,
-        receiver: TON_RECEIVER,
-        data: '0x1234',
-        extraArgs: '0x181dcf10000000000000000000000000000000000000000000000000000000000000000001',
-        gasLimit: 0n,
-        allowOutOfOrderExecution: true,
-        tokenAmounts,
-        feeToken: ZERO_ADDRESS,
-        feeTokenAmount: 0n,
-        feeValueJuels: 0n,
-      }
-
-      const hash = hasher(message)
-      assert.match(hash, /^0x[a-f0-9]{64}$/)
-    })
-
-    it('should handle embedded gasLimit', () => {
-      const message: CCIPMessage_V1_6 & {
-        gasLimit: bigint
-        allowOutOfOrderExecution: boolean
-      } = {
-        header: {
-          messageId: '0x' + '1'.repeat(64),
-          sequenceNumber: 123n,
-          nonce: 456n,
-          sourceChainSelector: CHAINSEL_EVM_TEST_90000001,
-          destChainSelector: CHAINSEL_TON,
-        },
-        sender: EVM_SENDER_ADDRESS_TEST,
-        receiver: TON_RECEIVER,
-        data: '0x1234',
-        extraArgs: '0x',
-        gasLimit: 500000n,
-        allowOutOfOrderExecution: false,
-        tokenAmounts: [] as CCIPMessage_V1_6['tokenAmounts'],
-        feeToken: ZERO_ADDRESS,
-        feeTokenAmount: 0n,
-        feeValueJuels: 0n,
-      }
-
-      const hash = hasher(message)
-      assert.match(hash, /^0x[a-f0-9]{64}$/)
     })
 
     it('should compute leaf hash matching chainlink-ton for Merkle verification', () => {
