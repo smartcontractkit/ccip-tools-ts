@@ -23,14 +23,13 @@ export interface TONWallet {
 
 /**
  * Unsigned TON transaction data.
- * Contains all information needed to construct and sign a transaction.
+ * Contains the payload needed to construct a transaction.
+ * Value is determined at execution time, not included here.
  */
 export type UnsignedTONTx = {
   family: typeof ChainFamily.TON
   /** Target contract address */
   to: string
-  /** Amount of TON to send (in nanotons) */
-  value: bigint
   /** Message payload as BOC-serialized Cell */
   body: Cell
 }
