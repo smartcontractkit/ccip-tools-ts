@@ -420,9 +420,10 @@ export function prettyReceipt(
 /**
  * Format a CCIPError with recovery hints for user-friendly display.
  * @param err - Error to format.
+ * @param verbose - If true, include stack trace for debugging.
  * @returns Formatted error string if CCIPError, null otherwise.
  */
-export function formatCCIPError(err: unknown): string | null {
+export function formatCCIPError(err: unknown, verbose = false): string | null {
   if (!CCIPError.isCCIPError(err)) return null
 
   const lines: string[] = []
@@ -441,6 +442,15 @@ export function formatCCIPError(err: unknown): string | null {
     lines.push(`  note: ${note}`)
   }
 
+  if (verbose && err.stack) {
+    lines.push('')
+    lines.push('  Stack trace:')
+    const stackLines = err.stack.split('\n').slice(1)
+    for (const line of stackLines) {
+      lines.push(`  ${line}`)
+    }
+  }
+
   return lines.join('\n')
 }
 
@@ -451,7 +461,7 @@ export function formatCCIPError(err: unknown): string | null {
  */
 export function logParsedError(this: Ctx, err: unknown): boolean {
   // First check if it's a CCIPError with recovery hints
-  const formatted = formatCCIPError(err)
+  const formatted = formatCCIPError(err, this.verbose)
   if (formatted) {
     this.logger.error(formatted)
     return true
@@ -523,5 +533,5 @@ export function getCtx(argv: { verbose?: boolean }): [controller: AbortControlle
     logger.debug = () => {}
   }
 
-  return [controller, { destroy$, logger }]
+  return [controller, { destroy$, logger, verbose: argv.verbose }]
 }

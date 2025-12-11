@@ -18,4 +18,5 @@ export type Ctx = {
     table: (tabularData: unknown, properties?: readonly string[]) => void
     log: (...args: unknown[]) => void
   }
+  verbose?: boolean
 }

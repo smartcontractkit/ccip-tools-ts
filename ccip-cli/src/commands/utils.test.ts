@@ -71,4 +71,21 @@ describe('formatCCIPError', () => {
     // Check help: indentation
     assert.match(formatted, /\n {2}help:/)
   })
+
+  it('should include stack trace when verbose is true', () => {
+    const error = new CCIPChainNotFoundError('12345')
+    const formatted = formatCCIPError(error, true)
+
+    assert.ok(formatted)
+    assert.match(formatted, /Stack trace:/)
+    assert.match(formatted, /at /)
+  })
+
+  it('should not include stack trace when verbose is false', () => {
+    const error = new CCIPChainNotFoundError('12345')
+    const formatted = formatCCIPError(error, false)
+
+    assert.ok(formatted)
+    assert.doesNotMatch(formatted, /Stack trace:/)
+  })
 })
