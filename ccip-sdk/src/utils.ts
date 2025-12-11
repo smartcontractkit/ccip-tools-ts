@@ -8,7 +8,7 @@ import {
   decodeBase64,
   getBytes,
   isBytesLike,
-  toBeHex,
+  toBeArray,
   toBigInt,
 } from 'ethers'
 import { memoize } from 'micro-memoize'
@@ -248,9 +248,8 @@ export function leToBigInt(data: BytesLike | readonly number[]): bigint {
  * @returns Little-endian Uint8Array.
  */
 export function toLeArray(value: BigNumberish, width?: Numeric): Uint8Array {
-  return getBytes(toBeHex(value, width)).reverse()
+  return toBeArray(value, width).reverse()
 }
-
 /**
  * Checks if the given data is a valid Base64 encoded string.
  * @param data - Data to check.

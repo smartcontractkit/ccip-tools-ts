@@ -95,6 +95,19 @@ describe('encodeExtraArgs', () => {
       assert.equal(extractMagicTag(encoded), EVMExtraArgsV2Tag)
       assert.ok(encoded.length > 10)
     })
+
+    it('should parse real Sepolia->TON message extraArgs', () => {
+      // https://sepolia.etherscan.io/tx/0x6bdfcce8def68f19f40d340bc38d01866c10a4c92685df1c3d08180280a4ccac
+      const res = decodeExtraArgs(
+        '0x181dcf100000000000000000000000000000000000000000000000000000000005f5e1000000000000000000000000000000000000000000000000000000000000000001',
+        ChainFamily.EVM,
+      )
+      assert.deepEqual(res, {
+        _tag: 'EVMExtraArgsV2',
+        gasLimit: 100_000_000n,
+        allowOutOfOrderExecution: true,
+      })
+    })
   })
 })
 
