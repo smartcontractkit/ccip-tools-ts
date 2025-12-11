@@ -5,7 +5,8 @@ import { dataSlice, getNumber } from 'ethers'
 
 // Import index.ts to ensure all Chain classes are loaded and registered
 import './index.ts'
-import { decodeExtraArgs, encodeExtraArgs } from './extra-args.ts'
+import { EVMExtraArgsV2Tag, decodeExtraArgs, encodeExtraArgs } from './extra-args.ts'
+import { extractMagicTag } from './ton/utils.ts'
 import { ChainFamily } from './types.ts'
 
 describe('encodeExtraArgs', () => {
@@ -74,6 +75,40 @@ describe('encodeExtraArgs', () => {
       assert.equal(encoded.length, 2 + 2 * (4 + 32 + 1)) // Much shorter than EVM encoding
     })
   })
+  describe('TON extra args', () => {
+    it('should encode EVMExtraArgsV2 (GenericExtraArgsV2)', () => {
+      const encoded = encodeExtraArgs(
+        { gasLimit: 400_000n, allowOutOfOrderExecution: true },
+        ChainFamily.TON,
+      )
+
+      assert.equal(extractMagicTag(encoded), EVMExtraArgsV2Tag)
+      assert.ok(encoded.length > 10)
+    })
+
+    it('should encode EVMExtraArgsV2 (GenericExtraArgsV2) with allowOutOfOrderExecution false', () => {
+      const encoded = encodeExtraArgs(
+        { gasLimit: 500_000n, allowOutOfOrderExecution: false },
+        ChainFamily.TON,
+      )
+
+      assert.equal(extractMagicTag(encoded), EVMExtraArgsV2Tag)
+      assert.ok(encoded.length > 10)
+    })
+
+    it('should parse real Sepolia->TON message extraArgs', () => {
+      // https://sepolia.etherscan.io/tx/0x6bdfcce8def68f19f40d340bc38d01866c10a4c92685df1c3d08180280a4ccac
+      const res = decodeExtraArgs(
+        '0x181dcf100000000000000000000000000000000000000000000000000000000005f5e1000000000000000000000000000000000000000000000000000000000000000001',
+        ChainFamily.EVM,
+      )
+      assert.deepEqual(res, {
+        _tag: 'EVMExtraArgsV2',
+        gasLimit: 100_000_000n,
+        allowOutOfOrderExecution: true,
+      })
+    })
+  })
 })
 
 describe('parseExtraArgs', () => {
@@ -138,6 +173,33 @@ describe('parseExtraArgs', () => {
       })
     })
   })
+  describe('TON extra args (TLB encoding)', () => {
+    it('should parse EVMExtraArgsV2 (GenericExtraArgsV2)', () => {
+      const encoded = encodeExtraArgs(
+        { gasLimit: 400_000n, allowOutOfOrderExecution: true },
+        ChainFamily.TON,
+      )
+      const res = decodeExtraArgs(encoded, ChainFamily.TON)
+      assert.deepEqual(res, {
+        _tag: 'EVMExtraArgsV2',
+        gasLimit: 400000n,
+        allowOutOfOrderExecution: true,
+      })
+    })
+
+    it('should parse EVMExtraArgsV2 (GenericExtraArgsV2) with allowOutOfOrderExecution false', () => {
+      const encoded = encodeExtraArgs(
+        { gasLimit: 500_000n, allowOutOfOrderExecution: false },
+        ChainFamily.TON,
+      )
+      const res = decodeExtraArgs(encoded, ChainFamily.TON)
+      assert.deepEqual(res, {
+        _tag: 'EVMExtraArgsV2',
+        gasLimit: 500000n,
+        allowOutOfOrderExecution: false,
+      })
+    })
+  })
 
   describe('auto-detect chain family', () => {
     it('should auto-detect EVM v1 args', () => {
@@ -196,6 +258,13 @@ describe('parseExtraArgs', () => {
       const decoded = decodeExtraArgs(encoded, ChainFamily.Aptos)
       assert.deepEqual(decoded, { ...original, _tag: 'EVMExtraArgsV2' })
     })
+
+    it('should round-trip TON EVMExtraArgsV2', () => {
+      const original = { gasLimit: 400_000n, allowOutOfOrderExecution: true }
+      const encoded = encodeExtraArgs(original, ChainFamily.TON)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.TON)
+      assert.deepEqual(decoded, { ...original, _tag: 'EVMExtraArgsV2' })
+    })
   })
 
   describe('encoding format differences', () => {
@@ -219,6 +288,16 @@ describe('parseExtraArgs', () => {
       assert.equal(evmEncoded.substring(0, 10), aptosEncoded.substring(0, 10))
       // But different lengths
       assert.ok(evmEncoded.length > aptosEncoded.length)
+    })
+
+    it('should produce different encodings for EVM vs TON', () => {
+      const args = { gasLimit: 300_000n, allowOutOfOrderExecution: false }
+      const evmEncoded = encodeExtraArgs(args, ChainFamily.EVM)
+      const tonEncoded = encodeExtraArgs(args, ChainFamily.TON)
+
+      assert.equal(evmEncoded.substring(0, 10), EVMExtraArgsV2Tag)
+      assert.equal(extractMagicTag(tonEncoded), EVMExtraArgsV2Tag)
+      assert.notEqual(evmEncoded, tonEncoded)
     })
   })
 })

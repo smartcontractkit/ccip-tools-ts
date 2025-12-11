@@ -61,6 +61,7 @@ import {
   ExecutionState,
 } from '../types.ts'
 import {
+  bytesToBuffer,
   createRateLimitedFetch,
   decodeAddress,
   decodeOnRampAddress,
@@ -83,7 +84,6 @@ import { fetchSolanaOffchainTokenData } from './offchain.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
-  bytesToBuffer,
   getErrorFromLogs,
   hexDiscriminator,
   parseSolanaLogs,

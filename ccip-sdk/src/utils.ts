@@ -118,14 +118,17 @@ const networkInfoFromChainId = memoize((chainId: NetworkInfo['chainId']): Networ
 export const networkInfo = memoize(function networkInfo_(
   selectorOrIdOrName: bigint | number | string,
 ): NetworkInfo {
-  let chainId
+  let chainId, match
   if (typeof selectorOrIdOrName === 'number') {
     chainId = selectorOrIdOrName
-  } else if (typeof selectorOrIdOrName === 'string' && selectorOrIdOrName.match(/^\d+$/)) {
-    selectorOrIdOrName = BigInt(selectorOrIdOrName)
+  } else if (
+    typeof selectorOrIdOrName === 'string' &&
+    (match = selectorOrIdOrName.match(/^(-?\d+)n?$/))
+  ) {
+    selectorOrIdOrName = BigInt(match[1])
   }
   if (typeof selectorOrIdOrName === 'bigint') {
-    // maybe we got a number deserialized as bigint
+    // maybe we got a chainId deserialized as bigint
     if (selectorOrIdOrName.toString() in SELECTORS) {
       chainId = Number(selectorOrIdOrName)
     } else {
@@ -138,7 +141,7 @@ export const networkInfo = memoize(function networkInfo_(
       if (!chainId) throw new Error(`Selector not found: ${selectorOrIdOrName}`)
     }
   } else if (typeof selectorOrIdOrName === 'string') {
-    if (selectorOrIdOrName.includes('-')) {
+    if (selectorOrIdOrName.includes('-', 1)) {
       for (const id in SELECTORS) {
         if (SELECTORS[id].name === selectorOrIdOrName) {
           chainId = id
@@ -247,7 +250,6 @@ export function leToBigInt(data: BytesLike | readonly number[]): bigint {
 export function toLeArray(value: BigNumberish, width?: Numeric): Uint8Array {
   return toBeArray(value, width).reverse()
 }
-
 /**
  * Checks if the given data is a valid Base64 encoded string.
  * @param data - Data to check.
@@ -276,6 +278,15 @@ export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
   } else {
     throw new Error(`Unsupported data format: ${util.inspect(data)}`)
   }
+}
+
+/**
+ * Converts bytes to a Node.js Buffer.
+ * @param bytes - Bytes to convert (hex string, Uint8Array, Base64, etc).
+ * @returns Node.js Buffer.
+ */
+export function bytesToBuffer(bytes: BytesLike | readonly number[]): Buffer {
+  return Buffer.from(getDataBytes(bytes))
 }
 
 /**

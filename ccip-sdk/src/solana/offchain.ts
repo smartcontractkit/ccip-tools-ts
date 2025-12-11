@@ -4,11 +4,11 @@ import { hexlify } from 'ethers'
 
 import { getUsdcAttestation } from '../offchain.ts'
 import type { CCIPMessage, CCIPRequest, OffchainTokenData, WithLogger } from '../types.ts'
-import { networkInfo, util } from '../utils.ts'
+import { bytesToBuffer, networkInfo, util } from '../utils.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
 import type { SolanaLog, SolanaTransaction } from './index.ts'
-import { bytesToBuffer, hexDiscriminator } from './utils.ts'
+import { hexDiscriminator } from './utils.ts'
 
 interface CcipCctpMessageSentEvent {
   originalSender: PublicKey

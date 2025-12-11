@@ -1,5 +1,3 @@
-import { Buffer } from 'buffer'
-
 import { eventDiscriminator } from '@coral-xyz/anchor'
 import {
   type AddressLookupTableAccount,
@@ -14,7 +12,7 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from '@solana/web3.js'
-import { type BytesLike, dataLength, dataSlice, hexlify } from 'ethers'
+import { dataLength, dataSlice, hexlify } from 'ethers'
 
 import type { Log_, WithLogger } from '../types.ts'
 import { getDataBytes, sleep } from '../utils.ts'
@@ -27,15 +25,6 @@ import type { UnsignedSolanaTx, Wallet } from './types.ts'
  */
 export function hexDiscriminator(eventName: string): string {
   return hexlify(eventDiscriminator(eventName))
-}
-
-/**
- * Converts bytes to a Node.js Buffer.
- * @param bytes - Bytes to convert.
- * @returns Node.js Buffer.
- */
-export function bytesToBuffer(bytes: BytesLike): Buffer {
-  return Buffer.from(getDataBytes(bytes).buffer)
 }
 
 /**

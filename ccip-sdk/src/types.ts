@@ -6,6 +6,7 @@ import type { CCIPMessage_EVM, CCIPMessage_V1_6_EVM } from './evm/messages.ts'
 import type { ExtraArgs } from './extra-args.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
 import type { CCIPMessage_V1_6_Sui } from './sui/types.ts'
+import type { CCIPMessage_V1_6_TON } from './ton/types.ts'
 // v1.6 Base type from EVM contains the intersection of all other CCIPMessage v1.6 types
 export type { CCIPMessage_V1_6 } from './evm/messages.ts'
 
@@ -63,6 +64,7 @@ export const ChainFamily = {
   Solana: 'solana',
   Aptos: 'aptos',
   Sui: 'sui',
+  TON: 'ton',
 } as const
 /** Type representing one of the supported chain families. */
 export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
@@ -79,7 +81,9 @@ export const CCIPVersion = {
 export type CCIPVersion = (typeof CCIPVersion)[keyof typeof CCIPVersion]
 
 /** Helper type that maps chain family to its chain ID format. */
-type ChainFamilyWithId<F extends ChainFamily> = F extends typeof ChainFamily.EVM
+type ChainFamilyWithId<F extends ChainFamily> = F extends
+  | typeof ChainFamily.EVM
+  | typeof ChainFamily.TON
   ? { readonly family: F; readonly chainId: number }
   : F extends typeof ChainFamily.Solana
     ? { readonly family: F; readonly chainId: string }
@@ -120,7 +124,7 @@ export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
   | typeof CCIPVersion.V1_2
   | typeof CCIPVersion.V1_5
   ? CCIPMessage_EVM<V>
-  : CCIPMessage_V1_6_EVM | CCIPMessage_V1_6_Solana | CCIPMessage_V1_6_Sui
+  : CCIPMessage_V1_6_EVM | CCIPMessage_V1_6_Solana | CCIPMessage_V1_6_Sui | CCIPMessage_V1_6_TON
 
 /**
  * Generic log structure compatible across chain families.
