@@ -1,4 +1,4 @@
-import { Address, Cell, beginCell } from '@ton/core'
+import { Address, Cell, beginCell, toNano } from '@ton/core'
 import { TonClient, internal } from '@ton/ton'
 import { type BytesLike, isBytesLike } from 'ethers'
 import { memoize } from 'micro-memoize'
@@ -392,7 +392,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return Promise.resolve({
       family: ChainFamily.TON,
       to: unsigned.to,
-      value: unsigned.value,
       body: unsigned.body,
     })
   }
@@ -427,7 +426,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       messages: [
         internal({
           to: unsigned.to,
-          value: unsigned.value,
+          value: toNano('0.5'), // TODO: FIXME: estimate proper value for execution costs instead of hardcoding.
           body: unsigned.body,
         }),
       ],
