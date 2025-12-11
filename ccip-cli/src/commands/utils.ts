@@ -418,24 +418,59 @@ export function prettyReceipt(
 }
 
 /**
+ * Format a CCIPError with recovery hints for user-friendly display.
+ * @param err - Error to format.
+ * @returns Formatted error string if CCIPError, null otherwise.
+ */
+export function formatCCIPError(err: unknown): string | null {
+  if (!CCIPError.isCCIPError(err)) return null
+
+  const lines: string[] = []
+
+  lines.push(`error[${err.code}]: ${err.message}`)
+
+  if (err.recovery) {
+    lines.push(`  help: ${err.recovery}`)
+  }
+
+  if (err.isTransient) {
+    let note = 'this error may resolve on retry'
+    if (err.retryAfterMs) {
+      note += ` (wait ${Math.round(err.retryAfterMs / 1000)}s)`
+    }
+    lines.push(`  note: ${note}`)
+  }
+
+  return lines.join('\n')
+}
+
+/**
  * Logs a parsed error message if the error can be decoded.
  * @param err - Error to parse and log.
  * @returns True if error was successfully parsed and logged.
  */
 export function logParsedError(this: Ctx, err: unknown): boolean {
+  // First check if it's a CCIPError with recovery hints
+  const formatted = formatCCIPError(err)
+  if (formatted) {
+    this.logger.error(formatted)
+    return true
+  }
+
+  // Then try chain-specific parsing for revert data
   for (const chain of Object.values<ChainStatic>(supportedChains)) {
     const parsed = chain.parse?.(err)
     if (!parsed) continue
     const { method, Instruction: instruction, ...rest } = parsed
     if (method || instruction) {
       this.logger.error(
-        `🛑 Failed to call "${(method || instruction) as string}"`,
+        `error: Failed to call "${(method || instruction) as string}"`,
         ...Object.entries(rest)
           .map(([k, e]) => [`\n${k.substring(0, 1).toUpperCase()}${k.substring(1)} =`, e])
           .flat(1),
       )
     } else {
-      this.logger.error('🛑 Error:', parsed)
+      this.logger.error('error:', parsed)
     }
     return true
   }

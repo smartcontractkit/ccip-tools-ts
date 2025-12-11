@@ -7,7 +7,7 @@ import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
 import { type Ctx, Format } from './types.ts'
-import { getCtx, prettyTable } from './utils.ts'
+import { getCtx, logParsedError, prettyTable } from './utils.ts'
 
 export const command = ['parse <data>', 'parseBytes <data>', 'parseData <data>']
 export const describe =
@@ -35,7 +35,7 @@ export function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & Glob
     parseBytes(ctx, argv)
   } catch (err) {
     process.exitCode = 1
-    ctx.logger.error(err)
+    if (!logParsedError.call(ctx, err)) ctx.logger.error(err)
   }
 }
 
