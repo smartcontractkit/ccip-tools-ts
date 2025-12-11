@@ -16,7 +16,10 @@ To install it from latest NpmJS release, do:
 ```sh
 npm install -g @chainlink/ccip-cli
 ccip-cli --help
-# or
+```
+
+To run it directly with NPX, do:
+```
 npx @chainlink/ccip-cli --help
 ```
 
@@ -52,10 +55,14 @@ with any prefix or suffix (only URLs are parsed).
 The default filename is just for compatibility with previous tools, and isn't required to be an
 actual env file. `.txt`, `.csv` or `.json` arrays should work out of the box.
 
+
+> [!IMPORTANT]
+> We recommend .env files.  Do not upload RPCs with your API secrets in the URL to source countrol like github.
+
 Example `.env` file:
 
 ```
-https://eth-sepolia.g.alchemy.com/v2/demo
+https://eth-sepolia.g.alchemy.com/v2/<<<YOUR__ALCHEMY__API__KEY>>>
 ARB_SEPOLIA_RPC: https://arbitrum-sepolia.drpc.org
 RPC_AVALANCHE_TESTNET=https://avalanche-fuji-c-chain-rpc.publicnode.com
 https://api.devnet.solana.com  # solana devnet public rpc
@@ -69,7 +76,7 @@ to reply for each network.
 
 ## Wallet
 
-Commands which need to send transactions try to get a private key from a `USER_KEY` environment
+Commands which need to send transactions try to get a private key from a `PRIVATE_KEY` environment
 variable.
 
 Wallet options can also be passed as `--wallet`, where each chain family may interpret it however it
@@ -104,6 +111,49 @@ ChainIDs follow this pattern:
 - `--format=json`: Machine-readable JSON
 - `--page=10000`: limits `eth_getLogs` (and others) pagination/scanning ranges (e.g. for RPCs which
 don't support large ranges)
+
+### `send`
+
+```sh
+ccip-cli send 11155111 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 ethereum-testnet-sepolia-arbitrum-1 \
+    --receiver 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+    --data 'hello world' \
+    --gas-limit 300000 \
+    --fee-token 0x779877A7B0D9E8603169DdbD7836e478b4624789 \
+    --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=0.1
+```
+
+Sends a message from router on source network, to dest; positional parameters are:
+
+1. `source`: chainId or name
+2. `router`: address on source
+3. `dest`: chainId or name
+
+If `--receiver` is omitted, sends to self (sender, see [Wallet](#wallet) section above) address on
+dest, if to same chain family (e.g. EVM-to-EVM). If not same chain family, it is mandatory.
+
+If `--data` is not a hex-string, it will be UTF-8 encoded.
+
+If `--gas-limit` is omitted, ramp default config (usually 200k) is used.
+It can be `0` to disable execution on receiver.
+`--estimate-gas-limit` can be provided instead, to estimate the gas limit for the message execution.
+It receives a percentage margin (e.g. `--estimate-gas-limit=10` for +10% margin), which is added to
+the estimation before sending the message.
+`--only-estimate` prints gas estimation then exits.
+
+If `--fee-token` is not provided, CCIP fee will be paid in native token.
+`--only-get-fee` prints CCIP fee then exits.
+
+`--transfer-tokens` can receive multiple pairs of `0xTokenAddr=amount` (source token addresses,
+separated by spaces, terminated with `--` if needed). `amount` will be converted using token
+decimals (e.g. 0.1 = 10^5 of the smallest unit for USDC, which is 6 decimals).
+
+`--allow-out-of-order-exec` (`--ooo`) is only available on v1.5+ lanes, and opt-out of _sender_
+`nonce` order enforcement. It's useful for destinations where execution can't be guaranteed
+(e.g. zkOverflow), and required for many destinations.
+
+`--approve-max` will approve the maximum possible amount of tokens, if approval is needed for
+either transfer or fee tokens. Default behavior is to approve the strictly needed allowance.
 
 ### `show` (default command)
 
@@ -167,48 +217,6 @@ ccip-cli manualExec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce502
   --clear-leftover-accounts
 ```
 
-### `send`
-
-```sh
-ccip-cli send 11155111 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 ethereum-testnet-sepolia-arbitrum-1 \
-    --receiver 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
-    --data 'hello world' \
-    --gas-limit 300000 \
-    --fee-token 0x779877A7B0D9E8603169DdbD7836e478b4624789 \
-    --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=0.1
-```
-
-Sends a message from router on source network, to dest; positional parameters are:
-
-1. `source`: chainId or name
-2. `router`: address on source
-3. `dest`: chainId or name
-
-If `--receiver` is omitted, sends to self (sender, see [Wallet](#wallet) section above) address on
-dest, if to same chain family (e.g. EVM-to-EVM). If not same chain family, it is mandatory.
-
-If `--data` is not a hex-string, it will be UTF-8 encoded.
-
-If `--gas-limit` is omitted, ramp default config (usually 200k) is used.
-It can be `0` to disable execution on receiver.
-`--estimate-gas-limit` can be provided instead, to estimate the gas limit for the message execution.
-It receives a percentage margin (e.g. `--estimate-gas-limit=10` for +10% margin), which is added to
-the estimation before sending the message.
-`--only-estimate` prints gas estimation then exits.
-
-If `--fee-token` is not provided, CCIP fee will be paid in native token.
-`--only-get-fee` prints CCIP fee then exits.
-
-`--transfer-tokens` can receive multiple pairs of `0xTokenAddr=amount` (source token addresses,
-separated by spaces, terminated with `--` if needed). `amount` will be converted using token
-decimals (e.g. 0.1 = 10^5 of the smallest unit for USDC, which is 6 decimals).
-
-`--allow-out-of-order-exec` (`--ooo`) is only available on v1.5+ lanes, and opt-out of _sender_
-`nonce` order enforcement. It's useful for destinations where execution can't be guaranteed
-(e.g. zkOverflow), and required for many destinations.
-
-`--approve-max` will approve the maximum possible amount of tokens, if approval is needed for
-either transfer or fee tokens. Default behavior is to approve the strictly needed allowance.
 
 ### `parse`
 
