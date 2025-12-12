@@ -12,6 +12,8 @@ import {
   CCIPAptosAddressModuleRequiredError,
   CCIPAptosTopicInvalidError,
   CCIPAptosTransactionTypeUnexpectedError,
+  CCIPLogsWatchRequiresFinalityError,
+  CCIPLogsWatchRequiresStartError,
 } from '../errors/index.ts'
 import type { Log_ } from '../types.ts'
 import { sleep } from '../utils.ts'
@@ -99,9 +101,7 @@ async function* fetchEventsForward(
   limit = 100,
 ): AsyncGenerator<ResEvent> {
   if (opts.watch && typeof opts.endBlock === 'number' && opts.endBlock > 0)
-    throw new Error(
-      `Watch mode requires finality config for endBlock (latest, finalized or block depth=negative), got=${opts.endBlock}`,
-    )
+    throw new CCIPLogsWatchRequiresFinalityError(opts.endBlock)
   opts.endBlock ||= 'latest'
 
   const fetchBatch = memoize(
@@ -264,6 +264,8 @@ export async function* streamAptosLogs(
   let eventsIter
   if (opts.startBlock || opts.startTime) {
     eventsIter = fetchEventsForward(ctx, opts, eventHandlerField, stateAddr, limit)
+  } else if (opts.watch) {
+    throw new CCIPLogsWatchRequiresStartError()
   } else {
     // backwards, just paginate down to lowest sequence number
     eventsIter = fetchEventsBackward(ctx, opts, eventHandlerField, stateAddr, limit)

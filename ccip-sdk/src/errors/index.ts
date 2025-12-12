@@ -16,6 +16,7 @@ export { CCIPBlockNotFoundError, CCIPTransactionNotFoundError } from './speciali
 
 // Specialized errors - Logs
 export {
+  CCIPLogsAddressRequiredError,
   CCIPLogsWatchRequiresFinalityError,
   CCIPLogsWatchRequiresStartError,
 } from './specialized.ts'
@@ -102,7 +103,6 @@ export {
   CCIPSolanaLaneVersionUnsupportedError,
   CCIPSolanaLookupTableNotFoundError,
   CCIPSolanaOffRampEventsNotFoundError,
-  CCIPSolanaProgramAddressRequiredError,
   CCIPSolanaRefAddressesNotFoundError,
   CCIPSolanaRouterConfigNotFoundError,
   CCIPSolanaTopicsInvalidError,

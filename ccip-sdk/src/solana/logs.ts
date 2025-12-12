@@ -3,9 +3,9 @@ import { type Connection, PublicKey } from '@solana/web3.js'
 import type { LogFilter } from '../chain.ts'
 import type { SolanaTransaction } from './index.ts'
 import {
+  CCIPLogsAddressRequiredError,
   CCIPLogsWatchRequiresFinalityError,
   CCIPLogsWatchRequiresStartError,
-  CCIPSolanaProgramAddressRequiredError,
 } from '../errors/index.ts'
 import { sleep } from '../utils.ts'
 
@@ -133,7 +133,7 @@ export async function* getTransactionsForAddress(
     getTransaction: (signature: string) => Promise<SolanaTransaction>
   },
 ): AsyncGenerator<SolanaTransaction> {
-  if (!opts.address) throw new CCIPSolanaProgramAddressRequiredError()
+  if (!opts.address) throw new CCIPLogsAddressRequiredError()
 
   opts.endBlock ||= 'latest'
 
@@ -144,11 +144,7 @@ export async function* getTransactionsForAddress(
 
     allSignatures = fetchSigsForward(opts, ctx)
   } else {
-    if (opts.watch)
-      throw new CCIPLogsWatchRequiresStartError({
-        startBlock: opts.startBlock,
-        startTime: opts.startTime,
-      })
+    if (opts.watch) throw new CCIPLogsWatchRequiresStartError()
 
     allSignatures = fetchSigsBackwards(opts, ctx) // generate backwards until depleting getSignaturesForAddress
   }

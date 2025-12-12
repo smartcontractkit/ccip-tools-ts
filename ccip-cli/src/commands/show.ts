@@ -163,7 +163,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
         break
     }
     found = true
-    break
+    if (argv.wait) break
   }
   if (!found) logger.warn(`No execution receipt found for request`)
 }

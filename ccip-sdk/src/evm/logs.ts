@@ -10,7 +10,10 @@ import { memoize } from 'micro-memoize'
 import type { LogFilter } from '../chain.ts'
 import {
   CCIPLogTopicsNotFoundError,
+  CCIPLogsAddressRequiredError,
   CCIPLogsNotFoundError,
+  CCIPLogsWatchRequiresFinalityError,
+  CCIPLogsWatchRequiresStartError,
   CCIPRpcNotFoundError,
 } from '../errors/index.ts'
 import { blockRangeGenerator, getSomeBlockNumberBefore } from '../utils.ts'
@@ -191,12 +194,9 @@ export async function* getEvmLogs(
 
   if (filter.watch) {
     if (typeof filter.endBlock === 'number' && filter.endBlock > 0)
-      throw new Error(
-        `getLogs watch mode only supports endBlock with a finality tag or block depth (negative); got=${filter.endBlock}`,
-      )
-    else if (filter.onlyFallback) throw new Error(`getLogs watch mode don't support onlyFallback`)
+      throw new CCIPLogsWatchRequiresFinalityError(filter.endBlock)
     else if (filter.startBlock == null && filter.startTime == null)
-      throw new Error(`getLogs watch mode requires startBlock or startTime`)
+      throw new CCIPLogsWatchRequiresStartError()
   }
 
   if (
@@ -226,8 +226,7 @@ export async function* getEvmLogs(
     )
   }
   if (filter.onlyFallback != null) {
-    if (!filter.address || !filter.topics?.length)
-      throw new Error('getLogs onlyFallback mode requires address and topics')
+    if (!filter.address || !filter.topics?.length) throw new CCIPLogsAddressRequiredError()
     let logs
     try {
       logs = await provider.getLogs({

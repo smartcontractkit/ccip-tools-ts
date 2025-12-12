@@ -517,22 +517,6 @@ export class CCIPLbtcAttestationNotApprovedError extends CCIPError {
 
 // Solana
 
-/** Thrown when program address required for Solana log filtering. */
-export class CCIPSolanaProgramAddressRequiredError extends CCIPError {
-  override readonly name = 'CCIPSolanaProgramAddressRequiredError'
-  /** Creates a Solana program address required error. */
-  constructor(options?: CCIPErrorOptions) {
-    super(
-      CCIPErrorCode.SOLANA_PROGRAM_ADDRESS_REQUIRED,
-      'Program address is required for Solana log filtering',
-      {
-        ...options,
-        isTransient: false,
-      },
-    )
-  }
-}
-
 /** Thrown when lookup table not found. Transient: may not be synced yet. */
 export class CCIPSolanaLookupTableNotFoundError extends CCIPError {
   override readonly name = 'CCIPSolanaLookupTableNotFoundError'
@@ -730,14 +714,22 @@ export class CCIPLogsWatchRequiresFinalityError extends CCIPError {
 export class CCIPLogsWatchRequiresStartError extends CCIPError {
   override readonly name = 'CCIPLogsWatchRequiresStartError'
   /** Creates a block not found error. */
-  constructor(
-    { startBlock, startTime }: { startBlock?: number; startTime?: number },
-    options?: CCIPErrorOptions,
-  ) {
+  constructor(options?: CCIPErrorOptions) {
     super(CCIPErrorCode.LOGS_WATCH_REQUIRES_START, `Watch mode requires startBlock or startTime`, {
       ...options,
       isTransient: false,
-      context: { ...options?.context, startBlock, startTime },
+    })
+  }
+}
+
+/** Thrown when address is required for logs filtering, but not provided. */
+export class CCIPLogsAddressRequiredError extends CCIPError {
+  override readonly name = 'CCIPLogsAddressRequiredError'
+  /** Creates a Solana program address required error. */
+  constructor(options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.LOGS_ADDRESS_REQUIRED, 'Address is required for logs filtering', {
+      ...options,
+      isTransient: false,
     })
   }
 }

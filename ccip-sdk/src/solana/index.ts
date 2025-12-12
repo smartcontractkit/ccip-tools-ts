@@ -38,10 +38,10 @@ import {
   CCIPExtraArgsInvalidError,
   CCIPExtraArgsLengthInvalidError,
   CCIPLogDataMissingError,
+  CCIPLogsAddressRequiredError,
   CCIPOnRampRequiredError,
   CCIPSolanaExtraArgsEncodingError,
   CCIPSolanaOffRampEventsNotFoundError,
-  CCIPSolanaProgramAddressRequiredError,
   CCIPSolanaRefAddressesNotFoundError,
   CCIPSolanaTopicsInvalidError,
   CCIPSplTokenInvalidError,
@@ -378,7 +378,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   ): AsyncGenerator<Log_ & { tx: SolanaTransaction }> {
     let programs: true | string[]
     if (!opts.address) {
-      throw new CCIPSolanaProgramAddressRequiredError()
+      throw new CCIPLogsAddressRequiredError()
     } else if (!opts.programs) {
       programs = [opts.address]
     } else {

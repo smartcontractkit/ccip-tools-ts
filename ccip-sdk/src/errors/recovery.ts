@@ -125,8 +125,11 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Check that the event signature matches. Ensure you are filtering the correct contract address.',
   LOG_EVENT_HANDLER_UNKNOWN:
     'This event type is not recognized. Ensure you are using a supported CCIP event topic.',
+  LOGS_WATCH_REQUIRES_FINALITY:
+    'Logs watch requires endBlock to be a `finalized`, `latest` or finality block depth (negative).',
+  LOGS_WATCH_REQUIRES_START: 'Logs watch requires either startBlock or startTime (forward mode).',
+  LOGS_ADDRESS_REQUIRED: 'Provide address for logs filtering.',
 
-  SOLANA_PROGRAM_ADDRESS_REQUIRED: 'Provide a program address for Solana log filtering.',
   SOLANA_TOPICS_INVALID: 'Topics must be strings for Solana event filtering.',
   SOLANA_LOOKUP_TABLE_NOT_FOUND: 'Lookup table account not found. It may not be synced yet.',
   SOLANA_ROUTER_CONFIG_NOT_FOUND: 'Router config PDA not found.',
