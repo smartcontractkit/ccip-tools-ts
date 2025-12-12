@@ -499,7 +499,7 @@ export function createRateLimitedFetch(
         recordRequest(method)
         // logger.debug('__fetching', input, init?.body)
 
-        const response = await fetch(input, init)
+        const response = await globalThis.fetch(input, init)
 
         // Update method rate limits from response headers
         updateMethodRateLimits(response, method)
