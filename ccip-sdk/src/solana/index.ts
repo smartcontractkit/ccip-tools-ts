@@ -13,7 +13,6 @@ import {
   SYSVAR_CLOCK_PUBKEY,
   SystemProgram,
 } from '@solana/web3.js'
-import type BN from 'bn.js'
 import bs58 from 'bs58'
 import {
   type BytesLike,
@@ -108,6 +107,7 @@ import { fetchSolanaOffchainTokenData } from './offchain.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
+  convertRateLimiter,
   getErrorFromLogs,
   hexDiscriminator,
   parseSolanaLogs,
@@ -123,18 +123,20 @@ import { patchBorsh } from './patchBorsh.ts'
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
 const offrampCoder = new BorshCoder(CCIP_OFFRAMP_IDL)
-const tokenPoolCoder = new BorshCoder({
+const TOKEN_POOL_IDL = {
   ...BURN_MINT_TOKEN_POOL,
   types: BASE_TOKEN_POOL.types,
   events: BASE_TOKEN_POOL.events,
   errors: [...BASE_TOKEN_POOL.errors, ...BURN_MINT_TOKEN_POOL.errors],
-})
-const cctpTokenPoolCoder = new BorshCoder({
+}
+const tokenPoolCoder = new BorshCoder(TOKEN_POOL_IDL)
+const CCTP_TOKEN_POOL_IDL = {
   ...CCIP_CCTP_TOKEN_POOL,
   types: [...BASE_TOKEN_POOL.types, ...CCIP_CCTP_TOKEN_POOL.types],
   events: [...BASE_TOKEN_POOL.events, ...CCIP_CCTP_TOKEN_POOL.events],
   errors: [...BASE_TOKEN_POOL.errors, ...CCIP_CCTP_TOKEN_POOL.errors],
-})
+}
+const cctpTokenPoolCoder = new BorshCoder(CCTP_TOKEN_POOL_IDL)
 // const commonCoder = new BorshCoder(CCIP_COMMON_IDL)
 
 interface ParsedTokenInfo {
@@ -1353,10 +1355,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }> {
     // `tokenPool` is actually a State PDA in the tokenPoolProgram
     const tokenPoolState = await this.connection.getAccountInfo(new PublicKey(tokenPool))
-    if (!tokenPoolState) throw new CCIPTokenPoolStateNotFoundError(tokenPool)
-
-    const { config }: { config: { mint: PublicKey; router: PublicKey } } =
-      tokenPoolCoder.accounts.decode('state', tokenPoolState.data)
+    if (!tokenPoolState || tokenPoolState.data.length < 266 + 32)
+      throw new CCIPTokenPoolStateNotFoundError(tokenPool)
     const tokenPoolProgram = tokenPoolState.owner.toBase58()
 
     let typeAndVersion
@@ -1366,9 +1366,14 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       // TokenPool may not have a typeAndVersion
     }
 
+    // const { config }: { config: IdlTypes<typeof BASE_TOKEN_POOL>['BaseConfig'] } =
+    //   tokenPoolCoder.accounts.decode('state', tokenPoolState.data)
+    const mint = new PublicKey(tokenPoolState.data.subarray(41, 41 + 32))
+    const router = new PublicKey(tokenPoolState.data.subarray(266, 266 + 32))
+
     return {
-      token: config.mint.toBase58(),
-      router: config.router.toBase58(),
+      token: mint.toBase58(),
+      router: router.toBase58(),
       tokenPoolProgram,
       typeAndVersion,
     }
@@ -1432,31 +1437,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     for (const acc of accounts) {
       try {
-        let base: {
-          remote: {
-            poolAddresses: { address: Buffer }[]
-            tokenAddress: { address: Buffer }
-            decimals: number
-          }
-          inboundRateLimit: {
-            tokens: BN
-            lastUpdated: BN
-            cfg: {
-              enabled: boolean
-              capacity: BN
-              rate: BN
-            }
-          }
-          outboundRateLimit: {
-            tokens: BN
-            lastUpdated: BN
-            cfg: {
-              enabled: boolean
-              capacity: BN
-              rate: BN
-            }
-          }
-        }
+        let base: IdlTypes<typeof BASE_TOKEN_POOL>['BaseChain']
         try {
           ;({ base } = tokenPoolCoder.accounts.decode('chainConfig', acc.account.data))
         } catch (_) {
@@ -1489,35 +1470,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           decodeAddress(pool.address, remoteNetwork.family),
         )
 
-        let inboundRateLimiterState: RateLimiterState = null
-        if (base.inboundRateLimit.cfg.enabled) {
-          inboundRateLimiterState = {
-            tokens: BigInt(base.inboundRateLimit.tokens.toString()),
-            capacity: BigInt(base.inboundRateLimit.cfg.capacity.toString()),
-            rate: BigInt(base.inboundRateLimit.cfg.rate.toString()),
-          }
-          const cur =
-            inboundRateLimiterState.tokens +
-            inboundRateLimiterState.rate *
-              BigInt(Math.floor(Date.now() / 1000) - base.inboundRateLimit.lastUpdated.toNumber())
-          if (cur < inboundRateLimiterState.capacity) inboundRateLimiterState.tokens = cur
-          else inboundRateLimiterState.tokens = inboundRateLimiterState.capacity
-        }
-
-        let outboundRateLimiterState: RateLimiterState = null
-        if (base.outboundRateLimit.cfg.enabled) {
-          outboundRateLimiterState = {
-            tokens: BigInt(base.outboundRateLimit.tokens.toString()),
-            capacity: BigInt(base.outboundRateLimit.cfg.capacity.toString()),
-            rate: BigInt(base.outboundRateLimit.cfg.rate.toString()),
-          }
-          const cur =
-            outboundRateLimiterState.tokens +
-            outboundRateLimiterState.rate *
-              BigInt(Math.floor(Date.now() / 1000) - base.outboundRateLimit.lastUpdated.toNumber())
-          if (cur < outboundRateLimiterState.capacity) outboundRateLimiterState.tokens = cur
-          else outboundRateLimiterState.tokens = outboundRateLimiterState.capacity
-        }
+        const inboundRateLimiterState = convertRateLimiter(base.inboundRateLimit)
+        const outboundRateLimiterState = convertRateLimiter(base.outboundRateLimit)
 
         remotes[remoteNetwork.name] = {
           remoteToken,
