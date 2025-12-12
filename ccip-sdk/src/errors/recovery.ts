@@ -6,7 +6,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Verify the chainId, chain selector, or chain name is correct. Check CCIP documentation for supported chains.',
   CHAIN_SELECTOR_NOT_FOUND:
     'Verify the chain selector is valid. Use networkInfo() to look up selectors.',
-  CHAIN_FAMILY_UNSUPPORTED: 'Supported families: EVM, Solana, Aptos, Sui.',
+  CHAIN_FAMILY_UNSUPPORTED: 'Supported families: EVM, Solana, Aptos, Sui, TON.',
+  CHAIN_FAMILY_MISMATCH: 'The network family does not match the expected chain type.',
   NETWORK_FAMILY_UNSUPPORTED: 'The network family is not supported for this operation.',
   APTOS_NETWORK_UNKNOWN: 'Provide a valid Aptos RPC URL (mainnet or testnet).',
 
@@ -18,11 +19,13 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
 
   MESSAGE_INVALID: 'Verify the message format matches the expected CCIP message structure.',
   MESSAGE_DECODE_FAILED: 'Check if it is a valid CCIP message format.',
+  MESSAGE_CCIP_DECODE_FAILED: 'Could not decode the CCIP message. Verify the format.',
   MESSAGE_NOT_FOUND_IN_TX: 'No CCIPSendRequested event found. Verify the transaction hash.',
   MESSAGE_ID_NOT_FOUND: 'Wait and retry. The message may still be in transit (5-20 min typical).',
   MESSAGE_BATCH_INCOMPLETE: 'Not all messages in the batch were found.',
   MESSAGE_NOT_IN_BATCH: 'The message is not in the expected batch. Verify the commit report.',
   MESSAGE_CHAIN_MISMATCH: 'The execution report is for a different chain.',
+  MESSAGE_VERSION_INVALID: 'The message version is not supported for this chain.',
 
   OFFRAMP_NOT_FOUND: 'No off-ramp found for this lane. Verify the lane is supported.',
   ONRAMP_REQUIRED: 'Provide the onRamp address for this operation.',
@@ -33,6 +36,11 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   MERKLE_TREE_EMPTY: 'Provide at least one leaf hash.',
   MERKLE_PROOF_EMPTY: 'Both leaves and proofs are empty.',
   MERKLE_PROOF_TOO_LARGE: 'Proof exceeds maximum size (256 leaves). Split into smaller batches.',
+  MERKLE_HASHES_TOO_LARGE: 'Total hashes exceed the maximum merkle tree size.',
+  MERKLE_FLAGS_MISMATCH: 'Source flags count does not match total hashes.',
+  MERKLE_PROOF_FLAGS_MISMATCH: 'Proof source flags do not match proof hashes.',
+  MERKLE_PROOF_INCOMPLETE: 'Not all proofs were consumed during verification.',
+  MERKLE_INTERNAL_ERROR: 'Internal merkle computation error.',
 
   VERSION_UNSUPPORTED: 'Supported versions: 1.0, 1.2, 1.5, 1.6.',
   HASHER_VERSION_UNSUPPORTED: 'This hasher version is not supported for the target chain.',
@@ -46,8 +54,10 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   EXTRA_ARGS_INVALID_SVM: 'ExtraArgs must be SVMExtraArgsV1 format for Solana.',
   EXTRA_ARGS_INVALID_SUI: 'ExtraArgs must be SUIExtraArgsV1 format for Sui.',
   EXTRA_ARGS_INVALID_APTOS: 'ExtraArgs must be EVMExtraArgsV1 or EVMExtraArgsV2 format for Aptos.',
+  EXTRA_ARGS_INVALID_TON: 'ExtraArgs must be EVMExtraArgsV2 (GenericExtraArgsV2) format for TON.',
   EXTRA_ARGS_SOLANA_EVM_ONLY: 'Solana can only encode EVMExtraArgsV2.',
   EXTRA_ARGS_APTOS_RESTRICTION: 'Aptos can only encode EVMExtraArgsV2 and SVMExtraArgsV1.',
+  EXTRA_ARGS_LENGTH_INVALID: 'EVMExtraArgsV2 has an unsupported length. Check the encoding.',
 
   CONTRACT_TYPE_INVALID: 'The contract at this address is not the expected type.',
   CONTRACT_NOT_ROUTER: 'This address is not a CCIP Router contract.',
@@ -63,9 +73,11 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   TOKEN_NOT_REGISTERED: 'Token is not registered in the TokenAdminRegistry.',
   TOKEN_DECIMALS_INSUFFICIENT: 'Destination token has insufficient decimals.',
   TOKEN_INVALID_SPL: 'Invalid SPL token or Token-2022.',
+  TOKEN_DATA_PARSE_FAILED: 'Could not parse token data. Verify the token format.',
   TOKEN_MINT_NOT_FOUND: 'Token mint not found.',
   TOKEN_AMOUNT_INVALID: 'Token amount must have a valid address and positive amount.',
   TOKEN_POOL_STATE_NOT_FOUND: 'TokenPool state PDA not found.',
+  TOKEN_POOL_INFO_NOT_FOUND: 'TokenPool info not found. Verify the token pool address.',
 
   WALLET_NOT_SIGNER: 'Provide a wallet with signing capability (Signer interface).',
   WALLET_INVALID: 'Provide a valid Wallet instance.',
@@ -80,19 +92,32 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   LBTC_ATTESTATION_NOT_FOUND: 'LBTC attestation not found. Verify the payload hash.',
   LBTC_ATTESTATION_NOT_APPROVED: 'LBTC attestation not yet approved. Wait for notarization.',
   CCTP_DECODE_FAILED: 'Could not decode CCTP event.',
+  CCTP_MULTIPLE_EVENTS: 'Multiple CCTP events found. Expected only one per transaction.',
 
   LOG_DATA_INVALID: 'Invalid log data format.',
   LOG_DATA_MISSING: 'Log data is missing or not a string.',
+  LOG_APTOS_INVALID: 'The Aptos log format is invalid.',
   LOGS_NOT_FOUND: 'No logs found matching the filter criteria.',
+  LOG_TOPICS_NOT_FOUND: 'No matching log topics found. Verify the filter criteria.',
+  LOG_EVENT_HANDLER_UNKNOWN: 'Unknown event handler. Verify the topic is supported.',
 
   SOLANA_PROGRAM_ADDRESS_REQUIRED: 'Provide a program address for Solana log filtering.',
   SOLANA_TOPICS_INVALID: 'Topics must be strings for Solana event filtering.',
   SOLANA_LOOKUP_TABLE_NOT_FOUND: 'Lookup table account not found. It may not be synced yet.',
   SOLANA_ROUTER_CONFIG_NOT_FOUND: 'Router config PDA not found.',
+  SOLANA_FEE_RESULT_INVALID: 'Invalid fee result from router. Check the router configuration.',
+  SOLANA_REF_ADDRESSES_NOT_FOUND: 'Reference addresses account not found. Wait and retry.',
+  SOLANA_OFFRAMP_EVENTS_NOT_FOUND: 'OffRamp events not found. Wait and retry.',
+  SOLANA_SOURCE_CHAIN_UNSUPPORTED: 'This source chain is not supported for Solana destinations.',
+  SOLANA_COMPUTE_UNITS_EXCEEDED:
+    'Simulation exceeds compute units limit. Increase the limit or simplify the transaction.',
 
   APTOS_TX_INVALID: 'Invalid Aptos transaction hash or version.',
   APTOS_TX_TYPE_INVALID: 'Expected a user transaction type.',
+  APTOS_TX_TYPE_UNEXPECTED: 'The transaction type was not expected. Verify the transaction.',
   APTOS_ADDRESS_MODULE_REQUIRED: 'Provide an address with module for Aptos log filtering.',
+  APTOS_TOPIC_INVALID: 'Provide a valid event topic string for Aptos filtering.',
+  APTOS_HASHER_VERSION_UNSUPPORTED: 'This hasher version is not supported for Aptos.',
 
   HTTP_ERROR: 'HTTP request failed. 429 indicates rate limiting.',
   RPC_NOT_FOUND: 'No RPC endpoint found. Configure an RPC URL.',

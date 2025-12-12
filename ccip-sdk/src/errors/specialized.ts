@@ -67,7 +67,7 @@ export class CCIPMessageInvalidError extends CCIPError {
   /** Creates a message invalid error. */
   constructor(data: unknown, options?: CCIPErrorOptions) {
     const dataStr = typeof data === 'object' && data !== null ? JSON.stringify(data) : String(data)
-    super(CCIPErrorCode.MESSAGE_INVALID, `invalid msg: ${dataStr}`, {
+    super(CCIPErrorCode.MESSAGE_INVALID, `Invalid CCIP message format: ${dataStr}`, {
       ...options,
       isTransient: false,
       context: { ...options?.context, data },
@@ -178,7 +178,7 @@ export class CCIPOnRampRequiredError extends CCIPError {
   override readonly name = 'CCIPOnRampRequiredError'
   /** Creates an onRamp required error. */
   constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.ONRAMP_REQUIRED, 'onRamp is required', {
+    super(CCIPErrorCode.ONRAMP_REQUIRED, 'onRamp address is required for this operation', {
       ...options,
       isTransient: false,
     })
@@ -227,10 +227,14 @@ export class CCIPMerkleTreeEmptyError extends CCIPError {
   override readonly name = 'CCIPMerkleTreeEmptyError'
   /** Creates a merkle tree empty error. */
   constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.MERKLE_TREE_EMPTY, 'Cannot construct a tree without leaves', {
-      ...options,
-      isTransient: false,
-    })
+    super(
+      CCIPErrorCode.MERKLE_TREE_EMPTY,
+      'Cannot construct merkle tree: no leaf hashes provided',
+      {
+        ...options,
+        isTransient: false,
+      },
+    )
   }
 }
 
@@ -687,7 +691,7 @@ export class CCIPLogsNotFoundError extends CCIPError {
   override readonly name = 'CCIPLogsNotFoundError'
   /** Creates a logs not found error. */
   constructor(filter?: unknown, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.LOGS_NOT_FOUND, 'No logs found', {
+    super(CCIPErrorCode.LOGS_NOT_FOUND, 'No logs found matching the filter criteria', {
       ...options,
       isTransient: true,
       retryAfterMs: 5000,
@@ -749,10 +753,14 @@ export class CCIPMerkleProofEmptyError extends CCIPError {
   override readonly name = 'CCIPMerkleProofEmptyError'
   /** Creates a merkle proof empty error. */
   constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.MERKLE_PROOF_EMPTY, 'Leaves and proofs are empty', {
-      ...options,
-      isTransient: false,
-    })
+    super(
+      CCIPErrorCode.MERKLE_PROOF_EMPTY,
+      'Cannot verify merkle proof: leaves and proofs are empty',
+      {
+        ...options,
+        isTransient: false,
+      },
+    )
   }
 }
 
@@ -825,10 +833,14 @@ export class CCIPMerkleProofIncompleteError extends CCIPError {
   override readonly name = 'CCIPMerkleProofIncompleteError'
   /** Creates a merkle proof incomplete error. */
   constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.MERKLE_PROOF_INCOMPLETE, 'Not all proofs used during processing', {
-      ...options,
-      isTransient: false,
-    })
+    super(
+      CCIPErrorCode.MERKLE_PROOF_INCOMPLETE,
+      'Merkle verification failed: not all proofs were consumed',
+      {
+        ...options,
+        isTransient: false,
+      },
+    )
   }
 }
 
@@ -982,7 +994,7 @@ export class CCIPSolanaTopicsInvalidError extends CCIPError {
   override readonly name = 'CCIPSolanaTopicsInvalidError'
   /** Creates a Solana topics invalid error. */
   constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.SOLANA_TOPICS_INVALID, 'Topics must be strings', {
+    super(CCIPErrorCode.SOLANA_TOPICS_INVALID, 'Solana event topics must be string values', {
       ...options,
       isTransient: false,
     })
@@ -1082,10 +1094,14 @@ export class CCIPSolanaExtraArgsEncodingError extends CCIPError {
   override readonly name = 'CCIPSolanaExtraArgsEncodingError'
   /** Creates a Solana extraArgs encoding error. */
   constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.EXTRA_ARGS_SOLANA_EVM_ONLY, 'Solana can only encode EVMExtraArgsV2', {
-      ...options,
-      isTransient: false,
-    })
+    super(
+      CCIPErrorCode.EXTRA_ARGS_SOLANA_EVM_ONLY,
+      'Solana extraArgs encoding only supports EVMExtraArgsV2 format',
+      {
+        ...options,
+        isTransient: false,
+      },
+    )
   }
 }
 
@@ -1094,7 +1110,7 @@ export class CCIPLogDataMissingError extends CCIPError {
   override readonly name = 'CCIPLogDataMissingError'
   /** Creates a log data missing error. */
   constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.LOG_DATA_MISSING, 'Log data is missing or not a string', {
+    super(CCIPErrorCode.LOG_DATA_MISSING, 'Log data is missing or invalid: expected string value', {
       ...options,
       isTransient: false,
     })
@@ -1186,10 +1202,14 @@ export class CCIPAptosTransactionTypeInvalidError extends CCIPError {
   override readonly name = 'CCIPAptosTransactionTypeInvalidError'
   /** Creates an Aptos transaction type invalid error. */
   constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.APTOS_TX_TYPE_INVALID, 'Invalid transaction type', {
-      ...options,
-      isTransient: false,
-    })
+    super(
+      CCIPErrorCode.APTOS_TX_TYPE_INVALID,
+      'Invalid Aptos transaction type: expected user_transaction',
+      {
+        ...options,
+        isTransient: false,
+      },
+    )
   }
 }
 
@@ -1316,10 +1336,14 @@ export class CCIPAptosAddressModuleRequiredError extends CCIPError {
   override readonly name = 'CCIPAptosAddressModuleRequiredError'
   /** Creates an Aptos address module required error. */
   constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.APTOS_ADDRESS_MODULE_REQUIRED, 'address with module is required', {
-      ...options,
-      isTransient: false,
-    })
+    super(
+      CCIPErrorCode.APTOS_ADDRESS_MODULE_REQUIRED,
+      'Aptos address with module name is required for this operation',
+      {
+        ...options,
+        isTransient: false,
+      },
+    )
   }
 }
 
@@ -1534,10 +1558,14 @@ export class CCIPSuiMessageVersionInvalidError extends CCIPError {
   override readonly name = 'CCIPSuiMessageVersionInvalidError'
   /** Creates a Sui message version invalid error. */
   constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.MESSAGE_VERSION_INVALID, 'Invalid message, not v1.6 Sui', {
-      ...options,
-      isTransient: false,
-    })
+    super(
+      CCIPErrorCode.MESSAGE_VERSION_INVALID,
+      'Invalid Sui message: only CCIP v1.6 format is supported',
+      {
+        ...options,
+        isTransient: false,
+      },
+    )
   }
 }
 
