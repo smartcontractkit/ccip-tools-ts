@@ -13,6 +13,9 @@ import {
   SigningKey,
   Wallet,
 } from 'ethers'
+import dotenv from 'dotenv'
+
+dotenv.config()
 
 // monkey-patch @ethers-ext/signer-ledger to preserve path when `.connect`ing provider
 Object.assign(LedgerSigner.prototype, {
@@ -31,7 +34,7 @@ export async function loadEvmWallet(
   provider: JsonRpcApiProvider,
   { wallet: walletOpt }: { wallet?: unknown },
 ): Promise<Signer> {
-  if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
+  if (!walletOpt) walletOpt = process.env['PRIVATE_KEY'] || process.env['OWNER_KEY']
   if (
     typeof walletOpt === 'number' ||
     (typeof walletOpt === 'string' && walletOpt.match(/^(\d+|0x[a-fA-F0-9]{40})$/))

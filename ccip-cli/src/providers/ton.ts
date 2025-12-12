@@ -8,6 +8,9 @@ import type { TONWallet } from '@chainlink/ccip-sdk/src/ton/types.ts'
 import { keyPairFromSecretKey, mnemonicToPrivateKey } from '@ton/crypto'
 import { WalletContractV4 } from '@ton/ton'
 
+import dotenv from 'dotenv'
+dotenv.config()
+
 /**
  * Loads a TON wallet from the provided options.
  * @param wallet - wallet options (as passed from yargs argv)
@@ -16,7 +19,7 @@ import { WalletContractV4 } from '@ton/ton'
 export async function loadTonWallet({
   wallet: walletOpt,
 }: { wallet?: unknown } = {}): Promise<TONWallet> {
-  if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
+  if (!walletOpt) walletOpt = process.env['PRIVATE_KEY'] || process.env['OWNER_KEY']
 
   if (typeof walletOpt !== 'string') throw new CCIPWalletInvalidError(walletOpt)
 

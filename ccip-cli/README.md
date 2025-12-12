@@ -94,8 +94,8 @@ E.g. `--wallet ledger:1` uses derivation `m/44'/60'/1'/0/0` for EVM accounts
 
 ## Chain names and selectors
 
-Where required, networks can be referred by name or selector from [chain-selectors](https://github.com/smartcontractkit/chain-selectors).
-ChainIDs follow this pattern:
+Where required, networks can be referred by ChainID, name or selector from [chain-selectors](https://github.com/smartcontractkit/chain-selectors).
+ChainIDs depend on the chain family and must be passed using this pattern:
 
 - `EVM`: numeric chain id; e.g. `1` for `ethereum-mainnet`.
 - `Solana`: genesis hash; e.g. `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d` for `solana-mainnet`
@@ -150,7 +150,7 @@ decimals (e.g. 0.1 = 10^5 of the smallest unit for USDC, which is 6 decimals).
 
 `--allow-out-of-order-exec` (`--ooo`) is only available on v1.5+ lanes, and opt-out of _sender_
 `nonce` order enforcement. It's useful for destinations where execution can't be guaranteed
-(e.g. zkOverflow), and required for many destinations.
+(e.g. zkOverflow), and required for many destinations. You can read about this config [here](https://docs.chain.link/ccip/tutorials/svm/source/token-transfers#understanding-the-configuration-fields).
 
 `--approve-max` will approve the maximum possible amount of tokens, if approval is needed for
 either transfer or fee tokens. Default behavior is to approve the strictly needed allowance.

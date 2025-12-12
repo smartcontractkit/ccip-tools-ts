@@ -15,6 +15,9 @@ import {
 import bs58 from 'bs58'
 import { getBytes, hexlify } from 'ethers'
 
+import dotenv from 'dotenv'
+dotenv.config()
+
 /** Ledger hardware wallet signer for Solana. */
 export class LedgerSolanaWallet {
   publicKey: PublicKey
@@ -99,7 +102,7 @@ export async function loadSolanaWallet({
   wallet: walletOpt,
 }: { wallet?: unknown } = {}): Promise<AnchorWallet> {
   if (!walletOpt)
-    walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY'] || '~/.config/solana/id.json'
+    walletOpt = process.env['PRIVATE_KEY'] || process.env['OWNER_KEY'] || '~/.config/solana/id.json'
   let wallet: string
   if (typeof walletOpt !== 'string') throw new CCIPArgumentInvalidError('wallet', String(walletOpt))
   wallet = walletOpt

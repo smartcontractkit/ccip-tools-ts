@@ -16,6 +16,9 @@ import AptosLedger from '@ledgerhq/hw-app-aptos'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
 import { type BytesLike, getBytes, hexlify } from 'ethers'
 
+import dotenv from 'dotenv'
+dotenv.config()
+
 /**
  * A LedgerSigner object represents a signer for a private key on a Ledger hardware wallet.
  * This object is initialized alongside a LedgerClient connection, and can be used to sign
