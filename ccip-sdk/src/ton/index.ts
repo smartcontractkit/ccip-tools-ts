@@ -121,18 +121,30 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   static async fromUrl(url: string, ctx?: WithLogger): Promise<TONChain> {
     const { logger = console } = ctx ?? {}
 
-    // Validate URL format for TON endpoints
-    if (
-      !url.includes('toncenter') &&
-      !url.includes('ton') &&
-      !url.includes('localhost') &&
-      !url.includes('127.0.0.1')
-    ) {
+    // Parse URL for secure hostname validation
+    let parsedUrl: URL
+    try {
+      parsedUrl = new URL(url)
+    } catch {
+      throw new CCIPArgumentInvalidError('url', `Invalid URL format: ${url}`)
+    }
+
+    const hostname = parsedUrl.hostname.toLowerCase()
+
+    // Validate hostname for TON endpoints
+    const validTonHostnames = ['toncenter.com', 'localhost', '127.0.0.1']
+    const isValidHost =
+      validTonHostnames.some((valid) => hostname === valid || hostname.endsWith(`.${valid}`)) ||
+      hostname.includes('ton')
+
+    if (!isValidHost) {
       throw new CCIPArgumentInvalidError('url', `Invalid TON RPC URL: ${url}`)
     }
 
     // Check if using public endpoint without API key and apply rate limiting
-    const isPublicEndpoint = url.includes('toncenter.com') && !url.includes('api_key')
+    const isTonCenter = hostname === 'toncenter.com' || hostname.endsWith('.toncenter.com')
+    const hasApiKey = parsedUrl.searchParams.has('api_key')
+    const isPublicEndpoint = isTonCenter && !hasApiKey
 
     let httpAdapter: AxiosAdapter | undefined
     if (isPublicEndpoint) {
@@ -151,11 +163,15 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       throw new CCIPHttpError(0, `Failed to connect to TON endpoint ${url}: ${message}`)
     }
 
-    // Detect network from URL
+    // Detect network from hostname
     let networkId: string
-    if (url.includes('testnet')) {
+    if (hostname.includes('testnet')) {
       networkId = 'ton-testnet'
-    } else if (url.includes('sandbox') || url.includes('localhost') || url.includes('127.0.0.1')) {
+    } else if (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname.includes('sandbox')
+    ) {
       networkId = 'ton-localnet'
     } else {
       // Default to mainnet for production endpoints
