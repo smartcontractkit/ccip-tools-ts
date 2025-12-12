@@ -1,4 +1,4 @@
-import { eventDiscriminator } from '@coral-xyz/anchor'
+import { type IdlTypes, eventDiscriminator } from '@coral-xyz/anchor'
 import {
   type AddressLookupTableAccount,
   type Connection,
@@ -20,7 +20,9 @@ import {
 } from '../errors/index.ts'
 import type { Log_, WithLogger } from '../types.ts'
 import { getDataBytes, sleep } from '../utils.ts'
+import type { IDL as BASE_TOKEN_POOL_IDL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import type { UnsignedSolanaTx, Wallet } from './types.ts'
+import type { RateLimiterState } from '../chain.ts'
 
 /**
  * Generates a hex-encoded discriminator for a Solana event.
@@ -384,4 +386,25 @@ export async function simulateAndSendTxs(
     if (includesMain) mainHash = signature
   }
   return mainHash!
+}
+
+/**
+ * Convert TokenPool's rate limit to RateLimiterState object
+ */
+export function convertRateLimiter(
+  input: IdlTypes<typeof BASE_TOKEN_POOL_IDL>['BaseChain']['inboundRateLimit'],
+): RateLimiterState {
+  if (!input.cfg.enabled) return null
+  const tokens = BigInt(input.tokens.toString())
+  const out: RateLimiterState = {
+    capacity: BigInt(input.cfg.capacity.toString()),
+    rate: BigInt(input.cfg.rate.toString()),
+    get tokens() {
+      const cur =
+        tokens + this.rate * BigInt(Math.floor(Date.now() / 1000) - input.lastUpdated.toNumber())
+      if (cur < this.capacity) return cur
+      else return this.capacity
+    },
+  }
+  return out
 }

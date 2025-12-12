@@ -28,7 +28,6 @@ import {
   CCIPOffRampNotFoundError,
   CCIPOnRampRequiredError,
   CCIPSolanaLookupTableNotFoundError,
-  CCIPSolanaProgramAddressRequiredError,
   CCIPTokenDecimalsInsufficientError,
   CCIPTokenNotConfiguredError,
   CCIPTokenNotInRegistryError,
@@ -599,13 +598,6 @@ describe('specialized errors', () => {
       assert.equal(error.isTransient, true)
       assert.equal(error.retryAfterMs, 5000)
       assert.equal(error.context.address, 'tableAddr')
-    })
-
-    it('CCIPSolanaProgramAddressRequiredError should be permanent', () => {
-      const error = new CCIPSolanaProgramAddressRequiredError()
-
-      assert.equal(error.code, 'SOLANA_PROGRAM_ADDRESS_REQUIRED')
-      assert.equal(error.isTransient, false)
     })
   })
 

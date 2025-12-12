@@ -21,15 +21,13 @@ import type { WithLogger } from '../types.ts'
  * Clean up and recycle buffers and Address Lookup Tables owned by wallet.
  * @param ctx - Context object containing the Solana connection instance and logger.
  * @param wallet - Wallet instance to sign txs.
- * @param getLogs - SolanaChain-compatible getLogs function (to scan for Buffers and ALTs).
  * @param opts - Optional parameters. Set `waitDeactivation` to wait for lookup table deactivation
  *   cool down period (513 slots) to pass before closing; by default, we deactivate (if needed)
  *   and leave close to be done in the future.
  */
 export async function cleanUpBuffers(
-  ctx: { connection: Connection } & WithLogger,
+  ctx: { connection: Connection; getLogs: SolanaChain['getLogs'] } & WithLogger,
   wallet: Wallet,
-  getLogs: SolanaChain['getLogs'],
   opts?: { waitDeactivation?: boolean },
 ): Promise<void> {
   const { connection, logger = console } = ctx
@@ -103,7 +101,7 @@ export async function cleanUpBuffers(
   }
 
   let alreadyClosed = 0
-  for await (const log of getLogs({
+  for await (const log of ctx.getLogs({
     address: wallet.publicKey.toBase58(),
     topics: [
       'Instruction: BufferExecutionReport',

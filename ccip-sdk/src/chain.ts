@@ -45,9 +45,13 @@ export type LogFilter = {
   /** Starting Unix timestamp (inclusive). */
   startTime?: number
   /** Ending block number (inclusive). */
-  endBlock?: number
-  /** Optional hint signature for end of iteration. */
+  endBlock?: number | 'finalized' | 'latest'
+  /** Solana: optional hint txHash for end of iteration. */
   endBefore?: string
+  /** watch mode: polls for new logs after fetching since start (required), until endBlock tag
+   *  (e.g. endBlock=finalized polls only finalized logs)
+   *  */
+  watch?: boolean
   /** Contract address to filter logs by. */
   address?: string
   /** Topics to filter logs by. */
@@ -382,7 +386,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   async fetchCommitReport(
     commitStore: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.sequenceNumber' | 'tx.timestamp'>,
-    hints?: { startBlock?: number; page?: number },
+    hints?: { startBlock?: number; page?: number; watch?: boolean },
   ): Promise<CCIPCommit> {
     return fetchCommitReport(this, commitStore, request, hints)
   }
@@ -399,7 +403,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     offRamp: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
-    hints?: { page?: number },
+    hints?: { page?: number; watch?: boolean },
   ): AsyncIterableIterator<CCIPExecution> {
     const onlyLast = !commit?.log.blockNumber && !request.tx.timestamp // backwards
     for await (const log of this.getLogs({
