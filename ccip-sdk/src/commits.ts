@@ -23,7 +23,7 @@ export async function fetchCommitReport(
     message: { header },
     tx: { timestamp: requestTimestamp },
   }: PickDeep<CCIPRequest, 'lane' | 'message.header.sequenceNumber' | 'tx.timestamp'>,
-  hints?: { startBlock?: number; page?: number },
+  hints?: { startBlock?: number; page?: number; watch?: boolean },
 ): Promise<CCIPCommit> {
   for await (const log of dest.getLogs({
     ...hints,

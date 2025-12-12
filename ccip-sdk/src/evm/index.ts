@@ -1449,7 +1449,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     offRamp: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
-    opts?: { page?: number },
+    opts?: { page?: number; watch?: boolean },
   ): AsyncIterableIterator<CCIPExecution> {
     let opts_: Parameters<EVMChain['getLogs']>[0] | undefined = opts
     if (request.lane.version < CCIPVersion.V1_6) {

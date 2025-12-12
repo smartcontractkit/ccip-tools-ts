@@ -1143,7 +1143,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   override async fetchCommitReport(
     commitStore: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.sequenceNumber' | 'tx.timestamp'>,
-    hints?: { startBlock?: number; page?: number },
+    hints?: { startBlock?: number; page?: number; watch?: boolean },
   ): Promise<CCIPCommit> {
     const commitsAroundSeqNum = await this.connection.getProgramAccounts(
       new PublicKey(commitStore),
@@ -1205,7 +1205,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     offRamp: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
-    opts?: { page?: number },
+    opts?: { page?: number; watch?: boolean },
   ): AsyncIterableIterator<CCIPExecution> {
     let opts_: Parameters<SolanaChain['getLogs']>[0] | undefined = opts
     if (commit) {

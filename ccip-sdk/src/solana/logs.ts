@@ -21,13 +21,14 @@ async function* fetchSigsForward(
 
   // forward collect all matching sigs in array
   const allSigs = [] as Awaited<ReturnType<typeof connection.getSignaturesForAddress>>
-  let batch: typeof allSigs
+  let batch: typeof allSigs, until: string
   do {
     batch = await connection.getSignaturesForAddress(
       new PublicKey(opts.address!),
       { limit, before: allSigs[allSigs.length - 1]?.signature ?? opts.endBefore },
       commitment,
     )
+    until ??= batch[0]?.signature
 
     while (
       batch.length > 0 &&
@@ -53,8 +54,8 @@ async function* fetchSigsForward(
   }
   yield* allSigs // all past logs
 
-  let until = allSigs[allSigs.length - 1]?.signature,
-    lastReq = performance.now()
+  if (allSigs.length) until = allSigs[allSigs.length - 1].signature
+  let lastReq = performance.now()
   // if not watch mode, returns
   while (opts.watch) {
     let break$ = sleep(

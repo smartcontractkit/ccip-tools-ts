@@ -14,6 +14,9 @@ import {
   CCIPAptosTransactionTypeUnexpectedError,
 } from '../errors/index.ts'
 import type { Log_ } from '../types.ts'
+import { sleep } from '../utils.ts'
+
+const DEFAULT_POLL_INTERVAL = 5e3
 
 const eventToHandler = {
   CCIPMessageSent: 'OnRampState/ccip_message_sent_events',
@@ -89,12 +92,18 @@ async function binarySearchFirst(
 }
 
 async function* fetchEventsForward(
-  provider: Aptos,
-  opts: LogFilter,
+  { provider, destroy$ }: { provider: Aptos; destroy$?: Promise<unknown> },
+  opts: LogFilter & { pollInterval?: number },
   eventHandlerField: string,
   stateAddr: string,
   limit = 100,
 ): AsyncGenerator<ResEvent> {
+  if (opts.watch && typeof opts.endBlock === 'number' && opts.endBlock > 0)
+    throw new Error(
+      `Watch mode requires finality config for endBlock (latest, finalized or block depth=negative), got=${opts.endBlock}`,
+    )
+  opts.endBlock ||= 'latest'
+
   const fetchBatch = memoize(
     async (start?: number) => {
       const { data }: { data: ResEvent[] } = await getAptosFullNode({
@@ -106,7 +115,7 @@ async function* fetchEventsForward(
       if (!start) fetchBatch.cache.set([+data[0].sequence_number], Promise.resolve(data))
       return data
     },
-    { maxArgs: 1, maxSize: 100 },
+    { maxArgs: 1, maxSize: 100, async: true },
   )
 
   const initialBatch = await fetchBatch()
@@ -129,8 +138,25 @@ async function* fetchEventsForward(
     start = end - limit + 1
   }
 
-  let first = true
-  for (; start < end; start += limit) {
+  let notAfter =
+    typeof opts.endBlock !== 'number'
+      ? undefined
+      : opts.endBlock < 0
+        ? memoize(
+            async () =>
+              +(await provider.getLedgerInfo()).ledger_version + (opts.endBlock as number),
+            {
+              async: true,
+              maxArgs: 0,
+              expires: opts.pollInterval || DEFAULT_POLL_INTERVAL,
+            },
+          )
+        : opts.endBlock
+
+  let first = true,
+    catchedUp = false
+  while (opts.watch || !catchedUp) {
+    const lastReq = performance.now()
     const data = await fetchBatch(start)
     if (
       first &&
@@ -144,17 +170,39 @@ async function* fetchEventsForward(
       })
       data.splice(0, actualStart - 1)
     }
+
+    if (!first && catchedUp && typeof opts.endBlock === 'number' && opts.endBlock < 0)
+      notAfter = +(await provider.getLedgerInfo()).ledger_version + opts.endBlock
+
     first = false
+
     for (const ev of data) {
       if (opts.startBlock && +ev.version < opts.startBlock) continue
-      if (opts.endBlock && +ev.version > opts.endBlock) return
+      // there may be an unknown interval between yields, so we support memoized negative finality
+      if (
+        notAfter &&
+        +ev.version > (typeof notAfter === 'function' ? await notAfter() : notAfter)
+      ) {
+        catchedUp = true
+        break
+      }
+      const start_: number = +ev.sequence_number
+      start = start_ + 1
       yield ev
+    }
+    catchedUp ||= start >= end
+    if (opts.watch && catchedUp) {
+      let break$ = sleep(
+        Math.max((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq), 1),
+      ).then(() => false)
+      if (destroy$) break$ = Promise.race([break$, destroy$.then(() => true)])
+      if (await break$) break
     }
   }
 }
 
 async function* fetchEventsBackward(
-  provider: Aptos,
+  { provider }: { provider: Aptos },
   opts: LogFilter,
   eventHandlerField: string,
   stateAddr: string,
@@ -162,6 +210,12 @@ async function* fetchEventsBackward(
 ): AsyncGenerator<ResEvent> {
   let start
   let cont = true
+  const notAfter =
+    typeof opts.endBlock !== 'number'
+      ? undefined
+      : opts.endBlock < 0
+        ? +(await provider.getLedgerInfo()).ledger_version + opts.endBlock
+        : opts.endBlock
   do {
     const { data } = await getAptosFullNode<object, ResEvent[]>({
       aptosConfig: provider.config,
@@ -175,7 +229,7 @@ async function* fetchEventsBackward(
     else start = Math.max(+data[0].sequence_number - limit, 1)
 
     for (const ev of data.reverse()) {
-      if (opts.endBlock && +ev.version > opts.endBlock) continue
+      if (notAfter && +ev.version > notAfter) continue
       if (+ev.sequence_number <= 1) cont = false
       yield ev
     }
@@ -189,7 +243,7 @@ async function* fetchEventsBackward(
  * @returns Async generator of log entries.
  */
 export async function* streamAptosLogs(
-  provider: Aptos,
+  ctx: { provider: Aptos; destroy$?: Promise<unknown> },
   opts: LogFilter & { versionAsHash?: boolean },
 ): AsyncGenerator<Log_> {
   const limit = 100
@@ -201,7 +255,7 @@ export async function* streamAptosLogs(
     eventHandlerField = (eventToHandler as Record<string, string>)[eventHandlerField]
     if (!eventHandlerField) throw new CCIPAptosTopicInvalidError(opts.topics[0])
   }
-  const [stateAddr] = await provider.view<[string]>({
+  const [stateAddr] = await ctx.provider.view<[string]>({
     payload: {
       function: `${opts.address}::get_state_address` as `0x${string}::${string}::get_state_address`,
     },
@@ -209,10 +263,10 @@ export async function* streamAptosLogs(
 
   let eventsIter
   if (opts.startBlock || opts.startTime) {
-    eventsIter = fetchEventsForward(provider, opts, eventHandlerField, stateAddr, limit)
+    eventsIter = fetchEventsForward(ctx, opts, eventHandlerField, stateAddr, limit)
   } else {
     // backwards, just paginate down to lowest sequence number
-    eventsIter = fetchEventsBackward(provider, opts, eventHandlerField, stateAddr, limit)
+    eventsIter = fetchEventsBackward(ctx, opts, eventHandlerField, stateAddr, limit)
   }
 
   let topics
@@ -225,7 +279,7 @@ export async function* streamAptosLogs(
       blockNumber: +ev.version,
       transactionHash: opts?.versionAsHash
         ? `${ev.version}`
-        : (await getUserTxByVersion(provider, +ev.version)).hash,
+        : (await getUserTxByVersion(ctx.provider, +ev.version)).hash,
       data: ev.data as Record<string, unknown>,
     }
   }
