@@ -28,13 +28,7 @@ import {
 import { type Memoized, memoize } from 'micro-memoize'
 import type { PickDeep, SetRequired } from 'type-fest'
 
-import {
-  type LogFilter,
-  type RateLimiterState,
-  type TokenInfo,
-  type TokenPoolRemote,
-  Chain,
-} from '../chain.ts'
+import { type LogFilter, type TokenInfo, type TokenPoolRemote, Chain } from '../chain.ts'
 import {
   CCIPBlockTimeNotFoundError,
   CCIPContractNotRouterError,
@@ -103,6 +97,7 @@ import { IDL as BURN_MINT_TOKEN_POOL } from './idl/1.6.0/BURN_MINT_TOKEN_POOL.ts
 import { IDL as CCIP_CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
+import { getTransactionsForAddress } from './logs.ts'
 import { fetchSolanaOffchainTokenData } from './offchain.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
@@ -174,6 +169,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   connection: Connection
   commitment: Commitment = 'confirmed'
+  readonly destroy$: Promise<void>
 
   /**
    * Creates a new SolanaChain instance.
@@ -184,6 +180,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     super(network, ctx)
 
     this.connection = connection
+    this.destroy$ = new Promise<void>((resolve) => (this.destroy = resolve))
 
     // Memoize expensive operations
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
@@ -284,9 +281,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   // cached
   /** {@inheritDoc Chain.getBlockTimestamp} */
-  async getBlockTimestamp(block: number | 'finalized'): Promise<number> {
-    if (block === 'finalized') {
-      const slot = await this.connection.getSlot('finalized')
+  async getBlockTimestamp(block: number | 'latest' | 'finalized'): Promise<number> {
+    if (typeof block !== 'number') {
+      const slot = await this.connection.getSlot(block === 'latest' ? 'confirmed' : block)
       const blockTime = await this.connection.getBlockTime(slot)
       if (blockTime === null) {
         throw new CCIPBlockTimeNotFoundError(`finalized slot ${slot}`)
@@ -347,69 +344,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async *getTransactionsForAddress(
     opts: Omit<LogFilter, 'topics'>,
   ): AsyncGenerator<SolanaTransaction> {
-    if (!opts.address) throw new CCIPSolanaProgramAddressRequiredError()
-
-    let allSignatures
-    const limit = Math.min(opts?.page || 1000, 1000)
-    if (opts.startBlock || opts.startTime) {
-      // forward collect all matching sigs in array
-      allSignatures = [] as Awaited<ReturnType<typeof this.connection.getSignaturesForAddress>>
-      let batch: typeof allSignatures
-      do {
-        batch = await this.connection.getSignaturesForAddress(
-          new PublicKey(opts.address),
-          { limit, before: allSignatures[allSignatures.length - 1]?.signature },
-          'confirmed',
-        )
-
-        while (
-          batch.length > 0 &&
-          (batch[batch.length - 1].slot < (opts.startBlock || 0) ||
-            (batch[batch.length - 1].blockTime || -1) < (opts.startTime || 0))
-        ) {
-          batch.length-- // truncate tail of txs which are older than requested start
-        }
-
-        allSignatures.push(...batch) // concat in descending order
-      } while (batch.length >= limit)
-
-      allSignatures.reverse()
-
-      while (
-        opts.endBlock &&
-        allSignatures.length > 0 &&
-        allSignatures[allSignatures.length - 1].slot > opts.endBlock
-      ) {
-        allSignatures.length-- // truncate head (after reverse) of txs newer than requested end
-      }
-    } else {
-      allSignatures = async function* (this: SolanaChain) {
-        let batch: Awaited<ReturnType<typeof this.connection.getSignaturesForAddress>> | undefined
-        do {
-          batch = await this.connection.getSignaturesForAddress(
-            new PublicKey(opts.address!),
-            {
-              limit,
-              before: batch?.length
-                ? batch[batch.length - 1].signature
-                : opts.endBefore
-                  ? opts.endBefore
-                  : undefined,
-            },
-            'confirmed',
-          )
-          for (const sig of batch) {
-            if (opts.endBlock && sig.slot > opts.endBlock) continue
-            yield sig
-          }
-        } while (batch.length >= limit)
-      }.call(this) // generate backwards until depleting getSignaturesForAddress
-    }
-
-    // Process signatures
-    for await (const signatureInfo of allSignatures) {
-      yield await this.getTransaction(signatureInfo.signature)
-    }
+    yield* getTransactionsForAddress(opts, this)
   }
 
   /**
@@ -430,45 +365,46 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *   - `startBlock`: Starting slot number (inclusive)
    *   - `startTime`: Starting Unix timestamp (inclusive)
    *   - `endBlock`: Ending slot number (inclusive)
+   *   - `endBefore`: Fetch signatures before this transaction
    *   - `address`: Program address to filter logs by (required for Solana)
    *   - `topics`: Array of topics to filter logs by (optional); either 0x-8B discriminants or event names
+   *   - `watch`: Watch for new logs
    *   - `programs`: Special option to allow querying by address of interest, but yielding matching
    *     logs from specific (string address) program or any (true)
-   *   - `commit`: Special param for fetching ExecutionReceipts, to narrow down the search
    * @returns AsyncIterableIterator of parsed Log_ objects.
    */
   async *getLogs(
-    opts: LogFilter & { sender?: string; programs?: string[] | true; commit?: CommitReport },
+    opts: LogFilter & { programs?: string[] | true },
   ): AsyncGenerator<Log_ & { tx: SolanaTransaction }> {
     let programs: true | string[]
-    if (opts.sender && !opts.address) {
-      // specialization for fetching txs/requests for a given account of interest without a programID
-      opts.address = opts.sender
-      programs = true
-    } else if (!opts.address) {
+    if (!opts.address) {
       throw new CCIPSolanaProgramAddressRequiredError()
     } else if (!opts.programs) {
       programs = [opts.address]
     } else {
       programs = opts.programs
     }
+    let topics
     if (opts.topics?.length) {
       if (!opts.topics.every((topic) => typeof topic === 'string'))
         throw new CCIPSolanaTopicsInvalidError()
       // append events discriminants (if not 0x-8B already), but keep OG topics
-      opts.topics.push(
+      topics = [
+        ...opts.topics,
         ...opts.topics.filter((t) => !isHexString(t, 8)).map((t) => hexDiscriminator(t)),
-      )
+      ]
     }
 
     // Process signatures and yield logs
     for await (const tx of this.getTransactionsForAddress(opts)) {
-      for (const log of tx.logs) {
+      let logs = tx.logs
+      if (opts.startBlock == null && opts.startTime == null) logs = logs.toReversed() // backwards
+      for (const log of logs) {
         // Filter and yield logs from the specified program, and which match event discriminant or log prefix
         if (
           (programs !== true && !programs.includes(log.address)) ||
-          (opts.topics?.length &&
-            !(opts.topics as string[]).some(
+          (topics &&
+            !topics.some(
               (t) =>
                 t === log.topics[0] || (typeof log.data === 'string' && log.data.startsWith(t)),
             ))

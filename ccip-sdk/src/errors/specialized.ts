@@ -713,6 +713,35 @@ export class CCIPLogTopicsNotFoundError extends CCIPError {
   }
 }
 
+/** Thrown when trying to `watch` logs but giving a fixed `endBlock` */
+export class CCIPLogsWatchRequiresFinalityError extends CCIPError {
+  override readonly name = 'CCIPLogsWatchRequiresFinalityError'
+  /** Creates a block not found error. */
+  constructor(endBlock?: number | string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.LOGS_WATCH_REQUIRES_FINALITY,
+      `Watch mode requires finality config for endBlock (latest, finalized or block depth=negative)`,
+      { ...options, isTransient: false, context: { ...options?.context, endBlock } },
+    )
+  }
+}
+
+/** Thrown when trying to `watch` logs but giving a fixed `endBlock` */
+export class CCIPLogsWatchRequiresStartError extends CCIPError {
+  override readonly name = 'CCIPLogsWatchRequiresStartError'
+  /** Creates a block not found error. */
+  constructor(
+    { startBlock, startTime }: { startBlock?: number; startTime?: number },
+    options?: CCIPErrorOptions,
+  ) {
+    super(CCIPErrorCode.LOGS_WATCH_REQUIRES_START, `Watch mode requires startBlock or startTime`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, startBlock, startTime },
+    })
+  }
+}
+
 // Chain Family
 
 /** Thrown when network family does not match expected for a Chain constructor. */

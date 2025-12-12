@@ -14,6 +14,12 @@ export {
 // Specialized errors - Block & Transaction
 export { CCIPBlockNotFoundError, CCIPTransactionNotFoundError } from './specialized.ts'
 
+// Specialized errors - Logs
+export {
+  CCIPLogsWatchRequiresFinalityError,
+  CCIPLogsWatchRequiresStartError,
+} from './specialized.ts'
+
 // Specialized errors - CCIP Message
 export {
   CCIPMessageBatchIncompleteError,
