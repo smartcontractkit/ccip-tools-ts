@@ -293,6 +293,20 @@ describe('recovery hints', () => {
       assert.equal(hint, undefined)
     })
   })
+
+  describe('coverage', () => {
+    it('should have recovery hints for all error codes', () => {
+      const allCodes = Object.values(CCIPErrorCode)
+      const codesWithHints = Object.keys(DEFAULT_RECOVERY_HINTS)
+      const missing = allCodes.filter((code) => !codesWithHints.includes(code))
+
+      assert.deepEqual(
+        missing,
+        [],
+        `Missing recovery hints for: ${missing.join(', ')}. Add hints in recovery.ts.`,
+      )
+    })
+  })
 })
 
 // =============================================================================

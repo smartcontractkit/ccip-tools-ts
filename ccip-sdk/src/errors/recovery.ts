@@ -71,6 +71,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   EXTRA_ARGS_INVALID_TON: 'ExtraArgs must be EVMExtraArgsV2 (GenericExtraArgsV2) format for TON.',
   EXTRA_ARGS_SOLANA_EVM_ONLY: 'Solana can only encode EVMExtraArgsV2.',
   EXTRA_ARGS_APTOS_RESTRICTION: 'Aptos can only encode EVMExtraArgsV2 and SVMExtraArgsV1.',
+  EXTRA_ARGS_APTOS_V2_REQUIRED: 'Aptos requires EVMExtraArgsV2 format for this operation.',
   EXTRA_ARGS_LENGTH_INVALID:
     'Provide EVMExtraArgsV2 with valid gasLimit and allowOutOfOrderExecution fields.',
 
