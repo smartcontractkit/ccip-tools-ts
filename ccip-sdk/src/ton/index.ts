@@ -1,6 +1,7 @@
 import { Address, Cell, beginCell, toNano } from '@ton/core'
 import { TonClient, internal } from '@ton/ton'
-import { type BytesLike, isBytesLike } from 'ethers'
+import type { AxiosAdapter } from 'axios'
+import { type BytesLike, getAddress as checksumAddress, isBytesLike } from 'ethers'
 import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
@@ -11,11 +12,11 @@ import {
   CCIPHttpError,
   CCIPMessageInvalidError,
   CCIPNotImplementedError,
+  CCIPSourceChainUnsupportedError,
   CCIPTransactionNotFoundError,
   CCIPWalletInvalidError,
 } from '../errors/specialized.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
-import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
@@ -31,12 +32,57 @@ import {
   type WithLogger,
   ChainFamily,
 } from '../types.ts'
-import { getDataBytes, networkInfo } from '../utils.ts'
+import { bytesToBuffer, createRateLimitedFetch, getDataBytes, networkInfo } from '../utils.ts'
+import { OffRamp } from './bindings/offramp.ts'
+import { OnRamp } from './bindings/onramp.ts'
+import { Router } from './bindings/router.ts'
 // import { parseTONLogs } from './utils.ts'
 import { generateUnsignedExecuteReport as generateUnsignedExecuteReportImpl } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import { type CCIPMessage_V1_6_TON, type UnsignedTONTx, isTONWallet } from './types.ts'
 import { waitForTransaction } from './utils.ts'
+import type { LeafHasher } from '../hasher/common.ts'
+
+/**
+ * Wraps a rate-limited fetch as an axios adapter for TonClient.
+ * @param rateLimitedFetch - A fetch function with rate limiting applied.
+ * @returns An AxiosAdapter that uses the rate-limited fetch.
+ */
+function fetchToAxiosAdapter(rateLimitedFetch: typeof fetch): AxiosAdapter {
+  return async (config) => {
+    // Convert axios headers to fetch-compatible format
+    const headers: Record<string, string> = {}
+    if (config.headers) {
+      for (const [key, value] of Object.entries(config.headers)) {
+        if (value != null) headers[key] = String(value)
+      }
+    }
+
+    const response = await rateLimitedFetch(config.url!, {
+      method: config.method?.toUpperCase(),
+      headers,
+      body: config.data as string | undefined,
+    })
+
+    const data = await response.json()
+    return {
+      data,
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries()),
+      config,
+      request: {},
+    }
+  }
+}
+
+/**
+ * Type guard to check if an error is a TVM error with an exit code.
+ * TON VM errors include an exitCode property indicating the error type.
+ */
+function isTvmError(error: unknown): error is Error & { exitCode: number } {
+  return error instanceof Error && 'exitCode' in error && typeof error.exitCode === 'number'
+}
 
 /**
  * TON chain implementation supporting TON networks.
@@ -73,6 +119,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @returns A new TONChain instance.
    */
   static async fromUrl(url: string, ctx?: WithLogger): Promise<TONChain> {
+    const { logger = console } = ctx ?? {}
+
     // Validate URL format for TON endpoints
     if (
       !url.includes('toncenter') &&
@@ -83,7 +131,17 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       throw new CCIPArgumentInvalidError('url', `Invalid TON RPC URL: ${url}`)
     }
 
-    const client = new TonClient({ endpoint: url })
+    // Check if using public endpoint without API key and apply rate limiting
+    const isPublicEndpoint = url.includes('toncenter.com') && !url.includes('api_key')
+
+    let httpAdapter: AxiosAdapter | undefined
+    if (isPublicEndpoint) {
+      logger.warn('Using public TON endpoint without API key: rate limiting to 1 req/sec')
+      const rateLimitedFetch = createRateLimitedFetch({ maxRequests: 1, windowMs: 1100 }, ctx)
+      httpAdapter = fetchToAxiosAdapter(rateLimitedFetch)
+    }
+
+    const client = new TonClient({ endpoint: url, httpAdapter })
 
     // Verify connection by making an actual RPC call
     try {
@@ -188,13 +246,25 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /** {@inheritDoc Chain.getRouterForOnRamp} */
-  getRouterForOnRamp(_onRamp: string, _destChainSelector: bigint): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError('getRouterForOnRamp'))
+  async getRouterForOnRamp(onRamp: string, destChainSelector: bigint): Promise<string> {
+    const rawAddress = TONChain.getAddress(onRamp)
+    const onRampAddress = Address.parseRaw(rawAddress)
+
+    const onRampContract = OnRamp.createFromAddress(onRampAddress)
+    const openedContract = this.provider.open(onRampContract)
+    const destConfig = await openedContract.getDestChainConfig(destChainSelector)
+
+    return destConfig.router.toString()
   }
 
   /** {@inheritDoc Chain.getRouterForOffRamp} */
-  getRouterForOffRamp(_offRamp: string, _sourceChainSelector: bigint): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError('getRouterForOffRamp'))
+  async getRouterForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
+    const offRampAddress = Address.parse(offRamp)
+    const offRampContract = OffRamp.createFromAddress(offRampAddress)
+    const openedContract = this.provider.open(offRampContract)
+
+    const sourceConfig = await openedContract.getSourceChainConfig(sourceChainSelector)
+    return sourceConfig.router.toString()
   }
 
   /** {@inheritDoc Chain.getNativeTokenForRouter} */
@@ -203,23 +273,57 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /** {@inheritDoc Chain.getOffRampsForRouter} */
-  getOffRampsForRouter(_router: string, _sourceChainSelector: bigint): Promise<string[]> {
-    return Promise.reject(new CCIPNotImplementedError('getOffRampsForRouter'))
+  async getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]> {
+    const routerAddress = Address.parse(router)
+    const routerContract = Router.createFromAddress(routerAddress)
+    const openedContract = this.provider.open(routerContract)
+
+    try {
+      // Get the specific OffRamp for the source chain selector
+      const offRamp = await openedContract.getOffRamp(sourceChainSelector)
+      return [offRamp.toString()]
+    } catch (error) {
+      if (isTvmError(error) && error.exitCode === 261) {
+        return [] // Return empty array if no OffRamp configured for this source chain
+      }
+      throw error
+    }
   }
 
   /** {@inheritDoc Chain.getOnRampForRouter} */
-  getOnRampForRouter(_router: string, _destChainSelector: bigint): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError('getOnRampForRouter'))
+  async getOnRampForRouter(router: string, destChainSelector: bigint): Promise<string> {
+    const routerAddress = Address.parse(router)
+    const routerContract = Router.createFromAddress(routerAddress)
+    const openedContract = this.provider.open(routerContract)
+
+    const onRamp = await openedContract.getOnRamp(destChainSelector)
+    return onRamp.toString()
   }
 
   /** {@inheritDoc Chain.getOnRampForOffRamp} */
-  async getOnRampForOffRamp(_offRamp: string, _sourceChainSelector: bigint): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError('getOnRampForOffRamp'))
+  async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
+    const offRampAddress = Address.parse(offRamp)
+    const offRampContract = OffRamp.createFromAddress(offRampAddress)
+    const openedContract = this.provider.open(offRampContract)
+
+    try {
+      const sourceConfig = await openedContract.getSourceChainConfig(sourceChainSelector)
+      // Convert CrossChainAddress (buffer) to checksummed EVM address
+      return checksumAddress('0x' + sourceConfig.onRamp.toString('hex'))
+    } catch (error) {
+      if (isTvmError(error) && error.exitCode === 266) {
+        throw new CCIPSourceChainUnsupportedError(sourceChainSelector, {
+          context: { offRamp },
+        })
+      }
+      throw error
+    }
   }
 
   /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
-  getCommitStoreForOffRamp(_offRamp: string): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError('getCommitStoreForOffRamp'))
+  async getCommitStoreForOffRamp(offRamp: string): Promise<string> {
+    // TODO: FIXME: check assumption
+    return Promise.resolve(offRamp)
   }
 
   /** {@inheritDoc Chain.getTokenForTokenPool} */
@@ -330,11 +434,54 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
   /**
    * Converts bytes to a TON address.
-   * @param _bytes - Bytes to convert.
-   * @returns TON address string.
+   * Handles:
+   * - 36-byte CCIP format: workchain(4 bytes, big-endian) + hash(32 bytes)
+   * - 33-byte format: workchain(1 byte) + hash(32 bytes)
+   * - 32-byte format: hash only (assumes workchain 0)
+   * Also handles user-friendly format strings (e.g., "EQ...", "UQ...", "kQ...", "0Q...")
+   * and raw format strings ("workchain:hash").
+   * @param bytes - Bytes or string to convert.
+   * @returns TON raw address string in format "workchain:hash".
    */
-  static getAddress(_bytes: BytesLike): string {
-    throw new CCIPNotImplementedError('getAddress')
+  static getAddress(bytes: BytesLike): string {
+    // If it's already a string address, try to parse and return raw format
+    if (typeof bytes === 'string') {
+      // Handle raw format "workchain:hash"
+      if (bytes.includes(':') && !bytes.startsWith('0x')) {
+        return bytes
+      }
+      // Handle user-friendly format (EQ..., UQ..., etc.)
+      if (
+        bytes.startsWith('EQ') ||
+        bytes.startsWith('UQ') ||
+        bytes.startsWith('kQ') ||
+        bytes.startsWith('0Q')
+      ) {
+        return Address.parse(bytes).toRawString()
+      }
+    }
+
+    const data = bytesToBuffer(bytes)
+
+    if (data.length === 36) {
+      // CCIP cross-chain format: workchain(4 bytes, big-endian) + hash(32 bytes)
+      const workchain = data.readInt32BE(0)
+      const hash = data.subarray(4).toString('hex')
+      return `${workchain}:${hash}`
+    } else if (data.length === 33) {
+      // workchain (1 byte) + hash (32 bytes)
+      const workchain = data[0] === 0xff ? -1 : data[0]
+      const hash = data.subarray(1).toString('hex')
+      return `${workchain}:${hash}`
+    } else if (data.length === 32) {
+      // hash only, assume workchain 0
+      return `0:${data.toString('hex')}`
+    } else {
+      throw new CCIPArgumentInvalidError(
+        'bytes',
+        `Invalid TON address bytes length: ${data.length}. Expected 32, 33, or 36 bytes.`,
+      )
+    }
   }
 
   /**
