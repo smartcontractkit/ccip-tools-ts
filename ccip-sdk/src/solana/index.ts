@@ -1105,7 +1105,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async cleanUpBuffers(opts: { wallet: unknown; waitDeactivation?: boolean }): Promise<void> {
     const wallet = opts.wallet
     if (!isWallet(wallet)) throw new CCIPWalletInvalidError(util.inspect(wallet))
-    await cleanUpBuffers(this, wallet, this.getLogs.bind(this), opts)
+    await cleanUpBuffers(this, wallet, opts)
   }
 
   /**
