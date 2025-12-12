@@ -291,7 +291,7 @@ export class CCIPExtraArgsInvalidError extends CCIPError {
   override readonly name = 'CCIPExtraArgsInvalidError'
   /** Creates an extraArgs invalid error. */
   constructor(
-    chainFamily: 'EVM' | 'SVM' | 'Sui' | 'Aptos',
+    chainFamily: 'EVM' | 'SVM' | 'Sui' | 'Aptos' | 'TON',
     extraArgs?: string,
     options?: CCIPErrorOptions,
   ) {
@@ -300,6 +300,7 @@ export class CCIPExtraArgsInvalidError extends CCIPError {
       SVM: CCIPErrorCode.EXTRA_ARGS_INVALID_SVM,
       Sui: CCIPErrorCode.EXTRA_ARGS_INVALID_SUI,
       Aptos: CCIPErrorCode.EXTRA_ARGS_INVALID_APTOS,
+      TON: CCIPErrorCode.EXTRA_ARGS_INVALID_TON,
     } as const
     const code = ERROR_CODE_MAP[chainFamily]
     const message = extraArgs

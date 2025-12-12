@@ -3,6 +3,7 @@ import type { KeyPair } from '@ton/crypto'
 import type { WalletContractV4 } from '@ton/ton'
 import { toBigInt } from 'ethers'
 
+import { CCIPDataFormatUnsupportedError } from '../errors/specialized.ts'
 import type { EVMExtraArgsV2 } from '../extra-args.ts'
 import type { CCIPMessage_V1_6, ChainFamily, ExecutionReport } from '../types.ts'
 import { bytesToBuffer } from '../utils.ts'
@@ -58,7 +59,9 @@ function asSnakeData<T>(array: T[], builderFn: (item: T) => Builder): Cell {
   for (const value of array) {
     const itemBuilder = builderFn(value)
     if (itemBuilder.refs > 3) {
-      throw new Error('Cannot pack more than 3 refs per item; store it in a separate ref cell.')
+      throw new CCIPDataFormatUnsupportedError(
+        'Cannot pack more than 3 refs per item; store it in a separate ref cell.',
+      )
     }
     if (builder.availableBits < itemBuilder.bits || builder.availableRefs <= 1) {
       cells.push(builder)

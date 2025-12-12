@@ -1,6 +1,7 @@
 import { type Address, Cell, beginCell } from '@ton/core'
 import type { TonClient } from '@ton/ton'
 
+import { CCIPTransactionNotFinalizedError } from '../errors/specialized.ts'
 import { bytesToBuffer, sleep } from '../utils.ts'
 
 /**
@@ -124,7 +125,5 @@ export async function waitForTransaction(
     await sleep(intervalMs)
   }
 
-  throw new Error(
-    `Transaction with seqno ${expectedSeqno} not confirmed after ${maxAttempts} attempts`,
-  )
+  throw new CCIPTransactionNotFinalizedError(String(expectedSeqno))
 }

@@ -1,6 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs'
-import util from 'node:util'
 
+import {
+  CCIPArgumentInvalidError,
+  CCIPWalletInvalidError,
+} from '@chainlink/ccip-sdk/src/errors/specialized.ts'
 import type { TONWallet } from '@chainlink/ccip-sdk/src/ton/types.ts'
 import { keyPairFromSecretKey, mnemonicToPrivateKey } from '@ton/crypto'
 import { WalletContractV4 } from '@ton/ton'
@@ -15,8 +18,7 @@ export async function loadTonWallet({
 }: { wallet?: unknown } = {}): Promise<TONWallet> {
   if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
 
-  if (typeof walletOpt !== 'string')
-    throw new Error(`Invalid wallet option: ${util.inspect(walletOpt)}`)
+  if (typeof walletOpt !== 'string') throw new CCIPWalletInvalidError(walletOpt)
 
   // Handle mnemonic phrase
   if (walletOpt.includes(' ')) {
@@ -33,12 +35,13 @@ export async function loadTonWallet({
   if (walletOpt.startsWith('0x')) {
     const secretKey = Buffer.from(walletOpt.slice(2), 'hex')
     if (secretKey.length === 32) {
-      throw new Error(
-        'Invalid private key: 32-byte seeds not supported. Use 64-byte secret key or mnemonic.',
+      throw new CCIPArgumentInvalidError(
+        'wallet',
+        '32-byte seeds not supported. Use 64-byte secret key or mnemonic.',
       )
     }
     if (secretKey.length !== 64) {
-      throw new Error('Invalid private key: must be 64 bytes (or use mnemonic)')
+      throw new CCIPArgumentInvalidError('wallet', 'must be 64 bytes (or use mnemonic)')
     }
     const keyPair = keyPairFromSecretKey(secretKey)
     const contract = WalletContractV4.create({
@@ -53,7 +56,7 @@ export async function loadTonWallet({
     const content = readFileSync(walletOpt, 'utf8').trim()
     const secretKey = Buffer.from(content.startsWith('0x') ? content.slice(2) : content, 'hex')
     if (secretKey.length !== 64) {
-      throw new Error('Invalid private key in file: must be 64 bytes')
+      throw new CCIPArgumentInvalidError('wallet', 'Invalid private key in file: must be 64 bytes')
     }
     const keyPair = keyPairFromSecretKey(secretKey)
     const contract = WalletContractV4.create({
@@ -63,5 +66,5 @@ export async function loadTonWallet({
     return { contract, keyPair }
   }
 
-  throw new Error('Wallet not specified')
+  throw new CCIPArgumentInvalidError('wallet', 'Wallet not specified')
 }

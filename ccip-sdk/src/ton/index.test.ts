@@ -207,7 +207,7 @@ describe('TONChain.executeReport', () => {
       tonChain.executeReport(TON_OFFRAMP_ADDRESS_TEST, baseExecReport, {
         wallet: { invalid: true },
       }),
-      /requires a TON wallet/,
+      /Wallet must be a Signer/,
     )
   })
 
@@ -225,7 +225,7 @@ describe('TONChain.executeReport', () => {
 
     await assert.rejects(
       tonChain.executeReport(TON_OFFRAMP_ADDRESS_TEST, v1_5Report as any, { wallet }),
-      /TON expects EVMExtraArgsV2/,
+      /Invalid extraArgs for TON/,
     )
   })
 
@@ -273,7 +273,7 @@ describe('TONChain.generateUnsignedExecuteReport', () => {
           TON_OFFRAMP_ADDRESS_TEST,
           v1_5Report as any,
         ),
-      /TON expects EVMExtraArgsV2/,
+      /Invalid extraArgs for TON/,
     )
   })
 })
