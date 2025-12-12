@@ -14,6 +14,10 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 
 import type { Chain } from './chain.ts'
+import {
+  CCIPLegacyTokenPoolsUnsupportedError,
+  CCIPTokenDecimalsInsufficientError,
+} from './errors/index.ts'
 import TokenABI from './evm/abi/BurnMintERC677Token.ts'
 import RouterABI from './evm/abi/Router.ts'
 import { defaultAbiCoder } from './evm/const.ts'
@@ -63,7 +67,7 @@ export async function estimateExecGasForRequest(
 
   const destTokenAmounts = await Promise.all(
     request.message.tokenAmounts.map(async (ta) => {
-      if (!('destTokenAddress' in ta)) throw new Error('legacy <1.5 tokenPools not supported')
+      if (!('destTokenAddress' in ta)) throw new CCIPLegacyTokenPoolsUnsupportedError()
       const [{ decimals: sourceDecimals }, { decimals: destDecimals }] = await Promise.all([
         source
           .getTokenForTokenPool(ta.sourcePoolAddress)
@@ -73,8 +77,11 @@ export async function estimateExecGasForRequest(
       const destAmount =
         (ta.amount * 10n ** BigInt(destDecimals - sourceDecimals + 36)) / 10n ** 36n
       if (destAmount === 0n)
-        throw new Error(
-          `not enough decimals=${destDecimals} for token=${ta.destTokenAddress} on dest=${dest.network.name} to express ${formatUnits(ta.amount, sourceDecimals)}`,
+        throw new CCIPTokenDecimalsInsufficientError(
+          ta.destTokenAddress,
+          destDecimals,
+          dest.network.name,
+          formatUnits(ta.amount, sourceDecimals),
         )
       return { token: ta.destTokenAddress, amount: destAmount }
     }),

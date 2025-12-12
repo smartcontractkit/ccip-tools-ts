@@ -5,6 +5,15 @@ import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { type LogFilter, Chain } from '../chain.ts'
+import {
+  CCIPArgumentInvalidError,
+  CCIPExtraArgsInvalidError,
+  CCIPHttpError,
+  CCIPMessageInvalidError,
+  CCIPNotImplementedError,
+  CCIPTransactionNotFoundError,
+  CCIPWalletInvalidError,
+} from '../errors/specialized.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
@@ -22,7 +31,7 @@ import {
   type WithLogger,
   ChainFamily,
 } from '../types.ts'
-import { getDataBytes, networkInfo, util } from '../utils.ts'
+import { getDataBytes, networkInfo } from '../utils.ts'
 // import { parseTONLogs } from './utils.ts'
 import { generateUnsignedExecuteReport as generateUnsignedExecuteReportImpl } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
@@ -71,7 +80,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       !url.includes('localhost') &&
       !url.includes('127.0.0.1')
     ) {
-      throw new Error(`Invalid TON RPC URL: ${url}`)
+      throw new CCIPArgumentInvalidError('url', `Invalid TON RPC URL: ${url}`)
     }
 
     const client = new TonClient({ endpoint: url })
@@ -81,7 +90,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       await client.getMasterchainInfo()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`Failed to connect to TON endpoint ${url}: ${message}`)
+      throw new CCIPHttpError(0, `Failed to connect to TON endpoint ${url}: ${message}`)
     }
 
     // Detect network from URL
@@ -100,7 +109,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
   /** {@inheritDoc Chain.getBlockTimestamp} */
   async getBlockTimestamp(_version: number | 'finalized'): Promise<number> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getBlockTimestamp'))
   }
 
   /**
@@ -117,7 +126,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const parts = hash.split(':')
 
     if (parts.length !== 4) {
-      throw new Error(
+      throw new CCIPArgumentInvalidError(
+        'hash',
         `Invalid TON transaction hash format: "${hash}". Expected "workchain:address:lt:hash"`,
       )
     }
@@ -129,7 +139,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const tx = await this.provider.getTransaction(address, lt, txHash)
 
     if (!tx) {
-      throw new Error(`Transaction not found: ${hash}`)
+      throw new CCIPTransactionNotFoundError(hash)
     }
 
     return {
@@ -144,13 +154,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   /** {@inheritDoc Chain.getLogs} */
   async *getLogs(_opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<Log_> {
     await Promise.resolve()
-    throw new Error('Not implemented')
+    throw new CCIPNotImplementedError('getLogs')
     yield undefined as never
   }
 
   /** {@inheritDoc Chain.fetchRequestsInTx} */
   override async fetchRequestsInTx(_tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('fetchRequestsInTx'))
   }
 
   /** {@inheritDoc Chain.fetchAllMessagesInBatch} */
@@ -164,7 +174,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     _commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
     _opts?: { page?: number },
   ): Promise<R['message'][]> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('fetchAllMessagesInBatch'))
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
@@ -174,57 +184,57 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     | [type_: string, version: string, typeAndVersion: string]
     | [type_: string, version: string, typeAndVersion: string, suffix: string]
   > {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('typeAndVersion'))
   }
 
   /** {@inheritDoc Chain.getRouterForOnRamp} */
   getRouterForOnRamp(_onRamp: string, _destChainSelector: bigint): Promise<string> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getRouterForOnRamp'))
   }
 
   /** {@inheritDoc Chain.getRouterForOffRamp} */
   getRouterForOffRamp(_offRamp: string, _sourceChainSelector: bigint): Promise<string> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getRouterForOffRamp'))
   }
 
   /** {@inheritDoc Chain.getNativeTokenForRouter} */
   getNativeTokenForRouter(_router: string): Promise<string> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getNativeTokenForRouter'))
   }
 
   /** {@inheritDoc Chain.getOffRampsForRouter} */
   getOffRampsForRouter(_router: string, _sourceChainSelector: bigint): Promise<string[]> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getOffRampsForRouter'))
   }
 
   /** {@inheritDoc Chain.getOnRampForRouter} */
   getOnRampForRouter(_router: string, _destChainSelector: bigint): Promise<string> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getOnRampForRouter'))
   }
 
   /** {@inheritDoc Chain.getOnRampForOffRamp} */
   async getOnRampForOffRamp(_offRamp: string, _sourceChainSelector: bigint): Promise<string> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getOnRampForOffRamp'))
   }
 
   /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
   getCommitStoreForOffRamp(_offRamp: string): Promise<string> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getCommitStoreForOffRamp'))
   }
 
   /** {@inheritDoc Chain.getTokenForTokenPool} */
   async getTokenForTokenPool(_tokenPool: string): Promise<string> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getTokenForTokenPool'))
   }
 
   /** {@inheritDoc Chain.getTokenInfo} */
   async getTokenInfo(_token: string): Promise<{ symbol: string; decimals: number }> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getTokenInfo'))
   }
 
   /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
   getTokenAdminRegistryFor(_address: string): Promise<string> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getTokenAdminRegistryFor'))
   }
 
   // Static methods for decoding
@@ -234,7 +244,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @returns Decoded CCIPMessage or undefined if not valid.
    */
   static decodeMessage(_log: Log_): CCIPMessage_V1_6_TON | undefined {
-    throw new Error('Not implemented')
+    throw new CCIPNotImplementedError('decodeMessage')
   }
 
   /**
@@ -306,7 +316,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @returns Array of CommitReport or undefined if not valid.
    */
   static decodeCommits(_log: Log_, _lane?: Lane): CommitReport[] | undefined {
-    throw new Error('Not implemented')
+    throw new CCIPNotImplementedError('decodeCommits')
   }
 
   /**
@@ -315,7 +325,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @returns ExecutionReceipt or undefined if not valid.
    */
   static decodeReceipt(_log: Log_): ExecutionReceipt | undefined {
-    throw new Error('Not implemented')
+    throw new CCIPNotImplementedError('decodeReceipt')
   }
 
   /**
@@ -324,7 +334,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @returns TON address string.
    */
   static getAddress(_bytes: BytesLike): string {
-    throw new Error('Not implemented')
+    throw new CCIPNotImplementedError('getAddress')
   }
 
   /**
@@ -339,7 +349,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
   /** {@inheritDoc Chain.getFee} */
   async getFee(_router: string, _destChainSelector: bigint, _message: AnyMessage): Promise<bigint> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getFee'))
   }
 
   /** {@inheritDoc Chain.generateUnsignedSendMessage} */
@@ -350,7 +360,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     _message: AnyMessage & { fee?: bigint },
     _opts?: { approveMax?: boolean },
   ): Promise<never> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('generateUnsignedSendMessage'))
   }
 
   /** {@inheritDoc Chain.sendMessage} */
@@ -360,13 +370,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     _message: AnyMessage & { fee: bigint },
     _opts?: { wallet?: unknown; approveMax?: boolean },
   ): Promise<CCIPRequest> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('sendMessage'))
   }
 
   /** {@inheritDoc Chain.fetchOffchainTokenData} */
   fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
     if (!('receiverObjectIds' in request.message)) {
-      throw new Error('Invalid message, not v1.6 TON')
+      throw new CCIPMessageInvalidError(request.message)
     }
     // default offchain token data
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
@@ -380,7 +390,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     opts?: { gasLimit?: number },
   ): Promise<UnsignedTONTx> {
     if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
-      throw new Error('TON expects EVMExtraArgsV2 (GenericExtraArgsV2) reports')
+      throw new CCIPExtraArgsInvalidError('TON')
     }
 
     const unsigned = generateUnsignedExecuteReportImpl(
@@ -404,9 +414,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   ): Promise<ChainTransaction> {
     const wallet = opts.wallet
     if (!isTONWallet(wallet)) {
-      throw new Error(
-        `${this.constructor.name}.executeReport requires a TON wallet, got=${util.inspect(wallet)}`,
-      )
+      throw new CCIPWalletInvalidError(wallet)
     }
 
     const unsigned = await this.generateUnsignedExecuteReport(
@@ -460,26 +468,26 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
   /** {@inheritDoc Chain.getSupportedTokens} */
   async getSupportedTokens(_address: string): Promise<string[]> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getSupportedTokens'))
   }
 
   /** {@inheritDoc Chain.getRegistryTokenConfig} */
   async getRegistryTokenConfig(_address: string, _tokenName: string): Promise<never> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getRegistryTokenConfig'))
   }
 
   /** {@inheritDoc Chain.getTokenPoolConfigs} */
   async getTokenPoolConfigs(_tokenPool: string): Promise<never> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getTokenPoolConfigs'))
   }
 
   /** {@inheritDoc Chain.getTokenPoolRemotes} */
   async getTokenPoolRemotes(_tokenPool: string): Promise<never> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getTokenPoolRemotes'))
   }
 
   /** {@inheritDoc Chain.getFeeTokens} */
   async getFeeTokens(_router: string): Promise<never> {
-    return Promise.reject(new Error('Not implemented'))
+    return Promise.reject(new CCIPNotImplementedError('getFeeTokens'))
   }
 }

@@ -4,6 +4,8 @@ import {
   type ChainStatic,
   type EVMChain,
   type ExecutionReport,
+  CCIPChainFamilyUnsupportedError,
+  CCIPReceiptNotFoundError,
   ChainFamily,
   bigIntReplacer,
   calculateManualExecProof,
@@ -177,7 +179,9 @@ async function manualExec(
     'extraArgs' in request.message
   ) {
     if (dest.network.family !== ChainFamily.EVM)
-      throw new Error('Gas estimation is only supported for EVM networks for now')
+      throw new CCIPChainFamilyUnsupportedError(dest.network.family, {
+        context: { feature: 'gas estimation' },
+      })
 
     let estimated = await estimateExecGasForRequest(
       source,
@@ -232,7 +236,7 @@ async function manualExec(
     }
     found = true
   }
-  if (!found) throw new Error(`Could not find receipt in tx logs`)
+  if (!found) throw new CCIPReceiptNotFoundError(manualExecTx.hash)
 }
 
 /*

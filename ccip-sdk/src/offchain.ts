@@ -1,5 +1,11 @@
 import { keccak256 } from 'ethers'
 
+import {
+  CCIPLbtcAttestationNotApprovedError,
+  CCIPLbtcAttestationNotFoundError,
+  CCIPUsdcAttestationError,
+} from './errors/index.ts'
+
 const CIRCLE_API_URL = {
   mainnet: 'https://iris-api.circle.com/v1',
   testnet: 'https://iris-api-sandbox.circle.com/v1',
@@ -35,7 +41,7 @@ export async function getUsdcAttestation(message: string, isTestnet: boolean): P
   const res = await fetch(`${circleApiBaseUrl}/attestations/${msgHash}`)
   const json = (await res.json()) as CctpAttestationResponse
   if (!('status' in json) || json.status !== 'complete' || !json.attestation) {
-    throw new Error('Could not fetch USDC attestation. Response: ' + JSON.stringify(json, null, 2))
+    throw new CCIPUsdcAttestationError(msgHash, json)
   }
   return json.attestation
 }
@@ -60,27 +66,17 @@ export async function getLbtcAttestation(
   })
   const response = (await res.json()) as LombardAttestationsResponse
   if (response == null || !('attestations' in response)) {
-    throw new Error(
-      'Error while fetching LBTC attestation. Response: ' + JSON.stringify(response, null, 2),
-    )
+    throw new CCIPLbtcAttestationNotFoundError(payloadHash, response)
   }
   const attestation = response.attestations.find((att) => att.message_hash === payloadHash)
   if (attestation == null) {
-    throw new Error(
-      'Could not find requested LBTC attestation with hash:' +
-        payloadHash +
-        ' in response: ' +
-        JSON.stringify(response, null, 2),
-    )
+    throw new CCIPLbtcAttestationNotFoundError(payloadHash, response)
   }
   if (
     attestation.status !== 'NOTARIZATION_STATUS_SESSION_APPROVED' ||
     !('attestation' in attestation)
   ) {
-    throw new Error(
-      'LBTC attestation is not approved or invalid. Response: ' +
-        JSON.stringify(attestation, null, 2),
-    )
+    throw new CCIPLbtcAttestationNotApprovedError(payloadHash, attestation)
   }
   return attestation
 }

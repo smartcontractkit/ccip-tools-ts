@@ -3,6 +3,7 @@ import type { PickDeep } from 'type-fest'
 
 import type { UnsignedAptosTx } from './aptos/types.ts'
 import { fetchCommitReport } from './commits.ts'
+import { CCIPChainFamilyMismatchError } from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/index.ts'
 import type {
   EVMExtraArgsV1,
@@ -119,7 +120,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   constructor(network: NetworkInfo, { logger = console }: WithLogger = {}) {
     if (network.family !== (this.constructor as ChainStatic).family)
-      throw new Error(`Invalid network family for ${this.constructor.name}: ${network.family}`)
+      throw new CCIPChainFamilyMismatchError(
+        this.constructor.name,
+        (this.constructor as ChainStatic).family,
+        network.family,
+      )
     this.network = network as NetworkInfo<F>
     this.logger = logger
   }

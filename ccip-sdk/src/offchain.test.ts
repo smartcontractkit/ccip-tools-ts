@@ -180,14 +180,14 @@ describe('getLbtcAttestation', () => {
 
     await assert.rejects(
       async () => await getLbtcAttestation(randomPayloadHash, true),
-      /Could not find requested LBTC attestation/,
+      /Could not find LBTC attestation for hash/,
     )
   })
 
   it('should throw error if attestation is not approved', async () => {
     await assert.rejects(
       async () => await getLbtcAttestation(pendingPayloadHash, true),
-      /LBTC attestation is not approved or invalid/,
+      /LBTC attestation not yet approved for hash/,
     )
   })
 
@@ -196,7 +196,7 @@ describe('getLbtcAttestation', () => {
 
     await assert.rejects(
       async () => await getLbtcAttestation(approvedPayloadHash1, true),
-      /Error while fetching LBTC attestation/,
+      /Could not find LBTC attestation for hash/,
     )
   })
 
@@ -205,7 +205,7 @@ describe('getLbtcAttestation', () => {
 
     await assert.rejects(
       async () => await getLbtcAttestation(approvedPayloadHash1, true),
-      /Error while fetching LBTC attestation/,
+      /Could not find LBTC attestation for hash/,
     )
   })
 

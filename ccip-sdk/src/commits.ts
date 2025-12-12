@@ -1,6 +1,7 @@
 import type { PickDeep } from 'type-fest'
 
 import type { Chain, ChainStatic } from './chain.ts'
+import { CCIPCommitNotFoundError } from './errors/index.ts'
 import { type CCIPCommit, type CCIPRequest, CCIPVersion } from './types.ts'
 
 /**
@@ -37,7 +38,8 @@ export async function fetchCommitReport(
     return { report, log }
   }
 
-  throw new Error(
-    `Could not find commit after ${hints?.startBlock ?? requestTimestamp} for sequenceNumber=${header.sequenceNumber}`,
+  throw new CCIPCommitNotFoundError(
+    hints?.startBlock ?? String(requestTimestamp),
+    header.sequenceNumber,
   )
 }

@@ -18,6 +18,13 @@ import BN from 'bn.js'
 import { zeroPadValue } from 'ethers'
 
 import { SolanaChain } from './index.ts'
+import {
+  CCIPSolanaFeeResultInvalidError,
+  CCIPSolanaLookupTableNotFoundError,
+  CCIPSolanaRouterConfigNotFoundError,
+  CCIPTokenAmountInvalidError,
+  CCIPTokenMintNotFoundError,
+} from '../errors/index.ts'
 import { type AnyMessage, type WithLogger, ChainFamily } from '../types.ts'
 import { bytesToBuffer, toLeArray, util } from '../utils.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
@@ -32,7 +39,7 @@ function anyToSvmMessage(message: AnyMessage): IdlTypes<typeof CCIP_ROUTER_IDL>[
     data: bytesToBuffer(message.data || '0x'),
     tokenAmounts: (message.tokenAmounts || []).map((ta) => {
       if (!ta.token || ta.amount < 0n) {
-        throw new Error('Invalid token amount: token address and positive amount required')
+        throw new CCIPTokenAmountInvalidError()
       }
       return {
         token: new PublicKey(ta.token),
@@ -66,7 +73,7 @@ export async function getFee(
   // Get router config to find feeQuoter
   const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], program.programId)
   const configAccount = await connection.getAccountInfo(configPda)
-  if (!configAccount) throw new Error(`Router config not found at ${configPda.toBase58()}`)
+  if (!configAccount) throw new CCIPSolanaRouterConfigNotFoundError(configPda.toBase58())
 
   const { feeQuoter, linkTokenMint }: { feeQuoter: PublicKey; linkTokenMint: PublicKey } =
     program.coder.accounts.decode('config', configAccount.data)
@@ -147,7 +154,7 @@ export async function getFee(
     .view()) as IdlTypes<typeof CCIP_ROUTER_IDL>['GetFeeResult']
 
   if (!result?.amount) {
-    throw new Error(`Invalid fee result from router: ${util.inspect(result)}`)
+    throw new CCIPSolanaFeeResultInvalidError(util.inspect(result))
   }
 
   return BigInt(result.amount.toString())
@@ -224,7 +231,7 @@ async function deriveAccountsCcipSend({
         const lookupTableAccountInfo = await connection.getAddressLookupTable(table)
 
         if (!lookupTableAccountInfo.value) {
-          throw new Error(`Lookup table account not found: ${table.toBase58()}`)
+          throw new CCIPSolanaLookupTableNotFoundError(table.toBase58())
         }
 
         return lookupTableAccountInfo.value
@@ -332,7 +339,7 @@ async function approveRouterSpender(
 ): Promise<TransactionInstruction | undefined> {
   // Get the current account info to check existing delegation (or create if needed)
   const mintInfo = await connection.getAccountInfo(token)
-  if (!mintInfo) throw new Error(`Mint ${token.toBase58()} not found`)
+  if (!mintInfo) throw new CCIPTokenMintNotFoundError(token.toBase58())
   const associatedTokenAccount = getAssociatedTokenAddressSync(
     token,
     owner,

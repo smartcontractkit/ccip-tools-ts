@@ -1,5 +1,4 @@
 import { existsSync, readFileSync } from 'node:fs'
-import util from 'node:util'
 
 import {
   type AccountAddress,
@@ -12,6 +11,7 @@ import {
   Ed25519Signature,
   generateSigningMessageForTransaction,
 } from '@aptos-labs/ts-sdk'
+import { CCIPArgumentInvalidError } from '@chainlink/ccip-sdk/src/index.ts'
 import AptosLedger from '@ledgerhq/hw-app-aptos'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
 import { type BytesLike, getBytes, hexlify } from 'ethers'
@@ -99,8 +99,7 @@ export class AptosLedgerSigner /*implements AptosAsyncAccount*/ {
  */
 export async function loadAptosWallet({ wallet: walletOpt }: { wallet?: unknown }) {
   if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
-  if (typeof walletOpt !== 'string')
-    throw new Error(`Invalid wallet option: ${util.inspect(walletOpt)}`)
+  if (typeof walletOpt !== 'string') throw new CCIPArgumentInvalidError('wallet', String(walletOpt))
   if ((walletOpt ?? '').startsWith('ledger')) {
     let derivationPath = walletOpt.split(':')[1]
     if (!derivationPath) derivationPath = "m/44'/637'/0'/0'/0'"
@@ -121,5 +120,5 @@ export async function loadAptosWallet({ wallet: walletOpt }: { wallet?: unknown 
       privateKey: new Ed25519PrivateKey(walletOpt as string, false),
     })
   }
-  throw new Error('Wallet not specified')
+  throw new CCIPArgumentInvalidError('wallet', 'not specified')
 }

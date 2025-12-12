@@ -5,6 +5,8 @@ import {
   type ChainGetter,
   type ChainTransaction,
   type EVMChain,
+  CCIPChainFamilyUnsupportedError,
+  CCIPRpcNotFoundError,
   ChainFamily,
   networkInfo,
   supportedChains,
@@ -32,7 +34,8 @@ function signalToPromise(signal: AbortSignal) {
             reject(
               signal.reason instanceof Error
                 ? signal.reason
-                : new Error(`Aborted: ${signal.reason as string}`),
+                : // eslint-disable-next-line no-restricted-syntax -- AbortSignal convention requires generic Error
+                  new Error(`Aborted: ${signal.reason as string}`),
             ),
           { once: true },
         )
@@ -143,7 +146,7 @@ export function fetchChainsFromRpcs(
     void (destroy$ ? Promise.race([res, signalToPromise(destroy$)]) : res).finally(() => {
       finished = true
       Object.entries(chainsCbs).forEach(([name, [_, reject]]) =>
-        reject(new Error(`No provider/chain found for network=${name}`)),
+        reject(new CCIPRpcNotFoundError(name)),
       )
     })
     return Promise.any(txs)
@@ -152,7 +155,7 @@ export function fetchChainsFromRpcs(
   const chainGetter = async (idOrSelectorOrName: number | string | bigint): Promise<Chain> => {
     const network = networkInfo(idOrSelectorOrName)
     if (network.name in chains) return chains[network.name]
-    if (finished) throw new Error(`No provider/chain found for network=${network.name}`)
+    if (finished) throw new CCIPRpcNotFoundError(network.name)
     chains[network.name] = new Promise((resolve, reject) => {
       chainsCbs[network.name] = [resolve, reject]
     })
@@ -192,6 +195,6 @@ export async function loadChainWallet(chain: Chain, opts: { wallet?: unknown }) 
       wallet = await loadTonWallet(opts)
       return [wallet.contract.address.toString(), wallet] as const
     default:
-      throw new Error(`Unsupported chain family: ${chain.network.family}`)
+      throw new CCIPChainFamilyUnsupportedError(chain.network.family)
   }
 }

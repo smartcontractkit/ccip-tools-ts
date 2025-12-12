@@ -53,7 +53,7 @@ describe('TON hasher', () => {
           onRamp: EVM_ONRAMP_ADDRESS_TEST,
           version: CCIPVersion.V1_2,
         })
-      }, /TON only supports CCIP v1.6/)
+      }, /Unsupported hasher version for TON/)
     })
 
     it('should create hasher for v1.6', () => {

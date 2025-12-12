@@ -1,3 +1,4 @@
+import { CCIPChainFamilyUnsupportedError } from '../errors/index.ts'
 import { supportedChains } from '../supported-chains.ts'
 import type { CCIPVersion, Lane, WithLogger } from '../types.ts'
 import { networkInfo } from '../utils.ts'
@@ -15,6 +16,6 @@ export function getLeafHasher<V extends CCIPVersion = CCIPVersion>(
 ): LeafHasher<V> {
   const destFamily = networkInfo(lane.destChainSelector).family
   const chain = supportedChains[destFamily]
-  if (!chain) throw new Error(`Unsupported chain family: ${destFamily}`)
+  if (!chain) throw new CCIPChainFamilyUnsupportedError(destFamily)
   return chain.getDestLeafHasher(lane, ctx) as LeafHasher<V>
 }

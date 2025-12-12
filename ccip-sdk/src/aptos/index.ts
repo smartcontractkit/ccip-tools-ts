@@ -21,8 +21,22 @@ import {
 import { memoize } from 'micro-memoize'
 import type { PickDeep, SetRequired } from 'type-fest'
 
-import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { type LogFilter, type TokenInfo, type TokenPoolRemote, Chain } from '../chain.ts'
+import { generateUnsignedCcipSend, getFee } from './send.ts'
+import {
+  CCIPAptosAddressInvalidError,
+  CCIPAptosExtraArgsEncodingError,
+  CCIPAptosExtraArgsV2RequiredError,
+  CCIPAptosLogInvalidError,
+  CCIPAptosNetworkUnknownError,
+  CCIPAptosRegistryTypeInvalidError,
+  CCIPAptosTokenNotRegisteredError,
+  CCIPAptosTransactionInvalidError,
+  CCIPAptosTransactionTypeInvalidError,
+  CCIPAptosWalletInvalidError,
+  CCIPError,
+  CCIPOnRampRequiredError,
+} from '../errors/index.ts'
 import {
   type EVMExtraArgsV2,
   type ExtraArgs,
@@ -30,6 +44,12 @@ import {
   EVMExtraArgsV2Tag,
   SVMExtraArgsV1Tag,
 } from '../extra-args.ts'
+import {
+  type UnsignedAptosTx,
+  EVMExtraArgsV2Codec,
+  SVMExtraArgsV1Codec,
+  isAptosAccount,
+} from './types.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -61,12 +81,6 @@ import { generateUnsignedExecuteReport } from './exec.ts'
 import { getAptosLeafHasher } from './hasher.ts'
 import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
 import { getTokenInfo } from './token.ts'
-import {
-  type UnsignedAptosTx,
-  EVMExtraArgsV2Codec,
-  SVMExtraArgsV1Codec,
-  isAptosAccount,
-} from './types.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import {
   decodeMessage,
@@ -172,7 +186,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     else if (url.includes('mainnet')) network = Network.MAINNET
     else if (url.includes('testnet')) network = Network.TESTNET
     else if (url.includes('local')) network = Network.LOCAL
-    else throw new Error(`Unknown Aptos network: ${util.inspect(url)}`)
+    else throw new CCIPAptosNetworkUnknownError(util.inspect(url))
     const config: AptosConfig = new AptosConfig({
       network,
       fullnode: typeof url === 'string' && url.includes('://') ? url : undefined,
@@ -196,9 +210,9 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     } else if (!isNaN(+hashOrVersion)) {
       tx = await getUserTxByVersion(this.provider, +hashOrVersion)
     } else {
-      throw new Error(`Invalid transaction hash or version: ${hashOrVersion}`)
+      throw new CCIPAptosTransactionInvalidError(hashOrVersion)
     }
-    if (tx.type !== TransactionResponseType.User) throw new Error('Invalid transaction type')
+    if (tx.type !== TransactionResponseType.User) throw new CCIPAptosTransactionTypeInvalidError()
 
     return {
       hash: tx.hash,
@@ -232,7 +246,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     onRamp?: string,
     opts?: { page?: number },
   ): Promise<CCIPRequest> {
-    if (!onRamp) throw new Error('onRamp is required')
+    if (!onRamp) throw new CCIPOnRampRequiredError()
     return fetchCCIPRequestById(this, messageId, {
       address: await this.getOnRampForRouter(onRamp, 0n),
       ...opts,
@@ -325,7 +339,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         firstErr ??= err as Error
       }
     }
-    throw firstErr ?? new Error(`Could not view 'get_token' in ${tokenPool}`)
+    throw CCIPError.from(firstErr ?? `Could not view 'get_token' in ${tokenPool}`, 'UNKNOWN')
   }
 
   /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
@@ -333,7 +347,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     const registry = address.split('::')[0] + '::token_admin_registry'
     const [type] = await this.typeAndVersion(registry)
     if (type !== 'TokenAdminRegistry') {
-      throw new Error(`Expected ${registry} to have TokenAdminRegistry type, got=${type}`)
+      throw new CCIPAptosRegistryTypeInvalidError(registry, type)
     }
     return registry
   }
@@ -351,7 +365,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       (typeof data !== 'string' || !data.startsWith('{')) &&
       (typeof data !== 'object' || data == null || isBytesLike(data))
     )
-      throw new Error(`invalid log data: ${util.inspect(log)}`)
+      throw new CCIPAptosLogInvalidError(util.inspect(log))
     // offload massaging to generic decodeJsonMessage
     try {
       return decodeMessage(data)
@@ -418,7 +432,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
           accounts: extraArgs.accounts.map(getAddressBytes),
         }).toBytes(),
       ])
-    throw new Error('Aptos can only encode EVMExtraArgsV2 & SVMExtraArgsV1')
+    throw new CCIPAptosExtraArgsEncodingError()
   }
 
   /**
@@ -428,7 +442,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @returns Array of CommitReport or undefined if not valid.
    */
   static decodeCommits({ data }: Pick<Log_, 'data'>, lane?: Lane): CommitReport[] | undefined {
-    if (!data || typeof data != 'object') throw new Error('invalid aptos log')
+    if (!data || typeof data != 'object') throw new CCIPAptosLogInvalidError(data)
     const data_ = data as { blessed_merkle_roots: unknown[]; unblessed_merkle_roots: unknown[] }
     if (!data_.blessed_merkle_roots) return
     let commits = (
@@ -458,7 +472,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @returns ExecutionReceipt or undefined if not valid.
    */
   static decodeReceipt({ data }: Pick<Log_, 'data'>): ExecutionReceipt | undefined {
-    if (!data || typeof data != 'object') throw new Error('invalid aptos log')
+    if (!data || typeof data != 'object') throw new CCIPAptosLogInvalidError(data)
     const data_ = data as { message_id: string; state: number }
     if (!data_.message_id || !data_.state) return
     return convertKeysToCamelCase(data_, (v) =>
@@ -482,7 +496,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         bytes = bytes.slice(0, idx)
       }
     }
-    if (dataLength(bytes) > 32) throw new Error(`Invalid aptos address: "${hexlify(bytes)}"`)
+    if (dataLength(bytes) > 32) throw new CCIPAptosAddressInvalidError(hexlify(bytes))
     return zeroPadValue(bytes, 32) + suffix
   }
 
@@ -532,9 +546,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   ): Promise<CCIPRequest> {
     const account = opts.wallet
     if (!isAptosAccount(account)) {
-      throw new Error(
-        `${this.constructor.name}.sendMessage requires an Aptos account wallet, got=${util.inspect(opts.wallet)}`,
-      )
+      throw new CCIPAptosWalletInvalidError(this.constructor.name, util.inspect(opts.wallet))
     }
 
     const unsignedTx = await this.generateUnsignedSendMessage(
@@ -576,7 +588,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     opts: { gasLimit?: number },
   ): Promise<UnsignedAptosTx> {
     if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
-      throw new Error('Aptos expects EVMExtraArgsV2 reports')
+      throw new CCIPAptosExtraArgsV2RequiredError()
     }
 
     const tx = await generateUnsignedExecuteReport(
@@ -600,9 +612,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   ): Promise<ChainTransaction> {
     const account = opts.wallet
     if (!isAptosAccount(account)) {
-      throw new Error(
-        `${this.constructor.name}.sendMessage requires an Aptos account wallet, got=${util.inspect(opts.wallet)}`,
-      )
+      throw new CCIPAptosWalletInvalidError(this.constructor.name, util.inspect(opts.wallet))
     }
 
     const unsignedTx = await this.generateUnsignedExecuteReport(
@@ -676,8 +686,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         functionArguments: [token],
       },
     })
-    if (administrator.match(/^0x0*$/))
-      throw new Error(`Token=${token} not registered in registry=${registry}`)
+    if (administrator.match(/^0x0*$/)) throw new CCIPAptosTokenNotRegisteredError(token, registry)
     return {
       administrator,
       ...(!pendingAdministrator.match(/^0x0*$/) && { pendingAdministrator }),
@@ -721,7 +730,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         firstErr ??= err as Error
       }
     }
-    throw firstErr ?? new Error(`Could not get tokenPool configs from ${tokenPool}`)
+    throw CCIPError.from(firstErr ?? `Could not get tokenPool configs from ${tokenPool}`, 'UNKNOWN')
   }
 
   /** {@inheritDoc Chain.getTokenPoolRemotes} */
@@ -818,7 +827,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         firstErr ??= err as Error
       }
     }
-    throw firstErr ?? new Error(`Could not view 'get_remote_token' in ${tokenPool}`)
+    throw CCIPError.from(firstErr ?? `Could not view 'get_remote_token' in ${tokenPool}`, 'UNKNOWN')
   }
 
   /** {@inheritDoc Chain.getFeeTokens} */

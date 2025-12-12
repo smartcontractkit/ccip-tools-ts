@@ -441,7 +441,7 @@ describe('fetchAllMessagesInBatch', () => {
           minSeqNr: 1n,
           maxSeqNr: 10n,
         }),
-      /Could not find all expected/,
+      /Could not find all messages in batch/,
     )
   })
 })

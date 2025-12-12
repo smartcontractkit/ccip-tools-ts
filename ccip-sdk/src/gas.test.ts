@@ -260,7 +260,7 @@ describe('estimateExecGasForRequest', () => {
         })
       },
       {
-        message: 'legacy <1.5 tokenPools not supported',
+        message: 'Legacy <1.5 token pools not supported',
       },
     )
   })

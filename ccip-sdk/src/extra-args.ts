@@ -1,5 +1,6 @@
 import { type BytesLike, id } from 'ethers'
 
+import { CCIPChainFamilyUnsupportedError, CCIPExtraArgsParseError } from './errors/index.ts'
 import { supportedChains } from './supported-chains.ts'
 import { ChainFamily } from './types.ts'
 
@@ -67,7 +68,7 @@ export type ExtraArgs = EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1 | SuiEx
  **/
 export function encodeExtraArgs(args: ExtraArgs, from: ChainFamily = ChainFamily.EVM): string {
   const chain = supportedChains[from]
-  if (!chain) throw new Error(`Unsupported chain family: ${from}`)
+  if (!chain) throw new CCIPChainFamilyUnsupportedError(from)
   return chain.encodeExtraArgs(args)
 }
 
@@ -90,7 +91,7 @@ export function decodeExtraArgs(
   let chains
   if (from) {
     const chain = supportedChains[from]
-    if (!chain) throw new Error(`Unsupported chain family: ${from}`)
+    if (!chain) throw new CCIPChainFamilyUnsupportedError(from)
     chains = [chain]
   } else {
     chains = Object.values(supportedChains)
@@ -99,5 +100,5 @@ export function decodeExtraArgs(
     const decoded = chain.decodeExtraArgs(data)
     if (decoded) return decoded
   }
-  throw new Error(`Could not parse extraArgs from "${from}"`)
+  throw new CCIPExtraArgsParseError(String(from ?? data))
 }

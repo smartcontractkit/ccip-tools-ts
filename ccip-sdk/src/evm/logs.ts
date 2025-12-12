@@ -8,7 +8,12 @@ import {
 import { memoize } from 'micro-memoize'
 
 import type { LogFilter } from '../chain.ts'
-import { blockRangeGenerator, getSomeBlockNumberBefore, util } from '../utils.ts'
+import {
+  CCIPLogTopicsNotFoundError,
+  CCIPLogsNotFoundError,
+  CCIPRpcNotFoundError,
+} from '../errors/index.ts'
+import { blockRangeGenerator, getSomeBlockNumberBefore } from '../utils.ts'
 import { getAllFragmentsMatchingEvents } from './const.ts'
 import type { WithLogger } from '../types.ts'
 
@@ -110,7 +115,7 @@ async function getFallbackArchiveLogs(
   const providerLogs$ = getFallbackRpcsList()
     .then((rpcs) => {
       const rpc = rpcs.find(({ chainId: id }) => id === chainId)
-      if (!rpc) throw new Error(`No RPC found for chainId=${chainId}`)
+      if (!rpc) throw new CCIPRpcNotFoundError(chainId)
       return Array.from(
         new Set(rpc.rpc.map(({ url }) => url).filter((url) => url.match(/^https?:\/\//))),
       )
@@ -139,7 +144,7 @@ async function getFallbackArchiveLogs(
                 toBlock: filter.endBlock ?? 'latest',
               })
               .then((logs) => {
-                if (!logs.length) throw new Error('No logs found')
+                if (!logs.length) throw new CCIPLogsNotFoundError(filter)
                 logger.debug(
                   'getFallbackArchiveLogs raced',
                   url,
@@ -195,7 +200,7 @@ export async function* getEvmLogs(
         .flat(),
     )
     if (!topics.size) {
-      throw new Error(`Could not find matching topics: ${util.inspect(filter.topics)}`)
+      throw new CCIPLogTopicsNotFoundError(filter.topics)
     }
     filter.topics = [Array.from(topics)]
   }

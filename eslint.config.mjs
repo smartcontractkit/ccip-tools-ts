@@ -43,6 +43,26 @@ export default defineConfig(
     },
   },
   {
+    // Ban generic Error constructor - enforce typed error classes
+    files: ['ccip-sdk/src/**/*.ts', 'ccip-cli/src/**/*.ts'],
+    ignores: ['**/*.test.ts', '**/__tests__/**', '**/__mocks__/**'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "NewExpression[callee.name='Error']",
+          message:
+            'Use CCIPError or specialized error classes instead of generic Error. See src/errors/specialized.ts for available error types.',
+        },
+        {
+          selector: "CallExpression[callee.name='Error']",
+          message:
+            'Use CCIPError or specialized error classes instead of generic Error. Use "new" with error classes.',
+        },
+      ],
+    },
+  },
+  {
     // Apply these settings to test files
     files: ['**/*.test.ts', '**/__tests__/**/*.ts', '**/__mocks__/**/*.ts'],
     rules: {

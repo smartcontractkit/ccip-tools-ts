@@ -24,6 +24,7 @@
 import {
   type Chain,
   type RateLimiterState,
+  CCIPTokenNotConfiguredError,
   bigIntReplacer,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -111,8 +112,7 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     if (!info) return // format != pretty
     registryConfig = await source.getRegistryTokenConfig(registry, info.token)
     tokenPool = registryConfig.tokenPool
-    if (!tokenPool)
-      throw new Error(`TokenPool not set in tokenAdminRegistry=${registry} for token=${info.token}`)
+    if (!tokenPool) throw new CCIPTokenNotConfiguredError(info.token, registry)
     poolConfigs = await source.getTokenPoolConfigs(tokenPool)
   } else {
     if (!argv.token) {
@@ -131,10 +131,7 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
 
       registryConfig = await source.getRegistryTokenConfig(registry, argv.token)
       tokenPool = registryConfig.tokenPool
-      if (!tokenPool)
-        throw new Error(
-          `TokenPool not set in tokenAdminRegistry=${registry} for token=${argv.token}`,
-        )
+      if (!tokenPool) throw new CCIPTokenNotConfiguredError(argv.token, registry)
       poolConfigs = await source.getTokenPoolConfigs(tokenPool)
     }
 

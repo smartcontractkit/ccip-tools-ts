@@ -1,6 +1,10 @@
 import { type Cell, Address, beginCell } from '@ton/core'
 import { sha256, toBigInt } from 'ethers'
 
+import {
+  CCIPExtraArgsInvalidError,
+  CCIPHasherVersionUnsupportedError,
+} from '../errors/specialized.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
@@ -29,7 +33,7 @@ export function getTONLeafHasher<V extends CCIPVersion = CCIPVersion>({
   version: V
 }): LeafHasher<V> {
   if (version !== CCIPVersion.V1_6) {
-    throw new Error(`TON only supports CCIP v1.6, got: ${version}`)
+    throw new CCIPHasherVersionUnsupportedError('TON', version)
   }
 
   // Pre-compute metadata hash once for all messages using this hasher
@@ -95,9 +99,7 @@ function hashV16TONMessage(message: CCIPMessage_V1_6, metadataHash: string): str
       networkInfo(message.header.sourceChainSelector).family,
     )
     if (!parsedArgs || parsedArgs._tag !== 'EVMExtraArgsV2') {
-      throw new Error(
-        'Invalid extraArgs for TON message, must be EVMExtraArgsV2 (GenericExtraArgsV2)',
-      )
+      throw new CCIPExtraArgsInvalidError('TON', message.extraArgs)
     }
     gasLimit = parsedArgs.gasLimit || 0n
   }

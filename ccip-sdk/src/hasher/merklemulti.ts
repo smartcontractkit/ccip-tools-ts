@@ -1,5 +1,15 @@
 // For reference implementation, see https://github.com/smartcontractkit/ccip/blob/ccip-develop/core/services/ocr2/plugins/ccip/merklemulti/merkle_multi.go
 import { ZERO_HASH, hashInternal } from './common.ts'
+import {
+  CCIPMerkleFlagsMismatchError,
+  CCIPMerkleHashesTooLargeError,
+  CCIPMerkleInternalError,
+  CCIPMerkleProofEmptyError,
+  CCIPMerkleProofFlagsMismatchError,
+  CCIPMerkleProofIncompleteError,
+  CCIPMerkleProofTooLargeError,
+  CCIPMerkleTreeEmptyError,
+} from '../errors/index.ts'
 
 export const MAX_NUMBER_TREE_LEAVES = 256
 
@@ -146,7 +156,7 @@ export class Tree {
    */
   constructor(leafHashes: Hash[]) {
     if (leafHashes.length === 0) {
-      throw new Error('Cannot construct a tree without leaves')
+      throw new CCIPMerkleTreeEmptyError()
     }
 
     // Initialize the first layer with leaf hashes.
@@ -227,21 +237,21 @@ export function verifyComputeRoot(leafHashes: Hash[], proof: Proof): Hash {
   const proofsLength = proof.hashes.length
 
   if (leavesLength === 0 && proofsLength === 0) {
-    throw new Error('leaves and proofs are empty')
+    throw new CCIPMerkleProofEmptyError()
   }
 
   if (leavesLength > MAX_NUMBER_TREE_LEAVES + 1 || proofsLength > MAX_NUMBER_TREE_LEAVES + 1) {
-    throw new Error(`leaves or proofs length beyond the limit of ${MAX_NUMBER_TREE_LEAVES}`)
+    throw new CCIPMerkleProofTooLargeError(MAX_NUMBER_TREE_LEAVES)
   }
 
   const totalHashes = leavesLength + proofsLength - 1
 
   if (totalHashes > MAX_NUMBER_TREE_LEAVES) {
-    throw new Error(`total hashes length cannot be larger than ${MAX_NUMBER_TREE_LEAVES}`)
+    throw new CCIPMerkleHashesTooLargeError(totalHashes, MAX_NUMBER_TREE_LEAVES)
   }
 
   if (totalHashes !== proof.sourceFlags.length) {
-    throw new Error(`hashes ${totalHashes} != sourceFlags ${proof.sourceFlags.length}`)
+    throw new CCIPMerkleFlagsMismatchError(totalHashes, proof.sourceFlags.length)
   }
 
   // If there are no hashes, return the first leaf hash.
@@ -253,7 +263,7 @@ export function verifyComputeRoot(leafHashes: Hash[], proof: Proof): Hash {
   const sourceProofCount = proof.countSourceFlags(false)
 
   if (sourceProofCount !== proofsLength) {
-    throw new Error(`proof source flags ${sourceProofCount} != proof hashes ${proofsLength}`)
+    throw new CCIPMerkleProofFlagsMismatchError(sourceProofCount, proofsLength)
   }
 
   const hashes: Hash[] = new Array<Hash>(totalHashes)
@@ -293,7 +303,7 @@ export function verifyComputeRoot(leafHashes: Hash[], proof: Proof): Hash {
     }
 
     if (a === undefined || b === undefined) {
-      throw new Error('a or b is undefined')
+      throw new CCIPMerkleInternalError('Hash operand is undefined')
     }
 
     // Compute the hash of a and b and store it in the hashes array.
@@ -302,7 +312,7 @@ export function verifyComputeRoot(leafHashes: Hash[], proof: Proof): Hash {
 
   // Check if all proofs were used during processing.
   if (hashPos !== totalHashes - 1 || leafPos !== leavesLength || proofPos !== proofsLength) {
-    throw new Error('not all proofs used during processing')
+    throw new CCIPMerkleProofIncompleteError()
   }
 
   // Return the computed Merkle root hash.

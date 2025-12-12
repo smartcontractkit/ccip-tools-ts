@@ -1,6 +1,11 @@
 import { memoize } from 'micro-memoize'
 
 import type { Chain, ChainStatic } from './chain.ts'
+import {
+  CCIPMerkleRootMismatchError,
+  CCIPMessageNotInBatchError,
+  CCIPOffRampNotFoundError,
+} from './errors/index.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
 import {
   type CCIPCommit,
@@ -35,9 +40,10 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
 
   const msgIdx = messagesInBatch.findIndex((message) => message.header.messageId === messageId)
   if (msgIdx < 0) {
-    throw new Error(
-      `Could not find ${messageId} in batch seqNums=[${Number(messagesInBatch[0].header.sequenceNumber)}..${Number(messagesInBatch[messagesInBatch.length - 1].header.sequenceNumber)}]`,
-    )
+    throw new CCIPMessageNotInBatchError(messageId, {
+      min: messagesInBatch[0].header.sequenceNumber,
+      max: messagesInBatch[messagesInBatch.length - 1].header.sequenceNumber,
+    })
   }
 
   const leaves = messagesInBatch.map((message) => hasher(message))
@@ -45,9 +51,7 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
   // Create multi-merkle tree
   const tree = new Tree(leaves)
   if (merkleRoot && tree.root() !== merkleRoot) {
-    throw new Error(
-      `Merkle root created from send events doesn't match ReportAccepted merkle root: expected=${merkleRoot}, got=${tree.root()}`,
-    )
+    throw new CCIPMerkleRootMismatchError(merkleRoot, tree.root())
   }
 
   // Generate proof from multi-merkle tree
@@ -89,7 +93,7 @@ export const discoverOffRamp = memoize(
         }
       }
     }
-    throw new Error(`No matching offRamp found for "${onRamp}" on "${dest.network.name}"`)
+    throw new CCIPOffRampNotFoundError(onRamp, dest.network.name)
   },
   {
     transformKey: ([source, dest, onRamp]) =>

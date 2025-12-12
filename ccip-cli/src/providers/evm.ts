@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import util from 'util'
 
+import { CCIPArgumentInvalidError } from '@chainlink/ccip-sdk/src/index.ts'
 import { LedgerSigner } from '@ethers-ext/signer-ledger'
 import { password } from '@inquirer/prompts'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
@@ -43,8 +43,7 @@ export async function loadEvmWallet(
         : Number(walletOpt),
     )
   }
-  if (typeof walletOpt !== 'string')
-    throw new Error(`Invalid wallet option: ${util.inspect(walletOpt)}`)
+  if (typeof walletOpt !== 'string') throw new CCIPArgumentInvalidError('wallet', String(walletOpt))
   if ((walletOpt ?? '').startsWith('ledger')) {
     let derivationPath = walletOpt.split(':')[1]
     if (derivationPath && !isNaN(Number(derivationPath)))
