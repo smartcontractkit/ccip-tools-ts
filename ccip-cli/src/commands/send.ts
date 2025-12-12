@@ -8,7 +8,6 @@ import {
   CCIPChainFamilyUnsupportedError,
   CCIPTokenNotFoundError,
   ChainFamily,
-  bigIntReplacer,
   estimateExecGasForRequest,
   getDataBytes,
   networkInfo,
@@ -18,14 +17,9 @@ import { type BytesLike, dataLength, formatUnits, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
-import { type Ctx, Format } from './types.ts'
-import {
-  getCtx,
-  logParsedError,
-  parseTokenAmounts,
-  prettyRequest,
-  withDateTimestamp,
-} from './utils.ts'
+import { showRequests } from './show.ts'
+import type { Ctx } from './types.ts'
+import { getCtx, logParsedError, parseTokenAmounts } from './utils.ts'
 import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 
 export const command = 'send <source> <router> <dest>'
@@ -129,6 +123,11 @@ export const builder = (yargs: Argv) =>
         type: 'boolean',
         describe:
           "Approve the maximum amount of tokens to transfer; default=false approves only what's needed",
+      },
+      wait: {
+        type: 'boolean',
+        default: false,
+        describe: 'Wait for execution',
       },
     })
     .check(
@@ -330,15 +329,13 @@ async function sendMessage(
     request.message.header.messageId,
   )
 
-  switch (argv.format) {
-    case Format.log:
-      logger.log(`message ${request.log.index} =`, withDateTimestamp(request))
-      break
-    case Format.pretty:
-      await prettyRequest.call(ctx, source, request)
-      break
-    case Format.json:
-      logger.info(JSON.stringify(request, bigIntReplacer, 2))
-      break
-  }
+  await showRequests(ctx, {
+    ...argv,
+    txHash: request.tx.hash,
+    'tx-hash': request.tx.hash,
+    'id-from-source': undefined,
+    idFromSource: undefined,
+    'log-index': undefined,
+    logIndex: undefined,
+  })
 }

@@ -1,9 +1,11 @@
 import {
   type CCIPRequest,
+  type Chain,
   type ChainTransaction,
   CCIPExecTxRevertedError,
   CCIPNotImplementedError,
   bigIntReplacer,
+  CCIPMessageIdNotFoundError,
   discoverOffRamp,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -48,6 +50,10 @@ export const builder = (yargs: Argv) =>
         describe:
           'Search by messageId instead of txHash; requires `[onRamp@]sourceNetwork` (onRamp address may be required in some chains)',
       },
+      wait: {
+        type: 'boolean',
+        describe: 'Wait for execution',
+      },
     })
 
 /**
@@ -64,7 +70,10 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
     .finally(() => controller.abort('Exited'))
 }
 
-async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
+/**
+ * Show details of a request.
+ */
+export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
   const { logger } = ctx
   let source, getChain, tx: ChainTransaction, request: CCIPRequest
   // messageId not yet implemented for Solana
@@ -109,12 +118,15 @@ async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
     throw new CCIPExecTxRevertedError(request.log.transactionHash, {
       context: { error: request.tx.error },
     })
+  if (argv.wait === false) return // `false` used by call at end of `send` command
+
+  await waitForRequestFinalized(source, request)
 
   const dest = await getChain(request.lane.destChainSelector)
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
   const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
 
-  const commit = await dest.fetchCommitReport(commitStore, request, argv)
+  const commit = await dest.fetchCommitReport(commitStore, request, { ...argv, watch: argv.wait })
   switch (argv.format) {
     case Format.log:
       logger.log('commit =', commit)
@@ -128,7 +140,10 @@ async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
   }
 
   let found = false
-  for await (const receipt of dest.fetchExecutionReceipts(offRamp, request, commit, argv)) {
+  for await (const receipt of dest.fetchExecutionReceipts(offRamp, request, commit, {
+    ...argv,
+    watch: argv.wait,
+  })) {
     switch (argv.format) {
       case Format.log:
         logger.log('receipt =', withDateTimestamp(receipt))
@@ -148,6 +163,24 @@ async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
         break
     }
     found = true
+    break
   }
   if (!found) logger.warn(`No execution receipt found for request`)
+}
+
+async function waitForRequestFinalized(source: Chain, request: CCIPRequest) {
+  for await (const log of source.getLogs({
+    address: request.lane.onRamp,
+    startBlock: request.tx.blockNumber,
+    endBlock: 'finalized',
+    topics: [request.log.topics[0]],
+    watch: true,
+  })) {
+    if (log.transactionHash === request.tx.hash) {
+      source.logger.info(`Request ${request.message.header.messageId} finalized ✅`)
+      break
+    } else if (log.blockNumber > request.log.blockNumber) {
+      throw new CCIPMessageIdNotFoundError(request.message.header.messageId)
+    }
+  }
 }
