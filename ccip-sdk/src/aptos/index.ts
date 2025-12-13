@@ -504,6 +504,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /**
+   * Validates a transaction hash format for Aptos
+   */
+  static isTxHash(v: unknown): v is `0x${string}` {
+    return typeof v === 'string' && /^0x[0-9a-fA-F]{64}$/.test(v)
+  }
+
+  /**
    * Gets the leaf hasher for Aptos destination chains.
    * @param lane - Lane configuration.
    * @returns Leaf hasher function.

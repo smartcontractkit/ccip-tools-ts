@@ -946,6 +946,19 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
+   * Validates a transaction hash format for Solana
+   */
+  static isTxHash(v: unknown): v is string {
+    if (typeof v !== 'string') return false
+    try {
+      return bs58.decode(v).length === 64
+    } catch (_) {
+      // pass
+    }
+    return false
+  }
+
+  /**
    * Gets the leaf hasher for Solana destination chains.
    * @param lane - Lane configuration.
    * @returns Leaf hasher function.

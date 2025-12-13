@@ -37,7 +37,14 @@ export {
   CCIPVersion,
   ExecutionState,
 } from './types.ts'
-export { bigIntReplacer, bigIntReviver, decodeAddress, getDataBytes, networkInfo } from './utils.ts'
+export {
+  bigIntReplacer,
+  bigIntReviver,
+  decodeAddress,
+  getDataBytes,
+  isSupportedTxHash,
+  networkInfo,
+} from './utils.ts'
 
 // errors
 export * from './errors/index.ts'

@@ -210,6 +210,13 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /**
+   * Validates a transaction hash format for Sui
+   */
+  static isTxHash(_v: unknown): _v is string {
+    return false
+  }
+
+  /**
    * Gets the leaf hasher for Sui destination chains.
    * @param lane - Lane configuration.
    * @returns Leaf hasher function.

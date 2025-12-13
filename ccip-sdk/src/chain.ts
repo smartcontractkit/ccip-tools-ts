@@ -569,6 +569,10 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    */
   getAddress(bytes: BytesLike): string
   /**
+   * Validates a transaction hash format for this chain family
+   */
+  isTxHash(v: unknown): v is string
+  /**
    * Create a leaf hasher for this dest chain and lane
    * @param lane - source, dest and onramp lane info
    * @param ctx - context object containing logger

@@ -654,6 +654,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Validates a transaction hash format for EVM
+   */
+  static isTxHash(v: unknown): v is `0x${string}` {
+    return typeof v === 'string' && /^0x[0-9a-fA-F]{64}$/.test(v)
+  }
+
+  /**
    * Gets lane configuration from an OnRamp contract.
    * @param onRamp - OnRamp contract address.
    * @returns Lane configuration.
