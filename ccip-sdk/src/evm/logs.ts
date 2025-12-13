@@ -275,7 +275,7 @@ export async function* getEvmLogs(
 
   // watch mode, otherwise return
   while (filter.watch) {
-    let nextBlock$ = new Promise<number | false>(
+    let cont$ = new Promise<number | false>(
       (resolve) =>
         void provider.once(
           !filter.endBlock || typeof filter.endBlock === 'number' || filter.endBlock == 'latest'
@@ -284,15 +284,9 @@ export async function* getEvmLogs(
           resolve,
         ),
     )
-    if (ctx.destroy$)
-      nextBlock$ = Promise.race([
-        ctx.destroy$.then(
-          () => false as const,
-          () => false as const,
-        ),
-        nextBlock$,
-      ])
-    if ((await nextBlock$) === false) break
+    if (filter.watch instanceof Promise)
+      cont$ = Promise.race([filter.watch.then(() => false as const), cont$])
+    if ((await cont$) === false) break
 
     const filter_ = {
       fromBlock: Math.max(latestLogBlockNumber, endBlock - (filter.page ?? 10e3)) + 1,

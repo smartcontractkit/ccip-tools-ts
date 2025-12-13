@@ -89,7 +89,7 @@ async function binarySearchFirst(
 }
 
 async function* fetchEventsForward(
-  { provider, destroy$ }: { provider: Aptos; destroy$?: Promise<unknown> },
+  { provider }: { provider: Aptos },
   opts: LogFilter & { pollInterval?: number },
   eventHandlerField: string,
   stateAddr: string,
@@ -190,7 +190,8 @@ async function* fetchEventsForward(
       let break$ = sleep(
         Math.max((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq), 1),
       ).then(() => false)
-      if (destroy$) break$ = Promise.race([break$, destroy$.then(() => true)])
+      if (opts.watch instanceof Promise)
+        break$ = Promise.race([break$, opts.watch.then(() => true)])
       if (await break$) break
     }
   }
@@ -238,7 +239,7 @@ async function* fetchEventsBackward(
  * @returns Async generator of log entries.
  */
 export async function* streamAptosLogs(
-  ctx: { provider: Aptos; destroy$?: Promise<unknown> },
+  ctx: { provider: Aptos },
   opts: LogFilter & { versionAsHash?: boolean },
 ): AsyncGenerator<Log_> {
   const limit = 100

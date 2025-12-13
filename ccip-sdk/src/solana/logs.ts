@@ -13,7 +13,7 @@ const DEFAULT_POLL_INTERVAL = 5e3
 
 async function* fetchSigsForward(
   opts: LogFilter & { pollInterval?: number },
-  ctx: { connection: Connection; destroy$?: Promise<unknown> },
+  ctx: { connection: Connection },
 ) {
   const { connection } = ctx
   const limit = Math.min(opts?.page || 1000, 1000)
@@ -61,7 +61,7 @@ async function* fetchSigsForward(
     let break$ = sleep(
       Math.max((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq), 1),
     ).then(() => false)
-    if (ctx.destroy$) break$ = Promise.race([break$, ctx.destroy$.then(() => true)])
+    if (opts.watch instanceof Promise) break$ = Promise.race([break$, opts.watch.then(() => true)])
     if (await break$) break
 
     lastReq = performance.now()
@@ -90,7 +90,7 @@ async function* fetchSigsForward(
 
 async function* fetchSigsBackwards(
   opts: LogFilter & { pollInterval?: number },
-  ctx: { connection: Connection; destroy$?: Promise<unknown> },
+  ctx: { connection: Connection },
 ) {
   const { connection } = ctx
   const limit = Math.min(opts?.page || 1000, 1000)
@@ -129,7 +129,6 @@ export async function* getTransactionsForAddress(
   opts: Omit<LogFilter, 'topics'> & { pollInterval?: number },
   ctx: {
     connection: Connection
-    destroy$?: Promise<unknown>
     getTransaction: (signature: string) => Promise<SolanaTransaction>
   },
 ): AsyncGenerator<SolanaTransaction> {

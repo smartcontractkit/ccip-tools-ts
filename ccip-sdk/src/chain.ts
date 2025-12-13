@@ -48,10 +48,10 @@ export type LogFilter = {
   endBlock?: number | 'finalized' | 'latest'
   /** Solana: optional hint txHash for end of iteration. */
   endBefore?: string
-  /** watch mode: polls for new logs after fetching since start (required), until endBlock tag
-   *  (e.g. endBlock=finalized polls only finalized logs)
-   *  */
-  watch?: boolean
+  /** watch mode: polls for new logs after fetching since start (required), until endBlock finality tag
+   *  (e.g. endBlock=finalized polls only finalized logs); can be a promise to cancel loop
+   */
+  watch?: boolean | Promise<unknown>
   /** Contract address to filter logs by. */
   address?: string
   /** Topics to filter logs by. */
@@ -170,6 +170,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       'tx'
     >,
     finality: number | 'finalized' = 'finalized',
+    cancel$?: Promise<unknown>,
   ): Promise<true> {
     const timestamp = log.tx?.timestamp ?? tx?.timestamp
     if (!timestamp || Date.now() / 1e3 - timestamp > 60) {
@@ -185,7 +186,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       startBlock: log.blockNumber,
       endBlock: finality,
       topics: [log.topics[0]],
-      watch: true,
+      watch: cancel$ ?? true,
     })) {
       if (l.transactionHash === log.transactionHash) {
         this.logger.info(`Request "${log.transactionHash}" finalized ✅`)
@@ -429,7 +430,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   async fetchCommitReport(
     commitStore: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.sequenceNumber' | 'tx.timestamp'>,
-    hints?: { startBlock?: number; page?: number; watch?: boolean },
+    hints?: Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number },
   ): Promise<CCIPCommit> {
     return fetchCommitReport(this, commitStore, request, hints)
   }
@@ -446,7 +447,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     offRamp: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
-    hints?: { page?: number; watch?: boolean },
+    hints?: Pick<LogFilter, 'page' | 'watch'>,
   ): AsyncIterableIterator<CCIPExecution> {
     const onlyLast = !commit?.log.blockNumber && !request.tx.timestamp // backwards
     for await (const log of this.getLogs({

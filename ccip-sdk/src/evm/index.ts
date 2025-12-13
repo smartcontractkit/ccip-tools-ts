@@ -307,6 +307,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /** {@inheritDoc Chain.getLogs} */
   async *getLogs(filter: LogFilter & { onlyFallback?: boolean }): AsyncIterableIterator<Log> {
+    if (filter.watch instanceof Promise)
+      filter = { ...filter, watch: Promise.race([filter.watch, this.destroy$]) }
     yield* getEvmLogs(filter, this)
   }
 
@@ -1449,7 +1451,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     offRamp: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
-    opts?: { page?: number; watch?: boolean },
+    opts?: Pick<LogFilter, 'page' | 'watch'>,
   ): AsyncIterableIterator<CCIPExecution> {
     let opts_: Parameters<EVMChain['getLogs']>[0] | undefined = opts
     if (request.lane.version < CCIPVersion.V1_6) {

@@ -346,6 +346,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async *getTransactionsForAddress(
     opts: Omit<LogFilter, 'topics'>,
   ): AsyncGenerator<SolanaTransaction> {
+    if (opts.watch instanceof Promise)
+      opts = { ...opts, watch: Promise.race([opts.watch, this.destroy$]) }
     yield* getTransactionsForAddress(opts, this)
   }
 
@@ -1145,7 +1147,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   override async fetchCommitReport(
     commitStore: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.sequenceNumber' | 'tx.timestamp'>,
-    hints?: { startBlock?: number; page?: number; watch?: boolean },
+    hints?: Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number },
   ): Promise<CCIPCommit> {
     const commitsAroundSeqNum = await this.connection.getProgramAccounts(
       new PublicKey(commitStore),
@@ -1207,7 +1209,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     offRamp: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
-    opts?: { page?: number; watch?: boolean },
+    opts?: Pick<LogFilter, 'page' | 'watch'>,
   ): AsyncIterableIterator<CCIPExecution> {
     let opts_: Parameters<SolanaChain['getLogs']>[0] | undefined = opts
     if (commit) {
