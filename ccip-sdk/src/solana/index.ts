@@ -190,7 +190,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     this.getBlockTimestamp = memoize(this.getBlockTimestamp.bind(this), {
       async: true,
       maxSize: 100,
-      forceUpdate: (key) => typeof key[key.length - 1] !== 'number',
+      forceUpdate: ([k]) => typeof k !== 'number' || k <= 0,
     })
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       maxSize: 100,
@@ -289,6 +289,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         throw new CCIPBlockTimeNotFoundError(`finalized slot ${slot}`)
       }
       return blockTime
+    } else if (block <= 0) {
+      block = (await this.connection.getSlot('confirmed')) + block
     }
 
     const blockTime = await this.connection.getBlockTime(block)

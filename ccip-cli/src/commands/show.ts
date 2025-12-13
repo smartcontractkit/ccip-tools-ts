@@ -1,11 +1,9 @@
 import {
   type CCIPRequest,
-  type Chain,
   type ChainTransaction,
   CCIPExecTxRevertedError,
   CCIPNotImplementedError,
   bigIntReplacer,
-  CCIPMessageIdNotFoundError,
   discoverOffRamp,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -19,6 +17,7 @@ import {
   prettyCommit,
   prettyReceipt,
   prettyRequest,
+  prettyTable,
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
@@ -95,32 +94,46 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     request = await selectRequest(await source.fetchRequestsInTx(tx), 'to know more', argv)
   }
 
-  const offchainTokenData = await source.fetchOffchainTokenData(request)
-
   switch (argv.format) {
     case Format.log: {
-      logger.log(
-        `message ${request.log.index} =`,
-        withDateTimestamp(request),
-        '\nattestations =',
-        offchainTokenData,
-      )
+      logger.log(`message ${request.log.index} =`, withDateTimestamp(request))
       break
     }
     case Format.pretty:
-      await prettyRequest.call(ctx, source, request, offchainTokenData)
+      await prettyRequest.call(ctx, source, request)
       break
     case Format.json:
-      logger.info(JSON.stringify({ ...request, offchainTokenData }, bigIntReplacer, 2))
+      logger.info(JSON.stringify(request, bigIntReplacer, 2))
       break
   }
   if (request.tx.error)
     throw new CCIPExecTxRevertedError(request.log.transactionHash, {
       context: { error: request.tx.error },
     })
-  if (argv.wait === false) return // `false` used by call at end of `send` command
 
-  await waitForRequestFinalized(source, request)
+  if (argv.wait === false)
+    return // `false` used by call at end of `send` command without `--wait`
+  else if (argv.wait) await source.waitFinalized(request)
+  const offchainTokenData = await source.fetchOffchainTokenData(request)
+
+  if (offchainTokenData?.length && offchainTokenData.some((d) => !!d)) {
+    switch (argv.format) {
+      case Format.log: {
+        logger.log('attestations =', offchainTokenData)
+        break
+      }
+      case Format.pretty:
+        ctx.logger.info('Attestations:')
+        for (const attestation of offchainTokenData) {
+          const { _tag: type, ...rest } = attestation!
+          prettyTable.call(ctx, { type, ...rest })
+        }
+        break
+      case Format.json:
+        logger.info(JSON.stringify({ attestations: offchainTokenData }, bigIntReplacer, 2))
+        break
+    }
+  }
 
   const dest = await getChain(request.lane.destChainSelector)
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
@@ -166,21 +179,4 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     if (argv.wait) break
   }
   if (!found) logger.warn(`No execution receipt found for request`)
-}
-
-async function waitForRequestFinalized(source: Chain, request: CCIPRequest) {
-  for await (const log of source.getLogs({
-    address: request.lane.onRamp,
-    startBlock: request.tx.blockNumber,
-    endBlock: 'finalized',
-    topics: [request.log.topics[0]],
-    watch: true,
-  })) {
-    if (log.transactionHash === request.tx.hash) {
-      source.logger.info(`Request ${request.message.header.messageId} finalized ✅`)
-      break
-    } else if (log.blockNumber > request.log.blockNumber) {
-      throw new CCIPMessageIdNotFoundError(request.message.header.messageId)
-    }
-  }
 }

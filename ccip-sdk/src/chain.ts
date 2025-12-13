@@ -1,9 +1,9 @@
 import type { BytesLike } from 'ethers'
-import type { PickDeep } from 'type-fest'
+import type { PickDeep, SetOptional } from 'type-fest'
 
 import type { UnsignedAptosTx } from './aptos/types.ts'
 import { fetchCommitReport } from './commits.ts'
-import { CCIPChainFamilyMismatchError } from './errors/index.ts'
+import { CCIPChainFamilyMismatchError, CCIPTransactionNotFinalizedError } from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/index.ts'
 import type {
   EVMExtraArgsV1,
@@ -143,7 +143,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
   /**
    * Fetch the timestamp of a given block
-   * @param block - block number or 'finalized'
+   * @param block - positive block number, negative finality depth or 'finalized' tag
    * @returns timestamp of the block, in seconds
    */
   abstract getBlockTimestamp(block: number | 'finalized'): Promise<number>
@@ -153,6 +153,49 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @returns generic transaction details
    */
   abstract getTransaction(hash: string): Promise<ChainTransaction>
+  /**
+   * Confirm a log tx is finalized or wait for it to be finalized
+   * Throws if it isn't included (e.g. a reorg)
+   */
+  async waitFinalized(
+    {
+      log,
+      tx,
+    }: SetOptional<
+      PickDeep<
+        CCIPRequest,
+        | `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'tx.timestamp'}`
+        | 'tx.timestamp'
+      >,
+      'tx'
+    >,
+    finality: number | 'finalized' = 'finalized',
+  ): Promise<true> {
+    const timestamp = log.tx?.timestamp ?? tx?.timestamp
+    if (!timestamp || Date.now() / 1e3 - timestamp > 60) {
+      // only try to fetch tx if request is old enough (>60s)
+      const [trans, finalizedTs] = await Promise.all([
+        this.getTransaction(log.transactionHash),
+        this.getBlockTimestamp(finality),
+      ])
+      if (trans.timestamp <= finalizedTs) return true
+    }
+    for await (const l of this.getLogs({
+      address: log.address,
+      startBlock: log.blockNumber,
+      endBlock: finality,
+      topics: [log.topics[0]],
+      watch: true,
+    })) {
+      if (l.transactionHash === log.transactionHash) {
+        this.logger.info(`Request "${log.transactionHash}" finalized ✅`)
+        return true
+      } else if (l.blockNumber > log.blockNumber) {
+        break
+      }
+    }
+    throw new CCIPTransactionNotFinalizedError(log.transactionHash)
+  }
   /**
    * An async generator that yields logs based on the provided options.
    * @param opts - Options object containing:

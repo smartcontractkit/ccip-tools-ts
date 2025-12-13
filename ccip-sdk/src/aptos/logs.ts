@@ -47,22 +47,17 @@ export async function getUserTxByVersion(
 /**
  * Gets the timestamp for a given transaction version.
  * @param provider - Aptos provider instance.
- * @param version - Version number or 'finalized'.
- * @returns Timestamp in seconds.
+ * @param version - Positive version number, negative block depth finality, or 'finalized'.
+ * @returns Epoch timestamp in seconds.
  */
 export async function getVersionTimestamp(
   provider: Aptos,
   version: number | 'finalized',
 ): Promise<number> {
-  if (version === 'finalized') {
-    const info = await provider.getLedgerInfo()
-    const tx = await provider.getTransactionByVersion({
-      ledgerVersion: +info.ledger_version,
-    })
-    return +(tx as UserTransactionResponse).timestamp / 1e6
-  }
-  const tx = await getUserTxByVersion(provider, version)
-  return +tx.timestamp / 1e6
+  if (typeof version !== 'number') version = 0
+  if (version <= 0) version = +(await provider.getLedgerInfo()).ledger_version + version
+  const tx = await provider.getTransactionByVersion({ ledgerVersion: version })
+  return +(tx as UserTransactionResponse).timestamp / 1e6
 }
 
 type ResEvent = AptosEvent & { version: string }

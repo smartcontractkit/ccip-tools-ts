@@ -7,7 +7,6 @@ import {
   type Chain,
   type ChainStatic,
   type Lane,
-  type OffchainTokenData,
   CCIPError,
   CCIPErrorCode,
   ExecutionState,
@@ -195,14 +194,8 @@ function omit<T extends Record<string, unknown>, K extends string>(
  * Prints a CCIP request in a human-readable format.
  * @param source - Source chain instance.
  * @param request - CCIP request to print.
- * @param offchainTokenData - Optional offchain token data.
  */
-export async function prettyRequest(
-  this: Ctx,
-  source: Chain,
-  request: CCIPRequest,
-  offchainTokenData?: OffchainTokenData[],
-) {
+export async function prettyRequest(this: Ctx, source: Chain, request: CCIPRequest) {
   prettyLane.call(this, request.lane)
   this.logger.info('Request (source):')
 
@@ -265,13 +258,6 @@ export async function prettyRequest(
     ...('accounts' in request.message ? formatArray('accounts', request.message.accounts) : {}),
     ...rest,
   })
-
-  if (!offchainTokenData?.length || offchainTokenData.every((d) => !d)) return
-  this.logger.info('Attestations:')
-  for (const attestation of offchainTokenData) {
-    const { _tag: type, ...rest } = attestation!
-    prettyTable.call(this, { type, ...rest })
-  }
 }
 
 /**

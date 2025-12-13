@@ -202,7 +202,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       maxSize: 100,
       maxArgs: 1,
       async: true,
-      forceUpdate: ([block]) => typeof block !== 'number',
+      forceUpdate: ([block]) => typeof block !== 'number' || block <= 0,
     })
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       maxSize: 100,
