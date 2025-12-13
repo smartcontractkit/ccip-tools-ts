@@ -11,6 +11,7 @@ import {
   calculateManualExecProof,
   discoverOffRamp,
   estimateExecGasForRequest,
+  isSupportedTxHash,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
@@ -46,6 +47,7 @@ export const builder = (yargs: Argv) =>
       demandOption: true,
       describe: 'transaction hash of the request (source) message',
     })
+    .check(({ txHash }) => isSupportedTxHash(txHash))
     .options({
       'log-index': {
         type: 'number',
