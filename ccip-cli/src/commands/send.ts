@@ -140,13 +140,13 @@ export const builder = (yargs: Argv) =>
  * @param argv - Command line arguments.
  */
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
-  const [controller, ctx] = getCtx(argv)
+  const [ctx, destroy] = getCtx(argv)
   return sendMessage(ctx, argv)
     .catch((err) => {
       process.exitCode = 1
       if (!logParsedError.call(ctx, err)) ctx.logger.error(err)
     })
-    .finally(() => controller.abort('Exited'))
+    .finally(destroy)
 }
 
 async function sendMessage(

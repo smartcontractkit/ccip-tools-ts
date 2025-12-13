@@ -20,31 +20,6 @@ import type { Ctx } from '../commands/index.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
 
-const signalToPromiseMap = new WeakMap<AbortSignal, Promise<void>>()
-function signalToPromise(signal: AbortSignal) {
-  let promise = signalToPromiseMap.get(signal)
-  if (!promise) {
-    signalToPromiseMap.set(
-      signal,
-      (promise = new Promise((_, reject) => {
-        signal.throwIfAborted()
-        signal.addEventListener(
-          'abort',
-          () =>
-            reject(
-              signal.reason instanceof Error
-                ? signal.reason
-                : // eslint-disable-next-line no-restricted-syntax -- AbortSignal convention requires generic Error
-                  new Error(`Aborted: ${signal.reason as string}`),
-            ),
-          { once: true },
-        )
-      })),
-    )
-  }
-  return promise
-}
-
 async function collectEndpoints({
   rpcs,
   'rpcs-file': rpcsFile,
@@ -93,7 +68,6 @@ export function fetchChainsFromRpcs(
   argv: { rpcs?: string[]; 'rpcs-file'?: string },
   txHash?: string,
 ) {
-  const { destroy$ } = ctx
   const chains: Record<string, Promise<Chain>> = {}
   const chainsCbs: Record<
     string,
@@ -129,9 +103,7 @@ export function fetchChainsFromRpcs(
           chain$.then((chain) => {
             if (chain.network.name in chains && !(chain.network.name in chainsCbs))
               return chain.destroy?.() // lost race
-            destroy$.addEventListener('abort', () => {
-              void chain.destroy?.() // cleanup
-            })
+            if (chain.destroy) void ctx.destroy$.finally(chain.destroy.bind(chain)) // cleanup
             if (!(chain.network.name in chains)) {
               chains[chain.network.name] = Promise.resolve(chain)
             } else if (chain.network.name in chainsCbs) {
@@ -143,7 +115,7 @@ export function fetchChainsFromRpcs(
       }
     }
     const res = Promise.allSettled(pendingPromises)
-    void (destroy$ ? Promise.race([res, signalToPromise(destroy$)]) : res)
+    void Promise.race([res, ctx.destroy$])
       .catch(() => {})
       .finally(() => {
         if (finished) return

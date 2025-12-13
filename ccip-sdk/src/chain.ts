@@ -189,7 +189,6 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       watch: cancel$ ?? true,
     })) {
       if (l.transactionHash === log.transactionHash) {
-        this.logger.info(`Request "${log.transactionHash}" finalized ✅`)
         return true
       } else if (l.blockNumber > log.blockNumber) {
         break

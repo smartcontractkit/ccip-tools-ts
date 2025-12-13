@@ -30,7 +30,7 @@ export const builder = (yargs: Argv) =>
  * @param argv - Command line arguments.
  */
 export function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
-  const [, ctx] = getCtx(argv)
+  const [ctx] = getCtx(argv)
   try {
     parseBytes(ctx, argv)
   } catch (err) {

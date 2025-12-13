@@ -272,7 +272,6 @@ export async function prettyCommit(
   commit: CCIPCommit,
   request: PickDeep<CCIPRequest, 'tx.timestamp'>,
 ) {
-  this.logger.info('Commit (dest):')
   const timestamp = await dest.getBlockTimestamp(commit.log.blockNumber)
   prettyTable.call(this, {
     merkleRoot: commit.report.merkleRoot,
@@ -508,9 +507,9 @@ export async function* yieldResolved<T>(promises: readonly Promise<T>[]): AsyncG
  * @param argv - yargs argv containing verbose flag
  * @returns AbortController and context object with destroy$ signal and logger
  */
-export function getCtx(argv: { verbose?: boolean }): [controller: AbortController, ctx: Ctx] {
-  const controller = new AbortController()
-  const destroy$ = controller.signal
+export function getCtx(argv: { verbose?: boolean }): [ctx: Ctx, destroy: () => void] {
+  let destroy
+  const destroy$ = new Promise<void>((resolve) => (destroy = resolve))
 
   const logger = new Console(process.stdout, process.stderr, true)
   if (argv.verbose) {
@@ -519,5 +518,5 @@ export function getCtx(argv: { verbose?: boolean }): [controller: AbortControlle
     logger.debug = () => {}
   }
 
-  return [controller, { destroy$, logger, verbose: argv.verbose }]
+  return [{ destroy$, logger, verbose: argv.verbose }, destroy!]
 }

@@ -13,7 +13,7 @@ export type Format = (typeof Format)[keyof typeof Format]
  * Command context
  */
 export type Ctx = {
-  destroy$: AbortSignal
+  destroy$: Promise<unknown>
   logger: Logger & {
     table: (tabularData: unknown, properties?: readonly string[]) => void
     log: (...args: unknown[]) => void
