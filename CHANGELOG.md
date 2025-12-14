@@ -5,6 +5,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- SDK: `Chain.getLogs` can receive `watch` boolean or cancel promise, to enter continuous logs fetching
+- SDK: `Chain.waitFinality` method to receive a `log` and wait for its tx to finalize
+- SDK: `Chain.isTxHash` static method to typeguard chain-specific txHash string format
+- SDK: `isSupportedTxHash` function exported to check any supported chain
+- CLI: `show --wait` and `send --wait` waits for finality, commit and first execution of pending requests
+- CLI: RPC endpoint url racer now triggers chain-families on-demand
+- CLI: `--rpcs`/`-r` now can split CSV strings
+- CLI: if `--wallet` is omitted and `--rpcs-file=['./.env]` has a `USER_KEY=` or `PRIVATE_KEY=` variable, it will be used as wallet
 
 # [0.91.0] - 2025-12-08 - Pre-release
 - `Chain.sendMessage` now calls `getFee` by itself, if not provided; it also returns a `CCIPRequest`
