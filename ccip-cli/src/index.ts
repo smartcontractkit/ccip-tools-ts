@@ -3,7 +3,7 @@ import { realpathSync } from 'fs'
 import util from 'node:util'
 import { pathToFileURL } from 'url'
 
-import yargs, { type InferredOptionTypes } from 'yargs'
+import yargs, { type ArgumentsCamelCase, type InferredOptionTypes } from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
 import { Format } from './commands/index.ts'
@@ -17,7 +17,7 @@ const VERSION = '0.92.0-42fc5dd'
 const globalOpts = {
   rpcs: {
     type: 'array',
-    alias: 'r',
+    alias: ['r', 'rpc'],
     describe: 'List of RPC endpoint URLs, ws[s] or http[s]',
     string: true,
   },
@@ -46,7 +46,7 @@ const globalOpts = {
 } as const
 
 /** Type for global CLI options. */
-export type GlobalOpts = InferredOptionTypes<typeof globalOpts>
+export type GlobalOpts = ArgumentsCamelCase<InferredOptionTypes<typeof globalOpts>>
 
 async function main() {
   await yargs(hideBin(process.argv))

@@ -160,7 +160,7 @@ function formatDate(timestamp: number) {
 /**
  * Formats duration in seconds to human-readable string.
  * @param secs - Duration in seconds.
- * @returns Formatted duration string (e.g., "1h 30m").
+ * @returns Formatted duration string (e.g., "2d 1h30m").
  */
 export function formatDuration(secs: number) {
   if (secs < 0) secs = -secs
@@ -175,7 +175,7 @@ export function formatDuration(secs: number) {
   }
   return Object.entries(time)
     .filter((val) => val[1] !== 0)
-    .map(([key, val]) => `${val}${key}${key === 'd' ? ' ' : ''}`)
+    .map(([key, val], i, arr) => `${val}${key}${key === 'd' && i < arr.length - 1 ? ' ' : ''}`)
     .join('')
 }
 

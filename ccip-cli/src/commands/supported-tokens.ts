@@ -209,7 +209,7 @@ async function listTokens({ logger }: Ctx, source: Chain, registry: string, argv
   if (argv.format !== Format.pretty) return // Format.pretty interactive search and details
 
   return search({
-    message: 'Select a token to know more:',
+    message: 'Select a supported token to know more:',
     pageSize: 20,
     source: (term) => {
       const filtered = infos.filter(

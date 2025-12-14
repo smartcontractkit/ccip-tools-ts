@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
 import {
@@ -22,18 +23,20 @@ import type { Ctx } from '../commands/index.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
 
-async function collectEndpoints({
-  rpcs,
-  'rpcs-file': rpcsFile,
-}: {
-  rpcs?: string[]
-  'rpcs-file'?: string
-}): Promise<Set<string>> {
-  const endpoints = new Set<string>(rpcs || [])
+async function collectEndpoints(
+  this: Ctx,
+  { rpcs, rpcsFile }: { rpcs?: string[]; rpcsFile?: string },
+): Promise<Set<string>> {
+  const endpoints = new Set<string>(
+    rpcs
+      ?.map((s) => s.split(','))
+      .flat()
+      .map((s) => s.trim()) || [],
+  )
   for (const [env, val] of Object.entries(process.env)) {
     if (env.startsWith('RPC_') && val && RPCS_RE.test(val)) endpoints.add(val)
   }
-  if (rpcsFile) {
+  if (rpcsFile && existsSync(rpcsFile)) {
     try {
       const fileContent = await readFile(rpcsFile, 'utf8')
       for (const line of fileContent.toString().split(/(?:\r\n|\r|\n)/g)) {
@@ -41,7 +44,7 @@ async function collectEndpoints({
         if (match) endpoints.add(match[0])
       }
     } catch (error) {
-      console.debug('Error reading RPCs file', error)
+      this.logger.debug('Error reading RPCs file', error)
     }
   }
   return endpoints
@@ -49,11 +52,11 @@ async function collectEndpoints({
 
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: { rpcs?: string[]; 'rpcs-file'?: string },
+  argv: { rpcs?: string[]; rpcsFile?: string },
 ): ChainGetter
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: { rpcs?: string[]; 'rpcs-file'?: string },
+  argv: { rpcs?: string[]; rpcsFile?: string },
   txHash: string,
 ): [ChainGetter, Promise<[Chain, ChainTransaction]>]
 
@@ -68,7 +71,7 @@ export function fetchChainsFromRpcs(
  */
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: { rpcs?: string[]; 'rpcs-file'?: string },
+  argv: { rpcs?: string[]; rpcsFile?: string },
   txHash?: string,
 ) {
   const chains: Record<string, Promise<Chain>> = {}
@@ -78,6 +81,7 @@ export function fetchChainsFromRpcs(
   > = {}
   const finished: Partial<Record<ChainFamily, boolean>> = {}
   const initFamily$: Partial<Record<ChainFamily, Promise<unknown>>> = {}
+  let endpoints$: Promise<Set<string>>
 
   let txResolve: (value: [Chain, ChainTransaction]) => void, txReject: (reason?: unknown) => void
   const txResult = new Promise<[Chain, ChainTransaction]>((resolve, reject) => {
@@ -86,7 +90,7 @@ export function fetchChainsFromRpcs(
   })
 
   const loadChainFamily = (F: ChainFamily, txHash?: string) =>
-    (initFamily$[F] ||= collectEndpoints(argv).then((endpoints) => {
+    (initFamily$[F] ??= (endpoints$ ??= collectEndpoints.call(ctx, argv)).then((endpoints) => {
       const C = supportedChains[F]
       if (!C) throw new CCIPNetworkFamilyUnsupportedError(F)
       ctx.logger.debug('Racing', endpoints.size, 'RPC endpoints for', F)
@@ -100,6 +104,7 @@ export function fetchChainsFromRpcs(
 
         void chain$.then(
           (chain) => {
+            endpoints.delete(url) // when resolved, remove from set so it isn't tried for future families
             // on chain detected for url
             if (chain.network.name in chains && !(chain.network.name in chainsCbs))
               return chain.destroy?.() // but lost race, cleanup right away
@@ -171,23 +176,33 @@ export function fetchChainsFromRpcs(
 /**
  * Load chain-specific wallet for given chain
  * @param chain - Chain instance to load wallet for
- * @param opts - Wallet options (as passed from yargs argv)
+ * @param argv - Wallet options (as passed from yargs argv)
  * @returns Promise to chain-specific wallet instance
  */
-export async function loadChainWallet(chain: Chain, opts: { wallet?: unknown }) {
+export async function loadChainWallet(chain: Chain, argv: { wallet?: unknown; rpcsFile?: string }) {
+  if (!argv.wallet && argv.rpcsFile && existsSync(argv.rpcsFile)) {
+    try {
+      const file = readFileSync(argv.rpcsFile, 'utf8')
+      const match = file.match(/^\s*(USER_KEY|OWNER_KEY|PRIVATE_KEY)=(\S+)/m)
+      if (match) argv.wallet = match[2]
+    } catch (_) {
+      // pass
+    }
+  }
+
   let wallet
   switch (chain.network.family) {
     case ChainFamily.EVM:
-      wallet = await loadEvmWallet((chain as EVMChain).provider, opts)
+      wallet = await loadEvmWallet((chain as EVMChain).provider, argv)
       return [await wallet.getAddress(), wallet] as const
     case ChainFamily.Solana:
-      wallet = await loadSolanaWallet(opts)
+      wallet = await loadSolanaWallet(argv)
       return [wallet.publicKey.toBase58(), wallet] as const
     case ChainFamily.Aptos:
-      wallet = await loadAptosWallet(opts)
+      wallet = await loadAptosWallet(argv)
       return [wallet.accountAddress.toString(), wallet] as const
     case ChainFamily.TON:
-      wallet = await loadTonWallet(opts)
+      wallet = await loadTonWallet(argv)
       return [wallet.contract.address.toString(), wallet] as const
     default:
       throw new CCIPChainFamilyUnsupportedError(chain.network.family)
