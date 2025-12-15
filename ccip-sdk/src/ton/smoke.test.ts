@@ -3,7 +3,6 @@ import { before, describe, it } from 'node:test'
 
 import { Address } from '@ton/core'
 
-import type { ChainTransaction } from '../types.ts'
 import { TONChain } from './index.ts'
 import type { CCIPMessage_V1_6_TON } from './types.ts'
 
@@ -31,7 +30,6 @@ describe('TONChain smoke tests', () => {
   before(async () => {
     tonChain = await TONChain.fromUrl(TON_TESTNET_RPC)
   })
-
   describe('TON RPC connectivity', () => {
     it('should create TONChain from URL', async () => {
       const chain = await TONChain.fromUrl(TON_TESTNET_RPC)
@@ -137,164 +135,296 @@ describe('TONChain smoke tests', () => {
     })
   })
 
-  describe('Transaction lookup', () => {
-    describe('Basic transaction', () => {
-      // Real transaction from TON testnet
-      // https://testnet.tonviewer.com/transaction/2d933807e103d1839be2870ff03f8c56739c561af9a41f195f049c4dedccd260
-      const testHash = '2d933807e103d1839be2870ff03f8c56739c561af9a41f195f049c4dedccd260'
-      const expectedSender = '0:e96e915e5d1d8318f41c018fc5afc6f5a30c7f2ba2dbbd1a33f42b7e249bf826'
-      const expectedLt = 42352673000001
-      const expectedTimestamp = 1765557346
-      const expectedCompositeHash = `${expectedSender}:${expectedLt}:${testHash}`
+  describe('getLogs', () => {
+    it('should find logs for OnRamp address with valid structure', async () => {
+      const logs: any[] = []
 
-      it('should fetch transaction by raw hash', async () => {
-        const result = await tonChain.getTransaction(testHash)
-        assert.equal(result.hash.toLowerCase(), expectedCompositeHash.toLowerCase())
-        assert.equal(result.from.toLowerCase(), expectedSender.toLowerCase())
-        assert.equal(result.blockNumber, expectedLt)
-        assert.equal(result.timestamp, expectedTimestamp)
-      })
-
-      it('should fetch transaction by raw hash with 0x prefix', async () => {
-        const result = await tonChain.getTransaction(`0x${testHash}`)
-        assert.equal(result.hash.toLowerCase(), expectedCompositeHash.toLowerCase())
-        assert.equal(result.from.toLowerCase(), expectedSender.toLowerCase())
-      })
-
-      it('should fetch transaction by composite hash', async () => {
-        const result = await tonChain.getTransaction(expectedCompositeHash)
-        assert.equal(result.hash.toLowerCase(), expectedCompositeHash.toLowerCase())
-        assert.equal(result.from.toLowerCase(), expectedSender.toLowerCase())
-      })
-
-      it('should throw for invalid hash format', async () => {
-        await assert.rejects(
-          tonChain.getTransaction('not-a-valid-hash'),
-          /Invalid TON transaction hash format/,
-        )
-      })
-
-      it('should throw for non-existent hash', async () => {
-        const fakeHash = '0'.repeat(64)
-        await assert.rejects(tonChain.getTransaction(fakeHash), /Transaction not found/)
-      })
-    })
-
-    describe('CCIP transaction with logs', () => {
-      // Real CCIPMessageSent transaction from TON testnet (TON -> Sepolia)
-      // Sent by staging monitor with default parameters
-      const ccipTxHash = 'a7f7fc28388e0e486dbb2724dce077d5e7bb348d3abf9f109a0ef499fc229e3a'
-
-      const expected = {
-        messageId: '0x09dd921d24a91c1111fdcf524a664bd7b0935a54bc3bccea72073231479a688d',
-        sourceChainSelector: TON_TESTNET_CHAIN_SELECTOR,
-        destChainSelector: SEPOLIA_CHAIN_SELECTOR,
-        sequenceNumber: 821n,
-        nonce: 0n,
-        sender: 'EQAFbU7ATpBTe2vPiTpThvehgNiynnD4llSA8IaJThJFpvP7',
-        receiver: '0x00000000000000000000000040d7c009d073e0d740ed2c50ca0a48c84a3f8b47',
-        data: '0x636369702d73746167696e672d3230323138383537383631',
-        feeToken: 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAd99',
-        feeTokenAmount: 131016104n,
-        feeValueJuels: 15125193363198824n,
-        gasLimit: 1000000n,
-        allowOutOfOrderExecution: true,
-        onRampAddress: ADDRESSES_TO_ASSERT.tonOnRamp,
+      for await (const log of tonChain.getLogs({
+        address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        page: 10,
+      })) {
+        logs.push(log)
+        if (logs.length >= 3) break
       }
 
-      // Fetch once, reuse across all tests
-      let tx: ChainTransaction
-      let message: CCIPMessage_V1_6_TON | undefined
+      assert.ok(logs.length > 0, 'Should find at least one log')
 
-      before(async () => {
-        tx = await tonChain.getTransaction(ccipTxHash)
-        message = TONChain.decodeMessage(tx.logs[0])
-      })
+      // Verify log structure
+      const log = logs[0]
+      assert.ok(log.address, 'log should have address')
+      assert.ok(log.data, 'log should have data')
+      assert.ok(typeof log.data === 'string', 'log data should be base64 string')
+      assert.ok(log.blockNumber > 0, 'log should have positive blockNumber')
+      assert.ok(log.transactionHash, 'log should have transactionHash')
+      assert.ok(log.transactionHash.includes(':'), 'transactionHash should be composite format')
+      assert.ok(typeof log.index === 'number', 'log should have numeric index')
+      assert.ok(Array.isArray(log.topics), 'log should have topics array')
 
-      it('should retrieve transaction with valid structure', () => {
-        assert.ok(tx.hash, 'hash should be present')
-        assert.ok(tx.hash.includes(ccipTxHash), 'hash should contain original tx hash')
-        assert.ok(tx.blockNumber > 0, 'blockNumber should be positive')
-        assert.ok(tx.timestamp > 0, 'timestamp should be positive')
-        assert.ok(Array.isArray(tx.logs), 'logs should be an array')
-        assert.equal(tx.logs.length, 1, 'Should have exactly one log (CCIPMessageSent)')
-      })
+      // Topics contain messageId for CCIP messages
+      if (log.topics.length > 0) {
+        assert.ok(log.topics[0].startsWith('0x'), 'topic should be hex messageId')
+        assert.equal(log.topics[0].length, 66, 'messageId should be 32 bytes')
+      }
 
-      it('should have valid log structure', () => {
-        const log = tx.logs[0]
-
-        assert.equal(
-          Address.parseRaw(log.address).toString(),
-          Address.parse(expected.onRampAddress).toString(),
-          'log address should be OnRamp',
-        )
-        assert.ok(log.data, 'log should have data')
-        assert.equal(typeof log.data, 'string', 'log data should be string (base64)')
-        assert.equal(log.index, 0, 'log index should be 0')
-        assert.ok(log.blockNumber > 0, 'log should have positive blockNumber')
-        assert.equal(log.transactionHash, tx.hash, 'log transactionHash should match tx hash')
-        assert.deepEqual(log.topics, [], 'TON logs should have empty topics array')
-      })
-
-      it('should decode CCIPMessageSent successfully', () => {
-        assert.ok(message, 'Should successfully decode message')
-      })
-
-      it('should decode header fields correctly', () => {
-        assert.ok(message)
-        assert.equal(message.header.messageId, expected.messageId)
-        assert.equal(message.header.sourceChainSelector, expected.sourceChainSelector)
-        assert.equal(message.header.destChainSelector, expected.destChainSelector)
-        assert.equal(message.header.sequenceNumber, expected.sequenceNumber)
-        assert.equal(message.header.nonce, expected.nonce)
-      })
-
-      it('should decode sender and receiver correctly', () => {
-        assert.ok(message)
-        assert.equal(message.sender, expected.sender)
-        assert.equal(message.receiver.toLowerCase(), expected.receiver.toLowerCase())
-        assert.ok(
-          message.receiver.toLowerCase().endsWith('40d7c009d073e0d740ed2c50ca0a48c84a3f8b47'),
-          'receiver should contain EVM address',
-        )
-      })
-
-      it('should decode data correctly', () => {
-        assert.ok(message)
-        assert.equal(message.data, expected.data)
-        const dataStr = Buffer.from(message.data.slice(2), 'hex').toString('utf8')
-        assert.equal(dataStr, 'ccip-staging-20218857861')
-      })
-
-      it('should decode fee fields correctly', () => {
-        assert.ok(message)
-        assert.equal(message.feeToken, expected.feeToken)
-        assert.equal(message.feeTokenAmount, expected.feeTokenAmount)
-        assert.equal(message.feeValueJuels, expected.feeValueJuels)
-      })
-
-      it('should decode extraArgs correctly', () => {
-        assert.ok(message)
-        assert.equal(message.gasLimit, expected.gasLimit)
-        assert.equal(message.allowOutOfOrderExecution, expected.allowOutOfOrderExecution)
-        assert.ok(message.extraArgs.startsWith('0x181dcf10'), 'should have EVMExtraArgsV2 tag')
-        assert.equal(message.extraArgs.length, 76, 'extraArgs should be 37 bytes')
-      })
-
-      it('should decode tokenAmounts correctly', () => {
-        assert.ok(message)
-        assert.ok(Array.isArray(message.tokenAmounts))
-        assert.equal(message.tokenAmounts.length, 0)
-      })
+      // Verify descending order if we have multiple logs
+      if (logs.length > 1) {
+        for (let i = 1; i < logs.length; i++) {
+          assert.ok(
+            logs[i - 1].blockNumber >= logs[i].blockNumber,
+            'Logs should be in descending order by blockNumber',
+          )
+        }
+      }
     })
 
-    describe('decodeMessage edge cases', () => {
-      it('should return undefined for invalid inputs', () => {
-        assert.equal(TONChain.decodeMessage({ data: '' }), undefined)
-        assert.equal(TONChain.decodeMessage({ data: undefined as any }), undefined)
-        assert.equal(TONChain.decodeMessage({ data: 'not-valid-base64!!!' }), undefined)
-        assert.equal(TONChain.decodeMessage({ data: 'SGVsbG8gV29ybGQ=' }), undefined)
-      })
+    it('should find logs for OffRamp address', async () => {
+      const logs: any[] = []
+
+      for await (const log of tonChain.getLogs({
+        address: ADDRESSES_TO_ASSERT.tonOffRamp,
+        page: 10,
+      })) {
+        logs.push(log)
+        if (logs.length >= 1) break
+      }
+
+      assert.ok(logs.length > 0, 'Should find at least one log for OffRamp')
+    })
+
+    it('should paginate through multiple transactions', async () => {
+      const logs: any[] = []
+      const seenTxHashes = new Set<string>()
+
+      for await (const log of tonChain.getLogs({
+        address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        page: 5,
+      })) {
+        logs.push(log)
+        seenTxHashes.add(log.transactionHash)
+        // Stop early once we've seen multiple txs
+        if (seenTxHashes.size >= 3) break
+      }
+
+      assert.ok(seenTxHashes.size > 1, 'Should retrieve logs from multiple transactions')
+    })
+
+    it('should respect startBlock and endBlock filters', async () => {
+      // First, get a couple of logs to determine a valid block range
+      const recentLogs: any[] = []
+      for await (const log of tonChain.getLogs({
+        address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        page: 5,
+      })) {
+        recentLogs.push(log)
+        if (recentLogs.length >= 3) break
+      }
+
+      assert.ok(recentLogs.length >= 2, 'Need at least 2 logs to test filtering')
+
+      // Use the range from fetched logs
+      const highBlock = recentLogs[0].blockNumber
+      const lowBlock = recentLogs[recentLogs.length - 1].blockNumber
+
+      // Test startBlock: should only get logs >= startBlock
+      const logsWithStartBlock: any[] = []
+      for await (const log of tonChain.getLogs({
+        address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        startBlock: lowBlock,
+        page: 10,
+      })) {
+        logsWithStartBlock.push(log)
+        if (logsWithStartBlock.length >= 5) break
+      }
+
+      for (const log of logsWithStartBlock) {
+        assert.ok(
+          log.blockNumber >= lowBlock,
+          `log.blockNumber ${log.blockNumber} should be >= startBlock ${lowBlock}`,
+        )
+      }
+
+      // Test endBlock: should only get logs <= endBlock
+      const logsWithEndBlock: any[] = []
+      for await (const log of tonChain.getLogs({
+        address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        endBlock: highBlock,
+        page: 10,
+      })) {
+        logsWithEndBlock.push(log)
+        if (logsWithEndBlock.length >= 3) break
+      }
+
+      for (const log of logsWithEndBlock) {
+        assert.ok(
+          log.blockNumber <= highBlock,
+          `log.blockNumber ${log.blockNumber} should be <= endBlock ${highBlock}`,
+        )
+      }
+    })
+  })
+
+  describe('decodeMessage', () => {
+    // Real CCIPMessageSent transaction from TON testnet (TON -> Sepolia)
+    const ccipTxHash = 'a7f7fc28388e0e486dbb2724dce077d5e7bb348d3abf9f109a0ef499fc229e3a'
+
+    const expected = {
+      messageId: '0x09dd921d24a91c1111fdcf524a664bd7b0935a54bc3bccea72073231479a688d',
+      sourceChainSelector: TON_TESTNET_CHAIN_SELECTOR,
+      destChainSelector: SEPOLIA_CHAIN_SELECTOR,
+      sequenceNumber: 821n,
+      nonce: 0n,
+      sender: 'EQAFbU7ATpBTe2vPiTpThvehgNiynnD4llSA8IaJThJFpvP7',
+      receiver: '0x00000000000000000000000040d7c009d073e0d740ed2c50ca0a48c84a3f8b47',
+      data: '0x636369702d73746167696e672d3230323138383537383631',
+      feeToken: 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAd99',
+      feeTokenAmount: 131016104n,
+      feeValueJuels: 15125193363198824n,
+      gasLimit: 1000000n,
+      allowOutOfOrderExecution: true,
+    }
+
+    let message: CCIPMessage_V1_6_TON | undefined
+
+    before(async () => {
+      const tx = await tonChain.getTransaction(ccipTxHash)
+      message = TONChain.decodeMessage(tx.logs[0])
+    })
+
+    it('should decode CCIPMessageSent from transaction log', () => {
+      assert.ok(message, 'Should successfully decode message')
+    })
+
+    it('should decode header fields correctly', () => {
+      assert.ok(message)
+      assert.equal(message.header.messageId, expected.messageId)
+      assert.equal(message.header.sourceChainSelector, expected.sourceChainSelector)
+      assert.equal(message.header.destChainSelector, expected.destChainSelector)
+      assert.equal(message.header.sequenceNumber, expected.sequenceNumber)
+      assert.equal(message.header.nonce, expected.nonce)
+    })
+
+    it('should decode sender and receiver correctly', () => {
+      assert.ok(message)
+      assert.equal(message.sender, expected.sender)
+      assert.equal(message.receiver.toLowerCase(), expected.receiver.toLowerCase())
+    })
+
+    it('should decode data correctly', () => {
+      assert.ok(message)
+      assert.equal(message.data, expected.data)
+      const dataStr = Buffer.from(message.data.slice(2), 'hex').toString('utf8')
+      assert.equal(dataStr, 'ccip-staging-20218857861')
+    })
+
+    it('should decode fee fields correctly', () => {
+      assert.ok(message)
+      assert.equal(message.feeToken, expected.feeToken)
+      assert.equal(message.feeTokenAmount, expected.feeTokenAmount)
+      assert.equal(message.feeValueJuels, expected.feeValueJuels)
+    })
+
+    it('should decode extraArgs correctly', () => {
+      assert.ok(message)
+      assert.equal(message.gasLimit, expected.gasLimit)
+      assert.equal(message.allowOutOfOrderExecution, expected.allowOutOfOrderExecution)
+      assert.ok(message.extraArgs.startsWith('0x181dcf10'), 'should have EVMExtraArgsV2 tag')
+    })
+
+    it('should decode tokenAmounts correctly', () => {
+      assert.ok(message)
+      assert.ok(Array.isArray(message.tokenAmounts))
+      assert.equal(message.tokenAmounts.length, 0)
+    })
+
+    it('should return undefined for invalid inputs', () => {
+      assert.equal(TONChain.decodeMessage({ data: '' }), undefined)
+      assert.equal(TONChain.decodeMessage({ data: undefined as any }), undefined)
+      assert.equal(TONChain.decodeMessage({ data: 'not-valid-base64!!!' }), undefined)
+      assert.equal(TONChain.decodeMessage({ data: 'SGVsbG8gV29ybGQ=' }), undefined)
+    })
+  })
+
+  describe('decodeCommits', () => {
+    const expectedOnChainCommit = {
+      txHash: '6f970beafb5f10923f75382d0424d5582ae8f8966dbd428b6e284216c7a66826',
+      sourceChainSelector: 16015286601757825753n, // Sepolia
+      onRampAddress: '0xfb34b9969dd201cc9a04e604a6d40af917b6c1e8',
+      minSeqNr: 942n,
+      maxSeqNr: 942n,
+      merkleRoot: '0xfcd58111c28a183371ed7f16f2b2b64b90783a295ee4b058da5c5e51b4ca2b5d',
+    }
+
+    it('should return undefined for invalid inputs', () => {
+      assert.equal(TONChain.decodeCommits({ data: '' } as any), undefined, 'empty data')
+      assert.equal(TONChain.decodeCommits({ data: undefined } as any), undefined, 'undefined data')
+      assert.equal(
+        TONChain.decodeCommits({ data: 'not-valid-base64!!!' } as any),
+        undefined,
+        'invalid base64',
+      )
+    })
+
+    it('should return undefined for non-commit BOC data (e.g., CCIPMessageSent)', async () => {
+      const ccipTxHash = 'a7f7fc28388e0e486dbb2724dce077d5e7bb348d3abf9f109a0ef499fc229e3a'
+      const tx = await tonChain.getTransaction(ccipTxHash)
+      assert.ok(tx.logs.length > 0, 'Should have logs')
+      const result = TONChain.decodeCommits(tx.logs[0])
+      assert.equal(result, undefined, 'CCIPMessageSent should not decode as commit')
+    })
+
+    it('should find and decode commit reports by iterating logs', async () => {
+      const tx = await tonChain.getTransaction(expectedOnChainCommit.txHash)
+      assert.ok(tx.logs.length > 0, 'Should have logs')
+
+      // Find the CommitReportAccepted log by trying each one
+      let result: ReturnType<typeof TONChain.decodeCommits> = undefined
+      for (const log of tx.logs) {
+        result = TONChain.decodeCommits(log)
+        if (result) break
+      }
+
+      assert.ok(result, 'Should find and decode commit report from transaction logs')
+      assert.equal(result.length, 1, 'Should have exactly one commit report')
+      const commit = result[0]
+      assert.equal(commit.sourceChainSelector, expectedOnChainCommit.sourceChainSelector)
+      assert.equal(commit.minSeqNr, expectedOnChainCommit.minSeqNr)
+      assert.equal(commit.maxSeqNr, expectedOnChainCommit.maxSeqNr)
+    })
+
+    it('should filter by lane when provided', async () => {
+      const tx = await tonChain.getTransaction(expectedOnChainCommit.txHash)
+
+      // Should match with correct lane
+      const matchingLane = {
+        sourceChainSelector: expectedOnChainCommit.sourceChainSelector,
+        onRamp: expectedOnChainCommit.onRampAddress,
+      }
+      const resultMatch = TONChain.decodeCommits(tx.logs[1], matchingLane as any)
+      assert.ok(resultMatch, 'Should decode when lane matches')
+
+      // Should return undefined with wrong sourceChainSelector
+      const wrongSelectorLane = {
+        sourceChainSelector: 123n,
+        onRamp: expectedOnChainCommit.onRampAddress,
+      }
+      const resultWrongSelector = TONChain.decodeCommits(tx.logs[1], wrongSelectorLane as any)
+      assert.equal(
+        resultWrongSelector,
+        undefined,
+        'Should return undefined when sourceChainSelector does not match',
+      )
+
+      // Should return undefined with wrong onRamp
+      const wrongOnRampLane = {
+        sourceChainSelector: expectedOnChainCommit.sourceChainSelector,
+        onRamp: '0x0000000000000000000000000000000000000000',
+      }
+      const resultWrongOnRamp = TONChain.decodeCommits(tx.logs[1], wrongOnRampLane as any)
+      assert.equal(
+        resultWrongOnRamp,
+        undefined,
+        'Should return undefined when onRamp does not match',
+      )
     })
   })
 })

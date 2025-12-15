@@ -4,7 +4,6 @@ import type { AxiosAdapter } from 'axios'
 import { type BytesLike, getAddress as checksumAddress, isBytesLike } from 'ethers'
 import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
-import { fetchCCIPRequestsInTx } from '../requests.ts'
 
 import { type LogFilter, Chain } from '../chain.ts'
 import {
@@ -18,6 +17,7 @@ import {
   CCIPWalletInvalidError,
 } from '../errors/specialized.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
+import { fetchCCIPRequestsInTx } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
@@ -323,10 +323,150 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /** {@inheritDoc Chain.getLogs} */
-  async *getLogs(_opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<Log_> {
-    await Promise.resolve()
-    throw new CCIPNotImplementedError('getLogs')
-    yield undefined as never
+  async *getLogs(opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<Log_> {
+    if (!opts.address) {
+      throw new CCIPArgumentInvalidError('address', 'Address is required for TON log filtering')
+    }
+
+    // Convert address string to TON Address
+    const address = Address.parse(opts.address)
+
+    // Determine search direction based on startTime/startBlock
+    // If startTime or startBlock is provided, search forward (oldest to newest)
+    // Otherwise, search backward (newest to oldest)
+    const searchForward = !!(opts.startBlock || opts.startTime)
+
+    // Get transactions for the address with pagination
+    // TonClient.getTransactions returns transactions in reverse order (newest first)
+    let lt: string | undefined
+    let hash: string | undefined
+    // TonCenter API has a max limit of 1000, cap pageSize to 999 to leave room for +1 pagination
+    const requestedPageSize = opts.page || 50
+    const pageSize = Math.min(requestedPageSize, 999)
+
+    // Collect logs for forward iteration (if needed)
+    const collectedLogs: Log_[] = []
+
+    while (true) {
+      const limit = pageSize
+      const txs = await this.provider.getTransactions(address, {
+        limit,
+        lt,
+        hash,
+        archival: true, // Include historical transactions
+      })
+
+      if (txs.length === 0) break
+
+      // Skip the first transaction when paginating (it's the same as last from previous batch)
+      const startIdx = lt ? 1 : 0
+
+      for (let i = startIdx; i < txs.length; i++) {
+        const tx = txs[i]
+        // Filter by block range if specified (using logical time as block number)
+        const blockNumber = Number(tx.lt)
+        const timestamp = tx.now
+
+        // Transactions are in reverse order (newest first)
+        // If we're below startBlock, we're done (all remaining will also be below)
+        if (opts.startBlock && blockNumber < opts.startBlock) {
+          if (searchForward) {
+            // Yield collected logs in reverse (oldest first)
+            for (let j = collectedLogs.length - 1; j >= 0; j--) {
+              yield collectedLogs[j]
+            }
+          }
+          return
+        }
+
+        // Filter by startTime if provided
+        if (opts.startTime && timestamp < opts.startTime) {
+          if (searchForward) {
+            // Yield collected logs in reverse (oldest first)
+            for (let j = collectedLogs.length - 1; j >= 0; j--) {
+              yield collectedLogs[j]
+            }
+          }
+          return
+        }
+
+        // Skip transactions above endBlock
+        if (opts.endBlock && blockNumber > opts.endBlock) {
+          continue
+        }
+
+        // Extract logs from outgoing external messages
+        const outMessages = tx.outMessages.values()
+        let index = 0
+        for (const msg of outMessages) {
+          if (msg.info.type === 'external-out') {
+            const body = msg.body
+            const data = body.toBoc().toString('base64')
+
+            // Try to decode as CCIP message to check if it's valid
+            const decoded = TONChain.decodeMessage({ data })
+
+            // Also try to decode as commit report
+            const decodedCommit = TONChain.decodeCommits({ data } as Log_)
+
+            // If we have topic filters, filter based on event type
+            if (opts.topics?.length) {
+              const topicFilter = opts.topics[0]
+              if (topicFilter === 'CommitReportAccepted') {
+                // Only yield commit logs
+                if (!decodedCommit) {
+                  index++
+                  continue
+                }
+              } else if (!decoded) {
+                // For other topics, require valid CCIP message
+                index++
+                continue
+              }
+            }
+
+            const compositeHash = `${address.toRawString()}:${tx.lt}:${tx.hash().toString('hex')}`
+
+            const log: Log_ = {
+              address: address.toRawString(),
+              topics: decoded ? [decoded.header.messageId] : [],
+              data,
+              blockNumber,
+              transactionHash: compositeHash,
+              index,
+            }
+
+            if (searchForward) {
+              collectedLogs.push(log)
+            } else {
+              yield log
+            }
+          }
+          index++
+        }
+      }
+
+      // Set up pagination for next batch
+      const lastTx = txs[txs.length - 1]
+      lt = lastTx.lt.toString()
+      hash = lastTx.hash().toString('base64')
+
+      // If we got fewer transactions than requested, we've reached the end
+      if (txs.length < pageSize) break
+
+      // Check if we've gone below startBlock - no need to fetch more
+      if (opts.startBlock && Number(lastTx.lt) < opts.startBlock) break
+
+      // Check if we've gone below startTime - no need to fetch more
+      if (opts.startTime && lastTx.now < opts.startTime) break
+    }
+
+    // Yield collected logs in reverse order for forward iteration
+    if (searchForward) {
+      for (let j = collectedLogs.length - 1; j >= 0; j--) {
+        yield collectedLogs[j]
+      }
+    }
   }
 
   /** {@inheritDoc Chain.fetchRequestsInTx} */
@@ -615,13 +755,68 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * Decodes commit reports from a TON log event.
-   * @param _log - Log with data field.
-   * @param _lane - Lane info for filtering.
-   * @returns Array of CommitReport or undefined if not valid.
+   * Decodes commit reports from a TON log event (CommitReportAccepted).
+   *
+   * @param log - Log with data field (base64-encoded BOC).
+   * @param lane - Optional lane info for filtering.
+   * @returns Array of CommitReport or undefined if not a valid commit event.
    */
-  static decodeCommits(_log: Log_, _lane?: Lane): CommitReport[] | undefined {
-    throw new CCIPNotImplementedError('decodeCommits')
+  static decodeCommits(log: Log_, lane?: Lane): CommitReport[] | undefined {
+    if (!log.data || typeof log.data !== 'string') return undefined
+
+    try {
+      const boc = Buffer.from(log.data, 'base64')
+      const cell = Cell.fromBoc(boc)[0]
+      const slice = cell.beginParse()
+
+      // Cell body starts directly with hasMerkleRoot (topic is in message header)
+      const hasMerkleRoot = slice.loadBit()
+
+      if (!hasMerkleRoot) {
+        // No merkle root - could be price-only update, skip for now
+        return undefined
+      }
+
+      // Read MerkleRoot fields inline
+      const sourceChainSelector = slice.loadUintBig(64)
+      const onRampLen = slice.loadUint(8)
+
+      if (onRampLen === 0 || onRampLen > 32) {
+        // Invalid onRamp length
+        return undefined
+      }
+
+      const onRampBytes = slice.loadBuffer(onRampLen)
+      const minSeqNr = slice.loadUintBig(64)
+      const maxSeqNr = slice.loadUintBig(64)
+      const merkleRoot = '0x' + slice.loadUintBig(256).toString(16).padStart(64, '0')
+
+      // Read hasPriceUpdates (1 bit) - we don't need the data but should consume it
+      if (slice.remainingBits >= 1) {
+        const hasPriceUpdates = slice.loadBit()
+        if (hasPriceUpdates && slice.remainingRefs > 0) {
+          slice.loadRef() // Skip price updates ref
+        }
+      }
+
+      const report: CommitReport = {
+        sourceChainSelector,
+        onRampAddress: '0x' + onRampBytes.toString('hex'),
+        minSeqNr,
+        maxSeqNr,
+        merkleRoot,
+      }
+
+      // Filter by lane if provided
+      if (lane) {
+        if (report.sourceChainSelector !== lane.sourceChainSelector) return undefined
+        if (report.onRampAddress?.toLowerCase() !== lane.onRamp?.toLowerCase()) return undefined
+      }
+
+      return [report]
+    } catch {
+      return undefined
+    }
   }
 
   /**
