@@ -4,7 +4,7 @@
 
 Use specialized `CCIPError` classes. Never throw generic `Error`.
 
-### Architecture
+###packages/cre-sdk/src/sdk/utils/values/value.ts Architecture
 
 ```
 CCIPError (base)
