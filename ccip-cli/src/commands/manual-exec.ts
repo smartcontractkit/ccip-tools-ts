@@ -172,7 +172,7 @@ async function manualExec(
   const execReport: ExecutionReport = {
     ...execReportProof,
     message: request.message,
-    offchainTokenData: offchainTokenData,
+    offchainTokenData,
   }
 
   if (

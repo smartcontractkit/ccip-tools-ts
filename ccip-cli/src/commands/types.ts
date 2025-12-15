@@ -15,7 +15,7 @@ export type Format = (typeof Format)[keyof typeof Format]
 export type Ctx = {
   destroy$: Promise<unknown>
   logger: Logger & {
-    table: (tabularData: unknown, properties?: readonly string[]) => void
+    table: (tabularData: unknown, properties?: string[]) => void
     log: (...args: unknown[]) => void
   }
   verbose?: boolean
