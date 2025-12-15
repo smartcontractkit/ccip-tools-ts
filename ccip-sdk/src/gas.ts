@@ -44,6 +44,24 @@ type Any2EVMMessage = Parameters<TypedContract<typeof RouterABI>['routeMessage']
  * @param dest - Provider for the destination chain.
  * @param request - CCIP request info containing `lane` and `message` details.
  * @returns Estimated gasLimit as bigint.
+ * @example
+ * ```typescript
+ * import { estimateExecGasForRequest, EVMChain } from '@chainlink/ccip-sdk'
+ *
+ * const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+ * const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+ *
+ * const gasLimit = await estimateExecGasForRequest(source, dest, {
+ *   lane: request.lane,
+ *   message: {
+ *     sender: '0x...',
+ *     receiver: '0x...',
+ *     data: '0x...',
+ *     tokenAmounts: [],
+ *   },
+ * })
+ * console.log('Estimated gas:', gasLimit)
+ * ```
  */
 export async function estimateExecGasForRequest(
   source: Chain,

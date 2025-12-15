@@ -1,0 +1,35 @@
+/**
+ * ChainSupport component styles
+ * Displays chain badges in a horizontal row
+ */
+
+.chainSupport {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2x, 8px);
+  margin: var(--space-4x, 16px) 0;
+  padding: var(--space-3x, 12px) var(--space-4x, 16px);
+  background: var(--ifm-color-emphasis-100);
+  border-radius: var(--ifm-global-radius);
+}
+
+.label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ifm-color-emphasis-700);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2x, 8px);
+}
+
+/* Dark mode adjustments */
+[data-theme='dark'] .chainSupport {
+  background: var(--ifm-color-emphasis-200);
+}
+
+[data-theme='dark'] .label {
+  color: var(--ifm-color-emphasis-600);
+}

@@ -1,0 +1,1483 @@
+/**
+ * Custom CSS for CCIP Tools API Reference
+ * Consistent with main Chainlink Documentation
+ * Colors from: ./build/documentation/src/styles/theme.css
+ */
+
+/* Import Chainlink design system global styles */
+@import '@chainlink/design-system/global-styles.css';
+
+:root {
+  /* === CHAINLINK BRAND COLORS (from main docs) === */
+  --chainlink-blue: #375bd2;
+  --chainlink-blue-hover: #1a2b6b;
+  --chainlink-blue-light: #5a8dee;
+
+  /* === GRAY SCALE (HSL format from main docs theme.css) === */
+  --gray-50: hsla(215, 14%, 95%, 1);
+  --gray-100: hsla(215, 14%, 90%, 1);
+  --gray-200: hsla(215, 14%, 85%, 1);
+  --gray-300: hsla(215, 14%, 75%, 1);
+  --gray-400: hsla(215, 14%, 65%, 1);
+  --gray-500: hsla(215, 14%, 55%, 1);
+  --gray-600: hsla(215, 14%, 45%, 1);
+  --gray-700: hsla(215, 14%, 35%, 1);
+  --gray-800: hsla(215, 14%, 25%, 1); /* Footer background */
+  --gray-900: hsla(215, 14%, 15%, 1); /* Footer copyright */
+  --gray-950: hsla(215, 14%, 10%, 1);
+
+  /* === SEMANTIC COLORS (from main docs) === */
+  --color-success: hsla(158, 79%, 42%, 1); /* Green */
+  --color-warning: hsla(22, 100%, 50%, 1); /* Orange */
+  --color-error: hsla(351, 100%, 54%, 1); /* Red */
+  --color-info: hsla(212, 100%, 61%, 1); /* Blue */
+
+  /* === BACKGROUND COLORS FOR CALLOUTS === */
+  --color-background-info: #e3f2fd;
+  --color-background-warning: #fff3e0;
+  --color-background-error: #ffebee;
+  --color-background-success: #e8f5e9;
+
+  /* === SPACING SYSTEM (from main docs) === */
+  --space-1x: 4px;
+  --space-2x: 8px;
+  --space-3x: 12px;
+  --space-4x: 16px;
+  --space-6x: 24px;
+  --space-8x: 32px;
+  --space-10x: 40px;
+  --space-12x: 48px;
+  --space-16x: 64px;
+
+  /* === CODE BLOCK COLORS (from main docs) === */
+  --code-bg: #2b2b2b;
+  --code-text: #f8faff;
+  --code-header-bg: #3a3a3a;
+
+  /* === COMPONENT TOKENS === */
+  --badge-border-radius: 16px;
+  --badge-padding-x: 12px;
+  --badge-padding-y: 4px;
+  --card-border-radius: 8px;
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --card-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.15);
+
+  /* === ANIMATION TOKENS === */
+  --transition-fast: 150ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 300ms ease;
+
+  /* === DOCUSAURUS INFIMA MAPPINGS === */
+  --ifm-color-primary: var(--chainlink-blue);
+  --ifm-color-primary-dark: #2d4fc4;
+  --ifm-color-primary-darker: #2a4ab9;
+  --ifm-color-primary-darkest: #233d98;
+  --ifm-color-primary-light: #4a6cd8;
+  --ifm-color-primary-lighter: #5575db;
+  --ifm-color-primary-lightest: #7590e4;
+
+  /* Typography */
+  --ifm-font-family-base: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --ifm-font-family-monospace:
+    'SF Mono', 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
+
+  /* Spacing */
+  --ifm-spacing-horizontal: var(--space-4x);
+  --ifm-spacing-vertical: var(--space-4x);
+
+  /* Code blocks */
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+
+  /* Borders */
+  --ifm-border-radius: 4px;
+
+  /* Navbar */
+  --ifm-navbar-height: var(--space-16x);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: var(--chainlink-blue-light);
+  --ifm-color-primary-dark: #3e78eb;
+  --ifm-color-primary-darker: #306de9;
+  --ifm-color-primary-darkest: #1854d4;
+  --ifm-color-primary-light: #76a2f1;
+  --ifm-color-primary-lighter: #84adf3;
+  --ifm-color-primary-lightest: #b0c9f7;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+
+  /* Dark mode callout backgrounds */
+  --color-background-info: rgba(33, 150, 243, 0.15);
+  --color-background-warning: rgba(255, 152, 0, 0.15);
+  --color-background-error: rgba(244, 67, 54, 0.15);
+  --color-background-success: rgba(76, 175, 80, 0.15);
+
+  /* Dark mode card shadow */
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --card-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* === NAVBAR STYLING (consistent with main docs) === */
+.navbar {
+  backdrop-filter: blur(20px);
+  box-shadow: 0px 4px 12px 0px rgba(0, 0, 0, 0.06);
+}
+
+/* === FOOTER STYLING (must match main docs) === */
+.footer {
+  background-color: var(--gray-800);
+}
+
+.footer--dark {
+  background-color: var(--gray-800);
+}
+
+.footer__title {
+  color: white;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.footer__link-item {
+  color: #9ea2ab;
+  transition: color var(--transition-fast);
+}
+
+.footer__link-item:hover {
+  color: white;
+}
+
+.footer__copyright {
+  background-color: var(--gray-900);
+  padding: var(--space-8x);
+  margin-top: var(--space-16x);
+}
+
+/* === CODE BLOCK STYLING (from main docs) === */
+/* Force dark code blocks in both light and dark mode for better readability */
+/* Only target Docusaurus/Prism code blocks, not custom components */
+.prism-code,
+[class*='codeBlockContainer'] pre,
+pre[class*='language-'],
+.theme-code-block div[class*='codeBlock'] {
+  background-color: var(--code-bg) !important;
+  color: var(--code-text) !important;
+}
+
+/* Code block header (filename/language label) */
+.theme-code-block div[class*='codeBlockTitle'],
+.theme-code-block div[class*='codeBlockLines'] > div:first-child {
+  background-color: var(--code-header-bg) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Inline code styling */
+:not(pre) > code {
+  background-color: var(--gray-100);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  color: var(--gray-800);
+}
+
+[data-theme='dark'] :not(pre) > code {
+  background-color: var(--gray-700);
+  color: var(--gray-100);
+}
+
+/* Code block line numbers */
+.prism-code .token-line {
+  padding: 0 var(--space-4x);
+}
+
+/* Language badge in code blocks */
+.theme-code-block div[class*='codeBlockTitle'] {
+  color: var(--gray-400) !important;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: var(--space-2x) var(--space-4x);
+}
+
+/* Copy button styling */
+button[class*='copyButton'] {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  color: var(--gray-400) !important;
+  transition: all var(--transition-fast);
+}
+
+button[class*='copyButton']:hover {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  color: white !important;
+}
+
+/* Syntax highlighting tokens - ensure visibility on dark background */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #6a9955 !important;
+}
+
+.token.punctuation {
+  color: #d4d4d4 !important;
+}
+
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol {
+  color: #b5cea8 !important;
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin {
+  color: #ce9178 !important;
+}
+
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  color: #d4d4d4 !important;
+}
+
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #569cd6 !important;
+}
+
+.token.function,
+.token.class-name {
+  color: #dcdcaa !important;
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+  color: #d16969 !important;
+}
+
+/* === CARD HOVER EFFECTS === */
+.card {
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--card-shadow-hover);
+}
+
+/* === BADGE BASE STYLING === */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1x);
+  padding: var(--badge-padding-y) var(--badge-padding-x);
+  border-radius: var(--badge-border-radius);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* === GITHUB/DISCORD NAVBAR ICONS === */
+.header-github-link,
+.header-discord-link {
+  display: flex;
+  align-items: center;
+  padding: var(--space-2x);
+  margin: 0 var(--space-1x);
+  transition: opacity var(--transition-fast);
+}
+
+.header-github-link:hover,
+.header-discord-link:hover {
+  opacity: 0.7;
+}
+
+.header-github-link::before {
+  content: '';
+  width: 24px;
+  height: 24px;
+  display: flex;
+  background: url('~@site/static/assets/icons/github-blue.svg') no-repeat center;
+  background-size: contain;
+}
+
+.header-discord-link::before {
+  content: '';
+  width: 24px;
+  height: 24px;
+  display: flex;
+  background: url('~@site/static/assets/icons/discord.svg') no-repeat center;
+  background-size: contain;
+}
+
+[data-theme='dark'] .header-github-link::before {
+  filter: brightness(1.5);
+}
+
+[data-theme='dark'] .header-discord-link::before {
+  filter: brightness(1.5);
+}
+
+/* === NAVBAR LOGO === */
+.navbar__logo {
+  height: 28px;
+  margin-right: var(--space-2x);
+}
+
+/* === NAVBAR TITLE (Custom HTML item) === */
+.navbar__title {
+  font-weight: 600;
+  font-size: 1.125rem;
+  color: var(--ifm-navbar-link-color);
+  text-decoration: none;
+  margin-right: var(--space-6x);
+  white-space: nowrap;
+}
+
+.navbar__title:hover {
+  color: var(--ifm-navbar-link-hover-color);
+  text-decoration: none;
+}
+
+/* === NAVBAR ACTIVE LINK STYLING === */
+.navbar__link--active {
+  font-weight: 600;
+}
+
+/* === BREADCRUMBS STYLING === */
+.breadcrumbs {
+  font-size: 0.875rem;
+  margin-bottom: var(--space-4x);
+}
+
+.breadcrumbs__link {
+  color: var(--ifm-color-primary);
+  transition: color var(--transition-fast);
+}
+
+.breadcrumbs__link:hover {
+  color: var(--ifm-color-primary-dark);
+  text-decoration: none;
+}
+
+.breadcrumbs__item:not(:last-child)::after {
+  content: '/';
+  margin: 0 var(--space-2x);
+  color: var(--gray-400);
+}
+
+/* === TABLE OF CONTENTS STYLING === */
+.table-of-contents {
+  font-size: 0.8125rem;
+}
+
+.table-of-contents__link {
+  color: var(--gray-600);
+  transition: color var(--transition-fast);
+}
+
+.table-of-contents__link:hover {
+  color: var(--ifm-color-primary);
+}
+
+.table-of-contents__link--active {
+  font-weight: 600;
+  color: var(--ifm-color-primary);
+}
+
+[data-theme='dark'] .table-of-contents__link {
+  color: var(--gray-400);
+}
+
+[data-theme='dark'] .table-of-contents__link--active {
+  color: var(--ifm-color-primary-light);
+}
+
+/* === SIDEBAR STYLING === */
+.menu__link {
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.menu__link--active {
+  font-weight: 600;
+}
+
+/* New badge for sidebar items */
+.sidebar-new-badge::after {
+  content: 'NEW';
+  margin-left: var(--space-2x);
+  padding: 2px 6px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: white;
+  background-color: var(--color-success);
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+/* === INFO GRID (for package metadata) === */
+.info-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3x);
+  margin: var(--space-4x) 0 var(--space-6x) 0;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2x);
+  padding: var(--space-2x) var(--space-3x);
+  background: var(--ifm-background-surface-color);
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.info-label {
+  font-weight: 600;
+  color: var(--ifm-color-emphasis-600);
+}
+
+.info-item code {
+  background-color: var(--ifm-color-emphasis-200);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+[data-theme='dark'] .info-item {
+  background: var(--ifm-background-surface-color);
+  border-color: var(--ifm-color-emphasis-400);
+}
+
+[data-theme='dark'] .info-label {
+  color: var(--ifm-color-emphasis-500);
+}
+
+[data-theme='dark'] .info-item code {
+  background-color: var(--ifm-color-emphasis-300);
+}
+
+/* === API DOCUMENTATION STYLING === */
+.api-info-box {
+  display: inline-block;
+  background: var(--ifm-background-surface-color);
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: var(--card-border-radius, 8px);
+  padding: var(--space-4x);
+  margin-bottom: var(--space-6x);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.api-info-box table {
+  margin-bottom: 0;
+  display: table;
+  width: auto;
+}
+
+.api-info-box thead {
+  display: none;
+}
+
+.api-info-box tr {
+  background: transparent !important;
+}
+
+.api-info-box th,
+.api-info-box td {
+  border: none;
+  padding: var(--space-2x) var(--space-3x);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.api-info-box td:first-child {
+  font-weight: 600;
+  color: var(--ifm-color-emphasis-700);
+  padding-right: var(--space-4x);
+  white-space: nowrap;
+}
+
+.api-info-box td:last-child {
+  color: var(--ifm-font-color-base);
+}
+
+.api-info-box code {
+  background-color: var(--ifm-color-emphasis-200);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.875em;
+  font-family: var(--ifm-font-family-monospace);
+}
+
+[data-theme='dark'] .api-info-box {
+  background: var(--ifm-background-surface-color);
+  border-color: var(--ifm-color-emphasis-400);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme='dark'] .api-info-box td:first-child {
+  color: var(--ifm-color-emphasis-500);
+}
+
+[data-theme='dark'] .api-info-box code {
+  background-color: var(--ifm-color-emphasis-300);
+}
+
+/* === OPENAPI CODE BLOCK STYLING === */
+/* Hide line numbers in API code samples for cleaner appearance */
+.openapi-explorer__code-block-code-line-number {
+  display: none !important;
+}
+
+/* Fix code block overflow - enable horizontal scrolling */
+/* Target the outer container that constrains width */
+.openapi-tabs__code-container,
+.openapi-tabs__code-container-inner {
+  overflow-x: auto !important;
+}
+
+.openapi-explorer__code-block-container {
+  overflow-x: auto !important;
+  max-width: 100% !important;
+}
+
+.openapi-explorer__code-block-content {
+  overflow-x: auto !important;
+}
+
+/* Ensure code lines don't wrap - use horizontal scroll instead */
+.openapi-explorer__code-block-content code,
+.openapi-explorer__code-block code {
+  white-space: pre !important;
+  display: block !important;
+}
+
+/* Style the scrollbar for better visibility */
+/* Target the pre element which is the actual scrollable container */
+.openapi-explorer__code-block-content pre,
+.openapi-explorer__code-block.thin-scrollbar,
+pre.openapi-explorer__code-block {
+  overflow: auto !important;
+  scrollbar-width: auto !important;
+  scrollbar-color: rgba(255, 255, 255, 0.5) rgba(0, 0, 0, 0.3) !important;
+  padding: 16px !important;
+  max-height: 400px !important;
+}
+
+/* Force scrollbar visibility on WebKit browsers (Chrome, Safari, Edge) */
+.openapi-explorer__code-block-content pre::-webkit-scrollbar,
+.openapi-explorer__code-block.thin-scrollbar::-webkit-scrollbar,
+pre.openapi-explorer__code-block::-webkit-scrollbar {
+  -webkit-appearance: none !important;
+  height: 12px !important;
+  width: 12px !important;
+  display: block !important;
+}
+
+.openapi-explorer__code-block-content pre::-webkit-scrollbar-track,
+.openapi-explorer__code-block.thin-scrollbar::-webkit-scrollbar-track,
+pre.openapi-explorer__code-block::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3) !important;
+  border-radius: 6px !important;
+}
+
+.openapi-explorer__code-block-content pre::-webkit-scrollbar-thumb,
+.openapi-explorer__code-block.thin-scrollbar::-webkit-scrollbar-thumb,
+pre.openapi-explorer__code-block::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.5) !important;
+  border-radius: 6px !important;
+  border: 2px solid rgba(0, 0, 0, 0.3) !important;
+}
+
+.openapi-explorer__code-block-content pre::-webkit-scrollbar-thumb:hover,
+.openapi-explorer__code-block.thin-scrollbar::-webkit-scrollbar-thumb:hover,
+pre.openapi-explorer__code-block::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* Override thin-scrollbar class to ensure scrollbar is visible */
+.thin-scrollbar {
+  scrollbar-width: auto !important;
+}
+
+/* Note: Code blocks in the right panel are horizontally scrollable.
+   On macOS, scrollbars are hidden by default (overlay scrollbars).
+   Users can:
+   1. Scroll horizontally using trackpad/mouse
+   2. Click "Expand to fullscreen" button to view complete code */
+
+/* === HIDE OPENAPI FEEDBACK WIDGET === */
+/* Remove "Was this page helpful?" section - no feedback system in place */
+/* Target the specific feedback div structure in API docs */
+/* IMPORTANT: Exclude .theme-doc-markdown to avoid hiding CLI docs content */
+article > div:last-of-type:not(.theme-doc-markdown):has(p:first-child):has(button) {
+  display: none !important;
+}
+
+/* === HIDE DUPLICATE EXAMPLE TAB === */
+/* Hide "Example (auto)" tab since it shows identical content to "Example" tab */
+/* The OpenAPI spec has well-defined examples that match auto-generated ones */
+/* Target: .openapi-tabs__schema is the specific class for Schema/Example/Example(auto) tabs */
+.openapi-tabs__schema [role='tab']:nth-child(2) {
+  display: none !important;
+}
+
+/* ============================================
+   OPENAPI VISUAL ENHANCEMENTS
+   Bringing API docs to parity with CLI docs
+   ============================================ */
+
+/* === OPENAPI INPUT FIELDS === */
+/* Enhanced focus states matching CLI Builder inputs */
+[class*='openapi'] input[type='text'],
+[class*='openapi'] input:not([type]),
+[class*='openapi'] textarea {
+  border: 1px solid var(--ifm-color-emphasis-300) !important;
+  border-radius: 6px !important;
+  padding: 0.5rem 0.75rem !important;
+  font-family: var(--ifm-font-family-monospace) !important;
+  font-size: 0.875rem !important;
+  background: var(--ifm-background-color) !important;
+  color: var(--ifm-font-color-base) !important;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease !important;
+}
+
+[class*='openapi'] input[type='text']:focus,
+[class*='openapi'] input:not([type]):focus,
+[class*='openapi'] textarea:focus {
+  outline: none !important;
+  border-color: var(--ifm-color-primary) !important;
+  box-shadow: 0 0 0 3px var(--ifm-color-primary-lightest) !important;
+}
+
+[class*='openapi'] input::placeholder,
+[class*='openapi'] textarea::placeholder {
+  color: var(--ifm-font-color-secondary) !important;
+  opacity: 0.7 !important;
+}
+
+[data-theme='dark'] [class*='openapi'] input[type='text'],
+[data-theme='dark'] [class*='openapi'] input:not([type]),
+[data-theme='dark'] [class*='openapi'] textarea {
+  border-color: var(--ifm-color-emphasis-400) !important;
+  background: var(--ifm-background-surface-color) !important;
+}
+
+/* === SEND API REQUEST BUTTON === */
+/* Enhanced button matching CLI Builder copy button style */
+button[class*='sendButton'],
+button:has(> span:only-child):has(span:contains('Send')),
+[class*='openapi'] button[type='submit'],
+.openapi-explorer button[class*='execute'],
+button:contains('Send API Request') {
+  background: var(--ifm-color-primary) !important;
+  color: white !important;
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 0.625rem 1.25rem !important;
+  font-size: 0.875rem !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition:
+    background 0.15s ease,
+    transform 0.1s ease,
+    box-shadow 0.15s ease !important;
+}
+
+button[class*='sendButton']:hover,
+[class*='openapi'] button[type='submit']:hover,
+.openapi-explorer button[class*='execute']:hover {
+  background: var(--ifm-color-primary-dark) !important;
+  box-shadow: 0 2px 8px rgba(55, 91, 210, 0.3) !important;
+}
+
+button[class*='sendButton']:active,
+[class*='openapi'] button[type='submit']:active,
+.openapi-explorer button[class*='execute']:active {
+  transform: scale(0.98) !important;
+}
+
+button[class*='sendButton']:focus-visible,
+[class*='openapi'] button[type='submit']:focus-visible,
+.openapi-explorer button[class*='execute']:focus-visible {
+  outline: 2px solid var(--ifm-color-primary) !important;
+  outline-offset: 2px !important;
+}
+
+/* === RESPONSE STATUS TABS (200, 400, 404, 500) === */
+/* Make status codes more visually distinct */
+[role='tablist'] [role='tab'] {
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease !important;
+}
+
+/* Success status (2xx) */
+[role='tab'][aria-selected='true']:has(> :first-child:contains('200')),
+[role='tab'][aria-selected='true']:has(> :first-child:contains('201')),
+[role='tab'][aria-selected='true']:has(> :first-child:contains('204')) {
+  background: var(--color-background-success) !important;
+  border-color: var(--color-success) !important;
+}
+
+/* Error status (4xx) */
+[role='tab'][aria-selected='true']:has(> :first-child:contains('400')),
+[role='tab'][aria-selected='true']:has(> :first-child:contains('404')) {
+  background: var(--color-background-warning) !important;
+  border-color: var(--color-warning) !important;
+}
+
+/* Server error (5xx) */
+[role='tab'][aria-selected='true']:has(> :first-child:contains('500')),
+[role='tab'][aria-selected='true']:has(> :first-child:contains('502')),
+[role='tab'][aria-selected='true']:has(> :first-child:contains('503')) {
+  background: var(--color-background-error) !important;
+  border-color: var(--color-error) !important;
+}
+
+/* === HTTP METHOD BADGES === */
+/* Enhanced styling for GET, POST, PUT, DELETE badges */
+[class*='openapi'] [class*='badge'],
+[class*='openapi-method'] {
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  padding: 0.25rem 0.75rem !important;
+  border-radius: 4px !important;
+  font-size: 0.75rem !important;
+}
+
+/* === PARAMETER SECTIONS === */
+/* Enhanced collapsible sections for Path/Query/Body parameters */
+[class*='openapi'] details,
+[class*='openapi'] [class*='schemaItem'],
+fieldset[class*='openapi'] {
+  border: 1px solid var(--ifm-color-emphasis-200) !important;
+  border-radius: 8px !important;
+  margin-bottom: 0.75rem !important;
+  overflow: hidden !important;
+  transition: border-color 0.15s ease !important;
+}
+
+[class*='openapi'] details:hover,
+[class*='openapi'] [class*='schemaItem']:hover {
+  border-color: var(--ifm-color-emphasis-300) !important;
+}
+
+[class*='openapi'] details > summary,
+[class*='openapi'] [class*='collapsible'] > button {
+  background: var(--ifm-color-emphasis-100) !important;
+  padding: 0.75rem 1rem !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: background-color 0.15s ease !important;
+}
+
+[class*='openapi'] details > summary:hover,
+[class*='openapi'] [class*='collapsible'] > button:hover {
+  background: var(--ifm-color-emphasis-200) !important;
+}
+
+[class*='openapi'] details[open] > summary {
+  border-bottom: 1px solid var(--ifm-color-emphasis-200) !important;
+}
+
+[data-theme='dark'] [class*='openapi'] details,
+[data-theme='dark'] [class*='openapi'] [class*='schemaItem'],
+[data-theme='dark'] fieldset[class*='openapi'] {
+  border-color: var(--ifm-color-emphasis-400) !important;
+}
+
+[data-theme='dark'] [class*='openapi'] details > summary,
+[data-theme='dark'] [class*='openapi'] [class*='collapsible'] > button {
+  background: var(--ifm-color-emphasis-200) !important;
+}
+
+[data-theme='dark'] [class*='openapi'] details > summary:hover,
+[data-theme='dark'] [class*='openapi'] [class*='collapsible'] > button:hover {
+  background: var(--ifm-color-emphasis-300) !important;
+}
+
+/* === REQUIRED/NULLABLE BADGES === */
+/* Enhanced styling for parameter requirement indicators */
+[class*='openapi'] [class*='required'],
+[class*='schemaRequired'] {
+  background: var(--color-error) !important;
+  color: white !important;
+  font-size: 0.6875rem !important;
+  font-weight: 700 !important;
+  padding: 0.125rem 0.5rem !important;
+  border-radius: 4px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.03em !important;
+}
+
+[class*='openapi'] [class*='nullable'] {
+  background: var(--ifm-color-emphasis-200) !important;
+  color: var(--ifm-font-color-secondary) !important;
+  font-size: 0.6875rem !important;
+  font-weight: 600 !important;
+  padding: 0.125rem 0.5rem !important;
+  border-radius: 4px !important;
+}
+
+[data-theme='dark'] [class*='openapi'] [class*='nullable'] {
+  background: var(--ifm-color-emphasis-400) !important;
+  color: var(--gray-300) !important;
+}
+
+/* === TYPE BADGES === */
+/* Styling for string, number, boolean, object, array type indicators */
+[class*='openapi'] [class*='type'],
+[class*='schemaDataType'] {
+  background: var(--ifm-color-primary-lightest) !important;
+  color: var(--ifm-color-primary-darkest) !important;
+  font-size: 0.6875rem !important;
+  font-weight: 600 !important;
+  padding: 0.125rem 0.5rem !important;
+  border-radius: 4px !important;
+  font-family: var(--ifm-font-family-monospace) !important;
+}
+
+[data-theme='dark'] [class*='openapi'] [class*='type'],
+[data-theme='dark'] [class*='schemaDataType'] {
+  background: rgba(90, 141, 238, 0.2) !important;
+  color: var(--chainlink-blue-light) !important;
+}
+
+/* === REQUEST/RESPONSE PANELS === */
+/* Enhanced right-side panel styling */
+[class*='openapi'] [class*='rightPanel'],
+[class*='openapi-demo'] {
+  background: var(--ifm-color-emphasis-100) !important;
+  border-radius: 8px !important;
+  border: 1px solid var(--ifm-color-emphasis-200) !important;
+  overflow: hidden !important;
+}
+
+[data-theme='dark'] [class*='openapi'] [class*='rightPanel'],
+[data-theme='dark'] [class*='openapi-demo'] {
+  background: var(--ifm-color-emphasis-200) !important;
+  border-color: var(--ifm-color-emphasis-400) !important;
+}
+
+/* Request/Response section headers */
+[class*='openapi'] [class*='panelHeader'],
+[class*='openapi'] [class*='sectionHeader'] {
+  background: var(--ifm-color-emphasis-200) !important;
+  padding: 0.625rem 1rem !important;
+  font-size: 0.8125rem !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  color: var(--ifm-font-color-secondary) !important;
+  border-bottom: 1px solid var(--ifm-color-emphasis-300) !important;
+}
+
+[data-theme='dark'] [class*='openapi'] [class*='panelHeader'],
+[data-theme='dark'] [class*='openapi'] [class*='sectionHeader'] {
+  background: var(--ifm-color-emphasis-300) !important;
+  border-color: var(--ifm-color-emphasis-400) !important;
+}
+
+/* === LANGUAGE TABS === */
+/* Enhanced styling for code sample language tabs (curl, nodejs, python, etc.) */
+[class*='openapi'] [role='tablist'] {
+  background: var(--code-header-bg) !important;
+  border-radius: 6px 6px 0 0 !important;
+  padding: 0.25rem !important;
+  gap: 0.25rem !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+}
+
+[class*='openapi'] [role='tab'] {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 4px !important;
+  padding: 0.375rem 0.75rem !important;
+  font-size: 0.75rem !important;
+  font-weight: 500 !important;
+  color: var(--gray-400) !important;
+  cursor: pointer !important;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease !important;
+}
+
+[class*='openapi'] [role='tab']:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: var(--gray-200) !important;
+}
+
+[class*='openapi'] [role='tab'][aria-selected='true'] {
+  background: rgba(255, 255, 255, 0.15) !important;
+  color: white !important;
+  font-weight: 600 !important;
+}
+
+/* Language tab icons - ensure visibility in all modes */
+[class*='openapi'] [role='tab'] img,
+[class*='openapi'] [role='tab'] svg {
+  opacity: 0.6 !important;
+  transition:
+    opacity 0.15s ease,
+    filter 0.15s ease !important;
+  filter: brightness(1.2) !important;
+}
+
+[class*='openapi'] [role='tab']:hover img,
+[class*='openapi'] [role='tab']:hover svg {
+  opacity: 0.85 !important;
+  filter: brightness(1.4) !important;
+}
+
+[class*='openapi'] [role='tab'][aria-selected='true'] img,
+[class*='openapi'] [role='tab'][aria-selected='true'] svg {
+  opacity: 1 !important;
+  filter: brightness(1.5) !important;
+}
+
+/* Light mode specific - increase contrast for tab icons */
+:root [class*='openapi'] [role='tab'] img,
+:root [class*='openapi'] [role='tab'] svg {
+  filter: brightness(1.3) contrast(1.1) !important;
+}
+
+:root [class*='openapi'] [role='tab']:hover img,
+:root [class*='openapi'] [role='tab']:hover svg {
+  filter: brightness(1.5) contrast(1.2) !important;
+}
+
+:root [class*='openapi'] [role='tab'][aria-selected='true'] img,
+:root [class*='openapi'] [role='tab'][aria-selected='true'] svg {
+  filter: brightness(1.6) contrast(1.2) !important;
+}
+
+/* === EXAMPLE VALUES === */
+/* Better styling for example code snippets */
+[class*='openapi'] [class*='example'] code,
+[class*='openapi'] code[class*='example'] {
+  background: var(--ifm-color-emphasis-200) !important;
+  padding: 0.125rem 0.5rem !important;
+  border-radius: 4px !important;
+  font-size: 0.8125rem !important;
+  color: var(--ifm-color-primary) !important;
+}
+
+[data-theme='dark'] [class*='openapi'] [class*='example'] code,
+[data-theme='dark'] [class*='openapi'] code[class*='example'] {
+  background: var(--ifm-color-emphasis-400) !important;
+  color: var(--chainlink-blue-light) !important;
+}
+
+/* === BASE URL DISPLAY === */
+/* Enhanced base URL section styling */
+[class*='openapi'] [class*='baseUrl'],
+[class*='openapi'] [class*='serverUrl'] {
+  background: var(--ifm-color-emphasis-100) !important;
+  border: 1px solid var(--ifm-color-emphasis-200) !important;
+  border-radius: 6px !important;
+  padding: 0.5rem 0.75rem !important;
+  font-family: var(--ifm-font-family-monospace) !important;
+  font-size: 0.8125rem !important;
+  margin-bottom: 1rem !important;
+}
+
+[data-theme='dark'] [class*='openapi'] [class*='baseUrl'],
+[data-theme='dark'] [class*='openapi'] [class*='serverUrl'] {
+  background: var(--ifm-color-emphasis-200) !important;
+  border-color: var(--ifm-color-emphasis-400) !important;
+}
+
+/* === RESPONSE BODY STYLING === */
+/* Enhanced response display area */
+[class*='openapi'] [class*='response'],
+[class*='openapi'] [class*='responseBody'] {
+  background: var(--ifm-color-emphasis-100) !important;
+  border-radius: 6px !important;
+  padding: 1rem !important;
+  margin-top: 0.5rem !important;
+}
+
+[data-theme='dark'] [class*='openapi'] [class*='response'],
+[data-theme='dark'] [class*='openapi'] [class*='responseBody'] {
+  background: var(--ifm-color-emphasis-200) !important;
+}
+
+/* === CLEAR BUTTON === */
+/* Style the Clear button in response panel */
+[class*='openapi'] button:contains('Clear'),
+[class*='openapi'] [class*='clearButton'] {
+  background: transparent !important;
+  color: var(--ifm-font-color-secondary) !important;
+  border: 1px solid var(--ifm-color-emphasis-300) !important;
+  border-radius: 4px !important;
+  padding: 0.25rem 0.75rem !important;
+  font-size: 0.75rem !important;
+  cursor: pointer !important;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease !important;
+}
+
+[class*='openapi'] button:contains('Clear'):hover,
+[class*='openapi'] [class*='clearButton']:hover {
+  background: var(--ifm-color-emphasis-100) !important;
+  border-color: var(--ifm-color-emphasis-400) !important;
+}
+
+/* === COLLAPSE ALL BUTTON === */
+[class*='openapi'] button:contains('Collapse'),
+[class*='openapi'] [class*='collapseButton'] {
+  background: transparent !important;
+  color: var(--ifm-font-color-secondary) !important;
+  border: none !important;
+  font-size: 0.75rem !important;
+  cursor: pointer !important;
+  text-decoration: underline !important;
+  transition: color 0.15s ease !important;
+}
+
+[class*='openapi'] button:contains('Collapse'):hover,
+[class*='openapi'] [class*='collapseButton']:hover {
+  color: var(--ifm-color-primary) !important;
+}
+
+/* === SCHEMA FIELD DESCRIPTIONS === */
+/* Better typography for field descriptions */
+[class*='openapi'] [class*='schemaDescription'],
+[class*='openapi'] [class*='description'] p {
+  font-size: 0.8125rem !important;
+  line-height: 1.5 !important;
+  color: var(--ifm-font-color-secondary) !important;
+  margin: 0.375rem 0 0 !important;
+}
+
+/* === POSSIBLE VALUES / ENUM === */
+/* Enhanced enum value display */
+[class*='openapi'] [class*='possibleValues'],
+[class*='openapi'] [class*='enum'] {
+  margin-top: 0.5rem !important;
+  padding: 0.5rem 0.75rem !important;
+  background: var(--ifm-color-emphasis-100) !important;
+  border-radius: 4px !important;
+  font-size: 0.8125rem !important;
+}
+
+[data-theme='dark'] [class*='openapi'] [class*='possibleValues'],
+[data-theme='dark'] [class*='openapi'] [class*='enum'] {
+  background: var(--ifm-color-emphasis-200) !important;
+}
+
+/* === API ENDPOINT URL HEADER === */
+/* The GET/POST + URL display under the title */
+[class*='openapi'] h2[class*='url'],
+[class*='openapi'] [class*='endpointUrl'] {
+  font-family: var(--ifm-font-family-monospace) !important;
+  font-size: 0.875rem !important;
+  font-weight: 400 !important;
+  background: var(--ifm-color-emphasis-100) !important;
+  padding: 0.5rem 1rem !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--ifm-color-emphasis-200) !important;
+  margin: 0.5rem 0 1.5rem !important;
+  overflow-x: auto !important;
+  white-space: nowrap !important;
+}
+
+[data-theme='dark'] [class*='openapi'] h2[class*='url'],
+[data-theme='dark'] [class*='openapi'] [class*='endpointUrl'] {
+  background: var(--ifm-color-emphasis-200) !important;
+  border-color: var(--ifm-color-emphasis-400) !important;
+}
+
+/* === SMOOTH TRANSITIONS === */
+/* Add subtle animations for better UX */
+[class*='openapi'] * {
+  transition-property: background-color, border-color, color, box-shadow, transform;
+  transition-duration: 0.15s;
+  transition-timing-function: ease;
+}
+
+/* Disable transitions for layout properties to prevent jank */
+[class*='openapi'] *::before,
+[class*='openapi'] *::after {
+  transition: none !important;
+}
+
+/* ============================================
+   LIGHT MODE ACCESSIBILITY FIXES
+   Improving contrast for users with sight issues
+   Using exact class names from docusaurus-openapi-docs
+   ============================================ */
+
+/* === RESPONSE STATUS TABS (200, 400, 404, 500) - LIGHT MODE === */
+/* Class: tabs__item openapi-tabs__response-code-item */
+:root .openapi-tabs__response-code-item {
+  color: var(--gray-700) !important;
+  font-weight: 600 !important;
+}
+
+:root .openapi-tabs__response-code-item:hover {
+  color: var(--gray-900) !important;
+  background: var(--gray-200) !important;
+}
+
+:root .openapi-tabs__response-code-item.active {
+  color: var(--gray-900) !important;
+  font-weight: 700 !important;
+  background: var(--gray-300) !important;
+}
+
+/* === LANGUAGE SELECTOR TABS (curl, nodejs, python, etc.) - LIGHT MODE === */
+/* Class: tabs__item openapi-tabs__code-item */
+:root .openapi-tabs__code-list-container {
+  background: var(--gray-300) !important;
+}
+
+:root .openapi-tabs__code-item {
+  color: var(--gray-700) !important;
+  font-weight: 500 !important;
+}
+
+:root .openapi-tabs__code-item:hover {
+  color: var(--gray-900) !important;
+  background: var(--gray-400) !important;
+}
+
+:root .openapi-tabs__code-item.active {
+  color: var(--gray-900) !important;
+  background: var(--gray-500) !important;
+  font-weight: 600 !important;
+}
+
+/* === SUB-TABS (AXIOS, NATIVE, REQUEST, UNIREST) - LIGHT MODE === */
+/* Class: tabs__item openapi-tabs__code-item openapi-tabs__code-item--variant */
+:root .openapi-tabs__code-item--variant {
+  color: var(--gray-700) !important;
+  font-weight: 500 !important;
+}
+
+:root .openapi-tabs__code-item--variant:hover {
+  color: var(--gray-900) !important;
+  background: var(--gray-400) !important;
+}
+
+:root .openapi-tabs__code-item--variant.active {
+  color: var(--gray-900) !important;
+  background: var(--gray-500) !important;
+  font-weight: 600 !important;
+}
+
+/* === SCHEMA / EXAMPLE TABS - LIGHT MODE === */
+/* Class: tabs__item openapi-tabs__schema-item */
+:root .openapi-tabs__schema-list-container {
+  background: var(--gray-400) !important;
+}
+
+:root .openapi-tabs__schema-item {
+  color: var(--gray-800) !important;
+  font-weight: 500 !important;
+}
+
+:root .openapi-tabs__schema-item:hover {
+  color: var(--gray-900) !important;
+  background: rgba(0, 0, 0, 0.15) !important;
+}
+
+:root .openapi-tabs__schema-item.active {
+  color: var(--gray-900) !important;
+  background: rgba(0, 0, 0, 0.2) !important;
+  font-weight: 600 !important;
+}
+
+/* === APPLICATION/JSON TAB - LIGHT MODE === */
+/* Class: tabs__item openapi-tabs__mime-item */
+:root .openapi-tabs__mime-list-container {
+  background: var(--gray-700) !important;
+}
+
+:root .openapi-tabs__mime-item {
+  color: white !important;
+  font-weight: 600 !important;
+}
+
+/* === TYPE INDICATORS (string, object, array, etc.) - LIGHT MODE === */
+:root [class*='openapi'] [class*='schemaDataType'],
+:root [class*='openapi'] span[class*='type'] {
+  background: var(--ifm-color-primary-lightest) !important;
+  color: var(--ifm-color-primary-darkest) !important;
+  font-weight: 600 !important;
+}
+
+/* === PLACEHOLDER TEXT - LIGHT MODE === */
+:root [class*='openapi'] input::placeholder,
+:root [class*='openapi'] textarea::placeholder {
+  color: var(--gray-500) !important;
+  opacity: 1 !important;
+}
+
+/* === DARK MODE - Ensure existing styles work well === */
+[data-theme='dark'] .openapi-tabs__response-code-item {
+  color: var(--gray-400) !important;
+}
+
+[data-theme='dark'] .openapi-tabs__response-code-item:hover {
+  color: var(--gray-200) !important;
+}
+
+[data-theme='dark'] .openapi-tabs__response-code-item.active {
+  color: white !important;
+}
+
+[data-theme='dark'] .openapi-tabs__code-list-container {
+  background: var(--code-header-bg) !important;
+}
+
+[data-theme='dark'] .openapi-tabs__code-item {
+  color: var(--gray-400) !important;
+}
+
+[data-theme='dark'] .openapi-tabs__code-item:hover {
+  color: var(--gray-200) !important;
+}
+
+[data-theme='dark'] .openapi-tabs__code-item.active {
+  color: white !important;
+  background: rgba(255, 255, 255, 0.15) !important;
+}
+
+[data-theme='dark'] .openapi-tabs__code-item--variant {
+  color: var(--gray-400) !important;
+}
+
+[data-theme='dark'] .openapi-tabs__code-item--variant:hover {
+  color: var(--gray-200) !important;
+}
+
+[data-theme='dark'] .openapi-tabs__code-item--variant.active {
+  color: white !important;
+}
+
+[data-theme='dark'] .openapi-tabs__schema-list-container {
+  background: var(--gray-700) !important;
+}
+
+[data-theme='dark'] .openapi-tabs__schema-item {
+  color: var(--gray-300) !important;
+}
+
+[data-theme='dark'] .openapi-tabs__schema-item:hover {
+  color: var(--gray-100) !important;
+}
+
+[data-theme='dark'] .openapi-tabs__schema-item.active {
+  color: white !important;
+}
+
+[data-theme='dark'] .openapi-tabs__mime-list-container {
+  background: var(--gray-800) !important;
+}
+
+[data-theme='dark'] .openapi-tabs__mime-item {
+  color: white !important;
+}
+
+/* ============================================
+   TYPEDOC SDK PAGE STYLING
+   Improving visual hierarchy for SDK docs
+   ============================================ */
+
+/* === REDUCE SEPARATOR PROMINENCE === */
+/* TypeDoc uses <hr> between methods/properties */
+.theme-doc-markdown hr {
+  border: none;
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+  margin: 2rem 0;
+  opacity: 0.5;
+}
+
+[data-theme='dark'] .theme-doc-markdown hr {
+  border-top-color: var(--ifm-color-emphasis-400);
+  opacity: 0.4;
+}
+
+/* === BETTER VISUAL GROUPING FOR SECTIONS === */
+/* Major sections (Constructors, Properties, Methods) */
+.theme-doc-markdown h2 {
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 2px solid var(--ifm-color-primary-lightest);
+}
+
+.theme-doc-markdown h2:first-of-type {
+  margin-top: 1.5rem;
+  padding-top: 0;
+  border-top: none;
+}
+
+[data-theme='dark'] .theme-doc-markdown h2 {
+  border-top-color: var(--ifm-color-primary-darker);
+}
+
+/* === COMPACT "DEFINED IN" LINKS === */
+/* Make source file references more subtle */
+.theme-doc-markdown p:has(> a[href*='github.com']) {
+  font-size: 0.75rem;
+  color: var(--ifm-font-color-secondary);
+  margin-top: -0.25rem;
+  margin-bottom: 0.75rem;
+  opacity: 0.7;
+}
+
+.theme-doc-markdown p:has(> a[href*='github.com']) a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.theme-doc-markdown p:has(> a[href*='github.com']) a:hover {
+  color: var(--ifm-color-primary);
+  text-decoration: underline;
+}
+
+/* === METHOD SIGNATURE STYLING === */
+/* Make method signatures stand out with better formatting */
+.theme-doc-markdown blockquote {
+  background: var(--ifm-color-emphasis-100);
+  border-left: 4px solid var(--ifm-color-primary);
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0 1rem;
+  border-radius: 0 6px 6px 0;
+}
+
+[data-theme='dark'] .theme-doc-markdown blockquote {
+  background: var(--ifm-color-emphasis-200);
+}
+
+.theme-doc-markdown blockquote p {
+  margin: 0;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.theme-doc-markdown blockquote code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* === PARAMETER SECTIONS === */
+/* Improve readability of parameter lists */
+.theme-doc-markdown h4,
+.theme-doc-markdown h5,
+.theme-doc-markdown h6 {
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.theme-doc-markdown h5,
+.theme-doc-markdown h6 {
+  font-size: 0.9rem;
+  color: var(--ifm-font-color-secondary);
+}
+
+/* === TYPE BADGES IN SDK DOCS === */
+/* Style type annotations consistently */
+.theme-doc-markdown p > code:only-child,
+.theme-doc-markdown li > code:first-child {
+  background: var(--ifm-color-primary-lightest);
+  color: var(--ifm-color-primary-darkest);
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8125rem;
+}
+
+[data-theme='dark'] .theme-doc-markdown p > code:only-child,
+[data-theme='dark'] .theme-doc-markdown li > code:first-child {
+  background: rgba(90, 141, 238, 0.2);
+  color: var(--chainlink-blue-light);
+}
+
+/* === EXAMPLE CODE BLOCKS === */
+/* Make examples more prominent */
+.theme-doc-markdown h4 + div[class*='codeBlockContainer'],
+.theme-doc-markdown h3 + p + div[class*='codeBlockContainer'] {
+  margin-top: 0.5rem;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* === INHERITED/OVERRIDES SECTIONS === */
+/* Make inheritance info more subtle */
+.theme-doc-markdown h4:has(a[href*='Inherited']),
+.theme-doc-markdown h4:has(a[href*='Overrides']) {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--ifm-font-color-secondary);
+  margin-top: 0.5rem;
+}
+
+.theme-doc-markdown h4:has(a[href*='Inherited']) + p,
+.theme-doc-markdown h4:has(a[href*='Overrides']) + p {
+  font-size: 0.8rem;
+  color: var(--ifm-font-color-secondary);
+}
+
+/* === EXTENDS SECTION === */
+/* Better styling for class hierarchy */
+.theme-doc-markdown h2:has(a[href*='extends']) + ul {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.5rem 0 1.5rem;
+}
+
+.theme-doc-markdown h2:has(a[href*='extends']) + ul li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 1rem;
+  background: var(--ifm-color-emphasis-100);
+  border-radius: 6px;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.875rem;
+}
+
+[data-theme='dark'] .theme-doc-markdown h2:has(a[href*='extends']) + ul li {
+  background: var(--ifm-color-emphasis-200);
+}
+
+/* === INDEXABLE SECTION === */
+/* Style the indexable signature block */
+.theme-doc-markdown h2:has(a[href*='indexable']) + p {
+  padding: 0.75rem 1rem;
+  background: var(--ifm-color-emphasis-100);
+  border-radius: 6px;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.875rem;
+  margin-bottom: 1.5rem;
+}
+
+[data-theme='dark'] .theme-doc-markdown h2:has(a[href*='indexable']) + p {
+  background: var(--ifm-color-emphasis-200);
+}

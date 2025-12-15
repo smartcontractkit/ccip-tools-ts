@@ -1,0 +1,105 @@
+/**
+ * Hero section styles
+ * Uses Chainlink brand colors
+ */
+
+.hero {
+  padding: var(--space-16x, 64px) var(--space-4x, 16px);
+  background: linear-gradient(
+    135deg,
+    var(--chainlink-blue, #375bd2) 0%,
+    var(--chainlink-blue-hover, #1a2b6b) 100%
+  );
+  color: white;
+  text-align: center;
+}
+
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.title {
+  font-size: 3rem;
+  font-weight: 600;
+  margin-bottom: var(--space-4x, 16px);
+  color: white;
+}
+
+.subtitle {
+  font-size: 1.25rem;
+  margin-bottom: var(--space-8x, 32px);
+  color: rgba(255, 255, 255, 0.95);
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.6;
+}
+
+.buttons {
+  display: flex;
+  gap: var(--space-4x, 16px);
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.buttonPrimary {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-3x, 12px) var(--space-6x, 24px);
+  background-color: white;
+  color: var(--chainlink-blue, #375bd2);
+  border-radius: var(--ifm-border-radius, 4px);
+  font-weight: 600;
+  text-decoration: none;
+  transition: all var(--transition-fast, 150ms ease);
+}
+
+.buttonPrimary:hover {
+  background-color: var(--gray-100, #e8eaed);
+  color: var(--chainlink-blue-hover, #1a2b6b);
+  text-decoration: none;
+  transform: translateY(-2px);
+}
+
+.buttonSecondary {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-3x, 12px) var(--space-6x, 24px);
+  background-color: transparent;
+  color: white;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-radius: var(--ifm-border-radius, 4px);
+  font-weight: 600;
+  text-decoration: none;
+  transition: all var(--transition-fast, 150ms ease);
+}
+
+.buttonSecondary:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: white;
+  color: white;
+  text-decoration: none;
+}
+
+@media (max-width: 768px) {
+  .title {
+    font-size: 2rem;
+  }
+
+  .subtitle {
+    font-size: 1rem;
+  }
+
+  .buttons {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .buttonPrimary,
+  .buttonSecondary {
+    width: 100%;
+    max-width: 280px;
+    justify-content: center;
+  }
+}

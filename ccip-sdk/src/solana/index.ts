@@ -166,10 +166,14 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     patchBorsh()
     supportedChains[ChainFamily.Solana] = SolanaChain
   }
+  /** Chain family identifier for Solana networks. */
   static readonly family = ChainFamily.Solana
+  /** Native token decimals (9 for SOL). */
   static readonly decimals = 9
 
+  /** The Solana RPC connection for blockchain interactions. */
   connection: Connection
+  /** Transaction commitment level for confirmations. Defaults to 'confirmed'. */
   commitment: Commitment = 'confirmed'
   readonly destroy$: Promise<void>
 
@@ -275,6 +279,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @param url - RPC endpoint URL.
    * @param ctx - context containing logger.
    * @returns A new SolanaChain instance.
+   * @example
+   * ```typescript
+   * import { SolanaChain } from '@chainlink/ccip-sdk'
+   *
+   * const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+   * console.log(chain.network.name) // 'solana-devnet'
+   * ```
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<SolanaChain> {
     const connection = this._getConnection(url, ctx)
@@ -626,6 +637,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /**
    * Fetches token metadata from Metaplex.
+   * @internal
    * @param mintPublicKey - Token mint public key.
    * @returns Token name and symbol, or null if not found.
    */
@@ -987,7 +999,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @param router - router address
    * @param destChainSelector - destination chain selector
    * @param message - AnyMessage to send (with or without fee)
-   * @param approveMax - approve max amount of tokens if needed, instead of only what's needed
+   * @param opts - Optional parameters: `approveMax` to approve max amount of tokens instead of exact amount
    * @returns instructions - array of instructions; `ccipSend` is last, after any approval
    *   lookupTables - array of lookup tables for `ccipSend` call
    *   mainIndex - instructions.length - 1
@@ -1492,6 +1504,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /**
    * Gets the router configuration from the Config PDA.
+   * @internal
    * @param router - Router program address.
    * @returns Router configuration including feeQuoter.
    */
