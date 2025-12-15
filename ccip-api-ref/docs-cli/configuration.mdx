@@ -64,25 +64,25 @@ The CLI supports environment variables for configuration. Command-line flags ove
 
 ### RPC Configuration
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `RPC_*` | RPC endpoints (any suffix) | `RPC_SEPOLIA=https://...` |
+| Variable | Description                | Example                   |
+| -------- | -------------------------- | ------------------------- |
+| `RPC_*`  | RPC endpoints (any suffix) | `RPC_SEPOLIA=https://...` |
 
 ### Wallet Configuration
 
-| Variable | Description |
-|----------|-------------|
-| `USER_KEY` | Private key (EVM: hex, Solana: base58) |
-| `PRIVATE_KEY` | Alias for `USER_KEY` |
-| `USER_KEY_PASSWORD` | Password for encrypted JSON keystore |
+| Variable            | Description                            |
+| ------------------- | -------------------------------------- |
+| `USER_KEY`          | Private key (EVM: hex, Solana: base58) |
+| `PRIVATE_KEY`       | Alias for `USER_KEY`                   |
+| `USER_KEY_PASSWORD` | Password for encrypted JSON keystore   |
 
 ### Output Preferences
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `CCIP_FORMAT` | Output format (`pretty`, `log`, `json`) | `pretty` |
-| `CCIP_VERBOSE` | Enable debug logging (`true`/`false`) | `false` |
-| `CCIP_PAGE` | Pagination size for `getLogs` queries | `10000` |
+| Variable       | Description                             | Default  |
+| -------------- | --------------------------------------- | -------- |
+| `CCIP_FORMAT`  | Output format (`pretty`, `log`, `json`) | `pretty` |
+| `CCIP_VERBOSE` | Enable debug logging (`true`/`false`)   | `false`  |
+| `CCIP_PAGE`    | Pagination size for `getLogs` queries   | `10000`  |
 
 **Example .env file:**
 
