@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'ccip-sdk/src/**'
+      - 'ccip-cli/src/**'
       - 'ccip-api-ref/**'
       - 'package.json'
       - 'package-lock.json'
@@ -12,6 +13,7 @@ on:
       - main
     paths:
       - 'ccip-sdk/src/**'
+      - 'ccip-cli/src/**'
       - 'ccip-api-ref/**'
 
 jobs:
@@ -29,6 +31,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Run checks
+        run: npm run check -w ccip-api-ref
 
       - name: Generate API docs from OpenAPI spec
         run: npm run gen-api -w ccip-api-ref
