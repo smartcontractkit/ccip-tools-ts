@@ -4,6 +4,7 @@ import type { AxiosAdapter } from 'axios'
 import { type BytesLike, getAddress as checksumAddress, isBytesLike } from 'ethers'
 import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
+import { fetchCCIPRequestsInTx } from '../requests.ts'
 
 import { type LogFilter, Chain } from '../chain.ts'
 import {
@@ -196,7 +197,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param hash - 64-char hex hash (without 0x prefix)
    * @returns ChainTransaction with transaction details
    */
-  async getTransactionByHash(hash: string): Promise<ChainTransaction> {
+  private async getTransactionByHash(hash: string): Promise<ChainTransaction> {
     if (!this.endpointUrl) {
       throw new CCIPArgumentInvalidError(
         'hash',
@@ -269,7 +270,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
       // Check if it's a valid 64-char hex string (raw hash format)
       if (/^[a-fA-F0-9]{64}$/.test(cleanHash)) {
-        return this.getTransactionByHash(cleanHash)
+        // Use V3 API to resolve the composite hash, then fetch full tx with logs
+        const resolved = await this.getTransactionByHash(cleanHash)
+        // Now fetch the full transaction using composite hash to get logs
+        return this.getTransaction(resolved.hash)
       }
       throw new CCIPArgumentInvalidError(
         'hash',
@@ -289,10 +293,30 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       throw new CCIPTransactionNotFoundError(hash)
     }
 
+    // Extract logs from outgoing external messages
+    const logs: Log_[] = []
+    const outMessages = tx.outMessages.values()
+    let index = 0
+    for (const msg of outMessages) {
+      if (msg.info.type === 'external-out') {
+        logs.push({
+          address: address.toRawString(),
+          topics: [],
+          data: msg.body.toBoc().toString('base64'), // Convert BOC to base64
+          // TODO: FIXME: consider fetching block info
+          blockNumber: Number(tx.lt), // Use logical time as block number
+          transactionHash: hash,
+          index: index,
+        })
+      }
+      index++
+    }
+
     return {
       hash,
-      logs: [], // TODO
-      blockNumber: Number(tx.lt),
+      logs,
+      // TODO: FIXME: consider fetching block info
+      blockNumber: Number(tx.lt), // Use logical time as block number
       timestamp: tx.now,
       from: address.toRawString(),
     }
@@ -306,8 +330,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /** {@inheritDoc Chain.fetchRequestsInTx} */
-  override async fetchRequestsInTx(_tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return Promise.reject(new CCIPNotImplementedError('fetchRequestsInTx'))
+  override async fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+    return fetchCCIPRequestsInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
   }
 
   /** {@inheritDoc Chain.fetchAllMessagesInBatch} */
@@ -430,14 +454,102 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return Promise.reject(new CCIPNotImplementedError('getTokenAdminRegistryFor'))
   }
 
-  // Static methods for decoding
   /**
    * Decodes a CCIP message from a TON log event.
-   * @param _log - Log with data field.
+   * @param log - Log with data field.
    * @returns Decoded CCIPMessage or undefined if not valid.
    */
-  static decodeMessage(_log: Log_): CCIPMessage_V1_6_TON | undefined {
-    throw new CCIPNotImplementedError('decodeMessage')
+  static decodeMessage(log: Pick<Log_, 'data'>): CCIPMessage_V1_6_TON | undefined {
+    if (!log.data || typeof log.data !== 'string') return undefined
+
+    try {
+      // Parse BOC from base64
+      const boc = Buffer.from(log.data, 'base64')
+      const cell = Cell.fromBoc(boc)[0]
+      const slice = cell.beginParse()
+
+      // Load header fields directly (no topic prefix)
+      // Structure from TVM2AnyRampMessage:
+      // header: RampMessageHeader + sender: address + body: Cell + feeValueJuels: uint96
+      const header = {
+        messageId: '0x' + slice.loadUintBig(256).toString(16).padStart(64, '0'),
+        sourceChainSelector: slice.loadUintBig(64),
+        destChainSelector: slice.loadUintBig(64),
+        sequenceNumber: slice.loadUintBig(64),
+        nonce: slice.loadUintBig(64),
+      }
+
+      // Load sender address
+      const sender = slice.loadAddress()?.toString() ?? ''
+
+      // Load body cell ref
+      const bodyCell = slice.loadRef()
+
+      // Load feeValueJuels (96 bits) at message level, after body ref
+      const feeValueJuels = slice.loadUintBig(96)
+
+      // Parse body cell: TVM2AnyRampMessageBody
+      // Order: receiver (ref) + data (ref) + extraArgs (ref) + tokenAmounts (ref) + feeToken (inline) + feeTokenAmount (256 bits)
+      const bodySlice = bodyCell.beginParse()
+
+      // Load receiver from ref 0 (CrossChainAddress: length(8 bits) + bytes)
+      const receiverSlice = bodySlice.loadRef().beginParse()
+      const receiverLength = receiverSlice.loadUint(8)
+      const receiverBytes = receiverSlice.loadBuffer(receiverLength)
+      const receiver = '0x' + receiverBytes.toString('hex')
+
+      // Load data from ref 1
+      const dataSlice = bodySlice.loadRef().beginParse()
+      const dataBytes = dataSlice.loadBuffer(dataSlice.remainingBits / 8)
+      const data = '0x' + dataBytes.toString('hex')
+
+      // Load extraArgs from ref 2
+      const extraArgsCell = bodySlice.loadRef()
+      const extraArgsSlice = extraArgsCell.beginParse()
+
+      // Read tag (32 bits)
+      const extraArgsTag = extraArgsSlice.loadUint(32)
+      if (extraArgsTag !== Number(EVMExtraArgsV2Tag)) return undefined
+
+      // Read gasLimit (maybe uint256): 1 bit flag + 256 bits if present
+      const hasGasLimit = extraArgsSlice.loadBit()
+      const gasLimit = hasGasLimit ? extraArgsSlice.loadUintBig(256) : 0n
+
+      // Read allowOutOfOrderExecution (1 bit)
+      const allowOutOfOrderExecution = extraArgsSlice.loadBit()
+
+      // Build extraArgs as raw hex matching reference format
+      const tagHex = extraArgsTag.toString(16).padStart(8, '0')
+      const gasLimitHex = (hasGasLimit ? '8' : '0') + gasLimit.toString(16).padStart(63, '0')
+      const oooByte = allowOutOfOrderExecution ? '40' : '00'
+      const extraArgs = '0x' + tagHex + gasLimitHex + oooByte
+
+      // Load tokenAmounts from ref 3
+      const _tokenAmountsCell = bodySlice.loadRef()
+      const tokenAmounts: CCIPMessage_V1_6_TON['tokenAmounts'] = [] // TODO: FIXME: parse when implemented
+
+      // Load feeToken (inline address in body)
+      const feeToken = bodySlice.loadMaybeAddress()?.toString() ?? ''
+
+      // Load feeTokenAmount (256 bits)
+      const feeTokenAmount = bodySlice.loadUintBig(256)
+
+      return {
+        header,
+        sender,
+        receiver,
+        data,
+        tokenAmounts,
+        feeToken,
+        feeTokenAmount,
+        feeValueJuels,
+        extraArgs,
+        gasLimit,
+        allowOutOfOrderExecution,
+      }
+    } catch {
+      return undefined
+    }
   }
 
   /**
