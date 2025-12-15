@@ -88,6 +88,10 @@ export const builder = (yargs: Argv) =>
         describe:
           'Clears buffers (if a previous attempt was aborted) or any ALT owned by this sender.',
       },
+      'receiver-object-ids': {
+        type: 'array',
+        describe: 'Receiver object IDs for Sui execution (if executing on Sui destination)',
+      },
       'sender-queue': {
         type: 'boolean',
         describe: 'Execute all messages in sender queue, starting with the provided tx',

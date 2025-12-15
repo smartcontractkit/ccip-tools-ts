@@ -1,4 +1,9 @@
+import { SuiClient } from '@mysten/sui/client'
+import type { Keypair } from '@mysten/sui/cryptography'
+import { SuiGraphQLClient } from '@mysten/sui/graphql'
+import { Transaction } from '@mysten/sui/transactions'
 import { type BytesLike, isBytesLike } from 'ethers'
+import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { AptosChain } from '../aptos/index.ts'
@@ -10,7 +15,9 @@ import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
+  type CCIPMessage,
   type CCIPRequest,
+  type CCIPVersion,
   type ChainTransaction,
   type CommitReport,
   type ExecutionReceipt,
@@ -23,6 +30,27 @@ import {
   ChainFamily,
 } from '../types.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
+import { decodeAddress, networkInfo } from '../utils.ts'
+import { getSuiEventsInTimeRange } from './events.ts'
+import {
+  type SuiManuallyExecuteInput,
+  type TokenConfig,
+  buildManualExecutionPTB,
+} from './manuallyExec/index.ts'
+import {
+  fetchTokenConfigs,
+  getCcipObjectRef,
+  getOffRampStateObject,
+  getReceiverModule,
+} from './objects.ts'
+
+type SuiContractDir = {
+  ccip: string
+  onRamp: string
+  offRamp: string
+  router: string
+  tokenAdminRegistry: string
+}
 
 /**
  * Sui chain implementation supporting Sui networks.
@@ -33,40 +61,188 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     supportedChains[ChainFamily.Sui] = SuiChain
   }
   static readonly family = ChainFamily.Sui
-  static readonly decimals = 8
+  static readonly decimals = 9 // SUI has 9 decimals
 
-  /**
-   * Creates a new SuiChain instance.
-   * @param network - Sui network configuration.
-   */
-  constructor(network: NetworkInfo<typeof ChainFamily.Sui>, ctx?: WithLogger) {
-    super(network, ctx)
+  readonly network: NetworkInfo<typeof ChainFamily.Sui>
+  readonly client: SuiClient
+  readonly graphqlClient: SuiGraphQLClient
+
+  // contracts dir <chainSelectorName, SuiContractDir>
+  readonly contractsDir: SuiContractDir
+
+  constructor(client: SuiClient, network: NetworkInfo<typeof ChainFamily.Sui>) {
+    super()
+
+    this.client = client
+    this.network = network
+    this.contractsDir = {} as SuiContractDir // TODO: Inject correct contract addresses
+
+    // TODO: Graphql client should come from config
+    let graphqlUrl: string
+    const selector = network.chainSelector
+    if (selector === 17529533435026248318n) {
+      // Sui mainnet (sui:1)
+      graphqlUrl = 'https://graphql.mainnet.sui.io/graphql'
+    } else if (selector === 9762610643973837292n) {
+      // Sui testnet (sui:2)
+      graphqlUrl = 'https://graphql.testnet.sui.io/graphql'
+    } else {
+      // Localnet (sui:4) or unknown
+      graphqlUrl = 'https://graphql.devnet.sui.io/graphql'
+    }
+
+    this.graphqlClient = new SuiGraphQLClient({
+      url: graphqlUrl,
+    })
+
+    // Memoize getWallet to avoid recreating keypairs
+    const originalGetWallet = this.getWallet.bind(this)
+    this.getWallet = memoize(originalGetWallet, { maxSize: 1, maxArgs: 0 })
   }
 
-  /**
-   * Creates a SuiChain instance from an RPC URL.
-   * @param _url - RPC endpoint URL.
-   * @returns A new SuiChain instance.
-   */
-  static async fromUrl(_url: string, _ctx?: WithLogger): Promise<SuiChain> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.fromUrl'))
+  static async fromUrl(url: string): Promise<SuiChain> {
+    const client = new SuiClient({ url })
+
+    // Get chain identifier from the client and map to network info format
+    const rawChainId = await client.getChainIdentifier().catch(() => null)
+
+    if (rawChainId === null) {
+      throw new Error(`[SuiChain.fromUrl] Unable to fetch chain identifier from URL: ${url}`)
+    }
+
+    // Map Sui chain identifiers to our network info format
+    // Reference: https://docs.sui.io/guides/developer/getting-started/connect
+    let chainId: string
+    if (rawChainId === '35834a8a') {
+      chainId = 'sui:1' // mainnet
+    } else if (rawChainId === '4c78adac') {
+      chainId = 'sui:2' // testnet
+    } else if (rawChainId === 'b0c08dea') {
+      chainId = 'sui:4' // devnet
+    } else if (rawChainId) {
+      // Unknown chain, try to infer from URL
+      if (url.includes('mainnet')) {
+        chainId = 'sui:1'
+      } else if (url.includes('testnet')) {
+        chainId = 'sui:2'
+      } else if (url.includes('devnet')) {
+        chainId = 'sui:4'
+      } else {
+        chainId = 'sui:4' // default to devnet for unknown
+      }
+    } else {
+      // If we can't get chain identifier, try to infer from URL
+      if (url.includes('mainnet')) {
+        chainId = 'sui:1'
+      } else if (url.includes('testnet')) {
+        chainId = 'sui:2'
+      } else if (url.includes('devnet')) {
+        chainId = 'sui:4'
+      } else {
+        chainId = 'sui:4' // default to devnet
+      }
+    }
+
+    const network = networkInfo(chainId) as NetworkInfo<typeof ChainFamily.Sui>
+    return new SuiChain(client, network)
   }
 
-  /** {@inheritDoc Chain.getBlockTimestamp} */
-  async getBlockTimestamp(_version: number | 'finalized'): Promise<number> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getBlockTimestamp'))
+  async getBlockTimestamp(block: number): Promise<number> {
+    const checkpoint = await this.client.getCheckpoint({
+      id: String(block),
+    })
+    return Number(checkpoint.timestampMs)
   }
 
-  /** {@inheritDoc Chain.getTransaction} */
-  async getTransaction(_hash: string | number): Promise<ChainTransaction> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getTransaction'))
+  async getTransaction(hash: string | number): Promise<ChainTransaction> {
+    // For Sui, hash should be a transaction digest (string)
+    const digest = typeof hash === 'number' ? String(hash) : hash
+
+    const txResponse = await this.client.getTransactionBlock({
+      digest,
+      options: {
+        showEvents: true,
+        showEffects: true,
+        showInput: true,
+      },
+    })
+
+    // Extract events from the transaction
+    const events: Log_[] = []
+    if (txResponse.events) {
+      for (let i = 0; i < txResponse.events.length; i++) {
+        const event = txResponse.events[i]
+        const eventType = event.type
+        const packageId = eventType.split('::')[0]
+        const moduleName = eventType.split('::')[1]
+        const eventName = eventType.split('::')[2]
+
+        events.push({
+          address: `${packageId}::${moduleName}`,
+          transactionHash: digest,
+          index: i,
+          blockNumber: Number(txResponse.checkpoint || 0),
+          data: event.parsedJson as Record<string, unknown>,
+          topics: [eventName],
+        })
+      }
+    }
+
+    return {
+      hash: digest,
+      logs: events,
+      blockNumber: Number(txResponse.checkpoint || 0),
+      timestamp: Number(txResponse.timestampMs || 0) / 1000,
+      from: txResponse.transaction?.data?.sender || '',
+    }
   }
 
-  /** {@inheritDoc Chain.getLogs} */
-  // eslint-disable-next-line require-yield
-  async *getLogs(_opts: LogFilter & { versionAsHash?: boolean }) {
-    await Promise.resolve()
-    throw new CCIPNotImplementedError()
+  async *getLogs(opts: LogFilter & { versionAsHash?: boolean }) {
+    // Extract the event type from topics
+    const topic = Array.isArray(opts.topics?.[0]) ? opts.topics[0][0] : opts.topics?.[0] || ''
+    if (!topic || (topic !== 'ReportAccepted' && topic !== 'CommitReportAccepted')) {
+      throw new Error('Only ReportAccepted and CommitReportAccepted event types are supported')
+    }
+
+    const eventTypes = {
+      ReportAccepted: `${this.contractsDir.offRamp}::offramp::ReportAccepted`,
+      CommitReportAccepted: `${this.contractsDir.offRamp}::offramp::CommitReportAccepted`,
+    }
+
+    const startTime = opts.startTime ? new Date(opts.startTime * 1000) : new Date(0)
+    const endTime = opts.endBlock
+      ? new Date(opts.endBlock)
+      : new Date(startTime.getTime() + 1 * 24 * 60 * 60 * 1000) // default to +24h
+
+    // TODO: Verify the type
+    type SuiEventData = {
+      package_id: string
+      module_name: string
+      tx_digest: string
+      checkpoint: number
+      event_name: string
+      [key: string]: unknown
+    }
+
+    const events = await getSuiEventsInTimeRange<SuiEventData>(
+      this.client,
+      this.graphqlClient,
+      eventTypes[topic],
+      startTime,
+      endTime,
+    )
+
+    for (const event of events) {
+      const eventData = event.contents.json
+      yield {
+        address: eventData.package_id + '::' + eventData.module_name,
+        transactionHash: event.transaction?.digest || '',
+        index: 0, // Sui events do not have an index, set to 0
+        blockNumber: Number(event.transaction?.effects.checkpoint.sequenceNumber || 0),
+        data: eventData,
+        topics: [eventData.event_name],
+      }
+    }
   }
 
   /** {@inheritDoc Chain.fetchRequestsInTx} */
@@ -98,54 +274,164 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.typeAndVersion'))
   }
 
-  /** {@inheritDoc Chain.getRouterForOnRamp} */
-  getRouterForOnRamp(_onRamp: string, _destChainSelector: bigint): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getRouterForOnRamp'))
+  async getRouterForOnRamp(onRamp: string, _destChainSelector: bigint): Promise<string> {
+    if (onRamp === this.contractsDir.onRamp) {
+      return Promise.resolve(this.contractsDir.router)
+    }
+    throw new Error('Router not found for given onRamp')
   }
 
-  /** {@inheritDoc Chain.getRouterForOffRamp} */
-  getRouterForOffRamp(_offRamp: string, _sourceChainSelector: bigint): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getRouterForOffRamp'))
+  async getRouterForOffRamp(offRamp: string, _sourceChainSelector: bigint): Promise<string> {
+    if (offRamp === this.contractsDir.offRamp) {
+      return Promise.resolve(this.contractsDir.router)
+    }
+    throw new Error('Router not found for given offRamp')
   }
 
   /** {@inheritDoc Chain.getNativeTokenForRouter} */
   getNativeTokenForRouter(_router: string): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getNativeTokenForRouter'))
+    // SUI native token is always 0x2::sui::SUI
+    return Promise.resolve('0x2::sui::SUI')
   }
 
-  /** {@inheritDoc Chain.getOffRampsForRouter} */
-  getOffRampsForRouter(_router: string, _sourceChainSelector: bigint): Promise<string[]> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getOffRampsForRouter'))
+  getOffRampsForRouter(router: string, _sourceChainSelector: bigint): Promise<string[]> {
+    if (router === this.contractsDir.router) {
+      return Promise.resolve([this.contractsDir.offRamp])
+    }
+    return Promise.resolve([])
   }
 
-  /** {@inheritDoc Chain.getOnRampForRouter} */
-  getOnRampForRouter(_router: string, _destChainSelector: bigint): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getOnRampForRouter'))
+  getOnRampForRouter(router: string, _destChainSelector: bigint): Promise<string> {
+    if (router === this.contractsDir.router) {
+      return Promise.resolve(this.contractsDir.onRamp)
+    }
+    throw new Error('OnRamp not found for given router')
   }
 
-  /** {@inheritDoc Chain.getOnRampForOffRamp} */
-  async getOnRampForOffRamp(_offRamp: string, _sourceChainSelector: bigint): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getOnRampForOffRamp'))
+  async getOnRampForOffRamp(_offRamp: string, sourceChainSelector: bigint): Promise<string> {
+    const offrampPackageId = this.contractsDir.offRamp
+    const functionName = 'get_source_chain_config'
+    const target = `${offrampPackageId}::offramp::${functionName}`
+
+    // Get the OffRampState object
+    const offrampStateObject = await getOffRampStateObject(this.client, offrampPackageId)
+    const ccipObjectRef = await getCcipObjectRef(this.client, this.contractsDir.ccip)
+    // Use the Transaction builder to create a move call
+    const tx = new Transaction()
+
+    // Add move call to the transaction with OffRampState object and source chain selector
+    tx.moveCall({
+      target,
+      arguments: [
+        tx.object(ccipObjectRef),
+        tx.object(offrampStateObject),
+        tx.pure.u64(sourceChainSelector),
+      ],
+    })
+
+    // Execute with devInspectTransactionBlock for read-only call
+    const result = await this.client.devInspectTransactionBlock({
+      sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      transactionBlock: tx,
+    })
+
+    if (result.effects.status.status !== 'success' || !result.results?.[0]?.returnValues?.[0]) {
+      throw new Error(
+        `Failed to call ${target}: ${result.effects.status.error || 'No return value'}`,
+      )
+    }
+
+    // The return value is a SourceChainConfig struct with the following fields:
+    // - Router (address = 32 bytes)
+    // - IsEnabled (bool = 1 byte)
+    // - MinSeqNr (u64 = 8 bytes)
+    // - IsRmnVerificationDisabled (bool = 1 byte)
+    // - OnRamp (vector<u8> = length + bytes)
+    const returnValue = result.results[0].returnValues[0]
+    const [data] = returnValue
+    const configBytes = new Uint8Array(data)
+
+    let offset = 0
+
+    // Skip Router (32 bytes)
+    offset += 32
+
+    // Skip IsEnabled (1 byte)
+    offset += 1
+
+    // Skip MinSeqNr (8 bytes)
+    offset += 8
+
+    // Skip IsRmnVerificationDisabled (1 byte)
+    offset += 1
+
+    // OnRamp (vector<u8>)
+    const onRampLength = configBytes[offset]
+    offset += 1
+    const onRampBytes = configBytes.slice(offset, offset + onRampLength)
+
+    // Decode the address from the onRamp bytes
+    return decodeAddress(onRampBytes, networkInfo(sourceChainSelector).family)
   }
 
-  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
-  getCommitStoreForOffRamp(_offRamp: string): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getCommitStoreForOffRamp'))
+  getCommitStoreForOffRamp(offRamp: string): Promise<string> {
+    return Promise.resolve(offRamp)
   }
 
-  /** {@inheritDoc Chain.getTokenForTokenPool} */
-  async getTokenForTokenPool(_tokenPool: string): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getTokenForTokenPool'))
+  getTokenForTokenPool(_tokenPool: string): Promise<string> {
+    throw new Error('Not implemented')
   }
 
-  /** {@inheritDoc Chain.getTokenInfo} */
-  async getTokenInfo(_token: string): Promise<{ symbol: string; decimals: number }> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getTokenInfo'))
+  async getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }> {
+    // Handle native SUI token
+    if (token === '0x2::sui::SUI' || token.includes('::sui::SUI')) {
+      return { symbol: 'SUI', decimals: 9 }
+    }
+
+    try {
+      // For Coin types, try to fetch metadata from the coin metadata object
+      // Format: 0xPACKAGE::module::TYPE
+      const coinMetadata = await this.client.getCoinMetadata({ coinType: token })
+
+      if (coinMetadata) {
+        return {
+          symbol: coinMetadata.symbol || 'UNKNOWN',
+          decimals: coinMetadata.decimals,
+        }
+      }
+    } catch (error) {
+      console.log(`Failed to fetch coin metadata for ${token}:`, error)
+    }
+
+    // Fallback: parse from token type string if possible
+    const parts = token.split('::')
+    const symbol = parts[parts.length - 1] || 'UNKNOWN'
+
+    return {
+      symbol: symbol.toUpperCase(),
+      decimals: 9, // Default to 9 decimals (SUI standard)
+    }
   }
 
   /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
   getTokenAdminRegistryFor(_address: string): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getTokenAdminRegistryFor'))
+    return Promise.reject(new Error('Not implemented'))
+  }
+
+  static getWallet(_opts?: { wallet?: unknown }): Promise<Keypair> {
+    return Promise.reject(
+      new Error('Wallet loading not configured. Override SuiChain.getWallet in your environment.'),
+    )
+  }
+
+  // Instance method for getting wallet, delegates to static method
+  async getWallet(opts?: { wallet?: unknown }): Promise<Keypair> {
+    return (this.constructor as typeof SuiChain).getWallet(opts)
+  }
+
+  async getWalletAddress(opts?: { wallet?: unknown }): Promise<string> {
+    const wallet = await this.getWallet(opts)
+    return wallet.toSuiAddress()
   }
 
   // Static methods for decoding
@@ -164,38 +450,52 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @returns Decoded extra arguments or undefined if unknown format.
    */
   static decodeExtraArgs(
-    extraArgs: BytesLike,
+    _extraArgs: BytesLike,
   ):
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
     | undefined {
-    return AptosChain.decodeExtraArgs(extraArgs)
+    throw new Error('Not implemented')
   }
 
-  /**
-   * Encodes extra arguments for Sui CCIP messages.
-   * @param extraArgs - Extra arguments to encode.
-   * @returns Encoded extra arguments as hex string.
-   */
-  static encodeExtraArgs(extraArgs: ExtraArgs): string {
-    return AptosChain.encodeExtraArgs(extraArgs)
+  static encodeExtraArgs(_extraArgs: ExtraArgs): string {
+    throw new Error('Not implemented')
   }
 
-  /**
-   * Decodes commit reports from a Sui log event.
-   * @param _log - Log event data.
-   * @param _lane - Lane info for filtering.
-   * @returns Array of CommitReport or undefined if not valid.
-   */
-  static decodeCommits(_log: Log_, _lane?: Lane): CommitReport[] | undefined {
-    throw new CCIPNotImplementedError()
+  static decodeCommits(log: Log_, _lane?: Lane): CommitReport[] | undefined {
+    if (!log.data || typeof log.data !== 'object' || !('unblessed_merkle_roots' in log.data)) {
+      return
+    }
+
+    const toHexFromBase64 = (b64: string) => {
+      return '0x' + Buffer.from(b64, 'base64').toString('hex')
+    }
+
+    const unblessedRoots = log.data.unblessed_merkle_roots
+    if (!Array.isArray(unblessedRoots) || unblessedRoots.length === 0) {
+      return
+    }
+
+    type UnblessedRoot = {
+      source_chain_selector: string
+      on_ramp_address: string
+      min_seq_nr: string
+      max_seq_nr: string
+      merkle_root: string
+    }
+
+    return unblessedRoots.map((root: unknown) => {
+      const typedRoot = root as UnblessedRoot
+      return {
+        sourceChainSelector: BigInt(typedRoot.source_chain_selector),
+        onRampAddress: log.address,
+        minSeqNr: BigInt(typedRoot.min_seq_nr),
+        maxSeqNr: BigInt(typedRoot.max_seq_nr),
+        merkleRoot: toHexFromBase64(typedRoot.merkle_root),
+      }
+    })
   }
 
-  /**
-   * Decodes an execution receipt from a Sui log event.
-   * @param _log - Log event data.
-   * @returns ExecutionReceipt or undefined if not valid.
-   */
   static decodeReceipt(_log: Log_): ExecutionReceipt | undefined {
     throw new CCIPNotImplementedError()
   }
@@ -273,10 +573,64 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   /** {@inheritDoc Chain.executeReport} */
   async executeReport(
     _offRamp: string,
-    _execReport: ExecutionReport,
-    _opts?: { wallet?: unknown; gasLimit?: number },
+    execReport: ExecutionReport,
+    opts?: { wallet?: unknown; gasLimit?: number },
   ): Promise<ChainTransaction> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.executeReport'))
+    const ccipObjectRef = await getCcipObjectRef(this.client, this.contractsDir.ccip)
+    const offrampStateObject = await getOffRampStateObject(this.client, this.contractsDir.offRamp)
+    const receiverConfig = await getReceiverModule(
+      this.client,
+      this.contractsDir.ccip,
+      ccipObjectRef,
+      execReport.message.receiver,
+    )
+    let tokenConfigs: TokenConfig[] = []
+    if (execReport.message.tokenAmounts.length !== 0) {
+      tokenConfigs = await fetchTokenConfigs(
+        this.client,
+        this.contractsDir.ccip,
+        ccipObjectRef,
+        execReport.message.tokenAmounts as CCIPMessage<typeof CCIPVersion.V1_6>['tokenAmounts'],
+      )
+    }
+    const input: SuiManuallyExecuteInput = {
+      executionReport: execReport as ExecutionReport<CCIPMessage_V1_6_Sui>,
+      offrampAddress: this.contractsDir.offRamp,
+      ccipAddress: this.contractsDir.ccip,
+      ccipObjectRef,
+      offrampStateObject,
+      receiverConfig,
+      tokenConfigs,
+    }
+    const tx = buildManualExecutionPTB(input)
+
+    // Get the wallet/keypair for signing
+    const wallet = await this.getWallet(opts)
+
+    // Set gas budget if provided
+    if (opts?.gasLimit) {
+      tx.setGasBudget(opts.gasLimit)
+    }
+
+    // Sign and execute the transaction
+    const result = await this.client.signAndExecuteTransaction({
+      signer: wallet,
+      transaction: tx,
+      options: {
+        showEffects: true,
+        showEvents: true,
+      },
+    })
+
+    // Check if transaction was successful
+    if (result.effects?.status?.status !== 'success') {
+      throw new Error(
+        `Transaction execution failed: ${result.effects?.status?.error || 'Unknown error'}`,
+      )
+    }
+
+    // Return the transaction as a ChainTransaction
+    return this.getTransaction(result.digest)
   }
 
   /**
