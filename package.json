@@ -8,10 +8,11 @@
   "type": "module",
   "workspaces": [
     "ccip-sdk",
-    "ccip-cli"
+    "ccip-cli",
+    "ccip-api-ref"
   ],
   "scripts": {
-    "test": "npm run clean:coverage && c8 node --test --test-concurrency=4",
+    "test": "npm run clean:coverage && c8 npm test -w ccip-sdk -w ccip-cli",
     "test:unit": "npm run clean:coverage && c8 npm test -w ccip-sdk",
     "test:e2e": "npm run clean:coverage && c8 npm test -w ccip-cli",
     "lint": "npm run lint --workspaces",
@@ -20,12 +21,16 @@
     "check": "npm run check --workspaces",
     "generate": "node ./generate.cjs `grep -lrn '^\\s*//\\s*generate\\b' ./ccip-sdk/src ./ccip-cli/src`",
     "clean:coverage": "rm -rfv ./.coverage ./.c8_output",
-    "clean": "npm run clean:coverage && npm run clean --workspaces",
-    "build": "npm run clean && npm run generate && npm run build --workspaces",
-    "prepare": "npm run build"
+    "clean": "npm run clean:coverage && npm run clean -w ccip-sdk -w ccip-cli",
+    "build": "npm run clean && npm run generate && npm run build -w ccip-sdk -w ccip-cli",
+    "prepare": "npm run build",
+    "docs:dev": "npm run dev -w ccip-api-ref",
+    "docs:build": "npm run gen-api -w ccip-api-ref && npm run build -w ccip-api-ref",
+    "docs:serve": "npm run serve -w ccip-api-ref"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
+    "@types/node": "24.10.1",
     "c8": "^10.1.3",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",

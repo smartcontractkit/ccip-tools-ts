@@ -1,0 +1,9 @@
+# Generated directories
+.docusaurus/
+build/
+docs-sdk/
+docs-api/
+test-results/
+
+# Dependencies
+node_modules/

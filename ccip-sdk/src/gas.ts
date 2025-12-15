@@ -10,7 +10,7 @@ import { discoverOffRamp } from './execution.ts'
 import { sourceToDestTokenAddresses } from './requests.ts'
 
 /**
- * A subset of [[MessageInput]] for estimating receive execution gas.
+ * A subset of {@link MessageInput} for estimating receive execution gas.
  */
 export type EstimateMessageInput = {
   /** receiver contract address */
@@ -35,7 +35,7 @@ export type EstimateMessageInput = {
 }
 
 /**
- * Options for [[estimateReceiveExecution]] function.
+ * Options for {@link estimateReceiveExecution} function.
  */
 export type EstimateReceiveExecutionOpts = {
   /** Source chain instance (for token data retrieval) */
@@ -50,8 +50,34 @@ export type EstimateReceiveExecutionOpts = {
 
 /**
  * Estimate CCIP gasLimit needed to execute a request on a contract receiver.
- * @param opts - Options for estimation: source and dest chains, router or ramp address, and message
- * @returns Estimated gasLimit.
+ *
+ * @param options - {@link EstimateReceiveExecutionOpts} for estimation
+ * @returns Estimated gasLimit as bigint
+ *
+ * @throws {@link CCIPMethodUnsupportedError} if dest chain doesn't support estimation
+ * @throws {@link CCIPContractTypeInvalidError} if routerOrRamp is invalid contract type
+ *
+ * @example
+ *
+ * ```typescript
+ * import { estimateReceiveExecution, EVMChain } from '@chainlink/ccip-sdk'
+ *
+ * const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+ * const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+ *
+ * const gasLimit = await estimateReceiveExecution({
+ *   source,
+ *   dest,
+ *   routerOrRamp: '0xRouter...',
+ *   message: {
+ *     sender: '0x...',
+ *     receiver: '0x...',
+ *     data: '0x...',
+ *     tokenAmounts: [],
+ *   },
+ * })
+ * console.log('Estimated gas:', gasLimit)
+ * ```
  */
 export async function estimateReceiveExecution({
   source,

@@ -1,0 +1,68 @@
+/**
+ * ErrorBoundary Styles
+ *
+ * Minimal, non-intrusive styling for the error fallback UI.
+ */
+
+.errorContainer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--ifm-color-emphasis-600);
+  background: var(--ifm-color-emphasis-100);
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 6px;
+}
+
+[data-theme='dark'] .errorContainer {
+  background: var(--ifm-color-emphasis-100);
+  border-color: var(--ifm-color-emphasis-300);
+}
+
+.errorIcon {
+  font-size: 14px;
+  color: var(--ifm-color-warning-dark);
+}
+
+.errorText {
+  color: var(--ifm-color-emphasis-700);
+}
+
+.retryButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin-left: 4px;
+  font-size: 14px;
+  color: var(--ifm-color-primary);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.retryButton:hover {
+  background: var(--ifm-color-emphasis-200);
+}
+
+.retryButton:active {
+  background: var(--ifm-color-emphasis-300);
+}
+
+.errorDetails {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding-top: 6px;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 10px;
+  color: var(--ifm-color-emphasis-600);
+  word-break: break-word;
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+}
