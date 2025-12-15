@@ -1,0 +1,331 @@
+---
+id: error-handling
+title: 'Error Handling'
+description: 'Handle CCIP errors, recover from failures, and manually execute stuck messages.'
+sidebar_label: Error Handling
+sidebar_position: 3
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Error Handling
+
+## Error Types
+
+| Error | Description |
+|-------|-------------|
+| `CCIPTransactionNotFoundError` | Transaction hash doesn't exist |
+| `CCIPMessageNotFoundInTxError` | Transaction contains no CCIP messages |
+| `CCIPMessageIdNotFoundError` | Message ID not found after searching |
+| `CCIPMessageDecodeError` | Failed to decode message data |
+| `CCIPBlockNotFoundError` | Block doesn't exist or isn't finalized |
+| `CCIPOffRampNotFoundError` | No OffRamp found for the lane |
+| `CCIPMerkleRootMismatchError` | Merkle proof validation failed |
+
+## Basic Error Handling
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+try {
+  const requests = await chain.fetchRequestsInTx('0x1234...')
+  console.log('Found', requests.length, 'messages')
+} catch (error) {
+  if (error.message.includes('not found')) {
+    console.log('Transaction not found - check the hash')
+  } else if (error.message.includes('no CCIP messages')) {
+    console.log('Transaction exists but has no CCIP messages')
+  } else {
+    console.error('Unexpected error:', error)
+  }
+}
+```
+
+## Search Failures
+
+Handle pagination exhaustion when searching by message ID:
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+async function findMessage(messageId: string, onRampHint?: string) {
+  const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+  try {
+    const request = await chain.fetchCCIPRequestById(
+      messageId,
+      { address: onRampHint }
+    )
+    return request
+  } catch (error) {
+    if (error.message.includes('not found')) {
+      console.log('Message not found - it may be:')
+      console.log('  - Very old (before search window)')
+      console.log('  - On a different chain')
+      console.log('  - Invalid message ID')
+      return null
+    }
+    throw error
+  }
+}
+```
+
+Provide the `address` (OnRamp) hint when searching by message ID. Without it, the search scans all OnRamp contracts.
+
+## Execution States
+
+Messages can fail execution for several reasons:
+
+```typescript
+import {
+  EVMChain,
+  fetchExecutionReceipts,
+  ExecutionState
+} from '@chainlink/ccip-sdk'
+
+async function checkExecutionStatus(dest: EVMChain, offRamp: string, request: any) {
+  for await (const execution of fetchExecutionReceipts(dest, offRamp, request)) {
+    switch (execution.receipt.state) {
+      case ExecutionState.Success:
+        console.log('Message executed successfully')
+        return 'success'
+
+      case ExecutionState.Failure:
+        console.log('Execution failed - receiver reverted')
+        console.log('Return data:', execution.receipt.returnData)
+        return 'failed'
+
+      case ExecutionState.Untouched:
+        console.log('Message not yet attempted')
+        return 'pending'
+    }
+  }
+  return 'not_found'
+}
+```
+
+## Manual Execution
+
+When automatic execution fails, manually execute the message.
+
+### Step 1: Gather Data
+
+```typescript
+import {
+  EVMChain,
+  fetchAllMessagesInBatch,
+  discoverOffRamp
+} from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+const requests = await source.fetchRequestsInTx('0x1234...')
+const request = requests[0]
+
+const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+
+const commit = await dest.fetchCommitReport(
+  offRamp,
+  request.message.header.sequenceNumber
+)
+
+if (!commit) {
+  throw new Error('Message not yet committed - cannot execute')
+}
+```
+
+### Step 2: Calculate Merkle Proof
+
+```typescript
+import { calculateManualExecProof, fetchAllMessagesInBatch } from '@chainlink/ccip-sdk'
+
+const messagesInBatch = await fetchAllMessagesInBatch(
+  source,
+  request,
+  commit.report
+)
+
+const proof = calculateManualExecProof(
+  messagesInBatch,
+  request.lane,
+  request.message.header.messageId,
+  commit.report.merkleRoot
+)
+
+console.log('Merkle root:', proof.merkleRoot)
+console.log('Proof hashes:', proof.proofs)
+```
+
+### Step 3: Execute
+
+```typescript
+const executionReport = {
+  ...proof,
+  message: request.message,
+  offchainTokenData: [],
+}
+
+const tx = await dest.executeReport(offRamp, executionReport)
+console.log('Manual execution tx:', tx.hash)
+```
+
+## Merkle Root Mismatches
+
+If the calculated merkle root doesn't match the commit:
+
+```typescript
+import { calculateManualExecProof } from '@chainlink/ccip-sdk'
+
+try {
+  const proof = calculateManualExecProof(
+    messagesInBatch,
+    request.lane,
+    request.message.header.messageId,
+    commit.report.merkleRoot
+  )
+} catch (error) {
+  if (error.message.includes('Merkle root mismatch')) {
+    console.log('Merkle root mismatch - possible causes:')
+    console.log('  - Messages in batch are incomplete')
+    console.log('  - Wrong lane configuration')
+    console.log('  - Message was modified')
+
+    // Try without validation to see calculated root
+    const unvalidatedProof = calculateManualExecProof(
+      messagesInBatch,
+      request.lane,
+      request.message.header.messageId
+    )
+    console.log('Calculated root:', unvalidatedProof.merkleRoot)
+    console.log('Expected root:', commit.report.merkleRoot)
+  }
+}
+```
+
+## Retry Logic
+
+Implement retry logic for transient failures:
+
+```typescript
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  delayMs = 1000
+): Promise<T> {
+  let lastError: Error | undefined
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn()
+    } catch (error) {
+      lastError = error as Error
+
+      // Don't retry on definitive failures
+      if (
+        error.message.includes('not found') ||
+        error.message.includes('invalid')
+      ) {
+        throw error
+      }
+
+      console.log(`Attempt ${attempt} failed, retrying in ${delayMs}ms...`)
+      await new Promise(resolve => setTimeout(resolve, delayMs))
+      delayMs *= 2 // Exponential backoff
+    }
+  }
+
+  throw lastError
+}
+
+const request = await withRetry(() =>
+  chain.fetchCCIPRequestById(messageId, { address: onRamp })
+)
+```
+
+## Complete Recovery Example
+
+```typescript
+import {
+  EVMChain,
+  fetchExecutionReceipts,
+  fetchAllMessagesInBatch,
+  calculateManualExecProof,
+  discoverOffRamp,
+  ExecutionState,
+} from '@chainlink/ccip-sdk'
+
+async function recoverFailedMessage(sourceTxHash: string) {
+  const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+  const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+  // Step 1: Get the request
+  const requests = await source.fetchRequestsInTx(sourceTxHash)
+  const request = requests[0]
+  console.log('Message ID:', request.message.header.messageId)
+
+  // Step 2: Find OffRamp
+  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+
+  // Step 3: Check current execution status
+  let needsManualExecution = false
+  for await (const execution of fetchExecutionReceipts(dest, offRamp, request)) {
+    if (execution.receipt.state === ExecutionState.Success) {
+      console.log('Already executed')
+      return { status: 'already_executed' }
+    }
+    if (execution.receipt.state === ExecutionState.Failure) {
+      console.log('Previous execution failed, attempting manual execution...')
+      needsManualExecution = true
+      break
+    }
+  }
+
+  // Step 4: Get commit
+  const commit = await dest.fetchCommitReport(
+    offRamp,
+    request.message.header.sequenceNumber
+  )
+  if (!commit) {
+    console.log('Not yet committed - wait for DON to commit')
+    return { status: 'pending_commit' }
+  }
+
+  // Step 5: Manual execution
+  if (needsManualExecution) {
+    const messagesInBatch = await fetchAllMessagesInBatch(
+      source,
+      request,
+      commit.report
+    )
+
+    const proof = calculateManualExecProof(
+      messagesInBatch,
+      request.lane,
+      request.message.header.messageId,
+      commit.report.merkleRoot
+    )
+
+    console.log('Executing manually...')
+    const tx = await dest.executeReport(offRamp, {
+      ...proof,
+      message: request.message,
+      offchainTokenData: [],
+    })
+
+    console.log('Manual execution tx:', tx.hash)
+    return { status: 'manually_executed', tx: tx.hash }
+  }
+
+  return { status: 'pending_execution' }
+}
+```
+
+## Related
+
+- [Tracking Messages](/sdk/guides/tracking-messages) - Monitor message status
+- [Sending Messages](/sdk/guides/sending-messages) - Send messages correctly
+- [Multi-Chain Support](/sdk/guides/multi-chain) - Chain-specific error handling

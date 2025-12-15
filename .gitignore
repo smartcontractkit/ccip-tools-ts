@@ -12,6 +12,7 @@ coverage-summary.txt
 build/
 ccip-api-ref/docs-sdk/*
 !ccip-api-ref/docs-sdk/introduction.mdx
+!ccip-api-ref/docs-sdk/guides/
 ccip-api-ref/docs-api/*
 !ccip-api-ref/docs-api/ccip-api.info.mdx
 !ccip-api-ref/docs-api/sidebar.d.ts
