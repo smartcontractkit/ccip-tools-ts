@@ -93,7 +93,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
   static readonly family = ChainFamily.TON
   static readonly decimals = 9 // TON uses 9 decimals (nanotons)
-
+  private readonly endpointUrl?: string
+  private readonly fetchFn: typeof fetch
   readonly provider: TonClient
 
   /**
@@ -102,9 +103,17 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param network - Network information for this chain.
    * @param ctx - Context containing logger.
    */
-  constructor(client: TonClient, network: NetworkInfo, ctx?: WithLogger) {
+  constructor(
+    client: TonClient,
+    network: NetworkInfo,
+    ctx?: WithLogger,
+    endpointUrl?: string,
+    fetchFn: typeof fetch = fetch,
+  ) {
     super(network, ctx)
     this.provider = client
+    this.endpointUrl = endpointUrl
+    this.fetchFn = fetchFn
 
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       maxSize: 100,
@@ -147,9 +156,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const isPublicEndpoint = isTonCenter && !hasApiKey
 
     let httpAdapter: AxiosAdapter | undefined
+    let rateLimitedFetch: typeof fetch = fetch
     if (isPublicEndpoint) {
       logger.warn('Using public TON endpoint without API key: rate limiting to 1 req/sec')
-      const rateLimitedFetch = createRateLimitedFetch({ maxRequests: 1, windowMs: 1100 }, ctx)
+      rateLimitedFetch = createRateLimitedFetch({ maxRequests: 1, windowMs: 1500 }, ctx)
       httpAdapter = fetchToAxiosAdapter(rateLimitedFetch)
     }
 
@@ -178,7 +188,58 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       networkId = 'ton-mainnet'
     }
 
-    return new TONChain(client, networkInfo(networkId), ctx)
+    return new TONChain(client, networkInfo(networkId), ctx, url, rateLimitedFetch)
+  }
+
+  /**
+   * Fetches a transaction by raw hash using TonCenter V3 API.
+   * @param hash - 64-char hex hash (without 0x prefix)
+   * @returns ChainTransaction with transaction details
+   */
+  async getTransactionByHash(hash: string): Promise<ChainTransaction> {
+    if (!this.endpointUrl) {
+      throw new CCIPArgumentInvalidError(
+        'hash',
+        `Raw hash lookup requires endpoint URL. Use composite format "workchain:address:lt:hash" instead.`,
+      )
+    }
+
+    // Derive V3 API base URL from the configured endpoint
+    // e.g., "https://testnet.toncenter.com/api/v2/jsonRPC" -> "https://testnet.toncenter.com/api/v3"
+    const parsedUrl = new URL(this.endpointUrl)
+    const v3BaseUrl = `${parsedUrl.protocol}//${parsedUrl.host}/api/v3`
+
+    // TonCenter V3 API accepts hash in hex format
+    const response = await this.fetchFn(`${v3BaseUrl}/transactions?hash=${hash}`)
+
+    if (!response.ok) {
+      throw new CCIPHttpError(
+        response.status,
+        `Failed to fetch transaction: ${response.statusText}`,
+      )
+    }
+
+    const data = (await response.json()) as {
+      transactions: Array<{ account: string; lt: string; now: number }>
+    }
+
+    if (!data.transactions || data.transactions.length === 0) {
+      throw new CCIPTransactionNotFoundError(hash)
+    }
+
+    const tx = data.transactions[0]
+    const address = tx.account // Already in raw format "workchain:hash"
+
+    // Build composite hash for consistency
+    const compositeHash = `${address}:${tx.lt}:${hash}`
+
+    return {
+      hash: compositeHash,
+      logs: [], // TODO
+      blockNumber: Number(tx.lt),
+      timestamp: tx.now,
+      from: address,
+    }
   }
 
   /** {@inheritDoc Chain.getBlockTimestamp} */
@@ -189,20 +250,30 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   /**
    * Fetches a transaction by its hash.
    *
-   * TON transactions are identified by (address, lt, hash).
-   * Expected format: "workchain:address:lt:hash"
-   * Example: "0:abc123...def:12345:abc123...def"
+   * Supports two formats:
+   * 1. Composite format: "workchain:address:lt:hash" (e.g., "0:abc123...def:12345:abc123...def")
+   * 2. Raw hash format: 64-character hex string (e.g., "2d933807e103d1839be2870ff03f8c56739c561af9a41f195f049c4dedccd260")
    *
-   * @param hash - Transaction identifier in format "workchain:address:lt:hash"
+   * For raw hash lookups, the TonCenter V3 API is used (requires endpoint URL).
+   *
+   * @param hash - Transaction identifier in either format
    * @returns ChainTransaction with transaction details
    */
   async getTransaction(hash: string): Promise<ChainTransaction> {
     const parts = hash.split(':')
 
+    // If not 4 parts, check if it's a raw 64-char hex hash
     if (parts.length !== 4) {
+      // Strip 0x prefix if present
+      const cleanHash = hash.startsWith('0x') || hash.startsWith('0X') ? hash.slice(2) : hash
+
+      // Check if it's a valid 64-char hex string (raw hash format)
+      if (/^[a-fA-F0-9]{64}$/.test(cleanHash)) {
+        return this.getTransactionByHash(cleanHash)
+      }
       throw new CCIPArgumentInvalidError(
         'hash',
-        `Invalid TON transaction hash format: "${hash}". Expected "workchain:address:lt:hash"`,
+        `Invalid TON transaction hash format: "${hash}". Expected "workchain:address:lt:hash" or 64-char hex hash`,
       )
     }
 
@@ -210,7 +281,9 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const lt = parts[2]
     const txHash = parts[3]
 
-    const tx = await this.provider.getTransaction(address, lt, txHash)
+    // Convert hex hash to base64 for TonClient API
+    const hashBase64 = Buffer.from(txHash, 'hex').toString('base64')
+    const tx = await this.provider.getTransaction(address, lt, hashBase64)
 
     if (!tx) {
       throw new CCIPTransactionNotFoundError(hash)
@@ -221,7 +294,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       logs: [], // TODO
       blockNumber: Number(tx.lt),
       timestamp: tx.now,
-      from: address.toString(),
+      from: address.toRawString(),
     }
   }
 

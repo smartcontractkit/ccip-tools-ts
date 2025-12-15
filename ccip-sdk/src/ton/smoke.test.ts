@@ -134,4 +134,116 @@ describe('TONChain smoke tests', () => {
       )
     })
   })
+
+  describe('Transaction lookup', () => {
+    // Real transaction from TON testnet
+    // https://testnet.tonviewer.com/transaction/2d933807e103d1839be2870ff03f8c56739c561af9a41f195f049c4dedccd260
+    const testHash = '2d933807e103d1839be2870ff03f8c56739c561af9a41f195f049c4dedccd260'
+    const expectedSender = '0:e96e915e5d1d8318f41c018fc5afc6f5a30c7f2ba2dbbd1a33f42b7e249bf826' // EQDpbpFeXR2DGPQcAY_Fr8b1owx_K6LbvRoz9Ct-JJv4JvhN in raw format
+    const expectedLt = 42352673000001
+    const expectedTimestamp = 1765557346
+    // Pre-computed composite hash for this transaction
+    const expectedCompositeHash = `${expectedSender}:${expectedLt}:${testHash}`
+
+    it('TONChain.getTransactionByHash should fetch transaction by raw hash', async () => {
+      const result = await tonChain.getTransactionByHash(testHash)
+
+      // Verify composite hash format: workchain:address:lt:hash
+      const parts = result.hash.split(':')
+      assert.equal(parts.length, 4, 'hash should have 4 parts separated by colons')
+      assert.equal(parts[0], '0', 'workchain should be 0')
+      assert.equal(parts[3], testHash, 'last part should be the original hash')
+
+      // Verify sender address (raw format)
+      assert.equal(
+        result.from.toLowerCase(),
+        expectedSender.toLowerCase(),
+        'from should match the sender address',
+      )
+      // Verify logical time (lt) is used as blockNumber
+      assert.equal(result.blockNumber, expectedLt, 'blockNumber should be the logical time (lt)')
+
+      // Verify timestamp
+      assert.equal(result.timestamp, expectedTimestamp, 'timestamp should match')
+
+      // Verify logs are empty (TODO: not yet implemented)
+      assert.deepEqual(result.logs, [], 'logs should be empty array')
+    })
+
+    it('TONChain.getTransactionByHash should throw for non-existent hash', async () => {
+      const fakeHash = '0000000000000000000000000000000000000000000000000000000000000000'
+
+      await assert.rejects(tonChain.getTransactionByHash(fakeHash), /Transaction not found/)
+    })
+
+    it('TONChain.getTransaction should fetch transaction by raw hash (no prefix)', async () => {
+      const result = await tonChain.getTransaction(testHash)
+
+      // Should return the same data as getTransactionByHash
+      assert.equal(
+        result.hash.toLowerCase(),
+        expectedCompositeHash.toLowerCase(),
+        'hash should be composite format',
+      )
+      assert.equal(
+        result.from.toLowerCase(),
+        expectedSender.toLowerCase(),
+        'from should match the sender address',
+      )
+      assert.equal(result.blockNumber, expectedLt, 'blockNumber should be the logical time (lt)')
+      assert.equal(result.timestamp, expectedTimestamp, 'timestamp should match')
+    })
+
+    it('TONChain.getTransaction should fetch transaction by raw hash (0x prefix)', async () => {
+      const result = await tonChain.getTransaction(`0x${testHash}`)
+
+      // Should return the same data as getTransactionByHash
+      assert.equal(
+        result.hash.toLowerCase(),
+        expectedCompositeHash.toLowerCase(),
+        'hash should be composite format',
+      )
+      assert.equal(
+        result.from.toLowerCase(),
+        expectedSender.toLowerCase(),
+        'from should match the sender address',
+      )
+      assert.equal(result.blockNumber, expectedLt, 'blockNumber should be the logical time (lt)')
+      assert.equal(result.timestamp, expectedTimestamp, 'timestamp should match')
+    })
+
+    it('TONChain.getTransaction should fetch transaction by composite hash', async () => {
+      // First, get the composite hash from a raw hash lookup
+      const firstResult = await tonChain.getTransaction(testHash)
+      const compositeHash = firstResult.hash
+
+      // Now fetch using the composite format
+      const result = await tonChain.getTransaction(compositeHash)
+
+      // Should return the same data
+      assert.equal(result.hash, compositeHash, 'hash should match composite format')
+      assert.equal(
+        result.from.toLowerCase(),
+        expectedSender.toLowerCase(),
+        'from should match the sender address',
+      )
+      assert.equal(result.blockNumber, expectedLt, 'blockNumber should be the logical time (lt)')
+      assert.equal(result.timestamp, expectedTimestamp, 'timestamp should match')
+    })
+
+    it('TONChain.getTransaction should throw for invalid hash format', async () => {
+      const invalidHash = 'not-a-valid-hash'
+
+      await assert.rejects(
+        tonChain.getTransaction(invalidHash),
+        /Invalid TON transaction hash format/,
+      )
+    })
+
+    it('TONChain.getTransaction should throw for non-existent raw hash', async () => {
+      const fakeHash = '0000000000000000000000000000000000000000000000000000000000000000'
+
+      await assert.rejects(tonChain.getTransaction(fakeHash), /Transaction not found/)
+    })
+  })
 })
