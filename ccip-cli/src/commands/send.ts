@@ -1,3 +1,24 @@
+/**
+ * CCIP CLI Send Command
+ *
+ * Sends a cross-chain message via CCIP. Supports data payloads, token transfers,
+ * custom gas limits, and various fee payment options.
+ *
+ * @example
+ * ```bash
+ * # Send a message with data
+ * ccip-cli send -s sepolia -d fuji -r 0xRouter... --to 0xReceiver... --data "hello"
+ *
+ * # Send tokens
+ * ccip-cli send -s sepolia -d fuji -r 0xRouter... -t 0xToken=1.5
+ *
+ * # Pay fee in LINK
+ * ccip-cli send -s sepolia -d fuji -r 0xRouter... --fee-token LINK
+ * ```
+ *
+ * @packageDocumentation
+ */
+
 import {
   type ChainStatic,
   type ExtraArgs,

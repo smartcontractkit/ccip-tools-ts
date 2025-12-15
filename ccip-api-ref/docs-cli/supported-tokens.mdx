@@ -1,0 +1,148 @@
+---
+id: supported-tokens
+title: 'getSupportedTokens'
+description: 'List tokens supported for CCIP transfers and display token pool configurations.'
+sidebar_label: getSupportedTokens
+sidebar_position: 6
+custom_edit_url: null
+---
+
+# getSupportedTokens
+
+<ChainSupport />
+
+List tokens supported for CCIP transfers and display token pool configurations.
+
+## Synopsis
+
+```bash
+ccip-cli getSupportedTokens -n <network> -a <address> [options]
+```
+
+Aliases: `get-supported-tokens`
+
+## Description
+
+The `getSupportedTokens` command queries CCIP infrastructure to display supported tokens and their pool configurations. It provides information about fee tokens, transfer limits, and rate limiter states.
+
+## Options
+
+### Required Options
+
+| Option      | Alias | Type   | Description                                                 |
+| ----------- | ----- | ------ | ----------------------------------------------------------- |
+| `--network` | `-n`  | string | Source network (chain ID or name, e.g., `ethereum-mainnet`) |
+| `--address` | `-a`  | string | Router, OnRamp, TokenAdminRegistry, or TokenPool address    |
+
+### Optional Options
+
+| Option         | Alias | Type    | Default | Description                                                             |
+| -------------- | ----- | ------- | ------- | ----------------------------------------------------------------------- |
+| `--token`      | `-t`  | string  | -       | Token address to query (pre-selects from list if address is a registry) |
+| `--fee-tokens` | -     | boolean | `false` | List fee tokens instead of transferable tokens                          |
+
+See [Configuration](/cli/configuration) for global options (`--rpcs`, `--format`, etc.).
+
+## Command Builder
+
+Build your `getSupportedTokens` command interactively:
+
+<CLIBuilder command="getSupportedTokens" />
+
+## Output Modes
+
+### Token List Mode
+
+When querying a Router without specifying a token:
+
+| Section        | Description                               |
+| -------------- | ----------------------------------------- |
+| **Fee Tokens** | Tokens accepted for CCIP fees             |
+| **Token List** | Interactive searchable list of all tokens |
+
+### Token Detail Mode
+
+When a token is selected or specified:
+
+| Field         | Description                                   |
+| ------------- | --------------------------------------------- |
+| Token address | Contract address on the source chain          |
+| Symbol / Name | Token symbol and full name                    |
+| Decimals      | Token decimal places                          |
+| Pool address  | Associated token pool contract                |
+| Pool type     | Lock/Release, Burn/Mint, etc.                 |
+| Remote chains | Supported destination chains with rate limits |
+
+## Examples
+
+### List supported tokens on Ethereum mainnet
+
+```bash
+ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D
+```
+
+### Query a specific token
+
+```bash
+ccip-cli getSupportedTokens \
+  -n ethereum-mainnet \
+  -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D \
+  -t 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+```
+
+### Query a token pool directly
+
+```bash
+ccip-cli getSupportedTokens -n ethereum-mainnet -a 0xTokenPoolAddress
+```
+
+### Output as JSON
+
+```bash
+ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0... --format json
+```
+
+### List fee tokens
+
+```bash
+ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D --fee-tokens
+```
+
+## Rate Limiter Information
+
+For each remote chain, the command displays rate limiter state:
+
+| Field        | Description                                       |
+| ------------ | ------------------------------------------------- |
+| `capacity`   | Maximum tokens in the rate limiter bucket         |
+| `tokens`     | Current available tokens (percentage of capacity) |
+| `rate`       | Refill rate per second                            |
+| `timeToFull` | Time until bucket reaches capacity (if not full)  |
+
+## Interactive Mode
+
+In `--format pretty` (default), the token list is interactive:
+
+| Key        | Action                             |
+| ---------- | ---------------------------------- |
+| Type       | Filter by address, symbol, or name |
+| Arrow keys | Navigate the list                  |
+| Enter      | Select token and view details      |
+
+## See Also
+
+- [send](/cli/send) - Send tokens using `--transfer-tokens`
+- [Configuration](/cli/configuration) - RPC setup
+
+## Exit Codes
+
+| Code | Meaning                                                      |
+| ---- | ------------------------------------------------------------ |
+| `0`  | Success - tokens listed or token details retrieved           |
+| `1`  | Error (network failure, invalid contract, missing arguments) |
+
+Use in scripts:
+
+```bash
+ccip-cli getSupportedTokens -n $NETWORK -a $ROUTER --format json | jq '.tokens'
+```

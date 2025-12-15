@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src",
+    "docusaurus.config.ts",
+    "sidebars.ts",
+    "sidebars-cli.ts",
+    "sidebars-sdk.ts",
+    "sidebars-api.ts",
+    "docusaurus.d.ts",
+    "docs-api/sidebar.d.ts",
+    "docs-api/v1/sidebar.d.ts"
+  ],
+  "exclude": ["node_modules", "**/node_modules/**"]
+}

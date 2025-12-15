@@ -1,0 +1,89 @@
+---
+id: ccip-api
+title: 'CCIP API'
+description: 'REST API for Cross-Chain Interoperability Protocol (CCIP) - query messages, lanes, and intents.'
+sidebar_label: Introduction
+sidebar_position: 0
+hide_title: true
+custom_edit_url: null
+slug: /
+---
+
+# CCIP API
+
+REST API for querying cross-chain message data, lane information, and intent operations on the Chainlink Cross-Chain Interoperability Protocol.
+
+<div className="info-grid">
+  <div className="info-item">
+    <span className="info-label">Base URL</span>
+    <code>https://api.ccip.chain.link/v2</code>
+  </div>
+  <div className="info-item">
+    <span className="info-label">Version</span>
+    <span>2.0.0</span>
+  </div>
+  <div className="info-item">
+    <span className="info-label">Format</span>
+    <span>JSON</span>
+  </div>
+  <div className="info-item">
+    <span className="info-label">License</span>
+    <span>MIT</span>
+  </div>
+</div>
+
+## Multi-Chain Support
+
+The CCIP API supports querying messages and lanes across multiple blockchain ecosystems:
+
+<ChainSupport />
+
+## Quick Reference
+
+| Use Case                        | Endpoint                                              | Action                                               |
+| ------------------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
+| Track a cross-chain message     | [Retrieve a Message](/api/get-message-by-id)          | [Try it live →](/api/get-message-by-id#request)      |
+| Check lane performance          | [Get Lane Latency](/api/get-lane-latency)             | [Try it live →](/api/get-lane-latency#request)       |
+| Get a quote for intent transfer | [Get Intent Quote](/api/get-intent-quote)             | [Try it live →](/api/get-intent-quote#request)       |
+| Find intents by transaction     | [Get Intents by Tx Hash](/api/get-intents-by-tx-hash) | [Try it live →](/api/get-intents-by-tx-hash#request) |
+| Track intent status             | [Get Intent by ID](/api/get-intent-by-id)             | [Try it live →](/api/get-intent-by-id#request)       |
+
+Each endpoint page includes:
+
+- Full request/response schema
+- Code samples in 9 languages
+- Interactive playground to test live
+
+## HTTP Status Codes
+
+All endpoints return standardized HTTP status codes:
+
+| Code  | Meaning                                                       |
+| ----- | ------------------------------------------------------------- |
+| `200` | Success - request completed successfully                      |
+| `400` | Bad Request - invalid parameters or malformed request         |
+| `404` | Not Found - resource does not exist (message ID, intent ID)   |
+| `500` | Server Error - internal error, retry with exponential backoff |
+
+```bash
+# Example: Check response status in scripts
+curl -s -o /dev/null -w "%{http_code}" \
+  "https://api.ccip.chain.link/v2/message/0x..."
+```
+
+## Authentication
+
+The CCIP API is **publicly accessible** and does not require authentication. However, please be mindful of rate limits when integrating into production applications.
+
+## Best Practices
+
+- **Cache responses** - Message data is immutable once finalized
+- **Use pagination** - For endpoints returning lists, use limit/offset parameters
+- **Handle retries** - Implement exponential backoff for 5xx errors
+- **Validate inputs** - Message IDs must be 66-character hex strings (`0x` + 64 hex chars)
+
+## Next Steps
+
+- [Retrieve a Message](/api/get-message-by-id) - Track your first cross-chain message
+- [Get Lane Latency](/api/get-lane-latency) - Check lane performance metrics
+- [Get Intent Quote](/api/get-intent-quote) - Get pricing for intent-based transfers

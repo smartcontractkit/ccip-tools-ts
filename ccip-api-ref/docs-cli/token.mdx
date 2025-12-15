@@ -1,0 +1,146 @@
+---
+id: token
+title: 'token'
+description: 'Query native or token balance for an address on any supported chain.'
+sidebar_label: token
+sidebar_position: 8
+custom_edit_url: null
+---
+
+# token
+
+<ChainSupport />
+
+Query native or token balance for an address on any supported chain.
+
+## Synopsis
+
+```bash
+ccip-cli token -n <network> -H <holder> [options]
+```
+
+## Description
+
+The `token` command queries the balance of native tokens (ETH, SOL, APT, etc.) or ERC20/SPL tokens for a specified wallet address. It supports all CCIP-enabled chains including EVM, Solana, Aptos, Sui, and TON.
+
+## Options
+
+### Required Options
+
+| Option      | Alias | Type   | Description                                                          |
+| ----------- | ----- | ------ | -------------------------------------------------------------------- |
+| `--network` | `-n`  | string | Network chain ID or name (e.g., `ethereum-mainnet`, `solana-devnet`) |
+| `--holder`  | `-H`  | string | Wallet address to query balance for                                  |
+
+### Optional Options
+
+| Option    | Alias | Type   | Default | Description                                   |
+| --------- | ----- | ------ | ------- | --------------------------------------------- |
+| `--token` | `-t`  | string | -       | Token address (omit for native token balance) |
+
+See [Configuration](/cli/configuration) for global options (`--rpcs`, `--format`, etc.).
+
+## Command Builder
+
+Build your `token` command interactively:
+
+<CLIBuilder command="token" />
+
+## Output Fields
+
+| Field       | Description                                         |
+| ----------- | --------------------------------------------------- |
+| `network`   | Network name                                        |
+| `holder`    | Wallet address queried                              |
+| `token`     | Token symbol (e.g., "USDC") or "native"             |
+| `balance`   | Raw balance in smallest units (wei, lamports, etc.) |
+| `formatted` | Human-readable balance with decimals                |
+| `symbol`    | Token symbol (for ERC20/SPL tokens)                 |
+| `name`      | Token name (for ERC20/SPL tokens)                   |
+| `decimals`  | Token decimal places                                |
+
+## Examples
+
+### Query native ETH balance
+
+```bash
+ccip-cli token -n ethereum-mainnet -H 0x1234567890abcdef1234567890abcdef12345678
+```
+
+### Query ERC20 token balance (USDC)
+
+```bash
+ccip-cli token \
+  -n ethereum-mainnet \
+  -H 0x1234567890abcdef1234567890abcdef12345678 \
+  -t 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+```
+
+### Query native SOL balance on Solana
+
+```bash
+ccip-cli token -n solana-devnet -H EPUjBP3Xf76K1VKsDSc6GupBWE8uykNksCLJgXZn87CB
+```
+
+### Query LINK token balance on Avalanche
+
+```bash
+ccip-cli token \
+  -n avalanche-mainnet \
+  -H 0xYourAddress \
+  -t 0x5947BB275c521040051D82396192181b413227A3
+```
+
+### Output as JSON
+
+```bash
+ccip-cli token -n ethereum-mainnet -H 0x1234... --format json
+```
+
+Example JSON output:
+
+```json
+{
+  "network": "ethereum-mainnet",
+  "holder": "0x1234567890abcdef1234567890abcdef12345678",
+  "token": "USDC",
+  "balance": "1000000000",
+  "formatted": "1000.0",
+  "symbol": "USDC",
+  "name": "USD Coin",
+  "decimals": 6
+}
+```
+
+### Query in a script
+
+```bash
+# Get raw balance value
+BALANCE=$(ccip-cli token -n ethereum-mainnet -H $WALLET --format json | jq -r '.balance')
+echo "Balance: $BALANCE wei"
+```
+
+## Multi-Chain Support
+
+The `token` command supports all CCIP-enabled chain families:
+
+| Chain Family | Native Token           | Example Network                       |
+| ------------ | ---------------------- | ------------------------------------- |
+| EVM          | ETH, MATIC, AVAX, etc. | `ethereum-mainnet`, `polygon-mainnet` |
+| Solana       | SOL                    | `solana-mainnet`, `solana-devnet`     |
+| Aptos        | APT                    | `aptos-mainnet`, `aptos-testnet`      |
+| Sui          | SUI                    | `sui-mainnet`, `sui-testnet`          |
+| TON          | TON                    | `ton-mainnet`, `ton-testnet`          |
+
+## See Also
+
+- [getSupportedTokens](/cli/supported-tokens) - List supported CCIP tokens
+- [send](/cli/send) - Send tokens cross-chain
+- [Configuration](/cli/configuration) - RPC setup
+
+## Exit Codes
+
+| Code | Meaning                                                     |
+| ---- | ----------------------------------------------------------- |
+| `0`  | Success - balance retrieved                                 |
+| `1`  | Error (network failure, invalid address, missing arguments) |

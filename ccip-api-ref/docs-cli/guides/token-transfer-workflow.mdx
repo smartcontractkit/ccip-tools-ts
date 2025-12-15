@@ -1,0 +1,336 @@
+---
+id: token-transfer-workflow
+title: 'Token Transfer'
+description: 'Transfer tokens cross-chain using the CCIP CLI.'
+sidebar_label: Token Transfer
+sidebar_position: 1
+custom_edit_url: null
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Token Transfer
+
+Transfer tokens cross-chain using a four-step workflow: verify token support, estimate fees, send the transfer, and track execution.
+
+## Workflow
+
+| Step        | Command                  | Purpose                         |
+| ----------- | ------------------------ | ------------------------------- |
+| 1. Verify   | `getSupportedTokens`     | Check token support on the lane |
+| 2. Estimate | `send --only-get-fee`    | Get fee quote                   |
+| 3. Send     | `send --transfer-tokens` | Execute transfer                |
+| 4. Track    | `show`                   | Monitor execution               |
+
+## Prerequisites
+
+Configure RPC endpoints and wallet:
+
+```bash title=".env"
+RPC_SEPOLIA=https://ethereum-sepolia-rpc.publicnode.com
+RPC_ARB_SEPOLIA=https://arbitrum-sepolia-rpc.publicnode.com
+USER_KEY=0xYourPrivateKeyHere
+```
+
+Required balances on source chain:
+
+- Tokens to transfer
+- Gas for source transaction
+- CCIP fee (native token or LINK)
+
+## Step 1: Verify Token Support
+
+Check that your token is supported on the lane:
+
+```bash
+ccip-cli getSupportedTokens \
+  -n ethereum-testnet-sepolia \
+  -a 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59
+```
+
+Select a token to view its configuration:
+
+```
+═══ Token Details ═══
+Address:  0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05
+Symbol:   CCIP-BnM
+Decimals: 18
+Pool:     0x466D489b6d36E7E3b824ef491C225F5830E81cC1
+
+═══ Remote Chains ═══
+┌─────────────────────────────────────┬──────────────┬───────────────┐
+│ Destination                         │ Rate Limit   │ Available     │
+├─────────────────────────────────────┼──────────────┼───────────────┤
+│ ethereum-testnet-sepolia-arbitrum-1 │ 10000.0/min  │ 100% (10000)  │
+└─────────────────────────────────────┴──────────────┴───────────────┘
+```
+
+Verify:
+
+| Field       | Requirement                     |
+| ----------- | ------------------------------- |
+| Destination | Target chain is listed          |
+| Rate Limit  | Transfer amount is within limit |
+| Available   | Capacity exists for transfer    |
+
+Query a specific token directly:
+
+```bash
+ccip-cli getSupportedTokens \
+  -n ethereum-testnet-sepolia \
+  -a 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -t 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05
+```
+
+## Step 2: Estimate Fee
+
+Get the fee quote before sending:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --only-get-fee
+```
+
+Output:
+
+```
+Fee: 0.001234567890123456 ETH (native)
+```
+
+To get the fee in LINK:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --fee-token LINK \
+  --only-get-fee
+```
+
+## Step 3: Send Transfer
+
+### Single token
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --wallet ledger
+```
+
+### Multiple tokens
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --transfer-tokens 0xToken1=1.0 \
+  --transfer-tokens 0xToken2=100.5 \
+  --wallet ledger
+```
+
+### With message data
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --data "transfer-id:12345" \
+  --wallet ledger
+```
+
+### Pay fee in LINK
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --fee-token LINK \
+  --wallet ledger
+```
+
+### With custom gas limit
+
+For receivers with complex token handling:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --gas-limit 500000 \
+  --wallet ledger
+```
+
+## Step 4: Track Transfer
+
+Check message status:
+
+```bash
+ccip-cli show 0xYourTransactionHash
+```
+
+Wait for execution to complete:
+
+```bash
+ccip-cli show 0xYourTransactionHash --wait
+```
+
+Or include `--wait` in the send command:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --wallet ledger \
+  --wait
+```
+
+## Example
+
+```bash
+# Verify token support
+ccip-cli getSupportedTokens \
+  -n ethereum-testnet-sepolia \
+  -a 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -t 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05
+
+# Estimate fee
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --fee-token LINK \
+  --only-get-fee
+
+# Send transfer
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --fee-token LINK \
+  --wallet ledger
+
+# Track execution
+ccip-cli show 0xabc123... --wait
+```
+
+## Chain-Specific Behavior
+
+<Tabs>
+<TabItem value="evm" label="EVM to EVM" default>
+
+Tokens transfer via Lock/Release or Burn/Mint pools. Receiver addresses use standard EVM format.
+
+**Token approvals:**
+
+The CLI handles approvals automatically. Use `--approve-max` for unlimited allowance:
+
+```bash
+--approve-max
+```
+
+</TabItem>
+<TabItem value="solana" label="EVM to Solana">
+
+Receiver is a Solana program address. Token receiver may differ from program receiver.
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d solana-devnet \
+  --receiver <SOLANA_PROGRAM_ADDRESS> \
+  --token-receiver <SOLANA_TOKEN_ACCOUNT> \
+  --transfer-tokens 0xToken=1.0 \
+  --wallet ledger
+```
+
+</TabItem>
+<TabItem value="from-solana" label="Solana to EVM">
+
+Source addresses use Solana format. Token amounts use SPL token decimals.
+
+```bash
+ccip-cli send \
+  -s solana-devnet \
+  -r <SOLANA_ROUTER> \
+  -d ethereum-testnet-sepolia \
+  --receiver 0xEvmAddress \
+  --transfer-tokens <SPL_TOKEN_MINT>=1.0 \
+  --wallet ledger
+```
+
+</TabItem>
+</Tabs>
+
+## Failures
+
+For failed transfers, see [Debugging Failed Messages](/cli/guides/debugging-workflow).
+
+| Issue                  | Cause                 | Solution                            |
+| ---------------------- | --------------------- | ----------------------------------- |
+| Transfer stuck         | Rate limiter depleted | Wait for refill or reduce amount    |
+| Execution failed       | Insufficient gas      | Retry with `manualExec --gas-limit` |
+| Token not supported    | Token not registered  | Use a supported token               |
+| Insufficient allowance | Approval failed       | Run send again or approve manually  |
+
+## Token Amount Format
+
+Specify amounts in human-readable format. The CLI converts to smallest units using the token's decimals.
+
+| Input | Interpretation |
+| ----- | -------------- |
+| `1.0` | 1.0 tokens     |
+| `0.5` | 0.5 tokens     |
+| `100` | 100 tokens     |
+
+Multiple tokens:
+
+```bash
+--transfer-tokens 0xToken1=1.0 --transfer-tokens 0xToken2=50
+```
+
+Short form:
+
+```bash
+-t 0xToken1=1.0 -t 0xToken2=50
+```
+
+## Related
+
+- [Transfer Data](/cli/guides/data-transfer-workflow) - Transfer data only
+- [Transfer Tokens and Data](/cli/guides/tokens-and-data-workflow) - Transfer both
+- [getSupportedTokens](/cli/supported-tokens) - Command reference
+- [send](/cli/send) - Command reference
+- [show](/cli/show) - Command reference
+- [Configuration](/cli/configuration) - RPC and wallet setup

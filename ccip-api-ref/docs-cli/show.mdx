@@ -1,0 +1,127 @@
+---
+id: show
+title: 'show'
+description: 'Display details of a CCIP request, including commit status and execution receipts.'
+sidebar_label: show
+sidebar_position: 2
+custom_edit_url: null
+---
+
+# show
+
+<ChainSupport />
+
+Display details of a CCIP request, including commit status and execution receipts.
+
+## Synopsis
+
+```bash
+ccip-cli show <tx-hash> [options]
+```
+
+`show` is the default command, so you can also use:
+
+```bash
+ccip-cli <tx-hash>
+```
+
+## Description
+
+The `show` command retrieves and displays comprehensive information about a CCIP cross-chain message. It queries the source chain for the original request, then checks the destination chain for commit and execution status.
+
+## Arguments
+
+| Argument    | Type   | Required | Description                                                      |
+| ----------- | ------ | -------- | ---------------------------------------------------------------- |
+| `<tx-hash>` | string | Yes      | Transaction hash containing the CCIP request on the source chain |
+
+## Options
+
+| Option             | Type    | Default | Description                                                                                                                                |
+| ------------------ | ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--log-index`      | number  | -       | Select a specific message by log index when multiple CCIP messages exist in one transaction. If omitted, an interactive menu is displayed. |
+| `--id-from-source` | string  | -       | Search by message ID instead of transaction hash. Format: `[onRamp@]sourceNetwork`. The onRamp address may be required for some chains.    |
+| `--wait`           | boolean | -       | Wait for finality, commit, and first execution of pending requests before returning.                                                       |
+
+See [Configuration](/cli/configuration) for global options (`--rpcs`, `--format`, etc.).
+
+## Command Builder
+
+Build your `show` command interactively:
+
+<CLIBuilder command="show" />
+
+## Examples
+
+### Track a message by transaction hash
+
+```bash
+ccip-cli show 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b \
+  --rpc https://eth-sepolia.example.com \
+  --rpc https://arb-sepolia.example.com
+```
+
+### Select a specific message in a multi-message transaction
+
+When a transaction contains multiple CCIP messages, use `--log-index` to select one:
+
+```bash
+ccip-cli show 0xabc123... --log-index 2
+```
+
+### Search by message ID
+
+If you have the message ID instead of the transaction hash:
+
+```bash
+ccip-cli show 0xmessageId... --id-from-source ethereum-testnet-sepolia
+```
+
+### Output as JSON for scripting
+
+```bash
+ccip-cli show 0xabc123... --format json
+```
+
+### Wait for message execution
+
+Monitor a message until it's fully executed on the destination chain:
+
+```bash
+ccip-cli show 0xabc123... --wait
+```
+
+## Output
+
+The command displays three sections:
+
+| Section      | Description                                                    |
+| ------------ | -------------------------------------------------------------- |
+| **Request**  | Message details from the source chain (sender, receiver, data) |
+| **Commit**   | Commit report from destination chain (merkle root, sequences)  |
+| **Receipts** | Execution receipts showing success or failure status           |
+
+## Behavior
+
+1. The CLI attempts all configured RPCs in parallel
+1. Uses the first network that responds with the transaction
+1. If destination RPC is available, fetches commit and execution status
+1. For multi-message transactions without `--log-index`, displays an interactive selection menu
+
+## See Also
+
+- [manualExec](/cli/manual-exec) - Execute pending or failed messages
+- [Configuration](/cli/configuration) - RPC and output format options
+
+## Exit Codes
+
+| Code | Meaning                                                       |
+| ---- | ------------------------------------------------------------- |
+| `0`  | Success - message details retrieved                           |
+| `1`  | Error (network failure, message not found, invalid arguments) |
+
+Use in scripts:
+
+```bash
+ccip-cli show $TX_HASH --format json && echo "Message found" || echo "Failed"
+```

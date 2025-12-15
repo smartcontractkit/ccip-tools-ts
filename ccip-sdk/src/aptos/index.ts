@@ -98,13 +98,18 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   static {
     supportedChains[ChainFamily.Aptos] = AptosChain
   }
+  /** Chain family identifier for Aptos networks. */
   static readonly family = ChainFamily.Aptos
+  /** Native token decimals (8 for APT). */
   static readonly decimals = 8
 
   readonly destroy$: Promise<void>
+  /** The Aptos SDK provider for blockchain interactions. */
   provider: Aptos
 
+  /** Retrieves token information for a given token address. */
   getTokenInfo: (token: string) => Promise<TokenInfo>
+  /** @internal */
   _getAccountModulesNames: (address: string) => Promise<string[]>
 
   /**

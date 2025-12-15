@@ -50,11 +50,34 @@ export type EstimateReceiveExecutionOpts = {
 
 /**
  * Estimate CCIP gasLimit needed to execute a request on a contract receiver.
- * @param opts - Options for estimation: source and dest chains, router or ramp address, and message
- * @returns Estimated gasLimit.
+ *
+ * @param opts - {@link EstimateReceiveExecutionOpts} for estimation
+ * @returns Estimated gasLimit
+ *
  * @throws {@link CCIPMethodUnsupportedError} if dest chain doesn't support estimation
  * @throws {@link CCIPContractTypeInvalidError} if routerOrRamp is not a valid contract type
  * @throws {@link CCIPTokenDecimalsInsufficientError} if dest token has insufficient decimals
+ *
+ * @example
+ * ```typescript
+ * import { estimateReceiveExecution, EVMChain } from '@chainlink/ccip-sdk'
+ *
+ * const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+ * const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+ *
+ * const gasLimit = await estimateReceiveExecution({
+ *   source,
+ *   dest,
+ *   routerOrRamp: '0xRouter...',
+ *   message: {
+ *     sender: '0x...',
+ *     receiver: '0x...',
+ *     data: '0x...',
+ *     tokenAmounts: [],
+ *   },
+ * })
+ * console.log('Estimated gas:', gasLimit)
+ * ```
  */
 export async function estimateReceiveExecution({
   source,
