@@ -119,10 +119,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     this.graphqlClient = new SuiGraphQLClient({
       url: graphqlUrl,
     })
-
-    // Memoize getWallet to avoid recreating keypairs
-    const originalGetWallet = this.getWallet.bind(this)
-    this.getWallet = memoize(originalGetWallet, { maxSize: 1, maxArgs: 0 })
   }
 
   /**
@@ -443,40 +439,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
   getTokenAdminRegistryFor(_address: string): Promise<string> {
     return Promise.reject(new CCIPNotImplementedError())
-  }
-
-  /**
-   * Gets a wallet/keypair for signing transactions.
-   * This method should be overridden in your environment to provide the actual wallet.
-   * @param _opts - Optional wallet configuration.
-   * @returns A Sui Keypair for signing transactions.
-   */
-  static getWallet(_opts?: { wallet?: unknown }): Promise<Keypair> {
-    return Promise.reject(
-      new CCIPWalletInvalidError(
-        'Wallet loading not configured. Override SuiChain.getWallet in your environment.',
-      ),
-    )
-  }
-
-  /**
-   * Gets a wallet/keypair for signing transactions (instance method).
-   * Delegates to the static getWallet method.
-   * @param opts - Optional wallet configuration.
-   * @returns A Sui Keypair for signing transactions.
-   */
-  async getWallet(opts?: { wallet?: unknown }): Promise<Keypair> {
-    return (this.constructor as typeof SuiChain).getWallet(opts)
-  }
-
-  /**
-   * Gets the wallet address for the current wallet.
-   * @param opts - Optional wallet configuration.
-   * @returns The Sui address as a string.
-   */
-  async getWalletAddress(opts?: { wallet?: unknown }): Promise<string> {
-    const wallet = await this.getWallet(opts)
-    return wallet.toSuiAddress()
   }
 
   // Static methods for decoding
