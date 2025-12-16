@@ -90,7 +90,7 @@ export function serializeExecutionReport(execReport: ExecutionReport<CCIPMessage
   return beginCell()
     .storeUint(execReport.message.header.sourceChainSelector, 64)
     .storeRef(asSnakeData([execReport.message], serializeMessage))
-    .storeRef(Cell.EMPTY)
+    .storeRef(Cell.EMPTY) // offchainTokenData - empty for now
     .storeRef(
       asSnakeData(execReport.proofs.map(toBigInt), (proof: bigint) => {
         return beginCell().storeUint(proof, 256)
@@ -101,36 +101,35 @@ export function serializeExecutionReport(execReport: ExecutionReport<CCIPMessage
 }
 
 function serializeMessage(message: CCIPMessage_V1_6_TON): Builder {
-  return beginCell()
-    .storeRef(serializeHeader(message.header))
-    .storeRef(serializeSender(message.sender))
-    .storeRef(serializeData(message.data))
-    .storeAddress(Address.parse(message.receiver))
-    .storeCoins(message.gasLimit)
-    .storeMaybeRef(
-      message.tokenAmounts?.length > 0 ? serializeTokenAmounts(message.tokenAmounts) : null,
-    )
+  return (
+    beginCell()
+      // Store header INLINE (not as ref)
+      .storeUint(BigInt(message.header.messageId), 256)
+      .storeUint(message.header.sourceChainSelector, 64)
+      .storeUint(message.header.destChainSelector, 64)
+      .storeUint(message.header.sequenceNumber, 64)
+      .storeUint(message.header.nonce, 64)
+      // Store sender as ref with length prefix
+      .storeRef(
+        beginCell()
+          .storeUint(bytesToBuffer(message.sender).length, 8)
+          .storeBuffer(bytesToBuffer(message.sender))
+          .endCell(),
+      )
+      // Store data as ref
+      .storeRef(beginCell().storeBuffer(bytesToBuffer(message.data)).endCell())
+      // Store receiver address
+      .storeAddress(Address.parse(message.receiver))
+      // Store gas limit
+      //.storeCoins(message.gasLimit)
+      // Store token amounts as maybe ref
+      .storeMaybeRef(
+        message.tokenAmounts?.length > 0 ? serializeTokenAmounts(message.tokenAmounts) : null,
+      )
+  )
 }
 
-function serializeHeader(header: CCIPMessage_V1_6['header']): Builder {
-  return beginCell()
-    .storeUint(BigInt(header.messageId), 256)
-    .storeUint(header.sourceChainSelector, 64)
-    .storeUint(header.destChainSelector, 64)
-    .storeUint(header.sequenceNumber, 64)
-    .storeUint(header.nonce, 64)
-}
-
-function serializeSender(sender: string): Builder {
-  const senderBytes = bytesToBuffer(sender)
-  return beginCell().storeUint(senderBytes.length, 8).storeBuffer(senderBytes)
-}
-
-function serializeData(data: string): Builder {
-  return beginCell().storeBuffer(bytesToBuffer(data))
-}
-
-function serializeTokenAmounts(tokenAmounts: CCIPMessage_V1_6['tokenAmounts']): Builder {
+function serializeTokenAmounts(tokenAmounts: CCIPMessage_V1_6['tokenAmounts']): Cell {
   const builder = beginCell()
   for (const ta of tokenAmounts) {
     builder.storeRef(
@@ -142,10 +141,10 @@ function serializeTokenAmounts(tokenAmounts: CCIPMessage_V1_6['tokenAmounts']): 
         .endCell(),
     )
   }
-  return builder
+  return builder.endCell()
 }
 
-function serializeSourcePool(address: string): Builder {
+function serializeSourcePool(address: string): Cell {
   const bytes = bytesToBuffer(address)
-  return beginCell().storeUint(bytes.length, 8).storeBuffer(bytes)
+  return beginCell().storeUint(bytes.length, 8).storeBuffer(bytes).endCell()
 }
