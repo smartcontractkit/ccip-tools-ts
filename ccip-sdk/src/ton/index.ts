@@ -401,7 +401,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
           return
         }
 
-        if (opts.endBlock && blockNumber > opts.endBlock) {
+        if (opts.endBlock && typeof opts.endBlock === 'number' && blockNumber > opts.endBlock) {
           continue
         }
 

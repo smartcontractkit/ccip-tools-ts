@@ -72,7 +72,7 @@ function wasCalledAsScript() {
 }
 
 if (import.meta?.main || wasCalledAsScript()) {
-  const later = setTimeout(() => { }, 2 ** 31 - 1) // keep event-loop alive
+  const later = setTimeout(() => {}, 2 ** 31 - 1) // keep event-loop alive
   await main()
     .catch((err) => {
       console.error(err)
