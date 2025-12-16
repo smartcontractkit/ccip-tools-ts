@@ -55,12 +55,12 @@ export function hashV16SuiMessage(
   }
 
   const innerHash = concat([
-    encodeNumber(message.header.messageId),
+    encodeNumber(message.messageId),
     zeroPadValue(message.receiver, 32),
-    encodeNumber(message.header.sequenceNumber),
+    encodeNumber(message.sequenceNumber),
     encodeNumber(gasLimit),
     zeroPadValue(tokenReceiver, 32),
-    encodeNumber(message.header.nonce),
+    encodeNumber(message.nonce),
   ])
 
   const tokenHash = concat([

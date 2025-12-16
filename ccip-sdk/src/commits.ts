@@ -20,9 +20,9 @@ export async function fetchCommitReport(
   commitStore: string,
   {
     lane,
-    message: { header },
+    message,
     tx: { timestamp: requestTimestamp },
-  }: PickDeep<CCIPRequest, 'lane' | 'message.header.sequenceNumber' | 'tx.timestamp'>,
+  }: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>,
   hints?: Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number },
 ): Promise<CCIPCommit> {
   for await (const log of dest.getLogs({
@@ -32,14 +32,14 @@ export async function fetchCommitReport(
     topics: [lane.version < CCIPVersion.V1_6 ? 'ReportAccepted' : 'CommitReportAccepted'],
   })) {
     const report = (dest.constructor as ChainStatic).decodeCommits(log, lane)?.[0]
-    if (!report || report.maxSeqNr < header.sequenceNumber) continue
+    if (!report || report.maxSeqNr < message.sequenceNumber) continue
     // since we walk forward from some startBlock/startTime, give up if we find a newer report
-    if (report.minSeqNr > header.sequenceNumber) break
+    if (report.minSeqNr > message.sequenceNumber) break
     return { report, log }
   }
 
   throw new CCIPCommitNotFoundError(
     hints?.startBlock ?? String(requestTimestamp),
-    header.sequenceNumber,
+    message.sequenceNumber,
   )
 }

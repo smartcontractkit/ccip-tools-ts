@@ -61,7 +61,7 @@ class MockChain extends Chain {
   override async fetchAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
     _request: R,
@@ -379,7 +379,7 @@ describe('fetchCommitReport', () => {
 
     const request = {
       lane,
-      message: { header: { sequenceNumber: 1n } } as any,
+      message: { sequenceNumber: 1n } as any,
       tx: { timestamp: 1700000000 },
     }
 
@@ -436,7 +436,7 @@ describe('fetchCommitReport', () => {
 
     const request = {
       lane,
-      message: { header: { sequenceNumber: 1n } } as any,
+      message: { sequenceNumber: 1n } as any,
       tx: { timestamp: 1700000000 },
     }
 
@@ -489,7 +489,7 @@ describe('fetchCommitReport', () => {
 
     const request = {
       lane,
-      message: { header: { sequenceNumber: 4n } } as any,
+      message: { sequenceNumber: 4n } as any,
       tx: { timestamp: 1700000000 },
     }
 
@@ -547,7 +547,7 @@ describe('fetchCommitReport', () => {
 
     const request = {
       lane,
-      message: { header: { sequenceNumber: 5n } } as any,
+      message: { sequenceNumber: 5n } as any,
       tx: { timestamp: 1700000000 },
     }
 
@@ -623,7 +623,7 @@ describe('fetchCommitReport', () => {
 
     const request = {
       lane,
-      message: { header: { sequenceNumber: 5n } } as any,
+      message: { sequenceNumber: 5n } as any,
       tx: { timestamp: 1700000000 },
     }
 
@@ -678,7 +678,7 @@ describe('fetchCommitReport', () => {
     const requestTimestamp = 1700000000
     const request = {
       lane,
-      message: { header: { sequenceNumber: 3n } } as any,
+      message: { sequenceNumber: 3n } as any,
       tx: { timestamp: requestTimestamp },
     }
 

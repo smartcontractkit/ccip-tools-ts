@@ -75,10 +75,10 @@ describe('EVMChain.decodeMessage', () => {
       assert.equal(result.sender.toLowerCase(), testAddresses.sender.toLowerCase())
       assert.equal(result.receiver.toLowerCase(), testAddresses.receiver.toLowerCase())
       assert.equal(result.feeToken.toLowerCase(), testAddresses.feeToken.toLowerCase())
-      assert.equal(result.header.messageId, testHash.messageId)
-      assert.equal(result.header.sequenceNumber, 100n)
-      assert.equal(result.header.nonce, 1n)
-      assert.equal(result.header.sourceChainSelector, 1n)
+      assert.equal(result.messageId, testHash.messageId)
+      assert.equal(result.sequenceNumber, 100n)
+      assert.equal(result.nonce, 1n)
+      assert.equal(result.sourceChainSelector, 1n)
     })
 
     it('should decode message with token amounts', () => {
@@ -185,14 +185,11 @@ describe('EVMChain.decodeMessage', () => {
       assert.equal(result.sender.toLowerCase(), testAddresses.sender.toLowerCase())
       assert.equal(result.receiver.toLowerCase(), testAddresses.receiver.toLowerCase())
       assert.equal(result.feeToken.toLowerCase(), testAddresses.feeToken.toLowerCase())
-      assert.equal(result.header.messageId, testHash.messageId)
-      assert.equal(result.header.sequenceNumber, 500n)
-      assert.equal(result.header.nonce, 10n)
-      assert.equal(result.header.sourceChainSelector, sourceChainSelector)
-      assert.equal(
-        (result.header as { destChainSelector?: bigint }).destChainSelector,
-        destChainSelector,
-      )
+      assert.equal(result.messageId, testHash.messageId)
+      assert.equal(result.sequenceNumber, 500n)
+      assert.equal(result.nonce, 10n)
+      assert.equal(result.sourceChainSelector, sourceChainSelector)
+      assert.equal((result as { destChainSelector?: bigint }).destChainSelector, destChainSelector)
       assert.equal(result.data, '0xabcd')
     })
 
@@ -414,7 +411,7 @@ describe('EVMChain.decodeMessage', () => {
       const result = EVMChain.decodeMessage({ data: encoded.data })
 
       assert.ok(result)
-      assert.equal(result.header.sequenceNumber, 1n)
+      assert.equal(result.sequenceNumber, 1n)
     })
   })
 })

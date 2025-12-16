@@ -78,12 +78,12 @@ export function serializeExecutionReport(
 ): Uint8Array {
   const message = execReport.message
   return ExecutionReportCodec.serialize({
-    sourceChainSelector: message.header.sourceChainSelector,
-    messageId: getBytes(message.header.messageId),
-    headerSourceChainSelector: message.header.sourceChainSelector,
-    destChainSelector: message.header.destChainSelector,
-    sequenceNumber: message.header.sequenceNumber,
-    nonce: message.header.nonce,
+    sourceChainSelector: message.sourceChainSelector,
+    messageId: getBytes(message.messageId),
+    headerSourceChainSelector: message.sourceChainSelector,
+    destChainSelector: message.destChainSelector,
+    sequenceNumber: message.sequenceNumber,
+    nonce: message.nonce,
     sender: getAddressBytes(message.sender),
     data: getBytes(message.data),
     receiver: getAddressBytes(message.receiver),

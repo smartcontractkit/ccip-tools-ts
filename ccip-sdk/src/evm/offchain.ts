@@ -34,7 +34,7 @@ export async function fetchEVMOffchainTokenData(
   },
   ctx: WithLogger,
 ): Promise<OffchainTokenData[]> {
-  const { isTestnet } = networkInfo(request.message.header.sourceChainSelector)
+  const { isTestnet } = networkInfo(request.message.sourceChainSelector)
   // there's a chance there are other CCIPSendRequested in same tx,
   // and they may contain USDC transfers as well, so we select
   // any USDC logs after that and before our CCIPSendRequested

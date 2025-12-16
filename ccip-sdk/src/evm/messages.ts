@@ -23,29 +23,29 @@ type EVM2AnyMessageRequested = CleanAddressable<
   >[0]
 >
 
-/** v1.6+ Message Base type (all other destinations share this intersection). */
+type CCIPMessageSent = CleanAddressable<
+  AbiParametersToPrimitiveTypes<
+    ExtractAbiEvent<typeof OnRamp_1_6_ABI, 'CCIPMessageSent'>['inputs']
+  >[2]
+>
+
+/**
+ * v1.6+ Message Base type (all other destinations share this intersection).
+ * `header` is merged to message root, for consistency.
+ */
 export type CCIPMessage_V1_6 = MergeArrayElements<
-  CleanAddressable<
-    AbiParametersToPrimitiveTypes<
-      ExtractAbiEvent<typeof OnRamp_1_6_ABI, 'CCIPMessageSent'>['inputs']
-    >[2]
-  >,
-  { tokenAmounts: readonly SourceTokenData[] }
+  Omit<CCIPMessageSent, 'header'>,
+  CCIPMessageSent['header'] & { tokenAmounts: readonly SourceTokenData[] }
 >
 
 /** CCIP v1.5 EVM message type. */
 export type CCIPMessage_V1_5_EVM = MergeArrayElements<
   EVM2AnyMessageRequested,
-  {
-    header: Omit<CCIPMessage_V1_6['header'], 'destChainSelector'>
-    tokenAmounts: readonly SourceTokenData[]
-  }
+  { tokenAmounts: readonly SourceTokenData[] }
 >
 
 /** CCIP v1.2 EVM message type. */
-export type CCIPMessage_V1_2_EVM = EVM2AnyMessageRequested & {
-  header: Omit<CCIPMessage_V1_6['header'], 'destChainSelector'>
-}
+export type CCIPMessage_V1_2_EVM = EVM2AnyMessageRequested
 
 /** v1.6 EVM specialization with EVMExtraArgsV2 and tokenAmounts.*.destGasAmount. */
 export type CCIPMessage_V1_6_EVM = CCIPMessage_V1_6 & EVMExtraArgsV2

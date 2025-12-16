@@ -438,7 +438,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async fetchAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
     request: R,
@@ -712,14 +712,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const message = decoded.data.message
 
     // Convert BN/number types to bigints
+    const messageId = hexlify(new Uint8Array(message.header.messageId))
     const sourceChainSelector = BigInt(message.header.sourceChainSelector.toString())
     const destChainSelector = BigInt(message.header.destChainSelector.toString())
     const sequenceNumber = BigInt(message.header.sequenceNumber.toString())
     const nonce = BigInt(message.header.nonce.toString())
     const destNetwork = networkInfo(destChainSelector)
 
-    // Convert message fields to expected format
-    const messageId = hexlify(new Uint8Array(message.header.messageId))
     const sender = message.sender.toString()
     const data_ = getDataBytes(message.data)
     // TODO: extract this into a proper normalize/decode/reencode data utility
@@ -749,13 +748,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const { _tag, ...rest } = parsed
 
     return {
-      header: {
-        messageId,
-        sourceChainSelector,
-        destChainSelector: destChainSelector,
-        sequenceNumber: sequenceNumber,
-        nonce,
-      },
+      // merge header fields to message
+      messageId,
+      sourceChainSelector,
+      destChainSelector: destChainSelector,
+      sequenceNumber: sequenceNumber,
+      nonce,
       sender,
       receiver,
       data: msgData,
@@ -1159,7 +1157,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    */
   override async fetchCommitReport(
     commitStore: string,
-    request: PickDeep<CCIPRequest, 'lane' | 'message.header.sequenceNumber' | 'tx.timestamp'>,
+    request: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>,
     hints?: Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number },
   ): Promise<CCIPCommit> {
     const commitsAroundSeqNum = await this.connection.getProgramAccounts(
@@ -1183,7 +1181,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           {
             memcmp: {
               offset: 8 + 1 + 8 + 32 + 8 + 1,
-              bytes: encodeBase58(toLeArray(request.message.header.sequenceNumber, 8).slice(1)),
+              bytes: encodeBase58(toLeArray(request.message.sequenceNumber, 8).slice(1)),
             },
           },
         ],
@@ -1193,10 +1191,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       // const merkleRoot = acc.account.data.subarray(8 + 1 + 8, 8 + 1 + 8 + 32)
       const minSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8)
       const maxSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8 + 8)
-      if (
-        minSeqNr > request.message.header.sequenceNumber ||
-        maxSeqNr < request.message.header.sequenceNumber
-      )
+      if (minSeqNr > request.message.sequenceNumber || maxSeqNr < request.message.sequenceNumber)
         continue
       // we have all the commit report info, but we also need log details (txHash, etc)
       for await (const log of this.getLogs({
@@ -1220,7 +1215,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   /** {@inheritDoc Chain.fetchExecutionReceipts} */
   override async *fetchExecutionReceipts(
     offRamp: string,
-    request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,
+    request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
     opts?: Pick<LogFilter, 'page' | 'watch'>,
   ): AsyncIterableIterator<CCIPExecution> {

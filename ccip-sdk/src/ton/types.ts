@@ -88,7 +88,7 @@ function asSnakeData<T>(array: T[], builderFn: (item: T) => Builder): Cell {
  */
 export function serializeExecutionReport(execReport: ExecutionReport<CCIPMessage_V1_6_TON>): Cell {
   return beginCell()
-    .storeUint(execReport.message.header.sourceChainSelector, 64)
+    .storeUint(execReport.message.sourceChainSelector, 64)
     .storeRef(asSnakeData([execReport.message], serializeMessage))
     .storeRef(Cell.EMPTY)
     .storeRef(
@@ -102,7 +102,7 @@ export function serializeExecutionReport(execReport: ExecutionReport<CCIPMessage
 
 function serializeMessage(message: CCIPMessage_V1_6_TON): Builder {
   return beginCell()
-    .storeRef(serializeHeader(message.header))
+    .storeRef(serializeHeader(message))
     .storeRef(serializeSender(message.sender))
     .storeRef(serializeData(message.data))
     .storeAddress(Address.parse(message.receiver))
@@ -112,13 +112,13 @@ function serializeMessage(message: CCIPMessage_V1_6_TON): Builder {
     )
 }
 
-function serializeHeader(header: CCIPMessage_V1_6['header']): Builder {
+function serializeHeader(message: CCIPMessage_V1_6): Builder {
   return beginCell()
-    .storeUint(BigInt(header.messageId), 256)
-    .storeUint(header.sourceChainSelector, 64)
-    .storeUint(header.destChainSelector, 64)
-    .storeUint(header.sequenceNumber, 64)
-    .storeUint(header.nonce, 64)
+    .storeUint(BigInt(message.messageId), 256)
+    .storeUint(message.sourceChainSelector, 64)
+    .storeUint(message.destChainSelector, 64)
+    .storeUint(message.sequenceNumber, 64)
+    .storeUint(message.nonce, 64)
 }
 
 function serializeSender(sender: string): Builder {

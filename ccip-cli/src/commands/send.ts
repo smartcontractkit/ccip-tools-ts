@@ -326,7 +326,7 @@ async function sendMessage(
     ', tx =>',
     request.tx.hash,
     ', messageId =>',
-    request.message.header.messageId,
+    request.message.messageId,
   )
 
   await showRequests(ctx, {

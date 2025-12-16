@@ -96,7 +96,7 @@ function hashV16TONMessage(message: CCIPMessage_V1_6, metadataHash: string): str
   } else {
     const parsedArgs = decodeExtraArgs(
       message.extraArgs,
-      networkInfo(message.header.sourceChainSelector).family,
+      networkInfo(message.sourceChainSelector).family,
     )
     if (!parsedArgs || parsedArgs._tag !== 'EVMExtraArgsV2') {
       throw new CCIPExtraArgsInvalidError('TON', message.extraArgs)
@@ -106,11 +106,11 @@ function hashV16TONMessage(message: CCIPMessage_V1_6, metadataHash: string): str
 
   // Build header cell containing header routing information
   const headerCell = beginCell()
-    .storeUint(toBigInt(message.header.messageId), 256)
+    .storeUint(toBigInt(message.messageId), 256)
     .storeAddress(Address.parse(message.receiver))
-    .storeUint(toBigInt(message.header.sequenceNumber), 64)
+    .storeUint(toBigInt(message.sequenceNumber), 64)
     .storeCoins(gasLimit)
-    .storeUint(toBigInt(message.header.nonce), 64)
+    .storeUint(toBigInt(message.nonce), 64)
     .endCell()
 
   // Build sender cell with address bytes

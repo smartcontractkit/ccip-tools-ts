@@ -113,6 +113,6 @@ const request = await source.sendMessage(
   { ...message, fee },
   { wallet: process.env['SOLANA_PRIVATE_KEY'] },
 )
-const messageId = request.message.header.messageId
+const messageId = request.message.messageId
 const txHash = request.tx.hash
 ```

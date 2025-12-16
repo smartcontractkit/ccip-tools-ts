@@ -113,7 +113,7 @@ export function getV16LeafHasher(
     logger.debug('Message', message)
     const parsedArgs = decodeExtraArgs(
       message.extraArgs,
-      networkInfo(message.header.sourceChainSelector).family,
+      networkInfo(message.sourceChainSelector).family,
     )
     if (
       !parsedArgs ||
@@ -141,11 +141,11 @@ export function getV16LeafHasher(
         'uint64 nonce',
       ],
       [
-        message.header.messageId,
+        message.messageId,
         message.receiver,
-        message.header.sequenceNumber,
+        message.sequenceNumber,
         parsedArgs.gasLimit,
-        message.header.nonce,
+        message.nonce,
       ],
     )
 
@@ -171,7 +171,7 @@ export function getV16LeafHasher(
     )
 
     logger.debug('v1.6 leafHasher:', {
-      messageId: message.header.messageId,
+      messageId: message.messageId,
       encodedTokens,
       fixedSizeValues,
       packedValues,

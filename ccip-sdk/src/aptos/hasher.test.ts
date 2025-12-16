@@ -24,13 +24,11 @@ describe('aptos hasher', () => {
     const gasLimit = 500000n
 
     const msg: CCIPMessage_V1_6_EVM = {
-      header: {
-        messageId,
-        sequenceNumber: 42n,
-        nonce: 123n,
-        sourceChainSelector: 1n,
-        destChainSelector: 2n,
-      },
+      messageId,
+      sequenceNumber: 42n,
+      nonce: 123n,
+      sourceChainSelector: 1n,
+      destChainSelector: 2n,
       sender: '0x8765432109fedcba8765432109fedcba87654321',
       data: hexlify(toUtf8Bytes('sample message data')),
       receiver: zeroPadValue('0x1234', 32),

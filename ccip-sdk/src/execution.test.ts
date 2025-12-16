@@ -77,7 +77,7 @@ class MockChain extends Chain {
   override async fetchAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
     _request: R,
@@ -267,42 +267,30 @@ describe('calculateManualExecProof', () => {
 
   const messages: CCIPMessage[] = [
     {
-      header: {
-        messageId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-        sequenceNumber: 1n,
-        nonce: 1n,
-        sourceChainSelector: lane.sourceChainSelector,
-      },
       messageId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      sequenceNumber: 1n,
+      nonce: 1n,
       sourceChainSelector: lane.sourceChainSelector,
       sender: '0x1111111111111111111111111111111111111111',
       receiver: '0x2222222222222222222222222222222222222222',
       data: '0x',
       gasLimit: 100000n,
       strict: false,
-      nonce: 1n,
-      sequenceNumber: 1n,
       feeToken: '0x0000000000000000000000000000000000000000',
       feeTokenAmount: 1000n,
       tokenAmounts: [],
       sourceTokenData: [],
     },
     {
-      header: {
-        messageId: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
-        sequenceNumber: 2n,
-        nonce: 2n,
-        sourceChainSelector: lane.sourceChainSelector,
-      },
       messageId: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
+      sequenceNumber: 2n,
+      nonce: 2n,
       sourceChainSelector: lane.sourceChainSelector,
       sender: '0x3333333333333333333333333333333333333333',
       receiver: '0x4444444444444444444444444444444444444444',
       data: '0x',
       gasLimit: 200000n,
       strict: false,
-      nonce: 2n,
-      sequenceNumber: 2n,
       feeToken: '0x0000000000000000000000000000000000000000',
       feeTokenAmount: 2000n,
       tokenAmounts: [],
@@ -312,7 +300,7 @@ describe('calculateManualExecProof', () => {
 
   it('should calculate manual execution proof correctly', () => {
     const merkleRoot = '0x9c66d4cfcba6e359f42f096ff16192e16967cea456503c02e738c5646d06cab4'
-    const messageId = messages[0].header.messageId
+    const messageId = messages[0].messageId
 
     const result = calculateManualExecProof(messages, lane, messageId, merkleRoot, {
       logger: console,
@@ -325,7 +313,7 @@ describe('calculateManualExecProof', () => {
   })
 
   it('should calculate messageId as root of batch with single message', () => {
-    const messageId = messages[0].header.messageId
+    const messageId = messages[0].messageId
     const batch = [messages[0]]
 
     const result = calculateManualExecProof(batch, lane, messageId, undefined, { logger: console })
@@ -346,7 +334,7 @@ describe('calculateManualExecProof', () => {
   })
 
   it('should throw an error if merkle root does not match', () => {
-    const messageId = messages[0].header.messageId
+    const messageId = messages[0].messageId
     const wrongMerkleRoot = '0x0000000000000000000000000000000000000000000000000000000000000001'
 
     assert.throws(
@@ -361,13 +349,11 @@ describe('calculateManualExecProof', () => {
     const messages1_6: CCIPMessage[] = [
       {
         data: '0x',
-        header: {
-          nonce: 0n,
-          messageId: '0x2222222222222222222222222222222222222222222222222222222222222222',
-          sequenceNumber: 1n,
-          destChainSelector: networkInfo(421614).chainSelector,
-          sourceChainSelector: networkInfo(11155111).chainSelector,
-        },
+        nonce: 0n,
+        messageId: '0x2222222222222222222222222222222222222222222222222222222222222222',
+        sequenceNumber: 1n,
+        destChainSelector: networkInfo(421614).chainSelector,
+        sourceChainSelector: networkInfo(11155111).chainSelector,
         sender: '0x1111111111111111111111111111111111111111',
         feeToken: '0x0000000000000000000000000000000000000000',
         receiver: '0x95b9e79A732C0E03d04a41c30C9DF7852a3D8Da4',
@@ -387,7 +373,7 @@ describe('calculateManualExecProof', () => {
       version: CCIPVersion.V1_6,
     }
 
-    const messageId = messages1_6[0].header.messageId
+    const messageId = messages1_6[0].messageId
     const result = calculateManualExecProof(messages1_6, lane1_6, messageId, merkleRoot1_6, {
       logger: console,
     })
@@ -404,13 +390,13 @@ describe('calculateManualExecProof', () => {
     const message = decodeMessage(msgInfoString) as CCIPMessage_V1_6_EVM
 
     const lane: Lane = {
-      sourceChainSelector: message.header.sourceChainSelector,
-      destChainSelector: message.header.destChainSelector,
+      sourceChainSelector: message.sourceChainSelector,
+      destChainSelector: message.destChainSelector,
       onRamp: '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45',
       version: CCIPVersion.V1_6,
     }
 
-    const messageId = message.header.messageId
+    const messageId = message.messageId
     const result = calculateManualExecProof([message], lane, messageId, undefined, {
       logger: console,
     })
