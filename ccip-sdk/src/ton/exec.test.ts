@@ -57,7 +57,12 @@ describe('TON generateUnsignedExecuteReport', () => {
     const slice = unsigned.body.beginParse()
     slice.loadUint(32) // opcode
     slice.loadUint(64) // queryID
-    slice.loadRef() // execution report reference
+    // ExecutionReport is stored inline via storeBuilder, skip its contents:
+    slice.loadUintBig(64) // sourceChainSelector (use loadUintBig for large values)
+    slice.loadRef() // messages
+    slice.loadRef() // offchainTokenData
+    slice.loadRef() // proofs
+    slice.loadUintBig(256) // proofFlagBits
 
     const gasOverride = slice.loadCoins()
     assert.equal(gasOverride, 1_000_000_000n)
