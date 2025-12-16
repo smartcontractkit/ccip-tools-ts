@@ -27,6 +27,7 @@ export type SuiManuallyExecuteInput = {
   offrampStateObject: string
   receiverConfig: ManuallyExecuteSuiReceiverConfig
   tokenConfigs?: TokenConfig[]
+  overrideReceiverObjectIds?: string[]
 }
 
 export function buildManualExecutionPTB({
@@ -37,6 +38,7 @@ export function buildManualExecutionPTB({
   offrampStateObject,
   receiverConfig,
   tokenConfigs,
+  overrideReceiverObjectIds,
 }: SuiManuallyExecuteInput): Transaction {
   const reportBytes = serializeExecutionReport(executionReport)
 
@@ -95,8 +97,10 @@ export function buildManualExecutionPTB({
       tx.pure.vector('u8', Buffer.from(executionReport.message.header.messageId.slice(2), 'hex')),
       tx.object(ccipObjectRef),
       messageArg,
-      // This assumes the original message receiver objects are correct. If this has any error, the message can get stuck. We should be able to override them
-      ...decodedExtraArgs.receiverObjectIds.map((objId) => tx.object(objId)),
+      // if overrideReceiverObjectIds is provided, use them; otherwise, use the ones from decodedExtraArgs (original message)
+      ...(overrideReceiverObjectIds && overrideReceiverObjectIds.length > 0
+        ? overrideReceiverObjectIds.map(tx.object)
+        : decodedExtraArgs.receiverObjectIds.map(tx.object)),
     ],
   })
 

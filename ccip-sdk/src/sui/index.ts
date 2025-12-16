@@ -11,6 +11,8 @@ import { type LogFilter, Chain } from '../chain.ts'
 import {
   CCIPContractNotRouterError,
   CCIPDataFormatUnsupportedError,
+  CCIPError,
+  CCIPErrorCode,
   CCIPExecTxRevertedError,
   CCIPNotImplementedError,
   CCIPSuiMessageVersionInvalidError,
@@ -51,12 +53,23 @@ import {
   getOffRampStateObject,
   getReceiverModule,
 } from './objects.ts'
+import selectors from '../selectors.ts'
 
 type SuiContractDir = {
   ccip: string
   onRamp: string
   offRamp: string
   router: string
+}
+
+// TODO: Populate with actual contract addresses per chain
+const contractDirs: Record<string, SuiContractDir> = {
+  '9762610643973837292': {
+    ccip: '0x...',
+    onRamp: '0x...',
+    offRamp: '0x...',
+    router: '0x...',
+  },
 }
 
 /**
@@ -82,20 +95,20 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @param client - Sui client for interacting with the Sui network.
    * @param network - Network information for this chain.
    */
-  constructor(client: SuiClient, network: NetworkInfo<typeof ChainFamily.Sui>) {
-    super(network)
+  constructor(client: SuiClient, network: NetworkInfo<typeof ChainFamily.Sui>, ctx?: WithLogger) {
+    super(network, ctx)
 
     this.client = client
     this.network = network
-    this.contractsDir = {} as SuiContractDir // TODO: Inject correct contract addresses
+    this.contractsDir = contractDirs[String(network.chainSelector)]
 
     // TODO: Graphql client should come from config
     let graphqlUrl: string
     const selector = network.chainSelector
-    if (selector === 17529533435026248318n) {
+    if (selector === selectors['sui:1'].selector) {
       // Sui mainnet (sui:1)
       graphqlUrl = 'https://graphql.mainnet.sui.io/graphql'
-    } else if (selector === 9762610643973837292n) {
+    } else if (selector === selectors['sui:2'].selector) {
       // Sui testnet (sui:2)
       graphqlUrl = 'https://graphql.testnet.sui.io/graphql'
     } else {
@@ -117,7 +130,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @param url - HTTP or WebSocket endpoint URL for the Sui network.
    * @returns A new SuiChain instance.
    */
-  static async fromUrl(url: string): Promise<SuiChain> {
+  static async fromUrl(url: string, ctx?: WithLogger): Promise<SuiChain> {
     const client = new SuiClient({ url })
 
     // Get chain identifier from the client and map to network info format
@@ -135,32 +148,15 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       chainId = 'sui:2' // testnet
     } else if (rawChainId === 'b0c08dea') {
       chainId = 'sui:4' // devnet
-    } else if (rawChainId) {
-      // Unknown chain, try to infer from URL
-      if (url.includes('mainnet')) {
-        chainId = 'sui:1'
-      } else if (url.includes('testnet')) {
-        chainId = 'sui:2'
-      } else if (url.includes('devnet')) {
-        chainId = 'sui:4'
-      } else {
-        chainId = 'sui:4' // default to devnet for unknown
-      }
     } else {
-      // If we can't get chain identifier, try to infer from URL
-      if (url.includes('mainnet')) {
-        chainId = 'sui:1'
-      } else if (url.includes('testnet')) {
-        chainId = 'sui:2'
-      } else if (url.includes('devnet')) {
-        chainId = 'sui:4'
-      } else {
-        chainId = 'sui:4' // default to devnet
-      }
+      throw new CCIPError(
+        CCIPErrorCode.NETWORK_FAMILY_UNSUPPORTED,
+        `Unsupported Sui chain identifier: ${rawChainId}`,
+      )
     }
 
     const network = networkInfo(chainId) as NetworkInfo<typeof ChainFamily.Sui>
-    return new SuiChain(client, network)
+    return new SuiChain(client, network, ctx)
   }
 
   /** {@inheritDoc Chain.getBlockTimestamp} */
@@ -637,7 +633,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   async executeReport(
     _offRamp: string,
     execReport: ExecutionReport,
-    opts: { wallet: unknown; gasLimit?: number },
+    opts: { wallet: unknown; gasLimit?: number; receiverObjectIds?: string[] },
   ): Promise<ChainTransaction> {
     const wallet = opts.wallet as Keypair
     const ccipObjectRef = await getCcipObjectRef(this.client, this.contractsDir.ccip)
@@ -657,6 +653,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
         execReport.message.tokenAmounts as CCIPMessage<typeof CCIPVersion.V1_6>['tokenAmounts'],
       )
     }
+
     const input: SuiManuallyExecuteInput = {
       executionReport: execReport as ExecutionReport<CCIPMessage_V1_6_Sui>,
       offrampAddress: this.contractsDir.offRamp,
@@ -665,6 +662,12 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       offrampStateObject,
       receiverConfig,
       tokenConfigs,
+    }
+    if (opts.receiverObjectIds) {
+      this.logger.info(
+        `Overriding Sui Manual Execution receiverObjectIds with: ${opts.receiverObjectIds.join(', ')}`,
+      )
+      input.overrideReceiverObjectIds = opts.receiverObjectIds
     }
     const tx = buildManualExecutionPTB(input)
 

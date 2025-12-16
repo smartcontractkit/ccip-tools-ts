@@ -91,6 +91,8 @@ export const builder = (yargs: Argv) =>
       'receiver-object-ids': {
         type: 'array',
         describe: 'Receiver object IDs for Sui execution (if executing on Sui destination)',
+        string: true,
+        example: '--receiver-object-ids 0xabc... 0xdef...',
       },
       'sender-queue': {
         type: 'boolean',
