@@ -523,4 +523,185 @@ describe('TONChain smoke tests', () => {
       assert.equal(wrongOnRamp, undefined, 'Wrong onRamp should return undefined')
     })
   })
+
+  describe('typeAndVersion', () => {
+    it('should return valid typeAndVersion for OffRamp', async () => {
+      const result = await tonChain.typeAndVersion(ADDRESSES_TO_ASSERT.tonOffRamp)
+
+      assert.ok(result.length >= 3, 'Should return at least [type, version, typeAndVersion]')
+      assert.equal(result[0], 'OffRamp', 'Type should be OffRamp')
+      assert.match(result[1], /^\d+\.\d+\.\d+/, 'Version should be semver format')
+      assert.ok(result[2].includes('OffRamp'), 'typeAndVersion should contain OffRamp')
+    })
+
+    it('should return valid typeAndVersion for OnRamp', async () => {
+      const result = await tonChain.typeAndVersion(ADDRESSES_TO_ASSERT.tonOnRamp)
+
+      assert.equal(result[0], 'OnRamp', 'Type should be OnRamp')
+      assert.match(result[1], /^\d+\.\d+\.\d+/, 'Version should be semver format')
+    })
+
+    it('should return valid typeAndVersion for Router', async () => {
+      const result = await tonChain.typeAndVersion(ADDRESSES_TO_ASSERT.tonRouter)
+
+      assert.equal(result[0], 'Router', 'Type should be Router')
+      assert.match(result[1], /^\d+\.\d+\.\d+/, 'Version should be semver format')
+    })
+  })
+
+  describe('getTokenInfo', () => {
+    // Test cases covering all TEP-64 metadata formats using mainnet tokens
+    const tokenTestCases = [
+      {
+        name: 'Onchain Metadata Token (BabyDoge)',
+        tokenAddress: 'EQCWDj49HFInSwSk49eAo476E1YBywLoFuSZ6OO3x7jmP2jn',
+        tokenType: 'onchain',
+        expectedSymbol: 'BabyDoge',
+        expectedDecimals: 9,
+      },
+      {
+        name: 'Semichain Metadata Token (USDT)',
+        tokenAddress: 'EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs',
+        tokenType: 'semichain',
+        expectedSymbol: 'USD₮',
+        expectedDecimals: 6,
+      },
+      {
+        name: 'Offchain Metadata Token (SCALE)',
+        tokenAddress: 'EQBlqsm144Dq6SjbPI4jjZvA1hqTIP3CvHovbIfW_t-SCALE',
+        tokenType: 'offchain',
+        expectedSymbol: 'SCALE',
+        expectedDecimals: 9,
+      },
+    ]
+
+    let mainnetChain: TONChain
+
+    before(async () => {
+      mainnetChain = await TONChain.fromUrl('https://mainnet-v4.tonhubapi.com')
+    })
+
+    for (const tc of tokenTestCases) {
+      it(`should parse ${tc.name}`, async () => {
+        const result = await mainnetChain.getTokenInfo(tc.tokenAddress)
+
+        assert.equal(result.symbol, tc.expectedSymbol, `Symbol mismatch for ${tc.tokenType} token`)
+        assert.equal(
+          result.decimals,
+          tc.expectedDecimals,
+          `Decimals mismatch for ${tc.tokenType} token`,
+        )
+      })
+    }
+
+    it('should return defaults for non-Jetton contract', async () => {
+      // Use a valid address that doesn't have get_jetton_data (e.g., Router)
+      const result = await tonChain.getTokenInfo(ADDRESSES_TO_ASSERT.tonRouter)
+
+      assert.equal(result.symbol, 'TON', 'Should return default symbol')
+      assert.equal(result.decimals, 9, 'Should return default decimals')
+    })
+
+    it('should throw for invalid address format', async () => {
+      await assert.rejects(
+        () => tonChain.getTokenInfo('invalid-address'),
+        /Unknown address type|Invalid address/i,
+        'Should throw for invalid address',
+      )
+    })
+  })
+
+  describe('getTransaction', () => {
+    let knownTxHash: string
+
+    before(async () => {
+      // Get a known transaction hash from logs
+      for await (const log of tonChain.getLogs({
+        address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        page: 1,
+      })) {
+        knownTxHash = log.transactionHash
+        break
+      }
+    })
+
+    it('should fetch transaction by composite hash', async () => {
+      assert.ok(knownTxHash, 'Should have a known transaction hash from logs')
+
+      const tx = await tonChain.getTransaction(knownTxHash)
+
+      assert.equal(tx.hash, knownTxHash)
+      assert.ok(tx.blockNumber > 0, 'blockNumber should be positive')
+      assert.ok(tx.timestamp > 0, 'timestamp should be positive')
+      assert.ok(Array.isArray(tx.logs), 'logs should be an array')
+    })
+
+    it('should fetch transaction by raw 64-char hex hash via TonCenter', async () => {
+      assert.ok(knownTxHash, 'Should have a known transaction hash from logs')
+
+      // Extract the raw hash (last part of composite format)
+      const parts = knownTxHash.split(':')
+      assert.equal(parts.length, 4, 'Should have 4 parts in composite hash')
+      const rawHash = parts[3]
+
+      // Lookup by raw hash should resolve via TonCenter V3 API
+      const tx = await tonChain.getTransaction(rawHash)
+
+      // Should resolve to the same transaction
+      assert.equal(
+        tx.hash.toLowerCase(),
+        knownTxHash.toLowerCase(),
+        'Should resolve to same composite hash',
+      )
+      assert.ok(tx.blockNumber > 0, 'blockNumber should be positive')
+    })
+
+    it('should fetch transaction by 0x-prefixed raw hash', async () => {
+      assert.ok(knownTxHash)
+
+      const parts = knownTxHash.split(':')
+      const rawHash = `0x${parts[3]}`
+
+      const tx = await tonChain.getTransaction(rawHash)
+
+      assert.equal(
+        tx.hash.toLowerCase(),
+        knownTxHash.toLowerCase(),
+        'Should resolve to same composite hash',
+      )
+    })
+
+    it('should return logs with valid structure', async () => {
+      assert.ok(knownTxHash)
+
+      const tx = await tonChain.getTransaction(knownTxHash)
+
+      // OnRamp transactions should have external-out messages (CCIPMessageSent events)
+      if (tx.logs.length > 0) {
+        const log = tx.logs[0]
+        assert.ok(log.address, 'log should have address')
+        assert.ok(log.data, 'log should have data')
+        assert.equal(log.transactionHash, knownTxHash, 'log transactionHash should match')
+        assert.equal(typeof log.index, 'number', 'log index should be a number')
+      }
+    })
+
+    it('should throw for non-existent transaction', async () => {
+      const fakeHash = `0:${'a'.repeat(64)}:999999999999:${'b'.repeat(64)}`
+
+      await assert.rejects(
+        tonChain.getTransaction(fakeHash),
+        /not found/i,
+        'Should throw for non-existent transaction',
+      )
+    })
+
+    it('should throw for invalid hash format', async () => {
+      await assert.rejects(
+        tonChain.getTransaction('invalid-format'),
+        /Invalid TON transaction hash format/,
+        'Should throw for invalid format',
+      )
+    })
+  })
 })

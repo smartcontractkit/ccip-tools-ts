@@ -1,4 +1,4 @@
-import { Address, Cell, beginCell, toNano } from '@ton/core'
+import { Address, Cell, Dictionary, beginCell, toNano } from '@ton/core'
 import { TonClient4, internal } from '@ton/ton'
 import { type BytesLike, getAddress as checksumAddress, isBytesLike } from 'ethers'
 import { memoize } from 'micro-memoize'
@@ -9,7 +9,6 @@ import {
   CCIPArgumentInvalidError,
   CCIPExtraArgsInvalidError,
   CCIPHttpError,
-  CCIPMessageInvalidError,
   CCIPNotImplementedError,
   CCIPSourceChainUnsupportedError,
   CCIPTransactionNotFoundError,
@@ -32,7 +31,13 @@ import {
   type WithLogger,
   ChainFamily,
 } from '../types.ts'
-import { bytesToBuffer, getDataBytes, networkInfo } from '../utils.ts'
+import {
+  bytesToBuffer,
+  createRateLimitedFetch,
+  getDataBytes,
+  networkInfo,
+  parseTypeAndVersion,
+} from '../utils.ts'
 import { OffRamp } from './bindings/offramp.ts'
 import { OnRamp } from './bindings/onramp.ts'
 import { Router } from './bindings/router.ts'
@@ -62,6 +67,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   static readonly decimals = 9 // TON uses 9 decimals (nanotons)
   private readonly endpointUrl?: string
   private readonly fetchFn: typeof fetch
+  private readonly rateLimitedFetch: typeof fetch
   readonly provider: TonClient4
   private readonly timestampCache: Map<number, number> = new Map()
 
@@ -82,6 +88,12 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     this.provider = client
     this.endpointUrl = endpointUrl
     this.fetchFn = fetchFn
+
+    // Rate-limited fetch for TonCenter API (public tier: ~1 req/sec)
+    this.rateLimitedFetch = createRateLimitedFetch(
+      { maxRequests: 1, windowMs: 1100, maxRetries: 5 },
+      ctx,
+    )
 
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       maxSize: 100,
@@ -179,11 +191,68 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
+   * Looks up a transaction by raw hash using the TonCenter V3 API.
+   *
+   * This is necessary because TON's V4 API requires (address, lt, hash) for lookups,
+   * but users typically only have the raw transaction hash from explorers.
+   * TonCenter V3 provides an index that allows hash-only lookups.
+   *
+   * @param hash - Raw 64-char hex transaction hash
+   * @returns Transaction identifier components needed for V4 API lookup
+   */
+  private async lookupTxByRawHash(hash: string): Promise<{
+    account: string
+    lt: string
+    hash: string
+  }> {
+    const isTestnet = this.network.name?.includes('testnet')
+    const baseUrl = isTestnet
+      ? 'https://testnet.toncenter.com/api/v3/transactions'
+      : 'https://toncenter.com/api/v3/transactions'
+
+    // TonCenter V3 accepts hex directly
+    const cleanHash = hash.startsWith('0x') ? hash.slice(2) : hash
+
+    const url = `${baseUrl}?hash=${cleanHash}`
+    this.logger.debug?.(`TonCenter V3 lookup: ${url}`)
+
+    let response: Response
+    try {
+      response = await this.rateLimitedFetch(url, {
+        headers: { Accept: 'application/json' },
+      })
+    } catch (error) {
+      this.logger.error?.(`TonCenter V3 fetch failed:`, error)
+      throw new CCIPTransactionNotFoundError(hash, { cause: error as Error })
+    }
+
+    let data: { transactions?: Array<{ account: string; lt: string; hash: string }> }
+    try {
+      data = (await response.json()) as typeof data
+    } catch (error) {
+      this.logger.error?.(`TonCenter V3 JSON parse failed:`, error)
+      throw new CCIPTransactionNotFoundError(hash, { cause: error as Error })
+    }
+
+    this.logger.debug?.(`TonCenter V3 response:`, data)
+
+    if (!data.transactions || data.transactions.length === 0) {
+      this.logger.debug?.(`TonCenter V3: no transactions found for hash ${cleanHash}`)
+      throw new CCIPTransactionNotFoundError(hash)
+    }
+
+    return data.transactions[0]
+  }
+
+  /**
    * Fetches a transaction by its hash.
    *
    * Supports two formats:
    * 1. Composite format: "workchain:address:lt:hash" (e.g., "0:abc123...def:12345:abc123...def")
-   * 2. Raw hash format: 64-character hex string (e.g., "2d933807e103d1839be2870ff03f8c56739c561af9a41f195f049c4dedccd260")
+   * 2. Raw hash format: 64-character hex string resolved via TonCenter V3 API
+   *
+   * Note: TON's V4 API requires (address, lt, hash) for lookups. Raw hash lookups
+   * use TonCenter's V3 index API to resolve the hash to a full identifier first.
    *
    * @param hash - Transaction identifier in either format
    * @returns ChainTransaction with transaction details
@@ -191,33 +260,28 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   async getTransaction(hash: string): Promise<ChainTransaction> {
     const parts = hash.split(':')
 
-    // If not 4 parts, check if it's a raw 64-char hex hash
+    // If not composite format (4 parts), check if it's a raw 64-char hex hash
     if (parts.length !== 4) {
-      // Strip 0x prefix if present
       const cleanHash = hash.startsWith('0x') || hash.startsWith('0X') ? hash.slice(2) : hash
 
-      // Check if it's a valid 64-char hex string (raw hash format)
       if (/^[a-fA-F0-9]{64}$/.test(cleanHash)) {
-        // For V4, we need to search for the transaction - not directly supported
-        // Fall back to the endpoint URL if available
-        if (!this.endpointUrl) {
-          throw new CCIPArgumentInvalidError(
-            'hash',
-            `Raw hash lookup not directly supported in V4 API. Use composite format "workchain:address:lt:hash" instead.`,
-          )
-        }
-        // Could implement V3 API fallback here if needed
-        throw new CCIPArgumentInvalidError(
-          'hash',
-          `Raw hash lookup requires V3 API. Use composite format "workchain:address:lt:hash" instead.`,
-        )
+        // Look up transaction details using TonCenter V3 API
+        const txInfo = await this.lookupTxByRawHash(cleanHash)
+
+        // Build composite hash: account already includes workchain:address format
+        const compositeHash = `${txInfo.account}:${txInfo.lt}:${cleanHash}`
+        this.logger.debug?.(`Resolved raw hash to composite: ${compositeHash}`)
+
+        return this.getTransaction(compositeHash)
       }
+
       throw new CCIPArgumentInvalidError(
         'hash',
         `Invalid TON transaction hash format: "${hash}". Expected "workchain:address:lt:hash" or 64-char hex hash`,
       )
     }
 
+    // Parse composite format: workchain:address:lt:hash
     const address = Address.parseRaw(`${parts[0]}:${parts[1]}`)
     const lt = parts[2]
     const txHash = parts[3]
@@ -420,12 +484,38 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
   /** {@inheritDoc Chain.typeAndVersion} */
   async typeAndVersion(
-    _address: string,
+    address: string,
   ): Promise<
     | [type_: string, version: string, typeAndVersion: string]
     | [type_: string, version: string, typeAndVersion: string, suffix: string]
   > {
-    return Promise.reject(new CCIPNotImplementedError('typeAndVersion'))
+    const tonAddress = Address.parse(address)
+
+    // Get current block for state lookup
+    const lastBlock = await this.provider.getLastBlock()
+
+    // Call the typeAndVersion getter method on the contract
+    const result = await this.provider.runMethod(lastBlock.last.seqno, tonAddress, 'typeAndVersion')
+
+    // Parse the two string slices returned by the contract
+    // TON contracts return strings as cells with snake format encoding
+    const typeCell = result.reader.readCell()
+    const versionCell = result.reader.readCell()
+
+    // Load strings from cells using snake format
+    const contractType = typeCell.beginParse().loadStringTail()
+    const version = versionCell.beginParse().loadStringTail()
+
+    // Extract just the last part of the type (e.g., "OffRamp" from "com.chainlink.ton.ccip.OffRamp")
+    const typeParts = contractType.split('.')
+    const shortType = typeParts[typeParts.length - 1]
+
+    // Format as "Type Version" and use the common parser
+    const typeAndVersionStr = `${shortType} ${version}`
+
+    return parseTypeAndVersion(typeAndVersionStr) as
+      | [type_: string, version: string, typeAndVersion: string]
+      | [type_: string, version: string, typeAndVersion: string, suffix: string]
   }
 
   /** {@inheritDoc Chain.getRouterForOnRamp} */
@@ -514,9 +604,337 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return Promise.reject(new CCIPNotImplementedError('getTokenForTokenPool'))
   }
 
+  /**
+   * Parses snake format data from a cell.
+   * Snake format: first byte indicates format (0x00), followed by string data that may span multiple cells.
+   */
+  private parseSnakeData(cell: Cell): string {
+    const slice = cell.beginParse()
+
+    // Check first byte. Should be 0x00 for snake format
+    if (slice.remainingBits >= 8) {
+      const firstByte = slice.preloadUint(8)
+      if (firstByte === 0x00) {
+        // Standard snake format. skip the indicator byte
+        slice.loadUint(8)
+      }
+      // If not 0x00, the data might be stored directly without indicator
+    }
+
+    // Load the string, following references if needed
+    let result = ''
+
+    // Load available bits as string
+    const bits = slice.remainingBits
+    if (bits > 0) {
+      // Round down to nearest byte
+      const bytes = Math.floor(bits / 8)
+      if (bytes > 0) {
+        const buffer = slice.loadBuffer(bytes)
+        result = buffer.toString('utf-8')
+      }
+    }
+
+    // Follow references for continuation (snake format can span multiple cells)
+    while (slice.remainingRefs > 0) {
+      const refCell = slice.loadRef()
+      const refSlice = refCell.beginParse()
+      const refBits = refSlice.remainingBits
+      if (refBits > 0) {
+        const refBytes = Math.floor(refBits / 8)
+        if (refBytes > 0) {
+          const buffer = refSlice.loadBuffer(refBytes)
+          result += buffer.toString('utf-8')
+        }
+      }
+      break
+    }
+
+    return result
+  }
+
+  /**
+   * Parses Jetton content cell to extract metadata.
+   * Supports onchain (0x00), offchain (0x01), and semichain (0x02) formats per TEP-64.
+   */
+  private async parseJettonContent(
+    contentCell: Cell,
+  ): Promise<{ symbol: string; decimals: number }> {
+    const slice = contentCell.beginParse()
+
+    // Default values
+    const symbol = 'JETTON'
+    const decimals = 9
+
+    try {
+      // Check content type (first byte)
+      const contentType = slice.loadUint(8)
+
+      if (contentType === 0x00) {
+        // Onchain metadata - dictionary may be inline or in a reference
+        // Structure varies: either inline dict or Maybe ^Cell wrapper with dict in ref
+
+        let dict: Dictionary<bigint, Cell> | undefined
+
+        // Check if there's remaining data for inline dict
+        if (slice.remainingBits > 1) {
+          // Try loading inline dict
+          try {
+            dict = slice.loadDict(Dictionary.Keys.BigUint(256), Dictionary.Values.Cell())
+          } catch {
+            // Failed, will try from ref below
+          }
+        }
+
+        // If no inline dict, check for Maybe ^Cell pattern (1 bit + ref)
+        if (!dict && slice.remainingBits >= 1 && slice.remainingRefs > 0) {
+          const hasDict = slice.loadBit()
+          if (hasDict) {
+            const dictCell = slice.loadRef()
+            try {
+              dict = dictCell
+                .beginParse()
+                .loadDictDirect(Dictionary.Keys.BigUint(256), Dictionary.Values.Cell())
+            } catch {
+              // Try without the direct flag
+              try {
+                dict = Dictionary.loadDirect(
+                  Dictionary.Keys.BigUint(256),
+                  Dictionary.Values.Cell(),
+                  dictCell.beginParse(),
+                )
+              } catch {
+                this.logger.debug?.('Onchain: failed to load dict from ref')
+              }
+            }
+          }
+        }
+
+        // If still no dict, try loading directly from first ref (some tokens store it this way)
+        if (!dict && contentCell.refs.length > 0) {
+          try {
+            const refSlice = contentCell.refs[0].beginParse()
+            dict = refSlice.loadDictDirect(Dictionary.Keys.BigUint(256), Dictionary.Values.Cell())
+          } catch {
+            this.logger.debug?.('Onchain: failed to load dict directly from ref')
+          }
+        }
+
+        if (dict) {
+          return await this.parseOnchainDict(dict)
+        }
+
+        return { symbol, decimals }
+      } else if (contentType === 0x01) {
+        // Offchain metadata: URI stored in remaining bits
+        const uri = slice.loadStringTail()
+        return this.fetchOffchainJettonMetadata(uri)
+      } else if (contentType === 0x02) {
+        // Semichain metadata per TEP-64:
+        // Structure: 0x02 (8 bits) | remaining_data: dictionary_direct
+        // The dictionary is stored DIRECTLY in remaining slice data, not in a reference!
+        // Use loadDictDirect() instead of loadDict() which expects Maybe ^Cell wrapper
+
+        let onchainResult = { symbol: 'JETTON', decimals: 9 }
+        let uri = ''
+
+        // Load dictionary directly from remaining slice data
+        try {
+          const dict = slice.loadDictDirect(Dictionary.Keys.BigUint(256), Dictionary.Values.Cell())
+          onchainResult = await this.parseOnchainDict(dict)
+        } catch (e) {
+          this.logger.debug?.('Semichain: failed to load dict directly:', e)
+        }
+
+        // After dictionary, there may be a URI in remaining bits or refs
+        if (slice.remainingBits > 0) {
+          try {
+            uri = slice.loadStringTail()
+          } catch {
+            this.logger.debug?.('Semichain: failed to load URI from remaining bits')
+          }
+        }
+
+        // If no URI in bits, try from cell reference
+        if (!uri && slice.remainingRefs > 0) {
+          try {
+            const uriCell = slice.loadRef()
+            const uriSlice = uriCell.beginParse()
+
+            // Check for offchain content indicator (0x01)
+            if (uriSlice.remainingBits >= 8) {
+              const firstByte = uriSlice.preloadUint(8)
+              if (firstByte === 0x01) {
+                uriSlice.loadUint(8)
+              }
+            }
+            uri = uriSlice.loadStringTail()
+          } catch {
+            this.logger.debug?.('Semichain: failed to load URI from ref')
+          }
+        }
+
+        // If we got valid symbol from onchain dict, use it
+        if (onchainResult.symbol !== 'JETTON') {
+          return onchainResult
+        }
+
+        // Otherwise try fetching from URI
+        if (uri && (uri.startsWith('http') || uri.startsWith('ipfs://') || uri.startsWith('Qm'))) {
+          const offchainResult = await this.fetchOffchainJettonMetadata(uri)
+          // Merge: use offchain values but prefer onchain decimals if we got them
+          return {
+            symbol: offchainResult.symbol,
+            decimals:
+              onchainResult.decimals !== 9 ? onchainResult.decimals : offchainResult.decimals,
+          }
+        }
+
+        return onchainResult
+      }
+    } catch (error) {
+      this.logger.debug?.('Failed to parse jetton content:', error)
+    }
+
+    return { symbol, decimals }
+  }
+
+  /**
+   * Parses onchain metadata dictionary to extract symbol and decimals.
+   * If symbol is not found, checks for URI key to fetch offchain metadata.
+   */
+  private async parseOnchainDict(
+    dict: Dictionary<bigint, Cell>,
+  ): Promise<{ symbol: string; decimals: number }> {
+    let symbol = 'JETTON'
+    let decimals = 9
+
+    // SHA256 hashes of known attribute names per TEP-64
+    const symbolHash = BigInt('0xb76a7ca153c24671658335bbd08946350ffc621fa1c516e7123095d4ffd5c581')
+    const decimalsHash = BigInt(
+      '0xee80fd2f1e03480e2282363596ee752d7bb27f50776b95086a0279189675923e',
+    )
+    // SHA256("uri") for hybrid onchain tokens that store URI in dict
+    const uriHash = BigInt('0x70e5d7b6a29b392f85076fe15ca2f2053c56c2338728c4e33c9e8ddb1ee827cc')
+
+    // Try to get symbol from dict
+    const symbolCell = dict.get(symbolHash)
+    if (symbolCell) {
+      const parsed = this.parseSnakeData(symbolCell)
+      if (parsed) {
+        symbol = parsed
+      }
+    }
+
+    // Try to get decimals from dict
+    const decimalsCell = dict.get(decimalsHash)
+    if (decimalsCell) {
+      const decStr = this.parseSnakeData(decimalsCell)
+      const parsed = parseInt(decStr, 10)
+      if (!isNaN(parsed) && parsed >= 0 && parsed <= 255) {
+        decimals = parsed
+      }
+    }
+
+    // If symbol not found in dict, check for URI key and fetch offchain
+    if (symbol === 'JETTON') {
+      const uriCell = dict.get(uriHash)
+      if (uriCell) {
+        const uri = this.parseSnakeData(uriCell)
+        if (uri && (uri.startsWith('http') || uri.startsWith('ipfs://') || uri.startsWith('Qm'))) {
+          const offchain = await this.fetchOffchainJettonMetadata(uri)
+          symbol = offchain.symbol
+          // Only use offchain decimals if we didn't get it from onchain
+          if (decimals === 9) {
+            decimals = offchain.decimals
+          }
+        }
+      }
+    }
+
+    return { symbol, decimals }
+  }
+
+  /**
+   * Fetches Jetton metadata from an external URI.
+   * Handles IPFS and HTTP(S) URIs.
+   */
+  private async fetchOffchainJettonMetadata(
+    uri: string,
+  ): Promise<{ symbol: string; decimals: number }> {
+    // Default values
+    let symbol = 'JETTON'
+    let decimals = 9
+
+    try {
+      // Normalize URI
+      let normalizedUri = uri
+      if (uri.startsWith('ipfs://')) {
+        normalizedUri = 'https://ipfs.io/ipfs/' + uri.slice(7)
+      } else if (uri.startsWith('Qm') && uri.length >= 46) {
+        normalizedUri = 'https://ipfs.io/ipfs/' + uri
+      }
+
+      if (!normalizedUri.startsWith('http://') && !normalizedUri.startsWith('https://')) {
+        return { symbol, decimals }
+      }
+
+      const response = await this.rateLimitedFetch(normalizedUri, {
+        headers: { Accept: 'application/json' },
+      })
+
+      if (!response.ok) {
+        return { symbol, decimals }
+      }
+
+      const metadata = (await response.json()) as {
+        symbol?: string
+        decimals?: number | string
+      }
+
+      if (metadata.symbol && typeof metadata.symbol === 'string') {
+        symbol = metadata.symbol
+      }
+
+      if (metadata.decimals !== undefined) {
+        const dec =
+          typeof metadata.decimals === 'string'
+            ? parseInt(metadata.decimals, 10)
+            : metadata.decimals
+        if (!isNaN(dec) && dec >= 0 && dec <= 255) {
+          decimals = dec
+        }
+      }
+    } catch (error) {
+      this.logger.debug?.(`Failed to fetch offchain jetton metadata from ${uri}:`, error)
+    }
+
+    return { symbol, decimals }
+  }
+
   /** {@inheritDoc Chain.getTokenInfo} */
-  async getTokenInfo(_token: string): Promise<{ symbol: string; decimals: number }> {
-    return Promise.reject(new CCIPNotImplementedError('getTokenInfo'))
+  async getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }> {
+    const tokenAddress = Address.parse(token)
+
+    // Get current block for state lookup
+    const lastBlock = await this.provider.getLastBlock()
+
+    try {
+      // Call get_jetton_data getter on the Jetton master contract
+      const result = await this.provider.runMethod(
+        lastBlock.last.seqno,
+        tokenAddress,
+        'get_jetton_data',
+      )
+
+      // Read content cell which contains metadata
+      const contentCell = result.reader.readCell()
+      return this.parseJettonContent(contentCell)
+    } catch (error) {
+      this.logger.debug?.(`Failed to get jetton data for ${token}:`, error)
+      // If we can't read jetton data, return defaults
+      return { symbol: '', decimals: 9 }
+    }
   }
 
   /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
@@ -848,10 +1266,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
   /** {@inheritDoc Chain.fetchOffchainTokenData} */
   fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
-    if (!('receiverObjectIds' in request.message)) {
-      throw new CCIPMessageInvalidError(request.message)
-    }
-    // default offchain token data
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 

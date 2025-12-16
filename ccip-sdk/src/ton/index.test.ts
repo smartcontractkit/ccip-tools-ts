@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { type Cell, Address, toNano } from '@ton/core'
+import { type Cell, Address, Dictionary, beginCell, toNano } from '@ton/core'
 import type { KeyPair } from '@ton/crypto'
 import type { TonClient4, WalletContractV4 } from '@ton/ton'
 
@@ -165,7 +165,7 @@ describe('TONChain.executeReport', () => {
       TON_OFFRAMP_ADDRESS_TEST,
       'should send to offRamp address',
     )
-    assert.equal(captured.messages[0].value, toNano('0.1'), 'should send 0.1 TON for gas')
+    assert.equal(captured.messages[0].value, toNano('0.5'), 'should send 0.5 TON for gas')
   })
 
   it('should build Cell body with MANUALLY_EXECUTE_OPCODE', async () => {
@@ -279,5 +279,238 @@ describe('TONChain.generateUnsignedExecuteReport', () => {
         ),
       /Invalid extraArgs for TON/,
     )
+  })
+})
+
+describe('TONChain.typeAndVersion', () => {
+  const mockNetworkInfo = {
+    family: ChainFamily.TON,
+    chainSelector: 13879075125137744094n,
+    chainId: 'ton-testnet',
+    name: 'TON Testnet',
+    isTestnet: true,
+  }
+
+  function createMockClient(opts: { contractType: string; version: string }) {
+    // Create mock cells with snake format strings
+    const typeCell = beginCell().storeStringTail(opts.contractType).endCell()
+    const versionCell = beginCell().storeStringTail(opts.version).endCell()
+
+    return {
+      getLastBlock: async () => ({ last: { seqno: 12345678 } }),
+      runMethod: async (_seqno: number, _address: Address, method: string) => {
+        if (method === 'typeAndVersion') {
+          let readIndex = 0
+          return {
+            reader: {
+              readCell: () => {
+                readIndex++
+                return readIndex === 1 ? typeCell : versionCell
+              },
+            },
+          }
+        }
+        throw new Error(`Unknown method: ${method}`)
+      },
+    } as unknown as TonClient4
+  }
+
+  it('should parse OffRamp type and version', async () => {
+    const client = createMockClient({
+      contractType: 'com.chainlink.ton.ccip.OffRamp',
+      version: '1.6.0',
+    })
+    const tonChain = new TONChain(client, mockNetworkInfo as any)
+
+    const result = await tonChain.typeAndVersion('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+
+    assert.equal(result[0], 'OffRamp')
+    assert.equal(result[1], '1.6.0')
+    assert.equal(result[2], 'OffRamp 1.6.0')
+  })
+
+  it('should parse OnRamp type and version', async () => {
+    const client = createMockClient({
+      contractType: 'com.chainlink.ton.ccip.OnRamp',
+      version: '1.6.0',
+    })
+    const tonChain = new TONChain(client, mockNetworkInfo as any)
+
+    const result = await tonChain.typeAndVersion('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+
+    assert.equal(result[0], 'OnRamp')
+    assert.equal(result[1], '1.6.0')
+  })
+
+  it('should parse Router type and version', async () => {
+    const client = createMockClient({
+      contractType: 'com.chainlink.ton.ccip.Router',
+      version: '1.6.0',
+    })
+    const tonChain = new TONChain(client, mockNetworkInfo as any)
+
+    const result = await tonChain.typeAndVersion('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+
+    assert.equal(result[0], 'Router')
+    assert.equal(result[1], '1.6.0')
+  })
+
+  it('should handle version with suffix', async () => {
+    const client = createMockClient({
+      contractType: 'com.chainlink.ton.ccip.OffRamp',
+      version: '1.6.0-dev',
+    })
+    const tonChain = new TONChain(client, mockNetworkInfo as any)
+
+    const result = await tonChain.typeAndVersion('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+
+    assert.equal(result[0], 'OffRamp')
+    assert.equal(result[1], '1.6.0')
+  })
+})
+describe('TONChain.getTokenInfo', () => {
+  const mockNetworkInfo = {
+    family: ChainFamily.TON,
+    chainSelector: 13879075125137744094n,
+    chainId: 'ton-testnet',
+    name: 'TON Testnet',
+    isTestnet: true,
+  }
+
+  function createMockClientForJetton(opts: {
+    totalSupply?: bigint
+    mintable?: boolean
+    contentType: 'onchain' | 'offchain' | 'error'
+    symbol?: string
+    decimals?: number
+    uri?: string
+  }) {
+    // Use the already-imported beginCell and Dictionary from '@ton/core'
+    let contentCell: Cell
+
+    if (opts.contentType === 'onchain') {
+      // Build onchain metadata dict per TEP-64
+      const symbolHash = BigInt(
+        '0xb76a7ca153c24671658335bbd08946350ffc621fa1c516e7123095d4ffd5c581',
+      )
+      const decimalsHash = BigInt(
+        '0xee80fd2f1e03480e2282363596ee752d7bb27f50776b95086a0279189675923e',
+      )
+
+      const dict = Dictionary.empty(Dictionary.Keys.BigUint(256), Dictionary.Values.Cell())
+
+      if (opts.symbol) {
+        const symbolCell = beginCell().storeUint(0, 8).storeStringTail(opts.symbol).endCell()
+        dict.set(symbolHash, symbolCell)
+      }
+
+      if (opts.decimals !== undefined) {
+        const decimalsCell = beginCell()
+          .storeUint(0, 8)
+          .storeStringTail(opts.decimals.toString())
+          .endCell()
+        dict.set(decimalsHash, decimalsCell)
+      }
+
+      contentCell = beginCell().storeUint(0x00, 8).storeDict(dict).endCell()
+    } else if (opts.contentType === 'offchain') {
+      contentCell = beginCell()
+        .storeUint(0x01, 8)
+        .storeStringTail(opts.uri ?? '')
+        .endCell()
+    } else {
+      // Invalid content for error testing
+      contentCell = beginCell().endCell()
+    }
+
+    const mockAddress = Address.parse('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+
+    return {
+      getLastBlock: async () => ({ last: { seqno: 12345678 } }),
+      runMethod: async (_seqno: number, _address: Address, method: string) => {
+        if (method === 'get_jetton_data') {
+          return {
+            reader: {
+              readBigNumber: () => opts.totalSupply ?? 1000000000n,
+              readAddress: () => mockAddress,
+              readCell: () => contentCell,
+            },
+          }
+        }
+        throw new Error(`Unknown method: ${method}`)
+      },
+    } as unknown as TonClient4
+  }
+
+  it('should parse onchain jetton metadata with symbol and decimals', async () => {
+    const client = createMockClientForJetton({
+      contentType: 'onchain',
+      symbol: 'USDT',
+      decimals: 6,
+    })
+    const tonChain = new TONChain(client, mockNetworkInfo as any)
+
+    const result = await tonChain.getTokenInfo('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+
+    assert.equal(result.symbol, 'USDT')
+    assert.equal(result.decimals, 6)
+  })
+
+  it('should return defaults for onchain metadata without symbol/decimals', async () => {
+    const client = createMockClientForJetton({
+      contentType: 'onchain',
+    })
+    const tonChain = new TONChain(client, mockNetworkInfo as any)
+
+    const result = await tonChain.getTokenInfo('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+
+    assert.equal(result.symbol, 'JETTON')
+    assert.equal(result.decimals, 9)
+  })
+
+  it('should return defaults when get_jetton_data fails', async () => {
+    const client = {
+      getLastBlock: async () => ({ last: { seqno: 12345678 } }),
+      runMethod: async () => {
+        throw new Error('Contract not found')
+      },
+    } as unknown as TonClient4
+
+    const tonChain = new TONChain(client, mockNetworkInfo as any)
+
+    const result = await tonChain.getTokenInfo('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+
+    assert.equal(result.symbol, '')
+    assert.equal(result.decimals, 9)
+  })
+
+  it('should handle invalid decimals value gracefully', async () => {
+    const decimalsHash = BigInt(
+      '0xee80fd2f1e03480e2282363596ee752d7bb27f50776b95086a0279189675923e',
+    )
+
+    const dict = Dictionary.empty(Dictionary.Keys.BigUint(256), Dictionary.Values.Cell())
+    const decimalsCell = beginCell().storeUint(0, 8).storeStringTail('invalid').endCell()
+    dict.set(decimalsHash, decimalsCell)
+
+    const contentCell = beginCell().storeUint(0x00, 8).storeDict(dict).endCell()
+    const mockAddress = Address.parse('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+
+    const client = {
+      getLastBlock: async () => ({ last: { seqno: 12345678 } }),
+      runMethod: async () => ({
+        reader: {
+          readBigNumber: () => 1000000000n,
+          readAddress: () => mockAddress,
+          readCell: () => contentCell,
+        },
+      }),
+    } as unknown as TonClient4
+
+    const tonChain = new TONChain(client, mockNetworkInfo as any)
+    const result = await tonChain.getTokenInfo('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+
+    // Should use default decimals when parsing fails
+    assert.equal(result.decimals, 9)
   })
 })
