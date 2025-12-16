@@ -165,7 +165,7 @@ describe('TONChain.executeReport', () => {
       TON_OFFRAMP_ADDRESS_TEST,
       'should send to offRamp address',
     )
-    assert.equal(captured.messages[0].value, toNano('0.5'), 'should send 0.5 TON for gas')
+    assert.equal(captured.messages[0].value, toNano('0.1'), 'should send 0.5 TON for gas')
   })
 
   it('should build Cell body with MANUALLY_EXECUTE_OPCODE', async () => {

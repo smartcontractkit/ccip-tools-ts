@@ -871,7 +871,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       messages: [
         internal({
           to: unsigned.to,
-          value: toNano('0.5'), // TODO: FIXME: estimate proper value for execution costs instead of hardcoding.
+          value: toNano('0.1'), // TODO: FIXME: estimate proper value for execution costs instead of hardcoding.
           body: unsigned.body,
         }),
       ],
