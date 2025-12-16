@@ -1240,6 +1240,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
+   * Validates a transaction hash format for TON
+   */
+  static isTxHash(_v: unknown): _v is string {
+    return false
+  }
+
+  /**
    * Gets the leaf hasher for TON destination chains.
    * @param lane - Lane configuration.
    * @param _ctx - Context containing logger.

@@ -1,10 +1,10 @@
 import type { BytesLike } from 'ethers'
-import type { PickDeep } from 'type-fest'
+import type { PickDeep, SetOptional } from 'type-fest'
 
 import type { UnsignedAptosTx } from './aptos/types.ts'
 import { fetchCommitReport } from './commits.ts'
-import { CCIPChainFamilyMismatchError } from './errors/index.ts'
-import type { UnsignedEVMTx } from './evm/index.ts'
+import { CCIPChainFamilyMismatchError, CCIPTransactionNotFinalizedError } from './errors/index.ts'
+import type { UnsignedEVMTx } from './evm/types.ts'
 import type {
   EVMExtraArgsV1,
   EVMExtraArgsV2,
@@ -45,9 +45,13 @@ export type LogFilter = {
   /** Starting Unix timestamp (inclusive). */
   startTime?: number
   /** Ending block number (inclusive). */
-  endBlock?: number
-  /** Optional hint signature for end of iteration. */
+  endBlock?: number | 'finalized' | 'latest'
+  /** Solana: optional hint txHash for end of iteration. */
   endBefore?: string
+  /** watch mode: polls for new logs after fetching since start (required), until endBlock finality tag
+   *  (e.g. endBlock=finalized polls only finalized logs); can be a promise to cancel loop
+   */
+  watch?: boolean | Promise<unknown>
   /** Contract address to filter logs by. */
   address?: string
   /** Topics to filter logs by. */
@@ -139,7 +143,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
   /**
    * Fetch the timestamp of a given block
-   * @param block - block number or 'finalized'
+   * @param block - positive block number, negative finality depth or 'finalized' tag
    * @returns timestamp of the block, in seconds
    */
   abstract getBlockTimestamp(block: number | 'finalized'): Promise<number>
@@ -149,6 +153,49 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @returns generic transaction details
    */
   abstract getTransaction(hash: string): Promise<ChainTransaction>
+  /**
+   * Confirm a log tx is finalized or wait for it to be finalized
+   * Throws if it isn't included (e.g. a reorg)
+   */
+  async waitFinalized(
+    {
+      log,
+      tx,
+    }: SetOptional<
+      PickDeep<
+        CCIPRequest,
+        | `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'tx.timestamp'}`
+        | 'tx.timestamp'
+      >,
+      'tx'
+    >,
+    finality: number | 'finalized' = 'finalized',
+    cancel$?: Promise<unknown>,
+  ): Promise<true> {
+    const timestamp = log.tx?.timestamp ?? tx?.timestamp
+    if (!timestamp || Date.now() / 1e3 - timestamp > 60) {
+      // only try to fetch tx if request is old enough (>60s)
+      const [trans, finalizedTs] = await Promise.all([
+        this.getTransaction(log.transactionHash),
+        this.getBlockTimestamp(finality),
+      ])
+      if (trans.timestamp <= finalizedTs) return true
+    }
+    for await (const l of this.getLogs({
+      address: log.address,
+      startBlock: log.blockNumber,
+      endBlock: finality,
+      topics: [log.topics[0]],
+      watch: cancel$ ?? true,
+    })) {
+      if (l.transactionHash === log.transactionHash) {
+        return true
+      } else if (l.blockNumber > log.blockNumber) {
+        break
+      }
+    }
+    throw new CCIPTransactionNotFinalizedError(log.transactionHash)
+  }
   /**
    * An async generator that yields logs based on the provided options.
    * @param opts - Options object containing:
@@ -382,7 +429,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   async fetchCommitReport(
     commitStore: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.sequenceNumber' | 'tx.timestamp'>,
-    hints?: { startBlock?: number; page?: number },
+    hints?: Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number },
   ): Promise<CCIPCommit> {
     return fetchCommitReport(this, commitStore, request, hints)
   }
@@ -399,7 +446,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     offRamp: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
-    hints?: { page?: number },
+    hints?: Pick<LogFilter, 'page' | 'watch'>,
   ): AsyncIterableIterator<CCIPExecution> {
     const onlyLast = !commit?.log.blockNumber && !request.tx.timestamp // backwards
     for await (const log of this.getLogs({
@@ -521,6 +568,10 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * @returns Address in this chain family's format
    */
   getAddress(bytes: BytesLike): string
+  /**
+   * Validates a transaction hash format for this chain family
+   */
+  isTxHash(v: unknown): v is string
   /**
    * Create a leaf hasher for this dest chain and lane
    * @param lane - source, dest and onramp lane info

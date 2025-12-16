@@ -99,6 +99,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   static readonly family = ChainFamily.Aptos
   static readonly decimals = 8
 
+  readonly destroy$: Promise<void>
   provider: Aptos
 
   getTokenInfo: (token: string) => Promise<TokenInfo>
@@ -112,7 +113,9 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   constructor(provider: Aptos, network: NetworkInfo, ctx?: WithLogger) {
     super(network, ctx)
 
+    this.destroy$ = new Promise<void>((resolve) => (this.destroy = resolve))
     this.provider = provider
+
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
       maxSize: 100,
       maxArgs: 1,
@@ -232,7 +235,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
 
   /** {@inheritDoc Chain.getLogs} */
   async *getLogs(opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<Log_> {
-    yield* streamAptosLogs(this.provider, opts)
+    yield* streamAptosLogs(this, opts)
   }
 
   /** {@inheritDoc Chain.fetchRequestsInTx} */
@@ -498,6 +501,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     }
     if (dataLength(bytes) > 32) throw new CCIPAptosAddressInvalidError(hexlify(bytes))
     return zeroPadValue(bytes, 32) + suffix
+  }
+
+  /**
+   * Validates a transaction hash format for Aptos
+   */
+  static isTxHash(v: unknown): v is `0x${string}` {
+    return typeof v === 'string' && /^0x[0-9a-fA-F]{64}$/.test(v)
   }
 
   /**

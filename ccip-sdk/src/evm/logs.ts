@@ -10,7 +10,10 @@ import { memoize } from 'micro-memoize'
 import type { LogFilter } from '../chain.ts'
 import {
   CCIPLogTopicsNotFoundError,
+  CCIPLogsAddressRequiredError,
   CCIPLogsNotFoundError,
+  CCIPLogsWatchRequiresFinalityError,
+  CCIPLogsWatchRequiresStartError,
   CCIPRpcNotFoundError,
 } from '../errors/index.ts'
 import { blockRangeGenerator, getSomeBlockNumberBefore } from '../utils.ts'
@@ -188,7 +191,14 @@ export async function* getEvmLogs(
   ctx: { provider: JsonRpcApiProvider; destroy$?: Promise<unknown> } & WithLogger,
 ): AsyncIterableIterator<Log> {
   const { provider, logger = console } = ctx
-  const endBlock = filter.endBlock ?? (await provider.getBlockNumber())
+
+  if (filter.watch) {
+    if (typeof filter.endBlock === 'number' && filter.endBlock > 0)
+      throw new CCIPLogsWatchRequiresFinalityError(filter.endBlock)
+    else if (filter.startBlock == null && filter.startTime == null)
+      throw new CCIPLogsWatchRequiresStartError()
+  }
+
   if (
     filter.topics?.length &&
     filter.topics.every((t: string | string[] | null): t is string => typeof t === 'string')
@@ -204,21 +214,25 @@ export async function* getEvmLogs(
     }
     filter.topics = [Array.from(topics)]
   }
+
+  const { number: endBlock } = (await provider.getBlock(filter.endBlock || 'latest'))!
+
   if (filter.startBlock == null && filter.startTime) {
     filter.startBlock = await getSomeBlockNumberBefore(
-      async (block: number | 'finalized') => (await provider.getBlock(block))!.timestamp, // cached
+      async (block: number) => (await provider.getBlock(block))!.timestamp, // cached
       endBlock,
       filter.startTime,
       ctx,
     )
   }
-  if (filter.onlyFallback != null && filter.address && filter.topics?.length) {
+  if (filter.onlyFallback != null) {
+    if (!filter.address || !filter.topics?.length) throw new CCIPLogsAddressRequiredError()
     let logs
     try {
       logs = await provider.getLogs({
         ...filter,
         fromBlock: filter.startBlock ?? 1,
-        toBlock: filter.endBlock ?? 'latest',
+        toBlock: endBlock,
       })
     } catch (_) {
       try {
@@ -228,7 +242,7 @@ export async function* getEvmLogs(
             address: filter.address,
             topics: filter.topics,
             startBlock: filter.startBlock ?? 1,
-            endBlock: filter.endBlock ?? 'latest',
+            endBlock,
           },
           ctx,
         )
@@ -242,19 +256,48 @@ export async function* getEvmLogs(
       return
     }
   }
-  // paginate only if filter.onlyFallback is nullish
+
+  let latestLogBlockNumber = filter.startBlock ?? 1
+  // paginate only if filter.onlyFallback isn't true
   for (const blockRange of blockRangeGenerator({ ...filter, endBlock })) {
-    logger.debug('evm getLogs:', {
+    const filter_ = {
       ...blockRange,
       ...(filter.address ? { address: filter.address } : {}),
       ...(filter.topics?.length ? { topics: filter.topics } : {}),
-    })
-    const logs = await provider.getLogs({
-      ...blockRange,
+    }
+    logger.debug('evm getLogs:', filter_)
+    const logs = await provider.getLogs(filter_)
+    if (logs.length)
+      latestLogBlockNumber = Math.max(latestLogBlockNumber, logs[logs.length - 1].blockNumber)
+    if (filter.startBlock == null) logs.reverse()
+    yield* logs
+  }
+
+  // watch mode, otherwise return
+  while (filter.watch) {
+    let cont$ = new Promise<number | false>(
+      (resolve) =>
+        void provider.once(
+          !filter.endBlock || typeof filter.endBlock === 'number' || filter.endBlock == 'latest'
+            ? 'block'
+            : filter.endBlock, // finalized | safe
+          resolve,
+        ),
+    )
+    if (filter.watch instanceof Promise)
+      cont$ = Promise.race([filter.watch.then(() => false as const), cont$])
+    if ((await cont$) === false) break
+
+    const filter_ = {
+      fromBlock: Math.max(latestLogBlockNumber, endBlock - (filter.page ?? 10e3)) + 1,
+      toBlock: filter.endBlock || 'latest',
       ...(filter.address ? { address: filter.address } : {}),
       ...(filter.topics?.length ? { topics: filter.topics } : {}),
-    })
-    if (!filter.startBlock) logs.reverse()
+    }
+    logger.debug('evm watch getLogs:', filter_)
+    const logs = await provider.getLogs(filter_)
+    if (logs.length)
+      latestLogBlockNumber = Math.max(latestLogBlockNumber, logs[logs.length - 1].blockNumber)
     yield* logs
   }
 }

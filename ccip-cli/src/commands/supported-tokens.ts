@@ -71,13 +71,13 @@ export const builder = (yargs: Argv) =>
  * @param argv - Command line arguments.
  */
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
-  const [controller, ctx] = getCtx(argv)
+  const [ctx, destroy] = getCtx(argv)
   return getSupportedTokens(ctx, argv)
     .catch((err) => {
       process.exitCode = 1
       if (!logParsedError.call(ctx, err)) ctx.logger.error(err)
     })
-    .finally(() => controller.abort('Exited'))
+    .finally(destroy)
 }
 
 async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
@@ -209,7 +209,7 @@ async function listTokens({ logger }: Ctx, source: Chain, registry: string, argv
   if (argv.format !== Format.pretty) return // Format.pretty interactive search and details
 
   return search({
-    message: 'Select a token to know more:',
+    message: 'Select a supported token to know more:',
     pageSize: 20,
     source: (term) => {
       const filtered = infos.filter(

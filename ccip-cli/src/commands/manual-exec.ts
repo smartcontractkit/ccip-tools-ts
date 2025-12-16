@@ -11,6 +11,7 @@ import {
   calculateManualExecProof,
   discoverOffRamp,
   estimateExecGasForRequest,
+  isSupportedTxHash,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
@@ -46,6 +47,7 @@ export const builder = (yargs: Argv) =>
       demandOption: true,
       describe: 'transaction hash of the request (source) message',
     })
+    .check(({ txHash }) => isSupportedTxHash(txHash))
     .options({
       'log-index': {
         type: 'number',
@@ -104,7 +106,7 @@ export const builder = (yargs: Argv) =>
  * @param argv - Command line arguments.
  */
 export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts) {
-  const [controller, ctx] = getCtx(argv)
+  const [ctx, destroy] = getCtx(argv)
   // argv.senderQueue
   //   ? manualExecSenderQueue(providers, argv.tx_hash, argv)
   //   : manualExec(argv, destroy$)
@@ -113,7 +115,7 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
       process.exitCode = 1
       if (!logParsedError.call(ctx, err)) ctx.logger.error(err)
     })
-    .finally(() => controller.abort('Exited'))
+    .finally(destroy)
 }
 
 async function manualExec(

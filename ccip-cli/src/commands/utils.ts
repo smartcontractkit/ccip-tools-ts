@@ -7,7 +7,6 @@ import {
   type Chain,
   type ChainStatic,
   type Lane,
-  type OffchainTokenData,
   CCIPError,
   CCIPErrorCode,
   ExecutionState,
@@ -161,7 +160,7 @@ function formatDate(timestamp: number) {
 /**
  * Formats duration in seconds to human-readable string.
  * @param secs - Duration in seconds.
- * @returns Formatted duration string (e.g., "1h 30m").
+ * @returns Formatted duration string (e.g., "2d 1h30m").
  */
 export function formatDuration(secs: number) {
   if (secs < 0) secs = -secs
@@ -176,7 +175,7 @@ export function formatDuration(secs: number) {
   }
   return Object.entries(time)
     .filter((val) => val[1] !== 0)
-    .map(([key, val]) => `${val}${key}${key === 'd' ? ' ' : ''}`)
+    .map(([key, val], i, arr) => `${val}${key}${key === 'd' && i < arr.length - 1 ? ' ' : ''}`)
     .join('')
 }
 
@@ -195,14 +194,8 @@ function omit<T extends Record<string, unknown>, K extends string>(
  * Prints a CCIP request in a human-readable format.
  * @param source - Source chain instance.
  * @param request - CCIP request to print.
- * @param offchainTokenData - Optional offchain token data.
  */
-export async function prettyRequest(
-  this: Ctx,
-  source: Chain,
-  request: CCIPRequest,
-  offchainTokenData?: OffchainTokenData[],
-) {
+export async function prettyRequest(this: Ctx, source: Chain, request: CCIPRequest) {
   prettyLane.call(this, request.lane)
   this.logger.info('Request (source):')
 
@@ -265,13 +258,6 @@ export async function prettyRequest(
     ...('accounts' in request.message ? formatArray('accounts', request.message.accounts) : {}),
     ...rest,
   })
-
-  if (!offchainTokenData?.length || offchainTokenData.every((d) => !d)) return
-  this.logger.info('Attestations:')
-  for (const attestation of offchainTokenData) {
-    const { _tag: type, ...rest } = attestation!
-    prettyTable.call(this, { type, ...rest })
-  }
 }
 
 /**
@@ -286,7 +272,6 @@ export async function prettyCommit(
   commit: CCIPCommit,
   request: PickDeep<CCIPRequest, 'tx.timestamp'>,
 ) {
-  this.logger.info('Commit (dest):')
   const timestamp = await dest.getBlockTimestamp(commit.log.blockNumber)
   prettyTable.call(this, {
     merkleRoot: commit.report.merkleRoot,
@@ -522,9 +507,9 @@ export async function* yieldResolved<T>(promises: readonly Promise<T>[]): AsyncG
  * @param argv - yargs argv containing verbose flag
  * @returns AbortController and context object with destroy$ signal and logger
  */
-export function getCtx(argv: { verbose?: boolean }): [controller: AbortController, ctx: Ctx] {
-  const controller = new AbortController()
-  const destroy$ = controller.signal
+export function getCtx(argv: { verbose?: boolean }): [ctx: Ctx, destroy: () => void] {
+  let destroy
+  const destroy$ = new Promise<void>((resolve) => (destroy = resolve))
 
   const logger = new Console(process.stdout, process.stderr, true)
   if (argv.verbose) {
@@ -533,5 +518,5 @@ export function getCtx(argv: { verbose?: boolean }): [controller: AbortControlle
     logger.debug = () => {}
   }
 
-  return [controller, { destroy$, logger, verbose: argv.verbose }]
+  return [{ destroy$, logger, verbose: argv.verbose }, destroy!]
 }

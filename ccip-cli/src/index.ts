@@ -3,7 +3,7 @@ import { realpathSync } from 'fs'
 import util from 'node:util'
 import { pathToFileURL } from 'url'
 
-import yargs, { type InferredOptionTypes } from 'yargs'
+import yargs, { type ArgumentsCamelCase, type InferredOptionTypes } from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
 import { Format } from './commands/index.ts'
@@ -11,13 +11,13 @@ import { Format } from './commands/index.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.91.1-c882e96'
+const VERSION = '0.92.0-42fc5dd'
 // generate:end
 
 const globalOpts = {
   rpcs: {
     type: 'array',
-    alias: 'r',
+    alias: ['r', 'rpc'],
     describe: 'List of RPC endpoint URLs, ws[s] or http[s]',
     string: true,
   },
@@ -46,7 +46,7 @@ const globalOpts = {
 } as const
 
 /** Type for global CLI options. */
-export type GlobalOpts = InferredOptionTypes<typeof globalOpts>
+export type GlobalOpts = ArgumentsCamelCase<InferredOptionTypes<typeof globalOpts>>
 
 async function main() {
   await yargs(hideBin(process.argv))
@@ -72,7 +72,7 @@ function wasCalledAsScript() {
 }
 
 if (import.meta?.main || wasCalledAsScript()) {
-  const later = setTimeout(() => {}, 2 ** 31 - 1) // keep event-loop alive
+  const later = setTimeout(() => { }, 2 ** 31 - 1) // keep event-loop alive
   await main()
     .catch((err) => {
       console.error(err)

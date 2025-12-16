@@ -11,7 +11,7 @@ import {
 } from 'ethers'
 import { memoize } from 'micro-memoize'
 
-import type { Chain } from './chain.ts'
+import type { Chain, ChainStatic } from './chain.ts'
 import {
   CCIPBlockBeforeTimestampNotFoundError,
   CCIPChainFamilyUnsupportedError,
@@ -224,6 +224,24 @@ export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFam
   const chain = supportedChains[family]
   if (!chain) throw new CCIPChainFamilyUnsupportedError(family)
   return chain.getAddress(getAddressBytes(address))
+}
+
+/**
+ * Validate a value is a txHash string in some supported chain family
+ **/
+export function isSupportedTxHash(txHash: unknown, family?: ChainFamily): txHash is string {
+  let chains: ChainStatic[]
+  if (!family) chains = Object.values(supportedChains)
+  else if (family in supportedChains) chains = [supportedChains[family]!]
+  else throw new CCIPChainFamilyUnsupportedError(family)
+  for (const C of chains) {
+    try {
+      if (C.isTxHash(txHash)) return true
+    } catch (_) {
+      // continue
+    }
+  }
+  return false
 }
 
 /**
