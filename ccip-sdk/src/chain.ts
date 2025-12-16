@@ -4,7 +4,7 @@ import type { PickDeep, SetOptional } from 'type-fest'
 import type { UnsignedAptosTx } from './aptos/types.ts'
 import { fetchCommitReport } from './commits.ts'
 import { CCIPChainFamilyMismatchError, CCIPTransactionNotFinalizedError } from './errors/index.ts'
-import type { UnsignedEVMTx } from './evm/index.ts'
+import type { UnsignedEVMTx } from './evm/types.ts'
 import type {
   EVMExtraArgsV1,
   EVMExtraArgsV2,

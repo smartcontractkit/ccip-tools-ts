@@ -123,14 +123,8 @@ import {
   fetchCCIPRequestById,
   fetchCCIPRequestsInTx,
 } from '../requests.ts'
-
-/**
- * Type representing a set of unsigned EVM transactions
- */
-export type UnsignedEVMTx = {
-  family: typeof ChainFamily.EVM
-  transactions: Pick<TransactionRequest, 'from' | 'to' | 'data'>[]
-}
+import type { UnsignedEVMTx } from './types.ts'
+export type { UnsignedEVMTx }
 
 const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 
