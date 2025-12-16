@@ -2,7 +2,8 @@ import { bcs } from '@mysten/sui/bcs'
 import type { SuiClient } from '@mysten/sui/client'
 import { Transaction } from '@mysten/sui/transactions'
 import { normalizeSuiAddress } from '@mysten/sui/utils'
-import { blake2b } from '@noble/hashes/blake2b'
+import { blake2b } from '@noble/hashes/blake2'
+
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
 
 /**

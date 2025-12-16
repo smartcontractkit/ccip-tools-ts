@@ -694,6 +694,14 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       })
     }
 
+    await this.client.waitForTransaction({
+      digest: result.digest,
+      options: {
+        showEffects: true,
+        showEvents: true,
+      },
+    })
+
     // Return the transaction as a ChainTransaction
     return this.getTransaction(result.digest)
   }
