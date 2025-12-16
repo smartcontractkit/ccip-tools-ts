@@ -932,6 +932,12 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         'get_jetton_data',
       )
 
+      // get_jetton_data returns: (total_supply, mintable, admin_address, content, wallet_code)
+      // Skip total_supply (int), mintable (int), admin_address (slice) to get content cell
+      result.reader.readBigNumber() // total_supply
+      result.reader.readBigNumber() // mintable (-1 or 0)
+      result.reader.readAddress() // admin_address
+
       // Read content cell which contains metadata
       const contentCell = result.reader.readCell()
       return this.parseJettonContent(contentCell)

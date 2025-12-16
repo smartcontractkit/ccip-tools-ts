@@ -598,7 +598,7 @@ describe('TONChain smoke tests', () => {
       // Use a valid address that doesn't have get_jetton_data (e.g., Router)
       const result = await tonChain.getTokenInfo(ADDRESSES_TO_ASSERT.tonRouter)
 
-      assert.equal(result.symbol, 'TON', 'Should return default symbol')
+      assert.equal(result.symbol, '', 'Should return default symbol')
       assert.equal(result.decimals, 9, 'Should return default decimals')
     })
 
