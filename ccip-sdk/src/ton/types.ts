@@ -86,7 +86,9 @@ function asSnakeData<T>(array: T[], builderFn: (item: T) => Builder): Cell {
  * @param execReport - Execution report containing message, proofs, and proof flag bits.
  * @returns BOC-serialized Cell containing the execution report.
  */
-export function serializeExecutionReport(execReport: ExecutionReport<CCIPMessage_V1_6_TON>): Cell {
+export function serializeExecutionReport(
+  execReport: ExecutionReport<CCIPMessage_V1_6_TON>,
+): Builder {
   return beginCell()
     .storeUint(execReport.message.header.sourceChainSelector, 64)
     .storeRef(asSnakeData([execReport.message], serializeMessage))
@@ -97,7 +99,6 @@ export function serializeExecutionReport(execReport: ExecutionReport<CCIPMessage
       }),
     )
     .storeUint(execReport.proofFlagBits, 256)
-    .endCell()
 }
 
 function serializeMessage(message: CCIPMessage_V1_6_TON): Builder {
@@ -121,7 +122,7 @@ function serializeMessage(message: CCIPMessage_V1_6_TON): Builder {
       // Store receiver address
       .storeAddress(Address.parse(message.receiver))
       // Store gas limit
-      //.storeCoins(message.gasLimit)
+      .storeCoins(message.gasLimit)
       // Store token amounts as maybe ref
       .storeMaybeRef(
         message.tokenAmounts?.length > 0 ? serializeTokenAmounts(message.tokenAmounts) : null,

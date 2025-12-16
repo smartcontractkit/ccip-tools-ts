@@ -233,7 +233,7 @@ async function manualExec(
           receipt,
           request,
           receipt.log.tx?.from ??
-          (await dest.getTransaction(receipt.log.transactionHash).catch(() => null))?.from,
+            (await dest.getTransaction(receipt.log.transactionHash).catch(() => null))?.from,
         )
         break
       case Format.json:
