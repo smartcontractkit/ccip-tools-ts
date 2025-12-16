@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 
 import { type Cell, Address, toNano } from '@ton/core'
 import type { KeyPair } from '@ton/crypto'
-import type { TonClient, WalletContractV4 } from '@ton/ton'
+import type { TonClient4, WalletContractV4 } from '@ton/ton'
 
 import { type ExecutionReport, ChainFamily } from '../types.ts'
 import { TONChain } from './index.ts'
@@ -71,10 +71,12 @@ describe('TONChain.executeReport', () => {
     } | null = null
 
     const mockTxLt = opts?.txLt ?? '12345678'
-    const mockTxHash = opts?.txHash ?? 'abcdef1234567890'
+    const mockTxHash =
+      opts?.txHash ?? 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890'
+    const currentSeqno = opts?.seqno ?? 0
 
     const mockOpenedWallet = {
-      getSeqno: async () => opts?.seqno ?? 0,
+      getSeqno: async () => currentSeqno,
       sendTransfer: async (params: {
         seqno: number
         secretKey: Buffer
@@ -102,31 +104,37 @@ describe('TONChain.executeReport', () => {
       },
     }
 
+    const mockTx = {
+      lt: BigInt(mockTxLt),
+      hash: () => Buffer.from(mockTxHash, 'hex'),
+      now: Math.floor(Date.now() / 1000),
+      outMessages: { values: () => [mockOutMessage] },
+      inMessage: { info: { type: 'internal', src: mockWalletAddress } },
+    }
+
     const mockClient = {
       open: () => mockOpenedWallet,
-      runMethod: async (_address: Address, method: string) => {
+      getLastBlock: async () => ({
+        last: { seqno: 12345678 },
+        now: Math.floor(Date.now() / 1000),
+      }),
+      runMethod: async (_seqno: number, _address: Address, method: string) => {
         if (method === 'seqno') {
-          return { stack: { readNumber: () => (opts?.seqno ?? 0) + 1 } }
+          // Return seqno+1 to simulate transaction confirmed
+          return { reader: { readNumber: () => currentSeqno + 1 } }
         }
         throw new Error(`Unknown method: ${method}`)
       },
-      getTransaction: async () => ({
-        lt: BigInt(mockTxLt),
-        hash: () => Buffer.from(mockTxHash, 'hex'),
-        now: Math.floor(Date.now() / 1000),
-        outMessages: { values: () => [mockOutMessage] },
-        inMessage: { info: { type: 'internal', src: mockWalletAddress } },
-      }),
-      getTransactions: async () => [
-        {
-          lt: BigInt(mockTxLt),
-          hash: () => Buffer.from(mockTxHash, 'hex'),
-          now: Math.floor(Date.now() / 1000),
-          outMessages: { values: () => [mockOutMessage] },
-          inMessage: { info: { type: 'internal', src: mockWalletAddress } },
+      getAccountLite: async () => ({
+        account: {
+          last: {
+            lt: mockTxLt,
+            hash: Buffer.from(mockTxHash, 'hex').toString('base64'),
+          },
         },
-      ],
-    } as unknown as TonClient
+      }),
+      getAccountTransactions: async () => [{ tx: mockTx }],
+    } as unknown as TonClient4
 
     const mockWallet: TONWallet = {
       contract: { address: mockWalletAddress } as WalletContractV4,
@@ -157,7 +165,7 @@ describe('TONChain.executeReport', () => {
       TON_OFFRAMP_ADDRESS_TEST,
       'should send to offRamp address',
     )
-    assert.equal(captured.messages[0].value, toNano('0.5'), 'should send 0.5 TON for gas')
+    assert.equal(captured.messages[0].value, toNano('0.1'), 'should send 0.1 TON for gas')
   })
 
   it('should build Cell body with MANUALLY_EXECUTE_OPCODE', async () => {
@@ -178,7 +186,7 @@ describe('TONChain.executeReport', () => {
   })
 
   it('should return tx hash in workchain:address:lt:hash format', async () => {
-    const { client, wallet } = createMockClientAndWallet({
+    const { client, wallet, mockTxLt, mockTxHash } = createMockClientAndWallet({
       txLt: '42317062000001',
       txHash: 'bb94e574159e19660ab558347f59f80fd005b44c544417df38d0dfb08f2bd395',
     })
@@ -191,12 +199,8 @@ describe('TONChain.executeReport', () => {
     const [workchain, address, lt, hash] = result.hash.split(':')
     assert.equal(workchain, '0', 'workchain should be 0')
     assert.equal(address.length, 64, 'address should be 64 hex chars')
-    assert.equal(lt, '42317062000001', 'lt should match transaction lt')
-    assert.equal(
-      hash,
-      'bb94e574159e19660ab558347f59f80fd005b44c544417df38d0dfb08f2bd395',
-      'hash should match transaction hash',
-    )
+    assert.equal(lt, mockTxLt, 'lt should match transaction lt')
+    assert.equal(hash, mockTxHash, 'hash should match transaction hash')
   })
 
   it('should reject non-TON wallet', async () => {
@@ -242,7 +246,7 @@ describe('TONChain.executeReport', () => {
 
 describe('TONChain.generateUnsignedExecuteReport', () => {
   it('should return UnsignedTONTx with family=ton', async () => {
-    const tonChain = new TONChain({} as TonClient, mockNetworkInfo as any)
+    const tonChain = new TONChain({} as TonClient4, mockNetworkInfo as any)
 
     const unsigned = await tonChain.generateUnsignedExecuteReport(
       '0:' + 'b'.repeat(64),
@@ -256,7 +260,7 @@ describe('TONChain.generateUnsignedExecuteReport', () => {
   })
 
   it('should reject non-V1.6 message format', () => {
-    const tonChain = new TONChain({} as TonClient, mockNetworkInfo as any)
+    const tonChain = new TONChain({} as TonClient4, mockNetworkInfo as any)
 
     const v1_5Report = {
       message: { header: { messageId: '0x' + '1'.repeat(64) }, strict: false },

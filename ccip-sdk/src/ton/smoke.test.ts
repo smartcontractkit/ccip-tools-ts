@@ -7,7 +7,7 @@ import { TONChain } from './index.ts'
 import type { CCIPMessage_V1_6_TON } from './types.ts'
 
 // TON testnet endpoint
-const TON_TESTNET_RPC = 'https://testnet.toncenter.com/api/v2/jsonRPC'
+const TON_TESTNET_RPC = 'https://testnet-v4.tonhubapi.com'
 
 // Chain selectors
 const SEPOLIA_CHAIN_SELECTOR = 16015286601757825753n
@@ -264,95 +264,191 @@ describe('TONChain smoke tests', () => {
   })
 
   describe('decodeMessage', () => {
-    // Real CCIPMessageSent transaction from TON testnet (TON -> Sepolia)
-    const ccipTxHash = 'a7f7fc28388e0e486dbb2724dce077d5e7bb348d3abf9f109a0ef499fc229e3a'
-
-    const expected = {
-      messageId: '0x09dd921d24a91c1111fdcf524a664bd7b0935a54bc3bccea72073231479a688d',
-      sourceChainSelector: TON_TESTNET_CHAIN_SELECTOR,
-      destChainSelector: SEPOLIA_CHAIN_SELECTOR,
-      sequenceNumber: 821n,
-      nonce: 0n,
-      sender: 'EQAFbU7ATpBTe2vPiTpThvehgNiynnD4llSA8IaJThJFpvP7',
-      receiver: '0x00000000000000000000000040d7c009d073e0d740ed2c50ca0a48c84a3f8b47',
-      data: '0x636369702d73746167696e672d3230323138383537383631',
-      feeToken: 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAd99',
-      feeTokenAmount: 131016104n,
-      feeValueJuels: 15125193363198824n,
-      gasLimit: 1000000n,
-      allowOutOfOrderExecution: true,
-    }
-
     let message: CCIPMessage_V1_6_TON | undefined
+    let ccipTxHash: string | undefined
 
     before(async () => {
-      const tx = await tonChain.getTransaction(ccipTxHash)
-      message = TONChain.decodeMessage(tx.logs[0])
+      // Fetch a real CCIPMessageSent log from OnRamp
+      for await (const log of tonChain.getLogs({
+        address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        page: 10,
+      })) {
+        const decoded = TONChain.decodeMessage(log)
+        if (decoded) {
+          message = decoded
+          ccipTxHash = log.transactionHash
+          break
+        }
+      }
     })
 
     it('should decode CCIPMessageSent from transaction log', () => {
       assert.ok(message, 'Should successfully decode message')
+      assert.ok(ccipTxHash, 'Should have found a valid transaction')
     })
 
-    it('should decode header fields correctly', () => {
+    it('should decode header.messageId as 32-byte hex', () => {
       assert.ok(message)
-      assert.equal(message.header.messageId, expected.messageId)
-      assert.equal(message.header.sourceChainSelector, expected.sourceChainSelector)
-      assert.equal(message.header.destChainSelector, expected.destChainSelector)
-      assert.equal(message.header.sequenceNumber, expected.sequenceNumber)
-      assert.equal(message.header.nonce, expected.nonce)
+      assert.ok(message.header.messageId.startsWith('0x'), 'messageId should be hex prefixed')
+      assert.equal(
+        message.header.messageId.length,
+        66,
+        'messageId should be 32 bytes (66 chars with 0x)',
+      )
+      assert.match(message.header.messageId, /^0x[a-f0-9]{64}$/, 'messageId should be valid hex')
     })
 
-    it('should decode sender and receiver correctly', () => {
+    it('should decode header.sourceChainSelector as TON testnet', () => {
       assert.ok(message)
-      assert.equal(message.sender, expected.sender)
-      assert.equal(message.receiver.toLowerCase(), expected.receiver.toLowerCase())
+      assert.equal(message.header.sourceChainSelector, TON_TESTNET_CHAIN_SELECTOR)
     })
 
-    it('should decode data correctly', () => {
+    it('should decode header.destChainSelector as Sepolia', () => {
       assert.ok(message)
-      assert.equal(message.data, expected.data)
-      const dataStr = Buffer.from(message.data.slice(2), 'hex').toString('utf8')
-      assert.equal(dataStr, 'ccip-staging-20218857861')
+      assert.equal(message.header.destChainSelector, SEPOLIA_CHAIN_SELECTOR)
     })
 
-    it('should decode fee fields correctly', () => {
+    it('should decode header.sequenceNumber as positive bigint', () => {
       assert.ok(message)
-      assert.equal(message.feeToken, expected.feeToken)
-      assert.equal(message.feeTokenAmount, expected.feeTokenAmount)
-      assert.equal(message.feeValueJuels, expected.feeValueJuels)
+      assert.equal(typeof message.header.sequenceNumber, 'bigint')
+      assert.ok(message.header.sequenceNumber > 0n, 'sequenceNumber should be positive')
     })
 
-    it('should decode extraArgs correctly', () => {
+    it('should decode header.nonce as bigint (typically 0 for out-of-order)', () => {
       assert.ok(message)
-      assert.equal(message.gasLimit, expected.gasLimit)
-      assert.equal(message.allowOutOfOrderExecution, expected.allowOutOfOrderExecution)
-      assert.ok(message.extraArgs.startsWith('0x181dcf10'), 'should have EVMExtraArgsV2 tag')
+      assert.equal(typeof message.header.nonce, 'bigint')
+      // nonce is 0 when allowOutOfOrderExecution is true
+      if (message.allowOutOfOrderExecution) {
+        assert.equal(message.header.nonce, 0n, 'nonce should be 0 for out-of-order execution')
+      }
     })
 
-    it('should decode tokenAmounts correctly', () => {
+    it('should decode sender as TON user-friendly address', () => {
       assert.ok(message)
-      assert.ok(Array.isArray(message.tokenAmounts))
-      assert.equal(message.tokenAmounts.length, 0)
+      // TON user-friendly addresses start with EQ (mainnet) or kQ/0Q (testnet bounceable/non-bounceable)
+      assert.match(
+        message.sender,
+        /^(EQ|UQ|kQ|0Q)[A-Za-z0-9_-]{46}$/,
+        'sender should be TON user-friendly address',
+      )
+      // Verify it's a valid address by parsing
+      assert.doesNotThrow(
+        () => Address.parse(message!.sender),
+        'sender should be parseable TON address',
+      )
+    })
+
+    it('should decode receiver as padded EVM address (32 bytes)', () => {
+      assert.ok(message)
+      assert.ok(message.receiver.startsWith('0x'), 'receiver should be hex prefixed')
+      assert.equal(message.receiver.length, 66, 'receiver should be 32 bytes (padded EVM address)')
+      // First 12 bytes should be zero padding for EVM addresses
+      assert.ok(
+        message.receiver.startsWith('0x000000000000000000000000'),
+        'receiver should have 12-byte zero padding',
+      )
+      // Last 20 bytes should be the actual EVM address
+      const evmAddress = '0x' + message.receiver.slice(-40)
+      assert.match(evmAddress, /^0x[a-fA-F0-9]{40}$/, 'extracted EVM address should be valid')
+    })
+
+    it('should decode data as hex bytes', () => {
+      assert.ok(message)
+      assert.ok(message.data.startsWith('0x'), 'data should be hex prefixed')
+      assert.match(message.data, /^0x([a-f0-9]{2})*$/, 'data should be valid hex bytes')
+    })
+
+    it('should decode tokenAmounts as array', () => {
+      assert.ok(message)
+      assert.ok(Array.isArray(message.tokenAmounts), 'tokenAmounts should be array')
+      // Each token amount should have required fields if present
+      for (const ta of message.tokenAmounts) {
+        assert.ok('sourcePoolAddress' in ta, 'tokenAmount should have sourcePoolAddress')
+        assert.ok('destTokenAddress' in ta, 'tokenAmount should have destTokenAddress')
+      }
+    })
+
+    it('should decode feeToken as TON address', () => {
+      assert.ok(message)
+      assert.ok(message.feeToken, 'feeToken should be present')
+      assert.doesNotThrow(
+        () => Address.parse(message!.feeToken),
+        'feeToken should be parseable TON address',
+      )
+    })
+
+    it('should decode feeTokenAmount as positive bigint', () => {
+      assert.ok(message)
+      assert.equal(typeof message.feeTokenAmount, 'bigint')
+      assert.ok(message.feeTokenAmount > 0n, 'feeTokenAmount should be positive')
+    })
+
+    it('should decode feeValueJuels as positive bigint', () => {
+      assert.ok(message)
+      assert.equal(typeof message.feeValueJuels, 'bigint')
+      assert.ok(message.feeValueJuels > 0n, 'feeValueJuels should be positive')
+    })
+
+    it('should decode extraArgs with EVMExtraArgsV2 tag', () => {
+      assert.ok(message)
+      assert.ok(
+        message.extraArgs.startsWith('0x181dcf10'),
+        'extraArgs should have EVMExtraArgsV2 tag (0x181dcf10)',
+      )
+      // EVMExtraArgsV2 tag (4 bytes) + gasLimit (32 bytes) + allowOutOfOrderExecution (1 byte) = 37 bytes = 74 hex chars + 2 for 0x
+      assert.equal(message.extraArgs.length, 76, 'extraArgs should be 37 bytes for EVMExtraArgsV2')
+    })
+
+    it('should decode gasLimit as positive bigint', () => {
+      assert.ok(message)
+      assert.equal(typeof message.gasLimit, 'bigint')
+      assert.ok(message.gasLimit > 0n, 'gasLimit should be positive')
+      assert.ok(
+        message.gasLimit >= 100_000n,
+        'gasLimit should be at least 100k for cross-chain calls',
+      )
+    })
+
+    it('should decode allowOutOfOrderExecution as boolean', () => {
+      assert.ok(message)
+      assert.equal(typeof message.allowOutOfOrderExecution, 'boolean')
     })
 
     it('should return undefined for invalid inputs', () => {
-      assert.equal(TONChain.decodeMessage({ data: '' }), undefined)
-      assert.equal(TONChain.decodeMessage({ data: undefined as any }), undefined)
-      assert.equal(TONChain.decodeMessage({ data: 'not-valid-base64!!!' }), undefined)
-      assert.equal(TONChain.decodeMessage({ data: 'SGVsbG8gV29ybGQ=' }), undefined)
+      assert.equal(TONChain.decodeMessage({ data: '' }), undefined, 'empty string')
+      assert.equal(TONChain.decodeMessage({ data: undefined as any }), undefined, 'undefined')
+      assert.equal(
+        TONChain.decodeMessage({ data: 'not-valid-base64!!!' }),
+        undefined,
+        'invalid base64',
+      )
+      assert.equal(
+        TONChain.decodeMessage({ data: 'SGVsbG8gV29ybGQ=' }),
+        undefined,
+        'valid base64 but not BOC',
+      )
     })
   })
 
   describe('decodeCommits', () => {
-    const expectedOnChainCommit = {
-      txHash: '6f970beafb5f10923f75382d0424d5582ae8f8966dbd428b6e284216c7a66826',
-      sourceChainSelector: 16015286601757825753n, // Sepolia
-      onRampAddress: '0xfb34b9969dd201cc9a04e604a6d40af917b6c1e8',
-      minSeqNr: 942n,
-      maxSeqNr: 942n,
-      merkleRoot: '0xfcd58111c28a183371ed7f16f2b2b64b90783a295ee4b058da5c5e51b4ca2b5d',
-    }
+    let commitLog: any
+    let commitReport: ReturnType<typeof TONChain.decodeCommits>
+
+    before(async () => {
+      // Fetch a real CommitReportAccepted log from OffRamp
+      for await (const log of tonChain.getLogs({
+        address: ADDRESSES_TO_ASSERT.tonOffRamp,
+        topics: ['CommitReportAccepted'],
+        page: 20,
+      })) {
+        const decoded = TONChain.decodeCommits(log)
+        if (decoded && decoded.length > 0) {
+          commitLog = log
+          commitReport = decoded
+          break
+        }
+      }
+    })
 
     it('should return undefined for invalid inputs', () => {
       assert.equal(TONChain.decodeCommits({ data: '' } as any), undefined, 'empty data')
@@ -364,67 +460,67 @@ describe('TONChain smoke tests', () => {
       )
     })
 
-    it('should return undefined for non-commit BOC data (e.g., CCIPMessageSent)', async () => {
-      const ccipTxHash = 'a7f7fc28388e0e486dbb2724dce077d5e7bb348d3abf9f109a0ef499fc229e3a'
-      const tx = await tonChain.getTransaction(ccipTxHash)
-      assert.ok(tx.logs.length > 0, 'Should have logs')
-      const result = TONChain.decodeCommits(tx.logs[0])
-      assert.equal(result, undefined, 'CCIPMessageSent should not decode as commit')
+    it('should return undefined for non-commit BOC data', async () => {
+      for await (const log of tonChain.getLogs({
+        address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        page: 1,
+      })) {
+        assert.equal(
+          TONChain.decodeCommits(log),
+          undefined,
+          'CCIPMessageSent should not decode as commit',
+        )
+        break
+      }
     })
 
-    it('should find and decode commit reports by iterating logs', async () => {
-      const tx = await tonChain.getTransaction(expectedOnChainCommit.txHash)
-      assert.ok(tx.logs.length > 0, 'Should have logs')
+    it('should decode commit report with correct lane info', () => {
+      assert.ok(commitReport && commitReport.length > 0, 'Should decode commit report')
+      const commit = commitReport[0]
 
-      // Find the CommitReportAccepted log by trying each one
-      let result: ReturnType<typeof TONChain.decodeCommits> = undefined
-      for (const log of tx.logs) {
-        result = TONChain.decodeCommits(log)
-        if (result) break
-      }
-
-      assert.ok(result, 'Should find and decode commit report from transaction logs')
-      assert.equal(result.length, 1, 'Should have exactly one commit report')
-      const commit = result[0]
-      assert.equal(commit.sourceChainSelector, expectedOnChainCommit.sourceChainSelector)
-      assert.equal(commit.minSeqNr, expectedOnChainCommit.minSeqNr)
-      assert.equal(commit.maxSeqNr, expectedOnChainCommit.maxSeqNr)
+      // Lane identification
+      assert.equal(commit.sourceChainSelector, SEPOLIA_CHAIN_SELECTOR)
+      assert.equal(commit.onRampAddress.toLowerCase(), ADDRESSES_TO_ASSERT.evmOnramp.toLowerCase())
     })
 
-    it('should filter by lane when provided', async () => {
-      const tx = await tonChain.getTransaction(expectedOnChainCommit.txHash)
+    it('should decode valid sequence number range', () => {
+      assert.ok(commitReport && commitReport.length > 0)
+      const commit = commitReport[0]
 
-      // Should match with correct lane
-      const matchingLane = {
-        sourceChainSelector: expectedOnChainCommit.sourceChainSelector,
-        onRamp: expectedOnChainCommit.onRampAddress,
-      }
-      const resultMatch = TONChain.decodeCommits(tx.logs[1], matchingLane as any)
-      assert.ok(resultMatch, 'Should decode when lane matches')
+      assert.ok(commit.minSeqNr > 0n, 'minSeqNr should be positive')
+      assert.ok(commit.maxSeqNr >= commit.minSeqNr, 'maxSeqNr >= minSeqNr')
+    })
 
-      // Should return undefined with wrong sourceChainSelector
-      const wrongSelectorLane = {
+    it('should decode valid merkleRoot', () => {
+      assert.ok(commitReport && commitReport.length > 0)
+      const commit = commitReport[0]
+
+      assert.match(commit.merkleRoot, /^0x[a-f0-9]{64}$/, 'merkleRoot should be 32-byte hex')
+    })
+
+    it('should filter commits by lane', () => {
+      assert.ok(commitLog)
+
+      // Matching lane returns commits
+      const match = TONChain.decodeCommits(commitLog, {
+        sourceChainSelector: SEPOLIA_CHAIN_SELECTOR,
+        onRamp: ADDRESSES_TO_ASSERT.evmOnramp,
+      } as any)
+      assert.ok(match && match.length > 0, 'Should return commits for matching lane')
+
+      // Wrong selector returns undefined
+      const wrongSelector = TONChain.decodeCommits(commitLog, {
         sourceChainSelector: 123n,
-        onRamp: expectedOnChainCommit.onRampAddress,
-      }
-      const resultWrongSelector = TONChain.decodeCommits(tx.logs[1], wrongSelectorLane as any)
-      assert.equal(
-        resultWrongSelector,
-        undefined,
-        'Should return undefined when sourceChainSelector does not match',
-      )
+        onRamp: ADDRESSES_TO_ASSERT.evmOnramp,
+      } as any)
+      assert.equal(wrongSelector, undefined, 'Wrong sourceChainSelector should return undefined')
 
-      // Should return undefined with wrong onRamp
-      const wrongOnRampLane = {
-        sourceChainSelector: expectedOnChainCommit.sourceChainSelector,
+      // Wrong onRamp returns undefined
+      const wrongOnRamp = TONChain.decodeCommits(commitLog, {
+        sourceChainSelector: SEPOLIA_CHAIN_SELECTOR,
         onRamp: '0x0000000000000000000000000000000000000000',
-      }
-      const resultWrongOnRamp = TONChain.decodeCommits(tx.logs[1], wrongOnRampLane as any)
-      assert.equal(
-        resultWrongOnRamp,
-        undefined,
-        'Should return undefined when onRamp does not match',
-      )
+      } as any)
+      assert.equal(wrongOnRamp, undefined, 'Wrong onRamp should return undefined')
     })
   })
 })

@@ -1,6 +1,5 @@
 import { Address, Cell, beginCell, toNano } from '@ton/core'
-import { TonClient, internal } from '@ton/ton'
-import type { AxiosAdapter } from 'axios'
+import { TonClient4, internal } from '@ton/ton'
 import { type BytesLike, getAddress as checksumAddress, isBytesLike } from 'ethers'
 import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
@@ -33,7 +32,7 @@ import {
   type WithLogger,
   ChainFamily,
 } from '../types.ts'
-import { bytesToBuffer, createRateLimitedFetch, getDataBytes, networkInfo } from '../utils.ts'
+import { bytesToBuffer, getDataBytes, networkInfo } from '../utils.ts'
 import { OffRamp } from './bindings/offramp.ts'
 import { OnRamp } from './bindings/onramp.ts'
 import { Router } from './bindings/router.ts'
@@ -43,39 +42,6 @@ import { getTONLeafHasher } from './hasher.ts'
 import { type CCIPMessage_V1_6_TON, type UnsignedTONTx, isTONWallet } from './types.ts'
 import { waitForTransaction } from './utils.ts'
 import type { LeafHasher } from '../hasher/common.ts'
-
-/**
- * Wraps a rate-limited fetch as an axios adapter for TonClient.
- * @param rateLimitedFetch - A fetch function with rate limiting applied.
- * @returns An AxiosAdapter that uses the rate-limited fetch.
- */
-function fetchToAxiosAdapter(rateLimitedFetch: typeof fetch): AxiosAdapter {
-  return async (config) => {
-    // Convert axios headers to fetch-compatible format
-    const headers: Record<string, string> = {}
-    if (config.headers) {
-      for (const [key, value] of Object.entries(config.headers)) {
-        if (value != null) headers[key] = String(value)
-      }
-    }
-
-    const response = await rateLimitedFetch(config.url!, {
-      method: config.method?.toUpperCase(),
-      headers,
-      body: config.data as string | undefined,
-    })
-
-    const data = await response.json()
-    return {
-      data,
-      status: response.status,
-      statusText: response.statusText,
-      headers: Object.fromEntries(response.headers.entries()),
-      config,
-      request: {},
-    }
-  }
-}
 
 /**
  * Type guard to check if an error is a TVM error with an exit code.
@@ -96,7 +62,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   static readonly decimals = 9 // TON uses 9 decimals (nanotons)
   private readonly endpointUrl?: string
   private readonly fetchFn: typeof fetch
-  readonly provider: TonClient
+  readonly provider: TonClient4
+  private readonly timestampCache: Map<number, number> = new Map()
 
   /**
    * Creates a new TONChain instance.
@@ -105,7 +72,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param ctx - Context containing logger.
    */
   constructor(
-    client: TonClient,
+    client: TonClient4,
     network: NetworkInfo,
     ctx?: WithLogger,
     endpointUrl?: string,
@@ -124,14 +91,15 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   /**
    * Creates a TONChain instance from an RPC URL.
    * Verifies the connection and detects the network.
-   * @param url - RPC endpoint URL.
+   *
+   * @param url - RPC endpoint URL for TonClient4.
    * @param ctx - Context containing logger.
    * @returns A new TONChain instance.
    */
   static async fromUrl(url: string, ctx?: WithLogger): Promise<TONChain> {
     const { logger = console } = ctx ?? {}
 
-    // Parse URL for secure hostname validation
+    // Parse URL for validation
     let parsedUrl: URL
     try {
       parsedUrl = new URL(url)
@@ -141,37 +109,34 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
     const hostname = parsedUrl.hostname.toLowerCase()
 
-    // Validate hostname for TON endpoints
-    const validTonHostnames = ['toncenter.com', 'localhost', '127.0.0.1']
+    // Validate hostname for TON V4 endpoints
+    const validV4Hostnames = [
+      'tonhubapi.com',
+      'ton-api.io',
+      'orbs.network',
+      'localhost',
+      '127.0.0.1',
+    ]
     const isValidHost =
-      validTonHostnames.some((valid) => hostname === valid || hostname.endsWith(`.${valid}`)) ||
+      validV4Hostnames.some((valid) => hostname === valid || hostname.endsWith(`.${valid}`)) ||
       hostname.includes('ton')
 
     if (!isValidHost) {
-      throw new CCIPArgumentInvalidError('url', `Invalid TON RPC URL: ${url}`)
+      throw new CCIPArgumentInvalidError(
+        'url',
+        `Invalid TON V4 RPC URL: ${url}. Use tonhubapi.com or similar V4 endpoint.`,
+      )
     }
 
-    // Check if using public endpoint without API key and apply rate limiting
-    const isTonCenter = hostname === 'toncenter.com' || hostname.endsWith('.toncenter.com')
-    const hasApiKey = parsedUrl.searchParams.has('api_key')
-    const isPublicEndpoint = isTonCenter && !hasApiKey
+    const client = new TonClient4({ endpoint: url })
 
-    let httpAdapter: AxiosAdapter | undefined
-    let rateLimitedFetch: typeof fetch = fetch
-    if (isPublicEndpoint) {
-      logger.warn('Using public TON endpoint without API key: rate limiting to 1 req/sec')
-      rateLimitedFetch = createRateLimitedFetch({ maxRequests: 1, windowMs: 1500 }, ctx)
-      httpAdapter = fetchToAxiosAdapter(rateLimitedFetch)
-    }
-
-    const client = new TonClient({ endpoint: url, httpAdapter })
-
-    // Verify connection by making an actual RPC call
+    // Verify connection by getting the latest block
     try {
-      await client.getMasterchainInfo()
+      await client.getLastBlock()
+      logger.debug?.(`Connected to TON V4 endpoint: ${url}`)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      throw new CCIPHttpError(0, `Failed to connect to TON endpoint ${url}: ${message}`)
+      throw new CCIPHttpError(0, `Failed to connect to TON V4 endpoint ${url}: ${message}`)
     }
 
     // Detect network from hostname
@@ -189,63 +154,28 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       networkId = 'ton-mainnet'
     }
 
-    return new TONChain(client, networkInfo(networkId), ctx, url, rateLimitedFetch)
-  }
-
-  /**
-   * Fetches a transaction by raw hash using TonCenter V3 API.
-   * @param hash - 64-char hex hash (without 0x prefix)
-   * @returns ChainTransaction with transaction details
-   */
-  private async getTransactionByHash(hash: string): Promise<ChainTransaction> {
-    if (!this.endpointUrl) {
-      throw new CCIPArgumentInvalidError(
-        'hash',
-        `Raw hash lookup requires endpoint URL. Use composite format "workchain:address:lt:hash" instead.`,
-      )
-    }
-
-    // Derive V3 API base URL from the configured endpoint
-    // e.g., "https://testnet.toncenter.com/api/v2/jsonRPC" -> "https://testnet.toncenter.com/api/v3"
-    const parsedUrl = new URL(this.endpointUrl)
-    const v3BaseUrl = `${parsedUrl.protocol}//${parsedUrl.host}/api/v3`
-
-    // TonCenter V3 API accepts hash in hex format
-    const response = await this.fetchFn(`${v3BaseUrl}/transactions?hash=${hash}`)
-
-    if (!response.ok) {
-      throw new CCIPHttpError(
-        response.status,
-        `Failed to fetch transaction: ${response.statusText}`,
-      )
-    }
-
-    const data = (await response.json()) as {
-      transactions: Array<{ account: string; lt: string; now: number }>
-    }
-
-    if (!data.transactions || data.transactions.length === 0) {
-      throw new CCIPTransactionNotFoundError(hash)
-    }
-
-    const tx = data.transactions[0]
-    const address = tx.account // Already in raw format "workchain:hash"
-
-    // Build composite hash for consistency
-    const compositeHash = `${address}:${tx.lt}:${hash}`
-
-    return {
-      hash: compositeHash,
-      logs: [], // TODO
-      blockNumber: Number(tx.lt),
-      timestamp: tx.now,
-      from: address,
-    }
+    return new TONChain(client, networkInfo(networkId), ctx, url)
   }
 
   /** {@inheritDoc Chain.getBlockTimestamp} */
-  async getBlockTimestamp(_version: number | 'finalized'): Promise<number> {
-    return Promise.reject(new CCIPNotImplementedError('getBlockTimestamp'))
+  async getBlockTimestamp(block: number | 'finalized'): Promise<number> {
+    if (block === 'finalized') {
+      // Get the latest block timestamp from V4 API
+      const lastBlock = await this.provider.getLastBlock()
+      return lastBlock.now
+    }
+
+    // Check timestamp cache (populated by getLogs)
+    const cached = this.timestampCache.get(block)
+    if (cached !== undefined) {
+      return cached
+    }
+
+    // For TON, block number is logical time (lt) which is unique per account
+    // Cannot look up timestamp by lt alone without account address
+    throw new CCIPNotImplementedError(
+      `getBlockTimestamp: lt ${block} not in cache - ensure getLogs was called first`,
+    )
   }
 
   /**
@@ -254,8 +184,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * Supports two formats:
    * 1. Composite format: "workchain:address:lt:hash" (e.g., "0:abc123...def:12345:abc123...def")
    * 2. Raw hash format: 64-character hex string (e.g., "2d933807e103d1839be2870ff03f8c56739c561af9a41f195f049c4dedccd260")
-   *
-   * For raw hash lookups, the TonCenter V3 API is used (requires endpoint URL).
    *
    * @param hash - Transaction identifier in either format
    * @returns ChainTransaction with transaction details
@@ -270,10 +198,19 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
       // Check if it's a valid 64-char hex string (raw hash format)
       if (/^[a-fA-F0-9]{64}$/.test(cleanHash)) {
-        // Use V3 API to resolve the composite hash, then fetch full tx with logs
-        const resolved = await this.getTransactionByHash(cleanHash)
-        // Now fetch the full transaction using composite hash to get logs
-        return this.getTransaction(resolved.hash)
+        // For V4, we need to search for the transaction - not directly supported
+        // Fall back to the endpoint URL if available
+        if (!this.endpointUrl) {
+          throw new CCIPArgumentInvalidError(
+            'hash',
+            `Raw hash lookup not directly supported in V4 API. Use composite format "workchain:address:lt:hash" instead.`,
+          )
+        }
+        // Could implement V3 API fallback here if needed
+        throw new CCIPArgumentInvalidError(
+          'hash',
+          `Raw hash lookup requires V3 API. Use composite format "workchain:address:lt:hash" instead.`,
+        )
       }
       throw new CCIPArgumentInvalidError(
         'hash',
@@ -285,13 +222,27 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const lt = parts[2]
     const txHash = parts[3]
 
-    // Convert hex hash to base64 for TonClient API
-    const hashBase64 = Buffer.from(txHash, 'hex').toString('base64')
-    const tx = await this.provider.getTransaction(address, lt, hashBase64)
+    // Get the latest block to use as reference
+    const lastBlock = await this.provider.getLastBlock()
 
-    if (!tx) {
+    // Get account transactions using V4 API
+    const account = await this.provider.getAccountLite(lastBlock.last.seqno, address)
+    if (!account.account.last) {
       throw new CCIPTransactionNotFoundError(hash)
     }
+
+    // Fetch transactions and find the one we're looking for
+    const txs = await this.provider.getAccountTransactions(
+      address,
+      BigInt(lt),
+      Buffer.from(txHash, 'hex'),
+    )
+
+    if (!txs || txs.length === 0) {
+      throw new CCIPTransactionNotFoundError(hash)
+    }
+
+    const tx = txs[0].tx
 
     // Extract logs from outgoing external messages
     const logs: Log_[] = []
@@ -302,9 +253,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         logs.push({
           address: address.toRawString(),
           topics: [],
-          data: msg.body.toBoc().toString('base64'), // Convert BOC to base64
-          // TODO: FIXME: consider fetching block info
-          blockNumber: Number(tx.lt), // Use logical time as block number
+          data: msg.body.toBoc().toString('base64'),
+          blockNumber: Number(tx.lt),
           transactionHash: hash,
           index: index,
         })
@@ -315,63 +265,57 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return {
       hash,
       logs,
-      // TODO: FIXME: consider fetching block info
-      blockNumber: Number(tx.lt), // Use logical time as block number
+      blockNumber: Number(tx.lt),
       timestamp: tx.now,
       from: address.toRawString(),
     }
   }
 
   /** {@inheritDoc Chain.getLogs} */
+  /** {@inheritDoc Chain.getLogs} */
   async *getLogs(opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<Log_> {
     if (!opts.address) {
       throw new CCIPArgumentInvalidError('address', 'Address is required for TON log filtering')
     }
 
-    // Convert address string to TON Address
     const address = Address.parse(opts.address)
 
-    // Determine search direction based on startTime/startBlock
-    // If startTime or startBlock is provided, search forward (oldest to newest)
-    // Otherwise, search backward (newest to oldest)
+    // Determine search direction
     const searchForward = !!(opts.startBlock || opts.startTime)
 
-    // Get transactions for the address with pagination
-    // TonClient.getTransactions returns transactions in reverse order (newest first)
-    let lt: string | undefined
-    let hash: string | undefined
-    // TonCenter API has a max limit of 1000, cap pageSize to 999 to leave room for +1 pagination
-    const requestedPageSize = opts.page || 50
-    const pageSize = Math.min(requestedPageSize, 999)
+    // Get the latest block for account state lookup
+    const lastBlock = await this.provider.getLastBlock()
 
-    // Collect logs for forward iteration (if needed)
+    // Get account state to find the last transaction
+    const account = await this.provider.getAccountLite(lastBlock.last.seqno, address)
+    if (!account.account.last) {
+      return // No transactions
+    }
+
+    let lt: bigint = BigInt(account.account.last.lt)
+    let hash: Buffer = Buffer.from(account.account.last.hash, 'base64')
+
     const collectedLogs: Log_[] = []
 
     while (true) {
-      const limit = pageSize
-      const txs = await this.provider.getTransactions(address, {
-        limit,
-        lt,
-        hash,
-        archival: true, // Include historical transactions
-      })
+      const txs = await this.provider.getAccountTransactions(address, lt, hash)
 
-      if (txs.length === 0) break
+      if (!txs || txs.length === 0) break
 
       // Skip the first transaction when paginating (it's the same as last from previous batch)
-      const startIdx = lt ? 1 : 0
+      const startIdx = collectedLogs.length > 0 || !searchForward ? 1 : 0
 
       for (let i = startIdx; i < txs.length; i++) {
-        const tx = txs[i]
-        // Filter by block range if specified (using logical time as block number)
+        const { tx } = txs[i]
         const blockNumber = Number(tx.lt)
         const timestamp = tx.now
 
-        // Transactions are in reverse order (newest first)
-        // If we're below startBlock, we're done (all remaining will also be below)
+        // Cache timestamp for getBlockTimestamp lookups
+        this.timestampCache.set(blockNumber, timestamp)
+
+        // Filter by block/time range
         if (opts.startBlock && blockNumber < opts.startBlock) {
           if (searchForward) {
-            // Yield collected logs in reverse (oldest first)
             for (let j = collectedLogs.length - 1; j >= 0; j--) {
               yield collectedLogs[j]
             }
@@ -379,10 +323,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
           return
         }
 
-        // Filter by startTime if provided
         if (opts.startTime && timestamp < opts.startTime) {
           if (searchForward) {
-            // Yield collected logs in reverse (oldest first)
             for (let j = collectedLogs.length - 1; j >= 0; j--) {
               yield collectedLogs[j]
             }
@@ -390,7 +332,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
           return
         }
 
-        // Skip transactions above endBlock
         if (opts.endBlock && blockNumber > opts.endBlock) {
           continue
         }
@@ -403,23 +344,17 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
             const body = msg.body
             const data = body.toBoc().toString('base64')
 
-            // Try to decode as CCIP message to check if it's valid
             const decoded = TONChain.decodeMessage({ data })
-
-            // Also try to decode as commit report
             const decodedCommit = TONChain.decodeCommits({ data } as Log_)
 
-            // If we have topic filters, filter based on event type
             if (opts.topics?.length) {
               const topicFilter = opts.topics[0]
               if (topicFilter === 'CommitReportAccepted') {
-                // Only yield commit logs
                 if (!decodedCommit) {
                   index++
                   continue
                 }
               } else if (!decoded) {
-                // For other topics, require valid CCIP message
                 index++
                 continue
               }
@@ -447,21 +382,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       }
 
       // Set up pagination for next batch
-      const lastTx = txs[txs.length - 1]
-      lt = lastTx.lt.toString()
-      hash = lastTx.hash().toString('base64')
+      // Set up pagination for next batch
+      if (txs.length < 2) break // Need at least 2 to continue (one overlap)
+      const lastTx = txs[txs.length - 1].tx
+      lt = lastTx.lt
+      hash = Buffer.from(lastTx.hash())
 
-      // If we got fewer transactions than requested, we've reached the end
-      if (txs.length < pageSize) break
-
-      // Check if we've gone below startBlock - no need to fetch more
       if (opts.startBlock && Number(lastTx.lt) < opts.startBlock) break
-
-      // Check if we've gone below startTime - no need to fetch more
       if (opts.startTime && lastTx.now < opts.startTime) break
     }
 
-    // Yield collected logs in reverse order for forward iteration
     if (searchForward) {
       for (let j = collectedLogs.length - 1; j >= 0; j--) {
         yield collectedLogs[j]

@@ -1,5 +1,5 @@
 import { type Address, Cell, beginCell } from '@ton/core'
-import type { TonClient } from '@ton/ton'
+import type { TonClient4 } from '@ton/ton'
 
 import { CCIPTransactionNotFinalizedError } from '../errors/specialized.ts'
 import { bytesToBuffer, sleep } from '../utils.ts'
@@ -53,7 +53,7 @@ export function extractMagicTag(bocHex: string): string {
  * Waits for a transaction to be confirmed by polling until the wallet's seqno advances.
  * Once seqno advances past expectedSeqno, fetches the latest transaction details.
  *
- * @param client - TON client
+ * @param client - TON V4 client
  * @param walletAddress - Address of the wallet that sent the transaction
  * @param expectedSeqno - The seqno used when sending the transaction
  * @param expectedDestination - Optional destination address to verify (e.g., offRamp)
@@ -62,7 +62,7 @@ export function extractMagicTag(bocHex: string): string {
  * @returns Transaction info with lt and hash
  */
 export async function waitForTransaction(
-  client: TonClient,
+  client: TonClient4,
   walletAddress: Address,
   expectedSeqno: number,
   expectedDestination?: Address,
@@ -71,18 +71,31 @@ export async function waitForTransaction(
 ): Promise<{ lt: string; hash: string; timestamp: number }> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      // Check current seqno by calling the wallet's seqno getter
-      const seqnoResult = await client.runMethod(walletAddress, 'seqno')
-      const currentSeqno = seqnoResult.stack.readNumber()
+      // Get latest block for state lookup (V4 API requires block seqno)
+      const lastBlock = await client.getLastBlock()
 
-      // Check if transaction was processed
+      // Check current seqno by running the getter
+      const seqnoResult = await client.runMethod(lastBlock.last.seqno, walletAddress, 'seqno')
+      const currentSeqno = seqnoResult.reader.readNumber()
+
       const seqnoAdvanced = currentSeqno > expectedSeqno
 
       if (seqnoAdvanced) {
-        // Get the most recent transaction (should be ours)
-        const txs = await client.getTransactions(walletAddress, { limit: 5 })
+        // Get account state to find latest transaction
+        const account = await client.getAccountLite(lastBlock.last.seqno, walletAddress)
+        if (!account.account.last) {
+          await sleep(intervalMs)
+          continue
+        }
 
-        for (const tx of txs) {
+        // Get recent transactions using V4 API
+        const txs = await client.getAccountTransactions(
+          walletAddress,
+          BigInt(account.account.last.lt),
+          Buffer.from(account.account.last.hash, 'base64'),
+        )
+
+        for (const { tx } of txs) {
           // If destination verification requested, check outgoing messages
           if (expectedDestination) {
             const outMessages = tx.outMessages.values()
@@ -108,13 +121,20 @@ export async function waitForTransaction(
 
       // Handle case where contract was just deployed (seqno 0 -> 1)
       if (expectedSeqno === 0 && attempt > 0) {
-        const txs = await client.getTransactions(walletAddress, { limit: 1 })
-        if (txs.length > 0) {
-          const tx = txs[0]
-          return {
-            lt: tx.lt.toString(),
-            hash: tx.hash().toString('hex'),
-            timestamp: tx.now,
+        const account = await client.getAccountLite(lastBlock.last.seqno, walletAddress)
+        if (account.account.last) {
+          const txs = await client.getAccountTransactions(
+            walletAddress,
+            BigInt(account.account.last.lt),
+            Buffer.from(account.account.last.hash, 'base64'),
+          )
+          if (txs.length > 0) {
+            const { tx } = txs[0]
+            return {
+              lt: tx.lt.toString(),
+              hash: tx.hash().toString('hex'),
+              timestamp: tx.now,
+            }
           }
         }
       }
