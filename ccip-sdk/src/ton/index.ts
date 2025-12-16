@@ -41,7 +41,6 @@ import {
 import { OffRamp } from './bindings/offramp.ts'
 import { OnRamp } from './bindings/onramp.ts'
 import { Router } from './bindings/router.ts'
-// import { parseTONLogs } from './utils.ts'
 import { generateUnsignedExecuteReport as generateUnsignedExecuteReportImpl } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import { type CCIPMessage_V1_6_TON, type UnsignedTONTx, isTONWallet } from './types.ts'
@@ -90,10 +89,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     this.fetchFn = fetchFn
 
     // Rate-limited fetch for TonCenter API (public tier: ~1 req/sec)
-    this.rateLimitedFetch = createRateLimitedFetch(
-      { maxRequests: 1, windowMs: 1100, maxRetries: 5 },
+    const rateLimitedFetch = createRateLimitedFetch(
+      { maxRequests: 1, windowMs: 1500, maxRetries: 5 },
       ctx,
     )
+    this.rateLimitedFetch = (input, init) => {
+      this.logger.warn?.(
+        'Public TONCenter API calls are rate-limited to ~1 req/sec, some commands may be slow',
+      )
+      return rateLimitedFetch(input, init)
+    }
 
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       maxSize: 100,
