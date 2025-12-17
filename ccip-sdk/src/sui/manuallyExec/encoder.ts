@@ -1,7 +1,10 @@
 import { bcs } from '@mysten/sui/bcs'
-import { type BytesLike, AbiCoder } from 'ethers'
+import type { BytesLike } from 'ethers'
 
-import type { CCIPMessage, CCIPVersion, ExecutionReport } from '../../types.ts'
+import { type SuiExtraArgsV1, decodeExtraArgs } from '../../extra-args.ts'
+import type { ExecutionReport } from '../../types.ts'
+import { bytesToBuffer, networkInfo } from '../../utils.ts'
+import type { CCIPMessage_V1_6_Sui } from '../types.ts'
 
 const Any2SuiTokenTransferBCS = bcs.struct('Any2SuiTokenTransfer', {
   source_pool_address: bcs.vector(bcs.u8()),
@@ -29,7 +32,7 @@ const ExecutionReportBCS = bcs.struct('ExecutionReport', {
 })
 
 export function serializeExecutionReport(
-  executionReport: ExecutionReport<CCIPMessage<typeof CCIPVersion.V1_6>>,
+  executionReport: ExecutionReport<CCIPMessage_V1_6_Sui>,
 ): Uint8Array {
   const { message, offchainTokenData, proofs } = executionReport
 
@@ -37,7 +40,10 @@ export function serializeExecutionReport(
     throw new Error('Message is undefined in execution report')
   }
 
-  const decodedExtraArgs = decodeSuiExtraArgs(message.extraArgs)
+  const decodedExtraArgs = decodeExtraArgs(
+    message.extraArgs,
+    networkInfo(message.destChainSelector as bigint).family,
+  ) as SuiExtraArgsV1
 
   type TokenAmount = {
     sourcePoolAddress: string
@@ -48,83 +54,41 @@ export function serializeExecutionReport(
   }
 
   const reportData = {
-    source_chain_selector: executionReport.message.header.sourceChainSelector,
-    message_id: Array.from(Buffer.from(executionReport.message.header.messageId.slice(2), 'hex')),
-    header_source_chain_selector: executionReport.message.header.sourceChainSelector,
-    dest_chain_selector: executionReport.message.header.destChainSelector,
-    sequence_number: executionReport.message.header.sequenceNumber,
-    nonce: executionReport.message.header.nonce,
-    sender: Array.from(Buffer.from(executionReport.message.sender.slice(2), 'hex')),
-    data: Array.from(Buffer.from(executionReport.message.data.slice(2), 'hex')),
-    receiver: executionReport.message.receiver,
+    source_chain_selector: message.sourceChainSelector as bigint,
+    message_id: Array.from(bytesToBuffer(message.messageId as string)),
+    header_source_chain_selector: message.sourceChainSelector as bigint,
+    dest_chain_selector: message.destChainSelector as bigint,
+    sequence_number: message.sequenceNumber as bigint,
+    nonce: message.nonce as bigint,
+    sender: Array.from(bytesToBuffer(message.sender)),
+    data: Array.from(bytesToBuffer(message.data)),
+    receiver: message.receiver,
     gas_limit: decodedExtraArgs.gasLimit,
     token_receiver: decodedExtraArgs.tokenReceiver,
-    token_amounts: executionReport.message.tokenAmounts.map((token: TokenAmount) => ({
-      source_pool_address: Array.from(Buffer.from(token.sourcePoolAddress.slice(2), 'hex')),
+    token_amounts: message.tokenAmounts.map((token: TokenAmount) => ({
+      source_pool_address: Array.from(bytesToBuffer(token.sourcePoolAddress)),
       dest_token_address: token.destTokenAddress,
       dest_gas_amount: Number(token.destGasAmount || 0n), // Use actual destGasAmount from token data
-      extra_data: Array.from(Buffer.from(token.extraData.slice(2), 'hex')),
+      extra_data: Array.from(bytesToBuffer(token.extraData)),
       amount: BigInt(token.amount),
     })),
     offchain_token_data: offchainTokenData.map((data) => {
       if (!data) {
-        return Array.from(Buffer.from('', 'hex'))
+        return bytesToBuffer('')
       }
       // Extract the actual data bytes from the object
       const dataBytes = data._tag ? data[data._tag] : '0x'
-      if (typeof dataBytes === 'string') {
-        const hex = dataBytes.startsWith('0x') ? dataBytes.slice(2) : dataBytes
-        return Array.from(Buffer.from(hex, 'hex'))
-      }
-      return Array.from(Buffer.from(dataBytes))
+      return Array.from(bytesToBuffer(dataBytes))
     }),
     proofs: proofs.map((proof: BytesLike) => {
-      const proofStr = typeof proof === 'string' ? proof : Buffer.from(proof).toString('hex')
-      const proofBytes = Buffer.from(
-        proofStr.startsWith('0x') ? proofStr.slice(2) : proofStr,
-        'hex',
-      )
+      const proofBytes = bytesToBuffer(proof)
       // Ensure each proof is exactly 32 bytes
       if (proofBytes.length !== 32) {
-        const proofHex =
-          typeof proof === 'string' ? proof : `0x${Buffer.from(proof).toString('hex')}`
-        throw new Error(
-          `Invalid proof length: expected 32 bytes, got ${proofBytes.length} bytes for proof ${proofHex}`,
-        )
+        throw new Error(`Invalid proof length: expected 32 bytes, got ${proofBytes.length}`)
       }
       return Array.from(proofBytes)
     }),
   }
 
   return ExecutionReportBCS.serialize(reportData).toBytes()
-}
-
-export const SUI_EXTRA_ARGS_V1_TAG = '0x21ea4ca9' as const
-
-export interface SUIExtraArgsV1 {
-  gasLimit: bigint
-  allowOutOfOrderExecution: boolean
-  tokenReceiver: string
-  receiverObjectIds: string[]
-}
-
-export function decodeSuiExtraArgs(data: string): SUIExtraArgsV1 {
-  if (!data.startsWith(SUI_EXTRA_ARGS_V1_TAG)) {
-    throw new Error(`Invalid Sui extra args tag. Expected ${SUI_EXTRA_ARGS_V1_TAG}`)
-  }
-
-  const abiData = '0x' + data.slice(10)
-  const decoded = AbiCoder.defaultAbiCoder().decode(
-    ['tuple(uint256,bool,bytes32,bytes32[])'],
-    abiData,
-  )
-
-  const tuple = decoded[0] as readonly [bigint, boolean, string, string[]]
-
-  return {
-    gasLimit: tuple[0],
-    allowOutOfOrderExecution: tuple[1],
-    tokenReceiver: tuple[2],
-    receiverObjectIds: tuple[3], // Already an array of hex strings
-  }
 }

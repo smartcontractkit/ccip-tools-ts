@@ -1,8 +1,9 @@
+import { toHex } from '@mysten/bcs'
 import { type SuiTransactionBlockResponse, SuiClient } from '@mysten/sui/client'
 import type { Keypair } from '@mysten/sui/cryptography'
 import { SuiGraphQLClient } from '@mysten/sui/graphql'
 import { Transaction } from '@mysten/sui/transactions'
-import { type BytesLike, isBytesLike } from 'ethers'
+import { type BytesLike, AbiCoder, isBytesLike } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { AptosChain } from '../aptos/index.ts'
@@ -17,7 +18,7 @@ import {
   CCIPSuiMessageVersionInvalidError,
   CCIPVersionFeatureUnavailableError,
 } from '../errors/index.ts'
-import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1 } from '../extra-args.ts'
+import type { ExtraArgs, SuiExtraArgsV1 } from '../extra-args.ts'
 import { getSuiLeafHasher } from './hasher.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
@@ -38,7 +39,7 @@ import {
   ChainFamily,
 } from '../types.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
-import { decodeAddress, networkInfo } from '../utils.ts'
+import { decodeAddress, getDataBytes, networkInfo } from '../utils.ts'
 import { type CommitEvent, getSuiEventsInTimeRange } from './events.ts'
 import {
   type SuiManuallyExecuteInput,
@@ -52,6 +53,8 @@ import {
   getReceiverModule,
 } from './objects.ts'
 import selectors from '../selectors.ts'
+
+export const SUI_EXTRA_ARGS_V1_TAG = '21ea4ca9' as const
 
 type SuiContractDir = {
   ccip: string
@@ -443,13 +446,27 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @param _extraArgs - Encoded extra arguments bytes.
    * @returns Decoded extra arguments or undefined if unknown format.
    */
-  static decodeExtraArgs(
-    _extraArgs: BytesLike,
-  ):
-    | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
-    | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
-    | undefined {
-    throw new CCIPNotImplementedError()
+  static decodeExtraArgs(extraArgs: BytesLike): SuiExtraArgsV1 {
+    const data = getDataBytes(extraArgs)
+    const hexBytes = toHex(data)
+    if (!hexBytes.startsWith(SUI_EXTRA_ARGS_V1_TAG)) {
+      throw new Error(`Invalid Sui extra args tag. Expected ${SUI_EXTRA_ARGS_V1_TAG}`)
+    }
+
+    const abiData = '0x' + hexBytes.slice(8)
+    const decoded = AbiCoder.defaultAbiCoder().decode(
+      ['tuple(uint256,bool,bytes32,bytes32[])'],
+      abiData,
+    )
+
+    const tuple = decoded[0] as readonly [bigint, boolean, string, string[]]
+
+    return {
+      gasLimit: tuple[0],
+      allowOutOfOrderExecution: tuple[1],
+      tokenReceiver: tuple[2],
+      receiverObjectIds: tuple[3], // Already an array of hex strings
+    }
   }
 
   /**

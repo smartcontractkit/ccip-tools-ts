@@ -1,7 +1,10 @@
 import { Transaction } from '@mysten/sui/transactions'
 
-import { decodeSuiExtraArgs, serializeExecutionReport } from './encoder.ts'
-import type { CCIPMessage, CCIPVersion, ExecutionReport } from '../../types.ts'
+import { serializeExecutionReport } from './encoder.ts'
+import { type SuiExtraArgsV1, decodeExtraArgs } from '../../extra-args.ts'
+import type { ExecutionReport } from '../../types.ts'
+import { networkInfo } from '../../utils.ts'
+import type { CCIPMessage_V1_6_Sui } from '../types.ts'
 
 export type ManuallyExecuteSuiReceiverConfig = {
   moduleName: string
@@ -21,7 +24,7 @@ export type TokenConfig = {
 
 export type SuiManuallyExecuteInput = {
   offrampAddress: string
-  executionReport: ExecutionReport<CCIPMessage<typeof CCIPVersion.V1_6>>
+  executionReport: ExecutionReport<CCIPMessage_V1_6_Sui>
   ccipAddress: string
   ccipObjectRef: string
   offrampStateObject: string
@@ -85,7 +88,10 @@ export function buildManualExecutionPTB({
   }
 
   // Decode extraArgs to get receiverObjectIds
-  const decodedExtraArgs = decodeSuiExtraArgs(executionReport.message.extraArgs)
+  const decodedExtraArgs = decodeExtraArgs(
+    executionReport.message.extraArgs,
+    networkInfo(executionReport.message.destChainSelector as bigint).family,
+  ) as SuiExtraArgsV1
 
   if (decodedExtraArgs.receiverObjectIds.length === 0) {
     throw new Error('No receiverObjectIds provided in SUIExtraArgsV1')
@@ -94,7 +100,10 @@ export function buildManualExecutionPTB({
   tx.moveCall({
     target: `${receiverConfig.packageId}::${receiverConfig.moduleName}::ccip_receive`,
     arguments: [
-      tx.pure.vector('u8', Buffer.from(executionReport.message.header.messageId.slice(2), 'hex')),
+      tx.pure.vector(
+        'u8',
+        Buffer.from((executionReport.message.messageId as string).slice(2), 'hex'),
+      ),
       tx.object(ccipObjectRef),
       messageArg,
       // if overrideReceiverObjectIds is provided, use them; otherwise, use the ones from decodedExtraArgs (original message)
