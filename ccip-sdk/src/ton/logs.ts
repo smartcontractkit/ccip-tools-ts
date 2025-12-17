@@ -68,7 +68,7 @@ export async function lookupTxByRawHash(
 
 /** Decoder functions passed to fetchLogs to avoid circular imports */
 export interface LogDecoders {
-  decodeMessage: (log: Pick<Log_, 'data'>) => { header: { messageId: string } } | undefined
+  decodeMessage: (log: Pick<Log_, 'data'>) => { messageId: string } | undefined
   decodeCommits: (log: Log_) => unknown[] | undefined
 }
 
@@ -171,7 +171,7 @@ export async function* fetchLogs(
 
           const log: Log_ = {
             address: address.toRawString(),
-            topics: decoded ? [decoded.header.messageId] : [],
+            topics: decoded ? [decoded.messageId] : [],
             data,
             blockNumber,
             transactionHash: compositeHash,

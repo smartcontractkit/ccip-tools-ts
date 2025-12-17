@@ -541,7 +541,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const feeTokenAmount = bodySlice.loadUintBig(256)
 
       return {
-        header,
+        ...header,
         sender,
         receiver,
         data,
