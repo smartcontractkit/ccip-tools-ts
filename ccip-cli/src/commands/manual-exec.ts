@@ -146,7 +146,6 @@ async function manualExec(
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
   const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
   const commit = await dest.fetchCommitReport(commitStore, request, argv)
-  console.log('LOG commitReport:', commit)
 
   switch (argv.format) {
     case Format.log:
@@ -168,7 +167,6 @@ async function manualExec(
     commit.report.merkleRoot,
     dest,
   )
-  console.log('LOG execReportProof:', execReportProof)
 
   const offchainTokenData = await source.fetchOffchainTokenData(request)
   const execReport: ExecutionReport = {
@@ -176,7 +174,6 @@ async function manualExec(
     message: request.message,
     offchainTokenData: offchainTokenData,
   }
-  console.log('LOG execReport:', execReport)
 
   if (
     argv.estimateGasLimit != null &&
@@ -212,7 +209,6 @@ async function manualExec(
 
   const [, wallet] = await loadChainWallet(dest, argv)
   const manualExecTx = await dest.executeReport(offRamp, execReport, { ...argv, wallet })
-  console.log('LOG manualExecTx:', manualExecTx)
 
   logger.info('🚀 manualExec tx =', manualExecTx.hash, 'to offRamp =', offRamp)
 
