@@ -1,4 +1,4 @@
-// TODO: FIXME: Remove local copies when chainlink-ton is published as npm package
+// TODO: FIXME: Remove local copies and import when chainlink-ton is published as npm package
 import type { Address, ContractProvider } from '@ton/core'
 
 /**
@@ -25,7 +25,6 @@ export interface DynamicConfig {
 /**
  * TON OffRamp contract binding.
  * The OffRamp receives and executes cross-chain messages on the destination (TON) chain.
- * In CCIP v1.6, the OffRamp also serves as the CommitStore.
  */
 export class OffRamp {
   readonly address: Address
@@ -49,7 +48,6 @@ export class OffRamp {
 
   /**
    * Retrieves the source chain configuration for a given chain selector.
-   * This includes the router, enabled status, sequence number, and the source OnRamp address.
    *
    * @param provider - TON contract provider for making RPC calls.
    * @param sourceChainSelector - The CCIP chain selector of the source chain.

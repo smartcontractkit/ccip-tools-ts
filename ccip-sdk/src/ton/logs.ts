@@ -2,88 +2,33 @@ import { Address } from '@ton/core'
 import type { TonClient4 } from '@ton/ton'
 
 import type { LogFilter } from '../chain.ts'
-import { CCIPArgumentInvalidError, CCIPTransactionNotFoundError } from '../errors/specialized.ts'
-import type { Log_, WithLogger } from '../types.ts'
+import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
+import type { Log_ } from '../types.ts'
 
-/**
- * Looks up a transaction by raw hash using the TonCenter V3 API.
- *
- * This is necessary because TON's V4 API requires (address, lt, hash) for lookups,
- * but users typically only have the raw transaction hash from explorers.
- * TonCenter V3 provides an index that allows hash-only lookups.
- *
- * @param hash - Raw 64-char hex transaction hash
- * @param isTestnet - Whether to use testnet API
- * @param rateLimitedFetch - Rate-limited fetch function
- * @param logger - Logger instance
- * @returns Transaction identifier components needed for V4 API lookup
- */
-export async function lookupTxByRawHash(
-  hash: string,
-  isTestnet: boolean,
-  rateLimitedFetch: typeof fetch,
-  logger: WithLogger['logger'],
-): Promise<{
-  account: string
-  lt: string
-  hash: string
-}> {
-  const baseUrl = isTestnet
-    ? 'https://testnet.toncenter.com/api/v3/transactions'
-    : 'https://toncenter.com/api/v3/transactions'
-
-  // TonCenter V3 accepts hex directly
-  const cleanHash = hash.startsWith('0x') ? hash.slice(2) : hash
-
-  const url = `${baseUrl}?hash=${cleanHash}`
-  logger?.debug?.(`TonCenter V3 lookup: ${url}`)
-
-  let response: Response
-  try {
-    response = await rateLimitedFetch(url, {
-      headers: { Accept: 'application/json' },
-    })
-  } catch (error) {
-    logger?.error?.(`TonCenter V3 fetch failed:`, error)
-    throw new CCIPTransactionNotFoundError(hash, { cause: error as Error })
-  }
-
-  let data: { transactions?: Array<{ account: string; lt: string; hash: string }> }
-  try {
-    data = (await response.json()) as typeof data
-  } catch (error) {
-    logger?.error?.(`TonCenter V3 JSON parse failed:`, error)
-    throw new CCIPTransactionNotFoundError(hash, { cause: error as Error })
-  }
-
-  logger?.debug?.(`TonCenter V3 response:`, data)
-
-  if (!data.transactions || data.transactions.length === 0) {
-    logger?.debug?.(`TonCenter V3: no transactions found for hash ${cleanHash}`)
-    throw new CCIPTransactionNotFoundError(hash)
-  }
-
-  return data.transactions[0]
-}
-
-/** Decoder functions passed to fetchLogs to avoid circular imports */
+/** Decoder functions passed to fetchLogs to identify and parse TON log events avoiding circular imports */
 export interface LogDecoders {
-  decodeMessage: (log: Pick<Log_, 'data'>) => { messageId: string } | undefined
-  decodeCommits: (log: Log_) => unknown[] | undefined
+  /** Try to decode as CCIP message, returns messageId if successful */
+  tryDecodeAsMessage: (log: Pick<Log_, 'data'>) => { messageId: string } | undefined
+  /** Try to decode as commit report, returns truthy if successful */
+  tryDecodeAsCommit: (log: Pick<Log_, 'data'>) => unknown[] | undefined
 }
 
 /**
  * Fetches logs from a TON address by iterating through account transactions.
  *
+ * Note: For TON, `startBlock` and `endBlock` in opts represent logical time (lt),
+ * not block sequence numbers. This is because TON transaction APIs are indexed by lt.
+ * The lt is monotonically increasing per account and suitable for ordering.
+ *
  * @param provider - TonClient4 instance
- * @param opts - Log filter options
- * @param timestampCache - Cache for block timestamps
+ * @param opts - Log filter options (startBlock/endBlock are lt values)
+ * @param ltTimestampCache - Cache mapping lt to Unix timestamp
  * @param decoders - Message decoder functions
  */
 export async function* fetchLogs(
   provider: TonClient4,
   opts: LogFilter,
-  timestampCache: Map<number, number>,
+  ltTimestampCache: Map<number, number>,
   decoders: LogDecoders,
 ): AsyncIterableIterator<Log_> {
   if (!opts.address) {
@@ -102,106 +47,106 @@ export async function* fetchLogs(
     return // No transactions
   }
 
-  let lt: bigint = BigInt(account.account.last.lt)
-  let hash: Buffer = Buffer.from(account.account.last.hash, 'base64')
+  // Pagination cursor
+  let cursorLt: bigint = BigInt(account.account.last.lt)
+  let cursorHash: Buffer = Buffer.from(account.account.last.hash, 'base64')
 
   const collectedLogs: Log_[] = []
-
-  // Helper to yield collected logs in reverse order (for forward search)
-  function* yieldCollected() {
-    for (let j = collectedLogs.length - 1; j >= 0; j--) {
-      yield collectedLogs[j]
-    }
-  }
+  let isFirstBatch = true
 
   while (true) {
-    const txs = await provider.getAccountTransactions(address, lt, hash)
-
+    const txs = await provider.getAccountTransactions(address, cursorLt, cursorHash)
     if (!txs || txs.length === 0) break
 
-    // Skip the first transaction when paginating (it's the same as last from previous batch)
-    const startIdx = collectedLogs.length > 0 || !searchForward ? 1 : 0
+    // Skip first tx when paginating (it's the same as last from previous batch)
+    const startIdx = isFirstBatch ? 0 : 1
+    isFirstBatch = false
 
     for (let i = startIdx; i < txs.length; i++) {
       const { tx } = txs[i]
-      const blockNumber = Number(tx.lt)
+      const txLt = Number(tx.lt)
       const timestamp = tx.now
 
-      // Cache timestamp for getBlockTimestamp lookups
-      timestampCache.set(blockNumber, timestamp)
+      // Cache lt → timestamp
+      ltTimestampCache.set(txLt, timestamp)
 
-      // Filter by block/time range
-      if (opts.startBlock && typeof opts.startBlock === 'number' && blockNumber < opts.startBlock) {
-        if (searchForward) yield* yieldCollected()
+      // Range filters
+      if (opts.startBlock && typeof opts.startBlock === 'number' && txLt < opts.startBlock) {
+        if (searchForward) yield* collectedLogs.reverse()
         return
       }
-
       if (opts.startTime && timestamp < opts.startTime) {
-        if (searchForward) yield* yieldCollected()
+        if (searchForward) yield* collectedLogs.reverse()
         return
       }
-
-      if (opts.endBlock && typeof opts.endBlock === 'number' && blockNumber > opts.endBlock) {
+      if (opts.endBlock && typeof opts.endBlock === 'number' && txLt > opts.endBlock) {
         continue
       }
 
-      // Extract logs from outgoing external messages
-      const outMessages = tx.outMessages.values()
+      // Extract logs from external-out messages
+      const compositeHash = `${address.toRawString()}:${tx.lt}:${tx.hash().toString('hex')}`
       let index = 0
-      for (const msg of outMessages) {
-        if (msg.info.type === 'external-out') {
-          const data = msg.body.toBoc().toString('base64')
-          const topicFilter = opts.topics?.[0]
 
-          // Only decode what we need based on filter
-          if (topicFilter === 'CommitReportAccepted') {
-            if (!decoders.decodeCommits({ data } as Log_)) {
-              index++
-              continue
-            }
-          } else if (topicFilter) {
-            if (!decoders.decodeMessage({ data })) {
-              index++
-              continue
-            }
+      for (const msg of tx.outMessages.values()) {
+        if (msg.info.type !== 'external-out') {
+          index++
+          continue
+        }
+
+        const data = msg.body.toBoc().toString('base64')
+        const topicFilter = opts.topics?.[0]
+
+        // Try to identify log type and build topics array
+        const topics: string[] = []
+
+        if (topicFilter === 'CommitReportAccepted') {
+          // Looking for commits - skip if not a valid commit
+          if (!decoders.tryDecodeAsCommit({ data })) {
+            index++
+            continue
           }
-
-          const decoded = decoders.decodeMessage({ data })
-          const compositeHash = `${address.toRawString()}:${tx.lt}:${tx.hash().toString('hex')}`
-
-          const log: Log_ = {
-            address: address.toRawString(),
-            topics: decoded ? [decoded.messageId] : [],
-            data,
-            blockNumber,
-            transactionHash: compositeHash,
-            index,
+          topics.push('CommitReportAccepted')
+        } else {
+          // Try to decode as CCIP message
+          const message = decoders.tryDecodeAsMessage({ data })
+          if (topicFilter && !message) {
+            // Topic filter set but couldn't decode as message - skip
+            index++
+            continue
           }
-
-          if (searchForward) {
-            collectedLogs.push(log)
-          } else {
-            yield log
+          if (message) {
+            topics.push('CCIPMessageSent')
           }
+        }
+
+        const log: Log_ = {
+          address: address.toRawString(),
+          topics,
+          data,
+          blockNumber: txLt,
+          transactionHash: compositeHash,
+          index,
+        }
+
+        if (searchForward) {
+          collectedLogs.push(log)
+        } else {
+          yield log
         }
         index++
       }
     }
 
-    // Set up pagination for next batch
+    // Update pagination cursor
     if (txs.length < 2) break
     const lastTx = txs[txs.length - 1].tx
-    lt = lastTx.lt
-    hash = Buffer.from(lastTx.hash())
+    cursorLt = lastTx.lt
+    cursorHash = Buffer.from(lastTx.hash())
 
-    if (
-      opts.startBlock &&
-      typeof opts.startBlock === 'number' &&
-      Number(lastTx.lt) < opts.startBlock
-    )
-      break
+    // Early exit if past start boundary
+    if (opts.startBlock && typeof opts.startBlock === 'number' && Number(cursorLt) < opts.startBlock) break
     if (opts.startTime && lastTx.now < opts.startTime) break
   }
 
-  if (searchForward) yield* yieldCollected()
+  if (searchForward) yield* collectedLogs.reverse()
 }

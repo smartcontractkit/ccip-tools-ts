@@ -4,7 +4,7 @@ import { type BytesLike, getAddress as checksumAddress, isBytesLike } from 'ethe
 import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
-import { type LogDecoders, fetchLogs, lookupTxByRawHash } from './logs.ts'
+import { type LogDecoders, fetchLogs } from './logs.ts'
 import { type LogFilter, Chain } from '../chain.ts'
 import {
   CCIPArgumentInvalidError,
@@ -45,7 +45,7 @@ import { Router } from './bindings/router.ts'
 import { generateUnsignedExecuteReport as generateUnsignedExecuteReportImpl } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import { type CCIPMessage_V1_6_TON, type UnsignedTONTx, isTONWallet } from './types.ts'
-import { parseJettonContent, waitForTransaction } from './utils.ts'
+import { parseJettonContent, waitForTransaction, lookupTxByRawHash } from './utils.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 
 /**
@@ -58,6 +58,14 @@ function isTvmError(error: unknown): error is Error & { exitCode: number } {
 
 /**
  * TON chain implementation supporting TON networks.
+ *
+ * TON uses two different ordering concepts:
+ * - `seqno` (sequence number): The actual block number in the blockchain
+ * - `lt` (logical time): A per-account transaction ordering timestamp
+ *
+ * This implementation uses `lt` for the `blockNumber` field in logs and transactions
+ * because TON's transaction APIs are indexed by `lt`, not `seqno`. The `lt` is
+ * monotonically increasing per account and suitable for pagination and ordering.
  */
 export class TONChain extends Chain<typeof ChainFamily.TON> {
   static {
@@ -67,7 +75,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   static readonly decimals = 9 // TON uses 9 decimals (nanotons)
   private readonly rateLimitedFetch: typeof fetch
   readonly provider: TonClient4
-  private readonly timestampCache: Map<number, number> = new Map()
+  /**
+   * Cache mapping logical time (lt) to Unix timestamp.
+   * Populated during getLogs iteration for later getBlockTimestamp lookups.
+   */
+  private readonly ltTimestampCache: Map<number, number> = new Map()
 
   /**
    * Creates a new TONChain instance.
@@ -116,26 +128,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
 
     const hostname = parsedUrl.hostname.toLowerCase()
-
-    // Validate hostname for TON V4 endpoints
-    const validV4Hostnames = [
-      'tonhubapi.com',
-      'ton-api.io',
-      'orbs.network',
-      'localhost',
-      '127.0.0.1',
-    ]
-    const isValidHost =
-      validV4Hostnames.some((valid) => hostname === valid || hostname.endsWith(`.${valid}`)) ||
-      hostname.includes('ton')
-
-    if (!isValidHost) {
-      throw new CCIPArgumentInvalidError(
-        'url',
-        `Invalid TON V4 RPC URL: ${url}. Use tonhubapi.com or similar V4 endpoint.`,
-      )
-    }
-
     const client = new TonClient4({ endpoint: url })
 
     // Verify connection by getting the latest block
@@ -165,7 +157,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return new TONChain(client, networkInfo(networkId), ctx)
   }
 
-  /** {@inheritDoc Chain.getBlockTimestamp} */
+  /**
+   * Fetch the timestamp for a given logical time (lt) or finalized block.
+   *
+   * Note: For TON, the `block` parameter represents logical time (lt), not block seqno.
+   * This is because TON transaction APIs are indexed by lt. The lt must have been
+   * previously cached via getLogs or getTransaction calls.
+   *
+   * @param block - Logical time (lt) as number, or 'finalized' for latest block timestamp
+   * @returns Unix timestamp in seconds
+   */
   async getBlockTimestamp(block: number | 'finalized'): Promise<number> {
     if (block === 'finalized') {
       // Get the latest block timestamp from V4 API
@@ -173,16 +174,17 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       return lastBlock.now
     }
 
-    // Check timestamp cache (populated by getLogs)
-    const cached = this.timestampCache.get(block)
+    // Check lt → timestamp cache
+    const cached = this.ltTimestampCache.get(block)
     if (cached !== undefined) {
       return cached
     }
 
-    // For TON, block number is logical time (lt) which is unique per account
-    // Cannot look up timestamp by lt alone without account address
+    // For TON, we cannot look up timestamp by lt alone without the account address.
+    // The lt must have been cached during a previous getLogs or getTransaction call.
     throw new CCIPNotImplementedError(
-      `getBlockTimestamp: lt ${block} not in cache - ensure getLogs was called first`,
+      `getBlockTimestamp: lt ${block} not in cache. ` +
+      `TON requires lt to be cached from getLogs or getTransaction calls first.`,
     )
   }
 
@@ -198,6 +200,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    *
    * @param hash - Transaction identifier in either format
    * @returns ChainTransaction with transaction details
+   *          Note: `blockNumber` contains logical time (lt), not block seqno
    */
   async getTransaction(hash: string): Promise<ChainTransaction> {
     const parts = hash.split(':')
@@ -253,6 +256,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
 
     const tx = txs[0].tx
+    const txLt = Number(tx.lt)
+
+    // Cache lt → timestamp for later getBlockTimestamp lookups
+    this.ltTimestampCache.set(txLt, tx.now)
 
     // Extract logs from outgoing external messages
     const logs: Log_[] = []
@@ -264,7 +271,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
           address: address.toRawString(),
           topics: [],
           data: msg.body.toBoc().toString('base64'),
-          blockNumber: Number(tx.lt),
+          blockNumber: txLt, // Note: This is lt (logical time), not block seqno
           transactionHash: hash,
           index: index,
         })
@@ -275,19 +282,26 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return {
       hash,
       logs,
-      blockNumber: Number(tx.lt),
+      blockNumber: txLt, // Note: This is lt (logical time), not block seqno
       timestamp: tx.now,
       from: address.toRawString(),
     }
   }
 
-  /** {@inheritDoc Chain.getLogs} */
+  /**
+   * Async generator that yields logs from TON transactions.
+   *
+   * Note: For TON, `startBlock` and `endBlock` in opts represent logical time (lt),
+   * not block sequence numbers. This is because TON transaction APIs are indexed by lt.
+   *
+   * @param opts - Log filter options (startBlock/endBlock are interpreted as lt values)
+   */
   async *getLogs(opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<Log_> {
     const decoders: LogDecoders = {
-      decodeMessage: (log) => TONChain.decodeMessage(log),
-      decodeCommits: (log) => TONChain.decodeCommits(log),
+      tryDecodeAsMessage: (log) => TONChain.decodeMessage(log),
+      tryDecodeAsCommit: (log) => TONChain.decodeCommits(log as Log_),
     }
-    yield* fetchLogs(this.provider, opts, this.timestampCache, decoders)
+    yield* fetchLogs(this.provider, opts, this.ltTimestampCache, decoders)
   }
 
   /** {@inheritDoc Chain.fetchRequestsInTx} */

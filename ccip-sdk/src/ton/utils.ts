@@ -1,6 +1,7 @@
 import { type Address, Cell, Dictionary, beginCell } from '@ton/core'
 import type { TonClient4 } from '@ton/ton'
-
+import { CCIPTransactionNotFoundError } from '../errors/specialized.ts'
+import type { Log_, WithLogger } from '../types.ts'
 import { CCIPTransactionNotFinalizedError } from '../errors/specialized.ts'
 import { bytesToBuffer, sleep } from '../utils.ts'
 
@@ -446,4 +447,65 @@ export async function parseJettonContent(
   }
 
   return { symbol, decimals }
+}
+
+/**
+ * Looks up a transaction by raw hash using the TonCenter V3 API.
+ *
+ * This is necessary because TON's V4 API requires (address, lt, hash) for lookups,
+ * but users typically only have the raw transaction hash from explorers.
+ * TonCenter V3 provides an index that allows hash-only lookups.
+ *
+ * @param hash - Raw 64-char hex transaction hash
+ * @param isTestnet - Whether to use testnet API
+ * @param rateLimitedFetch - Rate-limited fetch function
+ * @param logger - Logger instance
+ * @returns Transaction identifier components needed for V4 API lookup
+ */
+export async function lookupTxByRawHash(
+  hash: string,
+  isTestnet: boolean,
+  rateLimitedFetch: typeof fetch,
+  logger: WithLogger['logger'],
+): Promise<{
+  account: string
+  lt: string
+  hash: string
+}> {
+  const baseUrl = isTestnet
+    ? 'https://testnet.toncenter.com/api/v3/transactions'
+    : 'https://toncenter.com/api/v3/transactions'
+
+  // TonCenter V3 accepts hex directly
+  const cleanHash = hash.startsWith('0x') ? hash.slice(2) : hash
+
+  const url = `${baseUrl}?hash=${cleanHash}`
+  logger?.debug?.(`TonCenter V3 lookup: ${url}`)
+
+  let response: Response
+  try {
+    response = await rateLimitedFetch(url, {
+      headers: { Accept: 'application/json' },
+    })
+  } catch (error) {
+    logger?.error?.(`TonCenter V3 fetch failed:`, error)
+    throw new CCIPTransactionNotFoundError(hash, { cause: error as Error })
+  }
+
+  let data: { transactions?: Array<{ account: string; lt: string; hash: string }> }
+  try {
+    data = (await response.json()) as typeof data
+  } catch (error) {
+    logger?.error?.(`TonCenter V3 JSON parse failed:`, error)
+    throw new CCIPTransactionNotFoundError(hash, { cause: error as Error })
+  }
+
+  logger?.debug?.(`TonCenter V3 response:`, data)
+
+  if (!data.transactions || data.transactions.length === 0) {
+    logger?.debug?.(`TonCenter V3: no transactions found for hash ${cleanHash}`)
+    throw new CCIPTransactionNotFoundError(hash)
+  }
+
+  return data.transactions[0]
 }

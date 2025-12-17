@@ -1,4 +1,4 @@
-// TODO: FIXME: Remove local copies when chainlink-ton is published as npm package
+// TODO: FIXME: Remove local copies and import when chainlink-ton is published as npm package
 import { type Address, type ContractProvider, Dictionary } from '@ton/core'
 
 /**
