@@ -45,7 +45,7 @@ import { Router } from './bindings/router.ts'
 import { generateUnsignedExecuteReport as generateUnsignedExecuteReportImpl } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import { type CCIPMessage_V1_6_TON, type UnsignedTONTx, isTONWallet } from './types.ts'
-import { parseJettonContent, waitForTransaction, lookupTxByRawHash } from './utils.ts'
+import { lookupTxByRawHash, parseJettonContent, waitForTransaction } from './utils.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 
 /**
@@ -184,7 +184,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // The lt must have been cached during a previous getLogs or getTransaction call.
     throw new CCIPNotImplementedError(
       `getBlockTimestamp: lt ${block} not in cache. ` +
-      `TON requires lt to be cached from getLogs or getTransaction calls first.`,
+        `TON requires lt to be cached from getLogs or getTransaction calls first.`,
     )
   }
 

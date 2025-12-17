@@ -144,7 +144,12 @@ export async function* fetchLogs(
     cursorHash = Buffer.from(lastTx.hash())
 
     // Early exit if past start boundary
-    if (opts.startBlock && typeof opts.startBlock === 'number' && Number(cursorLt) < opts.startBlock) break
+    if (
+      opts.startBlock &&
+      typeof opts.startBlock === 'number' &&
+      Number(cursorLt) < opts.startBlock
+    )
+      break
     if (opts.startTime && lastTx.now < opts.startTime) break
   }
 

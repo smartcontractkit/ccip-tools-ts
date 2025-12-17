@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { before, describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 
 import { type Cell, Address, Dictionary, beginCell, toNano } from '@ton/core'
 import type { KeyPair } from '@ton/crypto'
@@ -319,7 +319,9 @@ describe('TON index unit tests', () => {
       })
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
-      const result = await tonChain.typeAndVersion('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+      const result = await tonChain.typeAndVersion(
+        'EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa',
+      )
 
       assert.equal(result[0], 'OffRamp')
       assert.equal(result[1], '1.6.0')
@@ -333,7 +335,9 @@ describe('TON index unit tests', () => {
       })
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
-      const result = await tonChain.typeAndVersion('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+      const result = await tonChain.typeAndVersion(
+        'EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa',
+      )
 
       assert.equal(result[0], 'OnRamp')
       assert.equal(result[1], '1.6.0')
@@ -347,7 +351,9 @@ describe('TON index unit tests', () => {
       })
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
-      const result = await tonChain.typeAndVersion('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+      const result = await tonChain.typeAndVersion(
+        'EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa',
+      )
 
       assert.equal(result[0], 'Router')
       assert.equal(result[1], '1.6.0')
@@ -361,7 +367,9 @@ describe('TON index unit tests', () => {
       })
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
-      const result = await tonChain.typeAndVersion('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+      const result = await tonChain.typeAndVersion(
+        'EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa',
+      )
 
       assert.equal(result[0], 'OffRamp')
       assert.equal(result[1], '1.6.0')

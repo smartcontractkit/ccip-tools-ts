@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import { beginCell } from '@ton/core'
 import { toBigInt } from 'ethers'
 
-import { extractMagicTag, hexToBuffer, tryParseCell, lookupTxByRawHash } from './utils.ts'
+import { extractMagicTag, hexToBuffer, lookupTxByRawHash, tryParseCell } from './utils.ts'
 import {
   EVMExtraArgsV1Tag,
   EVMExtraArgsV2Tag,
@@ -130,10 +130,10 @@ describe('TON utils unit tests', () => {
 
   describe('lookupTxByRawHash', () => {
     const mockLogger = {
-      debug: () => { },
-      error: () => { },
-      info: () => { },
-      warn: () => { },
+      debug: () => {},
+      error: () => {},
+      info: () => {},
+      warn: () => {},
     }
 
     it('should strip 0x prefix from hash', async () => {
@@ -182,8 +182,8 @@ describe('TON utils unit tests', () => {
 
       await lookupTxByRawHash('abc', false, mockFetch, mockLogger)
 
-      const parsed = new URL(capturedUrl);
-      assert.equal(parsed.hostname, 'toncenter.com', 'Should use mainnet URL');
+      const parsed = new URL(capturedUrl)
+      assert.equal(parsed.hostname, 'toncenter.com', 'Should use mainnet URL')
     })
 
     it('should throw CCIPTransactionNotFoundError when no transactions found', async () => {
