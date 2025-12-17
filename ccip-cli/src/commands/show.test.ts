@@ -12,6 +12,7 @@ const RPCS = [
   process.env['RPC_AVAX'] || 'https://avalanche-fuji-c-chain-rpc.publicnode.com',
   process.env['RPC_APTOS'] || 'testnet',
   process.env['RPC_SOLANA'] || 'https://api.devnet.solana.com',
+  process.env['RPC_TON'] || 'https://testnet-v4.tonhubapi.com',
 ]
 
 /**
@@ -533,4 +534,53 @@ describe('e2e command show Aptos', () => {
       )
     },
   )
+})
+
+describe('e2e command show TON', () => {
+  // Test transaction hash (raw 64-char hex, resolved via TonCenter)
+  const TX_HASH = '160f4da4b46fa0370ac7f4fcdac03f3a85919bce900be0bacf539df61fca2525'
+  const MESSAGE_ID = '0x48f80b0f66b929ef4196d3b3947051a7d9c6b892db38f98b8df07294808c3e7e'
+  const SENDER = 'EQAFbU7ATpBTe2vPiTpThvehgNiynnD4llSA8IaJThJFpvP7'
+  const RECEIVER = '0x00000000000000000000000040d7c009d073e0d740ed2c50ca0a48c84a3f8b47'
+  const ONRAMP = '0:d3201cce36637ae2d3262f299fd3e8ed73f00059f0e55e265cafb8dae6b8bb6a'
+  const OFFRAMP = '0x93Bb167Ebd91987f9Dff6B954b9Eead469d2b849'
+
+  it('should show complete CCIP transaction details TON to EVM', { timeout: 120000 }, async () => {
+    const args = buildShowArgs(TX_HASH)
+    const result = await spawnCLI(args, 120000)
+
+    assert.equal(result.exitCode, 0)
+    const output = result.stdout
+
+    // Lane information
+    assert.match(output, /name.*ton-testnet.*ethereum-testnet-sepolia/i)
+    assert.match(output, /chainId.*-3.*11155111/)
+    assert.match(output, /chainSelector.*1399300952838017768n?.*16015286601757825753n?/)
+    assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
+
+    // Request information
+    assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
+    assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
+    assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
+    assert.match(output, /sequenceNumber.*985/)
+    assert.match(output, /nonce.*0.*allow out-of-order/)
+    assert.match(output, /gasLimit.*1000000n?/)
+    assert.match(output, /data.*ccip-staging-20302718339/)
+    assert.match(output, /allowOutOfOrderExecution.*true/)
+
+    // Commit information
+    assert.match(output, /Commit.*dest/i)
+    assert.match(
+      output,
+      /merkleRoot.*0x03fac3a156309096f9415ea40f4a93e8674771eb6bc4511b31807510b6777207/i,
+    )
+    assert.match(output, /min.*985/)
+    assert.match(output, /max.*985/)
+
+    // Execution receipt
+    assert.match(output, /Receipts.*dest/i)
+    assert.match(output, /state.*success/i)
+    assert.match(output, /gasUsed.*41293/)
+    assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
+  })
 })

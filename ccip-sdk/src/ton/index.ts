@@ -184,7 +184,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // The lt must have been cached during a previous getLogs or getTransaction call.
     throw new CCIPNotImplementedError(
       `getBlockTimestamp: lt ${block} not in cache. ` +
-        `TON requires lt to be cached from getLogs or getTransaction calls first.`,
+      `TON requires lt to be cached from getLogs or getTransaction calls first.`,
     )
   }
 
@@ -457,6 +457,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         'get_jetton_data',
       )
 
+      // skips 
       result.reader.readBigNumber() // total_supply
       result.reader.readBigNumber() // mintable
       result.reader.readAddress() // admin_address
@@ -653,7 +654,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const hasMerkleRoot = slice.loadBit()
 
       if (!hasMerkleRoot) {
-        // No merkle root - could be price-only update, skip for now
+        // No merkle root: could be price-only update, skip for now
         return undefined
       }
 
@@ -671,7 +672,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const maxSeqNr = slice.loadUintBig(64)
       const merkleRoot = '0x' + slice.loadUintBig(256).toString(16).padStart(64, '0')
 
-      // Read hasPriceUpdates (1 bit) - we don't need the data but should consume it
+      // Read hasPriceUpdates (1 bit): we don't need the data but should consume it
       if (slice.remainingBits >= 1) {
         const hasPriceUpdates = slice.loadBit()
         if (hasPriceUpdates && slice.remainingRefs > 0) {
