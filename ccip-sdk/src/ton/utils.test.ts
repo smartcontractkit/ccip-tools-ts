@@ -182,10 +182,8 @@ describe('TON utils unit tests', () => {
 
       await lookupTxByRawHash('abc', false, mockFetch, mockLogger)
 
-      assert.ok(
-        capturedUrl.includes('toncenter.com') && !capturedUrl.includes('testnet'),
-        'Should use mainnet URL',
-      )
+      const parsed = new URL(capturedUrl);
+      assert.equal(parsed.hostname, 'toncenter.com', 'Should use mainnet URL');
     })
 
     it('should throw CCIPTransactionNotFoundError when no transactions found', async () => {
