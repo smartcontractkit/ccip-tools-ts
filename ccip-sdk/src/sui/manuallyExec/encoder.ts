@@ -1,7 +1,8 @@
 import { bcs } from '@mysten/sui/bcs'
 import type { BytesLike } from 'ethers'
 
-import { type SuiExtraArgsV1, decodeExtraArgs } from '../../extra-args.ts'
+import { CCIPMessageInvalidError } from '../../errors/specialized.ts'
+import { decodeExtraArgs } from '../../extra-args.ts'
 import type { ExecutionReport } from '../../types.ts'
 import { bytesToBuffer, networkInfo } from '../../utils.ts'
 import type { CCIPMessage_V1_6_Sui } from '../types.ts'
@@ -31,19 +32,28 @@ const ExecutionReportBCS = bcs.struct('ExecutionReport', {
   proofs: bcs.vector(bcs.fixedArray(32, bcs.u8())),
 })
 
+/**
+ * Serializes an execution report for Sui manual execution.
+ * @param executionReport - The execution report to serialize.
+ * @returns Serialized execution report as Uint8Array.
+ */
 export function serializeExecutionReport(
   executionReport: ExecutionReport<CCIPMessage_V1_6_Sui>,
 ): Uint8Array {
   const { message, offchainTokenData, proofs } = executionReport
 
   if (!message) {
-    throw new Error('Message is undefined in execution report')
+    throw new CCIPMessageInvalidError('Message is undefined in execution report')
   }
 
   const decodedExtraArgs = decodeExtraArgs(
     message.extraArgs,
-    networkInfo(message.destChainSelector as bigint).family,
-  ) as SuiExtraArgsV1
+    networkInfo(message.destChainSelector).family,
+  )
+
+  if (!decodedExtraArgs || decodedExtraArgs._tag !== 'SuiExtraArgsV1') {
+    throw new CCIPMessageInvalidError('Expected Sui extra args')
+  }
 
   type TokenAmount = {
     sourcePoolAddress: string
@@ -54,12 +64,12 @@ export function serializeExecutionReport(
   }
 
   const reportData = {
-    source_chain_selector: message.sourceChainSelector as bigint,
-    message_id: Array.from(bytesToBuffer(message.messageId as string)),
-    header_source_chain_selector: message.sourceChainSelector as bigint,
-    dest_chain_selector: message.destChainSelector as bigint,
-    sequence_number: message.sequenceNumber as bigint,
-    nonce: message.nonce as bigint,
+    source_chain_selector: message.sourceChainSelector,
+    message_id: Array.from(bytesToBuffer(message.messageId)),
+    header_source_chain_selector: message.sourceChainSelector,
+    dest_chain_selector: message.destChainSelector,
+    sequence_number: message.sequenceNumber,
+    nonce: message.nonce,
     sender: Array.from(bytesToBuffer(message.sender)),
     data: Array.from(bytesToBuffer(message.data)),
     receiver: message.receiver,
@@ -84,7 +94,9 @@ export function serializeExecutionReport(
       const proofBytes = bytesToBuffer(proof)
       // Ensure each proof is exactly 32 bytes
       if (proofBytes.length !== 32) {
-        throw new Error(`Invalid proof length: expected 32 bytes, got ${proofBytes.length}`)
+        throw new CCIPMessageInvalidError(
+          `Invalid proof length: expected 32 bytes, got ${proofBytes.length}`,
+        )
       }
       return Array.from(proofBytes)
     }),

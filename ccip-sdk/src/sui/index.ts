@@ -14,6 +14,7 @@ import {
   CCIPError,
   CCIPErrorCode,
   CCIPExecTxRevertedError,
+  CCIPExtraArgsInvalidError,
   CCIPNotImplementedError,
   CCIPSuiMessageVersionInvalidError,
   CCIPVersionFeatureUnavailableError,
@@ -443,14 +444,14 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /**
    * Decodes extra arguments from Sui CCIP messages.
-   * @param _extraArgs - Encoded extra arguments bytes.
+   * @param extraArgs - Encoded extra arguments bytes.
    * @returns Decoded extra arguments or undefined if unknown format.
    */
   static decodeExtraArgs(extraArgs: BytesLike): SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' } {
     const data = getDataBytes(extraArgs)
     const hexBytes = toHex(data)
     if (!hexBytes.startsWith(SUI_EXTRA_ARGS_V1_TAG)) {
-      throw new Error(`Invalid Sui extra args tag. Expected ${SUI_EXTRA_ARGS_V1_TAG}`)
+      throw new CCIPExtraArgsInvalidError('Sui', hexBytes)
     }
 
     const abiData = '0x' + hexBytes.slice(8)

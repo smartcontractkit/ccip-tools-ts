@@ -4,6 +4,7 @@ import { Transaction } from '@mysten/sui/transactions'
 import { normalizeSuiAddress } from '@mysten/sui/utils'
 import { blake2b } from '@noble/hashes/blake2'
 
+import { CCIPDataFormatUnsupportedError } from '../errors/index.ts'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
 
 /**
@@ -63,13 +64,15 @@ export async function getCcipObjectRef(client: SuiClient, ccipPackageId: string)
   })
 
   if (pointerResponse.data.length === 0) {
-    throw new Error('No CCIPObjectRefPointer found for the given packageId')
+    throw new CCIPDataFormatUnsupportedError(
+      'No CCIPObjectRefPointer found for the given packageId',
+    )
   }
 
   // Get the pointer object to extract ccip_object_id
   const pointerId = pointerResponse.data[0].data?.objectId
   if (!pointerId) {
-    throw new Error('Pointer does not have objectId')
+    throw new CCIPDataFormatUnsupportedError('Pointer does not have objectId')
   }
 
   const pointerObject = await client.getObject({
@@ -78,7 +81,7 @@ export async function getCcipObjectRef(client: SuiClient, ccipPackageId: string)
   })
 
   if (pointerObject.data?.content?.dataType !== 'moveObject') {
-    throw new Error('Pointer object is not a Move object')
+    throw new CCIPDataFormatUnsupportedError('Pointer object is not a Move object')
   }
 
   const ccipObjectId = (pointerObject.data.content.fields as Record<string, unknown>)[
@@ -86,7 +89,7 @@ export async function getCcipObjectRef(client: SuiClient, ccipPackageId: string)
   ] as string
 
   if (!ccipObjectId) {
-    throw new Error('Could not find ccip_object_id in pointer')
+    throw new CCIPDataFormatUnsupportedError('Could not find ccip_object_id in pointer')
   }
 
   // Derive the CCIPObjectRef ID from the parent CCIPObject ID
@@ -108,13 +111,15 @@ export async function getOffRampStateObject(
   })
 
   if (offrampPointerResponse.data.length === 0) {
-    throw new Error('No OffRampStatePointer found for the given offramp package')
+    throw new CCIPDataFormatUnsupportedError(
+      'No OffRampStatePointer found for the given offramp package',
+    )
   }
 
   const offrampPointerId = offrampPointerResponse.data[0].data?.objectId
 
   if (!offrampPointerId) {
-    throw new Error('OffRampStatePointer does not have a valid objectId')
+    throw new CCIPDataFormatUnsupportedError('OffRampStatePointer does not have a valid objectId')
   }
 
   const offrampPointerObject = await client.getObject({
@@ -123,7 +128,7 @@ export async function getOffRampStateObject(
   })
 
   if (offrampPointerObject.data?.content?.dataType !== 'moveObject') {
-    throw new Error('OffRamp pointer object is not a Move object')
+    throw new CCIPDataFormatUnsupportedError('OffRamp pointer object is not a Move object')
   }
 
   const offrampObjectId = (offrampPointerObject.data.content.fields as Record<string, unknown>)[
@@ -131,13 +136,21 @@ export async function getOffRampStateObject(
   ] as string
 
   if (!offrampObjectId) {
-    throw new Error('Could not find off_ramp_object_id in pointer')
+    throw new CCIPDataFormatUnsupportedError('Could not find off_ramp_object_id in pointer')
   }
 
   // Derive the OffRampState ID from the parent OffRamp Object ID
   return deriveObjectID(offrampObjectId, new TextEncoder().encode('OffRampState'))
 }
 
+/**
+ * Get the receiver module configuration from the receiver registry.
+ * @param provider - Sui client
+ * @param ccipPackageId - CCIP package ID
+ * @param ccipObjectRef - CCIP object reference
+ * @param receiverPackageId - Receiver package ID
+ * @returns Receiver module name and package ID
+ */
 export async function getReceiverModule(
   provider: SuiClient,
   ccipPackageId: string,
@@ -158,17 +171,17 @@ export async function getReceiverModule(
   })
 
   if (result.error) {
-    throw new Error(`Failed to call get_receiver_config: ${result.error}`)
+    throw new CCIPDataFormatUnsupportedError(`Failed to call get_receiver_config: ${result.error}`)
   }
 
   if (!result.results || result.results.length === 0) {
-    throw new Error('No results returned from get_receiver_config')
+    throw new CCIPDataFormatUnsupportedError('No results returned from get_receiver_config')
   }
 
   const returnValues = result.results[0]?.returnValues
 
   if (!returnValues || returnValues.length === 0) {
-    throw new Error('No return values from get_receiver_config')
+    throw new CCIPDataFormatUnsupportedError('No return values from get_receiver_config')
   }
 
   // Decode the ReceiverConfig struct
@@ -191,6 +204,14 @@ export async function getReceiverModule(
   }
 }
 
+/**
+ * Fetch token configurations for the given token amounts.
+ * @param client - Sui client
+ * @param ccipPackageId - CCIP package ID
+ * @param ccipObjectRef - CCIP object reference
+ * @param tokenAmounts - Token amounts from CCIP message
+ * @returns Array of token configurations
+ */
 export async function fetchTokenConfigs(
   client: SuiClient,
   ccipPackageId: string,
@@ -223,17 +244,23 @@ export async function fetchTokenConfigs(
     })
 
     if (result.error) {
-      throw new Error(`Failed to fetch token config for ${tokenAddress}: ${result.error}`)
+      throw new CCIPDataFormatUnsupportedError(
+        `Failed to fetch token config for ${tokenAddress}: ${result.error}`,
+      )
     }
 
     if (!result.results || result.results.length === 0) {
-      throw new Error(`No results returned from get_token_config_struct for ${tokenAddress}`)
+      throw new CCIPDataFormatUnsupportedError(
+        `No results returned from get_token_config_struct for ${tokenAddress}`,
+      )
     }
 
     const returnValues = result.results[0]?.returnValues
 
     if (!returnValues || returnValues.length === 0) {
-      throw new Error(`No return values from get_token_config_struct for ${tokenAddress}`)
+      throw new CCIPDataFormatUnsupportedError(
+        `No return values from get_token_config_struct for ${tokenAddress}`,
+      )
     }
 
     // Parse the TokenConfig struct from BCS-encoded bytes

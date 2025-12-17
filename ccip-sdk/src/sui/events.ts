@@ -1,6 +1,11 @@
 import type { SuiClient, SuiEventFilter } from '@mysten/sui/client'
 import type { SuiGraphQLClient } from '@mysten/sui/graphql'
 
+import { CCIPDataFormatUnsupportedError } from '../errors/index.ts'
+
+/**
+ * Commit event data structure from Sui blockchain.
+ */
 export type CommitEvent = {
   unblessed_merkle_roots: {
     max_seq_nr: string
@@ -110,13 +115,13 @@ async function getCheckpointsFromTransactions(
   })
 
   if (result.errors) {
-    throw new Error(
+    throw new CCIPDataFormatUnsupportedError(
       `Error fetching transaction checkpoints: ${JSON.stringify(result.errors, null, 2)}`,
     )
   }
 
   if (!result.data?.first) {
-    throw new Error('First transaction not found in GraphQL response')
+    throw new CCIPDataFormatUnsupportedError('First transaction not found in GraphQL response')
   }
 
   const startCheckpoint = parseInt(result.data.first.effects.checkpoint.sequenceNumber)
@@ -138,7 +143,7 @@ async function getCheckpointsFromTransactions(
       variables: {},
     })
     if (!latestResult.data) {
-      throw new Error('Failed to fetch latest checkpoint')
+      throw new CCIPDataFormatUnsupportedError('Failed to fetch latest checkpoint')
     }
     endCheckpoint = parseInt(latestResult.data.checkpoints.nodes[0].sequenceNumber)
   } else {
@@ -238,32 +243,35 @@ async function fetchEventsWithCheckpointRange<T>(
       }
     `
 
-    const result = await graphqlClient.query<EventsQueryResponse>({
-      query,
-      variables: {
-        type,
-        after: cursor,
-        afterCheckpoint: startCheckpoint,
-        beforeCheckpoint: endCheckpoint + 1, // beforeCheckpoint is exclusive
-      },
-    })
+    const result: { data?: EventsQueryResponse; errors?: unknown } =
+      await graphqlClient.query<EventsQueryResponse>({
+        query,
+        variables: {
+          type,
+          after: cursor,
+          afterCheckpoint: startCheckpoint,
+          beforeCheckpoint: endCheckpoint + 1, // beforeCheckpoint is exclusive
+        },
+      })
 
-    // eslint-disable-next-line
-    if ((result as any)?.errors) {
-      // eslint-disable-next-line
-      throw new Error(`GraphQL errors: ${JSON.stringify((result as any).errors, null, 2)}`)
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    if (result.errors) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      throw new CCIPDataFormatUnsupportedError(
+        `GraphQL errors: ${JSON.stringify(result.errors, null, 2)}`,
+      )
     }
 
-    // eslint-disable-next-line
-    if (!(result as any).data) {
-      throw new Error('No data returned from GraphQL query')
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    if (!result.data) {
+      throw new CCIPDataFormatUnsupportedError('No data returned from GraphQL query')
     }
 
-    // eslint-disable-next-line
-    const { nodes, pageInfo } = (result as any).data.events as {
-      nodes: GraphQLEventNode[]
-      pageInfo: { hasNextPage: boolean; endCursor: string | null }
-    }
+    const {
+      nodes,
+      pageInfo,
+    }: { nodes: GraphQLEventNode[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } =
+      result.data.events
 
     for (const node of nodes) {
       allEvents.push({

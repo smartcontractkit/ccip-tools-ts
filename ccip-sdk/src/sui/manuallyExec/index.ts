@@ -1,16 +1,19 @@
 import { Transaction } from '@mysten/sui/transactions'
 
 import { serializeExecutionReport } from './encoder.ts'
-import { type SuiExtraArgsV1, decodeExtraArgs } from '../../extra-args.ts'
+import { CCIPMessageInvalidError } from '../../errors/specialized.ts'
+import { decodeExtraArgs } from '../../extra-args.ts'
 import type { ExecutionReport } from '../../types.ts'
 import { networkInfo } from '../../utils.ts'
 import type { CCIPMessage_V1_6_Sui } from '../types.ts'
 
+/** Configuration for manually executing a Sui receiver module. */
 export type ManuallyExecuteSuiReceiverConfig = {
   moduleName: string
   packageId: string
 }
 
+/** Configuration for a token pool in manual execution. */
 export type TokenConfig = {
   tokenPoolPackageId: string
   tokenPoolModule: string
@@ -22,6 +25,7 @@ export type TokenConfig = {
   releaseOrMintParams: string[]
 }
 
+/** Input parameters for building a Sui manual execution transaction. */
 export type SuiManuallyExecuteInput = {
   offrampAddress: string
   executionReport: ExecutionReport<CCIPMessage_V1_6_Sui>
@@ -33,6 +37,11 @@ export type SuiManuallyExecuteInput = {
   overrideReceiverObjectIds?: string[]
 }
 
+/**
+ * Builds a Sui Programmable Transaction Block for manual CCIP message execution.
+ * @param params - Input parameters for building the manual execution transaction.
+ * @returns A Transaction object ready to be signed and executed.
+ */
 export function buildManualExecutionPTB({
   offrampAddress,
   executionReport,
@@ -68,7 +77,7 @@ export function buildManualExecutionPTB({
   // Process token pool transfers
   if (tokenConfigs && tokenConfigs.length > 0) {
     if (executionReport.message.tokenAmounts.length !== tokenConfigs.length) {
-      throw new Error('Token amounts length does not match token configs length')
+      throw new CCIPMessageInvalidError('Token amounts length does not match token configs length')
     }
 
     // Process each token transfer
@@ -90,20 +99,21 @@ export function buildManualExecutionPTB({
   // Decode extraArgs to get receiverObjectIds
   const decodedExtraArgs = decodeExtraArgs(
     executionReport.message.extraArgs,
-    networkInfo(executionReport.message.destChainSelector as bigint).family,
-  ) as SuiExtraArgsV1
+    networkInfo(executionReport.message.destChainSelector).family,
+  )
+
+  if (!decodedExtraArgs || decodedExtraArgs._tag !== 'SuiExtraArgsV1') {
+    throw new CCIPMessageInvalidError('Expected Sui extra args')
+  }
 
   if (decodedExtraArgs.receiverObjectIds.length === 0) {
-    throw new Error('No receiverObjectIds provided in SUIExtraArgsV1')
+    throw new CCIPMessageInvalidError('No receiverObjectIds provided in SUIExtraArgsV1')
   }
   // Call the receiver contract
   tx.moveCall({
     target: `${receiverConfig.packageId}::${receiverConfig.moduleName}::ccip_receive`,
     arguments: [
-      tx.pure.vector(
-        'u8',
-        Buffer.from((executionReport.message.messageId as string).slice(2), 'hex'),
-      ),
+      tx.pure.vector('u8', Buffer.from(executionReport.message.messageId.slice(2), 'hex')),
       tx.object(ccipObjectRef),
       messageArg,
       // if overrideReceiverObjectIds is provided, use them; otherwise, use the ones from decodedExtraArgs (original message)
