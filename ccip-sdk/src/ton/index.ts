@@ -184,7 +184,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // The lt must have been cached during a previous getLogs or getTransaction call.
     throw new CCIPNotImplementedError(
       `getBlockTimestamp: lt ${block} not in cache. ` +
-      `TON requires lt to be cached from getLogs or getTransaction calls first.`,
+        `TON requires lt to be cached from getLogs or getTransaction calls first.`,
     )
   }
 
@@ -457,7 +457,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         'get_jetton_data',
       )
 
-      // skips 
+      // skips
       result.reader.readBigNumber() // total_supply
       result.reader.readBigNumber() // mintable
       result.reader.readAddress() // admin_address

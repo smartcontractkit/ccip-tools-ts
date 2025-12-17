@@ -143,15 +143,34 @@ function resultToObject<T>(o: T): T {
       : o
 }
 
+/**
+ * Recursively filters out numeric keys from an object (removes array-like indices from ethers Result.toObject())
+ */
+function stripNumericKeys(obj: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(obj)
+      .filter(([key]) => !/^\d+$/.test(key))
+      .map(([key, value]) => [
+        key,
+        value !== null && typeof value === 'object' && !Array.isArray(value)
+          ? stripNumericKeys(value as Record<string, unknown>)
+          : value,
+      ]),
+  )
+}
 function resultsToMessage(result: Result): Record<string, unknown> {
   if (result.message) result = result.message as Result
+  const obj = stripNumericKeys(result.toObject())
+  // Convert nested Result objects (eg. header) to plain objects
+  if (obj.header && obj.header instanceof Result) {
+    obj.header = stripNumericKeys(obj.header.toObject())
+  }
   return {
-    ...result.toObject(),
-    tokenAmounts: (result.tokenAmounts as Result[]).map((ta) => ta.toObject()),
+    ...obj,
+    tokenAmounts: (result.tokenAmounts as Result[]).map((ta) => stripNumericKeys(ta.toObject())),
     ...(result.sourceTokenData
       ? { sourceTokenData: (result.sourceTokenData as Result).toArray() }
       : {}),
-    ...(result.header ? (result.header as Result).toObject() : {}),
   }
 }
 
