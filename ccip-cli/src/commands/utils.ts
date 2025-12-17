@@ -10,6 +10,7 @@ import {
   CCIPError,
   CCIPErrorCode,
   ExecutionState,
+  decodeAddress,
   networkInfo,
   supportedChains,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -207,6 +208,15 @@ export async function prettyRequest(this: Ctx, source: Chain, request: CCIPReque
   }
   const nonce = Number(request.message.nonce)
 
+  // Normalize receiver to destination chain format for display
+  let displayReceiver = request.message.receiver
+  try {
+    const destFamily = networkInfo(request.lane.destChainSelector).family
+    displayReceiver = decodeAddress(request.message.receiver, destFamily)
+  } catch {
+    // Keep raw receiver if normalization fails (unknown chain)
+  }
+
   const rest = omit(
     request.message,
     'messageId',
@@ -228,7 +238,7 @@ export async function prettyRequest(this: Ctx, source: Chain, request: CCIPReque
     messageId: request.message.messageId,
     ...(request.tx.from ? { origin: request.tx.from } : {}),
     sender: request.message.sender,
-    receiver: request.message.receiver,
+    receiver: displayReceiver,
     sequenceNumber: Number(request.message.sequenceNumber),
     nonce: nonce === 0 ? '0 => allow out-of-order exec' : nonce,
     ...('gasLimit' in request.message
