@@ -166,7 +166,8 @@ describe('TON utils unit tests', () => {
 
       await lookupTxByRawHash('abc', true, mockFetch, mockLogger)
 
-      assert.ok(capturedUrl.includes('testnet.toncenter.com'), 'Should use testnet URL')
+      const parsed = new URL(capturedUrl)
+      assert.equal(parsed.hostname, 'testnet.toncenter.com', 'Should use testnet URL')
     })
 
     it('should use mainnet URL when isTestnet=false', async () => {
