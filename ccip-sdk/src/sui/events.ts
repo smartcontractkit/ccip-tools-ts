@@ -1,6 +1,16 @@
 import type { SuiClient, SuiEventFilter } from '@mysten/sui/client'
 import type { SuiGraphQLClient } from '@mysten/sui/graphql'
 
+export type CommitEvent = {
+  unblessed_merkle_roots: {
+    max_seq_nr: string
+    merkle_root: string
+    min_seq_nr: string
+    on_ramp_address: string
+    source_chain_selector: string
+  }[]
+}
+
 async function getTransactionDigestsInTimeRange(
   client: SuiClient,
   startTime: Date,

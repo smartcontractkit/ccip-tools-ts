@@ -1,9 +1,8 @@
-import { SuiClient } from '@mysten/sui/client'
+import { type SuiTransactionBlockResponse, SuiClient } from '@mysten/sui/client'
 import type { Keypair } from '@mysten/sui/cryptography'
 import { SuiGraphQLClient } from '@mysten/sui/graphql'
 import { Transaction } from '@mysten/sui/transactions'
 import { type BytesLike, isBytesLike } from 'ethers'
-import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { AptosChain } from '../aptos/index.ts'
@@ -17,7 +16,6 @@ import {
   CCIPNotImplementedError,
   CCIPSuiMessageVersionInvalidError,
   CCIPVersionFeatureUnavailableError,
-  CCIPWalletInvalidError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1 } from '../extra-args.ts'
 import { getSuiLeafHasher } from './hasher.ts'
@@ -41,7 +39,7 @@ import {
 } from '../types.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
 import { decodeAddress, networkInfo } from '../utils.ts'
-import { getSuiEventsInTimeRange } from './events.ts'
+import { type CommitEvent, getSuiEventsInTimeRange } from './events.ts'
 import {
   type SuiManuallyExecuteInput,
   type TokenConfig,
@@ -211,17 +209,12 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   async *getLogs(opts: LogFilter & { versionAsHash?: boolean }) {
     // Extract the event type from topics
     const topic = Array.isArray(opts.topics?.[0]) ? opts.topics[0][0] : opts.topics?.[0] || ''
-    if (!topic || (topic !== 'ReportAccepted' && topic !== 'CommitReportAccepted')) {
+    if (!topic || topic !== 'CommitReportAccepted') {
       throw new CCIPVersionFeatureUnavailableError(
         'Event type',
         topic || 'unknown',
-        'ReportAccepted or CommitReportAccepted',
+        'CommitReportAccepted',
       )
-    }
-
-    const eventTypes = {
-      ReportAccepted: `${this.contractsDir.offRamp}::offramp::ReportAccepted`,
-      CommitReportAccepted: `${this.contractsDir.offRamp}::offramp::CommitReportAccepted`,
     }
 
     const startTime = opts.startTime ? new Date(opts.startTime * 1000) : new Date(0)
@@ -229,19 +222,13 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       ? new Date(opts.endBlock)
       : new Date(startTime.getTime() + 1 * 24 * 60 * 60 * 1000) // default to +24h
 
-    type SuiEventData = {
-      package_id: string
-      module_name: string
-      tx_digest: string
-      checkpoint: number
-      event_name: string
-      [key: string]: unknown
-    }
-
-    const events = await getSuiEventsInTimeRange<SuiEventData>(
+    this.logger.info(
+      `Fetching Sui events of type ${topic} from ${startTime.toISOString()} to ${endTime.toISOString()}`,
+    )
+    const events = await getSuiEventsInTimeRange<CommitEvent>(
       this.client,
       this.graphqlClient,
-      eventTypes[topic],
+      `${this.contractsDir.offRamp}::offramp::CommitReportAccepted`,
       startTime,
       endTime,
     )
@@ -249,12 +236,12 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     for (const event of events) {
       const eventData = event.contents.json
       yield {
-        address: eventData.package_id + '::' + eventData.module_name,
+        address: this.contractsDir.offRamp,
         transactionHash: event.transaction?.digest || '',
         index: 0, // Sui events do not have an index, set to 0
         blockNumber: Number(event.transaction?.effects.checkpoint.sequenceNumber || 0),
         data: eventData,
-        topics: [eventData.event_name],
+        topics: [topic],
       }
     }
   }
@@ -484,30 +471,21 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     if (!log.data || typeof log.data !== 'object' || !('unblessed_merkle_roots' in log.data)) {
       return
     }
-
     const toHexFromBase64 = (b64: string) => '0x' + Buffer.from(b64, 'base64').toString('hex')
 
-    const unblessedRoots = log.data.unblessed_merkle_roots
+    const eventData = log.data as CommitEvent
+    const unblessedRoots = eventData.unblessed_merkle_roots
     if (!Array.isArray(unblessedRoots) || unblessedRoots.length === 0) {
       return
     }
 
-    type UnblessedRoot = {
-      source_chain_selector: string
-      on_ramp_address: string
-      min_seq_nr: string
-      max_seq_nr: string
-      merkle_root: string
-    }
-
-    return unblessedRoots.map((root: unknown) => {
-      const typedRoot = root as UnblessedRoot
+    return unblessedRoots.map((root) => {
       return {
-        sourceChainSelector: BigInt(typedRoot.source_chain_selector),
-        onRampAddress: log.address,
-        minSeqNr: BigInt(typedRoot.min_seq_nr),
-        maxSeqNr: BigInt(typedRoot.max_seq_nr),
-        merkleRoot: toHexFromBase64(typedRoot.merkle_root),
+        sourceChainSelector: BigInt(root.source_chain_selector),
+        onRampAddress: toHexFromBase64(root.on_ramp_address),
+        minSeqNr: BigInt(root.min_seq_nr),
+        maxSeqNr: BigInt(root.max_seq_nr),
+        merkleRoot: toHexFromBase64(root.merkle_root),
       }
     })
   }
@@ -518,7 +496,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @returns Decoded execution receipt or undefined.
    */
   static decodeReceipt(_log: Log_): ExecutionReceipt | undefined {
-    throw new CCIPNotImplementedError()
+    return
   }
 
   /**
@@ -638,23 +616,34 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       tx.setGasBudget(opts.gasLimit)
     }
 
+    this.logger.info(`Executing Sui CCIP executeReport transaction...`)
     // Sign and execute the transaction
-    const result = await this.client.signAndExecuteTransaction({
-      signer: wallet,
-      transaction: tx,
-      options: {
-        showEffects: true,
-        showEvents: true,
-      },
-    })
+    let result: SuiTransactionBlockResponse
+    try {
+      result = await this.client.signAndExecuteTransaction({
+        signer: wallet,
+        transaction: tx,
+        options: {
+          showEffects: true,
+          showEvents: true,
+        },
+      })
+    } catch (e) {
+      throw new CCIPError(
+        CCIPErrorCode.TRANSACTION_NOT_FINALIZED,
+        `Failed to send Sui executeReport transaction: ${(e as Error).message}`,
+      )
+    }
 
-    // Check if transaction was successful
+    // Check if transaction inmediately reverted
     if (result.effects?.status?.status !== 'success') {
       const errorMsg = result.effects?.status?.error || 'Unknown error'
       throw new CCIPExecTxRevertedError(result.digest, {
         context: { error: errorMsg },
       })
     }
+
+    this.logger.info(`Waiting for Sui transaction ${result.digest} to be finalized...`)
 
     await this.client.waitForTransaction({
       digest: result.digest,
