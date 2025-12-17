@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI: RPC endpoint url racer now triggers chain-families on-demand
 - CLI: `--rpcs`/`-r` now can split CSV strings
 - CLI: if `--wallet` is omitted and `--rpcs-file=['./.env]` has a `USER_KEY=` or `PRIVATE_KEY=` variable, it will be used as wallet
+- SDK: `CCIPMessage` loses `header`; properties now are merged to `message` root (e.g. `message.messageId`)
 
 # [0.91.0] - 2025-12-08 - Pre-release
 - `Chain.sendMessage` now calls `getFee` by itself, if not provided; it also returns a `CCIPRequest`

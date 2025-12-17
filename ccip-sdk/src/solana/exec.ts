@@ -51,7 +51,7 @@ export async function generateUnsignedExecuteReport(
   let bufferId
   if (opts?.forceBuffer) {
     // Use messageId for bufferId. This is arbitrary, but easy to track.
-    bufferId = bytesToBuffer(execReport.message.header.messageId)
+    bufferId = bytesToBuffer(execReport.message.messageId)
   }
 
   const {
@@ -324,7 +324,7 @@ async function getManuallyExecuteInputs({
     originalSender: bytesToBuffer(execReport.message.sender),
     payer,
     messagingAccounts,
-    sourceChainSelector: execReport.message.header.sourceChainSelector,
+    sourceChainSelector: execReport.message.sourceChainSelector,
     tokenTransferAndOffchainData,
     merkleRoot: bytesToBuffer(execReport.merkleRoot),
     bufferId,
@@ -348,14 +348,14 @@ function prepareExecutionReport({
   typeof CCIP_OFFRAMP_IDL
 >['ExecutionReportSingleChain'] {
   return {
-    sourceChainSelector: new BN(message.header.sourceChainSelector.toString()),
+    sourceChainSelector: new BN(message.sourceChainSelector.toString()),
     message: {
       header: {
-        messageId: Array.from(getDataBytes(message.header.messageId)),
-        sourceChainSelector: new BN(message.header.sourceChainSelector),
-        destChainSelector: new BN(message.header.destChainSelector),
-        sequenceNumber: new BN(message.header.sequenceNumber),
-        nonce: new BN(message.header.nonce),
+        messageId: Array.from(getDataBytes(message.messageId)),
+        sourceChainSelector: new BN(message.sourceChainSelector),
+        destChainSelector: new BN(message.destChainSelector),
+        sequenceNumber: new BN(message.sequenceNumber),
+        nonce: new BN(message.nonce),
       },
       sender: bytesToBuffer(message.sender),
       data: bytesToBuffer(message.data),

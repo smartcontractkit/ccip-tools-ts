@@ -90,7 +90,7 @@ export function serializeExecutionReport(
   execReport: ExecutionReport<CCIPMessage_V1_6_TON>,
 ): Builder {
   return beginCell()
-    .storeUint(execReport.message.header.sourceChainSelector, 64)
+    .storeUint(execReport.message.sourceChainSelector, 64)
     .storeRef(asSnakeData([execReport.message], serializeMessage))
     .storeRef(Cell.EMPTY) // offchainTokenData - empty for now
     .storeRef(
@@ -105,11 +105,11 @@ function serializeMessage(message: CCIPMessage_V1_6_TON): Builder {
   return (
     beginCell()
       // Store header INLINE (not as ref)
-      .storeUint(BigInt(message.header.messageId), 256)
-      .storeUint(message.header.sourceChainSelector, 64)
-      .storeUint(message.header.destChainSelector, 64)
-      .storeUint(message.header.sequenceNumber, 64)
-      .storeUint(message.header.nonce, 64)
+      .storeUint(BigInt(message.messageId), 256)
+      .storeUint(message.sourceChainSelector, 64)
+      .storeUint(message.destChainSelector, 64)
+      .storeUint(message.sequenceNumber, 64)
+      .storeUint(message.nonce, 64)
       // Store sender as ref with length prefix
       .storeRef(
         beginCell()

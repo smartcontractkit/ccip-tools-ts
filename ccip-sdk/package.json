@@ -32,11 +32,11 @@
     "!**/__mocks__"
   ],
   "devDependencies": {
-    "@eslint/js": "^9.39.1",
+    "@eslint/js": "^9.39.2",
     "@types/bn.js": "^5.2.0",
-    "@types/node": "24.10.2",
+    "@types/node": "25.0.2",
     "@types/yargs": "17.0.35",
-    "eslint": "^9.39.1",
+    "eslint": "^9.39.2",
     "eslint-config-prettier": "10.1.8",
     "eslint-import-resolver-typescript": "4.4.4",
     "eslint-plugin-import": "^2.32.0",
@@ -46,10 +46,10 @@
     "ethers-abitype": "1.0.3",
     "prettier": "^3.7.4",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.49.0"
+    "typescript-eslint": "8.50.0"
   },
   "dependencies": {
-    "@aptos-labs/ts-sdk": "^5.1.6",
+    "@aptos-labs/ts-sdk": "^5.2.0",
     "@coral-xyz/anchor": "^0.29.0",
     "@mysten/bcs": "^1.9.2",
     "@mysten/sui": "^1.45.2",
@@ -57,7 +57,7 @@
     "@solana/web3.js": "^1.98.4",
     "@ton/core": "0.62.0",
     "@ton/ton": "^16.1.0",
-    "abitype": "1.2.1",
+    "abitype": "1.2.3",
     "bn.js": "^5.2.2",
     "borsh": "^2.0.0",
     "bs58": "^6.0.0",

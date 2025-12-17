@@ -260,7 +260,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   async fetchAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
     request: R,

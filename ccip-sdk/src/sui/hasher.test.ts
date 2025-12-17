@@ -104,13 +104,11 @@ describe('Sui hasher', () => {
         ChainFamily.EVM,
       )
       const message: CCIPMessage_V1_6 = {
-        header: {
-          messageId,
-          sourceChainSelector,
-          destChainSelector,
-          sequenceNumber,
-          nonce,
-        },
+        messageId,
+        sourceChainSelector,
+        destChainSelector,
+        sequenceNumber,
+        nonce,
         sender,
         receiver,
         data,
@@ -141,13 +139,11 @@ describe('Sui hasher', () => {
       })
 
       const message: CCIPMessage_V1_6 = {
-        header: {
-          messageId,
-          sourceChainSelector,
-          destChainSelector,
-          sequenceNumber,
-          nonce,
-        },
+        messageId,
+        sourceChainSelector,
+        destChainSelector,
+        sequenceNumber,
+        nonce,
         sender,
         receiver,
         data,
@@ -208,13 +204,11 @@ describe('Sui hasher', () => {
       const tokenReceiver = zeroPadValue('0x00', 32) // Zero address
 
       const message: CCIPMessage_V1_6 = {
-        header: {
-          messageId,
-          sourceChainSelector,
-          destChainSelector,
-          sequenceNumber,
-          nonce,
-        },
+        messageId,
+        sourceChainSelector,
+        destChainSelector,
+        sequenceNumber,
+        nonce,
         sender,
         receiver,
         data,

@@ -96,12 +96,6 @@ class MockChain {
           sourceChainSelector: dataObj.sourceChainSelector ?? 16015286601757825753n,
           sequenceNumber: dataObj.sequenceNumber ?? 1n,
           nonce: 0n,
-          header: {
-            messageId: dataObj.messageId,
-            sourceChainSelector: dataObj.sourceChainSelector ?? 16015286601757825753n,
-            sequenceNumber: dataObj.sequenceNumber ?? 1n,
-            nonce: 0n,
-          },
           sender: dataObj.sender ?? '0x0000000000000000000000000000000000000045',
           receiver: dataObj.receiver ?? toBeHex(456, 32),
           data: '0x',
@@ -172,7 +166,7 @@ describe('fetchCCIPMessagesInTx', () => {
 
     const result = await fetchCCIPRequestsInTx(mockedChain as unknown as Chain, mockTx)
     assert.equal(result.length, 1)
-    assert.equal(result[0].message.header.sequenceNumber, 1n)
+    assert.equal(result[0].message.sequenceNumber, 1n)
     assert.equal(result[0].tx, mockTx)
     assert.equal(result[0].lane.version, CCIPVersion.V1_2)
   })
@@ -230,12 +224,6 @@ describe('fetchCCIPMessagesInTx', () => {
             sourceChainSelector: dataObj.sourceChainSelector ?? 16015286601757825753n,
             sequenceNumber: dataObj.sequenceNumber ?? 1n,
             nonce: 0n,
-            header: {
-              messageId: dataObj.messageId,
-              sourceChainSelector: dataObj.sourceChainSelector ?? 16015286601757825753n,
-              sequenceNumber: dataObj.sequenceNumber ?? 1n,
-              nonce: 0n,
-            },
             sender: dataObj.sender ?? '0x0000000000000000000000000000000000000045',
             receiver: dataObj.receiver ?? toBeHex(456, 32),
             data: '0x',
@@ -317,12 +305,6 @@ describe('fetchCCIPMessageById', () => {
             sourceChainSelector: dataObj.sourceChainSelector ?? 16015286601757825753n,
             sequenceNumber: dataObj.sequenceNumber ?? 1n,
             nonce: 0n,
-            header: {
-              messageId: dataObj.messageId,
-              sourceChainSelector: dataObj.sourceChainSelector ?? 16015286601757825753n,
-              sequenceNumber: dataObj.sequenceNumber ?? 1n,
-              nonce: 0n,
-            },
             sender: dataObj.sender ?? '0x0000000000000000000000000000000000000045',
             receiver: dataObj.receiver ?? toBeHex(456, 32),
             data: '0x',
@@ -356,12 +338,6 @@ describe('fetchAllMessagesInBatch', () => {
         sourceChainSelector: 16015286601757825753n,
         sequenceNumber: 9n,
         nonce: 0n,
-        header: {
-          messageId: '0xMessageId9',
-          sourceChainSelector: 16015286601757825753n,
-          sequenceNumber: 9n,
-          nonce: 0n,
-        },
         sender: '0x0000000000000000000000000000000000000045',
         receiver: toBeHex(456, 32),
         data: '0x',
@@ -387,7 +363,7 @@ describe('fetchAllMessagesInBatch', () => {
     })
 
     assert.equal(result.length, 1)
-    assert.equal(result[0].header.sequenceNumber, 9n)
+    assert.equal(result[0].sequenceNumber, 9n)
   })
 
   it('should throw an error if not all expected events are found', async () => {
@@ -405,12 +381,6 @@ describe('fetchAllMessagesInBatch', () => {
         sourceChainSelector: 16015286601757825753n,
         sequenceNumber: 5n,
         nonce: 0n,
-        header: {
-          messageId: '0xMessageId5',
-          sourceChainSelector: 16015286601757825753n,
-          sequenceNumber: 5n,
-          nonce: 0n,
-        },
         sender: '0x0000000000000000000000000000000000000045',
         receiver: toBeHex(456, 32),
         data: '0x',

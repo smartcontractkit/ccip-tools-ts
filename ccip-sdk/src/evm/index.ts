@@ -151,8 +151,8 @@ function resultsToMessage(result: Result): Record<string, unknown> {
     ...(result.sourceTokenData
       ? { sourceTokenData: (result.sourceTokenData as Result).toArray() }
       : {}),
-    ...(result.header ? { header: (result.header as Result).toObject() } : {}),
-  } as unknown as CCIPMessage
+    ...(result.header ? (result.header as Result).toObject() : {}),
+  }
 }
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
@@ -324,7 +324,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   async fetchAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
     request: R,
@@ -382,24 +382,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (!message) return
     if (!isHexString(message.sender, 20)) throw new CCIPMessageDecodeError('invalid sender')
 
-    if (!message.header) {
-      // CCIPMessage_V1_2_EVM
-      message.header = {
-        messageId: message.messageId as string,
-        sequenceNumber: message.sequenceNumber as bigint,
-        nonce: message.nonce as bigint,
-        sourceChainSelector: message.sourceChainSelector as bigint,
-      }
+    if (message.header) {
+      // CCIPMessage_V1_6
+      Object.assign(message, message.header)
+      delete message.header
     }
 
     const sourceFamily = networkInfo(
-      (message.header as { sourceChainSelector: bigint }).sourceChainSelector,
+      (message as { sourceChainSelector: bigint }).sourceChainSelector,
     ).family
     let destFamily: ChainFamily = ChainFamily.EVM
-    if ((message.header as { destChainSelector: bigint } | undefined)?.destChainSelector) {
-      destFamily = networkInfo(
-        (message.header as { destChainSelector: bigint }).destChainSelector,
-      ).family
+    if ((message as { destChainSelector?: bigint }).destChainSelector) {
+      destFamily = networkInfo((message as { destChainSelector: bigint }).destChainSelector).family
     }
     // conversions to make any message version be compatible with latest v1.6
     message.tokenAmounts = (message.tokenAmounts as Record<string, string | bigint | number>[]).map(
@@ -1181,8 +1175,19 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
             {
               ...execReport,
               proofs: execReport.proofs.map((p) => hexlify(p)),
-              sourceChainSelector: execReport.message.header.sourceChainSelector,
-              messages: [message],
+              sourceChainSelector: execReport.message.sourceChainSelector,
+              messages: [
+                {
+                  ...message,
+                  header: {
+                    messageId: message.messageId,
+                    sourceChainSelector: message.sourceChainSelector,
+                    destChainSelector: message.destChainSelector,
+                    sequenceNumber: message.sequenceNumber,
+                    nonce: message.nonce,
+                  },
+                },
+              ],
               offchainTokenData: [offchainTokenData],
             },
           ],
@@ -1450,7 +1455,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /** {@inheritDoc Chain.fetchExecutionReceipts} */
   override async *fetchExecutionReceipts(
     offRamp: string,
-    request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,
+    request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
     opts?: Pick<LogFilter, 'page' | 'watch'>,
   ): AsyncIterableIterator<CCIPExecution> {
@@ -1461,7 +1466,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         topics: [
           interfaces.EVM2EVMOffRamp_v1_5.getEvent('ExecutionStateChanged')!.topicHash,
           null,
-          request.message.header.messageId,
+          request.message.messageId,
         ],
         // onlyFallback: false,
       }
@@ -1472,7 +1477,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           interfaces.OffRamp_v1_6.getEvent('ExecutionStateChanged')!.topicHash,
           toBeHex(request.lane.sourceChainSelector, 32),
           null,
-          request.message.header.messageId,
+          request.message.messageId,
         ],
         // onlyFallback: false,
       }

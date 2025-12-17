@@ -51,7 +51,7 @@ export function hashV16AptosMessage(
   if (!('gasLimit' in message)) {
     const parsedArgs = decodeExtraArgs(
       message.extraArgs,
-      networkInfo(message.header.sourceChainSelector).family,
+      networkInfo(message.sourceChainSelector).family,
     )
     if (!parsedArgs || !('gasLimit' in parsedArgs))
       throw new CCIPExtraArgsInvalidError('Aptos', message.extraArgs)
@@ -61,11 +61,11 @@ export function hashV16AptosMessage(
   }
 
   const innerHash = concat([
-    message.header.messageId,
+    message.messageId,
     zeroPadValue(message.receiver, 32),
-    encodeNumber(message.header.sequenceNumber),
+    encodeNumber(message.sequenceNumber),
     encodeNumber(gasLimit), // Aptos as dest uses EVMExtraArgs
-    encodeNumber(message.header.nonce),
+    encodeNumber(message.nonce),
   ])
 
   const tokenHash = concat([

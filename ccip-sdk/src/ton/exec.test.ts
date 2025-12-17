@@ -10,13 +10,11 @@ describe('TON generateUnsignedExecuteReport', () => {
 
   const baseExecReport: ExecutionReport<CCIPMessage_V1_6_TON> = {
     message: {
-      header: {
-        messageId: '0x' + '1'.repeat(64),
-        sourceChainSelector: 743186221051783445n,
-        destChainSelector: 16015286601757825753n,
-        sequenceNumber: 1n,
-        nonce: 0n,
-      },
+      messageId: '0x' + '1'.repeat(64),
+      sourceChainSelector: 743186221051783445n,
+      destChainSelector: 16015286601757825753n,
+      sequenceNumber: 1n,
+      nonce: 0n,
       sender: '0x' + '2'.repeat(40),
       receiver: '0:' + '3'.repeat(64),
       data: '0x',

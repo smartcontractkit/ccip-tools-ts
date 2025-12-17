@@ -299,7 +299,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   override async fetchAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
     _request: R,

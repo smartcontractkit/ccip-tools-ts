@@ -47,7 +47,7 @@ export async function selectRequest(
     choices: [
       ...requests.map((req, i) => ({
         value: i,
-        name: `${req.log.index} => ${req.message.header.messageId}`,
+        name: `${req.log.index} => ${req.message.messageId}`,
         description:
           `sender =\t\t${req.message.sender}
 receiver =\t\t${req.message.receiver}
@@ -205,11 +205,13 @@ export async function prettyRequest(this: Ctx, source: Chain, request: CCIPReque
   } catch (_) {
     // no finalized tag support
   }
-  const nonce = Number(request.message.header.nonce)
+  const nonce = Number(request.message.nonce)
 
   const rest = omit(
     request.message,
-    'header',
+    'messageId',
+    'sequenceNumber',
+    'nonce',
     'sender',
     'receiver',
     'tokenAmounts',
@@ -218,15 +220,16 @@ export async function prettyRequest(this: Ctx, source: Chain, request: CCIPReque
     'feeTokenAmount',
     'sourceTokenData',
     'sourceChainSelector',
+    'destChainSelector',
     'extraArgs',
     'accounts',
   )
   prettyTable.call(this, {
-    messageId: request.message.header.messageId,
+    messageId: request.message.messageId,
     ...(request.tx.from ? { origin: request.tx.from } : {}),
     sender: request.message.sender,
     receiver: request.message.receiver,
-    sequenceNumber: Number(request.message.header.sequenceNumber),
+    sequenceNumber: Number(request.message.sequenceNumber),
     nonce: nonce === 0 ? '0 => allow out-of-order exec' : nonce,
     ...('gasLimit' in request.message
       ? { gasLimit: Number(request.message.gasLimit) }

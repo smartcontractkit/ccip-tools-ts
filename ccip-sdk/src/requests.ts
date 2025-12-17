@@ -28,13 +28,14 @@ import { convertKeysToCamelCase, decodeAddress, leToBigInt, networkInfo } from '
 function decodeJsonMessage(data: Record<string, unknown>) {
   if (!data || typeof data != 'object') throw new CCIPMessageInvalidError(data)
   if (data.message) data = data.message as Record<string, unknown>
+  if (data.header) {
+    Object.assign(data, data.header)
+    delete data.header
+  }
   let data_ = data as Record<string, unknown> & {
-    header: {
-      dest_chain_selector?: string
-      destChainSelector?: string
-      sourceChainSelector?: string
-      source_chain_selector?: string
-    }
+    dest_chain_selector?: string
+    destChainSelector?: string
+    source_chain_selector?: string
     sourceChainSelector?: string
     extraArgs?: string
     tokenAmounts: {
@@ -42,29 +43,17 @@ function decodeJsonMessage(data: Record<string, unknown>) {
       destGasAmount?: bigint
     }[]
   }
-  const sourceChainSelector =
-    data_.header?.sourceChainSelector ??
-    data_.header?.source_chain_selector ??
-    data_.sourceChainSelector
+  const sourceChainSelector = data_.source_chain_selector ?? data_.sourceChainSelector
   if (!sourceChainSelector) throw new CCIPMessageInvalidError(data)
   const sourceNetwork = networkInfo(sourceChainSelector)
-  if (!data_.header) {
-    const header = {
-      sourceChainSelector: data_.sourceChainSelector,
-      messageId: data_.messageId,
-      nonce: data_.nonce,
-      sequenceNumber: data_.sequenceNumber,
-    }
-    data_.header = header
-  }
 
-  const destChainSelector = data_.header.dest_chain_selector ?? data_.header.destChainSelector
+  const destChainSelector = data_.dest_chain_selector ?? data_.destChainSelector
   if (destChainSelector) {
     const destFamily = networkInfo(destChainSelector).family
     data_ = convertKeysToCamelCase(data_, (v, k) =>
       typeof v === 'string' && v.match(/^\d+$/)
         ? BigInt(v)
-        : k === 'receiver' || k === 'destTokenAddress'
+        : k === 'receiver' || k === 'destTokenAddress' || k === 'tokenReceiver'
           ? decodeAddress(v as string, destFamily)
           : v,
     ) as typeof data_
@@ -137,11 +126,11 @@ export async function fetchCCIPRequestsInTx(
     let lane
     const message = (source.constructor as ChainStatic).decodeMessage(log)
     if (!message) continue
-    if ('destChainSelector' in message.header) {
+    if ('destChainSelector' in message) {
       const [_, version] = await source.typeAndVersion(log.address)
       lane = {
-        sourceChainSelector: message.header.sourceChainSelector,
-        destChainSelector: message.header.destChainSelector,
+        sourceChainSelector: message.sourceChainSelector,
+        destChainSelector: message.destChainSelector,
         onRamp: log.address,
         version: version as CCIPVersion,
       }
@@ -177,10 +166,10 @@ export async function fetchCCIPRequestById(
     ...hints,
   })) {
     const message = (source.constructor as ChainStatic).decodeMessage(log)
-    if (message?.header.messageId !== messageId) continue
+    if (message?.messageId !== messageId) continue
     let destChainSelector, version
-    if ('destChainSelector' in message.header) {
-      destChainSelector = message.header.destChainSelector
+    if ('destChainSelector' in message) {
+      destChainSelector = message.destChainSelector
       ;[, version] = await source.typeAndVersion(log.address)
     } else {
       ;({ destChainSelector, version } = await (source as EVMChain).getLaneForOnRamp(log.address))
@@ -188,7 +177,7 @@ export async function fetchCCIPRequestById(
     const tx = log.tx ?? (await source.getTransaction(log.transactionHash))
     return {
       lane: {
-        sourceChainSelector: source.network.chainSelector,
+        sourceChainSelector: message.sourceChainSelector,
         destChainSelector,
         onRamp: log.address,
         version: version as CCIPVersion,
@@ -216,7 +205,7 @@ export async function fetchAllMessagesInBatch<
   C extends Chain,
   R extends PickDeep<
     CCIPRequest,
-    'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+    'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
   >,
 >(
   source: C,
@@ -232,13 +221,13 @@ export async function fetchAllMessagesInBatch<
     address: request.log.address,
     ...opts,
   }
-  if (request.message.header.sequenceNumber === maxSeqNr) filter.endBlock = request.log.blockNumber
+  if (request.message.sequenceNumber === maxSeqNr) filter.endBlock = request.log.blockNumber
   else
     // start proportionally before send request block, including case when seqNum==min => startBlock
     filter.startBlock =
       request.log.blockNumber -
       Math.ceil(
-        (Number(request.message.header.sequenceNumber - minSeqNr) / Number(maxSeqNr - minSeqNr)) *
+        (Number(request.message.sequenceNumber - minSeqNr) / Number(maxSeqNr - minSeqNr)) *
           filter.page,
       )
 
@@ -252,15 +241,15 @@ export async function fetchAllMessagesInBatch<
       const message = (source.constructor as ChainStatic).decodeMessage(log)
       if (
         !message ||
-        ('destChainSelector' in message.header &&
-          message.header.destChainSelector !== request.lane.destChainSelector)
+        ('destChainSelector' in message &&
+          message.destChainSelector !== request.lane.destChainSelector)
       )
         continue
-      if (message.header.sequenceNumber < minSeqNr) continue
+      if (message.sequenceNumber < minSeqNr) continue
       messages.push(message)
-      if (message.header.sequenceNumber >= maxSeqNr) break
+      if (message.sequenceNumber >= maxSeqNr) break
     }
-    if (messages.length && messages[0].header.sequenceNumber > minSeqNr) {
+    if (messages.length && messages[0].sequenceNumber > minSeqNr) {
       // still work to be done backwards
       delete filter['startBlock']
       filter['endBlock'] = backwardsEndBlock
@@ -273,19 +262,19 @@ export async function fetchAllMessagesInBatch<
       const message = (source.constructor as ChainStatic).decodeMessage(log)
       if (
         !message ||
-        ('destChainSelector' in message.header &&
-          message.header.destChainSelector !== request.lane.destChainSelector)
+        ('destChainSelector' in message &&
+          message.destChainSelector !== request.lane.destChainSelector)
       )
         continue
       messages.unshift(message)
-      if (message.header.sequenceNumber <= minSeqNr) break
+      if (message.sequenceNumber <= minSeqNr) break
     }
   }
 
   if (messages.length != Number(maxSeqNr - minSeqNr) + 1) {
     throw new CCIPMessageBatchIncompleteError(
       { min: minSeqNr, max: maxSeqNr },
-      messages.map((e) => e.header.sequenceNumber),
+      messages.map((e) => e.sequenceNumber),
     )
   }
   return messages
@@ -312,8 +301,8 @@ export async function* fetchRequestsForSender(
     const message = (source.constructor as ChainStatic).decodeMessage(log)
     if (message?.sender !== sender) continue
     let destChainSelector, version
-    if ('destChainSelector' in message.header) {
-      destChainSelector = message.header.destChainSelector
+    if ('destChainSelector' in message) {
+      destChainSelector = message.destChainSelector
       ;[, version] = await source.typeAndVersion(log.address)
     } else if (source.network.family === ChainFamily.EVM) {
       ;({ destChainSelector, version } = await (source as EVMChain).getLaneForOnRamp(log.address))

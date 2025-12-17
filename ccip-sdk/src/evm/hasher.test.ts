@@ -16,21 +16,15 @@ describe('EVM leaf hasher', () => {
     const onRamp = '0x5550000000000000000000000000000000000001'
     const hasher = getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp)
 
-    const header = {
+    const message = {
       messageId: '0x1001',
       sequenceNumber: 1337n,
       nonce: 1337n,
       sourceChainSelector,
-    }
-    const message = {
-      header,
-      sourceChainSelector: sourceChainSelector,
       sender: '0x1110000000000000000000000000000000000001',
       receiver: '0x2220000000000000000000000000000000000001',
-      sequenceNumber: header.sequenceNumber,
       gasLimit: 100n,
       strict: false,
-      nonce: header.nonce,
       feeToken: ZeroAddress,
       feeTokenAmount: 1n,
       data: '0x',
@@ -38,7 +32,6 @@ describe('EVM leaf hasher', () => {
         { token: '0x4440000000000000000000000000000000000001', amount: 12345678900n } as any,
       ],
       sourceTokenData: [],
-      messageId: header.messageId,
     } as CCIPMessage<typeof CCIPVersion.V1_5>
 
     const msgHash = hasher(message)
@@ -52,17 +45,14 @@ describe('EVM leaf hasher', () => {
     const onRamp = '0x7d571a25eb5a09013580c60aeb40ed89c924082a'
     const hasher = getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp)
 
-    const header = {
+    const extraArgs =
+      '0x181dcf100000000000000000000000000000000000000000000000005eb3e65ecb9fb54e0000000000000000000000000000000000000000000000000000000000000001'
+    const message: CCIPMessage_V1_6 = {
       messageId: '0xf82dd9f9977f06d5c789d33299f15c3c693c9b7b084206c8c524c3620f966edd',
       sequenceNumber: 17624761845632355147n,
       nonce: 13974814057813369789n,
       sourceChainSelector,
       destChainSelector,
-    }
-    const extraArgs =
-      '0x181dcf100000000000000000000000000000000000000000000000005eb3e65ecb9fb54e0000000000000000000000000000000000000000000000000000000000000001'
-    const message: CCIPMessage_V1_6 = {
-      header,
       sender: '0x00000000000000000000000021aa8a422bfb1a82e254331259c1cbbea7408b44',
       receiver: '0x56ad368c27ab9a428e9992c3843c79a35830794a',
       feeToken: '0x6627c714a7ba7cc17bddeffa83b36a3b969e4e6c',

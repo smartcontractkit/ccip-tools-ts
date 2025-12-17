@@ -163,7 +163,7 @@ async function manualExec(
   const execReportProof = calculateManualExecProof(
     messagesInBatch,
     request.lane,
-    request.message.header.messageId,
+    request.message.messageId,
     commit.report.merkleRoot,
     dest,
   )
@@ -172,7 +172,7 @@ async function manualExec(
   const execReport: ExecutionReport = {
     ...execReportProof,
     message: request.message,
-    offchainTokenData: offchainTokenData,
+    offchainTokenData,
   }
 
   if (

@@ -243,7 +243,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   abstract fetchAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.header.sequenceNumber'
+      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
     request: R,
@@ -428,7 +428,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    **/
   async fetchCommitReport(
     commitStore: string,
-    request: PickDeep<CCIPRequest, 'lane' | 'message.header.sequenceNumber' | 'tx.timestamp'>,
+    request: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>,
     hints?: Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number },
   ): Promise<CCIPCommit> {
     return fetchCommitReport(this, commitStore, request, hints)
@@ -444,7 +444,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   async *fetchExecutionReceipts(
     offRamp: string,
-    request: PickDeep<CCIPRequest, 'lane' | 'message.header.messageId' | 'tx.timestamp'>,
+    request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
     hints?: Pick<LogFilter, 'page' | 'watch'>,
   ): AsyncIterableIterator<CCIPExecution> {
@@ -457,7 +457,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       ...hints,
     })) {
       const receipt = (this.constructor as ChainStatic).decodeReceipt(log)
-      if (!receipt || receipt.messageId !== request.message.header.messageId) continue
+      if (!receipt || receipt.messageId !== request.message.messageId) continue
 
       const timestamp = log.tx?.timestamp ?? (await this.getBlockTimestamp(log.blockNumber))
       yield { receipt, log, timestamp }

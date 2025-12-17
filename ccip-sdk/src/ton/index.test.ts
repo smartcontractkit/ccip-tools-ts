@@ -19,13 +19,11 @@ const TON_OFFRAMP_ADDRESS_TEST =
 // Shared test data
 const baseExecReport: ExecutionReport<CCIPMessage_V1_6_TON> = {
   message: {
-    header: {
-      messageId: '0x' + '0'.repeat(63) + '1',
-      sourceChainSelector: CHAINSEL_EVM_TEST_90000001,
-      destChainSelector: CHAINSEL_TON,
-      sequenceNumber: 1n,
-      nonce: 0n,
-    },
+    messageId: '0x' + '0'.repeat(63) + '1',
+    sourceChainSelector: CHAINSEL_EVM_TEST_90000001,
+    destChainSelector: CHAINSEL_TON,
+    sequenceNumber: 1n,
+    nonce: 0n,
     sender: EVM_SENDER_ADDRESS_TEST,
     receiver: 'EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2',
     data: '0x',
@@ -220,7 +218,7 @@ describe('TONChain.executeReport', () => {
     const tonChain = new TONChain(client, mockNetworkInfo as any)
 
     const v1_5Report = {
-      message: { header: { messageId: '0x' + '1'.repeat(64) }, strict: false },
+      message: { messageId: '0x' + '1'.repeat(64), strict: false },
       proofs: [],
       proofFlagBits: 0n,
       merkleRoot: '0xce60f1962af3c7c7f9d3e434dea13530564dbff46704d628ff4b2206bbc93289',
@@ -263,7 +261,7 @@ describe('TONChain.generateUnsignedExecuteReport', () => {
     const tonChain = new TONChain({} as TonClient4, mockNetworkInfo as any)
 
     const v1_5Report = {
-      message: { header: { messageId: '0x' + '1'.repeat(64) }, strict: false },
+      message: { messageId: '0x' + '1'.repeat(64), strict: false },
       proofs: [],
       proofFlagBits: 0n,
       merkleRoot: '0xce60f1962af3c7c7f9d3e434dea13530564dbff46704d628ff4b2206bbc93289',

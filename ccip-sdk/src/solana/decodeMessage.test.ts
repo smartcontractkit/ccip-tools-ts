@@ -26,13 +26,13 @@ describe('SolanaChain.decodeMessage', () => {
 
     // ----- MESSAGE HEADER -----
     assert.equal(
-      message.header.messageId.toLowerCase(),
+      message.messageId.toLowerCase(),
       '0xc8cad4f80de5b5c436c102beedfb2bef0797169730c340c1c2147c70ea7e05c0',
     )
-    assert.equal(message.header.sourceChainSelector, 16423721717087811551n) // Solana Devnet
-    assert.equal(message.header.destChainSelector, 16015286601757825753n) // Ethereum Sepolia
-    assert.equal(message.header.sequenceNumber, 2151n)
-    assert.equal(message.header.nonce, 0n)
+    assert.equal(message.sourceChainSelector, 16423721717087811551n) // Solana Devnet
+    assert.equal(message.destChainSelector, 16015286601757825753n) // Ethereum Sepolia
+    assert.equal(message.sequenceNumber, 2151n)
+    assert.equal(message.nonce, 0n)
 
     // ----- MESSAGE -----
     assert.equal(message.sender, '6oFoex6ZdFuMcb7X3HHBKpqZUkEAyFAjwjTD8swn8iWA')

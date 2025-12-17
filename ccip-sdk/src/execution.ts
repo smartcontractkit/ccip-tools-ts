@@ -38,11 +38,11 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
 ): Omit<ExecutionReport, 'offchainTokenData' | 'message'> {
   const hasher = getLeafHasher(lane, ctx)
 
-  const msgIdx = messagesInBatch.findIndex((message) => message.header.messageId === messageId)
+  const msgIdx = messagesInBatch.findIndex((message) => message.messageId === messageId)
   if (msgIdx < 0) {
     throw new CCIPMessageNotInBatchError(messageId, {
-      min: messagesInBatch[0].header.sequenceNumber,
-      max: messagesInBatch[messagesInBatch.length - 1].header.sequenceNumber,
+      min: messagesInBatch[0].sequenceNumber,
+      max: messagesInBatch[messagesInBatch.length - 1].sequenceNumber,
     })
   }
 
@@ -134,7 +134,7 @@ export async function* fetchExecutionReceipts(
     ...hints,
   })) {
     const receipt = (dest.constructor as ChainStatic).decodeReceipt(log)
-    if (!receipt || receipt.messageId !== request.message.header.messageId) continue
+    if (!receipt || receipt.messageId !== request.message.messageId) continue
 
     const timestamp = log.tx?.timestamp ?? (await dest.getBlockTimestamp(log.blockNumber))
     yield { receipt, log, timestamp }

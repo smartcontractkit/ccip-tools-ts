@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 
 import { type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import { getTONLeafHasher, hashTONMetadata } from './hasher.ts'
+import type { EVMExtraArgsV2 } from '../extra-args.ts'
 
 const ZERO_ADDRESS = '0x' + '0'.repeat(40)
 
@@ -79,17 +80,12 @@ describe('TON hasher', () => {
     it('should compute leaf hash matching chainlink-ton for Merkle verification', () => {
       // https://github.com/smartcontractkit/chainlink-ton/blob/f56790ae36317956ec09a53f9524bef77fddcadc/contracts/tests/ccip/OffRamp.spec.ts#L989-L990
       const expectedHash = '0xce60f1962af3c7c7f9d3e434dea13530564dbff46704d628ff4b2206bbc93289'
-      const message: CCIPMessage_V1_6 & {
-        gasLimit: bigint
-        allowOutOfOrderExecution: boolean
-      } = {
-        header: {
-          messageId: '0x' + '0'.repeat(63) + '1',
-          sequenceNumber: 1n,
-          nonce: 0n,
-          sourceChainSelector: CHAINSEL_EVM_TEST_90000001,
-          destChainSelector: CHAINSEL_TON,
-        },
+      const message: CCIPMessage_V1_6 & EVMExtraArgsV2 = {
+        messageId: '0x' + '0'.repeat(63) + '1',
+        sequenceNumber: 1n,
+        nonce: 0n,
+        sourceChainSelector: CHAINSEL_EVM_TEST_90000001,
+        destChainSelector: CHAINSEL_TON,
         sender: EVM_SENDER_ADDRESS_TEST,
         receiver: 'EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2',
         data: '0x',
