@@ -287,39 +287,35 @@ describe('TONChain smoke tests', () => {
       assert.ok(ccipTxHash, 'Should have found a valid transaction')
     })
 
-    it('should decode header.messageId as 32-byte hex', () => {
+    it('should decode messageId as 32-byte hex', () => {
       assert.ok(message)
-      assert.ok(message.header.messageId.startsWith('0x'), 'messageId should be hex prefixed')
-      assert.equal(
-        message.header.messageId.length,
-        66,
-        'messageId should be 32 bytes (66 chars with 0x)',
-      )
-      assert.match(message.header.messageId, /^0x[a-f0-9]{64}$/, 'messageId should be valid hex')
+      assert.ok(message.messageId.startsWith('0x'), 'messageId should be hex prefixed')
+      assert.equal(message.messageId.length, 66, 'messageId should be 32 bytes (66 chars with 0x)')
+      assert.match(message.messageId, /^0x[a-f0-9]{64}$/, 'messageId should be valid hex')
     })
 
-    it('should decode header.sourceChainSelector as TON testnet', () => {
+    it('should decode sourceChainSelector as TON testnet', () => {
       assert.ok(message)
-      assert.equal(message.header.sourceChainSelector, TON_TESTNET_CHAIN_SELECTOR)
+      assert.equal(message.sourceChainSelector, TON_TESTNET_CHAIN_SELECTOR)
     })
 
-    it('should decode header.destChainSelector as Sepolia', () => {
+    it('should decode destChainSelector as Sepolia', () => {
       assert.ok(message)
-      assert.equal(message.header.destChainSelector, SEPOLIA_CHAIN_SELECTOR)
+      assert.equal(message.destChainSelector, SEPOLIA_CHAIN_SELECTOR)
     })
 
-    it('should decode header.sequenceNumber as positive bigint', () => {
+    it('should decode sequenceNumber as positive bigint', () => {
       assert.ok(message)
-      assert.equal(typeof message.header.sequenceNumber, 'bigint')
-      assert.ok(message.header.sequenceNumber > 0n, 'sequenceNumber should be positive')
+      assert.equal(typeof message.sequenceNumber, 'bigint')
+      assert.ok(message.sequenceNumber > 0n, 'sequenceNumber should be positive')
     })
 
-    it('should decode header.nonce as bigint (typically 0 for out-of-order)', () => {
+    it('should decode nonce as bigint (typically 0 for out-of-order)', () => {
       assert.ok(message)
-      assert.equal(typeof message.header.nonce, 'bigint')
+      assert.equal(typeof message.nonce, 'bigint')
       // nonce is 0 when allowOutOfOrderExecution is true
       if (message.allowOutOfOrderExecution) {
-        assert.equal(message.header.nonce, 0n, 'nonce should be 0 for out-of-order execution')
+        assert.equal(message.nonce, 0n, 'nonce should be 0 for out-of-order execution')
       }
     })
 

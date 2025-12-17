@@ -92,7 +92,7 @@ export function serializeExecutionReport(
   return beginCell()
     .storeUint(execReport.message.sourceChainSelector, 64)
     .storeRef(asSnakeData([execReport.message], serializeMessage))
-    .storeRef(Cell.EMPTY) // offchainTokenData - empty for now
+    .storeRef(Cell.EMPTY) // TODO: FIXME: offchainTokenData empty for now, add when implemented
     .storeRef(
       asSnakeData(execReport.proofs.map(toBigInt), (proof: bigint) => {
         return beginCell().storeUint(proof, 256)
@@ -102,32 +102,24 @@ export function serializeExecutionReport(
 }
 
 function serializeMessage(message: CCIPMessage_V1_6_TON): Builder {
-  return (
-    beginCell()
-      // Store header INLINE (not as ref)
-      .storeUint(BigInt(message.messageId), 256)
-      .storeUint(message.sourceChainSelector, 64)
-      .storeUint(message.destChainSelector, 64)
-      .storeUint(message.sequenceNumber, 64)
-      .storeUint(message.nonce, 64)
-      // Store sender as ref with length prefix
-      .storeRef(
-        beginCell()
-          .storeUint(bytesToBuffer(message.sender).length, 8)
-          .storeBuffer(bytesToBuffer(message.sender))
-          .endCell(),
-      )
-      // Store data as ref
-      .storeRef(beginCell().storeBuffer(bytesToBuffer(message.data)).endCell())
-      // Store receiver address
-      .storeAddress(Address.parse(message.receiver))
-      // Store gas limit
-      .storeCoins(message.gasLimit)
-      // Store token amounts as maybe ref
-      .storeMaybeRef(
-        message.tokenAmounts?.length > 0 ? serializeTokenAmounts(message.tokenAmounts) : null,
-      )
-  )
+  return beginCell()
+    .storeUint(BigInt(message.messageId), 256)
+    .storeUint(message.sourceChainSelector, 64)
+    .storeUint(message.destChainSelector, 64)
+    .storeUint(message.sequenceNumber, 64)
+    .storeUint(message.nonce, 64)
+    .storeRef(
+      beginCell()
+        .storeUint(bytesToBuffer(message.sender).length, 8)
+        .storeBuffer(bytesToBuffer(message.sender))
+        .endCell(),
+    )
+    .storeRef(beginCell().storeBuffer(bytesToBuffer(message.data)).endCell())
+    .storeAddress(Address.parse(message.receiver))
+    .storeCoins(message.gasLimit)
+    .storeMaybeRef(
+      message.tokenAmounts?.length > 0 ? serializeTokenAmounts(message.tokenAmounts) : null,
+    )
 }
 
 function serializeTokenAmounts(tokenAmounts: CCIPMessage_V1_6['tokenAmounts']): Cell {
