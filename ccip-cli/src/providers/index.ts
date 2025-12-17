@@ -209,6 +209,7 @@ export async function loadChainWallet(chain: Chain, argv: { wallet?: unknown; rp
       wallet = await loadTonWallet(argv)
       return [wallet.contract.address.toString(), wallet] as const
     default:
-      throw new CCIPChainFamilyUnsupportedError(chain.network.family)
+      // TypeScript exhaustiveness check - this should never be reached
+      throw new CCIPChainFamilyUnsupportedError((chain.network as { family: string }).family)
   }
 }

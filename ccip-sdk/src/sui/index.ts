@@ -446,7 +446,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @param _extraArgs - Encoded extra arguments bytes.
    * @returns Decoded extra arguments or undefined if unknown format.
    */
-  static decodeExtraArgs(extraArgs: BytesLike): SuiExtraArgsV1 {
+  static decodeExtraArgs(extraArgs: BytesLike): SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' } {
     const data = getDataBytes(extraArgs)
     const hexBytes = toHex(data)
     if (!hexBytes.startsWith(SUI_EXTRA_ARGS_V1_TAG)) {
@@ -466,6 +466,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       allowOutOfOrderExecution: tuple[1],
       tokenReceiver: tuple[2],
       receiverObjectIds: tuple[3], // Already an array of hex strings
+      _tag: 'SuiExtraArgsV1',
     }
   }
 
