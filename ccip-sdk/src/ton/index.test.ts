@@ -571,6 +571,63 @@ describe('TON index unit tests', () => {
     })
   })
 
+  describe('formatAddress', () => {
+    it('should convert raw format to friendly format', () => {
+      const raw = `0:${'ab'.repeat(32)}`
+      const result = TONChain.formatAddress(raw)
+      // Should return friendly format starting with EQ (workchain 0, bounceable)
+      assert.match(result, /^EQ/)
+      // Verify round-trip: parsing back should give same raw address
+      assert.equal(Address.parseRaw(raw).toString(), result)
+    })
+
+    it('should convert workchain -1 raw format to friendly format', () => {
+      const raw = `-1:${'ab'.repeat(32)}`
+      const result = TONChain.formatAddress(raw)
+      // Workchain -1 uses Ef prefix (bounceable masterchain)
+      assert.match(result, /^Ef/)
+    })
+
+    it('should return friendly format unchanged', () => {
+      const friendly = 'EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2'
+      const result = TONChain.formatAddress(friendly)
+      assert.equal(result, friendly)
+    })
+
+    it('should return original if parsing fails', () => {
+      const invalid = 'not-a-valid-address'
+      const result = TONChain.formatAddress(invalid)
+      assert.equal(result, invalid)
+    })
+  })
+
+  describe('formatTxHash', () => {
+    it('should extract hash from composite format', () => {
+      const hash = 'abcd1234' + '5'.repeat(56)
+      const composite = `0:${'a'.repeat(64)}:12345678:${hash}`
+      const result = TONChain.formatTxHash(composite)
+      assert.equal(result, hash)
+    })
+
+    it('should return raw hash unchanged', () => {
+      const hash = 'a'.repeat(64)
+      const result = TONChain.formatTxHash(hash)
+      assert.equal(result, hash)
+    })
+
+    it('should return unknown format unchanged', () => {
+      const unknown = 'some-unknown-format'
+      const result = TONChain.formatTxHash(unknown)
+      assert.equal(result, unknown)
+    })
+
+    it('should handle 3-part format (not composite) unchanged', () => {
+      const threeParts = `0:${'a'.repeat(64)}:12345`
+      const result = TONChain.formatTxHash(threeParts)
+      assert.equal(result, threeParts)
+    })
+  })
+
   describe('isTxHash', () => {
     it('should accept 64-char hex hash', () => {
       assert.equal(TONChain.isTxHash('a'.repeat(64)), true)

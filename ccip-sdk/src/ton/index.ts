@@ -762,6 +762,40 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
+   * Formats a TON address for human-friendly display.
+   * Converts raw format (workchain:hash) to user-friendly format (EQ..., UQ..., etc.)
+   * @param address - Address in any recognized format
+   * @returns User-friendly TON address string
+   */
+  static formatAddress(address: string): string {
+    try {
+      // Parse the address (handles both raw and friendly formats)
+      const parsed = Address.parse(address)
+      // Return user-friendly format (bounceable by default)
+      return parsed.toString()
+    } catch {
+      // If parsing fails, return original
+      return address
+    }
+  }
+
+  /**
+   * Formats a TON transaction hash for human-friendly display.
+   * Extracts the raw 64-char hash from composite format for cleaner display.
+   * @param hash - Transaction hash in composite or raw format
+   * @returns The raw 64-char hex hash for display
+   */
+  static formatTxHash(hash: string): string {
+    const parts = hash.split(':')
+    if (parts.length === 4) {
+      // Composite format: workchain:address:lt:hash - return just the hash part
+      return parts[3]
+    }
+    // Already raw format or unknown - return as-is
+    return hash
+  }
+
+  /**
    * Validates a transaction hash format for TON.
    * Supports:
    * - Raw 64-char hex hash (with or without 0x prefix)
