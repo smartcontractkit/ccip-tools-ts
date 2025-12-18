@@ -8,7 +8,6 @@ import type { TONWallet } from '@chainlink/ccip-sdk/src/ton/types.ts'
 import { keyPairFromSecretKey, mnemonicToPrivateKey } from '@ton/crypto'
 import { WalletContractV4 } from '@ton/ton'
 
-
 /**
  * Loads a TON wallet from the provided options.
  * @param wallet - wallet options (as passed from yargs argv)
