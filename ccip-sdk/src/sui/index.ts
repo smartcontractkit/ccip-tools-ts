@@ -54,24 +54,15 @@ import {
   getReceiverModule,
 } from './objects.ts'
 import selectors from '../selectors.ts'
+import { discoverCCIP, discoverOfframp } from './discovery.ts'
 
 export const SUI_EXTRA_ARGS_V1_TAG = '21ea4ca9' as const
 
 type SuiContractDir = {
-  ccip: string
-  onRamp: string
-  offRamp: string
-  router: string
-}
-
-// TODO: Populate with actual contract addresses per chain
-const contractDirs: Record<string, SuiContractDir> = {
-  '9762610643973837292': {
-    ccip: '0x...',
-    onRamp: '0x...',
-    offRamp: '0x...',
-    router: '0x...',
-  },
+  ccip?: string
+  onRamp?: string
+  offRamp?: string
+  router?: string
 }
 
 /**
@@ -102,7 +93,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     this.client = client
     this.network = network
-    this.contractsDir = contractDirs[String(network.chainSelector)]
+    this.contractsDir = {}
 
     // TODO: Graphql client should come from config
     let graphqlUrl: string
@@ -211,6 +202,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /** {@inheritDoc Chain.getLogs} */
   async *getLogs(opts: LogFilter & { versionAsHash?: boolean }) {
+    if (!this.contractsDir.offRamp) {
+      throw new CCIPContractNotRouterError('OffRamp address not set in contracts directory', 'Sui')
+    }
     // Extract the event type from topics
     const topic = Array.isArray(opts.topics?.[0]) ? opts.topics[0][0] : opts.topics?.[0] || ''
     if (!topic || topic !== 'CommitReportAccepted') {
@@ -281,17 +275,15 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /** {@inheritDoc Chain.getRouterForOnRamp} */
   async getRouterForOnRamp(onRamp: string, _destChainSelector: bigint): Promise<string> {
-    if (onRamp === this.contractsDir.onRamp) {
-      return Promise.resolve(this.contractsDir.router)
+    this.contractsDir.onRamp = onRamp
+    if (onRamp !== this.contractsDir.onRamp) {
+      this.contractsDir.onRamp = onRamp
     }
-    throw new CCIPContractNotRouterError(onRamp, 'unknown')
+    return Promise.resolve(this.contractsDir.onRamp)
   }
 
   /** {@inheritDoc Chain.getRouterForOffRamp} */
-  async getRouterForOffRamp(offRamp: string, _sourceChainSelector: bigint): Promise<string> {
-    if (offRamp === this.contractsDir.offRamp) {
-      return Promise.resolve(this.contractsDir.router)
-    }
+  getRouterForOffRamp(offRamp: string, _sourceChainSelector: bigint): Promise<string> {
     throw new CCIPContractNotRouterError(offRamp, 'unknown')
   }
 
@@ -302,24 +294,28 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.getOffRampsForRouter} */
-  getOffRampsForRouter(router: string, _sourceChainSelector: bigint): Promise<string[]> {
-    if (router === this.contractsDir.router) {
-      return Promise.resolve([this.contractsDir.offRamp])
-    }
-    return Promise.resolve([])
+  async getOffRampsForRouter(router: string, _sourceChainSelector: bigint): Promise<string[]> {
+    const ccip = await discoverCCIP(this.client, router)
+    const offramp = await discoverOfframp(this.client, ccip)
+    this.contractsDir.offRamp = offramp
+    this.contractsDir.ccip = ccip
+    return [offramp]
   }
 
   /** {@inheritDoc Chain.getOnRampForRouter} */
-  getOnRampForRouter(router: string, _destChainSelector: bigint): Promise<string> {
-    if (router === this.contractsDir.router) {
-      return Promise.resolve(this.contractsDir.onRamp)
+  getOnRampForRouter(_router: string, _destChainSelector: bigint): Promise<string> {
+    if (!this.contractsDir.onRamp) {
+      throw new CCIPContractNotRouterError('OnRamp address not set in contracts directory', 'Sui')
     }
-    throw new CCIPContractNotRouterError(router, 'unknown')
+    return Promise.resolve(this.contractsDir.onRamp)
   }
 
   /** {@inheritDoc Chain.getOnRampForOffRamp} */
-  async getOnRampForOffRamp(_offRamp: string, sourceChainSelector: bigint): Promise<string> {
-    const offrampPackageId = this.contractsDir.offRamp
+  async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
+    if (!this.contractsDir.ccip) {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, 'CCIP address not set in contracts directory')
+    }
+    const offrampPackageId = offRamp
     const functionName = 'get_source_chain_config'
     const target = `${offrampPackageId}::offramp::${functionName}`
 
@@ -594,6 +590,12 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     execReport: ExecutionReport,
     opts: { wallet: unknown; gasLimit?: number; receiverObjectIds?: string[] },
   ): Promise<ChainTransaction> {
+    if (!this.contractsDir.offRamp || !this.contractsDir.ccip) {
+      throw new CCIPContractNotRouterError(
+        'OffRamp or CCIP address not set in contracts directory',
+        'Sui',
+      )
+    }
     const wallet = opts.wallet as Keypair
     const ccipObjectRef = await getCcipObjectRef(this.client, this.contractsDir.ccip)
     const offrampStateObject = await getOffRampStateObject(this.client, this.contractsDir.offRamp)
