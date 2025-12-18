@@ -3,6 +3,7 @@ import { before, describe, it } from 'node:test'
 
 import { Address } from '@ton/core'
 
+import '../index.ts'
 import { TONChain } from './index.ts'
 import type { CCIPMessage_V1_6_TON } from './types.ts'
 
@@ -340,18 +341,12 @@ describe('TON index integration tests', () => {
       )
     })
 
-    it('should decode receiver as padded EVM address (32 bytes)', () => {
+    it('should decode receiver as checksummed EVM address', () => {
       assert.ok(message)
       assert.ok(message.receiver.startsWith('0x'), 'receiver should be hex prefixed')
-      assert.equal(message.receiver.length, 66, 'receiver should be 32 bytes (padded EVM address)')
-      // First 12 bytes should be zero padding for EVM addresses
-      assert.ok(
-        message.receiver.startsWith('0x000000000000000000000000'),
-        'receiver should have 12-byte zero padding',
-      )
-      // Last 20 bytes should be the actual EVM address
-      const evmAddress = '0x' + message.receiver.slice(-40)
-      assert.match(evmAddress, /^0x[a-fA-F0-9]{40}$/, 'extracted EVM address should be valid')
+      // Receiver should be a checksummed 20-byte EVM address (42 chars with 0x prefix)
+      assert.equal(message.receiver.length, 42, 'receiver should be 20 bytes (42 chars with 0x)')
+      assert.match(message.receiver, /^0x[a-fA-F0-9]{40}$/, 'receiver should be valid EVM address')
     })
 
     it('should decode data as hex bytes', () => {

@@ -35,6 +35,7 @@ import {
 import {
   bytesToBuffer,
   createRateLimitedFetch,
+  decodeAddress,
   getDataBytes,
   networkInfo,
   parseTypeAndVersion,
@@ -517,7 +518,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const receiverSlice = bodySlice.loadRef().beginParse()
       const receiverLength = receiverSlice.loadUint(8)
       const receiverBytes = receiverSlice.loadBuffer(receiverLength)
-      const receiver = '0x' + receiverBytes.toString('hex')
+
+      // Decode receiver address using destination chain's format
+      let receiver: string
+      try {
+        const destFamily = networkInfo(header.destChainSelector).family
+        receiver = decodeAddress(receiverBytes, destFamily)
+      } catch {
+        // Fallback to raw hex if chain not registered or decoding fails
+        receiver = '0x' + receiverBytes.toString('hex')
+      }
 
       // Load data from ref 1
       const dataSlice = bodySlice.loadRef().beginParse()
