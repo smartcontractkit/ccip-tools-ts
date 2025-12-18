@@ -48,7 +48,12 @@ discovers the required networks from them.
 
 ## Tooling and Development
 
-NodeJS v24 is recommended for development.
+> [!NOTE]
+> NodeJS version v20+ is required. For development of the packages, v24+ is required.
+> When running from local folder, it'll try to execute the [src](./src/index.ts) script directly,
+> without an explicit transpilation step. NodeJS v24+ can run `.ts` files directly, while older
+> versions are run with [tsx](https://tsx.is/).  
+> `npm test` will only work with V24+
 
 Both packages are written in [TypeScript](https://www.typescriptlang.org/), transpiled to modern
 JavaScript using `tsc`, and all of transpiled, types and sources are published to npm.
@@ -60,6 +65,7 @@ The codebase is also restricted to syntax compatible with [NodeJS type stripping
 allowing the sources to be consumed directly by NodeJS v23+, without an explicit transpilation phase.
 
 Example:
+
 ```sh
 node ./ccip-cli/src/index.ts --help
 ```

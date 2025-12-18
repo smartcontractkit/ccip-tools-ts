@@ -36,11 +36,6 @@ alias ccip-cli="$PWD/ccip-cli/ccip-cli"  # optional, to run from local repo dire
 > [!NOTE]
 > In dev context below, we'll assume you are on `ccip-cli` folder.
 
-> [!NOTE]
-> NodeJS version v20+ is required, with v23+ recommended.
-> When running from local folder, it'll try to execute the [src](./src/index.ts) script directly,
-> without an explicit transpilation step. NodeJS v23+ can run `.ts` files directly, while older
-> versions are run with [tsx](https://tsx.is/).
 
 ## RPCs
 
