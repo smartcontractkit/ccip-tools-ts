@@ -11,7 +11,6 @@ import {
   CCIPError,
   CCIPErrorCode,
   ExecutionState,
-  decodeAddress,
   networkInfo,
   supportedChains,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -290,8 +289,8 @@ export async function prettyRequest(this: Ctx, source: Chain, request: CCIPReque
       await Promise.all(request.message.tokenAmounts.map(formatToken.bind(null, source))),
     ),
     ...(isBytesLike(request.message.data) &&
-      dataLength(request.message.data) > 0 &&
-      getBytes(request.message.data).every((b) => 32 <= b && b <= 126) // printable characters
+    dataLength(request.message.data) > 0 &&
+    getBytes(request.message.data).every((b) => 32 <= b && b <= 126) // printable characters
       ? { data: toUtf8String(request.message.data) }
       : formatData('data', request.message.data)),
     ...('accounts' in request.message ? formatArray('accounts', request.message.accounts) : {}),
@@ -433,7 +432,7 @@ export function prettyReceipt(
   prettyTable.call(this, {
     state: receipt.receipt.state === ExecutionState.Success ? '✅ success' : '❌ failed',
     ...(receipt.receipt.state !== ExecutionState.Success ||
-      (receipt.receipt.returnData && receipt.receipt.returnData !== '0x')
+    (receipt.receipt.returnData && receipt.receipt.returnData !== '0x')
       ? { returnData: receipt.receipt.returnData }
       : {}),
     ...(receipt.receipt.gasUsed ? { gasUsed: Number(receipt.receipt.gasUsed) } : {}),
@@ -559,7 +558,7 @@ export function getCtx(argv: { verbose?: boolean }): [ctx: Ctx, destroy: () => v
   if (argv.verbose) {
     logger.debug('Verbose mode enabled')
   } else {
-    logger.debug = () => { }
+    logger.debug = () => {}
   }
 
   return [{ destroy$, logger, verbose: argv.verbose }, destroy!]
