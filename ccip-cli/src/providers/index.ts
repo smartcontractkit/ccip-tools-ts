@@ -183,7 +183,7 @@ export async function loadChainWallet(chain: Chain, argv: { wallet?: unknown; rp
   if (!argv.wallet && argv.rpcsFile && existsSync(argv.rpcsFile)) {
     try {
       const file = readFileSync(argv.rpcsFile, 'utf8')
-      const match = file.match(/^\s*(USER_KEY|OWNER_KEY|PRIVATE_KEY)=(\S+)/m)
+      const match = file.match(/^\s*(OWNER_KEY|PRIVATE_KEY)=(\S+)/m)
       if (match) argv.wallet = match[2]
     } catch (_) {
       // pass

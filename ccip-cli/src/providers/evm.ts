@@ -13,9 +13,6 @@ import {
   SigningKey,
   Wallet,
 } from 'ethers'
-import dotenv from 'dotenv'
-
-dotenv.config()
 
 // monkey-patch @ethers-ext/signer-ledger to preserve path when `.connect`ing provider
 Object.assign(LedgerSigner.prototype, {

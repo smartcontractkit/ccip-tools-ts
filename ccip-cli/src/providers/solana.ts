@@ -15,9 +15,6 @@ import {
 import bs58 from 'bs58'
 import { getBytes, hexlify } from 'ethers'
 
-import dotenv from 'dotenv'
-dotenv.config()
-
 /** Ledger hardware wallet signer for Solana. */
 export class LedgerSolanaWallet {
   publicKey: PublicKey
