@@ -180,10 +180,14 @@ export function fetchChainsFromRpcs(
  * @returns Promise to chain-specific wallet instance
  */
 export async function loadChainWallet(chain: Chain, argv: { wallet?: unknown; rpcsFile?: string }) {
+  // Centralized wallet resolution: check env vars first, then rpcsFile
+  if (!argv.wallet) {
+    argv.wallet = process.env['PRIVATE_KEY'] || process.env['USER_KEY'] || process.env['OWNER_KEY']
+  }
   if (!argv.wallet && argv.rpcsFile && existsSync(argv.rpcsFile)) {
     try {
       const file = readFileSync(argv.rpcsFile, 'utf8')
-      const match = file.match(/^\s*(USER_KEY|OWNER_KEY|PRIVATE_KEY)=(\S+)/m)
+      const match = file.match(/^\s*(PRIVATE_KEY|USER_KEY|OWNER_KEY)=(\S+)/m)
       if (match) argv.wallet = match[2]
     } catch (_) {
       // pass

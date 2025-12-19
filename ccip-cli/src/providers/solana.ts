@@ -98,8 +98,8 @@ export class LedgerSolanaWallet {
 export async function loadSolanaWallet({
   wallet: walletOpt,
 }: { wallet?: unknown } = {}): Promise<AnchorWallet> {
-  if (!walletOpt)
-    walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY'] || '~/.config/solana/id.json'
+  // Default to Solana's standard keypair location if no wallet provided
+  if (!walletOpt) walletOpt = '~/.config/solana/id.json'
   let wallet: string
   if (typeof walletOpt !== 'string') throw new CCIPArgumentInvalidError('wallet', String(walletOpt))
   wallet = walletOpt
