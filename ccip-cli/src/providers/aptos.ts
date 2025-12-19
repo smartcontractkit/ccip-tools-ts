@@ -98,7 +98,6 @@ export class AptosLedgerSigner /*implements AptosAsyncAccount*/ {
  * @returns Promise to AptosAsyncAccount instance
  */
 export async function loadAptosWallet({ wallet: walletOpt }: { wallet?: unknown }) {
-  if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
   if (typeof walletOpt !== 'string') throw new CCIPArgumentInvalidError('wallet', String(walletOpt))
   if ((walletOpt ?? '').startsWith('ledger')) {
     let derivationPath = walletOpt.split(':')[1]

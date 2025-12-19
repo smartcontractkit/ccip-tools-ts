@@ -1,0 +1,7 @@
+position: 2
+label: "CLI"
+collapsible: true
+collapsed: false
+link:
+  type: doc
+  id: ccip-tools-cli
