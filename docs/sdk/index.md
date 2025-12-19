@@ -1,11 +1,14 @@
-# @chainlink/ccip-sdk
+---
+id: ccip-tools-sdk
+title: CCIP SDK
+sidebar_label: Overview
+sidebar_position: 0
+edit_url: https://github.com/smartcontractkit/ccip-tools-ts/edit/main/docs/sdk/index.md
+---
 
-TypeScript SDK for integrating [CCIP](https://chain.link/cross-chain) (Cross-Chain Interoperability Protocol) into your applications.
+# CCIP SDK
 
-> [!IMPORTANT]
-> This tool is provided under an MIT license and is for convenience and illustration purposes only.
-
-📖 **[Full SDK Documentation](https://github.com/smartcontractkit/ccip-tools-ts/blob/main/docs/sdk/index.md)** - Complete API reference, advanced patterns, and tree-shaking guide.
+The TypeScript SDK for integrating CCIP into your applications.
 
 ## Installation
 
@@ -13,25 +16,34 @@ TypeScript SDK for integrating [CCIP](https://chain.link/cross-chain) (Cross-Cha
 npm install @chainlink/ccip-sdk
 ```
 
-> [!NOTE]
-> Node.js v20+ required. v23+ recommended for native TypeScript execution.
+:::note Requirements
+Node.js v20+ required. v23+ recommended for native TypeScript execution.
+:::
 
-## Chain Classes
+## Core Concepts
 
-The SDK provides a unified `Chain` class interface for each blockchain family. Create instances using `fromUrl`:
+### Chain Class
+
+The SDK uses an abstract `Chain` class that provides a unified interface across different blockchain families. Each chain family has its own implementation.
 
 ```ts
-import { EVMChain, SolanaChain, AptosChain } from '@chainlink/ccip-sdk'
+import { EVMChain, SolanaChain, AptosChain, SuiChain, TONChain } from '@chainlink/ccip-sdk'
 
-// EVM chains (Ethereum, Arbitrum, Optimism, etc.)
+// Create a chain instance from an RPC URL
 const evmChain = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.com')
-
-// Solana
 const solanaChain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
-
-// Aptos
 const aptosChain = await AptosChain.fromUrl('https://api.testnet.aptoslabs.com/v1')
 ```
+
+### Supported Chain Families
+
+| Chain Family | Class | Library | Status |
+|--------------|-------|---------|--------|
+| EVM | `EVMChain` | [ethers.js v6](https://docs.ethers.org/v6/) | Supported |
+| Solana | `SolanaChain` | [solana-web3.js](https://github.com/solana-foundation/solana-web3.js) | Supported |
+| Aptos | `AptosChain` | [aptos-ts-sdk](https://github.com/aptos-labs/aptos-ts-sdk) | Supported |
+| Sui | `SuiChain` | [@mysten/sui](https://github.com/MystenLabs/sui) | In Development |
+| TON | `TONChain` | [@ton/ton](https://github.com/ton-org/ton) | In Development |
 
 ## Common Tasks
 
@@ -40,20 +52,22 @@ const aptosChain = await AptosChain.fromUrl('https://api.testnet.aptoslabs.com/v
 ```ts
 import { EVMChain } from '@chainlink/ccip-sdk'
 
+// Connect to the source chain
 const source = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.com')
 
 // Fetch message details from a transaction
 const requests = await source.fetchRequestsInTx(
-  '0xb8b27d9811509e3c364c9afaf8f14d8ebc65dec06327493981d7f7f4a00f2918'
+  '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
 )
 
+// Access message and lane details
 const request = requests[0]
 console.log('Message ID:', request.message.messageId)
 console.log('Sender:', request.message.sender)
 console.log('Destination chain:', request.lane.destChainSelector)
 ```
 
-### Get Fee Estimate
+### Get CCIP Fee Estimate
 
 ```ts
 import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
@@ -64,7 +78,7 @@ const destSelector = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSel
 
 const fee = await source.getFee(router, destSelector, {
   receiver: '0xYourReceiverAddress',
-  data: '0x48656c6c6f', // "Hello" in hex
+  data: '0x', // Empty data payload
   extraArgs: { gasLimit: 200_000 }, // Gas limit for receiver's ccipReceive callback
 })
 
@@ -80,15 +94,15 @@ import { Wallet } from 'ethers'
 const source = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.com')
 const wallet = new Wallet('YOUR_PRIVATE_KEY', source.provider)
 
-const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
 const destSelector = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector
 
 // Get fee first
 const fee = await source.getFee(router, destSelector, {
   receiver: '0xYourReceiverAddress',
-  data: '0x48656c6c6f',
+  data: '0x48656c6c6f', // "Hello" in hex
   extraArgs: {
-    gasLimit: 200_000,
+    gasLimit: 200_000, // Gas for receiver's ccipReceive callback
     allowOutOfOrderExecution: true, // Don't wait for prior messages from this sender
   },
 })
@@ -114,20 +128,20 @@ console.log('Message ID:', request.message.messageId)
 
 Transaction-sending methods require a chain-specific wallet:
 
-| Chain  | Wallet Type     | Example                                    |
-| ------ | --------------- | ------------------------------------------ |
-| EVM    | `ethers.Signer` | `new Wallet(privateKey, provider)`         |
+| Chain | Wallet Type | Example |
+|-------|-------------|---------|
+| EVM | `ethers.Signer` | `new Wallet(privateKey, provider)` |
 | Solana | `anchor.Wallet` | `new Wallet(Keypair.fromSecretKey(...))` |
-| Aptos  | `aptos.Account` | `Account.fromPrivateKey(...)`              |
+| Aptos | `aptos.Account` | `Account.fromPrivateKey(...)` |
 
 ### Unsigned Transactions
 
-For custom signing workflows (e.g., browser wallets, hardware wallets), use the `generateUnsigned*` methods:
+For custom signing workflows, use the `generateUnsigned*` methods:
 
 ```ts
-// Generate unsigned transaction data
+// Generate unsigned transaction data (returns chain-specific tx format)
 const unsignedTx = await source.generateUnsignedSendMessage(
-  senderAddress, // Your wallet address
+  senderAddress,  // Your wallet address
   router,
   destSelector,
   message
@@ -138,28 +152,42 @@ const signedTx = await customSigner.sign(unsignedTx)
 await customSender.broadcast(signedTx)
 ```
 
+:::tip Browser Integration
 For EVM chains in browsers, get a signer from the connected wallet:
-
 ```ts
 const signer = await source.provider.getSigner()
 ```
+:::
 
-## Supported Chains
+## Extending the SDK
 
-| Chain Family | Class         | Library                                                                  | Status         |
-| ------------ | ------------- | ------------------------------------------------------------------------ | -------------- |
-| EVM          | `EVMChain`    | [ethers.js v6](https://docs.ethers.org/v6/)                              | Supported      |
-| Solana       | `SolanaChain` | [solana-web3.js](https://github.com/solana-foundation/solana-web3.js)    | Supported      |
-| Aptos        | `AptosChain`  | [aptos-ts-sdk](https://github.com/aptos-labs/aptos-ts-sdk)               | Supported      |
-| Sui          | `SuiChain`    | [@mysten/sui](https://github.com/MystenLabs/sui)                         | In Development |
-| TON          | `TONChain`    | [@ton/ton](https://github.com/ton-org/ton)                               | In Development |
+You can extend chain classes to customize behavior:
 
-## Related
+```ts
+import { SolanaChain, supportedChains, ChainFamily } from '@chainlink/ccip-sdk'
 
-- [@chainlink/ccip-cli](https://www.npmjs.com/package/@chainlink/ccip-cli) - Command-line interface
-- [CCIP Official Docs](https://docs.chain.link/ccip) - Protocol documentation
-- [CCIP Directory](https://docs.chain.link/ccip/directory) - Router addresses
+class CustomSolanaChain extends SolanaChain {
+  // Override methods as needed
+}
 
-## License
+// Register your custom implementation
+supportedChains[ChainFamily.Solana] = CustomSolanaChain
+```
 
-MIT
+## Tree-Shaking
+
+For optimal bundle size, import only the chains you need:
+
+```ts
+// ✅ Good - only imports EVM chain
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+// ⚠️ Imports all chains - larger bundle
+import { allSupportedChains } from '@chainlink/ccip-sdk'
+```
+
+## Next Steps
+
+- [CLI Reference](../cli/) - Use the command-line interface
+- [Adding New Chain](../adding-new-chain) - Contribute a new chain family
+- [CCIP Documentation](https://docs.chain.link/ccip) - Official CCIP docs

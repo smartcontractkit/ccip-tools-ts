@@ -1,152 +1,334 @@
-# Adding New Chain Support
+---
+id: ccip-tools-adding-new-chain
+title: Adding New Chain Support
+sidebar_label: Adding New Chain
+sidebar_position: 3
+edit_url: https://github.com/smartcontractkit/ccip-tools-ts/edit/main/docs/adding-new-chain.md
+---
 
-> Back to [CONTRIBUTING.md](../CONTRIBUTING.md)
+# Adding New Chain Support
 
 This guide walks through implementing a new chain family in the CCIP SDK.
 
-## Overview
+## What You'll Build
 
-A chain implementation consists of:
+A complete chain implementation includes:
 
-1. **SDK Implementation** (`ccip-sdk/src/{chainFamily}/index.ts`) - Lane discovery, token operations, message tracking, transaction building
-1. **Hasher** (`ccip-sdk/src/{chainFamily}/hasher.ts`) - Computes unique message IDs from CCIP message contents
-1. **CLI Wallet Provider** (`ccip-cli/src/providers/{chainFamily}.ts`) - Loads signing keys (file or Ledger) for transaction testing
+| Component | File | Purpose |
+|-----------|------|---------|
+| Chain class | `ccip-sdk/src/{chain}/index.ts` | Core implementation |
+| Hasher | `ccip-sdk/src/{chain}/hasher.ts` | Message ID computation |
+| Wallet provider | `ccip-cli/src/providers/{chain}.ts` | CLI wallet loading |
 
 ## Prerequisites
 
-Before starting:
+Before starting, study these files:
 
-- Read `ccip-sdk/src/chain.ts` - the abstract base class
-- Read `ccip-sdk/src/types.ts` - core types (`ChainFamily`, `CCIPRequest`, `NetworkInfo`, etc.)
-- Study one reference implementation thoroughly (see below)
+1. **`ccip-sdk/src/chain.ts`** - Abstract base class with required methods
+2. **`ccip-sdk/src/types.ts`** - Core types (`ChainFamily`, `CCIPRequest`, etc.)
+3. **One reference implementation** - See below
 
-## Reference Implementations
+### Reference Implementations
 
-| Chain  | File                           |
-| ------ | ------------------------------ |
-| EVM    | `ccip-sdk/src/evm/index.ts`    |
-| Solana | `ccip-sdk/src/solana/index.ts` |
-| Aptos  | `ccip-sdk/src/aptos/index.ts`  |
+| Chain | File | Completeness |
+|-------|------|--------------|
+| EVM | `ccip-sdk/src/evm/index.ts` | Full implementation |
+| Solana | `ccip-sdk/src/solana/index.ts` | Full implementation |
+| Aptos | `ccip-sdk/src/aptos/index.ts` | Full implementation |
+| TON | `ccip-sdk/src/ton/index.ts` | Partial (execution only) |
+| Sui | `ccip-sdk/src/sui/index.ts` | Stub (hasher only) |
 
 ---
 
-## Step-by-Step
+## Step 1: Register the Chain Family
 
-### Step 1: Add ChainFamily
+**File:** `ccip-sdk/src/types.ts`
 
-File: `ccip-sdk/src/types.ts`
+Add your chain to the `ChainFamily` constant:
 
-Add your chain to the `ChainFamily` object. Search for `export const ChainFamily` to find the location.
-
-### Step 2: Create Directory Structure
-
+```ts
+export const ChainFamily = {
+  EVM: 'evm',
+  Solana: 'solana',
+  Aptos: 'aptos',
+  Sui: 'sui',
+  TON: 'ton',
+  YourChain: 'yourchain',  // Add this
+} as const
 ```
-ccip-sdk/src/{chainFamily}/
-├── index.ts    # Main chain class (required)
-└── hasher.ts   # Message hashing (required)
+
+---
+
+## Step 2: Create Directory Structure
+
+```bash
+mkdir -p ccip-sdk/src/yourchain
+touch ccip-sdk/src/yourchain/index.ts
+touch ccip-sdk/src/yourchain/hasher.ts
+touch ccip-sdk/src/yourchain/types.ts
 ```
 
-Add other files as needed (types.ts, logs.ts, utils.ts). See reference implementations for examples.
+---
 
-### Step 3: Implement the Chain Class
+## Step 3: Implement the Chain Class
 
-File: `ccip-sdk/src/{chainFamily}/index.ts`
+**File:** `ccip-sdk/src/yourchain/index.ts`
 
-#### 3.1 Static Registration Block
+### 3.1 Class Declaration with Auto-Registration
 
-This pattern auto-registers your chain when the module loads:
-
-```typescript
+```ts
+import { Chain } from '../chain.ts'
 import { supportedChains } from '../supported-chains.ts'
-import { ChainFamily } from '../types.ts'
+import { ChainFamily, type NetworkInfo, type WithLogger } from '../types.ts'
 
-export class {ChainName}Chain extends Chain<typeof ChainFamily.{ChainName}> {
+export class YourChainChain extends Chain<typeof ChainFamily.YourChain> {
+  // Auto-register when this module is imported
   static {
-    supportedChains[ChainFamily.{ChainName}] = {ChainName}Chain
+    supportedChains[ChainFamily.YourChain] = YourChainChain
   }
-  // ... rest of implementation
+
+  static readonly family = ChainFamily.YourChain
+  static readonly decimals = 18 // Native token decimals for your chain
+
+  // ... implementation
 }
 ```
 
-Search for `static {` in any existing chain implementation to see this pattern.
+### 3.2 Static Methods
 
-#### 3.2 Static Methods (ChainStatic Interface)
+Implement all static methods from `ChainStatic` interface:
 
-Search for `export type ChainStatic` in `ccip-sdk/src/chain.ts` for the complete list of static methods to implement.
+```ts
+// Required static methods
+static fromUrl(url: string, ctx?: WithLogger): Promise<YourChainChain>
+static decodeMessage(log: Log_): CCIPMessage | undefined
+static decodeExtraArgs(extraArgs: BytesLike): ExtraArgs | undefined
+static encodeExtraArgs(extraArgs: ExtraArgs): string
+static decodeCommits(log: Log_, lane?: Lane): CommitReport[] | undefined
+static decodeReceipt(log: Log_): ExecutionReceipt | undefined
+static getAddress(bytes: BytesLike): string
+static isTxHash(v: unknown): v is string
+static getDestLeafHasher(lane: Lane, ctx?: WithLogger): LeafHasher
+```
 
-#### 3.3 Constructor Pattern
+### 3.3 Constructor
 
-Search for the constructor in `ccip-sdk/src/solana/index.ts` to see:
+```ts
+readonly client: YourChainClient  // Your chain's SDK client
 
-- How to initialize chain-specific clients
-- Memoization of expensive RPC calls using `micro-memoize`
+constructor(
+  client: YourChainClient,
+  network: NetworkInfo<typeof ChainFamily.YourChain>,
+  ctx?: WithLogger
+) {
+  super(network, ctx)  // Pass network and optional logger context
+  this.client = client
+  // Memoize expensive RPC calls
+  this.getTransaction = memoize(this.getTransaction.bind(this))
+}
+```
 
-#### 3.4 Abstract Methods to Implement
+### 3.4 Abstract Methods
 
-Search for `abstract` in `ccip-sdk/src/chain.ts` for the complete list of methods to implement.
+Implement all abstract methods from `Chain` class. Key methods include:
 
-### Step 4: Implement the Hasher
+```ts
+// Block and transaction operations
+abstract getBlockTimestamp(block: number | 'finalized'): Promise<number>
+abstract getTransaction(hash: string): Promise<ChainTransaction>
+abstract getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
 
-File: `ccip-sdk/src/{chainFamily}/hasher.ts`
+// Message operations
+abstract fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]>
+abstract fetchAllMessagesInBatch(request, commit, opts?): Promise<CCIPMessage[]>
 
-Hasher computes message IDs for CCIP messages. Each chain has different encoding.
+// Contract queries
+abstract typeAndVersion(address: string): Promise<[type, version, typeAndVersion, suffix?]>
+abstract getRouterForOnRamp(onRamp: string, destChainSelector: bigint): Promise<string>
+abstract getOnRampForRouter(router: string, destChainSelector: bigint): Promise<string>
+// ... and more router/ramp methods
 
-See existing hasher files in `ccip-sdk/src/evm/`, `ccip-sdk/src/solana/`, `ccip-sdk/src/aptos/`.
+// Fee and tokens
+abstract getFee(router: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint>
+abstract getTokenInfo(token: string): Promise<TokenInfo>
+abstract getSupportedTokens(address: string): Promise<string[]>
 
-### Step 5: Define UnsignedTx Type
+// Transaction building and sending
+abstract generateUnsignedSendMessage(sender, router, dest, message, opts?): Promise<UnsignedTx>
+abstract sendMessage(router, dest, message, opts: { wallet }): Promise<CCIPRequest>
+abstract generateUnsignedExecuteReport(payer, offRamp, execReport, opts): Promise<UnsignedTx>
+abstract executeReport(offRamp, execReport, opts: { wallet }): Promise<ChainTransaction>
+```
 
-Define your unsigned transaction type in `ccip-sdk/src/{chainFamily}/types.ts`. See existing implementations for examples.
-
-Then add it to the `UnsignedTx` mapped type in `ccip-sdk/src/chain.ts`. Search for `export type UnsignedTx` to find the location.
-
-### Step 6: Export from SDK
-
-File: `ccip-sdk/src/index.ts`
-
-Add your chain class import and export it. Also add to `allSupportedChains` object. Search for `allSupportedChains` to find the location.
-
-### Step 7: CLI Wallet Provider
-
-File: `ccip-cli/src/providers/{chainFamily}.ts`
-
-Create a `load{ChainFamily}Wallet` function that returns a wallet object. See existing providers for examples.
-
-Then register it in `ccip-cli/src/providers/index.ts`:
-
-1. Import your wallet loader
-1. Add a case to the `loadChainWallet` switch that extracts the address and returns `[address, wallet]`
+See `ccip-sdk/src/chain.ts` for the complete list (~25 abstract methods).
 
 ---
 
-## Testing
+## Step 4: Implement the Hasher
 
-### Unit Tests
+**File:** `ccip-sdk/src/yourchain/hasher.ts`
 
-Add tests in `ccip-sdk/src/{chainFamily}/` as `*.test.ts` files.
+The hasher computes deterministic message IDs. Each chain encodes messages differently.
 
-**Required**: Message hashing tests (`hasher.test.ts`) - these verify correctness of message ID computation, which is critical for cross-chain message tracking.
+```ts
+import { keccak256 } from '../hasher/common.ts'
+import type { CCIPMessage } from '../types.ts'
 
-**Recommended**: Follow `ccip-sdk/src/evm/` for comprehensive test coverage patterns including message decoding, error handling, and request parsing.
+export function hashMessage(message: CCIPMessage): string {
+  // Encode message fields according to your chain's format
+  const encoded = encodeMessageForYourChain(message)
+  return keccak256(encoded)
+}
+```
 
-### Integration Testing via CLI
+:::warning Critical
+Message ID computation must match the on-chain implementation exactly. Test against real transactions.
+:::
 
-After implementing, test with the CLI:
+---
+
+## Step 5: Define Types
+
+**File:** `ccip-sdk/src/yourchain/types.ts`
+
+Define your unsigned transaction type:
+
+```ts
+export interface YourChainUnsignedTx {
+  // Chain-specific transaction structure
+  instructions: YourChainInstruction[]
+  recentBlockhash?: string
+  // ...
+}
+```
+
+Then add it to `UnsignedTx` in `ccip-sdk/src/chain.ts`:
+
+```ts
+export type UnsignedTx = {
+  [ChainFamily.EVM]: UnsignedEVMTx
+  [ChainFamily.Solana]: UnsignedSolanaTx
+  [ChainFamily.Aptos]: UnsignedAptosTx
+  [ChainFamily.TON]: UnsignedTONTx
+  [ChainFamily.Sui]: never // Not yet implemented
+  [ChainFamily.YourChain]: UnsignedYourChainTx  // Add this
+}
+```
+
+---
+
+## Step 6: Export from SDK
+
+**File:** `ccip-sdk/src/index.ts`
+
+```ts
+// Add import
+export { YourChainChain } from './yourchain/index.ts'
+
+// Add to allSupportedChains (keys are ChainFamily values)
+export const allSupportedChains = {
+  [ChainFamily.EVM]: EVMChain,
+  [ChainFamily.Solana]: SolanaChain,
+  [ChainFamily.Aptos]: AptosChain,
+  [ChainFamily.Sui]: SuiChain,
+  [ChainFamily.TON]: TONChain,
+  [ChainFamily.YourChain]: YourChainChain,  // Add this
+}
+```
+
+---
+
+## Step 7: CLI Wallet Provider
+
+**File:** `ccip-cli/src/providers/yourchain.ts`
+
+```ts
+export async function loadYourChainWallet(
+  walletArg: string | undefined,
+): Promise<YourChainWallet> {
+  // Load from:
+  // - Environment variable (PRIVATE_KEY)
+  // - File path
+  // - Ledger (if supported)
+  
+  const privateKey = process.env['PRIVATE_KEY'] || walletArg
+  if (!privateKey) {
+    throw new Error('No wallet provided')
+  }
+  
+  return createWalletFromPrivateKey(privateKey)
+}
+```
+
+**File:** `ccip-cli/src/providers/index.ts`
+
+```ts
+import { loadYourChainWallet } from './yourchain.ts'
+
+export async function loadChainWallet(chain: Chain): Promise<[string, unknown]> {
+  switch (chain.family) {
+    // ... existing cases
+    case ChainFamily.YourChain: {
+      const wallet = await loadYourChainWallet(walletArg)
+      return [wallet.address, wallet]
+    }
+  }
+}
+```
+
+---
+
+## Step 8: Testing
+
+### Required: Hasher Tests
+
+**File:** `ccip-sdk/src/yourchain/hasher.test.ts`
+
+```ts
+import { describe, it } from 'node:test'
+import assert from 'node:assert'
+import { hashMessage } from './hasher.ts'
+
+describe('YourChain hasher', () => {
+  it('computes correct message ID', () => {
+    // Use a real message from your chain
+    const message = { /* ... */ }
+    const expectedId = '0x...' // From on-chain transaction
+    
+    assert.strictEqual(hashMessage(message), expectedId)
+  })
+})
+```
+
+### Integration Testing
 
 ```bash
 # Build
 npm run build
 
-# Test message tracking (requires real tx hash from your chain)
-./ccip-cli/ccip-cli show <transaction-hash> --rpcs <your-rpc-url>
+# Test message tracking
+./ccip-cli/ccip-cli show <your-chain-tx-hash> --rpcs <your-rpc-url>
 
 # Test token info
-./ccip-cli/ccip-cli getSupportedTokens <chain-selector> <router-address> --rpcs <your-rpc-url>
+./ccip-cli/ccip-cli getSupportedTokens <chain-selector> <router> --rpcs <your-rpc-url>
 ```
-
-Alternatively, create a `.env` file with RPC endpoints to avoid passing `--rpcs` each time.
 
 ---
 
-## Before Submitting
+## Checklist
 
-See [Quality Gates](../CONTRIBUTING.md#quality-gates) and [Error Handling](../CONTRIBUTING.md#error-handling) in CONTRIBUTING.md.
+Before submitting your PR:
+
+- [ ] Chain class implements all abstract methods
+- [ ] Static registration block added
+- [ ] Hasher tests pass with real transaction data
+- [ ] Types exported from SDK
+- [ ] CLI wallet provider implemented
+- [ ] All quality gates pass (`npm run check && npm test`)
+- [ ] CHANGELOG.md updated
+
+## Need Help?
+
+- Study the reference implementations
+- Open a [draft PR](https://github.com/smartcontractkit/ccip-tools-ts/pulls) for early feedback
+- Ask questions in the PR comments
