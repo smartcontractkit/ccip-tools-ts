@@ -7,7 +7,7 @@ import type { EVMExtraArgsV2 } from '../extra-args.ts'
 
 const ZERO_ADDRESS = '0x' + '0'.repeat(40)
 
-describe('TON hasher', () => {
+describe('TON hasher unit tests', () => {
   const CHAINSEL_EVM_TEST_90000001 = 909606746561742123n
   const CHAINSEL_TON = 13879075125137744094n
   const EVM_ONRAMP_ADDRESS_TEST = '0x111111c891c5d4e6ad68064ae45d43146d4f9f3a'

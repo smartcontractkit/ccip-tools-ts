@@ -31,7 +31,6 @@ export async function loadEvmWallet(
   provider: JsonRpcApiProvider,
   { wallet: walletOpt }: { wallet?: unknown },
 ): Promise<Signer> {
-  if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
   if (
     typeof walletOpt === 'number' ||
     (typeof walletOpt === 'string' && walletOpt.match(/^(\d+|0x[a-fA-F0-9]{40})$/))

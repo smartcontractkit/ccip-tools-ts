@@ -8,7 +8,6 @@ import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519'
  * @returns Sui Keypair instance
  */
 export function loadSuiWallet({ wallet: walletOpt }: { wallet?: unknown }) {
-  if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
   if (typeof walletOpt !== 'string') throw new CCIPArgumentInvalidError('wallet', String(walletOpt))
 
   const keyBytes = bytesToBuffer(walletOpt)

@@ -5,6 +5,7 @@ import {
   type CCIPExecution,
   type CCIPRequest,
   type Chain,
+  type ChainFamily,
   type ChainStatic,
   type Lane,
   CCIPError,
@@ -94,8 +95,31 @@ export function prettyLane(this: Ctx, lane: Lane) {
     name: { source: source.name, dest: dest.name },
     chainId: { source: source.chainId, dest: dest.chainId },
     chainSelector: { source: source.chainSelector, dest: dest.chainSelector },
-    'onRamp/version': { source: lane.onRamp, dest: lane.version },
+    'onRamp/version': {
+      source: formatDisplayAddress(lane.onRamp, source.family),
+      dest: lane.version,
+    },
   })
+}
+
+/**
+ * Format an address for display using chain-specific formatting.
+ * @param address - Address string
+ * @param family - Chain family for formatting
+ * @returns Formatted address for display
+ */
+export function formatDisplayAddress(address: string, family: ChainFamily): string {
+  return supportedChains[family]?.formatAddress?.(address) ?? address
+}
+
+/**
+ * Format a transaction hash for display using chain-specific formatting.
+ * @param hash - Transaction hash string
+ * @param family - Chain family for formatting
+ * @returns Formatted hash for display
+ */
+export function formatDisplayTxHash(hash: string, family: ChainFamily): string {
+  return supportedChains[family]?.formatTxHash?.(hash) ?? hash
 }
 
 async function formatToken(
@@ -207,6 +231,17 @@ export async function prettyRequest(this: Ctx, source: Chain, request: CCIPReque
   }
   const nonce = Number(request.message.nonce)
 
+  const sourceFamily = networkInfo(request.lane.sourceChainSelector).family
+  const destFamily = networkInfo(request.lane.destChainSelector).family
+
+  // Normalize receiver to destination chain format for display
+  const displaySender = formatDisplayAddress(request.message.sender, sourceFamily)
+  const displayReceiver = formatDisplayAddress(request.message.receiver, destFamily)
+  const displayOrigin = request.tx.from
+    ? formatDisplayAddress(request.tx.from, sourceFamily)
+    : undefined
+  const displayTxHash = formatDisplayTxHash(request.log.transactionHash, sourceFamily)
+
   const rest = omit(
     request.message,
     'messageId',
@@ -226,9 +261,9 @@ export async function prettyRequest(this: Ctx, source: Chain, request: CCIPReque
   )
   prettyTable.call(this, {
     messageId: request.message.messageId,
-    ...(request.tx.from ? { origin: request.tx.from } : {}),
-    sender: request.message.sender,
-    receiver: request.message.receiver,
+    ...(displayOrigin ? { origin: displayOrigin } : {}),
+    sender: displaySender,
+    receiver: displayReceiver,
     sequenceNumber: Number(request.message.sequenceNumber),
     nonce: nonce === 0 ? '0 => allow out-of-order exec' : nonce,
     ...('gasLimit' in request.message
@@ -236,7 +271,7 @@ export async function prettyRequest(this: Ctx, source: Chain, request: CCIPReque
       : 'computeUnits' in request.message
         ? { computeUnits: Number(request.message.computeUnits) }
         : {}),
-    transactionHash: request.log.transactionHash,
+    transactionHash: displayTxHash,
     logIndex: request.log.index,
     blockNumber: request.log.blockNumber,
     timestamp: `${formatDate(request.tx.timestamp)} (${formatDuration(Date.now() / 1e3 - request.tx.timestamp)} ago)`,
@@ -273,16 +308,19 @@ export async function prettyCommit(
   this: Ctx,
   dest: Chain,
   commit: CCIPCommit,
-  request: PickDeep<CCIPRequest, 'tx.timestamp'>,
+  request: PickDeep<CCIPRequest, 'tx.timestamp' | 'lane.destChainSelector'>,
 ) {
   const timestamp = await dest.getBlockTimestamp(commit.log.blockNumber)
+  const destFamily = networkInfo(request.lane.destChainSelector).family
+  const origin = commit.log.tx?.from ?? (await dest.getTransaction(commit.log.transactionHash)).from
+
   prettyTable.call(this, {
     merkleRoot: commit.report.merkleRoot,
     min: Number(commit.report.minSeqNr),
     max: Number(commit.report.maxSeqNr),
-    origin: commit.log.tx?.from ?? (await dest.getTransaction(commit.log.transactionHash)).from,
-    contract: commit.log.address,
-    transactionHash: commit.log.transactionHash,
+    origin: formatDisplayAddress(origin, destFamily),
+    contract: formatDisplayAddress(commit.log.address, destFamily),
+    transactionHash: formatDisplayTxHash(commit.log.transactionHash, destFamily),
     blockNumber: commit.log.blockNumber,
     timestamp: `${formatDate(timestamp)} (${formatDuration(timestamp - request.tx.timestamp)} after request)`,
   })
@@ -386,9 +424,11 @@ export function prettyTable(
 export function prettyReceipt(
   this: Ctx,
   receipt: CCIPExecution,
-  request: PickDeep<CCIPRequest, 'tx.timestamp'>,
+  request: PickDeep<CCIPRequest, 'tx.timestamp' | 'lane.destChainSelector'>,
   origin?: string,
 ) {
+  const destFamily = networkInfo(request.lane.destChainSelector).family
+
   prettyTable.call(this, {
     state: receipt.receipt.state === ExecutionState.Success ? '✅ success' : '❌ failed',
     ...(receipt.receipt.state !== ExecutionState.Success ||
@@ -396,9 +436,9 @@ export function prettyReceipt(
       ? { returnData: receipt.receipt.returnData }
       : {}),
     ...(receipt.receipt.gasUsed ? { gasUsed: Number(receipt.receipt.gasUsed) } : {}),
-    ...(origin ? { origin } : {}),
-    contract: receipt.log.address,
-    transactionHash: receipt.log.transactionHash,
+    ...(origin ? { origin: formatDisplayAddress(origin, destFamily) } : {}),
+    contract: formatDisplayAddress(receipt.log.address, destFamily),
+    transactionHash: formatDisplayTxHash(receipt.log.transactionHash, destFamily),
     logIndex: receipt.log.index,
     blockNumber: receipt.log.blockNumber,
     timestamp: `${formatDate(receipt.timestamp)} (${formatDuration(receipt.timestamp - request.tx.timestamp)} after request)`,

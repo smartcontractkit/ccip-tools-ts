@@ -16,8 +16,6 @@ import { WalletContractV4 } from '@ton/ton'
 export async function loadTonWallet({
   wallet: walletOpt,
 }: { wallet?: unknown } = {}): Promise<TONWallet> {
-  if (!walletOpt) walletOpt = process.env['USER_KEY'] || process.env['OWNER_KEY']
-
   if (typeof walletOpt !== 'string') throw new CCIPWalletInvalidError(walletOpt)
 
   // Handle mnemonic phrase

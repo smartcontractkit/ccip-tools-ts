@@ -1,76 +1,86 @@
 # ccip-tools-ts
 
-## Typescript SDK and CLI to interact with CCIP (monorepo).
-
-This tool can be used to query and interact with [CCIP](https://ccip.chain.link) contracts deployed
-in supported blockchains, through its publicly accessible data and methods.
+TypeScript SDK and CLI for [CCIP](https://chain.link/cross-chain) (Cross-Chain Interoperability Protocol).
 
 > [!IMPORTANT]
 > This tool is provided under an MIT license and is for convenience and illustration purposes only.
 
-## Architecture
+## Packages
 
-```
-┌╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶┐
-╷  ccip-tools-ts                                                      ╷
-╷  ┌──────────────────────────┐        ┌──────────────────────────┐   ╷
-╷  │                          │        │                          │   ╷
-╷  │  @chainlink/ccip-sdk     │◀───────│  @chainlink/ccip-cli     │   ╷
-╷  │                          │        │                          │   ╷
-╷  └──────────────────────────┘        └──────────────────────────┘   ╷
-└╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶┘
-```
+| Package                           | Description                         | Install                              |
+| --------------------------------- | ----------------------------------- | ------------------------------------ |
+| [@chainlink/ccip-sdk](./ccip-sdk) | TypeScript SDK for CCIP integration | `npm install @chainlink/ccip-sdk`    |
+| [@chainlink/ccip-cli](./ccip-cli) | Command-line interface              | `npm install -g @chainlink/ccip-cli` |
 
-ccip-tools-ts (this monorepo) is constituted of 2 packages:
+## Quick Start
 
-### [@chainlink/ccip-sdk](./ccip-sdk)
+### Track a CCIP Message (CLI)
 
-The SDK provides a set of importable utilities, types, functions and classes to interact with the
-CCIP protocol, supporting multiple chain families (currently, EVM, Solana and Aptos) through a
-unified interface.
-
-It aims to be agnostic of the environment (NodeJS, Web, etc), uses specific
-blockchain libraries internally, but tries to not expose details of them on its public APIs.
-
-It depends minimally on centralized services, and should work with any compatible RPC or Provider,
-even public/rate-limited ones (when possible).
-
-It doesn't hardcode CCIP deployed contracts, and includes algorithms to discover the related
-addresses only from the common entrypoints, usually a transaction hash or Router address.
-
-### [@chainlink/ccip-cli](./ccip-cli)
-
-The CLI imports and uses the SDK, and serves also as demo on how to instantiate and use many
-features exposed by it.
-
-It reads a list of RPCs URLs from a file, command-line option or environment variables, and
-discovers the required networks from them.
-
-## Tooling and Development
-
-NodeJS v24 is recommended for development.
-
-Both packages are written in [TypeScript](https://www.typescriptlang.org/), transpiled to modern
-JavaScript using `tsc`, and all of transpiled, types and sources are published to npm.
-The idea is to make it easy for modern TS codebases to import them, and bundle with their preferred
-bundler and to their preferred target version. They don't aim for minimal bundle size directly, and
-instead expect consumers to optimize their tree-shaken bundles.
-
-The codebase is also restricted to syntax compatible with [NodeJS type stripping](https://nodejs.org/api/typescript.html#type-stripping),
-allowing the sources to be consumed directly by NodeJS v23+, without an explicit transpilation phase.
-
-Example:
-```sh
-node ./ccip-cli/src/index.ts --help
+```bash
+ccip-cli show 0xYOUR_TX_HASH \
+  -r https://ethereum-sepolia-rpc.publicnode.com \
+  -r https://sepolia-rollup.arbitrum.io/rpc
 ```
 
-Tests are written for NodeJS native runner (`node --test`), and don't require external packages.
+### Integrate in Your App (SDK)
 
-CLI contains mostly e2e tests, and SDK, unit and integration. They all can be run and have
-aggregated coverage collected and reported by running in repo root:
+```ts
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
 
-```sh
-npm run test
+const source = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.com')
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
+const dest = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector
+
+const fee = await source.getFee(router, dest, {
+  receiver: '0xYourAddress',
+  data: '0x48656c6c6f',
+  extraArgs: { gasLimit: 200_000 },
+})
 ```
 
-Check the respective package's README for more details.
+## Supported Chains
+
+| Chain Family | Networks                                                     | Status         |
+| ------------ | ------------------------------------------------------------ | -------------- |
+| EVM          | Ethereum, Arbitrum, Optimism, Polygon, Avalanche, Base, etc. | Supported      |
+| Solana       | Mainnet, Devnet                                              | Supported      |
+| Aptos        | Mainnet, Testnet                                             | Supported      |
+| Sui          | Mainnet, Testnet                                             | In Development |
+| TON          | Mainnet, Testnet                                             | In Development |
+
+## Documentation
+
+📖 **[Full Documentation](./docs/)**
+
+| Guide                                          | Description                  |
+| ---------------------------------------------- | ---------------------------- |
+| [Overview](./docs/index.md)                    | Introduction and quick start |
+| [SDK Guide](./docs/sdk/index.md)               | SDK usage and patterns       |
+| [CLI Reference](./docs/cli/index.md)           | All commands and options     |
+| [Contributing](./CONTRIBUTING.md)              | Development setup            |
+| [Adding New Chain](./docs/adding-new-chain.md) | Implement a new blockchain   |
+
+## Development
+
+> [!NOTE]
+> NodeJS version v20+ is required. For development of the packages, v24+ is required.
+> `npm test` will only work with v24+
+
+```bash
+git clone https://github.com/smartcontractkit/ccip-tools-ts
+cd ccip-tools-ts
+npm ci
+npm test
+```
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
+
+## Resources
+
+- [CCIP Official Documentation](https://docs.chain.link/ccip)
+- [CCIP Directory](https://docs.chain.link/ccip/directory) - Router addresses by network
+- [Changelog](./CHANGELOG.md)
+
+## License
+
+MIT

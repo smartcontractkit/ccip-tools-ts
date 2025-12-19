@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import { beginCell } from '@ton/core'
 import { toBigInt } from 'ethers'
 
-import { extractMagicTag, hexToBuffer, tryParseCell } from './utils.ts'
+import { extractMagicTag, hexToBuffer, lookupTxByRawHash, tryParseCell } from './utils.ts'
 import {
   EVMExtraArgsV1Tag,
   EVMExtraArgsV2Tag,
@@ -12,7 +12,7 @@ import {
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
 
-describe('TON utils', () => {
+describe('TON utils unit tests', () => {
   describe('hexToBuffer', () => {
     it('should convert hex string with 0x prefix', () => {
       const buffer = hexToBuffer('0x48656c6c6f')
@@ -125,6 +125,118 @@ describe('TON utils', () => {
 
         assert.equal(tag, testCase.expected)
       }
+    })
+  })
+
+  describe('lookupTxByRawHash', () => {
+    const mockLogger = {
+      debug: () => {},
+      error: () => {},
+      info: () => {},
+      warn: () => {},
+    }
+
+    it('should strip 0x prefix from hash', async () => {
+      let capturedUrl = ''
+      const mockFetch = (async (url: string) => {
+        capturedUrl = url
+        return {
+          json: async () => ({
+            transactions: [{ account: '0:abc', lt: '123', hash: 'def' }],
+          }),
+        }
+      }) as unknown as typeof fetch
+
+      await lookupTxByRawHash('0xabcdef', true, mockFetch, mockLogger)
+
+      assert.ok(capturedUrl.includes('hash=abcdef'), 'Should strip 0x prefix')
+      assert.ok(!capturedUrl.includes('0x'), 'Should not include 0x in URL')
+    })
+
+    it('should use testnet URL when isTestnet=true', async () => {
+      let capturedUrl = ''
+      const mockFetch = (async (url: string) => {
+        capturedUrl = url
+        return {
+          json: async () => ({
+            transactions: [{ account: '0:abc', lt: '123', hash: 'def' }],
+          }),
+        }
+      }) as unknown as typeof fetch
+
+      await lookupTxByRawHash('abc', true, mockFetch, mockLogger)
+
+      const parsed = new URL(capturedUrl)
+      assert.equal(parsed.hostname, 'testnet.toncenter.com', 'Should use testnet URL')
+    })
+
+    it('should use mainnet URL when isTestnet=false', async () => {
+      let capturedUrl = ''
+      const mockFetch = (async (url: string) => {
+        capturedUrl = url
+        return {
+          json: async () => ({
+            transactions: [{ account: '0:abc', lt: '123', hash: 'def' }],
+          }),
+        }
+      }) as unknown as typeof fetch
+
+      await lookupTxByRawHash('abc', false, mockFetch, mockLogger)
+
+      const parsed = new URL(capturedUrl)
+      assert.equal(parsed.hostname, 'toncenter.com', 'Should use mainnet URL')
+    })
+
+    it('should throw CCIPTransactionNotFoundError when no transactions found', async () => {
+      const mockFetch = (async () => ({
+        json: async () => ({ transactions: [] }),
+      })) as unknown as typeof fetch
+
+      await assert.rejects(
+        () => lookupTxByRawHash('nonexistent', true, mockFetch, mockLogger),
+        /not found/i,
+      )
+    })
+
+    it('should throw CCIPTransactionNotFoundError on network error', async () => {
+      const mockFetch = (async () => {
+        throw new Error('Network error')
+      }) as unknown as typeof fetch
+
+      await assert.rejects(
+        () => lookupTxByRawHash('abc', true, mockFetch, mockLogger),
+        /not found/i,
+      )
+    })
+
+    it('should throw CCIPTransactionNotFoundError on invalid JSON', async () => {
+      const mockFetch = (async () => ({
+        json: async () => {
+          throw new Error('Invalid JSON')
+        },
+      })) as unknown as typeof fetch
+
+      await assert.rejects(
+        () => lookupTxByRawHash('abc', true, mockFetch, mockLogger),
+        /not found/i,
+      )
+    })
+
+    it('should return first transaction from results', async () => {
+      const mockFetch = (async () => ({
+        json: async () => ({
+          transactions: [
+            { account: '0:first', lt: '100', hash: 'aaa' },
+            { account: '0:second', lt: '200', hash: 'bbb' },
+          ],
+        }),
+      })) as unknown as typeof fetch
+
+      const result = await lookupTxByRawHash('abc', true, mockFetch, mockLogger)
+
+      assert.equal(result.account, '0:first')
+      assert.equal(result.lt, '100')
+      assert.equal(result.hash, 'aaa')
     })
   })
 })

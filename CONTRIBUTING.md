@@ -1,6 +1,6 @@
 # Contributing
 
-For project overview and architecture, see [README.md](README.md).
+For project overview and architecture, see the [documentation](docs/index.md).
 
 ## Prerequisites
 

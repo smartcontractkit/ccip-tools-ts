@@ -33,7 +33,7 @@ export function generateUnsignedExecuteReport(
   const payload = beginCell()
     .storeUint(MANUALLY_EXECUTE_OPCODE, 32) // Opcode for OffRamp_ManuallyExecute
     .storeUint(0, 64) // queryID (default 0)
-    .storeRef(serializedReport) // ExecutionReport as reference
+    .storeBuilder(serializedReport) // as builder!
     .storeCoins(gasOverride) // gasOverride (optional, 0 = no override)
     .endCell()
 

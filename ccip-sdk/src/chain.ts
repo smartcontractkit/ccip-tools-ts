@@ -573,6 +573,19 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    */
   isTxHash(v: unknown): v is string
   /**
+   * Format an address for human-friendly display.
+   * Defaults to getAddress if not overridden.
+   * @param address - Address string in any recognized format
+   * @returns Human-friendly address string for display
+   */
+  formatAddress?(address: string): string
+  /**
+   * Format a transaction hash for human-friendly display.
+   * @param hash - Transaction hash string
+   * @returns Human-friendly hash string for display
+   */
+  formatTxHash?(hash: string): string
+  /**
    * Create a leaf hasher for this dest chain and lane
    * @param lane - source, dest and onramp lane info
    * @param ctx - context object containing logger
