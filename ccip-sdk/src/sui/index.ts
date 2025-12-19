@@ -3,7 +3,7 @@ import { type SuiTransactionBlockResponse, SuiClient } from '@mysten/sui/client'
 import type { Keypair } from '@mysten/sui/cryptography'
 import { SuiGraphQLClient } from '@mysten/sui/graphql'
 import { Transaction } from '@mysten/sui/transactions'
-import { type BytesLike, AbiCoder, isBytesLike } from 'ethers'
+import { type BytesLike, AbiCoder, hexlify, isBytesLike } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { AptosChain } from '../aptos/index.ts'
@@ -32,6 +32,7 @@ import {
   type CommitReport,
   type ExecutionReceipt,
   type ExecutionReport,
+  type ExecutionState,
   type Lane,
   type Log_,
   type NetworkInfo,
@@ -40,7 +41,7 @@ import {
   ChainFamily,
 } from '../types.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
-import { decodeAddress, getDataBytes, networkInfo } from '../utils.ts'
+import { bytesToBuffer, decodeAddress, getDataBytes, networkInfo } from '../utils.ts'
 import { type CommitEvent, getSuiEventsInTimeRange } from './events.ts'
 import {
   type SuiManuallyExecuteInput,
@@ -507,11 +508,56 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /**
    * Decodes an execution receipt from a log entry.
-   * @param _log - The log entry to decode.
+   * @param log - The log entry to decode.
    * @returns Decoded execution receipt or undefined.
    */
-  static decodeReceipt(_log: Log_): ExecutionReceipt | undefined {
-    return
+  static decodeReceipt(log: Log_): ExecutionReceipt | undefined {
+    // Check if this is an ExecutionStateChanged event
+    const topic = (Array.isArray(log.topics) ? log.topics[0] : log.topics) as string
+    if (topic !== 'ExecutionStateChanged') {
+      return undefined
+    }
+
+    // Validate log data structure
+    if (!log.data || typeof log.data !== 'object') {
+      return undefined
+    }
+
+    const eventData = log.data as {
+      message_hash?: number[]
+      message_id?: number[]
+      sequence_number?: string
+      source_chain_selector?: string
+      state?: number
+    }
+
+    // Verify required fields exist
+    if (
+      !eventData.message_id ||
+      !Array.isArray(eventData.message_id) ||
+      eventData.sequence_number === undefined ||
+      eventData.state === undefined
+    ) {
+      return undefined
+    }
+
+    const toHex = (bytes: BytesLike | number[]) => hexlify(bytesToBuffer(bytes))
+
+    // Convert message_id bytes array to hex string
+    const messageId = toHex(eventData.message_id)
+
+    // Convert message_hash bytes array to hex string (if present)
+    const messageHash = eventData.message_hash ? toHex(eventData.message_hash) : undefined
+
+    return {
+      messageId,
+      sequenceNumber: BigInt(eventData.sequence_number),
+      state: eventData.state as ExecutionState,
+      sourceChainSelector: eventData.source_chain_selector
+        ? BigInt(eventData.source_chain_selector)
+        : undefined,
+      messageHash,
+    }
   }
 
   /**
