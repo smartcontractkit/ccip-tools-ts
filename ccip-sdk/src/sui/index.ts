@@ -265,12 +265,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
-  async typeAndVersion(
-    _address: string,
-  ): Promise<
-    | [type_: string, version: string, typeAndVersion: string]
-    | [type_: string, version: string, typeAndVersion: string, suffix: string]
-  > {
+  async typeAndVersion(_address: string) {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.typeAndVersion'))
   }
 

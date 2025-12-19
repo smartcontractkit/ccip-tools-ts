@@ -3,9 +3,8 @@ import type { BytesLike } from 'ethers'
 
 import { CCIPMessageInvalidError } from '../../errors/specialized.ts'
 import { decodeExtraArgs } from '../../extra-args.ts'
-import type { ExecutionReport } from '../../types.ts'
-import { bytesToBuffer, networkInfo } from '../../utils.ts'
-import type { CCIPMessage_V1_6_Sui } from '../types.ts'
+import type { CCIPMessage, CCIPVersion, ExecutionReport } from '../../types.ts'
+import { bytesToBuffer, getAddressBytes, getDataBytes, networkInfo } from '../../utils.ts'
 
 const Any2SuiTokenTransferBCS = bcs.struct('Any2SuiTokenTransfer', {
   source_pool_address: bcs.vector(bcs.u8()),
@@ -38,7 +37,7 @@ const ExecutionReportBCS = bcs.struct('ExecutionReport', {
  * @returns Serialized execution report as Uint8Array.
  */
 export function serializeExecutionReport(
-  executionReport: ExecutionReport<CCIPMessage_V1_6_Sui>,
+  executionReport: ExecutionReport<CCIPMessage<typeof CCIPVersion.V1_6>>,
 ): Uint8Array {
   const { message, offchainTokenData, proofs } = executionReport
 
@@ -46,21 +45,17 @@ export function serializeExecutionReport(
     throw new CCIPMessageInvalidError('Message is undefined in execution report')
   }
 
-  const decodedExtraArgs = decodeExtraArgs(
-    message.extraArgs,
-    networkInfo(message.destChainSelector).family,
-  )
-
-  if (!decodedExtraArgs || decodedExtraArgs._tag !== 'SuiExtraArgsV1') {
-    throw new CCIPMessageInvalidError('Expected Sui extra args')
-  }
-
-  type TokenAmount = {
-    sourcePoolAddress: string
-    destTokenAddress: string
-    destGasAmount?: bigint
-    extraData: string
-    amount: bigint
+  let gasLimit, tokenReceiver
+  if ('receiverObjectIds' in message) {
+    ;({ gasLimit, tokenReceiver } = message)
+  } else {
+    const decodedExtraArgs = decodeExtraArgs(
+      message.extraArgs,
+      networkInfo(message.sourceChainSelector).family,
+    )
+    if (decodedExtraArgs?._tag !== 'SuiExtraArgsV1')
+      throw new CCIPMessageInvalidError('Expected Sui extra args')
+    ;({ gasLimit, tokenReceiver } = decodedExtraArgs)
   }
 
   const reportData = {
@@ -73,32 +68,19 @@ export function serializeExecutionReport(
     sender: Array.from(bytesToBuffer(message.sender)),
     data: Array.from(bytesToBuffer(message.data)),
     receiver: message.receiver,
-    gas_limit: decodedExtraArgs.gasLimit,
-    token_receiver: decodedExtraArgs.tokenReceiver,
-    token_amounts: message.tokenAmounts.map((token: TokenAmount) => ({
-      source_pool_address: Array.from(bytesToBuffer(token.sourcePoolAddress)),
+    gas_limit: gasLimit,
+    token_receiver: tokenReceiver,
+    token_amounts: message.tokenAmounts.map((token) => ({
+      source_pool_address: Array.from(getAddressBytes(token.sourcePoolAddress)),
       dest_token_address: token.destTokenAddress,
       dest_gas_amount: Number(token.destGasAmount || 0n), // Use actual destGasAmount from token data
-      extra_data: Array.from(bytesToBuffer(token.extraData)),
+      extra_data: Array.from(getDataBytes(token.extraData)),
       amount: BigInt(token.amount),
     })),
-    offchain_token_data: offchainTokenData.map((data) => {
-      if (!data) {
-        return bytesToBuffer('')
-      }
-      // Extract the actual data bytes from the object
-      const dataBytes = data._tag ? data[data._tag] : '0x'
-      return Array.from(bytesToBuffer(dataBytes))
-    }),
+    // TODO: encode as per CCTP/LBTC TPs, when available
+    offchain_token_data: offchainTokenData.map(() => Buffer.from([])),
     proofs: proofs.map((proof: BytesLike) => {
-      const proofBytes = bytesToBuffer(proof)
-      // Ensure each proof is exactly 32 bytes
-      if (proofBytes.length !== 32) {
-        throw new CCIPMessageInvalidError(
-          `Invalid proof length: expected 32 bytes, got ${proofBytes.length}`,
-        )
-      }
-      return Array.from(proofBytes)
+      return Array.from(getDataBytes(proof))
     }),
   }
 
