@@ -86,25 +86,35 @@ function asSnakeData<T>(array: T[], builderFn: (item: T) => Builder): Cell {
  * @param execReport - Execution report containing message, proofs, and proof flag bits.
  * @returns BOC-serialized Cell containing the execution report.
  */
-export function serializeExecutionReport(execReport: ExecutionReport<CCIPMessage_V1_6_TON>): Cell {
+export function serializeExecutionReport(
+  execReport: ExecutionReport<CCIPMessage_V1_6_TON>,
+): Builder {
   return beginCell()
     .storeUint(execReport.message.sourceChainSelector, 64)
     .storeRef(asSnakeData([execReport.message], serializeMessage))
-    .storeRef(Cell.EMPTY)
+    .storeRef(Cell.EMPTY) // TODO: FIXME: offchainTokenData empty for now, add when implemented
     .storeRef(
       asSnakeData(execReport.proofs.map(toBigInt), (proof: bigint) => {
         return beginCell().storeUint(proof, 256)
       }),
     )
     .storeUint(execReport.proofFlagBits, 256)
-    .endCell()
 }
 
 function serializeMessage(message: CCIPMessage_V1_6_TON): Builder {
   return beginCell()
-    .storeRef(serializeHeader(message))
-    .storeRef(serializeSender(message.sender))
-    .storeRef(serializeData(message.data))
+    .storeUint(BigInt(message.messageId), 256)
+    .storeUint(message.sourceChainSelector, 64)
+    .storeUint(message.destChainSelector, 64)
+    .storeUint(message.sequenceNumber, 64)
+    .storeUint(message.nonce, 64)
+    .storeRef(
+      beginCell()
+        .storeUint(bytesToBuffer(message.sender).length, 8)
+        .storeBuffer(bytesToBuffer(message.sender))
+        .endCell(),
+    )
+    .storeRef(beginCell().storeBuffer(bytesToBuffer(message.data)).endCell())
     .storeAddress(Address.parse(message.receiver))
     .storeCoins(message.gasLimit)
     .storeMaybeRef(
@@ -112,25 +122,7 @@ function serializeMessage(message: CCIPMessage_V1_6_TON): Builder {
     )
 }
 
-function serializeHeader(message: CCIPMessage_V1_6): Builder {
-  return beginCell()
-    .storeUint(BigInt(message.messageId), 256)
-    .storeUint(message.sourceChainSelector, 64)
-    .storeUint(message.destChainSelector, 64)
-    .storeUint(message.sequenceNumber, 64)
-    .storeUint(message.nonce, 64)
-}
-
-function serializeSender(sender: string): Builder {
-  const senderBytes = bytesToBuffer(sender)
-  return beginCell().storeUint(senderBytes.length, 8).storeBuffer(senderBytes)
-}
-
-function serializeData(data: string): Builder {
-  return beginCell().storeBuffer(bytesToBuffer(data))
-}
-
-function serializeTokenAmounts(tokenAmounts: CCIPMessage_V1_6['tokenAmounts']): Builder {
+function serializeTokenAmounts(tokenAmounts: CCIPMessage_V1_6['tokenAmounts']): Cell {
   const builder = beginCell()
   for (const ta of tokenAmounts) {
     builder.storeRef(
@@ -142,10 +134,10 @@ function serializeTokenAmounts(tokenAmounts: CCIPMessage_V1_6['tokenAmounts']): 
         .endCell(),
     )
   }
-  return builder
+  return builder.endCell()
 }
 
-function serializeSourcePool(address: string): Builder {
+function serializeSourcePool(address: string): Cell {
   const bytes = bytesToBuffer(address)
-  return beginCell().storeUint(bytes.length, 8).storeBuffer(bytes)
+  return beginCell().storeUint(bytes.length, 8).storeBuffer(bytes).endCell()
 }

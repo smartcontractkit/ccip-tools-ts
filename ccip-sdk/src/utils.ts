@@ -447,6 +447,7 @@ export function createRateLimitedFetch(
     if (method && methodRateLimits[method]) {
       while (isMethodRateLimited(method)) {
         const oldestRequest = methodRateLimits[method].queue[0]
+        if (!oldestRequest) break // Queue was cleaned, no longer rate limited
         const waitTime = windowMs - (Date.now() - oldestRequest.timestamp)
         if (waitTime > 0) {
           await sleep(waitTime + 100) // Add small buffer
@@ -457,6 +458,7 @@ export function createRateLimitedFetch(
     // Wait for global rate limit
     while (isRateLimited()) {
       const oldestRequest = requestQueue[0]
+      if (!oldestRequest) break // Queue was cleaned, no longer rate limited
       const waitTime = windowMs - (Date.now() - oldestRequest.timestamp)
       if (waitTime > 0) {
         await sleep(waitTime + 100) // Add small buffer

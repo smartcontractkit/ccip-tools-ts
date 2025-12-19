@@ -319,6 +319,47 @@ describe('EVMChain.decodeMessage', () => {
       assert.equal(ta.amount, 5000n)
       assert.equal(ta.destGasAmount, destGasAmount)
     })
+
+    it('should not have numeric keys in decoded message', () => {
+      const sourceChainSelector = 5009297550715157269n
+      const destChainSelector = 4949039107694359620n
+
+      const extraArgs = concat([
+        EVMExtraArgsV2Tag,
+        defaultAbiCoder.encode(['tuple(uint256,bool)'], [[200_000n, false]]),
+      ])
+
+      const fragment = interfaces.OnRamp_v1_6.getEvent('CCIPMessageSent')!
+      const encoded = interfaces.OnRamp_v1_6.encodeEventLog(fragment, [
+        destChainSelector,
+        500n,
+        {
+          header: {
+            messageId: testHash.messageId,
+            sourceChainSelector,
+            destChainSelector,
+            sequenceNumber: 500n,
+            nonce: 10n,
+          },
+          sender: testAddresses.sender,
+          data: '0xabcd',
+          receiver: padAddress(testAddresses.receiver),
+          extraArgs,
+          feeToken: testAddresses.feeToken,
+          feeTokenAmount: 5000n,
+          feeValueJuels: 100n,
+          tokenAmounts: [],
+        },
+      ])
+
+      const result = EVMChain.decodeMessage({ topics: encoded.topics, data: encoded.data })
+
+      assert.ok(result)
+
+      // Check that no numeric keys are present
+      const numericKeys = Object.keys(result).filter((k) => /^\d+$/.test(k))
+      assert.deepEqual(numericKeys, [], `Found unexpected numeric keys: ${numericKeys.join(', ')}`)
+    })
   })
 
   describe('error handling', () => {

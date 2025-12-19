@@ -136,23 +136,17 @@ const SuiExtraArgsV1 =
   'tuple(uint256 gasLimit, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] receiverObjectIds)'
 
 function resultToObject<T>(o: T): T {
-  return o instanceof Promise
-    ? (o.then(resultToObject) as T)
-    : o instanceof Result
-      ? (o.toObject() as T)
-      : o
-}
-
-function resultsToMessage(result: Result): Record<string, unknown> {
-  if (result.message) result = result.message as Result
-  return {
-    ...result.toObject(),
-    tokenAmounts: (result.tokenAmounts as Result[]).map((ta) => ta.toObject()),
-    ...(result.sourceTokenData
-      ? { sourceTokenData: (result.sourceTokenData as Result).toArray() }
-      : {}),
-    ...(result.header ? (result.header as Result).toObject() : {}),
+  if (o instanceof Promise) return o.then(resultToObject) as T
+  if (!(o instanceof Result)) return o
+  if (o.length === 0) return o.toArray() as T
+  try {
+    const obj = o.toObject()
+    if (!Object.keys(obj).every((k) => /^_+\d*$/.test(k)))
+      return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, resultToObject(v)])) as T
+  } catch (_) {
+    // fallthrough
   }
+  return o.toArray().map(resultToObject) as T
 }
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
@@ -374,7 +368,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       try {
         // we don't actually use Interface instance here, `decodeEventLog` is mostly static when given a fragment
         const result = interfaces.OnRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
-        message = resultsToMessage(result)
+        message = resultToObject(result) as Record<string, unknown>
+        if (message.message) message = message.message as Record<string, unknown>
+        if (message) break
       } catch (_) {
         // try next fragment
       }
