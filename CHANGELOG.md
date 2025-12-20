@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.92.0] - 2025-12-20 - Pre-release
 - SDK: `Chain.getLogs` can receive `watch` boolean or cancel promise, to enter continuous logs fetching
 - SDK: `Chain.waitFinality` method to receive a `log` and wait for its tx to finalize
 - SDK: `Chain.isTxHash` static method to typeguard chain-specific txHash string format
@@ -15,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI: if `--wallet` is omitted and `--rpcs-file=['./.env]` has a `USER_KEY=` or `PRIVATE_KEY=` variable, it will be used as wallet
 - SDK: `CCIPMessage` loses `header`; properties now are merged to `message` root (e.g. `message.messageId`)
 
-# [0.91.0] - 2025-12-08 - Pre-release
+## [0.91.0] - 2025-12-08 - Pre-release
 - `Chain.sendMessage` now calls `getFee` by itself, if not provided; it also returns a `CCIPRequest`
 - Fix USDC/CCTP attestation fetching in Solana
 - `CCIPRequest` loses `timestamp` property, available in `tx.timestamp` instead

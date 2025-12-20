@@ -1,4 +1,4 @@
-import type { Logger } from '@chainlink/ccip-sdk/src/types.js'
+import type { Logger } from '@chainlink/ccip-sdk/src/index.ts'
 
 /** Output format options for CLI commands. */
 export const Format = {
