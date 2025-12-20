@@ -18,6 +18,7 @@ import {
 import { loadAptosWallet } from './aptos.ts'
 import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
+import { loadSuiWallet } from './sui.ts'
 import { loadTonWallet } from './ton.ts'
 import type { Ctx } from '../commands/index.ts'
 
@@ -205,10 +206,14 @@ export async function loadChainWallet(chain: Chain, argv: { wallet?: unknown; rp
     case ChainFamily.Aptos:
       wallet = await loadAptosWallet(argv)
       return [wallet.accountAddress.toString(), wallet] as const
+    case ChainFamily.Sui:
+      wallet = loadSuiWallet(argv)
+      return [wallet.toSuiAddress(), wallet] as const
     case ChainFamily.TON:
       wallet = await loadTonWallet(argv)
       return [wallet.contract.address.toString(), wallet] as const
     default:
-      throw new CCIPChainFamilyUnsupportedError(chain.network.family)
+      // TypeScript exhaustiveness check - this should never be reached
+      throw new CCIPChainFamilyUnsupportedError((chain.network as { family: string }).family)
   }
 }

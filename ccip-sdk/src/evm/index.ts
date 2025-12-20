@@ -548,25 +548,24 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     switch (tag) {
       case EVMExtraArgsV1Tag: {
         const args = defaultAbiCoder.decode([EVMExtraArgsV1], dataSlice(data, 4))
-        return { ...((args[0] as Result).toObject() as EVMExtraArgsV1), _tag: 'EVMExtraArgsV1' }
+        return { ...(resultToObject(args[0]) as EVMExtraArgsV1), _tag: 'EVMExtraArgsV1' }
       }
       case EVMExtraArgsV2Tag: {
         const args = defaultAbiCoder.decode([EVMExtraArgsV2], dataSlice(data, 4))
-        return { ...((args[0] as Result).toObject() as EVMExtraArgsV2), _tag: 'EVMExtraArgsV2' }
+        return { ...(resultToObject(args[0]) as EVMExtraArgsV2), _tag: 'EVMExtraArgsV2' }
       }
       case SVMExtraArgsV1Tag: {
         const args = defaultAbiCoder.decode([SVMExtraArgsV1], dataSlice(data, 4))
-        const parsed = (args[0] as Result).toObject() as SVMExtraArgsV1
+        const parsed = resultToObject(args[0]) as SVMExtraArgsV1
         parsed.tokenReceiver = encodeBase58(parsed.tokenReceiver)
         parsed.accounts = parsed.accounts.map((a: string) => encodeBase58(a))
         return { ...parsed, _tag: 'SVMExtraArgsV1' }
       }
       case SuiExtraArgsV1Tag: {
         const args = defaultAbiCoder.decode([SuiExtraArgsV1], dataSlice(data, 4))
-        const parsed = (args[0] as Result).toObject() as SuiExtraArgsV1
+        const parsed = resultToObject(args[0]) as SuiExtraArgsV1
         return {
           ...parsed,
-          receiverObjectIds: Array.from<string>(parsed.receiverObjectIds),
           _tag: 'SuiExtraArgsV1',
         }
       }

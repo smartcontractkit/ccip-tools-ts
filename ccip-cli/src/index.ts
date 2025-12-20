@@ -11,7 +11,7 @@ import { Format } from './commands/index.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.92.0-92cc8d4'
+const VERSION = '0.92.0-f3065bf'
 // generate:end
 
 const globalOpts = {
@@ -72,7 +72,7 @@ function wasCalledAsScript() {
 }
 
 if (import.meta?.main || wasCalledAsScript()) {
-  const later = setTimeout(() => { }, 2 ** 31 - 1) // keep event-loop alive
+  const later = setTimeout(() => {}, 2 ** 31 - 1) // keep event-loop alive
   await main()
     .catch((err) => {
       console.error(err)
