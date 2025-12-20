@@ -47,6 +47,9 @@ jobs:
         name: coverage-summary
         path: coverage-summary.txt
 
+    - name: Smoke test cli
+      run: npx $PWD/ccip-cli --help
+
   coverage-comment:
     needs: build-and-test
     runs-on: ubuntu-latest

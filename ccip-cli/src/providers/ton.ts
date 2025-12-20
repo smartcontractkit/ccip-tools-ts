@@ -1,10 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 
-import {
-  CCIPArgumentInvalidError,
-  CCIPWalletInvalidError,
-} from '@chainlink/ccip-sdk/src/errors/specialized.ts'
-import type { TONWallet } from '@chainlink/ccip-sdk/src/ton/types.ts'
+import { CCIPArgumentInvalidError, CCIPWalletInvalidError } from '@chainlink/ccip-sdk/src/index.ts'
 import { keyPairFromSecretKey, mnemonicToPrivateKey } from '@ton/crypto'
 import { WalletContractV4 } from '@ton/ton'
 
@@ -13,9 +9,7 @@ import { WalletContractV4 } from '@ton/ton'
  * @param wallet - wallet options (as passed from yargs argv)
  * @returns Promise to TONWallet instance
  */
-export async function loadTonWallet({
-  wallet: walletOpt,
-}: { wallet?: unknown } = {}): Promise<TONWallet> {
+export async function loadTonWallet({ wallet: walletOpt }: { wallet?: unknown } = {}) {
   if (typeof walletOpt !== 'string') throw new CCIPWalletInvalidError(walletOpt)
 
   // Handle mnemonic phrase

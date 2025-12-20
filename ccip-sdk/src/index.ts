@@ -40,6 +40,7 @@ export {
 export {
   bigIntReplacer,
   bigIntReviver,
+  bytesToBuffer,
   decodeAddress,
   getDataBytes,
   isSupportedTxHash,

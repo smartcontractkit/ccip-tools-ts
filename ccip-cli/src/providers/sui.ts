@@ -1,5 +1,4 @@
-import { CCIPArgumentInvalidError } from '@chainlink/ccip-sdk/src/index.ts'
-import { bytesToBuffer } from '@chainlink/ccip-sdk/src/utils.ts'
+import { CCIPArgumentInvalidError, bytesToBuffer } from '@chainlink/ccip-sdk/src/index.ts'
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519'
 
 /**

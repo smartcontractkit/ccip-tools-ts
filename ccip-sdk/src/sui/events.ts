@@ -210,7 +210,7 @@ async function fetchEventsWithCheckpointRange<T>(
     const query = `
       query FetchEvents($type: String!, $after: String, $afterCheckpoint: UInt53!, $beforeCheckpoint: UInt53!) {
         events(
-          filter: { 
+          filter: {
             type: $type
             afterCheckpoint: $afterCheckpoint
             beforeCheckpoint: $beforeCheckpoint
@@ -254,15 +254,12 @@ async function fetchEventsWithCheckpointRange<T>(
         },
       })
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     if (result.errors) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       throw new CCIPDataFormatUnsupportedError(
         `GraphQL errors: ${JSON.stringify(result.errors, null, 2)}`,
       )
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     if (!result.data) {
       throw new CCIPDataFormatUnsupportedError('No data returned from GraphQL query')
     }

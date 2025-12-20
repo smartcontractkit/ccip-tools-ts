@@ -63,6 +63,23 @@ export default defineConfig(
     },
   },
   {
+    // Ban cli imports from @chainlink/ccip-sdk modules other than /src/index.ts
+    files: ['ccip-cli/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: '^(?!@chainlink/ccip-sdk/src/index\\.ts$).*\\/ccip-sdk\\b',
+              message: 'Import from @chainlink/ccip-sdk/src/index.ts instead of other modules.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Apply these settings to test files
     files: ['**/*.test.ts', '**/__tests__/**/*.ts', '**/__mocks__/**/*.ts'],
     rules: {
