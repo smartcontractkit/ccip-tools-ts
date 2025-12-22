@@ -3,6 +3,8 @@ import {
   type ChainTransaction,
   CCIPExecTxRevertedError,
   CCIPNotImplementedError,
+  ExecutionState,
+  MessageStatus,
   bigIntReplacer,
   discoverOffRamp,
   isSupportedTxHash,
@@ -118,13 +120,13 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   let cancelWaitFinalized: (() => void) | undefined
   const finalized$ = (async () => {
     if (argv.wait) {
-      logger.info('Waiting for finalization...')
+      logger.info(`[${MessageStatus.Sent}] Waiting for source chain finalization...`)
       await source.waitFinalized(
         request,
         undefined,
         new Promise<void>((resolve) => (cancelWaitFinalized = resolve)),
       )
-      logger.info(`Transaction "${request.log.transactionHash}" finalized ✅`)
+      logger.info(`[${MessageStatus.SourceFinalized}] Source chain finalized`)
     }
 
     const offchainTokenData = await source.fetchOffchainTokenData(request)
@@ -147,7 +149,8 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       }
     }
 
-    if (argv.wait) logger.info('Waiting for Commit (dest)...')
+    if (argv.wait)
+      logger.info(`[${MessageStatus.SourceFinalized}] Waiting for commit on destination chain...`)
     else logger.info('Commit (dest):')
   })()
 
@@ -164,6 +167,8 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     cancelWaitFinalized?.()
     if (!commit) return
     await finalized$
+    if (argv.wait)
+      logger.info(`[${MessageStatus.Committed}] Commit report accepted on destination chain`)
     switch (argv.format) {
       case Format.log:
         logger.log('commit =', commit)
@@ -175,7 +180,8 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
         logger.info(JSON.stringify(commit, bigIntReplacer, 2))
         break
     }
-    if (argv.wait) logger.info('Waiting for Receipt (dest):')
+    if (argv.wait)
+      logger.info(`[${MessageStatus.Blessed}] Waiting for execution on destination chain...`)
     else logger.info('Receipts (dest):')
     return commit
   })()
@@ -189,6 +195,15 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   )) {
     cancelWaitCommit?.()
     await commit$
+    const status =
+      receipt.receipt.state === ExecutionState.Success
+        ? MessageStatus.Success
+        : MessageStatus.Failed
+    const statusMessage =
+      receipt.receipt.state === ExecutionState.Success
+        ? 'Message executed on destination chain'
+        : 'Message execution failed on destination chain'
+    logger.info(`[${status}] ${statusMessage}`)
     switch (argv.format) {
       case Format.log:
         logger.log('receipt =', withDateTimestamp(receipt))
