@@ -20,20 +20,18 @@ import { fetchCCIPRequestsInTx } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
-  type CCIPCommit,
-  type CCIPExecution,
   type CCIPRequest,
   type ChainTransaction,
   type CommitReport,
   type ExecutionReceipt,
   type ExecutionReport,
+  type ExecutionState,
   type Lane,
   type Log_,
   type NetworkInfo,
   type OffchainTokenData,
   type WithLogger,
   ChainFamily,
-  ExecutionState,
 } from '../types.ts'
 import {
   bytesToBuffer,
@@ -754,40 +752,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       }
     } catch {
       return undefined
-    }
-  }
-
-  /**
-   * Fetches execution receipts for a CCIP request.
-   *
-   * TON's async execution model can emit multiple ExecutionStateChanged events
-   * for the same message. This override filters to return only the latest/final state.
-   *
-   */
-  override async *fetchExecutionReceipts(
-    offRamp: string,
-    request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
-    commit?: CCIPCommit,
-    opts?: Pick<LogFilter, 'page' | 'watch'>,
-  ): AsyncIterableIterator<CCIPExecution> {
-    let latestExecution: CCIPExecution | undefined
-
-    for await (const execution of super.fetchExecutionReceipts(offRamp, request, commit, opts)) {
-      // Keep track of the latest execution (highest blockNumber/lt)
-      if (!latestExecution || execution.log.blockNumber > latestExecution.log.blockNumber) {
-        latestExecution = execution
-      }
-
-      // If we find a Success state, that's the final state
-      if (execution.receipt.state === ExecutionState.Success) {
-        yield execution
-        return
-      }
-    }
-
-    // Yield the latest execution if we didn't find a Success
-    if (latestExecution) {
-      yield latestExecution
     }
   }
 
