@@ -557,6 +557,7 @@ describe('TON index integration tests', () => {
     })
 
     it('should return undefined for non-receipt BOC data', async () => {
+      // Fetch CCIPMessageSent logs from OnRamp - these should NOT decode as receipts
       for await (const log of tonChain.getLogs({
         address: ADDRESSES_TO_ASSERT.tonOnRamp,
         page: 1,

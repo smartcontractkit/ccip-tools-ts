@@ -1,4 +1,5 @@
 import {
+  type CCIPExecution,
   type CCIPRequest,
   type CCIPVersion,
   type ChainStatic,
@@ -12,12 +13,15 @@ import {
   discoverOffRamp,
   estimateExecGasForRequest,
   isSupportedTxHash,
+  networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
 import { type Ctx, Format } from './types.ts'
 import {
+  formatDisplayAddress,
+  formatDisplayTxHash,
   getCtx,
   logParsedError,
   prettyCommit,
@@ -216,9 +220,17 @@ async function manualExec(
   const [, wallet] = await loadChainWallet(dest, argv)
   const manualExecTx = await dest.executeReport(offRamp, execReport, { ...argv, wallet })
 
-  logger.info('🚀 manualExec tx =', manualExecTx.hash, 'to offRamp =', offRamp)
+  const destFamily = networkInfo(request.lane.destChainSelector).family
+  logger.info(
+    '🚀 manualExec tx =',
+    formatDisplayTxHash(manualExecTx.hash, destFamily),
+    'to offRamp =',
+    formatDisplayAddress(offRamp, destFamily),
+  )
 
   let found = false
+
+  // For sync chains (eg. EVM) try to find receipt in the submitted transaction's logs
   for (const log of manualExecTx.logs) {
     const execReceipt = (dest.constructor as ChainStatic).decodeReceipt(log)
     if (!execReceipt) continue
@@ -243,6 +255,75 @@ async function manualExec(
         break
     }
     found = true
+  }
+
+  // For async chains (eg. TON), the receipt may be in a separate transaction
+  if (!found) {
+    // For async execution, we need to wait for the Offramp to process the message.
+    // The execution receipt will appear in a separate transaction.
+    const walletTxTimestamp = manualExecTx.timestamp
+
+    // Keep polling until we find a Success receipt or exhaust attempts
+    const maxAttempts = 60
+    const delayMs = 5000
+    const timeoutMins = Math.floor((maxAttempts * delayMs) / 1000 / 60)
+    logger.info(`Waiting for execution receipt (timeout: ~${timeoutMins}m)...`)
+
+    let latestReceipt: CCIPExecution | undefined
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
+      }
+
+      for await (const execution of dest.fetchExecutionReceipts(offRamp, request, commit, {
+        page: argv.page,
+      })) {
+        // Only accept receipts that occurred AFTER our wallet transaction
+        if (walletTxTimestamp && execution.timestamp < walletTxTimestamp) {
+          continue // Skip old receipts from before our manual exec
+        }
+
+        // Track the latest receipt we've found
+        if (!latestReceipt || execution.timestamp > latestReceipt.timestamp) {
+          latestReceipt = execution
+        }
+
+        // If we found Success, we're done
+        if (execution.receipt.state === 2) {
+          // ExecutionState.Success
+          found = true
+          break
+        }
+      }
+
+      // If we found a Success receipt, stop polling
+      if (found) break
+    }
+
+    // Display the latest receipt we found (either Success after polling, or latest non-Success)
+    if (latestReceipt) {
+      switch (argv.format) {
+        case Format.log:
+          logger.log('receipt =', withDateTimestamp(latestReceipt))
+          break
+        case Format.pretty:
+          logger.info('Receipts (dest):')
+          prettyReceipt.call(
+            ctx,
+            latestReceipt,
+            request,
+            latestReceipt.log.tx?.from ??
+              (await dest.getTransaction(latestReceipt.log.transactionHash).catch(() => null))
+                ?.from,
+          )
+          break
+        case Format.json:
+          logger.info(JSON.stringify(latestReceipt.receipt, bigIntReplacer, 2))
+          break
+      }
+      found = true
+    }
   }
   if (!found) throw new CCIPReceiptNotFoundError(manualExecTx.hash)
 }

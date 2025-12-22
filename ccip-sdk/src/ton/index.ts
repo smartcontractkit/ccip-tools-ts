@@ -734,6 +734,9 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const cell = Cell.fromBoc(boc)[0]
       const slice = cell.beginParse()
 
+      // ExecutionStateChanged has no refs
+      if (cell.refs.length > 0) return undefined
+
       // Cell body contains only the struct fields
       // ExecutionStateChanged: sourceChainSelector(64) + sequenceNumber(64) + messageId(256) + state(8)
       const sourceChainSelector = slice.loadUintBig(64)
@@ -741,11 +744,14 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const messageId = '0x' + slice.loadUintBig(256).toString(16).padStart(64, '0')
       const state = slice.loadUint(8) as ExecutionState
 
+      // Validate state is a valid ExecutionState (0-3)
+      if (state > 3) return undefined
+
       return {
         messageId,
         sequenceNumber,
         sourceChainSelector,
-        state,
+        state: state,
       }
     } catch {
       return undefined
@@ -997,7 +1003,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       messages: [
         internal({
           to: unsigned.to,
-          value: toNano('0.2'), // TODO: FIXME: estimate proper value for execution costs instead of hardcoding.
+          value: toNano('0.3'), // TODO: FIXME: estimate proper value for execution costs instead of hardcoding.
           body: unsigned.body,
         }),
       ],
