@@ -1459,8 +1459,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     )
   }
 
-  /** {@inheritDoc Chain.fetchExecutionReceipts} */
-  override async *fetchExecutionReceipts(
+  /** {@inheritDoc Chain.getExecutionReceipts} */
+  override async *getExecutionReceipts(
     offRamp: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
@@ -1489,6 +1489,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         // onlyFallback: false,
       }
     }
-    yield* super.fetchExecutionReceipts(offRamp, request, commit, opts_)
+    yield* super.getExecutionReceipts(offRamp, request, commit, opts_)
   }
 }

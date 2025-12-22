@@ -1157,7 +1157,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   /**
    * Solana optimization: we use getProgramAccounts with
    */
-  override async fetchCommitReport(
+  override async getCommitReport(
     commitStore: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>,
     hints?: Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number },
@@ -1211,11 +1211,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       }
     }
     // in case we can't find it, fallback to generic iterating txs
-    return super.fetchCommitReport(commitStore, request, hints)
+    return super.getCommitReport(commitStore, request, hints)
   }
 
-  /** {@inheritDoc Chain.fetchExecutionReceipts} */
-  override async *fetchExecutionReceipts(
+  /** {@inheritDoc Chain.getExecutionReceipts} */
+  override async *getExecutionReceipts(
     offRamp: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
@@ -1238,7 +1238,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         address: commitReportPda.toBase58(),
       }
     }
-    yield* super.fetchExecutionReceipts(offRamp, request, commit, opts_)
+    yield* super.getExecutionReceipts(offRamp, request, commit, opts_)
   }
 
   /** {@inheritDoc Chain.getRegistryTokenConfig} */

@@ -7,7 +7,7 @@ import { type CCIPCommit, type CCIPRequest, CCIPVersion } from './types.ts'
 /**
  * Look for a CommitReport at dest for given CCIPRequest
  * Provides a basic/generic implementation, but subclasses of Chain may override with more specific
- * logic in Chain.fetchCommitReport method
+ * logic in Chain.getCommitReport method
  *
  * @param dest - Destination network provider
  * @param commitStore - Commit store address
@@ -15,7 +15,7 @@ import { type CCIPCommit, type CCIPRequest, CCIPVersion } from './types.ts'
  * @param hints - Additional filtering hints
  * @returns CCIP commit info
  **/
-export async function fetchCommitReport(
+export async function getCommitReport(
   dest: Chain,
   commitStore: string,
   {

@@ -160,7 +160,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
 
   let cancelWaitCommit: (() => void) | undefined
   const commit$ = (async () => {
-    const commit = await dest.fetchCommitReport(commitStore, request, {
+    const commit = await dest.getCommitReport(commitStore, request, {
       ...argv,
       watch: argv.wait && new Promise<void>((resolve) => (cancelWaitCommit = resolve)),
     })
@@ -187,7 +187,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   })()
 
   let found = false
-  for await (const receipt of dest.fetchExecutionReceipts(
+  for await (const receipt of dest.getExecutionReceipts(
     offRamp,
     request,
     !argv.wait ? await commit$ : undefined,

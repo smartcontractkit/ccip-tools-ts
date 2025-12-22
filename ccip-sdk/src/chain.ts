@@ -3,7 +3,7 @@ import type { PickDeep, SetOptional } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
 import type { UnsignedAptosTx } from './aptos/types.ts'
-import { fetchCommitReport } from './commits.ts'
+import { getCommitReport } from './commits.ts'
 import {
   CCIPApiClientNotAvailableError,
   CCIPChainFamilyMismatchError,
@@ -255,9 +255,12 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * An async generator that yields logs based on the provided options.
    * @param opts - Options object containing:
    *   - `startBlock`: if provided, fetch and generate logs forward starting from this block;
-   *     otherwise, returns logs backwards in time from endBlock;
-   *     optionally, startTime may be provided to fetch logs forward starting from this time
-   *   - `endBlock`: if omitted, use latest block
+   *        otherwise, returns logs backwards in time from endBlock;
+   *        optionally, startTime may be provided to fetch logs forward starting from this time
+   *   - `startTime`: instead of a startBlock, a start timestamp may be provided;
+   *        if either is provided, fetch logs forward from this starting point; otherwise, backwards
+   *   - `endBlock`: if omitted, use latest block; can be a block number, 'latest', 'finalized' or
+   *        negative finality block depth
    *   - `endBefore`: optional hint signature for end of iteration, instead of endBlock
    *   - `address`: if provided, fetch logs for this address only (may be required in some
    *     networks/implementations)
@@ -266,6 +269,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *     some networks/implementations may not be able to filter topics other than topic0s, so one may
    *     want to assume those are optimization hints, instead of hard filters, and verify results
    *   - `page`: if provided, try to use this page/range for batches
+   *   - `watch`: true or cancellation promise, getLogs continuously after initial fetch
    * @returns An async iterable iterator of logs.
    */
   abstract getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
@@ -481,12 +485,12 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param hints - Additional filtering hints
    * @returns CCIPCommit info, or reject if none found
    **/
-  async fetchCommitReport(
+  async getCommitReport(
     commitStore: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>,
     hints?: Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number },
   ): Promise<CCIPCommit> {
-    return fetchCommitReport(this, commitStore, request, hints)
+    return getCommitReport(this, commitStore, request, hints)
   }
 
   /**
@@ -529,14 +533,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
-   * Default/generic implementation of fetchExecutionReceipts
+   * Default/generic implementation of getExecutionReceipts
    * @param offRamp - Off-ramp address
    * @param request - CCIPRequest to get execution receipts for
    * @param commit - CCIPCommit info to help narrowing search for executions
    * @param hints - Additional filtering hints
    * @returns Async generator of CCIPExecution receipts
    */
-  async *fetchExecutionReceipts(
+  async *getExecutionReceipts(
     offRamp: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,

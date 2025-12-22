@@ -6,7 +6,7 @@ import { Interface } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { Chain } from './chain.ts'
-import { fetchCommitReport } from './commits.ts'
+import { getCommitReport } from './commits.ts'
 import CommitStore_1_2_ABI from './evm/abi/CommitStore_1_2.ts'
 import OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
 import {
@@ -234,7 +234,7 @@ class MockChain extends Chain {
       if (parsed12?.name === 'ReportAccepted') {
         if (!lane) return undefined
         // For v1.2, we don't have lane info in the event, so we just return it with the provided lane
-        // The actual filtering happens in fetchCommitReport based on the commitStore address
+        // The actual filtering happens in getCommitReport based on the commitStore address
         return [
           {
             merkleRoot: parsed12.args.report.merkleRoot as string,
@@ -346,7 +346,7 @@ class MockChain extends Chain {
   }
 }
 
-describe('fetchCommitReport', () => {
+describe('getCommitReport', () => {
   it('should return first matching commit report for v1.2', async () => {
     const dest = new MockChain(11155111, 'EVM2EVMOffRamp 1.2.0')
 
@@ -384,7 +384,7 @@ describe('fetchCommitReport', () => {
     }
 
     const hints = { startBlock: 12345 }
-    const result = await fetchCommitReport(dest, '0xCommitStore', request, hints)
+    const result = await getCommitReport(dest, '0xCommitStore', request, hints)
 
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 1n)
@@ -443,7 +443,7 @@ describe('fetchCommitReport', () => {
     const hints = { startBlock: 12345 }
 
     await assert.rejects(
-      async () => await fetchCommitReport(dest, '0xCommitStore', request, hints),
+      async () => await getCommitReport(dest, '0xCommitStore', request, hints),
       /Could not find commit after 12345 for sequenceNumber=1/,
     )
   })
@@ -494,7 +494,7 @@ describe('fetchCommitReport', () => {
     }
 
     const hints = { startBlock: 12345 }
-    const result = await fetchCommitReport(dest, '0xOffRamp', request, hints)
+    const result = await getCommitReport(dest, '0xOffRamp', request, hints)
 
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 3n)
@@ -554,7 +554,7 @@ describe('fetchCommitReport', () => {
     const hints = { startBlock: 12345 }
 
     await assert.rejects(
-      async () => await fetchCommitReport(dest, '0xOffRamp', request, hints),
+      async () => await getCommitReport(dest, '0xOffRamp', request, hints),
       /Could not find commit after 12345 for sequenceNumber=5/,
     )
   })
@@ -628,7 +628,7 @@ describe('fetchCommitReport', () => {
     }
 
     const hints = { startBlock: 12345 }
-    const result = await fetchCommitReport(dest, '0xOffRamp', request, hints)
+    const result = await getCommitReport(dest, '0xOffRamp', request, hints)
 
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 4n)
@@ -683,7 +683,7 @@ describe('fetchCommitReport', () => {
     }
 
     // No hints provided, should use timestamp
-    const result = await fetchCommitReport(dest, '0xOffRamp', request)
+    const result = await getCommitReport(dest, '0xOffRamp', request)
 
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 1n)

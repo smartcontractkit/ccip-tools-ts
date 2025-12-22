@@ -154,7 +154,7 @@ async function manualExec(
   const dest = await getChain(request.lane.destChainSelector)
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
   const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
-  const commit = await dest.fetchCommitReport(commitStore, request, argv)
+  const commit = await dest.getCommitReport(commitStore, request, argv)
 
   switch (argv.format) {
     case Format.log:

@@ -118,7 +118,7 @@ export const discoverOffRamp = memoize(
  * @param commit - Optional commit info to narrow down search.
  * @param hints - Optional hints (e.g., `page` for getLogs pagination range).
  */
-export async function* fetchExecutionReceipts(
+export async function* getExecutionReceipts(
   dest: Chain,
   offRamp: string,
   request: CCIPRequest,
