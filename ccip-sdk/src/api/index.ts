@@ -76,8 +76,8 @@ export class CCIPAPIClient {
    * @param ctx - Optional context
    * @returns New CCIPAPIClient instance
    */
-  static fromUrl(baseUrl?: string, ctx?: CCIPAPIClientContext): CCIPAPIClient {
-    return new CCIPAPIClient(baseUrl, ctx)
+  static fromUrl(baseUrl?: string, ctx?: CCIPAPIClientContext): Promise<CCIPAPIClient> {
+    return Promise.resolve(new CCIPAPIClient(baseUrl, ctx))
   }
 
   /**
