@@ -263,8 +263,8 @@ async function manualExec(
     // The execution receipt will appear in a separate transaction.
     const walletTxTimestamp = manualExecTx.timestamp
 
-    // Keep polling until we find a Success receipt or exhaust attempts
-    const maxAttempts = 60
+    // Keep polling until we find a Success receipt or exhaust attempts (~10m timeout)
+    const maxAttempts = 120
     const delayMs = 5000
     const timeoutMins = Math.floor((maxAttempts * delayMs) / 1000 / 60)
     logger.info(`Waiting for execution receipt (timeout: ~${timeoutMins}m)...`)

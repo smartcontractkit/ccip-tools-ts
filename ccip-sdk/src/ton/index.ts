@@ -20,18 +20,20 @@ import { fetchCCIPRequestsInTx } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
+  type CCIPCommit,
+  type CCIPExecution,
   type CCIPRequest,
   type ChainTransaction,
   type CommitReport,
   type ExecutionReceipt,
   type ExecutionReport,
-  type ExecutionState,
   type Lane,
   type Log_,
   type NetworkInfo,
   type OffchainTokenData,
   type WithLogger,
   ChainFamily,
+  ExecutionState,
 } from '../types.ts'
 import {
   bytesToBuffer,
@@ -752,6 +754,28 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       }
     } catch {
       return undefined
+    }
+  }
+
+  /**
+   *
+   * TON override: Only yields final execution states (Success or Failure).
+   * TON emits ExecutionStateChanged for each state transition (Untouched → InProgress → Success),
+   * but we only care about final states (Success or Failure), not intermediate ones.
+   */
+  override async *fetchExecutionReceipts(
+    offRamp: string,
+    request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
+    commit?: CCIPCommit,
+    hints?: Pick<LogFilter, 'page' | 'watch'>,
+  ): AsyncIterableIterator<CCIPExecution> {
+    for await (const execution of super.fetchExecutionReceipts(offRamp, request, commit, hints)) {
+      if (
+        execution.receipt.state === ExecutionState.Success ||
+        execution.receipt.state === ExecutionState.Failed
+      ) {
+        yield execution
+      }
     }
   }
 

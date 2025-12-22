@@ -644,11 +644,26 @@ describe('e2e command show TON', () => {
     assert.match(output, /logIndex.*1/)
     assert.match(output, /blockNumber.*42539944000005/)
 
-    // TON filters multiple execution states to show only final state
-    // Count how many "state:" lines appear in the Receipts section
+    // TON shows execution history including failed attempts and final success after manualExec
+    // First receipt final state: failed
+    assert.match(output, /state.*failed/i)
+    assert.match(
+      output,
+      /transactionHash.*531c2fbc8db214d194aef894bfbb7163b3ad9f8c36f89d18b459c9f52d4faa14/i,
+    )
+
+    // Second receipt final state: successful
+    assert.match(output, /state.*success/i)
+    assert.match(
+      output,
+      /transactionHash.*354d53820392622a113685e6c34517cd240e97aaa2ebf2082db7f4637b19f07e/i,
+    )
+
+    // Verify we have both failed and successful executions
     const receiptsSection = output.split(/Receipts.*dest/i)[1] || ''
-    const stateMatches =
-      receiptsSection.match(/state.*(?:success|failed|inProgress|untouched)/gi) || []
-    assert.equal(stateMatches.length, 1, 'TON should only show one execution receipt (final state)')
+    const failedMatches = receiptsSection.match(/failed/gi) || []
+    const successMatches = receiptsSection.match(/success/gi) || []
+    assert.ok(failedMatches.length >= 1, 'Should have at least one failed execution')
+    assert.ok(successMatches.length >= 1, 'Should have at least one successful execution')
   })
 })
