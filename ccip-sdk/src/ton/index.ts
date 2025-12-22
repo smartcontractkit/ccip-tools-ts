@@ -187,7 +187,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // The lt must have been cached during a previous getLogs or getTransaction call.
     throw new CCIPNotImplementedError(
       `getBlockTimestamp: lt ${block} not in cache. ` +
-      `TON requires lt to be cached from getLogs or getTransaction calls first.`,
+        `TON requires lt to be cached from getLogs or getTransaction calls first.`,
     )
   }
 
