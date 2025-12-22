@@ -40,6 +40,8 @@ export {
   type WithLogger,
   CCIPVersion,
   ExecutionState,
+  IntentStatus,
+  MessageStatus,
 } from './types.ts'
 export {
   bigIntReplacer,
