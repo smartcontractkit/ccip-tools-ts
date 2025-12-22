@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI: `lane-latency <source> <dest>` command; `--no-api` flag for decentralized mode
 - SDK: `MessageStatus` enum for message lifecycle tracking
 - CLI: `show --wait` displays status progression during message tracking
+- SDK: Rename `fetch*` to `get*` for message methods (`getMessagesInTx`, `getMessageById`, `getMessagesForSender`)
 
 ## [0.92.0] - 2025-12-20 - Pre-release
 - SDK: `Chain.getLogs` can receive `watch` boolean or cancel promise, to enter continuous logs fetching
