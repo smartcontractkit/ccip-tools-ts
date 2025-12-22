@@ -54,8 +54,8 @@ describe('CCIPAPIClient', () => {
     })
 
     it('should use custom base URL', () => {
-      const client = new CCIPAPIClient('https://custom.api')
-      assert.equal(client.baseUrl, 'https://custom.api')
+      const client = new CCIPAPIClient('https://custom.api/')
+      assert.equal(client.baseUrl, 'https://custom.api/')
     })
 
     it('should use provided fetch function', async () => {
@@ -83,8 +83,8 @@ describe('CCIPAPIClient', () => {
     })
 
     it('should create client with custom URL', () => {
-      const client = CCIPAPIClient.fromUrl('https://custom.api')
-      assert.equal(client.baseUrl, 'https://custom.api')
+      const client = CCIPAPIClient.fromUrl('https://custom.api/')
+      assert.equal(client.baseUrl, 'https://custom.api/')
     })
   })
 

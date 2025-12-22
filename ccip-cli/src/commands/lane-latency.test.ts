@@ -91,12 +91,12 @@ describe('lane-latency command', () => {
     await getLaneLatencyCmd(createCtx(), {
       source: '1',
       dest: '42161',
-      apiUrl: 'https://custom.api.example.com',
+      apiUrl: 'https://custom.api.example.com/',
       format: Format.json,
     } as Parameters<typeof getLaneLatencyCmd>[1])
 
     const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] })?.arguments[0]
-    assert.ok(url.startsWith('https://custom.api.example.com'))
+    assert.ok(url.startsWith('https://custom.api.example.com/'))
   })
 
   it('should output log format correctly', async () => {
