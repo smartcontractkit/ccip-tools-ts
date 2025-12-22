@@ -44,8 +44,8 @@
     }
   },
   "devDependencies": {
+    "@depay/web3-mock": "^15.3.0",
     "@eslint/js": "^9.39.2",
-    "viem": "^2.43.3",
     "@types/bn.js": "^5.2.0",
     "@types/node": "25.0.3",
     "@types/yargs": "17.0.35",
@@ -59,7 +59,8 @@
     "ethers-abitype": "1.0.3",
     "prettier": "^3.7.4",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.50.0"
+    "typescript-eslint": "8.50.0",
+    "viem": "^2.43.3"
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^5.2.0",
