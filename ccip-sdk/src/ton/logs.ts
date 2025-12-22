@@ -4,6 +4,7 @@ import type { TonClient4 } from '@ton/ton'
 import type { LogFilter } from '../chain.ts'
 import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
 import type { Log_ } from '../types.ts'
+import { bytesToBuffer } from '../utils.ts'
 
 /** Decoder functions passed to fetchLogs to identify and parse TON log events avoiding circular imports */
 export interface LogDecoders {
@@ -51,7 +52,7 @@ export async function* fetchLogs(
 
   // Pagination cursor
   let cursorLt: bigint = BigInt(account.account.last.lt)
-  let cursorHash: Buffer = Buffer.from(account.account.last.hash, 'base64')
+  let cursorHash: Buffer = bytesToBuffer(account.account.last.hash)
 
   const collectedLogs: Log_[] = []
   let isFirstBatch = true
@@ -150,7 +151,7 @@ export async function* fetchLogs(
     if (txs.length < 2) break
     const lastTx = txs[txs.length - 1].tx
     cursorLt = lastTx.lt
-    cursorHash = Buffer.from(lastTx.hash())
+    cursorHash = bytesToBuffer(lastTx.hash())
 
     // Early exit if past start boundary
     if (

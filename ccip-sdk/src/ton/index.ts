@@ -39,7 +39,6 @@ import {
   bytesToBuffer,
   createRateLimitedFetch,
   decodeAddress,
-  getDataBytes,
   networkInfo,
   parseTypeAndVersion,
 } from '../utils.ts'
@@ -490,7 +489,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
     try {
       // Parse BOC from base64
-      const boc = Buffer.from(log.data, 'base64')
+      const boc = bytesToBuffer(log.data)
       const cell = Cell.fromBoc(boc)[0]
       const slice = cell.beginParse()
 
@@ -627,7 +626,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   static decodeExtraArgs(
     extraArgs: BytesLike,
   ): (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' }) | undefined {
-    const data = Buffer.from(getDataBytes(extraArgs))
+    const data = bytesToBuffer(extraArgs)
 
     try {
       // Parse BOC format to extract cell data
@@ -660,7 +659,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     if (!log.data || typeof log.data !== 'string') return undefined
 
     try {
-      const boc = Buffer.from(log.data, 'base64')
+      const boc = bytesToBuffer(log.data)
       const cell = Cell.fromBoc(boc)[0]
       const slice = cell.beginParse()
 
@@ -730,7 +729,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     if (!log.data || typeof log.data !== 'string') return undefined
 
     try {
-      const boc = Buffer.from(log.data, 'base64')
+      const boc = bytesToBuffer(log.data)
       const cell = Cell.fromBoc(boc)[0]
       const slice = cell.beginParse()
 
