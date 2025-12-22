@@ -1,6 +1,6 @@
 import { Address, Cell, beginCell, toNano } from '@ton/core'
 import { TonClient4, internal } from '@ton/ton'
-import { type BytesLike, getAddress as checksumAddress, isBytesLike } from 'ethers'
+import { type BytesLike, getAddress as checksumAddress, isBytesLike, toBeHex } from 'ethers'
 import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
@@ -187,7 +187,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // The lt must have been cached during a previous getLogs or getTransaction call.
     throw new CCIPNotImplementedError(
       `getBlockTimestamp: lt ${block} not in cache. ` +
-        `TON requires lt to be cached from getLogs or getTransaction calls first.`,
+      `TON requires lt to be cached from getLogs or getTransaction calls first.`,
     )
   }
 
@@ -497,7 +497,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       // Structure from TVM2AnyRampMessage:
       // header: RampMessageHeader + sender: address + body: Cell + feeValueJuels: uint96
       const header = {
-        messageId: '0x' + slice.loadUintBig(256).toString(16).padStart(64, '0'),
+        messageId: toBeHex(slice.loadUintBig(256), 32),
         sourceChainSelector: slice.loadUintBig(64),
         destChainSelector: slice.loadUintBig(64),
         sequenceNumber: slice.loadUintBig(64),
@@ -683,7 +683,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const onRampBytes = slice.loadBuffer(onRampLen)
       const minSeqNr = slice.loadUintBig(64)
       const maxSeqNr = slice.loadUintBig(64)
-      const merkleRoot = '0x' + slice.loadUintBig(256).toString(16).padStart(64, '0')
+      const merkleRoot = toBeHex(slice.loadUintBig(256), 32)
 
       // Read hasPriceUpdates (1 bit): we don't need the data but should consume it
       if (slice.remainingBits >= 1) {
@@ -725,11 +725,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param log - Log with data field (base64-encoded BOC).
    * @returns ExecutionReceipt or undefined if not valid.
    */
-  static decodeReceipt(log: Log_): ExecutionReceipt | undefined {
-    if (!log.data || typeof log.data !== 'string') return undefined
+  static decodeReceipt({ data }: Pick<Log_, 'data'>): ExecutionReceipt | undefined {
+    if (!data || typeof data !== 'string') return undefined
 
     try {
-      const boc = bytesToBuffer(log.data)
+      const boc = bytesToBuffer(data)
       const cell = Cell.fromBoc(boc)[0]
       const slice = cell.beginParse()
 
@@ -740,7 +740,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       // ExecutionStateChanged: sourceChainSelector(64) + sequenceNumber(64) + messageId(256) + state(8)
       const sourceChainSelector = slice.loadUintBig(64)
       const sequenceNumber = slice.loadUintBig(64)
-      const messageId = '0x' + slice.loadUintBig(256).toString(16).padStart(64, '0')
+      const messageId = toBeHex(slice.loadUintBig(256), 32)
       const state = slice.loadUint(8) as ExecutionState
 
       // Validate state is a valid ExecutionState (0-3)
