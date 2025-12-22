@@ -143,7 +143,7 @@ abstract getTransaction(hash: string): Promise<ChainTransaction>
 abstract getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
 
 // Message operations
-abstract fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]>
+abstract getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]>
 abstract fetchAllMessagesInBatch(request, commit, opts?): Promise<CCIPMessage[]>
 
 // Contract queries

@@ -91,8 +91,8 @@ import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import {
   decodeMessage,
   fetchAllMessagesInBatch,
-  fetchCCIPRequestById,
-  fetchCCIPRequestsInTx,
+  getMessageById,
+  getMessagesInTx,
 } from '../requests.ts'
 
 /**
@@ -244,19 +244,19 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     yield* streamAptosLogs(this, opts)
   }
 
-  /** {@inheritDoc Chain.fetchRequestsInTx} */
-  async fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return fetchCCIPRequestsInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
+  /** {@inheritDoc Chain.getMessagesInTx} */
+  async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+    return getMessagesInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
   }
 
-  /** {@inheritDoc Chain.fetchRequestById} */
-  override async fetchRequestById(
+  /** {@inheritDoc Chain.getMessageById} */
+  override async getMessageById(
     messageId: string,
     onRamp?: string,
     opts?: { page?: number },
   ): Promise<CCIPRequest> {
     if (!onRamp) throw new CCIPOnRampRequiredError()
-    return fetchCCIPRequestById(this, messageId, {
+    return getMessageById(this, messageId, {
       address: await this.getOnRampForRouter(onRamp, 0n),
       ...opts,
     })
@@ -587,7 +587,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     })
 
     // Return the CCIPRequest by fetching it
-    return (await this.fetchRequestsInTx(await this.getTransaction(hash)))[0]
+    return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]
   }
 
   /** {@inheritDoc Chain.fetchOffchainTokenData} */

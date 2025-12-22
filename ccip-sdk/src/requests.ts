@@ -115,10 +115,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
  * @param tx - ChainTransaction to search in
  * @returns CCIP requests (messages) in the transaction (at least one)
  **/
-export async function fetchCCIPRequestsInTx(
-  source: Chain,
-  tx: ChainTransaction,
-): Promise<CCIPRequest[]> {
+export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Promise<CCIPRequest[]> {
   const txHash = tx.hash
 
   const requests: CCIPRequest[] = []
@@ -156,7 +153,7 @@ export async function fetchCCIPRequestsInTx(
  * @param hints - Optional hints for pagination (e.g., `address` for onRamp, `page` for pagination size).
  * @returns CCIPRequest with given messageId.
  */
-export async function fetchCCIPRequestById(
+export async function getMessageById(
   source: Chain,
   messageId: string,
   hints?: { page?: number; address?: string },
@@ -287,7 +284,7 @@ export async function fetchAllMessagesInBatch<
  * @param filter - Log filter options.
  * @returns Async generator of CCIP requests.
  */
-export async function* fetchRequestsForSender(
+export async function* getMessagesForSender(
   source: Chain,
   sender: string,
   filter: Pick<LogFilter, 'address' | 'startBlock' | 'startTime' | 'endBlock'>,

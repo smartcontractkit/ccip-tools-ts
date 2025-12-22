@@ -245,9 +245,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
   }
 
-  /** {@inheritDoc Chain.fetchRequestsInTx} */
-  override async fetchRequestsInTx(_tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.fetchRequestsInTx'))
+  /** {@inheritDoc Chain.getMessagesInTx} */
+  override async getMessagesInTx(_tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+    return Promise.reject(new CCIPNotImplementedError('SuiChain.getMessagesInTx'))
   }
 
   /** {@inheritDoc Chain.fetchAllMessagesInBatch} */

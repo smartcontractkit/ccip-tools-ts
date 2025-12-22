@@ -275,7 +275,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param tx - ChainTransaction or txHash to fetch requests from
    * @returns CCIP messages in the transaction (at least one)
    **/
-  abstract fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]>
+  abstract getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]>
 
   /**
    * Scan for a CCIP request by message ID
@@ -283,7 +283,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param onRamp - address may be required in some implementations, and throw if missing
    * @returns CCIPRequest
    **/
-  fetchRequestById?(
+  getMessageById?(
     messageId: string,
     onRamp?: string,
     opts?: { page?: number },

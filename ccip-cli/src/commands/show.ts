@@ -86,14 +86,14 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     } else idFromSource = argv.idFromSource
     const sourceNetwork = networkInfo(idFromSource)
     source = await getChain(sourceNetwork.chainId)
-    if (!source.fetchRequestById)
-      throw new CCIPNotImplementedError(`fetchRequestById for ${source.constructor.name}`)
-    request = await source.fetchRequestById(argv.txHash, onRamp, argv)
+    if (!source.getMessageById)
+      throw new CCIPNotImplementedError(`getMessageById for ${source.constructor.name}`)
+    request = await source.getMessageById(argv.txHash, onRamp, argv)
   } else {
     const [getChain_, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHash)
     getChain = getChain_
     ;[source, tx] = await tx$
-    request = await selectRequest(await source.fetchRequestsInTx(tx), 'to know more', argv)
+    request = await selectRequest(await source.getMessagesInTx(tx), 'to know more', argv)
   }
 
   switch (argv.format) {

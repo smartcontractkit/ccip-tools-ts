@@ -43,7 +43,7 @@ import { EVMChain } from '@chainlink/ccip-sdk'
 const source = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.com')
 
 // Fetch message details from a transaction
-const requests = await source.fetchRequestsInTx(
+const requests = await source.getMessagesInTx(
   '0xb8b27d9811509e3c364c9afaf8f14d8ebc65dec06327493981d7f7f4a00f2918'
 )
 

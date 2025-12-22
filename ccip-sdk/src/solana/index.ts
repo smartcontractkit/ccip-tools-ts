@@ -115,11 +115,7 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-import {
-  fetchAllMessagesInBatch,
-  fetchCCIPRequestById,
-  fetchCCIPRequestsInTx,
-} from '../requests.ts'
+import { fetchAllMessagesInBatch, getMessageById, getMessagesInTx } from '../requests.ts'
 import { patchBorsh } from './patchBorsh.ts'
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
@@ -425,19 +421,19 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
   }
 
-  /** {@inheritDoc Chain.fetchRequestsInTx} */
-  async fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return fetchCCIPRequestsInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
+  /** {@inheritDoc Chain.getMessagesInTx} */
+  async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+    return getMessagesInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
   }
 
-  /** {@inheritDoc Chain.fetchRequestById} */
-  override fetchRequestById(
+  /** {@inheritDoc Chain.getMessageById} */
+  override getMessageById(
     messageId: string,
     onRamp?: string,
     opts?: { page?: number },
   ): Promise<CCIPRequest> {
     if (!onRamp) throw new CCIPOnRampRequiredError()
-    return fetchCCIPRequestById(this, messageId, { address: onRamp, ...opts })
+    return getMessageById(this, messageId, { address: onRamp, ...opts })
   }
 
   /** {@inheritDoc Chain.fetchAllMessagesInBatch} */
@@ -1032,7 +1028,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     )
 
     const hash = await simulateAndSendTxs(this, wallet, unsigned)
-    return (await this.fetchRequestsInTx(await this.getTransaction(hash)))[0]
+    return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]
   }
 
   /** {@inheritDoc Chain.fetchOffchainTokenData} */
