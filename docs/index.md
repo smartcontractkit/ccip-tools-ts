@@ -1,7 +1,7 @@
 ---
 id: ccip-tools-overview
 title: CCIP Tools
-sidebar_label: Overview
+sidebar_label: CCIP Tools Overview
 sidebar_position: 0
 edit_url: https://github.com/smartcontractkit/ccip-tools-ts/edit/main/docs/index.md
 ---
@@ -22,6 +22,7 @@ This tool is provided under an MIT license and is for convenience and illustrati
 | Send cross-chain message | SDK/CLI | Programmatic or command-line |
 | Manually execute stuck message | CLI | `ccip-cli manualExec 0xTxHash` |
 | Check supported tokens | CLI | `ccip-cli getSupportedTokens chain router` |
+| Query lane latency | CLI/SDK | `ccip-cli lane-latency eth-mainnet arb-mainnet` |
 | Integrate CCIP in your dApp | SDK | Import and use in your code |
 
 ## Quick Start
@@ -85,9 +86,10 @@ console.log('Fee:', fee.toString())
 │  │   @chainlink/ccip-sdk    │◀───────│   @chainlink/ccip-cli    │  │
 │  │                          │        │                          │  │
 │  │  • Chain abstraction     │        │  • show, send, manualExec│  │
-│  │  • Message tracking      │        │  • RPC management        │  │
-│  │  • Fee estimation        │        │  • Wallet integration    │  │
-│  │  • Transaction building  │        │  • Output formatting     │  │
+│  │  • Message tracking      │        │  • parse, getSupportedTokens│
+│  │  • Fee estimation        │        │  • lane-latency          │  │
+│  │  • Transaction building  │        │  • RPC & wallet mgmt     │  │
+│  │  • API client            │        │  • Output formatting     │  │
 │  │                          │        │                          │  │
 │  └──────────────────────────┘        └──────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
@@ -104,8 +106,8 @@ console.log('Fee:', fee.toString())
 | EVM | Ethereum, Arbitrum, Optimism, Polygon, Avalanche, Base, etc. | [ethers.js v6](https://docs.ethers.org/v6/) | Supported |
 | Solana | Mainnet, Devnet | [solana-web3.js](https://github.com/solana-foundation/solana-web3.js) | Supported |
 | Aptos | Mainnet, Testnet | [aptos-ts-sdk](https://github.com/aptos-labs/aptos-ts-sdk) | Supported |
-| Sui | Mainnet, Testnet | [@mysten/sui](https://github.com/MystenLabs/sui) | In Development |
-| TON | Mainnet, Testnet | [@ton/ton](https://github.com/ton-org/ton) | In Development |
+| Sui | Mainnet, Testnet | [@mysten/sui](https://github.com/MystenLabs/sui) | Partial (manual exec) |
+| TON | Mainnet, Testnet | [@ton/ton](https://github.com/ton-org/ton) | Partial (manual exec) |
 
 ## Requirements
 

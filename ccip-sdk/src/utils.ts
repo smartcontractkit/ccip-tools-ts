@@ -20,6 +20,7 @@ import {
   CCIPError,
   CCIPHttpError,
   CCIPTypeVersionInvalidError,
+  HttpStatus,
 } from './errors/index.ts'
 import SELECTORS from './selectors.ts'
 import { supportedChains } from './supported-chains.ts'
@@ -530,8 +531,8 @@ export function createRateLimitedFetch(
           return response
         }
 
-        // For 429 responses, throw an error to trigger retry
-        if (response.status === 429) {
+        // For rate limit responses, throw an error to trigger retry
+        if (response.status === HttpStatus.TOO_MANY_REQUESTS) {
           throw new CCIPHttpError(response.status, response.statusText)
         }
 

@@ -1,5 +1,9 @@
+export type { APIErrorResponse, CCIPAPIClientContext, LaneLatencyResponse } from './api/index.ts'
+export { CCIPAPIClient, DEFAULT_API_BASE_URL } from './api/index.ts'
+
 export type {
   Chain,
+  ChainContext,
   ChainGetter,
   ChainStatic,
   LogFilter,
@@ -18,7 +22,7 @@ export {
   encodeExtraArgs,
 } from './extra-args.ts'
 export { estimateExecGasForRequest } from './gas.ts'
-export { decodeMessage, fetchRequestsForSender, sourceToDestTokenAmounts } from './requests.ts'
+export { decodeMessage, getMessagesForSender, sourceToDestTokenAmounts } from './requests.ts'
 export {
   type AnyMessage,
   type CCIPCommit,

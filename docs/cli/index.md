@@ -1,7 +1,7 @@
 ---
 id: ccip-tools-cli
 title: CCIP CLI
-sidebar_label: Overview
+sidebar_label: CCIP CLI Overview
 sidebar_position: 0
 edit_url: https://github.com/smartcontractkit/ccip-tools-ts/edit/main/docs/cli/index.md
 ---
@@ -68,13 +68,33 @@ ARB_SEPOLIA_RPC=https://sepolia-rollup.arbitrum.io/rpc
 RPC_AVALANCHE=https://api.avax-test.network/ext/bc/C/rpc
 ```
 
-**Environment variables** (prefix with `RPC_`):
+**Environment variables:**
 ```bash
+# RPC URLs are auto-detected from any variable containing valid URLs
 export RPC_SEPOLIA=https://ethereum-sepolia-rpc.publicnode.com
+export ARB_RPC=https://sepolia-rollup.arbitrum.io/rpc
 ccip-cli show 0x...
 ```
 
 The CLI tests all RPCs in parallel and uses the fastest responding endpoint for each network.
+
+### API Configuration
+
+By default, the CLI uses the CCIP API (api.ccip.chain.link) for enhanced functionality like lane latency queries.
+
+**Disable API access (full decentralization mode):**
+```bash
+ccip-cli show 0x... --no-api
+```
+
+**Environment variable:**
+```bash
+# CCIP_ prefix maps to CLI options
+export CCIP_NO_API=true         # Same as --no-api
+export CCIP_VERBOSE=true        # Same as --verbose
+export CCIP_FORMAT=json         # Same as --format=json
+ccip-cli show 0x...
+```
 
 ### Wallet Configuration
 
@@ -313,6 +333,39 @@ ccip-cli getSupportedTokens ethereum-mainnet 0x80226fc0Ee2b096224EeAc085Bb9a8cba
 # Query token pool directly
 ccip-cli getSupportedTokens ethereum-mainnet 0xTokenPoolAddress
 ```
+
+---
+
+### laneLatency
+
+Query estimated lane latency between source and destination chains.
+
+```bash
+ccip-cli lane-latency <source> <dest> [options]
+```
+
+**Arguments:**
+- `source` - Source chain (chainId, selector, or name)
+- `dest` - Destination chain (chainId, selector, or name)
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--api-url <url>` | Custom CCIP API URL (defaults to api.ccip.chain.link) |
+
+**Example:**
+```bash
+# Check latency between Ethereum and Arbitrum
+ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet
+
+# Using chain selectors
+ccip-cli lane-latency 5009297550715157269 4949039107694359620
+
+# With custom API endpoint
+ccip-cli lane-latency ethereum-mainnet polygon-mainnet --api-url https://custom-api.example.com
+```
+
+**Note:** This command requires CCIP API access. It will fail if `--no-api` flag is used.
 
 ---
 

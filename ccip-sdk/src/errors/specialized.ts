@@ -1,5 +1,6 @@
 import { type CCIPErrorOptions, CCIPError } from './CCIPError.ts'
 import { CCIPErrorCode } from './codes.ts'
+import { isTransientHttpStatus } from '../http-status.ts'
 
 // Chain/Network
 
@@ -182,6 +183,23 @@ export class CCIPOnRampRequiredError extends CCIPError {
       ...options,
       isTransient: false,
     })
+  }
+}
+
+/** Thrown when lane not found between source and destination chains. */
+export class CCIPLaneNotFoundError extends CCIPError {
+  override readonly name = 'CCIPLaneNotFoundError'
+  /** Creates a lane not found error. */
+  constructor(sourceChainSelector: bigint, destChainSelector: bigint, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.LANE_NOT_FOUND,
+      `Lane not found: ${sourceChainSelector} → ${destChainSelector}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, sourceChainSelector, destChainSelector },
+      },
+    )
   }
 }
 
@@ -559,7 +577,7 @@ export class CCIPHttpError extends CCIPError {
   constructor(status: number, statusText: string, options?: CCIPErrorOptions) {
     super(CCIPErrorCode.HTTP_ERROR, `HTTP ${status}: ${statusText}`, {
       ...options,
-      isTransient: status === 429 || status >= 500,
+      isTransient: isTransientHttpStatus(status),
       context: { ...options?.context, status, statusText },
     })
   }
@@ -1650,6 +1668,24 @@ export class CCIPAptosHasherVersionUnsupportedError extends CCIPError {
         isTransient: false,
         context: { ...options?.context, version },
       },
+    )
+  }
+}
+
+// API Client
+
+/** Thrown when API client is not available (explicitly opted out). */
+export class CCIPApiClientNotAvailableError extends CCIPError {
+  override readonly name = 'CCIPApiClientNotAvailableError'
+  /**
+   * Creates an API client not available error.
+   * @param options - Additional error options
+   */
+  constructor(options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.API_CLIENT_NOT_AVAILABLE,
+      'CCIP API client is not available. Initialize with an apiClient or remove the explicit opt-out (apiClient: null).',
+      { ...options, isTransient: false },
     )
   }
 }
