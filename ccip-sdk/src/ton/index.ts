@@ -313,8 +313,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return getMessagesInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
   }
 
-  /** {@inheritDoc Chain.fetchAllMessagesInBatch} */
-  override async fetchAllMessagesInBatch<
+  /** {@inheritDoc Chain.getAllMessagesInBatch} */
+  override async getAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
@@ -324,7 +324,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     _commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
     _opts?: { page?: number },
   ): Promise<R['message'][]> {
-    return Promise.reject(new CCIPNotImplementedError('fetchAllMessagesInBatch'))
+    return Promise.reject(new CCIPNotImplementedError('getAllMessagesInBatch'))
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

@@ -119,7 +119,7 @@ import {
   parseSourceTokenData,
 } from './messages.ts'
 import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
-import { fetchAllMessagesInBatch, getMessageById, getMessagesInTx } from '../requests.ts'
+import { getAllMessagesInBatch, getMessageById, getMessagesInTx } from '../requests.ts'
 import type { UnsignedEVMTx } from './types.ts'
 export type { UnsignedEVMTx }
 
@@ -329,8 +329,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return getMessageById(this, messageId, { address: onRamp, ...opts })
   }
 
-  /** {@inheritDoc Chain.fetchAllMessagesInBatch} */
-  async fetchAllMessagesInBatch<
+  /** {@inheritDoc Chain.getAllMessagesInBatch} */
+  async getAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
@@ -348,7 +348,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         topics: [[request.log.topics[0]], [toBeHex(request.lane.destChainSelector, 32)]],
       }
     }
-    return fetchAllMessagesInBatch(this, request, commit, opts_)
+    return getAllMessagesInBatch(this, request, commit, opts_)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

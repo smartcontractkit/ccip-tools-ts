@@ -144,7 +144,7 @@ abstract getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
 
 // Message operations
 abstract getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]>
-abstract fetchAllMessagesInBatch(request, commit, opts?): Promise<CCIPMessage[]>
+abstract getAllMessagesInBatch(request, commit, opts?): Promise<CCIPMessage[]>
 
 // Contract queries
 abstract typeAndVersion(address: string): Promise<[type, version, typeAndVersion, suffix?]>

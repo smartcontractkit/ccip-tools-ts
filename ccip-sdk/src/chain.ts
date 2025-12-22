@@ -295,7 +295,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param commit - CommitReport range (min, max).
    * @param opts - Optional parameters (e.g., `page` for pagination width).
    */
-  abstract fetchAllMessagesInBatch<
+  abstract getAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'

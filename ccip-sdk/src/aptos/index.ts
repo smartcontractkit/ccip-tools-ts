@@ -90,7 +90,7 @@ import { getTokenInfo } from './token.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import {
   decodeMessage,
-  fetchAllMessagesInBatch,
+  getAllMessagesInBatch,
   getMessageById,
   getMessagesInTx,
 } from '../requests.ts'
@@ -262,8 +262,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     })
   }
 
-  /** {@inheritDoc Chain.fetchAllMessagesInBatch} */
-  async fetchAllMessagesInBatch<
+  /** {@inheritDoc Chain.getAllMessagesInBatch} */
+  async getAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
@@ -273,7 +273,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
     opts?: { page?: number },
   ): Promise<R['message'][]> {
-    return fetchAllMessagesInBatch(this, request, commit, opts)
+    return getAllMessagesInBatch(this, request, commit, opts)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

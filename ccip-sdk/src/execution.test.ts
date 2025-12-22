@@ -74,7 +74,7 @@ class MockChain extends Chain {
     return []
   }
 
-  override async fetchAllMessagesInBatch<
+  override async getAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
