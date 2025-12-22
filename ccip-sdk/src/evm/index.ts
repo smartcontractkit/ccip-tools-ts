@@ -1091,8 +1091,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return (await this.getMessagesInTx(await this.getTransaction(response.hash)))[0]
   }
 
-  /** {@inheritDoc Chain.fetchOffchainTokenData} */
-  fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
+  /** {@inheritDoc Chain.getOffchainTokenData} */
+  getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
     return fetchEVMOffchainTokenData(request, this)
   }
 

@@ -177,7 +177,7 @@ async function manualExec(
     dest,
   )
 
-  const offchainTokenData = await source.fetchOffchainTokenData(request)
+  const offchainTokenData = await source.getOffchainTokenData(request)
   const execReport: ExecutionReport = {
     ...execReportProof,
     message: request.message,

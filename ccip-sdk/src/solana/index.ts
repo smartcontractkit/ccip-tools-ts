@@ -1031,8 +1031,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]
   }
 
-  /** {@inheritDoc Chain.fetchOffchainTokenData} */
-  async fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
+  /** {@inheritDoc Chain.getOffchainTokenData} */
+  async getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
     return fetchSolanaOffchainTokenData(request, this)
   }
 

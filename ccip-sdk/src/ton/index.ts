@@ -933,8 +933,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return Promise.reject(new CCIPNotImplementedError('sendMessage'))
   }
 
-  /** {@inheritDoc Chain.fetchOffchainTokenData} */
-  fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
+  /** {@inheritDoc Chain.getOffchainTokenData} */
+  getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 

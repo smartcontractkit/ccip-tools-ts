@@ -129,7 +129,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       logger.info(`[${MessageStatus.SourceFinalized}] Source chain finalized`)
     }
 
-    const offchainTokenData = await source.fetchOffchainTokenData(request)
+    const offchainTokenData = await source.getOffchainTokenData(request)
     if (offchainTokenData?.length && offchainTokenData.some((d) => !!d)) {
       switch (argv.format) {
         case Format.log: {

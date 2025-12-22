@@ -429,7 +429,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param request - CCIP request, with tx, logs and message
    * @returns array with one offchain token data for each token transfer in request
    */
-  abstract fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]>
+  abstract getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]>
   /**
    * Generate unsigned tx to manuallyExecute a message
    * @param payer - address which will be used to transmit the report tx

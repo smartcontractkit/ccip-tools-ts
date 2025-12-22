@@ -606,8 +606,8 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.sendMessage'))
   }
 
-  /** {@inheritDoc Chain.fetchOffchainTokenData} */
-  fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
+  /** {@inheritDoc Chain.getOffchainTokenData} */
+  getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
     if (!('receiverObjectIds' in request.message)) {
       throw new CCIPSuiMessageVersionInvalidError()
     }

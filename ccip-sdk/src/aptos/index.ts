@@ -590,8 +590,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]
   }
 
-  /** {@inheritDoc Chain.fetchOffchainTokenData} */
-  fetchOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
+  /** {@inheritDoc Chain.getOffchainTokenData} */
+  getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
     // default offchain token data
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
