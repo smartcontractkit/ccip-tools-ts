@@ -11,6 +11,8 @@ export interface LogDecoders {
   tryDecodeAsMessage: (log: Pick<Log_, 'data'>) => { messageId: string } | undefined
   /** Try to decode as commit report, returns truthy if successful */
   tryDecodeAsCommit: (log: Pick<Log_, 'data'>) => unknown[] | undefined
+  /** Try to decode as execution receipt, returns truthy if successful */
+  tryDecodeAsReceipt: (log: Pick<Log_, 'data'>) => { messageId: string } | undefined
 }
 
 /**
@@ -106,6 +108,13 @@ export async function* fetchLogs(
             continue
           }
           topics.push('CommitReportAccepted')
+        } else if (topicFilter === 'ExecutionStateChanged') {
+          // Looking for execution receipts - skip if not valid
+          if (!decoders.tryDecodeAsReceipt({ data })) {
+            index++
+            continue
+          }
+          topics.push('ExecutionStateChanged')
         } else {
           // Try to decode as CCIP message
           const message = decoders.tryDecodeAsMessage({ data })

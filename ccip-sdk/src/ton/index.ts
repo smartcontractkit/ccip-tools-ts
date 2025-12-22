@@ -20,6 +20,8 @@ import { fetchCCIPRequestsInTx } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
+  type CCIPCommit,
+  type CCIPExecution,
   type CCIPRequest,
   type ChainTransaction,
   type CommitReport,
@@ -31,6 +33,7 @@ import {
   type OffchainTokenData,
   type WithLogger,
   ChainFamily,
+  ExecutionState,
 } from '../types.ts'
 import {
   bytesToBuffer,
@@ -301,6 +304,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const decoders: LogDecoders = {
       tryDecodeAsMessage: (log) => TONChain.decodeMessage(log),
       tryDecodeAsCommit: (log) => TONChain.decodeCommits(log as Log_),
+      tryDecodeAsReceipt: (log) => TONChain.decodeReceipt(log as Log_),
     }
     yield* fetchLogs(this.provider, opts, this.ltTimestampCache, decoders)
   }
@@ -712,11 +716,74 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
   /**
    * Decodes an execution receipt from a TON log event.
-   * @param _log - Log with data field.
+   *
+   * The ExecutionStateChanged event structure (topic is in message header, not body):
+   * - sourceChainSelector: uint64 (8 bytes)
+   * - sequenceNumber: uint64 (8 bytes)
+   * - messageId: uint256 (32 bytes)
+   * - state: uint8 (1 byte) - Untouched=0, InProgress=1, Success=2, Failure=3
+   *
+   * @param log - Log with data field (base64-encoded BOC).
    * @returns ExecutionReceipt or undefined if not valid.
    */
-  static decodeReceipt(_log: Log_): ExecutionReceipt | undefined {
-    throw new CCIPNotImplementedError('decodeReceipt')
+  static decodeReceipt(log: Log_): ExecutionReceipt | undefined {
+    if (!log.data || typeof log.data !== 'string') return undefined
+
+    try {
+      const boc = Buffer.from(log.data, 'base64')
+      const cell = Cell.fromBoc(boc)[0]
+      const slice = cell.beginParse()
+
+      // Cell body contains only the struct fields
+      // ExecutionStateChanged: sourceChainSelector(64) + sequenceNumber(64) + messageId(256) + state(8)
+      const sourceChainSelector = slice.loadUintBig(64)
+      const sequenceNumber = slice.loadUintBig(64)
+      const messageId = '0x' + slice.loadUintBig(256).toString(16).padStart(64, '0')
+      const state = slice.loadUint(8) as ExecutionState
+
+      return {
+        messageId,
+        sequenceNumber,
+        sourceChainSelector,
+        state,
+      }
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * Fetches execution receipts for a CCIP request.
+   *
+   * TON's async execution model can emit multiple ExecutionStateChanged events
+   * for the same message. This override filters to return only the latest/final state.
+   *
+   */
+  override async *fetchExecutionReceipts(
+    offRamp: string,
+    request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
+    commit?: CCIPCommit,
+    opts?: Pick<LogFilter, 'page' | 'watch'>,
+  ): AsyncIterableIterator<CCIPExecution> {
+    let latestExecution: CCIPExecution | undefined
+
+    for await (const execution of super.fetchExecutionReceipts(offRamp, request, commit, opts)) {
+      // Keep track of the latest execution (highest blockNumber/lt)
+      if (!latestExecution || execution.log.blockNumber > latestExecution.log.blockNumber) {
+        latestExecution = execution
+      }
+
+      // If we find a Success state, that's the final state
+      if (execution.receipt.state === ExecutionState.Success) {
+        yield execution
+        return
+      }
+    }
+
+    // Yield the latest execution if we didn't find a Success
+    if (latestExecution) {
+      yield latestExecution
+    }
   }
 
   /**

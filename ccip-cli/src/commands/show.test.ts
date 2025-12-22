@@ -632,8 +632,23 @@ describe('e2e command show TON', () => {
       /transactionHash.*9048d65a2ecf5194fa9dfb5cc0ac59a55ffd75b9b6de5d7f09e53ef87ad5e6a8/i,
     )
 
-    // Execution receipt - not yet implemented for TON destination
-    // Just check that we don't crash and show the "No execution receipt" message
+    // Execution receipt
     assert.match(output, /Receipts.*dest/i)
+    assert.match(output, /state.*success/i)
+    assert.match(output, new RegExp(`origin.*${OFFRAMP}`, 'i'))
+    assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
+    assert.match(
+      output,
+      /transactionHash.*354d53820392622a113685e6c34517cd240e97aaa2ebf2082db7f4637b19f07e/i,
+    )
+    assert.match(output, /logIndex.*1/)
+    assert.match(output, /blockNumber.*42539944000005/)
+
+    // TON filters multiple execution states to show only final state
+    // Count how many "state:" lines appear in the Receipts section
+    const receiptsSection = output.split(/Receipts.*dest/i)[1] || ''
+    const stateMatches =
+      receiptsSection.match(/state.*(?:success|failed|inProgress|untouched)/gi) || []
+    assert.equal(stateMatches.length, 1, 'TON should only show one execution receipt (final state)')
   })
 })
