@@ -153,6 +153,9 @@ export const CCIPErrorCode = {
   // Internal
   NOT_IMPLEMENTED: 'NOT_IMPLEMENTED',
   UNKNOWN: 'UNKNOWN',
+
+  // Viem Adapter
+  VIEM_ADAPTER_ERROR: 'VIEM_ADAPTER_ERROR',
 } as const
 
 /** Union type of all error codes. */
