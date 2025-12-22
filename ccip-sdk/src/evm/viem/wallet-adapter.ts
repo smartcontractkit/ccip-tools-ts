@@ -5,10 +5,10 @@ import {
   type TypedDataDomain,
   type TypedDataField,
   AbstractSigner,
-  JsonRpcProvider,
 } from 'ethers'
-import type { Account, Chain, Transport, WalletClient } from 'viem'
+import type { Account, Chain, PublicClient, Transport, WalletClient } from 'viem'
 
+import { ViemTransportProvider } from './client-adapter.ts'
 import { CCIPViemAdapterError } from '../../errors/index.ts'
 
 /**
@@ -25,7 +25,10 @@ class ViemWalletAdapter extends AbstractSigner {
   private readonly walletClient: WalletClient<Transport, Chain, Account>
 
   /** Creates a new ViemWalletAdapter wrapping the given WalletClient. */
-  constructor(walletClient: WalletClient<Transport, Chain, Account>, provider: JsonRpcProvider) {
+  constructor(
+    walletClient: WalletClient<Transport, Chain, Account>,
+    provider: ViemTransportProvider,
+  ) {
     super(provider)
     this.walletClient = walletClient
   }
@@ -161,6 +164,11 @@ class ViemWalletAdapter extends AbstractSigner {
  * - Local accounts (privateKeyToAccount, mnemonicToAccount)
  * - JSON-RPC accounts (browser wallets like MetaMask)
  *
+ * Works with ALL viem transport types including:
+ * - http() - Standard HTTP transport
+ * - webSocket() - WebSocket transport
+ * - custom() - Injected providers (MetaMask, WalletConnect, etc.)
+ *
  * @param client - viem WalletClient instance with account and chain defined
  * @returns ethers AbstractSigner for use with sendMessage, manuallyExecute, etc.
  *
@@ -186,6 +194,22 @@ class ViemWalletAdapter extends AbstractSigner {
  *   { wallet: viemWallet(walletClient) }
  * )
  * ```
+ *
+ * @example Browser wallet (MetaMask)
+ * ```typescript
+ * import { createWalletClient, custom } from 'viem'
+ * import { mainnet } from 'viem/chains'
+ * import { viemWallet } from '@chainlink/ccip-sdk/viem'
+ *
+ * const walletClient = createWalletClient({
+ *   chain: mainnet,
+ *   transport: custom(window.ethereum),
+ *   account: connectedAccount,
+ * })
+ *
+ * // Works with injected providers!
+ * const signer = viemWallet(walletClient)
+ * ```
  */
 export function viemWallet(client: WalletClient<Transport, Chain, Account>): AbstractSigner {
   // Validate account is defined
@@ -201,28 +225,8 @@ export function viemWallet(client: WalletClient<Transport, Chain, Account>): Abs
     })
   }
 
-  // Extract RPC URL from transport for read operations
-  const transport = client.transport
-  let rpcUrl: string | undefined
-  if ('url' in transport && typeof transport.url === 'string') {
-    rpcUrl = transport.url
-  } else if (
-    'value' in transport &&
-    transport.value &&
-    typeof transport.value === 'object' &&
-    'url' in transport.value
-  ) {
-    rpcUrl = (transport.value as { url?: string }).url
-  }
-
-  if (!rpcUrl) {
-    throw new CCIPViemAdapterError('Could not extract RPC URL from WalletClient transport', {
-      recovery: 'Ensure your WalletClient uses http() transport with a URL',
-    })
-  }
-
-  // Create read-only provider for blockchain queries
-  const provider = new JsonRpcProvider(rpcUrl, client.chain.id)
+  // Create provider that wraps viem transport (works for ALL transport types including injected)
+  const provider = new ViemTransportProvider(client as unknown as PublicClient<Transport, Chain>)
 
   // Return adapter that delegates signing to viem
   return new ViemWalletAdapter(client, provider)

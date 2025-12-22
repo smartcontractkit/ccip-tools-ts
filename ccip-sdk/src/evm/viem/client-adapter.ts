@@ -1,4 +1,10 @@
-import { JsonRpcProvider } from 'ethers'
+import {
+  type JsonRpcError,
+  type JsonRpcPayload,
+  type JsonRpcResult,
+  JsonRpcApiProvider,
+  Network,
+} from 'ethers'
 import type { Chain, PublicClient, Transport } from 'viem'
 
 import type { ChainContext } from '../../chain.ts'
@@ -6,33 +12,65 @@ import { CCIPViemAdapterError } from '../../errors/index.ts'
 import { EVMChain } from '../index.ts'
 
 /**
- * Extract RPC URL from viem transport.
- * Handles http, webSocket, and fallback transports.
+ * Custom ethers provider that forwards RPC calls through viem's transport.
+ * Works with ALL viem transports: http, webSocket, custom (injected), fallback.
+ *
+ * This approach is superior to extracting URLs because it supports:
+ * - MetaMask and other injected providers (window.ethereum)
+ * - WalletConnect
+ * - Coinbase Wallet
+ * - Any custom() transport
  */
-function extractRpcUrl(client: PublicClient<Transport, Chain>): string {
-  const transport = client.transport
+export class ViemTransportProvider extends JsonRpcApiProvider {
+  readonly #client: PublicClient<Transport, Chain>
 
-  // Direct URL on transport
-  if ('url' in transport && typeof transport.url === 'string') {
-    return transport.url
+  /** Creates a new ViemTransportProvider wrapping the given viem client. */
+  constructor(client: PublicClient<Transport, Chain>) {
+    const network = Network.from({
+      chainId: client.chain.id,
+      name: client.chain.name,
+    })
+    super(network, { staticNetwork: network })
+    this.#client = client
   }
 
-  // URL in transport value (common pattern)
-  if ('value' in transport && transport.value && typeof transport.value === 'object') {
-    const value = transport.value as Record<string, unknown>
-    if ('url' in value && typeof value.url === 'string') {
-      return value.url
-    }
+  /**
+   * Forward RPC calls to viem's transport.
+   * Handles both single and batched requests.
+   */
+  async _send(
+    payload: JsonRpcPayload | Array<JsonRpcPayload>,
+  ): Promise<Array<JsonRpcResult | JsonRpcError>> {
+    const payloads = Array.isArray(payload) ? payload : [payload]
+    const results = await Promise.all(
+      payloads.map(async (p) => {
+        try {
+          const params = Array.isArray(p.params) ? p.params : []
+          const result = await this.#client.request({
+            method: p.method as Parameters<PublicClient['request']>[0]['method'],
+            params: params as Parameters<PublicClient['request']>[0]['params'],
+          })
+          return { id: p.id, result } as JsonRpcResult
+        } catch (error) {
+          return {
+            id: p.id,
+            error: { code: -32000, message: String(error) },
+          } as JsonRpcError
+        }
+      }),
+    )
+    return results
   }
-
-  throw new CCIPViemAdapterError('Could not extract RPC URL from viem transport', {
-    context: { transportType: transport.type },
-    recovery: 'Ensure your PublicClient uses http() or webSocket() transport with a URL',
-  })
 }
 
 /**
  * Create EVMChain from a viem PublicClient.
+ *
+ * Supports ALL viem transport types including:
+ * - http() - Standard HTTP transport
+ * - webSocket() - WebSocket transport
+ * - custom() - Injected providers (MetaMask, WalletConnect, etc.)
+ * - fallback() - Fallback transport with multiple providers
  *
  * @param client - viem PublicClient instance with chain defined
  * @param ctx - Optional chain context (logger, etc.)
@@ -52,6 +90,20 @@ function extractRpcUrl(client: PublicClient<Transport, Chain>): string {
  * const chain = await fromViemClient(publicClient)
  * const messages = await chain.getMessagesInTx(tx)
  * ```
+ *
+ * @example Browser wallet (MetaMask)
+ * ```typescript
+ * import { createPublicClient, custom } from 'viem'
+ * import { mainnet } from 'viem/chains'
+ * import { fromViemClient } from '@chainlink/ccip-sdk/viem'
+ *
+ * const publicClient = createPublicClient({
+ *   chain: mainnet,
+ *   transport: custom(window.ethereum),
+ * })
+ *
+ * const chain = await fromViemClient(publicClient)
+ * ```
  */
 export async function fromViemClient(
   client: PublicClient<Transport, Chain>,
@@ -64,11 +116,8 @@ export async function fromViemClient(
     })
   }
 
-  // Extract RPC URL from transport
-  const rpcUrl = extractRpcUrl(client)
-
-  // Create ethers provider with chain ID
-  const provider = new JsonRpcProvider(rpcUrl, client.chain.id)
+  // Use custom provider that wraps viem transport (works for ALL transport types)
+  const provider = new ViemTransportProvider(client)
 
   // Use existing EVMChain.fromProvider
   return EVMChain.fromProvider(provider, ctx)

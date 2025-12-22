@@ -60,22 +60,22 @@ describe('viemWallet', () => {
     )
   })
 
-  it('should throw if transport URL cannot be extracted', () => {
+  it('should work with custom transport (browser wallet)', () => {
+    // Simulate MetaMask-style injected provider - no URL available
     const mockWalletClient = {
       account: { address: '0x1234567890123456789012345678901234567890' },
       chain: { id: 1, name: 'Ethereum' },
-      transport: { type: 'custom' }, // No URL
+      transport: { type: 'custom' }, // No URL - simulates MetaMask
+      request: mock.fn(),
+      signMessage: mock.fn(),
+      signTypedData: mock.fn(),
+      sendTransaction: mock.fn(),
     }
 
-    assert.throws(
-      () => viemWallet(mockWalletClient as never),
-      (err: Error) => {
-        assert.ok(err instanceof CCIPViemAdapterError)
-        assert.equal(err.name, 'CCIPViemAdapterError')
-        assert.ok(err.message.includes('RPC URL'))
-        return true
-      },
-    )
+    // Should NOT throw - custom transports are now supported
+    const signer = viemWallet(mockWalletClient as never)
+    assert.ok(signer)
+    assert.equal(typeof signer.getAddress, 'function')
   })
 
   it('should return correct address', async () => {

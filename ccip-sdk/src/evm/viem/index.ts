@@ -24,6 +24,6 @@
  * @packageDocumentation
  */
 
-export { fromViemClient } from './client-adapter.ts'
+export { ViemTransportProvider, fromViemClient } from './client-adapter.ts'
 export { viemWallet } from './wallet-adapter.ts'
 export type { ViemPublicClient, ViemWalletClient } from './types.ts'
