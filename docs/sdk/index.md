@@ -1,7 +1,7 @@
 ---
 id: ccip-tools-sdk
 title: CCIP SDK
-sidebar_label: Overview
+sidebar_label: CCIP SDK Overview
 sidebar_position: 0
 edit_url: https://github.com/smartcontractkit/ccip-tools-ts/edit/main/docs/sdk/index.md
 ---
@@ -42,8 +42,8 @@ const aptosChain = await AptosChain.fromUrl('https://api.testnet.aptoslabs.com/v
 | EVM | `EVMChain` | [ethers.js v6](https://docs.ethers.org/v6/) | Supported |
 | Solana | `SolanaChain` | [solana-web3.js](https://github.com/solana-foundation/solana-web3.js) | Supported |
 | Aptos | `AptosChain` | [aptos-ts-sdk](https://github.com/aptos-labs/aptos-ts-sdk) | Supported |
-| Sui | `SuiChain` | [@mysten/sui](https://github.com/MystenLabs/sui) | In Development |
-| TON | `TONChain` | [@ton/ton](https://github.com/ton-org/ton) | In Development |
+| Sui | `SuiChain` | [@mysten/sui](https://github.com/MystenLabs/sui) | Partial (manual exec) |
+| TON | `TONChain` | [@ton/ton](https://github.com/ton-org/ton) | Partial (manual exec) |
 
 ## Common Tasks
 
@@ -122,6 +122,99 @@ const request = await source.sendMessage(
 
 console.log('Transaction hash:', request.tx.hash)
 console.log('Message ID:', request.message.messageId)
+```
+
+## CCIP API Client
+
+Query lane latency from the CCIP REST API.
+
+### Standalone Usage
+
+```ts
+import { CCIPAPIClient } from '@chainlink/ccip-sdk'
+
+const api = new CCIPAPIClient()
+
+// Get estimated delivery time
+const latency = await api.getLaneLatency(
+  5009297550715157269n,  // Ethereum mainnet selector
+  4949039107694359620n,  // Arbitrum mainnet selector
+)
+
+console.log(`Estimated delivery: ${Math.round(latency.totalMs / 60000)} minutes`)
+```
+
+### Via Chain Instance
+
+```ts
+const chain = await EVMChain.fromUrl('https://eth-mainnet.example.com')
+
+// Uses chain's selector as source
+const latency = await chain.getLaneLatency(4949039107694359620n) // To Arbitrum
+console.log(`ETA: ${Math.round(latency.totalMs / 60000)} min`)
+```
+
+### Disable API (Decentralization Mode)
+
+```ts
+// Opt-out of API - uses only RPC data
+const chain = await EVMChain.fromUrl(url, { apiClient: null })
+
+// This will throw CCIPApiClientNotAvailableError
+await chain.getLaneLatency(destSelector)
+```
+
+## Chain Identification
+
+Use `networkInfo()` to convert between chain identifiers:
+
+```ts
+import { networkInfo } from '@chainlink/ccip-sdk'
+
+// All return the same NetworkInfo object:
+const info1 = networkInfo('ethereum-mainnet')       // by name
+const info2 = networkInfo(1)                        // by chain ID
+const info3 = networkInfo(5009297550715157269n)     // by selector (bigint)
+const info4 = networkInfo('5009297550715157269')    // by selector (string)
+
+console.log(info1.chainSelector)  // 5009297550715157269n
+console.log(info1.name)           // 'ethereum-mainnet'
+console.log(info1.family)         // 'evm'
+```
+
+## Error Handling
+
+The SDK provides typed errors with recovery hints:
+
+```ts
+import {
+  CCIPHttpError,
+  CCIPApiClientNotAvailableError,
+  CCIPTransactionNotFoundError,
+  isTransientError
+} from '@chainlink/ccip-sdk'
+
+try {
+  const latency = await api.getLaneLatency(source, dest)
+} catch (err) {
+  if (err instanceof CCIPHttpError) {
+    console.error(`API error ${err.context.status}: ${err.context.apiErrorMessage}`)
+
+    // Check if safe to retry
+    if (err.isTransient) {
+      // Retry after delay
+    }
+  }
+
+  if (err instanceof CCIPApiClientNotAvailableError) {
+    console.error('API disabled - remove apiClient: null to use this feature')
+  }
+
+  // Generic transient check
+  if (isTransientError(err)) {
+    console.log('Retrying...')
+  }
+}
 ```
 
 ## Wallet Configuration

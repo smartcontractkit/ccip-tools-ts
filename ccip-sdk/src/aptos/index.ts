@@ -21,7 +21,13 @@ import {
 import { memoize } from 'micro-memoize'
 import type { PickDeep, SetRequired } from 'type-fest'
 
-import { type LogFilter, type TokenInfo, type TokenPoolRemote, Chain } from '../chain.ts'
+import {
+  type ChainContext,
+  type LogFilter,
+  type TokenInfo,
+  type TokenPoolRemote,
+  Chain,
+} from '../chain.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import {
   CCIPAptosAddressInvalidError,
@@ -110,7 +116,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @param provider - Aptos SDK provider instance.
    * @param network - Network information for this chain.
    */
-  constructor(provider: Aptos, network: NetworkInfo, ctx?: WithLogger) {
+  constructor(provider: Aptos, network: NetworkInfo, ctx?: ChainContext) {
     super(network, ctx)
 
     this.destroy$ = new Promise<void>((resolve) => (this.destroy = resolve))
@@ -180,7 +186,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    */
   static async fromUrl(
     url: string | Network | readonly [string, Network],
-    ctx?: WithLogger,
+    ctx?: ChainContext,
   ): Promise<AptosChain> {
     let network: Network
     if (Array.isArray(url)) {

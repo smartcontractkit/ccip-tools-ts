@@ -28,7 +28,7 @@ import type { TypedContract } from 'ethers-abitype'
 import { memoize } from 'micro-memoize'
 import type { PickDeep, SetRequired } from 'type-fest'
 
-import { type LogFilter, type TokenPoolRemote, Chain } from '../chain.ts'
+import { type ChainContext, type LogFilter, type TokenPoolRemote, Chain } from '../chain.ts'
 import {
   CCIPAddressInvalidEvmError,
   CCIPBlockNotFoundError,
@@ -177,7 +177,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param provider - JSON-RPC provider for the EVM network.
    * @param network - Network information for this chain.
    */
-  constructor(provider: JsonRpcApiProvider, network: NetworkInfo, ctx?: WithLogger) {
+  constructor(provider: JsonRpcApiProvider, network: NetworkInfo, ctx?: ChainContext) {
     super(network, ctx)
 
     this.provider = provider
@@ -252,7 +252,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param ctx - context containing logger.
    * @returns A new EVMChain instance.
    */
-  static async fromProvider(provider: JsonRpcApiProvider, ctx?: WithLogger): Promise<EVMChain> {
+  static async fromProvider(provider: JsonRpcApiProvider, ctx?: ChainContext): Promise<EVMChain> {
     try {
       return new EVMChain(provider, networkInfo(Number((await provider.getNetwork()).chainId)), ctx)
     } catch (err) {
@@ -267,7 +267,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param ctx - context containing logger.
    * @returns A new EVMChain instance.
    */
-  static async fromUrl(url: string, ctx?: WithLogger): Promise<EVMChain> {
+  static async fromUrl(url: string, ctx?: ChainContext): Promise<EVMChain> {
     return this.fromProvider(await this._getProvider(url), ctx)
   }
 

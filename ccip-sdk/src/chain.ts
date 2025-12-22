@@ -1,9 +1,14 @@
 import type { BytesLike } from 'ethers'
 import type { PickDeep, SetOptional } from 'type-fest'
 
+import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
 import type { UnsignedAptosTx } from './aptos/types.ts'
 import { fetchCommitReport } from './commits.ts'
-import { CCIPChainFamilyMismatchError, CCIPTransactionNotFinalizedError } from './errors/index.ts'
+import {
+  CCIPApiClientNotAvailableError,
+  CCIPChainFamilyMismatchError,
+  CCIPTransactionNotFinalizedError,
+} from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
 import type {
   EVMExtraArgsV1,
@@ -35,6 +40,42 @@ import {
   ExecutionState,
 } from './types.ts'
 import { util } from './utils.ts'
+
+/**
+ * Context for Chain class initialization.
+ * Extends WithLogger with optional API client configuration.
+ *
+ * @example Default behavior (auto-create API client)
+ * ```typescript
+ * const chain = await EVMChain.fromUrl(rpcUrl, { logger })
+ * await chain.getLaneLatency(destSelector) // Works - uses production API
+ * ```
+ *
+ * @example Custom API endpoint
+ * ```typescript
+ * const api = new CCIPAPIClient('https://staging-api.example.com', { logger })
+ * const chain = await EVMChain.fromUrl(rpcUrl, { apiClient: api, logger })
+ * ```
+ *
+ * @example Explicit opt-out (decentralized mode)
+ * ```typescript
+ * const chain = await EVMChain.fromUrl(rpcUrl, { apiClient: null, logger })
+ * await chain.getLaneLatency(destSelector) // Throws CCIPApiClientNotAvailableError
+ * ```
+ */
+export type ChainContext = WithLogger & {
+  /**
+   * CCIP API client instance for lane information queries.
+   *
+   * - `undefined` (default): Creates CCIPAPIClient with production endpoint
+   *   (https://api.ccip.chain.link)
+   * - `CCIPAPIClient`: Uses provided instance (allows custom URL, fetch, etc.)
+   * - `null`: Disables API client entirely (getLaneLatency() will throw)
+   *
+   * Default: `undefined` (auto-create with production endpoint)
+   */
+  apiClient?: CCIPAPIClient | null
+}
 
 /**
  * Filter options for getLogs queries across chains.
@@ -117,12 +158,17 @@ export type UnsignedTx = {
 export abstract class Chain<F extends ChainFamily = ChainFamily> {
   readonly network: NetworkInfo<F>
   logger: Logger
+  /** CCIP API client (null if opted out) */
+  readonly apiClient: CCIPAPIClient | null
 
   /**
    * Base constructor for Chain class.
    * @param network - NetworkInfo object for the Chain instance
+   * @param ctx - Optional context with logger and API client configuration
    */
-  constructor(network: NetworkInfo, { logger = console }: WithLogger = {}) {
+  constructor(network: NetworkInfo, ctx?: ChainContext) {
+    const { logger = console, apiClient } = ctx ?? {}
+
     if (network.family !== (this.constructor as ChainStatic).family)
       throw new CCIPChainFamilyMismatchError(
         this.constructor.name,
@@ -131,6 +177,15 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       )
     this.network = network as NetworkInfo<F>
     this.logger = logger
+
+    // API client initialization: default enabled, null = explicit opt-out
+    if (apiClient === null) {
+      this.apiClient = null // Explicit opt-out
+    } else if (apiClient !== undefined) {
+      this.apiClient = apiClient // Use provided instance
+    } else {
+      this.apiClient = new CCIPAPIClient(undefined, { logger }) // Default
+    }
   }
 
   /** Cleanup method to release resources (e.g., close connections). */
@@ -435,6 +490,45 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
+   * Fetches estimated lane latency to a destination chain.
+   * Uses this chain's selector as the source.
+   *
+   * @param destChainSelector - Destination CCIP chain selector (bigint)
+   * @returns Promise resolving to {@link LaneLatencyResponse} containing:
+   *   - `lane.sourceNetworkInfo` - Source chain metadata (name, selector, chainId)
+   *   - `lane.destNetworkInfo` - Destination chain metadata
+   *   - `lane.routerAddress` - Router contract address on source chain
+   *   - `totalMs` - Estimated delivery time in milliseconds
+   *
+   * @throws {@link CCIPApiClientNotAvailableError} if apiClient was disabled (set to `null`)
+   * @throws {@link CCIPHttpError} if API request fails (network error, 4xx, 5xx status)
+   *
+   * @remarks
+   * Each call makes a fresh API request. Consider caching results if making
+   * frequent calls for the same lane.
+   *
+   * @example Get estimated delivery time
+   * ```typescript
+   * const chain = await EVMChain.fromUrl('https://eth-mainnet.example.com')
+   * try {
+   *   const latency = await chain.getLaneLatency(4949039107694359620n) // Arbitrum
+   *   console.log(`Estimated delivery: ${Math.round(latency.totalMs / 60000)} minutes`)
+   *   console.log(`Router: ${latency.lane.routerAddress}`)
+   * } catch (err) {
+   *   if (err instanceof CCIPHttpError) {
+   *     console.error(`API error: ${err.context.apiErrorCode}`)
+   *   }
+   * }
+   * ```
+   */
+  async getLaneLatency(destChainSelector: bigint): Promise<LaneLatencyResponse> {
+    if (!this.apiClient) {
+      throw new CCIPApiClientNotAvailableError()
+    }
+    return this.apiClient.getLaneLatency(this.network.chainSelector, destChainSelector)
+  }
+
+  /**
    * Default/generic implementation of fetchExecutionReceipts
    * @param offRamp - Off-ramp address
    * @param request - CCIPRequest to get execution receipts for
@@ -524,8 +618,9 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
   /**
    * async constructor: builds a Chain from a rpc endpoint url
    * @param url - rpc endpoint url
+   * @param ctx - optional context with logger and API client configuration
    */
-  fromUrl(url: string, ctx?: WithLogger): Promise<Chain<F>>
+  fromUrl(url: string, ctx?: ChainContext): Promise<Chain<F>>
   /**
    * Try to decode a CCIP message *from* a log/event *originated* from this *source* chain,
    * but which may *target* other dest chain families

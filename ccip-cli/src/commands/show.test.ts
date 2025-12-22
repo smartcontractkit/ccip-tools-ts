@@ -1,10 +1,11 @@
 import { spawn } from 'child_process'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { fileURLToPath } from 'node:url'
 import path from 'path'
 
-// Use src/index.ts - can be run with node directly from project root
-const CLI_PATH = path.join(process.cwd(), 'src', 'index.ts')
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const CLI_PATH = path.join(__dirname, '..', 'index.ts')
 
 // Public RPCs for testing
 const RPCS = [

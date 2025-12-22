@@ -114,19 +114,23 @@ static getDestLeafHasher(lane: Lane, ctx?: WithLogger): LeafHasher
 ### 3.3 Constructor
 
 ```ts
+import { type ChainContext } from '../chain.ts'
+
 readonly client: YourChainClient  // Your chain's SDK client
 
 constructor(
   client: YourChainClient,
   network: NetworkInfo<typeof ChainFamily.YourChain>,
-  ctx?: WithLogger
+  ctx?: ChainContext  // Includes logger and optional apiClient
 ) {
-  super(network, ctx)  // Pass network and optional logger context
+  super(network, ctx)  // Handles apiClient and logger initialization
   this.client = client
   // Memoize expensive RPC calls
   this.getTransaction = memoize(this.getTransaction.bind(this))
 }
 ```
+
+**Note:** `ChainContext` extends `WithLogger` and adds optional `apiClient` for CCIP API integration. The base class handles API client initialization automatically.
 
 ### 3.4 Abstract Methods
 
@@ -310,7 +314,7 @@ npm run build
 ./ccip-cli/ccip-cli show <your-chain-tx-hash> --rpcs <your-rpc-url>
 
 # Test token info
-./ccip-cli/ccip-cli getSupportedTokens <chain-selector> <router> --rpcs <your-rpc-url>
+./ccip-cli/ccip-cli getSupportedTokens <chainSelector> <router> --rpcs <your-rpc-url>
 ```
 
 ---

@@ -5,7 +5,7 @@ import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { type LogDecoders, fetchLogs } from './logs.ts'
-import { type LogFilter, Chain } from '../chain.ts'
+import { type ChainContext, type LogFilter, Chain } from '../chain.ts'
 import {
   CCIPArgumentInvalidError,
   CCIPExtraArgsInvalidError,
@@ -88,7 +88,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param network - Network information for this chain.
    * @param ctx - Context containing logger.
    */
-  constructor(client: TonClient4, network: NetworkInfo, ctx?: WithLogger) {
+  constructor(client: TonClient4, network: NetworkInfo, ctx?: ChainContext) {
     super(network, ctx)
     this.provider = client
 
@@ -117,7 +117,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param ctx - Context containing logger.
    * @returns A new TONChain instance.
    */
-  static async fromUrl(url: string, ctx?: WithLogger): Promise<TONChain> {
+  static async fromUrl(url: string, ctx?: ChainContext): Promise<TONChain> {
     const { logger = console } = ctx ?? {}
 
     // Parse URL for validation

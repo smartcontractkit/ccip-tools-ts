@@ -28,7 +28,13 @@ import {
 import { type Memoized, memoize } from 'micro-memoize'
 import type { PickDeep, SetRequired } from 'type-fest'
 
-import { type LogFilter, type TokenInfo, type TokenPoolRemote, Chain } from '../chain.ts'
+import {
+  type ChainContext,
+  type LogFilter,
+  type TokenInfo,
+  type TokenPoolRemote,
+  Chain,
+} from '../chain.ts'
 import {
   CCIPBlockTimeNotFoundError,
   CCIPContractNotRouterError,
@@ -176,7 +182,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @param connection - Solana connection instance.
    * @param network - Network information for this chain.
    */
-  constructor(connection: Connection, network: NetworkInfo, ctx?: WithLogger) {
+  constructor(connection: Connection, network: NetworkInfo, ctx?: ChainContext) {
     super(network, ctx)
 
     this.connection = connection
@@ -263,7 +269,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @param ctx - context containing logger.
    * @returns A new SolanaChain instance.
    */
-  static async fromConnection(connection: Connection, ctx?: WithLogger): Promise<SolanaChain> {
+  static async fromConnection(connection: Connection, ctx?: ChainContext): Promise<SolanaChain> {
     // Get genesis hash to use as chainId
     return new SolanaChain(connection, networkInfo(await connection.getGenesisHash()), ctx)
   }
@@ -274,7 +280,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @param ctx - context containing logger.
    * @returns A new SolanaChain instance.
    */
-  static async fromUrl(url: string, ctx?: WithLogger): Promise<SolanaChain> {
+  static async fromUrl(url: string, ctx?: ChainContext): Promise<SolanaChain> {
     const connection = this._getConnection(url, ctx)
     return this.fromConnection(connection, ctx)
   }
