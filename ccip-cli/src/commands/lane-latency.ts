@@ -8,7 +8,7 @@ import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
 import { type Ctx, Format } from './types.ts'
-import { getCtx, logParsedError, prettyTable } from './utils.ts'
+import { formatDuration, getCtx, logParsedError, prettyTable } from './utils.ts'
 
 export const command = ['laneLatency <source> <dest>', 'lane-latency <source> <dest>']
 export const describe = 'Query real-time lane latency between source and destination chains'
@@ -82,15 +82,10 @@ export async function getLaneLatencyCmd(ctx: Ctx, argv: Parameters<typeof handle
       logger.log('Lane Latency:', result)
       break
     default: {
-      const seconds = Math.round(result.totalMs / 1000)
-      const minutes = Math.floor(seconds / 60)
-      const remainingSeconds = seconds % 60
-      const eta = minutes > 0 ? `~${minutes}m ${remainingSeconds}s` : `${seconds}s`
-
       prettyTable.call(ctx, {
         Source: `${sourceNetwork.name} [${sourceNetwork.chainSelector}]`,
         Destination: `${destNetwork.name} [${destNetwork.chainSelector}]`,
-        'Estimated Delivery': eta,
+        'Estimated Delivery': `~${formatDuration(result.totalMs / 1000)}`,
         'Latency (ms)': result.totalMs.toLocaleString(),
       })
     }
