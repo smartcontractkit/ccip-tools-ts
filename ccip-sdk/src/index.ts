@@ -52,6 +52,13 @@ export {
   isSupportedTxHash,
   networkInfo,
 } from './utils.ts'
+export {
+  type CCIPExplorerLinks,
+  type ExplorerLinkType,
+  CCIP_EXPLORER_BASE_URL,
+  getCCIPExplorerLinks,
+  getCCIPExplorerUrl,
+} from './explorer.ts'
 
 // errors
 export * from './errors/index.ts'

@@ -9,6 +9,7 @@ import {
   CCIPTokenNotFoundError,
   ChainFamily,
   estimateExecGasForRequest,
+  getCCIPExplorerUrl,
   getDataBytes,
   networkInfo,
   sourceToDestTokenAmounts,
@@ -327,6 +328,13 @@ async function sendMessage(
     request.tx.hash,
     ', messageId =>',
     request.message.messageId,
+  )
+  logger.info(
+    '\nCCIP Explorer:',
+    '\n  Message:',
+    getCCIPExplorerUrl('msg', request.message.messageId),
+    '\n  Transaction:',
+    getCCIPExplorerUrl('tx', request.tx.hash),
   )
 
   await showRequests(ctx, {

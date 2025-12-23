@@ -11,6 +11,7 @@ import {
   CCIPError,
   CCIPErrorCode,
   ExecutionState,
+  getCCIPExplorerUrl,
   networkInfo,
   supportedChains,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -295,6 +296,7 @@ export async function prettyRequest(this: Ctx, source: Chain, request: CCIPReque
       : formatData('data', request.message.data)),
     ...('accounts' in request.message ? formatArray('accounts', request.message.accounts) : {}),
     ...rest,
+    'CCIP Explorer': getCCIPExplorerUrl('msg', request.message.messageId),
   })
 }
 
