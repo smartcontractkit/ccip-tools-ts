@@ -156,7 +156,9 @@ export type UnsignedTx = {
  * specialized) for some basic methods
  */
 export abstract class Chain<F extends ChainFamily = ChainFamily> {
+  /** Network configuration including chain selector, name, and family. */
   readonly network: NetworkInfo<F>
+  /** Logger instance for debugging and informational output. */
   logger: Logger
   /** CCIP API client (null if opted out) */
   readonly apiClient: CCIPAPIClient | null
@@ -200,12 +202,26 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Fetch the timestamp of a given block
    * @param block - positive block number, negative finality depth or 'finalized' tag
    * @returns timestamp of the block, in seconds
+   * @throws CCIPBlockNotFoundError - When the specified block does not exist or is not yet finalized
+   * @throws CCIPBlockTimeNotFoundError - When block exists but timestamp cannot be retrieved
+   * @example
+   * ```typescript
+   * const timestamp = await chain.getBlockTimestamp(12345678)
+   * console.log('Block time:', new Date(timestamp * 1000))
+   * ```
    */
   abstract getBlockTimestamp(block: number | 'finalized'): Promise<number>
   /**
    * Fetch a transaction by its hash
    * @param hash - transaction hash
    * @returns generic transaction details
+   * @throws CCIPTransactionNotFoundError - When transaction with the given hash does not exist
+   * @example
+   * ```typescript
+   * const tx = await chain.getTransaction('0x123...')
+   * console.log('Block:', tx.blockNumber)
+   * console.log('Status:', tx.status)
+   * ```
    */
   abstract getTransaction(hash: string): Promise<ChainTransaction>
   /**
@@ -267,6 +283,15 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *     want to assume those are optimization hints, instead of hard filters, and verify results
    *   - `page`: if provided, try to use this page/range for batches
    * @returns An async iterable iterator of logs.
+   *
+   * @remarks
+   * Behavior varies by chain family:
+   * - **EVM**: Full topic filtering, supports both startBlock and endBlock
+   * - **Solana**: Requires address (program ID), may have pagination limits
+   * - **Aptos**: Different log structure and filtering capabilities
+   *
+   * Fetching forward (with startBlock) is generally faster when you know the starting point.
+   * Fetching backward (without startBlock) is slower but can discover the most recent logs first.
    */
   abstract getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
 
@@ -274,6 +299,18 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Fetch all CCIP requests in a transaction
    * @param tx - ChainTransaction or txHash to fetch requests from
    * @returns CCIP messages in the transaction (at least one)
+   * @throws CCIPTransactionNotFoundError - When transaction does not exist
+   * @throws CCIPMessageNotFoundInTxError - When transaction contains no CCIP messages
+   * @throws CCIPMessageDecodeError - When CCIP message data cannot be decoded
+   * @example
+   * ```typescript
+   * const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+   * const requests = await chain.getMessagesInTx('0x123...')
+   * for (const req of requests) {
+   *   console.log('Message ID:', req.message.messageId)
+   *   console.log('Destination:', req.lane.destChainSelector)
+   * }
+   * ```
    **/
   abstract getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]>
 
@@ -282,6 +319,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param messageId - message ID to fetch request for
    * @param onRamp - address may be required in some implementations, and throw if missing
    * @returns CCIPRequest
+   * @throws CCIPMessageIdNotFoundError - When no message with the given ID is found
+   * @throws CCIPOnRampRequiredError - When onRamp address is required but not provided
    **/
   getMessageById?(
     messageId: string,
@@ -294,6 +333,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param request - CCIPRequest to fetch batch for.
    * @param commit - CommitReport range (min, max).
    * @param opts - Optional parameters (e.g., `page` for pagination width).
+   * @throws CCIPMessageBatchIncompleteError - When not all messages in the batch could be fetched
+   * @throws CCIPMessageNotInBatchError - When the request's message is not in the specified batch range
    */
   abstract fetchAllMessagesInBatch<
     R extends PickDeep<
@@ -312,6 +353,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @returns version - parsed version of the contract, e.g. `1.6.0`
    * @returns typeAndVersion - original (unparsed) typeAndVersion() string
    * @returns suffix - suffix of the version, if any (e.g. `-dev`)
+   * @throws CCIPContractTypeInvalidError - When the contract does not have a valid typeAndVersion
+   * @throws CCIPTypeVersionInvalidError - When typeAndVersion string cannot be parsed
+   * @example
+   * ```typescript
+   * const [type, version, raw] = await chain.typeAndVersion('0xOnRampAddress')
+   * console.log(`${type} v${version}`) // "OnRamp v1.6.0"
+   * ```
    */
   abstract typeAndVersion(
     address: string,
@@ -323,6 +371,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param onRamp - OnRamp contract address
    * @param destChainSelector - destination chain selector
    * @returns Router address
+   * @see {@link getOnRampForRouter} - Inverse lookup
    */
   abstract getRouterForOnRamp(onRamp: string, destChainSelector: bigint): Promise<string>
   /**
@@ -330,6 +379,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param offRamp - OffRamp contract address
    * @param sourceChainSelector - source chain selector
    * @returns Router address
+   * @see {@link getOnRampForOffRamp} - Get OnRamp from OffRamp
    */
   abstract getRouterForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string>
   /**
@@ -351,6 +401,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param router - Router contract address
    * @param destChainSelector - destination chain selector
    * @returns OnRamp addresses
+   * @see {@link getRouterForOnRamp} - Inverse lookup
    */
   abstract getOnRampForRouter(router: string, destChainSelector: bigint): Promise<string>
   /**
@@ -359,6 +410,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param offRamp - OffRamp contract address
    * @param sourceChainSelector - source chain selector
    * @returns OnRamp address
+   * @see {@link getRouterForOffRamp} - Get Router from OffRamp
    */
   abstract getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string>
   /**
@@ -366,6 +418,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * For CCIP v1.6 and later, it should return the offRamp address.
    * @param offRamp - OffRamp contract address.
    * @returns CommitStore address.
+   * @see {@link getOnRampForOffRamp} - Get OnRamp from OffRamp
+   * @see {@link getRouterForOffRamp} - Get Router from OffRamp
    */
   abstract getCommitStoreForOffRamp(offRamp: string): Promise<string>
   /**
@@ -378,12 +432,20 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Fetch token metadata
    * @param token - Token address
    * @returns Token symbol and decimals, and optionally name
+   * @throws CCIPTokenNotInRegistryError - When token is not found at the address
+   * @example
+   * ```typescript
+   * const info = await chain.getTokenInfo('0xLINKAddress')
+   * console.log(`${info.symbol}: ${info.decimals} decimals`)
+   * ```
    */
   abstract getTokenInfo(token: string): Promise<TokenInfo>
   /**
    * Fetch TokenAdminRegistry configured in a given OnRamp, Router, etc
    * Needed to map a source token to its dest counterparts
-   * @param onRamp - Some contract for which we can fetch a TokenAdminRegistry
+   * @param address - Some contract for which we can fetch a TokenAdminRegistry
+   * @see {@link getRegistryTokenConfig} - Get token config from registry
+   * @see {@link getSupportedTokens} - List tokens in registry
    */
   abstract getTokenAdminRegistryFor(address: string): Promise<string>
   /**
@@ -391,6 +453,22 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param router - router address on this chain
    * @param destChainSelector - dest network selector
    * @param message - message to send
+   * @throws CCIPContractNotRouterError - When the address is not a valid Router contract
+   * @throws CCIPChainNotFoundError - When the destination chain is not supported
+   * @throws CCIPTokenNotConfiguredError - When a token in the message is not supported
+   * @example
+   * ```typescript
+   * import { networkInfo } from '@chainlink/ccip-sdk'
+   *
+   * const fee = await chain.getFee(
+   *   '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59', // Router
+   *   networkInfo('avalanche-testnet-fuji').chainSelector,
+   *   { receiver: '0x...', data: '0x', tokenAmounts: [] }
+   * )
+   * console.log('Fee:', fee.toString(), 'wei')
+   * ```
+   * @see {@link generateUnsignedSendMessage} - Build unsigned tx with fee
+   * @see {@link sendMessage} - Send message with wallet
    */
   abstract getFee(router: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint>
   /**
@@ -399,8 +477,26 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param router - address of the Router contract
    * @param destChainSelector - chainSelector of destination chain
    * @param message - AnyMessage to send; if `fee` is not present, it'll be calculated
-   * @param approveMax - if tokens approvals are needed, opt into approving maximum allowance
+   * @param opts - Optional parameters: `approveMax` to approve maximum allowance for token transfers
    * @returns chain-family specific unsigned txs
+   * @example
+   * ```typescript
+   * import { networkInfo } from '@chainlink/ccip-sdk'
+   *
+   * const unsignedTx = await chain.generateUnsignedSendMessage(
+   *   '0xSenderAddress',
+   *   '0xRouterAddress',
+   *   networkInfo('avalanche-testnet-fuji').chainSelector,
+   *   {
+   *     receiver: '0xReceiverAddress',
+   *     data: '0x',
+   *     tokenAmounts: [],
+   *   }
+   * )
+   * // Sign and send the transaction with your wallet
+   * ```
+   * @see {@link getFee} - Calculate fee before building tx
+   * @see {@link sendMessage} - Higher-level method with wallet
    */
   abstract generateUnsignedSendMessage(
     sender: string,
@@ -417,6 +513,24 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param opts - Optional parameters:
    *   - `wallet`: cli or environmental parameters to help pick a wallet
    *   - `approveMax`: approve the maximum amount of tokens to transfer
+   * @throws CCIPWalletNotSignerError - When wallet cannot sign transactions
+   * @throws CCIPContractNotRouterError - When the address is not a valid Router contract
+   * @throws CCIPChainNotFoundError - When destination chain is not supported
+   * @throws CCIPTokenNotConfiguredError - When a token in the message is not supported
+   * @example
+   * ```typescript
+   * import { networkInfo } from '@chainlink/ccip-sdk'
+   *
+   * const request = await chain.sendMessage(
+   *   '0xRouterAddress',
+   *   networkInfo('avalanche-testnet-fuji').chainSelector,
+   *   { receiver: '0x...', data: '0x', tokenAmounts: [] },
+   *   { wallet: myWallet }
+   * )
+   * console.log('Message ID:', request.message.messageId)
+   * ```
+   * @see {@link getFee} - Get the fee before sending
+   * @see {@link generateUnsignedSendMessage} - Generate unsigned transaction
    */
   abstract sendMessage(
     router: string,
@@ -435,11 +549,12 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param payer - address which will be used to transmit the report tx
    * @param offRamp - address of the OffRamp contract
    * @param execReport - execution report
-   * @param gasLimit - gasLimit or computeUnits limit override for the ccipReceive call
-   * @param tokensGasLimit - For EVM, overrides gasLimit on tokenpPool call
-   * @param forceBuffer - For Solana, send report in chunks to OffRamp, to later execute
-   * @param forceLookupTable - For Solana, create and extend addresses in a lookup table before executing
+   * @param opts - Execution options: `gasLimit` for ccipReceive override, `tokensGasLimit` for EVM tokenPool,
+   *   `forceBuffer` for Solana chunked reports, `forceLookupTable` for Solana lookup tables
    * @returns chain-family specific unsigned txs
+   * @see {@link calculateManualExecProof} - Build execution report with proofs
+   * @see {@link executeReport} - Execute with wallet
+   * @see {@link discoverOffRamp} - Find OffRamp address
    */
   abstract generateUnsignedExecuteReport(
     payer: string,
@@ -456,9 +571,23 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Execute messages in report in an offRamp
    * @param offRamp - offRamp address on this dest chain
    * @param execReport - execution report containing messages to execute, proofs and offchainTokenData
-   * @param opts - general options for execution (see [[generateUnsignedExecuteReport]])
-   * @param wallet - chain-specific wallet or signer instance, to sign transactions
+   * @param opts - Execution options: `wallet` for signing, `gasLimit` override, `tokensGasLimit` for EVM,
+   *   `forceBuffer` and `forceLookupTable` for Solana
    * @returns transaction of the execution
+   * @throws CCIPWalletNotSignerError - When wallet cannot sign transactions
+   * @throws CCIPExecTxRevertedError - When the execution transaction reverts
+   * @throws CCIPExecTxNotConfirmedError - When the transaction is not confirmed within timeout
+   * @example
+   * ```typescript
+   * import { calculateManualExecProof } from '@chainlink/ccip-sdk'
+   *
+   * const execReport = await calculateManualExecProof(request, { source, dest })
+   * const tx = await dest.executeReport(offRamp, execReport, { wallet: myWallet })
+   * console.log('Executed in tx:', tx.hash)
+   * ```
+   * @see {@link calculateManualExecProof} - Build execution report with proofs
+   * @see {@link generateUnsignedExecuteReport} - Generate unsigned tx
+   * @see {@link discoverOffRamp} - Find OffRamp address
    */
   abstract executeReport(
     offRamp: string,
@@ -480,6 +609,17 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param request - CCIPRequest to get commit info for
    * @param hints - Additional filtering hints
    * @returns CCIPCommit info, or reject if none found
+   * @throws CCIPCommitNotFoundError - When no commit report is found for the request
+   * @example
+   * ```typescript
+   * const commit = await destChain.fetchCommitReport(
+   *   commitStoreAddress,
+   *   request
+   * )
+   * console.log('Committed at block:', commit.log.blockNumber)
+   * console.log('Merkle root:', commit.report.merkleRoot)
+   * ```
+   * @see {@link fetchExecutionReceipts} - Check if message was executed
    **/
   async fetchCommitReport(
     commitStore: string,
@@ -535,6 +675,16 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param commit - CCIPCommit info to help narrowing search for executions
    * @param hints - Additional filtering hints
    * @returns Async generator of CCIPExecution receipts
+   * @example
+   * ```typescript
+   * for await (const exec of destChain.fetchExecutionReceipts(offRamp, request, commit)) {
+   *   console.log('State:', exec.receipt.state) // 0=Untouched, 1=InProgress, 2=Success, 3=Failure
+   *   if (exec.receipt.state === 2) {
+   *     console.log('Successfully executed!')
+   *   }
+   * }
+   * ```
+   * @see {@link fetchCommitReport} - Check if message was committed first
    */
   async *fetchExecutionReceipts(
     offRamp: string,
@@ -564,13 +714,29 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param address - Usually TokenAdminRegistry, but chain may support receiving Router, OnRamp, etc.
    * @param opts - Optional parameters (e.g., `page` for pagination range).
    * @returns Array of supported token addresses.
+   * @example
+   * ```typescript
+   * const tokens = await chain.getSupportedTokens(tokenAdminRegistry)
+   * for (const token of tokens) {
+   *   const info = await chain.getTokenInfo(token)
+   *   console.log(`${info.symbol}: ${token}`)
+   * }
+   * ```
    */
   abstract getSupportedTokens(address: string, opts?: { page?: number }): Promise<string[]>
 
   /**
    * Get TokenConfig for a given token address in a TokenAdminRegistry
-   * @param address - TokenAdminRegistry contract address
+   * @param registry - TokenAdminRegistry contract address
    * @param token - Token address
+   * @example
+   * ```typescript
+   * const config = await chain.getRegistryTokenConfig(registry, tokenAddress)
+   * console.log('Administrator:', config.administrator)
+   * console.log('Token Pool:', config.tokenPool)
+   * ```
+   * @see {@link getTokenAdminRegistryFor} - Get registry address
+   * @see {@link getTokenPoolConfigs} - Get pool configuration
    */
   abstract getRegistryTokenConfig(
     registry: string,
@@ -584,6 +750,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Get TokenPool state and configurations
    * @param tokenPool - Token pool address
+   * @example
+   * ```typescript
+   * const poolConfig = await chain.getTokenPoolConfigs(tokenPoolAddress)
+   * console.log('Token:', poolConfig.token)
+   * console.log('Router:', poolConfig.router)
+   * ```
+   * @see {@link getTokenPoolRemotes} - Get remote chain configs
+   * @see {@link getRegistryTokenConfig} - Get registry config
    */
   abstract getTokenPoolConfigs(tokenPool: string): Promise<{
     token: string
@@ -596,6 +770,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param tokenPool - Token pool address.
    * @param remoteChainSelector - If provided, only return remotes for the specified chain (may error if remote not supported).
    * @returns Record of network names and remote configurations (remoteToken, remotePools, rateLimitStates).
+   * @example
+   * ```typescript
+   * const remotes = await chain.getTokenPoolRemotes(tokenPoolAddress)
+   * for (const [network, remote] of Object.entries(remotes)) {
+   *   console.log(`${network}: ${remote.remoteToken}`)
+   * }
+   * ```
+   * @see {@link getTokenPoolConfigs} - Get pool configuration
    */
   abstract getTokenPoolRemotes(
     tokenPool: string,
@@ -606,6 +788,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Fetch list and info of supported feeTokens.
    * @param router - Router address on this chain.
    * @returns Mapping of token addresses to respective TokenInfo objects.
+   * @example
+   * ```typescript
+   * const feeTokens = await chain.getFeeTokens(routerAddress)
+   * for (const [address, info] of Object.entries(feeTokens)) {
+   *   console.log(`${info.symbol} (${address})`)
+   * }
+   * ```
    */
   abstract getFeeTokens(router: string): Promise<Record<string, TokenInfo>>
 }

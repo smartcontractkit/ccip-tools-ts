@@ -86,6 +86,23 @@ function decodeJsonMessage(data: Record<string, unknown>) {
 /**
  * Decodes hex strings, bytearrays, JSON strings and raw objects as CCIPMessages
  * Does minimal validation, but converts objects in the format expected by ccip-tools-ts
+ *
+ * @param data - Hex string, Uint8Array, JSON string, or raw object to decode.
+ * @returns Decoded CCIPMessage.
+ * @throws CCIPMessageDecodeError - When the data cannot be decoded as a valid CCIP message
+ * @throws CCIPMessageInvalidError - When the message structure is invalid or missing required fields
+ * @example
+ * ```typescript
+ * import { decodeMessage } from '@chainlink/ccip-sdk'
+ *
+ * // Decode from JSON string
+ * const message = decodeMessage('{"header":{"sourceChainSelector":"123",...}')
+ *
+ * // Decode from hex-encoded bytes
+ * const message = decodeMessage('0x...')
+ *
+ * console.log('Message ID:', message.messageId)
+ * ```
  **/
 export function decodeMessage(data: string | Uint8Array | Record<string, unknown>): CCIPMessage {
   if (
@@ -114,6 +131,9 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
  * @param source - Chain
  * @param tx - ChainTransaction to search in
  * @returns CCIP requests (messages) in the transaction (at least one)
+ * @throws CCIPMessageNotFoundInTxError - When no CCIP messages are found in the transaction
+ * @throws CCIPNetworkFamilyUnsupportedError - When chain family is not supported for legacy lanes
+ * @see {@link getMessageById} - Search by messageId when tx hash unknown
  **/
 export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Promise<CCIPRequest[]> {
   const txHash = tx.hash
@@ -152,6 +172,14 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
  * @param messageId - MessageId to search for.
  * @param hints - Optional hints for pagination (e.g., `address` for onRamp, `page` for pagination size).
  * @returns CCIPRequest with given messageId.
+ * @throws CCIPMessageIdNotFoundError - When no message with the given ID is found after searching
+ *
+ * @remarks
+ * **Performance**: This function can be slow as it paginates backward through logs
+ * starting from the latest block. To improve performance:
+ * - Provide the `address` hint (OnRamp address) to narrow the search scope
+ * - Use `getMessagesInTx` if you know the transaction hash
+ * @see {@link getMessagesInTx} - Faster method when tx hash is known
  */
 export async function getMessageById(
   source: Chain,
@@ -197,6 +225,7 @@ const BLOCK_LOG_WINDOW_SIZE = 5000
  * @param seqNrRange - Object containing minSeqNr and maxSeqNr for the batch range.
  * @param opts - Optional log filtering parameters.
  * @returns Array of messages in the batch.
+ * @see {@link fetchCommitReport} - Get commit report to determine batch range
  */
 export async function fetchAllMessagesInBatch<
   C extends Chain,
@@ -283,6 +312,19 @@ export async function fetchAllMessagesInBatch<
  * @param sender - Sender address.
  * @param filter - Log filter options.
  * @returns Async generator of CCIP requests.
+ * @example
+ * ```typescript
+ * import { getMessagesForSender, EVMChain } from '@chainlink/ccip-sdk'
+ *
+ * const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+ *
+ * for await (const request of getMessagesForSender(chain, '0xSenderAddress', {})) {
+ *   console.log('Message ID:', request.message.messageId)
+ *   console.log('Destination:', request.lane.destChainSelector)
+ * }
+ * ```
+ * @see {@link getMessagesInTx} - Fetch from specific transaction
+ * @see {@link getMessageById} - Search by messageId
  */
 export async function* getMessagesForSender(
   source: Chain,
@@ -326,6 +368,22 @@ export async function* getMessagesForSender(
  * @param onRamp - Contract address.
  * @param sourceTokenAmounts - Array of token amounts, usually containing `token` and `amount` properties.
  * @returns Array of objects with `sourcePoolAddress`, `destTokenAddress`, and remaining properties.
+ * @example
+ * ```typescript
+ * import { sourceToDestTokenAmounts, networkInfo } from '@chainlink/ccip-sdk'
+ *
+ * const tokenAmounts = [{ token: '0xLINK', amount: 1000000n }]
+ * const destTokens = await sourceToDestTokenAmounts(
+ *   sourceChain,
+ *   networkInfo('avalanche-testnet-fuji').chainSelector,
+ *   onRampAddress,
+ *   tokenAmounts
+ * )
+ * console.log('Dest token:', destTokens[0].destTokenAddress)
+ * ```
+ * @see {@link getTokenAdminRegistryFor} - Get registry for token lookup
+ * @see {@link getRegistryTokenConfig} - Get token pool from registry
+ * @see {@link getTokenPoolRemotes} - Get remote token addresses
  */
 export async function sourceToDestTokenAmounts<S extends { token: string }>(
   source: Chain,

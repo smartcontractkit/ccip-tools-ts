@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDK: `MessageStatus` enum for message lifecycle tracking
 - CLI: `show --wait` displays status progression during message tracking
 - SDK: Rename `fetch*` to `get*` for message methods (`getMessagesInTx`, `getMessageById`, `getMessagesForSender`)
+- Docs: `ccip-api-ref` - Docusaurus-based API reference site with SDK guides, CLI documentation, interactive command builders, and auto-generated TypeDoc API reference
 
 ## [0.92.0] - 2025-12-20 - Pre-release
 - SDK: `Chain.getLogs` can receive `watch` boolean or cancel promise, to enter continuous logs fetching

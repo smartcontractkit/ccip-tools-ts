@@ -162,10 +162,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   static {
     supportedChains[ChainFamily.EVM] = EVMChain
   }
+  /** Chain family identifier for EVM-compatible networks. */
   static readonly family = ChainFamily.EVM
+  /** Native token decimals (18 for all EVM chains). */
   static readonly decimals = 18
 
+  /** The underlying JSON-RPC provider for blockchain interactions. */
   provider: JsonRpcApiProvider
+  /** Promise that resolves when the chain instance is destroyed and resources are released. */
   readonly destroy$: Promise<void>
 
   /**
@@ -262,6 +266,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param url - WebSocket (wss://) or HTTP (https://) endpoint URL.
    * @param ctx - context containing logger.
    * @returns A new EVMChain instance.
+   * @example
+   * ```typescript
+   * import { EVMChain } from '@chainlink/ccip-sdk'
+   *
+   * const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+   * console.log(chain.network.name) // 'ethereum-testnet-sepolia'
+   * ```
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<EVMChain> {
     return this.fromProvider(await this._getProvider(url), ctx)
@@ -867,6 +878,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /**
    * Gets any available OnRamp for the given router.
+   * @internal
    * @param router - Router contract address.
    * @returns OnRamp contract address.
    */
@@ -957,7 +969,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param router - address of the Router contract
    * @param destChainSelector - chainSelector of destination chain
    * @param message - AnyMessage to send; if `fee` is not present, it'll be calculated
-   * @param approveMax - if tokens approvals are needed, opt into approving maximum allowance
+   * @param opts - Optional parameters: `approveMax` to approve maximum allowance for token transfers
    * @returns Array containing 0 or more unsigned token approvals txs (if needed at the time of
    *   generation), followed by a ccipSend TransactionRequest
    */

@@ -1,0 +1,11 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "build",
+  "installCommand": "cd .. && npm ci",
+  "framework": "docusaurus-2",
+  "trailingSlash": true,
+  "rewrites": [
+    { "source": "/ccip/ccip-tools/:path*", "destination": "/:path*" },
+    { "source": "/ccip/ccip-tools", "destination": "/" }
+  ]
+}

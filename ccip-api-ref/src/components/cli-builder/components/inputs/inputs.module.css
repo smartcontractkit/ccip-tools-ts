@@ -1,0 +1,305 @@
+/**
+ * CLI Builder Input Styles
+ *
+ * Consistent styling for all CLI Builder form inputs.
+ * Uses CSS custom properties for theming support.
+ */
+
+/* Input wrapper */
+.inputWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin-bottom: 1rem;
+}
+
+/* Labels */
+.label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ifm-font-color-base);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.required {
+  color: var(--ifm-color-danger);
+  font-weight: 600;
+}
+
+.count {
+  font-size: 0.75rem;
+  color: var(--ifm-font-color-secondary);
+  font-weight: 400;
+}
+
+/* Text input */
+.input {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  font-family: var(--ifm-font-family-monospace);
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 6px;
+  background: var(--ifm-background-color);
+  color: var(--ifm-font-color-base);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+  width: 100%;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 0 0 3px var(--ifm-color-primary-lightest);
+}
+
+.input::placeholder {
+  color: var(--ifm-font-color-secondary);
+  opacity: 0.7;
+}
+
+.input:disabled {
+  background: var(--ifm-color-emphasis-100);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* Select input */
+.select {
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  font-family: var(--ifm-font-family-base);
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 6px;
+  background: var(--ifm-background-color);
+  color: var(--ifm-font-color-base);
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  width: 100%;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 0 0 3px var(--ifm-color-primary-lightest);
+}
+
+.select:disabled {
+  background-color: var(--ifm-color-emphasis-100);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.chainSelect optgroup {
+  font-weight: 600;
+  color: var(--ifm-font-color-base);
+}
+
+.chainHint {
+  font-size: 0.75rem;
+  color: var(--ifm-font-color-secondary);
+  margin: 0;
+}
+
+.chainHint code {
+  font-size: 0.7rem;
+  padding: 0.125rem 0.375rem;
+  background: var(--ifm-color-emphasis-100);
+  border-radius: 4px;
+}
+
+/* Checkbox wrapper */
+.checkboxWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.checkbox {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--ifm-color-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.checkbox:focus {
+  outline: 2px solid var(--ifm-color-primary);
+  outline-offset: 2px;
+}
+
+.checkboxLabel {
+  font-size: 0.875rem;
+  color: var(--ifm-font-color-base);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Description text */
+.description {
+  font-size: 0.75rem;
+  color: var(--ifm-font-color-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Error state */
+.inputError {
+  border-color: var(--ifm-color-danger) !important;
+}
+
+.inputError:focus {
+  box-shadow: 0 0 0 3px var(--ifm-color-danger-lightest) !important;
+}
+
+.error {
+  font-size: 0.75rem;
+  color: var(--ifm-color-danger);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.error::before {
+  content: '\26A0'; /* Warning sign */
+  font-size: 0.875rem;
+}
+
+/* Array input */
+.arrayInputRow {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.arrayInput {
+  flex: 1;
+}
+
+.addButton {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  background: var(--ifm-color-primary);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    opacity 0.15s ease;
+  white-space: nowrap;
+}
+
+.addButton:hover:not(:disabled) {
+  background: var(--ifm-color-primary-dark);
+}
+
+.addButton:focus {
+  outline: 2px solid var(--ifm-color-primary);
+  outline-offset: 2px;
+}
+
+.addButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.arrayList {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.arrayItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--ifm-color-emphasis-100);
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 4px;
+}
+
+.arrayValue {
+  font-size: 0.75rem;
+  font-family: var(--ifm-font-family-monospace);
+  color: var(--ifm-font-color-base);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.removeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: var(--ifm-font-color-secondary);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.removeButton:hover {
+  background: var(--ifm-color-danger-lightest);
+  color: var(--ifm-color-danger);
+}
+
+.removeButton:focus {
+  outline: 2px solid var(--ifm-color-danger);
+  outline-offset: 1px;
+}
+
+/* Dark mode adjustments */
+[data-theme='dark'] .input,
+[data-theme='dark'] .select {
+  border-color: var(--ifm-color-emphasis-400);
+}
+
+[data-theme='dark'] .select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23aaa' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+}
+
+[data-theme='dark'] .arrayItem {
+  background: var(--ifm-color-emphasis-200);
+  border-color: var(--ifm-color-emphasis-300);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .arrayInputRow {
+    flex-direction: column;
+  }
+
+  .addButton {
+    width: 100%;
+  }
+}

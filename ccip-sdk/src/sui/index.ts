@@ -74,6 +74,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   static {
     supportedChains[ChainFamily.Sui] = SuiChain
   }
+  /** Chain family identifier for Sui networks. */
   static readonly family = ChainFamily.Sui
   static readonly decimals = 9 // SUI has 9 decimals
 

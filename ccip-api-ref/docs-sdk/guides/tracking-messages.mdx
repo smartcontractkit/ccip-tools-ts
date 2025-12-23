@@ -1,0 +1,189 @@
+---
+id: tracking-messages
+title: 'Tracking Messages'
+description: 'Track CCIP messages through sent, committed, and executed stages.'
+sidebar_label: Tracking Messages
+sidebar_position: 1
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Tracking Messages
+
+## Message Lifecycle
+
+A CCIP message passes through three stages:
+
+1. **Sent** - Message emitted on source chain
+2. **Committed** - Merkle root committed on destination chain
+3. **Executed** - Message executed on destination chain
+
+## By Transaction Hash
+
+Use `getMessagesInTx` when you have the source transaction hash. This is the fastest method.
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+const requests = await source.getMessagesInTx('0x1234...')
+
+for (const request of requests) {
+  console.log('Message ID:', request.message.messageId)
+  console.log('Sequence Number:', request.message.sequenceNumber)
+  console.log('Destination:', request.lane.destChainSelector)
+}
+```
+
+## By Message ID
+
+Use `getMessageById` when you only have the message ID. Provide the `address` hint (OnRamp address) to improve performance.
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+const request = await source.getMessageById(
+  '0xabcd1234...',   // messageId
+  '0xOnRampAddr...', // OnRamp address (recommended for performance)
+  { page: 10000 }    // Block range per page
+)
+
+console.log('Found message in tx:', request.tx.hash)
+```
+
+Without the OnRamp address hint, the search scans all OnRamp contracts and can be slow.
+
+## By Sender Address
+
+Use `getMessagesForSender` to find all messages from a specific sender:
+
+```typescript
+import { EVMChain, getMessagesForSender } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+for await (const request of getMessagesForSender(
+  source,
+  '0xSenderAddress...',
+  { startBlock: 1000000 }
+)) {
+  console.log('Message ID:', request.message.messageId)
+  console.log('Sent to:', request.lane.destChainSelector)
+}
+```
+
+## Commit Status
+
+Check if a message has been committed on the destination chain:
+
+```typescript
+import { EVMChain, discoverOffRamp } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+const requests = await source.getMessagesInTx('0x1234...')
+const request = requests[0]
+
+const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+
+const commit = await dest.fetchCommitReport(offRamp, request)
+
+if (commit) {
+  console.log('Committed at block:', commit.log.blockNumber)
+  console.log('Merkle root:', commit.report.merkleRoot)
+} else {
+  console.log('Not yet committed')
+}
+```
+
+## Execution Status
+
+Check if a committed message has been executed:
+
+```typescript
+import { EVMChain, fetchExecutionReceipts, ExecutionState } from '@chainlink/ccip-sdk'
+
+const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+for await (const execution of fetchExecutionReceipts(
+  dest,
+  offRamp,
+  request,
+  commit
+)) {
+  console.log('Execution state:', ExecutionState[execution.receipt.state])
+  console.log('Gas used:', execution.receipt.gasUsed)
+
+  if (execution.receipt.state === ExecutionState.Success) {
+    console.log('Message successfully executed')
+  } else if (execution.receipt.state === ExecutionState.Failure) {
+    console.log('Message execution failed - may need manual execution')
+  }
+}
+```
+
+## Complete Example
+
+Track a message through all stages:
+
+```typescript
+import {
+  EVMChain,
+  fetchExecutionReceipts,
+  discoverOffRamp,
+  ExecutionState
+} from '@chainlink/ccip-sdk'
+
+async function trackMessage(sourceTxHash: string) {
+  const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+  const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+  // Stage 1: Get sent message
+  console.log('Fetching sent message...')
+  const requests = await source.getMessagesInTx(sourceTxHash)
+  const request = requests[0]
+  console.log('Message ID:', request.message.messageId)
+
+  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+
+  // Stage 2: Check commit status
+  console.log('Checking commit status...')
+  const commit = await dest.fetchCommitReport(offRamp, request)
+
+  if (!commit) {
+    console.log('Status: Pending commit')
+    return { status: 'pending_commit', request }
+  }
+  console.log('Committed at block:', commit.log.blockNumber)
+
+  // Stage 3: Check execution status
+  console.log('Checking execution status...')
+  for await (const execution of fetchExecutionReceipts(
+    dest,
+    offRamp,
+    request,
+    commit
+  )) {
+    if (execution.receipt.state === ExecutionState.Success) {
+      console.log('Status: Executed')
+      return { status: 'executed', request, commit, execution }
+    }
+  }
+
+  console.log('Status: Committed, pending execution')
+  return { status: 'pending_execution', request, commit }
+}
+
+const result = await trackMessage('0x1234...')
+```
+
+## Related
+
+- [Sending Messages](/sdk/guides/sending-messages) - Send cross-chain messages
+- [Error Handling](/sdk/guides/error-handling) - Handle failures and manual execution
+- [Multi-Chain Support](/sdk/guides/multi-chain) - Work with different blockchain families
