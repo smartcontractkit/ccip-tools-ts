@@ -20,7 +20,7 @@ const config: Config = {
   tagline: 'SDK and CLI for Chainlink Cross-Chain Interoperability Protocol',
 
   url: 'https://docs.chain.link',
-  baseUrl: '/ccip-tools/',
+  baseUrl: '/ccip/ccip-tools/',
 
   organizationName: 'smartcontractkit',
   projectName: 'ccip-tools-ts',
@@ -213,7 +213,7 @@ const config: Config = {
       { property: 'og:site_name', content: 'CCIP Tools' },
       {
         property: 'og:image',
-        content: 'https://docs.chain.link/ccip-tools/img/og-ccip-tools.png',
+        content: 'https://docs.chain.link/ccip/ccip-tools/img/og-ccip-tools.png',
       },
       { property: 'og:image:width', content: '1200' },
       { property: 'og:image:height', content: '630' },
@@ -227,7 +227,7 @@ const config: Config = {
       { name: 'twitter:creator', content: '@chainlink' },
       {
         name: 'twitter:image',
-        content: 'https://docs.chain.link/ccip-tools/img/og-ccip-tools.png',
+        content: 'https://docs.chain.link/ccip/ccip-tools/img/og-ccip-tools.png',
       },
       {
         name: 'twitter:image:alt',
@@ -255,10 +255,12 @@ const config: Config = {
       },
       items: [
         // Site title - links to local home (separate from logo which links to parent docs)
+        // Uses 'to' instead of hardcoded HTML for automatic baseUrl prefixing
         {
-          type: 'html',
+          to: '/',
+          label: 'CCIP Tools',
           position: 'left',
-          value: '<a href="/ccip-tools/" class="navbar__brand navbar__title">CCIP Tools</a>',
+          className: 'navbar__brand navbar__title',
         },
         // Left side - Documentation sections (API → SDK → CLI order)
         {

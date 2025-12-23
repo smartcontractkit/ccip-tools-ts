@@ -1,6 +1,7 @@
 {
-  "buildCommand": "npm run gen-api && npm run build",
+  "buildCommand": "npm run build",
   "outputDirectory": "build",
   "installCommand": "cd .. && npm ci",
-  "framework": "docusaurus-2"
+  "framework": "docusaurus-2",
+  "trailingSlash": true
 }
