@@ -147,15 +147,16 @@ ccip-cli send ... --wallet ledger:1  # Uses m/44'/60'/1'/0/0 for EVM
 
 These options are available on all commands:
 
-| Option        | Alias | Type     | Default  | Description                               |
-| ------------- | ----- | -------- | -------- | ----------------------------------------- |
-| `--rpcs`      | `-r`  | string[] | -        | RPC endpoint URLs                         |
-| `--rpcs-file` | -     | string   | `./.env` | File containing RPC endpoints             |
-| `--format`    | `-f`  | string   | `pretty` | Output format: `pretty`, `log`, or `json` |
-| `--verbose`   | `-v`  | boolean  | `false`  | Enable debug logging                      |
-| `--page`      | -     | number   | `10000`  | Pagination size for `getLogs` queries     |
-| `--help`      | `-h`  | boolean  | -        | Show help                                 |
-| `--version`   | `-V`  | boolean  | -        | Show version                              |
+| Option        | Alias | Type     | Default  | Description                                       |
+| ------------- | ----- | -------- | -------- | ------------------------------------------------- |
+| `--rpcs`      | `-r`  | string[] | -        | RPC endpoint URLs (alias: `--rpc`)                |
+| `--rpcs-file` | -     | string   | `./.env` | File containing RPC endpoints                     |
+| `--format`    | `-f`  | string   | `pretty` | Output format: `pretty`, `log`, or `json`         |
+| `--verbose`   | `-v`  | boolean  | `false`  | Enable debug logging                              |
+| `--page`      | -     | number   | `10000`  | Pagination size for `getLogs` queries             |
+| `--no-api`    | -     | boolean  | `false`  | Disable CCIP API integration (full decentralized) |
+| `--help`      | `-h`  | boolean  | -        | Show help                                         |
+| `--version`   | `-V`  | boolean  | -        | Show version                                      |
 
 **Output formats:**
 

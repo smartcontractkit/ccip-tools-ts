@@ -101,7 +101,7 @@ function decodeJsonMessage(data: Record<string, unknown>) {
  * // Decode from hex-encoded bytes
  * const message = decodeMessage('0x...')
  *
- * console.log('Message ID:', message.header.messageId)
+ * console.log('Message ID:', message.messageId)
  * ```
  **/
 export function decodeMessage(data: string | Uint8Array | Record<string, unknown>): CCIPMessage {
@@ -133,7 +133,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
  * @returns CCIP requests (messages) in the transaction (at least one)
  * @throws CCIPMessageNotFoundInTxError - When no CCIP messages are found in the transaction
  * @throws CCIPNetworkFamilyUnsupportedError - When chain family is not supported for legacy lanes
- * @see {@link fetchCCIPRequestById} - Search by messageId when tx hash unknown
+ * @see {@link getMessageById} - Search by messageId when tx hash unknown
  **/
 export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Promise<CCIPRequest[]> {
   const txHash = tx.hash
@@ -178,8 +178,8 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
  * **Performance**: This function can be slow as it paginates backward through logs
  * starting from the latest block. To improve performance:
  * - Provide the `address` hint (OnRamp address) to narrow the search scope
- * - Use `fetchRequestsInTx` if you know the transaction hash
- * @see {@link fetchCCIPRequestsInTx} - Faster method when tx hash is known
+ * - Use `getMessagesInTx` if you know the transaction hash
+ * @see {@link getMessagesInTx} - Faster method when tx hash is known
  */
 export async function getMessageById(
   source: Chain,
@@ -314,17 +314,17 @@ export async function fetchAllMessagesInBatch<
  * @returns Async generator of CCIP requests.
  * @example
  * ```typescript
- * import { fetchRequestsForSender, EVMChain } from '@chainlink/ccip-sdk'
+ * import { getMessagesForSender, EVMChain } from '@chainlink/ccip-sdk'
  *
  * const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
  *
- * for await (const request of fetchRequestsForSender(chain, '0xSenderAddress', {})) {
- *   console.log('Message ID:', request.message.header.messageId)
+ * for await (const request of getMessagesForSender(chain, '0xSenderAddress', {})) {
+ *   console.log('Message ID:', request.message.messageId)
  *   console.log('Destination:', request.lane.destChainSelector)
  * }
  * ```
- * @see {@link fetchCCIPRequestsInTx} - Fetch from specific transaction
- * @see {@link fetchCCIPRequestById} - Search by messageId
+ * @see {@link getMessagesInTx} - Fetch from specific transaction
+ * @see {@link getMessageById} - Search by messageId
  */
 export async function* getMessagesForSender(
   source: Chain,

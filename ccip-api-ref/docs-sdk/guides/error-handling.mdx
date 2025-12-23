@@ -13,31 +13,57 @@ import TabItem from '@theme/TabItem'
 
 ## Error Types
 
-| Error | Description |
-|-------|-------------|
-| `CCIPTransactionNotFoundError` | Transaction hash doesn't exist |
-| `CCIPMessageNotFoundInTxError` | Transaction contains no CCIP messages |
-| `CCIPMessageIdNotFoundError` | Message ID not found after searching |
-| `CCIPMessageDecodeError` | Failed to decode message data |
-| `CCIPBlockNotFoundError` | Block doesn't exist or isn't finalized |
-| `CCIPOffRampNotFoundError` | No OffRamp found for the lane |
-| `CCIPMerkleRootMismatchError` | Merkle proof validation failed |
+All SDK errors extend `CCIPError` and include:
+- **`code`** - Machine-readable error code
+- **`isTransient`** - Whether retry may succeed
+- **`retryAfterMs`** - Suggested retry delay (if transient)
+- **`recovery`** - Human-readable recovery suggestion
+- **`context`** - Structured debug info (hash, messageId, etc.)
+
+### Common Errors
+
+| Error | Code | Transient | Description |
+|-------|------|-----------|-------------|
+| `CCIPTransactionNotFoundError` | `TRANSACTION_NOT_FOUND` | Yes (5s) | Transaction not indexed yet |
+| `CCIPMessageNotFoundInTxError` | `MESSAGE_NOT_FOUND_IN_TX` | Yes (30s) | No CCIP events in tx (may be indexing) |
+| `CCIPMessageIdNotFoundError` | `MESSAGE_ID_NOT_FOUND` | Yes (30s) | Message ID not found (may be indexing) |
+| `CCIPBlockNotFoundError` | `BLOCK_NOT_FOUND` | Yes (12s) | Block not yet available |
+| `CCIPCommitNotFoundError` | `COMMIT_NOT_FOUND` | Yes (60s) | Commit not yet on dest chain |
+| `CCIPMessageDecodeError` | `MESSAGE_CCIP_DECODE_FAILED` | No | Invalid message format |
+| `CCIPOffRampNotFoundError` | `OFFRAMP_NOT_FOUND` | No | Lane not configured |
+| `CCIPMerkleRootMismatchError` | `MERKLE_ROOT_MISMATCH` | No | Proof validation failed |
 
 ## Basic Error Handling
 
+Use `CCIPError.isCCIPError()` for safe type checking (handles dual package scenarios):
+
 ```typescript
-import { EVMChain } from '@chainlink/ccip-sdk'
+import {
+  EVMChain,
+  CCIPError,
+  CCIPTransactionNotFoundError,
+  CCIPMessageNotFoundInTxError,
+} from '@chainlink/ccip-sdk'
 
 const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
 try {
-  const requests = await chain.fetchRequestsInTx('0x1234...')
+  const requests = await chain.getMessagesInTx('0x1234...')
   console.log('Found', requests.length, 'messages')
 } catch (error) {
-  if (error.message.includes('not found')) {
-    console.log('Transaction not found - check the hash')
-  } else if (error.message.includes('no CCIP messages')) {
-    console.log('Transaction exists but has no CCIP messages')
+  // Use CCIPError.isCCIPError() for safe type checking
+  if (CCIPError.isCCIPError(error)) {
+    console.log('Error code:', error.code)
+    console.log('Context:', error.context)      // { hash: '0x1234...' }
+    console.log('Transient:', error.isTransient)
+    console.log('Recovery:', error.recovery)    // Human-readable suggestion
+
+    // Handle specific error types
+    if (error instanceof CCIPTransactionNotFoundError) {
+      console.log('Transaction not found - check the hash')
+    } else if (error instanceof CCIPMessageNotFoundInTxError) {
+      console.log('Transaction exists but has no CCIP messages')
+    }
   } else {
     console.error('Unexpected error:', error)
   }
@@ -46,26 +72,36 @@ try {
 
 ## Search Failures
 
-Handle pagination exhaustion when searching by message ID:
+`CCIPMessageIdNotFoundError` is **transient** - the message may still be indexing. Use `shouldRetry` for automatic handling:
 
 ```typescript
-import { EVMChain } from '@chainlink/ccip-sdk'
+import {
+  EVMChain,
+  CCIPError,
+  CCIPMessageIdNotFoundError,
+  shouldRetry,
+  getRetryDelay,
+} from '@chainlink/ccip-sdk'
 
 async function findMessage(messageId: string, onRampHint?: string) {
   const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
   try {
-    const request = await chain.fetchCCIPRequestById(
-      messageId,
-      { address: onRampHint }
-    )
+    const request = await chain.getMessageById(messageId, onRampHint)
     return request
   } catch (error) {
-    if (error.message.includes('not found')) {
-      console.log('Message not found - it may be:')
-      console.log('  - Very old (before search window)')
-      console.log('  - On a different chain')
-      console.log('  - Invalid message ID')
+    if (error instanceof CCIPMessageIdNotFoundError) {
+      // This error is transient - message may still be indexing
+      console.log('Transient:', error.isTransient)        // true
+      console.log('Retry after:', error.retryAfterMs)     // 30000ms
+      console.log('Context:', error.context)               // { messageId: '0x...' }
+
+      // Check if we should retry
+      if (shouldRetry(error)) {
+        const delay = getRetryDelay(error) ?? 30000
+        console.log(`Message not indexed yet, retry in ${delay}ms`)
+        // Implement retry logic here
+      }
       return null
     }
     throw error
@@ -73,7 +109,7 @@ async function findMessage(messageId: string, onRampHint?: string) {
 }
 ```
 
-Provide the `address` (OnRamp) hint when searching by message ID. Without it, the search scans all OnRamp contracts.
+Provide the OnRamp address hint when searching by message ID. Without it, the search scans all OnRamp contracts.
 
 ## Execution States
 
@@ -83,11 +119,14 @@ Messages can fail execution for several reasons:
 import {
   EVMChain,
   fetchExecutionReceipts,
-  ExecutionState
+  ExecutionState,
+  type CCIPRequest,
 } from '@chainlink/ccip-sdk'
 
-async function checkExecutionStatus(dest: EVMChain, offRamp: string, request: any) {
+async function checkExecutionStatus(dest: EVMChain, offRamp: string, request: CCIPRequest) {
+  let found = false
   for await (const execution of fetchExecutionReceipts(dest, offRamp, request)) {
+    found = true
     switch (execution.receipt.state) {
       case ExecutionState.Success:
         console.log('Message executed successfully')
@@ -98,10 +137,15 @@ async function checkExecutionStatus(dest: EVMChain, offRamp: string, request: an
         console.log('Return data:', execution.receipt.returnData)
         return 'failed'
 
-      case ExecutionState.Untouched:
-        console.log('Message not yet attempted')
-        return 'pending'
+      case ExecutionState.InProgress:
+        console.log('Execution in progress')
+        return 'in_progress'
     }
+  }
+  // No execution receipts found - message not yet attempted
+  if (!found) {
+    console.log('Message not yet attempted')
+    return 'pending'
   }
   return 'not_found'
 }
@@ -114,24 +158,17 @@ When automatic execution fails, manually execute the message.
 ### Step 1: Gather Data
 
 ```typescript
-import {
-  EVMChain,
-  fetchAllMessagesInBatch,
-  discoverOffRamp
-} from '@chainlink/ccip-sdk'
+import { EVMChain, discoverOffRamp } from '@chainlink/ccip-sdk'
 
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
 const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
 
-const requests = await source.fetchRequestsInTx('0x1234...')
+const requests = await source.getMessagesInTx('0x1234...')
 const request = requests[0]
 
 const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
 
-const commit = await dest.fetchCommitReport(
-  offRamp,
-  request.message.header.sequenceNumber
-)
+const commit = await dest.fetchCommitReport(offRamp, request)
 
 if (!commit) {
   throw new Error('Message not yet committed - cannot execute')
@@ -141,18 +178,15 @@ if (!commit) {
 ### Step 2: Calculate Merkle Proof
 
 ```typescript
-import { calculateManualExecProof, fetchAllMessagesInBatch } from '@chainlink/ccip-sdk'
+import { calculateManualExecProof } from '@chainlink/ccip-sdk'
 
-const messagesInBatch = await fetchAllMessagesInBatch(
-  source,
-  request,
-  commit.report
-)
+// Fetch all messages in the commit batch (chain method)
+const messagesInBatch = await source.fetchAllMessagesInBatch(request, commit.report)
 
 const proof = calculateManualExecProof(
   messagesInBatch,
   request.lane,
-  request.message.header.messageId,
+  request.message.messageId,
   commit.report.merkleRoot
 )
 
@@ -163,13 +197,17 @@ console.log('Proof hashes:', proof.proofs)
 ### Step 3: Execute
 
 ```typescript
+import { Wallet } from 'ethers'
+
+const wallet = new Wallet(process.env.PRIVATE_KEY!)
+
 const executionReport = {
   ...proof,
   message: request.message,
   offchainTokenData: [],
 }
 
-const tx = await dest.executeReport(offRamp, executionReport)
+const tx = await dest.executeReport(offRamp, executionReport, { wallet })
 console.log('Manual execution tx:', tx.hash)
 ```
 
@@ -178,17 +216,17 @@ console.log('Manual execution tx:', tx.hash)
 If the calculated merkle root doesn't match the commit:
 
 ```typescript
-import { calculateManualExecProof } from '@chainlink/ccip-sdk'
+import { calculateManualExecProof, CCIPMerkleRootMismatchError } from '@chainlink/ccip-sdk'
 
 try {
   const proof = calculateManualExecProof(
     messagesInBatch,
     request.lane,
-    request.message.header.messageId,
+    request.message.messageId,
     commit.report.merkleRoot
   )
 } catch (error) {
-  if (error.message.includes('Merkle root mismatch')) {
+  if (error instanceof CCIPMerkleRootMismatchError) {
     console.log('Merkle root mismatch - possible causes:')
     console.log('  - Messages in batch are incomplete')
     console.log('  - Wrong lane configuration')
@@ -198,7 +236,7 @@ try {
     const unvalidatedProof = calculateManualExecProof(
       messagesInBatch,
       request.lane,
-      request.message.header.messageId
+      request.message.messageId
     )
     console.log('Calculated root:', unvalidatedProof.merkleRoot)
     console.log('Expected root:', commit.report.merkleRoot)
@@ -206,15 +244,66 @@ try {
 }
 ```
 
-## Retry Logic
+## Structured Logging
 
-Implement retry logic for transient failures:
+Use `formatErrorForLogging` for production-ready structured logs:
 
 ```typescript
+import { CCIPError, formatErrorForLogging } from '@chainlink/ccip-sdk'
+
+try {
+  const requests = await chain.getMessagesInTx('0x1234...')
+} catch (error) {
+  if (CCIPError.isCCIPError(error)) {
+    // Format for structured logging (JSON-safe)
+    const logData = formatErrorForLogging(error)
+    console.log(JSON.stringify(logData, null, 2))
+    // {
+    //   "name": "CCIPTransactionNotFoundError",
+    //   "code": "TRANSACTION_NOT_FOUND",
+    //   "message": "Transaction not found: 0x1234...",
+    //   "isTransient": true,
+    //   "context": { "hash": "0x1234..." },
+    //   "recovery": "Wait for transaction to be indexed and retry"
+    // }
+  }
+}
+```
+
+You can also wrap unknown errors in `CCIPError` format:
+
+```typescript
+import { CCIPError } from '@chainlink/ccip-sdk'
+
+try {
+  await someOperation()
+} catch (error) {
+  // Wrap any error in CCIPError format
+  const ccipError = CCIPError.from(error)
+  console.log('Code:', ccipError.code) // 'UNKNOWN' if not a CCIP error
+}
+```
+
+## Retry Logic
+
+The SDK provides built-in utilities for handling transient failures. Each `CCIPError` has:
+
+- **`isTransient`** - Whether retry may succeed
+- **`retryAfterMs`** - Suggested retry delay
+- **`recovery`** - Human-readable recovery suggestion
+
+Use the SDK's `shouldRetry` and `getRetryDelay` utilities:
+
+```typescript
+import {
+  CCIPError,
+  shouldRetry,
+  getRetryDelay,
+} from '@chainlink/ccip-sdk'
+
 async function withRetry<T>(
   fn: () => Promise<T>,
-  maxRetries = 3,
-  delayMs = 1000
+  maxRetries = 3
 ): Promise<T> {
   let lastError: Error | undefined
 
@@ -224,17 +313,22 @@ async function withRetry<T>(
     } catch (error) {
       lastError = error as Error
 
-      // Don't retry on definitive failures
-      if (
-        error.message.includes('not found') ||
-        error.message.includes('invalid')
-      ) {
+      // Use SDK's built-in transient detection
+      if (!shouldRetry(error)) {
+        // Log recovery hint if available
+        if (CCIPError.isCCIPError(error) && error.recovery) {
+          console.log('Recovery hint:', error.recovery)
+        }
         throw error
       }
 
-      console.log(`Attempt ${attempt} failed, retrying in ${delayMs}ms...`)
-      await new Promise(resolve => setTimeout(resolve, delayMs))
-      delayMs *= 2 // Exponential backoff
+      // Use SDK's recommended delay (or default to exponential backoff)
+      const delay = CCIPError.isCCIPError(error)
+        ? getRetryDelay(error) ?? 5000
+        : 5000 * attempt
+
+      console.log(`Attempt ${attempt} failed, retrying in ${delay}ms...`)
+      await new Promise(resolve => setTimeout(resolve, delay))
     }
   }
 
@@ -242,9 +336,22 @@ async function withRetry<T>(
 }
 
 const request = await withRetry(() =>
-  chain.fetchCCIPRequestById(messageId, { address: onRamp })
+  chain.getMessageById(messageId, onRamp)
 )
 ```
+
+### Transient Error Codes
+
+The SDK marks these errors as transient (retry may succeed):
+
+| Error | Recommended Delay |
+|-------|------------------|
+| `BLOCK_NOT_FOUND` | 12s (wait for block) |
+| `MESSAGE_ID_NOT_FOUND` | 30s (indexing delay) |
+| `MESSAGE_NOT_FOUND_IN_TX` | 30s (indexing delay) |
+| `COMMIT_NOT_FOUND` | 60s (wait for DON) |
+| `HTTP_ERROR` | 5s (network issues) |
+| `USDC_ATTESTATION_FAILED` | 30s (attestation service) |
 
 ## Complete Recovery Example
 
@@ -252,20 +359,21 @@ const request = await withRetry(() =>
 import {
   EVMChain,
   fetchExecutionReceipts,
-  fetchAllMessagesInBatch,
   calculateManualExecProof,
   discoverOffRamp,
   ExecutionState,
 } from '@chainlink/ccip-sdk'
+import { Wallet } from 'ethers'
 
-async function recoverFailedMessage(sourceTxHash: string) {
+async function recoverFailedMessage(sourceTxHash: string, privateKey: string) {
   const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
   const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+  const wallet = new Wallet(privateKey)
 
   // Step 1: Get the request
-  const requests = await source.fetchRequestsInTx(sourceTxHash)
+  const requests = await source.getMessagesInTx(sourceTxHash)
   const request = requests[0]
-  console.log('Message ID:', request.message.header.messageId)
+  console.log('Message ID:', request.message.messageId)
 
   // Step 2: Find OffRamp
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
@@ -285,10 +393,7 @@ async function recoverFailedMessage(sourceTxHash: string) {
   }
 
   // Step 4: Get commit
-  const commit = await dest.fetchCommitReport(
-    offRamp,
-    request.message.header.sequenceNumber
-  )
+  const commit = await dest.fetchCommitReport(offRamp, request)
   if (!commit) {
     console.log('Not yet committed - wait for DON to commit')
     return { status: 'pending_commit' }
@@ -296,25 +401,26 @@ async function recoverFailedMessage(sourceTxHash: string) {
 
   // Step 5: Manual execution
   if (needsManualExecution) {
-    const messagesInBatch = await fetchAllMessagesInBatch(
-      source,
-      request,
-      commit.report
-    )
+    // Use chain method to fetch all messages in batch
+    const messagesInBatch = await source.fetchAllMessagesInBatch(request, commit.report)
 
     const proof = calculateManualExecProof(
       messagesInBatch,
       request.lane,
-      request.message.header.messageId,
+      request.message.messageId,
       commit.report.merkleRoot
     )
 
     console.log('Executing manually...')
-    const tx = await dest.executeReport(offRamp, {
-      ...proof,
-      message: request.message,
-      offchainTokenData: [],
-    })
+    const tx = await dest.executeReport(
+      offRamp,
+      {
+        ...proof,
+        message: request.message,
+        offchainTokenData: [],
+      },
+      { wallet }
+    )
 
     console.log('Manual execution tx:', tx.hash)
     return { status: 'manually_executed', tx: tx.hash }

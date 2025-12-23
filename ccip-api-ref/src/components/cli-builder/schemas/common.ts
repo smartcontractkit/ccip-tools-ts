@@ -16,7 +16,6 @@ export const walletOptions: OptionDefinition[] = [
     options: [
       { value: '', label: 'Default (env/keystore)' },
       { value: 'ledger', label: 'Ledger Hardware Wallet' },
-      { value: 'trezor', label: 'Trezor Hardware Wallet' },
     ],
   },
 ]
@@ -26,11 +25,13 @@ export const outputOptions: OptionDefinition[] = [
   {
     type: 'select',
     name: 'format',
+    alias: 'f',
     label: 'Output Format',
     description: 'Format for command output',
     group: 'output',
     options: [
-      { value: 'pretty', label: 'Pretty (human-readable)' },
+      { value: 'pretty', label: 'Pretty (human-readable tables)' },
+      { value: 'log', label: 'Log (console with details)' },
       { value: 'json', label: 'JSON (machine-readable)' },
     ],
     defaultValue: 'pretty',
@@ -38,8 +39,9 @@ export const outputOptions: OptionDefinition[] = [
   {
     type: 'boolean',
     name: 'verbose',
+    alias: 'v',
     label: 'Verbose',
-    description: 'Enable verbose logging',
+    description: 'Enable debug logging',
     group: 'output',
     defaultValue: false,
   },
@@ -50,6 +52,7 @@ export const rpcOptions: OptionDefinition[] = [
   {
     type: 'string',
     name: 'rpcs',
+    alias: 'r',
     label: 'RPC URLs',
     description: 'Comma-separated list of RPC URLs',
     group: 'output',

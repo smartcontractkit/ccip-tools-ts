@@ -305,9 +305,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @example
    * ```typescript
    * const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
-   * const requests = await chain.fetchRequestsInTx('0x123...')
+   * const requests = await chain.getMessagesInTx('0x123...')
    * for (const req of requests) {
-   *   console.log('Message ID:', req.message.header.messageId)
+   *   console.log('Message ID:', req.message.messageId)
    *   console.log('Destination:', req.lane.destChainSelector)
    * }
    * ```
@@ -527,7 +527,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *   { receiver: '0x...', data: '0x', tokenAmounts: [] },
    *   { wallet: myWallet }
    * )
-   * console.log('Message ID:', request.message.header.messageId)
+   * console.log('Message ID:', request.message.messageId)
    * ```
    * @see {@link getFee} - Get the fee before sending
    * @see {@link generateUnsignedSendMessage} - Generate unsigned transaction

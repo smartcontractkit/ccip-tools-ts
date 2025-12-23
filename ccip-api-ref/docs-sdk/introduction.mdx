@@ -60,9 +60,9 @@ const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
 console.log('Connected to:', chain.network.name)
 
 // Fetch CCIP requests from a transaction
-const requests = await chain.fetchRequestsInTx('0x...')
+const requests = await chain.getMessagesInTx('0x...')
 for (const req of requests) {
-  console.log('Message ID:', req.message.header.messageId)
+  console.log('Message ID:', req.message.messageId)
   console.log('Destination:', req.lane.destChainSelector)
 }
 ```
@@ -82,7 +82,7 @@ You need RPC endpoints for the chains you want to interact with. Node.js v20+ is
 | Task | Method | Reference |
 |------|--------|-----------|
 | Connect to chain | `EVMChain.fromUrl(rpcUrl)` | [EVMChain](/sdk/classes/EVMChain) |
-| Track message | `chain.fetchRequestsInTx(txHash)` | [fetchRequestsInTx](/sdk/interfaces/Chain#fetchrequestsintx) |
+| Track message | `chain.getMessagesInTx(txHash)` | [getMessagesInTx](/sdk/interfaces/Chain#getmessagesintx) |
 | Get fee | `chain.getFee(router, destChain, message)` | [getFee](/sdk/interfaces/Chain#getfee) |
 | Send message | `chain.sendMessage(router, destChain, message)` | [sendMessage](/sdk/interfaces/Chain#sendmessage) |
 | Manual execution | `calculateManualExecProof(request)` | [calculateManualExecProof](/sdk/functions/calculateManualExecProof) |
@@ -130,12 +130,13 @@ import {
 } from '@chainlink/ccip-sdk'
 
 try {
-  const requests = await chain.fetchRequestsInTx(txHash)
+  const requests = await chain.getMessagesInTx(txHash)
 } catch (error) {
   if (error instanceof CCIPMessageNotFoundInTxError) {
-    console.log('No CCIP messages in transaction:', error.txHash)
+    console.log('No CCIP messages in transaction')
+    console.log('Recovery hint:', error.recovery)
   } else if (error instanceof CCIPBlockNotFoundError) {
-    console.log('Block not found:', error.block)
+    console.log('Block not found:', error.context?.block)
   } else {
     throw error
   }
@@ -147,5 +148,5 @@ See [Error Handling](/sdk/guides/error-handling) for recovery patterns.
 ## Next Steps
 
 - [EVMChain](/sdk/classes/EVMChain) - EVM chain operations
-- [fetchRequestsForSender](/sdk/functions/fetchRequestsForSender) - Query by sender address
+- [getMessagesForSender](/sdk/functions/getMessagesForSender) - Query by sender address
 - [calculateManualExecProof](/sdk/functions/calculateManualExecProof) - Manual execution

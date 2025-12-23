@@ -33,14 +33,16 @@ export const manualExecSchema: CommandSchema<'manualExec'> = {
       description: 'Select specific message by log index',
       group: 'message',
       placeholder: '0',
+      pattern: /^\d+$/,
     },
     // Gas Options
     {
       type: 'string',
       name: 'gas-limit',
-      alias: 'L',
+      alias: ['L', 'compute-units'],
       label: 'Gas Limit',
-      description: 'Override gas limit for receiver callback (0 = original)',
+      description:
+        'Override gas limit for receiver callback (0 = original). Use --compute-units for Solana.',
       group: 'gas',
       placeholder: '500000',
     },
@@ -81,6 +83,16 @@ export const manualExecSchema: CommandSchema<'manualExec'> = {
       label: 'Clear Leftover Accounts',
       description: 'Clear buffers/tables from previous attempts',
       group: 'solana',
+    },
+    // Sui Options
+    {
+      type: 'array',
+      name: 'receiver-object-ids',
+      label: 'Receiver Object IDs',
+      description: 'Receiver object IDs for Sui execution',
+      group: 'sui',
+      itemType: 'string',
+      placeholder: '0xabc...',
     },
     // Queue Options
     {

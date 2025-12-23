@@ -26,19 +26,17 @@ import TabItem from '@theme/TabItem'
 
 ```typescript
 import { EVMChain } from '@chainlink/ccip-sdk'
+import { Wallet } from 'ethers'
 
 // From RPC URL
 const ethereum = await EVMChain.fromUrl('https://rpc.sepolia.org')
 const arbitrum = await EVMChain.fromUrl('https://sepolia-rollup.arbitrum.io/rpc')
 
-// With private key for signing
-const chain = await EVMChain.fromUrl(
-  'https://rpc.sepolia.org',
-  { privateKey: process.env.PRIVATE_KEY }
-)
+console.log('Connected to:', ethereum.network.name)
+console.log('Chain selector:', ethereum.network.chainSelector)
 
-console.log('Connected to:', chain.network.name)
-console.log('Chain selector:', chain.network.chainSelector)
+// Create wallet for signing (passed to sendMessage, not fromUrl)
+const wallet = new Wallet(process.env.PRIVATE_KEY!, ethereum.provider)
 ```
 
 </TabItem>
@@ -46,17 +44,17 @@ console.log('Chain selector:', chain.network.chainSelector)
 
 ```typescript
 import { SolanaChain } from '@chainlink/ccip-sdk'
+import { Keypair } from '@solana/web3.js'
+import { Wallet } from '@coral-xyz/anchor'
 
 // From RPC URL
 const solana = await SolanaChain.fromUrl('https://api.devnet.solana.com')
 
-// With keypair for signing
-const chain = await SolanaChain.fromUrl(
-  'https://api.devnet.solana.com',
-  { keypair: myKeypair }
-)
+console.log('Connected to:', solana.network.name)
 
-console.log('Connected to:', chain.network.name)
+// Create wallet for signing (passed to sendMessage, not fromUrl)
+const keypair = Keypair.fromSecretKey(/* your secret key */)
+const wallet = new Wallet(keypair)
 ```
 
 </TabItem>
@@ -82,7 +80,7 @@ All chain classes implement the `Chain` interface for chain-agnostic code:
 import { Chain, EVMChain, SolanaChain } from '@chainlink/ccip-sdk'
 
 async function trackMessage(chain: Chain, txHash: string) {
-  const requests = await chain.fetchRequestsInTx(txHash)
+  const requests = await chain.getMessagesInTx(txHash)
   return requests
 }
 
@@ -113,10 +111,11 @@ const message = {
   feeToken: '0x' + '0'.repeat(40),
   extraArgs: encodeExtraArgs({
     _tag: 'SVMExtraArgsV1',
-    computeUnits: 200000,
+    computeUnits: 200000n,                      // Compute units (bigint)
     accountIsWritableBitmap: 0n,
     allowOutOfOrderExecution: true,
-    accounts: [],
+    tokenReceiver: solanaReceiver,              // Token receiver on Solana
+    accounts: [],                                // Additional accounts for CPI
   }),
 }
 
@@ -127,7 +126,7 @@ const fee = await source.getFee(source.network.router, destSelector, message)
 ### Solana to EVM
 
 ```typescript
-import { SolanaChain, encodeExtraArgs, networkInfo } from '@chainlink/ccip-sdk'
+import { SolanaChain, encodeExtraArgs, networkInfo, ChainFamily } from '@chainlink/ccip-sdk'
 
 const source = await SolanaChain.fromUrl('https://api.devnet.solana.com')
 
@@ -135,11 +134,12 @@ const message = {
   receiver: '0xEVMReceiverAddress...',
   data: Buffer.from('hello'),
   tokenAmounts: [],
+  // Solana uses different encoding format (uint128 vs uint256)
   extraArgs: encodeExtraArgs({
     _tag: 'EVMExtraArgsV2',
     gasLimit: 200000n,
     allowOutOfOrderExecution: false,
-  }),
+  }, ChainFamily.Solana),
 }
 
 const destSelector = networkInfo('ethereum-testnet-sepolia').chainSelector
@@ -197,7 +197,7 @@ import { AptosChain } from '@chainlink/ccip-sdk'
 
 const chain = await AptosChain.fromUrl('https://fullnode.testnet.aptoslabs.com/v1')
 
-const requests = await chain.fetchRequestsInTx('0xAptosTransactionHash...')
+const requests = await chain.getMessagesInTx('0xAptosTransactionHash...')
 ```
 
 ## Network Information
@@ -250,7 +250,7 @@ async function getChain(networkName: string): Promise<Chain> {
 
 async function trackAnyMessage(networkName: string, txHash: string) {
   const chain = await getChain(networkName)
-  const requests = await chain.fetchRequestsInTx(txHash)
+  const requests = await chain.getMessagesInTx(txHash)
 
   console.log('Found', requests.length, 'messages on', networkName)
   return requests
@@ -296,9 +296,9 @@ async function trackCrossChainMessage(
 
   console.log(`Tracking ${sourceNetwork} -> ${destNetwork}`)
 
-  const requests = await source.fetchRequestsInTx(sourceTxHash)
+  const requests = await source.getMessagesInTx(sourceTxHash)
   const request = requests[0]
-  console.log('Message ID:', request.message.header.messageId)
+  console.log('Message ID:', request.message.messageId)
 
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
   console.log('OffRamp:', offRamp)

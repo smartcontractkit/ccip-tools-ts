@@ -32,8 +32,10 @@ Send arbitrary data to a contract on another chain:
 
 ```typescript
 import { EVMChain, encodeExtraArgs, networkInfo } from '@chainlink/ccip-sdk'
+import { Wallet } from 'ethers'
 import { toHex } from 'viem'
 
+const wallet = new Wallet(process.env.PRIVATE_KEY!)
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
 const message = {
@@ -54,8 +56,15 @@ const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
 const fee = await source.getFee(router, destSelector, message)
 console.log('Fee:', fee, 'wei')
 
-const tx = await source.sendMessage(router, destSelector, message, { value: fee })
-console.log('Sent in tx:', tx.hash)
+// Include fee in message and provide wallet for signing
+const request = await source.sendMessage(
+  router,
+  destSelector,
+  { ...message, fee },
+  { wallet }
+)
+console.log('Sent in tx:', request.tx.hash)
+console.log('Message ID:', request.message.messageId)
 ```
 
 ## Token Transfer
@@ -64,7 +73,9 @@ Transfer tokens cross-chain:
 
 ```typescript
 import { EVMChain, encodeExtraArgs, networkInfo } from '@chainlink/ccip-sdk'
+import { Wallet } from 'ethers'
 
+const wallet = new Wallet(process.env.PRIVATE_KEY!)
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
 const LINK_TOKEN = '0x779877A7B0D9E8603169DdbD7836e478b4624789' // LINK on Sepolia
@@ -92,11 +103,17 @@ const router = source.network.router
 const fee = await source.getFee(router, destSelector, message)
 console.log('Fee:', fee, 'LINK wei')
 
-// Ensure LINK allowance is set for router before sending
-const tx = await source.sendMessage(router, destSelector, message)
+// SDK handles token approvals automatically via approveMax option
+const request = await source.sendMessage(
+  router,
+  destSelector,
+  { ...message, fee },
+  { wallet, approveMax: true }
+)
+console.log('Sent in tx:', request.tx.hash)
 ```
 
-Before sending tokens, approve the Router contract to spend your tokens. `sendMessage` fails if allowance is insufficient.
+Before sending tokens, ensure you have approved the Router contract to spend your tokens, or use `approveMax: true` to auto-approve.
 
 ## Extra Arguments
 
@@ -130,10 +147,11 @@ import { encodeExtraArgs } from '@chainlink/ccip-sdk'
 
 const extraArgs = encodeExtraArgs({
   _tag: 'SVMExtraArgsV1',
-  computeUnits: 200000,
+  computeUnits: 200000n,                      // Compute units (bigint)
   accountIsWritableBitmap: 0n,
   allowOutOfOrderExecution: true,
-  accounts: [], // Additional accounts for CPI
+  tokenReceiver: 'SolanaReceiverAddress...',  // Token receiver on Solana
+  accounts: [],                                // Additional accounts for CPI
 })
 ```
 
@@ -171,19 +189,29 @@ Generate unsigned transactions for offline signing or multi-sig wallets:
 import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
 
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const senderAddress = '0xYourWalletAddress...'
 
-const { tx, fee } = await source.generateUnsignedSendMessage(
+const router = source.network.router
+const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+
+// Get fee first
+const fee = await source.getFee(router, destSelector, message)
+
+// Generate unsigned transaction (sender address is required)
+const unsignedTx = await source.generateUnsignedSendMessage(
+  senderAddress,  // sender address
   router,
   destSelector,
-  message
+  { ...message, fee }
 )
 
-console.log('Unsigned tx:', tx)
-console.log('Required fee:', fee)
+console.log('Unsigned transactions:', unsignedTx.transactions)
 
 // Sign and send with your preferred method
-// const signedTx = await wallet.signTransaction(tx)
-// const hash = await source.provider.sendTransaction(signedTx)
+// for (const tx of unsignedTx.transactions) {
+//   const signedTx = await wallet.signTransaction(tx)
+//   await source.provider.broadcastTransaction(signedTx)
+// }
 ```
 
 ## Complete Example
@@ -196,13 +224,12 @@ import {
   encodeExtraArgs,
   networkInfo
 } from '@chainlink/ccip-sdk'
+import { Wallet } from 'ethers'
 import { toHex, parseEther } from 'viem'
 
 async function sendCrossChainMessage() {
-  const source = await EVMChain.fromUrl(
-    'https://rpc.sepolia.org',
-    { privateKey: process.env.PRIVATE_KEY }
-  )
+  const wallet = new Wallet(process.env.PRIVATE_KEY!)
+  const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
   const router = source.network.router
   const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
@@ -230,19 +257,18 @@ async function sendCrossChainMessage() {
   // Add 10% buffer for gas price fluctuations
   const feeWithBuffer = (fee * 110n) / 100n
 
-  const tx = await source.sendMessage(
+  // sendMessage returns CCIPRequest containing tx and message info
+  const request = await source.sendMessage(
     router,
     destSelector,
-    message,
-    { value: feeWithBuffer }
+    { ...message, fee: feeWithBuffer },
+    { wallet, approveMax: true }
   )
 
-  console.log('Transaction hash:', tx.hash)
+  console.log('Transaction hash:', request.tx.hash)
+  console.log('Message ID:', request.message.messageId)
 
-  const requests = await source.fetchRequestsInTx(tx.hash)
-  console.log('Message ID:', requests[0].message.header.messageId)
-
-  return requests[0]
+  return request
 }
 ```
 

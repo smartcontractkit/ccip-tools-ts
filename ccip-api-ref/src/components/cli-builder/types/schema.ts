@@ -20,8 +20,8 @@ export interface BaseOption<T extends OptionType = OptionType> {
   type: T
   /** CLI flag name (e.g., 'receiver' for --receiver) */
   name: string
-  /** Short alias (e.g., 'R' for -R) */
-  alias?: string
+  /** Short alias (e.g., 'R' for -R) or multiple aliases */
+  alias?: string | string[]
   /** Display label in the UI */
   label: string
   /** Help text shown below input */

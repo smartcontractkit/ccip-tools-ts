@@ -43,7 +43,7 @@ import {
  * import { calculateManualExecProof, EVMChain } from '@chainlink/ccip-sdk'
  *
  * // Fetch the request and all messages in its batch
- * const request = (await source.fetchRequestsInTx(txHash))[0]
+ * const request = (await source.getMessagesInTx(txHash))[0]
  * const commit = await dest.fetchCommitReport(commitStore, request)
  * const messages = await source.fetchAllMessagesInBatch(request, commit.report)
  *
@@ -51,7 +51,7 @@ import {
  * const proof = calculateManualExecProof(
  *   messages,
  *   request.lane,
- *   request.message.header.messageId,
+ *   request.message.messageId,
  *   commit.report.merkleRoot
  * )
  * console.log('Merkle root:', proof.merkleRoot)

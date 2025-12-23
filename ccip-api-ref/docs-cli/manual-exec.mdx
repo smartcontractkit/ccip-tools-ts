@@ -59,6 +59,12 @@ The `manualExec` command allows you to manually trigger the execution of a CCIP 
 | `--force-lookup-table`      | boolean | `false` | Create a lookup table for accounts to fit in transaction.   |
 | `--clear-leftover-accounts` | boolean | `false` | Clear buffers or lookup tables from previous attempts.      |
 
+### Sui-Specific Options
+
+| Option                  | Type     | Default | Description                                           |
+| ----------------------- | -------- | ------- | ----------------------------------------------------- |
+| `--receiver-object-ids` | string[] | -       | Receiver object IDs for Sui execution on destination. |
+
 ### Queue Execution
 
 | Option           | Type    | Default | Description                                                                                |

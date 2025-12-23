@@ -21,59 +21,57 @@ A CCIP message passes through three stages:
 
 ## By Transaction Hash
 
-Use `fetchRequestsInTx` when you have the source transaction hash. This is the fastest method.
+Use `getMessagesInTx` when you have the source transaction hash. This is the fastest method.
 
 ```typescript
 import { EVMChain } from '@chainlink/ccip-sdk'
 
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
-const requests = await source.fetchRequestsInTx('0x1234...')
+const requests = await source.getMessagesInTx('0x1234...')
 
 for (const request of requests) {
-  console.log('Message ID:', request.message.header.messageId)
-  console.log('Sequence Number:', request.message.header.sequenceNumber)
+  console.log('Message ID:', request.message.messageId)
+  console.log('Sequence Number:', request.message.sequenceNumber)
   console.log('Destination:', request.lane.destChainSelector)
 }
 ```
 
 ## By Message ID
 
-Use `fetchCCIPRequestById` when you only have the message ID. Provide the `address` hint (OnRamp address) to improve performance.
+Use `getMessageById` when you only have the message ID. Provide the `address` hint (OnRamp address) to improve performance.
 
 ```typescript
 import { EVMChain } from '@chainlink/ccip-sdk'
 
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
-const request = await source.fetchCCIPRequestById(
-  '0xabcd1234...',  // messageId
-  {
-    address: '0x...',  // OnRamp address (recommended)
-    page: 10000        // Block range per page
-  }
+const request = await source.getMessageById(
+  '0xabcd1234...',   // messageId
+  '0xOnRampAddr...', // OnRamp address (recommended for performance)
+  { page: 10000 }    // Block range per page
 )
 
 console.log('Found message in tx:', request.tx.hash)
 ```
 
-Without the `address` hint, the search scans all OnRamp contracts and can be slow.
+Without the OnRamp address hint, the search scans all OnRamp contracts and can be slow.
 
 ## By Sender Address
 
-Use `fetchRequestsForSender` to find all messages from a specific sender:
+Use `getMessagesForSender` to find all messages from a specific sender:
 
 ```typescript
-import { EVMChain, fetchRequestsForSender } from '@chainlink/ccip-sdk'
+import { EVMChain, getMessagesForSender } from '@chainlink/ccip-sdk'
 
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
-for await (const request of fetchRequestsForSender(
+for await (const request of getMessagesForSender(
   source,
   '0xSenderAddress...',
   { startBlock: 1000000 }
 )) {
-  console.log('Message ID:', request.message.header.messageId)
+  console.log('Message ID:', request.message.messageId)
   console.log('Sent to:', request.lane.destChainSelector)
 }
 ```
@@ -88,15 +86,12 @@ import { EVMChain, discoverOffRamp } from '@chainlink/ccip-sdk'
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
 const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
 
-const requests = await source.fetchRequestsInTx('0x1234...')
+const requests = await source.getMessagesInTx('0x1234...')
 const request = requests[0]
 
 const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
 
-const commit = await dest.fetchCommitReport(
-  offRamp,
-  request.message.header.sequenceNumber
-)
+const commit = await dest.fetchCommitReport(offRamp, request)
 
 if (commit) {
   console.log('Committed at block:', commit.log.blockNumber)
@@ -150,18 +145,15 @@ async function trackMessage(sourceTxHash: string) {
 
   // Stage 1: Get sent message
   console.log('Fetching sent message...')
-  const requests = await source.fetchRequestsInTx(sourceTxHash)
+  const requests = await source.getMessagesInTx(sourceTxHash)
   const request = requests[0]
-  console.log('Message ID:', request.message.header.messageId)
+  console.log('Message ID:', request.message.messageId)
 
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
 
   // Stage 2: Check commit status
   console.log('Checking commit status...')
-  const commit = await dest.fetchCommitReport(
-    offRamp,
-    request.message.header.sequenceNumber
-  )
+  const commit = await dest.fetchCommitReport(offRamp, request)
 
   if (!commit) {
     console.log('Status: Pending commit')

@@ -4,7 +4,7 @@
  * Defines the schema for the `ccip-cli send` command.
  */
 
-import { outputOptions, walletOptions } from './common.ts'
+import { outputOptions, rpcOptions, walletOptions } from './common.ts'
 import type { CommandSchema } from '../types/index.ts'
 
 export const sendSchema: CommandSchema<'send'> = {
@@ -87,9 +87,10 @@ export const sendSchema: CommandSchema<'send'> = {
     {
       type: 'string',
       name: 'gas-limit',
-      alias: 'L',
+      alias: ['L', 'compute-units'],
       label: 'Gas Limit',
-      description: 'Gas limit for receiver callback (0 = default ~200k)',
+      description:
+        'Gas limit for receiver callback (0 = default ~200k). Use --compute-units for Solana.',
       group: 'gas',
       placeholder: '200000',
     },
@@ -157,6 +158,18 @@ export const sendSchema: CommandSchema<'send'> = {
       description: 'Print gas estimate and exit without sending',
       group: 'output',
     },
+
+    // Execution Options
+    {
+      type: 'boolean',
+      name: 'wait',
+      label: 'Wait for Execution',
+      description: 'Wait for finality, commit, and first execution before returning',
+      group: 'output',
+    },
+
+    // RPC Options
+    ...rpcOptions,
 
     // Output Options
     ...outputOptions,

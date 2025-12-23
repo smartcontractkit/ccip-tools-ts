@@ -44,11 +44,11 @@ The `send` command constructs and submits a CCIP message to transfer data and/or
 
 ### Gas Options
 
-| Option                      | Alias   | Type    | Default | Description                                                                                      |
-| --------------------------- | ------- | ------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `--gas-limit`               | `-L`    | number  | `0`     | Gas limit for receiver callback. `0` uses ramp default (~200k).                                  |
-| `--estimate-gas-limit`      | -       | number  | -       | Estimate gas limit with a percentage margin (e.g., `10` for +10%). Conflicts with `--gas-limit`. |
-| `--allow-out-of-order-exec` | `--ooo` | boolean | `false` | Allow out-of-order execution. Required for some destinations. Only v1.5+ lanes.                  |
+| Option                      | Alias                   | Type    | Default | Description                                                                                       |
+| --------------------------- | ----------------------- | ------- | ------- | ------------------------------------------------------------------------------------------------- |
+| `--gas-limit`               | `-L`, `--compute-units` | number  | `0`     | Gas limit for receiver callback. `0` uses ramp default (~200k). Use `--compute-units` for Solana. |
+| `--estimate-gas-limit`      | -                       | number  | -       | Estimate gas limit with a percentage margin (e.g., `10` for +10%). Conflicts with `--gas-limit`.  |
+| `--allow-out-of-order-exec` | `--ooo`                 | boolean | `false` | Allow out-of-order execution. Required for some destinations. Only v1.5+ lanes.                   |
 
 <Callout type="warning" title="Gas Limit">
   Setting `--gas-limit 0` uses the ramp default (~200k). If your receiver contract requires more
