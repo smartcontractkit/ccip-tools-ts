@@ -163,7 +163,7 @@ describe('TON index unit tests', () => {
         TON_OFFRAMP_ADDRESS_TEST,
         'should send to offRamp address',
       )
-      assert.equal(captured.messages[0].value, toNano('0.2'), 'should send 0.2 TON for gas')
+      assert.equal(captured.messages[0].value, toNano('0.3'), 'should send 0.3 TON for gas')
     })
 
     it('should build Cell body with MANUALLY_EXECUTE_OPCODE', async () => {
@@ -652,6 +652,229 @@ describe('TON index unit tests', () => {
       assert.equal(TONChain.isTxHash('0x' + 'g'.repeat(64)), false) // invalid hex
       assert.equal(TONChain.isTxHash(123), false)
       assert.equal(TONChain.isTxHash(null), false)
+    })
+  })
+
+  describe('fetchExecutionReceipts override', () => {
+    const mockNetworkInfo = {
+      family: ChainFamily.TON,
+      chainSelector: 13879075125137744094n,
+      chainId: 'ton-testnet',
+      name: 'TON Testnet',
+      isTestnet: true,
+    }
+
+    const TEST_MESSAGE_ID = '0x' + '1'.repeat(64)
+    const TEST_SOURCE_CHAIN_SELECTOR = 16015286601757825753n
+    const TEST_OFFRAMP = '0:9f2e995aebceb97ae094dbe4cf973cbc8a402b4f0ac5287a00be8aca042d51b9'
+
+    // Helper to create a valid ExecutionStateChanged BOC cell
+    function createExecutionStateChangedCell(state: number) {
+      return beginCell()
+        .storeUint(TEST_SOURCE_CHAIN_SELECTOR, 64) // sourceChainSelector
+        .storeUint(1n, 64) // sequenceNumber
+        .storeUint(BigInt(TEST_MESSAGE_ID), 256) // messageId
+        .storeUint(state, 8) // state
+        .endCell()
+    }
+
+    // Helper to create a mock transaction with external-out message containing ExecutionStateChanged
+    function createMockTransaction(state: number, lt: number, timestamp?: number) {
+      const cell = createExecutionStateChangedCell(state)
+      const txHash = Buffer.alloc(32)
+      txHash.fill(lt % 256) // Different hash per lt
+
+      return {
+        tx: {
+          lt: BigInt(lt),
+          hash: () => txHash,
+          now: timestamp ?? Math.floor(Date.now() / 1000),
+          outMessages: {
+            values: () => [
+              {
+                info: { type: 'external-out' as const },
+                body: cell,
+              },
+            ],
+          },
+        },
+      }
+    }
+
+    function createMockClient(transactions: ReturnType<typeof createMockTransaction>[]) {
+      // Sort by lt descending (newest first) to match TON API behavior
+      const sortedTxs = [...transactions].sort((a, b) => Number(b.tx.lt) - Number(a.tx.lt))
+      const latestTx = sortedTxs[0]
+
+      let callCount = 0
+      return {
+        getLastBlock: async () => ({
+          last: { seqno: 12345678 },
+          now: Math.floor(Date.now() / 1000),
+        }),
+        getAccountLite: async () => ({
+          account: {
+            last: {
+              lt: latestTx.tx.lt.toString(),
+              hash: latestTx.tx.hash().toString('base64'),
+            },
+          },
+        }),
+        getAccountTransactions: async () => {
+          // First call returns all transactions, subsequent calls return empty (end of history)
+          if (callCount++ === 0) {
+            return sortedTxs
+          }
+          return []
+        },
+      } as unknown as TonClient4
+    }
+
+    const baseRequest = {
+      lane: { sourceChainSelector: TEST_SOURCE_CHAIN_SELECTOR },
+      message: { messageId: TEST_MESSAGE_ID },
+      tx: { timestamp: 0 },
+    }
+
+    it('should filter out Untouched state (0)', async () => {
+      const mockClient = createMockClient([
+        createMockTransaction(0, 1000), // Untouched - should be filtered
+        createMockTransaction(2, 1001), // Success - should be yielded
+      ])
+
+      const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
+
+      const receipts = []
+      for await (const receipt of tonChain.fetchExecutionReceipts(
+        TEST_OFFRAMP,
+        baseRequest as any,
+      )) {
+        receipts.push(receipt)
+      }
+
+      // Should only have Success, not Untouched
+      assert.equal(receipts.length, 1, 'Should have exactly 1 receipt')
+      assert.equal(receipts[0].receipt.state, 2, 'Receipt state should be Success (2)')
+    })
+
+    it('should filter out InProgress state (1)', async () => {
+      const mockClient = createMockClient([
+        createMockTransaction(1, 1000), // InProgress - should be filtered
+        createMockTransaction(3, 1001), // Failure - should be yielded
+      ])
+
+      const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
+
+      const receipts = []
+      for await (const receipt of tonChain.fetchExecutionReceipts(
+        TEST_OFFRAMP,
+        baseRequest as any,
+      )) {
+        receipts.push(receipt)
+      }
+
+      // Should only have Failure, not InProgress
+      assert.equal(receipts.length, 1, 'Should have exactly 1 receipt')
+      assert.equal(receipts[0].receipt.state, 3, 'Receipt state should be Failure (3)')
+    })
+
+    it('should yield both Success and Failure states', async () => {
+      // Create transactions with timestamps in the past
+      const pastTimestamp = 100 // Fixed timestamp for deterministic testing
+
+      const mockClient = createMockClient([
+        createMockTransaction(3, 1000, pastTimestamp), // Failure
+        createMockTransaction(2, 1001, pastTimestamp + 1), // Success
+      ])
+
+      const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
+
+      // Use startTime before the mock transactions so they are included
+      const request = {
+        lane: { sourceChainSelector: TEST_SOURCE_CHAIN_SELECTOR },
+        message: { messageId: TEST_MESSAGE_ID },
+        tx: { timestamp: pastTimestamp - 10 }, // Before mock tx timestamps
+      }
+
+      const receipts = []
+      for await (const receipt of tonChain.fetchExecutionReceipts(TEST_OFFRAMP, request as any)) {
+        receipts.push(receipt)
+      }
+
+      // Should have both Failure and Success
+      assert.equal(receipts.length, 2, 'Should have exactly 2 receipts')
+      const states = receipts.map((r) => r.receipt.state)
+      assert.ok(states.includes(2), 'Should include Success state (2)')
+      assert.ok(states.includes(3), 'Should include Failure state (3)')
+    })
+
+    it('should filter by messageId', async () => {
+      // Create a cell with a different messageId
+      const otherMessageIdCell = beginCell()
+        .storeUint(TEST_SOURCE_CHAIN_SELECTOR, 64)
+        .storeUint(1n, 64)
+        .storeUint(BigInt('0x' + '2'.repeat(64)), 256) // Different messageId
+        .storeUint(2, 8) // Success
+        .endCell()
+
+      // Create transactions: one with matching messageId, one with different
+      const matchingTx = createMockTransaction(2, 1000) // Matching messageId - should be yielded
+      const otherTx = {
+        tx: {
+          lt: BigInt(999),
+          hash: () => Buffer.alloc(32, 0x99),
+          now: Math.floor(Date.now() / 1000),
+          outMessages: {
+            values: () => [
+              {
+                info: { type: 'external-out' as const },
+                body: otherMessageIdCell,
+              },
+            ],
+          },
+        },
+      }
+
+      // Sort by lt descending (newest first)
+      const sortedTxs = [matchingTx, otherTx].sort((a, b) => Number(b.tx.lt) - Number(a.tx.lt))
+      const latestTx = sortedTxs[0]
+
+      let callCount = 0
+      const mockClient = {
+        getLastBlock: async () => ({
+          last: { seqno: 12345678 },
+          now: Math.floor(Date.now() / 1000),
+        }),
+        getAccountLite: async () => ({
+          account: {
+            last: {
+              lt: latestTx.tx.lt.toString(),
+              hash: latestTx.tx.hash().toString('base64'),
+            },
+          },
+        }),
+        getAccountTransactions: async () => {
+          // First call returns all transactions, subsequent calls return empty
+          if (callCount++ === 0) {
+            return sortedTxs
+          }
+          return []
+        },
+      } as unknown as TonClient4
+
+      const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
+
+      const receipts = []
+      for await (const receipt of tonChain.fetchExecutionReceipts(
+        TEST_OFFRAMP,
+        baseRequest as any,
+      )) {
+        receipts.push(receipt)
+      }
+
+      // Should only have the one with matching messageId
+      assert.equal(receipts.length, 1, 'Should have exactly 1 receipt')
+      assert.equal(receipts[0].receipt.messageId, TEST_MESSAGE_ID)
     })
   })
 })

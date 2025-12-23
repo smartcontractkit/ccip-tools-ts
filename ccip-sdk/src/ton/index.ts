@@ -1,6 +1,6 @@
 import { Address, Cell, beginCell, toNano } from '@ton/core'
 import { TonClient4, internal } from '@ton/ton'
-import { type BytesLike, getAddress as checksumAddress, isBytesLike } from 'ethers'
+import { type BytesLike, getAddress as checksumAddress, isBytesLike, toBeHex } from 'ethers'
 import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
@@ -20,6 +20,8 @@ import { getMessagesInTx } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
+  type CCIPCommit,
+  type CCIPExecution,
   type CCIPRequest,
   type ChainTransaction,
   type CommitReport,
@@ -31,12 +33,12 @@ import {
   type OffchainTokenData,
   type WithLogger,
   ChainFamily,
+  ExecutionState,
 } from '../types.ts'
 import {
   bytesToBuffer,
   createRateLimitedFetch,
   decodeAddress,
-  getDataBytes,
   networkInfo,
   parseTypeAndVersion,
 } from '../utils.ts'
@@ -301,6 +303,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const decoders: LogDecoders = {
       tryDecodeAsMessage: (log) => TONChain.decodeMessage(log),
       tryDecodeAsCommit: (log) => TONChain.decodeCommits(log as Log_),
+      tryDecodeAsReceipt: (log) => TONChain.decodeReceipt(log as Log_),
     }
     yield* fetchLogs(this.provider, opts, this.ltTimestampCache, decoders)
   }
@@ -486,7 +489,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
     try {
       // Parse BOC from base64
-      const boc = Buffer.from(log.data, 'base64')
+      const boc = bytesToBuffer(log.data)
       const cell = Cell.fromBoc(boc)[0]
       const slice = cell.beginParse()
 
@@ -494,7 +497,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       // Structure from TVM2AnyRampMessage:
       // header: RampMessageHeader + sender: address + body: Cell + feeValueJuels: uint96
       const header = {
-        messageId: '0x' + slice.loadUintBig(256).toString(16).padStart(64, '0'),
+        messageId: toBeHex(slice.loadUintBig(256), 32),
         sourceChainSelector: slice.loadUintBig(64),
         destChainSelector: slice.loadUintBig(64),
         sequenceNumber: slice.loadUintBig(64),
@@ -623,7 +626,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   static decodeExtraArgs(
     extraArgs: BytesLike,
   ): (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' }) | undefined {
-    const data = Buffer.from(getDataBytes(extraArgs))
+    const data = bytesToBuffer(extraArgs)
 
     try {
       // Parse BOC format to extract cell data
@@ -656,7 +659,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     if (!log.data || typeof log.data !== 'string') return undefined
 
     try {
-      const boc = Buffer.from(log.data, 'base64')
+      const boc = bytesToBuffer(log.data)
       const cell = Cell.fromBoc(boc)[0]
       const slice = cell.beginParse()
 
@@ -680,7 +683,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const onRampBytes = slice.loadBuffer(onRampLen)
       const minSeqNr = slice.loadUintBig(64)
       const maxSeqNr = slice.loadUintBig(64)
-      const merkleRoot = '0x' + slice.loadUintBig(256).toString(16).padStart(64, '0')
+      const merkleRoot = toBeHex(slice.loadUintBig(256), 32)
 
       // Read hasPriceUpdates (1 bit): we don't need the data but should consume it
       if (slice.remainingBits >= 1) {
@@ -712,11 +715,68 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
   /**
    * Decodes an execution receipt from a TON log event.
-   * @param _log - Log with data field.
+   *
+   * The ExecutionStateChanged event structure (topic is in message header, not body):
+   * - sourceChainSelector: uint64 (8 bytes)
+   * - sequenceNumber: uint64 (8 bytes)
+   * - messageId: uint256 (32 bytes)
+   * - state: uint8 (1 byte) - Untouched=0, InProgress=1, Success=2, Failure=3
+   *
+   * @param log - Log with data field (base64-encoded BOC).
    * @returns ExecutionReceipt or undefined if not valid.
    */
-  static decodeReceipt(_log: Log_): ExecutionReceipt | undefined {
-    throw new CCIPNotImplementedError('decodeReceipt')
+  static decodeReceipt({ data }: Pick<Log_, 'data'>): ExecutionReceipt | undefined {
+    if (!data || typeof data !== 'string') return undefined
+
+    try {
+      const boc = bytesToBuffer(data)
+      const cell = Cell.fromBoc(boc)[0]
+      const slice = cell.beginParse()
+
+      // ExecutionStateChanged has no refs
+      if (cell.refs.length > 0) return undefined
+
+      // Cell body contains only the struct fields
+      // ExecutionStateChanged: sourceChainSelector(64) + sequenceNumber(64) + messageId(256) + state(8)
+      const sourceChainSelector = slice.loadUintBig(64)
+      const sequenceNumber = slice.loadUintBig(64)
+      const messageId = toBeHex(slice.loadUintBig(256), 32)
+      const state = slice.loadUint(8) as ExecutionState
+
+      // Validate state is a valid ExecutionState (0-3)
+      if (state > 3) return undefined
+
+      return {
+        messageId,
+        sequenceNumber,
+        sourceChainSelector,
+        state: state,
+      }
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   *
+   * TON override: Only yields final execution states (Success or Failure).
+   * TON emits ExecutionStateChanged for each state transition (Untouched → InProgress → Success),
+   * but we only care about final states (Success or Failure), not intermediate ones.
+   */
+  override async *fetchExecutionReceipts(
+    offRamp: string,
+    request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
+    commit?: CCIPCommit,
+    hints?: Pick<LogFilter, 'page' | 'watch'>,
+  ): AsyncIterableIterator<CCIPExecution> {
+    for await (const execution of super.fetchExecutionReceipts(offRamp, request, commit, hints)) {
+      if (
+        execution.receipt.state === ExecutionState.Success ||
+        execution.receipt.state === ExecutionState.Failed
+      ) {
+        yield execution
+      }
+    }
   }
 
   /**
@@ -930,7 +990,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       messages: [
         internal({
           to: unsigned.to,
-          value: toNano('0.2'), // TODO: FIXME: estimate proper value for execution costs instead of hardcoding.
+          value: toNano('0.3'), // TODO: FIXME: estimate proper value for execution costs instead of hardcoding.
           body: unsigned.body,
         }),
       ],
