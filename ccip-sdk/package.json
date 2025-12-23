@@ -6,6 +6,7 @@
   "license": "MIT",
   "repository": "git://github.com/smartcontractkit/ccip-tools-ts.git",
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
