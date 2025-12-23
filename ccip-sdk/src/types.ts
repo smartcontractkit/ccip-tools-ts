@@ -200,6 +200,42 @@ export const ExecutionState = {
 export type ExecutionState = (typeof ExecutionState)[keyof typeof ExecutionState]
 
 /**
+ * CCIP message lifecycle status.
+ * Represents the current state of a cross-chain message.
+ */
+export const MessageStatus = {
+  /** Message sent on source chain, pending finalization. */
+  Sent: 'SENT',
+  /** Source chain transaction finalized. */
+  SourceFinalized: 'SOURCE_FINALIZED',
+  /** Commit report accepted on destination chain. */
+  Committed: 'COMMITTED',
+  /** Commit blessed by Risk Management Network. */
+  Blessed: 'BLESSED',
+  /** Message executed successfully on destination. */
+  Success: 'SUCCESS',
+  /** Message execution failed on destination. */
+  Failed: 'FAILED',
+} as const
+/** Type representing a CCIP message lifecycle status. */
+export type MessageStatus = (typeof MessageStatus)[keyof typeof MessageStatus]
+
+/**
+ * Intent operation status for cross-chain swaps/bridges.
+ * Represents the current state of an intent.
+ */
+export const IntentStatus = {
+  /** Intent created, awaiting fulfillment. */
+  Pending: 'PENDING',
+  /** Intent fulfilled successfully. */
+  Completed: 'COMPLETED',
+  /** Intent failed. */
+  Failed: 'FAILED',
+} as const
+/** Type representing an intent operation status. */
+export type IntentStatus = (typeof IntentStatus)[keyof typeof IntentStatus]
+
+/**
  * Receipt of a CCIP message execution on the destination chain.
  */
 export type ExecutionReceipt = {

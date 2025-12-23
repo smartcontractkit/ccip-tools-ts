@@ -7,7 +7,7 @@ import { type BytesLike, AbiCoder, hexlify, isBytesLike } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { AptosChain } from '../aptos/index.ts'
-import { type LogFilter, Chain } from '../chain.ts'
+import { type ChainContext, type LogFilter, Chain } from '../chain.ts'
 import {
   CCIPContractNotRouterError,
   CCIPDataFormatUnsupportedError,
@@ -89,7 +89,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @param client - Sui client for interacting with the Sui network.
    * @param network - Network information for this chain.
    */
-  constructor(client: SuiClient, network: NetworkInfo<typeof ChainFamily.Sui>, ctx?: WithLogger) {
+  constructor(client: SuiClient, network: NetworkInfo<typeof ChainFamily.Sui>, ctx?: ChainContext) {
     super(network, ctx)
 
     this.client = client
@@ -120,7 +120,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @param url - HTTP or WebSocket endpoint URL for the Sui network.
    * @returns A new SuiChain instance.
    */
-  static async fromUrl(url: string, ctx?: WithLogger): Promise<SuiChain> {
+  static async fromUrl(url: string, ctx?: ChainContext): Promise<SuiChain> {
     const client = new SuiClient({ url })
 
     // Get chain identifier from the client and map to network info format
@@ -245,9 +245,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
   }
 
-  /** {@inheritDoc Chain.fetchRequestsInTx} */
-  override async fetchRequestsInTx(_tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.fetchRequestsInTx'))
+  /** {@inheritDoc Chain.getMessagesInTx} */
+  override async getMessagesInTx(_tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+    return Promise.reject(new CCIPNotImplementedError('SuiChain.getMessagesInTx'))
   }
 
   /** {@inheritDoc Chain.fetchAllMessagesInBatch} */

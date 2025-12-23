@@ -53,11 +53,11 @@ async function collectEndpoints(
 
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: { rpcs?: string[]; rpcsFile?: string },
+  argv: { rpcs?: string[]; rpcsFile?: string; noApi?: boolean },
 ): ChainGetter
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: { rpcs?: string[]; rpcsFile?: string },
+  argv: { rpcs?: string[]; rpcsFile?: string; noApi?: boolean },
   txHash: string,
 ): [ChainGetter, Promise<[Chain, ChainTransaction]>]
 
@@ -66,13 +66,13 @@ export function fetchChainsFromRpcs(
  * If txHash is provided, fetches matching families first and returns [chainGetter, txPromise];
  * Otherwise, spawns racing URLs for each family asked by `getChain` getter
  * @param ctx - Context object containing destroy$ promise and logger properties
- * @param argv - Options containing rpcs (list) and/or rpcs file
+ * @param argv - Options containing rpcs (list), rpcs file and noApi flag
  * @param txHash - Optional txHash to fetch concurrently; causes the function to return a [ChainGetter, Promise<ChainTransaction>]
  * @returns a ChainGetter (if txHash was provided), or a tuple of [ChainGetter, Promise<ChainTransaction>]
  */
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: { rpcs?: string[]; rpcsFile?: string },
+  argv: { rpcs?: string[]; rpcsFile?: string; noApi?: boolean },
   txHash?: string,
 ) {
   const chains: Record<string, Promise<Chain>> = {}
@@ -100,7 +100,10 @@ export function fetchChainsFromRpcs(
       const txs$: Promise<unknown>[] = []
       let txFound = false
       for (const url of endpoints) {
-        const chain$ = C.fromUrl(url, ctx)
+        const chain$ = C.fromUrl(url, {
+          ...ctx,
+          apiClient: argv.noApi ? null : undefined,
+        })
         chains$.push(chain$)
 
         void chain$.then(

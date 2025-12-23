@@ -135,7 +135,7 @@ async function manualExec(
   // messageId not yet implemented for Solana
   const [getChain, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHash)
   const [source, tx] = await tx$
-  const request = await selectRequest(await source.fetchRequestsInTx(tx), 'to know more', argv)
+  const request = await selectRequest(await source.getMessagesInTx(tx), 'to know more', argv)
 
   switch (argv.format) {
     case Format.log: {
@@ -339,7 +339,7 @@ export async function manualExecSenderQueue(
   const dest = await providers.forChainId(chainIdFromSelector(firstRequest.lane.destChainSelector))
 
   const requests: Omit<CCIPRequest, 'timestamp' | 'tx'>[] = []
-  for await (const request of fetchRequestsForSender(source, firstRequest)) {
+  for await (const request of getMessagesForSender(source, firstRequest)) {
     requests.push(request)
     if (requests.length >= MAX_QUEUE) break
   }

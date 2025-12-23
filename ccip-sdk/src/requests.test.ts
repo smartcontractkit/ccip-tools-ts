@@ -8,9 +8,9 @@ import type { Chain, LogFilter } from './chain.ts'
 import {
   decodeMessage,
   fetchAllMessagesInBatch,
-  fetchCCIPRequestById,
-  fetchCCIPRequestsInTx,
-  fetchRequestsForSender,
+  getMessageById,
+  getMessagesForSender,
+  getMessagesInTx,
 } from './requests.ts'
 import {
   type CCIPMessage,
@@ -164,7 +164,7 @@ describe('fetchCCIPMessagesInTx', () => {
       from: '0x0000000000000000000000000000000000000001',
     }
 
-    const result = await fetchCCIPRequestsInTx(mockedChain as unknown as Chain, mockTx)
+    const result = await getMessagesInTx(mockedChain as unknown as Chain, mockTx)
     assert.equal(result.length, 1)
     assert.equal(result[0].message.sequenceNumber, 1n)
     assert.equal(result[0].tx, mockTx)
@@ -200,7 +200,7 @@ describe('fetchCCIPMessagesInTx', () => {
     }
 
     await assert.rejects(
-      async () => await fetchCCIPRequestsInTx(mockedChain as unknown as Chain, mockTx),
+      async () => await getMessagesInTx(mockedChain as unknown as Chain, mockTx),
       /Could not find any CCIPSendRequested message in tx: 0x123/,
     )
 
@@ -257,7 +257,7 @@ describe('fetchCCIPMessageById', () => {
       })(),
     )
 
-    const result = await fetchCCIPRequestById(mockedChain as unknown as Chain, '0xMessageId1')
+    const result = await getMessageById(mockedChain as unknown as Chain, '0xMessageId1')
     assert.equal(result.log.index, 1)
     assert.ok(result.message)
     assert.equal(result.tx.timestamp, 1234567890)
@@ -281,7 +281,7 @@ describe('fetchCCIPMessageById', () => {
     )
 
     await assert.rejects(
-      async () => await fetchCCIPRequestById(mockedChain as unknown as Chain, '0xMessageId1'),
+      async () => await getMessageById(mockedChain as unknown as Chain, '0xMessageId1'),
       /Could not find a CCIPSendRequested message with messageId: 0xMessageId1/,
     )
 
@@ -416,7 +416,7 @@ describe('fetchAllMessagesInBatch', () => {
   })
 })
 
-describe('fetchRequestsForSender', () => {
+describe('getMessagesForSender', () => {
   it('should yield requests for a sender', async () => {
     const sender = '0x0000000000000000000000000000000000000045'
     const someOtherMessage = mockedMessage(18)
@@ -452,7 +452,7 @@ describe('fetchRequestsForSender', () => {
     )
 
     const res: Omit<CCIPRequest, 'tx' | 'timestamp'>[] = []
-    const generator = fetchRequestsForSender(mockedChain as unknown as Chain, sender, {
+    const generator = getMessagesForSender(mockedChain as unknown as Chain, sender, {
       address: rampAddress,
       startBlock: 11,
     })
