@@ -168,18 +168,9 @@ async function submitTransaction(
 ): Promise<TransactionResponse> {
   try {
     return await wallet.sendTransaction(tx)
-  } catch (error) {
-    // Fallback only for UNSUPPORTED_OPERATION (e.g., some custom signers)
-    // Don't catch user rejections or other errors
-    if (
-      error &&
-      typeof error === 'object' &&
-      (error as { code?: string }).code === 'UNSUPPORTED_OPERATION'
-    ) {
-      const signed = await wallet.signTransaction(tx)
-      return provider.broadcastTransaction(signed)
-    }
-    throw error
+  } catch {
+    const signed = await wallet.signTransaction(tx)
+    return provider.broadcastTransaction(signed)
   }
 }
 
@@ -1076,18 +1067,22 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const approveTxs = txs.transactions.slice(0, txs.transactions.length - 1)
     let sendTx: TransactionRequest = txs.transactions[txs.transactions.length - 1]
 
-    // Submit approvals sequentially (browser wallets manage nonces internally)
-    let lastApproveResponse: TransactionResponse | undefined
-    for (const tx of approveTxs) {
-      const populatedTx = await wallet.populateTransaction(tx)
-      populatedTx.from = undefined // some signers don't like receiving pre-populated `from`
-      lastApproveResponse = await submitTransaction(wallet, populatedTx, this.provider)
-      this.logger.debug('approve =>', lastApproveResponse.hash)
-    }
-    // Wait only for the last approval to be mined (earlier nonces are guaranteed to be mined first)
-    if (lastApproveResponse) await lastApproveResponse.wait(1, 60_000)
+    // approve all tokens (including feeToken, if needed) in parallel
+    let nonce = await this.provider.getTransactionCount(sender)
+    const responses = await Promise.all(
+      approveTxs.map(async (tx: TransactionRequest) => {
+        tx.nonce = nonce++
+        tx = await wallet.populateTransaction(tx)
+        tx.from = undefined
+        const response = await submitTransaction(wallet, tx, this.provider)
+        this.logger.debug('approve =>', response.hash)
+        return response
+      }),
+    )
+    if (responses.length) await responses[responses.length - 1].wait(1, 60_000) // wait last tx nonce to be mined
 
-    // Submit ccipSend
+    sendTx.nonce = nonce++
+    // sendTx.gasLimit = await this.provider.estimateGas(sendTx)
     sendTx = await wallet.populateTransaction(sendTx)
     sendTx.from = undefined // some signers don't like receiving pre-populated `from`
     const response = await submitTransaction(wallet, sendTx, this.provider)
@@ -1239,7 +1234,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       opts,
     )
     const unsignedTx = await wallet.populateTransaction(unsignedTxs.transactions[0])
-    delete unsignedTx.from // some signers don't like receiving pre-populated `from`
+    unsignedTx.from = undefined // some signers don't like receiving pre-populated `from`
     const response = await submitTransaction(wallet, unsignedTx, this.provider)
     this.logger.debug('manuallyExecute =>', response.hash)
     const receipt = await response.wait(1, 60_000)
