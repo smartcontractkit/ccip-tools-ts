@@ -63,6 +63,11 @@ const sidebars: SidebarsConfig = {
           id: 'supported-tokens',
           label: 'getSupportedTokens',
         },
+        {
+          type: 'doc',
+          id: 'lane-latency',
+          label: 'laneLatency',
+        },
       ],
     },
     {
