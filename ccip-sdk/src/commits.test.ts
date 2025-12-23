@@ -54,7 +54,7 @@ class MockChain extends Chain {
     }
   }
 
-  override async fetchRequestsInTx(_tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+  override async getMessagesInTx(_tx: string | ChainTransaction): Promise<CCIPRequest[]> {
     return []
   }
 

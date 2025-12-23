@@ -31,7 +31,11 @@ export {
 } from './specialized.ts'
 
 // Specialized errors - Lane & Routing
-export { CCIPOffRampNotFoundError, CCIPOnRampRequiredError } from './specialized.ts'
+export {
+  CCIPLaneNotFoundError,
+  CCIPOffRampNotFoundError,
+  CCIPOnRampRequiredError,
+} from './specialized.ts'
 
 // Specialized errors - Commit & Merkle
 export {
@@ -159,6 +163,9 @@ export {
   CCIPTypeVersionInvalidError,
 } from './specialized.ts'
 
+// Specialized errors - API Client
+export { CCIPApiClientNotAvailableError } from './specialized.ts'
+
 // Specialized errors - Address Validation
 export { CCIPAddressInvalidEvmError } from './specialized.ts'
 
@@ -167,6 +174,9 @@ export { CCIPSourceChainUnsupportedError } from './specialized.ts'
 
 // Specialized errors - CLI & Validation
 export { CCIPArgumentInvalidError } from './specialized.ts'
+
+// HTTP Status codes (re-exported from root)
+export { HttpStatus, isServerError, isTransientHttpStatus } from '../http-status.ts'
 
 // Recovery hints
 export { DEFAULT_RECOVERY_HINTS, getDefaultRecovery } from './recovery.ts'

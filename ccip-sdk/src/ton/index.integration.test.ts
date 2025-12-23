@@ -818,7 +818,7 @@ describe('TON index integration tests', () => {
     })
   })
 
-  describe('fetchRequestsInTx', () => {
+  describe('getMessagesInTx', () => {
     it('should parse CCIP request from OnRamp transaction', async () => {
       // Get a known transaction with CCIPMessageSent
       let txHash: string | undefined
@@ -834,7 +834,7 @@ describe('TON index integration tests', () => {
 
       assert.ok(txHash, 'Should find a transaction with CCIP message')
 
-      const requests = await tonChain.fetchRequestsInTx(txHash)
+      const requests = await tonChain.getMessagesInTx(txHash)
 
       assert.ok(requests.length > 0, 'Should find at least one CCIP request')
 

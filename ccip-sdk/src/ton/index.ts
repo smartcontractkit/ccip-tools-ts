@@ -5,7 +5,7 @@ import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { type LogDecoders, fetchLogs } from './logs.ts'
-import { type LogFilter, Chain } from '../chain.ts'
+import { type ChainContext, type LogFilter, Chain } from '../chain.ts'
 import {
   CCIPArgumentInvalidError,
   CCIPExtraArgsInvalidError,
@@ -16,7 +16,7 @@ import {
   CCIPWalletInvalidError,
 } from '../errors/specialized.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
-import { fetchCCIPRequestsInTx } from '../requests.ts'
+import { getMessagesInTx } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
@@ -90,7 +90,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param network - Network information for this chain.
    * @param ctx - Context containing logger.
    */
-  constructor(client: TonClient4, network: NetworkInfo, ctx?: WithLogger) {
+  constructor(client: TonClient4, network: NetworkInfo, ctx?: ChainContext) {
     super(network, ctx)
     this.provider = client
 
@@ -119,7 +119,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param ctx - Context containing logger.
    * @returns A new TONChain instance.
    */
-  static async fromUrl(url: string, ctx?: WithLogger): Promise<TONChain> {
+  static async fromUrl(url: string, ctx?: ChainContext): Promise<TONChain> {
     const { logger = console } = ctx ?? {}
 
     // Parse URL for validation
@@ -308,9 +308,9 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     yield* fetchLogs(this.provider, opts, this.ltTimestampCache, decoders)
   }
 
-  /** {@inheritDoc Chain.fetchRequestsInTx} */
-  override async fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return fetchCCIPRequestsInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
+  /** {@inheritDoc Chain.getMessagesInTx} */
+  override async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+    return getMessagesInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
   }
 
   /** {@inheritDoc Chain.fetchAllMessagesInBatch} */

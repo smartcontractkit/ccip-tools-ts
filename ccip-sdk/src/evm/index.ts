@@ -28,7 +28,7 @@ import type { TypedContract } from 'ethers-abitype'
 import { memoize } from 'micro-memoize'
 import type { PickDeep, SetRequired } from 'type-fest'
 
-import { type LogFilter, type TokenPoolRemote, Chain } from '../chain.ts'
+import { type ChainContext, type LogFilter, type TokenPoolRemote, Chain } from '../chain.ts'
 import {
   CCIPAddressInvalidEvmError,
   CCIPBlockNotFoundError,
@@ -118,11 +118,7 @@ import {
   parseSourceTokenData,
 } from './messages.ts'
 import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
-import {
-  fetchAllMessagesInBatch,
-  fetchCCIPRequestById,
-  fetchCCIPRequestsInTx,
-} from '../requests.ts'
+import { fetchAllMessagesInBatch, getMessageById, getMessagesInTx } from '../requests.ts'
 import type { UnsignedEVMTx } from './types.ts'
 export type { UnsignedEVMTx }
 
@@ -177,7 +173,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param provider - JSON-RPC provider for the EVM network.
    * @param network - Network information for this chain.
    */
-  constructor(provider: JsonRpcApiProvider, network: NetworkInfo, ctx?: WithLogger) {
+  constructor(provider: JsonRpcApiProvider, network: NetworkInfo, ctx?: ChainContext) {
     super(network, ctx)
 
     this.provider = provider
@@ -252,7 +248,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param ctx - context containing logger.
    * @returns A new EVMChain instance.
    */
-  static async fromProvider(provider: JsonRpcApiProvider, ctx?: WithLogger): Promise<EVMChain> {
+  static async fromProvider(provider: JsonRpcApiProvider, ctx?: ChainContext): Promise<EVMChain> {
     try {
       return new EVMChain(provider, networkInfo(Number((await provider.getNetwork()).chainId)), ctx)
     } catch (err) {
@@ -267,7 +263,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param ctx - context containing logger.
    * @returns A new EVMChain instance.
    */
-  static async fromUrl(url: string, ctx?: WithLogger): Promise<EVMChain> {
+  static async fromUrl(url: string, ctx?: ChainContext): Promise<EVMChain> {
     return this.fromProvider(await this._getProvider(url), ctx)
   }
 
@@ -300,18 +296,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     yield* getEvmLogs(filter, this)
   }
 
-  /** {@inheritDoc Chain.fetchRequestsInTx} */
-  async fetchRequestsInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return fetchCCIPRequestsInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
+  /** {@inheritDoc Chain.getMessagesInTx} */
+  async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+    return getMessagesInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
   }
 
-  /** {@inheritDoc Chain.fetchRequestById} */
-  override fetchRequestById(
+  /** {@inheritDoc Chain.getMessageById} */
+  override getMessageById(
     messageId: string,
     onRamp?: string,
     opts?: { page?: number },
   ): Promise<CCIPRequest> {
-    return fetchCCIPRequestById(this, messageId, { address: onRamp, ...opts })
+    return getMessageById(this, messageId, { address: onRamp, ...opts })
   }
 
   /** {@inheritDoc Chain.fetchAllMessagesInBatch} */
@@ -1075,7 +1071,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const response = await this.provider.broadcastTransaction(signed)
     this.logger.debug('ccipSend =>', response.hash)
     await response.wait(1, 60_000)
-    return (await this.fetchRequestsInTx(await this.getTransaction(response.hash)))[0]
+    return (await this.getMessagesInTx(await this.getTransaction(response.hash)))[0]
   }
 
   /** {@inheritDoc Chain.fetchOffchainTokenData} */

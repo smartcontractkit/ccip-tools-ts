@@ -38,6 +38,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   ONRAMP_REQUIRED: 'Provide the onRamp address for this operation.',
   LANE_VERSION_UNSUPPORTED:
     'Upgrade to a supported lane version. Check version compatibility: https://docs.chain.link/ccip/directory',
+  LANE_NOT_FOUND:
+    'This lane may not exist or is not yet supported by CCIP. Check the CCIP Directory for supported lanes: https://docs.chain.link/ccip/directory',
 
   COMMIT_NOT_FOUND: 'Wait for the commit report. DON commit typically takes a few minutes.',
   MERKLE_ROOT_MISMATCH:
@@ -152,6 +154,9 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
 
   HTTP_ERROR: 'HTTP request failed. 429 indicates rate limiting.',
   RPC_NOT_FOUND: 'No RPC endpoint found. Configure an RPC URL.',
+
+  API_CLIENT_NOT_AVAILABLE:
+    'The API client was explicitly disabled. To use API features like getLaneLatency(), create the Chain without apiClient: null or provide a CCIPAPIClient instance.',
 
   DATA_FORMAT_UNSUPPORTED: 'Unsupported data format. Use hex, bytes, or base64.',
   DATA_PARSE_FAILED: 'Could not parse the provided data. Verify the format.',
