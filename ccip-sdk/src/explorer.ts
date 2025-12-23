@@ -82,13 +82,10 @@ export interface CCIPExplorerLinks {
 export function getCCIPExplorerLinks<V extends CCIPVersion>(
   request: CCIPRequest<V>,
 ): CCIPExplorerLinks {
-  const senderAddress = decodeAddress(request.message.sender, 'evm')
-  const receiverAddress = decodeAddress(request.message.receiver, 'evm')
-
   return {
     message: getCCIPExplorerUrl('msg', request.message.messageId),
     transaction: getCCIPExplorerUrl('tx', request.tx.hash),
-    sender: getCCIPExplorerUrl('address', senderAddress),
-    receiver: getCCIPExplorerUrl('address', receiverAddress),
+    sender: getCCIPExplorerUrl('address', request.message.sender),
+    receiver: getCCIPExplorerUrl('address', request.message.receiver),
   }
 }
