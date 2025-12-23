@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { toBeHex } from 'ethers'
-
 import { CCIP_EXPLORER_BASE_URL, getCCIPExplorerLinks, getCCIPExplorerUrl } from './explorer.ts'
 import './index.ts'
 import type { CCIPRequest } from './types.ts'
@@ -32,6 +30,9 @@ describe('getCCIPExplorerUrl', () => {
 })
 
 describe('getCCIPExplorerLinks', () => {
+  // Addresses are pre-decoded in the request (not 32-byte padded)
+  // For EVM: 20-byte hex addresses
+  // For Solana: base58 addresses
   const mockRequest: CCIPRequest = {
     lane: {
       sourceChainSelector: 16015286601757825753n,
@@ -41,8 +42,8 @@ describe('getCCIPExplorerLinks', () => {
     },
     message: {
       messageId: '0x54da064fc6080248aa42cc8dec9e1d19e55c5e21d9a662e06fe30915201ce553',
-      sender: toBeHex('0xbff1d393d0f318c4aaf54fdb670e63cb44ed3461', 32),
-      receiver: toBeHex('0xabc1234567890123456789012345678901234567', 32),
+      sender: '0xbff1d393d0f318c4aaf54fdb670e63cb44ed3461',
+      receiver: '0xabc1234567890123456789012345678901234567',
       sourceChainSelector: 16015286601757825753n,
       destChainSelector: 4949039107694359620n,
       sequenceNumber: 100n,
@@ -85,22 +86,14 @@ describe('getCCIPExplorerLinks', () => {
       links.transaction,
       'https://ccip.chain.link/tx/0xaf8c73a7f872c831da535a62e3837fe5a62f1b92e4b09fddc773b956c3c27d56',
     )
-    // Addresses are checksummed by decodeAddress
+    // Addresses are used as-is (pre-decoded in the request)
     assert.equal(
       links.sender,
-      'https://ccip.chain.link/address/0xbfF1d393d0f318C4aaF54Fdb670e63cB44Ed3461',
+      'https://ccip.chain.link/address/0xbff1d393d0f318c4aaf54fdb670e63cb44ed3461',
     )
     assert.equal(
       links.receiver,
-      'https://ccip.chain.link/address/0xAbc1234567890123456789012345678901234567',
+      'https://ccip.chain.link/address/0xabc1234567890123456789012345678901234567',
     )
-  })
-
-  it('should decode padded addresses correctly', () => {
-    const links = getCCIPExplorerLinks(mockRequest)
-
-    // Verify addresses are decoded from 32-byte padded format
-    assert.ok(!links.sender.includes('0x000000000000000000000000'))
-    assert.ok(!links.receiver.includes('0x000000000000000000000000'))
   })
 })

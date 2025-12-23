@@ -23,7 +23,6 @@
  */
 
 import type { CCIPRequest, CCIPVersion } from './types.ts'
-import { decodeAddress } from './utils.ts'
 
 /** CCIP Explorer base URL */
 export const CCIP_EXPLORER_BASE_URL = 'https://ccip.chain.link'
