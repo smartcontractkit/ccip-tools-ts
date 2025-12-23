@@ -1,5 +1,4 @@
 import {
-  type CCIPExecution,
   type CCIPRequest,
   type CCIPVersion,
   type ChainStatic,
@@ -259,67 +258,41 @@ async function manualExec(
 
   // For async chains (eg. TON), the receipt may be in a separate transaction
   if (!found) {
-    // For async execution, we need to wait for the Offramp to process the message.
-    // The execution receipt will appear in a separate transaction.
-    const walletTxTimestamp = manualExecTx.timestamp
+    // We need to wait for the Offramp to process the message.
+    // Use watch mode to poll for the final execution state (Success or Failure).
+    const timeoutMs = 10 * 60 * 1000 // ~10 minute timeout
+    logger.info(`Waiting for execution receipt (timeout: ${timeoutMs / 60_000}m)...`)
 
-    // Keep polling until we find a Success receipt or exhaust attempts (~10m timeout)
-    const maxAttempts = 120
-    const delayMs = 5000
-    const timeoutMins = Math.floor((maxAttempts * delayMs) / 1000 / 60)
-    logger.info(`Waiting for execution receipt (timeout: ~${timeoutMins}m)...`)
+    // Create a timeout promise that resolves after timeoutMs
+    const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))
 
-    let latestReceipt: CCIPExecution | undefined
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      if (attempt > 0) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs))
+    // Use watch mode to poll for execution receipts
+    for await (const execution of dest.fetchExecutionReceipts(offRamp, request, commit, {
+      page: argv.page,
+      watch: timeoutPromise,
+    })) {
+      // Only accept receipts that occurred AFTER our wallet transaction
+      if (manualExecTx.timestamp && execution.timestamp < manualExecTx.timestamp) {
+        continue // Skip old receipts from before our manual exec
       }
 
-      for await (const execution of dest.fetchExecutionReceipts(offRamp, request, commit, {
-        page: argv.page,
-      })) {
-        // Only accept receipts that occurred AFTER our wallet transaction
-        if (walletTxTimestamp && execution.timestamp < walletTxTimestamp) {
-          continue // Skip old receipts from before our manual exec
-        }
-
-        // Track the latest receipt we've found
-        if (!latestReceipt || execution.timestamp > latestReceipt.timestamp) {
-          latestReceipt = execution
-        }
-
-        // If we found Success, we're done
-        if (execution.receipt.state === 2) {
-          // ExecutionState.Success
-          found = true
-          break
-        }
-      }
-
-      // If we found a Success receipt, stop polling
-      if (found) break
-    }
-
-    // Display the latest receipt we found (either Success after polling, or latest non-Success)
-    if (latestReceipt) {
+      // Found a final state: display and exit
       switch (argv.format) {
         case Format.log:
-          logger.log('receipt =', withDateTimestamp(latestReceipt))
+          logger.log('receipt =', withDateTimestamp(execution))
           break
         case Format.pretty:
           logger.info('Receipts (dest):')
           prettyReceipt.call(
             ctx,
-            latestReceipt,
+            execution,
             request,
-            latestReceipt.log.tx?.from ??
-              (await dest.getTransaction(latestReceipt.log.transactionHash).catch(() => null))
-                ?.from,
+            execution.log.tx?.from ??
+              (await dest.getTransaction(execution.log.transactionHash).catch(() => null))?.from,
           )
           break
         case Format.json:
-          logger.info(JSON.stringify(latestReceipt.receipt, bigIntReplacer, 2))
+          logger.info(JSON.stringify(execution.receipt, bigIntReplacer, 2))
           break
       }
       found = true
