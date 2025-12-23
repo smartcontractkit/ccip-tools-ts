@@ -96,7 +96,7 @@ export async function waitForTransaction(
         const txs = await client.getAccountTransactions(
           walletAddress,
           BigInt(account.account.last.lt),
-          Buffer.from(account.account.last.hash, 'base64'),
+          bytesToBuffer(account.account.last.hash),
         )
 
         for (const { tx } of txs) {
@@ -130,7 +130,7 @@ export async function waitForTransaction(
           const txs = await client.getAccountTransactions(
             walletAddress,
             BigInt(account.account.last.lt),
-            Buffer.from(account.account.last.hash, 'base64'),
+            bytesToBuffer(account.account.last.hash),
           )
           if (txs.length > 0) {
             const { tx } = txs[0]

@@ -12,12 +12,15 @@ import {
   discoverOffRamp,
   estimateExecGasForRequest,
   isSupportedTxHash,
+  networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
 import { type Ctx, Format } from './types.ts'
 import {
+  formatDisplayAddress,
+  formatDisplayTxHash,
   getCtx,
   logParsedError,
   prettyCommit,
@@ -216,9 +219,17 @@ async function manualExec(
   const [, wallet] = await loadChainWallet(dest, argv)
   const manualExecTx = await dest.executeReport(offRamp, execReport, { ...argv, wallet })
 
-  logger.info('🚀 manualExec tx =', manualExecTx.hash, 'to offRamp =', offRamp)
+  const destFamily = networkInfo(request.lane.destChainSelector).family
+  logger.info(
+    '🚀 manualExec tx =',
+    formatDisplayTxHash(manualExecTx.hash, destFamily),
+    'to offRamp =',
+    formatDisplayAddress(offRamp, destFamily),
+  )
 
   let found = false
+
+  // For sync chains (eg. EVM) try to find receipt in the submitted transaction's logs
   for (const log of manualExecTx.logs) {
     const execReceipt = (dest.constructor as ChainStatic).decodeReceipt(log)
     if (!execReceipt) continue
@@ -243,6 +254,49 @@ async function manualExec(
         break
     }
     found = true
+  }
+
+  // For async chains (eg. TON), the receipt may be in a separate transaction
+  if (!found) {
+    // We need to wait for the Offramp to process the message.
+    // Use watch mode to poll for the final execution state (Success or Failure).
+    const timeoutMs = 10 * 60 * 1000 // ~10 minute timeout
+    logger.info(`Waiting for execution receipt (timeout: ${timeoutMs / 60_000}m)...`)
+
+    // Create a timeout promise that resolves after timeoutMs
+    const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))
+
+    // Use watch mode to poll for execution receipts
+    for await (const execution of dest.fetchExecutionReceipts(offRamp, request, commit, {
+      page: argv.page,
+      watch: timeoutPromise,
+    })) {
+      // Only accept receipts that occurred AFTER our wallet transaction
+      if (manualExecTx.timestamp && execution.timestamp < manualExecTx.timestamp) {
+        continue // Skip old receipts from before our manual exec
+      }
+
+      // Found a final state: display and exit
+      switch (argv.format) {
+        case Format.log:
+          logger.log('receipt =', withDateTimestamp(execution))
+          break
+        case Format.pretty:
+          logger.info('Receipts (dest):')
+          prettyReceipt.call(
+            ctx,
+            execution,
+            request,
+            execution.log.tx?.from ??
+              (await dest.getTransaction(execution.log.transactionHash).catch(() => null))?.from,
+          )
+          break
+        case Format.json:
+          logger.info(JSON.stringify(execution.receipt, bigIntReplacer, 2))
+          break
+      }
+      found = true
+    }
   }
   if (!found) throw new CCIPReceiptNotFoundError(manualExecTx.hash)
 }

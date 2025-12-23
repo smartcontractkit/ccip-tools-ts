@@ -526,6 +526,82 @@ describe('TON index integration tests', () => {
     })
   })
 
+  describe('decodeReceipt', () => {
+    let receiptLog: any
+    let receipt: ReturnType<typeof TONChain.decodeReceipt>
+
+    before(async () => {
+      // Fetch a real ExecutionStateChanged log from OffRamp
+      for await (const log of tonChain.getLogs({
+        address: ADDRESSES_TO_ASSERT.tonOffRamp,
+        topics: ['ExecutionStateChanged'],
+        page: 20,
+      })) {
+        const decoded = TONChain.decodeReceipt(log)
+        if (decoded) {
+          receiptLog = log
+          receipt = decoded
+          break
+        }
+      }
+    })
+
+    it('should return undefined for invalid inputs', () => {
+      assert.equal(TONChain.decodeReceipt({ data: '' } as any), undefined, 'empty data')
+      assert.equal(TONChain.decodeReceipt({ data: undefined } as any), undefined, 'undefined data')
+      assert.equal(
+        TONChain.decodeReceipt({ data: 'not-valid-base64!!!' } as any),
+        undefined,
+        'invalid base64',
+      )
+    })
+
+    it('should return undefined for non-receipt BOC data', async () => {
+      // Fetch CCIPMessageSent logs from OnRamp - these should NOT decode as receipts
+      for await (const log of tonChain.getLogs({
+        address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        page: 1,
+      })) {
+        assert.equal(
+          TONChain.decodeReceipt(log),
+          undefined,
+          'CCIPMessageSent should not decode as receipt',
+        )
+        break
+      }
+    })
+
+    it('should have ExecutionStateChanged as topics[0]', () => {
+      assert.ok(receiptLog, 'Should have found a receipt log')
+      assert.ok(receiptLog.topics.length > 0, 'topics should not be empty')
+      assert.equal(receiptLog.topics[0], 'ExecutionStateChanged', 'topics[0] should be event name')
+    })
+
+    it('should decode receipt with valid sourceChainSelector', () => {
+      assert.ok(receipt, 'Should decode receipt')
+      assert.equal(receipt.sourceChainSelector, SEPOLIA_CHAIN_SELECTOR)
+    })
+
+    it('should decode valid sequenceNumber', () => {
+      assert.ok(receipt)
+      assert.equal(typeof receipt.sequenceNumber, 'bigint')
+      assert.ok(receipt.sequenceNumber > 0n, 'sequenceNumber should be positive')
+    })
+
+    it('should decode valid messageId', () => {
+      assert.ok(receipt)
+      assert.match(receipt.messageId, /^0x[a-f0-9]{64}$/, 'messageId should be 32-byte hex')
+    })
+
+    it('should decode valid state', () => {
+      assert.ok(receipt)
+      assert.ok(
+        [0, 1, 2, 3].includes(receipt.state),
+        'state should be Untouched(0), InProgress(1), Success(2), or Failure(3)',
+      )
+    })
+  })
+
   describe('typeAndVersion', () => {
     it('should return valid typeAndVersion for OffRamp', async () => {
       const result = await tonChain.typeAndVersion(ADDRESSES_TO_ASSERT.tonOffRamp)
