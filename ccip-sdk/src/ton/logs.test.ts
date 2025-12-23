@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 import { beginCell } from '@ton/core'
 import type { TonClient4 } from '@ton/ton'
 
+import { sleep } from '../utils.ts'
 import { type LogDecoders, fetchLogs } from './logs.ts'
 
 const TEST_ADDRESS = '0:9f2e995aebceb97ae094dbe4cf973cbc8a402b4f0ac5287a00be8aca042d51b9'
@@ -138,8 +139,8 @@ describe('fetchLogs', () => {
         cancel = resolve
       })
 
-      // Cancel quickly
-      setTimeout(() => cancel(), 50)
+      // Cancel after a short delay
+      void sleep(50).then(() => cancel())
 
       const logs = []
       for await (const log of fetchLogs(
@@ -424,7 +425,7 @@ describe('fetchLogs', () => {
       })
 
       // Cancel after a short delay
-      setTimeout(() => cancel!(), 50)
+      void sleep(50).then(() => cancel!())
 
       const logs = []
       const startTime = Date.now()

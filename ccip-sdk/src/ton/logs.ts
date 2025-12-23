@@ -143,25 +143,31 @@ async function* pollForNewLogs(
     })
   }
 
-  while (!cancelled) {
-    // Race sleep against cancellation promise to allow early exit
+  const waitForNextPoll = async (): Promise<void> => {
     if (opts.watch instanceof Promise) {
       await Promise.race([sleep(pollInterval), opts.watch])
     } else {
       await sleep(pollInterval)
     }
-    if (cancelled) break
+  }
 
+  while (!cancelled) {
     const lastBlock = await provider.getLastBlock()
     if (cancelled) break
 
     const account = await provider.getAccountLite(lastBlock.last.seqno, address)
     if (cancelled) break
 
-    if (!account.account.last) continue
+    if (!account.account.last) {
+      await waitForNextPoll()
+      continue
+    }
 
     const currentLt = BigInt(account.account.last.lt)
-    if (lastSeenLt !== undefined && currentLt <= lastSeenLt) continue
+    if (lastSeenLt !== undefined && currentLt <= lastSeenLt) {
+      await waitForNextPoll()
+      continue
+    }
 
     // Stop condition: stop when we reach previously seen transactions
     const stopCondition = (lt: number, _timestamp: number): boolean => {
@@ -185,6 +191,7 @@ async function* pollForNewLogs(
     }
 
     lastSeenLt = currentLt
+    await waitForNextPoll()
   }
 }
 

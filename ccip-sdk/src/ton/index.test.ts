@@ -839,6 +839,7 @@ describe('TON index unit tests', () => {
       const sortedTxs = [matchingTx, otherTx].sort((a, b) => Number(b.tx.lt) - Number(a.tx.lt))
       const latestTx = sortedTxs[0]
 
+      let callCount = 0
       const mockClient = {
         getLastBlock: async () => ({
           last: { seqno: 12345678 },
@@ -852,7 +853,13 @@ describe('TON index unit tests', () => {
             },
           },
         }),
-        getAccountTransactions: async () => sortedTxs,
+        getAccountTransactions: async () => {
+          // First call returns all transactions, subsequent calls return empty
+          if (callCount++ === 0) {
+            return sortedTxs
+          }
+          return []
+        },
       } as unknown as TonClient4
 
       const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
