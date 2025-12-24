@@ -71,7 +71,6 @@ import {
   type ChainTransaction,
   type CommitReport,
   type ExecutionReceipt,
-  type ExecutionReport,
   type ExecutionState,
   type Lane,
   type Log_,
@@ -329,7 +328,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.getAllMessagesInBatch} */
-  async getAllMessagesInBatch<
+  getAllMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
@@ -1083,18 +1082,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /**
    * Generate unsigned tx to manuallyExecute a message
-   * @param _payer - not used in EVM
-   * @param offRamp - address of the OffRamp contract
-   * @param execReport - execution report
-   * @param opts - gas limit overrides for ccipReceive and tokenPool calls options
+   * @param opts - ExecuteReport options
    * @returns array containing one unsigned `manuallyExecute` TransactionRequest object
    */
-  async generateUnsignedExecuteReport(
-    _payer: string,
-    offRamp: string,
-    execReport: ExecutionReport,
-    opts: { gasLimit?: number; tokensGasLimit?: number },
-  ): Promise<UnsignedEVMTx> {
+  async generateUnsignedExecuteReport({
+    offRamp,
+    execReport,
+    ...opts
+  }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedEVMTx> {
     const [_, version] = await this.typeAndVersion(offRamp)
 
     let manualExecTx
@@ -1204,20 +1199,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.executeReport} */
-  async executeReport(
-    offRamp: string,
-    execReport: ExecutionReport,
-    opts: { wallet: unknown; gasLimit?: number; tokensGasLimit?: number },
-  ) {
+  async executeReport(opts: Parameters<Chain['executeReport']>[0]) {
     const wallet = opts.wallet
     if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
 
-    const unsignedTxs = await this.generateUnsignedExecuteReport(
-      await wallet.getAddress(),
-      offRamp,
-      execReport,
-      opts,
-    )
+    const unsignedTxs = await this.generateUnsignedExecuteReport({
+      ...opts,
+      payer: await wallet.getAddress(),
+    })
     const unsignedTx = await wallet.populateTransaction(unsignedTxs.transactions[0])
     unsignedTx.from = undefined // some signers don't like receiving pre-populated `from`
     const response = await submitTransaction(wallet, unsignedTx, this.provider)

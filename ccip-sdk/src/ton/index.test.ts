@@ -152,7 +152,11 @@ describe('TON index unit tests', () => {
       const { client, wallet, getCapturedTransfer } = createMockClientAndWallet({ seqno: 42 })
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
-      await tonChain.executeReport(TON_OFFRAMP_ADDRESS_TEST, baseExecReport, { wallet })
+      await tonChain.executeReport({
+        offRamp: TON_OFFRAMP_ADDRESS_TEST,
+        execReport: baseExecReport,
+        wallet,
+      })
 
       const captured = getCapturedTransfer()
       assert.ok(captured, 'sendTransfer should be called')
@@ -170,7 +174,11 @@ describe('TON index unit tests', () => {
       const { client, wallet, getCapturedTransfer } = createMockClientAndWallet()
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
-      await tonChain.executeReport(TON_OFFRAMP_ADDRESS_TEST, baseExecReport, { wallet })
+      await tonChain.executeReport({
+        offRamp: TON_OFFRAMP_ADDRESS_TEST,
+        execReport: baseExecReport,
+        wallet,
+      })
 
       const captured = getCapturedTransfer()!
       const slice = captured.messages[0].body.beginParse()
@@ -190,7 +198,9 @@ describe('TON index unit tests', () => {
       })
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
-      const result = await tonChain.executeReport(TON_OFFRAMP_ADDRESS_TEST, baseExecReport, {
+      const result = await tonChain.executeReport({
+        offRamp: TON_OFFRAMP_ADDRESS_TEST,
+        execReport: baseExecReport,
         wallet,
       })
 
@@ -206,7 +216,9 @@ describe('TON index unit tests', () => {
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
       await assert.rejects(
-        tonChain.executeReport(TON_OFFRAMP_ADDRESS_TEST, baseExecReport, {
+        tonChain.executeReport({
+          offRamp: TON_OFFRAMP_ADDRESS_TEST,
+          execReport: baseExecReport,
           wallet: { invalid: true },
         }),
         /Wallet must be a Signer/,
@@ -226,7 +238,11 @@ describe('TON index unit tests', () => {
       }
 
       await assert.rejects(
-        tonChain.executeReport(TON_OFFRAMP_ADDRESS_TEST, v1_5Report as any, { wallet }),
+        tonChain.executeReport({
+          offRamp: TON_OFFRAMP_ADDRESS_TEST,
+          execReport: v1_5Report as any,
+          wallet,
+        }),
         /Invalid extraArgs for TON/,
       )
     })
@@ -236,7 +252,11 @@ describe('TON index unit tests', () => {
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
       await assert.rejects(
-        tonChain.executeReport(TON_OFFRAMP_ADDRESS_TEST, baseExecReport, { wallet }),
+        tonChain.executeReport({
+          offRamp: TON_OFFRAMP_ADDRESS_TEST,
+          execReport: baseExecReport,
+          wallet,
+        }),
         /Transaction failed/,
       )
     })
@@ -246,11 +266,11 @@ describe('TON index unit tests', () => {
     it('should return UnsignedTONTx with family=ton', async () => {
       const tonChain = new TONChain({} as TonClient4, mockNetworkInfo as any)
 
-      const unsigned = await tonChain.generateUnsignedExecuteReport(
-        '0:' + 'b'.repeat(64),
-        TON_OFFRAMP_ADDRESS_TEST,
-        baseExecReport,
-      )
+      const unsigned = await tonChain.generateUnsignedExecuteReport({
+        payer: '0:' + 'b'.repeat(64),
+        offRamp: TON_OFFRAMP_ADDRESS_TEST,
+        execReport: baseExecReport,
+      })
 
       assert.equal(unsigned.family, 'ton')
       assert.equal(unsigned.to, TON_OFFRAMP_ADDRESS_TEST)
@@ -270,11 +290,11 @@ describe('TON index unit tests', () => {
 
       assert.throws(
         () =>
-          tonChain.generateUnsignedExecuteReport(
-            '0:' + 'b'.repeat(64),
-            TON_OFFRAMP_ADDRESS_TEST,
-            v1_5Report as any,
-          ),
+          tonChain.generateUnsignedExecuteReport({
+            payer: '0:' + 'b'.repeat(64),
+            offRamp: TON_OFFRAMP_ADDRESS_TEST,
+            execReport: v1_5Report as any,
+          }),
         /Invalid extraArgs for TON/,
       )
     })
@@ -745,10 +765,7 @@ describe('TON index unit tests', () => {
       const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
 
       const receipts = []
-      for await (const receipt of tonChain.fetchExecutionReceipts(
-        TEST_OFFRAMP,
-        baseRequest as any,
-      )) {
+      for await (const receipt of tonChain.getExecutionReceipts(TEST_OFFRAMP, baseRequest as any)) {
         receipts.push(receipt)
       }
 
@@ -766,10 +783,7 @@ describe('TON index unit tests', () => {
       const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
 
       const receipts = []
-      for await (const receipt of tonChain.fetchExecutionReceipts(
-        TEST_OFFRAMP,
-        baseRequest as any,
-      )) {
+      for await (const receipt of tonChain.getExecutionReceipts(TEST_OFFRAMP, baseRequest as any)) {
         receipts.push(receipt)
       }
 
@@ -797,7 +811,7 @@ describe('TON index unit tests', () => {
       }
 
       const receipts = []
-      for await (const receipt of tonChain.fetchExecutionReceipts(TEST_OFFRAMP, request as any)) {
+      for await (const receipt of tonChain.getExecutionReceipts(TEST_OFFRAMP, request as any)) {
         receipts.push(receipt)
       }
 
@@ -865,10 +879,7 @@ describe('TON index unit tests', () => {
       const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
 
       const receipts = []
-      for await (const receipt of tonChain.fetchExecutionReceipts(
-        TEST_OFFRAMP,
-        baseRequest as any,
-      )) {
+      for await (const receipt of tonChain.getExecutionReceipts(TEST_OFFRAMP, baseRequest as any)) {
         receipts.push(receipt)
       }
 

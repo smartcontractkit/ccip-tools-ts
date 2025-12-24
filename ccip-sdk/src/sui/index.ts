@@ -607,20 +607,18 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /** {@inheritDoc Chain.generateUnsignedExecuteReport} */
   override generateUnsignedExecuteReport(
-    _payer: string,
-    _offRamp: string,
-    _execReport: ExecutionReport,
-    _opts: object,
+    _opts: Parameters<Chain['generateUnsignedExecuteReport']>[0],
   ): Promise<never> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.generateUnsignedExecuteReport'))
   }
 
   /** {@inheritDoc Chain.executeReport} */
   async executeReport(
-    _offRamp: string,
-    execReport: ExecutionReport,
-    opts: { wallet: unknown; gasLimit?: number; receiverObjectIds?: string[] },
+    opts: Parameters<Chain['executeReport']>[0] & {
+      receiverObjectIds?: string[]
+    },
   ): Promise<ChainTransaction> {
+    const { execReport } = opts
     if (!this.contractsDir.offRamp || !this.contractsDir.ccip) {
       throw new CCIPContractNotRouterError(
         'OffRamp or CCIP address not set in contracts directory',

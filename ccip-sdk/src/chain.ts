@@ -152,6 +152,38 @@ export type UnsignedTx = {
 }
 
 /**
+ * Common options for [[generateUnsignedSendMessage]] and [[sendMessage]] Chain methods
+ */
+export type SendMessageOpts = {
+  // Router address on this chain
+  router: string
+  // Destination network selector.
+  destChainSelector: bigint
+  // Message to send. If `fee` is omitted, it'll be calculated
+  message: AnyMessage & { fee?: bigint }
+  // Approve the maximum amount of tokens to transfer
+  approveMax?: boolean
+}
+
+/**
+ * Common options for [[generateUnsignedExecuteReport]] and [[executeReport]] Chain methods
+ */
+export type ExecuteReportOpts = {
+  // address of the OffRamp contract
+  offRamp: string
+  // execution report
+  execReport: ExecutionReport
+  // gasLimit or computeUnits limit override for the ccipReceive call
+  gasLimit?: number
+  // For EVM, overrides gasLimit on tokenPool call
+  tokensGasLimit?: number
+  // For Solana, send report in chunks to OffRamp, to later execute
+  forceBuffer?: boolean
+  // For Solana, create and extend addresses in a lookup table before executing
+  forceLookupTable?: boolean
+}
+
+/**
  * Works like an interface for a base Chain class, but provides implementation (which can be
  * specialized) for some basic methods
  */
@@ -394,45 +426,29 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Fetch the current fee for a given intended message
    * @param opts - Messages options
    */
-  abstract getFee(opts: {
-    router: string
-    destChainSelector: bigint
-    message: AnyMessage
-  }): Promise<bigint>
+  abstract getFee(opts: Omit<SendMessageOpts, 'approveMax'>): Promise<bigint>
   /**
    * Generate unsigned txs for ccipSend'ing a message
    * @param opts - Send options
    * @returns chain-family specific unsigned txs
    */
-  abstract generateUnsignedSendMessage(opts: {
-    // Sender address (address of wallet which will send the message)
-    sender: string
-    // Router address on this chain
-    router: string
-    // Destination network selector.
-    destChainSelector: bigint
-    // Message to send. If `fee` is omitted, it'll be calculated
-    message: AnyMessage & { fee?: bigint }
-    // Approve the maximum amount of tokens to transfer
-    approveMax?: boolean
-  }): Promise<UnsignedTx[F]>
+  abstract generateUnsignedSendMessage(
+    opts: SendMessageOpts & {
+      // Sender address (address of wallet which will send the message)
+      sender: string
+    },
+  ): Promise<UnsignedTx[F]>
   /**
    * Send a CCIP message through a router using provided wallet.
    * @param opts - Send options
    * @returns CCIP request
    */
-  abstract sendMessage(opts: {
-    // Router address on this chain
-    router: string
-    // Destination network selector.
-    destChainSelector: bigint
-    // Message to send. If `fee` is omitted, it'll be calculated
-    message: AnyMessage & { fee?: bigint }
-    // Signer instance (chain-dependent)
-    wallet: unknown
-    // Approve the maximum amount of tokens to transfer
-    approveMax?: boolean
-  }): Promise<CCIPRequest>
+  abstract sendMessage(
+    opts: SendMessageOpts & {
+      // Signer instance (chain-dependent)
+      wallet: unknown
+    },
+  ): Promise<CCIPRequest>
   /**
    * Fetch supported offchain token data for a request from this network
    * @param request - CCIP request, with tx, logs and message
@@ -441,43 +457,24 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   abstract getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]>
   /**
    * Generate unsigned tx to manuallyExecute a message
-   * @param payer - address which will be used to transmit the report tx
-   * @param offRamp - address of the OffRamp contract
-   * @param execReport - execution report
-   * @param gasLimit - gasLimit or computeUnits limit override for the ccipReceive call
-   * @param tokensGasLimit - For EVM, overrides gasLimit on tokenpPool call
-   * @param forceBuffer - For Solana, send report in chunks to OffRamp, to later execute
-   * @param forceLookupTable - For Solana, create and extend addresses in a lookup table before executing
+   * @param opts - executeReport options
    * @returns chain-family specific unsigned txs
    */
   abstract generateUnsignedExecuteReport(
-    payer: string,
-    offRamp: string,
-    execReport: ExecutionReport,
-    opts: {
-      gasLimit?: number
-      tokensGasLimit?: number
-      forceBuffer?: boolean
-      forceLookupTable?: boolean
+    opts: ExecuteReportOpts & {
+      // address which will be used to send the report tx
+      payer: string
     },
   ): Promise<UnsignedTx[F]>
   /**
    * Execute messages in report in an offRamp
-   * @param offRamp - offRamp address on this dest chain
-   * @param execReport - execution report containing messages to execute, proofs and offchainTokenData
-   * @param opts - general options for execution (see [[generateUnsignedExecuteReport]])
-   * @param wallet - chain-specific wallet or signer instance, to sign transactions
+   * @param opts - ExecuteReport options
    * @returns transaction of the execution
    */
   abstract executeReport(
-    offRamp: string,
-    execReport: ExecutionReport,
-    opts: {
+    opts: ExecuteReportOpts & {
+      // Signer instance (chain-dependent)
       wallet: unknown
-      gasLimit?: number
-      tokensGasLimit?: number
-      forceBuffer?: boolean
-      forceLookupTable?: boolean
     },
   ): Promise<ChainTransaction>
 

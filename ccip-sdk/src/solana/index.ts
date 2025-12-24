@@ -1021,40 +1021,35 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /**
    * Raw/unsigned version of [[executeReport]]
-   * @param payer - payer address of the execution transaction
-   * @param offRamp - OffRamp contract address
-   * @param execReport_ - ExecutionReport of a dest=Solana message
-   * @param opts - execute report options
-   *   - forceBuffer - Whether to force the use of a buffer account
-   *   - forceLookupTable - Whether to force creation of a lookup table for the call
+   * @param opts - ExecuteReport options
    * @returns instructions - array of instructions to execute the report
    *   lookupTables - array of lookup tables for `manuallyExecute` call
    *   mainIndex - index of the `manuallyExecute` instruction in the array; last unless
    *   forceLookupTable is set, in which case last is ALT deactivation tx, and manuallyExecute is
    *   second to last
    */
-  async generateUnsignedExecuteReport(
-    payer: string,
-    offRamp: string,
-    execReport_: ExecutionReport,
-    opts?: { forceBuffer?: boolean; forceLookupTable?: boolean },
-  ): Promise<UnsignedSolanaTx> {
-    if (!('computeUnits' in execReport_.message))
+  async generateUnsignedExecuteReport({
+    payer,
+    offRamp,
+    execReport,
+    ...opts
+  }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedSolanaTx> {
+    if (!('computeUnits' in execReport.message))
       throw new CCIPExecutionReportChainMismatchError('Solana')
-    const execReport = execReport_ as ExecutionReport<CCIPMessage_V1_6_Solana>
-    const offRamp_ = new PublicKey(offRamp)
-    return generateUnsignedExecuteReport(this, new PublicKey(payer), offRamp_, execReport, opts)
+    const execReport_ = execReport as ExecutionReport<CCIPMessage_V1_6_Solana>
+    return generateUnsignedExecuteReport(
+      this,
+      new PublicKey(payer),
+      new PublicKey(offRamp),
+      execReport_,
+      opts,
+    )
   }
 
   /** {@inheritDoc Chain.executeReport} */
   async executeReport(
-    offRamp: string,
-    execReport: ExecutionReport,
-    opts: {
-      wallet: unknown
-      gasLimit?: number
-      forceLookupTable?: boolean
-      forceBuffer?: boolean
+    opts: Parameters<Chain['executeReport']>[0] & {
+      // when cleaning leftover LookUp Tables, wait deactivation grace period (~513 slots) then close ALT
       waitDeactivation?: boolean
     },
   ): Promise<ChainTransaction> {
@@ -1064,12 +1059,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     let hash
     do {
       try {
-        const unsigned = await this.generateUnsignedExecuteReport(
-          wallet.publicKey.toBase58(),
-          offRamp,
-          execReport,
-          opts,
-        )
+        const unsigned = await this.generateUnsignedExecuteReport({
+          ...opts,
+          payer: wallet.publicKey.toBase58(),
+        })
         hash = await simulateAndSendTxs(this, wallet, unsigned, opts?.gasLimit)
       } catch (err) {
         if (

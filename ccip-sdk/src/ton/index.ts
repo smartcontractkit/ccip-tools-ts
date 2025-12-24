@@ -929,12 +929,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /** {@inheritDoc Chain.generateUnsignedExecuteReport} */
-  generateUnsignedExecuteReport(
-    _payer: string,
-    offRamp: string,
-    execReport: ExecutionReport,
-    opts?: { gasLimit?: number },
-  ): Promise<UnsignedTONTx> {
+  generateUnsignedExecuteReport({
+    offRamp,
+    execReport,
+    ...opts
+  }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedTONTx> {
     if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
       throw new CCIPExtraArgsInvalidError('TON')
     }
@@ -953,22 +952,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /** {@inheritDoc Chain.executeReport} */
-  async executeReport(
-    offRamp: string,
-    execReport: ExecutionReport,
-    opts: { wallet: unknown; gasLimit?: number },
-  ): Promise<ChainTransaction> {
-    const wallet = opts.wallet
+  async executeReport(opts: Parameters<Chain['executeReport']>[0]): Promise<ChainTransaction> {
+    const { offRamp, wallet } = opts
     if (!isTONWallet(wallet)) {
       throw new CCIPWalletInvalidError(wallet)
     }
 
-    const unsigned = await this.generateUnsignedExecuteReport(
-      wallet.contract.address.toString(),
-      offRamp,
-      execReport as ExecutionReport<CCIPMessage_V1_6_TON>,
-      opts,
-    )
+    const unsigned = await this.generateUnsignedExecuteReport({
+      ...opts,
+      payer: wallet.contract.address.toString(),
+    })
 
     // Open wallet and send transaction using the unsigned data
     const openedWallet = this.provider.open(wallet.contract)

@@ -589,12 +589,12 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /** generate raw/unsigned `manually_execute` transaction data */
-  async generateUnsignedExecuteReport(
-    payer: string,
-    offRamp: string,
-    execReport: ExecutionReport,
-    opts: { gasLimit?: number },
-  ): Promise<UnsignedAptosTx> {
+  async generateUnsignedExecuteReport({
+    payer,
+    offRamp,
+    execReport,
+    ...opts
+  }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedAptosTx> {
     if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
       throw new CCIPAptosExtraArgsV2RequiredError()
     }
@@ -613,22 +613,16 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /** {@inheritDoc Chain.executeReport} */
-  async executeReport(
-    offRamp: string,
-    execReport: ExecutionReport,
-    opts: { wallet: unknown; gasLimit?: number },
-  ): Promise<ChainTransaction> {
+  async executeReport(opts: Parameters<Chain['executeReport']>[0]): Promise<ChainTransaction> {
     const account = opts.wallet
     if (!isAptosAccount(account)) {
       throw new CCIPAptosWalletInvalidError(this.constructor.name, util.inspect(opts.wallet))
     }
 
-    const unsignedTx = await this.generateUnsignedExecuteReport(
-      account.accountAddress.toString(),
-      offRamp,
-      execReport,
-      opts,
-    )
+    const unsignedTx = await this.generateUnsignedExecuteReport({
+      ...opts,
+      payer: account.accountAddress.toString(),
+    })
     const unsigned = SimpleTransaction.deserialize(new Deserializer(unsignedTx.transactions[0]))
 
     // Sign and submit the transaction
