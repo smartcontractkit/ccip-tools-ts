@@ -392,42 +392,47 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   abstract getTokenAdminRegistryFor(address: string): Promise<string>
   /**
    * Fetch the current fee for a given intended message
-   * @param router - router address on this chain
-   * @param destChainSelector - dest network selector
-   * @param message - message to send
+   * @param opts - Messages options
    */
-  abstract getFee(router: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint>
+  abstract getFee(opts: {
+    router: string
+    destChainSelector: bigint
+    message: AnyMessage
+  }): Promise<bigint>
   /**
    * Generate unsigned txs for ccipSend'ing a message
-   * @param sender - sender address
-   * @param router - address of the Router contract
-   * @param destChainSelector - chainSelector of destination chain
-   * @param message - AnyMessage to send; if `fee` is not present, it'll be calculated
-   * @param approveMax - if tokens approvals are needed, opt into approving maximum allowance
+   * @param opts - Send options
    * @returns chain-family specific unsigned txs
    */
-  abstract generateUnsignedSendMessage(
-    sender: string,
-    router: string,
-    destChainSelector: bigint,
-    message: AnyMessage & { fee?: bigint },
-    opts?: { approveMax?: boolean },
-  ): Promise<UnsignedTx[F]>
+  abstract generateUnsignedSendMessage(opts: {
+    // Sender address (address of wallet which will send the message)
+    sender: string
+    // Router address on this chain
+    router: string
+    // Destination network selector.
+    destChainSelector: bigint
+    // Message to send. If `fee` is omitted, it'll be calculated
+    message: AnyMessage & { fee?: bigint }
+    // Approve the maximum amount of tokens to transfer
+    approveMax?: boolean
+  }): Promise<UnsignedTx[F]>
   /**
    * Send a CCIP message through a router using provided wallet.
-   * @param router - Router address on this chain.
-   * @param destChainSelector - Destination network selector.
-   * @param message - Message to send.
-   * @param opts - Optional parameters:
-   *   - `wallet`: cli or environmental parameters to help pick a wallet
-   *   - `approveMax`: approve the maximum amount of tokens to transfer
+   * @param opts - Send options
+   * @returns CCIP request
    */
-  abstract sendMessage(
-    router: string,
-    destChainSelector: bigint,
-    message: AnyMessage & { fee?: bigint },
-    opts: { wallet: unknown; approveMax?: boolean },
-  ): Promise<CCIPRequest>
+  abstract sendMessage(opts: {
+    // Router address on this chain
+    router: string
+    // Destination network selector.
+    destChainSelector: bigint
+    // Message to send. If `fee` is omitted, it'll be calculated
+    message: AnyMessage & { fee?: bigint }
+    // Signer instance (chain-dependent)
+    wallet: unknown
+    // Approve the maximum amount of tokens to transfer
+    approveMax?: boolean
+  }): Promise<CCIPRequest>
   /**
    * Fetch supported offchain token data for a request from this network
    * @param request - CCIP request, with tx, logs and message

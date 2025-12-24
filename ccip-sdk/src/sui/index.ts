@@ -24,7 +24,6 @@ import { getSuiLeafHasher } from './hasher.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
-  type AnyMessage,
   type CCIPMessage,
   type CCIPRequest,
   type CCIPVersion,
@@ -581,28 +580,19 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.getFee} */
-  async getFee(_router: string, _destChainSelector: bigint, _message: AnyMessage): Promise<bigint> {
+  async getFee(_opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.getFee'))
   }
 
   /** {@inheritDoc Chain.generateUnsignedSendMessage} */
   override generateUnsignedSendMessage(
-    _sender: string,
-    _router: string,
-    _destChainSelector: bigint,
-    _message: AnyMessage & { fee?: bigint },
-    _opts?: { approveMax?: boolean },
+    _opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<never> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.generateUnsignedSendMessage'))
   }
 
   /** {@inheritDoc Chain.sendMessage} */
-  async sendMessage(
-    _router: string,
-    _destChainSelector: bigint,
-    _message: AnyMessage & { fee: bigint },
-    _opts?: { wallet?: unknown; approveMax?: boolean },
-  ): Promise<CCIPRequest> {
+  async sendMessage(_opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.sendMessage'))
   }
 

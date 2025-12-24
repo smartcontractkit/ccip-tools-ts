@@ -19,7 +19,6 @@ import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra
 import { getMessagesInTx } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
-  type AnyMessage,
   type CCIPCommit,
   type CCIPExecution,
   type CCIPRequest,
@@ -763,13 +762,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * TON emits ExecutionStateChanged for each state transition (Untouched → InProgress → Success),
    * but we only care about final states (Success or Failure), not intermediate ones.
    */
-  override async *fetchExecutionReceipts(
+  override async *getExecutionReceipts(
     offRamp: string,
     request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
     commit?: CCIPCommit,
     hints?: Pick<LogFilter, 'page' | 'watch'>,
   ): AsyncIterableIterator<CCIPExecution> {
-    for await (const execution of super.fetchExecutionReceipts(offRamp, request, commit, hints)) {
+    for await (const execution of super.getExecutionReceipts(offRamp, request, commit, hints)) {
       if (
         execution.receipt.state === ExecutionState.Success ||
         execution.receipt.state === ExecutionState.Failed
@@ -908,28 +907,19 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /** {@inheritDoc Chain.getFee} */
-  async getFee(_router: string, _destChainSelector: bigint, _message: AnyMessage): Promise<bigint> {
+  async getFee(_opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
     return Promise.reject(new CCIPNotImplementedError('getFee'))
   }
 
   /** {@inheritDoc Chain.generateUnsignedSendMessage} */
   generateUnsignedSendMessage(
-    _sender: string,
-    _router: string,
-    _destChainSelector: bigint,
-    _message: AnyMessage & { fee?: bigint },
-    _opts?: { approveMax?: boolean },
+    _opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<never> {
     return Promise.reject(new CCIPNotImplementedError('generateUnsignedSendMessage'))
   }
 
   /** {@inheritDoc Chain.sendMessage} */
-  async sendMessage(
-    _router: string,
-    _destChainSelector: bigint,
-    _message: AnyMessage & { fee: bigint },
-    _opts?: { wallet?: unknown; approveMax?: boolean },
-  ): Promise<CCIPRequest> {
+  async sendMessage(_opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
     return Promise.reject(new CCIPNotImplementedError('sendMessage'))
   }
 

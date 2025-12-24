@@ -64,7 +64,6 @@ import type { LeafHasher } from '../hasher/common.ts'
 import SELECTORS from '../selectors.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
-  type AnyMessage,
   type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
@@ -976,30 +975,23 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /** {@inheritDoc Chain.getFee} */
-  getFee(router: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint> {
+  getFee({ router, destChainSelector, message }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
     return getFee(this, router, destChainSelector, message)
   }
 
   /**
    * Raw/unsigned version of [[sendMessage]]
    *
-   * @param sender - sender/feePayer address
-   * @param router - router address
-   * @param destChainSelector - destination chain selector
-   * @param message - AnyMessage to send (with or without fee)
-   * @param approveMax - approve max amount of tokens if needed, instead of only what's needed
+   * @param opts - Send options
    * @returns instructions - array of instructions; `ccipSend` is last, after any approval
    *   lookupTables - array of lookup tables for `ccipSend` call
    *   mainIndex - instructions.length - 1
    */
   async generateUnsignedSendMessage(
-    sender: string,
-    router: string,
-    destChainSelector: bigint,
-    message: AnyMessage & { fee?: bigint },
-    opts?: { approveMax?: boolean },
+    opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedSolanaTx> {
-    if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
+    const { sender, router, destChainSelector, message } = opts
+    if (!message.fee) message.fee = await this.getFee(opts)
     return generateUnsignedCcipSend(
       this,
       new PublicKey(sender),
@@ -1011,23 +1003,14 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /** {@inheritDoc Chain.sendMessage} */
-  async sendMessage(
-    router: string,
-    destChainSelector: bigint,
-    message: AnyMessage & { fee?: bigint },
-    opts: { wallet: unknown; approveMax?: boolean },
-  ): Promise<CCIPRequest> {
-    const wallet = opts.wallet
-    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(util.inspect(wallet))
-    const unsigned = await this.generateUnsignedSendMessage(
-      wallet.publicKey.toBase58(),
-      router,
-      destChainSelector,
-      message,
-      opts,
-    )
+  async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
+    if (!isWallet(opts.wallet)) throw new CCIPWalletInvalidError(util.inspect(opts.wallet))
+    const unsigned = await this.generateUnsignedSendMessage({
+      ...opts,
+      sender: opts.wallet.publicKey.toBase58(),
+    })
 
-    const hash = await simulateAndSendTxs(this, wallet, unsigned)
+    const hash = await simulateAndSendTxs(this, opts.wallet, unsigned)
     return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]
   }
 

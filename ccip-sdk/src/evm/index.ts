@@ -64,7 +64,6 @@ import {
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
-  type AnyMessage,
   type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
@@ -955,13 +954,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.getFee} */
-  async getFee(router_: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint> {
-    const router = new Contract(
-      router_,
+  async getFee({
+    router,
+    destChainSelector,
+    message,
+  }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+    const contract = new Contract(
+      router,
       interfaces.Router,
       this.provider,
     ) as unknown as TypedContract<typeof Router_ABI>
-    return router.getFee(destChainSelector, {
+    return contract.getFee(destChainSelector, {
       receiver: zeroPadValue(getAddressBytes(message.receiver), 32),
       data: hexlify(message.data),
       tokenAmounts: message.tokenAmounts ?? [],
@@ -972,22 +975,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /**
    * Generate unsigned txs for ccipSend'ing a message
-   * @param sender - sender address
-   * @param router - address of the Router contract
-   * @param destChainSelector - chainSelector of destination chain
-   * @param message - AnyMessage to send; if `fee` is not present, it'll be calculated
-   * @param approveMax - if tokens approvals are needed, opt into approving maximum allowance
+   * @param opts - Send options
    * @returns Array containing 0 or more unsigned token approvals txs (if needed at the time of
    *   generation), followed by a ccipSend TransactionRequest
    */
   async generateUnsignedSendMessage(
-    sender: string,
-    router: string,
-    destChainSelector: bigint,
-    message: AnyMessage & { fee?: bigint },
-    opts?: { approveMax?: boolean },
+    opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedEVMTx> {
-    if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
+    const { sender, router, destChainSelector, message } = opts
+    if (!message.fee) message.fee = await this.getFee(opts)
     const feeToken = message.feeToken ?? ZeroAddress
     const receiver = zeroPadValue(getAddressBytes(message.receiver), 32)
     const data = hexlify(message.data)
@@ -1047,23 +1043,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.sendMessage} */
-  async sendMessage(
-    router_: string,
-    destChainSelector: bigint,
-    message: AnyMessage & { fee?: bigint },
-    opts: { wallet: unknown; approveMax?: boolean },
-  ): Promise<CCIPRequest> {
+  async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
     const wallet = opts.wallet
     if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
 
     const sender = await wallet.getAddress()
-    const txs = await this.generateUnsignedSendMessage(
-      sender,
-      router_,
-      destChainSelector,
-      message,
-      opts,
-    )
+    const txs = await this.generateUnsignedSendMessage({ ...opts, sender })
     const approveTxs = txs.transactions.slice(0, txs.transactions.length - 1)
     let sendTx: TransactionRequest = txs.transactions[txs.transactions.length - 1]
 

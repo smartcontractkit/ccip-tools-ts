@@ -59,7 +59,6 @@ import {
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
-  type AnyMessage,
   type CCIPMessage,
   type CCIPRequest,
   type ChainTransaction,
@@ -526,19 +525,20 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /** {@inheritDoc Chain.getFee} */
-  async getFee(router: string, destChainSelector: bigint, message: AnyMessage): Promise<bigint> {
+  async getFee({
+    router,
+    destChainSelector,
+    message,
+  }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
     return getFee(this.provider, router, destChainSelector, message)
   }
 
   /** generate raw/unsigned `ccip_send` transaction */
   async generateUnsignedSendMessage(
-    sender: string,
-    router: string,
-    destChainSelector: bigint,
-    message: AnyMessage & { fee?: bigint },
-    opts: { approveMax?: boolean },
+    opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedAptosTx> {
-    if (!message.fee) message.fee = await this.getFee(router, destChainSelector, message)
+    const { sender, router, destChainSelector, message } = opts
+    if (!message.fee) message.fee = await this.getFee(opts)
     const tx = await generateUnsignedCcipSend(
       this.provider,
       sender,
@@ -554,24 +554,16 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /** {@inheritDoc Chain.sendMessage} */
-  async sendMessage(
-    router: string,
-    destChainSelector: bigint,
-    message: AnyMessage & { fee?: bigint },
-    opts: { wallet: unknown; approveMax?: boolean },
-  ): Promise<CCIPRequest> {
+  async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
     const account = opts.wallet
     if (!isAptosAccount(account)) {
       throw new CCIPAptosWalletInvalidError(this.constructor.name, util.inspect(opts.wallet))
     }
 
-    const unsignedTx = await this.generateUnsignedSendMessage(
-      account.accountAddress.toString(),
-      router,
-      destChainSelector,
-      message,
-      opts,
-    )
+    const unsignedTx = await this.generateUnsignedSendMessage({
+      ...opts,
+      sender: account.accountAddress.toString(),
+    })
     const unsigned = SimpleTransaction.deserialize(new Deserializer(unsignedTx.transactions[0]))
 
     // Sign and submit the transaction

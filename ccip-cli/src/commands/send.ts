@@ -296,7 +296,11 @@ async function sendMessage(
   }
 
   // calculate fee
-  const fee = await source.getFee(argv.router, destNetwork.chainSelector, message)
+  const fee = await source.getFee({
+    ...argv,
+    destChainSelector: destNetwork.chainSelector,
+    message,
+  })
 
   logger.info(
     'Fee:',
@@ -310,12 +314,12 @@ async function sendMessage(
   if (argv.onlyGetFee) return
 
   if (!walletAddress) [walletAddress, wallet] = await loadChainWallet(source, argv)
-  const request = await source.sendMessage(
-    argv.router,
-    destNetwork.chainSelector,
-    { ...message, fee },
-    { ...argv, wallet },
-  )
+  const request = await source.sendMessage({
+    ...argv,
+    destChainSelector: destNetwork.chainSelector,
+    message: { ...message, fee },
+    wallet,
+  })
   logger.info(
     '🚀 Sending message to',
     tokenReceiver && tokenReceiver !== '11111111111111111111111111111111'
