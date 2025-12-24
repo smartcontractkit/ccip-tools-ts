@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-sdk",
-  "version": "0.92.1",
+  "version": "0.93.0",
   "description": "SDK/Library to interact with CCIP",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -60,7 +60,7 @@
     "ethers-abitype": "1.0.3",
     "prettier": "^3.7.4",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.50.0",
+    "typescript-eslint": "8.50.1",
     "viem": "^2.43.3"
   },
   "dependencies": {

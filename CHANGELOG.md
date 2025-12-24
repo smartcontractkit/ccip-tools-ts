@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.93.0] - 2025-12-24 - Pre-release
 - SDK: `CCIPAPIClient` and `Chain.getLaneLatency()` for querying lane delivery times via CCIP API
 - CLI: `lane-latency <source> <dest>` command; `--no-api` flag for decentralized mode
 - SDK: `MessageStatus` enum for message lifecycle tracking

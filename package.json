@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-tools-ts",
-  "version": "0.92.1",
+  "version": "0.93.0",
   "description": "CLI and library to interact with CCIP",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -37,7 +37,7 @@
     "glob": "13.0.0",
     "prettier": "3.7.4",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.50.0",
+    "typescript-eslint": "8.50.1",
     "yaml": "2.8.2"
   },
   "overrides": {
