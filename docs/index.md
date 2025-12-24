@@ -103,7 +103,7 @@ console.log('Fee:', fee.toString())
 
 | Chain Family | Networks | Library | Status |
 |--------------|----------|---------|--------|
-| EVM | Ethereum, Arbitrum, Optimism, Polygon, Avalanche, Base, etc. | [ethers.js v6](https://docs.ethers.org/v6/) | Supported |
+| EVM | Ethereum, Arbitrum, Optimism, Polygon, Avalanche, Base, etc. | [ethers.js v6](https://docs.ethers.org/v6/) or [viem](https://viem.sh/) | Supported |
 | Solana | Mainnet, Devnet | [solana-web3.js](https://github.com/solana-foundation/solana-web3.js) | Supported |
 | Aptos | Mainnet, Testnet | [aptos-ts-sdk](https://github.com/aptos-labs/aptos-ts-sdk) | Supported |
 | Sui | Mainnet, Testnet | [@mysten/sui](https://github.com/MystenLabs/sui) | Partial (manual exec) |

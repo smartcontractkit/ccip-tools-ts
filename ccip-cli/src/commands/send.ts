@@ -328,7 +328,6 @@ async function sendMessage(
     ', messageId =>',
     request.message.messageId,
   )
-
   await showRequests(ctx, {
     ...argv,
     txHash: request.tx.hash,

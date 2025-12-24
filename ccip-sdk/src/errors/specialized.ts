@@ -1689,3 +1689,21 @@ export class CCIPApiClientNotAvailableError extends CCIPError {
     )
   }
 }
+
+// Viem Adapter
+
+/** Thrown when viem adapter encounters an issue. */
+export class CCIPViemAdapterError extends CCIPError {
+  override readonly name = 'CCIPViemAdapterError'
+  /**
+   * Creates a viem adapter error.
+   * @param message - Error message describing the issue
+   * @param options - Additional error options including recovery hints
+   */
+  constructor(message: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.VIEM_ADAPTER_ERROR, message, {
+      ...options,
+      isTransient: false,
+    })
+  }
+}

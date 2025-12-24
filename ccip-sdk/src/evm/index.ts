@@ -7,6 +7,7 @@ import {
   type Signer,
   type TransactionReceipt,
   type TransactionRequest,
+  type TransactionResponse,
   Contract,
   JsonRpcProvider,
   Result,
@@ -153,6 +154,24 @@ function isSigner(wallet: unknown): wallet is Signer {
     'signTransaction' in wallet &&
     'getAddress' in wallet
   )
+}
+
+/**
+ * Submit transaction using best available method.
+ * Try sendTransaction() first (works with browser wallets),
+ * fallback to signTransaction() + broadcastTransaction() if unsupported.
+ */
+async function submitTransaction(
+  wallet: Signer,
+  tx: TransactionRequest,
+  provider: JsonRpcApiProvider,
+): Promise<TransactionResponse> {
+  try {
+    return await wallet.sendTransaction(tx)
+  } catch {
+    const signed = await wallet.signTransaction(tx)
+    return provider.broadcastTransaction(signed)
+  }
 }
 
 /**
@@ -1055,8 +1074,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         tx.nonce = nonce++
         tx = await wallet.populateTransaction(tx)
         tx.from = undefined
-        const signed = await wallet.signTransaction(tx)
-        const response = await this.provider.broadcastTransaction(signed)
+        const response = await submitTransaction(wallet, tx, this.provider)
         this.logger.debug('approve =>', response.hash)
         return response
       }),
@@ -1067,8 +1085,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     // sendTx.gasLimit = await this.provider.estimateGas(sendTx)
     sendTx = await wallet.populateTransaction(sendTx)
     sendTx.from = undefined // some signers don't like receiving pre-populated `from`
-    const signed = await wallet.signTransaction(sendTx)
-    const response = await this.provider.broadcastTransaction(signed)
+    const response = await submitTransaction(wallet, sendTx, this.provider)
     this.logger.debug('ccipSend =>', response.hash)
     await response.wait(1, 60_000)
     return (await this.getMessagesInTx(await this.getTransaction(response.hash)))[0]
@@ -1218,9 +1235,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     )
     const unsignedTx = await wallet.populateTransaction(unsignedTxs.transactions[0])
     unsignedTx.from = undefined // some signers don't like receiving pre-populated `from`
-    const signed = await wallet.signTransaction(unsignedTx)
-    const response = await this.provider.broadcastTransaction(signed)
-    this.logger.debug('ccipSend =>', response.hash)
+    const response = await submitTransaction(wallet, unsignedTx, this.provider)
+    this.logger.debug('manuallyExecute =>', response.hash)
     const receipt = await response.wait(1, 60_000)
     if (!receipt?.hash) throw new CCIPExecTxNotConfirmedError(response.hash)
     if (!receipt.status) throw new CCIPExecTxRevertedError(response.hash)

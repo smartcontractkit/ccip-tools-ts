@@ -39,7 +39,7 @@ const aptosChain = await AptosChain.fromUrl('https://api.testnet.aptoslabs.com/v
 
 | Chain Family | Class | Library | Status |
 |--------------|-------|---------|--------|
-| EVM | `EVMChain` | [ethers.js v6](https://docs.ethers.org/v6/) | Supported |
+| EVM | `EVMChain` | [ethers.js v6](https://docs.ethers.org/v6/) or [viem](https://viem.sh/) | Supported |
 | Solana | `SolanaChain` | [solana-web3.js](https://github.com/solana-foundation/solana-web3.js) | Supported |
 | Aptos | `AptosChain` | [aptos-ts-sdk](https://github.com/aptos-labs/aptos-ts-sdk) | Supported |
 | Sui | `SuiChain` | [@mysten/sui](https://github.com/MystenLabs/sui) | Partial (manual exec) |
@@ -224,6 +224,7 @@ Transaction-sending methods require a chain-specific wallet:
 | Chain | Wallet Type | Example |
 |-------|-------------|---------|
 | EVM | `ethers.Signer` | `new Wallet(privateKey, provider)` |
+| EVM (viem) | `viemWallet(WalletClient)` | See [Using with Viem](#using-with-viem) |
 | Solana | `anchor.Wallet` | `new Wallet(Keypair.fromSecretKey(...))` |
 | Aptos | `aptos.Account` | `Account.fromPrivateKey(...)` |
 
@@ -250,6 +251,73 @@ For EVM chains in browsers, get a signer from the connected wallet:
 ```ts
 const signer = await source.provider.getSigner()
 ```
+:::
+
+## Using with Viem
+
+If you prefer [viem](https://viem.sh/) over ethers.js, the SDK provides adapters via a separate entry point:
+
+```bash
+npm install viem  # Required peer dependency
+```
+
+### Create EVMChain from viem PublicClient
+
+```ts
+import { createPublicClient, http } from 'viem'
+import { mainnet } from 'viem/chains'
+import { fromViemClient } from '@chainlink/ccip-sdk/viem'
+
+const publicClient = createPublicClient({
+  chain: mainnet,
+  transport: http('https://ethereum-rpc.publicnode.com'),
+})
+
+const chain = await fromViemClient(publicClient)
+
+// All read operations work the same way
+const messages = await chain.getMessagesInTx(txHash)
+const fee = await chain.getFee(router, destSelector, message)
+```
+
+### Send Transactions with viem WalletClient
+
+```ts
+import { createPublicClient, createWalletClient, http } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
+import { mainnet } from 'viem/chains'
+import { fromViemClient, viemWallet } from '@chainlink/ccip-sdk/viem'
+
+// Create viem clients
+const account = privateKeyToAccount('0x...')
+
+const publicClient = createPublicClient({
+  chain: mainnet,
+  transport: http('https://ethereum-rpc.publicnode.com'),
+})
+
+const walletClient = createWalletClient({
+  chain: mainnet,
+  transport: http('https://ethereum-rpc.publicnode.com'),
+  account,
+})
+
+// Create EVMChain
+const chain = await fromViemClient(publicClient)
+
+// Send message using viemWallet adapter
+const request = await chain.sendMessage(
+  router,
+  destSelector,
+  message,
+  { wallet: viemWallet(walletClient) }
+)
+
+console.log('Transaction:', request.tx.hash)
+```
+
+:::note Local Accounts
+The `viemWallet` adapter properly handles both local accounts (created with `privateKeyToAccount`) and JSON-RPC accounts (browser wallets). It uses a custom `AbstractSigner` implementation to avoid the `eth_accounts` limitation with local accounts.
 :::
 
 ## Extending the SDK

@@ -155,6 +155,9 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   HTTP_ERROR: 'HTTP request failed. 429 indicates rate limiting.',
   RPC_NOT_FOUND: 'No RPC endpoint found. Configure an RPC URL.',
 
+  VIEM_ADAPTER_ERROR:
+    'Check that your viem client has both account and chain defined. For WalletClient, use createWalletClient({ chain, account, ... }).',
+
   API_CLIENT_NOT_AVAILABLE:
     'The API client was explicitly disabled. To use API features like getLaneLatency(), create the Chain without apiClient: null or provide a CCIPAPIClient instance.',
 

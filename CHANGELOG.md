@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDK: `MessageStatus` enum for message lifecycle tracking
 - CLI: `show --wait` displays status progression during message tracking
 - SDK: Rename `fetch*` to `get*` for message methods (`getMessagesInTx`, `getMessageById`, `getMessagesForSender`)
+- SDK: Viem adapter via `@chainlink/ccip-sdk/viem` - use `fromViemClient()` and `viemWallet()` for viem users
+- SDK: `getCCIPExplorerUrl()` and `getCCIPExplorerLinks()` for CCIP Explorer URL generation
+- CLI: `send` and `show` commands now display CCIP Explorer links for visual transaction tracking
+- SDK: Added `sideEffects: false` to package.json for improved tree-shaking support
 
 ## [0.92.0] - 2025-12-20 - Pre-release
 - SDK: `Chain.getLogs` can receive `watch` boolean or cancel promise, to enter continuous logs fetching

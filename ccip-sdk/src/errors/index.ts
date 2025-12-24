@@ -166,6 +166,9 @@ export {
 // Specialized errors - API Client
 export { CCIPApiClientNotAvailableError } from './specialized.ts'
 
+// Specialized errors - Viem Adapter
+export { CCIPViemAdapterError } from './specialized.ts'
+
 // Specialized errors - Address Validation
 export { CCIPAddressInvalidEvmError } from './specialized.ts'
 
