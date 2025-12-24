@@ -60,13 +60,13 @@ import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
 
 const source = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.com')
 const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
-const destSelector = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector
+const destChainSelector = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector
 
-const fee = await source.getFee(router, destSelector, {
+const fee = await source.getFee({ router, destChainSelector, message: {
   receiver: '0xYourReceiverAddress',
   data: '0x48656c6c6f', // "Hello" in hex
   extraArgs: { gasLimit: 200_000 }, // Gas limit for receiver's ccipReceive callback
-})
+} })
 
 console.log('Fee in native token:', fee.toString())
 ```
@@ -81,10 +81,10 @@ const source = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.c
 const wallet = new Wallet('YOUR_PRIVATE_KEY', source.provider)
 
 const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
-const destSelector = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector
+const destChainSelector = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector
 
 // Get fee first
-const fee = await source.getFee(router, destSelector, {
+const fee = await source.getFee({ router, destChainSelector, message: {
   receiver: '0xYourReceiverAddress',
   data: '0x48656c6c6f',
   extraArgs: {
@@ -94,17 +94,17 @@ const fee = await source.getFee(router, destSelector, {
 })
 
 // Send the message
-const request = await source.sendMessage(
+const request = await source.sendMessage({
   router,
-  destSelector,
-  {
+  destChainSelector,
+  message: {
     receiver: '0xYourReceiverAddress',
     data: '0x48656c6c6f',
     extraArgs: { gasLimit: 200_000, allowOutOfOrderExecution: true },
     fee,
   },
-  { wallet }
-)
+  wallet,
+})
 
 console.log('Transaction hash:', request.tx.hash)
 console.log('Message ID:', request.message.messageId)
@@ -126,22 +126,24 @@ For custom signing workflows (e.g., browser wallets, hardware wallets), use the 
 
 ```ts
 // Generate unsigned transaction data
-const unsignedTx = await source.generateUnsignedSendMessage(
-  senderAddress, // Your wallet address
+const unsignedTx = await source.generateUnsignedSendMessage({
+  sender, // Your wallet address
   router,
-  destSelector,
+  destChainSelector,
   message
-)
+})
 
 // Sign and send with your own logic
-const signedTx = await customSigner.sign(unsignedTx)
-await customSender.broadcast(signedTx)
+for (const tx of unsignedTx.transactions) {
+  const signed = await customSigner.sign(tx)
+  await customSender.broadcast(signed)
+}
 ```
 
 For EVM chains in browsers, get a signer from the connected wallet:
 
 ```ts
-const signer = await source.provider.getSigner()
+const signer = await source.provider.getSigner(0)
 ```
 
 ## Supported Chains

@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDK: `getCCIPExplorerUrl()` and `getCCIPExplorerLinks()` for CCIP Explorer URL generation
 - CLI: `send` and `show` commands now display CCIP Explorer links for visual transaction tracking
 - SDK: Added `sideEffects: false` to package.json for improved tree-shaking support
-- SDK: Rename `fetch*` to `get*` for message methods (`getMessagesInTx`, `getMessageById`, `getMessagesForSender`, `getAllMessagesInBatch`, `getOffchainTokenData`, `getCommitReport`, `getExecutionReceipts`)
+- SDK: **Breaking**: Rename `fetch*` to `get*` for message methods (`getMessagesInTx`, `getMessageById`, `getMessagesForSender`, `getAllMessagesInBatch`, `getOffchainTokenData`, `getCommitReport`, `getExecutionReceipts`)
+- SDK: **Breaking**: Convert methods with >2 arguments (besides opts/ctx) to single destructured object argument (`getFee`, `generateUnsignedSendMessage`, `sendMessage`, `generateUnsignedExecuteReport`, `executeReport`, `getCommitReport`, `getExecutionReceipts`, `waitFinalized`)
 
 ## [0.92.0] - 2025-12-20 - Pre-release
 - SDK: `Chain.getLogs` can receive `watch` boolean or cancel promise, to enter continuous logs fetching

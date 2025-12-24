@@ -29,13 +29,13 @@ import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
 
 const source = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.com')
 const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
-const dest = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector
+const destChainSelector = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector
 
-const fee = await source.getFee(router, dest, {
+const fee = await source.getFee({ router, destChainSelector, message: {
   receiver: '0xYourAddress',
   data: '0x48656c6c6f',
   extraArgs: { gasLimit: 200_000 },
-})
+}})
 ```
 
 ## Supported Chains
