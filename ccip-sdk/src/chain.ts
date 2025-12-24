@@ -244,21 +244,22 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Confirm a log tx is finalized or wait for it to be finalized
    * Throws if it isn't included (e.g. a reorg)
    */
-  async waitFinalized(
-    {
-      log,
-      tx,
-    }: SetOptional<
+  async waitFinalized({
+    request: { log, tx },
+    finality = 'finalized',
+    cancel$,
+  }: {
+    request: SetOptional<
       PickDeep<
         CCIPRequest,
         | `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'tx.timestamp'}`
         | 'tx.timestamp'
       >,
       'tx'
-    >,
-    finality: number | 'finalized' = 'finalized',
-    cancel$?: Promise<unknown>,
-  ): Promise<true> {
+    >
+    finality?: number | 'finalized'
+    cancel$?: Promise<unknown>
+  }): Promise<true> {
     const timestamp = log.tx?.timestamp ?? tx?.timestamp
     if (!timestamp || Date.now() / 1e3 - timestamp > 60) {
       // only try to fetch tx if request is old enough (>60s)
@@ -482,16 +483,19 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Look for a CommitReport at dest for given CCIP request
    * May be specialized by some subclasses
    *
-   * @param commitStore - Commit store address
-   * @param request - CCIPRequest to get commit info for
-   * @param hints - Additional filtering hints
+   * @param opts - getCommitReport options
    * @returns CCIPCommit info, or reject if none found
    **/
-  async getCommitReport(
-    commitStore: string,
-    request: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>,
-    hints?: Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number },
-  ): Promise<CCIPCommit> {
+  async getCommitReport({
+    commitStore,
+    request,
+    ...hints
+  }: {
+    // address of commitStore (OffRamp in >=v1.6)
+    commitStore: string
+    // CCIPRequest subset object
+    request: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>
+  } & Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number }): Promise<CCIPCommit> {
     return getCommitReport(this, commitStore, request, hints)
   }
 
@@ -536,18 +540,22 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
   /**
    * Default/generic implementation of getExecutionReceipts
-   * @param offRamp - Off-ramp address
-   * @param request - CCIPRequest to get execution receipts for
-   * @param commit - CCIPCommit info to help narrowing search for executions
-   * @param hints - Additional filtering hints
+   * @param opts - getExecutionReceipts options
    * @returns Async generator of CCIPExecution receipts
    */
-  async *getExecutionReceipts(
-    offRamp: string,
-    request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
-    commit?: CCIPCommit,
-    hints?: Pick<LogFilter, 'page' | 'watch'>,
-  ): AsyncIterableIterator<CCIPExecution> {
+  async *getExecutionReceipts({
+    offRamp,
+    request,
+    commit,
+    ...hints
+  }: {
+    // address of OffRamp contract
+    offRamp: string
+    // request to scan executions for
+    request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>
+    // optional commit associated with the request, can be used for optimizations in some families
+    commit?: CCIPCommit
+  } & Pick<LogFilter, 'page' | 'watch'>): AsyncIterableIterator<CCIPExecution> {
     const onlyLast = !commit?.log.blockNumber && !request.tx.timestamp // backwards
     for await (const log of this.getLogs({
       startBlock: commit?.log.blockNumber,

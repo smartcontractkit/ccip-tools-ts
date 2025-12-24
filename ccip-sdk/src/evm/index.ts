@@ -64,7 +64,6 @@ import {
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
-  type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
@@ -1435,12 +1434,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /** {@inheritDoc Chain.getExecutionReceipts} */
   override async *getExecutionReceipts(
-    offRamp: string,
-    request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
-    commit?: CCIPCommit,
-    opts?: Pick<LogFilter, 'page' | 'watch'>,
+    opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
-    let opts_: Parameters<EVMChain['getLogs']>[0] | undefined = opts
+    const { request } = opts
+    let opts_: Parameters<Chain['getExecutionReceipts']>[0] & Parameters<EVMChain['getLogs']>[0] =
+      opts
     if (request.lane.version < CCIPVersion.V1_6) {
       opts_ = {
         ...opts,
@@ -1463,6 +1461,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         // onlyFallback: false,
       }
     }
-    yield* super.getExecutionReceipts(offRamp, request, commit, opts_)
+    yield* super.getExecutionReceipts(opts_)
   }
 }

@@ -121,11 +121,10 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   const finalized$ = (async () => {
     if (argv.wait) {
       logger.info(`[${MessageStatus.Sent}] Waiting for source chain finalization...`)
-      await source.waitFinalized(
+      await source.waitFinalized({
         request,
-        undefined,
-        new Promise<void>((resolve) => (cancelWaitFinalized = resolve)),
-      )
+        cancel$: new Promise<void>((resolve) => (cancelWaitFinalized = resolve)),
+      })
       logger.info(`[${MessageStatus.SourceFinalized}] Source chain finalized`)
     }
 
@@ -160,7 +159,9 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
 
   let cancelWaitCommit: (() => void) | undefined
   const commit$ = (async () => {
-    const commit = await dest.getCommitReport(commitStore, request, {
+    const commit = await dest.getCommitReport({
+      commitStore,
+      request,
       ...argv,
       watch: argv.wait && new Promise<void>((resolve) => (cancelWaitCommit = resolve)),
     })
@@ -187,12 +188,13 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   })()
 
   let found = false
-  for await (const receipt of dest.getExecutionReceipts(
+  for await (const receipt of dest.getExecutionReceipts({
+    ...argv,
     offRamp,
     request,
-    !argv.wait ? await commit$ : undefined,
-    { ...argv, watch: argv.wait && ctx.destroy$ },
-  )) {
+    commit: !argv.wait ? await commit$ : undefined,
+    watch: argv.wait && ctx.destroy$,
+  })) {
     cancelWaitCommit?.()
     await commit$
     const status =

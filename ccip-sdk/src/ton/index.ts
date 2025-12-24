@@ -19,8 +19,6 @@ import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra
 import { getMessagesInTx } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
-  type CCIPCommit,
-  type CCIPExecution,
   type CCIPRequest,
   type ChainTransaction,
   type CommitReport,
@@ -725,7 +723,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @returns ExecutionReceipt or undefined if not valid.
    */
   static decodeReceipt({ data }: Pick<Log_, 'data'>): ExecutionReceipt | undefined {
-    if (!data || typeof data !== 'string') return undefined
+    if (!data || typeof data !== 'string') return
 
     try {
       const boc = bytesToBuffer(data)
@@ -733,48 +731,27 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const slice = cell.beginParse()
 
       // ExecutionStateChanged has no refs
-      if (cell.refs.length > 0) return undefined
+      if (cell.refs.length > 0) return
 
       // Cell body contains only the struct fields
       // ExecutionStateChanged: sourceChainSelector(64) + sequenceNumber(64) + messageId(256) + state(8)
       const sourceChainSelector = slice.loadUintBig(64)
       const sequenceNumber = slice.loadUintBig(64)
       const messageId = toBeHex(slice.loadUintBig(256), 32)
-      const state = slice.loadUint(8) as ExecutionState
+      const state = slice.loadUint(8)
 
-      // Validate state is a valid ExecutionState (0-3)
-      if (state > 3) return undefined
+      // Validate state is a valid ExecutionState (2-3)
+      // TON has intermediary txs with state 1 (InProgress), but we filter them here
+      if (state !== ExecutionState.Success && state !== ExecutionState.Failed) return
 
       return {
         messageId,
         sequenceNumber,
         sourceChainSelector,
-        state: state,
+        state: state as ExecutionState,
       }
     } catch {
-      return undefined
-    }
-  }
-
-  /**
-   *
-   * TON override: Only yields final execution states (Success or Failure).
-   * TON emits ExecutionStateChanged for each state transition (Untouched → InProgress → Success),
-   * but we only care about final states (Success or Failure), not intermediate ones.
-   */
-  override async *getExecutionReceipts(
-    offRamp: string,
-    request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
-    commit?: CCIPCommit,
-    hints?: Pick<LogFilter, 'page' | 'watch'>,
-  ): AsyncIterableIterator<CCIPExecution> {
-    for await (const execution of super.getExecutionReceipts(offRamp, request, commit, hints)) {
-      if (
-        execution.receipt.state === ExecutionState.Success ||
-        execution.receipt.state === ExecutionState.Failed
-      ) {
-        yield execution
-      }
+      return
     }
   }
 

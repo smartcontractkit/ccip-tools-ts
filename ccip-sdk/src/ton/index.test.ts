@@ -765,7 +765,10 @@ describe('TON index unit tests', () => {
       const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
 
       const receipts = []
-      for await (const receipt of tonChain.getExecutionReceipts(TEST_OFFRAMP, baseRequest as any)) {
+      for await (const receipt of tonChain.getExecutionReceipts({
+        offRamp: TEST_OFFRAMP,
+        request: baseRequest as any,
+      })) {
         receipts.push(receipt)
       }
 
@@ -783,7 +786,10 @@ describe('TON index unit tests', () => {
       const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
 
       const receipts = []
-      for await (const receipt of tonChain.getExecutionReceipts(TEST_OFFRAMP, baseRequest as any)) {
+      for await (const receipt of tonChain.getExecutionReceipts({
+        offRamp: TEST_OFFRAMP,
+        request: baseRequest as any,
+      })) {
         receipts.push(receipt)
       }
 
@@ -811,7 +817,10 @@ describe('TON index unit tests', () => {
       }
 
       const receipts = []
-      for await (const receipt of tonChain.getExecutionReceipts(TEST_OFFRAMP, request as any)) {
+      for await (const receipt of tonChain.getExecutionReceipts({
+        offRamp: TEST_OFFRAMP,
+        request: request as any,
+      })) {
         receipts.push(receipt)
       }
 
@@ -879,7 +888,10 @@ describe('TON index unit tests', () => {
       const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
 
       const receipts = []
-      for await (const receipt of tonChain.getExecutionReceipts(TEST_OFFRAMP, baseRequest as any)) {
+      for await (const receipt of tonChain.getExecutionReceipts({
+        offRamp: TEST_OFFRAMP,
+        request: baseRequest as any,
+      })) {
         receipts.push(receipt)
       }
 

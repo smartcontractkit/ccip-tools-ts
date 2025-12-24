@@ -1134,28 +1134,29 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * Solana optimization: we use getProgramAccounts with
    */
   override async getCommitReport(
-    commitStore: string,
-    request: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>,
-    hints?: Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number },
+    opts: Parameters<Chain['getCommitReport']>[0],
   ): Promise<CCIPCommit> {
+    const { commitStore, request } = opts
     const commitsAroundSeqNum = await this.connection.getProgramAccounts(
       new PublicKey(commitStore),
       {
         filters: [
           {
+            // commit report account discriminator filter
             memcmp: {
               offset: 0,
               bytes: encodeBase58(BorshAccountsCoder.accountDiscriminator('CommitReport')),
             },
           },
           {
+            // sourceChainSelector filter
             memcmp: {
               offset: 8 + 1,
               bytes: encodeBase58(toLeArray(request.lane.sourceChainSelector, 8)),
             },
           },
-          // hack: memcmp report.min with msg.sequenceNumber's without least-significant byte;
-          // this should be ~256 around seqNum, i.e. big chance of a match; requires PDAs to be alive
+          // memcmp report.min with msg.sequenceNumber's without least-significant byte;
+          // this should be ~256 around seqNum, i.e. big chance of a match; requires PDAs not to have been closed
           {
             memcmp: {
               offset: 8 + 1 + 8 + 32 + 8 + 1,
@@ -1187,17 +1188,16 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       }
     }
     // in case we can't find it, fallback to generic iterating txs
-    return super.getCommitReport(commitStore, request, hints)
+    return super.getCommitReport(opts)
   }
 
   /** {@inheritDoc Chain.getExecutionReceipts} */
   override async *getExecutionReceipts(
-    offRamp: string,
-    request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>,
-    commit?: CCIPCommit,
-    opts?: Pick<LogFilter, 'page' | 'watch'>,
+    opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
-    let opts_: Parameters<SolanaChain['getLogs']>[0] | undefined = opts
+    const { offRamp, request, commit } = opts
+    let opts_: Parameters<Chain['getExecutionReceipts']>[0] &
+      Parameters<SolanaChain['getLogs']>[0] = opts
     if (commit) {
       // if we know of commit, use `commit_report` PDA as more specialized address
       const [commitReportPda] = PublicKey.findProgramAddressSync(
@@ -1214,7 +1214,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         address: commitReportPda.toBase58(),
       }
     }
-    yield* super.getExecutionReceipts(offRamp, request, commit, opts_)
+    yield* super.getExecutionReceipts(opts_)
   }
 
   /** {@inheritDoc Chain.getRegistryTokenConfig} */

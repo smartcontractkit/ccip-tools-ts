@@ -154,7 +154,7 @@ async function manualExec(
   const dest = await getChain(request.lane.destChainSelector)
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
   const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
-  const commit = await dest.getCommitReport(commitStore, request, argv)
+  const commit = await dest.getCommitReport({ ...argv, commitStore, request })
 
   switch (argv.format) {
     case Format.log:
@@ -267,7 +267,10 @@ async function manualExec(
     const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))
 
     // Use watch mode to poll for execution receipts
-    for await (const execution of dest.getExecutionReceipts(offRamp, request, commit, {
+    for await (const execution of dest.getExecutionReceipts({
+      offRamp,
+      request,
+      commit,
       page: argv.page,
       watch: timeoutPromise,
     })) {
