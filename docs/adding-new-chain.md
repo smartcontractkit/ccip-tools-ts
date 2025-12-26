@@ -14,11 +14,11 @@ This guide walks through implementing a new chain family in the CCIP SDK.
 
 A complete chain implementation includes:
 
-| Component | File | Purpose |
-|-----------|------|---------|
-| Chain class | `ccip-sdk/src/{chain}/index.ts` | Core implementation |
-| Hasher | `ccip-sdk/src/{chain}/hasher.ts` | Message ID computation |
-| Wallet provider | `ccip-cli/src/providers/{chain}.ts` | CLI wallet loading |
+| Component       | File                                | Purpose                |
+| --------------- | ----------------------------------- | ---------------------- |
+| Chain class     | `ccip-sdk/src/{chain}/index.ts`     | Core implementation    |
+| Hasher          | `ccip-sdk/src/{chain}/hasher.ts`    | Message ID computation |
+| Wallet provider | `ccip-cli/src/providers/{chain}.ts` | CLI wallet loading     |
 
 ## Prerequisites
 
@@ -30,13 +30,13 @@ Before starting, study these files:
 
 ### Reference Implementations
 
-| Chain | File | Completeness |
-|-------|------|--------------|
-| EVM | `ccip-sdk/src/evm/index.ts` | Full implementation |
-| Solana | `ccip-sdk/src/solana/index.ts` | Full implementation |
-| Aptos | `ccip-sdk/src/aptos/index.ts` | Full implementation |
-| TON | `ccip-sdk/src/ton/index.ts` | Partial (execution only) |
-| Sui | `ccip-sdk/src/sui/index.ts` | Stub (hasher only) |
+| Chain  | File                           | Completeness             |
+| ------ | ------------------------------ | ------------------------ |
+| EVM    | `ccip-sdk/src/evm/index.ts`    | Full implementation      |
+| Solana | `ccip-sdk/src/solana/index.ts` | Full implementation      |
+| Aptos  | `ccip-sdk/src/aptos/index.ts`  | Full implementation      |
+| TON    | `ccip-sdk/src/ton/index.ts`    | Partial (execution only) |
+| Sui    | `ccip-sdk/src/sui/index.ts`    | Stub (hasher only)       |
 
 ---
 
@@ -53,7 +53,7 @@ export const ChainFamily = {
   Aptos: 'aptos',
   Sui: 'sui',
   TON: 'ton',
-  YourChain: 'yourchain',  // Add this
+  YourChain: 'yourchain', // Add this
 } as const
 ```
 
@@ -144,7 +144,7 @@ abstract getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
 
 // Message operations
 abstract getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]>
-abstract getAllMessagesInBatch(request, commit, opts?): Promise<CCIPMessage[]>
+abstract getMessagesInBatch(request, commit, opts?): Promise<CCIPMessage[]>
 
 // Contract queries
 abstract typeAndVersion(address: string): Promise<[type, version, typeAndVersion, suffix?]>
@@ -215,7 +215,7 @@ export type UnsignedTx = {
   [ChainFamily.Aptos]: UnsignedAptosTx
   [ChainFamily.TON]: UnsignedTONTx
   [ChainFamily.Sui]: never // Not yet implemented
-  [ChainFamily.YourChain]: UnsignedYourChainTx  // Add this
+  [ChainFamily.YourChain]: UnsignedYourChainTx // Add this
 }
 ```
 
@@ -236,7 +236,7 @@ export const allSupportedChains = {
   [ChainFamily.Aptos]: AptosChain,
   [ChainFamily.Sui]: SuiChain,
   [ChainFamily.TON]: TONChain,
-  [ChainFamily.YourChain]: YourChainChain,  // Add this
+  [ChainFamily.YourChain]: YourChainChain, // Add this
 }
 ```
 

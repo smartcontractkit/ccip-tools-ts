@@ -250,8 +250,8 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.getMessagesInTx'))
   }
 
-  /** {@inheritDoc Chain.getAllMessagesInBatch} */
-  override async getAllMessagesInBatch<
+  /** {@inheritDoc Chain.getMessagesInBatch} */
+  override async getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
@@ -261,7 +261,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     _commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
     _opts?: { page?: number },
   ): Promise<R['message'][]> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getAllMessagesInBatch'))
+    return Promise.reject(new CCIPNotImplementedError('SuiChain.getMessagesInBatch'))
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

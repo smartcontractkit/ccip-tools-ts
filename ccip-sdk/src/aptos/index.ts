@@ -88,12 +88,7 @@ import { getAptosLeafHasher } from './hasher.ts'
 import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
 import { getTokenInfo } from './token.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import {
-  decodeMessage,
-  getAllMessagesInBatch,
-  getMessageById,
-  getMessagesInTx,
-} from '../requests.ts'
+import { decodeMessage, getMessageById, getMessagesInBatch, getMessagesInTx } from '../requests.ts'
 
 /**
  * Aptos chain implementation supporting Aptos networks.
@@ -262,8 +257,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     })
   }
 
-  /** {@inheritDoc Chain.getAllMessagesInBatch} */
-  async getAllMessagesInBatch<
+  /** {@inheritDoc Chain.getMessagesInBatch} */
+  async getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
@@ -273,7 +268,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
     opts?: { page?: number },
   ): Promise<R['message'][]> {
-    return getAllMessagesInBatch(this, request, commit, opts)
+    return getMessagesInBatch(this, request, commit, opts)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

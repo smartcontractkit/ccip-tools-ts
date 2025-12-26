@@ -7,9 +7,9 @@ import './index.ts' // Import to ensure chains are loaded
 import type { Chain, LogFilter } from './chain.ts'
 import {
   decodeMessage,
-  getAllMessagesInBatch,
   getMessageById,
   getMessagesForSender,
+  getMessagesInBatch,
   getMessagesInTx,
 } from './requests.ts'
 import {
@@ -322,7 +322,7 @@ describe('fetchCCIPMessageById', () => {
   })
 })
 
-describe('getAllMessagesInBatch', () => {
+describe('getMessagesInBatch', () => {
   it('should return all messages in a batch', async () => {
     const mockRequest: Omit<CCIPRequest, 'tx' | 'timestamp'> = {
       log: {
@@ -357,7 +357,7 @@ describe('getAllMessagesInBatch', () => {
     }
 
     // When minSeqNr === maxSeqNr, it should just return the request message
-    const result = await getAllMessagesInBatch(mockedChain as unknown as Chain, mockRequest, {
+    const result = await getMessagesInBatch(mockedChain as unknown as Chain, mockRequest, {
       minSeqNr: 9n,
       maxSeqNr: 9n,
     })
@@ -407,7 +407,7 @@ describe('getAllMessagesInBatch', () => {
 
     await assert.rejects(
       async () =>
-        await getAllMessagesInBatch(mockedChain as unknown as Chain, mockRequest, {
+        await getMessagesInBatch(mockedChain as unknown as Chain, mockRequest, {
           minSeqNr: 1n,
           maxSeqNr: 10n,
         }),

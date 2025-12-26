@@ -198,7 +198,7 @@ const BLOCK_LOG_WINDOW_SIZE = 5000
  * @param opts - Optional log filtering parameters.
  * @returns Array of messages in the batch.
  */
-export async function getAllMessagesInBatch<
+export async function getMessagesInBatch<
   C extends Chain,
   R extends PickDeep<
     CCIPRequest,

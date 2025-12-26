@@ -114,7 +114,7 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-import { getAllMessagesInBatch, getMessageById, getMessagesInTx } from '../requests.ts'
+import { getMessageById, getMessagesInBatch, getMessagesInTx } from '../requests.ts'
 import { patchBorsh } from './patchBorsh.ts'
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
@@ -435,8 +435,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return getMessageById(this, messageId, { address: onRamp, ...opts })
   }
 
-  /** {@inheritDoc Chain.getAllMessagesInBatch} */
-  async getAllMessagesInBatch<
+  /** {@inheritDoc Chain.getMessagesInBatch} */
+  async getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
@@ -450,14 +450,14 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       [Buffer.from('dest_chain_state'), toLeArray(request.lane.destChainSelector, 8)],
       new PublicKey(request.log.address),
     )
-    // getAllMessagesInBatch pass opts back to getLogs; use it to narrow getLogs filter only to
+    // getMessagesInBatch pass opts back to getLogs; use it to narrow getLogs filter only to
     // txs touching destChainStatePda
     const opts_: Parameters<SolanaChain['getLogs']>[0] = {
       ...opts,
       programs: [request.log.address],
       address: destChainStatePda.toBase58(),
     }
-    return getAllMessagesInBatch(this, request, commit, opts_)
+    return getMessagesInBatch(this, request, commit, opts_)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

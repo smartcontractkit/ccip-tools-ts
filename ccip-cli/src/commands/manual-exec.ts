@@ -164,7 +164,7 @@ async function manualExec(
       break
   }
 
-  const messagesInBatch = await source.getAllMessagesInBatch(request, commit.report, argv)
+  const messagesInBatch = await source.getMessagesInBatch(request, commit.report, argv)
   const execReportProof = calculateManualExecProof(
     messagesInBatch,
     request.lane,

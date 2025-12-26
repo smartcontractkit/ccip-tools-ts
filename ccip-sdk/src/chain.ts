@@ -333,7 +333,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param commit - CommitReport range (min, max).
    * @param opts - Optional parameters (e.g., `page` for pagination width).
    */
-  abstract getAllMessagesInBatch<
+  abstract getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
@@ -492,7 +492,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @example
    * ```typescript
    * const execReportProof = calculateManualExecProof(
-   *   messagesInBatch: await source.getAllMessagesInBatch(request, commit.report),
+   *   messagesInBatch: await source.getMessagesInBatch(request, commit.report),
    *   request.lane,
    *   request.message.messageId,
    *   commit.report.merkleRoot,
