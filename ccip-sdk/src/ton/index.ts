@@ -11,6 +11,7 @@ import {
   CCIPExtraArgsInvalidError,
   CCIPHttpError,
   CCIPNotImplementedError,
+  CCIPReceiptNotFoundError,
   CCIPSourceChainUnsupportedError,
   CCIPTransactionNotFoundError,
   CCIPWalletInvalidError,
@@ -19,6 +20,7 @@ import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra
 import { getMessagesInTx } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
+  type CCIPExecution,
   type CCIPRequest,
   type ChainTransaction,
   type CommitReport,
@@ -38,6 +40,7 @@ import {
   decodeAddress,
   networkInfo,
   parseTypeAndVersion,
+  sleep,
 } from '../utils.ts'
 import { OffRamp } from './bindings/offramp.ts'
 import { OnRamp } from './bindings/onramp.ts'
@@ -929,7 +932,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /** {@inheritDoc Chain.executeReport} */
-  async executeReport(opts: Parameters<Chain['executeReport']>[0]): Promise<ChainTransaction> {
+  async executeReport(opts: Parameters<Chain['executeReport']>[0]): Promise<CCIPExecution> {
     const { offRamp, wallet } = opts
     if (!isTONWallet(wallet)) {
       throw new CCIPWalletInvalidError(wallet)
@@ -944,6 +947,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const openedWallet = this.provider.open(wallet.contract)
     const seqno = await openedWallet.getSeqno()
 
+    const startTime = Math.floor(Date.now() / 1000)
     await openedWallet.sendTransfer({
       seqno,
       secretKey: wallet.keyPair.secretKey,
@@ -965,9 +969,20 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       offRampAddress,
     )
 
-    // Return composite hash in format "workchain:address:lt:hash"
+    // composite hash in format "workchain:address:lt:hash"
     const hash = `${wallet.contract.address.toRawString()}:${txInfo.lt}:${txInfo.hash}`
-    return this.getTransaction(hash)
+
+    const message = opts.execReport.message as CCIPMessage_V1_6_TON
+    for await (const exec of this.getExecutionReceipts({
+      offRamp: opts.offRamp,
+      messageId: message.messageId,
+      sourceChainSelector: message.sourceChainSelector,
+      startTime,
+      watch: sleep(10 * 60e3 /* 10m */),
+    })) {
+      return exec // break and return on first yield
+    }
+    throw new CCIPReceiptNotFoundError(hash)
   }
 
   /**

@@ -1,26 +1,21 @@
 import {
   type CCIPRequest,
   type CCIPVersion,
-  type ChainStatic,
   type EVMChain,
   type ExecutionReport,
   CCIPChainFamilyUnsupportedError,
-  CCIPReceiptNotFoundError,
   ChainFamily,
   bigIntReplacer,
   calculateManualExecProof,
   discoverOffRamp,
   estimateExecGasForRequest,
   isSupportedTxHash,
-  networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
 import { type Ctx, Format } from './types.ts'
 import {
-  formatDisplayAddress,
-  formatDisplayTxHash,
   getCtx,
   logParsedError,
   prettyCommit,
@@ -161,6 +156,7 @@ async function manualExec(
       logger.log('commit =', commit)
       break
     case Format.pretty:
+      logger.info('Commit (dest):')
       await prettyCommit.call(ctx, dest, commit, request)
       break
     case Format.json:
@@ -217,91 +213,26 @@ async function manualExec(
   }
 
   const [, wallet] = await loadChainWallet(dest, argv)
-  const manualExecTx = await dest.executeReport({ ...argv, offRamp, execReport, wallet })
+  const receipt = await dest.executeReport({ ...argv, offRamp, execReport, wallet })
 
-  const destFamily = networkInfo(request.lane.destChainSelector).family
-  logger.info(
-    '🚀 manualExec tx =',
-    formatDisplayTxHash(manualExecTx.hash, destFamily),
-    'to offRamp =',
-    formatDisplayAddress(offRamp, destFamily),
-  )
-
-  let found = false
-
-  // For sync chains (eg. EVM) try to find receipt in the submitted transaction's logs
-  for (const log of manualExecTx.logs) {
-    const execReceipt = (dest.constructor as ChainStatic).decodeReceipt(log)
-    if (!execReceipt) continue
-    const timestamp = await dest.getBlockTimestamp(log.blockNumber)
-    const receipt = { receipt: execReceipt, log, timestamp }
-    switch (argv.format) {
-      case Format.log:
-        logger.log('receipt =', withDateTimestamp(receipt))
-        break
-      case Format.pretty:
-        if (!found) logger.info('Receipts (dest):')
-        prettyReceipt.call(
-          ctx,
-          receipt,
-          request,
-          receipt.log.tx?.from ??
-            (await dest.getTransaction(receipt.log.transactionHash).catch(() => null))?.from,
-        )
-        break
-      case Format.json:
-        logger.info(JSON.stringify(execReceipt, bigIntReplacer, 2))
-        break
-    }
-    found = true
+  switch (argv.format) {
+    case Format.log:
+      logger.log('receipt =', withDateTimestamp(receipt))
+      break
+    case Format.pretty:
+      logger.info('Receipt (dest):')
+      prettyReceipt.call(
+        ctx,
+        receipt,
+        request,
+        receipt.log.tx?.from ??
+          (await dest.getTransaction(receipt.log.transactionHash).catch(() => null))?.from,
+      )
+      break
+    case Format.json:
+      logger.info(JSON.stringify(receipt, bigIntReplacer, 2))
+      break
   }
-
-  // For async chains (eg. TON), the receipt may be in a separate transaction
-  if (!found) {
-    // We need to wait for the Offramp to process the message.
-    // Use watch mode to poll for the final execution state (Success or Failure).
-    const timeoutMs = 10 * 60 * 1000 // ~10 minute timeout
-    logger.info(`Waiting for execution receipt (timeout: ${timeoutMs / 60_000}m)...`)
-
-    // Create a timeout promise that resolves after timeoutMs
-    const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))
-
-    // Use watch mode to poll for execution receipts
-    for await (const execution of dest.getExecutionReceipts({
-      offRamp,
-      request,
-      commit,
-      page: argv.page,
-      watch: timeoutPromise,
-    })) {
-      // Only accept receipts that occurred AFTER our wallet transaction
-      if (manualExecTx.timestamp && execution.timestamp < manualExecTx.timestamp) {
-        continue // Skip old receipts from before our manual exec
-      }
-
-      // Found a final state: display and exit
-      switch (argv.format) {
-        case Format.log:
-          logger.log('receipt =', withDateTimestamp(execution))
-          break
-        case Format.pretty:
-          logger.info('Receipts (dest):')
-          prettyReceipt.call(
-            ctx,
-            execution,
-            request,
-            execution.log.tx?.from ??
-              (await dest.getTransaction(execution.log.transactionHash).catch(() => null))?.from,
-          )
-          break
-        case Format.json:
-          logger.info(JSON.stringify(execution.receipt, bigIntReplacer, 2))
-          break
-      }
-      found = true
-    }
-  }
-  if (!found) throw new CCIPReceiptNotFoundError(manualExecTx.hash)
 }
 
 // TODO: re-implement executing `sender` queue

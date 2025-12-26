@@ -24,6 +24,7 @@ import { getSuiLeafHasher } from './hasher.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
+  type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
   type CCIPVersion,
@@ -617,7 +618,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     opts: Parameters<Chain['executeReport']>[0] & {
       receiverObjectIds?: string[]
     },
-  ): Promise<ChainTransaction> {
+  ): Promise<CCIPExecution> {
     const { execReport } = opts
     if (!this.contractsDir.offRamp || !this.contractsDir.ccip) {
       throw new CCIPContractNotRouterError(
@@ -704,7 +705,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     })
 
     // Return the transaction as a ChainTransaction
-    return this.getTransaction(result.digest)
+    return this.getExecutionReceiptInTx(await this.getTransaction(result.digest))
   }
 
   /**

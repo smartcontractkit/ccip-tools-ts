@@ -11,6 +11,7 @@ import type { CCIPMessage_V1_6_EVM } from './evm/messages.ts'
 import { calculateManualExecProof, discoverOffRamp } from './execution.ts'
 import { decodeMessage } from './requests.ts'
 import {
+  type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
   type ChainTransaction,
@@ -195,14 +196,8 @@ class MockChain extends Chain {
     return Promise.reject(new Error('not implemented'))
   }
 
-  async executeReport(_opts: any): Promise<ChainTransaction> {
-    return {
-      hash: '0xHash',
-      logs: [],
-      blockNumber: 1000,
-      timestamp: this.mockBlockTimestamp,
-      from: '0xSender',
-    }
+  async executeReport(_opts: any): Promise<CCIPExecution> {
+    return Promise.reject(new Error('not implemented'))
   }
 
   static decodeMessage(_log: Log_): CCIPMessage | null {

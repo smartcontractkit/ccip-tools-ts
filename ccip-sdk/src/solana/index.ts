@@ -980,9 +980,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * Raw/unsigned version of [[sendMessage]]
-   *
-   * @param opts - Send options
+   * {@inheritDoc Chain.generateUnsignedSendMessage}
    * @returns instructions - array of instructions; `ccipSend` is last, after any approval
    *   lookupTables - array of lookup tables for `ccipSend` call
    *   mainIndex - instructions.length - 1
@@ -1020,8 +1018,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * Raw/unsigned version of [[executeReport]]
-   * @param opts - ExecuteReport options
+   * {@inheritDoc Chain.generateUnsignedExecuteReport}
    * @returns instructions - array of instructions to execute the report
    *   lookupTables - array of lookup tables for `manuallyExecute` call
    *   mainIndex - index of the `manuallyExecute` instruction in the array; last unless
@@ -1052,7 +1049,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       // when cleaning leftover LookUp Tables, wait deactivation grace period (~513 slots) then close ALT
       waitDeactivation?: boolean
     },
-  ): Promise<ChainTransaction> {
+  ): Promise<CCIPExecution> {
     const wallet = opts.wallet
     if (!isWallet(wallet)) throw new CCIPWalletInvalidError(util.inspect(wallet))
 
@@ -1084,7 +1081,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     } catch (err) {
       this.logger.warn('Error while trying to clean up buffers:', err)
     }
-    return this.getTransaction(hash)
+    const tx = await this.getTransaction(hash)
+    return this.getExecutionReceiptInTx(tx)
   }
 
   /**
@@ -1131,7 +1129,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * Solana optimization: we use getProgramAccounts with
+   * Solana specialization: use getProgramAccounts to fetch commit reports from PDAs
    */
   override async getCommitReport(
     opts: Parameters<Chain['getCommitReport']>[0],
@@ -1159,7 +1157,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           // this should be ~256 around seqNum, i.e. big chance of a match; requires PDAs not to have been closed
           {
             memcmp: {
-              offset: 8 + 1 + 8 + 32 + 8 + 1,
+              offset: 8 + 1 + 8 + 32 + 8 + /*skip byte*/ 1,
               bytes: encodeBase58(toLeArray(request.message.sequenceNumber, 8).slice(1)),
             },
           },
@@ -1170,7 +1168,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       // const merkleRoot = acc.account.data.subarray(8 + 1 + 8, 8 + 1 + 8 + 32)
       const minSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8)
       const maxSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8 + 8)
-      if (minSeqNr > request.message.sequenceNumber || maxSeqNr < request.message.sequenceNumber)
+      if (request.message.sequenceNumber < minSeqNr || maxSeqNr < request.message.sequenceNumber)
         continue
       // we have all the commit report info, but we also need log details (txHash, etc)
       for await (const log of this.getLogs({
@@ -1195,15 +1193,15 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   override async *getExecutionReceipts(
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
-    const { offRamp, request, commit } = opts
+    const { offRamp, sourceChainSelector, commit } = opts
     let opts_: Parameters<Chain['getExecutionReceipts']>[0] &
       Parameters<SolanaChain['getLogs']>[0] = opts
-    if (commit) {
+    if (commit && sourceChainSelector) {
       // if we know of commit, use `commit_report` PDA as more specialized address
       const [commitReportPda] = PublicKey.findProgramAddressSync(
         [
           Buffer.from('commit_report'),
-          toLeArray(request.lane.sourceChainSelector, 8),
+          toLeArray(sourceChainSelector, 8),
           bytesToBuffer(commit.report.merkleRoot),
         ],
         new PublicKey(offRamp),

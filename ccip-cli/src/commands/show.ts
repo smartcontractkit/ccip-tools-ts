@@ -191,7 +191,9 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   for await (const receipt of dest.getExecutionReceipts({
     ...argv,
     offRamp,
-    request,
+    messageId: request.message.messageId,
+    sourceChainSelector: request.message.sourceChainSelector,
+    startTime: request.tx.timestamp,
     commit: !argv.wait ? await commit$ : undefined,
     watch: argv.wait && ctx.destroy$,
   })) {

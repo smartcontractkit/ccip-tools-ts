@@ -59,6 +59,7 @@ import {
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
+  type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
   type ChainTransaction,
@@ -533,7 +534,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return getFee(this.provider, router, destChainSelector, message)
   }
 
-  /** generate raw/unsigned `ccip_send` transaction */
+  /** {@inheritDoc Chain.generateUnsignedSendMessage} */
   async generateUnsignedSendMessage(
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedAptosTx> {
@@ -588,7 +589,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
-  /** generate raw/unsigned `manually_execute` transaction data */
+  /** {@inheritDoc Chain.generateUnsignedExecuteReport} */
   async generateUnsignedExecuteReport({
     payer,
     offRamp,
@@ -613,7 +614,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /** {@inheritDoc Chain.executeReport} */
-  async executeReport(opts: Parameters<Chain['executeReport']>[0]): Promise<ChainTransaction> {
+  async executeReport(opts: Parameters<Chain['executeReport']>[0]): Promise<CCIPExecution> {
     const account = opts.wallet
     if (!isAptosAccount(account)) {
       throw new CCIPAptosWalletInvalidError(this.constructor.name, util.inspect(opts.wallet))
@@ -636,7 +637,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     const { hash } = await this.provider.waitForTransaction({
       transactionHash: pendingTxn.hash,
     })
-    return this.getTransaction(hash)
+    const tx = await this.getTransaction(hash)
+    return this.getExecutionReceiptInTx(tx)
   }
 
   /**

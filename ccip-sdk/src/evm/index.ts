@@ -926,6 +926,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /**
    * Gets the FeeQuoter contract address for a given Router or Ramp.
+   * @internal
    * @param address - Router or Ramp contract address.
    * @returns FeeQuoter contract address.
    */
@@ -972,8 +973,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Generate unsigned txs for ccipSend'ing a message
-   * @param opts - Send options
+   * {@inheritDoc Chain.generateUnsignedSendMessage}
    * @returns Array containing 0 or more unsigned token approvals txs (if needed at the time of
    *   generation), followed by a ccipSend TransactionRequest
    */
@@ -1080,8 +1080,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Generate unsigned tx to manuallyExecute a message
-   * @param opts - ExecuteReport options
+   * {@inheritDoc Chain.generateUnsignedExecuteReport}
    * @returns array containing one unsigned `manuallyExecute` TransactionRequest object
    */
   async generateUnsignedExecuteReport({
@@ -1213,7 +1212,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const receipt = await response.wait(1, 60_000)
     if (!receipt?.hash) throw new CCIPExecTxNotConfirmedError(response.hash)
     if (!receipt.status) throw new CCIPExecTxRevertedError(response.hash)
-    return this.getTransaction(receipt)
+    const tx = await this.getTransaction(receipt)
+    return this.getExecutionReceiptInTx(tx)
   }
 
   /**
@@ -1436,16 +1436,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   override async *getExecutionReceipts(
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
-    const { request } = opts
+    const { messageId, sourceChainSelector } = opts
     let opts_: Parameters<Chain['getExecutionReceipts']>[0] & Parameters<EVMChain['getLogs']>[0] =
       opts
-    if (request.lane.version < CCIPVersion.V1_6) {
+    const [, version] = await this.typeAndVersion(opts.offRamp)
+    if (version < CCIPVersion.V1_6) {
       opts_ = {
         ...opts,
         topics: [
           interfaces.EVM2EVMOffRamp_v1_5.getEvent('ExecutionStateChanged')!.topicHash,
           null,
-          request.message.messageId,
+          messageId ?? null,
         ],
         // onlyFallback: false,
       }
@@ -1454,9 +1455,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ...opts,
         topics: [
           interfaces.OffRamp_v1_6.getEvent('ExecutionStateChanged')!.topicHash,
-          toBeHex(request.lane.sourceChainSelector, 32),
+          sourceChainSelector ? toBeHex(sourceChainSelector, 32) : null,
           null,
-          request.message.messageId,
+          messageId ?? null,
         ],
         // onlyFallback: false,
       }

@@ -49,12 +49,30 @@ describe('TON index unit tests', () => {
     name: 'TON Testnet',
     isTestnet: true,
   }
-  describe('executeReport', () => {
+
+  describe('executeReport', { timeout: 10e3 }, () => {
     const mockKeyPair: KeyPair = {
       publicKey: Buffer.alloc(32, 0x01),
       secretKey: Buffer.alloc(64, 0x02),
     }
     const mockWalletAddress = Address.parse('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+
+    // Helper to create a valid ExecutionStateChanged BOC cell for executeReport tests
+    function createExecutionStateChangedCell(
+      sourceChainSelector: bigint,
+      sequenceNumber: bigint,
+      messageId: string,
+      state: number,
+    ) {
+      // messageId is hex string like '0x0000...0001', convert to bigint
+      const messageIdBigInt = BigInt(messageId)
+      return beginCell()
+        .storeUint(sourceChainSelector, 64) // sourceChainSelector
+        .storeUint(sequenceNumber, 64) // sequenceNumber
+        .storeUint(messageIdBigInt, 256) // messageId
+        .storeUint(state, 8) // state: 2 = Success
+        .endCell()
+    }
 
     function createMockClientAndWallet(opts?: {
       seqno?: number
@@ -110,6 +128,32 @@ describe('TON index unit tests', () => {
         inMessage: { info: { type: 'internal', src: mockWalletAddress } },
       }
 
+      // Create ExecutionStateChanged cell for the OffRamp address
+      // Uses baseExecReport message data: messageId, sourceChainSelector, sequenceNumber
+      const execStateCell = createExecutionStateChangedCell(
+        CHAINSEL_EVM_TEST_90000001, // sourceChainSelector from baseExecReport
+        1n, // sequenceNumber from baseExecReport
+        '0x' + '0'.repeat(63) + '1', // messageId from baseExecReport
+        2, // state: Success
+      )
+
+      const offRampAddress = Address.parse(TON_OFFRAMP_ADDRESS_TEST)
+
+      // Mock transaction for OffRamp containing ExecutionStateChanged external-out message
+      const mockOffRampTx = {
+        lt: BigInt(mockTxLt),
+        hash: () => Buffer.from(mockTxHash, 'hex'),
+        now: Math.floor(Date.now() / 1000),
+        outMessages: {
+          values: () => [
+            {
+              info: { type: 'external-out' as const },
+              body: execStateCell,
+            },
+          ],
+        },
+      }
+
       const mockClient = {
         open: () => mockOpenedWallet,
         getLastBlock: async () => ({
@@ -123,15 +167,25 @@ describe('TON index unit tests', () => {
           }
           throw new Error(`Unknown method: ${method}`)
         },
-        getAccountLite: async () => ({
-          account: {
-            last: {
-              lt: mockTxLt,
-              hash: Buffer.from(mockTxHash, 'hex').toString('base64'),
+        getAccountLite: async (_seqno: number, _address: Address) => {
+          // Return account info for both wallet and offRamp addresses
+          return {
+            account: {
+              last: {
+                lt: mockTxLt,
+                hash: Buffer.from(mockTxHash, 'hex').toString('base64'),
+              },
             },
-          },
-        }),
-        getAccountTransactions: async () => [{ tx: mockTx }],
+          }
+        },
+        getAccountTransactions: async (address: Address) => {
+          // Return different transactions based on the address being queried
+          const isOffRamp = address.equals(offRampAddress)
+          if (isOffRamp) {
+            return [{ tx: mockOffRampTx }]
+          }
+          return [{ tx: mockTx }]
+        },
       } as unknown as TonClient4
 
       const mockWallet: TONWallet = {
@@ -204,7 +258,7 @@ describe('TON index unit tests', () => {
         wallet,
       })
 
-      const [workchain, address, lt, hash] = result.hash.split(':')
+      const [workchain, address, lt, hash] = result.log.transactionHash.split(':')
       assert.equal(workchain, '0', 'workchain should be 0')
       assert.equal(address.length, 64, 'address should be 64 hex chars')
       assert.equal(lt, mockTxLt, 'lt should match transaction lt')
@@ -751,9 +805,9 @@ describe('TON index unit tests', () => {
     }
 
     const baseRequest = {
-      lane: { sourceChainSelector: TEST_SOURCE_CHAIN_SELECTOR },
-      message: { messageId: TEST_MESSAGE_ID },
-      tx: { timestamp: 0 },
+      sourceChainSelector: TEST_SOURCE_CHAIN_SELECTOR,
+      messageId: TEST_MESSAGE_ID,
+      startTime: 1,
     }
 
     it('should filter out Untouched state (0)', async () => {
@@ -767,7 +821,7 @@ describe('TON index unit tests', () => {
       const receipts = []
       for await (const receipt of tonChain.getExecutionReceipts({
         offRamp: TEST_OFFRAMP,
-        request: baseRequest as any,
+        ...baseRequest,
       })) {
         receipts.push(receipt)
       }
@@ -788,7 +842,7 @@ describe('TON index unit tests', () => {
       const receipts = []
       for await (const receipt of tonChain.getExecutionReceipts({
         offRamp: TEST_OFFRAMP,
-        request: baseRequest as any,
+        ...baseRequest,
       })) {
         receipts.push(receipt)
       }
@@ -811,15 +865,15 @@ describe('TON index unit tests', () => {
 
       // Use startTime before the mock transactions so they are included
       const request = {
-        lane: { sourceChainSelector: TEST_SOURCE_CHAIN_SELECTOR },
-        message: { messageId: TEST_MESSAGE_ID },
-        tx: { timestamp: pastTimestamp - 10 }, // Before mock tx timestamps
+        sourceChainSelector: TEST_SOURCE_CHAIN_SELECTOR,
+        messageId: TEST_MESSAGE_ID,
+        startTime: pastTimestamp - 10, // Before mock tx timestamps
       }
 
       const receipts = []
       for await (const receipt of tonChain.getExecutionReceipts({
         offRamp: TEST_OFFRAMP,
-        request: request as any,
+        ...request,
       })) {
         receipts.push(receipt)
       }
@@ -890,7 +944,7 @@ describe('TON index unit tests', () => {
       const receipts = []
       for await (const receipt of tonChain.getExecutionReceipts({
         offRamp: TEST_OFFRAMP,
-        request: baseRequest as any,
+        ...baseRequest,
       })) {
         receipts.push(receipt)
       }

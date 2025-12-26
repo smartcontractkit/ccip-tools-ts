@@ -184,14 +184,8 @@ class MockChain extends Chain {
     return Promise.reject(new Error('not implemented'))
   }
 
-  async executeReport(_opts: any): Promise<ChainTransaction> {
-    return {
-      hash: '0xHash',
-      logs: [],
-      blockNumber: 1000,
-      timestamp: this.mockBlockTimestamp,
-      from: '0xSender',
-    }
+  async executeReport(_opts: any) {
+    return Promise.reject(new Error('not implemented'))
   }
 
   static decodeMessage(_log: Log_): CCIPMessage | undefined {

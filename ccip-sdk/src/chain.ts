@@ -7,6 +7,7 @@ import { getCommitReport } from './commits.ts'
 import {
   CCIPApiClientNotAvailableError,
   CCIPChainFamilyMismatchError,
+  CCIPExecTxRevertedError,
   CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
@@ -155,13 +156,13 @@ export type UnsignedTx = {
  * Common options for [[generateUnsignedSendMessage]] and [[sendMessage]] Chain methods
  */
 export type SendMessageOpts = {
-  // Router address on this chain
+  /** Router address on this chain */
   router: string
-  // Destination network selector.
+  /** Destination network selector. */
   destChainSelector: bigint
-  // Message to send. If `fee` is omitted, it'll be calculated
+  /** Message to send. If `fee` is omitted, it'll be calculated */
   message: AnyMessage & { fee?: bigint }
-  // Approve the maximum amount of tokens to transfer
+  /** Approve the maximum amount of tokens to transfer */
   approveMax?: boolean
 }
 
@@ -169,17 +170,17 @@ export type SendMessageOpts = {
  * Common options for [[generateUnsignedExecuteReport]] and [[executeReport]] Chain methods
  */
 export type ExecuteReportOpts = {
-  // address of the OffRamp contract
+  /** address of the OffRamp contract */
   offRamp: string
-  // execution report
+  /** execution report */
   execReport: ExecutionReport
-  // gasLimit or computeUnits limit override for the ccipReceive call
+  /** gasLimit or computeUnits limit override for the ccipReceive call */
   gasLimit?: number
-  // For EVM, overrides gasLimit on tokenPool call
+  /** For EVM, overrides gasLimit on tokenPool call */
   tokensGasLimit?: number
-  // For Solana, send report in chunks to OffRamp, to later execute
+  /** For Solana, send report in chunks to OffRamp, to later execute */
   forceBuffer?: boolean
-  // For Solana, create and extend addresses in a lookup table before executing
+  /** For Solana, create and extend addresses in a lookup table before executing */
   forceLookupTable?: boolean
 }
 
@@ -425,28 +426,44 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   abstract getTokenAdminRegistryFor(address: string): Promise<string>
   /**
    * Fetch the current fee for a given intended message
-   * @param opts - Messages options
+   * @param opts - {@link SendMessageOpts} without approveMax
    */
   abstract getFee(opts: Omit<SendMessageOpts, 'approveMax'>): Promise<bigint>
   /**
    * Generate unsigned txs for ccipSend'ing a message
-   * @param opts - Send options
+   * @param opts - {@link SendMessageOpts} with sender address
    * @returns chain-family specific unsigned txs
    */
   abstract generateUnsignedSendMessage(
     opts: SendMessageOpts & {
-      // Sender address (address of wallet which will send the message)
+      /** Sender address (address of wallet which will send the message) */
       sender: string
     },
   ): Promise<UnsignedTx[F]>
   /**
    * Send a CCIP message through a router using provided wallet.
-   * @param opts - Send options
+   * @param opts - {@link SendMessageOpts} with chain-specific wallet for signing
    * @returns CCIP request
+   *
+   * @example
+   * ```typescript
+   * const request = await chain.sendMessage({
+   *   router: '0x...',
+   *   destChainSelector: 4949039107694359620n,
+   *   message: {
+   *     receiver: '0x...',
+   *     data: '0x1337',
+   *     tokenAmounts: [{ token: '0x...', amount: 100n }],
+   *     feeToken: '0xLinkToken',
+   *   },
+   *   wallet: signer,
+   * })
+   * console.log(`Message ID: ${request.message.messageId}`)
+   * ```
    */
   abstract sendMessage(
     opts: SendMessageOpts & {
-      // Signer instance (chain-dependent)
+      /** Signer instance (chain-dependent) */
       wallet: unknown
     },
   ): Promise<CCIPRequest>
@@ -458,31 +475,51 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   abstract getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]>
   /**
    * Generate unsigned tx to manuallyExecute a message
-   * @param opts - executeReport options
+   * @param opts - {@link ExecuteReportOpts} with payer address which will send the exec tx
    * @returns chain-family specific unsigned txs
    */
   abstract generateUnsignedExecuteReport(
     opts: ExecuteReportOpts & {
-      // address which will be used to send the report tx
+      /** address which will be used to send the report tx */
       payer: string
     },
   ): Promise<UnsignedTx[F]>
   /**
    * Execute messages in report in an offRamp
-   * @param opts - ExecuteReport options
+   * @param opts - {@link ExecuteReportOpts} with chain-specific wallet to sign and send tx
    * @returns transaction of the execution
+   *
+   * @example
+   * ```typescript
+   * const execReportProof = calculateManualExecProof(
+   *   messagesInBatch: await source.getAllMessagesInBatch(request, commit.report),
+   *   request.lane,
+   *   request.message.messageId,
+   *   commit.report.merkleRoot,
+   *   dest,
+   * )
+   * const receipt = await dest.executeReport({
+   *   offRamp,
+   *   execReport: {
+   *     ...execReportProof,
+   *     message: request.message,
+   *     offchainTokenData: await source.getOffchainTokenData(request),
+   *   },
+   *   wallet,
+   * })
+   * console.log(`Message ID: ${request.message.messageId}`)
+   * ```
    */
   abstract executeReport(
     opts: ExecuteReportOpts & {
       // Signer instance (chain-dependent)
       wallet: unknown
     },
-  ): Promise<ChainTransaction>
+  ): Promise<CCIPExecution>
 
   /**
    * Look for a CommitReport at dest for given CCIP request
    * May be specialized by some subclasses
-   *
    * @param opts - getCommitReport options
    * @returns CCIPCommit info, or reject if none found
    **/
@@ -491,11 +528,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     request,
     ...hints
   }: {
-    // address of commitStore (OffRamp in >=v1.6)
+    /** address of commitStore (OffRamp in \>=v1.6) */
     commitStore: string
-    // CCIPRequest subset object
+    /** CCIPRequest subset object */
     request: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>
-  } & Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number }): Promise<CCIPCommit> {
+  } & Pick<LogFilter, 'page' | 'watch' | 'startBlock'>): Promise<CCIPCommit> {
     return getCommitReport(this, commitStore, request, hints)
   }
 
@@ -545,32 +582,63 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   async *getExecutionReceipts({
     offRamp,
-    request,
+    messageId,
+    sourceChainSelector,
     commit,
     ...hints
   }: {
-    // address of OffRamp contract
+    /** address of OffRamp contract */
     offRamp: string
-    // request to scan executions for
-    request: PickDeep<CCIPRequest, 'lane' | 'message.messageId' | 'tx.timestamp'>
-    // optional commit associated with the request, can be used for optimizations in some families
+    /** filter: yield only executions for this message */
+    messageId?: string
+    /** filter: yield only executions for this source chain */
+    sourceChainSelector?: bigint
+    /** optional commit associated with the request, can be used for optimizations in some families */
     commit?: CCIPCommit
-  } & Pick<LogFilter, 'page' | 'watch'>): AsyncIterableIterator<CCIPExecution> {
-    const onlyLast = !commit?.log.blockNumber && !request.tx.timestamp // backwards
+  } & Pick<
+    LogFilter,
+    'page' | 'watch' | 'startBlock' | 'startTime'
+  >): AsyncIterableIterator<CCIPExecution> {
+    hints.startBlock ??= commit?.log.blockNumber
+    const onlyLast = !hints.startTime && !hints.startBlock // backwards
     for await (const log of this.getLogs({
-      startBlock: commit?.log.blockNumber,
-      startTime: request.tx.timestamp,
       address: offRamp,
       topics: ['ExecutionStateChanged'],
       ...hints,
     })) {
       const receipt = (this.constructor as ChainStatic).decodeReceipt(log)
-      if (!receipt || receipt.messageId !== request.message.messageId) continue
+      // filters
+      if (
+        !receipt ||
+        (messageId && receipt.messageId !== messageId) ||
+        (sourceChainSelector &&
+          receipt.sourceChainSelector &&
+          receipt.sourceChainSelector !== sourceChainSelector)
+      )
+        continue
 
       const timestamp = log.tx?.timestamp ?? (await this.getBlockTimestamp(log.blockNumber))
       yield { receipt, log, timestamp }
       if (onlyLast || receipt.state === ExecutionState.Success) break
     }
+  }
+
+  /**
+   * Fetch first execution receipt inside a transaction.
+   * @internal
+   * @param tx - transaction hash or transaction object
+   * @returns CCIP execution object
+   */
+  async getExecutionReceiptInTx(tx: string | ChainTransaction): Promise<CCIPExecution> {
+    if (typeof tx === 'string') tx = await this.getTransaction(tx)
+    for (const log of tx.logs) {
+      const rcpt = (this.constructor as ChainStatic).decodeReceipt(log)
+      if (!rcpt) continue
+
+      const timestamp = tx.timestamp
+      return { receipt: rcpt, log, timestamp }
+    }
+    throw new CCIPExecTxRevertedError(tx.hash)
   }
 
   /**
