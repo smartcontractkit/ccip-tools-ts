@@ -37,10 +37,11 @@
     "glob": "13.0.0",
     "prettier": "3.7.4",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.50.1",
+    "typescript-eslint": "8.51.0",
     "yaml": "2.8.2"
   },
   "overrides": {
-    "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10"
+    "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
+    "@ledgerhq/types-live": "6.90.0"
   }
 }
