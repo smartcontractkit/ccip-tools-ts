@@ -2,9 +2,8 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { beginCell } from '@ton/core'
-import { toBigInt } from 'ethers'
 
-import { extractMagicTag, hexToBuffer, lookupTxByRawHash, tryParseCell } from './utils.ts'
+import { crc32, extractMagicTag, lookupTxByRawHash, tryParseCell } from './utils.ts'
 import {
   EVMExtraArgsV1Tag,
   EVMExtraArgsV2Tag,
@@ -13,55 +12,6 @@ import {
 } from '../extra-args.ts'
 
 describe('TON utils unit tests', () => {
-  describe('hexToBuffer', () => {
-    it('should convert hex string with 0x prefix', () => {
-      const buffer = hexToBuffer('0x48656c6c6f')
-      assert.deepEqual(buffer, Buffer.from('Hello'))
-    })
-
-    it('should convert hex string without 0x prefix', () => {
-      const buffer = hexToBuffer('48656c6c6f')
-      assert.deepEqual(buffer, Buffer.from('Hello'))
-    })
-
-    it('should handle uppercase 0X prefix', () => {
-      const buffer = hexToBuffer('0X48656c6c6f')
-      assert.deepEqual(buffer, Buffer.from('Hello'))
-    })
-
-    it('should return empty buffer for empty input', () => {
-      const buffer = hexToBuffer('')
-      assert.deepEqual(buffer, Buffer.alloc(0))
-    })
-
-    it('should return empty buffer for just 0x', () => {
-      const buffer = hexToBuffer('0x')
-      assert.deepEqual(buffer, Buffer.alloc(0))
-    })
-  })
-
-  describe('toBigInt', () => {
-    it('should return bigint unchanged', () => {
-      const result = toBigInt(123n)
-      assert.equal(result, 123n)
-    })
-
-    it('should convert number to bigint', () => {
-      const result = toBigInt(123)
-      assert.equal(result, 123n)
-    })
-
-    it('should convert string to bigint', () => {
-      const result = toBigInt('123')
-      assert.equal(result, 123n)
-    })
-
-    it('should convert hex string to bigint', () => {
-      const result = toBigInt('0x7b')
-      assert.equal(result, 123n)
-    })
-  })
-
   describe('tryParseCell', () => {
     it('should parse valid BOC format', () => {
       const cell = beginCell().storeUint(0x12345678, 32).endCell()
@@ -129,13 +79,6 @@ describe('TON utils unit tests', () => {
   })
 
   describe('lookupTxByRawHash', () => {
-    const mockLogger = {
-      debug: () => {},
-      error: () => {},
-      info: () => {},
-      warn: () => {},
-    }
-
     it('should strip 0x prefix from hash', async () => {
       let capturedUrl = ''
       const mockFetch = (async (url: string) => {
@@ -147,7 +90,7 @@ describe('TON utils unit tests', () => {
         }
       }) as unknown as typeof fetch
 
-      await lookupTxByRawHash('0xabcdef', true, mockFetch, mockLogger)
+      await lookupTxByRawHash('0xabcdef', true, mockFetch)
 
       assert.ok(capturedUrl.includes('hash=abcdef'), 'Should strip 0x prefix')
       assert.ok(!capturedUrl.includes('0x'), 'Should not include 0x in URL')
@@ -164,7 +107,7 @@ describe('TON utils unit tests', () => {
         }
       }) as unknown as typeof fetch
 
-      await lookupTxByRawHash('abc', true, mockFetch, mockLogger)
+      await lookupTxByRawHash('abcd', true, mockFetch)
 
       const parsed = new URL(capturedUrl)
       assert.equal(parsed.hostname, 'testnet.toncenter.com', 'Should use testnet URL')
@@ -181,7 +124,7 @@ describe('TON utils unit tests', () => {
         }
       }) as unknown as typeof fetch
 
-      await lookupTxByRawHash('abc', false, mockFetch, mockLogger)
+      await lookupTxByRawHash('abcd', false, mockFetch)
 
       const parsed = new URL(capturedUrl)
       assert.equal(parsed.hostname, 'toncenter.com', 'Should use mainnet URL')
@@ -192,10 +135,7 @@ describe('TON utils unit tests', () => {
         json: async () => ({ transactions: [] }),
       })) as unknown as typeof fetch
 
-      await assert.rejects(
-        () => lookupTxByRawHash('nonexistent', true, mockFetch, mockLogger),
-        /not found/i,
-      )
+      await assert.rejects(() => lookupTxByRawHash('deadbeef', true, mockFetch), /not found/i)
     })
 
     it('should throw CCIPTransactionNotFoundError on network error', async () => {
@@ -203,10 +143,7 @@ describe('TON utils unit tests', () => {
         throw new Error('Network error')
       }) as unknown as typeof fetch
 
-      await assert.rejects(
-        () => lookupTxByRawHash('abc', true, mockFetch, mockLogger),
-        /not found/i,
-      )
+      await assert.rejects(() => lookupTxByRawHash('abcd', true, mockFetch), /not found/i)
     })
 
     it('should throw CCIPTransactionNotFoundError on invalid JSON', async () => {
@@ -216,10 +153,7 @@ describe('TON utils unit tests', () => {
         },
       })) as unknown as typeof fetch
 
-      await assert.rejects(
-        () => lookupTxByRawHash('abc', true, mockFetch, mockLogger),
-        /not found/i,
-      )
+      await assert.rejects(() => lookupTxByRawHash('abcd', true, mockFetch), /not found/i)
     })
 
     it('should return first transaction from results', async () => {
@@ -232,11 +166,18 @@ describe('TON utils unit tests', () => {
         }),
       })) as unknown as typeof fetch
 
-      const result = await lookupTxByRawHash('abc', true, mockFetch, mockLogger)
+      const result = await lookupTxByRawHash('abcd', true, mockFetch)
 
       assert.equal(result.account, '0:first')
       assert.equal(result.lt, '100')
       assert.equal(result.hash, 'aaa')
     })
+  })
+})
+
+describe('crc32', () => {
+  it('should calculate CRC32 checksum', () => {
+    const event = 'ExecutionStateChanged'
+    assert.equal(crc32(event), '0x4c94c360')
   })
 })

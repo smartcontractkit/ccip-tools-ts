@@ -94,7 +94,7 @@ describe('CCIPAPIClient', () => {
       await client.getLaneLatency(5009297550715157269n, 4949039107694359620n)
 
       assert.equal(mockedFetch.mock.calls.length, 1)
-      const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] })?.arguments[0]
+      const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
       assert.ok(url.includes('sourceChainSelector=5009297550715157269'))
       assert.ok(url.includes('destChainSelector=4949039107694359620'))
     })
@@ -103,7 +103,7 @@ describe('CCIPAPIClient', () => {
       const client = new CCIPAPIClient()
       await client.getLaneLatency(1n, 2n)
 
-      const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] })?.arguments[0]
+      const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
       assert.ok(url.startsWith(DEFAULT_API_BASE_URL))
       assert.ok(url.includes('/v1/lanes/latency'))
     })

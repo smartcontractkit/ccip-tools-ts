@@ -11,7 +11,7 @@
     "ccip-cli"
   ],
   "scripts": {
-    "test": "npm run clean:coverage && c8 npm test --workspaces",
+    "test": "npm run clean:coverage && c8 node --test --test-concurrency=4",
     "test:unit": "npm run clean:coverage && c8 npm test -w ccip-sdk",
     "test:e2e": "npm run clean:coverage && c8 npm test -w ccip-cli",
     "lint": "npm run lint --workspaces",

@@ -463,13 +463,13 @@ describe('blockRangeGenerator', () => {
   it('should generate block ranges forwards', () => {
     const ranges = [...blockRangeGenerator({ startBlock: 1000, endBlock: 50000 })]
     assert.equal(ranges.length, 5)
-    assert.equal(ranges[0].fromBlock, 1000)
-    assert.equal(ranges[0].toBlock, 10999)
-    assert.ok('progress' in ranges[0])
-    assert.equal(ranges[1].fromBlock, 11000)
-    assert.equal(ranges[1].toBlock, 20999)
-    assert.equal(ranges[4].fromBlock, 41000)
-    assert.equal(ranges[4].toBlock, 50000)
+    assert.equal(ranges[0]!.fromBlock, 1000)
+    assert.equal(ranges[0]!.toBlock, 10999)
+    assert.ok('progress' in ranges[0]!)
+    assert.equal(ranges[1]!.fromBlock, 11000)
+    assert.equal(ranges[1]!.toBlock, 20999)
+    assert.equal(ranges[4]!.fromBlock, 41000)
+    assert.equal(ranges[4]!.toBlock, 50000)
   })
 
   it('should generate single block range', () => {
@@ -480,10 +480,10 @@ describe('blockRangeGenerator', () => {
   it('should handle custom step size', () => {
     const ranges = [...blockRangeGenerator({ startBlock: 1, endBlock: 1000, page: 200 })]
     assert.equal(ranges.length, 5)
-    assert.equal(ranges[0].fromBlock, 1)
-    assert.equal(ranges[0].toBlock, 200)
-    assert.equal(ranges[4].fromBlock, 801)
-    assert.equal(ranges[4].toBlock, 1000)
+    assert.equal(ranges[0]!.fromBlock, 1)
+    assert.equal(ranges[0]!.toBlock, 200)
+    assert.equal(ranges[4]!.fromBlock, 801)
+    assert.equal(ranges[4]!.toBlock, 1000)
   })
 
   it('should handle when endBlock equals startBlock', () => {

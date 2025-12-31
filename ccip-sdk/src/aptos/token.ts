@@ -149,7 +149,7 @@ export async function getTokenInfo(provider: Aptos, token: string): Promise<Toke
         decimals: decimalsRes[0] as number,
       }
     } catch (err) {
-      lastErr = err as Error
+      lastErr = err as Error | undefined
     }
   }
 

@@ -84,7 +84,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     getChain = fetchChainsFromRpcs(ctx, argv)
     let idFromSource, onRamp
     if (argv.idFromSource.includes('@')) {
-      ;[onRamp, idFromSource] = argv.idFromSource.split('@')
+      ;[onRamp, idFromSource] = argv.idFromSource.split('@') as [string, string]
     } else idFromSource = argv.idFromSource
     const sourceNetwork = networkInfo(idFromSource)
     source = await getChain(sourceNetwork.chainId)
@@ -129,7 +129,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     }
 
     const offchainTokenData = await source.getOffchainTokenData(request)
-    if (offchainTokenData?.length && offchainTokenData.some((d) => !!d)) {
+    if (offchainTokenData.length && offchainTokenData.some((d) => !!d)) {
       switch (argv.format) {
         case Format.log: {
           logger.log('attestations =', offchainTokenData)
@@ -166,7 +166,6 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       watch: argv.wait && new Promise<void>((resolve) => (cancelWaitCommit = resolve)),
     })
     cancelWaitFinalized?.()
-    if (!commit) return
     await finalized$
     if (argv.wait)
       logger.info(`[${MessageStatus.Committed}] Commit report accepted on destination chain`)

@@ -479,11 +479,11 @@ describe('EVMChain.decodeCommits', () => {
 
       assert.ok(result)
       assert.equal(result.length, 1)
-      assert.equal(result[0].merkleRoot, testHash.merkleRoot)
-      assert.equal(result[0].minSeqNr, 10n)
-      assert.equal(result[0].maxSeqNr, 20n)
-      assert.equal(result[0].sourceChainSelector, sourceChainSelector)
-      assert.equal(result[0].onRampAddress, testAddresses.onRamp)
+      assert.equal(result[0]!.merkleRoot, testHash.merkleRoot)
+      assert.equal(result[0]!.minSeqNr, 10n)
+      assert.equal(result[0]!.maxSeqNr, 20n)
+      assert.equal(result[0]!.sourceChainSelector, sourceChainSelector)
+      assert.equal(result[0]!.onRampAddress, testAddresses.onRamp)
     })
 
     it('should throw when decoding v1.5 without lane', () => {
@@ -534,10 +534,10 @@ describe('EVMChain.decodeCommits', () => {
 
       assert.ok(result)
       assert.equal(result.length, 1)
-      assert.equal(result[0].merkleRoot, testHash.merkleRoot)
-      assert.equal(result[0].minSeqNr, 100n)
-      assert.equal(result[0].maxSeqNr, 200n)
-      assert.equal(result[0].sourceChainSelector, sourceChainSelector)
+      assert.equal(result[0]!.merkleRoot, testHash.merkleRoot)
+      assert.equal(result[0]!.minSeqNr, 100n)
+      assert.equal(result[0]!.maxSeqNr, 200n)
+      assert.equal(result[0]!.sourceChainSelector, sourceChainSelector)
     })
 
     it('should decode multiple commit reports', () => {
@@ -571,8 +571,8 @@ describe('EVMChain.decodeCommits', () => {
 
       assert.ok(result)
       assert.equal(result.length, 2)
-      assert.equal(result[0].sourceChainSelector, sourceChainSelector1)
-      assert.equal(result[1].sourceChainSelector, sourceChainSelector2)
+      assert.equal(result[0]!.sourceChainSelector, sourceChainSelector1)
+      assert.equal(result[1]!.sourceChainSelector, sourceChainSelector2)
     })
 
     it('should filter by lane when provided', () => {
@@ -610,8 +610,8 @@ describe('EVMChain.decodeCommits', () => {
 
       assert.ok(result)
       assert.equal(result.length, 1)
-      assert.equal(result[0].sourceChainSelector, targetChainSelector)
-      assert.equal(result[0].merkleRoot, testHash.merkleRoot)
+      assert.equal(result[0]!.sourceChainSelector, targetChainSelector)
+      assert.equal(result[0]!.merkleRoot, testHash.merkleRoot)
     })
 
     it('should return undefined when no reports match lane filter', () => {

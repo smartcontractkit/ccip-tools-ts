@@ -153,7 +153,7 @@ describe('getLbtcAttestation', () => {
       mockedFetch.mock.calls[0]?.arguments[0],
       'https://gastald-testnet.prod.lombard.finance/api/bridge/v1/deposits/getByHash',
     )
-    assert.deepEqual(mockedFetch.mock.calls[0]?.arguments[1], {
+    assert.deepEqual(mockedFetch.mock.calls[0].arguments[1], {
       method: 'POST',
       body: JSON.stringify({ messageHash: [approvedPayloadHash1] }),
     })
@@ -168,7 +168,7 @@ describe('getLbtcAttestation', () => {
       mockedFetch.mock.calls[0]?.arguments[0],
       'https://mainnet.prod.lombard.finance/api/bridge/v1/deposits/getByHash',
     )
-    assert.deepEqual(mockedFetch.mock.calls[0]?.arguments[1], {
+    assert.deepEqual(mockedFetch.mock.calls[0].arguments[1], {
       method: 'POST',
       body: JSON.stringify({ messageHash: [approvedPayloadHash1] }),
     })

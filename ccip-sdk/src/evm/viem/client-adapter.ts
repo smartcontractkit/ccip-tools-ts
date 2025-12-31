@@ -110,7 +110,7 @@ export async function fromViemClient(
   ctx?: ChainContext,
 ): Promise<EVMChain> {
   // Validate chain is defined
-  if (!client.chain) {
+  if (!(client as Partial<typeof client>).chain) {
     throw new CCIPViemAdapterError('PublicClient must have a chain defined', {
       recovery: 'Pass a chain to createPublicClient: createPublicClient({ chain: mainnet, ... })',
     })

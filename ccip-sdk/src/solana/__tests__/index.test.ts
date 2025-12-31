@@ -514,8 +514,8 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const decoded = SolanaChain.decodeExtraArgs(encoded)
 
     assert.equal(decoded?._tag, 'EVMExtraArgsV2')
-    assert.equal(decoded?.gasLimit, originalArgs.gasLimit)
-    assert.equal(decoded?.allowOutOfOrderExecution, originalArgs.allowOutOfOrderExecution)
+    assert.equal(decoded.gasLimit, originalArgs.gasLimit)
+    assert.equal(decoded.allowOutOfOrderExecution, originalArgs.allowOutOfOrderExecution)
   })
 
   it('should encode with minimum gasLimit value', () => {
@@ -540,7 +540,7 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const decoded = SolanaChain.decodeExtraArgs(encoded)
 
     assert.ok(decoded)
-    assert.equal(decoded?.gasLimit, 200000n)
+    assert.equal(decoded.gasLimit, 200000n)
   })
 
   it('should maintain encoding consistency across multiple calls', () => {
@@ -568,8 +568,8 @@ describe('SolanaChain.encodeExtraArgs', () => {
 
     const decoded = SolanaChain.decodeExtraArgs(encoded)
     assert.equal(decoded?._tag, 'EVMExtraArgsV2')
-    assert.equal(decoded?.gasLimit, 500000n)
-    assert.equal(decoded?.allowOutOfOrderExecution, true)
+    assert.equal(decoded.gasLimit, 500000n)
+    assert.equal(decoded.allowOutOfOrderExecution, true)
   })
 
   it('should produce valid extra args for CCIP message creation', () => {
@@ -586,8 +586,8 @@ describe('SolanaChain.encodeExtraArgs', () => {
     // Verify it can be decoded
     const decoded = SolanaChain.decodeExtraArgs(encoded)
     assert.ok(decoded)
-    assert.equal(decoded?.gasLimit, gasLimit)
-    assert.equal(decoded?.allowOutOfOrderExecution, allowOutOfOrder)
+    assert.equal(decoded.gasLimit, gasLimit)
+    assert.equal(decoded.allowOutOfOrderExecution, allowOutOfOrder)
   })
 
   it('should demonstrate usage pattern for cross-chain messaging', () => {

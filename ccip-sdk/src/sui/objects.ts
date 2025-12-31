@@ -63,14 +63,14 @@ export async function getCcipObjectRef(client: SuiClient, ccipPackageId: string)
     },
   })
 
-  if (pointerResponse.data.length === 0) {
+  if (!pointerResponse.data.length) {
     throw new CCIPDataFormatUnsupportedError(
       'No CCIPObjectRefPointer found for the given packageId',
     )
   }
 
   // Get the pointer object to extract ccip_object_id
-  const pointerId = pointerResponse.data[0].data?.objectId
+  const pointerId = pointerResponse.data[0]!.data?.objectId
   if (!pointerId) {
     throw new CCIPDataFormatUnsupportedError('Pointer does not have objectId')
   }
@@ -110,13 +110,13 @@ export async function getOffRampStateObject(
     },
   })
 
-  if (offrampPointerResponse.data.length === 0) {
+  if (!offrampPointerResponse.data.length) {
     throw new CCIPDataFormatUnsupportedError(
       'No OffRampStatePointer found for the given offramp package',
     )
   }
 
-  const offrampPointerId = offrampPointerResponse.data[0].data?.objectId
+  const offrampPointerId = offrampPointerResponse.data[0]!.data?.objectId
 
   if (!offrampPointerId) {
     throw new CCIPDataFormatUnsupportedError('OffRampStatePointer does not have a valid objectId')
@@ -180,19 +180,19 @@ export async function getReceiverModule(
 
   const returnValues = result.results[0]?.returnValues
 
-  if (!returnValues || returnValues.length === 0) {
+  if (!returnValues?.length) {
     throw new CCIPDataFormatUnsupportedError('No return values from get_receiver_config')
   }
 
   // Decode the ReceiverConfig struct
   // ReceiverConfig has two fields: module_name (String) and proof_typename (ascii::String)
   // The struct is returned as a BCS-encoded byte array
-  const receiverConfigBytes = returnValues[0][0]
+  const receiverConfigBytes = returnValues[0]![0]
 
   // Parse the struct:
   // First field is module_name (String = vector<u8> with length prefix)
   let offset = 0
-  const moduleNameLength = receiverConfigBytes[offset]
+  const moduleNameLength = receiverConfigBytes[offset]!
   offset += 1
   const moduleName = new TextDecoder().decode(
     new Uint8Array(receiverConfigBytes.slice(offset, offset + moduleNameLength)),
@@ -257,14 +257,14 @@ export async function fetchTokenConfigs(
 
     const returnValues = result.results[0]?.returnValues
 
-    if (!returnValues || returnValues.length === 0) {
+    if (!returnValues?.length) {
       throw new CCIPDataFormatUnsupportedError(
         `No return values from get_token_config_struct for ${tokenAddress}`,
       )
     }
 
     // Parse the TokenConfig struct from BCS-encoded bytes
-    const configBytes = returnValues[0][0]
+    const configBytes = returnValues[0]![0]
 
     // TokenConfig structure (from token_admin_registry.go):
     // - TokenPoolPackageId (address = 32 bytes)
@@ -286,7 +286,7 @@ export async function fetchTokenConfigs(
     offset += 32
 
     // TokenPoolModule (String)
-    const moduleNameLength = configBytes[offset]
+    const moduleNameLength = configBytes[offset]!
     offset += 1
     const tokenPoolModule = new TextDecoder().decode(
       new Uint8Array(configBytes.slice(offset, offset + moduleNameLength)),
@@ -294,7 +294,7 @@ export async function fetchTokenConfigs(
     offset += moduleNameLength
 
     // TokenType (ascii::String)
-    const tokenTypeLength = configBytes[offset]
+    const tokenTypeLength = configBytes[offset]!
     offset += 1
     const tokenType = new TextDecoder().decode(
       new Uint8Array(configBytes.slice(offset, offset + tokenTypeLength)),
@@ -316,7 +316,7 @@ export async function fetchTokenConfigs(
     offset += 32
 
     // TokenPoolTypeProof (ascii::String)
-    const proofLength = configBytes[offset]
+    const proofLength = configBytes[offset]!
     offset += 1
     const tokenPoolTypeProof = new TextDecoder().decode(
       new Uint8Array(configBytes.slice(offset, offset + proofLength)),
@@ -324,7 +324,7 @@ export async function fetchTokenConfigs(
     offset += proofLength
 
     // LockOrBurnParams (vector<address>)
-    const lockOrBurnCount = configBytes[offset]
+    const lockOrBurnCount = configBytes[offset]!
     offset += 1
     const lockOrBurnParams: string[] = []
     for (let i = 0; i < lockOrBurnCount; i++) {
@@ -334,7 +334,7 @@ export async function fetchTokenConfigs(
     }
 
     // ReleaseOrMintParams (vector<address>)
-    const releaseOrMintCount = configBytes[offset]
+    const releaseOrMintCount = configBytes[offset]!
     offset += 1
     const releaseOrMintParams: string[] = []
     for (let i = 0; i < releaseOrMintCount; i++) {

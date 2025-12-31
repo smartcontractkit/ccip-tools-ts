@@ -52,12 +52,15 @@ export class CCIPError extends Error {
     this.retryAfterMs = options?.retryAfterMs
     this.recovery = options?.recovery ?? getDefaultRecovery(code)
 
-    Error.captureStackTrace?.(this, this.constructor)
+    Error.captureStackTrace(this, this.constructor)
   }
 
   /** Type guard. Prefer over instanceof (handles dual package hazard). */
   static isCCIPError(error: unknown): error is CCIPError {
-    return error instanceof CCIPError || !!(error as { _isCCIPError?: boolean })?._isCCIPError
+    return (
+      error instanceof CCIPError ||
+      !!(error as { _isCCIPError?: boolean } | undefined)?._isCCIPError
+    )
   }
 
   /** Wrap unknown catch value in CCIPError. */

@@ -105,18 +105,18 @@ export async function generateUnsignedExecuteReport(
   const execIx = await program.methods
     .manuallyExecute(serializedReport, tokenIndexes)
     .accounts({
-      config: accounts[0].pubkey,
-      referenceAddresses: accounts[1].pubkey,
-      sourceChain: accounts[2].pubkey,
-      commitReport: accounts[3].pubkey,
-      offramp: accounts[4].pubkey,
-      allowedOfframp: accounts[5].pubkey,
-      authority: accounts[6].pubkey,
-      systemProgram: accounts[7].pubkey,
-      sysvarInstructions: accounts[8].pubkey,
-      rmnRemote: accounts[9].pubkey,
-      rmnRemoteCurses: accounts[10].pubkey,
-      rmnRemoteConfig: accounts[11].pubkey,
+      config: accounts[0]!.pubkey,
+      referenceAddresses: accounts[1]!.pubkey,
+      sourceChain: accounts[2]!.pubkey,
+      commitReport: accounts[3]!.pubkey,
+      offramp: accounts[4]!.pubkey,
+      allowedOfframp: accounts[5]!.pubkey,
+      authority: accounts[6]!.pubkey,
+      systemProgram: accounts[7]!.pubkey,
+      sysvarInstructions: accounts[8]!.pubkey,
+      rmnRemote: accounts[9]!.pubkey,
+      rmnRemoteCurses: accounts[10]!.pubkey,
+      rmnRemoteConfig: accounts[11]!.pubkey,
     })
     .remainingAccounts(accounts.slice(12))
     .instruction()
@@ -414,7 +414,7 @@ async function autoDeriveExecutionAccounts({
 
   const [configPDA] = PublicKey.findProgramAddressSync([Buffer.from('config')], offramp.programId)
 
-  while (true) {
+  while (stage) {
     const params: IdlTypes<typeof CCIP_OFFRAMP_IDL>['DeriveAccountsExecuteParams'] = {
       executeCaller: payer,
       messageAccounts: messagingAccounts,
@@ -480,11 +480,6 @@ async function autoDeriveExecutionAccounts({
 
     // Collect lookup tables
     lookupTables.push(...response.lookUpTablesToSave)
-
-    // Check if derivation is complete
-    if (!response.nextStage || response.nextStage.length === 0) {
-      break
-    }
 
     stage = response.nextStage
   }

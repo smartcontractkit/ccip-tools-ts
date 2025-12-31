@@ -131,8 +131,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Logs watch requires endBlock to be a `finalized`, `latest` or finality block depth (negative).',
   LOGS_WATCH_REQUIRES_START: 'Logs watch requires either startBlock or startTime (forward mode).',
   LOGS_ADDRESS_REQUIRED: 'Provide address for logs filtering.',
+  TOPICS_INVALID: 'Topics must be strings for event filtering.',
 
-  SOLANA_TOPICS_INVALID: 'Topics must be strings for Solana event filtering.',
   SOLANA_LOOKUP_TABLE_NOT_FOUND: 'Lookup table account not found. It may not be synced yet.',
   SOLANA_ROUTER_CONFIG_NOT_FOUND: 'Router config PDA not found.',
   SOLANA_FEE_RESULT_INVALID: 'Invalid fee result from router. Check the router configuration.',

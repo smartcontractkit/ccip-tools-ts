@@ -41,7 +41,7 @@ describe('SolanaChain.decodeMessage', () => {
 
     // ----- TOKEN AMOUNTS -----
     assert.equal(message.tokenAmounts.length, 1)
-    const tokenAmount = message.tokenAmounts[0]
+    const tokenAmount = message.tokenAmounts[0]!
 
     assert.equal(tokenAmount.sourcePoolAddress, 'D22aGkYvJiFJ9tpxUV1RUWkNUy4FSUBk2NAvwQQD2G9Y')
     assert.equal(

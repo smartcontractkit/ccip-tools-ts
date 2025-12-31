@@ -89,6 +89,7 @@ import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs
 import { getTokenInfo } from './token.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import { decodeMessage, getMessageById, getMessagesInBatch, getMessagesInTx } from '../requests.ts'
+export type { UnsignedAptosTx }
 
 /**
  * Aptos chain implementation supporting Aptos networks.
@@ -367,7 +368,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     const { data } = log
     if (
       (typeof data !== 'string' || !data.startsWith('{')) &&
-      (typeof data !== 'object' || data == null || isBytesLike(data))
+      (typeof data !== 'object' || isBytesLike(data))
     )
       throw new CCIPAptosLogInvalidError(util.inspect(log))
     // offload massaging to generic decodeJsonMessage
@@ -447,7 +448,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    */
   static decodeCommits({ data }: Pick<Log_, 'data'>, lane?: Lane): CommitReport[] | undefined {
     if (!data || typeof data != 'object') throw new CCIPAptosLogInvalidError(data)
-    const data_ = data as { blessed_merkle_roots: unknown[]; unblessed_merkle_roots: unknown[] }
+    const data_ = data as {
+      blessed_merkle_roots: unknown[] | undefined
+      unblessed_merkle_roots: unknown[]
+    }
     if (!data_.blessed_merkle_roots) return
     let commits = (
       convertKeysToCamelCase(
@@ -575,7 +579,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     })
 
     // Return the CCIPRequest by fetching it
-    return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]
+    return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]!
   }
 
   /** {@inheritDoc Chain.getOffchainTokenData} */

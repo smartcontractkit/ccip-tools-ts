@@ -40,6 +40,7 @@ import {
   type WithLogger,
   ChainFamily,
 } from '../types.ts'
+import { discoverCCIP, discoverOfframp } from './discovery.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
 import { bytesToBuffer, decodeAddress, getDataBytes, networkInfo } from '../utils.ts'
 import { type CommitEvent, getSuiEventsInTimeRange } from './events.ts'
@@ -54,8 +55,6 @@ import {
   getOffRampStateObject,
   getReceiverModule,
 } from './objects.ts'
-import selectors from '../selectors.ts'
-import { discoverCCIP, discoverOfframp } from './discovery.ts'
 
 export const SUI_EXTRA_ARGS_V1_TAG = '21ea4ca9' as const
 
@@ -98,11 +97,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     // TODO: Graphql client should come from config
     let graphqlUrl: string
-    const selector = network.chainSelector
-    if (selector === selectors['sui:1'].selector) {
+    if (this.network.name === 'sui-mainnet') {
       // Sui mainnet (sui:1)
       graphqlUrl = 'https://graphql.mainnet.sui.io/graphql'
-    } else if (selector === selectors['sui:2'].selector) {
+    } else if (this.network.name === 'sui-testnet') {
       // Sui testnet (sui:2)
       graphqlUrl = 'https://graphql.testnet.sui.io/graphql'
     } else {
@@ -173,13 +171,12 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     // Extract events from the transaction
     const events: Log_[] = []
-    if (txResponse.events) {
-      for (let i = 0; i < txResponse.events.length; i++) {
-        const event = txResponse.events[i]
+    if (txResponse.events?.length) {
+      for (const [i, event] of txResponse.events.entries()) {
         const eventType = event.type
         const packageId = eventType.split('::')[0]
         const moduleName = eventType.split('::')[1]
-        const eventName = eventType.split('::')[2]
+        const eventName = eventType.split('::')[2]!
 
         events.push({
           address: `${packageId}::${moduleName}`,
@@ -197,7 +194,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       logs: events,
       blockNumber: Number(txResponse.checkpoint || 0),
       timestamp: Number(txResponse.timestampMs || 0) / 1000,
-      from: txResponse.transaction?.data?.sender || '',
+      from: txResponse.transaction?.data.sender || '',
     }
   }
 
@@ -368,7 +365,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     offset += 1
 
     // OnRamp (vector<u8>)
-    const onRampLength = configBytes[offset]
+    const onRampLength = configBytes[offset]!
     offset += 1
     const onRampBytes = configBytes.slice(offset, offset + onRampLength)
 
@@ -439,7 +436,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @param extraArgs - Encoded extra arguments bytes.
    * @returns Decoded extra arguments or undefined if unknown format.
    */
-  static decodeExtraArgs(extraArgs: BytesLike): SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' } {
+  static decodeExtraArgs(
+    extraArgs: BytesLike,
+  ): (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' }) | undefined {
     const data = getDataBytes(extraArgs)
     const hexBytes = toHex(data)
     if (!hexBytes.startsWith(SUI_EXTRA_ARGS_V1_TAG)) {
@@ -663,7 +662,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     const tx = buildManualExecutionPTB(input)
 
     // Set gas budget if provided
-    if (opts?.gasLimit) {
+    if (opts.gasLimit) {
       tx.setGasBudget(opts.gasLimit)
     }
 
@@ -687,8 +686,8 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
 
     // Check if transaction inmediately reverted
-    if (result.effects?.status?.status !== 'success') {
-      const errorMsg = result.effects?.status?.error || 'Unknown error'
+    if (result.effects?.status.status !== 'success') {
+      const errorMsg = result.effects?.status.error || 'Unknown error'
       throw new CCIPExecTxRevertedError(result.digest, {
         context: { error: errorMsg },
       })

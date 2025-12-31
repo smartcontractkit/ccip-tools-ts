@@ -25,16 +25,10 @@ export const discoverCCIP = async (client: SuiClient, onramp: string): Promise<s
     transactionBlock: tx,
   })
   const returnValues = inspectResult.results?.[0]?.returnValues
-  if (!returnValues || returnValues.length === 0) {
+  if (!returnValues?.length) {
     throw new CCIPError(CCIPErrorCode.UNKNOWN, 'No return values from dev inspect')
   }
-  const [valueBytes] = returnValues[0]
-  if (!valueBytes) {
-    throw new CCIPError(
-      CCIPErrorCode.UNKNOWN,
-      'Unable to decode CCIP package id from return values',
-    )
-  }
+  const [valueBytes] = returnValues[0]!
 
   return normalizeSuiAddress(hexlify(bytesToBuffer(valueBytes)))
 }
@@ -145,7 +139,7 @@ export const discoverOfframp = async (client: SuiClient, ccip: string) => {
     .flatMap((pkg) => Object.values(pkg))
     .filter((module) => module.name === 'offramp')
 
-  if (offrampPkgs.length === 0) {
+  if (!offrampPkgs.length) {
     throw new CCIPError(
       CCIPErrorCode.UNKNOWN,
       'Could not find OffRamp package among OwnerCap packages',
@@ -159,5 +153,5 @@ export const discoverOfframp = async (client: SuiClient, ccip: string) => {
     )
   }
 
-  return normalizeSuiAddress(offrampPkgs[0].address)
+  return normalizeSuiAddress(offrampPkgs[0]!.address)
 }

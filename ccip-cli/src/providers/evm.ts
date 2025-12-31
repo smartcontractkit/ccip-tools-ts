@@ -43,7 +43,7 @@ export async function loadEvmWallet(
     )
   }
   if (typeof walletOpt !== 'string') throw new CCIPArgumentInvalidError('wallet', String(walletOpt))
-  if ((walletOpt ?? '').startsWith('ledger')) {
+  if (walletOpt.startsWith('ledger')) {
     let derivationPath = walletOpt.split(':')[1]
     if (derivationPath && !isNaN(Number(derivationPath)))
       derivationPath = `m/44'/60'/${derivationPath}'/0/0`

@@ -13,7 +13,7 @@ const RPCS = [
   process.env['RPC_AVAX'] || 'https://avalanche-fuji-c-chain-rpc.publicnode.com',
   process.env['RPC_APTOS'] || 'testnet',
   process.env['RPC_SOLANA'] || 'https://api.devnet.solana.com',
-  process.env['RPC_TON'] || 'https://testnet-v4.tonhubapi.com',
+  process.env['RPC_TON'] || 'https://testnet.toncenter.com/api/v2',
 ]
 
 /**

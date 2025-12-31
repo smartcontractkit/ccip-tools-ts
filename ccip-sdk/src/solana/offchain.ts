@@ -53,13 +53,13 @@ export async function fetchSolanaOffchainTokenData(
   },
   { logger = console }: WithLogger = {},
 ): Promise<OffchainTokenData[]> {
-  if (request.message.tokenAmounts === undefined || request.message.tokenAmounts.length === 0) {
+  if (!request.message.tokenAmounts.length) {
     return []
   }
 
   if (request.message.tokenAmounts.length > 1) {
     throw new CCIPDataFormatUnsupportedError(
-      `Expected at most 1 token transfer, found ${request.message.tokenAmounts?.length}`,
+      `Expected at most 1 token transfer, found ${request.message.tokenAmounts.length}`,
     )
   }
 
@@ -123,7 +123,7 @@ export async function fetchSolanaOffchainTokenData(
  * @returns Encoded data - Borsh-encoded attestation for Solana
  */
 export function encodeSolanaOffchainTokenData(data: OffchainTokenData): string {
-  if (data?._tag === 'usdc') {
+  if (data?._tag === 'usdc' && data.message && data.attestation) {
     const messageBuffer = bytesToBuffer(data.message)
     const attestationBuffer = bytesToBuffer(data.attestation)
 

@@ -274,7 +274,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       address: log.address,
       startBlock: log.blockNumber,
       endBlock: finality,
-      topics: [log.topics[0]],
+      topics: [log.topics[0]!],
       watch: cancel$ ?? true,
     })) {
       if (l.transactionHash === log.transactionHash) {

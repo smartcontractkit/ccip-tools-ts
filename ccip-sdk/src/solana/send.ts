@@ -151,7 +151,7 @@ export async function getFee(
       feeQuoterLinkTokenConfig: feeQuoterLinkTokenConfigPda,
     })
     .remainingAccounts(remainingAccounts)
-    .view()) as IdlTypes<typeof CCIP_ROUTER_IDL>['GetFeeResult']
+    .view()) as IdlTypes<typeof CCIP_ROUTER_IDL>['GetFeeResult'] | undefined
 
   if (!result?.amount) {
     throw new CCIPSolanaFeeResultInvalidError(util.inspect(result))
@@ -242,7 +242,7 @@ async function deriveAccountsCcipSend({
     addressLookupTableAccounts.push(...lookupTableAccounts)
 
     stage = response.nextStage
-  } while (stage?.length)
+  } while (stage.length)
 
   return {
     accounts: derivedAccounts,
@@ -301,24 +301,24 @@ export async function generateUnsignedCcipSend(
   const sendIx = await program.methods
     .ccipSend(new BN(destChainSelector), svmMessage, tokenIndexes)
     .accountsStrict({
-      config: accounts[0].pubkey,
-      destChainState: accounts[1].pubkey,
-      nonce: accounts[2].pubkey,
-      authority: accounts[3].pubkey,
-      systemProgram: accounts[4].pubkey,
-      feeTokenProgram: accounts[5].pubkey,
-      feeTokenMint: accounts[6].pubkey,
-      feeTokenUserAssociatedAccount: accounts[7].pubkey,
-      feeTokenReceiver: accounts[8].pubkey,
-      feeBillingSigner: accounts[9].pubkey,
-      feeQuoter: accounts[10].pubkey,
-      feeQuoterConfig: accounts[11].pubkey,
-      feeQuoterDestChain: accounts[12].pubkey,
-      feeQuoterBillingTokenConfig: accounts[13].pubkey,
-      feeQuoterLinkTokenConfig: accounts[14].pubkey,
-      rmnRemote: accounts[15].pubkey,
-      rmnRemoteCurses: accounts[16].pubkey,
-      rmnRemoteConfig: accounts[17].pubkey,
+      config: accounts[0]!.pubkey,
+      destChainState: accounts[1]!.pubkey,
+      nonce: accounts[2]!.pubkey,
+      authority: accounts[3]!.pubkey,
+      systemProgram: accounts[4]!.pubkey,
+      feeTokenProgram: accounts[5]!.pubkey,
+      feeTokenMint: accounts[6]!.pubkey,
+      feeTokenUserAssociatedAccount: accounts[7]!.pubkey,
+      feeTokenReceiver: accounts[8]!.pubkey,
+      feeBillingSigner: accounts[9]!.pubkey,
+      feeQuoter: accounts[10]!.pubkey,
+      feeQuoterConfig: accounts[11]!.pubkey,
+      feeQuoterDestChain: accounts[12]!.pubkey,
+      feeQuoterBillingTokenConfig: accounts[13]!.pubkey,
+      feeQuoterLinkTokenConfig: accounts[14]!.pubkey,
+      rmnRemote: accounts[15]!.pubkey,
+      rmnRemoteCurses: accounts[16]!.pubkey,
+      rmnRemoteConfig: accounts[17]!.pubkey,
     })
     .remainingAccounts(accounts.slice(18))
     .instruction()

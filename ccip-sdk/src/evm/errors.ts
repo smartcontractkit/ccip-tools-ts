@@ -162,7 +162,7 @@ export function recursiveParseError(
   if (!parsed) return [[key, data]]
   const [fragment, _, args] = parsed
   const desc = fragment.format('full')
-  key = desc.split(' ')[0]
+  key = desc.split(' ')[0]!
   const res = [[key, desc.substring(key.length + 1)]] as ReturnType<typeof recursiveParseError>
   if (!args) return res
   if (['ReceiverError', 'TokenHandlingError'].includes(fragment.name) && args.err === '0x') {
@@ -182,7 +182,7 @@ export function parseData(data: unknown): Record<string, unknown> | undefined {
   if (!data) return
   if (isHexString(data)) {
     const parsed = recursiveParseError('', data)
-    if (parsed.length === 1 && parsed[0][1] === data) return
+    if (parsed.length === 1 && parsed[0]![1] === data) return
     return Object.fromEntries(parsed)
   }
   if (typeof data !== 'object') return

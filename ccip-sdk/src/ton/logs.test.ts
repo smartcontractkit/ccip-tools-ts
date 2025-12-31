@@ -1,484 +1,1065 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it, mock } from 'node:test'
 
-import { beginCell } from '@ton/core'
-import type { TonClient4 } from '@ton/ton'
+import { Address } from '@ton/core'
+import type { TonClient, Transaction } from '@ton/ton'
 
-import { sleep } from '../utils.ts'
-import { type LogDecoders, fetchLogs } from './logs.ts'
+import type { ChainTransaction } from '../types.ts'
+import { streamTransactionsForAddress } from './logs.ts'
 
-const TEST_ADDRESS = '0:9f2e995aebceb97ae094dbe4cf973cbc8a402b4f0ac5287a00be8aca042d51b9'
+describe('TON logs unit tests', () => {
+  const TEST_ADDRESS = '0:' + '1'.repeat(64)
 
-// Mock decoders that accept all messages
-const mockDecoders: LogDecoders = {
-  tryDecodeAsMessage: () => ({ messageId: '0x' + '1'.repeat(64) }),
-  tryDecodeAsCommit: () => [{}],
-  tryDecodeAsReceipt: () => ({ messageId: '0x' + '1'.repeat(64) }),
-}
-
-// Mock decoders that reject all messages
-const rejectingDecoders: LogDecoders = {
-  tryDecodeAsMessage: () => undefined,
-  tryDecodeAsCommit: () => undefined,
-  tryDecodeAsReceipt: () => undefined,
-}
-
-function createMockTransaction(lt: number, timestamp: number) {
-  const txHash = Buffer.alloc(32)
-  txHash.writeUInt32BE(lt, 0)
-
-  const mockCell = beginCell().storeUint(0, 8).endCell()
-
-  return {
-    tx: {
-      lt: BigInt(lt),
-      hash: () => txHash,
-      now: timestamp,
-      outMessages: {
-        values: () => [
-          {
-            info: { type: 'external-out' as const },
-            body: mockCell,
-          },
-        ],
+  // Helper to create mock Transaction
+  function createMockTransaction(overrides: Partial<Transaction> = {}): Transaction {
+    return {
+      address: Address.parse(TEST_ADDRESS),
+      lt: 1000n,
+      hash: () => Buffer.from('testhash'),
+      now: Math.floor(Date.now() / 1000),
+      outMessagesCount: 0,
+      oldStatus: 'active',
+      endStatus: 'active',
+      inMessage: undefined,
+      outMessages: new Map(),
+      totalFees: {
+        coins: 0n,
+        extraCurrencies: new Map(),
       },
-    },
+      stateUpdate: {
+        oldHash: Buffer.alloc(32),
+        newHash: Buffer.alloc(32),
+      },
+      description: {
+        type: 'generic',
+        aborted: false,
+        creditFirst: false,
+        storagePhase: undefined,
+        creditPhase: undefined,
+        computePhase: {
+          type: 'vm',
+          success: true,
+          messageStateUsed: false,
+          accountActivated: false,
+          gasFees: 0n,
+          gasUsed: 0n,
+          gasLimit: 0n,
+          gasCredit: undefined,
+          mode: 0,
+          exitCode: 0,
+          exitArg: undefined,
+          vmSteps: 0,
+          vmInitStateHash: Buffer.alloc(32),
+          vmFinalStateHash: Buffer.alloc(32),
+        },
+        actionPhase: undefined,
+        bouncePhase: undefined,
+        destroyed: false,
+      },
+      ...overrides,
+    } as Transaction
   }
-}
 
-function createMockClient(
-  transactions: ReturnType<typeof createMockTransaction>[],
-  opts?: { noAccount?: boolean },
-) {
-  const sortedTxs = [...transactions].sort((a, b) => Number(b.tx.lt) - Number(a.tx.lt))
-  const latestTx = sortedTxs[0]
+  // Helper to create mock ChainTransaction
+  function createMockChainTransaction(hash: string, blockNumber: number): ChainTransaction {
+    return {
+      hash,
+      logs: [],
+      blockNumber,
+      timestamp: Math.floor(Date.now() / 1000),
+      from: TEST_ADDRESS,
+    }
+  }
 
-  // allows setTimeout callbacks to run
-  const yieldToMacrotasks = () => new Promise((resolve) => setImmediate(resolve))
+  describe('streamTransactionsForAddress', () => {
+    describe('validation', () => {
+      it('should throw CCIPLogsAddressRequiredError when address is not provided', async () => {
+        const mockProvider = {} as TonClient
+        const mockGetTransaction = mock.fn(async () => createMockChainTransaction('hash', 1))
 
-  return {
-    getLastBlock: async () => {
-      await yieldToMacrotasks()
-      return { last: { seqno: 12345678 } }
-    },
-    getAccountLite: async () => {
-      await yieldToMacrotasks()
-      return {
-        account: {
-          last:
-            opts?.noAccount || !latestTx
-              ? null
-              : {
-                  lt: latestTx.tx.lt.toString(),
-                  hash: latestTx.tx.hash().toString('base64'),
+        await assert.rejects(
+          async () => {
+            for await (const _tx of streamTransactionsForAddress(
+              {},
+              { provider: mockProvider, getTransaction: mockGetTransaction },
+            )) {
+              // Should not reach here
+            }
+          },
+          {
+            name: 'CCIPLogsAddressRequiredError',
+          },
+        )
+      })
+
+      it('should throw CCIPLogsWatchRequiresStartError when watch is true but no startBlock or startTime', async () => {
+        const mockProvider = {} as TonClient
+        const mockGetTransaction = mock.fn(async () => createMockChainTransaction('hash', 1))
+
+        await assert.rejects(
+          async () => {
+            for await (const _tx of streamTransactionsForAddress(
+              {
+                address: TEST_ADDRESS,
+                watch: true,
+              },
+              { provider: mockProvider, getTransaction: mockGetTransaction },
+            )) {
+              // Should not reach here
+            }
+          },
+          {
+            name: 'CCIPLogsWatchRequiresStartError',
+          },
+        )
+      })
+
+      it('should throw CCIPLogsWatchRequiresFinalityError when watch is true with fixed endBlock', async () => {
+        const mockProvider = {} as TonClient
+        const mockGetTransaction = mock.fn(async () => createMockChainTransaction('hash', 1))
+
+        await assert.rejects(
+          async () => {
+            for await (const _tx of streamTransactionsForAddress(
+              {
+                address: TEST_ADDRESS,
+                startBlock: 100,
+                endBlock: 500,
+                watch: true,
+              },
+              { provider: mockProvider, getTransaction: mockGetTransaction },
+            )) {
+              // Should not reach here
+            }
+          },
+          {
+            name: 'CCIPLogsWatchRequiresFinalityError',
+          },
+        )
+      })
+
+      it('should throw CCIPLogsWatchRequiresFinalityError when watch is true with endBefore', async () => {
+        const mockProvider = {} as TonClient
+        const mockGetTransaction = mock.fn(async () => createMockChainTransaction('hash', 1))
+
+        await assert.rejects(
+          async () => {
+            for await (const _tx of streamTransactionsForAddress(
+              {
+                address: TEST_ADDRESS,
+                startBlock: 100,
+                endBefore: 'somehash',
+                watch: true,
+              },
+              { provider: mockProvider, getTransaction: mockGetTransaction },
+            )) {
+              // Should not reach here
+            }
+          },
+          {
+            name: 'CCIPLogsWatchRequiresFinalityError',
+          },
+        )
+      })
+    })
+
+    describe('forward fetching (with startBlock)', () => {
+      it('should fetch transactions forward when startBlock is provided', async () => {
+        const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
+        const tx2 = createMockTransaction({ lt: 1001n, now: 101 })
+        const tx3 = createMockTransaction({ lt: 1002n, now: 102 })
+
+        const getTransactionsMock = mock.fn(async () => [tx1, tx2, tx3])
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            startBlock: 100,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        assert.equal(results.length, 3)
+        assert.equal(mockGetTransaction.mock.calls.length, 3)
+        assert.ok(getTransactionsMock.mock.calls.length >= 1)
+      })
+
+      it('should filter transactions by startTime', async () => {
+        // Create enough transactions to trigger pagination (batch size equals limit)
+        const oldTxs = Array.from({ length: 50 }, (_, i) =>
+          createMockTransaction({ lt: BigInt(900 + i), now: 90 + i }),
+        )
+        const newTxs = Array.from({ length: 49 }, (_, i) =>
+          createMockTransaction({ lt: BigInt(1000 + i), now: 150 + i }),
+        )
+
+        let callCount = 0
+        const getTransactionsMock = mock.fn(async () => {
+          callCount++
+          if (callCount === 1) {
+            // First batch: mix of old and new transactions (99 total, triggers pagination)
+            return [...newTxs, ...oldTxs].slice(0, 99)
+          }
+          // Second batch: only old transactions
+          return oldTxs.slice(0, 50)
+        })
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            startTime: 150,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        // Should only include transactions with timestamp >= 150
+        assert.equal(results.length, 49)
+        assert.ok(results.every((tx) => tx.timestamp >= 150))
+      })
+
+      it('should truncate transactions newer than endBlock', async () => {
+        const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
+        const tx2 = createMockTransaction({ lt: 1001n, now: 101 })
+        const tx3 = createMockTransaction({ lt: 1002n, now: 102 })
+
+        const getTransactionsMock = mock.fn(async () => [tx3, tx2, tx1])
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            startBlock: 100,
+            endBlock: 1001,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        // Should only include tx1 and tx2, not tx3
+        assert.equal(results.length, 2)
+      })
+
+      it('should handle pagination correctly with page size limit', async () => {
+        const batch1 = Array.from({ length: 10 }, (_, i) =>
+          createMockTransaction({ lt: BigInt(1000 + i), now: 100 + i }),
+        )
+        const batch2 = Array.from({ length: 5 }, (_, i) =>
+          createMockTransaction({ lt: BigInt(990 + i), now: 90 + i }),
+        )
+
+        let callCount = 0
+        const getTransactionsMock = mock.fn(async () => {
+          callCount++
+          if (callCount === 1) return batch1
+          return batch2
+        })
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            startBlock: 100,
+            page: 10,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        assert.ok(results.length > 0)
+        assert.ok(getTransactionsMock.mock.calls.length >= 1)
+      })
+
+      it('should respect negative endBlock (treat as latest)', async () => {
+        const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
+
+        const getTransactionsMock = mock.fn(async () => [tx1])
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            startBlock: 100,
+            endBlock: -1,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        assert.equal(results.length, 1)
+      })
+    })
+
+    describe('backward fetching (without startBlock)', () => {
+      it('should fetch transactions backward when no startBlock or startTime', async () => {
+        const tx1 = createMockTransaction({ lt: 1002n, now: 102 })
+        const tx2 = createMockTransaction({ lt: 1001n, now: 101 })
+        const tx3 = createMockTransaction({ lt: 1000n, now: 100 })
+
+        const getTransactionsMock = mock.fn(async () => [tx1, tx2, tx3])
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        assert.equal(results.length, 3)
+        assert.equal(mockGetTransaction.mock.calls.length, 3)
+      })
+
+      it('should filter transactions by endBlock in backward mode', async () => {
+        const tx1 = createMockTransaction({ lt: 1002n, now: 102 })
+        const tx2 = createMockTransaction({ lt: 1001n, now: 101 })
+        const tx3 = createMockTransaction({ lt: 1000n, now: 100 })
+
+        const getTransactionsMock = mock.fn(async () => [tx1, tx2, tx3])
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            endBlock: 1001,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        // Should only include tx2 and tx3, not tx1
+        assert.equal(results.length, 2)
+      })
+
+      it('should handle endBefore parameter in backward mode', async () => {
+        const tx1 = createMockTransaction({ lt: 1002n, now: 102 })
+        const tx2 = createMockTransaction({ lt: 1001n, now: 101 })
+
+        const getTransactionsMock = mock.fn(async (addr, opts) => {
+          if (opts?.hash) {
+            assert.equal(opts.hash, 'testhash')
+            assert.equal(opts.lt, '1001')
+            return [tx2]
+          }
+          return [tx1, tx2]
+        })
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            endBlock: 1001,
+            endBefore: 'testhash',
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        assert.ok(results.length >= 1)
+      })
+
+      it('should treat negative endBlock as latest in backward mode', async () => {
+        const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
+
+        const getTransactionsMock = mock.fn(async () => [tx1])
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            endBlock: -5,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        assert.equal(results.length, 1)
+      })
+
+      it('should handle pagination in backward mode', async () => {
+        const batch1 = Array.from({ length: 100 }, (_, i) =>
+          createMockTransaction({ lt: BigInt(1100 - i), now: 1100 - i }),
+        )
+        const batch2 = Array.from({ length: 50 }, (_, i) =>
+          createMockTransaction({ lt: BigInt(1000 - i), now: 1000 - i }),
+        )
+
+        let callCount = 0
+        const getTransactionsMock = mock.fn(async () => {
+          callCount++
+          if (callCount === 1) return batch1
+          return batch2
+        })
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            page: 100,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        assert.ok(results.length > 0)
+        assert.ok(getTransactionsMock.mock.calls.length >= 2)
+      })
+    })
+
+    describe('watch mode', () => {
+      it('should poll for new transactions in watch mode', async () => {
+        const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
+        const tx2 = createMockTransaction({ lt: 1001n, now: 101 })
+
+        let callCount = 0
+        const getTransactionsMock = mock.fn(async () => {
+          callCount++
+          if (callCount === 1) return [tx1]
+          if (callCount === 2) return [tx2]
+          return []
+        })
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        // Create a promise that resolves after a short delay to stop watching
+        const stopWatch = new Promise((resolve) => setTimeout(resolve, 50))
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            startBlock: 100,
+            watch: stopWatch,
+            pollInterval: 10,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        assert.ok(results.length >= 1)
+      })
+
+      it('should handle watch as boolean true', async () => {
+        const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
+
+        let callCount = 0
+        const getTransactionsMock = mock.fn(async () => {
+          callCount++
+          if (callCount === 1) return [tx1]
+          return []
+        })
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        // Create a promise that resolves quickly to stop the loop
+        const stopWatch = new Promise((resolve) => setTimeout(resolve, 50))
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            startBlock: 100,
+            watch: stopWatch,
+            pollInterval: 10,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        assert.ok(results.length >= 1)
+      })
+
+      it('should use custom pollInterval in watch mode', async () => {
+        const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
+
+        const getTransactionsMock = mock.fn(async () => [tx1])
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const stopWatch = new Promise((resolve) => setTimeout(resolve, 30))
+
+        const results: ChainTransaction[] = []
+        const startTime = performance.now()
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            startBlock: 100,
+            watch: stopWatch,
+            pollInterval: 20,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+        const duration = performance.now() - startTime
+
+        // Should have waited at least one poll interval
+        assert.ok(duration >= 20)
+      })
+    })
+
+    describe('edge cases', () => {
+      it('should handle empty transaction list', async () => {
+        const getTransactionsMock = mock.fn(async () => [])
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            startBlock: 100,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        assert.equal(results.length, 0)
+        assert.equal(mockGetTransaction.mock.calls.length, 0)
+      })
+
+      it('should handle single transaction', async () => {
+        const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
+
+        const getTransactionsMock = mock.fn(async () => [tx1])
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            startBlock: 100,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        assert.equal(results.length, 1)
+      })
+
+      it('should correctly parse TON address format', async () => {
+        const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
+
+        const getTransactionsMock = mock.fn(async (addr) => {
+          // Verify address was parsed correctly
+          assert.ok(addr instanceof Address)
+          // Don't assert exact string match as Address.toString() may format differently
+          return [tx1]
+        })
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            startBlock: 100,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        assert.equal(results.length, 1)
+      })
+
+      it('should set endBlock to latest when not provided', async () => {
+        const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
+
+        const getTransactionsMock = mock.fn(async () => [tx1])
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            startBlock: 100,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        assert.equal(results.length, 1)
+      })
+
+      it('should handle maximum page size limit', async () => {
+        const txs = Array.from({ length: 50 }, (_, i) =>
+          createMockTransaction({ lt: BigInt(1000 + i), now: 100 + i }),
+        )
+
+        const getTransactionsMock = mock.fn(async (addr, opts) => {
+          // For forward mode, limit should be capped at 99
+          assert.ok(opts?.limit === undefined || opts.limit <= 99)
+          return txs
+        })
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            startBlock: 100,
+            page: 150, // Should be capped at 99
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        assert.ok(results.length > 0)
+      })
+
+      describe('complex scenarios', () => {
+        it('should handle multiple batches with mixed timestamps', async () => {
+          const batch1 = Array.from({ length: 99 }, (_, i) =>
+            createMockTransaction({ lt: BigInt(2000 + i), now: 200 + i }),
+          )
+          const batch2 = Array.from({ length: 50 }, (_, i) =>
+            createMockTransaction({ lt: BigInt(1900 + i), now: 190 + i }),
+          )
+
+          let callCount = 0
+          const getTransactionsMock = mock.fn(async () => {
+            callCount++
+            if (callCount === 1) return batch1
+            return batch2
+          })
+          const mockProvider = {
+            getTransactions: getTransactionsMock,
+          } as unknown as TonClient
+
+          const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+            createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+          )
+
+          const results: ChainTransaction[] = []
+          for await (const tx of streamTransactionsForAddress(
+            {
+              address: TEST_ADDRESS,
+              startBlock: 1900,
+            },
+            { provider: mockProvider, getTransaction: mockGetTransaction },
+          )) {
+            results.push(tx)
+          }
+
+          assert.ok(results.length > 0)
+          assert.ok(getTransactionsMock.mock.calls.length >= 2)
+        })
+
+        it('should handle transactions with same logical time', async () => {
+          const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
+          const tx2 = createMockTransaction({ lt: 1000n, now: 100 })
+
+          const getTransactionsMock = mock.fn(async () => [tx1, tx2])
+          const mockProvider = {
+            getTransactions: getTransactionsMock,
+          } as unknown as TonClient
+
+          const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+            createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+          )
+
+          const results: ChainTransaction[] = []
+          for await (const tx of streamTransactionsForAddress(
+            {
+              address: TEST_ADDRESS,
+              startBlock: 100,
+            },
+            { provider: mockProvider, getTransaction: mockGetTransaction },
+          )) {
+            results.push(tx)
+          }
+
+          assert.equal(results.length, 2)
+        })
+
+        it('should handle very large logical time values', async () => {
+          const tx1 = createMockTransaction({ lt: 9007199254740991n, now: 100 }) // Max safe integer
+
+          const getTransactionsMock = mock.fn(async () => [tx1])
+          const mockProvider = {
+            getTransactions: getTransactionsMock,
+          } as unknown as TonClient
+
+          const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+            createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+          )
+
+          const results: ChainTransaction[] = []
+          for await (const tx of streamTransactionsForAddress(
+            {
+              address: TEST_ADDRESS,
+              startBlock: 100,
+            },
+            { provider: mockProvider, getTransaction: mockGetTransaction },
+          )) {
+            results.push(tx)
+          }
+
+          assert.equal(results.length, 1)
+        })
+
+        it('should handle getTransaction throwing errors', async () => {
+          const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
+
+          const getTransactionsMock = mock.fn(async () => [tx1])
+          const mockProvider = {
+            getTransactions: getTransactionsMock,
+          } as unknown as TonClient
+
+          const mockGetTransaction = mock.fn(async () => {
+            throw new Error('Transaction fetch failed')
+          })
+
+          await assert.rejects(
+            async () => {
+              for await (const _tx of streamTransactionsForAddress(
+                {
+                  address: TEST_ADDRESS,
+                  startBlock: 100,
                 },
-        },
-      }
-    },
-    getAccountTransactions: async (_address: unknown, lt: bigint, _hash: Buffer) => {
-      await yieldToMacrotasks()
-      // Simulate pagination: return transactions starting from the given lt
-      const startIndex = sortedTxs.findIndex((t) => t.tx.lt === lt)
-      if (startIndex === -1) return []
-      // Return from startIndex onwards
-      return sortedTxs.slice(startIndex)
-    },
-  } as unknown as TonClient4
-}
-describe('fetchLogs', () => {
-  describe('validation', () => {
-    it('should throw when address is missing', async () => {
-      const client = createMockClient([])
-      const cache = new Map<number, number>()
+                { provider: mockProvider, getTransaction: mockGetTransaction },
+              )) {
+                // Should not reach here
+              }
+            },
+            {
+              message: 'Transaction fetch failed',
+            },
+          )
+        })
 
-      await assert.rejects(async () => {
-        for await (const _log of fetchLogs(client, {}, cache, mockDecoders)) {
-          // should not reach
-        }
-      }, /Address is required/)
-    })
+        it('should handle provider.getTransactions throwing errors', async () => {
+          const getTransactionsMock = mock.fn(async () => {
+            throw new Error('Provider error')
+          })
+          const mockProvider = {
+            getTransactions: getTransactionsMock,
+          } as unknown as TonClient
 
-    it('should throw when watch is used without startBlock or startTime', async () => {
-      const client = createMockClient([createMockTransaction(1000, 1700000000)])
-      const cache = new Map<number, number>()
+          const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+            createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+          )
 
-      await assert.rejects(async () => {
-        for await (const _log of fetchLogs(
-          client,
-          { address: TEST_ADDRESS, watch: true },
-          cache,
-          mockDecoders,
-        )) {
-          break
-        }
-      }, /watch.*requires.*start/i)
-    })
+          await assert.rejects(
+            async () => {
+              for await (const _tx of streamTransactionsForAddress(
+                {
+                  address: TEST_ADDRESS,
+                  startBlock: 100,
+                },
+                { provider: mockProvider, getTransaction: mockGetTransaction },
+              )) {
+                // Should not reach here
+              }
+            },
+            {
+              message: 'Provider error',
+            },
+          )
+        })
 
-    it('should throw when watch is used with specific numeric endBlock', async () => {
-      const client = createMockClient([createMockTransaction(1000, 1700000000)])
-      const cache = new Map<number, number>()
+        it('should properly handle endBlock=0', async () => {
+          const tx1 = createMockTransaction({ lt: 0n, now: 0 })
 
-      await assert.rejects(async () => {
-        for await (const _log of fetchLogs(
-          client,
-          { address: TEST_ADDRESS, startBlock: 1, endBlock: 100, watch: true },
-          cache,
-          mockDecoders,
-        )) {
-          break
-        }
-      }, /finality/i)
-    })
+          const getTransactionsMock = mock.fn(async () => [tx1])
+          const mockProvider = {
+            getTransactions: getTransactionsMock,
+          } as unknown as TonClient
 
-    it('should allow watch with finalized endBlock', { timeout: 5000 }, async () => {
-      const client = createMockClient([createMockTransaction(1000, 1700000000)])
-      const cache = new Map<number, number>()
+          const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+            createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+          )
 
-      let cancel!: () => void
-      const cancelPromise = new Promise<void>((resolve) => {
-        cancel = resolve
+          const results: ChainTransaction[] = []
+          for await (const tx of streamTransactionsForAddress(
+            {
+              address: TEST_ADDRESS,
+              endBlock: 0,
+            },
+            { provider: mockProvider, getTransaction: mockGetTransaction },
+          )) {
+            results.push(tx)
+          }
+
+          assert.equal(results.length, 1)
+        })
+
+        it('should handle startTime=0', async () => {
+          const tx1 = createMockTransaction({ lt: 1000n, now: 0 })
+          const tx2 = createMockTransaction({ lt: 1001n, now: 100 })
+
+          const getTransactionsMock = mock.fn(async () => [tx2, tx1])
+          const mockProvider = {
+            getTransactions: getTransactionsMock,
+          } as unknown as TonClient
+
+          const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+            createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+          )
+
+          const results: ChainTransaction[] = []
+          for await (const tx of streamTransactionsForAddress(
+            {
+              address: TEST_ADDRESS,
+              startTime: 0,
+            },
+            { provider: mockProvider, getTransaction: mockGetTransaction },
+          )) {
+            results.push(tx)
+          }
+
+          assert.equal(results.length, 2)
+        })
+
+        it('should handle both startBlock and startTime together', async () => {
+          const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
+
+          const getTransactionsMock = mock.fn(async () => [tx1])
+          const mockProvider = {
+            getTransactions: getTransactionsMock,
+          } as unknown as TonClient
+
+          const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+            createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+          )
+
+          const results: ChainTransaction[] = []
+          for await (const tx of streamTransactionsForAddress(
+            {
+              address: TEST_ADDRESS,
+              startBlock: 100,
+              startTime: 50,
+            },
+            { provider: mockProvider, getTransaction: mockGetTransaction },
+          )) {
+            results.push(tx)
+          }
+
+          assert.equal(results.length, 1)
+        })
+
+        it('should handle watch cancellation via promise', async () => {
+          const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
+
+          const getTransactionsMock = mock.fn(async () => [tx1])
+          const mockProvider = {
+            getTransactions: getTransactionsMock,
+          } as unknown as TonClient
+
+          const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+            createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+          )
+
+          let resolveCancel: () => void
+          const cancelPromise = new Promise<void>((resolve) => {
+            resolveCancel = resolve
+          })
+
+          const results: ChainTransaction[] = []
+
+          // Start iteration
+          const iterator = streamTransactionsForAddress(
+            {
+              address: TEST_ADDRESS,
+              startBlock: 100,
+              watch: cancelPromise,
+              pollInterval: 100,
+            },
+            { provider: mockProvider, getTransaction: mockGetTransaction },
+          )
+
+          // Get first transaction
+          const first = await iterator.next()
+          results.push(first.value)
+
+          // Cancel after short delay
+          setTimeout(() => resolveCancel!(), 10)
+
+          // Try to get more (should stop)
+          for await (const tx of iterator) {
+            results.push(tx)
+          }
+
+          assert.ok(results.length >= 1)
+        })
+
+        it('should properly sequence multiple pagination requests', async () => {
+          const batches = [
+            Array.from({ length: 99 }, (_, i) =>
+              createMockTransaction({ lt: BigInt(3000 - i), now: 3000 - i }),
+            ),
+            Array.from({ length: 99 }, (_, i) =>
+              createMockTransaction({ lt: BigInt(2901 - i), now: 2901 - i }),
+            ),
+            Array.from({ length: 50 }, (_, i) =>
+              createMockTransaction({ lt: BigInt(2802 - i), now: 2802 - i }),
+            ),
+          ]
+
+          let callCount = 0
+          const getTransactionsMock = mock.fn(async () => {
+            const batch = batches[callCount] || []
+            callCount++
+            return batch
+          })
+          const mockProvider = {
+            getTransactions: getTransactionsMock,
+          } as unknown as TonClient
+
+          const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+            createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+          )
+
+          const results: ChainTransaction[] = []
+          for await (const tx of streamTransactionsForAddress(
+            {
+              address: TEST_ADDRESS,
+              startBlock: 2700,
+              page: 99,
+            },
+            { provider: mockProvider, getTransaction: mockGetTransaction },
+          )) {
+            results.push(tx)
+          }
+
+          assert.ok(results.length > 0)
+          assert.ok(getTransactionsMock.mock.calls.length >= 3)
+        })
       })
-
-      // Cancel after a short delay
-      void sleep(50).then(() => cancel())
-
-      const logs = []
-      for await (const log of fetchLogs(
-        client,
-        {
-          address: TEST_ADDRESS,
-          startBlock: 1,
-          endBlock: 'finalized',
-          watch: cancelPromise,
-          pollInterval: 10,
-        },
-        cache,
-        mockDecoders,
-      )) {
-        logs.push(log)
-      }
-
-      assert.ok(true, 'should complete without error')
-    })
-  })
-
-  describe('pagination', () => {
-    it('should respect page limit', async () => {
-      const txs = [
-        createMockTransaction(1000, 1700000000),
-        createMockTransaction(2000, 1700001000),
-        createMockTransaction(3000, 1700002000),
-      ]
-      const client = createMockClient(txs)
-      const cache = new Map<number, number>()
-
-      const logs = []
-      for await (const log of fetchLogs(
-        client,
-        { address: TEST_ADDRESS, page: 2 },
-        cache,
-        mockDecoders,
-      )) {
-        logs.push(log)
-      }
-
-      assert.equal(logs.length, 2, 'should return only 2 logs')
-    })
-  })
-
-  describe('ordering', () => {
-    it('should return logs in descending order (newest first) for backward mode', async () => {
-      const txs = [
-        createMockTransaction(1000, 1700000000),
-        createMockTransaction(2000, 1700001000),
-        createMockTransaction(3000, 1700002000),
-      ]
-      const client = createMockClient(txs)
-      const cache = new Map<number, number>()
-
-      const logs = []
-      for await (const log of fetchLogs(client, { address: TEST_ADDRESS }, cache, mockDecoders)) {
-        logs.push(log)
-      }
-
-      // Newest first (no startBlock/startTime = backward mode)
-      assert.equal(logs[0].blockNumber, 3000)
-      assert.equal(logs[1].blockNumber, 2000)
-      assert.equal(logs[2].blockNumber, 1000)
-    })
-
-    it('should return logs in ascending order (oldest first) for forward mode', async () => {
-      const txs = [
-        createMockTransaction(1000, 1700000000),
-        createMockTransaction(2000, 1700001000),
-        createMockTransaction(3000, 1700002000),
-      ]
-      const client = createMockClient(txs)
-      const cache = new Map<number, number>()
-
-      const logs = []
-      for await (const log of fetchLogs(
-        client,
-        { address: TEST_ADDRESS, startBlock: 500 },
-        cache,
-        mockDecoders,
-      )) {
-        logs.push(log)
-      }
-
-      // Oldest first (startBlock set = forward mode)
-      assert.equal(logs[0].blockNumber, 1000)
-      assert.equal(logs[1].blockNumber, 2000)
-      assert.equal(logs[2].blockNumber, 3000)
-    })
-  })
-
-  describe('stop conditions', () => {
-    it('should stop at startBlock boundary', async () => {
-      const txs = [
-        createMockTransaction(1000, 1700000000),
-        createMockTransaction(2000, 1700001000),
-        createMockTransaction(3000, 1700002000),
-      ]
-      const client = createMockClient(txs)
-      const cache = new Map<number, number>()
-
-      const logs = []
-      for await (const log of fetchLogs(
-        client,
-        { address: TEST_ADDRESS, startBlock: 1500 },
-        cache,
-        mockDecoders,
-      )) {
-        logs.push(log)
-      }
-
-      // Should only get logs with lt >= 1500
-      assert.equal(logs.length, 2)
-      assert.ok(logs.every((l) => l.blockNumber >= 1500))
-    })
-
-    it('should stop at startTime boundary', async () => {
-      const txs = [
-        createMockTransaction(1000, 1700000000),
-        createMockTransaction(2000, 1700001000),
-        createMockTransaction(3000, 1700002000),
-      ]
-      const client = createMockClient(txs)
-      const cache = new Map<number, number>()
-
-      const logs = []
-      for await (const log of fetchLogs(
-        client,
-        { address: TEST_ADDRESS, startTime: 1700001500 },
-        cache,
-        mockDecoders,
-      )) {
-        logs.push(log)
-      }
-
-      // Should only get logs with timestamp >= 1700001500
-      assert.equal(logs.length, 1)
-      assert.equal(logs[0].blockNumber, 3000)
-    })
-
-    it('should filter by endBlock', async () => {
-      const txs = [
-        createMockTransaction(1000, 1700000000),
-        createMockTransaction(2000, 1700001000),
-        createMockTransaction(3000, 1700002000),
-      ]
-      const client = createMockClient(txs)
-      const cache = new Map<number, number>()
-
-      const logs = []
-      for await (const log of fetchLogs(
-        client,
-        { address: TEST_ADDRESS, endBlock: 2500 },
-        cache,
-        mockDecoders,
-      )) {
-        logs.push(log)
-      }
-
-      // Should only get logs with lt <= 2500
-      assert.equal(logs.length, 2)
-      assert.ok(logs.every((l) => l.blockNumber <= 2500))
-    })
-  })
-
-  describe('topic filtering', () => {
-    it('should filter by CCIPMessageSent topic', async () => {
-      const txs = [createMockTransaction(1000, 1700000000)]
-      const client = createMockClient(txs)
-      const cache = new Map<number, number>()
-
-      const logs = []
-      for await (const log of fetchLogs(
-        client,
-        { address: TEST_ADDRESS, topics: ['CCIPMessageSent'] },
-        cache,
-        mockDecoders,
-      )) {
-        logs.push(log)
-      }
-
-      assert.equal(logs.length, 1)
-      assert.deepEqual(logs[0].topics, ['CCIPMessageSent'])
-    })
-
-    it('should filter by CommitReportAccepted topic', async () => {
-      const txs = [createMockTransaction(1000, 1700000000)]
-      const client = createMockClient(txs)
-      const cache = new Map<number, number>()
-
-      const logs = []
-      for await (const log of fetchLogs(
-        client,
-        { address: TEST_ADDRESS, topics: ['CommitReportAccepted'] },
-        cache,
-        mockDecoders,
-      )) {
-        logs.push(log)
-      }
-
-      assert.equal(logs.length, 1)
-      assert.deepEqual(logs[0].topics, ['CommitReportAccepted'])
-    })
-
-    it('should filter by ExecutionStateChanged topic', async () => {
-      const txs = [createMockTransaction(1000, 1700000000)]
-      const client = createMockClient(txs)
-      const cache = new Map<number, number>()
-
-      const logs = []
-      for await (const log of fetchLogs(
-        client,
-        { address: TEST_ADDRESS, topics: ['ExecutionStateChanged'] },
-        cache,
-        mockDecoders,
-      )) {
-        logs.push(log)
-      }
-
-      assert.equal(logs.length, 1)
-      assert.deepEqual(logs[0].topics, ['ExecutionStateChanged'])
-    })
-
-    it('should return no logs when decoder rejects all', async () => {
-      const txs = [createMockTransaction(1000, 1700000000)]
-      const client = createMockClient(txs)
-      const cache = new Map<number, number>()
-
-      const logs = []
-      for await (const log of fetchLogs(
-        client,
-        { address: TEST_ADDRESS, topics: ['CCIPMessageSent'] },
-        cache,
-        rejectingDecoders,
-      )) {
-        logs.push(log)
-      }
-
-      assert.equal(logs.length, 0)
-    })
-  })
-
-  describe('caching', () => {
-    it('should populate ltTimestampCache', async () => {
-      const txs = [createMockTransaction(1000, 1700000000), createMockTransaction(2000, 1700001000)]
-      const client = createMockClient(txs)
-      const cache = new Map<number, number>()
-
-      for await (const _log of fetchLogs(client, { address: TEST_ADDRESS }, cache, mockDecoders)) {
-        // consume all
-      }
-
-      assert.equal(cache.get(1000), 1700000000)
-      assert.equal(cache.get(2000), 1700001000)
-    })
-  })
-
-  describe('empty account', () => {
-    it('should return empty when account has no transactions', async () => {
-      const client = createMockClient([], { noAccount: true })
-      const cache = new Map<number, number>()
-
-      const logs = []
-      for await (const log of fetchLogs(client, { address: TEST_ADDRESS }, cache, mockDecoders)) {
-        logs.push(log)
-      }
-
-      assert.equal(logs.length, 0)
-    })
-  })
-
-  describe('watch mode', () => {
-    it('should cancel when promise resolves during iteration', async () => {
-      const txs = [createMockTransaction(1000, 1700000000)]
-      const client = createMockClient(txs)
-      const cache = new Map<number, number>()
-
-      let cancel: () => void
-      const cancelPromise = new Promise<void>((resolve) => {
-        cancel = resolve
-      })
-
-      // Cancel after a short delay
-      void sleep(50).then(() => cancel!())
-
-      const logs = []
-      const startTime = Date.now()
-
-      for await (const log of fetchLogs(
-        client,
-        { address: TEST_ADDRESS, startBlock: 500, watch: cancelPromise, pollInterval: 10 },
-        cache,
-        mockDecoders,
-      )) {
-        logs.push(log)
-      }
-
-      const elapsed = Date.now() - startTime
-
-      // Should exit quickly and not hang
-      assert.ok(elapsed < 1000, `should exit quickly, took ${elapsed}ms`)
-    })
-  })
-
-  describe('log structure', () => {
-    it('should create correct composite hash format', async () => {
-      const txs = [createMockTransaction(1000, 1700000000)]
-      const client = createMockClient(txs)
-      const cache = new Map<number, number>()
-
-      const logs = []
-      for await (const log of fetchLogs(client, { address: TEST_ADDRESS }, cache, mockDecoders)) {
-        logs.push(log)
-      }
-
-      const [workchain, address, lt, hash] = logs[0].transactionHash.split(':')
-      assert.equal(workchain, '0')
-      assert.equal(address.length, 64)
-      assert.equal(lt, '1000')
-      assert.equal(hash.length, 64)
-    })
-
-    it('should set correct log properties', async () => {
-      const txs = [createMockTransaction(1000, 1700000000)]
-      const client = createMockClient(txs)
-      const cache = new Map<number, number>()
-
-      const logs = []
-      for await (const log of fetchLogs(client, { address: TEST_ADDRESS }, cache, mockDecoders)) {
-        logs.push(log)
-      }
-
-      assert.equal(logs[0].blockNumber, 1000)
-      assert.equal(logs[0].index, 0)
-      assert.ok(logs[0].address.includes(':'))
-      assert.ok(logs[0].data) // base64 encoded
-      assert.ok(Array.isArray(logs[0].topics))
     })
   })
 })

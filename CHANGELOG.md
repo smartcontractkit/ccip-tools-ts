@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDK: simplify `getExecutionReceipts` filters (accept `messageId` and `sourceChainSelector`, instead of whole `request`)
 - SDK: `executeReport` resolves to `CCIPExecution`, instead of generic `ChainTransaction`
 - SDK: rename `getAllMessagesInBatch` to `getMessagesInBatch` (for consistency with other method names)
+- SDK: migrate TONChain to TonClient (from TonClient4) and TON HTTP V2 endpoints (more common)
+- CLI: implement Ledger hardwallet support for TON
 
 ## [0.92.0] - 2025-12-20 - Pre-release
 

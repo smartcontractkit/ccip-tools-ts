@@ -16,12 +16,12 @@ async function* fetchSigsForward(
   ctx: { connection: Connection },
 ) {
   const { connection } = ctx
-  const limit = Math.min(opts?.page || 1000, 1000)
+  const limit = Math.min(opts.page || 1000, 1000)
   const commitment = opts.endBlock === 'finalized' ? 'finalized' : 'confirmed'
 
   // forward collect all matching sigs in array
   const allSigs = [] as Awaited<ReturnType<typeof connection.getSignaturesForAddress>>
-  let batch: typeof allSigs, until: string
+  let batch: typeof allSigs, until: string | undefined
   do {
     batch = await connection.getSignaturesForAddress(
       new PublicKey(opts.address!),
@@ -32,8 +32,8 @@ async function* fetchSigsForward(
 
     while (
       batch.length > 0 &&
-      (batch[batch.length - 1].slot < (opts.startBlock || 0) ||
-        (batch[batch.length - 1].blockTime || -1) < (opts.startTime || 0))
+      (batch[batch.length - 1]!.slot < (opts.startBlock || 0) ||
+        (batch[batch.length - 1]!.blockTime || -1) < (opts.startTime || 0))
     ) {
       batch.length-- // truncate tail of txs which are older than requested start
     }
@@ -49,12 +49,12 @@ async function* fetchSigsForward(
       : opts.endBlock < 0
         ? (await connection.getSlot('confirmed')) + opts.endBlock
         : opts.endBlock
-  while (notAfter && allSigs.length > 0 && allSigs[allSigs.length - 1].slot > notAfter) {
+  while (notAfter && allSigs.length > 0 && allSigs[allSigs.length - 1]!.slot > notAfter) {
     allSigs.length-- // truncate head (after reverse) of txs newer than requested end
   }
   yield* allSigs // all past logs
 
-  if (allSigs.length) until = allSigs[allSigs.length - 1].signature
+  if (allSigs.length) until = allSigs[allSigs.length - 1]!.signature
   let lastReq = performance.now()
   // if not watch mode, returns
   while (opts.watch) {
@@ -93,7 +93,7 @@ async function* fetchSigsBackwards(
   ctx: { connection: Connection },
 ) {
   const { connection } = ctx
-  const limit = Math.min(opts?.page || 1000, 1000)
+  const limit = Math.min(opts.page || 1000, 1000)
   const commitment = opts.endBlock === 'finalized' ? 'finalized' : 'confirmed'
 
   if (typeof opts.endBlock === 'number' && opts.endBlock < 0)
@@ -106,7 +106,7 @@ async function* fetchSigsBackwards(
       {
         limit,
         before: batch?.length
-          ? batch[batch.length - 1].signature
+          ? batch[batch.length - 1]!.signature
           : opts.endBefore
             ? opts.endBefore
             : undefined,

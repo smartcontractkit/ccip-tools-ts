@@ -70,7 +70,7 @@ function computeNextLayer(layer: Hash[]): readonly [Hash[], Hash[]] {
 
   const nextLayer: Hash[] = []
   for (let i = 0; i < layer.length; i += 2) {
-    nextLayer.push(hashInternal(layer[i], layer[i + 1]))
+    nextLayer.push(hashInternal(layer[i]!, layer[i + 1]!))
   }
 
   return [layer, nextLayer]
@@ -107,7 +107,7 @@ function proveSingleLayer(layer: Hash[], indices: number[]): SingleLayerProof {
 
   let j = 0
   while (j < indices.length) {
-    const x = indices[j]
+    const x = indices[j]!
 
     // Calculate the parent index for the current index and add it to the nextIndices array.
     nextIndices.push(parentIndex(x))
@@ -131,7 +131,7 @@ function proveSingleLayer(layer: Hash[], indices: number[]): SingleLayerProof {
   const subProof: Hash[] = []
   for (const i of authIndices) {
     // Populate the subproof array with the values from the authentication indices in the layer.
-    subProof.push(layer[i])
+    subProof.push(layer[i]!)
   }
 
   // Return the single-layer proof object containing nextIndices, subProof, and sourceFlags.
@@ -184,7 +184,7 @@ export class Tree {
    * @returns The root hash.
    */
   root(): Hash {
-    return this.layers[this.layers.length - 1][0]
+    return this.layers[this.layers.length - 1]![0]!
   }
 
   /**
@@ -256,7 +256,7 @@ export function verifyComputeRoot(leafHashes: Hash[], proof: Proof): Hash {
 
   // If there are no hashes, return the first leaf hash.
   if (totalHashes === 0) {
-    return leafHashes[0]
+    return leafHashes[0]!
   }
 
   // Count the number of source flags pointing to proofs.
@@ -270,7 +270,7 @@ export function verifyComputeRoot(leafHashes: Hash[], proof: Proof): Hash {
 
   for (let i = 0; i < totalHashes; i++) {
     // Initialize the hashes array with the first leaf hash.
-    hashes.push(leafHashes[0])
+    hashes.push(leafHashes[0]!)
   }
 
   let leafPos = 0
@@ -316,5 +316,5 @@ export function verifyComputeRoot(leafHashes: Hash[], proof: Proof): Hash {
   }
 
   // Return the computed Merkle root hash.
-  return hashes[totalHashes - 1]
+  return hashes[totalHashes - 1]!
 }

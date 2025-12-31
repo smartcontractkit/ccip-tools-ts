@@ -67,7 +67,7 @@ describe('lane-latency command', () => {
     } as Parameters<typeof getLaneLatencyCmd>[1])
 
     assert.equal(mockLog.mock.calls.length, 1)
-    const output = (mockLog.mock.calls[0] as unknown as { arguments: string[] })?.arguments[0]
+    const output = (mockLog.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
     const parsed = JSON.parse(output)
     // SDK now returns only { totalMs } - lane info is no longer included
     assert.equal(parsed.totalMs, 1147000)
@@ -82,7 +82,7 @@ describe('lane-latency command', () => {
       format: Format.json,
     } as Parameters<typeof getLaneLatencyCmd>[1])
 
-    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] })?.arguments[0]
+    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
     assert.ok(url.includes('sourceChainSelector=5009297550715157269'))
     assert.ok(url.includes('destChainSelector=4949039107694359620'))
   })
@@ -95,7 +95,7 @@ describe('lane-latency command', () => {
       format: Format.json,
     } as Parameters<typeof getLaneLatencyCmd>[1])
 
-    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] })?.arguments[0]
+    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
     assert.ok(url.startsWith('https://custom.api.example.com/'))
   })
 
@@ -107,7 +107,7 @@ describe('lane-latency command', () => {
     } as Parameters<typeof getLaneLatencyCmd>[1])
 
     assert.equal(mockLog.mock.calls.length, 1)
-    const args = (mockLog.mock.calls[0] as unknown as { arguments: unknown[] })?.arguments
+    const args = (mockLog.mock.calls[0] as unknown as { arguments: unknown[] }).arguments
     assert.equal(args[0], 'Lane Latency:')
     assert.ok(args[1])
   })
@@ -119,7 +119,7 @@ describe('lane-latency command', () => {
       format: Format.json,
     } as Parameters<typeof getLaneLatencyCmd>[1])
 
-    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] })?.arguments[0]
+    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
     // Chain ID 1 maps to ethereum-mainnet selector
     assert.ok(url.includes('sourceChainSelector=5009297550715157269'))
     // Chain ID 42161 maps to arbitrum-mainnet selector
@@ -133,7 +133,7 @@ describe('lane-latency command', () => {
       format: Format.json,
     } as Parameters<typeof getLaneLatencyCmd>[1])
 
-    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] })?.arguments[0]
+    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
     assert.ok(url.includes('sourceChainSelector=5009297550715157269'))
     assert.ok(url.includes('destChainSelector=4949039107694359620'))
   })
@@ -149,7 +149,7 @@ describe('lane-latency command', () => {
         } as Parameters<typeof getLaneLatencyCmd>[1]),
       (err: unknown) =>
         err instanceof CCIPApiClientNotAvailableError &&
-        typeof err.context?.reason === 'string' &&
+        typeof err.context.reason === 'string' &&
         err.context.reason.includes('lane-latency command requires API access'),
     )
 

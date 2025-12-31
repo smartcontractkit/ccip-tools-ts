@@ -107,7 +107,7 @@ async function* fetchEventsForward(
         path: `accounts/${stateAddr}/events/${opts.address}::${eventHandlerField}`,
         params: { start, limit },
       })
-      if (!start) fetchBatch.cache.set([+data[0].sequence_number], Promise.resolve(data))
+      if (!start) fetchBatch.cache.set([+data[0]!.sequence_number], Promise.resolve(data))
       return data
     },
     { maxArgs: 1, maxSize: 100, async: true },
@@ -115,17 +115,17 @@ async function* fetchEventsForward(
 
   const initialBatch = await fetchBatch()
   if (!initialBatch.length) return
-  const end = +initialBatch[initialBatch.length - 1].sequence_number
+  const end = +initialBatch[initialBatch.length - 1]!.sequence_number
 
   let start
   if (
-    (!opts.startBlock || opts.startBlock < +initialBatch[0].version) &&
+    (!opts.startBlock || opts.startBlock < +initialBatch[0]!.version) &&
     (!opts.startTime ||
-      opts.startTime < (await getVersionTimestamp(provider, +initialBatch[0].version)))
+      opts.startTime < (await getVersionTimestamp(provider, +initialBatch[0]!.version)))
   ) {
     const i = await binarySearchFirst(0, Math.floor(end / limit) - 1, async (i) => {
       const batch = await fetchBatch(end - (i + 1) * limit + 1)
-      const firstTimestamp = await getVersionTimestamp(provider, +batch[0].version)
+      const firstTimestamp = await getVersionTimestamp(provider, +batch[0]!.version)
       return firstTimestamp > opts.startTime!
     })
     start = end - (i + 1) * limit + 1
@@ -156,11 +156,11 @@ async function* fetchEventsForward(
     if (
       first &&
       opts.startTime &&
-      (await getVersionTimestamp(provider, +data[0].version)) < opts.startTime
+      (await getVersionTimestamp(provider, +data[0]!.version)) < opts.startTime
     ) {
       // the first batch may have some head which is not in the range
       const actualStart = await binarySearchFirst(0, data.length - 1, async (i) => {
-        const timestamp = await getVersionTimestamp(provider, +data[i].version)
+        const timestamp = await getVersionTimestamp(provider, +data[i]!.version)
         return timestamp < opts.startTime!
       })
       data.splice(0, actualStart - 1)
@@ -222,7 +222,7 @@ async function* fetchEventsBackward(
 
     if (!data.length) break
     else if (start === 1) cont = false
-    else start = Math.max(+data[0].sequence_number - limit, 1)
+    else start = Math.max(+data[0]!.sequence_number - limit, 1)
 
     for (const ev of data.reverse()) {
       if (notAfter && +ev.version > notAfter) continue
@@ -248,7 +248,7 @@ export async function* streamAptosLogs(
     throw new CCIPAptosTopicInvalidError()
   let eventHandlerField = opts.topics[0]
   if (!eventHandlerField.includes('/')) {
-    eventHandlerField = (eventToHandler as Record<string, string>)[eventHandlerField]
+    eventHandlerField = (eventToHandler as Record<string, string>)[eventHandlerField]!
     if (!eventHandlerField) throw new CCIPAptosTopicInvalidError(opts.topics[0])
   }
   const [stateAddr] = await ctx.provider.view<[string]>({
@@ -275,7 +275,7 @@ export async function* streamAptosLogs(
       topics,
       index: +ev.sequence_number,
       blockNumber: +ev.version,
-      transactionHash: opts?.versionAsHash
+      transactionHash: opts.versionAsHash
         ? `${ev.version}`
         : (await getUserTxByVersion(ctx.provider, +ev.version)).hash,
       data: ev.data as Record<string, unknown>,

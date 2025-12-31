@@ -41,8 +41,8 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
   const msgIdx = messagesInBatch.findIndex((message) => message.messageId === messageId)
   if (msgIdx < 0) {
     throw new CCIPMessageNotInBatchError(messageId, {
-      min: messagesInBatch[0].sequenceNumber,
-      max: messagesInBatch[messagesInBatch.length - 1].sequenceNumber,
+      min: messagesInBatch[0]!.sequenceNumber,
+      max: messagesInBatch[messagesInBatch.length - 1]!.sequenceNumber,
     })
   }
 
@@ -82,13 +82,13 @@ export const discoverOffRamp = memoize(
       const destOffRamps = await dest.getOffRampsForRouter(destRouter, source.network.chainSelector)
       for (const offRamp of destOffRamps) {
         const offRampsOnRamp = await dest.getOnRampForOffRamp(offRamp, source.network.chainSelector)
+        logger.debug(
+          'discoverOffRamp: found, from',
+          { sourceRouter, sourceOffRamps, destOnRamp, destOffRamps, offRampsOnRamp },
+          '=',
+          offRamp,
+        )
         if (offRampsOnRamp === onRamp) {
-          logger.debug(
-            'discoverOffRamp: found, from',
-            { sourceRouter, sourceOffRamps, destOnRamp, destOffRamps, offRampsOnRamp },
-            '=',
-            offRamp,
-          )
           return offRamp
         }
       }

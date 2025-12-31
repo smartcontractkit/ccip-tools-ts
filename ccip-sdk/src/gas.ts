@@ -107,13 +107,13 @@ export async function estimateExecGasForRequest(
       const currentBalance = await tokenContract.balanceOf(request.message.receiver)
       destAmounts[token] = currentBalance
     }
-    destAmounts[token] += amount
+    destAmounts[token]! += amount
     stateOverrides[token] = {
       stateDiff: {
         [solidityPackedKeccak256(
           ['uint256', 'uint256'],
           [request.message.receiver, BALANCES_SLOT],
-        )]: toBeHex(destAmounts[token], 32),
+        )]: toBeHex(destAmounts[token]!, 32),
       },
     }
   }

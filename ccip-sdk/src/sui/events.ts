@@ -35,11 +35,11 @@ async function getTransactionDigestsInTimeRange(
     order: 'ascending',
   })
 
-  if (!firstEvents.data || firstEvents.data.length === 0) {
+  if (!firstEvents.data.length) {
     return null
   }
 
-  const firstDigest = firstEvents.data[0].id.txDigest
+  const firstDigest = firstEvents.data[0]!.id.txDigest
 
   // Get last event (descending order)
   const lastEvents = await client.queryEvents({
@@ -48,7 +48,7 @@ async function getTransactionDigestsInTimeRange(
     order: 'descending',
   })
 
-  const lastDigest = lastEvents.data[0].id.txDigest
+  const lastDigest = lastEvents.data[0]!.id.txDigest
 
   return { firstDigest, lastDigest }
 }
@@ -145,7 +145,7 @@ async function getCheckpointsFromTransactions(
     if (!latestResult.data) {
       throw new CCIPDataFormatUnsupportedError('Failed to fetch latest checkpoint')
     }
-    endCheckpoint = parseInt(latestResult.data.checkpoints.nodes[0].sequenceNumber)
+    endCheckpoint = parseInt(latestResult.data.checkpoints.nodes[0]!.sequenceNumber)
   } else {
     endCheckpoint = parseInt(result.data.last.effects.checkpoint.sequenceNumber)
   }
@@ -282,10 +282,6 @@ async function fetchEventsWithCheckpointRange<T>(
 
     hasNextPage = pageInfo.hasNextPage
     cursor = pageInfo.endCursor ?? undefined
-
-    if (!hasNextPage) {
-      break
-    }
   }
 
   return allEvents

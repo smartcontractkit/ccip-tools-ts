@@ -40,6 +40,7 @@ export default defineConfig(
         { fixMixedExportsWithInlineTypeSpecifier: true },
       ],
       '@typescript-eslint/no-import-type-side-effects': 'warn',
+      '@typescript-eslint/no-unnecessary-condition': 'warn',
     },
   },
   {

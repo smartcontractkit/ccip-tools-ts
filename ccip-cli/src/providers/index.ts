@@ -6,6 +6,7 @@ import {
   type ChainGetter,
   type ChainTransaction,
   type EVMChain,
+  type TONChain,
   CCIPChainFamilyUnsupportedError,
   CCIPNetworkFamilyUnsupportedError,
   CCIPRpcNotFoundError,
@@ -82,7 +83,7 @@ export function fetchChainsFromRpcs(
   > = {}
   const finished: Partial<Record<ChainFamily, boolean>> = {}
   const initFamily$: Partial<Record<ChainFamily, Promise<unknown>>> = {}
-  let endpoints$: Promise<Set<string>>
+  let endpoints$: Promise<Set<string>> | undefined
 
   let txResolve: (value: [Chain, ChainTransaction]) => void, txReject: (reason?: unknown) => void
   const txResult = new Promise<[Chain, ChainTransaction]>((resolve, reject) => {
@@ -119,7 +120,7 @@ export function fetchChainsFromRpcs(
               chains[chain.network.name] = Promise.resolve(chain)
             } else if (chain.network.name in chainsCbs) {
               // chain detected, and there's a "pending request" by getChain: resolve
-              const [resolve] = chainsCbs[chain.network.name]
+              const [resolve] = chainsCbs[chain.network.name]!
               resolve(chain)
             }
             return chain
@@ -155,16 +156,16 @@ export function fetchChainsFromRpcs(
 
   const chainGetter = async (idOrSelectorOrName: number | string | bigint): Promise<Chain> => {
     const network = networkInfo(idOrSelectorOrName)
-    if (network.name in chains) return chains[network.name]
+    if (network.name in chains) return chains[network.name]!
     if (finished[network.family]) throw new CCIPRpcNotFoundError(network.name)
-    chains[network.name] = new Promise((resolve, reject) => {
+    const c = (chains[network.name] = new Promise((resolve, reject) => {
       chainsCbs[network.name] = [resolve, reject]
-    })
-    void chains[network.name].finally(() => {
+    }))
+    void c.finally(() => {
       delete chainsCbs[network.name] // when chain is settled, delete the callbacks
     })
     void loadChainFamily(network.family)
-    return chains[network.name]
+    return c
   }
 
   if (!txHash) return chainGetter
@@ -213,8 +214,8 @@ export async function loadChainWallet(chain: Chain, argv: { wallet?: unknown; rp
       wallet = loadSuiWallet(argv)
       return [wallet.toSuiAddress(), wallet] as const
     case ChainFamily.TON:
-      wallet = await loadTonWallet(argv)
-      return [wallet.contract.address.toString(), wallet] as const
+      wallet = await loadTonWallet((chain as TONChain).provider, argv, chain.network.isTestnet)
+      return [wallet.getAddress(), wallet] as const
     default:
       // TypeScript exhaustiveness check - this should never be reached
       throw new CCIPChainFamilyUnsupportedError((chain.network as { family: string }).family)

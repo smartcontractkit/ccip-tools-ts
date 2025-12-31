@@ -25,7 +25,7 @@ import {
 } from './types.ts'
 import { convertKeysToCamelCase, decodeAddress, leToBigInt, networkInfo } from './utils.ts'
 
-function decodeJsonMessage(data: Record<string, unknown>) {
+function decodeJsonMessage(data: Record<string, unknown> | undefined) {
   if (!data || typeof data != 'object') throw new CCIPMessageInvalidError(data)
   if (data.message) data = data.message as Record<string, unknown>
   if (data.header) {
@@ -60,7 +60,7 @@ function decodeJsonMessage(data: Record<string, unknown>) {
   }
 
   for (const ta of data_.tokenAmounts) {
-    if (ta.destGasAmount != null || ta.destExecData == null) continue
+    if (ta.destGasAmount != null || !ta.destExecData) continue
     switch (sourceNetwork.family) {
       // EVM & Solana encode destExecData as big-endian
       case ChainFamily.EVM:
@@ -90,7 +90,7 @@ function decodeJsonMessage(data: Record<string, unknown>) {
 export function decodeMessage(data: string | Uint8Array | Record<string, unknown>): CCIPMessage {
   if (
     (typeof data === 'string' && data.startsWith('{')) ||
-    (typeof data === 'object' && data !== null && !isBytesLike(data))
+    (typeof data === 'object' && !isBytesLike(data))
   ) {
     if (typeof data === 'string')
       data = yaml.parse(data, { intAsBigInt: true }) as Record<string, unknown>
@@ -246,7 +246,7 @@ export async function getMessagesInBatch<
       messages.push(message)
       if (message.sequenceNumber >= maxSeqNr) break
     }
-    if (messages.length && messages[0].sequenceNumber > minSeqNr) {
+    if (messages.length && messages[0]!.sequenceNumber > minSeqNr) {
       // still work to be done backwards
       delete filter['startBlock']
       filter['endBlock'] = backwardsEndBlock
@@ -345,7 +345,7 @@ export async function sourceToDestTokenAmounts<S extends { token: string }>(
       return {
         ...rest,
         sourcePoolAddress,
-        destTokenAddress: remotes[networkInfo(destChainSelector).name].remoteToken,
+        destTokenAddress: remotes[networkInfo(destChainSelector).name]!.remoteToken,
       }
     }),
   )

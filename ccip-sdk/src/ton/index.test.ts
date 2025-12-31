@@ -2,12 +2,12 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { type Cell, Address, Dictionary, beginCell, toNano } from '@ton/core'
-import type { KeyPair } from '@ton/crypto'
-import type { TonClient4, WalletContractV4 } from '@ton/ton'
+import type { TonClient } from '@ton/ton'
 
 import { type ExecutionReport, ChainFamily } from '../types.ts'
 import { TONChain } from './index.ts'
 import { type CCIPMessage_V1_6_TON, type TONWallet, MANUALLY_EXECUTE_OPCODE } from './types.ts'
+import { crc32 } from './utils.ts'
 
 describe('TON index unit tests', () => {
   // Test constants from chainlink-ton test suite
@@ -51,10 +51,6 @@ describe('TON index unit tests', () => {
   }
 
   describe('executeReport', { timeout: 10e3 }, () => {
-    const mockKeyPair: KeyPair = {
-      publicKey: Buffer.alloc(32, 0x01),
-      secretKey: Buffer.alloc(64, 0x02),
-    }
     const mockWalletAddress = Address.parse('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
 
     // Helper to create a valid ExecutionStateChanged BOC cell for executeReport tests
@@ -81,52 +77,15 @@ describe('TON index unit tests', () => {
       txHash?: string
     }) {
       let capturedTransfer: {
-        seqno: number
-        secretKey: Buffer
-        messages: Array<{ to: Address; value: bigint; body: Cell }>
+        to: string
+        body: Cell
+        value?: bigint
       } | null = null
 
       const mockTxLt = opts?.txLt ?? '12345678'
       const mockTxHash =
         opts?.txHash ?? 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890'
       const currentSeqno = opts?.seqno ?? 0
-
-      const mockOpenedWallet = {
-        getSeqno: async () => currentSeqno,
-        sendTransfer: async (params: {
-          seqno: number
-          secretKey: Buffer
-          messages: Array<{ info: { dest: Address; value: { coins: bigint } }; body: Cell }>
-        }) => {
-          if (opts?.shouldFail) {
-            throw new Error('Transaction failed')
-          }
-          capturedTransfer = {
-            seqno: params.seqno,
-            secretKey: params.secretKey,
-            messages: params.messages.map((m) => ({
-              to: m.info.dest,
-              value: m.info.value.coins,
-              body: m.body,
-            })),
-          }
-        },
-      }
-
-      const mockOutMessage = {
-        info: {
-          type: 'internal' as const,
-          dest: Address.parse(TON_OFFRAMP_ADDRESS_TEST),
-        },
-      }
-
-      const mockTx = {
-        lt: BigInt(mockTxLt),
-        hash: () => Buffer.from(mockTxHash, 'hex'),
-        now: Math.floor(Date.now() / 1000),
-        outMessages: { values: () => [mockOutMessage] },
-        inMessage: { info: { type: 'internal', src: mockWalletAddress } },
-      }
 
       // Create ExecutionStateChanged cell for the OffRamp address
       // Uses baseExecReport message data: messageId, sourceChainSelector, sequenceNumber
@@ -140,57 +99,60 @@ describe('TON index unit tests', () => {
       const offRampAddress = Address.parse(TON_OFFRAMP_ADDRESS_TEST)
 
       // Mock transaction for OffRamp containing ExecutionStateChanged external-out message
+      // Create dest with crc32 value for ExecutionStateChanged topic
+      const execStateChangedCrc = BigInt(crc32('ExecutionStateChanged'))
+
       const mockOffRampTx = {
         lt: BigInt(mockTxLt),
         hash: () => Buffer.from(mockTxHash, 'hex'),
         now: Math.floor(Date.now() / 1000),
-        outMessages: {
-          values: () => [
+        address: BigInt('0x' + offRampAddress.hash.toString('hex')),
+        outMessages: new Map([
+          [
+            0,
             {
-              info: { type: 'external-out' as const },
+              info: {
+                type: 'external-out' as const,
+                src: offRampAddress,
+                dest: { value: execStateChangedCrc },
+              },
               body: execStateCell,
             },
           ],
-        },
+        ]),
       }
 
       const mockClient = {
-        open: () => mockOpenedWallet,
-        getLastBlock: async () => ({
-          last: { seqno: 12345678 },
-          now: Math.floor(Date.now() / 1000),
-        }),
-        runMethod: async (_seqno: number, _address: Address, method: string) => {
+        runMethod: async (_address: Address, method: string) => {
           if (method === 'seqno') {
             // Return seqno+1 to simulate transaction confirmed
-            return { reader: { readNumber: () => currentSeqno + 1 } }
+            return { stack: { readNumber: () => currentSeqno + 1 } }
           }
           throw new Error(`Unknown method: ${method}`)
         },
-        getAccountLite: async (_seqno: number, _address: Address) => {
-          // Return account info for both wallet and offRamp addresses
-          return {
-            account: {
-              last: {
-                lt: mockTxLt,
-                hash: Buffer.from(mockTxHash, 'hex').toString('base64'),
-              },
-            },
-          }
-        },
-        getAccountTransactions: async (address: Address) => {
+        getTransactions: async (address: Address) => {
           // Return different transactions based on the address being queried
           const isOffRamp = address.equals(offRampAddress)
           if (isOffRamp) {
-            return [{ tx: mockOffRampTx }]
+            return [mockOffRampTx]
           }
-          return [{ tx: mockTx }]
+          return []
         },
-      } as unknown as TonClient4
+      } as unknown as TonClient
 
       const mockWallet: TONWallet = {
-        contract: { address: mockWalletAddress } as WalletContractV4,
-        keyPair: mockKeyPair,
+        getAddress: () => mockWalletAddress.toString(),
+        sendTransaction: async (unsignedTx: { to: string; body: Cell; value?: bigint }) => {
+          if (opts?.shouldFail) {
+            throw new Error('Transaction failed')
+          }
+          capturedTransfer = {
+            to: unsignedTx.to,
+            body: unsignedTx.body,
+            value: unsignedTx.value,
+          }
+          return currentSeqno
+        },
       }
 
       return {
@@ -213,15 +175,10 @@ describe('TON index unit tests', () => {
       })
 
       const captured = getCapturedTransfer()
-      assert.ok(captured, 'sendTransfer should be called')
-      assert.equal(captured.seqno, 42, 'should use wallet seqno')
-      assert.equal(captured.messages.length, 1, 'should send single message')
-      assert.equal(
-        captured.messages[0].to.toRawString(),
-        TON_OFFRAMP_ADDRESS_TEST,
-        'should send to offRamp address',
-      )
-      assert.equal(captured.messages[0].value, toNano('0.3'), 'should send 0.3 TON for gas')
+      assert.ok(captured, 'sendTransaction should be called')
+      assert.equal(captured.to, TON_OFFRAMP_ADDRESS_TEST, 'should send to offRamp address')
+      assert.ok(captured.body instanceof Object, 'body should be a Cell')
+      assert.equal(captured.value, toNano('0.3'), 'should send 0.3 TON for gas')
     })
 
     it('should build Cell body with MANUALLY_EXECUTE_OPCODE', async () => {
@@ -235,7 +192,7 @@ describe('TON index unit tests', () => {
       })
 
       const captured = getCapturedTransfer()!
-      const slice = captured.messages[0].body.beginParse()
+      const slice = captured.body.beginParse()
 
       assert.equal(
         slice.loadUint(32),
@@ -258,7 +215,12 @@ describe('TON index unit tests', () => {
         wallet,
       })
 
-      const [workchain, address, lt, hash] = result.log.transactionHash.split(':')
+      const [workchain, address, lt, hash] = result.log.transactionHash.split(':') as [
+        string,
+        string,
+        string,
+        string,
+      ]
       assert.equal(workchain, '0', 'workchain should be 0')
       assert.equal(address.length, 64, 'address should be 64 hex chars')
       assert.equal(lt, mockTxLt, 'lt should match transaction lt')
@@ -318,7 +280,10 @@ describe('TON index unit tests', () => {
 
   describe('generateUnsignedExecuteReport', () => {
     it('should return UnsignedTONTx with family=ton', async () => {
-      const tonChain = new TONChain({} as TonClient4, mockNetworkInfo as any)
+      const tonChain = new TONChain(
+        { getTransactions: async () => [] } as any,
+        mockNetworkInfo as any,
+      )
 
       const unsigned = await tonChain.generateUnsignedExecuteReport({
         payer: '0:' + 'b'.repeat(64),
@@ -332,7 +297,10 @@ describe('TON index unit tests', () => {
     })
 
     it('should reject non-V1.6 message format', () => {
-      const tonChain = new TONChain({} as TonClient4, mockNetworkInfo as any)
+      const tonChain = new TONChain(
+        { getTransactions: async () => [] } as any,
+        mockNetworkInfo as any,
+      )
 
       const v1_5Report = {
         message: { messageId: '0x' + '1'.repeat(64), strict: false },
@@ -368,12 +336,11 @@ describe('TON index unit tests', () => {
       const versionCell = beginCell().storeStringTail(opts.version).endCell()
 
       return {
-        getLastBlock: async () => ({ last: { seqno: 12345678 } }),
-        runMethod: async (_seqno: number, _address: Address, method: string) => {
+        runMethod: async (_address: Address, method: string) => {
           if (method === 'typeAndVersion') {
             let readIndex = 0
             return {
-              reader: {
+              stack: {
                 readCell: () => {
                   readIndex++
                   return readIndex === 1 ? typeCell : versionCell
@@ -383,7 +350,8 @@ describe('TON index unit tests', () => {
           }
           throw new Error(`Unknown method: ${method}`)
         },
-      } as unknown as TonClient4
+        getTransactions: async () => [],
+      } as unknown as TonClient
     }
 
     it('should parse OffRamp type and version', async () => {
@@ -506,11 +474,10 @@ describe('TON index unit tests', () => {
       const mockAddress = Address.parse('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
 
       return {
-        getLastBlock: async () => ({ last: { seqno: 12345678 } }),
-        runMethod: async (_seqno: number, _address: Address, method: string) => {
+        runMethod: async (_address: Address, method: string) => {
           if (method === 'get_jetton_data') {
             return {
-              reader: {
+              stack: {
                 readBigNumber: () => opts.totalSupply ?? 1000000000n,
                 readAddress: () => mockAddress,
                 readCell: () => contentCell,
@@ -519,7 +486,8 @@ describe('TON index unit tests', () => {
           }
           throw new Error(`Unknown method: ${method}`)
         },
-      } as unknown as TonClient4
+        getTransactions: async () => [],
+      } as unknown as TonClient
     }
 
     it('should parse onchain jetton metadata with symbol and decimals', async () => {
@@ -550,11 +518,11 @@ describe('TON index unit tests', () => {
 
     it('should return defaults when get_jetton_data fails', async () => {
       const client = {
-        getLastBlock: async () => ({ last: { seqno: 12345678 } }),
         runMethod: async () => {
           throw new Error('Contract not found')
         },
-      } as unknown as TonClient4
+        getTransactions: async () => [],
+      } as unknown as TonClient
 
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
@@ -577,15 +545,15 @@ describe('TON index unit tests', () => {
       const mockAddress = Address.parse('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
 
       const client = {
-        getLastBlock: async () => ({ last: { seqno: 12345678 } }),
         runMethod: async () => ({
-          reader: {
+          stack: {
             readBigNumber: () => 1000000000n,
             readAddress: () => mockAddress,
             readCell: () => contentCell,
           },
         }),
-      } as unknown as TonClient4
+        getTransactions: async () => [],
+      } as unknown as TonClient
 
       const tonChain = new TONChain(client, mockNetworkInfo as any)
       const result = await tonChain.getTokenInfo('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
@@ -757,20 +725,28 @@ describe('TON index unit tests', () => {
       const cell = createExecutionStateChangedCell(state)
       const txHash = Buffer.alloc(32)
       txHash.fill(lt % 256) // Different hash per lt
+      const offRampAddress = Address.parse(TEST_OFFRAMP)
+      const execStateChangedCrc = BigInt(crc32('ExecutionStateChanged'))
 
       return {
         tx: {
           lt: BigInt(lt),
           hash: () => txHash,
           now: timestamp ?? Math.floor(Date.now() / 1000),
-          outMessages: {
-            values: () => [
+          address: BigInt('0x' + offRampAddress.hash.toString('hex')),
+          outMessages: new Map([
+            [
+              0,
               {
-                info: { type: 'external-out' as const },
+                info: {
+                  type: 'external-out' as const,
+                  src: offRampAddress,
+                  dest: { value: execStateChangedCrc },
+                },
                 body: cell,
               },
             ],
-          },
+          ]),
         },
       }
     }
@@ -778,30 +754,17 @@ describe('TON index unit tests', () => {
     function createMockClient(transactions: ReturnType<typeof createMockTransaction>[]) {
       // Sort by lt descending (newest first) to match TON API behavior
       const sortedTxs = [...transactions].sort((a, b) => Number(b.tx.lt) - Number(a.tx.lt))
-      const latestTx = sortedTxs[0]
 
       let callCount = 0
       return {
-        getLastBlock: async () => ({
-          last: { seqno: 12345678 },
-          now: Math.floor(Date.now() / 1000),
-        }),
-        getAccountLite: async () => ({
-          account: {
-            last: {
-              lt: latestTx.tx.lt.toString(),
-              hash: latestTx.tx.hash().toString('base64'),
-            },
-          },
-        }),
-        getAccountTransactions: async () => {
+        getTransactions: async () => {
           // First call returns all transactions, subsequent calls return empty (end of history)
           if (callCount++ === 0) {
-            return sortedTxs
+            return sortedTxs.map((t) => t.tx)
           }
           return []
         },
-      } as unknown as TonClient4
+      } as unknown as TonClient
     }
 
     const baseRequest = {
@@ -828,7 +791,7 @@ describe('TON index unit tests', () => {
 
       // Should only have Success, not Untouched
       assert.equal(receipts.length, 1, 'Should have exactly 1 receipt')
-      assert.equal(receipts[0].receipt.state, 2, 'Receipt state should be Success (2)')
+      assert.equal(receipts[0]!.receipt.state, 2, 'Receipt state should be Success (2)')
     })
 
     it('should filter out InProgress state (1)', async () => {
@@ -849,7 +812,7 @@ describe('TON index unit tests', () => {
 
       // Should only have Failure, not InProgress
       assert.equal(receipts.length, 1, 'Should have exactly 1 receipt')
-      assert.equal(receipts[0].receipt.state, 3, 'Receipt state should be Failure (3)')
+      assert.equal(receipts[0]!.receipt.state, 3, 'Receipt state should be Failure (3)')
     })
 
     it('should yield both Success and Failure states', async () => {
@@ -896,48 +859,43 @@ describe('TON index unit tests', () => {
 
       // Create transactions: one with matching messageId, one with different
       const matchingTx = createMockTransaction(2, 1000) // Matching messageId - should be yielded
+      const offRampAddress = Address.parse(TEST_OFFRAMP)
+      const execStateChangedCrc = BigInt(crc32('ExecutionStateChanged'))
       const otherTx = {
         tx: {
           lt: BigInt(999),
           hash: () => Buffer.alloc(32, 0x99),
           now: Math.floor(Date.now() / 1000),
-          outMessages: {
-            values: () => [
+          address: BigInt('0x' + offRampAddress.hash.toString('hex')),
+          outMessages: new Map([
+            [
+              0,
               {
-                info: { type: 'external-out' as const },
+                info: {
+                  type: 'external-out' as const,
+                  src: offRampAddress,
+                  dest: { value: execStateChangedCrc },
+                },
                 body: otherMessageIdCell,
               },
             ],
-          },
+          ]),
         },
       }
 
       // Sort by lt descending (newest first)
       const sortedTxs = [matchingTx, otherTx].sort((a, b) => Number(b.tx.lt) - Number(a.tx.lt))
-      const latestTx = sortedTxs[0]
 
       let callCount = 0
       const mockClient = {
-        getLastBlock: async () => ({
-          last: { seqno: 12345678 },
-          now: Math.floor(Date.now() / 1000),
-        }),
-        getAccountLite: async () => ({
-          account: {
-            last: {
-              lt: latestTx.tx.lt.toString(),
-              hash: latestTx.tx.hash().toString('base64'),
-            },
-          },
-        }),
-        getAccountTransactions: async () => {
+        getTransactions: async () => {
           // First call returns all transactions, subsequent calls return empty
           if (callCount++ === 0) {
-            return sortedTxs
+            return sortedTxs.map((t) => t.tx)
           }
           return []
         },
-      } as unknown as TonClient4
+      } as unknown as TonClient
 
       const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
 
@@ -951,7 +909,7 @@ describe('TON index unit tests', () => {
 
       // Should only have the one with matching messageId
       assert.equal(receipts.length, 1, 'Should have exactly 1 receipt')
-      assert.equal(receipts[0].receipt.messageId, TEST_MESSAGE_ID)
+      assert.equal(receipts[0]!.receipt.messageId, TEST_MESSAGE_ID)
     })
   })
 })

@@ -62,7 +62,7 @@ function anyPromiseMax<T>(
         const currentIndex = index++
         inFlight++
 
-        void promises[currentIndex]()
+        void promises[currentIndex]!()
           .then(resolve)
           .catch((error) => {
             errors[currentIndex] = error
@@ -114,7 +114,7 @@ async function getFallbackArchiveLogs(
   let cancel$ = new Promise<unknown>((resolve) => (cancel = resolve))
   if (destroy$) cancel$ = Promise.race([destroy$, cancel$])
 
-  let winner: string
+  let winner: string | undefined
   const providerLogs$ = getFallbackRpcsList()
     .then((rpcs) => {
       const rpc = rpcs.find(({ chainId: id }) => id === chainId)
@@ -268,7 +268,7 @@ export async function* getEvmLogs(
     logger.debug('evm getLogs:', filter_)
     const logs = await provider.getLogs(filter_)
     if (logs.length)
-      latestLogBlockNumber = Math.max(latestLogBlockNumber, logs[logs.length - 1].blockNumber)
+      latestLogBlockNumber = Math.max(latestLogBlockNumber, logs[logs.length - 1]!.blockNumber)
     if (filter.startBlock == null) logs.reverse()
     yield* logs
   }
@@ -297,7 +297,7 @@ export async function* getEvmLogs(
     logger.debug('evm watch getLogs:', filter_)
     const logs = await provider.getLogs(filter_)
     if (logs.length)
-      latestLogBlockNumber = Math.max(latestLogBlockNumber, logs[logs.length - 1].blockNumber)
+      latestLogBlockNumber = Math.max(latestLogBlockNumber, logs[logs.length - 1]!.blockNumber)
     yield* logs
   }
 }

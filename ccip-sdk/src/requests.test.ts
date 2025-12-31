@@ -166,9 +166,9 @@ describe('fetchCCIPMessagesInTx', () => {
 
     const result = await getMessagesInTx(mockedChain as unknown as Chain, mockTx)
     assert.equal(result.length, 1)
-    assert.equal(result[0].message.sequenceNumber, 1n)
-    assert.equal(result[0].tx, mockTx)
-    assert.equal(result[0].lane.version, CCIPVersion.V1_2)
+    assert.equal(result[0]!.message.sequenceNumber, 1n)
+    assert.equal(result[0]!.tx, mockTx)
+    assert.equal(result[0]!.lane.version, CCIPVersion.V1_2)
   })
 
   it('should throw an error if no CCIPSendRequested message found', async () => {
@@ -363,7 +363,7 @@ describe('getMessagesInBatch', () => {
     })
 
     assert.equal(result.length, 1)
-    assert.equal(result[0].sequenceNumber, 9n)
+    assert.equal(result[0]!.sequenceNumber, 9n)
   })
 
   it('should throw an error if not all expected events are found', async () => {
@@ -474,9 +474,9 @@ describe('decodeMessage', () => {
 
     const msg = decodeMessage(msgInfoString)
     assert.equal(msg.tokenAmounts.length, 1)
-    const tokenAmount = msg.tokenAmounts[0]
+    const tokenAmount = msg.tokenAmounts[0]!
 
-    assert.ok('token' in msg.tokenAmounts[0])
+    assert.ok('token' in msg.tokenAmounts[0]!)
     assert.equal(msg.feeTokenAmount, 31933333333333333n)
 
     if ('token' in tokenAmount) {
@@ -494,7 +494,7 @@ describe('decodeMessage', () => {
     const msg = decodeMessage(msgInfoString)
 
     assert.equal(msg.tokenAmounts.length, 1)
-    const tokenAmount = msg.tokenAmounts[0]
+    const tokenAmount = msg.tokenAmounts[0]!
 
     if ('destTokenAddress' in tokenAmount) {
       assert.equal(tokenAmount.destTokenAddress, '0x316496C5dA67D052235B9952bc42db498d6c520b')

@@ -104,7 +104,7 @@ class MockChain extends Chain {
   }
 
   async typeAndVersion(_address: string): Promise<[string, string, string]> {
-    const parts = this.mockTypeAndVersion.split(' ')
+    const parts = this.mockTypeAndVersion.split(' ') as [string, string]
     return [parts[0], parts[1], this.mockTypeAndVersion]
   }
 
@@ -273,21 +273,21 @@ describe('calculateManualExecProof', () => {
 
   it('should calculate manual execution proof correctly', () => {
     const merkleRoot = '0x9c66d4cfcba6e359f42f096ff16192e16967cea456503c02e738c5646d06cab4'
-    const messageId = messages[0].messageId
+    const messageId = messages[0]!.messageId
 
     const result = calculateManualExecProof(messages, lane, messageId, merkleRoot, {
       logger: console,
     })
 
     assert.ok(result.proofs)
-    assert.ok(result.proofFlagBits !== undefined)
+    assert.ok(result.proofFlagBits === 0n)
     assert.ok(result.merkleRoot)
     assert.ok(Array.isArray(result.proofs))
   })
 
   it('should calculate messageId as root of batch with single message', () => {
-    const messageId = messages[0].messageId
-    const batch = [messages[0]]
+    const messageId = messages[0]!.messageId
+    const batch = [messages[0]!]
 
     const result = calculateManualExecProof(batch, lane, messageId, undefined, { logger: console })
 
@@ -307,7 +307,7 @@ describe('calculateManualExecProof', () => {
   })
 
   it('should throw an error if merkle root does not match', () => {
-    const messageId = messages[0].messageId
+    const messageId = messages[0]!.messageId
     const wrongMerkleRoot = '0x0000000000000000000000000000000000000000000000000000000000000001'
 
     assert.throws(
@@ -346,7 +346,7 @@ describe('calculateManualExecProof', () => {
       version: CCIPVersion.V1_6,
     }
 
-    const messageId = messages1_6[0].messageId
+    const messageId = messages1_6[0]!.messageId
     const result = calculateManualExecProof(messages1_6, lane1_6, messageId, merkleRoot1_6, {
       logger: console,
     })

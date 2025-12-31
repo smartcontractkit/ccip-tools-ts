@@ -41,10 +41,6 @@ export function serializeExecutionReport(
 ): Uint8Array {
   const { message, offchainTokenData, proofs } = executionReport
 
-  if (!message) {
-    throw new CCIPMessageInvalidError('Message is undefined in execution report')
-  }
-
   let gasLimit, tokenReceiver
   if ('receiverObjectIds' in message) {
     ;({ gasLimit, tokenReceiver } = message)

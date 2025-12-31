@@ -342,7 +342,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       // specialized getLogs filter for v1.6 CCIPMessageSent events, to filter by dest
       opts_ = {
         ...opts,
-        topics: [[request.log.topics[0]], [toBeHex(request.lane.destChainSelector, 32)]],
+        topics: [[request.log.topics[0]!], [toBeHex(request.lane.destChainSelector, 32)]],
       }
     }
     return getMessagesInBatch(this, request, commit, opts_)
@@ -370,8 +370,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (!isBytesLike(log.data)) throw new CCIPLogDataInvalidError(log.data)
     let fragments
     if (log.topics?.[0]) {
-      fragments = [requestsFragments[log.topics[0] as `0x${string}`]]
-      if (!fragments[0]) return
+      const f = requestsFragments[log.topics[0] as `0x${string}`]
+      if (!f) return
+      fragments = [f]
     } else {
       fragments = Object.values(requestsFragments)
     }
@@ -381,7 +382,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         // we don't actually use Interface instance here, `decodeEventLog` is mostly static when given a fragment
         const result = interfaces.OnRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
         message = resultToObject(result) as Record<string, unknown>
-        if (message.message) message = message.message as Record<string, unknown>
+        if (message.message) message = message.message as Record<string, unknown> | undefined
         if (message) break
       } catch (_) {
         // try next fragment
@@ -411,7 +412,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           try {
             tokenAmount = {
               ...parseSourceTokenData(
-                (message as { sourceTokenData: string[] }).sourceTokenData[i],
+                (message as { sourceTokenData: string[] }).sourceTokenData[i]!,
               ),
               ...tokenAmount,
             }
@@ -525,8 +526,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (!isBytesLike(log.data)) throw new CCIPLogDataInvalidError(log.data)
     let fragments
     if (log.topics?.[0]) {
-      fragments = [receiptsFragments[log.topics[0] as `0x${string}`]]
-      if (!fragments[0]) return
+      const f = receiptsFragments[log.topics[0] as `0x${string}`]
+      if (!f) return
+      fragments = [f]
     } else fragments = Object.values(receiptsFragments)
     for (const fragment of fragments) {
       try {
@@ -591,7 +593,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param args - Extra arguments to encode.
    * @returns Encoded extra arguments as hex string.
    */
-  static encodeExtraArgs(args: ExtraArgs): string {
+  static encodeExtraArgs(args: ExtraArgs | undefined): string {
     if (!args) return '0x'
     if ('computeUnits' in args) {
       return concat([
@@ -622,9 +624,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ),
       ])
     } else if ('allowOutOfOrderExecution' in args) {
-      if (args.gasLimit == null) args.gasLimit = DEFAULT_GAS_LIMIT
+      if ((args as Partial<typeof args>).gasLimit == null) args.gasLimit = DEFAULT_GAS_LIMIT
       return concat([EVMExtraArgsV2Tag, defaultAbiCoder.encode([EVMExtraArgsV2], [args])])
-    } else if (args.gasLimit != null) {
+    } else if ((args as Partial<typeof args>).gasLimit != null) {
       return concat([EVMExtraArgsV1Tag, defaultAbiCoder.encode([EVMExtraArgsV1], [args])])
     }
     return '0x'
@@ -1007,7 +1009,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ) as unknown as TypedContract<typeof Token_ABI>
           const allowance = await contract.allowance(sender, router)
           if (allowance >= amount) return
-          const amnt = opts?.approveMax ? 2n ** 256n - 1n : amount
+          const amnt = opts.approveMax ? 2n ** 256n - 1n : amount
           return contract.approve.populateTransaction(router, amnt, { from: sender })
         }),
       )
@@ -1048,7 +1050,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const sender = await wallet.getAddress()
     const txs = await this.generateUnsignedSendMessage({ ...opts, sender })
     const approveTxs = txs.transactions.slice(0, txs.transactions.length - 1)
-    let sendTx: TransactionRequest = txs.transactions[txs.transactions.length - 1]
+    let sendTx: TransactionRequest = txs.transactions[txs.transactions.length - 1]!
 
     // approve all tokens (including feeToken, if needed) in parallel
     let nonce = await this.provider.getTransactionCount(sender)
@@ -1062,7 +1064,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         return response
       }),
     )
-    if (responses.length) await responses[responses.length - 1].wait(1, 60_000) // wait last tx nonce to be mined
+    if (responses.length) await responses[responses.length - 1]!.wait(1, 60_000) // wait last tx nonce to be mined
 
     sendTx.nonce = nonce++
     // sendTx.gasLimit = await this.provider.estimateGas(sendTx)
@@ -1071,7 +1073,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const response = await submitTransaction(wallet, sendTx, this.provider)
     this.logger.debug('ccipSend =>', response.hash)
     await response.wait(1, 60_000)
-    return (await this.getMessagesInTx(await this.getTransaction(response.hash)))[0]
+    return (await this.getMessagesInTx(await this.getTransaction(response.hash)))[0]!
   }
 
   /** {@inheritDoc Chain.getOffchainTokenData} */
@@ -1100,7 +1102,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           EVM2EVMOffRamp_1_2_ABI,
           this.provider,
         ) as unknown as TypedContract<typeof EVM2EVMOffRamp_1_2_ABI>
-        const gasOverride = BigInt(opts?.gasLimit ?? 0)
+        const gasOverride = BigInt(opts.gasLimit ?? 0)
         manualExecTx = await contract.manuallyExecute.populateTransaction(
           {
             ...execReport,
@@ -1127,9 +1129,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           },
           [
             {
-              receiverExecutionGasLimit: BigInt(opts?.gasLimit ?? 0),
+              receiverExecutionGasLimit: BigInt(opts.gasLimit ?? 0),
               tokenGasOverrides: execReport.message.tokenAmounts.map(() =>
-                BigInt(opts?.tokensGasLimit ?? opts?.gasLimit ?? 0),
+                BigInt(opts.tokensGasLimit ?? opts.gasLimit ?? 0),
               ),
             },
           ],
@@ -1180,9 +1182,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           [
             [
               {
-                receiverExecutionGasLimit: BigInt(opts?.gasLimit ?? 0),
+                receiverExecutionGasLimit: BigInt(opts.gasLimit ?? 0),
                 tokenGasOverrides: execReport.message.tokenAmounts.map(() =>
-                  BigInt(opts?.tokensGasLimit ?? opts?.gasLimit ?? 0),
+                  BigInt(opts.tokensGasLimit ?? opts.gasLimit ?? 0),
                 ),
               },
             ],
@@ -1205,7 +1207,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ...opts,
       payer: await wallet.getAddress(),
     })
-    const unsignedTx = await wallet.populateTransaction(unsignedTxs.transactions[0])
+    const unsignedTx = await wallet.populateTransaction(unsignedTxs.transactions[0]!)
     unsignedTx.from = undefined // some signers don't like receiving pre-populated `from`
     const response = await submitTransaction(wallet, unsignedTx, this.provider)
     this.logger.debug('manuallyExecute =>', response.hash)
@@ -1309,7 +1311,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   ): Promise<Record<string, TokenPoolRemote>> {
     const [_, version] = await this.typeAndVersion(tokenPool)
 
-    let supportedChains: Promise<NetworkInfo[]>
+    let supportedChains: Promise<NetworkInfo[]> | undefined
     if (remoteChainSelector) supportedChains = Promise.resolve([networkInfo(remoteChainSelector)])
 
     let remotePools: Promise<string[][]>
@@ -1368,10 +1370,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
               [
                 chain.name,
                 {
-                  remoteToken: decodeAddress(remoteInfo[i][0], chain.family),
-                  remotePools: remotePools[i].map((pool) => decodeAddress(pool, chain.family)),
-                  inboundRateLimiterState: remoteInfo[i][1].isEnabled ? remoteInfo[i][1] : null,
-                  outboundRateLimiterState: remoteInfo[i][2].isEnabled ? remoteInfo[i][2] : null,
+                  remoteToken: decodeAddress(remoteInfo[i]![0], chain.family),
+                  remotePools: remotePools[i]!.map((pool) => decodeAddress(pool, chain.family)),
+                  inboundRateLimiterState: remoteInfo[i]![1].isEnabled ? remoteInfo[i]![1] : null,
+                  outboundRateLimiterState: remoteInfo[i]![2].isEnabled ? remoteInfo[i]![2] : null,
                 },
               ] as const,
           ),
@@ -1384,7 +1386,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const onRamp = await this._getSomeOnRampFor(router)
     const [_, version] = await this.typeAndVersion(onRamp)
     let tokens
-    let onRampIface: Interface
+    let onRampIface: Interface | undefined
     switch (version) {
       case CCIPVersion.V1_2:
         onRampIface = interfaces.EVM2EVMOnRamp_v1_2

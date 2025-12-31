@@ -65,10 +65,14 @@ export * from './errors/index.ts'
 
 // chains
 import { AptosChain } from './aptos/index.ts'
+export type { UnsignedAptosTx } from './aptos/index.ts'
 import { EVMChain } from './evm/index.ts'
+export type { UnsignedEVMTx } from './evm/index.ts'
 import { SolanaChain } from './solana/index.ts'
+export type { UnsignedSolanaTx } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'
+export type { UnsignedTONTx } from './ton/index.ts'
 import { ChainFamily } from './types.ts'
 export { AptosChain, ChainFamily, EVMChain, SolanaChain, SuiChain, TONChain }
 // use `supportedChains` to override/register derived classes, if needed

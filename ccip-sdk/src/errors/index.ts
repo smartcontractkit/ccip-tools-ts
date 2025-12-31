@@ -109,7 +109,6 @@ export {
   CCIPSolanaOffRampEventsNotFoundError,
   CCIPSolanaRefAddressesNotFoundError,
   CCIPSolanaRouterConfigNotFoundError,
-  CCIPSolanaTopicsInvalidError,
   CCIPSplTokenInvalidError,
   CCIPTokenAmountInvalidError,
   CCIPTokenDataParseError,
@@ -117,6 +116,7 @@ export {
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTokenPoolInfoNotFoundError,
   CCIPTokenPoolStateNotFoundError,
+  CCIPTopicsInvalidError,
   CCIPTransactionNotFinalizedError,
 } from './specialized.ts'
 

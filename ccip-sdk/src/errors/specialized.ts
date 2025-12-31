@@ -1028,14 +1028,15 @@ export class CCIPBlockTimeNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when Solana topics are not valid strings. */
-export class CCIPSolanaTopicsInvalidError extends CCIPError {
-  override readonly name = 'CCIPSolanaTopicsInvalidError'
+/** Thrown when topics are not valid strings. */
+export class CCIPTopicsInvalidError extends CCIPError {
+  override readonly name = 'CCIPTopicsInvalidError'
   /** Creates a Solana topics invalid error. */
-  constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.SOLANA_TOPICS_INVALID, 'Solana event topics must be string values', {
+  constructor(topics: unknown[], options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.TOPICS_INVALID, 'event topics must be string values', {
       ...options,
       isTransient: false,
+      context: { ...options?.context, topics },
     })
   }
 }

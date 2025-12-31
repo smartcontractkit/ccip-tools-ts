@@ -1,6 +1,4 @@
 import { type Builder, Address, Cell, beginCell } from '@ton/core'
-import type { KeyPair } from '@ton/crypto'
-import type { WalletContractV4 } from '@ton/ton'
 import { toBigInt } from 'ethers'
 
 import { CCIPDataFormatUnsupportedError } from '../errors/specialized.ts'
@@ -15,14 +13,6 @@ export type CCIPMessage_V1_6_TON = CCIPMessage_V1_6 & EVMExtraArgsV2
 export const MANUALLY_EXECUTE_OPCODE = 0xa00785cf
 
 /**
- * TON wallet with keypair for signing transactions
- */
-export interface TONWallet {
-  contract: WalletContractV4
-  keyPair: KeyPair
-}
-
-/**
  * Unsigned TON transaction data.
  * Contains the payload needed to construct a transaction.
  * Value is determined at execution time, not included here.
@@ -33,6 +23,16 @@ export type UnsignedTONTx = {
   to: string
   /** Message payload as BOC-serialized Cell */
   body: Cell
+  /** Value to send with the transaction */
+  value?: bigint
+}
+
+/**
+ * TON wallet with keypair for signing transactions
+ */
+export interface TONWallet {
+  getAddress(): string | Promise<string>
+  sendTransaction(unsignedTx: Omit<UnsignedTONTx, 'family'>): Promise<number>
 }
 
 /** Typeguard for TON Wallet */
@@ -40,14 +40,10 @@ export function isTONWallet(wallet: unknown): wallet is TONWallet {
   return (
     typeof wallet === 'object' &&
     wallet !== null &&
-    'contract' in wallet &&
-    'keyPair' in wallet &&
-    typeof wallet.contract === 'object' &&
-    wallet.contract !== null &&
-    'address' in wallet.contract &&
-    typeof wallet.keyPair === 'object' &&
-    wallet.keyPair !== null &&
-    'secretKey' in wallet.keyPair
+    'sendTransaction' in wallet &&
+    typeof wallet.sendTransaction === 'function' &&
+    'getAddress' in wallet &&
+    typeof wallet.getAddress === 'function'
   )
 }
 
@@ -72,9 +68,9 @@ function asSnakeData<T>(array: T[], builderFn: (item: T) => Builder): Cell {
   cells.push(builder)
 
   // Build the linked structure from the end
-  let current = cells[cells.length - 1].endCell()
+  let current = cells[cells.length - 1]!.endCell()
   for (let i = cells.length - 2; i >= 0; i--) {
-    const b = cells[i]
+    const b = cells[i]!
     b.storeRef(current)
     current = b.endCell()
   }
@@ -118,7 +114,7 @@ function serializeMessage(message: CCIPMessage_V1_6_TON): Builder {
     .storeAddress(Address.parse(message.receiver))
     .storeCoins(message.gasLimit)
     .storeMaybeRef(
-      message.tokenAmounts?.length > 0 ? serializeTokenAmounts(message.tokenAmounts) : null,
+      message.tokenAmounts.length > 0 ? serializeTokenAmounts(message.tokenAmounts) : null,
     )
 }
 

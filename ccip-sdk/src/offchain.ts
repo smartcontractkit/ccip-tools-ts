@@ -64,7 +64,7 @@ export async function getLbtcAttestation(
     method: 'POST',
     body: JSON.stringify({ messageHash: [payloadHash] }),
   })
-  const response = (await res.json()) as LombardAttestationsResponse
+  const response = (await res.json()) as LombardAttestationsResponse | null
   if (response == null || !('attestations' in response)) {
     throw new CCIPLbtcAttestationNotFoundError(payloadHash, response)
   }

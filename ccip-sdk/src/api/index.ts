@@ -121,7 +121,7 @@ export class CCIPAPIClient {
     url.searchParams.set('sourceChainSelector', sourceChainSelector.toString())
     url.searchParams.set('destChainSelector', destChainSelector.toString())
 
-    this.logger.debug?.(`CCIPAPIClient: GET ${url.toString()}`)
+    this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`)
 
     const response = await this._fetch(url.toString())
 
@@ -160,7 +160,7 @@ export class CCIPAPIClient {
     const raw = (await response.json()) as RawLaneLatencyResponse
 
     // Log full raw response for debugging
-    this.logger.debug?.('getLaneLatency raw response:', raw)
+    this.logger.debug('getLaneLatency raw response:', raw)
 
     return { totalMs: raw.totalMs }
   }

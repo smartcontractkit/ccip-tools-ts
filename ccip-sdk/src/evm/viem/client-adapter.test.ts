@@ -101,7 +101,7 @@ describe('ViemTransportProvider', () => {
       params: [],
     })
     assert.equal(results.length, 1)
-    assert.ok('result' in results[0])
+    assert.ok('result' in results[0]!)
     if ('result' in results[0]) {
       assert.equal(results[0].result, '0x123456')
     }
@@ -126,8 +126,8 @@ describe('ViemTransportProvider', () => {
       { jsonrpc: '2.0', id: 2, method: 'eth_getBalance', params: ['0x123', 'latest'] },
     ])
     assert.equal(results.length, 2)
-    assert.ok('result' in results[0])
-    assert.ok('result' in results[1])
+    assert.ok('result' in results[0]!)
+    assert.ok('result' in results[1]!)
     if ('result' in results[0]) {
       assert.equal(results[0].result, '0x123456')
     }
@@ -153,7 +153,7 @@ describe('ViemTransportProvider', () => {
       params: [],
     })
     assert.equal(results.length, 1)
-    assert.ok('error' in results[0])
+    assert.ok('error' in results[0]!)
     const errorResult = results[0] as { error: { message: string } }
     assert.ok(errorResult.error.message.includes('RPC error'))
   })

@@ -213,13 +213,13 @@ class ViemWalletAdapter extends AbstractSigner {
  */
 export function viemWallet(client: WalletClient<Transport, Chain, Account>): AbstractSigner {
   // Validate account is defined
-  if (!client.account) {
+  if (!(client.account as Account | undefined)) {
     throw new CCIPViemAdapterError('WalletClient must have an account defined', {
       recovery: 'Pass an account to createWalletClient or use .extend(walletActions)',
     })
   }
 
-  if (!client.chain) {
+  if (!(client.chain as Chain | undefined)) {
     throw new CCIPViemAdapterError('WalletClient must have a chain defined', {
       recovery: 'Pass a chain to createWalletClient: createWalletClient({ chain: mainnet, ... })',
     })

@@ -803,7 +803,7 @@ describe('utility functions', () => {
     })
 
     it('should work as type assertion', () => {
-      const value: string | undefined = 'hello'
+      const value = 'hello' as string | undefined
       assertUtil(value !== undefined, CCIPErrorCode.UNKNOWN, 'Value required')
       // After assertion, TypeScript knows value is string
       const length: number = value.length

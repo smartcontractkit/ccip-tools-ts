@@ -81,9 +81,7 @@ export function buildManualExecutionPTB({
     }
 
     // Process each token transfer
-    for (let i = 0; i < tokenConfigs.length; i++) {
-      const tokenConfig = tokenConfigs[i]
-
+    for (const tokenConfig of tokenConfigs) {
       tx.moveCall({
         target: `${tokenConfig.tokenPoolPackageId}::${tokenConfig.tokenPoolModule}::release_or_mint`,
         typeArguments: [tokenConfig.tokenType],

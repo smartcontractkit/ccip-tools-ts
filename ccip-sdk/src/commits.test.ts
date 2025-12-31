@@ -85,7 +85,7 @@ class MockChain extends Chain {
       // Filter by topics if specified - topics can be event names or topic hashes
       // For simplicity in tests, we just check if the log has any topics and yield it
       // Real implementation would check topic0 matches
-      if (opts.topics && log.topics && log.topics.length > 0) {
+      if (opts.topics && log.topics.length > 0) {
         // If topics filter is provided, just yield the log (simplified for mock)
         // In a real implementation, this would check if log.topics[0] matches one of the requested topics
         yield log
@@ -96,7 +96,7 @@ class MockChain extends Chain {
   }
 
   async typeAndVersion(_address: string): Promise<[string, string, string]> {
-    const parts = this.mockTypeAndVersion.split(' ')
+    const parts = this.mockTypeAndVersion.split(' ') as [string, string]
     return [parts[0], parts[1], this.mockTypeAndVersion]
   }
 

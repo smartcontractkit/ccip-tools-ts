@@ -58,9 +58,9 @@ class CombinationGenerator {
     }
 
     // Increment the element found above and adjust the rest
-    this.currentCombination[i]++
+    this.currentCombination[i]!++
     for (let j = i + 1; j < this.k; j++) {
-      this.currentCombination[j] = this.currentCombination[i] + j - i
+      this.currentCombination[j] = this.currentCombination[i]! + j - i
     }
 
     return true // A new combination was generated
@@ -92,11 +92,11 @@ describe('Merkle multi basic tests', () => {
 
   it('should correctly pad tree layers', () => {
     const tr4 = new Tree([a, b, c])
-    assert.equal(tr4.layers[0].length, 4)
+    assert.equal(tr4.layers[0]!.length, 4)
 
     const tr8 = new Tree([a, b, c, d, e])
-    assert.equal(tr8.layers[0].length, 6)
-    assert.equal(tr8.layers[1].length, 4)
+    assert.equal(tr8.layers[0]!.length, 6)
+    assert.equal(tr8.layers[1]!.length, 4)
 
     const expected = hashInternal(
       hashInternal(hashInternal(a, b), hashInternal(c, d)),
@@ -180,7 +180,7 @@ describe('Merkle multi proof for trees of various sizes', () => {
         while (gen.next()) {
           const leaveIndices = gen.combination()
           const proof = tr.prove(leaveIndices)
-          const leavesToProve = leaveIndices.map((idx: number) => leafHashes[idx])
+          const leavesToProve = leaveIndices.map((idx: number) => leafHashes[idx]!)
 
           const root = verifyComputeRoot(leavesToProve, proof)
           assert.equal(root, expectedRoots[length - 1])

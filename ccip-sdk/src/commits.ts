@@ -34,17 +34,17 @@ export async function getCommitReport(
     const reports = (dest.constructor as ChainStatic).decodeCommits(log, lane)
     if (!reports) continue
     const validReports = reports.filter((r) => {
-      if (!r || r.maxSeqNr < message.sequenceNumber) return
+      if (r.maxSeqNr < message.sequenceNumber) return
       // we could give up since we walk forward from some startBlock/startTime, but there might be some out-of-order logs
       if (r.minSeqNr > message.sequenceNumber) return
       return true
     })
 
-    if (validReports.length === 0) continue
+    if (!validReports.length) continue
 
     return {
       log,
-      report: validReports[0],
+      report: validReports[0]!,
     }
   }
 

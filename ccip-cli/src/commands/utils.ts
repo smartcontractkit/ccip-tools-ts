@@ -43,7 +43,7 @@ export async function selectRequest(
   hints?: { logIndex?: number },
 ): Promise<CCIPRequest> {
   if (hints?.logIndex != null) requests = requests.filter((req) => req.log.index === hints.logIndex)
-  if (requests.length === 1) return requests[0]
+  if (requests.length === 1) return requests[0]!
   const answer = await select({
     message: `${requests.length} messageIds found; select one${promptSuffix ? ' ' + promptSuffix : ''}`,
     choices: [
@@ -67,7 +67,7 @@ tokenTransfers =\t[${req.message.tokenAmounts.map((ta) => ('token' in ta ? ta.to
     ],
   })
   if (answer < 0) throw new CCIPError(CCIPErrorCode.UNKNOWN, 'User requested exit')
-  return requests[answer]
+  return requests[answer]!
 }
 
 /**
@@ -143,7 +143,7 @@ async function formatToken(
  * @returns Record with indexed keys.
  */
 export function formatArray<T>(name: string, values: readonly T[]): Record<string, T> {
-  if (values.length <= 1) return { [name]: values[0] }
+  if (values.length <= 1) return { [name]: values[0]! }
   return Object.fromEntries(values.map((v, i) => [`${name}[${i}]`, v] as const))
 }
 
@@ -523,7 +523,7 @@ export function logParsedError(this: Ctx, err: unknown): boolean {
 export async function parseTokenAmounts(source: Chain, transferTokens: readonly string[]) {
   return Promise.all(
     transferTokens.map(async (tokenAmount) => {
-      const [token, amount_] = tokenAmount.split('=')
+      const [token, amount_] = tokenAmount.split('=') as [string, string]
       const { decimals } = await source.getTokenInfo(token)
       const amount = parseUnits(amount_, decimals)
       return { token, amount }

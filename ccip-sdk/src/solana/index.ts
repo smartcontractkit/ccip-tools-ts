@@ -49,13 +49,13 @@ import {
   CCIPSolanaExtraArgsEncodingError,
   CCIPSolanaOffRampEventsNotFoundError,
   CCIPSolanaRefAddressesNotFoundError,
-  CCIPSolanaTopicsInvalidError,
   CCIPSplTokenInvalidError,
   CCIPTokenDataParseError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTokenPoolInfoNotFoundError,
   CCIPTokenPoolStateNotFoundError,
+  CCIPTopicsInvalidError,
   CCIPTransactionNotFoundError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
@@ -116,6 +116,7 @@ import {
 } from './utils.ts'
 import { getMessageById, getMessagesInBatch, getMessagesInTx } from '../requests.ts'
 import { patchBorsh } from './patchBorsh.ts'
+export type { UnsignedSolanaTx }
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
 const offrampCoder = new BorshCoder(CCIP_OFFRAMP_IDL)
@@ -318,7 +319,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     // Parse logs from transaction using helper function
     const logs_ = tx.meta?.logMessages?.length
-      ? parseSolanaLogs(tx.meta?.logMessages).map((l) => ({
+      ? parseSolanaLogs(tx.meta.logMessages).map((l) => ({
           ...l,
           transactionHash: hash,
           blockNumber: tx.slot,
@@ -330,7 +331,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       logs: [] as SolanaLog[],
       blockNumber: tx.slot,
       timestamp: tx.blockTime,
-      from: tx.transaction.message.staticAccountKeys[0].toString(),
+      from: tx.transaction.message.staticAccountKeys[0]!.toString(),
       error: tx.meta?.err,
       tx, // specialized solana transaction
     }
@@ -392,7 +393,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     let topics
     if (opts.topics?.length) {
       if (!opts.topics.every((topic) => typeof topic === 'string'))
-        throw new CCIPSolanaTopicsInvalidError()
+        throw new CCIPTopicsInvalidError(opts.topics)
       // append events discriminants (if not 0x-8B already), but keep OG topics
       topics = [
         ...opts.topics,
@@ -580,7 +581,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     if (
       !mintInfo.value ||
-      !mintInfo.value.data ||
       (typeof mintInfo.value.data === 'object' &&
         'program' in mintInfo.value.data &&
         mintInfo.value.data.program !== 'spl-token' &&
@@ -836,7 +836,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       (typeof CCIP_OFFRAMP_IDL)['events'][number] & { name: 'CommitReportAccepted' },
       IdlTypes<typeof CCIP_OFFRAMP_IDL>
     >(log.data)
-    if (decoded?.name !== 'CommitReportAccepted' || !decoded.data?.merkleRoot) return
+    if (decoded?.name !== 'CommitReportAccepted' || !decoded.data.merkleRoot) return
     const merkleRoot = decoded.data.merkleRoot
 
     // Verify the source chain selector matches our lane
@@ -1009,7 +1009,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     })
 
     const hash = await simulateAndSendTxs(this, opts.wallet, unsigned)
-    return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]
+    return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]!
   }
 
   /** {@inheritDoc Chain.getOffchainTokenData} */
@@ -1060,7 +1060,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           ...opts,
           payer: wallet.publicKey.toBase58(),
         })
-        hash = await simulateAndSendTxs(this, wallet, unsigned, opts?.gasLimit)
+        hash = await simulateAndSendTxs(this, wallet, unsigned, opts.gasLimit)
       } catch (err) {
         if (
           !(err instanceof Error) ||
@@ -1070,8 +1070,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         // in case of failure to serialize a report, first try buffering (because it gets
         // auto-closed upon successful execution), then ALTs (need a grace period ~3min after
         // deactivation before they can be closed/recycled)
-        if (!opts?.forceBuffer) opts = { ...opts, forceBuffer: true }
-        else if (!opts?.forceLookupTable) opts = { ...opts, forceLookupTable: true }
+        if (!opts.forceBuffer) opts = { ...opts, forceBuffer: true }
+        else if (!opts.forceLookupTable) opts = { ...opts, forceLookupTable: true }
         else throw err
       }
     } while (!hash)
@@ -1246,7 +1246,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     // Check if pendingAdministrator is set (not system program address)
     if (
-      pendingAdministrator &&
       !pendingAdministrator.equals(SystemProgram.programId) &&
       !pendingAdministrator.equals(PublicKey.default)
     ) {
@@ -1257,7 +1256,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     try {
       const lookupTableAddr = new PublicKey(tokenAdminRegistry.data.subarray(73, 73 + 32))
       const lookupTable = await this.connection.getAddressLookupTable(lookupTableAddr)
-      if (lookupTable?.value) {
+      if (lookupTable.value) {
         // tokenPool state PDA is at index [3]
         const tokenPoolAddress = lookupTable.value.state.addresses[3]
         if (tokenPoolAddress && !tokenPoolAddress.equals(PublicKey.default)) {
@@ -1427,7 +1426,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         },
       ],
     })) {
-      if (!acc.account.data || acc.account.data.length < mintOffset + 32) continue
+      if (acc.account.data.length < mintOffset + 32) continue
       const mint = new PublicKey(acc.account.data.subarray(mintOffset, mintOffset + 32))
       const [derivedPda] = PublicKey.findProgramAddressSync(
         [Buffer.from('token_admin_registry'), mint.toBuffer()],

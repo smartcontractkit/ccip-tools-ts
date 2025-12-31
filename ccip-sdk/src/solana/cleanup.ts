@@ -92,7 +92,7 @@ export async function cleanUpBuffers(
         logger.info('🗑️  Closed lookup table', altAddr, ': tx =>', sig)
       } catch (err) {
         const info = await connection.getAddressLookupTable(lookupTable)
-        if (!info?.value) break
+        if (!info.value) break
         else if (info.value.state.deactivationSlot < 2n ** 63n)
           deactivationSlot = Number(info.value.state.deactivationSlot)
         logger.warn('Failed to close lookup table', altAddr, err)
@@ -181,12 +181,12 @@ export async function cleanUpBuffers(
       }
       case 'Instruction: DeactivateLookupTable':
       case 'Instruction: CreateLookupTable': {
-        const lookupTable = tx.tx.transaction.message.staticAccountKeys[1]
+        const lookupTable = tx.tx.transaction.message.staticAccountKeys[1]!
         if (seenAccs.has(lookupTable.toBase58())) continue
         seenAccs.add(lookupTable.toBase58())
 
         const info = await connection.getAddressLookupTable(lookupTable)
-        if (!info?.value) {
+        if (!info.value) {
           alreadyClosed++ // assume we're done when we hit Nth closed ALT; maybe add an option to keep going?
           logger.debug('Lookup table', lookupTable.toBase58(), 'already closed')
         } else if (info.value.state.authority?.toBase58() !== wallet.publicKey.toBase58()) {
@@ -201,7 +201,7 @@ export async function cleanUpBuffers(
           pendingPromises.push(closeAlt(lookupTable, Number(info.value.state.deactivationSlot)))
         } else if (
           info.value.state.addresses.length >= 18 &&
-          info.value.state.addresses[6].equals(wallet.publicKey)
+          info.value.state.addresses[6]!.equals(wallet.publicKey)
         ) {
           // the conditions above match for ALTs created for ccip manualExec
           const deactivateIx = AddressLookupTableProgram.deactivateLookupTable({

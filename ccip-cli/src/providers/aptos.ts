@@ -99,7 +99,7 @@ export class AptosLedgerSigner /*implements AptosAsyncAccount*/ {
  */
 export async function loadAptosWallet({ wallet: walletOpt }: { wallet?: unknown }) {
   if (typeof walletOpt !== 'string') throw new CCIPArgumentInvalidError('wallet', String(walletOpt))
-  if ((walletOpt ?? '').startsWith('ledger')) {
+  if (walletOpt.startsWith('ledger')) {
     let derivationPath = walletOpt.split(':')[1]
     if (!derivationPath) derivationPath = "m/44'/637'/0'/0'/0'"
     else if (!isNaN(Number(derivationPath))) derivationPath = `m/44'/637'/${derivationPath}'/0'/0'`

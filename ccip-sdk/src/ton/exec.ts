@@ -1,4 +1,4 @@
-import { beginCell } from '@ton/core'
+import { type Cell, beginCell } from '@ton/core'
 
 import type { ExecutionReport } from '../types.ts'
 import {
@@ -19,10 +19,7 @@ export function generateUnsignedExecuteReport(
   offRamp: string,
   execReport: ExecutionReport<CCIPMessage_V1_6_TON>,
   opts?: { gasLimit?: number },
-): {
-  to: string
-  body: ReturnType<typeof beginCell>['endCell'] extends () => infer R ? R : never
-} {
+): { to: string; body: Cell } {
   // Serialize the execution report
   const serializedReport = serializeExecutionReport(execReport)
 

@@ -133,7 +133,7 @@ describe('SDK Integration - Viem Node.js (http transport)', () => {
     })
 
     assert.ok(client)
-    assert.equal(client.chain?.id, 1)
+    assert.equal(client.chain.id, 1)
   })
 
   it('should create WalletClient with local account', () => {
@@ -148,7 +148,7 @@ describe('SDK Integration - Viem Node.js (http transport)', () => {
     })
 
     assert.ok(walletClient.account)
-    assert.equal(walletClient.chain?.id, 1)
+    assert.equal(walletClient.chain.id, 1)
   })
 
   it('should create signer from viemWallet with local account', async () => {
@@ -210,7 +210,7 @@ describe('ViemTransportProvider', () => {
     })
 
     assert.equal(results.length, 1)
-    assert.ok('result' in results[0])
+    assert.ok('result' in results[0]!)
   })
 
   it('should handle batched requests', async () => {
@@ -227,8 +227,8 @@ describe('ViemTransportProvider', () => {
     ])
 
     assert.equal(results.length, 2)
-    assert.ok('result' in results[0])
-    assert.ok('result' in results[1])
+    assert.ok('result' in results[0]!)
+    assert.ok('result' in results[1]!)
   })
 
   it('should work as ethers provider for basic operations', async () => {

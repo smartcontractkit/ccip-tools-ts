@@ -108,14 +108,14 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
     // Track program calls and returns to maintain the address stack
     let match
     if ((match = log.match(/^Program (\w+) invoke\b/))) {
-      programStack.push(match[1])
+      programStack.push(match[1]!)
     } else if ((match = log.match(/^Program (\w+) (success|failed)\b/))) {
       // Pop from stack when program returns
       programStack.pop()
     } else if ((match = log.match(/^Program (log|data): /))) {
       // Extract the actual log data
       const logData = log.slice(match[0].length)
-      const currentProgram = programStack[programStack.length - 1]
+      const currentProgram = programStack[programStack.length - 1]!
       let topics: string[] = []
 
       if (log.startsWith('Program data: ')) {
@@ -156,13 +156,13 @@ export function getErrorFromLogs(
   if (logs_.every((l) => typeof l === 'string')) logs = parseSolanaLogs(logs_)
   else logs = logs_
 
-  const lastLog = logs[logs.length - 1]
+  const lastLog = logs[logs.length - 1]!
   // collect all logs from the last program execution (the one which failed)
   const lastProgramLogs = logs
     .reduceRight(
       (acc, l) =>
         // if acc is empty (i.e. on last log), or it is emitted by the same program and not a Program data:
-        !acc.length || (l.address === acc[0].address && !l.topics?.length) ? [l, ...acc] : acc,
+        !acc.length || (l.address === acc[0]!.address && !l.topics.length) ? [l, ...acc] : acc,
       [] as Pick<Log_, 'address' | 'index' | 'data'>[],
     )
     .map(({ data }) => data as string)

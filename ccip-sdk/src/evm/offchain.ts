@@ -40,7 +40,7 @@ export async function fetchEVMOffchainTokenData(
   // any USDC logs after that and before our CCIPSendRequested
   const prevCcipRequestIdx =
     request.tx.logs.find(
-      ({ topics, index }) => topics[0] in requestsFragments && index < request.log.index,
+      ({ topics, index }) => topics[0]! in requestsFragments && index < request.log.index,
     )?.index ?? -1
   const usdcRequestLogs = request.tx.logs.filter(
     ({ index }) => prevCcipRequestIdx < index && index < request.log.index,
@@ -118,8 +118,9 @@ async function getUsdcTokenData(
     const poolLog = arr[i + 2]
     if (
       log.topics[0] !== USDC_EVENT.topicHash ||
-      transferLog?.topics?.[0] !== TRANSFER_EVENT.topicHash ||
-      !BURNED_EVENT_TOPIC_HASHES.has(poolLog?.topics?.[0])
+      transferLog?.topics[0] !== TRANSFER_EVENT.topicHash ||
+      !poolLog?.topics.length ||
+      !BURNED_EVENT_TOPIC_HASHES.has(poolLog.topics[0]!)
     ) {
       return acc
     }
@@ -179,7 +180,7 @@ async function getLbtcTokenData(
 ): Promise<OffchainTokenData[]> {
   const lbtcDepositHashes = new Set(
     allLogsInRequest
-      .filter(({ topics }) => LBTC_EVENTS_HASHES.has(topics[0]))
+      .filter(({ topics }) => LBTC_EVENTS_HASHES.has(topics[0]!))
       .map(({ topics }) => topics[3]),
   )
   return Promise.all(

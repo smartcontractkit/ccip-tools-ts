@@ -133,7 +133,7 @@ export const networkInfo = memoize(function networkInfo_(
     typeof selectorOrIdOrName === 'string' &&
     (match = selectorOrIdOrName.match(/^(-?\d+)n?$/))
   ) {
-    selectorOrIdOrName = BigInt(match[1])
+    selectorOrIdOrName = BigInt(match[1]!)
   }
   if (typeof selectorOrIdOrName === 'bigint') {
     // maybe we got a chainId deserialized as bigint
@@ -141,7 +141,7 @@ export const networkInfo = memoize(function networkInfo_(
       chainId = Number(selectorOrIdOrName)
     } else {
       for (const id in SELECTORS) {
-        if (SELECTORS[id].selector === selectorOrIdOrName) {
+        if (SELECTORS[id]!.selector === selectorOrIdOrName) {
           chainId = id
           break
         }
@@ -151,7 +151,7 @@ export const networkInfo = memoize(function networkInfo_(
   } else if (typeof selectorOrIdOrName === 'string') {
     if (selectorOrIdOrName.includes('-', 1)) {
       for (const id in SELECTORS) {
-        if (SELECTORS[id].name === selectorOrIdOrName) {
+        if (SELECTORS[id]!.name === selectorOrIdOrName) {
           chainId = id
           break
         }
@@ -294,9 +294,9 @@ export function isBase64(data: unknown): data is string {
  * @returns Uint8Array representation.
  */
 export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
-  if (Array.isArray(data)) {
-    return new Uint8Array(data)
-  }
+  if (Array.isArray(data)) return new Uint8Array(data)
+  if (typeof data === 'string' && data.match(/^[0-9a-f]+[a-f][0-9a-f]+$/i)) data = '0x' + data
+  else if (typeof data === 'string' && data.match(/^0X[0-9a-fA-F]+$/)) data = data.toLowerCase()
   if (isBytesLike(data)) {
     return getBytes(data)
   } else if (isBase64(data)) {
@@ -389,7 +389,7 @@ export function parseTypeAndVersion(
   if (!match) throw new CCIPTypeVersionInvalidError(typeAndVersion)
   const [, typeRaw, version] = match
   // some string normalization
-  const type = typeRaw
+  const type = typeRaw!
     .replaceAll(/-(\w)/g, (_, w: string) => w.toUpperCase()) // kebabToPascal
     .replace(/ccip/gi, 'CCIP')
     .replace(
@@ -397,59 +397,52 @@ export function parseTypeAndVersion(
       (_, o: string, n: string, ramp: string) =>
         `${o.toUpperCase()}${n.toLowerCase()}${ramp.charAt(0).toUpperCase()}${ramp.slice(1).toLowerCase()}`,
     ) // ccipOfframp -> CCIPOffRamp
-  if (!match[3]) return [type, version, typeAndVersion]
-  else return [type, version, typeAndVersion, match[3]]
+  if (!match[3]) return [type, version!, typeAndVersion]
+  else return [type, version!, typeAndVersion, match[3]]
 }
 
-/**
- * Creates a rate-limited fetch function with retry logic.
- * Configurable via maxRequests, windowMs, and maxRetries options.
- * @returns Rate-limited fetch function.
- */
-export function createRateLimitedFetch(
-  {
-    maxRequests = 40,
-    windowMs = 11e3,
-    maxRetries = 5,
-  }: { maxRequests?: number; windowMs?: number; maxRetries?: number } = {},
-  { logger = console }: WithLogger = {},
-): typeof fetch {
-  // Custom fetch implementation with retry logic and rate limiting
-  // Per-instance state
-  const requestQueue: Array<{ timestamp: number }> = []
-  const methodRateLimits: Record<
+/* eslint-disable jsdoc/require-jsdoc */
+type RateLimitOpts = { maxRequests: number; windowMs: number; maxRetries: number }
+
+class RateLimit {
+  readonly requestQueue: Array<{ timestamp: number }>
+  readonly methodRateLimits: Record<
     string,
     { limit: number; remaining: number; queue: Array<{ timestamp: number }> }
-  > = {}
-
-  const isRateLimited = (): boolean => {
-    const now = Date.now()
-    // Remove old requests outside the window
-    while (requestQueue.length > 0 && now - requestQueue[0].timestamp > windowMs) {
-      requestQueue.shift()
-    }
-    return requestQueue.length >= maxRequests
+  >
+  constructor() {
+    this.requestQueue = []
+    this.methodRateLimits = {}
   }
 
-  const isMethodRateLimited = (method: string): boolean => {
-    const methodLimit = methodRateLimits[method]
+  isRateLimited({ windowMs, maxRequests }: RateLimitOpts): boolean {
+    const now = Date.now()
+    // Remove old requests outside the window
+    while (this.requestQueue.length > 0 && now - this.requestQueue[0]!.timestamp > windowMs) {
+      this.requestQueue.shift()
+    }
+    return this.requestQueue.length >= maxRequests
+  }
+
+  isMethodRateLimited({ windowMs }: RateLimitOpts, method: string): boolean {
+    const methodLimit = this.methodRateLimits[method]
     if (!methodLimit) return false
 
     const now = Date.now()
     // Remove old requests outside the window
-    while (methodLimit.queue.length > 0 && now - methodLimit.queue[0].timestamp > windowMs) {
+    while (methodLimit.queue.length > 0 && now - methodLimit.queue[0]!.timestamp > windowMs) {
       methodLimit.queue.shift()
     }
     return methodLimit.queue.length >= methodLimit.limit
   }
 
-  const waitForRateLimit = async (method?: string): Promise<void> => {
+  async waitForRateLimit(opts: RateLimitOpts, method?: string): Promise<void> {
     // Wait for method-specific rate limit if applicable
-    if (method && methodRateLimits[method]) {
-      while (isMethodRateLimited(method)) {
-        const oldestRequest = methodRateLimits[method].queue[0]
+    if (method && this.methodRateLimits[method]) {
+      while (this.isMethodRateLimited(opts, method)) {
+        const oldestRequest = this.methodRateLimits[method].queue[0]
         if (!oldestRequest) break // Queue was cleaned, no longer rate limited
-        const waitTime = windowMs - (Date.now() - oldestRequest.timestamp)
+        const waitTime = opts.windowMs - (Date.now() - oldestRequest.timestamp)
         if (waitTime > 0) {
           await sleep(waitTime + 100) // Add small buffer
         }
@@ -457,49 +450,77 @@ export function createRateLimitedFetch(
     }
 
     // Wait for global rate limit
-    while (isRateLimited()) {
-      const oldestRequest = requestQueue[0]
+    while (this.isRateLimited(opts)) {
+      const oldestRequest = this.requestQueue[0]
       if (!oldestRequest) break // Queue was cleaned, no longer rate limited
-      const waitTime = windowMs - (Date.now() - oldestRequest.timestamp)
+      const waitTime = opts.windowMs - (Date.now() - oldestRequest.timestamp)
       if (waitTime > 0) {
         await sleep(waitTime + 100) // Add small buffer
       }
     }
   }
 
-  const recordRequest = (method?: string): void => {
+  recordRequest(method?: string): void {
     const timestamp = Date.now()
-    requestQueue.push({ timestamp })
-    if (method && methodRateLimits[method]) {
-      methodRateLimits[method].queue.push({ timestamp })
+    this.requestQueue.push({ timestamp })
+    if (method && this.methodRateLimits[method]) {
+      this.methodRateLimits[method].queue.push({ timestamp })
     }
   }
 
-  const updateMethodRateLimits = (response: Response, method?: string): void => {
+  updateMethodRateLimits(response: Response, method?: string): void {
     if (!method) return
 
     const limit = Number(response.headers.get('x-ratelimit-method-limit'))
     const remaining = Number(response.headers.get('x-ratelimit-method-remaining'))
 
     if (isNaN(limit) || isNaN(remaining)) return
-    if (!methodRateLimits[method]) {
-      methodRateLimits[method] = { limit, remaining, queue: [] }
+    if (!this.methodRateLimits[method]) {
+      this.methodRateLimits[method] = { limit, remaining, queue: [] }
     } else {
-      methodRateLimits[method].limit = limit
-      methodRateLimits[method].remaining = remaining
+      this.methodRateLimits[method].limit = limit
+      this.methodRateLimits[method].remaining = remaining
     }
   }
+}
+/* eslint-enable jsdoc/require-jsdoc */
+
+// global map per hostname
+const perHostnameRateLimits: Record<string, RateLimit> = {}
+
+/**
+ * Creates a rate-limited fetch function with retry logic.
+ * Configurable via maxRequests, windowMs, and maxRetries options.
+ * @returns Rate-limited fetch function.
+ */
+export function createRateLimitedFetch(
+  opts: Partial<RateLimitOpts> = {},
+  { logger = console }: WithLogger = {},
+): typeof fetch {
+  opts.maxRequests ??= 40
+  opts.maxRetries ??= 5
+  opts.windowMs ??= 11e3
+  const opts_ = opts as RateLimitOpts
 
   const extractMethod = (init?: RequestInit): string | undefined => {
     if (!init?.body || (typeof init.body !== 'string' && typeof init.body !== 'object')) return
     try {
-      const parsed = (typeof init.body === 'string' ? JSON.parse(init.body) : init.body) as {
-        method?: string
-      }
+      const parsed = (typeof init.body === 'string' ? JSON.parse(init.body) : init.body) as
+        | { method?: string }
+        | undefined
       if (parsed && typeof parsed.method === 'string') return parsed.method
     } catch {
       // Not JSON or no method field
     }
+  }
+
+  const extractHostname = (input: Parameters<typeof fetch>[0]): string => {
+    if (typeof input === 'string') {
+      input = new URL(input)
+    } else if (input instanceof Request) {
+      input = new URL(input.url)
+    }
+    return input.hostname
   }
 
   const isRateLimitError = (error: unknown): boolean => {
@@ -512,22 +533,32 @@ export function createRateLimitedFetch(
   return async (input, init?) => {
     let lastError: Error | null = null
     const method = extractMethod(init)
+    const hostname = extractHostname(input)
+    const rl = (perHostnameRateLimits[hostname] ??= new RateLimit())
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const body = init?.body ?? (input instanceof Request ? await input.clone().json() : undefined)
+    for (let attempt = 0; attempt <= opts_.maxRetries; attempt++) {
       try {
         // Wait for rate limit before making request
-        await waitForRateLimit(method)
-        recordRequest(method)
-        // logger.debug('__fetching', input, init?.body)
+        await rl.waitForRateLimit(opts_, method)
+        rl.recordRequest(method)
 
-        const response = await globalThis.fetch(input, init)
+        const response = await globalThis.fetch(
+          input instanceof Request ? input.clone() : input,
+          init,
+        )
 
         // Update method rate limits from response headers
-        updateMethodRateLimits(response, method)
+        rl.updateMethodRateLimits(response, method)
 
         // If response is successful, return it
         if (response.ok) {
-          logger.debug('fetched', input, response.status, init?.body)
+          logger.debug(
+            'fetched',
+            response.status,
+            body,
+            // ((await response.clone().json()) as { result: unknown })?.result,
+          )
           return response
         }
 
@@ -549,9 +580,7 @@ export function createRateLimitedFetch(
         }
 
         // Don't retry on the last attempt
-        if (attempt >= maxRetries) {
-          break
-        }
+        if (attempt >= opts_.maxRetries) break
       }
     }
 
