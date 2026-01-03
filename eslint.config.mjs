@@ -64,6 +64,20 @@ export default defineConfig(
     },
   },
   {
+    // Cross-platform portability - ban Node.js built-in modules in SDK production code
+    // SDK must work in both Node.js and browsers. See CONTRIBUTING.md "Cross-Platform Portability"
+    files: ['ccip-sdk/src/**/*.ts'],
+    ignores: ['**/*.test.ts', '**/__tests__/**', '**/__mocks__/**'],
+    rules: {
+      'import/no-nodejs-modules': [
+        'error',
+        {
+          allow: ['buffer'], // Allowed because we explicitly import { Buffer } from 'buffer'
+        },
+      ],
+    },
+  },
+  {
     // Ban cli imports from @chainlink/ccip-sdk modules other than /src/index.ts
     files: ['ccip-cli/src/**/*.ts'],
     rules: {

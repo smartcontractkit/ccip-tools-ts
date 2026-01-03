@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { toHex } from '@mysten/bcs'
 import { type SuiTransactionBlockResponse, SuiClient } from '@mysten/sui/client'
 import type { Keypair } from '@mysten/sui/cryptography'

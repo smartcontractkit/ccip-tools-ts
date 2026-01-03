@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { bcs } from '@mysten/sui/bcs'
 import type { SuiClient } from '@mysten/sui/client'
 import { Transaction } from '@mysten/sui/transactions'

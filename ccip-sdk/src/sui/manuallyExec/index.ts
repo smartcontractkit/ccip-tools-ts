@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { Transaction } from '@mysten/sui/transactions'
 
 import { serializeExecutionReport } from './encoder.ts'

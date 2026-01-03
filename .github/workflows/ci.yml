@@ -28,6 +28,16 @@ jobs:
     - name: Run lint
       run: npm run check
 
+    - name: Validate package exports
+      working-directory: ccip-sdk
+      run: |
+        # publint - check package.json exports and module format
+        npx publint
+
+        # attw - check TypeScript types resolution (informational)
+        # Note: CJS resolution warnings are expected for ESM-only packages
+        npx @arethetypeswrong/cli --pack . --profile esm-only || true
+
     - name: Run tests with coverage
       run: |
         set -o pipefail
