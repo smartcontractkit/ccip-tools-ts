@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { bcs } from '@mysten/sui/bcs'
 import type { BytesLike } from 'ethers'
 

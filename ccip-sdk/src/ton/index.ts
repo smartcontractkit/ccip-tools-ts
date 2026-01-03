@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { type Transaction, Address, Cell, beginCell, toNano } from '@ton/core'
 import { TonClient } from '@ton/ton'
 import { type AxiosAdapter, getAdapter } from 'axios'

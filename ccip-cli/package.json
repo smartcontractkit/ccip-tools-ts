@@ -4,7 +4,10 @@
   "description": "CCIP Command Line Interface, based on @chainlink/ccip-sdk",
   "author": "Chainlink devs",
   "license": "MIT",
-  "repository": "git://github.com/smartcontractkit/ccip-tools-ts.git",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smartcontractkit/ccip-tools-ts.git"
+  },
   "type": "module",
   "bin": "dist/index.js",
   "scripts": {

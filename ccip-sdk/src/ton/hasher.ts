@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { type Cell, Address, beginCell } from '@ton/core'
 import { sha256, toBigInt } from 'ethers'
 
