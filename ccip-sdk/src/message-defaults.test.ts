@@ -11,8 +11,8 @@ describe('getDefaultExtraArgs', () => {
     it('should return EVMExtraArgsV2 with gasLimit=0 and allowOutOfOrderExecution=true', () => {
       const result = getDefaultExtraArgs(ChainFamily.EVM, receiver)
 
-      assert.equal(result.gasLimit, 0n)
-      assert.equal(result.allowOutOfOrderExecution, true)
+      assert.equal((result as { gasLimit: bigint }).gasLimit, 0n)
+      assert.equal((result as { allowOutOfOrderExecution: boolean }).allowOutOfOrderExecution, true)
       assert.equal('computeUnits' in result, false)
       assert.equal('tokenReceiver' in result, false)
     })
@@ -42,8 +42,8 @@ describe('getDefaultExtraArgs', () => {
     it('should return EVMExtraArgsV2 with gasLimit=0 and allowOutOfOrderExecution=true', () => {
       const result = getDefaultExtraArgs(ChainFamily.Aptos, receiver)
 
-      assert.equal(result.gasLimit, 0n)
-      assert.equal(result.allowOutOfOrderExecution, true)
+      assert.equal((result as { gasLimit: bigint }).gasLimit, 0n)
+      assert.equal((result as { allowOutOfOrderExecution: boolean }).allowOutOfOrderExecution, true)
       assert.equal('computeUnits' in result, false)
       assert.equal('tokenReceiver' in result, false)
     })
@@ -53,8 +53,8 @@ describe('getDefaultExtraArgs', () => {
     it('should return SuiExtraArgsV1 with tokenReceiver set to receiver', () => {
       const result = getDefaultExtraArgs(ChainFamily.Sui, receiver)
 
-      assert.equal(result.gasLimit, 0n)
-      assert.equal(result.allowOutOfOrderExecution, true)
+      assert.equal((result as { gasLimit: bigint }).gasLimit, 0n)
+      assert.equal((result as { allowOutOfOrderExecution: boolean }).allowOutOfOrderExecution, true)
       assert.equal((result as { tokenReceiver: string }).tokenReceiver, receiver)
       assert.deepEqual((result as { receiverObjectIds: string[] }).receiverObjectIds, [])
     })
@@ -71,8 +71,8 @@ describe('getDefaultExtraArgs', () => {
     it('should return EVMExtraArgsV2 with gasLimit=0 and allowOutOfOrderExecution=true', () => {
       const result = getDefaultExtraArgs(ChainFamily.TON, receiver)
 
-      assert.equal(result.gasLimit, 0n)
-      assert.equal(result.allowOutOfOrderExecution, true)
+      assert.equal((result as { gasLimit: bigint }).gasLimit, 0n)
+      assert.equal((result as { allowOutOfOrderExecution: boolean }).allowOutOfOrderExecution, true)
       assert.equal('computeUnits' in result, false)
       assert.equal('tokenReceiver' in result, false)
     })

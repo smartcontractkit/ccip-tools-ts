@@ -88,8 +88,11 @@ describe('normalizeMessage', () => {
       it('should apply EVM defaults for extraArgs', () => {
         const result = normalizeMessage(tokenMsg, selector('ethereum-mainnet'))
 
-        assert.equal(result.extraArgs.gasLimit, 0n)
-        assert.equal(result.extraArgs.allowOutOfOrderExecution, true)
+        assert.equal((result.extraArgs as { gasLimit: bigint }).gasLimit, 0n)
+        assert.equal(
+          (result.extraArgs as { allowOutOfOrderExecution: boolean }).allowOutOfOrderExecution,
+          true,
+        )
         assert.equal('computeUnits' in result.extraArgs, false)
       })
     })
@@ -98,7 +101,10 @@ describe('normalizeMessage', () => {
       it('should apply Solana defaults with tokenReceiver', () => {
         const result = normalizeMessage(tokenMsg, selector('solana-mainnet'))
 
-        assert.equal(result.extraArgs.allowOutOfOrderExecution, true)
+        assert.equal(
+          (result.extraArgs as { allowOutOfOrderExecution: boolean }).allowOutOfOrderExecution,
+          true,
+        )
         assert.equal('computeUnits' in result.extraArgs, true)
         assert.equal(
           (result.extraArgs as { tokenReceiver: string }).tokenReceiver,
@@ -111,8 +117,11 @@ describe('normalizeMessage', () => {
       it('should apply Aptos defaults for extraArgs', () => {
         const result = normalizeMessage(tokenMsg, selector('aptos-mainnet'))
 
-        assert.equal(result.extraArgs.gasLimit, 0n)
-        assert.equal(result.extraArgs.allowOutOfOrderExecution, true)
+        assert.equal((result.extraArgs as { gasLimit: bigint }).gasLimit, 0n)
+        assert.equal(
+          (result.extraArgs as { allowOutOfOrderExecution: boolean }).allowOutOfOrderExecution,
+          true,
+        )
       })
     })
 
@@ -120,8 +129,11 @@ describe('normalizeMessage', () => {
       it('should apply Sui defaults with tokenReceiver', () => {
         const result = normalizeMessage(tokenMsg, selector('sui-mainnet'))
 
-        assert.equal(result.extraArgs.gasLimit, 0n)
-        assert.equal(result.extraArgs.allowOutOfOrderExecution, true)
+        assert.equal((result.extraArgs as { gasLimit: bigint }).gasLimit, 0n)
+        assert.equal(
+          (result.extraArgs as { allowOutOfOrderExecution: boolean }).allowOutOfOrderExecution,
+          true,
+        )
         assert.equal(
           (result.extraArgs as { tokenReceiver: string }).tokenReceiver,
           tokenMsg.receiver,
@@ -133,8 +145,11 @@ describe('normalizeMessage', () => {
       it('should apply TON defaults for extraArgs', () => {
         const result = normalizeMessage(tokenMsg, selector('ton-mainnet'))
 
-        assert.equal(result.extraArgs.gasLimit, 0n)
-        assert.equal(result.extraArgs.allowOutOfOrderExecution, true)
+        assert.equal((result.extraArgs as { gasLimit: bigint }).gasLimit, 0n)
+        assert.equal(
+          (result.extraArgs as { allowOutOfOrderExecution: boolean }).allowOutOfOrderExecution,
+          true,
+        )
       })
     })
   })
