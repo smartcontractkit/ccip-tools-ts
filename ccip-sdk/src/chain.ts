@@ -19,10 +19,10 @@ import type {
   SuiExtraArgsV1,
 } from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
+import type { MessageInput } from './message.ts'
 import type { UnsignedSolanaTx } from './solana/types.ts'
 import type { UnsignedTONTx } from './ton/types.ts'
 import {
-  type AnyMessage,
   type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
@@ -153,15 +153,50 @@ export type UnsignedTx = {
 }
 
 /**
- * Common options for [[generateUnsignedSendMessage]] and [[sendMessage]] Chain methods
+ * Common options for [[generateUnsignedSendMessage]] and [[sendMessage]] Chain methods.
+ *
+ * Accepts both simplified `tokenTransfer()` and full `message()` formats.
+ *
+ * @example Token transfer (simplified)
+ * ```typescript
+ * import { tokenTransfer } from '@chainlink/ccip-sdk'
+ *
+ * await chain.sendMessage({
+ *   router: '0x...',
+ *   destChainSelector: 4949039107694359620n,
+ *   message: tokenTransfer({
+ *     receiver: '0x...',
+ *     token: usdcAddress,
+ *     amount: 1_000_000n,
+ *   }),
+ *   wallet: signer,
+ * })
+ * ```
+ *
+ * @example Full message (complete control)
+ * ```typescript
+ * import { message } from '@chainlink/ccip-sdk'
+ *
+ * await chain.sendMessage({
+ *   router: '0x...',
+ *   destChainSelector: 4949039107694359620n,
+ *   message: message({
+ *     receiver: '0x...',
+ *     data: '0x1234',
+ *     extraArgs: { gasLimit: 500_000n, allowOutOfOrderExecution: true },
+ *     tokenAmounts: [{ token: usdcAddress, amount: 1_000_000n }],
+ *   }),
+ *   wallet: signer,
+ * })
+ * ```
  */
 export type SendMessageOpts = {
   /** Router address on this chain */
   router: string
   /** Destination network selector. */
   destChainSelector: bigint
-  /** Message to send. If `fee` is omitted, it'll be calculated */
-  message: AnyMessage & { fee?: bigint }
+  /** Message to send. Accepts tokenTransfer() or message() factory outputs. If `fee` is omitted, it'll be calculated. */
+  message: MessageInput & { fee?: bigint }
   /** Approve the maximum amount of tokens to transfer */
   approveMax?: boolean
 }

@@ -57,6 +57,7 @@ import {
   isAptosAccount,
 } from './types.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { normalizeMessage } from '../message-normalizer.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type CCIPExecution,
@@ -530,7 +531,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     destChainSelector,
     message,
   }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    return getFee(this.provider, router, destChainSelector, message)
+    const msg = normalizeMessage(message, destChainSelector)
+    return getFee(this.provider, router, destChainSelector, msg)
   }
 
   /** {@inheritDoc Chain.generateUnsignedSendMessage} */
@@ -538,13 +540,19 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedAptosTx> {
     const { sender, router, destChainSelector, message } = opts
-    if (!message.fee) message.fee = await this.getFee(opts)
+
+    const msg = normalizeMessage(message, destChainSelector)
+    const fee = 'fee' in message ? message.fee : undefined
+
+    if (!fee) msg.fee = await this.getFee({ router, destChainSelector, message: msg })
+    else msg.fee = fee
+
     const tx = await generateUnsignedCcipSend(
       this.provider,
       sender,
       router,
       destChainSelector,
-      message as SetRequired<typeof message, 'fee'>,
+      msg as SetRequired<typeof msg, 'fee'>,
       opts,
     )
     return {
