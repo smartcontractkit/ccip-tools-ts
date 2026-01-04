@@ -62,6 +62,7 @@ import {
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { normalizeMessage } from '../message-normalizer.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type CCIPExecution,
@@ -960,17 +961,19 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     destChainSelector,
     message,
   }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+    const msg = normalizeMessage(message, destChainSelector)
+
     const contract = new Contract(
       router,
       interfaces.Router,
       this.provider,
     ) as unknown as TypedContract<typeof Router_ABI>
     return contract.getFee(destChainSelector, {
-      receiver: zeroPadValue(getAddressBytes(message.receiver), 32),
-      data: hexlify(message.data),
-      tokenAmounts: message.tokenAmounts ?? [],
-      feeToken: message.feeToken ?? ZeroAddress,
-      extraArgs: hexlify((this.constructor as typeof EVMChain).encodeExtraArgs(message.extraArgs)),
+      receiver: zeroPadValue(getAddressBytes(msg.receiver), 32),
+      data: hexlify(msg.data),
+      tokenAmounts: msg.tokenAmounts ?? [],
+      feeToken: msg.feeToken ?? ZeroAddress,
+      extraArgs: hexlify((this.constructor as typeof EVMChain).encodeExtraArgs(msg.extraArgs)),
     })
   }
 
@@ -983,21 +986,25 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedEVMTx> {
     const { sender, router, destChainSelector, message } = opts
-    if (!message.fee) message.fee = await this.getFee(opts)
-    const feeToken = message.feeToken ?? ZeroAddress
-    const receiver = zeroPadValue(getAddressBytes(message.receiver), 32)
-    const data = hexlify(message.data)
-    const extraArgs = hexlify(
-      (this.constructor as typeof EVMChain).encodeExtraArgs(message.extraArgs),
-    )
+
+    const msg = normalizeMessage(message, destChainSelector)
+    const fee = 'fee' in message ? message.fee : undefined
+
+    if (!fee) msg.fee = await this.getFee({ router, destChainSelector, message: msg })
+    else msg.fee = fee
+
+    const feeToken = msg.feeToken ?? ZeroAddress
+    const receiver = zeroPadValue(getAddressBytes(msg.receiver), 32)
+    const data = hexlify(msg.data)
+    const extraArgs = hexlify((this.constructor as typeof EVMChain).encodeExtraArgs(msg.extraArgs))
 
     // make sure to approve once per token, for the total amount (including fee, if needed)
-    const amountsToApprove = (message.tokenAmounts ?? []).reduce(
+    const amountsToApprove = (msg.tokenAmounts ?? []).reduce(
       (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
       {} as { [token: string]: bigint },
     )
     if (feeToken !== ZeroAddress)
-      amountsToApprove[feeToken] = (amountsToApprove[feeToken] ?? 0n) + message.fee
+      amountsToApprove[feeToken] = (amountsToApprove[feeToken] ?? 0n) + msg.fee
 
     const approveTxs = (
       await Promise.all(
@@ -1025,14 +1032,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       {
         receiver,
         data,
-        tokenAmounts: message.tokenAmounts ?? [],
+        tokenAmounts: msg.tokenAmounts ?? [],
         extraArgs,
         feeToken,
       },
       {
         from: sender,
         // if native fee, include it in value; otherwise, it's transferedFrom feeToken
-        ...(feeToken === ZeroAddress && { value: message.fee }),
+        ...(feeToken === ZeroAddress && { value: msg.fee }),
       },
     )
     const txRequests = [...approveTxs, sendTx] as SetRequired<typeof sendTx, 'from'>[]

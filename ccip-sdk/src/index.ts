@@ -8,9 +8,20 @@ export type {
   ChainStatic,
   LogFilter,
   RateLimiterState,
+  SendMessageOpts,
   TokenInfo,
   TokenPoolRemote,
 } from './chain.ts'
+
+// Message types and factory functions
+export type {
+  FullMessage,
+  FullMessageParams,
+  MessageInput,
+  TokenTransferMessage,
+  TokenTransferParams,
+} from './message.ts'
+export { isFullMessage, isTokenTransfer, message, tokenTransfer } from './message.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
 export {
   type EVMExtraArgsV1,

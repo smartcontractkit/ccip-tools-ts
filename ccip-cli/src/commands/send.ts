@@ -1,9 +1,9 @@
 import {
-  type AnyMessage,
   type CCIPVersion,
   type ChainStatic,
   type EVMChain,
   type ExtraArgs,
+  type FullMessage,
   CCIPArgumentInvalidError,
   CCIPChainFamilyUnsupportedError,
   CCIPTokenNotFoundError,
@@ -287,7 +287,8 @@ async function sendMessage(
     feeTokenInfo = await source.getTokenInfo(nativeToken)
   }
 
-  const message: AnyMessage = {
+  const message: FullMessage = {
+    kind: 'full' as const,
     receiver,
     data,
     extraArgs: extraArgs as ExtraArgs,

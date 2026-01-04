@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: Simplified token transfer API - `tokenTransfer()` factory for single-token transfers without manual `extraArgs`/`data` configuration
 - SDK: Browser compatibility - explicit `buffer` dependency and imports for cross-platform support
 - CI: Added `publint` and `@arethetypeswrong/cli` validation for package exports
 - ESLint: `import/no-nodejs-modules` rule prevents Node.js-only imports in SDK

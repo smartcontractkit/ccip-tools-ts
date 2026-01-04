@@ -61,6 +61,7 @@ import {
 } from '../errors/index.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { normalizeMessage } from '../message-normalizer.ts'
 import SELECTORS from '../selectors.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -976,7 +977,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /** {@inheritDoc Chain.getFee} */
   getFee({ router, destChainSelector, message }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    return getFee(this, router, destChainSelector, message)
+    const msg = normalizeMessage(message, destChainSelector)
+    return getFee(this, router, destChainSelector, msg)
   }
 
   /**
@@ -989,13 +991,19 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedSolanaTx> {
     const { sender, router, destChainSelector, message } = opts
-    if (!message.fee) message.fee = await this.getFee(opts)
+
+    const msg = normalizeMessage(message, destChainSelector)
+    const fee = 'fee' in message ? message.fee : undefined
+
+    if (!fee) msg.fee = await this.getFee({ router, destChainSelector, message: msg })
+    else msg.fee = fee
+
     return generateUnsignedCcipSend(
       this,
       new PublicKey(sender),
       new PublicKey(router),
       destChainSelector,
-      message as SetRequired<typeof message, 'fee'>,
+      msg as SetRequired<typeof msg, 'fee'>,
       opts,
     )
   }
