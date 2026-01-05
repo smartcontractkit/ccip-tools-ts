@@ -1,19 +1,23 @@
-import type {
-  APIErrorResponse,
-  APICCIPRequest,
-  LaneLatencyResponse,
-  RawLaneLatencyResponse,
-  RawMessageResponse,
-} from './types.ts'
 import {
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
 } from '../errors/index.ts'
+import type { EVMExtraArgsV2, SVMExtraArgsV1 } from '../extra-args.ts'
 import { HttpStatus } from '../http-status.ts'
-import { CCIPVersion, type Logger, type MessageStatus, type WithLogger } from '../types.ts'
+import { type Logger, type MessageStatus, type WithLogger, CCIPVersion } from '../types.ts'
+import type {
+  APICCIPRequest,
+  APIErrorResponse,
+  LaneLatencyResponse,
+  RawEVMExtraArgs,
+  RawLaneLatencyResponse,
+  RawMessageResponse,
+  RawSVMExtraArgs,
+  RawTokenAmount,
+} from './types.ts'
 
-export type { APIErrorResponse, APICCIPRequest, LaneLatencyResponse } from './types.ts'
+export type { APICCIPRequest, APIErrorResponse, LaneLatencyResponse } from './types.ts'
 
 /**
  * Parses API version string to CCIPVersion enum.
@@ -32,6 +36,50 @@ function parseVersion(version: string | null | undefined): CCIPVersion | undefin
     default:
       return undefined
   }
+}
+
+/**
+ * Type guard to distinguish SVM extra args from EVM extra args.
+ * @param args - Raw extra args from API response
+ * @returns true if args is RawSVMExtraArgs
+ */
+function isRawSVMExtraArgs(args: RawEVMExtraArgs | RawSVMExtraArgs): args is RawSVMExtraArgs {
+  return 'computeUnits' in args
+}
+
+/**
+ * Transforms raw API extra args to SDK extra args types.
+ * @param raw - Raw extra args from API response
+ * @returns EVMExtraArgsV2 or SVMExtraArgsV1
+ */
+function transformExtraArgs(
+  raw: RawEVMExtraArgs | RawSVMExtraArgs,
+): EVMExtraArgsV2 | SVMExtraArgsV1 {
+  if (isRawSVMExtraArgs(raw)) {
+    return {
+      computeUnits: BigInt(raw.computeUnits),
+      accountIsWritableBitmap: BigInt(raw.accountIsWritableBitmap),
+      allowOutOfOrderExecution: raw.allowOutOfOrderExecution,
+      tokenReceiver: raw.tokenReceiver,
+      accounts: raw.accounts,
+    }
+  }
+  return {
+    gasLimit: BigInt(raw.gasLimit),
+    allowOutOfOrderExecution: raw.allowOutOfOrderExecution,
+  }
+}
+
+/**
+ * Transforms raw API token amounts to SDK token amounts format.
+ * @param raw - Raw token amounts from API response
+ * @returns Array of token amounts with bigint amounts
+ */
+function transformTokenAmounts(raw: RawTokenAmount[]): { token: string; amount: bigint }[] {
+  return raw.map((ta) => ({
+    token: ta.tokenAddress,
+    amount: BigInt(ta.amount),
+  }))
 }
 
 /** Default CCIP API base URL */
@@ -284,7 +332,7 @@ export class CCIPAPIClient {
       ? Math.floor(new Date(raw.receiptTimestamp).getTime() / 1000)
       : undefined
 
-    // Build lane - all fields available from API (Lane type is complete)
+    // Build lane - all fields available from API 
     const lane = {
       sourceChainSelector: BigInt(raw.sourceNetworkInfo.chainSelector),
       destChainSelector: BigInt(raw.destNetworkInfo.chainSelector),
@@ -292,9 +340,7 @@ export class CCIPAPIClient {
       version: parseVersion(raw.version) ?? CCIPVersion.V1_6,
     }
 
-    // Build partial message - populate what we can from API
-    // Note: This is partial - CCIPMessage has more fields (tokenAmounts, extraArgs, etc.)
-    // that aren't available from the API in the same format
+    // Build message with extraArgs spread and tokenAmounts included
     const message = {
       messageId: raw.messageId,
       sender: raw.sender,
@@ -304,9 +350,11 @@ export class CCIPAPIClient {
       nonce: raw.nonce ? BigInt(raw.nonce) : 0n,
       feeToken: raw.fees?.tokenAddress ?? '',
       feeTokenAmount: raw.fees?.totalAmount ? BigInt(raw.fees.totalAmount) : 0n,
+      tokenAmounts: transformTokenAmounts(raw.tokenAmounts),
+      ...transformExtraArgs(raw.extraArgs),
     }
 
-    // Build partial log - only transactionHash and address are available from API
+    // Build log and address - only transactionHash and address are available from API
     // (topics, index, blockNumber, data not available)
     const log = {
       transactionHash: raw.sendTransactionHash,
@@ -326,7 +374,7 @@ export class CCIPAPIClient {
     return {
       // CCIPRequest fields (Partial) - cast partial objects
       lane,
-      message: message as APICCIPRequest['message'],
+      message: message as unknown as APICCIPRequest['message'],
       log: log as APICCIPRequest['log'],
       tx: tx as APICCIPRequest['tx'],
       // API-specific fields

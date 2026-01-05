@@ -87,7 +87,7 @@ export type RawFees = {
   fixedFeesDetails?: RawFixedFee[]
 }
 
-/** Raw API response from GET /v1/messages/{messageId} */
+/** Raw API response from GET /v1/messages/:messageId */
 export type RawMessageResponse = {
   messageId: string
   sender: string
@@ -125,7 +125,8 @@ export type RawMessageResponse = {
  *
  * Fields populated from API:
  * - lane: sourceChainSelector, destChainSelector, onRamp, version (all available)
- * - message: messageId, sender, receiver, data, sequenceNumber, nonce (partial - tokenAmounts format differs)
+ * - message: messageId, sender, receiver, data, sequenceNumber, nonce, tokenAmounts,
+ *   plus extraArgs fields (gasLimit, allowOutOfOrderExecution for EVM; SVM fields for Solana)
  * - log: transactionHash, address (partial - topics, index, blockNumber not available)
  * - tx: hash, timestamp, from (partial - logs, blockNumber not available)
  *

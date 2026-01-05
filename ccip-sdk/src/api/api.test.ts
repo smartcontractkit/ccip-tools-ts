@@ -9,8 +9,8 @@ import {
   CCIPMessageIdNotFoundError,
   HttpStatus,
 } from '../errors/index.ts'
-import { CCIPVersion } from '../types.ts'
 import { EVMChain } from '../evm/index.ts'
+import { CCIPVersion } from '../types.ts'
 
 const origFetch = globalThis.fetch
 
@@ -506,6 +506,103 @@ describe('CCIPAPIClient', () => {
       const lastCall = debugFn.mock.calls[1] as unknown as { arguments: unknown[] }
       assert.equal(lastCall.arguments[0], 'getMessageById raw response:')
       assert.ok(lastCall.arguments[1])
+    })
+
+    it('should parse EVM extraArgs correctly', async () => {
+      const response = {
+        ...mockMessageResponse,
+        extraArgs: { gasLimit: '500000', allowOutOfOrderExecution: true },
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(response),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageById('0x1234...')
+
+      // ExtraArgs fields are spread onto message
+      const msg = result.message as Record<string, unknown>
+      assert.ok(!('computeUnits' in msg))
+      assert.ok('gasLimit' in msg)
+      assert.equal(msg.gasLimit, 500000n)
+      assert.equal(msg.allowOutOfOrderExecution, true)
+    })
+
+    it('should parse SVM extraArgs correctly', async () => {
+      const response = {
+        ...mockMessageResponse,
+        extraArgs: {
+          computeUnits: 200000,
+          accountIsWritableBitmap: '255',
+          allowOutOfOrderExecution: false,
+          tokenReceiver: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+          accounts: ['Account1', 'Account2'],
+        },
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(response),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageById('0x1234...')
+
+      // SVM extraArgs fields are spread onto message
+      const msg = result.message as Record<string, unknown>
+      assert.ok('computeUnits' in msg)
+      assert.equal(msg.computeUnits, 200000n)
+      assert.equal(msg.accountIsWritableBitmap, 255n)
+      assert.equal(msg.allowOutOfOrderExecution, false)
+      assert.equal(msg.tokenReceiver, 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+      assert.deepEqual(msg.accounts, ['Account1', 'Account2'])
+    })
+
+    it('should parse tokenAmounts correctly', async () => {
+      const response = {
+        ...mockMessageResponse,
+        tokenAmounts: [
+          { tokenAddress: '0xToken1', amount: '1000000000000000000' },
+          { tokenAddress: '0xToken2', amount: '2500000' },
+        ],
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(response),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageById('0x1234...')
+
+      // tokenAmounts is on message
+      const msg = result.message as unknown as { tokenAmounts: { token: string; amount: bigint }[] }
+      assert.equal(msg.tokenAmounts.length, 2)
+      assert.equal(msg.tokenAmounts[0]!.token, '0xToken1')
+      assert.equal(msg.tokenAmounts[0]!.amount, 1000000000000000000n)
+      assert.equal(msg.tokenAmounts[1]!.token, '0xToken2')
+      assert.equal(msg.tokenAmounts[1]!.amount, 2500000n)
+    })
+
+    it('should handle empty tokenAmounts', async () => {
+      const response = {
+        ...mockMessageResponse,
+        tokenAmounts: [],
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(response),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageById('0x1234...')
+
+      // tokenAmounts is on message
+      const msg = result.message as unknown as { tokenAmounts: { token: string; amount: bigint }[] }
+      assert.equal(msg.tokenAmounts.length, 0)
     })
   })
 })

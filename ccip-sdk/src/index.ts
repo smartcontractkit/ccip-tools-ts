@@ -1,6 +1,6 @@
 export type {
-  APIErrorResponse,
   APICCIPRequest,
+  APIErrorResponse,
   CCIPAPIClientContext,
   LaneLatencyResponse,
 } from './api/index.ts'
