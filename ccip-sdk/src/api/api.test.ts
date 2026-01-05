@@ -6,8 +6,10 @@ import {
   CCIPApiClientNotAvailableError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
+  CCIPMessageIdNotFoundError,
   HttpStatus,
 } from '../errors/index.ts'
+import { CCIPVersion } from '../types.ts'
 import { EVMChain } from '../evm/index.ts'
 
 const origFetch = globalThis.fetch
@@ -249,6 +251,261 @@ describe('CCIPAPIClient', () => {
           err.context.status === HttpStatus.BAD_REQUEST &&
           err.context.apiErrorCode === 'INVALID_PARAMETERS',
       )
+    })
+  })
+
+  describe('getMessageById', () => {
+    const mockMessageResponse = {
+      messageId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      sender: '0x742d35Cc6634C0532925a3b8D5c8C22C5B2D8a3E',
+      receiver: '0x893F0bCaa7F325c2b6bBd2133536f4e4b8fea88e',
+      status: 'SUCCESS',
+      sourceNetworkInfo: {
+        name: 'ethereum-mainnet',
+        chainSelector: '5009297550715157269',
+        chainId: '1',
+        chainFamily: 'EVM',
+      },
+      destNetworkInfo: {
+        name: 'arbitrum-mainnet',
+        chainSelector: '4949039107694359620',
+        chainId: '42161',
+        chainFamily: 'EVM',
+      },
+      sendTransactionHash: '0x9428debf5e5f01234567890abcdef1234567890abcdef1234567890abcdef12',
+      sendTimestamp: '2023-12-01T10:30:00Z',
+      tokenAmounts: [
+        { tokenAddress: '0xA0b86a8B5b6E8e0A09C4c3Dc7dE6e69e1e2d3f4a', amount: '1000000' },
+      ],
+      extraArgs: { gasLimit: '400000', allowOutOfOrderExecution: false },
+      readyForManualExecution: false,
+      finality: 0,
+      fees: { tokenAddress: '0xFeeTokenAddress', totalAmount: '5000000' },
+      version: '1.6.0',
+      onramp: '0x1234567890abcdef1234567890abcdef12345678',
+      origin: '0x742d35Cc6634C0532925a3b8D5c8C22C5B2D8a3E',
+      sequenceNumber: '67890',
+      nonce: '12345',
+      receiptTransactionHash: '0xReceipt1234567890abcdef1234567890abcdef1234567890abcdef12345678',
+      receiptTimestamp: '2023-12-01T10:45:00Z',
+      deliveryTime: 900000,
+      data: '0xabcdef',
+    }
+
+    it('should fetch message by ID with correct URL', async () => {
+      const messageId = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockMessageResponse),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      await client.getMessageById(messageId)
+
+      const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.includes('/v1/messages/'))
+      assert.ok(url.includes(messageId))
+    })
+
+    it('should return APICCIPRequest with parsed fields', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockMessageResponse),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageById('0x1234...')
+
+      // Lane
+      assert.equal(result.lane?.sourceChainSelector, 5009297550715157269n)
+      assert.equal(result.lane?.destChainSelector, 4949039107694359620n)
+      assert.equal(result.lane?.version, CCIPVersion.V1_6)
+      assert.equal(result.lane?.onRamp, mockMessageResponse.onramp)
+
+      // Message
+      assert.equal(result.message?.messageId, mockMessageResponse.messageId)
+      assert.equal(result.message?.sender, mockMessageResponse.sender)
+      assert.equal(result.message?.sequenceNumber, 67890n)
+      assert.equal(result.message?.nonce, 12345n)
+
+      // TX
+      assert.equal(result.tx?.hash, mockMessageResponse.sendTransactionHash)
+      assert.equal(result.tx?.timestamp, 1701426600) // Unix timestamp for 2023-12-01T10:30:00Z
+      assert.equal(result.tx?.from, mockMessageResponse.origin)
+
+      // Log
+      assert.equal(result.log?.transactionHash, mockMessageResponse.sendTransactionHash)
+      assert.equal(result.log?.address, mockMessageResponse.onramp)
+
+      // Status and extras
+      assert.equal(result.status, 'SUCCESS')
+      assert.equal(result.readyForManualExecution, false)
+      assert.equal(result.deliveryTime, 900000)
+      assert.equal(result.finality, 0)
+
+      // Network info
+      assert.equal(result.sourceNetworkInfo.name, 'ethereum-mainnet')
+      assert.equal(result.sourceNetworkInfo.chainSelector, 5009297550715157269n)
+      assert.equal(result.destNetworkInfo.name, 'arbitrum-mainnet')
+    })
+
+    it('should throw CCIPMessageIdNotFoundError on 404', async () => {
+      const errorResponse = { error: 'NOT_FOUND', message: 'Message not found' }
+      globalThis.fetch = (() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.NOT_FOUND,
+          statusText: 'Not Found',
+          json: () => Promise.resolve(errorResponse),
+        })) as unknown as typeof fetch
+
+      const client = new CCIPAPIClient()
+      await assert.rejects(
+        async () => await client.getMessageById('0x1234...'),
+        (err: unknown) =>
+          err instanceof CCIPMessageIdNotFoundError &&
+          err.context.messageId === '0x1234...' &&
+          err.isTransient === true,
+      )
+    })
+
+    it('should throw CCIPHttpError on 400 (invalid format)', async () => {
+      const errorResponse = { error: 'INVALID_MESSAGE_ID', message: 'Invalid format' }
+      globalThis.fetch = (() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.BAD_REQUEST,
+          statusText: 'Bad Request',
+          json: () => Promise.resolve(errorResponse),
+        })) as unknown as typeof fetch
+
+      const client = new CCIPAPIClient()
+      await assert.rejects(
+        async () => await client.getMessageById('invalid'),
+        (err: unknown) =>
+          err instanceof CCIPHttpError &&
+          err.context.status === HttpStatus.BAD_REQUEST &&
+          err.context.apiErrorCode === 'INVALID_MESSAGE_ID',
+      )
+    })
+
+    it('should handle missing optional fields gracefully', async () => {
+      const minimalResponse = {
+        messageId: '0x1234...',
+        sender: '0x742d...',
+        receiver: '0x893F...',
+        status: 'SENT',
+        sourceNetworkInfo: {
+          name: 'ethereum-mainnet',
+          chainSelector: '5009297550715157269',
+          chainId: '1',
+          chainFamily: 'EVM',
+        },
+        destNetworkInfo: {
+          name: 'arbitrum-mainnet',
+          chainSelector: '4949039107694359620',
+          chainId: '42161',
+          chainFamily: 'EVM',
+        },
+        sendTransactionHash: '0x9428...',
+        sendTimestamp: '2023-12-01T10:30:00Z',
+        tokenAmounts: [],
+        extraArgs: { gasLimit: '200000', allowOutOfOrderExecution: false },
+        readyForManualExecution: false,
+        finality: 0,
+        fees: {},
+        // No optional fields: version, onramp, nonce, sequenceNumber, etc.
+      }
+
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(minimalResponse),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageById('0x1234...')
+
+      // Should use defaults for missing fields
+      assert.equal(result.lane?.version, CCIPVersion.V1_6) // Default
+      assert.equal(result.lane?.onRamp, '')
+      assert.equal(result.message?.sequenceNumber, 0n)
+      assert.equal(result.message?.nonce, 0n)
+      assert.equal(result.receiptTransactionHash, undefined)
+    })
+
+    it('should parse version string to CCIPVersion enum', async () => {
+      for (const [versionStr, expected] of [
+        ['1.2.0', CCIPVersion.V1_2],
+        ['1.5.0', CCIPVersion.V1_5],
+        ['1.6.0', CCIPVersion.V1_6],
+      ] as const) {
+        const response = { ...mockMessageResponse, version: versionStr }
+        const customFetch = mock.fn(() =>
+          Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(response),
+          }),
+        )
+        const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+        const result = await client.getMessageById('0x1234...')
+
+        assert.equal(result.lane?.version, expected)
+      }
+    })
+
+    it('should handle unknown version gracefully', async () => {
+      const response = { ...mockMessageResponse, version: '2.0.0' }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(response),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageById('0x1234...')
+
+      // Unknown version defaults to V1_6
+      assert.equal(result.lane?.version, CCIPVersion.V1_6)
+    })
+
+    it('should be transient error for 5xx', async () => {
+      globalThis.fetch = (() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.INTERNAL_SERVER_ERROR,
+          statusText: 'Internal Server Error',
+          json: () => Promise.resolve({ error: 'INTERNAL_SERVER_ERROR', message: 'Error' }),
+        })) as unknown as typeof fetch
+
+      const client = new CCIPAPIClient()
+      await assert.rejects(
+        async () => await client.getMessageById('0x1234...'),
+        (err: unknown) => err instanceof CCIPHttpError && err.isTransient === true,
+      )
+    })
+
+    it('should log raw response via debug', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockMessageResponse),
+        }),
+      )
+      const debugFn = mock.fn()
+      const client = new CCIPAPIClient(undefined, {
+        logger: { log: () => {}, debug: debugFn } as any,
+        fetch: customFetch as any,
+      })
+
+      await client.getMessageById('0x1234...')
+
+      assert.equal(debugFn.mock.calls.length, 2) // Once for URL, once for raw response
+      const lastCall = debugFn.mock.calls[1] as unknown as { arguments: unknown[] }
+      assert.equal(lastCall.arguments[0], 'getMessageById raw response:')
+      assert.ok(lastCall.arguments[1])
     })
   })
 })

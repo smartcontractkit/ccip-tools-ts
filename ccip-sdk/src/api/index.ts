@@ -1,9 +1,38 @@
-import type { APIErrorResponse, LaneLatencyResponse, RawLaneLatencyResponse } from './types.ts'
-import { CCIPHttpError, CCIPLaneNotFoundError } from '../errors/index.ts'
+import type {
+  APIErrorResponse,
+  APICCIPRequest,
+  LaneLatencyResponse,
+  RawLaneLatencyResponse,
+  RawMessageResponse,
+} from './types.ts'
+import {
+  CCIPHttpError,
+  CCIPLaneNotFoundError,
+  CCIPMessageIdNotFoundError,
+} from '../errors/index.ts'
 import { HttpStatus } from '../http-status.ts'
-import type { Logger, WithLogger } from '../types.ts'
+import { CCIPVersion, type Logger, type MessageStatus, type WithLogger } from '../types.ts'
 
-export type { APIErrorResponse, LaneLatencyResponse } from './types.ts'
+export type { APIErrorResponse, APICCIPRequest, LaneLatencyResponse } from './types.ts'
+
+/**
+ * Parses API version string to CCIPVersion enum.
+ * @param version - Version string like "1.5.0", "1.6.0"
+ * @returns CCIPVersion if recognized, undefined otherwise
+ */
+function parseVersion(version: string | null | undefined): CCIPVersion | undefined {
+  if (!version) return undefined
+  switch (version) {
+    case '1.2.0':
+      return CCIPVersion.V1_2
+    case '1.5.0':
+      return CCIPVersion.V1_5
+    case '1.6.0':
+      return CCIPVersion.V1_6
+    default:
+      return undefined
+  }
+}
 
 /** Default CCIP API base URL */
 export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
@@ -163,5 +192,162 @@ export class CCIPAPIClient {
     this.logger.debug('getLaneLatency raw response:', raw)
 
     return { totalMs: raw.totalMs }
+  }
+
+  /**
+   * Fetches a CCIP message by its unique message ID.
+   *
+   * @param messageId - The message ID (64-character hex string with 0x prefix)
+   * @returns Promise resolving to {@link APICCIPRequest} with message details
+   *
+   * @throws {@link CCIPMessageIdNotFoundError} when message not found (404)
+   * @throws {@link CCIPHttpError} on HTTP errors with context:
+   *   - `status` - HTTP status code
+   *   - `statusText` - HTTP status message
+   *   - `apiErrorCode` - API error code (e.g., "INVALID_MESSAGE_ID")
+   *   - `apiErrorMessage` - Human-readable error message
+   *
+   * @example Basic usage
+   * ```typescript
+   * const request = await api.getMessageById(
+   *   '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+   * )
+   * console.log(`Status: ${request.status}`)
+   * console.log(`From: ${request.message?.sender}`)
+   * ```
+   *
+   * @example Handling not found
+   * ```typescript
+   * try {
+   *   const request = await api.getMessageById(messageId)
+   * } catch (err) {
+   *   if (err instanceof CCIPMessageIdNotFoundError) {
+   *     console.error('Message not found, it may still be in transit')
+   *   }
+   * }
+   * ```
+   */
+  async getMessageById(messageId: string): Promise<APICCIPRequest> {
+    const url = `${this.baseUrl}/v1/messages/${encodeURIComponent(messageId)}`
+
+    this.logger.debug(`CCIPAPIClient: GET ${url}`)
+
+    const response = await this._fetch(url)
+
+    if (!response.ok) {
+      // Try to parse structured error response from API
+      let apiError: APIErrorResponse | undefined
+      try {
+        apiError = (await response.json()) as APIErrorResponse
+      } catch {
+        // Response body not JSON, use HTTP status only
+      }
+
+      // 404 - Message not found
+      if (response.status === HttpStatus.NOT_FOUND) {
+        throw new CCIPMessageIdNotFoundError(messageId, {
+          context: apiError
+            ? {
+                apiErrorCode: apiError.error,
+                apiErrorMessage: apiError.message,
+              }
+            : undefined,
+        })
+      }
+
+      // Generic HTTP error for other cases
+      throw new CCIPHttpError(response.status, response.statusText, {
+        context: apiError
+          ? {
+              apiErrorCode: apiError.error,
+              apiErrorMessage: apiError.message,
+            }
+          : undefined,
+      })
+    }
+
+    const raw = (await response.json()) as RawMessageResponse
+
+    this.logger.debug('getMessageById raw response:', raw)
+
+    return this._transformMessageResponse(raw)
+  }
+
+  /**
+   * Transforms raw API response to APICCIPRequest.
+   * Populates all derivable CCIPRequest fields from API data.
+   * @internal
+   */
+  private _transformMessageResponse(raw: RawMessageResponse): APICCIPRequest {
+    const sendTimestamp = Math.floor(new Date(raw.sendTimestamp).getTime() / 1000)
+    const receiptTimestamp = raw.receiptTimestamp
+      ? Math.floor(new Date(raw.receiptTimestamp).getTime() / 1000)
+      : undefined
+
+    // Build lane - all fields available from API (Lane type is complete)
+    const lane = {
+      sourceChainSelector: BigInt(raw.sourceNetworkInfo.chainSelector),
+      destChainSelector: BigInt(raw.destNetworkInfo.chainSelector),
+      onRamp: raw.onramp ?? '',
+      version: parseVersion(raw.version) ?? CCIPVersion.V1_6,
+    }
+
+    // Build partial message - populate what we can from API
+    // Note: This is partial - CCIPMessage has more fields (tokenAmounts, extraArgs, etc.)
+    // that aren't available from the API in the same format
+    const message = {
+      messageId: raw.messageId,
+      sender: raw.sender,
+      receiver: raw.receiver,
+      data: raw.data ?? '0x',
+      sequenceNumber: raw.sequenceNumber ? BigInt(raw.sequenceNumber) : 0n,
+      nonce: raw.nonce ? BigInt(raw.nonce) : 0n,
+      feeToken: raw.fees?.tokenAddress ?? '',
+      feeTokenAmount: raw.fees?.totalAmount ? BigInt(raw.fees.totalAmount) : 0n,
+    }
+
+    // Build partial log - only transactionHash and address are available from API
+    // (topics, index, blockNumber, data not available)
+    const log = {
+      transactionHash: raw.sendTransactionHash,
+      address: raw.onramp ?? '',
+    }
+
+    // Build partial tx - only hash, timestamp, from are available from API
+    // (blockNumber, logs not available)
+    const tx = {
+      hash: raw.sendTransactionHash,
+      timestamp: sendTimestamp,
+      from: raw.origin ?? '',
+    }
+
+    // Note: We use type assertions for partial nested objects since Partial<CCIPRequest>
+    // requires complete types when provided. These are intentionally partial.
+    return {
+      // CCIPRequest fields (Partial) - cast partial objects
+      lane,
+      message: message as APICCIPRequest['message'],
+      log: log as APICCIPRequest['log'],
+      tx: tx as APICCIPRequest['tx'],
+      // API-specific fields
+      status: raw.status as MessageStatus,
+      readyForManualExecution: raw.readyForManualExecution,
+      finality: raw.finality,
+      receiptTransactionHash: raw.receiptTransactionHash ?? undefined,
+      receiptTimestamp,
+      deliveryTime: raw.deliveryTime ?? undefined,
+      sourceNetworkInfo: {
+        name: raw.sourceNetworkInfo.name,
+        chainSelector: BigInt(raw.sourceNetworkInfo.chainSelector),
+        chainId: raw.sourceNetworkInfo.chainId,
+        chainFamily: raw.sourceNetworkInfo.chainFamily,
+      },
+      destNetworkInfo: {
+        name: raw.destNetworkInfo.name,
+        chainSelector: BigInt(raw.destNetworkInfo.chainSelector),
+        chainId: raw.destNetworkInfo.chainId,
+        chainFamily: raw.destNetworkInfo.chainFamily,
+      },
+    }
   }
 }
