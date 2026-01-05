@@ -6,6 +6,7 @@ import {
 import type { EVMExtraArgsV2, SVMExtraArgsV1 } from '../extra-args.ts'
 import { HttpStatus } from '../http-status.ts'
 import { type Logger, type MessageStatus, type WithLogger, CCIPVersion } from '../types.ts'
+import { networkInfo } from '../utils.ts'
 import type {
   APICCIPRequest,
   APIErrorResponse,
@@ -17,7 +18,12 @@ import type {
   RawTokenAmount,
 } from './types.ts'
 
-export type { APICCIPRequest, APIErrorResponse, LaneLatencyResponse } from './types.ts'
+export type {
+  APICCIPRequest,
+  APICCIPRequestMetadata,
+  APIErrorResponse,
+  LaneLatencyResponse,
+} from './types.ts'
 
 /**
  * Parses API version string to CCIPVersion enum.
@@ -70,15 +76,33 @@ function transformExtraArgs(
   }
 }
 
+/** Zero address placeholder for missing token pool addresses */
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+
 /**
  * Transforms raw API token amounts to SDK token amounts format.
+ * Includes SourceTokenData fields with placeholder values since the API
+ * does not provide pool addresses - these require on-chain lookup.
  * @param raw - Raw token amounts from API response
- * @returns Array of token amounts with bigint amounts
+ * @returns Array of token amounts with bigint amounts and SourceTokenData placeholders
  */
-function transformTokenAmounts(raw: RawTokenAmount[]): { token: string; amount: bigint }[] {
+function transformTokenAmounts(raw: RawTokenAmount[]): {
+  token: string
+  amount: bigint
+  // SourceTokenData fields (placeholders - not available from API)
+  sourcePoolAddress: string
+  destTokenAddress: string
+  extraData: string
+  destGasAmount: bigint
+}[] {
   return raw.map((ta) => ({
     token: ta.tokenAddress,
     amount: BigInt(ta.amount),
+    // TODO: API does not provide pool addresses - these require on-chain lookup
+    sourcePoolAddress: ZERO_ADDRESS,
+    destTokenAddress: ZERO_ADDRESS,
+    extraData: '0x',
+    destGasAmount: 0n,
   }))
 }
 
@@ -332,7 +356,7 @@ export class CCIPAPIClient {
       ? Math.floor(new Date(raw.receiptTimestamp).getTime() / 1000)
       : undefined
 
-    // Build lane - all fields available from API 
+    // Build lane - all fields available from API
     const lane = {
       sourceChainSelector: BigInt(raw.sourceNetworkInfo.chainSelector),
       destChainSelector: BigInt(raw.destNetworkInfo.chainSelector),
@@ -343,13 +367,15 @@ export class CCIPAPIClient {
     // Build message with extraArgs spread and tokenAmounts included
     const message = {
       messageId: raw.messageId,
+      sourceChainSelector: lane.sourceChainSelector,
+      destChainSelector: lane.destChainSelector,
       sender: raw.sender,
       receiver: raw.receiver,
       data: raw.data ?? '0x',
       sequenceNumber: raw.sequenceNumber ? BigInt(raw.sequenceNumber) : 0n,
       nonce: raw.nonce ? BigInt(raw.nonce) : 0n,
-      feeToken: raw.fees?.tokenAddress ?? '',
-      feeTokenAmount: raw.fees?.totalAmount ? BigInt(raw.fees.totalAmount) : 0n,
+      feeToken: raw.fees.tokenAddress ?? '',
+      feeTokenAmount: raw.fees.totalAmount ? BigInt(raw.fees.totalAmount) : 0n,
       tokenAmounts: transformTokenAmounts(raw.tokenAmounts),
       ...transformExtraArgs(raw.extraArgs),
     }
@@ -384,18 +410,8 @@ export class CCIPAPIClient {
       receiptTransactionHash: raw.receiptTransactionHash ?? undefined,
       receiptTimestamp,
       deliveryTime: raw.deliveryTime ?? undefined,
-      sourceNetworkInfo: {
-        name: raw.sourceNetworkInfo.name,
-        chainSelector: BigInt(raw.sourceNetworkInfo.chainSelector),
-        chainId: raw.sourceNetworkInfo.chainId,
-        chainFamily: raw.sourceNetworkInfo.chainFamily,
-      },
-      destNetworkInfo: {
-        name: raw.destNetworkInfo.name,
-        chainSelector: BigInt(raw.destNetworkInfo.chainSelector),
-        chainId: raw.destNetworkInfo.chainId,
-        chainFamily: raw.destNetworkInfo.chainFamily,
-      },
+      sourceNetworkInfo: networkInfo(BigInt(raw.sourceNetworkInfo.chainSelector)),
+      destNetworkInfo: networkInfo(BigInt(raw.destNetworkInfo.chainSelector)),
     }
   }
 }

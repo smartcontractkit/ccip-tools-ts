@@ -10,6 +10,7 @@ import {
   HttpStatus,
 } from '../errors/index.ts'
 import { EVMChain } from '../evm/index.ts'
+import { decodeMessage } from '../requests.ts'
 import { CCIPVersion } from '../types.ts'
 
 const origFetch = globalThis.fetch
@@ -345,10 +346,10 @@ describe('CCIPAPIClient', () => {
       assert.equal(result.deliveryTime, 900000)
       assert.equal(result.finality, 0)
 
-      // Network info
+      // Network info - uses SDK's networkInfo() which has canonical names
       assert.equal(result.sourceNetworkInfo.name, 'ethereum-mainnet')
       assert.equal(result.sourceNetworkInfo.chainSelector, 5009297550715157269n)
-      assert.equal(result.destNetworkInfo.name, 'arbitrum-mainnet')
+      assert.equal(result.destNetworkInfo.name, 'ethereum-mainnet-arbitrum-1')
     })
 
     it('should throw CCIPMessageIdNotFoundError on 404', async () => {
@@ -577,11 +578,31 @@ describe('CCIPAPIClient', () => {
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
       const result = await client.getMessageById('0x1234...')
 
-      // tokenAmounts is on message
-      const msg = result.message as unknown as { tokenAmounts: { token: string; amount: bigint }[] }
+      // tokenAmounts is on message with SourceTokenData fields
+      const msg = result.message as unknown as {
+        tokenAmounts: {
+          token: string
+          amount: bigint
+          sourcePoolAddress: string
+          destTokenAddress: string
+          extraData: string
+          destGasAmount: bigint
+        }[]
+      }
       assert.equal(msg.tokenAmounts.length, 2)
       assert.equal(msg.tokenAmounts[0]!.token, '0xToken1')
       assert.equal(msg.tokenAmounts[0]!.amount, 1000000000000000000n)
+      // SourceTokenData placeholder fields (zero address since API doesn't provide pool data)
+      assert.equal(
+        msg.tokenAmounts[0]!.sourcePoolAddress,
+        '0x0000000000000000000000000000000000000000',
+      )
+      assert.equal(
+        msg.tokenAmounts[0]!.destTokenAddress,
+        '0x0000000000000000000000000000000000000000',
+      )
+      assert.equal(msg.tokenAmounts[0]!.extraData, '0x')
+      assert.equal(msg.tokenAmounts[0]!.destGasAmount, 0n)
       assert.equal(msg.tokenAmounts[1]!.token, '0xToken2')
       assert.equal(msg.tokenAmounts[1]!.amount, 2500000n)
     })
@@ -603,6 +624,36 @@ describe('CCIPAPIClient', () => {
       // tokenAmounts is on message
       const msg = result.message as unknown as { tokenAmounts: { token: string; amount: bigint }[] }
       assert.equal(msg.tokenAmounts.length, 0)
+    })
+
+    it('should produce a message that passes decodeMessage validation', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockMessageResponse),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageById('0x1234...')
+
+      // The message should have sourceChainSelector which decodeMessage requires
+      const message = result.message as unknown as Record<string, unknown>
+      assert.ok(message.sourceChainSelector, 'message should have sourceChainSelector')
+      assert.ok(message.destChainSelector, 'message should have destChainSelector')
+
+      // Validate: decodeMessage should be able to process the message
+      // decodeMessage expects sourceChainSelector in the message for JSON objects
+      const decoded = decodeMessage(message)
+
+      // Assert key fields match
+      assert.equal(decoded.messageId, result.message?.messageId)
+      assert.equal(decoded.sourceChainSelector, result.lane?.sourceChainSelector)
+      assert.equal(decoded.sender, result.message?.sender)
+      // Addresses may be checksummed differently after decoding, compare case-insensitively
+      assert.equal(
+        decoded.receiver.toLowerCase(),
+        (result.message?.receiver as string).toLowerCase(),
+      )
     })
   })
 })

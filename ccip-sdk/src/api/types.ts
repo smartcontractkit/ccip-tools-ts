@@ -1,4 +1,4 @@
-import type { CCIPRequest, MessageStatus } from '../types.ts'
+import type { CCIPRequest, MessageStatus, NetworkInfo } from '../types.ts'
 
 /**
  * Response from GET /v1/lanes/latency endpoint.
@@ -120,20 +120,10 @@ export type RawMessageResponse = {
 // ============================================================================
 
 /**
- * CCIP request information retrieved from API.
- * Based on Partial<CCIPRequest> with additional API-specific fields.
- *
- * Fields populated from API:
- * - lane: sourceChainSelector, destChainSelector, onRamp, version (all available)
- * - message: messageId, sender, receiver, data, sequenceNumber, nonce, tokenAmounts,
- *   plus extraArgs fields (gasLimit, allowOutOfOrderExecution for EVM; SVM fields for Solana)
- * - log: transactionHash, address (partial - topics, index, blockNumber not available)
- * - tx: hash, timestamp, from (partial - logs, blockNumber not available)
- *
- * Additional API-specific fields not in CCIPRequest:
- * - status, readyForManualExecution, receiptTransactionHash, receiptTimestamp, etc.
+ * API-specific metadata fields not present in CCIPRequest.
+ * These fields are only available when fetching message details from the CCIP API.
  */
-export type APICCIPRequest = Partial<CCIPRequest> & {
+export type APICCIPRequestMetadata = {
   /** Message lifecycle status from API */
   status: MessageStatus
   /** Whether message is ready for manual execution */
@@ -146,18 +136,24 @@ export type APICCIPRequest = Partial<CCIPRequest> & {
   receiptTimestamp?: number
   /** End-to-end delivery time in ms if completed */
   deliveryTime?: number
-  /** Source network info from API */
-  sourceNetworkInfo: {
-    name: string
-    chainSelector: bigint
-    chainId: string
-    chainFamily: string
-  }
-  /** Destination network info from API */
-  destNetworkInfo: {
-    name: string
-    chainSelector: bigint
-    chainId: string
-    chainFamily: string
-  }
+  /** Source network info */
+  sourceNetworkInfo: NetworkInfo
+  /** Destination network info */
+  destNetworkInfo: NetworkInfo
 }
+
+/**
+ * CCIP request information retrieved from API.
+ * Based on Partial<CCIPRequest> with additional API-specific metadata.
+ *
+ * Fields populated from API:
+ * - lane: sourceChainSelector, destChainSelector, onRamp, version (all available)
+ * - message: messageId, sender, receiver, data, sequenceNumber, nonce, tokenAmounts,
+ *   plus extraArgs fields (gasLimit, allowOutOfOrderExecution for EVM; SVM fields for Solana)
+ * - log: transactionHash, address (partial - topics, index, blockNumber not available)
+ * - tx: hash, timestamp, from (partial - logs, blockNumber not available)
+ *
+ * Additional API-specific fields not in CCIPRequest:
+ * - status, readyForManualExecution, receiptTransactionHash, receiptTimestamp, etc.
+ */
+export type APICCIPRequest = Partial<CCIPRequest> & APICCIPRequestMetadata
