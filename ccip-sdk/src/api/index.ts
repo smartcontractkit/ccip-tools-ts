@@ -2,6 +2,7 @@ import {
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
+  CCIPMessageIdValidationError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, SVMExtraArgsV1 } from '../extra-args.ts'
 import { HttpStatus } from '../http-status.ts'
@@ -24,7 +25,6 @@ export type {
   APIErrorResponse,
   LaneLatencyResponse,
 } from './types.ts'
-
 
 /** Default CCIP API base URL */
 export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
@@ -189,9 +189,10 @@ export class CCIPAPIClient {
   /**
    * Fetches a CCIP message by its unique message ID.
    *
-   * @param messageId - The message ID (64-character hex string with 0x prefix)
+   * @param messageId - The message ID (0x prefix + 64 hex characters, e.g., "0x1234...abcd")
    * @returns Promise resolving to {@link APICCIPRequest} with message details
    *
+   * @throws {@link CCIPMessageIdValidationError} when messageId format is invalid
    * @throws {@link CCIPMessageIdNotFoundError} when message not found (404)
    * @throws {@link CCIPHttpError} on HTTP errors with context:
    *   - `status` - HTTP status code
@@ -220,11 +221,11 @@ export class CCIPAPIClient {
    * ```
    */
   async getMessageById(messageId: string): Promise<APICCIPRequest> {
-    // Validate messageId format: 64 hex chars, with or without 0x prefix
-    const hexPattern = /^(0x)?[0-9a-fA-F]{64}$/
+    // Validate messageId format: 0x prefix + 64 hex chars
+    const hexPattern = /^0x[0-9a-fA-F]{64}$/
     if (!hexPattern.test(messageId)) {
-      throw new Error(
-        `Invalid messageId format: expected 64-character hex string (with or without 0x prefix), got "${messageId}"`,
+      throw new CCIPMessageIdValidationError(
+        `Invalid messageId format: expected 0x prefix followed by 64 hex characters, got "${messageId}"`,
       )
     }
 
@@ -343,7 +344,6 @@ export class CCIPAPIClient {
     }
   }
 }
-
 
 /**
  * Parses API version string to CCIPVersion enum.

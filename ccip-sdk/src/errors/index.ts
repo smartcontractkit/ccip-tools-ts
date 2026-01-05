@@ -25,6 +25,7 @@ export {
 export {
   CCIPMessageBatchIncompleteError,
   CCIPMessageIdNotFoundError,
+  CCIPMessageIdValidationError,
   CCIPMessageInvalidError,
   CCIPMessageNotFoundInTxError,
   CCIPMessageNotInBatchError,

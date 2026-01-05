@@ -7,6 +7,7 @@ import {
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
+  CCIPMessageIdValidationError,
   HttpStatus,
 } from '../errors/index.ts'
 import { EVMChain } from '../evm/index.ts'
@@ -317,7 +318,7 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234...')
+      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
 
       // Lane
       assert.equal(result.lane?.sourceChainSelector, 5009297550715157269n)
@@ -364,31 +365,21 @@ describe('CCIPAPIClient', () => {
 
       const client = new CCIPAPIClient()
       await assert.rejects(
-        async () => await client.getMessageById('0x1234...'),
+        async () => await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'),
         (err: unknown) =>
           err instanceof CCIPMessageIdNotFoundError &&
-          err.context.messageId === '0x1234...' &&
+          err.context.messageId === '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef' &&
           err.isTransient === true,
       )
     })
 
-    it('should throw CCIPHttpError on 400 (invalid format)', async () => {
-      const errorResponse = { error: 'INVALID_MESSAGE_ID', message: 'Invalid format' }
-      globalThis.fetch = (() =>
-        Promise.resolve({
-          ok: false,
-          status: HttpStatus.BAD_REQUEST,
-          statusText: 'Bad Request',
-          json: () => Promise.resolve(errorResponse),
-        })) as unknown as typeof fetch
-
+    it('should throw CCIPMessageIdValidationError on invalid format', async () => {
       const client = new CCIPAPIClient()
       await assert.rejects(
         async () => await client.getMessageById('invalid'),
         (err: unknown) =>
-          err instanceof CCIPHttpError &&
-          err.context.status === HttpStatus.BAD_REQUEST &&
-          err.context.apiErrorCode === 'INVALID_MESSAGE_ID',
+          err instanceof CCIPMessageIdValidationError &&
+          err.message.includes('Invalid messageId format'),
       )
     })
 
@@ -427,7 +418,7 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234...')
+      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
 
       // Should use defaults for missing fields
       assert.equal(result.lane?.version, CCIPVersion.V1_6) // Default
@@ -451,7 +442,7 @@ describe('CCIPAPIClient', () => {
           }),
         )
         const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-        const result = await client.getMessageById('0x1234...')
+        const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
 
         assert.equal(result.lane?.version, expected)
       }
@@ -466,7 +457,7 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234...')
+      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
 
       // Unknown version defaults to V1_6
       assert.equal(result.lane?.version, CCIPVersion.V1_6)
@@ -483,7 +474,7 @@ describe('CCIPAPIClient', () => {
 
       const client = new CCIPAPIClient()
       await assert.rejects(
-        async () => await client.getMessageById('0x1234...'),
+        async () => await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'),
         (err: unknown) => err instanceof CCIPHttpError && err.isTransient === true,
       )
     })
@@ -501,7 +492,7 @@ describe('CCIPAPIClient', () => {
         fetch: customFetch as any,
       })
 
-      await client.getMessageById('0x1234...')
+      await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
 
       assert.equal(debugFn.mock.calls.length, 2) // Once for URL, once for raw response
       const lastCall = debugFn.mock.calls[1] as unknown as { arguments: unknown[] }
@@ -521,7 +512,7 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234...')
+      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
 
       // ExtraArgs fields are spread onto message
       const msg = result.message as Record<string, unknown>
@@ -549,7 +540,7 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234...')
+      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
 
       // SVM extraArgs fields are spread onto message
       const msg = result.message as Record<string, unknown>
@@ -576,7 +567,7 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234...')
+      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
 
       // tokenAmounts is on message with SourceTokenData fields
       const msg = result.message as unknown as {
@@ -619,7 +610,7 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234...')
+      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
 
       // tokenAmounts is on message
       const msg = result.message as unknown as { tokenAmounts: { token: string; amount: bigint }[] }
@@ -634,7 +625,7 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234...')
+      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
 
       // The message should have sourceChainSelector which decodeMessage requires
       const message = result.message as unknown as Record<string, unknown>
