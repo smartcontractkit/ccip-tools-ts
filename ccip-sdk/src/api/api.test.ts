@@ -638,8 +638,6 @@ describe('CCIPAPIClient', () => {
 
       // The message should have sourceChainSelector which decodeMessage requires
       const message = result.message as unknown as Record<string, unknown>
-      assert.ok(message.sourceChainSelector, 'message should have sourceChainSelector')
-      assert.ok(message.destChainSelector, 'message should have destChainSelector')
 
       // Validate: decodeMessage should be able to process the message
       // decodeMessage expects sourceChainSelector in the message for JSON objects

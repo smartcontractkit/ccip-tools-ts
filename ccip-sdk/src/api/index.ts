@@ -25,86 +25,6 @@ export type {
   LaneLatencyResponse,
 } from './types.ts'
 
-/**
- * Parses API version string to CCIPVersion enum.
- * @param version - Version string like "1.5.0", "1.6.0"
- * @returns CCIPVersion if recognized, undefined otherwise
- */
-function parseVersion(version: string | null | undefined): CCIPVersion | undefined {
-  if (!version) return undefined
-  switch (version) {
-    case '1.2.0':
-      return CCIPVersion.V1_2
-    case '1.5.0':
-      return CCIPVersion.V1_5
-    case '1.6.0':
-      return CCIPVersion.V1_6
-    default:
-      return undefined
-  }
-}
-
-/**
- * Type guard to distinguish SVM extra args from EVM extra args.
- * @param args - Raw extra args from API response
- * @returns true if args is RawSVMExtraArgs
- */
-function isRawSVMExtraArgs(args: RawEVMExtraArgs | RawSVMExtraArgs): args is RawSVMExtraArgs {
-  return 'computeUnits' in args
-}
-
-/**
- * Transforms raw API extra args to SDK extra args types.
- * @param raw - Raw extra args from API response
- * @returns EVMExtraArgsV2 or SVMExtraArgsV1
- */
-function transformExtraArgs(
-  raw: RawEVMExtraArgs | RawSVMExtraArgs,
-): EVMExtraArgsV2 | SVMExtraArgsV1 {
-  if (isRawSVMExtraArgs(raw)) {
-    return {
-      computeUnits: BigInt(raw.computeUnits),
-      accountIsWritableBitmap: BigInt(raw.accountIsWritableBitmap),
-      allowOutOfOrderExecution: raw.allowOutOfOrderExecution,
-      tokenReceiver: raw.tokenReceiver,
-      accounts: raw.accounts,
-    }
-  }
-  return {
-    gasLimit: BigInt(raw.gasLimit),
-    allowOutOfOrderExecution: raw.allowOutOfOrderExecution,
-  }
-}
-
-/** Zero address placeholder for missing token pool addresses */
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
-
-/**
- * Transforms raw API token amounts to SDK token amounts format.
- * Includes SourceTokenData fields with placeholder values since the API
- * does not provide pool addresses - these require on-chain lookup.
- * @param raw - Raw token amounts from API response
- * @returns Array of token amounts with bigint amounts and SourceTokenData placeholders
- */
-function transformTokenAmounts(raw: RawTokenAmount[]): {
-  token: string
-  amount: bigint
-  // SourceTokenData fields (placeholders - not available from API)
-  sourcePoolAddress: string
-  destTokenAddress: string
-  extraData: string
-  destGasAmount: bigint
-}[] {
-  return raw.map((ta) => ({
-    token: ta.tokenAddress,
-    amount: BigInt(ta.amount),
-    // TODO: API does not provide pool addresses - these require on-chain lookup
-    sourcePoolAddress: ZERO_ADDRESS,
-    destTokenAddress: ZERO_ADDRESS,
-    extraData: '0x',
-    destGasAmount: 0n,
-  }))
-}
 
 /** Default CCIP API base URL */
 export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
@@ -300,6 +220,14 @@ export class CCIPAPIClient {
    * ```
    */
   async getMessageById(messageId: string): Promise<APICCIPRequest> {
+    // Validate messageId format: 64 hex chars, with or without 0x prefix
+    const hexPattern = /^(0x)?[0-9a-fA-F]{64}$/
+    if (!hexPattern.test(messageId)) {
+      throw new Error(
+        `Invalid messageId format: expected 64-character hex string (with or without 0x prefix), got "${messageId}"`,
+      )
+    }
+
     const url = `${this.baseUrl}/v1/messages/${encodeURIComponent(messageId)}`
 
     this.logger.debug(`CCIPAPIClient: GET ${url}`)
@@ -414,4 +342,87 @@ export class CCIPAPIClient {
       destNetworkInfo: networkInfo(BigInt(raw.destNetworkInfo.chainSelector)),
     }
   }
+}
+
+
+/**
+ * Parses API version string to CCIPVersion enum.
+ * @param version - Version string like "1.5.0", "1.6.0"
+ * @returns CCIPVersion if recognized, undefined otherwise
+ */
+function parseVersion(version: string | null | undefined): CCIPVersion | undefined {
+  if (!version) return undefined
+  switch (version) {
+    case '1.2.0':
+      return CCIPVersion.V1_2
+    case '1.5.0':
+      return CCIPVersion.V1_5
+    case '1.6.0':
+      return CCIPVersion.V1_6
+    default:
+      return undefined
+  }
+}
+
+/**
+ * Type guard to distinguish SVM extra args from EVM extra args.
+ * @param args - Raw extra args from API response
+ * @returns true if args is RawSVMExtraArgs
+ */
+function isRawSVMExtraArgs(args: RawEVMExtraArgs | RawSVMExtraArgs): args is RawSVMExtraArgs {
+  return 'computeUnits' in args
+}
+
+/**
+ * Transforms raw API extra args to SDK extra args types.
+ * @param raw - Raw extra args from API response
+ * @returns EVMExtraArgsV2 or SVMExtraArgsV1
+ */
+function transformExtraArgs(
+  raw: RawEVMExtraArgs | RawSVMExtraArgs,
+): EVMExtraArgsV2 | SVMExtraArgsV1 {
+  if (isRawSVMExtraArgs(raw)) {
+    return {
+      computeUnits: BigInt(raw.computeUnits),
+      accountIsWritableBitmap: BigInt(raw.accountIsWritableBitmap),
+      allowOutOfOrderExecution: raw.allowOutOfOrderExecution,
+      tokenReceiver: raw.tokenReceiver,
+      accounts: raw.accounts,
+    }
+  }
+  return {
+    gasLimit: BigInt(raw.gasLimit),
+    allowOutOfOrderExecution: raw.allowOutOfOrderExecution,
+  }
+}
+
+/** Zero address placeholder for missing token pool addresses */
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+
+/**
+ * Transforms raw API token amounts to SDK token amounts format.
+ * Includes SourceTokenData fields with placeholder values since the API
+ * does not provide pool addresses - these require on-chain lookup.
+ * @param raw - Raw token amounts from API response
+ * @returns Array of token amounts with bigint amounts and SourceTokenData placeholders
+ */
+function transformTokenAmounts(raw: RawTokenAmount[]): {
+  token: string
+  amount: bigint
+  // SourceTokenData fields (placeholders - not available from API)
+  sourcePoolAddress: string
+  destTokenAddress: string
+  extraData: string
+  destGasAmount: bigint
+}[] {
+  return raw.map((ta) => ({
+    token: ta.tokenAddress,
+    amount: BigInt(ta.amount),
+    // TODO: API does not provide pool addresses - these require on-chain lookup
+    // Consider exposing these through the API.
+    sourcePoolAddress: ZERO_ADDRESS,
+    destTokenAddress: ZERO_ADDRESS,
+    extraData: '0x',
+    destGasAmount: 0n,
+  }))
 }
