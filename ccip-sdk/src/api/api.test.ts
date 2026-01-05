@@ -318,7 +318,9 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
+      const result = await client.getMessageById(
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      )
 
       // Lane
       assert.equal(result.lane?.sourceChainSelector, 5009297550715157269n)
@@ -365,10 +367,14 @@ describe('CCIPAPIClient', () => {
 
       const client = new CCIPAPIClient()
       await assert.rejects(
-        async () => await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'),
+        async () =>
+          await client.getMessageById(
+            '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+          ),
         (err: unknown) =>
           err instanceof CCIPMessageIdNotFoundError &&
-          err.context.messageId === '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef' &&
+          err.context.messageId ===
+            '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef' &&
           err.isTransient === true,
       )
     })
@@ -418,7 +424,9 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
+      const result = await client.getMessageById(
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      )
 
       // Should use defaults for missing fields
       assert.equal(result.lane?.version, CCIPVersion.V1_6) // Default
@@ -442,7 +450,9 @@ describe('CCIPAPIClient', () => {
           }),
         )
         const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-        const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
+        const result = await client.getMessageById(
+          '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+        )
 
         assert.equal(result.lane?.version, expected)
       }
@@ -457,7 +467,9 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
+      const result = await client.getMessageById(
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      )
 
       // Unknown version defaults to V1_6
       assert.equal(result.lane?.version, CCIPVersion.V1_6)
@@ -474,7 +486,10 @@ describe('CCIPAPIClient', () => {
 
       const client = new CCIPAPIClient()
       await assert.rejects(
-        async () => await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'),
+        async () =>
+          await client.getMessageById(
+            '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+          ),
         (err: unknown) => err instanceof CCIPHttpError && err.isTransient === true,
       )
     })
@@ -492,7 +507,9 @@ describe('CCIPAPIClient', () => {
         fetch: customFetch as any,
       })
 
-      await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
+      await client.getMessageById(
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      )
 
       assert.equal(debugFn.mock.calls.length, 2) // Once for URL, once for raw response
       const lastCall = debugFn.mock.calls[1] as unknown as { arguments: unknown[] }
@@ -512,7 +529,9 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
+      const result = await client.getMessageById(
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      )
 
       // ExtraArgs fields are spread onto message
       const msg = result.message as Record<string, unknown>
@@ -540,7 +559,9 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
+      const result = await client.getMessageById(
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      )
 
       // SVM extraArgs fields are spread onto message
       const msg = result.message as Record<string, unknown>
@@ -567,7 +588,9 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
+      const result = await client.getMessageById(
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      )
 
       // tokenAmounts is on message with SourceTokenData fields
       const msg = result.message as unknown as {
@@ -610,7 +633,9 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
+      const result = await client.getMessageById(
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      )
 
       // tokenAmounts is on message
       const msg = result.message as unknown as { tokenAmounts: { token: string; amount: bigint }[] }
@@ -625,7 +650,9 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageById('0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
+      const result = await client.getMessageById(
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      )
 
       // The message should have sourceChainSelector which decodeMessage requires
       const message = result.message as unknown as Record<string, unknown>
