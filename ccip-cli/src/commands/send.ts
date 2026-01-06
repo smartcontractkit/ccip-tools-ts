@@ -1,4 +1,4 @@
-import { requireRouter } from '@chainlink/ccip-config'
+import { requireRouter } from '@chainlink/ccip-config/src/index.ts'
 import {
   type AnyMessage,
   type CCIPVersion,

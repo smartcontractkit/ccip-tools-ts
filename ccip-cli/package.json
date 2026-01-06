@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck",
     "build": "npm run clean && tsc -p ./tsconfig.build.json && npm run patch-dist",
-    "patch-dist": "chmod +x ./dist/index.js && find ./dist -type f -name \"*.js\" -exec sed -i.bkp 's|@chainlink/ccip-sdk/src/.*\\.ts|@chainlink/ccip-sdk|g' {} + && find ./dist -type f -name \"*.bkp\" -delete",
+    "patch-dist": "chmod +x ./dist/index.js && find ./dist -type f -name \"*.js\" -exec sed -i.bkp 's|@chainlink/ccip-sdk/src/.*\\.ts|@chainlink/ccip-sdk|g; s|@chainlink/ccip-config/src/index\\.ts|@chainlink/ccip-config|g; s|@chainlink/ccip-config/src/chains/evm/mainnet\\.ts|@chainlink/ccip-config/chains/evm/mainnet|g; s|@chainlink/ccip-config/src/chains/evm/testnet\\.ts|@chainlink/ccip-config/chains/evm/testnet|g; s|@chainlink/ccip-config/src/chains/solana/index\\.ts|@chainlink/ccip-config/chains/solana|g; s|@chainlink/ccip-config/src/chains/aptos/index\\.ts|@chainlink/ccip-config/chains/aptos|g; s|@chainlink/ccip-config/src/chains/sui/index\\.ts|@chainlink/ccip-config/chains/sui|g; s|@chainlink/ccip-config/src/chains/ton/index\\.ts|@chainlink/ccip-config/chains/ton|g' {} + && find ./dist -type f -name \"*.bkp\" -delete",
     "start": "./ccip-cli",
     "clean": "rm -rfv ./dist",
     "prepare": "npm run build"

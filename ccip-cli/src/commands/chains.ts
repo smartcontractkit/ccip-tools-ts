@@ -10,7 +10,7 @@
  * - Field extraction for specific values
  */
 
-import { getAllDeployments } from '@chainlink/ccip-config'
+import { getAllDeployments } from '@chainlink/ccip-config/src/index.ts'
 import { type ChainFamily, networkInfo } from '@chainlink/ccip-sdk/src/index.ts'
 import { search } from '@inquirer/prompts'
 import Fuse from 'fuse.js'

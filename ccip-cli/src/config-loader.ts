@@ -11,13 +11,13 @@
  */
 
 // EVM chains
-import '@chainlink/ccip-config/chains/evm/mainnet'
-import '@chainlink/ccip-config/chains/evm/testnet'
+import '@chainlink/ccip-config/src/chains/evm/mainnet.ts'
+import '@chainlink/ccip-config/src/chains/evm/testnet.ts'
 
 // Non-EVM chains
-import '@chainlink/ccip-config/chains/solana'
-import '@chainlink/ccip-config/chains/aptos'
-import '@chainlink/ccip-config/chains/sui'
-import '@chainlink/ccip-config/chains/ton'
+import '@chainlink/ccip-config/src/chains/solana/index.ts'
+import '@chainlink/ccip-config/src/chains/aptos/index.ts'
+import '@chainlink/ccip-config/src/chains/sui/index.ts'
+import '@chainlink/ccip-config/src/chains/ton/index.ts'
 
 export {}
