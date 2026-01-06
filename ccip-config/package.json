@@ -1,0 +1,122 @@
+{
+  "name": "@chainlink/ccip-config",
+  "version": "0.93.0",
+  "description": "CCIP chain configuration and registry",
+  "author": "Chainlink devs",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smartcontractkit/ccip-tools-ts.git"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./chains": {
+      "types": "./dist/chains/index.d.ts",
+      "default": "./dist/chains/index.js"
+    },
+    "./chains/evm": {
+      "types": "./dist/chains/evm/index.d.ts",
+      "default": "./dist/chains/evm/index.js"
+    },
+    "./chains/evm/mainnet": {
+      "types": "./dist/chains/evm/mainnet.d.ts",
+      "default": "./dist/chains/evm/mainnet.js"
+    },
+    "./chains/evm/testnet": {
+      "types": "./dist/chains/evm/testnet.d.ts",
+      "default": "./dist/chains/evm/testnet.js"
+    },
+    "./chains/solana": {
+      "types": "./dist/chains/solana/index.d.ts",
+      "default": "./dist/chains/solana/index.js"
+    },
+    "./chains/solana/mainnet": {
+      "types": "./dist/chains/solana/mainnet.d.ts",
+      "default": "./dist/chains/solana/mainnet.js"
+    },
+    "./chains/solana/testnet": {
+      "types": "./dist/chains/solana/testnet.d.ts",
+      "default": "./dist/chains/solana/testnet.js"
+    },
+    "./chains/aptos": {
+      "types": "./dist/chains/aptos/index.d.ts",
+      "default": "./dist/chains/aptos/index.js"
+    },
+    "./chains/aptos/mainnet": {
+      "types": "./dist/chains/aptos/mainnet.d.ts",
+      "default": "./dist/chains/aptos/mainnet.js"
+    },
+    "./chains/aptos/testnet": {
+      "types": "./dist/chains/aptos/testnet.d.ts",
+      "default": "./dist/chains/aptos/testnet.js"
+    },
+    "./chains/sui": {
+      "types": "./dist/chains/sui/index.d.ts",
+      "default": "./dist/chains/sui/index.js"
+    },
+    "./chains/sui/mainnet": {
+      "types": "./dist/chains/sui/mainnet.d.ts",
+      "default": "./dist/chains/sui/mainnet.js"
+    },
+    "./chains/sui/testnet": {
+      "types": "./dist/chains/sui/testnet.d.ts",
+      "default": "./dist/chains/sui/testnet.js"
+    },
+    "./chains/ton": {
+      "types": "./dist/chains/ton/index.d.ts",
+      "default": "./dist/chains/ton/index.js"
+    },
+    "./chains/ton/mainnet": {
+      "types": "./dist/chains/ton/mainnet.d.ts",
+      "default": "./dist/chains/ton/mainnet.js"
+    },
+    "./chains/ton/testnet": {
+      "types": "./dist/chains/ton/testnet.d.ts",
+      "default": "./dist/chains/ton/testnet.js"
+    },
+    "./src/*": "./src/*"
+  },
+  "sideEffects": [
+    "./dist/chains/**/*.js",
+    "./src/chains/**/*.ts"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "lint": "prettier --check ./src && eslint ./src",
+    "lint:fix": "prettier --write ./src && eslint --fix ./src",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run typecheck",
+    "build": "npm run clean && tsc -p ./tsconfig.build.json",
+    "clean": "rm -rfv ./dist",
+    "prepare": "npm run build"
+  },
+  "files": [
+    "dist",
+    "src",
+    "tsconfig.json",
+    "!**/*.test.*",
+    "!**/__tests__",
+    "!**/__mocks__"
+  ],
+  "dependencies": {
+    "@chainlink/ccip-sdk": "^0.93.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "25.0.3",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-import-resolver-typescript": "4.4.4",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-jsdoc": "^61.5.0",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-tsdoc": "^0.5.0",
+    "prettier": "^3.7.4",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.51.0"
+  }
+}

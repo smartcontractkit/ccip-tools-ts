@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- SDK: Browser compatibility - explicit `buffer` dependency and imports for cross-platform support
-- CI: Added `publint` and `@arethetypeswrong/cli` validation for package exports
-- ESLint: `import/no-nodejs-modules` rule prevents Node.js-only imports in SDK
-- Docs: Cross-Platform Portability guidelines in CONTRIBUTING.md
+- **New Package**: `@chainlink/ccip-config` - Chain deployment registry with router addresses and display names
+  - Tree-shakable imports: `import '@chainlink/ccip-config/chains/evm/mainnet'`
+  - Lookup by SDK canonical name: `getDeploymentByName('ethereum-mainnet')`
+  - Lookup by selector: `getRouter()`, `requireRouter()`, `getDisplayName()`
+- **CLI**: New `chains` command - list, search, and lookup chain info
+  - Filters: `--family`, `--mainnet`, `--testnet`, `--ccip-only`
+  - Search: `ccip chains --search arbitrum`
+  - Interactive: `ccip chains -i`
+- **SDK**: Browser compatibility with explicit `buffer` imports
+- **CI**: Added `publint` and `@arethetypeswrong/cli` for package validation
 
 ## [0.93.0] - 2025-12-26 - Pre-release
 

@@ -369,6 +369,62 @@ ccip-cli lane-latency ethereum-mainnet polygon-mainnet --api-url https://custom-
 
 ---
 
+### chains
+
+List and lookup CCIP chain configuration including router addresses.
+
+```bash
+ccip-cli chains [identifier] [options]
+```
+
+**Arguments:**
+- `identifier` - (Optional) Chain name, chainId, or selector to lookup
+
+**Options:**
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--family <type>` | | Filter by chain family: `evm`, `solana`, `aptos`, `sui`, `ton` |
+| `--mainnet` | | Show only mainnets |
+| `--testnet` | | Show only testnets |
+| `--ccip-only` | | Show only CCIP-enabled chains (with router addresses) |
+| `--search <term>` | `-s` | Fuzzy search chains by name |
+| `--interactive` | `-i` | Interactive mode with type-ahead filtering |
+| `--json` | | Output as JSON for scripting |
+| `--field <name>` | | Output only a specific field value |
+| `--count` | | Show count summary only |
+
+**Examples:**
+
+```bash
+# List all chains
+ccip-cli chains
+
+# List EVM mainnets with CCIP routers
+ccip-cli chains --family evm --mainnet --ccip-only
+
+# Lookup a specific chain
+ccip-cli chains ethereum-mainnet
+ccip-cli chains 1                    # by EVM chainId
+ccip-cli chains 5009297550715157269  # by selector
+
+# Fuzzy search (typo-tolerant)
+ccip-cli chains --search "arbtrum"   # finds "arbitrum"
+
+# Interactive mode - browse and select
+ccip-cli chains -i
+
+# Get just the router address for scripting
+ROUTER=$(ccip-cli chains ethereum-mainnet --field router)
+
+# JSON output for processing
+ccip-cli chains --json --family evm --mainnet | jq '.[].router'
+
+# Count CCIP-enabled chains
+ccip-cli chains --count --ccip-only
+```
+
+---
+
 ## Output Formats
 
 | Format | Use Case |

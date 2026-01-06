@@ -7,10 +7,11 @@ TypeScript SDK and CLI for [CCIP](https://chain.link/cross-chain) (Cross-Chain I
 
 ## Packages
 
-| Package                           | Description                         | Install                              |
-| --------------------------------- | ----------------------------------- | ------------------------------------ |
-| [@chainlink/ccip-sdk](./ccip-sdk) | TypeScript SDK for CCIP integration | `npm install @chainlink/ccip-sdk`    |
-| [@chainlink/ccip-cli](./ccip-cli) | Command-line interface              | `npm install -g @chainlink/ccip-cli` |
+| Package                               | Description                          | Install                                 |
+| ------------------------------------- | ------------------------------------ | --------------------------------------- |
+| [@chainlink/ccip-sdk](./ccip-sdk)     | TypeScript SDK for CCIP integration  | `npm install @chainlink/ccip-sdk`       |
+| [@chainlink/ccip-cli](./ccip-cli)     | Command-line interface               | `npm install -g @chainlink/ccip-cli`    |
+| [@chainlink/ccip-config](./ccip-config) | Chain deployment configuration     | `npm install @chainlink/ccip-config`    |
 
 ## Quick Start
 

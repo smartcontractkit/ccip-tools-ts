@@ -1,3 +1,4 @@
+import { requireRouter } from '@chainlink/ccip-config'
 import {
   type AnyMessage,
   type CCIPVersion,
@@ -7,7 +8,7 @@ import {
   CCIPArgumentInvalidError,
   CCIPChainFamilyUnsupportedError,
   CCIPTokenNotFoundError,
-  ChainFamily,
+  ChainFamily as ChainFamilyEnum,
   estimateExecGasForRequest,
   getDataBytes,
   networkInfo,
@@ -16,14 +17,16 @@ import {
 import { type BytesLike, dataLength, formatUnits, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
 
+import '../config-loader.ts'
 import type { GlobalOpts } from '../index.ts'
 import { showRequests } from './show.ts'
 import type { Ctx } from './types.ts'
 import { getCtx, logParsedError, parseTokenAmounts } from './utils.ts'
 import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 
-export const command = 'send <source> <router> <dest>'
-export const describe = 'Send a CCIP message from router on source to dest'
+export const command = 'send <source> <dest>'
+export const describe =
+  'Send a CCIP message from source to dest (router auto-detected or use --router)'
 
 /**
  * Yargs builder for the send command.
@@ -38,11 +41,6 @@ export const builder = (yargs: Argv) =>
       describe: 'source network, chainId or name',
       example: 'ethereum-testnet-sepolia',
     })
-    .positional('router', {
-      type: 'string',
-      demandOption: true,
-      describe: 'router contract address on source',
-    })
     .positional('dest', {
       type: 'string',
       demandOption: true,
@@ -50,6 +48,10 @@ export const builder = (yargs: Argv) =>
       example: 'ethereum-testnet-sepolia-arbitrum-1',
     })
     .options({
+      router: {
+        type: 'string',
+        describe: 'Router contract address on source (auto-detected from ccip-config if omitted)',
+      },
       receiver: {
         alias: 'R',
         type: 'string',
@@ -156,6 +158,16 @@ async function sendMessage(
   const { logger } = ctx
   const sourceNetwork = networkInfo(argv.source)
   const destNetwork = networkInfo(argv.dest)
+
+  // Resolve router: use provided value or auto-detect from ccip-config
+  let router: string
+  if (argv.router) {
+    router = argv.router
+  } else {
+    router = requireRouter(sourceNetwork.chainSelector)
+    logger.debug('Auto-detected router:', router)
+  }
+
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
 
@@ -178,7 +190,7 @@ async function sendMessage(
   let tokenReceiver
   let accounts,
     accountIsWritableBitmap = 0n
-  if (destNetwork.family === ChainFamily.Solana) {
+  if (destNetwork.family === ChainFamilyEnum.Solana) {
     if (argv.tokenReceiver) tokenReceiver = argv.tokenReceiver
     else if (!tokenAmounts.length) {
       tokenReceiver = '11111111111111111111111111111111'
@@ -219,12 +231,12 @@ async function sendMessage(
 
   if (argv.estimateGasLimit != null || argv.onlyEstimate) {
     // TODO: implement for all chain families
-    if (destNetwork.family !== ChainFamily.EVM)
+    if (destNetwork.family !== ChainFamilyEnum.EVM)
       throw new CCIPChainFamilyUnsupportedError(destNetwork.family, {
         context: { feature: 'gas estimation' },
       })
     const dest = (await getChain(destNetwork.chainSelector)) as unknown as EVMChain
-    const onRamp = await source.getOnRampForRouter(argv.router, destNetwork.chainSelector)
+    const onRamp = await source.getOnRampForRouter(router, destNetwork.chainSelector)
     const lane = {
       sourceChainSelector: source.network.chainSelector,
       destChainSelector: destNetwork.chainSelector,
@@ -256,10 +268,10 @@ async function sendMessage(
   // `--allow-out-of-order-exec` forces EVMExtraArgsV2, which shouldn't work on v1.2 lanes;
   // otherwise, fallsback to EVMExtraArgsV1 (compatible with v1.2 & v1.5)
   const extraArgs = {
-    ...(argv.allowOutOfOrderExec != null || destNetwork.family !== ChainFamily.EVM
+    ...(argv.allowOutOfOrderExec != null || destNetwork.family !== ChainFamilyEnum.EVM
       ? { allowOutOfOrderExecution: !!argv.allowOutOfOrderExec }
       : {}),
-    ...(destNetwork.family === ChainFamily.Solana
+    ...(destNetwork.family === ChainFamilyEnum.Solana
       ? { computeUnits: BigInt(argv.gasLimit) }
       : { gasLimit: BigInt(argv.gasLimit) }),
     ...(tokenReceiver ? { tokenReceiver } : {}),
@@ -272,7 +284,7 @@ async function sendMessage(
       feeToken = (source.constructor as ChainStatic).getAddress(argv.feeToken)
       feeTokenInfo = await source.getTokenInfo(feeToken)
     } catch (_) {
-      const feeTokens = await source.getFeeTokens(argv.router)
+      const feeTokens = await source.getFeeTokens(router)
       logger.debug('supported feeTokens:', feeTokens)
       for (const [token, info] of Object.entries(feeTokens)) {
         if (info.symbol === 'UNKNOWN' || info.symbol !== argv.feeToken) continue
@@ -283,7 +295,7 @@ async function sendMessage(
       if (!feeTokenInfo) throw new CCIPTokenNotFoundError(argv.feeToken)
     }
   } else {
-    const nativeToken = await source.getNativeTokenForRouter(argv.router)
+    const nativeToken = await source.getNativeTokenForRouter(router)
     feeTokenInfo = await source.getTokenInfo(nativeToken)
   }
 
@@ -298,6 +310,7 @@ async function sendMessage(
   // calculate fee
   const fee = await source.getFee({
     ...argv,
+    router,
     destChainSelector: destNetwork.chainSelector,
     message,
   })
@@ -316,6 +329,7 @@ async function sendMessage(
   if (!walletAddress) [walletAddress, wallet] = await loadChainWallet(source, argv)
   const request = await source.sendMessage({
     ...argv,
+    router,
     destChainSelector: destNetwork.chainSelector,
     message: { ...message, fee },
     wallet,
