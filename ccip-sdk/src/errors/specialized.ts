@@ -1529,6 +1529,29 @@ export class CCIPTokenMintNotFoundError extends CCIPError {
   }
 }
 
+/** Thrown when token mint exists but is not a valid SPL token (wrong owner program). */
+export class CCIPTokenMintInvalidError extends CCIPError {
+  override readonly name = 'CCIPTokenMintInvalidError'
+  /** Creates a token mint invalid error. */
+  constructor(
+    token: string,
+    actualOwner: string,
+    expectedOwners: string[],
+    options?: CCIPErrorOptions,
+  ) {
+    super(
+      CCIPErrorCode.TOKEN_MINT_INVALID,
+      `Token ${token} is not a valid SPL token mint. ` +
+        `Account is owned by ${actualOwner}, but expected one of: ${expectedOwners.join(' or ')}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, token, actualOwner, expectedOwners },
+      },
+    )
+  }
+}
+
 /** Thrown when token amount is invalid. */
 export class CCIPTokenAmountInvalidError extends CCIPError {
   override readonly name = 'CCIPTokenAmountInvalidError'
@@ -1540,6 +1563,23 @@ export class CCIPTokenAmountInvalidError extends CCIPError {
       {
         ...options,
         isTransient: false,
+      },
+    )
+  }
+}
+
+/** Thrown when token account (e.g., Solana ATA) does not exist for holder. */
+export class CCIPTokenAccountNotFoundError extends CCIPError {
+  override readonly name = 'CCIPTokenAccountNotFoundError'
+  /** Creates a token account not found error. */
+  constructor(token: string, holder: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.TOKEN_ACCOUNT_NOT_FOUND,
+      `Token account not found for token ${token} and holder ${holder}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, token, holder },
       },
     )
   }

@@ -8,7 +8,7 @@ import { type Memoized, memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { streamTransactionsForAddress } from './logs.ts'
-import { type ChainContext, type LogFilter, Chain } from '../chain.ts'
+import { type ChainContext, type GetBalanceOpts, type LogFilter, Chain } from '../chain.ts'
 import {
   CCIPArgumentInvalidError,
   CCIPExtraArgsInvalidError,
@@ -523,6 +523,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       this.logger.debug(`Failed to get jetton data for ${token}:`, error)
       return { symbol: '', decimals: (this.constructor as typeof TONChain).decimals }
     }
+  }
+
+  /** {@inheritDoc Chain.getBalance} */
+  async getBalance(_opts: GetBalanceOpts): Promise<bigint> {
+    return Promise.reject(new CCIPNotImplementedError('TONChain.getBalance'))
   }
 
   /** {@inheritDoc Chain.getTokenAdminRegistryFor} */

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: `Chain.getBalance()` method for querying native and token balances (EVM, Solana, Aptos)
+- SDK: Solana `resolveATA()` utility for ATA derivation with automatic SPL Token vs Token-2022 detection
+- CLI: `token <network> <holder> [token]` command for balance queries
+
 ## [0.94.0] - 2026-01-14 - Pre-release
 
 - SDK: Browser compatibility - explicit `buffer` dependency and imports for cross-platform support
