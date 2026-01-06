@@ -23,6 +23,7 @@ This tool is provided under an MIT license and is for convenience and illustrati
 | Manually execute stuck message | CLI | `ccip-cli manualExec 0xTxHash` |
 | Check supported tokens | CLI | `ccip-cli getSupportedTokens chain router` |
 | Query lane latency | CLI/SDK | `ccip-cli lane-latency eth-mainnet arb-mainnet` |
+| Lookup chain/router info | CLI | `ccip-cli chains ethereum-mainnet` |
 | Integrate CCIP in your dApp | SDK | Import and use in your code |
 
 ## Quick Start
@@ -78,26 +79,31 @@ console.log('Fee:', fee.toString())
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│  ccip-tools-ts                                                      │
-│                                                                     │
-│  ┌──────────────────────────┐        ┌──────────────────────────┐  │
-│  │                          │        │                          │  │
-│  │   @chainlink/ccip-sdk    │◀───────│   @chainlink/ccip-cli    │  │
-│  │                          │        │                          │  │
-│  │  • Chain abstraction     │        │  • show, send, manualExec│  │
-│  │  • Message tracking      │        │  • parse, getSupportedTokens│
-│  │  • Fee estimation        │        │  • lane-latency          │  │
-│  │  • Transaction building  │        │  • RPC & wallet mgmt     │  │
-│  │  • API client            │        │  • Output formatting     │  │
-│  │                          │        │                          │  │
-│  └──────────────────────────┘        └──────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  ccip-tools-ts                                                               │
+│                                                                              │
+│  ┌────────────────────┐  ┌────────────────────┐  ┌────────────────────────┐ │
+│  │                    │  │                    │  │                        │ │
+│  │ @chainlink/ccip-sdk│  │@chainlink/ccip-    │  │  @chainlink/ccip-cli   │ │
+│  │                    │  │       config       │  │                        │ │
+│  │ • Chain abstraction│  │                    │  │ • show, send, manualExec│
+│  │ • Message tracking │  │ • Router addresses │  │ • chains, parse        │ │
+│  │ • Fee estimation   │  │ • Display names    │  │ • getSupportedTokens   │ │
+│  │ • Tx building      │  │ • Chain registry   │  │ • lane-latency         │ │
+│  │ • API client       │  │                    │  │ • RPC & wallet mgmt    │ │
+│  │                    │  │                    │  │                        │ │
+│  └─────────▲──────────┘  └─────────▲──────────┘  └───────────┬────────────┘ │
+│            │                       │                         │              │
+│            └───────────────────────┴─────────────────────────┘              │
+│                              CLI uses both                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **SDK** - Library for programmatic integration. Supports multiple chain families.
 
-**CLI** - Command-line tool that uses the SDK. Great for debugging, testing, and scripting.
+**Config** - Chain deployment registry with router addresses and display names.
+
+**CLI** - Command-line tool that uses the SDK and Config. Great for debugging, testing, and scripting.
 
 ## Supported Chains
 
@@ -121,6 +127,7 @@ console.log('Fee:', fee.toString())
 |-------|-------------|
 | [SDK Guide](./sdk/) | Integrate CCIP in your TypeScript application |
 | [CLI Reference](./cli/) | Command-line usage and examples |
+| [Config Reference](./config/) | Chain deployment registry (router addresses) |
 | [Contributing](./contributing/) | Development setup and guidelines |
 | [Adding New Chain](./adding-new-chain) | Implement support for a new blockchain |
 

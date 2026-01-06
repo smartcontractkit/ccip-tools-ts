@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 
 import {
   type Chain,
+  type ChainFamily,
   type ChainGetter,
   type ChainTransaction,
   type EVMChain,
@@ -11,7 +12,7 @@ import {
   CCIPNetworkFamilyUnsupportedError,
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
-  ChainFamily,
+  ChainFamily as ChainFamilyEnum,
   networkInfo,
   supportedChains,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -201,19 +202,19 @@ export async function loadChainWallet(chain: Chain, argv: { wallet?: unknown; rp
 
   let wallet
   switch (chain.network.family) {
-    case ChainFamily.EVM:
+    case ChainFamilyEnum.EVM:
       wallet = await loadEvmWallet((chain as EVMChain).provider, argv)
       return [await wallet.getAddress(), wallet] as const
-    case ChainFamily.Solana:
+    case ChainFamilyEnum.Solana:
       wallet = await loadSolanaWallet(argv)
       return [wallet.publicKey.toBase58(), wallet] as const
-    case ChainFamily.Aptos:
+    case ChainFamilyEnum.Aptos:
       wallet = await loadAptosWallet(argv)
       return [wallet.accountAddress.toString(), wallet] as const
-    case ChainFamily.Sui:
+    case ChainFamilyEnum.Sui:
       wallet = loadSuiWallet(argv)
       return [wallet.toSuiAddress(), wallet] as const
-    case ChainFamily.TON:
+    case ChainFamilyEnum.TON:
       wallet = await loadTonWallet((chain as TONChain).provider, argv, chain.network.isTestnet)
       return [wallet.getAddress(), wallet] as const
     default:

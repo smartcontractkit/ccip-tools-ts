@@ -45,7 +45,7 @@ export default defineConfig(
   },
   {
     // Ban generic Error constructor - enforce typed error classes
-    files: ['ccip-sdk/src/**/*.ts', 'ccip-cli/src/**/*.ts'],
+    files: ['ccip-sdk/src/**/*.ts', 'ccip-cli/src/**/*.ts', 'ccip-config/src/**/*.ts'],
     ignores: ['**/*.test.ts', '**/__tests__/**', '**/__mocks__/**'],
     rules: {
       'no-restricted-syntax': [
@@ -64,9 +64,9 @@ export default defineConfig(
     },
   },
   {
-    // Cross-platform portability - ban Node.js built-in modules in SDK production code
-    // SDK must work in both Node.js and browsers. See CONTRIBUTING.md "Cross-Platform Portability"
-    files: ['ccip-sdk/src/**/*.ts'],
+    // Cross-platform portability - ban Node.js built-in modules in SDK and ccip-config production code
+    // SDK and ccip-config must work in both Node.js and browsers. See CONTRIBUTING.md "Cross-Platform Portability"
+    files: ['ccip-sdk/src/**/*.ts', 'ccip-config/src/**/*.ts'],
     ignores: ['**/*.test.ts', '**/__tests__/**', '**/__mocks__/**'],
     rules: {
       'import/no-nodejs-modules': [
@@ -146,9 +146,9 @@ export default defineConfig(
       'tsdoc/syntax': 'error', // Enforced - all syntax issues have been fixed
     },
   },
-  // JSDoc completeness enforcement (both packages, exclude tests)
+  // JSDoc completeness enforcement (all packages, exclude tests)
   {
-    files: ['ccip-sdk/src/**/*.ts', 'ccip-cli/src/**/*.ts'],
+    files: ['ccip-sdk/src/**/*.ts', 'ccip-cli/src/**/*.ts', 'ccip-config/src/**/*.ts'],
     ignores: ['**/*.test.ts', '**/__tests__/**', '**/__mocks__/**', '**/idl/**'],
     plugins: { jsdoc },
     rules: {
