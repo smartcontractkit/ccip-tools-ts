@@ -30,6 +30,7 @@ import type { PickDeep, SetRequired } from 'type-fest'
 
 import {
   type ChainContext,
+  type GetBalanceOpts,
   type LogFilter,
   type TokenInfo,
   type TokenPoolRemote,
@@ -111,6 +112,7 @@ import {
   getErrorFromLogs,
   hexDiscriminator,
   parseSolanaLogs,
+  resolveATA,
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
@@ -620,6 +622,30 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       }
     } else {
       throw new CCIPTokenDataParseError(token)
+    }
+  }
+
+  /** {@inheritDoc Chain.getBalance} */
+  async getBalance(opts: GetBalanceOpts): Promise<bigint> {
+    const { address, token } = opts
+    const addressPubkey = new PublicKey(address)
+
+    if (!token) {
+      return BigInt(await this.connection.getBalance(addressPubkey))
+    }
+
+    const tokenPubkey = new PublicKey(token)
+    const resolved = await resolveATA(this.connection, tokenPubkey, addressPubkey)
+    if (!resolved) {
+      this.logger.warn(`Token mint ${token} not found on-chain`)
+      return 0n
+    }
+
+    try {
+      const accountInfo = await this.connection.getTokenAccountBalance(resolved.ata)
+      return BigInt(accountInfo.value.amount)
+    } catch {
+      return 0n // Account doesn't exist = 0 balance
     }
   }
 

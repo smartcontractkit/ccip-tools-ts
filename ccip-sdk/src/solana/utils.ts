@@ -1,5 +1,7 @@
 import { type IdlTypes, eventDiscriminator } from '@coral-xyz/anchor'
+import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import {
+  type AccountInfo,
   type AddressLookupTableAccount,
   type Connection,
   type Signer,
@@ -23,6 +25,54 @@ import { getDataBytes, sleep } from '../utils.ts'
 import type { IDL as BASE_TOKEN_POOL_IDL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import type { UnsignedSolanaTx, Wallet } from './types.ts'
 import type { RateLimiterState } from '../chain.ts'
+
+/**
+ * Result of resolving an Associated Token Account for a given mint and owner.
+ */
+export type ResolvedATA = {
+  /** The derived ATA address */
+  ata: PublicKey
+  /** The token program that owns the mint (SPL Token or Token-2022) */
+  tokenProgram: PublicKey
+  /** The raw mint account info */
+  mintInfo: AccountInfo<Buffer>
+}
+
+/**
+ * Resolves the Associated Token Account (ATA) for a given mint and owner.
+ * Automatically detects the correct token program (SPL Token vs Token-2022).
+ *
+ * @param connection - Solana connection instance
+ * @param mint - Token mint address
+ * @param owner - Owner's wallet address
+ * @returns ResolvedATA with ata, tokenProgram, and mintInfo, or null if mint doesn't exist
+ *
+ * @example
+ * ```typescript
+ * const result = await resolveATA(connection, mintPubkey, ownerPubkey)
+ * if (!result) {
+ *   // Mint doesn't exist
+ *   return
+ * }
+ * const { ata, tokenProgram } = result
+ * ```
+ */
+export async function resolveATA(
+  connection: Connection,
+  mint: PublicKey,
+  owner: PublicKey,
+): Promise<ResolvedATA | null> {
+  const mintInfo = await connection.getAccountInfo(mint)
+  if (!mintInfo) {
+    return null
+  }
+  const ata = getAssociatedTokenAddressSync(mint, owner, undefined, mintInfo.owner)
+  return {
+    ata,
+    tokenProgram: mintInfo.owner,
+    mintInfo,
+  }
+}
 
 /**
  * Generates a hex-encoded discriminator for a Solana event.

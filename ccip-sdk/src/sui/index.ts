@@ -9,7 +9,7 @@ import { type BytesLike, AbiCoder, hexlify, isBytesLike } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { AptosChain } from '../aptos/index.ts'
-import { type ChainContext, type LogFilter, Chain } from '../chain.ts'
+import { type ChainContext, type GetBalanceOpts, type LogFilter, Chain } from '../chain.ts'
 import {
   CCIPContractNotRouterError,
   CCIPDataFormatUnsupportedError,
@@ -417,7 +417,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
   }
 
-  /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
+  /** {@inheritDoc Chain.getBalance} */
+  async getBalance(_opts: GetBalanceOpts): Promise<bigint> {
+    return Promise.reject(new CCIPNotImplementedError('SuiChain.getBalance'))
+  }
+
   /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
   getTokenAdminRegistryFor(_address: string): Promise<string> {
     return Promise.reject(new CCIPNotImplementedError())
