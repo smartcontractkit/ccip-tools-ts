@@ -29,7 +29,13 @@ import type { TypedContract } from 'ethers-abitype'
 import { memoize } from 'micro-memoize'
 import type { PickDeep, SetRequired } from 'type-fest'
 
-import { type ChainContext, type LogFilter, type TokenPoolRemote, Chain } from '../chain.ts'
+import {
+  type ChainContext,
+  type GetBalanceOpts,
+  type LogFilter,
+  type TokenPoolRemote,
+  Chain,
+} from '../chain.ts'
 import {
   CCIPAddressInvalidEvmError,
   CCIPBlockNotFoundError,
@@ -858,6 +864,22 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       contract.name(),
     ])
     return { symbol, decimals: Number(decimals), name }
+  }
+
+  /** {@inheritDoc Chain.getBalance} */
+  async getBalance(opts: GetBalanceOpts): Promise<bigint> {
+    const { address, token } = opts
+
+    if (!token) {
+      return this.provider.getBalance(address)
+    }
+
+    const contract = new Contract(
+      token,
+      interfaces.Token,
+      this.provider,
+    ) as unknown as TypedContract<typeof Token_ABI>
+    return contract.balanceOf(address)
   }
 
   /**

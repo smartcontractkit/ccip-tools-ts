@@ -23,6 +23,7 @@ import type { PickDeep, SetRequired } from 'type-fest'
 
 import {
   type ChainContext,
+  type GetBalanceOpts,
   type LogFilter,
   type TokenInfo,
   type TokenPoolRemote,
@@ -345,6 +346,22 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       }
     }
     throw CCIPError.from(firstErr ?? `Could not view 'get_token' in ${tokenPool}`, 'UNKNOWN')
+  }
+
+  /** {@inheritDoc Chain.getBalance} */
+  async getBalance(opts: GetBalanceOpts): Promise<bigint> {
+    const { address, token } = opts
+    const asset = token ?? '0x1::aptos_coin::AptosCoin'
+
+    try {
+      const balance = await this.provider.getBalance({
+        accountAddress: address,
+        asset,
+      })
+      return BigInt(balance)
+    } catch {
+      return 0n
+    }
   }
 
   /** {@inheritDoc Chain.getTokenAdminRegistryFor} */

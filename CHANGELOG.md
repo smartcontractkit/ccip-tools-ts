@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: `Chain.getBalance()` method for querying native and token balances (EVM, Solana, Aptos)
+- SDK: Solana `resolveATA()` utility for ATA derivation with automatic SPL Token vs Token-2022 detection
+- CLI: `token <network> <address> [token]` command for balance queries
 - SDK: Browser compatibility - explicit `buffer` dependency and imports for cross-platform support
 - CI: Added `publint` and `@arethetypeswrong/cli` validation for package exports
 - ESLint: `import/no-nodejs-modules` rule prevents Node.js-only imports in SDK
