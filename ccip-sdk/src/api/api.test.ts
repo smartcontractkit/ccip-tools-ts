@@ -672,6 +672,116 @@ describe('CCIPAPIClient', () => {
       assert.equal(decoded.receiver.toLowerCase(), result.message.receiver.toLowerCase())
     })
   })
+
+  describe('getTransferStatus', () => {
+    const mockMessageResponse = {
+      messageId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      sender: '0x742d35Cc6634C0532925a3b8D5c8C22C5B2D8a3E',
+      receiver: '0x893F0bCaa7F325c2b6bBd2133536f4e4b8fea88e',
+      status: 'SUCCESS',
+      sourceNetworkInfo: {
+        name: 'ethereum-mainnet',
+        chainSelector: '5009297550715157269',
+        chainId: '1',
+        chainFamily: 'EVM',
+      },
+      destNetworkInfo: {
+        name: 'arbitrum-mainnet',
+        chainSelector: '4949039107694359620',
+        chainId: '42161',
+        chainFamily: 'EVM',
+      },
+      sendTransactionHash: '0x9428debf5e5f01234567890abcdef1234567890abcdef1234567890abcdef12',
+      sendTimestamp: '2023-12-01T10:30:00Z',
+      tokenAmounts: [],
+      extraArgs: { gasLimit: '400000', allowOutOfOrderExecution: false },
+      readyForManualExecution: false,
+      finality: 0,
+      fees: {},
+    }
+
+    it('should return only the status field', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockMessageResponse),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const status = await client.getTransferStatus(
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      )
+
+      assert.equal(status, 'SUCCESS')
+    })
+
+    it('should return different status values', async () => {
+      for (const expectedStatus of ['SENT', 'SOURCE_FINALIZED', 'COMMITTED', 'FAILED']) {
+        const response = { ...mockMessageResponse, status: expectedStatus }
+        const customFetch = mock.fn(() =>
+          Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(response),
+          }),
+        )
+        const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+        const status = await client.getTransferStatus(
+          '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+        )
+
+        assert.equal(status, expectedStatus)
+      }
+    })
+
+    it('should propagate CCIPMessageIdValidationError for invalid format', async () => {
+      const client = new CCIPAPIClient()
+      await assert.rejects(
+        async () => await client.getTransferStatus('invalid'),
+        (err: unknown) =>
+          err instanceof CCIPMessageIdValidationError &&
+          err.message.includes('Invalid messageId format'),
+      )
+    })
+
+    it('should propagate CCIPMessageIdNotFoundError on 404', async () => {
+      const errorResponse = { error: 'NOT_FOUND', message: 'Message not found' }
+      globalThis.fetch = (() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.NOT_FOUND,
+          statusText: 'Not Found',
+          json: () => Promise.resolve(errorResponse),
+        })) as unknown as typeof fetch
+
+      const client = new CCIPAPIClient()
+      await assert.rejects(
+        async () =>
+          await client.getTransferStatus(
+            '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+          ),
+        (err: unknown) => err instanceof CCIPMessageIdNotFoundError,
+      )
+    })
+
+    it('should propagate CCIPHttpError on other errors', async () => {
+      globalThis.fetch = (() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.INTERNAL_SERVER_ERROR,
+          statusText: 'Internal Server Error',
+          json: () => Promise.resolve({ error: 'INTERNAL_SERVER_ERROR', message: 'Error' }),
+        })) as unknown as typeof fetch
+
+      const client = new CCIPAPIClient()
+      await assert.rejects(
+        async () =>
+          await client.getTransferStatus(
+            '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+          ),
+        (err: unknown) => err instanceof CCIPHttpError && err.isTransient === true,
+      )
+    })
+  })
 })
 
 describe('Chain with apiClient: null', () => {
