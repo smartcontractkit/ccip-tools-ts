@@ -1,9 +1,30 @@
-import type { APIErrorResponse, LaneLatencyResponse, RawLaneLatencyResponse } from './types.ts'
-import { CCIPHttpError, CCIPLaneNotFoundError } from '../errors/index.ts'
+import {
+  CCIPHttpError,
+  CCIPLaneNotFoundError,
+  CCIPMessageIdNotFoundError,
+  CCIPMessageIdValidationError,
+} from '../errors/index.ts'
+import type { EVMExtraArgsV2, SVMExtraArgsV1 } from '../extra-args.ts'
 import { HttpStatus } from '../http-status.ts'
-import type { Logger, WithLogger } from '../types.ts'
+import { type Logger, type MessageStatus, type WithLogger, CCIPVersion } from '../types.ts'
+import { networkInfo } from '../utils.ts'
+import type {
+  APICCIPRequest,
+  APIErrorResponse,
+  LaneLatencyResponse,
+  RawEVMExtraArgs,
+  RawLaneLatencyResponse,
+  RawMessageResponse,
+  RawSVMExtraArgs,
+  RawTokenAmount,
+} from './types.ts'
 
-export type { APIErrorResponse, LaneLatencyResponse } from './types.ts'
+export type {
+  APICCIPRequest,
+  APICCIPRequestMetadata,
+  APIErrorResponse,
+  LaneLatencyResponse,
+} from './types.ts'
 
 /** Default CCIP API base URL */
 export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
@@ -164,4 +185,246 @@ export class CCIPAPIClient {
 
     return { totalMs: raw.totalMs }
   }
+
+  /**
+   * Fetches a CCIP message by its unique message ID.
+   *
+   * @param messageId - The message ID (0x prefix + 64 hex characters, e.g., "0x1234...abcd")
+   * @returns Promise resolving to {@link APICCIPRequest} with message details
+   *
+   * @throws {@link CCIPMessageIdValidationError} when messageId format is invalid
+   * @throws {@link CCIPMessageIdNotFoundError} when message not found (404)
+   * @throws {@link CCIPHttpError} on HTTP errors with context:
+   *   - `status` - HTTP status code
+   *   - `statusText` - HTTP status message
+   *   - `apiErrorCode` - API error code (e.g., "INVALID_MESSAGE_ID")
+   *   - `apiErrorMessage` - Human-readable error message
+   *
+   * @example Basic usage
+   * ```typescript
+   * const request = await api.getMessageById(
+   *   '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+   * )
+   * console.log(`Status: ${request.status}`)
+   * console.log(`From: ${request.message?.sender}`)
+   * ```
+   *
+   * @example Handling not found
+   * ```typescript
+   * try {
+   *   const request = await api.getMessageById(messageId)
+   * } catch (err) {
+   *   if (err instanceof CCIPMessageIdNotFoundError) {
+   *     console.error('Message not found, it may still be in transit')
+   *   }
+   * }
+   * ```
+   */
+  async getMessageById(messageId: string): Promise<APICCIPRequest> {
+    // Validate messageId format: 0x prefix + 64 hex chars
+    const hexPattern = /^0x[0-9a-fA-F]{64}$/
+    if (!hexPattern.test(messageId)) {
+      throw new CCIPMessageIdValidationError(
+        `Invalid messageId format: expected 0x prefix followed by 64 hex characters, got "${messageId}"`,
+      )
+    }
+
+    const url = `${this.baseUrl}/v1/messages/${encodeURIComponent(messageId)}`
+
+    this.logger.debug(`CCIPAPIClient: GET ${url}`)
+
+    const response = await this._fetch(url)
+
+    if (!response.ok) {
+      // Try to parse structured error response from API
+      let apiError: APIErrorResponse | undefined
+      try {
+        apiError = (await response.json()) as APIErrorResponse
+      } catch {
+        // Response body not JSON, use HTTP status only
+      }
+
+      // 404 - Message not found
+      if (response.status === HttpStatus.NOT_FOUND) {
+        throw new CCIPMessageIdNotFoundError(messageId, {
+          context: apiError
+            ? {
+                apiErrorCode: apiError.error,
+                apiErrorMessage: apiError.message,
+              }
+            : undefined,
+        })
+      }
+
+      // Generic HTTP error for other cases
+      throw new CCIPHttpError(response.status, response.statusText, {
+        context: apiError
+          ? {
+              apiErrorCode: apiError.error,
+              apiErrorMessage: apiError.message,
+            }
+          : undefined,
+      })
+    }
+
+    const raw = (await response.json()) as RawMessageResponse
+
+    this.logger.debug('getMessageById raw response:', raw)
+
+    return this._transformMessageResponse(raw)
+  }
+
+  /**
+   * Transforms raw API response to APICCIPRequest.
+   * Populates all derivable CCIPRequest fields from API data.
+   * @internal
+   */
+  private _transformMessageResponse(raw: RawMessageResponse): APICCIPRequest {
+    const sendTimestamp = Math.floor(new Date(raw.sendTimestamp).getTime() / 1000)
+    const receiptTimestamp = raw.receiptTimestamp
+      ? Math.floor(new Date(raw.receiptTimestamp).getTime() / 1000)
+      : undefined
+
+    // Build lane - all fields available from API
+    const lane = {
+      sourceChainSelector: BigInt(raw.sourceNetworkInfo.chainSelector),
+      destChainSelector: BigInt(raw.destNetworkInfo.chainSelector),
+      onRamp: raw.onramp ?? '',
+      version: parseVersion(raw.version) ?? CCIPVersion.V1_6,
+    }
+
+    // Build message with extraArgs spread and tokenAmounts included
+    const message = {
+      messageId: raw.messageId,
+      sourceChainSelector: lane.sourceChainSelector,
+      destChainSelector: lane.destChainSelector,
+      sender: raw.sender,
+      receiver: raw.receiver,
+      data: raw.data ?? '0x',
+      sequenceNumber: raw.sequenceNumber ? BigInt(raw.sequenceNumber) : 0n,
+      nonce: raw.nonce ? BigInt(raw.nonce) : 0n,
+      feeToken: raw.fees.tokenAddress ?? '',
+      feeTokenAmount: raw.fees.totalAmount ? BigInt(raw.fees.totalAmount) : 0n,
+      tokenAmounts: transformTokenAmounts(raw.tokenAmounts),
+      ...transformExtraArgs(raw.extraArgs),
+    }
+
+    // Build log and address - only transactionHash and address are available from API
+    // (topics, index, blockNumber, data not available)
+    const log = {
+      transactionHash: raw.sendTransactionHash,
+      address: raw.onramp ?? '',
+    }
+
+    // Build partial tx - only hash, timestamp, from are available from API
+    // (blockNumber, logs not available)
+    const tx = {
+      hash: raw.sendTransactionHash,
+      timestamp: sendTimestamp,
+      from: raw.origin ?? '',
+    }
+
+    // Note: We use type assertions for partial nested objects since Partial<CCIPRequest>
+    // requires complete types when provided. These are intentionally partial.
+    return {
+      // CCIPRequest fields (Partial) - cast partial objects
+      lane,
+      message: message as unknown as APICCIPRequest['message'],
+      log: log as APICCIPRequest['log'],
+      tx: tx as APICCIPRequest['tx'],
+      // API-specific fields
+      status: raw.status as MessageStatus,
+      readyForManualExecution: raw.readyForManualExecution,
+      finality: raw.finality,
+      receiptTransactionHash: raw.receiptTransactionHash ?? undefined,
+      receiptTimestamp,
+      deliveryTime: raw.deliveryTime ?? undefined,
+      sourceNetworkInfo: networkInfo(BigInt(raw.sourceNetworkInfo.chainSelector)),
+      destNetworkInfo: networkInfo(BigInt(raw.destNetworkInfo.chainSelector)),
+    }
+  }
+}
+
+/**
+ * Parses API version string to CCIPVersion enum.
+ * @param version - Version string like "1.5.0", "1.6.0", or "1.6.0-dev"
+ * @returns CCIPVersion if recognized, undefined otherwise
+ */
+function parseVersion(version: string | null | undefined): CCIPVersion | undefined {
+  if (!version) return undefined
+  // Strip "-dev" suffix if present
+  const semver = version.replace(/-dev$/, '')
+  switch (semver) {
+    case '1.2.0':
+      return CCIPVersion.V1_2
+    case '1.5.0':
+      return CCIPVersion.V1_5
+    case '1.6.0':
+      return CCIPVersion.V1_6
+    default:
+      return undefined
+  }
+}
+
+/**
+ * Type guard to distinguish SVM extra args from EVM extra args.
+ * @param args - Raw extra args from API response
+ * @returns true if args is RawSVMExtraArgs
+ */
+function isRawSVMExtraArgs(args: RawEVMExtraArgs | RawSVMExtraArgs): args is RawSVMExtraArgs {
+  return 'computeUnits' in args
+}
+
+/**
+ * Transforms raw API extra args to SDK extra args types.
+ * @param raw - Raw extra args from API response
+ * @returns EVMExtraArgsV2 or SVMExtraArgsV1
+ */
+function transformExtraArgs(
+  raw: RawEVMExtraArgs | RawSVMExtraArgs,
+): EVMExtraArgsV2 | SVMExtraArgsV1 {
+  if (isRawSVMExtraArgs(raw)) {
+    return {
+      computeUnits: BigInt(raw.computeUnits),
+      accountIsWritableBitmap: BigInt(raw.accountIsWritableBitmap),
+      allowOutOfOrderExecution: raw.allowOutOfOrderExecution,
+      tokenReceiver: raw.tokenReceiver,
+      accounts: raw.accounts,
+    }
+  }
+  return {
+    gasLimit: BigInt(raw.gasLimit),
+    allowOutOfOrderExecution: raw.allowOutOfOrderExecution,
+  }
+}
+
+/** Zero address placeholder for missing token pool addresses */
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+
+/**
+ * Transforms raw API token amounts to SDK token amounts format.
+ * Includes SourceTokenData fields with placeholder values since the API
+ * does not provide pool addresses - these require on-chain lookup.
+ * @param raw - Raw token amounts from API response
+ * @returns Array of token amounts with bigint amounts and SourceTokenData placeholders
+ */
+function transformTokenAmounts(raw: RawTokenAmount[]): {
+  token: string
+  amount: bigint
+  // SourceTokenData fields (placeholders - not available from API)
+  sourcePoolAddress: string
+  destTokenAddress: string
+  extraData: string
+  destGasAmount: bigint
+}[] {
+  return raw.map((ta) => ({
+    token: ta.tokenAddress,
+    amount: BigInt(ta.amount),
+    // TODO: API does not provide pool addresses - these require on-chain lookup
+    // Consider exposing these through the API.
+    sourcePoolAddress: ZERO_ADDRESS,
+    destTokenAddress: ZERO_ADDRESS,
+    extraData: '0x',
+    destGasAmount: 0n,
+  }))
 }

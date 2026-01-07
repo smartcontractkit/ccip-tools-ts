@@ -112,6 +112,18 @@ export class CCIPMessageIdNotFoundError extends CCIPError {
   }
 }
 
+/** Thrown when messageId format is invalid. */
+export class CCIPMessageIdValidationError extends CCIPError {
+  override readonly name = 'CCIPMessageIdValidationError'
+  /** Creates a message ID validation error. */
+  constructor(message: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.MESSAGE_ID_INVALID, message, {
+      ...options,
+      isTransient: false,
+    })
+  }
+}
+
 /** Thrown when not all messages in batch were found. Transient: may still be indexing. */
 export class CCIPMessageBatchIncompleteError extends CCIPError {
   override readonly name = 'CCIPMessageBatchIncompleteError'
