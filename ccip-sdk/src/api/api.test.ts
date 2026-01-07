@@ -9,6 +9,7 @@ import {
   CCIPMessageIdNotFoundError,
   CCIPMessageIdValidationError,
   CCIPMessageNotFoundInTxError,
+  CCIPUnexpectedPaginationError,
   HttpStatus,
 } from '../errors/index.ts'
 import { EVMChain } from '../evm/index.ts'
@@ -891,6 +892,34 @@ describe('CCIPAPIClient', () => {
       const lastCall = debugFn.mock.calls[1] as unknown as { arguments: unknown[] }
       assert.equal(lastCall.arguments[0], 'getMessageIdsFromTransaction raw response:')
       assert.ok(lastCall.arguments[1])
+    })
+
+    it('should throw CCIPUnexpectedPaginationError when hasNextPage is true', async () => {
+      const paginatedResponse = {
+        data: Array(100)
+          .fill(null)
+          .map((_, i) => ({
+            ...mockMessagesResponse.data[0],
+            messageId: `0x${i.toString(16).padStart(64, '0')}`,
+          })),
+        pagination: { limit: 100, hasNextPage: true, cursor: 'next-page-cursor' },
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(paginatedResponse),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const txHash = '0x9428debf5e5f01234567890abcdef1234567890abcdef1234567890abcdef12'
+
+      await assert.rejects(
+        async () => await client.getMessageIdsFromTransaction(txHash),
+        (err: unknown) =>
+          err instanceof CCIPUnexpectedPaginationError &&
+          err.context.txHash === txHash &&
+          err.context.messageCount === 100,
+      )
     })
   })
 })

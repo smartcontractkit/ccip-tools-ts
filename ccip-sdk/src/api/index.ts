@@ -4,6 +4,7 @@ import {
   CCIPMessageIdNotFoundError,
   CCIPMessageIdValidationError,
   CCIPMessageNotFoundInTxError,
+  CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, SVMExtraArgsV1 } from '../extra-args.ts'
 import { HttpStatus } from '../http-status.ts'
@@ -434,6 +435,13 @@ export class CCIPAPIClient {
     const raw = (await response.json()) as RawMessagesResponse
 
     this.logger.debug('getMessageIdsFromTransaction raw response:', raw)
+
+    // A transaction typically produces exactly one CCIP message ID. Edge cases (e.g.,
+    // batched sends) may produce a few more, but never enough to paginate. If we see
+    // hasNextPage=true, something unexpected happened.
+    if (raw.pagination.hasNextPage) {
+      throw new CCIPUnexpectedPaginationError(txHash, raw.data.length)
+    }
 
     // No messages found for this transaction
     if (raw.data.length === 0) {

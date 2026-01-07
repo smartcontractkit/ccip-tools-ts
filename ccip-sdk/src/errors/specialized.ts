@@ -1703,6 +1703,24 @@ export class CCIPApiClientNotAvailableError extends CCIPError {
   }
 }
 
+/** Thrown when API returns unexpected pagination (e.g., in getMessageIdsFromTransaction). */
+export class CCIPUnexpectedPaginationError extends CCIPError {
+  override readonly name = 'CCIPUnexpectedPaginationError'
+  /**
+   * Creates an unexpected pagination error.
+   * @param txHash - The transaction hash being queried
+   * @param messageCount - Number of messages returned in the first page
+   * @param options - Additional error options
+   */
+  constructor(txHash: string, messageCount: number, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.API_UNEXPECTED_PAGINATION,
+      `Unexpected pagination in getMessageIdsFromTransaction: got ${messageCount} messages with hasNextPage=true for tx ${txHash}`,
+      { ...options, isTransient: false, context: { ...options?.context, txHash, messageCount } },
+    )
+  }
+}
+
 // Viem Adapter
 
 /** Thrown when viem adapter encounters an issue. */
