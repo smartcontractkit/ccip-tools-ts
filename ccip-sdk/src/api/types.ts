@@ -116,6 +116,36 @@ export type RawMessageResponse = {
 }
 
 // ============================================================================
+// GET /v1/messages (search) types
+// ============================================================================
+
+/** Raw message search result from /messages endpoint */
+export type RawMessageSearchResult = {
+  messageId: string
+  sender: string
+  receiver: string
+  origin?: string | null
+  status: string
+  sourceNetworkInfo: RawNetworkInfo
+  destNetworkInfo: RawNetworkInfo
+  sendTransactionHash: string
+  sendTimestamp: string
+  receiptTransactionHash?: string | null
+  receiptTimestamp?: string | null
+  tokenAddress?: string | null
+}
+
+/** Raw paginated response from /messages endpoint */
+export type RawMessagesResponse = {
+  data: RawMessageSearchResult[]
+  pagination: {
+    limit: number
+    hasNextPage: boolean
+    cursor?: string | null
+  }
+}
+
+// ============================================================================
 // APICCIPRequest type - derived from CCIPRequest
 // ============================================================================
 
