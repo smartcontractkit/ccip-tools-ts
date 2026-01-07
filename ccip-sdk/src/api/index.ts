@@ -347,12 +347,14 @@ export class CCIPAPIClient {
 
 /**
  * Parses API version string to CCIPVersion enum.
- * @param version - Version string like "1.5.0", "1.6.0"
+ * @param version - Version string like "1.5.0", "1.6.0", or "1.6.0-dev"
  * @returns CCIPVersion if recognized, undefined otherwise
  */
 function parseVersion(version: string | null | undefined): CCIPVersion | undefined {
   if (!version) return undefined
-  switch (version) {
+  // Strip "-dev" suffix if present
+  const semver = version.replace(/-dev$/, '')
+  switch (semver) {
     case '1.2.0':
       return CCIPVersion.V1_2
     case '1.5.0':
