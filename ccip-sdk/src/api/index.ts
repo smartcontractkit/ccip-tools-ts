@@ -1,4 +1,5 @@
 import {
+  CCIPArgumentInvalidError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
@@ -354,7 +355,7 @@ export class CCIPAPIClient {
    * @param txHash - The source transaction hash (EVM: 0x-prefixed hex, Solana: Base58)
    * @returns Promise resolving to an array of messageId strings
    *
-   * @throws {@link CCIPMessageIdValidationError} when txHash format is invalid
+   * @throws {@link CCIPArgumentInvalidError} when txHash format is invalid
    * @throws {@link CCIPMessageNotFoundInTxError} when no messages found for the transaction
    * @throws {@link CCIPHttpError} on HTTP errors with context:
    *   - `status` - HTTP status code
@@ -387,8 +388,9 @@ export class CCIPAPIClient {
     // - Solana/SVM: Base58 encoded, 32-88 characters (no 0, I, O, l)
     const txHashPattern = /^(0x[a-fA-F0-9]{1,64}|[1-9A-HJ-NP-Za-km-z]{32,88})$/
     if (!txHashPattern.test(txHash)) {
-      throw new CCIPMessageIdValidationError(
-        `Invalid transaction hash format: expected 0x-prefixed hex (EVM) or Base58 (Solana), got "${txHash}"`,
+      throw new CCIPArgumentInvalidError(
+        'txHash',
+        `Invalid format: expected 0x-prefixed hex (EVM) or Base58 (Solana), got "${txHash}"`,
       )
     }
 

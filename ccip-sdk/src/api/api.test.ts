@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 import { CCIPAPIClient, DEFAULT_API_BASE_URL } from './index.ts'
 import {
   CCIPApiClientNotAvailableError,
+  CCIPArgumentInvalidError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
@@ -816,21 +817,21 @@ describe('CCIPAPIClient', () => {
       )
     })
 
-    it('should throw CCIPMessageIdValidationError on invalid EVM txHash format', async () => {
+    it('should throw CCIPArgumentInvalidError on invalid EVM txHash format', async () => {
       const client = new CCIPAPIClient()
 
       // Missing 0x prefix
       await assert.rejects(
         async () => await client.getMessageIdsFromTransaction('1234567890abcdef'),
         (err: unknown) =>
-          err instanceof CCIPMessageIdValidationError &&
-          err.message.includes('Invalid transaction hash format'),
+          err instanceof CCIPArgumentInvalidError &&
+          err.message.includes('Invalid argument "txHash"'),
       )
 
       // Invalid characters
       await assert.rejects(
         async () => await client.getMessageIdsFromTransaction('0xGGGG'),
-        (err: unknown) => err instanceof CCIPMessageIdValidationError,
+        (err: unknown) => err instanceof CCIPArgumentInvalidError,
       )
     })
 
