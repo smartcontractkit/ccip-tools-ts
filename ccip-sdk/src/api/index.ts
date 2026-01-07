@@ -3,6 +3,7 @@ import {
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
   CCIPMessageIdValidationError,
+  CCIPMessageNotFoundInTxError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, SVMExtraArgsV1 } from '../extra-args.ts'
 import { HttpStatus } from '../http-status.ts'
@@ -15,6 +16,7 @@ import type {
   RawEVMExtraArgs,
   RawLaneLatencyResponse,
   RawMessageResponse,
+  RawMessagesResponse,
   RawSVMExtraArgs,
   RawTokenAmount,
 } from './types.ts'
@@ -342,6 +344,103 @@ export class CCIPAPIClient {
       sourceNetworkInfo: networkInfo(BigInt(raw.sourceNetworkInfo.chainSelector)),
       destNetworkInfo: networkInfo(BigInt(raw.destNetworkInfo.chainSelector)),
     }
+  }
+
+  /**
+   * Fetches CCIP message IDs associated with a transaction hash. This is generally a 1 to 1
+   * correspondence, but could be multiple in edge cases.
+   *
+   * @param txHash - The source transaction hash (EVM: 0x-prefixed hex, Solana: Base58)
+   * @returns Promise resolving to an array of messageId strings
+   *
+   * @throws {@link CCIPMessageIdValidationError} when txHash format is invalid
+   * @throws {@link CCIPMessageNotFoundInTxError} when no messages found for the transaction
+   * @throws {@link CCIPHttpError} on HTTP errors with context:
+   *   - `status` - HTTP status code
+   *   - `statusText` - HTTP status message
+   *   - `apiErrorCode` - API error code
+   *   - `apiErrorMessage` - Human-readable error message
+   *
+   * @example Basic usage
+   * ```typescript
+   * const messageIds = await api.getMessageIdsFromTransaction(
+   *   '0x9428deb1234567890abcdef1234567890abcdef1234567890abcdef1234567890'
+   * )
+   * console.log(`Found ${messageIds.length} message(s): ${messageIds.join(', ')}`)
+   * ```
+   *
+   * @example Handling not found
+   * ```typescript
+   * try {
+   *   const messageIds = await api.getMessageIdsFromTransaction(txHash)
+   * } catch (err) {
+   *   if (err instanceof CCIPMessageNotFoundInTxError) {
+   *     console.error('No CCIP messages found in this transaction')
+   *   }
+   * }
+   * ```
+   */
+  async getMessageIdsFromTransaction(txHash: string): Promise<string[]> {
+    // Validate txHash format:
+    // - EVM: 0x prefix + 1-64 hex characters (e.g., 0x1234...abcd)
+    // - Solana/SVM: Base58 encoded, 32-88 characters (no 0, I, O, l)
+    const txHashPattern = /^(0x[a-fA-F0-9]{1,64}|[1-9A-HJ-NP-Za-km-z]{32,88})$/
+    if (!txHashPattern.test(txHash)) {
+      throw new CCIPMessageIdValidationError(
+        `Invalid transaction hash format: expected 0x-prefixed hex (EVM) or Base58 (Solana), got "${txHash}"`,
+      )
+    }
+
+    const url = new URL(`${this.baseUrl}/v1/messages`)
+    url.searchParams.set('sourceTransactionHash', txHash)
+    url.searchParams.set('limit', '100')
+
+    this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`)
+
+    const response = await this._fetch(url.toString())
+
+    if (!response.ok) {
+      // Try to parse structured error response from API
+      let apiError: APIErrorResponse | undefined
+      try {
+        apiError = (await response.json()) as APIErrorResponse
+      } catch {
+        // Response body not JSON, use HTTP status only
+      }
+
+      // 404 - No messages found for transaction
+      if (response.status === HttpStatus.NOT_FOUND) {
+        throw new CCIPMessageNotFoundInTxError(txHash, {
+          context: apiError
+            ? {
+                apiErrorCode: apiError.error,
+                apiErrorMessage: apiError.message,
+              }
+            : undefined,
+        })
+      }
+
+      // Generic HTTP error for other cases
+      throw new CCIPHttpError(response.status, response.statusText, {
+        context: apiError
+          ? {
+              apiErrorCode: apiError.error,
+              apiErrorMessage: apiError.message,
+            }
+          : undefined,
+      })
+    }
+
+    const raw = (await response.json()) as RawMessagesResponse
+
+    this.logger.debug('getMessageIdsFromTransaction raw response:', raw)
+
+    // No messages found for this transaction
+    if (raw.data.length === 0) {
+      throw new CCIPMessageNotFoundInTxError(txHash)
+    }
+
+    return raw.data.map((msg) => msg.messageId)
   }
 }
 
