@@ -453,6 +453,11 @@ const selectors: Selectors = {
     name: 'story-testnet',
     family: 'evm',
   },
+  '1672': {
+    selector: 7801139999541420232n,
+    name: 'pharos-mainnet',
+    family: 'evm',
+  },
   '1687': {
     selector: 10749384167430721561n,
     name: 'mint-testnet',
