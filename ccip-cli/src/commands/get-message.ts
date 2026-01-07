@@ -70,17 +70,17 @@ export async function getMessageByIdCmd(ctx: Ctx, argv: Parameters<typeof handle
       logger.log('Message:', result)
       break
     default: {
-      const sendTimestamp = result.tx?.timestamp
+      const sendTimestamp = result.tx.timestamp
       const receiptTimestamp = result.receiptTimestamp
 
       prettyTable.call(ctx, {
         Status: result.status,
-        'Message ID': result.message?.messageId,
+        'Message ID': result.message.messageId,
         Source: `${result.sourceNetworkInfo.name} [${result.sourceNetworkInfo.chainSelector}]`,
         Destination: `${result.destNetworkInfo.name} [${result.destNetworkInfo.chainSelector}]`,
-        Sender: result.message?.sender,
-        Receiver: result.message?.receiver,
-        'Send Tx': result.tx?.hash,
+        Sender: result.message.sender,
+        Receiver: result.message.receiver,
+        'Send Tx': result.tx.hash,
         ...(sendTimestamp
           ? {
               'Send Time': `${formatTimestamp(sendTimestamp)} (${formatDuration(Date.now() / 1e3 - sendTimestamp)} ago)`,
@@ -94,7 +94,7 @@ export async function getMessageByIdCmd(ctx: Ctx, argv: Parameters<typeof handle
           : {}),
         Finality: result.finality,
         'Ready for Manual Exec': result.readyForManualExecution,
-        Version: result.lane?.version,
+        Version: result.lane.version,
       })
     }
   }

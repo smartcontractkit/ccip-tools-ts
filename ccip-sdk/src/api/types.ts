@@ -144,7 +144,10 @@ export type APICCIPRequestMetadata = {
 
 /**
  * CCIP request information retrieved from API.
- * Based on Partial<CCIPRequest> with additional API-specific metadata.
+ * Includes API-specific metadata, plus CCIPRequest fields with partial nested data and placeholders
+ * when required. TODO: Analyze whether these placeholders are acceptable, and in case they're not
+ * decide whether to expand the API to provide the missing data non-optionally, or whether to
+ * remove them from CCIPRequest)
  *
  * Fields populated from API:
  * - lane: sourceChainSelector, destChainSelector, onRamp, version (all available)
@@ -156,4 +159,4 @@ export type APICCIPRequestMetadata = {
  * Additional API-specific fields not in CCIPRequest:
  * - status, readyForManualExecution, receiptTransactionHash, receiptTimestamp, etc.
  */
-export type APICCIPRequest = Partial<CCIPRequest> & APICCIPRequestMetadata
+export type APICCIPRequest = CCIPRequest & APICCIPRequestMetadata

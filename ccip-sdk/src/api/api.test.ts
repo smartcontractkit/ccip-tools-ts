@@ -323,25 +323,25 @@ describe('CCIPAPIClient', () => {
       )
 
       // Lane
-      assert.equal(result.lane?.sourceChainSelector, 5009297550715157269n)
-      assert.equal(result.lane?.destChainSelector, 4949039107694359620n)
-      assert.equal(result.lane?.version, CCIPVersion.V1_6)
-      assert.equal(result.lane?.onRamp, mockMessageResponse.onramp)
+      assert.equal(result.lane.sourceChainSelector, 5009297550715157269n)
+      assert.equal(result.lane.destChainSelector, 4949039107694359620n)
+      assert.equal(result.lane.version, CCIPVersion.V1_6)
+      assert.equal(result.lane.onRamp, mockMessageResponse.onramp)
 
       // Message
-      assert.equal(result.message?.messageId, mockMessageResponse.messageId)
-      assert.equal(result.message?.sender, mockMessageResponse.sender)
-      assert.equal(result.message?.sequenceNumber, 67890n)
-      assert.equal(result.message?.nonce, 12345n)
+      assert.equal(result.message.messageId, mockMessageResponse.messageId)
+      assert.equal(result.message.sender, mockMessageResponse.sender)
+      assert.equal(result.message.sequenceNumber, 67890n)
+      assert.equal(result.message.nonce, 12345n)
 
       // TX
-      assert.equal(result.tx?.hash, mockMessageResponse.sendTransactionHash)
-      assert.equal(result.tx?.timestamp, 1701426600) // Unix timestamp for 2023-12-01T10:30:00Z
-      assert.equal(result.tx?.from, mockMessageResponse.origin)
+      assert.equal(result.tx.hash, mockMessageResponse.sendTransactionHash)
+      assert.equal(result.tx.timestamp, 1701426600) // Unix timestamp for 2023-12-01T10:30:00Z
+      assert.equal(result.tx.from, mockMessageResponse.origin)
 
       // Log
-      assert.equal(result.log?.transactionHash, mockMessageResponse.sendTransactionHash)
-      assert.equal(result.log?.address, mockMessageResponse.onramp)
+      assert.equal(result.log.transactionHash, mockMessageResponse.sendTransactionHash)
+      assert.equal(result.log.address, mockMessageResponse.onramp)
 
       // Status and extras
       assert.equal(result.status, 'SUCCESS')
@@ -429,10 +429,10 @@ describe('CCIPAPIClient', () => {
       )
 
       // Should use defaults for missing fields
-      assert.equal(result.lane?.version, CCIPVersion.V1_6) // Default
-      assert.equal(result.lane?.onRamp, '')
-      assert.equal(result.message?.sequenceNumber, 0n)
-      assert.equal(result.message?.nonce, 0n)
+      assert.equal(result.lane.version, CCIPVersion.V1_6) // Default
+      assert.equal(result.lane.onRamp, '')
+      assert.equal(result.message.sequenceNumber, 0n)
+      assert.equal(result.message.nonce, 0n)
       assert.equal(result.receiptTransactionHash, undefined)
     })
 
@@ -457,7 +457,7 @@ describe('CCIPAPIClient', () => {
           '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
         )
 
-        assert.equal(result.lane?.version, expected)
+        assert.equal(result.lane.version, expected)
       }
     })
 
@@ -475,7 +475,7 @@ describe('CCIPAPIClient', () => {
       )
 
       // Unknown version defaults to V1_6
-      assert.equal(result.lane?.version, CCIPVersion.V1_6)
+      assert.equal(result.lane.version, CCIPVersion.V1_6)
     })
 
     it('should be transient error for 5xx', async () => {
@@ -665,14 +665,11 @@ describe('CCIPAPIClient', () => {
       const decoded = decodeMessage(message)
 
       // Assert key fields match
-      assert.equal(decoded.messageId, result.message?.messageId)
-      assert.equal(decoded.sourceChainSelector, result.lane?.sourceChainSelector)
-      assert.equal(decoded.sender, result.message?.sender)
+      assert.equal(decoded.messageId, result.message.messageId)
+      assert.equal(decoded.sourceChainSelector, result.lane.sourceChainSelector)
+      assert.equal(decoded.sender, result.message.sender)
       // Addresses may be checksummed differently after decoding, compare case-insensitively
-      assert.equal(
-        decoded.receiver.toLowerCase(),
-        (result.message?.receiver as string).toLowerCase(),
-      )
+      assert.equal(decoded.receiver.toLowerCase(), result.message.receiver.toLowerCase())
     })
   })
 })
