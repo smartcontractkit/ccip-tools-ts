@@ -19,7 +19,7 @@ import {
   zeroPadValue,
 } from 'ethers'
 import { memoize } from 'micro-memoize'
-import type { PickDeep, SetRequired } from 'type-fest'
+import type { PickDeep } from 'type-fest'
 
 import {
   type ChainContext,
@@ -59,6 +59,7 @@ import {
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
+  type AnyMessage,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
@@ -88,7 +89,13 @@ import { getAptosLeafHasher } from './hasher.ts'
 import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
 import { getTokenInfo } from './token.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import { decodeMessage, getMessageById, getMessagesInBatch, getMessagesInTx } from '../requests.ts'
+import {
+  decodeMessage,
+  getMessageById,
+  getMessagesInBatch,
+  getMessagesInTx,
+  populateDefaultMessageForDest,
+} from '../requests.ts'
 export type { UnsignedAptosTx }
 
 /**
@@ -530,13 +537,18 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     destChainSelector,
     message,
   }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    return getFee(this.provider, router, destChainSelector, message)
+    const message_ = populateDefaultMessageForDest(message, networkInfo(destChainSelector).family)
+    return getFee(this.provider, router, destChainSelector, message_)
   }
 
   /** {@inheritDoc Chain.generateUnsignedSendMessage} */
   async generateUnsignedSendMessage(
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedAptosTx> {
+    opts.message = populateDefaultMessageForDest(
+      opts.message,
+      networkInfo(opts.destChainSelector).family,
+    )
     const { sender, router, destChainSelector, message } = opts
     if (!message.fee) message.fee = await this.getFee(opts)
     const tx = await generateUnsignedCcipSend(
@@ -544,7 +556,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       sender,
       router,
       destChainSelector,
-      message as SetRequired<typeof message, 'fee'>,
+      message as AnyMessage & { fee: bigint },
       opts,
     )
     return {

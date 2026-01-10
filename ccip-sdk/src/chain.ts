@@ -1,4 +1,4 @@
-import type { BytesLike } from 'ethers'
+import { type BytesLike, dataLength } from 'ethers'
 import type { PickDeep, SetOptional } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
@@ -10,6 +10,7 @@ import {
   CCIPExecTxRevertedError,
   CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
+import { DEFAULT_GAS_LIMIT } from './evm/const.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
 import type {
   EVMExtraArgsV1,
@@ -37,6 +38,7 @@ import {
   type Logger,
   type NetworkInfo,
   type OffchainTokenData,
+  type RequestMessage,
   type WithLogger,
   ExecutionState,
 } from './types.ts'
@@ -153,7 +155,7 @@ export type UnsignedTx = {
 }
 
 /**
- * Common options for [[generateUnsignedSendMessage]] and [[sendMessage]] Chain methods
+ * Common options for [[getFee]], [[generateUnsignedSendMessage]] and [[sendMessage]] Chain methods
  */
 export type SendMessageOpts = {
   /** Router address on this chain */
@@ -161,7 +163,7 @@ export type SendMessageOpts = {
   /** Destination network selector. */
   destChainSelector: bigint
   /** Message to send. If `fee` is omitted, it'll be calculated */
-  message: AnyMessage & { fee?: bigint }
+  message: RequestMessage
   /** Approve the maximum amount of tokens to transfer */
   approveMax?: boolean
 }
@@ -690,6 +692,21 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @returns Mapping of token addresses to respective TokenInfo objects.
    */
   abstract getFeeTokens(router: string): Promise<Record<string, TokenInfo>>
+
+  /** {@inheritDoc ChainStatic.populateDefaultMessageForDest} */
+  static populateDefaultMessageForDest(
+    message: Parameters<ChainStatic['populateDefaultMessageForDest']>[0],
+  ): AnyMessage {
+    // default to GenericExtraArgsV2, aka EVMExtraArgsV2
+    return {
+      ...message,
+      extraArgs: {
+        gasLimit: message.data && dataLength(message.data) ? DEFAULT_GAS_LIMIT : 0n,
+        allowOutOfOrderExecution: true,
+        ...message.extraArgs,
+      },
+    }
+  }
 }
 
 /** Static methods and properties available on Chain class constructors. */
@@ -775,6 +792,13 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * @returns Ordered record with messages/properties, or undefined if not a recognized error
    */
   parse?(data: unknown): Record<string, unknown> | undefined | null
+  /**
+   * Returns a copy of a message, populating missing fields like `extraArgs` with defaults
+   * It's expected to return a message suitable at least for basic token transfers
+   * @param message - AnyMessage (from source), containing at least `receiver`
+   * @returns A message suitable for `sendMessage` to this destination chain family
+   */
+  populateDefaultMessageForDest(message: RequestMessage): AnyMessage
 }
 
 /** Function type for getting a Chain instance by ID, selector, or name. */

@@ -26,16 +26,18 @@ import {
   toBigInt,
 } from 'ethers'
 import { type Memoized, memoize } from 'micro-memoize'
-import type { PickDeep, SetRequired } from 'type-fest'
+import type { PickDeep } from 'type-fest'
 
 import {
   type ChainContext,
+  type ChainStatic,
   type LogFilter,
   type TokenInfo,
   type TokenPoolRemote,
   Chain,
 } from '../chain.ts'
 import {
+  CCIPArgumentInvalidError,
   CCIPBlockTimeNotFoundError,
   CCIPContractNotRouterError,
   CCIPDataFormatUnsupportedError,
@@ -59,11 +61,17 @@ import {
   CCIPTransactionNotFoundError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
-import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
+import {
+  type EVMExtraArgsV2,
+  type ExtraArgs,
+  type SVMExtraArgsV1,
+  EVMExtraArgsV2Tag,
+} from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import SELECTORS from '../selectors.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
+  type AnyMessage,
   type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
@@ -114,8 +122,14 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-import { getMessageById, getMessagesInBatch, getMessagesInTx } from '../requests.ts'
+import {
+  getMessageById,
+  getMessagesInBatch,
+  getMessagesInTx,
+  populateDefaultMessageForDest,
+} from '../requests.ts'
 import { patchBorsh } from './patchBorsh.ts'
+import { DEFAULT_GAS_LIMIT } from '../evm/const.ts'
 export type { UnsignedSolanaTx }
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
@@ -976,7 +990,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /** {@inheritDoc Chain.getFee} */
   getFee({ router, destChainSelector, message }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    return getFee(this, router, destChainSelector, message)
+    const message_ = populateDefaultMessageForDest(message, networkInfo(destChainSelector).family)
+    return getFee(this, router, destChainSelector, message_)
   }
 
   /**
@@ -990,12 +1005,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   ): Promise<UnsignedSolanaTx> {
     const { sender, router, destChainSelector, message } = opts
     if (!message.fee) message.fee = await this.getFee(opts)
+    const message_ = populateDefaultMessageForDest(message, networkInfo(destChainSelector).family)
     return generateUnsignedCcipSend(
       this,
       new PublicKey(sender),
       new PublicKey(router),
       destChainSelector,
-      message as SetRequired<typeof message, 'fee'>,
+      message_ as AnyMessage & { fee: bigint },
       opts,
     )
   }
@@ -1478,5 +1494,75 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     // feeQuoter is present in router's config, and has a DestChainState account which is updated by
     // the offramps, so we can use it to narrow the search for the offramp
     return program.account.config.fetch(configPda)
+  }
+
+  /** {@inheritDoc ChainStatic.populateDefaultMessageForDest} */
+  static override populateDefaultMessageForDest(
+    message: Parameters<ChainStatic['populateDefaultMessageForDest']>[0],
+  ): AnyMessage & { extraArgs: SVMExtraArgsV1 } {
+    if (
+      !(
+        message.extraArgs &&
+        'tokenReceiver' in message.extraArgs &&
+        message.extraArgs.tokenReceiver
+      ) &&
+      message.data &&
+      getDataBytes(message.data).length &&
+      message.tokenAmounts?.length
+    )
+      throw new CCIPArgumentInvalidError(
+        'tokenReceiver',
+        'required when sending tokens with data to Solana',
+      )
+
+    const computeUnits =
+      message.extraArgs &&
+      'computeUnits' in message.extraArgs &&
+      message.extraArgs.computeUnits != null
+        ? message.extraArgs.computeUnits
+        : message.extraArgs && 'gasLimit' in message.extraArgs && message.extraArgs.gasLimit != null
+          ? message.extraArgs.gasLimit // populates computeUnits from gasLimit
+          : message.data && getDataBytes(message.data).length
+            ? DEFAULT_GAS_LIMIT
+            : 0n
+    const allowOutOfOrderExecution =
+      message.extraArgs &&
+      'allowOutOfOrderExecution' in message.extraArgs &&
+      message.extraArgs.allowOutOfOrderExecution != null
+        ? message.extraArgs.allowOutOfOrderExecution
+        : true
+    const tokenReceiver =
+      message.extraArgs &&
+      'tokenReceiver' in message.extraArgs &&
+      message.extraArgs.tokenReceiver != null
+        ? message.extraArgs.tokenReceiver
+        : message.tokenAmounts?.length
+          ? this.getAddress(message.receiver)
+          : PublicKey.default.toBase58()
+    const accounts =
+      message.extraArgs && 'accounts' in message.extraArgs && message.extraArgs.accounts != null
+        ? message.extraArgs.accounts
+        : []
+    const accountIsWritableBitmap =
+      message.extraArgs &&
+      'accountIsWritableBitmap' in message.extraArgs &&
+      message.extraArgs.accountIsWritableBitmap != null
+        ? message.extraArgs.accountIsWritableBitmap
+        : 0n
+
+    const extraArgs: SVMExtraArgsV1 = {
+      computeUnits,
+      allowOutOfOrderExecution,
+      tokenReceiver,
+      accounts,
+      accountIsWritableBitmap,
+    }
+
+    return {
+      ...message,
+      extraArgs,
+      // if tokenReceiver, then message.receiver can (must?) be default
+      ...(!!message.tokenAmounts?.length && { receiver: PublicKey.default.toBase58() }),
+    }
   }
 }

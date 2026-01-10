@@ -116,7 +116,12 @@ import {
   parseSourceTokenData,
 } from './messages.ts'
 import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
-import { getMessageById, getMessagesInBatch, getMessagesInTx } from '../requests.ts'
+import {
+  getMessageById,
+  getMessagesInBatch,
+  getMessagesInTx,
+  populateDefaultMessageForDest,
+} from '../requests.ts'
 import type { UnsignedEVMTx } from './types.ts'
 export type { UnsignedEVMTx }
 
@@ -960,6 +965,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     destChainSelector,
     message,
   }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+    const message_ = populateDefaultMessageForDest(message, networkInfo(destChainSelector).family)
     const contract = new Contract(
       router,
       interfaces.Router,
@@ -967,7 +973,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     ) as unknown as TypedContract<typeof Router_ABI>
     return contract.getFee(destChainSelector, {
       receiver: zeroPadValue(getAddressBytes(message.receiver), 32),
-      data: hexlify(message.data),
+      data: hexlify(message_.data ?? '0x'),
       tokenAmounts: message.tokenAmounts ?? [],
       feeToken: message.feeToken ?? ZeroAddress,
       extraArgs: hexlify((this.constructor as typeof EVMChain).encodeExtraArgs(message.extraArgs)),
@@ -986,9 +992,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (!message.fee) message.fee = await this.getFee(opts)
     const feeToken = message.feeToken ?? ZeroAddress
     const receiver = zeroPadValue(getAddressBytes(message.receiver), 32)
-    const data = hexlify(message.data)
+
+    const message_ = populateDefaultMessageForDest(message, networkInfo(destChainSelector).family)
+    const data = hexlify(message_.data ?? '0x')
     const extraArgs = hexlify(
-      (this.constructor as typeof EVMChain).encodeExtraArgs(message.extraArgs),
+      (this.constructor as typeof EVMChain).encodeExtraArgs(message_.extraArgs),
     )
 
     // make sure to approve once per token, for the total amount (including fee, if needed)
