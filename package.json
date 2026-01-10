@@ -31,13 +31,13 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import": "^2.32.0",
-    "eslint-plugin-jsdoc": "^61.5.0",
+    "eslint-plugin-jsdoc": "^62.0.0",
     "eslint-plugin-prettier": "^5.5.4",
     "eslint-plugin-tsdoc": "^0.5.0",
     "glob": "13.0.0",
     "prettier": "3.7.4",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.51.0",
+    "typescript-eslint": "8.52.0",
     "yaml": "2.8.2"
   },
   "overrides": {
