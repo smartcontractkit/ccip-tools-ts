@@ -1,9 +1,9 @@
 import {
-  type AnyMessage,
   type CCIPVersion,
   type ChainStatic,
   type EVMChain,
   type ExtraArgs,
+  type RequestMessage,
   CCIPArgumentInvalidError,
   CCIPChainFamilyUnsupportedError,
   CCIPTokenNotFoundError,
@@ -13,7 +13,7 @@ import {
   networkInfo,
   sourceToDestTokenAmounts,
 } from '@chainlink/ccip-sdk/src/index.ts'
-import { type BytesLike, dataLength, formatUnits, toUtf8Bytes } from 'ethers'
+import { type BytesLike, formatUnits, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -67,7 +67,6 @@ export const builder = (yargs: Argv) =>
         type: 'number',
         describe:
           'Gas limit for receiver callback execution; defaults to default configured on ramps',
-        default: 0,
       },
       'estimate-gas-limit': {
         type: 'number',
@@ -105,10 +104,11 @@ export const builder = (yargs: Argv) =>
         describe: "Address of the Solana tokenReceiver (if different than program's receiver)",
       },
       account: {
+        alias: 'receiver-object-id',
         type: 'array',
         string: true,
         describe:
-          'List of accounts needed by Solana receiver program; append `=rw` to specify account as writable; can be specified multiple times',
+          'List of accounts needed by Solana receiver program, or receiverObjectIds needed by Sui; On Solana, append `=rw` to specify account as writable; can be specified multiple times',
         example: 'requiredPdaAddress=rw',
       },
       'only-get-fee': {
@@ -159,15 +159,13 @@ async function sendMessage(
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
 
-  let data: BytesLike
+  let data: BytesLike | undefined
   if (argv.data) {
     try {
       data = getDataBytes(argv.data)
     } catch (_) {
       data = toUtf8Bytes(argv.data)
     }
-  } else {
-    data = '0x'
   }
 
   const tokenAmounts: { token: string; amount: bigint }[] = argv.transferTokens?.length
@@ -175,25 +173,11 @@ async function sendMessage(
     : []
 
   let receiver = argv.receiver
-  let tokenReceiver
   let accounts,
     accountIsWritableBitmap = 0n
   if (destNetwork.family === ChainFamily.Solana) {
-    if (argv.tokenReceiver) tokenReceiver = argv.tokenReceiver
-    else if (!tokenAmounts.length) {
-      tokenReceiver = '11111111111111111111111111111111'
-    } else if (!dataLength(data)) {
-      // sending tokens without data, i.e. not for a receiver contract
-      tokenReceiver = receiver
-      receiver = '11111111111111111111111111111111'
-    } else {
-      throw new CCIPArgumentInvalidError(
-        'token-receiver',
-        'required when sending tokens with data to Solana',
-      )
-    }
-
-    if (argv.account) {
+    // parse accounts with or without `=rw` suffix
+    if (argv.account?.length) {
       accounts = argv.account.map((account, i) => {
         if (account.endsWith('=rw')) {
           accountIsWritableBitmap |= 1n << BigInt(i)
@@ -201,12 +185,7 @@ async function sendMessage(
         }
         return account
       })
-    } else accounts = [] as string[]
-  } else if (argv.tokenReceiver || argv.account?.length) {
-    throw new CCIPArgumentInvalidError(
-      'token-receiver/account',
-      'only valid for Solana destination',
-    )
+    }
   }
 
   let walletAddress, wallet
@@ -244,7 +223,7 @@ async function sendMessage(
       message: {
         sender: walletAddress,
         receiver,
-        data,
+        data: data || '0x',
         tokenAmounts: destTokenAmounts,
       },
     })
@@ -253,17 +232,19 @@ async function sendMessage(
     if (argv.onlyEstimate) return
   }
 
-  // `--allow-out-of-order-exec` forces EVMExtraArgsV2, which shouldn't work on v1.2 lanes;
-  // otherwise, fallsback to EVMExtraArgsV1 (compatible with v1.2 & v1.5)
+  // builds a catch-all extraArgs object, which can be massaged by
+  // [[Chain.populateDefaultMessageForDest]] to create suitable extraArgs with defaults if needed
   const extraArgs = {
-    ...(argv.allowOutOfOrderExec != null || destNetwork.family !== ChainFamily.EVM
-      ? { allowOutOfOrderExecution: !!argv.allowOutOfOrderExec }
-      : {}),
-    ...(destNetwork.family === ChainFamily.Solana
-      ? { computeUnits: BigInt(argv.gasLimit) }
-      : { gasLimit: BigInt(argv.gasLimit) }),
-    ...(tokenReceiver ? { tokenReceiver } : {}),
-    ...(accounts ? { accounts, accountIsWritableBitmap } : {}),
+    ...(argv.allowOutOfOrderExec != null && {
+      allowOutOfOrderExecution: !!argv.allowOutOfOrderExec,
+    }),
+    ...(argv.gasLimit == null
+      ? {}
+      : destNetwork.family === ChainFamily.Solana
+        ? { computeUnits: BigInt(argv.gasLimit) }
+        : { gasLimit: BigInt(argv.gasLimit) }),
+    ...(!!argv.tokenReceiver && { tokenReceiver: argv.tokenReceiver }),
+    ...(!!accounts && { accounts, accountIsWritableBitmap }), // accounts also used as Sui receiverObjectIds
   }
 
   let feeToken, feeTokenInfo
@@ -287,7 +268,7 @@ async function sendMessage(
     feeTokenInfo = await source.getTokenInfo(nativeToken)
   }
 
-  const message: AnyMessage = {
+  const message: RequestMessage = {
     receiver,
     data,
     extraArgs: extraArgs as ExtraArgs,
@@ -322,9 +303,7 @@ async function sendMessage(
   })
   logger.info(
     '🚀 Sending message to',
-    tokenReceiver && tokenReceiver !== '11111111111111111111111111111111'
-      ? tokenReceiver
-      : receiver,
+    receiver,
     '@',
     destNetwork.name,
     ', tx =>',

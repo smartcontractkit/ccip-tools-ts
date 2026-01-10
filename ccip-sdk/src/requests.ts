@@ -2,7 +2,7 @@ import { isBytesLike, toBigInt } from 'ethers'
 import type { PickDeep } from 'type-fest'
 import yaml from 'yaml'
 
-import type { Chain, ChainStatic, LogFilter } from './chain.ts'
+import { type ChainStatic, type LogFilter, Chain } from './chain.ts'
 import {
   CCIPMessageBatchIncompleteError,
   CCIPMessageDecodeError,
@@ -16,11 +16,13 @@ import type { EVMChain } from './evm/index.ts'
 import { decodeExtraArgs } from './extra-args.ts'
 import { supportedChains } from './supported-chains.ts'
 import {
+  type AnyMessage,
   type CCIPMessage,
   type CCIPRequest,
   type CCIPVersion,
   type ChainTransaction,
   type Log_,
+  type RequestMessage,
   ChainFamily,
 } from './types.ts'
 import { convertKeysToCamelCase, decodeAddress, leToBigInt, networkInfo } from './utils.ts'
@@ -107,6 +109,19 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
     }
   }
   throw new CCIPMessageDecodeError()
+}
+
+/**
+ * Populates missing required fields (e.g. `extraArgs`) from AnyMessage
+ * @param message - partial AnyMessage
+ * @returns original message or shallow copy with defaults for required fields
+ **/
+export function populateDefaultMessageForDest(
+  message: RequestMessage,
+  dest: ChainFamily,
+): AnyMessage {
+  const chain = supportedChains[dest] ?? Chain
+  return chain.populateDefaultMessageForDest(message)
 }
 
 /**
