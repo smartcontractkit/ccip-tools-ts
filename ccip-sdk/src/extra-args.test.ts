@@ -222,7 +222,7 @@ describe('parseExtraArgs', () => {
     })
 
     it('should throw on unknown tag', () => {
-      assert.throws(() => decodeExtraArgs('0x12345678'), /Invalid extraArgs/)
+      assert.throws(() => decodeExtraArgs('0x12345678'), /Could not parse extraArgs/)
     })
 
     it('should throw on empty data', () => {
