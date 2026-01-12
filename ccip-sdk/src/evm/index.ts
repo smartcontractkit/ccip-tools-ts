@@ -64,6 +64,7 @@ import {
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
+  type AnyMessage,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
@@ -117,10 +118,10 @@ import {
 } from './messages.ts'
 import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
 import {
+  buildMessageForDest,
   getMessageById,
   getMessagesInBatch,
   getMessagesInTx,
-  populateDefaultMessageForDest,
 } from '../requests.ts'
 import type { UnsignedEVMTx } from './types.ts'
 export type { UnsignedEVMTx }
@@ -965,18 +966,20 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     destChainSelector,
     message,
   }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    const message_ = populateDefaultMessageForDest(message, networkInfo(destChainSelector).family)
+    const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
     const contract = new Contract(
       router,
       interfaces.Router,
       this.provider,
     ) as unknown as TypedContract<typeof Router_ABI>
     return contract.getFee(destChainSelector, {
-      receiver: zeroPadValue(getAddressBytes(message.receiver), 32),
-      data: hexlify(message_.data ?? '0x'),
-      tokenAmounts: message.tokenAmounts ?? [],
-      feeToken: message.feeToken ?? ZeroAddress,
-      extraArgs: hexlify((this.constructor as typeof EVMChain).encodeExtraArgs(message.extraArgs)),
+      receiver: zeroPadValue(getAddressBytes(populatedMessage.receiver), 32),
+      data: hexlify(populatedMessage.data ?? '0x'),
+      tokenAmounts: populatedMessage.tokenAmounts ?? [],
+      feeToken: populatedMessage.feeToken ?? ZeroAddress,
+      extraArgs: hexlify(
+        (this.constructor as typeof EVMChain).encodeExtraArgs(populatedMessage.extraArgs),
+      ),
     })
   }
 
@@ -988,15 +991,21 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   async generateUnsignedSendMessage(
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedEVMTx> {
-    const { sender, router, destChainSelector, message } = opts
-    if (!message.fee) message.fee = await this.getFee(opts)
+    const { sender, router, destChainSelector } = opts
+    const populatedMessage = buildMessageForDest(
+      opts.message,
+      networkInfo(destChainSelector).family,
+    )
+    const message = {
+      ...populatedMessage,
+      fee: opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage })),
+    }
+
     const feeToken = message.feeToken ?? ZeroAddress
     const receiver = zeroPadValue(getAddressBytes(message.receiver), 32)
-
-    const message_ = populateDefaultMessageForDest(message, networkInfo(destChainSelector).family)
-    const data = hexlify(message_.data ?? '0x')
+    const data = hexlify(message.data ?? '0x')
     const extraArgs = hexlify(
-      (this.constructor as typeof EVMChain).encodeExtraArgs(message_.extraArgs),
+      (this.constructor as typeof EVMChain).encodeExtraArgs(message.extraArgs),
     )
 
     // make sure to approve once per token, for the total amount (including fee, if needed)

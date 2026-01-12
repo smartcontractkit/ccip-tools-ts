@@ -116,12 +116,12 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
  * @param message - partial AnyMessage
  * @returns original message or shallow copy with defaults for required fields
  **/
-export function populateDefaultMessageForDest(
+export function buildMessageForDest(
   message: RequestMessage,
   dest: ChainFamily,
 ): AnyMessage {
   const chain = supportedChains[dest] ?? Chain
-  return chain.populateDefaultMessageForDest(message)
+  return chain.buildMessageForDest(message)
 }
 
 /**

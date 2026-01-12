@@ -233,7 +233,7 @@ async function sendMessage(
   }
 
   // builds a catch-all extraArgs object, which can be massaged by
-  // [[Chain.populateDefaultMessageForDest]] to create suitable extraArgs with defaults if needed
+  // [[Chain.buildMessageForDest]] to create suitable extraArgs with defaults if needed
   const extraArgs = {
     ...(argv.allowOutOfOrderExec != null && {
       allowOutOfOrderExecution: !!argv.allowOutOfOrderExec,
