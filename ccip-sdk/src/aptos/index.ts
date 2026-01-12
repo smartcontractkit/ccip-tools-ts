@@ -59,7 +59,6 @@ import {
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
-  type AnyMessage,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
@@ -90,11 +89,11 @@ import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs
 import { getTokenInfo } from './token.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import {
+  buildMessageForDest,
   decodeMessage,
   getMessageById,
   getMessagesInBatch,
   getMessagesInTx,
-  populateDefaultMessageForDest,
 } from '../requests.ts'
 export type { UnsignedAptosTx }
 
@@ -537,26 +536,29 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     destChainSelector,
     message,
   }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    const message_ = populateDefaultMessageForDest(message, networkInfo(destChainSelector).family)
-    return getFee(this.provider, router, destChainSelector, message_)
+    const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
+    return getFee(this.provider, router, destChainSelector, populatedMessage)
   }
 
   /** {@inheritDoc Chain.generateUnsignedSendMessage} */
   async generateUnsignedSendMessage(
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedAptosTx> {
-    opts.message = populateDefaultMessageForDest(
+    const { sender, router, destChainSelector } = opts
+    const populatedMessage = buildMessageForDest(
       opts.message,
-      networkInfo(opts.destChainSelector).family,
+      networkInfo(destChainSelector).family,
     )
-    const { sender, router, destChainSelector, message } = opts
-    if (!message.fee) message.fee = await this.getFee(opts)
+    const message = {
+      ...populatedMessage,
+      fee: opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage })),
+    }
     const tx = await generateUnsignedCcipSend(
       this.provider,
       sender,
       router,
       destChainSelector,
-      message as AnyMessage & { fee: bigint },
+      message,
       opts,
     )
     return {

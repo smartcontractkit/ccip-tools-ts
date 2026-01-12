@@ -123,10 +123,10 @@ import {
   simulationProvider,
 } from './utils.ts'
 import {
+  buildMessageForDest,
   getMessageById,
   getMessagesInBatch,
   getMessagesInTx,
-  populateDefaultMessageForDest,
 } from '../requests.ts'
 import { patchBorsh } from './patchBorsh.ts'
 import { DEFAULT_GAS_LIMIT } from '../evm/const.ts'
@@ -990,8 +990,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /** {@inheritDoc Chain.getFee} */
   getFee({ router, destChainSelector, message }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    const message_ = populateDefaultMessageForDest(message, networkInfo(destChainSelector).family)
-    return getFee(this, router, destChainSelector, message_)
+    const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
+    return getFee(this, router, destChainSelector, populatedMessage)
   }
 
   /**
@@ -1003,15 +1003,21 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async generateUnsignedSendMessage(
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedSolanaTx> {
-    const { sender, router, destChainSelector, message } = opts
-    if (!message.fee) message.fee = await this.getFee(opts)
-    const message_ = populateDefaultMessageForDest(message, networkInfo(destChainSelector).family)
+    const { sender, router, destChainSelector } = opts
+    const populatedMessage = buildMessageForDest(
+      opts.message,
+      networkInfo(destChainSelector).family,
+    )
+    const message = {
+      ...populatedMessage,
+      fee: opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage })),
+    }
     return generateUnsignedCcipSend(
       this,
       new PublicKey(sender),
       new PublicKey(router),
       destChainSelector,
-      message_ as AnyMessage & { fee: bigint },
+      message,
       opts,
     )
   }
@@ -1496,9 +1502,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return program.account.config.fetch(configPda)
   }
 
-  /** {@inheritDoc ChainStatic.populateDefaultMessageForDest} */
-  static override populateDefaultMessageForDest(
-    message: Parameters<ChainStatic['populateDefaultMessageForDest']>[0],
+  /** {@inheritDoc ChainStatic.buildMessageForDest} */
+  static override buildMessageForDest(
+    message: Parameters<ChainStatic['buildMessageForDest']>[0],
   ): AnyMessage & { extraArgs: SVMExtraArgsV1 } {
     if (
       !(

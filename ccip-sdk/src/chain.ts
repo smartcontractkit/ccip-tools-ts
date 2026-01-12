@@ -693,9 +693,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getFeeTokens(router: string): Promise<Record<string, TokenInfo>>
 
-  /** {@inheritDoc ChainStatic.populateDefaultMessageForDest} */
-  static populateDefaultMessageForDest(
-    message: Parameters<ChainStatic['populateDefaultMessageForDest']>[0],
+  /** {@inheritDoc ChainStatic.buildMessageForDest} */
+  static buildMessageForDest(
+    message: Parameters<ChainStatic['buildMessageForDest']>[0],
   ): AnyMessage {
     // default to GenericExtraArgsV2, aka EVMExtraArgsV2
     return {
@@ -798,7 +798,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * @param message - AnyMessage (from source), containing at least `receiver`
    * @returns A message suitable for `sendMessage` to this destination chain family
    */
-  populateDefaultMessageForDest(message: RequestMessage): AnyMessage
+  buildMessageForDest(message: RequestMessage): AnyMessage
 }
 
 /** Function type for getting a Chain instance by ID, selector, or name. */

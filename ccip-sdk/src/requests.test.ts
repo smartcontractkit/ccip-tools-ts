@@ -510,7 +510,7 @@ describe('decodeMessage', () => {
     }
   })
 
-  describe('populateDefaultMessageForDest', () => {
+  describe('buildMessageForDest', () => {
     describe('Chain (base implementation)', () => {
       it('should populate default extraArgs for EVM with data', () => {
         const message = {
@@ -518,7 +518,7 @@ describe('decodeMessage', () => {
           data: '0x1234',
         }
 
-        const result = Chain.populateDefaultMessageForDest(message)
+        const result = Chain.buildMessageForDest(message)
 
         assert.ok(result.extraArgs)
         assert.equal(typeof result.extraArgs, 'object')
@@ -538,7 +538,7 @@ describe('decodeMessage', () => {
           receiver: '0x1234567890123456789012345678901234567890',
         }
 
-        const result = Chain.populateDefaultMessageForDest(message)
+        const result = Chain.buildMessageForDest(message)
 
         assert.ok(result.extraArgs)
         assert.ok('gasLimit' in result.extraArgs)
@@ -560,7 +560,7 @@ describe('decodeMessage', () => {
           },
         }
 
-        const result = Chain.populateDefaultMessageForDest(message)
+        const result = Chain.buildMessageForDest(message)
 
         assert.ok(result.extraArgs)
         assert.ok('gasLimit' in result.extraArgs)
@@ -581,7 +581,7 @@ describe('decodeMessage', () => {
           },
         }
 
-        const result = Chain.populateDefaultMessageForDest(message)
+        const result = Chain.buildMessageForDest(message)
 
         assert.ok(result.extraArgs)
         if ('gasLimit' in result.extraArgs) {
@@ -598,7 +598,7 @@ describe('decodeMessage', () => {
           data: '0x',
         }
 
-        const result = Chain.populateDefaultMessageForDest(message)
+        const result = Chain.buildMessageForDest(message)
 
         assert.ok(result.extraArgs)
         assert.ok('gasLimit' in result.extraArgs)
@@ -613,7 +613,7 @@ describe('decodeMessage', () => {
           feeToken: '0xFeeTokenAddress',
         }
 
-        const result = Chain.populateDefaultMessageForDest(message)
+        const result = Chain.buildMessageForDest(message)
 
         assert.deepEqual(result.tokenAmounts, message.tokenAmounts)
         assert.equal(result.feeToken, message.feeToken)
@@ -630,7 +630,7 @@ describe('decodeMessage', () => {
           },
         }
 
-        const result = SolanaChain.populateDefaultMessageForDest(message)
+        const result = SolanaChain.buildMessageForDest(message)
 
         assert.ok(result.extraArgs)
         const extraArgs = result.extraArgs as SVMExtraArgsV1
@@ -650,7 +650,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = SolanaChain.populateDefaultMessageForDest(message)
+        const result = SolanaChain.buildMessageForDest(message)
 
         const extraArgs = result.extraArgs as SVMExtraArgsV1
         assert.equal(extraArgs.computeUnits, 250000n)
@@ -666,7 +666,7 @@ describe('decodeMessage', () => {
           },
         }
 
-        const result = SolanaChain.populateDefaultMessageForDest(message)
+        const result = SolanaChain.buildMessageForDest(message)
 
         const extraArgs = result.extraArgs as SVMExtraArgsV1
         assert.equal(extraArgs.computeUnits, 150000n)
@@ -678,7 +678,7 @@ describe('decodeMessage', () => {
           data: '0xabcd',
         }
 
-        const result = SolanaChain.populateDefaultMessageForDest(message)
+        const result = SolanaChain.buildMessageForDest(message)
 
         const extraArgs = result.extraArgs as SVMExtraArgsV1
         assert.equal(extraArgs.computeUnits, 200000n) // DEFAULT_GAS_LIMIT
@@ -689,7 +689,7 @@ describe('decodeMessage', () => {
           receiver: 'DummyReceiverAddress1234567890123456789012',
         }
 
-        const result = SolanaChain.populateDefaultMessageForDest(message)
+        const result = SolanaChain.buildMessageForDest(message)
 
         const extraArgs = result.extraArgs as SVMExtraArgsV1
         assert.equal(extraArgs.computeUnits, 0n)
@@ -705,7 +705,7 @@ describe('decodeMessage', () => {
           },
         }
 
-        const result = SolanaChain.populateDefaultMessageForDest(message)
+        const result = SolanaChain.buildMessageForDest(message)
 
         const extraArgs = result.extraArgs as SVMExtraArgsV1
         assert.ok('computeUnits' in extraArgs)
@@ -728,7 +728,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = SolanaChain.populateDefaultMessageForDest(message)
+        const result = SolanaChain.buildMessageForDest(message)
 
         const extraArgs = result.extraArgs as SVMExtraArgsV1
         assert.equal(extraArgs.tokenReceiver, customReceiver)
@@ -741,7 +741,7 @@ describe('decodeMessage', () => {
           tokenAmounts: [{ token: 'TokenMint123', amount: 100n }],
         }
 
-        const result = SolanaChain.populateDefaultMessageForDest(message)
+        const result = SolanaChain.buildMessageForDest(message)
 
         const extraArgs = result.extraArgs as SVMExtraArgsV1
         assert.equal(extraArgs.tokenReceiver, receiverAddr)
@@ -756,7 +756,7 @@ describe('decodeMessage', () => {
         }
 
         assert.throws(
-          () => SolanaChain.populateDefaultMessageForDest(message),
+          () => SolanaChain.buildMessageForDest(message),
           /tokenReceiver.*required when sending tokens with data to Solana/i,
         )
       })
@@ -774,7 +774,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = SolanaChain.populateDefaultMessageForDest(message)
+        const result = SolanaChain.buildMessageForDest(message)
 
         const extraArgs = result.extraArgs as SVMExtraArgsV1
         assert.deepEqual(extraArgs.accounts, accounts)
@@ -790,7 +790,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = SolanaChain.populateDefaultMessageForDest(message)
+        const result = SolanaChain.buildMessageForDest(message)
 
         const extraArgs = result.extraArgs as SVMExtraArgsV1
         assert.equal(extraArgs.accountIsWritableBitmap, bitmap)
@@ -805,7 +805,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = SolanaChain.populateDefaultMessageForDest(message)
+        const result = SolanaChain.buildMessageForDest(message)
 
         assert.equal(result.receiver, '11111111111111111111111111111111')
       })
@@ -819,7 +819,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = SolanaChain.populateDefaultMessageForDest(message)
+        const result = SolanaChain.buildMessageForDest(message)
 
         const extraArgs = result.extraArgs as SVMExtraArgsV1
         assert.equal(extraArgs.allowOutOfOrderExecution, false)
@@ -836,7 +836,7 @@ describe('decodeMessage', () => {
           },
         }
 
-        const result = SuiChain.populateDefaultMessageForDest(message)
+        const result = SuiChain.buildMessageForDest(message)
 
         assert.ok(result.extraArgs)
         assert.equal(result.extraArgs.gasLimit, 100000n)
@@ -854,7 +854,7 @@ describe('decodeMessage', () => {
           data: '0xabcd',
         }
 
-        const result = SuiChain.populateDefaultMessageForDest(message)
+        const result = SuiChain.buildMessageForDest(message)
 
         assert.equal(result.extraArgs.gasLimit, 1000000n) // DEFAULT_GAS_LIMIT for Sui
       })
@@ -864,7 +864,7 @@ describe('decodeMessage', () => {
           receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
         }
 
-        const result = SuiChain.populateDefaultMessageForDest(message)
+        const result = SuiChain.buildMessageForDest(message)
 
         assert.equal(result.extraArgs.gasLimit, 0n)
       })
@@ -879,7 +879,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = SuiChain.populateDefaultMessageForDest(message)
+        const result = SuiChain.buildMessageForDest(message)
 
         assert.equal(result.extraArgs.tokenReceiver, customReceiver)
       })
@@ -891,7 +891,7 @@ describe('decodeMessage', () => {
           tokenAmounts: [{ token: '0xToken123', amount: 100n }],
         }
 
-        const result = SuiChain.populateDefaultMessageForDest(message)
+        const result = SuiChain.buildMessageForDest(message)
 
         assert.equal(result.extraArgs.tokenReceiver, receiverAddr)
         assert.equal(
@@ -913,7 +913,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = SuiChain.populateDefaultMessageForDest(message)
+        const result = SuiChain.buildMessageForDest(message)
 
         assert.deepEqual(result.extraArgs.receiverObjectIds, accounts)
       })
@@ -928,7 +928,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = SuiChain.populateDefaultMessageForDest(message)
+        const result = SuiChain.buildMessageForDest(message)
 
         assert.deepEqual(result.extraArgs.receiverObjectIds, objectIds)
       })
@@ -945,7 +945,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = SuiChain.populateDefaultMessageForDest(message)
+        const result = SuiChain.buildMessageForDest(message)
 
         assert.deepEqual(result.extraArgs.receiverObjectIds, objectIds)
       })
@@ -959,7 +959,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = SuiChain.populateDefaultMessageForDest(message)
+        const result = SuiChain.buildMessageForDest(message)
 
         assert.deepEqual(result.extraArgs.receiverObjectIds, [])
       })
@@ -975,7 +975,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = SuiChain.populateDefaultMessageForDest(message)
+        const result = SuiChain.buildMessageForDest(message)
 
         assert.deepEqual(result.extraArgs.receiverObjectIds, accounts)
       })
@@ -989,7 +989,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = SuiChain.populateDefaultMessageForDest(message)
+        const result = SuiChain.buildMessageForDest(message)
 
         assert.equal(
           result.receiver,
@@ -1006,7 +1006,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = SuiChain.populateDefaultMessageForDest(message)
+        const result = SuiChain.buildMessageForDest(message)
 
         assert.equal(result.extraArgs.allowOutOfOrderExecution, false)
       })
@@ -1019,7 +1019,7 @@ describe('decodeMessage', () => {
           feeToken: '0xFeeToken456',
         }
 
-        const result = SuiChain.populateDefaultMessageForDest(message)
+        const result = SuiChain.buildMessageForDest(message)
 
         assert.equal(result.data, message.data)
         assert.deepEqual(result.tokenAmounts, message.tokenAmounts)
@@ -1036,7 +1036,7 @@ describe('decodeMessage', () => {
           },
         }
 
-        const result = SuiChain.populateDefaultMessageForDest(message)
+        const result = SuiChain.buildMessageForDest(message)
 
         assert.ok('gasLimit' in result.extraArgs)
         assert.ok('allowOutOfOrderExecution' in result.extraArgs)
