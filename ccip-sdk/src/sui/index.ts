@@ -1,11 +1,10 @@
 import { Buffer } from 'buffer'
 
-import { toHex } from '@mysten/bcs'
 import { type SuiTransactionBlockResponse, SuiClient } from '@mysten/sui/client'
 import type { Keypair } from '@mysten/sui/cryptography'
 import { SuiGraphQLClient } from '@mysten/sui/graphql'
 import { Transaction } from '@mysten/sui/transactions'
-import { type BytesLike, AbiCoder, hexlify, isBytesLike } from 'ethers'
+import { type BytesLike, hexlify, isBytesLike } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { AptosChain } from '../aptos/index.ts'
@@ -16,12 +15,11 @@ import {
   CCIPError,
   CCIPErrorCode,
   CCIPExecTxRevertedError,
-  CCIPExtraArgsInvalidError,
   CCIPNotImplementedError,
   CCIPSuiMessageVersionInvalidError,
   CCIPVersionFeatureUnavailableError,
 } from '../errors/index.ts'
-import type { ExtraArgs, SuiExtraArgsV1 } from '../extra-args.ts'
+import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1 } from '../extra-args.ts'
 import { getSuiLeafHasher } from './hasher.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
@@ -44,7 +42,7 @@ import {
 } from '../types.ts'
 import { discoverCCIP, discoverOfframp } from './discovery.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
-import { bytesToBuffer, decodeAddress, getDataBytes, networkInfo } from '../utils.ts'
+import { bytesToBuffer, decodeAddress, networkInfo } from '../utils.ts'
 import { type CommitEvent, getSuiEventsInTimeRange } from './events.ts'
 import {
   type SuiManuallyExecuteInput,
@@ -440,28 +438,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    */
   static decodeExtraArgs(
     extraArgs: BytesLike,
-  ): (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' }) | undefined {
-    const data = getDataBytes(extraArgs)
-    const hexBytes = toHex(data)
-    if (!hexBytes.startsWith(SUI_EXTRA_ARGS_V1_TAG)) {
-      throw new CCIPExtraArgsInvalidError('Sui', hexBytes)
-    }
-
-    const abiData = '0x' + hexBytes.slice(8)
-    const decoded = AbiCoder.defaultAbiCoder().decode(
-      ['tuple(uint256,bool,bytes32,bytes32[])'],
-      abiData,
-    )
-
-    const tuple = decoded[0] as readonly [bigint, boolean, string, string[]]
-
-    return {
-      gasLimit: tuple[0],
-      allowOutOfOrderExecution: tuple[1],
-      tokenReceiver: tuple[2],
-      receiverObjectIds: tuple[3], // Already an array of hex strings
-      _tag: 'SuiExtraArgsV1',
-    }
+  ):
+    | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
+    | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
+    | undefined {
+    return AptosChain.decodeExtraArgs(extraArgs)
   }
 
   /**
