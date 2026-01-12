@@ -627,26 +627,17 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /** {@inheritDoc Chain.getBalance} */
   async getBalance(opts: GetBalanceOpts): Promise<bigint> {
-    const { address, token } = opts
-    const addressPubkey = new PublicKey(address)
+    const { holder, token } = opts
+    const holderPubkey = new PublicKey(holder)
 
     if (!token) {
-      return BigInt(await this.connection.getBalance(addressPubkey))
+      return BigInt(await this.connection.getBalance(holderPubkey))
     }
 
     const tokenPubkey = new PublicKey(token)
-    const resolved = await resolveATA(this.connection, tokenPubkey, addressPubkey)
-    if (!resolved) {
-      this.logger.warn(`Token mint ${token} not found on-chain`)
-      return 0n
-    }
-
-    try {
-      const accountInfo = await this.connection.getTokenAccountBalance(resolved.ata)
-      return BigInt(accountInfo.value.amount)
-    } catch {
-      return 0n // Account doesn't exist = 0 balance
-    }
+    const resolved = await resolveATA(this.connection, tokenPubkey, holderPubkey)
+    const accountInfo = await this.connection.getTokenAccountBalance(resolved.ata)
+    return BigInt(accountInfo.value.amount)
   }
 
   /**

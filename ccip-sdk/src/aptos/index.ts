@@ -350,18 +350,14 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
 
   /** {@inheritDoc Chain.getBalance} */
   async getBalance(opts: GetBalanceOpts): Promise<bigint> {
-    const { address, token } = opts
+    const { holder, token } = opts
     const asset = token ?? '0x1::aptos_coin::AptosCoin'
 
-    try {
-      const balance = await this.provider.getBalance({
-        accountAddress: address,
-        asset,
-      })
-      return BigInt(balance)
-    } catch {
-      return 0n
-    }
+    const balance = await this.provider.getBalance({
+      accountAddress: holder,
+      asset,
+    })
+    return BigInt(balance)
   }
 
   /** {@inheritDoc Chain.getTokenAdminRegistryFor} */

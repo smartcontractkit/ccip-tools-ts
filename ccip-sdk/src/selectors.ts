@@ -453,6 +453,11 @@ const selectors: Selectors = {
     name: 'story-testnet',
     family: 'evm',
   },
+  '1672': {
+    selector: 7801139999541420232n,
+    name: 'pharos-mainnet',
+    family: 'evm',
+  },
   '1687': {
     selector: 10749384167430721561n,
     name: 'mint-testnet',
@@ -807,6 +812,11 @@ const selectors: Selectors = {
     family: 'evm',
   },
   '36888': { selector: 4829375610284793157n, name: 'ab-mainnet', family: 'evm' },
+  '36900': {
+    selector: 4059281736450291836n,
+    name: 'adi-mainnet',
+    family: 'evm',
+  },
   '37111': {
     selector: 6827576821754315911n,
     name: 'ethereum-testnet-sepolia-lens-1',
@@ -1007,6 +1017,11 @@ const selectors: Selectors = {
   '98867': {
     selector: 13874588925447303949n,
     name: 'plume-testnet-sepolia',
+    family: 'evm',
+  },
+  '99999': {
+    selector: 9418205736192840573n,
+    name: 'adi-testnet',
     family: 'evm',
   },
   '128123': {

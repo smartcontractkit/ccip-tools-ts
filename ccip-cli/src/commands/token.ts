@@ -58,7 +58,7 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
   const chain = await getChain(networkName)
 
   const balance = await chain.getBalance({
-    address: argv.address,
+    holder: argv.address,
     token: argv.token,
   })
 
@@ -80,7 +80,7 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
       )
       return
     case Format.log:
-      logger.log(`Balance: ${balance}`)
+      logger.log(`Balance of ${tokenLabel}: ${balance}`)
       return
     case Format.pretty:
     default:

@@ -112,6 +112,7 @@ export {
   CCIPSplTokenInvalidError,
   CCIPTokenAmountInvalidError,
   CCIPTokenDataParseError,
+  CCIPTokenMintInvalidError,
   CCIPTokenMintNotFoundError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTokenPoolInfoNotFoundError,

@@ -18,7 +18,6 @@ import {
   CCIPSolanaLookupTableNotFoundError,
   CCIPSolanaRouterConfigNotFoundError,
   CCIPTokenAmountInvalidError,
-  CCIPTokenMintNotFoundError,
 } from '../errors/index.ts'
 import { type AnyMessage, type WithLogger, ChainFamily } from '../types.ts'
 import { bytesToBuffer, toLeArray, util } from '../utils.ts'
@@ -334,7 +333,6 @@ async function approveRouterSpender(
 ): Promise<TransactionInstruction | undefined> {
   // Get the current account info to check existing delegation (or create if needed)
   const resolved = await resolveATA(connection, token, owner)
-  if (!resolved) throw new CCIPTokenMintNotFoundError(token.toBase58())
   const accountInfo = await getAccount(connection, resolved.ata, undefined, resolved.tokenProgram)
 
   // spender is a Router PDA

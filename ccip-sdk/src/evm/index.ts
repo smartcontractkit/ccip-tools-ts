@@ -868,10 +868,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /** {@inheritDoc Chain.getBalance} */
   async getBalance(opts: GetBalanceOpts): Promise<bigint> {
-    const { address, token } = opts
+    const { holder, token } = opts
 
     if (!token) {
-      return this.provider.getBalance(address)
+      return this.provider.getBalance(holder)
     }
 
     const contract = new Contract(
@@ -879,7 +879,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       interfaces.Token,
       this.provider,
     ) as unknown as TypedContract<typeof Token_ABI>
-    return contract.balanceOf(address)
+    return contract.balanceOf(holder)
   }
 
   /**

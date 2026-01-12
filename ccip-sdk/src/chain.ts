@@ -120,8 +120,8 @@ export type TokenInfo = {
 export type GetBalanceOpts = {
   /** Token address. Use null/undefined for native token balance. */
   token?: string | null
-  /** Address to query balance for. */
-  address: string
+  /** Holder address to query balance for. */
+  holder: string
 }
 
 /**
