@@ -19,7 +19,7 @@ import {
   zeroPadValue,
 } from 'ethers'
 import { memoize } from 'micro-memoize'
-import type { PickDeep, SetRequired } from 'type-fest'
+import type { PickDeep } from 'type-fest'
 
 import {
   type ChainContext,
@@ -88,7 +88,13 @@ import { getAptosLeafHasher } from './hasher.ts'
 import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
 import { getTokenInfo } from './token.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import { decodeMessage, getMessageById, getMessagesInBatch, getMessagesInTx } from '../requests.ts'
+import {
+  buildMessageForDest,
+  decodeMessage,
+  getMessageById,
+  getMessagesInBatch,
+  getMessagesInTx,
+} from '../requests.ts'
 export type { UnsignedAptosTx }
 
 /**
@@ -530,21 +536,29 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     destChainSelector,
     message,
   }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    return getFee(this.provider, router, destChainSelector, message)
+    const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
+    return getFee(this.provider, router, destChainSelector, populatedMessage)
   }
 
   /** {@inheritDoc Chain.generateUnsignedSendMessage} */
   async generateUnsignedSendMessage(
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedAptosTx> {
-    const { sender, router, destChainSelector, message } = opts
-    if (!message.fee) message.fee = await this.getFee(opts)
+    const { sender, router, destChainSelector } = opts
+    const populatedMessage = buildMessageForDest(
+      opts.message,
+      networkInfo(destChainSelector).family,
+    )
+    const message = {
+      ...populatedMessage,
+      fee: opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage })),
+    }
     const tx = await generateUnsignedCcipSend(
       this.provider,
       sender,
       router,
       destChainSelector,
-      message as SetRequired<typeof message, 'fee'>,
+      message,
       opts,
     )
     return {
