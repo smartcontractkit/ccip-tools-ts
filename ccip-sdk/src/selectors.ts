@@ -764,6 +764,11 @@ const selectors: Selectors = {
     name: 'ethereum-testnet-sepolia-immutable-zkevm-1',
     family: 'evm',
   },
+  '14601': {
+    selector: 1763698235108410440n,
+    name: 'sonic-testnet',
+    family: 'evm',
+  },
   '16600': {
     selector: 16088006396410204581n,
     name: '0g-testnet-newton',

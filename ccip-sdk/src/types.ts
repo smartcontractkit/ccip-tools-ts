@@ -307,7 +307,7 @@ export type AnyMessage = {
 /**
  * Partial [[AnyMessage]], which populates default fields like `extraArgs` if needed
  */
-export type RequestMessage = Partial<AnyMessage> & {
+export type MessageInput = Partial<AnyMessage> & {
   receiver: AnyMessage['receiver']
   extraArgs?: Partial<ExtraArgs>
   fee?: bigint

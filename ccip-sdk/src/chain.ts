@@ -38,7 +38,7 @@ import {
   type Logger,
   type NetworkInfo,
   type OffchainTokenData,
-  type RequestMessage,
+  type MessageInput,
   type WithLogger,
   ExecutionState,
 } from './types.ts'
@@ -163,7 +163,7 @@ export type SendMessageOpts = {
   /** Destination network selector. */
   destChainSelector: bigint
   /** Message to send. If `fee` is omitted, it'll be calculated */
-  message: RequestMessage
+  message: MessageInput
   /** Approve the maximum amount of tokens to transfer */
   approveMax?: boolean
 }
@@ -798,7 +798,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * @param message - AnyMessage (from source), containing at least `receiver`
    * @returns A message suitable for `sendMessage` to this destination chain family
    */
-  buildMessageForDest(message: RequestMessage): AnyMessage
+  buildMessageForDest(message: MessageInput): AnyMessage
 }
 
 /** Function type for getting a Chain instance by ID, selector, or name. */
