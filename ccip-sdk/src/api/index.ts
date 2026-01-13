@@ -398,33 +398,25 @@ function transformExtraArgs(
   }
 }
 
-/** Zero address placeholder for missing token pool addresses */
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
-
 /**
  * Transforms raw API token amounts to SDK token amounts format.
- * Includes SourceTokenData fields with placeholder values since the API
- * does not provide pool addresses - these require on-chain lookup.
  * @param raw - Raw token amounts from API response
- * @returns Array of token amounts with bigint amounts and SourceTokenData placeholders
+ * @returns Array of token amounts with bigint amounts and SourceTokenData fields
  */
 function transformTokenAmounts(raw: RawTokenAmount[]): {
   token: string
   amount: bigint
-  // SourceTokenData fields (placeholders - not available from API)
   sourcePoolAddress: string
   destTokenAddress: string
   extraData: string
   destGasAmount: bigint
 }[] {
   return raw.map((ta) => ({
-    token: ta.tokenAddress,
+    token: ta.sourceTokenAddress,
     amount: BigInt(ta.amount),
-    // TODO: API does not provide pool addresses - these require on-chain lookup
-    // Consider exposing these through the API.
-    sourcePoolAddress: ZERO_ADDRESS,
-    destTokenAddress: ZERO_ADDRESS,
-    extraData: '0x',
-    destGasAmount: 0n,
+    sourcePoolAddress: ta.sourcePoolAddress,
+    destTokenAddress: ta.destTokenAddress,
+    extraData: ta.extraData ?? '0x',
+    destGasAmount: ta.destGasAmount ? BigInt(ta.destGasAmount) : 0n,
   }))
 }

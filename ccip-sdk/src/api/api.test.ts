@@ -277,7 +277,12 @@ describe('CCIPAPIClient', () => {
       sendTransactionHash: '0x9428debf5e5f01234567890abcdef1234567890abcdef1234567890abcdef12',
       sendTimestamp: '2023-12-01T10:30:00Z',
       tokenAmounts: [
-        { tokenAddress: '0xA0b86a8B5b6E8e0A09C4c3Dc7dE6e69e1e2d3f4a', amount: '1000000' },
+        {
+          sourceTokenAddress: '0xA0b86a8B5b6E8e0A09C4c3Dc7dE6e69e1e2d3f4a',
+          destTokenAddress: '0xB1c97a9C6c7F9f1B10D5e4Ec8eF7f70f2f3e4d5c',
+          sourcePoolAddress: '0xC2d08b0D7d8a0a2C21E6f5Fd9fa8a81a3a4f5e6d',
+          amount: '1000000',
+        },
       ],
       extraArgs: { gasLimit: '400000', allowOutOfOrderExecution: false },
       readyForManualExecution: false,
@@ -580,8 +585,20 @@ describe('CCIPAPIClient', () => {
       const response = {
         ...mockMessageResponse,
         tokenAmounts: [
-          { tokenAddress: '0xToken1', amount: '1000000000000000000' },
-          { tokenAddress: '0xToken2', amount: '2500000' },
+          {
+            sourceTokenAddress: '0xToken1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            destTokenAddress: '0xDestToken1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            sourcePoolAddress: '0xPool1cccccccccccccccccccccccccccccccccc',
+            amount: '1000000000000000000',
+            extraData: '0xabcd',
+            destGasAmount: '50000',
+          },
+          {
+            sourceTokenAddress: '0xToken2dddddddddddddddddddddddddddddddddd',
+            destTokenAddress: '0xDestToken2eeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+            sourcePoolAddress: '0xPool2ffffffffffffffffffffffffffffffffffff',
+            amount: '2500000',
+          },
         ],
       }
       const customFetch = mock.fn(() =>
@@ -607,21 +624,24 @@ describe('CCIPAPIClient', () => {
         }[]
       }
       assert.equal(msg.tokenAmounts.length, 2)
-      assert.equal(msg.tokenAmounts[0]!.token, '0xToken1')
+      // First token with all fields populated
+      assert.equal(msg.tokenAmounts[0]!.token, '0xToken1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
       assert.equal(msg.tokenAmounts[0]!.amount, 1000000000000000000n)
-      // SourceTokenData placeholder fields (zero address since API doesn't provide pool data)
       assert.equal(
         msg.tokenAmounts[0]!.sourcePoolAddress,
-        '0x0000000000000000000000000000000000000000',
+        '0xPool1cccccccccccccccccccccccccccccccccc',
       )
       assert.equal(
         msg.tokenAmounts[0]!.destTokenAddress,
-        '0x0000000000000000000000000000000000000000',
+        '0xDestToken1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       )
-      assert.equal(msg.tokenAmounts[0]!.extraData, '0x')
-      assert.equal(msg.tokenAmounts[0]!.destGasAmount, 0n)
-      assert.equal(msg.tokenAmounts[1]!.token, '0xToken2')
+      assert.equal(msg.tokenAmounts[0]!.extraData, '0xabcd')
+      assert.equal(msg.tokenAmounts[0]!.destGasAmount, 50000n)
+      // Second token with optional fields missing (uses defaults)
+      assert.equal(msg.tokenAmounts[1]!.token, '0xToken2dddddddddddddddddddddddddddddddddd')
       assert.equal(msg.tokenAmounts[1]!.amount, 2500000n)
+      assert.equal(msg.tokenAmounts[1]!.extraData, '0x')
+      assert.equal(msg.tokenAmounts[1]!.destGasAmount, 0n)
     })
 
     it('should handle empty tokenAmounts', async () => {

@@ -96,6 +96,31 @@ export async function getMessageByIdCmd(ctx: Ctx, argv: Parameters<typeof handle
         'Ready for Manual Exec': result.readyForManualExecution,
         Version: result.lane.version,
       })
+
+      // Display token transfers if any
+      const tokenAmounts = result.message.tokenAmounts as {
+        token: string
+        amount: bigint
+        sourcePoolAddress: string
+        destTokenAddress: string
+        extraData: string
+        destGasAmount: bigint
+      }[]
+      if (tokenAmounts.length > 0) {
+        logger.log('\nToken Transfers:')
+        for (let i = 0; i < tokenAmounts.length; i++) {
+          const ta = tokenAmounts[i]!
+          prettyTable.call(ctx, {
+            [`Token ${i + 1}`]: '',
+            '  Source Token': ta.token,
+            '  Dest Token': ta.destTokenAddress,
+            '  Source Pool': ta.sourcePoolAddress,
+            '  Amount': ta.amount.toString(),
+            ...(ta.extraData !== '0x' ? { '  Extra Data': ta.extraData } : {}),
+            ...(ta.destGasAmount > 0n ? { '  Dest Gas': ta.destGasAmount.toString() } : {}),
+          })
+        }
+      }
     }
   }
 }

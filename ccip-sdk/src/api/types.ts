@@ -54,8 +54,12 @@ export type RawNetworkInfo = {
 
 /** Token amount from API response */
 export type RawTokenAmount = {
-  tokenAddress: string
+  sourceTokenAddress: string
+  destTokenAddress: string
+  sourcePoolAddress: string
   amount: string
+  extraData?: string | null
+  destGasAmount?: string | null
 }
 
 /** EVM extra args from API (GenericExtraArgsV2) */
