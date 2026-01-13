@@ -303,12 +303,21 @@ export type ExecutionReport<M extends CCIPMessage = CCIPMessage> = {
 export type AnyMessage = {
   /** Receiver address on the destination chain. */
   receiver: BytesLike
-  /** Arbitrary data payload. */
-  data: BytesLike
   /** Extra arguments for gas limits and other settings. */
   extraArgs: ExtraArgs
+  /** Arbitrary data payload. */
+  data?: BytesLike
   /** Optional token transfers. */
   tokenAmounts?: readonly { token: string; amount: bigint }[]
   /** Optional fee token address (native if omitted). */
   feeToken?: string
+}
+
+/**
+ * Partial [[AnyMessage]], which populates default fields like `extraArgs` if needed
+ */
+export type RequestMessage = Partial<AnyMessage> & {
+  receiver: AnyMessage['receiver']
+  extraArgs?: Partial<ExtraArgs>
+  fee?: bigint
 }

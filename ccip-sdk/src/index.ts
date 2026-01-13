@@ -30,7 +30,6 @@ export {
 export { estimateExecGasForRequest } from './gas.ts'
 export { decodeMessage, getMessagesForSender, sourceToDestTokenAmounts } from './requests.ts'
 export {
-  type AnyMessage,
   type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
@@ -43,6 +42,7 @@ export {
   type Logger,
   type NetworkInfo,
   type OffchainTokenData,
+  type RequestMessage,
   type WithLogger,
   CCIPVersion,
   ExecutionState,

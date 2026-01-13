@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
 import './index.ts' // Import to ensure chains are loaded
-import type { Chain, LogFilter } from './chain.ts'
+import { type LogFilter, Chain } from './chain.ts'
+import type { SVMExtraArgsV1 } from './extra-args.ts'
 import {
   decodeMessage,
   getMessageById,
@@ -12,6 +13,8 @@ import {
   getMessagesInBatch,
   getMessagesInTx,
 } from './requests.ts'
+import { SolanaChain } from './solana/index.ts'
+import { SuiChain } from './sui/index.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
@@ -505,5 +508,543 @@ describe('decodeMessage', () => {
         '0x65ad4cb3142cab5100a4eeed34e2005cbb1fcae42fc688e3c96b0c33ae16e6b9',
       )
     }
+  })
+
+  describe('buildMessageForDest', () => {
+    describe('Chain (base implementation)', () => {
+      it('should populate default extraArgs for EVM with data', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+        }
+
+        const result = Chain.buildMessageForDest(message)
+
+        assert.ok(result.extraArgs)
+        assert.equal(typeof result.extraArgs, 'object')
+        assert.ok('gasLimit' in result.extraArgs)
+        if ('allowOutOfOrderExecution' in result.extraArgs) {
+          assert.equal(result.extraArgs.allowOutOfOrderExecution, true)
+        }
+        if ('gasLimit' in result.extraArgs) {
+          assert.equal(result.extraArgs.gasLimit, 200000n) // DEFAULT_GAS_LIMIT
+        }
+        assert.equal(result.receiver, message.receiver)
+        assert.equal(result.data, message.data)
+      })
+
+      it('should populate gasLimit as 0 when no data', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+        }
+
+        const result = Chain.buildMessageForDest(message)
+
+        assert.ok(result.extraArgs)
+        assert.ok('gasLimit' in result.extraArgs)
+        if ('gasLimit' in result.extraArgs) {
+          assert.equal(result.extraArgs.gasLimit, 0n)
+        }
+        if ('allowOutOfOrderExecution' in result.extraArgs) {
+          assert.equal(result.extraArgs.allowOutOfOrderExecution, true)
+        }
+      })
+
+      it('should preserve existing extraArgs values', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+          extraArgs: {
+            gasLimit: 500000n,
+            allowOutOfOrderExecution: false,
+          },
+        }
+
+        const result = Chain.buildMessageForDest(message)
+
+        assert.ok(result.extraArgs)
+        assert.ok('gasLimit' in result.extraArgs)
+        if ('gasLimit' in result.extraArgs) {
+          assert.equal(result.extraArgs.gasLimit, 500000n)
+        }
+        if ('allowOutOfOrderExecution' in result.extraArgs) {
+          assert.equal(result.extraArgs.allowOutOfOrderExecution, false)
+        }
+      })
+
+      it('should merge partial extraArgs with defaults', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+          extraArgs: {
+            gasLimit: 300000n,
+          },
+        }
+
+        const result = Chain.buildMessageForDest(message)
+
+        assert.ok(result.extraArgs)
+        if ('gasLimit' in result.extraArgs) {
+          assert.equal(result.extraArgs.gasLimit, 300000n)
+        }
+        if ('allowOutOfOrderExecution' in result.extraArgs) {
+          assert.equal(result.extraArgs.allowOutOfOrderExecution, true)
+        }
+      })
+
+      it('should handle empty data string as no data', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x',
+        }
+
+        const result = Chain.buildMessageForDest(message)
+
+        assert.ok(result.extraArgs)
+        assert.ok('gasLimit' in result.extraArgs)
+        assert.equal(result.extraArgs.gasLimit, 0n)
+      })
+
+      it('should preserve tokenAmounts and feeToken', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+          tokenAmounts: [{ token: '0xTokenAddress', amount: 1000n }],
+          feeToken: '0xFeeTokenAddress',
+        }
+
+        const result = Chain.buildMessageForDest(message)
+
+        assert.deepEqual(result.tokenAmounts, message.tokenAmounts)
+        assert.equal(result.feeToken, message.feeToken)
+      })
+    })
+
+    describe('SolanaChain', () => {
+      it('should populate SVMExtraArgsV1 with computeUnits from gasLimit', () => {
+        const message = {
+          receiver: 'DummyReceiverAddress1234567890123456789012',
+          data: '0x1234',
+          extraArgs: {
+            gasLimit: 100000n,
+          },
+        }
+
+        const result = SolanaChain.buildMessageForDest(message)
+
+        assert.ok(result.extraArgs)
+        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        assert.equal(extraArgs.computeUnits, 100000n)
+        assert.equal(extraArgs.allowOutOfOrderExecution, true)
+        assert.equal(extraArgs.tokenReceiver, '11111111111111111111111111111111')
+        assert.deepEqual(extraArgs.accounts, [])
+        assert.equal(extraArgs.accountIsWritableBitmap, 0n)
+      })
+
+      it('should use computeUnits if provided directly', () => {
+        const message = {
+          receiver: 'DummyReceiverAddress1234567890123456789012',
+          data: '0x1234',
+          extraArgs: {
+            computeUnits: 250000n,
+          } as any,
+        }
+
+        const result = SolanaChain.buildMessageForDest(message)
+
+        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        assert.equal(extraArgs.computeUnits, 250000n)
+      })
+
+      it('should prefer computeUnits over gasLimit if both provided', () => {
+        const message = {
+          receiver: 'DummyReceiverAddress1234567890123456789012',
+          data: '0x1234',
+          extraArgs: {
+            computeUnits: 150000n,
+            gasLimit: 100000n,
+          },
+        }
+
+        const result = SolanaChain.buildMessageForDest(message)
+
+        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        assert.equal(extraArgs.computeUnits, 150000n)
+      })
+
+      it('should use DEFAULT_GAS_LIMIT for computeUnits when data present and no gas specified', () => {
+        const message = {
+          receiver: 'DummyReceiverAddress1234567890123456789012',
+          data: '0xabcd',
+        }
+
+        const result = SolanaChain.buildMessageForDest(message)
+
+        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        assert.equal(extraArgs.computeUnits, 200000n) // DEFAULT_GAS_LIMIT
+      })
+
+      it('should set computeUnits to 0 when no data', () => {
+        const message = {
+          receiver: 'DummyReceiverAddress1234567890123456789012',
+        }
+
+        const result = SolanaChain.buildMessageForDest(message)
+
+        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        assert.equal(extraArgs.computeUnits, 0n)
+      })
+
+      it('should output only strict SVMExtraArgsV1 variables', () => {
+        const message = {
+          receiver: 'DummyReceiverAddress1234567890123456789012',
+          data: '0x1234',
+          extraArgs: {
+            gasLimit: 100000n,
+            someOtherField: 'should not appear',
+          },
+        }
+
+        const result = SolanaChain.buildMessageForDest(message)
+
+        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        assert.ok('computeUnits' in extraArgs)
+        assert.ok('allowOutOfOrderExecution' in extraArgs)
+        assert.ok('tokenReceiver' in extraArgs)
+        assert.ok('accounts' in extraArgs)
+        assert.ok('accountIsWritableBitmap' in extraArgs)
+        assert.ok(!('gasLimit' in extraArgs))
+        assert.ok(!('someOtherField' in extraArgs))
+        assert.equal(Object.keys(extraArgs).length, 5)
+      })
+
+      it('should use custom tokenReceiver when provided', () => {
+        const customReceiver = 'CustomReceiverAddress123456789012345678901'
+        const message = {
+          receiver: 'DummyReceiverAddress1234567890123456789012',
+          data: '0x1234',
+          extraArgs: {
+            tokenReceiver: customReceiver,
+          } as any,
+        }
+
+        const result = SolanaChain.buildMessageForDest(message)
+
+        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        assert.equal(extraArgs.tokenReceiver, customReceiver)
+      })
+
+      it('should set tokenReceiver to receiver when tokenAmounts present', () => {
+        const receiverAddr = '11111111111111111111111111111112' // Valid base58 Solana address
+        const message = {
+          receiver: receiverAddr,
+          tokenAmounts: [{ token: 'TokenMint123', amount: 100n }],
+        }
+
+        const result = SolanaChain.buildMessageForDest(message)
+
+        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        assert.equal(extraArgs.tokenReceiver, receiverAddr)
+        assert.equal(result.receiver, '11111111111111111111111111111111') // default PublicKey when tokens
+      })
+
+      it('should throw error when sending tokens with data but no tokenReceiver', () => {
+        const message = {
+          receiver: 'DummyReceiverAddress1234567890123456789012',
+          data: '0x1234',
+          tokenAmounts: [{ token: 'TokenMint123', amount: 100n }],
+        }
+
+        assert.throws(
+          () => SolanaChain.buildMessageForDest(message),
+          /tokenReceiver.*required when sending tokens with data to Solana/i,
+        )
+      })
+
+      it('should accept accounts array', () => {
+        const accounts = [
+          'Account1111111111111111111111111111111111',
+          'Account2222222222222222222222222222222222',
+        ]
+        const message = {
+          receiver: 'DummyReceiverAddress1234567890123456789012',
+          data: '0x1234',
+          extraArgs: {
+            accounts,
+          } as any,
+        }
+
+        const result = SolanaChain.buildMessageForDest(message)
+
+        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        assert.deepEqual(extraArgs.accounts, accounts)
+      })
+
+      it('should accept accountIsWritableBitmap', () => {
+        const bitmap = 0b1010n
+        const message = {
+          receiver: 'DummyReceiverAddress1234567890123456789012',
+          data: '0x1234',
+          extraArgs: {
+            accountIsWritableBitmap: bitmap,
+          } as any,
+        }
+
+        const result = SolanaChain.buildMessageForDest(message)
+
+        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        assert.equal(extraArgs.accountIsWritableBitmap, bitmap)
+      })
+
+      it('should override receiver to default when tokenAmounts present', () => {
+        const message = {
+          receiver: 'CustomReceiverAddress1234567890123456789012',
+          tokenAmounts: [{ token: 'TokenMint123', amount: 100n }],
+          extraArgs: {
+            tokenReceiver: 'TokenReceiverAddress12345678901234567890',
+          } as any,
+        }
+
+        const result = SolanaChain.buildMessageForDest(message)
+
+        assert.equal(result.receiver, '11111111111111111111111111111111')
+      })
+
+      it('should allow custom allowOutOfOrderExecution', () => {
+        const message = {
+          receiver: 'DummyReceiverAddress1234567890123456789012',
+          data: '0x1234',
+          extraArgs: {
+            allowOutOfOrderExecution: false,
+          } as any,
+        }
+
+        const result = SolanaChain.buildMessageForDest(message)
+
+        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        assert.equal(extraArgs.allowOutOfOrderExecution, false)
+      })
+    })
+
+    describe('SuiChain', () => {
+      it('should populate SuiExtraArgsV1 with gasLimit', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
+          data: '0x1234',
+          extraArgs: {
+            gasLimit: 100000n,
+          },
+        }
+
+        const result = SuiChain.buildMessageForDest(message)
+
+        assert.ok(result.extraArgs)
+        assert.equal(result.extraArgs.gasLimit, 100000n)
+        assert.equal(result.extraArgs.allowOutOfOrderExecution, true)
+        assert.equal(
+          result.extraArgs.tokenReceiver,
+          '0x0000000000000000000000000000000000000000000000000000000000000000',
+        )
+        assert.deepEqual(result.extraArgs.receiverObjectIds, [])
+      })
+
+      it('should use DEFAULT_GAS_LIMIT when data present and no gasLimit specified', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
+          data: '0xabcd',
+        }
+
+        const result = SuiChain.buildMessageForDest(message)
+
+        assert.equal(result.extraArgs.gasLimit, 1000000n) // DEFAULT_GAS_LIMIT for Sui
+      })
+
+      it('should set gasLimit to 0 when no data', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
+        }
+
+        const result = SuiChain.buildMessageForDest(message)
+
+        assert.equal(result.extraArgs.gasLimit, 0n)
+      })
+
+      it('should use custom tokenReceiver when provided', () => {
+        const customReceiver = '0xabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd'
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
+          data: '0x1234',
+          extraArgs: {
+            tokenReceiver: customReceiver,
+          } as any,
+        }
+
+        const result = SuiChain.buildMessageForDest(message)
+
+        assert.equal(result.extraArgs.tokenReceiver, customReceiver)
+      })
+
+      it('should set tokenReceiver to receiver when tokenAmounts present', () => {
+        const receiverAddr = '0x1234567890123456789012345678901234567890123456789012345678901234'
+        const message = {
+          receiver: receiverAddr,
+          tokenAmounts: [{ token: '0xToken123', amount: 100n }],
+        }
+
+        const result = SuiChain.buildMessageForDest(message)
+
+        assert.equal(result.extraArgs.tokenReceiver, receiverAddr)
+        assert.equal(
+          result.receiver,
+          '0x0000000000000000000000000000000000000000000000000000000000000000',
+        )
+      })
+
+      it('should populate receiverObjectIds from accounts', () => {
+        const accounts = [
+          '0xobj1111111111111111111111111111111111111111111111111111111111111',
+          '0xobj2222222222222222222222222222222222222222222222222222222222222',
+        ]
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
+          data: '0x1234',
+          extraArgs: {
+            accounts,
+          } as any,
+        }
+
+        const result = SuiChain.buildMessageForDest(message)
+
+        assert.deepEqual(result.extraArgs.receiverObjectIds, accounts)
+      })
+
+      it('should use receiverObjectIds directly when provided', () => {
+        const objectIds = ['0xobj3333333333333333333333333333333333333333333333333333333333333']
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
+          data: '0x1234',
+          extraArgs: {
+            receiverObjectIds: objectIds,
+          } as any,
+        }
+
+        const result = SuiChain.buildMessageForDest(message)
+
+        assert.deepEqual(result.extraArgs.receiverObjectIds, objectIds)
+      })
+
+      it('should prefer receiverObjectIds over accounts', () => {
+        const objectIds = ['0xobj1111111111111111111111111111111111111111111111111111111111111']
+        const accounts = ['0xacc2222222222222222222222222222222222222222222222222222222222222']
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
+          data: '0x1234',
+          extraArgs: {
+            receiverObjectIds: objectIds,
+            accounts,
+          } as any,
+        }
+
+        const result = SuiChain.buildMessageForDest(message)
+
+        assert.deepEqual(result.extraArgs.receiverObjectIds, objectIds)
+      })
+
+      it('should handle empty receiverObjectIds array', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
+          data: '0x1234',
+          extraArgs: {
+            receiverObjectIds: [],
+          } as any,
+        }
+
+        const result = SuiChain.buildMessageForDest(message)
+
+        assert.deepEqual(result.extraArgs.receiverObjectIds, [])
+      })
+
+      it('should fall back to accounts if receiverObjectIds is empty array', () => {
+        const accounts = ['0xacc1111111111111111111111111111111111111111111111111111111111111']
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
+          data: '0x1234',
+          extraArgs: {
+            receiverObjectIds: [],
+            accounts,
+          } as any,
+        }
+
+        const result = SuiChain.buildMessageForDest(message)
+
+        assert.deepEqual(result.extraArgs.receiverObjectIds, accounts)
+      })
+
+      it('should override receiver to zero address when tokenAmounts present', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
+          tokenAmounts: [{ token: '0xToken123', amount: 100n }],
+          extraArgs: {
+            tokenReceiver: '0xabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd',
+          } as any,
+        }
+
+        const result = SuiChain.buildMessageForDest(message)
+
+        assert.equal(
+          result.receiver,
+          '0x0000000000000000000000000000000000000000000000000000000000000000',
+        )
+      })
+
+      it('should allow custom allowOutOfOrderExecution', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
+          data: '0x1234',
+          extraArgs: {
+            allowOutOfOrderExecution: false,
+          } as any,
+        }
+
+        const result = SuiChain.buildMessageForDest(message)
+
+        assert.equal(result.extraArgs.allowOutOfOrderExecution, false)
+      })
+
+      it('should preserve other message fields', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
+          data: '0xdeadbeef',
+          tokenAmounts: [{ token: '0xToken123', amount: 500n }],
+          feeToken: '0xFeeToken456',
+        }
+
+        const result = SuiChain.buildMessageForDest(message)
+
+        assert.equal(result.data, message.data)
+        assert.deepEqual(result.tokenAmounts, message.tokenAmounts)
+        assert.equal(result.feeToken, message.feeToken)
+      })
+
+      it('should output only SuiExtraArgsV1 variables', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
+          data: '0x1234',
+          extraArgs: {
+            gasLimit: 100000n,
+            unknownField: 'should not appear',
+          },
+        }
+
+        const result = SuiChain.buildMessageForDest(message)
+
+        assert.ok('gasLimit' in result.extraArgs)
+        assert.ok('allowOutOfOrderExecution' in result.extraArgs)
+        assert.ok('tokenReceiver' in result.extraArgs)
+        assert.ok('receiverObjectIds' in result.extraArgs)
+        assert.ok(!('unknownField' in result.extraArgs))
+        assert.equal(Object.keys(result.extraArgs).length, 4)
+      })
+    })
   })
 })

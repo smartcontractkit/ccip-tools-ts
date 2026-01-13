@@ -23,7 +23,7 @@ function messageArgs(
 ] {
   // Prepare the message structure for the view call
   const receiver = getBytes(zeroPadValue(getDataBytes(message.receiver), 32))
-  const data = getDataBytes(message.data)
+  const data = getDataBytes(message.data || '0x')
 
   // Get the native token to use as fee token if not specified
   const feeToken = message.feeToken || DEFAULT_FEE_TOKEN

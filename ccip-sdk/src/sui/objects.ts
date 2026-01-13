@@ -4,7 +4,7 @@ import { bcs } from '@mysten/sui/bcs'
 import type { SuiClient } from '@mysten/sui/client'
 import { Transaction } from '@mysten/sui/transactions'
 import { normalizeSuiAddress } from '@mysten/sui/utils'
-import { blake2b } from '@noble/hashes/blake2'
+import { blake2b } from '@noble/hashes/blake2.js'
 
 import { CCIPDataFormatUnsupportedError } from '../errors/index.ts'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'

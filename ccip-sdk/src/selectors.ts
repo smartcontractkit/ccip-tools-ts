@@ -764,6 +764,11 @@ const selectors: Selectors = {
     name: 'ethereum-testnet-sepolia-immutable-zkevm-1',
     family: 'evm',
   },
+  '14601': {
+    selector: 1763698235108410440n,
+    name: 'sonic-testnet',
+    family: 'evm',
+  },
   '16600': {
     selector: 16088006396410204581n,
     name: '0g-testnet-newton',
@@ -812,6 +817,11 @@ const selectors: Selectors = {
     family: 'evm',
   },
   '36888': { selector: 4829375610284793157n, name: 'ab-mainnet', family: 'evm' },
+  '36900': {
+    selector: 4059281736450291836n,
+    name: 'adi-mainnet',
+    family: 'evm',
+  },
   '37111': {
     selector: 6827576821754315911n,
     name: 'ethereum-testnet-sepolia-lens-1',
@@ -1012,6 +1022,11 @@ const selectors: Selectors = {
   '98867': {
     selector: 13874588925447303949n,
     name: 'plume-testnet-sepolia',
+    family: 'evm',
+  },
+  '99999': {
+    selector: 9418205736192840573n,
+    name: 'adi-testnet',
     family: 'evm',
   },
   '128123': {

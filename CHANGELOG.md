@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.94.0]
+
 - SDK: Browser compatibility - explicit `buffer` dependency and imports for cross-platform support
 - CI: Added `publint` and `@arethetypeswrong/cli` validation for package exports
 - ESLint: `import/no-nodejs-modules` rule prevents Node.js-only imports in SDK
 - Docs: Cross-Platform Portability guidelines in CONTRIBUTING.md
+- SDK: Populate default extraArgs for getFee, sendMessage methods, requiring minimal parameters to use these methods
 
-## [0.93.0] - 2025-12-26 - Pre-release
+## [0.93.0] - 2025-12-31 - Pre-release
 
 - SDK: `CCIPAPIClient` and `Chain.getLaneLatency()` for querying lane delivery times via CCIP API
 - CLI: `lane-latency <source> <dest>` command; `--no-api` flag for decentralized mode
