@@ -22,7 +22,7 @@ import {
   type CCIPVersion,
   type ChainTransaction,
   type Log_,
-  type RequestMessage,
+  type MessageInput,
   ChainFamily,
 } from './types.ts'
 import { convertKeysToCamelCase, decodeAddress, leToBigInt, networkInfo } from './utils.ts'
@@ -116,7 +116,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
  * @param message - partial AnyMessage
  * @returns original message or shallow copy with defaults for required fields
  **/
-export function buildMessageForDest(message: RequestMessage, dest: ChainFamily): AnyMessage {
+export function buildMessageForDest(message: MessageInput, dest: ChainFamily): AnyMessage {
   const chain = supportedChains[dest] ?? Chain
   return chain.buildMessageForDest(message)
 }

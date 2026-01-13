@@ -3,7 +3,7 @@ import {
   type ChainStatic,
   type EVMChain,
   type ExtraArgs,
-  type RequestMessage,
+  type MessageInput,
   CCIPArgumentInvalidError,
   CCIPChainFamilyUnsupportedError,
   CCIPTokenNotFoundError,
@@ -268,7 +268,7 @@ async function sendMessage(
     feeTokenInfo = await source.getTokenInfo(nativeToken)
   }
 
-  const message: RequestMessage = {
+  const message: MessageInput = {
     receiver,
     data,
     extraArgs: extraArgs as ExtraArgs,
