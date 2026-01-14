@@ -42,7 +42,7 @@ export {
   type Logger,
   type NetworkInfo,
   type OffchainTokenData,
-  type RequestMessage,
+  type MessageInput,
   type WithLogger,
   CCIPVersion,
   ExecutionState,
