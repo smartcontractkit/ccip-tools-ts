@@ -1,4 +1,10 @@
-export type { APIErrorResponse, CCIPAPIClientContext, LaneLatencyResponse } from './api/index.ts'
+export type {
+  APICCIPRequest,
+  APICCIPRequestMetadata,
+  APIErrorResponse,
+  CCIPAPIClientContext,
+  LaneLatencyResponse,
+} from './api/index.ts'
 export { CCIPAPIClient, DEFAULT_API_BASE_URL } from './api/index.ts'
 
 export type {

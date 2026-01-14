@@ -26,6 +26,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Ensure the log data is from a CCIPSendRequested event. Verify the source chain and transaction hash.',
   MESSAGE_NOT_FOUND_IN_TX: 'No CCIPSendRequested event found. Verify the transaction hash.',
   MESSAGE_ID_NOT_FOUND: 'Wait and retry. The message may still be in transit (5-20 min typical).',
+  MESSAGE_ID_INVALID:
+    'Verify the message ID format. Must be a valid 32-byte hex string (0x-prefixed, 64 hex chars).',
   MESSAGE_BATCH_INCOMPLETE: 'Not all messages in the batch were found.',
   MESSAGE_NOT_IN_BATCH: 'The message is not in the expected batch. Verify the commit report.',
   MESSAGE_CHAIN_MISMATCH:
