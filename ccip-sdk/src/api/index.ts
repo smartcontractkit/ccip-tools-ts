@@ -275,6 +275,33 @@ export class CCIPAPIClient {
   }
 
   /**
+   * Fetches the status of a CCIP transfer by message ID.
+   *
+   * This is a convenience wrapper around getMessageById that returns only the status.
+   *
+   * @param messageId - The message ID (0x prefix + 64 hex characters)
+   * @returns Promise resolving to {@link MessageStatus}
+   *
+   * @throws {@link CCIPMessageIdValidationError} when messageId format is invalid
+   * @throws {@link CCIPMessageIdNotFoundError} when message not found (404)
+   * @throws {@link CCIPHttpError} on other HTTP errors
+   *
+   * @example
+   * ```typescript
+   * const status = await api.getTransferStatus(
+   *   '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+   * )
+   * if (status === 'SUCCESS') {
+   *   console.log('Transfer completed!')
+   * }
+   * ```
+   */
+  async getTransferStatus(messageId: string): Promise<MessageStatus> {
+    const request = await this.getMessageById(messageId)
+    return request.status
+  }
+
+  /**
    * Transforms raw API response to APICCIPRequest.
    * Populates all derivable CCIPRequest fields from API data.
    * @internal
