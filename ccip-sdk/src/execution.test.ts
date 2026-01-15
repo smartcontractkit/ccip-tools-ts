@@ -164,6 +164,10 @@ class MockChain extends Chain {
     return { symbol: 'TST', decimals: 18, name: 'Test Token' }
   }
 
+  async getBalance(_opts: { token?: string | null; holder: string }): Promise<bigint> {
+    return 0n
+  }
+
   async getTokenAdminRegistryFor(_address: string): Promise<string> {
     return '0xTokenAdminRegistry'
   }

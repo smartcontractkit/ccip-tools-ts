@@ -369,6 +369,63 @@ ccip-cli lane-latency ethereum-mainnet polygon-mainnet --api-url https://custom-
 
 ---
 
+### token
+
+Query native or token balance for an address.
+
+```bash
+ccip-cli token <network> <holder> [token]
+```
+
+**Arguments:**
+- `network` - Network name or chainId (e.g., `ethereum-mainnet`, `solana-devnet`, `aptos-testnet`)
+- `holder` - Wallet address to query balance for
+- `token` - (Optional) Token address. Omit for native token balance
+
+**Supported Chains:**
+- EVM chains (Ethereum, Arbitrum, Avalanche, etc.)
+- Solana (devnet, mainnet)
+- Aptos (testnet, mainnet)
+
+**Examples:**
+
+```bash
+# Native balance on Ethereum mainnet
+ccip-cli token ethereum-mainnet 0x1234...abcd
+
+# ERC-20 token balance
+ccip-cli token ethereum-mainnet 0x1234...abcd 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+
+# Solana native SOL balance
+ccip-cli token solana-mainnet EPUjBP3Xf76K1VKsDSc6GupBWE8uykNksCLJgXZn87CB
+
+# Solana SPL token balance (WSOL)
+ccip-cli token solana-devnet EPUjBP3Xf76K1VKsDSc6GupBWE8uykNksCLJgXZn87CB So11111111111111111111111111111111111111112
+
+# Aptos native APT balance
+ccip-cli token aptos-testnet 0xd0e227835c33932721d54ae401cfaae753c295024fe454aa029b5e2782d2fad4
+
+# Aptos token balance (CCIP-BnM)
+ccip-cli token aptos-testnet 0xd0e227835c33932721d54ae401cfaae753c295024fe454aa029b5e2782d2fad4 0xa680c9935c7ea489676fa0e01f1ff8a97fadf0cb35e1e06ba1ba32ecd882fc9a
+```
+
+**Output:**
+
+For token balances, the output includes formatted balance with token metadata:
+```
+┌───────────┬──────────────────────────────────────────────┐
+│ network   │ 'aptos-testnet'                              │
+│ holder    │ '0xd0e227...'                                │
+│ token     │ 'CCIP-BnM'                                   │
+│ balance   │ '10300400000'                                │
+│ formatted │ '103.004'                                    │
+│ decimals  │ 8                                            │
+│ name      │ 'CCIP-BnM'                                   │
+└───────────┴──────────────────────────────────────────────┘
+```
+
+---
+
 ## Output Formats
 
 | Format | Use Case |

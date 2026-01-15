@@ -31,6 +31,7 @@ import type { PickDeep } from 'type-fest'
 import {
   type ChainContext,
   type ChainStatic,
+  type GetBalanceOpts,
   type LogFilter,
   type TokenInfo,
   type TokenPoolRemote,
@@ -52,6 +53,7 @@ import {
   CCIPSolanaOffRampEventsNotFoundError,
   CCIPSolanaRefAddressesNotFoundError,
   CCIPSplTokenInvalidError,
+  CCIPTokenAccountNotFoundError,
   CCIPTokenDataParseError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
@@ -119,6 +121,7 @@ import {
   getErrorFromLogs,
   hexDiscriminator,
   parseSolanaLogs,
+  resolveATA,
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
@@ -635,6 +638,28 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     } else {
       throw new CCIPTokenDataParseError(token)
     }
+  }
+
+  /** {@inheritDoc Chain.getBalance} */
+  async getBalance(opts: GetBalanceOpts): Promise<bigint> {
+    const { holder, token } = opts
+    const holderPubkey = new PublicKey(holder)
+
+    if (!token) {
+      return BigInt(await this.connection.getBalance(holderPubkey))
+    }
+
+    const tokenPubkey = new PublicKey(token)
+    const resolved = await resolveATA(this.connection, tokenPubkey, holderPubkey)
+
+    // Check if ATA exists on-chain
+    const ataAccountInfo = await this.connection.getAccountInfo(resolved.ata)
+    if (!ataAccountInfo) {
+      throw new CCIPTokenAccountNotFoundError(token, holder)
+    }
+
+    const accountInfo = await this.connection.getTokenAccountBalance(resolved.ata)
+    return BigInt(accountInfo.value.amount)
   }
 
   /**
