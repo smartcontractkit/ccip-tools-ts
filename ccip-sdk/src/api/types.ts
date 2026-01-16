@@ -148,19 +148,26 @@ export type APICCIPRequestMetadata = {
 
 /**
  * CCIP request information retrieved from API.
- * Includes API-specific metadata, plus CCIPRequest fields with partial nested data and placeholders
- * when required. TODO: Analyze whether these placeholders are acceptable, and in case they're not
- * decide whether to expand the API to provide the missing data non-optionally, or whether to
- * remove them from CCIPRequest)
+
+ * Combines standard {@link CCIPRequest} fields with API-specific metadata.
+
+ * **Complete fields:**
+ * - `lane`: All fields available (sourceChainSelector, destChainSelector, onRamp, version)
+ * - `message`: All core fields (messageId, sender, receiver, data, sequenceNumber, nonce,
+ *   tokenAmounts, feeToken, feeTokenAmount) plus extraArgs (EVM or SVM depending on chain)
  *
- * Fields populated from API:
- * - lane: sourceChainSelector, destChainSelector, onRamp, version (all available)
- * - message: messageId, sender, receiver, data, sequenceNumber, nonce, tokenAmounts,
- *   plus extraArgs fields (gasLimit, allowOutOfOrderExecution for EVM; SVM fields for Solana)
- * - log: transactionHash, address (partial - topics, index, blockNumber not available)
- * - tx: hash, timestamp, from (partial - logs, blockNumber not available)
+ * **Partial fields (API limitation):**
+ * - `log`: Only `transactionHash` and `address` available
+ *   (missing: `topics`, `index`, `blockNumber`, `data`)
+ * - `tx`: Only `hash`, `timestamp`, `from` available
+ *   (missing: `logs`, `blockNumber`)
  *
- * Additional API-specific fields not in CCIPRequest:
- * - status, readyForManualExecution, receiptTransactionHash, receiptTimestamp, etc.
+ * **API-only fields** (in {@link APICCIPRequestMetadata}):
+ * - `status`, `readyForManualExecution`, `finality`
+ * - `receiptTransactionHash`, `receiptTimestamp`, `deliveryTime`
+ * - `sourceNetworkInfo`, `destNetworkInfo`
+ *
+ * For complete `log` or `tx` data, query the source chain RPC directly using
+ * `tx.hash` or `log.transactionHash`.
  */
 export type APICCIPRequest = CCIPRequest & APICCIPRequestMetadata
