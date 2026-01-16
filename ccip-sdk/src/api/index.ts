@@ -1,4 +1,5 @@
 import {
+  CCIPDataParseError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
@@ -280,10 +281,17 @@ export class CCIPAPIClient {
    * @internal
    */
   private _transformMessageResponse(raw: RawMessageResponse): APICCIPRequest {
-    const sendTimestamp = Math.floor(new Date(raw.sendTimestamp).getTime() / 1000)
-    const receiptTimestamp = raw.receiptTimestamp
-      ? Math.floor(new Date(raw.receiptTimestamp).getTime() / 1000)
-      : undefined
+    const sendDate = new Date(raw.sendTimestamp)
+    if (isNaN(sendDate.getTime())) {
+      throw new CCIPDataParseError(`sendTimestamp: ${raw.sendTimestamp}`)
+    }
+    const sendTimestamp = Math.floor(sendDate.getTime() / 1000)
+
+    const receiptDate = raw.receiptTimestamp ? new Date(raw.receiptTimestamp) : undefined
+    if (receiptDate && isNaN(receiptDate.getTime())) {
+      throw new CCIPDataParseError(`receiptTimestamp: ${raw.receiptTimestamp}`)
+    }
+    const receiptTimestamp = receiptDate ? Math.floor(receiptDate.getTime() / 1000) : undefined
 
     // Build lane - all fields available from API
     const lane = {

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 import { CCIPAPIClient, DEFAULT_API_BASE_URL } from './index.ts'
 import {
   CCIPApiClientNotAvailableError,
+  CCIPDataParseError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
@@ -690,6 +691,75 @@ describe('CCIPAPIClient', () => {
       assert.equal(decoded.sender, result.message.sender)
       // Addresses may be checksummed differently after decoding, compare case-insensitively
       assert.equal(decoded.receiver.toLowerCase(), result.message.receiver.toLowerCase())
+    })
+
+    it('should throw CCIPDataParseError on invalid sendTimestamp', async () => {
+      const response = {
+        ...mockMessageResponse,
+        sendTimestamp: 'not-a-valid-date',
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(response),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+
+      await assert.rejects(
+        async () =>
+          await client.getMessageById(
+            '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+          ),
+        (err: unknown) =>
+          err instanceof CCIPDataParseError &&
+          err.message.includes('sendTimestamp') &&
+          err.message.includes('not-a-valid-date'),
+      )
+    })
+
+    it('should throw CCIPDataParseError on invalid receiptTimestamp', async () => {
+      const response = {
+        ...mockMessageResponse,
+        receiptTimestamp: 'invalid-timestamp',
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(response),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+
+      await assert.rejects(
+        async () =>
+          await client.getMessageById(
+            '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+          ),
+        (err: unknown) =>
+          err instanceof CCIPDataParseError &&
+          err.message.includes('receiptTimestamp') &&
+          err.message.includes('invalid-timestamp'),
+      )
+    })
+
+    it('should allow missing receiptTimestamp (undefined)', async () => {
+      const response = {
+        ...mockMessageResponse,
+        receiptTimestamp: undefined,
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(response),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageById(
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      )
+
+      assert.equal(result.receiptTimestamp, undefined)
     })
   })
 })
