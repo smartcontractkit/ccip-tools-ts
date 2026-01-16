@@ -29,6 +29,7 @@ export {
   CCIPMessageInvalidError,
   CCIPMessageNotFoundInTxError,
   CCIPMessageNotInBatchError,
+  CCIPMessageRetrievalError,
 } from './specialized.ts'
 
 // Specialized errors - Lane & Routing

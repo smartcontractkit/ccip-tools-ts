@@ -167,6 +167,38 @@ export class CCIPMessageNotInBatchError extends CCIPError {
   }
 }
 
+/** Thrown when message retrieval fails via both API and RPC. */
+export class CCIPMessageRetrievalError extends CCIPError {
+  override readonly name = 'CCIPMessageRetrievalError'
+  /** Creates a message retrieval error with both API and RPC failure context. */
+  constructor(
+    messageId: string,
+    apiError: CCIPError | undefined,
+    rpcError: CCIPError | undefined,
+    options?: CCIPErrorOptions,
+  ) {
+    const apiMsg = apiError?.message ?? 'API disabled or not attempted'
+    const rpcMsg = rpcError?.message ?? 'RPC not configured'
+    super(
+      CCIPErrorCode.MESSAGE_RETRIEVAL_FAILED,
+      `Failed to retrieve message ${messageId} via API and RPC.\n  API: ${apiMsg}\n  RPC: ${rpcMsg}`,
+      {
+        ...options,
+        isTransient: apiError?.isTransient ?? false,
+        retryAfterMs: apiError?.retryAfterMs,
+        recovery:
+          'Verify the message ID is correct. If using --id-from-source, configure an RPC for on-chain lookup or wait for API indexing.',
+        context: {
+          ...options?.context,
+          messageId,
+          apiError: apiError?.message,
+          rpcError: rpcError?.message,
+        },
+      },
+    )
+  }
+}
+
 // Lane & Routing
 
 /** Thrown when no offRamp found for lane. */

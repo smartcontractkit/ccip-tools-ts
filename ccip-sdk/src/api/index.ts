@@ -28,7 +28,7 @@ export type {
 } from './types.ts'
 
 /** Default CCIP API base URL */
-export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
+export const DEFAULT_API_BASE_URL = 'https://ccip-api-v2.o11y.stage.cldev.sh'
 
 /**
  * Context for CCIPAPIClient initialization.
@@ -139,7 +139,7 @@ export class CCIPAPIClient {
     sourceChainSelector: bigint,
     destChainSelector: bigint,
   ): Promise<LaneLatencyResponse> {
-    const url = new URL(`${this.baseUrl}/v1/lanes/latency`)
+    const url = new URL(`${this.baseUrl}/v2/lanes/latency`)
     url.searchParams.set('sourceChainSelector', sourceChainSelector.toString())
     url.searchParams.set('destChainSelector', destChainSelector.toString())
 
@@ -230,7 +230,7 @@ export class CCIPAPIClient {
       )
     }
 
-    const url = `${this.baseUrl}/v1/messages/${encodeURIComponent(messageId)}`
+    const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}`
 
     this.logger.debug(`CCIPAPIClient: GET ${url}`)
 
@@ -273,6 +273,20 @@ export class CCIPAPIClient {
     this.logger.debug('getMessageById raw response:', raw)
 
     return this._transformMessageResponse(raw)
+  }
+
+  /**
+   * Fetches CCIP messages by source transaction hash.
+   *
+   * @param txHash - Source transaction hash
+   * @returns Promise resolving to array of {@link APICCIPRequest}
+   *
+   * @throws {@link CCIPHttpError} on HTTP errors
+   */
+  getMessagesByTx(txHash: string): Promise<APICCIPRequest[]> {
+    // TODO: Implementation to be cherry-picked from separate branch
+    void txHash
+    return Promise.reject(new CCIPHttpError(501, 'Not implemented'))
   }
 
   /**

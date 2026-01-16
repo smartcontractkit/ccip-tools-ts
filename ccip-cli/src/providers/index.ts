@@ -144,13 +144,15 @@ export function fetchChainsFromRpcs(
         }
       }
 
-      void Promise.race([Promise.allSettled(chains$), ctx.destroy$]).finally(() => {
-        if (finished[F]) return
-        finished[F] = true
-        Object.entries(chainsCbs)
-          .filter(([name]) => networkInfo(name).family === F)
-          .forEach(([name, [_, reject]]) => reject(new CCIPRpcNotFoundError(name)))
-      })
+      void Promise.race([Promise.allSettled(chains$), ctx.destroy$])
+        .finally(() => {
+          if (finished[F]) return
+          finished[F] = true
+          Object.entries(chainsCbs)
+            .filter(([name]) => networkInfo(name).family === F)
+            .forEach(([name, [_, reject]]) => reject(new CCIPRpcNotFoundError(name)))
+        })
+        .catch(() => {}) // Suppress any rejection escaping from finally callback
       return Promise.any(txHash ? txs$ : chains$)
     }))
 
@@ -164,7 +166,8 @@ export function fetchChainsFromRpcs(
     void c.finally(() => {
       delete chainsCbs[network.name] // when chain is settled, delete the callbacks
     })
-    void loadChainFamily(network.family)
+    // loadChainFamily rejection is handled through chainsCbs callbacks, suppress unhandled rejection
+    void loadChainFamily(network.family).catch(() => {})
     return c
   }
 

@@ -122,7 +122,8 @@ export function buildMessageForDest(message: MessageInput, dest: ChainFamily): A
 }
 
 /**
- * Fetch all CCIP messages in a transaction
+ * Fetch all CCIP messages in a transaction.
+ * Tries API first if available, falls back to RPC log decoding.
  * @param source - Chain
  * @param tx - ChainTransaction to search in
  * @returns CCIP requests (messages) in the transaction (at least one)
@@ -130,6 +131,19 @@ export function buildMessageForDest(message: MessageInput, dest: ChainFamily): A
 export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Promise<CCIPRequest[]> {
   const txHash = tx.hash
 
+  // Try API first if available
+  if (source.apiClient) {
+    try {
+      const apiRequests = await source.apiClient.getMessagesByTx(txHash)
+      if (apiRequests.length > 0) {
+        return apiRequests
+      }
+    } catch (err) {
+      source.logger.debug?.('API getMessagesByTx failed, falling back to RPC:', err)
+    }
+  }
+
+  // RPC fallback
   const requests: CCIPRequest[] = []
   for (const log of tx.logs) {
     let lane
@@ -159,7 +173,7 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
 
 /**
  * Fetch a CCIP message by its messageId.
- * Can be slow due to having to paginate backwards through logs.
+ * Tries API first if available, falls back to RPC log scanning.
  * @param source - Provider to fetch logs from.
  * @param messageId - MessageId to search for.
  * @param hints - Optional hints for pagination (e.g., `address` for onRamp, `page` for pagination size).
@@ -170,6 +184,16 @@ export async function getMessageById(
   messageId: string,
   hints?: { page?: number; address?: string },
 ): Promise<CCIPRequest> {
+  // Try API first if available
+  if (source.apiClient) {
+    try {
+      return await source.apiClient.getMessageById(messageId)
+    } catch (err) {
+      source.logger.debug?.('API getMessageById failed, falling back to RPC:', err)
+    }
+  }
+
+  // RPC fallback
   for await (const log of source.getLogs({
     topics: ['CCIPSendRequested', 'CCIPMessageSent'],
     ...hints,
