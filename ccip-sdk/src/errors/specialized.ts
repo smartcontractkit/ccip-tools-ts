@@ -1735,6 +1735,28 @@ export class CCIPApiClientNotAvailableError extends CCIPError {
   }
 }
 
+/** Thrown when API returns hasNextPage=true unexpectedly (more than 100 messages). */
+export class CCIPUnexpectedPaginationError extends CCIPError {
+  override readonly name = 'CCIPUnexpectedPaginationError'
+  /**
+   * Creates an unexpected pagination error.
+   * @param txHash - The transaction hash queried
+   * @param messageCount - Number of messages returned in the response
+   * @param options - Additional error options
+   */
+  constructor(txHash: string, messageCount: number, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.API_UNEXPECTED_PAGINATION,
+      `Transaction ${txHash} contains more CCIP messages than expected (${messageCount}+ returned with hasNextPage=true)`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, txHash, messageCount },
+      },
+    )
+  }
+}
+
 // Viem Adapter
 
 /** Thrown when viem adapter encounters an issue. */

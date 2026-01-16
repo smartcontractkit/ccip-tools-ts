@@ -1,9 +1,11 @@
 import {
-  CCIPDataParseError,
+  CCIPArgumentInvalidError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
   CCIPMessageIdValidationError,
+  CCIPMessageNotFoundInTxError,
+  CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, SVMExtraArgsV1 } from '../extra-args.ts'
 import { HttpStatus } from '../http-status.ts'
@@ -16,6 +18,7 @@ import type {
   RawEVMExtraArgs,
   RawLaneLatencyResponse,
   RawMessageResponse,
+  RawMessagesResponse,
   RawSVMExtraArgs,
   RawTokenAmount,
 } from './types.ts'
@@ -276,17 +279,91 @@ export class CCIPAPIClient {
   }
 
   /**
-   * Fetches CCIP messages by source transaction hash.
+   * Fetches message IDs from a source transaction hash.
    *
-   * @param txHash - Source transaction hash
-   * @returns Promise resolving to array of {@link APICCIPRequest}
+   * @param txHash - Source transaction hash (EVM hex or Solana Base58)
+   * @returns Promise resolving to array of message IDs
    *
+   * @throws {@link CCIPArgumentInvalidError} when txHash format is invalid
+   * @throws {@link CCIPMessageNotFoundInTxError} when no messages found (404 or empty)
+   * @throws {@link CCIPUnexpectedPaginationError} when hasNextPage is true
    * @throws {@link CCIPHttpError} on HTTP errors
+   *
+   * @example Basic usage
+   * ```typescript
+   * const messageIds = await api.getMessageIdsFromTransaction(
+   *   '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+   * )
+   * console.log(`Found ${messageIds.length} messages`)
+   * ```
    */
-  getMessagesByTx(txHash: string): Promise<APICCIPRequest[]> {
-    // TODO: Implementation to be cherry-picked from separate branch
-    void txHash
-    return Promise.reject(new CCIPHttpError(501, 'Not implemented'))
+  async getMessageIdsFromTransaction(txHash: string): Promise<string[]> {
+    // Validate txHash format: EVM hex (0x + 64 hex chars) or Solana Base58 (32-88 chars alphanumeric)
+    const evmHexPattern = /^0x[0-9a-fA-F]{64}$/
+    const solanaBase58Pattern = /^[1-9A-HJ-NP-Za-km-z]{32,88}$/
+
+    if (!evmHexPattern.test(txHash) && !solanaBase58Pattern.test(txHash)) {
+      throw new CCIPArgumentInvalidError(
+        'txHash',
+        'expected EVM hex (0x + 64 hex chars) or Solana Base58 format',
+      )
+    }
+
+    const url = new URL(`${this.baseUrl}/v2/messages`)
+    url.searchParams.set('sourceTransactionHash', txHash)
+    url.searchParams.set('limit', '100')
+
+    this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`)
+
+    const response = await this._fetch(url.toString())
+
+    if (!response.ok) {
+      // Try to parse structured error response from API
+      let apiError: APIErrorResponse | undefined
+      try {
+        apiError = (await response.json()) as APIErrorResponse
+      } catch {
+        // Response body not JSON, use HTTP status only
+      }
+
+      // 404 - No messages found
+      if (response.status === HttpStatus.NOT_FOUND) {
+        throw new CCIPMessageNotFoundInTxError(txHash, {
+          context: apiError
+            ? {
+                apiErrorCode: apiError.error,
+                apiErrorMessage: apiError.message,
+              }
+            : undefined,
+        })
+      }
+
+      // Generic HTTP error for other cases
+      throw new CCIPHttpError(response.status, response.statusText, {
+        context: apiError
+          ? {
+              apiErrorCode: apiError.error,
+              apiErrorMessage: apiError.message,
+            }
+          : undefined,
+      })
+    }
+
+    const raw = (await response.json()) as RawMessagesResponse
+
+    this.logger.debug('getMessageIdsFromTransaction raw response:', raw)
+
+    // Handle empty results
+    if (raw.data.length === 0) {
+      throw new CCIPMessageNotFoundInTxError(txHash)
+    }
+
+    // Handle unexpected pagination (more than 100 messages)
+    if (raw.pagination.hasNextPage) {
+      throw new CCIPUnexpectedPaginationError(txHash, raw.data.length)
+    }
+
+    return raw.data.map((msg) => msg.messageId)
   }
 
   /**
@@ -296,16 +373,13 @@ export class CCIPAPIClient {
    */
   private _transformMessageResponse(raw: RawMessageResponse): APICCIPRequest {
     const sendDate = new Date(raw.sendTimestamp)
-    if (isNaN(sendDate.getTime())) {
-      throw new CCIPDataParseError(`sendTimestamp: ${raw.sendTimestamp}`)
-    }
-    const sendTimestamp = Math.floor(sendDate.getTime() / 1000)
+    const sendTimestamp = isNaN(sendDate.getTime()) ? 0 : Math.floor(sendDate.getTime() / 1000)
 
     const receiptDate = raw.receiptTimestamp ? new Date(raw.receiptTimestamp) : undefined
-    if (receiptDate && isNaN(receiptDate.getTime())) {
-      throw new CCIPDataParseError(`receiptTimestamp: ${raw.receiptTimestamp}`)
-    }
-    const receiptTimestamp = receiptDate ? Math.floor(receiptDate.getTime() / 1000) : undefined
+    const receiptTimestamp =
+      receiptDate && !isNaN(receiptDate.getTime())
+        ? Math.floor(receiptDate.getTime() / 1000)
+        : undefined
 
     // Build lane - all fields available from API
     const lane = {

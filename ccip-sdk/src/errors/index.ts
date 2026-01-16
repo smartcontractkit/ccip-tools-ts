@@ -166,7 +166,7 @@ export {
 } from './specialized.ts'
 
 // Specialized errors - API Client
-export { CCIPApiClientNotAvailableError } from './specialized.ts'
+export { CCIPApiClientNotAvailableError, CCIPUnexpectedPaginationError } from './specialized.ts'
 
 // Specialized errors - Viem Adapter
 export { CCIPViemAdapterError } from './specialized.ts'

@@ -162,6 +162,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
 
   API_CLIENT_NOT_AVAILABLE:
     'The API client was explicitly disabled. To use API features like getLaneLatency(), create the Chain without apiClient: null or provide a CCIPAPIClient instance.',
+  API_UNEXPECTED_PAGINATION:
+    'The transaction contains an unexpectedly large number of CCIP messages (over 100). This is unusual and may indicate an issue with the transaction or API response.',
 
   DATA_FORMAT_UNSUPPORTED: 'Unsupported data format. Use hex, bytes, or base64.',
   DATA_PARSE_FAILED: 'Could not parse the provided data. Verify the format.',

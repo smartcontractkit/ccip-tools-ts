@@ -36,9 +36,9 @@ import {
   type Lane,
   type Log_,
   type Logger,
+  type MessageInput,
   type NetworkInfo,
   type OffchainTokenData,
-  type MessageInput,
   type WithLogger,
   ExecutionState,
 } from './types.ts'

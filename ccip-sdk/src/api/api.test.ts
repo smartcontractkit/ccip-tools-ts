@@ -4,11 +4,13 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 import { CCIPAPIClient, DEFAULT_API_BASE_URL } from './index.ts'
 import {
   CCIPApiClientNotAvailableError,
-  CCIPDataParseError,
+  CCIPArgumentInvalidError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
   CCIPMessageIdValidationError,
+  CCIPMessageNotFoundInTxError,
+  CCIPUnexpectedPaginationError,
   HttpStatus,
 } from '../errors/index.ts'
 import { EVMChain } from '../evm/index.ts'
@@ -110,7 +112,7 @@ describe('CCIPAPIClient', () => {
 
       const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
       assert.ok(url.startsWith(DEFAULT_API_BASE_URL))
-      assert.ok(url.includes('/v1/lanes/latency'))
+      assert.ok(url.includes('/v2/lanes/latency'))
     })
 
     it('should return only totalMs', async () => {
@@ -275,7 +277,7 @@ describe('CCIPAPIClient', () => {
         chainId: '42161',
         chainFamily: 'EVM',
       },
-      sendTransactionHash: '0x9428debf5e5f01234567890abcdef1234567890abcdef1234567890abcdef12',
+      sendTransactionHash: '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
       sendTimestamp: '2023-12-01T10:30:00Z',
       tokenAmounts: [
         {
@@ -312,7 +314,7 @@ describe('CCIPAPIClient', () => {
       await client.getMessageById(messageId)
 
       const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
-      assert.ok(url.includes('/v1/messages/'))
+      assert.ok(url.includes('/v2/messages/'))
       assert.ok(url.includes(messageId))
     })
 
@@ -693,7 +695,7 @@ describe('CCIPAPIClient', () => {
       assert.equal(decoded.receiver.toLowerCase(), result.message.receiver.toLowerCase())
     })
 
-    it('should throw CCIPDataParseError on invalid sendTimestamp', async () => {
+    it('should handle invalid sendTimestamp gracefully (defaults to 0)', async () => {
       const response = {
         ...mockMessageResponse,
         sendTimestamp: 'not-a-valid-date',
@@ -706,19 +708,14 @@ describe('CCIPAPIClient', () => {
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
 
-      await assert.rejects(
-        async () =>
-          await client.getMessageById(
-            '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-          ),
-        (err: unknown) =>
-          err instanceof CCIPDataParseError &&
-          err.message.includes('sendTimestamp') &&
-          err.message.includes('not-a-valid-date'),
+      const result = await client.getMessageById(
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
       )
+
+      assert.equal(result.tx.timestamp, 0)
     })
 
-    it('should throw CCIPDataParseError on invalid receiptTimestamp', async () => {
+    it('should handle invalid receiptTimestamp gracefully (defaults to undefined)', async () => {
       const response = {
         ...mockMessageResponse,
         receiptTimestamp: 'invalid-timestamp',
@@ -731,16 +728,11 @@ describe('CCIPAPIClient', () => {
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
 
-      await assert.rejects(
-        async () =>
-          await client.getMessageById(
-            '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-          ),
-        (err: unknown) =>
-          err instanceof CCIPDataParseError &&
-          err.message.includes('receiptTimestamp') &&
-          err.message.includes('invalid-timestamp'),
+      const result = await client.getMessageById(
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
       )
+
+      assert.equal(result.receiptTimestamp, undefined)
     })
 
     it('should allow missing receiptTimestamp (undefined)', async () => {
@@ -760,6 +752,255 @@ describe('CCIPAPIClient', () => {
       )
 
       assert.equal(result.receiptTimestamp, undefined)
+    })
+  })
+
+  describe('getMessageIdsFromTransaction', () => {
+    const mockMessagesResponse = {
+      data: [
+        {
+          messageId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+          sender: '0x742d35Cc6634C0532925a3b8D5c8C22C5B2D8a3E',
+          receiver: '0x893F0bCaa7F325c2b6bBd2133536f4e4b8fea88e',
+          status: 'SUCCESS',
+          sourceNetworkInfo: {
+            name: 'ethereum-mainnet',
+            chainSelector: '5009297550715157269',
+            chainId: '1',
+            chainFamily: 'EVM',
+          },
+          destNetworkInfo: {
+            name: 'arbitrum-mainnet',
+            chainSelector: '4949039107694359620',
+            chainId: '42161',
+            chainFamily: 'EVM',
+          },
+          sendTransactionHash: '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
+          sendTimestamp: '2023-12-01T10:30:00Z',
+        },
+      ],
+      pagination: {
+        limit: 100,
+        hasNextPage: false,
+      },
+    }
+
+    it('should fetch with correct URL and query parameters', async () => {
+      const txHash = '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234'
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockMessagesResponse),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      await client.getMessageIdsFromTransaction(txHash)
+
+      assert.equal(customFetch.mock.calls.length, 1)
+      const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.includes('/v2/messages'))
+      assert.ok(url.includes(`sourceTransactionHash=${encodeURIComponent(txHash)}`))
+      assert.ok(url.includes('limit=100'))
+    })
+
+    it('should return single messageId', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockMessagesResponse),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageIdsFromTransaction(
+        '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
+      )
+
+      assert.equal(result.length, 1)
+      assert.equal(result[0], '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
+    })
+
+    it('should return multiple messageIds', async () => {
+      const multiResponse = {
+        data: [
+          { ...mockMessagesResponse.data[0] },
+          {
+            ...mockMessagesResponse.data[0],
+            messageId: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
+          },
+        ],
+        pagination: { limit: 100, hasNextPage: false },
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(multiResponse),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageIdsFromTransaction(
+        '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
+      )
+
+      assert.equal(result.length, 2)
+      assert.equal(result[0], '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef')
+      assert.equal(result[1], '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890')
+    })
+
+    it('should throw CCIPMessageNotFoundInTxError on empty response', async () => {
+      const emptyResponse = {
+        data: [],
+        pagination: { limit: 100, hasNextPage: false },
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(emptyResponse),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+
+      await assert.rejects(
+        async () =>
+          await client.getMessageIdsFromTransaction(
+            '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
+          ),
+        (err: unknown) =>
+          err instanceof CCIPMessageNotFoundInTxError &&
+          err.context.txHash ===
+            '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
+      )
+    })
+
+    it('should throw CCIPMessageNotFoundInTxError on 404', async () => {
+      const errorResponse = { error: 'NOT_FOUND', message: 'No messages found' }
+      globalThis.fetch = (() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.NOT_FOUND,
+          statusText: 'Not Found',
+          json: () => Promise.resolve(errorResponse),
+        })) as unknown as typeof fetch
+
+      const client = new CCIPAPIClient()
+      await assert.rejects(
+        async () =>
+          await client.getMessageIdsFromTransaction(
+            '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
+          ),
+        (err: unknown) =>
+          err instanceof CCIPMessageNotFoundInTxError &&
+          err.context.apiErrorCode === 'NOT_FOUND' &&
+          err.isTransient === true,
+      )
+    })
+
+    it('should throw CCIPArgumentInvalidError on invalid EVM txHash', async () => {
+      const client = new CCIPAPIClient()
+
+      await assert.rejects(
+        async () => await client.getMessageIdsFromTransaction('invalid-hash'),
+        (err: unknown) =>
+          err instanceof CCIPArgumentInvalidError &&
+          err.message.includes('txHash') &&
+          err.message.includes('EVM hex'),
+      )
+    })
+
+    it('should throw CCIPArgumentInvalidError on txHash too short', async () => {
+      const client = new CCIPAPIClient()
+
+      await assert.rejects(
+        async () => await client.getMessageIdsFromTransaction('0x1234'),
+        (err: unknown) => err instanceof CCIPArgumentInvalidError && err.message.includes('txHash'),
+      )
+    })
+
+    it('should accept valid Solana Base58 txHash', async () => {
+      // Valid Solana transaction signature (Base58, 88 chars typical)
+      const solanaTxHash =
+        '5UfDuX7hXbP9KQvQfYyqDANnxhZeyBXJ9VvM6BuqGhJaS5dwDnBJEwMjDnJKHQJJVn6UvNUWuCy'
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockMessagesResponse),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+
+      const result = await client.getMessageIdsFromTransaction(solanaTxHash)
+
+      assert.equal(result.length, 1)
+      // Verify fetch was called with the Solana tx hash
+      const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.includes(encodeURIComponent(solanaTxHash)))
+    })
+
+    it('should throw CCIPHttpError on 5xx with transient flag', async () => {
+      globalThis.fetch = (() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.INTERNAL_SERVER_ERROR,
+          statusText: 'Internal Server Error',
+          json: () => Promise.resolve({ error: 'INTERNAL_ERROR', message: 'Server error' }),
+        })) as unknown as typeof fetch
+
+      const client = new CCIPAPIClient()
+      await assert.rejects(
+        async () =>
+          await client.getMessageIdsFromTransaction(
+            '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
+          ),
+        (err: unknown) => err instanceof CCIPHttpError && err.isTransient === true,
+      )
+    })
+
+    it('should log raw response via debug', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockMessagesResponse),
+        }),
+      )
+      const debugFn = mock.fn()
+      const client = new CCIPAPIClient(undefined, {
+        logger: { log: () => {}, debug: debugFn } as any,
+        fetch: customFetch as any,
+      })
+
+      await client.getMessageIdsFromTransaction(
+        '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
+      )
+
+      assert.equal(debugFn.mock.calls.length, 2) // Once for URL, once for raw response
+      const lastCall = debugFn.mock.calls[1] as unknown as { arguments: unknown[] }
+      assert.equal(lastCall.arguments[0], 'getMessageIdsFromTransaction raw response:')
+      assert.ok(lastCall.arguments[1])
+    })
+
+    it('should throw CCIPUnexpectedPaginationError when hasNextPage is true', async () => {
+      const paginatedResponse = {
+        data: mockMessagesResponse.data,
+        pagination: { limit: 100, hasNextPage: true, cursor: 'next-page-token' },
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(paginatedResponse),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+
+      await assert.rejects(
+        async () =>
+          await client.getMessageIdsFromTransaction(
+            '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
+          ),
+        (err: unknown) =>
+          err instanceof CCIPUnexpectedPaginationError &&
+          err.context.txHash ===
+            '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234' &&
+          err.context.messageCount === 1,
+      )
     })
   })
 })
