@@ -154,6 +154,60 @@ const latency = await chain.getLaneLatency(4949039107694359620n) // To Arbitrum
 console.log(`ETA: ${Math.round(latency.totalMs / 60000)} min`)
 ```
 
+### Fetch Message by ID
+
+Retrieve full message details using a message ID:
+
+```ts
+import { CCIPAPIClient } from '@chainlink/ccip-sdk'
+
+const api = new CCIPAPIClient()
+
+// Fetch message by its unique ID
+const request = await api.getMessageById(
+  '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+)
+
+// Access message details
+console.log('Status:', request.status)           // 'SUCCESS', 'FAILED', 'SENT', etc.
+console.log('Sender:', request.message.sender)
+console.log('Lane:', request.lane.sourceChainSelector, '→', request.lane.destChainSelector)
+
+// API-specific metadata
+console.log('Ready for manual exec:', request.readyForManualExecution)
+console.log('Delivery time:', request.deliveryTime, 'ms')
+```
+
+The returned `APICCIPRequest` extends `CCIPRequest` with additional API metadata:
+- `status` - Message lifecycle status (`SENT`, `COMMITTED`, `SUCCESS`, `FAILED`)
+- `readyForManualExecution` - Whether manual execution is available
+- `finality` - Block confirmations on source chain
+- `receiptTransactionHash` - Execution tx hash (if completed)
+- `deliveryTime` - End-to-end delivery time in ms (if completed)
+
+### Find Messages in a Transaction
+
+Get all CCIP message IDs from a source transaction:
+
+```ts
+const api = new CCIPAPIClient()
+
+// Get message IDs from transaction hash
+const messageIds = await api.getMessageIdsInTx(
+  '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234'
+)
+
+console.log(`Found ${messageIds.length} CCIP message(s)`)
+
+// Fetch full details for each message
+for (const id of messageIds) {
+  const request = await api.getMessageById(id)
+  console.log(`Message ${id}: ${request.status}`)
+}
+```
+
+Supports both EVM hex hashes (`0x...`) and Solana Base58 signatures.
+
 ### Disable API (Decentralization Mode)
 
 ```ts
@@ -191,6 +245,9 @@ import {
   CCIPHttpError,
   CCIPApiClientNotAvailableError,
   CCIPTransactionNotFoundError,
+  CCIPMessageIdNotFoundError,
+  CCIPMessageIdValidationError,
+  CCIPMessageRetrievalError,
   isTransientError
 } from '@chainlink/ccip-sdk'
 
@@ -213,6 +270,32 @@ try {
   // Generic transient check
   if (isTransientError(err)) {
     console.log('Retrying...')
+  }
+}
+```
+
+### Message Retrieval Errors
+
+```ts
+try {
+  const request = await api.getMessageById(messageId)
+} catch (err) {
+  if (err instanceof CCIPMessageIdValidationError) {
+    // Invalid format - must be 0x + 64 hex chars
+    console.error('Invalid message ID format')
+  }
+
+  if (err instanceof CCIPMessageIdNotFoundError) {
+    // Message not found - may still be indexing (transient)
+    if (err.isTransient) {
+      console.log('Message not indexed yet, retrying...')
+    }
+  }
+
+  if (err instanceof CCIPMessageRetrievalError) {
+    // Both API and RPC failed
+    console.error('API error:', err.context.apiError)
+    console.error('RPC error:', err.context.rpcError)
   }
 }
 ```

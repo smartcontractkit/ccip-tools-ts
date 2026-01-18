@@ -31,7 +31,7 @@ export type {
 } from './types.ts'
 
 /** Default CCIP API base URL */
-export const DEFAULT_API_BASE_URL = 'https://ccip-api-v2.o11y.stage.cldev.sh'
+export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
 
 /**
  * Context for CCIPAPIClient initialization.
