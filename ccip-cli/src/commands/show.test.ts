@@ -577,87 +577,91 @@ describe('e2e command show TON', () => {
     assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
   })
 
-  it.skip('should show complete CCIP transaction details EVM to TON', { timeout: 120000 }, async () => {
-    const TX_HASH = '0x1f20d3f106a31dd6b1eec5dbb7ee0e8ba81cd2cef8718534518977645e14e5f5'
-    const MESSAGE_ID = '0x40bf2c2df2112fc58937f7edad8bf0edda3f6f08c35708970a21c0bc544eb970'
-    const SENDER = '0x65fdC0441C7a29B28A7b0fbBCbC28a134Ef376a0'
-    const RECEIVER = 'EQBuYCiBYoDqZro_v7z242bKtooAWUV-L73ifE-R6_GVKuRF'
-    const ONRAMP = '0xFB34b9969Dd201cc9A04E604a6D40AF917b6C1E8'
-    const OFFRAMP = 'EQCfLpla6865euCU2-TPlzy8vKQKT8rFKHoAvorKBC1RudIO'
+  it.skip(
+    'should show complete CCIP transaction details EVM to TON',
+    { timeout: 120000 },
+    async () => {
+      const TX_HASH = '0x1f20d3f106a31dd6b1eec5dbb7ee0e8ba81cd2cef8718534518977645e14e5f5'
+      const MESSAGE_ID = '0x40bf2c2df2112fc58937f7edad8bf0edda3f6f08c35708970a21c0bc544eb970'
+      const SENDER = '0x65fdC0441C7a29B28A7b0fbBCbC28a134Ef376a0'
+      const RECEIVER = 'EQBuYCiBYoDqZro_v7z242bKtooAWUV-L73ifE-R6_GVKuRF'
+      const ONRAMP = '0xFB34b9969Dd201cc9A04E604a6D40AF917b6C1E8'
+      const OFFRAMP = 'EQCfLpla6865euCU2-TPlzy8vKQKT8rFKHoAvorKBC1RudIO'
 
-    // Use --noapi to ensure RPC path is used for full pretty output with commits/receipts
-    const args = buildShowArgs(TX_HASH, '--noapi', '--wait')
-    const result = await spawnCLI(args, 120000)
+      // Use --noapi to ensure RPC path is used for full pretty output with commits/receipts
+      const args = buildShowArgs(TX_HASH, '--noapi', '--wait')
+      const result = await spawnCLI(args, 120000)
 
-    assert.equal(result.exitCode, 0, result.stdout + result.stderr)
-    const output = result.stdout
+      assert.equal(result.exitCode, 0, result.stdout + result.stderr)
+      const output = result.stdout
 
-    // Lane information
-    assert.match(output, /name.*ethereum-testnet-sepolia.*ton-testnet/i)
-    assert.match(output, /chainId.*11155111.*-3/)
-    assert.match(output, /chainSelector.*16015286601757825753n?.*1399300952838017768n?/)
-    assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
+      // Lane information
+      assert.match(output, /name.*ethereum-testnet-sepolia.*ton-testnet/i)
+      assert.match(output, /chainId.*11155111.*-3/)
+      assert.match(output, /chainSelector.*16015286601757825753n?.*1399300952838017768n?/)
+      assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
 
-    // Request information
-    assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
-    assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
-    assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
-    assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
-    assert.match(output, /sequenceNumber.*1114/)
-    assert.match(output, /nonce.*0.*allow out-of-order/)
-    assert.match(output, /gasLimit.*100000000n?/)
-    assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
-    assert.match(output, /data.*CCIP staging test 14:56/)
-    assert.match(output, /allowOutOfOrderExecution.*true/)
+      // Request information
+      assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
+      assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
+      assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
+      assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
+      assert.match(output, /sequenceNumber.*1114/)
+      assert.match(output, /nonce.*0.*allow out-of-order/)
+      assert.match(output, /gasLimit.*100000000n?/)
+      assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
+      assert.match(output, /data.*CCIP staging test 14:56/)
+      assert.match(output, /allowOutOfOrderExecution.*true/)
 
-    // Commit information (dest is TON - friendly format)
-    assert.match(output, /Commit.*dest/i)
-    assert.match(
-      output,
-      /merkleRoot.*0x66359185e781ceee83d5f15b110581adf06c5ddc6e895ff9b8e670f2730d026d/i,
-    )
-    assert.match(output, /min.*1114/)
-    assert.match(output, /max.*1114/)
-    assert.match(output, new RegExp(`origin.*${OFFRAMP}`, 'i'))
-    assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
-    // Transaction hash should be in friendly format (64-char hex, not composite)
-    assert.match(
-      output,
-      /transactionHash.*9048d65a2ecf5194fa9dfb5cc0ac59a55ffd75b9b6de5d7f09e53ef87ad5e6a8/i,
-    )
+      // Commit information (dest is TON - friendly format)
+      assert.match(output, /Commit.*dest/i)
+      assert.match(
+        output,
+        /merkleRoot.*0x66359185e781ceee83d5f15b110581adf06c5ddc6e895ff9b8e670f2730d026d/i,
+      )
+      assert.match(output, /min.*1114/)
+      assert.match(output, /max.*1114/)
+      assert.match(output, new RegExp(`origin.*${OFFRAMP}`, 'i'))
+      assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
+      // Transaction hash should be in friendly format (64-char hex, not composite)
+      assert.match(
+        output,
+        /transactionHash.*9048d65a2ecf5194fa9dfb5cc0ac59a55ffd75b9b6de5d7f09e53ef87ad5e6a8/i,
+      )
 
-    // Execution receipt
-    assert.match(output, /execution.*destination/i)
-    assert.match(output, /state.*success/i)
-    assert.match(output, new RegExp(`origin.*${OFFRAMP}`, 'i'))
-    assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
-    assert.match(
-      output,
-      /transactionHash.*354d53820392622a113685e6c34517cd240e97aaa2ebf2082db7f4637b19f07e/i,
-    )
-    assert.match(output, /logIndex.*1/)
-    assert.match(output, /blockNumber.*42539944000005/)
+      // Execution receipt
+      assert.match(output, /execution.*destination/i)
+      assert.match(output, /state.*success/i)
+      assert.match(output, new RegExp(`origin.*${OFFRAMP}`, 'i'))
+      assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
+      assert.match(
+        output,
+        /transactionHash.*354d53820392622a113685e6c34517cd240e97aaa2ebf2082db7f4637b19f07e/i,
+      )
+      assert.match(output, /logIndex.*1/)
+      assert.match(output, /blockNumber.*42539944000005/)
 
-    // TON shows execution history including failed attempts and final success after manualExec
-    // First receipt final state: failed
-    assert.match(output, /state.*failed/i)
-    assert.match(
-      output,
-      /transactionHash.*531c2fbc8db214d194aef894bfbb7163b3ad9f8c36f89d18b459c9f52d4faa14/i,
-    )
+      // TON shows execution history including failed attempts and final success after manualExec
+      // First receipt final state: failed
+      assert.match(output, /state.*failed/i)
+      assert.match(
+        output,
+        /transactionHash.*531c2fbc8db214d194aef894bfbb7163b3ad9f8c36f89d18b459c9f52d4faa14/i,
+      )
 
-    // Second receipt final state: successful
-    assert.match(output, /state.*success/i)
-    assert.match(
-      output,
-      /transactionHash.*354d53820392622a113685e6c34517cd240e97aaa2ebf2082db7f4637b19f07e/i,
-    )
+      // Second receipt final state: successful
+      assert.match(output, /state.*success/i)
+      assert.match(
+        output,
+        /transactionHash.*354d53820392622a113685e6c34517cd240e97aaa2ebf2082db7f4637b19f07e/i,
+      )
 
-    // Verify we have both failed and successful executions
-    const receiptsSection = output.split(/execution.*destination/i)[1] || ''
-    const failedMatches = receiptsSection.match(/failed/gi) || []
-    const successMatches = receiptsSection.match(/success/gi) || []
-    assert.ok(failedMatches.length >= 1, 'Should have at least one failed execution')
-    assert.ok(successMatches.length >= 1, 'Should have at least one successful execution')
-  })
+      // Verify we have both failed and successful executions
+      const receiptsSection = output.split(/execution.*destination/i)[1] || ''
+      const failedMatches = receiptsSection.match(/failed/gi) || []
+      const successMatches = receiptsSection.match(/success/gi) || []
+      assert.ok(failedMatches.length >= 1, 'Should have at least one failed execution')
+      assert.ok(successMatches.length >= 1, 'Should have at least one successful execution')
+    },
+  )
 })

@@ -142,7 +142,7 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
         return apiRequests
       }
     } catch (err) {
-      source.logger.debug?.('API getMessageIdsInTx failed, falling back to RPC:', err)
+      source.logger.debug('API getMessageIdsInTx failed, falling back to RPC:', err)
     }
   }
 
@@ -192,7 +192,7 @@ export async function getMessageById(
     try {
       return await source.apiClient.getMessageById(messageId)
     } catch (err) {
-      source.logger.debug?.('API getMessageById failed, falling back to RPC:', err)
+      source.logger.debug('API getMessageById failed, falling back to RPC:', err)
     }
   }
 
