@@ -291,13 +291,13 @@ export class CCIPAPIClient {
    *
    * @example Basic usage
    * ```typescript
-   * const messageIds = await api.getMessageIdsFromTransaction(
+   * const messageIds = await api.getMessageIdsInTx(
    *   '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
    * )
    * console.log(`Found ${messageIds.length} messages`)
    * ```
    */
-  async getMessageIdsFromTransaction(txHash: string): Promise<string[]> {
+  async getMessageIdsInTx(txHash: string): Promise<string[]> {
     // Validate txHash format: EVM hex (0x + 64 hex chars) or Solana Base58 (32-88 chars alphanumeric)
     const evmHexPattern = /^0x[0-9a-fA-F]{64}$/
     const solanaBase58Pattern = /^[1-9A-HJ-NP-Za-km-z]{32,88}$/
@@ -351,7 +351,7 @@ export class CCIPAPIClient {
 
     const raw = (await response.json()) as RawMessagesResponse
 
-    this.logger.debug('getMessageIdsFromTransaction raw response:', raw)
+    this.logger.debug('getMessageIdsInTxraw response:', raw)
 
     // Handle empty results
     if (raw.data.length === 0) {

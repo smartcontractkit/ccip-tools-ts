@@ -134,7 +134,7 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
   // Try API first if available
   if (source.apiClient) {
     try {
-      const messageIds = await source.apiClient.getMessageIdsFromTransaction(txHash)
+      const messageIds = await source.apiClient.getMessageIdsInTx(txHash)
       if (messageIds.length > 0) {
         const apiRequests = await Promise.all(
           messageIds.map((id) => source.apiClient!.getMessageById(id)),
@@ -142,7 +142,7 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
         return apiRequests
       }
     } catch (err) {
-      source.logger.debug?.('API getMessageIdsFromTransaction failed, falling back to RPC:', err)
+      source.logger.debug?.('API getMessageIdsInTx failed, falling back to RPC:', err)
     }
   }
 

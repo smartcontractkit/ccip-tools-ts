@@ -140,14 +140,14 @@ async function retrieveMessageDataFromTxHash(
   if (!argv.noapi) {
     const apiClient = new CCIPAPIClient(undefined, { logger })
     try {
-      const messageIds = await apiClient.getMessageIdsFromTransaction(argv.txHash)
-      logger.debug('API getMessageIdsFromTransaction succeeded, found', messageIds.length)
+      const messageIds = await apiClient.getMessageIdsInTx(argv.txHash)
+      logger.debug('API getMessageIdsInTx succeeded, found', messageIds.length)
       const requests = await Promise.all(messageIds.map((id) => apiClient.getMessageById(id)))
       logger.debug('API request retrieval succeeded')
       return requests
     } catch (err) {
       apiError = CCIPError.from(err)
-      logger.debug('API getMessageIdsFromTransaction failed, falling back to RPC:', err)
+      logger.debug('API getMessageIdsInTx failed, falling back to RPC:', err)
     }
   }
 
@@ -213,12 +213,11 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       context: { error: req.tx.error },
     })
 
-  // Only continue to commit/receipt logic if --wait is explicitly requested
-  if (!argv.wait) return
-
-  // Ensure chains are loaded for wait/commit/receipt functionality
-  const { source: src, getChain: gc } = await ensureChains()
-  await waitForExecution(ctx, argv, req, src, gc)
+  if (argv.wait) {
+    // Ensure chains are loaded for wait/commit/receipt functionality
+    const { source: src, getChain: gc } = await ensureChains()
+    await waitForExecution(ctx, argv, req, src, gc)
+  }
 }
 
 /**

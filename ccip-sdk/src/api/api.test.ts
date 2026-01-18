@@ -755,7 +755,7 @@ describe('CCIPAPIClient', () => {
     })
   })
 
-  describe('getMessageIdsFromTransaction', () => {
+  describe('getMessageIdsInTx', () => {
     const mockMessagesResponse = {
       data: [
         {
@@ -794,7 +794,7 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      await client.getMessageIdsFromTransaction(txHash)
+      await client.getMessageIdsInTx(txHash)
 
       assert.equal(customFetch.mock.calls.length, 1)
       const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
@@ -811,7 +811,7 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageIdsFromTransaction(
+      const result = await client.getMessageIdsInTx(
         '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
       )
 
@@ -837,7 +837,7 @@ describe('CCIPAPIClient', () => {
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
-      const result = await client.getMessageIdsFromTransaction(
+      const result = await client.getMessageIdsInTx(
         '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
       )
 
@@ -861,7 +861,7 @@ describe('CCIPAPIClient', () => {
 
       await assert.rejects(
         async () =>
-          await client.getMessageIdsFromTransaction(
+          await client.getMessageIdsInTx(
             '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
           ),
         (err: unknown) =>
@@ -884,7 +884,7 @@ describe('CCIPAPIClient', () => {
       const client = new CCIPAPIClient()
       await assert.rejects(
         async () =>
-          await client.getMessageIdsFromTransaction(
+          await client.getMessageIdsInTx(
             '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
           ),
         (err: unknown) =>
@@ -898,7 +898,7 @@ describe('CCIPAPIClient', () => {
       const client = new CCIPAPIClient()
 
       await assert.rejects(
-        async () => await client.getMessageIdsFromTransaction('invalid-hash'),
+        async () => await client.getMessageIdsInTx('invalid-hash'),
         (err: unknown) =>
           err instanceof CCIPArgumentInvalidError &&
           err.message.includes('txHash') &&
@@ -910,7 +910,7 @@ describe('CCIPAPIClient', () => {
       const client = new CCIPAPIClient()
 
       await assert.rejects(
-        async () => await client.getMessageIdsFromTransaction('0x1234'),
+        async () => await client.getMessageIdsInTx('0x1234'),
         (err: unknown) => err instanceof CCIPArgumentInvalidError && err.message.includes('txHash'),
       )
     })
@@ -927,7 +927,7 @@ describe('CCIPAPIClient', () => {
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
 
-      const result = await client.getMessageIdsFromTransaction(solanaTxHash)
+      const result = await client.getMessageIdsInTx(solanaTxHash)
 
       assert.equal(result.length, 1)
       // Verify fetch was called with the Solana tx hash
@@ -947,7 +947,7 @@ describe('CCIPAPIClient', () => {
       const client = new CCIPAPIClient()
       await assert.rejects(
         async () =>
-          await client.getMessageIdsFromTransaction(
+          await client.getMessageIdsInTx(
             '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
           ),
         (err: unknown) => err instanceof CCIPHttpError && err.isTransient === true,
@@ -967,13 +967,13 @@ describe('CCIPAPIClient', () => {
         fetch: customFetch as any,
       })
 
-      await client.getMessageIdsFromTransaction(
+      await client.getMessageIdsInTx(
         '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
       )
 
       assert.equal(debugFn.mock.calls.length, 2) // Once for URL, once for raw response
       const lastCall = debugFn.mock.calls[1] as unknown as { arguments: unknown[] }
-      assert.equal(lastCall.arguments[0], 'getMessageIdsFromTransaction raw response:')
+      assert.equal(lastCall.arguments[0], 'getMessageIdsInTx raw response:')
       assert.ok(lastCall.arguments[1])
     })
 
@@ -992,7 +992,7 @@ describe('CCIPAPIClient', () => {
 
       await assert.rejects(
         async () =>
-          await client.getMessageIdsFromTransaction(
+          await client.getMessageIdsInTx(
             '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
           ),
         (err: unknown) =>
