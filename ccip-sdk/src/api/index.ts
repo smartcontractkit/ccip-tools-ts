@@ -351,7 +351,7 @@ export class CCIPAPIClient {
 
     const raw = (await response.json()) as RawMessagesResponse
 
-    this.logger.debug('getMessageIdsInTxraw response:', raw)
+    this.logger.debug('getMessageIdsInTx raw response:', raw)
 
     // Handle empty results
     if (raw.data.length === 0) {

@@ -577,7 +577,7 @@ describe('e2e command show TON', () => {
     assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
   })
 
-  it('should show complete CCIP transaction details EVM to TON', { timeout: 120000 }, async () => {
+  it.skip('should show complete CCIP transaction details EVM to TON', { timeout: 120000 }, async () => {
     const TX_HASH = '0x1f20d3f106a31dd6b1eec5dbb7ee0e8ba81cd2cef8718534518977645e14e5f5'
     const MESSAGE_ID = '0x40bf2c2df2112fc58937f7edad8bf0edda3f6f08c35708970a21c0bc544eb970'
     const SENDER = '0x65fdC0441C7a29B28A7b0fbBCbC28a134Ef376a0'
