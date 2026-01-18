@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.94.0]
+## [0.94.0] - 2026-01-14 - Pre-release
 
 - SDK: Browser compatibility - explicit `buffer` dependency and imports for cross-platform support
 - CI: Added `publint` and `@arethetypeswrong/cli` validation for package exports
