@@ -32,6 +32,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   MESSAGE_NOT_IN_BATCH: 'The message is not in the expected batch. Verify the commit report.',
   MESSAGE_CHAIN_MISMATCH:
     'Verify you are using the correct destination chain. Check that sourceChainSelector and destChainSelector match your lane.',
+  MESSAGE_RETRIEVAL_FAILED:
+    'Both API and RPC failed to retrieve the message. Verify the transaction hash is correct and the transaction is confirmed. Check RPC and network connectivity.',
   MESSAGE_VERSION_INVALID:
     'Ensure the source chain onRamp uses CCIP v1.6. Older message versions are not compatible with this destination.',
 

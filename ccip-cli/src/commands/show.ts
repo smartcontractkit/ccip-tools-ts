@@ -2,7 +2,6 @@ import {
   type CCIPRequest,
   type Chain,
   type ChainGetter,
-  type ChainTransaction,
   CCIPAPIClient,
   CCIPError,
   CCIPExecTxRevertedError,
@@ -79,61 +78,106 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
 }
 
 /**
+ * Retrieve message data by message ID (idFromSource path).
+ * @returns Array containing a single CCIPRequest
+ */
+async function retrieveMessageDataFromId(
+  ctx: Ctx,
+  argv: Parameters<typeof handler>[0],
+): Promise<CCIPRequest[]> {
+  const { logger } = ctx
+
+  let idFromSource: string
+  let onRamp: string | undefined
+  if (argv.idFromSource!.includes('@')) {
+    ;[onRamp, idFromSource] = argv.idFromSource!.split('@') as [string, string]
+  } else {
+    idFromSource = argv.idFromSource!
+  }
+  const sourceNetwork = networkInfo(idFromSource)
+
+  // Try API first if available (no RPC needed)
+  let apiError: CCIPError | undefined
+  if (!argv.noapi) {
+    const apiClient = new CCIPAPIClient(undefined, { logger })
+    try {
+      const request = await apiClient.getMessageById(idFromSource)
+      logger.debug('API getMessageById succeeded')
+      return [request]
+    } catch (err) {
+      apiError = CCIPError.from(err)
+      logger.debug('API getMessageById failed, falling back to RPC:', err)
+    }
+  }
+
+  // Fall back to RPC if API failed or was disabled
+  try {
+    const getChain = fetchChainsFromRpcs(ctx, argv)
+    const source = await getChain(sourceNetwork.chainId)
+    if (!source.getMessageById)
+      throw new CCIPNotImplementedError(`getMessageById for ${source.constructor.name}`)
+    const request = await source.getMessageById(argv.idFromSource!, onRamp, argv)
+    return [request]
+  } catch (err) {
+    const rpcError = CCIPError.from(err)
+    // Both API and RPC failed - throw combined error
+    throw new CCIPMessageRetrievalError(idFromSource, apiError, rpcError)
+  }
+}
+
+/**
+ * Retrieve message data by transaction hash.
+ * @returns Array of CCIPRequests (may contain multiple)
+ */
+async function retrieveMessageDataFromTxHash(
+  ctx: Ctx,
+  argv: Parameters<typeof handler>[0],
+): Promise<CCIPRequest[]> {
+  const { logger } = ctx
+
+  // Try API first if available (no RPC needed)
+  let apiError: CCIPError | undefined
+  if (!argv.noapi) {
+    const apiClient = new CCIPAPIClient(undefined, { logger })
+    try {
+      const messageIds = await apiClient.getMessageIdsFromTransaction(argv.txHash)
+      logger.debug('API getMessageIdsFromTransaction succeeded, found', messageIds.length)
+      const requests = await Promise.all(messageIds.map((id) => apiClient.getMessageById(id)))
+      logger.debug('API request retrieval succeeded')
+      return requests
+    } catch (err) {
+      apiError = CCIPError.from(err)
+      logger.debug('API getMessageIdsFromTransaction failed, falling back to RPC:', err)
+    }
+  }
+
+  // Fall back to RPC if API failed or was disabled
+  try {
+    const [, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHash)
+    const [source, tx] = await tx$
+    return await source.getMessagesInTx(tx)
+  } catch (err) {
+    const rpcError = CCIPError.from(err)
+    // Both API and RPC failed - throw combined error
+    throw new CCIPMessageRetrievalError('Unknown ID', apiError, rpcError)
+  }
+}
+
+/**
  * Show details of a request.
  */
 export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
   const { logger } = ctx
-  let source: Chain | undefined
-  let getChain: ChainGetter | undefined
-  let tx!: ChainTransaction
-  let request: CCIPRequest | undefined
-  // messageId not yet implemented for Solana
-  if (argv.idFromSource) {
-    let idFromSource: string, onRamp: string | undefined
-    if (argv.idFromSource.includes('@')) {
-      ;[onRamp, idFromSource] = argv.idFromSource.split('@') as [string, string]
-    } else idFromSource = argv.idFromSource
-    const sourceNetwork = networkInfo(idFromSource)
 
-    // Try API first if available (no RPC needed)
-    let apiError: CCIPError | undefined
-    if (!argv.noApi) {
-      const apiClient = new CCIPAPIClient(undefined, { logger })
-      try {
-        request = await apiClient.getMessageById(argv.txHash)
-        logger.debug('API getMessageById succeeded')
-      } catch (err) {
-        apiError = CCIPError.from(err)
-        logger.debug('API getMessageById failed, falling back to RPC:', err)
-      }
-    }
+  const requests = argv.idFromSource
+    ? await retrieveMessageDataFromId(ctx, argv)
+    : await retrieveMessageDataFromTxHash(ctx, argv)
 
-    // Fall back to RPC if API failed or was disabled
-    if (!request) {
-      try {
-        getChain = fetchChainsFromRpcs(ctx, argv)
-        source = await getChain(sourceNetwork.chainId)
-        if (!source.getMessageById)
-          throw new CCIPNotImplementedError(`getMessageById for ${source.constructor.name}`)
-        request = await source.getMessageById(argv.txHash, onRamp, argv)
-      } catch (err) {
-        const rpcError = CCIPError.from(err)
-        // Both API and RPC failed - throw combined error
-        throw new CCIPMessageRetrievalError(argv.txHash, apiError, rpcError)
-      }
-    }
-  } else {
-    const [getChain_, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHash)
-    getChain = getChain_
-    ;[source, tx] = await tx$
-    request = await selectRequest(await source.getMessagesInTx(tx), 'to know more', argv)
-  }
-
-  // Request is guaranteed defined: idFromSource path throws CCIPMessageRetrievalError,
-  // else path throws via selectRequest if no messages found
-  const req = request
+  const req = await selectRequest(requests, 'to know more', argv)
 
   // Lazy-load chains if needed (when we got request from API)
+  let source: Chain | undefined
+  let getChain: ChainGetter | undefined
   const ensureChains = async () => {
     if (!getChain) {
       getChain = fetchChainsFromRpcs(ctx, argv)
@@ -150,20 +194,12 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       break
     }
     case Format.pretty: {
-      // If we got request from API without RPC, fall back to JSON immediately
-      // (TODO: Expand pritty printing to not rely on the RPC. Currently RPC
-      // is required mainly for token formatting)
-      if (!source && !getChain) {
-        logger.debug('No RPC available, falling back to JSON for display')
-        logger.info(JSON.stringify(req, bigIntReplacer, 2))
-        break
-      }
       // Try to get chain for rich display, fall back to JSON if unavailable
       try {
         const { source: src } = await ensureChains()
         await prettyRequest.call(ctx, src, req)
-      } catch {
-        logger.debug('Chain unavailable for pretty format, falling back to JSON')
+      } catch (err) {
+        logger.debug('Pretty format failed, falling back to JSON:', err)
         logger.info(JSON.stringify(req, bigIntReplacer, 2))
       }
       break
