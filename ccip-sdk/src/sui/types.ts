@@ -26,3 +26,25 @@ export function encodeSuiExtraArgsV1(args: SuiExtraArgsV1): string {
   const bcsData = SuiExtraArgsV1Codec.serialize({ ...args, tokenReceiver, receiverObjectIds })
   return concat([SuiExtraArgsV1Tag, bcsData.toBytes()])
 }
+
+export type SuiCCIPMessageLog = {
+  dest_chain_selector: string
+  message: {
+    data: number[]
+    extra_args: number[]
+    fee_token: string
+    fee_token_amount: string
+    fee_value_juels: string
+    header: {
+      dest_chain_selector: string
+      message_id: number[]
+      nonce: string
+      sequence_number: string
+      source_chain_selector: string
+    }
+    receiver: number[]
+    sender: string
+    token_amounts: unknown[]
+  }
+  sequence_number: string
+}
