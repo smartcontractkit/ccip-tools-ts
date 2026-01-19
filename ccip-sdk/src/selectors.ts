@@ -842,6 +842,11 @@ const selectors: Selectors = {
     name: 'tempo-testnet',
     family: 'evm',
   },
+  '42431': {
+    selector: 8457817439310187923n,
+    name: 'tempo-testnet-moderato',
+    family: 'evm',
+  },
   '42793': {
     selector: 13624601974233774587n,
     name: 'etherlink-mainnet',
