@@ -158,6 +158,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
 
   HTTP_ERROR: 'HTTP request failed. 429 indicates rate limiting.',
   RPC_NOT_FOUND: 'No RPC endpoint found. Configure an RPC URL.',
+  TIMEOUT:
+    'Request timed out. Check network connectivity and try again. Consider increasing timeoutMs if the server is slow.',
 
   VIEM_ADAPTER_ERROR:
     'Check that your viem client has both account and chain defined. For WalletClient, use createWalletClient({ chain, account, ... }).',

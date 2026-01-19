@@ -184,8 +184,8 @@ export class CCIPMessageRetrievalError extends CCIPError {
       `Failed to retrieve message ${messageId} via API and RPC.\n  API: ${apiMsg}\n  RPC: ${rpcMsg}`,
       {
         ...options,
-        isTransient: apiError?.isTransient ?? false,
-        retryAfterMs: apiError?.retryAfterMs,
+        isTransient: (apiError?.isTransient ?? false) || (rpcError?.isTransient ?? false),
+        retryAfterMs: apiError?.retryAfterMs ?? rpcError?.retryAfterMs,
         recovery:
           'Verify the message ID is correct. If using --id-from-source, configure an RPC for on-chain lookup or wait for API indexing.',
         context: {
@@ -623,6 +623,20 @@ export class CCIPHttpError extends CCIPError {
       ...options,
       isTransient: isTransientHttpStatus(status),
       context: { ...options?.context, status, statusText },
+    })
+  }
+}
+
+/** Thrown when a request times out. Transient: network may recover. */
+export class CCIPTimeoutError extends CCIPError {
+  override readonly name = 'CCIPTimeoutError'
+  /** Creates a timeout error. */
+  constructor(operation: string, timeoutMs: number, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.TIMEOUT, `Request timed out after ${timeoutMs}ms: ${operation}`, {
+      ...options,
+      isTransient: true,
+      retryAfterMs: 5000,
+      context: { ...options?.context, operation, timeoutMs },
     })
   }
 }

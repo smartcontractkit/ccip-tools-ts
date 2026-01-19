@@ -5,6 +5,7 @@ import {
   CCIPMessageIdNotFoundError,
   CCIPMessageIdValidationError,
   CCIPMessageNotFoundInTxError,
+  CCIPTimeoutError,
   CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, SVMExtraArgsV1 } from '../extra-args.ts'
@@ -33,12 +34,17 @@ export type {
 /** Default CCIP API base URL */
 export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
 
+/** Default timeout for API requests in milliseconds */
+export const DEFAULT_TIMEOUT_MS = 30000
+
 /**
  * Context for CCIPAPIClient initialization.
  */
 export type CCIPAPIClientContext = WithLogger & {
   /** Custom fetch function (defaults to globalThis.fetch) */
   fetch?: typeof fetch
+  /** Request timeout in milliseconds (defaults to 30000ms) */
+  timeoutMs?: number
 }
 
 /**
@@ -80,6 +86,8 @@ export class CCIPAPIClient {
   readonly baseUrl: string
   /** Logger instance */
   readonly logger: Logger
+  /** Request timeout in milliseconds */
+  readonly timeoutMs: number
   /** Fetch function used for HTTP requests */
   private readonly _fetch: typeof fetch
 
@@ -91,6 +99,7 @@ export class CCIPAPIClient {
   constructor(baseUrl?: string, ctx?: CCIPAPIClientContext) {
     this.baseUrl = baseUrl ?? DEFAULT_API_BASE_URL
     this.logger = ctx?.logger ?? console
+    this.timeoutMs = ctx?.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this._fetch = ctx?.fetch ?? globalThis.fetch
   }
 
@@ -103,6 +112,30 @@ export class CCIPAPIClient {
    */
   static fromUrl(baseUrl?: string, ctx?: CCIPAPIClientContext): Promise<CCIPAPIClient> {
     return Promise.resolve(new CCIPAPIClient(baseUrl, ctx))
+  }
+
+  /**
+   * Performs a fetch request with timeout protection.
+   * @param url - URL to fetch
+   * @param operation - Operation name for error context
+   * @returns Promise resolving to Response
+   * @throws CCIPTimeoutError if request times out
+   * @internal
+   */
+  private async _fetchWithTimeout(url: string, operation: string): Promise<Response> {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs)
+
+    try {
+      return await this._fetch(url, { signal: controller.signal })
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new CCIPTimeoutError(operation, this.timeoutMs)
+      }
+      throw error
+    } finally {
+      clearTimeout(timeoutId)
+    }
   }
 
   /**
@@ -148,7 +181,7 @@ export class CCIPAPIClient {
 
     this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`)
 
-    const response = await this._fetch(url.toString())
+    const response = await this._fetchWithTimeout(url.toString(), 'getLaneLatency')
 
     if (!response.ok) {
       // Try to parse structured error response from API
@@ -237,7 +270,7 @@ export class CCIPAPIClient {
 
     this.logger.debug(`CCIPAPIClient: GET ${url}`)
 
-    const response = await this._fetch(url)
+    const response = await this._fetchWithTimeout(url, 'getMessageById')
 
     if (!response.ok) {
       // Try to parse structured error response from API
@@ -315,7 +348,7 @@ export class CCIPAPIClient {
 
     this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`)
 
-    const response = await this._fetch(url.toString())
+    const response = await this._fetchWithTimeout(url.toString(), 'getMessageIdsInTx')
 
     if (!response.ok) {
       // Try to parse structured error response from API

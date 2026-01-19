@@ -162,6 +162,7 @@ export {
   CCIPNetworkFamilyUnsupportedError,
   CCIPNotImplementedError,
   CCIPRpcNotFoundError,
+  CCIPTimeoutError,
   CCIPTypeVersionInvalidError,
 } from './specialized.ts'
 

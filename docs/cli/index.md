@@ -365,7 +365,7 @@ ccip-cli lane-latency 5009297550715157269 4949039107694359620
 ccip-cli lane-latency ethereum-mainnet polygon-mainnet --api-url https://custom-api.example.com
 ```
 
-**Note:** This command requires CCIP API access. It will fail if `--no-api` flag is used.
+**Note:** This command requires CCIP API access. It will fail if `--noapi` flag is used.
 
 ---
 
