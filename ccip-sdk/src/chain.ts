@@ -36,9 +36,9 @@ import {
   type Lane,
   type Log_,
   type Logger,
+  type MessageInput,
   type NetworkInfo,
   type OffchainTokenData,
-  type MessageInput,
   type WithLogger,
   ExecutionState,
 } from './types.ts'
@@ -114,6 +114,16 @@ export type TokenInfo = {
   readonly decimals: number
   /** Optional human-readable token name. */
   readonly name?: string
+}
+
+/**
+ * Options for getBalance query.
+ */
+export type GetBalanceOpts = {
+  /** Token address. Use null/undefined for native token balance. */
+  token?: string | null
+  /** Holder address to query balance for. */
+  holder: string
 }
 
 /**
@@ -420,6 +430,29 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @returns Token symbol and decimals, and optionally name
    */
   abstract getTokenInfo(token: string): Promise<TokenInfo>
+  /**
+   * Query token balance for an address.
+   *
+   * @param opts - Balance query options
+   * @returns Token balance information including raw and formatted values
+   * @throws {@link CCIPNotImplementedError} if chain family doesn't support this method
+   *
+   * @example Query native token balance
+   * ```typescript
+   * const balance = await chain.getBalance({ address: '0x123...' })
+   * console.log(`Native balance: ${balance}`) // balance in wei
+   * ```
+   *
+   * @example Query ERC20 token balance
+   * ```typescript
+   * const balance = await chain.getBalance({
+   *   address: '0x123...',
+   *   token: '0xLINK...'
+   * })
+   * console.log(`LINK balance: ${balance}`) // balance in smallest units
+   * ```
+   */
+  abstract getBalance(opts: GetBalanceOpts): Promise<bigint>
   /**
    * Fetch TokenAdminRegistry configured in a given OnRamp, Router, etc
    * Needed to map a source token to its dest counterparts

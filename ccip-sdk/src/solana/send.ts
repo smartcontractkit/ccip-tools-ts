@@ -1,12 +1,7 @@
 import { Buffer } from 'buffer'
 
 import { type IdlTypes, Program } from '@coral-xyz/anchor'
-import {
-  NATIVE_MINT,
-  createApproveInstruction,
-  getAccount,
-  getAssociatedTokenAddressSync,
-} from '@solana/spl-token'
+import { NATIVE_MINT, createApproveInstruction, getAccount } from '@solana/spl-token'
 import {
   type AccountMeta,
   type AddressLookupTableAccount,
@@ -23,13 +18,12 @@ import {
   CCIPSolanaLookupTableNotFoundError,
   CCIPSolanaRouterConfigNotFoundError,
   CCIPTokenAmountInvalidError,
-  CCIPTokenMintNotFoundError,
 } from '../errors/index.ts'
 import { type AnyMessage, type WithLogger, ChainFamily } from '../types.ts'
 import { bytesToBuffer, toLeArray, util } from '../utils.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import type { UnsignedSolanaTx } from './types.ts'
-import { simulationProvider } from './utils.ts'
+import { resolveATA, simulationProvider } from './utils.ts'
 
 function anyToSvmMessage(message: AnyMessage): IdlTypes<typeof CCIP_ROUTER_IDL>['SVM2AnyMessage'] {
   const feeTokenPubkey = message.feeToken ? new PublicKey(message.feeToken) : PublicKey.default
@@ -338,20 +332,8 @@ async function approveRouterSpender(
   amount?: bigint,
 ): Promise<TransactionInstruction | undefined> {
   // Get the current account info to check existing delegation (or create if needed)
-  const mintInfo = await connection.getAccountInfo(token)
-  if (!mintInfo) throw new CCIPTokenMintNotFoundError(token.toBase58())
-  const associatedTokenAccount = getAssociatedTokenAddressSync(
-    token,
-    owner,
-    undefined,
-    mintInfo.owner,
-  )
-  const accountInfo = await getAccount(
-    connection,
-    associatedTokenAccount,
-    undefined,
-    mintInfo.owner,
-  )
+  const resolved = await resolveATA(connection, token, owner)
+  const accountInfo = await getAccount(connection, resolved.ata, undefined, resolved.tokenProgram)
 
   // spender is a Router PDA
   const [spender] = PublicKey.findProgramAddressSync([Buffer.from('fee_billing_signer')], router)
@@ -370,7 +352,7 @@ async function approveRouterSpender(
     owner,
     amount ?? BigInt(Number.MAX_SAFE_INTEGER),
     undefined,
-    mintInfo.owner,
+    resolved.tokenProgram,
   )
   logger.info(
     'Approving',
