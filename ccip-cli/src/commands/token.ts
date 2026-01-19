@@ -3,7 +3,7 @@
  * Queries native or token balance for an address.
  */
 
-import { networkInfo } from '@chainlink/ccip-sdk/src/index.ts'
+import { type ChainStatic, networkInfo } from '@chainlink/ccip-sdk/src/index.ts'
 import { formatUnits } from 'ethers'
 import type { Argv } from 'yargs'
 
@@ -64,9 +64,17 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
   })
 
   // Get token info for formatting (only for tokens, not native)
-  const tokenInfo = argv.token ? await chain.getTokenInfo(argv.token) : null
+  let tokenInfo
+  if (argv.token) {
+    argv.token = (chain.constructor as ChainStatic).getAddress(argv.token)
+    tokenInfo = await chain.getTokenInfo(argv.token)
+  }
+
   const tokenLabel = tokenInfo?.symbol ?? 'native'
-  const formatted = tokenInfo ? formatUnits(balance, tokenInfo.decimals) : null
+  const formatted = formatUnits(
+    balance,
+    tokenInfo ? tokenInfo.decimals : (chain.constructor as ChainStatic).decimals,
+  )
 
   switch (argv.format) {
     case Format.json:
@@ -77,11 +85,8 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
             holder: argv.holder,
             token: tokenLabel,
             balance: balance.toString(),
-            ...(tokenInfo && {
-              formatted,
-              decimals: tokenInfo.decimals,
-              name: tokenInfo.name,
-            }),
+            formatted,
+            ...tokenInfo,
           },
           null,
           2,
@@ -90,9 +95,12 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
       return
     case Format.log:
       logger.log(
-        tokenInfo
-          ? `Balance of ${tokenInfo.name} (${tokenLabel}): ${balance} = ${formatted} ${tokenLabel}`
-          : `Balance of ${tokenLabel}: ${balance}`,
+        `Balance of`,
+        tokenInfo ? argv.token : tokenLabel,
+        ':',
+        balance,
+        `=`,
+        tokenInfo ? `${formatted} ${tokenLabel}` : formatted,
       )
       return
     case Format.pretty:
@@ -100,13 +108,10 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
       prettyTable.call(ctx, {
         network: networkName,
         holder: argv.holder,
-        token: tokenLabel,
-        balance: balance.toString(),
-        ...(tokenInfo && {
-          formatted,
-          decimals: tokenInfo.decimals,
-          name: tokenInfo.name,
-        }),
+        token: argv.token ?? tokenLabel,
+        balance,
+        formatted,
+        ...tokenInfo,
       })
       return
   }
