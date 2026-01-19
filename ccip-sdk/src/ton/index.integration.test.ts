@@ -13,7 +13,10 @@ const CCIP_MESSAGE_SENT_TOPIC = crc32('CCIPMessageSent') // 0xa45d293c
 const COMMIT_REPORT_ACCEPTED_TOPIC = crc32('CommitReportAccepted') // 0x27d3bce8
 const EXECUTION_STATE_CHANGED_TOPIC = crc32('ExecutionStateChanged') // 0x4c94c360
 
-describe('TON index integration tests', () => {
+// SKIP: TON testnet endpoint (testnet.toncenter.com) is currently unreachable/unusable.
+// These integration tests require live TON testnet connectivity and will be re-enabled
+// once the infrastructure is restored.
+describe.skip('TON index integration tests', () => {
   let tonChain: TONChain
 
   /**
