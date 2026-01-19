@@ -25,16 +25,12 @@ import {
   CCIPNotImplementedError,
   CCIPVersionFeatureUnavailableError,
 } from '../errors/index.ts'
-import { getMessagesInBatch, getMessagesInTx } from '../requests.ts'
-import {
-  type EVMExtraArgsV2,
-  type ExtraArgs,
-  type SVMExtraArgsV1,
-  type SuiExtraArgsV1,
-} from '../extra-args.ts'
-import { getSuiLeafHasher } from './hasher.ts'
+import { CCIPSuiLogInvalidError } from '../errors/specialized.ts'
+import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { getMessagesInBatch, getMessagesInTx } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
+import { getSuiLeafHasher } from './hasher.ts'
 import {
   type AnyMessage,
   type CCIPExecution,
@@ -53,9 +49,8 @@ import {
   type WithLogger,
   ChainFamily,
 } from '../types.ts'
-import { discoverCCIP, discoverOfframp } from './discovery.ts'
-import type { CCIPMessage_V1_6_Sui, SuiCCIPMessageLog } from './types.ts'
 import { bytesToBuffer, decodeAddress, networkInfo, parseTypeAndVersion, util } from '../utils.ts'
+import { discoverCCIP, discoverOfframp } from './discovery.ts'
 import { type CommitEvent, getSuiEventsInTimeRange } from './events.ts'
 import {
   type SuiManuallyExecuteInput,
@@ -68,7 +63,7 @@ import {
   getOffRampStateObject,
   getReceiverModule,
 } from './objects.ts'
-import { CCIPSuiLogInvalidError } from '../errors/specialized.ts'
+import type { CCIPMessage_V1_6_Sui, SuiCCIPMessageLog } from './types.ts'
 
 export const SUI_EXTRA_ARGS_V1_TAG = '21ea4ca9' as const
 const DEFAULT_GAS_LIMIT = 1000000n
@@ -534,7 +529,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
         feeToken: log.message.fee_token,
         feeTokenAmount: BigInt(log.message.fee_token_amount),
         feeValueJuels: BigInt(log.message.fee_value_juels),
-        tokenAmounts: log.message.token_amounts.map((ta: any) => ({
+        tokenAmounts: log.message.token_amounts.map((ta) => ({
           sourcePoolAddress: ta.source_pool_address || '',
           destTokenAddress: toHex(ta.dest_token_address || []),
           extraData: toHex(ta.extra_data || []),
