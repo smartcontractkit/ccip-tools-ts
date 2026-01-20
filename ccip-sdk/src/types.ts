@@ -216,15 +216,10 @@ export const MessageStatus = {
   Success: 'SUCCESS',
   /** Message execution failed on destination. */
   Failed: 'FAILED',
-  /**
-   * CCIP 1.7 will introduce two new statuses:
-   *
-   * - `VERIFYING`: Message is being verified by the CCIP network
-   * - `VERIFIED`: Message has been verified by the CCIP network
-   *
-   * It will also deprecate COMMITTED and BLESSED, though they will
-   * continue to exist and be used when retrieving legacy messages.
-   */
+  /** Message is being verified by the CCIP network */
+  Verifying: 'VERIFYING',
+  /** Message has been verified by the CCIP network */
+  Verified: 'VERIFIED',
 } as const
 /** Type representing a CCIP message lifecycle status. */
 export type MessageStatus = (typeof MessageStatus)[keyof typeof MessageStatus]
