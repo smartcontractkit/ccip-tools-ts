@@ -42,10 +42,10 @@ const globalOpts = {
     type: 'number',
     describe: 'getLogs page/range size',
   },
-  noapi: {
+  api: {
     type: 'boolean',
-    describe: 'Disable CCIP API integration (full decentralization mode)',
-    default: false,
+    describe: 'Enable CCIP API integration (disable with --no-api for full decentralization mode)',
+    default: true,
   },
 } as const
 

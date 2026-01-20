@@ -54,12 +54,12 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
 export async function getLaneLatencyCmd(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
   const { logger } = ctx
 
-  // Respect --noapi flag - this command requires API access
-  if (argv.noapi) {
+  // Respect --no-api flag - this command requires API access
+  if (argv.api === false) {
     throw new CCIPApiClientNotAvailableError({
       context: {
         reason:
-          'The lane-latency command requires API access. Remove --noapi flag to use this command.',
+          'The lane-latency command requires API access. Remove --no-api flag to use this command.',
       },
     })
   }

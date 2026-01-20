@@ -98,7 +98,7 @@ async function retrieveMessageDataFromId(
 
   // Try API first if available (no RPC needed)
   let apiError: CCIPError | undefined
-  if (!argv.noapi) {
+  if (argv.api !== false) {
     const apiClient = new CCIPAPIClient(undefined, { logger })
     try {
       const request = await apiClient.getMessageById(idFromSource)
@@ -137,7 +137,7 @@ async function retrieveMessageDataFromTxHash(
 
   // Try API first if available (no RPC needed)
   let apiError: CCIPError | undefined
-  if (!argv.noapi) {
+  if (argv.api !== false) {
     const apiClient = new CCIPAPIClient(undefined, { logger })
     try {
       const messageIds = await apiClient.getMessageIdsInTx(argv.txHash)

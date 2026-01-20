@@ -84,13 +84,13 @@ By default, the CLI uses the CCIP API for message retrieval and lane latency que
 
 **Disable API access (RPC-only mode):**
 ```bash
-ccip-cli show 0x... --noapi
+ccip-cli show 0x... --no-api
 ```
 
 **Environment variable:**
 ```bash
 # CCIP_ prefix maps to CLI options
-export CCIP_NOAPI=true          # Same as --noapi
+export CCIP_API=false           # Same as --no-api
 export CCIP_VERBOSE=true        # Same as --verbose
 export CCIP_FORMAT=json         # Same as --format=json
 ccip-cli show 0x...
@@ -155,7 +155,7 @@ ccip-cli show <tx_hash> [options]
 | `--log-index <n>` | Select specific message if tx contains multiple |
 | `--id-from-source <network>` | Search by messageId instead of txHash (format: `[onRamp@]sourceNetwork`) |
 | `--wait` | Wait for finalization, commit, and execution on destination chain |
-| `--noapi` | Disable API access, use RPC only |
+| `--no-api` | Disable API access, use RPC only |
 
 **Example:**
 ```bash
@@ -365,7 +365,7 @@ ccip-cli lane-latency 5009297550715157269 4949039107694359620
 ccip-cli lane-latency ethereum-mainnet polygon-mainnet --api-url https://custom-api.example.com
 ```
 
-**Note:** This command requires CCIP API access. It will fail if `--noapi` flag is used.
+**Note:** This command requires CCIP API access. It will fail if `--no-api` flag is used.
 
 ---
 

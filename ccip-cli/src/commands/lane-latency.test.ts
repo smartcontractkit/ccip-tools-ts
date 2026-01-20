@@ -138,14 +138,14 @@ describe('lane-latency command', () => {
     assert.ok(url.includes('destChainSelector=4949039107694359620'))
   })
 
-  it('should throw CCIPApiClientNotAvailableError when --noapi flag is set', async () => {
+  it('should throw CCIPApiClientNotAvailableError when --no-api flag is set', async () => {
     await assert.rejects(
       async () =>
         await getLaneLatencyCmd(createCtx(), {
           source: '5009297550715157269',
           dest: '4949039107694359620',
           format: Format.json,
-          noapi: true, // Simulate --noapi flag
+          api: false, // Simulate --no-api flag
         } as Parameters<typeof getLaneLatencyCmd>[1]),
       (err: unknown) =>
         err instanceof CCIPApiClientNotAvailableError &&
@@ -157,32 +157,32 @@ describe('lane-latency command', () => {
     assert.equal(mockedFetch.mock.calls.length, 0)
   })
 
-  it('should work normally when --noapi flag is false', async () => {
+  it('should work normally when --api flag is true (default)', async () => {
     await getLaneLatencyCmd(createCtx(), {
       source: '5009297550715157269',
       dest: '4949039107694359620',
       format: Format.json,
-      noapi: false, // Explicit false
+      api: true, // Explicit true
     } as Parameters<typeof getLaneLatencyCmd>[1])
 
     // Verify fetch was called (API was used)
     assert.equal(mockedFetch.mock.calls.length, 1)
   })
 
-  describe('CCIP_NOAPI environment variable integration', () => {
-    it('should respect CCIP_NOAPI=true environment variable', async () => {
-      const origEnv = process.env.CCIP_NOAPI
+  describe('CCIP_API environment variable integration', () => {
+    it('should respect CCIP_API=false environment variable', async () => {
+      const origEnv = process.env.CCIP_API
       try {
-        process.env.CCIP_NOAPI = 'true'
+        process.env.CCIP_API = 'false'
 
-        // Simulate yargs .env('CCIP') behavior - yargs converts CCIP_NOAPI to noapi
+        // Simulate yargs .env('CCIP') behavior - yargs converts CCIP_API to api
         await assert.rejects(
           async () =>
             await getLaneLatencyCmd(createCtx(), {
               source: '5009297550715157269',
               dest: '4949039107694359620',
               format: Format.json,
-              noapi: process.env.CCIP_NOAPI === 'true',
+              api: process.env.CCIP_API === 'false' ? false : true,
             } as Parameters<typeof getLaneLatencyCmd>[1]),
           (err: unknown) => err instanceof CCIPApiClientNotAvailableError,
         )
@@ -191,9 +191,9 @@ describe('lane-latency command', () => {
         assert.equal(mockedFetch.mock.calls.length, 0)
       } finally {
         if (origEnv === undefined) {
-          delete process.env.CCIP_NOAPI
+          delete process.env.CCIP_API
         } else {
-          process.env.CCIP_NOAPI = origEnv
+          process.env.CCIP_API = origEnv
         }
       }
     })

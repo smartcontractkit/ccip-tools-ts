@@ -96,7 +96,7 @@ describe('e2e command show EVM', () => {
       { timeout: 120000 },
       async () => {
         // Use --noapi and --wait to ensure RPC path and full output with commits/receipts
-        const args = buildShowArgs(TX_HASH, '--noapi', '--wait')
+        const args = buildShowArgs(TX_HASH, '--no-api', '--wait')
         const result = await spawnCLI(args, 120000)
 
         assert.equal(result.exitCode, 0)
@@ -160,7 +160,7 @@ describe('e2e command show EVM', () => {
   describe('json format', () => {
     it('should output valid JSON with all expected fields', { timeout: 120000 }, async () => {
       // Use --noapi and --wait to ensure RPC path and full output with commits/receipts
-      const args = buildShowArgs(TX_HASH, '--format', 'json', '--noapi', '--wait')
+      const args = buildShowArgs(TX_HASH, '--format', 'json', '--no-api', '--wait')
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0)
@@ -202,7 +202,7 @@ describe('e2e command show EVM', () => {
   describe('log format', () => {
     it('should output in log format with object assignments', { timeout: 120000 }, async () => {
       // Use --noapi and --wait to ensure RPC path and full output with commits/receipts
-      const args = buildShowArgs(TX_HASH, '--format', 'log', '--noapi', '--wait')
+      const args = buildShowArgs(TX_HASH, '--format', 'log', '--no-api', '--wait')
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0)
@@ -222,7 +222,7 @@ describe('e2e command show EVM', () => {
   describe('verbose flag', () => {
     it('should work with verbose flag enabled', { timeout: 120000 }, async () => {
       // Use --noapi to ensure RPC path is used for full pretty output
-      const args = buildShowArgs(TX_HASH, '--verbose', '--noapi')
+      const args = buildShowArgs(TX_HASH, '--verbose', '--no-api')
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0)
@@ -273,7 +273,7 @@ describe('e2e command show EVM', () => {
       const OFFRAMP = '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45'
 
       // Use --noapi and --wait to ensure RPC path and full output with commits/receipts
-      const args = buildShowArgs(TX_HASH, '--noapi', '--wait')
+      const args = buildShowArgs(TX_HASH, '--no-api', '--wait')
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0)
@@ -338,7 +338,7 @@ describe('e2e command show EVM', () => {
       const OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
 
       // Use --noapi and --wait to ensure RPC path and full output with commits/receipts
-      const args = buildShowArgs(TX_HASH, '--noapi', '--wait')
+      const args = buildShowArgs(TX_HASH, '--no-api', '--wait')
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0, result.stdout + result.stderr)
@@ -405,7 +405,7 @@ describe('e2e command show Solana', () => {
     { timeout: 120000 },
     async () => {
       // Use --noapi to ensure RPC path is used for full pretty output with commits/receipts
-      const args = buildShowArgs(TX_HASH, '--noapi', '--wait')
+      const args = buildShowArgs(TX_HASH, '--no-api', '--wait')
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0, result.stdout + result.stderr)
@@ -475,7 +475,7 @@ describe('e2e command show Aptos', () => {
     { timeout: 120000 },
     async () => {
       // Use --noapi to ensure RPC path is used for full pretty output with commits/receipts
-      const args = buildShowArgs(TX_HASH, '--noapi', '--wait')
+      const args = buildShowArgs(TX_HASH, '--no-api', '--wait')
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0, `stdout: ${result.stdout}\nstderr: ${result.stderr}`)
@@ -539,7 +539,7 @@ describe('e2e command show TON', () => {
     const OFFRAMP = '0x93Bb167Ebd91987f9Dff6B954b9Eead469d2b849'
 
     // Use --noapi to ensure RPC path is used for full pretty output with commits/receipts
-    const args = buildShowArgs(TX_HASH, '--noapi', '--wait')
+    const args = buildShowArgs(TX_HASH, '--no-api', '--wait')
     const result = await spawnCLI(args, 120000)
 
     assert.equal(result.exitCode, 0)
@@ -589,7 +589,7 @@ describe('e2e command show TON', () => {
       const OFFRAMP = 'EQCfLpla6865euCU2-TPlzy8vKQKT8rFKHoAvorKBC1RudIO'
 
       // Use --noapi to ensure RPC path is used for full pretty output with commits/receipts
-      const args = buildShowArgs(TX_HASH, '--noapi', '--wait')
+      const args = buildShowArgs(TX_HASH, '--no-api', '--wait')
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0, result.stdout + result.stderr)
