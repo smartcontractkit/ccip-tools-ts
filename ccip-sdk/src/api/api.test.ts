@@ -481,8 +481,8 @@ describe('CCIPAPIClient', () => {
       }
     })
 
-    it('should handle unknown version gracefully', async () => {
-      const response = { ...mockMessageResponse, version: '2.0.0' }
+    it('should preserve unknown version as-is', async () => {
+      const response = { ...mockMessageResponse, version: '1.7.0' }
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
@@ -494,8 +494,44 @@ describe('CCIPAPIClient', () => {
         '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
       )
 
-      // Unknown version defaults to V1_6
-      assert.equal(result.lane.version, CCIPVersion.V1_6)
+      // Unknown version is preserved as-is (not silently converted to V1_6)
+      assert.equal(result.lane.version, '1.7.0')
+    })
+
+    it('should strip -dev suffix from unknown versions', async () => {
+      const response = { ...mockMessageResponse, version: '1.7.0-dev' }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(response)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageById(
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      )
+
+      // -dev suffix is stripped
+      assert.equal(result.lane.version, '1.7.0')
+    })
+
+    it('should default to V1_6 when version is null or undefined', async () => {
+      for (const version of [null, undefined]) {
+        const response = { ...mockMessageResponse, version }
+        const customFetch = mock.fn(() =>
+          Promise.resolve({
+            ok: true,
+            text: () => Promise.resolve(JSON.stringify(response)),
+          }),
+        )
+        const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+        const result = await client.getMessageById(
+          '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+        )
+
+        // Null/undefined falls back to V1_6
+        assert.equal(result.lane.version, CCIPVersion.V1_6)
+      }
     })
 
     it('should be transient error for 5xx', async () => {

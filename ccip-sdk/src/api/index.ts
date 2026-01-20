@@ -400,7 +400,7 @@ export class CCIPAPIClient {
       sourceChainSelector: BigInt(raw.sourceNetworkInfo.chainSelector),
       destChainSelector: BigInt(raw.destNetworkInfo.chainSelector),
       onRamp: raw.onramp,
-      version: parseVersion(raw.version) ?? CCIPVersion.V1_6,
+      version: (raw.version?.replace(/-dev$/, '') ?? CCIPVersion.V1_6) as CCIPVersion,
     }
 
     // Build message with extraArgs spread and tokenAmounts included
@@ -452,27 +452,6 @@ export class CCIPAPIClient {
       sourceNetworkInfo: networkInfo(BigInt(raw.sourceNetworkInfo.chainSelector)),
       destNetworkInfo: networkInfo(BigInt(raw.destNetworkInfo.chainSelector)),
     }
-  }
-}
-
-/**
- * Parses API version string to CCIPVersion enum.
- * @param version - Version string like "1.5.0", "1.6.0", or "1.6.0-dev"
- * @returns CCIPVersion if recognized, undefined otherwise
- */
-function parseVersion(version: string | null | undefined): CCIPVersion | undefined {
-  if (!version) return undefined
-  // Strip "-dev" suffix if present
-  const semver = version.replace(/-dev$/, '')
-  switch (semver) {
-    case '1.2.0':
-      return CCIPVersion.V1_2
-    case '1.5.0':
-      return CCIPVersion.V1_5
-    case '1.6.0':
-      return CCIPVersion.V1_6
-    default:
-      return undefined
   }
 }
 
