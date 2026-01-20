@@ -47,7 +47,7 @@ export async function generateUnsignedExecuteReport(
   opts?: { forceLookupTable?: boolean; forceBuffer?: boolean; clearLeftoverAccounts?: boolean },
 ): Promise<UnsignedSolanaTx> {
   const { connection, logger = console } = ctx
-  console.log('🔥', 'updated exec');
+
   const program = new Program(CCIP_OFFRAMP_IDL, offramp, simulationProvider(ctx, payer))
 
   let bufferId
