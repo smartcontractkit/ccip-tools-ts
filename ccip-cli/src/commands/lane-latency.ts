@@ -85,7 +85,7 @@ export async function getLaneLatencyCmd(ctx: Ctx, argv: Parameters<typeof handle
       prettyTable.call(ctx, {
         Source: `${sourceNetwork.name} [${sourceNetwork.chainSelector}]`,
         Destination: `${destNetwork.name} [${destNetwork.chainSelector}]`,
-        'Estimated Delivery': `~${formatDuration(result.totalMs / 1000)}`,
+        'Estimated Delivery': `~${formatDuration(Number(result.totalMs) / 1000)}`,
         'Latency (ms)': result.totalMs.toLocaleString(),
       })
     }

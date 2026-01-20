@@ -6,7 +6,7 @@ import type { CCIPRequest, MessageStatus, NetworkInfo } from '../types.ts'
  */
 export type LaneLatencyResponse = {
   /** Estimated delivery time in milliseconds */
-  totalMs: number
+  totalMs: bigint
 }
 
 /** Raw API response (string selectors, before conversion) */
@@ -26,7 +26,7 @@ export type RawLaneLatencyResponse = {
     }
     routerAddress: string
   }
-  totalMs: number
+  totalMs: bigint
 }
 
 /**
@@ -70,7 +70,7 @@ export type RawEVMExtraArgs = {
 
 /** SVM extra args from API (SVMExtraArgsV1) */
 export type RawSVMExtraArgs = {
-  computeUnits: number
+  computeUnits: bigint
   accountIsWritableBitmap: string
   allowOutOfOrderExecution: boolean
   tokenReceiver: string
@@ -109,7 +109,7 @@ export type RawMessageResponse = {
   tokenAmounts: RawTokenAmount[]
   extraArgs: RawEVMExtraArgs | RawSVMExtraArgs
   readyForManualExecution: boolean
-  finality: number
+  finality: bigint
   fees: RawFees
   // Required fields (as of schema v2.0.0)
   origin: string
@@ -121,7 +121,7 @@ export type RawMessageResponse = {
   version?: string | null
   receiptTransactionHash?: string | null
   receiptTimestamp?: string | null
-  deliveryTime?: number | null
+  deliveryTime?: bigint | null
   data?: string | null
 }
 
@@ -166,13 +166,13 @@ export type APICCIPRequestMetadata = {
   /** Whether message is ready for manual execution */
   readyForManualExecution: boolean
   /** Finality block confirmations */
-  finality: number
+  finality: bigint
   /** Receipt transaction hash if executed */
   receiptTransactionHash?: string
   /** Receipt timestamp (Unix) if executed */
   receiptTimestamp?: number
   /** End-to-end delivery time in ms if completed */
-  deliveryTime?: number
+  deliveryTime?: bigint
   /** Source network info */
   sourceNetworkInfo: NetworkInfo
   /** Destination network info */

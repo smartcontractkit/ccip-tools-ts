@@ -4,11 +4,9 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 import { CCIPAPIClient, DEFAULT_API_BASE_URL } from './index.ts'
 import {
   CCIPApiClientNotAvailableError,
-  CCIPArgumentInvalidError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
-  CCIPMessageIdValidationError,
   CCIPMessageNotFoundInTxError,
   CCIPUnexpectedPaginationError,
   HttpStatus,

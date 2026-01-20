@@ -1,9 +1,7 @@
 import {
-  CCIPArgumentInvalidError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
-  CCIPMessageIdValidationError,
   CCIPMessageNotFoundInTxError,
   CCIPTimeoutError,
   CCIPUnexpectedPaginationError,
@@ -474,7 +472,7 @@ function transformExtraArgs(
 ): EVMExtraArgsV2 | SVMExtraArgsV1 {
   if (isRawSVMExtraArgs(raw)) {
     return {
-      computeUnits: BigInt(raw.computeUnits),
+      computeUnits: raw.computeUnits, // already bigint from yaml parser
       accountIsWritableBitmap: BigInt(raw.accountIsWritableBitmap),
       allowOutOfOrderExecution: raw.allowOutOfOrderExecution,
       tokenReceiver: raw.tokenReceiver,
