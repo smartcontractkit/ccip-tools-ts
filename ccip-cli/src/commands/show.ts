@@ -3,6 +3,7 @@ import {
   type Chain,
   type ChainGetter,
   CCIPAPIClient,
+  CCIPArgumentInvalidError,
   CCIPError,
   CCIPExecTxRevertedError,
   CCIPMessageRetrievalError,
@@ -30,8 +31,15 @@ import {
 } from './utils.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
-export const command = ['show <tx-hash>', '* <tx-hash>']
+export const command = ['show', '*']
 export const describe = 'Show details of a CCIP request'
+
+/**
+ * Validates a message ID format (32-byte hex string with 0x prefix).
+ */
+function isValidMessageId(id: string): boolean {
+  return /^0x[a-fA-F0-9]{64}$/.test(id)
+}
 
 /**
  * Yargs builder for the show command.
@@ -40,22 +48,27 @@ export const describe = 'Show details of a CCIP request'
  */
 export const builder = (yargs: Argv) =>
   yargs
-    .positional('tx-hash', {
-      type: 'string',
-      demandOption: true,
-      describe: 'transaction hash of the request (source) message',
-    })
-    .check(({ txHash }) => isSupportedTxHash(txHash))
     .options({
+      tx: {
+        type: 'string',
+        describe: 'Transaction hash to query',
+        conflicts: 'id',
+      },
+      id: {
+        type: 'string',
+        describe: 'Message ID to query',
+        conflicts: 'tx',
+      },
+      source: {
+        type: 'string',
+        describe:
+          'Source network for RPC fallback when using --id (e.g., ethereum-mainnet); format: [onRamp@]sourceNetwork',
+        implies: 'id',
+      },
       'log-index': {
         type: 'number',
         describe:
           'Pre-select a message request by logIndex, if more than one in tx; by default, a selection menu is shown',
-      },
-      'id-from-source': {
-        type: 'string',
-        describe:
-          'Search by messageId instead of txHash; requires `[onRamp@]sourceNetwork` (onRamp address may be required in some chains)',
       },
       wait: {
         type: 'boolean',
@@ -65,6 +78,24 @@ export const builder = (yargs: Argv) =>
         type: 'string',
         describe: 'Custom CCIP API URL (defaults to api.ccip.chain.link)',
       },
+    })
+    .check((argv) => {
+      if (!argv.tx && !argv.id) {
+        throw new CCIPArgumentInvalidError(
+          '--tx or --id',
+          'Must provide either --tx <txHash> or --id <messageId>',
+        )
+      }
+      if (argv.tx && !isSupportedTxHash(argv.tx)) {
+        throw new CCIPArgumentInvalidError(
+          '--tx',
+          `Invalid transaction hash format: ${String(argv.tx)}`,
+        )
+      }
+      if (argv.id && !isValidMessageId(argv.id)) {
+        throw new CCIPArgumentInvalidError('--id', `Invalid message ID format: ${argv.id}`)
+      }
+      return true
     })
 
 /**
@@ -82,7 +113,7 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
 }
 
 /**
- * Retrieve message data by message ID (idFromSource path).
+ * Retrieve message data by message ID.
  * @returns Array containing a single CCIPRequest
  */
 async function retrieveMessageDataFromId(
@@ -90,22 +121,14 @@ async function retrieveMessageDataFromId(
   argv: Parameters<typeof handler>[0],
 ): Promise<CCIPRequest[]> {
   const { logger } = ctx
-
-  let idFromSource: string
-  let onRamp: string | undefined
-  if (argv.idFromSource!.includes('@')) {
-    ;[onRamp, idFromSource] = argv.idFromSource!.split('@') as [string, string]
-  } else {
-    idFromSource = argv.idFromSource!
-  }
-  const sourceNetwork = networkInfo(idFromSource)
+  const messageId = argv.id!
 
   // Try API first if available (no RPC needed)
   let apiError: CCIPError | undefined
   if (argv.api !== false) {
     const apiClient = new CCIPAPIClient(argv.apiUrl, { logger })
     try {
-      const request = await apiClient.getMessageById(idFromSource)
+      const request = await apiClient.getMessageById(messageId)
       logger.debug('API getMessageById succeeded')
       return [request]
     } catch (err) {
@@ -114,18 +137,32 @@ async function retrieveMessageDataFromId(
     }
   }
 
-  // Fall back to RPC if API failed or was disabled
+  // Fall back to RPC only if --source is provided
+  if (!argv.source) {
+    throw apiError ?? new CCIPMessageRetrievalError(messageId, apiError, undefined)
+  }
+
+  // Parse source - format: [onRamp@]sourceNetwork
+  let sourceNetworkName: string
+  let onRamp: string | undefined
+  if (argv.source.includes('@')) {
+    ;[onRamp, sourceNetworkName] = argv.source.split('@') as [string, string]
+  } else {
+    sourceNetworkName = argv.source
+  }
+  const sourceNetwork = networkInfo(sourceNetworkName)
+
   try {
     const getChain = fetchChainsFromRpcs(ctx, argv)
     const source = await getChain(sourceNetwork.chainId)
     if (!source.getMessageById)
       throw new CCIPNotImplementedError(`getMessageById for ${source.constructor.name}`)
-    const request = await source.getMessageById(argv.idFromSource!, onRamp, argv)
+    const request = await source.getMessageById(messageId, onRamp, argv)
     return [request]
   } catch (err) {
     const rpcError = CCIPError.from(err)
     // Both API and RPC failed - throw combined error
-    throw new CCIPMessageRetrievalError(idFromSource, apiError, rpcError)
+    throw new CCIPMessageRetrievalError(messageId, apiError, rpcError)
   }
 }
 
@@ -138,13 +175,14 @@ async function retrieveMessageDataFromTxHash(
   argv: Parameters<typeof handler>[0],
 ): Promise<CCIPRequest[]> {
   const { logger } = ctx
+  const txHash = argv.tx!
 
   // Try API first if available (no RPC needed)
   let apiError: CCIPError | undefined
   if (argv.api !== false) {
     const apiClient = new CCIPAPIClient(argv.apiUrl, { logger })
     try {
-      const messageIds = await apiClient.getMessageIdsInTx(argv.txHash)
+      const messageIds = await apiClient.getMessageIdsInTx(txHash)
       logger.debug('API getMessageIdsInTx succeeded, found', messageIds.length)
       const requests = await Promise.all(messageIds.map((id) => apiClient.getMessageById(id)))
       logger.debug('API request retrieval succeeded')
@@ -157,7 +195,7 @@ async function retrieveMessageDataFromTxHash(
 
   // Fall back to RPC if API failed or was disabled
   try {
-    const [, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHash)
+    const [, tx$] = fetchChainsFromRpcs(ctx, argv, txHash)
     const [source, tx] = await tx$
     return await source.getMessagesInTx(tx)
   } catch (err) {
@@ -173,7 +211,7 @@ async function retrieveMessageDataFromTxHash(
 export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
   const { logger } = ctx
 
-  const requests = argv.idFromSource
+  const requests = argv.id
     ? await retrieveMessageDataFromId(ctx, argv)
     : await retrieveMessageDataFromTxHash(ctx, argv)
 

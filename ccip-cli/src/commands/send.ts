@@ -313,10 +313,9 @@ async function sendMessage(
   )
   await showRequests(ctx, {
     ...argv,
-    txHash: request.tx.hash,
-    'tx-hash': request.tx.hash,
-    'id-from-source': undefined,
-    idFromSource: undefined,
+    tx: request.tx.hash,
+    id: undefined,
+    source: undefined,
     'log-index': undefined,
     logIndex: undefined,
     'api-url': undefined,

@@ -68,12 +68,29 @@ async function spawnCLI(
 }
 
 /**
- * Helper to build common CLI arguments for show command
+ * Helper to build common CLI arguments for show command with --tx option
  */
 function buildShowArgs(txHash: string, ...additionalArgs: string[]): string[] {
   return [
     'show',
+    '--tx',
     txHash,
+    '-r',
+    ...RPCS,
+    '--rpcs-file',
+    'package.json', // Disable rpcs file loading
+    ...additionalArgs,
+  ]
+}
+
+/**
+ * Helper to build CLI arguments for show command with --id option
+ */
+function buildShowIdArgs(messageId: string, ...additionalArgs: string[]): string[] {
+  return [
+    'show',
+    '--id',
+    messageId,
     '-r',
     ...RPCS,
     '--rpcs-file',
@@ -235,6 +252,21 @@ describe('e2e command show EVM', () => {
     })
   })
 
+  describe('--id option', () => {
+    it('should query by message ID with --id option', { timeout: 120000 }, async () => {
+      // Use --id to query by message ID instead of tx hash
+      const args = buildShowIdArgs(MESSAGE_ID, '--no-api', '--source', 'ethereum-testnet-sepolia')
+      const result = await spawnCLI(args, 120000)
+
+      assert.equal(result.exitCode, 0, `stdout: ${result.stdout}\nstderr: ${result.stderr}`)
+
+      // Should contain the message information
+      assert.match(result.stdout, new RegExp(MESSAGE_ID, 'i'))
+      assert.match(result.stdout, new RegExp(SENDER, 'i'))
+      assert.match(result.stdout, new RegExp(RECEIVER, 'i'))
+    })
+  })
+
   describe('error handling', () => {
     it('should handle invalid transaction hash gracefully', { timeout: 120000 }, async () => {
       const invalidTxHash = '0x0000000000000000000000000000000000000000000000000000000000000000'
@@ -248,15 +280,47 @@ describe('e2e command show EVM', () => {
       assert.ok(result.stderr.length > 0)
     })
 
-    it('should require transaction hash argument', { timeout: 30000 }, async () => {
+    it('should error when neither --tx nor --id is provided', { timeout: 30000 }, async () => {
       const args = ['show', '-r', ...RPCS, '--rpcs-file', '.gitignore']
       const result = await spawnCLI(args, 30000)
 
       // Should exit with error code
       assert.notEqual(result.exitCode, 0)
 
-      // Should mention missing argument
-      assert.match(result.stderr, /tx-hash|required|missing/i)
+      // Should mention needing --tx or --id
+      assert.match(result.stderr, /--tx.*--id|Must provide/i)
+    })
+
+    it('should error when both --tx and --id are provided', { timeout: 30000 }, async () => {
+      const args = [
+        'show',
+        '--tx',
+        '0x25e63fa89abb77acd353edc24ed3ab5880a8d206c8229e6f61dc00d399f447b3',
+        '--id',
+        '0xdfb374fef50749b0bc86784e097ecc9547c5145ddfb8f9d96f1da3024abfcd04',
+        '-r',
+        ...RPCS,
+        '--rpcs-file',
+        '.gitignore',
+      ]
+      const result = await spawnCLI(args, 30000)
+
+      // Should exit with error code
+      assert.notEqual(result.exitCode, 0)
+
+      // Should mention mutually exclusive arguments
+      assert.match(result.stderr, /mutually exclusive/i)
+    })
+
+    it('should error with invalid message ID format', { timeout: 30000 }, async () => {
+      const args = ['show', '--id', 'invalid-id', '-r', ...RPCS, '--rpcs-file', '.gitignore']
+      const result = await spawnCLI(args, 30000)
+
+      // Should exit with error code
+      assert.notEqual(result.exitCode, 0)
+
+      // Should mention invalid format
+      assert.match(result.stderr, /Invalid message ID format/i)
     })
   })
 
