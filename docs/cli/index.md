@@ -178,7 +178,7 @@ Send a cross-chain message.
 ccip-cli send <source> <router> <dest> [options]
 ```
 
-**Arguments:**
+**Positional Arguments:**
 - `source` - Source chain (ID or name)
 - `router` - CCIP Router address on source
 - `dest` - Destination chain (ID or name)
