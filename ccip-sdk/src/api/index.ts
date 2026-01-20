@@ -258,14 +258,6 @@ export class CCIPAPIClient {
    * ```
    */
   async getMessageById(messageId: string): Promise<APICCIPRequest> {
-    // Validate messageId format: 0x prefix + 64 hex chars
-    const hexPattern = /^0x[0-9a-fA-F]{64}$/
-    if (!hexPattern.test(messageId)) {
-      throw new CCIPMessageIdValidationError(
-        `Invalid messageId format: expected 0x prefix followed by 64 hex characters, got "${messageId}"`,
-      )
-    }
-
     const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}`
 
     this.logger.debug(`CCIPAPIClient: GET ${url}`)
@@ -331,17 +323,6 @@ export class CCIPAPIClient {
    * ```
    */
   async getMessageIdsInTx(txHash: string): Promise<string[]> {
-    // Validate txHash format: EVM hex (0x + 64 hex chars) or Solana Base58 (32-88 chars alphanumeric)
-    const evmHexPattern = /^0x[0-9a-fA-F]{64}$/
-    const solanaBase58Pattern = /^[1-9A-HJ-NP-Za-km-z]{32,88}$/
-
-    if (!evmHexPattern.test(txHash) && !solanaBase58Pattern.test(txHash)) {
-      throw new CCIPArgumentInvalidError(
-        'txHash',
-        'expected EVM hex (0x + 64 hex chars) or Solana Base58 format',
-      )
-    }
-
     const url = new URL(`${this.baseUrl}/v2/messages`)
     url.searchParams.set('sourceTransactionHash', txHash)
     url.searchParams.set('limit', '100')

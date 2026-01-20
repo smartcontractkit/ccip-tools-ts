@@ -392,16 +392,6 @@ describe('CCIPAPIClient', () => {
       )
     })
 
-    it('should throw CCIPMessageIdValidationError on invalid format', async () => {
-      const client = new CCIPAPIClient()
-      await assert.rejects(
-        async () => await client.getMessageById('invalid'),
-        (err: unknown) =>
-          err instanceof CCIPMessageIdValidationError &&
-          err.message.includes('Invalid messageId format'),
-      )
-    })
-
     it('should handle missing optional fields gracefully', async () => {
       const minimalResponse = {
         messageId: '0x1234...',
@@ -906,27 +896,6 @@ describe('CCIPAPIClient', () => {
           err instanceof CCIPMessageNotFoundInTxError &&
           err.context.apiErrorCode === 'NOT_FOUND' &&
           err.isTransient === true,
-      )
-    })
-
-    it('should throw CCIPArgumentInvalidError on invalid EVM txHash', async () => {
-      const client = new CCIPAPIClient()
-
-      await assert.rejects(
-        async () => await client.getMessageIdsInTx('invalid-hash'),
-        (err: unknown) =>
-          err instanceof CCIPArgumentInvalidError &&
-          err.message.includes('txHash') &&
-          err.message.includes('EVM hex'),
-      )
-    })
-
-    it('should throw CCIPArgumentInvalidError on txHash too short', async () => {
-      const client = new CCIPAPIClient()
-
-      await assert.rejects(
-        async () => await client.getMessageIdsInTx('0x1234'),
-        (err: unknown) => err instanceof CCIPArgumentInvalidError && err.message.includes('txHash'),
       )
     })
 
