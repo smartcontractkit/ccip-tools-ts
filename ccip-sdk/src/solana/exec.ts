@@ -19,6 +19,7 @@ import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
 import type { CCIPMessage_V1_6_Solana, UnsignedSolanaTx } from './types.ts'
 import { bytesToBuffer, getDataBytes, toLeArray } from '../utils.ts'
+import { simulationProvider } from './utils.ts'
 
 type ExecAlt = {
   initialIxs: TransactionInstruction[]
@@ -46,7 +47,8 @@ export async function generateUnsignedExecuteReport(
   opts?: { forceLookupTable?: boolean; forceBuffer?: boolean; clearLeftoverAccounts?: boolean },
 ): Promise<UnsignedSolanaTx> {
   const { connection, logger = console } = ctx
-  const program = new Program(CCIP_OFFRAMP_IDL, offramp, ctx)
+  console.log('🔥', 'updated exec');
+  const program = new Program(CCIP_OFFRAMP_IDL, offramp, simulationProvider(ctx, payer))
 
   let bufferId
   if (opts?.forceBuffer) {
