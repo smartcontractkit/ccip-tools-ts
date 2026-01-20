@@ -623,6 +623,11 @@ const selectors: Selectors = {
     name: 'ethereum-testnet-sepolia-lisk-1',
     family: 'evm',
   },
+  '4217': {
+    selector: 7281642695469137430n,
+    name: 'tempo-mainnet',
+    family: 'evm',
+  },
   '4326': {
     selector: 6093540873831549674n,
     name: 'megaeth-mainnet',

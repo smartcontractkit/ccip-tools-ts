@@ -1,6 +1,5 @@
 export type {
   APICCIPRequest,
-  APICCIPRequestMetadata,
   APIErrorResponse,
   CCIPAPIClientContext,
   LaneLatencyResponse,
