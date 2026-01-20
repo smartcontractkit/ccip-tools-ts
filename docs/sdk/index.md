@@ -37,13 +37,13 @@ const aptosChain = await AptosChain.fromUrl('https://api.testnet.aptoslabs.com/v
 
 ### Supported Chain Families
 
-| Chain Family | Class | Library | Status |
-|--------------|-------|---------|--------|
-| EVM | `EVMChain` | [ethers.js v6](https://docs.ethers.org/v6/) or [viem](https://viem.sh/) | Supported |
-| Solana | `SolanaChain` | [solana-web3.js](https://github.com/solana-foundation/solana-web3.js) | Supported |
-| Aptos | `AptosChain` | [aptos-ts-sdk](https://github.com/aptos-labs/aptos-ts-sdk) | Supported |
-| Sui | `SuiChain` | [@mysten/sui](https://github.com/MystenLabs/sui) | Partial (manual exec) |
-| TON | `TONChain` | [@ton/ton](https://github.com/ton-org/ton) | Partial (manual exec) |
+| Chain Family | Class         | Library                                                                 | Status                |
+| ------------ | ------------- | ----------------------------------------------------------------------- | --------------------- |
+| EVM          | `EVMChain`    | [ethers.js v6](https://docs.ethers.org/v6/) or [viem](https://viem.sh/) | Supported             |
+| Solana       | `SolanaChain` | [solana-web3.js](https://github.com/solana-foundation/solana-web3.js)   | Supported             |
+| Aptos        | `AptosChain`  | [aptos-ts-sdk](https://github.com/aptos-labs/aptos-ts-sdk)              | Supported             |
+| Sui          | `SuiChain`    | [@mysten/sui](https://github.com/MystenLabs/sui)                        | Partial (manual exec) |
+| TON          | `TONChain`    | [@ton/ton](https://github.com/ton-org/ton)                              | Partial (manual exec) |
 
 ## Common Tasks
 
@@ -57,7 +57,7 @@ const source = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.c
 
 // Fetch message details from a transaction
 const requests = await source.getMessagesInTx(
-  '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+  '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
 )
 
 // Access message and lane details
@@ -161,7 +161,7 @@ const request = await source.sendMessage(
     extraArgs: { gasLimit: 200_000, allowOutOfOrderExecution: true },
     fee,
   },
-  { wallet }
+  { wallet },
 )
 
 console.log('Transaction hash:', request.tx.hash)
@@ -181,8 +181,8 @@ const api = new CCIPAPIClient()
 
 // Get estimated delivery time
 const latency = await api.getLaneLatency(
-  5009297550715157269n,  // Ethereum mainnet selector
-  4949039107694359620n,  // Arbitrum mainnet selector
+  5009297550715157269n, // Ethereum mainnet selector
+  4949039107694359620n, // Arbitrum mainnet selector
 )
 
 console.log(`Estimated delivery: ${Math.round(latency.totalMs / 60000)} minutes`)
@@ -209,11 +209,11 @@ const api = new CCIPAPIClient()
 
 // Fetch message by its unique ID
 const request = await api.getMessageById(
-  '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+  '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
 )
 
 // Access message details
-console.log('Status:', request.status)           // 'SUCCESS', 'FAILED', 'SENT', etc.
+console.log('Status:', request.status) // 'SUCCESS', 'FAILED', 'SENT', etc.
 console.log('Sender:', request.message.sender)
 console.log('Lane:', request.lane.sourceChainSelector, '→', request.lane.destChainSelector)
 
@@ -223,6 +223,7 @@ console.log('Delivery time:', request.deliveryTime, 'ms')
 ```
 
 The returned `APICCIPRequest` extends `CCIPRequest` with additional API metadata:
+
 - `status` - Message lifecycle status (`SENT`, `COMMITTED`, `SUCCESS`, `FAILED`)
 - `readyForManualExecution` - Whether manual execution is available
 - `finality` - Block confirmations on source chain
@@ -238,7 +239,7 @@ const api = new CCIPAPIClient()
 
 // Get message IDs from transaction hash
 const messageIds = await api.getMessageIdsInTx(
-  '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234'
+  '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
 )
 
 console.log(`Found ${messageIds.length} CCIP message(s)`)
@@ -270,14 +271,14 @@ Use `networkInfo()` to convert between chain identifiers:
 import { networkInfo } from '@chainlink/ccip-sdk'
 
 // All return the same NetworkInfo object:
-const info1 = networkInfo('ethereum-mainnet')       // by name
-const info2 = networkInfo(1)                        // by chain ID
-const info3 = networkInfo(5009297550715157269n)     // by selector (bigint)
-const info4 = networkInfo('5009297550715157269')    // by selector (string)
+const info1 = networkInfo('ethereum-mainnet') // by name
+const info2 = networkInfo(1) // by chain ID
+const info3 = networkInfo(5009297550715157269n) // by selector (bigint)
+const info4 = networkInfo('5009297550715157269') // by selector (string)
 
-console.log(info1.chainSelector)  // 5009297550715157269n
-console.log(info1.name)           // 'ethereum-mainnet'
-console.log(info1.family)         // 'evm'
+console.log(info1.chainSelector) // 5009297550715157269n
+console.log(info1.name) // 'ethereum-mainnet'
+console.log(info1.family) // 'evm'
 ```
 
 ## Error Handling
@@ -292,7 +293,9 @@ import {
   CCIPMessageIdNotFoundError,
   CCIPMessageIdValidationError,
   CCIPMessageRetrievalError,
-  isTransientError
+  CCIPMessageNotFoundInTxError,
+  CCIPUnexpectedPaginationError,
+  isTransientError,
 } from '@chainlink/ccip-sdk'
 
 try {
@@ -344,16 +347,36 @@ try {
 }
 ```
 
+### Transaction Message Lookup Errors
+
+```ts
+try {
+  const messageIds = await api.getMessageIdsInTx(txHash)
+} catch (err) {
+  if (err instanceof CCIPMessageNotFoundInTxError) {
+    // No CCIP messages found - tx may still be indexing
+    if (err.isTransient) {
+      console.log('Transaction not indexed yet, retrying in 30s...')
+    }
+  }
+
+  if (err instanceof CCIPUnexpectedPaginationError) {
+    // Rare: transaction contains >100 CCIP messages
+    console.error(`Too many messages: ${err.context.messageCount}+`)
+  }
+}
+```
+
 ## Wallet Configuration
 
 Transaction-sending methods require a chain-specific wallet:
 
-| Chain | Wallet Type | Example |
-|-------|-------------|---------|
-| EVM | `ethers.Signer` | `new Wallet(privateKey, provider)` |
-| EVM (viem) | `viemWallet(WalletClient)` | See [Using with Viem](#using-with-viem) |
-| Solana | `anchor.Wallet` | `new Wallet(Keypair.fromSecretKey(...))` |
-| Aptos | `aptos.Account` | `Account.fromPrivateKey(...)` |
+| Chain      | Wallet Type                | Example                                  |
+| ---------- | -------------------------- | ---------------------------------------- |
+| EVM        | `ethers.Signer`            | `new Wallet(privateKey, provider)`       |
+| EVM (viem) | `viemWallet(WalletClient)` | See [Using with Viem](#using-with-viem)  |
+| Solana     | `anchor.Wallet`            | `new Wallet(Keypair.fromSecretKey(...))` |
+| Aptos      | `aptos.Account`            | `Account.fromPrivateKey(...)`            |
 
 ### Unsigned Transactions
 
@@ -362,10 +385,10 @@ For custom signing workflows, use the `generateUnsigned*` methods:
 ```ts
 // Generate unsigned transaction data (returns chain-specific tx format)
 const unsignedTx = await source.generateUnsignedSendMessage(
-  senderAddress,  // Your wallet address
+  senderAddress, // Your wallet address
   router,
   destSelector,
-  message
+  message,
 )
 
 // Sign and send with your own logic
@@ -375,9 +398,11 @@ await customSender.broadcast(signedTx)
 
 :::tip Browser Integration
 For EVM chains in browsers, get a signer from the connected wallet:
+
 ```ts
 const signer = await source.provider.getSigner()
 ```
+
 :::
 
 ## Using with Viem
@@ -433,12 +458,9 @@ const walletClient = createWalletClient({
 const chain = await fromViemClient(publicClient)
 
 // Send message using viemWallet adapter
-const request = await chain.sendMessage(
-  router,
-  destSelector,
-  message,
-  { wallet: viemWallet(walletClient) }
-)
+const request = await chain.sendMessage(router, destSelector, message, {
+  wallet: viemWallet(walletClient),
+})
 
 console.log('Transaction:', request.tx.hash)
 ```
