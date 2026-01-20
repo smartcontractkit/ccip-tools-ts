@@ -319,5 +319,7 @@ async function sendMessage(
     idFromSource: undefined,
     'log-index': undefined,
     logIndex: undefined,
+    'api-url': undefined,
+    apiUrl: undefined,
   })
 }

@@ -418,7 +418,7 @@ export class CCIPAPIClient {
     const lane = {
       sourceChainSelector: BigInt(raw.sourceNetworkInfo.chainSelector),
       destChainSelector: BigInt(raw.destNetworkInfo.chainSelector),
-      onRamp: raw.onramp ?? '',
+      onRamp: raw.onramp,
       version: parseVersion(raw.version) ?? CCIPVersion.V1_6,
     }
 
@@ -430,10 +430,10 @@ export class CCIPAPIClient {
       sender: raw.sender,
       receiver: raw.receiver,
       data: raw.data ?? '0x',
-      sequenceNumber: raw.sequenceNumber ? BigInt(raw.sequenceNumber) : 0n,
+      sequenceNumber: BigInt(raw.sequenceNumber),
       nonce: raw.nonce ? BigInt(raw.nonce) : 0n,
-      feeToken: raw.fees.tokenAddress ?? '',
-      feeTokenAmount: raw.fees.totalAmount ? BigInt(raw.fees.totalAmount) : 0n,
+      feeToken: raw.fees.fixedFeesDetails.tokenAddress,
+      feeTokenAmount: BigInt(raw.fees.fixedFeesDetails.totalAmount),
       tokenAmounts: transformTokenAmounts(raw.tokenAmounts),
       ...transformExtraArgs(raw.extraArgs),
     }
@@ -442,7 +442,7 @@ export class CCIPAPIClient {
     // (topics, index, blockNumber, data not available)
     const log = {
       transactionHash: raw.sendTransactionHash,
-      address: raw.onramp ?? '',
+      address: raw.onramp,
     }
 
     // Build partial tx - only hash, timestamp, from are available from API
@@ -450,7 +450,7 @@ export class CCIPAPIClient {
     const tx = {
       hash: raw.sendTransactionHash,
       timestamp: sendTimestamp,
-      from: raw.origin ?? '',
+      from: raw.origin,
     }
 
     // Note: We use type assertions for partial nested objects since Partial<CCIPRequest>

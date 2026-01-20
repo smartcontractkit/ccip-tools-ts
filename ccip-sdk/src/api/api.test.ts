@@ -290,7 +290,12 @@ describe('CCIPAPIClient', () => {
       extraArgs: { gasLimit: '400000', allowOutOfOrderExecution: false },
       readyForManualExecution: false,
       finality: 0,
-      fees: { tokenAddress: '0xFeeTokenAddress', totalAmount: '5000000' },
+      fees: {
+        fixedFeesDetails: {
+          tokenAddress: '0xFeeTokenAddress',
+          totalAmount: '5000000',
+        },
+      },
       version: '1.6.0',
       onramp: '0x1234567890abcdef1234567890abcdef12345678',
       origin: '0x742d35Cc6634C0532925a3b8D5c8C22C5B2D8a3E',
@@ -421,8 +426,17 @@ describe('CCIPAPIClient', () => {
         extraArgs: { gasLimit: '200000', allowOutOfOrderExecution: false },
         readyForManualExecution: false,
         finality: 0,
-        fees: {},
-        // No optional fields: version, onramp, nonce, sequenceNumber, etc.
+        fees: {
+          fixedFeesDetails: {
+            tokenAddress: '0xFeeToken',
+            totalAmount: '1000',
+          },
+        },
+        // Required fields (as of schema v2.0.0)
+        origin: '0xOriginAddress',
+        sequenceNumber: '12345',
+        onramp: '0xOnRampAddress',
+        // No optional fields: version, nonce, receiptTransactionHash, etc.
       }
 
       const customFetch = mock.fn(() =>
@@ -436,11 +450,11 @@ describe('CCIPAPIClient', () => {
         '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
       )
 
-      // Should use defaults for missing fields
-      assert.equal(result.lane.version, CCIPVersion.V1_6) // Default
-      assert.equal(result.lane.onRamp, '')
-      assert.equal(result.message.sequenceNumber, 0n)
-      assert.equal(result.message.nonce, 0n)
+      // Should use defaults for missing optional fields
+      assert.equal(result.lane.version, CCIPVersion.V1_6) // Default when version not provided
+      assert.equal(result.lane.onRamp, '0xOnRampAddress')
+      assert.equal(result.message.sequenceNumber, 12345n)
+      assert.equal(result.message.nonce, 0n) // nonce is still optional
       assert.equal(result.receiptTransactionHash, undefined)
     })
 
@@ -760,6 +774,7 @@ describe('CCIPAPIClient', () => {
       data: [
         {
           messageId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+          origin: '0x742d35Cc6634C0532925a3b8D5c8C22C5B2D8a3E',
           sender: '0x742d35Cc6634C0532925a3b8D5c8C22C5B2D8a3E',
           receiver: '0x893F0bCaa7F325c2b6bBd2133536f4e4b8fea88e',
           status: 'SUCCESS',

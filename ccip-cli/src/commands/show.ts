@@ -61,6 +61,10 @@ export const builder = (yargs: Argv) =>
         type: 'boolean',
         describe: 'Wait for (first) execution',
       },
+      'api-url': {
+        type: 'string',
+        describe: 'Custom CCIP API URL (defaults to api.ccip.chain.link)',
+      },
     })
 
 /**
@@ -99,7 +103,7 @@ async function retrieveMessageDataFromId(
   // Try API first if available (no RPC needed)
   let apiError: CCIPError | undefined
   if (argv.api !== false) {
-    const apiClient = new CCIPAPIClient(undefined, { logger })
+    const apiClient = new CCIPAPIClient(argv.apiUrl, { logger })
     try {
       const request = await apiClient.getMessageById(idFromSource)
       logger.debug('API getMessageById succeeded')
@@ -138,7 +142,7 @@ async function retrieveMessageDataFromTxHash(
   // Try API first if available (no RPC needed)
   let apiError: CCIPError | undefined
   if (argv.api !== false) {
-    const apiClient = new CCIPAPIClient(undefined, { logger })
+    const apiClient = new CCIPAPIClient(argv.apiUrl, { logger })
     try {
       const messageIds = await apiClient.getMessageIdsInTx(argv.txHash)
       logger.debug('API getMessageIdsInTx succeeded, found', messageIds.length)

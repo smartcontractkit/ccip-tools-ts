@@ -84,11 +84,16 @@ export type RawFixedFee = {
   amount: string
 }
 
+/** Fixed fees details wrapper from API response */
+export type RawFixedFeesDetails = {
+  tokenAddress: string
+  totalAmount: string
+  items?: RawFixedFee[]
+}
+
 /** Fees from API response */
 export type RawFees = {
-  tokenAddress?: string
-  totalAmount?: string
-  fixedFeesDetails?: RawFixedFee[]
+  fixedFeesDetails: RawFixedFeesDetails
 }
 
 /** Raw API response from GET /v1/messages/:messageId */
@@ -106,11 +111,12 @@ export type RawMessageResponse = {
   readyForManualExecution: boolean
   finality: number
   fees: RawFees
+  // Required fields (as of schema v2.0.0)
+  origin: string
+  sequenceNumber: string
+  onramp: string
   // Optional fields
-  origin?: string | null
   nonce?: string | null
-  sequenceNumber?: string
-  onramp?: string
   routerAddress?: string | null
   version?: string | null
   receiptTransactionHash?: string | null
@@ -126,6 +132,7 @@ export type RawMessageResponse = {
 /** Message search result from /v2/messages search endpoint */
 export type RawMessageSearchResult = {
   messageId: string
+  origin: string
   sender: string
   receiver: string
   status: string
