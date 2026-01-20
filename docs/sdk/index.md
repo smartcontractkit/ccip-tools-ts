@@ -67,6 +67,50 @@ console.log('Sender:', request.message.sender)
 console.log('Destination chain:', request.lane.destChainSelector)
 ```
 
+### Query Token Balance
+
+```ts
+import { EVMChain, SolanaChain, AptosChain } from '@chainlink/ccip-sdk'
+
+// EVM - native balance
+const evmChain = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.com')
+const nativeBalance = await evmChain.getBalance({
+  holder: '0xYourAddress',
+})
+
+// EVM - ERC-20 token balance
+const tokenBalance = await evmChain.getBalance({
+  holder: '0xYourAddress',
+  token: '0xTokenContractAddress',
+})
+
+// Solana - SOL balance
+const solanaChain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+const solBalance = await solanaChain.getBalance({
+  holder: 'YourSolanaAddress',
+})
+
+// Solana - SPL Token balance (auto-detects Token-2022)
+const splBalance = await solanaChain.getBalance({
+  holder: 'YourSolanaAddress',
+  token: 'TokenMintAddress',
+})
+
+// Aptos - APT balance
+const aptosChain = await AptosChain.fromUrl('https://api.testnet.aptoslabs.com/v1')
+const aptBalance = await aptosChain.getBalance({
+  holder: '0xYourAptosAddress',
+})
+
+// Aptos - Fungible Asset balance
+const faBalance = await aptosChain.getBalance({
+  holder: '0xYourAptosAddress',
+  token: '0xFungibleAssetAddress',
+})
+
+console.log('Balance:', nativeBalance.toString()) // Raw bigint
+```
+
 ### Get CCIP Fee Estimate
 
 ```ts

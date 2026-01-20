@@ -12,6 +12,7 @@ export type {
   ChainContext,
   ChainGetter,
   ChainStatic,
+  GetBalanceOpts,
   LogFilter,
   RateLimiterState,
   TokenInfo,

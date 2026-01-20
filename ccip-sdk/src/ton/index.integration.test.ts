@@ -24,10 +24,10 @@ describe.skip('TON index integration tests', () => {
    * Replace these placeholders with real addresses:
    */
   const ADDRESSES_TO_ASSERT = {
-    tonOffRamp: 'EQCfLpla6865euCU2-TPlzy8vKQKT8rFKHoAvorKBC1RudIO',
-    tonRouter: 'EQDrkhDYT8czFZuYNPlFMJ5ICD8FQoEW0b1KvITMVljC3ZTV',
-    tonOnRamp: 'EQDTIBzONmN64tMmLymf0-jtc_AAWfDlXiZcr7ja5ri7ak53',
-    evmOnramp: '0xfb34b9969dd201cc9a04e604a6d40af917b6c1e8',
+    tonOffRamp: 'EQBoGLxL52YDV1OwcaDLcNHyGVOxtcHQDxFb0WqVUQeyRHBd',
+    tonRouter: 'EQDWS-oJCjyrf-6c1wF5eGP7b2qNWn7wUqS3dlNgb_YzKNHG',
+    tonOnRamp: 'EQC-GtbjW4hz_gXOiBOxT0_Jj-EYkI_zjQ-H8VyYHH9fbSd6',
+    evmOnramp: '0xa36871bde0f98b84066405462e4a9709fb71c905',
   }
 
   // TON testnet endpoint (v2 API for TonClient)
@@ -125,8 +125,10 @@ describe.skip('TON index integration tests', () => {
 
       // Verify the known offRamp is in the list
       const expectedOffRamp = Address.parse(ADDRESSES_TO_ASSERT.tonOffRamp).toRawString()
-      const found = offRamps.some((addr) => Address.parse(addr).toRawString() === expectedOffRamp)
-      assert.ok(found, 'Should include the known OffRamp address')
+      assert.ok(
+        offRamps.includes(expectedOffRamp),
+        `Should include the known OffRamp address: got=[${offRamps.join(', ')}] expected=${expectedOffRamp}`,
+      )
     })
     it('TONChain.getOnRampForRouter should return onRamp for destination chain', async () => {
       const onRamp = await tonChain.getOnRampForRouter(

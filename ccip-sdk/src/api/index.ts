@@ -432,7 +432,6 @@ export class CCIPAPIClient {
       hash: raw.sendTransactionHash,
       timestamp: sendTimestamp,
       from: raw.origin,
-      logs: [log],
     }
 
     // Note: We use type assertions for partial nested objects since Partial<CCIPRequest>
