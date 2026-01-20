@@ -1,7 +1,7 @@
 import type { CCIPRequest, MessageStatus, NetworkInfo } from '../types.ts'
 
 /**
- * Response from GET /v1/lanes/latency endpoint.
+ * Response from GET /v2/lanes/latency endpoint.
  * Returns only the latency value - caller already knows source/dest chains.
  */
 export type LaneLatencyResponse = {
@@ -41,7 +41,7 @@ export type APIErrorResponse = {
 }
 
 // ============================================================================
-// GET /v1/messages/{messageId} types
+// GET /v2/messages/{messageId} types
 // ============================================================================
 
 /** Network info from API response */
@@ -96,7 +96,7 @@ export type RawFees = {
   fixedFeesDetails: RawFixedFeesDetails
 }
 
-/** Raw API response from GET /v1/messages/:messageId */
+/** Raw API response from GET /v2/messages/:messageId */
 export type RawMessageResponse = {
   messageId: string
   sender: string

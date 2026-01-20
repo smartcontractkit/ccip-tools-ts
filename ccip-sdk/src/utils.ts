@@ -12,6 +12,7 @@ import {
   toBigInt,
 } from 'ethers'
 import { memoize } from 'micro-memoize'
+import yaml from 'yaml'
 
 import type { Chain, ChainStatic } from './chain.ts'
 import {
@@ -218,6 +219,16 @@ export function bigIntReviver(_key: string, value: unknown): unknown {
     return BigInt(value)
   }
   return value
+}
+
+/**
+ * Parses JSON text with BigInt support for large integers.
+ * Uses yaml parser which handles integers as BigInt when they exceed safe integer range.
+ * @param text - JSON string to parse
+ * @returns Parsed object with large integers as BigInt
+ */
+export function parseJson<T = unknown>(text: string): T {
+  return yaml.parse(text, { intAsBigInt: true }) as T
 }
 
 /**

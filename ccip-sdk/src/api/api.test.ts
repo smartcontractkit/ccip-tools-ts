@@ -40,11 +40,15 @@ describe('CCIPAPIClient', () => {
   }
 
   const mockedFetchJson = mock.fn(() => Promise.resolve(mockResponse))
-  const mockedFetch = mock.fn(() => Promise.resolve({ ok: true, json: mockedFetchJson }))
+  const mockedFetchText = mock.fn(() => Promise.resolve(JSON.stringify(mockResponse)))
+  const mockedFetch = mock.fn(() =>
+    Promise.resolve({ ok: true, json: mockedFetchJson, text: mockedFetchText }),
+  )
 
   beforeEach(() => {
     mockedFetch.mock.resetCalls()
     mockedFetchJson.mock.resetCalls()
+    mockedFetchText.mock.resetCalls()
     globalThis.fetch = mockedFetch as any
   })
 
@@ -52,6 +56,7 @@ describe('CCIPAPIClient', () => {
     globalThis.fetch = origFetch
     mockedFetch.mock.restore()
     mockedFetchJson.mock.restore()
+    mockedFetchText.mock.restore()
   })
 
   describe('constructor', () => {
@@ -67,7 +72,10 @@ describe('CCIPAPIClient', () => {
 
     it('should use provided fetch function', async () => {
       const customFetch = mock.fn(() =>
-        Promise.resolve({ ok: true, json: () => Promise.resolve(mockResponse) }),
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(mockResponse)),
+        }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
 
@@ -120,7 +128,7 @@ describe('CCIPAPIClient', () => {
       const result = await client.getLaneLatency(1n, 2n)
 
       assert.deepEqual(Object.keys(result), ['totalMs'])
-      assert.equal(result.totalMs, 1147000)
+      assert.equal(result.totalMs, 1147000n)
     })
 
     it('should log raw response via debug', async () => {
@@ -144,7 +152,7 @@ describe('CCIPAPIClient', () => {
           ok: false,
           status: HttpStatus.NOT_FOUND,
           statusText: 'Not Found',
-          json: () => Promise.resolve(errorResponse),
+          text: () => Promise.resolve(JSON.stringify(errorResponse)),
         })) as unknown as typeof fetch
 
       const client = new CCIPAPIClient()
@@ -165,7 +173,7 @@ describe('CCIPAPIClient', () => {
           ok: false,
           status: HttpStatus.BAD_REQUEST,
           statusText: 'Bad Request',
-          json: () => Promise.resolve(errorResponse),
+          text: () => Promise.resolve(JSON.stringify(errorResponse)),
         })) as unknown as typeof fetch
 
       const client = new CCIPAPIClient()
@@ -183,7 +191,7 @@ describe('CCIPAPIClient', () => {
           ok: false,
           status: HttpStatus.INTERNAL_SERVER_ERROR,
           statusText: 'Internal Server Error',
-          json: () => Promise.resolve(errorResponse),
+          text: () => Promise.resolve(JSON.stringify(errorResponse)),
         })) as unknown as typeof fetch
 
       const client = new CCIPAPIClient()
@@ -203,7 +211,7 @@ describe('CCIPAPIClient', () => {
           ok: false,
           status: HttpStatus.NOT_FOUND,
           statusText: 'Not Found',
-          json: () => Promise.resolve(errorResponse),
+          text: () => Promise.resolve(JSON.stringify(errorResponse)),
         })) as unknown as typeof fetch
 
       const client = new CCIPAPIClient()
@@ -222,7 +230,7 @@ describe('CCIPAPIClient', () => {
           ok: false,
           status: HttpStatus.SERVICE_UNAVAILABLE,
           statusText: 'Service Unavailable',
-          json: () => Promise.reject(new Error('Not JSON')),
+          text: () => Promise.resolve('Not JSON'),
         })) as unknown as typeof fetch
 
       const client = new CCIPAPIClient()
@@ -245,7 +253,7 @@ describe('CCIPAPIClient', () => {
           ok: false,
           status: HttpStatus.BAD_REQUEST,
           statusText: 'Bad Request',
-          json: () => Promise.resolve(errorResponse),
+          text: () => Promise.resolve(JSON.stringify(errorResponse)),
         })) as unknown as typeof fetch
 
       const client = new CCIPAPIClient()
@@ -312,7 +320,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(mockMessageResponse),
+          text: () => Promise.resolve(JSON.stringify(mockMessageResponse)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -327,7 +335,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(mockMessageResponse),
+          text: () => Promise.resolve(JSON.stringify(mockMessageResponse)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -359,8 +367,8 @@ describe('CCIPAPIClient', () => {
       // Status and extras
       assert.equal(result.status, 'SUCCESS')
       assert.equal(result.readyForManualExecution, false)
-      assert.equal(result.deliveryTime, 900000)
-      assert.equal(result.finality, 0)
+      assert.equal(result.deliveryTime, 900000n)
+      assert.equal(result.finality, 0n)
 
       // Network info - uses SDK's networkInfo() which has canonical names
       assert.equal(result.sourceNetworkInfo.name, 'ethereum-mainnet')
@@ -375,7 +383,7 @@ describe('CCIPAPIClient', () => {
           ok: false,
           status: HttpStatus.NOT_FOUND,
           statusText: 'Not Found',
-          json: () => Promise.resolve(errorResponse),
+          text: () => Promise.resolve(JSON.stringify(errorResponse)),
         })) as unknown as typeof fetch
 
       const client = new CCIPAPIClient()
@@ -432,7 +440,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(minimalResponse),
+          text: () => Promise.resolve(JSON.stringify(minimalResponse)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -461,7 +469,7 @@ describe('CCIPAPIClient', () => {
         const customFetch = mock.fn(() =>
           Promise.resolve({
             ok: true,
-            json: () => Promise.resolve(response),
+            text: () => Promise.resolve(JSON.stringify(response)),
           }),
         )
         const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -478,7 +486,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(response),
+          text: () => Promise.resolve(JSON.stringify(response)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -496,7 +504,8 @@ describe('CCIPAPIClient', () => {
           ok: false,
           status: HttpStatus.INTERNAL_SERVER_ERROR,
           statusText: 'Internal Server Error',
-          json: () => Promise.resolve({ error: 'INTERNAL_SERVER_ERROR', message: 'Error' }),
+          text: () =>
+            Promise.resolve(JSON.stringify({ error: 'INTERNAL_SERVER_ERROR', message: 'Error' })),
         })) as unknown as typeof fetch
 
       const client = new CCIPAPIClient()
@@ -513,7 +522,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(mockMessageResponse),
+          text: () => Promise.resolve(JSON.stringify(mockMessageResponse)),
         }),
       )
       const debugFn = mock.fn()
@@ -540,7 +549,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(response),
+          text: () => Promise.resolve(JSON.stringify(response)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -570,7 +579,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(response),
+          text: () => Promise.resolve(JSON.stringify(response)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -611,7 +620,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(response),
+          text: () => Promise.resolve(JSON.stringify(response)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -659,7 +668,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(response),
+          text: () => Promise.resolve(JSON.stringify(response)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -676,7 +685,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(mockMessageResponse),
+          text: () => Promise.resolve(JSON.stringify(mockMessageResponse)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -707,7 +716,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(response),
+          text: () => Promise.resolve(JSON.stringify(response)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -727,7 +736,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(response),
+          text: () => Promise.resolve(JSON.stringify(response)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -747,7 +756,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(response),
+          text: () => Promise.resolve(JSON.stringify(response)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -795,7 +804,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(mockMessagesResponse),
+          text: () => Promise.resolve(JSON.stringify(mockMessagesResponse)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -812,7 +821,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(mockMessagesResponse),
+          text: () => Promise.resolve(JSON.stringify(mockMessagesResponse)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -838,7 +847,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(multiResponse),
+          text: () => Promise.resolve(JSON.stringify(multiResponse)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -859,7 +868,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(emptyResponse),
+          text: () => Promise.resolve(JSON.stringify(emptyResponse)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -883,7 +892,7 @@ describe('CCIPAPIClient', () => {
           ok: false,
           status: HttpStatus.NOT_FOUND,
           statusText: 'Not Found',
-          json: () => Promise.resolve(errorResponse),
+          text: () => Promise.resolve(JSON.stringify(errorResponse)),
         })) as unknown as typeof fetch
 
       const client = new CCIPAPIClient()
@@ -906,7 +915,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(mockMessagesResponse),
+          text: () => Promise.resolve(JSON.stringify(mockMessagesResponse)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -925,7 +934,8 @@ describe('CCIPAPIClient', () => {
           ok: false,
           status: HttpStatus.INTERNAL_SERVER_ERROR,
           statusText: 'Internal Server Error',
-          json: () => Promise.resolve({ error: 'INTERNAL_ERROR', message: 'Server error' }),
+          text: () =>
+            Promise.resolve(JSON.stringify({ error: 'INTERNAL_ERROR', message: 'Server error' })),
         })) as unknown as typeof fetch
 
       const client = new CCIPAPIClient()
@@ -942,7 +952,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(mockMessagesResponse),
+          text: () => Promise.resolve(JSON.stringify(mockMessagesResponse)),
         }),
       )
       const debugFn = mock.fn()
@@ -969,7 +979,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve(paginatedResponse),
+          text: () => Promise.resolve(JSON.stringify(paginatedResponse)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })

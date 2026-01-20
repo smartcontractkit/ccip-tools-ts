@@ -1,6 +1,5 @@
 import { isBytesLike, toBigInt } from 'ethers'
 import type { PickDeep } from 'type-fest'
-import yaml from 'yaml'
 
 import { type ChainStatic, type LogFilter, Chain } from './chain.ts'
 import {
@@ -25,7 +24,13 @@ import {
   type MessageInput,
   ChainFamily,
 } from './types.ts'
-import { convertKeysToCamelCase, decodeAddress, leToBigInt, networkInfo } from './utils.ts'
+import {
+  convertKeysToCamelCase,
+  decodeAddress,
+  leToBigInt,
+  networkInfo,
+  parseJson,
+} from './utils.ts'
 
 function decodeJsonMessage(data: Record<string, unknown> | undefined) {
   if (!data || typeof data != 'object') throw new CCIPMessageInvalidError(data)
@@ -94,8 +99,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
     (typeof data === 'string' && data.startsWith('{')) ||
     (typeof data === 'object' && !isBytesLike(data))
   ) {
-    if (typeof data === 'string')
-      data = yaml.parse(data, { intAsBigInt: true }) as Record<string, unknown>
+    if (typeof data === 'string') data = parseJson<Record<string, unknown>>(data)
     return decodeJsonMessage(data)
   }
 

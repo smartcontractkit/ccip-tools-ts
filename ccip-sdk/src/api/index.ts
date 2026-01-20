@@ -11,7 +11,7 @@ import {
 import type { EVMExtraArgsV2, SVMExtraArgsV1 } from '../extra-args.ts'
 import { HttpStatus } from '../http-status.ts'
 import { type Logger, type MessageStatus, type WithLogger, CCIPVersion } from '../types.ts'
-import { networkInfo } from '../utils.ts'
+import { networkInfo, parseJson } from '../utils.ts'
 import type {
   APICCIPRequest,
   APIErrorResponse,
@@ -187,7 +187,7 @@ export class CCIPAPIClient {
       // Try to parse structured error response from API
       let apiError: APIErrorResponse | undefined
       try {
-        apiError = (await response.json()) as APIErrorResponse
+        apiError = parseJson<APIErrorResponse>(await response.text())
       } catch {
         // Response body not JSON, use HTTP status only
       }
@@ -215,7 +215,7 @@ export class CCIPAPIClient {
       })
     }
 
-    const raw = (await response.json()) as RawLaneLatencyResponse
+    const raw = parseJson<RawLaneLatencyResponse>(await response.text())
 
     // Log full raw response for debugging
     this.logger.debug('getLaneLatency raw response:', raw)
@@ -268,7 +268,7 @@ export class CCIPAPIClient {
       // Try to parse structured error response from API
       let apiError: APIErrorResponse | undefined
       try {
-        apiError = (await response.json()) as APIErrorResponse
+        apiError = parseJson<APIErrorResponse>(await response.text())
       } catch {
         // Response body not JSON, use HTTP status only
       }
@@ -296,7 +296,7 @@ export class CCIPAPIClient {
       })
     }
 
-    const raw = (await response.json()) as RawMessageResponse
+    const raw = parseJson<RawMessageResponse>(await response.text())
 
     this.logger.debug('getMessageById raw response:', raw)
 
@@ -335,7 +335,7 @@ export class CCIPAPIClient {
       // Try to parse structured error response from API
       let apiError: APIErrorResponse | undefined
       try {
-        apiError = (await response.json()) as APIErrorResponse
+        apiError = parseJson<APIErrorResponse>(await response.text())
       } catch {
         // Response body not JSON, use HTTP status only
       }
@@ -363,7 +363,7 @@ export class CCIPAPIClient {
       })
     }
 
-    const raw = (await response.json()) as RawMessagesResponse
+    const raw = parseJson<RawMessagesResponse>(await response.text())
 
     this.logger.debug('getMessageIdsInTx raw response:', raw)
 
@@ -432,6 +432,7 @@ export class CCIPAPIClient {
       hash: raw.sendTransactionHash,
       timestamp: sendTimestamp,
       from: raw.origin,
+      logs: [log],
     }
 
     // Note: We use type assertions for partial nested objects since Partial<CCIPRequest>
