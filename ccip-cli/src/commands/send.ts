@@ -316,6 +316,7 @@ async function sendMessage(
     tx: request.tx.hash,
     id: undefined,
     source: undefined,
+    onramp: undefined,
     'log-index': undefined,
     logIndex: undefined,
     'api-url': undefined,

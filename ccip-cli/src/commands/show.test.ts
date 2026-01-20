@@ -265,6 +265,27 @@ describe('e2e command show EVM', () => {
       assert.match(result.stdout, new RegExp(SENDER, 'i'))
       assert.match(result.stdout, new RegExp(RECEIVER, 'i'))
     })
+
+    it('should query by message ID with --onramp option', { timeout: 120000 }, async () => {
+      // Use --id with --source and --onramp to narrow the query
+      const args = buildShowIdArgs(
+        MESSAGE_ID,
+        '--no-api',
+        '--source',
+        'ethereum-testnet-sepolia',
+        '--onramp',
+        ONRAMP,
+      )
+      const result = await spawnCLI(args, 120000)
+
+      assert.equal(result.exitCode, 0, `stdout: ${result.stdout}\nstderr: ${result.stderr}`)
+
+      // Should contain the message information
+      assert.match(result.stdout, new RegExp(MESSAGE_ID, 'i'))
+      assert.match(result.stdout, new RegExp(SENDER, 'i'))
+      assert.match(result.stdout, new RegExp(RECEIVER, 'i'))
+      assert.match(result.stdout, new RegExp(ONRAMP, 'i'))
+    })
   })
 
   describe('error handling', () => {

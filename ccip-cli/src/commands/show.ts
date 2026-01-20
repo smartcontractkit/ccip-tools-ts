@@ -61,9 +61,13 @@ export const builder = (yargs: Argv) =>
       },
       source: {
         type: 'string',
-        describe:
-          'Source network for RPC fallback when using --id (e.g., ethereum-mainnet); format: [onRamp@]sourceNetwork',
+        describe: 'Source network for RPC fallback when using --id (e.g., ethereum-mainnet)',
         implies: 'id',
+      },
+      onramp: {
+        type: 'string',
+        describe: 'OnRamp contract address on source network (optional, for narrower query)',
+        implies: 'source',
       },
       'log-index': {
         type: 'number',
@@ -142,22 +146,14 @@ async function retrieveMessageDataFromId(
     throw apiError ?? new CCIPMessageRetrievalError(messageId, apiError, undefined)
   }
 
-  // Parse source - format: [onRamp@]sourceNetwork
-  let sourceNetworkName: string
-  let onRamp: string | undefined
-  if (argv.source.includes('@')) {
-    ;[onRamp, sourceNetworkName] = argv.source.split('@') as [string, string]
-  } else {
-    sourceNetworkName = argv.source
-  }
-  const sourceNetwork = networkInfo(sourceNetworkName)
+  const sourceNetwork = networkInfo(argv.source)
 
   try {
     const getChain = fetchChainsFromRpcs(ctx, argv)
     const source = await getChain(sourceNetwork.chainId)
     if (!source.getMessageById)
       throw new CCIPNotImplementedError(`getMessageById for ${source.constructor.name}`)
-    const request = await source.getMessageById(messageId, onRamp, argv)
+    const request = await source.getMessageById(messageId, argv.onramp, argv)
     return [request]
   } catch (err) {
     const rpcError = CCIPError.from(err)
