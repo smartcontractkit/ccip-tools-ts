@@ -119,9 +119,9 @@ export type RawMessageResponse = {
   nonce?: string | null
   routerAddress?: string | null
   version?: string | null
-  receiptTransactionHash?: string | null
-  receiptTimestamp?: string | null
-  deliveryTime?: bigint | null
+  receiptTransactionHash?: string
+  receiptTimestamp?: string
+  deliveryTime?: bigint
   data?: string | null
 }
 

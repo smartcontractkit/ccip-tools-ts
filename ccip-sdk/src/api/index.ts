@@ -6,20 +6,27 @@ import {
   CCIPTimeoutError,
   CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
-import type { EVMExtraArgsV2, SVMExtraArgsV1 } from '../extra-args.ts'
 import { HttpStatus } from '../http-status.ts'
-import { type Logger, type MessageStatus, type WithLogger, CCIPVersion } from '../types.ts'
-import { networkInfo, parseJson } from '../utils.ts'
+import { decodeMessage } from '../requests.ts'
+import {
+  type CCIPMessage,
+  type ChainTransaction,
+  type Log_,
+  type Logger,
+  type MessageStatus,
+  type NetworkInfo,
+  type WithLogger,
+  CCIPVersion,
+} from '../types.ts'
+import { isTestnet, parseJson } from '../utils.ts'
 import type {
   APICCIPRequest,
   APIErrorResponse,
   LaneLatencyResponse,
-  RawEVMExtraArgs,
   RawLaneLatencyResponse,
   RawMessageResponse,
   RawMessagesResponse,
-  RawSVMExtraArgs,
-  RawTokenAmount,
+  RawNetworkInfo,
 } from './types.ts'
 
 export type {
@@ -43,6 +50,17 @@ export type CCIPAPIClientContext = WithLogger & {
   fetch?: typeof fetch
   /** Request timeout in milliseconds (defaults to 30000ms) */
   timeoutMs?: number
+}
+
+const ensureNetworkInfo = (o: RawNetworkInfo): NetworkInfo => {
+  Object.defineProperty(o, 'isTestnet', {
+    get(this: RawNetworkInfo) {
+      return isTestnet(this.name)
+    },
+    configurable: true,
+    enumerable: true,
+  })
+  return o as unknown as NetworkInfo
 }
 
 /**
@@ -294,10 +312,8 @@ export class CCIPAPIClient {
       })
     }
 
-    const raw = parseJson<RawMessageResponse>(await response.text())
-
+    const raw = await response.text()
     this.logger.debug('getMessageById raw response:', raw)
-
     return this._transformMessageResponse(raw)
   }
 
@@ -383,127 +399,87 @@ export class CCIPAPIClient {
    * Populates all derivable CCIPRequest fields from API data.
    * @internal
    */
-  private _transformMessageResponse(raw: RawMessageResponse): APICCIPRequest {
-    const sendDate = new Date(raw.sendTimestamp)
-    const sendTimestamp = isNaN(sendDate.getTime()) ? 0 : Math.floor(sendDate.getTime() / 1000)
+  private _transformMessageResponse(text: string): APICCIPRequest {
+    // Build message with extraArgs spread and tokenAmounts included
+    const raw = decodeMessage(text) as CCIPMessage & Omit<RawMessageResponse, keyof CCIPMessage>
 
-    const receiptDate = raw.receiptTimestamp ? new Date(raw.receiptTimestamp) : undefined
-    const receiptTimestamp =
+    const {
+      sourceNetworkInfo,
+      destNetworkInfo,
+      status,
+      origin,
+      onramp,
+      version,
+      readyForManualExecution,
+      finality,
+      sendTransactionHash,
+      receiptTransactionHash,
+      sendTimestamp,
+      receiptTimestamp,
+      deliveryTime,
+      ...message
+    } = raw
+
+    const sendDate = new Date(sendTimestamp)
+    const sendTimestamp_ = isNaN(sendDate.getTime()) ? 0 : Math.floor(sendDate.getTime() / 1000)
+
+    const receiptDate = receiptTimestamp && new Date(receiptTimestamp)
+    const receiptTimestamp_ =
       receiptDate && !isNaN(receiptDate.getTime())
         ? Math.floor(receiptDate.getTime() / 1000)
         : undefined
 
     // Build lane - all fields available from API
+    const source = ensureNetworkInfo(sourceNetworkInfo)
+    const dest = ensureNetworkInfo(destNetworkInfo)
     const lane = {
-      sourceChainSelector: BigInt(raw.sourceNetworkInfo.chainSelector),
-      destChainSelector: BigInt(raw.destNetworkInfo.chainSelector),
-      onRamp: raw.onramp,
-      version: (raw.version?.replace(/-dev$/, '') ?? CCIPVersion.V1_6) as CCIPVersion,
-    }
-
-    // Build message with extraArgs spread and tokenAmounts included
-    const message = {
-      messageId: raw.messageId,
-      sourceChainSelector: lane.sourceChainSelector,
-      destChainSelector: lane.destChainSelector,
-      sender: raw.sender,
-      receiver: raw.receiver,
-      data: raw.data ?? '0x',
-      sequenceNumber: BigInt(raw.sequenceNumber),
-      nonce: raw.nonce ? BigInt(raw.nonce) : 0n,
-      feeToken: raw.fees.fixedFeesDetails.tokenAddress,
-      feeTokenAmount: BigInt(raw.fees.fixedFeesDetails.totalAmount),
-      tokenAmounts: transformTokenAmounts(raw.tokenAmounts),
-      ...transformExtraArgs(raw.extraArgs),
+      source,
+      sourceChainSelector: source.chainSelector,
+      dest,
+      destChainSelector: dest.chainSelector,
+      onRamp: onramp,
+      version: (version?.replace(/-dev$/, '') ?? CCIPVersion.V1_6) as CCIPVersion,
     }
 
     // Build log and address - only transactionHash and address are available from API
     // (topics, index, blockNumber, data not available)
-    const log = {
-      transactionHash: raw.sendTransactionHash,
+    const log: Log_ = {
+      transactionHash: sendTransactionHash,
       address: raw.onramp,
+      data: { message: parseJson(text) },
+      topics: [lane.version < CCIPVersion.V1_6 ? 'CCIPSendRequested' : 'CCIPMessageSent'],
+      index: 0, // TODO
+      blockNumber: 0, // TODO
     }
 
     // Build partial tx - only hash, timestamp, from are available from API
     // (blockNumber, logs not available)
-    const tx = {
-      hash: raw.sendTransactionHash,
-      timestamp: sendTimestamp,
-      from: raw.origin,
+    const tx: ChainTransaction = {
+      hash: log.transactionHash,
+      timestamp: sendTimestamp_,
+      from: origin,
+      logs: [log],
+      blockNumber: log.blockNumber, // TODO
     }
+    log.tx = tx
 
     // Note: We use type assertions for partial nested objects since Partial<CCIPRequest>
     // requires complete types when provided. These are intentionally partial.
     return {
       // CCIPRequest fields (Partial) - cast partial objects
       lane,
-      message: message as unknown as APICCIPRequest['message'],
-      log: log as APICCIPRequest['log'],
-      tx: tx as APICCIPRequest['tx'],
+      message,
+      log,
+      tx,
       // API-specific fields
-      status: raw.status as MessageStatus,
-      readyForManualExecution: raw.readyForManualExecution,
-      finality: raw.finality,
-      receiptTransactionHash: raw.receiptTransactionHash ?? undefined,
-      receiptTimestamp,
-      deliveryTime: raw.deliveryTime ?? undefined,
-      sourceNetworkInfo: networkInfo(BigInt(raw.sourceNetworkInfo.chainSelector)),
-      destNetworkInfo: networkInfo(BigInt(raw.destNetworkInfo.chainSelector)),
+      status: status as MessageStatus,
+      readyForManualExecution,
+      finality,
+      receiptTransactionHash,
+      receiptTimestamp: receiptTimestamp_,
+      deliveryTime,
+      sourceNetworkInfo: ensureNetworkInfo(sourceNetworkInfo),
+      destNetworkInfo: ensureNetworkInfo(destNetworkInfo),
     }
   }
-}
-
-/**
- * Type guard to distinguish SVM extra args from EVM extra args.
- * @param args - Raw extra args from API response
- * @returns true if args is RawSVMExtraArgs
- */
-function isRawSVMExtraArgs(args: RawEVMExtraArgs | RawSVMExtraArgs): args is RawSVMExtraArgs {
-  return 'computeUnits' in args
-}
-
-/**
- * Transforms raw API extra args to SDK extra args types.
- * @param raw - Raw extra args from API response
- * @returns EVMExtraArgsV2 or SVMExtraArgsV1
- */
-function transformExtraArgs(
-  raw: RawEVMExtraArgs | RawSVMExtraArgs,
-): EVMExtraArgsV2 | SVMExtraArgsV1 {
-  if (isRawSVMExtraArgs(raw)) {
-    return {
-      computeUnits: raw.computeUnits, // already bigint from yaml parser
-      accountIsWritableBitmap: BigInt(raw.accountIsWritableBitmap),
-      allowOutOfOrderExecution: raw.allowOutOfOrderExecution,
-      tokenReceiver: raw.tokenReceiver,
-      accounts: raw.accounts,
-    }
-  }
-  return {
-    gasLimit: BigInt(raw.gasLimit),
-    allowOutOfOrderExecution: raw.allowOutOfOrderExecution,
-  }
-}
-
-/**
- * Transforms raw API token amounts to SDK token amounts format.
- * @param raw - Raw token amounts from API response
- * @returns Array of token amounts with bigint amounts and SourceTokenData fields
- */
-function transformTokenAmounts(raw: RawTokenAmount[]): {
-  token: string
-  amount: bigint
-  sourcePoolAddress: string
-  destTokenAddress: string
-  extraData: string
-  destGasAmount: bigint
-}[] {
-  return raw.map((ta) => ({
-    token: ta.sourceTokenAddress,
-    amount: BigInt(ta.amount),
-    sourcePoolAddress: ta.sourcePoolAddress,
-    destTokenAddress: ta.destTokenAddress,
-    extraData: ta.extraData ?? '0x',
-    destGasAmount: ta.destGasAmount ? BigInt(ta.destGasAmount) : 0n,
-  }))
 }

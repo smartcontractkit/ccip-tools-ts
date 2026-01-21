@@ -27,6 +27,7 @@ import {
 import {
   convertKeysToCamelCase,
   decodeAddress,
+  getDataBytes,
   leToBigInt,
   networkInfo,
   parseJson,
@@ -44,49 +45,80 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
     destChainSelector?: string
     source_chain_selector?: string
     sourceChainSelector?: string
-    extraArgs?: string
+    extraArgs?: string | Record<string, unknown>
     tokenAmounts: {
       destExecData: string
       destGasAmount?: bigint
+      token?: string
+      sourceTokenAddress?: string
     }[]
+    feeToken?: string
+    feeTokenAmount?: bigint
+    fees?: {
+      fixedFeesDetails: {
+        tokenAddress: string
+        totalAmount: bigint
+      }
+    }
+    sourceNetworkInfo?: { chainSelector: string }
+    destNetworkInfo?: { chainSelector: string }
   }
-  const sourceChainSelector = data_.source_chain_selector ?? data_.sourceChainSelector
+  const sourceChainSelector =
+    data_.source_chain_selector ??
+    data_.sourceChainSelector ??
+    data_.sourceNetworkInfo?.chainSelector
   if (!sourceChainSelector) throw new CCIPMessageInvalidError(data)
-  const sourceNetwork = networkInfo(sourceChainSelector)
+  data_.sourceChainSelector ??= sourceChainSelector
+  const sourceFamily = networkInfo(sourceChainSelector).family
 
-  const destChainSelector = data_.dest_chain_selector ?? data_.destChainSelector
-  if (destChainSelector) {
-    const destFamily = networkInfo(destChainSelector).family
-    data_ = convertKeysToCamelCase(data_, (v, k) =>
-      typeof v === 'string' && v.match(/^\d+$/)
-        ? BigInt(v)
-        : k === 'receiver' || k === 'destTokenAddress' || k === 'tokenReceiver'
-          ? decodeAddress(v as string, destFamily)
+  const destChainSelector =
+    data_.dest_chain_selector ?? data_.destChainSelector ?? data_.destNetworkInfo?.chainSelector
+  data_.destChainSelector ??= destChainSelector
+  const destFamily = destChainSelector ? networkInfo(destChainSelector).family : ChainFamily.EVM
+  // transform type, normalize keys case, source/dest addresses, and ensure known bigints
+  data_ = convertKeysToCamelCase(data_, (v, k) =>
+    k?.match(/(selector|amount|nonce|number|limit|bitmap)$/i)
+      ? BigInt(v as string | number | bigint)
+      : typeof v === 'string' && k?.match(/(^dest)|(receiver|offramp|accounts)/i)
+        ? decodeAddress(v, destFamily)
+        : typeof v === 'string' &&
+            k?.match(/(source|sender|origin|onramp|(feetoken$)|(^tokenaddress$))/i)
+          ? decodeAddress(v, sourceFamily)
           : v,
-    ) as typeof data_
-  }
+  ) as typeof data_
 
   for (const ta of data_.tokenAmounts) {
     if (ta.destGasAmount != null || !ta.destExecData) continue
-    switch (sourceNetwork.family) {
+    switch (sourceFamily) {
       // EVM & Solana encode destExecData as big-endian
       case ChainFamily.EVM:
       case ChainFamily.Solana:
-        ta.destGasAmount = toBigInt(ta.destExecData)
+        ta.destGasAmount = toBigInt(getDataBytes(ta.destExecData))
         break
       // Aptos & Sui, as little-endian
       default:
-        ta.destGasAmount = leToBigInt(ta.destExecData)
+        ta.destGasAmount = leToBigInt(getDataBytes(ta.destExecData))
     }
+    if (ta.token && !ta.sourceTokenAddress) ta.sourceTokenAddress = ta.token
+    if (!ta.token && ta.sourceTokenAddress) ta.token = ta.sourceTokenAddress
   }
 
-  if (data_.extraArgs) {
-    const extraArgs = decodeExtraArgs(data_.extraArgs ?? '', sourceNetwork.family)
+  if (data_.extraArgs && typeof data_.extraArgs === 'string') {
+    const extraArgs = decodeExtraArgs(data_.extraArgs, sourceFamily)
     if (extraArgs) {
       const { _tag, ...rest } = extraArgs
       Object.assign(data_, rest)
     }
+  } else if (data_.extraArgs) {
+    Object.assign(data_, data_.extraArgs)
+    delete data_.extraArgs
   }
+
+  if (data_.fees && !data_.feeToken) {
+    data_.feeToken = data_.fees.fixedFeesDetails.tokenAddress
+    data_.feeTokenAmount = data_.fees.fixedFeesDetails.totalAmount
+  }
+
   return data_ as unknown as CCIPMessage
 }
 
