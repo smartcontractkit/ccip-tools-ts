@@ -60,11 +60,11 @@ export type MergeArrayElements<T, U> = {
  * Enumeration of supported blockchain families.
  */
 export const ChainFamily = {
-  EVM: 'evm',
-  Solana: 'solana',
-  Aptos: 'aptos',
-  Sui: 'sui',
-  TON: 'ton',
+  EVM: 'EVM',
+  Solana: 'SVM',
+  Aptos: 'APTOS',
+  Sui: 'SUI',
+  TON: 'TON',
 } as const
 /** Type representing one of the supported chain families. */
 export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
