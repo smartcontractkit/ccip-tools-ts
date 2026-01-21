@@ -11,7 +11,7 @@ import { Format } from './commands/index.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.94.0-e84b0ce'
+const VERSION = '0.94.0-a0846af'
 // generate:end
 
 const globalOpts = {
@@ -42,10 +42,10 @@ const globalOpts = {
     type: 'number',
     describe: 'getLogs page/range size',
   },
-  api: {
+  'no-api': {
     type: 'boolean',
-    describe: 'Enable CCIP API integration (disable with --no-api for full decentralization mode)',
-    default: true,
+    describe: 'Disable CCIP API integration (full decentralization mode)',
+    default: false,
   },
 } as const
 

@@ -145,7 +145,7 @@ describe('lane-latency command', () => {
           source: '5009297550715157269',
           dest: '4949039107694359620',
           format: Format.json,
-          api: false, // Simulate --no-api flag
+          noApi: true, // Simulate --no-api flag
         } as Parameters<typeof getLaneLatencyCmd>[1]),
       (err: unknown) =>
         err instanceof CCIPApiClientNotAvailableError &&
@@ -157,32 +157,32 @@ describe('lane-latency command', () => {
     assert.equal(mockedFetch.mock.calls.length, 0)
   })
 
-  it('should work normally when --api flag is true (default)', async () => {
+  it('should work normally when --no-api flag is false', async () => {
     await getLaneLatencyCmd(createCtx(), {
       source: '5009297550715157269',
       dest: '4949039107694359620',
       format: Format.json,
-      api: true, // Explicit true
+      noApi: false, // Explicit false
     } as Parameters<typeof getLaneLatencyCmd>[1])
 
     // Verify fetch was called (API was used)
     assert.equal(mockedFetch.mock.calls.length, 1)
   })
 
-  describe('CCIP_API environment variable integration', () => {
-    it('should respect CCIP_API=false environment variable', async () => {
-      const origEnv = process.env.CCIP_API
+  describe('CCIP_NO_API environment variable integration', () => {
+    it('should respect CCIP_NO_API=true environment variable', async () => {
+      const origEnv = process.env.CCIP_NO_API
       try {
-        process.env.CCIP_API = 'false'
+        process.env.CCIP_NO_API = 'true'
 
-        // Simulate yargs .env('CCIP') behavior - yargs converts CCIP_API to api
+        // Simulate yargs .env('CCIP') behavior - yargs converts CCIP_NO_API to noApi
         await assert.rejects(
           async () =>
             await getLaneLatencyCmd(createCtx(), {
               source: '5009297550715157269',
               dest: '4949039107694359620',
               format: Format.json,
-              api: process.env.CCIP_API === 'false' ? false : true,
+              noApi: process.env.CCIP_NO_API === 'true',
             } as Parameters<typeof getLaneLatencyCmd>[1]),
           (err: unknown) => err instanceof CCIPApiClientNotAvailableError,
         )
@@ -191,9 +191,9 @@ describe('lane-latency command', () => {
         assert.equal(mockedFetch.mock.calls.length, 0)
       } finally {
         if (origEnv === undefined) {
-          delete process.env.CCIP_API
+          delete process.env.CCIP_NO_API
         } else {
-          process.env.CCIP_API = origEnv
+          process.env.CCIP_NO_API = origEnv
         }
       }
     })

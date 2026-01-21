@@ -80,9 +80,9 @@ The CLI tests all RPCs in parallel and uses the fastest responding endpoint for 
 
 ### API Configuration
 
-By default, the CLI uses the CCIP API for message retrieval and lane latency queries. The `show` command tries the API first and falls back to RPC if unavailable, enabling faster lookups without requiring RPC endpoints for both chains.
+By default, the CLI uses the CCIP API (api.ccip.chain.link) for enhanced functionality like lane latency queries.
 
-**Disable API access (RPC-only mode):**
+**Disable API access (full decentralization mode):**
 ```bash
 ccip-cli show 0x... --no-api
 ```
@@ -90,7 +90,7 @@ ccip-cli show 0x... --no-api
 **Environment variable:**
 ```bash
 # CCIP_ prefix maps to CLI options
-export CCIP_API=false           # Same as --no-api
+export CCIP_NO_API=true         # Same as --no-api
 export CCIP_VERBOSE=true        # Same as --verbose
 export CCIP_FORMAT=json         # Same as --format=json
 ccip-cli show 0x...
@@ -145,17 +145,17 @@ ccip-cli show <tx_hash> [options]
 ```
 
 **What it does:**
-1. Retrieves the CCIP message (tries API first, falls back to RPC)
+1. Finds the CCIP message in the source transaction
 2. Shows message details (sender, receiver, data, tokens)
-3. With `--wait`: Monitors finalization, commit, and execution status on destination chain
+3. Checks if the message has been committed (included in a Merkle root) on destination chain
+4. Shows execution status (pending, success, or failed) on destination chain
 
 **Options:**
 | Option | Description |
 |--------|-------------|
 | `--log-index <n>` | Select specific message if tx contains multiple |
 | `--id-from-source <network>` | Search by messageId instead of txHash (format: `[onRamp@]sourceNetwork`) |
-| `--wait` | Wait for finalization, commit, and execution on destination chain |
-| `--no-api` | Disable API access, use RPC only |
+| `--wait` | Wait for message execution on destination chain before returning |
 
 **Example:**
 ```bash

@@ -54,11 +54,11 @@ async function collectEndpoints(
 
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: { rpcs?: string[]; rpcsFile?: string; api?: boolean },
+  argv: { rpcs?: string[]; rpcsFile?: string; noApi?: boolean },
 ): ChainGetter
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: { rpcs?: string[]; rpcsFile?: string; api?: boolean },
+  argv: { rpcs?: string[]; rpcsFile?: string; noApi?: boolean },
   txHash: string,
 ): [ChainGetter, Promise<[Chain, ChainTransaction]>]
 
@@ -67,13 +67,13 @@ export function fetchChainsFromRpcs(
  * If txHash is provided, fetches matching families first and returns [chainGetter, txPromise];
  * Otherwise, spawns racing URLs for each family asked by `getChain` getter
  * @param ctx - Context object containing destroy$ promise and logger properties
- * @param argv - Options containing rpcs (list), rpcs file and api flag
+ * @param argv - Options containing rpcs (list), rpcs file and noApi flag
  * @param txHash - Optional txHash to fetch concurrently; causes the function to return a [ChainGetter, Promise<ChainTransaction>]
  * @returns a ChainGetter (if txHash was provided), or a tuple of [ChainGetter, Promise<ChainTransaction>]
  */
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: { rpcs?: string[]; rpcsFile?: string; api?: boolean },
+  argv: { rpcs?: string[]; rpcsFile?: string; noApi?: boolean },
   txHash?: string,
 ) {
   const chains: Record<string, Promise<Chain>> = {}
@@ -103,7 +103,7 @@ export function fetchChainsFromRpcs(
       for (const url of endpoints) {
         const chain$ = C.fromUrl(url, {
           ...ctx,
-          apiClient: argv.api === false ? null : undefined,
+          apiClient: argv.noApi ? null : undefined,
         })
         chains$.push(chain$)
 
@@ -144,15 +144,13 @@ export function fetchChainsFromRpcs(
         }
       }
 
-      void Promise.race([Promise.allSettled(chains$), ctx.destroy$])
-        .finally(() => {
-          if (finished[F]) return
-          finished[F] = true
-          Object.entries(chainsCbs)
-            .filter(([name]) => networkInfo(name).family === F)
-            .forEach(([name, [_, reject]]) => reject(new CCIPRpcNotFoundError(name)))
-        })
-        .catch(() => {}) // Suppress any rejection escaping from finally callback
+      void Promise.race([Promise.allSettled(chains$), ctx.destroy$]).finally(() => {
+        if (finished[F]) return
+        finished[F] = true
+        Object.entries(chainsCbs)
+          .filter(([name]) => networkInfo(name).family === F)
+          .forEach(([name, [_, reject]]) => reject(new CCIPRpcNotFoundError(name)))
+      })
       return Promise.any(txHash ? txs$ : chains$)
     }))
 
@@ -163,11 +161,10 @@ export function fetchChainsFromRpcs(
     const c = (chains[network.name] = new Promise((resolve, reject) => {
       chainsCbs[network.name] = [resolve, reject]
     }))
-    c.finally(() => {
+    void c.finally(() => {
       delete chainsCbs[network.name] // when chain is settled, delete the callbacks
-    }).catch(() => {}) // Suppress unhandled rejection from .finally() promise
-    // loadChainFamily rejection is handled through chainsCbs callbacks, suppress unhandled rejection
-    void loadChainFamily(network.family).catch(() => {})
+    })
+    void loadChainFamily(network.family)
     return c
   }
 

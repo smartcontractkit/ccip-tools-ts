@@ -68,29 +68,12 @@ async function spawnCLI(
 }
 
 /**
- * Helper to build common CLI arguments for show command with --tx option
+ * Helper to build common CLI arguments for show command
  */
 function buildShowArgs(txHash: string, ...additionalArgs: string[]): string[] {
   return [
     'show',
-    '--tx',
     txHash,
-    '-r',
-    ...RPCS,
-    '--rpcs-file',
-    'package.json', // Disable rpcs file loading
-    ...additionalArgs,
-  ]
-}
-
-/**
- * Helper to build CLI arguments for show command with --id option
- */
-function buildShowIdArgs(messageId: string, ...additionalArgs: string[]): string[] {
-  return [
-    'show',
-    '--id',
-    messageId,
     '-r',
     ...RPCS,
     '--rpcs-file',
@@ -112,8 +95,7 @@ describe('e2e command show EVM', () => {
       'should show complete CCIP transaction details EVM to EVM',
       { timeout: 120000 },
       async () => {
-        // Use --noapi and --wait to ensure RPC path and full output with commits/receipts
-        const args = buildShowArgs(TX_HASH, '--no-api', '--wait')
+        const args = buildShowArgs(TX_HASH)
         const result = await spawnCLI(args, 120000)
 
         assert.equal(result.exitCode, 0)
@@ -156,8 +138,8 @@ describe('e2e command show EVM', () => {
         assert.match(output, /blockNumber.*47435605/)
         assert.match(output, /timestamp.*after request/)
 
-        // Receipts information (--wait shows first receipt found)
-        assert.match(output, /execution.*destination/i)
+        // Receipts information
+        assert.match(output, /Receipts.*dest/i)
 
         // First receipt - failed with TokenHandlingError
         assert.match(output, /state.*failed/i)
@@ -170,14 +152,30 @@ describe('e2e command show EVM', () => {
         )
         assert.match(output, /logIndex.*0/)
         assert.match(output, /blockNumber.*47435626/)
+
+        // Second receipt - successful
+        assert.match(output, /state.*success/i)
+        assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
+        assert.match(output, /contract.*0x01e3D835b4C4697D7F81B9d7Abc89A6E478E4a2f/i)
+        assert.match(
+          output,
+          /transactionHash.*0x3f04805d89d26666cb22fef28c1c206bfa399e3bbe7b91eeadcd8e0376a60cab/i,
+        )
+        assert.match(output, /logIndex.*4/)
+        assert.match(output, /blockNumber.*47435778/)
+
+        // Verify we have both failed and successful executions
+        const failedMatches = output.match(/failed/gi) || []
+        const successMatches = output.match(/success/gi) || []
+        assert.ok(failedMatches.length >= 1)
+        assert.ok(successMatches.length >= 1)
       },
     )
   })
 
   describe('json format', () => {
     it('should output valid JSON with all expected fields', { timeout: 120000 }, async () => {
-      // Use --noapi and --wait to ensure RPC path and full output with commits/receipts
-      const args = buildShowArgs(TX_HASH, '--format', 'json', '--no-api', '--wait')
+      const args = buildShowArgs(TX_HASH, '--format', 'json')
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0)
@@ -218,8 +216,7 @@ describe('e2e command show EVM', () => {
 
   describe('log format', () => {
     it('should output in log format with object assignments', { timeout: 120000 }, async () => {
-      // Use --noapi and --wait to ensure RPC path and full output with commits/receipts
-      const args = buildShowArgs(TX_HASH, '--format', 'log', '--no-api', '--wait')
+      const args = buildShowArgs(TX_HASH, '--format', 'log')
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0)
@@ -238,8 +235,7 @@ describe('e2e command show EVM', () => {
 
   describe('verbose flag', () => {
     it('should work with verbose flag enabled', { timeout: 120000 }, async () => {
-      // Use --noapi to ensure RPC path is used for full pretty output
-      const args = buildShowArgs(TX_HASH, '--verbose', '--no-api')
+      const args = buildShowArgs(TX_HASH, '--verbose')
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0)
@@ -249,42 +245,6 @@ describe('e2e command show EVM', () => {
       assert.match(result.stdout, /Lane/)
       assert.match(result.stdout, /Request/)
       assert.match(result.stdout, new RegExp(MESSAGE_ID, 'i'))
-    })
-  })
-
-  describe('--id option', () => {
-    it('should query by message ID with --id option', { timeout: 120000 }, async () => {
-      // Use --id to query by message ID instead of tx hash
-      const args = buildShowIdArgs(MESSAGE_ID, '--no-api', '--source', 'ethereum-testnet-sepolia')
-      const result = await spawnCLI(args, 120000)
-
-      assert.equal(result.exitCode, 0, `stdout: ${result.stdout}\nstderr: ${result.stderr}`)
-
-      // Should contain the message information
-      assert.match(result.stdout, new RegExp(MESSAGE_ID, 'i'))
-      assert.match(result.stdout, new RegExp(SENDER, 'i'))
-      assert.match(result.stdout, new RegExp(RECEIVER, 'i'))
-    })
-
-    it('should query by message ID with --onramp option', { timeout: 120000 }, async () => {
-      // Use --id with --source and --onramp to narrow the query
-      const args = buildShowIdArgs(
-        MESSAGE_ID,
-        '--no-api',
-        '--source',
-        'ethereum-testnet-sepolia',
-        '--onramp',
-        ONRAMP,
-      )
-      const result = await spawnCLI(args, 120000)
-
-      assert.equal(result.exitCode, 0, `stdout: ${result.stdout}\nstderr: ${result.stderr}`)
-
-      // Should contain the message information
-      assert.match(result.stdout, new RegExp(MESSAGE_ID, 'i'))
-      assert.match(result.stdout, new RegExp(SENDER, 'i'))
-      assert.match(result.stdout, new RegExp(RECEIVER, 'i'))
-      assert.match(result.stdout, new RegExp(ONRAMP, 'i'))
     })
   })
 
@@ -301,47 +261,15 @@ describe('e2e command show EVM', () => {
       assert.ok(result.stderr.length > 0)
     })
 
-    it('should error when neither --tx nor --id is provided', { timeout: 30000 }, async () => {
+    it('should require transaction hash argument', { timeout: 30000 }, async () => {
       const args = ['show', '-r', ...RPCS, '--rpcs-file', '.gitignore']
       const result = await spawnCLI(args, 30000)
 
       // Should exit with error code
       assert.notEqual(result.exitCode, 0)
 
-      // Should mention needing --tx or --id
-      assert.match(result.stderr, /--tx.*--id|Must provide/i)
-    })
-
-    it('should error when both --tx and --id are provided', { timeout: 30000 }, async () => {
-      const args = [
-        'show',
-        '--tx',
-        '0x25e63fa89abb77acd353edc24ed3ab5880a8d206c8229e6f61dc00d399f447b3',
-        '--id',
-        '0xdfb374fef50749b0bc86784e097ecc9547c5145ddfb8f9d96f1da3024abfcd04',
-        '-r',
-        ...RPCS,
-        '--rpcs-file',
-        '.gitignore',
-      ]
-      const result = await spawnCLI(args, 30000)
-
-      // Should exit with error code
-      assert.notEqual(result.exitCode, 0)
-
-      // Should mention mutually exclusive arguments
-      assert.match(result.stderr, /mutually exclusive/i)
-    })
-
-    it('should error with invalid message ID format', { timeout: 30000 }, async () => {
-      const args = ['show', '--id', 'invalid-id', '-r', ...RPCS, '--rpcs-file', '.gitignore']
-      const result = await spawnCLI(args, 30000)
-
-      // Should exit with error code
-      assert.notEqual(result.exitCode, 0)
-
-      // Should mention invalid format
-      assert.match(result.stderr, /Invalid message ID format/i)
+      // Should mention missing argument
+      assert.match(result.stderr, /tx-hash|required|missing/i)
     })
   })
 
@@ -357,8 +285,7 @@ describe('e2e command show EVM', () => {
       const ONRAMP = '0x23a5084Fa78104F3DF11C63Ae59fcac4f6AD9DeE'
       const OFFRAMP = '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45'
 
-      // Use --noapi and --wait to ensure RPC path and full output with commits/receipts
-      const args = buildShowArgs(TX_HASH, '--no-api', '--wait')
+      const args = buildShowArgs(TX_HASH)
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0)
@@ -401,7 +328,7 @@ describe('e2e command show EVM', () => {
       )
 
       // Receipts information
-      assert.match(output, /execution.*destination/i)
+      assert.match(output, /Receipts.*dest/i)
       assert.match(output, /state.*success/i)
       assert.match(
         output,
@@ -422,8 +349,7 @@ describe('e2e command show EVM', () => {
       const ONRAMP = '0x23a5084Fa78104F3DF11C63Ae59fcac4f6AD9DeE'
       const OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
 
-      // Use --noapi and --wait to ensure RPC path and full output with commits/receipts
-      const args = buildShowArgs(TX_HASH, '--no-api', '--wait')
+      const args = buildShowArgs(TX_HASH)
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0, result.stdout + result.stderr)
@@ -465,7 +391,7 @@ describe('e2e command show EVM', () => {
       )
 
       // Receipts information
-      assert.match(output, /execution.*destination/i)
+      assert.match(output, /Receipts.*dest/i)
       assert.match(output, /state.*success/i)
       assert.match(
         output,
@@ -489,8 +415,7 @@ describe('e2e command show Solana', () => {
     'should show complete CCIP transaction details Solana to EVM',
     { timeout: 120000 },
     async () => {
-      // Use --noapi to ensure RPC path is used for full pretty output with commits/receipts
-      const args = buildShowArgs(TX_HASH, '--no-api', '--wait')
+      const args = buildShowArgs(TX_HASH)
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0, result.stdout + result.stderr)
@@ -536,7 +461,7 @@ describe('e2e command show Solana', () => {
       )
 
       // Receipts information
-      assert.match(output, /execution.*destination/i)
+      assert.match(output, /Receipts.*dest/i)
       assert.match(output, /state.*success/i)
       assert.match(
         output,
@@ -559,8 +484,7 @@ describe('e2e command show Aptos', () => {
     'should show complete CCIP transaction details Aptos to EVM',
     { timeout: 120000 },
     async () => {
-      // Use --noapi to ensure RPC path is used for full pretty output with commits/receipts
-      const args = buildShowArgs(TX_HASH, '--no-api', '--wait')
+      const args = buildShowArgs(TX_HASH)
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0, `stdout: ${result.stdout}\nstderr: ${result.stderr}`)
@@ -602,7 +526,7 @@ describe('e2e command show Aptos', () => {
       )
 
       // Receipts information
-      assert.match(output, /execution.*destination/i)
+      assert.match(output, /Receipts.*dest/i)
       assert.match(output, /state.*success/i)
       assert.match(output, /gasUsed.*79399/i)
       assert.match(
@@ -623,8 +547,7 @@ describe('e2e command show TON', () => {
     const ONRAMP = 'EQDTIBzONmN64tMmLymf0-jtc_AAWfDlXiZcr7ja5ri7ak53'
     const OFFRAMP = '0x93Bb167Ebd91987f9Dff6B954b9Eead469d2b849'
 
-    // Use --noapi to ensure RPC path is used for full pretty output with commits/receipts
-    const args = buildShowArgs(TX_HASH, '--no-api', '--wait')
+    const args = buildShowArgs(TX_HASH)
     const result = await spawnCLI(args, 120000)
 
     assert.equal(result.exitCode, 0)
@@ -656,97 +579,92 @@ describe('e2e command show TON', () => {
     assert.match(output, /max.*985/)
 
     // Execution receipt
-    assert.match(output, /execution.*destination/i)
+    assert.match(output, /Receipts.*dest/i)
     assert.match(output, /state.*success/i)
     assert.match(output, /gasUsed.*41293/)
     assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
   })
 
-  it.skip(
-    'should show complete CCIP transaction details EVM to TON',
-    { timeout: 120000 },
-    async () => {
-      const TX_HASH = '0x1f20d3f106a31dd6b1eec5dbb7ee0e8ba81cd2cef8718534518977645e14e5f5'
-      const MESSAGE_ID = '0x40bf2c2df2112fc58937f7edad8bf0edda3f6f08c35708970a21c0bc544eb970'
-      const SENDER = '0x65fdC0441C7a29B28A7b0fbBCbC28a134Ef376a0'
-      const RECEIVER = 'EQBuYCiBYoDqZro_v7z242bKtooAWUV-L73ifE-R6_GVKuRF'
-      const ONRAMP = '0xFB34b9969Dd201cc9A04E604a6D40AF917b6C1E8'
-      const OFFRAMP = 'EQCfLpla6865euCU2-TPlzy8vKQKT8rFKHoAvorKBC1RudIO'
+  it('should show complete CCIP transaction details EVM to TON', { timeout: 120000 }, async () => {
+    const TX_HASH = '0x1f20d3f106a31dd6b1eec5dbb7ee0e8ba81cd2cef8718534518977645e14e5f5'
+    const MESSAGE_ID = '0x40bf2c2df2112fc58937f7edad8bf0edda3f6f08c35708970a21c0bc544eb970'
+    const SENDER = '0x65fdC0441C7a29B28A7b0fbBCbC28a134Ef376a0'
+    const RECEIVER = 'EQBuYCiBYoDqZro_v7z242bKtooAWUV-L73ifE-R6_GVKuRF'
+    const ONRAMP = '0xFB34b9969Dd201cc9A04E604a6D40AF917b6C1E8'
+    const OFFRAMP = 'EQCfLpla6865euCU2-TPlzy8vKQKT8rFKHoAvorKBC1RudIO'
 
-      // Use --noapi to ensure RPC path is used for full pretty output with commits/receipts
-      const args = buildShowArgs(TX_HASH, '--no-api', '--wait')
-      const result = await spawnCLI(args, 120000)
+    const args = buildShowArgs(TX_HASH)
+    const result = await spawnCLI(args, 120000)
 
-      assert.equal(result.exitCode, 0, result.stdout + result.stderr)
-      const output = result.stdout
+    assert.equal(result.exitCode, 0, result.stdout + result.stderr)
+    const output = result.stdout
 
-      // Lane information
-      assert.match(output, /name.*ethereum-testnet-sepolia.*ton-testnet/i)
-      assert.match(output, /chainId.*11155111.*-3/)
-      assert.match(output, /chainSelector.*16015286601757825753n?.*1399300952838017768n?/)
-      assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
+    // Lane information
+    assert.match(output, /name.*ethereum-testnet-sepolia.*ton-testnet/i)
+    assert.match(output, /chainId.*11155111.*-3/)
+    assert.match(output, /chainSelector.*16015286601757825753n?.*1399300952838017768n?/)
+    assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
 
-      // Request information
-      assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
-      assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
-      assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
-      assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
-      assert.match(output, /sequenceNumber.*1114/)
-      assert.match(output, /nonce.*0.*allow out-of-order/)
-      assert.match(output, /gasLimit.*100000000n?/)
-      assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
-      assert.match(output, /data.*CCIP staging test 14:56/)
-      assert.match(output, /allowOutOfOrderExecution.*true/)
+    // Request information
+    assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
+    assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
+    assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
+    assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
+    assert.match(output, /sequenceNumber.*1114/)
+    assert.match(output, /nonce.*0.*allow out-of-order/)
+    assert.match(output, /gasLimit.*100000000n?/)
+    assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
+    assert.match(output, /data.*CCIP staging test 14:56/)
+    assert.match(output, /allowOutOfOrderExecution.*true/)
 
-      // Commit information (dest is TON - friendly format)
-      assert.match(output, /Commit.*dest/i)
-      assert.match(
-        output,
-        /merkleRoot.*0x66359185e781ceee83d5f15b110581adf06c5ddc6e895ff9b8e670f2730d026d/i,
-      )
-      assert.match(output, /min.*1114/)
-      assert.match(output, /max.*1114/)
-      assert.match(output, new RegExp(`origin.*${OFFRAMP}`, 'i'))
-      assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
-      // Transaction hash should be in friendly format (64-char hex, not composite)
-      assert.match(
-        output,
-        /transactionHash.*9048d65a2ecf5194fa9dfb5cc0ac59a55ffd75b9b6de5d7f09e53ef87ad5e6a8/i,
-      )
+    // Commit information (dest is TON - friendly format)
+    assert.match(output, /Commit.*dest/i)
+    assert.match(
+      output,
+      /merkleRoot.*0x66359185e781ceee83d5f15b110581adf06c5ddc6e895ff9b8e670f2730d026d/i,
+    )
+    assert.match(output, /min.*1114/)
+    assert.match(output, /max.*1114/)
+    assert.match(output, new RegExp(`origin.*${OFFRAMP}`, 'i'))
+    assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
+    // Transaction hash should be in friendly format (64-char hex, not composite)
+    assert.match(
+      output,
+      /transactionHash.*9048d65a2ecf5194fa9dfb5cc0ac59a55ffd75b9b6de5d7f09e53ef87ad5e6a8/i,
+    )
 
-      // Execution receipt
-      assert.match(output, /execution.*destination/i)
-      assert.match(output, /state.*success/i)
-      assert.match(output, new RegExp(`origin.*${OFFRAMP}`, 'i'))
-      assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
-      assert.match(
-        output,
-        /transactionHash.*354d53820392622a113685e6c34517cd240e97aaa2ebf2082db7f4637b19f07e/i,
-      )
-      assert.match(output, /logIndex.*1/)
-      assert.match(output, /blockNumber.*42539944000005/)
+    // Execution receipt
+    assert.match(output, /Receipts.*dest/i)
+    assert.match(output, /state.*success/i)
+    assert.match(output, new RegExp(`origin.*${OFFRAMP}`, 'i'))
+    assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
+    assert.match(
+      output,
+      /transactionHash.*354d53820392622a113685e6c34517cd240e97aaa2ebf2082db7f4637b19f07e/i,
+    )
+    assert.match(output, /logIndex.*1/)
+    assert.match(output, /blockNumber.*42539944000005/)
 
-      // TON shows execution history including failed attempts and final success after manualExec
-      // First receipt final state: failed
-      assert.match(output, /state.*failed/i)
-      assert.match(
-        output,
-        /transactionHash.*531c2fbc8db214d194aef894bfbb7163b3ad9f8c36f89d18b459c9f52d4faa14/i,
-      )
+    // TON shows execution history including failed attempts and final success after manualExec
+    // First receipt final state: failed
+    assert.match(output, /state.*failed/i)
+    assert.match(
+      output,
+      /transactionHash.*531c2fbc8db214d194aef894bfbb7163b3ad9f8c36f89d18b459c9f52d4faa14/i,
+    )
 
-      // Second receipt final state: successful
-      assert.match(output, /state.*success/i)
-      assert.match(
-        output,
-        /transactionHash.*354d53820392622a113685e6c34517cd240e97aaa2ebf2082db7f4637b19f07e/i,
-      )
+    // Second receipt final state: successful
+    assert.match(output, /state.*success/i)
+    assert.match(
+      output,
+      /transactionHash.*354d53820392622a113685e6c34517cd240e97aaa2ebf2082db7f4637b19f07e/i,
+    )
 
-      // Verify we have both failed and successful executions
-      const receiptsSection = output.split(/execution.*destination/i)[1] || ''
-      const failedMatches = receiptsSection.match(/failed/gi) || []
-      const successMatches = receiptsSection.match(/success/gi) || []
-      assert.ok(failedMatches.length >= 1, 'Should have at least one failed execution')
-      assert.ok(successMatches.length >= 1, 'Should have at least one successful execution')
-    },
-  )
+    // Verify we have both failed and successful executions
+    const receiptsSection = output.split(/Receipts.*dest/i)[1] || ''
+    const failedMatches = receiptsSection.match(/failed/gi) || []
+    const successMatches = receiptsSection.match(/success/gi) || []
+    assert.ok(failedMatches.length >= 1, 'Should have at least one failed execution')
+    assert.ok(successMatches.length >= 1, 'Should have at least one successful execution')
+  })
 })
