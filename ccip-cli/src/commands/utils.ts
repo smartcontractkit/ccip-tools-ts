@@ -394,27 +394,32 @@ export function prettyTable(
   args: Record<string, unknown>,
   opts = { parseErrorKeys: ['returnData'], spcount: 0 },
 ) {
-  const out: (readonly [string, unknown])[] = []
-  for (const [key, value] of Object.entries(args)) {
+  function rec(key: string, value: unknown): [string, unknown][] {
     if (isBytesLike(value)) {
       let parseError
       if (opts.parseErrorKeys.includes(key)) parseError = true
-      if (dataLength(value) <= 32 && !parseError) out.push([key, value])
-      else out.push(...Object.entries(formatData(key, hexlify(value), parseError)))
+      if (dataLength(value) <= 32 && !parseError) return [[key, value]]
+      else return Object.entries(formatData(key, hexlify(value), parseError))
     } else if (typeof value === 'string') {
-      out.push(
-        ...wrapText(value, Math.max(100, +(process.env.COLUMNS || 80) * 0.9)).map(
-          (l, i) => [!i ? key : ' '.repeat(opts.spcount++), l] as const,
-        ),
+      return wrapText(value, Math.max(100, +(process.env.COLUMNS || 80) * 0.9)).map(
+        (l, i) => [!i ? key : ' '.repeat(opts.spcount++), l] as const,
       )
     } else if (Array.isArray(value)) {
-      if (value.length <= 1) out.push([key, value[0] as unknown])
-      else out.push(...value.map((v, i) => [`${key}[${i}]`, v as unknown] as const))
+      if (value.length <= 1) return [[key, value[0]]]
+      else return value.map((v, i) => rec(`${key}[${i}]`, v)).flat(1)
     } else if (value && typeof value === 'object') {
-      out.push(...Object.entries(value).map(([k, v]) => [`${key}.${k}`, v] as const))
-    } else out.push([key, value])
+      return Object.entries(value)
+        .map(([k, v]) => rec(`${key}.${k}`, v))
+        .flat(1)
+    } else return [[key, value]]
   }
-  return this.logger.table(Object.fromEntries(out))
+  return this.logger.table(
+    Object.fromEntries(
+      Object.entries(args)
+        .map(([k, v]) => rec(k, v))
+        .flat(1),
+    ),
+  )
 }
 
 /**
