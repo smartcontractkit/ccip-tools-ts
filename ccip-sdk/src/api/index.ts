@@ -417,6 +417,8 @@ export class CCIPAPIClient {
       sendTimestamp,
       receiptTimestamp,
       deliveryTime,
+      sendBlockNumber,
+      sendLogIndex,
       ...message
     } = raw
 
@@ -441,25 +443,23 @@ export class CCIPAPIClient {
       version: (version?.replace(/-dev$/, '') ?? CCIPVersion.V1_6) as CCIPVersion,
     }
 
-    // Build log and address - only transactionHash and address are available from API
-    // (topics, index, blockNumber, data not available)
+    // Build log from API data
     const log: Log_ = {
       transactionHash: sendTransactionHash,
       address: raw.onramp,
       data: { message: parseJson(text) },
       topics: [lane.version < CCIPVersion.V1_6 ? 'CCIPSendRequested' : 'CCIPMessageSent'],
-      index: 0, // TODO
-      blockNumber: 0, // TODO
+      index: Number(sendLogIndex),
+      blockNumber: Number(sendBlockNumber),
     }
 
-    // Build partial tx - only hash, timestamp, from are available from API
-    // (blockNumber, logs not available)
+    // Build tx from API data
     const tx: ChainTransaction = {
       hash: log.transactionHash,
       timestamp: sendTimestamp_,
       from: origin,
       logs: [log],
-      blockNumber: log.blockNumber, // TODO
+      blockNumber: Number(sendBlockNumber),
     }
     log.tx = tx
 

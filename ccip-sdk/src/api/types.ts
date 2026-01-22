@@ -115,6 +115,8 @@ export type RawMessageResponse = {
   origin: string
   sequenceNumber: string
   onramp: string
+  sendBlockNumber: bigint
+  sendLogIndex: bigint
   // Optional fields
   nonce?: string | null
   routerAddress?: string | null
@@ -181,26 +183,19 @@ export type APICCIPRequestMetadata = {
 
 /**
  * CCIP request information retrieved from API.
-
+ *
  * Combines standard {@link CCIPRequest} fields with API-specific metadata.
-
+ *
  * **Complete fields:**
  * - `lane`: All fields available (sourceChainSelector, destChainSelector, onRamp, version)
  * - `message`: All core fields (messageId, sender, receiver, data, sequenceNumber, nonce,
  *   tokenAmounts, feeToken, feeTokenAmount) plus extraArgs (EVM or SVM depending on chain)
- *
- * **Partial fields (API limitation):**
- * - `log`: Only `transactionHash` and `address` available
- *   (missing: `topics`, `index`, `blockNumber`, `data`)
- * - `tx`: Only `hash`, `timestamp`, `from` available
- *   (missing: `logs`, `blockNumber`)
+ * - `log`: transactionHash, address, index, blockNumber, topics, data
+ * - `tx`: hash, timestamp, from, logs, blockNumber
  *
  * **API-only fields** (in {@link APICCIPRequestMetadata}):
  * - `status`, `readyForManualExecution`, `finality`
  * - `receiptTransactionHash`, `receiptTimestamp`, `deliveryTime`
  * - `sourceNetworkInfo`, `destNetworkInfo`
- *
- * For complete `log` or `tx` data, query the source chain RPC directly using
- * `tx.hash` or `log.transactionHash`.
  */
 export type APICCIPRequest = CCIPRequest & APICCIPRequestMetadata
