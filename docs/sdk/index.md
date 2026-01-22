@@ -198,6 +198,16 @@ const latency = await chain.getLaneLatency(4949039107694359620n) // To Arbitrum
 console.log(`ETA: ${Math.round(latency.totalMs / 60000)} min`)
 ```
 
+### Custom Configuration
+
+```ts
+const api = new CCIPAPIClient('https://api.ccip.chain.link', {
+  timeoutMs: 60000, // Request timeout in ms (default: 30000)
+  logger: customLogger, // Custom logger instance
+  fetch: customFetch, // Custom fetch function
+})
+```
+
 ### Fetch Message by ID
 
 Retrieve full message details using a message ID:
@@ -295,6 +305,7 @@ import {
   CCIPMessageRetrievalError,
   CCIPMessageNotFoundInTxError,
   CCIPUnexpectedPaginationError,
+  CCIPTimeoutError,
   isTransientError,
 } from '@chainlink/ccip-sdk'
 
@@ -365,6 +376,28 @@ try {
     console.error(`Too many messages: ${err.context.messageCount}+`)
   }
 }
+```
+
+### Timeout Errors
+
+```ts
+try {
+  const request = await api.getMessageById(messageId)
+} catch (err) {
+  if (err instanceof CCIPTimeoutError) {
+    // Request timed out - transient, safe to retry
+    console.log(`Timeout after ${err.context.timeoutMs}ms`)
+    // err.retryAfterMs suggests 5000ms delay before retry
+  }
+}
+```
+
+Configure custom timeout when creating the client:
+
+```ts
+const api = new CCIPAPIClient('https://api.ccip.chain.link', {
+  timeoutMs: 60000, // 60 seconds (default: 30000ms)
+})
 ```
 
 ## Wallet Configuration
