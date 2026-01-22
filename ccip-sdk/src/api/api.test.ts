@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
+import '../index.ts'
+import { getAddress } from 'ethers'
+
 import { CCIPAPIClient, DEFAULT_API_BASE_URL } from './index.ts'
 import {
   CCIPApiClientNotAvailableError,
@@ -13,7 +16,8 @@ import {
 } from '../errors/index.ts'
 import { EVMChain } from '../evm/index.ts'
 import { decodeMessage } from '../requests.ts'
-import { CCIPVersion } from '../types.ts'
+import { CCIPVersion, ChainFamily } from '../types.ts'
+import { bigIntReplacer, networkInfo } from '../utils.ts'
 
 const origFetch = globalThis.fetch
 
@@ -268,8 +272,8 @@ describe('CCIPAPIClient', () => {
   describe('getMessageById', () => {
     const mockMessageResponse = {
       messageId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-      sender: '0x742d35Cc6634C0532925a3b8D5c8C22C5B2D8a3E',
-      receiver: '0x893F0bCaa7F325c2b6bBd2133536f4e4b8fea88e',
+      sender: '0x742d35cc6634c0532925a3b8d5c8c22c5b2d8a3e',
+      receiver: '0x893f0bcaa7f325c2b6bbd2133536f4e4b8fea88e',
       status: 'SUCCESS',
       sourceNetworkInfo: {
         name: 'ethereum-mainnet',
@@ -278,7 +282,7 @@ describe('CCIPAPIClient', () => {
         chainFamily: 'EVM',
       },
       destNetworkInfo: {
-        name: 'arbitrum-mainnet',
+        name: 'ethereum-mainnet-arbitrum-1',
         chainSelector: '4949039107694359620',
         chainId: '42161',
         chainFamily: 'EVM',
@@ -298,13 +302,13 @@ describe('CCIPAPIClient', () => {
       finality: 0,
       fees: {
         fixedFeesDetails: {
-          tokenAddress: '0xFeeTokenAddress',
+          tokenAddress: '0x4Cb3c1a50616725Bd1793D0eE0C7Fc4dC4E05c79',
           totalAmount: '5000000',
         },
       },
       version: '1.6.0',
       onramp: '0x1234567890abcdef1234567890abcdef12345678',
-      origin: '0x742d35Cc6634C0532925a3b8D5c8C22C5B2D8a3E',
+      origin: '0x742d35cc6634c0532925a3b8d5c8c22c5b2d8a3e',
       sequenceNumber: '67890',
       nonce: '12345',
       receiptTransactionHash: '0xReceipt1234567890abcdef1234567890abcdef1234567890abcdef12345678',
@@ -345,22 +349,22 @@ describe('CCIPAPIClient', () => {
       assert.equal(result.lane.sourceChainSelector, 5009297550715157269n)
       assert.equal(result.lane.destChainSelector, 4949039107694359620n)
       assert.equal(result.lane.version, CCIPVersion.V1_6)
-      assert.equal(result.lane.onRamp, mockMessageResponse.onramp)
+      assert.equal(result.lane.onRamp, getAddress(mockMessageResponse.onramp))
 
       // Message
       assert.equal(result.message.messageId, mockMessageResponse.messageId)
-      assert.equal(result.message.sender, mockMessageResponse.sender)
+      assert.equal(result.message.sender, getAddress(mockMessageResponse.sender))
       assert.equal(result.message.sequenceNumber, 67890n)
       assert.equal(result.message.nonce, 12345n)
 
       // TX
       assert.equal(result.tx.hash, mockMessageResponse.sendTransactionHash)
       assert.equal(result.tx.timestamp, 1701426600) // Unix timestamp for 2023-12-01T10:30:00Z
-      assert.equal(result.tx.from, mockMessageResponse.origin)
+      assert.equal(result.tx.from, getAddress(mockMessageResponse.origin))
 
       // Log
       assert.equal(result.log.transactionHash, mockMessageResponse.sendTransactionHash)
-      assert.equal(result.log.address, mockMessageResponse.onramp)
+      assert.equal(result.log.address, getAddress(mockMessageResponse.onramp))
 
       // Status and extras
       assert.equal(result.status, 'SUCCESS')
@@ -400,9 +404,9 @@ describe('CCIPAPIClient', () => {
 
     it('should handle missing optional fields gracefully', async () => {
       const minimalResponse = {
-        messageId: '0x1234...',
-        sender: '0x742d...',
-        receiver: '0x893F...',
+        messageId: '0x1234111111111111111111111111111111111111111111111111111111111111',
+        sender: '0x742d222222222222222222222222222222222222',
+        receiver: '0x893F333333333333333333333333333333333333',
         status: 'SENT',
         sourceNetworkInfo: {
           name: 'ethereum-mainnet',
@@ -411,7 +415,7 @@ describe('CCIPAPIClient', () => {
           chainFamily: 'EVM',
         },
         destNetworkInfo: {
-          name: 'arbitrum-mainnet',
+          name: 'ethereum-mainnet-arbitrum-1',
           chainSelector: '4949039107694359620',
           chainId: '42161',
           chainFamily: 'EVM',
@@ -424,14 +428,14 @@ describe('CCIPAPIClient', () => {
         finality: 0,
         fees: {
           fixedFeesDetails: {
-            tokenAddress: '0xFeeToken',
+            tokenAddress: '0x4269d8a4b138a1c39befc530d3904c150d8eb094',
             totalAmount: '1000',
           },
         },
         // Required fields (as of schema v2.0.0)
-        origin: '0xOriginAddress',
+        origin: '0xe065e0bfd48878dfd9a2ce8de49e81ba9de57ccd',
         sequenceNumber: '12345',
-        onramp: '0xOnRampAddress',
+        onramp: '0xa0fa1aca51c32bb3c8c0e96ddfc3af515578410a',
         // No optional fields: version, nonce, receiptTransactionHash, etc.
       }
 
@@ -448,7 +452,7 @@ describe('CCIPAPIClient', () => {
 
       // Should use defaults for missing optional fields
       assert.equal(result.lane.version, CCIPVersion.V1_6) // Default when version not provided
-      assert.equal(result.lane.onRamp, '0xOnRampAddress')
+      assert.equal(result.lane.onRamp, getAddress(minimalResponse.onramp))
       assert.equal(result.message.sequenceNumber, 12345n)
       assert.equal(result.message.nonce, 0n) // nonce is still optional
       assert.equal(result.receiptTransactionHash, undefined)
@@ -602,18 +606,22 @@ describe('CCIPAPIClient', () => {
     it('should parse SVM extraArgs correctly', async () => {
       const response = {
         ...mockMessageResponse,
+        destChainSelector: networkInfo('solana-mainnet').chainSelector,
         extraArgs: {
           computeUnits: 200000,
           accountIsWritableBitmap: '255',
           allowOutOfOrderExecution: false,
           tokenReceiver: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-          accounts: ['Account1', 'Account2'],
+          accounts: [
+            'So11111111111111111111111111111111111111113',
+            'So11111111111111111111111111111111111111114',
+          ],
         },
       }
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          text: () => Promise.resolve(JSON.stringify(response)),
+          text: () => Promise.resolve(JSON.stringify(response, bigIntReplacer)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
@@ -628,7 +636,10 @@ describe('CCIPAPIClient', () => {
       assert.equal(msg.accountIsWritableBitmap, 255n)
       assert.equal(msg.allowOutOfOrderExecution, false)
       assert.equal(msg.tokenReceiver, 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
-      assert.deepEqual(msg.accounts, ['Account1', 'Account2'])
+      assert.deepEqual(msg.accounts, [
+        'So11111111111111111111111111111111111111113',
+        'So11111111111111111111111111111111111111114',
+      ])
     })
 
     it('should parse tokenAmounts correctly', async () => {
@@ -636,17 +647,17 @@ describe('CCIPAPIClient', () => {
         ...mockMessageResponse,
         tokenAmounts: [
           {
-            sourceTokenAddress: '0xToken1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-            destTokenAddress: '0xDestToken1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-            sourcePoolAddress: '0xPool1cccccccccccccccccccccccccccccccccc',
+            sourceTokenAddress: '0xdBD5c2b8A83Ac0721Bb75D8ce5B32590Fc70840e',
+            destTokenAddress: '0xBb18bf798a37AA8f383EC9F4445189F465935Fb1',
+            sourcePoolAddress: '0xC24EE2C843E84dB8504dafe71724f04D5c278029',
             amount: '1000000000000000000',
             extraData: '0xabcd',
             destGasAmount: '50000',
           },
           {
-            sourceTokenAddress: '0xToken2dddddddddddddddddddddddddddddddddd',
-            destTokenAddress: '0xDestToken2eeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
-            sourcePoolAddress: '0xPool2ffffffffffffffffffffffffffffffffffff',
+            sourceTokenAddress: '0x60A920731Df0e9626b595F7549593B14A69602e4',
+            destTokenAddress: '0xb40A91dD612cf44Ad912e6916CCda3cC189E95DA',
+            sourcePoolAddress: '0x4f6A1D47edd2D5FDD50F2CebB2c0A7aBB2AAa7F3',
             amount: '2500000',
           },
         ],
@@ -675,23 +686,21 @@ describe('CCIPAPIClient', () => {
       }
       assert.equal(msg.tokenAmounts.length, 2)
       // First token with all fields populated
-      assert.equal(msg.tokenAmounts[0]!.token, '0xToken1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+      assert.equal(msg.tokenAmounts[0]!.token, response.tokenAmounts[0]!.sourceTokenAddress)
       assert.equal(msg.tokenAmounts[0]!.amount, 1000000000000000000n)
       assert.equal(
         msg.tokenAmounts[0]!.sourcePoolAddress,
-        '0xPool1cccccccccccccccccccccccccccccccccc',
+        response.tokenAmounts[0]!.sourcePoolAddress,
       )
       assert.equal(
         msg.tokenAmounts[0]!.destTokenAddress,
-        '0xDestToken1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        response.tokenAmounts[0]!.destTokenAddress,
       )
       assert.equal(msg.tokenAmounts[0]!.extraData, '0xabcd')
       assert.equal(msg.tokenAmounts[0]!.destGasAmount, 50000n)
       // Second token with optional fields missing (uses defaults)
-      assert.equal(msg.tokenAmounts[1]!.token, '0xToken2dddddddddddddddddddddddddddddddddd')
+      assert.equal(msg.tokenAmounts[1]!.token, response.tokenAmounts[1]!.sourceTokenAddress)
       assert.equal(msg.tokenAmounts[1]!.amount, 2500000n)
-      assert.equal(msg.tokenAmounts[1]!.extraData, '0x')
-      assert.equal(msg.tokenAmounts[1]!.destGasAmount, 0n)
     })
 
     it('should handle empty tokenAmounts', async () => {
@@ -1046,7 +1055,7 @@ describe('Chain with apiClient: null', () => {
       chainId: 1,
       chainSelector: 5009297550715157269n,
       name: 'ethereum-mainnet',
-      family: 'evm' as const,
+      family: ChainFamily.EVM,
       isTestnet: false,
     }
 

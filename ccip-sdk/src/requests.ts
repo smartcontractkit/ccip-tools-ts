@@ -69,25 +69,28 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
     data_.sourceNetworkInfo?.chainSelector
   if (!sourceChainSelector) throw new CCIPMessageInvalidError(data)
   data_.sourceChainSelector ??= sourceChainSelector
+  data_.nonce ??= 0n
   const sourceFamily = networkInfo(sourceChainSelector).family
 
   const destChainSelector =
     data_.dest_chain_selector ?? data_.destChainSelector ?? data_.destNetworkInfo?.chainSelector
-  data_.destChainSelector ??= destChainSelector
+  if (destChainSelector) data_.destChainSelector ??= destChainSelector
   const destFamily = destChainSelector ? networkInfo(destChainSelector).family : ChainFamily.EVM
   // transform type, normalize keys case, source/dest addresses, and ensure known bigints
   data_ = convertKeysToCamelCase(data_, (v, k) =>
     k?.match(/(selector|amount|nonce|number|limit|bitmap)$/i)
       ? BigInt(v as string | number | bigint)
-      : typeof v === 'string' && k?.match(/(^dest)|(receiver|offramp|accounts)/i)
+      : typeof v === 'string' && k?.match(/(^dest.*address)|(receiver|offramp|accounts)/i)
         ? decodeAddress(v, destFamily)
         : typeof v === 'string' &&
-            k?.match(/(source|sender|origin|onramp|(feetoken$)|(^tokenaddress$))/i)
+            k?.match(/((source.*address)|sender|origin|onramp|(feetoken$)|(token.*address$))/i)
           ? decodeAddress(v, sourceFamily)
           : v,
   ) as typeof data_
 
   for (const ta of data_.tokenAmounts) {
+    if (ta.token && !ta.sourceTokenAddress) ta.sourceTokenAddress = ta.token
+    if (!ta.token && ta.sourceTokenAddress) ta.token = ta.sourceTokenAddress
     if (ta.destGasAmount != null || !ta.destExecData) continue
     switch (sourceFamily) {
       // EVM & Solana encode destExecData as big-endian
@@ -99,8 +102,6 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
       default:
         ta.destGasAmount = leToBigInt(getDataBytes(ta.destExecData))
     }
-    if (ta.token && !ta.sourceTokenAddress) ta.sourceTokenAddress = ta.token
-    if (!ta.token && ta.sourceTokenAddress) ta.token = ta.sourceTokenAddress
   }
 
   if (data_.extraArgs && typeof data_.extraArgs === 'string') {

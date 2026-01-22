@@ -340,20 +340,29 @@ export function bytesToBuffer(bytes: BytesLike | readonly number[]): Buffer {
  * @param address - Address in hex or Base58 format.
  * @returns Address bytes as Uint8Array.
  */
-export function getAddressBytes(address: BytesLike): Uint8Array {
-  let bytes: Uint8Array
-  if (isBytesLike(address)) {
-    bytes = getBytes(address)
+export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Array {
+  let bytes
+  if (address instanceof Uint8Array) {
+    bytes = address
+  } else if (Array.isArray(address)) {
+    bytes = new Uint8Array(address)
+  } else if (typeof address === 'string' && address.match(/^((0x[0-9a-f]+)|[0-9a-f]{40,})$/i)) {
+    // supports with or without (long>=20B) 0x-prefix, odd or even length
+    bytes = getBytes(
+      address.length % 2
+        ? '0x0' + (address.toLowerCase().startsWith('0x') ? address.slice(2) : address)
+        : !address.toLowerCase().startsWith('0x')
+          ? '0x' + address
+          : address,
+    )
   } else {
-    bytes = bs58.decode(address)
-  }
-  if (bytes.length > 20) {
-    if (
-      bytes.slice(0, bytes.length - 20).every((b) => b === 0) &&
-      bytes.slice(-20).some((b) => b !== 0)
-    ) {
-      bytes = bytes.slice(-20)
+    try {
+      const bytes_ = bs58.decode(address as string)
+      if (!(bytes_.length % 32)) bytes = bytes_
+    } catch (_) {
+      // pass
     }
+    if (!bytes) bytes = decodeBase64(address as string)
   }
   return bytes
 }

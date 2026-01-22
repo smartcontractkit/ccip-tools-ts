@@ -16,13 +16,13 @@ describe('lane-latency command', () => {
         name: 'ethereum-mainnet',
         chainSelector: '5009297550715157269',
         chainId: '1',
-        chainFamily: 'evm',
+        chainFamily: 'EVM',
       },
       destNetworkInfo: {
         name: 'arbitrum-mainnet',
         chainSelector: '4949039107694359620',
         chainId: '42161',
-        chainFamily: 'evm',
+        chainFamily: 'EVM',
       },
       routerAddress: '0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D',
     },
@@ -30,7 +30,7 @@ describe('lane-latency command', () => {
   }
 
   const mockedFetch = mock.fn(() =>
-    Promise.resolve({ ok: true, json: () => Promise.resolve(mockApiResponse) }),
+    Promise.resolve({ ok: true, text: () => Promise.resolve(JSON.stringify(mockApiResponse)) }),
   )
 
   const mockLog = mock.fn()

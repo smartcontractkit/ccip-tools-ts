@@ -18,7 +18,7 @@ import {
   type WithLogger,
   CCIPVersion,
 } from '../types.ts'
-import { isTestnet, parseJson } from '../utils.ts'
+import { bigIntReviver, isTestnet, parseJson } from '../utils.ts'
 import type {
   APICCIPRequest,
   APIErrorResponse,
@@ -53,14 +53,10 @@ export type CCIPAPIClientContext = WithLogger & {
 }
 
 const ensureNetworkInfo = (o: RawNetworkInfo): NetworkInfo => {
-  Object.defineProperty(o, 'isTestnet', {
-    get(this: RawNetworkInfo) {
-      return isTestnet(this.name)
-    },
-    configurable: true,
-    enumerable: true,
-  })
-  return o as unknown as NetworkInfo
+  return Object.assign(o, {
+    isTestnet: isTestnet(o.name),
+    ...(!('family' in o) && { family: o.chainFamily }),
+  }) as unknown as NetworkInfo
 }
 
 /**
@@ -231,7 +227,7 @@ export class CCIPAPIClient {
       })
     }
 
-    const raw = parseJson<RawLaneLatencyResponse>(await response.text())
+    const raw = JSON.parse(await response.text(), bigIntReviver) as RawLaneLatencyResponse
 
     // Log full raw response for debugging
     this.logger.debug('getLaneLatency raw response:', raw)

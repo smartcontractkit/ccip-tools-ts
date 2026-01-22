@@ -291,7 +291,7 @@ describe('TON index unit tests', () => {
         execReport: baseExecReport,
       })
 
-      assert.equal(unsigned.family, 'ton')
+      assert.equal(unsigned.family, ChainFamily.TON)
       assert.equal(unsigned.to, TON_OFFRAMP_ADDRESS_TEST)
       assert.ok(unsigned.body instanceof Object, 'body should be a Cell')
     })

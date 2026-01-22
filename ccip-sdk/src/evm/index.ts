@@ -17,7 +17,6 @@ import {
   dataSlice,
   encodeBase58,
   getAddress,
-  getBytes,
   hexlify,
   isBytesLike,
   isHexString,
@@ -649,7 +648,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @returns Checksummed EVM address.
    */
   static getAddress(bytes: BytesLike): string {
-    bytes = getBytes(bytes)
+    if (isHexString(bytes, 20)) return getAddress(bytes)
+    bytes = getAddressBytes(bytes)
     if (bytes.length < 20) throw new CCIPAddressInvalidEvmError(hexlify(bytes))
     else if (bytes.length > 20) {
       if (bytes.slice(0, bytes.length - 20).every((b) => b === 0)) {
