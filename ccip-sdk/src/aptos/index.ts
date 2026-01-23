@@ -42,7 +42,6 @@ import {
   CCIPAptosTransactionTypeInvalidError,
   CCIPAptosWalletInvalidError,
   CCIPError,
-  CCIPOnRampRequiredError,
 } from '../errors/index.ts'
 import {
   type EVMExtraArgsV2,
@@ -89,12 +88,7 @@ import { getAptosLeafHasher } from './hasher.ts'
 import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
 import { getTokenInfo } from './token.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import {
-  buildMessageForDest,
-  decodeMessage,
-  getMessageById,
-  getMessagesInBatch,
-} from '../requests.ts'
+import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
 export type { UnsignedAptosTx }
 
 /**
@@ -244,24 +238,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   /** {@inheritDoc Chain.getLogs} */
   async *getLogs(opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<Log_> {
     yield* streamAptosLogs(this, opts)
-  }
-
-  /** {@inheritDoc Chain.getMessageById} */
-  override async getMessageById(
-    messageId: string,
-    opts?: { page?: number; onRamp?: string },
-  ): Promise<CCIPRequest> {
-    try {
-      // try API first
-      return await super.getMessageById(messageId, opts)
-    } catch (_) {
-      if (!opts?.onRamp) throw new CCIPOnRampRequiredError()
-      // fallsback to RPC
-      return getMessageById(this, messageId, {
-        ...opts,
-        onRamp: await this.getOnRampForRouter(opts.onRamp, 0n),
-      })
-    }
   }
 
   /** {@inheritDoc Chain.getMessagesInBatch} */

@@ -197,6 +197,7 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
  * @param messageId - MessageId to search for.
  * @param opts - Optional hints for pagination (e.g., `address` for onRamp, `page` for pagination size).
  * @returns CCIPRequest with given messageId.
+ * @internal
  */
 export async function getMessageById(
   source: Chain,
