@@ -168,6 +168,106 @@ console.log('Transaction hash:', request.tx.hash)
 console.log('Message ID:', request.message.messageId)
 ```
 
+### Transfer Tokens Cross-Chain
+
+Send tokens to another chain. Only `receiver` is required:
+
+**EVM:**
+
+```ts
+import { EVMChain, networkInfo, type MessageInput } from '@chainlink/ccip-sdk'
+import { Wallet } from 'ethers'
+
+const source = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.com')
+const wallet = new Wallet('YOUR_PRIVATE_KEY', source.provider)
+
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
+const destSelector = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector
+const linkToken = '0x779877A7B0D9E8603169DdbD7836e478b4624789' // LINK on Sepolia
+
+const message: MessageInput = {
+  receiver: '0xYourReceiverAddress',
+  tokenAmounts: [{ token: linkToken, amount: 1_500_000_000_000_000_000n }], // 1.5 LINK
+}
+
+const request = await source.sendMessage({
+  router,
+  destChainSelector: destSelector,
+  message,
+  wallet,
+})
+
+console.log('Transaction hash:', request.tx.hash)
+console.log('Message ID:', request.message.messageId)
+```
+
+**Solana:**
+
+```ts
+import { SolanaChain, networkInfo, type MessageInput } from '@chainlink/ccip-sdk'
+import { Wallet } from '@coral-xyz/anchor'
+import { Keypair } from '@solana/web3.js'
+
+const source = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+const wallet = new Wallet(Keypair.fromSecretKey(yourSecretKey))
+
+const message: MessageInput = {
+  receiver: '0xYourEVMReceiverAddress',
+  tokenAmounts: [{ token: 'SPLTokenMintAddress', amount: 1_000_000n }],
+}
+
+const request = await source.sendMessage({
+  router: 'SolanaRouterProgramAddress',
+  destChainSelector: networkInfo('ethereum-testnet-sepolia').chainSelector,
+  message,
+  wallet,
+})
+
+console.log('Transaction hash:', request.tx.hash)
+console.log('Message ID:', request.message.messageId)
+```
+
+:::note Defaults
+- `extraArgs.gasLimit` / `extraArgs.computeUnits`: `0` for token-only transfers
+- `extraArgs.allowOutOfOrderExecution`: `true`
+- `data`: Empty
+- `feeToken`: Native token (ETH or SOL)
+- Token approvals and fee calculation handled by `sendMessage`
+:::
+
+### Generate Unsigned Transactions
+
+For custom signing workflows (hardware wallets, multi-sig), use `generateUnsignedSendMessage`:
+
+```ts
+import { EVMChain, networkInfo, type MessageInput } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.com')
+
+const message: MessageInput = {
+  receiver: '0xYourReceiverAddress',
+  tokenAmounts: [{ token: '0x779877A7B0D9E8603169DdbD7836e478b4624789', amount: 1_500_000_000_000_000_000n }],
+}
+
+const unsignedTxs = await source.generateUnsignedSendMessage({
+  sender: '0xYourWalletAddress',
+  router: '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59',
+  destChainSelector: networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector,
+  message,
+})
+
+// Returns: { transactions: [approvalTx?, approvalTx?, ..., ccipSendTx] }
+// Last transaction is always ccipSend
+for (const tx of unsignedTxs.transactions) {
+  const signedTx = await yourSigner.sign(tx)
+  await yourBroadcaster.send(signedTx)
+}
+```
+
+:::note
+Only generates approval transactions for tokens with insufficient allowance.
+:::
+
 ## CCIP API Client
 
 Query lane latency from the CCIP REST API.
