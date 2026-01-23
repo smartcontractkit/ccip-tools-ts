@@ -130,7 +130,7 @@ describe('CCIPAPIClient', () => {
       const result = await client.getLaneLatency(1n, 2n)
 
       assert.deepEqual(Object.keys(result), ['totalMs'])
-      assert.equal(result.totalMs, 1147000n)
+      assert.equal(result.totalMs, 1147000)
     })
 
     it('should log raw response via debug', async () => {

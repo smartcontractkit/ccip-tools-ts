@@ -125,12 +125,7 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-import {
-  buildMessageForDest,
-  getMessageById,
-  getMessagesInBatch,
-  getMessagesInTx,
-} from '../requests.ts'
+import { buildMessageForDest, getMessageById, getMessagesInBatch } from '../requests.ts'
 import { patchBorsh } from './patchBorsh.ts'
 import { DEFAULT_GAS_LIMIT } from '../evm/const.ts'
 export type { UnsignedSolanaTx }
@@ -439,13 +434,18 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /** {@inheritDoc Chain.getMessageById} */
-  override getMessageById(
+  override async getMessageById(
     messageId: string,
-    onRamp?: string,
-    opts?: { page?: number },
+    opts?: { page?: number; onRamp?: string },
   ): Promise<CCIPRequest> {
-    if (!onRamp) throw new CCIPOnRampRequiredError()
-    return getMessageById(this, messageId, { address: onRamp, ...opts })
+    try {
+      // try API first
+      return await super.getMessageById(messageId, opts)
+    } catch (_) {
+      // fallsback to RPC
+      if (!opts?.onRamp) throw new CCIPOnRampRequiredError()
+      return getMessageById(this, messageId, opts)
+    }
   }
 
   /** {@inheritDoc Chain.getMessagesInBatch} */

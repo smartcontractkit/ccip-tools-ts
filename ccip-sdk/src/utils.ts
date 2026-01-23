@@ -358,7 +358,7 @@ export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Ar
   } else {
     try {
       const bytes_ = bs58.decode(address as string)
-      if (!(bytes_.length % 32)) bytes = bytes_
+      if (bytes_.length % 32 === 0) bytes = bytes_
     } catch (_) {
       // pass
     }

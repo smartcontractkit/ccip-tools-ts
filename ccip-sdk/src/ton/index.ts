@@ -21,7 +21,6 @@ import {
   CCIPWalletInvalidError,
 } from '../errors/specialized.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
-import { getMessagesInTx } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type CCIPExecution,

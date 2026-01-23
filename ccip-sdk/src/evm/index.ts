@@ -121,12 +121,7 @@ import {
   parseSourceTokenData,
 } from './messages.ts'
 import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
-import {
-  buildMessageForDest,
-  getMessageById,
-  getMessagesInBatch,
-  getMessagesInTx,
-} from '../requests.ts'
+import { buildMessageForDest, getMessageById, getMessagesInBatch } from '../requests.ts'
 import type { UnsignedEVMTx } from './types.ts'
 export type { UnsignedEVMTx }
 
@@ -323,12 +318,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.getMessageById} */
-  override getMessageById(
+  override async getMessageById(
     messageId: string,
-    onRamp?: string,
-    opts?: { page?: number },
+    opts?: { page?: number; onRamp?: string },
   ): Promise<CCIPRequest> {
-    return getMessageById(this, messageId, { address: onRamp, ...opts })
+    try {
+      // try API first
+      return await super.getMessageById(messageId, opts)
+    } catch (_) {
+      // fallsback to RPC
+      return getMessageById(this, messageId, opts)
+    }
   }
 
   /** {@inheritDoc Chain.getMessagesInBatch} */

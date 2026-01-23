@@ -6,27 +6,17 @@ import type { CCIPRequest, MessageStatus, NetworkInfo } from '../types.ts'
  */
 export type LaneLatencyResponse = {
   /** Estimated delivery time in milliseconds */
-  totalMs: bigint
+  totalMs: number
 }
 
 /** Raw API response (string selectors, before conversion) */
 export type RawLaneLatencyResponse = {
   lane: {
-    sourceNetworkInfo: {
-      name: string
-      chainSelector: string
-      chainId: string
-      chainFamily: string
-    }
-    destNetworkInfo: {
-      name: string
-      chainSelector: string
-      chainId: string
-      chainFamily: string
-    }
+    sourceNetworkInfo: RawNetworkInfo
+    destNetworkInfo: RawNetworkInfo
     routerAddress: string
   }
-  totalMs: bigint
+  totalMs: number
 }
 
 /**

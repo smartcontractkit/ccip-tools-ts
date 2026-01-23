@@ -88,7 +88,7 @@ type ChainFamilyWithId<F extends ChainFamily> = F extends
   : F extends typeof ChainFamily.Solana
     ? { readonly family: F; readonly chainId: string }
     : F extends typeof ChainFamily.Aptos | typeof ChainFamily.Sui
-      ? { readonly family: F; readonly chainId: `${F}:${number}` }
+      ? { readonly family: F; readonly chainId: `${Lowercase<F>}:${number}` }
       : never
 
 /**

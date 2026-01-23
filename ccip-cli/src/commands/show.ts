@@ -2,7 +2,6 @@ import {
   type CCIPRequest,
   type ChainTransaction,
   CCIPExecTxRevertedError,
-  CCIPNotImplementedError,
   ExecutionState,
   MessageStatus,
   bigIntReplacer,
@@ -88,9 +87,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     } else idFromSource = argv.idFromSource
     const sourceNetwork = networkInfo(idFromSource)
     source = await getChain(sourceNetwork.chainId)
-    if (!source.getMessageById)
-      throw new CCIPNotImplementedError(`getMessageById for ${source.constructor.name}`)
-    request = await source.getMessageById(argv.txHash, onRamp, argv)
+    request = await source.getMessageById(argv.txHash, { ...argv, onRamp })
   } else {
     const [getChain_, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHash)
     getChain = getChain_

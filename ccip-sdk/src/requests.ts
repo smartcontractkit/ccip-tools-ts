@@ -191,31 +191,22 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
 }
 
 /**
- * Fetch a CCIP message by its messageId.
- * Tries API first if available, falls back to RPC log scanning.
+ * Fetch a CCIP message by its messageId from RPC (slow).
+ * Should be called *after* generic Chain implementation, which fetches from API if available.
  * @param source - Provider to fetch logs from.
  * @param messageId - MessageId to search for.
- * @param hints - Optional hints for pagination (e.g., `address` for onRamp, `page` for pagination size).
+ * @param opts - Optional hints for pagination (e.g., `address` for onRamp, `page` for pagination size).
  * @returns CCIPRequest with given messageId.
  */
 export async function getMessageById(
   source: Chain,
   messageId: string,
-  hints?: { page?: number; address?: string },
+  opts?: { page?: number; onRamp?: string },
 ): Promise<CCIPRequest> {
-  // Try API first if available
-  if (source.apiClient) {
-    try {
-      return await source.apiClient.getMessageById(messageId)
-    } catch (err) {
-      source.logger.debug('API getMessageById failed, falling back to RPC:', err)
-    }
-  }
-
-  // RPC fallback
   for await (const log of source.getLogs({
     topics: ['CCIPSendRequested', 'CCIPMessageSent'],
-    ...hints,
+    address: opts?.onRamp,
+    ...opts,
   })) {
     const message = (source.constructor as ChainStatic).decodeMessage(log)
     if (message?.messageId !== messageId) continue

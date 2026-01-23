@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
 import './index.ts'
+import { dataLength } from 'ethers'
+
 import { ChainFamily } from './types.ts'
 import {
   bigIntReplacer,
@@ -22,7 +24,6 @@ import {
   snakeToCamel,
   toLeArray,
 } from './utils.ts'
-import { dataLength } from 'ethers'
 
 describe('getSomeBlockNumberBefore', () => {
   it('should return a block number before the given timestamp', async () => {

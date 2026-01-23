@@ -347,16 +347,20 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
-   * Scan for a CCIP request by message ID
+   * Fetch a message by ID.
+   * Default implementation just tries API.
+   * Children may override to fetch from chain as fallback
    * @param messageId - message ID to fetch request for
-   * @param onRamp - address may be required in some implementations, and throw if missing
+   * @param _opts - onRamp may be required in some implementations, and throw if missing
    * @returns CCIPRequest
    **/
-  getMessageById?(
+  async getMessageById(
     messageId: string,
-    onRamp?: string,
-    opts?: { page?: number },
-  ): Promise<CCIPRequest>
+    _opts?: { page?: number; onRamp?: string },
+  ): Promise<CCIPRequest> {
+    if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
+    return this.apiClient.getMessageById(messageId)
+  }
 
   /**
    * Fetches all CCIP messages contained in a given commit batch.

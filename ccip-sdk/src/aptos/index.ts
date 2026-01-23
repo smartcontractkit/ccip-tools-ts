@@ -94,7 +94,6 @@ import {
   decodeMessage,
   getMessageById,
   getMessagesInBatch,
-  getMessagesInTx,
 } from '../requests.ts'
 export type { UnsignedAptosTx }
 
@@ -250,14 +249,19 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   /** {@inheritDoc Chain.getMessageById} */
   override async getMessageById(
     messageId: string,
-    onRamp?: string,
-    opts?: { page?: number },
+    opts?: { page?: number; onRamp?: string },
   ): Promise<CCIPRequest> {
-    if (!onRamp) throw new CCIPOnRampRequiredError()
-    return getMessageById(this, messageId, {
-      address: await this.getOnRampForRouter(onRamp, 0n),
-      ...opts,
-    })
+    try {
+      // try API first
+      return await super.getMessageById(messageId, opts)
+    } catch (_) {
+      if (!opts?.onRamp) throw new CCIPOnRampRequiredError()
+      // fallsback to RPC
+      return getMessageById(this, messageId, {
+        ...opts,
+        onRamp: await this.getOnRampForRouter(opts.onRamp, 0n),
+      })
+    }
   }
 
   /** {@inheritDoc Chain.getMessagesInBatch} */
