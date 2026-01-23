@@ -160,29 +160,11 @@ export function buildMessageForDest(message: MessageInput, dest: ChainFamily): A
 
 /**
  * Fetch all CCIP messages in a transaction.
- * Tries API first if available, falls back to RPC log decoding.
  * @param source - Chain
  * @param tx - ChainTransaction to search in
  * @returns CCIP requests (messages) in the transaction (at least one)
  **/
 export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Promise<CCIPRequest[]> {
-  const txHash = tx.hash
-
-  // Try API first if available
-  if (source.apiClient) {
-    try {
-      const messageIds = await source.apiClient.getMessageIdsInTx(txHash)
-      if (messageIds.length > 0) {
-        const apiRequests = await Promise.all(
-          messageIds.map((id) => source.apiClient!.getMessageById(id)),
-        )
-        return apiRequests
-      }
-    } catch (err) {
-      source.logger.debug('API getMessageIdsInTx failed, falling back to RPC:', err)
-    }
-  }
-
   // RPC fallback
   const requests: CCIPRequest[] = []
   for (const log of tx.logs) {
@@ -204,10 +186,7 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
     }
     requests.push({ lane, message, log, tx })
   }
-  if (!requests.length) {
-    throw new CCIPMessageNotFoundInTxError(txHash)
-  }
-
+  if (!requests.length) throw new CCIPMessageNotFoundInTxError(tx.hash)
   return requests
 }
 

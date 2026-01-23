@@ -52,10 +52,6 @@ class MockChain extends Chain {
     }
   }
 
-  override async getMessagesInTx(_tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return []
-  }
-
   override async getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,

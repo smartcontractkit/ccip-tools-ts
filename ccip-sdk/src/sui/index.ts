@@ -250,11 +250,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
   }
 
-  /** {@inheritDoc Chain.getMessagesInTx} */
-  override async getMessagesInTx(_tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getMessagesInTx'))
-  }
-
   /** {@inheritDoc Chain.getMessagesInBatch} */
   override async getMessagesInBatch<
     R extends PickDeep<

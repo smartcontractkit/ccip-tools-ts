@@ -247,11 +247,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     yield* streamAptosLogs(this, opts)
   }
 
-  /** {@inheritDoc Chain.getMessagesInTx} */
-  async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return getMessagesInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
-  }
-
   /** {@inheritDoc Chain.getMessageById} */
   override async getMessageById(
     messageId: string,

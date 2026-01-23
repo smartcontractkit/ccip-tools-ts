@@ -322,11 +322,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     yield* getEvmLogs(filter, this)
   }
 
-  /** {@inheritDoc Chain.getMessagesInTx} */
-  async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return getMessagesInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
-  }
-
   /** {@inheritDoc Chain.getMessageById} */
   override getMessageById(
     messageId: string,

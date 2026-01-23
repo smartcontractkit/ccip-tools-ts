@@ -363,11 +363,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
   }
 
-  /** {@inheritDoc Chain.getMessagesInTx} */
-  override async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return getMessagesInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
-  }
-
   /** {@inheritDoc Chain.getMessagesInBatch} */
   override async getMessagesInBatch<
     R extends PickDeep<
