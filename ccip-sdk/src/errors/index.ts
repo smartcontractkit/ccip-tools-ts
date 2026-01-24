@@ -67,7 +67,6 @@ export { CCIPExtraArgsInvalidError, CCIPExtraArgsParseError } from './specialize
 
 // Specialized errors - Token & Registry
 export {
-  CCIPLegacyTokenPoolsUnsupportedError,
   CCIPTokenDecimalsInsufficientError,
   CCIPTokenNotConfiguredError,
   CCIPTokenNotFoundError,

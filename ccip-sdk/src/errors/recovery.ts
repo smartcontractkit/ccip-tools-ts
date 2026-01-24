@@ -67,7 +67,6 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Use a supported CCIP version for this chain. Check the lane configuration for compatible versions.',
   VERSION_FEATURE_UNAVAILABLE: 'This feature requires CCIP v1.6 or later.',
   VERSION_REQUIRES_LANE: 'Decoding commits from CCIP <= v1.5 requires lane information.',
-  LEGACY_TOKEN_POOLS_UNSUPPORTED: 'Legacy token pools (< v1.5) are not supported.',
 
   EXTRA_ARGS_PARSE_FAILED: 'Verify the format matches the source chain family.',
   EXTRA_ARGS_UNKNOWN: 'Use EVMExtraArgsV1/V2, SVMExtraArgsV1, or SuiExtraArgsV1.',

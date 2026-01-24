@@ -829,20 +829,6 @@ export class CCIPChainFamilyMismatchError extends CCIPError {
   }
 }
 
-// Token Pool
-
-/** Thrown when legacy (pre-1.5) token pools are not supported. */
-export class CCIPLegacyTokenPoolsUnsupportedError extends CCIPError {
-  override readonly name = 'CCIPLegacyTokenPoolsUnsupportedError'
-  /** Creates a legacy token pools unsupported error. */
-  constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.LEGACY_TOKEN_POOLS_UNSUPPORTED, 'Legacy <1.5 token pools not supported', {
-      ...options,
-      isTransient: false,
-    })
-  }
-}
-
 // Merkle Validation
 
 /** Thrown when merkle proof is empty. */

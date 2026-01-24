@@ -3,6 +3,7 @@ import { after, beforeEach, describe, it, mock } from 'node:test'
 
 import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
+import { estimateExecGas } from './evm/gas.ts'
 import { estimateExecGasForRequest } from './gas.ts'
 import { CCIPVersion, ChainFamily } from './types.ts'
 
@@ -13,6 +14,7 @@ function createMockChains(onRamp: string, offRamp: string) {
   const sourceRouter = getAddress(hexlify(randomBytes(20)))
   const destRouter = getAddress(hexlify(randomBytes(20)))
   const destOnRamp = getAddress(hexlify(randomBytes(20)))
+  const tokenAdminRegistry = getAddress(hexlify(randomBytes(20)))
 
   const mockSourceChain = {
     network: {
@@ -27,6 +29,15 @@ function createMockChains(onRamp: string, offRamp: string) {
     getRouterForOnRamp: mock.fn(async () => sourceRouter),
     getOffRampsForRouter: mock.fn(async () => [offRamp]),
     getOnRampForOffRamp: mock.fn(async () => destOnRamp),
+    getTokenAdminRegistryFor: mock.fn(async () => tokenAdminRegistry),
+    getRegistryTokenConfig: mock.fn(async (_registry: string, _token: string) => ({
+      tokenPool: getAddress(hexlify(randomBytes(20))),
+    })),
+    getTokenPoolRemotes: mock.fn(async (_pool: string, _destChainSelector: bigint) => ({
+      'ethereum-testnet-sepolia-base-1': {
+        remoteToken: getAddress(hexlify(randomBytes(20))),
+      },
+    })),
   }
 
   const mockDestChain = {
@@ -43,13 +54,17 @@ function createMockChains(onRamp: string, offRamp: string) {
         async () => '0x0000000000000000000000000000000000000000000000000000000000000000',
       ), // balanceOf returns 0
     },
-    getRouterForOffRamp: mock.fn(async () => destRouter),
+    getRouterForOffRamp: mock.fn(async (_offRamp: string) => destRouter),
     getTokenInfo: mock.fn(async () => ({ decimals: 18 })),
     getOffRampsForRouter: mock.fn(async () => [offRamp]),
     getRouterForOnRamp: mock.fn(async () => destRouter),
     // This is the key - it needs to return the onRamp to satisfy the discovery logic
     getOnRampForOffRamp: mock.fn(async () => onRamp),
     balanceOf: mock.fn(async () => 0n),
+    estimateReceiveExecution: mock.fn(async (opts: any) => {
+      const router = await mockDestChain.getRouterForOffRamp(opts.offRamp)
+      return estimateExecGas({ provider: mockDestChain.provider, router, ...opts })
+    }),
   }
 
   return { mockSourceChain, mockDestChain }
@@ -223,16 +238,26 @@ describe('estimateExecGasForRequest', () => {
     assert.equal(mockDestChain.getTokenInfo.mock.calls.length, 1)
   })
 
-  it('should throw error for legacy token pools without destTokenAddress', async () => {
+  it('should handle token amounts with only token property (v1.5+ format)', async () => {
     const onRamp = getAddress(hexlify(randomBytes(20)))
     const offRamp = getAddress(hexlify(randomBytes(20)))
     const router = getAddress(hexlify(randomBytes(20)))
+    const sourceToken = getAddress(hexlify(randomBytes(20)))
+    const destToken = getAddress(hexlify(randomBytes(20)))
 
     const chains = createMockChains(onRamp, offRamp)
     mockSourceChain = chains.mockSourceChain
     mockDestChain = chains.mockDestChain
 
     mockDestChain.getRouterForOffRamp = mock.fn(async () => router)
+    mockDestChain.provider.send = mock.fn(async () => toBeHex(40_000))
+    mockDestChain.getTokenInfo = mock.fn(async () => ({ decimals: 18 }))
+    mockSourceChain.getTokenInfo = mock.fn(async () => ({ decimals: 18 }))
+    mockSourceChain.getTokenPoolRemotes = mock.fn(async () => ({
+      'ethereum-testnet-sepolia-base-1': {
+        remoteToken: destToken,
+      },
+    }))
 
     const message = {
       sender: getAddress(hexlify(randomBytes(20))),
@@ -240,10 +265,9 @@ describe('estimateExecGasForRequest', () => {
       data: '0x',
       tokenAmounts: [
         {
-          sourcePoolAddress: getAddress(hexlify(randomBytes(20))),
-          // Missing destTokenAddress - legacy format
+          token: sourceToken,
           amount: 1000n,
-        } as any,
+        },
       ],
     }
 
@@ -251,20 +275,18 @@ describe('estimateExecGasForRequest', () => {
       sourceChainSelector,
       destChainSelector,
       onRamp,
-      version: CCIPVersion.V1_2,
+      version: CCIPVersion.V1_5,
     }
 
-    await assert.rejects(
-      async () => {
-        await estimateExecGasForRequest(mockSourceChain, mockDestChain, {
-          lane,
-          message,
-        })
-      },
-      {
-        message: 'Legacy <1.5 token pools not supported',
-      },
-    )
+    const result = await estimateExecGasForRequest(mockSourceChain, mockDestChain, {
+      lane,
+      message,
+    })
+
+    assert.equal(result, 19700) // 40000 - (21000 - 700)
+    assert.equal(mockSourceChain.getTokenAdminRegistryFor.mock.calls.length, 1)
+    assert.equal(mockSourceChain.getRegistryTokenConfig.mock.calls.length, 1)
+    assert.equal(mockSourceChain.getTokenPoolRemotes.mock.calls.length, 1)
   })
 
   it('should handle multiple token amounts', async () => {
