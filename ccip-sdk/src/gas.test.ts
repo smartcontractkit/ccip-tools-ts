@@ -4,7 +4,7 @@ import { after, beforeEach, describe, it, mock } from 'node:test'
 import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
 import { estimateExecGas } from './evm/gas.ts'
-import { estimateExecGasForRequest } from './gas.ts'
+import { estimateReceiveExecution } from './gas.ts'
 import { CCIPVersion, ChainFamily } from './types.ts'
 
 // Test doubles - we create mock chain objects that implement the minimal interface needed
@@ -122,7 +122,7 @@ describe('estimateExecGasForRequest', () => {
       version: CCIPVersion.V1_2,
     }
 
-    const result = await estimateExecGasForRequest(mockSourceChain, mockDestChain, {
+    const result = await estimateReceiveExecution(mockSourceChain, mockDestChain, {
       lane,
       message,
     })
@@ -175,7 +175,7 @@ describe('estimateExecGasForRequest', () => {
       version: CCIPVersion.V1_5,
     }
 
-    const result = await estimateExecGasForRequest(mockSourceChain, mockDestChain, {
+    const result = await estimateReceiveExecution(mockSourceChain, mockDestChain, {
       lane,
       message,
     })
@@ -228,7 +228,7 @@ describe('estimateExecGasForRequest', () => {
       version: CCIPVersion.V1_5,
     }
 
-    const result = await estimateExecGasForRequest(mockSourceChain, mockDestChain, {
+    const result = await estimateReceiveExecution(mockSourceChain, mockDestChain, {
       lane,
       message,
     })
@@ -278,7 +278,7 @@ describe('estimateExecGasForRequest', () => {
       version: CCIPVersion.V1_5,
     }
 
-    const result = await estimateExecGasForRequest(mockSourceChain, mockDestChain, {
+    const result = await estimateReceiveExecution(mockSourceChain, mockDestChain, {
       lane,
       message,
     })
@@ -336,7 +336,7 @@ describe('estimateExecGasForRequest', () => {
       version: CCIPVersion.V1_5,
     }
 
-    const result = await estimateExecGasForRequest(mockSourceChain, mockDestChain, {
+    const result = await estimateReceiveExecution(mockSourceChain, mockDestChain, {
       lane,
       message,
     })
@@ -378,7 +378,7 @@ describe('estimateExecGasForRequest', () => {
       version: CCIPVersion.V1_5,
     }
 
-    const result = await estimateExecGasForRequest(mockSourceChain, mockDestChain, {
+    const result = await estimateReceiveExecution(mockSourceChain, mockDestChain, {
       lane,
       message,
     })

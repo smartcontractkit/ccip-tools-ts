@@ -13,7 +13,7 @@ import type { Lane } from './types.ts'
  * @param request - CCIP request info containing `lane` and `message` details.
  * @returns Estimated gasLimit.
  */
-export async function estimateExecGasForRequest(
+export async function estimateReceiveExecution(
   source: Chain,
   dest: Chain,
   request: {

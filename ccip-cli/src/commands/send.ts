@@ -6,7 +6,7 @@ import {
   CCIPArgumentInvalidError,
   CCIPTokenNotFoundError,
   ChainFamily,
-  estimateExecGasForRequest,
+  estimateReceiveExecution,
   getDataBytes,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -211,7 +211,7 @@ async function sendMessage(
         // pass undefined sender for default
       }
     }
-    const estimated = await estimateExecGasForRequest(source, dest, {
+    const estimated = await estimateReceiveExecution(source, dest, {
       lane,
       message: {
         sender: walletAddress,

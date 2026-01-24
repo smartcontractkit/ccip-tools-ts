@@ -27,7 +27,7 @@ export {
   decodeExtraArgs,
   encodeExtraArgs,
 } from './extra-args.ts'
-export { estimateExecGasForRequest } from './gas.ts'
+export { estimateReceiveExecution } from './gas.ts'
 export { decodeMessage, getMessagesForSender, sourceToDestTokenAddresses } from './requests.ts'
 export {
   type CCIPCommit,

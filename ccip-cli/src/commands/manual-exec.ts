@@ -8,7 +8,7 @@ import {
   bigIntReplacer,
   calculateManualExecProof,
   discoverOffRamp,
-  estimateExecGasForRequest,
+  estimateReceiveExecution,
   isSupportedTxHash,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
@@ -190,7 +190,7 @@ async function manualExec(
         context: { feature: 'gas estimation' },
       })
 
-    let estimated = await estimateExecGasForRequest(
+    let estimated = await estimateReceiveExecution(
       source,
       dest as unknown as EVMChain,
       request as CCIPRequest<typeof CCIPVersion.V1_5 | typeof CCIPVersion.V1_6>,
