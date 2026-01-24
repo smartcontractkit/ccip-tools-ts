@@ -1,9 +1,11 @@
 import {
   type BytesLike,
+  type JsonRpcApiProvider,
   Contract,
   FunctionFragment,
   concat,
   formatUnits,
+  getAddress,
   getNumber,
   hexlify,
   randomBytes,
@@ -12,6 +14,7 @@ import {
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
+import { memoize } from 'micro-memoize'
 
 import type { Chain } from './chain.ts'
 import {
@@ -20,12 +23,11 @@ import {
 } from './errors/index.ts'
 import TokenABI from './evm/abi/BurnMintERC677Token.ts'
 import RouterABI from './evm/abi/Router.ts'
-import { defaultAbiCoder } from './evm/const.ts'
+import { defaultAbiCoder, interfaces } from './evm/const.ts'
 import type { EVMChain } from './evm/index.ts'
 import { discoverOffRamp } from './execution.ts'
 import type { Lane } from './types.ts'
 
-const BALANCES_SLOT = 0
 const ccipReceive = FunctionFragment.from({
   type: 'function',
   name: 'ccipReceive',
@@ -37,6 +39,50 @@ const ccipReceive = FunctionFragment.from({
   outputs: [],
 })
 type Any2EVMMessage = Parameters<TypedContract<typeof RouterABI>['routeMessage']>[0]
+
+const transferFragment = interfaces.Token.getFunction('transfer')!
+
+/**
+ * Finds suitable token balance slot by simulating a fake transfer between 2 non-existent accounts,
+ * with state overrides for the holders' balance, which reverts if override slot is wrong
+ */
+const findBalancesSlot = memoize(
+  async function findBalancesSlot_(token: string, provider: JsonRpcApiProvider): Promise<number> {
+    const fakeHolder = getAddress(hexlify(randomBytes(20)))
+    const fakeRecipient = getAddress(hexlify(randomBytes(20)))
+    const fakeAmount = 1e7
+
+    const calldata = concat([
+      transferFragment.selector,
+      defaultAbiCoder.encode(transferFragment.inputs, [fakeRecipient, fakeAmount]),
+    ])
+    let firstErr
+    // try range(0..15), but start with most probable 0 (common ERC20) and 9 (USDC)
+    for (const slot of [0, 9, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15]) {
+      try {
+        await provider.send('eth_estimateGas', [
+          { from: fakeHolder, to: token, data: calldata },
+          'latest',
+          {
+            [token]: {
+              stateDiff: {
+                [solidityPackedKeccak256(['uint256', 'uint256'], [fakeHolder, slot])]: toBeHex(
+                  fakeAmount,
+                  32,
+                ),
+              },
+            },
+          },
+        ])
+        return slot // if didn't reject
+      } catch (err) {
+        firstErr ??= err
+      }
+    }
+    throw firstErr as Error
+  },
+  { maxArgs: 1 },
+)
 
 /**
  * Estimate CCIP gasLimit needed to execute a request on a contract receiver.
@@ -101,19 +147,20 @@ export async function estimateExecGasForRequest(
   const stateOverrides: Record<string, { stateDiff: Record<string, string> }> = {}
   for (const { token, amount } of destTokenAmounts) {
     if (!(token in destAmounts)) {
-      const tokenContract = new Contract(token, TokenABI, dest) as unknown as TypedContract<
-        typeof TokenABI
-      >
+      const tokenContract = new Contract(
+        token,
+        TokenABI,
+        dest.provider,
+      ) as unknown as TypedContract<typeof TokenABI>
       const currentBalance = await tokenContract.balanceOf(request.message.receiver)
       destAmounts[token] = currentBalance
     }
     destAmounts[token]! += amount
+    const balancesSlot = await findBalancesSlot(token, dest.provider)
     stateOverrides[token] = {
       stateDiff: {
-        [solidityPackedKeccak256(
-          ['uint256', 'uint256'],
-          [request.message.receiver, BALANCES_SLOT],
-        )]: toBeHex(destAmounts[token]!, 32),
+        [solidityPackedKeccak256(['uint256', 'uint256'], [request.message.receiver, balancesSlot])]:
+          toBeHex(destAmounts[token]!, 32),
       },
     }
   }
