@@ -115,6 +115,7 @@ export const builder = (yargs: Argv) =>
       'only-estimate': {
         type: 'boolean',
         describe: 'Only estimate dest exec gasLimit',
+        implies: 'estimate-gas-limit',
       },
       'approve-max': {
         type: 'boolean',

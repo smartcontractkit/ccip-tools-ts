@@ -8,9 +8,11 @@ import type { Lane } from './types.ts'
 
 /**
  * Estimate CCIP gasLimit needed to execute a request on a contract receiver.
- * @param source - Provider for the source chain.
- * @param dest - Provider for the destination chain.
+ * @param source - Source chain object
+ * @param dest - Dest chain object
  * @param request - CCIP request info containing `lane` and `message` details.
+ *   `message` here is a subset of source-side [[CCIPMessage]] or [[MessageInput]], where either
+ *   older `token` or newer `sourcePoolAddress`+`destTokenAddress` can be used for `tokenAmounts`
  * @returns Estimated gasLimit.
  */
 export async function estimateReceiveExecution(
