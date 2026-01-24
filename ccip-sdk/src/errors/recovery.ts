@@ -6,11 +6,12 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Verify the chainId, chain selector, or chain name is correct. Check CCIP documentation for supported chains.',
   CHAIN_SELECTOR_NOT_FOUND:
     'Verify the chain selector is valid. Use networkInfo() to look up selectors.',
-  CHAIN_FAMILY_UNSUPPORTED: 'Supported families: EVM, Solana, Aptos, Sui, TON.',
+  CHAIN_FAMILY_UNSUPPORTED:
+    'This chain family is not supported. Check the method documentation for supported chain families.',
   CHAIN_FAMILY_MISMATCH:
     'Use the correct Chain class for this chain family (e.g., EVMChain for EVM, SolanaChain for Solana).',
-  NETWORK_FAMILY_UNSUPPORTED:
-    'This operation only supports specific chain families. Check the method documentation for supported chain families.',
+  METHOD_UNSUPPORTED:
+    'This method is not supported on this class. Refer to supported implementations.',
   APTOS_NETWORK_UNKNOWN: 'Provide a valid Aptos RPC URL (mainnet or testnet).',
 
   BLOCK_NOT_FOUND: 'Wait for the block to be finalized and retry.',

@@ -1,17 +1,14 @@
 import {
   type CCIPVersion,
   type ChainStatic,
-  type EVMChain,
   type ExtraArgs,
   type MessageInput,
   CCIPArgumentInvalidError,
-  CCIPChainFamilyUnsupportedError,
   CCIPTokenNotFoundError,
   ChainFamily,
   estimateExecGasForRequest,
   getDataBytes,
   networkInfo,
-  sourceToDestTokenAmounts,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { type BytesLike, formatUnits, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
@@ -198,11 +195,7 @@ async function sendMessage(
 
   if (argv.estimateGasLimit != null || argv.onlyEstimate) {
     // TODO: implement for all chain families
-    if (destNetwork.family !== ChainFamily.EVM)
-      throw new CCIPChainFamilyUnsupportedError(destNetwork.family, {
-        context: { feature: 'gas estimation' },
-      })
-    const dest = (await getChain(destNetwork.chainSelector)) as unknown as EVMChain
+    const dest = await getChain(destNetwork.chainSelector)
     const onRamp = await source.getOnRampForRouter(argv.router, destNetwork.chainSelector)
     const lane = {
       sourceChainSelector: source.network.chainSelector,
@@ -210,21 +203,21 @@ async function sendMessage(
       onRamp,
       version: (await source.typeAndVersion(onRamp))[1] as CCIPVersion,
     }
-    const destTokenAmounts = await sourceToDestTokenAmounts(
-      source,
-      destNetwork.chainSelector,
-      onRamp,
-      tokenAmounts,
-    )
 
-    if (!walletAddress) [walletAddress, wallet] = await loadChainWallet(source, argv)
+    if (!walletAddress) {
+      try {
+        ;[walletAddress, wallet] = await loadChainWallet(source, argv)
+      } catch {
+        // pass undefined sender for default
+      }
+    }
     const estimated = await estimateExecGasForRequest(source, dest, {
       lane,
       message: {
         sender: walletAddress,
         receiver,
         data: data || '0x',
-        tokenAmounts: destTokenAmounts,
+        tokenAmounts,
       },
     })
     logger.log('Estimated gasLimit:', estimated)

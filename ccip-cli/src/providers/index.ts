@@ -8,7 +8,6 @@ import {
   type EVMChain,
   type TONChain,
   CCIPChainFamilyUnsupportedError,
-  CCIPNetworkFamilyUnsupportedError,
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
   ChainFamily,
@@ -94,7 +93,7 @@ export function fetchChainsFromRpcs(
   const loadChainFamily = (F: ChainFamily, txHash?: string) =>
     (initFamily$[F] ??= (endpoints$ ??= collectEndpoints.call(ctx, argv)).then((endpoints) => {
       const C = supportedChains[F]
-      if (!C) throw new CCIPNetworkFamilyUnsupportedError(F)
+      if (!C) throw new CCIPChainFamilyUnsupportedError(F)
       ctx.logger.debug('Racing', endpoints.size, 'RPC endpoints for', F)
 
       const chains$: Promise<Chain>[] = []

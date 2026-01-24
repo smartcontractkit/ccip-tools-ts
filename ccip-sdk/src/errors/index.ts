@@ -9,6 +9,7 @@ export {
   CCIPChainFamilyMismatchError,
   CCIPChainFamilyUnsupportedError,
   CCIPChainNotFoundError,
+  CCIPMethodUnsupportedError,
 } from './specialized.ts'
 
 // Specialized errors - Block & Transaction
@@ -161,7 +162,6 @@ export {
   CCIPLogTopicsNotFoundError,
   CCIPLogsNotFoundError,
   CCIPMessageDecodeError,
-  CCIPNetworkFamilyUnsupportedError,
   CCIPNotImplementedError,
   CCIPRpcNotFoundError,
   CCIPTimeoutError,

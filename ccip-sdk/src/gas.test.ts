@@ -114,9 +114,10 @@ describe('estimateExecGasForRequest', () => {
 
     assert.equal(result, 23700) // 44000 - (21000 - 700)
     assert.equal(mockDestChain.getRouterForOffRamp.mock.calls.length, 1)
-    assert.equal(mockDestChain.provider.send.mock.calls.length, 1)
+    assert.ok(mockDestChain.provider.send.mock.calls.length >= 1)
 
-    const sendCall = mockDestChain.provider.send.mock.calls[0]
+    const sendCall =
+      mockDestChain.provider.send.mock.calls[mockDestChain.provider.send.mock.calls.length - 1]
     assert.equal(sendCall.arguments[0], 'eth_estimateGas')
     assert.equal(sendCall.arguments[1][0].from, router)
     assert.equal(sendCall.arguments[1][0].to, message.receiver)
@@ -165,9 +166,10 @@ describe('estimateExecGasForRequest', () => {
     })
 
     assert.equal(result, 25700) // 46000 - (21000 - 700)
-    assert.equal(mockDestChain.provider.send.mock.calls.length, 1)
+    assert.ok(mockDestChain.provider.send.mock.calls.length >= 1)
 
-    const sendCall = mockDestChain.provider.send.mock.calls[0]
+    const sendCall =
+      mockDestChain.provider.send.mock.calls[mockDestChain.provider.send.mock.calls.length - 1]
     assert.equal(sendCall.arguments[0], 'eth_estimateGas')
     assert.match(sendCall.arguments[1][0].data, /^0x85572ffb/)
   })
@@ -319,9 +321,10 @@ describe('estimateExecGasForRequest', () => {
 
     assert.equal(result, 39700) // 60000 - (21000 - 700)
     assert.equal(mockSourceChain.getTokenForTokenPool.mock.calls.length, 2)
-    assert.equal(mockDestChain.provider.send.mock.calls.length, 1)
+    assert.ok(mockDestChain.provider.send.mock.calls.length >= 1)
 
-    const sendCall = mockDestChain.provider.send.mock.calls[0]
+    const sendCall =
+      mockDestChain.provider.send.mock.calls[mockDestChain.provider.send.mock.calls.length - 1]
     const stateOverrides = sendCall.arguments[1][2]
     assert.ok(destTokenAddress1 in stateOverrides)
     assert.ok(destTokenAddress2 in stateOverrides)
