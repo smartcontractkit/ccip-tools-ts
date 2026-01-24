@@ -48,7 +48,6 @@ import {
   CCIPExtraArgsLengthInvalidError,
   CCIPLogDataMissingError,
   CCIPLogsAddressRequiredError,
-  CCIPOnRampRequiredError,
   CCIPSolanaExtraArgsEncodingError,
   CCIPSolanaOffRampEventsNotFoundError,
   CCIPSolanaRefAddressesNotFoundError,
@@ -125,12 +124,7 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-import {
-  buildMessageForDest,
-  getMessageById,
-  getMessagesInBatch,
-  getMessagesInTx,
-} from '../requests.ts'
+import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
 import { patchBorsh } from './patchBorsh.ts'
 import { DEFAULT_GAS_LIMIT } from '../evm/const.ts'
 export type { UnsignedSolanaTx }
@@ -436,21 +430,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         yield log
       }
     }
-  }
-
-  /** {@inheritDoc Chain.getMessagesInTx} */
-  async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return getMessagesInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
-  }
-
-  /** {@inheritDoc Chain.getMessageById} */
-  override getMessageById(
-    messageId: string,
-    onRamp?: string,
-    opts?: { page?: number },
-  ): Promise<CCIPRequest> {
-    if (!onRamp) throw new CCIPOnRampRequiredError()
-    return getMessageById(this, messageId, { address: onRamp, ...opts })
   }
 
   /** {@inheritDoc Chain.getMessagesInBatch} */

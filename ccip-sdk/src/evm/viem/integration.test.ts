@@ -10,6 +10,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { mainnet, sepolia } from 'viem/chains'
 
 import { ViemTransportProvider, fromViemClient, viemWallet } from './index.ts'
+import { ChainFamily } from '../../types.ts'
 import { createMockEthereumProvider } from '../__mocks__/ethereum-provider.ts'
 
 describe('SDK Integration - Viem Browser (custom transport)', () => {
@@ -101,7 +102,7 @@ describe('SDK Integration - Viem Browser (custom transport)', () => {
     const chain = await fromViemClient(client)
 
     assert.ok(chain)
-    assert.equal(chain.network.family, 'evm')
+    assert.equal(chain.network.family, ChainFamily.EVM)
     assert.equal(chain.network.chainId, 1)
   })
 

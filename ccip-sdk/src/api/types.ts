@@ -1,5 +1,7 @@
+import type { CCIPRequest, MessageStatus, NetworkInfo } from '../types.ts'
+
 /**
- * Response from GET /v1/lanes/latency endpoint.
+ * Response from GET /v2/lanes/latency endpoint.
  * Returns only the latency value - caller already knows source/dest chains.
  */
 export type LaneLatencyResponse = {
@@ -10,18 +12,8 @@ export type LaneLatencyResponse = {
 /** Raw API response (string selectors, before conversion) */
 export type RawLaneLatencyResponse = {
   lane: {
-    sourceNetworkInfo: {
-      name: string
-      chainSelector: string
-      chainId: string
-      chainFamily: string
-    }
-    destNetworkInfo: {
-      name: string
-      chainSelector: string
-      chainId: string
-      chainFamily: string
-    }
+    sourceNetworkInfo: RawNetworkInfo
+    destNetworkInfo: RawNetworkInfo
     routerAddress: string
   }
   totalMs: number
@@ -37,3 +29,163 @@ export type APIErrorResponse = {
   /** Human-readable error message with details */
   message: string
 }
+
+// ============================================================================
+// GET /v2/messages/{messageId} types
+// ============================================================================
+
+/** Network info from API response */
+export type RawNetworkInfo = {
+  name: string
+  chainSelector: string
+  chainId: string
+  chainFamily: string
+}
+
+/** Token amount from API response */
+export type RawTokenAmount = {
+  sourceTokenAddress: string
+  destTokenAddress: string
+  sourcePoolAddress: string
+  amount: string
+  extraData?: string | null
+  destGasAmount?: string | null
+}
+
+/** EVM extra args from API (GenericExtraArgsV2) */
+export type RawEVMExtraArgs = {
+  gasLimit: string
+  allowOutOfOrderExecution: boolean
+}
+
+/** SVM extra args from API (SVMExtraArgsV1) */
+export type RawSVMExtraArgs = {
+  computeUnits: bigint
+  accountIsWritableBitmap: string
+  allowOutOfOrderExecution: boolean
+  tokenReceiver: string
+  accounts: string[]
+}
+
+/** Fixed fee detail from API */
+export type RawFixedFee = {
+  contractAddress: string
+  feeType: string
+  amount: string
+}
+
+/** Fixed fees details wrapper from API response */
+export type RawFixedFeesDetails = {
+  tokenAddress: string
+  totalAmount: string
+  items?: RawFixedFee[]
+}
+
+/** Fees from API response */
+export type RawFees = {
+  fixedFeesDetails: RawFixedFeesDetails
+}
+
+/** Raw API response from GET /v2/messages/:messageId */
+export type RawMessageResponse = {
+  messageId: string
+  sender: string
+  receiver: string
+  status: string
+  sourceNetworkInfo: RawNetworkInfo
+  destNetworkInfo: RawNetworkInfo
+  sendTransactionHash: string
+  sendTimestamp: string
+  tokenAmounts: RawTokenAmount[]
+  extraArgs: RawEVMExtraArgs | RawSVMExtraArgs
+  readyForManualExecution: boolean
+  finality: bigint
+  fees: RawFees
+  // Required fields (as of schema v2.0.0)
+  origin: string
+  sequenceNumber: string
+  onramp: string
+  sendBlockNumber: bigint
+  sendLogIndex: bigint
+  // Optional fields
+  nonce?: string | null
+  routerAddress?: string | null
+  version?: string | null
+  receiptTransactionHash?: string
+  receiptTimestamp?: string
+  deliveryTime?: bigint
+  data?: string | null
+}
+
+// ============================================================================
+// GET /v2/messages search endpoint types
+// ============================================================================
+
+/** Message search result from /v2/messages search endpoint */
+export type RawMessageSearchResult = {
+  messageId: string
+  origin: string
+  sender: string
+  receiver: string
+  status: string
+  sourceNetworkInfo: RawNetworkInfo
+  destNetworkInfo: RawNetworkInfo
+  sendTransactionHash: string
+  sendTimestamp: string
+}
+
+/** Paginated response from /v2/messages search endpoint */
+export type RawMessagesResponse = {
+  data: RawMessageSearchResult[]
+  pagination: {
+    limit: number
+    hasNextPage: boolean
+    cursor?: string | null
+  }
+}
+
+// ============================================================================
+// APICCIPRequest type - derived from CCIPRequest
+// ============================================================================
+
+/**
+ * API-specific metadata fields not present in CCIPRequest.
+ * These fields are only available when fetching message details from the CCIP API.
+ */
+export type APICCIPRequestMetadata = {
+  /** Message lifecycle status from API */
+  status: MessageStatus
+  /** Whether message is ready for manual execution */
+  readyForManualExecution: boolean
+  /** Finality block confirmations */
+  finality: bigint
+  /** Receipt transaction hash if executed */
+  receiptTransactionHash?: string
+  /** Receipt timestamp (Unix) if executed */
+  receiptTimestamp?: number
+  /** End-to-end delivery time in ms if completed */
+  deliveryTime?: bigint
+  /** Source network info */
+  sourceNetworkInfo: NetworkInfo
+  /** Destination network info */
+  destNetworkInfo: NetworkInfo
+}
+
+/**
+ * CCIP request information retrieved from API.
+ *
+ * Combines standard {@link CCIPRequest} fields with API-specific metadata.
+ *
+ * **Complete fields:**
+ * - `lane`: All fields available (sourceChainSelector, destChainSelector, onRamp, version)
+ * - `message`: All core fields (messageId, sender, receiver, data, sequenceNumber, nonce,
+ *   tokenAmounts, feeToken, feeTokenAmount) plus extraArgs (EVM or SVM depending on chain)
+ * - `log`: transactionHash, address, index, blockNumber, topics, data
+ * - `tx`: hash, timestamp, from, logs, blockNumber
+ *
+ * **API-only fields** (in {@link APICCIPRequestMetadata}):
+ * - `status`, `readyForManualExecution`, `finality`
+ * - `receiptTransactionHash`, `receiptTimestamp`, `deliveryTime`
+ * - `sourceNetworkInfo`, `destNetworkInfo`
+ */
+export type APICCIPRequest = CCIPRequest & APICCIPRequestMetadata

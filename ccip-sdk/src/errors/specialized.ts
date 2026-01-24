@@ -112,6 +112,18 @@ export class CCIPMessageIdNotFoundError extends CCIPError {
   }
 }
 
+/** Thrown when messageId format is invalid. */
+export class CCIPMessageIdValidationError extends CCIPError {
+  override readonly name = 'CCIPMessageIdValidationError'
+  /** Creates a message ID validation error. */
+  constructor(message: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.MESSAGE_ID_INVALID, message, {
+      ...options,
+      isTransient: false,
+    })
+  }
+}
+
 /** Thrown when not all messages in batch were found. Transient: may still be indexing. */
 export class CCIPMessageBatchIncompleteError extends CCIPError {
   override readonly name = 'CCIPMessageBatchIncompleteError'
@@ -150,6 +162,38 @@ export class CCIPMessageNotInBatchError extends CCIPError {
         ...options,
         isTransient: false,
         context: { ...options?.context, messageId, seqNumRange },
+      },
+    )
+  }
+}
+
+/** Thrown when message retrieval fails via both API and RPC. */
+export class CCIPMessageRetrievalError extends CCIPError {
+  override readonly name = 'CCIPMessageRetrievalError'
+  /** Creates a message retrieval error with both API and RPC failure context. */
+  constructor(
+    messageId: string,
+    apiError: CCIPError | undefined,
+    rpcError: CCIPError | undefined,
+    options?: CCIPErrorOptions,
+  ) {
+    const apiMsg = apiError?.message ?? 'API disabled or not attempted'
+    const rpcMsg = rpcError?.message ?? 'RPC not configured'
+    super(
+      CCIPErrorCode.MESSAGE_RETRIEVAL_FAILED,
+      `Failed to retrieve message ${messageId} via API and RPC.\n  API: ${apiMsg}\n  RPC: ${rpcMsg}`,
+      {
+        ...options,
+        isTransient: (apiError?.isTransient ?? false) || (rpcError?.isTransient ?? false),
+        retryAfterMs: apiError?.retryAfterMs ?? rpcError?.retryAfterMs,
+        recovery:
+          'Verify the message ID is correct. If using --id-from-source, configure an RPC for on-chain lookup or wait for API indexing.',
+        context: {
+          ...options?.context,
+          messageId,
+          apiError: apiError?.message,
+          rpcError: rpcError?.message,
+        },
       },
     )
   }
@@ -579,6 +623,20 @@ export class CCIPHttpError extends CCIPError {
       ...options,
       isTransient: isTransientHttpStatus(status),
       context: { ...options?.context, status, statusText },
+    })
+  }
+}
+
+/** Thrown when a request times out. Transient: network may recover. */
+export class CCIPTimeoutError extends CCIPError {
+  override readonly name = 'CCIPTimeoutError'
+  /** Creates a timeout error. */
+  constructor(operation: string, timeoutMs: number, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.TIMEOUT, `Request timed out after ${timeoutMs}ms: ${operation}`, {
+      ...options,
+      isTransient: true,
+      retryAfterMs: 5000,
+      context: { ...options?.context, operation, timeoutMs },
     })
   }
 }
@@ -1727,6 +1785,28 @@ export class CCIPApiClientNotAvailableError extends CCIPError {
       CCIPErrorCode.API_CLIENT_NOT_AVAILABLE,
       'CCIP API client is not available. Initialize with an apiClient or remove the explicit opt-out (apiClient: null).',
       { ...options, isTransient: false },
+    )
+  }
+}
+
+/** Thrown when API returns hasNextPage=true unexpectedly (more than 100 messages). */
+export class CCIPUnexpectedPaginationError extends CCIPError {
+  override readonly name = 'CCIPUnexpectedPaginationError'
+  /**
+   * Creates an unexpected pagination error.
+   * @param txHash - The transaction hash queried
+   * @param messageCount - Number of messages returned in the response
+   * @param options - Additional error options
+   */
+  constructor(txHash: string, messageCount: number, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.API_UNEXPECTED_PAGINATION,
+      `Transaction ${txHash} contains more CCIP messages than expected (${messageCount}+ returned with hasNextPage=true)`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, txHash, messageCount },
+      },
     )
   }
 }

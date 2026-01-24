@@ -60,11 +60,11 @@ export type MergeArrayElements<T, U> = {
  * Enumeration of supported blockchain families.
  */
 export const ChainFamily = {
-  EVM: 'evm',
-  Solana: 'solana',
-  Aptos: 'aptos',
-  Sui: 'sui',
-  TON: 'ton',
+  EVM: 'EVM',
+  Solana: 'SVM',
+  Aptos: 'APTOS',
+  Sui: 'SUI',
+  TON: 'TON',
 } as const
 /** Type representing one of the supported chain families. */
 export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
@@ -88,7 +88,7 @@ type ChainFamilyWithId<F extends ChainFamily> = F extends
   : F extends typeof ChainFamily.Solana
     ? { readonly family: F; readonly chainId: string }
     : F extends typeof ChainFamily.Aptos | typeof ChainFamily.Sui
-      ? { readonly family: F; readonly chainId: `${F}:${number}` }
+      ? { readonly family: F; readonly chainId: `${Lowercase<F>}:${number}` }
       : never
 
 /**
@@ -216,6 +216,10 @@ export const MessageStatus = {
   Success: 'SUCCESS',
   /** Message execution failed on destination. */
   Failed: 'FAILED',
+  /** Message is being verified by the CCIP network */
+  Verifying: 'VERIFYING',
+  /** Message has been verified by the CCIP network */
+  Verified: 'VERIFIED',
 } as const
 /** Type representing a CCIP message lifecycle status. */
 export type MessageStatus = (typeof MessageStatus)[keyof typeof MessageStatus]

@@ -20,6 +20,7 @@ import type {
   SuiExtraArgsV1,
 } from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
+import { getMessagesInTx } from './requests.ts'
 import type { UnsignedSolanaTx } from './solana/types.ts'
 import type { UnsignedTONTx } from './ton/types.ts'
 import {
@@ -325,19 +326,41 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param tx - ChainTransaction or txHash to fetch requests from
    * @returns CCIP messages in the transaction (at least one)
    **/
-  abstract getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]>
+  async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+    const txHash = typeof tx === 'string' ? tx : tx.hash
+    try {
+      if (typeof tx === 'string') tx = await this.getTransaction(tx)
+      return getMessagesInTx(this, tx)
+    } catch (err) {
+      // if getTransaction or decoding fails, try API if available
+      if (this.apiClient) {
+        const messageIds = await this.apiClient.getMessageIdsInTx(txHash)
+        if (messageIds.length > 0) {
+          const apiRequests = await Promise.all(
+            messageIds.map((id) => this.apiClient!.getMessageById(id)),
+          )
+          return apiRequests
+        }
+      }
+      throw err
+    }
+  }
 
   /**
-   * Scan for a CCIP request by message ID
+   * Fetch a message by ID.
+   * Default implementation just tries API.
+   * Children may override to fetch from chain as fallback
    * @param messageId - message ID to fetch request for
-   * @param onRamp - address may be required in some implementations, and throw if missing
+   * @param _opts - onRamp may be required in some implementations, and throw if missing
    * @returns CCIPRequest
    **/
-  getMessageById?(
+  async getMessageById(
     messageId: string,
-    onRamp?: string,
-    opts?: { page?: number },
-  ): Promise<CCIPRequest>
+    _opts?: { page?: number; onRamp?: string },
+  ): Promise<CCIPRequest> {
+    if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
+    return this.apiClient.getMessageById(messageId)
+  }
 
   /**
    * Fetches all CCIP messages contained in a given commit batch.

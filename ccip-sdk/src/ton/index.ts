@@ -21,7 +21,6 @@ import {
   CCIPWalletInvalidError,
 } from '../errors/specialized.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
-import { getMessagesInTx } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type CCIPExecution,
@@ -361,11 +360,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         yield log
       }
     }
-  }
-
-  /** {@inheritDoc Chain.getMessagesInTx} */
-  override async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return getMessagesInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
   }
 
   /** {@inheritDoc Chain.getMessagesInBatch} */

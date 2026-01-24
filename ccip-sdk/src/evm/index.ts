@@ -17,7 +17,6 @@ import {
   dataSlice,
   encodeBase58,
   getAddress,
-  getBytes,
   hexlify,
   isBytesLike,
   isHexString,
@@ -122,12 +121,7 @@ import {
   parseSourceTokenData,
 } from './messages.ts'
 import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
-import {
-  buildMessageForDest,
-  getMessageById,
-  getMessagesInBatch,
-  getMessagesInTx,
-} from '../requests.ts'
+import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
 import type { UnsignedEVMTx } from './types.ts'
 export type { UnsignedEVMTx }
 
@@ -321,20 +315,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (filter.watch instanceof Promise)
       filter = { ...filter, watch: Promise.race([filter.watch, this.destroy$]) }
     yield* getEvmLogs(filter, this)
-  }
-
-  /** {@inheritDoc Chain.getMessagesInTx} */
-  async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return getMessagesInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
-  }
-
-  /** {@inheritDoc Chain.getMessageById} */
-  override getMessageById(
-    messageId: string,
-    onRamp?: string,
-    opts?: { page?: number },
-  ): Promise<CCIPRequest> {
-    return getMessageById(this, messageId, { address: onRamp, ...opts })
   }
 
   /** {@inheritDoc Chain.getMessagesInBatch} */
@@ -649,7 +629,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @returns Checksummed EVM address.
    */
   static getAddress(bytes: BytesLike): string {
-    bytes = getBytes(bytes)
+    if (isHexString(bytes, 20)) return getAddress(bytes)
+    bytes = getAddressBytes(bytes)
     if (bytes.length < 20) throw new CCIPAddressInvalidEvmError(hexlify(bytes))
     else if (bytes.length > 20) {
       if (bytes.slice(0, bytes.length - 20).every((b) => b === 0)) {
