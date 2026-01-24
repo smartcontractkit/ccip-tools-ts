@@ -113,6 +113,7 @@ import {
   requestsFragments,
 } from './const.ts'
 import { parseData } from './errors.ts'
+import { estimateExecGas } from './gas.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { getEvmLogs } from './logs.ts'
 import {
@@ -1484,5 +1485,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       }
     }
     yield* super.getExecutionReceipts(opts_)
+  }
+
+  /** {@inheritDoc Chain.estimateReceiveExecution} */
+  override async estimateReceiveExecution(
+    opts: Parameters<NonNullable<Chain['estimateReceiveExecution']>>[0],
+  ): Promise<number> {
+    const destRouter = await this.getRouterForOffRamp(
+      opts.offRamp,
+      opts.message.sourceChainSelector,
+    )
+    return estimateExecGas({ provider: this.provider, router: destRouter, ...opts })
   }
 }

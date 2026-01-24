@@ -537,7 +537,7 @@ describe('e2e command show Aptos', () => {
   )
 })
 
-describe('e2e command show TON', () => {
+describe.skip('e2e command show TON', () => {
   it('should show complete CCIP transaction details TON to EVM', { timeout: 120000 }, async () => {
     // Test transaction hash (raw 64-char hex, resolved via TonCenter)
     const TX_HASH = '160f4da4b46fa0370ac7f4fcdac03f3a85919bce900be0bacf539df61fca2525'

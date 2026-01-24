@@ -763,6 +763,26 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       },
     }
   }
+
+  /**
+   * Estimate `ccipReceive` execution cost (gas, computeUnits) for this *dest*
+   * @param opts - estimation options
+   * @returns estimated execution cost (gas or computeUnits)
+   */
+  estimateReceiveExecution?(opts: {
+    offRamp: string
+    receiver: string
+    message: {
+      sourceChainSelector: bigint
+      messageId: string
+      sender?: string
+      data?: BytesLike
+      destTokenAmounts?: readonly {
+        token: string
+        amount: bigint
+      }[]
+    }
+  }): Promise<number>
 }
 
 /** Static methods and properties available on Chain class constructors. */

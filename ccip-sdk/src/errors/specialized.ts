@@ -30,6 +30,19 @@ export class CCIPChainFamilyUnsupportedError extends CCIPError {
   }
 }
 
+/** Thrown when some method/operation is not supported on a given implementaiton class. */
+export class CCIPMethodUnsupportedError extends CCIPError {
+  override readonly name = 'CCIPMethodUnsupportedError'
+  /** Creates a method nsupported error. */
+  constructor(klass: string, method: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.METHOD_UNSUPPORTED, `Unsupported method in class: ${klass}.${method}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, class: klass, method },
+    })
+  }
+}
+
 // Block & Transaction
 
 /** Thrown when block not found. Transient: block may not be indexed yet. */
@@ -720,19 +733,6 @@ export class CCIPMessageDecodeError extends CCIPError {
   }
 }
 
-/** Thrown when network family is not supported for an operation. */
-export class CCIPNetworkFamilyUnsupportedError extends CCIPError {
-  override readonly name = 'CCIPNetworkFamilyUnsupportedError'
-  /** Creates a network family unsupported error. */
-  constructor(family: string, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.NETWORK_FAMILY_UNSUPPORTED, `Unsupported network family: ${family}`, {
-      ...options,
-      isTransient: false,
-      context: { ...options?.context, family },
-    })
-  }
-}
-
 /** Thrown when RPC endpoint not found. */
 export class CCIPRpcNotFoundError extends CCIPError {
   override readonly name = 'CCIPRpcNotFoundError'
@@ -826,20 +826,6 @@ export class CCIPChainFamilyMismatchError extends CCIPError {
         context: { ...options?.context, chainName, expected, actual },
       },
     )
-  }
-}
-
-// Token Pool
-
-/** Thrown when legacy (pre-1.5) token pools are not supported. */
-export class CCIPLegacyTokenPoolsUnsupportedError extends CCIPError {
-  override readonly name = 'CCIPLegacyTokenPoolsUnsupportedError'
-  /** Creates a legacy token pools unsupported error. */
-  constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.LEGACY_TOKEN_POOLS_UNSUPPORTED, 'Legacy <1.5 token pools not supported', {
-      ...options,
-      isTransient: false,
-    })
   }
 }
 

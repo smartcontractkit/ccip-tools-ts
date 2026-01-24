@@ -146,7 +146,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       chainId = 'sui:4' // devnet
     } else {
       throw new CCIPError(
-        CCIPErrorCode.NETWORK_FAMILY_UNSUPPORTED,
+        CCIPErrorCode.CHAIN_FAMILY_UNSUPPORTED,
         `Unsupported Sui chain identifier: ${rawChainId}`,
       )
     }

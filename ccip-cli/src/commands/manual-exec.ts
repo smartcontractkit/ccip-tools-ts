@@ -1,14 +1,9 @@
 import {
-  type CCIPRequest,
-  type CCIPVersion,
-  type EVMChain,
   type ExecutionReport,
-  CCIPChainFamilyUnsupportedError,
-  ChainFamily,
   bigIntReplacer,
   calculateManualExecProof,
   discoverOffRamp,
-  estimateExecGasForRequest,
+  estimateReceiveExecution,
   isSupportedTxHash,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
@@ -180,31 +175,21 @@ async function manualExec(
     offchainTokenData,
   }
 
-  if (
-    argv.estimateGasLimit != null &&
-    'gasLimit' in request.message &&
-    'extraArgs' in request.message
-  ) {
-    if (dest.network.family !== ChainFamily.EVM)
-      throw new CCIPChainFamilyUnsupportedError(dest.network.family, {
-        context: { feature: 'gas estimation' },
-      })
-
-    let estimated = await estimateExecGasForRequest(
-      source,
-      dest as unknown as EVMChain,
-      request as CCIPRequest<typeof CCIPVersion.V1_5 | typeof CCIPVersion.V1_6>,
-    )
+  if (argv.estimateGasLimit != null) {
+    let estimated = await estimateReceiveExecution(source, dest, request)
     logger.info('Estimated gasLimit override:', estimated)
     estimated += Math.ceil((estimated * argv.estimateGasLimit) / 100)
-    if (request.message.gasLimit >= estimated) {
+    const origLimit = Number(
+      'gasLimit' in request.message ? request.message.gasLimit : request.message.computeUnits,
+    )
+    if (origLimit >= estimated) {
       logger.warn(
         'Estimated +',
         argv.estimateGasLimit,
         '% margin =',
         estimated,
         '< original gasLimit =',
-        request.message.gasLimit,
+        origLimit,
         '. Leaving unchanged.',
       )
     } else {

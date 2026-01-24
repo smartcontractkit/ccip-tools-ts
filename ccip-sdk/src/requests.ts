@@ -3,12 +3,12 @@ import type { PickDeep } from 'type-fest'
 
 import { type ChainStatic, type LogFilter, Chain } from './chain.ts'
 import {
+  CCIPChainFamilyUnsupportedError,
   CCIPMessageBatchIncompleteError,
   CCIPMessageDecodeError,
   CCIPMessageIdNotFoundError,
   CCIPMessageInvalidError,
   CCIPMessageNotFoundInTxError,
-  CCIPNetworkFamilyUnsupportedError,
   CCIPTokenNotInRegistryError,
 } from './errors/index.ts'
 import type { EVMChain } from './evm/index.ts'
@@ -180,7 +180,7 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
         version: version as CCIPVersion,
       }
     } else if (source.network.family !== ChainFamily.EVM) {
-      throw new CCIPNetworkFamilyUnsupportedError(source.network.family)
+      throw new CCIPChainFamilyUnsupportedError(source.network.family)
     } else {
       lane = await (source as EVMChain).getLaneForOnRamp(log.address)
     }
@@ -351,7 +351,7 @@ export async function* getMessagesForSender(
     } else if (source.network.family === ChainFamily.EVM) {
       ;({ destChainSelector, version } = await (source as EVMChain).getLaneForOnRamp(log.address))
     } else {
-      throw new CCIPNetworkFamilyUnsupportedError(source.network.family)
+      throw new CCIPChainFamilyUnsupportedError(source.network.family)
     }
     yield {
       lane: {
@@ -371,29 +371,34 @@ export async function* getMessagesForSender(
  * @param source - Source chain.
  * @param destChainSelector - Destination network selector.
  * @param onRamp - Contract address.
- * @param sourceTokenAmounts - Array of token amounts, usually containing `token` and `amount` properties.
- * @returns Array of objects with `sourcePoolAddress`, `destTokenAddress`, and remaining properties.
+ * @param sourceTokenAmount - tokenAmount object, usually containing `token` and `amount` properties.
+ * @returns tokenAmount object with `sourcePoolAddress`, `sourceTokenAddress`, `destTokenAddress`, and remaining properties.
  */
-export async function sourceToDestTokenAmounts<S extends { token: string }>(
+export async function sourceToDestTokenAddresses<S extends { token: string }>(
   source: Chain,
   destChainSelector: bigint,
   onRamp: string,
-  sourceTokenAmounts: readonly S[],
-): Promise<(Omit<S, 'token'> & { sourcePoolAddress: string; destTokenAddress: string })[]> {
+  sourceTokenAmount: S,
+): Promise<
+  S & {
+    sourcePoolAddress: string
+    sourceTokenAddress: string
+    destTokenAddress: string
+  }
+> {
   const tokenAdminRegistry = await source.getTokenAdminRegistryFor(onRamp)
-  return Promise.all(
-    sourceTokenAmounts.map(async ({ token, ...rest }) => {
-      const { tokenPool: sourcePoolAddress } = await source.getRegistryTokenConfig(
-        tokenAdminRegistry,
-        token,
-      )
-      if (!sourcePoolAddress) throw new CCIPTokenNotInRegistryError(token, tokenAdminRegistry)
-      const remotes = await source.getTokenPoolRemotes(sourcePoolAddress, destChainSelector)
-      return {
-        ...rest,
-        sourcePoolAddress,
-        destTokenAddress: remotes[networkInfo(destChainSelector).name]!.remoteToken,
-      }
-    }),
+  const sourceTokenAddress = sourceTokenAmount.token
+  const { tokenPool: sourcePoolAddress } = await source.getRegistryTokenConfig(
+    tokenAdminRegistry,
+    sourceTokenAddress,
   )
+  if (!sourcePoolAddress)
+    throw new CCIPTokenNotInRegistryError(sourceTokenAddress, tokenAdminRegistry)
+  const remotes = await source.getTokenPoolRemotes(sourcePoolAddress, destChainSelector)
+  return {
+    ...sourceTokenAmount,
+    sourcePoolAddress,
+    sourceTokenAddress,
+    destTokenAddress: remotes[networkInfo(destChainSelector).name]!.remoteToken,
+  }
 }
