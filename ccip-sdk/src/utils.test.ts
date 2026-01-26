@@ -1310,7 +1310,8 @@ describe('withRetry', () => {
 
   it('should log retry attempts when logger provided', async () => {
     const debugFn = mock.fn<(...args: unknown[]) => void>()
-    const logger = { debug: debugFn }
+    const warnFn = mock.fn<(...args: unknown[]) => void>()
+    const logger = { debug: debugFn, warn: warnFn }
 
     let attempts = 0
     const operation = mock.fn(() => {

@@ -422,7 +422,7 @@ export type WithRetryConfig = {
   /** Whether to respect the error's retryAfterMs hint */
   respectRetryAfterHint: boolean
   /** Optional logger for retry attempts */
-  logger?: { debug: (...args: unknown[]) => void }
+  logger?: { debug: (...args: unknown[]) => void; warn: (...args: unknown[]) => void }
 }
 
 /**
@@ -477,6 +477,7 @@ export async function withRetry<T>(
 
       // Don't sleep after the last attempt
       if (attempt >= maxRetries) {
+        logger?.warn(`All ${maxRetries} retries exhausted:`, lastError.message)
         break
       }
 
