@@ -23,7 +23,7 @@ import {
 } from '../errors/specialized.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
-import { buildMessageForDest, getMessagesInTx } from '../requests.ts'
+import { buildMessageForDest } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type CCIPExecution,
@@ -232,7 +232,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // The lt must have been cached during a previous getLogs or getTransaction call.
     throw new CCIPNotImplementedError(
       `getBlockTimestamp: lt ${block} not in cache. ` +
-      `TON requires lt to be cached from getLogs or getTransaction calls first.`,
+        `TON requires lt to be cached from getLogs or getTransaction calls first.`,
     )
   }
 
@@ -293,7 +293,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
 
     // Cache lt → timestamp for later getBlockTimestamp lookups
-    ; (this.getBlockTimestamp as Memoized<typeof this.getBlockTimestamp, { async: true }>).cache.set(
+    ;(this.getBlockTimestamp as Memoized<typeof this.getBlockTimestamp, { async: true }>).cache.set(
       [Number(tx.lt)],
       Promise.resolve(tx.now),
     )
