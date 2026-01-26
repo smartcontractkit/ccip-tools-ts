@@ -9,6 +9,7 @@ export {
   CCIPChainFamilyMismatchError,
   CCIPChainFamilyUnsupportedError,
   CCIPChainNotFoundError,
+  CCIPMethodUnsupportedError,
 } from './specialized.ts'
 
 // Specialized errors - Block & Transaction
@@ -25,9 +26,11 @@ export {
 export {
   CCIPMessageBatchIncompleteError,
   CCIPMessageIdNotFoundError,
+  CCIPMessageIdValidationError,
   CCIPMessageInvalidError,
   CCIPMessageNotFoundInTxError,
   CCIPMessageNotInBatchError,
+  CCIPMessageRetrievalError,
 } from './specialized.ts'
 
 // Specialized errors - Lane & Routing
@@ -64,7 +67,6 @@ export { CCIPExtraArgsInvalidError, CCIPExtraArgsParseError } from './specialize
 
 // Specialized errors - Token & Registry
 export {
-  CCIPLegacyTokenPoolsUnsupportedError,
   CCIPTokenDecimalsInsufficientError,
   CCIPTokenNotConfiguredError,
   CCIPTokenNotFoundError,
@@ -159,14 +161,14 @@ export {
   CCIPLogTopicsNotFoundError,
   CCIPLogsNotFoundError,
   CCIPMessageDecodeError,
-  CCIPNetworkFamilyUnsupportedError,
   CCIPNotImplementedError,
   CCIPRpcNotFoundError,
+  CCIPTimeoutError,
   CCIPTypeVersionInvalidError,
 } from './specialized.ts'
 
 // Specialized errors - API Client
-export { CCIPApiClientNotAvailableError } from './specialized.ts'
+export { CCIPApiClientNotAvailableError, CCIPUnexpectedPaginationError } from './specialized.ts'
 
 // Specialized errors - Viem Adapter
 export { CCIPViemAdapterError } from './specialized.ts'

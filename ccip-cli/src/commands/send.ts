@@ -1,17 +1,13 @@
 import {
-  type CCIPVersion,
   type ChainStatic,
-  type EVMChain,
   type ExtraArgs,
   type MessageInput,
   CCIPArgumentInvalidError,
-  CCIPChainFamilyUnsupportedError,
   CCIPTokenNotFoundError,
   ChainFamily,
-  estimateExecGasForRequest,
+  estimateReceiveExecution,
   getDataBytes,
   networkInfo,
-  sourceToDestTokenAmounts,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { type BytesLike, formatUnits, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
@@ -118,6 +114,7 @@ export const builder = (yargs: Argv) =>
       'only-estimate': {
         type: 'boolean',
         describe: 'Only estimate dest exec gasLimit',
+        implies: 'estimate-gas-limit',
       },
       'approve-max': {
         type: 'boolean',
@@ -198,37 +195,34 @@ async function sendMessage(
 
   if (argv.estimateGasLimit != null || argv.onlyEstimate) {
     // TODO: implement for all chain families
-    if (destNetwork.family !== ChainFamily.EVM)
-      throw new CCIPChainFamilyUnsupportedError(destNetwork.family, {
-        context: { feature: 'gas estimation' },
-      })
-    const dest = (await getChain(destNetwork.chainSelector)) as unknown as EVMChain
-    const onRamp = await source.getOnRampForRouter(argv.router, destNetwork.chainSelector)
-    const lane = {
-      sourceChainSelector: source.network.chainSelector,
-      destChainSelector: destNetwork.chainSelector,
-      onRamp,
-      version: (await source.typeAndVersion(onRamp))[1] as CCIPVersion,
-    }
-    const destTokenAmounts = await sourceToDestTokenAmounts(
-      source,
-      destNetwork.chainSelector,
-      onRamp,
-      tokenAmounts,
-    )
+    const dest = await getChain(destNetwork.chainSelector)
 
-    if (!walletAddress) [walletAddress, wallet] = await loadChainWallet(source, argv)
-    const estimated = await estimateExecGasForRequest(source, dest, {
-      lane,
+    if (!walletAddress) {
+      try {
+        ;[walletAddress, wallet] = await loadChainWallet(source, argv)
+      } catch {
+        // pass undefined sender for default
+      }
+    }
+    const estimated = await estimateReceiveExecution({
+      source,
+      dest,
+      routerOrRamp: argv.router,
       message: {
         sender: walletAddress,
         receiver,
-        data: data || '0x',
-        tokenAmounts: destTokenAmounts,
+        data,
+        tokenAmounts,
       },
     })
-    logger.log('Estimated gasLimit:', estimated)
     argv.gasLimit = Math.ceil(estimated * (1 + (argv.estimateGasLimit ?? 0) / 100))
+    logger.log(
+      'Estimated gasLimit for sender =',
+      walletAddress,
+      ':',
+      estimated,
+      ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', argv.gasLimit] : []),
+    )
     if (argv.onlyEstimate) return
   }
 

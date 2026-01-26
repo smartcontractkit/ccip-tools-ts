@@ -1,15 +1,14 @@
 import { isBytesLike, toBigInt } from 'ethers'
 import type { PickDeep } from 'type-fest'
-import yaml from 'yaml'
 
 import { type ChainStatic, type LogFilter, Chain } from './chain.ts'
 import {
+  CCIPChainFamilyUnsupportedError,
   CCIPMessageBatchIncompleteError,
   CCIPMessageDecodeError,
   CCIPMessageIdNotFoundError,
   CCIPMessageInvalidError,
   CCIPMessageNotFoundInTxError,
-  CCIPNetworkFamilyUnsupportedError,
   CCIPTokenNotInRegistryError,
 } from './errors/index.ts'
 import type { EVMChain } from './evm/index.ts'
@@ -25,7 +24,14 @@ import {
   type MessageInput,
   ChainFamily,
 } from './types.ts'
-import { convertKeysToCamelCase, decodeAddress, leToBigInt, networkInfo } from './utils.ts'
+import {
+  convertKeysToCamelCase,
+  decodeAddress,
+  getDataBytes,
+  leToBigInt,
+  networkInfo,
+  parseJson,
+} from './utils.ts'
 
 function decodeJsonMessage(data: Record<string, unknown> | undefined) {
   if (!data || typeof data != 'object') throw new CCIPMessageInvalidError(data)
@@ -39,49 +45,81 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
     destChainSelector?: string
     source_chain_selector?: string
     sourceChainSelector?: string
-    extraArgs?: string
+    extraArgs?: string | Record<string, unknown>
     tokenAmounts: {
       destExecData: string
       destGasAmount?: bigint
+      token?: string
+      sourceTokenAddress?: string
     }[]
+    feeToken?: string
+    feeTokenAmount?: bigint
+    fees?: {
+      fixedFeesDetails: {
+        tokenAddress: string
+        totalAmount: bigint
+      }
+    }
+    sourceNetworkInfo?: { chainSelector: string }
+    destNetworkInfo?: { chainSelector: string }
   }
-  const sourceChainSelector = data_.source_chain_selector ?? data_.sourceChainSelector
+  const sourceChainSelector =
+    data_.source_chain_selector ??
+    data_.sourceChainSelector ??
+    data_.sourceNetworkInfo?.chainSelector
   if (!sourceChainSelector) throw new CCIPMessageInvalidError(data)
-  const sourceNetwork = networkInfo(sourceChainSelector)
+  data_.sourceChainSelector ??= sourceChainSelector
+  data_.nonce ??= 0n
+  const sourceFamily = networkInfo(sourceChainSelector).family
 
-  const destChainSelector = data_.dest_chain_selector ?? data_.destChainSelector
-  if (destChainSelector) {
-    const destFamily = networkInfo(destChainSelector).family
-    data_ = convertKeysToCamelCase(data_, (v, k) =>
-      typeof v === 'string' && v.match(/^\d+$/)
-        ? BigInt(v)
-        : k === 'receiver' || k === 'destTokenAddress' || k === 'tokenReceiver'
-          ? decodeAddress(v as string, destFamily)
+  const destChainSelector =
+    data_.dest_chain_selector ?? data_.destChainSelector ?? data_.destNetworkInfo?.chainSelector
+  if (destChainSelector) data_.destChainSelector ??= destChainSelector
+  const destFamily = destChainSelector ? networkInfo(destChainSelector).family : ChainFamily.EVM
+  // transform type, normalize keys case, source/dest addresses, and ensure known bigints
+  data_ = convertKeysToCamelCase(data_, (v, k) =>
+    k?.match(/(selector|amount|nonce|number|limit|bitmap)$/i)
+      ? BigInt(v as string | number | bigint)
+      : typeof v === 'string' && k?.match(/(^dest.*address)|(receiver|offramp|accounts)/i)
+        ? decodeAddress(v, destFamily)
+        : typeof v === 'string' &&
+            k?.match(/((source.*address)|sender|origin|onramp|(feetoken$)|(token.*address$))/i)
+          ? decodeAddress(v, sourceFamily)
           : v,
-    ) as typeof data_
-  }
+  ) as typeof data_
 
   for (const ta of data_.tokenAmounts) {
+    if (ta.token && !ta.sourceTokenAddress) ta.sourceTokenAddress = ta.token
+    if (!ta.token && ta.sourceTokenAddress) ta.token = ta.sourceTokenAddress
     if (ta.destGasAmount != null || !ta.destExecData) continue
-    switch (sourceNetwork.family) {
+    switch (sourceFamily) {
       // EVM & Solana encode destExecData as big-endian
       case ChainFamily.EVM:
       case ChainFamily.Solana:
-        ta.destGasAmount = toBigInt(ta.destExecData)
+        ta.destGasAmount = toBigInt(getDataBytes(ta.destExecData))
         break
       // Aptos & Sui, as little-endian
       default:
-        ta.destGasAmount = leToBigInt(ta.destExecData)
+        ta.destGasAmount = leToBigInt(getDataBytes(ta.destExecData))
     }
   }
 
-  if (data_.extraArgs) {
-    const extraArgs = decodeExtraArgs(data_.extraArgs ?? '', sourceNetwork.family)
+  if (data_.extraArgs && typeof data_.extraArgs === 'string') {
+    const extraArgs = decodeExtraArgs(data_.extraArgs, sourceFamily)
     if (extraArgs) {
       const { _tag, ...rest } = extraArgs
       Object.assign(data_, rest)
     }
+  } else if (data_.extraArgs) {
+    Object.assign(data_, data_.extraArgs)
+    delete data_.extraArgs
   }
+
+  if (data_.fees && !data_.feeToken) {
+    data_.feeToken = data_.fees.fixedFeesDetails.tokenAddress
+    data_.feeTokenAmount = data_.fees.fixedFeesDetails.totalAmount
+  }
+
   return data_ as unknown as CCIPMessage
 }
 
@@ -94,8 +132,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
     (typeof data === 'string' && data.startsWith('{')) ||
     (typeof data === 'object' && !isBytesLike(data))
   ) {
-    if (typeof data === 'string')
-      data = yaml.parse(data, { intAsBigInt: true }) as Record<string, unknown>
+    if (typeof data === 'string') data = parseJson<Record<string, unknown>>(data)
     return decodeJsonMessage(data)
   }
 
@@ -122,14 +159,13 @@ export function buildMessageForDest(message: MessageInput, dest: ChainFamily): A
 }
 
 /**
- * Fetch all CCIP messages in a transaction
+ * Fetch all CCIP messages in a transaction.
  * @param source - Chain
  * @param tx - ChainTransaction to search in
  * @returns CCIP requests (messages) in the transaction (at least one)
  **/
 export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Promise<CCIPRequest[]> {
-  const txHash = tx.hash
-
+  // RPC fallback
   const requests: CCIPRequest[] = []
   for (const log of tx.logs) {
     let lane
@@ -144,35 +180,34 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
         version: version as CCIPVersion,
       }
     } else if (source.network.family !== ChainFamily.EVM) {
-      throw new CCIPNetworkFamilyUnsupportedError(source.network.family)
+      throw new CCIPChainFamilyUnsupportedError(source.network.family)
     } else {
       lane = await (source as EVMChain).getLaneForOnRamp(log.address)
     }
     requests.push({ lane, message, log, tx })
   }
-  if (!requests.length) {
-    throw new CCIPMessageNotFoundInTxError(txHash)
-  }
-
+  if (!requests.length) throw new CCIPMessageNotFoundInTxError(tx.hash)
   return requests
 }
 
 /**
- * Fetch a CCIP message by its messageId.
- * Can be slow due to having to paginate backwards through logs.
+ * Fetch a CCIP message by its messageId from RPC (slow).
+ * Should be called *after* generic Chain implementation, which fetches from API if available.
  * @param source - Provider to fetch logs from.
  * @param messageId - MessageId to search for.
- * @param hints - Optional hints for pagination (e.g., `address` for onRamp, `page` for pagination size).
+ * @param opts - Optional hints for pagination (e.g., `address` for onRamp, `page` for pagination size).
  * @returns CCIPRequest with given messageId.
+ * @internal
  */
 export async function getMessageById(
   source: Chain,
   messageId: string,
-  hints?: { page?: number; address?: string },
+  opts?: { page?: number; onRamp?: string },
 ): Promise<CCIPRequest> {
   for await (const log of source.getLogs({
     topics: ['CCIPSendRequested', 'CCIPMessageSent'],
-    ...hints,
+    address: opts?.onRamp,
+    ...opts,
   })) {
     const message = (source.constructor as ChainStatic).decodeMessage(log)
     if (message?.messageId !== messageId) continue
@@ -316,7 +351,7 @@ export async function* getMessagesForSender(
     } else if (source.network.family === ChainFamily.EVM) {
       ;({ destChainSelector, version } = await (source as EVMChain).getLaneForOnRamp(log.address))
     } else {
-      throw new CCIPNetworkFamilyUnsupportedError(source.network.family)
+      throw new CCIPChainFamilyUnsupportedError(source.network.family)
     }
     yield {
       lane: {
@@ -336,29 +371,34 @@ export async function* getMessagesForSender(
  * @param source - Source chain.
  * @param destChainSelector - Destination network selector.
  * @param onRamp - Contract address.
- * @param sourceTokenAmounts - Array of token amounts, usually containing `token` and `amount` properties.
- * @returns Array of objects with `sourcePoolAddress`, `destTokenAddress`, and remaining properties.
+ * @param sourceTokenAmount - tokenAmount object, usually containing `token` and `amount` properties.
+ * @returns tokenAmount object with `sourcePoolAddress`, `sourceTokenAddress`, `destTokenAddress`, and remaining properties.
  */
-export async function sourceToDestTokenAmounts<S extends { token: string }>(
+export async function sourceToDestTokenAddresses<S extends { token: string }>(
   source: Chain,
   destChainSelector: bigint,
   onRamp: string,
-  sourceTokenAmounts: readonly S[],
-): Promise<(Omit<S, 'token'> & { sourcePoolAddress: string; destTokenAddress: string })[]> {
+  sourceTokenAmount: S,
+): Promise<
+  S & {
+    sourcePoolAddress: string
+    sourceTokenAddress: string
+    destTokenAddress: string
+  }
+> {
   const tokenAdminRegistry = await source.getTokenAdminRegistryFor(onRamp)
-  return Promise.all(
-    sourceTokenAmounts.map(async ({ token, ...rest }) => {
-      const { tokenPool: sourcePoolAddress } = await source.getRegistryTokenConfig(
-        tokenAdminRegistry,
-        token,
-      )
-      if (!sourcePoolAddress) throw new CCIPTokenNotInRegistryError(token, tokenAdminRegistry)
-      const remotes = await source.getTokenPoolRemotes(sourcePoolAddress, destChainSelector)
-      return {
-        ...rest,
-        sourcePoolAddress,
-        destTokenAddress: remotes[networkInfo(destChainSelector).name]!.remoteToken,
-      }
-    }),
+  const sourceTokenAddress = sourceTokenAmount.token
+  const { tokenPool: sourcePoolAddress } = await source.getRegistryTokenConfig(
+    tokenAdminRegistry,
+    sourceTokenAddress,
   )
+  if (!sourcePoolAddress)
+    throw new CCIPTokenNotInRegistryError(sourceTokenAddress, tokenAdminRegistry)
+  const remotes = await source.getTokenPoolRemotes(sourcePoolAddress, destChainSelector)
+  return {
+    ...sourceTokenAmount,
+    sourcePoolAddress,
+    sourceTokenAddress,
+    destTokenAddress: remotes[networkInfo(destChainSelector).name]!.remoteToken,
+  }
 }

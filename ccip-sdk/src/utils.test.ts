@@ -2,6 +2,9 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
 import './index.ts'
+import { NATIVE_MINT } from '@solana/spl-token'
+import { dataLength } from 'ethers'
+
 import { ChainFamily } from './types.ts'
 import {
   bigIntReplacer,
@@ -94,7 +97,7 @@ describe('decodeAddress', () => {
       // 32-byte Solana public key
       const solanaBytes = '0x0000000000000000000000000000000000000000000000000000000000000001'
       const decoded = decodeAddress(solanaBytes, ChainFamily.Solana)
-      assert.equal(decoded, '11111111111111111112')
+      assert.equal(decoded, '11111111111111111111111111111112')
     })
 
     it('should handle 32-byte hex Solana addresses', () => {
@@ -112,7 +115,7 @@ describe('decodeAddress', () => {
     it('should handle hex string for Solana addresses', () => {
       const hexAddress = '0x0000000000000000000000000000000000000000000000000000000000000001'
       const decoded = decodeAddress(hexAddress, ChainFamily.Solana)
-      assert.equal(decoded, '11111111111111111112')
+      assert.equal(decoded, '11111111111111111111111111111112')
     })
   })
 
@@ -197,7 +200,7 @@ describe('decodeAddress', () => {
       // Solana accepts 32-byte addresses
       const shortBytes = '0x0000000000000000000000000000000000000000000000000000000000000001'
       const decodedShort = decodeAddress(shortBytes, ChainFamily.Solana)
-      assert.equal(decodedShort, '11111111111111111112')
+      assert.equal(decodedShort, '11111111111111111111111111111112')
 
       // Aptos accepts variable length but normalizes to 32 bytes
       const longBytes = '0x0000000000000000000000000000000000000000000000000000000000000001'
@@ -922,22 +925,21 @@ describe('getAddressBytes', () => {
 
   it('should strip leading zeros from 32-byte padded addresses', () => {
     const paddedAddress = '0x0000000000000000000000001234567890123456789012345678901234567890'
-    const result = getAddressBytes(paddedAddress)
-    assert.equal(result.length, 20)
+    const result = decodeAddress(getAddressBytes(paddedAddress))
+    assert.equal(dataLength(result), 20)
   })
 
   it('should handle base58 Solana addresses', () => {
-    const solanaAddress = '11111111111111111111111111111111'
+    const solanaAddress = NATIVE_MINT.toBase58()
     const result = getAddressBytes(solanaAddress)
     assert.ok(result instanceof Uint8Array)
+    assert.equal(result.length, 32)
   })
 
-  it('should not strip zeros if non-zero bytes exist in leading portion', () => {
-    const address = new Uint8Array(32)
-    address[0] = 0x01 // Non-zero in leading portion
-    address[31] = 0x02
-    const result = getAddressBytes(address)
-    assert.equal(result.length, 32)
+  it('should handle empty bytes', () => {
+    const result = getAddressBytes('0x')
+    assert.ok(result instanceof Uint8Array)
+    assert.equal(result.length, 0)
   })
 
   it('should preserve 20-byte addresses without modification', () => {

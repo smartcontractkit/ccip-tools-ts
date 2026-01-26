@@ -6,11 +6,12 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Verify the chainId, chain selector, or chain name is correct. Check CCIP documentation for supported chains.',
   CHAIN_SELECTOR_NOT_FOUND:
     'Verify the chain selector is valid. Use networkInfo() to look up selectors.',
-  CHAIN_FAMILY_UNSUPPORTED: 'Supported families: EVM, Solana, Aptos, Sui, TON.',
+  CHAIN_FAMILY_UNSUPPORTED:
+    'This chain family is not supported. Check the method documentation for supported chain families.',
   CHAIN_FAMILY_MISMATCH:
     'Use the correct Chain class for this chain family (e.g., EVMChain for EVM, SolanaChain for Solana).',
-  NETWORK_FAMILY_UNSUPPORTED:
-    'This operation only supports specific chain families. Check the method documentation for supported chain families.',
+  METHOD_UNSUPPORTED:
+    'This method is not supported on this class. Refer to supported implementations.',
   APTOS_NETWORK_UNKNOWN: 'Provide a valid Aptos RPC URL (mainnet or testnet).',
 
   BLOCK_NOT_FOUND: 'Wait for the block to be finalized and retry.',
@@ -26,10 +27,14 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Ensure the log data is from a CCIPSendRequested event. Verify the source chain and transaction hash.',
   MESSAGE_NOT_FOUND_IN_TX: 'No CCIPSendRequested event found. Verify the transaction hash.',
   MESSAGE_ID_NOT_FOUND: 'Wait and retry. The message may still be in transit (5-20 min typical).',
+  MESSAGE_ID_INVALID:
+    'Verify the message ID format. Must be a valid 32-byte hex string (0x-prefixed, 64 hex chars).',
   MESSAGE_BATCH_INCOMPLETE: 'Not all messages in the batch were found.',
   MESSAGE_NOT_IN_BATCH: 'The message is not in the expected batch. Verify the commit report.',
   MESSAGE_CHAIN_MISMATCH:
     'Verify you are using the correct destination chain. Check that sourceChainSelector and destChainSelector match your lane.',
+  MESSAGE_RETRIEVAL_FAILED:
+    'Both API and RPC failed to retrieve the message. Verify the transaction hash is correct and the transaction is confirmed. Check RPC and network connectivity.',
   MESSAGE_VERSION_INVALID:
     'Ensure the source chain onRamp uses CCIP v1.6. Older message versions are not compatible with this destination.',
 
@@ -62,7 +67,6 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Use a supported CCIP version for this chain. Check the lane configuration for compatible versions.',
   VERSION_FEATURE_UNAVAILABLE: 'This feature requires CCIP v1.6 or later.',
   VERSION_REQUIRES_LANE: 'Decoding commits from CCIP <= v1.5 requires lane information.',
-  LEGACY_TOKEN_POOLS_UNSUPPORTED: 'Legacy token pools (< v1.5) are not supported.',
 
   EXTRA_ARGS_PARSE_FAILED: 'Verify the format matches the source chain family.',
   EXTRA_ARGS_UNKNOWN: 'Use EVMExtraArgsV1/V2, SVMExtraArgsV1, or SuiExtraArgsV1.',
@@ -158,12 +162,16 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
 
   HTTP_ERROR: 'HTTP request failed. 429 indicates rate limiting.',
   RPC_NOT_FOUND: 'No RPC endpoint found. Configure an RPC URL.',
+  TIMEOUT:
+    'Request timed out. Check network connectivity and try again. Consider increasing timeoutMs if the server is slow.',
 
   VIEM_ADAPTER_ERROR:
     'Check that your viem client has both account and chain defined. For WalletClient, use createWalletClient({ chain, account, ... }).',
 
   API_CLIENT_NOT_AVAILABLE:
     'The API client was explicitly disabled. To use API features like getLaneLatency(), create the Chain without apiClient: null or provide a CCIPAPIClient instance.',
+  API_UNEXPECTED_PAGINATION:
+    'The transaction contains an unexpectedly large number of CCIP messages (over 100). This is unusual and may indicate an issue with the transaction or API response.',
 
   DATA_FORMAT_UNSUPPORTED: 'Unsupported data format. Use hex, bytes, or base64.',
   DATA_PARSE_FAILED: 'Could not parse the provided data. Verify the format.',

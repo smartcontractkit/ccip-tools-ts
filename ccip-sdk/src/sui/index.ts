@@ -146,7 +146,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       chainId = 'sui:4' // devnet
     } else {
       throw new CCIPError(
-        CCIPErrorCode.NETWORK_FAMILY_UNSUPPORTED,
+        CCIPErrorCode.CHAIN_FAMILY_UNSUPPORTED,
         `Unsupported Sui chain identifier: ${rawChainId}`,
       )
     }
@@ -248,11 +248,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
         topics: [topic],
       }
     }
-  }
-
-  /** {@inheritDoc Chain.getMessagesInTx} */
-  override async getMessagesInTx(_tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getMessagesInTx'))
   }
 
   /** {@inheritDoc Chain.getMessagesInBatch} */

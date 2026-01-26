@@ -232,7 +232,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // The lt must have been cached during a previous getLogs or getTransaction call.
     throw new CCIPNotImplementedError(
       `getBlockTimestamp: lt ${block} not in cache. ` +
-        `TON requires lt to be cached from getLogs or getTransaction calls first.`,
+      `TON requires lt to be cached from getLogs or getTransaction calls first.`,
     )
   }
 
@@ -293,7 +293,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
 
     // Cache lt → timestamp for later getBlockTimestamp lookups
-    ;(this.getBlockTimestamp as Memoized<typeof this.getBlockTimestamp, { async: true }>).cache.set(
+    ; (this.getBlockTimestamp as Memoized<typeof this.getBlockTimestamp, { async: true }>).cache.set(
       [Number(tx.lt)],
       Promise.resolve(tx.now),
     )
@@ -363,11 +363,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         yield log
       }
     }
-  }
-
-  /** {@inheritDoc Chain.getMessagesInTx} */
-  override async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
-    return getMessagesInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
   }
 
   /** {@inheritDoc Chain.getMessagesInBatch} */
