@@ -346,7 +346,7 @@ export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Ar
     bytes = address
   } else if (Array.isArray(address)) {
     bytes = new Uint8Array(address)
-  } else if (typeof address === 'string' && address.match(/^((0x[0-9a-f]+)|[0-9a-f]{40,})$/i)) {
+  } else if (typeof address === 'string' && address.match(/^((0x[0-9a-f]*)|[0-9a-f]{40,})$/i)) {
     // supports with or without (long>=20B) 0x-prefix, odd or even length
     bytes = getBytes(
       address.length % 2

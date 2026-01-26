@@ -5,7 +5,7 @@ import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
 import { estimateExecGas } from './evm/gas.ts'
 import { estimateReceiveExecution } from './gas.ts'
-import { CCIPVersion, ChainFamily } from './types.ts'
+import { ChainFamily } from './types.ts'
 
 // Test doubles - we create mock chain objects that implement the minimal interface needed
 // The discoverOffRamp function performs a complex cross-check between chains, so we need
@@ -24,9 +24,14 @@ function createMockChains(onRamp: string, offRamp: string) {
       family: ChainFamily.EVM,
       isTestnet: true,
     },
+    typeAndVersion: mock.fn(async (address: string) => {
+      if (address === onRamp) return ['EVM2EVMOnRamp', '1.5.0', address]
+      return ['Router', '1.0.0', address]
+    }),
     getTokenForTokenPool: mock.fn(async () => getAddress(hexlify(randomBytes(20)))),
     getTokenInfo: mock.fn(async () => ({ decimals: 18 })),
     getRouterForOnRamp: mock.fn(async () => sourceRouter),
+    getOnRampForRouter: mock.fn(async (_router: string, _destChainSelector: bigint) => onRamp),
     getOffRampsForRouter: mock.fn(async () => [offRamp]),
     getOnRampForOffRamp: mock.fn(async () => destOnRamp),
     getTokenAdminRegistryFor: mock.fn(async () => tokenAdminRegistry),
@@ -54,12 +59,16 @@ function createMockChains(onRamp: string, offRamp: string) {
         async () => '0x0000000000000000000000000000000000000000000000000000000000000000',
       ), // balanceOf returns 0
     },
+    typeAndVersion: mock.fn(async (address: string) => {
+      if (address === offRamp) return ['EVM2EVMOffRamp', '1.5.0', address]
+      return ['Router', '1.0.0', address]
+    }),
     getRouterForOffRamp: mock.fn(async (_offRamp: string) => destRouter),
     getTokenInfo: mock.fn(async () => ({ decimals: 18 })),
     getOffRampsForRouter: mock.fn(async () => [offRamp]),
     getRouterForOnRamp: mock.fn(async () => destRouter),
     // This is the key - it needs to return the onRamp to satisfy the discovery logic
-    getOnRampForOffRamp: mock.fn(async () => onRamp),
+    getOnRampForOffRamp: mock.fn(async (_offRamp: string, _sourceChainSelector: bigint) => onRamp),
     balanceOf: mock.fn(async () => 0n),
     estimateReceiveExecution: mock.fn(async (opts: any) => {
       const router = await mockDestChain.getRouterForOffRamp(opts.offRamp)
@@ -71,9 +80,6 @@ function createMockChains(onRamp: string, offRamp: string) {
 }
 
 describe('estimateExecGasForRequest', () => {
-  const sourceChainSelector = 16015286601757825753n
-  const destChainSelector = 10344971235874465080n
-
   let mockSourceChain: any
   let mockDestChain: any
 
@@ -115,15 +121,10 @@ describe('estimateExecGasForRequest', () => {
       ],
     }
 
-    const lane = {
-      sourceChainSelector,
-      destChainSelector,
-      onRamp,
-      version: CCIPVersion.V1_2,
-    }
-
-    const result = await estimateReceiveExecution(mockSourceChain, mockDestChain, {
-      lane,
+    const result = await estimateReceiveExecution({
+      source: mockSourceChain,
+      dest: mockDestChain,
+      routerOrRamp: onRamp,
       message,
     })
 
@@ -168,15 +169,10 @@ describe('estimateExecGasForRequest', () => {
       ],
     }
 
-    const lane = {
-      sourceChainSelector,
-      destChainSelector,
-      onRamp,
-      version: CCIPVersion.V1_5,
-    }
-
-    const result = await estimateReceiveExecution(mockSourceChain, mockDestChain, {
-      lane,
+    const result = await estimateReceiveExecution({
+      source: mockSourceChain,
+      dest: mockDestChain,
+      routerOrRamp: onRamp,
       message,
     })
 
@@ -221,15 +217,10 @@ describe('estimateExecGasForRequest', () => {
       ],
     }
 
-    const lane = {
-      sourceChainSelector,
-      destChainSelector,
-      onRamp,
-      version: CCIPVersion.V1_5,
-    }
-
-    const result = await estimateReceiveExecution(mockSourceChain, mockDestChain, {
-      lane,
+    const result = await estimateReceiveExecution({
+      source: mockSourceChain,
+      dest: mockDestChain,
+      routerOrRamp: onRamp,
       message,
     })
 
@@ -271,15 +262,10 @@ describe('estimateExecGasForRequest', () => {
       ],
     }
 
-    const lane = {
-      sourceChainSelector,
-      destChainSelector,
-      onRamp,
-      version: CCIPVersion.V1_5,
-    }
-
-    const result = await estimateReceiveExecution(mockSourceChain, mockDestChain, {
-      lane,
+    const result = await estimateReceiveExecution({
+      source: mockSourceChain,
+      dest: mockDestChain,
+      routerOrRamp: onRamp,
       message,
     })
 
@@ -329,15 +315,10 @@ describe('estimateExecGasForRequest', () => {
       ],
     }
 
-    const lane = {
-      sourceChainSelector,
-      destChainSelector,
-      onRamp,
-      version: CCIPVersion.V1_5,
-    }
-
-    const result = await estimateReceiveExecution(mockSourceChain, mockDestChain, {
-      lane,
+    const result = await estimateReceiveExecution({
+      source: mockSourceChain,
+      dest: mockDestChain,
+      routerOrRamp: onRamp,
       message,
     })
 
@@ -371,15 +352,10 @@ describe('estimateExecGasForRequest', () => {
       tokenAmounts: [],
     }
 
-    const lane = {
-      sourceChainSelector,
-      destChainSelector,
-      onRamp,
-      version: CCIPVersion.V1_5,
-    }
-
-    const result = await estimateReceiveExecution(mockSourceChain, mockDestChain, {
-      lane,
+    const result = await estimateReceiveExecution({
+      source: mockSourceChain,
+      dest: mockDestChain,
+      routerOrRamp: onRamp,
       message,
     })
 

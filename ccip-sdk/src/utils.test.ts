@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
 import './index.ts'
+import { NATIVE_MINT } from '@solana/spl-token'
 import { dataLength } from 'ethers'
 
 import { ChainFamily } from './types.ts'
@@ -929,17 +930,16 @@ describe('getAddressBytes', () => {
   })
 
   it('should handle base58 Solana addresses', () => {
-    const solanaAddress = '11111111111111111111111111111111'
+    const solanaAddress = NATIVE_MINT.toBase58()
     const result = getAddressBytes(solanaAddress)
     assert.ok(result instanceof Uint8Array)
+    assert.equal(result.length, 32)
   })
 
-  it('should not strip zeros if non-zero bytes exist in leading portion', () => {
-    const address = new Uint8Array(32)
-    address[0] = 0x01 // Non-zero in leading portion
-    address[31] = 0x02
-    const result = getAddressBytes(address)
-    assert.equal(result.length, 32)
+  it('should handle empty bytes', () => {
+    const result = getAddressBytes('0x')
+    assert.ok(result instanceof Uint8Array)
+    assert.equal(result.length, 0)
   })
 
   it('should preserve 20-byte addresses without modification', () => {
