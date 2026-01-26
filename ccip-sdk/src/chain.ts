@@ -85,7 +85,7 @@ export type ChainContext = WithLogger & {
    * Controls exponential backoff behavior for transient errors.
    * Default: DEFAULT_API_RETRY_CONFIG
    */
-  apiApiRetryConfig?: ApiRetryConfig
+  apiRetryConfig?: ApiRetryConfig
 }
 
 /**
@@ -242,7 +242,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /** CCIP API client (null if opted out) */
   readonly apiClient: CCIPAPIClient | null
   /** Retry configuration for API fallback operations (null if API client is disabled) */
-  readonly apiApiRetryConfig: Required<ApiRetryConfig> | null
+  readonly apiRetryConfig: Required<ApiRetryConfig> | null
 
   /**
    * Base constructor for Chain class.
@@ -250,7 +250,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param ctx - Optional context with logger and API client configuration
    */
   constructor(network: NetworkInfo, ctx?: ChainContext) {
-    const { logger = console, apiClient, apiApiRetryConfig } = ctx ?? {}
+    const { logger = console, apiClient, apiRetryConfig } = ctx ?? {}
 
     if (network.family !== (this.constructor as ChainStatic).family)
       throw new CCIPChainFamilyMismatchError(
@@ -264,13 +264,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     // API client initialization: default enabled, null = explicit opt-out
     if (apiClient === null) {
       this.apiClient = null // Explicit opt-out
-      this.apiApiRetryConfig = null // No retry config needed without API client
+      this.apiRetryConfig = null // No retry config needed without API client
     } else if (apiClient !== undefined) {
       this.apiClient = apiClient // Use provided instance
-      this.apiApiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiApiRetryConfig }
+      this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     } else {
       this.apiClient = new CCIPAPIClient(undefined, { logger }) // Default
-      this.apiApiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiApiRetryConfig }
+      this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     }
   }
 
@@ -373,8 +373,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       return getMessagesInTx(this, tx)
     } catch (err) {
       // if getTransaction or decoding fails, try API if available with retry
-      // apiClient and apiApiRetryConfig are coupled: both exist or both are null
-      if (this.apiClient && this.apiApiRetryConfig) {
+      // apiClient and apiRetryConfig are coupled: both exist or both are null
+      if (this.apiClient && this.apiRetryConfig) {
         const apiRequests = await withRetry(
           async () => {
             const messageIds = await this.apiClient!.getMessageIdsInTx(txHash)
@@ -384,7 +384,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
             }
             return Promise.all(messageIds.map((id) => this.apiClient!.getMessageById(id)))
           },
-          { ...this.apiApiRetryConfig, logger: this.logger },
+          { ...this.apiRetryConfig, logger: this.logger },
         )
         if (apiRequests.length > 0) {
           return apiRequests
