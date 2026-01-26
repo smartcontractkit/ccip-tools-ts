@@ -7,6 +7,7 @@ export type {
 export { CCIPAPIClient, DEFAULT_API_BASE_URL } from './api/index.ts'
 
 export type {
+  ApiRetryConfig,
   Chain,
   ChainContext,
   ChainGetter,
@@ -17,6 +18,7 @@ export type {
   TokenInfo,
   TokenPoolRemote,
 } from './chain.ts'
+export { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
 export {
   type EVMExtraArgsV1,
@@ -49,6 +51,7 @@ export {
   IntentStatus,
   MessageStatus,
 } from './types.ts'
+export type { WithRetryConfig } from './utils.ts'
 export {
   bigIntReplacer,
   bigIntReviver,
@@ -57,6 +60,7 @@ export {
   getDataBytes,
   isSupportedTxHash,
   networkInfo,
+  withRetry,
 } from './utils.ts'
 export {
   type CCIPExplorerLinks,

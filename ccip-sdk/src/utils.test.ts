@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 import './index.ts'
 import { dataLength } from 'ethers'
 
+import { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
+import { CCIPHttpError, CCIPTimeoutError } from './errors/index.ts'
 import { ChainFamily } from './types.ts'
 import {
   bigIntReplacer,
@@ -23,6 +25,7 @@ import {
   sleep,
   snakeToCamel,
   toLeArray,
+  withRetry,
 } from './utils.ts'
 
 describe('getSomeBlockNumberBefore', () => {
@@ -1146,5 +1149,202 @@ describe('createRateLimitedFetch', () => {
 
     const result = await rateLimitedFetch('https://example.com')
     assert.equal(result.ok, true)
+  })
+})
+
+describe('withRetry', () => {
+  it('should return result on first attempt success', async () => {
+    const operation = mock.fn(() => Promise.resolve('success'))
+
+    const result = await withRetry(operation, {
+      ...DEFAULT_API_RETRY_CONFIG,
+      initialDelayMs: 10,
+    })
+
+    assert.equal(result, 'success')
+    assert.equal(operation.mock.calls.length, 1)
+  })
+
+  it('should return result after transient failure then success', async () => {
+    let attempts = 0
+    const operation = mock.fn(() => {
+      attempts++
+      if (attempts < 2) {
+        throw new CCIPTimeoutError('test', 1000)
+      }
+      return Promise.resolve('success')
+    })
+
+    const result = await withRetry(operation, {
+      ...DEFAULT_API_RETRY_CONFIG,
+      initialDelayMs: 10,
+      respectRetryAfterHint: false,
+    })
+
+    assert.equal(result, 'success')
+    assert.equal(operation.mock.calls.length, 2)
+  })
+
+  it('should retry on CCIPHttpError with 5xx status', async () => {
+    let attempts = 0
+    const operation = mock.fn(() => {
+      attempts++
+      if (attempts <= 2) {
+        throw new CCIPHttpError(503, 'Service Unavailable')
+      }
+      return Promise.resolve('recovered')
+    })
+
+    const result = await withRetry(operation, {
+      ...DEFAULT_API_RETRY_CONFIG,
+      initialDelayMs: 10,
+      respectRetryAfterHint: false,
+    })
+
+    assert.equal(result, 'recovered')
+    assert.equal(operation.mock.calls.length, 3)
+  })
+
+  it('should NOT retry on CCIPHttpError with 4xx status (non-transient)', async () => {
+    const operation = mock.fn(() => {
+      throw new CCIPHttpError(400, 'Bad Request')
+    })
+
+    await assert.rejects(() => withRetry(operation, DEFAULT_API_RETRY_CONFIG), {
+      name: 'CCIPHttpError',
+    })
+
+    assert.equal(operation.mock.calls.length, 1)
+  })
+
+  it('should throw last error after exhausting retries', async () => {
+    const operation = mock.fn(() => {
+      throw new CCIPTimeoutError('persistent timeout', 1000)
+    })
+
+    await assert.rejects(
+      () =>
+        withRetry(operation, {
+          ...DEFAULT_API_RETRY_CONFIG,
+          maxRetries: 2,
+          initialDelayMs: 10,
+          respectRetryAfterHint: false,
+        }),
+      {
+        name: 'CCIPTimeoutError',
+      },
+    )
+
+    // 1 initial + 2 retries = 3 total
+    assert.equal(operation.mock.calls.length, 3)
+  })
+
+  it('should apply exponential backoff', async () => {
+    const operation = mock.fn(() => {
+      throw new CCIPTimeoutError('test', 1000)
+    })
+
+    const startTime = Date.now()
+
+    await assert.rejects(() =>
+      withRetry(operation, {
+        maxRetries: 2,
+        initialDelayMs: 50,
+        backoffMultiplier: 2,
+        maxDelayMs: 1000,
+        respectRetryAfterHint: false,
+      }),
+    )
+
+    const totalTime = Date.now() - startTime
+    // With backoff: 50ms + 100ms = 150ms minimum
+    // Without backoff (fixed 50ms): 50ms + 50ms = 100ms
+    // So we should see total time closer to 150ms
+    assert.ok(totalTime >= 130, `Total time ${totalTime}ms should show backoff effect (>= 130ms)`)
+    assert.equal(operation.mock.calls.length, 3) // initial + 2 retries
+  })
+
+  it('should cap delay at maxDelayMs', async () => {
+    const operation = mock.fn(() => {
+      throw new CCIPTimeoutError('test', 1000)
+    })
+
+    const startTime = Date.now()
+
+    await assert.rejects(() =>
+      withRetry(operation, {
+        maxRetries: 3,
+        initialDelayMs: 100,
+        backoffMultiplier: 10, // Aggressive multiplier
+        maxDelayMs: 150, // But capped
+        respectRetryAfterHint: false,
+      }),
+    )
+
+    const totalTime = Date.now() - startTime
+    // 4 attempts with max 150ms delays should be under 700ms
+    assert.ok(totalTime < 700, `Total time ${totalTime}ms exceeded expected`)
+  })
+
+  it('should respect retryAfterMs hint when configured', async () => {
+    const operation = mock.fn(() => {
+      throw new CCIPTimeoutError('test', 200) // 200ms hint
+    })
+
+    const startTime = Date.now()
+
+    await assert.rejects(() =>
+      withRetry(operation, {
+        maxRetries: 1,
+        initialDelayMs: 10, // Lower than hint
+        backoffMultiplier: 1,
+        maxDelayMs: 1000,
+        respectRetryAfterHint: true,
+      }),
+    )
+
+    const totalTime = Date.now() - startTime
+    // Should use the hint (200ms) since it's higher than initialDelayMs (10ms)
+    assert.ok(totalTime >= 180, `Should respect retryAfterMs hint, got ${totalTime}ms`)
+  })
+
+  it('should log retry attempts when logger provided', async () => {
+    const debugFn = mock.fn<(...args: unknown[]) => void>()
+    const logger = { debug: debugFn }
+
+    let attempts = 0
+    const operation = mock.fn(() => {
+      attempts++
+      if (attempts <= 2) {
+        throw new CCIPTimeoutError('test', 1000)
+      }
+      return Promise.resolve('success')
+    })
+
+    await withRetry(operation, {
+      ...DEFAULT_API_RETRY_CONFIG,
+      initialDelayMs: 10,
+      respectRetryAfterHint: false,
+      logger,
+    })
+
+    // Should have logged retry attempts
+    assert.ok(debugFn.mock.calls.length >= 2)
+    const firstLog = debugFn.mock.calls[0]!.arguments
+    assert.ok(String(firstLog[0]).includes('Retry attempt'))
+  })
+
+  it('should wrap non-CCIPError errors', async () => {
+    const operation = mock.fn(() => {
+      throw new TypeError('something went wrong')
+    })
+
+    await assert.rejects(() => withRetry(operation, DEFAULT_API_RETRY_CONFIG), {
+      name: 'CCIPError',
+      code: 'UNKNOWN',
+    })
+
+    // Should not retry non-transient errors
+    assert.equal(operation.mock.calls.length, 1)
   })
 })

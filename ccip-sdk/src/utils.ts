@@ -25,6 +25,7 @@ import {
   CCIPTypeVersionInvalidError,
   HttpStatus,
 } from './errors/index.ts'
+import { getRetryDelay, shouldRetry } from './errors/utils.ts'
 import SELECTORS from './selectors.ts'
 import { supportedChains } from './supported-chains.ts'
 import { type NetworkInfo, type WithLogger, ChainFamily } from './types.ts'
@@ -405,6 +406,108 @@ export function convertKeysToCamelCase(
  * @returns Promise that resolves after the specified duration.
  */
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms).unref())
+
+/**
+ * Configuration for the withRetry utility.
+ */
+export type WithRetryConfig = {
+  /** Maximum number of retry attempts */
+  maxRetries: number
+  /** Initial delay in milliseconds before the first retry */
+  initialDelayMs: number
+  /** Multiplier applied to delay after each retry */
+  backoffMultiplier: number
+  /** Maximum delay in milliseconds between retries */
+  maxDelayMs: number
+  /** Whether to respect the error's retryAfterMs hint */
+  respectRetryAfterHint: boolean
+  /** Optional logger for retry attempts */
+  logger?: { debug: (...args: unknown[]) => void }
+}
+
+/**
+ * Executes an async operation with retry logic and exponential backoff.
+ * Only retries on transient errors (as determined by shouldRetry from errors/utils).
+ *
+ * @param operation - Async function to execute
+ * @param config - Retry configuration
+ * @returns Promise resolving to the operation result
+ * @throws The last error encountered after all retries are exhausted
+ *
+ * @example
+ * ```typescript
+ * const result = await withRetry(
+ *   () => apiClient.getMessageById(id),
+ *   {
+ *     maxRetries: 3,
+ *     initialDelayMs: 1000,
+ *     backoffMultiplier: 2,
+ *     maxDelayMs: 30000,
+ *     respectRetryAfterHint: true,
+ *   }
+ * )
+ * ```
+ */
+export async function withRetry<T>(
+  operation: () => Promise<T>,
+  config: WithRetryConfig,
+): Promise<T> {
+  const {
+    maxRetries,
+    initialDelayMs,
+    backoffMultiplier,
+    maxDelayMs,
+    respectRetryAfterHint,
+    logger,
+  } = config
+
+  let lastError: CCIPError | undefined
+  let delay = initialDelayMs
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation()
+    } catch (err) {
+      lastError = CCIPError.isCCIPError(err) ? err : CCIPError.from(err, 'UNKNOWN')
+
+      // Only retry on transient errors
+      if (!shouldRetry(lastError)) {
+        throw lastError
+      }
+
+      // Don't sleep after the last attempt
+      if (attempt >= maxRetries) {
+        break
+      }
+
+      // Calculate delay for next retry
+      let nextDelay = delay
+
+      // Respect error's retryAfterMs hint if configured
+      if (respectRetryAfterHint) {
+        const hintDelay = getRetryDelay(lastError)
+        if (hintDelay !== null) {
+          nextDelay = Math.max(delay, hintDelay)
+        }
+      }
+
+      // Cap at maxDelayMs
+      nextDelay = Math.min(nextDelay, maxDelayMs)
+
+      logger?.debug(
+        `Retry attempt ${attempt + 1}/${maxRetries} after ${nextDelay}ms:`,
+        lastError.message,
+      )
+
+      await sleep(nextDelay)
+
+      // Apply exponential backoff for next iteration
+      delay = Math.min(delay * backoffMultiplier, maxDelayMs)
+    }
+  }
+
+  throw lastError!
+}
 
 /**
  * Parses a typeAndVersion string into its components.
