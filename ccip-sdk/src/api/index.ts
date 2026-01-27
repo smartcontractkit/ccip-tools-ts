@@ -13,10 +13,11 @@ import {
   type ChainTransaction,
   type Log_,
   type Logger,
-  type MessageStatus,
   type NetworkInfo,
   type WithLogger,
   CCIPVersion,
+  ChainFamily,
+  MessageStatus,
 } from '../types.ts'
 import { bigIntReviver, isTestnet, parseJson } from '../utils.ts'
 import type {
@@ -52,10 +53,28 @@ export type CCIPAPIClientContext = WithLogger & {
   timeoutMs?: number
 }
 
-const ensureNetworkInfo = (o: RawNetworkInfo): NetworkInfo => {
+const validateChainFamily = (value: string, logger: Logger): ChainFamily => {
+  const validFamilies = Object.values(ChainFamily) as string[]
+  if (validFamilies.includes(value)) {
+    return value as ChainFamily
+  }
+  logger.warn(`Unexpected chainFamily value from API: "${value}", using UNKNOWN`)
+  return ChainFamily.Unknown
+}
+
+const validateMessageStatus = (value: string, logger: Logger): MessageStatus => {
+  const validStatuses = Object.values(MessageStatus) as string[]
+  if (validStatuses.includes(value)) {
+    return value as MessageStatus
+  }
+  logger.warn(`Unexpected message status from API: "${value}", using UNKNOWN`)
+  return MessageStatus.Unknown
+}
+
+const ensureNetworkInfo = (o: RawNetworkInfo, logger: Logger): NetworkInfo => {
   return Object.assign(o, {
     isTestnet: isTestnet(o.name),
-    ...(!('family' in o) && { family: o.chainFamily }),
+    ...(!('family' in o) && { family: validateChainFamily(o.chainFamily, logger) }),
   }) as unknown as NetworkInfo
 }
 
@@ -428,8 +447,8 @@ export class CCIPAPIClient {
         : undefined
 
     // Build lane - all fields available from API
-    const source = ensureNetworkInfo(sourceNetworkInfo)
-    const dest = ensureNetworkInfo(destNetworkInfo)
+    const source = ensureNetworkInfo(sourceNetworkInfo, this.logger)
+    const dest = ensureNetworkInfo(destNetworkInfo, this.logger)
     const lane = {
       source,
       sourceChainSelector: source.chainSelector,
@@ -468,14 +487,14 @@ export class CCIPAPIClient {
       log,
       tx,
       // API-specific fields
-      status: status as MessageStatus,
+      status: validateMessageStatus(status, this.logger),
       readyForManualExecution,
       finality,
       receiptTransactionHash,
       receiptTimestamp: receiptTimestamp_,
       deliveryTime,
-      sourceNetworkInfo: ensureNetworkInfo(sourceNetworkInfo),
-      destNetworkInfo: ensureNetworkInfo(destNetworkInfo),
+      sourceNetworkInfo: ensureNetworkInfo(sourceNetworkInfo, this.logger),
+      destNetworkInfo: ensureNetworkInfo(destNetworkInfo, this.logger),
     }
   }
 }
