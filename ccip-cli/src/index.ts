@@ -17,7 +17,7 @@ const VERSION = '0.94.0-d5ad1f9'
 const globalOpts = {
   rpcs: {
     type: 'array',
-    alias: ['r', 'rpc'],
+    alias: 'rpc',
     describe: 'List of RPC endpoint URLs, ws[s] or http[s]',
     string: true,
   },

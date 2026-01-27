@@ -224,7 +224,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 5009297550715157269n)
       assert.equal(info.name, 'ethereum-mainnet')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Aptos chain selector as bigint', () => {
@@ -233,7 +233,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 4741433654826277614n)
       assert.equal(info.name, 'aptos-mainnet')
       assert.equal(info.family, ChainFamily.Aptos)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Solana chain selector as bigint', () => {
@@ -242,7 +242,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 124615329519749607n)
       assert.equal(info.name, 'solana-mainnet')
       assert.equal(info.family, ChainFamily.Solana)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle testnet chain selector as bigint', () => {
@@ -251,7 +251,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 16015286601757825753n)
       assert.equal(info.name, 'ethereum-testnet-sepolia')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, true)
+      assert.equal(info.networkType, 'TESTNET')
     })
   })
 
@@ -262,7 +262,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 5009297550715157269n)
       assert.equal(info.name, 'ethereum-mainnet')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle BSC chain ID as number', () => {
@@ -271,7 +271,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 11344663589394136015n)
       assert.equal(info.name, 'binance_smart_chain-mainnet')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle testnet chain ID as number', () => {
@@ -280,7 +280,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 16015286601757825753n)
       assert.equal(info.name, 'ethereum-testnet-sepolia')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, true)
+      assert.equal(info.networkType, 'TESTNET')
     })
   })
 
@@ -291,7 +291,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 5009297550715157269n)
       assert.equal(info.name, 'ethereum-mainnet')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Aptos chain ID as string', () => {
@@ -300,7 +300,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 4741433654826277614n)
       assert.equal(info.name, 'aptos-mainnet')
       assert.equal(info.family, ChainFamily.Aptos)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Aptos testnet chain ID as string', () => {
@@ -309,7 +309,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 743186221051783445n)
       assert.equal(info.name, 'aptos-testnet')
       assert.equal(info.family, ChainFamily.Aptos)
-      assert.equal(info.isTestnet, true)
+      assert.equal(info.networkType, 'TESTNET')
     })
 
     it('should handle Solana chain ID as string', () => {
@@ -318,7 +318,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 124615329519749607n)
       assert.equal(info.name, 'solana-mainnet')
       assert.equal(info.family, ChainFamily.Solana)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Solana testnet chain ID as string', () => {
@@ -327,7 +327,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 6302590918974934319n)
       assert.equal(info.name, 'solana-testnet')
       assert.equal(info.family, ChainFamily.Solana)
-      assert.equal(info.isTestnet, true)
+      assert.equal(info.networkType, 'TESTNET')
     })
   })
 
@@ -338,7 +338,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 5009297550715157269n)
       assert.equal(info.name, 'ethereum-mainnet')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle EVM chainID as bigint', () => {
@@ -347,7 +347,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 5009297550715157269n)
       assert.equal(info.name, 'ethereum-mainnet')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Aptos chain ID as string when not a valid selector', () => {
@@ -356,7 +356,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 4741433654826277614n)
       assert.equal(info.name, 'aptos-mainnet')
       assert.equal(info.family, ChainFamily.Aptos)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
   })
 
@@ -367,7 +367,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 5009297550715157269n)
       assert.equal(info.name, 'ethereum-mainnet')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Aptos chain name', () => {
@@ -376,7 +376,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 4741433654826277614n)
       assert.equal(info.name, 'aptos-mainnet')
       assert.equal(info.family, ChainFamily.Aptos)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Solana chain name', () => {
@@ -385,7 +385,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 124615329519749607n)
       assert.equal(info.name, 'solana-mainnet')
       assert.equal(info.family, ChainFamily.Solana)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle EVM testnet chain name', () => {
@@ -394,7 +394,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 16015286601757825753n)
       assert.equal(info.name, 'ethereum-testnet-sepolia')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, true)
+      assert.equal(info.networkType, 'TESTNET')
     })
   })
 
@@ -432,21 +432,22 @@ describe('networkInfo', () => {
     })
   })
 
-  describe('isTestnet detection', () => {
+  describe('networkType detection', () => {
     it('should correctly identify mainnet chains', () => {
-      assert.equal(networkInfo(1).isTestnet, false) // Ethereum mainnet
-      assert.equal(networkInfo(56).isTestnet, false) // BSC mainnet
-      assert.equal(networkInfo('aptos-mainnet').isTestnet, false) // Aptos mainnet
+      assert.equal(networkInfo(1).networkType, 'MAINNET') // Ethereum mainnet
+      assert.equal(networkInfo(56).networkType, 'MAINNET') // BSC mainnet
+      assert.equal(networkInfo('aptos-mainnet').networkType, 'MAINNET') // Aptos mainnet
     })
 
     it('should correctly identify testnet chains', () => {
-      assert.equal(networkInfo(11155111).isTestnet, true) // Sepolia
-      assert.equal(networkInfo('aptos-testnet').isTestnet, true) // Aptos testnet
-      assert.equal(networkInfo('solana-testnet').isTestnet, true) // Solana testnet
+      assert.equal(networkInfo(11155111).networkType, 'TESTNET') // Sepolia
+      assert.equal(networkInfo('aptos-testnet').networkType, 'TESTNET') // Aptos testnet
+      assert.equal(networkInfo('solana-testnet').networkType, 'TESTNET') // Solana testnet
     })
 
     it('should correctly identify devnet/localnet as testnet', () => {
-      assert.equal(networkInfo('solana-testnet').isTestnet, true)
+      assert.equal(networkInfo('solana-devnet').networkType, 'TESTNET')
+      assert.equal(networkInfo('aptos-localnet').networkType, 'TESTNET')
     })
   })
 })

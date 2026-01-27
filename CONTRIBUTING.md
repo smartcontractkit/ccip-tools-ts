@@ -384,6 +384,159 @@ export class MyChain extends Chain<typeof ChainFamily.MyChain> {
 
 This enables dynamic chain discovery via `supportedChains[family]` and is required for CLI auto-detection.
 
+## CLI Argument Guidelines
+
+The CLI follows established patterns from industry-standard CLIs (AWS, GCP, kubectl, docker) for argument design. These guidelines ensure consistency, usability, and maintainability.
+
+### Positional vs Named Arguments
+
+Use this decision rule when adding or modifying CLI commands:
+
+| Condition | Argument Type | Rationale |
+|-----------|---------------|-----------|
+| **>2 arguments** | Named (`--option`) | Too many positionals are hard to remember |
+| **Same data type** (two addresses, two paths) | Named (`--option`) | Prevents accidental swapping |
+| **Single obvious identifier** | Positional | Natural and concise (e.g., `show <tx-hash>`) |
+| **Different types, ≤2 args** | Positional | Visually distinct, intuitive order |
+
+**The "Swap Test":** If swapping two adjacent positional arguments produces valid syntax but incorrect behavior, use named arguments instead.
+
+#### Examples
+
+```bash
+# ✅ Good: Single positional - obvious what it is
+ccip-cli show <tx-hash>
+ccip-cli parse <data>
+
+# ✅ Good: Named args - two addresses could be swapped
+ccip-cli send -s ethereum-sepolia -d arbitrum-sepolia -r 0x123...
+
+# ❌ Bad: Two addresses as positionals - easy to swap by mistake
+ccip-cli token <network> <holder> <token-address>
+
+# ✅ Good: Named args prevent confusion
+ccip-cli token --chain ethereum-sepolia --holder 0xAAA... --token 0xBBB...
+```
+
+### Required Named Arguments
+
+yargs supports required named arguments via `demandOption: true`. This is standard practice in AWS, GCP, and Azure CLIs:
+
+```typescript
+.option('source', {
+  alias: 's',
+  type: 'string',
+  demandOption: true,  // Makes --source required
+  describe: 'Source chain: chainId, selector, or name',
+})
+```
+
+### Alias Conventions
+
+| Pattern | Rule | Example |
+|---------|------|---------|
+| Short aliases | Single lowercase letter for common options | `-s` for `--source`, `-r` for `--router` |
+| Word aliases | Intuitive words for frequently-used options | `--to` for `--receiver` |
+| No alias | For rarely-typed options (addresses, paths) | `--fee-token` with no short form |
+| Avoid conflicts | Check global options before adding aliases | Global `--rpc` exists, so don't use `-r` globally |
+
+**Important:** Always check global options before adding aliases to command-specific options.
+
+### Help Text Guidelines
+
+1. **Start with the noun** - describe what the option represents, not what the user should do
+2. **Include format hints** - mention expected format (chainId, selector, name)
+3. **Note defaults** - if there's a default, mention it
+4. **Disambiguate aliases** - when using case-sensitive aliases, note which is which
+
+```typescript
+// ✅ Good
+describe: 'Source chain: chainId, selector, or name'
+describe: 'Gas limit for receiver callback; defaults to ramp config'
+describe: 'Router contract address on source'
+
+// ❌ Avoid
+describe: 'Specify the source chain'  // Starts with verb, less scannable
+describe: 'Gas limit'  // Too terse, no context
+```
+
+### Adding Examples
+
+Use yargs `.example()` to show common usage patterns:
+
+```typescript
+.example([
+  [
+    'ccip-cli send -s ethereum-sepolia -d arbitrum-sepolia -r 0x0BF3... --only-get-fee',
+    'Get fee estimate',
+  ],
+  [
+    'ccip-cli send -s ethereum-sepolia -d arbitrum-sepolia -r 0x0BF3... --to 0xABC...',
+    'Send message to specific receiver',
+  ],
+])
+```
+
+### Command Structure Template
+
+```typescript
+export const command = 'mycommand'  // No positionals for >2 args or same-type args
+export const describe = 'Brief description of what the command does'
+
+export const builder = (yargs: Argv) =>
+  yargs
+    // Required options first
+    .option('required-option', {
+      alias: 'x',
+      type: 'string',
+      demandOption: true,
+      describe: 'What this option represents',
+    })
+    // Optional options grouped by category
+    .options({
+      'optional-option': {
+        alias: 'o',
+        type: 'string',
+        describe: 'What this option represents (default: xyz)',
+      },
+    })
+    // Validation
+    .check((argv) => {
+      // Custom validation logic
+      return true
+    })
+    // Examples
+    .example([
+      ['ccip-cli mycommand -x value', 'Description of example'],
+    ])
+```
+
+### Validation
+
+Use `.check()` for custom validation with helpful error messages:
+
+```typescript
+.check((argv) => {
+  if (!argv.source) {
+    throw new Error(
+      'Missing required option: --source\n' +
+      'Example: ccip-cli send --source ethereum-sepolia --dest arbitrum-sepolia --router 0x...'
+    )
+  }
+  return true
+})
+```
+
+### Reference: Current Command Patterns
+
+| Command | Pattern | Rationale |
+|---------|---------|-----------|
+| `show <tx-hash>` | Single positional | One obvious identifier |
+| `parse <data>` | Single positional | One obvious identifier |
+| `manualExec <tx-hash>` | Single positional | One obvious identifier |
+| `send -s <source> -d <dest> -r <router>` | All named | >2 args, source/dest are same type |
+| `laneLatency <source> <dest>` | Two positionals | Both are network names (human-readable, distinct from hex) |
+
 ## Pull Requests
 
 1. Run quality gates locally

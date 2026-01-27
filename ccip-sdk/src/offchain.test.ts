@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 import { keccak256 } from 'ethers'
 
 import { getLbtcAttestation, getUsdcAttestation } from './offchain.ts'
+import { NetworkType } from './types.ts'
 
 const origFetch = globalThis.fetch
 
@@ -23,14 +24,14 @@ describe('getUsdcAttestation', () => {
     mockedFetchJson.mock.restore()
   })
 
-  it('should call the mainnet Circle API when isTestnet is false', async () => {
+  it('should call the mainnet Circle API when networkType is MAINNET', async () => {
     const messageHex = '0x1234567890abcdef'
     const msgHash = keccak256(messageHex)
     const completeResponse = { status: 'complete', attestation: '0xabcd' }
 
     mockedFetchJson.mock.mockImplementation(() => Promise.resolve(completeResponse))
 
-    const result = await getUsdcAttestation(messageHex, false)
+    const result = await getUsdcAttestation(messageHex, NetworkType.Mainnet)
 
     assert.equal(mockedFetch.mock.calls.length, 1)
     assert.equal(
@@ -40,14 +41,14 @@ describe('getUsdcAttestation', () => {
     assert.equal(result, '0xabcd')
   })
 
-  it('should call the testnet Circle API when isTestnet is true', async () => {
+  it('should call the testnet Circle API when networkType is TESTNET', async () => {
     const messageHex = '0x1234567890abcdef'
     const msgHash = keccak256(messageHex)
     const completeResponse = { status: 'complete', attestation: '0xabcd' }
 
     mockedFetchJson.mock.mockImplementation(() => Promise.resolve(completeResponse))
 
-    const result = await getUsdcAttestation(messageHex, true)
+    const result = await getUsdcAttestation(messageHex, NetworkType.Testnet)
 
     assert.equal(mockedFetch.mock.calls.length, 1)
     assert.equal(
@@ -70,7 +71,7 @@ describe('getUsdcAttestation', () => {
       }),
     )
 
-    const result = await getUsdcAttestation(messageHex, true)
+    const result = await getUsdcAttestation(messageHex, NetworkType.Testnet)
 
     assert.equal(mockedFetch.mock.calls.length, 1)
     assert.equal(
@@ -87,7 +88,7 @@ describe('getUsdcAttestation', () => {
     mockedFetchJson.mock.mockImplementation(() => Promise.resolve(pendingResponse))
 
     await assert.rejects(
-      async () => await getUsdcAttestation(messageHex, true),
+      async () => await getUsdcAttestation(messageHex, NetworkType.Testnet),
       /Could not fetch USDC attestation/,
     )
   })
@@ -99,7 +100,7 @@ describe('getUsdcAttestation', () => {
     mockedFetchJson.mock.mockImplementation(() => Promise.resolve(errorResponse))
 
     await assert.rejects(
-      async () => await getUsdcAttestation(messageHex, true),
+      async () => await getUsdcAttestation(messageHex, NetworkType.Testnet),
       /Could not fetch USDC attestation/,
     )
   })
@@ -146,7 +147,7 @@ describe('getLbtcAttestation', () => {
   })
 
   it('should return offchain token data for approved attestation', async () => {
-    const result = await getLbtcAttestation(approvedPayloadHash1, true)
+    const result = await getLbtcAttestation(approvedPayloadHash1, NetworkType.Testnet)
 
     assert.equal(mockedFetch.mock.calls.length, 1)
     assert.equal(
@@ -160,8 +161,8 @@ describe('getLbtcAttestation', () => {
     assert.equal(result.attestation, approvedPayloadAttestation1)
   })
 
-  it('should call mainnet API when isTestnet is false', async () => {
-    const result = await getLbtcAttestation(approvedPayloadHash1, false)
+  it('should call mainnet API when networkType is MAINNET', async () => {
+    const result = await getLbtcAttestation(approvedPayloadHash1, NetworkType.Mainnet)
 
     assert.equal(mockedFetch.mock.calls.length, 1)
     assert.equal(
@@ -179,14 +180,14 @@ describe('getLbtcAttestation', () => {
     const randomPayloadHash = '0xrandomhash'
 
     await assert.rejects(
-      async () => await getLbtcAttestation(randomPayloadHash, true),
+      async () => await getLbtcAttestation(randomPayloadHash, NetworkType.Testnet),
       /Could not find LBTC attestation for hash/,
     )
   })
 
   it('should throw error if attestation is not approved', async () => {
     await assert.rejects(
-      async () => await getLbtcAttestation(pendingPayloadHash, true),
+      async () => await getLbtcAttestation(pendingPayloadHash, NetworkType.Testnet),
       /LBTC attestation not yet approved for hash/,
     )
   })
@@ -195,7 +196,7 @@ describe('getLbtcAttestation', () => {
     mockedFetchJson.mock.mockImplementationOnce(() => Promise.resolve({}))
 
     await assert.rejects(
-      async () => await getLbtcAttestation(approvedPayloadHash1, true),
+      async () => await getLbtcAttestation(approvedPayloadHash1, NetworkType.Testnet),
       /Could not find LBTC attestation for hash/,
     )
   })
@@ -204,13 +205,13 @@ describe('getLbtcAttestation', () => {
     mockedFetchJson.mock.mockImplementationOnce(() => Promise.resolve({ data: 'value' }))
 
     await assert.rejects(
-      async () => await getLbtcAttestation(approvedPayloadHash1, true),
+      async () => await getLbtcAttestation(approvedPayloadHash1, NetworkType.Testnet),
       /Could not find LBTC attestation for hash/,
     )
   })
 
   it('should handle multiple attestations and return correct one', async () => {
-    const result = await getLbtcAttestation(approvedPayloadHash2, true)
+    const result = await getLbtcAttestation(approvedPayloadHash2, NetworkType.Testnet)
 
     assert.equal(result.attestation, approvedPayloadAttestation2)
   })

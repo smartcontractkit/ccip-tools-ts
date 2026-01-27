@@ -18,8 +18,9 @@ import {
   CCIPVersion,
   ChainFamily,
   MessageStatus,
+  NetworkType,
 } from '../types.ts'
-import { bigIntReviver, isTestnet, parseJson } from '../utils.ts'
+import { bigIntReviver, parseJson } from '../utils.ts'
 import type {
   APICCIPRequest,
   APIErrorResponse,
@@ -73,7 +74,7 @@ const validateMessageStatus = (value: string, logger: Logger): MessageStatus => 
 
 const ensureNetworkInfo = (o: RawNetworkInfo, logger: Logger): NetworkInfo => {
   return Object.assign(o, {
-    isTestnet: isTestnet(o.name),
+    networkType: o.name.includes('-mainnet') ? NetworkType.Mainnet : NetworkType.Testnet,
     ...(!('family' in o) && { family: validateChainFamily(o.chainFamily, logger) }),
   }) as unknown as NetworkInfo
 }

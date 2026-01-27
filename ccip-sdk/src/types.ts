@@ -71,6 +71,16 @@ export const ChainFamily = {
 export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
 
 /**
+ * Enumeration of network types (mainnet vs testnet).
+ */
+export const NetworkType = {
+  Mainnet: 'MAINNET',
+  Testnet: 'TESTNET',
+} as const
+/** Type representing the network environment type. */
+export type NetworkType = (typeof NetworkType)[keyof typeof NetworkType]
+
+/**
  * Enumeration of supported CCIP protocol versions.
  */
 export const CCIPVersion = {
@@ -100,8 +110,8 @@ export type NetworkInfo<F extends ChainFamily = ChainFamily> = {
   readonly chainSelector: bigint
   /** Human-readable network name. */
   readonly name: string
-  /** Whether this is a testnet. */
-  readonly isTestnet: boolean
+  /** Network environment type. */
+  readonly networkType: NetworkType
 } & ChainFamilyWithId<F>
 
 /**

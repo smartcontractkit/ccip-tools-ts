@@ -5,7 +5,7 @@ import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
 import { estimateExecGas } from './evm/gas.ts'
 import { estimateReceiveExecution } from './gas.ts'
-import { ChainFamily } from './types.ts'
+import { ChainFamily, NetworkType } from './types.ts'
 
 // Test doubles - we create mock chain objects that implement the minimal interface needed
 // The discoverOffRamp function performs a complex cross-check between chains, so we need
@@ -22,6 +22,7 @@ function createMockChains(onRamp: string, offRamp: string) {
       chainId: 11155111,
       chainSelector: 16015286601757825753n,
       family: ChainFamily.EVM,
+      networkType: NetworkType.Testnet,
       isTestnet: true,
     },
     typeAndVersion: mock.fn(async (address: string) => {
@@ -51,6 +52,7 @@ function createMockChains(onRamp: string, offRamp: string) {
       chainId: 84532,
       chainSelector: 10344971235874465080n,
       family: ChainFamily.EVM,
+      networkType: NetworkType.Testnet,
       isTestnet: true,
     },
     provider: {
