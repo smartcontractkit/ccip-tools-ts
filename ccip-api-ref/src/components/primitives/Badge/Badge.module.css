@@ -1,0 +1,108 @@
+/**
+ * Badge component styles
+ * Consistent with Chainlink design system
+ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1x, 4px);
+  padding: var(--badge-padding-y, 4px) var(--badge-padding-x, 12px);
+  border-radius: var(--badge-border-radius, 16px);
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Size variants */
+.badge--sm {
+  font-size: 0.625rem;
+  padding: 2px 8px;
+}
+
+.badge--md {
+  font-size: 0.75rem;
+  padding: 4px 12px;
+}
+
+.badge--lg {
+  font-size: 0.875rem;
+  padding: 6px 16px;
+}
+
+/* Color variants - using Chainlink design system colors */
+.badge--default {
+  background-color: var(--gray-100, #e8eaed);
+  color: var(--gray-700, #464c56);
+}
+
+.badge--success {
+  background-color: var(--color-background-success, #e8f5e9);
+  color: hsla(158, 79%, 32%, 1);
+}
+
+.badge--warning {
+  background-color: var(--color-background-warning, #fff3e0);
+  color: hsla(22, 100%, 40%, 1);
+}
+
+.badge--danger {
+  background-color: var(--color-background-error, #ffebee);
+  color: hsla(351, 100%, 44%, 1);
+}
+
+.badge--info {
+  background-color: var(--color-background-info, #e3f2fd);
+  color: var(--chainlink-blue, #375bd2);
+}
+
+/* Dark mode adjustments */
+[data-theme='dark'] .badge--default {
+  background-color: var(--gray-700, #464c56);
+  color: var(--gray-100, #e8eaed);
+}
+
+[data-theme='dark'] .badge--success {
+  background-color: rgba(76, 175, 80, 0.2);
+  color: hsla(158, 79%, 52%, 1);
+}
+
+[data-theme='dark'] .badge--warning {
+  background-color: rgba(255, 152, 0, 0.2);
+  color: hsla(22, 100%, 60%, 1);
+}
+
+[data-theme='dark'] .badge--danger {
+  background-color: rgba(244, 67, 54, 0.2);
+  color: hsla(351, 100%, 64%, 1);
+}
+
+[data-theme='dark'] .badge--info {
+  background-color: rgba(33, 150, 243, 0.2);
+  color: var(--chainlink-blue-light, #5a8dee);
+}
+
+/* Icon styling */
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon > svg,
+.icon > img {
+  width: 1em;
+  height: 1em;
+}
+
+.badge--sm .icon > svg,
+.badge--sm .icon > img {
+  width: 0.875em;
+  height: 0.875em;
+}
+
+.badge--lg .icon > svg,
+.badge--lg .icon > img {
+  width: 1.125em;
+  height: 1.125em;
+}

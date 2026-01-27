@@ -126,6 +126,23 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
 /**
  * Decodes hex strings, bytearrays, JSON strings and raw objects as CCIPMessages
  * Does minimal validation, but converts objects in the format expected by ccip-tools-ts
+ *
+ * @param data - Hex string, Uint8Array, JSON string, or raw object to decode.
+ * @returns Decoded CCIPMessage.
+ * @throws CCIPMessageDecodeError - When the data cannot be decoded as a valid CCIP message
+ * @throws CCIPMessageInvalidError - When the message structure is invalid or missing required fields
+ * @example
+ * ```typescript
+ * import { decodeMessage } from '@chainlink/ccip-sdk'
+ *
+ * // Decode from JSON string
+ * const message = decodeMessage('{"header":{"sourceChainSelector":"123",...}')
+ *
+ * // Decode from hex-encoded bytes
+ * const message = decodeMessage('0x...')
+ *
+ * console.log('Message ID:', message.header.messageId)
+ * ```
  **/
 export function decodeMessage(data: string | Uint8Array | Record<string, unknown>): CCIPMessage {
   if (
@@ -163,6 +180,9 @@ export function buildMessageForDest(message: MessageInput, dest: ChainFamily): A
  * @param source - Chain
  * @param tx - ChainTransaction to search in
  * @returns CCIP requests (messages) in the transaction (at least one)
+ * @throws CCIPMessageNotFoundInTxError - When no CCIP messages are found in the transaction
+ * @throws CCIPNetworkFamilyUnsupportedError - When chain family is not supported for legacy lanes
+ * @see {@link getMessageById} - Search by messageId when tx hash unknown
  **/
 export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Promise<CCIPRequest[]> {
   // RPC fallback
@@ -191,12 +211,30 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
 }
 
 /**
- * Fetch a CCIP message by its messageId from RPC (slow).
- * Should be called *after* generic Chain implementation, which fetches from API if available.
- * @param source - Provider to fetch logs from.
- * @param messageId - MessageId to search for.
- * @param opts - Optional hints for pagination (e.g., `address` for onRamp, `page` for pagination size).
- * @returns CCIPRequest with given messageId.
+ * Fetch a CCIP message by messageId from RPC logs (slow scan).
+ *
+ * This is the fallback implementation called by {@link Chain.getMessageById}
+ * when the API client is unavailable or fails.
+ *
+ * @param source - Source chain to scan logs from
+ * @param messageId - Message ID to search for
+ * @param opts - Optional hints (onRamp address narrows search, page controls batch size)
+ * @returns CCIPRequest matching the messageId
+ *
+ * @throws {@link CCIPMessageIdNotFoundError} if message not found after scanning all logs
+ *
+ * @example
+ *
+ * ```typescript
+ * import { getMessageById, EVMChain } from '@chainlink/ccip-sdk'
+ *
+ * const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+ * const request = await getMessageById(source, '0xabc123...', {
+ *   onRamp: '0xOnRampAddress...',
+ * })
+ * console.log(`Found: seqNr=${request.message.sequenceNumber}`)
+ * ```
+ *
  * @internal
  */
 export async function getMessageById(
@@ -244,6 +282,7 @@ const BLOCK_LOG_WINDOW_SIZE = 5000
  * @param seqNrRange - Object containing minSeqNr and maxSeqNr for the batch range.
  * @param opts - Optional log filtering parameters.
  * @returns Array of messages in the batch.
+ * @see {@link getCommitReport} - Get commit report to determine batch range
  */
 export async function getMessagesInBatch<
   C extends Chain,
@@ -330,6 +369,19 @@ export async function getMessagesInBatch<
  * @param sender - Sender address.
  * @param filter - Log filter options.
  * @returns Async generator of CCIP requests.
+ * @example
+ * ```typescript
+ * import { getMessagesForSender, EVMChain } from '@chainlink/ccip-sdk'
+ *
+ * const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+ *
+ * for await (const request of getMessagesForSender(chain, '0xSenderAddress', {})) {
+ *   console.log('Message ID:', request.message.header.messageId)
+ *   console.log('Destination:', request.lane.destChainSelector)
+ * }
+ * ```
+ * @see {@link getMessagesInTx} - Fetch from specific transaction
+ * @see {@link getMessageById} - Search by messageId
  */
 export async function* getMessagesForSender(
   source: Chain,
@@ -367,12 +419,34 @@ export async function* getMessagesForSender(
 }
 
 /**
- * Map source `token` to `sourcePoolAddress + destTokenAddress`.
- * @param source - Source chain.
- * @param destChainSelector - Destination network selector.
- * @param onRamp - Contract address.
- * @param sourceTokenAmount - tokenAmount object, usually containing `token` and `amount` properties.
- * @returns tokenAmount object with `sourcePoolAddress`, `sourceTokenAddress`, `destTokenAddress`, and remaining properties.
+ * Map source token to its pool address and destination token address.
+ *
+ * Resolves token routing by querying the TokenAdminRegistry and TokenPool
+ * to find the corresponding destination chain token.
+ *
+ * @param source - Source chain instance
+ * @param destChainSelector - Destination chain selector
+ * @param onRamp - OnRamp contract address
+ * @param sourceTokenAmount - Token amount object containing `token` and `amount`
+ * @returns Extended token amount with `sourcePoolAddress`, `sourceTokenAddress`, and `destTokenAddress`
+ *
+ * @throws {@link CCIPTokenNotInRegistryError} if token is not registered in TokenAdminRegistry
+ *
+ * @example
+ *
+ * ```typescript
+ * import { sourceToDestTokenAddresses, EVMChain } from '@chainlink/ccip-sdk'
+ *
+ * const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+ * const tokenAmount = await sourceToDestTokenAddresses(
+ *   source,
+ *   destChainSelector,
+ *   '0xOnRamp...',
+ *   { token: '0xLINK...', amount: 1000000000000000000n }
+ * )
+ * console.log(`Pool: ${tokenAmount.sourcePoolAddress}`)
+ * console.log(`Dest token: ${tokenAmount.destTokenAddress}`)
+ * ```
  */
 export async function sourceToDestTokenAddresses<S extends { token: string }>(
   source: Chain,

@@ -132,6 +132,22 @@ const networkInfoFromChainId = memoize((chainId: NetworkInfo['chainId']): Networ
  *   - Chain ID as number, bigint or string (EVM: "1", Aptos: "aptos:1", Solana: genesisHash)
  *   - Chain name as string ("ethereum-mainnet")
  * @returns Complete NetworkInfo object
+ * @example
+ * ```typescript
+ * import { networkInfo } from '@chainlink/ccip-sdk'
+ *
+ * // By chain name
+ * const sepolia = networkInfo('ethereum-testnet-sepolia')
+ * console.log('Selector:', sepolia.chainSelector)
+ *
+ * // By chain selector
+ * const fuji = networkInfo(14767482510784806043n)
+ * console.log('Name:', fuji.name) // 'avalanche-testnet-fuji'
+ *
+ * // By chain ID
+ * const mainnet = networkInfo(1)
+ * console.log('Family:', mainnet.family) // 'EVM'
+ * ```
  */
 export const networkInfo = memoize(function networkInfo_(
   selectorOrIdOrName: bigint | number | string,
@@ -207,6 +223,15 @@ export function* blockRangeGenerator(
  * @param _key - Property key (unused).
  * @param value - Value to transform.
  * @returns String representation if BigInt, otherwise unchanged value.
+ * @example
+ * ```typescript
+ * import { bigIntReplacer } from '@chainlink/ccip-sdk'
+ *
+ * const data = { amount: 1000000000000000000n }
+ * const json = JSON.stringify(data, bigIntReplacer)
+ * console.log(json) // '{"amount":"1000000000000000000"}'
+ * ```
+ * @see {@link bigIntReviver} - Revive BigInt values when parsing
  */
 export function bigIntReplacer(_key: string, value: unknown): unknown {
   if (typeof value === 'bigint') {
@@ -220,6 +245,15 @@ export function bigIntReplacer(_key: string, value: unknown): unknown {
  * @param _key - Property key (unused).
  * @param value - Value to transform.
  * @returns BigInt if numeric string, otherwise unchanged value.
+ * @example
+ * ```typescript
+ * import { bigIntReviver } from '@chainlink/ccip-sdk'
+ *
+ * const json = '{"amount":"1000000000000000000"}'
+ * const data = JSON.parse(json, bigIntReviver)
+ * console.log(typeof data.amount) // 'bigint'
+ * ```
+ * @see {@link bigIntReplacer} - Stringify BigInt values
  */
 export function bigIntReviver(_key: string, value: unknown): unknown {
   if (typeof value === 'string' && /^\d+$/.test(value)) {
@@ -240,6 +274,22 @@ export function parseJson<T = unknown>(text: string): T {
 
 /**
  * Decode address from a 32-byte hex string
+ *
+ * @param address - Address bytes (hex string or Uint8Array).
+ * @param family - Target chain family for address formatting.
+ * @returns Formatted address string.
+ * @example
+ * ```typescript
+ * import { decodeAddress, ChainFamily } from '@chainlink/ccip-sdk'
+ *
+ * // Decode EVM address from 32-byte hex
+ * const evmAddr = decodeAddress('0x000000000000000000000000abc123...', ChainFamily.EVM)
+ * console.log(evmAddr) // '0xABC123...'
+ *
+ * // Decode Solana address
+ * const solAddr = decodeAddress(bytes, ChainFamily.Solana)
+ * console.log(solAddr) // Base58 encoded address
+ * ```
  **/
 export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFamily.EVM): string {
   const chain = supportedChains[family]
@@ -312,6 +362,19 @@ export function isBase64(data: unknown): data is string {
  * Converts various data formats to Uint8Array.
  * @param data - Bytes, number array, or Base64 string.
  * @returns Uint8Array representation.
+ * @example
+ * ```typescript
+ * import { getDataBytes } from '@chainlink/ccip-sdk'
+ *
+ * // From hex string
+ * const bytes1 = getDataBytes('0x1234abcd')
+ *
+ * // From number array
+ * const bytes2 = getDataBytes([0x12, 0x34, 0xab, 0xcd])
+ *
+ * // From Base64
+ * const bytes3 = getDataBytes('EjSrzQ==')
+ * ```
  */
 export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
   if (Array.isArray(data)) return new Uint8Array(data)
