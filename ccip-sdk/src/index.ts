@@ -79,8 +79,8 @@ export type { UnsignedSolanaTx } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'
 export type { UnsignedTONTx } from './ton/index.ts'
-import { ChainFamily } from './types.ts'
-export { AptosChain, ChainFamily, EVMChain, SolanaChain, SuiChain, TONChain }
+import { ChainFamily, NetworkType } from './types.ts'
+export { AptosChain, ChainFamily, EVMChain, NetworkType, SolanaChain, SuiChain, TONChain }
 // use `supportedChains` to override/register derived classes, if needed
 export { supportedChains } from './supported-chains.ts'
 // import `allSupportedChains` to get them all registered, in tree-shaken environments

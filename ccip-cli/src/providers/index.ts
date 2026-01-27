@@ -11,6 +11,7 @@ import {
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
   ChainFamily,
+  NetworkType,
   networkInfo,
   supportedChains,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -213,7 +214,11 @@ export async function loadChainWallet(chain: Chain, argv: { wallet?: unknown; rp
       wallet = loadSuiWallet(argv)
       return [wallet.toSuiAddress(), wallet] as const
     case ChainFamily.TON:
-      wallet = await loadTonWallet((chain as TONChain).provider, argv, chain.network.isTestnet)
+      wallet = await loadTonWallet(
+        (chain as TONChain).provider,
+        argv,
+        chain.network.networkType === NetworkType.Testnet,
+      )
       return [wallet.getAddress(), wallet] as const
     default:
       // TypeScript exhaustiveness check - this should never be reached

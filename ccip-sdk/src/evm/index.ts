@@ -83,6 +83,7 @@ import {
   type WithLogger,
   CCIPVersion,
   ChainFamily,
+  NetworkType,
 } from '../types.ts'
 import {
   decodeAddress,
@@ -899,13 +900,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    */
   async _getSomeOnRampFor(router: string): Promise<string> {
     // when given a router, we take any onRamp we can find, as usually they all use same registry
-    const someOtherNetwork = this.network.isTestnet
-      ? this.network.name === 'ethereum-testnet-sepolia'
-        ? 'avalanche-testnet-fuji'
-        : 'ethereum-testnet-sepolia'
-      : this.network.name === 'ethereum-mainnet'
-        ? 'avalanche-mainnet'
-        : 'ethereum-mainnet'
+    const someOtherNetwork =
+      this.network.networkType === NetworkType.Testnet
+        ? this.network.name === 'ethereum-testnet-sepolia'
+          ? 'avalanche-testnet-fuji'
+          : 'ethereum-testnet-sepolia'
+        : this.network.name === 'ethereum-mainnet'
+          ? 'avalanche-mainnet'
+          : 'ethereum-mainnet'
     return this.getOnRampForRouter(router, networkInfo(someOtherNetwork).chainSelector)
   }
 

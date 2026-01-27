@@ -18,8 +18,8 @@ import type { Ctx } from './types.ts'
 import { getCtx, logParsedError, parseTokenAmounts } from './utils.ts'
 import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 
-export const command = 'send <source> <router> <dest>'
-export const describe = 'Send a CCIP message from router on source to dest'
+export const command = 'send'
+export const describe = 'Send a CCIP message from source to destination chain'
 
 /**
  * Yargs builder for the send command.
@@ -28,109 +28,107 @@ export const describe = 'Send a CCIP message from router on source to dest'
  */
 export const builder = (yargs: Argv) =>
   yargs
-    .positional('source', {
+    .option('source', {
+      alias: 's',
       type: 'string',
       demandOption: true,
-      describe: 'source network, chainId or name',
-      example: 'ethereum-testnet-sepolia',
+      describe: 'Source chain: chainId, selector, or name',
     })
-    .positional('router', {
+    .option('dest', {
+      alias: 'd',
       type: 'string',
       demandOption: true,
-      describe: 'router contract address on source',
+      describe: 'Destination chain: chainId, selector, or name',
     })
-    .positional('dest', {
+    .option('router', {
+      alias: 'r',
       type: 'string',
       demandOption: true,
-      describe: 'destination network, chainId or name',
-      example: 'ethereum-testnet-sepolia-arbitrum-1',
+      describe: 'Router contract address on source',
     })
     .options({
       receiver: {
-        alias: 'R',
+        alias: 'to',
         type: 'string',
-        describe:
-          'Receiver of the message; defaults to the sender wallet address if same network family',
+        describe: 'Receiver address on destination; defaults to sender if same chain family',
       },
       data: {
-        alias: 'd',
         type: 'string',
-        describe: 'Data to send in the message (non-hex will be utf-8 encoded)',
-        example: '0x1234',
+        describe: 'Data payload to send (non-hex will be UTF-8 encoded)',
       },
       'gas-limit': {
         alias: ['L', 'compute-units'],
         type: 'number',
-        describe:
-          'Gas limit for receiver callback execution; defaults to default configured on ramps',
+        describe: 'Gas limit for receiver callback; defaults to ramp config',
       },
       'estimate-gas-limit': {
         type: 'number',
-        describe:
-          'Estimate gas limit for receiver callback execution; argument is a % margin to add to the estimate',
-        example: '10',
+        describe: 'Estimate gas limit with % margin (e.g., 10 for +10%)',
         conflicts: 'gas-limit',
       },
       'allow-out-of-order-exec': {
         alias: 'ooo',
         type: 'boolean',
-        describe:
-          'Allow execution of messages out of order (i.e. sender nonce not enforced, only v1.5+ lanes, mandatory for some dests)',
+        describe: 'Allow out-of-order execution (v1.5+ lanes)',
       },
       'fee-token': {
         type: 'string',
-        describe:
-          'Address or symbol of the fee token (e.g. LINK address on source); if not provided, will pay in native',
+        describe: 'Fee token address or symbol (default: native)',
       },
       'transfer-tokens': {
         alias: 't',
         type: 'array',
         string: true,
-        describe: 'List of token amounts (on source) to transfer to the receiver',
-        example: '0xtoken=0.1',
+        describe: 'Token amounts to transfer: token=amount',
       },
       wallet: {
         alias: 'w',
         type: 'string',
-        describe:
-          'Wallet to send transactions with; pass `ledger[:index_or_derivation]` to use Ledger USB hardware wallet, or private key in `USER_KEY` environment variable',
+        describe: 'Wallet: ledger[:index] or private key',
       },
       'token-receiver': {
         type: 'string',
-        describe: "Address of the Solana tokenReceiver (if different than program's receiver)",
+        describe: 'Solana token receiver (if different from program receiver)',
       },
       account: {
         alias: 'receiver-object-id',
         type: 'array',
         string: true,
-        describe:
-          'List of accounts needed by Solana receiver program, or receiverObjectIds needed by Sui; On Solana, append `=rw` to specify account as writable; can be specified multiple times',
-        example: 'requiredPdaAddress=rw',
+        describe: 'Solana accounts (append =rw for writable) or Sui object IDs',
       },
       'only-get-fee': {
         type: 'boolean',
-        describe: 'Fetch and print the fee for the transaction, then exit',
+        describe: 'Print fee and exit',
       },
       'only-estimate': {
         type: 'boolean',
-        describe: 'Only estimate dest exec gasLimit',
+        describe: 'Print gas estimate and exit',
         implies: 'estimate-gas-limit',
       },
       'approve-max': {
         type: 'boolean',
-        describe:
-          "Approve the maximum amount of tokens to transfer; default=false approves only what's needed",
+        describe: 'Approve max token amount instead of exact',
       },
       wait: {
         type: 'boolean',
         default: false,
-        describe: 'Wait for execution',
+        describe: 'Wait for execution on destination',
       },
     })
     .check(
       ({ 'transfer-tokens': transferTokens }) =>
         !transferTokens || transferTokens.every((t) => /^[^=]+=\d+(\.\d+)?$/.test(t)),
     )
+    .example([
+      [
+        'ccip-cli send -s ethereum-testnet-sepolia -d arbitrum-sepolia -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 --only-get-fee',
+        'Get fee estimate',
+      ],
+      [
+        'ccip-cli send -s ethereum-testnet-sepolia -d arbitrum-sepolia -r 0x0BF3... --to 0xABC... --data "Hello"',
+        'Send message with data',
+      ],
+    ])
 
 /**
  * Handler for the send command.

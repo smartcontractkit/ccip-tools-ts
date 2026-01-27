@@ -10,6 +10,7 @@ import {
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
+import { NetworkType } from '../types.ts'
 
 describe('TON utils unit tests', () => {
   describe('tryParseCell', () => {
@@ -90,13 +91,13 @@ describe('TON utils unit tests', () => {
         }
       }) as unknown as typeof fetch
 
-      await lookupTxByRawHash('0xabcdef', true, mockFetch)
+      await lookupTxByRawHash('0xabcdef', NetworkType.Testnet, mockFetch)
 
       assert.ok(capturedUrl.includes('hash=abcdef'), 'Should strip 0x prefix')
       assert.ok(!capturedUrl.includes('0x'), 'Should not include 0x in URL')
     })
 
-    it('should use testnet URL when isTestnet=true', async () => {
+    it('should use testnet URL when networkType=TESTNET', async () => {
       let capturedUrl = ''
       const mockFetch = (async (url: string) => {
         capturedUrl = url
@@ -107,13 +108,13 @@ describe('TON utils unit tests', () => {
         }
       }) as unknown as typeof fetch
 
-      await lookupTxByRawHash('abcd', true, mockFetch)
+      await lookupTxByRawHash('abcd', NetworkType.Testnet, mockFetch)
 
       const parsed = new URL(capturedUrl)
       assert.equal(parsed.hostname, 'testnet.toncenter.com', 'Should use testnet URL')
     })
 
-    it('should use mainnet URL when isTestnet=false', async () => {
+    it('should use mainnet URL when networkType=TESTNET', async () => {
       let capturedUrl = ''
       const mockFetch = (async (url: string) => {
         capturedUrl = url
@@ -124,7 +125,7 @@ describe('TON utils unit tests', () => {
         }
       }) as unknown as typeof fetch
 
-      await lookupTxByRawHash('abcd', false, mockFetch)
+      await lookupTxByRawHash('abcd', NetworkType.Mainnet, mockFetch)
 
       const parsed = new URL(capturedUrl)
       assert.equal(parsed.hostname, 'toncenter.com', 'Should use mainnet URL')
@@ -135,7 +136,10 @@ describe('TON utils unit tests', () => {
         json: async () => ({ transactions: [] }),
       })) as unknown as typeof fetch
 
-      await assert.rejects(() => lookupTxByRawHash('deadbeef', true, mockFetch), /not found/i)
+      await assert.rejects(
+        () => lookupTxByRawHash('deadbeef', NetworkType.Testnet, mockFetch),
+        /not found/i,
+      )
     })
 
     it('should throw CCIPTransactionNotFoundError on network error', async () => {
@@ -143,7 +147,10 @@ describe('TON utils unit tests', () => {
         throw new Error('Network error')
       }) as unknown as typeof fetch
 
-      await assert.rejects(() => lookupTxByRawHash('abcd', true, mockFetch), /not found/i)
+      await assert.rejects(
+        () => lookupTxByRawHash('abcd', NetworkType.Testnet, mockFetch),
+        /not found/i,
+      )
     })
 
     it('should throw CCIPTransactionNotFoundError on invalid JSON', async () => {
@@ -153,7 +160,10 @@ describe('TON utils unit tests', () => {
         },
       })) as unknown as typeof fetch
 
-      await assert.rejects(() => lookupTxByRawHash('abcd', true, mockFetch), /not found/i)
+      await assert.rejects(
+        () => lookupTxByRawHash('abcd', NetworkType.Testnet, mockFetch),
+        /not found/i,
+      )
     })
 
     it('should return first transaction from results', async () => {
@@ -166,7 +176,7 @@ describe('TON utils unit tests', () => {
         }),
       })) as unknown as typeof fetch
 
-      const result = await lookupTxByRawHash('abcd', true, mockFetch)
+      const result = await lookupTxByRawHash('abcd', NetworkType.Testnet, mockFetch)
 
       assert.equal(result.account, '0:first')
       assert.equal(result.lt, '100')

@@ -163,13 +163,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     ctx?: ChainContext & { fetchFn?: typeof fetch },
   ): Promise<TONChain> {
     // Verify connection by getting the latest block
-    const isTestnet =
+    const isMainnet =
       (
         await client.getContractState(
           Address.parse('EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs'), // mainnet USDT
         )
-      ).state !== 'active'
-    return new TONChain(client, networkInfo(isTestnet ? 'ton-testnet' : 'ton-mainnet'), ctx)
+      ).state === 'active'
+    return new TONChain(client, networkInfo(isMainnet ? 'ton-mainnet' : 'ton-testnet'), ctx)
   }
 
   /**
@@ -263,7 +263,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
           )
         const txInfo = await lookupTxByRawHash(
           cleanHash,
-          this.network.isTestnet,
+          this.network.networkType,
           this.rateLimitedFetch,
           this,
         )

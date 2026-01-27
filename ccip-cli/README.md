@@ -44,8 +44,8 @@ alias ccip-cli="$PWD/ccip-cli/ccip-cli"  # optional, to run from local repo dire
 All commands require a list of RPCs endpoints for the networks of interest (source and destination).
 Both `http[s]` and `ws[s]` (websocket) URLs are supported.
 
-This list can be passed in the command line, through the `-r/--rpcs` option; it may be passed
-multiple times, e.g. `-r <source_rpc> -r <dest_rpc>`, and are merged with those fetched from the
+This list can be passed in the command line, through the `--rpc/--rpcs` option; it may be passed
+multiple times, e.g. `--rpc <source_rpc> --rpc <dest_rpc>`, and are merged with those fetched from the
 rpcs file (`--rpcs-file`, default=`./.env`), which may contain multiple endpoints, one per line,
 with any prefix or suffix (only URLs are parsed).
 
@@ -112,7 +112,10 @@ don't support large ranges)
 ### `send`
 
 ```sh
-ccip-cli send 11155111 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 ethereum-testnet-sepolia-arbitrum-1 \
+ccip-cli send \
+    --source ethereum-testnet-sepolia \
+    --dest ethereum-testnet-sepolia-arbitrum-1 \
+    --router 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
     --receiver 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
     --data 'hello world' \
     --gas-limit 300000 \
@@ -120,37 +123,49 @@ ccip-cli send 11155111 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 ethereum-testn
     --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=0.1
 ```
 
-Sends a message from router on source network, to dest; positional parameters are:
+Sends a CCIP message from source to destination chain.
 
-1. `source`: chainId or name
-2. `router`: address on source
-3. `dest`: chainId or name
+**Required options:**
 
-If `--receiver` is omitted, sends to self (sender, see [Wallet](#wallet) section above) address on
-dest, if to same chain family (e.g. EVM-to-EVM). If not same chain family, it is mandatory.
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--source` | `-s` | Source chain (chainId, selector, or name) |
+| `--dest` | `-d` | Destination chain (chainId, selector, or name) |
+| `--router` | `-r` | Router contract address on source |
 
-If `--data` is not a hex-string, it will be UTF-8 encoded.
+**Message options:**
 
-If `--gas-limit` is omitted, ramp default config (usually 200k) is used.
-It can be `0` to disable execution on receiver.
-`--estimate-gas-limit` can be provided instead, to estimate the gas limit for the message execution.
-It receives a percentage margin (e.g. `--estimate-gas-limit=10` for +10% margin), which is added to
-the estimation before sending the message.
-`--only-estimate` prints gas estimation then exits.
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--receiver` | `--to` | Receiver address; defaults to sender if same chain family |
+| `--data` | | Data payload (non-hex = UTF-8 encoded) |
+| `--gas-limit` | `-L` | Gas limit for receiver callback (default: ramp config) |
+| `--estimate-gas-limit` | | Auto-estimate with % margin; conflicts with `--gas-limit` |
+| `--allow-out-of-order-exec` | `--ooo` | Skip sender nonce enforcement (v1.5+ lanes) |
 
-If `--fee-token` is not provided, CCIP fee will be paid in native token.
-`--only-get-fee` prints CCIP fee then exits.
+**Token options:**
 
-`--transfer-tokens` can receive multiple pairs of `0xTokenAddr=amount` (source token addresses,
-separated by spaces, terminated with `--` if needed). `amount` will be converted using token
-decimals (e.g. 0.1 = 10^5 of the smallest unit for USDC, which is 6 decimals).
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--fee-token` | | Pay fee in ERC20 (default: native token) |
+| `--transfer-tokens` | `-t` | Token transfers as `token=amount` (e.g., `0xToken=0.1`) |
+| `--approve-max` | | Approve max allowance instead of exact |
 
-`--allow-out-of-order-exec` (`--ooo`) is only available on v1.5+ lanes, and opt-out of _sender_
-`nonce` order enforcement. It's useful for destinations where execution can't be guaranteed
-(e.g. zkOverflow), and required for many destinations. You can read about this config [here](https://docs.chain.link/ccip/tutorials/svm/source/token-transfers#understanding-the-configuration-fields).
+**Utility options:**
 
-`--approve-max` will approve the maximum possible amount of tokens, if approval is needed for
-either transfer or fee tokens. Default behavior is to approve the strictly needed allowance.
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--only-get-fee` | | Print fee and exit |
+| `--only-estimate` | | Print gas estimate and exit (requires `--estimate-gas-limit`) |
+| `--wait` | | Wait for execution on destination |
+| `--wallet` | `-w` | Wallet (ledger[:index] or private key) |
+
+**Solana/Sui options:**
+
+| Option | Description |
+|--------|-------------|
+| `--token-receiver` | Solana token receiver if different from program |
+| `--account` | Solana accounts (append `=rw` for writable) or Sui object IDs |
 
 ### `show` (default command)
 
@@ -231,28 +246,35 @@ It'll recursively try to decode `returnData` and `error` arguments.
 ### `getSupportedTokens`
 
 ```sh
-ccip-cli getSupportedTokens <source> <router>  # lists supported tokens
-ccip-cli getSupportedTokens <source> <router> [token]  # show token and pool details for this token
-ccip-cli getSupportedTokens <source> <tokenPool>  # same as above, for the pool directly
+ccip-cli getSupportedTokens --network <network> --address <address> [--token <token>]
 ```
 
-Source is the network to be queried, as chainID or name.
-If a CCIP `router` address is provided as second parameter, lists all the tokens and its information
-supported in that lane. Type to filter the list.  
+List supported tokens in a given Router/OnRamp/TokenAdminRegistry, or show info about a specific token/pool.
 
-If `token` address is supported as 3rd parameter, pre-selects the token in the list.
+**Required options:**
 
-If `tokenPool` address is provided as 2nd parameter, uses it the same as if having provided
-router + token addresses.
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--network` | `-n` | Source network: chainId or name |
+| `--address` | `-a` | Router/OnRamp/TokenAdminRegistry/TokenPool contract address |
 
-In any case, details of the TokenPool and Token will be printed, including all connected remote
-chains and its rate limits state.
+**Optional:**
 
-#### Example
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--token` | `-t` | Token address to query (pre-selects from list if address is a registry) |
+
+#### Examples
 
 ```sh
-# Check tokens supported for transfer from Ethereum to Polygon
-ccip-cli getSupportedTokens ethereum-mainnet 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D
+# List all supported tokens from a router
+ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D
+
+# Get details for a specific token
+ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D -t 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+
+# Query a token pool directly
+ccip-cli getSupportedTokens -n ethereum-mainnet -a 0xTokenPoolAddress
 ```
 
 #### Output Format Options
@@ -260,3 +282,37 @@ ccip-cli getSupportedTokens ethereum-mainnet 0x80226fc0Ee2b096224EeAc085Bb9a8cba
 - `--format pretty` (default): Human-readable output
 - `--format log`: Basic console logging
 - `--format json`: Machine-readable JSON
+
+### `token`
+
+```sh
+ccip-cli token --network <network> --holder <address> [--token <token>]
+```
+
+Query native or token balance for an address.
+
+**Required options:**
+
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--network` | `-n` | Network: chainId or name (e.g., ethereum-mainnet, solana-devnet) |
+| `--holder` | `-H` | Wallet address to query balance for |
+
+**Optional:**
+
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--token` | `-t` | Token address (omit for native token balance) |
+
+#### Examples
+
+```sh
+# Native ETH balance
+ccip-cli token -n ethereum-mainnet -H 0x1234...abcd
+
+# ERC-20 token balance
+ccip-cli token -n ethereum-mainnet -H 0x1234...abcd -t 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+
+# Solana native SOL balance
+ccip-cli token -n solana-devnet -H EPUjBP3Xf76K1VKsDSc6GupBWE8uykNksCLJgXZn87CB
+```

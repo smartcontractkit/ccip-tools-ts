@@ -3,7 +3,7 @@ import { beforeEach, describe, it, mock } from 'node:test'
 
 import { type Connection, PublicKey } from '@solana/web3.js'
 
-import { ChainFamily } from '../../types.ts'
+import { type NetworkInfo, ChainFamily, NetworkType } from '../../types.ts'
 import { SolanaChain } from '../index.ts'
 
 // Create mock functions
@@ -20,12 +20,12 @@ const mockConnection = {
   getSignaturesForAddress: mockGetSignaturesForAddress,
 } as unknown as Connection
 
-const mockNetworkInfo = {
+const mockNetworkInfo: NetworkInfo = {
   family: ChainFamily.Solana,
   chainId: 'test-chain',
   name: 'Test Solana',
   chainSelector: 1234567890n,
-  isTestnet: true,
+  networkType: NetworkType.Testnet,
 }
 
 describe('SolanaChain getTokenInfo', () => {
