@@ -241,7 +241,7 @@ export function parseJson<T = unknown>(text: string): T {
 export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFamily.EVM): string {
   const chain = supportedChains[family]
   if (!chain) throw new CCIPChainFamilyUnsupportedError(family)
-  return chain.getAddress(getAddressBytes(address))
+  return chain.getAddress(address)
 }
 
 /**
@@ -270,7 +270,7 @@ export function decodeOnRampAddress(
   family: ChainFamily = ChainFamily.EVM,
 ): string {
   let decoded = decodeAddress(address, family)
-  if (family === ChainFamily.Aptos) decoded += '::onramp'
+  if (family === ChainFamily.Aptos || family === ChainFamily.Sui) decoded += '::onramp'
   return decoded
 }
 
@@ -314,6 +314,8 @@ export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
   if (Array.isArray(data)) return new Uint8Array(data)
   if (typeof data === 'string' && data.match(/^[0-9a-f]+[a-f][0-9a-f]+$/i)) data = '0x' + data
   else if (typeof data === 'string' && data.match(/^0X[0-9a-fA-F]+$/)) data = data.toLowerCase()
+  if (typeof data === 'string' && data.startsWith('0x') && data.length % 2)
+    data = '0x0' + data.slice(2)
   if (isBytesLike(data)) {
     return getBytes(data)
   } else if (isBase64(data)) {
@@ -343,7 +345,11 @@ export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Ar
     bytes = address
   } else if (Array.isArray(address)) {
     bytes = new Uint8Array(address)
-  } else if (typeof address === 'string' && address.match(/^((0x[0-9a-f]*)|[0-9a-f]{40,})$/i)) {
+  } else if (
+    typeof address === 'string' &&
+    address.match(/^((0x[0-9a-f]*)|[0-9a-f]{40,})(::.*)?$/i)
+  ) {
+    address = address.split('::')[0]! // discard possible Aptos/Sui module suffix
     // supports with or without (long>=20B) 0x-prefix, odd or even length
     bytes = getBytes(
       address.length % 2
@@ -380,7 +386,9 @@ export function convertKeysToCamelCase(
   mapValues?: (value: unknown, key?: string) => unknown,
   key?: string,
 ): unknown {
-  if (Array.isArray(obj)) {
+  if (Array.isArray(obj) && obj.every((v) => typeof v === 'number')) {
+    return mapValues ? mapValues(obj, key) : obj
+  } else if (Array.isArray(obj)) {
     return obj.map((v) => convertKeysToCamelCase(v, mapValues, key))
   }
 

@@ -2,47 +2,50 @@ import type { SuiClient } from '@mysten/sui/client'
 import { Transaction } from '@mysten/sui/transactions'
 import { normalizeSuiAddress } from '@mysten/sui/utils'
 import { hexlify } from 'ethers'
+import { memoize } from 'micro-memoize'
 
 import { CCIPError } from '../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../errors/codes.ts'
-import { bytesToBuffer } from '../utils.ts'
+import { getAddressBytes } from '../utils.ts'
 
 /**
  * Discovers the CCIP package ID associated with a given Sui onramp package.
  *
+ * @param ramp - sui onramp or offramp address, packageId with module suffix
  * @param client - sui client
- * @param onramp - sui onramp package id
  * @returns ccip package id
  */
-export const discoverCCIP = async (client: SuiClient, onramp: string): Promise<string> => {
-  // Remove ::onramp suffix if present, then add it back with the function name
-  const packageId = onramp.replace(/::onramp$/, '')
-  const tx = new Transaction()
-  tx.moveCall({
-    target: `${packageId}::onramp::get_ccip_package_id`,
-  })
+export const getCcipStateAddress = memoize(
+  async (ramp: string, client: SuiClient): Promise<string> => {
+    // Remove ::onramp suffix if present, then add it back with the function name
+    const tx = new Transaction()
+    tx.moveCall({
+      target: `${ramp}::get_ccip_package_id`,
+    })
 
-  const inspectResult = await client.devInspectTransactionBlock({
-    sender: normalizeSuiAddress('0x0'),
-    transactionBlock: tx,
-  })
-  const returnValues = inspectResult.results?.[0]?.returnValues
-  if (!returnValues?.length) {
-    throw new CCIPError(CCIPErrorCode.UNKNOWN, 'No return values from dev inspect')
-  }
-  const [valueBytes] = returnValues[0]!
+    const inspectResult = await client.devInspectTransactionBlock({
+      sender: normalizeSuiAddress('0x0'),
+      transactionBlock: tx,
+    })
+    const returnValues = inspectResult.results?.[0]?.returnValues
+    if (!returnValues?.length) {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, 'No return values from dev inspect')
+    }
+    const [valueBytes] = returnValues[0]!
 
-  return normalizeSuiAddress(hexlify(bytesToBuffer(valueBytes)))
-}
+    return normalizeSuiAddress(hexlify(getAddressBytes(valueBytes))) + '::state_object'
+  },
+  { maxArgs: 1, async: true },
+)
 
 /**
  * Gets the Sui offramp package ID associated with a given CCIP package ID.
  *
- * @param client - Sui client
  * @param ccip - Sui CCIP Package Id
+ * @param client - Sui client
  * @returns Sui offramp package id
  */
-export const discoverOfframp = async (client: SuiClient, ccip: string) => {
+export const getOffRampForCcip = async (ccip: string, client: SuiClient) => {
   // Get CCIP publish tx info
   // Get the owner cap created in that tx.
   // Get owner of the ownercap object.
@@ -50,7 +53,7 @@ export const discoverOfframp = async (client: SuiClient, ccip: string) => {
   // Trough each of the objects owned by that owner, get the original transaction that created them.
   // Take any of the objects created by that transaction, check its info to find the OffRamp package.
   const ccipObject = await client.getObject({
-    id: ccip,
+    id: ccip.split('::')[0]!,
     options: {
       showPreviousTransaction: true,
     },
@@ -211,5 +214,5 @@ const findModulePackageId = async (client: SuiClient, moduleName: string, packag
     )
   }
 
-  return normalizeSuiAddress(pkgs[0]!.address)
+  return normalizeSuiAddress(pkgs[0]!.address) + '::offramp'
 }

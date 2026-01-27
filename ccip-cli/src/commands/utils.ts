@@ -12,6 +12,7 @@ import {
   CCIPErrorCode,
   ExecutionState,
   getCCIPExplorerUrl,
+  getDataBytes,
   networkInfo,
   supportedChains,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -19,11 +20,11 @@ import { select } from '@inquirer/prompts'
 import {
   dataLength,
   formatUnits,
-  getBytes,
   hexlify,
   isBytesLike,
   isHexString,
   parseUnits,
+  toBigInt,
   toUtf8String,
 } from 'ethers'
 import type { PickDeep } from 'type-fest'
@@ -215,6 +216,24 @@ function omit<T extends Record<string, unknown>, K extends string>(
   return result
 }
 
+function formatDataString(data: string): Record<string, string> {
+  const bytes = getDataBytes(data)
+  const isPrintableChars = (bytes_: Uint8Array) => bytes_.every((b) => 32 <= b && b <= 126)
+  if (bytes.length > 64 && toBigInt(bytes.subarray(0, 32)) === 32n) {
+    const len = toBigInt(bytes.subarray(32, 64))
+    if (
+      len < 512 &&
+      bytes.length - 64 === Math.ceil(Number(len) / 32) * 32 &&
+      isPrintableChars(bytes.subarray(64, 64 + Number(len))) &&
+      bytes.subarray(64 + Number(len)).every((b) => b === 0)
+    ) {
+      return { data: toUtf8String(bytes.subarray(64, 64 + Number(len))) }
+    }
+  }
+  if (bytes.length > 0 && isPrintableChars(bytes)) return { data: toUtf8String(bytes) }
+  return formatData('data', data)
+}
+
 /**
  * Prints a CCIP request in a human-readable format.
  * @param source - Source chain instance.
@@ -289,11 +308,7 @@ export async function prettyRequest(this: Ctx, source: Chain, request: CCIPReque
       'tokens',
       await Promise.all(request.message.tokenAmounts.map(formatToken.bind(null, source))),
     ),
-    ...(isBytesLike(request.message.data) &&
-    dataLength(request.message.data) > 0 &&
-    getBytes(request.message.data).every((b) => 32 <= b && b <= 126) // printable characters
-      ? { data: toUtf8String(request.message.data) }
-      : formatData('data', request.message.data)),
+    ...formatDataString(request.message.data),
     ...('accounts' in request.message ? formatArray('accounts', request.message.accounts) : {}),
     ...rest,
   })

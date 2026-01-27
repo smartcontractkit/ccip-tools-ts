@@ -135,7 +135,6 @@ export {
   CCIPAptosNetworkUnknownError,
   CCIPAptosRegistryTypeInvalidError,
   CCIPAptosTokenNotRegisteredError,
-  CCIPAptosTopicInvalidError,
   CCIPAptosTransactionInvalidError,
   CCIPAptosTransactionTypeInvalidError,
   CCIPAptosTransactionTypeUnexpectedError,

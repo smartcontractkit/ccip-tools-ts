@@ -194,7 +194,7 @@ describe('decodeAddress', () => {
     })
 
     it('should handle mixed case hex input', () => {
-      const mixedCaseAddress = '0xAbCdEf1234567890AbCdEf1234567890AbCdEf12'
+      const mixedCaseAddress = '0XABCDEF1234567890ABCDEF1234567890ABCDEF12'
       const decoded = decodeAddress(mixedCaseAddress)
       assert.equal(decoded, '0xabCDEF1234567890ABcDEF1234567890aBCDeF12')
     })

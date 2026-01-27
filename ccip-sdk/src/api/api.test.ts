@@ -291,9 +291,9 @@ describe('CCIPAPIClient', () => {
       sendTimestamp: '2023-12-01T10:30:00Z',
       tokenAmounts: [
         {
-          sourceTokenAddress: '0xA0b86a8B5b6E8e0A09C4c3Dc7dE6e69e1e2d3f4a',
-          destTokenAddress: '0xB1c97a9C6c7F9f1B10D5e4Ec8eF7f70f2f3e4d5c',
-          sourcePoolAddress: '0xC2d08b0D7d8a0a2C21E6f5Fd9fa8a81a3a4f5e6d',
+          sourceTokenAddress: '0xa0b86a8b5b6e8e0a09c4c3dc7de6e69e1e2d3f4a',
+          destTokenAddress: '0xb1c97a9c6c7f9f1b10d5e4ec8ef7f70f2f3e4d5c',
+          sourcePoolAddress: '0xc2d08b0d7d8a0a2c21e6f5fd9fa8a81a3a4f5e6d',
           amount: '1000000',
         },
       ],
@@ -302,7 +302,7 @@ describe('CCIPAPIClient', () => {
       finality: 0,
       fees: {
         fixedFeesDetails: {
-          tokenAddress: '0x4Cb3c1a50616725Bd1793D0eE0C7Fc4dC4E05c79',
+          tokenAddress: '0x4cb3c1a50616725bd1793d0ee0c7fc4dc4e05c79',
           totalAmount: '5000000',
         },
       },
@@ -720,7 +720,7 @@ describe('CCIPAPIClient', () => {
       )
 
       // tokenAmounts is on message
-      const msg = result.message as unknown as { tokenAmounts: { token: string; amount: bigint }[] }
+      const msg = result.message as { tokenAmounts: readonly { token: string; amount: bigint }[] }
       assert.equal(msg.tokenAmounts.length, 0)
     })
 
