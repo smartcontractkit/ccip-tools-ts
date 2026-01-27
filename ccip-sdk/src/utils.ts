@@ -27,7 +27,7 @@ import {
 } from './errors/index.ts'
 import SELECTORS from './selectors.ts'
 import { supportedChains } from './supported-chains.ts'
-import { type NetworkInfo, type WithLogger, ChainFamily, NetworkType } from './types.ts'
+import { type NetworkInfo, type WithLogger, ChainFamily } from './types.ts'
 
 /**
  * Returns *some* block number with timestamp prior to `timestamp`
@@ -117,7 +117,6 @@ const networkInfoFromChainId = memoize((chainId: NetworkInfo['chainId']): Networ
     name: sel.name,
     family: sel.family,
     networkType: sel.network_type,
-    isTestnet: sel.network_type === NetworkType.Testnet,
   } as NetworkInfo
 })
 

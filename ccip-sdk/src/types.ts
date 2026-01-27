@@ -111,8 +111,6 @@ export type NetworkInfo<F extends ChainFamily = ChainFamily> = {
   readonly name: string
   /** Network environment type. */
   readonly networkType: NetworkType
-  /** Whether this is a testnet. */
-  readonly isTestnet: boolean
 } & ChainFamilyWithId<F>
 
 /**

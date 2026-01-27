@@ -5,6 +5,7 @@ import {
   CCIPLbtcAttestationNotFoundError,
   CCIPUsdcAttestationError,
 } from './errors/index.ts'
+import { NetworkType } from './types.ts'
 
 const CIRCLE_API_URL = {
   mainnet: 'https://iris-api.circle.com/v1',
@@ -31,13 +32,17 @@ type LombardAttestationsResponse = { attestations: Array<LombardAttestation> }
  * https://developers.circle.com/stablecoins/reference/getattestation
  *
  * @param message - payload of USDC MessageSent(bytes message) event
- * @param isTestnet - true if this was from a testnet
+ * @param networkType - network type (mainnet or testnet)
  * @returns USDC/CCTP attestation bytes
  */
-export async function getUsdcAttestation(message: string, isTestnet: boolean): Promise<string> {
+export async function getUsdcAttestation(
+  message: string,
+  networkType: NetworkType,
+): Promise<string> {
   const msgHash = keccak256(message)
 
-  const circleApiBaseUrl = isTestnet ? CIRCLE_API_URL.testnet : CIRCLE_API_URL.mainnet
+  const circleApiBaseUrl =
+    networkType === NetworkType.Mainnet ? CIRCLE_API_URL.mainnet : CIRCLE_API_URL.testnet
   const res = await fetch(`${circleApiBaseUrl}/attestations/${msgHash}`)
   const json = (await res.json()) as CctpAttestationResponse
   if (!('status' in json) || json.status !== 'complete' || !json.attestation) {
@@ -50,16 +55,17 @@ export async function getUsdcAttestation(message: string, isTestnet: boolean): P
  * Returns the LBTC attestation for a given payload hash
  *
  * @param payloadHash - hash of the payload of the LBTC transfer
- * @param isTestnet - true if this was from a testnet
+ * @param networkType - network type (mainnet or testnet)
  * @returns LBTC attestation bytes
  */
 export async function getLbtcAttestation(
   payloadHash: string,
-  isTestnet: boolean,
+  networkType: NetworkType,
 ): Promise<{
   attestation: string
 }> {
-  const lbtcApiBaseUrl = isTestnet ? LOMBARD_API_URL.testnet : LOMBARD_API_URL.mainnet
+  const lbtcApiBaseUrl =
+    networkType === NetworkType.Mainnet ? LOMBARD_API_URL.mainnet : LOMBARD_API_URL.testnet
   const res = await fetch(`${lbtcApiBaseUrl}/api/bridge/v1/deposits/getByHash`, {
     method: 'POST',
     body: JSON.stringify({ messageHash: [payloadHash] }),

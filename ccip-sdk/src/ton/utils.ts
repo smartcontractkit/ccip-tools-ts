@@ -2,7 +2,7 @@ import { Cell, Dictionary, beginCell } from '@ton/core'
 import { hexlify, toBeHex } from 'ethers'
 
 import { CCIPTransactionNotFoundError } from '../errors/specialized.ts'
-import type { WithLogger } from '../types.ts'
+import { type WithLogger, NetworkType } from '../types.ts'
 import { bytesToBuffer } from '../utils.ts'
 
 /**
@@ -340,14 +340,14 @@ export async function parseJettonContent(
  * TonCenter V3 provides an index that allows hash-only lookups.
  *
  * @param hash - Raw 64-char hex transaction hash
- * @param isTestnet - Whether to use testnet API
+ * @param networkType - Network type (mainnet or testnet)
  * @param fetch - Rate-limited fetch function
  * @param logger - Logger instance
  * @returns Transaction identifier components needed for V4 API lookup
  */
 export async function lookupTxByRawHash(
   hash: string,
-  isTestnet: boolean,
+  networkType: NetworkType,
   fetch = globalThis.fetch,
   { logger = console }: WithLogger = {},
 ): Promise<{
@@ -355,9 +355,10 @@ export async function lookupTxByRawHash(
   lt: string
   hash: string
 }> {
-  const baseUrl = isTestnet
-    ? 'https://testnet.toncenter.com/api/v3/transactions'
-    : 'https://toncenter.com/api/v3/transactions'
+  const baseUrl =
+    networkType === NetworkType.Mainnet
+      ? 'https://toncenter.com/api/v3/transactions'
+      : 'https://testnet.toncenter.com/api/v3/transactions'
 
   // TonCenter V3 accepts hex directly
   const cleanHash = bytesToBuffer(hash).toString('hex')

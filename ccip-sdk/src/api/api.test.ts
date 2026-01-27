@@ -1057,7 +1057,6 @@ describe('Chain with apiClient: null', () => {
       name: 'ethereum-mainnet',
       family: ChainFamily.EVM,
       networkType: NetworkType.Mainnet,
-      isTestnet: false,
     }
 
     // Create EVMChain with apiClient: null (decentralized mode)

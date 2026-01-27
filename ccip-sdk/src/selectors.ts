@@ -1505,6 +1505,12 @@ const selectors: Selectors = {
     network_type: 'MAINNET',
     family: 'EVM',
   },
+  '6281971': {
+    selector: 7254999290874773717n,
+    name: 'dogeos-testnet-chikyu',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
   '7777777': {
     selector: 3555797439612589184n,
     name: 'zora-mainnet',

@@ -1,7 +1,13 @@
 import { type Addressable, type Log, EventFragment } from 'ethers'
 
 import { getLbtcAttestation, getUsdcAttestation } from '../offchain.ts'
-import type { CCIPMessage, CCIPRequest, OffchainTokenData, WithLogger } from '../types.ts'
+import type {
+  CCIPMessage,
+  CCIPRequest,
+  NetworkType,
+  OffchainTokenData,
+  WithLogger,
+} from '../types.ts'
 import { networkInfo } from '../utils.ts'
 import { defaultAbiCoder, interfaces, requestsFragments } from './const.ts'
 import { type SourceTokenData, parseSourceTokenData } from './messages.ts'
@@ -34,7 +40,7 @@ export async function fetchEVMOffchainTokenData(
   },
   ctx: WithLogger,
 ): Promise<OffchainTokenData[]> {
-  const { isTestnet } = networkInfo(request.message.sourceChainSelector)
+  const { networkType } = networkInfo(request.message.sourceChainSelector)
   // there's a chance there are other CCIPSendRequested in same tx,
   // and they may contain USDC transfers as well, so we select
   // any USDC logs after that and before our CCIPSendRequested
@@ -52,7 +58,7 @@ export async function fetchEVMOffchainTokenData(
   const usdcTokenData = await getUsdcTokenData(
     request.message.tokenAmounts,
     usdcRequestLogs,
-    isTestnet,
+    networkType,
     ctx,
   )
   let lbtcTokenData: OffchainTokenData[] = []
@@ -64,7 +70,7 @@ export async function fetchEVMOffchainTokenData(
       tokenAmounts = request.message.tokenAmounts
     }
     //for lbtc we distinguish logs by hash in event, so we can pass all of them
-    lbtcTokenData = await getLbtcTokenData(tokenAmounts, request.tx.logs as Log[], isTestnet, ctx)
+    lbtcTokenData = await getLbtcTokenData(tokenAmounts, request.tx.logs as Log[], networkType, ctx)
   } catch (_) {
     // pass
   }
@@ -99,13 +105,13 @@ export function encodeEVMOffchainTokenData(data: OffchainTokenData): string {
  *
  * @param tokenAmounts - all tokenAmounts to try
  * @param allLogsInRequest - all other logs in same tx as CCIPSendRequested
- * @param isTestnet - use testnet CCTP API endpoint
+ * @param networkType - network type (mainnet or testnet)
  * @returns array where each position is either the attestation for that transfer or undefined
  **/
 async function getUsdcTokenData(
   tokenAmounts: CCIPMessage['tokenAmounts'],
   allLogsInRequest: Pick<Log, 'topics' | 'address' | 'data'>[],
-  isTestnet: boolean,
+  networkType: NetworkType,
   { logger = console }: WithLogger = {},
 ): Promise<OffchainTokenData[]> {
   const attestations: OffchainTokenData[] = []
@@ -151,7 +157,7 @@ async function getUsdcTokenData(
       let message
       try {
         message = defaultAbiCoder.decode(USDC_EVENT.inputs, messageSentLog.data)[0] as string
-        const attestation = await getUsdcAttestation(message, isTestnet)
+        const attestation = await getUsdcAttestation(message, networkType)
         tokenData = {
           _tag: 'usdc',
           message,
@@ -175,7 +181,7 @@ async function getUsdcTokenData(
 async function getLbtcTokenData(
   tokenAmounts: readonly SourceTokenData[],
   allLogsInRequest: readonly Pick<Log, 'topics' | 'address' | 'data'>[],
-  isTestnet: boolean,
+  networkType: NetworkType,
   { logger = console }: WithLogger = {},
 ): Promise<OffchainTokenData[]> {
   const lbtcDepositHashes = new Set(
@@ -189,7 +195,7 @@ async function getLbtcTokenData(
       // otherwise attestation is not required
       if (lbtcDepositHashes.has(extraData)) {
         try {
-          return { _tag: 'lbtc', extraData, ...(await getLbtcAttestation(extraData, isTestnet)) }
+          return { _tag: 'lbtc', extraData, ...(await getLbtcAttestation(extraData, networkType)) }
         } catch (err) {
           logger.warn(`❌ EVM LBTC: Failed to fetch attestation for message:`, extraData, err)
         }

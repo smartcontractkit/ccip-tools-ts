@@ -4,10 +4,11 @@ import { describe, it } from 'node:test'
 import { type Cell, Address, Dictionary, beginCell, toNano } from '@ton/core'
 import type { TonClient } from '@ton/ton'
 
-import { type ExecutionReport, ChainFamily, NetworkType } from '../types.ts'
+import { type ExecutionReport, ChainFamily } from '../types.ts'
 import { TONChain } from './index.ts'
 import { type CCIPMessage_V1_6_TON, type TONWallet, MANUALLY_EXECUTE_OPCODE } from './types.ts'
 import { crc32 } from './utils.ts'
+import { networkInfo } from '../utils.ts'
 
 describe('TON index unit tests', () => {
   // Test constants from chainlink-ton test suite
@@ -42,14 +43,7 @@ describe('TON index unit tests', () => {
     offchainTokenData: [],
   }
 
-  const mockNetworkInfo = {
-    family: ChainFamily.TON,
-    chainSelector: CHAINSEL_TON,
-    chainId: 'ton-testnet',
-    name: 'TON Testnet',
-    networkType: NetworkType.Testnet,
-    isTestnet: true,
-  }
+  const mockNetworkInfo = networkInfo('ton-testnet')
 
   describe('executeReport', { timeout: 10e3 }, () => {
     const mockWalletAddress = Address.parse('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
@@ -324,14 +318,7 @@ describe('TON index unit tests', () => {
   })
 
   describe('typeAndVersion', () => {
-    const mockNetworkInfo = {
-      family: ChainFamily.TON,
-      chainSelector: 13879075125137744094n,
-      chainId: 'ton-testnet',
-      name: 'TON Testnet',
-      networkType: NetworkType.Testnet,
-      isTestnet: true,
-    }
+    const mockNetworkInfo = networkInfo('ton-testnet')
 
     function createMockClient(opts: { contractType: string; version: string }) {
       const typeCell = beginCell().storeStringTail(opts.contractType).endCell()
@@ -393,7 +380,7 @@ describe('TON index unit tests', () => {
         contractType: 'com.chainlink.ton.ccip.Router',
         version: '1.6.0',
       })
-      const tonChain = new TONChain(client, mockNetworkInfo as any)
+      const tonChain = new TONChain(client, mockNetworkInfo)
 
       const result = await tonChain.typeAndVersion(
         'EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa',
@@ -409,7 +396,7 @@ describe('TON index unit tests', () => {
         contractType: 'com.chainlink.ton.ccip.OffRamp',
         version: '1.6.0-dev',
       })
-      const tonChain = new TONChain(client, mockNetworkInfo as any)
+      const tonChain = new TONChain(client, mockNetworkInfo)
 
       const result = await tonChain.typeAndVersion(
         'EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa',
@@ -420,14 +407,7 @@ describe('TON index unit tests', () => {
     })
   })
   describe('getTokenInfo', () => {
-    const mockNetworkInfo = {
-      family: ChainFamily.TON,
-      chainSelector: 13879075125137744094n,
-      chainId: 'ton-testnet',
-      name: 'TON Testnet',
-      networkType: NetworkType.Testnet,
-      isTestnet: true,
-    }
+    const mockNetworkInfo = networkInfo('ton-testnet')
 
     function createMockClientForJetton(opts: {
       totalSupply?: bigint
@@ -701,14 +681,7 @@ describe('TON index unit tests', () => {
   })
 
   describe('fetchExecutionReceipts override', () => {
-    const mockNetworkInfo = {
-      family: ChainFamily.TON,
-      chainSelector: 13879075125137744094n,
-      chainId: 'ton-testnet',
-      name: 'TON Testnet',
-      networkType: NetworkType.Testnet,
-      isTestnet: true,
-    }
+    const mockNetworkInfo = networkInfo('ton-testnet')
 
     const TEST_MESSAGE_ID = '0x' + '1'.repeat(64)
     const TEST_SOURCE_CHAIN_SELECTOR = 16015286601757825753n

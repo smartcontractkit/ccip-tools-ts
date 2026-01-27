@@ -17,8 +17,9 @@ import {
   type NetworkInfo,
   type WithLogger,
   CCIPVersion,
+  NetworkType,
 } from '../types.ts'
-import { bigIntReviver, networkInfo, parseJson } from '../utils.ts'
+import { bigIntReviver, parseJson } from '../utils.ts'
 import type {
   APICCIPRequest,
   APIErrorResponse,
@@ -53,9 +54,8 @@ export type CCIPAPIClientContext = WithLogger & {
 }
 
 const ensureNetworkInfo = (o: RawNetworkInfo): NetworkInfo => {
-  const info = networkInfo(o.name)
   return Object.assign(o, {
-    isTestnet: info.isTestnet,
+    networkType: o.name.includes('-mainnet') ? NetworkType.Mainnet : NetworkType.Testnet,
     ...(!('family' in o) && { family: o.chainFamily }),
   }) as unknown as NetworkInfo
 }
