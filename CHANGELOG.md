@@ -9,8 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - SDK: `Chain.getBalance()` method for querying native and token balances (EVM, Solana, Aptos)
 - SDK: Solana `resolveATA()` utility for ATA derivation with automatic SPL Token vs Token-2022 detection
-- CLI: `token <network> <holder> [token]` command for balance queries
+- CLI: `token` command for balance queries
 - SDK: fix EVM estimate gas for token transfers with balance slot!=0 (e.g. USDC)
+- SDK: Add `NetworkType` enum (`'MAINNET' | 'TESTNET'`) and `networkType` property to `NetworkInfo`
+- SDK: Selector generation scripts now validate `network_type` presence from upstream chain-selectors
+- CLI: **Breaking**: `send`, `getSupportedTokens`, and `token` commands now use named arguments instead of positional (e.g., `send -s <source> -d <dest> -r <router>`)
+- CLI: **Breaking**: `-r` alias removed from global `--rpcs` option (use `--rpc` instead); `-r` now used for `--router` in `send` command
 
 ## [0.94.0] - 2026-01-14 - Pre-release
 

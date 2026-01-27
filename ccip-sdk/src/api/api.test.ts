@@ -16,7 +16,7 @@ import {
 } from '../errors/index.ts'
 import { EVMChain } from '../evm/index.ts'
 import { decodeMessage } from '../requests.ts'
-import { CCIPVersion, ChainFamily } from '../types.ts'
+import { CCIPVersion, ChainFamily, NetworkType } from '../types.ts'
 import { bigIntReplacer, networkInfo } from '../utils.ts'
 
 const origFetch = globalThis.fetch
@@ -1056,6 +1056,7 @@ describe('Chain with apiClient: null', () => {
       chainSelector: 5009297550715157269n,
       name: 'ethereum-mainnet',
       family: ChainFamily.EVM,
+      networkType: NetworkType.Mainnet,
       isTestnet: false,
     }
 

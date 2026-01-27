@@ -37,7 +37,7 @@ import { formatDuration, getCtx, logParsedError, prettyTable } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
-export const command = ['getSupportedTokens <source> <address> [token]']
+export const command = 'getSupportedTokens'
 export const describe =
   'List supported tokens in a given Router/OnRamp/TokenAdminRegistry, and/or show info about token/pool'
 
@@ -48,23 +48,34 @@ export const describe =
  */
 export const builder = (yargs: Argv) =>
   yargs
-    .positional('source', {
+    .option('network', {
+      alias: 'n',
       type: 'string',
       demandOption: true,
-      describe: 'source network, chainId or name',
-      example: 'ethereum-testnet-sepolia',
+      describe: 'Source network: chainId or name (e.g., ethereum-mainnet)',
     })
-    .positional('address', {
+    .option('address', {
+      alias: 'a',
       type: 'string',
       demandOption: true,
-      describe: 'router/onramp/tokenAdminRegistry/tokenPool contract address on source',
+      describe: 'Router/OnRamp/TokenAdminRegistry/TokenPool contract address',
     })
-    .positional('token', {
+    .option('token', {
+      alias: 't',
       type: 'string',
       demandOption: false,
-      describe:
-        'If address is router/onramp/tokenAdminRegistry, token may be used to pre-select a token from the supported list',
+      describe: 'Token address to query (pre-selects from list if address is a registry)',
     })
+    .example([
+      [
+        'ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D',
+        'List all supported tokens from router',
+      ],
+      [
+        'ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc... -t 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        'Get details for specific token',
+      ],
+    ])
 
 /**
  * Handler for the supported-tokens command.
@@ -82,7 +93,7 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
 
 async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
   const { logger } = ctx
-  const sourceNetwork = networkInfo(argv.source)
+  const sourceNetwork = networkInfo(argv.network)
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
   let registry

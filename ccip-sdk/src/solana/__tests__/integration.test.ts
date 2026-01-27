@@ -3,7 +3,7 @@ import { before, describe, it } from 'node:test'
 
 import { Connection, PublicKey } from '@solana/web3.js'
 
-import { ChainFamily } from '../../types.ts'
+import { ChainFamily, NetworkType } from '../../types.ts'
 import { SolanaChain } from '../index.ts'
 
 // Integration test for real Solana mainnet token
@@ -27,6 +27,7 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
       chainId: 'mainnet-beta',
       name: 'Solana Mainnet',
       chainSelector: 4893384233818604317n, // Solana mainnet selector
+      networkType: NetworkType.Mainnet,
       isTestnet: false,
     }
 

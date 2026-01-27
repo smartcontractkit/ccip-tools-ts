@@ -11,13 +11,13 @@ import { Format } from './commands/index.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '0.94.0-a0846af'
+const VERSION = '0.94.0-7c4c5cd'
 // generate:end
 
 const globalOpts = {
   rpcs: {
     type: 'array',
-    alias: ['r', 'rpc'],
+    alias: 'rpc',
     describe: 'List of RPC endpoint URLs, ws[s] or http[s]',
     string: true,
   },

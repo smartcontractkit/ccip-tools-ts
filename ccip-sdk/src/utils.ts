@@ -27,7 +27,7 @@ import {
 } from './errors/index.ts'
 import SELECTORS from './selectors.ts'
 import { supportedChains } from './supported-chains.ts'
-import { type NetworkInfo, type WithLogger, ChainFamily } from './types.ts'
+import { type NetworkInfo, type WithLogger, ChainFamily, NetworkType } from './types.ts'
 
 /**
  * Returns *some* block number with timestamp prior to `timestamp`
@@ -107,10 +107,6 @@ export async function getSomeBlockNumberBefore(
 /**
  * Checks if a chain is a testnet
  */
-export function isTestnet(name: string): boolean {
-  return !name.includes('-mainnet')
-}
-
 // memoized so we always output the same object for a given chainId
 const networkInfoFromChainId = memoize((chainId: NetworkInfo['chainId']): NetworkInfo => {
   const sel = SELECTORS[chainId]
@@ -120,7 +116,8 @@ const networkInfoFromChainId = memoize((chainId: NetworkInfo['chainId']): Networ
     chainSelector: sel.selector,
     name: sel.name,
     family: sel.family,
-    isTestnet: isTestnet(sel.name),
+    networkType: sel.network_type,
+    isTestnet: sel.network_type === NetworkType.Testnet,
   } as NetworkInfo
 })
 

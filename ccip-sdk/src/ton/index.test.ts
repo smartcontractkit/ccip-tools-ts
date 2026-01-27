@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import { type Cell, Address, Dictionary, beginCell, toNano } from '@ton/core'
 import type { TonClient } from '@ton/ton'
 
-import { type ExecutionReport, ChainFamily } from '../types.ts'
+import { type ExecutionReport, ChainFamily, NetworkType } from '../types.ts'
 import { TONChain } from './index.ts'
 import { type CCIPMessage_V1_6_TON, type TONWallet, MANUALLY_EXECUTE_OPCODE } from './types.ts'
 import { crc32 } from './utils.ts'
@@ -47,6 +47,7 @@ describe('TON index unit tests', () => {
     chainSelector: CHAINSEL_TON,
     chainId: 'ton-testnet',
     name: 'TON Testnet',
+    networkType: NetworkType.Testnet,
     isTestnet: true,
   }
 
@@ -328,6 +329,7 @@ describe('TON index unit tests', () => {
       chainSelector: 13879075125137744094n,
       chainId: 'ton-testnet',
       name: 'TON Testnet',
+      networkType: NetworkType.Testnet,
       isTestnet: true,
     }
 
@@ -423,6 +425,7 @@ describe('TON index unit tests', () => {
       chainSelector: 13879075125137744094n,
       chainId: 'ton-testnet',
       name: 'TON Testnet',
+      networkType: NetworkType.Testnet,
       isTestnet: true,
     }
 
@@ -703,6 +706,7 @@ describe('TON index unit tests', () => {
       chainSelector: 13879075125137744094n,
       chainId: 'ton-testnet',
       name: 'TON Testnet',
+      networkType: NetworkType.Testnet,
       isTestnet: true,
     }
 

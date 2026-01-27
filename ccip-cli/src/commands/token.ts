@@ -12,7 +12,7 @@ import { getCtx, logParsedError, prettyTable } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
-export const command = ['token <network> <holder> [token]']
+export const command = 'token'
 export const describe = 'Query token balance for an address'
 
 /**
@@ -22,21 +22,35 @@ export const describe = 'Query token balance for an address'
  */
 export const builder = (yargs: Argv) =>
   yargs
-    .positional('network', {
+    .option('network', {
+      alias: 'n',
       type: 'string',
       demandOption: true,
-      describe: 'Network name or chainId (e.g., ethereum-mainnet, solana-devnet)',
+      describe: 'Network: chainId or name (e.g., ethereum-mainnet, solana-devnet)',
     })
-    .positional('holder', {
+    .option('holder', {
+      alias: 'H',
       type: 'string',
       demandOption: true,
       describe: 'Wallet address to query balance for',
     })
-    .positional('token', {
+    .option('token', {
+      alias: 't',
       type: 'string',
       demandOption: false,
       describe: 'Token address (omit for native token balance)',
     })
+    .example([
+      ['ccip-cli token -n ethereum-mainnet -H 0x1234...abcd', 'Query native ETH balance'],
+      [
+        'ccip-cli token -n ethereum-mainnet -H 0x1234... -t 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        'Query USDC token balance',
+      ],
+      [
+        'ccip-cli token -n solana-devnet -H EPUjBP3Xf76K1VKsDSc6GupBWE8uykNksCLJgXZn87CB',
+        'Query native SOL balance',
+      ],
+    ])
 
 /**
  * Handler for the token command.

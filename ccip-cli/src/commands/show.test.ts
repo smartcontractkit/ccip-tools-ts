@@ -74,7 +74,7 @@ function buildShowArgs(txHash: string, ...additionalArgs: string[]): string[] {
   return [
     'show',
     txHash,
-    '-r',
+    '--rpc',
     ...RPCS,
     '--rpcs-file',
     'package.json', // Disable rpcs file loading
@@ -262,7 +262,7 @@ describe('e2e command show EVM', () => {
     })
 
     it('should require transaction hash argument', { timeout: 30000 }, async () => {
-      const args = ['show', '-r', ...RPCS, '--rpcs-file', '.gitignore']
+      const args = ['show', '--rpc', ...RPCS, '--rpcs-file', '.gitignore']
       const result = await spawnCLI(args, 30000)
 
       // Should exit with error code
