@@ -15,9 +15,11 @@ import { bytesToBuffer } from '../utils.ts'
  * @returns ccip package id
  */
 export const discoverCCIP = async (client: SuiClient, onramp: string): Promise<string> => {
+  // Remove ::onramp suffix if present, then add it back with the function name
+  const packageId = onramp.replace(/::onramp$/, '')
   const tx = new Transaction()
   tx.moveCall({
-    target: `${onramp}::onramp::get_ccip_package_id`,
+    target: `${packageId}::onramp::get_ccip_package_id`,
   })
 
   const inspectResult = await client.devInspectTransactionBlock({
@@ -63,12 +65,29 @@ export const discoverOfframp = async (client: SuiClient, ccip: string) => {
     )
   }
 
+  if (!ccipCreationTxDigest) {
+    throw new CCIPError(CCIPErrorCode.UNKNOWN, 'CCIP object has no previous transaction')
+  }
+
   const ccipCreationTx = await client.getTransactionBlock({
     digest: ccipCreationTxDigest,
     options: {
       showEffects: true,
+      showInput: true,
     },
   })
+
+  let mcmsPackageId: string | undefined
+  const txData = ccipCreationTx.transaction?.data.transaction
+  if (txData && 'transactions' in txData) {
+    const publishTx = txData.transactions.find((t) => {
+      return typeof t === 'object' && 'Publish' in t
+    })
+    if (publishTx) {
+      // First element in Publish array is the MCMS package ID
+      mcmsPackageId = publishTx.Publish[0]
+    }
+  }
 
   const ccipCreatedObjects = ccipCreationTx.effects?.created?.map((obj) => obj.reference.objectId)
   if (!ccipCreatedObjects || ccipCreatedObjects.length === 0) {
@@ -88,6 +107,41 @@ export const discoverOfframp = async (client: SuiClient, ccip: string) => {
     ),
   )
 
+  // If owner cap was transferred to MCMS, the object will not exist anymore
+  const erroredObjects = ccipObjectsData
+    .filter((obj) => !!obj.error && obj.error.code === 'notExists')
+    .map((obj) => (obj as { error: { object_id: string } }).error.object_id)
+
+  // we need mcmsPackageId to proceed with owner cap lookup
+  if (erroredObjects.length && !mcmsPackageId) {
+    throw new CCIPError(
+      CCIPErrorCode.UNKNOWN,
+      'MCMS package ID not found, cannot proceed with owner cap lookup',
+    )
+  }
+
+  // If no ownerCap object found, it means it was transferred to MCMS. Find offramp through MCMS registered packages
+  if (erroredObjects.length) {
+    // Find all the packages that were registered in the `mcms_registry` through the `EntrypointRegistered` event
+    // Query for EntrypointRegistered events from the MCMS package
+    const events = await client.queryEvents({
+      query: {
+        MoveEventType: `${mcmsPackageId}::mcms_registry::EntrypointRegistered`,
+      },
+    })
+
+    // Extract package IDs from the events
+    const registeredPackageIds = events.data
+      .map((event) => {
+        const eventData = event.parsedJson as { account_address?: string }
+        return eventData.account_address
+      })
+      .filter((pkgId): pkgId is string => !!pkgId)
+
+    return findModulePackageId(client, 'offramp', registeredPackageIds)
+  }
+
+  // Otherise, find the owner cap object among the created objects
   const ownerCapObject = ccipObjectsData.find((objData) =>
     objData.data?.type?.includes('::ownable::OwnerCap'),
   )
@@ -124,34 +178,38 @@ export const discoverOfframp = async (client: SuiClient, ccip: string) => {
     .filter((objData) => objData.data?.type?.includes('::ownable::OwnerCap'))
     .map((obj) => obj.data?.type?.split('::')[0])
 
+  return findModulePackageId(client, 'offramp', ownerCapPackageIds as string[])
+}
+
+const findModulePackageId = async (client: SuiClient, moduleName: string, packageIds: string[]) => {
   const packagesInfo = await Promise.all(
-    ownerCapPackageIds.map((pkgId) =>
+    packageIds.map((pkgId) =>
       client.getNormalizedMoveModulesByPackage({
-        package: pkgId || '',
+        package: pkgId,
       }),
     ),
   )
 
-  const offrampPkgs = packagesInfo
+  const pkgs = packagesInfo
     .filter((pkg) => {
-      return Object.values(pkg).some((module) => module.name === 'offramp')
+      return Object.values(pkg).some((module) => module.name === moduleName)
     })
     .flatMap((pkg) => Object.values(pkg))
-    .filter((module) => module.name === 'offramp')
+    .filter((module) => module.name === moduleName)
 
-  if (!offrampPkgs.length) {
+  if (!pkgs.length) {
     throw new CCIPError(
       CCIPErrorCode.UNKNOWN,
-      'Could not find OffRamp package among OwnerCap packages',
+      `Could not find ${moduleName} package among registered MCMS packages`,
     )
   }
 
-  if (offrampPkgs.length > 1) {
+  if (pkgs.length > 1) {
     throw new CCIPError(
       CCIPErrorCode.UNKNOWN,
-      'Multiple OffRamp packages found; unable to uniquely identify OffRamp package',
+      `Multiple ${moduleName} packages found; unable to uniquely identify ${moduleName} package`,
     )
   }
 
-  return normalizeSuiAddress(offrampPkgs[0]!.address)
+  return normalizeSuiAddress(pkgs[0]!.address)
 }
