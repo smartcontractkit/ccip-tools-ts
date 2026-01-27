@@ -4,6 +4,7 @@ import { type SuiTransactionBlockResponse, SuiClient } from '@mysten/sui/client'
 import type { Keypair } from '@mysten/sui/cryptography'
 import { SuiGraphQLClient } from '@mysten/sui/graphql'
 import { Transaction } from '@mysten/sui/transactions'
+import { isValidSuiAddress, isValidTransactionDigest, normalizeSuiAddress } from '@mysten/sui/utils'
 import { type BytesLike, dataLength, hexlify, isBytesLike } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
@@ -22,13 +23,14 @@ import {
   CCIPErrorCode,
   CCIPExecTxRevertedError,
   CCIPNotImplementedError,
-  CCIPSuiMessageVersionInvalidError,
   CCIPVersionFeatureUnavailableError,
 } from '../errors/index.ts'
+import { CCIPSuiLogInvalidError } from '../errors/specialized.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
-import { getSuiLeafHasher } from './hasher.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { getMessagesInBatch, getMessagesInTx } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
+import { getSuiLeafHasher } from './hasher.ts'
 import {
   type AnyMessage,
   type CCIPExecution,
@@ -47,9 +49,8 @@ import {
   type WithLogger,
   ChainFamily,
 } from '../types.ts'
+import { bytesToBuffer, decodeAddress, networkInfo, parseTypeAndVersion, util } from '../utils.ts'
 import { discoverCCIP, discoverOfframp } from './discovery.ts'
-import type { CCIPMessage_V1_6_Sui } from './types.ts'
-import { bytesToBuffer, decodeAddress, networkInfo } from '../utils.ts'
 import { type CommitEvent, getSuiEventsInTimeRange } from './events.ts'
 import {
   type SuiManuallyExecuteInput,
@@ -62,6 +63,7 @@ import {
   getOffRampStateObject,
   getReceiverModule,
 } from './objects.ts'
+import type { CCIPMessage_V1_6_Sui, SuiCCIPMessageLog } from './types.ts'
 
 export const SUI_EXTRA_ARGS_V1_TAG = '21ea4ca9' as const
 const DEFAULT_GAS_LIMIT = 1000000n
@@ -183,11 +185,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       for (const [i, event] of txResponse.events.entries()) {
         const eventType = event.type
         const packageId = eventType.split('::')[0]
-        const moduleName = eventType.split('::')[1]
         const eventName = eventType.split('::')[2]!
 
         events.push({
-          address: `${packageId}::${moduleName}`,
+          address: packageId || '',
           transactionHash: digest,
           index: i,
           blockNumber: Number(txResponse.checkpoint || 0),
@@ -250,6 +251,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
   }
 
+  /** {@inheritDoc Chain.getMessagesInTx} */
+  override async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
+    return getMessagesInTx(this, typeof tx === 'string' ? await this.getTransaction(tx) : tx)
+  }
+
   /** {@inheritDoc Chain.getMessagesInBatch} */
   override async getMessagesInBatch<
     R extends PickDeep<
@@ -257,16 +263,50 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
-    _request: R,
-    _commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
-    _opts?: { page?: number },
+    request: R,
+    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    opts?: { page?: number },
   ): Promise<R['message'][]> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getMessagesInBatch'))
+    return getMessagesInBatch(this, request, commit, opts)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
-  async typeAndVersion(_address: string) {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.typeAndVersion'))
+  async typeAndVersion(address: string) {
+    // Remove ::onramp suffix if present, then add it back with the function name
+    const packageId = address.replace(/::onramp$/, '')
+    const target = `${packageId}::onramp::type_and_version`
+
+    // Use the Transaction builder to create a move call
+    const tx = new Transaction()
+
+    // Add move call to the transaction
+    tx.moveCall({
+      target,
+      arguments: [],
+    })
+
+    // Execute with devInspectTransactionBlock for read-only call
+    const result = await this.client.devInspectTransactionBlock({
+      sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      transactionBlock: tx,
+    })
+
+    if (result.effects.status.status !== 'success' || !result.results?.[0]?.returnValues?.[0]) {
+      throw new CCIPDataFormatUnsupportedError(
+        `Failed to call ${target}: ${result.effects.status.error || 'No return value'}`,
+      )
+    }
+
+    // The return value is a String (vector<u8>)
+    const returnValue = result.results[0].returnValues[0]
+    const [data] = returnValue
+    const bytes = new Uint8Array(data)
+
+    // Parse the string: length (1 byte) + UTF-8 bytes
+    const length = bytes[0]!
+    const stringBytes = bytes.slice(1, 1 + length)
+
+    return parseTypeAndVersion(new TextDecoder().decode(stringBytes))
   }
 
   /** {@inheritDoc Chain.getRouterForOnRamp} */
@@ -388,33 +428,47 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /** {@inheritDoc Chain.getTokenInfo} */
   async getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }> {
-    // Handle native SUI token
-    if (token === '0x2::sui::SUI' || token.includes('::sui::SUI')) {
-      return { symbol: 'SUI', decimals: 9 }
+    const normalizedTokenAddress = normalizeSuiAddress(token)
+    if (!isValidSuiAddress(normalizedTokenAddress)) {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
     }
 
-    try {
-      // For Coin types, try to fetch metadata from the coin metadata object
-      // Format: 0xPACKAGE::module::TYPE
-      const coinMetadata = await this.client.getCoinMetadata({ coinType: token })
+    const objectResponse = await this.client.getObject({
+      id: normalizedTokenAddress,
+      options: { showType: true },
+    })
 
-      if (coinMetadata) {
-        return {
-          symbol: coinMetadata.symbol || 'UNKNOWN',
-          decimals: coinMetadata.decimals,
-        }
+    const getCoinFromMetadata = (metadata: string) => {
+      // Extract the type parameter from CoinMetadata<...>
+      const match = metadata.match(/CoinMetadata<(.+)>$/)
+
+      if (!match || !match[1]) {
+        throw new CCIPError(CCIPErrorCode.UNKNOWN, `Invalid metadata format: ${metadata}`)
       }
-    } catch (error) {
-      console.log(`Failed to fetch coin metadata for ${token}:`, error)
+
+      return match[1]
     }
 
-    // Fallback: parse from token type string if possible
-    const parts = token.split('::')
-    const symbol = parts[parts.length - 1] || 'UNKNOWN'
+    const coinType = getCoinFromMetadata(objectResponse.data?.type || '')
+    if (coinType.split('::').length < 3) {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
+    }
+
+    let metadata = null
+    try {
+      metadata = await this.client.getCoinMetadata({ coinType })
+    } catch (e) {
+      console.error('Error fetching coin metadata:', e)
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
+    }
+
+    if (!metadata) {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
+    }
 
     return {
-      symbol: symbol.toUpperCase(),
-      decimals: 9, // Default to 9 decimals (SUI standard)
+      symbol: metadata.symbol,
+      decimals: metadata.decimals,
     }
   }
 
@@ -431,11 +485,66 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   // Static methods for decoding
   /**
    * Decodes a CCIP message from a Sui log event.
-   * @param _log - Log event data.
+   * @param log - Log event data.
    * @returns Decoded CCIPMessage or undefined if not valid.
    */
-  static decodeMessage(_log: Log_): CCIPMessage_V1_6_Sui | undefined {
-    throw new CCIPNotImplementedError()
+  static decodeMessage(log: Log_): CCIPMessage | undefined {
+    const { data } = log
+    if (
+      (typeof data !== 'string' || !data.startsWith('{')) &&
+      (typeof data !== 'object' || isBytesLike(data))
+    )
+      throw new CCIPSuiLogInvalidError(util.inspect(log))
+    const toCCIPMessage = (log: SuiCCIPMessageLog): CCIPMessage => {
+      const toHex = (bytes: BytesLike | number[]) => hexlify(bytesToBuffer(bytes))
+
+      // Normalize receiver address: if it's 32 bytes with 12 leading zeros, convert to 20 bytes
+      const normalizeReceiver = (bytes: number[]): string => {
+        if (bytes.length === 32) {
+          // Check if first 12 bytes are all zeros (EVM address padded to 32 bytes)
+          const isEVMAddress = bytes.slice(0, 12).every((b) => b === 0)
+          if (isEVMAddress) {
+            // Take only the last 20 bytes
+            return toHex(bytes.slice(12))
+          }
+        }
+        return toHex(bytes)
+      }
+
+      const decodedExtraArgs = AptosChain.decodeExtraArgs(toHex(log.message.extra_args))
+
+      return {
+        // Header fields (merged to root)
+        messageId: toHex(log.message.header.message_id),
+        sourceChainSelector: BigInt(log.message.header.source_chain_selector),
+        destChainSelector: BigInt(log.message.header.dest_chain_selector),
+        sequenceNumber: BigInt(log.message.header.sequence_number),
+        nonce: BigInt(log.message.header.nonce),
+
+        // Message body fields
+        sender: log.message.sender,
+        receiver: normalizeReceiver(log.message.receiver),
+        data: toHex(log.message.data),
+        extraArgs: toHex(log.message.extra_args),
+        feeToken: log.message.fee_token,
+        feeTokenAmount: BigInt(log.message.fee_token_amount),
+        feeValueJuels: BigInt(log.message.fee_value_juels),
+        tokenAmounts: log.message.token_amounts.map((ta) => ({
+          sourcePoolAddress: ta.source_pool_address || '',
+          destTokenAddress: toHex(ta.dest_token_address || []),
+          extraData: toHex(ta.extra_data || []),
+          amount: BigInt(ta.amount || 0),
+          destExecData: toHex(ta.dest_exec_data || []),
+          destGasAmount: BigInt(ta.dest_gas_amount || 0),
+        })),
+        ...decodedExtraArgs,
+      } as CCIPMessage
+    }
+    try {
+      return toCCIPMessage(data as SuiCCIPMessageLog)
+    } catch (_) {
+      return undefined
+    }
   }
 
   /**
@@ -556,8 +665,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   /**
    * Validates a transaction hash format for Sui
    */
-  static isTxHash(_v: unknown): _v is string {
-    return false
+  static isTxHash(v: unknown): v is string {
+    if (typeof v !== 'string') return false
+    const isHex64 = () => /^0x[0-9a-fA-F]{64}$/.test(v)
+    // check in both hex and base58 formats
+    return isHex64() || isValidTransactionDigest(v)
   }
 
   /**
@@ -588,9 +700,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /** {@inheritDoc Chain.getOffchainTokenData} */
   getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
-    if (!('receiverObjectIds' in request.message)) {
-      throw new CCIPSuiMessageVersionInvalidError()
-    }
     // default offchain token data
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
