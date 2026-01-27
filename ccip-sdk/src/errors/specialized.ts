@@ -1693,6 +1693,19 @@ export class CCIPSuiMessageVersionInvalidError extends CCIPError {
   }
 }
 
+/** Thrown when Sui log data is invalid. */
+export class CCIPSuiLogInvalidError extends CCIPError {
+  override readonly name = 'CCIPSuiLogInvalidError'
+  /** Creates an Sui log invalid error. */
+  constructor(log: unknown, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.LOG_DATA_INVALID, `Invalid sui log: ${String(log)}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, log },
+    })
+  }
+}
+
 /** Thrown when Solana lane version is unsupported. */
 export class CCIPSolanaLaneVersionUnsupportedError extends CCIPError {
   override readonly name = 'CCIPSolanaLaneVersionUnsupportedError'

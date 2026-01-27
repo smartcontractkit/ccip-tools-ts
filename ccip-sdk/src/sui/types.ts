@@ -15,6 +15,16 @@ export const SuiExtraArgsV1Codec = bcs.struct('SuiExtraArgsV1', {
   receiverObjectIds: bcs.vector(bcs.vector(bcs.u8())),
 })
 
+/** Token amount data structure for Sui CCIP messages. */
+export type SuiTokenAmount = {
+  source_pool_address?: string
+  dest_token_address?: number[]
+  extra_data?: number[]
+  amount?: string | number
+  dest_exec_data?: number[]
+  dest_gas_amount?: string | number
+}
+
 /**
  * Encodes Sui v1 extra arguments using BCS encoding.
  * @param args - Sui extra arguments to encode.
@@ -25,4 +35,29 @@ export function encodeSuiExtraArgsV1(args: SuiExtraArgsV1): string {
   const receiverObjectIds = args.receiverObjectIds.map((id) => getDataBytes(id))
   const bcsData = SuiExtraArgsV1Codec.serialize({ ...args, tokenReceiver, receiverObjectIds })
   return concat([SuiExtraArgsV1Tag, bcsData.toBytes()])
+}
+
+/**
+ * Sui-specific CCIP message log structure from events.
+ */
+export type SuiCCIPMessageLog = {
+  dest_chain_selector: string
+  message: {
+    data: number[]
+    extra_args: number[]
+    fee_token: string
+    fee_token_amount: string
+    fee_value_juels: string
+    header: {
+      dest_chain_selector: string
+      message_id: number[]
+      nonce: string
+      sequence_number: string
+      source_chain_selector: string
+    }
+    receiver: number[]
+    sender: string
+    token_amounts: SuiTokenAmount[]
+  }
+  sequence_number: string
 }
