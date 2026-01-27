@@ -65,6 +65,7 @@ export const ChainFamily = {
   Aptos: 'APTOS',
   Sui: 'SUI',
   TON: 'TON',
+  Unknown: 'UNKNOWN',
 } as const
 /** Type representing one of the supported chain families. */
 export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
@@ -230,6 +231,8 @@ export const MessageStatus = {
   Verifying: 'VERIFYING',
   /** Message has been verified by the CCIP network */
   Verified: 'VERIFIED',
+  /** Unknown status returned by API */
+  Unknown: 'UNKNOWN',
 } as const
 /** Type representing a CCIP message lifecycle status. */
 export type MessageStatus = (typeof MessageStatus)[keyof typeof MessageStatus]

@@ -43,7 +43,7 @@ import {
   type WithLogger,
   ExecutionState,
 } from './types.ts'
-import { util } from './utils.ts'
+import { util, withRetry } from './utils.ts'
 
 /**
  * Context for Chain class initialization.
@@ -79,6 +79,41 @@ export type ChainContext = WithLogger & {
    * Default: `undefined` (auto-create with production endpoint)
    */
   apiClient?: CCIPAPIClient | null
+
+  /**
+   * Retry configuration for API fallback operations.
+   * Controls exponential backoff behavior for transient errors.
+   * Default: DEFAULT_API_RETRY_CONFIG
+   */
+  apiRetryConfig?: ApiRetryConfig
+}
+
+/**
+ * Configuration for retry behavior with exponential backoff.
+ */
+export type ApiRetryConfig = {
+  /** Maximum number of retry attempts for transient errors.*/
+  maxRetries?: number
+
+  /** Initial delay in milliseconds before the first retry. */
+  initialDelayMs?: number
+
+  /** Multiplier applied to delay after each retry (exponential backoff). Set to 1 for fixed delays. */
+  backoffMultiplier?: number
+
+  /** Maximum delay in milliseconds between retries (caps exponential growth). */
+  maxDelayMs?: number
+
+  /** Whether to respect the error's retryAfterMs hint when available. If true, uses max(calculated delay, error.retryAfterMs). */
+  respectRetryAfterHint?: boolean
+}
+
+export const DEFAULT_API_RETRY_CONFIG: Required<ApiRetryConfig> = {
+  maxRetries: 3,
+  initialDelayMs: 1000,
+  backoffMultiplier: 2,
+  maxDelayMs: 30000,
+  respectRetryAfterHint: true,
 }
 
 /**
@@ -163,6 +198,7 @@ export type UnsignedTx = {
   [ChainFamily.Aptos]: UnsignedAptosTx
   [ChainFamily.TON]: UnsignedTONTx
   [ChainFamily.Sui]: never // TODO
+  [ChainFamily.Unknown]: never
 }
 
 /**
@@ -206,6 +242,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   logger: Logger
   /** CCIP API client (null if opted out) */
   readonly apiClient: CCIPAPIClient | null
+  /** Retry configuration for API fallback operations (null if API client is disabled) */
+  readonly apiRetryConfig: Required<ApiRetryConfig> | null
 
   /**
    * Base constructor for Chain class.
@@ -213,7 +251,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param ctx - Optional context with logger and API client configuration
    */
   constructor(network: NetworkInfo, ctx?: ChainContext) {
-    const { logger = console, apiClient } = ctx ?? {}
+    const { logger = console, apiClient, apiRetryConfig } = ctx ?? {}
 
     if (network.family !== (this.constructor as ChainStatic).family)
       throw new CCIPChainFamilyMismatchError(
@@ -227,10 +265,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     // API client initialization: default enabled, null = explicit opt-out
     if (apiClient === null) {
       this.apiClient = null // Explicit opt-out
+      this.apiRetryConfig = null // No retry config needed without API client
     } else if (apiClient !== undefined) {
       this.apiClient = apiClient // Use provided instance
+      this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     } else {
       this.apiClient = new CCIPAPIClient(undefined, { logger }) // Default
+      this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     }
   }
 
@@ -332,13 +373,21 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       if (typeof tx === 'string') tx = await this.getTransaction(tx)
       return getMessagesInTx(this, tx)
     } catch (err) {
-      // if getTransaction or decoding fails, try API if available
-      if (this.apiClient) {
-        const messageIds = await this.apiClient.getMessageIdsInTx(txHash)
-        if (messageIds.length > 0) {
-          const apiRequests = await Promise.all(
-            messageIds.map((id) => this.apiClient!.getMessageById(id)),
-          )
+      // if getTransaction or decoding fails, try API if available with retry
+      // apiClient and apiRetryConfig are coupled: both exist or both are null
+      if (this.apiClient && this.apiRetryConfig) {
+        const apiRequests = await withRetry(
+          async () => {
+            const messageIds = await this.apiClient!.getMessageIdsInTx(txHash)
+            if (messageIds.length === 0) {
+              // Treat empty results as the original error condition
+              throw err
+            }
+            return Promise.all(messageIds.map((id) => this.apiClient!.getMessageById(id)))
+          },
+          { ...this.apiRetryConfig, logger: this.logger },
+        )
+        if (apiRequests.length > 0) {
           return apiRequests
         }
       }
@@ -359,7 +408,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     _opts?: { page?: number; onRamp?: string },
   ): Promise<CCIPRequest> {
     if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
-    return this.apiClient.getMessageById(messageId)
+    // apiClient and apiRetryConfig are coupled: both exist or neither does
+    return withRetry(() => this.apiClient!.getMessageById(messageId), {
+      ...this.apiRetryConfig!,
+      logger: this.logger,
+    })
   }
 
   /**

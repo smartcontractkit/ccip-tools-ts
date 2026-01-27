@@ -228,12 +228,13 @@ console.log('Message ID:', request.message.messageId)
 ```
 
 :::note Defaults
+
 - `extraArgs.gasLimit` / `extraArgs.computeUnits`: `0` for token-only transfers
 - `extraArgs.allowOutOfOrderExecution`: `true`
 - `data`: Empty
 - `feeToken`: Native token (ETH or SOL)
 - Token approvals and fee calculation handled by `sendMessage`
-:::
+  :::
 
 ### Generate Unsigned Transactions
 
@@ -246,7 +247,9 @@ const source = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.c
 
 const message: MessageInput = {
   receiver: '0xYourReceiverAddress',
-  tokenAmounts: [{ token: '0x779877A7B0D9E8603169DdbD7836e478b4624789', amount: 1_500_000_000_000_000_000n }],
+  tokenAmounts: [
+    { token: '0x779877A7B0D9E8603169DdbD7836e478b4624789', amount: 1_500_000_000_000_000_000n },
+  ],
 }
 
 const unsignedTxs = await source.generateUnsignedSendMessage({
@@ -363,15 +366,84 @@ for (const id of messageIds) {
 
 Supports both EVM hex hashes (`0x...`) and Solana Base58 signatures.
 
-### Disable API (Decentralization Mode)
+### API Mode Configuration
+
+By default, Chain instances use the CCIP API for enhanced functionality. You can configure this behavior:
+
+```ts
+import { EVMChain, DEFAULT_API_RETRY_CONFIG } from '@chainlink/ccip-sdk'
+
+// Default: API enabled with automatic retry on fallback
+const chain = await EVMChain.fromUrl(url)
+
+// Custom retry configuration for API fallback operations
+const chainWithRetry = await EVMChain.fromUrl(url, {
+  apiRetryConfig: {
+    maxRetries: 5, // Max retry attempts (default: 3)
+    initialDelayMs: 2000, // Initial delay before first retry (default: 1000)
+    backoffMultiplier: 1.5, // Multiplier for exponential backoff (default: 2)
+    maxDelayMs: 60000, // Maximum delay cap (default: 30000)
+    respectRetryAfterHint: true, // Use error's retryAfterMs when available (default: true)
+  },
+})
+
+// Fully decentralized mode - uses only RPC data, no API
+const decentralizedChain = await EVMChain.fromUrl(url, { apiClient: null })
+```
+
+#### API Fallback Workflow
+
+When `getMessagesInTx()` fails to retrieve messages via RPC (e.g., due to an unsupported chain or RPC errors), it automatically falls back to the CCIP API with retry logic:
+
+1. First attempt via RPC
+2. On failure, query the API for message IDs
+3. Retry with exponential backoff on transient errors (5xx, timeouts)
+4. Respects `retryAfterMs` hints from error responses
+
+This provides resilience against temporary API issues while maintaining decentralization as the primary path.
+
+Similarly, `getMessageById()` uses retry logic when fetching message details by ID:
+
+1. Query the API for message details
+2. Retry with exponential backoff on transient errors (5xx, timeouts)
+3. Respects `retryAfterMs` hints from error responses
+
+#### Decentralized Mode
+
+Disable the API entirely for fully decentralized operation:
 
 ```ts
 // Opt-out of API - uses only RPC data
 const chain = await EVMChain.fromUrl(url, { apiClient: null })
 
-// This will throw CCIPApiClientNotAvailableError
-await chain.getLaneLatency(destSelector)
+// API-dependent methods will throw CCIPApiClientNotAvailableError
+await chain.getLaneLatency(destSelector) // Throws
 ```
+
+### Retry Utility
+
+The SDK exports a `withRetry` utility for implementing custom retry logic with exponential backoff:
+
+```ts
+import { withRetry, DEFAULT_API_RETRY_CONFIG } from '@chainlink/ccip-sdk'
+
+const result = await withRetry(
+  async () => {
+    // Your async operation that may fail transiently
+    return await someApiCall()
+  },
+  {
+    maxRetries: 3,
+    initialDelayMs: 1000,
+    backoffMultiplier: 2,
+    maxDelayMs: 30000,
+    respectRetryAfterHint: true,
+    logger: console, // Optional: logs retry attempts
+  },
+)
+```
+
+The utility only retries on transient errors (5xx HTTP errors, timeouts). Non-transient errors (4xx, validation errors) are thrown immediately.
 
 ## Chain Identification
 
