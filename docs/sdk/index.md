@@ -402,6 +402,12 @@ When `getMessagesInTx()` fails to retrieve messages via RPC (e.g., due to an uns
 
 This provides resilience against temporary API issues while maintaining decentralization as the primary path.
 
+Similarly, `getMessageById()` uses retry logic when fetching message details by ID:
+
+1. Query the API for message details
+2. Retry with exponential backoff on transient errors (5xx, timeouts)
+3. Respects `retryAfterMs` hints from error responses
+
 #### Decentralized Mode
 
 Disable the API entirely for fully decentralized operation:

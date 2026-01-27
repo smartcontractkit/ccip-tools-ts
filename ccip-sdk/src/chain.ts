@@ -408,7 +408,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     _opts?: { page?: number; onRamp?: string },
   ): Promise<CCIPRequest> {
     if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
-    return this.apiClient.getMessageById(messageId)
+    // apiClient and apiRetryConfig are coupled: both exist or neither does
+    return withRetry(() => this.apiClient!.getMessageById(messageId), {
+      ...this.apiRetryConfig!,
+      logger: this.logger,
+    })
   }
 
   /**
