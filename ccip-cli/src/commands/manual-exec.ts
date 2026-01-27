@@ -176,7 +176,12 @@ async function manualExec(
   }
 
   if (argv.estimateGasLimit != null) {
-    let estimated = await estimateReceiveExecution(source, dest, request)
+    let estimated = await estimateReceiveExecution({
+      source,
+      dest,
+      routerOrRamp: offRamp,
+      message: request.message,
+    })
     logger.info('Estimated gasLimit override:', estimated)
     estimated += Math.ceil((estimated * argv.estimateGasLimit) / 100)
     const origLimit = Number(
@@ -186,7 +191,7 @@ async function manualExec(
       logger.warn(
         'Estimated +',
         argv.estimateGasLimit,
-        '% margin =',
+        '% =',
         estimated,
         '< original gasLimit =',
         origLimit,

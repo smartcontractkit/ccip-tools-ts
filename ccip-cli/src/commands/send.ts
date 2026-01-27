@@ -1,5 +1,4 @@
 import {
-  type CCIPVersion,
   type ChainStatic,
   type ExtraArgs,
   type MessageInput,
@@ -197,13 +196,6 @@ async function sendMessage(
   if (argv.estimateGasLimit != null || argv.onlyEstimate) {
     // TODO: implement for all chain families
     const dest = await getChain(destNetwork.chainSelector)
-    const onRamp = await source.getOnRampForRouter(argv.router, destNetwork.chainSelector)
-    const lane = {
-      sourceChainSelector: source.network.chainSelector,
-      destChainSelector: destNetwork.chainSelector,
-      onRamp,
-      version: (await source.typeAndVersion(onRamp))[1] as CCIPVersion,
-    }
 
     if (!walletAddress) {
       try {
@@ -212,17 +204,25 @@ async function sendMessage(
         // pass undefined sender for default
       }
     }
-    const estimated = await estimateReceiveExecution(source, dest, {
-      lane,
+    const estimated = await estimateReceiveExecution({
+      source,
+      dest,
+      routerOrRamp: argv.router,
       message: {
         sender: walletAddress,
         receiver,
-        data: data || '0x',
+        data,
         tokenAmounts,
       },
     })
-    logger.log('Estimated gasLimit:', estimated)
     argv.gasLimit = Math.ceil(estimated * (1 + (argv.estimateGasLimit ?? 0) / 100))
+    logger.log(
+      'Estimated gasLimit for sender =',
+      walletAddress,
+      ':',
+      estimated,
+      ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', argv.gasLimit] : []),
+    )
     if (argv.onlyEstimate) return
   }
 
