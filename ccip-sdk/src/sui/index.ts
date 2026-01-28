@@ -432,6 +432,15 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       options: { showType: true, showContent: true },
     })
 
+    const tpType = objects.data
+      .find((obj) => obj.data?.type?.includes('token_pool::'))
+      ?.data?.type?.split('::')[1]
+
+    const allowedTps = ['managed_token_pool', 'burn_mint_token_pool', 'lock_release_token_pool']
+    if (!tpType || !allowedTps.includes(tpType)) {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, `Invalid token pool type: ${tpType}`)
+    }
+
     // Find the state pointer object
     let stateObjectPointerId: string | undefined
     for (const obj of objects.data) {
@@ -440,11 +449,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
       const fields = content.fields as Record<string, unknown>
       // Look for a pointer field that references the state object
-      if (fields.managed_token_pool_object_id) {
-        stateObjectPointerId = fields.managed_token_pool_object_id as string
-      } else if (fields.token_pool_object_id) {
-        stateObjectPointerId = fields.token_pool_object_id as string
-      }
+      stateObjectPointerId = fields[`${tpType}_object_id`] as string
     }
 
     if (!stateObjectPointerId) {
@@ -454,9 +459,15 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       )
     }
 
+    const stateNamesPerTP: Record<string, string> = {
+      managed_token_pool: 'ManagedTokenPoolState',
+      burn_mint_token_pool: 'BurnMintTokenPoolState',
+      lock_release_token_pool: 'LockReleaseTokenPoolState',
+    }
+
     const poolStateObject = deriveObjectID(
       stateObjectPointerId,
-      new TextEncoder().encode('ManagedTokenPoolState'),
+      new TextEncoder().encode(stateNamesPerTP[tpType]),
     )
 
     // Get object info to get the coin type
