@@ -58,6 +58,7 @@ import {
   buildManualExecutionPTB,
 } from './manuallyExec/index.ts'
 import {
+  deriveObjectID,
   fetchTokenConfigs,
   getCcipObjectRef,
   getOffRampStateObject,
@@ -422,8 +423,101 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.getTokenForTokenPool} */
-  getTokenForTokenPool(_tokenPool: string): Promise<string> {
-    throw new CCIPNotImplementedError()
+  async getTokenForTokenPool(tokenPool: string): Promise<string> {
+    const normalizedTokenPool = normalizeSuiAddress(tokenPool)
+
+    // Get objects owned by this package (looking for state pointers)
+    const objects = await this.client.getOwnedObjects({
+      owner: normalizedTokenPool,
+      options: { showType: true, showContent: true },
+    })
+
+    const tpType = objects.data
+      .find((obj) => obj.data?.type?.includes('token_pool::'))
+      ?.data?.type?.split('::')[1]
+
+    const allowedTps = ['managed_token_pool', 'burn_mint_token_pool', 'lock_release_token_pool']
+    if (!tpType || !allowedTps.includes(tpType)) {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, `Invalid token pool type: ${tpType}`)
+    }
+
+    // Find the state pointer object
+    let stateObjectPointerId: string | undefined
+    for (const obj of objects.data) {
+      const content = obj.data?.content
+      if (content?.dataType !== 'moveObject') continue
+
+      const fields = content.fields as Record<string, unknown>
+      // Look for a pointer field that references the state object
+      stateObjectPointerId = fields[`${tpType}_object_id`] as string
+    }
+
+    if (!stateObjectPointerId) {
+      throw new CCIPError(
+        CCIPErrorCode.UNKNOWN,
+        `No token pool state pointer found for ${tokenPool}`,
+      )
+    }
+
+    const stateNamesPerTP: Record<string, string> = {
+      managed_token_pool: 'ManagedTokenPoolState',
+      burn_mint_token_pool: 'BurnMintTokenPoolState',
+      lock_release_token_pool: 'LockReleaseTokenPoolState',
+    }
+
+    const poolStateObject = deriveObjectID(
+      stateObjectPointerId,
+      new TextEncoder().encode(stateNamesPerTP[tpType]),
+    )
+
+    // Get object info to get the coin type
+    const info = await this.client.getObject({
+      id: poolStateObject,
+      options: { showType: true, showContent: true },
+    })
+
+    const type = info.data?.type
+    if (!type) {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading token pool state object type')
+    }
+
+    // Extract the type parameter T from ManagedTokenPoolState<T>
+    const typeMatch = type.match(/(?:Managed|BurnMint|LockRelease)TokenPoolState<(.+)>$/)
+    if (!typeMatch || !typeMatch[1]) {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, `Invalid pool state type format: ${type}`)
+    }
+    const tokenType = typeMatch[1]
+
+    // Call get_token function from managed_token_pool contract with the type parameter
+    const target = type.split('<')[0]?.split('::').slice(0, 2).join('::') + '::get_token'
+    if (!target) {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, `Invalid pool state type format: ${type}`)
+    }
+    const tx = new Transaction()
+    tx.moveCall({
+      target,
+      typeArguments: [tokenType],
+      arguments: [tx.object(poolStateObject)],
+    })
+
+    const result = await this.client.devInspectTransactionBlock({
+      sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      transactionBlock: tx,
+    })
+
+    if (result.effects.status.status !== 'success' || !result.results?.[0]?.returnValues?.[0]) {
+      throw new CCIPDataFormatUnsupportedError(
+        `Failed to call ${target}: ${result.effects.status.error || 'No return value'}`,
+      )
+    }
+
+    // Parse the return value to get the coin metadata address (32 bytes)
+    const returnValue = result.results[0].returnValues[0]
+    const [data] = returnValue
+    const coinMetadataBytes = new Uint8Array(data)
+    const coinMetadataAddress = normalizeSuiAddress(hexlify(coinMetadataBytes))
+
+    return coinMetadataAddress
   }
 
   /** {@inheritDoc Chain.getTokenInfo} */
