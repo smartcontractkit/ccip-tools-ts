@@ -216,6 +216,8 @@ function omit<T extends Record<string, unknown>, K extends string>(
   return result
 }
 
+// while formatData just breaks 0x bytes into 32B chunks for readability, this function first
+// tests if the data looks like a UTF-8 string (with length prefix) and decode that before
 function formatDataString(data: string): Record<string, string> {
   const bytes = getDataBytes(data)
   const isPrintableChars = (bytes_: Uint8Array) => bytes_.every((b) => 32 <= b && b <= 126)
