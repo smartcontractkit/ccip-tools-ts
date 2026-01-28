@@ -1,4 +1,4 @@
-import { isBytesLike, toBigInt } from 'ethers'
+import { type BytesLike, hexlify, isBytesLike, toBigInt } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { type ChainStatic, type LogFilter, Chain } from './chain.ts'
@@ -78,14 +78,16 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
   const destFamily = destChainSelector ? networkInfo(destChainSelector).family : ChainFamily.EVM
   // transform type, normalize keys case, source/dest addresses, and ensure known bigints
   data_ = convertKeysToCamelCase(data_, (v, k) =>
-    k?.match(/(selector|amount|nonce|number|limit|bitmap)$/i)
+    k?.match(/(selector|amount|nonce|number|limit|bitmap|juels)$/i)
       ? BigInt(v as string | number | bigint)
-      : typeof v === 'string' && k?.match(/(^dest.*address)|(receiver|offramp|accounts)/i)
-        ? decodeAddress(v, destFamily)
-        : typeof v === 'string' &&
-            k?.match(/((source.*address)|sender|origin|onramp|(feetoken$)|(token.*address$))/i)
-          ? decodeAddress(v, sourceFamily)
-          : v,
+      : k?.match(/(^dest.*address)|(receiver|offramp|accounts)/i)
+        ? decodeAddress(v as BytesLike, destFamily)
+        : k?.match(/((source.*address)|sender|origin|onramp|(feetoken$)|(token.*address$))/i)
+          ? decodeAddress(v as BytesLike, sourceFamily)
+          : v instanceof Uint8Array ||
+              (Array.isArray(v) && v.length >= 4 && v.every((e) => typeof e === 'number'))
+            ? hexlify(getDataBytes(v as readonly number[]))
+            : v,
   ) as typeof data_
 
   for (const ta of data_.tokenAmounts) {

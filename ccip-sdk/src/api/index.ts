@@ -39,7 +39,7 @@ export type {
 } from './types.ts'
 
 /** Default CCIP API base URL */
-export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
+export const DEFAULT_API_BASE_URL = 'https://api.ccip.cldev.cloud'
 
 /** Default timeout for API requests in milliseconds */
 export const DEFAULT_TIMEOUT_MS = 30000

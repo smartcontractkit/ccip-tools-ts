@@ -10,10 +10,10 @@ import { memoize } from 'micro-memoize'
 import type { LogFilter } from '../chain.ts'
 import {
   CCIPAptosAddressModuleRequiredError,
-  CCIPAptosTopicInvalidError,
   CCIPAptosTransactionTypeUnexpectedError,
   CCIPLogsWatchRequiresFinalityError,
   CCIPLogsWatchRequiresStartError,
+  CCIPTopicsInvalidError,
 } from '../errors/index.ts'
 import type { Log_ } from '../types.ts'
 import { sleep } from '../utils.ts'
@@ -245,11 +245,11 @@ export async function* streamAptosLogs(
   const limit = 100
   if (!opts.address || !opts.address.includes('::')) throw new CCIPAptosAddressModuleRequiredError()
   if (opts.topics?.length !== 1 || typeof opts.topics[0] !== 'string')
-    throw new CCIPAptosTopicInvalidError()
+    throw new CCIPTopicsInvalidError(opts.topics!)
   let eventHandlerField = opts.topics[0]
   if (!eventHandlerField.includes('/')) {
     eventHandlerField = (eventToHandler as Record<string, string>)[eventHandlerField]!
-    if (!eventHandlerField) throw new CCIPAptosTopicInvalidError(opts.topics[0])
+    if (!eventHandlerField) throw new CCIPTopicsInvalidError(opts.topics)
   }
   const [stateAddr] = await ctx.provider.view<[string]>({
     payload: {

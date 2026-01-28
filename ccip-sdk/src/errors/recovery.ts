@@ -157,7 +157,6 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   APTOS_TX_TYPE_UNEXPECTED:
     'Check that the transaction is a standard user transaction, not a script or module deployment.',
   APTOS_ADDRESS_MODULE_REQUIRED: 'Provide an address with module for Aptos log filtering.',
-  APTOS_TOPIC_INVALID: 'Provide a valid event topic string for Aptos filtering.',
   APTOS_HASHER_VERSION_UNSUPPORTED: 'This hasher version is not supported for Aptos.',
 
   HTTP_ERROR: 'HTTP request failed. 429 indicates rate limiting.',

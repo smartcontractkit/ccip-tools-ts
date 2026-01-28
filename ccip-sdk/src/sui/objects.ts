@@ -5,9 +5,17 @@ import type { SuiClient } from '@mysten/sui/client'
 import { Transaction } from '@mysten/sui/transactions'
 import { normalizeSuiAddress } from '@mysten/sui/utils'
 import { blake2b } from '@noble/hashes/blake2.js'
+import { hexlify, toUtf8Bytes } from 'ethers'
+import { memoize } from 'micro-memoize'
 
 import { CCIPDataFormatUnsupportedError } from '../errors/index.ts'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
+import { toLeArray } from '../utils.ts'
+
+const bcsBytes = (bytes: Uint8Array) => bcs.vector(bcs.u8()).serialize(bytes).toBytes()
+
+const HASHING_INTENT_SCOPE_CHILD_OBJECT_ID = 0xf0
+const SUI_FRAMEWORK_ADDRESS = '0x2'
 
 /**
  * Derive a dynamic field object ID using the Sui algorithm
@@ -19,27 +27,24 @@ export function deriveObjectID(parentAddress: string, keyBytes: Uint8Array): str
   const parentBytes = bcs.Address.serialize(normalizedParent).toBytes()
 
   // BCS serialize the key (vector<u8>)
-  const bcsKeyBytes = bcs.vector(bcs.u8()).serialize(Array.from(keyBytes)).toBytes()
+  const bcsKeyBytes = bcsBytes(keyBytes)
+  const keyLenBytes = toLeArray(bcsKeyBytes.length, 8) // uint64
 
   // Construct TypeTag for DerivedObjectKey<vector<u8>>
-  const suiFrameworkAddress = bcs.Address.serialize('0x2').toBytes()
+  const suiFrameworkAddress = bcs.Address.serialize(SUI_FRAMEWORK_ADDRESS).toBytes()
   const typeTagBytes = new Uint8Array([
     0x07, // TypeTag::Struct
     ...suiFrameworkAddress,
-    0x0e, // module length
-    ...new TextEncoder().encode('derived_object'),
-    0x10, // struct name length
-    ...new TextEncoder().encode('DerivedObjectKey'),
+    ...bcsBytes(toUtf8Bytes('derived_object')), //module
+    ...bcsBytes(toUtf8Bytes('DerivedObjectKey')), // struct name
     0x01, // type params count
-    ...[0x06, 0x01], // vector<u8> TypeTag
+    0x06, // TypeTag::Vector
+    0x01, // TypeTag::U8
   ])
 
   // Build the hash input
-  const keyLenBytes = new Uint8Array(8)
-  new DataView(keyLenBytes.buffer).setBigUint64(0, BigInt(bcsKeyBytes.length), true)
-
   const hashInput = new Uint8Array([
-    0xf0, // HashingIntentScope::ChildObjectId
+    HASHING_INTENT_SCOPE_CHILD_OBJECT_ID,
     ...parentBytes,
     ...keyLenBytes,
     ...bcsKeyBytes,
@@ -49,101 +54,72 @@ export function deriveObjectID(parentAddress: string, keyBytes: Uint8Array): str
   // Hash with Blake2b-256
   const hash = blake2b(hashInput, { dkLen: 32 })
 
-  // Convert to address string
-  return normalizeSuiAddress('0x' + Buffer.from(hash).toString('hex'))
+  return hexlify(hash)
 }
 
 /**
- * Get the CCIPObjectRef ID for a CCIP package
+ * Finds the StatePointer object owned by a package.
+ * The StatePointer contains a reference to the parent object used for derivation.
  */
-export async function getCcipObjectRef(client: SuiClient, ccipPackageId: string): Promise<string> {
-  // Get the pointer to find the CCIPObject ID
-  const pointerResponse = await client.getOwnedObjects({
-    owner: ccipPackageId,
-    filter: {
-      StructType: `${ccipPackageId}::state_object::CCIPObjectRefPointer`,
-    },
-  })
+export const getObjectRef = memoize(
+  async function getPackageIds_(address: string, client: SuiClient): Promise<string> {
+    let stateObjectName
+    if (address.endsWith('::onramp')) stateObjectName = 'OnRampState'
+    else if (address.endsWith('::offramp')) stateObjectName = 'OffRampState'
+    else stateObjectName = 'CCIPObjectRef'
 
-  if (!pointerResponse.data.length) {
-    throw new CCIPDataFormatUnsupportedError(
-      'No CCIPObjectRefPointer found for the given packageId',
-    )
-  }
+    const fullStatePointerType = `${address}::${stateObjectName}Pointer`
 
-  // Get the pointer object to extract ccip_object_id
-  const pointerId = pointerResponse.data[0]!.data?.objectId
-  if (!pointerId) {
-    throw new CCIPDataFormatUnsupportedError('Pointer does not have objectId')
-  }
+    const ownedObjects = await client.getOwnedObjects({
+      owner: address.split('::')[0]!,
+      filter: { StructType: fullStatePointerType },
+      options: { showContent: true },
+    })
 
-  const pointerObject = await client.getObject({
-    id: pointerId,
-    options: { showContent: true },
-  })
-
-  if (pointerObject.data?.content?.dataType !== 'moveObject') {
-    throw new CCIPDataFormatUnsupportedError('Pointer object is not a Move object')
-  }
-
-  const ccipObjectId = (pointerObject.data.content.fields as Record<string, unknown>)[
-    'ccip_object_id'
-  ] as string
-
-  if (!ccipObjectId) {
-    throw new CCIPDataFormatUnsupportedError('Could not find ccip_object_id in pointer')
-  }
-
-  // Derive the CCIPObjectRef ID from the parent CCIPObject ID
-  return deriveObjectID(ccipObjectId, new TextEncoder().encode('CCIPObjectRef'))
-}
+    const pointer = ownedObjects.data[0]?.data
+    if (!pointer?.objectId || pointer.content!.dataType !== 'moveObject')
+      throw new CCIPDataFormatUnsupportedError(
+        'No CCIP ObjectRef Pointer found for the given packageId',
+        { context: { fullStatePointerType, pointer } },
+      )
+    // const statePointerObjectId = pointer.objectId
+    const parentObjectId = Object.entries(pointer.content!.fields).find(([key]) =>
+      key.endsWith('_object_id'),
+    )?.[1]
+    if (typeof parentObjectId !== 'string')
+      throw new CCIPDataFormatUnsupportedError('No parent object id found inthe given pointer', {
+        context: { fullStatePointerType, pointer },
+      })
+    return deriveObjectID(parentObjectId, toUtf8Bytes(stateObjectName))
+  },
+  { maxArgs: 1, expires: 300e3, async: true },
+)
 
 /**
- * Get the OffRampState object ID for an offramp package
+ * Finds the StatePointer object owned by a package.
+ * The StatePointer contains a reference to the parent object used for derivation.
  */
-export async function getOffRampStateObject(
-  client: SuiClient,
-  offrampPackageId: string,
-): Promise<string> {
-  const offrampPointerResponse = await client.getOwnedObjects({
-    owner: offrampPackageId,
-    filter: {
-      StructType: `${offrampPackageId}::offramp::OffRampStatePointer`,
-    },
-  })
-
-  if (!offrampPointerResponse.data.length) {
-    throw new CCIPDataFormatUnsupportedError(
-      'No OffRampStatePointer found for the given offramp package',
-    )
-  }
-
-  const offrampPointerId = offrampPointerResponse.data[0]!.data?.objectId
-
-  if (!offrampPointerId) {
-    throw new CCIPDataFormatUnsupportedError('OffRampStatePointer does not have a valid objectId')
-  }
-
-  const offrampPointerObject = await client.getObject({
-    id: offrampPointerId,
-    options: { showContent: true },
-  })
-
-  if (offrampPointerObject.data?.content?.dataType !== 'moveObject') {
-    throw new CCIPDataFormatUnsupportedError('OffRamp pointer object is not a Move object')
-  }
-
-  const offrampObjectId = (offrampPointerObject.data.content.fields as Record<string, unknown>)[
-    'off_ramp_object_id'
-  ] as string
-
-  if (!offrampObjectId) {
-    throw new CCIPDataFormatUnsupportedError('Could not find off_ramp_object_id in pointer')
-  }
-
-  // Derive the OffRampState ID from the parent OffRamp Object ID
-  return deriveObjectID(offrampObjectId, new TextEncoder().encode('OffRampState'))
-}
+export const getLatestPackageId = memoize(
+  async function getLatestPackageId_(address: string, client: SuiClient): Promise<string> {
+    const suffix = address.split('::')[1]
+    try {
+      const stateObjectId = await getObjectRef(address, client)
+      const stateObject = await client.getObject({
+        id: stateObjectId,
+        options: { showContent: true },
+      })
+      const stateContent = stateObject.data?.content
+      if (stateContent?.dataType !== 'moveObject') return address
+      const packageIdsField = (stateContent.fields as Record<string, unknown>)['package_ids']
+      if (!Array.isArray(packageIdsField) || packageIdsField.length === 0) return address
+      const latest = packageIdsField[packageIdsField.length - 1] as string
+      return suffix ? `${latest}::${suffix}` : latest
+    } catch {
+      return address
+    }
+  },
+  { maxArgs: 1, expires: 60e3, async: true },
+)
 
 /**
  * Get the receiver module configuration from the receiver registry.

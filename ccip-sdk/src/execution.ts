@@ -84,7 +84,14 @@ export const discoverOffRamp = memoize(
         const offRampsOnRamp = await dest.getOnRampForOffRamp(offRamp, source.network.chainSelector)
         logger.debug(
           'discoverOffRamp: found, from',
-          { sourceRouter, sourceOffRamps, destOnRamp, destOffRamps, offRampsOnRamp },
+          {
+            sourceOnRamp: onRamp,
+            sourceRouter,
+            sourceOffRamps,
+            destOnRamp,
+            destOffRamps,
+            offRampsOnRamp,
+          },
           '=',
           offRamp,
         )

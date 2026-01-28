@@ -1077,7 +1077,7 @@ export class CCIPTopicsInvalidError extends CCIPError {
   override readonly name = 'CCIPTopicsInvalidError'
   /** Creates a Solana topics invalid error. */
   constructor(topics: unknown[], options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.TOPICS_INVALID, 'event topics must be string values', {
+    super(CCIPErrorCode.TOPICS_INVALID, `event topics must be string values`, {
       ...options,
       isTransient: false,
       context: { ...options?.context, topics },
@@ -1426,23 +1426,6 @@ export class CCIPAptosAddressModuleRequiredError extends CCIPError {
       {
         ...options,
         isTransient: false,
-      },
-    )
-  }
-}
-
-/** Thrown when Aptos topic is invalid. */
-export class CCIPAptosTopicInvalidError extends CCIPError {
-  override readonly name = 'CCIPAptosTopicInvalidError'
-  /** Creates an Aptos topic invalid error. */
-  constructor(topic?: string, options?: CCIPErrorOptions) {
-    super(
-      CCIPErrorCode.APTOS_TOPIC_INVALID,
-      topic ? `Unknown topic event handler="${topic}"` : 'single string topic required',
-      {
-        ...options,
-        isTransient: false,
-        context: { ...options?.context, topic },
       },
     )
   }

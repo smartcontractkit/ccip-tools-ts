@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-sdk",
-  "version": "0.94.0",
+  "version": "0.95.0",
   "description": "SDK/Library to interact with CCIP",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -51,20 +51,20 @@
     "@depay/web3-mock": "^15.3.0",
     "@eslint/js": "^9.39.2",
     "@types/bn.js": "^5.2.0",
-    "@types/node": "25.0.9",
+    "@types/node": "25.0.10",
     "@types/yargs": "17.0.35",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "10.1.8",
     "eslint-import-resolver-typescript": "4.4.4",
     "eslint-plugin-import": "^2.32.0",
-    "eslint-plugin-jsdoc": "^62.2.0",
+    "eslint-plugin-jsdoc": "^62.4.1",
     "eslint-plugin-prettier": "^5.5.5",
     "eslint-plugin-tsdoc": "^0.5.0",
     "ethers-abitype": "1.0.3",
-    "prettier": "^3.8.0",
+    "prettier": "^3.8.1",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.53.1",
-    "viem": "^2.44.4"
+    "typescript-eslint": "8.54.0",
+    "viem": "^2.45.0"
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^5.2.1",
@@ -74,7 +74,7 @@
     "@mysten/sui": "^1.45.2",
     "@solana/spl-token": "0.4.14",
     "@solana/web3.js": "^1.98.4",
-    "@ton/core": "0.62.1",
+    "@ton/core": "0.63.0",
     "@ton/crypto": "^3.3.0",
     "@ton/ton": "^16.1.0",
     "abitype": "1.2.3",
@@ -84,7 +84,7 @@
     "ethers": "6.16.0",
     "got": "^11.8.6",
     "micro-memoize": "^5.1.1",
-    "type-fest": "^5.4.1",
+    "type-fest": "^5.4.2",
     "yaml": "2.8.2"
   },
   "overrides": {

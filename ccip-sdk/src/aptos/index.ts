@@ -9,9 +9,7 @@ import {
 import {
   type BytesLike,
   concat,
-  dataLength,
   dataSlice,
-  decodeBase64,
   getBytes,
   hexlify,
   isBytesLike,
@@ -487,18 +485,18 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @param bytes - Bytes to convert.
    * @returns Aptos address (0x-prefixed hex, 32 bytes padded).
    */
-  static getAddress(bytes: BytesLike): string {
+  static getAddress(bytes: BytesLike | readonly number[]): string {
     let suffix = ''
-    if (typeof bytes === 'string' && !bytes.startsWith('0x')) {
-      bytes = decodeBase64(bytes)
-    } else if (typeof bytes === 'string') {
+    if (Array.isArray(bytes)) bytes = new Uint8Array(bytes)
+    if (typeof bytes === 'string' && bytes.startsWith('0x')) {
       const idx = bytes.indexOf('::')
       if (idx > 0) {
         suffix = bytes.slice(idx)
         bytes = bytes.slice(0, idx)
       }
     }
-    if (dataLength(bytes) > 32) throw new CCIPAptosAddressInvalidError(hexlify(bytes))
+    bytes = getDataBytes(bytes)
+    if (bytes.length > 32) throw new CCIPAptosAddressInvalidError(hexlify(bytes))
     return zeroPadValue(bytes, 32) + suffix
   }
 
