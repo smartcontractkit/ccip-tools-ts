@@ -32,19 +32,19 @@
   ],
   "devDependencies": {
     "@eslint/js": "^9.39.2",
-    "@types/node": "25.0.9",
+    "@types/node": "25.0.10",
     "@types/yargs": "17.0.35",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "10.1.8",
     "eslint-import-resolver-typescript": "4.4.4",
     "eslint-plugin-import": "^2.32.0",
-    "eslint-plugin-jsdoc": "^62.2.0",
+    "eslint-plugin-jsdoc": "^62.4.1",
     "eslint-plugin-prettier": "^5.5.5",
     "eslint-plugin-tsdoc": "^0.5.0",
-    "prettier": "^3.8.0",
+    "prettier": "^3.8.1",
     "tsx": "4.21.0",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.53.1"
+    "typescript-eslint": "8.54.0"
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^5.2.1",
@@ -59,7 +59,7 @@
     "@ton-community/ton-ledger": "^7.3.0",
     "bs58": "^6.0.0",
     "ethers": "6.16.0",
-    "type-fest": "^5.4.1",
+    "type-fest": "^5.4.2",
     "yargs": "18.0.0"
   }
 }
