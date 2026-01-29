@@ -32,33 +32,34 @@ const ccipReceive = FunctionFragment.from({
 })
 type Any2EVMMessage = Parameters<TypedContract<typeof RouterABI>['routeMessage']>[0]
 
-const transferFragment = interfaces.Token.getFunction('transfer')!
-
 /**
  * Finds suitable token balance slot by simulating a fake transfer between 2 non-existent accounts,
  * with state overrides for the holders' balance, which reverts if override slot is wrong
  */
 const findBalancesSlot = memoize(
-  async function findBalancesSlot_(token: string, provider: JsonRpcApiProvider): Promise<number> {
-    const fakeHolder = getAddress(hexlify(randomBytes(20)))
-    const fakeRecipient = getAddress(hexlify(randomBytes(20)))
-    const fakeAmount = 1e7
+  async function findBalancesSlot_(
+    token: string,
+    provider: JsonRpcApiProvider,
+    holder: string = getAddress(hexlify(randomBytes(20))),
+    recipient: string = getAddress(hexlify(randomBytes(20))),
+  ): Promise<number> {
+    const contract = new Contract(token, interfaces.Token, provider) as unknown as TypedContract<
+      typeof TokenABI
+    >
+    const fakeAmount = (await contract.totalSupply()) + 1n
+    const calldata = interfaces.Token.encodeFunctionData('transfer', [recipient, fakeAmount])
 
-    const calldata = concat([
-      transferFragment.selector,
-      defaultAbiCoder.encode(transferFragment.inputs, [fakeRecipient, fakeAmount]),
-    ])
     let firstErr
     // try range(0..15), but start with most probable 0 (common ERC20) and 9 (USDC)
     for (const slot of [0, 9, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15]) {
       try {
         await provider.send('eth_estimateGas', [
-          { from: fakeHolder, to: token, data: calldata },
+          { from: holder, to: token, data: calldata },
           'latest',
           {
             [token]: {
               stateDiff: {
-                [solidityPackedKeccak256(['uint256', 'uint256'], [fakeHolder, slot])]: toBeHex(
+                [solidityPackedKeccak256(['uint256', 'uint256'], [holder, slot])]: toBeHex(
                   fakeAmount,
                   32,
                 ),
@@ -109,7 +110,7 @@ export async function estimateExecGas({
       destAmounts[token] = currentBalance
     }
     destAmounts[token]! += amount
-    const balancesSlot = await findBalancesSlot(token, provider)
+    const balancesSlot = await findBalancesSlot(token, provider, receiver, router)
     stateOverrides[token] = {
       stateDiff: {
         [solidityPackedKeccak256(['uint256', 'uint256'], [receiver, balancesSlot])]: toBeHex(
