@@ -355,6 +355,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Decodes a CCIP message from a log event.
    * @param log - Log event with topics and data.
    * @returns Decoded CCIPMessage or undefined if not a valid CCIP message.
+   * @throws {@link CCIPLogDataInvalidError} if log data is not valid bytes
+   * @throws {@link CCIPMessageDecodeError} if message cannot be decoded
    */
   static decodeMessage(log: {
     topics?: readonly string[]
@@ -456,6 +458,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param log - Log event with topics and data.
    * @param lane - Lane info (required for CCIP v1.5 and earlier).
    * @returns Array of CommitReport or undefined if not a valid commit event.
+   * @throws {@link CCIPLogDataInvalidError} if log data is not valid bytes
+   * @throws {@link CCIPVersionRequiresLaneError} if CCIP v1.5 event but no lane provided
    */
   static decodeCommits(
     log: { topics?: readonly string[]; data: unknown },
@@ -511,6 +515,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Decodes an execution receipt from a log event.
    * @param log - Log event with topics and data.
    * @returns ExecutionReceipt or undefined if not a valid execution event.
+   * @throws {@link CCIPLogDataInvalidError} if log data is not valid bytes
    */
   static decodeReceipt(log: {
     topics?: readonly string[]
@@ -629,6 +634,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Converts bytes to a checksummed EVM address.
    * @param bytes - Bytes to convert (must be 20 bytes or 32 bytes with leading zeros).
    * @returns Checksummed EVM address.
+   * @throws {@link CCIPAddressInvalidEvmError} if bytes cannot be converted to a valid EVM address
    */
   static getAddress(bytes: BytesLike): string {
     if (isHexString(bytes, 20)) return getAddress(bytes)
@@ -655,6 +661,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Gets lane configuration from an OnRamp contract.
    * @param onRamp - OnRamp contract address.
    * @returns Lane configuration.
+   * @throws {@link CCIPContractTypeInvalidError} if contract doesn't have destChainSelector
    */
   async getLaneForOnRamp(onRamp: string): Promise<Lane> {
     const [, version] = await this.typeAndVersion(onRamp)
@@ -674,7 +681,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /** {@inheritDoc Chain.getRouterForOnRamp} */
+  /**
+   * {@inheritDoc Chain.getRouterForOnRamp}
+   * @throws {@link CCIPVersionUnsupportedError} if OnRamp version is not supported
+   */
   async getRouterForOnRamp(onRamp: string, destChainSelector: bigint): Promise<string> {
     const [, version] = await this.typeAndVersion(onRamp)
     let onRampABI
@@ -703,7 +713,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /** {@inheritDoc Chain.getRouterForOffRamp} */
+  /**
+   * {@inheritDoc Chain.getRouterForOffRamp}
+   * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
+   */
   async getRouterForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
     const [, version] = await this.typeAndVersion(offRamp)
     let offRampABI, router
@@ -770,7 +783,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return contract.getOnRamp(destChainSelector) as Promise<string>
   }
 
-  /** {@inheritDoc Chain.getOnRampForOffRamp} */
+  /**
+   * {@inheritDoc Chain.getOnRampForOffRamp}
+   * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
+   */
   async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
     const [, version] = await this.typeAndVersion(offRamp)
     let offRampABI
@@ -803,7 +819,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
+  /**
+   * {@inheritDoc Chain.getCommitStoreForOffRamp}
+   * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
+   */
   async getCommitStoreForOffRamp(offRamp: string): Promise<string> {
     const [, version] = await this.typeAndVersion(offRamp)
     let offRampABI
@@ -875,6 +894,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param lane - Lane configuration.
    * @param ctx - Context object containing logger.
    * @returns Leaf hasher function.
+   * @throws {@link CCIPSourceChainUnsupportedError} if source chain is not EVM for v1.2/v1.5
+   * @throws {@link CCIPHasherVersionUnsupportedError} if lane version is not supported
    */
   static getDestLeafHasher(
     { sourceChainSelector, destChainSelector, onRamp, version }: Lane,
@@ -911,7 +932,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return this.getOnRampForRouter(router, networkInfo(someOtherNetwork).chainSelector)
   }
 
-  /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
+  /**
+   * {@inheritDoc Chain.getTokenAdminRegistryFor}
+   * @throws {@link CCIPContractNotRouterError} if address is not a Router, OnRamp, or OffRamp
+   */
   async getTokenAdminRegistryFor(address: string): Promise<string> {
     let [type, version, typeAndVersion] = await this.typeAndVersion(address)
     if (type === 'TokenAdminRegistry') {
@@ -942,6 +966,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @internal
    * @param address - Router or Ramp contract address.
    * @returns FeeQuoter contract address.
+   * @throws {@link CCIPContractNotRouterError} if address is not a Router, OnRamp, or OffRamp
+   * @throws {@link CCIPVersionFeatureUnavailableError} if contract version is below v1.6
    */
   async getFeeQuoterFor(address: string): Promise<string> {
     let [type, version, typeAndVersion] = await this.typeAndVersion(address)
@@ -1064,7 +1090,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /** {@inheritDoc Chain.sendMessage} */
+  /**
+   * {@inheritDoc Chain.sendMessage}
+   * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Signer
+   */
   async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
     const wallet = opts.wallet
     if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
@@ -1106,6 +1135,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /**
    * {@inheritDoc Chain.generateUnsignedExecuteReport}
    * @returns array containing one unsigned `manuallyExecute` TransactionRequest object
+   * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
    */
   async generateUnsignedExecuteReport({
     offRamp,
@@ -1220,7 +1250,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return { family: ChainFamily.EVM, transactions: [manualExecTx] }
   }
 
-  /** {@inheritDoc Chain.executeReport} */
+  /**
+   * {@inheritDoc Chain.executeReport}
+   * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Signer
+   * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm
+   * @throws {@link CCIPExecTxRevertedError} if execution transaction reverts
+   */
   async executeReport(opts: Parameters<Chain['executeReport']>[0]) {
     const wallet = opts.wallet
     if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
@@ -1272,7 +1307,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return res as string[]
   }
 
-  /** {@inheritDoc Chain.getRegistryTokenConfig} */
+  /**
+   * {@inheritDoc Chain.getRegistryTokenConfig}
+   * @throws {@link CCIPTokenNotConfiguredError} if token is not configured in registry
+   */
   async getRegistryTokenConfig(
     registry: string,
     token: string,
@@ -1403,7 +1441,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     )
   }
 
-  /** {@inheritDoc Chain.getFeeTokens} */
+  /**
+   * {@inheritDoc Chain.getFeeTokens}
+   * @throws {@link CCIPVersionUnsupportedError} if OnRamp version is not supported
+   */
   async getFeeTokens(router: string) {
     const onRamp = await this._getSomeOnRampFor(router)
     const [_, version] = await this.typeAndVersion(onRamp)

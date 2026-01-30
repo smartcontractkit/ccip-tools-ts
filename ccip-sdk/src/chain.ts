@@ -71,8 +71,7 @@ export type ChainContext = WithLogger & {
   /**
    * CCIP API client instance for lane information queries.
    *
-   * - `undefined` (default): Creates CCIPAPIClient with production endpoint
-   *   (https://api.ccip.chain.link)
+   * - `undefined` (default): Creates CCIPAPIClient with {@link DEFAULT_API_BASE_URL}
    * - `CCIPAPIClient`: Uses provided instance (allows custom URL, fetch, etc.)
    * - `null`: Disables API client entirely (getLaneLatency() will throw)
    *
@@ -202,7 +201,7 @@ export type UnsignedTx = {
 }
 
 /**
- * Common options for [[getFee]], [[generateUnsignedSendMessage]] and [[sendMessage]] Chain methods
+ * Common options for {@link Chain.getFee}, {@link Chain.generateUnsignedSendMessage} and {@link Chain.sendMessage} methods.
  */
 export type SendMessageOpts = {
   /** Router address on this chain */
@@ -216,7 +215,7 @@ export type SendMessageOpts = {
 }
 
 /**
- * Common options for [[generateUnsignedExecuteReport]] and [[executeReport]] Chain methods
+ * Common options for {@link Chain.generateUnsignedExecuteReport} and {@link Chain.executeReport} methods.
  */
 export type ExecuteReportOpts = {
   /** address of the OffRamp contract */
@@ -249,6 +248,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Base constructor for Chain class.
    * @param network - NetworkInfo object for the Chain instance
    * @param ctx - Optional context with logger and API client configuration
+   * @throws {@link CCIPChainFamilyMismatchError} if network family doesn't match the Chain subclass
    */
   constructor(network: NetworkInfo, ctx?: ChainContext) {
     const { logger = console, apiClient, apiRetryConfig } = ctx ?? {}
@@ -287,17 +287,21 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Fetch the timestamp of a given block
    * @param block - positive block number, negative finality depth or 'finalized' tag
    * @returns timestamp of the block, in seconds
+   * @throws {@link CCIPBlockNotFoundError} if block does not exist
    */
   abstract getBlockTimestamp(block: number | 'finalized'): Promise<number>
   /**
    * Fetch a transaction by its hash
    * @param hash - transaction hash
    * @returns generic transaction details
+   * @throws {@link CCIPTransactionNotFoundError} if transaction not found
    */
   abstract getTransaction(hash: string): Promise<ChainTransaction>
   /**
-   * Confirm a log tx is finalized or wait for it to be finalized
-   * Throws if it isn't included (e.g. a reorg)
+   * Confirm a log tx is finalized or wait for it to be finalized.
+   * @param opts - Options containing the request, finality level, and optional cancel promise
+   * @returns true when the transaction is finalized
+   * @throws {@link CCIPTransactionNotFinalizedError} if the transaction is not included (e.g., due to a reorg)
    */
   async waitFinalized({
     request: { log, tx },
@@ -359,6 +363,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *   - `page`: if provided, try to use this page/range for batches
    *   - `watch`: true or cancellation promise, getLogs continuously after initial fetch
    * @returns An async iterable iterator of logs.
+   * @throws {@link CCIPLogsWatchRequiresFinalityError} if watch mode is used without a finality endBlock tag
+   * @throws {@link CCIPLogsWatchRequiresStartError} if watch mode is used without startBlock or startTime
+   * @throws {@link CCIPLogsAddressRequiredError} if address is required but not provided (chain-specific)
    */
   abstract getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
 
@@ -366,7 +373,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Fetch all CCIP requests in a transaction
    * @param tx - ChainTransaction or txHash to fetch requests from
    * @returns CCIP messages in the transaction (at least one)
-   **/
+   * @throws {@link CCIPMessageNotFoundInTxError} if no CCIP messages found in transaction
+   */
   async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
     const txHash = typeof tx === 'string' ? tx : tx.hash
     try {
@@ -397,11 +405,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
   /**
    * Fetch a message by ID.
-   * Default implementation just tries API.
-   * Children may override to fetch from chain as fallback
+   * Default implementation uses the CCIP API.
+   * Subclasses may override to fetch from chain as fallback.
    * @param messageId - message ID to fetch request for
-   * @param _opts - onRamp may be required in some implementations, and throw if missing
-   * @returns CCIPRequest
+   * @param _opts - onRamp may be required in some implementations
+   * @returns CCIPRequest containing the message details
+   * @throws {@link CCIPApiClientNotAvailableError} if apiClient was disabled (set to `null`)
+   * @throws {@link CCIPMessageIdNotFoundError} if message not found
+   * @throws {@link CCIPHttpError} if API request fails
    **/
   async getMessageById(
     messageId: string,
@@ -420,6 +431,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param request - CCIPRequest to fetch batch for.
    * @param commit - CommitReport range (min, max).
    * @param opts - Optional parameters (e.g., `page` for pagination width).
+   * @returns Array of messages in the batch.
+   * @throws {@link CCIPMessageBatchIncompleteError} if not all messages in range could be fetched
    */
   abstract getMessagesInBatch<
     R extends PickDeep<
@@ -438,6 +451,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @returns version - parsed version of the contract, e.g. `1.6.0`
    * @returns typeAndVersion - original (unparsed) typeAndVersion() string
    * @returns suffix - suffix of the version, if any (e.g. `-dev`)
+   * @throws {@link CCIPTypeVersionInvalidError} if contract doesn't have valid typeAndVersion
    */
   abstract typeAndVersion(
     address: string,
@@ -532,12 +546,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Fetch TokenAdminRegistry configured in a given OnRamp, Router, etc
    * Needed to map a source token to its dest counterparts
-   * @param onRamp - Some contract for which we can fetch a TokenAdminRegistry
+   * @param address - Some contract for which we can fetch a TokenAdminRegistry (OnRamp, Router, etc.)
+   * @returns TokenAdminRegistry address
    */
   abstract getTokenAdminRegistryFor(address: string): Promise<string>
   /**
    * Fetch the current fee for a given intended message
    * @param opts - {@link SendMessageOpts} without approveMax
+   * @returns Fee amount in the feeToken's smallest units
    */
   abstract getFee(opts: Omit<SendMessageOpts, 'approveMax'>): Promise<bigint>
   /**
@@ -555,6 +571,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Send a CCIP message through a router using provided wallet.
    * @param opts - {@link SendMessageOpts} with chain-specific wallet for signing
    * @returns CCIP request
+   * @throws {@link CCIPWalletNotSignerError} if wallet cannot sign transactions
    *
    * @example
    * ```typescript
@@ -620,6 +637,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * })
    * console.log(`Message ID: ${request.message.messageId}`)
    * ```
+   * @throws {@link CCIPWalletNotSignerError} if wallet cannot sign transactions
+   * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm
    */
   abstract executeReport(
     opts: ExecuteReportOpts & {
@@ -632,8 +651,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Look for a CommitReport at dest for given CCIP request
    * May be specialized by some subclasses
    * @param opts - getCommitReport options
-   * @returns CCIPCommit info, or reject if none found
-   **/
+   * @returns CCIPCommit info
+   * @throws {@link CCIPCommitNotFoundError} if no commit found for the request
+   */
   async getCommitReport({
     commitStore,
     request,
@@ -739,6 +759,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @internal
    * @param tx - transaction hash or transaction object
    * @returns CCIP execution object
+   * @throws {@link CCIPExecTxRevertedError} if no execution receipt found in transaction
    */
   async getExecutionReceiptInTx(tx: string | ChainTransaction): Promise<CCIPExecution> {
     if (typeof tx === 'string') tx = await this.getTransaction(tx)
@@ -762,8 +783,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
   /**
    * Get TokenConfig for a given token address in a TokenAdminRegistry
-   * @param address - TokenAdminRegistry contract address
+   * @param registry - TokenAdminRegistry contract address
    * @param token - Token address
+   * @returns Token configuration including administrator and optional tokenPool
+   * @throws {@link CCIPTokenNotInRegistryError} if token not found in registry
    */
   abstract getRegistryTokenConfig(
     registry: string,
@@ -777,6 +800,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Get TokenPool state and configurations
    * @param tokenPool - Token pool address
+   * @returns Token pool configuration including token address, router, and optional typeAndVersion
    */
   abstract getTokenPoolConfigs(tokenPool: string): Promise<{
     token: string
@@ -789,6 +813,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param tokenPool - Token pool address.
    * @param remoteChainSelector - If provided, only return remotes for the specified chain (may error if remote not supported).
    * @returns Record of network names and remote configurations (remoteToken, remotePools, rateLimitStates).
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if remoteChainSelector is specified but not configured
    */
   abstract getTokenPoolRemotes(
     tokenPool: string,
@@ -880,7 +905,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    */
   decodeCommits(log: Pick<Log_, 'data'>, lane?: Lane): CommitReport[] | undefined
   /**
-   * Decode a receipt (ExecutioStateChanged) event
+   * Decode a receipt (ExecutionStateChanged) event
    * @param log - Chain generic log
    * @returns ExecutionReceipt or undefined if not a recognized receipt
    */

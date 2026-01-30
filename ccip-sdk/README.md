@@ -153,8 +153,8 @@ const signer = await source.provider.getSigner(0)
 | EVM          | `EVMChain`    | [ethers.js v6](https://docs.ethers.org/v6/)                              | Supported      |
 | Solana       | `SolanaChain` | [solana-web3.js](https://github.com/solana-foundation/solana-web3.js)    | Supported      |
 | Aptos        | `AptosChain`  | [aptos-ts-sdk](https://github.com/aptos-labs/aptos-ts-sdk)               | Supported      |
-| Sui          | `SuiChain`    | [@mysten/sui](https://github.com/MystenLabs/sui)                         | In Development |
-| TON          | `TONChain`    | [@ton/ton](https://github.com/ton-org/ton)                               | In Development |
+| Sui          | `SuiChain`    | [@mysten/sui](https://github.com/MystenLabs/sui)                         | Partial (manual exec) |
+| TON          | `TONChain`    | [@ton/ton](https://github.com/ton-org/ton)                               | Partial (manual exec) |
 
 ## Related
 

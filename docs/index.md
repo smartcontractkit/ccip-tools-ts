@@ -44,8 +44,8 @@ Track an existing CCIP message to verify everything works:
 ```bash
 # Track a message on Sepolia → Arbitrum Sepolia
 ccip-cli show 0x0e0e39d96754b8a35a07b233e79e20807af3045e77f183ee6a23e6d628396273 \
-  -r https://ethereum-sepolia-rpc.publicnode.com \
-  -r https://arbitrum-sepolia-rpc.publicnode.com
+  --rpc https://ethereum-sepolia-rpc.publicnode.com \
+  --rpc https://arbitrum-sepolia-rpc.publicnode.com
 ```
 
 You should see message details, commit status, and execution state.
@@ -68,11 +68,11 @@ const message = {
 }
 
 // 3. Get the fee
-const fee = await source.getFee(router, dest, message)
+const fee = await source.getFee({ router, destChainSelector: dest, message })
 console.log('Fee:', fee.toString())
 
 // 4. Send (requires wallet - see SDK docs)
-// const request = await source.sendMessage(router, dest, { ...message, fee }, { wallet })
+// const request = await source.sendMessage({ router, destChainSelector: dest, message: { ...message, fee }, wallet })
 ```
 
 ## Architecture

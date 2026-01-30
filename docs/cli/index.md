@@ -103,6 +103,9 @@ For commands that send transactions:
 **Environment variable:**
 ```bash
 export PRIVATE_KEY=0xYourPrivateKey  # Recommended
+# Alternative names also supported:
+export USER_KEY=0xYourPrivateKey     # Same as PRIVATE_KEY
+export OWNER_KEY=0xYourPrivateKey    # Same as PRIVATE_KEY
 ccip-cli send ...
 ```
 
@@ -193,7 +196,7 @@ ccip-cli send --source <chain> --dest <chain> --router <address> [options]
 | `--receiver` | `--to` | Destination address (defaults to sender if same family) |
 | `--data` | | Message payload (auto-encoded if not hex) |
 | `--gas-limit` | `-L`, `--compute-units` | Gas for receiver callback (default: ramp config) |
-| `--allow-out-of-order-exec` | `--ooo` | Allow execution without nonce ordering (v1.5+) |
+| `--allow-out-of-order-exec` | `--ooo` | Allow execution without nonce ordering (v1.6+) |
 
 **Token Options:**
 
@@ -290,6 +293,11 @@ ccip-cli manualExec <tx_hash> [options]
 | `--force-buffer` | Split large message into chunks sent to a buffer account before execution |
 | `--force-lookup-table` | Create an address lookup table to fit more accounts in transaction |
 | `--clear-leftover-accounts` | Clean up buffer accounts or lookup tables from previous aborted attempts |
+
+**Sui-Specific:**
+| Option | Description |
+|--------|-------------|
+| `--receiver-object-ids` | Receiver object IDs required for Sui execution (e.g., `--receiver-object-ids 0xabc... 0xdef...`) |
 
 **Example:**
 

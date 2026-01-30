@@ -38,7 +38,8 @@ import { type NetworkInfo, type WithLogger, ChainFamily } from './types.ts'
  * @param timestamp - target timestamp
  * @param precision - returned blockNumber should be within this many blocks before timestamp
  * @returns blockNumber of a block at provider which is close but before target timestamp
- **/
+ * @throws {@link CCIPBlockBeforeTimestampNotFoundError} if no block exists before the given timestamp
+ */
 export async function getSomeBlockNumberBefore(
   getBlockTimestamp: (blockNumber: number) => Promise<number>,
   recentBlockNumber: number,
@@ -106,9 +107,9 @@ export async function getSomeBlockNumberBefore(
 }
 
 /**
- * Checks if a chain is a testnet
+ * Converts a chain ID to complete NetworkInfo.
+ * Memoized to return the same object reference for a given chainId.
  */
-// memoized so we always output the same object for a given chainId
 const networkInfoFromChainId = memoize((chainId: NetworkInfo['chainId']): NetworkInfo => {
   const sel = SELECTORS[chainId]
   if (!sel?.name) throw new CCIPChainNotFoundError(chainId)
@@ -129,6 +130,7 @@ const networkInfoFromChainId = memoize((chainId: NetworkInfo['chainId']): Networ
  *   - Chain ID as number, bigint or string (EVM: "1", Aptos: "aptos:1", Solana: genesisHash)
  *   - Chain name as string ("ethereum-mainnet")
  * @returns Complete NetworkInfo object
+ * @throws {@link CCIPChainNotFoundError} if chain is not found
  */
 export const networkInfo = memoize(function networkInfo_(
   selectorOrIdOrName: bigint | number | string,
@@ -237,7 +239,11 @@ export function parseJson<T = unknown>(text: string): T {
 
 /**
  * Decode address from a 32-byte hex string
- **/
+ * @param address - Address bytes to decode
+ * @param family - Chain family for address format (defaults to EVM)
+ * @returns Decoded address string
+ * @throws {@link CCIPChainFamilyUnsupportedError} if chain family is not supported
+ */
 export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFamily.EVM): string {
   const chain = supportedChains[family]
   if (!chain) throw new CCIPChainFamilyUnsupportedError(family)
@@ -246,7 +252,11 @@ export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFam
 
 /**
  * Validate a value is a txHash string in some supported chain family
- **/
+ * @param txHash - Value to check
+ * @param family - Optional chain family to validate against
+ * @returns true if value is a valid transaction hash
+ * @throws {@link CCIPChainFamilyUnsupportedError} if specified chain family is not supported
+ */
 export function isSupportedTxHash(txHash: unknown, family?: ChainFamily): txHash is string {
   let chains: ChainStatic[]
   if (!family) chains = Object.values(supportedChains)
@@ -309,6 +319,7 @@ export function isBase64(data: unknown): data is string {
  * Converts various data formats to Uint8Array.
  * @param data - Bytes, number array, or Base64 string.
  * @returns Uint8Array representation.
+ * @throws {@link CCIPDataFormatUnsupportedError} if data format is not recognized
  */
 export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
   if (Array.isArray(data)) return new Uint8Array(data)
@@ -518,6 +529,7 @@ export async function withRetry<T>(
  * Parses a typeAndVersion string into its components.
  * @param typeAndVersion - String in format "TypeName vX.Y.Z".
  * @returns Tuple of [type, version, original, suffix?].
+ * @throws {@link CCIPTypeVersionInvalidError} if string format is invalid
  */
 export function parseTypeAndVersion(
   typeAndVersion: string,

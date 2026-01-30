@@ -125,6 +125,8 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * Creates a SuiChain instance from an RPC URL.
    * @param url - HTTP or WebSocket endpoint URL for the Sui network.
    * @returns A new SuiChain instance.
+   * @throws {@link CCIPDataFormatUnsupportedError} if unable to fetch chain identifier
+   * @throws {@link CCIPError} if chain identifier is not supported
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<SuiChain> {
     const client = new SuiClient({ url })
@@ -208,7 +210,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
   }
 
-  /** {@inheritDoc Chain.getLogs} */
+  /**
+   * {@inheritDoc Chain.getLogs}
+   * @throws {@link CCIPLogsAddressRequiredError} if address is not provided
+   * @throws {@link CCIPTopicsInvalidError} if topics format is invalid
+   */
   async *getLogs(opts: LogFilter & { versionAsHash?: boolean }) {
     if (!opts.address) throw new CCIPLogsAddressRequiredError()
 
@@ -246,7 +252,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return getMessagesInBatch(this, request, commit, opts)
   }
 
-  /** {@inheritDoc Chain.typeAndVersion} */
+  /**
+   * {@inheritDoc Chain.typeAndVersion}
+   * @throws {@link CCIPDataFormatUnsupportedError} if view call fails
+   */
   async typeAndVersion(address: string) {
     // requires address to have `::<module>` suffix
     address = await getLatestPackageId(address, this.client)
@@ -280,7 +289,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.resolve(onRamp)
   }
 
-  /** {@inheritDoc Chain.getRouterForOffRamp} */
+  /**
+   * {@inheritDoc Chain.getRouterForOffRamp}
+   * @throws {@link CCIPContractNotRouterError} always (Sui architecture doesn't have separate router)
+   */
   getRouterForOffRamp(offRamp: string, _sourceChainSelector: bigint): Promise<string> {
     throw new CCIPContractNotRouterError(offRamp, 'unknown')
   }
@@ -305,7 +317,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.resolve(router)
   }
 
-  /** {@inheritDoc Chain.getOnRampForOffRamp} */
+  /**
+   * {@inheritDoc Chain.getOnRampForOffRamp}
+   * @throws {@link CCIPDataFormatUnsupportedError} if view call fails
+   */
   async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
     offRamp = await getLatestPackageId(offRamp, this.client)
     const functionName = 'get_source_chain_config'
@@ -383,7 +398,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.resolve(offRamp)
   }
 
-  /** {@inheritDoc Chain.getTokenForTokenPool} */
+  /**
+   * {@inheritDoc Chain.getTokenForTokenPool}
+   * @throws {@link CCIPError} if token pool type is invalid or state not found
+   * @throws {@link CCIPDataFormatUnsupportedError} if view call fails
+   */
   async getTokenForTokenPool(tokenPool: string): Promise<string> {
     const normalizedTokenPool = normalizeSuiAddress(tokenPool)
 
@@ -481,7 +500,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return coinMetadataAddress
   }
 
-  /** {@inheritDoc Chain.getTokenInfo} */
+  /**
+   * {@inheritDoc Chain.getTokenInfo}
+   * @throws {@link CCIPError} if token address is invalid or metadata cannot be loaded
+   */
   async getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }> {
     const normalizedTokenAddress = normalizeSuiAddress(token)
     if (!isValidSuiAddress(normalizedTokenAddress)) {
@@ -558,6 +580,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * Decodes a CCIP message from a Sui log event.
    * @param log - Log event data.
    * @returns Decoded CCIPMessage or undefined if not valid.
+   * @throws {@link CCIPSuiLogInvalidError} if log data format is invalid
    */
   static decodeMessage(log: Log_): CCIPMessage | undefined {
     const { data } = log
@@ -592,6 +615,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * Encodes extra arguments for CCIP messages.
    * @param _extraArgs - Extra arguments to encode.
    * @returns Encoded extra arguments as a hex string.
+   * @throws {@link CCIPNotImplementedError} always (not yet implemented)
    */
   static encodeExtraArgs(_extraArgs: ExtraArgs): string {
     throw new CCIPNotImplementedError()
@@ -723,7 +747,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.generateUnsignedExecuteReport'))
   }
 
-  /** {@inheritDoc Chain.executeReport} */
+  /**
+   * {@inheritDoc Chain.executeReport}
+   * @throws {@link CCIPError} if transaction submission fails
+   * @throws {@link CCIPExecTxRevertedError} if transaction reverts
+   */
   async executeReport(
     opts: Parameters<Chain['executeReport']>[0] & {
       receiverObjectIds?: string[]

@@ -1,3 +1,12 @@
+/**
+ * \@chainlink/ccip-sdk - SDK for interacting with Chainlink CCIP (Cross-Chain Interoperability Protocol).
+ *
+ * This package provides tools for sending cross-chain messages, tracking message status,
+ * and executing manual message delivery across supported blockchain networks.
+ *
+ * @packageDocumentation
+ */
+
 export type {
   APICCIPRequest,
   APIErrorResponse,

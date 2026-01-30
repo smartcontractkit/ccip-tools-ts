@@ -69,7 +69,7 @@ export const builder = (yargs: Argv) =>
       'allow-out-of-order-exec': {
         alias: 'ooo',
         type: 'boolean',
-        describe: 'Allow out-of-order execution (v1.5+ lanes)',
+        describe: 'Allow out-of-order execution (v1.6+ lanes)',
       },
       'fee-token': {
         type: 'string',

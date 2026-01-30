@@ -30,10 +30,10 @@ export class CCIPChainFamilyUnsupportedError extends CCIPError {
   }
 }
 
-/** Thrown when some method/operation is not supported on a given implementaiton class. */
+/** Thrown when some method/operation is not supported on a given implementation class. */
 export class CCIPMethodUnsupportedError extends CCIPError {
   override readonly name = 'CCIPMethodUnsupportedError'
-  /** Creates a method nsupported error. */
+  /** Creates a method unsupported error. */
   constructor(klass: string, method: string, options?: CCIPErrorOptions) {
     super(CCIPErrorCode.METHOD_UNSUPPORTED, `Unsupported method in class: ${klass}.${method}`, {
       ...options,
@@ -776,7 +776,7 @@ export class CCIPLogTopicsNotFoundError extends CCIPError {
 /** Thrown when trying to `watch` logs but giving a fixed `endBlock` */
 export class CCIPLogsWatchRequiresFinalityError extends CCIPError {
   override readonly name = 'CCIPLogsWatchRequiresFinalityError'
-  /** Creates a block not found error. */
+  /** Creates a watch requires finality error. */
   constructor(endBlock?: number | string, options?: CCIPErrorOptions) {
     super(
       CCIPErrorCode.LOGS_WATCH_REQUIRES_FINALITY,
@@ -786,10 +786,10 @@ export class CCIPLogsWatchRequiresFinalityError extends CCIPError {
   }
 }
 
-/** Thrown when trying to `watch` logs but giving a fixed `endBlock` */
+/** Thrown when trying to `watch` logs without a start point. */
 export class CCIPLogsWatchRequiresStartError extends CCIPError {
   override readonly name = 'CCIPLogsWatchRequiresStartError'
-  /** Creates a block not found error. */
+  /** Creates a watch requires start error. */
   constructor(options?: CCIPErrorOptions) {
     super(CCIPErrorCode.LOGS_WATCH_REQUIRES_START, `Watch mode requires startBlock or startTime`, {
       ...options,
@@ -1679,7 +1679,7 @@ export class CCIPSuiMessageVersionInvalidError extends CCIPError {
 /** Thrown when Sui log data is invalid. */
 export class CCIPSuiLogInvalidError extends CCIPError {
   override readonly name = 'CCIPSuiLogInvalidError'
-  /** Creates an Sui log invalid error. */
+  /** Creates a Sui log invalid error. */
   constructor(log: unknown, options?: CCIPErrorOptions) {
     super(CCIPErrorCode.LOG_DATA_INVALID, `Invalid sui log: ${String(log)}`, {
       ...options,
