@@ -74,7 +74,7 @@ to reply for each network.
 ## Wallet
 
 Commands which need to send transactions try to get a private key from a `PRIVATE_KEY` environment
-variable.
+variable. Alternative names `USER_KEY` and `OWNER_KEY` are also supported (checked in that order).
 
 Wallet options can also be passed as `--wallet`, where each chain family may interpret it however it
 can:
@@ -108,6 +108,13 @@ ChainIDs depend on the chain family and must be passed using this pattern:
 - `--format=json`: Machine-readable JSON
 - `--page=10000`: limits `eth_getLogs` (and others) pagination/scanning ranges (e.g. for RPCs which
 don't support large ranges)
+- `--no-api`: Disable CCIP API integration (fully decentralized mode, RPC-only)
+
+**Environment variable prefix:** All CLI options can be set via environment variables using the
+`CCIP_` prefix. For example:
+- `CCIP_NO_API=true` → same as `--no-api`
+- `CCIP_VERBOSE=true` → same as `--verbose`
+- `CCIP_FORMAT=json` → same as `--format=json`
 
 ### `send`
 
@@ -220,6 +227,10 @@ table. The former gets auto-cleared upon successful execution, while the latter 
 to be cleared.
 `--clear-leftover-accounts` can be used to scan and wait for the accounts to be cleared, after exec.
 
+#### Sui Special Cases
+
+`--receiver-object-ids` specifies receiver object IDs required for Sui execution (e.g., `--receiver-object-ids 0xabc... 0xdef...`).
+
 #### Example
 ```sh
 ccip-cli manualExec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b \
@@ -239,7 +250,7 @@ Error: EVM2EVMOnRamp_1.2.0.UnsupportedToken(address)
 Args: { token: '0x779877A7B0D9E8603169DdbD7836e478b4624789' }
 ```
 
-Attempts to parse hex-encoded function call data, error and revert reasons, for our known contracts.
+Attempts to parse function call data, error and revert reasons for CCIP contracts. Supports hex (EVM), base64 (Solana), and other chain-specific formats.
 
 It'll recursively try to decode `returnData` and `error` arguments.
 
@@ -316,3 +327,42 @@ ccip-cli token -n ethereum-mainnet -H 0x1234...abcd -t 0xA0b86991c6218b36c1d19D4
 # Solana native SOL balance
 ccip-cli token -n solana-devnet -H EPUjBP3Xf76K1VKsDSc6GupBWE8uykNksCLJgXZn87CB
 ```
+
+### `laneLatency`
+
+```sh
+ccip-cli laneLatency <source> <dest> [--api-url <url>]
+```
+
+Query real-time lane latency between source and destination chains using the CCIP API.
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<source>` | Source network (chainId, selector, or name) |
+| `<dest>` | Destination network (chainId, selector, or name) |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--api-url` | Custom CCIP API URL (default: api.ccip.chain.link) |
+
+> **Note:** This command requires CCIP API access and respects the `--no-api` flag.
+
+#### Example
+
+```sh
+ccip-cli laneLatency ethereum-mainnet arbitrum-mainnet
+```
+
+## Supported Chains
+
+| Chain Family | Status | Notes |
+|--------------|--------|-------|
+| EVM | Supported | Full functionality |
+| Solana | Supported | Full functionality |
+| Aptos | Supported | Full functionality |
+| Sui | Partial | Manual execution only |
+| TON | Partial | Manual execution only |

@@ -177,6 +177,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @param url - RPC URL, Aptos Network enum value or [fullNodeUrl, Network] tuple.
    * @param ctx - context containing logger
    * @returns A new AptosChain instance.
+   * @throws {@link CCIPAptosNetworkUnknownError} if network cannot be determined from URL
    */
   static async fromUrl(
     url: string | Network | readonly [string, Network],
@@ -203,7 +204,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return getVersionTimestamp(this.provider, version)
   }
 
-  /** {@inheritDoc Chain.getTransaction} */
+  /**
+   * {@inheritDoc Chain.getTransaction}
+   * @throws {@link CCIPAptosTransactionInvalidError} if hash/version format is invalid
+   * @throws {@link CCIPAptosTransactionTypeInvalidError} if transaction is not a user transaction
+   */
   async getTransaction(hashOrVersion: string | number): Promise<ChainTransaction> {
     let tx
     if (isHexString(hashOrVersion, 32)) {
@@ -339,7 +344,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return BigInt(balance)
   }
 
-  /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
+  /**
+   * {@inheritDoc Chain.getTokenAdminRegistryFor}
+   * @throws {@link CCIPAptosRegistryTypeInvalidError} if registry type is invalid
+   */
   async getTokenAdminRegistryFor(address: string): Promise<string> {
     const registry = address.split('::')[0] + '::token_admin_registry'
     const [type] = await this.typeAndVersion(registry)
@@ -353,6 +361,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * Decodes a CCIP message from an Aptos log event.
    * @param log - Log with data field.
    * @returns Decoded CCIPMessage or undefined if not valid.
+   * @throws {@link CCIPAptosLogInvalidError} if log data format is invalid
    */
   static decodeMessage(log: {
     data: BytesLike | Record<string, unknown>
@@ -415,6 +424,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * Encodes extra arguments for Aptos CCIP messages.
    * @param extraArgs - Extra arguments to encode.
    * @returns Encoded extra arguments as hex string.
+   * @throws {@link CCIPAptosExtraArgsEncodingError} if extra args format is not supported
    */
   static encodeExtraArgs(extraArgs: ExtraArgs): string {
     if ('gasLimit' in extraArgs && 'allowOutOfOrderExecution' in extraArgs)
@@ -437,6 +447,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @param log - Log with data field.
    * @param lane - Lane info for filtering.
    * @returns Array of CommitReport or undefined if not valid.
+   * @throws {@link CCIPAptosLogInvalidError} if log data format is invalid
    */
   static decodeCommits({ data }: Pick<Log_, 'data'>, lane?: Lane): CommitReport[] | undefined {
     if (!data || typeof data != 'object') throw new CCIPAptosLogInvalidError(data)
@@ -470,6 +481,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * Decodes an execution receipt from an Aptos log event.
    * @param log - Log with data field.
    * @returns ExecutionReceipt or undefined if not valid.
+   * @throws {@link CCIPAptosLogInvalidError} if log data format is invalid
    */
   static decodeReceipt({ data }: Pick<Log_, 'data'>): ExecutionReceipt | undefined {
     if (!data || typeof data != 'object') throw new CCIPAptosLogInvalidError(data)
@@ -484,6 +496,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * Converts bytes to an Aptos address.
    * @param bytes - Bytes to convert.
    * @returns Aptos address (0x-prefixed hex, 32 bytes padded).
+   * @throws {@link CCIPAptosAddressInvalidError} if bytes length exceeds 32
    */
   static getAddress(bytes: BytesLike | readonly number[]): string {
     let suffix = ''
@@ -553,7 +566,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     }
   }
 
-  /** {@inheritDoc Chain.sendMessage} */
+  /**
+   * {@inheritDoc Chain.sendMessage}
+   * @throws {@link CCIPAptosWalletInvalidError} if wallet is not a valid Aptos account
+   */
   async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
     const account = opts.wallet
     if (!isAptosAccount(account)) {
@@ -588,7 +604,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
-  /** {@inheritDoc Chain.generateUnsignedExecuteReport} */
+  /**
+   * {@inheritDoc Chain.generateUnsignedExecuteReport}
+   * @throws {@link CCIPAptosExtraArgsV2RequiredError} if message missing EVMExtraArgsV2 fields
+   */
   async generateUnsignedExecuteReport({
     payer,
     offRamp,
@@ -612,7 +631,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     }
   }
 
-  /** {@inheritDoc Chain.executeReport} */
+  /**
+   * {@inheritDoc Chain.executeReport}
+   * @throws {@link CCIPAptosWalletInvalidError} if wallet is not a valid Aptos account
+   */
   async executeReport(opts: Parameters<Chain['executeReport']>[0]): Promise<CCIPExecution> {
     const account = opts.wallet
     if (!isAptosAccount(account)) {
@@ -671,7 +693,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return page
   }
 
-  /** {@inheritDoc Chain.getRegistryTokenConfig} */
+  /**
+   * {@inheritDoc Chain.getRegistryTokenConfig}
+   * @throws {@link CCIPAptosTokenNotRegisteredError} if token is not registered
+   */
   async getRegistryTokenConfig(
     registry: string,
     token: string,

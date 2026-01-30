@@ -18,8 +18,8 @@ TypeScript SDK and CLI for [CCIP](https://chain.link/cross-chain) (Cross-Chain I
 
 ```bash
 ccip-cli show 0xYOUR_TX_HASH \
-  -r https://ethereum-sepolia-rpc.publicnode.com \
-  -r https://sepolia-rollup.arbitrum.io/rpc
+  --rpc https://ethereum-sepolia-rpc.publicnode.com \
+  --rpc https://sepolia-rollup.arbitrum.io/rpc
 ```
 
 ### Integrate in Your App (SDK)
@@ -45,8 +45,8 @@ const fee = await source.getFee({ router, destChainSelector, message: {
 | EVM          | Ethereum, Arbitrum, Optimism, Polygon, Avalanche, Base, etc. | Supported      |
 | Solana       | Mainnet, Devnet                                              | Supported      |
 | Aptos        | Mainnet, Testnet                                             | Supported      |
-| Sui          | Mainnet, Testnet                                             | In Development |
-| TON          | Mainnet, Testnet                                             | In Development |
+| Sui          | Mainnet, Testnet                                             | Partial (manual exec) |
+| TON          | Mainnet, Testnet                                             | Partial (manual exec) |
 
 ## Documentation
 

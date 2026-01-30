@@ -15,6 +15,13 @@ export const SuiExtraArgsV1Tag = id('CCIP SuiExtraArgsV1').substring(0, 10) as '
 
 /**
  * EVM extra arguments version 1 with gas limit only.
+ *
+ * @example
+ * ```typescript
+ * const args: EVMExtraArgsV1 = {
+ *   gasLimit: 200_000n,
+ * }
+ * ```
  */
 export type EVMExtraArgsV1 = {
   /** Gas limit for execution on the destination chain. */
@@ -24,6 +31,14 @@ export type EVMExtraArgsV1 = {
 /**
  * EVM extra arguments version 2 with out-of-order execution support.
  * Also known as GenericExtraArgsV2.
+ *
+ * @example
+ * ```typescript
+ * const args: EVMExtraArgsV2 = {
+ *   gasLimit: 200_000n,
+ *   allowOutOfOrderExecution: true,
+ * }
+ * ```
  */
 export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
   /** Whether to allow out-of-order message execution. */
@@ -32,6 +47,17 @@ export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
 
 /**
  * Solana (SVM) extra arguments version 1.
+ *
+ * @example
+ * ```typescript
+ * const args: SVMExtraArgsV1 = {
+ *   computeUnits: 200_000n,
+ *   accountIsWritableBitmap: 0n,
+ *   allowOutOfOrderExecution: true,
+ *   tokenReceiver: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+ *   accounts: [],
+ * }
+ * ```
  */
 export type SVMExtraArgsV1 = {
   /** Compute units for Solana execution. */
@@ -48,6 +74,16 @@ export type SVMExtraArgsV1 = {
 
 /**
  * Sui extra arguments version 1.
+ *
+ * @example
+ * ```typescript
+ * const args: SuiExtraArgsV1 = {
+ *   gasLimit: 200_000n,
+ *   allowOutOfOrderExecution: true,
+ *   tokenReceiver: '0x1234...abcd',
+ *   receiverObjectIds: ['0xobject1...', '0xobject2...'],
+ * }
+ * ```
  */
 export type SuiExtraArgsV1 = EVMExtraArgsV2 & {
   /** Token receiver address on Sui. */
@@ -63,9 +99,22 @@ export type ExtraArgs = EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1 | SuiEx
 
 /**
  * Encodes extra arguments for CCIP messages.
- * The args are *to* a dest network, but are encoded as a message *from* this source chain
- * e.g. Solana uses Borsh to encode extraArgs in its produced requests, even those targetting EVM
- **/
+ * The args are *to* a dest network, but are encoded as a message *from* this source chain.
+ * E.g. Solana uses Borsh to encode extraArgs in its produced requests, even those targeting EVM.
+ * @param args - Extra arguments to encode
+ * @param from - Source chain family for encoding format (defaults to EVM)
+ * @returns Encoded extra arguments as hex string
+ * @throws {@link CCIPChainFamilyUnsupportedError} if chain family not supported
+ *
+ * @example
+ * ```typescript
+ * const encoded = encodeExtraArgs({
+ *   gasLimit: 200_000n,
+ *   allowOutOfOrderExecution: true,
+ * })
+ * // Returns: '0x181dcf10...'
+ * ```
+ */
 export function encodeExtraArgs(args: ExtraArgs, from: ChainFamily = ChainFamily.EVM): string {
   const chain = supportedChains[from]
   if (!chain) throw new CCIPChainFamilyUnsupportedError(from)
@@ -77,6 +126,16 @@ export function encodeExtraArgs(args: ExtraArgs, from: ChainFamily = ChainFamily
  * @param data - Extra arguments bytearray data.
  * @param from - Optional chain family to narrow decoding attempts.
  * @returns Extra arguments object if found, undefined otherwise.
+ * @throws {@link CCIPChainFamilyUnsupportedError} if specified chain family not supported
+ * @throws {@link CCIPExtraArgsParseError} if data cannot be parsed as valid extra args
+ *
+ * @example
+ * ```typescript
+ * const decoded = decodeExtraArgs('0x181dcf10...')
+ * if (decoded?._tag === 'EVMExtraArgsV2') {
+ *   console.log(decoded.gasLimit, decoded.allowOutOfOrderExecution)
+ * }
+ * ```
  */
 export function decodeExtraArgs(
   data: BytesLike,

@@ -22,7 +22,7 @@ export const builder = (yargs: Argv) =>
   yargs.positional('data', {
     type: 'string',
     demandOption: true,
-    describe: 'router contract address on source',
+    describe: 'Data to parse (hex, base64, or chain-specific format)',
   })
 
 /**

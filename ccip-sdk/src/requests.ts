@@ -126,9 +126,12 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
 }
 
 /**
- * Decodes hex strings, bytearrays, JSON strings and raw objects as CCIPMessages
- * Does minimal validation, but converts objects in the format expected by ccip-tools-ts
- **/
+ * Decodes hex strings, bytearrays, JSON strings and raw objects as CCIPMessages.
+ * Does minimal validation, but converts objects in the format expected by ccip-tools-ts.
+ * @param data - Data to decode (hex string, Uint8Array, JSON string, or object)
+ * @returns Decoded CCIPMessage
+ * @throws {@link CCIPMessageDecodeError} if data cannot be decoded as a valid message
+ */
 export function decodeMessage(data: string | Uint8Array | Record<string, unknown>): CCIPMessage {
   if (
     (typeof data === 'string' && data.startsWith('{')) ||
@@ -151,10 +154,11 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
 }
 
 /**
- * Populates missing required fields (e.g. `extraArgs`) from AnyMessage
- * @param message - partial AnyMessage
- * @returns original message or shallow copy with defaults for required fields
- **/
+ * Populates missing required fields (e.g. `extraArgs`) from AnyMessage.
+ * @param message - Partial AnyMessage with at least receiver
+ * @param dest - Destination chain family to build message for
+ * @returns Original message or shallow copy with defaults for required fields
+ */
 export function buildMessageForDest(message: MessageInput, dest: ChainFamily): AnyMessage {
   const chain = supportedChains[dest] ?? Chain
   return chain.buildMessageForDest(message)
@@ -162,10 +166,12 @@ export function buildMessageForDest(message: MessageInput, dest: ChainFamily): A
 
 /**
  * Fetch all CCIP messages in a transaction.
- * @param source - Chain
+ * @param source - Source chain instance
  * @param tx - ChainTransaction to search in
  * @returns CCIP requests (messages) in the transaction (at least one)
- **/
+ * @throws {@link CCIPChainFamilyUnsupportedError} if chain family not supported for legacy messages
+ * @throws {@link CCIPMessageNotFoundInTxError} if no CCIP messages found in transaction
+ */
 export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Promise<CCIPRequest[]> {
   // RPC fallback
   const requests: CCIPRequest[] = []
@@ -332,6 +338,7 @@ export async function getMessagesInBatch<
  * @param sender - Sender address.
  * @param filter - Log filter options.
  * @returns Async generator of CCIP requests.
+ * @throws {@link CCIPChainFamilyUnsupportedError} if chain family not supported for legacy messages
  */
 export async function* getMessagesForSender(
   source: Chain,
@@ -375,6 +382,7 @@ export async function* getMessagesForSender(
  * @param onRamp - Contract address.
  * @param sourceTokenAmount - tokenAmount object, usually containing `token` and `amount` properties.
  * @returns tokenAmount object with `sourcePoolAddress`, `sourceTokenAddress`, `destTokenAddress`, and remaining properties.
+ * @throws {@link CCIPTokenNotInRegistryError} if token not found in registry
  */
 export async function sourceToDestTokenAddresses<S extends { token: string }>(
   source: Chain,

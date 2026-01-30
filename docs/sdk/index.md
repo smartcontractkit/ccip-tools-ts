@@ -120,10 +120,14 @@ const source = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.c
 const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
 const destSelector = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector
 
-const fee = await source.getFee(router, destSelector, {
-  receiver: '0xYourReceiverAddress',
-  data: '0x', // Empty data payload
-  extraArgs: { gasLimit: 200_000 }, // Gas limit for receiver's ccipReceive callback
+const fee = await source.getFee({
+  router,
+  destChainSelector: destSelector,
+  message: {
+    receiver: '0xYourReceiverAddress',
+    data: '0x', // Empty data payload
+    extraArgs: { gasLimit: 200_000 }, // Gas limit for receiver's ccipReceive callback
+  },
 })
 
 console.log('Fee in native token:', fee.toString())
@@ -142,27 +146,31 @@ const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
 const destSelector = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector
 
 // Get fee first
-const fee = await source.getFee(router, destSelector, {
-  receiver: '0xYourReceiverAddress',
-  data: '0x48656c6c6f', // "Hello" in hex
-  extraArgs: {
-    gasLimit: 200_000, // Gas for receiver's ccipReceive callback
-    allowOutOfOrderExecution: true, // Don't wait for prior messages from this sender
+const fee = await source.getFee({
+  router,
+  destChainSelector: destSelector,
+  message: {
+    receiver: '0xYourReceiverAddress',
+    data: '0x48656c6c6f', // "Hello" in hex
+    extraArgs: {
+      gasLimit: 200_000, // Gas for receiver's ccipReceive callback
+      allowOutOfOrderExecution: true, // Don't wait for prior messages from this sender
+    },
   },
 })
 
 // Send the message
-const request = await source.sendMessage(
+const request = await source.sendMessage({
   router,
-  destSelector,
-  {
+  destChainSelector: destSelector,
+  message: {
     receiver: '0xYourReceiverAddress',
     data: '0x48656c6c6f',
     extraArgs: { gasLimit: 200_000, allowOutOfOrderExecution: true },
     fee,
   },
-  { wallet },
-)
+  wallet,
+})
 
 console.log('Transaction hash:', request.tx.hash)
 console.log('Message ID:', request.message.messageId)
@@ -589,16 +597,18 @@ For custom signing workflows, use the `generateUnsigned*` methods:
 
 ```ts
 // Generate unsigned transaction data (returns chain-specific tx format)
-const unsignedTx = await source.generateUnsignedSendMessage(
-  senderAddress, // Your wallet address
+const unsignedTx = await source.generateUnsignedSendMessage({
+  sender: senderAddress, // Your wallet address
   router,
-  destSelector,
+  destChainSelector: destSelector,
   message,
-)
+})
 
 // Sign and send with your own logic
-const signedTx = await customSigner.sign(unsignedTx)
-await customSender.broadcast(signedTx)
+for (const tx of unsignedTx.transactions) {
+  const signedTx = await customSigner.sign(tx)
+  await customSender.broadcast(signedTx)
+}
 ```
 
 :::tip Browser Integration
@@ -634,7 +644,7 @@ const chain = await fromViemClient(publicClient)
 
 // All read operations work the same way
 const messages = await chain.getMessagesInTx(txHash)
-const fee = await chain.getFee(router, destSelector, message)
+const fee = await chain.getFee({ router, destChainSelector: destSelector, message })
 ```
 
 ### Send Transactions with viem WalletClient
@@ -663,7 +673,10 @@ const walletClient = createWalletClient({
 const chain = await fromViemClient(publicClient)
 
 // Send message using viemWallet adapter
-const request = await chain.sendMessage(router, destSelector, message, {
+const request = await chain.sendMessage({
+  router,
+  destChainSelector: destSelector,
+  message,
   wallet: viemWallet(walletClient),
 })
 

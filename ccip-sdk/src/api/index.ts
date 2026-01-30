@@ -125,7 +125,7 @@ export class CCIPAPIClient {
 
   /**
    * Creates a new CCIPAPIClient instance.
-   * @param baseUrl - Base URL for the CCIP API (defaults to https://api.ccip.chain.link)
+   * @param baseUrl - Base URL for the CCIP API (defaults to {@link DEFAULT_API_BASE_URL})
    * @param ctx - Optional context with logger and custom fetch
    */
   constructor(baseUrl?: string, ctx?: CCIPAPIClientContext) {
@@ -177,10 +177,12 @@ export class CCIPAPIClient {
    * @param destChainSelector - Destination chain selector (bigint)
    * @returns Promise resolving to {@link LaneLatencyResponse} with totalMs
    *
-   * @throws {@link CCIPHttpError} on HTTP errors with context:
-   *   - `status` - HTTP status code (e.g., 404, 500)
+   * @throws {@link CCIPLaneNotFoundError} when lane not found (404)
+   * @throws {@link CCIPTimeoutError} if request times out
+   * @throws {@link CCIPHttpError} on other HTTP errors with context:
+   *   - `status` - HTTP status code (e.g., 500)
    *   - `statusText` - HTTP status message
-   *   - `apiErrorCode` - API error code (e.g., "LANE_NOT_FOUND", "INVALID_PARAMETERS")
+   *   - `apiErrorCode` - API error code (e.g., "INVALID_PARAMETERS")
    *   - `apiErrorMessage` - Human-readable error message from API
    *
    * @example Basic usage
@@ -261,8 +263,8 @@ export class CCIPAPIClient {
    * @param messageId - The message ID (0x prefix + 64 hex characters, e.g., "0x1234...abcd")
    * @returns Promise resolving to {@link APICCIPRequest} with message details
    *
-   * @throws {@link CCIPMessageIdValidationError} when messageId format is invalid
    * @throws {@link CCIPMessageIdNotFoundError} when message not found (404)
+   * @throws {@link CCIPTimeoutError} if request times out
    * @throws {@link CCIPHttpError} on HTTP errors with context:
    *   - `status` - HTTP status code
    *   - `statusText` - HTTP status message
@@ -339,9 +341,9 @@ export class CCIPAPIClient {
    * @param txHash - Source transaction hash (EVM hex or Solana Base58)
    * @returns Promise resolving to array of message IDs
    *
-   * @throws {@link CCIPArgumentInvalidError} when txHash format is invalid
    * @throws {@link CCIPMessageNotFoundInTxError} when no messages found (404 or empty)
    * @throws {@link CCIPUnexpectedPaginationError} when hasNextPage is true
+   * @throws {@link CCIPTimeoutError} if request times out
    * @throws {@link CCIPHttpError} on HTTP errors
    *
    * @example Basic usage

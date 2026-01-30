@@ -104,6 +104,17 @@ type ChainFamilyWithId<F extends ChainFamily> = F extends
 
 /**
  * Network information including chain selector and metadata.
+ *
+ * @example
+ * ```typescript
+ * const info: NetworkInfo = {
+ *   chainSelector: 16015286601757825753n,
+ *   name: 'ethereum-testnet-sepolia',
+ *   networkType: 'TESTNET',
+ *   family: 'EVM',
+ *   chainId: 11155111,
+ * }
+ * ```
  */
 export type NetworkInfo<F extends ChainFamily = ChainFamily> = {
   /** Unique chain selector used by CCIP. */
@@ -116,6 +127,16 @@ export type NetworkInfo<F extends ChainFamily = ChainFamily> = {
 
 /**
  * CCIP lane configuration connecting source and destination chains.
+ *
+ * @example
+ * ```typescript
+ * const lane: Lane = {
+ *   sourceChainSelector: 16015286601757825753n, // Ethereum Sepolia
+ *   destChainSelector: 12532609583862916517n,   // Polygon Mumbai
+ *   onRamp: '0x1234...abcd',
+ *   version: '1.6.0',
+ * }
+ * ```
  */
 export interface Lane<V extends CCIPVersion = CCIPVersion> {
   /** Source chain selector. */
@@ -149,6 +170,17 @@ export type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'blockNumber' | 't
 
 /**
  * Generic transaction structure compatible across chain families.
+ *
+ * @example
+ * ```typescript
+ * const tx: ChainTransaction = {
+ *   hash: '0xabc123...',
+ *   logs: [],
+ *   blockNumber: 12345678,
+ *   timestamp: 1704067200,
+ *   from: '0x1234...abcd',
+ * }
+ * ```
  */
 export type ChainTransaction = {
   /** Transaction hash. */
@@ -254,6 +286,16 @@ export type IntentStatus = (typeof IntentStatus)[keyof typeof IntentStatus]
 
 /**
  * Receipt of a CCIP message execution on the destination chain.
+ *
+ * @example
+ * ```typescript
+ * const receipt: ExecutionReceipt = {
+ *   messageId: '0xabc123...',
+ *   sequenceNumber: 42n,
+ *   state: ExecutionState.Success,
+ *   sourceChainSelector: 16015286601757825753n,
+ * }
+ * ```
  */
 export type ExecutionReceipt = {
   /** Unique message identifier. */
@@ -291,6 +333,17 @@ export type OffchainTokenData = { _tag: string; [k: string]: BytesLike } | undef
 
 /**
  * Execution report containing message, proofs, and offchain token data.
+ *
+ * @example
+ * ```typescript
+ * const report: ExecutionReport = {
+ *   message: { messageId: '0x...', ... },
+ *   proofs: ['0xproof1...', '0xproof2...'],
+ *   proofFlagBits: 0n,
+ *   merkleRoot: '0xroot...',
+ *   offchainTokenData: [],
+ * }
+ * ```
  */
 export type ExecutionReport<M extends CCIPMessage = CCIPMessage> = {
   /** The CCIP message to execute. */
@@ -307,6 +360,16 @@ export type ExecutionReport<M extends CCIPMessage = CCIPMessage> = {
 
 /**
  * A message to be sent to another network.
+ *
+ * @example
+ * ```typescript
+ * const message: AnyMessage = {
+ *   receiver: '0x1234...abcd',
+ *   extraArgs: { gasLimit: 200_000n, allowOutOfOrderExecution: true },
+ *   data: '0xdeadbeef',
+ *   tokenAmounts: [{ token: '0xtoken...', amount: 1000000n }],
+ * }
+ * ```
  */
 export type AnyMessage = {
   /** Receiver address on the destination chain. */
@@ -322,7 +385,22 @@ export type AnyMessage = {
 }
 
 /**
- * Partial [[AnyMessage]], which populates default fields like `extraArgs` if needed
+ * Partial {@link AnyMessage}, which populates default fields like `extraArgs` if needed.
+ *
+ * @example
+ * ```typescript
+ * // Minimal input - only receiver required, defaults applied for extraArgs
+ * const input: MessageInput = {
+ *   receiver: '0x1234...abcd',
+ * }
+ *
+ * // With custom gas limit
+ * const inputWithGas: MessageInput = {
+ *   receiver: '0x1234...abcd',
+ *   extraArgs: { gasLimit: 500_000n },
+ *   data: '0xdeadbeef',
+ * }
+ * ```
  */
 export type MessageInput = Partial<AnyMessage> & {
   receiver: AnyMessage['receiver']
