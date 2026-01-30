@@ -866,9 +866,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.getRegistryTokenConfig'))
   }
 
-  /** {@inheritDoc Chain.getTokenPoolConfigs} */
-  async getTokenPoolConfigs(_tokenPool: string): Promise<never> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getTokenPoolConfigs'))
+  /** {@inheritDoc Chain.getTokenPoolConfig} */
+  async getTokenPoolConfig(_tokenPool: string): Promise<never> {
+    return Promise.reject(new CCIPNotImplementedError('SuiChain.getTokenPoolConfig'))
   }
 
   /** {@inheritDoc Chain.getTokenPoolRemotes} */

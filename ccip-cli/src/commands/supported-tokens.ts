@@ -124,12 +124,12 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     registryConfig = await source.getRegistryTokenConfig(registry, info.token)
     tokenPool = registryConfig.tokenPool
     if (!tokenPool) throw new CCIPTokenNotConfiguredError(info.token, registry)
-    poolConfigs = await source.getTokenPoolConfigs(tokenPool)
+    poolConfigs = await source.getTokenPoolConfig(tokenPool)
   } else {
     if (!argv.token) {
       // tokenPool
       tokenPool = argv.address
-      poolConfigs = await source.getTokenPoolConfigs(tokenPool)
+      poolConfigs = await source.getTokenPoolConfig(tokenPool)
       registry ??= await source.getTokenAdminRegistryFor(poolConfigs.router)
       ;[info, registryConfig] = await Promise.all([
         source.getTokenInfo(poolConfigs.token),
@@ -143,7 +143,7 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
       registryConfig = await source.getRegistryTokenConfig(registry, argv.token)
       tokenPool = registryConfig.tokenPool
       if (!tokenPool) throw new CCIPTokenNotConfiguredError(argv.token, registry)
-      poolConfigs = await source.getTokenPoolConfigs(tokenPool)
+      poolConfigs = await source.getTokenPoolConfig(tokenPool)
     }
 
     if (argv.format === Format.json) {

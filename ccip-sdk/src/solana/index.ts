@@ -1341,10 +1341,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * {@inheritDoc Chain.getTokenPoolConfigs}
+   * {@inheritDoc Chain.getTokenPoolConfig}
    * @throws {@link CCIPTokenPoolStateNotFoundError} if token pool state not found
    */
-  async getTokenPoolConfigs(tokenPool: string): Promise<{
+  async getTokenPoolConfig(tokenPool: string): Promise<{
     token: string
     router: string
     tokenPoolProgram: string

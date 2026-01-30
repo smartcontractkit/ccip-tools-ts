@@ -132,7 +132,7 @@ class MockChain extends Chain {
     return {}
   }
 
-  async getTokenPoolConfigs(_tokenPool: string): Promise<{
+  async getTokenPoolConfig(_tokenPool: string): Promise<{
     token: string
     router: string
     typeAndVersion?: string
