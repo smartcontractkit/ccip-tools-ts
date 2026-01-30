@@ -420,7 +420,8 @@ export function convertKeysToCamelCase(
  * @param ms - Duration in milliseconds.
  * @returns Promise that resolves after the specified duration.
  */
-export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms).unref())
+export const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
  * Configuration for the withRetry utility.

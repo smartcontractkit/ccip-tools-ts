@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: Fix `sleep()` browser compatibility - remove Node.js-only `.unref()` call that caused `TypeError` in browsers
+
 ## [0.95.0] - 2026-01-28 - Pre-release
 
 - SDK: `Chain.getBalance()` method for querying native and token balances (EVM, Solana, Aptos)
