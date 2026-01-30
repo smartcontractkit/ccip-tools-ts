@@ -1339,8 +1339,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /** {@inheritDoc Chain.getTokenPoolConfigs} */
-  async getTokenPoolConfigs(tokenPool: string): Promise<{
+  /** {@inheritDoc Chain.getTokenPoolConfig} */
+  async getTokenPoolConfig(tokenPool: string): Promise<{
     token: string
     router: string
     typeAndVersion: string

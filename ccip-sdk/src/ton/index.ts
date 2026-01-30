@@ -1096,11 +1096,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * {@inheritDoc Chain.getTokenPoolConfigs}
+   * {@inheritDoc Chain.getTokenPoolConfig}
    * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
    */
-  async getTokenPoolConfigs(_tokenPool: string): Promise<never> {
-    return Promise.reject(new CCIPNotImplementedError('getTokenPoolConfigs'))
+  async getTokenPoolConfig(_tokenPool: string): Promise<never> {
+    return Promise.reject(new CCIPNotImplementedError('getTokenPoolConfig'))
   }
 
   /**

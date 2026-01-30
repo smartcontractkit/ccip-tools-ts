@@ -722,8 +722,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     }
   }
 
-  /** {@inheritDoc Chain.getTokenPoolConfigs} */
-  async getTokenPoolConfigs(tokenPool: string): Promise<{
+  /** {@inheritDoc Chain.getTokenPoolConfig} */
+  async getTokenPoolConfig(tokenPool: string): Promise<{
     token: string
     router: string
     typeAndVersion?: string

@@ -24,7 +24,9 @@ export type {
   GetBalanceOpts,
   LogFilter,
   RateLimiterState,
+  RegistryTokenConfig,
   TokenInfo,
+  TokenPoolConfig,
   TokenPoolRemote,
 } from './chain.ts'
 export { DEFAULT_API_RETRY_CONFIG } from './chain.ts'

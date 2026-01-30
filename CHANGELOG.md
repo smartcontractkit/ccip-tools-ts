@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: Improve JSDoc for `RateLimiterState` - clarify that `null` means rate limiting is disabled
+- SDK: Improve JSDoc for `getTokenPoolRemotes` and `TokenPoolRemote` - clarify Record keys are chain names
+- SDK: Add named types `TokenPoolConfig` and `RegistryTokenConfig` for clearer IDE hints
+- SDK: Rename `getTokenPoolConfigs` to `getTokenPoolConfig` for consistency (returns single config)
+
 ## [0.95.0] - 2026-01-28 - Pre-release
 
 - SDK: `Chain.getBalance()` method for querying native and token balances (EVM, Solana, Aptos)
