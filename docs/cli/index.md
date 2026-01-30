@@ -196,7 +196,7 @@ ccip-cli send --source <chain> --dest <chain> --router <address> [options]
 | `--receiver` | `--to` | Destination address (defaults to sender if same family) |
 | `--data` | | Message payload (auto-encoded if not hex) |
 | `--gas-limit` | `-L`, `--compute-units` | Gas for receiver callback (default: ramp config) |
-| `--allow-out-of-order-exec` | `--ooo` | Allow execution without nonce ordering (v1.6+) |
+| `--allow-out-of-order-exec` | `--ooo` | Allow execution without nonce ordering (v1.5+) |
 
 **Token Options:**
 
@@ -316,10 +316,10 @@ ccip-cli manualExec <tx_hash> --force-buffer --clear-leftover-accounts
 
 ### parse
 
-Decode CCIP-related data, errors, and revert reasons.
+Decode CCIP-related data, errors, and revert reasons. Supports hex (EVM), base64 (Solana), and other chain-specific formats.
 
 ```bash
-ccip-cli parse <hex_data>
+ccip-cli parse <data>
 ```
 
 **Example:**

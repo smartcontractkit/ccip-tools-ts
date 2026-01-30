@@ -22,7 +22,7 @@ export const builder = (yargs: Argv) =>
   yargs.positional('data', {
     type: 'string',
     demandOption: true,
-    describe: 'Hex-encoded data to parse (error, revert reason, function call, or event)',
+    describe: 'Data to parse (hex, base64, or chain-specific format)',
   })
 
 /**

@@ -148,7 +148,7 @@ Sends a CCIP message from source to destination chain.
 | `--data` | | Data payload (non-hex = UTF-8 encoded) |
 | `--gas-limit` | `-L` | Gas limit for receiver callback (default: ramp config) |
 | `--estimate-gas-limit` | | Auto-estimate with % margin; conflicts with `--gas-limit` |
-| `--allow-out-of-order-exec` | `--ooo` | Skip sender nonce enforcement (v1.6+ lanes) |
+| `--allow-out-of-order-exec` | `--ooo` | Skip sender nonce enforcement (v1.5+ lanes) |
 
 **Token options:**
 
@@ -250,7 +250,7 @@ Error: EVM2EVMOnRamp_1.2.0.UnsupportedToken(address)
 Args: { token: '0x779877A7B0D9E8603169DdbD7836e478b4624789' }
 ```
 
-Attempts to parse hex-encoded function call data, error and revert reasons, for our known contracts.
+Attempts to parse function call data, error and revert reasons for CCIP contracts. Supports hex (EVM), base64 (Solana), and other chain-specific formats.
 
 It'll recursively try to decode `returnData` and `error` arguments.
 
