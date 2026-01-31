@@ -420,8 +420,8 @@ export function convertKeysToCamelCase(
  * @param ms - Duration in milliseconds.
  * @returns Promise that resolves after the specified duration.
  */
-export const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms))
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- unref is Node.js-only; browsers return number
+export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms).unref?.())
 
 /**
  * Configuration for the withRetry utility.

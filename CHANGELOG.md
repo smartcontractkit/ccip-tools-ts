@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- SDK: Fix `sleep()` browser compatibility - remove Node.js-only `.unref()` call that caused `TypeError` in browsers
+- SDK: Fix `sleep()` browser compatibility - use optional chaining for `.unref()` which is Node.js-only
 
 ## [0.95.0] - 2026-01-28 - Pre-release
 
