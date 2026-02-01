@@ -1,5 +1,7 @@
 import {
+  type CCIPRequest,
   type ExecutionReport,
+  CCIPError,
   bigIntReplacer,
   calculateManualExecProof,
   discoverOffRamp,
@@ -125,103 +127,129 @@ async function manualExec(
   // messageId not yet implemented for Solana
   const [getChain, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHash)
   const [source, tx] = await tx$
-  const request = await selectRequest(await source.getMessagesInTx(tx), 'to know more', argv)
+  // Store all messages to use inside loop
+  const messages = await source.getMessagesInTx(tx)
+  let request: CCIPRequest
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  while (true) {
+    try {
+      //Select a message
+      request = await selectRequest(messages, 'to know more', argv)
+    } catch (error) {
+      // Handle the exit case
+      if (error instanceof CCIPError && error.message === 'User requested exit') {
+        logger.info('Exiting manual execution.')
+        break
+      }
+      // If it's some other error, re-throw it
+      throw error
+    }
+    switch (argv.format) {
+      case Format.log: {
+        const logPrefix = 'log' in request ? `message ${request.log.index} = ` : 'message = '
+        logger.log(logPrefix, withDateTimestamp(request))
+        break
+      }
+      case Format.pretty:
+        await prettyRequest.call(ctx, source, request)
+        break
+      case Format.json:
+        logger.info(JSON.stringify(request, bigIntReplacer, 2))
+        break
+    }
+    // try-catch for execution
+    try {
+      const dest = await getChain(request.lane.destChainSelector)
+      const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
+      const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
+      const commit = await dest.getCommitReport({ ...argv, commitStore, request })
 
-  switch (argv.format) {
-    case Format.log: {
-      const logPrefix = 'log' in request ? `message ${request.log.index} = ` : 'message = '
-      logger.log(logPrefix, withDateTimestamp(request))
+      switch (argv.format) {
+        case Format.log:
+          logger.log('commit =', commit)
+          break
+        case Format.pretty:
+          logger.info('Commit (dest):')
+          await prettyCommit.call(ctx, dest, commit, request)
+          break
+        case Format.json:
+          logger.info(JSON.stringify(commit, bigIntReplacer, 2))
+          break
+      }
+
+      const messagesInBatch = await source.getMessagesInBatch(request, commit.report, argv)
+      const execReportProof = calculateManualExecProof(
+        messagesInBatch,
+        request.lane,
+        request.message.messageId,
+        commit.report.merkleRoot,
+        dest,
+      )
+
+      const offchainTokenData = await source.getOffchainTokenData(request)
+      const execReport: ExecutionReport = {
+        ...execReportProof,
+        message: request.message,
+        offchainTokenData,
+      }
+
+      if (argv.estimateGasLimit != null) {
+        let estimated = await estimateReceiveExecution({
+          source,
+          dest,
+          routerOrRamp: offRamp,
+          message: request.message,
+        })
+        logger.info('Estimated gasLimit override:', estimated)
+        estimated += Math.ceil((estimated * argv.estimateGasLimit) / 100)
+        const origLimit = Number(
+          'gasLimit' in request.message ? request.message.gasLimit : request.message.computeUnits,
+        )
+        if (origLimit >= estimated) {
+          logger.warn(
+            'Estimated +',
+            argv.estimateGasLimit,
+            '% =',
+            estimated,
+            '< original gasLimit =',
+            origLimit,
+            '. Leaving unchanged.',
+          )
+        } else {
+          argv.gasLimit = estimated
+        }
+      }
+
+      const [, wallet] = await loadChainWallet(dest, argv)
+      const receipt = await dest.executeReport({ ...argv, offRamp, execReport, wallet })
+
+      switch (argv.format) {
+        case Format.log:
+          logger.log('receipt =', withDateTimestamp(receipt))
+          break
+        case Format.pretty:
+          logger.info('Receipt (dest):')
+          prettyReceipt.call(
+            ctx,
+            receipt,
+            request,
+            receipt.log.tx?.from ??
+              (await dest.getTransaction(receipt.log.transactionHash).catch(() => null))?.from,
+          )
+          break
+        case Format.json:
+          logger.info(JSON.stringify(receipt, bigIntReplacer, 2))
+          break
+      }
+    } catch (error) {
+      logger.error('Message execution failed:', error)
+      logger.info('Returning to message selection...\n')
+    }
+    // Exit if only one message (prevents infinite loop since selectRequest auto-selects single messages)
+    if (messages.length === 1) {
+      logger.info('Single message transaction - exiting after execution.')
       break
     }
-    case Format.pretty:
-      await prettyRequest.call(ctx, source, request)
-      break
-    case Format.json:
-      logger.info(JSON.stringify(request, bigIntReplacer, 2))
-      break
-  }
-
-  const dest = await getChain(request.lane.destChainSelector)
-  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
-  const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
-  const commit = await dest.getCommitReport({ ...argv, commitStore, request })
-
-  switch (argv.format) {
-    case Format.log:
-      logger.log('commit =', commit)
-      break
-    case Format.pretty:
-      logger.info('Commit (dest):')
-      await prettyCommit.call(ctx, dest, commit, request)
-      break
-    case Format.json:
-      logger.info(JSON.stringify(commit, bigIntReplacer, 2))
-      break
-  }
-
-  const messagesInBatch = await source.getMessagesInBatch(request, commit.report, argv)
-  const execReportProof = calculateManualExecProof(
-    messagesInBatch,
-    request.lane,
-    request.message.messageId,
-    commit.report.merkleRoot,
-    dest,
-  )
-
-  const offchainTokenData = await source.getOffchainTokenData(request)
-  const execReport: ExecutionReport = {
-    ...execReportProof,
-    message: request.message,
-    offchainTokenData,
-  }
-
-  if (argv.estimateGasLimit != null) {
-    let estimated = await estimateReceiveExecution({
-      source,
-      dest,
-      routerOrRamp: offRamp,
-      message: request.message,
-    })
-    logger.info('Estimated gasLimit override:', estimated)
-    estimated += Math.ceil((estimated * argv.estimateGasLimit) / 100)
-    const origLimit = Number(
-      'gasLimit' in request.message ? request.message.gasLimit : request.message.computeUnits,
-    )
-    if (origLimit >= estimated) {
-      logger.warn(
-        'Estimated +',
-        argv.estimateGasLimit,
-        '% =',
-        estimated,
-        '< original gasLimit =',
-        origLimit,
-        '. Leaving unchanged.',
-      )
-    } else {
-      argv.gasLimit = estimated
-    }
-  }
-
-  const [, wallet] = await loadChainWallet(dest, argv)
-  const receipt = await dest.executeReport({ ...argv, offRamp, execReport, wallet })
-
-  switch (argv.format) {
-    case Format.log:
-      logger.log('receipt =', withDateTimestamp(receipt))
-      break
-    case Format.pretty:
-      logger.info('Receipt (dest):')
-      prettyReceipt.call(
-        ctx,
-        receipt,
-        request,
-        receipt.log.tx?.from ??
-          (await dest.getTransaction(receipt.log.transactionHash).catch(() => null))?.from,
-      )
-      break
-    case Format.json:
-      logger.info(JSON.stringify(receipt, bigIntReplacer, 2))
-      break
   }
 }
 
