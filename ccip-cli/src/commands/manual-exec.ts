@@ -245,6 +245,11 @@ async function manualExec(
       logger.error('Message execution failed:', error)
       logger.info('Returning to message selection...\n')
     }
+    // Exit if only one message (prevents infinite loop since selectRequest auto-selects single messages)
+    if (messages.length === 1) {
+      logger.info('Single message transaction - exiting after execution.')
+      break
+    }
   }
 }
 
