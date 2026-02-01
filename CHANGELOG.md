@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CLI: `manualExec` command now loops through multiple messages in single session (#111)
 - SDK: Fix `sleep()` browser compatibility - use optional chaining for `.unref()` which is Node.js-only
 
 ## [0.95.0] - 2026-01-28 - Pre-release
