@@ -1,5 +1,6 @@
 import {
   Aptos,
+  AptosApiError,
   AptosConfig,
   Deserializer,
   Network,
@@ -40,6 +41,7 @@ import {
   CCIPAptosTransactionTypeInvalidError,
   CCIPAptosWalletInvalidError,
   CCIPError,
+  CCIPTokenPoolChainConfigNotFoundError,
 } from '../errors/index.ts'
 import {
   type EVMExtraArgsV2,
@@ -774,8 +776,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       tokens: string
     }
     const modulesNames = (await this._getAccountModulesNames(tokenPool))
-      .reverse()
       .filter((name) => name.endsWith('token_pool'))
+      .sort((a, b) => b.length - a.length)
     let firstErr
     for (const name of modulesNames) {
       try {
@@ -814,40 +816,49 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
                   functionArguments: [chain.chainSelector],
                 },
               })
-              const [
-                [remoteToken],
-                [remotePools],
-                [inboundRateLimiterState],
-                [outboundRateLimiterState],
-              ] = await Promise.all([
-                remoteToken$,
-                remotePools$,
-                inboundRateLimiterState$,
-                outboundRateLimiterState$,
-              ])
-              return [
-                chain.name,
-                {
-                  remoteToken: decodeAddress(remoteToken, chain.family),
-                  remotePools: remotePools.map((pool) => decodeAddress(pool, chain.family)),
-                  inboundRateLimiterState: inboundRateLimiterState.is_enabled
-                    ? {
-                        capacity: BigInt(inboundRateLimiterState.capacity),
-                        lastUpdated: Number(inboundRateLimiterState.last_updated),
-                        rate: BigInt(inboundRateLimiterState.rate),
-                        tokens: BigInt(inboundRateLimiterState.tokens),
-                      }
-                    : null,
-                  outboundRateLimiterState: outboundRateLimiterState.is_enabled
-                    ? {
-                        capacity: BigInt(outboundRateLimiterState.capacity),
-                        lastUpdated: Number(outboundRateLimiterState.last_updated),
-                        rate: BigInt(outboundRateLimiterState.rate),
-                        tokens: BigInt(outboundRateLimiterState.tokens),
-                      }
-                    : null,
-                },
-              ] as const
+              try {
+                const [
+                  [remoteToken],
+                  [remotePools],
+                  [inboundRateLimiterState],
+                  [outboundRateLimiterState],
+                ] = await Promise.all([
+                  remoteToken$,
+                  remotePools$,
+                  inboundRateLimiterState$,
+                  outboundRateLimiterState$,
+                ])
+                return [
+                  chain.name,
+                  {
+                    remoteToken: decodeAddress(remoteToken, chain.family),
+                    remotePools: remotePools.map((pool) => decodeAddress(pool, chain.family)),
+                    inboundRateLimiterState: inboundRateLimiterState.is_enabled
+                      ? {
+                          capacity: BigInt(inboundRateLimiterState.capacity),
+                          lastUpdated: Number(inboundRateLimiterState.last_updated),
+                          rate: BigInt(inboundRateLimiterState.rate),
+                          tokens: BigInt(inboundRateLimiterState.tokens),
+                        }
+                      : null,
+                    outboundRateLimiterState: outboundRateLimiterState.is_enabled
+                      ? {
+                          capacity: BigInt(outboundRateLimiterState.capacity),
+                          lastUpdated: Number(outboundRateLimiterState.last_updated),
+                          rate: BigInt(outboundRateLimiterState.rate),
+                          tokens: BigInt(outboundRateLimiterState.tokens),
+                        }
+                      : null,
+                  },
+                ] as const
+              } catch (err) {
+                if (
+                  err instanceof AptosApiError &&
+                  err.message.includes('Key not found in the smart table')
+                )
+                  throw new CCIPTokenPoolChainConfigNotFoundError(tokenPool, tokenPool, chain.name)
+                throw err
+              }
             }),
           ),
         )

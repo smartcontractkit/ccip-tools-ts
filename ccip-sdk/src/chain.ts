@@ -8,6 +8,7 @@ import {
   CCIPApiClientNotAvailableError,
   CCIPChainFamilyMismatchError,
   CCIPExecTxRevertedError,
+  CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
 import { DEFAULT_GAS_LIMIT } from './evm/const.ts'
@@ -43,7 +44,7 @@ import {
   type WithLogger,
   ExecutionState,
 } from './types.ts'
-import { util, withRetry } from './utils.ts'
+import { networkInfo, util, withRetry } from './utils.ts'
 
 /**
  * Context for Chain class initialization.
@@ -895,19 +896,19 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @remarks
    * A token pool maintains configurations for each destination chain it supports.
-   * The returned Record maps chain names to their respective configurations.
+   * The returned Record maps chain selectors to their respective configurations.
    *
    * @example Get all supported destinations
    * ```typescript
    * const remotes = await chain.getTokenPoolRemotes(poolAddress)
    * // Returns: {
    * //   "ethereum-mainnet": { remoteToken: "0x...", remotePools: [...], ... },
-   * //   "arbitrum-mainnet": { remoteToken: "0x...", remotePools: [...], ... },
+   * //   "ethereum-mainnet-arbitrum-1": { remoteToken: "0x...", remotePools: [...], ... },
    * //   "solana-mainnet": { remoteToken: "...", remotePools: [...], ... }
    * // }
    *
    * // Access a specific chain's config
-   * const arbConfig = remotes['arbitrum-mainnet']
+   * const arbConfig = remotes['ethereum-mainnet']
    * console.log(`Remote token: ${arbConfig.remoteToken}`)
    * ```
    *
@@ -932,6 +933,25 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     tokenPool: string,
     remoteChainSelector?: bigint,
   ): Promise<Record<string, TokenPoolRemote>>
+  /**
+   * Single-remote explicit version of [[getTokenPoolRemotes]]
+   * @param tokenPool - Token pool address on the current chain.
+   * @param remoteChainSelector - chain selector of the desired remote chain
+   * @returns TokenPoolRemote config for the specified remote chain
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if no configuration found for the specified remote chain
+   */
+  async getTokenPoolRemote(
+    tokenPool: string,
+    remoteChainSelector: bigint,
+  ): Promise<TokenPoolRemote> {
+    const remotes = await this.getTokenPoolRemotes(tokenPool, remoteChainSelector)
+    const network = networkInfo(remoteChainSelector)
+    const remoteConfig = remotes[network.chainSelector.toString()]
+    if (!remoteConfig) {
+      throw new CCIPTokenPoolChainConfigNotFoundError(tokenPool, tokenPool, network.name)
+    }
+    return remoteConfig
+  }
 
   /**
    * Fetch list and info of supported feeTokens.
