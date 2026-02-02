@@ -721,6 +721,12 @@ const selectors: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '3343': {
+    selector: 6325494908023253251n,
+    name: 'edge-mainnet',
+    network_type: 'MAINNET',
+    family: 'EVM',
+  },
   '3636': {
     selector: 1467223411771711614n,
     name: 'bitcoin-testnet-botanix',
@@ -1001,6 +1007,12 @@ const selectors: Selectors = {
     selector: 14894068710063348487n,
     name: 'apechain-mainnet',
     network_type: 'MAINNET',
+    family: 'EVM',
+  },
+  '33431': {
+    selector: 13222148116102326311n,
+    name: 'edge-testnet',
+    network_type: 'TESTNET',
     family: 'EVM',
   },
   '34443': {
