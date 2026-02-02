@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDK: Add named types `TokenPoolConfig` and `RegistryTokenConfig` for clearer IDE hints
 - SDK: Rename `getTokenPoolConfigs` to `getTokenPoolConfig` for consistency (returns single config)
 - SDK: Add `Chain.getTokenPoolRemote` for fetching single remote config by chainSelector
+- SDK: Fix `sleep()` browser compatibility - use optional chaining for `.unref()` which is Node.js-only
 
 ## [0.95.0] - 2026-01-28 - Pre-release
 
