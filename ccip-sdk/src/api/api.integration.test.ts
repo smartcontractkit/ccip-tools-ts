@@ -53,6 +53,64 @@ describe(
       )
     })
 
+    describe('getLaneInfo', () => {
+      it(
+        'should return full lane info including routerAddress for valid testnet lane',
+        { timeout: 30000 },
+        async () => {
+          const result = await api.getLaneInfo(SEPOLIA_SELECTOR, FUJI_SELECTOR)
+
+          // Verify chain selectors are passed through correctly
+          assert.equal(result.sourceChainSelector, SEPOLIA_SELECTOR)
+          assert.equal(result.destChainSelector, FUJI_SELECTOR)
+
+          // Verify router address is a valid Ethereum address
+          assert.ok(result.routerAddress, 'Should have routerAddress')
+          assert.match(
+            result.routerAddress,
+            /^0x[a-fA-F0-9]{40}$/,
+            'routerAddress should be a valid Ethereum address',
+          )
+
+          // Verify totalMs is present and positive
+          assert.equal(typeof result.totalMs, 'number')
+          assert.ok(result.totalMs! > 0, `Expected positive totalMs, got ${result.totalMs}`)
+        },
+      )
+
+      it('should return correct source network info', { timeout: 30000 }, async () => {
+        const result = await api.getLaneInfo(SEPOLIA_SELECTOR, FUJI_SELECTOR)
+
+        assert.ok(result.sourceNetworkInfo, 'Should have sourceNetworkInfo')
+        assert.equal(result.sourceNetworkInfo.chainSelector, SEPOLIA_SELECTOR)
+        assert.match(result.sourceNetworkInfo.name, /sepolia/i)
+      })
+
+      it('should return correct destination network info', { timeout: 30000 }, async () => {
+        const result = await api.getLaneInfo(SEPOLIA_SELECTOR, FUJI_SELECTOR)
+
+        assert.ok(result.destNetworkInfo, 'Should have destNetworkInfo')
+        assert.equal(result.destNetworkInfo.chainSelector, FUJI_SELECTOR)
+        assert.match(result.destNetworkInfo.name, /fuji|avalanche/i)
+      })
+
+      it(
+        'should throw CCIPLaneNotFoundError for non-existent lane',
+        { timeout: 30000 },
+        async () => {
+          const INVALID_SELECTOR = 999999999999n
+
+          await assert.rejects(
+            () => api.getLaneInfo(SEPOLIA_SELECTOR, INVALID_SELECTOR),
+            (err: Error) => {
+              assert.ok(err instanceof CCIPLaneNotFoundError)
+              return true
+            },
+          )
+        },
+      )
+    })
+
     describe('getMessageById', () => {
       it(
         'should return full message details for known message ID',

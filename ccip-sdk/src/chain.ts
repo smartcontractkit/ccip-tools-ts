@@ -1,7 +1,7 @@
 import { type BytesLike, dataLength } from 'ethers'
 import type { PickDeep, SetOptional } from 'type-fest'
 
-import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
+import { type LaneInfoResponse, type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
 import type { UnsignedAptosTx } from './aptos/types.ts'
 import { getCommitReport } from './commits.ts'
 import {
@@ -29,6 +29,7 @@ import {
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
+  type CCIPVersion,
   type ChainFamily,
   type ChainTransaction,
   type CommitReport,
@@ -704,6 +705,63 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       throw new CCIPApiClientNotAvailableError()
     }
     return this.apiClient.getLaneLatency(this.network.chainSelector, destChainSelector)
+  }
+
+  /**
+   * Fetches lane information including OnRamp address and CCIP version for a destination chain.
+   * Uses API to discover router address, then on-chain calls to get OnRamp and version.
+   *
+   * @param destChainSelector - Destination CCIP chain selector (bigint)
+   * @param opts - Optional parameters:
+   *   - `router`: Router address (if provided, skips API call)
+   * @returns Promise resolving to {@link Lane} with onRamp address and version
+   *
+   * @throws {@link CCIPApiClientNotAvailableError} if apiClient was disabled and no router provided
+   * @throws {@link CCIPLaneNotFoundError} if lane not found via API
+   * @throws {@link CCIPHttpError} if API request fails
+   *
+   * @example Get lane info using API to discover router
+   * ```typescript
+   * const chain = await EVMChain.fromUrl('https://eth-mainnet.example.com')
+   * const lane = await chain.getLane(4949039107694359620n) // Arbitrum
+   * console.log(`OnRamp: ${lane.onRamp}`)
+   * console.log(`Version: ${lane.version}`)
+   * ```
+   *
+   * @example Get lane info with known router (no API needed)
+   * ```typescript
+   * const chain = await EVMChain.fromUrl('https://eth-mainnet.example.com', { apiClient: null })
+   * const lane = await chain.getLane(4949039107694359620n, { router: '0x80226fc0Ee2b...' })
+   * console.log(`Version: ${lane.version}`)
+   * ```
+   */
+  async getLane(destChainSelector: bigint, opts?: { router?: string }): Promise<Lane> {
+    let router = opts?.router
+
+    // If router not provided, get it from API
+    if (!router) {
+      if (!this.apiClient) {
+        throw new CCIPApiClientNotAvailableError()
+      }
+      const laneInfo: LaneInfoResponse = await this.apiClient.getLaneInfo(
+        this.network.chainSelector,
+        destChainSelector,
+      )
+      router = laneInfo.routerAddress
+    }
+
+    // Get OnRamp from Router
+    const onRamp = await this.getOnRampForRouter(router, destChainSelector)
+
+    // Get version from OnRamp
+    const [, version] = await this.typeAndVersion(onRamp)
+
+    return {
+      sourceChainSelector: this.network.chainSelector,
+      destChainSelector,
+      onRamp,
+      version: version as CCIPVersion,
+    }
   }
 
   /**

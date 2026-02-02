@@ -24,6 +24,7 @@ import { bigIntReviver, parseJson } from '../utils.ts'
 import type {
   APICCIPRequest,
   APIErrorResponse,
+  LaneInfoResponse,
   LaneLatencyResponse,
   RawLaneLatencyResponse,
   RawMessageResponse,
@@ -35,6 +36,7 @@ export type {
   APICCIPRequest,
   APICCIPRequestMetadata,
   APIErrorResponse,
+  LaneInfoResponse,
   LaneLatencyResponse,
 } from './types.ts'
 
@@ -209,13 +211,42 @@ export class CCIPAPIClient {
     sourceChainSelector: bigint,
     destChainSelector: bigint,
   ): Promise<LaneLatencyResponse> {
+    const laneInfo = await this.getLaneInfo(sourceChainSelector, destChainSelector)
+    return { totalMs: laneInfo.totalMs ?? 0 }
+  }
+
+  /**
+   * Fetches lane information including router address between source and destination chains.
+   *
+   * @param sourceChainSelector - Source chain selector (bigint)
+   * @param destChainSelector - Destination chain selector (bigint)
+   * @returns Promise resolving to {@link LaneInfoResponse} with router address and network info
+   *
+   * @throws {@link CCIPLaneNotFoundError} when lane not found (404)
+   * @throws {@link CCIPTimeoutError} if request times out
+   * @throws {@link CCIPHttpError} on other HTTP errors
+   *
+   * @example Basic usage
+   * ```typescript
+   * const laneInfo = await api.getLaneInfo(
+   *   5009297550715157269n,  // Ethereum mainnet
+   *   4949039107694359620n,  // Arbitrum mainnet
+   * )
+   * console.log(`Router: ${laneInfo.routerAddress}`)
+   * console.log(`Estimated delivery: ${Math.round(laneInfo.totalMs / 60000)} minutes`)
+   * ```
+   */
+  async getLaneInfo(
+    sourceChainSelector: bigint,
+    destChainSelector: bigint,
+  ): Promise<LaneInfoResponse> {
     const url = new URL(`${this.baseUrl}/v2/lanes/latency`)
     url.searchParams.set('sourceChainSelector', sourceChainSelector.toString())
     url.searchParams.set('destChainSelector', destChainSelector.toString())
 
     this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`)
 
-    const response = await this._fetchWithTimeout(url.toString(), 'getLaneLatency')
+    const response = await this._fetchWithTimeout(url.toString(), 'getLaneInfo')
 
     if (!response.ok) {
       // Try to parse structured error response from API
@@ -252,9 +283,16 @@ export class CCIPAPIClient {
     const raw = JSON.parse(await response.text(), bigIntReviver) as RawLaneLatencyResponse
 
     // Log full raw response for debugging
-    this.logger.debug('getLaneLatency raw response:', raw)
+    this.logger.debug('getLaneInfo raw response:', raw)
 
-    return { totalMs: raw.totalMs }
+    return {
+      sourceChainSelector,
+      destChainSelector,
+      routerAddress: raw.lane.routerAddress,
+      sourceNetworkInfo: ensureNetworkInfo(raw.lane.sourceNetworkInfo, this.logger),
+      destNetworkInfo: ensureNetworkInfo(raw.lane.destNetworkInfo, this.logger),
+      totalMs: raw.totalMs,
+    }
   }
 
   /**

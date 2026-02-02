@@ -136,14 +136,15 @@ describe('CCIPAPIClient', () => {
     it('should log raw response via debug', async () => {
       const debugFn = mock.fn()
       const client = new CCIPAPIClient(undefined, {
-        logger: { log: () => {}, debug: debugFn } as any,
+        logger: { log: () => {}, debug: debugFn, warn: () => {} } as any,
       })
 
       await client.getLaneLatency(1n, 2n)
 
+      // getLaneLatency delegates to getLaneInfo, so logs come from getLaneInfo
       assert.equal(debugFn.mock.calls.length, 2) // Once for URL, once for raw response
       const lastCall = debugFn.mock.calls[1] as unknown as { arguments: unknown[] }
-      assert.equal(lastCall.arguments[0], 'getLaneLatency raw response:')
+      assert.equal(lastCall.arguments[0], 'getLaneInfo raw response:')
       assert.ok(lastCall.arguments[1]) // Raw response object
     })
 
@@ -265,6 +266,91 @@ describe('CCIPAPIClient', () => {
           err instanceof CCIPHttpError &&
           err.context.status === HttpStatus.BAD_REQUEST &&
           err.context.apiErrorCode === 'INVALID_PARAMETERS',
+      )
+    })
+  })
+
+  describe('getLaneInfo', () => {
+    it('should fetch with correct URL parameters', async () => {
+      const client = new CCIPAPIClient()
+      await client.getLaneInfo(5009297550715157269n, 4949039107694359620n)
+
+      assert.equal(mockedFetch.mock.calls.length, 1)
+      const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.includes('sourceChainSelector=5009297550715157269'))
+      assert.ok(url.includes('destChainSelector=4949039107694359620'))
+    })
+
+    it('should use correct base URL in request', async () => {
+      const client = new CCIPAPIClient()
+      await client.getLaneInfo(1n, 2n)
+
+      const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.startsWith(DEFAULT_API_BASE_URL))
+      assert.ok(url.includes('/v2/lanes/latency'))
+    })
+
+    it('should return full lane info including routerAddress', async () => {
+      const client = new CCIPAPIClient()
+      const result = await client.getLaneInfo(5009297550715157269n, 4949039107694359620n)
+
+      assert.equal(result.sourceChainSelector, 5009297550715157269n)
+      assert.equal(result.destChainSelector, 4949039107694359620n)
+      assert.equal(result.routerAddress, '0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D')
+      assert.equal(result.totalMs, 1147000)
+      assert.equal(result.sourceNetworkInfo.name, 'ethereum-mainnet')
+      assert.equal(result.destNetworkInfo.name, 'arbitrum-mainnet')
+    })
+
+    it('should log raw response via debug', async () => {
+      const debugFn = mock.fn()
+      const client = new CCIPAPIClient(undefined, {
+        logger: { log: () => {}, debug: debugFn, warn: () => {} } as any,
+      })
+
+      await client.getLaneInfo(1n, 2n)
+
+      assert.equal(debugFn.mock.calls.length, 2) // Once for URL, once for raw response
+      const lastCall = debugFn.mock.calls[1] as unknown as { arguments: unknown[] }
+      assert.equal(lastCall.arguments[0], 'getLaneInfo raw response:')
+      assert.ok(lastCall.arguments[1])
+    })
+
+    it('should throw CCIPLaneNotFoundError on NOT_FOUND', async () => {
+      const errorResponse = { error: 'NOT_FOUND', message: 'Lane not found' }
+      globalThis.fetch = (() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.NOT_FOUND,
+          statusText: 'Not Found',
+          text: () => Promise.resolve(JSON.stringify(errorResponse)),
+        })) as unknown as typeof fetch
+
+      const client = new CCIPAPIClient()
+      await assert.rejects(
+        async () => await client.getLaneInfo(1n, 2n),
+        (err: unknown) =>
+          err instanceof CCIPLaneNotFoundError &&
+          err.context.sourceChainSelector === 1n &&
+          err.context.destChainSelector === 2n,
+      )
+    })
+
+    it('should throw CCIPHttpError on non-ok response', async () => {
+      const errorResponse = { error: 'BAD_REQUEST', message: 'Invalid parameters' }
+      globalThis.fetch = (() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.BAD_REQUEST,
+          statusText: 'Bad Request',
+          text: () => Promise.resolve(JSON.stringify(errorResponse)),
+        })) as unknown as typeof fetch
+
+      const client = new CCIPAPIClient()
+      await assert.rejects(
+        async () => await client.getLaneInfo(1n, 2n),
+        (err: unknown) =>
+          err instanceof CCIPHttpError && err.context.status === HttpStatus.BAD_REQUEST,
       )
     })
   })

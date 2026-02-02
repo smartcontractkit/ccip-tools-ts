@@ -9,6 +9,25 @@ export type LaneLatencyResponse = {
   totalMs: number
 }
 
+/**
+ * Lane information response from GET /v2/lanes/latency endpoint.
+ * Includes router address and network info for both chains.
+ */
+export type LaneInfoResponse = {
+  /** Source chain selector */
+  sourceChainSelector: bigint
+  /** Destination chain selector */
+  destChainSelector: bigint
+  /** Router contract address on the source chain */
+  routerAddress: string
+  /** Source network metadata */
+  sourceNetworkInfo: NetworkInfo
+  /** Destination network metadata */
+  destNetworkInfo: NetworkInfo
+  /** Estimated delivery time in milliseconds (if available) */
+  totalMs?: number
+}
+
 /** Raw API response (string selectors, before conversion) */
 export type RawLaneLatencyResponse = {
   lane: {
