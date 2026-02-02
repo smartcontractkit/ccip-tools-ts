@@ -30,7 +30,6 @@ import type { PickDeep } from 'type-fest'
 
 import {
   type ChainContext,
-  type ChainStatic,
   type GetBalanceOpts,
   type LogFilter,
   type TokenInfo,
@@ -84,6 +83,7 @@ import {
   type Lane,
   type Log_,
   type MergeArrayElements,
+  type MessageInput,
   type NetworkInfo,
   type OffchainTokenData,
   type WithLogger,
@@ -1574,12 +1574,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @throws {@link CCIPArgumentInvalidError} if tokenReceiver missing when sending tokens with data
    */
   static override buildMessageForThisDest(
-    message: Parameters<ChainStatic['buildMessageForThisDest']>[0],
-    laneVersion?: CCIPVersion,
+    message: MessageInput,
+    _laneVersion?: CCIPVersion,
   ): AnyMessage & { extraArgs: SVMExtraArgsV1 } {
-    // Store as unused variable for now (will be used later for ExtraArgs selection)
-    void laneVersion
-
     if (
       !(
         message.extraArgs &&

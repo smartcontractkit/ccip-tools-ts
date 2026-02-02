@@ -163,6 +163,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
 export function buildMessageForDest(
   message: MessageInput,
   dest: ChainFamily,
+  // TODO: Decide what to do when not provided.
   laneVersion?: CCIPVersion,
 ): AnyMessage {
   const chain = supportedChains[dest] ?? Chain

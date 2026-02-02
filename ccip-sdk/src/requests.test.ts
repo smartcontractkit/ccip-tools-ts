@@ -618,6 +618,92 @@ describe('decodeMessage', () => {
         assert.deepEqual(result.tokenAmounts, message.tokenAmounts)
         assert.equal(result.feeToken, message.feeToken)
       })
+
+      // Version-aware ExtraArgs selection tests
+      it('should return EVMExtraArgsV1 (only gasLimit) for lane version 1.2', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+        }
+
+        const result = Chain.buildMessageForThisDest(message, CCIPVersion.V1_2)
+
+        assert.ok(result.extraArgs)
+        assert.ok('gasLimit' in result.extraArgs)
+        assert.equal(result.extraArgs.gasLimit, 200000n)
+        // V1.2 should NOT have allowOutOfOrderExecution
+        assert.equal('allowOutOfOrderExecution' in result.extraArgs, false)
+      })
+
+      it('should return EVMExtraArgsV1 (only gasLimit) for lane version 1.5', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+        }
+
+        const result = Chain.buildMessageForThisDest(message, CCIPVersion.V1_5)
+
+        assert.ok(result.extraArgs)
+        assert.ok('gasLimit' in result.extraArgs)
+        assert.equal(result.extraArgs.gasLimit, 200000n)
+        // V1.5 should NOT have allowOutOfOrderExecution
+        assert.equal('allowOutOfOrderExecution' in result.extraArgs, false)
+      })
+
+      it('should return EVMExtraArgsV2 for lane version 1.6', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+        }
+
+        const result = Chain.buildMessageForThisDest(message, CCIPVersion.V1_6)
+
+        assert.ok(result.extraArgs)
+        assert.ok('gasLimit' in result.extraArgs)
+        assert.ok('allowOutOfOrderExecution' in result.extraArgs)
+        assert.equal(result.extraArgs.gasLimit, 200000n)
+        if ('allowOutOfOrderExecution' in result.extraArgs) {
+          assert.equal(result.extraArgs.allowOutOfOrderExecution, true)
+        }
+      })
+
+      it('should return EVMExtraArgsV2 when laneVersion is undefined (backwards compat)', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+        }
+
+        const result = Chain.buildMessageForThisDest(message) // no version
+
+        assert.ok(result.extraArgs)
+        assert.ok('gasLimit' in result.extraArgs)
+        assert.ok('allowOutOfOrderExecution' in result.extraArgs)
+        if ('allowOutOfOrderExecution' in result.extraArgs) {
+          assert.equal(result.extraArgs.allowOutOfOrderExecution, true)
+        }
+      })
+
+      it('should pass through user-provided extraArgs directly (ignoring lane version)', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+          extraArgs: {
+            gasLimit: 500000n,
+            allowOutOfOrderExecution: false,
+          },
+        }
+
+        // Lane version is ignored when user provides extraArgs
+        const result = Chain.buildMessageForThisDest(message, CCIPVersion.V1_5)
+
+        assert.ok(result.extraArgs)
+        assert.ok('gasLimit' in result.extraArgs)
+        assert.equal(result.extraArgs.gasLimit, 500000n)
+        assert.ok('allowOutOfOrderExecution' in result.extraArgs)
+        if ('allowOutOfOrderExecution' in result.extraArgs) {
+          assert.equal(result.extraArgs.allowOutOfOrderExecution, false)
+        }
+      })
     })
 
     describe('SolanaChain', () => {
@@ -823,6 +909,27 @@ describe('decodeMessage', () => {
 
         const extraArgs = result.extraArgs as SVMExtraArgsV1
         assert.equal(extraArgs.allowOutOfOrderExecution, false)
+      })
+
+      // Lane version parameter is accepted but not used for validation (Solana always produces SVMExtraArgsV1)
+      it('should accept lane version parameter without validation', () => {
+        const message = {
+          receiver: 'DummyReceiverAddress1234567890123456789012',
+          data: '0x1234',
+        }
+
+        // All versions should work - no validation is performed
+        const resultV12 = SolanaChain.buildMessageForThisDest(message, CCIPVersion.V1_2)
+        const resultV15 = SolanaChain.buildMessageForThisDest(message, CCIPVersion.V1_5)
+        const resultV16 = SolanaChain.buildMessageForThisDest(message, CCIPVersion.V1_6)
+        const resultUndefined = SolanaChain.buildMessageForThisDest(message) // no version
+
+        // All should produce valid SVMExtraArgsV1
+        for (const result of [resultV12, resultV15, resultV16, resultUndefined]) {
+          assert.ok(result.extraArgs)
+          const extraArgs = result.extraArgs as SVMExtraArgsV1
+          assert.ok('computeUnits' in extraArgs)
+        }
       })
     })
 
@@ -1044,6 +1151,27 @@ describe('decodeMessage', () => {
         assert.ok('receiverObjectIds' in result.extraArgs)
         assert.ok(!('unknownField' in result.extraArgs))
         assert.equal(Object.keys(result.extraArgs).length, 4)
+      })
+
+      // Lane version parameter is accepted but not used for validation (Sui always produces SuiExtraArgsV1)
+      it('should accept lane version parameter without validation', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
+          data: '0x1234',
+        }
+
+        // All versions should work - no validation is performed
+        const resultV12 = SuiChain.buildMessageForThisDest(message, CCIPVersion.V1_2)
+        const resultV15 = SuiChain.buildMessageForThisDest(message, CCIPVersion.V1_5)
+        const resultV16 = SuiChain.buildMessageForThisDest(message, CCIPVersion.V1_6)
+        const resultUndefined = SuiChain.buildMessageForThisDest(message) // no version
+
+        // All should produce valid SuiExtraArgsV1
+        for (const result of [resultV12, resultV15, resultV16, resultUndefined]) {
+          assert.ok(result.extraArgs)
+          assert.ok('gasLimit' in result.extraArgs)
+          assert.ok('receiverObjectIds' in result.extraArgs)
+        }
       })
     })
   })

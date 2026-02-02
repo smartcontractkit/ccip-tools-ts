@@ -8,13 +8,7 @@ import { type BytesLike, dataLength, hexlify, isBytesLike, isHexString } from 'e
 import type { PickDeep, SetOptional } from 'type-fest'
 
 import { AptosChain } from '../aptos/index.ts'
-import {
-  type ChainContext,
-  type ChainStatic,
-  type GetBalanceOpts,
-  type LogFilter,
-  Chain,
-} from '../chain.ts'
+import { type ChainContext, type GetBalanceOpts, type LogFilter, Chain } from '../chain.ts'
 import {
   CCIPContractNotRouterError,
   CCIPDataFormatUnsupportedError,
@@ -38,7 +32,6 @@ import {
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
-  type CCIPVersion,
   type ChainTransaction,
   type CommitReport,
   type ExecutionReceipt,
@@ -46,9 +39,11 @@ import {
   type ExecutionState,
   type Lane,
   type Log_,
+  type MessageInput,
   type NetworkInfo,
   type OffchainTokenData,
   type WithLogger,
+  CCIPVersion,
   ChainFamily,
 } from '../types.ts'
 import {
@@ -883,12 +878,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /** {@inheritDoc ChainStatic.buildMessageForThisDest} */
   static override buildMessageForThisDest(
-    message: Parameters<ChainStatic['buildMessageForThisDest']>[0],
-    laneVersion?: CCIPVersion,
+    message: MessageInput,
+    _laneVersion?: CCIPVersion,
   ): AnyMessage & { extraArgs: SuiExtraArgsV1 } {
-    // Store as unused variable for now (will be used later for ExtraArgs selection)
-    void laneVersion
-
     const gasLimit =
       message.extraArgs && 'gasLimit' in message.extraArgs && message.extraArgs.gasLimit != null
         ? message.extraArgs.gasLimit

@@ -29,7 +29,6 @@ import {
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
-  type CCIPVersion,
   type ChainFamily,
   type ChainTransaction,
   type CommitReport,
@@ -42,6 +41,7 @@ import {
   type NetworkInfo,
   type OffchainTokenData,
   type WithLogger,
+  CCIPVersion,
   ExecutionState,
 } from './types.ts'
 import { util, withRetry } from './utils.ts'
@@ -886,21 +886,31 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   abstract getFeeTokens(router: string): Promise<Record<string, TokenInfo>>
 
   /** {@inheritDoc ChainStatic.buildMessageForThisDest} */
-  static buildMessageForThisDest(
-    message: Parameters<ChainStatic['buildMessageForThisDest']>[0],
-    laneVersion?: CCIPVersion,
-  ): AnyMessage {
-    // Store as unused variable for now (will be used later for ExtraArgs selection)
-    void laneVersion
+  static buildMessageForThisDest(message: MessageInput, laneVersion?: CCIPVersion): AnyMessage {
+    // If user provided extraArgs, pass them through directly
+    if (message.extraArgs && Object.keys(message.extraArgs).length > 0) {
+      return {
+        ...message,
+        extraArgs: message.extraArgs as AnyMessage['extraArgs'],
+      }
+    }
 
-    // default to GenericExtraArgsV2, aka EVMExtraArgsV2
+    // Deduce default extraArgs based on lane version
+    const isPreV16 = laneVersion && laneVersion < CCIPVersion.V1_6
+    const gasLimit = message.data && dataLength(message.data) ? DEFAULT_GAS_LIMIT : 0n
+
+    // v1.0-1.5: EVMExtraArgsV1 (only gasLimit)
+    if (isPreV16) {
+      return {
+        ...message,
+        extraArgs: { gasLimit },
+      }
+    }
+
+    // v1.6+ or unknown: EVMExtraArgsV2
     return {
       ...message,
-      extraArgs: {
-        gasLimit: message.data && dataLength(message.data) ? DEFAULT_GAS_LIMIT : 0n,
-        allowOutOfOrderExecution: true,
-        ...message.extraArgs,
-      },
+      extraArgs: { gasLimit, allowOutOfOrderExecution: true },
     }
   }
 
