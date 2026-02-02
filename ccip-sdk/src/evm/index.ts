@@ -123,7 +123,7 @@ import {
   parseSourceTokenData,
 } from './messages.ts'
 import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
-import { buildMessageForThisDest, getMessagesInBatch } from '../requests.ts'
+import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
 import type { UnsignedEVMTx } from './types.ts'
 export type { UnsignedEVMTx }
 
@@ -997,7 +997,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     destChainSelector,
     message,
   }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    const populatedMessage = buildMessageForThisDest(message, networkInfo(destChainSelector).family)
+    const lane = await this.getLane(destChainSelector, { router })
+    const populatedMessage = buildMessageForDest(
+      message,
+      networkInfo(destChainSelector).family,
+      lane.version,
+    )
     const contract = new Contract(
       router,
       interfaces.Router,
@@ -1023,9 +1028,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedEVMTx> {
     const { sender, router, destChainSelector } = opts
-    const populatedMessage = buildMessageForThisDest(
+    const lane = await this.getLane(destChainSelector, { router })
+    const populatedMessage = buildMessageForDest(
       opts.message,
       networkInfo(destChainSelector).family,
+      lane.version,
     )
     const message = {
       ...populatedMessage,

@@ -124,7 +124,7 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-import { buildMessageForThisDest, getMessagesInBatch } from '../requests.ts'
+import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
 import { patchBorsh } from './patchBorsh.ts'
 import { DEFAULT_GAS_LIMIT } from '../evm/const.ts'
 export type { UnsignedSolanaTx }
@@ -1027,8 +1027,17 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /** {@inheritDoc Chain.getFee} */
-  getFee({ router, destChainSelector, message }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    const populatedMessage = buildMessageForThisDest(message, networkInfo(destChainSelector).family)
+  async getFee({
+    router,
+    destChainSelector,
+    message,
+  }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+    const lane = await this.getLane(destChainSelector, { router })
+    const populatedMessage = buildMessageForDest(
+      message,
+      networkInfo(destChainSelector).family,
+      lane.version,
+    )
     return getFee(this, router, destChainSelector, populatedMessage)
   }
 
@@ -1042,9 +1051,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedSolanaTx> {
     const { sender, router, destChainSelector } = opts
-    const populatedMessage = buildMessageForThisDest(
+    const lane = await this.getLane(destChainSelector, { router })
+    const populatedMessage = buildMessageForDest(
       opts.message,
       networkInfo(destChainSelector).family,
+      lane.version,
     )
     const message = {
       ...populatedMessage,
@@ -1564,7 +1575,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    */
   static override buildMessageForThisDest(
     message: Parameters<ChainStatic['buildMessageForThisDest']>[0],
+    laneVersion?: CCIPVersion,
   ): AnyMessage & { extraArgs: SVMExtraArgsV1 } {
+    // Store as unused variable for now (will be used later for ExtraArgs selection)
+    void laneVersion
+
     if (
       !(
         message.extraArgs &&

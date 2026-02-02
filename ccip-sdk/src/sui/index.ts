@@ -884,7 +884,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   /** {@inheritDoc ChainStatic.buildMessageForThisDest} */
   static override buildMessageForThisDest(
     message: Parameters<ChainStatic['buildMessageForThisDest']>[0],
+    laneVersion?: CCIPVersion,
   ): AnyMessage & { extraArgs: SuiExtraArgsV1 } {
+    // Store as unused variable for now (will be used later for ExtraArgs selection)
+    void laneVersion
+
     const gasLimit =
       message.extraArgs && 'gasLimit' in message.extraArgs && message.extraArgs.gasLimit != null
         ? message.extraArgs.gasLimit

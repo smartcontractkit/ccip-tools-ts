@@ -157,11 +157,16 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
  * Populates missing required fields (e.g. `extraArgs`) from AnyMessage.
  * @param message - Partial AnyMessage with at least receiver
  * @param dest - Destination chain family to build message for
+ * @param laneVersion - optional lane version for selecting appropriate ExtraArgs type
  * @returns Original message or shallow copy with defaults for required fields
  */
-export function buildMessageForThisDest(message: MessageInput, dest: ChainFamily): AnyMessage {
+export function buildMessageForDest(
+  message: MessageInput,
+  dest: ChainFamily,
+  laneVersion?: CCIPVersion,
+): AnyMessage {
   const chain = supportedChains[dest] ?? Chain
-  return chain.buildMessageForThisDest(message)
+  return chain.buildMessageForThisDest(message, laneVersion)
 }
 
 /**

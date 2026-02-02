@@ -888,7 +888,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /** {@inheritDoc ChainStatic.buildMessageForThisDest} */
   static buildMessageForThisDest(
     message: Parameters<ChainStatic['buildMessageForThisDest']>[0],
+    laneVersion?: CCIPVersion,
   ): AnyMessage {
+    // Store as unused variable for now (will be used later for ExtraArgs selection)
+    void laneVersion
+
     // default to GenericExtraArgsV2, aka EVMExtraArgsV2
     return {
       ...message,
@@ -1008,9 +1012,10 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * Returns a copy of a message, populating missing fields like `extraArgs` with defaults
    * It's expected to return a message suitable at least for basic token transfers
    * @param message - AnyMessage (from source), containing at least `receiver`
+   * @param laneVersion - optional lane version for selecting appropriate ExtraArgs type
    * @returns A message suitable for `sendMessage` to this destination chain family
    */
-  buildMessageForThisDest(message: MessageInput): AnyMessage
+  buildMessageForThisDest(message: MessageInput, laneVersion?: CCIPVersion): AnyMessage
 }
 
 /** Function type for getting a Chain instance by ID, selector, or name. */
