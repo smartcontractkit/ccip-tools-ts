@@ -86,7 +86,7 @@ import { getAptosLeafHasher } from './hasher.ts'
 import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
 import { getTokenInfo } from './token.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
+import { buildMessageForThisDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
 export type { UnsignedAptosTx }
 
 /**
@@ -535,7 +535,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     destChainSelector,
     message,
   }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
+    const populatedMessage = buildMessageForThisDest(message, networkInfo(destChainSelector).family)
     return getFee(this.provider, router, destChainSelector, populatedMessage)
   }
 
@@ -544,7 +544,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedAptosTx> {
     const { sender, router, destChainSelector } = opts
-    const populatedMessage = buildMessageForDest(
+    const populatedMessage = buildMessageForThisDest(
       opts.message,
       networkInfo(destChainSelector).family,
     )

@@ -159,9 +159,9 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
  * @param dest - Destination chain family to build message for
  * @returns Original message or shallow copy with defaults for required fields
  */
-export function buildMessageForDest(message: MessageInput, dest: ChainFamily): AnyMessage {
+export function buildMessageForThisDest(message: MessageInput, dest: ChainFamily): AnyMessage {
   const chain = supportedChains[dest] ?? Chain
-  return chain.buildMessageForDest(message)
+  return chain.buildMessageForThisDest(message)
 }
 
 /**

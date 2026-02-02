@@ -124,7 +124,7 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
+import { buildMessageForThisDest, getMessagesInBatch } from '../requests.ts'
 import { patchBorsh } from './patchBorsh.ts'
 import { DEFAULT_GAS_LIMIT } from '../evm/const.ts'
 export type { UnsignedSolanaTx }
@@ -1028,7 +1028,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /** {@inheritDoc Chain.getFee} */
   getFee({ router, destChainSelector, message }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
+    const populatedMessage = buildMessageForThisDest(message, networkInfo(destChainSelector).family)
     return getFee(this, router, destChainSelector, populatedMessage)
   }
 
@@ -1042,7 +1042,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedSolanaTx> {
     const { sender, router, destChainSelector } = opts
-    const populatedMessage = buildMessageForDest(
+    const populatedMessage = buildMessageForThisDest(
       opts.message,
       networkInfo(destChainSelector).family,
     )
@@ -1559,11 +1559,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * {@inheritDoc ChainStatic.buildMessageForDest}
+   * {@inheritDoc ChainStatic.buildMessageForThisDest}
    * @throws {@link CCIPArgumentInvalidError} if tokenReceiver missing when sending tokens with data
    */
-  static override buildMessageForDest(
-    message: Parameters<ChainStatic['buildMessageForDest']>[0],
+  static override buildMessageForThisDest(
+    message: Parameters<ChainStatic['buildMessageForThisDest']>[0],
   ): AnyMessage & { extraArgs: SVMExtraArgsV1 } {
     if (
       !(

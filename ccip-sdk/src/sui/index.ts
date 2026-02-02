@@ -881,9 +881,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.getFeeTokens'))
   }
 
-  /** {@inheritDoc ChainStatic.buildMessageForDest} */
-  static override buildMessageForDest(
-    message: Parameters<ChainStatic['buildMessageForDest']>[0],
+  /** {@inheritDoc ChainStatic.buildMessageForThisDest} */
+  static override buildMessageForThisDest(
+    message: Parameters<ChainStatic['buildMessageForThisDest']>[0],
   ): AnyMessage & { extraArgs: SuiExtraArgsV1 } {
     const gasLimit =
       message.extraArgs && 'gasLimit' in message.extraArgs && message.extraArgs.gasLimit != null
