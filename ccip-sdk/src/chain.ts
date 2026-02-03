@@ -47,6 +47,23 @@ import {
 } from './types.ts'
 import { networkInfo, util, withRetry } from './utils.ts'
 
+/** Field names unique to EVMExtraArgsV3 (not present in V2). */
+const V3_ONLY_FIELDS = [
+  'blockConfirmations',
+  'ccvs',
+  'ccvArgs',
+  'executor',
+  'executorArgs',
+  'tokenReceiver',
+  'tokenArgs',
+] as const
+
+/** Check if extraArgs contains any V3-only fields. */
+function hasV3ExtraArgs(extraArgs: Partial<ExtraArgs> | undefined): boolean {
+  if (!extraArgs) return false
+  return V3_ONLY_FIELDS.some((field) => field in extraArgs)
+}
+
 /**
  * Context for Chain class initialization.
  * Extends WithLogger with optional API client configuration.
@@ -979,11 +996,32 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   static buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
   ): AnyMessage {
-    // default to GenericExtraArgsV2, aka EVMExtraArgsV2
+    const gasLimit = message.data && dataLength(message.data) ? DEFAULT_GAS_LIMIT : 0n
+
+    // Detect if user wants V3 by checking for any V3-only field
+    if (hasV3ExtraArgs(message.extraArgs)) {
+      // V3 defaults (GenericExtraArgsV3)
+      return {
+        ...message,
+        extraArgs: {
+          gasLimit,
+          blockConfirmations: 0,
+          ccvs: [],
+          ccvArgs: [],
+          executor: '',
+          executorArgs: new Uint8Array(),
+          tokenReceiver: new Uint8Array(),
+          tokenArgs: new Uint8Array(),
+          ...message.extraArgs,
+        },
+      }
+    }
+
+    // Default to V2 (GenericExtraArgsV2, aka EVMExtraArgsV2)
     return {
       ...message,
       extraArgs: {
-        gasLimit: message.data && dataLength(message.data) ? DEFAULT_GAS_LIMIT : 0n,
+        gasLimit,
         allowOutOfOrderExecution: true,
         ...message.extraArgs,
       },
