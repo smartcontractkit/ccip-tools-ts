@@ -59,11 +59,13 @@ import {
 import {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
+  type EVMExtraArgsV3,
   type ExtraArgs,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
   EVMExtraArgsV1Tag,
   EVMExtraArgsV2Tag,
+  EVMExtraArgsV3Tag,
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
@@ -136,6 +138,238 @@ const SVMExtraArgsV1 =
   'tuple(uint32 computeUnits, uint64 accountIsWritableBitmap, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] accounts)'
 const SuiExtraArgsV1 =
   'tuple(uint256 gasLimit, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] receiverObjectIds)'
+
+/**
+ * Encodes EVMExtraArgsV3 using tightly packed binary format.
+ *
+ * Binary format:
+ * - tag (4 bytes): 0x302326cb
+ * - gasLimit (4 bytes): uint32 big-endian
+ * - blockConfirmations (2 bytes): uint16 big-endian
+ * - ccvsLength (1 byte): uint8
+ * - For each CCV:
+ *   - ccvAddressLength (1 byte): 0 or 20
+ *   - ccvAddress (0 or 20 bytes)
+ *   - ccvArgsLength (2 bytes): uint16 big-endian
+ *   - ccvArgs (variable)
+ * - executorLength (1 byte): 0 or 20
+ * - executor (0 or 20 bytes)
+ * - executorArgsLength (2 bytes): uint16 big-endian
+ * - executorArgs (variable)
+ * - tokenReceiverLength (1 byte): uint8
+ * - tokenReceiver (variable)
+ * - tokenArgsLength (2 bytes): uint16 big-endian
+ * - tokenArgs (variable)
+ */
+function encodeExtraArgsV3(args: EVMExtraArgsV3): string {
+  const parts: Uint8Array[] = []
+
+  // Tag (4 bytes)
+  parts.push(getDataBytes(EVMExtraArgsV3Tag))
+
+  // gasLimit (4 bytes, uint32 big-endian)
+  const gasLimitBytes = new Uint8Array(4)
+  const gasLimitValue = Number(args.gasLimit)
+  gasLimitBytes[0] = (gasLimitValue >>> 24) & 0xff
+  gasLimitBytes[1] = (gasLimitValue >>> 16) & 0xff
+  gasLimitBytes[2] = (gasLimitValue >>> 8) & 0xff
+  gasLimitBytes[3] = gasLimitValue & 0xff
+  parts.push(gasLimitBytes)
+
+  // blockConfirmations (2 bytes, uint16 big-endian)
+  const blockConfBytes = new Uint8Array(2)
+  blockConfBytes[0] = (args.blockConfirmations >>> 8) & 0xff
+  blockConfBytes[1] = args.blockConfirmations & 0xff
+  parts.push(blockConfBytes)
+
+  // ccvsLength (1 byte)
+  parts.push(new Uint8Array([args.ccvs.length]))
+
+  // For each CCV
+  for (let i = 0; i < args.ccvs.length; i++) {
+    const ccvAddress = args.ccvs[i]!
+    const ccvArgs = args.ccvArgs[i] ?? new Uint8Array(0)
+
+    if (ccvAddress && ccvAddress !== '' && ccvAddress !== '0x') {
+      // ccvAddressLength = 20
+      parts.push(new Uint8Array([20]))
+      // ccvAddress (20 bytes)
+      parts.push(getDataBytes(ccvAddress))
+    } else {
+      // ccvAddressLength = 0
+      parts.push(new Uint8Array([0]))
+    }
+
+    // ccvArgsLength (2 bytes, uint16 big-endian)
+    const ccvArgsLenBytes = new Uint8Array(2)
+    ccvArgsLenBytes[0] = (ccvArgs.length >>> 8) & 0xff
+    ccvArgsLenBytes[1] = ccvArgs.length & 0xff
+    parts.push(ccvArgsLenBytes)
+
+    // ccvArgs (variable)
+    if (ccvArgs.length > 0) {
+      parts.push(ccvArgs)
+    }
+  }
+
+  // executorLength (1 byte)
+  if (args.executor && args.executor !== '' && args.executor !== '0x') {
+    parts.push(new Uint8Array([20]))
+    parts.push(getDataBytes(args.executor))
+  } else {
+    parts.push(new Uint8Array([0]))
+  }
+
+  // executorArgsLength (2 bytes, uint16 big-endian)
+  const executorArgsLenBytes = new Uint8Array(2)
+  executorArgsLenBytes[0] = (args.executorArgs.length >>> 8) & 0xff
+  executorArgsLenBytes[1] = args.executorArgs.length & 0xff
+  parts.push(executorArgsLenBytes)
+
+  // executorArgs (variable)
+  if (args.executorArgs.length > 0) {
+    parts.push(args.executorArgs)
+  }
+
+  // tokenReceiverLength (1 byte)
+  parts.push(new Uint8Array([args.tokenReceiver.length]))
+
+  // tokenReceiver (variable)
+  if (args.tokenReceiver.length > 0) {
+    parts.push(args.tokenReceiver)
+  }
+
+  // tokenArgsLength (2 bytes, uint16 big-endian)
+  const tokenArgsLenBytes = new Uint8Array(2)
+  tokenArgsLenBytes[0] = (args.tokenArgs.length >>> 8) & 0xff
+  tokenArgsLenBytes[1] = args.tokenArgs.length & 0xff
+  parts.push(tokenArgsLenBytes)
+
+  // tokenArgs (variable)
+  if (args.tokenArgs.length > 0) {
+    parts.push(args.tokenArgs)
+  }
+
+  return hexlify(concat(parts))
+}
+
+/**
+ * Decodes EVMExtraArgsV3 from tightly packed binary format.
+ * @param data - Bytes to decode (without the tag prefix).
+ * @returns Decoded EVMExtraArgsV3 or undefined if parsing fails.
+ */
+function decodeExtraArgsV3(data: Uint8Array): EVMExtraArgsV3 | undefined {
+  let offset = 0
+
+  // gasLimit (4 bytes, uint32 big-endian)
+  if (offset + 4 > data.length) return undefined
+  const gasLimit = BigInt(
+    ((data[offset]! << 24) |
+      (data[offset + 1]! << 16) |
+      (data[offset + 2]! << 8) |
+      data[offset + 3]!) >>>
+      0,
+  )
+  offset += 4
+
+  // blockConfirmations (2 bytes, uint16 big-endian)
+  if (offset + 2 > data.length) return undefined
+  const blockConfirmations = (data[offset]! << 8) | data[offset + 1]!
+  offset += 2
+
+  // ccvsLength (1 byte)
+  if (offset + 1 > data.length) return undefined
+  const ccvsLength = data[offset]!
+  offset += 1
+
+  const ccvs: string[] = []
+  const ccvArgs: Uint8Array[] = []
+
+  // For each CCV
+  for (let i = 0; i < ccvsLength; i++) {
+    // ccvAddressLength (1 byte)
+    if (offset + 1 > data.length) return undefined
+    const ccvAddrLen = data[offset]!
+    offset += 1
+
+    // ccvAddress (0 or 20 bytes)
+    if (ccvAddrLen === 20) {
+      if (offset + 20 > data.length) return undefined
+      ccvs.push(getAddress(hexlify(data.slice(offset, offset + 20))))
+      offset += 20
+    } else if (ccvAddrLen === 0) {
+      ccvs.push('')
+    } else {
+      return undefined // Invalid address length
+    }
+
+    // ccvArgsLength (2 bytes, uint16 big-endian)
+    if (offset + 2 > data.length) return undefined
+    const ccvArgsLen = (data[offset]! << 8) | data[offset + 1]!
+    offset += 2
+
+    // ccvArgs (variable)
+    if (offset + ccvArgsLen > data.length) return undefined
+    ccvArgs.push(data.slice(offset, offset + ccvArgsLen))
+    offset += ccvArgsLen
+  }
+
+  // executorLength (1 byte)
+  if (offset + 1 > data.length) return undefined
+  const executorLen = data[offset]!
+  offset += 1
+
+  // executor (0 or 20 bytes)
+  let executor = ''
+  if (executorLen === 20) {
+    if (offset + 20 > data.length) return undefined
+    executor = getAddress(hexlify(data.slice(offset, offset + 20)))
+    offset += 20
+  } else if (executorLen !== 0) {
+    return undefined // Invalid executor length
+  }
+
+  // executorArgsLength (2 bytes, uint16 big-endian)
+  if (offset + 2 > data.length) return undefined
+  const executorArgsLen = (data[offset]! << 8) | data[offset + 1]!
+  offset += 2
+
+  // executorArgs (variable)
+  if (offset + executorArgsLen > data.length) return undefined
+  const executorArgs = data.slice(offset, offset + executorArgsLen)
+  offset += executorArgsLen
+
+  // tokenReceiverLength (1 byte)
+  if (offset + 1 > data.length) return undefined
+  const tokenReceiverLen = data[offset]!
+  offset += 1
+
+  // tokenReceiver (variable)
+  if (offset + tokenReceiverLen > data.length) return undefined
+  const tokenReceiver = data.slice(offset, offset + tokenReceiverLen)
+  offset += tokenReceiverLen
+
+  // tokenArgsLength (2 bytes, uint16 big-endian)
+  if (offset + 2 > data.length) return undefined
+  const tokenArgsLen = (data[offset]! << 8) | data[offset + 1]!
+  offset += 2
+
+  // tokenArgs (variable)
+  if (offset + tokenArgsLen > data.length) return undefined
+  const tokenArgs = data.slice(offset, offset + tokenArgsLen)
+  offset += tokenArgsLen
+
+  return {
+    gasLimit,
+    blockConfirmations,
+    ccvs,
+    ccvArgs,
+    executor,
+    executorArgs,
+    tokenReceiver,
+    tokenArgs,
+  }
+}
 
 function resultToObject<T>(o: T): T {
   if (o instanceof Promise) return o.then(resultToObject) as T
@@ -553,6 +787,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   ):
     | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
+    | (EVMExtraArgsV3 & { _tag: 'EVMExtraArgsV3' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
     | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
     | undefined {
@@ -566,6 +801,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       case EVMExtraArgsV2Tag: {
         const args = defaultAbiCoder.decode([EVMExtraArgsV2], dataSlice(data, 4))
         return { ...(resultToObject(args[0]) as EVMExtraArgsV2), _tag: 'EVMExtraArgsV2' }
+      }
+      case EVMExtraArgsV3Tag: {
+        const parsed = decodeExtraArgsV3(data.slice(4))
+        if (!parsed) return undefined
+        return { ...parsed, _tag: 'EVMExtraArgsV3' }
       }
       case SVMExtraArgsV1Tag: {
         const args = defaultAbiCoder.decode([SVMExtraArgsV1], dataSlice(data, 4))
@@ -594,7 +834,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    */
   static encodeExtraArgs(args: ExtraArgs | undefined): string {
     if (!args) return '0x'
-    if ('computeUnits' in args) {
+    if ('blockConfirmations' in args) {
+      // EVMExtraArgsV3 - tightly packed binary encoding
+      return encodeExtraArgsV3(args)
+    } else if ('computeUnits' in args) {
       return concat([
         SVMExtraArgsV1Tag,
         defaultAbiCoder.encode(

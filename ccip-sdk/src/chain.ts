@@ -16,6 +16,7 @@ import type { UnsignedEVMTx } from './evm/types.ts'
 import type {
   EVMExtraArgsV1,
   EVMExtraArgsV2,
+  EVMExtraArgsV3,
   ExtraArgs,
   SVMExtraArgsV1,
   SuiExtraArgsV1,
@@ -1040,6 +1041,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
   ):
     | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
+    | (EVMExtraArgsV3 & { _tag: 'EVMExtraArgsV3' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
     | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
     | undefined

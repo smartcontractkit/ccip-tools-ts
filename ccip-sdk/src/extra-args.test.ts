@@ -5,7 +5,12 @@ import { dataSlice, getNumber } from 'ethers'
 
 // Import index.ts to ensure all Chain classes are loaded and registered
 import './index.ts'
-import { EVMExtraArgsV2Tag, decodeExtraArgs, encodeExtraArgs } from './extra-args.ts'
+import {
+  type EVMExtraArgsV3,
+  EVMExtraArgsV2Tag,
+  decodeExtraArgs,
+  encodeExtraArgs,
+} from './extra-args.ts'
 import { extractMagicTag } from './ton/utils.ts'
 import { ChainFamily } from './types.ts'
 
@@ -298,6 +303,275 @@ describe('parseExtraArgs', () => {
       assert.equal(evmEncoded.substring(0, 10), EVMExtraArgsV2Tag)
       assert.equal(extractMagicTag(tonEncoded), EVMExtraArgsV2Tag)
       assert.notEqual(evmEncoded, tonEncoded)
+    })
+  })
+})
+
+describe('EVMExtraArgsV3', () => {
+  describe('encoding', () => {
+    it('should encode V3 args with correct tag', () => {
+      const args: EVMExtraArgsV3 = {
+        gasLimit: 200_000n,
+        blockConfirmations: 5,
+        ccvs: [],
+        ccvArgs: [],
+        executor: '',
+        executorArgs: new Uint8Array(0),
+        tokenReceiver: new Uint8Array(0),
+        tokenArgs: new Uint8Array(0),
+      }
+      const encoded = encodeExtraArgs(args, ChainFamily.EVM)
+      assert.match(encoded, /^0x302326cb/) // EVMExtraArgsV3Tag
+    })
+
+    it('should encode gasLimit as uint32 big-endian', () => {
+      const args: EVMExtraArgsV3 = {
+        gasLimit: 0x12345678n,
+        blockConfirmations: 0,
+        ccvs: [],
+        ccvArgs: [],
+        executor: '',
+        executorArgs: new Uint8Array(0),
+        tokenReceiver: new Uint8Array(0),
+        tokenArgs: new Uint8Array(0),
+      }
+      const encoded = encodeExtraArgs(args, ChainFamily.EVM)
+      // After 4-byte tag, next 4 bytes should be gasLimit
+      assert.equal(dataSlice(encoded, 4, 8), '0x12345678')
+    })
+
+    it('should encode blockConfirmations as uint16 big-endian', () => {
+      const args: EVMExtraArgsV3 = {
+        gasLimit: 0n,
+        blockConfirmations: 0x1234,
+        ccvs: [],
+        ccvArgs: [],
+        executor: '',
+        executorArgs: new Uint8Array(0),
+        tokenReceiver: new Uint8Array(0),
+        tokenArgs: new Uint8Array(0),
+      }
+      const encoded = encodeExtraArgs(args, ChainFamily.EVM)
+      // After 4-byte tag + 4-byte gasLimit, next 2 bytes should be blockConfirmations
+      assert.equal(dataSlice(encoded, 8, 10), '0x1234')
+    })
+  })
+
+  describe('decoding', () => {
+    it('should decode V3 args with empty arrays', () => {
+      const original: EVMExtraArgsV3 = {
+        gasLimit: 200_000n,
+        blockConfirmations: 5,
+        ccvs: [],
+        ccvArgs: [],
+        executor: '',
+        executorArgs: new Uint8Array(0),
+        tokenReceiver: new Uint8Array(0),
+        tokenArgs: new Uint8Array(0),
+      }
+      const encoded = encodeExtraArgs(original, ChainFamily.EVM)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM)
+
+      assert.equal(decoded?._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded?.gasLimit, 200_000n)
+      assert.equal((decoded as EVMExtraArgsV3).blockConfirmations, 5)
+      assert.deepEqual((decoded as EVMExtraArgsV3).ccvs, [])
+      assert.deepEqual((decoded as EVMExtraArgsV3).ccvArgs, [])
+      assert.equal((decoded as EVMExtraArgsV3).executor, '')
+    })
+
+    it('should decode V3 args with CCVs', () => {
+      const original: EVMExtraArgsV3 = {
+        gasLimit: 100_000n,
+        blockConfirmations: 10,
+        ccvs: ['0x1234567890123456789012345678901234567890'],
+        ccvArgs: [new Uint8Array([1, 2, 3, 4])],
+        executor: '',
+        executorArgs: new Uint8Array(0),
+        tokenReceiver: new Uint8Array(0),
+        tokenArgs: new Uint8Array(0),
+      }
+      const encoded = encodeExtraArgs(original, ChainFamily.EVM)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as EVMExtraArgsV3 & { _tag: string }
+
+      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded.ccvs.length, 1)
+      assert.equal(decoded.ccvs[0]?.toLowerCase(), '0x1234567890123456789012345678901234567890')
+      assert.deepEqual(decoded.ccvArgs[0], new Uint8Array([1, 2, 3, 4]))
+    })
+
+    it('should decode V3 args with executor', () => {
+      const original: EVMExtraArgsV3 = {
+        gasLimit: 50_000n,
+        blockConfirmations: 0,
+        ccvs: [],
+        ccvArgs: [],
+        executor: '0xabcdefABCDEF123456789012345678901234ABCD',
+        executorArgs: new Uint8Array([0xaa, 0xbb]),
+        tokenReceiver: new Uint8Array(0),
+        tokenArgs: new Uint8Array(0),
+      }
+      const encoded = encodeExtraArgs(original, ChainFamily.EVM)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as EVMExtraArgsV3 & { _tag: string }
+
+      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded.executor.toLowerCase(), '0xabcdefabcdef123456789012345678901234abcd')
+      assert.deepEqual(decoded.executorArgs, new Uint8Array([0xaa, 0xbb]))
+    })
+
+    it('should decode V3 args with tokenReceiver and tokenArgs', () => {
+      const original: EVMExtraArgsV3 = {
+        gasLimit: 300_000n,
+        blockConfirmations: 15,
+        ccvs: [],
+        ccvArgs: [],
+        executor: '',
+        executorArgs: new Uint8Array(0),
+        tokenReceiver: new Uint8Array([
+          1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+        ]),
+        tokenArgs: new Uint8Array([0xff, 0xee, 0xdd]),
+      }
+      const encoded = encodeExtraArgs(original, ChainFamily.EVM)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as EVMExtraArgsV3 & { _tag: string }
+
+      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.deepEqual(decoded.tokenReceiver, original.tokenReceiver)
+      assert.deepEqual(decoded.tokenArgs, original.tokenArgs)
+    })
+  })
+
+  describe('round-trip encoding/decoding', () => {
+    it('should round-trip minimal V3 args', () => {
+      const original: EVMExtraArgsV3 = {
+        gasLimit: 200_000n,
+        blockConfirmations: 5,
+        ccvs: [],
+        ccvArgs: [],
+        executor: '',
+        executorArgs: new Uint8Array(0),
+        tokenReceiver: new Uint8Array(0),
+        tokenArgs: new Uint8Array(0),
+      }
+      const encoded = encodeExtraArgs(original, ChainFamily.EVM)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as EVMExtraArgsV3 & { _tag: string }
+
+      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded.gasLimit, original.gasLimit)
+      assert.equal(decoded.blockConfirmations, original.blockConfirmations)
+      assert.deepEqual(decoded.ccvs, original.ccvs)
+      assert.deepEqual(decoded.ccvArgs, original.ccvArgs)
+      assert.equal(decoded.executor, original.executor)
+      assert.deepEqual(decoded.executorArgs, original.executorArgs)
+      assert.deepEqual(decoded.tokenReceiver, original.tokenReceiver)
+      assert.deepEqual(decoded.tokenArgs, original.tokenArgs)
+    })
+
+    it('should round-trip V3 args with all fields populated', () => {
+      const original: EVMExtraArgsV3 = {
+        gasLimit: 500_000n,
+        blockConfirmations: 20,
+        ccvs: [
+          '0x1111111111111111111111111111111111111111',
+          '0x2222222222222222222222222222222222222222',
+        ],
+        ccvArgs: [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5, 6, 7, 8])],
+        executor: '0x3333333333333333333333333333333333333333',
+        executorArgs: new Uint8Array([0x10, 0x20, 0x30]),
+        tokenReceiver: new Uint8Array([
+          0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf,
+          0xb0, 0xb1, 0xb2, 0xb3, 0xb4,
+        ]),
+        tokenArgs: new Uint8Array([0xcc, 0xdd, 0xee, 0xff]),
+      }
+      const encoded = encodeExtraArgs(original, ChainFamily.EVM)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as EVMExtraArgsV3 & { _tag: string }
+
+      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded.gasLimit, original.gasLimit)
+      assert.equal(decoded.blockConfirmations, original.blockConfirmations)
+      assert.equal(decoded.ccvs.length, 2)
+      assert.equal(decoded.ccvs[0]?.toLowerCase(), original.ccvs[0]!.toLowerCase())
+      assert.equal(decoded.ccvs[1]?.toLowerCase(), original.ccvs[1]!.toLowerCase())
+      assert.deepEqual(decoded.ccvArgs[0], original.ccvArgs[0])
+      assert.deepEqual(decoded.ccvArgs[1], original.ccvArgs[1])
+      assert.equal(decoded.executor.toLowerCase(), original.executor.toLowerCase())
+      assert.deepEqual(decoded.executorArgs, original.executorArgs)
+      assert.deepEqual(decoded.tokenReceiver, original.tokenReceiver)
+      assert.deepEqual(decoded.tokenArgs, original.tokenArgs)
+    })
+
+    it('should round-trip V3 args with max uint32 gasLimit', () => {
+      const original: EVMExtraArgsV3 = {
+        gasLimit: BigInt(0xffffffff), // max uint32
+        blockConfirmations: 0xffff, // max uint16
+        ccvs: [],
+        ccvArgs: [],
+        executor: '',
+        executorArgs: new Uint8Array(0),
+        tokenReceiver: new Uint8Array(0),
+        tokenArgs: new Uint8Array(0),
+      }
+      const encoded = encodeExtraArgs(original, ChainFamily.EVM)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as EVMExtraArgsV3 & { _tag: string }
+
+      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded.gasLimit, BigInt(0xffffffff))
+      assert.equal(decoded.blockConfirmations, 0xffff)
+    })
+  })
+
+  describe('auto-detect chain family', () => {
+    it('should auto-detect V3 args', () => {
+      const original: EVMExtraArgsV3 = {
+        gasLimit: 100_000n,
+        blockConfirmations: 3,
+        ccvs: [],
+        ccvArgs: [],
+        executor: '',
+        executorArgs: new Uint8Array(0),
+        tokenReceiver: new Uint8Array(0),
+        tokenArgs: new Uint8Array(0),
+      }
+      const encoded = encodeExtraArgs(original, ChainFamily.EVM)
+      const decoded = decodeExtraArgs(encoded) // no chain family specified
+
+      assert.equal(decoded?._tag, 'EVMExtraArgsV3')
+    })
+  })
+
+  describe('V1/V2 backward compatibility', () => {
+    it('should still correctly decode V1 args after V3 addition', () => {
+      const res = decodeExtraArgs(
+        '0x97a657c9000000000000000000000000000000000000000000000000000000000000000a',
+        ChainFamily.EVM,
+      )
+      assert.deepEqual(res, { _tag: 'EVMExtraArgsV1', gasLimit: 10n })
+    })
+
+    it('should still correctly decode V2 args after V3 addition', () => {
+      const res = decodeExtraArgs(
+        '0x181dcf10000000000000000000000000000000000000000000000000000000000000000b0000000000000000000000000000000000000000000000000000000000000001',
+        ChainFamily.EVM,
+      )
+      assert.deepEqual(res, {
+        _tag: 'EVMExtraArgsV2',
+        gasLimit: 11n,
+        allowOutOfOrderExecution: true,
+      })
+    })
+
+    it('should still correctly encode V1 args after V3 addition', () => {
+      const encoded = encodeExtraArgs({ gasLimit: 100_000n }, ChainFamily.EVM)
+      assert.match(encoded, /^0x97a657c9/) // EVMExtraArgsV1Tag
+    })
+
+    it('should still correctly encode V2 args after V3 addition', () => {
+      const encoded = encodeExtraArgs(
+        { gasLimit: 200_000n, allowOutOfOrderExecution: true },
+        ChainFamily.EVM,
+      )
+      assert.match(encoded, /^0x181dcf10/) // EVMExtraArgsV2Tag
     })
   })
 })

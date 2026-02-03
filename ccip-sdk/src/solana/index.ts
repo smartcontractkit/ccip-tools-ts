@@ -1599,7 +1599,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const tokenReceiver =
       message.extraArgs &&
       'tokenReceiver' in message.extraArgs &&
-      message.extraArgs.tokenReceiver != null
+      message.extraArgs.tokenReceiver != null &&
+      typeof message.extraArgs.tokenReceiver === 'string'
         ? message.extraArgs.tokenReceiver
         : message.tokenAmounts?.length
           ? this.getAddress(message.receiver)

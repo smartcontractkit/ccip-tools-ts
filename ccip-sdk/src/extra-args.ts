@@ -8,6 +8,8 @@ import { ChainFamily } from './types.ts'
 export const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'
 /** Tag identifier for EVMExtraArgsV2 encoding. */
 export const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'
+/** Tag identifier for EVMExtraArgsV3 encoding (tightly packed binary format). */
+export const EVMExtraArgsV3Tag = '0x302326cb' as const
 /** Tag identifier for SVMExtraArgsV1 encoding. */
 export const SVMExtraArgsV1Tag = id('CCIP SVMExtraArgsV1').substring(0, 10) as '0x1f3b3aba'
 /** Tag identifier for SuiExtraArgsV1 encoding. */
@@ -43,6 +45,43 @@ export type EVMExtraArgsV1 = {
 export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
   /** Whether to allow out-of-order message execution. */
   allowOutOfOrderExecution: boolean
+}
+
+/**
+ * EVM extra arguments version 3 with cross-chain verifiers and executor support.
+ * Also known as GenericExtraArgsV3. Uses tightly packed binary encoding (NOT ABI-encoded).
+ *
+ * @example
+ * ```typescript
+ * const args: EVMExtraArgsV3 = {
+ *   gasLimit: 200_000n,
+ *   blockConfirmations: 5,
+ *   ccvs: ['0x1234...'],
+ *   ccvArgs: [new Uint8Array([1, 2, 3])],
+ *   executor: '0x5678...',
+ *   executorArgs: new Uint8Array([]),
+ *   tokenReceiver: new Uint8Array([...]),
+ *   tokenArgs: new Uint8Array([]),
+ * }
+ * ```
+ */
+export type EVMExtraArgsV3 = {
+  /** Gas limit for execution on the destination chain (uint32). */
+  gasLimit: bigint
+  /** Number of block confirmations required. */
+  blockConfirmations: number
+  /** Cross-chain verifier addresses (EVM addresses). */
+  ccvs: string[]
+  /** Per-CCV arguments. */
+  ccvArgs: Uint8Array[]
+  /** Executor address (EVM address or empty string for none). */
+  executor: string
+  /** Executor-specific arguments. */
+  executorArgs: Uint8Array
+  /** Token receiver in bytes (destination chain format). */
+  tokenReceiver: Uint8Array
+  /** Token pool-specific arguments. */
+  tokenArgs: Uint8Array
 }
 
 /**
@@ -95,7 +134,12 @@ export type SuiExtraArgsV1 = EVMExtraArgsV2 & {
 /**
  * Union type of all supported extra arguments formats.
  */
-export type ExtraArgs = EVMExtraArgsV1 | EVMExtraArgsV2 | SVMExtraArgsV1 | SuiExtraArgsV1
+export type ExtraArgs =
+  | EVMExtraArgsV1
+  | EVMExtraArgsV2
+  | EVMExtraArgsV3
+  | SVMExtraArgsV1
+  | SuiExtraArgsV1
 
 /**
  * Encodes extra arguments for CCIP messages.
@@ -143,6 +187,7 @@ export function decodeExtraArgs(
 ):
   | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
   | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
+  | (EVMExtraArgsV3 & { _tag: 'EVMExtraArgsV3' })
   | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
   | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
   | undefined {
