@@ -574,4 +574,150 @@ describe('EVMExtraArgsV3', () => {
       assert.match(encoded, /^0x181dcf10/) // EVMExtraArgsV2Tag
     })
   })
+
+  describe('canonical test vectors', () => {
+    // These test vectors were generated using a Forge script that calls the actual
+    // ExtraArgsCodec.sol library from the CCIP 2.0 contract code. The hex strings
+    // are canonical reference values produced by the on-chain encoder.
+
+    it('should decode test vector: minimal', () => {
+      // gasLimit=200000, blockConfirmations=1, all empty
+      const decoded = decodeExtraArgs(
+        '0x302326cb00030d40000100000000000000',
+        ChainFamily.EVM,
+      ) as EVMExtraArgsV3 & { _tag: string }
+      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded.gasLimit, 200000n)
+      assert.equal(decoded.blockConfirmations, 1)
+      assert.deepEqual(decoded.ccvs, [])
+      assert.deepEqual(decoded.ccvArgs, [])
+      assert.equal(decoded.executor, '')
+      assert.deepEqual(decoded.executorArgs, new Uint8Array(0))
+      assert.deepEqual(decoded.tokenReceiver, new Uint8Array(0))
+      assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
+    })
+
+    it('should decode test vector: all zeros', () => {
+      // All fields zero/empty
+      const decoded = decodeExtraArgs(
+        '0x302326cb00000000000000000000000000',
+        ChainFamily.EVM,
+      ) as EVMExtraArgsV3 & { _tag: string }
+      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded.gasLimit, 0n)
+      assert.equal(decoded.blockConfirmations, 0)
+      assert.deepEqual(decoded.ccvs, [])
+      assert.deepEqual(decoded.ccvArgs, [])
+      assert.equal(decoded.executor, '')
+      assert.deepEqual(decoded.executorArgs, new Uint8Array(0))
+      assert.deepEqual(decoded.tokenReceiver, new Uint8Array(0))
+      assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
+    })
+
+    it('should decode test vector: max values', () => {
+      // gasLimit=4294967295 (max uint32), blockConfirmations=65535 (max uint16)
+      const decoded = decodeExtraArgs(
+        '0x302326cbffffffffffff00000000000000',
+        ChainFamily.EVM,
+      ) as EVMExtraArgsV3 & { _tag: string }
+      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded.gasLimit, 4294967295n)
+      assert.equal(decoded.blockConfirmations, 65535)
+      assert.deepEqual(decoded.ccvs, [])
+      assert.deepEqual(decoded.ccvArgs, [])
+      assert.equal(decoded.executor, '')
+      assert.deepEqual(decoded.executorArgs, new Uint8Array(0))
+      assert.deepEqual(decoded.tokenReceiver, new Uint8Array(0))
+      assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
+    })
+
+    it('should decode test vector: with executor', () => {
+      // gasLimit=400000, blockConfirmations=5, executor=0x9fca2fa95be0944a4ad731474dd3cdb1b704f9c6, executorArgs="data"
+      const decoded = decodeExtraArgs(
+        '0x302326cb00061a80000500149fca2fa95be0944a4ad731474dd3cdb1b704f9c6000464617461000000',
+        ChainFamily.EVM,
+      ) as EVMExtraArgsV3 & { _tag: string }
+      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded.gasLimit, 400000n)
+      assert.equal(decoded.blockConfirmations, 5)
+      assert.deepEqual(decoded.ccvs, [])
+      assert.deepEqual(decoded.ccvArgs, [])
+      assert.equal(decoded.executor.toLowerCase(), '0x9fca2fa95be0944a4ad731474dd3cdb1b704f9c6')
+      assert.deepEqual(decoded.executorArgs, new Uint8Array([0x64, 0x61, 0x74, 0x61])) // "data"
+      assert.deepEqual(decoded.tokenReceiver, new Uint8Array(0))
+      assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
+    })
+
+    it('should decode test vector: with 2 CCVs', () => {
+      // gasLimit=300000, blockConfirmations=10, 2 CCVs with "args1"/"args2"
+      const decoded = decodeExtraArgs(
+        '0x302326cb000493e0000a021497cb3391ea73689a81b6853deb104dd078538f6b0005617267733114a0b7e3c01fcd94560317638a6b01f81846dee14400056172677332000000000000',
+        ChainFamily.EVM,
+      ) as EVMExtraArgsV3 & { _tag: string }
+      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded.gasLimit, 300000n)
+      assert.equal(decoded.blockConfirmations, 10)
+      assert.equal(decoded.ccvs.length, 2)
+      assert.equal(decoded.ccvs[0]?.toLowerCase(), '0x97cb3391ea73689a81b6853deb104dd078538f6b')
+      assert.equal(decoded.ccvs[1]?.toLowerCase(), '0xa0b7e3c01fcd94560317638a6b01f81846dee144')
+      assert.deepEqual(decoded.ccvArgs[0], new Uint8Array([0x61, 0x72, 0x67, 0x73, 0x31])) // "args1"
+      assert.deepEqual(decoded.ccvArgs[1], new Uint8Array([0x61, 0x72, 0x67, 0x73, 0x32])) // "args2"
+      assert.equal(decoded.executor, '')
+      assert.deepEqual(decoded.executorArgs, new Uint8Array(0))
+      assert.deepEqual(decoded.tokenReceiver, new Uint8Array(0))
+      assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
+    })
+
+    it('should decode test vector: full fields', () => {
+      // All fields populated: gasLimit=200000, blockConfirmations=12, 2 CCVs, executor, tokenReceiver, tokenArgs
+      const decoded = decodeExtraArgs(
+        '0x302326cb00030d40000c021497cb3391ea73689a81b6853deb104dd078538f6b0005617267733114a0b7e3c01fcd94560317638a6b01f81846dee14400056172677332149fca2fa95be0944a4ad731474dd3cdb1b704f9c60008657865634172677314c9f66ef22b2e26c2af10fcf8847ac4a920ab3eaa0009746f6b656e41726773',
+        ChainFamily.EVM,
+      ) as EVMExtraArgsV3 & { _tag: string }
+      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded.gasLimit, 200000n)
+      assert.equal(decoded.blockConfirmations, 12)
+      assert.equal(decoded.ccvs.length, 2)
+      assert.equal(decoded.ccvs[0]?.toLowerCase(), '0x97cb3391ea73689a81b6853deb104dd078538f6b')
+      assert.equal(decoded.ccvs[1]?.toLowerCase(), '0xa0b7e3c01fcd94560317638a6b01f81846dee144')
+      assert.deepEqual(decoded.ccvArgs[0], new Uint8Array([0x61, 0x72, 0x67, 0x73, 0x31])) // "args1"
+      assert.deepEqual(decoded.ccvArgs[1], new Uint8Array([0x61, 0x72, 0x67, 0x73, 0x32])) // "args2"
+      assert.equal(decoded.executor.toLowerCase(), '0x9fca2fa95be0944a4ad731474dd3cdb1b704f9c6')
+      // "execArgs" (note capital A) = 0x65 78 65 63 41 72 67 73
+      assert.deepEqual(
+        decoded.executorArgs,
+        new Uint8Array([0x65, 0x78, 0x65, 0x63, 0x41, 0x72, 0x67, 0x73]),
+      )
+      // tokenReceiver is 20 bytes: 0xc9f66ef22b2e26c2af10fcf8847ac4a920ab3eaa
+      assert.equal(decoded.tokenReceiver.length, 20)
+      // "tokenArgs" (note capital A) = 0x74 6f 6b 65 6e 41 72 67 73
+      assert.deepEqual(
+        decoded.tokenArgs,
+        new Uint8Array([0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x41, 0x72, 0x67, 0x73]),
+      )
+    })
+
+    it('should decode test vector: zero-address CCVs', () => {
+      // 2 CCVs with address(0), executor with 40-byte string args, tokenReceiver with 40-byte string
+      const decoded = decodeExtraArgs(
+        '0x302326cb0000e86b00220200000000000014123456789012345678901234567890123456789000283332383233383934323839333538373233353938373233393538383537393238333932373335323528333238323338393432383933353837323335393837323332393338353739323833373237333532350000',
+        ChainFamily.EVM,
+      ) as EVMExtraArgsV3 & { _tag: string }
+      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded.gasLimit, 59499n)
+      assert.equal(decoded.blockConfirmations, 34)
+      assert.equal(decoded.ccvs.length, 2)
+      // CCVs with address(0) are decoded as empty strings
+      assert.equal(decoded.ccvs[0], '')
+      assert.equal(decoded.ccvs[1], '')
+      assert.deepEqual(decoded.ccvArgs[0], new Uint8Array(0)) // empty
+      assert.deepEqual(decoded.ccvArgs[1], new Uint8Array(0)) // empty
+      assert.equal(decoded.executor.toLowerCase(), '0x1234567890123456789012345678901234567890')
+      // executorArgs is "3282389428935872359872395885792839273525" (40 bytes)
+      assert.equal(decoded.executorArgs.length, 40)
+      // tokenReceiver is "3282389428935872359872329385792837273525" (40 bytes as string)
+      assert.equal(decoded.tokenReceiver.length, 40)
+      assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
+    })
+  })
 })
