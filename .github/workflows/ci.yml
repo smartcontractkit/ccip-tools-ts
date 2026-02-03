@@ -25,13 +25,6 @@ jobs:
     - name: Install dependencies and build
       run: npm ci
 
-    - name: Upload npm debug logs on failure
-      if: failure()
-      uses: actions/upload-artifact@v5.0.0
-      with:
-        name: npm-debug-logs
-        path: /home/runner/.npm/_logs/
-
     - name: Run lint
       run: npm run check
 
