@@ -384,23 +384,35 @@ const request = await api.getMessageById(
   '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
 )
 
-// Access message details
-console.log('Status:', request.status) // 'SUCCESS', 'FAILED', 'SENT', etc.
+// Access standard fields
+console.log('Message ID:', request.message.messageId)
 console.log('Sender:', request.message.sender)
 console.log('Lane:', request.lane.sourceChainSelector, '→', request.lane.destChainSelector)
 
-// API-specific metadata
-console.log('Ready for manual exec:', request.readyForManualExecution)
-console.log('Delivery time:', request.deliveryTime, 'ms')
+// Access API metadata (present when fetched via API)
+if (request.metadata) {
+  console.log('Status:', request.metadata.status) // 'SUCCESS', 'FAILED', 'SENT', etc.
+  console.log('Ready for manual exec:', request.metadata.readyForManualExecution)
+  if (request.metadata.deliveryTime) {
+    console.log('Delivery time:', request.metadata.deliveryTime, 'ms')
+  }
+}
 ```
 
-The returned `APICCIPRequest` extends `CCIPRequest` with additional API metadata:
+When fetched via the API, `CCIPRequest` includes a `metadata` field with additional information:
 
-- `status` - Message lifecycle status (`SENT`, `COMMITTED`, `SUCCESS`, `FAILED`)
-- `readyForManualExecution` - Whether manual execution is available
-- `finality` - Block confirmations on source chain
-- `receiptTransactionHash` - Execution tx hash (if completed)
-- `deliveryTime` - End-to-end delivery time in ms (if completed)
+#### API Metadata Fields
+
+| Field                     | Type            | Description                              |
+| ------------------------- | --------------- | ---------------------------------------- |
+| `status`                  | `MessageStatus` | SENT, COMMITTED, SUCCESS, FAILED, etc.   |
+| `readyForManualExecution` | `boolean`       | Whether manual execution is available    |
+| `finality`                | `bigint`        | Block confirmations on source chain      |
+| `receiptTransactionHash`  | `string?`       | Execution tx hash (if completed)         |
+| `receiptTimestamp`        | `number?`       | Execution timestamp (if completed)       |
+| `deliveryTime`            | `bigint?`       | End-to-end delivery time in ms           |
+| `sourceNetworkInfo`       | `NetworkInfo`   | Source chain metadata                    |
+| `destNetworkInfo`         | `NetworkInfo`   | Destination chain metadata               |
 
 ### Find Messages in a Transaction
 
@@ -419,7 +431,7 @@ console.log(`Found ${messageIds.length} CCIP message(s)`)
 // Fetch full details for each message
 for (const id of messageIds) {
   const request = await api.getMessageById(id)
-  console.log(`Message ${id}: ${request.status}`)
+  console.log(`Message ${id}: ${request.metadata?.status}`)
 }
 ```
 

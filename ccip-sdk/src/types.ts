@@ -1,6 +1,7 @@
 import type { AbiParametersToPrimitiveTypes, ExtractAbiEvent } from 'abitype'
 import type { BytesLike, Log } from 'ethers'
 
+import type { APICCIPRequestMetadata } from './api/types.ts'
 import type OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
 import type { CCIPMessage_EVM, CCIPMessage_V1_6_EVM } from './evm/messages.ts'
 import type { ExtraArgs } from './extra-args.ts'
@@ -209,6 +210,29 @@ export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
   log: Log_
   /** Transaction that emitted the request. */
   tx: Pick<ChainTransaction, 'hash' | 'logs' | 'blockNumber' | 'timestamp' | 'from' | 'error'>
+
+  /**
+   * API-enriched metadata. Present only when fetched via CCIP API.
+   *
+   * @remarks
+   * When a request is fetched using {@link Chain.getMessageById} or as a fallback
+   * in {@link Chain.getMessagesInTx}, this field contains additional information
+   * including message status, execution details, and network info.
+   *
+   * When constructed from on-chain data only, this field is `undefined`.
+   *
+   * @example
+   * ```typescript
+   * const request = await chain.getMessageById(messageId)
+   * if (request.metadata) {
+   *   console.log('Status:', request.metadata.status)
+   *   console.log('Delivery time:', request.metadata.deliveryTime)
+   * }
+   * ```
+   *
+   * @see {@link APICCIPRequestMetadata}
+   */
+  metadata?: APICCIPRequestMetadata
 }
 
 /**
