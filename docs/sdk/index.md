@@ -111,6 +111,57 @@ const faBalance = await aptosChain.getBalance({
 console.log('Balance:', nativeBalance.toString()) // Raw bigint
 ```
 
+### Query Token Pool Configuration
+
+Inspect token pool configurations and remote chain settings:
+
+```ts
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const chain = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.com')
+const poolAddress = '0xYourTokenPoolAddress'
+
+// Get pool configuration (token, router, version)
+const config = await chain.getTokenPoolConfig(poolAddress)
+console.log('Token:', config.token)
+console.log('Router:', config.router)
+console.log('Version:', config.typeAndVersion) // e.g., "BurnMintTokenPool 1.5.1"
+
+// Get all remote chain configurations
+const remotes = await chain.getTokenPoolRemotes(poolAddress)
+// Returns: { "arbitrum-mainnet": { remoteToken, remotePools, ... }, ... }
+
+for (const [chainName, remote] of Object.entries(remotes)) {
+  console.log(`${chainName}: token=${remote.remoteToken}, pools=${remote.remotePools.length}`)
+}
+
+// Get configuration for a specific remote chain
+const arbitrumSelector = 4949039107694359620n
+const arbRemote = await chain.getTokenPoolRemote(poolAddress, arbitrumSelector)
+console.log('Remote token on Arbitrum:', arbRemote.remoteToken)
+console.log('Inbound rate limit:', arbRemote.inboundRateLimiterState) // null if disabled
+```
+
+### Query Token Admin Registry
+
+Look up token administrator and pool information:
+
+```ts
+const registryAddress = '0xYourTokenAdminRegistryAddress'
+const tokenAddress = '0xYourTokenAddress'
+
+const tokenConfig = await chain.getRegistryTokenConfig(registryAddress, tokenAddress)
+console.log('Administrator:', tokenConfig.administrator)
+console.log('Token Pool:', tokenConfig.tokenPool)
+if (tokenConfig.pendingAdministrator) {
+  console.log('Pending admin transfer to:', tokenConfig.pendingAdministrator)
+}
+
+// List all supported tokens in a registry
+const tokens = await chain.getSupportedTokens(registryAddress)
+console.log('Supported tokens:', tokens)
+```
+
 ### Get CCIP Fee Estimate
 
 ```ts

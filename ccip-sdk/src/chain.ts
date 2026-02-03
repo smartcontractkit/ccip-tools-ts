@@ -8,6 +8,7 @@ import {
   CCIPApiClientNotAvailableError,
   CCIPChainFamilyMismatchError,
   CCIPExecTxRevertedError,
+  CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
 import { DEFAULT_GAS_LIMIT } from './evm/const.ts'
@@ -43,7 +44,7 @@ import {
   type WithLogger,
   ExecutionState,
 } from './types.ts'
-import { util, withRetry } from './utils.ts'
+import { networkInfo, util, withRetry } from './utils.ts'
 
 /**
  * Context for Chain class initialization.
@@ -163,29 +164,93 @@ export type GetBalanceOpts = {
 
 /**
  * Rate limiter state for token pool configurations.
- * Null if rate limiting is disabled.
+ *
+ * @remarks
+ * - Returns the rate limiter bucket state when rate limiting is **enabled**
+ * - Returns `null` when rate limiting is **disabled** (unlimited throughput)
+ *
+ * @example Handling nullable state
+ * ```typescript
+ * const remote = await chain.getTokenPoolRemotes(poolAddress)
+ * const state = remote['ethereum-mainnet'].inboundRateLimiterState
+ *
+ * if (state === null) {
+ *   console.log('Rate limiting disabled - unlimited throughput')
+ * } else {
+ *   console.log(`Capacity: ${state.capacity}, Available: ${state.tokens}`)
+ * }
+ * ```
  */
 export type RateLimiterState = {
   /** Current token balance in the rate limiter bucket. */
   tokens: bigint
   /** Maximum capacity of the rate limiter bucket. */
   capacity: bigint
-  /** Rate at which tokens are replenished. */
+  /** Rate at which tokens are replenished (tokens per second). */
   rate: bigint
 } | null
 
 /**
- * Remote token pool configuration for a specific chain.
+ * Remote token pool configuration for a specific destination chain.
+ *
+ * @remarks
+ * Each entry represents the configuration needed to transfer tokens
+ * from the current chain to a specific destination chain.
  */
 export type TokenPoolRemote = {
   /** Address of the remote token on the destination chain. */
   remoteToken: string
-  /** Addresses of remote token pools. */
+  /**
+   * Addresses of remote token pools on the destination chain.
+   *
+   * @remarks
+   * Multiple pools may exist for:
+   * - Redundancy (failover if one pool is unavailable)
+   * - Capacity aggregation across pools
+   * - Version management (different pool implementations)
+   */
   remotePools: string[]
   /** Inbound rate limiter state for tokens coming into this chain. */
   inboundRateLimiterState: RateLimiterState
   /** Outbound rate limiter state for tokens leaving this chain. */
   outboundRateLimiterState: RateLimiterState
+}
+
+/**
+ * Token pool configuration returned by {@link Chain.getTokenPoolConfig}.
+ *
+ * @remarks
+ * Contains the core configuration of a token pool including the token it manages,
+ * the router it's registered with, and optionally its version identifier.
+ */
+export type TokenPoolConfig = {
+  /** Address of the token managed by this pool. */
+  token: string
+  /** Address of the CCIP router this pool is registered with. */
+  router: string
+  /**
+   * Version identifier string (e.g., "BurnMintTokenPool 1.5.1").
+   *
+   * @remarks
+   * May be undefined for older pool implementations that don't expose this method.
+   */
+  typeAndVersion?: string
+}
+
+/**
+ * Token configuration from a TokenAdminRegistry, returned by {@link Chain.getRegistryTokenConfig}.
+ *
+ * @remarks
+ * The TokenAdminRegistry tracks which administrator controls each token
+ * and which pool is authorized to handle transfers.
+ */
+export type RegistryTokenConfig = {
+  /** Address of the current administrator for this token. */
+  administrator: string
+  /** Address of pending administrator (if ownership transfer is in progress). */
+  pendingAdministrator?: string
+  /** Address of the token pool authorized to handle this token's transfers. */
+  tokenPool?: string
 }
 
 /**
@@ -782,43 +847,125 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   abstract getSupportedTokens(address: string, opts?: { page?: number }): Promise<string[]>
 
   /**
-   * Get TokenConfig for a given token address in a TokenAdminRegistry
-   * @param registry - TokenAdminRegistry contract address
-   * @param token - Token address
-   * @returns Token configuration including administrator and optional tokenPool
-   * @throws {@link CCIPTokenNotInRegistryError} if token not found in registry
+   * Fetch token configuration from a TokenAdminRegistry.
+   *
+   * @remarks
+   * The TokenAdminRegistry is a contract that tracks token administrators and their
+   * associated pools. Each token has an administrator who can update pool configurations.
+   *
+   * @example Query a token's registry configuration
+   * ```typescript
+   * const config = await chain.getRegistryTokenConfig(registryAddress, tokenAddress)
+   * console.log(`Administrator: ${config.administrator}`)
+   * if (config.tokenPool) {
+   *   console.log(`Pool: ${config.tokenPool}`)
+   * }
+   * ```
+   *
+   * @param registry - TokenAdminRegistry contract address.
+   * @param token - Token address to query.
+   * @returns {@link RegistryTokenConfig} containing administrator and pool information.
+   * @throws {@link CCIPTokenNotInRegistryError} if token is not registered.
    */
-  abstract getRegistryTokenConfig(
-    registry: string,
-    token: string,
-  ): Promise<{
-    administrator: string
-    pendingAdministrator?: string
-    tokenPool?: string
-  }>
+  abstract getRegistryTokenConfig(registry: string, token: string): Promise<RegistryTokenConfig>
 
   /**
-   * Get TokenPool state and configurations
-   * @param tokenPool - Token pool address
-   * @returns Token pool configuration including token address, router, and optional typeAndVersion
+   * Fetch configuration of a token pool.
+   *
+   * @remarks
+   * Returns the core configuration of a token pool including which token it manages
+   * and which router it's registered with.
+   *
+   * @example Query pool configuration
+   * ```typescript
+   * const config = await chain.getTokenPoolConfig(poolAddress)
+   * console.log(`Manages token: ${config.token}`)
+   * console.log(`Router: ${config.router}`)
+   * if (config.typeAndVersion) {
+   *   console.log(`Version: ${config.typeAndVersion}`)
+   * }
+   * ```
+   *
+   * @param tokenPool - Token pool contract address.
+   * @returns {@link TokenPoolConfig} containing token, router, and version info.
    */
-  abstract getTokenPoolConfigs(tokenPool: string): Promise<{
-    token: string
-    router: string
-    typeAndVersion?: string
-  }>
+  abstract getTokenPoolConfig(tokenPool: string): Promise<TokenPoolConfig>
 
   /**
-   * Get TokenPool remote configurations.
-   * @param tokenPool - Token pool address.
-   * @param remoteChainSelector - If provided, only return remotes for the specified chain (may error if remote not supported).
-   * @returns Record of network names and remote configurations (remoteToken, remotePools, rateLimitStates).
-   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if remoteChainSelector is specified but not configured
+   * Fetch remote chain configurations for a token pool.
+   *
+   * @remarks
+   * A token pool maintains configurations for each destination chain it supports.
+   * The returned Record maps chain names to their respective configurations.
+   *
+   * @example Get all supported destinations
+   * ```typescript
+   * const remotes = await chain.getTokenPoolRemotes(poolAddress)
+   * // Returns: {
+   * //   "ethereum-mainnet": { remoteToken: "0x...", remotePools: [...], ... },
+   * //   "ethereum-mainnet-arbitrum-1": { remoteToken: "0x...", remotePools: [...], ... },
+   * //   "solana-mainnet": { remoteToken: "...", remotePools: [...], ... }
+   * // }
+   *
+   * // Access a specific chain's config
+   * const arbConfig = remotes['ethereum-mainnet']
+   * console.log(`Remote token: ${arbConfig.remoteToken}`)
+   * ```
+   *
+   * @example Filter to a specific destination
+   * ```typescript
+   * import { networkInfo } from '@chainlink/ccip-sdk'
+   *
+   * const arbitrumSelector = 4949039107694359620n
+   * const remotes = await chain.getTokenPoolRemotes(poolAddress, arbitrumSelector)
+   * // Returns only: { "arbitrum-mainnet": { ... } }
+   *
+   * const chainName = networkInfo(arbitrumSelector).name
+   * const config = remotes[chainName]
+   * ```
+   *
+   * @param tokenPool - Token pool address on the current chain.
+   * @param remoteChainSelector - Optional chain selector to filter results to a single destination.
+   * @returns Record where keys are chain names (e.g., "ethereum-mainnet") and values are {@link TokenPoolRemote} configs.
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if remoteChainSelector is specified but not configured.
    */
   abstract getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
   ): Promise<Record<string, TokenPoolRemote>>
+  /**
+   * Fetch remote chain configuration for a token pool for a specific destination.
+   *
+   * @remarks
+   * Convenience wrapper around {@link getTokenPoolRemotes} that returns a single
+   * configuration instead of a Record. Use this when you need configuration for
+   * a specific destination chain.
+   *
+   * @example
+   * ```typescript
+   * const arbitrumSelector = 4949039107694359620n
+   * const remote = await chain.getTokenPoolRemote(poolAddress, arbitrumSelector)
+   * console.log(`Remote token: ${remote.remoteToken}`)
+   * console.log(`Remote pools: ${remote.remotePools.join(', ')}`)
+   * ```
+   *
+   * @param tokenPool - Token pool address on the current chain.
+   * @param remoteChainSelector - Chain selector of the desired remote chain.
+   * @returns TokenPoolRemote config for the specified remote chain.
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if no configuration found for the specified remote chain.
+   */
+  async getTokenPoolRemote(
+    tokenPool: string,
+    remoteChainSelector: bigint,
+  ): Promise<TokenPoolRemote> {
+    const remotes = await this.getTokenPoolRemotes(tokenPool, remoteChainSelector)
+    const network = networkInfo(remoteChainSelector)
+    const remoteConfig = remotes[network.name]
+    if (!remoteConfig) {
+      throw new CCIPTokenPoolChainConfigNotFoundError(tokenPool, tokenPool, network.name)
+    }
+    return remoteConfig
+  }
 
   /**
    * Fetch list and info of supported feeTokens.

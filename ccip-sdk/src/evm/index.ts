@@ -49,6 +49,7 @@ import {
   CCIPMessageDecodeError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
+  CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
   CCIPVersionFeatureUnavailableError,
   CCIPVersionRequiresLaneError,
@@ -1339,8 +1340,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /** {@inheritDoc Chain.getTokenPoolConfigs} */
-  async getTokenPoolConfigs(tokenPool: string): Promise<{
+  /** {@inheritDoc Chain.getTokenPoolConfig} */
+  async getTokenPoolConfig(tokenPool: string): Promise<{
     token: string
     router: string
     typeAndVersion: string
@@ -1425,18 +1426,20 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return Promise.all([supportedChains, remotePools, remoteInfo]).then(
       ([supportedChains, remotePools, remoteInfo]) =>
         Object.fromEntries(
-          supportedChains.map(
-            (chain, i) =>
-              [
-                chain.name,
-                {
-                  remoteToken: decodeAddress(remoteInfo[i]![0], chain.family),
-                  remotePools: remotePools[i]!.map((pool) => decodeAddress(pool, chain.family)),
-                  inboundRateLimiterState: remoteInfo[i]![1].isEnabled ? remoteInfo[i]![1] : null,
-                  outboundRateLimiterState: remoteInfo[i]![2].isEnabled ? remoteInfo[i]![2] : null,
-                },
-              ] as const,
-          ),
+          supportedChains.map((chain, i) => {
+            const remoteTokenRaw = remoteInfo[i]![0]
+            if (!remoteTokenRaw || remoteTokenRaw.match(/^(0x)?0*$/))
+              throw new CCIPTokenPoolChainConfigNotFoundError(tokenPool, tokenPool, chain.name)
+            return [
+              chain.name,
+              {
+                remoteToken: decodeAddress(remoteTokenRaw, chain.family),
+                remotePools: remotePools[i]!.map((pool) => decodeAddress(pool, chain.family)),
+                inboundRateLimiterState: remoteInfo[i]![1].isEnabled ? remoteInfo[i]![1] : null,
+                outboundRateLimiterState: remoteInfo[i]![2].isEnabled ? remoteInfo[i]![2] : null,
+              },
+            ] as const
+          }),
         ),
     )
   }

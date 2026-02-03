@@ -1255,7 +1255,7 @@ export class CCIPTokenPoolChainConfigNotFoundError extends CCIPError {
     options?: CCIPErrorOptions,
   ) {
     super(
-      CCIPErrorCode.TOKEN_NOT_CONFIGURED,
+      CCIPErrorCode.TOKEN_REMOTE_NOT_CONFIGURED,
       `ChainConfig not found at ${address} for tokenPool=${tokenPool} and remoteNetwork=${remoteNetwork}`,
       {
         ...options,

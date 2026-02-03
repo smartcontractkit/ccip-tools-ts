@@ -96,6 +96,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   TOKEN_NOT_IN_REGISTRY: 'Token not found in TokenAdminRegistry.',
   TOKEN_NOT_CONFIGURED: 'Token is not configured in the registry.',
   TOKEN_NOT_REGISTERED: 'Token is not registered in the TokenAdminRegistry.',
+  TOKEN_REMOTE_NOT_CONFIGURED: 'Remote network is not registered in TokenPool.',
   TOKEN_DECIMALS_INSUFFICIENT: 'Destination token has insufficient decimals.',
   TOKEN_INVALID_SPL: 'Invalid SPL token or Token-2022.',
   TOKEN_DATA_PARSE_FAILED:
