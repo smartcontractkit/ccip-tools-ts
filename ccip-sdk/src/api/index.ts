@@ -1,3 +1,5 @@
+import type { SetRequired } from 'type-fest'
+
 import {
   CCIPHttpError,
   CCIPLaneNotFoundError,
@@ -286,7 +288,7 @@ export class CCIPAPIClient {
    * }
    * ```
    */
-  async getMessageById(messageId: string): Promise<CCIPRequest> {
+  async getMessageById(messageId: string): Promise<SetRequired<CCIPRequest, 'metadata'>> {
     const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}`
 
     this.logger.debug(`CCIPAPIClient: GET ${url}`)
@@ -412,7 +414,7 @@ export class CCIPAPIClient {
    * Populates all derivable CCIPRequest fields from API data.
    * @internal
    */
-  private _transformMessageResponse(text: string): CCIPRequest {
+  _transformMessageResponse(text: string): SetRequired<CCIPRequest, 'metadata'> {
     // Build message with extraArgs spread and tokenAmounts included
     const raw = decodeMessage(text) as CCIPMessage & Omit<RawMessageResponse, keyof CCIPMessage>
 
