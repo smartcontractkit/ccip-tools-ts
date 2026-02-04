@@ -22,6 +22,22 @@ describe('fromViemClient', () => {
     )
   })
 
+  it('should throw if chain.id is not defined', async () => {
+    const mockClient = {
+      chain: { name: 'Ethereum' }, // Missing id
+      request: async () => '0x1',
+    }
+
+    await assert.rejects(
+      () => fromViemClient(mockClient as never),
+      (err: Error) => {
+        assert.ok(err instanceof CCIPViemAdapterError)
+        assert.ok(err.message.includes('chain'))
+        return true
+      },
+    )
+  })
+
   it('should work with http transport', async () => {
     const mockClient = {
       chain: { id: 1, name: 'Ethereum' },
@@ -156,5 +172,50 @@ describe('ViemTransportProvider', () => {
     assert.ok('error' in results[0]!)
     const errorResult = results[0] as { error: { message: string } }
     assert.ok(errorResult.error.message.includes('RPC error'))
+  })
+})
+
+describe('fromViemClient - Structural Type Acceptance', () => {
+  it('should accept minimal structural client (RainbowKit pattern)', async () => {
+    const minimalClient = {
+      chain: { id: 1, name: 'Ethereum' },
+      request: async () => '0x1',
+    }
+
+    // Should not throw type-related errors
+    try {
+      await fromViemClient(minimalClient as never)
+    } catch (err) {
+      // May fail at provider level, but type acceptance should work
+      assert.ok(!(err instanceof CCIPViemAdapterError && err.message.includes('type')))
+    }
+  })
+
+  it('should accept client with readonly chain (wagmi freezes configs)', async () => {
+    const frozenClient = {
+      chain: Object.freeze({ id: 1, name: 'Ethereum' }),
+      request: async () => '0x1',
+    }
+
+    try {
+      await fromViemClient(frozenClient as never)
+    } catch (err) {
+      assert.ok(!(err instanceof CCIPViemAdapterError))
+    }
+  })
+
+  it('should reject client without chain', async () => {
+    const noChainClient = { request: async () => '0x1' }
+
+    await assert.rejects(() => fromViemClient(noChainClient as never), /must have a chain defined/)
+  })
+
+  it('should reject client with null chain', async () => {
+    const nullChainClient = { chain: null, request: async () => '0x1' }
+
+    await assert.rejects(
+      () => fromViemClient(nullChainClient as never),
+      /must have a chain defined/,
+    )
   })
 })

@@ -10,6 +10,7 @@ import type { Chain, PublicClient, Transport } from 'viem'
 import type { ChainContext } from '../../chain.ts'
 import { CCIPViemAdapterError } from '../../errors/index.ts'
 import { EVMChain } from '../index.ts'
+import type { ViemClientLike } from './types.ts'
 
 /**
  * Custom ethers provider that forwards RPC calls through viem's transport.
@@ -66,13 +67,19 @@ export class ViemTransportProvider extends JsonRpcApiProvider {
 /**
  * Create EVMChain from a viem PublicClient.
  *
- * Supports ALL viem transport types including:
+ * Accepts any viem-compatible client including:
+ * - Direct viem createPublicClient()
+ * - Wagmi's usePublicClient() / getPublicClient()
+ * - RainbowKit's getDefaultConfig() clients
+ * - Any object with chain.id, chain.name, and request()
+ *
+ * Supports ALL viem transport types and chain configurations including:
  * - http() - Standard HTTP transport
  * - webSocket() - WebSocket transport
  * - custom() - Injected providers (MetaMask, WalletConnect, etc.)
  * - fallback() - Fallback transport with multiple providers
  *
- * @param client - viem PublicClient instance with chain defined
+ * @param client - Any viem-compatible client with chain defined
  * @param ctx - Optional chain context (logger, etc.)
  * @returns EVMChain instance
  *
@@ -104,20 +111,50 @@ export class ViemTransportProvider extends JsonRpcApiProvider {
  *
  * const chain = await fromViemClient(publicClient)
  * ```
+ *
+ * @example Wagmi integration
+ * ```typescript
+ * import { usePublicClient } from 'wagmi'
+ * import { fromViemClient } from '@chainlink/ccip-sdk/viem'
+ *
+ * const publicClient = usePublicClient()
+ * if (publicClient) {
+ *   const chain = await fromViemClient(publicClient)
+ * }
+ * ```
+ *
+ * @example RainbowKit + wagmi (works with OP Stack chains)
+ * ```typescript
+ * import { getDefaultConfig } from '@rainbow-me/rainbowkit'
+ * import { getPublicClient } from '@wagmi/core'
+ * import { sepolia, baseSepolia } from 'wagmi/chains'
+ * import { fromViemClient } from '@chainlink/ccip-sdk/viem'
+ *
+ * const config = getDefaultConfig({
+ *   chains: [sepolia, baseSepolia], // OP Stack chains work!
+ *   // ...
+ * })
+ *
+ * const client = getPublicClient(config)
+ * if (client) {
+ *   const chain = await fromViemClient(client) // No type cast needed!
+ * }
+ * ```
  */
 export async function fromViemClient(
-  client: PublicClient<Transport, Chain>,
+  client: ViemClientLike,
   ctx?: ChainContext,
 ): Promise<EVMChain> {
-  // Validate chain is defined
-  if (!(client as Partial<typeof client>).chain) {
+  // Validate chain is defined (runtime check)
+  if (!client.chain?.id) {
     throw new CCIPViemAdapterError('PublicClient must have a chain defined', {
       recovery: 'Pass a chain to createPublicClient: createPublicClient({ chain: mainnet, ... })',
     })
   }
 
   // Use custom provider that wraps viem transport (works for ALL transport types)
-  const provider = new ViemTransportProvider(client)
+  // Cast is safe - we've validated the required properties
+  const provider = new ViemTransportProvider(client as PublicClient<Transport, Chain>)
 
   // Use existing EVMChain.fromProvider
   return EVMChain.fromProvider(provider, ctx)

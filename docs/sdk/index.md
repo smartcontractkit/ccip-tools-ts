@@ -746,9 +746,70 @@ const request = await chain.sendMessage({
 console.log('Transaction:', request.tx.hash)
 ```
 
+### Wagmi Integration
+
+The viem adapters work seamlessly with wagmi's strongly-typed clients:
+
+```ts
+import { usePublicClient, useWalletClient } from 'wagmi'
+import { fromViemClient, viemWallet } from '@chainlink/ccip-sdk/viem'
+
+function SendCCIPMessage() {
+  const publicClient = usePublicClient()
+  const { data: walletClient } = useWalletClient()
+
+  async function handleSend() {
+    if (!publicClient || !walletClient) return
+
+    const chain = await fromViemClient(publicClient)
+    const signer = viemWallet(walletClient)
+
+    const request = await chain.sendMessage({
+      router: routerAddress,
+      destChainSelector,
+      message,
+      wallet: signer,
+    })
+  }
+}
+```
+
 :::note Local Accounts
 The `viemWallet` adapter properly handles both local accounts (created with `privateKeyToAccount`) and JSON-RPC accounts (browser wallets). It uses a custom `AbstractSigner` implementation to avoid the `eth_accounts` limitation with local accounts.
 :::
+
+### RainbowKit Integration
+
+The adapters work with RainbowKit's `getDefaultConfig`, including multi-chain setups with OP Stack chains (Base, Optimism, etc.):
+
+```ts
+import { getDefaultConfig } from '@rainbow-me/rainbowkit'
+import { getPublicClient, getWalletClient } from '@wagmi/core'
+import { sepolia, baseSepolia } from 'wagmi/chains'
+import { fromViemClient, viemWallet } from '@chainlink/ccip-sdk/viem'
+
+const config = getDefaultConfig({
+  appName: 'My App',
+  projectId: 'your-walletconnect-project-id',
+  chains: [sepolia, baseSepolia], // OP Stack chains supported
+})
+
+// Get clients from RainbowKit config
+const publicClient = getPublicClient(config)
+const walletClient = await getWalletClient(config)
+
+if (publicClient && walletClient) {
+  const chain = await fromViemClient(publicClient)
+  const signer = viemWallet(walletClient)
+
+  const request = await chain.sendMessage({
+    router: routerAddress,
+    destChainSelector,
+    message,
+    wallet: signer,
+  })
+}
+```
 
 ## Extending the SDK
 
