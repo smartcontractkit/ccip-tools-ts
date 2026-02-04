@@ -14,7 +14,7 @@ import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
 import { showRequests } from './show.ts'
-import { type Ctx, Format } from './types.ts'
+import type { Ctx } from './types.ts'
 import { getCtx, logParsedError, parseTokenAmounts } from './utils.ts'
 import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 
@@ -114,11 +114,6 @@ export const builder = (yargs: Argv) =>
         default: false,
         describe: 'Wait for execution on destination',
       },
-      'list-fee-tokens': {
-        type: 'boolean',
-        default: false,
-        describe: 'List available fee tokens for the router and exit',
-      },
     })
     .check(
       ({ 'transfer-tokens': transferTokens }) =>
@@ -132,10 +127,6 @@ export const builder = (yargs: Argv) =>
       [
         'ccip-cli send -s ethereum-testnet-sepolia -d arbitrum-sepolia -r 0x0BF3... --to 0xABC... --data "Hello"',
         'Send message with data',
-      ],
-      [
-        'ccip-cli send -s ethereum-mainnet -d arbitrum-mainnet -r 0x80226fc... --list-fee-tokens',
-        'List available fee tokens for a router',
       ],
     ])
 
@@ -162,23 +153,6 @@ async function sendMessage(
   const destNetwork = networkInfo(argv.dest)
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
-
-  // Handle --list-fee-tokens flag
-  if (argv.listFeeTokens) {
-    const feeTokens = await source.getFeeTokens(argv.router)
-    switch (argv.format) {
-      case Format.pretty:
-        logger.info('Fee Tokens:')
-        logger.table(feeTokens)
-        break
-      case Format.json:
-        logger.log(JSON.stringify(feeTokens, null, 2))
-        break
-      default:
-        logger.log('feeTokens:', feeTokens)
-    }
-    return
-  }
 
   let data: BytesLike | undefined
   if (argv.data) {

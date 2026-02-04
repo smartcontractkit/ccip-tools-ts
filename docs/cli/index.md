@@ -213,7 +213,6 @@ ccip-cli send --source <chain> --dest <chain> --router <address> [options]
 | `--only-get-fee` | Print fee and exit |
 | `--only-estimate` | Print gas estimate and exit |
 | `--estimate-gas-limit <margin%>` | Auto-estimate with safety margin |
-| `--list-fee-tokens` | List available fee tokens for the router and exit |
 
 **Utility Options:**
 
@@ -256,13 +255,6 @@ ccip-cli send \
   --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=0.1 \
   --fee-token LINK \
   --wait
-
-# List available fee tokens for a router
-ccip-cli send \
-  -s ethereum-mainnet \
-  -d arbitrum-mainnet \
-  -r 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D \
-  --list-fee-tokens
 ```
 
 ---
@@ -366,6 +358,7 @@ ccip-cli get-supported-tokens --network <network> --address <address> [--token <
 | Option | Alias | Description |
 |--------|-------|-------------|
 | `--token` | `-t` | Token address to query (pre-selects from list if address is a registry) |
+| `--fee-tokens` | | List fee tokens instead of transferable tokens |
 
 **Examples:**
 
@@ -378,6 +371,11 @@ ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb
 
 # Query token pool directly
 ccip-cli getSupportedTokens -n ethereum-mainnet -a 0xTokenPoolAddress
+
+# List fee tokens instead of transferable tokens
+ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D --fee-tokens
+# or using kebab-case:
+ccip-cli get-supported-tokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D --fee-tokens
 ```
 
 ---

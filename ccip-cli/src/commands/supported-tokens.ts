@@ -66,6 +66,11 @@ export const builder = (yargs: Argv) =>
       demandOption: false,
       describe: 'Token address to query (pre-selects from list if address is a registry)',
     })
+    .option('fee-tokens', {
+      type: 'boolean',
+      default: false,
+      describe: 'List fee tokens instead of transferable tokens',
+    })
     .example([
       [
         'ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D',
@@ -101,6 +106,23 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     registry = await source.getTokenAdminRegistryFor(argv.address)
   } catch (_) {
     // ignore
+  }
+
+  // Handle --fee-tokens flag
+  if (argv.feeTokens) {
+    const feeTokens = await source.getFeeTokens(argv.address)
+    switch (argv.format) {
+      case Format.pretty:
+        logger.info('Fee Tokens:')
+        logger.table(feeTokens)
+        break
+      case Format.json:
+        logger.log(JSON.stringify(feeTokens, null, 2))
+        break
+      default:
+        logger.log('feeTokens:', feeTokens)
+    }
+    return
   }
 
   let info, tokenPool, poolConfigs, registryConfig
