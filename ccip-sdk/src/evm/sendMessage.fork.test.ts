@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 
-import { JsonRpcProvider, Wallet } from 'ethers'
+import { AbiCoder, Contract, JsonRpcProvider, Wallet, keccak256, parseUnits, toBeHex } from 'ethers'
 import { anvil } from 'prool/instances'
 
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
@@ -24,6 +24,35 @@ const CCIP_SEND_REQUESTED_TOPIC =
 const APTOS_TESTNET_SELECTOR = 743186221051783445n
 // keccak256 of the CCIPMessageSent(uint64,uint64,tuple) event signature from the v1.6 OnRamp ABI
 const CCIP_MESSAGE_SENT_TOPIC = interfaces.OnRamp_v1_6.getEvent('CCIPMessageSent')!.topicHash
+
+// Token with pool support on the Sepolia -> Aptos lane
+const APTOS_SUPPORTED_TOKEN = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
+
+async function setERC20Balance(
+  provider: JsonRpcProvider,
+  token: string,
+  address: string,
+  amount: bigint,
+  balanceSlot = 0n,
+): Promise<void> {
+  const storageKey = keccak256(
+    AbiCoder.defaultAbiCoder().encode(['address', 'uint256'], [address, balanceSlot]),
+  )
+  await provider.send('anvil_setStorageAt', [token, storageKey, toBeHex(amount, 32)])
+  const erc20 = new Contract(
+    token,
+    ['function balanceOf(address) view returns (uint256)'],
+    provider,
+  )
+  const balance: bigint = await erc20.getFunction('balanceOf')(address)
+  if (balance !== amount) {
+    if (balanceSlot < 20n)
+      return setERC20Balance(provider, token, address, amount, balanceSlot + 1n)
+    throw new Error(
+      `setERC20Balance: no working slot found (last tried ${balanceSlot}, got ${balance}, expected ${amount})`,
+    )
+  }
+}
 
 describe(
   'sendMessage - Anvil Fork Tests',
@@ -104,6 +133,61 @@ describe(
         String(request.message.data).includes('dead'),
         'message data should contain sent payload',
       )
+    })
+
+    it('should send v1.6 token transfer with extraArgs (Sepolia -> Aptos)', async () => {
+      assert.ok(chain, 'chain should be initialized')
+      const provider = wallet.provider as JsonRpcProvider
+      const walletAddress = await wallet.getAddress()
+
+      const amount = parseUnits('0.1', 18)
+      await setERC20Balance(provider, APTOS_SUPPORTED_TOKEN, walletAddress, amount)
+
+      const request = await chain.sendMessage({
+        router: SEPOLIA_ROUTER,
+        destChainSelector: APTOS_TESTNET_SELECTOR,
+        message: {
+          receiver: walletAddress,
+          data: '0xcafe',
+          tokenAmounts: [{ token: APTOS_SUPPORTED_TOKEN, amount }],
+          extraArgs: { gasLimit: 0n, allowOutOfOrderExecution: true },
+        },
+        wallet,
+      })
+
+      // Event log assertions
+      assert.ok(request.log, 'request should contain the event log')
+      assert.equal(request.log.topics[0], CCIP_MESSAGE_SENT_TOPIC, 'should be CCIPMessageSent')
+      assert.equal(request.log.transactionHash, request.tx.hash, 'log tx hash should match')
+
+      // Message assertions
+      assert.ok(request.message.messageId, 'messageId should be defined')
+      assert.match(request.message.messageId, /^0x[0-9a-f]{64}$/i)
+      assert.ok(
+        String(request.message.data).includes('cafe'),
+        'message data should contain sent payload',
+      )
+      assert.ok(request.message.feeToken, 'feeToken should be defined')
+
+      // ExtraArgs assertions (decoded from extraArgs bytes in v1.6 event)
+      const msg = request.message as Record<string, unknown>
+      assert.equal(msg.gasLimit, 0n, 'gasLimit should round-trip as 0')
+      assert.equal(
+        msg.allowOutOfOrderExecution,
+        true,
+        'allowOutOfOrderExecution should round-trip as true',
+      )
+
+      // Token transfer assertions
+      const tokenAmounts = request.message.tokenAmounts as unknown as Record<string, unknown>[]
+      assert.equal(tokenAmounts.length, 1, 'should have one token transfer')
+      assert.equal(
+        (tokenAmounts[0] as { amount: bigint }).amount,
+        amount,
+        'token amount should round-trip',
+      )
+      assert.ok(tokenAmounts[0]!.sourcePoolAddress, 'v1.6 should have sourcePoolAddress')
+      assert.ok(tokenAmounts[0]!.destTokenAddress, 'v1.6 should have destTokenAddress')
     })
   },
 )
