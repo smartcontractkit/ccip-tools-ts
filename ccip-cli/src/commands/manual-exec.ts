@@ -25,7 +25,7 @@ import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 // const MAX_EXECS_IN_BATCH = 1
 // const MAX_PENDING_TXS = 25
 
-export const command = 'manualExec <tx-hash>'
+export const command = ['manualExec <tx-hash>', 'manual-exec <tx-hash>']
 export const describe = 'Execute manually pending or failed messages'
 
 /**

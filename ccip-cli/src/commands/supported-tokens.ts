@@ -37,7 +37,7 @@ import { formatDuration, getCtx, logParsedError, prettyTable } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
-export const command = 'getSupportedTokens'
+export const command = ['getSupportedTokens', 'get-supported-tokens']
 export const describe =
   'List supported tokens in a given Router/OnRamp/TokenAdminRegistry, and/or show info about token/pool'
 
@@ -105,19 +105,6 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
 
   let info, tokenPool, poolConfigs, registryConfig
   if (registry && !argv.token) {
-    const feeTokens = await source.getFeeTokens(argv.address)
-    switch (argv.format) {
-      case Format.pretty:
-        logger.info('Fee Tokens:')
-        logger.table(feeTokens)
-        break
-      case Format.json:
-        logger.log(JSON.stringify(feeTokens, null, 2))
-        break
-      default:
-        logger.log('feeTokens:', feeTokens)
-    }
-
     // router + interactive list
     info = await listTokens(ctx, source, registry, argv)
     if (!info) return // format != pretty

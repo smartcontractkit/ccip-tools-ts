@@ -213,6 +213,7 @@ ccip-cli send --source <chain> --dest <chain> --router <address> [options]
 | `--only-get-fee` | Print fee and exit |
 | `--only-estimate` | Print gas estimate and exit |
 | `--estimate-gas-limit <margin%>` | Auto-estimate with safety margin |
+| `--list-fee-tokens` | List available fee tokens for the router and exit |
 
 **Utility Options:**
 
@@ -255,16 +256,25 @@ ccip-cli send \
   --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=0.1 \
   --fee-token LINK \
   --wait
+
+# List available fee tokens for a router
+ccip-cli send \
+  -s ethereum-mainnet \
+  -d arbitrum-mainnet \
+  -r 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D \
+  --list-fee-tokens
 ```
 
 ---
 
-### manualExec
+### manualExec (manual-exec)
 
 Manually execute a stuck message on the destination chain.
 
 ```bash
 ccip-cli manualExec <tx_hash> [options]
+# or using kebab-case:
+ccip-cli manual-exec <tx_hash> [options]
 ```
 
 **When to use:**
@@ -314,12 +324,13 @@ ccip-cli manualExec <tx_hash> --force-buffer --clear-leftover-accounts
 
 ---
 
-### parse
+### parse (parse-bytes, parse-data)
 
 Decode CCIP-related data, errors, and revert reasons. Supports hex (EVM), base64 (Solana), and other chain-specific formats.
 
 ```bash
 ccip-cli parse <data>
+# Aliases: parseBytes, parse-bytes, parseData, parse-data
 ```
 
 **Example:**
@@ -333,12 +344,14 @@ ccip-cli parse 0xbf16aab6000000000000000000000000779877a7b0d9e8603169ddbd7836e47
 
 ---
 
-### getSupportedTokens
+### getSupportedTokens (get-supported-tokens)
 
 List tokens supported for transfer on a lane.
 
 ```bash
 ccip-cli getSupportedTokens --network <network> --address <address> [--token <token>]
+# or using kebab-case:
+ccip-cli get-supported-tokens --network <network> --address <address> [--token <token>]
 ```
 
 **Required Options:**
