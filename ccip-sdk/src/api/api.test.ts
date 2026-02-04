@@ -366,16 +366,17 @@ describe('CCIPAPIClient', () => {
       assert.equal(result.log.transactionHash, mockMessageResponse.sendTransactionHash)
       assert.equal(result.log.address, getAddress(mockMessageResponse.onramp))
 
-      // Status and extras
-      assert.equal(result.status, 'SUCCESS')
-      assert.equal(result.readyForManualExecution, false)
-      assert.equal(result.deliveryTime, 900000n)
-      assert.equal(result.finality, 0n)
+      // Metadata (API-specific fields)
+      assert.ok(result.metadata, 'metadata should be defined')
+      assert.equal(result.metadata.status, 'SUCCESS')
+      assert.equal(result.metadata.readyForManualExecution, false)
+      assert.equal(result.metadata.deliveryTime, 900000n)
+      assert.equal(result.metadata.finality, 0n)
 
       // Network info - uses SDK's networkInfo() which has canonical names
-      assert.equal(result.sourceNetworkInfo.name, 'ethereum-mainnet')
-      assert.equal(result.sourceNetworkInfo.chainSelector, 5009297550715157269n)
-      assert.equal(result.destNetworkInfo.name, 'ethereum-mainnet-arbitrum-1')
+      assert.equal(result.metadata.sourceNetworkInfo.name, 'ethereum-mainnet')
+      assert.equal(result.metadata.sourceNetworkInfo.chainSelector, 5009297550715157269n)
+      assert.equal(result.metadata.destNetworkInfo.name, 'ethereum-mainnet-arbitrum-1')
     })
 
     it('should throw CCIPMessageIdNotFoundError on 404', async () => {
@@ -455,7 +456,8 @@ describe('CCIPAPIClient', () => {
       assert.equal(result.lane.onRamp, getAddress(minimalResponse.onramp))
       assert.equal(result.message.sequenceNumber, 12345n)
       assert.equal(result.message.nonce, 0n) // nonce is still optional
-      assert.equal(result.receiptTransactionHash, undefined)
+      assert.ok(result.metadata, 'metadata should be defined')
+      assert.equal(result.metadata.receiptTransactionHash, undefined)
     })
 
     it('should parse version string to CCIPVersion enum', async () => {
@@ -788,7 +790,8 @@ describe('CCIPAPIClient', () => {
         '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
       )
 
-      assert.equal(result.receiptTimestamp, undefined)
+      assert.ok(result.metadata, 'metadata should be defined')
+      assert.equal(result.metadata.receiptTimestamp, undefined)
     })
 
     it('should allow missing receiptTimestamp (undefined)', async () => {
@@ -807,7 +810,8 @@ describe('CCIPAPIClient', () => {
         '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
       )
 
-      assert.equal(result.receiptTimestamp, undefined)
+      assert.ok(result.metadata, 'metadata should be defined')
+      assert.equal(result.metadata.receiptTimestamp, undefined)
     })
   })
 

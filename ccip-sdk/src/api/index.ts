@@ -1,3 +1,5 @@
+import type { SetRequired } from 'type-fest'
+
 import {
   CCIPHttpError,
   CCIPLaneNotFoundError,
@@ -10,6 +12,7 @@ import { HttpStatus } from '../http-status.ts'
 import { decodeMessage } from '../requests.ts'
 import {
   type CCIPMessage,
+  type CCIPRequest,
   type ChainTransaction,
   type Log_,
   type Logger,
@@ -22,7 +25,6 @@ import {
 } from '../types.ts'
 import { bigIntReviver, parseJson } from '../utils.ts'
 import type {
-  APICCIPRequest,
   APIErrorResponse,
   LaneLatencyResponse,
   RawLaneLatencyResponse,
@@ -31,12 +33,7 @@ import type {
   RawNetworkInfo,
 } from './types.ts'
 
-export type {
-  APICCIPRequest,
-  APICCIPRequestMetadata,
-  APIErrorResponse,
-  LaneLatencyResponse,
-} from './types.ts'
+export type { APICCIPRequestMetadata, APIErrorResponse, LaneLatencyResponse } from './types.ts'
 
 /** Default CCIP API base URL */
 export const DEFAULT_API_BASE_URL = 'https://api.ccip.cldev.cloud'
@@ -291,7 +288,7 @@ export class CCIPAPIClient {
    * }
    * ```
    */
-  async getMessageById(messageId: string): Promise<APICCIPRequest> {
+  async getMessageById(messageId: string): Promise<SetRequired<CCIPRequest, 'metadata'>> {
     const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}`
 
     this.logger.debug(`CCIPAPIClient: GET ${url}`)
@@ -413,11 +410,11 @@ export class CCIPAPIClient {
   }
 
   /**
-   * Transforms raw API response to APICCIPRequest.
+   * Transforms raw API response to CCIPRequest with metadata.
    * Populates all derivable CCIPRequest fields from API data.
    * @internal
    */
-  private _transformMessageResponse(text: string): APICCIPRequest {
+  _transformMessageResponse(text: string): SetRequired<CCIPRequest, 'metadata'> {
     // Build message with extraArgs spread and tokenAmounts included
     const raw = decodeMessage(text) as CCIPMessage & Omit<RawMessageResponse, keyof CCIPMessage>
 
@@ -489,15 +486,17 @@ export class CCIPAPIClient {
       message,
       log,
       tx,
-      // API-specific fields
-      status: validateMessageStatus(status, this.logger),
-      readyForManualExecution,
-      finality,
-      receiptTransactionHash,
-      receiptTimestamp: receiptTimestamp_,
-      deliveryTime,
-      sourceNetworkInfo: ensureNetworkInfo(sourceNetworkInfo, this.logger),
-      destNetworkInfo: ensureNetworkInfo(destNetworkInfo, this.logger),
+      // API-specific metadata
+      metadata: {
+        status: validateMessageStatus(status, this.logger),
+        readyForManualExecution,
+        finality,
+        receiptTransactionHash,
+        receiptTimestamp: receiptTimestamp_,
+        deliveryTime,
+        sourceNetworkInfo: ensureNetworkInfo(sourceNetworkInfo, this.logger),
+        destNetworkInfo: ensureNetworkInfo(destNetworkInfo, this.logger),
+      },
     }
   }
 }

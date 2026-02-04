@@ -1,4 +1,4 @@
-import type { CCIPRequest, MessageStatus, NetworkInfo } from '../types.ts'
+import type { MessageStatus, NetworkInfo } from '../types.ts'
 
 /**
  * Response from GET /v2/lanes/latency endpoint.
@@ -149,43 +149,38 @@ export type RawMessagesResponse = {
 // ============================================================================
 
 /**
- * API-specific metadata fields not present in CCIPRequest.
- * These fields are only available when fetching message details from the CCIP API.
+ * API-specific metadata fields for CCIP requests.
+ *
+ * @remarks
+ * These fields are only available when fetching via the CCIP API.
+ * This type is the value of the `metadata` field on {@link CCIPRequest}.
+ *
+ * @example
+ * ```typescript
+ * const request = await chain.getMessageById(messageId)
+ * if (request.metadata) {
+ *   console.log(`Status: ${request.metadata.status}`)
+ *   if (request.metadata.receiptTransactionHash) {
+ *     console.log(`Executed in tx: ${request.metadata.receiptTransactionHash}`)
+ *   }
+ * }
+ * ```
  */
 export type APICCIPRequestMetadata = {
-  /** Message lifecycle status from API */
+  /** Message lifecycle status from API. */
   status: MessageStatus
-  /** Whether message is ready for manual execution */
+  /** Whether message is ready for manual execution. */
   readyForManualExecution: boolean
-  /** Finality block confirmations */
+  /** Number of block confirmations on source chain. */
   finality: bigint
-  /** Receipt transaction hash if executed */
+  /** Transaction hash of execution receipt (if executed). */
   receiptTransactionHash?: string
-  /** Receipt timestamp (Unix) if executed */
+  /** Unix timestamp of execution receipt (if executed). */
   receiptTimestamp?: number
-  /** End-to-end delivery time in ms if completed */
+  /** End-to-end delivery time in milliseconds (if completed). */
   deliveryTime?: bigint
-  /** Source network info */
+  /** Source network metadata. */
   sourceNetworkInfo: NetworkInfo
-  /** Destination network info */
+  /** Destination network metadata. */
   destNetworkInfo: NetworkInfo
 }
-
-/**
- * CCIP request information retrieved from API.
- *
- * Combines standard {@link CCIPRequest} fields with API-specific metadata.
- *
- * **Complete fields:**
- * - `lane`: All fields available (sourceChainSelector, destChainSelector, onRamp, version)
- * - `message`: All core fields (messageId, sender, receiver, data, sequenceNumber, nonce,
- *   tokenAmounts, feeToken, feeTokenAmount) plus extraArgs (EVM or SVM depending on chain)
- * - `log`: transactionHash, address, index, blockNumber, topics, data
- * - `tx`: hash, timestamp, from, logs, blockNumber
- *
- * **API-only fields** (in {@link APICCIPRequestMetadata}):
- * - `status`, `readyForManualExecution`, `finality`
- * - `receiptTransactionHash`, `receiptTimestamp`, `deliveryTime`
- * - `sourceNetworkInfo`, `destNetworkInfo`
- */
-export type APICCIPRequest = CCIPRequest & APICCIPRequestMetadata
