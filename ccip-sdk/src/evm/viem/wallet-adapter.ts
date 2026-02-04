@@ -9,6 +9,7 @@ import {
 import type { Account, Chain, PublicClient, Transport, WalletClient } from 'viem'
 
 import { ViemTransportProvider } from './client-adapter.ts'
+import type { ViemWalletClientLike } from './types.ts'
 import { CCIPViemAdapterError } from '../../errors/index.ts'
 
 /**
@@ -160,6 +161,12 @@ class ViemWalletAdapter extends AbstractSigner {
 /**
  * Convert viem WalletClient to ethers-compatible Signer.
  *
+ * Accepts any viem-compatible wallet client including:
+ * - Direct viem createWalletClient()
+ * - Wagmi's useWalletClient() / getWalletClient()
+ * - RainbowKit's wallet clients
+ * - Any object with account, chain, and signing methods
+ *
  * Supports both:
  * - Local accounts (privateKeyToAccount, mnemonicToAccount)
  * - JSON-RPC accounts (browser wallets like MetaMask)
@@ -210,24 +217,52 @@ class ViemWalletAdapter extends AbstractSigner {
  * // Works with injected providers!
  * const signer = viemWallet(walletClient)
  * ```
+ *
+ * @example Wagmi integration
+ * ```typescript
+ * import { useWalletClient } from 'wagmi'
+ * import { viemWallet } from '@chainlink/ccip-sdk/viem'
+ *
+ * const { data: walletClient } = useWalletClient()
+ * if (walletClient) {
+ *   const signer = viemWallet(walletClient)
+ * }
+ * ```
+ *
+ * @example RainbowKit + wagmi (works with OP Stack chains)
+ * ```typescript
+ * import { getWalletClient } from '@wagmi/core'
+ * import { viemWallet } from '@chainlink/ccip-sdk/viem'
+ *
+ * const walletClient = await getWalletClient(config)
+ * if (walletClient) {
+ *   const signer = viemWallet(walletClient) // No type cast needed!
+ * }
+ * ```
  */
-export function viemWallet(client: WalletClient<Transport, Chain, Account>): AbstractSigner {
-  // Validate account is defined
-  if (!(client.account as Account | undefined)) {
+export function viemWallet(client: ViemWalletClientLike): AbstractSigner {
+  // Validate account is defined (runtime check)
+  if (!client.account?.address) {
     throw new CCIPViemAdapterError('WalletClient must have an account defined', {
       recovery: 'Pass an account to createWalletClient or use .extend(walletActions)',
     })
   }
 
-  if (!(client.chain as Chain | undefined)) {
+  // Validate chain is defined (runtime check)
+  if (!client.chain?.id) {
     throw new CCIPViemAdapterError('WalletClient must have a chain defined', {
       recovery: 'Pass a chain to createWalletClient: createWalletClient({ chain: mainnet, ... })',
     })
   }
 
   // Create provider that wraps viem transport (works for ALL transport types including injected)
+  // Cast is safe - we've validated the required properties
   const provider = new ViemTransportProvider(client as unknown as PublicClient<Transport, Chain>)
 
   // Return adapter that delegates signing to viem
-  return new ViemWalletAdapter(client, provider)
+  // Cast is safe - we've validated required properties
+  return new ViemWalletAdapter(
+    client as unknown as WalletClient<Transport, Chain, Account>,
+    provider,
+  )
 }

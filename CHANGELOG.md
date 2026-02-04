@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: Viem adapters (`fromViemClient`, `viemWallet`) now accept wagmi/RainbowKit clients including OP Stack chains
 - SDK: **Breaking**: `CCIPRequest` now includes optional `metadata?: APICCIPRequestMetadata` field
   - API fields (`status`, `receiptTransactionHash`, `deliveryTime`, etc.) moved under `metadata`
   - Migration: Change `request.status` to `request.metadata?.status`
