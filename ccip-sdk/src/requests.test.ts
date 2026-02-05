@@ -5,7 +5,7 @@ import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
 import './index.ts' // Import to ensure chains are loaded
 import { type LogFilter, Chain } from './chain.ts'
-import type { EVMExtraArgsV3, SVMExtraArgsV1 } from './extra-args.ts'
+import type { GenericExtraArgsV3, SVMExtraArgsV1 } from './extra-args.ts'
 import {
   decodeMessage,
   getMessageById,
@@ -631,7 +631,7 @@ describe('decodeMessage', () => {
         }
 
         const result = Chain.buildMessageForDest(message)
-        const extraArgs = result.extraArgs as EVMExtraArgsV3
+        const extraArgs = result.extraArgs as GenericExtraArgsV3
 
         assert.ok('blockConfirmations' in result.extraArgs)
         assert.equal(extraArgs.blockConfirmations, 5)
@@ -649,7 +649,7 @@ describe('decodeMessage', () => {
         }
 
         const result = Chain.buildMessageForDest(message)
-        const extraArgs = result.extraArgs as EVMExtraArgsV3
+        const extraArgs = result.extraArgs as GenericExtraArgsV3
 
         assert.ok('executor' in result.extraArgs)
         assert.equal(extraArgs.executor, '0xExecutorAddress1234567890123456789012')
@@ -666,7 +666,7 @@ describe('decodeMessage', () => {
         }
 
         const result = Chain.buildMessageForDest(message)
-        const extraArgs = result.extraArgs as EVMExtraArgsV3
+        const extraArgs = result.extraArgs as GenericExtraArgsV3
 
         // Verify all V3 fields have proper defaults
         assert.deepEqual(extraArgs.ccvs, ['0xCCVAddress123456789012345678901234567890'])
@@ -710,7 +710,7 @@ describe('decodeMessage', () => {
         }
 
         const result = Chain.buildMessageForDest(message)
-        const extraArgs = result.extraArgs as EVMExtraArgsV3
+        const extraArgs = result.extraArgs as GenericExtraArgsV3
 
         assert.equal(extraArgs.gasLimit, 0n)
         assert.equal(extraArgs.blockConfirmations, 10)
@@ -731,7 +731,7 @@ describe('decodeMessage', () => {
         }
 
         const result = Chain.buildMessageForDest(message)
-        const extraArgs = result.extraArgs as EVMExtraArgsV3
+        const extraArgs = result.extraArgs as GenericExtraArgsV3
 
         assert.equal(extraArgs.gasLimit, 500000n)
         assert.equal(extraArgs.blockConfirmations, 3)

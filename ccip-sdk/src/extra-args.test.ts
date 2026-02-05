@@ -6,7 +6,7 @@ import { dataSlice, getNumber } from 'ethers'
 // Import index.ts to ensure all Chain classes are loaded and registered
 import './index.ts'
 import {
-  type EVMExtraArgsV3,
+  type GenericExtraArgsV3,
   EVMExtraArgsV2Tag,
   decodeExtraArgs,
   encodeExtraArgs,
@@ -307,10 +307,10 @@ describe('parseExtraArgs', () => {
   })
 })
 
-describe('EVMExtraArgsV3', () => {
+describe('GenericExtraArgsV3', () => {
   describe('encoding', () => {
     it('should encode V3 args with correct tag', () => {
-      const args: EVMExtraArgsV3 = {
+      const args: GenericExtraArgsV3 = {
         gasLimit: 200_000n,
         blockConfirmations: 5,
         ccvs: [],
@@ -321,11 +321,11 @@ describe('EVMExtraArgsV3', () => {
         tokenArgs: new Uint8Array(0),
       }
       const encoded = encodeExtraArgs(args, ChainFamily.EVM)
-      assert.match(encoded, /^0x302326cb/) // EVMExtraArgsV3Tag
+      assert.match(encoded, /^0x302326cb/) // GenericExtraArgsV3Tag
     })
 
     it('should encode gasLimit as uint32 big-endian', () => {
-      const args: EVMExtraArgsV3 = {
+      const args: GenericExtraArgsV3 = {
         gasLimit: 0x12345678n,
         blockConfirmations: 0,
         ccvs: [],
@@ -341,7 +341,7 @@ describe('EVMExtraArgsV3', () => {
     })
 
     it('should encode blockConfirmations as uint16 big-endian', () => {
-      const args: EVMExtraArgsV3 = {
+      const args: GenericExtraArgsV3 = {
         gasLimit: 0n,
         blockConfirmations: 0x1234,
         ccvs: [],
@@ -359,7 +359,7 @@ describe('EVMExtraArgsV3', () => {
 
   describe('decoding', () => {
     it('should decode V3 args with empty arrays', () => {
-      const original: EVMExtraArgsV3 = {
+      const original: GenericExtraArgsV3 = {
         gasLimit: 200_000n,
         blockConfirmations: 5,
         ccvs: [],
@@ -372,16 +372,16 @@ describe('EVMExtraArgsV3', () => {
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
       const decoded = decodeExtraArgs(encoded, ChainFamily.EVM)
 
-      assert.equal(decoded?._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded?._tag, 'GenericExtraArgsV3')
       assert.equal(decoded?.gasLimit, 200_000n)
-      assert.equal((decoded as EVMExtraArgsV3).blockConfirmations, 5)
-      assert.deepEqual((decoded as EVMExtraArgsV3).ccvs, [])
-      assert.deepEqual((decoded as EVMExtraArgsV3).ccvArgs, [])
-      assert.equal((decoded as EVMExtraArgsV3).executor, '')
+      assert.equal((decoded as GenericExtraArgsV3).blockConfirmations, 5)
+      assert.deepEqual((decoded as GenericExtraArgsV3).ccvs, [])
+      assert.deepEqual((decoded as GenericExtraArgsV3).ccvArgs, [])
+      assert.equal((decoded as GenericExtraArgsV3).executor, '')
     })
 
     it('should decode V3 args with CCVs', () => {
-      const original: EVMExtraArgsV3 = {
+      const original: GenericExtraArgsV3 = {
         gasLimit: 100_000n,
         blockConfirmations: 10,
         ccvs: ['0x1234567890123456789012345678901234567890'],
@@ -392,16 +392,18 @@ describe('EVMExtraArgsV3', () => {
         tokenArgs: new Uint8Array(0),
       }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
-      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as EVMExtraArgsV3 & { _tag: string }
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as GenericExtraArgsV3 & {
+        _tag: string
+      }
 
-      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.ccvs.length, 1)
       assert.equal(decoded.ccvs[0]?.toLowerCase(), '0x1234567890123456789012345678901234567890')
       assert.deepEqual(decoded.ccvArgs[0], new Uint8Array([1, 2, 3, 4]))
     })
 
     it('should decode V3 args with executor', () => {
-      const original: EVMExtraArgsV3 = {
+      const original: GenericExtraArgsV3 = {
         gasLimit: 50_000n,
         blockConfirmations: 0,
         ccvs: [],
@@ -412,15 +414,17 @@ describe('EVMExtraArgsV3', () => {
         tokenArgs: new Uint8Array(0),
       }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
-      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as EVMExtraArgsV3 & { _tag: string }
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as GenericExtraArgsV3 & {
+        _tag: string
+      }
 
-      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.executor.toLowerCase(), '0xabcdefabcdef123456789012345678901234abcd')
       assert.deepEqual(decoded.executorArgs, new Uint8Array([0xaa, 0xbb]))
     })
 
     it('should decode V3 args with tokenReceiver and tokenArgs', () => {
-      const original: EVMExtraArgsV3 = {
+      const original: GenericExtraArgsV3 = {
         gasLimit: 300_000n,
         blockConfirmations: 15,
         ccvs: [],
@@ -433,9 +437,11 @@ describe('EVMExtraArgsV3', () => {
         tokenArgs: new Uint8Array([0xff, 0xee, 0xdd]),
       }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
-      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as EVMExtraArgsV3 & { _tag: string }
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as GenericExtraArgsV3 & {
+        _tag: string
+      }
 
-      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.deepEqual(decoded.tokenReceiver, original.tokenReceiver)
       assert.deepEqual(decoded.tokenArgs, original.tokenArgs)
     })
@@ -443,7 +449,7 @@ describe('EVMExtraArgsV3', () => {
 
   describe('round-trip encoding/decoding', () => {
     it('should round-trip minimal V3 args', () => {
-      const original: EVMExtraArgsV3 = {
+      const original: GenericExtraArgsV3 = {
         gasLimit: 200_000n,
         blockConfirmations: 5,
         ccvs: [],
@@ -454,9 +460,11 @@ describe('EVMExtraArgsV3', () => {
         tokenArgs: new Uint8Array(0),
       }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
-      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as EVMExtraArgsV3 & { _tag: string }
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as GenericExtraArgsV3 & {
+        _tag: string
+      }
 
-      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.gasLimit, original.gasLimit)
       assert.equal(decoded.blockConfirmations, original.blockConfirmations)
       assert.deepEqual(decoded.ccvs, original.ccvs)
@@ -468,7 +476,7 @@ describe('EVMExtraArgsV3', () => {
     })
 
     it('should round-trip V3 args with all fields populated', () => {
-      const original: EVMExtraArgsV3 = {
+      const original: GenericExtraArgsV3 = {
         gasLimit: 500_000n,
         blockConfirmations: 20,
         ccvs: [
@@ -485,9 +493,11 @@ describe('EVMExtraArgsV3', () => {
         tokenArgs: new Uint8Array([0xcc, 0xdd, 0xee, 0xff]),
       }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
-      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as EVMExtraArgsV3 & { _tag: string }
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as GenericExtraArgsV3 & {
+        _tag: string
+      }
 
-      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.gasLimit, original.gasLimit)
       assert.equal(decoded.blockConfirmations, original.blockConfirmations)
       assert.equal(decoded.ccvs.length, 2)
@@ -502,7 +512,7 @@ describe('EVMExtraArgsV3', () => {
     })
 
     it('should round-trip V3 args with max uint32 gasLimit', () => {
-      const original: EVMExtraArgsV3 = {
+      const original: GenericExtraArgsV3 = {
         gasLimit: BigInt(0xffffffff), // max uint32
         blockConfirmations: 0xffff, // max uint16
         ccvs: [],
@@ -513,9 +523,11 @@ describe('EVMExtraArgsV3', () => {
         tokenArgs: new Uint8Array(0),
       }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
-      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as EVMExtraArgsV3 & { _tag: string }
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as GenericExtraArgsV3 & {
+        _tag: string
+      }
 
-      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.gasLimit, BigInt(0xffffffff))
       assert.equal(decoded.blockConfirmations, 0xffff)
     })
@@ -523,7 +535,7 @@ describe('EVMExtraArgsV3', () => {
 
   describe('auto-detect chain family', () => {
     it('should auto-detect V3 args', () => {
-      const original: EVMExtraArgsV3 = {
+      const original: GenericExtraArgsV3 = {
         gasLimit: 100_000n,
         blockConfirmations: 3,
         ccvs: [],
@@ -536,7 +548,7 @@ describe('EVMExtraArgsV3', () => {
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
       const decoded = decodeExtraArgs(encoded) // no chain family specified
 
-      assert.equal(decoded?._tag, 'EVMExtraArgsV3')
+      assert.equal(decoded?._tag, 'GenericExtraArgsV3')
     })
   })
 
@@ -585,8 +597,8 @@ describe('EVMExtraArgsV3', () => {
       const decoded = decodeExtraArgs(
         '0x302326cb00030d40000100000000000000',
         ChainFamily.EVM,
-      ) as EVMExtraArgsV3 & { _tag: string }
-      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      ) as GenericExtraArgsV3 & { _tag: string }
+      assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.gasLimit, 200000n)
       assert.equal(decoded.blockConfirmations, 1)
       assert.deepEqual(decoded.ccvs, [])
@@ -602,8 +614,8 @@ describe('EVMExtraArgsV3', () => {
       const decoded = decodeExtraArgs(
         '0x302326cb00000000000000000000000000',
         ChainFamily.EVM,
-      ) as EVMExtraArgsV3 & { _tag: string }
-      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      ) as GenericExtraArgsV3 & { _tag: string }
+      assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.gasLimit, 0n)
       assert.equal(decoded.blockConfirmations, 0)
       assert.deepEqual(decoded.ccvs, [])
@@ -619,8 +631,8 @@ describe('EVMExtraArgsV3', () => {
       const decoded = decodeExtraArgs(
         '0x302326cbffffffffffff00000000000000',
         ChainFamily.EVM,
-      ) as EVMExtraArgsV3 & { _tag: string }
-      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      ) as GenericExtraArgsV3 & { _tag: string }
+      assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.gasLimit, 4294967295n)
       assert.equal(decoded.blockConfirmations, 65535)
       assert.deepEqual(decoded.ccvs, [])
@@ -636,8 +648,8 @@ describe('EVMExtraArgsV3', () => {
       const decoded = decodeExtraArgs(
         '0x302326cb00061a80000500149fca2fa95be0944a4ad731474dd3cdb1b704f9c6000464617461000000',
         ChainFamily.EVM,
-      ) as EVMExtraArgsV3 & { _tag: string }
-      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      ) as GenericExtraArgsV3 & { _tag: string }
+      assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.gasLimit, 400000n)
       assert.equal(decoded.blockConfirmations, 5)
       assert.deepEqual(decoded.ccvs, [])
@@ -653,8 +665,8 @@ describe('EVMExtraArgsV3', () => {
       const decoded = decodeExtraArgs(
         '0x302326cb000493e0000a021497cb3391ea73689a81b6853deb104dd078538f6b0005617267733114a0b7e3c01fcd94560317638a6b01f81846dee14400056172677332000000000000',
         ChainFamily.EVM,
-      ) as EVMExtraArgsV3 & { _tag: string }
-      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      ) as GenericExtraArgsV3 & { _tag: string }
+      assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.gasLimit, 300000n)
       assert.equal(decoded.blockConfirmations, 10)
       assert.equal(decoded.ccvs.length, 2)
@@ -673,8 +685,8 @@ describe('EVMExtraArgsV3', () => {
       const decoded = decodeExtraArgs(
         '0x302326cb00030d40000c021497cb3391ea73689a81b6853deb104dd078538f6b0005617267733114a0b7e3c01fcd94560317638a6b01f81846dee14400056172677332149fca2fa95be0944a4ad731474dd3cdb1b704f9c60008657865634172677314c9f66ef22b2e26c2af10fcf8847ac4a920ab3eaa0009746f6b656e41726773',
         ChainFamily.EVM,
-      ) as EVMExtraArgsV3 & { _tag: string }
-      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      ) as GenericExtraArgsV3 & { _tag: string }
+      assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.gasLimit, 200000n)
       assert.equal(decoded.blockConfirmations, 12)
       assert.equal(decoded.ccvs.length, 2)
@@ -702,8 +714,8 @@ describe('EVMExtraArgsV3', () => {
       const decoded = decodeExtraArgs(
         '0x302326cb0000e86b00220200000000000014123456789012345678901234567890123456789000283332383233383934323839333538373233353938373233393538383537393238333932373335323528333238323338393432383933353837323335393837323332393338353739323833373237333532350000',
         ChainFamily.EVM,
-      ) as EVMExtraArgsV3 & { _tag: string }
-      assert.equal(decoded._tag, 'EVMExtraArgsV3')
+      ) as GenericExtraArgsV3 & { _tag: string }
+      assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.gasLimit, 59499n)
       assert.equal(decoded.blockConfirmations, 34)
       assert.equal(decoded.ccvs.length, 2)

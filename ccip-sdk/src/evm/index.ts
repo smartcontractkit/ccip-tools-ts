@@ -59,13 +59,13 @@ import {
 import {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
-  type EVMExtraArgsV3,
   type ExtraArgs,
+  type GenericExtraArgsV3,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
   EVMExtraArgsV1Tag,
   EVMExtraArgsV2Tag,
-  EVMExtraArgsV3Tag,
+  GenericExtraArgsV3Tag,
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
@@ -140,7 +140,7 @@ const SuiExtraArgsV1 =
   'tuple(uint256 gasLimit, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] receiverObjectIds)'
 
 /**
- * Encodes EVMExtraArgsV3 using tightly packed binary format.
+ * Encodes GenericExtraArgsV3 using tightly packed binary format.
  *
  * Binary format:
  * - tag (4 bytes): 0x302326cb
@@ -161,11 +161,11 @@ const SuiExtraArgsV1 =
  * - tokenArgsLength (2 bytes): uint16 big-endian
  * - tokenArgs (variable)
  */
-function encodeExtraArgsV3(args: EVMExtraArgsV3): string {
+function encodeExtraArgsV3(args: GenericExtraArgsV3): string {
   const parts: Uint8Array[] = []
 
   // Tag (4 bytes)
-  parts.push(getDataBytes(EVMExtraArgsV3Tag))
+  parts.push(getDataBytes(GenericExtraArgsV3Tag))
 
   // gasLimit (4 bytes, uint32 big-endian)
   const gasLimitBytes = new Uint8Array(4)
@@ -254,11 +254,11 @@ function encodeExtraArgsV3(args: EVMExtraArgsV3): string {
 }
 
 /**
- * Decodes EVMExtraArgsV3 from tightly packed binary format.
+ * Decodes GenericExtraArgsV3 from tightly packed binary format.
  * @param data - Bytes to decode (without the tag prefix).
- * @returns Decoded EVMExtraArgsV3 or undefined if parsing fails.
+ * @returns Decoded GenericExtraArgsV3 or undefined if parsing fails.
  */
-function decodeExtraArgsV3(data: Uint8Array): EVMExtraArgsV3 | undefined {
+function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
   let offset = 0
 
   // gasLimit (4 bytes, uint32 big-endian)
@@ -787,7 +787,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   ):
     | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
-    | (EVMExtraArgsV3 & { _tag: 'EVMExtraArgsV3' })
+    | (GenericExtraArgsV3 & { _tag: 'GenericExtraArgsV3' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
     | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
     | undefined {
@@ -802,10 +802,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const args = defaultAbiCoder.decode([EVMExtraArgsV2], dataSlice(data, 4))
         return { ...(resultToObject(args[0]) as EVMExtraArgsV2), _tag: 'EVMExtraArgsV2' }
       }
-      case EVMExtraArgsV3Tag: {
+      case GenericExtraArgsV3Tag: {
         const parsed = decodeExtraArgsV3(data.slice(4))
         if (!parsed) return undefined
-        return { ...parsed, _tag: 'EVMExtraArgsV3' }
+        return { ...parsed, _tag: 'GenericExtraArgsV3' }
       }
       case SVMExtraArgsV1Tag: {
         const args = defaultAbiCoder.decode([SVMExtraArgsV1], dataSlice(data, 4))
@@ -835,7 +835,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   static encodeExtraArgs(args: ExtraArgs | undefined): string {
     if (!args) return '0x'
     if ('blockConfirmations' in args) {
-      // EVMExtraArgsV3 - tightly packed binary encoding
+      // GenericExtraArgsV3 - tightly packed binary encoding
       return encodeExtraArgsV3(args)
     } else if ('computeUnits' in args) {
       return concat([

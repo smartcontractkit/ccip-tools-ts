@@ -8,8 +8,8 @@ import { ChainFamily } from './types.ts'
 export const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'
 /** Tag identifier for EVMExtraArgsV2 encoding. */
 export const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'
-/** Tag identifier for EVMExtraArgsV3 encoding (tightly packed binary format). */
-export const EVMExtraArgsV3Tag = '0x302326cb' as const
+/** Tag identifier for GenericExtraArgsV3 encoding (tightly packed binary format). */
+export const GenericExtraArgsV3Tag = '0x302326cb' as const
 /** Tag identifier for SVMExtraArgsV1 encoding. */
 export const SVMExtraArgsV1Tag = id('CCIP SVMExtraArgsV1').substring(0, 10) as '0x1f3b3aba'
 /** Tag identifier for SuiExtraArgsV1 encoding. */
@@ -48,12 +48,12 @@ export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
 }
 
 /**
- * EVM extra arguments version 3 with cross-chain verifiers and executor support.
- * Also known as GenericExtraArgsV3. Uses tightly packed binary encoding (NOT ABI-encoded).
+ * Generic extra arguments version 3 with cross-chain verifiers and executor support.
+ * Uses tightly packed binary encoding (NOT ABI-encoded).
  *
  * @example
  * ```typescript
- * const args: EVMExtraArgsV3 = {
+ * const args: GenericExtraArgsV3 = {
  *   gasLimit: 200_000n,
  *   blockConfirmations: 5,
  *   ccvs: ['0x1234...'],
@@ -65,7 +65,7 @@ export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
  * }
  * ```
  */
-export type EVMExtraArgsV3 = {
+export type GenericExtraArgsV3 = {
   /** Gas limit for execution on the destination chain (uint32). */
   gasLimit: bigint
   /** Number of block confirmations required. */
@@ -137,7 +137,7 @@ export type SuiExtraArgsV1 = EVMExtraArgsV2 & {
 export type ExtraArgs =
   | EVMExtraArgsV1
   | EVMExtraArgsV2
-  | EVMExtraArgsV3
+  | GenericExtraArgsV3
   | SVMExtraArgsV1
   | SuiExtraArgsV1
 
@@ -187,7 +187,7 @@ export function decodeExtraArgs(
 ):
   | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
   | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
-  | (EVMExtraArgsV3 & { _tag: 'EVMExtraArgsV3' })
+  | (GenericExtraArgsV3 & { _tag: 'GenericExtraArgsV3' })
   | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
   | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
   | undefined {

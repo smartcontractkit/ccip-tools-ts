@@ -16,8 +16,8 @@ import type { UnsignedEVMTx } from './evm/types.ts'
 import type {
   EVMExtraArgsV1,
   EVMExtraArgsV2,
-  EVMExtraArgsV3,
   ExtraArgs,
+  GenericExtraArgsV3,
   SVMExtraArgsV1,
   SuiExtraArgsV1,
 } from './extra-args.ts'
@@ -47,7 +47,7 @@ import {
 } from './types.ts'
 import { networkInfo, util, withRetry } from './utils.ts'
 
-/** Field names unique to EVMExtraArgsV3 (not present in V2). */
+/** Field names unique to GenericExtraArgsV3 (not present in V2). */
 const V3_ONLY_FIELDS = [
   'blockConfirmations',
   'ccvs',
@@ -1079,7 +1079,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
   ):
     | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
-    | (EVMExtraArgsV3 & { _tag: 'EVMExtraArgsV3' })
+    | (GenericExtraArgsV3 & { _tag: 'GenericExtraArgsV3' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
     | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
     | undefined
