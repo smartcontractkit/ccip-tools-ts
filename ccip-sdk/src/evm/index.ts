@@ -169,19 +169,10 @@ function encodeExtraArgsV3(args: GenericExtraArgsV3): string {
   parts.push(getDataBytes(GenericExtraArgsV3Tag))
 
   // gasLimit (4 bytes, uint32 big-endian)
-  const gasLimitBytes = new Uint8Array(4)
-  const gasLimitValue = Number(args.gasLimit)
-  gasLimitBytes[0] = (gasLimitValue >>> 24) & 0xff
-  gasLimitBytes[1] = (gasLimitValue >>> 16) & 0xff
-  gasLimitBytes[2] = (gasLimitValue >>> 8) & 0xff
-  gasLimitBytes[3] = gasLimitValue & 0xff
-  parts.push(gasLimitBytes)
+  parts.push(getDataBytes(toBeHex(args.gasLimit, 4)))
 
   // blockConfirmations (2 bytes, uint16 big-endian)
-  const blockConfBytes = new Uint8Array(2)
-  blockConfBytes[0] = (args.blockConfirmations >>> 8) & 0xff
-  blockConfBytes[1] = args.blockConfirmations & 0xff
-  parts.push(blockConfBytes)
+  parts.push(getDataBytes(toBeHex(args.blockConfirmations, 2)))
 
   // ccvsLength (1 byte)
   parts.push(new Uint8Array([args.ccvs.length]))
@@ -202,10 +193,7 @@ function encodeExtraArgsV3(args: GenericExtraArgsV3): string {
     }
 
     // ccvArgsLength (2 bytes, uint16 big-endian)
-    const ccvArgsLenBytes = new Uint8Array(2)
-    ccvArgsLenBytes[0] = (ccvArgsBytes.length >>> 8) & 0xff
-    ccvArgsLenBytes[1] = ccvArgsBytes.length & 0xff
-    parts.push(ccvArgsLenBytes)
+    parts.push(getDataBytes(toBeHex(ccvArgsBytes.length, 2)))
 
     // ccvArgs (variable)
     if (ccvArgsBytes.length > 0) {
@@ -227,10 +215,7 @@ function encodeExtraArgsV3(args: GenericExtraArgsV3): string {
   const tokenArgsBytes = getDataBytes(args.tokenArgs)
 
   // executorArgsLength (2 bytes, uint16 big-endian)
-  const executorArgsLenBytes = new Uint8Array(2)
-  executorArgsLenBytes[0] = (executorArgsBytes.length >>> 8) & 0xff
-  executorArgsLenBytes[1] = executorArgsBytes.length & 0xff
-  parts.push(executorArgsLenBytes)
+  parts.push(getDataBytes(toBeHex(executorArgsBytes.length, 2)))
 
   // executorArgs (variable)
   if (executorArgsBytes.length > 0) {
@@ -246,10 +231,7 @@ function encodeExtraArgsV3(args: GenericExtraArgsV3): string {
   }
 
   // tokenArgsLength (2 bytes, uint16 big-endian)
-  const tokenArgsLenBytes = new Uint8Array(2)
-  tokenArgsLenBytes[0] = (tokenArgsBytes.length >>> 8) & 0xff
-  tokenArgsLenBytes[1] = tokenArgsBytes.length & 0xff
-  parts.push(tokenArgsLenBytes)
+  parts.push(getDataBytes(toBeHex(tokenArgsBytes.length, 2)))
 
   // tokenArgs (variable)
   if (tokenArgsBytes.length > 0) {
