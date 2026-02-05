@@ -188,7 +188,7 @@ function encodeExtraArgsV3(args: GenericExtraArgsV3): string {
   // For each CCV
   for (let i = 0; i < args.ccvs.length; i++) {
     const ccvAddress = args.ccvs[i]!
-    const ccvArgs = args.ccvArgs[i] ?? new Uint8Array(0)
+    const ccvArgsBytes = getDataBytes(args.ccvArgs[i] ?? '0x')
 
     if (ccvAddress && ccvAddress !== '' && ccvAddress !== '0x') {
       // ccvAddressLength = 20
@@ -202,13 +202,13 @@ function encodeExtraArgsV3(args: GenericExtraArgsV3): string {
 
     // ccvArgsLength (2 bytes, uint16 big-endian)
     const ccvArgsLenBytes = new Uint8Array(2)
-    ccvArgsLenBytes[0] = (ccvArgs.length >>> 8) & 0xff
-    ccvArgsLenBytes[1] = ccvArgs.length & 0xff
+    ccvArgsLenBytes[0] = (ccvArgsBytes.length >>> 8) & 0xff
+    ccvArgsLenBytes[1] = ccvArgsBytes.length & 0xff
     parts.push(ccvArgsLenBytes)
 
     // ccvArgs (variable)
-    if (ccvArgs.length > 0) {
-      parts.push(ccvArgs)
+    if (ccvArgsBytes.length > 0) {
+      parts.push(ccvArgsBytes)
     }
   }
 
@@ -220,34 +220,39 @@ function encodeExtraArgsV3(args: GenericExtraArgsV3): string {
     parts.push(new Uint8Array([0]))
   }
 
+  // Convert BytesLike fields to Uint8Array
+  const executorArgsBytes = getDataBytes(args.executorArgs)
+  const tokenReceiverBytes = getDataBytes(args.tokenReceiver)
+  const tokenArgsBytes = getDataBytes(args.tokenArgs)
+
   // executorArgsLength (2 bytes, uint16 big-endian)
   const executorArgsLenBytes = new Uint8Array(2)
-  executorArgsLenBytes[0] = (args.executorArgs.length >>> 8) & 0xff
-  executorArgsLenBytes[1] = args.executorArgs.length & 0xff
+  executorArgsLenBytes[0] = (executorArgsBytes.length >>> 8) & 0xff
+  executorArgsLenBytes[1] = executorArgsBytes.length & 0xff
   parts.push(executorArgsLenBytes)
 
   // executorArgs (variable)
-  if (args.executorArgs.length > 0) {
-    parts.push(args.executorArgs)
+  if (executorArgsBytes.length > 0) {
+    parts.push(executorArgsBytes)
   }
 
   // tokenReceiverLength (1 byte)
-  parts.push(new Uint8Array([args.tokenReceiver.length]))
+  parts.push(new Uint8Array([tokenReceiverBytes.length]))
 
   // tokenReceiver (variable)
-  if (args.tokenReceiver.length > 0) {
-    parts.push(args.tokenReceiver)
+  if (tokenReceiverBytes.length > 0) {
+    parts.push(tokenReceiverBytes)
   }
 
   // tokenArgsLength (2 bytes, uint16 big-endian)
   const tokenArgsLenBytes = new Uint8Array(2)
-  tokenArgsLenBytes[0] = (args.tokenArgs.length >>> 8) & 0xff
-  tokenArgsLenBytes[1] = args.tokenArgs.length & 0xff
+  tokenArgsLenBytes[0] = (tokenArgsBytes.length >>> 8) & 0xff
+  tokenArgsLenBytes[1] = tokenArgsBytes.length & 0xff
   parts.push(tokenArgsLenBytes)
 
   // tokenArgs (variable)
-  if (args.tokenArgs.length > 0) {
-    parts.push(args.tokenArgs)
+  if (tokenArgsBytes.length > 0) {
+    parts.push(tokenArgsBytes)
   }
 
   return hexlify(concat(parts))
@@ -346,8 +351,20 @@ function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
 
   // tokenReceiver (variable)
   if (offset + tokenReceiverLen > data.length) return undefined
-  const tokenReceiver = data.slice(offset, offset + tokenReceiverLen)
+  const tokenReceiverBytes = data.slice(offset, offset + tokenReceiverLen)
   offset += tokenReceiverLen
+
+  // Convert tokenReceiver bytes to string
+  let tokenReceiver: string
+  if (tokenReceiverLen === 0) {
+    tokenReceiver = ''
+  } else if (tokenReceiverLen === 20) {
+    // 20 bytes = EVM address, return checksummed
+    tokenReceiver = getAddress(hexlify(tokenReceiverBytes))
+  } else {
+    // Other lengths: return as hex string
+    tokenReceiver = hexlify(tokenReceiverBytes)
+  }
 
   // tokenArgsLength (2 bytes, uint16 big-endian)
   if (offset + 2 > data.length) return undefined

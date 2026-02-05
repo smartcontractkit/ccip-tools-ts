@@ -673,9 +673,9 @@ describe('decodeMessage', () => {
         assert.deepEqual(extraArgs.ccvArgs, [])
         assert.equal(extraArgs.blockConfirmations, 0)
         assert.equal(extraArgs.executor, '')
-        assert.ok(extraArgs.executorArgs instanceof Uint8Array)
-        assert.ok(extraArgs.tokenReceiver instanceof Uint8Array)
-        assert.ok(extraArgs.tokenArgs instanceof Uint8Array)
+        assert.equal(extraArgs.executorArgs, '0x')
+        assert.equal(extraArgs.tokenReceiver, '')
+        assert.equal(extraArgs.tokenArgs, '0x')
       })
 
       it('should use V2 when only V2 fields are provided', () => {

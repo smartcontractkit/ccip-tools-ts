@@ -57,11 +57,11 @@ export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
  *   gasLimit: 200_000n,
  *   blockConfirmations: 5,
  *   ccvs: ['0x1234...'],
- *   ccvArgs: [new Uint8Array([1, 2, 3])],
+ *   ccvArgs: ['0x010203'],
  *   executor: '0x5678...',
- *   executorArgs: new Uint8Array([]),
- *   tokenReceiver: new Uint8Array([...]),
- *   tokenArgs: new Uint8Array([]),
+ *   executorArgs: '0x',
+ *   tokenReceiver: '0xReceiverAddress...',
+ *   tokenArgs: '0x',
  * }
  * ```
  */
@@ -72,16 +72,16 @@ export type GenericExtraArgsV3 = {
   blockConfirmations: number
   /** Cross-chain verifier addresses (EVM addresses). */
   ccvs: string[]
-  /** Per-CCV arguments. */
-  ccvArgs: Uint8Array[]
+  /** Per-CCV arguments (BytesLike). */
+  ccvArgs: BytesLike[]
   /** Executor address (EVM address or empty string for none). */
   executor: string
-  /** Executor-specific arguments. */
-  executorArgs: Uint8Array
-  /** Token receiver in bytes (destination chain format). */
-  tokenReceiver: Uint8Array
-  /** Token pool-specific arguments. */
-  tokenArgs: Uint8Array
+  /** Executor-specific arguments (BytesLike). */
+  executorArgs: BytesLike
+  /** Token receiver address (checksummed EVM address or hex string). */
+  tokenReceiver: string
+  /** Token pool-specific arguments (BytesLike). */
+  tokenArgs: BytesLike
 }
 
 /**

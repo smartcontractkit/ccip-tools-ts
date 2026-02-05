@@ -1009,9 +1009,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           ccvs: [],
           ccvArgs: [],
           executor: '',
-          executorArgs: new Uint8Array(),
-          tokenReceiver: new Uint8Array(),
-          tokenArgs: new Uint8Array(),
+          executorArgs: '0x',
+          tokenReceiver: '',
+          tokenArgs: '0x',
           ...message.extraArgs,
         },
       }

@@ -316,9 +316,9 @@ describe('GenericExtraArgsV3', () => {
         ccvs: [],
         ccvArgs: [],
         executor: '',
-        executorArgs: new Uint8Array(0),
-        tokenReceiver: new Uint8Array(0),
-        tokenArgs: new Uint8Array(0),
+        executorArgs: '0x',
+        tokenReceiver: '',
+        tokenArgs: '0x',
       }
       const encoded = encodeExtraArgs(args, ChainFamily.EVM)
       assert.match(encoded, /^0x302326cb/) // GenericExtraArgsV3Tag
@@ -331,9 +331,9 @@ describe('GenericExtraArgsV3', () => {
         ccvs: [],
         ccvArgs: [],
         executor: '',
-        executorArgs: new Uint8Array(0),
-        tokenReceiver: new Uint8Array(0),
-        tokenArgs: new Uint8Array(0),
+        executorArgs: '0x',
+        tokenReceiver: '',
+        tokenArgs: '0x',
       }
       const encoded = encodeExtraArgs(args, ChainFamily.EVM)
       // After 4-byte tag, next 4 bytes should be gasLimit
@@ -347,9 +347,9 @@ describe('GenericExtraArgsV3', () => {
         ccvs: [],
         ccvArgs: [],
         executor: '',
-        executorArgs: new Uint8Array(0),
-        tokenReceiver: new Uint8Array(0),
-        tokenArgs: new Uint8Array(0),
+        executorArgs: '0x',
+        tokenReceiver: '',
+        tokenArgs: '0x',
       }
       const encoded = encodeExtraArgs(args, ChainFamily.EVM)
       // After 4-byte tag + 4-byte gasLimit, next 2 bytes should be blockConfirmations
@@ -365,9 +365,9 @@ describe('GenericExtraArgsV3', () => {
         ccvs: [],
         ccvArgs: [],
         executor: '',
-        executorArgs: new Uint8Array(0),
-        tokenReceiver: new Uint8Array(0),
-        tokenArgs: new Uint8Array(0),
+        executorArgs: '0x',
+        tokenReceiver: '',
+        tokenArgs: '0x',
       }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
       const decoded = decodeExtraArgs(encoded, ChainFamily.EVM)
@@ -378,6 +378,7 @@ describe('GenericExtraArgsV3', () => {
       assert.deepEqual((decoded as GenericExtraArgsV3).ccvs, [])
       assert.deepEqual((decoded as GenericExtraArgsV3).ccvArgs, [])
       assert.equal((decoded as GenericExtraArgsV3).executor, '')
+      assert.equal((decoded as GenericExtraArgsV3).tokenReceiver, '')
     })
 
     it('should decode V3 args with CCVs', () => {
@@ -385,11 +386,11 @@ describe('GenericExtraArgsV3', () => {
         gasLimit: 100_000n,
         blockConfirmations: 10,
         ccvs: ['0x1234567890123456789012345678901234567890'],
-        ccvArgs: [new Uint8Array([1, 2, 3, 4])],
+        ccvArgs: ['0x01020304'],
         executor: '',
-        executorArgs: new Uint8Array(0),
-        tokenReceiver: new Uint8Array(0),
-        tokenArgs: new Uint8Array(0),
+        executorArgs: '0x',
+        tokenReceiver: '',
+        tokenArgs: '0x',
       }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
       const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as GenericExtraArgsV3 & {
@@ -409,9 +410,9 @@ describe('GenericExtraArgsV3', () => {
         ccvs: [],
         ccvArgs: [],
         executor: '0xabcdefABCDEF123456789012345678901234ABCD',
-        executorArgs: new Uint8Array([0xaa, 0xbb]),
-        tokenReceiver: new Uint8Array(0),
-        tokenArgs: new Uint8Array(0),
+        executorArgs: '0xaabb',
+        tokenReceiver: '',
+        tokenArgs: '0x',
       }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
       const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as GenericExtraArgsV3 & {
@@ -430,11 +431,9 @@ describe('GenericExtraArgsV3', () => {
         ccvs: [],
         ccvArgs: [],
         executor: '',
-        executorArgs: new Uint8Array(0),
-        tokenReceiver: new Uint8Array([
-          1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
-        ]),
-        tokenArgs: new Uint8Array([0xff, 0xee, 0xdd]),
+        executorArgs: '0x',
+        tokenReceiver: '0x0102030405060708090a0b0c0d0e0f1011121314',
+        tokenArgs: '0xffeedd',
       }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
       const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as GenericExtraArgsV3 & {
@@ -442,8 +441,12 @@ describe('GenericExtraArgsV3', () => {
       }
 
       assert.equal(decoded._tag, 'GenericExtraArgsV3')
-      assert.deepEqual(decoded.tokenReceiver, original.tokenReceiver)
-      assert.deepEqual(decoded.tokenArgs, original.tokenArgs)
+      // 20 bytes = EVM address, decoded to checksummed format
+      assert.equal(
+        decoded.tokenReceiver.toLowerCase(),
+        '0x0102030405060708090a0b0c0d0e0f1011121314',
+      )
+      assert.deepEqual(decoded.tokenArgs, new Uint8Array([0xff, 0xee, 0xdd]))
     })
   })
 
@@ -455,9 +458,9 @@ describe('GenericExtraArgsV3', () => {
         ccvs: [],
         ccvArgs: [],
         executor: '',
-        executorArgs: new Uint8Array(0),
-        tokenReceiver: new Uint8Array(0),
-        tokenArgs: new Uint8Array(0),
+        executorArgs: '0x',
+        tokenReceiver: '',
+        tokenArgs: '0x',
       }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
       const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as GenericExtraArgsV3 & {
@@ -470,9 +473,9 @@ describe('GenericExtraArgsV3', () => {
       assert.deepEqual(decoded.ccvs, original.ccvs)
       assert.deepEqual(decoded.ccvArgs, original.ccvArgs)
       assert.equal(decoded.executor, original.executor)
-      assert.deepEqual(decoded.executorArgs, original.executorArgs)
-      assert.deepEqual(decoded.tokenReceiver, original.tokenReceiver)
-      assert.deepEqual(decoded.tokenArgs, original.tokenArgs)
+      assert.deepEqual(decoded.executorArgs, new Uint8Array(0))
+      assert.equal(decoded.tokenReceiver, '')
+      assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
     })
 
     it('should round-trip V3 args with all fields populated', () => {
@@ -483,14 +486,11 @@ describe('GenericExtraArgsV3', () => {
           '0x1111111111111111111111111111111111111111',
           '0x2222222222222222222222222222222222222222',
         ],
-        ccvArgs: [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5, 6, 7, 8])],
+        ccvArgs: ['0x010203', '0x0405060708'],
         executor: '0x3333333333333333333333333333333333333333',
-        executorArgs: new Uint8Array([0x10, 0x20, 0x30]),
-        tokenReceiver: new Uint8Array([
-          0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf,
-          0xb0, 0xb1, 0xb2, 0xb3, 0xb4,
-        ]),
-        tokenArgs: new Uint8Array([0xcc, 0xdd, 0xee, 0xff]),
+        executorArgs: '0x102030',
+        tokenReceiver: '0xa1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4',
+        tokenArgs: '0xccddeeff',
       }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
       const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as GenericExtraArgsV3 & {
@@ -503,12 +503,13 @@ describe('GenericExtraArgsV3', () => {
       assert.equal(decoded.ccvs.length, 2)
       assert.equal(decoded.ccvs[0]?.toLowerCase(), original.ccvs[0]!.toLowerCase())
       assert.equal(decoded.ccvs[1]?.toLowerCase(), original.ccvs[1]!.toLowerCase())
-      assert.deepEqual(decoded.ccvArgs[0], original.ccvArgs[0])
-      assert.deepEqual(decoded.ccvArgs[1], original.ccvArgs[1])
+      assert.deepEqual(decoded.ccvArgs[0], new Uint8Array([1, 2, 3]))
+      assert.deepEqual(decoded.ccvArgs[1], new Uint8Array([4, 5, 6, 7, 8]))
       assert.equal(decoded.executor.toLowerCase(), original.executor.toLowerCase())
-      assert.deepEqual(decoded.executorArgs, original.executorArgs)
-      assert.deepEqual(decoded.tokenReceiver, original.tokenReceiver)
-      assert.deepEqual(decoded.tokenArgs, original.tokenArgs)
+      assert.deepEqual(decoded.executorArgs, new Uint8Array([0x10, 0x20, 0x30]))
+      // tokenReceiver is 20 bytes, returned as checksummed EVM address
+      assert.equal(decoded.tokenReceiver.toLowerCase(), original.tokenReceiver.toLowerCase())
+      assert.deepEqual(decoded.tokenArgs, new Uint8Array([0xcc, 0xdd, 0xee, 0xff]))
     })
 
     it('should round-trip V3 args with max uint32 gasLimit', () => {
@@ -518,9 +519,9 @@ describe('GenericExtraArgsV3', () => {
         ccvs: [],
         ccvArgs: [],
         executor: '',
-        executorArgs: new Uint8Array(0),
-        tokenReceiver: new Uint8Array(0),
-        tokenArgs: new Uint8Array(0),
+        executorArgs: '0x',
+        tokenReceiver: '',
+        tokenArgs: '0x',
       }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
       const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as GenericExtraArgsV3 & {
@@ -541,9 +542,9 @@ describe('GenericExtraArgsV3', () => {
         ccvs: [],
         ccvArgs: [],
         executor: '',
-        executorArgs: new Uint8Array(0),
-        tokenReceiver: new Uint8Array(0),
-        tokenArgs: new Uint8Array(0),
+        executorArgs: '0x',
+        tokenReceiver: '',
+        tokenArgs: '0x',
       }
       const encoded = encodeExtraArgs(original, ChainFamily.EVM)
       const decoded = decodeExtraArgs(encoded) // no chain family specified
@@ -605,7 +606,7 @@ describe('GenericExtraArgsV3', () => {
       assert.deepEqual(decoded.ccvArgs, [])
       assert.equal(decoded.executor, '')
       assert.deepEqual(decoded.executorArgs, new Uint8Array(0))
-      assert.deepEqual(decoded.tokenReceiver, new Uint8Array(0))
+      assert.equal(decoded.tokenReceiver, '')
       assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
     })
 
@@ -622,7 +623,7 @@ describe('GenericExtraArgsV3', () => {
       assert.deepEqual(decoded.ccvArgs, [])
       assert.equal(decoded.executor, '')
       assert.deepEqual(decoded.executorArgs, new Uint8Array(0))
-      assert.deepEqual(decoded.tokenReceiver, new Uint8Array(0))
+      assert.equal(decoded.tokenReceiver, '')
       assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
     })
 
@@ -639,7 +640,7 @@ describe('GenericExtraArgsV3', () => {
       assert.deepEqual(decoded.ccvArgs, [])
       assert.equal(decoded.executor, '')
       assert.deepEqual(decoded.executorArgs, new Uint8Array(0))
-      assert.deepEqual(decoded.tokenReceiver, new Uint8Array(0))
+      assert.equal(decoded.tokenReceiver, '')
       assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
     })
 
@@ -656,7 +657,7 @@ describe('GenericExtraArgsV3', () => {
       assert.deepEqual(decoded.ccvArgs, [])
       assert.equal(decoded.executor.toLowerCase(), '0x9fca2fa95be0944a4ad731474dd3cdb1b704f9c6')
       assert.deepEqual(decoded.executorArgs, new Uint8Array([0x64, 0x61, 0x74, 0x61])) // "data"
-      assert.deepEqual(decoded.tokenReceiver, new Uint8Array(0))
+      assert.equal(decoded.tokenReceiver, '')
       assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
     })
 
@@ -676,7 +677,7 @@ describe('GenericExtraArgsV3', () => {
       assert.deepEqual(decoded.ccvArgs[1], new Uint8Array([0x61, 0x72, 0x67, 0x73, 0x32])) // "args2"
       assert.equal(decoded.executor, '')
       assert.deepEqual(decoded.executorArgs, new Uint8Array(0))
-      assert.deepEqual(decoded.tokenReceiver, new Uint8Array(0))
+      assert.equal(decoded.tokenReceiver, '')
       assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
     })
 
@@ -700,8 +701,11 @@ describe('GenericExtraArgsV3', () => {
         decoded.executorArgs,
         new Uint8Array([0x65, 0x78, 0x65, 0x63, 0x41, 0x72, 0x67, 0x73]),
       )
-      // tokenReceiver is 20 bytes: 0xc9f66ef22b2e26c2af10fcf8847ac4a920ab3eaa
-      assert.equal(decoded.tokenReceiver.length, 20)
+      // tokenReceiver is 20 bytes -> checksummed EVM address
+      assert.equal(
+        decoded.tokenReceiver.toLowerCase(),
+        '0xc9f66ef22b2e26c2af10fcf8847ac4a920ab3eaa',
+      )
       // "tokenArgs" (note capital A) = 0x74 6f 6b 65 6e 41 72 67 73
       assert.deepEqual(
         decoded.tokenArgs,
@@ -727,8 +731,11 @@ describe('GenericExtraArgsV3', () => {
       assert.equal(decoded.executor.toLowerCase(), '0x1234567890123456789012345678901234567890')
       // executorArgs is "3282389428935872359872395885792839273525" (40 bytes)
       assert.equal(decoded.executorArgs.length, 40)
-      // tokenReceiver is "3282389428935872359872329385792837273525" (40 bytes as string)
-      assert.equal(decoded.tokenReceiver.length, 40)
+      // tokenReceiver is 40 bytes (not 20) -> hex string format
+      assert.equal(
+        decoded.tokenReceiver,
+        '0x33323832333839343238393335383732333539383732333239333835373932383337323733353235',
+      )
       assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
     })
   })
