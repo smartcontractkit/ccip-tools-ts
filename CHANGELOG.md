@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CLI: Add kebab-case aliases for multi-word commands (`manual-exec`, `get-supported-tokens`, `parse-bytes`, `parse-data`)
+- CLI: Add `--fee-tokens` flag to `getSupportedTokens` command to list fee tokens instead of transferable tokens
 - SDK: **Breaking**: `CCIPRequest` now includes optional `metadata?: APICCIPRequestMetadata` field
   - API fields (`status`, `receiptTransactionHash`, `deliveryTime`, etc.) moved under `metadata`
   - Migration: Change `request.status` to `request.metadata?.status`
