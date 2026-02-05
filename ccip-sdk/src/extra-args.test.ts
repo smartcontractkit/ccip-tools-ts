@@ -400,7 +400,7 @@ describe('GenericExtraArgsV3', () => {
       assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.ccvs.length, 1)
       assert.equal(decoded.ccvs[0]?.toLowerCase(), '0x1234567890123456789012345678901234567890')
-      assert.deepEqual(decoded.ccvArgs[0], new Uint8Array([1, 2, 3, 4]))
+      assert.equal(decoded.ccvArgs[0], '0x01020304')
     })
 
     it('should decode V3 args with executor', () => {
@@ -421,7 +421,7 @@ describe('GenericExtraArgsV3', () => {
 
       assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.executor.toLowerCase(), '0xabcdefabcdef123456789012345678901234abcd')
-      assert.deepEqual(decoded.executorArgs, new Uint8Array([0xaa, 0xbb]))
+      assert.equal(decoded.executorArgs, '0xaabb')
     })
 
     it('should decode V3 args with tokenReceiver and tokenArgs', () => {
@@ -446,7 +446,7 @@ describe('GenericExtraArgsV3', () => {
         decoded.tokenReceiver.toLowerCase(),
         '0x0102030405060708090a0b0c0d0e0f1011121314',
       )
-      assert.deepEqual(decoded.tokenArgs, new Uint8Array([0xff, 0xee, 0xdd]))
+      assert.equal(decoded.tokenArgs, '0xffeedd')
     })
   })
 
@@ -473,9 +473,9 @@ describe('GenericExtraArgsV3', () => {
       assert.deepEqual(decoded.ccvs, original.ccvs)
       assert.deepEqual(decoded.ccvArgs, original.ccvArgs)
       assert.equal(decoded.executor, original.executor)
-      assert.deepEqual(decoded.executorArgs, new Uint8Array(0))
+      assert.equal(decoded.executorArgs, '0x')
       assert.equal(decoded.tokenReceiver, '')
-      assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
+      assert.equal(decoded.tokenArgs, '0x')
     })
 
     it('should round-trip V3 args with all fields populated', () => {
@@ -503,13 +503,13 @@ describe('GenericExtraArgsV3', () => {
       assert.equal(decoded.ccvs.length, 2)
       assert.equal(decoded.ccvs[0]?.toLowerCase(), original.ccvs[0]!.toLowerCase())
       assert.equal(decoded.ccvs[1]?.toLowerCase(), original.ccvs[1]!.toLowerCase())
-      assert.deepEqual(decoded.ccvArgs[0], new Uint8Array([1, 2, 3]))
-      assert.deepEqual(decoded.ccvArgs[1], new Uint8Array([4, 5, 6, 7, 8]))
+      assert.equal(decoded.ccvArgs[0], '0x010203')
+      assert.equal(decoded.ccvArgs[1], '0x0405060708')
       assert.equal(decoded.executor.toLowerCase(), original.executor.toLowerCase())
-      assert.deepEqual(decoded.executorArgs, new Uint8Array([0x10, 0x20, 0x30]))
+      assert.equal(decoded.executorArgs, '0x102030')
       // tokenReceiver is 20 bytes, returned as checksummed EVM address
       assert.equal(decoded.tokenReceiver.toLowerCase(), original.tokenReceiver.toLowerCase())
-      assert.deepEqual(decoded.tokenArgs, new Uint8Array([0xcc, 0xdd, 0xee, 0xff]))
+      assert.equal(decoded.tokenArgs, '0xccddeeff')
     })
 
     it('should round-trip V3 args with max uint32 gasLimit', () => {
@@ -605,9 +605,9 @@ describe('GenericExtraArgsV3', () => {
       assert.deepEqual(decoded.ccvs, [])
       assert.deepEqual(decoded.ccvArgs, [])
       assert.equal(decoded.executor, '')
-      assert.deepEqual(decoded.executorArgs, new Uint8Array(0))
+      assert.equal(decoded.executorArgs, '0x')
       assert.equal(decoded.tokenReceiver, '')
-      assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
+      assert.equal(decoded.tokenArgs, '0x')
     })
 
     it('should decode test vector: all zeros', () => {
@@ -622,9 +622,9 @@ describe('GenericExtraArgsV3', () => {
       assert.deepEqual(decoded.ccvs, [])
       assert.deepEqual(decoded.ccvArgs, [])
       assert.equal(decoded.executor, '')
-      assert.deepEqual(decoded.executorArgs, new Uint8Array(0))
+      assert.equal(decoded.executorArgs, '0x')
       assert.equal(decoded.tokenReceiver, '')
-      assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
+      assert.equal(decoded.tokenArgs, '0x')
     })
 
     it('should decode test vector: max values', () => {
@@ -639,9 +639,9 @@ describe('GenericExtraArgsV3', () => {
       assert.deepEqual(decoded.ccvs, [])
       assert.deepEqual(decoded.ccvArgs, [])
       assert.equal(decoded.executor, '')
-      assert.deepEqual(decoded.executorArgs, new Uint8Array(0))
+      assert.equal(decoded.executorArgs, '0x')
       assert.equal(decoded.tokenReceiver, '')
-      assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
+      assert.equal(decoded.tokenArgs, '0x')
     })
 
     it('should decode test vector: with executor', () => {
@@ -656,9 +656,9 @@ describe('GenericExtraArgsV3', () => {
       assert.deepEqual(decoded.ccvs, [])
       assert.deepEqual(decoded.ccvArgs, [])
       assert.equal(decoded.executor.toLowerCase(), '0x9fca2fa95be0944a4ad731474dd3cdb1b704f9c6')
-      assert.deepEqual(decoded.executorArgs, new Uint8Array([0x64, 0x61, 0x74, 0x61])) // "data"
+      assert.equal(decoded.executorArgs, '0x64617461') // "data"
       assert.equal(decoded.tokenReceiver, '')
-      assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
+      assert.equal(decoded.tokenArgs, '0x')
     })
 
     it('should decode test vector: with 2 CCVs', () => {
@@ -673,12 +673,12 @@ describe('GenericExtraArgsV3', () => {
       assert.equal(decoded.ccvs.length, 2)
       assert.equal(decoded.ccvs[0]?.toLowerCase(), '0x97cb3391ea73689a81b6853deb104dd078538f6b')
       assert.equal(decoded.ccvs[1]?.toLowerCase(), '0xa0b7e3c01fcd94560317638a6b01f81846dee144')
-      assert.deepEqual(decoded.ccvArgs[0], new Uint8Array([0x61, 0x72, 0x67, 0x73, 0x31])) // "args1"
-      assert.deepEqual(decoded.ccvArgs[1], new Uint8Array([0x61, 0x72, 0x67, 0x73, 0x32])) // "args2"
+      assert.equal(decoded.ccvArgs[0], '0x6172677331') // "args1"
+      assert.equal(decoded.ccvArgs[1], '0x6172677332') // "args2"
       assert.equal(decoded.executor, '')
-      assert.deepEqual(decoded.executorArgs, new Uint8Array(0))
+      assert.equal(decoded.executorArgs, '0x')
       assert.equal(decoded.tokenReceiver, '')
-      assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
+      assert.equal(decoded.tokenArgs, '0x')
     })
 
     it('should decode test vector: full fields', () => {
@@ -693,24 +693,18 @@ describe('GenericExtraArgsV3', () => {
       assert.equal(decoded.ccvs.length, 2)
       assert.equal(decoded.ccvs[0]?.toLowerCase(), '0x97cb3391ea73689a81b6853deb104dd078538f6b')
       assert.equal(decoded.ccvs[1]?.toLowerCase(), '0xa0b7e3c01fcd94560317638a6b01f81846dee144')
-      assert.deepEqual(decoded.ccvArgs[0], new Uint8Array([0x61, 0x72, 0x67, 0x73, 0x31])) // "args1"
-      assert.deepEqual(decoded.ccvArgs[1], new Uint8Array([0x61, 0x72, 0x67, 0x73, 0x32])) // "args2"
+      assert.equal(decoded.ccvArgs[0], '0x6172677331') // "args1"
+      assert.equal(decoded.ccvArgs[1], '0x6172677332') // "args2"
       assert.equal(decoded.executor.toLowerCase(), '0x9fca2fa95be0944a4ad731474dd3cdb1b704f9c6')
       // "execArgs" (note capital A) = 0x65 78 65 63 41 72 67 73
-      assert.deepEqual(
-        decoded.executorArgs,
-        new Uint8Array([0x65, 0x78, 0x65, 0x63, 0x41, 0x72, 0x67, 0x73]),
-      )
+      assert.equal(decoded.executorArgs, '0x6578656341726773')
       // tokenReceiver is 20 bytes -> checksummed EVM address
       assert.equal(
         decoded.tokenReceiver.toLowerCase(),
         '0xc9f66ef22b2e26c2af10fcf8847ac4a920ab3eaa',
       )
       // "tokenArgs" (note capital A) = 0x74 6f 6b 65 6e 41 72 67 73
-      assert.deepEqual(
-        decoded.tokenArgs,
-        new Uint8Array([0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x41, 0x72, 0x67, 0x73]),
-      )
+      assert.equal(decoded.tokenArgs, '0x746f6b656e41726773')
     })
 
     it('should decode test vector: zero-address CCVs', () => {
@@ -726,17 +720,17 @@ describe('GenericExtraArgsV3', () => {
       // CCVs with address(0) are decoded as empty strings
       assert.equal(decoded.ccvs[0], '')
       assert.equal(decoded.ccvs[1], '')
-      assert.deepEqual(decoded.ccvArgs[0], new Uint8Array(0)) // empty
-      assert.deepEqual(decoded.ccvArgs[1], new Uint8Array(0)) // empty
+      assert.equal(decoded.ccvArgs[0], '0x') // empty
+      assert.equal(decoded.ccvArgs[1], '0x') // empty
       assert.equal(decoded.executor.toLowerCase(), '0x1234567890123456789012345678901234567890')
-      // executorArgs is "3282389428935872359872395885792839273525" (40 bytes)
-      assert.equal(decoded.executorArgs.length, 40)
+      // executorArgs is "3282389428935872359872395885792839273525" (40 bytes = 80 hex chars + "0x" prefix)
+      assert.equal(decoded.executorArgs.length, 82)
       // tokenReceiver is 40 bytes (not 20) -> hex string format
       assert.equal(
         decoded.tokenReceiver,
         '0x33323832333839343238393335383732333539383732333239333835373932383337323733353235',
       )
-      assert.deepEqual(decoded.tokenArgs, new Uint8Array(0))
+      assert.equal(decoded.tokenArgs, '0x')
     })
   })
 })

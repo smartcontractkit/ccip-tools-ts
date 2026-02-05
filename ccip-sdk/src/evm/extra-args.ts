@@ -179,7 +179,7 @@ function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
   offset += 1
 
   const ccvs: string[] = []
-  const ccvArgs: Uint8Array[] = []
+  const ccvArgs: string[] = []
 
   // For each CCV
   for (let i = 0; i < ccvsLength; i++) {
@@ -206,7 +206,7 @@ function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
 
     // ccvArgs (variable)
     if (offset + ccvArgsLen > data.length) return undefined
-    ccvArgs.push(data.slice(offset, offset + ccvArgsLen))
+    ccvArgs.push(hexlify(data.slice(offset, offset + ccvArgsLen)))
     offset += ccvArgsLen
   }
 
@@ -232,7 +232,7 @@ function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
 
   // executorArgs (variable)
   if (offset + executorArgsLen > data.length) return undefined
-  const executorArgs = data.slice(offset, offset + executorArgsLen)
+  const executorArgs = hexlify(data.slice(offset, offset + executorArgsLen))
   offset += executorArgsLen
 
   // tokenReceiverLength (1 byte)
@@ -264,7 +264,7 @@ function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
 
   // tokenArgs (variable)
   if (offset + tokenArgsLen > data.length) return undefined
-  const tokenArgs = data.slice(offset, offset + tokenArgsLen)
+  const tokenArgs = hexlify(data.slice(offset, offset + tokenArgsLen))
   offset += tokenArgsLen
 
   return {
