@@ -70,31 +70,34 @@ describe(
             typeof result.message.sequenceNumber === 'bigint',
             'sequenceNumber should be bigint',
           )
-          assert.ok(result.status, 'Result should include status')
+          assert.ok(result.metadata, 'Result should include metadata')
+          assert.ok(result.metadata.status, 'Metadata should include status')
         },
       )
 
       it('should return correct lane information', { timeout: 30000 }, async () => {
         const result = await api.getMessageById(KNOWN_MESSAGE_ID)
 
-        assert.ok(result.sourceNetworkInfo, 'Should have sourceNetworkInfo')
-        assert.equal(result.sourceNetworkInfo.chainSelector, SEPOLIA_SELECTOR)
-        assert.match(result.sourceNetworkInfo.name, /sepolia/i)
+        assert.ok(result.metadata, 'Should have metadata')
+        assert.ok(result.metadata.sourceNetworkInfo, 'Should have sourceNetworkInfo')
+        assert.equal(result.metadata.sourceNetworkInfo.chainSelector, SEPOLIA_SELECTOR)
+        assert.match(result.metadata.sourceNetworkInfo.name, /sepolia/i)
 
-        assert.ok(result.destNetworkInfo, 'Should have destNetworkInfo')
-        assert.equal(result.destNetworkInfo.chainSelector, FUJI_SELECTOR)
-        assert.match(result.destNetworkInfo.name, /fuji|avalanche/i)
+        assert.ok(result.metadata.destNetworkInfo, 'Should have destNetworkInfo')
+        assert.equal(result.metadata.destNetworkInfo.chainSelector, FUJI_SELECTOR)
+        assert.match(result.metadata.destNetworkInfo.name, /fuji|avalanche/i)
       })
 
       it('should return correct message status', { timeout: 30000 }, async () => {
         const result = await api.getMessageById(KNOWN_MESSAGE_ID)
 
+        assert.ok(result.metadata, 'Should have metadata')
         const validStatuses = Object.values(MessageStatus)
         assert.ok(
-          validStatuses.includes(result.status),
-          `Status "${result.status}" should be a valid MessageStatus`,
+          validStatuses.includes(result.metadata.status),
+          `Status "${result.metadata.status}" should be a valid MessageStatus`,
         )
-        assert.equal(result.status, MessageStatus.Success)
+        assert.equal(result.metadata.status, MessageStatus.Success)
       })
 
       it(
