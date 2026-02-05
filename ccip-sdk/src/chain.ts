@@ -8,6 +8,7 @@ import {
   CCIPApiClientNotAvailableError,
   CCIPChainFamilyMismatchError,
   CCIPExecTxRevertedError,
+  CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
 import { DEFAULT_GAS_LIMIT } from './evm/const.ts'
@@ -16,6 +17,7 @@ import type {
   EVMExtraArgsV1,
   EVMExtraArgsV2,
   ExtraArgs,
+  GenericExtraArgsV3,
   SVMExtraArgsV1,
   SuiExtraArgsV1,
 } from './extra-args.ts'
@@ -43,7 +45,24 @@ import {
   type WithLogger,
   ExecutionState,
 } from './types.ts'
-import { util } from './utils.ts'
+import { networkInfo, util, withRetry } from './utils.ts'
+
+/** Field names unique to GenericExtraArgsV3 (not present in V2). */
+const V3_ONLY_FIELDS = [
+  'blockConfirmations',
+  'ccvs',
+  'ccvArgs',
+  'executor',
+  'executorArgs',
+  'tokenReceiver',
+  'tokenArgs',
+] as const
+
+/** Check if extraArgs contains any V3-only fields. */
+function hasV3ExtraArgs(extraArgs: Partial<ExtraArgs> | undefined): boolean {
+  if (!extraArgs) return false
+  return V3_ONLY_FIELDS.some((field) => field in extraArgs)
+}
 
 /**
  * Context for Chain class initialization.
@@ -71,14 +90,48 @@ export type ChainContext = WithLogger & {
   /**
    * CCIP API client instance for lane information queries.
    *
-   * - `undefined` (default): Creates CCIPAPIClient with production endpoint
-   *   (https://api.ccip.chain.link)
+   * - `undefined` (default): Creates CCIPAPIClient with {@link DEFAULT_API_BASE_URL}
    * - `CCIPAPIClient`: Uses provided instance (allows custom URL, fetch, etc.)
    * - `null`: Disables API client entirely (getLaneLatency() will throw)
    *
    * Default: `undefined` (auto-create with production endpoint)
    */
   apiClient?: CCIPAPIClient | null
+
+  /**
+   * Retry configuration for API fallback operations.
+   * Controls exponential backoff behavior for transient errors.
+   * Default: DEFAULT_API_RETRY_CONFIG
+   */
+  apiRetryConfig?: ApiRetryConfig
+}
+
+/**
+ * Configuration for retry behavior with exponential backoff.
+ */
+export type ApiRetryConfig = {
+  /** Maximum number of retry attempts for transient errors.*/
+  maxRetries?: number
+
+  /** Initial delay in milliseconds before the first retry. */
+  initialDelayMs?: number
+
+  /** Multiplier applied to delay after each retry (exponential backoff). Set to 1 for fixed delays. */
+  backoffMultiplier?: number
+
+  /** Maximum delay in milliseconds between retries (caps exponential growth). */
+  maxDelayMs?: number
+
+  /** Whether to respect the error's retryAfterMs hint when available. If true, uses max(calculated delay, error.retryAfterMs). */
+  respectRetryAfterHint?: boolean
+}
+
+export const DEFAULT_API_RETRY_CONFIG: Required<ApiRetryConfig> = {
+  maxRetries: 3,
+  initialDelayMs: 1000,
+  backoffMultiplier: 2,
+  maxDelayMs: 30000,
+  respectRetryAfterHint: true,
 }
 
 /**
@@ -129,29 +182,93 @@ export type GetBalanceOpts = {
 
 /**
  * Rate limiter state for token pool configurations.
- * Null if rate limiting is disabled.
+ *
+ * @remarks
+ * - Returns the rate limiter bucket state when rate limiting is **enabled**
+ * - Returns `null` when rate limiting is **disabled** (unlimited throughput)
+ *
+ * @example Handling nullable state
+ * ```typescript
+ * const remote = await chain.getTokenPoolRemotes(poolAddress)
+ * const state = remote['ethereum-mainnet'].inboundRateLimiterState
+ *
+ * if (state === null) {
+ *   console.log('Rate limiting disabled - unlimited throughput')
+ * } else {
+ *   console.log(`Capacity: ${state.capacity}, Available: ${state.tokens}`)
+ * }
+ * ```
  */
 export type RateLimiterState = {
   /** Current token balance in the rate limiter bucket. */
   tokens: bigint
   /** Maximum capacity of the rate limiter bucket. */
   capacity: bigint
-  /** Rate at which tokens are replenished. */
+  /** Rate at which tokens are replenished (tokens per second). */
   rate: bigint
 } | null
 
 /**
- * Remote token pool configuration for a specific chain.
+ * Remote token pool configuration for a specific destination chain.
+ *
+ * @remarks
+ * Each entry represents the configuration needed to transfer tokens
+ * from the current chain to a specific destination chain.
  */
 export type TokenPoolRemote = {
   /** Address of the remote token on the destination chain. */
   remoteToken: string
-  /** Addresses of remote token pools. */
+  /**
+   * Addresses of remote token pools on the destination chain.
+   *
+   * @remarks
+   * Multiple pools may exist for:
+   * - Redundancy (failover if one pool is unavailable)
+   * - Capacity aggregation across pools
+   * - Version management (different pool implementations)
+   */
   remotePools: string[]
   /** Inbound rate limiter state for tokens coming into this chain. */
   inboundRateLimiterState: RateLimiterState
   /** Outbound rate limiter state for tokens leaving this chain. */
   outboundRateLimiterState: RateLimiterState
+}
+
+/**
+ * Token pool configuration returned by {@link Chain.getTokenPoolConfig}.
+ *
+ * @remarks
+ * Contains the core configuration of a token pool including the token it manages,
+ * the router it's registered with, and optionally its version identifier.
+ */
+export type TokenPoolConfig = {
+  /** Address of the token managed by this pool. */
+  token: string
+  /** Address of the CCIP router this pool is registered with. */
+  router: string
+  /**
+   * Version identifier string (e.g., "BurnMintTokenPool 1.5.1").
+   *
+   * @remarks
+   * May be undefined for older pool implementations that don't expose this method.
+   */
+  typeAndVersion?: string
+}
+
+/**
+ * Token configuration from a TokenAdminRegistry, returned by {@link Chain.getRegistryTokenConfig}.
+ *
+ * @remarks
+ * The TokenAdminRegistry tracks which administrator controls each token
+ * and which pool is authorized to handle transfers.
+ */
+export type RegistryTokenConfig = {
+  /** Address of the current administrator for this token. */
+  administrator: string
+  /** Address of pending administrator (if ownership transfer is in progress). */
+  pendingAdministrator?: string
+  /** Address of the token pool authorized to handle this token's transfers. */
+  tokenPool?: string
 }
 
 /**
@@ -163,10 +280,11 @@ export type UnsignedTx = {
   [ChainFamily.Aptos]: UnsignedAptosTx
   [ChainFamily.TON]: UnsignedTONTx
   [ChainFamily.Sui]: never // TODO
+  [ChainFamily.Unknown]: never
 }
 
 /**
- * Common options for [[getFee]], [[generateUnsignedSendMessage]] and [[sendMessage]] Chain methods
+ * Common options for {@link Chain.getFee}, {@link Chain.generateUnsignedSendMessage} and {@link Chain.sendMessage} methods.
  */
 export type SendMessageOpts = {
   /** Router address on this chain */
@@ -180,7 +298,7 @@ export type SendMessageOpts = {
 }
 
 /**
- * Common options for [[generateUnsignedExecuteReport]] and [[executeReport]] Chain methods
+ * Common options for {@link Chain.generateUnsignedExecuteReport} and {@link Chain.executeReport} methods.
  */
 export type ExecuteReportOpts = {
   /** address of the OffRamp contract */
@@ -206,14 +324,17 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   logger: Logger
   /** CCIP API client (null if opted out) */
   readonly apiClient: CCIPAPIClient | null
+  /** Retry configuration for API fallback operations (null if API client is disabled) */
+  readonly apiRetryConfig: Required<ApiRetryConfig> | null
 
   /**
    * Base constructor for Chain class.
    * @param network - NetworkInfo object for the Chain instance
    * @param ctx - Optional context with logger and API client configuration
+   * @throws {@link CCIPChainFamilyMismatchError} if network family doesn't match the Chain subclass
    */
   constructor(network: NetworkInfo, ctx?: ChainContext) {
-    const { logger = console, apiClient } = ctx ?? {}
+    const { logger = console, apiClient, apiRetryConfig } = ctx ?? {}
 
     if (network.family !== (this.constructor as ChainStatic).family)
       throw new CCIPChainFamilyMismatchError(
@@ -227,10 +348,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     // API client initialization: default enabled, null = explicit opt-out
     if (apiClient === null) {
       this.apiClient = null // Explicit opt-out
+      this.apiRetryConfig = null // No retry config needed without API client
     } else if (apiClient !== undefined) {
       this.apiClient = apiClient // Use provided instance
+      this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     } else {
       this.apiClient = new CCIPAPIClient(undefined, { logger }) // Default
+      this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     }
   }
 
@@ -246,17 +370,21 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Fetch the timestamp of a given block
    * @param block - positive block number, negative finality depth or 'finalized' tag
    * @returns timestamp of the block, in seconds
+   * @throws {@link CCIPBlockNotFoundError} if block does not exist
    */
   abstract getBlockTimestamp(block: number | 'finalized'): Promise<number>
   /**
    * Fetch a transaction by its hash
    * @param hash - transaction hash
    * @returns generic transaction details
+   * @throws {@link CCIPTransactionNotFoundError} if transaction not found
    */
   abstract getTransaction(hash: string): Promise<ChainTransaction>
   /**
-   * Confirm a log tx is finalized or wait for it to be finalized
-   * Throws if it isn't included (e.g. a reorg)
+   * Confirm a log tx is finalized or wait for it to be finalized.
+   * @param opts - Options containing the request, finality level, and optional cancel promise
+   * @returns true when the transaction is finalized
+   * @throws {@link CCIPTransactionNotFinalizedError} if the transaction is not included (e.g., due to a reorg)
    */
   async waitFinalized({
     request: { log, tx },
@@ -318,6 +446,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *   - `page`: if provided, try to use this page/range for batches
    *   - `watch`: true or cancellation promise, getLogs continuously after initial fetch
    * @returns An async iterable iterator of logs.
+   * @throws {@link CCIPLogsWatchRequiresFinalityError} if watch mode is used without a finality endBlock tag
+   * @throws {@link CCIPLogsWatchRequiresStartError} if watch mode is used without startBlock or startTime
+   * @throws {@link CCIPLogsAddressRequiredError} if address is required but not provided (chain-specific)
    */
   abstract getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
 
@@ -325,20 +456,29 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Fetch all CCIP requests in a transaction
    * @param tx - ChainTransaction or txHash to fetch requests from
    * @returns CCIP messages in the transaction (at least one)
-   **/
+   * @throws {@link CCIPMessageNotFoundInTxError} if no CCIP messages found in transaction
+   */
   async getMessagesInTx(tx: string | ChainTransaction): Promise<CCIPRequest[]> {
     const txHash = typeof tx === 'string' ? tx : tx.hash
     try {
       if (typeof tx === 'string') tx = await this.getTransaction(tx)
       return getMessagesInTx(this, tx)
     } catch (err) {
-      // if getTransaction or decoding fails, try API if available
-      if (this.apiClient) {
-        const messageIds = await this.apiClient.getMessageIdsInTx(txHash)
-        if (messageIds.length > 0) {
-          const apiRequests = await Promise.all(
-            messageIds.map((id) => this.apiClient!.getMessageById(id)),
-          )
+      // if getTransaction or decoding fails, try API if available with retry
+      // apiClient and apiRetryConfig are coupled: both exist or both are null
+      if (this.apiClient && this.apiRetryConfig) {
+        const apiRequests = await withRetry(
+          async () => {
+            const messageIds = await this.apiClient!.getMessageIdsInTx(txHash)
+            if (messageIds.length === 0) {
+              // Treat empty results as the original error condition
+              throw err
+            }
+            return Promise.all(messageIds.map((id) => this.apiClient!.getMessageById(id)))
+          },
+          { ...this.apiRetryConfig, logger: this.logger },
+        )
+        if (apiRequests.length > 0) {
           return apiRequests
         }
       }
@@ -347,19 +487,42 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
-   * Fetch a message by ID.
-   * Default implementation just tries API.
-   * Children may override to fetch from chain as fallback
-   * @param messageId - message ID to fetch request for
-   * @param _opts - onRamp may be required in some implementations, and throw if missing
-   * @returns CCIPRequest
+   * Fetch a CCIP message by its unique message ID.
+   *
+   * @remarks
+   * Uses the CCIP API to retrieve message details. The returned request includes
+   * a `metadata` field with API-specific information.
+   *
+   * @example
+   * ```typescript
+   * const request = await chain.getMessageById(messageId)
+   * console.log(`Sender: ${request.message.sender}`)
+   *
+   * if (request.metadata) {
+   *   console.log(`Status: ${request.metadata.status}`)
+   *   if (request.metadata.deliveryTime) {
+   *     console.log(`Delivered in ${request.metadata.deliveryTime}ms`)
+   *   }
+   * }
+   * ```
+   *
+   * @param messageId - The unique message ID (0x + 64 hex chars)
+   * @param _opts - Optional: `onRamp` hint for non-EVM chains
+   * @returns CCIPRequest with `metadata` populated from API
+   * @throws {@link CCIPApiClientNotAvailableError} if API disabled
+   * @throws {@link CCIPMessageIdNotFoundError} if message not found
+   * @throws {@link CCIPHttpError} if API request fails
    **/
   async getMessageById(
     messageId: string,
     _opts?: { page?: number; onRamp?: string },
   ): Promise<CCIPRequest> {
     if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
-    return this.apiClient.getMessageById(messageId)
+    // apiClient and apiRetryConfig are coupled: both exist or neither does
+    return withRetry(() => this.apiClient!.getMessageById(messageId), {
+      ...this.apiRetryConfig!,
+      logger: this.logger,
+    })
   }
 
   /**
@@ -367,6 +530,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param request - CCIPRequest to fetch batch for.
    * @param commit - CommitReport range (min, max).
    * @param opts - Optional parameters (e.g., `page` for pagination width).
+   * @returns Array of messages in the batch.
+   * @throws {@link CCIPMessageBatchIncompleteError} if not all messages in range could be fetched
    */
   abstract getMessagesInBatch<
     R extends PickDeep<
@@ -385,6 +550,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @returns version - parsed version of the contract, e.g. `1.6.0`
    * @returns typeAndVersion - original (unparsed) typeAndVersion() string
    * @returns suffix - suffix of the version, if any (e.g. `-dev`)
+   * @throws {@link CCIPTypeVersionInvalidError} if contract doesn't have valid typeAndVersion
    */
   abstract typeAndVersion(
     address: string,
@@ -479,12 +645,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Fetch TokenAdminRegistry configured in a given OnRamp, Router, etc
    * Needed to map a source token to its dest counterparts
-   * @param onRamp - Some contract for which we can fetch a TokenAdminRegistry
+   * @param address - Some contract for which we can fetch a TokenAdminRegistry (OnRamp, Router, etc.)
+   * @returns TokenAdminRegistry address
    */
   abstract getTokenAdminRegistryFor(address: string): Promise<string>
   /**
    * Fetch the current fee for a given intended message
    * @param opts - {@link SendMessageOpts} without approveMax
+   * @returns Fee amount in the feeToken's smallest units
    */
   abstract getFee(opts: Omit<SendMessageOpts, 'approveMax'>): Promise<bigint>
   /**
@@ -502,6 +670,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Send a CCIP message through a router using provided wallet.
    * @param opts - {@link SendMessageOpts} with chain-specific wallet for signing
    * @returns CCIP request
+   * @throws {@link CCIPWalletNotSignerError} if wallet cannot sign transactions
    *
    * @example
    * ```typescript
@@ -567,6 +736,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * })
    * console.log(`Message ID: ${request.message.messageId}`)
    * ```
+   * @throws {@link CCIPWalletNotSignerError} if wallet cannot sign transactions
+   * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm
    */
   abstract executeReport(
     opts: ExecuteReportOpts & {
@@ -579,8 +750,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Look for a CommitReport at dest for given CCIP request
    * May be specialized by some subclasses
    * @param opts - getCommitReport options
-   * @returns CCIPCommit info, or reject if none found
-   **/
+   * @returns CCIPCommit info
+   * @throws {@link CCIPCommitNotFoundError} if no commit found for the request
+   */
   async getCommitReport({
     commitStore,
     request,
@@ -686,6 +858,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @internal
    * @param tx - transaction hash or transaction object
    * @returns CCIP execution object
+   * @throws {@link CCIPExecTxRevertedError} if no execution receipt found in transaction
    */
   async getExecutionReceiptInTx(tx: string | ChainTransaction): Promise<CCIPExecution> {
     if (typeof tx === 'string') tx = await this.getTransaction(tx)
@@ -708,39 +881,125 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   abstract getSupportedTokens(address: string, opts?: { page?: number }): Promise<string[]>
 
   /**
-   * Get TokenConfig for a given token address in a TokenAdminRegistry
-   * @param address - TokenAdminRegistry contract address
-   * @param token - Token address
+   * Fetch token configuration from a TokenAdminRegistry.
+   *
+   * @remarks
+   * The TokenAdminRegistry is a contract that tracks token administrators and their
+   * associated pools. Each token has an administrator who can update pool configurations.
+   *
+   * @example Query a token's registry configuration
+   * ```typescript
+   * const config = await chain.getRegistryTokenConfig(registryAddress, tokenAddress)
+   * console.log(`Administrator: ${config.administrator}`)
+   * if (config.tokenPool) {
+   *   console.log(`Pool: ${config.tokenPool}`)
+   * }
+   * ```
+   *
+   * @param registry - TokenAdminRegistry contract address.
+   * @param token - Token address to query.
+   * @returns {@link RegistryTokenConfig} containing administrator and pool information.
+   * @throws {@link CCIPTokenNotInRegistryError} if token is not registered.
    */
-  abstract getRegistryTokenConfig(
-    registry: string,
-    token: string,
-  ): Promise<{
-    administrator: string
-    pendingAdministrator?: string
-    tokenPool?: string
-  }>
+  abstract getRegistryTokenConfig(registry: string, token: string): Promise<RegistryTokenConfig>
 
   /**
-   * Get TokenPool state and configurations
-   * @param tokenPool - Token pool address
+   * Fetch configuration of a token pool.
+   *
+   * @remarks
+   * Returns the core configuration of a token pool including which token it manages
+   * and which router it's registered with.
+   *
+   * @example Query pool configuration
+   * ```typescript
+   * const config = await chain.getTokenPoolConfig(poolAddress)
+   * console.log(`Manages token: ${config.token}`)
+   * console.log(`Router: ${config.router}`)
+   * if (config.typeAndVersion) {
+   *   console.log(`Version: ${config.typeAndVersion}`)
+   * }
+   * ```
+   *
+   * @param tokenPool - Token pool contract address.
+   * @returns {@link TokenPoolConfig} containing token, router, and version info.
    */
-  abstract getTokenPoolConfigs(tokenPool: string): Promise<{
-    token: string
-    router: string
-    typeAndVersion?: string
-  }>
+  abstract getTokenPoolConfig(tokenPool: string): Promise<TokenPoolConfig>
 
   /**
-   * Get TokenPool remote configurations.
-   * @param tokenPool - Token pool address.
-   * @param remoteChainSelector - If provided, only return remotes for the specified chain (may error if remote not supported).
-   * @returns Record of network names and remote configurations (remoteToken, remotePools, rateLimitStates).
+   * Fetch remote chain configurations for a token pool.
+   *
+   * @remarks
+   * A token pool maintains configurations for each destination chain it supports.
+   * The returned Record maps chain names to their respective configurations.
+   *
+   * @example Get all supported destinations
+   * ```typescript
+   * const remotes = await chain.getTokenPoolRemotes(poolAddress)
+   * // Returns: {
+   * //   "ethereum-mainnet": { remoteToken: "0x...", remotePools: [...], ... },
+   * //   "ethereum-mainnet-arbitrum-1": { remoteToken: "0x...", remotePools: [...], ... },
+   * //   "solana-mainnet": { remoteToken: "...", remotePools: [...], ... }
+   * // }
+   *
+   * // Access a specific chain's config
+   * const arbConfig = remotes['ethereum-mainnet']
+   * console.log(`Remote token: ${arbConfig.remoteToken}`)
+   * ```
+   *
+   * @example Filter to a specific destination
+   * ```typescript
+   * import { networkInfo } from '@chainlink/ccip-sdk'
+   *
+   * const arbitrumSelector = 4949039107694359620n
+   * const remotes = await chain.getTokenPoolRemotes(poolAddress, arbitrumSelector)
+   * // Returns only: { "arbitrum-mainnet": { ... } }
+   *
+   * const chainName = networkInfo(arbitrumSelector).name
+   * const config = remotes[chainName]
+   * ```
+   *
+   * @param tokenPool - Token pool address on the current chain.
+   * @param remoteChainSelector - Optional chain selector to filter results to a single destination.
+   * @returns Record where keys are chain names (e.g., "ethereum-mainnet") and values are {@link TokenPoolRemote} configs.
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if remoteChainSelector is specified but not configured.
    */
   abstract getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
   ): Promise<Record<string, TokenPoolRemote>>
+  /**
+   * Fetch remote chain configuration for a token pool for a specific destination.
+   *
+   * @remarks
+   * Convenience wrapper around {@link getTokenPoolRemotes} that returns a single
+   * configuration instead of a Record. Use this when you need configuration for
+   * a specific destination chain.
+   *
+   * @example
+   * ```typescript
+   * const arbitrumSelector = 4949039107694359620n
+   * const remote = await chain.getTokenPoolRemote(poolAddress, arbitrumSelector)
+   * console.log(`Remote token: ${remote.remoteToken}`)
+   * console.log(`Remote pools: ${remote.remotePools.join(', ')}`)
+   * ```
+   *
+   * @param tokenPool - Token pool address on the current chain.
+   * @param remoteChainSelector - Chain selector of the desired remote chain.
+   * @returns TokenPoolRemote config for the specified remote chain.
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if no configuration found for the specified remote chain.
+   */
+  async getTokenPoolRemote(
+    tokenPool: string,
+    remoteChainSelector: bigint,
+  ): Promise<TokenPoolRemote> {
+    const remotes = await this.getTokenPoolRemotes(tokenPool, remoteChainSelector)
+    const network = networkInfo(remoteChainSelector)
+    const remoteConfig = remotes[network.name]
+    if (!remoteConfig) {
+      throw new CCIPTokenPoolChainConfigNotFoundError(tokenPool, tokenPool, network.name)
+    }
+    return remoteConfig
+  }
 
   /**
    * Fetch list and info of supported feeTokens.
@@ -753,11 +1012,32 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   static buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
   ): AnyMessage {
-    // default to GenericExtraArgsV2, aka EVMExtraArgsV2
+    const gasLimit = message.data && dataLength(message.data) ? DEFAULT_GAS_LIMIT : 0n
+
+    // Detect if user wants V3 by checking for any V3-only field
+    if (hasV3ExtraArgs(message.extraArgs)) {
+      // V3 defaults (GenericExtraArgsV3)
+      return {
+        ...message,
+        extraArgs: {
+          gasLimit,
+          blockConfirmations: 0,
+          ccvs: [],
+          ccvArgs: [],
+          executor: '',
+          executorArgs: '0x',
+          tokenReceiver: '',
+          tokenArgs: '0x',
+          ...message.extraArgs,
+        },
+      }
+    }
+
+    // Default to V2 (GenericExtraArgsV2, aka EVMExtraArgsV2)
     return {
       ...message,
       extraArgs: {
-        gasLimit: message.data && dataLength(message.data) ? DEFAULT_GAS_LIMIT : 0n,
+        gasLimit,
         allowOutOfOrderExecution: true,
         ...message.extraArgs,
       },
@@ -815,6 +1095,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
   ):
     | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
+    | (GenericExtraArgsV3 & { _tag: 'GenericExtraArgsV3' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
     | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
     | undefined
@@ -827,7 +1108,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    */
   decodeCommits(log: Pick<Log_, 'data'>, lane?: Lane): CommitReport[] | undefined
   /**
-   * Decode a receipt (ExecutioStateChanged) event
+   * Decode a receipt (ExecutionStateChanged) event
    * @param log - Chain generic log
    * @returns ExecutionReceipt or undefined if not a recognized receipt
    */

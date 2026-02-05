@@ -63,7 +63,7 @@ export async function fetchSolanaOffchainTokenData(
     )
   }
 
-  const { isTestnet } = networkInfo(request.lane.sourceChainSelector)
+  const { networkType } = networkInfo(request.lane.sourceChainSelector)
   const txSignature = request.log.transactionHash
 
   // Parse Solana transaction to find CCTP event
@@ -103,7 +103,7 @@ export async function fetchSolanaOffchainTokenData(
     const message = hexlify(cctpEvent.messageSentBytes)
     try {
       // Extract message bytes to fetch circle's attestation and then encode offchainTokenData.
-      const attestation = await getUsdcAttestation(message, isTestnet)
+      const attestation = await getUsdcAttestation(message, networkType)
 
       offchainTokenData[0] = { _tag: 'usdc', message, attestation }
     } catch (error) {

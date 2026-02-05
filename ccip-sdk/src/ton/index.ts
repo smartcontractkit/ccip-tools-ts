@@ -166,13 +166,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     ctx?: ChainContext & { fetchFn?: typeof fetch },
   ): Promise<TONChain> {
     // Verify connection by getting the latest block
-    const isTestnet =
+    const isMainnet =
       (
         await client.getContractState(
           Address.parse('EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs'), // mainnet USDT
         )
-      ).state !== 'active'
-    return new TONChain(client, networkInfo(isTestnet ? 'ton-testnet' : 'ton-mainnet'), ctx)
+      ).state === 'active'
+    return new TONChain(client, networkInfo(isMainnet ? 'ton-mainnet' : 'ton-testnet'), ctx)
   }
 
   /**
@@ -182,6 +182,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param url - RPC endpoint URL for TonClient (v2).
    * @param ctx - Context containing logger.
    * @returns A new TONChain instance.
+   * @throws {@link CCIPHttpError} if connection to the RPC endpoint fails
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<TONChain> {
     const { logger = console } = ctx ?? {}
@@ -222,6 +223,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    *
    * @param block - Logical time (lt) as number, or 'finalized' for latest block timestamp
    * @returns Unix timestamp in seconds
+   * @throws {@link CCIPNotImplementedError} if lt is not in cache
    */
   async getBlockTimestamp(block: number | 'finalized'): Promise<number> {
     if (typeof block != 'number') {
@@ -249,6 +251,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param tx - Transaction identifier in either format
    * @returns ChainTransaction with transaction details
    *          Note: `blockNumber` contains logical time (lt), not block seqno
+   * @throws {@link CCIPArgumentInvalidError} if hash format is invalid
+   * @throws {@link CCIPTransactionNotFoundError} if transaction not found
    */
   async getTransaction(tx: string | Transaction): Promise<ChainTransaction> {
     let address
@@ -266,7 +270,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
           )
         const txInfo = await lookupTxByRawHash(
           cleanHash,
-          this.network.isTestnet,
+          this.network.networkType,
           this.rateLimitedFetch,
           this,
         )
@@ -343,6 +347,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * not block sequence numbers. This is because TON transaction APIs are indexed by lt.
    *
    * @param opts - Log filter options (startBlock/endBlock are interpreted as lt values)
+   * @throws {@link CCIPTopicsInvalidError} if topics format is invalid
    */
   async *getLogs(opts: LogFilter): AsyncIterableIterator<Log_> {
     let topics
@@ -365,7 +370,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
   }
 
-  /** {@inheritDoc Chain.getMessagesInBatch} */
+  /**
+   * {@inheritDoc Chain.getMessagesInBatch}
+   * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
+   */
   override async getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
@@ -423,7 +431,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return stack.readAddress().toRawString()
   }
 
-  /** {@inheritDoc Chain.getNativeTokenForRouter} */
+  /**
+   * {@inheritDoc Chain.getNativeTokenForRouter}
+   * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
+   */
   getNativeTokenForRouter(_router: string): Promise<string> {
     // TON native token is represented as address 0:0...01 (workchain 0, hash = 1)
     // This is a convention for representing native TON in CCIP
@@ -450,7 +461,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return stack.readAddress().toRawString()
   }
 
-  /** {@inheritDoc Chain.getOnRampForOffRamp} */
+  /**
+   * {@inheritDoc Chain.getOnRampForOffRamp}
+   * @throws {@link CCIPSourceChainUnsupportedError} if source chain is not configured
+   */
   async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
     try {
       const offRampContract = this.provider.provider(Address.parse(offRamp))
@@ -496,7 +510,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return Promise.resolve(offRamp)
   }
 
-  /** {@inheritDoc Chain.getTokenForTokenPool} */
+  /**
+   * {@inheritDoc Chain.getTokenForTokenPool}
+   * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
+   */
   async getTokenForTokenPool(_tokenPool: string): Promise<string> {
     return Promise.reject(new CCIPNotImplementedError('getTokenForTokenPool'))
   }
@@ -524,12 +541,18 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
   }
 
-  /** {@inheritDoc Chain.getBalance} */
+  /**
+   * {@inheritDoc Chain.getBalance}
+   * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
+   */
   async getBalance(_opts: GetBalanceOpts): Promise<bigint> {
     return Promise.reject(new CCIPNotImplementedError('TONChain.getBalance'))
   }
 
-  /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
+  /**
+   * {@inheritDoc Chain.getTokenAdminRegistryFor}
+   * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
+   */
   getTokenAdminRegistryFor(_address: string): Promise<string> {
     return Promise.reject(new CCIPNotImplementedError('getTokenAdminRegistryFor'))
   }
@@ -837,6 +860,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * and raw format strings ("workchain:hash").
    * @param bytes - Bytes or string to convert.
    * @returns TON raw address string in format "workchain:hash".
+   * @throws {@link CCIPArgumentInvalidError} if bytes length is invalid
    */
   static getAddress(bytes: BytesLike): string {
     // If it's already a string address, try to parse and return raw format
@@ -1067,7 +1091,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
-  /** {@inheritDoc Chain.generateUnsignedExecuteReport} */
+  /**
+   * {@inheritDoc Chain.generateUnsignedExecuteReport}
+   * @throws {@link CCIPExtraArgsInvalidError} if extra args are not EVMExtraArgsV2 format
+   */
   generateUnsignedExecuteReport({
     offRamp,
     execReport,
@@ -1089,7 +1116,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     })
   }
 
-  /** {@inheritDoc Chain.executeReport} */
+  /**
+   * {@inheritDoc Chain.executeReport}
+   * @throws {@link CCIPWalletInvalidError} if wallet is not a valid TON wallet
+   * @throws {@link CCIPReceiptNotFoundError} if execution receipt not found within timeout
+   */
   async executeReport(opts: Parameters<Chain['executeReport']>[0]): Promise<CCIPExecution> {
     const { offRamp, wallet } = opts
     if (!isTONWallet(wallet)) {
@@ -1134,27 +1165,42 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
   }
 
-  /** {@inheritDoc Chain.getSupportedTokens} */
+  /**
+   * {@inheritDoc Chain.getSupportedTokens}
+   * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
+   */
   async getSupportedTokens(_address: string): Promise<string[]> {
     return Promise.reject(new CCIPNotImplementedError('getSupportedTokens'))
   }
 
-  /** {@inheritDoc Chain.getRegistryTokenConfig} */
+  /**
+   * {@inheritDoc Chain.getRegistryTokenConfig}
+   * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
+   */
   async getRegistryTokenConfig(_address: string, _tokenName: string): Promise<never> {
     return Promise.reject(new CCIPNotImplementedError('getRegistryTokenConfig'))
   }
 
-  /** {@inheritDoc Chain.getTokenPoolConfigs} */
-  async getTokenPoolConfigs(_tokenPool: string): Promise<never> {
-    return Promise.reject(new CCIPNotImplementedError('getTokenPoolConfigs'))
+  /**
+   * {@inheritDoc Chain.getTokenPoolConfig}
+   * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
+   */
+  async getTokenPoolConfig(_tokenPool: string): Promise<never> {
+    return Promise.reject(new CCIPNotImplementedError('getTokenPoolConfig'))
   }
 
-  /** {@inheritDoc Chain.getTokenPoolRemotes} */
+  /**
+   * {@inheritDoc Chain.getTokenPoolRemotes}
+   * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
+   */
   async getTokenPoolRemotes(_tokenPool: string): Promise<never> {
     return Promise.reject(new CCIPNotImplementedError('getTokenPoolRemotes'))
   }
 
-  /** {@inheritDoc Chain.getFeeTokens} */
+  /**
+   * {@inheritDoc Chain.getFeeTokens}
+   * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
+   */
   async getFeeTokens(_router: string): Promise<never> {
     return Promise.reject(new CCIPNotImplementedError('getFeeTokens'))
   }

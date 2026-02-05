@@ -5,6 +5,8 @@ import './index.ts'
 import { NATIVE_MINT } from '@solana/spl-token'
 import { dataLength } from 'ethers'
 
+import { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
+import { CCIPHttpError, CCIPTimeoutError } from './errors/index.ts'
 import { ChainFamily } from './types.ts'
 import {
   bigIntReplacer,
@@ -24,6 +26,7 @@ import {
   sleep,
   snakeToCamel,
   toLeArray,
+  withRetry,
 } from './utils.ts'
 
 describe('getSomeBlockNumberBefore', () => {
@@ -190,8 +193,8 @@ describe('decodeAddress', () => {
       assert.equal(decoded, '0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF')
     })
 
-    it('should handle mixed case hex input', () => {
-      const mixedCaseAddress = '0xAbCdEf1234567890AbCdEf1234567890AbCdEf12'
+    it('should handle uppercase hex input', () => {
+      const mixedCaseAddress = '0XABCDEF1234567890ABCDEF1234567890ABCDEF12'
       const decoded = decodeAddress(mixedCaseAddress)
       assert.equal(decoded, '0xabCDEF1234567890ABcDEF1234567890aBCDeF12')
     })
@@ -221,7 +224,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 5009297550715157269n)
       assert.equal(info.name, 'ethereum-mainnet')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Aptos chain selector as bigint', () => {
@@ -230,7 +233,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 4741433654826277614n)
       assert.equal(info.name, 'aptos-mainnet')
       assert.equal(info.family, ChainFamily.Aptos)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Solana chain selector as bigint', () => {
@@ -239,7 +242,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 124615329519749607n)
       assert.equal(info.name, 'solana-mainnet')
       assert.equal(info.family, ChainFamily.Solana)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle testnet chain selector as bigint', () => {
@@ -248,7 +251,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 16015286601757825753n)
       assert.equal(info.name, 'ethereum-testnet-sepolia')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, true)
+      assert.equal(info.networkType, 'TESTNET')
     })
   })
 
@@ -259,7 +262,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 5009297550715157269n)
       assert.equal(info.name, 'ethereum-mainnet')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle BSC chain ID as number', () => {
@@ -268,7 +271,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 11344663589394136015n)
       assert.equal(info.name, 'binance_smart_chain-mainnet')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle testnet chain ID as number', () => {
@@ -277,7 +280,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 16015286601757825753n)
       assert.equal(info.name, 'ethereum-testnet-sepolia')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, true)
+      assert.equal(info.networkType, 'TESTNET')
     })
   })
 
@@ -288,7 +291,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 5009297550715157269n)
       assert.equal(info.name, 'ethereum-mainnet')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Aptos chain ID as string', () => {
@@ -297,7 +300,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 4741433654826277614n)
       assert.equal(info.name, 'aptos-mainnet')
       assert.equal(info.family, ChainFamily.Aptos)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Aptos testnet chain ID as string', () => {
@@ -306,7 +309,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 743186221051783445n)
       assert.equal(info.name, 'aptos-testnet')
       assert.equal(info.family, ChainFamily.Aptos)
-      assert.equal(info.isTestnet, true)
+      assert.equal(info.networkType, 'TESTNET')
     })
 
     it('should handle Solana chain ID as string', () => {
@@ -315,7 +318,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 124615329519749607n)
       assert.equal(info.name, 'solana-mainnet')
       assert.equal(info.family, ChainFamily.Solana)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Solana testnet chain ID as string', () => {
@@ -324,7 +327,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 6302590918974934319n)
       assert.equal(info.name, 'solana-testnet')
       assert.equal(info.family, ChainFamily.Solana)
-      assert.equal(info.isTestnet, true)
+      assert.equal(info.networkType, 'TESTNET')
     })
   })
 
@@ -335,7 +338,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 5009297550715157269n)
       assert.equal(info.name, 'ethereum-mainnet')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle EVM chainID as bigint', () => {
@@ -344,7 +347,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 5009297550715157269n)
       assert.equal(info.name, 'ethereum-mainnet')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Aptos chain ID as string when not a valid selector', () => {
@@ -353,7 +356,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 4741433654826277614n)
       assert.equal(info.name, 'aptos-mainnet')
       assert.equal(info.family, ChainFamily.Aptos)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
   })
 
@@ -364,7 +367,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 5009297550715157269n)
       assert.equal(info.name, 'ethereum-mainnet')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Aptos chain name', () => {
@@ -373,7 +376,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 4741433654826277614n)
       assert.equal(info.name, 'aptos-mainnet')
       assert.equal(info.family, ChainFamily.Aptos)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle Solana chain name', () => {
@@ -382,7 +385,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 124615329519749607n)
       assert.equal(info.name, 'solana-mainnet')
       assert.equal(info.family, ChainFamily.Solana)
-      assert.equal(info.isTestnet, false)
+      assert.equal(info.networkType, 'MAINNET')
     })
 
     it('should handle EVM testnet chain name', () => {
@@ -391,7 +394,7 @@ describe('networkInfo', () => {
       assert.equal(info.chainSelector, 16015286601757825753n)
       assert.equal(info.name, 'ethereum-testnet-sepolia')
       assert.equal(info.family, ChainFamily.EVM)
-      assert.equal(info.isTestnet, true)
+      assert.equal(info.networkType, 'TESTNET')
     })
   })
 
@@ -429,21 +432,22 @@ describe('networkInfo', () => {
     })
   })
 
-  describe('isTestnet detection', () => {
+  describe('networkType detection', () => {
     it('should correctly identify mainnet chains', () => {
-      assert.equal(networkInfo(1).isTestnet, false) // Ethereum mainnet
-      assert.equal(networkInfo(56).isTestnet, false) // BSC mainnet
-      assert.equal(networkInfo('aptos-mainnet').isTestnet, false) // Aptos mainnet
+      assert.equal(networkInfo(1).networkType, 'MAINNET') // Ethereum mainnet
+      assert.equal(networkInfo(56).networkType, 'MAINNET') // BSC mainnet
+      assert.equal(networkInfo('aptos-mainnet').networkType, 'MAINNET') // Aptos mainnet
     })
 
     it('should correctly identify testnet chains', () => {
-      assert.equal(networkInfo(11155111).isTestnet, true) // Sepolia
-      assert.equal(networkInfo('aptos-testnet').isTestnet, true) // Aptos testnet
-      assert.equal(networkInfo('solana-testnet').isTestnet, true) // Solana testnet
+      assert.equal(networkInfo(11155111).networkType, 'TESTNET') // Sepolia
+      assert.equal(networkInfo('aptos-testnet').networkType, 'TESTNET') // Aptos testnet
+      assert.equal(networkInfo('solana-testnet').networkType, 'TESTNET') // Solana testnet
     })
 
     it('should correctly identify devnet/localnet as testnet', () => {
-      assert.equal(networkInfo('solana-testnet').isTestnet, true)
+      assert.equal(networkInfo('solana-devnet').networkType, 'TESTNET')
+      assert.equal(networkInfo('aptos-localnet').networkType, 'TESTNET')
     })
   })
 })
@@ -1146,5 +1150,203 @@ describe('createRateLimitedFetch', () => {
 
     const result = await rateLimitedFetch('https://example.com')
     assert.equal(result.ok, true)
+  })
+})
+
+describe('withRetry', () => {
+  it('should return result on first attempt success', async () => {
+    const operation = mock.fn(() => Promise.resolve('success'))
+
+    const result = await withRetry(operation, {
+      ...DEFAULT_API_RETRY_CONFIG,
+      initialDelayMs: 10,
+    })
+
+    assert.equal(result, 'success')
+    assert.equal(operation.mock.calls.length, 1)
+  })
+
+  it('should return result after transient failure then success', async () => {
+    let attempts = 0
+    const operation = mock.fn(() => {
+      attempts++
+      if (attempts < 2) {
+        throw new CCIPTimeoutError('test', 1000)
+      }
+      return Promise.resolve('success')
+    })
+
+    const result = await withRetry(operation, {
+      ...DEFAULT_API_RETRY_CONFIG,
+      initialDelayMs: 10,
+      respectRetryAfterHint: false,
+    })
+
+    assert.equal(result, 'success')
+    assert.equal(operation.mock.calls.length, 2)
+  })
+
+  it('should retry on CCIPHttpError with 5xx status', async () => {
+    let attempts = 0
+    const operation = mock.fn(() => {
+      attempts++
+      if (attempts <= 2) {
+        throw new CCIPHttpError(503, 'Service Unavailable')
+      }
+      return Promise.resolve('recovered')
+    })
+
+    const result = await withRetry(operation, {
+      ...DEFAULT_API_RETRY_CONFIG,
+      initialDelayMs: 10,
+      respectRetryAfterHint: false,
+    })
+
+    assert.equal(result, 'recovered')
+    assert.equal(operation.mock.calls.length, 3)
+  })
+
+  it('should NOT retry on CCIPHttpError with 4xx status (non-transient)', async () => {
+    const operation = mock.fn(() => {
+      throw new CCIPHttpError(400, 'Bad Request')
+    })
+
+    await assert.rejects(() => withRetry(operation, DEFAULT_API_RETRY_CONFIG), {
+      name: 'CCIPHttpError',
+    })
+
+    assert.equal(operation.mock.calls.length, 1)
+  })
+
+  it('should throw last error after exhausting retries', async () => {
+    const operation = mock.fn(() => {
+      throw new CCIPTimeoutError('persistent timeout', 1000)
+    })
+
+    await assert.rejects(
+      () =>
+        withRetry(operation, {
+          ...DEFAULT_API_RETRY_CONFIG,
+          maxRetries: 2,
+          initialDelayMs: 10,
+          respectRetryAfterHint: false,
+        }),
+      {
+        name: 'CCIPTimeoutError',
+      },
+    )
+
+    // 1 initial + 2 retries = 3 total
+    assert.equal(operation.mock.calls.length, 3)
+  })
+
+  it('should apply exponential backoff', async () => {
+    const operation = mock.fn(() => {
+      throw new CCIPTimeoutError('test', 1000)
+    })
+
+    const startTime = Date.now()
+
+    await assert.rejects(() =>
+      withRetry(operation, {
+        maxRetries: 2,
+        initialDelayMs: 50,
+        backoffMultiplier: 2,
+        maxDelayMs: 1000,
+        respectRetryAfterHint: false,
+      }),
+    )
+
+    const totalTime = Date.now() - startTime
+    // With backoff: 50ms + 100ms = 150ms minimum
+    // Without backoff (fixed 50ms): 50ms + 50ms = 100ms
+    // So we should see total time closer to 150ms
+    assert.ok(totalTime >= 130, `Total time ${totalTime}ms should show backoff effect (>= 130ms)`)
+    assert.equal(operation.mock.calls.length, 3) // initial + 2 retries
+  })
+
+  it('should cap delay at maxDelayMs', async () => {
+    const operation = mock.fn(() => {
+      throw new CCIPTimeoutError('test', 1000)
+    })
+
+    const startTime = Date.now()
+
+    await assert.rejects(() =>
+      withRetry(operation, {
+        maxRetries: 3,
+        initialDelayMs: 100,
+        backoffMultiplier: 10, // Aggressive multiplier
+        maxDelayMs: 150, // But capped
+        respectRetryAfterHint: false,
+      }),
+    )
+
+    const totalTime = Date.now() - startTime
+    // 4 attempts with max 150ms delays should be under 700ms
+    assert.ok(totalTime < 700, `Total time ${totalTime}ms exceeded expected`)
+  })
+
+  it('should respect retryAfterMs hint when configured', async () => {
+    const operation = mock.fn(() => {
+      throw new CCIPTimeoutError('test', 200) // 200ms hint
+    })
+
+    const startTime = Date.now()
+
+    await assert.rejects(() =>
+      withRetry(operation, {
+        maxRetries: 1,
+        initialDelayMs: 10, // Lower than hint
+        backoffMultiplier: 1,
+        maxDelayMs: 1000,
+        respectRetryAfterHint: true,
+      }),
+    )
+
+    const totalTime = Date.now() - startTime
+    // Should use the hint (200ms) since it's higher than initialDelayMs (10ms)
+    assert.ok(totalTime >= 180, `Should respect retryAfterMs hint, got ${totalTime}ms`)
+  })
+
+  it('should log retry attempts when logger provided', async () => {
+    const debugFn = mock.fn<(...args: unknown[]) => void>()
+    const warnFn = mock.fn<(...args: unknown[]) => void>()
+    const logger = { debug: debugFn, warn: warnFn }
+
+    let attempts = 0
+    const operation = mock.fn(() => {
+      attempts++
+      if (attempts <= 2) {
+        throw new CCIPTimeoutError('test', 1000)
+      }
+      return Promise.resolve('success')
+    })
+
+    await withRetry(operation, {
+      ...DEFAULT_API_RETRY_CONFIG,
+      initialDelayMs: 10,
+      respectRetryAfterHint: false,
+      logger,
+    })
+
+    // Should have logged retry attempts
+    assert.ok(debugFn.mock.calls.length >= 2)
+    const firstLog = debugFn.mock.calls[0]!.arguments
+    assert.ok(String(firstLog[0]).includes('Retry attempt'))
+  })
+
+  it('should wrap non-CCIPError errors', async () => {
+    const operation = mock.fn(() => {
+      throw new TypeError('something went wrong')
+    })
+
+    await assert.rejects(() => withRetry(operation, DEFAULT_API_RETRY_CONFIG), {
+      name: 'CCIPError',
+      code: 'UNKNOWN',
+    })
+
+    // Should not retry non-transient errors
+    assert.equal(operation.mock.calls.length, 1)
   })
 })

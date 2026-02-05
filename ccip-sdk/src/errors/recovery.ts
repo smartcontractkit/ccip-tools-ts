@@ -96,6 +96,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   TOKEN_NOT_IN_REGISTRY: 'Token not found in TokenAdminRegistry.',
   TOKEN_NOT_CONFIGURED: 'Token is not configured in the registry.',
   TOKEN_NOT_REGISTERED: 'Token is not registered in the TokenAdminRegistry.',
+  TOKEN_REMOTE_NOT_CONFIGURED: 'Remote network is not registered in TokenPool.',
   TOKEN_DECIMALS_INSUFFICIENT: 'Destination token has insufficient decimals.',
   TOKEN_INVALID_SPL: 'Invalid SPL token or Token-2022.',
   TOKEN_DATA_PARSE_FAILED:
@@ -157,7 +158,6 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   APTOS_TX_TYPE_UNEXPECTED:
     'Check that the transaction is a standard user transaction, not a script or module deployment.',
   APTOS_ADDRESS_MODULE_REQUIRED: 'Provide an address with module for Aptos log filtering.',
-  APTOS_TOPIC_INVALID: 'Provide a valid event topic string for Aptos filtering.',
   APTOS_HASHER_VERSION_UNSUPPORTED: 'This hasher version is not supported for Aptos.',
 
   HTTP_ERROR: 'HTTP request failed. 429 indicates rate limiting.',

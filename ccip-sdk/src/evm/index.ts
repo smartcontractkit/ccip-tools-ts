@@ -13,9 +13,6 @@ import {
   Result,
   WebSocketProvider,
   ZeroAddress,
-  concat,
-  dataSlice,
-  encodeBase58,
   getAddress,
   hexlify,
   isBytesLike,
@@ -49,23 +46,14 @@ import {
   CCIPMessageDecodeError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
+  CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
   CCIPVersionFeatureUnavailableError,
   CCIPVersionRequiresLaneError,
   CCIPVersionUnsupportedError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
-import {
-  type EVMExtraArgsV1,
-  type EVMExtraArgsV2,
-  type ExtraArgs,
-  type SVMExtraArgsV1,
-  type SuiExtraArgsV1,
-  EVMExtraArgsV1Tag,
-  EVMExtraArgsV2Tag,
-  SVMExtraArgsV1Tag,
-  SuiExtraArgsV1Tag,
-} from '../extra-args.ts'
+import type { ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -83,6 +71,7 @@ import {
   type WithLogger,
   CCIPVersion,
   ChainFamily,
+  NetworkType,
 } from '../types.ts'
 import {
   decodeAddress,
@@ -104,15 +93,12 @@ import EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import type Router_ABI from './abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
-import {
-  DEFAULT_GAS_LIMIT,
-  commitsFragments,
-  defaultAbiCoder,
-  interfaces,
-  receiptsFragments,
-  requestsFragments,
-} from './const.ts'
+import { commitsFragments, interfaces, receiptsFragments, requestsFragments } from './const.ts'
 import { parseData } from './errors.ts'
+import {
+  decodeExtraArgs as decodeExtraArgs_,
+  encodeExtraArgs as encodeExtraArgs_,
+} from './extra-args.ts'
 import { estimateExecGas } from './gas.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { getEvmLogs } from './logs.ts'
@@ -127,13 +113,6 @@ import type { UnsignedEVMTx } from './types.ts'
 export type { UnsignedEVMTx }
 
 const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
-
-const EVMExtraArgsV1 = 'tuple(uint256 gasLimit)'
-const EVMExtraArgsV2 = 'tuple(uint256 gasLimit, bool allowOutOfOrderExecution)'
-const SVMExtraArgsV1 =
-  'tuple(uint32 computeUnits, uint64 accountIsWritableBitmap, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] accounts)'
-const SuiExtraArgsV1 =
-  'tuple(uint256 gasLimit, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] receiverObjectIds)'
 
 function resultToObject<T>(o: T): T {
   if (o instanceof Promise) return o.then(resultToObject) as T
@@ -354,6 +333,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Decodes a CCIP message from a log event.
    * @param log - Log event with topics and data.
    * @returns Decoded CCIPMessage or undefined if not a valid CCIP message.
+   * @throws {@link CCIPLogDataInvalidError} if log data is not valid bytes
+   * @throws {@link CCIPMessageDecodeError} if message cannot be decoded
    */
   static decodeMessage(log: {
     topics?: readonly string[]
@@ -455,6 +436,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param log - Log event with topics and data.
    * @param lane - Lane info (required for CCIP v1.5 and earlier).
    * @returns Array of CommitReport or undefined if not a valid commit event.
+   * @throws {@link CCIPLogDataInvalidError} if log data is not valid bytes
+   * @throws {@link CCIPVersionRequiresLaneError} if CCIP v1.5 event but no lane provided
    */
   static decodeCommits(
     log: { topics?: readonly string[]; data: unknown },
@@ -510,6 +493,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Decodes an execution receipt from a log event.
    * @param log - Log event with topics and data.
    * @returns ExecutionReceipt or undefined if not a valid execution event.
+   * @throws {@link CCIPLogDataInvalidError} if log data is not valid bytes
    */
   static decodeReceipt(log: {
     topics?: readonly string[]
@@ -541,43 +525,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param extraArgs - Encoded extra arguments bytes.
    * @returns Decoded extra arguments with tag, or undefined if unknown format.
    */
-  static decodeExtraArgs(
-    extraArgs: BytesLike,
-  ):
-    | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
-    | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
-    | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
-    | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
-    | undefined {
-    const data = getDataBytes(extraArgs),
-      tag = dataSlice(data, 0, 4)
-    switch (tag) {
-      case EVMExtraArgsV1Tag: {
-        const args = defaultAbiCoder.decode([EVMExtraArgsV1], dataSlice(data, 4))
-        return { ...(resultToObject(args[0]) as EVMExtraArgsV1), _tag: 'EVMExtraArgsV1' }
-      }
-      case EVMExtraArgsV2Tag: {
-        const args = defaultAbiCoder.decode([EVMExtraArgsV2], dataSlice(data, 4))
-        return { ...(resultToObject(args[0]) as EVMExtraArgsV2), _tag: 'EVMExtraArgsV2' }
-      }
-      case SVMExtraArgsV1Tag: {
-        const args = defaultAbiCoder.decode([SVMExtraArgsV1], dataSlice(data, 4))
-        const parsed = resultToObject(args[0]) as SVMExtraArgsV1
-        parsed.tokenReceiver = encodeBase58(parsed.tokenReceiver)
-        parsed.accounts = parsed.accounts.map((a: string) => encodeBase58(a))
-        return { ...parsed, _tag: 'SVMExtraArgsV1' }
-      }
-      case SuiExtraArgsV1Tag: {
-        const args = defaultAbiCoder.decode([SuiExtraArgsV1], dataSlice(data, 4))
-        const parsed = resultToObject(args[0]) as SuiExtraArgsV1
-        return {
-          ...parsed,
-          _tag: 'SuiExtraArgsV1',
-        }
-      }
-      default:
-        return undefined
-    }
+  static decodeExtraArgs(extraArgs: BytesLike) {
+    return decodeExtraArgs_(extraArgs)
   }
 
   /**
@@ -586,48 +535,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @returns Encoded extra arguments as hex string.
    */
   static encodeExtraArgs(args: ExtraArgs | undefined): string {
-    if (!args) return '0x'
-    if ('computeUnits' in args) {
-      return concat([
-        SVMExtraArgsV1Tag,
-        defaultAbiCoder.encode(
-          [SVMExtraArgsV1],
-          [
-            {
-              ...args,
-              tokenReceiver: getAddressBytes(args.tokenReceiver),
-              accounts: args.accounts.map((a) => getAddressBytes(a)),
-            },
-          ],
-        ),
-      ])
-    } else if ('receiverObjectIds' in args) {
-      return concat([
-        SuiExtraArgsV1Tag,
-        defaultAbiCoder.encode(
-          [SuiExtraArgsV1],
-          [
-            {
-              ...args,
-              tokenReceiver: zeroPadValue(getAddressBytes(args.tokenReceiver), 32),
-              receiverObjectIds: args.receiverObjectIds.map((a) => getDataBytes(a)),
-            },
-          ],
-        ),
-      ])
-    } else if ('allowOutOfOrderExecution' in args) {
-      if ((args as Partial<typeof args>).gasLimit == null) args.gasLimit = DEFAULT_GAS_LIMIT
-      return concat([EVMExtraArgsV2Tag, defaultAbiCoder.encode([EVMExtraArgsV2], [args])])
-    } else if ((args as Partial<typeof args>).gasLimit != null) {
-      return concat([EVMExtraArgsV1Tag, defaultAbiCoder.encode([EVMExtraArgsV1], [args])])
-    }
-    return '0x'
+    return encodeExtraArgs_(args)
   }
 
   /**
    * Converts bytes to a checksummed EVM address.
    * @param bytes - Bytes to convert (must be 20 bytes or 32 bytes with leading zeros).
    * @returns Checksummed EVM address.
+   * @throws {@link CCIPAddressInvalidEvmError} if bytes cannot be converted to a valid EVM address
    */
   static getAddress(bytes: BytesLike): string {
     if (isHexString(bytes, 20)) return getAddress(bytes)
@@ -654,6 +569,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Gets lane configuration from an OnRamp contract.
    * @param onRamp - OnRamp contract address.
    * @returns Lane configuration.
+   * @throws {@link CCIPContractTypeInvalidError} if contract doesn't have destChainSelector
    */
   async getLaneForOnRamp(onRamp: string): Promise<Lane> {
     const [, version] = await this.typeAndVersion(onRamp)
@@ -673,7 +589,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /** {@inheritDoc Chain.getRouterForOnRamp} */
+  /**
+   * {@inheritDoc Chain.getRouterForOnRamp}
+   * @throws {@link CCIPVersionUnsupportedError} if OnRamp version is not supported
+   */
   async getRouterForOnRamp(onRamp: string, destChainSelector: bigint): Promise<string> {
     const [, version] = await this.typeAndVersion(onRamp)
     let onRampABI
@@ -702,7 +621,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /** {@inheritDoc Chain.getRouterForOffRamp} */
+  /**
+   * {@inheritDoc Chain.getRouterForOffRamp}
+   * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
+   */
   async getRouterForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
     const [, version] = await this.typeAndVersion(offRamp)
     let offRampABI, router
@@ -769,7 +691,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return contract.getOnRamp(destChainSelector) as Promise<string>
   }
 
-  /** {@inheritDoc Chain.getOnRampForOffRamp} */
+  /**
+   * {@inheritDoc Chain.getOnRampForOffRamp}
+   * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
+   */
   async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
     const [, version] = await this.typeAndVersion(offRamp)
     let offRampABI
@@ -802,7 +727,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
+  /**
+   * {@inheritDoc Chain.getCommitStoreForOffRamp}
+   * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
+   */
   async getCommitStoreForOffRamp(offRamp: string): Promise<string> {
     const [, version] = await this.typeAndVersion(offRamp)
     let offRampABI
@@ -874,6 +802,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param lane - Lane configuration.
    * @param ctx - Context object containing logger.
    * @returns Leaf hasher function.
+   * @throws {@link CCIPSourceChainUnsupportedError} if source chain is not EVM for v1.2/v1.5
+   * @throws {@link CCIPHasherVersionUnsupportedError} if lane version is not supported
    */
   static getDestLeafHasher(
     { sourceChainSelector, destChainSelector, onRamp, version }: Lane,
@@ -899,17 +829,21 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    */
   async _getSomeOnRampFor(router: string): Promise<string> {
     // when given a router, we take any onRamp we can find, as usually they all use same registry
-    const someOtherNetwork = this.network.isTestnet
-      ? this.network.name === 'ethereum-testnet-sepolia'
-        ? 'avalanche-testnet-fuji'
-        : 'ethereum-testnet-sepolia'
-      : this.network.name === 'ethereum-mainnet'
-        ? 'avalanche-mainnet'
-        : 'ethereum-mainnet'
+    const someOtherNetwork =
+      this.network.networkType === NetworkType.Testnet
+        ? this.network.name === 'ethereum-testnet-sepolia'
+          ? 'avalanche-testnet-fuji'
+          : 'ethereum-testnet-sepolia'
+        : this.network.name === 'ethereum-mainnet'
+          ? 'avalanche-mainnet'
+          : 'ethereum-mainnet'
     return this.getOnRampForRouter(router, networkInfo(someOtherNetwork).chainSelector)
   }
 
-  /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
+  /**
+   * {@inheritDoc Chain.getTokenAdminRegistryFor}
+   * @throws {@link CCIPContractNotRouterError} if address is not a Router, OnRamp, or OffRamp
+   */
   async getTokenAdminRegistryFor(address: string): Promise<string> {
     let [type, version, typeAndVersion] = await this.typeAndVersion(address)
     if (type === 'TokenAdminRegistry') {
@@ -940,6 +874,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @internal
    * @param address - Router or Ramp contract address.
    * @returns FeeQuoter contract address.
+   * @throws {@link CCIPContractNotRouterError} if address is not a Router, OnRamp, or OffRamp
+   * @throws {@link CCIPVersionFeatureUnavailableError} if contract version is below v1.6
    */
   async getFeeQuoterFor(address: string): Promise<string> {
     let [type, version, typeAndVersion] = await this.typeAndVersion(address)
@@ -1062,7 +998,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /** {@inheritDoc Chain.sendMessage} */
+  /**
+   * {@inheritDoc Chain.sendMessage}
+   * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Signer
+   */
   async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
     const wallet = opts.wallet
     if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
@@ -1104,6 +1043,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /**
    * {@inheritDoc Chain.generateUnsignedExecuteReport}
    * @returns array containing one unsigned `manuallyExecute` TransactionRequest object
+   * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
    */
   async generateUnsignedExecuteReport({
     offRamp,
@@ -1218,7 +1158,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return { family: ChainFamily.EVM, transactions: [manualExecTx] }
   }
 
-  /** {@inheritDoc Chain.executeReport} */
+  /**
+   * {@inheritDoc Chain.executeReport}
+   * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Signer
+   * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm
+   * @throws {@link CCIPExecTxRevertedError} if execution transaction reverts
+   */
   async executeReport(opts: Parameters<Chain['executeReport']>[0]) {
     const wallet = opts.wallet
     if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
@@ -1270,7 +1215,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return res as string[]
   }
 
-  /** {@inheritDoc Chain.getRegistryTokenConfig} */
+  /**
+   * {@inheritDoc Chain.getRegistryTokenConfig}
+   * @throws {@link CCIPTokenNotConfiguredError} if token is not configured in registry
+   */
   async getRegistryTokenConfig(
     registry: string,
     token: string,
@@ -1299,8 +1247,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /** {@inheritDoc Chain.getTokenPoolConfigs} */
-  async getTokenPoolConfigs(tokenPool: string): Promise<{
+  /** {@inheritDoc Chain.getTokenPoolConfig} */
+  async getTokenPoolConfig(tokenPool: string): Promise<{
     token: string
     router: string
     typeAndVersion: string
@@ -1385,23 +1333,28 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return Promise.all([supportedChains, remotePools, remoteInfo]).then(
       ([supportedChains, remotePools, remoteInfo]) =>
         Object.fromEntries(
-          supportedChains.map(
-            (chain, i) =>
-              [
-                chain.name,
-                {
-                  remoteToken: decodeAddress(remoteInfo[i]![0], chain.family),
-                  remotePools: remotePools[i]!.map((pool) => decodeAddress(pool, chain.family)),
-                  inboundRateLimiterState: remoteInfo[i]![1].isEnabled ? remoteInfo[i]![1] : null,
-                  outboundRateLimiterState: remoteInfo[i]![2].isEnabled ? remoteInfo[i]![2] : null,
-                },
-              ] as const,
-          ),
+          supportedChains.map((chain, i) => {
+            const remoteTokenRaw = remoteInfo[i]![0]
+            if (!remoteTokenRaw || remoteTokenRaw.match(/^(0x)?0*$/))
+              throw new CCIPTokenPoolChainConfigNotFoundError(tokenPool, tokenPool, chain.name)
+            return [
+              chain.name,
+              {
+                remoteToken: decodeAddress(remoteTokenRaw, chain.family),
+                remotePools: remotePools[i]!.map((pool) => decodeAddress(pool, chain.family)),
+                inboundRateLimiterState: remoteInfo[i]![1].isEnabled ? remoteInfo[i]![1] : null,
+                outboundRateLimiterState: remoteInfo[i]![2].isEnabled ? remoteInfo[i]![2] : null,
+              },
+            ] as const
+          }),
         ),
     )
   }
 
-  /** {@inheritDoc Chain.getFeeTokens} */
+  /**
+   * {@inheritDoc Chain.getFeeTokens}
+   * @throws {@link CCIPVersionUnsupportedError} if OnRamp version is not supported
+   */
   async getFeeTokens(router: string) {
     const onRamp = await this._getSomeOnRampFor(router)
     const [_, version] = await this.typeAndVersion(onRamp)

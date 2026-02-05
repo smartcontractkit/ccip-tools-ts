@@ -1,3 +1,5 @@
+import type { SetRequired } from 'type-fest'
+
 import {
   CCIPHttpError,
   CCIPLaneNotFoundError,
@@ -10,17 +12,19 @@ import { HttpStatus } from '../http-status.ts'
 import { decodeMessage } from '../requests.ts'
 import {
   type CCIPMessage,
+  type CCIPRequest,
   type ChainTransaction,
   type Log_,
   type Logger,
-  type MessageStatus,
   type NetworkInfo,
   type WithLogger,
   CCIPVersion,
+  ChainFamily,
+  MessageStatus,
+  NetworkType,
 } from '../types.ts'
-import { bigIntReviver, isTestnet, parseJson } from '../utils.ts'
+import { bigIntReviver, parseJson } from '../utils.ts'
 import type {
-  APICCIPRequest,
   APIErrorResponse,
   LaneLatencyResponse,
   RawLaneLatencyResponse,
@@ -29,15 +33,10 @@ import type {
   RawNetworkInfo,
 } from './types.ts'
 
-export type {
-  APICCIPRequest,
-  APICCIPRequestMetadata,
-  APIErrorResponse,
-  LaneLatencyResponse,
-} from './types.ts'
+export type { APICCIPRequestMetadata, APIErrorResponse, LaneLatencyResponse } from './types.ts'
 
 /** Default CCIP API base URL */
-export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
+export const DEFAULT_API_BASE_URL = 'https://api.ccip.cldev.cloud'
 
 /** Default timeout for API requests in milliseconds */
 export const DEFAULT_TIMEOUT_MS = 30000
@@ -52,10 +51,28 @@ export type CCIPAPIClientContext = WithLogger & {
   timeoutMs?: number
 }
 
-const ensureNetworkInfo = (o: RawNetworkInfo): NetworkInfo => {
+const validateChainFamily = (value: string, logger: Logger): ChainFamily => {
+  const validFamilies = Object.values(ChainFamily) as string[]
+  if (validFamilies.includes(value)) {
+    return value as ChainFamily
+  }
+  logger.warn(`Unexpected chainFamily value from API: "${value}", using UNKNOWN`)
+  return ChainFamily.Unknown
+}
+
+const validateMessageStatus = (value: string, logger: Logger): MessageStatus => {
+  const validStatuses = Object.values(MessageStatus) as string[]
+  if (validStatuses.includes(value)) {
+    return value as MessageStatus
+  }
+  logger.warn(`Unexpected message status from API: "${value}", using UNKNOWN`)
+  return MessageStatus.Unknown
+}
+
+const ensureNetworkInfo = (o: RawNetworkInfo, logger: Logger): NetworkInfo => {
   return Object.assign(o, {
-    isTestnet: isTestnet(o.name),
-    ...(!('family' in o) && { family: o.chainFamily }),
+    networkType: o.name.includes('-mainnet') ? NetworkType.Mainnet : NetworkType.Testnet,
+    ...(!('family' in o) && { family: validateChainFamily(o.chainFamily, logger) }),
   }) as unknown as NetworkInfo
 }
 
@@ -105,7 +122,7 @@ export class CCIPAPIClient {
 
   /**
    * Creates a new CCIPAPIClient instance.
-   * @param baseUrl - Base URL for the CCIP API (defaults to https://api.ccip.chain.link)
+   * @param baseUrl - Base URL for the CCIP API (defaults to {@link DEFAULT_API_BASE_URL})
    * @param ctx - Optional context with logger and custom fetch
    */
   constructor(baseUrl?: string, ctx?: CCIPAPIClientContext) {
@@ -157,10 +174,12 @@ export class CCIPAPIClient {
    * @param destChainSelector - Destination chain selector (bigint)
    * @returns Promise resolving to {@link LaneLatencyResponse} with totalMs
    *
-   * @throws {@link CCIPHttpError} on HTTP errors with context:
-   *   - `status` - HTTP status code (e.g., 404, 500)
+   * @throws {@link CCIPLaneNotFoundError} when lane not found (404)
+   * @throws {@link CCIPTimeoutError} if request times out
+   * @throws {@link CCIPHttpError} on other HTTP errors with context:
+   *   - `status` - HTTP status code (e.g., 500)
    *   - `statusText` - HTTP status message
-   *   - `apiErrorCode` - API error code (e.g., "LANE_NOT_FOUND", "INVALID_PARAMETERS")
+   *   - `apiErrorCode` - API error code (e.g., "INVALID_PARAMETERS")
    *   - `apiErrorMessage` - Human-readable error message from API
    *
    * @example Basic usage
@@ -241,8 +260,8 @@ export class CCIPAPIClient {
    * @param messageId - The message ID (0x prefix + 64 hex characters, e.g., "0x1234...abcd")
    * @returns Promise resolving to {@link APICCIPRequest} with message details
    *
-   * @throws {@link CCIPMessageIdValidationError} when messageId format is invalid
    * @throws {@link CCIPMessageIdNotFoundError} when message not found (404)
+   * @throws {@link CCIPTimeoutError} if request times out
    * @throws {@link CCIPHttpError} on HTTP errors with context:
    *   - `status` - HTTP status code
    *   - `statusText` - HTTP status message
@@ -269,7 +288,7 @@ export class CCIPAPIClient {
    * }
    * ```
    */
-  async getMessageById(messageId: string): Promise<APICCIPRequest> {
+  async getMessageById(messageId: string): Promise<SetRequired<CCIPRequest, 'metadata'>> {
     const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}`
 
     this.logger.debug(`CCIPAPIClient: GET ${url}`)
@@ -319,9 +338,9 @@ export class CCIPAPIClient {
    * @param txHash - Source transaction hash (EVM hex or Solana Base58)
    * @returns Promise resolving to array of message IDs
    *
-   * @throws {@link CCIPArgumentInvalidError} when txHash format is invalid
    * @throws {@link CCIPMessageNotFoundInTxError} when no messages found (404 or empty)
    * @throws {@link CCIPUnexpectedPaginationError} when hasNextPage is true
+   * @throws {@link CCIPTimeoutError} if request times out
    * @throws {@link CCIPHttpError} on HTTP errors
    *
    * @example Basic usage
@@ -391,11 +410,11 @@ export class CCIPAPIClient {
   }
 
   /**
-   * Transforms raw API response to APICCIPRequest.
+   * Transforms raw API response to CCIPRequest with metadata.
    * Populates all derivable CCIPRequest fields from API data.
    * @internal
    */
-  private _transformMessageResponse(text: string): APICCIPRequest {
+  _transformMessageResponse(text: string): SetRequired<CCIPRequest, 'metadata'> {
     // Build message with extraArgs spread and tokenAmounts included
     const raw = decodeMessage(text) as CCIPMessage & Omit<RawMessageResponse, keyof CCIPMessage>
 
@@ -428,8 +447,8 @@ export class CCIPAPIClient {
         : undefined
 
     // Build lane - all fields available from API
-    const source = ensureNetworkInfo(sourceNetworkInfo)
-    const dest = ensureNetworkInfo(destNetworkInfo)
+    const source = ensureNetworkInfo(sourceNetworkInfo, this.logger)
+    const dest = ensureNetworkInfo(destNetworkInfo, this.logger)
     const lane = {
       source,
       sourceChainSelector: source.chainSelector,
@@ -467,15 +486,17 @@ export class CCIPAPIClient {
       message,
       log,
       tx,
-      // API-specific fields
-      status: status as MessageStatus,
-      readyForManualExecution,
-      finality,
-      receiptTransactionHash,
-      receiptTimestamp: receiptTimestamp_,
-      deliveryTime,
-      sourceNetworkInfo: ensureNetworkInfo(sourceNetworkInfo),
-      destNetworkInfo: ensureNetworkInfo(destNetworkInfo),
+      // API-specific metadata
+      metadata: {
+        status: validateMessageStatus(status, this.logger),
+        readyForManualExecution,
+        finality,
+        receiptTransactionHash,
+        receiptTimestamp: receiptTimestamp_,
+        deliveryTime,
+        sourceNetworkInfo: ensureNetworkInfo(sourceNetworkInfo, this.logger),
+        destNetworkInfo: ensureNetworkInfo(destNetworkInfo, this.logger),
+      },
     }
   }
 }

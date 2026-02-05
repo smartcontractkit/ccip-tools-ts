@@ -44,6 +44,20 @@ npm run build       # Full build
 | [GitHub Issues](https://github.com/smartcontractkit/ccip-tools-ts/issues) | Bug reports & feature requests |
 | [Pull Requests](https://github.com/smartcontractkit/ccip-tools-ts/pulls) | Open PRs |
 
+## CLI Argument Guidelines
+
+When adding or modifying CLI commands, follow these rules for positional vs named arguments:
+
+| Condition | Use |
+|-----------|-----|
+| >2 arguments | Named (`--option`) |
+| Same data type (two addresses) | Named (`--option`) |
+| Single obvious identifier | Positional (`<arg>`) |
+
+**The "Swap Test":** If swapping two positional arguments produces valid but wrong behavior, use named arguments.
+
+See **[CLI Argument Guidelines in CONTRIBUTING.md](https://github.com/smartcontractkit/ccip-tools-ts/blob/main/CONTRIBUTING.md#cli-argument-guidelines)** for the complete guide.
+
 ## Adding New Chain Support
 
 For implementing a new blockchain family, see the dedicated guide:

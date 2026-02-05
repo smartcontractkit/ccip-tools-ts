@@ -252,6 +252,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @param url - RPC endpoint URL (https://, http://, wss://, or ws://).
    * @param ctx - context containing logger.
    * @returns Solana Connection instance.
+   * @throws {@link CCIPDataFormatUnsupportedError} if URL format is invalid
    */
   static _getConnection(url: string, ctx?: WithLogger): Connection {
     const { logger = console } = ctx ?? {}
@@ -293,7 +294,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   // cached
-  /** {@inheritDoc Chain.getBlockTimestamp} */
+  /**
+   * {@inheritDoc Chain.getBlockTimestamp}
+   * @throws {@link CCIPBlockTimeNotFoundError} if block time cannot be retrieved
+   */
   async getBlockTimestamp(block: number | 'latest' | 'finalized'): Promise<number> {
     if (typeof block !== 'number') {
       const slot = await this.connection.getSlot(block === 'latest' ? 'confirmed' : block)
@@ -313,7 +317,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return blockTime
   }
 
-  /** {@inheritDoc Chain.getTransaction} */
+  /**
+   * {@inheritDoc Chain.getTransaction}
+   * @throws {@link CCIPTransactionNotFoundError} if transaction not found
+   */
   async getTransaction(hash: string): Promise<SolanaTransaction> {
     const tx = await this.connection.getTransaction(hash, {
       commitment: 'confirmed',
@@ -389,6 +396,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *   - `programs`: Special option to allow querying by address of interest, but yielding matching
    *     logs from specific (string address) program or any (true)
    * @returns AsyncIterableIterator of parsed Log_ objects.
+   * @throws {@link CCIPLogsAddressRequiredError} if address is not provided
+   * @throws {@link CCIPTopicsInvalidError} if topics contain invalid values
    */
   async *getLogs(
     opts: LogFilter & { programs?: string[] | true },
@@ -480,7 +489,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return Promise.resolve(onRamp) // Solana's router is also the onRamp
   }
 
-  /** {@inheritDoc Chain.getRouterForOffRamp} */
+  /**
+   * {@inheritDoc Chain.getRouterForOffRamp}
+   * @throws {@link CCIPSolanaRefAddressesNotFoundError} if reference addresses PDA not found
+   */
   async getRouterForOffRamp(offRamp: string, _sourceChainSelector: bigint): Promise<string> {
     const offRamp_ = new PublicKey(offRamp)
     const program = new Program(CCIP_OFFRAMP_IDL as Idl, offRamp_, {
@@ -507,7 +519,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return Promise.resolve(NATIVE_MINT.toBase58())
   }
 
-  /** {@inheritDoc Chain.getOffRampsForRouter} */
+  /**
+   * {@inheritDoc Chain.getOffRampsForRouter}
+   * @throws {@link CCIPSolanaOffRampEventsNotFoundError} if no OffRamp events found
+   */
   async getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]> {
     // feeQuoter is present in router's config, and has a DestChainState account which is updated by
     // the offramps, so we can use it to narrow the search for the offramp
@@ -559,7 +574,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return Promise.resolve(offRamp) // Solana supports only CCIP>=1.6, for which OffRamp and CommitStore are the same
   }
 
-  /** {@inheritDoc Chain.getTokenForTokenPool} */
+  /**
+   * {@inheritDoc Chain.getTokenForTokenPool}
+   * @throws {@link CCIPTokenPoolInfoNotFoundError} if token pool info not found
+   */
   async getTokenForTokenPool(tokenPool: string): Promise<string> {
     const tokenPoolInfo = await this.connection.getAccountInfo(new PublicKey(tokenPool))
     if (!tokenPoolInfo) throw new CCIPTokenPoolInfoNotFoundError(tokenPool)
@@ -570,7 +588,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return config.mint.toString()
   }
 
-  /** {@inheritDoc Chain.getTokenInfo} */
+  /**
+   * {@inheritDoc Chain.getTokenInfo}
+   * @throws {@link CCIPSplTokenInvalidError} if token is not a valid SPL token
+   * @throws {@link CCIPTokenDataParseError} if token data cannot be parsed
+   */
   async getTokenInfo(token: string): Promise<TokenInfo> {
     const mint = new PublicKey(token)
     const mintInfo = await this.connection.getParsedAccountInfo(mint)
@@ -619,7 +641,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
   }
 
-  /** {@inheritDoc Chain.getBalance} */
+  /**
+   * {@inheritDoc Chain.getBalance}
+   * @throws {@link CCIPTokenAccountNotFoundError} if token account not found
+   */
   async getBalance(opts: GetBalanceOpts): Promise<bigint> {
     const { holder, token } = opts
     const holderPubkey = new PublicKey(holder)
@@ -712,6 +737,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * Decodes a CCIP message from a Solana log event.
    * @param log - Log with data field.
    * @returns Decoded CCIPMessage or undefined if not valid.
+   * @throws {@link CCIPExtraArgsInvalidError} if extra args cannot be decoded
    */
   static decodeMessage({ data }: { data: unknown }): CCIPMessage | undefined {
     if (!data || typeof data !== 'string') return undefined
@@ -789,6 +815,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * Decodes extra arguments from Solana CCIP messages.
    * @param extraArgs - Encoded extra arguments bytes.
    * @returns Decoded EVMExtraArgsV2 or undefined if unknown format.
+   * @throws {@link CCIPExtraArgsLengthInvalidError} if extra args length is invalid
    */
   static decodeExtraArgs(
     extraArgs: BytesLike,
@@ -816,6 +843,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * Encodes extra arguments for Solana CCIP messages.
    * @param args - Extra arguments to encode.
    * @returns Encoded extra arguments as hex string.
+   * @throws {@link CCIPSolanaExtraArgsEncodingError} if SVMExtraArgsV1 encoding is attempted
    */
   static encodeExtraArgs(args: ExtraArgs): string {
     if ('computeUnits' in args) throw new CCIPSolanaExtraArgsEncodingError()
@@ -832,6 +860,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @param log - Log with data field.
    * @param lane - Lane info for filtering.
    * @returns Array of CommitReport or undefined if not valid.
+   * @throws {@link CCIPLogDataMissingError} if log data is missing
    */
   static decodeCommits(
     log: Pick<Log_, 'data'>,
@@ -886,6 +915,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * Decodes an execution receipt from a Solana log event.
    * @param log - Log with data, tx, and index fields.
    * @returns ExecutionReceipt or undefined if not valid.
+   * @throws {@link CCIPLogDataMissingError} if log data is missing
+   * @throws {@link CCIPExecutionStateInvalidError} if execution state is invalid
    */
   static decodeReceipt(log: Pick<Log_, 'data' | 'tx' | 'index'>): ExecutionReceipt | undefined {
     // Check if this is a ExecutionStateChanged event by looking at the discriminant
@@ -984,7 +1015,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return getV16SolanaLeafHasher(lane, ctx)
   }
 
-  /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
+  /**
+   * {@inheritDoc Chain.getTokenAdminRegistryFor}
+   * @throws {@link CCIPContractNotRouterError} if address is not a Router
+   */
   async getTokenAdminRegistryFor(address: string): Promise<string> {
     const [type] = await this.typeAndVersion(address)
     if (!type.includes('Router')) throw new CCIPContractNotRouterError(address, type)
@@ -1026,7 +1060,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     )
   }
 
-  /** {@inheritDoc Chain.sendMessage} */
+  /**
+   * {@inheritDoc Chain.sendMessage}
+   * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Solana wallet
+   */
   async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
     if (!isWallet(opts.wallet)) throw new CCIPWalletInvalidError(util.inspect(opts.wallet))
     const unsigned = await this.generateUnsignedSendMessage({
@@ -1050,6 +1087,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *   mainIndex - index of the `manuallyExecute` instruction in the array; last unless
    *   forceLookupTable is set, in which case last is ALT deactivation tx, and manuallyExecute is
    *   second to last
+   * @throws {@link CCIPExecutionReportChainMismatchError} if message is not a Solana message
    */
   async generateUnsignedExecuteReport({
     payer,
@@ -1069,7 +1107,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     )
   }
 
-  /** {@inheritDoc Chain.executeReport} */
+  /**
+   * {@inheritDoc Chain.executeReport}
+   * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Solana wallet
+   */
   async executeReport(
     opts: Parameters<Chain['executeReport']>[0] & {
       // when cleaning leftover LookUp Tables, wait deactivation grace period (~513 slots) then close ALT
@@ -1118,6 +1159,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *   - waitDeactivation - Whether to wait for lookup table deactivation cool down period
    *       (513 slots) to pass before closing; by default, we deactivate (if needed) and move on, to
    *       close other ready ALTs
+   * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Solana wallet
    */
   async cleanUpBuffers(opts: { wallet: unknown; waitDeactivation?: boolean }): Promise<void> {
     const wallet = opts.wallet
@@ -1241,7 +1283,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     yield* super.getExecutionReceipts(opts_)
   }
 
-  /** {@inheritDoc Chain.getRegistryTokenConfig} */
+  /**
+   * {@inheritDoc Chain.getRegistryTokenConfig}
+   * @throws {@link CCIPTokenNotConfiguredError} if token is not configured in registry
+   */
   async getRegistryTokenConfig(
     registry: string,
     token: string,
@@ -1295,8 +1340,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return config
   }
 
-  /** {@inheritDoc Chain.getTokenPoolConfigs} */
-  async getTokenPoolConfigs(tokenPool: string): Promise<{
+  /**
+   * {@inheritDoc Chain.getTokenPoolConfig}
+   * @throws {@link CCIPTokenPoolStateNotFoundError} if token pool state not found
+   */
+  async getTokenPoolConfig(tokenPool: string): Promise<{
     token: string
     router: string
     tokenPoolProgram: string
@@ -1328,7 +1376,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
   }
 
-  /** {@inheritDoc Chain.getTokenPoolRemotes} */
+  /**
+   * {@inheritDoc Chain.getTokenPoolRemotes}
+   * @throws {@link CCIPTokenPoolStateNotFoundError} if token pool state not found
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if chain config not found for specified selector
+   */
   async getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
@@ -1506,7 +1558,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return program.account.config.fetch(configPda)
   }
 
-  /** {@inheritDoc ChainStatic.buildMessageForDest} */
+  /**
+   * {@inheritDoc ChainStatic.buildMessageForDest}
+   * @throws {@link CCIPArgumentInvalidError} if tokenReceiver missing when sending tokens with data
+   */
   static override buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
   ): AnyMessage & { extraArgs: SVMExtraArgsV1 } {
@@ -1544,7 +1599,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const tokenReceiver =
       message.extraArgs &&
       'tokenReceiver' in message.extraArgs &&
-      message.extraArgs.tokenReceiver != null
+      message.extraArgs.tokenReceiver != null &&
+      typeof message.extraArgs.tokenReceiver === 'string'
         ? message.extraArgs.tokenReceiver
         : message.tokenAmounts?.length
           ? this.getAddress(message.receiver)

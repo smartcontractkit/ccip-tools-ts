@@ -25,6 +25,7 @@ import {
   CCIPTypeVersionInvalidError,
   HttpStatus,
 } from './errors/index.ts'
+import { getRetryDelay, shouldRetry } from './errors/utils.ts'
 import SELECTORS from './selectors.ts'
 import { supportedChains } from './supported-chains.ts'
 import { type NetworkInfo, type WithLogger, ChainFamily } from './types.ts'
@@ -37,7 +38,8 @@ import { type NetworkInfo, type WithLogger, ChainFamily } from './types.ts'
  * @param timestamp - target timestamp
  * @param precision - returned blockNumber should be within this many blocks before timestamp
  * @returns blockNumber of a block at provider which is close but before target timestamp
- **/
+ * @throws {@link CCIPBlockBeforeTimestampNotFoundError} if no block exists before the given timestamp
+ */
 export async function getSomeBlockNumberBefore(
   getBlockTimestamp: (blockNumber: number) => Promise<number>,
   recentBlockNumber: number,
@@ -105,13 +107,9 @@ export async function getSomeBlockNumberBefore(
 }
 
 /**
- * Checks if a chain is a testnet
+ * Converts a chain ID to complete NetworkInfo.
+ * Memoized to return the same object reference for a given chainId.
  */
-export function isTestnet(name: string): boolean {
-  return !name.includes('-mainnet')
-}
-
-// memoized so we always output the same object for a given chainId
 const networkInfoFromChainId = memoize((chainId: NetworkInfo['chainId']): NetworkInfo => {
   const sel = SELECTORS[chainId]
   if (!sel?.name) throw new CCIPChainNotFoundError(chainId)
@@ -120,7 +118,7 @@ const networkInfoFromChainId = memoize((chainId: NetworkInfo['chainId']): Networ
     chainSelector: sel.selector,
     name: sel.name,
     family: sel.family,
-    isTestnet: isTestnet(sel.name),
+    networkType: sel.network_type,
   } as NetworkInfo
 })
 
@@ -132,6 +130,7 @@ const networkInfoFromChainId = memoize((chainId: NetworkInfo['chainId']): Networ
  *   - Chain ID as number, bigint or string (EVM: "1", Aptos: "aptos:1", Solana: genesisHash)
  *   - Chain name as string ("ethereum-mainnet")
  * @returns Complete NetworkInfo object
+ * @throws {@link CCIPChainNotFoundError} if chain is not found
  */
 export const networkInfo = memoize(function networkInfo_(
   selectorOrIdOrName: bigint | number | string,
@@ -240,16 +239,24 @@ export function parseJson<T = unknown>(text: string): T {
 
 /**
  * Decode address from a 32-byte hex string
- **/
+ * @param address - Address bytes to decode
+ * @param family - Chain family for address format (defaults to EVM)
+ * @returns Decoded address string
+ * @throws {@link CCIPChainFamilyUnsupportedError} if chain family is not supported
+ */
 export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFamily.EVM): string {
   const chain = supportedChains[family]
   if (!chain) throw new CCIPChainFamilyUnsupportedError(family)
-  return chain.getAddress(getAddressBytes(address))
+  return chain.getAddress(address)
 }
 
 /**
  * Validate a value is a txHash string in some supported chain family
- **/
+ * @param txHash - Value to check
+ * @param family - Optional chain family to validate against
+ * @returns true if value is a valid transaction hash
+ * @throws {@link CCIPChainFamilyUnsupportedError} if specified chain family is not supported
+ */
 export function isSupportedTxHash(txHash: unknown, family?: ChainFamily): txHash is string {
   let chains: ChainStatic[]
   if (!family) chains = Object.values(supportedChains)
@@ -273,7 +280,7 @@ export function decodeOnRampAddress(
   family: ChainFamily = ChainFamily.EVM,
 ): string {
   let decoded = decodeAddress(address, family)
-  if (family === ChainFamily.Aptos) decoded += '::onramp'
+  if (family === ChainFamily.Aptos || family === ChainFamily.Sui) decoded += '::onramp'
   return decoded
 }
 
@@ -312,11 +319,14 @@ export function isBase64(data: unknown): data is string {
  * Converts various data formats to Uint8Array.
  * @param data - Bytes, number array, or Base64 string.
  * @returns Uint8Array representation.
+ * @throws {@link CCIPDataFormatUnsupportedError} if data format is not recognized
  */
 export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
   if (Array.isArray(data)) return new Uint8Array(data)
   if (typeof data === 'string' && data.match(/^[0-9a-f]+[a-f][0-9a-f]+$/i)) data = '0x' + data
   else if (typeof data === 'string' && data.match(/^0X[0-9a-fA-F]+$/)) data = data.toLowerCase()
+  if (typeof data === 'string' && data.startsWith('0x') && data.length % 2)
+    data = '0x0' + data.slice(2)
   if (isBytesLike(data)) {
     return getBytes(data)
   } else if (isBase64(data)) {
@@ -346,7 +356,11 @@ export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Ar
     bytes = address
   } else if (Array.isArray(address)) {
     bytes = new Uint8Array(address)
-  } else if (typeof address === 'string' && address.match(/^((0x[0-9a-f]*)|[0-9a-f]{40,})$/i)) {
+  } else if (
+    typeof address === 'string' &&
+    address.match(/^((0x[0-9a-f]*)|[0-9a-f]{40,})(::.*)?$/i)
+  ) {
+    address = address.split('::')[0]! // discard possible Aptos/Sui module suffix
     // supports with or without (long>=20B) 0x-prefix, odd or even length
     bytes = getBytes(
       address.length % 2
@@ -383,7 +397,9 @@ export function convertKeysToCamelCase(
   mapValues?: (value: unknown, key?: string) => unknown,
   key?: string,
 ): unknown {
-  if (Array.isArray(obj)) {
+  if (Array.isArray(obj) && obj.every((v) => typeof v === 'number')) {
+    return mapValues ? mapValues(obj, key) : obj
+  } else if (Array.isArray(obj)) {
     return obj.map((v) => convertKeysToCamelCase(v, mapValues, key))
   }
 
@@ -404,12 +420,117 @@ export function convertKeysToCamelCase(
  * @param ms - Duration in milliseconds.
  * @returns Promise that resolves after the specified duration.
  */
-export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms).unref())
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- unref is Node.js-only; browsers return number
+export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms).unref?.())
+
+/**
+ * Configuration for the withRetry utility.
+ */
+export type WithRetryConfig = {
+  /** Maximum number of retry attempts */
+  maxRetries: number
+  /** Initial delay in milliseconds before the first retry */
+  initialDelayMs: number
+  /** Multiplier applied to delay after each retry */
+  backoffMultiplier: number
+  /** Maximum delay in milliseconds between retries */
+  maxDelayMs: number
+  /** Whether to respect the error's retryAfterMs hint */
+  respectRetryAfterHint: boolean
+  /** Optional logger for retry attempts */
+  logger?: { debug: (...args: unknown[]) => void; warn: (...args: unknown[]) => void }
+}
+
+/**
+ * Executes an async operation with retry logic and exponential backoff.
+ * Only retries on transient errors (as determined by shouldRetry from errors/utils).
+ *
+ * @param operation - Async function to execute
+ * @param config - Retry configuration
+ * @returns Promise resolving to the operation result
+ * @throws The last error encountered after all retries are exhausted
+ *
+ * @example
+ * ```typescript
+ * const result = await withRetry(
+ *   () => apiClient.getMessageById(id),
+ *   {
+ *     maxRetries: 3,
+ *     initialDelayMs: 1000,
+ *     backoffMultiplier: 2,
+ *     maxDelayMs: 30000,
+ *     respectRetryAfterHint: true,
+ *   }
+ * )
+ * ```
+ */
+export async function withRetry<T>(
+  operation: () => Promise<T>,
+  config: WithRetryConfig,
+): Promise<T> {
+  const {
+    maxRetries,
+    initialDelayMs,
+    backoffMultiplier,
+    maxDelayMs,
+    respectRetryAfterHint,
+    logger,
+  } = config
+
+  let lastError: CCIPError | undefined
+  let delay = initialDelayMs
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation()
+    } catch (err) {
+      lastError = CCIPError.isCCIPError(err) ? err : CCIPError.from(err, 'UNKNOWN')
+
+      // Only retry on transient errors
+      if (!shouldRetry(lastError)) {
+        throw lastError
+      }
+
+      // Don't sleep after the last attempt
+      if (attempt >= maxRetries) {
+        logger?.warn(`All ${maxRetries} retries exhausted:`, lastError.message)
+        break
+      }
+
+      // Calculate delay for next retry
+      let nextDelay = delay
+
+      // Respect error's retryAfterMs hint if configured
+      if (respectRetryAfterHint) {
+        const hintDelay = getRetryDelay(lastError)
+        if (hintDelay !== null) {
+          nextDelay = Math.max(delay, hintDelay)
+        }
+      }
+
+      // Cap at maxDelayMs
+      nextDelay = Math.min(nextDelay, maxDelayMs)
+
+      logger?.debug(
+        `Retry attempt ${attempt + 1}/${maxRetries} after ${nextDelay}ms:`,
+        lastError.message,
+      )
+
+      await sleep(nextDelay)
+
+      // Apply exponential backoff for next iteration
+      delay = Math.min(delay * backoffMultiplier, maxDelayMs)
+    }
+  }
+
+  throw lastError!
+}
 
 /**
  * Parses a typeAndVersion string into its components.
  * @param typeAndVersion - String in format "TypeName vX.Y.Z".
  * @returns Tuple of [type, version, original, suffix?].
+ * @throws {@link CCIPTypeVersionInvalidError} if string format is invalid
  */
 export function parseTypeAndVersion(
   typeAndVersion: string,

@@ -7,10 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CLI: Add kebab-case aliases for multi-word commands (`manual-exec`, `get-supported-tokens`, `parse-bytes`, `parse-data`)
+- CLI: Add `--fee-tokens` flag to `getSupportedTokens` command to list fee tokens instead of transferable tokens
+- SDK: **Breaking**: `CCIPRequest` now includes optional `metadata?: APICCIPRequestMetadata` field
+  - API fields (`status`, `receiptTransactionHash`, `deliveryTime`, etc.) moved under `metadata`
+  - Migration: Change `request.status` to `request.metadata?.status`
+- SDK: **Breaking**: Remove `APICCIPRequest` type - use `CCIPRequest` with `metadata` field instead
+- SDK: Improve JSDoc for `RateLimiterState` - clarify that `null` means rate limiting is disabled
+- SDK: Improve JSDoc for `getTokenPoolRemotes` and `TokenPoolRemote` - clarify Record keys are chain names
+- SDK: Add named types `TokenPoolConfig` and `RegistryTokenConfig` for clearer IDE hints
+- SDK: Rename `getTokenPoolConfigs` to `getTokenPoolConfig` for consistency (returns single config)
+- SDK: Add `Chain.getTokenPoolRemote` for fetching single remote config by chainSelector
+- SDK: Fix `sleep()` browser compatibility - use optional chaining for `.unref()` which is Node.js-only
+- SDK: Add `TOKEN_REMOTE_NOT_CONFIGURED` error code for missing TokenPool remote chain configurations
+- SDK: Fix EVM `getTokenPoolRemotes` to throw `CCIPTokenPoolChainConfigNotFoundError` when remote token is not configured
+- SDK: Fix Aptos `getTokenPoolRemotes` to throw `CCIPTokenPoolChainConfigNotFoundError` when remote chain config is missing
+
+## [0.95.0] - 2026-01-28 - Pre-release
+
 - SDK: `Chain.getBalance()` method for querying native and token balances (EVM, Solana, Aptos)
 - SDK: Solana `resolveATA()` utility for ATA derivation with automatic SPL Token vs Token-2022 detection
-- CLI: `token <network> <holder> [token]` command for balance queries
+- CLI: `token` command for balance queries
 - SDK: fix EVM estimate gas for token transfers with balance slot!=0 (e.g. USDC)
+- SDK: Add `NetworkType` enum (`'MAINNET' | 'TESTNET'`) and `networkType` property to `NetworkInfo`, in place of `isTestnet` boolean
+- SDK: Selector generation scripts now validate `network_type` presence from upstream chain-selectors
+- CLI: **Breaking**: `send`, `getSupportedTokens`, and `token` commands now use named arguments instead of positional (e.g., `send -s <source> -d <dest> -r <router>`)
+- CLI: **Breaking**: `-r` alias removed from global `--rpcs` option (use `--rpc` instead); `-r` now used for `--router` in `send` command
 
 ## [0.94.0] - 2026-01-14 - Pre-release
 

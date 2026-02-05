@@ -10,7 +10,7 @@ import { discoverOffRamp } from './execution.ts'
 import { sourceToDestTokenAddresses } from './requests.ts'
 
 /**
- * A subset of [[MessageInput]] for estimating receive execution gas.
+ * A subset of {@link MessageInput} for estimating receive execution gas.
  */
 export type EstimateMessageInput = {
   /** receiver contract address */
@@ -19,7 +19,7 @@ export type EstimateMessageInput = {
   messageId?: string
   /** optional sender: zero address will be used if omitted */
   sender?: string
-  /** optional data: zero bytes will be used if ommitted */
+  /** optional data: zero bytes will be used if omitted */
   data?: BytesLike
   /**
    * optional tokenAmounts; `amount` with either source `token` (as in MessageInput) or
@@ -35,7 +35,7 @@ export type EstimateMessageInput = {
 }
 
 /**
- * Options for [[estimateReceiveExecution]] function.
+ * Options for {@link estimateReceiveExecution} function.
  */
 export type EstimateReceiveExecutionOpts = {
   /** Source chain instance (for token data retrieval) */
@@ -52,6 +52,9 @@ export type EstimateReceiveExecutionOpts = {
  * Estimate CCIP gasLimit needed to execute a request on a contract receiver.
  * @param opts - Options for estimation: source and dest chains, router or ramp address, and message
  * @returns Estimated gasLimit.
+ * @throws {@link CCIPMethodUnsupportedError} if dest chain doesn't support estimation
+ * @throws {@link CCIPContractTypeInvalidError} if routerOrRamp is not a valid contract type
+ * @throws {@link CCIPTokenDecimalsInsufficientError} if dest token has insufficient decimals
  */
 export async function estimateReceiveExecution({
   source,
@@ -69,12 +72,16 @@ export async function estimateReceiveExecution({
       onRamp = await source.getOnRampForRouter(routerOrRamp, dest.network.chainSelector)
     else onRamp = routerOrRamp
     offRamp = await discoverOffRamp(source, dest, onRamp, source)
-  } catch {
-    const tnv = await dest.typeAndVersion(routerOrRamp)
-    if (!tnv[0].includes('OffRamp'))
-      throw new CCIPContractTypeInvalidError(routerOrRamp, tnv[2], ['OffRamp'])
-    offRamp = routerOrRamp
-    onRamp = await dest.getOnRampForOffRamp(offRamp, source.network.chainSelector)
+  } catch (sourceErr) {
+    try {
+      const tnv = await dest.typeAndVersion(routerOrRamp)
+      if (!tnv[0].includes('OffRamp'))
+        throw new CCIPContractTypeInvalidError(routerOrRamp, tnv[2], ['OffRamp'])
+      offRamp = routerOrRamp
+      onRamp = await dest.getOnRampForOffRamp(offRamp, source.network.chainSelector)
+    } catch {
+      throw sourceErr // re-throw original error
+    }
   }
 
   const destTokenAmounts = await Promise.all(

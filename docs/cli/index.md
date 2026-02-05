@@ -103,6 +103,9 @@ For commands that send transactions:
 **Environment variable:**
 ```bash
 export PRIVATE_KEY=0xYourPrivateKey  # Recommended
+# Alternative names also supported:
+export USER_KEY=0xYourPrivateKey     # Same as PRIVATE_KEY
+export OWNER_KEY=0xYourPrivateKey    # Same as PRIVATE_KEY
 ccip-cli send ...
 ```
 
@@ -175,76 +178,95 @@ ccip-cli show 0xMessageId --id-from-source ethereum-testnet-sepolia
 Send a cross-chain message.
 
 ```bash
-ccip-cli send <source> <router> <dest> [options]
+ccip-cli send --source <chain> --dest <chain> --router <address> [options]
 ```
 
-**Arguments:**
-- `source` - Source chain (ID or name)
-- `router` - CCIP Router address on source
-- `dest` - Destination chain (ID or name)
+**Required Options:**
 
-**Common Options:**
 | Option | Alias | Description |
 |--------|-------|-------------|
-| `--receiver <addr>` | `-R` | Destination address (defaults to sender if same chain family) |
-| `--data <hex\|string>` | `-d` | Message payload (auto-encoded if not hex) |
-| `--gas-limit <n>` | `-L`, `--compute-units` | Gas limit for receiver's `ccipReceive` callback on destination (default: 0 = ramp default) |
-| `--fee-token <addr>` | | Pay fee in ERC20 (default: native token) |
-| `--wallet <key\|path>` | `-w` | Wallet private key or keystore path |
-| `--wait` | | After sending, wait for message execution on destination chain |
+| `--source` | `-s` | Source chain (chainId, selector, or name) |
+| `--dest` | `-d` | Destination chain (chainId, selector, or name) |
+| `--router` | `-r` | Router contract address on source |
 
-**Token Transfer Options:**
+**Message Options:**
+
 | Option | Alias | Description |
 |--------|-------|-------------|
-| `--transfer-tokens <token>=<amount>` | `-t` | Transfer tokens (repeatable) |
-| `--approve-max` | | Approve max allowance instead of exact amount |
+| `--receiver` | `--to` | Destination address (defaults to sender if same family) |
+| `--data` | | Message payload (auto-encoded if not hex) |
+| `--gas-limit` | `-L`, `--compute-units` | Gas for receiver callback (default: ramp config) |
+| `--allow-out-of-order-exec` | `--ooo` | Allow execution without nonce ordering (v1.5+) |
+
+**Token Options:**
+
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--fee-token` | | Pay fee in ERC20 (default: native) |
+| `--transfer-tokens` | `-t` | Transfer tokens: `token=amount` (repeatable) |
+| `--approve-max` | | Approve max allowance |
 
 **Estimation Options:**
+
 | Option | Description |
 |--------|-------------|
-| `--only-get-fee` | Calculate and print the CCIP message fee, then exit without sending |
-| `--only-estimate` | Estimate destination chain gas for receiver callback, then exit without sending |
-| `--estimate-gas-limit <margin%>` | Auto-estimate with margin (conflicts with `--gas-limit`) |
+| `--only-get-fee` | Print fee and exit |
+| `--only-estimate` | Print gas estimate and exit |
+| `--estimate-gas-limit <margin%>` | Auto-estimate with safety margin |
 
-**Advanced Options:**
+**Utility Options:**
+
 | Option | Alias | Description |
 |--------|-------|-------------|
-| `--allow-out-of-order-exec` | `--ooo` | Allow message to be executed without waiting for prior messages from same sender (v1.5+ lanes, required for some destinations) |
+| `--wallet` | `-w` | Wallet private key or keystore path |
+| `--wait` | | Wait for execution on destination |
 
-**Solana Destination Options:**
+**Solana/Sui Options:**
+
 | Option | Description |
 |--------|-------------|
-| `--token-receiver <addr>` | Solana token receiver address (if different from program receiver) |
-| `--account <addr>[=rw]` | Additional accounts for Solana receiver program (repeatable, append `=rw` for writable) |
+| `--token-receiver` | Solana token receiver (if different from program receiver) |
+| `--account` | Solana accounts (append `=rw` for writable) or Sui object IDs |
 
 **Examples:**
 
 ```bash
 # Simple message from Sepolia to Arbitrum Sepolia
-ccip-cli send ethereum-testnet-sepolia \
-  0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
-  ethereum-testnet-sepolia-arbitrum-1 \
+ccip-cli send \
+  --source ethereum-testnet-sepolia \
+  --dest ethereum-testnet-sepolia-arbitrum-1 \
+  --router 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
   --receiver 0xYourAddress \
   --data "Hello CCIP"
 
-# Transfer tokens
-ccip-cli send 11155111 \
-  0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
-  ethereum-testnet-sepolia-arbitrum-1 \
-  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=0.1
+# Using short aliases
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -d arbitrum-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  --to 0xYourAddress \
+  --only-get-fee
 
-# Just get the fee
-ccip-cli send 11155111 0x0BF3... arbitrum-sepolia --only-get-fee
+# Token transfer with fee token
+ccip-cli send \
+  -s 11155111 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=0.1 \
+  --fee-token LINK \
+  --wait
 ```
 
 ---
 
-### manualExec
+### manualExec (manual-exec)
 
 Manually execute a stuck message on the destination chain.
 
 ```bash
 ccip-cli manualExec <tx_hash> [options]
+# or using kebab-case:
+ccip-cli manual-exec <tx_hash> [options]
 ```
 
 **When to use:**
@@ -274,6 +296,11 @@ ccip-cli manualExec <tx_hash> [options]
 | `--force-lookup-table` | Create an address lookup table to fit more accounts in transaction |
 | `--clear-leftover-accounts` | Clean up buffer accounts or lookup tables from previous aborted attempts |
 
+**Sui-Specific:**
+| Option | Description |
+|--------|-------------|
+| `--receiver-object-ids` | Receiver object IDs required for Sui execution (e.g., `--receiver-object-ids 0xabc... 0xdef...`) |
+
 **Example:**
 
 ```bash
@@ -289,12 +316,13 @@ ccip-cli manualExec <tx_hash> --force-buffer --clear-leftover-accounts
 
 ---
 
-### parse
+### parse (parse-bytes, parse-data)
 
-Decode CCIP-related data, errors, and revert reasons.
+Decode CCIP-related data, errors, and revert reasons. Supports hex (EVM), base64 (Solana), and other chain-specific formats.
 
 ```bash
-ccip-cli parse <hex_data>
+ccip-cli parse <data>
+# Aliases: parseBytes, parse-bytes, parseData, parse-data
 ```
 
 **Example:**
@@ -308,30 +336,46 @@ ccip-cli parse 0xbf16aab6000000000000000000000000779877a7b0d9e8603169ddbd7836e47
 
 ---
 
-### getSupportedTokens
+### getSupportedTokens (get-supported-tokens)
 
 List tokens supported for transfer on a lane.
 
 ```bash
-ccip-cli getSupportedTokens <source> <address> [token]
+ccip-cli getSupportedTokens --network <network> --address <address> [--token <token>]
+# or using kebab-case:
+ccip-cli get-supported-tokens --network <network> --address <address> [--token <token>]
 ```
 
-**Arguments:**
-- `source` - Source chain (ID or name)
-- `address` - Router, OnRamp, TokenAdminRegistry, or TokenPool address
-- `token` - (Optional) Pre-select a specific token from the list
+**Required Options:**
+
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--network` | `-n` | Source network: chainId or name |
+| `--address` | `-a` | Router/OnRamp/TokenAdminRegistry/TokenPool contract address |
+
+**Optional:**
+
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--token` | `-t` | Token address to query (pre-selects from list if address is a registry) |
+| `--fee-tokens` | | List fee tokens instead of transferable tokens |
 
 **Examples:**
 
 ```bash
 # List all supported tokens from a router
-ccip-cli getSupportedTokens ethereum-mainnet 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D
+ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D
 
 # Get details for a specific token
-ccip-cli getSupportedTokens ethereum-mainnet 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D -t 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 
 # Query token pool directly
-ccip-cli getSupportedTokens ethereum-mainnet 0xTokenPoolAddress
+ccip-cli getSupportedTokens -n ethereum-mainnet -a 0xTokenPoolAddress
+
+# List fee tokens instead of transferable tokens
+ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D --fee-tokens
+# or using kebab-case:
+ccip-cli get-supported-tokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D --fee-tokens
 ```
 
 ---
@@ -374,13 +418,21 @@ ccip-cli lane-latency ethereum-mainnet polygon-mainnet --api-url https://custom-
 Query native or token balance for an address.
 
 ```bash
-ccip-cli token <network> <holder> [token]
+ccip-cli token --network <network> --holder <address> [--token <token>]
 ```
 
-**Arguments:**
-- `network` - Network name or chainId (e.g., `ethereum-mainnet`, `solana-devnet`, `aptos-testnet`)
-- `holder` - Wallet address to query balance for
-- `token` - (Optional) Token address. Omit for native token balance
+**Required Options:**
+
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--network` | `-n` | Network: chainId or name (e.g., ethereum-mainnet, solana-devnet) |
+| `--holder` | `-H` | Wallet address to query balance for |
+
+**Optional:**
+
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--token` | `-t` | Token address (omit for native token balance) |
 
 **Supported Chains:**
 - EVM chains (Ethereum, Arbitrum, Avalanche, etc.)
@@ -391,22 +443,22 @@ ccip-cli token <network> <holder> [token]
 
 ```bash
 # Native balance on Ethereum mainnet
-ccip-cli token ethereum-mainnet 0x1234...abcd
+ccip-cli token -n ethereum-mainnet -H 0x1234...abcd
 
 # ERC-20 token balance
-ccip-cli token ethereum-mainnet 0x1234...abcd 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+ccip-cli token -n ethereum-mainnet -H 0x1234...abcd -t 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 
 # Solana native SOL balance
-ccip-cli token solana-mainnet EPUjBP3Xf76K1VKsDSc6GupBWE8uykNksCLJgXZn87CB
+ccip-cli token -n solana-mainnet -H EPUjBP3Xf76K1VKsDSc6GupBWE8uykNksCLJgXZn87CB
 
 # Solana SPL token balance (WSOL)
-ccip-cli token solana-devnet EPUjBP3Xf76K1VKsDSc6GupBWE8uykNksCLJgXZn87CB So11111111111111111111111111111111111111112
+ccip-cli token -n solana-devnet -H EPUjBP3Xf76K1VKsDSc6GupBWE8uykNksCLJgXZn87CB -t So11111111111111111111111111111111111111112
 
 # Aptos native APT balance
-ccip-cli token aptos-testnet 0xd0e227835c33932721d54ae401cfaae753c295024fe454aa029b5e2782d2fad4
+ccip-cli token -n aptos-testnet -H 0xd0e227835c33932721d54ae401cfaae753c295024fe454aa029b5e2782d2fad4
 
 # Aptos token balance (CCIP-BnM)
-ccip-cli token aptos-testnet 0xd0e227835c33932721d54ae401cfaae753c295024fe454aa029b5e2782d2fad4 0xa680c9935c7ea489676fa0e01f1ff8a97fadf0cb35e1e06ba1ba32ecd882fc9a
+ccip-cli token -n aptos-testnet -H 0xd0e227835c33932721d54ae401cfaae753c295024fe454aa029b5e2782d2fad4 -t 0xa680c9935c7ea489676fa0e01f1ff8a97fadf0cb35e1e06ba1ba32ecd882fc9a
 ```
 
 **Output:**
@@ -457,7 +509,7 @@ ccip-cli show 0x... --format=json | jq '.messageId'
 **Cause:** Missing RPC for source or destination chain.
 
 **Solutions:**
-- Add the missing RPC via `-r` flag or `.env` file
+- Add the missing RPC via `--rpc` flag or `.env` file
 - Check the network name/selector is correct
 
 ### "Execution reverted"

@@ -37,7 +37,7 @@ import { formatDuration, getCtx, logParsedError, prettyTable } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
-export const command = ['getSupportedTokens <source> <address> [token]']
+export const command = ['getSupportedTokens', 'get-supported-tokens']
 export const describe =
   'List supported tokens in a given Router/OnRamp/TokenAdminRegistry, and/or show info about token/pool'
 
@@ -48,23 +48,39 @@ export const describe =
  */
 export const builder = (yargs: Argv) =>
   yargs
-    .positional('source', {
+    .option('network', {
+      alias: 'n',
       type: 'string',
       demandOption: true,
-      describe: 'source network, chainId or name',
-      example: 'ethereum-testnet-sepolia',
+      describe: 'Source network: chainId or name (e.g., ethereum-mainnet)',
     })
-    .positional('address', {
+    .option('address', {
+      alias: 'a',
       type: 'string',
       demandOption: true,
-      describe: 'router/onramp/tokenAdminRegistry/tokenPool contract address on source',
+      describe: 'Router/OnRamp/TokenAdminRegistry/TokenPool contract address',
     })
-    .positional('token', {
+    .option('token', {
+      alias: 't',
       type: 'string',
       demandOption: false,
-      describe:
-        'If address is router/onramp/tokenAdminRegistry, token may be used to pre-select a token from the supported list',
+      describe: 'Token address to query (pre-selects from list if address is a registry)',
     })
+    .option('fee-tokens', {
+      type: 'boolean',
+      default: false,
+      describe: 'List fee tokens instead of transferable tokens',
+    })
+    .example([
+      [
+        'ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D',
+        'List all supported tokens from router',
+      ],
+      [
+        'ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc... -t 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        'Get details for specific token',
+      ],
+    ])
 
 /**
  * Handler for the supported-tokens command.
@@ -82,7 +98,7 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
 
 async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
   const { logger } = ctx
-  const sourceNetwork = networkInfo(argv.source)
+  const sourceNetwork = networkInfo(argv.network)
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
   let registry
@@ -92,8 +108,8 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     // ignore
   }
 
-  let info, tokenPool, poolConfigs, registryConfig
-  if (registry && !argv.token) {
+  // Handle --fee-tokens flag
+  if (argv.feeTokens) {
     const feeTokens = await source.getFeeTokens(argv.address)
     switch (argv.format) {
       case Format.pretty:
@@ -106,19 +122,23 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
       default:
         logger.log('feeTokens:', feeTokens)
     }
+    return
+  }
 
+  let info, tokenPool, poolConfigs, registryConfig
+  if (registry && !argv.token) {
     // router + interactive list
     info = await listTokens(ctx, source, registry, argv)
     if (!info) return // format != pretty
     registryConfig = await source.getRegistryTokenConfig(registry, info.token)
     tokenPool = registryConfig.tokenPool
     if (!tokenPool) throw new CCIPTokenNotConfiguredError(info.token, registry)
-    poolConfigs = await source.getTokenPoolConfigs(tokenPool)
+    poolConfigs = await source.getTokenPoolConfig(tokenPool)
   } else {
     if (!argv.token) {
       // tokenPool
       tokenPool = argv.address
-      poolConfigs = await source.getTokenPoolConfigs(tokenPool)
+      poolConfigs = await source.getTokenPoolConfig(tokenPool)
       registry ??= await source.getTokenAdminRegistryFor(poolConfigs.router)
       ;[info, registryConfig] = await Promise.all([
         source.getTokenInfo(poolConfigs.token),
@@ -132,7 +152,7 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
       registryConfig = await source.getRegistryTokenConfig(registry, argv.token)
       tokenPool = registryConfig.tokenPool
       if (!tokenPool) throw new CCIPTokenNotConfiguredError(argv.token, registry)
-      poolConfigs = await source.getTokenPoolConfigs(tokenPool)
+      poolConfigs = await source.getTokenPoolConfig(tokenPool)
     }
 
     if (argv.format === Format.json) {

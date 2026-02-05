@@ -9,7 +9,13 @@ import type { GlobalOpts } from '../index.ts'
 import { type Ctx, Format } from './types.ts'
 import { getCtx, logParsedError, prettyTable } from './utils.ts'
 
-export const command = ['parse <data>', 'parseBytes <data>', 'parseData <data>']
+export const command = [
+  'parse <data>',
+  'parseBytes <data>',
+  'parse-bytes <data>',
+  'parseData <data>',
+  'parse-data <data>',
+]
 export const describe =
   'Try to parse and print errors, revert reasons or function call or event data'
 
@@ -22,7 +28,7 @@ export const builder = (yargs: Argv) =>
   yargs.positional('data', {
     type: 'string',
     demandOption: true,
-    describe: 'router contract address on source',
+    describe: 'Data to parse (hex, base64, or chain-specific format)',
   })
 
 /**

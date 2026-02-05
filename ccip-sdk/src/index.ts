@@ -1,5 +1,14 @@
+/**
+ * \@chainlink/ccip-sdk - SDK for interacting with Chainlink CCIP (Cross-Chain Interoperability Protocol).
+ *
+ * This package provides tools for sending cross-chain messages, tracking message status,
+ * and executing manual message delivery across supported blockchain networks.
+ *
+ * @packageDocumentation
+ */
+
 export type {
-  APICCIPRequest,
+  APICCIPRequestMetadata,
   APIErrorResponse,
   CCIPAPIClientContext,
   LaneLatencyResponse,
@@ -7,6 +16,7 @@ export type {
 export { CCIPAPIClient, DEFAULT_API_BASE_URL } from './api/index.ts'
 
 export type {
+  ApiRetryConfig,
   Chain,
   ChainContext,
   ChainGetter,
@@ -14,9 +24,12 @@ export type {
   GetBalanceOpts,
   LogFilter,
   RateLimiterState,
+  RegistryTokenConfig,
   TokenInfo,
+  TokenPoolConfig,
   TokenPoolRemote,
 } from './chain.ts'
+export { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
 export {
   type EVMExtraArgsV1,
@@ -49,6 +62,7 @@ export {
   IntentStatus,
   MessageStatus,
 } from './types.ts'
+export type { WithRetryConfig } from './utils.ts'
 export {
   bigIntReplacer,
   bigIntReviver,
@@ -57,6 +71,7 @@ export {
   getDataBytes,
   isSupportedTxHash,
   networkInfo,
+  withRetry,
 } from './utils.ts'
 export {
   type CCIPExplorerLinks,
@@ -79,8 +94,8 @@ export type { UnsignedSolanaTx } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'
 export type { UnsignedTONTx } from './ton/index.ts'
-import { ChainFamily } from './types.ts'
-export { AptosChain, ChainFamily, EVMChain, SolanaChain, SuiChain, TONChain }
+import { ChainFamily, NetworkType } from './types.ts'
+export { AptosChain, ChainFamily, EVMChain, NetworkType, SolanaChain, SuiChain, TONChain }
 // use `supportedChains` to override/register derived classes, if needed
 export { supportedChains } from './supported-chains.ts'
 // import `allSupportedChains` to get them all registered, in tree-shaken environments

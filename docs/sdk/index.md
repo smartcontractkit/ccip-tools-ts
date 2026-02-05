@@ -111,6 +111,57 @@ const faBalance = await aptosChain.getBalance({
 console.log('Balance:', nativeBalance.toString()) // Raw bigint
 ```
 
+### Query Token Pool Configuration
+
+Inspect token pool configurations and remote chain settings:
+
+```ts
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const chain = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.com')
+const poolAddress = '0xYourTokenPoolAddress'
+
+// Get pool configuration (token, router, version)
+const config = await chain.getTokenPoolConfig(poolAddress)
+console.log('Token:', config.token)
+console.log('Router:', config.router)
+console.log('Version:', config.typeAndVersion) // e.g., "BurnMintTokenPool 1.5.1"
+
+// Get all remote chain configurations
+const remotes = await chain.getTokenPoolRemotes(poolAddress)
+// Returns: { "arbitrum-mainnet": { remoteToken, remotePools, ... }, ... }
+
+for (const [chainName, remote] of Object.entries(remotes)) {
+  console.log(`${chainName}: token=${remote.remoteToken}, pools=${remote.remotePools.length}`)
+}
+
+// Get configuration for a specific remote chain
+const arbitrumSelector = 4949039107694359620n
+const arbRemote = await chain.getTokenPoolRemote(poolAddress, arbitrumSelector)
+console.log('Remote token on Arbitrum:', arbRemote.remoteToken)
+console.log('Inbound rate limit:', arbRemote.inboundRateLimiterState) // null if disabled
+```
+
+### Query Token Admin Registry
+
+Look up token administrator and pool information:
+
+```ts
+const registryAddress = '0xYourTokenAdminRegistryAddress'
+const tokenAddress = '0xYourTokenAddress'
+
+const tokenConfig = await chain.getRegistryTokenConfig(registryAddress, tokenAddress)
+console.log('Administrator:', tokenConfig.administrator)
+console.log('Token Pool:', tokenConfig.tokenPool)
+if (tokenConfig.pendingAdministrator) {
+  console.log('Pending admin transfer to:', tokenConfig.pendingAdministrator)
+}
+
+// List all supported tokens in a registry
+const tokens = await chain.getSupportedTokens(registryAddress)
+console.log('Supported tokens:', tokens)
+```
+
 ### Get CCIP Fee Estimate
 
 ```ts
@@ -120,10 +171,14 @@ const source = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.c
 const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
 const destSelector = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector
 
-const fee = await source.getFee(router, destSelector, {
-  receiver: '0xYourReceiverAddress',
-  data: '0x', // Empty data payload
-  extraArgs: { gasLimit: 200_000 }, // Gas limit for receiver's ccipReceive callback
+const fee = await source.getFee({
+  router,
+  destChainSelector: destSelector,
+  message: {
+    receiver: '0xYourReceiverAddress',
+    data: '0x', // Empty data payload
+    extraArgs: { gasLimit: 200_000 }, // Gas limit for receiver's ccipReceive callback
+  },
 })
 
 console.log('Fee in native token:', fee.toString())
@@ -142,27 +197,31 @@ const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
 const destSelector = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector
 
 // Get fee first
-const fee = await source.getFee(router, destSelector, {
-  receiver: '0xYourReceiverAddress',
-  data: '0x48656c6c6f', // "Hello" in hex
-  extraArgs: {
-    gasLimit: 200_000, // Gas for receiver's ccipReceive callback
-    allowOutOfOrderExecution: true, // Don't wait for prior messages from this sender
+const fee = await source.getFee({
+  router,
+  destChainSelector: destSelector,
+  message: {
+    receiver: '0xYourReceiverAddress',
+    data: '0x48656c6c6f', // "Hello" in hex
+    extraArgs: {
+      gasLimit: 200_000, // Gas for receiver's ccipReceive callback
+      allowOutOfOrderExecution: true, // Don't wait for prior messages from this sender
+    },
   },
 })
 
 // Send the message
-const request = await source.sendMessage(
+const request = await source.sendMessage({
   router,
-  destSelector,
-  {
+  destChainSelector: destSelector,
+  message: {
     receiver: '0xYourReceiverAddress',
     data: '0x48656c6c6f',
     extraArgs: { gasLimit: 200_000, allowOutOfOrderExecution: true },
     fee,
   },
-  { wallet },
-)
+  wallet,
+})
 
 console.log('Transaction hash:', request.tx.hash)
 console.log('Message ID:', request.message.messageId)
@@ -228,12 +287,13 @@ console.log('Message ID:', request.message.messageId)
 ```
 
 :::note Defaults
+
 - `extraArgs.gasLimit` / `extraArgs.computeUnits`: `0` for token-only transfers
 - `extraArgs.allowOutOfOrderExecution`: `true`
 - `data`: Empty
 - `feeToken`: Native token (ETH or SOL)
 - Token approvals and fee calculation handled by `sendMessage`
-:::
+  :::
 
 ### Generate Unsigned Transactions
 
@@ -246,7 +306,9 @@ const source = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.c
 
 const message: MessageInput = {
   receiver: '0xYourReceiverAddress',
-  tokenAmounts: [{ token: '0x779877A7B0D9E8603169DdbD7836e478b4624789', amount: 1_500_000_000_000_000_000n }],
+  tokenAmounts: [
+    { token: '0x779877A7B0D9E8603169DdbD7836e478b4624789', amount: 1_500_000_000_000_000_000n },
+  ],
 }
 
 const unsignedTxs = await source.generateUnsignedSendMessage({
@@ -322,23 +384,35 @@ const request = await api.getMessageById(
   '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
 )
 
-// Access message details
-console.log('Status:', request.status) // 'SUCCESS', 'FAILED', 'SENT', etc.
+// Access standard fields
+console.log('Message ID:', request.message.messageId)
 console.log('Sender:', request.message.sender)
 console.log('Lane:', request.lane.sourceChainSelector, '→', request.lane.destChainSelector)
 
-// API-specific metadata
-console.log('Ready for manual exec:', request.readyForManualExecution)
-console.log('Delivery time:', request.deliveryTime, 'ms')
+// Access API metadata (present when fetched via API)
+if (request.metadata) {
+  console.log('Status:', request.metadata.status) // 'SUCCESS', 'FAILED', 'SENT', etc.
+  console.log('Ready for manual exec:', request.metadata.readyForManualExecution)
+  if (request.metadata.deliveryTime) {
+    console.log('Delivery time:', request.metadata.deliveryTime, 'ms')
+  }
+}
 ```
 
-The returned `APICCIPRequest` extends `CCIPRequest` with additional API metadata:
+When fetched via the API, `CCIPRequest` includes a `metadata` field with additional information:
 
-- `status` - Message lifecycle status (`SENT`, `COMMITTED`, `SUCCESS`, `FAILED`)
-- `readyForManualExecution` - Whether manual execution is available
-- `finality` - Block confirmations on source chain
-- `receiptTransactionHash` - Execution tx hash (if completed)
-- `deliveryTime` - End-to-end delivery time in ms (if completed)
+#### API Metadata Fields
+
+| Field                     | Type            | Description                              |
+| ------------------------- | --------------- | ---------------------------------------- |
+| `status`                  | `MessageStatus` | SENT, COMMITTED, SUCCESS, FAILED, etc.   |
+| `readyForManualExecution` | `boolean`       | Whether manual execution is available    |
+| `finality`                | `bigint`        | Block confirmations on source chain      |
+| `receiptTransactionHash`  | `string?`       | Execution tx hash (if completed)         |
+| `receiptTimestamp`        | `number?`       | Execution timestamp (if completed)       |
+| `deliveryTime`            | `bigint?`       | End-to-end delivery time in ms           |
+| `sourceNetworkInfo`       | `NetworkInfo`   | Source chain metadata                    |
+| `destNetworkInfo`         | `NetworkInfo`   | Destination chain metadata               |
 
 ### Find Messages in a Transaction
 
@@ -357,21 +431,90 @@ console.log(`Found ${messageIds.length} CCIP message(s)`)
 // Fetch full details for each message
 for (const id of messageIds) {
   const request = await api.getMessageById(id)
-  console.log(`Message ${id}: ${request.status}`)
+  console.log(`Message ${id}: ${request.metadata?.status}`)
 }
 ```
 
 Supports both EVM hex hashes (`0x...`) and Solana Base58 signatures.
 
-### Disable API (Decentralization Mode)
+### API Mode Configuration
+
+By default, Chain instances use the CCIP API for enhanced functionality. You can configure this behavior:
+
+```ts
+import { EVMChain, DEFAULT_API_RETRY_CONFIG } from '@chainlink/ccip-sdk'
+
+// Default: API enabled with automatic retry on fallback
+const chain = await EVMChain.fromUrl(url)
+
+// Custom retry configuration for API fallback operations
+const chainWithRetry = await EVMChain.fromUrl(url, {
+  apiRetryConfig: {
+    maxRetries: 5, // Max retry attempts (default: 3)
+    initialDelayMs: 2000, // Initial delay before first retry (default: 1000)
+    backoffMultiplier: 1.5, // Multiplier for exponential backoff (default: 2)
+    maxDelayMs: 60000, // Maximum delay cap (default: 30000)
+    respectRetryAfterHint: true, // Use error's retryAfterMs when available (default: true)
+  },
+})
+
+// Fully decentralized mode - uses only RPC data, no API
+const decentralizedChain = await EVMChain.fromUrl(url, { apiClient: null })
+```
+
+#### API Fallback Workflow
+
+When `getMessagesInTx()` fails to retrieve messages via RPC (e.g., due to an unsupported chain or RPC errors), it automatically falls back to the CCIP API with retry logic:
+
+1. First attempt via RPC
+2. On failure, query the API for message IDs
+3. Retry with exponential backoff on transient errors (5xx, timeouts)
+4. Respects `retryAfterMs` hints from error responses
+
+This provides resilience against temporary API issues while maintaining decentralization as the primary path.
+
+Similarly, `getMessageById()` uses retry logic when fetching message details by ID:
+
+1. Query the API for message details
+2. Retry with exponential backoff on transient errors (5xx, timeouts)
+3. Respects `retryAfterMs` hints from error responses
+
+#### Decentralized Mode
+
+Disable the API entirely for fully decentralized operation:
 
 ```ts
 // Opt-out of API - uses only RPC data
 const chain = await EVMChain.fromUrl(url, { apiClient: null })
 
-// This will throw CCIPApiClientNotAvailableError
-await chain.getLaneLatency(destSelector)
+// API-dependent methods will throw CCIPApiClientNotAvailableError
+await chain.getLaneLatency(destSelector) // Throws
 ```
+
+### Retry Utility
+
+The SDK exports a `withRetry` utility for implementing custom retry logic with exponential backoff:
+
+```ts
+import { withRetry, DEFAULT_API_RETRY_CONFIG } from '@chainlink/ccip-sdk'
+
+const result = await withRetry(
+  async () => {
+    // Your async operation that may fail transiently
+    return await someApiCall()
+  },
+  {
+    maxRetries: 3,
+    initialDelayMs: 1000,
+    backoffMultiplier: 2,
+    maxDelayMs: 30000,
+    respectRetryAfterHint: true,
+    logger: console, // Optional: logs retry attempts
+  },
+)
+```
+
+The utility only retries on transient errors (5xx HTTP errors, timeouts). Non-transient errors (4xx, validation errors) are thrown immediately.
 
 ## Chain Identification
 
@@ -517,16 +660,18 @@ For custom signing workflows, use the `generateUnsigned*` methods:
 
 ```ts
 // Generate unsigned transaction data (returns chain-specific tx format)
-const unsignedTx = await source.generateUnsignedSendMessage(
-  senderAddress, // Your wallet address
+const unsignedTx = await source.generateUnsignedSendMessage({
+  sender: senderAddress, // Your wallet address
   router,
-  destSelector,
+  destChainSelector: destSelector,
   message,
-)
+})
 
 // Sign and send with your own logic
-const signedTx = await customSigner.sign(unsignedTx)
-await customSender.broadcast(signedTx)
+for (const tx of unsignedTx.transactions) {
+  const signedTx = await customSigner.sign(tx)
+  await customSender.broadcast(signedTx)
+}
 ```
 
 :::tip Browser Integration
@@ -562,7 +707,7 @@ const chain = await fromViemClient(publicClient)
 
 // All read operations work the same way
 const messages = await chain.getMessagesInTx(txHash)
-const fee = await chain.getFee(router, destSelector, message)
+const fee = await chain.getFee({ router, destChainSelector: destSelector, message })
 ```
 
 ### Send Transactions with viem WalletClient
@@ -591,7 +736,10 @@ const walletClient = createWalletClient({
 const chain = await fromViemClient(publicClient)
 
 // Send message using viemWallet adapter
-const request = await chain.sendMessage(router, destSelector, message, {
+const request = await chain.sendMessage({
+  router,
+  destChainSelector: destSelector,
+  message,
   wallet: viemWallet(walletClient),
 })
 
