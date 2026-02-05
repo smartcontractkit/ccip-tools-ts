@@ -259,12 +259,14 @@ ccip-cli send \
 
 ---
 
-### manualExec
+### manualExec (manual-exec)
 
 Manually execute a stuck message on the destination chain.
 
 ```bash
 ccip-cli manualExec <tx_hash> [options]
+# or using kebab-case:
+ccip-cli manual-exec <tx_hash> [options]
 ```
 
 **When to use:**
@@ -314,12 +316,13 @@ ccip-cli manualExec <tx_hash> --force-buffer --clear-leftover-accounts
 
 ---
 
-### parse
+### parse (parse-bytes, parse-data)
 
 Decode CCIP-related data, errors, and revert reasons. Supports hex (EVM), base64 (Solana), and other chain-specific formats.
 
 ```bash
 ccip-cli parse <data>
+# Aliases: parseBytes, parse-bytes, parseData, parse-data
 ```
 
 **Example:**
@@ -333,12 +336,14 @@ ccip-cli parse 0xbf16aab6000000000000000000000000779877a7b0d9e8603169ddbd7836e47
 
 ---
 
-### getSupportedTokens
+### getSupportedTokens (get-supported-tokens)
 
 List tokens supported for transfer on a lane.
 
 ```bash
 ccip-cli getSupportedTokens --network <network> --address <address> [--token <token>]
+# or using kebab-case:
+ccip-cli get-supported-tokens --network <network> --address <address> [--token <token>]
 ```
 
 **Required Options:**
@@ -353,6 +358,7 @@ ccip-cli getSupportedTokens --network <network> --address <address> [--token <to
 | Option | Alias | Description |
 |--------|-------|-------------|
 | `--token` | `-t` | Token address to query (pre-selects from list if address is a registry) |
+| `--fee-tokens` | | List fee tokens instead of transferable tokens |
 
 **Examples:**
 
@@ -365,6 +371,11 @@ ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb
 
 # Query token pool directly
 ccip-cli getSupportedTokens -n ethereum-mainnet -a 0xTokenPoolAddress
+
+# List fee tokens instead of transferable tokens
+ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D --fee-tokens
+# or using kebab-case:
+ccip-cli get-supported-tokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D --fee-tokens
 ```
 
 ---
