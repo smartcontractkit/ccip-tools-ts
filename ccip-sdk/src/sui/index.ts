@@ -900,7 +900,8 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     const tokenReceiver =
       message.extraArgs &&
       'tokenReceiver' in message.extraArgs &&
-      message.extraArgs.tokenReceiver != null
+      message.extraArgs.tokenReceiver != null &&
+      typeof message.extraArgs.tokenReceiver === 'string'
         ? message.extraArgs.tokenReceiver
         : message.tokenAmounts?.length
           ? this.getAddress(message.receiver)

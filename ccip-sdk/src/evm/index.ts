@@ -13,9 +13,6 @@ import {
   Result,
   WebSocketProvider,
   ZeroAddress,
-  concat,
-  dataSlice,
-  encodeBase58,
   getAddress,
   hexlify,
   isBytesLike,
@@ -56,17 +53,7 @@ import {
   CCIPVersionUnsupportedError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
-import {
-  type EVMExtraArgsV1,
-  type EVMExtraArgsV2,
-  type ExtraArgs,
-  type SVMExtraArgsV1,
-  type SuiExtraArgsV1,
-  EVMExtraArgsV1Tag,
-  EVMExtraArgsV2Tag,
-  SVMExtraArgsV1Tag,
-  SuiExtraArgsV1Tag,
-} from '../extra-args.ts'
+import { type ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -106,15 +93,12 @@ import EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import type Router_ABI from './abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
-import {
-  DEFAULT_GAS_LIMIT,
-  commitsFragments,
-  defaultAbiCoder,
-  interfaces,
-  receiptsFragments,
-  requestsFragments,
-} from './const.ts'
+import { commitsFragments, interfaces, receiptsFragments, requestsFragments } from './const.ts'
 import { parseData } from './errors.ts'
+import {
+  decodeExtraArgs as decodeExtraArgs_,
+  encodeExtraArgs as encodeExtraArgs_,
+} from './extra-args.ts'
 import { estimateExecGas } from './gas.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { getEvmLogs } from './logs.ts'
@@ -129,13 +113,6 @@ import type { UnsignedEVMTx } from './types.ts'
 export type { UnsignedEVMTx }
 
 const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
-
-const EVMExtraArgsV1 = 'tuple(uint256 gasLimit)'
-const EVMExtraArgsV2 = 'tuple(uint256 gasLimit, bool allowOutOfOrderExecution)'
-const SVMExtraArgsV1 =
-  'tuple(uint32 computeUnits, uint64 accountIsWritableBitmap, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] accounts)'
-const SuiExtraArgsV1 =
-  'tuple(uint256 gasLimit, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] receiverObjectIds)'
 
 function resultToObject<T>(o: T): T {
   if (o instanceof Promise) return o.then(resultToObject) as T
@@ -548,43 +525,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param extraArgs - Encoded extra arguments bytes.
    * @returns Decoded extra arguments with tag, or undefined if unknown format.
    */
-  static decodeExtraArgs(
-    extraArgs: BytesLike,
-  ):
-    | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
-    | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
-    | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
-    | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
-    | undefined {
-    const data = getDataBytes(extraArgs),
-      tag = dataSlice(data, 0, 4)
-    switch (tag) {
-      case EVMExtraArgsV1Tag: {
-        const args = defaultAbiCoder.decode([EVMExtraArgsV1], dataSlice(data, 4))
-        return { ...(resultToObject(args[0]) as EVMExtraArgsV1), _tag: 'EVMExtraArgsV1' }
-      }
-      case EVMExtraArgsV2Tag: {
-        const args = defaultAbiCoder.decode([EVMExtraArgsV2], dataSlice(data, 4))
-        return { ...(resultToObject(args[0]) as EVMExtraArgsV2), _tag: 'EVMExtraArgsV2' }
-      }
-      case SVMExtraArgsV1Tag: {
-        const args = defaultAbiCoder.decode([SVMExtraArgsV1], dataSlice(data, 4))
-        const parsed = resultToObject(args[0]) as SVMExtraArgsV1
-        parsed.tokenReceiver = encodeBase58(parsed.tokenReceiver)
-        parsed.accounts = parsed.accounts.map((a: string) => encodeBase58(a))
-        return { ...parsed, _tag: 'SVMExtraArgsV1' }
-      }
-      case SuiExtraArgsV1Tag: {
-        const args = defaultAbiCoder.decode([SuiExtraArgsV1], dataSlice(data, 4))
-        const parsed = resultToObject(args[0]) as SuiExtraArgsV1
-        return {
-          ...parsed,
-          _tag: 'SuiExtraArgsV1',
-        }
-      }
-      default:
-        return undefined
-    }
+  static decodeExtraArgs(extraArgs: BytesLike) {
+    return decodeExtraArgs_(extraArgs)
   }
 
   /**
@@ -593,42 +535,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @returns Encoded extra arguments as hex string.
    */
   static encodeExtraArgs(args: ExtraArgs | undefined): string {
-    if (!args) return '0x'
-    if ('computeUnits' in args) {
-      return concat([
-        SVMExtraArgsV1Tag,
-        defaultAbiCoder.encode(
-          [SVMExtraArgsV1],
-          [
-            {
-              ...args,
-              tokenReceiver: getAddressBytes(args.tokenReceiver),
-              accounts: args.accounts.map((a) => getAddressBytes(a)),
-            },
-          ],
-        ),
-      ])
-    } else if ('receiverObjectIds' in args) {
-      return concat([
-        SuiExtraArgsV1Tag,
-        defaultAbiCoder.encode(
-          [SuiExtraArgsV1],
-          [
-            {
-              ...args,
-              tokenReceiver: zeroPadValue(getAddressBytes(args.tokenReceiver), 32),
-              receiverObjectIds: args.receiverObjectIds.map((a) => getDataBytes(a)),
-            },
-          ],
-        ),
-      ])
-    } else if ('allowOutOfOrderExecution' in args) {
-      if ((args as Partial<typeof args>).gasLimit == null) args.gasLimit = DEFAULT_GAS_LIMIT
-      return concat([EVMExtraArgsV2Tag, defaultAbiCoder.encode([EVMExtraArgsV2], [args])])
-    } else if ((args as Partial<typeof args>).gasLimit != null) {
-      return concat([EVMExtraArgsV1Tag, defaultAbiCoder.encode([EVMExtraArgsV1], [args])])
-    }
-    return '0x'
+    return encodeExtraArgs_(args)
   }
 
   /**
