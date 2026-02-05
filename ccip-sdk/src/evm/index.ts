@@ -22,6 +22,7 @@ import {
   isHexString,
   toBeHex,
   toBigInt,
+  toNumber,
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
@@ -268,18 +269,12 @@ function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
 
   // gasLimit (4 bytes, uint32 big-endian)
   if (offset + 4 > data.length) return undefined
-  const gasLimit = BigInt(
-    ((data[offset]! << 24) |
-      (data[offset + 1]! << 16) |
-      (data[offset + 2]! << 8) |
-      data[offset + 3]!) >>>
-      0,
-  )
+  const gasLimit = toBigInt(data.subarray(offset, offset + 4))
   offset += 4
 
   // blockConfirmations (2 bytes, uint16 big-endian)
   if (offset + 2 > data.length) return undefined
-  const blockConfirmations = (data[offset]! << 8) | data[offset + 1]!
+  const blockConfirmations = toNumber(data.subarray(offset, offset + 2))
   offset += 2
 
   // ccvsLength (1 byte)
@@ -310,7 +305,7 @@ function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
 
     // ccvArgsLength (2 bytes, uint16 big-endian)
     if (offset + 2 > data.length) return undefined
-    const ccvArgsLen = (data[offset]! << 8) | data[offset + 1]!
+    const ccvArgsLen = toNumber(data.subarray(offset, offset + 2))
     offset += 2
 
     // ccvArgs (variable)
@@ -336,7 +331,7 @@ function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
 
   // executorArgsLength (2 bytes, uint16 big-endian)
   if (offset + 2 > data.length) return undefined
-  const executorArgsLen = (data[offset]! << 8) | data[offset + 1]!
+  const executorArgsLen = toNumber(data.subarray(offset, offset + 2))
   offset += 2
 
   // executorArgs (variable)
@@ -368,7 +363,7 @@ function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
 
   // tokenArgsLength (2 bytes, uint16 big-endian)
   if (offset + 2 > data.length) return undefined
-  const tokenArgsLen = (data[offset]! << 8) | data[offset + 1]!
+  const tokenArgsLen = toNumber(data.subarray(offset, offset + 2))
   offset += 2
 
   // tokenArgs (variable)
