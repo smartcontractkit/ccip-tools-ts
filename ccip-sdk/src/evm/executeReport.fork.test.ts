@@ -20,7 +20,7 @@ const ANVIL_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae7
 const SOURCE_TX_HASH = '0xccf840f3e8268ad00822458862408a642d3bbef079096cacf65a68c8f2e21bc9'
 const MESSAGE_ID = '0xe7b71ffcab4fc1ad029c412bb75b33a2d036b59853f08b9306cc317690a29246'
 
-const skip = !!(process.env.SKIP_INTEGRATION_TESTS)
+const skip = !!process.env.SKIP_INTEGRATION_TESTS
 
 describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
   let source: EVMChain | undefined

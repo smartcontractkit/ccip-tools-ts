@@ -52,7 +52,7 @@ async function setERC20Balance(
 
 describe(
   'sendMessage - Anvil Fork Tests',
-  { skip: !!(process.env.SKIP_INTEGRATION_TESTS), timeout: 120_000 },
+  { skip: !!process.env.SKIP_INTEGRATION_TESTS, timeout: 120_000 },
   () => {
     let chain: EVMChain | undefined
     let wallet: Wallet
