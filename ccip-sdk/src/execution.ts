@@ -77,11 +77,27 @@ export const discoverOffRamp = memoize(
       dest.network.chainSelector,
     )
     for (const offRamp of sourceOffRamps) {
-      const destOnRamp = await source.getOnRampForOffRamp(offRamp, dest.network.chainSelector)
+      let destOnRamp: string
+      try {
+        destOnRamp = await source.getOnRampForOffRamp(offRamp, dest.network.chainSelector)
+      } catch {
+        logger.debug('discoverOffRamp: skipping offRamp', offRamp, '(no valid source chain config)')
+        continue
+      }
       const destRouter = await dest.getRouterForOnRamp(destOnRamp, source.network.chainSelector)
       const destOffRamps = await dest.getOffRampsForRouter(destRouter, source.network.chainSelector)
       for (const offRamp of destOffRamps) {
-        const offRampsOnRamp = await dest.getOnRampForOffRamp(offRamp, source.network.chainSelector)
+        let offRampsOnRamp: string
+        try {
+          offRampsOnRamp = await dest.getOnRampForOffRamp(offRamp, source.network.chainSelector)
+        } catch {
+          logger.debug(
+            'discoverOffRamp: skipping dest offRamp',
+            offRamp,
+            '(no valid source chain config)',
+          )
+          continue
+        }
         logger.debug(
           'discoverOffRamp: found, from',
           {
