@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CLI: Add kebab-case aliases for multi-word commands (`manual-exec`, `get-supported-tokens`, `parse-bytes`, `parse-data`)
+- CLI: Add `--fee-tokens` flag to `getSupportedTokens` command to list fee tokens instead of transferable tokens
+- SDK: **Breaking**: `CCIPRequest` now includes optional `metadata?: APICCIPRequestMetadata` field
+  - API fields (`status`, `receiptTransactionHash`, `deliveryTime`, etc.) moved under `metadata`
+  - Migration: Change `request.status` to `request.metadata?.status`
+- SDK: **Breaking**: Remove `APICCIPRequest` type - use `CCIPRequest` with `metadata` field instead
 - SDK: Improve JSDoc for `RateLimiterState` - clarify that `null` means rate limiting is disabled
 - SDK: Improve JSDoc for `getTokenPoolRemotes` and `TokenPoolRemote` - clarify Record keys are chain names
 - SDK: Add named types `TokenPoolConfig` and `RegistryTokenConfig` for clearer IDE hints

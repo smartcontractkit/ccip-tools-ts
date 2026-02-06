@@ -17,6 +17,7 @@ import type {
   EVMExtraArgsV1,
   EVMExtraArgsV2,
   ExtraArgs,
+  GenericExtraArgsV3,
   SVMExtraArgsV1,
   SuiExtraArgsV1,
 } from './extra-args.ts'
@@ -45,6 +46,23 @@ import {
   ExecutionState,
 } from './types.ts'
 import { networkInfo, util, withRetry } from './utils.ts'
+
+/** Field names unique to GenericExtraArgsV3 (not present in V2). */
+const V3_ONLY_FIELDS = [
+  'blockConfirmations',
+  'ccvs',
+  'ccvArgs',
+  'executor',
+  'executorArgs',
+  'tokenReceiver',
+  'tokenArgs',
+] as const
+
+/** Check if extraArgs contains any V3-only fields. */
+function hasV3ExtraArgs(extraArgs: Partial<ExtraArgs> | undefined): boolean {
+  if (!extraArgs) return false
+  return V3_ONLY_FIELDS.some((field) => field in extraArgs)
+}
 
 /**
  * Context for Chain class initialization.
@@ -469,13 +487,29 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
-   * Fetch a message by ID.
-   * Default implementation uses the CCIP API.
-   * Subclasses may override to fetch from chain as fallback.
-   * @param messageId - message ID to fetch request for
-   * @param _opts - onRamp may be required in some implementations
-   * @returns CCIPRequest containing the message details
-   * @throws {@link CCIPApiClientNotAvailableError} if apiClient was disabled (set to `null`)
+   * Fetch a CCIP message by its unique message ID.
+   *
+   * @remarks
+   * Uses the CCIP API to retrieve message details. The returned request includes
+   * a `metadata` field with API-specific information.
+   *
+   * @example
+   * ```typescript
+   * const request = await chain.getMessageById(messageId)
+   * console.log(`Sender: ${request.message.sender}`)
+   *
+   * if (request.metadata) {
+   *   console.log(`Status: ${request.metadata.status}`)
+   *   if (request.metadata.deliveryTime) {
+   *     console.log(`Delivered in ${request.metadata.deliveryTime}ms`)
+   *   }
+   * }
+   * ```
+   *
+   * @param messageId - The unique message ID (0x + 64 hex chars)
+   * @param _opts - Optional: `onRamp` hint for non-EVM chains
+   * @returns CCIPRequest with `metadata` populated from API
+   * @throws {@link CCIPApiClientNotAvailableError} if API disabled
    * @throws {@link CCIPMessageIdNotFoundError} if message not found
    * @throws {@link CCIPHttpError} if API request fails
    **/
@@ -978,11 +1012,32 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   static buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
   ): AnyMessage {
-    // default to GenericExtraArgsV2, aka EVMExtraArgsV2
+    const gasLimit = message.data && dataLength(message.data) ? DEFAULT_GAS_LIMIT : 0n
+
+    // Detect if user wants V3 by checking for any V3-only field
+    if (hasV3ExtraArgs(message.extraArgs)) {
+      // V3 defaults (GenericExtraArgsV3)
+      return {
+        ...message,
+        extraArgs: {
+          gasLimit,
+          blockConfirmations: 0,
+          ccvs: [],
+          ccvArgs: [],
+          executor: '',
+          executorArgs: '0x',
+          tokenReceiver: '',
+          tokenArgs: '0x',
+          ...message.extraArgs,
+        },
+      }
+    }
+
+    // Default to V2 (GenericExtraArgsV2, aka EVMExtraArgsV2)
     return {
       ...message,
       extraArgs: {
-        gasLimit: message.data && dataLength(message.data) ? DEFAULT_GAS_LIMIT : 0n,
+        gasLimit,
         allowOutOfOrderExecution: true,
         ...message.extraArgs,
       },
@@ -1040,6 +1095,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
   ):
     | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
+    | (GenericExtraArgsV3 & { _tag: 'GenericExtraArgsV3' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
     | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
     | undefined

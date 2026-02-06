@@ -5,7 +5,7 @@ import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
 import './index.ts' // Import to ensure chains are loaded
 import { type LogFilter, Chain } from './chain.ts'
-import type { SVMExtraArgsV1 } from './extra-args.ts'
+import type { GenericExtraArgsV3, SVMExtraArgsV1 } from './extra-args.ts'
 import {
   decodeMessage,
   getMessageById,
@@ -617,6 +617,129 @@ describe('decodeMessage', () => {
 
         assert.deepEqual(result.tokenAmounts, message.tokenAmounts)
         assert.equal(result.feeToken, message.feeToken)
+      })
+    })
+
+    describe('V3 extraArgs detection', () => {
+      it('should detect V3 when blockConfirmations is provided', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+          extraArgs: {
+            blockConfirmations: 5,
+          } as any,
+        }
+
+        const result = Chain.buildMessageForDest(message)
+        const extraArgs = result.extraArgs as GenericExtraArgsV3
+
+        assert.ok('blockConfirmations' in result.extraArgs)
+        assert.equal(extraArgs.blockConfirmations, 5)
+        assert.equal(extraArgs.gasLimit, 200000n)
+        assert.deepEqual(extraArgs.ccvs, [])
+        assert.equal(extraArgs.executor, '')
+      })
+
+      it('should detect V3 when executor is provided', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          extraArgs: {
+            executor: '0xExecutorAddress1234567890123456789012',
+          } as any,
+        }
+
+        const result = Chain.buildMessageForDest(message)
+        const extraArgs = result.extraArgs as GenericExtraArgsV3
+
+        assert.ok('executor' in result.extraArgs)
+        assert.equal(extraArgs.executor, '0xExecutorAddress1234567890123456789012')
+        assert.equal(extraArgs.blockConfirmations, 0)
+      })
+
+      it('should apply V3 defaults for all fields when any V3 field is present', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+          extraArgs: {
+            ccvs: ['0xCCVAddress123456789012345678901234567890'],
+          } as any,
+        }
+
+        const result = Chain.buildMessageForDest(message)
+        const extraArgs = result.extraArgs as GenericExtraArgsV3
+
+        // Verify all V3 fields have proper defaults
+        assert.deepEqual(extraArgs.ccvs, ['0xCCVAddress123456789012345678901234567890'])
+        assert.deepEqual(extraArgs.ccvArgs, [])
+        assert.equal(extraArgs.blockConfirmations, 0)
+        assert.equal(extraArgs.executor, '')
+        assert.equal(extraArgs.executorArgs, '0x')
+        assert.equal(extraArgs.tokenReceiver, '')
+        assert.equal(extraArgs.tokenArgs, '0x')
+      })
+
+      it('should use V2 when only V2 fields are provided', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+          extraArgs: {
+            gasLimit: 300000n,
+            allowOutOfOrderExecution: false,
+          },
+        }
+
+        const result = Chain.buildMessageForDest(message)
+
+        // Should be V2, not V3
+        assert.ok(!('blockConfirmations' in result.extraArgs))
+        assert.ok(!('executor' in result.extraArgs))
+        if ('gasLimit' in result.extraArgs) {
+          assert.equal(result.extraArgs.gasLimit, 300000n)
+        }
+        if ('allowOutOfOrderExecution' in result.extraArgs) {
+          assert.equal(result.extraArgs.allowOutOfOrderExecution, false)
+        }
+      })
+
+      it('should set V3 gasLimit to 0 when no data', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          extraArgs: {
+            blockConfirmations: 10,
+          } as any,
+        }
+
+        const result = Chain.buildMessageForDest(message)
+        const extraArgs = result.extraArgs as GenericExtraArgsV3
+
+        assert.equal(extraArgs.gasLimit, 0n)
+        assert.equal(extraArgs.blockConfirmations, 10)
+      })
+
+      it('should allow user to override V3 defaults', () => {
+        const customExecutorArgs = new Uint8Array([1, 2, 3])
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+          extraArgs: {
+            blockConfirmations: 3,
+            gasLimit: 500000n,
+            executor: '0xCustomExecutor12345678901234567890123',
+            executorArgs: customExecutorArgs,
+            ccvs: ['0xCCV1', '0xCCV2'],
+          } as any,
+        }
+
+        const result = Chain.buildMessageForDest(message)
+        const extraArgs = result.extraArgs as GenericExtraArgsV3
+
+        assert.equal(extraArgs.gasLimit, 500000n)
+        assert.equal(extraArgs.blockConfirmations, 3)
+        assert.equal(extraArgs.executor, '0xCustomExecutor12345678901234567890123')
+        assert.deepEqual(extraArgs.executorArgs, customExecutorArgs)
+        assert.deepEqual(extraArgs.ccvs, ['0xCCV1', '0xCCV2'])
+        // ccvArgs should still be default
+        assert.deepEqual(extraArgs.ccvArgs, [])
       })
     })
 

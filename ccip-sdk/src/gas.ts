@@ -72,12 +72,16 @@ export async function estimateReceiveExecution({
       onRamp = await source.getOnRampForRouter(routerOrRamp, dest.network.chainSelector)
     else onRamp = routerOrRamp
     offRamp = await discoverOffRamp(source, dest, onRamp, source)
-  } catch {
-    const tnv = await dest.typeAndVersion(routerOrRamp)
-    if (!tnv[0].includes('OffRamp'))
-      throw new CCIPContractTypeInvalidError(routerOrRamp, tnv[2], ['OffRamp'])
-    offRamp = routerOrRamp
-    onRamp = await dest.getOnRampForOffRamp(offRamp, source.network.chainSelector)
+  } catch (sourceErr) {
+    try {
+      const tnv = await dest.typeAndVersion(routerOrRamp)
+      if (!tnv[0].includes('OffRamp'))
+        throw new CCIPContractTypeInvalidError(routerOrRamp, tnv[2], ['OffRamp'])
+      offRamp = routerOrRamp
+      onRamp = await dest.getOnRampForOffRamp(offRamp, source.network.chainSelector)
+    } catch {
+      throw sourceErr // re-throw original error
+    }
   }
 
   const destTokenAmounts = await Promise.all(

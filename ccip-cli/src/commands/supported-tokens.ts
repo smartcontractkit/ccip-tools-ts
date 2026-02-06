@@ -37,7 +37,7 @@ import { formatDuration, getCtx, logParsedError, prettyTable } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
-export const command = 'getSupportedTokens'
+export const command = ['getSupportedTokens', 'get-supported-tokens']
 export const describe =
   'List supported tokens in a given Router/OnRamp/TokenAdminRegistry, and/or show info about token/pool'
 
@@ -65,6 +65,11 @@ export const builder = (yargs: Argv) =>
       type: 'string',
       demandOption: false,
       describe: 'Token address to query (pre-selects from list if address is a registry)',
+    })
+    .option('fee-tokens', {
+      type: 'boolean',
+      default: false,
+      describe: 'List fee tokens instead of transferable tokens',
     })
     .example([
       [
@@ -103,8 +108,8 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     // ignore
   }
 
-  let info, tokenPool, poolConfigs, registryConfig
-  if (registry && !argv.token) {
+  // Handle --fee-tokens flag
+  if (argv.feeTokens) {
     const feeTokens = await source.getFeeTokens(argv.address)
     switch (argv.format) {
       case Format.pretty:
@@ -117,7 +122,11 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
       default:
         logger.log('feeTokens:', feeTokens)
     }
+    return
+  }
 
+  let info, tokenPool, poolConfigs, registryConfig
+  if (registry && !argv.token) {
     // router + interactive list
     info = await listTokens(ctx, source, registry, argv)
     if (!info) return // format != pretty
