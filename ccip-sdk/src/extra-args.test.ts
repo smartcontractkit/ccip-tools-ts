@@ -373,7 +373,7 @@ describe('GenericExtraArgsV3', () => {
       const decoded = decodeExtraArgs(encoded, ChainFamily.EVM)
 
       assert.equal(decoded?._tag, 'GenericExtraArgsV3')
-      assert.equal(decoded?.gasLimit, 200_000n)
+      assert.equal(decoded.gasLimit, 200_000n)
       assert.equal((decoded as GenericExtraArgsV3).blockConfirmations, 5)
       assert.deepEqual((decoded as GenericExtraArgsV3).ccvs, [])
       assert.deepEqual((decoded as GenericExtraArgsV3).ccvArgs, [])

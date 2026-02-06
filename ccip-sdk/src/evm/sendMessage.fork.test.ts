@@ -39,11 +39,7 @@ async function setERC20Balance(
     AbiCoder.defaultAbiCoder().encode(['address', 'uint256'], [address, balanceSlot]),
   )
   await provider.send('anvil_setStorageAt', [token, storageKey, toBeHex(amount, 32)])
-  const erc20 = new Contract(
-    token,
-    interfaces.Token,
-    provider,
-  )
+  const erc20 = new Contract(token, interfaces.Token, provider)
   const balance: bigint = await erc20.getFunction('balanceOf')(address)
   if (balance !== amount) {
     if (balanceSlot < 20n)
