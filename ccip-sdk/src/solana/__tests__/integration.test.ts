@@ -7,18 +7,14 @@ import { type NetworkInfo, ChainFamily, NetworkType } from '../../types.ts'
 import { SolanaChain } from '../index.ts'
 
 // Integration test for real Solana mainnet token
-describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
+describe('SolanaChain getTokenInfo - Mainnet Integration',
+  { skip: !!(process.env.SKIP_INTEGRATION_TESTS) },
+  () => {
   let connection: Connection
   let solanaChain: SolanaChain
 
-  // Skip these tests in CI or if no network access
-  const skipIfNoNetwork = process.env.CI || process.env.SKIP_INTEGRATION_TESTS
 
   before(async () => {
-    if (skipIfNoNetwork) {
-      return
-    }
-
     // Use a public Solana mainnet RPC endpoint
     connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed')
 
@@ -37,11 +33,6 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
     'should fetch WMTX token info with symbol from Metaplex metadata fallback',
     { timeout: 30000 },
     async () => {
-      if (skipIfNoNetwork) {
-        console.log('Skipping integration test - no network access')
-        return
-      }
-
       const wmtxToken = 'WMTXyYKUMTG3VuZA5beXuHVRLpyTwwaoP7h2i8YpuRH'
 
       try {
@@ -64,11 +55,6 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
     'should demonstrate fallback flow by first checking SPL token data',
     { timeout: 30000 },
     async () => {
-      if (skipIfNoNetwork) {
-        console.log('Skipping integration test - no network access')
-        return
-      }
-
       const wmtxToken = 'WMTXyYKUMTG3VuZA5beXuHVRLpyTwwaoP7h2i8YpuRH'
       const mintPublicKey = new PublicKey(wmtxToken)
 
@@ -107,11 +93,6 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
   )
 
   it('should verify metadata PDA derivation is correct', { timeout: 30000 }, async () => {
-    if (skipIfNoNetwork) {
-      console.log('Skipping integration test - no network access')
-      return
-    }
-
     const wmtxToken = 'WMTXyYKUMTG3VuZA5beXuHVRLpyTwwaoP7h2i8YpuRH'
     const mintPublicKey = new PublicKey(wmtxToken)
     const TOKEN_METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
@@ -148,11 +129,6 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
   })
 
   it('should handle network errors gracefully', { timeout: 30000 }, async () => {
-    if (skipIfNoNetwork) {
-      console.log('Skipping integration test - no network access')
-      return
-    }
-
     // Test with an invalid token address that will cause network/parsing errors
     const invalidToken = 'So11111111111111111111111111111111111111112' // SOL native mint
 
@@ -170,11 +146,6 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', () => {
   })
 
   it('should support Token-2022 tokens on mainnet', { timeout: 30000 }, async () => {
-    if (skipIfNoNetwork) {
-      console.log('Skipping Token-2022 integration test - no network access')
-      return
-    }
-
     // Using a real Token-2022 token - PYUSD (PayPal USD) which uses Token Extensions
     const pyusdToken = '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo'
 

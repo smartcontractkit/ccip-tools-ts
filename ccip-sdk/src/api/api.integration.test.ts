@@ -19,7 +19,7 @@ const KNOWN_TX_HASH = '0x25e63fa89abb77acd353edc24ed3ab5880a8d206c8229e6f61dc00d
 
 describe(
   'CCIPAPIClient - Staging API Integration',
-  { skip: !!(process.env.CI || process.env.SKIP_INTEGRATION_TESTS) },
+  { skip: !!(process.env.SKIP_INTEGRATION_TESTS) },
   () => {
     let api: CCIPAPIClient
 
