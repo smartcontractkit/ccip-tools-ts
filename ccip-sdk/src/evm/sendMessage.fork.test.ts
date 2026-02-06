@@ -41,7 +41,7 @@ async function setERC20Balance(
   await provider.send('anvil_setStorageAt', [token, storageKey, toBeHex(amount, 32)])
   const erc20 = new Contract(
     token,
-    ['function balanceOf(address) view returns (uint256)'],
+    interfaces.Token,
     provider,
   )
   const balance: bigint = await erc20.getFunction('balanceOf')(address)
