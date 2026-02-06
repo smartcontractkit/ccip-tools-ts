@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execSync } from 'node:child_process'
 import { after, before, describe, it } from 'node:test'
 
 import { AbiCoder, Contract, JsonRpcProvider, Wallet, keccak256, parseUnits, toBeHex } from 'ethers'
@@ -50,9 +51,18 @@ async function setERC20Balance(
   }
 }
 
+function isAnvilAvailable(): boolean {
+  try {
+    execSync('anvil --version', { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
 describe(
   'sendMessage - Anvil Fork Tests',
-  { skip: !!process.env.SKIP_INTEGRATION_TESTS, timeout: 120_000 },
+  { skip: !!process.env.SKIP_INTEGRATION_TESTS || !isAnvilAvailable(), timeout: 120_000 },
   () => {
     let chain: EVMChain | undefined
     let wallet: Wallet
