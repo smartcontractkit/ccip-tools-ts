@@ -545,8 +545,35 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * {@inheritDoc Chain.getBalance}
    * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
    */
-  async getBalance(_opts: GetBalanceOpts): Promise<bigint> {
-    return Promise.reject(new CCIPNotImplementedError('TONChain.getBalance'))
+  async getBalance(opts: GetBalanceOpts): Promise<bigint> {
+    const { holder, token } = opts
+    const holderAddress = Address.parse(holder)
+
+    if (!token) {
+      // Get native TON balance
+      const state = await this.provider.getContractState(holderAddress)
+      return state.balance
+    }
+
+    // For jetton balance, we need to:
+    // 1. Derive the jetton wallet address for this holder
+    // 2. Query the balance from that wallet contract
+    const jettonMaster = Address.parse(token)
+    const { stack } = await this.provider.runMethod(jettonMaster, 'get_wallet_address', [
+      { type: 'slice', cell: beginCell().storeAddress(holderAddress).endCell() },
+    ])
+    const jettonWalletAddress = stack.readAddress()
+
+    try {
+      const { stack: balanceStack } = await this.provider.runMethod(
+        jettonWalletAddress,
+        'get_wallet_data',
+      )
+      return balanceStack.readBigNumber() // First value is balance
+    } catch {
+      // Wallet doesn't exist yet = 0 balance
+      return 0n
+    }
   }
 
   /**
@@ -986,7 +1013,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     message,
   }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
     return getFeeImpl(
-      { provider: this.provider, logger: this.logger },
+      this,
       router,
       destChainSelector,
       buildMessageForDest(message, networkInfo(destChainSelector).family),
@@ -1012,13 +1039,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         message: populatedMessage,
       }))
 
-    const unsigned = generateUnsignedCcipSend(
-      { provider: this.provider, logger: this.logger },
-      sender,
-      router,
-      destChainSelector,
-      { ...populatedMessage, fee },
-    )
+    const unsigned = generateUnsignedCcipSend(this, sender, router, destChainSelector, {
+      ...populatedMessage,
+      fee,
+    })
 
     return {
       family: ChainFamily.TON,

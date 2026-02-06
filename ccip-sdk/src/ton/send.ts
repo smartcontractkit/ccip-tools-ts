@@ -1,6 +1,6 @@
 import { type Cell, beginCell, toNano } from '@ton/core'
 import { type TonClient, Address } from '@ton/ton'
-import { getBytes } from 'ethers'
+import { zeroPadValue } from 'ethers'
 
 import type { UnsignedTONTx } from './types.ts'
 import { CCIPError, CCIPErrorCode } from '../errors/index.ts'
@@ -9,8 +9,7 @@ import type { AnyMessage, WithLogger } from '../types.ts'
 import { bytesToBuffer, getDataBytes } from '../utils.ts'
 
 /** Opcode for Router ccipSend operation */
-// TODO: new env deployment changes opcode to 0x31768d95, we'll need to update once live.
-export const CCIP_SEND_OPCODE = 0x38a69e3b
+export const CCIP_SEND_OPCODE = 0x31768d95
 
 /** Default gas buffer to add to fee for transaction execution */
 export const DEFAULT_GAS_BUFFER = toNano('0.5')
@@ -25,19 +24,6 @@ export const DEFAULT_GAS_LIMIT = 200_000n
 export const WRAPPED_NATIVE = Address.parse(
   '0:0000000000000000000000000000000000000000000000000000000000000001',
 )
-
-/**
- * Pads an address buffer to 32 bytes (left-padded with zeros).
- * EVM addresses are 20 bytes, but CCIP cross-chain encoding uses 32 bytes.
- */
-function padAddressTo32Bytes(addressBytes: Buffer): Buffer {
-  if (addressBytes.length >= 32) {
-    return addressBytes.subarray(0, 32)
-  }
-  const padded = Buffer.alloc(32)
-  addressBytes.copy(padded, 32 - addressBytes.length) // right-align (left-pad with zeros)
-  return padded
-}
 
 /**
  * Encodes token amounts as a snaked cell.
@@ -101,8 +87,7 @@ export function buildCcipSendCell(
   queryId = 0n,
 ): Cell {
   // Get receiver bytes and pad to 32 bytes for cross-chain encoding
-  const receiverBytes = Buffer.from(getBytes(getDataBytes(message.receiver)))
-  const paddedReceiver = padAddressTo32Bytes(receiverBytes)
+  const paddedReceiver = bytesToBuffer(zeroPadValue(getDataBytes(message.receiver), 32))
 
   // Data cell (ref 0)
   const dataCell = beginCell()
@@ -171,8 +156,7 @@ export async function getFee(
   }
 
   // Build stack parameters for validatedFee call
-  const receiverBytes = Buffer.from(getBytes(getDataBytes(message.receiver)))
-  const paddedReceiver = padAddressTo32Bytes(receiverBytes)
+  const paddedReceiver = bytesToBuffer(zeroPadValue(getDataBytes(message.receiver), 32))
   const receiverSlice = beginCell().storeBuffer(paddedReceiver).endCell()
   const dataCell = beginCell()
     .storeBuffer(bytesToBuffer(message.data || '0x'))

@@ -967,4 +967,72 @@ describe('TON index unit tests', () => {
       assert.equal(validatedFeeCalls.length, 0)
     })
   })
+
+  describe('getBalance', () => {
+    const mockNetworkInfo = networkInfo('ton-testnet')
+    const TON_FAUCET = 'EQAuz15H1ZHrZ_psVrAra7HealMIVeFq0wguqlmFno1f3EJj'
+    const USDT_TESTNET = 'kQD0GKBM8ZbryVk2aESmzfU6b9b_8era_IkvBSELujFZPsyy'
+
+    it('should return native TON balance when no token specified', async () => {
+      const mockClient = {
+        getContractState: async () => ({ balance: 1_500_000_000n }),
+        getTransactions: async () => [],
+      } as unknown as TonClient
+
+      const chain = new TONChain(mockClient, mockNetworkInfo)
+      const balance = await chain.getBalance({
+        holder: TON_FAUCET,
+      })
+
+      assert.equal(balance, 1_500_000_000n)
+    })
+
+    it('should return jetton balance when token specified', async () => {
+      const mockJettonWallet = Address.parse('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+      const mockClient = {
+        runMethod: async (_addr: Address, method: string) => {
+          if (method === 'get_wallet_address') {
+            return { stack: { readAddress: () => mockJettonWallet } }
+          }
+          if (method === 'get_wallet_data') {
+            return { stack: { readBigNumber: () => 500_000_000n } }
+          }
+          throw new Error(`Unknown method: ${method}`)
+        },
+        getTransactions: async () => [],
+      } as unknown as TonClient
+
+      const chain = new TONChain(mockClient, mockNetworkInfo)
+      const balance = await chain.getBalance({
+        holder: TON_FAUCET,
+        token: USDT_TESTNET,
+      })
+
+      assert.equal(balance, 500_000_000n)
+    })
+
+    it('should return 0n when jetton wallet does not exist', async () => {
+      const mockJettonWallet = Address.parse('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+      const mockClient = {
+        runMethod: async (_addr: Address, method: string) => {
+          if (method === 'get_wallet_address') {
+            return { stack: { readAddress: () => mockJettonWallet } }
+          }
+          if (method === 'get_wallet_data') {
+            throw new Error('Account not found')
+          }
+          throw new Error(`Unknown method: ${method}`)
+        },
+        getTransactions: async () => [],
+      } as unknown as TonClient
+
+      const chain = new TONChain(mockClient, mockNetworkInfo)
+      const balance = await chain.getBalance({
+        holder: TON_FAUCET,
+        token: USDT_TESTNET,
+      })
+
+      assert.equal(balance, 0n)
+    })
+  })
 })

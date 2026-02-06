@@ -1515,6 +1515,23 @@ export class CCIPTokenNotFoundError extends CCIPError {
   }
 }
 
+/** Thrown when account has insufficient balance for operation. */
+export class CCIPInsufficientBalanceError extends CCIPError {
+  override readonly name = 'CCIPInsufficientBalanceError'
+  /** Creates an insufficient balance error. */
+  constructor(have: string, need: string, symbol: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.INSUFFICIENT_BALANCE,
+      `Insufficient balance: have ${have} ${symbol}, need ${need} ${symbol}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, have, need, symbol },
+      },
+    )
+  }
+}
+
 // Solana-specific (additional)
 
 /** Thrown when router config not found at PDA. */
