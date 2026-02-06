@@ -3,6 +3,7 @@ import {
   type ExtraArgs,
   type MessageInput,
   CCIPArgumentInvalidError,
+  CCIPInsufficientBalanceError,
   CCIPTokenNotFoundError,
   ChainFamily,
   estimateReceiveExecution,
@@ -287,6 +288,27 @@ async function sendMessage(
   if (argv.onlyGetFee) return
 
   if (!walletAddress) [walletAddress, wallet] = await loadChainWallet(source, argv)
+
+  // Check sender has sufficient balance for fee
+  try {
+    const balance = await source.getBalance({ holder: walletAddress, token: feeToken })
+    if (balance < fee) {
+      const symbol =
+        feeTokenInfo.symbol.startsWith('W') && !feeToken
+          ? feeTokenInfo.symbol.substring(1)
+          : feeTokenInfo.symbol
+      throw new CCIPInsufficientBalanceError(
+        formatUnits(balance, feeTokenInfo.decimals),
+        formatUnits(fee, feeTokenInfo.decimals),
+        symbol,
+      )
+    }
+  } catch (e) {
+    // may fail for chains that don't implement getBalance yet; log and continue
+    if (e instanceof CCIPInsufficientBalanceError) throw e
+    logger.debug('Balance check skipped:', e)
+  }
+
   const request = await source.sendMessage({
     ...argv,
     destChainSelector: destNetwork.chainSelector,

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it, mock } from 'node:test'
 
 import { type Cell, Address, Dictionary, beginCell, toNano } from '@ton/core'
 import type { TonClient } from '@ton/ton'
@@ -887,6 +887,152 @@ describe('TON index unit tests', () => {
       // Should only have the one with matching messageId
       assert.equal(receipts.length, 1, 'Should have exactly 1 receipt')
       assert.equal(receipts[0]!.receipt.messageId, TEST_MESSAGE_ID)
+    })
+  })
+
+  describe('generateUnsignedSendMessage', () => {
+    const sendMockNetworkInfo = networkInfo('ton-testnet')
+
+    function createMockClient(feeToReturn: bigint) {
+      const runMethodMock = mock.fn(async (_addr: Address, method: string) => {
+        if (method === 'onRamp') {
+          return {
+            stack: {
+              readAddress: () => Address.parse('EQC-GtbjW4hz_gXOiBOxT0_Jj-EYkI_zjQ-H8VyYHH9fbSd6'),
+            },
+          }
+        }
+        if (method === 'feeQuoter') {
+          return {
+            stack: {
+              readAddress: () => Address.parse('EQAoCywn6WT8_R_ydtFzcYlcwWTWXG35w4Zbbhye_u2I0RnI'),
+            },
+          }
+        }
+        if (method === 'validatedFee') {
+          return { stack: { readBigNumber: () => feeToReturn } }
+        }
+        throw new Error(`Unknown method: ${method}`)
+      })
+
+      return {
+        client: {
+          runMethod: runMethodMock,
+          getTransactions: async () => [],
+        } as unknown as TonClient,
+        runMethodMock,
+      }
+    }
+
+    it('should return UnsignedTONTx with family=TON', async () => {
+      const { client } = createMockClient(1_000_000_000n)
+      const chain = new TONChain(client, sendMockNetworkInfo)
+
+      const unsigned = await chain.generateUnsignedSendMessage({
+        router: 'EQDWS-oJCjyrf-6c1wF5eGP7b2qNWn7wUqS3dlNgb_YzKNHG',
+        destChainSelector: 16015286601757825753n,
+        sender: 'EQDnhv_asmNh0FRlrwsT023NC4C_JgxBc8cMgKlwiVuU_zuT',
+        message: {
+          receiver: '0x40d7c009d073e0d740ed2c50ca0a48c84a3f8b47',
+          data: '0x1234',
+          extraArgs: { gasLimit: 200_000n, allowOutOfOrderExecution: true },
+        },
+      })
+
+      assert.equal(unsigned.family, ChainFamily.TON)
+      assert.ok(unsigned.to)
+      assert.ok(unsigned.body)
+      assert.ok(unsigned.value !== undefined && unsigned.value > 0n)
+    })
+
+    it('should skip fee quote when fee is provided', async () => {
+      const { client, runMethodMock } = createMockClient(1_000_000_000n)
+      const chain = new TONChain(client, sendMockNetworkInfo)
+
+      await chain.generateUnsignedSendMessage({
+        router: 'EQDWS-oJCjyrf-6c1wF5eGP7b2qNWn7wUqS3dlNgb_YzKNHG',
+        destChainSelector: 16015286601757825753n,
+        sender: 'EQDnhv_asmNh0FRlrwsT023NC4C_JgxBc8cMgKlwiVuU_zuT',
+        message: {
+          receiver: '0x40d7c009d073e0d740ed2c50ca0a48c84a3f8b47',
+          data: '0x',
+          fee: 5_000_000_000n,
+          extraArgs: { gasLimit: 200_000n, allowOutOfOrderExecution: true },
+        },
+      })
+
+      const validatedFeeCalls = runMethodMock.mock.calls.filter(
+        (c: { arguments: [Address, string] }) => c.arguments[1] === 'validatedFee',
+      )
+      assert.equal(validatedFeeCalls.length, 0)
+    })
+  })
+
+  describe('getBalance', () => {
+    const mockNetworkInfo = networkInfo('ton-testnet')
+    const TON_FAUCET = 'EQAuz15H1ZHrZ_psVrAra7HealMIVeFq0wguqlmFno1f3EJj'
+    const USDT_TESTNET = 'kQD0GKBM8ZbryVk2aESmzfU6b9b_8era_IkvBSELujFZPsyy'
+
+    it('should return native TON balance when no token specified', async () => {
+      const mockClient = {
+        getContractState: async () => ({ balance: 1_500_000_000n }),
+        getTransactions: async () => [],
+      } as unknown as TonClient
+
+      const chain = new TONChain(mockClient, mockNetworkInfo)
+      const balance = await chain.getBalance({
+        holder: TON_FAUCET,
+      })
+
+      assert.equal(balance, 1_500_000_000n)
+    })
+
+    it('should return jetton balance when token specified', async () => {
+      const mockJettonWallet = Address.parse('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+      const mockClient = {
+        runMethod: async (_addr: Address, method: string) => {
+          if (method === 'get_wallet_address') {
+            return { stack: { readAddress: () => mockJettonWallet } }
+          }
+          if (method === 'get_wallet_data') {
+            return { stack: { readBigNumber: () => 500_000_000n } }
+          }
+          throw new Error(`Unknown method: ${method}`)
+        },
+        getTransactions: async () => [],
+      } as unknown as TonClient
+
+      const chain = new TONChain(mockClient, mockNetworkInfo)
+      const balance = await chain.getBalance({
+        holder: TON_FAUCET,
+        token: USDT_TESTNET,
+      })
+
+      assert.equal(balance, 500_000_000n)
+    })
+
+    it('should return 0n when jetton wallet does not exist', async () => {
+      const mockJettonWallet = Address.parse('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
+      const mockClient = {
+        runMethod: async (_addr: Address, method: string) => {
+          if (method === 'get_wallet_address') {
+            return { stack: { readAddress: () => mockJettonWallet } }
+          }
+          if (method === 'get_wallet_data') {
+            throw new Error('Account not found')
+          }
+          throw new Error(`Unknown method: ${method}`)
+        },
+        getTransactions: async () => [],
+      } as unknown as TonClient
+
+      const chain = new TONChain(mockClient, mockNetworkInfo)
+      const balance = await chain.getBalance({
+        holder: TON_FAUCET,
+        token: USDT_TESTNET,
+      })
+
+      assert.equal(balance, 0n)
     })
   })
 })

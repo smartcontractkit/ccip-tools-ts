@@ -179,6 +179,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   BORSH_METHOD_UNKNOWN: 'Unknown Borsh method.',
 
   ARGUMENT_INVALID: 'Check the command-line argument format and requirements.',
+  INSUFFICIENT_BALANCE: 'Fund the wallet to cover the transaction fee.',
 
   NOT_IMPLEMENTED: 'This feature is not yet implemented.',
   UNKNOWN: 'An unknown error occurred. Check the error details.',
