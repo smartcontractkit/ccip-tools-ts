@@ -1389,9 +1389,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         interfaces.OffRamp_v2_0,
         this.provider,
       ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
-      const [requiredCCVs, optionalCCVs, optionalThreshold] = await resultToObject(
-        contract.getCCVsForMessage((request.message as CCIPMessage_V2_0).encodedMessage),
+      const ccvs = await contract.getCCVsForMessage(
+        (request.message as CCIPMessage_V2_0).encodedMessage,
       )
+      const [requiredCCVs, optionalCCVs, threshold] = ccvs.map(
+        resultToObject,
+      ) as unknown as CleanAddressable<typeof ccvs>
 
       const url = `${CCV_INDEXER_URL}/v1/verifierresults/${request.message.messageId}`
       const res = await fetch(url)
