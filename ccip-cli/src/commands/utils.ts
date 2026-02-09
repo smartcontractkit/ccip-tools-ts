@@ -280,6 +280,8 @@ export async function prettyRequest(this: Ctx, source: Chain, request: CCIPReque
     'destChainSelector',
     'extraArgs',
     'accounts',
+    'receipts',
+    'encodedMessage',
   )
   prettyTable.call(this, {
     messageId: request.message.messageId,
@@ -312,6 +314,7 @@ export async function prettyRequest(this: Ctx, source: Chain, request: CCIPReque
     ),
     ...formatDataString(request.message.data),
     ...('accounts' in request.message ? formatArray('accounts', request.message.accounts) : {}),
+    ...('receipts' in request.message ? formatArray('receipts', request.message.receipts) : {}),
     ...rest,
   })
   this.logger.info('CCIP Explorer:', getCCIPExplorerUrl('msg', request.message.messageId))

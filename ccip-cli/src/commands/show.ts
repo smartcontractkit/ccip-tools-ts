@@ -2,6 +2,7 @@ import {
   type CCIPRequest,
   type ChainTransaction,
   CCIPExecTxRevertedError,
+  CCIPVersion,
   ExecutionState,
   MessageStatus,
   bigIntReplacer,
@@ -181,7 +182,11 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       logger.info(`[${MessageStatus.Blessed}] Waiting for execution on destination chain...`)
     else logger.info('Receipts (dest):')
     return commit
-  })()
+  })().catch((err) => {
+    // FIXME: ignore getCommitReport errors until offchain commit fetching is ready
+    logger.debug('getCommitReport error:', err)
+    return undefined
+  })
 
   let found = false
   for await (const receipt of dest.getExecutionReceipts({
