@@ -593,13 +593,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getOnRampForRouter(router: string, destChainSelector: bigint): Promise<string>
   /**
-   * Fetch the OnRamp address set in OffRamp config
+   * Fetch the OnRamps addresses set in OffRamp config
    * Used to discover OffRamp connected to an OnRamp
    * @param offRamp - OffRamp contract address
    * @param sourceChainSelector - source chain selector
-   * @returns OnRamp address
+   * @returns OnRamp addresses
    */
-  abstract getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string>
+  abstract getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]>
   /**
    * Fetch the CommitStore set in OffRamp config (CCIP v1.5 and earlier).
    * For CCIP v1.6 and later, it should return the offRamp address.

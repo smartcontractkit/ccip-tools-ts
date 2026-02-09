@@ -462,10 +462,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * {@inheritDoc Chain.getOnRampForOffRamp}
+   * {@inheritDoc Chain.getOnRampsForOffRamp}
    * @throws {@link CCIPSourceChainUnsupportedError} if source chain is not configured
    */
-  async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
+  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
     try {
       const offRampContract = this.provider.provider(Address.parse(offRamp))
 
@@ -493,7 +493,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         const onRampLength = onRampSlice.loadUint(8)
         onRamp = onRampSlice.loadBuffer(onRampLength)
       }
-      return decodeAddress(onRamp, networkInfo(sourceChainSelector).family)
+      return [decodeAddress(onRamp, networkInfo(sourceChainSelector).family)]
     } catch (error) {
       if (isTvmError(error) && error.exitCode === 266) {
         throw new CCIPSourceChainUnsupportedError(sourceChainSelector, {

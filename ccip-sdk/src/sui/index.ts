@@ -318,10 +318,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /**
-   * {@inheritDoc Chain.getOnRampForOffRamp}
+   * {@inheritDoc Chain.getOnRampsForOffRamp}
    * @throws {@link CCIPDataFormatUnsupportedError} if view call fails
    */
-  async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
+  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
     offRamp = await getLatestPackageId(offRamp, this.client)
     const functionName = 'get_source_chain_config'
     // Preserve module suffix if present, otherwise add it
@@ -390,7 +390,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     const onRampBytes = configBytes.slice(offset, offset + onRampLength)
 
     // Decode the address from the onRamp bytes
-    return decodeAddress(onRampBytes, networkInfo(sourceChainSelector).family)
+    return [decodeAddress(onRampBytes, networkInfo(sourceChainSelector).family)]
   }
 
   /** {@inheritDoc Chain.getCommitStoreForOffRamp} */

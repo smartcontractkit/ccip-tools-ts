@@ -96,6 +96,7 @@ import {
   createRateLimitedFetch,
   decodeAddress,
   decodeOnRampAddress,
+  getAddressBytes,
   getDataBytes,
   leToBigInt,
   networkInfo,
@@ -548,8 +549,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return Promise.resolve(router) // solana's Router is also the OnRamp
   }
 
-  /** {@inheritDoc Chain.getOnRampForOffRamp} */
-  async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
+  /** {@inheritDoc Chain.getOnRampsForOffRamp} */
+  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
     const program = new Program(CCIP_OFFRAMP_IDL, new PublicKey(offRamp), {
       connection: this.connection,
     })
@@ -563,10 +564,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const {
       config: { onRamp },
     } = await program.account.sourceChain.fetch(statePda)
-    return decodeAddress(
-      new Uint8Array(onRamp.bytes.slice(0, onRamp.len)),
-      networkInfo(sourceChainSelector).family,
-    )
+    return [decodeAddress(getAddressBytes(onRamp.bytes), networkInfo(sourceChainSelector).family)]
   }
 
   /** {@inheritDoc Chain.getCommitStoreForOffRamp} */

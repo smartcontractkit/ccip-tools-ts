@@ -112,8 +112,8 @@ class MockChain extends Chain {
     return []
   }
 
-  async getOnRampForOffRamp(_offRamp: string, _chainSelector: bigint): Promise<string> {
-    return '0xOnRamp'
+  async getOnRampsForOffRamp(_offRamp: string, _chainSelector: bigint): Promise<string[]> {
+    return ['0xOnRamp']
   }
 
   async getOnRampForRouter(_router: string, _destChainSelector: bigint): Promise<string> {

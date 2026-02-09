@@ -296,8 +296,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return Promise.resolve(router.split('::')[0] + '::onramp')
   }
 
-  /** {@inheritDoc Chain.getOnRampForOffRamp} */
-  async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
+  /** {@inheritDoc Chain.getOnRampsForOffRamp} */
+  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
     const [sourceChainConfig] = await this.provider.view<[{ on_ramp: string }]>({
       payload: {
         function:
@@ -305,7 +305,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         functionArguments: [sourceChainSelector],
       },
     })
-    return decodeAddress(sourceChainConfig.on_ramp, networkInfo(sourceChainSelector).family)
+    return [decodeAddress(sourceChainConfig.on_ramp, networkInfo(sourceChainSelector).family)]
   }
 
   /** {@inheritDoc Chain.getCommitStoreForOffRamp} */

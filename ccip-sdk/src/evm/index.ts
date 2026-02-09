@@ -692,10 +692,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * {@inheritDoc Chain.getOnRampForOffRamp}
+   * {@inheritDoc Chain.getOnRampsForOffRamp}
    * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
    */
-  async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
+  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
     const [, version] = await this.typeAndVersion(offRamp)
     let offRampABI
     switch (version) {
@@ -710,7 +710,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           this.provider,
         ) as unknown as TypedContract<typeof offRampABI>
         const { onRamp } = await contract.getStaticConfig()
-        return onRamp as string
+        return [onRamp as string]
       }
       case CCIPVersion.V1_6: {
         offRampABI = OffRamp_1_6_ABI
@@ -720,7 +720,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           this.provider,
         ) as unknown as TypedContract<typeof offRampABI>
         const { onRamp } = await contract.getSourceChainConfig(sourceChainSelector)
-        return decodeOnRampAddress(onRamp, networkInfo(sourceChainSelector).family)
+        return [decodeOnRampAddress(onRamp, networkInfo(sourceChainSelector).family)]
       }
       default:
         throw new CCIPVersionUnsupportedError(version)
