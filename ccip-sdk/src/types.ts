@@ -384,6 +384,63 @@ export type ExecutionReport<M extends CCIPMessage = CCIPMessage> = {
 }
 
 /**
+ * Verification result for a CCIP v2.0 message, returned by the indexer API.
+ */
+export type VerifierResult = {
+  /** The CCIP message ID (0x-prefixed hex). */
+  messageId: string
+  /** The full decoded v2.0 wire-format message. */
+  message: CCIPMessage<typeof CCIPVersion.V2_0>
+  /** CCV contract addresses for this message (hex). */
+  messageCcvAddresses: readonly string[]
+  /** Preferred executor address (hex). */
+  messageExecutorAddress: string
+  /** Verification data required for destination execution (e.g. signatures). */
+  ccvData: BytesLike
+  /** Timestamp when the verifier result was created (Unix seconds). */
+  timestamp: number
+  /** Source CCV contract address hint (hex). */
+  verifierSourceAddress: string
+  /** Destination CCV contract address hint (hex). */
+  verifierDestAddress: string
+}
+
+/**
+ * Metadata about a verifier result from the indexer API.
+ */
+export type VerifierResultMetadata = {
+  /** Name of the verifier that produced the result. */
+  verifierName: string
+  /** When the attestation was created (Unix seconds). */
+  attestationTimestamp: number
+  /** When the result was ingested by the indexer (Unix seconds). */
+  ingestionTimestamp: number
+}
+
+/**
+ * A verifier result paired with its indexer metadata.
+ */
+export type VerifierResultWithMetadata = {
+  verifierResult: VerifierResult
+  metadata: VerifierResultMetadata
+}
+
+/**
+ * The collection of all required verifier results for manual execution of a v2.0 message.
+ */
+export type RequiredVerifierResults = {
+  results: readonly VerifierResult[]
+}
+
+/**
+ * Data required for successful manual execution of a CCIP message.
+ * For v1.6 and below, this is a {@link CommitReport} 
+ * For v2.0, this is the {@link RequiredVerifierResults} containing all
+ * verifier results needed to execute the message on the destination chain.
+ */
+export type ExecutionData = CommitReport | RequiredVerifierResults
+
+/**
  * A message to be sent to another network.
  *
  * @example
