@@ -1,3 +1,4 @@
+// TODO: track a v2 release tag and the v2.0.0 folder instead of a commit + latest/ folder, once 2.0.0 is released in `chainlink-ccip`
 export default [
   // generate:
   // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/4d91b9045f07aceb9b6e131899c36fa0e4bd0fbb/ccv/chains/evm/gobindings/generated/latest/onramp/onramp.go')
