@@ -46,6 +46,14 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
     source_chain_selector?: string
     sourceChainSelector?: string
     extraArgs?: string | Record<string, unknown>
+    sequenceNumber?: bigint
+    messageNumber?: bigint
+    tokenTransfer?: {
+      destExecData: string
+      destGasAmount?: bigint
+      token?: string
+      sourceTokenAddress?: string
+    }[]
     tokenAmounts: {
       destExecData: string
       destGasAmount?: bigint
@@ -60,6 +68,7 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
         totalAmount: bigint
       }
     }
+    receipts?: { feeTokenAmount: bigint }[]
     sourceNetworkInfo?: { chainSelector: string }
     destNetworkInfo?: { chainSelector: string }
   }
@@ -90,6 +99,10 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
             : v,
   ) as typeof data_
 
+  if (data_.tokenTransfer) {
+    data_.tokenAmounts = data_.tokenTransfer
+    delete data_.tokenTransfer
+  }
   for (const ta of data_.tokenAmounts) {
     if (ta.token && !ta.sourceTokenAddress) ta.sourceTokenAddress = ta.token
     if (!ta.token && ta.sourceTokenAddress) ta.token = ta.sourceTokenAddress
@@ -120,6 +133,15 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
   if (data_.fees && !data_.feeToken) {
     data_.feeToken = data_.fees.fixedFeesDetails.tokenAddress
     data_.feeTokenAmount = data_.fees.fixedFeesDetails.totalAmount
+  }
+  if (data_.sequenceNumber == null && data_.messageNumber != null) {
+    data_.sequenceNumber = data_.messageNumber
+  }
+  if (!data_.feeTokenAmount && data_.receipts) {
+    data_.feeTokenAmount = data_.receipts.reduce(
+      (acc, receipt) => acc + receipt.feeTokenAmount,
+      BigInt(0),
+    )
   }
 
   return data_ as unknown as CCIPMessage
@@ -293,6 +315,7 @@ export async function getMessagesInBatch<
       const message = (source.constructor as ChainStatic).decodeMessage(log)
       if (
         !message ||
+        !('sequenceNumber' in message) ||
         ('destChainSelector' in message &&
           message.destChainSelector !== request.lane.destChainSelector)
       )
@@ -314,6 +337,7 @@ export async function getMessagesInBatch<
       const message = (source.constructor as ChainStatic).decodeMessage(log)
       if (
         !message ||
+        !('sequenceNumber' in message) ||
         ('destChainSelector' in message &&
           message.destChainSelector !== request.lane.destChainSelector)
       )

@@ -63,7 +63,7 @@ export async function fetchEVMOffchainTokenData(
   )
   let lbtcTokenData: OffchainTokenData[] = []
   try {
-    let tokenAmounts: readonly SourceTokenData[]
+    let tokenAmounts
     if ('sourceTokenData' in request.message) {
       tokenAmounts = request.message.sourceTokenData.map(parseSourceTokenData)
     } else {
@@ -179,7 +179,7 @@ async function getUsdcTokenData(
  * Try to fetch LBTC attestations for transfers, return undefined in position if can't or not required
  **/
 async function getLbtcTokenData(
-  tokenAmounts: readonly SourceTokenData[],
+  tokenAmounts: readonly Pick<SourceTokenData, 'extraData'>[],
   allLogsInRequest: readonly Pick<Log, 'topics' | 'address' | 'data'>[],
   networkType: NetworkType,
   { logger = console }: WithLogger = {},

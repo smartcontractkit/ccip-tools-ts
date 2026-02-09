@@ -18,7 +18,6 @@ import {
   isBytesLike,
   isHexString,
   toBeHex,
-  toBigInt,
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
@@ -40,10 +39,8 @@ import {
   CCIPDataFormatUnsupportedError,
   CCIPExecTxNotConfirmedError,
   CCIPExecTxRevertedError,
-  CCIPExtraArgsParseError,
   CCIPHasherVersionUnsupportedError,
   CCIPLogDataInvalidError,
-  CCIPMessageDecodeError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
@@ -57,6 +54,7 @@ import type { ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
+  type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
@@ -88,12 +86,21 @@ import type TokenPool_ABI from './abi/LockReleaseTokenPool_1_6_1.ts'
 import EVM2EVMOffRamp_1_2_ABI from './abi/OffRamp_1_2.ts'
 import EVM2EVMOffRamp_1_5_ABI from './abi/OffRamp_1_5.ts'
 import OffRamp_1_6_ABI from './abi/OffRamp_1_6.ts'
+import OffRamp_2_0_ABI from './abi/OffRamp_2_0.ts'
 import EVM2EVMOnRamp_1_2_ABI from './abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
-import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
+import type OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
+import type OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
 import type Router_ABI from './abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
-import { commitsFragments, interfaces, receiptsFragments, requestsFragments } from './const.ts'
+import {
+  CCV_INDEXER_URL,
+  VersionedContractABI,
+  commitsFragments,
+  interfaces,
+  receiptsFragments,
+  requestsFragments,
+} from './const.ts'
 import { parseData } from './errors.ts'
 import {
   decodeExtraArgs as decodeExtraArgs_,
@@ -104,15 +111,18 @@ import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { getEvmLogs } from './logs.ts'
 import {
   type CCIPMessage_V1_6_EVM,
+  type CCIPMessage_V2_0,
   type CleanAddressable,
-  parseSourceTokenData,
+  type MessageV1,
+  type TokenTransferV1,
+  decodeMessageV1,
 } from './messages.ts'
+export { decodeMessageV1 }
+export type { MessageV1, TokenTransferV1 }
 import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
-import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
+import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
 import type { UnsignedEVMTx } from './types.ts'
 export type { UnsignedEVMTx }
-
-const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 
 function resultToObject<T>(o: T): T {
   if (o instanceof Promise) return o.then(resultToObject) as T
@@ -326,7 +336,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       VersionedContractABI,
       this.provider,
     ) as unknown as TypedContract<typeof VersionedContractABI>
-    return parseTypeAndVersion(await contract.typeAndVersion())
+    const res = parseTypeAndVersion(await contract.typeAndVersion())
+    if (res[1].startsWith('1.7.')) res[1] = CCIPVersion.V2_0
+    return res
   }
 
   /**
@@ -356,79 +368,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const result = interfaces.OnRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
         message = resultToObject(result) as Record<string, unknown>
         if (message.message) message = message.message as Record<string, unknown> | undefined
+        else if (message.encodedMessage) {
+          Object.assign(message, decodeMessageV1(message.encodedMessage as BytesLike))
+        }
         if (message) break
       } catch (_) {
         // try next fragment
       }
     }
     if (!message) return
-    if (!isHexString(message.sender, 20)) throw new CCIPMessageDecodeError('invalid sender')
-
-    if (message.header) {
-      // CCIPMessage_V1_6
-      Object.assign(message, message.header)
-      delete message.header
-    }
-
-    const sourceFamily = networkInfo(
-      (message as { sourceChainSelector: bigint }).sourceChainSelector,
-    ).family
-    let destFamily: ChainFamily = ChainFamily.EVM
-    if ((message as { destChainSelector?: bigint }).destChainSelector) {
-      destFamily = networkInfo((message as { destChainSelector: bigint }).destChainSelector).family
-    }
-    // conversions to make any message version be compatible with latest v1.6
-    message.tokenAmounts = (message.tokenAmounts as Record<string, string | bigint | number>[]).map(
-      (tokenAmount, i) => {
-        if ('sourceTokenData' in message) {
-          // CCIPMessage_V1_2_EVM
-          try {
-            tokenAmount = {
-              ...parseSourceTokenData(
-                (message as { sourceTokenData: string[] }).sourceTokenData[i]!,
-              ),
-              ...tokenAmount,
-            }
-          } catch (_) {
-            // legacy sourceTokenData
-          }
-        }
-        if (typeof tokenAmount.destExecData === 'string' && tokenAmount.destGasAmount == null) {
-          // CCIPMessage_V1_6_EVM
-          tokenAmount.destGasAmount = toBigInt(getDataBytes(tokenAmount.destExecData))
-        }
-        // Can be undefined if the message is from before v1.5 and failed to parse sourceTokenData
-        if (tokenAmount.sourcePoolAddress) {
-          tokenAmount.sourcePoolAddress = decodeAddress(
-            tokenAmount.sourcePoolAddress as string,
-            sourceFamily,
-          )
-        }
-        if (tokenAmount.destTokenAddress) {
-          tokenAmount.destTokenAddress = decodeAddress(
-            tokenAmount.destTokenAddress as string,
-            destFamily,
-          )
-        }
-        return tokenAmount
-      },
-    )
-    message.sender = decodeAddress(message.sender, sourceFamily)
-    message.feeToken = decodeAddress(message.feeToken as string, sourceFamily)
-    message.receiver = decodeAddress(message.receiver as string, destFamily)
-    if (message.extraArgs) {
-      // v1.6+
-      const parsed = this.decodeExtraArgs(message.extraArgs as string)
-      if (!parsed) throw new CCIPExtraArgsParseError(message.extraArgs as string)
-      const { _tag, ...rest } = parsed
-      // merge parsed extraArgs to any family in message root object
-      Object.assign(message, rest)
-    } else if (message.nonce === 0n) {
-      // v1.2..v1.5 targets EVM only; extraArgs is not explicit, gasLimit is already in
-      // message body, allowOutOfOrderExecution (in v1.5) was present only as nonce=0
-      message.allowOutOfOrderExecution = true
-    }
-    return message as CCIPMessage
+    return decodeMessage(message)
   }
 
   /**
@@ -609,11 +558,21 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         return router as string
       }
       case CCIPVersion.V1_6: {
-        onRampABI = OnRamp_1_6_ABI
-        const contract = new Contract(onRamp, onRampABI, this.provider) as unknown as TypedContract<
-          typeof onRampABI
-        >
+        const contract = new Contract(
+          onRamp,
+          interfaces.OnRamp_v1_6,
+          this.provider,
+        ) as unknown as TypedContract<typeof OnRamp_1_6_ABI>
         const [, , router] = await contract.getDestChainConfig(destChainSelector)
+        return router as string
+      }
+      case CCIPVersion.V2_0: {
+        const contract = new Contract(
+          onRamp,
+          interfaces.OnRamp_v2_0,
+          this.provider,
+        ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
+        const { router } = await contract.getDestChainConfig(destChainSelector)
         return router as string
       }
       default:
@@ -642,8 +601,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ;({ router } = await contract.getDynamicConfig())
         break
       }
-      case CCIPVersion.V1_6: {
+      case CCIPVersion.V1_6:
         offRampABI = OffRamp_1_6_ABI
+      // falls through
+      case CCIPVersion.V2_0: {
+        offRampABI = OffRamp_2_0_ABI
         const contract = new Contract(
           offRamp,
           offRampABI,
@@ -722,6 +684,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const { onRamp } = await contract.getSourceChainConfig(sourceChainSelector)
         return [decodeOnRampAddress(onRamp, networkInfo(sourceChainSelector).family)]
       }
+      case CCIPVersion.V2_0: {
+        offRampABI = OffRamp_2_0_ABI
+        const contract = new Contract(
+          offRamp,
+          offRampABI,
+          this.provider,
+        ) as unknown as TypedContract<typeof offRampABI>
+        const { onRamps } = await contract.getSourceChainConfig(sourceChainSelector)
+        const sourceFamily = networkInfo(sourceChainSelector).family
+        return onRamps.map((onRamp) => decodeOnRampAddress(onRamp, sourceFamily))
+      }
       default:
         throw new CCIPVersionUnsupportedError(version)
     }
@@ -748,11 +721,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const { commitStore } = await contract.getStaticConfig()
         return commitStore as string
       }
-      case CCIPVersion.V1_6: {
-        return offRamp
-      }
       default:
-        throw new CCIPVersionUnsupportedError(version)
+        return offRamp
     }
   }
 
@@ -1407,6 +1377,31 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     )
   }
 
+  /** {@inheritDoc Chain.getCommitReport} */
+  override async getCommitReport(
+    opts: Parameters<Chain['getCommitReport']>[0],
+  ): Promise<CCIPCommit> {
+    const { commitStore, request } = opts
+    const [, version] = await this.typeAndVersion(commitStore)
+    if (version >= CCIPVersion.V2_0) {
+      const contract = new Contract(
+        commitStore,
+        interfaces.OffRamp_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
+      const [requiredCCVs, optionalCCVs, optionalThreshold] = await resultToObject(
+        contract.getCCVsForMessage((request.message as CCIPMessage_V2_0).encodedMessage),
+      )
+
+      const url = `${CCV_INDEXER_URL}/v1/verifierresults/${request.message.messageId}`
+      const res = await fetch(url)
+      const json = await res.json()
+      return json as CCIPCommit
+    }
+    // fallback <=v1.6
+    return super.getCommitReport(opts)
+  }
+
   /** {@inheritDoc Chain.getExecutionReceipts} */
   override async *getExecutionReceipts(
     opts: Parameters<Chain['getExecutionReceipts']>[0],
@@ -1426,10 +1421,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         // onlyFallback: false,
       }
     } else /* >= V1.6 */ {
+      const topicHash =
+        version === CCIPVersion.V1_6
+          ? interfaces.OffRamp_v1_6.getEvent('ExecutionStateChanged')!.topicHash
+          : interfaces.OffRamp_v2_0.getEvent('ExecutionStateChanged')!.topicHash
       opts_ = {
         ...opts,
         topics: [
-          interfaces.OffRamp_v1_6.getEvent('ExecutionStateChanged')!.topicHash,
+          topicHash,
           sourceChainSelector ? toBeHex(sourceChainSelector, 32) : null,
           null,
           messageId ?? null,

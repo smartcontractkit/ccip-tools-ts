@@ -761,7 +761,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     /** address of commitStore (OffRamp in \>=v1.6) */
     commitStore: string
     /** CCIPRequest subset object */
-    request: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>
+    request: PickDeep<
+      CCIPRequest,
+      'lane' | `message.${'sequenceNumber' | 'messageId'}` | 'tx.timestamp'
+    >
   } & Pick<LogFilter, 'page' | 'watch' | 'startBlock'>): Promise<CCIPCommit> {
     return getCommitReport(this, commitStore, request, hints)
   }

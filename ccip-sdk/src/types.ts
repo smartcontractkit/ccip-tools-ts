@@ -3,7 +3,7 @@ import type { BytesLike, Log } from 'ethers'
 
 import type { APICCIPRequestMetadata } from './api/types.ts'
 import type OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
-import type { CCIPMessage_EVM, CCIPMessage_V1_6_EVM } from './evm/messages.ts'
+import type { CCIPMessage_EVM, CCIPMessage_V1_6_EVM, CCIPMessage_V2_0 } from './evm/messages.ts'
 import type { ExtraArgs } from './extra-args.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
 import type { CCIPMessage_V1_6_Sui } from './sui/types.ts'
@@ -88,6 +88,7 @@ export const CCIPVersion = {
   V1_2: '1.2.0',
   V1_5: '1.5.0',
   V1_6: '1.6.0',
+  V2_0: '2.0.0',
 } as const
 /** Type representing one of the supported CCIP versions. */
 export type CCIPVersion = (typeof CCIPVersion)[keyof typeof CCIPVersion]
@@ -153,11 +154,11 @@ export interface Lane<V extends CCIPVersion = CCIPVersion> {
 /**
  * Union type representing a CCIP message across different versions and chain families.
  */
-export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
-  | typeof CCIPVersion.V1_2
-  | typeof CCIPVersion.V1_5
-  ? CCIPMessage_EVM<V>
-  : CCIPMessage_V1_6_EVM | CCIPMessage_V1_6_Solana | CCIPMessage_V1_6_Sui | CCIPMessage_V1_6_TON
+export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends typeof CCIPVersion.V2_0
+  ? CCIPMessage_V2_0
+  : V extends typeof CCIPVersion.V1_6
+    ? CCIPMessage_V1_6_EVM | CCIPMessage_V1_6_Solana | CCIPMessage_V1_6_Sui | CCIPMessage_V1_6_TON
+    : CCIPMessage_EVM<V>
 
 /**
  * Generic log structure compatible across chain families.
