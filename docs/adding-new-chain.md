@@ -263,8 +263,8 @@ Define your chain-specific types, including the unsigned transaction type for `g
 
 **File:** `ccip-sdk/src/index.ts`
 
-1. Export your chain class
-2. Add it to `allSupportedChains`
+1. Import and export your chain class
+2. Export any unsigned transaction types
 
 **Reference:** Follow the existing pattern in `index.ts` for other chain families.
 
@@ -385,7 +385,6 @@ Before submitting your PR:
 **Types and Exports:**
 - [ ] `UnsignedTx` type mapping added to `chain.ts`
 - [ ] Chain class exported from `index.ts`
-- [ ] Added to `allSupportedChains` in `index.ts`
 
 **Hasher:**
 - [ ] `getDestLeafHasher` static method implemented

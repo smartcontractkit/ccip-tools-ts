@@ -767,15 +767,18 @@ supportedChains[ChainFamily.Solana] = CustomSolanaChain
 
 ## Tree-Shaking
 
-For optimal bundle size, import only the chains you need:
+Import only the chains you need for optimal bundle size:
 
 ```ts
-// ✅ Good - only imports EVM chain
+// Recommended: import specific chains
 import { EVMChain } from '@chainlink/ccip-sdk'
+import { EVMChain, SolanaChain } from '@chainlink/ccip-sdk'
 
-// ⚠️ Imports all chains - larger bundle
-import { allSupportedChains } from '@chainlink/ccip-sdk'
+// Import all chains (includes all chain dependencies)
+import { allSupportedChains } from '@chainlink/ccip-sdk/chains'
 ```
+
+Unused chain implementations are excluded from the final bundle via tree-shaking.
 
 ## Next Steps
 
