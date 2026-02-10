@@ -91,7 +91,7 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
       ? BigInt(v as string | number | bigint)
       : k?.match(/(^dest.*address)|(receiver|offramp|accounts)/i)
         ? decodeAddress(v as BytesLike, destFamily)
-        : k?.match(/((source.*address)|sender|origin|onramp|(feetoken$)|(token.*address$))/i)
+        : k?.match(/((source.*address)|sender|issuer|origin|onramp|(feetoken$)|(token.*address$))/i)
           ? decodeAddress(v as BytesLike, sourceFamily)
           : v instanceof Uint8Array ||
               (Array.isArray(v) && v.length >= 4 && v.every((e) => typeof e === 'number'))

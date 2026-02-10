@@ -1392,9 +1392,36 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       const ccvs = await contract.getCCVsForMessage(
         (request.message as CCIPMessage_V2_0).encodedMessage,
       )
-      const [requiredCCVs, optionalCCVs, threshold] = ccvs.map(
+      const [requiredCCVs, optionalCCVs, optionalThreshold] = ccvs.map(
         resultToObject,
       ) as unknown as CleanAddressable<typeof ccvs>
+      const verificationPolicy = {
+        requiredCCVs,
+        optionalCCVs,
+        optionalThreshold: Number(optionalThreshold),
+      }
+
+      if (this.apiClient) {
+        const apiRes = await this.apiClient.getMessageById(request.message.messageId)
+        if ('verifiers' in apiRes.message) {
+          const verifiers = apiRes.message.verifiers as {
+            items: {
+              destAddress: string
+              sourceAddress: string
+              verification: { data: string; timestamp: string }
+            }[]
+          }
+          return {
+            verificationPolicy,
+            verifications: verifiers.items.map((item) => ({
+              destAddress: item.destAddress,
+              sourceAddress: item.sourceAddress,
+              ccvData: item.verification.data,
+              timestamp: new Date(item.verification.timestamp).getTime() / 1e3,
+            })),
+          }
+        }
+      }
 
       const url = `${CCV_INDEXER_URL}/v1/verifierresults/${request.message.messageId}`
       const res = await fetch(url)
