@@ -775,7 +775,7 @@ import { EVMChain } from '@chainlink/ccip-sdk'
 import { EVMChain, SolanaChain } from '@chainlink/ccip-sdk'
 
 // Import all chains (includes all chain dependencies)
-import { allSupportedChains } from '@chainlink/ccip-sdk/chains'
+import { allSupportedChains } from '@chainlink/ccip-sdk/all'
 ```
 
 Unused chain implementations are excluded from the final bundle via tree-shaking.

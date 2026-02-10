@@ -19,9 +19,9 @@
       "types": "./dist/viem.d.ts",
       "default": "./dist/viem.js"
     },
-    "./chains": {
-      "types": "./dist/chains.d.ts",
-      "default": "./dist/chains.js"
+    "./all": {
+      "types": "./dist/all-chains.d.ts",
+      "default": "./dist/all-chains.js"
     },
     "./src/*": "./src/*"
   },

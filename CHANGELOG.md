@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- SDK: **Breaking**: Move `allSupportedChains` to `@chainlink/ccip-sdk/chains` entry point (fixes tree-shaking in esbuild/Bun/Parcel)
+- SDK: **Breaking**: Move `allSupportedChains` to `@chainlink/ccip-sdk/all` entry point (fixes tree-shaking in esbuild/Bun/Parcel)
 - CLI: Add kebab-case aliases for multi-word commands (`manual-exec`, `get-supported-tokens`, `parse-bytes`, `parse-data`)
 - CLI: Add `--fee-tokens` flag to `getSupportedTokens` command to list fee tokens instead of transferable tokens
 - SDK: **Breaking**: `CCIPRequest` now includes optional `metadata?: APICCIPRequestMetadata` field
