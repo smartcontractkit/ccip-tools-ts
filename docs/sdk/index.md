@@ -142,6 +142,26 @@ console.log('Remote token on Arbitrum:', arbRemote.remoteToken)
 console.log('Inbound rate limit:', arbRemote.inboundRateLimiterState) // null if disabled
 ```
 
+:::note Chain-Specific Fields
+Some chains return additional fields:
+- **Solana**: Includes `tokenPoolProgram` (the program ID)
+- **EVM**: `typeAndVersion` is always present
+
+Use `instanceof` to access chain-specific fields with full TypeScript support:
+
+```ts
+import { SolanaChain, EVMChain } from '@chainlink/ccip-sdk'
+
+if (chain instanceof SolanaChain) {
+  const config = await chain.getTokenPoolConfig(poolAddress)
+  console.log('Program:', config.tokenPoolProgram) // TypeScript knows this exists!
+} else if (chain instanceof EVMChain) {
+  const config = await chain.getTokenPoolConfig(poolAddress)
+  console.log('Version:', config.typeAndVersion) // Required on EVM
+}
+```
+:::
+
 ### Query Token Admin Registry
 
 Look up token administrator and pool information:

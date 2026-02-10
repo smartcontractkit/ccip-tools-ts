@@ -907,21 +907,27 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Fetch configuration of a token pool.
    *
    * @remarks
-   * Returns the core configuration of a token pool including which token it manages
-   * and which router it's registered with.
+   * Return type varies by chain:
+   * - **EVM**: `typeAndVersion` is always present (required)
+   * - **Solana**: Includes extra `tokenPoolProgram` field
+   * - **Aptos**: Standard fields only
+   * - **Sui/TON**: Throws {@link CCIPNotImplementedError}
    *
-   * @example Query pool configuration
+   * @example Type-safe access to chain-specific fields
    * ```typescript
-   * const config = await chain.getTokenPoolConfig(poolAddress)
-   * console.log(`Manages token: ${config.token}`)
-   * console.log(`Router: ${config.router}`)
-   * if (config.typeAndVersion) {
-   *   console.log(`Version: ${config.typeAndVersion}`)
+   * // Use instanceof to narrow the chain type
+   * if (chain instanceof SolanaChain) {
+   *   const config = await chain.getTokenPoolConfig(poolAddress)
+   *   console.log(config.tokenPoolProgram) // TypeScript knows this exists!
+   * } else if (chain instanceof EVMChain) {
+   *   const config = await chain.getTokenPoolConfig(poolAddress)
+   *   console.log(config.typeAndVersion) // TypeScript knows this is required!
    * }
    * ```
    *
    * @param tokenPool - Token pool contract address.
    * @returns {@link TokenPoolConfig} containing token, router, and version info.
+   * @throws {@link CCIPNotImplementedError} on Sui or TON chains
    */
   abstract getTokenPoolConfig(tokenPool: string): Promise<TokenPoolConfig>
 
