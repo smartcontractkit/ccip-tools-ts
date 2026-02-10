@@ -3,7 +3,7 @@ import type { PickDeep, SetOptional } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
 import type { UnsignedAptosTx } from './aptos/types.ts'
-import { getCommitReport } from './commits.ts'
+import { getOnchainCommitReport } from './commits.ts'
 import {
   CCIPApiClientNotAvailableError,
   CCIPChainFamilyMismatchError,
@@ -766,7 +766,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       'lane' | `message.${'sequenceNumber' | 'messageId'}` | 'tx.timestamp'
     >
   } & Pick<LogFilter, 'page' | 'watch' | 'startBlock'>): Promise<CCIPCommit> {
-    return getCommitReport(this, commitStore, request, hints)
+    return getOnchainCommitReport(this, commitStore, request, hints)
   }
 
   /**
@@ -832,7 +832,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     LogFilter,
     'page' | 'watch' | 'startBlock' | 'startTime'
   >): AsyncIterableIterator<CCIPExecution> {
-    hints.startBlock ??= commit?.log.blockNumber
+    if (commit && 'log' in commit) hints.startBlock ??= commit.log.blockNumber
     const onlyLast = !hints.startTime && !hints.startBlock // backwards
     for await (const log of this.getLogs({
       address: offRamp,

@@ -6,7 +6,7 @@ import { Interface } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { Chain } from './chain.ts'
-import { getCommitReport } from './commits.ts'
+import { getOnchainCommitReport } from './commits.ts'
 import CommitStore_1_2_ABI from './evm/abi/CommitStore_1_2.ts'
 import OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
 import {
@@ -356,7 +356,7 @@ describe('getCommitReport', () => {
     }
 
     const hints = { startBlock: 12345 }
-    const result = await getCommitReport(dest, '0xCommitStore', request, hints)
+    const result = await getOnchainCommitReport(dest, '0xCommitStore', request, hints)
 
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 1n)
@@ -415,7 +415,7 @@ describe('getCommitReport', () => {
     const hints = { startBlock: 12345 }
 
     await assert.rejects(
-      async () => await getCommitReport(dest, '0xCommitStore', request, hints),
+      async () => await getOnchainCommitReport(dest, '0xCommitStore', request, hints),
       /Could not find commit after 12345 for sequenceNumber=1/,
     )
   })
@@ -466,7 +466,7 @@ describe('getCommitReport', () => {
     }
 
     const hints = { startBlock: 12345 }
-    const result = await getCommitReport(dest, '0xOffRamp', request, hints)
+    const result = await getOnchainCommitReport(dest, '0xOffRamp', request, hints)
 
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 3n)
@@ -526,7 +526,7 @@ describe('getCommitReport', () => {
     const hints = { startBlock: 12345 }
 
     await assert.rejects(
-      async () => await getCommitReport(dest, '0xOffRamp', request, hints),
+      async () => await getOnchainCommitReport(dest, '0xOffRamp', request, hints),
       /Could not find commit after 12345 for sequenceNumber=5/,
     )
   })
@@ -600,7 +600,7 @@ describe('getCommitReport', () => {
     }
 
     const hints = { startBlock: 12345 }
-    const result = await getCommitReport(dest, '0xOffRamp', request, hints)
+    const result = await getOnchainCommitReport(dest, '0xOffRamp', request, hints)
 
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 4n)
@@ -655,7 +655,7 @@ describe('getCommitReport', () => {
     }
 
     // No hints provided, should use timestamp
-    const result = await getCommitReport(dest, '0xOffRamp', request)
+    const result = await getOnchainCommitReport(dest, '0xOffRamp', request)
 
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 1n)
