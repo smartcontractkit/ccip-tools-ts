@@ -237,21 +237,46 @@ export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
 }
 
 /**
- * Commit report structure from the OffRamp CommitReportAccepted event.
+ * OnChain Commit report structure from the OffRamp CommitReportAccepted event.
  */
 export type CommitReport = AbiParametersToPrimitiveTypes<
   ExtractAbiEvent<typeof OffRamp_1_6_ABI, 'CommitReportAccepted'>['inputs']
 >[0][number]
 
 /**
- * CCIP commit information containing the report and its log.
+ * OffChain Verification result for a CCIP v2.0 message, returned by the indexer API.
  */
-export interface CCIPCommit {
-  /** The commit report data. */
-  report: CommitReport
-  /** Log event from the commit. */
-  log: Log_
+export type VerifierResult = {
+  /** Verification data required for destination execution (e.g. signatures). */
+  ccvData: BytesLike
+  /** Source CCV contract address. */
+  sourceAddress: string
+  /** Destination CCV contract address. */
+  destAddress: string
+  /** Timestamp of the attestation (Unix seconds). */
+  timestamp?: number
 }
+
+/**
+ * CCIP commit information
+ */
+export type CCIPCommit =
+  | {
+      /** The commit report data. */
+      report: CommitReport
+      /** Log event from the commit. */
+      log: Log_
+    }
+  | {
+      /** Policy for this request */
+      verificationPolicy: {
+        optionalCCVs: readonly string[]
+        requiredCCVs: readonly string[]
+        optionalThreshold: number
+      }
+      /** Verifications array; one for each requiredCCV is needed for exec */
+      verifications: VerifierResult[]
+    }
 
 /**
  * Enumeration of possible execution states for a CCIP message.
@@ -382,63 +407,6 @@ export type ExecutionReport<M extends CCIPMessage = CCIPMessage> = {
   /** Offchain token data for each token transfer. */
   offchainTokenData: readonly OffchainTokenData[]
 }
-
-/**
- * Verification result for a CCIP v2.0 message, returned by the indexer API.
- */
-export type VerifierResult = {
-  /** The CCIP message ID (0x-prefixed hex). */
-  messageId: string
-  /** The full decoded v2.0 wire-format message. */
-  message: CCIPMessage<typeof CCIPVersion.V2_0>
-  /** CCV contract addresses for this message (hex). */
-  messageCcvAddresses: readonly string[]
-  /** Preferred executor address (hex). */
-  messageExecutorAddress: string
-  /** Verification data required for destination execution (e.g. signatures). */
-  ccvData: BytesLike
-  /** Timestamp when the verifier result was created (Unix seconds). */
-  timestamp: number
-  /** Source CCV contract address hint (hex). */
-  verifierSourceAddress: string
-  /** Destination CCV contract address hint (hex). */
-  verifierDestAddress: string
-}
-
-/**
- * Metadata about a verifier result from the indexer API.
- */
-export type VerifierResultMetadata = {
-  /** Name of the verifier that produced the result. */
-  verifierName: string
-  /** When the attestation was created (Unix seconds). */
-  attestationTimestamp: number
-  /** When the result was ingested by the indexer (Unix seconds). */
-  ingestionTimestamp: number
-}
-
-/**
- * A verifier result paired with its indexer metadata.
- */
-export type VerifierResultWithMetadata = {
-  verifierResult: VerifierResult
-  metadata: VerifierResultMetadata
-}
-
-/**
- * The collection of all required verifier results for manual execution of a v2.0 message.
- */
-export type RequiredVerifierResults = {
-  results: readonly VerifierResult[]
-}
-
-/**
- * Data required for successful manual execution of a CCIP message.
- * For v1.6 and below, this is a {@link CommitReport} 
- * For v2.0, this is the {@link RequiredVerifierResults} containing all
- * verifier results needed to execute the message on the destination chain.
- */
-export type ExecutionData = CommitReport | RequiredVerifierResults
 
 /**
  * A message to be sent to another network.

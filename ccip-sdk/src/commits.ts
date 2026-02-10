@@ -15,7 +15,7 @@ import { type CCIPCommit, type CCIPRequest, CCIPVersion } from './types.ts'
  * @param hints - Additional filtering hints
  * @returns CCIP commit info
  **/
-export async function getCommitReport(
+export async function getOnchainCommitReport(
   dest: Chain,
   commitStore: string,
   {
