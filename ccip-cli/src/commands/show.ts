@@ -2,7 +2,6 @@ import {
   type CCIPRequest,
   type ChainTransaction,
   CCIPExecTxRevertedError,
-  CCIPVersion,
   ExecutionState,
   MessageStatus,
   bigIntReplacer,
