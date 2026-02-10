@@ -628,14 +628,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @example Query native token balance
    * ```typescript
-   * const balance = await chain.getBalance({ address: '0x123...' })
+   * const balance = await chain.getBalance({ holder: '0x123...' })
    * console.log(`Native balance: ${balance}`) // balance in wei
    * ```
    *
    * @example Query ERC20 token balance
    * ```typescript
    * const balance = await chain.getBalance({
-   *   address: '0x123...',
+   *   holder: '0x123...',
    *   token: '0xLINK...'
    * })
    * console.log(`LINK balance: ${balance}`) // balance in smallest units
