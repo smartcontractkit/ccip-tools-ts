@@ -1349,6 +1349,12 @@ const selectors: Selectors = {
     network_type: 'MAINNET',
     family: 'EVM',
   },
+  '202601': {
+    selector: 1091131740251125869n,
+    name: 'ethereum-testnet-sepolia-ronin-1',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
   '421613': {
     selector: 6101244977088475029n,
     name: 'ethereum-testnet-goerli-arbitrum-1',

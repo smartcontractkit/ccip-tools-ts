@@ -142,6 +142,26 @@ console.log('Remote token on Arbitrum:', arbRemote.remoteToken)
 console.log('Inbound rate limit:', arbRemote.inboundRateLimiterState) // null if disabled
 ```
 
+:::note Chain-Specific Fields
+Some chains return additional fields:
+- **Solana**: Includes `tokenPoolProgram` (the program ID)
+- **EVM**: `typeAndVersion` is always present
+
+Use `instanceof` to access chain-specific fields with full TypeScript support:
+
+```ts
+import { SolanaChain, EVMChain } from '@chainlink/ccip-sdk'
+
+if (chain instanceof SolanaChain) {
+  const config = await chain.getTokenPoolConfig(poolAddress)
+  console.log('Program:', config.tokenPoolProgram) // TypeScript knows this exists!
+} else if (chain instanceof EVMChain) {
+  const config = await chain.getTokenPoolConfig(poolAddress)
+  console.log('Version:', config.typeAndVersion) // Required on EVM
+}
+```
+:::
+
 ### Query Token Admin Registry
 
 Look up token administrator and pool information:
@@ -413,6 +433,35 @@ When fetched via the API, `CCIPRequest` includes a `metadata` field with additio
 | `deliveryTime`            | `bigint?`       | End-to-end delivery time in ms           |
 | `sourceNetworkInfo`       | `NetworkInfo`   | Source chain metadata                    |
 | `destNetworkInfo`         | `NetworkInfo`   | Destination chain metadata               |
+
+#### Message Status Lifecycle
+
+The `MessageStatus` enum represents the current state of a cross-chain message:
+
+```ts
+import { MessageStatus } from '@chainlink/ccip-sdk'
+
+// Check message status
+if (request.metadata.status === MessageStatus.Success) {
+  console.log('Transfer complete!')
+}
+```
+
+| Status | Description |
+| ------ | ----------- |
+| `Sent` | Message sent on source chain, pending finalization |
+| `SourceFinalized` | Source chain transaction finalized |
+| `Committed` | Commit report accepted on destination chain |
+| `Blessed` | Commit blessed by Risk Management Network |
+| `Verifying` | Message is being verified by the CCIP network |
+| `Verified` | Message has been verified by the CCIP network |
+| `Success` | Message executed successfully on destination |
+| `Failed` | Message execution failed on destination |
+| `Unknown` | API returned an unrecognized status (see note below) |
+
+:::warning Unknown Status
+If you encounter `MessageStatus.Unknown`, it means the CCIP API returned a status value that your SDK version doesn't recognize. This typically happens when new status values are added to the API. **Update to the latest SDK version** to handle new status values properly.
+:::
 
 ### Find Messages in a Transaction
 

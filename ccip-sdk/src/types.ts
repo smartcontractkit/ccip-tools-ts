@@ -287,7 +287,11 @@ export const MessageStatus = {
   Verifying: 'VERIFYING',
   /** Message has been verified by the CCIP network */
   Verified: 'VERIFIED',
-  /** Unknown status returned by API */
+  /**
+   * API returned an unrecognized status value.
+   * This typically means the CCIP API has new status values that this SDK version
+   * doesn't recognize. Consider updating to the latest SDK version.
+   */
   Unknown: 'UNKNOWN',
 } as const
 /** Type representing a CCIP message lifecycle status. */
