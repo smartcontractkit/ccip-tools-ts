@@ -434,6 +434,35 @@ When fetched via the API, `CCIPRequest` includes a `metadata` field with additio
 | `sourceNetworkInfo`       | `NetworkInfo`   | Source chain metadata                    |
 | `destNetworkInfo`         | `NetworkInfo`   | Destination chain metadata               |
 
+#### Message Status Lifecycle
+
+The `MessageStatus` enum represents the current state of a cross-chain message:
+
+```ts
+import { MessageStatus } from '@chainlink/ccip-sdk'
+
+// Check message status
+if (request.metadata.status === MessageStatus.Success) {
+  console.log('Transfer complete!')
+}
+```
+
+| Status | Description |
+| ------ | ----------- |
+| `Sent` | Message sent on source chain, pending finalization |
+| `SourceFinalized` | Source chain transaction finalized |
+| `Committed` | Commit report accepted on destination chain |
+| `Blessed` | Commit blessed by Risk Management Network |
+| `Verifying` | Message is being verified by the CCIP network |
+| `Verified` | Message has been verified by the CCIP network |
+| `Success` | Message executed successfully on destination |
+| `Failed` | Message execution failed on destination |
+| `Unknown` | API returned an unrecognized status (see note below) |
+
+:::warning Unknown Status
+If you encounter `MessageStatus.Unknown`, it means the CCIP API returned a status value that your SDK version doesn't recognize. This typically happens when new status values are added to the API. **Update to the latest SDK version** to handle new status values properly.
+:::
+
 ### Find Messages in a Transaction
 
 Get all CCIP message IDs from a source transaction:
