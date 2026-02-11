@@ -120,9 +120,8 @@ export function getV16LeafHasher(
     // Non-EVM sources (e.g., TON) embed gasLimit on the message during parsing,
     // since their extraArgs format differs. EVM sources decode from extraArgs.
     let gasLimit: bigint
-    const embeddedGasLimit = (message as Partial<{ gasLimit: bigint }>).gasLimit
-    if (typeof embeddedGasLimit === 'bigint') {
-      gasLimit = embeddedGasLimit
+    if ('gasLimit' in message) {
+      gasLimit = message.gasLimit
     } else {
       const parsedArgs = decodeExtraArgs(
         message.extraArgs,
