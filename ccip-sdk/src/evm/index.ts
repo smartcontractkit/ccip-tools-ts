@@ -1100,7 +1100,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       }
       case CCIPVersion.V1_6: {
         // normalize message
-        const sender = zeroPadValue(getAddressBytes(execReport.message.sender), 32)
+        const senderBytes = getAddressBytes(execReport.message.sender)
+        // Addresses ≤32 bytes (EVM 20B, Aptos/Solana/Sui 32B) are zero-padded to 32 bytes;
+        // Addresses >32 bytes (e.g., TON 36B) are used as raw bytes without padding
+        const sender =
+          senderBytes.length <= 32 ? zeroPadValue(senderBytes, 32) : hexlify(senderBytes)
         const tokenAmounts = (execReport.message as CCIPMessage_V1_6_EVM).tokenAmounts.map(
           (ta) => ({
             ...ta,

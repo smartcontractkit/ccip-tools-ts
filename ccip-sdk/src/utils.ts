@@ -369,6 +369,14 @@ export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Ar
           ? '0x' + address
           : address,
     )
+  } else if (typeof address === 'string' && /^-?\d+:[0-9a-f]{64}$/i.test(address)) {
+    // TON raw format: "workchain:hash" → 36-byte CCIP format (4-byte BE workchain + 32-byte hash)
+    const [workchain, hash] = address.split(':')
+    const buf = new Uint8Array(36)
+    const view = new DataView(buf.buffer)
+    view.setInt32(0, parseInt(workchain!, 10), false) // big-endian
+    buf.set(getBytes('0x' + hash), 4)
+    bytes = buf
   } else {
     try {
       const bytes_ = bs58.decode(address as string)

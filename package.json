@@ -41,6 +41,7 @@
     "yaml": "2.8.2"
   },
   "overrides": {
-    "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10"
+    "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
+    "@ton/core": "0.63.0"
   }
 }
