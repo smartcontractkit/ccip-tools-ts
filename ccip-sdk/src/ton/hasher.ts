@@ -16,13 +16,8 @@ import { tryParseCell } from './utils.ts'
 // TON uses 256 bits (32 bytes) of zeros as leaf domain separator
 const TON_LEAF_DOMAIN_SEPARATOR = 0n
 
-// ============================================================================
-// Any→TON for manual execution on TON OffRamp
-// ============================================================================
-
 /**
- * Creates a leaf hasher for Any→TON messages.
- * Used for manual execution on the TON OffRamp.
+ * Creates a leaf hasher for TON messages.
  *
  * @param lane - Lane configuration containing sourceChainSelector, destChainSelector,
  *   onRamp (as hex string), and version (only v1.6 supported for TON).
@@ -54,7 +49,8 @@ export function getTONLeafHasher<V extends CCIPVersion = CCIPVersion>({
 
 /**
  * Creates a hash that uniquely identifies the message lane configuration
- * for Any→TON messages. Uses Any2TVMMessageHashV1 prefix.
+ * (source chain, destination chain, and onRamp address).
+ * Following the TON implementation from chainlink-ton repo.
  *
  * @param sourceChainSelector - Source chain selector.
  * @param destChainSelector - Destination chain selector.
@@ -66,7 +62,7 @@ export const hashTONMetadata = (
   destChainSelector: bigint,
   onRamp: string,
 ): string => {
-  // Domain separator for Any→TON messages
+  // Domain separator for TON messages
   const versionHash = BigInt(sha256(Buffer.from('Any2TVMMessageHashV1')))
   const onRampBytes = bytesToBuffer(onRamp)
 
@@ -85,7 +81,7 @@ export const hashTONMetadata = (
 }
 
 /**
- * Computes the full message hash for Any→TON messages.
+ * Computes the full message hash for a CCIP v1.6 TON message
  * Follows the chainlink-ton's Any2TVMRampMessage.generateMessageId()
  *
  * @param message - CCIP message to hash
@@ -128,7 +124,7 @@ function hashV16TONMessage(message: CCIPMessage_V1_6, metadataHash: string): str
 
   // Build token amounts cell if tokens are being transferred
   const tokenAmountsCell =
-    message.tokenAmounts.length > 0 ? buildAny2TONTokenAmountsCell(message.tokenAmounts) : null
+    message.tokenAmounts.length > 0 ? buildTokenAmountsCell(message.tokenAmounts) : null
 
   // Assemble the complete message cell
   // LEAF_DOMAIN_SEPARATOR (256 bits) + metadataHash (256 bits) + refs
@@ -149,12 +145,14 @@ function hashV16TONMessage(message: CCIPMessage_V1_6, metadataHash: string): str
 type TokenAmount = CCIPMessage_V1_6['tokenAmounts'][number]
 
 /**
- * Creates a nested cell structure for token amounts in Any→TON messages.
+ * Creates a nested cell structure for token amounts, where each token
+ * transfer is stored as a reference cell containing source pool, destination,
+ * amount, and extra data.
  *
  * @param tokenAmounts - Array of token transfer details
  * @returns Cell containing all token transfer information
  */
-function buildAny2TONTokenAmountsCell(tokenAmounts: readonly TokenAmount[]): Cell {
+function buildTokenAmountsCell(tokenAmounts: readonly TokenAmount[]): Cell {
   const builder = beginCell()
 
   // Process each token transfer
