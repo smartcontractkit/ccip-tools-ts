@@ -103,9 +103,9 @@ export function getV16LeafHasher(
   { logger = console }: WithLogger = {},
 ): LeafHasher<typeof CCIPVersion.V1_6> {
   const onRampBytes = getAddressBytes(onRamp)
-  // EVM addresses (20 bytes) need zero-padding to 32 bytes for hash;
-  // non-EVM sources (e.g., TON 36-byte addresses) use raw bytes without padding
-  const onRampForHash = onRampBytes.length === 20 ? zeroPadValue(onRampBytes, 32) : onRampBytes
+  // Addresses ≤32 bytes (EVM 20B, Aptos/Solana/Sui 32B) are zero-padded to 32 bytes;
+  // Addresses >32 bytes (e.g., TON 36B) are used as raw bytes without padding
+  const onRampForHash = onRampBytes.length <= 32 ? zeroPadValue(onRampBytes, 32) : onRampBytes
 
   const metadataInput = concat([
     ANY_2_EVM_MESSAGE_HASH,
@@ -159,10 +159,10 @@ export function getV16LeafHasher(
       [message.messageId, message.receiver, message.sequenceNumber, gasLimit, message.nonce],
     )
 
-    // EVM senders (20 bytes) need zero-padding to 32 bytes for hash;
-    // non-EVM sources (e.g., TON 36-byte addresses) use raw bytes without padding
     const senderBytes = getAddressBytes(message.sender)
-    const sender = senderBytes.length === 20 ? zeroPadValue(senderBytes, 32) : senderBytes
+    // Addresses ≤32 bytes (EVM 20B, Aptos/Solana/Sui 32B) are zero-padded to 32 bytes;
+    // Addresses >32 bytes (e.g., TON 36B) are used as raw bytes without padding
+    const sender = senderBytes.length <= 32 ? zeroPadValue(senderBytes, 32) : senderBytes
 
     const packedValues = defaultAbiCoder.encode(
       [

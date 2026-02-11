@@ -17,10 +17,10 @@ describe('TON hasher unit tests', () => {
   const TON_SENDER = '0:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890'
   const EVM_RECEIVER = '0xd2ae3ca32e9e1f81abc78a316c49b2767ba02085'
   const silentLogger = {
-    debug: () => { },
-    info: () => { },
-    warn: () => { },
-    error: () => { },
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
   } as Console
 
   // ============================================================================
