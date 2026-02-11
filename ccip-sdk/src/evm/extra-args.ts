@@ -58,7 +58,7 @@ function resultToObject<T>(o: T): T {
  * Encodes GenericExtraArgsV3 using tightly packed binary format.
  *
  * Binary format:
- * - tag (4 bytes): 0x302326cb
+ * - tag (4 bytes): 0xa69dd4aa
  * - gasLimit (4 bytes): uint32 big-endian
  * - blockConfirmations (2 bytes): uint16 big-endian
  * - ccvsLength (1 byte): uint8
