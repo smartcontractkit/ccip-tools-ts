@@ -23,7 +23,7 @@ import {
 } from '../errors/specialized.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
-import { buildMessageForDest } from '../requests.ts'
+import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type CCIPExecution,
@@ -380,11 +380,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
-    _request: R,
-    _commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
-    _opts?: { page?: number },
+    request: R,
+    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    opts?: { page?: number },
   ): Promise<R['message'][]> {
-    return Promise.reject(new CCIPNotImplementedError('getMessagesInBatch'))
+    return getMessagesInBatch(this, request, commit, opts)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
@@ -617,7 +617,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       }
 
       // Load sender address
-      const sender = slice.loadAddress().toString()
+      const sender = slice.loadAddress().toRawString()
 
       // Load body cell ref
       const bodyCell = slice.loadRef()
@@ -664,10 +664,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const allowOutOfOrderExecution = extraArgsSlice.loadBit()
 
       // Build extraArgs as raw hex matching reference format
-      const tagHex = extraArgsTag.toString(16).padStart(8, '0')
-      const gasLimitHex = (hasGasLimit ? '8' : '0') + gasLimit.toString(16).padStart(63, '0')
-      const oooByte = allowOutOfOrderExecution ? '40' : '00'
-      const extraArgs = '0x' + tagHex + gasLimitHex + oooByte
+      const extraArgs = '0x' + extraArgsCell.toBoc().toString('hex')
 
       // Load tokenAmounts from ref 3
       const _tokenAmountsCell = bodySlice.loadRef()
