@@ -168,6 +168,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   provider: JsonRpcApiProvider
   readonly destroy$: Promise<void>
+  private noncesPromises: Record<string, Promise<unknown>>
+  nonces: Record<string, number>
 
   /**
    * Creates a new EVMChain instance.
@@ -176,6 +178,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    */
   constructor(provider: JsonRpcApiProvider, network: NetworkInfo, ctx?: ChainContext) {
     super(network, ctx)
+
+    this.noncesPromises = {}
+    this.nonces = {}
 
     this.provider = provider
     this.destroy$ = new Promise<void>((resolve) => (this.destroy = resolve))
@@ -214,6 +219,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    */
   async listAccounts(): Promise<string[]> {
     return (await this.provider.listAccounts()).map(({ address }) => address)
+  }
+
+  /** Get the next nonce for a sender address and bump internal count */
+  async nextNonce(address: string): Promise<number> {
+    await (this.noncesPromises[address] ??= this.provider
+      .getTransactionCount(address)
+      .then((nonce) => {
+        this.nonces[address] = nonce
+        return nonce
+      }))
+    return this.nonces[address]!++
   }
 
   /**
@@ -1012,27 +1028,37 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     let sendTx: TransactionRequest = txs.transactions[txs.transactions.length - 1]!
 
     // approve all tokens (including feeToken, if needed) in parallel
-    let nonce = await this.provider.getTransactionCount(sender)
     const responses = await Promise.all(
       approveTxs.map(async (tx: TransactionRequest) => {
-        tx.nonce = nonce++
-        tx = await wallet.populateTransaction(tx)
-        tx.from = undefined
-        const response = await submitTransaction(wallet, tx, this.provider)
-        this.logger.debug('approve =>', response.hash)
-        return response
+        tx.nonce = await this.nextNonce(sender)
+        try {
+          tx = await wallet.populateTransaction(tx)
+          tx.from = undefined
+          const response = await submitTransaction(wallet, tx, this.provider)
+          this.logger.debug('approve =>', response.hash)
+          return response
+        } catch (err) {
+          this.nonces[sender]!--
+          throw err
+        }
       }),
     )
     if (responses.length) await responses[responses.length - 1]!.wait(1, 60_000) // wait last tx nonce to be mined
 
-    sendTx.nonce = nonce++
-    // sendTx.gasLimit = await this.provider.estimateGas(sendTx)
-    sendTx = await wallet.populateTransaction(sendTx)
-    sendTx.from = undefined // some signers don't like receiving pre-populated `from`
-    const response = await submitTransaction(wallet, sendTx, this.provider)
+    sendTx.nonce = await this.nextNonce(sender)
+    let response
+    try {
+      // sendTx.gasLimit = await this.provider.estimateGas(sendTx)
+      sendTx = await wallet.populateTransaction(sendTx)
+      sendTx.from = undefined // some signers don't like receiving pre-populated `from`
+      response = await submitTransaction(wallet, sendTx, this.provider)
+    } catch (err) {
+      this.nonces[sender]!--
+      throw err
+    }
     this.logger.debug('ccipSend =>', response.hash)
-    await response.wait(1, 60_000)
-    return (await this.getMessagesInTx(await this.getTransaction(response.hash)))[0]!
+    const tx = (await response.wait(1, 60_000))!
+    return (await this.getMessagesInTx(await this.getTransaction(tx)))[0]!
   }
 
   /** {@inheritDoc Chain.getOffchainTokenData} */
@@ -1176,9 +1202,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ...opts,
       payer: await wallet.getAddress(),
     })
-    const unsignedTx = await wallet.populateTransaction(unsignedTxs.transactions[0]!)
-    unsignedTx.from = undefined // some signers don't like receiving pre-populated `from`
-    const response = await submitTransaction(wallet, unsignedTx, this.provider)
+    const unsignedTx: TransactionRequest = unsignedTxs.transactions[0]!
+    unsignedTx.nonce = await this.nextNonce(await wallet.getAddress())
+    const populatedTx = await wallet.populateTransaction(unsignedTx)
+    populatedTx.from = undefined // some signers don't like receiving pre-populated `from`
+    const response = await submitTransaction(wallet, populatedTx, this.provider)
     this.logger.debug('manuallyExecute =>', response.hash)
     const receipt = await response.wait(1, 60_000)
     if (!receipt?.hash) throw new CCIPExecTxNotConfirmedError(response.hash)
