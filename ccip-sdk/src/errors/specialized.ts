@@ -4,7 +4,23 @@ import { isTransientHttpStatus } from '../http-status.ts'
 
 // Chain/Network
 
-/** Thrown when chain not found by chainId, selector, or name. */
+/**
+ * Thrown when chain not found by chainId, selector, or name.
+ *
+ * @example
+ * ```typescript
+ * import { networkInfo } from '@chainlink/ccip-sdk'
+ *
+ * try {
+ *   const info = networkInfo(999999) // Unknown chain
+ * } catch (error) {
+ *   if (error instanceof CCIPChainNotFoundError) {
+ *     console.log(`Chain not found: ${error.context.chainIdOrSelector}`)
+ *     console.log(`Recovery: ${error.recovery}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPChainNotFoundError extends CCIPError {
   override readonly name = 'CCIPChainNotFoundError'
   /** Creates a chain not found error. */
@@ -17,7 +33,20 @@ export class CCIPChainNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when chain family is not supported. */
+/**
+ * Thrown when chain family is not supported.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const chain = await createChain('unsupported-family')
+ * } catch (error) {
+ *   if (error instanceof CCIPChainFamilyUnsupportedError) {
+ *     console.log(`Unsupported family: ${error.context.family}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPChainFamilyUnsupportedError extends CCIPError {
   override readonly name = 'CCIPChainFamilyUnsupportedError'
   /** Creates a chain family unsupported error. */
@@ -30,7 +59,20 @@ export class CCIPChainFamilyUnsupportedError extends CCIPError {
   }
 }
 
-/** Thrown when some method/operation is not supported on a given implementation class. */
+/**
+ * Thrown when a method or operation is not supported on a given implementation class.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.someUnsupportedMethod()
+ * } catch (error) {
+ *   if (error instanceof CCIPMethodUnsupportedError) {
+ *     console.log(`Method not supported: ${error.context.class}.${error.context.method}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMethodUnsupportedError extends CCIPError {
   override readonly name = 'CCIPMethodUnsupportedError'
   /** Creates a method unsupported error. */
@@ -45,7 +87,22 @@ export class CCIPMethodUnsupportedError extends CCIPError {
 
 // Block & Transaction
 
-/** Thrown when block not found. Transient: block may not be indexed yet. */
+/**
+ * Thrown when block not found. Transient: block may not be indexed yet.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const timestamp = await chain.getBlockTimestamp(999999999)
+ * } catch (error) {
+ *   if (error instanceof CCIPBlockNotFoundError) {
+ *     if (error.isTransient) {
+ *       console.log(`Block not indexed yet, retry in ${error.retryAfterMs}ms`)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPBlockNotFoundError extends CCIPError {
   override readonly name = 'CCIPBlockNotFoundError'
   /** Creates a block not found error. */
@@ -59,7 +116,23 @@ export class CCIPBlockNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when transaction not found. Transient: tx may be pending. */
+/**
+ * Thrown when transaction not found. Transient: tx may be pending.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const tx = await chain.getTransaction('0x1234...')
+ * } catch (error) {
+ *   if (error instanceof CCIPTransactionNotFoundError) {
+ *     if (error.isTransient) {
+ *       await sleep(error.retryAfterMs ?? 5000)
+ *       // Retry the operation
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTransactionNotFoundError extends CCIPError {
   override readonly name = 'CCIPTransactionNotFoundError'
   /** Creates a transaction not found error. */
@@ -75,7 +148,20 @@ export class CCIPTransactionNotFoundError extends CCIPError {
 
 // CCIP Message
 
-/** Thrown when message format is invalid. */
+/**
+ * Thrown when message format is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const message = EVMChain.decodeMessage(invalidLog)
+ * } catch (error) {
+ *   if (error instanceof CCIPMessageInvalidError) {
+ *     console.log(`Invalid message format: ${error.message}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMessageInvalidError extends CCIPError {
   override readonly name = 'CCIPMessageInvalidError'
   /** Creates a message invalid error. */
@@ -89,7 +175,22 @@ export class CCIPMessageInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when no CCIPSendRequested event in tx. Transient: tx may not be indexed. */
+/**
+ * Thrown when no CCIPSendRequested event in tx. Transient: tx may not be indexed.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const messages = await chain.getMessagesInTx('0x1234...')
+ * } catch (error) {
+ *   if (error instanceof CCIPMessageNotFoundInTxError) {
+ *     if (error.isTransient) {
+ *       console.log(`Message not indexed yet, retry in ${error.retryAfterMs}ms`)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMessageNotFoundInTxError extends CCIPError {
   override readonly name = 'CCIPMessageNotFoundInTxError'
   /** Creates a message not found in transaction error. */
@@ -107,7 +208,22 @@ export class CCIPMessageNotFoundInTxError extends CCIPError {
   }
 }
 
-/** Thrown when message with messageId not found. Transient: message may be in transit. */
+/**
+ * Thrown when message with messageId not found. Transient: message may be in transit.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const request = await getMessageById(chain, messageId, onRamp)
+ * } catch (error) {
+ *   if (error instanceof CCIPMessageIdNotFoundError) {
+ *     if (error.isTransient) {
+ *       console.log(`Message in transit, retry in ${error.retryAfterMs}ms`)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMessageIdNotFoundError extends CCIPError {
   override readonly name = 'CCIPMessageIdNotFoundError'
   /** Creates a message ID not found error. */
@@ -125,7 +241,21 @@ export class CCIPMessageIdNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when messageId format is invalid. */
+/**
+ * Thrown when messageId format is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const request = await chain.getMessageById('invalid-format')
+ * } catch (error) {
+ *   if (error instanceof CCIPMessageIdValidationError) {
+ *     console.log(`Invalid messageId: ${error.message}`)
+ *     // Not transient - fix the messageId format
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMessageIdValidationError extends CCIPError {
   override readonly name = 'CCIPMessageIdValidationError'
   /** Creates a message ID validation error. */
@@ -137,7 +267,23 @@ export class CCIPMessageIdValidationError extends CCIPError {
   }
 }
 
-/** Thrown when not all messages in batch were found. Transient: may still be indexing. */
+/**
+ * Thrown when not all messages in batch were found. Transient: may still be indexing.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const messages = await getMessagesInBatch(chain, request, commit)
+ * } catch (error) {
+ *   if (error instanceof CCIPMessageBatchIncompleteError) {
+ *     console.log(`Found ${error.context.foundSeqNums.length} of expected range`)
+ *     if (error.isTransient) {
+ *       await sleep(error.retryAfterMs ?? 30000)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMessageBatchIncompleteError extends CCIPError {
   override readonly name = 'CCIPMessageBatchIncompleteError'
   /** Creates a message batch incomplete error. */
@@ -159,7 +305,20 @@ export class CCIPMessageBatchIncompleteError extends CCIPError {
   }
 }
 
-/** Thrown when message not in expected batch. */
+/**
+ * Thrown when message not in expected batch.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const proof = calculateManualExecProof(messages, lane, messageId)
+ * } catch (error) {
+ *   if (error instanceof CCIPMessageNotInBatchError) {
+ *     console.log(`Message ${error.context.messageId} not in batch range`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMessageNotInBatchError extends CCIPError {
   override readonly name = 'CCIPMessageNotInBatchError'
   /** Creates a message not in batch error. */
@@ -180,7 +339,21 @@ export class CCIPMessageNotInBatchError extends CCIPError {
   }
 }
 
-/** Thrown when message retrieval fails via both API and RPC. */
+/**
+ * Thrown when message retrieval fails via both API and RPC.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const request = await chain.getMessageById('0xabc123...')
+ * } catch (error) {
+ *   if (error instanceof CCIPMessageRetrievalError) {
+ *     console.log(`Failed to retrieve message: ${error.message}`)
+ *     console.log(`Recovery: ${error.recovery}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMessageRetrievalError extends CCIPError {
   override readonly name = 'CCIPMessageRetrievalError'
   /** Creates a message retrieval error with both API and RPC failure context. */
@@ -214,7 +387,21 @@ export class CCIPMessageRetrievalError extends CCIPError {
 
 // Lane & Routing
 
-/** Thrown when no offRamp found for lane. */
+/**
+ * Thrown when no offRamp found for lane.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const offRamp = await discoverOffRamp(source, dest, request)
+ * } catch (error) {
+ *   if (error instanceof CCIPOffRampNotFoundError) {
+ *     console.log(`No offRamp for ${error.context.onRamp} on ${error.context.destNetwork}`)
+ *     console.log(`Recovery: ${error.recovery}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPOffRampNotFoundError extends CCIPError {
   override readonly name = 'CCIPOffRampNotFoundError'
   /** Creates an offRamp not found error. */
@@ -231,7 +418,20 @@ export class CCIPOffRampNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when onRamp required but not provided. */
+/**
+ * Thrown when onRamp required but not provided.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const lane = await chain.getLaneForOnRamp(undefined)
+ * } catch (error) {
+ *   if (error instanceof CCIPOnRampRequiredError) {
+ *     console.log('onRamp address is required for this operation')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPOnRampRequiredError extends CCIPError {
   override readonly name = 'CCIPOnRampRequiredError'
   /** Creates an onRamp required error. */
@@ -243,7 +443,20 @@ export class CCIPOnRampRequiredError extends CCIPError {
   }
 }
 
-/** Thrown when lane not found between source and destination chains. */
+/**
+ * Thrown when lane not found between source and destination chains.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const lane = await discoverLane(sourceChainSelector, destChainSelector)
+ * } catch (error) {
+ *   if (error instanceof CCIPLaneNotFoundError) {
+ *     console.log(`No lane: ${error.context.sourceChainSelector} → ${error.context.destChainSelector}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPLaneNotFoundError extends CCIPError {
   override readonly name = 'CCIPLaneNotFoundError'
   /** Creates a lane not found error. */
@@ -262,7 +475,22 @@ export class CCIPLaneNotFoundError extends CCIPError {
 
 // Commit & Merkle
 
-/** Thrown when commit report not found. Transient: DON may not have committed yet. */
+/**
+ * Thrown when commit report not found. Transient: DON may not have committed yet.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const commit = await chain.getCommitReport({ commitStore, request })
+ * } catch (error) {
+ *   if (error instanceof CCIPCommitNotFoundError) {
+ *     if (error.isTransient) {
+ *       console.log(`Commit pending, retry in ${error.retryAfterMs}ms`)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPCommitNotFoundError extends CCIPError {
   override readonly name = 'CCIPCommitNotFoundError'
   /** Creates a commit not found error. */
@@ -280,7 +508,20 @@ export class CCIPCommitNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when merkle root verification fails. */
+/**
+ * Thrown when merkle root verification fails.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const proof = calculateManualExecProof(messages, lane, messageId, merkleRoot)
+ * } catch (error) {
+ *   if (error instanceof CCIPMerkleRootMismatchError) {
+ *     console.log(`Root mismatch: expected=${error.context.expected}, got=${error.context.got}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMerkleRootMismatchError extends CCIPError {
   override readonly name = 'CCIPMerkleRootMismatchError'
   /** Creates a merkle root mismatch error. */
@@ -297,7 +538,20 @@ export class CCIPMerkleRootMismatchError extends CCIPError {
   }
 }
 
-/** Thrown when attempting to create tree without leaves. */
+/**
+ * Thrown when attempting to create tree without leaves.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const root = createMerkleTree([])
+ * } catch (error) {
+ *   if (error instanceof CCIPMerkleTreeEmptyError) {
+ *     console.log('Cannot create merkle tree without messages')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMerkleTreeEmptyError extends CCIPError {
   override readonly name = 'CCIPMerkleTreeEmptyError'
   /** Creates a merkle tree empty error. */
@@ -315,7 +569,20 @@ export class CCIPMerkleTreeEmptyError extends CCIPError {
 
 // Version
 
-/** Thrown when CCIP version not supported. */
+/**
+ * Thrown when CCIP version not supported.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const [type, version] = await chain.typeAndVersion(contractAddress)
+ * } catch (error) {
+ *   if (error instanceof CCIPVersionUnsupportedError) {
+ *     console.log(`Version ${error.context.version} not supported`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPVersionUnsupportedError extends CCIPError {
   override readonly name = 'CCIPVersionUnsupportedError'
   /** Creates a version unsupported error. */
@@ -328,7 +595,20 @@ export class CCIPVersionUnsupportedError extends CCIPError {
   }
 }
 
-/** Thrown when hasher version not supported for chain. */
+/**
+ * Thrown when hasher version not supported for chain.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const hasher = getLeafHasher(lane)
+ * } catch (error) {
+ *   if (error instanceof CCIPHasherVersionUnsupportedError) {
+ *     console.log(`Hasher not available for ${error.context.chain} v${error.context.version}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPHasherVersionUnsupportedError extends CCIPError {
   override readonly name = 'CCIPHasherVersionUnsupportedError'
   /** Creates a hasher version unsupported error. */
@@ -347,7 +627,20 @@ export class CCIPHasherVersionUnsupportedError extends CCIPError {
 
 // ExtraArgs
 
-/** Thrown when extraArgs cannot be parsed. */
+/**
+ * Thrown when extraArgs cannot be parsed.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const args = decodeExtraArgs(invalidData)
+ * } catch (error) {
+ *   if (error instanceof CCIPExtraArgsParseError) {
+ *     console.log(`Cannot parse extraArgs: ${error.context.from}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPExtraArgsParseError extends CCIPError {
   override readonly name = 'CCIPExtraArgsParseError'
   /** Creates an extraArgs parse error. */
@@ -365,6 +658,17 @@ export class CCIPExtraArgsParseError extends CCIPError {
  *
  * @param chainFamily - Display name for the chain family (user-facing, differs from ChainFamily enum)
  * @param extraArgs - The actual invalid extraArgs value (for debugging)
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const encoded = encodeExtraArgs({ gasLimit: -1n }, 'EVM')
+ * } catch (error) {
+ *   if (error instanceof CCIPExtraArgsInvalidError) {
+ *     console.log(`Invalid extraArgs for ${error.context.chainFamily}`)
+ *   }
+ * }
+ * ```
  */
 export class CCIPExtraArgsInvalidError extends CCIPError {
   override readonly name = 'CCIPExtraArgsInvalidError'
@@ -395,7 +699,20 @@ export class CCIPExtraArgsInvalidError extends CCIPError {
 
 // Token & Registry
 
-/** Thrown when token not found in registry. */
+/**
+ * Thrown when token not found in registry.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const config = await chain.getRegistryTokenConfig(registry, tokenAddress)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenNotInRegistryError) {
+ *     console.log(`Token ${error.context.token} not in ${error.context.registry}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTokenNotInRegistryError extends CCIPError {
   override readonly name = 'CCIPTokenNotInRegistryError'
   /** Creates a token not in registry error. */
@@ -408,7 +725,20 @@ export class CCIPTokenNotInRegistryError extends CCIPError {
   }
 }
 
-/** Thrown when token not configured in registry. */
+/**
+ * Thrown when token not configured in registry.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const pool = await chain.getTokenPoolConfigs(tokenPool)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenNotConfiguredError) {
+ *     console.log(`Token ${error.context.token} not configured`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTokenNotConfiguredError extends CCIPError {
   override readonly name = 'CCIPTokenNotConfiguredError'
   /** Creates a token not configured error. */
@@ -425,7 +755,20 @@ export class CCIPTokenNotConfiguredError extends CCIPError {
   }
 }
 
-/** Thrown when destination token decimals insufficient. */
+/**
+ * Thrown when destination token decimals insufficient.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const amounts = await sourceToDestTokenAmounts(source, dest, tokenAmounts)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenDecimalsInsufficientError) {
+ *     console.log(`Cannot express ${error.context.amount} with ${error.context.destDecimals} decimals`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTokenDecimalsInsufficientError extends CCIPError {
   override readonly name = 'CCIPTokenDecimalsInsufficientError'
   /** Creates a token decimals insufficient error. */
@@ -450,7 +793,20 @@ export class CCIPTokenDecimalsInsufficientError extends CCIPError {
 
 // Contract Type
 
-/** Thrown when contract type is not as expected. */
+/**
+ * Thrown when contract type is not as expected.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const router = await chain.getRouterForOnRamp(address)
+ * } catch (error) {
+ *   if (error instanceof CCIPContractTypeInvalidError) {
+ *     console.log(`${error.context.address} is "${error.context.actualType}", expected ${error.context.expectedTypes}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPContractTypeInvalidError extends CCIPError {
   override readonly name = 'CCIPContractTypeInvalidError'
   /** Creates a contract type invalid error. */
@@ -474,7 +830,20 @@ export class CCIPContractTypeInvalidError extends CCIPError {
 
 // Wallet & Signer
 
-/** Thrown when wallet must be Signer but isn't. */
+/**
+ * Thrown when wallet must be Signer but isn't.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.sendMessage({ ...opts, wallet: provider })
+ * } catch (error) {
+ *   if (error instanceof CCIPWalletNotSignerError) {
+ *     console.log('Wallet must be a Signer to send transactions')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPWalletNotSignerError extends CCIPError {
   override readonly name = 'CCIPWalletNotSignerError'
   /** Creates a wallet not signer error. */
@@ -489,7 +858,22 @@ export class CCIPWalletNotSignerError extends CCIPError {
 
 // Execution
 
-/** Thrown when exec tx not confirmed. Transient: may need more time. */
+/**
+ * Thrown when exec tx not confirmed. Transient: may need more time.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.executeReport({ offRamp, execReport, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCIPExecTxNotConfirmedError) {
+ *     if (error.isTransient) {
+ *       await sleep(error.retryAfterMs ?? 5000)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPExecTxNotConfirmedError extends CCIPError {
   override readonly name = 'CCIPExecTxNotConfirmedError'
   /** Creates an exec transaction not confirmed error. */
@@ -503,7 +887,20 @@ export class CCIPExecTxNotConfirmedError extends CCIPError {
   }
 }
 
-/** Thrown when exec tx reverted. */
+/**
+ * Thrown when exec tx reverted.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.executeReport({ offRamp, execReport, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCIPExecTxRevertedError) {
+ *     console.log(`Execution reverted: ${error.context.txHash}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPExecTxRevertedError extends CCIPError {
   override readonly name = 'CCIPExecTxRevertedError'
   /** Creates an exec transaction reverted error. */
@@ -518,7 +915,22 @@ export class CCIPExecTxRevertedError extends CCIPError {
 
 // Attestation (USDC/LBTC)
 
-/** Thrown when USDC attestation fetch fails. Transient: attestation may not be ready. */
+/**
+ * Thrown when USDC attestation fetch fails. Transient: attestation may not be ready.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const offchainData = await chain.getOffchainTokenData(request)
+ * } catch (error) {
+ *   if (error instanceof CCIPUsdcAttestationError) {
+ *     if (error.isTransient) {
+ *       console.log(`USDC attestation pending, retry in ${error.retryAfterMs}ms`)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPUsdcAttestationError extends CCIPError {
   override readonly name = 'CCIPUsdcAttestationError'
   /** Creates a USDC attestation error. */
@@ -536,7 +948,22 @@ export class CCIPUsdcAttestationError extends CCIPError {
   }
 }
 
-/** Thrown when LBTC attestation fetch fails. Transient: attestation may not be ready. */
+/**
+ * Thrown when LBTC attestation fetch fails. Transient: attestation may not be ready.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const offchainData = await chain.getOffchainTokenData(request)
+ * } catch (error) {
+ *   if (error instanceof CCIPLbtcAttestationError) {
+ *     if (error.isTransient) {
+ *       console.log(`LBTC attestation pending, retry in ${error.retryAfterMs}ms`)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPLbtcAttestationError extends CCIPError {
   override readonly name = 'CCIPLbtcAttestationError'
   /** Creates an LBTC attestation error. */
@@ -554,7 +981,23 @@ export class CCIPLbtcAttestationError extends CCIPError {
   }
 }
 
-/** Thrown when LBTC attestation not found for payload hash. Transient: may not be processed yet. */
+/**
+ * Thrown when LBTC attestation not found for payload hash. Transient: may not be processed yet.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const offchainData = await chain.getOffchainTokenData(request)
+ * } catch (error) {
+ *   if (error instanceof CCIPLbtcAttestationNotFoundError) {
+ *     console.log(`Attestation not found for hash: ${error.context.payloadHash}`)
+ *     if (error.isTransient) {
+ *       await sleep(error.retryAfterMs ?? 30000)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPLbtcAttestationNotFoundError extends CCIPError {
   override readonly name = 'CCIPLbtcAttestationNotFoundError'
   /** Creates an LBTC attestation not found error. */
@@ -572,7 +1015,23 @@ export class CCIPLbtcAttestationNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when LBTC attestation is not yet approved. Transient: may be pending notarization. */
+/**
+ * Thrown when LBTC attestation is not yet approved. Transient: may be pending notarization.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const offchainData = await chain.getOffchainTokenData(request)
+ * } catch (error) {
+ *   if (error instanceof CCIPLbtcAttestationNotApprovedError) {
+ *     console.log(`Attestation pending approval for: ${error.context.payloadHash}`)
+ *     if (error.isTransient) {
+ *       await sleep(error.retryAfterMs ?? 30000)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPLbtcAttestationNotApprovedError extends CCIPError {
   override readonly name = 'CCIPLbtcAttestationNotApprovedError'
   /** Creates an LBTC attestation not approved error. */
@@ -592,7 +1051,22 @@ export class CCIPLbtcAttestationNotApprovedError extends CCIPError {
 
 // Solana
 
-/** Thrown when lookup table not found. Transient: may not be synced yet. */
+/**
+ * Thrown when lookup table not found. Transient: may not be synced yet.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const lookupTable = await solanaChain.getLookupTable(address)
+ * } catch (error) {
+ *   if (error instanceof CCIPSolanaLookupTableNotFoundError) {
+ *     if (error.isTransient) {
+ *       console.log(`Lookup table not synced, retry in ${error.retryAfterMs}ms`)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPSolanaLookupTableNotFoundError extends CCIPError {
   override readonly name = 'CCIPSolanaLookupTableNotFoundError'
   /** Creates a Solana lookup table not found error. */
@@ -612,7 +1086,20 @@ export class CCIPSolanaLookupTableNotFoundError extends CCIPError {
 
 // Aptos
 
-/** Thrown for invalid Aptos transaction hash or version. */
+/**
+ * Thrown for invalid Aptos transaction hash or version.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const tx = await aptosChain.getTransaction('invalid-hash')
+ * } catch (error) {
+ *   if (error instanceof CCIPAptosTransactionInvalidError) {
+ *     console.log(`Invalid tx: ${error.context.hashOrVersion}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPAptosTransactionInvalidError extends CCIPError {
   override readonly name = 'CCIPAptosTransactionInvalidError'
   /** Creates an Aptos transaction invalid error. */
@@ -627,7 +1114,23 @@ export class CCIPAptosTransactionInvalidError extends CCIPError {
 
 // HTTP & Data
 
-/** Thrown for HTTP errors. Transient if 429 or 5xx. */
+/**
+ * Thrown for HTTP errors. Transient if 429 or 5xx.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const latency = await chain.getLaneLatency(destChainSelector)
+ * } catch (error) {
+ *   if (error instanceof CCIPHttpError) {
+ *     console.log(`HTTP ${error.context.status}: ${error.context.statusText}`)
+ *     if (error.isTransient) {
+ *       // 429 or 5xx - safe to retry
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPHttpError extends CCIPError {
   override readonly name = 'CCIPHttpError'
   /** Creates an HTTP error. */
@@ -640,7 +1143,23 @@ export class CCIPHttpError extends CCIPError {
   }
 }
 
-/** Thrown when a request times out. Transient: network may recover. */
+/**
+ * Thrown when a request times out. Transient: network may recover.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const tx = await chain.getTransaction('0x1234...')
+ * } catch (error) {
+ *   if (error instanceof CCIPTimeoutError) {
+ *     console.log(`Operation timed out: ${error.context.operation}`)
+ *     if (error.isTransient) {
+ *       console.log(`Retry in ${error.retryAfterMs}ms`)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTimeoutError extends CCIPError {
   override readonly name = 'CCIPTimeoutError'
   /** Creates a timeout error. */
@@ -654,7 +1173,20 @@ export class CCIPTimeoutError extends CCIPError {
   }
 }
 
-/** Thrown for not implemented features. */
+/**
+ * Thrown for not implemented features.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.someUnimplementedMethod()
+ * } catch (error) {
+ *   if (error instanceof CCIPNotImplementedError) {
+ *     console.log(`Feature not implemented: ${error.context.feature}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPNotImplementedError extends CCIPError {
   override readonly name = 'CCIPNotImplementedError'
   /** Creates a not implemented error. */
@@ -673,7 +1205,20 @@ export class CCIPNotImplementedError extends CCIPError {
 
 // Data Format & Parsing
 
-/** Thrown when data format is not supported. */
+/**
+ * Thrown when data format is not supported.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const parsed = parseData(unknownFormat)
+ * } catch (error) {
+ *   if (error instanceof CCIPDataFormatUnsupportedError) {
+ *     console.log(`Unsupported format: ${error.context.data}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPDataFormatUnsupportedError extends CCIPError {
   override readonly name = 'CCIPDataFormatUnsupportedError'
   /** Creates a data format unsupported error. */
@@ -686,7 +1231,20 @@ export class CCIPDataFormatUnsupportedError extends CCIPError {
   }
 }
 
-/** Thrown when typeAndVersion string cannot be parsed. */
+/**
+ * Thrown when typeAndVersion string cannot be parsed.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const [type, version] = await chain.typeAndVersion(contractAddress)
+ * } catch (error) {
+ *   if (error instanceof CCIPTypeVersionInvalidError) {
+ *     console.log(`Cannot parse: ${error.context.typeAndVersion}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTypeVersionInvalidError extends CCIPError {
   override readonly name = 'CCIPTypeVersionInvalidError'
   /** Creates a type version invalid error. */
@@ -699,7 +1257,20 @@ export class CCIPTypeVersionInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when no block found before timestamp. */
+/**
+ * Thrown when no block found before timestamp.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const block = await chain.getBlockBeforeTimestamp(timestamp)
+ * } catch (error) {
+ *   if (error instanceof CCIPBlockBeforeTimestampNotFoundError) {
+ *     console.log(`No block before timestamp: ${error.context.timestamp}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPBlockBeforeTimestampNotFoundError extends CCIPError {
   override readonly name = 'CCIPBlockBeforeTimestampNotFoundError'
   /** Creates a block before timestamp not found error. */
@@ -716,7 +1287,20 @@ export class CCIPBlockBeforeTimestampNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when message decoding fails. */
+/**
+ * Thrown when message decoding fails.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const message = EVMChain.decodeMessage(log)
+ * } catch (error) {
+ *   if (error instanceof CCIPMessageDecodeError) {
+ *     console.log(`Decode failed: ${error.context.reason}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMessageDecodeError extends CCIPError {
   override readonly name = 'CCIPMessageDecodeError'
   /** Creates a message decode error. */
@@ -733,7 +1317,46 @@ export class CCIPMessageDecodeError extends CCIPError {
   }
 }
 
-/** Thrown when RPC endpoint not found. */
+/**
+ * Thrown when network family is not supported for an operation.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const chain = await Chain.fromUrl(rpcUrl)
+ * } catch (error) {
+ *   if (error instanceof CCIPNetworkFamilyUnsupportedError) {
+ *     console.log(`Unsupported family: ${error.context.family}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPNetworkFamilyUnsupportedError extends CCIPError {
+  override readonly name = 'CCIPNetworkFamilyUnsupportedError'
+  /** Creates a network family unsupported error. */
+  constructor(family: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.NETWORK_FAMILY_UNSUPPORTED, `Unsupported network family: ${family}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, family },
+    })
+  }
+}
+
+/**
+ * Thrown when RPC endpoint not found.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const chain = await EVMChain.fromUrl(rpcUrl)
+ * } catch (error) {
+ *   if (error instanceof CCIPRpcNotFoundError) {
+ *     console.log(`No RPC for chainId: ${error.context.chainId}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPRpcNotFoundError extends CCIPError {
   override readonly name = 'CCIPRpcNotFoundError'
   /** Creates an RPC not found error. */
@@ -746,7 +1369,22 @@ export class CCIPRpcNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when logs not found for filter criteria. */
+/**
+ * Thrown when logs not found for filter criteria. Transient: logs may not be indexed yet.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const logs = await chain.getLogs(filter)
+ * } catch (error) {
+ *   if (error instanceof CCIPLogsNotFoundError) {
+ *     if (error.isTransient) {
+ *       await sleep(error.retryAfterMs ?? 5000)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPLogsNotFoundError extends CCIPError {
   override readonly name = 'CCIPLogsNotFoundError'
   /** Creates a logs not found error. */
@@ -760,7 +1398,20 @@ export class CCIPLogsNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when log topics not found. */
+/**
+ * Thrown when log topics not found.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const logs = await chain.getLogs({ topics: ['0xunknown'] })
+ * } catch (error) {
+ *   if (error instanceof CCIPLogTopicsNotFoundError) {
+ *     console.log(`Topics not matched: ${error.context.topics}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPLogTopicsNotFoundError extends CCIPError {
   override readonly name = 'CCIPLogTopicsNotFoundError'
   /** Creates a log topics not found error. */
@@ -773,10 +1424,23 @@ export class CCIPLogTopicsNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when trying to `watch` logs but giving a fixed `endBlock` */
+/**
+ * Thrown when trying to `watch` logs but giving a fixed `endBlock`.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.watchLogs({ endBlock: 1000 }) // Fixed endBlock not allowed
+ * } catch (error) {
+ *   if (error instanceof CCIPLogsWatchRequiresFinalityError) {
+ *     console.log('Use "latest" or "finalized" for endBlock in watch mode')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPLogsWatchRequiresFinalityError extends CCIPError {
   override readonly name = 'CCIPLogsWatchRequiresFinalityError'
-  /** Creates a watch requires finality error. */
+  /** Creates a logs watch requires finality error. */
   constructor(endBlock?: number | string, options?: CCIPErrorOptions) {
     super(
       CCIPErrorCode.LOGS_WATCH_REQUIRES_FINALITY,
@@ -786,10 +1450,23 @@ export class CCIPLogsWatchRequiresFinalityError extends CCIPError {
   }
 }
 
-/** Thrown when trying to `watch` logs without a start point. */
+/**
+ * Thrown when trying to `watch` logs but no start position provided.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.watchLogs({}) // Missing startBlock or startTime
+ * } catch (error) {
+ *   if (error instanceof CCIPLogsWatchRequiresStartError) {
+ *     console.log('Provide startBlock or startTime for watch mode')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPLogsWatchRequiresStartError extends CCIPError {
   override readonly name = 'CCIPLogsWatchRequiresStartError'
-  /** Creates a watch requires start error. */
+  /** Creates a logs watch requires start error. */
   constructor(options?: CCIPErrorOptions) {
     super(CCIPErrorCode.LOGS_WATCH_REQUIRES_START, `Watch mode requires startBlock or startTime`, {
       ...options,
@@ -798,7 +1475,20 @@ export class CCIPLogsWatchRequiresStartError extends CCIPError {
   }
 }
 
-/** Thrown when address is required for logs filtering, but not provided. */
+/**
+ * Thrown when address is required for logs filtering, but not provided.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getLogs({ topics: [...] }) // Missing address
+ * } catch (error) {
+ *   if (error instanceof CCIPLogsAddressRequiredError) {
+ *     console.log('Contract address is required for this chain')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPLogsAddressRequiredError extends CCIPError {
   override readonly name = 'CCIPLogsAddressRequiredError'
   /** Creates a Solana program address required error. */
@@ -812,7 +1502,20 @@ export class CCIPLogsAddressRequiredError extends CCIPError {
 
 // Chain Family
 
-/** Thrown when network family does not match expected for a Chain constructor. */
+/**
+ * Thrown when network family does not match expected for a Chain constructor.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const chain = new EVMChain(provider, solanaNetworkInfo) // Wrong family
+ * } catch (error) {
+ *   if (error instanceof CCIPChainFamilyMismatchError) {
+ *     console.log(`Expected ${error.context.expected}, got ${error.context.actual}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPChainFamilyMismatchError extends CCIPError {
   override readonly name = 'CCIPChainFamilyMismatchError'
   /** Creates a chain family mismatch error. */
@@ -829,9 +1532,49 @@ export class CCIPChainFamilyMismatchError extends CCIPError {
   }
 }
 
+// Token Pool
+
+/**
+ * Thrown when legacy (pre-1.5) token pools are not supported.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getTokenPoolConfigs(legacyPool)
+ * } catch (error) {
+ *   if (error instanceof CCIPLegacyTokenPoolsUnsupportedError) {
+ *     console.log('Upgrade to CCIP v1.5+ token pools')
+ *   }
+ * }
+ * ```
+ */
+export class CCIPLegacyTokenPoolsUnsupportedError extends CCIPError {
+  override readonly name = 'CCIPLegacyTokenPoolsUnsupportedError'
+  /** Creates a legacy token pools unsupported error. */
+  constructor(options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.LEGACY_TOKEN_POOLS_UNSUPPORTED, 'Legacy <1.5 token pools not supported', {
+      ...options,
+      isTransient: false,
+    })
+  }
+}
+
 // Merkle Validation
 
-/** Thrown when merkle proof is empty. */
+/**
+ * Thrown when merkle proof is empty.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   verifyMerkleProof({ leaves: [], proofs: [] })
+ * } catch (error) {
+ *   if (error instanceof CCIPMerkleProofEmptyError) {
+ *     console.log('Cannot verify empty merkle proof')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMerkleProofEmptyError extends CCIPError {
   override readonly name = 'CCIPMerkleProofEmptyError'
   /** Creates a merkle proof empty error. */
@@ -847,7 +1590,20 @@ export class CCIPMerkleProofEmptyError extends CCIPError {
   }
 }
 
-/** Thrown when merkle leaves or proofs exceed max limit. */
+/**
+ * Thrown when merkle leaves or proofs exceed max limit.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   verifyMerkleProof({ leaves: largeArray, proofs })
+ * } catch (error) {
+ *   if (error instanceof CCIPMerkleProofTooLargeError) {
+ *     console.log(`Proof exceeds limit: ${error.context.limit}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMerkleProofTooLargeError extends CCIPError {
   override readonly name = 'CCIPMerkleProofTooLargeError'
   /** Creates a merkle proof too large error. */
@@ -860,7 +1616,20 @@ export class CCIPMerkleProofTooLargeError extends CCIPError {
   }
 }
 
-/** Thrown when total hashes exceed max merkle tree size. */
+/**
+ * Thrown when total hashes exceed max merkle tree size.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   createMerkleTree(hashes)
+ * } catch (error) {
+ *   if (error instanceof CCIPMerkleHashesTooLargeError) {
+ *     console.log(`${error.context.totalHashes} exceeds limit ${error.context.limit}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMerkleHashesTooLargeError extends CCIPError {
   override readonly name = 'CCIPMerkleHashesTooLargeError'
   /** Creates a merkle hashes too large error. */
@@ -877,7 +1646,20 @@ export class CCIPMerkleHashesTooLargeError extends CCIPError {
   }
 }
 
-/** Thrown when source flags count does not match expected total. */
+/**
+ * Thrown when source flags count does not match expected total.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   verifyMerkleProof({ hashes, sourceFlags })
+ * } catch (error) {
+ *   if (error instanceof CCIPMerkleFlagsMismatchError) {
+ *     console.log(`Hashes: ${error.context.totalHashes}, Flags: ${error.context.flagsLength}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMerkleFlagsMismatchError extends CCIPError {
   override readonly name = 'CCIPMerkleFlagsMismatchError'
   /** Creates a merkle flags mismatch error. */
@@ -894,7 +1676,20 @@ export class CCIPMerkleFlagsMismatchError extends CCIPError {
   }
 }
 
-/** Thrown when proof source flags count does not match proof hashes. */
+/**
+ * Thrown when proof source flags count does not match proof hashes.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   verifyMerkleProof({ sourceFlags, proofs })
+ * } catch (error) {
+ *   if (error instanceof CCIPMerkleProofFlagsMismatchError) {
+ *     console.log(`Flags: ${error.context.sourceProofCount}, Proofs: ${error.context.proofsLength}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMerkleProofFlagsMismatchError extends CCIPError {
   override readonly name = 'CCIPMerkleProofFlagsMismatchError'
   /** Creates a merkle proof flags mismatch error. */
@@ -911,7 +1706,20 @@ export class CCIPMerkleProofFlagsMismatchError extends CCIPError {
   }
 }
 
-/** Thrown when not all proofs were consumed during verification. */
+/**
+ * Thrown when not all proofs were consumed during verification.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   verifyMerkleProof({ leaves, proofs, root })
+ * } catch (error) {
+ *   if (error instanceof CCIPMerkleProofIncompleteError) {
+ *     console.log('Merkle proof verification incomplete')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMerkleProofIncompleteError extends CCIPError {
   override readonly name = 'CCIPMerkleProofIncompleteError'
   /** Creates a merkle proof incomplete error. */
@@ -927,7 +1735,20 @@ export class CCIPMerkleProofIncompleteError extends CCIPError {
   }
 }
 
-/** Thrown on internal merkle computation error. */
+/**
+ * Thrown on internal merkle computation error.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   computeMerkleRoot(hashes)
+ * } catch (error) {
+ *   if (error instanceof CCIPMerkleInternalError) {
+ *     console.log(`Internal merkle error: ${error.message}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPMerkleInternalError extends CCIPError {
   override readonly name = 'CCIPMerkleInternalError'
   /** Creates a merkle internal error. */
@@ -941,7 +1762,20 @@ export class CCIPMerkleInternalError extends CCIPError {
 
 // Address Validation
 
-/** Thrown when EVM address is invalid. */
+/**
+ * Thrown when EVM address is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   EVMChain.getAddress('not-an-address')
+ * } catch (error) {
+ *   if (error instanceof CCIPAddressInvalidEvmError) {
+ *     console.log(`Invalid address: ${error.context.address}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPAddressInvalidEvmError extends CCIPError {
   override readonly name = 'CCIPAddressInvalidEvmError'
   /** Creates an EVM address invalid error. */
@@ -956,7 +1790,20 @@ export class CCIPAddressInvalidEvmError extends CCIPError {
 
 // Version Requirements
 
-/** Thrown when CCIP version requires lane info. */
+/**
+ * Thrown when CCIP version requires lane info.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   EVMChain.decodeCommits(log) // Missing lane for v1.6
+ * } catch (error) {
+ *   if (error instanceof CCIPVersionRequiresLaneError) {
+ *     console.log(`Version ${error.context.version} requires lane parameter`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPVersionRequiresLaneError extends CCIPError {
   override readonly name = 'CCIPVersionRequiresLaneError'
   /** Creates a version requires lane error. */
@@ -973,7 +1820,20 @@ export class CCIPVersionRequiresLaneError extends CCIPError {
   }
 }
 
-/** Thrown when version feature is unavailable. */
+/**
+ * Thrown when version feature is unavailable.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getFeature(oldVersion)
+ * } catch (error) {
+ *   if (error instanceof CCIPVersionFeatureUnavailableError) {
+ *     console.log(`${error.context.feature} requires v${error.context.minVersion}+`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPVersionFeatureUnavailableError extends CCIPError {
   override readonly name = 'CCIPVersionFeatureUnavailableError'
   /** Creates a version feature unavailable error. */
@@ -991,7 +1851,20 @@ export class CCIPVersionFeatureUnavailableError extends CCIPError {
 
 // Contract Validation
 
-/** Thrown when contract is not a Router or expected CCIP contract. */
+/**
+ * Thrown when contract is not a Router or expected CCIP contract.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getRouterForOnRamp(address)
+ * } catch (error) {
+ *   if (error instanceof CCIPContractNotRouterError) {
+ *     console.log(`${error.context.address} is "${error.context.typeAndVersion}"`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPContractNotRouterError extends CCIPError {
   override readonly name = 'CCIPContractNotRouterError'
   /** Creates a contract not router error. */
@@ -1010,7 +1883,20 @@ export class CCIPContractNotRouterError extends CCIPError {
 
 // Log Data
 
-/** Thrown when log data is invalid. */
+/**
+ * Thrown when log data is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const message = EVMChain.decodeMessage(log)
+ * } catch (error) {
+ *   if (error instanceof CCIPLogDataInvalidError) {
+ *     console.log(`Invalid log data: ${error.context.data}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPLogDataInvalidError extends CCIPError {
   override readonly name = 'CCIPLogDataInvalidError'
   /** Creates a log data invalid error. */
@@ -1025,7 +1911,20 @@ export class CCIPLogDataInvalidError extends CCIPError {
 
 // Wallet
 
-/** Thrown when wallet is not a valid signer. */
+/**
+ * Thrown when wallet is not a valid signer.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.sendMessage({ ...opts, wallet: invalidWallet })
+ * } catch (error) {
+ *   if (error instanceof CCIPWalletInvalidError) {
+ *     console.log('Provide a valid signer wallet')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPWalletInvalidError extends CCIPError {
   override readonly name = 'CCIPWalletInvalidError'
   /** Creates a wallet invalid error. */
@@ -1039,7 +1938,20 @@ export class CCIPWalletInvalidError extends CCIPError {
 
 // Source Chain
 
-/** Thrown when source chain is unsupported for EVM hasher. */
+/**
+ * Thrown when source chain is unsupported for EVM hasher.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const hasher = chain.getDestLeafHasher(lane)
+ * } catch (error) {
+ *   if (error instanceof CCIPSourceChainUnsupportedError) {
+ *     console.log(`Unsupported source: ${error.context.chainSelector}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPSourceChainUnsupportedError extends CCIPError {
   override readonly name = 'CCIPSourceChainUnsupportedError'
   /** Creates a source chain unsupported error. */
@@ -1058,7 +1970,22 @@ export class CCIPSourceChainUnsupportedError extends CCIPError {
 
 // Solana-specific errors
 
-/** Thrown when block time cannot be retrieved for a slot. */
+/**
+ * Thrown when block time cannot be retrieved for a slot. Transient: slot may not be indexed.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const timestamp = await solanaChain.getBlockTimestamp(slot)
+ * } catch (error) {
+ *   if (error instanceof CCIPBlockTimeNotFoundError) {
+ *     if (error.isTransient) {
+ *       await sleep(error.retryAfterMs ?? 5000)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPBlockTimeNotFoundError extends CCIPError {
   override readonly name = 'CCIPBlockTimeNotFoundError'
   /** Creates a block time not found error. */
@@ -1072,7 +1999,20 @@ export class CCIPBlockTimeNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when topics are not valid strings. */
+/**
+ * Thrown when topics are not valid strings.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getLogs({ topics: [123] }) // Invalid topic type
+ * } catch (error) {
+ *   if (error instanceof CCIPTopicsInvalidError) {
+ *     console.log('Topics must be string values')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTopicsInvalidError extends CCIPError {
   override readonly name = 'CCIPTopicsInvalidError'
   /** Creates a Solana topics invalid error. */
@@ -1085,7 +2025,22 @@ export class CCIPTopicsInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when reference addresses account not found for offRamp. */
+/**
+ * Thrown when reference addresses account not found for offRamp. Transient: may not be synced.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await solanaChain.getOffRampForRouter(router)
+ * } catch (error) {
+ *   if (error instanceof CCIPSolanaRefAddressesNotFoundError) {
+ *     if (error.isTransient) {
+ *       await sleep(error.retryAfterMs ?? 5000)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPSolanaRefAddressesNotFoundError extends CCIPError {
   override readonly name = 'CCIPSolanaRefAddressesNotFoundError'
   /** Creates a reference addresses not found error. */
@@ -1103,7 +2058,22 @@ export class CCIPSolanaRefAddressesNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when OffRamp events not found in feeQuoter transactions. */
+/**
+ * Thrown when OffRamp events not found in feeQuoter transactions. Transient: events may not be indexed.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await solanaChain.getOffRampsForRouter(router)
+ * } catch (error) {
+ *   if (error instanceof CCIPSolanaOffRampEventsNotFoundError) {
+ *     if (error.isTransient) {
+ *       await sleep(error.retryAfterMs ?? 10000)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPSolanaOffRampEventsNotFoundError extends CCIPError {
   override readonly name = 'CCIPSolanaOffRampEventsNotFoundError'
   /** Creates an offRamp events not found error. */
@@ -1121,7 +2091,20 @@ export class CCIPSolanaOffRampEventsNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when token pool info not found. */
+/**
+ * Thrown when token pool info not found.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getTokenPoolConfigs(tokenPool)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenPoolInfoNotFoundError) {
+ *     console.log(`TokenPool not found: ${error.context.tokenPool}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTokenPoolInfoNotFoundError extends CCIPError {
   override readonly name = 'CCIPTokenPoolInfoNotFoundError'
   /** Creates a token pool info not found error. */
@@ -1134,7 +2117,20 @@ export class CCIPTokenPoolInfoNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when SPL token is invalid or not Token-2022. */
+/**
+ * Thrown when SPL token is invalid or not Token-2022.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await solanaChain.getTokenInfo(tokenAddress)
+ * } catch (error) {
+ *   if (error instanceof CCIPSplTokenInvalidError) {
+ *     console.log(`Invalid SPL token: ${error.context.token}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPSplTokenInvalidError extends CCIPError {
   override readonly name = 'CCIPSplTokenInvalidError'
   /** Creates an SPL token invalid error. */
@@ -1147,7 +2143,20 @@ export class CCIPSplTokenInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when token data cannot be parsed. */
+/**
+ * Thrown when token data cannot be parsed.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getTokenInfo(tokenAddress)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenDataParseError) {
+ *     console.log(`Cannot parse token: ${error.context.token}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTokenDataParseError extends CCIPError {
   override readonly name = 'CCIPTokenDataParseError'
   /** Creates a token data parse error. */
@@ -1160,7 +2169,20 @@ export class CCIPTokenDataParseError extends CCIPError {
   }
 }
 
-/** Thrown when EVMExtraArgsV2 has unsupported length. */
+/**
+ * Thrown when EVMExtraArgsV2 has unsupported length.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   SolanaChain.decodeExtraArgs(data)
+ * } catch (error) {
+ *   if (error instanceof CCIPExtraArgsLengthInvalidError) {
+ *     console.log(`Unsupported length: ${error.context.length}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPExtraArgsLengthInvalidError extends CCIPError {
   override readonly name = 'CCIPExtraArgsLengthInvalidError'
   /** Creates an extraArgs length invalid error. */
@@ -1173,7 +2195,20 @@ export class CCIPExtraArgsLengthInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when Solana can only encode EVMExtraArgsV2 but got different args. */
+/**
+ * Thrown when Solana can only encode EVMExtraArgsV2 but got different args.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   SolanaChain.encodeExtraArgs(unsupportedArgs)
+ * } catch (error) {
+ *   if (error instanceof CCIPSolanaExtraArgsEncodingError) {
+ *     console.log('Use EVMExtraArgsV2 format for Solana')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPSolanaExtraArgsEncodingError extends CCIPError {
   override readonly name = 'CCIPSolanaExtraArgsEncodingError'
   /** Creates a Solana extraArgs encoding error. */
@@ -1189,7 +2224,20 @@ export class CCIPSolanaExtraArgsEncodingError extends CCIPError {
   }
 }
 
-/** Thrown when log data is missing or not a string. */
+/**
+ * Thrown when log data is missing or not a string.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const message = Chain.decodeMessage(log)
+ * } catch (error) {
+ *   if (error instanceof CCIPLogDataMissingError) {
+ *     console.log('Log data is missing or invalid')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPLogDataMissingError extends CCIPError {
   override readonly name = 'CCIPLogDataMissingError'
   /** Creates a log data missing error. */
@@ -1201,7 +2249,20 @@ export class CCIPLogDataMissingError extends CCIPError {
   }
 }
 
-/** Thrown when ExecutionState is invalid. */
+/**
+ * Thrown when ExecutionState is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const receipt = Chain.decodeReceipt(log)
+ * } catch (error) {
+ *   if (error instanceof CCIPExecutionStateInvalidError) {
+ *     console.log(`Invalid state: ${error.context.state}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPExecutionStateInvalidError extends CCIPError {
   override readonly name = 'CCIPExecutionStateInvalidError'
   /** Creates an execution state invalid error. */
@@ -1214,7 +2275,20 @@ export class CCIPExecutionStateInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when execution report message is not for Solana. */
+/**
+ * Thrown when execution report message is not for the expected chain.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.executeReport({ offRamp, execReport, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCIPExecutionReportChainMismatchError) {
+ *     console.log(`Message not for ${error.context.chain}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPExecutionReportChainMismatchError extends CCIPError {
   override readonly name = 'CCIPExecutionReportChainMismatchError'
   /** Creates an execution report chain mismatch error. */
@@ -1227,7 +2301,20 @@ export class CCIPExecutionReportChainMismatchError extends CCIPError {
   }
 }
 
-/** Thrown when token pool state PDA not found. */
+/**
+ * Thrown when token pool state PDA not found.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await solanaChain.getTokenPoolConfigs(tokenPool)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenPoolStateNotFoundError) {
+ *     console.log(`State not found at: ${error.context.tokenPool}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTokenPoolStateNotFoundError extends CCIPError {
   override readonly name = 'CCIPTokenPoolStateNotFoundError'
   /** Creates a token pool state not found error. */
@@ -1244,7 +2331,20 @@ export class CCIPTokenPoolStateNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when ChainConfig not found for token pool and remote chain. */
+/**
+ * Thrown when ChainConfig not found for token pool and remote chain.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getTokenPoolRemotes(tokenPool, destChainSelector)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenPoolChainConfigNotFoundError) {
+ *     console.log(`No config for ${error.context.remoteNetwork}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTokenPoolChainConfigNotFoundError extends CCIPError {
   override readonly name = 'CCIPTokenPoolChainConfigNotFoundError'
   /** Creates a token pool chain config not found error. */
@@ -1268,7 +2368,20 @@ export class CCIPTokenPoolChainConfigNotFoundError extends CCIPError {
 
 // Aptos-specific errors
 
-/** Thrown when Aptos network is unknown. */
+/**
+ * Thrown when Aptos network is unknown.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const chain = await AptosChain.fromUrl('https://unknown-network')
+ * } catch (error) {
+ *   if (error instanceof CCIPAptosNetworkUnknownError) {
+ *     console.log(`Unknown network: ${error.context.url}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPAptosNetworkUnknownError extends CCIPError {
   override readonly name = 'CCIPAptosNetworkUnknownError'
   /** Creates an Aptos network unknown error. */
@@ -1281,7 +2394,20 @@ export class CCIPAptosNetworkUnknownError extends CCIPError {
   }
 }
 
-/** Thrown when Aptos transaction type is invalid. */
+/**
+ * Thrown when Aptos transaction type is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await aptosChain.getMessagesInTx(txHash)
+ * } catch (error) {
+ *   if (error instanceof CCIPAptosTransactionTypeInvalidError) {
+ *     console.log('Expected user_transaction type')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPAptosTransactionTypeInvalidError extends CCIPError {
   override readonly name = 'CCIPAptosTransactionTypeInvalidError'
   /** Creates an Aptos transaction type invalid error. */
@@ -1297,7 +2423,20 @@ export class CCIPAptosTransactionTypeInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when Aptos registry type is invalid. */
+/**
+ * Thrown when Aptos registry type is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await aptosChain.getTokenAdminRegistryFor(registry)
+ * } catch (error) {
+ *   if (error instanceof CCIPAptosRegistryTypeInvalidError) {
+ *     console.log(`Expected TokenAdminRegistry, got: ${error.context.actualType}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPAptosRegistryTypeInvalidError extends CCIPError {
   override readonly name = 'CCIPAptosRegistryTypeInvalidError'
   /** Creates an Aptos registry type invalid error. */
@@ -1314,7 +2453,20 @@ export class CCIPAptosRegistryTypeInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when Aptos log data is invalid. */
+/**
+ * Thrown when Aptos log data is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const message = AptosChain.decodeMessage(log)
+ * } catch (error) {
+ *   if (error instanceof CCIPAptosLogInvalidError) {
+ *     console.log(`Invalid log: ${error.context.log}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPAptosLogInvalidError extends CCIPError {
   override readonly name = 'CCIPAptosLogInvalidError'
   /** Creates an Aptos log invalid error. */
@@ -1327,7 +2479,20 @@ export class CCIPAptosLogInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when Aptos address is invalid. */
+/**
+ * Thrown when Aptos address is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   AptosChain.getAddress('invalid-address')
+ * } catch (error) {
+ *   if (error instanceof CCIPAptosAddressInvalidError) {
+ *     console.log(`Invalid address: ${error.context.address}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPAptosAddressInvalidError extends CCIPError {
   override readonly name = 'CCIPAptosAddressInvalidError'
   /** Creates an Aptos address invalid error. */
@@ -1340,7 +2505,20 @@ export class CCIPAptosAddressInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when Aptos can only encode specific extra args types. */
+/**
+ * Thrown when Aptos can only encode specific extra args types.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   AptosChain.encodeExtraArgs(unsupportedArgs)
+ * } catch (error) {
+ *   if (error instanceof CCIPAptosExtraArgsEncodingError) {
+ *     console.log('Use EVMExtraArgsV2 or SVMExtraArgsV1 for Aptos')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPAptosExtraArgsEncodingError extends CCIPError {
   override readonly name = 'CCIPAptosExtraArgsEncodingError'
   /** Creates an Aptos extraArgs encoding error. */
@@ -1356,7 +2534,20 @@ export class CCIPAptosExtraArgsEncodingError extends CCIPError {
   }
 }
 
-/** Thrown when Aptos wallet is invalid. */
+/**
+ * Thrown when Aptos wallet is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await aptosChain.sendMessage({ ...opts, wallet: invalidWallet })
+ * } catch (error) {
+ *   if (error instanceof CCIPAptosWalletInvalidError) {
+ *     console.log('Provide a valid Aptos account wallet')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPAptosWalletInvalidError extends CCIPError {
   override readonly name = 'CCIPAptosWalletInvalidError'
   /** Creates an Aptos wallet invalid error. */
@@ -1373,7 +2564,20 @@ export class CCIPAptosWalletInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when Aptos expects EVMExtraArgsV2 reports. */
+/**
+ * Thrown when Aptos expects EVMExtraArgsV2 reports.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await aptosChain.executeReport({ offRamp, execReport, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCIPAptosExtraArgsV2RequiredError) {
+ *     console.log('Aptos requires EVMExtraArgsV2 format')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPAptosExtraArgsV2RequiredError extends CCIPError {
   override readonly name = 'CCIPAptosExtraArgsV2RequiredError'
   /** Creates an Aptos EVMExtraArgsV2 required error. */
@@ -1385,7 +2589,20 @@ export class CCIPAptosExtraArgsV2RequiredError extends CCIPError {
   }
 }
 
-/** Thrown when token is not registered in Aptos registry. */
+/**
+ * Thrown when token is not registered in Aptos registry.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await aptosChain.getRegistryTokenConfig(registry, token)
+ * } catch (error) {
+ *   if (error instanceof CCIPAptosTokenNotRegisteredError) {
+ *     console.log(`Token ${error.context.token} not in registry`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPAptosTokenNotRegisteredError extends CCIPError {
   override readonly name = 'CCIPAptosTokenNotRegisteredError'
   /** Creates an Aptos token not registered error. */
@@ -1402,7 +2619,20 @@ export class CCIPAptosTokenNotRegisteredError extends CCIPError {
   }
 }
 
-/** Thrown for unexpected Aptos transaction type. */
+/**
+ * Thrown for unexpected Aptos transaction type.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await aptosChain.getTransaction(txHash)
+ * } catch (error) {
+ *   if (error instanceof CCIPAptosTransactionTypeUnexpectedError) {
+ *     console.log(`Unexpected type: ${error.context.type}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPAptosTransactionTypeUnexpectedError extends CCIPError {
   override readonly name = 'CCIPAptosTransactionTypeUnexpectedError'
   /** Creates an Aptos transaction type unexpected error. */
@@ -1415,7 +2645,20 @@ export class CCIPAptosTransactionTypeUnexpectedError extends CCIPError {
   }
 }
 
-/** Thrown when Aptos address with module is required. */
+/**
+ * Thrown when Aptos address with module is required.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await aptosChain.getLogs({ address: '0x1' }) // Missing module
+ * } catch (error) {
+ *   if (error instanceof CCIPAptosAddressModuleRequiredError) {
+ *     console.log('Provide address with module name')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPAptosAddressModuleRequiredError extends CCIPError {
   override readonly name = 'CCIPAptosAddressModuleRequiredError'
   /** Creates an Aptos address module required error. */
@@ -1431,9 +2674,52 @@ export class CCIPAptosAddressModuleRequiredError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when Aptos topic is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await aptosChain.getLogs({ topics: ['invalid'] })
+ * } catch (error) {
+ *   if (error instanceof CCIPAptosTopicInvalidError) {
+ *     console.log(`Invalid topic: ${error.context.topic}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPAptosTopicInvalidError extends CCIPError {
+  override readonly name = 'CCIPAptosTopicInvalidError'
+  /** Creates an Aptos topic invalid error. */
+  constructor(topic?: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.APTOS_TOPIC_INVALID,
+      topic ? `Unknown topic event handler="${topic}"` : 'single string topic required',
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, topic },
+      },
+    )
+  }
+}
+
 // Borsh
 
-/** Thrown when Borsh type is unknown. */
+/**
+ * Thrown when Borsh type is unknown.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   decodeBorsh(data, 'UnknownType')
+ * } catch (error) {
+ *   if (error instanceof CCIPBorshTypeUnknownError) {
+ *     console.log(`Unknown type: ${error.context.name}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPBorshTypeUnknownError extends CCIPError {
   override readonly name = 'CCIPBorshTypeUnknownError'
   /** Creates a Borsh type unknown error. */
@@ -1446,7 +2732,20 @@ export class CCIPBorshTypeUnknownError extends CCIPError {
   }
 }
 
-/** Thrown when Borsh method is unknown. */
+/**
+ * Thrown when Borsh method is unknown.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   callBorshMethod('unknownMethod')
+ * } catch (error) {
+ *   if (error instanceof CCIPBorshMethodUnknownError) {
+ *     console.log(`Unknown method: ${error.context.method}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPBorshMethodUnknownError extends CCIPError {
   override readonly name = 'CCIPBorshMethodUnknownError'
   /** Creates a Borsh method unknown error. */
@@ -1461,7 +2760,20 @@ export class CCIPBorshMethodUnknownError extends CCIPError {
 
 // CLI & Validation
 
-/** Thrown when CLI argument is invalid. */
+/**
+ * Thrown when CLI argument is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   parseArguments(['--invalid-arg'])
+ * } catch (error) {
+ *   if (error instanceof CCIPArgumentInvalidError) {
+ *     console.log(`${error.context.argument}: ${error.context.reason}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPArgumentInvalidError extends CCIPError {
   override readonly name = 'CCIPArgumentInvalidError'
   /** Creates an argument invalid error. */
@@ -1474,7 +2786,22 @@ export class CCIPArgumentInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when execution receipt not found in tx logs. Transient: receipt may not be indexed yet. */
+/**
+ * Thrown when execution receipt not found in tx logs. Transient: receipt may not be indexed yet.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const receipt = await chain.getExecutionReceiptInTx(txHash)
+ * } catch (error) {
+ *   if (error instanceof CCIPReceiptNotFoundError) {
+ *     if (error.isTransient) {
+ *       await sleep(error.retryAfterMs ?? 5000)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPReceiptNotFoundError extends CCIPError {
   override readonly name = 'CCIPReceiptNotFoundError'
   /** Creates a receipt not found error. */
@@ -1488,7 +2815,20 @@ export class CCIPReceiptNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when data cannot be parsed. */
+/**
+ * Thrown when data cannot be parsed.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const parsed = Chain.parse(data)
+ * } catch (error) {
+ *   if (error instanceof CCIPDataParseError) {
+ *     console.log(`Parse failed for: ${error.context.data}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPDataParseError extends CCIPError {
   override readonly name = 'CCIPDataParseError'
   /** Creates a data parse error. */
@@ -1502,7 +2842,20 @@ export class CCIPDataParseError extends CCIPError {
   }
 }
 
-/** Thrown when token not found in supported tokens list. */
+/**
+ * Thrown when token not found in supported tokens list.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const tokens = await chain.getSupportedTokens(router, destChainSelector)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenNotFoundError) {
+ *     console.log(`Token not found: ${error.context.token}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTokenNotFoundError extends CCIPError {
   override readonly name = 'CCIPTokenNotFoundError'
   /** Creates a token not found error. */
@@ -1534,7 +2887,20 @@ export class CCIPInsufficientBalanceError extends CCIPError {
 
 // Solana-specific (additional)
 
-/** Thrown when router config not found at PDA. */
+/**
+ * Thrown when router config not found at PDA.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await solanaChain.getOnRampForRouter(router, destChainSelector)
+ * } catch (error) {
+ *   if (error instanceof CCIPSolanaRouterConfigNotFoundError) {
+ *     console.log(`Config not found at: ${error.context.configPda}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPSolanaRouterConfigNotFoundError extends CCIPError {
   override readonly name = 'CCIPSolanaRouterConfigNotFoundError'
   /** Creates a Solana router config not found error. */
@@ -1547,7 +2913,20 @@ export class CCIPSolanaRouterConfigNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when fee result from router is invalid. */
+/**
+ * Thrown when fee result from router is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const fee = await solanaChain.getFee(router, message)
+ * } catch (error) {
+ *   if (error instanceof CCIPSolanaFeeResultInvalidError) {
+ *     console.log(`Invalid fee result: ${error.context.result}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPSolanaFeeResultInvalidError extends CCIPError {
   override readonly name = 'CCIPSolanaFeeResultInvalidError'
   /** Creates a Solana fee result invalid error. */
@@ -1560,7 +2939,20 @@ export class CCIPSolanaFeeResultInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when token mint not found. */
+/**
+ * Thrown when token mint not found.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await solanaChain.getTokenInfo(mintAddress)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenMintNotFoundError) {
+ *     console.log(`Mint not found: ${error.context.token}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTokenMintNotFoundError extends CCIPError {
   override readonly name = 'CCIPTokenMintNotFoundError'
   /** Creates a token mint not found error. */
@@ -1573,7 +2965,22 @@ export class CCIPTokenMintNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when token mint exists but is not a valid SPL token (wrong owner program). */
+/**
+ * Thrown when token mint exists but is not a valid SPL token (wrong owner program).
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const tokenInfo = await solanaChain.getTokenInfo(mintAddress)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenMintInvalidError) {
+ *     console.log(`Invalid mint: ${error.context.token}`)
+ *     console.log(`Owner: ${error.context.actualOwner}`)
+ *     console.log(`Expected: ${error.context.expectedOwners.join(' or ')}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTokenMintInvalidError extends CCIPError {
   override readonly name = 'CCIPTokenMintInvalidError'
   /** Creates a token mint invalid error. */
@@ -1596,7 +3003,20 @@ export class CCIPTokenMintInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when token amount is invalid. */
+/**
+ * Thrown when token amount is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.sendMessage({ tokenAmounts: [{ token: '', amount: 0n }] })
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenAmountInvalidError) {
+ *     console.log('Token address and positive amount required')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTokenAmountInvalidError extends CCIPError {
   override readonly name = 'CCIPTokenAmountInvalidError'
   /** Creates a token amount invalid error. */
@@ -1612,7 +3032,21 @@ export class CCIPTokenAmountInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when token account (e.g., Solana ATA) does not exist for holder. */
+/**
+ * Thrown when token account (e.g., Solana ATA) does not exist for holder.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const balance = await solanaChain.getBalance({ address: holder, token: mint })
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenAccountNotFoundError) {
+ *     console.log(`No ATA for token ${error.context.token}`)
+ *     console.log(`Holder: ${error.context.holder}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTokenAccountNotFoundError extends CCIPError {
   override readonly name = 'CCIPTokenAccountNotFoundError'
   /** Creates a token account not found error. */
@@ -1629,7 +3063,22 @@ export class CCIPTokenAccountNotFoundError extends CCIPError {
   }
 }
 
-/** Thrown when transaction not finalized after timeout. */
+/**
+ * Thrown when transaction not finalized after timeout. Transient: may need more time.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.waitFinalized(txHash)
+ * } catch (error) {
+ *   if (error instanceof CCIPTransactionNotFinalizedError) {
+ *     if (error.isTransient) {
+ *       await sleep(error.retryAfterMs ?? 10000)
+ *     }
+ *   }
+ * }
+ * ```
+ */
 export class CCIPTransactionNotFinalizedError extends CCIPError {
   override readonly name = 'CCIPTransactionNotFinalizedError'
   /** Creates a transaction not finalized error. */
@@ -1647,7 +3096,20 @@ export class CCIPTransactionNotFinalizedError extends CCIPError {
   }
 }
 
-/** Thrown when CCTP event decode fails. */
+/**
+ * Thrown when CCTP event decode fails.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const cctpData = decodeCctpEvent(log)
+ * } catch (error) {
+ *   if (error instanceof CCIPCctpDecodeError) {
+ *     console.log(`CCTP decode failed: ${error.context.log}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPCctpDecodeError extends CCIPError {
   override readonly name = 'CCIPCctpDecodeError'
   /** Creates a CCTP decode error. */
@@ -1660,7 +3122,20 @@ export class CCIPCctpDecodeError extends CCIPError {
   }
 }
 
-/** Thrown when Sui hasher version is unsupported. */
+/**
+ * Thrown when Sui hasher version is unsupported.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const hasher = SuiChain.getDestLeafHasher(lane)
+ * } catch (error) {
+ *   if (error instanceof CCIPSuiHasherVersionUnsupportedError) {
+ *     console.log(`Unsupported hasher: ${error.context.version}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPSuiHasherVersionUnsupportedError extends CCIPError {
   override readonly name = 'CCIPSuiHasherVersionUnsupportedError'
   /** Creates a Sui hasher version unsupported error. */
@@ -1677,7 +3152,20 @@ export class CCIPSuiHasherVersionUnsupportedError extends CCIPError {
   }
 }
 
-/** Thrown when Sui message version is invalid. */
+/**
+ * Thrown when Sui message version is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const message = SuiChain.decodeMessage(log)
+ * } catch (error) {
+ *   if (error instanceof CCIPSuiMessageVersionInvalidError) {
+ *     console.log('Only CCIP v1.6 format is supported for Sui')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPSuiMessageVersionInvalidError extends CCIPError {
   override readonly name = 'CCIPSuiMessageVersionInvalidError'
   /** Creates a Sui message version invalid error. */
@@ -1693,10 +3181,31 @@ export class CCIPSuiMessageVersionInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when Sui log data is invalid. */
+/**
+ * Thrown when Sui log data is invalid.
+ *
+ * This error occurs when attempting to decode a Sui event log that doesn't
+ * conform to the expected CCIP message format.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const message = SuiChain.decodeMessage(log)
+ * } catch (error) {
+ *   if (error instanceof CCIPSuiLogInvalidError) {
+ *     console.log('Invalid Sui log format:', error.context.log)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPSuiLogInvalidError extends CCIPError {
   override readonly name = 'CCIPSuiLogInvalidError'
-  /** Creates a Sui log invalid error. */
+  /**
+   * Creates a Sui log invalid error.
+   *
+   * @param log - The invalid log data
+   * @param options - Additional error options
+   */
   constructor(log: unknown, options?: CCIPErrorOptions) {
     super(CCIPErrorCode.LOG_DATA_INVALID, `Invalid sui log: ${String(log)}`, {
       ...options,
@@ -1706,7 +3215,20 @@ export class CCIPSuiLogInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when Solana lane version is unsupported. */
+/**
+ * Thrown when Solana lane version is unsupported.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const lane = await solanaChain.getLane(onRamp, offRamp)
+ * } catch (error) {
+ *   if (error instanceof CCIPSolanaLaneVersionUnsupportedError) {
+ *     console.log(`Unsupported version: ${error.context.version}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPSolanaLaneVersionUnsupportedError extends CCIPError {
   override readonly name = 'CCIPSolanaLaneVersionUnsupportedError'
   /** Creates a Solana lane version unsupported error. */
@@ -1719,7 +3241,20 @@ export class CCIPSolanaLaneVersionUnsupportedError extends CCIPError {
   }
 }
 
-/** Thrown when multiple CCTP events found in transaction. */
+/**
+ * Thrown when multiple CCTP events found in transaction.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const cctpData = await chain.getOffchainTokenData(request)
+ * } catch (error) {
+ *   if (error instanceof CCIPCctpMultipleEventsError) {
+ *     console.log(`Found ${error.context.count} events, expected 1`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPCctpMultipleEventsError extends CCIPError {
   override readonly name = 'CCIPCctpMultipleEventsError'
   /** Creates a CCTP multiple events error. */
@@ -1736,7 +3271,20 @@ export class CCIPCctpMultipleEventsError extends CCIPError {
   }
 }
 
-/** Thrown when compute units exceed limit. */
+/**
+ * Thrown when compute units exceed limit.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await solanaChain.executeReport({ offRamp, execReport, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCIPSolanaComputeUnitsExceededError) {
+ *     console.log(`CU: ${error.context.simulated} > limit ${error.context.limit}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPSolanaComputeUnitsExceededError extends CCIPError {
   override readonly name = 'CCIPSolanaComputeUnitsExceededError'
   /** Creates a compute units exceeded error. */
@@ -1753,7 +3301,20 @@ export class CCIPSolanaComputeUnitsExceededError extends CCIPError {
   }
 }
 
-/** Thrown when Aptos hasher version is unsupported. */
+/**
+ * Thrown when Aptos hasher version is unsupported.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const hasher = AptosChain.getDestLeafHasher(lane)
+ * } catch (error) {
+ *   if (error instanceof CCIPAptosHasherVersionUnsupportedError) {
+ *     console.log(`Unsupported hasher: ${error.context.version}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPAptosHasherVersionUnsupportedError extends CCIPError {
   override readonly name = 'CCIPAptosHasherVersionUnsupportedError'
   /** Creates an Aptos hasher version unsupported error. */
@@ -1772,7 +3333,21 @@ export class CCIPAptosHasherVersionUnsupportedError extends CCIPError {
 
 // API Client
 
-/** Thrown when API client is not available (explicitly opted out). */
+/**
+ * Thrown when API client is not available (explicitly opted out).
+ *
+ * @example
+ * ```typescript
+ * const chain = await EVMChain.fromUrl(rpc, { apiClient: null }) // Opt-out of API
+ * try {
+ *   await chain.getLaneLatency(destChainSelector)
+ * } catch (error) {
+ *   if (error instanceof CCIPApiClientNotAvailableError) {
+ *     console.log('API client disabled - initialize with apiClient or remove opt-out')
+ *   }
+ * }
+ * ```
+ */
 export class CCIPApiClientNotAvailableError extends CCIPError {
   override readonly name = 'CCIPApiClientNotAvailableError'
   /**
@@ -1788,15 +3363,24 @@ export class CCIPApiClientNotAvailableError extends CCIPError {
   }
 }
 
-/** Thrown when API returns hasNextPage=true unexpectedly (more than 100 messages). */
+/**
+ * Thrown when API returns hasNextPage=true unexpectedly (more than 100 messages).
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const messages = await chain.getMessagesInTx(txHash)
+ * } catch (error) {
+ *   if (error instanceof CCIPUnexpectedPaginationError) {
+ *     console.log(`Too many messages in tx: ${error.context.txHash}`)
+ *     console.log(`Message count: ${error.context.messageCount}+`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPUnexpectedPaginationError extends CCIPError {
   override readonly name = 'CCIPUnexpectedPaginationError'
-  /**
-   * Creates an unexpected pagination error.
-   * @param txHash - The transaction hash queried
-   * @param messageCount - Number of messages returned in the response
-   * @param options - Additional error options
-   */
+  /** Creates an unexpected pagination error. */
   constructor(txHash: string, messageCount: number, options?: CCIPErrorOptions) {
     super(
       CCIPErrorCode.API_UNEXPECTED_PAGINATION,
@@ -1812,7 +3396,22 @@ export class CCIPUnexpectedPaginationError extends CCIPError {
 
 // Viem Adapter
 
-/** Thrown when viem adapter encounters an issue. */
+/**
+ * Thrown when viem adapter encounters an issue.
+ *
+ * @example
+ * ```typescript
+ * import { fromViemClient } from '@chainlink/ccip-sdk/viem'
+ *
+ * try {
+ *   const chain = await fromViemClient(viemClient)
+ * } catch (error) {
+ *   if (error instanceof CCIPViemAdapterError) {
+ *     console.log(`Viem adapter error: ${error.message}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCIPViemAdapterError extends CCIPError {
   override readonly name = 'CCIPViemAdapterError'
   /**

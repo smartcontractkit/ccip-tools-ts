@@ -1,0 +1,278 @@
+---
+id: tracking-messages
+title: 'Tracking Messages'
+description: 'Track CCIP messages through sent, committed, and executed stages.'
+sidebar_label: Tracking Messages
+sidebar_position: 1
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Tracking Messages
+
+## Message Lifecycle
+
+A CCIP message passes through three stages:
+
+1. **Sent** - Message emitted on source chain
+2. **Committed** - Merkle root committed on destination chain
+3. **Executed** - Message executed on destination chain
+
+## By Transaction Hash
+
+Use `getMessagesInTx` when you have the source transaction hash. This is the fastest method.
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+const requests = await source.getMessagesInTx('0x1234...')
+
+for (const request of requests) {
+  console.log('Message ID:', request.message.messageId)
+  console.log('Sequence Number:', request.message.sequenceNumber)
+  console.log('Destination:', request.lane.destChainSelector)
+}
+```
+
+## By Message ID
+
+Use `getMessageById` when you only have the message ID:
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+const request = await source.getMessageById('0xabcd1234...')
+
+console.log('Found message in tx:', request.tx.hash)
+console.log('Status:', request.metadata?.status)
+```
+
+The `getMessageById` method uses the CCIP API for fast lookups by message ID.
+
+## By Sender Address
+
+Use `getMessagesForSender` to find all messages from a specific sender:
+
+```typescript
+import { EVMChain, getMessagesForSender } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+for await (const request of getMessagesForSender(
+  source,
+  '0xSenderAddress...',
+  { startBlock: 1000000 }
+)) {
+  console.log('Message ID:', request.message.messageId)
+  console.log('Sent to:', request.lane.destChainSelector)
+}
+```
+
+## Commit Status
+
+Check if a message has been committed on the destination chain:
+
+```typescript
+import { EVMChain, discoverOffRamp } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+const requests = await source.getMessagesInTx('0x1234...')
+const request = requests[0]
+
+const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+
+const commit = await dest.getCommitReport({
+  commitStore: offRamp,
+  request,
+})
+
+if (commit) {
+  console.log('Committed at block:', commit.log.blockNumber)
+  console.log('Merkle root:', commit.report.merkleRoot)
+} else {
+  console.log('Not yet committed')
+}
+```
+
+## Execution Status
+
+Check if a committed message has been executed:
+
+```typescript
+import { EVMChain, ExecutionState } from '@chainlink/ccip-sdk'
+
+const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+for await (const execution of dest.getExecutionReceipts({
+  offRamp,
+  messageId: request.message.messageId,
+  commit,
+})) {
+  console.log('Execution state:', ExecutionState[execution.receipt.state])
+  console.log('Gas used:', execution.receipt.gasUsed)
+
+  if (execution.receipt.state === ExecutionState.Success) {
+    console.log('Message successfully executed')
+  } else if (execution.receipt.state === ExecutionState.Failed) {
+    console.log('Message execution failed - may need manual execution')
+  }
+}
+```
+
+## Complete Example
+
+Track a message through all stages:
+
+```typescript
+import {
+  EVMChain,
+  discoverOffRamp,
+  ExecutionState
+} from '@chainlink/ccip-sdk'
+
+async function trackMessage(sourceTxHash: string) {
+  const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+  const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+  // Stage 1: Get sent message
+  console.log('Fetching sent message...')
+  const requests = await source.getMessagesInTx(sourceTxHash)
+  const request = requests[0]
+  console.log('Message ID:', request.message.messageId)
+
+  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+
+  // Stage 2: Check commit status
+  console.log('Checking commit status...')
+  const commit = await dest.getCommitReport({
+    commitStore: offRamp,
+    request,
+  })
+
+  if (!commit) {
+    console.log('Status: Pending commit')
+    return { status: 'pending_commit', request }
+  }
+  console.log('Committed at block:', commit.log.blockNumber)
+
+  // Stage 3: Check execution status
+  console.log('Checking execution status...')
+  for await (const execution of dest.getExecutionReceipts({
+    offRamp,
+    messageId: request.message.messageId,
+    commit,
+  })) {
+    if (execution.receipt.state === ExecutionState.Success) {
+      console.log('Status: Executed')
+      return { status: 'executed', request, commit, execution }
+    }
+  }
+
+  console.log('Status: Committed, pending execution')
+  return { status: 'pending_execution', request, commit }
+}
+
+const result = await trackMessage('0x1234...')
+```
+
+## Message Status Enum
+
+When using `getMessageById`, the `metadata.status` field indicates the current state:
+
+```typescript
+import { MessageStatus } from '@chainlink/ccip-sdk'
+
+const message = await chain.getMessageById(messageId)
+
+if (message.metadata?.status === MessageStatus.Success) {
+  console.log('Transfer complete!')
+}
+```
+
+| Status | Description |
+|--------|-------------|
+| `Sent` | Message sent on source chain, pending finalization |
+| `SourceFinalized` | Source chain transaction finalized |
+| `Committed` | Commit report accepted on destination chain |
+| `Blessed` | Commit blessed by Risk Management Network |
+| `Verifying` | Message is being verified by the CCIP network |
+| `Verified` | Message has been verified by the CCIP network |
+| `Success` | Message executed successfully on destination |
+| `Failed` | Message execution failed on destination |
+| `Unknown` | API returned an unrecognized status |
+
+If you encounter `MessageStatus.Unknown`, update to the latest SDK version to handle new status values.
+
+## CCIP Explorer Links
+
+Generate links to view messages on the CCIP Explorer:
+
+```typescript
+import { getCCIPExplorerUrl } from '@chainlink/ccip-sdk'
+
+// Link by message ID
+const messageUrl = getCCIPExplorerUrl('msg', messageId)
+console.log('View message:', messageUrl)
+// => 'https://ccip.chain.link/msg/0x...'
+
+// Link by transaction hash
+const txUrl = getCCIPExplorerUrl('tx', txHash)
+console.log('View transaction:', txUrl)
+// => 'https://ccip.chain.link/tx/0x...'
+```
+
+## Polling for Status
+
+Poll until a message reaches a final state:
+
+```typescript
+import { EVMChain, MessageStatus, CCIPMessageIdNotFoundError } from '@chainlink/ccip-sdk'
+
+async function pollMessageStatus(
+  chain: EVMChain,
+  messageId: string,
+  timeoutMs = 30 * 60 * 1000 // 30 minutes
+): Promise<MessageStatus> {
+  const startTime = Date.now()
+  const pollInterval = 10000 // 10 seconds
+
+  while (Date.now() - startTime < timeoutMs) {
+    try {
+      const message = await chain.getMessageById(messageId)
+      const status = message.metadata?.status ?? MessageStatus.Unknown
+
+      console.log('Current status:', MessageStatus[status])
+
+      // Check for final states
+      if (status === MessageStatus.Success || status === MessageStatus.Failed) {
+        return status
+      }
+
+      await new Promise(resolve => setTimeout(resolve, pollInterval))
+    } catch (error) {
+      // Message may not be indexed yet - keep polling
+      if (error instanceof CCIPMessageIdNotFoundError) {
+        console.log('Message not indexed yet, retrying...')
+        await new Promise(resolve => setTimeout(resolve, pollInterval))
+        continue
+      }
+      throw error
+    }
+  }
+
+  throw new Error('Timeout waiting for message completion')
+}
+```
+
+## Related
+
+- [Sending Messages](/sdk/guides/sending-messages) - Send cross-chain messages
+- [Error Handling](/sdk/guides/error-handling) - Handle failures and manual execution
+- [Multi-Chain Support](/sdk/guides/multi-chain) - Work with different blockchain families

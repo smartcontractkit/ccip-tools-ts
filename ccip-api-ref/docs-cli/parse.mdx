@@ -1,0 +1,105 @@
+---
+id: parse
+title: 'parse'
+description: 'Decode hex-encoded error bytes, revert reasons, or call data from CCIP contracts.'
+sidebar_label: parse
+sidebar_position: 5
+custom_edit_url: null
+---
+
+# parse
+
+<ChainSupport />
+
+Decode hex-encoded error bytes, revert reasons, function calls, or event data from CCIP contracts.
+
+## Synopsis
+
+```bash
+ccip-cli parse <data> [options]
+```
+
+Aliases: `parseBytes`, `parseData`, `parse-bytes`, `parse-data`
+
+## Description
+
+The `parse` command decodes hex-encoded bytes into human-readable format. It supports custom errors from CCIP contracts, standard Solidity revert reasons, function call data, and event log data.
+
+## Arguments
+
+| Argument | Type   | Required | Description                 |
+| -------- | ------ | -------- | --------------------------- |
+| `<data>` | string | Yes      | Hex-encoded bytes to decode |
+
+## Options
+
+See [Configuration](/cli/configuration) for global options (`--format`, etc.).
+
+## Command Builder
+
+Build your `parse` command interactively:
+
+<CLIBuilder command="parse" />
+
+## Supported Data Types
+
+| Type           | Description                          | Example Output                                  |
+| -------------- | ------------------------------------ | ----------------------------------------------- |
+| Custom errors  | CCIP contract-specific errors        | `EVM2EVMOnRamp_1.2.0.UnsupportedToken(address)` |
+| Revert reasons | `Error(string)` and `Panic(uint256)` | `Error: "Insufficient balance"`                 |
+| Function calls | Decoded function parameters          | `ccipSend(destinationChainSelector, message)`   |
+| Event data     | Decoded event parameters             | `CCIPSendRequested(message)`                    |
+
+## Use Cases
+
+| Use Case                   | Description                                       |
+| -------------------------- | ------------------------------------------------- |
+| Debug failed transactions  | Decode revert reasons from failed CCIP operations |
+| Analyze execution failures | Understand why manual execution failed            |
+| Inspect call data          | Decode function parameters from transaction input |
+
+## Examples
+
+### Decode an error
+
+```bash
+ccip-cli parse 0xbf16aab6000000000000000000000000779877a7b0d9e8603169ddbd7836e478b4624789
+```
+
+Output:
+
+```text
+Error: EVM2EVMOnRamp_1.2.0.UnsupportedToken(address)
+Args: { token: '0x779877A7B0D9E8603169DdbD7836e478b4624789' }
+```
+
+### Output as JSON
+
+```bash
+ccip-cli parse 0xbf16aab6... --format json
+```
+
+## Behavior
+
+1. Tries each supported chain's ABI decoders
+1. Returns the first successful decode
+1. Recursively decodes nested `returnData` and `error` arguments
+1. Returns "Unknown data" if no decoder matches
+
+## See Also
+
+- [show](/cli/show) - View full message details including any errors
+- [manualExec](/cli/manual-exec) - Retry failed executions
+
+## Exit Codes
+
+| Code | Meaning                                                |
+| ---- | ------------------------------------------------------ |
+| `0`  | Success - data decoded (or "Unknown data" if no match) |
+| `1`  | Error (invalid hex input, missing arguments)           |
+
+Use in scripts:
+
+```bash
+DECODED=$(ccip-cli parse $ERROR_DATA --format json)
+```

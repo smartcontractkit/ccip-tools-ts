@@ -1,0 +1,330 @@
+---
+id: error-reference
+title: 'Error Reference'
+description: 'Complete reference of CCIP SDK errors with error codes, causes, and recovery strategies.'
+sidebar_label: Error Reference
+sidebar_position: 7
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Error Reference
+
+All CCIP SDK errors extend the base `CCIPError` class, providing structured error information including error codes, context, and recovery hints.
+
+## Error Structure
+
+Every `CCIPError` includes:
+
+```typescript
+interface CCIPError {
+  code: CCIPErrorCode      // Machine-readable error code
+  message: string          // Human-readable description
+  context: Record<string, unknown>  // Structured context (IDs, addresses)
+  isTransient: boolean     // True if retry may succeed
+  retryAfterMs?: number    // Suggested retry delay
+  recovery?: string        // Recovery suggestion
+}
+```
+
+## Using Error Utilities
+
+### Type Guard
+
+```typescript
+import { CCIPError } from '@chainlink/ccip-sdk'
+
+try {
+  await chain.getMessagesInTx(txHash)
+} catch (error) {
+  if (CCIPError.isCCIPError(error)) {
+    console.log('Code:', error.code)
+    console.log('Context:', error.context)
+    console.log('Recovery:', error.recovery)
+  }
+}
+```
+
+### Transient Error Detection
+
+```typescript
+import { CCIPError, isTransientError, withRetry } from '@chainlink/ccip-sdk'
+
+// Check if error is transient
+if (CCIPError.isCCIPError(error) && error.isTransient) {
+  // Safe to retry
+  await sleep(error.retryAfterMs ?? 5000)
+}
+
+// Or use built-in retry wrapper
+const result = await withRetry(
+  () => chain.getMessageById(messageId),
+  {
+    maxRetries: 3,
+    initialDelayMs: 1000,
+    backoffMultiplier: 2,
+    maxDelayMs: 30000,
+    respectRetryAfterHint: true,
+  }
+)
+```
+
+### Error Serialization
+
+```typescript
+import { formatErrorForLogging } from '@chainlink/ccip-sdk'
+
+try {
+  await chain.sendMessage(...)
+} catch (error) {
+  // Safe to log (handles non-enumerable properties)
+  console.error(JSON.stringify(formatErrorForLogging(error)))
+}
+```
+
+## Error Categories
+
+### Chain & Network Errors
+
+| Error | Code | When Thrown | Recovery |
+|-------|------|-------------|----------|
+| `CCIPChainNotFoundError` | `CHAIN_NOT_FOUND` | Chain selector/ID not in supported networks | Verify chain is supported by CCIP |
+| `CCIPChainFamilyUnsupportedError` | `CHAIN_FAMILY_UNSUPPORTED` | Chain family not implemented | Use supported chain family (EVM, Solana, Aptos, Sui, TON) |
+| `CCIPChainFamilyMismatchError` | `CHAIN_FAMILY_MISMATCH` | Operation across incompatible chain families | Ensure source/dest chains are compatible |
+| `CCIPRpcNotFoundError` | `RPC_NOT_FOUND` | No RPC endpoint configured | Provide RPC URL via `--rpcs` or environment |
+
+### Transaction & Block Errors
+
+| Error | Code | Transient | When Thrown | Recovery |
+|-------|------|-----------|-------------|----------|
+| `CCIPTransactionNotFoundError` | `TRANSACTION_NOT_FOUND` | Yes | Transaction hash doesn't exist | Verify hash, wait for confirmation |
+| `CCIPBlockNotFoundError` | `BLOCK_NOT_FOUND` | Yes | Block doesn't exist or not finalized | Wait for block finalization |
+| `CCIPTransactionNotFinalizedError` | `TRANSACTION_NOT_FINALIZED` | Yes | Transaction not yet finalized | Wait for finality |
+
+### Message Errors
+
+| Error | Code | Transient | When Thrown | Recovery |
+|-------|------|-----------|-------------|----------|
+| `CCIPMessageNotFoundInTxError` | `MESSAGE_NOT_FOUND_IN_TX` | Yes | Transaction has no CCIP messages | Verify correct transaction hash |
+| `CCIPMessageIdNotFoundError` | `MESSAGE_ID_NOT_FOUND` | Yes | Message ID not found in search | Provide OnRamp hint, expand search range |
+| `CCIPMessageDecodeError` | `MESSAGE_DECODE_FAILED` | No | Failed to decode message data | Check message format compatibility |
+| `CCIPMessageBatchIncompleteError` | `MESSAGE_BATCH_INCOMPLETE` | Yes | Not all messages in batch found | Retry with larger search range |
+| `CCIPMessageInvalidError` | `MESSAGE_INVALID` | No | Message structure is invalid | Verify message fields |
+
+### Lane & Routing Errors
+
+| Error | Code | When Thrown | Recovery |
+|-------|------|-------------|----------|
+| `CCIPOffRampNotFoundError` | `OFFRAMP_NOT_FOUND` | No OffRamp for source→dest lane | Verify lane exists on CCIP |
+| `CCIPLaneNotFoundError` | `LANE_NOT_FOUND` | Lane doesn't exist | Check CCIP lane configuration |
+| `CCIPOnRampRequiredError` | `ONRAMP_REQUIRED` | OnRamp address needed but not provided | Provide OnRamp address |
+
+### Commit & Merkle Errors
+
+| Error | Code | Transient | When Thrown | Recovery |
+|-------|------|-----------|-------------|----------|
+| `CCIPCommitNotFoundError` | `COMMIT_NOT_FOUND` | Yes | Message not yet committed | Wait for DON to commit |
+| `CCIPMerkleRootMismatchError` | `MERKLE_ROOT_MISMATCH` | No | Calculated root doesn't match | Verify all messages in batch |
+| `CCIPMerkleProofEmptyError` | `MERKLE_PROOF_EMPTY` | No | No proof elements | Check message inclusion |
+| `CCIPMerkleTreeEmptyError` | `MERKLE_TREE_EMPTY` | No | No messages to hash | Verify batch contains messages |
+
+### Token Errors
+
+| Error | Code | When Thrown | Recovery |
+|-------|------|-------------|----------|
+| `CCIPTokenNotFoundError` | `TOKEN_NOT_FOUND` | Token address invalid or not found | Verify token address |
+| `CCIPTokenNotConfiguredError` | `TOKEN_NOT_CONFIGURED` | Token not configured in registry | Check TokenAdminRegistry |
+| `CCIPTokenNotInRegistryError` | `TOKEN_NOT_IN_REGISTRY` | Token not in admin registry | Register token with CCIP |
+| `CCIPTokenDecimalsInsufficientError` | `TOKEN_DECIMALS_INSUFFICIENT` | Token decimals too low for transfer | Use different token or adjust amount |
+| `CCIPTokenPoolChainConfigNotFoundError` | `TOKEN_REMOTE_NOT_CONFIGURED` | Remote chain not configured for token | Configure remote chain in pool |
+
+### Execution Errors
+
+| Error | Code | When Thrown | Recovery |
+|-------|------|-------------|----------|
+| `CCIPExecTxRevertedError` | `EXEC_TX_REVERTED` | Manual execution transaction reverted | Check gas limit, receiver contract |
+| `CCIPExecTxNotConfirmedError` | `EXEC_TX_NOT_CONFIRMED` | Execution tx didn't confirm | Increase gas, retry |
+| `CCIPReceiptNotFoundError` | `RECEIPT_NOT_FOUND` | Execution receipt not found | Wait for execution, check offRamp |
+
+### Attestation Errors (USDC/LBTC)
+
+| Error | Code | Transient | When Thrown | Recovery |
+|-------|------|-----------|-------------|----------|
+| `CCIPUsdcAttestationError` | `USDC_ATTESTATION_FAILED` | Yes | USDC attestation service error | Retry after delay |
+| `CCIPLbtcAttestationError` | `LBTC_ATTESTATION_ERROR` | Yes | LBTC attestation service error | Retry after delay |
+| `CCIPLbtcAttestationNotFoundError` | `LBTC_ATTESTATION_NOT_FOUND` | Yes | LBTC attestation not yet available | Wait and retry |
+| `CCIPLbtcAttestationNotApprovedError` | `LBTC_ATTESTATION_NOT_APPROVED` | Yes | LBTC attestation pending approval | Wait for approval |
+
+### Wallet & Signer Errors
+
+| Error | Code | When Thrown | Recovery |
+|-------|------|-------------|----------|
+| `CCIPWalletInvalidError` | `WALLET_INVALID` | Wallet not a valid signer | Provide ethers Signer or use `viemWallet(client)` wrapper |
+| `CCIPWalletNotSignerError` | `WALLET_NOT_SIGNER` | Wallet can't sign transactions | Use wallet with signing capability |
+| `CCIPInsufficientBalanceError` | `INSUFFICIENT_BALANCE` | Insufficient funds for transaction | Add funds to wallet |
+
+### Version Errors
+
+| Error | Code | When Thrown | Recovery |
+|-------|------|-------------|----------|
+| `CCIPVersionUnsupportedError` | `VERSION_UNSUPPORTED` | CCIP version not supported | Use supported version (v1.2, v1.5, v1.6) |
+| `CCIPVersionFeatureUnavailableError` | `VERSION_FEATURE_UNAVAILABLE` | Feature not available in version | Upgrade to newer CCIP version |
+| `CCIPHasherVersionUnsupportedError` | `HASHER_VERSION_UNSUPPORTED` | Hasher not implemented for version | Use supported version |
+
+### HTTP & API Errors
+
+| Error | Code | Transient | When Thrown | Recovery |
+|-------|------|-----------|-------------|----------|
+| `CCIPHttpError` | `HTTP_ERROR` | Yes | HTTP request failed | Retry with backoff |
+| `CCIPTimeoutError` | `TIMEOUT` | Yes | Operation timed out | Increase timeout, retry |
+| `CCIPApiClientNotAvailableError` | `API_CLIENT_NOT_AVAILABLE` | No | API client not configured | Initialize CCIPAPIClient |
+
+### Solana-Specific Errors
+
+| Error | Code | When Thrown | Recovery |
+|-------|------|-------------|----------|
+| `CCIPSolanaComputeUnitsExceededError` | `SOLANA_COMPUTE_UNITS_EXCEEDED` | Transaction exceeded compute units | Increase compute units in extraArgs |
+| `CCIPSolanaLookupTableNotFoundError` | `SOLANA_LOOKUP_TABLE_NOT_FOUND` | Address lookup table not found | Verify router configuration |
+| `CCIPSplTokenInvalidError` | `TOKEN_INVALID_SPL` | Invalid SPL token | Verify token is valid SPL token |
+
+### Aptos-Specific Errors
+
+| Error | Code | When Thrown | Recovery |
+|-------|------|-------------|----------|
+| `CCIPAptosAddressInvalidError` | `ADDRESS_INVALID_APTOS` | Invalid Aptos address format | Use valid Aptos address |
+| `CCIPAptosExtraArgsV2RequiredError` | `EXTRA_ARGS_APTOS_V2_REQUIRED` | EVMExtraArgsV2 required for Aptos | Use EVMExtraArgsV2 with allowOutOfOrderExecution |
+
+### Viem Adapter Errors
+
+| Error | Code | When Thrown | Recovery |
+|-------|------|-------------|----------|
+| `CCIPViemAdapterError` | `VIEM_ADAPTER_ERROR` | Viem client misconfigured | Ensure chain and account are defined on client |
+
+## Handling Patterns
+
+### Basic Error Handling
+
+```typescript
+import { CCIPError, CCIPErrorCode } from '@chainlink/ccip-sdk'
+
+try {
+  const requests = await chain.getMessagesInTx(txHash)
+} catch (error) {
+  if (!CCIPError.isCCIPError(error)) {
+    throw error // Re-throw non-CCIP errors
+  }
+
+  switch (error.code) {
+    case CCIPErrorCode.TRANSACTION_NOT_FOUND:
+      console.log('Transaction not found - verify the hash')
+      break
+    case CCIPErrorCode.MESSAGE_NOT_FOUND_IN_TX:
+      console.log('No CCIP messages in this transaction')
+      break
+    default:
+      console.log('Error:', error.message)
+      if (error.recovery) {
+        console.log('Recovery:', error.recovery)
+      }
+  }
+}
+```
+
+### Retry with Transient Errors
+
+```typescript
+import { CCIPError, withRetry } from '@chainlink/ccip-sdk'
+
+async function getMessageWithRetry(chain, messageId) {
+  return withRetry(
+    async () => {
+      try {
+        return await chain.getMessageById(messageId)
+      } catch (error) {
+        // Convert to CCIPError if needed
+        throw CCIPError.from(error)
+      }
+    },
+    {
+      maxRetries: 5,
+      initialDelayMs: 2000,
+      backoffMultiplier: 2,
+      maxDelayMs: 60000,
+      respectRetryAfterHint: true,
+      logger: console,
+    }
+  )
+}
+```
+
+### Manual Execution Error Recovery
+
+```typescript
+import {
+  CCIPError,
+  CCIPErrorCode,
+  calculateManualExecProof,
+} from '@chainlink/ccip-sdk'
+
+try {
+  const proof = calculateManualExecProof(
+    messagesInBatch,
+    lane,
+    messageId,
+    expectedMerkleRoot
+  )
+} catch (error) {
+  if (!CCIPError.isCCIPError(error)) throw error
+
+  switch (error.code) {
+    case CCIPErrorCode.MERKLE_ROOT_MISMATCH:
+      console.log('Merkle root mismatch')
+      console.log('Expected:', error.context.expected)
+      console.log('Calculated:', error.context.calculated)
+      console.log('Check if all messages in batch are included')
+      break
+
+    case CCIPErrorCode.MESSAGE_NOT_IN_BATCH:
+      console.log('Message not in batch')
+      console.log('Message ID:', error.context.messageId)
+      console.log('Verify sequence number range')
+      break
+
+    case CCIPErrorCode.MESSAGE_BATCH_INCOMPLETE:
+      console.log('Batch incomplete - retry with larger range')
+      break
+  }
+}
+```
+
+## Transient Error Codes
+
+These errors may succeed on retry:
+
+```typescript
+const TRANSIENT_CODES = [
+  'BLOCK_NOT_FOUND',
+  'TRANSACTION_NOT_FOUND',
+  'BLOCK_TIME_NOT_FOUND',
+  'TRANSACTION_NOT_FINALIZED',
+  'MESSAGE_NOT_FOUND_IN_TX',
+  'MESSAGE_ID_NOT_FOUND',
+  'MESSAGE_BATCH_INCOMPLETE',
+  'COMMIT_NOT_FOUND',
+  'RECEIPT_NOT_FOUND',
+  'USDC_ATTESTATION_FAILED',
+  'LBTC_ATTESTATION_ERROR',
+  'LBTC_ATTESTATION_NOT_FOUND',
+  'HTTP_ERROR',
+  'TIMEOUT',
+  'SOLANA_LOOKUP_TABLE_NOT_FOUND',
+  'SOLANA_REF_ADDRESSES_NOT_FOUND',
+]
+```
+
+## Related
+
+- [Error Handling Guide](/sdk/guides/error-handling) - Practical error handling patterns
+- [Manual Execution](/sdk/guides/manual-execution) - Handle execution failures
+- [CCIPError Class](/sdk/classes/CCIPError) - Base error class reference

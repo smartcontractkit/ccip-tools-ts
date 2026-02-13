@@ -1,0 +1,276 @@
+---
+id: token-pools
+title: 'Token Pools'
+description: 'Query token pool configuration, rate limits, and remote chain settings.'
+sidebar_label: Token Pools
+sidebar_position: 7
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Token Pools
+
+Token pools manage cross-chain token transfers. This guide covers how to query pool configuration, rate limits, and remote chain settings.
+
+## Token Pool Architecture
+
+Each supported token has a pool contract that handles:
+- **Lock/Release** or **Burn/Mint** mechanics
+- **Rate limiting** to prevent abuse
+- **Remote chain configuration** for cross-chain routing
+
+## Get Token Pool Address
+
+First, find the token pool address from the Token Admin Registry:
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+// Step 1: Get the Token Admin Registry for the router
+const registryAddress = await chain.getTokenAdminRegistryFor(routerAddress)
+
+// Step 2: Get token configuration from the registry
+const tokenConfig = await chain.getRegistryTokenConfig(registryAddress, tokenAddress)
+const poolAddress = tokenConfig.tokenPool
+
+console.log('Token pool:', poolAddress)
+```
+
+## Get Pool Configuration
+
+Query pool type and version:
+
+<Tabs>
+<TabItem value="evm" label="EVM Chains">
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+const poolConfig = await chain.getTokenPoolConfig(poolAddress)
+
+console.log('Pool type:', poolConfig.typeAndVersion)
+// e.g., "BurnMintTokenPool 1.5.0" or "LockReleaseTokenPool 1.5.0"
+console.log('Token:', poolConfig.token)
+console.log('Router:', poolConfig.router)
+```
+
+</TabItem>
+<TabItem value="solana" label="Solana">
+
+```typescript
+import { SolanaChain } from '@chainlink/ccip-sdk'
+
+const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+
+const poolConfig = await chain.getTokenPoolConfig(poolAddress)
+
+console.log('Pool type:', poolConfig.typeAndVersion ?? 'Unknown')
+console.log('Token:', poolConfig.token)
+console.log('Token Pool Program:', poolConfig.tokenPoolProgram) // Solana-specific
+```
+
+</TabItem>
+</Tabs>
+
+## Get Remote Chain Configuration
+
+Query how the pool connects to other chains:
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+// Get remote configuration for a specific destination
+const remotes = await chain.getTokenPoolRemotes(poolAddress, destChainSelector)
+
+// Extract the first entry (for single-destination queries)
+const remote = Object.values(remotes)[0]
+
+if (remote) {
+  console.log('Remote token:', remote.remoteToken)
+  console.log('Remote pools:', remote.remotePools.join(', '))
+}
+```
+
+## Rate Limits
+
+Token pools use token bucket rate limiters to prevent abuse. There are two directions:
+
+- **Outbound** - Limits tokens leaving the chain
+- **Inbound** - Limits tokens entering the chain
+
+### Check Rate Limit Status
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+const remotes = await chain.getTokenPoolRemotes(poolAddress, destChainSelector)
+const remote = Object.values(remotes)[0]
+
+if (remote) {
+  // Outbound rate limit (null if disabled)
+  if (remote.outboundRateLimiterState) {
+    const { tokens, capacity, rate } = remote.outboundRateLimiterState
+    console.log('Outbound limit:')
+    console.log(`  Available: ${tokens} / ${capacity} tokens`)
+    console.log(`  Refill rate: ${rate} tokens/second`)
+  } else {
+    console.log('Outbound rate limiting disabled')
+  }
+
+  // Inbound rate limit (null if disabled)
+  if (remote.inboundRateLimiterState) {
+    const { tokens, capacity, rate } = remote.inboundRateLimiterState
+    console.log('Inbound limit:')
+    console.log(`  Available: ${tokens} / ${capacity} tokens`)
+    console.log(`  Refill rate: ${rate} tokens/second`)
+  } else {
+    console.log('Inbound rate limiting disabled')
+  }
+}
+```
+
+### RateLimiterState Type
+
+```typescript
+// RateLimiterState is null if rate limiting is disabled
+type RateLimiterState = {
+  tokens: bigint   // Current tokens available in bucket
+  capacity: bigint // Maximum bucket capacity
+  rate: bigint     // Refill rate (tokens per second)
+} | null
+```
+
+### Handle Rate Limit Errors
+
+If your transfer exceeds the available tokens:
+
+```typescript
+import { EVMChain, CCIPError } from '@chainlink/ccip-sdk'
+
+try {
+  const request = await chain.sendMessage({
+    router,
+    destChainSelector,
+    message,
+    wallet,
+  })
+} catch (error) {
+  // Check if it's a rate limit error
+  const parsed = EVMChain.parse(error)
+  if (parsed && Object.values(parsed).some(v =>
+    typeof v === 'string' && v.includes('RateLimitReached')
+  )) {
+    console.log('Rate limit exceeded - try a smaller amount or wait')
+
+    // Check current rate limit status
+    const remotes = await chain.getTokenPoolRemotes(poolAddress, destChainSelector)
+    const remote = Object.values(remotes)[0]
+    if (remote?.outboundRateLimiterState) {
+      const { tokens, rate } = remote.outboundRateLimiterState
+      console.log(`Currently available: ${tokens}`)
+      console.log(`Refill rate: ${rate}/second`)
+    }
+  }
+  throw error
+}
+```
+
+## Complete Example
+
+Query full token pool information for a lane:
+
+```typescript
+import { EVMChain, SolanaChain, networkInfo } from '@chainlink/ccip-sdk'
+
+async function getTokenPoolInfo(
+  chain: EVMChain | SolanaChain,
+  routerAddress: string,
+  tokenAddress: string,
+  destChainSelector: bigint
+) {
+  // Step 1: Get Token Admin Registry
+  const registryAddress = await chain.getTokenAdminRegistryFor(routerAddress)
+  console.log('Registry:', registryAddress)
+
+  // Step 2: Get token configuration
+  const tokenConfig = await chain.getRegistryTokenConfig(registryAddress, tokenAddress)
+  const poolAddress = tokenConfig.tokenPool
+  console.log('Pool:', poolAddress)
+
+  // Step 3: Get pool configuration (use instanceof for type safety)
+  if (chain instanceof EVMChain) {
+    const poolConfig = await chain.getTokenPoolConfig(poolAddress)
+    console.log('Type:', poolConfig.typeAndVersion)
+  } else if (chain instanceof SolanaChain) {
+    const poolConfig = await chain.getTokenPoolConfig(poolAddress)
+    console.log('Type:', poolConfig.typeAndVersion ?? 'Unknown')
+    console.log('Program:', poolConfig.tokenPoolProgram)
+  }
+
+  // Step 4: Get remote chain configuration
+  const remotes = await chain.getTokenPoolRemotes(poolAddress, destChainSelector)
+  const remote = Object.values(remotes)[0]
+
+  if (remote) {
+    const destNetwork = networkInfo(destChainSelector)
+    console.log(`\nRemote chain: ${destNetwork.name}`)
+    console.log('Remote token:', remote.remoteToken)
+    console.log('Remote pools:', remote.remotePools)
+
+    // Rate limits
+    if (remote.outboundRateLimiterState) {
+      const { tokens, capacity, rate } = remote.outboundRateLimiterState
+      const percentAvailable = Number((tokens * 100n) / capacity)
+      console.log(`\nOutbound: ${percentAvailable}% available (${tokens}/${capacity})`)
+      console.log(`Refill: ${rate} tokens/second`)
+    }
+
+    if (remote.inboundRateLimiterState) {
+      const { tokens, capacity, rate } = remote.inboundRateLimiterState
+      const percentAvailable = Number((tokens * 100n) / capacity)
+      console.log(`\nInbound: ${percentAvailable}% available (${tokens}/${capacity})`)
+      console.log(`Refill: ${rate} tokens/second`)
+    }
+  }
+
+  return { registryAddress, poolAddress, remote }
+}
+
+// Usage
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+
+await getTokenPoolInfo(
+  chain,
+  '0xRouterAddress...',
+  '0xTokenAddress...',
+  destSelector
+)
+```
+
+## Pool Types
+
+Common token pool types:
+
+| Type | Mechanism | Use Case |
+|------|-----------|----------|
+| `LockReleaseTokenPool` | Lock on source, release on dest | Native tokens with existing supply |
+| `BurnMintTokenPool` | Burn on source, mint on dest | Wrapped tokens, stablecoins |
+| `LockReleaseTokenPoolAndProxy` | Lock/release with proxy | Upgradeable pools |
+| `BurnMintTokenPoolAndProxy` | Burn/mint with proxy | Upgradeable pools |
+| `USDCTokenPool` | CCTP integration | Native USDC transfers |
+
+## Related
+
+- [Sending Messages](/sdk/guides/sending-messages) - Send token transfers
+- [Error Handling](/sdk/guides/error-handling) - Handle rate limit errors
+- [Multi-Chain Support](/sdk/guides/multi-chain) - Work with different chains

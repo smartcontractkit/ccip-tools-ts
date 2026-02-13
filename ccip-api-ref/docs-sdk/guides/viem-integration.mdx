@@ -1,0 +1,384 @@
+---
+id: viem-integration
+title: 'Viem Integration'
+description: 'Use the CCIP SDK with viem clients for seamless integration with existing viem-based applications.'
+sidebar_label: Viem Integration
+sidebar_position: 5
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Viem Integration
+
+The CCIP SDK provides adapters for [viem](https://viem.sh), allowing you to use existing viem clients with the SDK without managing separate ethers.js providers.
+
+## Installation
+
+The viem adapters are included in the main SDK package:
+
+```bash
+npm install @chainlink/ccip-sdk viem
+```
+
+## Basic Usage
+
+Import from `@chainlink/ccip-sdk/viem`:
+
+```typescript
+import { createPublicClient, http } from 'viem'
+import { mainnet } from 'viem/chains'
+import { fromViemClient } from '@chainlink/ccip-sdk/viem'
+
+// Create a viem public client
+const publicClient = createPublicClient({
+  chain: mainnet,
+  transport: http('https://eth.llamarpc.com'),
+})
+
+// Convert to CCIP EVMChain
+const chain = await fromViemClient(publicClient)
+
+// Use all SDK features
+const messages = await chain.getMessagesInTx('0x1234...')
+console.log('Found', messages.length, 'CCIP messages')
+```
+
+## Supported Transports
+
+The viem adapters work with ALL viem transport types:
+
+<Tabs>
+<TabItem value="http" label="HTTP Transport">
+
+```typescript
+import { createPublicClient, http } from 'viem'
+import { sepolia } from 'viem/chains'
+import { fromViemClient } from '@chainlink/ccip-sdk/viem'
+
+const publicClient = createPublicClient({
+  chain: sepolia,
+  transport: http('https://rpc.sepolia.org'),
+})
+
+const chain = await fromViemClient(publicClient)
+```
+
+</TabItem>
+<TabItem value="websocket" label="WebSocket Transport">
+
+```typescript
+import { createPublicClient, webSocket } from 'viem'
+import { mainnet } from 'viem/chains'
+import { fromViemClient } from '@chainlink/ccip-sdk/viem'
+
+const publicClient = createPublicClient({
+  chain: mainnet,
+  transport: webSocket('wss://eth-mainnet.ws.alchemyapi.io/v2/...'),
+})
+
+const chain = await fromViemClient(publicClient)
+```
+
+</TabItem>
+<TabItem value="injected" label="Injected Provider (MetaMask)">
+
+```typescript
+import { createPublicClient, custom } from 'viem'
+import { mainnet } from 'viem/chains'
+import { fromViemClient } from '@chainlink/ccip-sdk/viem'
+
+// Works with MetaMask, WalletConnect, Coinbase Wallet, etc.
+const publicClient = createPublicClient({
+  chain: mainnet,
+  transport: custom(window.ethereum),
+})
+
+const chain = await fromViemClient(publicClient)
+```
+
+</TabItem>
+<TabItem value="fallback" label="Fallback Transport">
+
+```typescript
+import { createPublicClient, fallback, http } from 'viem'
+import { mainnet } from 'viem/chains'
+import { fromViemClient } from '@chainlink/ccip-sdk/viem'
+
+const publicClient = createPublicClient({
+  chain: mainnet,
+  transport: fallback([
+    http('https://eth.llamarpc.com'),
+    http('https://rpc.ankr.com/eth'),
+    http('https://eth.drpc.org'),
+  ]),
+})
+
+const chain = await fromViemClient(publicClient)
+```
+
+</TabItem>
+</Tabs>
+
+## Signing Transactions
+
+For write operations like `sendMessage`, wrap your viem WalletClient with `viemWallet`:
+
+```typescript
+import { createPublicClient, createWalletClient, http } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
+import { sepolia } from 'viem/chains'
+import { fromViemClient, viemWallet } from '@chainlink/ccip-sdk/viem'
+import { encodeExtraArgs, networkInfo } from '@chainlink/ccip-sdk'
+
+// Create clients
+const transport = http('https://rpc.sepolia.org')
+const account = privateKeyToAccount('0x...')
+
+const publicClient = createPublicClient({
+  chain: sepolia,
+  transport,
+})
+
+const walletClient = createWalletClient({
+  chain: sepolia,
+  transport,
+  account,
+})
+
+// Create CCIP chain
+const chain = await fromViemClient(publicClient)
+
+// Send message with viem wallet
+const router = chain.network.router
+const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+
+const message = {
+  receiver: '0xReceiverAddress...',
+  data: '0x',
+  tokenAmounts: [],
+  feeToken: '0x0000000000000000000000000000000000000000',
+  extraArgs: encodeExtraArgs({
+    gasLimit: 200000n,
+    allowOutOfOrderExecution: true,
+  }),
+}
+
+const fee = await chain.getFee({
+  router,
+  destChainSelector: destSelector,
+  message,
+})
+
+const request = await chain.sendMessage({
+  router,
+  destChainSelector: destSelector,
+  message,
+  wallet: viemWallet(walletClient),
+})
+
+console.log('Message ID:', request.message.messageId)
+```
+
+## Browser Wallet Integration
+
+The viem adapter works seamlessly with browser wallets:
+
+```typescript
+import { createPublicClient, createWalletClient, custom } from 'viem'
+import { mainnet } from 'viem/chains'
+import { fromViemClient, viemWallet } from '@chainlink/ccip-sdk/viem'
+
+// Connect to MetaMask
+const [address] = await window.ethereum.request({
+  method: 'eth_requestAccounts',
+})
+
+const publicClient = createPublicClient({
+  chain: mainnet,
+  transport: custom(window.ethereum),
+})
+
+const walletClient = createWalletClient({
+  chain: mainnet,
+  transport: custom(window.ethereum),
+  account: address,
+})
+
+const chain = await fromViemClient(publicClient)
+
+// Send message - user will be prompted to sign
+const request = await chain.sendMessage({
+  router,
+  destChainSelector: destSelector,
+  message,
+  wallet: viemWallet(walletClient),
+})
+```
+
+## Manual Execution with Viem
+
+Execute stuck messages using viem wallets:
+
+```typescript
+import { fromViemClient, viemWallet } from '@chainlink/ccip-sdk/viem'
+import { calculateManualExecProof, discoverOffRamp } from '@chainlink/ccip-sdk'
+
+const source = await fromViemClient(sourcePublicClient)
+const dest = await fromViemClient(destPublicClient)
+
+// Get the stuck message
+const requests = await source.getMessagesInTx('0x1234...')
+const request = requests[0]
+
+// Find OffRamp and get commit
+const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+const commit = await dest.getCommitReport({ commitStore: offRamp, request })
+
+// Calculate merkle proof
+const messagesInBatch = await source.getMessagesInBatch(request, commit.report)
+
+const proof = calculateManualExecProof(
+  messagesInBatch,
+  request.lane,
+  request.message.messageId,
+  commit.report.merkleRoot
+)
+
+// Execute with viem wallet
+const execution = await dest.executeReport({
+  offRamp,
+  execReport: {
+    ...proof,
+    message: request.message,
+    offchainTokenData: [],
+  },
+  wallet: viemWallet(walletClient),
+})
+
+console.log('Manual execution tx:', execution.log.transactionHash)
+```
+
+## API Reference
+
+### fromViemClient
+
+Creates an EVMChain from a viem PublicClient.
+
+```typescript
+function fromViemClient(
+  client: PublicClient<Transport, Chain>,
+  ctx?: ChainContext
+): Promise<EVMChain>
+```
+
+**Parameters:**
+
+| Parameter | Type                           | Description                        |
+| --------- | ------------------------------ | ---------------------------------- |
+| `client`  | `PublicClient<Transport, Chain>` | viem PublicClient with chain defined |
+| `ctx`     | `ChainContext`                 | Optional context (logger, etc.)    |
+
+**Returns:** `Promise<EVMChain>`
+
+**Throws:** `CCIPViemAdapterError` if client doesn't have a chain defined.
+
+### viemWallet
+
+Converts a viem WalletClient to an ethers-compatible Signer.
+
+```typescript
+function viemWallet(
+  client: WalletClient<Transport, Chain, Account>
+): AbstractSigner
+```
+
+**Parameters:**
+
+| Parameter | Type                                    | Description                              |
+| --------- | --------------------------------------- | ---------------------------------------- |
+| `client`  | `WalletClient<Transport, Chain, Account>` | viem WalletClient with account and chain |
+
+**Returns:** `AbstractSigner` compatible with SDK wallet parameters.
+
+**Throws:** `CCIPViemAdapterError` if client doesn't have account or chain defined.
+
+## Using with Wagmi
+
+When using the SDK with [wagmi](https://wagmi.sh/), you may encounter type mismatches because wagmi's `getPublicClient()` returns a chain-specific typed client.
+
+### Type Bridge Function
+
+Create a type bridge to convert wagmi's client to the SDK's expected type:
+
+```typescript
+import { getPublicClient } from '@wagmi/core'
+import { fromViemClient } from '@chainlink/ccip-sdk/viem'
+import type { PublicClient, Transport, Chain } from 'viem'
+
+// Type bridge for wagmi compatibility
+function toGenericPublicClient(
+  client: ReturnType<typeof getPublicClient>
+): PublicClient<Transport, Chain> {
+  return client as PublicClient<Transport, Chain>
+}
+
+// Usage
+const wagmiClient = getPublicClient(wagmiConfig, { chainId: 11155111 })
+const publicClient = toGenericPublicClient(wagmiClient)
+const chain = await fromViemClient(publicClient)
+```
+
+This cast is safe when both packages use the same viem version.
+
+### Complete Wagmi Example
+
+```typescript
+import { usePublicClient, useWalletClient } from 'wagmi'
+import { fromViemClient, viemWallet } from '@chainlink/ccip-sdk/viem'
+import { networkInfo } from '@chainlink/ccip-sdk'
+import type { PublicClient, Transport, Chain } from 'viem'
+
+function toGenericPublicClient(
+  client: ReturnType<typeof usePublicClient>
+): PublicClient<Transport, Chain> {
+  return client as PublicClient<Transport, Chain>
+}
+
+function MyComponent() {
+  const publicClient = usePublicClient()
+  const { data: walletClient } = useWalletClient()
+
+  async function sendMessage() {
+    if (!publicClient || !walletClient) return
+
+    const chain = await fromViemClient(toGenericPublicClient(publicClient))
+
+    const request = await chain.sendMessage({
+      router: chain.network.router,
+      destChainSelector: networkInfo('avalanche-testnet-fuji').chainSelector,
+      message: {
+        receiver: '0xReceiverAddress...',
+        data: '0x',
+      },
+      wallet: viemWallet(walletClient),
+    })
+
+    console.log('Message ID:', request.message.messageId)
+  }
+
+  return <button onClick={sendMessage}>Send Message</button>
+}
+```
+
+## Requirements
+
+- viem PublicClient must have a `chain` property defined
+- viem WalletClient must have both `chain` and `account` properties defined
+- All viem transport types are supported (http, webSocket, custom, fallback)
+
+## Related
+
+- [Sending Messages](/sdk/guides/sending-messages) - Send cross-chain messages
+- [Error Handling](/sdk/guides/error-handling) - Manual execution and recovery
+- [Multi-Chain Support](/sdk/guides/multi-chain) - Work with multiple chains

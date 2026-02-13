@@ -1,0 +1,60 @@
+---
+id: ccip-api
+title: 'CCIP API v1'
+description: 'REST API for Cross-Chain Interoperability Protocol (CCIP) - Version 1 (Deprecated).'
+sidebar_label: Introduction
+sidebar_position: 0
+hide_title: true
+custom_edit_url: null
+slug: /v1/
+---
+
+import { DeprecationBanner } from '@site/src/components'
+
+# CCIP API v1 (Deprecated)
+
+<DeprecationBanner
+  message="API v1 is deprecated and will be removed in a future release."
+  alternative="Please migrate to [API v2](/api/) which includes additional endpoints and improved response formats."
+/>
+
+REST API for querying cross-chain message data and lane information on the Chainlink Cross-Chain Interoperability Protocol.
+
+<div className="info-grid">
+  <div className="info-item">
+    <span className="info-label">Base URL</span>
+    <code>https://api.ccip.chain.link/v1</code>
+  </div>
+  <div className="info-item">
+    <span className="info-label">Version</span>
+    <span>1.0.0</span>
+  </div>
+  <div className="info-item">
+    <span className="info-label">Format</span>
+    <span>JSON</span>
+  </div>
+  <div className="info-item">
+    <span className="info-label">Status</span>
+    <span style={{ color: 'var(--ifm-color-warning-darkest)' }}>Deprecated</span>
+  </div>
+</div>
+
+## Available Endpoints
+
+| Endpoint                                                 | Description                        |
+| -------------------------------------------------------- | ---------------------------------- |
+| [Get Message](/api/v1/get-message)                       | Retrieve a single message by ID    |
+| [Get Lane Latency](/api/v1/get-lane-latency)             | Get latency metrics for a lane     |
+| [Get Intent Quote](/api/v1/get-intent-quote)             | Create a quote for intent transfer |
+| [Get Intents by Tx Hash](/api/v1/get-intents-by-tx-hash) | Get all intents for a transaction  |
+| [Get Intent by ID](/api/v1/get-intent-by-id)             | Get intent status by ID            |
+
+## Migration to v2
+
+API v2 includes:
+
+- **New endpoints**: `/messages` search, `/verifiers` list
+- **Improved responses**: More detailed message status information
+- **Better documentation**: Interactive playground and code samples
+
+[View API v2 Documentation →](/api/)

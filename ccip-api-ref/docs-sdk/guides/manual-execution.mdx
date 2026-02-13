@@ -1,0 +1,394 @@
+---
+id: manual-execution
+title: 'Manual Execution'
+description: 'Manually execute CCIP messages when automatic execution fails or is delayed.'
+sidebar_label: Manual Execution
+sidebar_position: 6
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Manual Execution
+
+When automatic CCIP message execution fails on the destination chain, you can manually execute the message. This guide covers the complete workflow for manual execution.
+
+## When to Manually Execute
+
+Manual execution is needed when:
+
+- **Receiver contract reverts** - The destination contract throws an error
+- **Insufficient gas limit** - The gas limit set in extraArgs was too low
+- **Rate limiter blocked** - Token transfer exceeded rate limits
+- **Execution timeout** - Automatic execution window expired
+
+## Prerequisites
+
+Before manual execution, ensure:
+
+1. The message has been **committed** on the destination chain
+2. The **source chain finality** period has passed
+3. You have a funded **wallet** on the destination chain
+
+## Step-by-Step Workflow
+
+### Step 1: Get the Original Request
+
+Retrieve the message from the source chain transaction:
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+const sourceTxHash = '0x1234...' // Transaction that sent the CCIP message
+
+// getMessagesInTx throws CCIPMessageNotFoundInTxError if no messages found
+const requests = await source.getMessagesInTx(sourceTxHash)
+const request = requests[0]
+console.log('Message ID:', request.message.messageId)
+console.log('Sequence Number:', request.message.sequenceNumber)
+```
+
+### Step 2: Find the OffRamp Contract
+
+Discover the OffRamp contract on the destination chain:
+
+```typescript
+import { discoverOffRamp } from '@chainlink/ccip-sdk'
+
+const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+console.log('OffRamp address:', offRamp)
+```
+
+### Step 3: Check Execution Status
+
+Verify whether the message needs manual execution:
+
+```typescript
+import { ExecutionState } from '@chainlink/ccip-sdk'
+
+let needsManualExecution = true
+
+for await (const execution of dest.getExecutionReceipts({
+  offRamp,
+  messageId: request.message.messageId,
+})) {
+  console.log('Execution state:', ExecutionState[execution.receipt.state])
+
+  switch (execution.receipt.state) {
+    case ExecutionState.Success:
+      console.log('Message already executed successfully')
+      needsManualExecution = false
+      break
+
+    case ExecutionState.Failed:
+      console.log('Previous execution failed')
+      console.log('Return data:', execution.receipt.returnData)
+      // Can proceed with manual execution
+      break
+
+    case ExecutionState.InProgress:
+      console.log('Execution in progress')
+      // Wait and check again
+      break
+  }
+}
+
+if (!needsManualExecution) {
+  process.exit(0)
+}
+```
+
+### Step 4: Get the Commit Report
+
+Verify the message has been committed:
+
+```typescript
+const commit = await dest.getCommitReport({
+  commitStore: offRamp,
+  request,
+})
+
+if (!commit) {
+  console.log('Message not yet committed')
+  console.log('Wait for the DON to commit the merkle root')
+  process.exit(1)
+}
+
+console.log('Commit found!')
+console.log('Merkle root:', commit.report.merkleRoot)
+console.log('Min sequence:', commit.report.minSeqNr)
+console.log('Max sequence:', commit.report.maxSeqNr)
+console.log('Commit tx:', commit.log.transactionHash)
+```
+
+### Step 5: Fetch All Messages in Batch
+
+Get all messages in the commit batch (needed for merkle proof):
+
+```typescript
+const messagesInBatch = await source.getMessagesInBatch(request, commit.report)
+
+console.log(
+  'Messages in batch:',
+  messagesInBatch.map((m) => m.messageId)
+)
+```
+
+### Step 6: Calculate Merkle Proof
+
+Calculate the merkle proof for your message:
+
+```typescript
+import { calculateManualExecProof } from '@chainlink/ccip-sdk'
+
+const proof = calculateManualExecProof(
+  messagesInBatch,
+  request.lane,
+  request.message.messageId,
+  commit.report.merkleRoot // Optional: validates proof
+)
+
+console.log('Proof calculated successfully')
+console.log('Merkle root:', proof.merkleRoot)
+console.log('Proof hashes:', proof.proofs.length)
+```
+
+### Step 7: Execute the Report
+
+Submit the manual execution transaction:
+
+```typescript
+const execution = await dest.executeReport({
+  offRamp,
+  execReport: {
+    ...proof,
+    message: request.message,
+    offchainTokenData: [], // Empty for non-CCTP tokens
+  },
+  wallet: destWallet,
+})
+
+console.log('Manual execution submitted:', execution.log.transactionHash)
+console.log('Execution confirmed in block:', execution.log.blockNumber)
+```
+
+## Complete Example
+
+```typescript
+import { ethers } from 'ethers'
+import {
+  EVMChain,
+  calculateManualExecProof,
+  discoverOffRamp,
+  ExecutionState,
+} from '@chainlink/ccip-sdk'
+
+async function manuallyExecuteMessage(
+  sourceRpc: string,
+  destRpc: string,
+  sourceTxHash: string,
+  wallet: ethers.Signer
+) {
+  // Connect to chains
+  const source = await EVMChain.fromUrl(sourceRpc)
+  const dest = await EVMChain.fromUrl(destRpc)
+
+  // Step 1: Get the request (throws CCIPMessageNotFoundInTxError if not found)
+  const requests = await source.getMessagesInTx(sourceTxHash)
+  const request = requests[0]
+  console.log('Processing message:', request.message.messageId)
+
+  // Step 2: Find OffRamp
+  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+
+  // Step 3: Check if already executed
+  for await (const execution of dest.getExecutionReceipts({
+    offRamp,
+    messageId: request.message.messageId,
+  })) {
+    if (execution.receipt.state === ExecutionState.Success) {
+      console.log('Already executed')
+      return { status: 'already_executed' }
+    }
+  }
+
+  // Step 4: Get commit
+  const commit = await dest.getCommitReport({ commitStore: offRamp, request })
+  if (!commit) {
+    console.log('Not yet committed')
+    return { status: 'pending_commit' }
+  }
+
+  // Step 5: Get messages in batch
+  const messagesInBatch = await source.getMessagesInBatch(request, commit.report)
+
+  // Step 6: Calculate proof
+  const proof = calculateManualExecProof(
+    messagesInBatch,
+    request.lane,
+    request.message.messageId,
+    commit.report.merkleRoot
+  )
+
+  // Step 7: Execute
+  const execution = await dest.executeReport({
+    offRamp,
+    execReport: {
+      ...proof,
+      message: request.message,
+      offchainTokenData: [],
+    },
+    wallet,
+  })
+
+  console.log('Manual execution tx:', execution.log.transactionHash)
+  return { status: 'executed', txHash: execution.log.transactionHash }
+}
+
+// Usage
+const destProvider = new ethers.JsonRpcProvider('https://rpc.fuji.avax.network')
+const destWallet = new ethers.Wallet(process.env.DEST_PRIVATE_KEY!, destProvider)
+
+await manuallyExecuteMessage(
+  'https://rpc.sepolia.org',
+  'https://rpc.fuji.avax.network',
+  '0xSourceTxHash...',
+  destWallet
+)
+```
+
+## Handling Token Transfers
+
+For messages with token transfers, you may need offchain token data:
+
+### USDC (CCTP) Transfers
+
+For USDC transfers using CCTP, you need to fetch the Circle attestation. The SDK handles this automatically:
+
+```typescript
+// Fetch offchain token data (handles USDC attestations automatically)
+const offchainTokenData = await source.getOffchainTokenData(request)
+
+const execution = await dest.executeReport({
+  offRamp,
+  execReport: {
+    ...proof,
+    message: request.message,
+    offchainTokenData, // Includes USDC attestation if applicable
+  },
+  wallet: destWallet,
+})
+```
+
+### Standard Token Transfers
+
+For non-CCTP tokens, `offchainTokenData` is typically empty:
+
+```typescript
+const execution = await dest.executeReport({
+  offRamp,
+  execReport: {
+    ...proof,
+    message: request.message,
+    offchainTokenData: [], // Empty for standard tokens
+  },
+  wallet: destWallet,
+})
+```
+
+## Troubleshooting
+
+### Merkle Root Mismatch
+
+If you get a merkle root mismatch error:
+
+```typescript
+try {
+  const proof = calculateManualExecProof(
+    messagesInBatch,
+    request.lane,
+    request.message.messageId,
+    commit.report.merkleRoot
+  )
+} catch (error) {
+  if (error.message.includes('Merkle root mismatch')) {
+    console.log('Merkle root mismatch - debugging...')
+
+    // Calculate without validation to see the computed root
+    const unvalidatedProof = calculateManualExecProof(
+      messagesInBatch,
+      request.lane,
+      request.message.messageId
+      // No expectedRoot - skip validation
+    )
+
+    console.log('Computed root:', unvalidatedProof.merkleRoot)
+    console.log('Expected root:', commit.report.merkleRoot)
+    console.log('Messages in batch:', messagesInBatch.length)
+
+    // Common causes:
+    // - Missing messages in batch
+    // - Wrong lane configuration
+    // - Incorrect sequence range
+  }
+}
+```
+
+### Execution Reverts
+
+If manual execution reverts, check:
+
+1. **Gas limit** - Increase gas for the destination execution
+2. **Receiver contract** - Ensure the receiver can handle the message
+3. **Token allowances** - Verify token pool has sufficient liquidity
+
+```typescript
+// Increase gas limit for execution
+const execution = await dest.executeReport({
+  offRamp,
+  execReport: executionReport,
+  wallet: destWallet,
+  gasLimit: 500000, // Override gas limit
+})
+```
+
+### Message Not Found
+
+If the message isn't found on the source chain:
+
+```typescript
+import { networkInfo } from '@chainlink/ccip-sdk'
+
+// Verify you're on the correct source chain
+const sourceNetwork = networkInfo(source.network.chainSelector)
+console.log('Source chain:', sourceNetwork.name)
+
+// Check if the transaction hash is correct
+const tx = await source.provider.getTransaction(sourceTxHash)
+if (!tx) {
+  console.log('Transaction not found - verify the hash and chain')
+}
+```
+
+## Using the CLI
+
+The CLI provides a simpler interface for manual execution:
+
+```bash
+# Execute a stuck message
+ccip-cli manualExec 0xSourceTxHash \
+  --source ethereum-testnet-sepolia \
+  --dest avalanche-testnet-fuji \
+  --wallet $PRIVATE_KEY
+```
+
+See [CLI Manual Exec](/cli/manual-exec) for more options.
+
+## Related
+
+- [Error Handling](/sdk/guides/error-handling) - Error types and recovery
+- [Tracking Messages](/sdk/guides/tracking-messages) - Monitor message status
+- [CLI Manual Exec](/cli/manual-exec) - Command-line manual execution

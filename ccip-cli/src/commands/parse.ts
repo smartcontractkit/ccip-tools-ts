@@ -1,3 +1,21 @@
+/**
+ * CCIP CLI Parse Command
+ *
+ * Parses and decodes various data formats including errors, revert reasons,
+ * function calls, and event data. Supports hex, base64, and chain-specific formats.
+ *
+ * @example
+ * ```bash
+ * # Parse a revert reason
+ * ccip-cli parse 0x08c379a0...
+ *
+ * # Parse event data
+ * ccip-cli parse 0xEventData...
+ * ```
+ *
+ * @packageDocumentation
+ */
+
 import {
   CCIPDataParseError,
   bigIntReplacer,

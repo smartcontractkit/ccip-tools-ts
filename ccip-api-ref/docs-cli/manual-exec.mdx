@@ -1,0 +1,183 @@
+---
+id: manual-exec
+title: 'manualExec'
+description: 'Manually execute pending or failed CCIP messages on the destination chain.'
+sidebar_label: manualExec
+sidebar_position: 4
+custom_edit_url: null
+---
+
+# manualExec
+
+<ChainSupport />
+
+Manually execute pending or failed CCIP messages on the destination chain.
+
+## Synopsis
+
+```bash
+ccip-cli manualExec <tx-hash> [options]
+```
+
+## Description
+
+The `manualExec` command allows you to manually trigger the execution of a CCIP message that is stuck or has failed. It retrieves the original request, calculates the merkle proof, fetches any required offchain data, and submits the execution transaction.
+
+## Arguments
+
+| Argument    | Type   | Required | Description                                                   |
+| ----------- | ------ | -------- | ------------------------------------------------------------- |
+| `<tx-hash>` | string | Yes      | Transaction hash of the original CCIP request on source chain |
+
+## Options
+
+### Message Selection
+
+| Option        | Type   | Default | Description                                                                            |
+| ------------- | ------ | ------- | -------------------------------------------------------------------------------------- |
+| `--log-index` | number | -       | Select a specific message by log index when multiple messages exist in one transaction |
+
+### Gas Options
+
+| Option                 | Alias                   | Type   | Default | Description                                                                                    |
+| ---------------------- | ----------------------- | ------ | ------- | ---------------------------------------------------------------------------------------------- |
+| `--gas-limit`          | `-L`, `--compute-units` | number | -       | Override gas limit for receiver callback. `0` keeps the original request value.                |
+| `--tokens-gas-limit`   | -                       | number | -       | Override gas limit for token pool `releaseOrMint` calls. `0` keeps original.                   |
+| `--estimate-gas-limit` | -                       | number | -       | Estimate gas limit with percentage margin (e.g., `10` for +10%). Conflicts with `--gas-limit`. |
+
+### Wallet
+
+| Option     | Alias | Type   | Description                                                                                    |
+| ---------- | ----- | ------ | ---------------------------------------------------------------------------------------------- |
+| `--wallet` | `-w`  | string | Wallet for signing transactions. See [Configuration](/cli/configuration#wallet-configuration). |
+
+### Solana-Specific Options
+
+| Option                      | Type    | Default | Description                                                 |
+| --------------------------- | ------- | ------- | ----------------------------------------------------------- |
+| `--force-buffer`            | boolean | `false` | Use buffer for messages too large for a single transaction. |
+| `--force-lookup-table`      | boolean | `false` | Create a lookup table for accounts to fit in transaction.   |
+| `--clear-leftover-accounts` | boolean | `false` | Clear buffers or lookup tables from previous attempts.      |
+
+### Sui-Specific Options
+
+| Option                  | Type     | Default | Description                                               |
+| ----------------------- | -------- | ------- | --------------------------------------------------------- |
+| `--receiver-object-ids` | string[] | -       | Receiver object IDs for Sui execution (e.g., `0xabc...`). |
+
+### Queue Execution
+
+| Option           | Type    | Default | Description                                                                                |
+| ---------------- | ------- | ------- | ------------------------------------------------------------------------------------------ |
+| `--sender-queue` | boolean | `false` | Execute all pending messages from the same sender, starting from the provided transaction. |
+| `--exec-failed`  | boolean | `false` | Include failed messages in queue execution. Requires `--sender-queue`.                     |
+
+See [Configuration](/cli/configuration) for global options (`--rpcs`, `--format`, etc.).
+
+## Command Builder
+
+Build your `manualExec` command interactively:
+
+<CLIBuilder command="manualExec" />
+
+## When to Use
+
+Manual execution is needed when:
+
+| Scenario                           | Description                                      |
+| ---------------------------------- | ------------------------------------------------ |
+| **Message stuck pending**          | DON hasn't executed it within expected timeframe |
+| **Previous execution failed**      | Need to retry with different gas parameters      |
+| **Out-of-order execution blocked** | Earlier message in sender queue failed           |
+
+<Callout type="danger">
+  Manual execution requires the message to be committed but not yet executed. Attempting to manually
+  execute an already-executed message will fail.
+</Callout>
+
+## Examples
+
+### Execute a pending message
+
+```bash
+ccip-cli manualExec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b \
+  --rpc https://eth-sepolia.example.com \
+  --rpc https://arb-sepolia.example.com \
+  --wallet ledger
+```
+
+### Override gas limit
+
+```bash
+ccip-cli manualExec 0xabc123... \
+  --gas-limit 500000 \
+  --wallet ledger
+```
+
+### Estimate and apply gas limit with margin
+
+```bash
+ccip-cli manualExec 0xabc123... \
+  --estimate-gas-limit 15 \
+  --wallet ledger
+```
+
+### Solana execution with buffer
+
+For large messages on Solana:
+
+```bash
+ccip-cli manualExec 0xabc123... \
+  --wallet ledger \
+  --gas-limit 500000 \
+  --force-buffer \
+  --clear-leftover-accounts
+```
+
+### Sui execution with receiver objects
+
+For Sui destinations that require receiver object IDs:
+
+```bash
+ccip-cli manualExec 0xabc123... \
+  --wallet ledger \
+  --receiver-object-ids 0xabc... 0xdef...
+```
+
+## Execution Flow
+
+1. Fetches the original request from the source chain
+1. Retrieves the commit report from the destination chain
+1. Calculates the merkle proof for manual execution
+1. Fetches any required offchain token data (e.g., CCTP attestations)
+1. Submits the execution transaction to the destination chain
+
+## Solana Considerations
+
+Solana transactions have size limits. For large messages:
+
+| Step | Option                      | Description                               |
+| ---- | --------------------------- | ----------------------------------------- |
+| 1    | `--force-buffer`            | Sends report in chunks                    |
+| 2    | `--force-lookup-table`      | Creates address lookup table for accounts |
+| 3    | `--clear-leftover-accounts` | Cleans up from aborted attempts           |
+
+After successful execution, buffers auto-clear. Lookup tables require a grace period before deletion.
+
+## See Also
+
+- [show](/cli/show) - Check message status before executing
+- [Configuration](/cli/configuration) - Wallet setup
+
+## Exit Codes
+
+| Code | Meaning                                                      |
+| ---- | ------------------------------------------------------------ |
+| `0`  | Success - execution transaction submitted                    |
+| `1`  | Error (network failure, execution failed, invalid arguments) |
+
+Use in scripts:
+
+```bash
+ccip-cli manualExec $TX_HASH --wallet ledger --format json || exit $?
+```

@@ -1,0 +1,139 @@
+---
+id: lane-latency
+title: 'laneLatency'
+description: 'Query real-time lane latency between source and destination chains.'
+sidebar_label: laneLatency
+sidebar_position: 7
+custom_edit_url: null
+---
+
+# laneLatency
+
+<ChainSupport />
+
+Query real-time lane latency between source and destination chains.
+
+## Synopsis
+
+```bash
+ccip-cli laneLatency <source> <dest> [options]
+```
+
+Aliases: `lane-latency`
+
+Shorthand: `latency`
+
+## Description
+
+The `laneLatency` command queries the CCIP API to retrieve estimated delivery time for cross-chain messages between a source and destination chain. This helps developers understand expected latency for their CCIP transfers.
+
+The latency estimate includes time for:
+
+- Source chain finality
+- DON (Decentralized Oracle Network) processing
+- Destination chain execution
+
+## Arguments
+
+| Argument   | Type   | Required | Description                                                                              |
+| ---------- | ------ | -------- | ---------------------------------------------------------------------------------------- |
+| `<source>` | string | Yes      | Source network identifier (chainId, selector, or name). Example: `ethereum-mainnet`      |
+| `<dest>`   | string | Yes      | Destination network identifier (chainId, selector, or name). Example: `arbitrum-mainnet` |
+
+## Options
+
+| Option      | Type   | Default                       | Description         |
+| ----------- | ------ | ----------------------------- | ------------------- |
+| `--api-url` | string | `https://api.ccip.chain.link` | Custom CCIP API URL |
+
+See [Configuration](/cli/configuration) for global options (`--format`, `--no-api`, etc.).
+
+:::note
+This command requires API access. If `--no-api` flag is set, the command will fail with an error indicating that API access is required.
+:::
+
+## Command Builder
+
+Build your `laneLatency` command interactively:
+
+<CLIBuilder command="laneLatency" />
+
+## Examples
+
+### Query latency between Ethereum and Arbitrum
+
+```bash
+ccip-cli laneLatency ethereum-mainnet arbitrum-mainnet
+```
+
+### Query using chain selectors
+
+```bash
+ccip-cli laneLatency 5009297550715157269 4949039107694359620
+```
+
+### Query using chain IDs
+
+```bash
+ccip-cli laneLatency 1 42161
+```
+
+### Output as JSON for scripting
+
+```bash
+ccip-cli laneLatency ethereum-mainnet arbitrum-mainnet --format json
+```
+
+### Use custom API endpoint
+
+```bash
+ccip-cli laneLatency ethereum-mainnet arbitrum-mainnet --api-url https://staging-api.example.com
+```
+
+## Output
+
+The command displays lane latency information in a table format:
+
+| Field                  | Description                                                |
+| ---------------------- | ---------------------------------------------------------- |
+| **Source**             | Source network name and chain selector                     |
+| **Destination**        | Destination network name and chain selector                |
+| **Estimated Delivery** | Human-readable estimated delivery time (e.g., ~20 minutes) |
+| **Latency (ms)**       | Estimated latency in milliseconds                          |
+
+### JSON Output
+
+When using `--format json`, the output includes the estimated latency:
+
+```json
+{
+  "totalMs": 1200000
+}
+```
+
+The `totalMs` value represents the estimated delivery time in milliseconds (1200000ms = 20 minutes).
+
+## Behavior
+
+1. Resolves source and destination network identifiers to chain selectors
+2. Queries the CCIP API for lane latency information
+3. Displays results in the requested format (table, JSON, or log)
+
+## See Also
+
+- [show](/cli/show) - Display details of a CCIP request
+- [send](/cli/send) - Send a cross-chain message
+- [Configuration](/cli/configuration) - RPC and output format options
+
+## Exit Codes
+
+| Code | Meaning                                                   |
+| ---- | --------------------------------------------------------- |
+| `0`  | Success - latency information retrieved                   |
+| `1`  | Error (network not found, API failure, invalid arguments) |
+
+Use in scripts:
+
+```bash
+ccip-cli laneLatency ethereum-mainnet arbitrum-mainnet --format json && echo "Success" || echo "Failed"
+```

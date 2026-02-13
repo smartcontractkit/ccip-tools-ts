@@ -1,0 +1,394 @@
+---
+id: multi-chain
+title: 'Multi-Chain'
+description: 'Work with EVM, Solana, Aptos, Sui, and TON chains using the unified SDK interface.'
+sidebar_label: Multi-Chain
+sidebar_position: 4
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Multi-Chain
+
+## Supported Chains
+
+| Chain Class | Family | Networks |
+|-------------|--------|----------|
+| `EVMChain` | EVM | Ethereum, Arbitrum, Optimism, Avalanche, Base, Polygon, BSC |
+| `SolanaChain` | Solana | Solana Mainnet, Devnet |
+| `AptosChain` | Aptos | Aptos Mainnet, Testnet |
+| `SuiChain` | Sui | Sui Mainnet, Testnet |
+| `TONChain` | TON | TON Mainnet, Testnet |
+
+## Connecting
+
+<Tabs>
+<TabItem value="evm" label="EVM">
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+// From RPC URL
+const ethereum = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const arbitrum = await EVMChain.fromUrl('https://sepolia-rollup.arbitrum.io/rpc')
+
+// With custom logger
+const chain = await EVMChain.fromUrl(
+  'https://rpc.sepolia.org',
+  { logger: console }
+)
+
+console.log('Connected to:', chain.network.name)
+console.log('Chain selector:', chain.network.chainSelector)
+```
+
+</TabItem>
+<TabItem value="solana" label="Solana">
+
+```typescript
+import { SolanaChain } from '@chainlink/ccip-sdk'
+
+// From RPC URL
+const solana = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+
+// With custom logger
+const chain = await SolanaChain.fromUrl(
+  'https://api.devnet.solana.com',
+  { logger: console }
+)
+
+console.log('Connected to:', chain.network.name)
+```
+
+</TabItem>
+<TabItem value="aptos" label="Aptos">
+
+```typescript
+import { AptosChain } from '@chainlink/ccip-sdk'
+
+// From RPC URL
+const aptos = await AptosChain.fromUrl('https://fullnode.testnet.aptoslabs.com/v1')
+
+console.log('Connected to:', aptos.network.name)
+```
+
+</TabItem>
+</Tabs>
+
+## Unified Interface
+
+All chain classes implement the `Chain` interface for chain-agnostic code:
+
+```typescript
+import { Chain, EVMChain, SolanaChain } from '@chainlink/ccip-sdk'
+
+async function trackMessage(chain: Chain, txHash: string) {
+  const requests = await chain.getMessagesInTx(txHash)
+  return requests
+}
+
+// Use with EVM
+const evmChain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const evmRequests = await trackMessage(evmChain, '0x1234...')
+
+// Use with Solana
+const solanaChain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+const solanaRequests = await trackMessage(solanaChain, 'base58signature...')
+```
+
+## Cross-Family Messaging
+
+### EVM to Solana
+
+```typescript
+import { EVMChain, encodeExtraArgs, networkInfo } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+const solanaReceiver = '...' // Solana program address
+
+const message = {
+  receiver: solanaReceiver,
+  data: '0x1234...',
+  tokenAmounts: [],
+  feeToken: '0x' + '0'.repeat(40),
+  extraArgs: encodeExtraArgs({
+    computeUnits: 200000n,
+    accountIsWritableBitmap: 0n,
+    allowOutOfOrderExecution: true,
+    tokenReceiver: '',
+    accounts: [],
+  }),
+}
+
+const destSelector = networkInfo('solana-devnet').chainSelector
+const fee = await source.getFee({
+  router: source.network.router,
+  destChainSelector: destSelector,
+  message,
+})
+```
+
+### Solana to EVM
+
+```typescript
+import { SolanaChain, encodeExtraArgs, networkInfo } from '@chainlink/ccip-sdk'
+
+const source = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+
+const message = {
+  receiver: '0xEVMReceiverAddress...',
+  data: Buffer.from('hello'),
+  tokenAmounts: [],
+  extraArgs: encodeExtraArgs({
+    gasLimit: 200000n,
+    allowOutOfOrderExecution: false,
+  }),
+}
+
+const destSelector = networkInfo('ethereum-testnet-sepolia').chainSelector
+```
+
+## Chain-Specific Notes
+
+### EVM
+
+- Full log filtering by topic and address
+- Supports block range pagination
+- Transaction receipts include gas used
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+for await (const log of chain.getLogs({
+  topics: ['CCIPMessageSent'],
+  startBlock: 1000000,
+  endBlock: 1001000,
+})) {
+  console.log('Log at block:', log.blockNumber)
+}
+```
+
+### Solana
+
+- Requires program address for log filtering
+- Uses signatures instead of transaction hashes
+- Account-based model affects message structure
+
+```typescript
+import { SolanaChain } from '@chainlink/ccip-sdk'
+
+const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+
+for await (const log of chain.getLogs({
+  address: 'CCIPProgramAddress...',
+  topics: ['CCIPMessageSent'],
+})) {
+  console.log('Found message')
+}
+```
+
+#### Solana Transaction Flow
+
+For Solana, use `getTransaction()` to fetch transaction details before extracting messages:
+
+```typescript
+import { SolanaChain } from '@chainlink/ccip-sdk'
+
+const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+
+// Fetch transaction details from signature
+const tx = await chain.getTransaction(signature)
+
+// Extract messages from the transaction
+const messages = await chain.getMessagesInTx(tx)
+const messageId = messages[0]?.message.messageId
+```
+
+#### Solana Wallet Integration
+
+Modern wallets like Phantom automatically add compute budget and priority fee instructions:
+
+```typescript
+import { SolanaChain } from '@chainlink/ccip-sdk'
+import { TransactionMessage, VersionedTransaction } from '@solana/web3.js'
+
+const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+
+// Generate unsigned transaction
+const unsignedTx = await chain.generateUnsignedSendMessage({
+  sender: walletPublicKey.toBase58(),
+  router: routerAddress,
+  destChainSelector,
+  message,
+})
+
+// Build versioned transaction
+const { blockhash } = await connection.getLatestBlockhash()
+const messageV0 = new TransactionMessage({
+  payerKey: walletPublicKey,
+  recentBlockhash: blockhash,
+  instructions: unsignedTx.instructions,
+}).compileToV0Message(unsignedTx.lookupTables)
+
+const transaction = new VersionedTransaction(messageV0)
+
+// Wallet automatically adds compute budget and priority fees
+const signature = await sendTransaction(transaction, connection)
+```
+
+### Aptos
+
+- Move-based smart contracts
+- Different event structure
+- Sequence numbers for ordering
+
+```typescript
+import { AptosChain } from '@chainlink/ccip-sdk'
+
+const chain = await AptosChain.fromUrl('https://fullnode.testnet.aptoslabs.com/v1')
+
+const requests = await chain.getMessagesInTx('0xAptosTransactionHash...')
+```
+
+## Network Information
+
+Use `networkInfo` to get chain details:
+
+```typescript
+import { networkInfo } from '@chainlink/ccip-sdk'
+
+// Get by network name
+const sepolia = networkInfo('ethereum-testnet-sepolia')
+console.log('Chain selector:', sepolia.chainSelector)
+console.log('Family:', sepolia.family) // 'EVM'
+
+// Get by chain selector
+const fuji = networkInfo(14767482510784806043n)
+console.log('Network name:', fuji.name) // 'avalanche-testnet-fuji'
+
+// Check chain family
+const solana = networkInfo('solana-devnet')
+console.log('Is EVM:', solana.family === 'EVM') // false
+console.log('Is Solana:', solana.family === 'SVM') // true
+```
+
+## Chain-Agnostic Code
+
+Use the base `Chain` type for maximum flexibility:
+
+```typescript
+import {
+  Chain,
+  EVMChain,
+  SolanaChain,
+  networkInfo,
+  ChainFamily
+} from '@chainlink/ccip-sdk'
+
+async function getChain(networkName: string): Promise<Chain> {
+  const network = networkInfo(networkName)
+
+  switch (network.family) {
+    case ChainFamily.EVM:
+      return EVMChain.fromUrl(getRpcUrl(networkName))
+    case ChainFamily.Solana:
+      return SolanaChain.fromUrl(getRpcUrl(networkName))
+    default:
+      throw new Error(`Unsupported chain family: ${network.family}`)
+  }
+}
+
+async function trackAnyMessage(networkName: string, txHash: string) {
+  const chain = await getChain(networkName)
+  const requests = await chain.getMessagesInTx(txHash)
+
+  console.log('Found', requests.length, 'messages on', networkName)
+  return requests
+}
+```
+
+## Complete Example
+
+Track a cross-chain message from any source to any destination:
+
+```typescript
+import {
+  EVMChain,
+  SolanaChain,
+  discoverOffRamp,
+  networkInfo,
+  ChainFamily,
+  type Chain,
+} from '@chainlink/ccip-sdk'
+
+async function createChain(networkName: string, rpcUrl: string): Promise<Chain> {
+  const { family } = networkInfo(networkName)
+  switch (family) {
+    case ChainFamily.EVM:
+      return EVMChain.fromUrl(rpcUrl)
+    case ChainFamily.Solana:
+      return SolanaChain.fromUrl(rpcUrl)
+    default:
+      throw new Error(`Unsupported: ${family}`)
+  }
+}
+
+async function trackCrossChainMessage(
+  sourceNetwork: string,
+  sourceRpc: string,
+  destNetwork: string,
+  destRpc: string,
+  sourceTxHash: string
+) {
+  const source = await createChain(sourceNetwork, sourceRpc)
+  const dest = await createChain(destNetwork, destRpc)
+
+  console.log(`Tracking ${sourceNetwork} -> ${destNetwork}`)
+
+  const requests = await source.getMessagesInTx(sourceTxHash)
+  const request = requests[0]
+  console.log('Message ID:', request.message.messageId)
+
+  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+  console.log('OffRamp:', offRamp)
+
+  for await (const execution of dest.getExecutionReceipts({
+    offRamp,
+    messageId: request.message.messageId,
+  })) {
+    console.log('Execution state:', execution.receipt.state)
+    return execution
+  }
+
+  console.log('Not yet executed')
+  return null
+}
+
+// Track EVM to EVM
+await trackCrossChainMessage(
+  'ethereum-testnet-sepolia',
+  'https://rpc.sepolia.org',
+  'avalanche-testnet-fuji',
+  'https://rpc.fuji.avax.network',
+  '0x1234...'
+)
+
+// Track EVM to Solana
+await trackCrossChainMessage(
+  'ethereum-testnet-sepolia',
+  'https://rpc.sepolia.org',
+  'solana-devnet',
+  'https://api.devnet.solana.com',
+  '0x5678...'
+)
+```
+
+## Related
+
+- [Tracking Messages](/sdk/guides/tracking-messages) - Message tracking details
+- [Sending Messages](/sdk/guides/sending-messages) - Send cross-chain messages
+- [Error Handling](/sdk/guides/error-handling) - Handle chain-specific errors

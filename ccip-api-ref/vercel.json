@@ -1,0 +1,23 @@
+{
+  "buildCommand": "npm run gen-api && npm run build",
+  "outputDirectory": "build",
+  "installCommand": "cd .. && npm ci",
+  "framework": "docusaurus-2",
+  "rewrites": [
+    {
+      "source": "/ccip/tools/:path*/",
+      "destination": "/:path*/"
+    },
+    {
+      "source": "/ccip/tools/:path*",
+      "destination": "/:path*"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/ccip/tools/",
+      "permanent": false
+    }
+  ]
+}
