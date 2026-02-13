@@ -3,7 +3,7 @@ import type { PickDeep, SetOptional } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
 import type { UnsignedAptosTx } from './aptos/types.ts'
-import { getCommitReport } from './commits.ts'
+import { getOnchainCommitReport } from './commits.ts'
 import {
   CCIPApiClientNotAvailableError,
   CCIPChainFamilyMismatchError,
@@ -593,13 +593,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getOnRampForRouter(router: string, destChainSelector: bigint): Promise<string>
   /**
-   * Fetch the OnRamp address set in OffRamp config
+   * Fetch the OnRamps addresses set in OffRamp config
    * Used to discover OffRamp connected to an OnRamp
    * @param offRamp - OffRamp contract address
    * @param sourceChainSelector - source chain selector
-   * @returns OnRamp address
+   * @returns OnRamp addresses
    */
-  abstract getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string>
+  abstract getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]>
   /**
    * Fetch the CommitStore set in OffRamp config (CCIP v1.5 and earlier).
    * For CCIP v1.6 and later, it should return the offRamp address.
@@ -761,9 +761,12 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     /** address of commitStore (OffRamp in \>=v1.6) */
     commitStore: string
     /** CCIPRequest subset object */
-    request: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>
+    request: PickDeep<
+      CCIPRequest,
+      'lane' | `message.${'sequenceNumber' | 'messageId'}` | 'tx.timestamp'
+    >
   } & Pick<LogFilter, 'page' | 'watch' | 'startBlock'>): Promise<CCIPCommit> {
-    return getCommitReport(this, commitStore, request, hints)
+    return getOnchainCommitReport(this, commitStore, request, hints)
   }
 
   /**
@@ -829,7 +832,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     LogFilter,
     'page' | 'watch' | 'startBlock' | 'startTime'
   >): AsyncIterableIterator<CCIPExecution> {
-    hints.startBlock ??= commit?.log.blockNumber
+    if (commit && 'log' in commit) hints.startBlock ??= commit.log.blockNumber
     const onlyLast = !hints.startTime && !hints.startBlock // backwards
     for await (const log of this.getLogs({
       address: offRamp,

@@ -77,42 +77,76 @@ export const discoverOffRamp = memoize(
       dest.network.chainSelector,
     )
     for (const offRamp of sourceOffRamps) {
-      let destOnRamp: string
+      let destOnRamps
       try {
-        destOnRamp = await source.getOnRampForOffRamp(offRamp, dest.network.chainSelector)
-      } catch {
-        logger.debug('discoverOffRamp: skipping offRamp', offRamp, '(no valid source chain config)')
+        destOnRamps = await source.getOnRampsForOffRamp(offRamp, dest.network.chainSelector)
+      } catch (err) {
+        logger.debug(
+          'discoverOffRamp: skipping offRamp',
+          offRamp,
+          '(no valid source chain config)',
+          err,
+        )
         continue
       }
-      const destRouter = await dest.getRouterForOnRamp(destOnRamp, source.network.chainSelector)
-      const destOffRamps = await dest.getOffRampsForRouter(destRouter, source.network.chainSelector)
-      for (const offRamp of destOffRamps) {
-        let offRampsOnRamp: string
-        try {
-          offRampsOnRamp = await dest.getOnRampForOffRamp(offRamp, source.network.chainSelector)
-        } catch {
-          logger.debug(
-            'discoverOffRamp: skipping dest offRamp',
-            offRamp,
-            '(no valid source chain config)',
-          )
-          continue
-        }
-        logger.debug(
-          'discoverOffRamp: found, from',
-          {
-            sourceOnRamp: onRamp,
-            sourceRouter,
-            sourceOffRamps,
-            destOnRamp,
-            destOffRamps,
-            offRampsOnRamp,
-          },
-          '=',
-          offRamp,
+      for (const destOnRamp of destOnRamps) {
+        const destRouter = await dest.getRouterForOnRamp(destOnRamp, source.network.chainSelector)
+        const destOffRamps = await dest.getOffRampsForRouter(
+          destRouter,
+          source.network.chainSelector,
         )
-        if (offRampsOnRamp === onRamp) {
-          return offRamp
+        for (const offRamp of destOffRamps) {
+          let offRampsOnRamps
+          try {
+            offRampsOnRamps = await dest.getOnRampsForOffRamp(offRamp, source.network.chainSelector)
+          } catch (err) {
+            logger.debug(
+              'discoverOffRamp: skipping dest offRamp',
+              offRamp,
+              '(no valid source chain config)',
+              err,
+            )
+            continue
+          }
+          for (const offRampsOnRamp of offRampsOnRamps) {
+            logger.debug(
+              'discoverOffRamp: found, from',
+              {
+                sourceOnRamp: onRamp,
+                sourceRouter,
+                sourceOffRamps,
+                destOnRamp,
+                destOffRamps,
+                offRampsOnRamp,
+              },
+              '=',
+              offRamp,
+            )
+            for (const offRamp of destOffRamps) {
+              const offRampsOnRamps = await dest.getOnRampsForOffRamp(
+                offRamp,
+                source.network.chainSelector,
+              )
+              for (const offRampsOnRamp of offRampsOnRamps) {
+                logger.debug(
+                  'discoverOffRamp: found, from',
+                  {
+                    sourceOnRamp: onRamp,
+                    sourceRouter,
+                    sourceOffRamps,
+                    destOnRamp,
+                    destOffRamps,
+                    offRampsOnRamps,
+                  },
+                  '=',
+                  offRamp,
+                )
+                if (offRampsOnRamp === onRamp) {
+                  return offRamp
+                }
+              }
+            }
+          }
         }
       }
     }

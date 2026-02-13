@@ -120,8 +120,8 @@ class MockChain extends Chain {
     return this.mockOffRampsForRouter.get(_router) || []
   }
 
-  async getOnRampForOffRamp(_offRamp: string, _chainSelector: bigint): Promise<string> {
-    return this.mockOnRampForOffRamp.get(_offRamp) || '0xDefaultOnRamp'
+  async getOnRampsForOffRamp(_offRamp: string, _chainSelector: bigint): Promise<string[]> {
+    return [this.mockOnRampForOffRamp.get(_offRamp) || '0xDefaultOnRamp']
   }
 
   async getOnRampForRouter(_router: string, _destChainSelector: bigint): Promise<string> {

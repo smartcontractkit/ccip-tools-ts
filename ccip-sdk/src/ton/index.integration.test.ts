@@ -82,8 +82,8 @@ describe.skip('TON index integration tests', () => {
       )
     })
 
-    it('TONChain.getOnRampForOffRamp should return source chain onRamp address', async () => {
-      const onRamp = await tonChain.getOnRampForOffRamp(
+    it('TONChain.getOnRampsForOffRamp should return source chain onRamp address', async () => {
+      const [onRamp] = await tonChain.getOnRampsForOffRamp(
         ADDRESSES_TO_ASSERT.tonOffRamp,
         SEPOLIA_CHAIN_SELECTOR,
       )

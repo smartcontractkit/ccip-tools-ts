@@ -34,7 +34,7 @@ function createMockChains(onRamp: string, offRamp: string) {
     getRouterForOnRamp: mock.fn(async () => sourceRouter),
     getOnRampForRouter: mock.fn(async (_router: string, _destChainSelector: bigint) => onRamp),
     getOffRampsForRouter: mock.fn(async () => [offRamp]),
-    getOnRampForOffRamp: mock.fn(async () => destOnRamp),
+    getOnRampsForOffRamp: mock.fn(async () => [destOnRamp]),
     getTokenAdminRegistryFor: mock.fn(async () => tokenAdminRegistry),
     getRegistryTokenConfig: mock.fn(async (_registry: string, _token: string) => ({
       tokenPool: getAddress(hexlify(randomBytes(20))),
@@ -70,7 +70,9 @@ function createMockChains(onRamp: string, offRamp: string) {
     getOffRampsForRouter: mock.fn(async () => [offRamp]),
     getRouterForOnRamp: mock.fn(async () => destRouter),
     // This is the key - it needs to return the onRamp to satisfy the discovery logic
-    getOnRampForOffRamp: mock.fn(async (_offRamp: string, _sourceChainSelector: bigint) => onRamp),
+    getOnRampsForOffRamp: mock.fn(async (_offRamp: string, _sourceChainSelector: bigint) => [
+      onRamp,
+    ]),
     balanceOf: mock.fn(async () => 0n),
     estimateReceiveExecution: mock.fn(async (opts: any) => {
       const router = await mockDestChain.getRouterForOffRamp(opts.offRamp)
