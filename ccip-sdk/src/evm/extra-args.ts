@@ -25,8 +25,9 @@ import {
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
+import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 import { getAddressBytes, getDataBytes } from '../utils.ts'
-import { DEFAULT_GAS_LIMIT, defaultAbiCoder } from './const.ts'
+import { defaultAbiCoder } from './const.ts'
 
 // ABI type strings for extra args encoding
 const EVMExtraArgsV1ABI = 'tuple(uint256 gasLimit)'

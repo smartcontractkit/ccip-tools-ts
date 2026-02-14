@@ -31,19 +31,6 @@ export function isAptosAccount(account: unknown): account is AptosAsyncAccount {
   )
 }
 
-export const EVMExtraArgsV2Codec = bcs.struct('EVMExtraArgsV2', {
-  gasLimit: bcs.u256(),
-  allowOutOfOrderExecution: bcs.bool(),
-})
-
-export const SVMExtraArgsV1Codec = bcs.struct('SVMExtraArgsV1', {
-  computeUnits: bcs.u32(),
-  accountIsWritableBitmap: bcs.u64(),
-  allowOutOfOrderExecution: bcs.bool(),
-  tokenReceiver: bcs.vector(bcs.u8()),
-  accounts: bcs.vector(bcs.vector(bcs.u8())),
-})
-
 export const ExecutionReportCodec = bcs.struct('ExecutionReport', {
   sourceChainSelector: bcs.u64(),
   messageId: bcs.fixedArray(32, bcs.u8()),
