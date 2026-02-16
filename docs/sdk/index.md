@@ -184,6 +184,8 @@ console.log('Supported tokens:', tokens)
 
 ### Get CCIP Fee Estimate
 
+> **Note:** The `receiver` field must be a valid address for the destination chain family. For instance: EVM uses 20-byte hex (e.g., `0x6d1af98d635d3121286ddda1a0c2d7078b1523ed`), Solana uses Base58 (e.g., `7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV`).
+
 ```ts
 import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
 
@@ -816,18 +818,369 @@ supportedChains[ChainFamily.Solana] = CustomSolanaChain
 
 ## Tree-Shaking
 
-Import only the chains you need for optimal bundle size:
+The CCIP SDK supports multiple blockchain ecosystems, each with distinct dependencies. Tree-shaking allows your bundler to include only the chains you actually use, significantly reducing your application's bundle size.
 
 ```ts
-// Recommended: import specific chains
+// Single chain - smallest bundle
 import { EVMChain } from '@chainlink/ccip-sdk'
+
+// Multiple specific chains
 import { EVMChain, SolanaChain } from '@chainlink/ccip-sdk'
 
-// Import all chains (includes all chain dependencies)
+// All chains - largest bundle, use only if needed
 import { allSupportedChains } from '@chainlink/ccip-sdk/all'
 ```
 
-Unused chain implementations are excluded from the final bundle via tree-shaking.
+### Bundle Sizes
+
+| Import | Minified | Gzipped |
+|--------|----------|---------|
+| EVM | 740 KB | ~180 KB |
+| Solana | 1.2 MB | ~290 KB |
+| Aptos | 1.4 MB | ~340 KB |
+| TON | 1.0 MB | ~240 KB |
+| EVM + Solana | 1.4 MB | ~340 KB |
+| All chains | 3.0 MB | ~720 KB |
+
+### Browser Polyfills
+
+#### Do I Need Polyfills?
+
+| Your Setup | Buffer Polyfill Required? |
+|------------|---------------------------|
+| Node.js (any chain) | No - Buffer is built-in |
+| Browser + EVM only | No (production) / Yes (Vite dev mode) |
+| Browser + Aptos only | No |
+| Browser + Solana | Yes |
+| Browser + TON | Yes |
+| Browser + Sui | Yes |
+| Browser + All chains | Yes |
+
+#### Why Polyfills Are Needed
+
+Solana, TON, and Sui blockchain libraries use Node.js's built-in `Buffer` class for binary data handling. Browsers don't provide this global, so you need to polyfill it.
+
+**EVM and Aptos chains** use browser-native APIs (`Uint8Array`, `TextEncoder`) and don't require polyfills.
+
+> **Important**: Even if you only use EVM chains, Vite's development server pre-bundles all SDK dependencies. Add the Buffer polyfill to avoid errors during `vite dev`.
+
+#### Bundler Configurations
+
+The following configurations are production-ready and handle both polyfills and tree-shaking. Tree-shaking works automatically when using ES module imports (`import { X } from`), but each bundler needs proper setup for the Buffer polyfill.
+
+**Vite**
+
+```bash
+npm install vite-plugin-node-polyfills
+```
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite'
+import { nodePolyfills } from 'vite-plugin-node-polyfills'
+
+export default defineConfig({
+  plugins: [
+    nodePolyfills({
+      include: ['buffer'],
+      globals: { Buffer: true },
+    }),
+  ],
+})
+```
+
+> Tree-shaking and minification work automatically in Vite. This config works for both `vite dev` and `vite build`.
+
+**Webpack 5**
+
+```bash
+npm install buffer
+```
+
+```js
+// webpack.config.js
+const webpack = require('webpack')
+
+module.exports = {
+  resolve: {
+    fallback: { buffer: require.resolve('buffer/') },
+  },
+  plugins: [
+    new webpack.ProvidePlugin({ Buffer: ['buffer', 'Buffer'] }),
+  ],
+}
+```
+
+```bash
+# Development
+webpack --mode development
+
+# Production (tree-shaking + minification)
+webpack --mode production
+```
+
+> Tree-shaking and minification are enabled automatically with `--mode production`. Add TypeScript loader and entry/output as needed for your project.
+
+**esbuild**
+
+```bash
+npm install buffer
+```
+
+```js
+// buffer-shim.js
+import { Buffer } from 'buffer'
+globalThis.Buffer = Buffer
+```
+
+```bash
+# Development (faster builds, no minification)
+esbuild src/index.ts --bundle --inject:./buffer-shim.js --platform=browser --define:global=globalThis --outfile=dist/bundle.js
+
+# Production (minified, tree-shaken)
+esbuild src/index.ts --bundle --inject:./buffer-shim.js --platform=browser --define:global=globalThis --minify --outfile=dist/bundle.js
+```
+
+> Tree-shaking is automatic in esbuild. Add `--minify` for production builds.
+
+**Parcel**
+
+Parcel 2 automatically polyfills Buffer when dependencies require it:
+
+```bash
+npm install buffer
+```
+
+```bash
+# Development (with HMR)
+parcel src/index.html
+
+# Production (minified, tree-shaken)
+parcel build src/index.html
+```
+
+> Parcel handles polyfills, tree-shaking, and minification automatically. No configuration file needed.
+
+**Rollup**
+
+```bash
+npm install buffer @rollup/plugin-node-resolve @rollup/plugin-commonjs @rollup/plugin-inject @rollup/plugin-terser
+```
+
+```js
+// rollup.config.js
+import resolve from '@rollup/plugin-node-resolve'
+import commonjs from '@rollup/plugin-commonjs'
+import inject from '@rollup/plugin-inject'
+import terser from '@rollup/plugin-terser'
+
+export default {
+  input: 'src/index.js',
+  output: { file: 'dist/bundle.js', format: 'es' },
+  plugins: [
+    resolve({ browser: true, preferBuiltins: false }),
+    commonjs(),
+    inject({ Buffer: ['buffer', 'Buffer'] }),
+    terser(), // Minification
+  ],
+}
+```
+
+> Tree-shaking is Rollup's core feature and works automatically. Add `@rollup/plugin-typescript` if using TypeScript.
+
+**Bun**
+
+Bun requires a custom build script to ensure the Buffer polyfill loads before the SDK code:
+
+```bash
+bun add buffer
+```
+
+```js
+// buffer-shim.js
+import { Buffer } from 'buffer/'
+globalThis.Buffer = Buffer
+```
+
+```ts
+// build.ts
+const isProduction = process.env.NODE_ENV === 'production'
+
+const polyfillResult = await Bun.build({
+  entrypoints: ['./buffer-shim.js'],
+  target: 'browser',
+  minify: isProduction,
+})
+const polyfillCode = await polyfillResult.outputs[0].text()
+
+const mainResult = await Bun.build({
+  entrypoints: ['./src/index.ts'],
+  target: 'browser',
+  minify: isProduction,
+})
+const mainCode = await mainResult.outputs[0].text()
+
+// Wrap in IIFEs to avoid variable conflicts
+const combined = `(function(){${polyfillCode}})();(function(){${mainCode}})();`
+await Bun.write('./dist/bundle.js', combined)
+
+console.log(`Built ${isProduction ? 'production' : 'development'} bundle`)
+```
+
+```bash
+# Development
+bun run build.ts
+
+# Production
+NODE_ENV=production bun run build.ts
+```
+
+> Bun's tree-shaking is automatic. The custom script is required because Bun hoists imports, which can place the polyfill after SDK code that needs it.
+
+#### Framework Integration
+
+**Next.js**
+
+```bash
+npm install buffer
+```
+
+```js
+// next.config.js
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      // Client-side polyfill
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        buffer: require.resolve('buffer/'),
+      }
+    }
+    return config
+  },
+}
+module.exports = nextConfig
+```
+
+For client components using Solana/TON, add at the top of your component:
+
+```tsx
+'use client'
+import { Buffer } from 'buffer'
+if (typeof window !== 'undefined') {
+  window.Buffer = Buffer
+}
+```
+
+> Next.js handles tree-shaking automatically in production builds. The polyfill is only needed client-side.
+
+**Remix**
+
+Remix uses esbuild under the hood. Add the buffer shim to your client entry:
+
+```bash
+npm install buffer
+```
+
+```ts
+// app/entry.client.tsx
+import { Buffer } from 'buffer'
+globalThis.Buffer = Buffer
+
+// ... rest of entry.client.tsx
+```
+
+> Remix tree-shakes automatically in production builds.
+
+#### Verify Your Setup
+
+After configuring your bundler, verify the polyfill is working:
+
+```ts
+// Add to your app's entry point or browser console
+console.log('Buffer available:', typeof Buffer !== 'undefined')
+console.log('Buffer works:', Buffer.from('test').toString('hex') === '74657374')
+```
+
+**Check bundle size** to verify tree-shaking:
+
+```bash
+# Check output file size
+ls -lh dist/*.js
+
+# For detailed analysis (install source-map-explorer first)
+npx source-map-explorer dist/bundle.js
+```
+
+Expected sizes for EVM-only: ~740 KB minified, ~180 KB gzipped.
+
+### Troubleshooting
+
+#### `ReferenceError: Buffer is not defined`
+
+**Cause**: Using Solana or TON chains without the Buffer polyfill, or the polyfill isn't loading before SDK code.
+
+**Solution**:
+1. Verify the polyfill configuration for your bundler (see above)
+2. Ensure `buffer` package is installed: `npm ls buffer`
+3. For Bun, use the custom build script to ensure correct load order
+
+#### `Cannot find module 'buffer'`
+
+**Cause**: The `buffer` package is not installed.
+
+**Solution**:
+```bash
+npm install buffer
+```
+
+#### Bundle size larger than expected
+
+**Cause**: Tree-shaking may not be working, or you're importing more chains than needed.
+
+**Symptoms**: EVM-only bundle exceeds 1 MB.
+
+**Solution**:
+1. Verify you're using ES module imports (not `require()`)
+2. Check you're importing specific chains, not `allSupportedChains`
+3. Run a bundle analyzer to identify unexpected inclusions:
+   ```bash
+   # Webpack
+   npx webpack-bundle-analyzer dist/stats.json
+
+   # Vite
+   npx vite-bundle-visualizer
+   ```
+
+#### Vite dev server errors with EVM-only code
+
+**Cause**: Vite pre-bundles all SDK dependencies in development mode, including Solana/TON libraries that need Buffer.
+
+**Solution**: Add the Buffer polyfill even for EVM-only development. This is only needed for `vite dev`; production builds will tree-shake correctly.
+
+#### `The requested module does not provide an export named 'X'`
+
+**Cause**: CommonJS/ESM compatibility issues, typically with older dependencies.
+
+**Solution**: Clear Vite's cache and rebuild:
+
+```bash
+rm -rf node_modules/.vite
+npm run dev
+```
+
+If the issue persists, add the problematic package to Vite's pre-bundling:
+
+```ts
+// vite.config.ts
+export default defineConfig({
+  optimizeDeps: {
+    include: ['problematic-package-name'],
+  },
+  // ... rest of config
+})
+```
 
 ## Next Steps
 

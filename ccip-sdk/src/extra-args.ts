@@ -9,7 +9,7 @@ export const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '
 /** Tag identifier for EVMExtraArgsV2 encoding. */
 export const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'
 /** Tag identifier for GenericExtraArgsV3 encoding (tightly packed binary format). */
-export const GenericExtraArgsV3Tag = '0x302326cb' as const
+export const GenericExtraArgsV3Tag = id('CCIP GenericExtraArgsV3').substring(0, 10) as '0xa69dd4aa'
 /** Tag identifier for SVMExtraArgsV1 encoding. */
 export const SVMExtraArgsV1Tag = id('CCIP SVMExtraArgsV1').substring(0, 10) as '0x1f3b3aba'
 /** Tag identifier for SuiExtraArgsV1 encoding. */

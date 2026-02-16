@@ -126,7 +126,7 @@ import {
 } from './utils.ts'
 import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
 import { patchBorsh } from './patchBorsh.ts'
-import { DEFAULT_GAS_LIMIT } from '../evm/const.ts'
+import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 export type { UnsignedSolanaTx }
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)

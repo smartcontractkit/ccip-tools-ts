@@ -1,11 +1,11 @@
 import { concat, id, keccak256, zeroPadValue } from 'ethers'
 
-import { encodeNumber, encodeRawBytes } from '../aptos/utils.ts'
 import { CCIPExtraArgsInvalidError, CCIPSuiHasherVersionUnsupportedError } from '../errors/index.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
+import { encodeNumber, encodeRawBytes } from '../shared/bcs-codecs.ts'
 
 /**
  * Creates a leaf hasher for Sui CCIP messages.

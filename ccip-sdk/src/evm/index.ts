@@ -189,6 +189,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   provider: JsonRpcApiProvider
   readonly destroy$: Promise<void>
   private noncesPromises: Record<string, Promise<unknown>>
+  /**
+   * Cache of current nonces per wallet address.
+   * Used internally by {@link sendMessage} and {@link executeReport} to manage transaction ordering.
+   * Can be inspected for debugging or manually adjusted if needed.
+   */
   nonces: Record<string, number>
 
   /**
@@ -241,7 +246,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return (await this.provider.listAccounts()).map(({ address }) => address)
   }
 
-  /** Get the next nonce for a sender address and bump internal count */
+  /**
+   * Get the next nonce for a wallet address and increment the internal counter.
+   * Fetches from the network on first call, then uses cached value.
+   * @param address - Wallet address to get nonce for
+   * @returns The next available nonce
+   */
   async nextNonce(address: string): Promise<number> {
     await (this.noncesPromises[address] ??= this.provider
       .getTransactionCount(address)

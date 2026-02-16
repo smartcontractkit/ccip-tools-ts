@@ -11,7 +11,6 @@ import {
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
-import { DEFAULT_GAS_LIMIT } from './evm/const.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
 import type {
   EVMExtraArgsV1,
@@ -23,6 +22,7 @@ import type {
 } from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
 import { getMessagesInTx } from './requests.ts'
+import { DEFAULT_GAS_LIMIT } from './shared/constants.ts'
 import type { UnsignedSolanaTx } from './solana/types.ts'
 import type { UnsignedTONTx } from './ton/types.ts'
 import {
