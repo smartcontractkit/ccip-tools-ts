@@ -34,9 +34,9 @@ import { type Ctx, Format } from './types.ts'
 import {
   getCtx,
   logParsedError,
-  prettyCommit,
   prettyReceipt,
   prettyRequest,
+  prettyVerifications,
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
@@ -165,7 +165,7 @@ async function manualExec(
   const dest = await getChain(request.lane.destChainSelector)
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
   const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
-  const commit = await dest.getCommitReport({ ...argv, commitStore, request })
+  const commit = await dest.getVerifications({ ...argv, commitStore, request })
 
   switch (argv.format) {
     case Format.log:
@@ -173,7 +173,7 @@ async function manualExec(
       break
     case Format.pretty:
       logger.info('Commit (dest):')
-      await prettyCommit.call(ctx, dest, commit, request)
+      await prettyVerifications.call(ctx, dest, commit, request)
       break
     case Format.json:
       logger.info(JSON.stringify(commit, bigIntReplacer, 2))

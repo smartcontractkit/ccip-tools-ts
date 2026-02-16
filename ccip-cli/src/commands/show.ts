@@ -39,10 +39,10 @@ import { type Ctx, Format } from './types.ts'
 import {
   getCtx,
   logParsedError,
-  prettyCommit,
   prettyReceipt,
   prettyRequest,
   prettyTable,
+  prettyVerifications,
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
@@ -193,13 +193,13 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
   const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
 
-  let cancelWaitCommit: (() => void) | undefined
-  const commit$ = (async () => {
-    const commit = await dest.getCommitReport({
+  let cancelWaitVerifications: (() => void) | undefined
+  const verifications$ = (async () => {
+    const commit = await dest.getVerifications({
       commitStore,
       request,
       ...argv,
-      watch: argv.wait && new Promise<void>((resolve) => (cancelWaitCommit = resolve)),
+      watch: argv.wait && new Promise<void>((resolve) => (cancelWaitVerifications = resolve)),
     })
     cancelWaitFinalized?.()
     await finalized$
@@ -210,7 +210,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
         logger.log('commit =', commit)
         break
       case Format.pretty:
-        await prettyCommit.call(ctx, dest, commit, request)
+        await prettyVerifications.call(ctx, dest, commit, request)
         break
       case Format.json:
         logger.info(JSON.stringify(commit, bigIntReplacer, 2))
@@ -233,11 +233,11 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     messageId: request.message.messageId,
     sourceChainSelector: request.message.sourceChainSelector,
     startTime: request.tx.timestamp,
-    commit: !argv.wait ? await commit$ : undefined,
+    verifications: !argv.wait ? await verifications$ : undefined,
     watch: argv.wait && ctx.destroy$,
   })) {
-    cancelWaitCommit?.()
-    await commit$
+    cancelWaitVerifications?.()
+    await verifications$
     const status =
       receipt.receipt.state === ExecutionState.Success
         ? MessageStatus.Success

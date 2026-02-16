@@ -358,6 +358,7 @@ describe('getCommitReport', () => {
     const hints = { startBlock: 12345 }
     const result = await getOnchainCommitReport(dest, '0xCommitStore', request, hints)
 
+    assert.ok('report' in result)
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 1n)
     assert.equal(result.report.maxSeqNr, 2n)
@@ -468,6 +469,7 @@ describe('getCommitReport', () => {
     const hints = { startBlock: 12345 }
     const result = await getOnchainCommitReport(dest, '0xOffRamp', request, hints)
 
+    assert.ok('report' in result)
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 3n)
     assert.equal(result.report.maxSeqNr, 8n)
@@ -602,6 +604,7 @@ describe('getCommitReport', () => {
     const hints = { startBlock: 12345 }
     const result = await getOnchainCommitReport(dest, '0xOffRamp', request, hints)
 
+    assert.ok('report' in result)
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 4n)
     assert.equal(result.report.maxSeqNr, 10n)
@@ -657,6 +660,7 @@ describe('getCommitReport', () => {
     // No hints provided, should use timestamp
     const result = await getOnchainCommitReport(dest, '0xOffRamp', request)
 
+    assert.ok('report' in result)
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 1n)
     assert.equal(result.report.maxSeqNr, 5n)

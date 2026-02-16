@@ -73,10 +73,10 @@ import SELECTORS from '../selectors.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
-  type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
+  type CCIPVerifications,
   type ChainTransaction,
   type CommitReport,
   type ExecutionReceipt,
@@ -1231,9 +1231,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   /**
    * Solana specialization: use getProgramAccounts to fetch commit reports from PDAs
    */
-  override async getCommitReport(
-    opts: Parameters<Chain['getCommitReport']>[0],
-  ): Promise<CCIPCommit> {
+  override async getVerifications(
+    opts: Parameters<Chain['getVerifications']>[0],
+  ): Promise<CCIPVerifications> {
     const { commitStore, request } = opts
     const commitsAroundSeqNum = await this.connection.getProgramAccounts(
       new PublicKey(commitStore),
@@ -1286,23 +1286,23 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       }
     }
     // in case we can't find it, fallback to generic iterating txs
-    return super.getCommitReport(opts)
+    return super.getVerifications(opts)
   }
 
   /** {@inheritDoc Chain.getExecutionReceipts} */
   override async *getExecutionReceipts(
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
-    const { offRamp, sourceChainSelector, commit } = opts
+    const { offRamp, sourceChainSelector, verifications } = opts
     let opts_: Parameters<Chain['getExecutionReceipts']>[0] &
       Parameters<SolanaChain['getLogs']>[0] = opts
-    if (commit && sourceChainSelector) {
+    if (sourceChainSelector && verifications && 'report' in verifications) {
       // if we know of commit, use `commit_report` PDA as more specialized address
       const [commitReportPda] = PublicKey.findProgramAddressSync(
         [
           Buffer.from('commit_report'),
           toLeArray(sourceChainSelector, 8),
-          bytesToBuffer(commit.report.merkleRoot),
+          bytesToBuffer(verifications.report.merkleRoot),
         ],
         new PublicKey(offRamp),
       )

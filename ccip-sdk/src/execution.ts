@@ -1,23 +1,13 @@
 import { memoize } from 'micro-memoize'
 
-import type { Chain, ChainStatic } from './chain.ts'
+import type { Chain } from './chain.ts'
 import {
   CCIPMerkleRootMismatchError,
   CCIPMessageNotInBatchError,
   CCIPOffRampNotFoundError,
 } from './errors/index.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
-import {
-  type CCIPCommit,
-  type CCIPExecution,
-  type CCIPMessage,
-  type CCIPRequest,
-  type CCIPVersion,
-  type ExecutionReport,
-  type Lane,
-  type WithLogger,
-  ExecutionState,
-} from './types.ts'
+import type { CCIPMessage, CCIPVersion, ExecutionReport, Lane, WithLogger } from './types.ts'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
@@ -213,46 +203,3 @@ export const discoverOffRamp = memoize(
       [source.network.chainSelector, dest.network.chainSelector, onRamp] as const,
   },
 )
-
-/**
- * Generic implementation for fetching ExecutionReceipts for given requests.
- * If more than one request is given, may yield them interleaved.
- * Completes as soon as there's no more work to be done.
- *
- * Two possible behaviors:
- * - if `startBlock|startTime` is given, pages forward from that block up;
- *   completes when success (final) receipt is found for all requests (or reach latest block)
- * - otherwise, pages backwards and returns only the most recent receipt per request;
- *   completes when receipts for all requests were seen
- *
- * @param dest - Provider to page through.
- * @param offRamp - OffRamp contract address.
- * @param request - CCIP request to search executions for.
- * @param commit - Optional commit info to narrow down search.
- * @param hints - Optional hints (e.g., `page` for getLogs pagination range).
- * @see {@link getCommitReport} - Check commit status before execution
- * @see {@link discoverOffRamp} - Find OffRamp address
- */
-export async function* getExecutionReceipts(
-  dest: Chain,
-  offRamp: string,
-  request: CCIPRequest,
-  commit?: CCIPCommit,
-  hints?: { page?: number },
-): AsyncGenerator<CCIPExecution> {
-  const onlyLast = !commit?.log.blockNumber && !request.tx.timestamp // backwards
-  for await (const log of dest.getLogs({
-    startBlock: commit?.log.blockNumber,
-    startTime: request.tx.timestamp,
-    address: offRamp,
-    topics: ['ExecutionStateChanged'],
-    ...hints,
-  })) {
-    const receipt = (dest.constructor as ChainStatic).decodeReceipt(log)
-    if (!receipt || receipt.messageId !== request.message.messageId) continue
-
-    const timestamp = log.tx?.timestamp ?? (await dest.getBlockTimestamp(log.blockNumber))
-    yield { receipt, log, timestamp }
-    if (onlyLast || receipt.state === ExecutionState.Success) break
-  }
-}

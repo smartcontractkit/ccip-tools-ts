@@ -435,7 +435,6 @@ export class CCIPAPIClient {
       onramp,
       version,
       readyForManualExecution,
-      finality,
       sendTransactionHash,
       receiptTransactionHash,
       sendTimestamp,
@@ -499,7 +498,6 @@ export class CCIPAPIClient {
       metadata: {
         status: validateMessageStatus(status, this.logger),
         readyForManualExecution,
-        finality,
         receiptTransactionHash,
         receiptTimestamp: receiptTimestamp_,
         deliveryTime,
