@@ -171,8 +171,6 @@ export type APICCIPRequestMetadata = {
   status: MessageStatus
   /** Whether message is ready for manual execution. */
   readyForManualExecution: boolean
-  /** Number of block confirmations on source chain. */
-  finality: bigint
   /** Transaction hash of execution receipt (if executed). */
   receiptTransactionHash?: string
   /** Unix timestamp of execution receipt (if executed). */

@@ -27,10 +27,10 @@ import type { UnsignedSolanaTx } from './solana/types.ts'
 import type { UnsignedTONTx } from './ton/types.ts'
 import {
   type AnyMessage,
-  type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
+  type CCIPVerifications,
   type ChainFamily,
   type ChainTransaction,
   type CommitReport,
@@ -965,7 +965,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`Committed at block: ${commit.log.blockNumber}`)
    * ```
    */
-  async getCommitReport({
+  async getVerifications({
     commitStore,
     request,
     ...hints
@@ -977,7 +977,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       CCIPRequest,
       'lane' | `message.${'sequenceNumber' | 'messageId'}` | 'tx.timestamp'
     >
-  } & Pick<LogFilter, 'page' | 'watch' | 'startBlock'>): Promise<CCIPCommit> {
+  } & Pick<LogFilter, 'page' | 'watch' | 'startBlock'>): Promise<CCIPVerifications> {
     return getOnchainCommitReport(this, commitStore, request, hints)
   }
 
@@ -1043,7 +1043,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     offRamp,
     messageId,
     sourceChainSelector,
-    commit,
+    verifications,
     ...hints
   }: {
     /** address of OffRamp contract */
@@ -1053,12 +1053,12 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     /** filter: yield only executions for this source chain */
     sourceChainSelector?: bigint
     /** optional commit associated with the request, can be used for optimizations in some families */
-    commit?: CCIPCommit
+    verifications?: CCIPVerifications
   } & Pick<
     LogFilter,
     'page' | 'watch' | 'startBlock' | 'startTime'
   >): AsyncIterableIterator<CCIPExecution> {
-    if (commit && 'log' in commit) hints.startBlock ??= commit.log.blockNumber
+    if (verifications && 'log' in verifications) hints.startBlock ??= verifications.log.blockNumber
     const onlyLast = !hints.startTime && !hints.startBlock // backwards
     for await (const log of this.getLogs({
       address: offRamp,
