@@ -76,7 +76,7 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
 
     // 3. Get commit store and commit report
     const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
-    const commit = await dest.getCommitReport({ commitStore, request })
+    const commit = await dest.getVerifications({ commitStore, request })
     assert.ok(commit.report.merkleRoot, 'commit should have a merkle root')
 
     // 4. Get all messages in the commit batch from source

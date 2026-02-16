@@ -2,7 +2,7 @@ import type { PickDeep } from 'type-fest'
 
 import type { Chain, ChainStatic, LogFilter } from './chain.ts'
 import { CCIPCommitNotFoundError } from './errors/index.ts'
-import { type CCIPCommit, type CCIPRequest, CCIPVersion } from './types.ts'
+import { type CCIPRequest, type CCIPVerifications, CCIPVersion } from './types.ts'
 
 /**
  * Look for a CommitReport at dest for given CCIPRequest
@@ -24,7 +24,7 @@ export async function getOnchainCommitReport(
     tx: { timestamp: requestTimestamp },
   }: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>,
   hints?: Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number },
-): Promise<CCIPCommit> {
+): Promise<CCIPVerifications> {
   for await (const log of dest.getLogs({
     ...hints,
     ...(!hints?.startBlock ? { startTime: requestTimestamp } : { startBlock: hints.startBlock }),

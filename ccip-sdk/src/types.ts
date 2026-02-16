@@ -258,9 +258,9 @@ export type VerifierResult = {
 }
 
 /**
- * CCIP commit information
+ * Verification data for a ccip message (onchain CommitReport, or offchain Verifications)
  */
-export type CCIPCommit =
+export type CCIPVerifications =
   | {
       /** The commit report data. */
       report: CommitReport

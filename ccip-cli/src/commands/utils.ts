@@ -1,9 +1,9 @@
 import { Console } from 'node:console'
 
 import {
-  type CCIPCommit,
   type CCIPExecution,
   type CCIPRequest,
+  type CCIPVerifications,
   type Chain,
   type ChainFamily,
   type ChainStatic,
@@ -265,7 +265,8 @@ export async function prettyRequest(this: Ctx, request: CCIPRequest, source?: Ch
   } catch (_) {
     // no finalized tag support
   }
-  const nonce = Number(request.message.nonce)
+  let nonce
+  if ('nonce' in request.message) nonce = Number(request.message.nonce)
 
   const sourceFamily = networkInfo(request.lane.sourceChainSelector).family
   const destFamily = networkInfo(request.lane.destChainSelector).family
@@ -303,7 +304,7 @@ export async function prettyRequest(this: Ctx, request: CCIPRequest, source?: Ch
     sender: displaySender,
     receiver: displayReceiver,
     sequenceNumber: Number(request.message.sequenceNumber),
-    nonce: nonce === 0 ? '0 => allow out-of-order exec' : nonce,
+    ...(nonce != null && { nonce: nonce === 0 ? '0 => allow out-of-order exec' : nonce }),
     ...('gasLimit' in request.message
       ? { gasLimit: Number(request.message.gasLimit) }
       : 'computeUnits' in request.message
@@ -335,40 +336,40 @@ export async function prettyRequest(this: Ctx, request: CCIPRequest, source?: Ch
 }
 
 /**
- * Prints a CCIP commit in a human-readable format.
+ * Prints CCIP Verifications in a human-readable format.
  * @param dest - Destination chain instance.
- * @param commit - CCIP commit to print.
+ * @param verifications - CCIP verifications to print.
  * @param request - CCIP request for timestamp comparison.
  */
-export async function prettyCommit(
+export async function prettyVerifications(
   this: Ctx,
   dest: Chain,
-  commit: CCIPCommit,
+  verifications: CCIPVerifications,
   request: PickDeep<CCIPRequest, 'tx.timestamp' | 'lane.destChainSelector'>,
 ) {
   const destFamily = networkInfo(request.lane.destChainSelector).family
 
-  if ('report' in commit) {
-    const timestamp = await dest.getBlockTimestamp(commit.log.blockNumber)
+  if ('report' in verifications) {
+    const timestamp = await dest.getBlockTimestamp(verifications.log.blockNumber)
     const origin =
-      commit.log.tx?.from ?? (await dest.getTransaction(commit.log.transactionHash)).from
+      verifications.log.tx?.from ?? (await dest.getTransaction(verifications.log.transactionHash)).from
     prettyTable.call(this, {
-      merkleRoot: commit.report.merkleRoot,
-      min: Number(commit.report.minSeqNr),
-      max: Number(commit.report.maxSeqNr),
+      merkleRoot: verifications.report.merkleRoot,
+      min: Number(verifications.report.minSeqNr),
+      max: Number(verifications.report.maxSeqNr),
       origin: formatDisplayAddress(origin, destFamily),
-      contract: formatDisplayAddress(commit.log.address, destFamily),
-      transactionHash: formatDisplayTxHash(commit.log.transactionHash, destFamily),
-      blockNumber: commit.log.blockNumber,
+      contract: formatDisplayAddress(verifications.log.address, destFamily),
+      transactionHash: formatDisplayTxHash(verifications.log.transactionHash, destFamily),
+      blockNumber: verifications.log.blockNumber,
       timestamp: `${formatDate(timestamp)} (${formatDuration(timestamp - request.tx.timestamp)} after request)`,
     })
   } else {
     let ts = 0
-    for (const { timestamp } of commit.verifications)
+    for (const { timestamp } of verifications.verifications)
       if (timestamp && timestamp > ts) ts = timestamp
 
     prettyTable.call(this, {
-      ...commit,
+      ...verifications,
       ...(ts && {
         timestamp: `${formatDate(ts)} (${formatDuration(ts - request.tx.timestamp)} after request)`,
       }),

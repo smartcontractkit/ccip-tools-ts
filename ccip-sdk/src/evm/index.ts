@@ -1,4 +1,3 @@
-import { parseAbi } from 'abitype'
 import {
   type BytesLike,
   type Interface,
@@ -54,10 +53,10 @@ import type { ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
-  type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
+  type CCIPVerifications,
   type ChainTransaction,
   type CommitReport,
   type ExecutionReceipt,
@@ -1451,9 +1450,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.getCommitReport} */
-  override async getCommitReport(
-    opts: Parameters<Chain['getCommitReport']>[0],
-  ): Promise<CCIPCommit> {
+  override async getVerifications(
+    opts: Parameters<Chain['getVerifications']>[0],
+  ): Promise<CCIPVerifications> {
     const { commitStore, request } = opts
     const [, version] = await this.typeAndVersion(commitStore)
     if (version >= CCIPVersion.V2_0) {
@@ -1499,10 +1498,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       const url = `${CCV_INDEXER_URL}/v1/verifierresults/${request.message.messageId}`
       const res = await fetch(url)
       const json = await res.json()
-      return json as CCIPCommit
+      return json as CCIPVerifications
     }
     // fallback <=v1.6
-    return super.getCommitReport(opts)
+    return super.getVerifications(opts)
   }
 
   /** {@inheritDoc Chain.getExecutionReceipts} */
