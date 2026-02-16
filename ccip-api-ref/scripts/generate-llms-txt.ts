@@ -3,10 +3,11 @@
  * Auto-generates llms.txt from source code - NO hardcoded content
  *
  * Extracts from:
- * - SDK: index.ts exports, chain.ts methods, types.ts enums
+ * - SDK: index.ts exports, chain.ts methods (FULL signatures)
  * - CLI: command files (yargs definitions)
- * - API: OpenAPI spec from https://api.ccip.chain.link/api-docs.json
+ * - API: OpenAPI spec from https://api.ccip.chain.link/api-docs.json (FULL details)
  * - Docs: filesystem structure
+ * - Architecture: Mermaid diagram from Architecture.tsx
  */
 
 import * as fs from 'fs'
@@ -15,7 +16,37 @@ import * as path from 'path'
 const ROOT_DIR = path.join(__dirname, '..')
 const SDK_DIR = path.join(ROOT_DIR, '..', 'ccip-sdk', 'src')
 const CLI_DIR = path.join(ROOT_DIR, '..', 'ccip-cli', 'src')
+const ARCHITECTURE_FILE = path.join(
+  ROOT_DIR,
+  'src',
+  'components',
+  'homepage',
+  'Architecture',
+  'Architecture.tsx',
+)
 const OUTPUT_FILE = path.join(ROOT_DIR, 'static', 'llms.txt')
+
+// ============================================================================
+// Architecture Diagram - Extract from React component
+// ============================================================================
+
+function extractMermaidDiagram(): string | null {
+  if (!fs.existsSync(ARCHITECTURE_FILE)) {
+    console.warn('Architecture.tsx not found, skipping diagram')
+    return null
+  }
+
+  const content = fs.readFileSync(ARCHITECTURE_FILE, 'utf-8')
+
+  // Extract the mermaid diagram from the template literal
+  const match = content.match(/const architectureDiagram = `\n([\s\S]*?)`/)
+  if (!match) {
+    console.warn('Could not extract Mermaid diagram from Architecture.tsx')
+    return null
+  }
+
+  return match[1].trim()
+}
 
 // ============================================================================
 // SDK Extraction - Parse actual source files
@@ -114,8 +145,7 @@ function extractChainMethods(): MethodInfo[] {
   const content = fs.readFileSync(chainPath, 'utf-8')
   const methods: MethodInfo[] = []
 
-  // Match method declarations in the Chain class
-  // Pattern: (async)? (abstract)? methodName(params): ReturnType
+  // Match method declarations in the Chain class - capture FULL signature
   const methodPattern =
     /^\s+(async\s+)?(abstract\s+)?(\w+)\s*(<[^>]*>)?\s*\(([^)]*)\)(?:\s*:\s*([^\n{]+))?/gm
 
@@ -124,8 +154,9 @@ function extractChainMethods(): MethodInfo[] {
     const isAsync = !!match[1]
     const isAbstract = !!match[2]
     const name = match[3]
+    const generics = match[4] || ''
     const params = match[5]?.trim() || ''
-    const returnType = match[6]?.trim() || 'void'
+    const returnType = match[6]?.trim().replace(/\s+/g, ' ') || 'void'
 
     // Skip constructor, private methods, internal methods
     if (name === 'constructor' || name.startsWith('_') || name === 'destroy') continue
@@ -148,9 +179,12 @@ function extractChainMethods(): MethodInfo[] {
     )
       continue
 
+    // Build FULL signature without truncation
+    const fullSignature = `${name}${generics}(${params}): ${returnType}`
+
     methods.push({
       name,
-      signature: `${name}(${params.length > 50 ? '...' : params}): ${returnType.replace(/\n/g, ' ').slice(0, 50)}`,
+      signature: fullSignature,
       isAbstract,
       isAsync,
     })
@@ -311,15 +345,26 @@ function extractCLICommands(): CLICommand[] {
 }
 
 // ============================================================================
-// API Extraction - Fetch and parse OpenAPI spec
+// API Extraction - Fetch and parse OpenAPI spec (FULL details)
 // ============================================================================
+
+interface APIParameter {
+  name: string
+  in: string
+  required: boolean
+  type: string
+  description: string
+}
 
 interface APIEndpoint {
   method: string
   path: string
   summary: string
-  description?: string
+  description: string
   tags: string[]
+  parameters: APIParameter[]
+  requestBody?: string
+  responses: { status: string; description: string }[]
 }
 
 async function fetchOpenAPISpec(): Promise<APIEndpoint[]> {
@@ -335,19 +380,72 @@ async function fetchOpenAPISpec(): Promise<APIEndpoint[]> {
     const spec = (await response.json()) as {
       paths: Record<
         string,
-        Record<string, { summary?: string; description?: string; tags?: string[] }>
+        Record<
+          string,
+          {
+            summary?: string
+            description?: string
+            tags?: string[]
+            parameters?: Array<{
+              name: string
+              in: string
+              required?: boolean
+              schema?: { type?: string }
+              description?: string
+            }>
+            requestBody?: {
+              content?: Record<string, { schema?: { $ref?: string; type?: string } }>
+            }
+            responses?: Record<string, { description?: string }>
+          }
+        >
       >
     }
 
-    for (const [path, methods] of Object.entries(spec.paths)) {
+    for (const [pathStr, methods] of Object.entries(spec.paths)) {
       for (const [method, details] of Object.entries(methods)) {
         if (method === 'parameters') continue // Skip path-level parameters
+
+        // Extract parameters
+        const parameters: APIParameter[] = (details.parameters || []).map((p) => ({
+          name: p.name,
+          in: p.in,
+          required: p.required || false,
+          type: p.schema?.type || 'string',
+          description: p.description || '',
+        }))
+
+        // Extract request body schema reference
+        let requestBody: string | undefined
+        if (details.requestBody?.content) {
+          const jsonContent = details.requestBody.content['application/json']
+          if (jsonContent?.schema?.$ref) {
+            requestBody = jsonContent.schema.$ref.split('/').pop()
+          } else if (jsonContent?.schema?.type) {
+            requestBody = jsonContent.schema.type
+          }
+        }
+
+        // Extract responses
+        const responses: { status: string; description: string }[] = []
+        if (details.responses) {
+          for (const [status, resp] of Object.entries(details.responses)) {
+            responses.push({
+              status,
+              description: resp.description || '',
+            })
+          }
+        }
+
         endpoints.push({
           method: method.toUpperCase(),
-          path,
+          path: pathStr,
           summary: details.summary || '',
-          description: details.description,
+          description: details.description || '',
           tags: details.tags || [],
+          parameters,
+          requestBody,
+          responses,
         })
       }
     }
@@ -372,12 +470,8 @@ function extractDocStructure(): { section: string; basePath: string; files: DocF
 
   const docDirs = [
     { dir: 'docs-sdk/guides', section: 'SDK Guides', basePath: '/sdk/guides/' },
-    { dir: 'docs-sdk/classes', section: 'SDK Classes', basePath: '/sdk/classes/' },
-    { dir: 'docs-sdk/functions', section: 'SDK Functions', basePath: '/sdk/functions/' },
-    { dir: 'docs-sdk/type-aliases', section: 'SDK Types', basePath: '/sdk/type-aliases/' },
     { dir: 'docs-cli', section: 'CLI', basePath: '/cli/' },
     { dir: 'docs-cli/guides', section: 'CLI Guides', basePath: '/cli/guides/' },
-    { dir: 'docs-api', section: 'API Endpoints', basePath: '/api/' },
   ]
 
   for (const { dir, section, basePath } of docDirs) {
@@ -418,6 +512,9 @@ function extractDocStructure(): { section: string; basePath: string; files: DocF
 // ============================================================================
 
 async function generateLlmsTxt(): Promise<string> {
+  console.log('Extracting Mermaid diagram...')
+  const mermaidDiagram = extractMermaidDiagram()
+
   console.log('Extracting SDK exports...')
   const sdkExports = extractSDKExports()
 
@@ -452,14 +549,40 @@ async function generateLlmsTxt(): Promise<string> {
   let output = `# CCIP Tools Documentation
 
 > Auto-generated context file for LLMs. Generated: ${now}
+> For CCIP protocol details (glossary, message lifecycle, architecture): https://docs.chain.link/ccip/llms-full.txt
 
 ## Overview
 
 CCIP Tools is a TypeScript toolkit for Chainlink CCIP (Cross-Chain Interoperability Protocol).
 
-**Package:** @chainlink/ccip-sdk
-**CLI:** ccip-cli
-**API:** https://api.ccip.chain.link
+- **SDK Package:** \`@chainlink/ccip-sdk\`
+- **CLI Package:** \`@chainlink/ccip-cli\`
+- **REST API:** https://api.ccip.chain.link
+
+---
+
+## CCIP Protocol Reference
+
+For detailed information about CCIP concepts, refer to the official documentation:
+
+- **Glossary** (chainSelector, OnRamp, OffRamp, Lane, DON): https://docs.chain.link/ccip/llms-full.txt
+- **Message Lifecycle** (Sent → Committed → Blessed → Success/Failed): https://docs.chain.link/ccip/llms-full.txt
+- **Architecture**: https://docs.chain.link/ccip/llms-full.txt
+
+---
+
+## Tools Architecture (SDK, CLI, API)
+
+${
+  mermaidDiagram
+    ? `The following Mermaid diagram shows the dependencies between SDK, CLI, and CCIP API:
+
+\`\`\`mermaid
+${mermaidDiagram}
+\`\`\`
+`
+    : '(Architecture diagram not available)'
+}
 
 ---
 
@@ -483,13 +606,17 @@ ${enums.map((e) => `- \`${e.name}\``).join('\n')}
 
 ---
 
-## Chain Methods
+## Chain Methods (Full Signatures)
 
-Methods available on chain instances (EVMChain, SolanaChain, etc.):
+Methods available on chain instances (EVMChain, SolanaChain, AptosChain, SuiChain, TONChain):
 
-| Method | Abstract |
-|--------|----------|
-${chainMethods.map((m) => `| \`${m.signature.slice(0, 60)}${m.signature.length > 60 ? '...' : ''}\` | ${m.isAbstract ? 'Yes' : 'No'} |`).join('\n')}
+${chainMethods
+  .map((m) => {
+    const prefix = m.isAbstract ? '[abstract] ' : ''
+    const asyncPrefix = m.isAsync ? 'async ' : ''
+    return `### \`${prefix}${asyncPrefix}${m.signature}\``
+  })
+  .join('\n\n')}
 
 ---
 
@@ -526,30 +653,61 @@ ${cliCommands
 
 Base URL: \`https://api.ccip.chain.link\`
 
-| Method | Path | Summary |
-|--------|------|---------|
-${apiEndpoints.map((e) => `| \`${e.method}\` | \`${e.path}\` | ${e.summary} |`).join('\n')}
+${apiEndpoints
+  .map((e) => {
+    let section = `### \`${e.method} ${e.path}\`\n\n`
+    section += `**Summary:** ${e.summary}\n\n`
 
----
-
-## Documentation Structure
-
-${docStructure
-  .map((s) => {
-    if (s.files.length > 20) {
-      return `### ${s.section} (${s.files.length} files)\n\nBase path: \`${s.basePath}\`\n`
+    if (e.description) {
+      section += `**Description:** ${e.description}\n\n`
     }
-    return `### ${s.section}\n\n${s.files.map((f) => `- [${f.title}](${f.path})`).join('\n')}\n`
+
+    if (e.parameters.length > 0) {
+      section += `**Parameters:**\n\n| Name | In | Type | Required | Description |\n|------|-----|------|----------|-------------|\n`
+      section += e.parameters
+        .map(
+          (p) =>
+            `| \`${p.name}\` | ${p.in} | ${p.type} | ${p.required ? 'Yes' : 'No'} | ${p.description} |`,
+        )
+        .join('\n')
+      section += '\n\n'
+    }
+
+    if (e.requestBody) {
+      section += `**Request Body:** \`${e.requestBody}\`\n\n`
+    }
+
+    if (e.responses.length > 0) {
+      section += `**Responses:**\n\n`
+      section += e.responses.map((r) => `- \`${r.status}\`: ${r.description}`).join('\n')
+      section += '\n'
+    }
+
+    return section
   })
   .join('\n')}
 
 ---
 
-## Links
+## Documentation Links
 
-- GitHub: https://github.com/smartcontractkit/ccip-tools-ts
-- CCIP Explorer: https://ccip.chain.link
-- API Docs: https://api.ccip.chain.link/api-docs
+${docStructure
+  .map((s) => {
+    return `### ${s.section}\n\n${s.files.map((f) => `- [${f.title}](https://docs.chain.link/ccip/tools${f.path})`).join('\n')}\n`
+  })
+  .join('\n')}
+
+---
+
+## Quick Links
+
+- **GitHub:** https://github.com/smartcontractkit/ccip-tools-ts
+- **npm (SDK):** https://www.npmjs.com/package/@chainlink/ccip-sdk
+- **npm (CLI):** https://www.npmjs.com/package/@chainlink/ccip-cli
+- **CCIP Explorer:** https://ccip.chain.link
+- **API Documentation:** https://api.ccip.chain.link/api-docs
+- **CCIP Protocol Docs:** https://docs.chain.link/ccip
+- **Full CCIP LLM Context:** https://docs.chain.link/ccip/llms-full.txt
 `
 
   return output

@@ -3,6 +3,7 @@ import Layout from '@theme/Layout'
 import React from 'react'
 
 import {
+  Architecture,
   ChainSupportSection,
   Features,
   Hero,
@@ -18,6 +19,7 @@ export default function Home(): React.JSX.Element {
     <Layout title={siteConfig.title} description={siteConfig.tagline}>
       <main>
         <Hero />
+        <Architecture />
         <Features />
         <QuickStart />
         <ChainSupportSection />
