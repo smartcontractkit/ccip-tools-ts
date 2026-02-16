@@ -95,12 +95,12 @@ describe('CCIPAPIClient', () => {
 
   describe('fromUrl', () => {
     it('should create client instance', async () => {
-      const client = await CCIPAPIClient.fromUrl()
+      const client = CCIPAPIClient.fromUrl()
       assert.ok(client instanceof CCIPAPIClient)
     })
 
     it('should create client with custom URL', async () => {
-      const client = await CCIPAPIClient.fromUrl('https://custom.api/')
+      const client = CCIPAPIClient.fromUrl('https://custom.api/')
       assert.equal(client.baseUrl, 'https://custom.api/')
     })
   })

@@ -76,7 +76,7 @@ function hasV3ExtraArgs(extraArgs: Partial<ExtraArgs> | undefined): boolean {
  *
  * @example Custom API endpoint
  * ```typescript
- * const api = new CCIPAPIClient('https://staging-api.example.com', { logger })
+ * const api = CCIPAPIClient.fromUrl('https://staging-api.example.com', { logger })
  * const chain = await EVMChain.fromUrl(rpcUrl, { apiClient: api, logger })
  * ```
  *
@@ -353,7 +353,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       this.apiClient = apiClient // Use provided instance
       this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     } else {
-      this.apiClient = new CCIPAPIClient(undefined, { logger }) // Default
+      this.apiClient = CCIPAPIClient.fromUrl(undefined, { logger }) // Default
       this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     }
   }
