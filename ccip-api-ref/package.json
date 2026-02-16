@@ -5,7 +5,7 @@
   "description": "API Reference documentation for CCIP SDK and CLI",
   "scripts": {
     "dev": "docusaurus start",
-    "build": "docusaurus build",
+    "build": "npm run generate-llms-txt && docusaurus build",
     "serve": "docusaurus serve",
     "clear": "docusaurus clear",
     "clean": "docusaurus clear",
@@ -15,7 +15,8 @@
     "lint:fix": "prettier --write . && eslint --fix .",
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck",
-    "test": "node --import tsx --test src/**/*.test.ts"
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "generate-llms-txt": "node --import tsx scripts/generate-llms-txt.ts"
   },
   "dependencies": {
     "@chainlink/design-system": "^0.2.8",

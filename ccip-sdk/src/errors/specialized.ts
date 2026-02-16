@@ -2484,11 +2484,13 @@ export class CCIPAptosLogInvalidError extends CCIPError {
  *
  * @example
  * ```typescript
+ * import { CCIPDataFormatUnsupportedError } from '@chainlink/ccip-sdk'
+ *
  * try {
  *   AptosChain.getAddress('invalid-address')
  * } catch (error) {
- *   if (error instanceof CCIPAptosAddressInvalidError) {
- *     console.log(`Invalid address: ${error.context.address}`)
+ *   if (error instanceof CCIPDataFormatUnsupportedError) {
+ *     console.log(`Invalid address: ${error.message}`)
  *   }
  * }
  * ```

@@ -1264,7 +1264,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getFeeTokens(router: string): Promise<Record<string, TokenInfo>>
 
-  /** {@inheritDoc ChainStatic.buildMessageForDest} */
+  /**
+   * Returns a copy of a message, populating missing fields like `extraArgs` with defaults.
+   * It's expected to return a message suitable at least for basic token transfers.
+   *
+   * @param message - AnyMessage (from source), containing at least `receiver`
+   * @returns A message suitable for `sendMessage` to this destination chain family
+   */
   static buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
   ): AnyMessage {
@@ -1450,7 +1456,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * @returns Address in this chain family's format
    *
    * @throws {@link CCIPAddressInvalidEvmError} if invalid EVM address
-   * @throws {@link CCIPAptosAddressInvalidError} if invalid Aptos address
+   * @throws {@link CCIPDataFormatUnsupportedError} if invalid Aptos/Sui address
    *
    * @example Normalize address
    * ```typescript

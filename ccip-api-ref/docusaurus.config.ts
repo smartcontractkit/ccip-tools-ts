@@ -205,7 +205,7 @@ const config: Config = {
     [
       'classic',
       {
-        // Keep docs preset for search plugin compatibility, but don't expose in nav
+        // Minimal docs preset required for search plugin compatibility
         docs: {
           path: 'docs',
           routeBasePath: 'docs',
@@ -305,6 +305,11 @@ const config: Config = {
           position: 'left',
           activeBaseRegex: '/cli/',
         },
+        {
+          href: 'https://github.com/smartcontractkit/ccip-tools-ts/releases',
+          label: 'Changelog',
+          position: 'left',
+        },
         // Right side - Social links with icons
         {
           href: 'https://discord.gg/chainlink',
@@ -372,10 +377,14 @@ const config: Config = {
               label: 'Chainlink',
               href: 'https://chain.link',
             },
+            {
+              label: 'LLM Context (llms.txt)',
+              href: '/llms.txt',
+            },
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Chainlink.`,
+      copyright: `Previous versions: see <a href="https://github.com/smartcontractkit/ccip-tools-ts/releases">GitHub releases</a><br/>Copyright © ${new Date().getFullYear()} Chainlink.`,
     },
     prism: {
       theme: prismThemes.github,

@@ -1,4 +1,5 @@
 import Link from '@docusaurus/Link'
+import useDocusaurusContext from '@docusaurus/useDocusaurusContext'
 import React from 'react'
 
 import styles from './Features.module.css'
@@ -9,6 +10,7 @@ interface FeatureCardProps {
   link: string
   linkText: string
   icon: React.ReactNode
+  version?: string
 }
 
 /** Icon components for feature cards */
@@ -56,12 +58,16 @@ function FeatureCard({
   link,
   linkText,
   icon,
+  version,
 }: FeatureCardProps): React.JSX.Element {
   return (
     <div className={styles.card}>
       <Link className={styles.cardLink} to={link}>
         <div className={styles.cardIconWrapper}>{icon}</div>
-        <h3 className={styles.cardTitle}>{title}</h3>
+        <h3 className={styles.cardTitle}>
+          {title}
+          {version && <span className={styles.versionBadge}>{version}</span>}
+        </h3>
         <p className={styles.cardDescription}>{description}</p>
         {linkText} →
       </Link>
@@ -71,6 +77,11 @@ function FeatureCard({
 
 /** Features section showcasing SDK, CLI, and API capabilities */
 export function Features(): React.JSX.Element {
+  const { siteConfig } = useDocusaurusContext()
+  const { customFields } = siteConfig
+  const sdkVersion = customFields?.sdkVersion as string | undefined
+  const cliVersion = customFields?.cliVersion as string | undefined
+
   return (
     <section className={styles.features}>
       <div className={styles.container}>
@@ -81,6 +92,7 @@ export function Features(): React.JSX.Element {
             description="REST API documentation for the CCIP API service with endpoint details, request/response schemas, and usage examples."
             link="/api/"
             linkText="Explore API"
+            version="v2"
           />
           <FeatureCard
             icon={<SdkIcon />}
@@ -88,6 +100,7 @@ export function Features(): React.JSX.Element {
             description="Full TypeScript SDK documentation with type definitions, examples, and multi-chain support for EVM, Solana, Aptos, and Sui."
             link="/sdk/"
             linkText="Explore SDK"
+            version={sdkVersion ? `v${sdkVersion}` : undefined}
           />
           <FeatureCard
             icon={<CliIcon />}
@@ -95,6 +108,7 @@ export function Features(): React.JSX.Element {
             description="Command-line interface documentation for CCIP operations including tracking requests, querying lanes, and manual execution."
             link="/cli/"
             linkText="Explore CLI"
+            version={cliVersion ? `v${cliVersion}` : undefined}
           />
         </div>
       </div>

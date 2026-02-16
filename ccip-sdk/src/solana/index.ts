@@ -1593,7 +1593,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * {@inheritDoc ChainStatic.buildMessageForDest}
+   * Returns a copy of a message, populating missing fields like `extraArgs` with defaults.
+   * It's expected to return a message suitable at least for basic token transfers.
+   *
+   * @param message - AnyMessage (from source), containing at least `receiver`
+   * @returns A message suitable for `sendMessage` to this destination chain family
    * @throws {@link CCIPArgumentInvalidError} if tokenReceiver missing when sending tokens with data
    */
   static override buildMessageForDest(

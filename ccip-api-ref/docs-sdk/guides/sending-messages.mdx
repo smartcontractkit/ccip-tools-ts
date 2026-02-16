@@ -36,7 +36,7 @@ type MessageInput = {
 Send arbitrary data to a contract on another chain:
 
 ```typescript
-import { EVMChain, encodeExtraArgs, networkInfo } from '@chainlink/ccip-sdk'
+import { EVMChain, encodeExtraArgs, networkInfo, CCIPError } from '@chainlink/ccip-sdk'
 import { toHex } from 'viem'
 
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
@@ -55,20 +55,29 @@ const message = {
 const router = source.network.router
 const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
 
-const fee = await source.getFee({
-  router,
-  destChainSelector: destSelector,
-  message,
-})
-console.log('Fee:', fee, 'wei')
+try {
+  const fee = await source.getFee({
+    router,
+    destChainSelector: destSelector,
+    message,
+  })
+  console.log('Fee:', fee, 'wei')
 
-const request = await source.sendMessage({
-  router,
-  destChainSelector: destSelector,
-  message: { ...message, fee },
-  wallet, // Required: ethers Signer or viemWallet(client)
-})
-console.log('Sent in tx:', request.tx.hash)
+  const request = await source.sendMessage({
+    router,
+    destChainSelector: destSelector,
+    message: { ...message, fee },
+    wallet, // Required: ethers Signer or viemWallet(client)
+  })
+  console.log('Sent in tx:', request.tx.hash)
+} catch (error) {
+  if (CCIPError.isCCIPError(error)) {
+    console.error('CCIP error:', error.code, error.message)
+    if (error.recovery) console.error('Recovery:', error.recovery)
+  } else {
+    throw error
+  }
+}
 ```
 
 ## Token Transfer
@@ -275,7 +284,8 @@ Send data and tokens with fee buffer:
 import {
   EVMChain,
   encodeExtraArgs,
-  networkInfo
+  networkInfo,
+  CCIPError
 } from '@chainlink/ccip-sdk'
 import { viemWallet } from '@chainlink/ccip-sdk/viem'
 import { toHex, parseEther, type WalletClient } from 'viem'
@@ -302,27 +312,35 @@ async function sendCrossChainMessage(walletClient: WalletClient) {
     }),
   }
 
-  const fee = await source.getFee({
-    router,
-    destChainSelector: destSelector,
-    message,
-  })
-  console.log('Estimated fee:', fee, 'wei')
+  try {
+    const fee = await source.getFee({
+      router,
+      destChainSelector: destSelector,
+      message,
+    })
+    console.log('Estimated fee:', fee, 'wei')
 
-  // Add 10% buffer for gas price fluctuations
-  const feeWithBuffer = (fee * 110n) / 100n
+    // Add 10% buffer for gas price fluctuations
+    const feeWithBuffer = (fee * 110n) / 100n
 
-  const request = await source.sendMessage({
-    router,
-    destChainSelector: destSelector,
-    message: { ...message, fee: feeWithBuffer },
-    wallet: viemWallet(walletClient), // Wrap viem WalletClient
-  })
+    const request = await source.sendMessage({
+      router,
+      destChainSelector: destSelector,
+      message: { ...message, fee: feeWithBuffer },
+      wallet: viemWallet(walletClient), // Wrap viem WalletClient
+    })
 
-  console.log('Transaction hash:', request.tx.hash)
-  console.log('Message ID:', request.message.messageId)
+    console.log('Transaction hash:', request.tx.hash)
+    console.log('Message ID:', request.message.messageId)
 
-  return request
+    return request
+  } catch (error) {
+    if (CCIPError.isCCIPError(error)) {
+      console.error('CCIP error:', error.code, error.message)
+      if (error.recovery) console.error('Recovery:', error.recovery)
+    }
+    throw error
+  }
 }
 ```
 

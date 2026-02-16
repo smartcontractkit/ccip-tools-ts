@@ -20,16 +20,24 @@ The SDK provides methods to query balances, token information, and lane characte
 Query ETH, AVAX, SOL, or other native token balances:
 
 ```typescript
-import { EVMChain } from '@chainlink/ccip-sdk'
+import { EVMChain, CCIPError } from '@chainlink/ccip-sdk'
 import { formatEther } from 'viem'
 
 const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
-const balance = await chain.getBalance({
-  holder: '0xWalletAddress...',
-})
+try {
+  const balance = await chain.getBalance({
+    holder: '0xWalletAddress...',
+  })
 
-console.log('Balance:', formatEther(balance), 'ETH')
+  console.log('Balance:', formatEther(balance), 'ETH')
+} catch (error) {
+  if (CCIPError.isCCIPError(error)) {
+    console.error('Failed to get balance:', error.message)
+  } else {
+    throw error
+  }
+}
 ```
 
 ### Token Balance
@@ -37,19 +45,27 @@ console.log('Balance:', formatEther(balance), 'ETH')
 Query ERC20/SPL token balances:
 
 ```typescript
-import { EVMChain } from '@chainlink/ccip-sdk'
+import { EVMChain, CCIPError } from '@chainlink/ccip-sdk'
 import { formatUnits } from 'viem'
 
 const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
-const balance = await chain.getBalance({
-  holder: '0xWalletAddress...',
-  token: '0xTokenAddress...',
-})
+try {
+  const balance = await chain.getBalance({
+    holder: '0xWalletAddress...',
+    token: '0xTokenAddress...',
+  })
 
-// Get decimals for formatting
-const tokenInfo = await chain.getTokenInfo('0xTokenAddress...')
-console.log('Balance:', formatUnits(balance, tokenInfo.decimals), tokenInfo.symbol)
+  // Get decimals for formatting
+  const tokenInfo = await chain.getTokenInfo('0xTokenAddress...')
+  console.log('Balance:', formatUnits(balance, tokenInfo.decimals), tokenInfo.symbol)
+} catch (error) {
+  if (CCIPError.isCCIPError(error)) {
+    console.error('Failed to get token balance:', error.message)
+  } else {
+    throw error
+  }
+}
 ```
 
 ### Multi-Chain Balance Examples

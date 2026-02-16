@@ -73,14 +73,7 @@ curl -s -o /dev/null -w "%{http_code}" \
 
 ## Authentication
 
-The CCIP API is **publicly accessible** and does not require authentication. However, please be mindful of rate limits when integrating into production applications.
-
-## Best Practices
-
-- **Cache responses** - Message data is immutable once finalized
-- **Use pagination** - For endpoints returning lists, use limit/offset parameters
-- **Handle retries** - Implement exponential backoff for 5xx errors
-- **Validate inputs** - Message IDs must be 66-character hex strings (`0x` + 64 hex chars)
+Most CCIP API endpoints are **publicly accessible** and do not require authentication. However, **Intent-related endpoints** may require an `x-api-key` header for validation. Please be mindful of rate limits when integrating into production applications.
 
 ## Next Steps
 
