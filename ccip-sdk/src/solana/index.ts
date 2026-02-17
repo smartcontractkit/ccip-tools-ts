@@ -171,6 +171,29 @@ export type SolanaTransaction = MergeArrayElements<
 
 /**
  * Solana chain implementation supporting Solana networks.
+ *
+ * Provides methods for sending CCIP cross-chain messages, querying message
+ * status, fetching fee quotes, and manually executing pending messages on
+ * Solana networks.
+ *
+ * @remarks
+ * Solana uses CCIP v1.6+ protocol only.
+ *
+ * @example Create from RPC URL
+ * ```typescript
+ * import { SolanaChain } from '@chainlink/ccip-sdk'
+ *
+ * const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+ * console.log(`Connected to: ${chain.network.name}`)
+ * ```
+ *
+ * @example Query messages in a transaction
+ * ```typescript
+ * const requests = await chain.getMessagesInTx('5abc123...')
+ * for (const req of requests) {
+ *   console.log(`Message ID: ${req.message.messageId}`)
+ * }
+ * ```
  */
 export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   static {
@@ -284,9 +307,20 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /**
    * Creates a SolanaChain instance from an RPC URL.
-   * @param url - RPC endpoint URL.
-   * @param ctx - context containing logger.
-   * @returns A new SolanaChain instance.
+   *
+   * @param url - RPC endpoint URL (https://, http://, wss://, or ws://).
+   * @param ctx - Optional context containing logger and API client configuration.
+   * @returns A new SolanaChain instance connected to the specified network.
+   * @throws {@link CCIPChainNotFoundError} if chain cannot be identified from genesis hash
+   *
+   * @example
+   * ```typescript
+   * // Create from devnet URL
+   * const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+   *
+   * // With custom logger
+   * const chain = await SolanaChain.fromUrl(url, { logger: customLogger })
+   * ```
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<SolanaChain> {
     const connection = this._getConnection(url, ctx)
@@ -1559,7 +1593,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * {@inheritDoc ChainStatic.buildMessageForDest}
+   * Returns a copy of a message, populating missing fields like `extraArgs` with defaults.
+   * It's expected to return a message suitable at least for basic token transfers.
+   *
+   * @param message - AnyMessage (from source), containing at least `receiver`
+   * @returns A message suitable for `sendMessage` to this destination chain family
    * @throws {@link CCIPArgumentInvalidError} if tokenReceiver missing when sending tokens with data
    */
   static override buildMessageForDest(

@@ -41,7 +41,13 @@ export class CCIPError extends Error {
 
   override readonly name: string = 'CCIPError'
 
-  /** Creates CCIPError with code, message, and options. */
+  /**
+   * Creates a CCIPError with code, message, and options.
+   *
+   * @param code - Machine-readable error code
+   * @param message - Human-readable error message
+   * @param options - Additional error options (cause, context, isTransient, etc.)
+   */
   constructor(code: CCIPErrorCode, message: string, options?: CCIPErrorOptions) {
     super(message, { cause: options?.cause })
     Object.setPrototypeOf(this, new.target.prototype)
@@ -55,7 +61,15 @@ export class CCIPError extends Error {
     Error.captureStackTrace(this, this.constructor)
   }
 
-  /** Type guard. Prefer over instanceof (handles dual package hazard). */
+  /**
+   * Type guard for CCIPError.
+   *
+   * Prefer this over `instanceof` to handle the dual package hazard
+   * when multiple versions of the SDK may be present.
+   *
+   * @param error - The error to check
+   * @returns True if the error is a CCIPError instance
+   */
   static isCCIPError(error: unknown): error is CCIPError {
     return (
       error instanceof CCIPError ||
@@ -63,7 +77,15 @@ export class CCIPError extends Error {
     )
   }
 
-  /** Wrap unknown catch value in CCIPError. */
+  /**
+   * Wraps an unknown caught value in a CCIPError.
+   *
+   * Useful for normalizing errors in catch blocks.
+   *
+   * @param error - The error to wrap
+   * @param code - Optional error code (defaults to 'UNKNOWN')
+   * @returns A CCIPError wrapping the original error
+   */
   static from(error: unknown, code?: CCIPErrorCode): CCIPError {
     if (error instanceof CCIPError) return error
     if (error instanceof Error) {
@@ -72,7 +94,14 @@ export class CCIPError extends Error {
     return new CCIPError(code ?? 'UNKNOWN', String(error))
   }
 
-  /** Serialize for logging (JSON.stringify loses non-enumerable props). */
+  /**
+   * Serializes the error for logging.
+   *
+   * Use this instead of `JSON.stringify(error)` directly, as Error properties
+   * are non-enumerable and would be lost.
+   *
+   * @returns An object containing all error properties
+   */
   toJSON(): Record<string, unknown> {
     return {
       name: this.name,

@@ -1,0 +1,28 @@
+/**
+ * Enhanced CodeBlock styles
+ */
+
+.codeBlockContainer {
+  position: relative;
+  margin: var(--space-4x, 16px) 0;
+}
+
+.languageBadge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 2px 8px;
+  background-color: var(--gray-700, #464c56);
+  color: var(--gray-200, #d4d7dc);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 0 var(--ifm-border-radius, 4px) 0 var(--ifm-border-radius, 4px);
+  z-index: 1;
+}
+
+[data-theme='dark'] .languageBadge {
+  background-color: var(--gray-600, #5a6270);
+  color: var(--gray-100, #e8eaed);
+}

@@ -158,6 +158,26 @@ async function submitTransaction(
 
 /**
  * EVM chain implementation supporting Ethereum-compatible networks.
+ *
+ * Provides methods for sending CCIP cross-chain messages, querying message
+ * status, fetching fee quotes, and manually executing pending messages on
+ * Ethereum Virtual Machine compatible chains.
+ *
+ * @example Create from RPC URL
+ * ```typescript
+ * import { EVMChain } from '@chainlink/ccip-sdk'
+ *
+ * const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+ * console.log(`Connected to: ${chain.network.name}`)
+ * ```
+ *
+ * @example Query messages in a transaction
+ * ```typescript
+ * const requests = await chain.getMessagesInTx('0xabc123...')
+ * for (const req of requests) {
+ *   console.log(`Message ID: ${req.message.messageId}`)
+ * }
+ * ```
  */
 export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   static {
@@ -286,9 +306,20 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /**
    * Creates an EVMChain instance from an RPC URL.
+   *
    * @param url - WebSocket (wss://) or HTTP (https://) endpoint URL.
-   * @param ctx - context containing logger.
-   * @returns A new EVMChain instance.
+   * @param ctx - Optional context containing logger and API client configuration.
+   * @returns A new EVMChain instance connected to the specified network.
+   * @throws {@link CCIPChainNotFoundError} if chain cannot be identified from chainId
+   *
+   * @example
+   * ```typescript
+   * // HTTP connection
+   * const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+   *
+   * // With custom logger
+   * const chain = await EVMChain.fromUrl(url, { logger: customLogger })
+   * ```
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<EVMChain> {
     return this.fromProvider(await this._getProvider(url), ctx)

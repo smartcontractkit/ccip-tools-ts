@@ -1,3 +1,21 @@
+/**
+ * CCIP CLI Lane Latency Command
+ *
+ * Queries real-time lane latency statistics between source and destination chains
+ * using the CCIP API. Shows average, median, and percentile latencies.
+ *
+ * @example
+ * ```bash
+ * # Get latency between Ethereum and Arbitrum
+ * ccip-cli laneLatency ethereum-mainnet arbitrum-mainnet
+ *
+ * # Use custom API URL
+ * ccip-cli laneLatency sepolia fuji --api-url https://custom-api.example.com
+ * ```
+ *
+ * @packageDocumentation
+ */
+
 import {
   CCIPAPIClient,
   CCIPApiClientNotAvailableError,

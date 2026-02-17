@@ -1,0 +1,437 @@
+---
+id: browser-setup
+title: 'Browser Setup'
+description: 'Configure bundlers and polyfills for using the CCIP SDK in browser applications.'
+sidebar_label: Browser Setup
+sidebar_position: 8
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Browser Setup
+
+The CCIP SDK works in browser environments with proper bundler configuration. This guide covers polyfill requirements and common bundler setups.
+
+## Polyfill Requirements
+
+### SDK-Only Projects
+
+If you're using `@chainlink/ccip-sdk` **without** wallet UI libraries, you only need the `buffer` polyfill:
+
+| Polyfill | Required By | Reason |
+|----------|-------------|--------|
+| `buffer` | CCIP SDK (Solana, TON, Sui chains) | Binary data handling |
+
+### With Wallet Libraries
+
+If you're using wallet connection libraries (RainbowKit, MetaMask SDK, Solana Wallet Adapter), additional polyfills are needed:
+
+| Polyfill | Required By | NOT Required By |
+|----------|-------------|-----------------|
+| `buffer` | **@chainlink/ccip-sdk** | - |
+| `crypto` | @metamask/sdk, wallet libraries | @chainlink/ccip-sdk |
+| `stream` | @metamask/sdk | @chainlink/ccip-sdk |
+| `process` | @metamask/sdk, @walletconnect | @chainlink/ccip-sdk |
+| `util` | @solana/wallet-adapter | @chainlink/ccip-sdk |
+
+## Vite Configuration
+
+<Tabs>
+<TabItem value="minimal" label="SDK Only">
+
+```typescript
+// vite.config.ts - Minimal config for CCIP SDK only
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { nodePolyfills } from 'vite-plugin-node-polyfills'
+
+export default defineConfig({
+  plugins: [
+    react(),
+    nodePolyfills({
+      include: ['buffer'],
+      globals: { Buffer: true },
+    }),
+  ],
+})
+```
+
+</TabItem>
+<TabItem value="full" label="With Wallet Libraries">
+
+```typescript
+// vite.config.ts - Full config with wallet libraries
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { nodePolyfills } from 'vite-plugin-node-polyfills'
+
+export default defineConfig({
+  plugins: [
+    react(),
+    nodePolyfills({
+      include: ['buffer', 'crypto', 'stream', 'util', 'process'],
+      globals: {
+        Buffer: true,
+        global: true,
+        process: true,
+      },
+    }),
+  ],
+  define: {
+    'process.env': {},
+  },
+})
+```
+
+</TabItem>
+</Tabs>
+
+Install the polyfill plugin:
+
+```bash
+npm install vite-plugin-node-polyfills
+```
+
+## Webpack Configuration
+
+<Tabs>
+<TabItem value="minimal" label="SDK Only">
+
+```javascript
+// webpack.config.js - Minimal config
+const webpack = require('webpack')
+
+module.exports = {
+  resolve: {
+    fallback: {
+      buffer: require.resolve('buffer/'),
+    },
+  },
+  plugins: [
+    new webpack.ProvidePlugin({
+      Buffer: ['buffer', 'Buffer'],
+    }),
+  ],
+}
+```
+
+</TabItem>
+<TabItem value="full" label="With Wallet Libraries">
+
+```javascript
+// webpack.config.js - Full config
+const webpack = require('webpack')
+
+module.exports = {
+  resolve: {
+    fallback: {
+      buffer: require.resolve('buffer/'),
+      crypto: require.resolve('crypto-browserify'),
+      stream: require.resolve('stream-browserify'),
+      util: require.resolve('util/'),
+      process: require.resolve('process/browser'),
+    },
+  },
+  plugins: [
+    new webpack.ProvidePlugin({
+      Buffer: ['buffer', 'Buffer'],
+      process: 'process/browser',
+    }),
+  ],
+}
+```
+
+</TabItem>
+</Tabs>
+
+Install polyfill packages:
+
+```bash
+npm install buffer
+# If using wallet libraries:
+npm install crypto-browserify stream-browserify util process
+```
+
+## Next.js Configuration
+
+```javascript
+// next.config.js
+const nextConfig = {
+  webpack: (config) => {
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      buffer: require.resolve('buffer/'),
+      // Add more if using wallet libraries
+    }
+    return config
+  },
+}
+
+module.exports = nextConfig
+```
+
+## Tree-Shaking
+
+The SDK supports tree-shaking - only the chains you import are bundled:
+
+```typescript
+// Only EVMChain is bundled
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+// Only SolanaChain is bundled
+import { SolanaChain } from '@chainlink/ccip-sdk'
+
+// All chains - largest bundle, use only if needed
+import { allSupportedChains } from '@chainlink/ccip-sdk/all'
+```
+
+### Bundle Sizes
+
+| Import | Minified | Gzipped |
+|--------|----------|---------|
+| EVM only | 740 KB | ~180 KB |
+| Solana only | 1.2 MB | ~290 KB |
+| Aptos only | 700 KB | ~170 KB |
+| Sui only | 756 KB | ~185 KB |
+| TON only | 760 KB | ~185 KB |
+| EVM + Solana | 1.4 MB | ~340 KB |
+| All chains | 2.0 MB | ~480 KB |
+
+**Important:** Don't place `@chainlink/ccip-sdk` in `manualChunks` configuration, as this disables tree-shaking:
+
+```typescript
+// vite.config.ts
+export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-solana': ['@solana/web3.js'],
+          // DON'T add @chainlink/ccip-sdk here
+        },
+      },
+    },
+  },
+})
+```
+
+## Fetch Binding Fix
+
+Some bundlers break the native fetch context. If you see "Illegal invocation" errors:
+
+```typescript
+// main.tsx or index.tsx - Add at the top
+if (typeof globalThis.fetch === 'function') {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (input, init) => originalFetch.call(globalThis, input, init)
+}
+```
+
+## Using with Wagmi/Viem
+
+When using the SDK with wagmi, you may encounter type mismatches with `fromViemClient()`:
+
+```typescript
+import { getPublicClient } from '@wagmi/core'
+import { fromViemClient } from '@chainlink/ccip-sdk/viem'
+import type { PublicClient, Transport, Chain } from 'viem'
+
+// Type bridge for wagmi compatibility
+function toGenericPublicClient(
+  client: ReturnType<typeof getPublicClient>
+): PublicClient<Transport, Chain> {
+  return client as PublicClient<Transport, Chain>
+}
+
+// Usage
+const wagmiClient = getPublicClient(wagmiConfig, { chainId: 11155111 })
+const publicClient = toGenericPublicClient(wagmiClient)
+const chain = await fromViemClient(publicClient)
+```
+
+This cast is safe when both packages use the same viem version.
+
+## Complete Vite Example
+
+Full configuration for a React app with EVM and Solana support:
+
+```typescript
+// vite.config.ts
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { nodePolyfills } from 'vite-plugin-node-polyfills'
+
+export default defineConfig({
+  plugins: [
+    react(),
+    nodePolyfills({
+      include: ['buffer', 'crypto', 'stream', 'util', 'process'],
+      globals: {
+        Buffer: true,
+        global: true,
+        process: true,
+      },
+    }),
+  ],
+  define: {
+    'process.env': {},
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-solana': ['@solana/web3.js', '@solana/wallet-adapter-base'],
+          'vendor-evm': ['wagmi', 'viem', '@rainbow-me/rainbowkit'],
+          // Don't include @chainlink/ccip-sdk - let it tree-shake
+        },
+      },
+    },
+  },
+  optimizeDeps: {
+    include: ['buffer'],
+  },
+})
+```
+
+## Framework Integration
+
+### Next.js
+
+```bash
+npm install buffer
+```
+
+```javascript
+// next.config.js
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        buffer: require.resolve('buffer/'),
+      }
+    }
+    return config
+  },
+}
+module.exports = nextConfig
+```
+
+For client components using Solana/TON, add at the top:
+
+```tsx
+'use client'
+import { Buffer } from 'buffer'
+if (typeof window !== 'undefined') {
+  window.Buffer = Buffer
+}
+```
+
+### Remix
+
+Remix uses esbuild under the hood. Add the buffer shim to your client entry:
+
+```bash
+npm install buffer
+```
+
+```typescript
+// app/entry.client.tsx
+import { Buffer } from 'buffer'
+globalThis.Buffer = Buffer
+
+// ... rest of entry.client.tsx
+```
+
+## Verify Your Setup
+
+After configuring your bundler, verify the polyfill is working:
+
+```typescript
+// Add to your app's entry point or browser console
+console.log('Buffer available:', typeof Buffer !== 'undefined')
+console.log('Buffer works:', Buffer.from('test').toString('hex') === '74657374')
+```
+
+Check bundle size to verify tree-shaking:
+
+```bash
+# Check output file size
+ls -lh dist/*.js
+
+# For detailed analysis
+npx source-map-explorer dist/bundle.js
+```
+
+Expected sizes for EVM-only: ~740 KB minified, ~180 KB gzipped.
+
+## Troubleshooting
+
+### "Buffer is not defined"
+
+**Cause:** Using Solana or TON chains without the Buffer polyfill, or the polyfill isn't loading before SDK code.
+
+**Solution:**
+1. Verify the polyfill configuration for your bundler
+2. Ensure `buffer` package is installed: `npm ls buffer`
+3. For Bun, use a custom build script to ensure correct load order
+
+### "process is not defined"
+
+**Cause:** Wallet libraries (MetaMask SDK, WalletConnect) require `process`.
+
+**Solution:** Add the process polyfill if using wallet libraries that require it.
+
+### "Illegal invocation" on fetch
+
+**Cause:** Some bundlers break the native fetch context.
+
+**Solution:** Add the fetch binding fix shown above.
+
+### Bundle size larger than expected
+
+**Cause:** Tree-shaking may not be working, or you're importing more chains than needed.
+
+**Symptoms:** EVM-only bundle exceeds 1 MB.
+
+**Solution:**
+1. Verify you're using ES module imports (not `require()`)
+2. Check you're importing specific chains, not `allSupportedChains`
+3. Run a bundle analyzer:
+   ```bash
+   # Webpack
+   npx webpack-bundle-analyzer dist/stats.json
+
+   # Vite
+   npx vite-bundle-visualizer
+   ```
+
+### Vite dev server errors with EVM-only code
+
+**Cause:** Vite pre-bundles all SDK dependencies in development mode, including Solana/TON libraries that need Buffer.
+
+**Solution:** Add the Buffer polyfill even for EVM-only development. This is only needed for `vite dev`; production builds will tree-shake correctly.
+
+### Type errors with wagmi
+
+**Cause:** Wagmi's `getPublicClient()` returns a chain-specific typed client that doesn't match the SDK's expected type.
+
+**Solution:** Use the type bridge function shown in "Using with Wagmi/Viem" section, or see the [Viem Integration](/sdk/guides/viem-integration#using-with-wagmi) guide.
+
+### "Cannot find module 'buffer'"
+
+**Cause:** The `buffer` package is not installed.
+
+**Solution:**
+```bash
+npm install buffer
+```
+
+## Related
+
+- [Viem Integration](/sdk/guides/viem-integration) - Use viem clients with the SDK
+- [Multi-Chain Support](/sdk/guides/multi-chain) - Work with different blockchain families

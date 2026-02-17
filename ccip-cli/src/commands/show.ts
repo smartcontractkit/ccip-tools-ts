@@ -1,3 +1,24 @@
+/**
+ * CCIP CLI Show Command
+ *
+ * Displays detailed information about a CCIP message, including its status,
+ * commit report, and execution receipts across source and destination chains.
+ *
+ * @example
+ * ```bash
+ * # Show message details
+ * ccip-cli show 0xSourceTxHash...
+ *
+ * # Wait for execution
+ * ccip-cli show 0xSourceTxHash... --wait
+ *
+ * # Output as JSON
+ * ccip-cli show 0xSourceTxHash... --format json
+ * ```
+ *
+ * @packageDocumentation
+ */
+
 import {
   type Chain,
   CCIPAPIClient,
@@ -40,7 +61,7 @@ export const builder = (yargs: Argv) =>
     .positional('tx-hash-or-id', {
       type: 'string',
       demandOption: true,
-      describe: 'transaction hash of the request (source) message',
+      describe: 'transaction hash or message ID (32-byte hex) of the CCIP request',
     })
     .check(({ txHashOrId }) => isSupportedTxHash(txHashOrId))
     .options({

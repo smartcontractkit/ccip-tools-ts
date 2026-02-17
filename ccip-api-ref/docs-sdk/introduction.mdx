@@ -1,0 +1,178 @@
+---
+id: introduction
+title: 'CCIP SDK'
+description: 'TypeScript SDK for Chainlink Cross-Chain Interoperability Protocol.'
+sidebar_label: Introduction
+sidebar_position: 0
+hide_title: true
+custom_edit_url: null
+slug: /
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+import { PackageVersion, ChainSupport, RpcProviders } from '@site/src/components'
+
+# CCIP SDK
+
+TypeScript SDK for sending, tracking, and executing cross-chain messages on CCIP.
+
+<div className="info-grid">
+  <div className="info-item"><span className="info-label">Package</span><code>@chainlink/ccip-sdk</code></div>
+  <div className="info-item"><span className="info-label">Version</span><span><PackageVersion package="sdk" /></span></div>
+  <div className="info-item"><span className="info-label">Node.js</span><span>v20+ (v23+ recommended)</span></div>
+  <div className="info-item"><span className="info-label">License</span><span>MIT</span></div>
+</div>
+
+:::note
+This documentation covers the latest version. For previous versions, see the [GitHub releases](https://github.com/smartcontractkit/ccip-tools-ts/releases).
+:::
+
+## Installation
+
+<Tabs>
+<TabItem value="npm" label="npm" default>
+
+```bash
+npm install @chainlink/ccip-sdk
+```
+
+</TabItem>
+<TabItem value="pnpm" label="pnpm">
+
+```bash
+pnpm add @chainlink/ccip-sdk
+```
+
+</TabItem>
+<TabItem value="yarn" label="yarn">
+
+```bash
+yarn add @chainlink/ccip-sdk
+```
+
+</TabItem>
+</Tabs>
+
+## Quick Start
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+// Connect to Ethereum Sepolia
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+console.log('Connected to:', chain.network.name)
+
+// Fetch CCIP requests from a transaction
+const requests = await chain.getMessagesInTx('0x...')
+for (const req of requests) {
+  console.log('Message ID:', req.message.messageId)
+  console.log('Destination:', req.lane.destChainSelector)
+}
+```
+
+## Prerequisites
+
+You need RPC endpoints for the chains you want to interact with. Node.js v20+ is required (v23+ recommended for native fetch support).
+
+<RpcProviders variant="list" />
+
+## Chain Support
+
+<ChainSupport />
+
+## Quick Reference
+
+| Task | Method | Reference |
+|------|--------|-----------|
+| Connect to chain | `EVMChain.fromUrl(rpcUrl)` | [EVMChain](/sdk/classes/EVMChain) |
+| Track message | `chain.getMessagesInTx(txHash)` | [getMessagesInTx](/sdk/interfaces/Chain#getmessagesintx) |
+| Get fee | `chain.getFee({ router, destChainSelector, message })` | [getFee](/sdk/interfaces/Chain#getfee) |
+| Send message | `chain.sendMessage({ router, destChainSelector, message })` | [sendMessage](/sdk/interfaces/Chain#sendmessage) |
+| Manual execution | `calculateManualExecProof(request)` | [calculateManualExecProof](/sdk/functions/calculateManualExecProof) |
+| Decode message | `decodeMessage(log)` | [decodeMessage](/sdk/functions/decodeMessage) |
+
+## Concepts
+
+### Chain Classes
+
+| Class | Blockchain | Import |
+|-------|------------|--------|
+| [EVMChain](/sdk/classes/EVMChain) | Ethereum, Arbitrum, Optimism, etc. | `import { EVMChain } from '@chainlink/ccip-sdk'` |
+| [SolanaChain](/sdk/classes/SolanaChain) | Solana | `import { SolanaChain } from '@chainlink/ccip-sdk'` |
+| [AptosChain](/sdk/classes/AptosChain) | Aptos | `import { AptosChain } from '@chainlink/ccip-sdk'` |
+| [SuiChain](/sdk/classes/SuiChain) | Sui | `import { SuiChain } from '@chainlink/ccip-sdk'` |
+| [TONChain](/sdk/classes/TONChain) | TON | `import { TONChain } from '@chainlink/ccip-sdk'` |
+
+### Message Lifecycle
+
+1. **Sent** - Message emitted on source chain ([CCIPRequest](/sdk/interfaces/CCIPRequest))
+2. **Committed** - Merkle root committed on destination ([CommitReport](/sdk/type-aliases/CommitReport))
+3. **Executed** - Message executed on destination ([ExecutionReceipt](/sdk/type-aliases/ExecutionReceipt))
+
+### Chain Selectors vs Chain IDs
+
+CCIP uses **chain selectors** (not chain IDs) to identify networks. Chain selectors are unique identifiers assigned by CCIP that remain consistent across the protocol.
+
+```typescript
+import { networkInfo } from '@chainlink/ccip-sdk'
+
+// Wrong: Using chain ID for CCIP operations
+const destChain = 84532 // Base Sepolia chain ID - DON'T USE
+
+// Correct: Using CCIP chain selector
+const destSelector = networkInfo('ethereum-testnet-sepolia-base-1').chainSelector
+// Returns: 10344971235874465080n
+```
+
+Always use chain selectors for:
+- `destChainSelector` in messages
+- Lane configuration
+- Fee estimation
+
+Use `networkInfo()` to convert between chain IDs, names, and selectors.
+
+### Extra Arguments
+
+Configure gas limits and execution parameters:
+
+```typescript
+import { encodeExtraArgs } from '@chainlink/ccip-sdk'
+
+const extraArgs = encodeExtraArgs({
+  gasLimit: 200000n,
+  allowOutOfOrderExecution: true,
+})
+```
+
+## Error Handling
+
+The SDK throws typed errors:
+
+```typescript
+import {
+  EVMChain,
+  CCIPMessageNotFoundInTxError,
+  CCIPBlockNotFoundError,
+} from '@chainlink/ccip-sdk'
+
+try {
+  const requests = await chain.getMessagesInTx(txHash)
+} catch (error) {
+  if (error instanceof CCIPMessageNotFoundInTxError) {
+    console.log('No CCIP messages in transaction:', error.context.txHash)
+  } else if (error instanceof CCIPBlockNotFoundError) {
+    console.log('Block not found:', error.context.block)
+  } else {
+    throw error
+  }
+}
+```
+
+See [Error Handling](/sdk/guides/error-handling) for recovery patterns.
+
+## Next Steps
+
+- [EVMChain](/sdk/classes/EVMChain) - EVM chain operations
+- [getMessagesForSender](/sdk/functions/getMessagesForSender) - Query by sender address
+- [calculateManualExecProof](/sdk/functions/calculateManualExecProof) - Manual execution

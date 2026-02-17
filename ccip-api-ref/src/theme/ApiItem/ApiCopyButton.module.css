@@ -1,0 +1,46 @@
+/**
+ * ApiCopyButton Positioning Styles
+ *
+ * Positions the CopyPageButton for API documentation pages
+ * to match CLI pages (top-right, above the code samples panel).
+ */
+
+.apiCopyButtonContainer {
+  position: fixed;
+  /* Position at top-right, below navbar (64px) with some padding */
+  top: calc(var(--ifm-navbar-height, 60px) + var(--space-4x, 16px));
+  right: var(--space-6x, 24px);
+  z-index: 100;
+  animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.apiCopyButton {
+  /* No extra shadow - match CLI's subtle appearance */
+}
+
+/* Mobile: position below navbar, centered or left-aligned */
+@media (max-width: 996px) {
+  .apiCopyButtonContainer {
+    /* On mobile, keep at top-right but adjust for smaller screens */
+    right: var(--space-4x, 16px);
+    top: calc(var(--ifm-navbar-height, 60px) + var(--space-3x, 12px));
+  }
+}
+
+/* Large screens: align with right panel edge */
+@media (min-width: 1440px) {
+  .apiCopyButtonContainer {
+    right: calc((100vw - 1400px) / 2 + var(--space-4x, 16px));
+  }
+}

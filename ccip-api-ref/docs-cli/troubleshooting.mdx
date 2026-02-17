@@ -1,0 +1,427 @@
+---
+id: troubleshooting
+title: 'Troubleshooting'
+description: 'Common issues and solutions for the CCIP CLI.'
+sidebar_label: Troubleshooting
+sidebar_position: 9
+custom_edit_url: null
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Troubleshooting
+
+## Connection
+
+### No RPC configured
+
+```
+Error: No RPC configured for chain ethereum-testnet-sepolia
+```
+
+Add an RPC endpoint:
+
+<Tabs>
+<TabItem value="env" label=".env" default>
+
+```bash title=".env"
+RPC_SEPOLIA=https://ethereum-sepolia-rpc.publicnode.com
+```
+
+</TabItem>
+<TabItem value="cli" label="Command line">
+
+```bash
+ccip-cli show 0x... --rpc https://ethereum-sepolia-rpc.publicnode.com
+```
+
+</TabItem>
+</Tabs>
+
+### RPC timeout
+
+```
+Error: Request timeout after 30000ms
+```
+
+```
+Error: connect ECONNREFUSED
+```
+
+Causes: RPC endpoint down, rate-limited, or network connectivity issue.
+
+Solutions:
+
+1. Use a different RPC provider
+2. Test RPC connectivity:
+   ```bash
+   curl -X POST https://your-rpc.com \
+     -H "Content-Type: application/json" \
+     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+   ```
+
+### Transaction not found
+
+```
+Error: Transaction not found
+```
+
+Causes: Wrong transaction hash, transaction on different network, or RPC using pruned node.
+
+Solutions:
+
+1. Verify transaction hash on block explorer
+2. Ensure RPC is configured for source chain:
+   ```bash
+   ccip-cli show 0x... --rpc https://source-chain-rpc.com
+   ```
+3. Use archive node for old transactions
+
+## Wallet
+
+### Wallet not configured
+
+```
+Error: Wallet required for this command
+```
+
+Commands `send` and `manualExec` require a wallet.
+
+<Tabs>
+<TabItem value="env" label=".env" default>
+
+```bash title=".env"
+USER_KEY=0xYourPrivateKeyHere
+```
+
+</TabItem>
+<TabItem value="ledger" label="Ledger">
+
+```bash
+ccip-cli send ... --wallet ledger
+```
+
+</TabItem>
+<TabItem value="keystore" label="Keystore">
+
+```bash
+export USER_KEY_PASSWORD="your-password"
+ccip-cli send ... --wallet /path/to/keystore.json
+```
+
+</TabItem>
+</Tabs>
+
+### Insufficient funds
+
+```
+Error: insufficient funds for gas * price + value
+```
+
+Your wallet needs:
+
+- Gas for source transaction
+- CCIP fee (check with `--only-get-fee`)
+- Token amounts (if transferring)
+
+Use `--fee-token LINK` to pay fees in LINK instead of native token.
+
+### Ledger connection failed
+
+```
+Error: Cannot open device
+```
+
+Solutions:
+
+1. Unlock Ledger and open correct app (Ethereum for EVM)
+2. Enable blind signing in Ledger app settings
+3. On Linux, add udev rules:
+   ```bash
+   sudo curl -o /etc/udev/rules.d/20-hw1.rules \
+     https://raw.githubusercontent.com/LedgerHQ/udev-rules/master/20-hw1.rules
+   sudo udevadm control --reload-rules
+   ```
+
+## Message Tracking
+
+### Message not found
+
+```
+Error: No CCIP request found in transaction
+```
+
+Causes: Transaction is not a CCIP send, transaction pending, or wrong chain RPC.
+
+Solutions:
+
+1. Verify transaction emitted `CCIPSendRequested` event on block explorer
+2. Wait for transaction confirmation
+3. Provide source chain RPC:
+   ```bash
+   ccip-cli show 0x... --rpc https://source-chain-rpc.com
+   ```
+
+### Commit not found
+
+Message not yet committed to destination chain.
+
+Solutions:
+
+1. Wait for commit (timing varies by lane)
+2. Use `--wait` flag:
+   ```bash
+   ccip-cli show 0x... --wait
+   ```
+3. Verify destination RPC is configured:
+   ```bash
+   ccip-cli show 0x... \
+     --rpc https://source-chain-rpc.com \
+     --rpc https://dest-chain-rpc.com
+   ```
+
+## Execution
+
+### Out of gas
+
+```
+State: FAILURE
+Return Data: 0x (empty or gas-related)
+```
+
+Receiver contract exceeded gas limit.
+
+Use `manualExec` with higher gas:
+
+```bash
+ccip-cli manualExec 0x... --gas-limit 500000 --wallet ledger
+```
+
+Or auto-estimate:
+
+```bash
+ccip-cli manualExec 0x... --estimate-gas-limit 20 --wallet ledger
+```
+
+### Receiver reverted
+
+```
+State: FAILURE
+Return Data: 0x08c379a0...
+```
+
+Decode the error:
+
+```bash
+ccip-cli parse 0x08c379a0...
+```
+
+Fix the issue in receiver contract or adjust parameters.
+
+### Message stuck as UNTOUCHED
+
+Causes:
+
+- DON hasn't executed yet
+- Earlier message from same sender failed (ordering)
+- Rate limiter exhausted
+
+Solutions:
+
+1. Wait for execution
+2. Check for ordering issues:
+   ```bash
+   ccip-cli manualExec 0xFirstFailedTx... \
+     --sender-queue \
+     --exec-failed \
+     --wallet ledger
+   ```
+3. Check rate limiter:
+   ```bash
+   ccip-cli getSupportedTokens -n source -a router -t token
+   ```
+
+### Already executed
+
+```
+Error: Message already executed
+```
+
+Check status:
+
+```bash
+ccip-cli show 0x...
+```
+
+If state is `SUCCESS`, no action needed.
+
+## Chain-Specific
+
+<Tabs>
+<TabItem value="evm" label="EVM" default>
+
+### Gas price too low
+
+```
+Error: replacement transaction underpriced
+```
+
+Wait for pending transaction to confirm.
+
+### Nonce too low
+
+```
+Error: nonce too low
+```
+
+Wait for pending transactions to confirm.
+
+</TabItem>
+<TabItem value="solana" label="Solana">
+
+### Transaction too large
+
+```
+Error: Transaction too large
+```
+
+Use buffer and lookup table:
+
+```bash
+ccip-cli manualExec 0x... \
+  --force-buffer \
+  --force-lookup-table \
+  --wallet ledger
+```
+
+### Compute units exceeded
+
+```
+Error: Program failed to complete
+```
+
+Increase compute units:
+
+```bash
+ccip-cli manualExec 0x... \
+  --compute-units 500000 \
+  --wallet ledger
+```
+
+### Leftover accounts
+
+```
+Error: Account already exists
+```
+
+Clear accounts from failed attempt:
+
+```bash
+ccip-cli manualExec 0x... \
+  --clear-leftover-accounts \
+  --wallet ledger
+```
+
+</TabItem>
+<TabItem value="aptos" label="Aptos">
+
+### Module address mismatch
+
+```
+Error: Module address mismatch
+```
+
+Include module suffix in receiver address:
+
+```bash
+--receiver 0xAddress::module::function
+```
+
+</TabItem>
+</Tabs>
+
+## Tokens
+
+### Token not supported
+
+```
+Error: UnsupportedToken
+```
+
+Check supported tokens:
+
+```bash
+ccip-cli getSupportedTokens -n source -a router
+```
+
+### Rate limiter depleted
+
+Transfer stuck or rejected due to rate limit.
+
+Check rate limiter status:
+
+```bash
+ccip-cli getSupportedTokens -n source -a router -t token
+```
+
+Wait for bucket refill or reduce transfer amount.
+
+### Token approval failed
+
+```
+Error: ERC20: insufficient allowance
+```
+
+The CLI handles approvals automatically. If approval fails:
+
+1. Approve manually on block explorer
+2. Use `--approve-max`:
+   ```bash
+   ccip-cli send ... --approve-max
+   ```
+
+## Output
+
+### JSON parse error
+
+Piping `--format json` to `jq` fails due to mixed output.
+
+Redirect stderr:
+
+```bash
+ccip-cli show 0x... --format json 2>/dev/null | jq '.'
+```
+
+### Interactive features not working
+
+Non-TTY environment (scripts, CI).
+
+Use non-interactive options:
+
+```bash
+ccip-cli show 0x... --log-index 0
+ccip-cli show 0x... --format json
+```
+
+## Getting Help
+
+Enable verbose logging:
+
+```bash
+ccip-cli show 0x... --verbose
+```
+
+Check command help:
+
+```bash
+ccip-cli <command> --help
+```
+
+Report issues: [github.com/smartcontractkit/ccip-tools-ts/issues](https://github.com/smartcontractkit/ccip-tools-ts/issues)
+
+## Related
+
+- [Configuration](/cli/configuration) - RPC and wallet setup
+- [Debugging Failed Messages](/cli/guides/debugging-workflow) - Debug workflow
+- [Token Transfer](/cli/guides/token-transfer-workflow) - Transfer workflow
