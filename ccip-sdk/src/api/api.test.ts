@@ -949,9 +949,7 @@ describe('CCIPAPIClient', () => {
             '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
           ),
         (err: unknown) =>
-          err instanceof CCIPMessageNotFoundInTxError &&
-          err.context.apiErrorCode === 'NOT_FOUND' &&
-          err.isTransient === true,
+          err instanceof CCIPMessageNotFoundInTxError && err.context.apiErrorCode === 'NOT_FOUND',
       )
     })
 

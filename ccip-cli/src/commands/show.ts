@@ -2,6 +2,8 @@ import {
   type Chain,
   CCIPAPIClient,
   CCIPExecTxRevertedError,
+  CCIPMessageIdNotFoundError,
+  CCIPTransactionNotFoundError,
   ExecutionState,
   MessageStatus,
   bigIntReplacer,
@@ -85,15 +87,28 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     const apiClient = CCIPAPIClient.fromUrl(undefined, ctx)
     if (isHexString(argv.txHashOrId, 32)) {
       request$ = Promise.any([request$, apiClient.getMessageById(argv.txHashOrId)])
-      // source = await getChain(sourceNetwork.chainId)
     }
   }
-  const request = await request$
+  let request
+  try {
+    request = await request$
+  } catch (err) {
+    if (err instanceof AggregateError && err.errors.length === 2) {
+      if (!(err.errors[0] instanceof CCIPTransactionNotFoundError)) throw err.errors[0] as Error
+      else if (!(err.errors[1] instanceof CCIPMessageIdNotFoundError)) throw err.errors[1] as Error
+    }
+    throw err
+  }
   if (!source) {
     try {
       source = await getChain(request.lane.sourceChainSelector)
-    } catch {
-      // pass
+    } catch (err) {
+      logger.debug(
+        'Fetched messageId from API, but failed find a source',
+        request.lane.sourceChainSelector,
+        'RPC endpoint:',
+        err,
+      )
     }
   }
 

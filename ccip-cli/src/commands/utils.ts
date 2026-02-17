@@ -508,6 +508,13 @@ export function formatCCIPError(err: unknown, verbose = false): string | null {
 
   lines.push(`error[${err.code}]: ${err.message}`)
 
+  if (Object.keys(err.context).length > 0) {
+    lines.push('  context:')
+    for (const [key, value] of Object.entries(err.context)) {
+      lines.push(`    ${key}: ${value as string}`)
+    }
+  }
+
   if (err.recovery) {
     lines.push(`  help: ${err.recovery}`)
   }
