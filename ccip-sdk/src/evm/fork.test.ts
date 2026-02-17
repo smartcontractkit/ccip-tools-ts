@@ -100,7 +100,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
   let ethProvider: JsonRpcProvider
   let avaxProvider: JsonRpcProvider
   let ethWallet: Wallet
-  let _avaxWallet: Wallet
 
   before(async () => {
     // Start both forks in parallel
@@ -117,7 +116,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
 
     // Create wallets for tests that need signing
     ethWallet = new Wallet(ANVIL_PRIVATE_KEY, ethProvider)
-    _avaxWallet = new Wallet(ANVIL_PRIVATE_KEY, avaxProvider)
   })
 
   after(async () => {
@@ -145,8 +143,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
         assert.ok(ethChain, 'chain should be initialized')
 
         const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, AVAX_SELECTOR)
-        if (onRamp === ZeroAddress) return
-
         const [type, version] = await ethChain.typeAndVersion(onRamp)
         assert.equal(type, 'EVM2EVMOnRamp', 'should be EVM2EVMOnRamp type')
         assert.ok(
@@ -159,7 +155,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
         assert.ok(ethChain, 'chain should be initialized')
 
         const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, APTOS_SELECTOR)
-        if (onRamp === ZeroAddress) return
 
         const [type, version] = await ethChain.typeAndVersion(onRamp)
         assert.equal(type, 'OnRamp', 'should be OnRamp type')
@@ -172,7 +167,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
         assert.ok(ethChain, 'chain should be initialized')
 
         const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, AVAX_SELECTOR)
-        if (onRamp === ZeroAddress) return
 
         assert.match(onRamp, /^0x[0-9a-fA-F]{40}$/, 'should be valid address')
         assert.notEqual(onRamp, ZeroAddress, 'should not be zero address')
@@ -185,7 +179,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
         assert.ok(ethChain, 'chain should be initialized')
 
         const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, APTOS_SELECTOR)
-        if (onRamp === ZeroAddress) return
 
         assert.match(onRamp, /^0x[0-9a-fA-F]{40}$/, 'should be valid address')
         assert.notEqual(onRamp, ZeroAddress, 'should not be zero address')
@@ -233,7 +226,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
         assert.ok(ethChain, 'chain should be initialized')
 
         const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, AVAX_SELECTOR)
-        if (onRamp === ZeroAddress) return
 
         const [, version] = await ethChain.typeAndVersion(onRamp)
         if (version !== CCIPVersion.V1_5 && version !== CCIPVersion.V1_2) return
@@ -246,7 +238,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
         assert.ok(ethChain, 'chain should be initialized')
 
         const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, APTOS_SELECTOR)
-        if (onRamp === ZeroAddress) return
 
         const [, version] = await ethChain.typeAndVersion(onRamp)
         if (version !== CCIPVersion.V1_6) return
@@ -286,7 +277,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
         assert.ok(ethChain, 'chain should be initialized')
 
         const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, AVAX_SELECTOR)
-        if (onRamp === ZeroAddress) return
 
         const lane = await ethChain.getLaneForOnRamp(onRamp)
         assert.equal(lane.sourceChainSelector, ETH_SELECTOR, 'source should be Ethereum')
@@ -320,9 +310,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
       it('should return native fee for data-only message (v1.5 lane)', async () => {
         assert.ok(ethChain, 'chain should be initialized')
 
-        const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, AVAX_SELECTOR)
-        if (onRamp === ZeroAddress) return
-
         const fee = await ethChain.getFee({
           router: ETH_ROUTER,
           destChainSelector: AVAX_SELECTOR,
@@ -339,34 +326,23 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
       it('should return native fee for data-only message (v1.6 lane)', async () => {
         assert.ok(ethChain, 'chain should be initialized')
 
-        const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, APTOS_SELECTOR)
-        if (onRamp === ZeroAddress) return
+        const fee = await ethChain.getFee({
+          router: ETH_ROUTER,
+          destChainSelector: APTOS_SELECTOR,
+          message: {
+            receiver: '0x0000000000000000000000000000000000000001',
+            data: '0x1234',
+            extraArgs: { gasLimit: 0n },
+          },
+        })
 
-        try {
-          const fee = await ethChain.getFee({
-            router: ETH_ROUTER,
-            destChainSelector: APTOS_SELECTOR,
-            message: {
-              receiver: '0x0000000000000000000000000000000000000001',
-              data: '0x1234',
-              extraArgs: { gasLimit: 0n },
-            },
-          })
-
-          assert.ok(typeof fee === 'bigint', 'fee should be bigint')
-          assert.ok(fee > 0n, `fee should be positive, got ${fee}`)
-        } catch (err) {
-          // Skip if lane configuration changed (UnsupportedToken, etc.)
-          if (String(err).includes('execution reverted')) return
-          throw err
-        }
+        assert.ok(typeof fee === 'bigint', 'fee should be bigint')
+        assert.ok(fee > 0n, `fee should be positive, got ${fee}`)
+        
       })
 
       it('should return fee with custom gasLimit in extraArgs', async () => {
         assert.ok(ethChain, 'chain should be initialized')
-
-        const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, AVAX_SELECTOR)
-        if (onRamp === ZeroAddress) return
 
         const baseFee = await ethChain.getFee({
           router: ETH_ROUTER,
@@ -392,9 +368,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
 
       it('should return higher fee for message with token amounts', async () => {
         assert.ok(ethChain, 'chain should be initialized')
-
-        const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, APTOS_SELECTOR)
-        if (onRamp === ZeroAddress) return
 
         try {
           const dataOnlyFee = await ethChain.getFee({
@@ -428,9 +401,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
 
       it('should return fee when using LINK as feeToken', async () => {
         assert.ok(ethChain, 'chain should be initialized')
-
-        const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, AVAX_SELECTOR)
-        if (onRamp === ZeroAddress) return
 
         const fee = await ethChain.getFee({
           router: ETH_ROUTER,
@@ -488,7 +458,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
         assert.ok(ethChain, 'chain should be initialized')
 
         const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, APTOS_SELECTOR)
-        if (onRamp === ZeroAddress) return
 
         const [, version] = await ethChain.typeAndVersion(onRamp)
         if (version !== CCIPVersion.V1_6) return
@@ -504,8 +473,7 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
       it('should throw CCIPVersionFeatureUnavailableError for v1.5 OnRamp', async () => {
         assert.ok(ethChain, 'chain should be initialized')
 
-        const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, AVAX_SELECTOR)
-        if (onRamp === ZeroAddress) return
+        const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, APTOS_SELECTOR)
 
         const [, version] = await ethChain.typeAndVersion(onRamp)
         if (version === CCIPVersion.V1_6) return
@@ -600,9 +568,7 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
 
       it('should return registry from OnRamp', async () => {
         assert.ok(ethChain, 'chain should be initialized')
-
         const onRamp = await ethChain.getOnRampForRouter(ETH_ROUTER, APTOS_SELECTOR)
-        if (onRamp === ZeroAddress) return
 
         const registry = await ethChain.getTokenAdminRegistryFor(onRamp)
 
