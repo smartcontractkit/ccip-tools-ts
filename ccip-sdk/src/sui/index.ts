@@ -881,7 +881,13 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.getFeeTokens'))
   }
 
-  /** {@inheritDoc ChainStatic.buildMessageForDest} */
+  /**
+   * Returns a copy of a message, populating missing fields like `extraArgs` with defaults.
+   * It's expected to return a message suitable at least for basic token transfers.
+   *
+   * @param message - AnyMessage (from source), containing at least `receiver`
+   * @returns A message suitable for `sendMessage` to this destination chain family
+   */
   static override buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
   ): AnyMessage & { extraArgs: SuiExtraArgsV1 } {

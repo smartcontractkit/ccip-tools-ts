@@ -829,7 +829,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * - sourceChainSelector: uint64 (8 bytes)
    * - sequenceNumber: uint64 (8 bytes)
    * - messageId: uint256 (32 bytes)
-   * - state: uint8 (1 byte) - Untouched=0, InProgress=1, Success=2, Failure=3
+   * - state: uint8 (1 byte) - InProgress=1, Success=2, Failed=3
    *
    * @param log - Log with data field (base64-encoded BOC).
    * @returns ExecutionReceipt or undefined if not valid.

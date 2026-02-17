@@ -1,0 +1,129 @@
+/**
+ * Callout component styles
+ * Consistent with Chainlink documentation design system
+ */
+
+.callout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2x, 8px);
+  padding: var(--space-4x, 16px);
+  border-radius: var(--ifm-global-radius);
+  border-left: 4px solid;
+  margin: var(--space-4x, 16px) 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2x, 8px);
+}
+
+.icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+}
+
+.title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.content {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.content p:last-child {
+  margin-bottom: 0;
+}
+
+.content code {
+  font-size: 0.875em;
+}
+
+/* Type variants */
+.info {
+  background-color: var(--color-background-info, #e3f2fd);
+  border-left-color: var(--color-info, #2196f3);
+}
+
+.info .title {
+  color: var(--color-info, #2196f3);
+}
+
+.note {
+  background-color: var(--ifm-color-emphasis-100);
+  border-left-color: var(--ifm-color-emphasis-500);
+}
+
+.note .title {
+  color: var(--ifm-color-emphasis-700);
+}
+
+.tip {
+  background-color: #e8f5e9;
+  border-left-color: #4caf50;
+}
+
+.tip .title {
+  color: #2e7d32;
+}
+
+.warning {
+  background-color: var(--color-background-warning, #fff3e0);
+  border-left-color: var(--color-warning, #ff9800);
+}
+
+.warning .title {
+  color: #e65100;
+}
+
+.danger {
+  background-color: var(--color-background-error, #ffebee);
+  border-left-color: var(--color-error, #f44336);
+}
+
+.danger .title {
+  color: #c62828;
+}
+
+/* Dark mode adjustments */
+[data-theme='dark'] .info {
+  background-color: rgba(33, 150, 243, 0.15);
+}
+
+[data-theme='dark'] .note {
+  background-color: var(--ifm-color-emphasis-200);
+}
+
+[data-theme='dark'] .tip {
+  background-color: rgba(76, 175, 80, 0.15);
+}
+
+[data-theme='dark'] .warning {
+  background-color: rgba(255, 152, 0, 0.15);
+}
+
+[data-theme='dark'] .danger {
+  background-color: rgba(244, 67, 54, 0.15);
+}
+
+[data-theme='dark'] .note .title {
+  color: var(--ifm-color-emphasis-500);
+}
+
+[data-theme='dark'] .tip .title {
+  color: #81c784;
+}
+
+[data-theme='dark'] .warning .title {
+  color: #ffb74d;
+}
+
+[data-theme='dark'] .danger .title {
+  color: #ef5350;
+}

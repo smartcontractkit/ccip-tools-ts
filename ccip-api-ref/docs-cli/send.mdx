@@ -1,0 +1,213 @@
+---
+id: send
+title: 'send'
+description: 'Send a CCIP message from a source chain to a destination chain.'
+sidebar_label: send
+sidebar_position: 3
+custom_edit_url: null
+---
+
+# send
+
+<ChainSupport />
+
+Send a CCIP message from a source chain to a destination chain.
+
+## Synopsis
+
+```bash
+ccip-cli send -s <source> -d <dest> -r <router> [options]
+```
+
+## Description
+
+The `send` command constructs and submits a CCIP message to transfer data and/or tokens between blockchains. It handles fee calculation, token approvals, and transaction submission.
+
+## Options
+
+### Required Options
+
+| Option     | Alias | Type   | Description                                       |
+| ---------- | ----- | ------ | ------------------------------------------------- |
+| `--source` | `-s`  | string | Source network (chain ID, selector, or name)      |
+| `--dest`   | `-d`  | string | Destination network (chain ID, selector, or name) |
+| `--router` | `-r`  | string | CCIP Router contract address on source chain      |
+
+### Message Options
+
+| Option              | Alias  | Type     | Default | Description                                                                                                    |
+| ------------------- | ------ | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `--receiver`        | `--to` | string   | -       | Receiver address on destination. Defaults to sender if same chain family. Required for cross-family transfers. |
+| `--data`            | -      | string   | -       | Message data. Non-hex strings are UTF-8 encoded. Optional.                                                     |
+| `--transfer-tokens` | `-t`   | string[] | -       | Token transfers in format `0xTokenAddr=amount`. Can be specified multiple times.                               |
+| `--fee-token`       | -      | string   | Native  | Fee token address or symbol (e.g., `LINK`). Omit to pay in native token.                                       |
+
+### Gas Options
+
+| Option                      | Alias                   | Type    | Default | Description                                                                                      |
+| --------------------------- | ----------------------- | ------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `--gas-limit`               | `-L`, `--compute-units` | number  | -       | Gas limit for receiver callback. Defaults to ramp config (~200k) if not specified.               |
+| `--estimate-gas-limit`      | -                       | number  | -       | Estimate gas limit with a percentage margin (e.g., `10` for +10%). Conflicts with `--gas-limit`. |
+| `--allow-out-of-order-exec` | `--ooo`                 | boolean | `false` | Allow out-of-order execution. Required for some destinations. Only v1.5+ lanes.                  |
+
+<Callout type="warning" title="Gas Limit">
+  Omitting `--gas-limit` uses the ramp default (~200k). If your receiver contract requires more gas,
+  execution will fail. Use `--estimate-gas-limit 10` to auto-calculate with a 10% buffer.
+</Callout>
+
+### Wallet Options
+
+| Option          | Alias | Type    | Description                                                                  |
+| --------------- | ----- | ------- | ---------------------------------------------------------------------------- |
+| `--wallet`      | `-w`  | string  | Wallet source. See [Configuration](/cli/configuration#wallet-configuration). |
+| `--approve-max` | -     | boolean | Approve maximum token allowance instead of exact amount needed.              |
+
+### Solana-Specific Options
+
+| Option             | Alias                  | Type     | Description                                                                   |
+| ------------------ | ---------------------- | -------- | ----------------------------------------------------------------------------- |
+| `--token-receiver` | -                      | string   | Token receiver address if different from program receiver.                    |
+| `--account`        | `--receiver-object-id` | string[] | Additional accounts for receiver program. Append `=rw` for writable accounts. |
+
+### Dry-Run Options
+
+| Option            | Type    | Description                                                                   |
+| ----------------- | ------- | ----------------------------------------------------------------------------- |
+| `--only-get-fee`  | boolean | Print the fee and exit without sending.                                       |
+| `--only-estimate` | boolean | Print gas estimate and exit without sending. Requires `--estimate-gas-limit`. |
+
+### Execution Options
+
+| Option   | Type    | Default | Description                                                      |
+| -------- | ------- | ------- | ---------------------------------------------------------------- |
+| `--wait` | boolean | `false` | Wait for finality, commit, and first execution before returning. |
+
+See [Configuration](/cli/configuration) for global options (`--rpcs`, `--rpcs-file`, `--format`, `--no-api`, etc.).
+
+## Command Builder
+
+Build your `send` command interactively:
+
+<CLIBuilder command="send" />
+
+## Examples
+
+### Send a simple message
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -d arbitrum-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  --to 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+  --data "hello world"
+```
+
+### Send with token transfer
+
+```bash
+ccip-cli send \
+  -s 11155111 \
+  -d arbitrum-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  --to 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=0.1 \
+  --fee-token 0x779877A7B0D9E8603169DdbD7836e478b4624789
+```
+
+### Pay fee in LINK with custom gas limit
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -d arbitrum-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  --to 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+  --data 0x1234abcd \
+  --gas-limit 300000 \
+  --fee-token LINK
+```
+
+### Estimate gas before sending
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -d arbitrum-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  --to 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+  --data 0x1234abcd \
+  --estimate-gas-limit 10
+```
+
+### Check fee without sending
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -d arbitrum-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  --to 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+  --only-get-fee
+```
+
+### Use Ledger hardware wallet
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -d arbitrum-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  --to 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+  --wallet ledger
+```
+
+### Send and wait for execution
+
+Send a message and wait until it's fully executed on the destination:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -d arbitrum-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  --to 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+  --data "hello world" \
+  --wait
+```
+
+## Token Transfer Format
+
+The `--transfer-tokens` option accepts pairs of `address=amount`:
+
+| Component | Description                                      |
+| --------- | ------------------------------------------------ |
+| Address   | Token contract address on source chain           |
+| Amount    | Human-readable amount (converted using decimals) |
+
+```bash
+# Transfer 0.1 USDC (6 decimals) = 100000 smallest units
+--transfer-tokens 0xTokenAddress=0.1
+
+# Multiple tokens
+--transfer-tokens 0xToken1=1.5 --transfer-tokens 0xToken2=100
+```
+
+## See Also
+
+- [show](/cli/show) - Track message status after sending
+- [getSupportedTokens](/cli/supported-tokens) - Find supported tokens for transfer
+- [Configuration](/cli/configuration) - Wallet and RPC setup
+
+## Exit Codes
+
+| Code | Meaning                                                                |
+| ---- | ---------------------------------------------------------------------- |
+| `0`  | Success - transaction submitted (or fee/estimate returned for dry-run) |
+| `1`  | Error (network failure, transaction reverted, invalid arguments)       |
+
+Use in CI/CD:
+
+```bash
+ccip-cli send -s $SOURCE -d $DEST -r $ROUTER --format json --only-get-fee || exit $?
+```

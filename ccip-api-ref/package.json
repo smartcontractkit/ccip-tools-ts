@@ -1,0 +1,58 @@
+{
+  "name": "@chainlink/ccip-api-ref",
+  "version": "0.96.0",
+  "private": true,
+  "description": "API Reference documentation for CCIP SDK and CLI",
+  "scripts": {
+    "dev": "docusaurus start",
+    "build": "npm run generate-llms-txt && docusaurus build",
+    "serve": "docusaurus serve",
+    "clear": "docusaurus clear",
+    "clean": "docusaurus clear",
+    "gen-api": "docusaurus gen-api-docs all && node scripts/post-gen-api.mjs",
+    "clean-api": "docusaurus clean-api-docs all",
+    "lint": "prettier --check . && eslint .",
+    "lint:fix": "prettier --write . && eslint --fix .",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run typecheck",
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "generate-llms-txt": "node --import tsx scripts/generate-llms-txt.ts"
+  },
+  "dependencies": {
+    "@chainlink/design-system": "^0.2.8",
+    "@docusaurus/core": "^3.9.2",
+    "@docusaurus/preset-classic": "^3.9.2",
+    "@docusaurus/theme-mermaid": "^3.9.2",
+    "@easyops-cn/docusaurus-search-local": "^0.52.2",
+    "@mdx-js/react": "^3.0.0",
+    "clsx": "^2.1.0",
+    "docusaurus-plugin-openapi-docs": "^4.5.1",
+    "docusaurus-theme-openapi-docs": "^4.5.1",
+    "focus-trap-react": "^11.0.4",
+    "prism-react-renderer": "^2.3.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@docusaurus/module-type-aliases": "^3.9.2",
+    "@docusaurus/types": "^3.9.2",
+    "docusaurus-plugin-typedoc": "^1.4.2",
+    "typedoc": "^0.28.15",
+    "typedoc-plugin-markdown": "^4.9.0"
+  },
+  "browserslist": {
+    "production": [
+      ">0.5%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 3 chrome version",
+      "last 3 firefox version",
+      "last 5 safari version"
+    ]
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

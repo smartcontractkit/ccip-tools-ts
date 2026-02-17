@@ -1,0 +1,42 @@
+/**
+ * ChainSupportSection styles
+ */
+
+.chainSupport {
+  padding: var(--space-16x, 64px) var(--space-4x, 16px);
+  background-color: var(--ifm-background-surface-color, #f5f6f7);
+}
+
+[data-theme='dark'] .chainSupport {
+  background-color: var(--gray-900, #1a1d21);
+}
+
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.title {
+  font-size: 2rem;
+  font-weight: 600;
+  margin-bottom: var(--space-4x, 16px);
+  color: var(--ifm-heading-color);
+}
+
+.description {
+  color: var(--ifm-font-color-secondary);
+  margin-bottom: var(--space-8x, 32px);
+  font-size: 1.1rem;
+  line-height: 1.6;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.chains {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4x, 16px);
+  justify-content: center;
+}

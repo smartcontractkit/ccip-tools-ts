@@ -8,6 +8,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Verify the chain selector is valid. Use networkInfo() to look up selectors.',
   CHAIN_FAMILY_UNSUPPORTED:
     'This chain family is not supported. Check the method documentation for supported chain families.',
+  NETWORK_FAMILY_UNSUPPORTED:
+    'This network family is not supported. Supported families: evm, solana, aptos, sui, ton.',
   CHAIN_FAMILY_MISMATCH:
     'Use the correct Chain class for this chain family (e.g., EVMChain for EVM, SolanaChain for Solana).',
   METHOD_UNSUPPORTED:
@@ -110,6 +112,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Check that the token pool is deployed and configured for this lane. Verify supported tokens: https://docs.chain.link/ccip/directory',
   TOKEN_ACCOUNT_NOT_FOUND:
     'The token account does not exist for this holder. The holder has never held this token. You may treat this as zero balance.',
+  LEGACY_TOKEN_POOLS_UNSUPPORTED:
+    'Legacy token pools (CCIP <1.5) are not supported. Upgrade to CCIP 1.5+ token pools.',
 
   WALLET_NOT_SIGNER: 'Provide a wallet with signing capability (Signer interface).',
   WALLET_INVALID: 'Provide a valid Wallet instance.',
@@ -159,6 +163,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Check that the transaction is a standard user transaction, not a script or module deployment.',
   APTOS_ADDRESS_MODULE_REQUIRED: 'Provide an address with module for Aptos log filtering.',
   APTOS_HASHER_VERSION_UNSUPPORTED: 'This hasher version is not supported for Aptos.',
+  APTOS_TOPIC_INVALID:
+    'Invalid Aptos event topic. Ensure the topic matches a known CCIP event type.',
 
   HTTP_ERROR: 'HTTP request failed. 429 indicates rate limiting.',
   RPC_NOT_FOUND: 'No RPC endpoint found. Configure an RPC URL.',

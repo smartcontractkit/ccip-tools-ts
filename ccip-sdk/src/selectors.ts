@@ -1099,6 +1099,12 @@ const selectors: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '46630': {
+    selector: 2032988798112970440n,
+    name: 'robinhood-testnet',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
   '47763': {
     selector: 7222032299962346917n,
     name: 'neox-mainnet',

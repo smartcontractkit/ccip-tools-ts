@@ -8,6 +8,14 @@ import tsdoc from 'eslint-plugin-tsdoc'
 import { configs as tseslintConfigs } from 'typescript-eslint'
 
 export default defineConfig(
+  {
+    ignores: [
+      'ccip-api-ref/.docusaurus/**',
+      'ccip-api-ref/build/**',
+      'ccip-api-ref/docs/api/**',
+      'ccip-api-ref/scripts/**',
+    ],
+  },
   eslint.configs.recommended,
   eslintPluginPrettierRecommended,
   importPlugin.flatConfigs.recommended,
@@ -17,7 +25,12 @@ export default defineConfig(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['*.js', '*.mjs', '.cjs'],
+          allowDefaultProject: [
+            '*.js',
+            '*.mjs',
+            '.cjs',
+            'ccip-api-ref/plugins/docusaurus-plugin-jsonld/index.js',
+          ],
         },
         tsconfigRootDir: import.meta.dirname,
       },
@@ -139,6 +152,41 @@ export default defineConfig(
       'import/extensions': ['warn', 'always', { ignorePackages: true, checkTypeImports: true }],
     },
   },
+  // Docusaurus - ignore virtual module imports and generated files
+  {
+    files: ['ccip-api-ref/src/**/*.tsx', 'ccip-api-ref/src/**/*.ts'],
+    rules: {
+      'import/no-unresolved': [
+        'error',
+        { ignore: ['^@docusaurus/', '^@theme/', '^@theme-original/', '^@site/'] },
+      ],
+    },
+  },
+  // Docusaurus plugin CommonJS wrapper - allow Node.js globals and require
+  {
+    files: ['ccip-api-ref/plugins/**/index.js'],
+    languageOptions: {
+      globals: {
+        module: 'readonly',
+        require: 'readonly',
+        __dirname: 'readonly',
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
+  {
+    files: ['ccip-api-ref/sidebars*.ts'],
+    rules: {
+      'import/no-unresolved': [
+        'error',
+        { ignore: ['typedoc-sidebar\\.cjs$', '/sidebar$'] },
+      ],
+      'import/extensions': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+    },
+  },
   // TSDoc syntax validation (applies to all TS files)
   {
     plugins: { tsdoc },
@@ -146,9 +194,9 @@ export default defineConfig(
       'tsdoc/syntax': 'error', // Enforced - all syntax issues have been fixed
     },
   },
-  // JSDoc completeness enforcement (both packages, exclude tests)
+  // JSDoc completeness enforcement (all packages, exclude tests)
   {
-    files: ['ccip-sdk/src/**/*.ts', 'ccip-cli/src/**/*.ts'],
+    files: ['ccip-sdk/src/**/*.ts', 'ccip-cli/src/**/*.ts', 'ccip-api-ref/src/**/*.ts'],
     ignores: ['**/*.test.ts', '**/__tests__/**', '**/__mocks__/**', '**/idl/**'],
     plugins: { jsdoc },
     rules: {
