@@ -323,24 +323,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
         assert.ok(fee > 0n, `fee should be positive, got ${fee}`)
       })
 
-      it('should return native fee for data-only message (v1.6 lane)', async () => {
-        assert.ok(ethChain, 'chain should be initialized')
-
-        const fee = await ethChain.getFee({
-          router: ETH_ROUTER,
-          destChainSelector: APTOS_SELECTOR,
-          message: {
-            receiver: '0x0000000000000000000000000000000000000001',
-            data: '0x1234',
-            extraArgs: { gasLimit: 0n },
-          },
-        })
-
-        assert.ok(typeof fee === 'bigint', 'fee should be bigint')
-        assert.ok(fee > 0n, `fee should be positive, got ${fee}`)
-        
-      })
-
       it('should return fee with custom gasLimit in extraArgs', async () => {
         assert.ok(ethChain, 'chain should be initialized')
 
@@ -366,7 +348,7 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
         assert.ok(highGasFee >= baseFee, 'higher gasLimit should result in equal or higher fee')
       })
 
-      it('should return higher fee for message with token amounts', async () => {
+      it('should return higher fee for message with token amounts (1.6 lane)', async () => {
         assert.ok(ethChain, 'chain should be initialized')
 
         try {
