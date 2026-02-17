@@ -9,7 +9,6 @@ import { execSync } from 'node:child_process'
 import { after, before, describe, it } from 'node:test'
 
 import {
-  type TransactionRequest,
   AbiCoder,
   Contract,
   JsonRpcProvider,
@@ -24,7 +23,7 @@ import { anvil } from 'prool/instances'
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
 import { CCIPTokenNotConfiguredError, CCIPVersionFeatureUnavailableError } from '../errors/index.ts'
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
-import { type ExecutionReport, CCIPVersion, ChainFamily, ExecutionState } from '../types.ts'
+import { type ExecutionReport, CCIPVersion, ExecutionState } from '../types.ts'
 import { interfaces } from './const.ts'
 import { EVMChain } from './index.ts'
 import { clearArchiveRpcsCache } from './logs.ts'
@@ -42,7 +41,6 @@ const ETH_LINK = '0x514910771AF9Ca656af840dff83E8264EcF986CA'
 const AVAX_RPC = process.env['RPC_AVALANCHE'] || 'https://rpcs.cldev.sh/avalanche/mainnet'
 const AVAX_CHAIN_ID = 43114
 const AVAX_SELECTOR = 6433500567565415381n
-const AVAX_ROUTER = '0xF4c7E640EdA248ef95972845a62bdC74237805dB'
 
 const APTOS_SELECTOR = 4741433654826277614n
 const APTOS_SUPPORTED_TOKEN = '0x514910771AF9Ca656af840dff83E8264EcF986CA'
@@ -875,7 +873,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
     })
   })
 
-
   // ==========================================================================
   // sendMessage
   // ==========================================================================
@@ -990,7 +987,7 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
   // executeReport
   // ==========================================================================
 
-  describe('executeReport', {skip: false}, () => {
+  describe('executeReport', () => {
     it('should manually execute a failed v1.5 message (Avalanche -> Ethereum)', async () => {
       assert.ok(avaxChain, 'source chain should be initialized')
       assert.ok(ethChain, 'dest chain should be initialized')
