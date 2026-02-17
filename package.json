@@ -23,10 +23,7 @@
     "clean:coverage": "rm -rfv ./.coverage ./.c8_output",
     "clean": "npm run clean:coverage && npm run clean -w ccip-sdk -w ccip-cli",
     "build": "npm run clean && npm run generate && npm run build -w ccip-sdk -w ccip-cli",
-    "prepare": "npm run build",
-    "docs:dev": "npm run dev -w ccip-api-ref",
-    "docs:build": "npm run gen-api -w ccip-api-ref && npm run build -w ccip-api-ref",
-    "docs:serve": "npm run serve -w ccip-api-ref"
+    "prepare": "npm run build"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

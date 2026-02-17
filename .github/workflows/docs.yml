@@ -42,7 +42,7 @@ jobs:
         run: npm run gen-api -w ccip-api-ref
 
       - name: Build documentation
-        run: npm run docs:build
+        run: npm run build -w ccip-api-ref
 
       - name: Upload build artifact
         if: github.ref == 'refs/heads/main'
