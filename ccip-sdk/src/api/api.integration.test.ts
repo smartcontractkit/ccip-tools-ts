@@ -25,7 +25,7 @@ describe(
 
     before(() => {
       // Uses staging API by default (api.ccip.cldev.cloud)
-      api = new CCIPAPIClient()
+      api = CCIPAPIClient.fromUrl()
     })
 
     describe('getLaneLatency', () => {

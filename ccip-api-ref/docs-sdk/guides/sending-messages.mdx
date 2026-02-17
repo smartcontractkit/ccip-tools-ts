@@ -1,0 +1,351 @@
+---
+id: sending-messages
+title: 'Sending Messages'
+description: 'Send CCIP messages with token transfers, arbitrary data, and gas configuration.'
+sidebar_label: Sending Messages
+sidebar_position: 2
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Sending Messages
+
+## Message Structure
+
+```typescript
+// MessageInput type - only receiver is required, all other fields are optional
+type MessageInput = {
+  receiver: string           // Required: Destination address (encoded for target chain)
+  data?: string              // Optional: Arbitrary data payload (hex string)
+  tokenAmounts?: {           // Optional: Tokens to transfer
+    token: string            // Source token address
+    amount: bigint           // Amount in smallest unit
+  }[]
+  feeToken?: string          // Optional: Fee payment token (address or zero for native)
+  extraArgs?: {              // Optional: Encoded or object extra arguments
+    gasLimit?: bigint        // Gas for receiver execution
+    allowOutOfOrderExecution?: boolean
+  }
+  fee?: bigint               // Optional: Fee amount (returned by getFee)
+}
+```
+
+## Simple Message
+
+Send arbitrary data to a contract on another chain:
+
+```typescript
+import { EVMChain, encodeExtraArgs, networkInfo, CCIPError } from '@chainlink/ccip-sdk'
+import { toHex } from 'viem'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+const message = {
+  receiver: '0xReceiverContract...',
+  data: toHex('Hello from Sepolia!'),
+  tokenAmounts: [],
+  feeToken: '0x0000000000000000000000000000000000000000', // Native ETH
+  extraArgs: encodeExtraArgs({
+    gasLimit: 200000n,
+    allowOutOfOrderExecution: false,
+  }),
+}
+
+const router = source.network.router
+const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+
+try {
+  const fee = await source.getFee({
+    router,
+    destChainSelector: destSelector,
+    message,
+  })
+  console.log('Fee:', fee, 'wei')
+
+  const request = await source.sendMessage({
+    router,
+    destChainSelector: destSelector,
+    message: { ...message, fee },
+    wallet, // Required: ethers Signer or viemWallet(client)
+  })
+  console.log('Sent in tx:', request.tx.hash)
+} catch (error) {
+  if (CCIPError.isCCIPError(error)) {
+    console.error('CCIP error:', error.code, error.message)
+    if (error.recovery) console.error('Recovery:', error.recovery)
+  } else {
+    throw error
+  }
+}
+```
+
+## Token Transfer
+
+Transfer tokens cross-chain:
+
+```typescript
+import { EVMChain, encodeExtraArgs, networkInfo } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+const LINK_TOKEN = '0x779877A7B0D9E8603169DdbD7836e478b4624789' // LINK on Sepolia
+
+const message = {
+  receiver: '0xRecipientAddress...',
+  data: '0x', // No data, just token transfer
+  tokenAmounts: [
+    {
+      token: LINK_TOKEN,
+      amount: 1000000000000000000n, // 1 LINK (18 decimals)
+    },
+  ],
+  feeToken: LINK_TOKEN, // Pay fee in LINK
+  extraArgs: encodeExtraArgs({
+    gasLimit: 0n, // No receiver execution needed
+    allowOutOfOrderExecution: true,
+  }),
+}
+
+const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+const router = source.network.router
+
+const fee = await source.getFee({
+  router,
+  destChainSelector: destSelector,
+  message,
+})
+console.log('Fee:', fee, 'LINK wei')
+
+// Ensure LINK allowance is set for router before sending
+const request = await source.sendMessage({
+  router,
+  destChainSelector: destSelector,
+  message: { ...message, fee },
+  wallet, // Required: ethers Signer or viemWallet(client)
+})
+```
+
+Before sending tokens, approve the Router contract to spend your tokens. `sendMessage` fails if allowance is insufficient.
+
+## Extra Arguments
+
+Extra arguments control execution behavior on the destination chain.
+
+<Tabs>
+<TabItem value="evm" label="EVM Destination">
+
+```typescript
+import { encodeExtraArgs } from '@chainlink/ccip-sdk'
+
+// EVM V2 (recommended) - inferred from allowOutOfOrderExecution
+const extraArgs = encodeExtraArgs({
+  gasLimit: 200000n,              // Gas for receiver execution
+  allowOutOfOrderExecution: true, // Allow out-of-order execution
+})
+
+// EVM V1 (legacy) - inferred when only gasLimit is set
+const extraArgsV1 = encodeExtraArgs({
+  gasLimit: 200000n,
+})
+```
+
+</TabItem>
+<TabItem value="solana" label="Solana Destination">
+
+```typescript
+import { encodeExtraArgs } from '@chainlink/ccip-sdk'
+
+// SVM (Solana) - inferred from computeUnits
+const extraArgs = encodeExtraArgs({
+  computeUnits: 200000n,
+  accountIsWritableBitmap: 0n,
+  allowOutOfOrderExecution: true,
+  tokenReceiver: '', // Solana token account
+  accounts: [], // Additional accounts for CPI
+})
+```
+
+</TabItem>
+</Tabs>
+
+## Fee Estimation
+
+Estimate fees before sending:
+
+```typescript
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+// Fee in native token
+const nativeMessage = { ...message, feeToken: '0x' + '0'.repeat(40) }
+const nativeFee = await source.getFee({
+  router,
+  destChainSelector: destSelector,
+  message: nativeMessage,
+})
+
+// Fee in LINK
+const linkMessage = { ...message, feeToken: LINK_TOKEN }
+const linkFee = await source.getFee({
+  router,
+  destChainSelector: destSelector,
+  message: linkMessage,
+})
+
+console.log('Native fee:', nativeFee, 'wei')
+console.log('LINK fee:', linkFee, 'wei')
+```
+
+Fees depend on destination chain gas costs, token transfer complexity, message data size, and current gas prices.
+
+## Unsigned Transactions
+
+Generate unsigned transactions for browser wallets, offline signing, or multi-sig wallets.
+
+### Why Use Unsigned Transactions?
+
+Browser wallets (MetaMask, Phantom) don't support `signTransaction()` - they only support `sendTransaction()`. The SDK's `sendMessage()` method uses `signTransaction()` internally, which won't work in browsers.
+
+**Solution**: Use `generateUnsignedSendMessage()` to get unsigned transactions, then sign them with your wallet provider.
+
+### Basic Usage
+
+```typescript
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+const unsignedTx = await source.generateUnsignedSendMessage({
+  router,
+  destChainSelector: destSelector,
+  message,
+  sender: walletAddress, // Required: address of wallet that will send
+})
+
+console.log('Unsigned tx:', unsignedTx)
+```
+
+### EVM Multi-Transaction Flow
+
+For token transfers on EVM, you typically need **two transactions**:
+
+1. **Approve** - Allow the CCIP Router to spend your tokens
+2. **ccipSend** - Execute the cross-chain transfer
+
+The SDK returns both in `unsignedTx.transactions[]`:
+
+```typescript
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+const unsignedTx = await source.generateUnsignedSendMessage({
+  router,
+  destChainSelector: destSelector,
+  message: {
+    receiver: '0xReceiver...',
+    tokenAmounts: [{ token: tokenAddress, amount }],
+    fee,
+  },
+  sender: walletAddress,
+})
+
+// Process all transactions in order (approvals first, then send)
+for (const tx of unsignedTx.transactions) {
+  const hash = await walletClient.sendTransaction(tx)
+  await publicClient.waitForTransactionReceipt({ hash })
+}
+```
+
+### Get Message After Sending
+
+After the final transaction confirms, extract the message ID:
+
+```typescript
+// Last transaction is the ccipSend
+const sendTx = unsignedTx.transactions[unsignedTx.transactions.length - 1]
+const hash = await walletClient.sendTransaction(sendTx)
+const receipt = await publicClient.waitForTransactionReceipt({ hash })
+
+// Get message details
+const messages = await source.getMessagesInTx(hash)
+const messageId = messages[0].message.messageId
+
+console.log('Message ID:', messageId)
+```
+
+## Complete Example
+
+Send data and tokens with fee buffer:
+
+```typescript
+import {
+  EVMChain,
+  encodeExtraArgs,
+  networkInfo,
+  CCIPError
+} from '@chainlink/ccip-sdk'
+import { viemWallet } from '@chainlink/ccip-sdk/viem'
+import { toHex, parseEther, type WalletClient } from 'viem'
+
+async function sendCrossChainMessage(walletClient: WalletClient) {
+  const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+  const router = source.network.router
+  const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+
+  const message = {
+    receiver: '0xReceiverContract...',
+    data: toHex(JSON.stringify({ action: 'deposit', user: '0x...' })),
+    tokenAmounts: [
+      {
+        token: '0x779877A7B0D9E8603169DdbD7836e478b4624789', // LINK
+        amount: parseEther('0.1'),
+      },
+    ],
+    feeToken: '0x0000000000000000000000000000000000000000', // Native ETH
+    extraArgs: encodeExtraArgs({
+      gasLimit: 300000n,
+      allowOutOfOrderExecution: false,
+    }),
+  }
+
+  try {
+    const fee = await source.getFee({
+      router,
+      destChainSelector: destSelector,
+      message,
+    })
+    console.log('Estimated fee:', fee, 'wei')
+
+    // Add 10% buffer for gas price fluctuations
+    const feeWithBuffer = (fee * 110n) / 100n
+
+    const request = await source.sendMessage({
+      router,
+      destChainSelector: destSelector,
+      message: { ...message, fee: feeWithBuffer },
+      wallet: viemWallet(walletClient), // Wrap viem WalletClient
+    })
+
+    console.log('Transaction hash:', request.tx.hash)
+    console.log('Message ID:', request.message.messageId)
+
+    return request
+  } catch (error) {
+    if (CCIPError.isCCIPError(error)) {
+      console.error('CCIP error:', error.code, error.message)
+      if (error.recovery) console.error('Recovery:', error.recovery)
+    }
+    throw error
+  }
+}
+```
+
+## Related
+
+- [Tracking Messages](/sdk/guides/tracking-messages) - Monitor sent messages
+- [Error Handling](/sdk/guides/error-handling) - Handle failures and retry
+- [Multi-Chain Support](/sdk/guides/multi-chain) - Send to non-EVM chains

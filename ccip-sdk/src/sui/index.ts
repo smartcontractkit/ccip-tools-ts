@@ -7,7 +7,6 @@ import { isValidSuiAddress, isValidTransactionDigest, normalizeSuiAddress } from
 import { type BytesLike, dataLength, hexlify, isBytesLike, isHexString } from 'ethers'
 import type { PickDeep, SetOptional } from 'type-fest'
 
-import { AptosChain } from '../aptos/index.ts'
 import {
   type ChainContext,
   type ChainStatic,
@@ -15,6 +14,16 @@ import {
   type LogFilter,
   Chain,
 } from '../chain.ts'
+import { getCcipStateAddress, getOffRampForCcip } from './discovery.ts'
+import { type CommitEvent, streamSuiLogs } from './events.ts'
+import { getSuiLeafHasher } from './hasher.ts'
+import {
+  deriveObjectID,
+  fetchTokenConfigs,
+  getLatestPackageId,
+  getObjectRef,
+  getReceiverModule,
+} from './objects.ts'
 import {
   CCIPContractNotRouterError,
   CCIPDataFormatUnsupportedError,
@@ -31,8 +40,8 @@ import {
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessage, getMessagesInBatch } from '../requests.ts'
+import { decodeMoveExtraArgs, getMoveAddress } from '../shared/bcs-codecs.ts'
 import { supportedChains } from '../supported-chains.ts'
-import { getSuiLeafHasher } from './hasher.ts'
 import {
   type AnyMessage,
   type CCIPExecution,
@@ -59,20 +68,11 @@ import {
   parseTypeAndVersion,
   util,
 } from '../utils.ts'
-import { getCcipStateAddress, getOffRampForCcip } from './discovery.ts'
-import { type CommitEvent, streamSuiLogs } from './events.ts'
 import {
   type SuiManuallyExecuteInput,
   type TokenConfig,
   buildManualExecutionPTB,
 } from './manuallyExec/index.ts'
-import {
-  deriveObjectID,
-  fetchTokenConfigs,
-  getLatestPackageId,
-  getObjectRef,
-  getReceiverModule,
-} from './objects.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
 
 const DEFAULT_GAS_LIMIT = 1000000n
@@ -608,7 +608,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
     | undefined {
-    return AptosChain.decodeExtraArgs(extraArgs)
+    return decodeMoveExtraArgs(extraArgs)
   }
 
   /**
@@ -696,7 +696,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @returns Sui address.
    */
   static getAddress(bytes: BytesLike | readonly number[]): string {
-    return AptosChain.getAddress(bytes)
+    return getMoveAddress(bytes)
   }
 
   /**
@@ -881,7 +881,13 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.getFeeTokens'))
   }
 
-  /** {@inheritDoc ChainStatic.buildMessageForDest} */
+  /**
+   * Returns a copy of a message, populating missing fields like `extraArgs` with defaults.
+   * It's expected to return a message suitable at least for basic token transfers.
+   *
+   * @param message - AnyMessage (from source), containing at least `receiver`
+   * @returns A message suitable for `sendMessage` to this destination chain family
+   */
   static override buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
   ): AnyMessage & { extraArgs: SuiExtraArgsV1 } {

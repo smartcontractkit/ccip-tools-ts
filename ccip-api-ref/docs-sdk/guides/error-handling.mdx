@@ -1,0 +1,532 @@
+---
+id: error-handling
+title: 'Error Handling'
+description: 'Handle CCIP errors, recover from failures, and manually execute stuck messages.'
+sidebar_label: Error Handling
+sidebar_position: 3
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Error Handling
+
+## Error Types
+
+### Core Errors
+
+| Error | Description |
+|-------|-------------|
+| `CCIPTransactionNotFoundError` | Transaction hash doesn't exist |
+| `CCIPMessageNotFoundInTxError` | Transaction contains no CCIP messages |
+| `CCIPMessageIdNotFoundError` | Message ID not found after searching |
+| `CCIPMessageDecodeError` | Failed to decode message data |
+| `CCIPBlockNotFoundError` | Block doesn't exist or isn't finalized |
+| `CCIPOffRampNotFoundError` | No OffRamp found for the lane |
+| `CCIPMerkleRootMismatchError` | Merkle proof validation failed |
+
+### API Errors
+
+| Error | Description |
+|-------|-------------|
+| `CCIPHttpError` | HTTP request failed (includes status code) |
+| `CCIPApiClientNotAvailableError` | API disabled with `apiClient: null` |
+| `CCIPMessageRetrievalError` | Both API and RPC failed to retrieve message |
+| `CCIPTimeoutError` | Request timed out (transient, safe to retry) |
+| `CCIPUnexpectedPaginationError` | Transaction contains >100 CCIP messages |
+| `CCIPMessageIdValidationError` | Invalid message ID format |
+
+## Basic Error Handling
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+try {
+  const requests = await chain.getMessagesInTx('0x1234...')
+  console.log('Found', requests.length, 'messages')
+} catch (error) {
+  if (error.message.includes('not found')) {
+    console.log('Transaction not found - check the hash')
+  } else if (error.message.includes('no CCIP messages')) {
+    console.log('Transaction exists but has no CCIP messages')
+  } else {
+    console.error('Unexpected error:', error)
+  }
+}
+```
+
+## Search Failures
+
+Handle search failures when looking up messages by ID:
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+async function findMessage(messageId: string) {
+  const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+
+  try {
+    const request = await chain.getMessageById(messageId)
+    return request
+  } catch (error) {
+    if (error.message.includes('not found')) {
+      console.log('Message not found - it may be:')
+      console.log('  - Very old (before search window)')
+      console.log('  - On a different chain')
+      console.log('  - Invalid message ID')
+      return null
+    }
+    throw error
+  }
+}
+```
+
+The `getMessageById` method uses the CCIP API to look up messages by their unique ID.
+
+## Execution States
+
+Messages can fail execution for several reasons:
+
+```typescript
+import { EVMChain, ExecutionState } from '@chainlink/ccip-sdk'
+
+async function checkExecutionStatus(dest: EVMChain, offRamp: string, request: any) {
+  for await (const execution of dest.getExecutionReceipts({
+    offRamp,
+    messageId: request.message.messageId,
+  })) {
+    switch (execution.receipt.state) {
+      case ExecutionState.Success:
+        console.log('Message executed successfully')
+        return 'success'
+
+      case ExecutionState.Failed:
+        console.log('Execution failed - receiver reverted')
+        console.log('Return data:', execution.receipt.returnData)
+        return 'failed'
+
+      case ExecutionState.InProgress:
+        console.log('Message execution in progress')
+        return 'pending'
+    }
+  }
+  return 'not_found'
+}
+```
+
+## Manual Execution
+
+When automatic execution fails, manually execute the message.
+
+### Step 1: Gather Data
+
+```typescript
+import {
+  EVMChain,
+  discoverOffRamp
+} from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+const requests = await source.getMessagesInTx('0x1234...')
+const request = requests[0]
+
+const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+
+const commit = await dest.getCommitReport({
+  commitStore: offRamp,
+  request,
+})
+
+if (!commit) {
+  throw new Error('Message not yet committed - cannot execute')
+}
+```
+
+### Step 2: Calculate Merkle Proof
+
+```typescript
+import { calculateManualExecProof } from '@chainlink/ccip-sdk'
+
+// Fetch all messages in the commit batch
+const messagesInBatch = await source.getMessagesInBatch(request, commit.report)
+
+const proof = calculateManualExecProof(
+  messagesInBatch,
+  request.lane,
+  request.message.messageId,
+  commit.report.merkleRoot
+)
+
+console.log('Merkle root:', proof.merkleRoot)
+console.log('Proof hashes:', proof.proofs)
+```
+
+### Step 3: Execute
+
+```typescript
+const executionReport = {
+  ...proof,
+  message: request.message,
+  offchainTokenData: [],
+}
+
+const execution = await dest.executeReport({
+  offRamp,
+  execReport: executionReport,
+  wallet, // Required: signer instance
+})
+console.log('Manual execution tx:', execution.log.transactionHash)
+```
+
+## Merkle Root Mismatches
+
+If the calculated merkle root doesn't match the commit:
+
+```typescript
+import { calculateManualExecProof } from '@chainlink/ccip-sdk'
+
+try {
+  const proof = calculateManualExecProof(
+    messagesInBatch,
+    request.lane,
+    request.message.messageId,
+    commit.report.merkleRoot
+  )
+} catch (error) {
+  if (error.message.includes('Merkle root mismatch')) {
+    console.log('Merkle root mismatch - possible causes:')
+    console.log('  - Messages in batch are incomplete')
+    console.log('  - Wrong lane configuration')
+    console.log('  - Message was modified')
+
+    // Try without validation to see calculated root
+    const unvalidatedProof = calculateManualExecProof(
+      messagesInBatch,
+      request.lane,
+      request.message.messageId
+    )
+    console.log('Calculated root:', unvalidatedProof.merkleRoot)
+    console.log('Expected root:', commit.report.merkleRoot)
+  }
+}
+```
+
+## Retry Logic
+
+Implement retry logic for transient failures:
+
+```typescript
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  delayMs = 1000
+): Promise<T> {
+  let lastError: Error | undefined
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn()
+    } catch (error) {
+      lastError = error as Error
+
+      // Don't retry on definitive failures
+      if (
+        error.message.includes('not found') ||
+        error.message.includes('invalid')
+      ) {
+        throw error
+      }
+
+      console.log(`Attempt ${attempt} failed, retrying in ${delayMs}ms...`)
+      await new Promise(resolve => setTimeout(resolve, delayMs))
+      delayMs *= 2 // Exponential backoff
+    }
+  }
+
+  throw lastError
+}
+
+const request = await withRetry(() =>
+  chain.getMessageById(messageId)
+)
+```
+
+## Complete Recovery Example
+
+```typescript
+import {
+  EVMChain,
+  calculateManualExecProof,
+  discoverOffRamp,
+  ExecutionState,
+} from '@chainlink/ccip-sdk'
+
+async function recoverFailedMessage(sourceTxHash: string) {
+  const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+  const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+  // Step 1: Get the request
+  const requests = await source.getMessagesInTx(sourceTxHash)
+  const request = requests[0]
+  console.log('Message ID:', request.message.messageId)
+
+  // Step 2: Find OffRamp
+  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+
+  // Step 3: Check current execution status
+  let needsManualExecution = false
+  for await (const execution of dest.getExecutionReceipts({
+    offRamp,
+    messageId: request.message.messageId,
+  })) {
+    if (execution.receipt.state === ExecutionState.Success) {
+      console.log('Already executed')
+      return { status: 'already_executed' }
+    }
+    if (execution.receipt.state === ExecutionState.Failed) {
+      console.log('Previous execution failed, attempting manual execution...')
+      needsManualExecution = true
+      break
+    }
+  }
+
+  // Step 4: Get commit
+  const commit = await dest.getCommitReport({
+    commitStore: offRamp,
+    request,
+  })
+  if (!commit) {
+    console.log('Not yet committed - wait for DON to commit')
+    return { status: 'pending_commit' }
+  }
+
+  // Step 5: Manual execution
+  if (needsManualExecution) {
+    // Fetch all messages in the commit batch
+    const messagesInBatch = await source.getMessagesInBatch(request, commit.report)
+
+    const proof = calculateManualExecProof(
+      messagesInBatch,
+      request.lane,
+      request.message.messageId,
+      commit.report.merkleRoot
+    )
+
+    console.log('Executing manually...')
+    const execution = await dest.executeReport({
+      offRamp,
+      execReport: {
+        ...proof,
+        message: request.message,
+        offchainTokenData: [],
+      },
+      wallet, // Required: signer instance
+    })
+
+    console.log('Manual execution tx:', execution.log.transactionHash)
+    return { status: 'manually_executed', tx: execution.log.transactionHash }
+  }
+
+  return { status: 'pending_execution' }
+}
+```
+
+## Error Parsing
+
+The SDK provides chain-specific error parsing to decode CCIP contract errors into human-readable messages.
+
+### EVM Error Parsing
+
+Parse errors from EVM transaction reverts:
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+try {
+  await publicClient.call({ to, data, value })
+} catch (error) {
+  const parsed = EVMChain.parse(error)
+  if (parsed) {
+    // parsed contains keys like 'revert', 'revert.ChainNotAllowed', etc.
+    console.log('Error:', parsed)
+    // => { revert: 'ChainNotAllowed(uint64 destChainSelector)', ... }
+
+    // Extract error name
+    for (const [key, value] of Object.entries(parsed)) {
+      if (key.startsWith('revert') && typeof value === 'string') {
+        const match = value.match(/^(\w+)\(/)
+        if (match) {
+          console.log('Error name:', match[1]) // e.g., 'ChainNotAllowed'
+        }
+      }
+    }
+  }
+}
+```
+
+### Solana Error Parsing
+
+Parse errors from Solana transaction logs:
+
+```typescript
+import { SolanaChain } from '@chainlink/ccip-sdk'
+
+try {
+  await sendTransaction(transaction, connection)
+} catch (error) {
+  // Pass the error (which may contain logs) or transaction logs directly
+  const parsed = SolanaChain.parse(error.logs || error)
+  if (parsed) {
+    console.log('Error:', parsed)
+    // => { program: '...', error: 'Rate limit exceeded', ... }
+  }
+}
+```
+
+## Common CCIP Errors
+
+| Error | Description | Solution |
+|-------|-------------|----------|
+| `ChainNotAllowed` | Destination chain not enabled for this token | Use a supported route |
+| `RateLimitReached` | Token bucket rate limit exceeded | Try smaller amount or wait for refill |
+| `UnsupportedToken` | Token not supported on this lane | Use a different token or route |
+| `InsufficientFeeTokenAmount` | Not enough fee provided | Ensure sufficient native tokens |
+| `InvalidReceiver` | Receiver address format invalid | Check address format for destination chain |
+| `SenderNotAllowed` | Sender not on allowlist | Contact token issuer for allowlist |
+| `InvalidExtraArgsTag` | Invalid extra args encoding | Use `encodeExtraArgs()` helper |
+| `MessageTooLarge` | Message data exceeds max size | Reduce data payload size |
+| `TokenMaxCapacityExceeded` | Transfer exceeds pool capacity | Try smaller amount |
+
+## CCIPError Class
+
+The SDK provides a base error class with useful properties:
+
+```typescript
+import { CCIPError, getRetryDelay } from '@chainlink/ccip-sdk'
+
+try {
+  const message = await chain.getMessageById(messageId)
+} catch (error) {
+  if (CCIPError.isCCIPError(error)) {
+    console.log('Message:', error.message)
+    console.log('Is transient:', error.isTransient) // Can retry?
+    console.log('Retry after:', error.retryAfterMs) // Suggested delay
+    console.log('Recovery hint:', error.recovery)
+
+    // Use SDK utility for retry delay
+    const delay = getRetryDelay(error)
+    if (delay !== null) {
+      await new Promise(resolve => setTimeout(resolve, delay))
+      // Retry the operation...
+    }
+  }
+}
+```
+
+### Expected Errors During Polling
+
+`CCIPMessageIdNotFoundError` is expected when polling for a recently sent message:
+
+```typescript
+import { CCIPMessageIdNotFoundError } from '@chainlink/ccip-sdk'
+
+try {
+  const message = await chain.getMessageById(messageId)
+} catch (error) {
+  if (error instanceof CCIPMessageIdNotFoundError) {
+    // Expected - message not indexed yet, keep polling
+    console.log('Message not found yet, will retry...')
+  } else {
+    throw error
+  }
+}
+```
+
+## Retry Utility
+
+The SDK exports a `withRetry` utility for implementing custom retry logic with exponential backoff:
+
+```typescript
+import { withRetry, DEFAULT_API_RETRY_CONFIG } from '@chainlink/ccip-sdk'
+
+const result = await withRetry(
+  async () => {
+    // Your async operation that may fail transiently
+    return await someApiCall()
+  },
+  {
+    maxRetries: 3,              // Max retry attempts (default: 3)
+    initialDelayMs: 1000,       // Initial delay before first retry (default: 1000)
+    backoffMultiplier: 2,       // Multiplier for exponential backoff (default: 2)
+    maxDelayMs: 30000,          // Maximum delay cap (default: 30000)
+    respectRetryAfterHint: true, // Use error's retryAfterMs when available
+    logger: console,            // Optional: logs retry attempts
+  },
+)
+```
+
+The utility only retries on transient errors (5xx HTTP errors, timeouts). Non-transient errors (4xx, validation errors) are thrown immediately.
+
+### Checking Transient Errors
+
+```typescript
+import { isTransientError } from '@chainlink/ccip-sdk'
+
+try {
+  const result = await chain.getMessageById(messageId)
+} catch (error) {
+  if (isTransientError(error)) {
+    console.log('Transient error - safe to retry')
+  } else {
+    console.log('Permanent error - do not retry')
+    throw error
+  }
+}
+```
+
+## API Mode Configuration
+
+By default, Chain instances use the CCIP API for enhanced functionality. You can configure this behavior:
+
+```typescript
+import { EVMChain, DEFAULT_API_RETRY_CONFIG } from '@chainlink/ccip-sdk'
+
+// Default: API enabled with automatic retry on fallback
+const chain = await EVMChain.fromUrl(url)
+
+// Custom retry configuration for API fallback operations
+const chainWithRetry = await EVMChain.fromUrl(url, {
+  apiRetryConfig: {
+    maxRetries: 5,
+    initialDelayMs: 2000,
+    backoffMultiplier: 1.5,
+    maxDelayMs: 60000,
+    respectRetryAfterHint: true,
+  },
+})
+
+// Fully decentralized mode - uses only RPC data, no API
+const decentralizedChain = await EVMChain.fromUrl(url, { apiClient: null })
+```
+
+### Decentralized Mode
+
+Disable the API entirely for fully decentralized operation:
+
+```typescript
+// Opt-out of API - uses only RPC data
+const chain = await EVMChain.fromUrl(url, { apiClient: null })
+
+// API-dependent methods will throw CCIPApiClientNotAvailableError
+await chain.getLaneLatency(destSelector) // Throws
+```
+
+## Related
+
+- [Tracking Messages](/sdk/guides/tracking-messages) - Monitor message status
+- [Sending Messages](/sdk/guides/sending-messages) - Send messages correctly
+- [Multi-Chain Support](/sdk/guides/multi-chain) - Chain-specific error handling

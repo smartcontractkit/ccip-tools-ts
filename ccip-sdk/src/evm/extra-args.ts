@@ -25,8 +25,9 @@ import {
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
+import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 import { getAddressBytes, getDataBytes } from '../utils.ts'
-import { DEFAULT_GAS_LIMIT, defaultAbiCoder } from './const.ts'
+import { defaultAbiCoder } from './const.ts'
 
 // ABI type strings for extra args encoding
 const EVMExtraArgsV1ABI = 'tuple(uint256 gasLimit)'
@@ -58,7 +59,7 @@ function resultToObject<T>(o: T): T {
  * Encodes GenericExtraArgsV3 using tightly packed binary format.
  *
  * Binary format:
- * - tag (4 bytes): 0x302326cb
+ * - tag (4 bytes): 0xa69dd4aa
  * - gasLimit (4 bytes): uint32 big-endian
  * - blockConfirmations (2 bytes): uint16 big-endian
  * - ccvsLength (1 byte): uint8

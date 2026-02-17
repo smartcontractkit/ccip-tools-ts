@@ -1,3 +1,4 @@
+import { memoize } from 'micro-memoize'
 import type { SetRequired } from 'type-fest'
 
 import {
@@ -36,7 +37,7 @@ import type {
 export type { APICCIPRequestMetadata, APIErrorResponse, LaneLatencyResponse } from './types.ts'
 
 /** Default CCIP API base URL */
-export const DEFAULT_API_BASE_URL = 'https://api.ccip.cldev.cloud'
+export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
 
 /** Default timeout for API requests in milliseconds */
 export const DEFAULT_TIMEOUT_MS = 30000
@@ -83,14 +84,14 @@ const ensureNetworkInfo = (o: RawNetworkInfo, logger: Logger): NetworkInfo => {
  *
  * @example Standalone usage
  * ```typescript
- * const api = new CCIPAPIClient()
+ * const api = CCIPAPIClient.fromUrl()
  * const latency = await api.getLaneLatency(sourceSelector, destSelector)
  * console.log(`Latency: ${latency.totalMs}ms`)
  * ```
  *
  * @example With custom options
  * ```typescript
- * const api = new CCIPAPIClient('https://custom.api.url', {
+ * const api = CCIPAPIClient.fromUrl('https://custom.api.url', {
  *   logger: myLogger,
  *   fetch: myCustomFetch,
  * })
@@ -120,6 +121,13 @@ export class CCIPAPIClient {
   /** Fetch function used for HTTP requests */
   private readonly _fetch: typeof fetch
 
+  static {
+    CCIPAPIClient.fromUrl = memoize(
+      (baseUrl?: string, ctx?: CCIPAPIClientContext) => new CCIPAPIClient(baseUrl, ctx),
+      { maxArgs: 1 },
+    )
+  }
+
   /**
    * Creates a new CCIPAPIClient instance.
    * @param baseUrl - Base URL for the CCIP API (defaults to {@link DEFAULT_API_BASE_URL})
@@ -133,14 +141,15 @@ export class CCIPAPIClient {
   }
 
   /**
-   * Factory method for creating CCIPAPIClient.
-   * Currently equivalent to constructor; reserved for future preflight checks.
+   * Factory method for creating memoized CCIPAPIClient.
+   * Should be preferred over constructor, to avoid multiple fetch/retry/rate-limits instances,
+   * unless that's specifically required.
    * @param baseUrl - Base URL for the CCIP API
    * @param ctx - Optional context
    * @returns New CCIPAPIClient instance
    */
-  static fromUrl(baseUrl?: string, ctx?: CCIPAPIClientContext): Promise<CCIPAPIClient> {
-    return Promise.resolve(new CCIPAPIClient(baseUrl, ctx))
+  static fromUrl(baseUrl?: string, ctx?: CCIPAPIClientContext): CCIPAPIClient {
+    return new CCIPAPIClient(baseUrl, ctx)
   }
 
   /**
@@ -273,7 +282,7 @@ export class CCIPAPIClient {
    * const request = await api.getMessageById(
    *   '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
    * )
-   * console.log(`Status: ${request.status}`)
+   * console.log(`Status: ${request.metadata.status}`)
    * console.log(`From: ${request.message?.sender}`)
    * ```
    *
