@@ -282,7 +282,7 @@ export class CCIPAPIClient {
    * const request = await api.getMessageById(
    *   '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
    * )
-   * console.log(`Status: ${request.status}`)
+   * console.log(`Status: ${request.metadata.status}`)
    * console.log(`From: ${request.message?.sender}`)
    * ```
    *

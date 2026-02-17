@@ -61,7 +61,7 @@ export const builder = (yargs: Argv) =>
     .positional('tx-hash-or-id', {
       type: 'string',
       demandOption: true,
-      describe: 'transaction hash of the request (source) message',
+      describe: 'transaction hash or message ID (32-byte hex) of the CCIP request',
     })
     .check(({ txHashOrId }) => isSupportedTxHash(txHashOrId))
     .options({

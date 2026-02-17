@@ -12,6 +12,10 @@
 
 import * as fs from 'fs'
 import * as path from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 const ROOT_DIR = path.join(__dirname, '..')
 const SDK_DIR = path.join(ROOT_DIR, '..', 'ccip-sdk', 'src')
@@ -56,6 +60,33 @@ interface ExportInfo {
   name: string
   kind: 'class' | 'function' | 'type' | 'enum' | 'const'
   from?: string
+}
+
+/**
+ * Extract individual error class names from errors/index.ts
+ * This provides 100% automated extraction - no hardcoded error names
+ */
+function extractErrorClasses(): ExportInfo[] {
+  const errorsIndexPath = path.join(SDK_DIR, 'errors', 'index.ts')
+  if (!fs.existsSync(errorsIndexPath)) return []
+
+  const content = fs.readFileSync(errorsIndexPath, 'utf-8')
+  const errors: ExportInfo[] = []
+
+  // Extract all: export { ErrorClass, ... } from './specialized.ts' or './CCIPError.ts'
+  const errorExports = content.matchAll(/export\s*\{\s*([^}]+)\s*\}\s*from\s*['"]([^'"]+)['"]/g)
+
+  for (const match of errorExports) {
+    const names = match[1].split(',').map((n) => n.trim().replace(/^type\s+/, ''))
+    for (const name of names) {
+      // Only include actual error classes (ending with Error)
+      if (name.endsWith('Error') && !name.startsWith('type ')) {
+        errors.push({ name, kind: 'class', from: match[2] })
+      }
+    }
+  }
+
+  return errors
 }
 
 function extractSDKExports(): ExportInfo[] {
@@ -120,11 +151,14 @@ function extractSDKExports(): ExportInfo[] {
     }
   }
 
-  // Extract: export * from './errors/index'
+  // For star exports from errors, we now extract individual classes
+  // instead of generic "CCIPError (+ subclasses)"
   const starExports = content.matchAll(/export\s*\*\s*from\s*['"]([^'"]+)['"]/g)
   for (const match of starExports) {
     if (match[1].includes('error')) {
-      exports.push({ name: 'CCIPError (+ subclasses)', kind: 'class', from: match[1] })
+      // Extract individual error classes from errors/index.ts
+      const errorClasses = extractErrorClasses()
+      exports.push(...errorClasses)
     }
   }
 

@@ -5,6 +5,7 @@ import React from 'react'
 import {
   Architecture,
   ChainSupportSection,
+  ExamplesShowcase,
   Features,
   Hero,
   QuickStart,
@@ -19,10 +20,11 @@ export default function Home(): React.JSX.Element {
     <Layout title={siteConfig.title} description={siteConfig.tagline}>
       <main>
         <Hero />
-        <Architecture />
         <Features />
         <QuickStart />
+        <ExamplesShowcase />
         <ChainSupportSection />
+        <Architecture />
         <Resources />
       </main>
     </Layout>
