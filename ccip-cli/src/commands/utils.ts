@@ -18,7 +18,6 @@ import {
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { select } from '@inquirer/prompts'
 import {
-  dataLength,
   formatUnits,
   hexlify,
   isBytesLike,
@@ -125,14 +124,17 @@ export function formatDisplayTxHash(hash: string, family: ChainFamily): string {
 }
 
 async function formatToken(
-  source: Chain,
-  ta: { amount: bigint } & ({ token: string } | { sourcePoolAddress: string }),
+  source: Chain | undefined,
+  ta: { amount: bigint } & (
+    | { token: string }
+    | { sourceTokenAddress?: string; sourcePoolAddress: string }
+  ),
 ): Promise<string> {
+  if (!source) return `${ta.amount} ${'sourcePoolAddress' in ta ? ta.sourcePoolAddress : ta.token}`
   let token
   if ('token' in ta) token = ta.token
-  else {
-    token = await source.getTokenForTokenPool(ta.sourcePoolAddress)
-  }
+  else if (ta.sourceTokenAddress) token = ta.sourceTokenAddress
+  else token = await source.getTokenForTokenPool(ta.sourcePoolAddress)
   const { symbol, decimals } = await source.getTokenInfo(token)
   return `${formatUnits(ta.amount, decimals)} ${symbol}`
 }
@@ -143,14 +145,26 @@ async function formatToken(
  * @param values - Array values to format.
  * @returns Record with indexed keys.
  */
-export function formatArray<T>(name: string, values: readonly T[]): Record<string, T> {
+export function formatArray<T>(
+  name: string,
+  values: readonly T[],
+  edges = '[]',
+): Record<string, T> {
   if (values.length <= 1) return { [name]: values[0]! }
-  return Object.fromEntries(values.map((v, i) => [`${name}[${i}]`, v] as const))
+  return Object.fromEntries(values.map((v, i) => [`${name}${edges[0]}${i}${edges[1]}`, v] as const))
 }
 
 // join truthy property names, separated by a dot
-function j(...args: string[]): string {
-  return args.filter(Boolean).join('.')
+function j(...args: (string | number)[]): string {
+  return args.reduce(
+    (acc: string, v): string =>
+      v === ''
+        ? acc
+        : acc
+          ? acc + (typeof v === 'number' ? `[${v}]` : (v.match(/^\w/) ? '.' : '') + v)
+          : v.toString(),
+    '',
+  )
 }
 
 function formatData(name: string, data: string, parseError = false): Record<string, string> {
@@ -176,7 +190,7 @@ function formatData(name: string, data: string, parseError = false): Record<stri
     for (let i = data.length; i > 2; i -= 64) {
       split.unshift(data.substring(Math.max(i - 64, 0), i))
     }
-  return formatArray(name, split)
+  return formatArray(name, split, '{}')
 }
 
 function formatDate(timestamp: number) {
@@ -238,16 +252,16 @@ function formatDataString(data: string): Record<string, string> {
 
 /**
  * Prints a CCIP request in a human-readable format.
- * @param source - Source chain instance.
  * @param request - CCIP request to print.
+ * @param source - Source chain instance.
  */
-export async function prettyRequest(this: Ctx, source: Chain, request: CCIPRequest) {
+export async function prettyRequest(this: Ctx, request: CCIPRequest, source?: Chain) {
   prettyLane.call(this, request.lane)
   this.logger.info('Request (source):')
 
   let finalized
   try {
-    finalized = await source.getBlockTimestamp('finalized')
+    if (source) finalized = await source.getBlockTimestamp('finalized')
   } catch (_) {
     // no finalized tag support
   }
@@ -329,10 +343,9 @@ export async function prettyCommit(
   commit: CCIPCommit,
   request: PickDeep<CCIPRequest, 'tx.timestamp' | 'lane.destChainSelector'>,
 ) {
-  const timestamp = await dest.getBlockTimestamp(commit.log.blockNumber)
   const destFamily = networkInfo(request.lane.destChainSelector).family
+  const timestamp = await dest.getBlockTimestamp(commit.log.blockNumber)
   const origin = commit.log.tx?.from ?? (await dest.getTransaction(commit.log.transactionHash)).from
-
   prettyTable.call(this, {
     merkleRoot: commit.report.merkleRoot,
     min: Number(commit.report.minSeqNr),
@@ -401,6 +414,18 @@ function wrapText(text: string, maxWidth: number, threshold: number = 0.1): stri
   return lines
 }
 
+function flatten(val: unknown, path: (string | number)[] = []): [(string | number)[], unknown][] {
+  if (Array.isArray(val)) {
+    if (val.length) return val.map((v: unknown, i: number) => flatten(v, [...path, i])).flat(1)
+  } else if (val && typeof val === 'object') {
+    if (Object.keys(val).length === 0) return [[path, val]]
+    return Object.entries(val)
+      .map(([k, v]) => flatten(v, [...path, k]))
+      .flat(1)
+  }
+  return [[path, val]]
+}
+
 /**
  * Prints a formatted table of key-value pairs.
  * @param args - Key-value pairs to print.
@@ -412,23 +437,29 @@ export function prettyTable(
   opts = { parseErrorKeys: ['returnData'], spcount: 0 },
 ) {
   const out: (readonly [string, unknown])[] = []
-  for (const [key, value] of Object.entries(args)) {
+  for (const [path, value] of flatten(args)) {
+    const last = path[path.length - 1]
+    const key = j(...path)
     if (isBytesLike(value)) {
       let parseError
-      if (opts.parseErrorKeys.includes(key)) parseError = true
-      if (dataLength(value) <= 32 && !parseError) out.push([key, value])
-      else out.push(...Object.entries(formatData(key, hexlify(value), parseError)))
+      if (opts.parseErrorKeys.includes(path[path.length - 1]!.toString())) parseError = true
+      out.push(
+        ...Object.entries(
+          formatData(key, typeof value !== 'string' ? hexlify(value) : value, parseError),
+        ),
+      )
     } else if (typeof value === 'string') {
       out.push(
         ...wrapText(value, Math.max(100, +(process.env.COLUMNS || 80) * 0.9)).map(
           (l, i) => [!i ? key : ' '.repeat(opts.spcount++), l] as const,
         ),
       )
-    } else if (Array.isArray(value)) {
-      if (value.length <= 1) out.push([key, value[0] as unknown])
-      else out.push(...value.map((v, i) => [`${key}[${i}]`, v as unknown] as const))
-    } else if (value && typeof value === 'object') {
-      out.push(...Object.entries(value).map(([k, v]) => [`${key}.${k}`, v] as const))
+    } else if (
+      typeof last === 'string' &&
+      last.toLowerCase().includes('timestamp') &&
+      typeof value === 'number'
+    ) {
+      out.push([key, formatDate(value)])
     } else out.push([key, value])
   }
   return this.logger.table(Object.fromEntries(out))
@@ -476,6 +507,13 @@ export function formatCCIPError(err: unknown, verbose = false): string | null {
   const lines: string[] = []
 
   lines.push(`error[${err.code}]: ${err.message}`)
+
+  if (Object.keys(err.context).length > 0) {
+    lines.push('  context:')
+    for (const [key, value] of Object.entries(err.context)) {
+      lines.push(`    ${key}: ${value as string}`)
+    }
+  }
 
   if (err.recovery) {
     lines.push(`  help: ${err.recovery}`)

@@ -361,7 +361,7 @@ Query lane latency from the CCIP REST API.
 ```ts
 import { CCIPAPIClient } from '@chainlink/ccip-sdk'
 
-const api = new CCIPAPIClient()
+const api = CCIPAPIClient.fromUrl()
 
 // Get estimated delivery time
 const latency = await api.getLaneLatency(
@@ -385,7 +385,7 @@ console.log(`ETA: ${Math.round(latency.totalMs / 60000)} min`)
 ### Custom Configuration
 
 ```ts
-const api = new CCIPAPIClient('https://api.ccip.chain.link', {
+const api = CCIPAPIClient.fromUrl('https://api.ccip.chain.link', {
   timeoutMs: 60000, // Request timeout in ms (default: 30000)
   logger: customLogger, // Custom logger instance
   fetch: customFetch, // Custom fetch function
@@ -399,7 +399,7 @@ Retrieve full message details using a message ID:
 ```ts
 import { CCIPAPIClient } from '@chainlink/ccip-sdk'
 
-const api = new CCIPAPIClient()
+const api = CCIPAPIClient.fromUrl()
 
 // Fetch message by its unique ID
 const request = await api.getMessageById(
@@ -470,7 +470,7 @@ If you encounter `MessageStatus.Unknown`, it means the CCIP API returned a statu
 Get all CCIP message IDs from a source transaction:
 
 ```ts
-const api = new CCIPAPIClient()
+const api = CCIPAPIClient.fromUrl()
 
 // Get message IDs from transaction hash
 const messageIds = await api.getMessageIdsInTx(
@@ -689,7 +689,7 @@ try {
 Configure custom timeout when creating the client:
 
 ```ts
-const api = new CCIPAPIClient('https://api.ccip.chain.link', {
+const api = CCIPAPIClient.fromUrl('https://api.ccip.chain.link', {
   timeoutMs: 60000, // 60 seconds (default: 30000ms)
 })
 ```

@@ -134,7 +134,7 @@ async function manualExec(
       break
     }
     case Format.pretty:
-      await prettyRequest.call(ctx, source, request)
+      await prettyRequest.call(ctx, request, source)
       break
     case Format.json:
       logger.info(JSON.stringify(request, bigIntReplacer, 2))

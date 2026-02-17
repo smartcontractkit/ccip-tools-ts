@@ -25,7 +25,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Ensure the data is a valid CCIPSendRequested event log. Check the transaction on the source chain explorer.',
   MESSAGE_CCIP_DECODE_FAILED:
     'Ensure the log data is from a CCIPSendRequested event. Verify the source chain and transaction hash.',
-  MESSAGE_NOT_FOUND_IN_TX: 'No CCIPSendRequested event found. Verify the transaction hash.',
+  MESSAGE_NOT_FOUND_IN_TX: 'No CCIP request event found in tx. Verify the transaction hash.',
   MESSAGE_ID_NOT_FOUND: 'Wait and retry. The message may still be in transit (5-20 min typical).',
   MESSAGE_ID_INVALID:
     'Verify the message ID format. Must be a valid 32-byte hex string (0x-prefixed, 64 hex chars).',
