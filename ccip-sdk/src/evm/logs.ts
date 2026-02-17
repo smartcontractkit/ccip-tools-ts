@@ -144,8 +144,7 @@ async function getFallbackArchiveLogs(
         urls.map((url) => async () => {
           const fetchReq = new FetchRequest(url)
           fetchReq.timeout = PER_REQUEST_TIMEOUT
-          // Use staticNetwork to prevent network detection retries that can hang
-          const provider = new JsonRpcProvider(fetchReq, chainId, { staticNetwork: true })
+          const provider = new JsonRpcProvider(fetchReq, chainId)
           void cancel$.finally(() => {
             if (url === winner) return
             provider.destroy()
