@@ -86,22 +86,6 @@ function anyPromiseMax<T>(
 const archiveRpcs: Record<number, Promise<JsonRpcApiProvider>> = {}
 
 /**
- * Clears the archive RPC provider cache and destroys all cached providers.
- */
-export async function clearArchiveRpcsCache(): Promise<void> {
-  const chainIds = Object.keys(archiveRpcs).map(Number)
-  for (const chainId of chainIds) {
-    try {
-      const provider = await archiveRpcs[chainId]
-      provider?.destroy()
-    } catch {
-      // ignore errors from failed/pending providers
-    }
-    delete archiveRpcs[chainId]
-  }
-}
-
-/**
  * Like provider.getLogs, but from a public list of archive nodes and wide range, races the first to reply
  * @param chainId - The chain ID of the network to query
  * @param filter - Log filter options

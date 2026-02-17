@@ -1,9 +1,3 @@
-/**
- * EVM Fork Tests - Consolidated
- *
- * All fork tests consolidated into a single file to share Anvil fork instances,
- * reducing RPC calls and avoiding rate limiting issues.
- */
 import assert from 'node:assert/strict'
 import { execSync } from 'node:child_process'
 import { after, before, describe, it } from 'node:test'
@@ -26,7 +20,6 @@ import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
 import { type ExecutionReport, CCIPVersion, ExecutionState } from '../types.ts'
 import { interfaces } from './const.ts'
 import { EVMChain } from './index.ts'
-import { clearArchiveRpcsCache } from './logs.ts'
 
 // ============================================================================
 // Constants
@@ -111,8 +104,6 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
 
   before(async () => {
     // Start both forks in parallel
-    // NOTE: Don't pass { timeout } to prool — it creates a timer that isn't cleared on
-    // success, keeping the event loop alive. We handle stop timeouts ourselves in after().
     ethInstance = anvil({ forkUrl: ETH_RPC, chainId: ETH_CHAIN_ID, port: 8550 })
     avaxInstance = anvil({ forkUrl: AVAX_RPC, chainId: AVAX_CHAIN_ID, port: 8551 })
     await Promise.all([ethInstance.start(), avaxInstance.start()])
@@ -132,28 +123,8 @@ describe('EVM Fork Tests', { skip, timeout: 300_000 }, () => {
   after(async () => {
     ethChain?.destroy?.()
     avaxChain?.destroy?.()
-    ethProvider.destroy()
-    avaxProvider.destroy()
-
-    await clearArchiveRpcsCache()
-
-    // Stop anvil instances with a timeout. Use .unref() so the timer doesn't keep
-    // the event loop alive. Race stop() against the timeout so a hung anvil process
-    // (e.g. still fetching forked state) doesn't block cleanup indefinitely.
-    const stopWithTimeout = (instance: typeof ethInstance) => {
-      if (!instance) return
-      const unrefTimeout = new Promise<void>((resolve) => {
-        const t = setTimeout(resolve, 5_000)
-        t.unref()
-      })
-      return Promise.race([instance.stop(), unrefTimeout])
-    }
-    await Promise.allSettled([stopWithTimeout(ethInstance), stopWithTimeout(avaxInstance)])
-
-    // Force-kill any anvil processes that didn't stop gracefully
-    ethInstance?._internal.process.kill('SIGKILL')
-    avaxInstance?._internal.process.kill('SIGKILL')
-  })
+    await Promise.all([ethInstance?.stop(), avaxInstance?.stop()])
+   })
 
   // ==========================================================================
   // Router and Lane Discovery
