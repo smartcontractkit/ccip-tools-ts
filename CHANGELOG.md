@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Remove `DEFAULT_APPROVE_GAS_LIMIT` (unused)
   - Non-EVM chains no longer bundle EVM ABIs (~500KB savings per chain)
   - Sui no longer bundles Aptos code (~300KB savings)
+- API: make `CCIPAPIClient.fromUrl` memoized non-async
+- CLI: Support `messageId` from API in `show` command
 
 ## [0.96.0] - 2026-02-10 - Pre-release
 

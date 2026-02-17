@@ -195,16 +195,11 @@ export class CCIPMessageNotFoundInTxError extends CCIPError {
   override readonly name = 'CCIPMessageNotFoundInTxError'
   /** Creates a message not found in transaction error. */
   constructor(txHash: string, options?: CCIPErrorOptions) {
-    super(
-      CCIPErrorCode.MESSAGE_NOT_FOUND_IN_TX,
-      `Could not find any CCIPSendRequested message in tx: ${txHash}`,
-      {
-        ...options,
-        isTransient: true,
-        retryAfterMs: 30000,
-        context: { ...options?.context, txHash },
-      },
-    )
+    super(CCIPErrorCode.MESSAGE_NOT_FOUND_IN_TX, `Could not find any CCIP request event in tx`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, txHash },
+    })
   }
 }
 

@@ -85,7 +85,7 @@ export async function getLaneLatencyCmd(ctx: Ctx, argv: Parameters<typeof handle
   const sourceNetwork = networkInfo(argv.source)
   const destNetwork = networkInfo(argv.dest)
 
-  const apiClient = new CCIPAPIClient(argv.apiUrl, { logger })
+  const apiClient = CCIPAPIClient.fromUrl(argv.apiUrl, { logger })
 
   const result = await apiClient.getLaneLatency(
     sourceNetwork.chainSelector,

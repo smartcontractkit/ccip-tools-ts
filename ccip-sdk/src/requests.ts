@@ -211,7 +211,8 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
     }
     requests.push({ lane, message, log, tx })
   }
-  if (!requests.length) throw new CCIPMessageNotFoundInTxError(tx.hash)
+  if (!requests.length)
+    throw new CCIPMessageNotFoundInTxError(tx.hash, { context: { network: source.network.name } })
   return requests
 }
 

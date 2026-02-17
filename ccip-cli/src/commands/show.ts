@@ -20,16 +20,18 @@
  */
 
 import {
-  type CCIPRequest,
-  type ChainTransaction,
+  type Chain,
+  CCIPAPIClient,
   CCIPExecTxRevertedError,
+  CCIPMessageIdNotFoundError,
+  CCIPTransactionNotFoundError,
   ExecutionState,
   MessageStatus,
   bigIntReplacer,
   discoverOffRamp,
   isSupportedTxHash,
-  networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
+import { isHexString } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -46,7 +48,7 @@ import {
 } from './utils.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
-export const command = ['show <tx-hash>', '* <tx-hash>']
+export const command = ['show <tx-hash-or-id>', '* <tx-hash-or-id>']
 export const describe = 'Show details of a CCIP request'
 
 /**
@@ -56,22 +58,17 @@ export const describe = 'Show details of a CCIP request'
  */
 export const builder = (yargs: Argv) =>
   yargs
-    .positional('tx-hash', {
+    .positional('tx-hash-or-id', {
       type: 'string',
       demandOption: true,
       describe: 'transaction hash of the request (source) message',
     })
-    .check(({ txHash }) => isSupportedTxHash(txHash))
+    .check(({ txHashOrId }) => isSupportedTxHash(txHashOrId))
     .options({
       'log-index': {
         type: 'number',
         describe:
           'Pre-select a message request by logIndex, if more than one in tx; by default, a selection menu is shown',
-      },
-      'id-from-source': {
-        type: 'string',
-        describe:
-          'Search by messageId instead of txHash; requires `[onRamp@]sourceNetwork` (onRamp address may be required in some chains)',
       },
       wait: {
         type: 'boolean',
@@ -98,22 +95,42 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
  */
 export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
   const { logger } = ctx
-  let source, getChain, tx: ChainTransaction, request: CCIPRequest
-  // messageId not yet implemented for Solana
-  if (argv.idFromSource) {
-    getChain = fetchChainsFromRpcs(ctx, argv)
-    let idFromSource, onRamp
-    if (argv.idFromSource.includes('@')) {
-      ;[onRamp, idFromSource] = argv.idFromSource.split('@') as [string, string]
-    } else idFromSource = argv.idFromSource
-    const sourceNetwork = networkInfo(idFromSource)
-    source = await getChain(sourceNetwork.chainId)
-    request = await source.getMessageById(argv.txHash, { ...argv, onRamp })
-  } else {
-    const [getChain_, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHash)
-    getChain = getChain_
-    ;[source, tx] = await tx$
-    request = await selectRequest(await source.getMessagesInTx(tx), 'to know more', argv)
+  const [getChain, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHashOrId)
+
+  let source: Chain | undefined
+  let request$ = (async () => {
+    const [source_, tx] = await tx$
+    source = source_
+    return selectRequest(await source_.getMessagesInTx(tx), 'to know more', argv)
+  })()
+
+  if (argv.noApi !== true) {
+    const apiClient = CCIPAPIClient.fromUrl(undefined, ctx)
+    if (isHexString(argv.txHashOrId, 32)) {
+      request$ = Promise.any([request$, apiClient.getMessageById(argv.txHashOrId)])
+    }
+  }
+  let request
+  try {
+    request = await request$
+  } catch (err) {
+    if (err instanceof AggregateError && err.errors.length === 2) {
+      if (!(err.errors[0] instanceof CCIPTransactionNotFoundError)) throw err.errors[0] as Error
+      else if (!(err.errors[1] instanceof CCIPMessageIdNotFoundError)) throw err.errors[1] as Error
+    }
+    throw err
+  }
+  if (!source) {
+    try {
+      source = await getChain(request.lane.sourceChainSelector)
+    } catch (err) {
+      logger.debug(
+        'Fetched messageId from API, but failed find a source',
+        request.lane.sourceChainSelector,
+        'RPC endpoint:',
+        err,
+      )
+    }
   }
 
   switch (argv.format) {
@@ -122,7 +139,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       break
     }
     case Format.pretty:
-      await prettyRequest.call(ctx, source, request)
+      await prettyRequest.call(ctx, request, source)
       break
     case Format.json:
       logger.info(JSON.stringify(request, bigIntReplacer, 2))
@@ -133,6 +150,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       context: { error: request.tx.error },
     })
 
+  if (!source) return
   if (argv.wait === false) return // `false` used by call at end of `send` command without `--wait`
 
   let cancelWaitFinalized: (() => void) | undefined

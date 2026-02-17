@@ -348,10 +348,8 @@ async function sendMessage(
   )
   await showRequests(ctx, {
     ...argv,
-    txHash: request.tx.hash,
-    'tx-hash': request.tx.hash,
-    'id-from-source': undefined,
-    idFromSource: undefined,
+    txHashOrId: request.tx.hash,
+    'tx-hash-or-id': request.tx.hash,
     'log-index': undefined,
     logIndex: undefined,
   })
