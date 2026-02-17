@@ -116,6 +116,44 @@ don't support large ranges)
 - `CCIP_VERBOSE=true` → same as `--verbose`
 - `CCIP_FORMAT=json` → same as `--format=json`
 
+### `chains`
+
+```sh
+ccip-cli chains [identifier] [--family EVM|SVM|APTOS|SUI|TON] [--mainnet|--testnet] [-s search]
+```
+
+List and lookup CCIP chain configurations. Use this to find chain names, chain IDs, and chain selectors.
+
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `identifier` | | Chain name, chainId, or selector for single lookup |
+| `--family` | | Filter by chain family |
+| `--mainnet` | | Show only mainnets |
+| `--testnet` | | Show only testnets |
+| `--search` | `-s` | Search chains by name |
+| `--count` | | Output count only |
+| `--field` | | Extract single field value |
+| `--interactive` | `-i` | Interactive type-ahead search |
+
+#### Examples
+
+```sh
+# List all chains
+ccip-cli chains
+
+# Lookup specific chain
+ccip-cli chains ethereum-mainnet
+
+# Filter EVM mainnets
+ccip-cli chains --family EVM --mainnet
+
+# Search for chains
+ccip-cli chains -s arbitrum
+
+# Get chain selector for scripting
+ccip-cli chains ethereum-mainnet --field chainSelector
+```
+
 ### `send`
 
 ```sh

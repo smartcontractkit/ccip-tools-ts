@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CLI: Add `chains` command to list and lookup CCIP chain configurations (uses docs config API)
 - SDK: **Breaking**: Reduce bundle size by eliminating cross-chain imports
   - Move `DEFAULT_GAS_LIMIT` from `evm/const.ts` to `shared/constants.ts`
   - Move BCS codecs and encoding utils to `shared/bcs-codecs.ts` (shared by Aptos/Sui)
