@@ -32,13 +32,13 @@ import { clearArchiveRpcsCache } from './logs.ts'
 // Constants
 // ============================================================================
 
-const ETH_RPC = process.env['RPC_ETHEREUM'] || 'https://rpcs.cldev.sh/ethereum/mainnet'
+const ETH_RPC = process.env['RPC_ETHEREUM'] || 'https://ethereum-rpc.publicnode.com'
 const ETH_CHAIN_ID = 1
 const ETH_SELECTOR = 5009297550715157269n
 const ETH_ROUTER = '0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D'
 const ETH_LINK = '0x514910771AF9Ca656af840dff83E8264EcF986CA'
 
-const AVAX_RPC = process.env['RPC_AVALANCHE'] || 'https://rpcs.cldev.sh/avalanche/mainnet'
+const AVAX_RPC = process.env['RPC_AVALANCHE'] || 'https://avalanche-c-chain-rpc.publicnode.com'
 const AVAX_CHAIN_ID = 43114
 const AVAX_SELECTOR = 6433500567565415381n
 
