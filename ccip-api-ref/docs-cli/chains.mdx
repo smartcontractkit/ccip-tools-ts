@@ -1,0 +1,249 @@
+---
+id: chains
+title: 'chains'
+description: 'List and lookup CCIP chain configurations with chain identifiers, selectors, and family information.'
+sidebar_label: chains
+sidebar_position: 1
+custom_edit_url: null
+---
+
+# chains
+
+<ChainSupport />
+
+List and lookup CCIP-supported chains with their identifiers, chain selectors, and chain family.
+
+## Synopsis
+
+```bash
+ccip-cli chains [identifier] [options]
+```
+
+## Description
+
+The `chains` command provides chain identifier mappings for CCIP-supported networks. Each chain has:
+
+- **Name**: Internal chain identifier (e.g., `ethereum-mainnet`)
+- **Chain ID**: Native chain identifier (e.g., `1` for Ethereum)
+- **Chain Selector**: Unique CCIP identifier used in cross-chain messaging
+
+Chain data is sourced from the [CCIP Directory](https://docs.chain.link/ccip/directory). Use this command to find the correct identifiers before using other CLI commands like `send`, `show`, or `laneLatency`.
+
+## Arguments
+
+| Argument       | Type   | Required | Description                                              |
+| -------------- | ------ | -------- | -------------------------------------------------------- |
+| `[identifier]` | string | No       | Chain name, chainId, or selector for single chain lookup |
+
+When an identifier is provided, displays detailed information for that chain. Without an identifier, lists all chains.
+
+## Options
+
+### Filter Options
+
+| Option      | Alias | Type    | Description                                                 |
+| ----------- | ----- | ------- | ----------------------------------------------------------- |
+| `--family`  | -     | string  | Filter by chain family: `EVM`, `SVM`, `APTOS`, `SUI`, `TON` |
+| `--mainnet` | -     | boolean | Show only mainnet chains                                    |
+| `--testnet` | -     | boolean | Show only testnet chains                                    |
+| `--search`  | `-s`  | string  | Search chains by name or display name                       |
+
+### Output Options
+
+| Option          | Alias | Type    | Description                                  |
+| --------------- | ----- | ------- | -------------------------------------------- |
+| `--count`       | -     | boolean | Output chain count only                      |
+| `--field`       | -     | string  | Extract a single field value (for scripting) |
+| `--interactive` | `-i`  | boolean | Interactive search with type-ahead filtering |
+
+See [Configuration](/cli/configuration) for global options (`--format`, etc.).
+
+## Command Builder
+
+Build your `chains` command interactively:
+
+<CLIBuilder command="chains" />
+
+## Examples
+
+### List all supported chains
+
+```bash
+ccip-cli chains
+```
+
+### Lookup a specific chain by name
+
+```bash
+ccip-cli chains ethereum-mainnet
+```
+
+Output:
+
+```
+Name:        ethereum-mainnet
+DisplayName: Ethereum
+Selector:    5009297550715157269
+ChainId:     1
+Family:      EVM
+Testnet:     false
+Supported:   Yes
+```
+
+### Lookup by chain selector
+
+```bash
+ccip-cli chains 5009297550715157269
+```
+
+### Lookup by chain ID
+
+```bash
+ccip-cli chains 1
+```
+
+### Filter by chain family
+
+```bash
+# List all EVM chains
+ccip-cli chains --family EVM
+
+# List all Solana chains
+ccip-cli chains --family SVM
+```
+
+### Filter by network type
+
+```bash
+# Mainnets only
+ccip-cli chains --mainnet
+
+# Testnets only
+ccip-cli chains --testnet
+```
+
+### Search for chains
+
+```bash
+# Find chains with "arbitrum" in the name
+ccip-cli chains -s arbitrum
+
+# Find chains by partial chain ID
+ccip-cli chains -s 42161
+```
+
+### Combine filters
+
+```bash
+# EVM mainnets only
+ccip-cli chains --family EVM --mainnet
+```
+
+### Count chains
+
+```bash
+# Total supported chains
+ccip-cli chains --count
+
+# Count EVM testnets
+ccip-cli chains --family EVM --testnet --count
+```
+
+### Extract specific field for scripting
+
+```bash
+# Get chain selector for use in scripts
+SELECTOR=$(ccip-cli chains ethereum-mainnet --field chainSelector)
+echo $SELECTOR
+# Output: 5009297550715157269
+```
+
+### JSON output
+
+```bash
+ccip-cli chains ethereum-mainnet --format json
+```
+
+Output:
+
+```json
+{
+  "chainId": 1,
+  "chainSelector": "5009297550715157269",
+  "name": "ethereum-mainnet",
+  "family": "EVM",
+  "networkType": "MAINNET",
+  "displayName": "Ethereum",
+  "environment": "mainnet"
+}
+```
+
+### Interactive search mode
+
+```bash
+ccip-cli chains -i
+```
+
+Provides type-ahead filtering to find chains by name.
+
+## Output Fields
+
+### List Output
+
+| Column      | Description                                          |
+| ----------- | ---------------------------------------------------- |
+| DisplayName | Human-readable chain name (e.g., `Ethereum`)         |
+| Name        | Internal chain identifier (e.g., `ethereum-mainnet`) |
+| Selector    | CCIP chain selector (unique identifier)              |
+| Family      | Chain family (EVM, SVM, APTOS, SUI, TON)             |
+| Network     | Environment (mainnet or testnet)                     |
+| Supported   | Whether chain is supported by CCIP                   |
+
+### Single Chain Output
+
+| Field       | Description                                          |
+| ----------- | ---------------------------------------------------- |
+| Name        | Internal chain identifier (e.g., `ethereum-mainnet`) |
+| DisplayName | Human-readable chain name                            |
+| Selector    | CCIP chain selector (use in `--dest`, `--source`)    |
+| ChainId     | Native chain ID                                      |
+| Family      | Chain family                                         |
+| Testnet     | Whether chain is a testnet                           |
+| Supported   | Whether chain is supported by CCIP                   |
+
+## Chain Families
+
+| Family  | Description                     |
+| ------- | ------------------------------- |
+| `EVM`   | Ethereum Virtual Machine chains |
+| `SVM`   | Solana Virtual Machine (Solana) |
+| `APTOS` | Aptos blockchain                |
+| `SUI`   | Sui blockchain                  |
+| `TON`   | TON blockchain                  |
+
+## Data Source
+
+Chain data is fetched from the CCIP docs configuration API, which reflects the current supported chains in the [CCIP Directory](https://docs.chain.link/ccip/directory). The API includes search and filtering capabilities.
+
+Data is cached for 5 minutes to reduce API calls. The SDK's `networkInfo()` provides canonical chain data (name, chainId, selector, family), while the API provides display names.
+
+## See Also
+
+- [CCIP Directory](https://docs.chain.link/ccip/directory) - Official supported chains reference
+- [send](/cli/send) - Send a cross-chain message (use chain name or selector)
+- [show](/cli/show) - Display details of a CCIP request
+- [laneLatency](/cli/lane-latency) - Query lane latency between chains
+- [Configuration](/cli/configuration) - RPC and output format options
+
+## Exit Codes
+
+| Code | Meaning                                |
+| ---- | -------------------------------------- |
+| `0`  | Success - chain(s) found and displayed |
+| `1`  | Error (chain not found, API failure)   |
+
+Use in scripts:
+
+```bash
+ccip-cli chains ethereum-mainnet --field chainSelector && echo "Found" || echo "Not found"
+```

@@ -50,6 +50,11 @@ const sidebars: SidebarsConfig = {
       items: [
         {
           type: 'doc',
+          id: 'chains',
+          label: 'chains',
+        },
+        {
+          type: 'doc',
           id: 'show',
           label: 'show',
         },
