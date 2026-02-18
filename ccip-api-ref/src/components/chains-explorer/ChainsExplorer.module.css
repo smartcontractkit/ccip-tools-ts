@@ -1,0 +1,475 @@
+/**
+ * Chains Explorer Styles
+ *
+ * Responsive design with table on desktop, cards on mobile.
+ * Uses CSS custom properties for theming support.
+ */
+
+/* Main container */
+.container {
+  margin: var(--space-6x, 24px) 0;
+}
+
+/* Header with search and filters */
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4x, 16px);
+  margin-bottom: var(--space-6x, 24px);
+}
+
+/* Search row */
+.searchRow {
+  display: flex;
+  gap: var(--space-3x, 12px);
+  align-items: center;
+}
+
+.searchInput {
+  flex: 1;
+  padding: var(--space-3x, 12px) var(--space-4x, 16px);
+  font-size: 1rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 8px;
+  background: var(--ifm-background-color);
+  color: var(--ifm-font-color-base);
+  transition:
+    border-color var(--transition-fast, 150ms ease),
+    box-shadow var(--transition-fast, 150ms ease);
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 0 0 3px var(--ifm-color-primary-lightest);
+}
+
+.searchInput::placeholder {
+  color: var(--ifm-font-color-secondary);
+  opacity: 0.7;
+}
+
+/* Filter row */
+.filterRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3x, 12px);
+  align-items: center;
+}
+
+.filterSelect {
+  padding: var(--space-2x, 8px) var(--space-6x, 24px) var(--space-2x, 8px) var(--space-3x, 12px);
+  font-size: 0.875rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 6px;
+  background: var(--ifm-background-color);
+  color: var(--ifm-font-color-base);
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  min-width: 140px;
+  transition:
+    border-color var(--transition-fast, 150ms ease),
+    box-shadow var(--transition-fast, 150ms ease);
+}
+
+.filterSelect:focus {
+  outline: none;
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 0 0 3px var(--ifm-color-primary-lightest);
+}
+
+.resetButton {
+  padding: var(--space-2x, 8px) var(--space-3x, 12px);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ifm-color-primary);
+  background: transparent;
+  border: 1px solid var(--ifm-color-primary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast, 150ms ease),
+    color var(--transition-fast, 150ms ease);
+}
+
+.resetButton:hover {
+  background: var(--ifm-color-primary);
+  color: white;
+}
+
+/* Results info */
+.resultsInfo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3x, 12px) 0;
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+  margin-bottom: var(--space-4x, 16px);
+}
+
+.resultsCount {
+  font-size: 0.875rem;
+  color: var(--ifm-font-color-secondary);
+}
+
+.directoryLink {
+  font-size: 0.875rem;
+  color: var(--ifm-color-primary);
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1x, 4px);
+}
+
+.directoryLink:hover {
+  text-decoration: underline;
+}
+
+/* Table styles */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.tableHeader {
+  background: var(--ifm-color-emphasis-100);
+}
+
+.tableHeaderCell {
+  padding: var(--space-3x, 12px) var(--space-4x, 16px);
+  text-align: left;
+  font-weight: 600;
+  color: var(--ifm-font-color-secondary);
+  border-bottom: 2px solid var(--ifm-color-emphasis-300);
+  white-space: nowrap;
+}
+
+.tableRow {
+  transition: background var(--transition-fast, 150ms ease);
+}
+
+.tableRow:hover {
+  background: var(--ifm-color-emphasis-100);
+}
+
+.tableCell {
+  padding: var(--space-3x, 12px) var(--space-4x, 16px);
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+  vertical-align: middle;
+}
+
+.chainName {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ifm-font-color-base);
+}
+
+.displayName {
+  color: var(--ifm-font-color-secondary);
+}
+
+.chainId {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.8125rem;
+  color: var(--ifm-font-color-secondary);
+}
+
+.selectorCell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2x, 8px);
+  white-space: nowrap;
+}
+
+.selector {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.8125rem;
+  color: var(--ifm-font-color-base);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copyButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: var(--ifm-color-emphasis-100);
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--ifm-font-color-secondary);
+  transition:
+    background var(--transition-fast, 150ms ease),
+    color var(--transition-fast, 150ms ease),
+    border-color var(--transition-fast, 150ms ease);
+  flex-shrink: 0;
+}
+
+.copyButton:hover {
+  background: var(--ifm-color-primary-lightest);
+  border-color: var(--ifm-color-primary);
+  color: var(--ifm-color-primary);
+}
+
+.copyButton:focus {
+  outline: 2px solid var(--ifm-color-primary);
+  outline-offset: 2px;
+}
+
+.copyButtonCopied {
+  background: var(--color-background-success);
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+/* Badge styles */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.badgeFamily {
+  background: var(--ifm-color-emphasis-100);
+  color: var(--ifm-font-color-base);
+}
+
+.badgeMainnet {
+  background: var(--color-background-success);
+  color: hsla(158, 79%, 32%, 1);
+}
+
+.badgeTestnet {
+  background: var(--color-background-warning);
+  color: hsla(22, 100%, 40%, 1);
+}
+
+.badgeSupported {
+  background: var(--color-background-success);
+  color: hsla(158, 79%, 32%, 1);
+}
+
+.badgeUnsupported {
+  background: var(--color-background-error);
+  color: hsla(351, 100%, 44%, 1);
+}
+
+/* Loading state */
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: var(--space-16x, 64px);
+  color: var(--ifm-font-color-secondary);
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--ifm-color-emphasis-300);
+  border-top-color: var(--ifm-color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: var(--space-3x, 12px);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Error state */
+.error {
+  padding: var(--space-8x, 32px);
+  text-align: center;
+  color: var(--color-error);
+  background: var(--color-background-error);
+  border-radius: 8px;
+}
+
+.errorTitle {
+  font-weight: 600;
+  margin-bottom: var(--space-2x, 8px);
+}
+
+.retryButton {
+  margin-top: var(--space-4x, 16px);
+  padding: var(--space-2x, 8px) var(--space-4x, 16px);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: white;
+  background: var(--color-error);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity var(--transition-fast, 150ms ease);
+}
+
+.retryButton:hover {
+  opacity: 0.9;
+}
+
+/* Empty state */
+.empty {
+  padding: var(--space-16x, 64px) var(--space-8x, 32px);
+  text-align: center;
+  color: var(--ifm-font-color-secondary);
+}
+
+.emptyTitle {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--ifm-font-color-base);
+  margin-bottom: var(--space-2x, 8px);
+}
+
+/* Card view (mobile) */
+.cardGrid {
+  display: none;
+}
+
+.card {
+  padding: var(--space-4x, 16px);
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 8px;
+  background: var(--ifm-background-color);
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--space-3x, 12px);
+}
+
+.cardTitle {
+  font-weight: 600;
+  color: var(--ifm-font-color-base);
+}
+
+.cardBadges {
+  display: flex;
+  gap: var(--space-2x, 8px);
+  flex-wrap: wrap;
+}
+
+.cardRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-2x, 8px) 0;
+  border-top: 1px solid var(--ifm-color-emphasis-100);
+}
+
+.cardLabel {
+  font-size: 0.75rem;
+  color: var(--ifm-font-color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cardValue {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.8125rem;
+  color: var(--ifm-font-color-base);
+}
+
+/* Dark mode */
+[data-theme='dark'] .searchInput,
+[data-theme='dark'] .filterSelect {
+  border-color: var(--ifm-color-emphasis-400);
+}
+
+[data-theme='dark'] .filterSelect {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23aaa' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+}
+
+[data-theme='dark'] .tableHeader {
+  background: var(--ifm-color-emphasis-200);
+}
+
+[data-theme='dark'] .tableHeaderCell {
+  border-bottom-color: var(--ifm-color-emphasis-400);
+}
+
+[data-theme='dark'] .copyButton {
+  background: var(--ifm-color-emphasis-200);
+  border-color: var(--ifm-color-emphasis-400);
+}
+
+[data-theme='dark'] .card {
+  border-color: var(--ifm-color-emphasis-400);
+}
+
+/* Responsive: Mobile view */
+@media (max-width: 768px) {
+  .searchRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filterRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filterSelect {
+    width: 100%;
+  }
+
+  .resetButton {
+    width: 100%;
+  }
+
+  .resultsInfo {
+    flex-direction: column;
+    gap: var(--space-2x, 8px);
+    align-items: flex-start;
+  }
+
+  /* Hide table, show cards */
+  .tableWrapper {
+    display: none;
+  }
+
+  .cardGrid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4x, 16px);
+  }
+}
+
+/* Responsive: Tablet */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .selector {
+    max-width: 100px;
+  }
+}
+
+/* Screen reader only */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
