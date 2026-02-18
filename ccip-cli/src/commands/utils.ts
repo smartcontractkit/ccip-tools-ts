@@ -352,7 +352,8 @@ export async function prettyVerifications(
   if ('report' in verifications) {
     const timestamp = await dest.getBlockTimestamp(verifications.log.blockNumber)
     const origin =
-      verifications.log.tx?.from ?? (await dest.getTransaction(verifications.log.transactionHash)).from
+      verifications.log.tx?.from ??
+      (await dest.getTransaction(verifications.log.transactionHash)).from
     prettyTable.call(this, {
       merkleRoot: verifications.report.merkleRoot,
       min: Number(verifications.report.minSeqNr),
