@@ -1,7 +1,7 @@
 // TODO: track a v2 release tag and the v2.0.0 folder instead of a commit + latest/ folder, once 2.0.0 is released in `chainlink-ccip`
 export default [
   // generate:
-  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/4d91b9045f07aceb9b6e131899c36fa0e4bd0fbb/ccv/chains/evm/gobindings/generated/latest/onramp/onramp.go')
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/develop/ccv/chains/evm/gobindings/generated/latest/onramp/onramp.go')
   //   .then((res) => res.text())
   //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
   //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
@@ -188,6 +188,73 @@ export default [
     ],
     outputs: [{ name: 'messageId', type: 'bytes32', internalType: 'bytes32' }],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'getAllDestChainConfigs',
+    inputs: [],
+    outputs: [
+      { name: '', type: 'uint64[]', internalType: 'uint64[]' },
+      {
+        name: '',
+        type: 'tuple[]',
+        internalType: 'struct OnRamp.DestChainConfig[]',
+        components: [
+          {
+            name: 'router',
+            type: 'address',
+            internalType: 'contract IRouter',
+          },
+          {
+            name: 'messageNumber',
+            type: 'uint64',
+            internalType: 'uint64',
+          },
+          {
+            name: 'addressBytesLength',
+            type: 'uint8',
+            internalType: 'uint8',
+          },
+          {
+            name: 'tokenReceiverAllowed',
+            type: 'bool',
+            internalType: 'bool',
+          },
+          {
+            name: 'messageNetworkFeeUSDCents',
+            type: 'uint16',
+            internalType: 'uint16',
+          },
+          {
+            name: 'tokenNetworkFeeUSDCents',
+            type: 'uint16',
+            internalType: 'uint16',
+          },
+          {
+            name: 'baseExecutionGasCost',
+            type: 'uint32',
+            internalType: 'uint32',
+          },
+          {
+            name: 'defaultExecutor',
+            type: 'address',
+            internalType: 'address',
+          },
+          {
+            name: 'laneMandatedCCVs',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+          {
+            name: 'defaultCCVs',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+          { name: 'offRamp', type: 'bytes', internalType: 'bytes' },
+        ],
+      },
+    ],
+    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -502,6 +569,12 @@ export default [
         type: 'address',
         indexed: false,
         internalType: 'address',
+      },
+      {
+        name: 'tokenAmountBeforeTokenPoolFees',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
       },
       {
         name: 'encodedMessage',
