@@ -308,6 +308,12 @@ const config: Config = {
           activeBaseRegex: '/cli/',
         },
         {
+          to: '/chains',
+          label: 'Chains',
+          position: 'left',
+          activeBaseRegex: '/chains',
+        },
+        {
           href: 'https://github.com/smartcontractkit/ccip-tools-ts/releases',
           label: 'Changelog',
           position: 'left',
@@ -345,6 +351,10 @@ const config: Config = {
               label: 'CLI Reference',
               to: '/cli/',
             },
+            {
+              label: 'Supported Chains',
+              to: '/chains',
+            },
           ],
         },
         {
@@ -381,7 +391,7 @@ const config: Config = {
             },
             {
               label: 'LLM Context (llms.txt)',
-              href: '/llms.txt',
+              href: 'pathname:///llms.txt',
             },
           ],
         },
