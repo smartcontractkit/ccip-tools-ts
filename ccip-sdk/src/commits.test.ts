@@ -188,6 +188,14 @@ class MockChain extends Chain {
     return Promise.reject(new Error('not implemented'))
   }
 
+  override generateUnsignedExecuteV2Message(_opts: any): Promise<never> {
+    return Promise.reject(new Error('not implemented'))
+  }
+
+  async executeV2Message(_opts: any) {
+    return Promise.reject(new Error('not implemented'))
+  }
+
   static decodeMessage(_log: Log_): CCIPMessage | undefined {
     return undefined
   }

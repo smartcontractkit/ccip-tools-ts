@@ -34,6 +34,7 @@ import {
   CCIPAptosTransactionTypeInvalidError,
   CCIPAptosWalletInvalidError,
   CCIPError,
+  CCIPNotImplementedError,
   CCIPTokenPoolChainConfigNotFoundError,
 } from '../errors/index.ts'
 import {
@@ -620,6 +621,22 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     })
     const tx = await this.getTransaction(hash)
     return this.getExecutionReceiptInTx(tx)
+  }
+
+  /** {@inheritDoc Chain.generateUnsignedExecuteV2Message} */
+  override generateUnsignedExecuteV2Message(
+    _opts: Parameters<Chain['generateUnsignedExecuteV2Message']>[0],
+  ): Promise<UnsignedAptosTx> {
+    return Promise.reject(
+      new CCIPNotImplementedError('AptosChain.generateUnsignedExecuteV2Message'),
+    )
+  }
+
+  /** {@inheritDoc Chain.executeV2Message} */
+  override executeV2Message(
+    _opts: Parameters<Chain['executeV2Message']>[0],
+  ): Promise<CCIPExecution> {
+    return Promise.reject(new CCIPNotImplementedError('AptosChain.executeV2Message'))
   }
 
   /**

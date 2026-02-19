@@ -316,6 +316,24 @@ export type ExecuteReportOpts = {
 }
 
 /**
+ * Common options for {@link Chain.generateUnsignedExecuteV2Message} and {@link Chain.executeV2Message} methods.
+ */
+export type ExecuteV2MessageOpts = {
+  /** address of the OffRamp contract */
+  offRamp: string
+  /** ABI-encoded message bytes (hex string) */
+  encodedMessage: string
+  /** CCV addresses (hex or chain-native encoding) */
+  ccvAddresses: string[]
+  /** Verifier results, parallel to ccvAddresses (hex-encoded byte blobs) */
+  verifierResults: string[]
+  /** gasLimit override for the ccipReceive call */
+  gasLimit?: number
+  /** For EVM, overrides gasLimit on tokenPool call */
+  tokensGasLimit?: number
+}
+
+/**
  * Works like an interface for a base Chain class, but provides implementation (which can be
  * specialized) for some basic methods
  */
@@ -942,6 +960,32 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract executeReport(
     opts: ExecuteReportOpts & {
+      // Signer instance (chain-dependent)
+      wallet: unknown
+    },
+  ): Promise<CCIPExecution>
+
+  /**
+   * Generate unsigned tx to execute a v2.0 message on an OffRamp.
+   *
+   * @param opts - {@link ExecuteV2MessageOpts} with payer address which will send the exec tx
+   * @returns Promise resolving to chain-family specific unsigned txs
+   */
+  abstract generateUnsignedExecuteV2Message(
+    opts: ExecuteV2MessageOpts & {
+      /** address which will be used to send the execution tx */
+      payer: string
+    },
+  ): Promise<UnsignedTx[F]>
+
+  /**
+   * Execute a v2.0 message on an OffRamp.
+   *
+   * @param opts - {@link ExecuteV2MessageOpts} with chain-specific wallet to sign and send tx
+   * @returns Promise resolving to transaction of the execution
+   */
+  abstract executeV2Message(
+    opts: ExecuteV2MessageOpts & {
       // Signer instance (chain-dependent)
       wallet: unknown
     },

@@ -24,6 +24,7 @@ export type {
   ChainContext,
   ChainGetter,
   ChainStatic,
+  ExecuteV2MessageOpts,
   GetBalanceOpts,
   LogFilter,
   RateLimiterState,

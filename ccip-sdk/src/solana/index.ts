@@ -48,6 +48,7 @@ import {
   CCIPExtraArgsLengthInvalidError,
   CCIPLogDataMissingError,
   CCIPLogsAddressRequiredError,
+  CCIPNotImplementedError,
   CCIPSolanaExtraArgsEncodingError,
   CCIPSolanaOffRampEventsNotFoundError,
   CCIPSolanaRefAddressesNotFoundError,
@@ -1182,6 +1183,22 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
     const tx = await this.getTransaction(hash)
     return this.getExecutionReceiptInTx(tx)
+  }
+
+  /** {@inheritDoc Chain.generateUnsignedExecuteV2Message} */
+  override generateUnsignedExecuteV2Message(
+    _opts: Parameters<Chain['generateUnsignedExecuteV2Message']>[0],
+  ): Promise<UnsignedSolanaTx> {
+    return Promise.reject(
+      new CCIPNotImplementedError('SolanaChain.generateUnsignedExecuteV2Message'),
+    )
+  }
+
+  /** {@inheritDoc Chain.executeV2Message} */
+  override executeV2Message(
+    _opts: Parameters<Chain['executeV2Message']>[0],
+  ): Promise<CCIPExecution> {
+    return Promise.reject(new CCIPNotImplementedError('SolanaChain.executeV2Message'))
   }
 
   /**

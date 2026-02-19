@@ -40,6 +40,7 @@ import {
   CCIPExecTxRevertedError,
   CCIPHasherVersionUnsupportedError,
   CCIPLogDataInvalidError,
+  CCIPNotImplementedError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
@@ -1223,6 +1224,20 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (!receipt.status) throw new CCIPExecTxRevertedError(response.hash)
     const tx = await this.getTransaction(receipt)
     return this.getExecutionReceiptInTx(tx)
+  }
+
+  /** {@inheritDoc Chain.generateUnsignedExecuteV2Message} */
+  override generateUnsignedExecuteV2Message(
+    _opts: Parameters<Chain['generateUnsignedExecuteV2Message']>[0],
+  ): Promise<UnsignedEVMTx> {
+    return Promise.reject(new CCIPNotImplementedError('EVMChain.generateUnsignedExecuteV2Message'))
+  }
+
+  /** {@inheritDoc Chain.executeV2Message} */
+  override executeV2Message(
+    _opts: Parameters<Chain['executeV2Message']>[0],
+  ): Promise<CCIPExecution> {
+    return Promise.reject(new CCIPNotImplementedError('EVMChain.executeV2Message'))
   }
 
   /**
