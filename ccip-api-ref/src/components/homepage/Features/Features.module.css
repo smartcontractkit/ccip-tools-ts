@@ -100,14 +100,14 @@
   font-size: 0.75rem;
   font-weight: 500;
   padding: 2px 8px;
-  background-color: var(--ifm-color-primary-lightest, #e8f0fe);
-  color: var(--ifm-color-primary-dark, #1a56db);
+  background-color: var(--chainlink-blue-light, #375bd2);
+  color: #ffffff;
   border-radius: 4px;
 }
 
 [data-theme='dark'] .versionBadge {
-  background-color: var(--ifm-color-primary-darkest, #1e3a5f);
-  color: var(--ifm-color-primary-lighter, #84adf3);
+  background-color: var(--chainlink-blue-light, #5a8dee);
+  color: #ffffff;
 }
 
 .cardDescription {

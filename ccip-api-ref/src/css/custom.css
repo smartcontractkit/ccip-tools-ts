@@ -230,7 +230,7 @@ button[class*='copyButton']:hover {
 }
 
 .token.punctuation {
-  color: #d4d4d4 !important;
+  color: #e8e8e8 !important;
 }
 
 .token.property,
@@ -255,7 +255,7 @@ button[class*='copyButton']:hover {
 .token.url,
 .language-css .token.string,
 .style .token.string {
-  color: #d4d4d4 !important;
+  color: #e8e8e8 !important;
 }
 
 .token.atrule,
@@ -273,6 +273,12 @@ button[class*='copyButton']:hover {
 .token.important,
 .token.variable {
   color: #d16969 !important;
+}
+
+/* Plain/unstyled code (e.g. package names in bash) - keep readable on dark background */
+.prism-code .token.plain,
+[class*='codeBlockContainer'] .token.plain {
+  color: #e8e8e8 !important;
 }
 
 /* === CARD HOVER EFFECTS === */
