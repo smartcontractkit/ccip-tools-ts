@@ -5,7 +5,7 @@ import { after, before, describe, it } from 'node:test'
 import { JsonRpcProvider, Wallet } from 'ethers'
 import { anvil } from 'prool/instances'
 
-import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
+import { calculateManualExecProof, discoverOffRamp, execute } from '../execution.ts'
 import { type ExecutionReport, ExecutionState } from '../types.ts'
 import { EVMChain } from './index.ts'
 
@@ -20,6 +20,10 @@ const ANVIL_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae7
 // Known message stuck in FAILED state on sepolia, sent from fuji (v1.6)
 const SOURCE_TX_HASH = '0xccf840f3e8268ad00822458862408a642d3bbef079096cacf65a68c8f2e21bc9'
 const MESSAGE_ID = '0xe7b71ffcab4fc1ad029c412bb75b33a2d036b59853f08b9306cc317690a29246'
+
+// Second known message: gasLimit: 0, readyForManualExecution, no token transfers (v1.6)
+const SOURCE_TX_HASH_2 = '0xe0caad74f4981c8972dce452a20096183d3a1181217ac83c164a484876c54a65'
+const MESSAGE_ID_2 = '0x31a9803ec2bf6626efad053aefff0c7087e6ed62b3875025b915f1e18d5fc437'
 
 function isAnvilAvailable(): boolean {
   try {
@@ -109,6 +113,28 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
     })
 
     assert.equal(execution.receipt.messageId, MESSAGE_ID, 'receipt messageId should match')
+    assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
+    assert.ok(execution.timestamp > 0, 'execution should have a positive timestamp')
+    assert.ok(
+      execution.receipt.state === ExecutionState.Success,
+      'execution state should be Success',
+    )
+  })
+
+  it('should execute a failed v1.6 message via execute() (Fuji -> Sepolia)', async () => {
+    assert.ok(source, 'source chain should be initialized')
+    assert.ok(dest, 'dest chain should be initialized')
+
+    const execution = await execute({
+      source,
+      dest,
+      txHash: SOURCE_TX_HASH_2,
+      messageId: MESSAGE_ID_2,
+      wallet,
+      gasLimit: 500_000,
+    })
+
+    assert.equal(execution.receipt.messageId, MESSAGE_ID_2, 'receipt messageId should match')
     assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
     assert.ok(execution.timestamp > 0, 'execution should have a positive timestamp')
     assert.ok(
