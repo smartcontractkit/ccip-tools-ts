@@ -724,6 +724,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           this.provider,
         ) as unknown as TypedContract<typeof offRampABI>
         const { onRamp } = await contract.getSourceChainConfig(sourceChainSelector)
+        if (!onRamp || onRamp.match(/^(0x)?0*$/i)) return []
         return [decodeOnRampAddress(onRamp, networkInfo(sourceChainSelector).family)]
       }
       case CCIPVersion.V2_0: {
