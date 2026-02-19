@@ -328,9 +328,7 @@ export type ExecuteV2MessageOpts = {
   /** Verifier results, parallel to ccvAddresses (hex-encoded byte blobs) */
   verifierResults: string[]
   /** gasLimit override for the ccipReceive call */
-  gasLimit?: number
-  /** For EVM, overrides gasLimit on tokenPool call */
-  tokensGasLimit?: number
+  gasLimit?: bigint
 }
 
 /**

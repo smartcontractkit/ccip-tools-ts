@@ -40,7 +40,6 @@ import {
   CCIPExecTxRevertedError,
   CCIPHasherVersionUnsupportedError,
   CCIPLogDataInvalidError,
-  CCIPNotImplementedError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
@@ -1227,17 +1226,50 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.generateUnsignedExecuteV2Message} */
-  override generateUnsignedExecuteV2Message(
-    _opts: Parameters<Chain['generateUnsignedExecuteV2Message']>[0],
-  ): Promise<UnsignedEVMTx> {
-    return Promise.reject(new CCIPNotImplementedError('EVMChain.generateUnsignedExecuteV2Message'))
+  override async generateUnsignedExecuteV2Message({
+    offRamp,
+    encodedMessage,
+    ccvAddresses,
+    verifierResults,
+    gasLimit,
+    payer,
+  }: Parameters<Chain['generateUnsignedExecuteV2Message']>[0]): Promise<UnsignedEVMTx> {
+    const contract = new Contract(
+      offRamp,
+      OffRamp_2_0_ABI,
+      this.provider,
+    ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
+
+    const tx = await contract.execute.populateTransaction(
+      encodedMessage,
+      ccvAddresses,
+      verifierResults,
+      gasLimit ?? 0n,
+    )
+    tx.from = payer
+    return { family: ChainFamily.EVM, transactions: [tx] }
   }
 
   /** {@inheritDoc Chain.executeV2Message} */
-  override executeV2Message(
-    _opts: Parameters<Chain['executeV2Message']>[0],
-  ): Promise<CCIPExecution> {
-    return Promise.reject(new CCIPNotImplementedError('EVMChain.executeV2Message'))
+  override async executeV2Message(opts: Parameters<Chain['executeV2Message']>[0]) {
+    const wallet = opts.wallet
+    if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
+
+    const unsignedTxs = await this.generateUnsignedExecuteV2Message({
+      ...opts,
+      payer: await wallet.getAddress(),
+    })
+    const unsignedTx: TransactionRequest = unsignedTxs.transactions[0]!
+    unsignedTx.nonce = await this.nextNonce(await wallet.getAddress())
+    const populatedTx = await wallet.populateTransaction(unsignedTx)
+    populatedTx.from = undefined
+    const response = await submitTransaction(wallet, populatedTx, this.provider)
+    this.logger.debug('executeV2Message =>', response.hash)
+    const receipt = await response.wait(1, 60_000)
+    if (!receipt?.hash) throw new CCIPExecTxNotConfirmedError(response.hash)
+    if (!receipt.status) throw new CCIPExecTxRevertedError(response.hash)
+    const tx = await this.getTransaction(receipt)
+    return this.getExecutionReceiptInTx(tx)
   }
 
   /**
