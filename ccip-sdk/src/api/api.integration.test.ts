@@ -25,7 +25,6 @@ describe(
     let api: CCIPAPIClient
 
     before(() => {
-      // Uses staging API by default (api.ccip.cldev.cloud)
       api = CCIPAPIClient.fromUrl()
     })
 

@@ -1,5 +1,6 @@
 import { memoize } from 'micro-memoize'
 
+import { CCIPAPIClient, isExecutionInputsV2 } from './api/index.ts'
 import type { Chain, ChainGetter } from './chain.ts'
 import {
   CCIPMerkleRootMismatchError,
@@ -10,7 +11,9 @@ import {
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
 } from './errors/index.ts'
+import { shouldRetry } from './errors/utils.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
+import { decodeMessage } from './requests.ts'
 import { supportedChains } from './supported-chains.ts'
 import type {
   CCIPExecution,
@@ -211,6 +214,15 @@ export type ExecuteOptions = {
   forceBuffer?: boolean
   /** Forces creation & usage of an ad-hoc lookup table for Solana execution */
   forceLookupTable?: boolean
+  /**
+   * Use CCIP API to fetch execution inputs.
+   * Falls back to RPC if API is unreachable (defaults to true).
+   */
+  api?: boolean
+  /**
+   * Override the default CCIP API URL.
+   */
+  apiUrlOverride?: string
 }
 
 /**
@@ -392,8 +404,35 @@ export async function execute(
       throw new CCIPOnchainCommitRequiredError(messageId)
     }
 
-    // 8. Get all messages in the commit batch
-    const messagesInBatch = await source.getMessagesInBatch(request, commit.report)
+    // 8. Get all messages in the commit batch (API with RPC fallback)
+    let messagesInBatch: CCIPMessage[]
+
+    if (options.api !== false) {
+      const apiClient = CCIPAPIClient.fromUrl(options.apiUrlOverride, { logger: source.logger })
+      try {
+        const executionInputs = await apiClient.getExecutionInputs(messageId)
+
+        if (isExecutionInputsV2(executionInputs)) {
+          // V2 lanes require offchain verification (not supported yet)
+          throw new CCIPOnchainCommitRequiredError(messageId)
+        }
+
+        // V1: decode each message in the batch
+        messagesInBatch = executionInputs.messageBatch.map((rawMsg) => decodeMessage(rawMsg))
+        source.logger.debug('execute: fetched messages via API', {
+          count: messagesInBatch.length,
+        })
+      } catch (err) {
+        if (shouldRetry(err)) {
+          source.logger.debug('execute: API unavailable, falling back to RPC', { error: err })
+          messagesInBatch = await source.getMessagesInBatch(request, commit.report)
+        } else {
+          throw err
+        }
+      }
+    } else {
+      messagesInBatch = await source.getMessagesInBatch(request, commit.report)
+    }
 
     // 9. Calculate merkle proof
     const execReportProof = calculateManualExecProof(
