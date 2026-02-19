@@ -77,7 +77,7 @@ describe('EVMChain.decodeMessage', () => {
       assert.equal(result.feeToken.toLowerCase(), testAddresses.feeToken.toLowerCase())
       assert.equal(result.messageId, testHash.messageId)
       assert.equal(result.sequenceNumber, 100n)
-      assert.equal(result.nonce, 1n)
+      assert.equal((result as { nonce: bigint }).nonce, 1n)
       assert.equal(result.sourceChainSelector, 1n)
     })
 
@@ -116,7 +116,7 @@ describe('EVMChain.decodeMessage', () => {
       assert.equal(ta1.amount, 2000n)
     })
 
-    it('should set allowOutOfOrderExecution when nonce is 0', () => {
+    it('should decode nonce 0 in v1.5 message', () => {
       const fragment = interfaces.EVM2EVMOnRamp_v1_5.getEvent('CCIPSendRequested')!
       const encoded = interfaces.EVM2EVMOnRamp_v1_5.encodeEventLog(fragment, [
         {
@@ -139,10 +139,8 @@ describe('EVMChain.decodeMessage', () => {
       const result = EVMChain.decodeMessage({ topics: encoded.topics, data: encoded.data })
 
       assert.ok(result)
-      assert.equal(
-        (result as { allowOutOfOrderExecution?: boolean }).allowOutOfOrderExecution,
-        true,
-      )
+      // v1.5 event doesn't have allowOutOfOrderExecution; nonce=0 is preserved as-is
+      assert.equal((result as { nonce: bigint }).nonce, 0n)
     })
   })
 
@@ -187,7 +185,7 @@ describe('EVMChain.decodeMessage', () => {
       assert.equal(result.feeToken.toLowerCase(), testAddresses.feeToken.toLowerCase())
       assert.equal(result.messageId, testHash.messageId)
       assert.equal(result.sequenceNumber, 500n)
-      assert.equal(result.nonce, 10n)
+      assert.equal((result as { nonce: bigint }).nonce, 10n)
       assert.equal(result.sourceChainSelector, sourceChainSelector)
       assert.equal((result as { destChainSelector?: bigint }).destChainSelector, destChainSelector)
       assert.equal(result.data, '0xabcd')
