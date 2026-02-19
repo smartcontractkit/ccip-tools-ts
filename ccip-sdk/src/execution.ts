@@ -1,22 +1,27 @@
 import { memoize } from 'micro-memoize'
 
-import type { Chain } from './chain.ts'
+import type { Chain, ChainGetter } from './chain.ts'
 import {
   CCIPMerkleRootMismatchError,
   CCIPMessageNotFoundInTxError,
   CCIPMessageNotInBatchError,
   CCIPOffRampNotFoundError,
   CCIPOnchainCommitRequiredError,
+  CCIPRpcNotFoundError,
+  CCIPTransactionNotFoundError,
 } from './errors/index.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
+import { supportedChains } from './supported-chains.ts'
 import type {
   CCIPExecution,
   CCIPMessage,
   CCIPVersion,
+  ChainTransaction,
   ExecutionReport,
   Lane,
   WithLogger,
 } from './types.ts'
+import { networkInfo } from './utils.ts'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
@@ -196,14 +201,12 @@ export const discoverOffRamp = memoize(
  * Options for the {@link execute} function.
  */
 export type ExecuteOpts = {
-  /** Source chain instance */
-  source: Chain
-  /** Destination chain instance */
-  dest: Chain
-  /** Message ID to execute */
-  messageId: string
+  /** RPC endpoint URLs — must cover both source and destination chains */
+  rpcs: readonly string[]
   /** Source transaction hash containing the CCIP request */
   txHash: string
+  /** Message ID to execute */
+  messageId: string
   /** Chain-specific wallet/signer for the destination chain */
   wallet: unknown
   /** Override gas limit for ccipReceive callback (0 keeps original) */
@@ -219,16 +222,116 @@ export type ExecuteOpts = {
 }
 
 /**
+ * Discover chains from RPC URLs and find the source transaction.
+ *
+ * @internal
+ */
+function discoverChains(
+  rpcs: readonly string[],
+  txHash: string,
+): [
+  getChain: ChainGetter,
+  sourceTx: Promise<[Chain, ChainTransaction]>,
+  cleanup: () => Promise<void>,
+] {
+  const chains = new Map<string, Chain>()
+
+  let resolveTx!: (v: [Chain, ChainTransaction]) => void
+  let rejectTx!: (e: unknown) => void
+  const sourceTx = new Promise<[Chain, ChainTransaction]>((resolve, reject) => {
+    resolveTx = resolve
+    rejectTx = reject
+  })
+
+  const matchingFamilies = Object.values(supportedChains).filter((C) => C.isTxHash(txHash))
+
+  const tryUrl = async (C: (typeof matchingFamilies)[number], url: string): Promise<void> => {
+    const chain = await C.fromUrl(url)
+    if (chains.has(chain.network.name)) {
+      await chain.destroy?.()
+      return
+    }
+    chains.set(chain.network.name, chain)
+    const tx = await chain.getTransaction(txHash)
+    resolveTx([chain, tx])
+  }
+
+  const discoveryDone = Promise.allSettled(
+    matchingFamilies.flatMap((C) => rpcs.map((url) => tryUrl(C, url))),
+  )
+  void discoveryDone.then(() => rejectTx(new CCIPTransactionNotFoundError(txHash)))
+
+  const getChain: ChainGetter = async (idOrSelectorOrName) => {
+    const network = networkInfo(idOrSelectorOrName)
+    if (chains.has(network.name)) return chains.get(network.name)!
+
+    await discoveryDone
+    if (chains.has(network.name)) return chains.get(network.name)!
+
+    // Chain not discovered — try all URLs for its family
+    const C = supportedChains[network.family]
+    if (!C) throw new CCIPRpcNotFoundError(network.name)
+
+    for (const url of rpcs) {
+      try {
+        const chain = await C.fromUrl(url)
+        if (chain.network.name === network.name) {
+          chains.set(network.name, chain)
+          return chain
+        }
+        if (!chains.has(chain.network.name)) {
+          chains.set(chain.network.name, chain)
+        } else {
+          await chain.destroy?.()
+        }
+      } catch {
+        // URL doesn't work for this family
+      }
+    }
+    throw new CCIPRpcNotFoundError(network.name)
+  }
+
+  const cleanup = async () => {
+    await Promise.all([...chains.values()].map((c) => c.destroy?.() ?? Promise.resolve()))
+  }
+
+  return [getChain, sourceTx, cleanup]
+}
+
+/**
+ * Reconnect an EVM wallet to the destination chain's provider.
+ * Duck-types the wallet for an ethers-compatible `.connect()` method.
+ *
+ * @internal
+ */
+function reconnectWallet(wallet: unknown, dest: Chain): unknown {
+  if (
+    typeof wallet === 'object' &&
+    wallet !== null &&
+    'connect' in wallet &&
+    typeof wallet.connect === 'function' &&
+    'provider' in dest
+  ) {
+    return (wallet.connect as (provider: unknown) => unknown)(
+      (dest as unknown as { provider: unknown }).provider,
+    )
+  }
+  return wallet
+}
+
+/**
  * Execute a CCIP message manually on the destination chain.
  *
- * Orchestrates the full manual execution flow: fetches the message from the source
- * transaction, discovers the OffRamp, retrieves the commit report, calculates the
- * merkle proof, fetches offchain token data, and executes the report on the
- * destination chain.
+ * Orchestrates the full manual execution flow: auto-discovers source and destination
+ * chains from the provided RPC URLs, fetches the message from the source transaction,
+ * discovers the OffRamp, retrieves the commit report, calculates the merkle proof,
+ * fetches offchain token data, and executes the report on the destination chain.
  *
- * @param opts - {@link ExecuteOpts} with source/dest chains, message ID, tx hash, and wallet
+ * @param opts - {@link ExecuteOpts} with RPC URLs, message ID, tx hash, and wallet
  * @returns Promise resolving to the execution result
  *
+ * @throws {@link CCIPTransactionNotFoundError} if the transaction cannot be found on any chain
+ * @throws {@link CCIPRpcNotFoundError} if no RPC is available for the destination chain
  * @throws {@link CCIPMessageNotFoundInTxError} if no message with the given messageId exists in the transaction
  * @throws {@link CCIPOnchainCommitRequiredError} if offchain verification (v2.0) is found instead of an onchain commit
  * @throws {@link CCIPOffRampNotFoundError} if no matching OffRamp is found
@@ -241,14 +344,10 @@ export type ExecuteOpts = {
  * ```typescript
  * import { execute, EVMChain } from '@chainlink/ccip-sdk'
  *
- * const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
- * const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
- *
  * const result = await execute({
- *   source,
- *   dest,
- *   messageId: '0x...',
+ *   rpcs: ['https://rpc.sepolia.org', 'https://rpc.fuji.avax.network'],
  *   txHash: '0x...',
+ *   messageId: '0x...',
  *   wallet: signer,
  * })
  * console.log(`Executed: ${result.log.transactionHash}`)
@@ -258,97 +357,95 @@ export type ExecuteOpts = {
  * @see {@link discoverOffRamp} - OffRamp discovery
  */
 export async function execute(opts: ExecuteOpts): Promise<CCIPExecution> {
-  const {
-    source,
-    dest,
-    messageId,
-    txHash,
-    wallet,
-    gasLimit,
-    tokensGasLimit,
-    estimateGasLimit,
-    forceBuffer,
-    forceLookupTable,
-  } = opts
+  const [getChain, sourceTx, cleanup] = discoverChains(opts.rpcs, opts.txHash)
+  try {
+    const [source] = await sourceTx
 
-  // 1. Get messages from source tx
-  const requests = await source.getMessagesInTx(txHash)
-
-  // 2. Find request by messageId
-  const request = requests.find((r) => r.message.messageId === messageId)
-  if (!request) {
-    throw new CCIPMessageNotFoundInTxError(txHash, {
-      context: { messageId },
-    })
-  }
-
-  // 3. Discover OffRamp on destination chain
-  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
-
-  // 4. Get commit store
-  const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
-
-  // 5. Get verification/commit report
-  const commit = await dest.getVerifications({ commitStore, request })
-
-  // 6. Validate onchain commit (v2.0 not yet supported)
-  if (!('report' in commit)) {
-    throw new CCIPOnchainCommitRequiredError(messageId)
-  }
-
-  // 7. Get all messages in the commit batch
-  const messagesInBatch = await source.getMessagesInBatch(request, commit.report)
-
-  // 8. Calculate merkle proof
-  const execReportProof = calculateManualExecProof(
-    messagesInBatch,
-    request.lane,
-    messageId,
-    commit.report.merkleRoot,
-    dest,
-  )
-
-  // 9. Get offchain token data (USDC/LBTC attestations)
-  const offchainTokenData = await source.getOffchainTokenData(request)
-
-  // 10. Assemble execution report
-  const execReport: ExecutionReport = {
-    ...execReportProof,
-    message: request.message,
-    offchainTokenData,
-  }
-
-  // 11. Optional gas estimation
-  let effectiveGasLimit = gasLimit
-  if (estimateGasLimit != null) {
-    const { estimateReceiveExecution } = await import('./gas.ts')
-    let estimated = await estimateReceiveExecution({
-      source,
-      dest,
-      routerOrRamp: offRamp,
-      message: request.message,
-    })
-    estimated += Math.ceil((estimated * estimateGasLimit) / 100)
-    const origLimit = Number(
-      'gasLimit' in request.message
-        ? request.message.gasLimit
-        : 'executionGasLimit' in request.message
-          ? request.message.executionGasLimit
-          : (request.message as Record<string, unknown>).computeUnits,
-    )
-    if (origLimit < estimated) {
-      effectiveGasLimit = estimated
+    // 1. Get messages from source tx, find by messageId
+    const requests = await source.getMessagesInTx(opts.txHash)
+    const request = requests.find((r) => r.message.messageId === opts.messageId)
+    if (!request) {
+      throw new CCIPMessageNotFoundInTxError(opts.txHash, {
+        context: { messageId: opts.messageId },
+      })
     }
-  }
 
-  // 12. Execute on destination chain
-  return dest.executeReport({
-    offRamp,
-    execReport,
-    wallet,
-    gasLimit: effectiveGasLimit,
-    tokensGasLimit,
-    forceBuffer,
-    forceLookupTable,
-  })
+    // 2. Resolve dest chain from message's destChainSelector
+    const dest = await getChain(request.lane.destChainSelector)
+
+    // 3. Reconnect wallet to dest provider if needed
+    const wallet = reconnectWallet(opts.wallet, dest)
+
+    // 4. Discover OffRamp on destination chain
+    const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
+
+    // 5. Get commit store
+    const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
+
+    // 6. Get verification/commit report
+    const commit = await dest.getVerifications({ commitStore, request })
+
+    // 7. Validate onchain commit (v2.0 not yet supported)
+    if (!('report' in commit)) {
+      throw new CCIPOnchainCommitRequiredError(opts.messageId)
+    }
+
+    // 8. Get all messages in the commit batch
+    const messagesInBatch = await source.getMessagesInBatch(request, commit.report)
+
+    // 9. Calculate merkle proof
+    const execReportProof = calculateManualExecProof(
+      messagesInBatch,
+      request.lane,
+      opts.messageId,
+      commit.report.merkleRoot,
+      dest,
+    )
+
+    // 10. Get offchain token data (USDC/LBTC attestations)
+    const offchainTokenData = await source.getOffchainTokenData(request)
+
+    // 11. Assemble execution report
+    const execReport: ExecutionReport = {
+      ...execReportProof,
+      message: request.message,
+      offchainTokenData,
+    }
+
+    // 12. Optional gas estimation
+    let effectiveGasLimit = opts.gasLimit
+    if (opts.estimateGasLimit != null) {
+      const { estimateReceiveExecution } = await import('./gas.ts')
+      let estimated = await estimateReceiveExecution({
+        source,
+        dest,
+        routerOrRamp: offRamp,
+        message: request.message,
+      })
+      estimated += Math.ceil((estimated * opts.estimateGasLimit) / 100)
+      const origLimit = Number(
+        'gasLimit' in request.message
+          ? request.message.gasLimit
+          : 'executionGasLimit' in request.message
+            ? request.message.executionGasLimit
+            : (request.message as Record<string, unknown>).computeUnits,
+      )
+      if (origLimit < estimated) {
+        effectiveGasLimit = estimated
+      }
+    }
+
+    // 13. Execute on destination chain
+    return await dest.executeReport({
+      offRamp,
+      execReport,
+      wallet,
+      gasLimit: effectiveGasLimit,
+      tokensGasLimit: opts.tokensGasLimit,
+      forceBuffer: opts.forceBuffer,
+      forceLookupTable: opts.forceLookupTable,
+    })
+  } finally {
+    await cleanup()
+  }
 }

@@ -122,15 +122,17 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   it('should execute a failed v1.6 message via execute() (Fuji -> Sepolia)', async () => {
-    assert.ok(source, 'source chain should be initialized')
-    assert.ok(dest, 'dest chain should be initialized')
+    assert.ok(fujiInstance, 'fuji anvil instance should be initialized')
+    assert.ok(sepoliaInstance, 'sepolia anvil instance should be initialized')
+
+    const fujiUrl = `http://${fujiInstance.host}:${fujiInstance.port}`
+    const sepoliaUrl = `http://${sepoliaInstance.host}:${sepoliaInstance.port}`
 
     const execution = await execute({
-      source,
-      dest,
+      rpcs: [fujiUrl, sepoliaUrl],
       txHash: SOURCE_TX_HASH_2,
       messageId: MESSAGE_ID_2,
-      wallet,
+      wallet: new Wallet(ANVIL_PRIVATE_KEY),
       gasLimit: 500_000,
     })
 
