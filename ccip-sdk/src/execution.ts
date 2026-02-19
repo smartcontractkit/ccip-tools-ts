@@ -198,17 +198,9 @@ export const discoverOffRamp = memoize(
 )
 
 /**
- * Options for the {@link execute} function.
+ * Optional configuration for the {@link execute} function.
  */
-export type ExecuteOpts = {
-  /** RPC endpoint URLs — must cover both source and destination chains */
-  rpcs: readonly string[]
-  /** Source transaction hash containing the CCIP request */
-  txHash: string
-  /** Message ID to execute */
-  messageId: string
-  /** Chain-specific wallet/signer for the destination chain */
-  wallet: unknown
+export type ExecuteOptions = {
   /** Override gas limit for ccipReceive callback (0 keeps original) */
   gasLimit?: number
   /** Override gas limit for tokenPool releaseOrMint calls (EVM only) */
@@ -327,7 +319,11 @@ function reconnectWallet(wallet: unknown, dest: Chain): unknown {
  * discovers the OffRamp, retrieves the commit report, calculates the merkle proof,
  * fetches offchain token data, and executes the report on the destination chain.
  *
- * @param opts - {@link ExecuteOpts} with RPC URLs, message ID, tx hash, and wallet
+ * @param messageId - Message ID to execute
+ * @param txHash - Source transaction hash containing the CCIP request
+ * @param wallet - Chain-specific wallet/signer for the destination chain
+ * @param rpcs - RPC endpoint URLs (must cover both source and destination chains)
+ * @param options - Optional configuration for gas limits and execution behavior
  * @returns Promise resolving to the execution result
  *
  * @throws {@link CCIPTransactionNotFoundError} if the transaction cannot be found on any chain
@@ -344,29 +340,35 @@ function reconnectWallet(wallet: unknown, dest: Chain): unknown {
  * ```typescript
  * import { execute, EVMChain } from '@chainlink/ccip-sdk'
  *
- * const result = await execute({
- *   rpcs: ['https://rpc.sepolia.org', 'https://rpc.fuji.avax.network'],
- *   txHash: '0x...',
- *   messageId: '0x...',
- *   wallet: signer,
- * })
+ * const result = await execute(
+ *   '0x...',  // messageId
+ *   '0x...',  // txHash
+ *   signer,
+ *   ['https://rpc.sepolia.org', 'https://rpc.fuji.avax.network'],
+ * )
  * console.log(`Executed: ${result.log.transactionHash}`)
  * ```
  *
  * @see {@link calculateManualExecProof} - Lower-level proof calculation
  * @see {@link discoverOffRamp} - OffRamp discovery
  */
-export async function execute(opts: ExecuteOpts): Promise<CCIPExecution> {
-  const [getChain, sourceTx, cleanup] = discoverChains(opts.rpcs, opts.txHash)
+export async function execute(
+  messageId: string,
+  txHash: string,
+  wallet: unknown,
+  rpcs: readonly string[],
+  options: ExecuteOptions = {},
+): Promise<CCIPExecution> {
+  const [getChain, sourceTx, cleanup] = discoverChains(rpcs, txHash)
   try {
     const [source] = await sourceTx
 
     // 1. Get messages from source tx, find by messageId
-    const requests = await source.getMessagesInTx(opts.txHash)
-    const request = requests.find((r) => r.message.messageId === opts.messageId)
+    const requests = await source.getMessagesInTx(txHash)
+    const request = requests.find((r) => r.message.messageId === messageId)
     if (!request) {
-      throw new CCIPMessageNotFoundInTxError(opts.txHash, {
-        context: { messageId: opts.messageId },
+      throw new CCIPMessageNotFoundInTxError(txHash, {
+        context: { messageId },
       })
     }
 
@@ -374,7 +376,7 @@ export async function execute(opts: ExecuteOpts): Promise<CCIPExecution> {
     const dest = await getChain(request.lane.destChainSelector)
 
     // 3. Reconnect wallet to dest provider if needed
-    const wallet = reconnectWallet(opts.wallet, dest)
+    const connectedWallet = reconnectWallet(wallet, dest)
 
     // 4. Discover OffRamp on destination chain
     const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
@@ -387,7 +389,7 @@ export async function execute(opts: ExecuteOpts): Promise<CCIPExecution> {
 
     // 7. Validate onchain commit (v2.0 not yet supported)
     if (!('report' in commit)) {
-      throw new CCIPOnchainCommitRequiredError(opts.messageId)
+      throw new CCIPOnchainCommitRequiredError(messageId)
     }
 
     // 8. Get all messages in the commit batch
@@ -397,7 +399,7 @@ export async function execute(opts: ExecuteOpts): Promise<CCIPExecution> {
     const execReportProof = calculateManualExecProof(
       messagesInBatch,
       request.lane,
-      opts.messageId,
+      messageId,
       commit.report.merkleRoot,
       dest,
     )
@@ -413,8 +415,8 @@ export async function execute(opts: ExecuteOpts): Promise<CCIPExecution> {
     }
 
     // 12. Optional gas estimation
-    let effectiveGasLimit = opts.gasLimit
-    if (opts.estimateGasLimit != null) {
+    let effectiveGasLimit = options.gasLimit
+    if (options.estimateGasLimit != null) {
       const { estimateReceiveExecution } = await import('./gas.ts')
       let estimated = await estimateReceiveExecution({
         source,
@@ -422,7 +424,7 @@ export async function execute(opts: ExecuteOpts): Promise<CCIPExecution> {
         routerOrRamp: offRamp,
         message: request.message,
       })
-      estimated += Math.ceil((estimated * opts.estimateGasLimit) / 100)
+      estimated += Math.ceil((estimated * options.estimateGasLimit) / 100)
       const origLimit = Number(
         'gasLimit' in request.message
           ? request.message.gasLimit
@@ -439,11 +441,11 @@ export async function execute(opts: ExecuteOpts): Promise<CCIPExecution> {
     return await dest.executeReport({
       offRamp,
       execReport,
-      wallet,
+      wallet: connectedWallet,
       gasLimit: effectiveGasLimit,
-      tokensGasLimit: opts.tokensGasLimit,
-      forceBuffer: opts.forceBuffer,
-      forceLookupTable: opts.forceLookupTable,
+      tokensGasLimit: options.tokensGasLimit,
+      forceBuffer: options.forceBuffer,
+      forceLookupTable: options.forceLookupTable,
     })
   } finally {
     await cleanup()

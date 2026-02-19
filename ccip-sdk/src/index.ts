@@ -11,9 +11,12 @@ export type {
   APICCIPRequestMetadata,
   APIErrorResponse,
   CCIPAPIClientContext,
+  ExecutionInputs,
+  ExecutionInputsV1,
+  ExecutionInputsV2,
   LaneLatencyResponse,
 } from './api/index.ts'
-export { CCIPAPIClient, DEFAULT_API_BASE_URL } from './api/index.ts'
+export { CCIPAPIClient, DEFAULT_API_BASE_URL, isExecutionInputsV2 } from './api/index.ts'
 
 export type {
   ApiRetryConfig,
@@ -31,7 +34,7 @@ export type {
 } from './chain.ts'
 export { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
 export { calculateManualExecProof, discoverOffRamp, execute } from './execution.ts'
-export type { ExecuteOpts } from './execution.ts'
+export type { ExecuteOptions } from './execution.ts'
 export {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,

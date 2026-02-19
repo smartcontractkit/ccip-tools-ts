@@ -237,6 +237,34 @@ export class CCIPMessageIdNotFoundError extends CCIPError {
 }
 
 /**
+ * Thrown when a message exists but has not been committed yet (409 Conflict).
+ * Transient: the message will eventually be committed.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const inputs = await api.getExecutionInputs(messageId)
+ * } catch (error) {
+ *   if (error instanceof CCIPMessageNotCommittedError) {
+ *     console.log(`Not committed yet, retry in ${error.retryAfterMs}ms`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPMessageNotCommittedError extends CCIPError {
+  override readonly name = 'CCIPMessageNotCommittedError'
+  /** Creates a message not committed error. */
+  constructor(messageId: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.MESSAGE_NOT_COMMITTED, `Message ${messageId} has not been committed yet`, {
+      ...options,
+      isTransient: true,
+      retryAfterMs: 30000,
+      context: { ...options?.context, messageId },
+    })
+  }
+}
+
+/**
  * Thrown when messageId format is invalid.
  *
  * @example

@@ -28,6 +28,7 @@ export {
   CCIPMessageIdNotFoundError,
   CCIPMessageIdValidationError,
   CCIPMessageInvalidError,
+  CCIPMessageNotCommittedError,
   CCIPMessageNotFoundInTxError,
   CCIPMessageNotInBatchError,
   CCIPMessageRetrievalError,

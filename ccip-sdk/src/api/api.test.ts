@@ -4,12 +4,13 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 import '../index.ts'
 import { getAddress } from 'ethers'
 
-import { CCIPAPIClient, DEFAULT_API_BASE_URL } from './index.ts'
+import { CCIPAPIClient, DEFAULT_API_BASE_URL, isExecutionInputsV2 } from './index.ts'
 import {
   CCIPApiClientNotAvailableError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
+  CCIPMessageNotCommittedError,
   CCIPMessageNotFoundInTxError,
   CCIPUnexpectedPaginationError,
   HttpStatus,
@@ -1040,6 +1041,189 @@ describe('CCIPAPIClient', () => {
           err.context.messageCount === 1,
       )
     })
+  })
+
+  describe('getExecutionInputs', () => {
+    const messageId = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+
+    it('should fetch with correct URL', async () => {
+      const v2Response = {
+        offramp: '0x1234567890abcdef1234567890abcdef12345678',
+        encodedMessage: '0xabc123',
+        verifierAddresses: ['0xverifier1', '0xverifier2'],
+        ccvData: ['0xdata1', '0xdata2'],
+        verificationComplete: true,
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(v2Response)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      await client.getExecutionInputs(messageId)
+
+      assert.equal(customFetch.mock.calls.length, 1)
+      const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.includes('/v2/messages/'))
+      assert.ok(url.includes(messageId))
+      assert.ok(url.endsWith('/execution-inputs'))
+    })
+
+    it('should parse V1 response (messageBatch present)', async () => {
+      const v1Response = {
+        offramp: '0x1234567890abcdef1234567890abcdef12345678',
+        messageBatch: [{ key: 'value' }],
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(v1Response)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getExecutionInputs(messageId)
+
+      assert.equal(result.offramp, v1Response.offramp)
+      assert.ok('messageBatch' in result)
+      assert.equal((result as { messageBatch: unknown[] }).messageBatch.length, 1)
+    })
+
+    it('should parse V2 response', async () => {
+      const v2Response = {
+        offramp: '0x1234567890abcdef1234567890abcdef12345678',
+        encodedMessage: '0xabc123',
+        verifierAddresses: ['0xverifier1', '0xverifier2'],
+        ccvData: ['0xdata1'],
+        verificationComplete: false,
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(v2Response)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getExecutionInputs(messageId)
+
+      assert.equal(result.offramp, v2Response.offramp)
+      assert.ok('encodedMessage' in result)
+      const v2 = result as {
+        encodedMessage: string
+        verifierAddresses: string[]
+        ccvData: string[]
+        verificationComplete: boolean
+      }
+      assert.equal(v2.encodedMessage, '0xabc123')
+      assert.deepEqual(v2.verifierAddresses, ['0xverifier1', '0xverifier2'])
+      assert.deepEqual(v2.ccvData, ['0xdata1'])
+      assert.equal(v2.verificationComplete, false)
+    })
+
+    it('should throw CCIPMessageIdNotFoundError on 404', async () => {
+      const errorResponse = { error: 'NOT_FOUND', message: 'Message not found' }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.NOT_FOUND,
+          statusText: 'Not Found',
+          text: () => Promise.resolve(JSON.stringify(errorResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+
+      await assert.rejects(
+        async () => await client.getExecutionInputs(messageId),
+        (err: unknown) =>
+          err instanceof CCIPMessageIdNotFoundError &&
+          err.context.messageId === messageId &&
+          err.isTransient === true,
+      )
+    })
+
+    it('should throw CCIPMessageNotCommittedError on 409', async () => {
+      const errorResponse = { error: 'MESSAGE_NOT_COMMITTED', message: 'Not committed yet' }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.CONFLICT,
+          statusText: 'Conflict',
+          text: () => Promise.resolve(JSON.stringify(errorResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+
+      await assert.rejects(
+        async () => await client.getExecutionInputs(messageId),
+        (err: unknown) =>
+          err instanceof CCIPMessageNotCommittedError &&
+          err.context.messageId === messageId &&
+          err.isTransient === true &&
+          err.context.apiErrorCode === 'MESSAGE_NOT_COMMITTED',
+      )
+    })
+
+    it('should throw CCIPHttpError on other HTTP errors', async () => {
+      const errorResponse = { error: 'INTERNAL_ERROR', message: 'Server error' }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.INTERNAL_SERVER_ERROR,
+          statusText: 'Internal Server Error',
+          text: () => Promise.resolve(JSON.stringify(errorResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+
+      await assert.rejects(
+        async () => await client.getExecutionInputs(messageId),
+        (err: unknown) =>
+          err instanceof CCIPHttpError &&
+          err.isTransient === true &&
+          err.context.status === HttpStatus.INTERNAL_SERVER_ERROR,
+      )
+    })
+
+    it('should handle non-JSON error body', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.BAD_GATEWAY,
+          statusText: 'Bad Gateway',
+          text: () => Promise.resolve('<html>Bad Gateway</html>'),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+
+      await assert.rejects(
+        async () => await client.getExecutionInputs(messageId),
+        (err: unknown) =>
+          err instanceof CCIPHttpError &&
+          err.context.status === HttpStatus.BAD_GATEWAY &&
+          err.context.apiErrorCode === undefined,
+      )
+    })
+  })
+})
+
+describe('isExecutionInputsV2', () => {
+  it('should return true for V2 inputs', () => {
+    const v2 = {
+      offramp: '0x1234',
+      encodedMessage: '0xabc',
+      verifierAddresses: ['0xv1'],
+      ccvData: ['0xd1'],
+      verificationComplete: true,
+    }
+    assert.equal(isExecutionInputsV2(v2), true)
+  })
+
+  it('should return false for V1 inputs', () => {
+    const v1 = {
+      offramp: '0x1234',
+      messageBatch: [{ key: 'value' }],
+    }
+    assert.equal(isExecutionInputsV2(v1), false)
   })
 })
 

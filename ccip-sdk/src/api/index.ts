@@ -5,6 +5,7 @@ import {
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
+  CCIPMessageNotCommittedError,
   CCIPMessageNotFoundInTxError,
   CCIPTimeoutError,
   CCIPUnexpectedPaginationError,
@@ -27,6 +28,8 @@ import {
 import { bigIntReviver, parseJson } from '../utils.ts'
 import type {
   APIErrorResponse,
+  ExecutionInputs,
+  ExecutionInputsV2,
   LaneLatencyResponse,
   RawLaneLatencyResponse,
   RawMessageResponse,
@@ -34,7 +37,19 @@ import type {
   RawNetworkInfo,
 } from './types.ts'
 
-export type { APICCIPRequestMetadata, APIErrorResponse, LaneLatencyResponse } from './types.ts'
+export type {
+  APICCIPRequestMetadata,
+  APIErrorResponse,
+  ExecutionInputs,
+  ExecutionInputsV1,
+  ExecutionInputsV2,
+  LaneLatencyResponse,
+} from './types.ts'
+
+/** Type guard to distinguish v2 execution inputs (lane v2.0+) from v1. */
+export function isExecutionInputsV2(inputs: ExecutionInputs): inputs is ExecutionInputsV2 {
+  return 'encodedMessage' in inputs
+}
 
 /** Default CCIP API base URL */
 export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
@@ -416,6 +431,77 @@ export class CCIPAPIClient {
     }
 
     return raw.data.map((msg) => msg.messageId)
+  }
+
+  /**
+   * Fetches execution inputs for a CCIP message.
+   *
+   * @param messageId - The message ID (0x prefix + 64 hex characters)
+   * @returns Promise resolving to {@link ExecutionInputs} (v1 or v2)
+   *
+   * @throws {@link CCIPMessageIdNotFoundError} when message not found (404)
+   * @throws {@link CCIPMessageNotCommittedError} when message not yet committed (409)
+   * @throws {@link CCIPTimeoutError} if request times out
+   * @throws {@link CCIPHttpError} on other HTTP errors
+   *
+   * @example Basic usage
+   * ```typescript
+   * const inputs = await api.getExecutionInputs(messageId)
+   * if (isExecutionInputsV2(inputs)) {
+   *   console.log(`Encoded message: ${inputs.encodedMessage}`)
+   * }
+   * ```
+   */
+  async getExecutionInputs(messageId: string): Promise<ExecutionInputs> {
+    const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}/execution-inputs`
+
+    this.logger.debug(`CCIPAPIClient: GET ${url}`)
+
+    const response = await this._fetchWithTimeout(url, 'getExecutionInputs')
+
+    if (!response.ok) {
+      let apiError: APIErrorResponse | undefined
+      try {
+        apiError = parseJson<APIErrorResponse>(await response.text())
+      } catch {
+        // Response body not JSON, use HTTP status only
+      }
+
+      if (response.status === HttpStatus.NOT_FOUND) {
+        throw new CCIPMessageIdNotFoundError(messageId, {
+          context: apiError
+            ? {
+                apiErrorCode: apiError.error,
+                apiErrorMessage: apiError.message,
+              }
+            : undefined,
+        })
+      }
+
+      if (response.status === HttpStatus.CONFLICT) {
+        throw new CCIPMessageNotCommittedError(messageId, {
+          context: apiError
+            ? {
+                apiErrorCode: apiError.error,
+                apiErrorMessage: apiError.message,
+              }
+            : undefined,
+        })
+      }
+
+      throw new CCIPHttpError(response.status, response.statusText, {
+        context: apiError
+          ? {
+              apiErrorCode: apiError.error,
+              apiErrorMessage: apiError.message,
+            }
+          : undefined,
+      })
+    }
+
+    const result = parseJson<ExecutionInputs>(await response.text())
+    this.logger.debug('getExecutionInputs raw response:', result)
+    return result
   }
 
   /**

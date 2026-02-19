@@ -126,6 +126,40 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
     )
   })
 
+  it('should reject when source chain RPC is missing', async () => {
+    assert.ok(sepoliaInstance, 'sepolia anvil instance should be initialized')
+
+    const sepoliaUrl = `http://${sepoliaInstance.host}:${sepoliaInstance.port}`
+
+    await assert.rejects(
+      execute(
+        MESSAGE_ID_2,
+        SOURCE_TX_HASH_2,
+        new Wallet(ANVIL_PRIVATE_KEY),
+        [sepoliaUrl], // only dest, no source
+        { gasLimit: 500_000 },
+      ),
+      (err: unknown) => err instanceof CCIPTransactionNotFoundError,
+    )
+  })
+
+  it('should reject when dest chain RPC is missing', async () => {
+    assert.ok(fujiInstance, 'fuji anvil instance should be initialized')
+
+    const fujiUrl = `http://${fujiInstance.host}:${fujiInstance.port}`
+
+    await assert.rejects(
+      execute(
+        MESSAGE_ID_2,
+        SOURCE_TX_HASH_2,
+        new Wallet(ANVIL_PRIVATE_KEY),
+        [fujiUrl], // only source, no dest
+        { gasLimit: 500_000 },
+      ),
+      (err: unknown) => err instanceof CCIPRpcNotFoundError,
+    )
+  })
+
   it('should execute via execute() with extra unrelated chain RPCs (Fuji -> Sepolia)', async () => {
     assert.ok(fujiInstance, 'fuji anvil instance should be initialized')
     assert.ok(sepoliaInstance, 'sepolia anvil instance should be initialized')
@@ -137,13 +171,13 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
 
     // Pass an extra RPC (Arbitrum Sepolia) that is unrelated to the Fuji→Sepolia lane;
     // discoverChains should discover it but not use it, and execution should succeed.
-    const execution = await execute({
-      rpcs: [fujiUrl, sepoliaUrl, extraUrl],
-      txHash: SOURCE_TX_HASH_2,
-      messageId: MESSAGE_ID_2,
-      wallet: new Wallet(ANVIL_PRIVATE_KEY),
-      gasLimit: 500_000,
-    })
+    const execution = await execute(
+      MESSAGE_ID_2,
+      SOURCE_TX_HASH_2,
+      new Wallet(ANVIL_PRIVATE_KEY),
+      [extraUrl, fujiUrl, sepoliaUrl],
+      { gasLimit: 500_000 },
+    )
 
     assert.equal(execution.receipt.messageId, MESSAGE_ID_2, 'receipt messageId should match')
     assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
@@ -151,40 +185,6 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
     assert.ok(
       execution.receipt.state === ExecutionState.Success,
       'execution state should be Success',
-    )
-  })
-
-  it('should reject when source chain RPC is missing', async () => {
-    assert.ok(sepoliaInstance, 'sepolia anvil instance should be initialized')
-
-    const sepoliaUrl = `http://${sepoliaInstance.host}:${sepoliaInstance.port}`
-
-    await assert.rejects(
-      execute({
-        rpcs: [sepoliaUrl], // only dest, no source
-        txHash: SOURCE_TX_HASH_2,
-        messageId: MESSAGE_ID_2,
-        wallet: new Wallet(ANVIL_PRIVATE_KEY),
-        gasLimit: 500_000,
-      }),
-      (err: unknown) => err instanceof CCIPTransactionNotFoundError,
-    )
-  })
-
-  it('should reject when dest chain RPC is missing', async () => {
-    assert.ok(fujiInstance, 'fuji anvil instance should be initialized')
-
-    const fujiUrl = `http://${fujiInstance.host}:${fujiInstance.port}`
-
-    await assert.rejects(
-      execute({
-        rpcs: [fujiUrl], // only source, no dest
-        txHash: SOURCE_TX_HASH_2,
-        messageId: MESSAGE_ID_2,
-        wallet: new Wallet(ANVIL_PRIVATE_KEY),
-        gasLimit: 500_000,
-      }),
-      (err: unknown) => err instanceof CCIPRpcNotFoundError,
     )
   })
 })

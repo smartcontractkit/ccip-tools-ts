@@ -37,6 +37,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Verify you are using the correct destination chain. Check that sourceChainSelector and destChainSelector match your lane.',
   MESSAGE_RETRIEVAL_FAILED:
     'Both API and RPC failed to retrieve the message. Verify the transaction hash is correct and the transaction is confirmed. Check RPC and network connectivity.',
+  MESSAGE_NOT_COMMITTED:
+    'The message has not been committed yet. Wait and retry (typically 1-5 minutes).',
   MESSAGE_VERSION_INVALID:
     'Ensure the source chain onRamp uses CCIP v1.6. Older message versions are not compatible with this destination.',
 
