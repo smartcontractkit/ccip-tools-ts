@@ -177,29 +177,8 @@ export const discoverOffRamp = memoize(
               '=',
               offRamp,
             )
-            for (const offRamp of destOffRamps) {
-              const offRampsOnRamps = await dest.getOnRampsForOffRamp(
-                offRamp,
-                source.network.chainSelector,
-              )
-              for (const offRampsOnRamp of offRampsOnRamps) {
-                logger.debug(
-                  'discoverOffRamp: found, from',
-                  {
-                    sourceOnRamp: onRamp,
-                    sourceRouter,
-                    sourceOffRamps,
-                    destOnRamp,
-                    destOffRamps,
-                    offRampsOnRamps,
-                  },
-                  '=',
-                  offRamp,
-                )
-                if (offRampsOnRamp === onRamp) {
-                  return offRamp
-                }
-              }
+            if (offRampsOnRamp === onRamp) {
+              return offRamp
             }
           }
         }
