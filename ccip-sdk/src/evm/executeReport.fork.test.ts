@@ -198,7 +198,7 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
 
     it('should execute via API path (Fuji -> Sepolia)', async () => {
       const sourceTxHash = '0x487a96a7e970325c43eb035668cb1eab057ebe71eb6e815644cc13cd368b67a1'
-      const messageId = '0xdeef1b4474b45145e95864e9ba8e9323b3093bd484e6fc6dd68bd44a8ae7589b'
+      const messageId = '0x03ea73d3aa58a5358b06e8df8ca3ae71e171b63616bf4568d40f9ed9f907cff5'
 
       assert.ok(fujiInstance, 'fuji anvil instance should be initialized')
       assert.ok(sepoliaInstance, 'sepolia anvil instance should be initialized')

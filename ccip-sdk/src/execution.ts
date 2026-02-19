@@ -11,17 +11,18 @@ import {
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
 } from './errors/index.ts'
-import { shouldRetry } from './errors/utils.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
 import { decodeMessage } from './requests.ts'
 import { supportedChains } from './supported-chains.ts'
 import type {
   CCIPExecution,
   CCIPMessage,
+  CCIPRequest,
   CCIPVersion,
   ChainTransaction,
   ExecutionReport,
   Lane,
+  Logger,
   WithLogger,
 } from './types.ts'
 import { networkInfo } from './utils.ts'
@@ -324,6 +325,67 @@ function reconnectWallet(wallet: unknown, dest: Chain): unknown {
 }
 
 /**
+ * Data fetched from the CCIP API for manual execution.
+ * @internal
+ */
+type APIExecutionData = {
+  request?: CCIPRequest
+  offRamp?: string
+  messagesInBatch?: CCIPMessage[]
+}
+
+/**
+ * Fetch execution data from the CCIP API (best-effort).
+ * Returns partial data - any failures are logged and silently skipped.
+ * @internal
+ */
+async function fetchExecutionDataFromAPI(
+  messageId: string,
+  apiUrlOverride: string | undefined,
+  logger: Logger,
+): Promise<APIExecutionData> {
+  const apiClient = CCIPAPIClient.fromUrl(apiUrlOverride, { logger })
+  const result: APIExecutionData = {}
+
+  // Make API calls in parallel for efficiency
+  const [requestResult, executionInputsResult] = await Promise.allSettled([
+    apiClient.getMessageById(messageId),
+    apiClient.getExecutionInputs(messageId),
+  ])
+
+  // Process getMessageById result
+  if (requestResult.status === 'fulfilled') {
+    result.request = requestResult.value
+    logger.debug('execute: fetched request via API')
+  } else {
+    logger.debug('execute: getMessageById failed, will use RPC', {
+      error: requestResult.reason as unknown,
+    })
+  }
+
+  // Process getExecutionInputs result
+  if (executionInputsResult.status === 'fulfilled') {
+    const executionInputs = executionInputsResult.value
+    // V2 lanes require offchain verification - this is a fundamental incompatibility
+    if (isExecutionInputsV2(executionInputs)) {
+      throw new CCIPOnchainCommitRequiredError(messageId)
+    }
+    result.offRamp = executionInputs.offramp
+    result.messagesInBatch = executionInputs.messageBatch.map((rawMsg) => decodeMessage(rawMsg))
+    logger.debug('execute: fetched execution inputs via API', {
+      offRamp: result.offRamp,
+      messageCount: result.messagesInBatch.length,
+    })
+  } else {
+    logger.debug('execute: getExecutionInputs failed, will use RPC', {
+      error: executionInputsResult.reason as unknown,
+    })
+  }
+
+  return result
+}
+
+/**
  * Execute a CCIP message manually on the destination chain.
  *
  * Orchestrates the full manual execution flow: auto-discovers source and destination
@@ -375,13 +437,28 @@ export async function execute(
   try {
     const [source] = await sourceTx
 
-    // 1. Get messages from source tx, find by messageId
-    const requests = await source.getMessagesInTx(txHash)
-    const request = requests.find((r) => r.message.messageId === messageId)
-    if (!request) {
-      throw new CCIPMessageNotFoundInTxError(txHash, {
-        context: { messageId },
-      })
+    // API Phase: Attempt to fetch all available data from API (best-effort)
+    const {
+      request: apiRequest,
+      offRamp: apiOffRamp,
+      messagesInBatch: apiMessagesInBatch,
+    } = options.api !== false
+      ? await fetchExecutionDataFromAPI(messageId, options.apiUrlOverride, source.logger)
+      : {}
+
+    // 1. Get request (API or RPC)
+    let request: CCIPRequest
+    if (apiRequest) {
+      request = apiRequest
+    } else {
+      const requests = await source.getMessagesInTx(txHash)
+      const found = requests.find((r) => r.message.messageId === messageId)
+      if (!found) {
+        throw new CCIPMessageNotFoundInTxError(txHash, {
+          context: { messageId },
+        })
+      }
+      request = found
     }
 
     // 2. Resolve dest chain from message's destChainSelector
@@ -390,8 +467,8 @@ export async function execute(
     // 3. Reconnect wallet to dest provider if needed
     const connectedWallet = reconnectWallet(wallet, dest)
 
-    // 4. Discover OffRamp on destination chain
-    const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
+    // 4. Discover OffRamp (API or RPC)
+    const offRamp = apiOffRamp ?? (await discoverOffRamp(source, dest, request.lane.onRamp, source))
 
     // 5. Get commit store
     const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
@@ -404,35 +481,9 @@ export async function execute(
       throw new CCIPOnchainCommitRequiredError(messageId)
     }
 
-    // 8. Get all messages in the commit batch (API with RPC fallback)
-    let messagesInBatch: CCIPMessage[]
-
-    if (options.api !== false) {
-      const apiClient = CCIPAPIClient.fromUrl(options.apiUrlOverride, { logger: source.logger })
-      try {
-        const executionInputs = await apiClient.getExecutionInputs(messageId)
-
-        if (isExecutionInputsV2(executionInputs)) {
-          // V2 lanes require offchain verification (not supported yet)
-          throw new CCIPOnchainCommitRequiredError(messageId)
-        }
-
-        // V1: decode each message in the batch
-        messagesInBatch = executionInputs.messageBatch.map((rawMsg) => decodeMessage(rawMsg))
-        source.logger.debug('execute: fetched messages via API', {
-          count: messagesInBatch.length,
-        })
-      } catch (err) {
-        if (shouldRetry(err)) {
-          source.logger.debug('execute: API unavailable, falling back to RPC', { error: err })
-          messagesInBatch = await source.getMessagesInBatch(request, commit.report)
-        } else {
-          throw err
-        }
-      }
-    } else {
-      messagesInBatch = await source.getMessagesInBatch(request, commit.report)
-    }
+    // 8. Get messages in batch (API already fetched, or RPC fallback)
+    const messagesInBatch =
+      apiMessagesInBatch ?? (await source.getMessagesInBatch(request, commit.report))
 
     // 9. Calculate merkle proof
     const execReportProof = calculateManualExecProof(
