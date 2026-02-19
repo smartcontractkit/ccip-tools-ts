@@ -30,7 +30,8 @@ export type {
   TokenPoolRemote,
 } from './chain.ts'
 export { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
-export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
+export { calculateManualExecProof, discoverOffRamp, execute } from './execution.ts'
+export type { ExecuteOpts } from './execution.ts'
 export {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,

@@ -122,6 +122,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   EXEC_TX_REVERTED: 'Transaction reverted. Check the receiver contract.',
   EXECUTION_STATE_INVALID: 'Invalid execution state returned from contract.',
   RECEIPT_NOT_FOUND: 'Receipt not found in transaction logs. Wait and retry.',
+  ONCHAIN_COMMIT_REQUIRED:
+    'Manual execution currently requires an onchain commit report. CCIP v2.0 offchain verification is not yet supported.',
 
   USDC_ATTESTATION_FAILED: 'USDC attestation not ready. Wait and retry (10-30 min typical).',
   LBTC_ATTESTATION_ERROR: 'LBTC attestation fetch failed. Wait and retry.',

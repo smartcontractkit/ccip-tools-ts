@@ -908,6 +908,37 @@ export class CCIPExecTxRevertedError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when manual execution requires an onchain commit report but offchain
+ * verifications (CCIP v2.0) were found instead.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await execute({ source, dest, messageId, txHash, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCIPOnchainCommitRequiredError) {
+ *     console.log('v2.0 offchain verification not yet supported for manual execution')
+ *   }
+ * }
+ * ```
+ */
+export class CCIPOnchainCommitRequiredError extends CCIPError {
+  override readonly name = 'CCIPOnchainCommitRequiredError'
+  /** Creates an onchain commit required error. */
+  constructor(messageId: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.ONCHAIN_COMMIT_REQUIRED,
+      'Manual execution requires an onchain commit report; offchain verification (v2.0) is not yet supported',
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, messageId },
+      },
+    )
+  }
+}
+
 // Attestation (USDC/LBTC)
 
 /**

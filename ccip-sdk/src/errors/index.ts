@@ -83,6 +83,7 @@ export { CCIPWalletInvalidError, CCIPWalletNotSignerError } from './specialized.
 export {
   CCIPExecTxNotConfirmedError,
   CCIPExecTxRevertedError,
+  CCIPOnchainCommitRequiredError,
   CCIPReceiptNotFoundError,
 } from './specialized.ts'
 
