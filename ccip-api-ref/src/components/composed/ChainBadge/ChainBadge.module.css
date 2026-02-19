@@ -1,0 +1,33 @@
+/**
+ * ChainBadge component styles
+ */
+
+.chainBadge {
+  /* Chain badges use neutral styling */
+  background-color: var(--gray-50, #f0f1f3);
+  border: 1px solid var(--gray-200, #d4d7dc);
+  transition:
+    background-color var(--transition-fast, 150ms ease),
+    border-color var(--transition-fast, 150ms ease);
+}
+
+.chainBadge:hover {
+  background-color: var(--gray-100, #e8eaed);
+  border-color: var(--gray-300, #bdc1c8);
+}
+
+[data-theme='dark'] .chainBadge {
+  background-color: var(--gray-800, #2d3239);
+  border-color: var(--gray-600, #5a6270);
+}
+
+[data-theme='dark'] .chainBadge:hover {
+  background-color: var(--gray-700, #464c56);
+  border-color: var(--gray-500, #6e7582);
+}
+
+.chainIcon {
+  width: 1em;
+  height: 1em;
+  object-fit: contain;
+}

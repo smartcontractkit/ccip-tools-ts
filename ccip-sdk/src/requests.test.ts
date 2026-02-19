@@ -204,7 +204,7 @@ describe('fetchCCIPMessagesInTx', () => {
 
     await assert.rejects(
       async () => await getMessagesInTx(mockedChain as unknown as Chain, mockTx),
-      /Could not find any CCIPSendRequested message in tx: 0x123/,
+      /Could not find any CCIP request event in tx/,
     )
 
     // Restore mock

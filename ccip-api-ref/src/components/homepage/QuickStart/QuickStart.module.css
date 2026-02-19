@@ -1,0 +1,89 @@
+/**
+ * QuickStart section styles
+ */
+
+.quickStart {
+  padding: var(--space-16x, 64px) var(--space-4x, 16px);
+  background-color: var(--ifm-background-surface-color, #f5f6f7);
+}
+
+[data-theme='dark'] .quickStart {
+  background-color: var(--gray-900, #1a1d21);
+}
+
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.title {
+  font-size: 2rem;
+  font-weight: 600;
+  margin-bottom: var(--space-4x, 16px);
+  color: var(--ifm-heading-color);
+}
+
+.description {
+  color: var(--ifm-font-color-secondary);
+  margin-bottom: var(--space-8x, 32px);
+  font-size: 1.1rem;
+  line-height: 1.6;
+  max-width: 100%;
+}
+
+.installCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-4x, 16px);
+  text-align: left;
+}
+
+.installCard {
+  border-radius: var(--card-border-radius, 8px);
+  overflow: hidden;
+  border: 1px solid var(--gray-200, #d4d7dc);
+  background-color: var(--ifm-background-color, #ffffff);
+}
+
+[data-theme='dark'] .installCard {
+  border-color: var(--gray-700, #464c56);
+  background-color: var(--gray-800, #2d3239);
+}
+
+.cardHeader {
+  padding: var(--space-2x, 8px) var(--space-4x, 16px);
+  background-color: var(--gray-100, #e8eaed);
+  border-bottom: 1px solid var(--gray-200, #d4d7dc);
+}
+
+[data-theme='dark'] .cardHeader {
+  background-color: var(--gray-700, #464c56);
+  border-bottom-color: var(--gray-600, #5a6270);
+}
+
+.cardLabel {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--chainlink-blue, #375bd2);
+}
+
+[data-theme='dark'] .cardLabel {
+  color: var(--chainlink-blue-light, #5a8dee);
+}
+
+/* Remove default margins and styling from CodeBlock inside cards */
+.installCard div[class*='codeBlockContainer'] {
+  margin: 0;
+  border-radius: 0;
+}
+
+.installCard pre {
+  border-radius: 0;
+  margin: 0;
+}
+
+/* Hide the language badge in install cards */
+.installCard span[class*='languageBadge'] {
+  display: none;
+}

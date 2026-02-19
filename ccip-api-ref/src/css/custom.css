@@ -1,0 +1,745 @@
+/**
+ * Custom CSS for CCIP Tools API Reference
+ * Consistent with main Chainlink Documentation
+ * Colors from: ./build/documentation/src/styles/theme.css
+ */
+
+/* Import Chainlink design system global styles */
+@import '@chainlink/design-system/global-styles.css';
+
+:root {
+  /* === CHAINLINK BRAND COLORS (from main docs) === */
+  --chainlink-blue: #375bd2;
+  --chainlink-blue-hover: #1a2b6b;
+  --chainlink-blue-light: #5a8dee;
+
+  /* === GRAY SCALE (HSL format from main docs theme.css) === */
+  --gray-50: hsla(215, 14%, 95%, 1);
+  --gray-100: hsla(215, 14%, 90%, 1);
+  --gray-200: hsla(215, 14%, 85%, 1);
+  --gray-300: hsla(215, 14%, 75%, 1);
+  --gray-400: hsla(215, 14%, 65%, 1);
+  --gray-500: hsla(215, 14%, 55%, 1);
+  --gray-600: hsla(215, 14%, 45%, 1);
+  --gray-700: hsla(215, 14%, 35%, 1);
+  --gray-800: hsla(215, 14%, 25%, 1); /* Footer background */
+  --gray-900: hsla(215, 14%, 15%, 1); /* Footer copyright */
+  --gray-950: hsla(215, 14%, 10%, 1);
+
+  /* === SEMANTIC COLORS (from main docs) === */
+  --color-success: hsla(158, 79%, 42%, 1); /* Green */
+  --color-warning: hsla(22, 100%, 50%, 1); /* Orange */
+  --color-error: hsla(351, 100%, 54%, 1); /* Red */
+  --color-info: hsla(212, 100%, 61%, 1); /* Blue */
+
+  /* === BACKGROUND COLORS FOR CALLOUTS === */
+  --color-background-info: #e3f2fd;
+  --color-background-warning: #fff3e0;
+  --color-background-error: #ffebee;
+  --color-background-success: #e8f5e9;
+
+  /* === SPACING SYSTEM (from main docs) === */
+  --space-1x: 4px;
+  --space-2x: 8px;
+  --space-3x: 12px;
+  --space-4x: 16px;
+  --space-6x: 24px;
+  --space-8x: 32px;
+  --space-10x: 40px;
+  --space-12x: 48px;
+  --space-16x: 64px;
+
+  /* === CODE BLOCK COLORS (from main docs) === */
+  --code-bg: #2b2b2b;
+  --code-text: #f8faff;
+  --code-header-bg: #3a3a3a;
+
+  /* === COMPONENT TOKENS === */
+  --badge-border-radius: 16px;
+  --badge-padding-x: 12px;
+  --badge-padding-y: 4px;
+  --card-border-radius: 8px;
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --card-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.15);
+
+  /* === ANIMATION TOKENS === */
+  --transition-fast: 150ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 300ms ease;
+
+  /* === DOCUSAURUS INFIMA MAPPINGS === */
+  /* --ifm-color-primary: var(--chainlink-blue); */
+  --ifm-color-primary: #2e7bff;
+  --ifm-color-primary-dark: #2d4fc4;
+  --ifm-color-primary-darker: #2a4ab9;
+  --ifm-color-primary-darkest: #233d98;
+  --ifm-color-primary-light: #4a6cd8;
+  --ifm-color-primary-lighter: #5575db;
+  --ifm-color-primary-lightest: #7590e4;
+
+  --ifm-menu-color-background-active: #1c64f214;
+
+  /* h1, h2, h3, ... colors */
+  --ifm-heading-color: #141921;
+
+  /* Typography */
+  --ifm-font-family-base: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --ifm-font-family-monospace:
+    'SF Mono', 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
+
+  /* Spacing */
+  --ifm-spacing-horizontal: var(--space-4x);
+  --ifm-spacing-vertical: var(--space-4x);
+
+  /* Code blocks */
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+
+  /* Borders */
+  --ifm-border-radius: 4px;
+
+  /* Navbar */
+  --ifm-navbar-height: var(--space-16x);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: var(--chainlink-blue-light);
+  --ifm-color-primary-dark: #3e78eb;
+  --ifm-color-primary-darker: #306de9;
+  --ifm-color-primary-darkest: #1854d4;
+  --ifm-color-primary-light: #76a2f1;
+  --ifm-color-primary-lighter: #84adf3;
+  --ifm-color-primary-lightest: #b0c9f7;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+
+  /* Dark mode callout backgrounds */
+  --color-background-info: rgba(33, 150, 243, 0.15);
+  --color-background-warning: rgba(255, 152, 0, 0.15);
+  --color-background-error: rgba(244, 67, 54, 0.15);
+  --color-background-success: rgba(76, 175, 80, 0.15);
+
+  /* Dark mode card shadow */
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --card-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.4);
+
+  /* h1, h2, h3, ... colors */
+  --ifm-heading-color: rgb(99, 112, 131);
+}
+
+/* === NAVBAR STYLING (consistent with main docs) === */
+.navbar {
+  backdrop-filter: blur(20px);
+  box-shadow: 0px 4px 12px 0px rgba(0, 0, 0, 0.06);
+}
+
+/* === FOOTER STYLING (must match main docs) === */
+.footer {
+  background-color: var(--gray-800);
+}
+
+.footer--dark {
+  background-color: var(--gray-800);
+}
+
+.footer__title {
+  color: white;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.footer__link-item {
+  color: #9ea2ab;
+  transition: color var(--transition-fast);
+}
+
+.footer__link-item:hover {
+  color: white;
+}
+
+.footer__copyright {
+  background-color: var(--gray-900);
+  padding: var(--space-8x);
+  margin-top: var(--space-16x);
+}
+
+/* === CODE BLOCK STYLING (from main docs) === */
+/* Force dark code blocks in both light and dark mode for better readability */
+/* Only target Docusaurus/Prism code blocks, not custom components */
+.prism-code,
+[class*='codeBlockContainer'] pre,
+pre[class*='language-'],
+.theme-code-block div[class*='codeBlock'] {
+  background-color: var(--code-bg) !important;
+  color: var(--code-text) !important;
+}
+
+/* Code block header (filename/language label) */
+.theme-code-block div[class*='codeBlockTitle'],
+.theme-code-block div[class*='codeBlockLines'] > div:first-child {
+  background-color: var(--code-header-bg) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Inline code styling */
+:not(pre) > code {
+  background-color: var(--gray-100);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  color: var(--gray-800);
+}
+
+[data-theme='dark'] :not(pre) > code {
+  background-color: var(--gray-700);
+  color: var(--gray-100);
+}
+
+/* Code block line numbers */
+.prism-code .token-line {
+  padding: 0 var(--space-4x);
+}
+
+/* Language badge in code blocks */
+.theme-code-block div[class*='codeBlockTitle'] {
+  color: var(--gray-400) !important;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: var(--space-2x) var(--space-4x);
+}
+
+/* Copy button styling */
+button[class*='copyButton'] {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  color: var(--gray-400) !important;
+  transition: all var(--transition-fast);
+}
+
+button[class*='copyButton']:hover {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  color: white !important;
+}
+
+/* Syntax highlighting tokens - ensure visibility on dark background */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #6a9955 !important;
+}
+
+.token.punctuation {
+  color: #d4d4d4 !important;
+}
+
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol {
+  color: #b5cea8 !important;
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin {
+  color: #ce9178 !important;
+}
+
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  color: #d4d4d4 !important;
+}
+
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #569cd6 !important;
+}
+
+.token.function,
+.token.class-name {
+  color: #dcdcaa !important;
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+  color: #d16969 !important;
+}
+
+/* === CARD HOVER EFFECTS === */
+.card {
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--card-shadow-hover);
+}
+
+/* === BADGE BASE STYLING === */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1x);
+  padding: var(--badge-padding-y) var(--badge-padding-x);
+  border-radius: var(--badge-border-radius);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* === GITHUB/DISCORD NAVBAR ICONS === */
+.header-github-link,
+.header-discord-link {
+  display: flex;
+  align-items: center;
+  padding: var(--space-2x);
+  margin: 0 var(--space-1x);
+  transition: opacity var(--transition-fast);
+}
+
+.header-github-link:hover,
+.header-discord-link:hover {
+  opacity: 0.7;
+}
+
+.header-github-link::before {
+  content: '';
+  width: 24px;
+  height: 24px;
+  display: flex;
+  background: url('~@site/static/assets/icons/github-blue.svg') no-repeat center;
+  background-size: contain;
+}
+
+.header-discord-link::before {
+  content: '';
+  width: 24px;
+  height: 24px;
+  display: flex;
+  background: url('~@site/static/assets/icons/discord.svg') no-repeat center;
+  background-size: contain;
+}
+
+[data-theme='dark'] .header-github-link::before {
+  filter: brightness(1.5);
+}
+
+[data-theme='dark'] .header-discord-link::before {
+  filter: brightness(1.5);
+}
+
+/* === NAVBAR LOGO === */
+.navbar__logo {
+  height: 28px;
+  margin-right: var(--space-2x);
+}
+
+/* === NAVBAR TITLE (Custom HTML item) === */
+.navbar__title {
+  font-weight: 600;
+  font-size: 1.125rem;
+  color: var(--ifm-navbar-link-color);
+  text-decoration: none;
+  margin-right: var(--space-6x);
+  white-space: nowrap;
+}
+
+.navbar__title:hover {
+  color: var(--ifm-navbar-link-hover-color);
+  text-decoration: none;
+}
+
+/* === NAVBAR ACTIVE LINK STYLING === */
+.navbar__link--active {
+  font-weight: 600;
+}
+
+/* === BREADCRUMBS STYLING === */
+.breadcrumbs {
+  font-size: 0.875rem;
+  margin-bottom: var(--space-4x);
+}
+
+.breadcrumbs__link {
+  color: var(--ifm-color-primary);
+  transition: color var(--transition-fast);
+}
+
+.breadcrumbs__link:hover {
+  color: var(--ifm-color-primary-dark);
+  text-decoration: none;
+}
+
+.breadcrumbs__item:not(:last-child)::after {
+  content: '/';
+  margin: 0 var(--space-2x);
+  color: var(--gray-400);
+}
+
+/* === TABLE OF CONTENTS STYLING === */
+.table-of-contents {
+  font-size: 0.8125rem;
+}
+
+.table-of-contents__link {
+  color: var(--gray-600);
+  transition: color var(--transition-fast);
+}
+
+.table-of-contents__link:hover {
+  color: var(--ifm-color-primary);
+}
+
+.table-of-contents__link--active {
+  font-weight: 600;
+  color: var(--ifm-color-primary);
+}
+
+[data-theme='dark'] .table-of-contents__link {
+  color: var(--gray-400);
+}
+
+[data-theme='dark'] .table-of-contents__link--active {
+  color: var(--ifm-color-primary-light);
+}
+
+/* === SIDEBAR STYLING === */
+.menu__link {
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.menu__link--active {
+  font-weight: 600;
+}
+
+.menu__link--active span {
+  color: var(--ifm-color-primary);
+}
+
+/* New badge for sidebar items */
+.sidebar-new-badge::after {
+  content: 'NEW';
+  margin-left: var(--space-2x);
+  padding: 2px 6px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: white;
+  background-color: var(--color-success);
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+/* === INFO GRID (for package metadata) === */
+.info-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3x);
+  margin: var(--space-4x) 0 var(--space-6x) 0;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2x);
+  padding: var(--space-2x) var(--space-3x);
+  background: var(--ifm-background-surface-color);
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.info-label {
+  font-weight: 600;
+  color: var(--ifm-color-emphasis-600);
+}
+
+.info-item code {
+  background-color: var(--ifm-color-emphasis-200);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+[data-theme='dark'] .info-item {
+  background: var(--ifm-background-surface-color);
+  border-color: var(--ifm-color-emphasis-400);
+}
+
+[data-theme='dark'] .info-label {
+  color: var(--ifm-color-emphasis-500);
+}
+
+[data-theme='dark'] .info-item code {
+  background-color: var(--ifm-color-emphasis-300);
+}
+
+/* === API DOCUMENTATION STYLING === */
+.api-info-box {
+  display: inline-block;
+  background: var(--ifm-background-surface-color);
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: var(--card-border-radius, 8px);
+  padding: var(--space-4x);
+  margin-bottom: var(--space-6x);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.api-info-box table {
+  margin-bottom: 0;
+  display: table;
+  width: auto;
+}
+
+.api-info-box thead {
+  display: none;
+}
+
+.api-info-box tr {
+  background: transparent !important;
+}
+
+.api-info-box th,
+.api-info-box td {
+  border: none;
+  padding: var(--space-2x) var(--space-3x);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.api-info-box td:first-child {
+  font-weight: 600;
+  color: var(--ifm-color-emphasis-700);
+  padding-right: var(--space-4x);
+  white-space: nowrap;
+}
+
+.api-info-box td:last-child {
+  color: var(--ifm-font-color-base);
+}
+
+.api-info-box code {
+  background-color: var(--ifm-color-emphasis-200);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.875em;
+  font-family: var(--ifm-font-family-monospace);
+}
+
+[data-theme='dark'] .api-info-box {
+  background: var(--ifm-background-surface-color);
+  border-color: var(--ifm-color-emphasis-400);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme='dark'] .api-info-box td:first-child {
+  color: var(--ifm-color-emphasis-500);
+}
+
+[data-theme='dark'] .api-info-box code {
+  background-color: var(--ifm-color-emphasis-300);
+}
+
+/* === OPENAPI CODE BLOCK STYLING === */
+/* Hide line numbers in API code samples for cleaner appearance */
+.openapi-explorer__code-block-code-line-number {
+  display: none !important;
+}
+
+.openapi-explorer__code-block-code-line-content .token.plain {
+  color: var(--gray-100) !important;
+}
+
+/* Fix code block overflow - enable horizontal scrolling */
+/* Target the outer container that constrains width */
+.openapi-tabs__code-container,
+.openapi-tabs__code-container-inner {
+  overflow-x: auto !important;
+}
+
+.openapi-explorer__code-block-container {
+  overflow-x: auto !important;
+  max-width: 100% !important;
+}
+
+.openapi-explorer__code-block-content {
+  overflow-x: auto !important;
+}
+
+/* Ensure code lines don't wrap - use horizontal scroll instead */
+.openapi-explorer__code-block-content code,
+.openapi-explorer__code-block code {
+  white-space: pre !important;
+  display: block !important;
+}
+
+/* Style the scrollbar for better visibility */
+/* Target the pre element which is the actual scrollable container */
+.openapi-explorer__code-block-content pre,
+.openapi-explorer__code-block.thin-scrollbar,
+pre.openapi-explorer__code-block {
+  overflow: auto !important;
+  scrollbar-width: auto !important;
+  scrollbar-color: rgba(255, 255, 255, 0.5) rgba(0, 0, 0, 0.3) !important;
+  padding: 16px !important;
+  max-height: 400px !important;
+}
+
+/* Force scrollbar visibility on WebKit browsers (Chrome, Safari, Edge) */
+.openapi-explorer__code-block-content pre::-webkit-scrollbar,
+.openapi-explorer__code-block.thin-scrollbar::-webkit-scrollbar,
+pre.openapi-explorer__code-block::-webkit-scrollbar {
+  -webkit-appearance: none !important;
+  height: 12px !important;
+  width: 12px !important;
+  display: block !important;
+}
+
+.openapi-explorer__code-block-content pre::-webkit-scrollbar-track,
+.openapi-explorer__code-block.thin-scrollbar::-webkit-scrollbar-track,
+pre.openapi-explorer__code-block::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3) !important;
+  border-radius: 6px !important;
+}
+
+.openapi-explorer__code-block-content pre::-webkit-scrollbar-thumb,
+.openapi-explorer__code-block.thin-scrollbar::-webkit-scrollbar-thumb,
+pre.openapi-explorer__code-block::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.5) !important;
+  border-radius: 6px !important;
+  border: 2px solid rgba(0, 0, 0, 0.3) !important;
+}
+
+.openapi-explorer__code-block-content pre::-webkit-scrollbar-thumb:hover,
+.openapi-explorer__code-block.thin-scrollbar::-webkit-scrollbar-thumb:hover,
+pre.openapi-explorer__code-block::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* Override thin-scrollbar class to ensure scrollbar is visible */
+.thin-scrollbar {
+  scrollbar-width: auto !important;
+}
+
+/* Note: Code blocks in the right panel are horizontally scrollable.
+   On macOS, scrollbars are hidden by default (overlay scrollbars).
+   Users can:
+   1. Scroll horizontally using trackpad/mouse
+   2. Click "Expand to fullscreen" button to view complete code */
+
+/* === HIDE OPENAPI FEEDBACK WIDGET === */
+/* Remove "Was this page helpful?" section - no feedback system in place */
+/* Target the specific feedback div structure in API docs */
+/* IMPORTANT: Exclude .theme-doc-markdown to avoid hiding CLI docs content */
+article > div:last-of-type:not(.theme-doc-markdown):has(p:first-child):has(button) {
+  display: none !important;
+}
+
+/* === HIDE DUPLICATE EXAMPLE TAB === */
+/* Hide "Example (auto)" tab since it shows identical content to "Example" tab */
+/* The OpenAPI spec has well-defined examples that match auto-generated ones */
+/* Target: .openapi-tabs__schema is the specific class for Schema/Example/Example(auto) tabs */
+.openapi-tabs__schema [role='tab']:nth-child(2) {
+  display: none !important;
+}
+
+/* === GITHUB/DISCORD NAVBAR ICONS === */
+.header-github-link,
+.header-discord-link {
+  display: flex;
+  align-items: center;
+  padding: var(--space-2x);
+  margin: 0 var(--space-1x);
+  transition: opacity var(--transition-fast);
+}
+
+.header-github-link:hover,
+.header-discord-link:hover {
+  opacity: 0.7;
+}
+
+.header-github-link::before {
+  content: '';
+  width: 24px;
+  height: 24px;
+  display: flex;
+  background: url('~@site/static/assets/icons/github-blue.svg') no-repeat center;
+  background-size: contain;
+}
+
+.header-discord-link::before {
+  content: '';
+  width: 24px;
+  height: 24px;
+  display: flex;
+  background: url('~@site/static/assets/icons/discord.svg') no-repeat center;
+  background-size: contain;
+}
+
+[data-theme='dark'] .header-github-link::before {
+  filter: brightness(1.5);
+}
+
+[data-theme='dark'] .header-discord-link::before {
+  filter: brightness(1.5);
+}
+
+/* === NAVBAR LOGO === */
+.navbar__logo {
+  height: 28px;
+  margin-right: var(--space-2x);
+}
+
+/* === NAVBAR TITLE (Custom HTML item) === */
+.navbar__title {
+  font-weight: 600;
+  font-size: 1.125rem;
+  color: var(--ifm-navbar-link-color);
+  text-decoration: none;
+  margin-right: var(--space-6x);
+  white-space: nowrap;
+}
+
+.navbar__title:hover {
+  color: var(--ifm-navbar-link-hover-color);
+  text-decoration: none;
+}
+
+/* === NAVBAR ACTIVE LINK STYLING === */
+.navbar__link--active {
+  font-weight: 600;
+}
+
+/* === BREADCRUMBS STYLING === */
+.breadcrumbs {
+  font-size: 0.875rem;
+  margin-bottom: var(--space-4x);
+}
+
+.breadcrumbs__link {
+  color: var(--ifm-color-primary);
+  transition: color var(--transition-fast);
+}
+
+.breadcrumbs__link:hover {
+  color: var(--ifm-color-primary-dark);
+  text-decoration: none;
+}
+
+.breadcrumbs__item:not(:last-child)::after {
+  content: '';
+  margin: 0 var(--space-2x);
+  color: var(--gray-400);
+}

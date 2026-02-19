@@ -7,16 +7,7 @@ import {
   SimpleTransaction,
   TransactionResponseType,
 } from '@aptos-labs/ts-sdk'
-import {
-  type BytesLike,
-  concat,
-  dataSlice,
-  getBytes,
-  hexlify,
-  isBytesLike,
-  isHexString,
-  zeroPadValue,
-} from 'ethers'
+import { type BytesLike, concat, isBytesLike, isHexString } from 'ethers'
 import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
@@ -28,9 +19,11 @@ import {
   type TokenPoolRemote,
   Chain,
 } from '../chain.ts'
+import { generateUnsignedExecuteReport } from './exec.ts'
+import { getAptosLeafHasher } from './hasher.ts'
+import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import {
-  CCIPAptosAddressInvalidError,
   CCIPAptosExtraArgsEncodingError,
   CCIPAptosExtraArgsV2RequiredError,
   CCIPAptosLogInvalidError,
@@ -50,13 +43,14 @@ import {
   EVMExtraArgsV2Tag,
   SVMExtraArgsV1Tag,
 } from '../extra-args.ts'
-import {
-  type UnsignedAptosTx,
-  EVMExtraArgsV2Codec,
-  SVMExtraArgsV1Codec,
-  isAptosAccount,
-} from './types.ts'
+import { type UnsignedAptosTx, isAptosAccount } from './types.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import {
+  BcsEVMExtraArgsV2Codec,
+  BcsSVMExtraArgsV1Codec,
+  decodeMoveExtraArgs,
+  getMoveAddress,
+} from '../shared/bcs-codecs.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type CCIPExecution,
@@ -78,14 +72,10 @@ import {
   decodeAddress,
   decodeOnRampAddress,
   getAddressBytes,
-  getDataBytes,
   networkInfo,
   parseTypeAndVersion,
   util,
 } from '../utils.ts'
-import { generateUnsignedExecuteReport } from './exec.ts'
-import { getAptosLeafHasher } from './hasher.ts'
-import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
 import { getTokenInfo } from './token.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
@@ -98,13 +88,18 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   static {
     supportedChains[ChainFamily.Aptos] = AptosChain
   }
+  /** Chain family identifier for Aptos networks. */
   static readonly family = ChainFamily.Aptos
+  /** Native token decimals (8 for APT). */
   static readonly decimals = 8
 
   readonly destroy$: Promise<void>
+  /** The Aptos SDK provider for blockchain interactions. */
   provider: Aptos
 
+  /** Retrieves token information for a given token address. */
   getTokenInfo: (token: string) => Promise<TokenInfo>
+  /** @internal */
   _getAccountModulesNames: (address: string) => Promise<string[]>
 
   /**
@@ -393,33 +388,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
     | undefined {
-    const data = getDataBytes(extraArgs),
-      tag = dataSlice(data, 0, 4)
-    switch (tag) {
-      case EVMExtraArgsV2Tag: {
-        const parsed = EVMExtraArgsV2Codec.parse(getBytes(dataSlice(data, 4)))
-        // Aptos serialization of EVMExtraArgsV2: 37 bytes total: 4 tag + 32 LE gasLimit + 1 allowOOOE
-        return {
-          _tag: 'EVMExtraArgsV2',
-          ...parsed,
-          gasLimit: BigInt(parsed.gasLimit),
-        }
-      }
-      case SVMExtraArgsV1Tag: {
-        const parsed = SVMExtraArgsV1Codec.parse(getBytes(dataSlice(data, 4)))
-        // Aptos serialization of SVMExtraArgsV1: 13 bytes total: 4 tag + 8 LE computeUnits
-        return {
-          _tag: 'SVMExtraArgsV1',
-          ...parsed,
-          computeUnits: BigInt(parsed.computeUnits),
-          accountIsWritableBitmap: BigInt(parsed.accountIsWritableBitmap),
-          tokenReceiver: decodeAddress(new Uint8Array(parsed.tokenReceiver), ChainFamily.Solana),
-          accounts: parsed.accounts.map((account) =>
-            decodeAddress(new Uint8Array(account), ChainFamily.Solana),
-          ),
-        }
-      }
-    }
+    return decodeMoveExtraArgs(extraArgs)
   }
 
   /**
@@ -430,11 +399,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    */
   static encodeExtraArgs(extraArgs: ExtraArgs): string {
     if ('gasLimit' in extraArgs && 'allowOutOfOrderExecution' in extraArgs)
-      return concat([EVMExtraArgsV2Tag, EVMExtraArgsV2Codec.serialize(extraArgs).toBytes()])
+      return concat([EVMExtraArgsV2Tag, BcsEVMExtraArgsV2Codec.serialize(extraArgs).toBytes()])
     else if ('computeUnits' in extraArgs)
       return concat([
         SVMExtraArgsV1Tag,
-        SVMExtraArgsV1Codec.serialize({
+        BcsSVMExtraArgsV1Codec.serialize({
           ...extraArgs,
           computeUnits: Number(extraArgs.computeUnits),
           tokenReceiver: getAddressBytes(extraArgs.tokenReceiver),
@@ -498,21 +467,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * Converts bytes to an Aptos address.
    * @param bytes - Bytes to convert.
    * @returns Aptos address (0x-prefixed hex, 32 bytes padded).
-   * @throws {@link CCIPAptosAddressInvalidError} if bytes length exceeds 32
+   * @throws {@link CCIPDataFormatUnsupportedError} if bytes length exceeds 32
    */
   static getAddress(bytes: BytesLike | readonly number[]): string {
-    let suffix = ''
-    if (Array.isArray(bytes)) bytes = new Uint8Array(bytes)
-    if (typeof bytes === 'string' && bytes.startsWith('0x')) {
-      const idx = bytes.indexOf('::')
-      if (idx > 0) {
-        suffix = bytes.slice(idx)
-        bytes = bytes.slice(0, idx)
-      }
-    }
-    bytes = getDataBytes(bytes)
-    if (bytes.length > 32) throw new CCIPAptosAddressInvalidError(hexlify(bytes))
-    return zeroPadValue(bytes, 32) + suffix
+    return getMoveAddress(bytes)
   }
 
   /**

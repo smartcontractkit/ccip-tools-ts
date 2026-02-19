@@ -1,0 +1,275 @@
+---
+id: data-transfer-workflow
+title: 'Transfer Data'
+description: 'Send arbitrary data cross-chain using the CCIP CLI.'
+sidebar_label: Transfer Data
+sidebar_position: 2
+custom_edit_url: null
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Transfer Data
+
+Send arbitrary data (messages) cross-chain using a three-step workflow: estimate fees, send the message, and track execution.
+
+## Workflow
+
+| Step        | Command               | Purpose           |
+| ----------- | --------------------- | ----------------- |
+| 1. Estimate | `send --only-get-fee` | Get fee quote     |
+| 2. Send     | `send --data`         | Execute transfer  |
+| 3. Track    | `show`                | Monitor execution |
+
+## Prerequisites
+
+Configure RPC endpoints and wallet:
+
+```bash title=".env"
+RPC_SEPOLIA=https://ethereum-sepolia-rpc.publicnode.com
+RPC_ARB_SEPOLIA=https://arbitrum-sepolia-rpc.publicnode.com
+USER_KEY=0xYourPrivateKeyHere
+```
+
+Required balances on source chain:
+
+- Gas for source transaction
+- CCIP fee (native token or LINK)
+
+## Step 1: Estimate Fee
+
+Get the fee quote before sending:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --data "hello world" \
+  --only-get-fee
+```
+
+Output:
+
+```
+Fee: 0.000123456789012345 ETH (native)
+```
+
+To get the fee in LINK:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --data "hello world" \
+  --fee-token LINK \
+  --only-get-fee
+```
+
+## Step 2: Send Message
+
+### Simple text message
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --data "hello world" \
+  --wallet ledger
+```
+
+### Hex-encoded data
+
+For binary data or contract calls, use hex encoding:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --data 0x1234abcdef \
+  --wallet ledger
+```
+
+### Pay fee in LINK
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --data "hello world" \
+  --fee-token LINK \
+  --wallet ledger
+```
+
+### With custom gas limit
+
+For receivers with complex message handling:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --data "hello world" \
+  --gas-limit 500000 \
+  --wallet ledger
+```
+
+### With estimated gas limit
+
+Automatically estimate gas with a buffer:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --data "hello world" \
+  --estimate-gas-limit 10 \
+  --wallet ledger
+```
+
+## Step 3: Track Message
+
+Check message status:
+
+```bash
+ccip-cli show 0xYourTransactionHash
+```
+
+Wait for execution to complete:
+
+```bash
+ccip-cli show 0xYourTransactionHash --wait
+```
+
+Or include `--wait` in the send command:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverAddress \
+  --data "hello world" \
+  --wallet ledger \
+  --wait
+```
+
+## Example
+
+```bash
+# Estimate fee
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+  --data "cross-chain message" \
+  --only-get-fee
+
+# Send message
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+  --data "cross-chain message" \
+  --wallet ledger
+
+# Track execution
+ccip-cli show 0xabc123... --wait
+```
+
+## Data Format
+
+The `--data` option accepts two formats:
+
+| Format | Example         | Behavior                        |
+| ------ | --------------- | ------------------------------- |
+| Text   | `"hello world"` | UTF-8 encoded automatically     |
+| Hex    | `0x1234abcd`    | Used as-is (must start with 0x) |
+
+For structured data, encode it as hex before sending:
+
+```bash
+# ABI-encoded function call
+--data 0x095ea7b3000000000000000000000000...
+```
+
+## Chain-Specific Behavior
+
+<Tabs>
+<TabItem value="evm" label="EVM to EVM" default>
+
+Messages are delivered to the receiver contract's `ccipReceive` function. The receiver must implement the `IAny2EVMMessageReceiver` interface.
+
+**Receiver requirements:**
+
+- Must implement `ccipReceive(Client.Any2EVMMessage)`
+- Must be a valid smart contract (not an EOA)
+
+</TabItem>
+<TabItem value="solana" label="EVM to Solana">
+
+Messages are delivered to a Solana program. Additional accounts may be required.
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d solana-devnet \
+  --receiver <SOLANA_PROGRAM_ADDRESS> \
+  --data "hello solana" \
+  --account <ACCOUNT_1> \
+  --account <ACCOUNT_2>=rw \
+  --wallet ledger
+```
+
+</TabItem>
+<TabItem value="from-solana" label="Solana to EVM">
+
+Source addresses use Solana format.
+
+```bash
+ccip-cli send \
+  -s solana-devnet \
+  -r <SOLANA_ROUTER> \
+  -d ethereum-testnet-sepolia \
+  --receiver 0xEvmAddress \
+  --data "hello evm" \
+  --wallet ledger
+```
+
+</TabItem>
+</Tabs>
+
+## Failures
+
+For failed messages, see [Debugging Failed Messages](/cli/guides/debugging-workflow).
+
+| Issue            | Cause                | Solution                            |
+| ---------------- | -------------------- | ----------------------------------- |
+| Execution failed | Insufficient gas     | Retry with `manualExec --gas-limit` |
+| Receiver reverts | Contract logic error | Fix receiver contract               |
+| Invalid receiver | Not a contract       | Use a valid contract address        |
+
+## Related
+
+- [send](/cli/send) - Command reference
+- [show](/cli/show) - Command reference
+- [Token Transfer](/cli/guides/token-transfer-workflow) - Transfer tokens
+- [Transfer Tokens and Data](/cli/guides/tokens-and-data-workflow) - Transfer both
+- [Configuration](/cli/configuration) - RPC and wallet setup

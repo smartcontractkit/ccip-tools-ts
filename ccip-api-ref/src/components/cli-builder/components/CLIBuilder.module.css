@@ -1,0 +1,312 @@
+/**
+ * CLI Builder Main Styles
+ *
+ * Styling for the main CLIBuilder component, command preview,
+ * and option groups. Uses CSS custom properties for theming.
+ */
+
+/* Main container */
+.cliBuilder {
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 8px;
+  background: var(--ifm-background-surface-color);
+  overflow: hidden;
+  margin: 1.5rem 0;
+}
+
+.cliBuilder.error {
+  background: var(--ifm-color-danger-lightest);
+  border-color: var(--ifm-color-danger);
+  padding: 1rem;
+}
+
+.cliBuilder.error p {
+  margin: 0.5rem 0;
+  color: var(--ifm-color-danger-darkest);
+}
+
+.cliBuilder.error code {
+  background: var(--ifm-color-danger-light);
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+}
+
+/* Header */
+.header {
+  padding: 1rem 1.25rem;
+  background: var(--ifm-color-emphasis-100);
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.title {
+  margin: 0 0 0.25rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--ifm-font-color-base);
+}
+
+.title code {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ifm-color-primary);
+  background: none;
+  padding: 0;
+}
+
+.synopsis {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--ifm-font-color-secondary);
+}
+
+/* Form */
+.form {
+  padding: 1.25rem;
+}
+
+/* Option groups */
+.optionGroup {
+  margin: 0 0 1.5rem;
+  padding: 0;
+  border: none;
+}
+
+.optionGroup:last-of-type {
+  margin-bottom: 0.5rem;
+}
+
+.groupLegend {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--ifm-font-color-base);
+  padding: 0;
+  margin-bottom: 0.25rem;
+}
+
+.groupDescription {
+  font-size: 0.8125rem;
+  color: var(--ifm-font-color-secondary);
+  margin: 0 0 0.75rem;
+}
+
+.groupContent {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* Actions */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+  margin-top: 0.5rem;
+}
+
+.resetButton {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  background: transparent;
+  color: var(--ifm-font-color-secondary);
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.resetButton:hover {
+  background: var(--ifm-color-emphasis-100);
+  border-color: var(--ifm-color-emphasis-400);
+}
+
+.resetButton:focus {
+  outline: 2px solid var(--ifm-color-primary);
+  outline-offset: 2px;
+}
+
+.validationHint {
+  font-size: 0.8125rem;
+  color: var(--ifm-font-color-secondary);
+  font-style: italic;
+}
+
+/* Command preview */
+.commandPreview {
+  background: var(--ifm-color-emphasis-100);
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.commandHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  background: var(--ifm-color-emphasis-200);
+}
+
+.commandLabel {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ifm-font-color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.copyButton {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  background: var(--ifm-color-primary);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    transform 0.1s ease;
+}
+
+.copyButton:hover {
+  background: var(--ifm-color-primary-dark);
+}
+
+.copyButton:active {
+  transform: scale(0.98);
+}
+
+.copyButton:focus {
+  outline: 2px solid white;
+  outline-offset: 2px;
+}
+
+.commandCode {
+  margin: 0;
+  padding: 1rem 1.25rem;
+  font-size: 0.875rem;
+  font-family: var(--ifm-font-family-monospace);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+  background: var(--ifm-pre-background);
+  color: var(--ifm-pre-color);
+}
+
+.commandCode code {
+  font-family: inherit;
+  background: none;
+  padding: 0;
+}
+
+/* Examples */
+.examples {
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+  background: var(--ifm-color-emphasis-50);
+}
+
+.examplesTitle {
+  margin: 0 0 0.75rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--ifm-font-color-base);
+}
+
+.example {
+  margin-bottom: 1rem;
+}
+
+.example:last-child {
+  margin-bottom: 0;
+}
+
+.exampleDescription {
+  margin: 0 0 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--ifm-font-color-secondary);
+}
+
+.exampleCode {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.8125rem;
+  font-family: var(--ifm-font-family-monospace);
+  background: var(--ifm-pre-background);
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.exampleCode code {
+  font-family: inherit;
+  background: none;
+  padding: 0;
+}
+
+/* Dark mode adjustments */
+[data-theme='dark'] .cliBuilder {
+  border-color: var(--ifm-color-emphasis-400);
+}
+
+[data-theme='dark'] .header {
+  background: var(--ifm-color-emphasis-200);
+  border-color: var(--ifm-color-emphasis-300);
+}
+
+[data-theme='dark'] .commandHeader {
+  background: var(--ifm-color-emphasis-300);
+}
+
+[data-theme='dark'] .commandPreview {
+  background: var(--ifm-color-emphasis-200);
+  border-color: var(--ifm-color-emphasis-300);
+}
+
+[data-theme='dark'] .examples {
+  background: var(--ifm-color-emphasis-100);
+  border-color: var(--ifm-color-emphasis-300);
+}
+
+[data-theme='dark'] .resetButton {
+  border-color: var(--ifm-color-emphasis-400);
+}
+
+[data-theme='dark'] .resetButton:hover {
+  background: var(--ifm-color-emphasis-200);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .header {
+    padding: 0.875rem 1rem;
+  }
+
+  .form {
+    padding: 1rem;
+  }
+
+  .actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .commandHeader {
+    padding: 0.625rem 1rem;
+  }
+
+  .commandCode {
+    padding: 0.875rem 1rem;
+    font-size: 0.8125rem;
+  }
+
+  .examples {
+    padding: 0.875rem 1rem;
+  }
+}

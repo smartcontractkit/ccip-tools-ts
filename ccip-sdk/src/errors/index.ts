@@ -144,6 +144,7 @@ export {
 // Specialized errors - Sui-specific
 export {
   CCIPSuiHasherVersionUnsupportedError,
+  CCIPSuiLogInvalidError,
   CCIPSuiMessageVersionInvalidError,
 } from './specialized.ts'
 

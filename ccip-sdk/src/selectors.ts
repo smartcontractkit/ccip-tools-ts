@@ -1099,6 +1099,12 @@ const selectors: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '46630': {
+    selector: 2032988798112970440n,
+    name: 'robinhood-testnet',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
   '47763': {
     selector: 7222032299962346917n,
     name: 'neox-mainnet',
@@ -1347,6 +1353,12 @@ const selectors: Selectors = {
     selector: 7937294810946806131n,
     name: 'bitcoin-mainnet-bitlayer-1',
     network_type: 'MAINNET',
+    family: 'EVM',
+  },
+  '202601': {
+    selector: 1091131740251125869n,
+    name: 'ethereum-testnet-sepolia-ronin-1',
+    network_type: 'TESTNET',
     family: 'EVM',
   },
   '421613': {
