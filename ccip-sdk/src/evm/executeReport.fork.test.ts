@@ -16,6 +16,10 @@ const FUJI_CHAIN_ID = 43113
 const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://ethereum-sepolia-rpc.publicnode.com'
 const SEPOLIA_CHAIN_ID = 11155111
 
+const BASE_SEPOLIA_RPC =
+  process.env['RPC_BASE_SEPOLIA'] || 'https://base-sepolia-rpc.publicnode.com'
+const BASE_SEPOLIA_CHAIN_ID = 84532
+
 const EXTRA_CHAIN_ID = 421614 // Arbitrum Sepolia — unrelated to the Fuji→Sepolia test lane
 
 const ANVIL_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
@@ -37,13 +41,24 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
   let wallet: Wallet
   let fujiInstance: ReturnType<typeof anvil> | undefined
   let sepoliaInstance: ReturnType<typeof anvil> | undefined
+  let baseSepoliaInstance: ReturnType<typeof anvil> | undefined
   let extraInstance: ReturnType<typeof anvil> | undefined
 
   before(async () => {
     fujiInstance = anvil({ forkUrl: FUJI_RPC, chainId: FUJI_CHAIN_ID, port: 8645 })
     sepoliaInstance = anvil({ forkUrl: SEPOLIA_RPC, chainId: SEPOLIA_CHAIN_ID, port: 8646 })
+    baseSepoliaInstance = anvil({
+      forkUrl: BASE_SEPOLIA_RPC,
+      chainId: BASE_SEPOLIA_CHAIN_ID,
+      port: 8648,
+    })
     extraInstance = anvil({ chainId: EXTRA_CHAIN_ID, port: 8647 })
-    await Promise.all([fujiInstance.start(), sepoliaInstance.start(), extraInstance.start()])
+    await Promise.all([
+      fujiInstance.start(),
+      sepoliaInstance.start(),
+      baseSepoliaInstance.start(),
+      extraInstance.start(),
+    ])
 
     const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
     const sepoliaProvider = new JsonRpcProvider(
@@ -58,7 +73,12 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
   after(async () => {
     source?.destroy?.()
     dest?.destroy?.()
-    await Promise.all([fujiInstance?.stop(), sepoliaInstance?.stop(), extraInstance?.stop()])
+    await Promise.all([
+      fujiInstance?.stop(),
+      sepoliaInstance?.stop(),
+      baseSepoliaInstance?.stop(),
+      extraInstance?.stop(),
+    ])
   })
 
   it('should manually execute a failed v1.6 message (Fuji -> Sepolia)', async () => {
@@ -119,6 +139,79 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
       execution.receipt.state === ExecutionState.Success,
       'execution state should be Success',
     )
+  })
+
+  it('should execute a v2.0 message (Sepolia -> Fuji)', async () => {
+    const messageId = '0xa7bcdc5f31942e8024885fc25c375168050245370d50155b29d60301b6f53968'
+
+    assert.ok(source, 'source (fuji) chain should be initialized')
+    assert.ok(fujiInstance, 'fuji anvil instance should be initialized')
+
+    const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
+    const fujiWallet = new Wallet(ANVIL_PRIVATE_KEY, fujiProvider)
+
+    const execution = await source.executeV2Message({
+      offRamp: '0x119b61664bd2c837a18b00837f88aa9a179173f8',
+      encodedMessage:
+        '0x01de41ba4fc9d91ad9ccf0a31a221f3c9b0000000000000010000749b00000000000015b6dbe238e41978c0a7ae4c8bfd488f2c8696256c95062188c9db7ff760cd3fc200000000000000000000000000f887309075403d02563cbcbb3d98fb2ef2d294614119b61664bd2c837a18b00837f88aa9a179173f8200000000000000000000000004f32ae7f112c26b109357785e5c66dc5d747fbce144f32ae7f112c26b109357785e5c66dc5d747fbce0000009301000000000000000000000000000000000000000000000000000000000000000120000000000000000000000000e72b27de4ee51b48848958bb20cdbcafd652e077200000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c7238145425890298aed601595a70ab815c96711a31bc65144f32ae7f112c26b109357785e5c66dc5d747fbce00043047587c0000',
+      ccvAddresses: [
+        '0x997bbb1be075e6e9e7802b84c27c79e820a337a3',
+        '0x7d974aae9002e40d85f2f552b080c83bfd2b979f',
+      ],
+      verifierResults: [
+        '0x49ff34ed0180208cf7cc720d7ff545706db2fa524aa7c16117aaaddc3eed248dfaf4a02edecddca8eb3df1ca45c1419345a549d4572bbefb8a6fc817733b0a1c279b670658f9b8bfe1125c0f98b08d3e73edef37aa4f80395c0967608001cb3b86575ba5d170f0a71b4ff7d67cd3ebe7af8e3bda8d2818bba63b667859d801a8b6ec0185431e13d002fdecac93c7ff5fe66c79b132570eb5c19b7fd5ef14e7688c5731977a8212dcad222c137c34a0729238e0aa381f1dcb4d622f8d72234155e7a190acee7a9d741eaa9d94ee10ac451a81ec3043a3b981fee4e9a59bc827440335ddcdc2c5d6d5538f8bdbdfcf25ec6c7bea2c16340daa7a667c3136fe0ef799c43d479070b305b92db7d67dc362af70ba9ac3e23f760ff3ce39a929bff33d5ec3cd7469fcf368930e76767ad34feccc9d595c54bfb06cb0a0d31138eda85c95bc8f67cc6b3eb408d016bca0336ca46ecbe5e65490106e8e2ff77f78eec261175ab1074451bf0257ac522aef2faf38082c817d706d64c7b48250bd3e2ab2d641588c16e4f7',
+        '0x8e1d1a9d000000010000000000000001b0fd224313b87ca8615e7b66a5d61e05e33e3ab97fc0961f1e41324a410f053e0000000000000000000000008fe6b999dc680ccfdd5bf7eb0974218be2542daa0000000000000000000000008fe6b999dc680ccfdd5bf7eb0974218be2542daa000000000000000000000000e23c4b54127d9a73e483a05b6978d8c0008ed817000003e8000007d0000000010000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c72380000000000000000000000004f32ae7f112c26b109357785e5c66dc5d747fbce0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000a3ae889af2026b931a7711eb3acb54f69d071c6f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008e1d1a9da7bcdc5f31942e8024885fc25c375168050245370d50155b29d60301b6f53968d3af1a1a1ae0a3c9e7c849e396e9a90277b4729921db5f46bea1a52be6898fd010d2cc95f61254acd850d3e59f768f3a9a36459153f268a6ae00088e9a34b6061ce8eaca0938380784e9dc8391c0a497782d40c89f7abf3a767f40f008e8cb972a07ee190228f505ee170dd7ae812bbe24aa5c557ab9a963a1bd2f8242ec7cd9121c',
+      ],
+      wallet: fujiWallet,
+    })
+
+    assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
+    assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
+    assert.ok(execution.timestamp > 0, 'execution should have a positive timestamp')
+    // The original message failed (gasLimit: 0, token transfer to EOA),
+    // so manual re-execution also results in Failed state. This still proves
+    // the full executeV2Message pipeline: ABI encoding, tx submission, event decoding.
+    // TODO: revisit with a message that succeeds on re-execution.
+    assert.ok(
+      execution.receipt.state === ExecutionState.Failed,
+      `execution state should be Failed, got ${execution.receipt.state}`,
+    )
+  })
+
+  it('should execute a v2.0 message successfully (Arbitrum Sepolia -> Base Sepolia)', async () => {
+    const messageId = '0x985661989074adde4b0c45fdfa4de9c5bc4a6c1c553e93e9303b150bc514fc51'
+
+    assert.ok(baseSepoliaInstance, 'base sepolia anvil instance should be initialized')
+
+    const baseSepoliaProvider = new JsonRpcProvider(
+      `http://${baseSepoliaInstance.host}:${baseSepoliaInstance.port}`,
+    )
+    const baseSepolia = await EVMChain.fromProvider(baseSepoliaProvider, { apiClient: null })
+    const baseSepoliaWallet = new Wallet(ANVIL_PRIVATE_KEY, baseSepoliaProvider)
+
+    try {
+      const execution = await baseSepolia.executeV2Message({
+        offRamp: '0x3039886f3e597dfd3171aa6397b709a4f68956ac',
+        encodedMessage:
+          '0x01304611b6affba76a8f90b8876dee6538000000000000000d00058490000000000000fc76ef6af690994784894d58b10eecf323c6140cf609ff501c1052b935fefa0520000000000000000000000000639c66c134293be91bc2263cc96f59fe5b2a143b143039886f3e597dfd3171aa6397b709a4f68956ac200000000000000000000000009d087fc03ae39b088326b67fa3c788236645b717149d087fc03ae39b088326b67fa3c788236645b717000000af0100000000000000000000000000000000000000000000000000000000000003e820000000000000000000000000c012c4cb0acb2a859e10a0ed04ffacac60ac2b2c20000000000000000000000000dd39c3e7ebaec7739a55250275ddb44b1b37230f14c82ee0dac12f2d9460d2ae0edc0789a92ac2e674149d087fc03ae39b088326b67fa3c788236645b717002000000000000000000000000000000000000000000000000000000000000000120000',
+        ccvAddresses: ['0x997bbb1be075e6e9e7802b84c27c79e820a337a3'],
+        verifierResults: [
+          '0x49ff34ed018056590028d8a389e8109824079827e06d667b22b8271c4dfb4071cb54129bc14d883800f99e3d9108e0e656a955ac9dea4e7ad0cd82886ed2c19a0e6b9825e6ea795f765099e9928d10ae2d9cae31e93b710907efa8373c53e746c174edeb2f8bb52ba607f254f651e0d43081d07eca55fe5162c56aef6e22d8da325e799fe01e3ba606eb0fa58bc07b354d00a085fc665f1f19517563372f39b457e9e0a7e231fb687b0619e754b4fd8f95ba6a79abd9e0f6ed4db2f7d608ebf0fd36a6758a77d3394a0fd7e33432e2c8298983b24a2fa31e4db55aa1f1b15081bed43db02fc810fd800eca3bf0613fc4a61912d2d7ba8612199b643ccf0fcda002388190a259e5321fea25770cf314821716c46d13aac7a36cc0be4989e12971ca1d0eda83ec9c96ee9be84f6ed7ffbf0611ffbdf54ffecb77131b34cc5c091735fce9ffb283920a2626872fbffe9d3199e5ee0b12b541df0c1808b8762478a36d1cbcd3bd6aafd376d2359bdfe72b2288c07ade956cb1970a5dd65ca83d81cdfb94ce14e32d',
+        ],
+        gasLimit: 500_000n,
+        wallet: baseSepoliaWallet,
+      })
+
+      assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
+      assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
+      assert.ok(execution.timestamp > 0, 'execution should have a positive timestamp')
+      assert.ok(
+        execution.receipt.state === ExecutionState.Success,
+        `execution state should be Success, got ${execution.receipt.state}`,
+      )
+    } finally {
+      baseSepolia.destroy?.()
+    }
   })
 
   it('should reject when source chain RPC is missing', async () => {
