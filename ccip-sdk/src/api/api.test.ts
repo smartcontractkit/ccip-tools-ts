@@ -356,7 +356,8 @@ describe('CCIPAPIClient', () => {
       assert.equal(result.message.messageId, mockMessageResponse.messageId)
       assert.equal(result.message.sender, getAddress(mockMessageResponse.sender))
       assert.equal(result.message.sequenceNumber, 67890n)
-      assert.equal((result.message as { nonce: bigint }).nonce, 12345n)
+      assert.ok('nonce' in result.message)
+      assert.equal(result.message.nonce, 12345n)
 
       // TX
       assert.equal(result.tx.hash, mockMessageResponse.sendTransactionHash)
@@ -372,6 +373,8 @@ describe('CCIPAPIClient', () => {
       assert.equal(result.metadata.status, 'SUCCESS')
       assert.equal(result.metadata.readyForManualExecution, false)
       assert.equal(result.metadata.deliveryTime, 900000n)
+      assert.ok('finality' in result.message)
+      assert.equal(result.message.finality, 0n)
 
       // Network info - uses SDK's networkInfo() which has canonical names
       assert.equal(result.metadata.sourceNetworkInfo.name, 'ethereum-mainnet')
@@ -455,7 +458,8 @@ describe('CCIPAPIClient', () => {
       assert.equal(result.lane.version, CCIPVersion.V1_6) // Default when version not provided
       assert.equal(result.lane.onRamp, getAddress(minimalResponse.onramp))
       assert.equal(result.message.sequenceNumber, 12345n)
-      assert.equal((result.message as { nonce: bigint }).nonce, 0n) // nonce is still optional
+      assert.ok('nonce' in result.message)
+      assert.equal(result.message.nonce, 0n) // nonce is still optional
       assert.ok(result.metadata, 'metadata should be defined')
       assert.equal(result.metadata.receiptTransactionHash, undefined)
     })

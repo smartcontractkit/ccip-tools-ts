@@ -3,13 +3,13 @@ import {
   type Interface,
   type JsonRpcApiProvider,
   type Log,
+  type Result,
   type Signer,
   type TransactionReceipt,
   type TransactionRequest,
   type TransactionResponse,
   Contract,
   JsonRpcProvider,
-  Result,
   WebSocketProvider,
   ZeroAddress,
   getAddress,
@@ -120,22 +120,8 @@ export { decodeMessageV1 }
 export type { MessageV1, TokenTransferV1 }
 import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
 import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
-import type { UnsignedEVMTx } from './types.ts'
+import { type UnsignedEVMTx, resultToObject } from './types.ts'
 export type { UnsignedEVMTx }
-
-function resultToObject<T>(o: T): T {
-  if (o instanceof Promise) return o.then(resultToObject) as T
-  if (!(o instanceof Result)) return o
-  if (o.length === 0) return o.toArray() as T
-  try {
-    const obj = o.toObject()
-    if (!Object.keys(obj).every((k) => /^_+\d*$/.test(k)))
-      return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, resultToObject(v)])) as T
-  } catch (_) {
-    // fallthrough
-  }
-  return o.toArray().map(resultToObject) as T
-}
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
 function isSigner(wallet: unknown): wallet is Signer {
@@ -757,6 +743,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           this.provider,
         ) as unknown as TypedContract<typeof offRampABI>
         const { onRamp } = await contract.getSourceChainConfig(sourceChainSelector)
+        if (!onRamp || onRamp.match(/^(0x)?0*$/i)) return []
         return [decodeOnRampAddress(onRamp, networkInfo(sourceChainSelector).family)]
       }
       case CCIPVersion.V2_0: {

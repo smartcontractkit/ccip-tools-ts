@@ -77,7 +77,8 @@ describe('EVMChain.decodeMessage', () => {
       assert.equal(result.feeToken.toLowerCase(), testAddresses.feeToken.toLowerCase())
       assert.equal(result.messageId, testHash.messageId)
       assert.equal(result.sequenceNumber, 100n)
-      assert.equal((result as { nonce: bigint }).nonce, 1n)
+      assert.ok('nonce' in result)
+      assert.equal(result.nonce, 1n)
       assert.equal(result.sourceChainSelector, 1n)
     })
 
@@ -140,7 +141,8 @@ describe('EVMChain.decodeMessage', () => {
 
       assert.ok(result)
       // v1.5 event doesn't have allowOutOfOrderExecution; nonce=0 is preserved as-is
-      assert.equal((result as { nonce: bigint }).nonce, 0n)
+      assert.ok('nonce' in result)
+      assert.equal(result.nonce, 0n)
     })
   })
 
@@ -185,7 +187,8 @@ describe('EVMChain.decodeMessage', () => {
       assert.equal(result.feeToken.toLowerCase(), testAddresses.feeToken.toLowerCase())
       assert.equal(result.messageId, testHash.messageId)
       assert.equal(result.sequenceNumber, 500n)
-      assert.equal((result as { nonce: bigint }).nonce, 10n)
+      assert.ok('nonce' in result)
+      assert.equal(result.nonce, 10n)
       assert.equal(result.sourceChainSelector, sourceChainSelector)
       assert.equal((result as { destChainSelector?: bigint }).destChainSelector, destChainSelector)
       assert.equal(result.data, '0xabcd')
