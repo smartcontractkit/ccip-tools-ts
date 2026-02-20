@@ -128,9 +128,6 @@ class MockChain extends Chain {
     return '0xOnRamp'
   }
 
-  async getCommitStoreForOffRamp(_offRamp: string): Promise<string> {
-    return '0xCommitStore'
-  }
 
   async getSupportedTokens(_address: string, _opts?: { page?: number }): Promise<string[]> {
     return []

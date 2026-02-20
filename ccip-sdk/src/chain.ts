@@ -722,20 +722,6 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]>
   /**
-   * Fetch the CommitStore set in OffRamp config (CCIP v1.5 and earlier).
-   * For CCIP v1.6 and later, it should return the offRamp address.
-   *
-   * @param offRamp - OffRamp contract address
-   * @returns Promise resolving to CommitStore address
-   *
-   * @example Get commit store
-   * ```typescript
-   * const commitStore = await dest.getCommitStoreForOffRamp(offRampAddress)
-   * // For v1.6+, commitStore === offRampAddress
-   * ```
-   */
-  abstract getCommitStoreForOffRamp(offRamp: string): Promise<string>
-  /**
    * Fetch the TokenPool's token/mint.
    *
    * @param tokenPool - TokenPool address
@@ -966,19 +952,19 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   async getVerifications({
-    commitStore,
+    offRamp,
     request,
     ...hints
   }: {
-    /** address of commitStore (OffRamp in \>=v1.6) */
-    commitStore: string
+    /** address of offRamp or commitStore contract */
+    offRamp: string
     /** CCIPRequest subset object */
     request: PickDeep<
       CCIPRequest,
       'lane' | `message.${'sequenceNumber' | 'messageId'}` | 'tx.timestamp'
     >
   } & Pick<LogFilter, 'page' | 'watch' | 'startBlock'>): Promise<CCIPVerifications> {
-    return getOnchainCommitReport(this, commitStore, request, hints)
+    return getOnchainCommitReport(this, offRamp, request, hints)
   }
 
   /**

@@ -10,25 +10,25 @@ import { type CCIPRequest, type CCIPVerifications, CCIPVersion } from './types.t
  * logic in Chain.getCommitReport method
  *
  * @param dest - Destination network provider
- * @param commitStore - Commit store address
+ * @param offRamp - Commit store address
  * @param request - CCIP request info
  * @param hints - Additional filtering hints
  * @returns CCIP commit info
  **/
 export async function getOnchainCommitReport(
   dest: Chain,
-  commitStore: string,
+  offRamp: string,
   {
     lane,
     message,
     tx: { timestamp: requestTimestamp },
-  }: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>,
-  hints?: Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number },
+  }: PickDeep<CCIPRequest, 'lane' | `message.${'sequenceNumber' | 'messageId'}` | 'tx.timestamp'>,
+  hints?: Pick<LogFilter, 'page' | 'watch' | 'startBlock'>,
 ): Promise<CCIPVerifications> {
   for await (const log of dest.getLogs({
     ...hints,
     ...(!hints?.startBlock ? { startTime: requestTimestamp } : { startBlock: hints.startBlock }),
-    address: commitStore,
+    address: offRamp,
     topics: [lane.version < CCIPVersion.V1_6 ? 'ReportAccepted' : 'CommitReportAccepted'],
   })) {
     const reports = (dest.constructor as ChainStatic).decodeCommits(log, lane)

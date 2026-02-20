@@ -303,10 +303,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return [decodeAddress(sourceChainConfig.on_ramp, networkInfo(sourceChainSelector).family)]
   }
 
-  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
-  getCommitStoreForOffRamp(offRamp: string): Promise<string> {
-    return Promise.resolve(offRamp.split('::')[0] + '::offramp')
-  }
 
   /** {@inheritDoc Chain.getTokenForTokenPool} */
   async getTokenForTokenPool(tokenPool: string): Promise<string> {

@@ -99,18 +99,6 @@ describe.skip('TON index integration tests', () => {
         'Should match expected EVM OnRamp address',
       )
     })
-
-    it('TONChain.getCommitStoreForOffRamp should return offRamp address for v1.6', async () => {
-      const commitStore = await tonChain.getCommitStoreForOffRamp(ADDRESSES_TO_ASSERT.tonOffRamp)
-
-      assert.ok(commitStore, 'Should return commit store address')
-
-      assert.equal(
-        Address.parse(commitStore).toRawString(),
-        Address.parse(ADDRESSES_TO_ASSERT.tonOffRamp).toRawString(),
-        'CommitStore should be the same as OffRamp for v1.6',
-      )
-    })
   })
 
   describe('Router bindings', () => {

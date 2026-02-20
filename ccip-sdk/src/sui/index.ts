@@ -393,10 +393,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return [decodeAddress(onRampBytes, networkInfo(sourceChainSelector).family)]
   }
 
-  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
-  getCommitStoreForOffRamp(offRamp: string): Promise<string> {
-    return Promise.resolve(offRamp)
-  }
 
   /**
    * {@inheritDoc Chain.getTokenForTokenPool}

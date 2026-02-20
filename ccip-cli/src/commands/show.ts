@@ -191,12 +191,11 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
 
   const dest = await getChain(request.lane.destChainSelector)
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
-  const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
 
   let cancelWaitVerifications: (() => void) | undefined
   const verifications$ = (async () => {
-    const commit = await dest.getVerifications({
-      commitStore,
+    const verifications = await dest.getVerifications({
+      offRamp,
       request,
       ...argv,
       watch: argv.wait && new Promise<void>((resolve) => (cancelWaitVerifications = resolve)),
@@ -207,19 +206,19 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       logger.info(`[${MessageStatus.Committed}] Commit report accepted on destination chain`)
     switch (argv.format) {
       case Format.log:
-        logger.log('commit =', commit)
+        logger.log('commit =', verifications)
         break
       case Format.pretty:
-        await prettyVerifications.call(ctx, dest, commit, request)
+        await prettyVerifications.call(ctx, dest, verifications, request)
         break
       case Format.json:
-        logger.info(JSON.stringify(commit, bigIntReplacer, 2))
+        logger.info(JSON.stringify(verifications, bigIntReplacer, 2))
         break
     }
     if (argv.wait)
       logger.info(`[${MessageStatus.Blessed}] Waiting for execution on destination chain...`)
     else logger.info('Receipts (dest):')
-    return commit
+    return verifications
   })().catch((err) => {
     // FIXME: ignore getCommitReport errors until offchain commit fetching is ready
     logger.debug('getCommitReport error:', err)

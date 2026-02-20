@@ -744,8 +744,19 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * {@inheritDoc Chain.getCommitStoreForOffRamp}
+   * Fetch the CommitStore set in OffRamp config (CCIP v1.5 and earlier).
+   * For CCIP v1.6 and later, it should return the offRamp address.
+   *
+   * @param offRamp - OffRamp contract address
+   * @returns Promise resolving to CommitStore address
+   *
+   * @example Get commit store
+   * ```typescript
+   * const commitStore = await dest.getCommitStoreForOffRamp(offRampAddress)
+   * // For v1.6+, commitStore === offRampAddress
+   * ```
    * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
+   * @internal
    */
   async getCommitStoreForOffRamp(offRamp: string): Promise<string> {
     const [, version] = await this.typeAndVersion(offRamp)
@@ -1440,11 +1451,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   override async getVerifications(
     opts: Parameters<Chain['getVerifications']>[0],
   ): Promise<CCIPVerifications> {
-    const { commitStore, request } = opts
-    const [, version] = await this.typeAndVersion(commitStore)
-    if (version >= CCIPVersion.V2_0) {
+    const { offRamp, request } = opts
+    if (request.lane.version >= CCIPVersion.V2_0) {
       const contract = new Contract(
-        commitStore,
+        offRamp,
         interfaces.OffRamp_v2_0,
         this.provider,
       ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
@@ -1486,6 +1496,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       const res = await fetch(url)
       const json = await res.json()
       return json as CCIPVerifications
+    } else if (request.lane.version < CCIPVersion.V1_6) {
+      // v1.2..v1.5 EVM (only) have separate CommitStore
+      opts.offRamp = await this.getCommitStoreForOffRamp(opts.offRamp)
     }
     // fallback <=v1.6
     return super.getVerifications(opts)
