@@ -28,6 +28,7 @@ export {
   CCIPMessageIdNotFoundError,
   CCIPMessageIdValidationError,
   CCIPMessageInvalidError,
+  CCIPMessageNotCommittedError,
   CCIPMessageNotFoundInTxError,
   CCIPMessageNotInBatchError,
   CCIPMessageRetrievalError,
@@ -81,8 +82,10 @@ export { CCIPWalletInvalidError, CCIPWalletNotSignerError } from './specialized.
 
 // Specialized errors - Execution
 export {
+  CCIPApiRequiredError,
   CCIPExecTxNotConfirmedError,
   CCIPExecTxRevertedError,
+  CCIPOnchainCommitRequiredError,
   CCIPReceiptNotFoundError,
 } from './specialized.ts'
 

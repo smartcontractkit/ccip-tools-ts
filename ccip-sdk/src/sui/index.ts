@@ -844,6 +844,20 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return this.getExecutionReceiptInTx(await this.getTransaction(result.digest))
   }
 
+  /** {@inheritDoc Chain.generateUnsignedExecuteV2Message} */
+  override generateUnsignedExecuteV2Message(
+    _opts: Parameters<Chain['generateUnsignedExecuteV2Message']>[0],
+  ): Promise<never> {
+    return Promise.reject(new CCIPNotImplementedError('SuiChain.generateUnsignedExecuteV2Message'))
+  }
+
+  /** {@inheritDoc Chain.executeV2Message} */
+  override executeV2Message(
+    _opts: Parameters<Chain['executeV2Message']>[0],
+  ): Promise<CCIPExecution> {
+    return Promise.reject(new CCIPNotImplementedError('SuiChain.executeV2Message'))
+  }
+
   /**
    * Parses raw Sui data into typed structures.
    * @param data - Raw data to parse.

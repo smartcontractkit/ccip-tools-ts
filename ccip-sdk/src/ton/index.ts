@@ -1174,6 +1174,20 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     throw new CCIPReceiptNotFoundError(seqno.toString())
   }
 
+  /** {@inheritDoc Chain.generateUnsignedExecuteV2Message} */
+  override generateUnsignedExecuteV2Message(
+    _opts: Parameters<Chain['generateUnsignedExecuteV2Message']>[0],
+  ): Promise<UnsignedTONTx> {
+    return Promise.reject(new CCIPNotImplementedError('TONChain.generateUnsignedExecuteV2Message'))
+  }
+
+  /** {@inheritDoc Chain.executeV2Message} */
+  override executeV2Message(
+    _opts: Parameters<Chain['executeV2Message']>[0],
+  ): Promise<CCIPExecution> {
+    return Promise.reject(new CCIPNotImplementedError('TONChain.executeV2Message'))
+  }
+
   /**
    * Parses raw TON data into typed structures.
    * @param data - Raw data to parse.

@@ -182,3 +182,25 @@ export type APICCIPRequestMetadata = {
   /** Destination network metadata. */
   destNetworkInfo: NetworkInfo
 }
+
+// ============================================================================
+// GET /messages/{messageId}/execution-inputs types
+// ============================================================================
+
+/** Execution inputs for lane v1.6 and below. */
+export type ExecutionInputsV1 = {
+  offramp: string
+  messageBatch: Record<string, unknown>[]
+}
+
+/** Execution inputs for lane v2.0+. */
+export type ExecutionInputsV2 = {
+  offramp: string
+  encodedMessage: string
+  verifierAddresses: string[]
+  ccvData: string[]
+  verificationComplete: boolean
+}
+
+/** Execution inputs returned by the API (v1 or v2). */
+export type ExecutionInputs = ExecutionInputsV1 | ExecutionInputsV2

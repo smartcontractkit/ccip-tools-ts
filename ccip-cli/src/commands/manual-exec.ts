@@ -21,6 +21,7 @@
 
 import {
   type ExecutionReport,
+  CCIPOnchainCommitRequiredError,
   bigIntReplacer,
   calculateManualExecProof,
   discoverOffRamp,
@@ -180,6 +181,7 @@ async function manualExec(
       break
   }
 
+  if (!('report' in commit)) throw new CCIPOnchainCommitRequiredError(request.message.messageId)
   const messagesInBatch = await source.getMessagesInBatch(request, commit.report, argv)
   const execReportProof = calculateManualExecProof(
     messagesInBatch,
@@ -206,7 +208,11 @@ async function manualExec(
     logger.info('Estimated gasLimit override:', estimated)
     estimated += Math.ceil((estimated * argv.estimateGasLimit) / 100)
     const origLimit = Number(
-      'gasLimit' in request.message ? request.message.gasLimit : request.message.computeUnits,
+      'gasLimit' in request.message
+        ? request.message.gasLimit
+        : 'executionGasLimit' in request.message
+          ? request.message.executionGasLimit
+          : request.message.computeUnits,
     )
     if (origLimit >= estimated) {
       logger.warn(

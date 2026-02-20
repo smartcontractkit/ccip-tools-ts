@@ -15,6 +15,12 @@ const SEPOLIA_SELECTOR = 16015286601757825753n
 const SEPOLIA_ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
 const ANVIL_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 
+const BASE_SEPOLIA_RPC =
+  process.env['RPC_BASE_SEPOLIA'] || 'https://base-sepolia-rpc.publicnode.com'
+const BASE_SEPOLIA_CHAIN_ID = 84532
+const BASE_SEPOLIA_SELECTOR = 10344971235874465080n
+const BASE_SEPOLIA_ROUTER = '0x206dA6a2702D303eeB81b764062F47974E759c65'
+
 // v1.5 lane: Sepolia -> Fuji (OnRamp 0x1249…025B)
 const FUJI_SELECTOR = 14767482510784806043n
 // keccak256 of the CCIPSendRequested(tuple) event signature from the v1.5 OnRamp ABI
@@ -25,6 +31,9 @@ const CCIP_SEND_REQUESTED_TOPIC =
 const APTOS_TESTNET_SELECTOR = 743186221051783445n
 // keccak256 of the CCIPMessageSent(uint64,uint64,tuple) event signature from the v1.6 OnRamp ABI
 const CCIP_MESSAGE_SENT_TOPIC = interfaces.OnRamp_v1_6.getEvent('CCIPMessageSent')!.topicHash
+
+// v2.0 lane: Base Sepolia -> Fuji (OnRamp 0xeD69…FBa8)
+const CCIP_MESSAGE_SENT_V2_TOPIC = interfaces.OnRamp_v2_0.getEvent('CCIPMessageSent')!.topicHash
 
 // Token with pool support on the Sepolia -> Aptos lane
 const APTOS_SUPPORTED_TOKEN = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
@@ -194,6 +203,66 @@ describe(
       )
       assert.ok(tokenAmounts[0]!.sourcePoolAddress, 'v1.6 should have sourcePoolAddress')
       assert.ok(tokenAmounts[0]!.destTokenAddress, 'v1.6 should have destTokenAddress')
+    })
+  },
+)
+
+describe(
+  'sendMessage - Anvil Fork Tests (Base Sepolia 2.0)',
+  { skip: !!process.env.SKIP_INTEGRATION_TESTS || !isAnvilAvailable(), timeout: 120_000 },
+  () => {
+    let chain: EVMChain | undefined
+    let wallet: Wallet
+    let instance: ReturnType<typeof anvil> | undefined
+
+    before(async () => {
+      instance = anvil({
+        forkUrl: BASE_SEPOLIA_RPC,
+        chainId: BASE_SEPOLIA_CHAIN_ID,
+      })
+      await instance.start()
+
+      const provider = new JsonRpcProvider(`http://${instance.host}:${instance.port}`)
+      chain = await EVMChain.fromProvider(provider, { apiClient: null })
+      wallet = new Wallet(ANVIL_PRIVATE_KEY, provider)
+    })
+
+    after(async () => {
+      chain?.destroy?.()
+      await instance?.stop()
+    })
+
+    it('should send via v2.0 lane (Base Sepolia -> Fuji) and emit CCIPMessageSent', async () => {
+      assert.ok(chain, 'chain should be initialized')
+      const walletAddress = await wallet.getAddress()
+
+      const request = await chain.sendMessage({
+        router: BASE_SEPOLIA_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: { receiver: walletAddress, data: '0xbeef' },
+        wallet,
+      })
+
+      // Message ID and lane assertions
+      assert.ok(request.message.messageId, 'messageId should be defined')
+      assert.match(request.message.messageId, /^0x[0-9a-f]{64}$/i)
+      assert.equal(request.lane.sourceChainSelector, BASE_SEPOLIA_SELECTOR)
+      assert.equal(request.lane.destChainSelector, FUJI_SELECTOR)
+      assert.ok(request.tx.hash, 'tx hash should be defined')
+
+      // Verify the v2.0 CCIPMessageSent event was emitted
+      assert.ok(request.log, 'request should contain the event log')
+      assert.equal(
+        request.log.topics[0],
+        CCIP_MESSAGE_SENT_V2_TOPIC,
+        'should be v2.0 CCIPMessageSent',
+      )
+      assert.ok(request.log.address, 'log should have the onRamp address')
+      assert.equal(request.log.transactionHash, request.tx.hash, 'log tx hash should match')
+      assert.ok(
+        String(request.message.data).includes('beef'),
+        'message data should contain sent payload',
+      )
     })
   },
 )

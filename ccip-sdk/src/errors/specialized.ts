@@ -237,6 +237,34 @@ export class CCIPMessageIdNotFoundError extends CCIPError {
 }
 
 /**
+ * Thrown when a message exists but has not been committed yet (409 Conflict).
+ * Transient: the message will eventually be committed.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const inputs = await api.getExecutionInputs(messageId)
+ * } catch (error) {
+ *   if (error instanceof CCIPMessageNotCommittedError) {
+ *     console.log(`Not committed yet, retry in ${error.retryAfterMs}ms`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPMessageNotCommittedError extends CCIPError {
+  override readonly name = 'CCIPMessageNotCommittedError'
+  /** Creates a message not committed error. */
+  constructor(messageId: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.MESSAGE_NOT_COMMITTED, `Message ${messageId} has not been committed yet`, {
+      ...options,
+      isTransient: true,
+      retryAfterMs: 30000,
+      context: { ...options?.context, messageId },
+    })
+  }
+}
+
+/**
  * Thrown when messageId format is invalid.
  *
  * @example
@@ -904,6 +932,65 @@ export class CCIPExecTxRevertedError extends CCIPError {
       ...options,
       isTransient: false,
       context: { ...options?.context, txHash },
+    })
+  }
+}
+
+/**
+ * Thrown when manual execution requires an onchain commit report but offchain
+ * verifications (CCIP v2.0) were found instead.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await execute({ source, dest, messageId, txHash, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCIPOnchainCommitRequiredError) {
+ *     console.log('v2.0 offchain verification not yet supported for manual execution')
+ *   }
+ * }
+ * ```
+ */
+export class CCIPOnchainCommitRequiredError extends CCIPError {
+  override readonly name = 'CCIPOnchainCommitRequiredError'
+  /** Creates an onchain commit required error. */
+  constructor(messageId: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.ONCHAIN_COMMIT_REQUIRED,
+      'Manual execution requires an onchain commit report; offchain verification (v2.0) is not yet supported',
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, messageId },
+      },
+    )
+  }
+}
+
+/**
+ * Thrown when an operation requires the CCIP API but the API is disabled or unreachable.
+ * Some operations currently cannot be completed via RPC alone; this limitation will be
+ * lifted as RPC-based alternatives are implemented.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await execute(messageId, wallet, rpcs, { api: false, txHash })
+ * } catch (error) {
+ *   if (error instanceof CCIPApiRequiredError) {
+ *     console.log('This operation requires the API — remove api: false')
+ *   }
+ * }
+ * ```
+ */
+export class CCIPApiRequiredError extends CCIPError {
+  override readonly name = 'CCIPApiRequiredError'
+  /** Creates an API required error. */
+  constructor(messageId: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.API_REQUIRED, 'The CCIP API is required for this operation', {
+      ...options,
+      isTransient: true,
+      context: { ...options?.context, messageId },
     })
   }
 }
