@@ -975,7 +975,7 @@ export class CCIPOnchainCommitRequiredError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await execute(messageId, txHash, wallet, rpcs, { api: false })
+ *   await execute(messageId, wallet, rpcs, { api: false, txHash })
  * } catch (error) {
  *   if (error instanceof CCIPApiRequiredError) {
  *     console.log('This operation requires the API — remove api: false')

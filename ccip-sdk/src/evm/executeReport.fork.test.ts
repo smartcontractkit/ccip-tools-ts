@@ -220,10 +220,9 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
     await assert.rejects(
       execute(
         messageId,
-        sourceTxHash,
         new Wallet(ANVIL_PRIVATE_KEY),
         [sepoliaUrl], // only dest, no source
-        { gasLimit: 500_000, api: false },
+        { gasLimit: 500_000, api: false, txHash: sourceTxHash },
       ),
       (err: unknown) => err instanceof CCIPTransactionNotFoundError,
     )
@@ -240,10 +239,9 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
     await assert.rejects(
       execute(
         messageId,
-        sourceTxHash,
         new Wallet(ANVIL_PRIVATE_KEY),
         [fujiUrl], // only source, no dest
-        { gasLimit: 500_000, api: false },
+        { gasLimit: 500_000, api: false, txHash: sourceTxHash },
       ),
       (err: unknown) => err instanceof CCIPRpcNotFoundError,
     )
@@ -266,10 +264,9 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
     // Use api: false to test RPC-only path (API is tested separately below)
     const execution = await execute(
       messageId,
-      sourceTxHash,
       new Wallet(ANVIL_PRIVATE_KEY),
       [extraUrl, fujiUrl, sepoliaUrl],
-      { gasLimit: 500_000, api: false },
+      { gasLimit: 500_000, api: false, txHash: sourceTxHash },
     )
 
     assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
@@ -297,12 +294,12 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
       // Execute using staging API to fetch execution inputs
       const execution = await execute(
         messageId,
-        sourceTxHash,
         new Wallet(ANVIL_PRIVATE_KEY),
         [fujiUrl, sepoliaUrl],
         {
           gasLimit: 500_000,
           apiUrlOverride: STAGING_API_URL,
+          txHash: sourceTxHash,
         },
       )
 
@@ -329,10 +326,9 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
       // are fetched from the API and routed through the V2 path in execute()
       const execution = await execute(
         messageId,
-        sourceTxHash,
         new Wallet(ANVIL_PRIVATE_KEY),
         [baseSepoliaUrl, fujiUrl],
-        { apiUrlOverride: STAGING_API_URL },
+        { apiUrlOverride: STAGING_API_URL, txHash: sourceTxHash },
       )
 
       assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
@@ -357,12 +353,12 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
       // Execute using RPC-only path (API disabled)
       const execution = await execute(
         messageId,
-        sourceTxHash,
         new Wallet(ANVIL_PRIVATE_KEY),
         [fujiUrl, sepoliaUrl],
         {
           gasLimit: 500_000,
           api: false,
+          txHash: sourceTxHash,
         },
       )
 

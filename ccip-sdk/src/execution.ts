@@ -4,6 +4,7 @@ import { CCIPAPIClient, isExecutionInputsV2 } from './api/index.ts'
 import type { Chain, ChainGetter } from './chain.ts'
 import {
   CCIPApiRequiredError,
+  CCIPArgumentInvalidError,
   CCIPMerkleRootMismatchError,
   CCIPMessageNotFoundInTxError,
   CCIPMessageNotInBatchError,
@@ -206,6 +207,12 @@ export const discoverOffRamp = memoize(
  * Optional configuration for the {@link execute} function.
  */
 export type ExecuteOptions = {
+  /**
+   * Source transaction hash containing the CCIP request.
+   * Only required when the API is disabled (`api: false`). When the API is enabled
+   * (default), this is derived automatically from the API response.
+   */
+  txHash?: string
   /** Override gas limit for ccipReceive callback (0 keeps original) */
   gasLimit?: number
   /** Override gas limit for tokenPool releaseOrMint calls (EVM only) */
@@ -525,16 +532,16 @@ async function executeV2(
  * with merkle proofs) and V2.0 (offchain CCV verification, currently via API) messages.
  *
  * @param messageId - Message ID to execute
- * @param txHash - Source transaction hash containing the CCIP request
  * @param wallet - Chain-specific wallet/signer for the destination chain
  * @param rpcs - RPC endpoint URLs (must cover both source and destination chains)
- * @param options - Optional configuration for gas limits and execution behavior
+ * @param options - Optional configuration for gas limits, execution behavior, and source txHash
  * @returns Promise resolving to the execution result
  *
  * @throws {@link CCIPTransactionNotFoundError} if the transaction cannot be found on any chain
  * @throws {@link CCIPRpcNotFoundError} if no RPC is available for the destination chain
  * @throws {@link CCIPMessageNotFoundInTxError} if no message with the given messageId exists in the transaction
  * @throws {@link CCIPApiRequiredError} if the operation requires the API but it is disabled or unreachable
+ * @throws {@link CCIPArgumentInvalidError} if txHash is missing and cannot be derived from the API
  * @throws {@link CCIPOffRampNotFoundError} if no matching OffRamp is found
  * @throws {@link CCIPCommitNotFoundError} if no commit report is found for the message
  * @throws {@link CCIPMessageNotInBatchError} if messageId is not in the commit batch
@@ -545,11 +552,19 @@ async function executeV2(
  * ```typescript
  * import { execute, EVMChain } from '@chainlink/ccip-sdk'
  *
+ * // API enabled (default) — txHash is derived automatically
  * const result = await execute(
  *   '0x...',  // messageId
- *   '0x...',  // txHash
  *   signer,
  *   ['https://rpc.sepolia.org', 'https://rpc.fuji.avax.network'],
+ * )
+ *
+ * // API disabled — txHash must be provided explicitly
+ * const result2 = await execute(
+ *   '0x...',  // messageId
+ *   signer,
+ *   ['https://rpc.sepolia.org', 'https://rpc.fuji.avax.network'],
+ *   { api: false, txHash: '0x...' },
  * )
  * console.log(`Executed: ${result.log.transactionHash}`)
  * ```
@@ -559,30 +574,52 @@ async function executeV2(
  */
 export async function execute(
   messageId: string,
-  txHash: string,
   wallet: unknown,
   rpcs: readonly string[],
   options: ExecuteOptions = {},
 ): Promise<CCIPExecution> {
-  const [getChain, sourceTx, cleanup] = discoverChains(rpcs, txHash)
+  // Resolve txHash: use provided value, derive from API, or throw
+  let effectiveTxHash = options.txHash
+  let prefetchedApiData: APIExecutionData | undefined
+
+  if (!effectiveTxHash) {
+    if (options.api === false) {
+      throw new CCIPArgumentInvalidError(
+        'txHash',
+        'txHash is required when the API is disabled (api: false). Provide it via options.txHash.',
+      )
+    }
+    // Pre-fetch from API to derive txHash (console as logger since source chain is unknown)
+    prefetchedApiData = await fetchExecutionDataFromAPI(messageId, options.apiUrlOverride, console)
+    effectiveTxHash = prefetchedApiData.request?.tx.hash
+    if (!effectiveTxHash) {
+      throw new CCIPArgumentInvalidError(
+        'txHash',
+        'txHash could not be resolved from the CCIP API. Provide it explicitly via options.txHash.',
+      )
+    }
+  }
+
+  const [getChain, sourceTx, cleanup] = discoverChains(rpcs, effectiveTxHash)
   try {
     const [source] = await sourceTx
 
-    // API Phase: Attempt to fetch all available data from API (best-effort)
+    // API Phase: reuse pre-fetched data, or fetch now with the source chain's logger
     const apiData: APIExecutionData =
-      options.api !== false
+      prefetchedApiData ??
+      (options.api !== false
         ? await fetchExecutionDataFromAPI(messageId, options.apiUrlOverride, source.logger)
-        : { version: 'v1' }
+        : { version: 'v1' })
 
     // 1. Get request (API or RPC)
     let request: CCIPRequest
     if (apiData.request) {
       request = apiData.request
     } else {
-      const requests = await source.getMessagesInTx(txHash)
+      const requests = await source.getMessagesInTx(effectiveTxHash)
       const found = requests.find((r) => r.message.messageId === messageId)
       if (!found) {
-        throw new CCIPMessageNotFoundInTxError(txHash, {
+        throw new CCIPMessageNotFoundInTxError(effectiveTxHash, {
           context: { messageId },
         })
       }
