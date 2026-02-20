@@ -327,7 +327,7 @@ export type ExecuteV2MessageOpts = {
   ccvAddresses: string[]
   /** Verifier results, parallel to ccvAddresses (hex-encoded byte blobs) */
   verifierResults: string[]
-  /** gasLimit override for the ccipReceive call */
+  /** Absolute EVM transaction gas limit. When omitted, computed from the message's encoded gas fields. */
   gasLimit?: bigint
 }
 

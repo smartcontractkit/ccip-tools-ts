@@ -165,6 +165,25 @@ async function submitTransaction(
   }
 }
 
+/** Overhead gas buffer for the OffRamp's outer execution logic and state updates. */
+const V2_EXECUTION_GAS_OVERHEAD = 200_000n
+
+/**
+ * Estimates the EVM transaction gas limit needed for a v2.0 OffRamp execute call.
+ *
+ * The OffRamp's `_callWithGasBuffer` catches internal OOGs without reverting,
+ * so `eth_estimateGas` finds the minimum for a non-reverting tx (the failure
+ * path, ~72K) rather than the gas actually needed for successful inner execution.
+ *
+ * Parses executionGasLimit (uint32 at bytes 25-28) and ccipReceiveGasLimit
+ * (uint32 at bytes 29-32) from the MessageV1Codec wire format and adds overhead.
+ */
+function estimateV2ExecuteGasLimit(encodedMessage: string): bigint {
+  const executionGasLimit = BigInt('0x' + encodedMessage.slice(52, 60))
+  const ccipReceiveGasLimit = BigInt('0x' + encodedMessage.slice(60, 68))
+  return executionGasLimit + ccipReceiveGasLimit + V2_EXECUTION_GAS_OVERHEAD
+}
+
 /**
  * EVM chain implementation supporting Ethereum-compatible networks.
  *
@@ -1231,7 +1250,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     encodedMessage,
     ccvAddresses,
     verifierResults,
-    gasLimit,
     payer,
   }: Parameters<Chain['generateUnsignedExecuteV2Message']>[0]): Promise<UnsignedEVMTx> {
     const contract = new Contract(
@@ -1244,7 +1262,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       encodedMessage,
       ccvAddresses,
       verifierResults,
-      gasLimit ?? 0n,
+      0n,
     )
     tx.from = payer
     return { family: ChainFamily.EVM, transactions: [tx] }
@@ -1261,6 +1279,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     })
     const unsignedTx: TransactionRequest = unsignedTxs.transactions[0]!
     unsignedTx.nonce = await this.nextNonce(await wallet.getAddress())
+    unsignedTx.gasLimit = opts.gasLimit ?? estimateV2ExecuteGasLimit(opts.encodedMessage)
     const populatedTx = await wallet.populateTransaction(unsignedTx)
     populatedTx.from = undefined
     const response = await submitTransaction(wallet, populatedTx, this.provider)

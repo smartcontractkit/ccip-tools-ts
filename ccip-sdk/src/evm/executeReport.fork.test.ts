@@ -141,7 +141,7 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
     )
   })
 
-  it('should execute a v2.0 message (Sepolia -> Fuji)', async () => {
+  it('should execute a v2.0 message that originally failed (Sepolia -> Fuji)', async () => {
     const messageId = '0xa7bcdc5f31942e8024885fc25c375168050245370d50155b29d60301b6f53968'
 
     assert.ok(source, 'source (fuji) chain should be initialized')
@@ -168,17 +168,13 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
     assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
     assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
     assert.ok(execution.timestamp > 0, 'execution should have a positive timestamp')
-    // The original message failed (gasLimit: 0, token transfer to EOA),
-    // so manual re-execution also results in Failed state. This still proves
-    // the full executeV2Message pipeline: ABI encoding, tx submission, event decoding.
-    // TODO: revisit with a message that succeeds on re-execution.
     assert.ok(
-      execution.receipt.state === ExecutionState.Failed,
-      `execution state should be Failed, got ${execution.receipt.state}`,
+      execution.receipt.state === ExecutionState.Success,
+      `execution state should be Success, got ${execution.receipt.state}`,
     )
   })
 
-  it('should execute a v2.0 message successfully (Arbitrum Sepolia -> Base Sepolia)', async () => {
+  it('should execute a noexec v2.0 message waiting for execution (Arbitrum Sepolia -> Base Sepolia)', async () => {
     const messageId = '0x985661989074adde4b0c45fdfa4de9c5bc4a6c1c553e93e9303b150bc514fc51'
 
     assert.ok(baseSepoliaInstance, 'base sepolia anvil instance should be initialized')
@@ -198,7 +194,6 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
         verifierResults: [
           '0x49ff34ed018056590028d8a389e8109824079827e06d667b22b8271c4dfb4071cb54129bc14d883800f99e3d9108e0e656a955ac9dea4e7ad0cd82886ed2c19a0e6b9825e6ea795f765099e9928d10ae2d9cae31e93b710907efa8373c53e746c174edeb2f8bb52ba607f254f651e0d43081d07eca55fe5162c56aef6e22d8da325e799fe01e3ba606eb0fa58bc07b354d00a085fc665f1f19517563372f39b457e9e0a7e231fb687b0619e754b4fd8f95ba6a79abd9e0f6ed4db2f7d608ebf0fd36a6758a77d3394a0fd7e33432e2c8298983b24a2fa31e4db55aa1f1b15081bed43db02fc810fd800eca3bf0613fc4a61912d2d7ba8612199b643ccf0fcda002388190a259e5321fea25770cf314821716c46d13aac7a36cc0be4989e12971ca1d0eda83ec9c96ee9be84f6ed7ffbf0611ffbdf54ffecb77131b34cc5c091735fce9ffb283920a2626872fbffe9d3199e5ee0b12b541df0c1808b8762478a36d1cbcd3bd6aafd376d2359bdfe72b2288c07ade956cb1970a5dd65ca83d81cdfb94ce14e32d',
         ],
-        gasLimit: 500_000n,
         wallet: baseSepoliaWallet,
       })
 
