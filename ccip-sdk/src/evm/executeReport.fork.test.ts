@@ -315,6 +315,35 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
       )
     })
 
+    it('should execute a v2.0 message via execute() + API (Base Sepolia -> Fuji)', async () => {
+      const sourceTxHash = '0xb64da37467013d09030688b165ce1ca90c5415c99e1580dcddfeff825dd91dd7'
+      const messageId = '0x0d6344c93e7dcd535fe5a4af0a733b4501db703d5540c2d301856abf903b70d1'
+
+      assert.ok(baseSepoliaInstance, 'base sepolia anvil instance should be initialized')
+      assert.ok(fujiInstance, 'fuji anvil instance should be initialized')
+
+      const baseSepoliaUrl = `http://${baseSepoliaInstance.host}:${baseSepoliaInstance.port}`
+      const fujiUrl = `http://${fujiInstance.host}:${fujiInstance.port}`
+
+      // Execute using staging API — V2 execution inputs (encodedMessage, verifierAddresses, ccvData)
+      // are fetched from the API and routed through the V2 path in execute()
+      const execution = await execute(
+        messageId,
+        sourceTxHash,
+        new Wallet(ANVIL_PRIVATE_KEY),
+        [baseSepoliaUrl, fujiUrl],
+        { apiUrlOverride: STAGING_API_URL },
+      )
+
+      assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
+      assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
+      assert.ok(execution.timestamp > 0, 'execution should have a positive timestamp')
+      assert.ok(
+        execution.receipt.state === ExecutionState.Success,
+        `execution state should be Success, got ${execution.receipt.state}`,
+      )
+    })
+
     it('should execute via RPC path when api: false (Fuji -> Sepolia)', async () => {
       const sourceTxHash = '0x75e717fd080fb9b921e42182fac2b80b209512aeb81d6c5ab06cb93fcd94971f'
       const messageId = '0x54045a6816c0124d21a7aad34ec5cf683dee5c4482535c647377b410900cac5a'

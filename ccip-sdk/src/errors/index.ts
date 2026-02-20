@@ -82,6 +82,7 @@ export { CCIPWalletInvalidError, CCIPWalletNotSignerError } from './specialized.
 
 // Specialized errors - Execution
 export {
+  CCIPApiRequiredError,
   CCIPExecTxNotConfirmedError,
   CCIPExecTxRevertedError,
   CCIPOnchainCommitRequiredError,

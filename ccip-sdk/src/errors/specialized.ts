@@ -967,6 +967,33 @@ export class CCIPOnchainCommitRequiredError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when an operation requires the CCIP API but the API is disabled or unreachable.
+ * Some operations cannot be completed via RPC alone.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await execute(messageId, txHash, wallet, rpcs, { api: false })
+ * } catch (error) {
+ *   if (error instanceof CCIPApiRequiredError) {
+ *     console.log('This operation requires the API — remove api: false')
+ *   }
+ * }
+ * ```
+ */
+export class CCIPApiRequiredError extends CCIPError {
+  override readonly name = 'CCIPApiRequiredError'
+  /** Creates an API required error. */
+  constructor(messageId: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.API_REQUIRED, 'The CCIP API is required for this operation', {
+      ...options,
+      isTransient: true,
+      context: { ...options?.context, messageId },
+    })
+  }
+}
+
 // Attestation (USDC/LBTC)
 
 /**

@@ -3,11 +3,11 @@ import { memoize } from 'micro-memoize'
 import { CCIPAPIClient, isExecutionInputsV2 } from './api/index.ts'
 import type { Chain, ChainGetter } from './chain.ts'
 import {
+  CCIPApiRequiredError,
   CCIPMerkleRootMismatchError,
   CCIPMessageNotFoundInTxError,
   CCIPMessageNotInBatchError,
   CCIPOffRampNotFoundError,
-  CCIPOnchainCommitRequiredError,
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
 } from './errors/index.ts'
@@ -328,11 +328,21 @@ function reconnectWallet(wallet: unknown, dest: Chain): unknown {
  * Data fetched from the CCIP API for manual execution.
  * @internal
  */
-type APIExecutionData = {
-  request?: CCIPRequest
-  offRamp?: string
-  messagesInBatch?: CCIPMessage[]
-}
+type APIExecutionData =
+  | {
+      version: 'v1'
+      request?: CCIPRequest
+      offRamp?: string
+      messagesInBatch?: CCIPMessage[]
+    }
+  | {
+      version: 'v2'
+      request?: CCIPRequest
+      offRamp: string
+      encodedMessage: string
+      ccvAddresses: string[]
+      verifierResults: string[]
+    }
 
 /**
  * Fetch execution data from the CCIP API (best-effort).
@@ -345,7 +355,6 @@ async function fetchExecutionDataFromAPI(
   logger: Logger,
 ): Promise<APIExecutionData> {
   const apiClient = CCIPAPIClient.fromUrl(apiUrlOverride, { logger })
-  const result: APIExecutionData = {}
 
   // Make API calls in parallel for efficiency
   const [requestResult, executionInputsResult] = await Promise.allSettled([
@@ -353,9 +362,10 @@ async function fetchExecutionDataFromAPI(
     apiClient.getExecutionInputs(messageId),
   ])
 
-  // Process getMessageById result
+  // Process getMessageById result (version-agnostic)
+  let request: CCIPRequest | undefined
   if (requestResult.status === 'fulfilled') {
-    result.request = requestResult.value
+    request = requestResult.value
     logger.debug('execute: fetched request via API')
   } else {
     logger.debug('execute: getMessageById failed, will use RPC', {
@@ -366,23 +376,144 @@ async function fetchExecutionDataFromAPI(
   // Process getExecutionInputs result
   if (executionInputsResult.status === 'fulfilled') {
     const executionInputs = executionInputsResult.value
-    // V2 lanes require offchain verification - this is a fundamental incompatibility
+
     if (isExecutionInputsV2(executionInputs)) {
-      throw new CCIPOnchainCommitRequiredError(messageId)
+      logger.debug('execute: detected V2 execution inputs from API', {
+        offRamp: executionInputs.offramp,
+      })
+      return {
+        version: 'v2',
+        request,
+        offRamp: executionInputs.offramp,
+        encodedMessage: executionInputs.encodedMessage,
+        ccvAddresses: executionInputs.verifierAddresses,
+        verifierResults: executionInputs.ccvData,
+      }
     }
-    result.offRamp = executionInputs.offramp
-    result.messagesInBatch = executionInputs.messageBatch.map((rawMsg) => decodeMessage(rawMsg))
-    logger.debug('execute: fetched execution inputs via API', {
-      offRamp: result.offRamp,
-      messageCount: result.messagesInBatch.length,
+
+    const messagesInBatch = executionInputs.messageBatch.map((rawMsg) => decodeMessage(rawMsg))
+    logger.debug('execute: fetched V1 execution inputs via API', {
+      offRamp: executionInputs.offramp,
+      messageCount: messagesInBatch.length,
     })
-  } else {
-    logger.debug('execute: getExecutionInputs failed, will use RPC', {
-      error: executionInputsResult.reason as unknown,
-    })
+    return {
+      version: 'v1',
+      request,
+      offRamp: executionInputs.offramp,
+      messagesInBatch,
+    }
   }
 
-  return result
+  logger.debug('execute: getExecutionInputs failed, will use RPC', {
+    error: executionInputsResult.reason as unknown,
+  })
+  return { version: 'v1', request }
+}
+
+/**
+ * Execute a V1.x CCIP message using commit reports and merkle proofs.
+ * @internal
+ */
+async function executeV1(
+  messageId: string,
+  source: Chain,
+  dest: Chain,
+  request: CCIPRequest,
+  wallet: unknown,
+  apiData: Extract<APIExecutionData, { version: 'v1' }>,
+  options: ExecuteOptions,
+): Promise<CCIPExecution> {
+  // 1. Discover OffRamp (API or RPC)
+  const offRamp =
+    apiData.offRamp ?? (await discoverOffRamp(source, dest, request.lane.onRamp, source))
+
+  // 2. Get commit store
+  const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
+
+  // 3. Get verification/commit report
+  const commit = await dest.getVerifications({ commitStore, request })
+
+  // 4. Validate onchain commit (V2 detected via RPC = need API)
+  if (!('report' in commit)) {
+    throw new CCIPApiRequiredError(messageId)
+  }
+
+  // 5. Get messages in batch (API already fetched, or RPC fallback)
+  const messagesInBatch =
+    apiData.messagesInBatch ?? (await source.getMessagesInBatch(request, commit.report))
+
+  // 6. Calculate merkle proof
+  const execReportProof = calculateManualExecProof(
+    messagesInBatch,
+    request.lane,
+    messageId,
+    commit.report.merkleRoot,
+    dest,
+  )
+
+  // 7. Get offchain token data (USDC/LBTC attestations)
+  const offchainTokenData = await source.getOffchainTokenData(request)
+
+  // 8. Assemble execution report
+  const execReport: ExecutionReport = {
+    ...execReportProof,
+    message: request.message,
+    offchainTokenData,
+  }
+
+  // 9. Optional gas estimation
+  let effectiveGasLimit = options.gasLimit
+  if (options.estimateGasLimit != null) {
+    const { estimateReceiveExecution } = await import('./gas.ts')
+    let estimated = await estimateReceiveExecution({
+      source,
+      dest,
+      routerOrRamp: offRamp,
+      message: request.message,
+    })
+    estimated += Math.ceil((estimated * options.estimateGasLimit) / 100)
+    const origLimit = Number(
+      'gasLimit' in request.message
+        ? request.message.gasLimit
+        : 'executionGasLimit' in request.message
+          ? request.message.executionGasLimit
+          : (request.message as Record<string, unknown>).computeUnits,
+    )
+    if (origLimit < estimated) {
+      effectiveGasLimit = estimated
+    }
+  }
+
+  // 10. Execute on destination chain
+  return await dest.executeReport({
+    offRamp,
+    execReport,
+    wallet,
+    gasLimit: effectiveGasLimit,
+    tokensGasLimit: options.tokensGasLimit,
+    forceBuffer: options.forceBuffer,
+    forceLookupTable: options.forceLookupTable,
+  })
+}
+
+/**
+ * Execute a V2.0 CCIP message using API-provided offchain verification data.
+ * @internal
+ */
+async function executeV2(
+  dest: Chain,
+  wallet: unknown,
+  apiData: Extract<APIExecutionData, { version: 'v2' }>,
+  options: ExecuteOptions,
+): Promise<CCIPExecution> {
+  return await dest.executeV2Message({
+    offRamp: apiData.offRamp,
+    encodedMessage: apiData.encodedMessage,
+    ccvAddresses: apiData.ccvAddresses,
+    verifierResults: apiData.verifierResults,
+    gasLimit: options.gasLimit != null ? BigInt(options.gasLimit) : undefined,
+    wallet,
+  })
 }
 
 /**
@@ -390,8 +521,8 @@ async function fetchExecutionDataFromAPI(
  *
  * Orchestrates the full manual execution flow: auto-discovers source and destination
  * chains from the provided RPC URLs, fetches the message from the source transaction,
- * discovers the OffRamp, retrieves the commit report, calculates the merkle proof,
- * fetches offchain token data, and executes the report on the destination chain.
+ * and executes it on the destination chain. Supports both V1.x (onchain commit reports
+ * with merkle proofs) and V2.0 (offchain CCV verification via API) messages.
  *
  * @param messageId - Message ID to execute
  * @param txHash - Source transaction hash containing the CCIP request
@@ -403,7 +534,7 @@ async function fetchExecutionDataFromAPI(
  * @throws {@link CCIPTransactionNotFoundError} if the transaction cannot be found on any chain
  * @throws {@link CCIPRpcNotFoundError} if no RPC is available for the destination chain
  * @throws {@link CCIPMessageNotFoundInTxError} if no message with the given messageId exists in the transaction
- * @throws {@link CCIPOnchainCommitRequiredError} if offchain verification (v2.0) is found instead of an onchain commit
+ * @throws {@link CCIPApiRequiredError} if the operation requires the API but it is disabled or unreachable
  * @throws {@link CCIPOffRampNotFoundError} if no matching OffRamp is found
  * @throws {@link CCIPCommitNotFoundError} if no commit report is found for the message
  * @throws {@link CCIPMessageNotInBatchError} if messageId is not in the commit batch
@@ -438,18 +569,15 @@ export async function execute(
     const [source] = await sourceTx
 
     // API Phase: Attempt to fetch all available data from API (best-effort)
-    const {
-      request: apiRequest,
-      offRamp: apiOffRamp,
-      messagesInBatch: apiMessagesInBatch,
-    } = options.api !== false
-      ? await fetchExecutionDataFromAPI(messageId, options.apiUrlOverride, source.logger)
-      : {}
+    const apiData: APIExecutionData =
+      options.api !== false
+        ? await fetchExecutionDataFromAPI(messageId, options.apiUrlOverride, source.logger)
+        : { version: 'v1' }
 
     // 1. Get request (API or RPC)
     let request: CCIPRequest
-    if (apiRequest) {
-      request = apiRequest
+    if (apiData.request) {
+      request = apiData.request
     } else {
       const requests = await source.getMessagesInTx(txHash)
       const found = requests.find((r) => r.message.messageId === messageId)
@@ -467,76 +595,12 @@ export async function execute(
     // 3. Reconnect wallet to dest provider if needed
     const connectedWallet = reconnectWallet(wallet, dest)
 
-    // 4. Discover OffRamp (API or RPC)
-    const offRamp = apiOffRamp ?? (await discoverOffRamp(source, dest, request.lane.onRamp, source))
-
-    // 5. Get commit store
-    const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
-
-    // 6. Get verification/commit report
-    const commit = await dest.getVerifications({ commitStore, request })
-
-    // 7. Validate onchain commit (v2.0 not yet supported)
-    if (!('report' in commit)) {
-      throw new CCIPOnchainCommitRequiredError(messageId)
+    // 4. Branch by version
+    if (apiData.version === 'v2') {
+      return await executeV2(dest, connectedWallet, apiData, options)
     }
 
-    // 8. Get messages in batch (API already fetched, or RPC fallback)
-    const messagesInBatch =
-      apiMessagesInBatch ?? (await source.getMessagesInBatch(request, commit.report))
-
-    // 9. Calculate merkle proof
-    const execReportProof = calculateManualExecProof(
-      messagesInBatch,
-      request.lane,
-      messageId,
-      commit.report.merkleRoot,
-      dest,
-    )
-
-    // 10. Get offchain token data (USDC/LBTC attestations)
-    const offchainTokenData = await source.getOffchainTokenData(request)
-
-    // 11. Assemble execution report
-    const execReport: ExecutionReport = {
-      ...execReportProof,
-      message: request.message,
-      offchainTokenData,
-    }
-
-    // 12. Optional gas estimation
-    let effectiveGasLimit = options.gasLimit
-    if (options.estimateGasLimit != null) {
-      const { estimateReceiveExecution } = await import('./gas.ts')
-      let estimated = await estimateReceiveExecution({
-        source,
-        dest,
-        routerOrRamp: offRamp,
-        message: request.message,
-      })
-      estimated += Math.ceil((estimated * options.estimateGasLimit) / 100)
-      const origLimit = Number(
-        'gasLimit' in request.message
-          ? request.message.gasLimit
-          : 'executionGasLimit' in request.message
-            ? request.message.executionGasLimit
-            : (request.message as Record<string, unknown>).computeUnits,
-      )
-      if (origLimit < estimated) {
-        effectiveGasLimit = estimated
-      }
-    }
-
-    // 13. Execute on destination chain
-    return await dest.executeReport({
-      offRamp,
-      execReport,
-      wallet: connectedWallet,
-      gasLimit: effectiveGasLimit,
-      tokensGasLimit: options.tokensGasLimit,
-      forceBuffer: options.forceBuffer,
-      forceLookupTable: options.forceLookupTable,
-    })
+    return await executeV1(messageId, source, dest, request, connectedWallet, apiData, options)
   } finally {
     await cleanup()
   }
