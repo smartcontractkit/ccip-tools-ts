@@ -8,22 +8,23 @@ import {
   CCIPMessageNotFoundInTxError,
   CCIPMessageNotInBatchError,
   CCIPOffRampNotFoundError,
+  CCIPOnchainCommitRequiredError,
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
 } from './errors/index.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
 import { decodeMessage } from './requests.ts'
 import { supportedChains } from './supported-chains.ts'
-import type {
-  CCIPExecution,
-  CCIPMessage,
-  CCIPRequest,
+import {
+  type CCIPExecution,
+  type CCIPMessage,
+  type CCIPRequest,
+  type ChainTransaction,
+  type ExecutionReport,
+  type Lane,
+  type Logger,
+  type WithLogger,
   CCIPVersion,
-  ChainTransaction,
-  ExecutionReport,
-  Lane,
-  Logger,
-  WithLogger,
 } from './types.ts'
 import { networkInfo } from './utils.ts'
 
@@ -430,15 +431,13 @@ async function executeV1(
   // 2. Get commit store
   const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
 
-  // 3. Get verification/commit report
+  // 3. Get commit report (V1 lanes should always have onchain commits)
   const commit = await dest.getVerifications({ commitStore, request })
-
-  // 4. Validate onchain commit (V2 detected via RPC = need API)
   if (!('report' in commit)) {
-    throw new CCIPApiRequiredError(messageId)
+    throw new CCIPOnchainCommitRequiredError(messageId)
   }
 
-  // 5. Get messages in batch (API already fetched, or RPC fallback)
+  // 4. Get messages in batch (API already fetched, or RPC fallback)
   const messagesInBatch =
     apiData.messagesInBatch ?? (await source.getMessagesInBatch(request, commit.report))
 
@@ -498,6 +497,7 @@ async function executeV1(
 
 /**
  * Execute a V2.0 CCIP message using API-provided offchain verification data.
+ * A future RPC-only path will retrieve verifications directly, removing the API requirement.
  * @internal
  */
 async function executeV2(
@@ -522,7 +522,7 @@ async function executeV2(
  * Orchestrates the full manual execution flow: auto-discovers source and destination
  * chains from the provided RPC URLs, fetches the message from the source transaction,
  * and executes it on the destination chain. Supports both V1.x (onchain commit reports
- * with merkle proofs) and V2.0 (offchain CCV verification via API) messages.
+ * with merkle proofs) and V2.0 (offchain CCV verification, currently via API) messages.
  *
  * @param messageId - Message ID to execute
  * @param txHash - Source transaction hash containing the CCIP request
@@ -595,12 +595,18 @@ export async function execute(
     // 3. Reconnect wallet to dest provider if needed
     const connectedWallet = reconnectWallet(wallet, dest)
 
-    // 4. Branch by version
-    if (apiData.version === 'v2') {
+    // 4. Branch by lane version
+    if (request.lane.version === CCIPVersion.V2_0) {
+      if (apiData.version !== 'v2') {
+        throw new CCIPApiRequiredError(messageId)
+      }
       return await executeV2(dest, connectedWallet, apiData, options)
     }
 
-    return await executeV1(messageId, source, dest, request, connectedWallet, apiData, options)
+    // V1 path — if the API unexpectedly returned V2 data for a V1 lane, ignore it
+    const v1Data: Extract<APIExecutionData, { version: 'v1' }> =
+      apiData.version === 'v1' ? apiData : { version: 'v1' }
+    return await executeV1(messageId, source, dest, request, connectedWallet, v1Data, options)
   } finally {
     await cleanup()
   }

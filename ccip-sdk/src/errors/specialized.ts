@@ -969,7 +969,8 @@ export class CCIPOnchainCommitRequiredError extends CCIPError {
 
 /**
  * Thrown when an operation requires the CCIP API but the API is disabled or unreachable.
- * Some operations cannot be completed via RPC alone.
+ * Some operations currently cannot be completed via RPC alone; this limitation will be
+ * lifted as RPC-based alternatives are implemented.
  *
  * @example
  * ```typescript

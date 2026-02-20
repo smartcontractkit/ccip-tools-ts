@@ -127,7 +127,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   ONCHAIN_COMMIT_REQUIRED:
     'Manual execution currently requires an onchain commit report. CCIP v2.0 offchain verification is not yet supported.',
   API_REQUIRED:
-    'Remove the --no-api flag or ensure the CCIP API is reachable. This operation cannot be completed via RPC alone.',
+    'Remove the --no-api flag or ensure the CCIP API is reachable. This operation currently cannot be completed via RPC alone.',
 
   USDC_ATTESTATION_FAILED: 'USDC attestation not ready. Wait and retry (10-30 min typical).',
   LBTC_ATTESTATION_ERROR: 'LBTC attestation fetch failed. Wait and retry.',
