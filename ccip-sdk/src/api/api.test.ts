@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 import '../index.ts'
 import { getAddress } from 'ethers'
 
-import { CCIPAPIClient, DEFAULT_API_BASE_URL } from './index.ts'
+import { CCIPAPIClient, DEFAULT_API_BASE_URL, SDK_VERSION, SDK_VERSION_HEADER } from './index.ts'
 import {
   CCIPApiClientNotAvailableError,
   CCIPHttpError,
@@ -83,6 +83,26 @@ describe('CCIPAPIClient', () => {
 
       await client.getLaneLatency(1n, 2n)
       assert.equal(customFetch.mock.calls.length, 1)
+    })
+
+    it('should include SDK version header in requests', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(mockResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      await client.getLaneLatency(1n, 2n)
+
+      const call = customFetch.mock.calls[0] as unknown as { arguments: [string, RequestInit] }
+      const options = call.arguments[1]
+      assert.ok(options.headers)
+      assert.equal(
+        (options.headers as Record<string, string>)[SDK_VERSION_HEADER],
+        `CCIP SDK v${SDK_VERSION}`,
+      )
+      assert.equal((options.headers as Record<string, string>)['Content-Type'], 'application/json')
     })
 
     it('should use provided logger', () => {

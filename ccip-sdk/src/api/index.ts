@@ -44,6 +44,12 @@ export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
 /** Default timeout for API requests in milliseconds */
 export const DEFAULT_TIMEOUT_MS = 30000
 
+/** SDK version string for telemetry header */
+export const SDK_VERSION = '1.0'
+
+/** SDK telemetry header name */
+export const SDK_VERSION_HEADER = 'X-SDK-Version'
+
 /**
  * Context for CCIPAPIClient initialization.
  */
@@ -167,7 +173,13 @@ export class CCIPAPIClient {
     const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs)
 
     try {
-      return await this._fetch(url, { signal: controller.signal })
+      return await this._fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          [SDK_VERSION_HEADER]: `CCIP SDK v${SDK_VERSION}`,
+        },
+      })
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         throw new CCIPTimeoutError(operation, this.timeoutMs)
