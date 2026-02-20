@@ -21,6 +21,7 @@
 
 import {
   type ExecutionReport,
+  CCIPOnchainCommitRequiredError,
   bigIntReplacer,
   calculateManualExecProof,
   discoverOffRamp,
@@ -180,7 +181,7 @@ async function manualExec(
       break
   }
 
-  if (!('report' in commit)) throw new Error('Manual execution requires onchain commit report')
+  if (!('report' in commit)) throw new CCIPOnchainCommitRequiredError(request.message.messageId)
   const messagesInBatch = await source.getMessagesInBatch(request, commit.report, argv)
   const execReportProof = calculateManualExecProof(
     messagesInBatch,

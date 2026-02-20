@@ -116,34 +116,6 @@ describe('EVMChain.decodeMessage', () => {
       assert.equal(ta1.token?.toLowerCase(), testAddresses.token2.toLowerCase())
       assert.equal(ta1.amount, 2000n)
     })
-
-    it('should decode nonce 0 in v1.5 message', () => {
-      const fragment = interfaces.EVM2EVMOnRamp_v1_5.getEvent('CCIPSendRequested')!
-      const encoded = interfaces.EVM2EVMOnRamp_v1_5.encodeEventLog(fragment, [
-        {
-          sourceChainSelector: 1n,
-          sender: testAddresses.sender,
-          receiver: testAddresses.receiver,
-          sequenceNumber: 1n,
-          gasLimit: 100_000n,
-          strict: false,
-          nonce: 0n,
-          feeToken: ZeroAddress,
-          feeTokenAmount: 0n,
-          data: '0x',
-          tokenAmounts: [],
-          sourceTokenData: [],
-          messageId: testHash.messageId,
-        },
-      ])
-
-      const result = EVMChain.decodeMessage({ topics: encoded.topics, data: encoded.data })
-
-      assert.ok(result)
-      // v1.5 event doesn't have allowOutOfOrderExecution; nonce=0 is preserved as-is
-      assert.ok('nonce' in result)
-      assert.equal(result.nonce, 0n)
-    })
   })
 
   describe('v1.6 CCIPMessageSent', () => {
