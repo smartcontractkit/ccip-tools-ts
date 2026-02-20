@@ -504,12 +504,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
   }
 
-  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
-  async getCommitStoreForOffRamp(offRamp: string): Promise<string> {
-    // TODO: FIXME: check assumption
-    return Promise.resolve(offRamp)
-  }
-
   /**
    * {@inheritDoc Chain.getTokenForTokenPool}
    * @throws {@link CCIPNotImplementedError} always (not implemented for TON)

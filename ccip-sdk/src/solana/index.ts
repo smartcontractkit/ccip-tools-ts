@@ -601,10 +601,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return [decodeAddress(getAddressBytes(onRamp.bytes), networkInfo(sourceChainSelector).family)]
   }
 
-  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
-  getCommitStoreForOffRamp(offRamp: string): Promise<string> {
-    return Promise.resolve(offRamp) // Solana supports only CCIP>=1.6, for which OffRamp and CommitStore are the same
-  }
 
   /**
    * {@inheritDoc Chain.getTokenForTokenPool}

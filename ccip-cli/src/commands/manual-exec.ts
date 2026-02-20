@@ -164,28 +164,27 @@ async function manualExec(
 
   const dest = await getChain(request.lane.destChainSelector)
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
-  const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
-  const commit = await dest.getVerifications({ ...argv, commitStore, request })
+  const verifications = await dest.getVerifications({ ...argv, offRamp, request })
 
   switch (argv.format) {
     case Format.log:
-      logger.log('commit =', commit)
+      logger.log('commit =', verifications)
       break
     case Format.pretty:
       logger.info('Commit (dest):')
-      await prettyVerifications.call(ctx, dest, commit, request)
+      await prettyVerifications.call(ctx, dest, verifications, request)
       break
     case Format.json:
-      logger.info(JSON.stringify(commit, bigIntReplacer, 2))
+      logger.info(JSON.stringify(verifications, bigIntReplacer, 2))
       break
   }
 
-  const messagesInBatch = await source.getMessagesInBatch(request, commit.report, argv)
+  const messagesInBatch = await source.getMessagesInBatch(request, verifications.report, argv)
   const execReportProof = calculateManualExecProof(
     messagesInBatch,
     request.lane,
     request.message.messageId,
-    commit.report.merkleRoot,
+    verifications.report.merkleRoot,
     dest,
   )
 

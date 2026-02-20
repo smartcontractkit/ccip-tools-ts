@@ -75,8 +75,7 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
     assert.ok(offRamp, 'offRamp should be discovered')
 
     // 3. Get commit store and commit report
-    const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
-    const verifications = await dest.getVerifications({ commitStore, request })
+    const verifications = await dest.getVerifications({ offRamp, request })
     assert.ok('report' in verifications, 'commit should have a merkle root')
     assert.ok(verifications.report.merkleRoot, 'commit should have a merkle root')
 
