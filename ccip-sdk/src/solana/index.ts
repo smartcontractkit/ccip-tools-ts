@@ -598,7 +598,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const {
       config: { onRamp },
     } = await program.account.sourceChain.fetch(statePda)
-    return [decodeAddress(getAddressBytes(onRamp.bytes), networkInfo(sourceChainSelector).family)]
+    return [
+      decodeAddress(
+        getAddressBytes(onRamp.bytes).subarray(0, onRamp.len),
+        networkInfo(sourceChainSelector).family,
+      ),
+    ]
   }
 
   /**
