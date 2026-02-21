@@ -171,7 +171,11 @@ function formatData(name: string, data: string, parseError = false): Record<stri
   if (parseError) {
     let parsed
     for (const chain of Object.values(supportedChains)) {
-      parsed = chain.parse?.(data)
+      try {
+        parsed = chain.parse?.(data)
+      } catch {
+        // ignore
+      }
       if (parsed) break
     }
     if (parsed) {

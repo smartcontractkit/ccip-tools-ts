@@ -6,7 +6,7 @@ import { JsonRpcProvider, Wallet } from 'ethers'
 import { anvil } from 'prool/instances'
 
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
-import { type ExecutionReport, ExecutionState } from '../types.ts'
+import { type ExecutionInput, ExecutionState } from '../types.ts'
 import { EVMChain } from './index.ts'
 
 const FUJI_RPC = process.env['RPC_FUJI'] || 'https://avalanche-fuji-c-chain-rpc.publicnode.com'
@@ -95,14 +95,14 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
     const offchainTokenData = await source.getOffchainTokenData(request)
 
     // 7. Build execution report and execute
-    const execReport: ExecutionReport = {
+    const input = {
       ...execReportProof,
       message: request.message,
       offchainTokenData,
-    }
+    } as ExecutionInput
     const execution = await dest.executeReport({
       offRamp,
-      execReport,
+      input,
       wallet,
       gasLimit: 500_000,
     })

@@ -399,18 +399,24 @@ export type OffchainTokenData = { _tag: string; [k: string]: BytesLike } | undef
  * }
  * ```
  */
-export type ExecutionReport<M extends CCIPMessage = CCIPMessage> = {
-  /** The CCIP message to execute. */
-  message: M
-  /** Merkle proofs for the message. */
-  proofs: readonly BytesLike[]
-  /** Bit flags for proof verification. */
-  proofFlagBits: bigint
-  /** Merkle root for verification. */
-  merkleRoot: string
-  /** Offchain token data for each token transfer. */
-  offchainTokenData: readonly OffchainTokenData[]
-}
+export type ExecutionInput<M extends CCIPMessage = CCIPMessage> =
+  M extends CCIPMessage<typeof CCIPVersion.V2_0>
+    ? {
+        message: M
+        verifications: VerifierResult[]
+      }
+    : {
+        /** The CCIP message to execute. */
+        message: M
+        /** Merkle proofs for the message. */
+        proofs: readonly BytesLike[]
+        /** Bit flags for proof verification. */
+        proofFlagBits: bigint
+        /** Merkle root for verification. */
+        merkleRoot: string
+        /** Offchain token data for each token transfer. */
+        offchainTokenData: readonly OffchainTokenData[]
+      }
 
 /**
  * A message to be sent to another network.

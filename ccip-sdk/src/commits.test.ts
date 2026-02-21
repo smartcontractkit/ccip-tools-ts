@@ -120,7 +120,6 @@ class MockChain extends Chain {
     return '0xOnRamp'
   }
 
-
   async getSupportedTokens(_address: string, _opts?: { page?: number }): Promise<string[]> {
     return []
   }

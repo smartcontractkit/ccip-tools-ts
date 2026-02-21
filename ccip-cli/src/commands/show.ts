@@ -219,11 +219,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       logger.info(`[${MessageStatus.Blessed}] Waiting for execution on destination chain...`)
     else logger.info('Receipts (dest):')
     return verifications
-  })().catch((err) => {
-    // FIXME: ignore getCommitReport errors until offchain commit fetching is ready
-    logger.debug('getCommitReport error:', err)
-    return undefined
-  })
+  })()
 
   let found = false
   for await (const receipt of dest.getExecutionReceipts({

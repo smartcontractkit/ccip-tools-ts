@@ -58,8 +58,8 @@ import {
   type CCIPRequest,
   type ChainTransaction,
   type CommitReport,
+  type ExecutionInput,
   type ExecutionReceipt,
-  type ExecutionReport,
   type Lane,
   type Log_,
   type NetworkInfo,
@@ -241,17 +241,17 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /** {@inheritDoc Chain.getMessagesInBatch} */
-  async getMessagesInBatch<
+  override async getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
     request: R,
-    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
     opts?: { page?: number },
   ): Promise<R['message'][]> {
-    return getMessagesInBatch(this, request, commit, opts)
+    return getMessagesInBatch(this, request, range, opts)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
@@ -302,7 +302,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     })
     return [decodeAddress(sourceChainConfig.on_ramp, networkInfo(sourceChainSelector).family)]
   }
-
 
   /** {@inheritDoc Chain.getTokenForTokenPool} */
   async getTokenForTokenPool(tokenPool: string): Promise<string> {
@@ -567,10 +566,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   async generateUnsignedExecuteReport({
     payer,
     offRamp,
-    execReport,
+    input,
     ...opts
   }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedAptosTx> {
-    if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
+    if (!('allowOutOfOrderExecution' in input.message && 'gasLimit' in input.message)) {
       throw new CCIPAptosExtraArgsV2RequiredError()
     }
 
@@ -578,7 +577,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       this.provider,
       payer,
       offRamp,
-      execReport as ExecutionReport<CCIPMessage_V1_6_EVM>,
+      input as ExecutionInput<CCIPMessage_V1_6_EVM>,
       opts,
     )
     return {
@@ -624,9 +623,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @returns Parsed data or undefined.
    */
   static parse(data: unknown) {
-    if (isBytesLike(data)) {
-      const parsedExtraArgs = this.decodeExtraArgs(data)
-      if (parsedExtraArgs) return parsedExtraArgs
+    try {
+      if (isBytesLike(data)) {
+        const parsedExtraArgs = this.decodeExtraArgs(data)
+        if (parsedExtraArgs) return parsedExtraArgs
+      }
+    } catch {
+      // ignore
     }
   }
 

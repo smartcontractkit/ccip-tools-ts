@@ -30,8 +30,8 @@ import {
   type CCIPRequest,
   type ChainTransaction,
   type CommitReport,
+  type ExecutionInput,
   type ExecutionReceipt,
-  type ExecutionReport,
   type Lane,
   type Log_,
   type NetworkInfo,
@@ -370,10 +370,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
   }
 
-  /**
-   * {@inheritDoc Chain.getMessagesInBatch}
-   * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
-   */
+  /** {@inheritDoc Chain.getMessagesInBatch} */
   override async getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
@@ -381,10 +378,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     >,
   >(
     request: R,
-    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
-    opts?: { page?: number },
+    range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    opts?: Pick<LogFilter, 'page'>,
   ): Promise<R['message'][]> {
-    return getMessagesInBatch(this, request, commit, opts)
+    return getMessagesInBatch(this, request, range, opts)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
@@ -1112,16 +1109,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    */
   generateUnsignedExecuteReport({
     offRamp,
-    execReport,
+    input,
     ...opts
   }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedTONTx> {
-    if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
+    if (!('allowOutOfOrderExecution' in input.message && 'gasLimit' in input.message)) {
       throw new CCIPExtraArgsInvalidError('TON')
     }
 
     const unsigned = generateUnsignedExecuteReportImpl(
       offRamp,
-      execReport as ExecutionReport<CCIPMessage_V1_6_TON>,
+      input as ExecutionInput<CCIPMessage_V1_6_TON>,
       opts,
     )
 
@@ -1155,7 +1152,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       ...unsigned,
     })
 
-    const message = opts.execReport.message as CCIPMessage_V1_6_TON
+    const message = opts.input.message as CCIPMessage_V1_6_TON
     for await (const exec of this.getExecutionReceipts({
       offRamp,
       messageId: message.messageId,

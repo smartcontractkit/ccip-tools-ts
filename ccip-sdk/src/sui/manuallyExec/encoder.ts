@@ -5,7 +5,7 @@ import type { BytesLike } from 'ethers'
 
 import { CCIPMessageInvalidError } from '../../errors/specialized.ts'
 import { decodeExtraArgs } from '../../extra-args.ts'
-import type { CCIPMessage, CCIPVersion, ExecutionReport } from '../../types.ts'
+import type { CCIPMessage, CCIPVersion, ExecutionInput } from '../../types.ts'
 import { bytesToBuffer, getAddressBytes, getDataBytes, networkInfo } from '../../utils.ts'
 
 const Any2SuiTokenTransferBCS = bcs.struct('Any2SuiTokenTransfer', {
@@ -39,7 +39,7 @@ const ExecutionReportBCS = bcs.struct('ExecutionReport', {
  * @returns Serialized execution report as Uint8Array.
  */
 export function serializeExecutionReport(
-  executionReport: ExecutionReport<CCIPMessage<typeof CCIPVersion.V1_6>>,
+  executionReport: ExecutionInput<CCIPMessage<typeof CCIPVersion.V1_6>>,
 ): Uint8Array {
   const { message, offchainTokenData, proofs } = executionReport
 

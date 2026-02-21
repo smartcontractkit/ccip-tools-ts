@@ -40,6 +40,7 @@ import {
   CCIPExecTxRevertedError,
   CCIPHasherVersionUnsupportedError,
   CCIPLogDataInvalidError,
+  CCIPNotImplementedError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
@@ -350,15 +351,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.getMessagesInBatch} */
-  getMessagesInBatch<
+  override getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
     request: R,
-    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
-    opts?: { page?: number },
+    range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    opts?: Pick<LogFilter, 'page'>,
   ): Promise<R['message'][]> {
     let opts_: Parameters<EVMChain['getLogs']>[0] | undefined
     if (request.lane.version >= CCIPVersion.V1_6) {
@@ -368,7 +369,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         topics: [[request.log.topics[0]!], [toBeHex(request.lane.destChainSelector, 32)]],
       }
     }
-    return getMessagesInBatch(this, request, commit, opts_)
+    return getMessagesInBatch(this, request, range, opts_)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
@@ -1081,13 +1082,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    */
   async generateUnsignedExecuteReport({
     offRamp,
-    execReport,
+    input,
     ...opts
   }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedEVMTx> {
+    if ('verifications' in input)
+      throw new CCIPNotImplementedError('EVMChain.generateUnsignedExecuteReport v2 messages')
     const [_, version] = await this.typeAndVersion(offRamp)
 
     let manualExecTx
-    const offchainTokenData = execReport.offchainTokenData.map(encodeEVMOffchainTokenData)
+    const offchainTokenData = input.offchainTokenData.map(encodeEVMOffchainTokenData)
 
     switch (version) {
       case CCIPVersion.V1_2: {
@@ -1099,9 +1102,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const gasOverride = BigInt(opts.gasLimit ?? 0)
         manualExecTx = await contract.manuallyExecute.populateTransaction(
           {
-            ...execReport,
-            proofs: execReport.proofs.map((d) => hexlify(d)),
-            messages: [execReport.message as CCIPMessage<typeof CCIPVersion.V1_2>],
+            ...input,
+            proofs: input.proofs.map((d) => hexlify(d)),
+            messages: [input.message as CCIPMessage<typeof CCIPVersion.V1_2>],
             offchainTokenData: [offchainTokenData],
           },
           [gasOverride],
@@ -1116,15 +1119,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ) as unknown as TypedContract<typeof EVM2EVMOffRamp_1_5_ABI>
         manualExecTx = await contract.manuallyExecute.populateTransaction(
           {
-            ...execReport,
-            proofs: execReport.proofs.map((d) => hexlify(d)),
-            messages: [execReport.message as CCIPMessage<typeof CCIPVersion.V1_5>],
+            ...input,
+            proofs: input.proofs.map((d) => hexlify(d)),
+            messages: [input.message as CCIPMessage<typeof CCIPVersion.V1_5>],
             offchainTokenData: [offchainTokenData],
           },
           [
             {
               receiverExecutionGasLimit: BigInt(opts.gasLimit ?? 0),
-              tokenGasOverrides: execReport.message.tokenAmounts.map(() =>
+              tokenGasOverrides: input.message.tokenAmounts.map(() =>
                 BigInt(opts.tokensGasLimit ?? opts.gasLimit ?? 0),
               ),
             },
@@ -1134,20 +1137,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       }
       case CCIPVersion.V1_6: {
         // normalize message
-        const senderBytes = getAddressBytes(execReport.message.sender)
+        const senderBytes = getAddressBytes(input.message.sender)
         // Addresses ≤32 bytes (EVM 20B, Aptos/Solana/Sui 32B) are zero-padded to 32 bytes;
         // Addresses >32 bytes (e.g., TON 36B) are used as raw bytes without padding
         const sender =
           senderBytes.length <= 32 ? zeroPadValue(senderBytes, 32) : hexlify(senderBytes)
-        const tokenAmounts = (execReport.message as CCIPMessage_V1_6_EVM).tokenAmounts.map(
-          (ta) => ({
-            ...ta,
-            sourcePoolAddress: zeroPadValue(getAddressBytes(ta.sourcePoolAddress), 32),
-            extraData: hexlify(getDataBytes(ta.extraData)),
-          }),
-        )
+        const tokenAmounts = (input.message as CCIPMessage_V1_6_EVM).tokenAmounts.map((ta) => ({
+          ...ta,
+          sourcePoolAddress: zeroPadValue(getAddressBytes(ta.sourcePoolAddress), 32),
+          extraData: hexlify(getDataBytes(ta.extraData)),
+        }))
         const message = {
-          ...(execReport.message as CCIPMessage_V1_6_EVM),
+          ...(input.message as CCIPMessage_V1_6_EVM),
           sender,
           tokenAmounts,
         }
@@ -1159,9 +1160,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         manualExecTx = await contract.manuallyExecute.populateTransaction(
           [
             {
-              ...execReport,
-              proofs: execReport.proofs.map((p) => hexlify(p)),
-              sourceChainSelector: execReport.message.sourceChainSelector,
+              ...input,
+              proofs: input.proofs.map((p) => hexlify(p)),
+              sourceChainSelector: input.message.sourceChainSelector,
               messages: [
                 {
                   ...message,
@@ -1181,7 +1182,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
             [
               {
                 receiverExecutionGasLimit: BigInt(opts.gasLimit ?? 0),
-                tokenGasOverrides: execReport.message.tokenAmounts.map(() =>
+                tokenGasOverrides: input.message.tokenAmounts.map(() =>
                   BigInt(opts.tokensGasLimit ?? opts.gasLimit ?? 0),
                 ),
               },
