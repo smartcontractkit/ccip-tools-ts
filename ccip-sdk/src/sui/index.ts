@@ -50,8 +50,8 @@ import {
   type CCIPVersion,
   type ChainTransaction,
   type CommitReport,
+  type ExecutionInput,
   type ExecutionReceipt,
-  type ExecutionReport,
   type ExecutionState,
   type Lane,
   type Log_,
@@ -246,10 +246,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     >,
   >(
     request: R,
-    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
-    opts?: { page?: number },
+    range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    opts?: Pick<LogFilter, 'page'>,
   ): Promise<R['message'][]> {
-    return getMessagesInBatch(this, request, commit, opts)
+    return getMessagesInBatch(this, request, range, opts)
   }
 
   /**
@@ -392,7 +392,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     // Decode the address from the onRamp bytes
     return [decodeAddress(onRampBytes, networkInfo(sourceChainSelector).family)]
   }
-
 
   /**
    * {@inheritDoc Chain.getTokenForTokenPool}
@@ -753,7 +752,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       receiverObjectIds?: string[]
     },
   ): Promise<CCIPExecution> {
-    const { execReport, offRamp } = opts
+    const { input, offRamp } = opts
     const wallet = opts.wallet as Keypair
 
     // Discover the CCIP package from the offramp
@@ -765,20 +764,20 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       this.client,
       ccip,
       ccipObjectRef,
-      execReport.message.receiver,
+      input.message.receiver,
     )
     let tokenConfigs: TokenConfig[] = []
-    if (execReport.message.tokenAmounts.length !== 0) {
+    if (input.message.tokenAmounts.length !== 0) {
       tokenConfigs = await fetchTokenConfigs(
         this.client,
         ccip,
         ccipObjectRef,
-        execReport.message.tokenAmounts as CCIPMessage<typeof CCIPVersion.V1_6>['tokenAmounts'],
+        input.message.tokenAmounts as CCIPMessage<typeof CCIPVersion.V1_6>['tokenAmounts'],
       )
     }
 
-    const input: SuiManuallyExecuteInput = {
-      executionReport: execReport as ExecutionReport<CCIPMessage_V1_6_Sui>,
+    const suiInput: SuiManuallyExecuteInput = {
+      executionReport: input as ExecutionInput<CCIPMessage_V1_6_Sui>,
       offrampAddress: offRamp,
       ccipAddress: ccip,
       ccipObjectRef,
@@ -790,9 +789,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       this.logger.info(
         `Overriding Sui Manual Execution receiverObjectIds with: ${opts.receiverObjectIds.join(', ')}`,
       )
-      input.overrideReceiverObjectIds = opts.receiverObjectIds
+      suiInput.overrideReceiverObjectIds = opts.receiverObjectIds
     }
-    const tx = buildManualExecutionPTB(input)
+    const tx = buildManualExecutionPTB(suiInput)
 
     // Set gas budget if provided
     if (opts.gasLimit) {

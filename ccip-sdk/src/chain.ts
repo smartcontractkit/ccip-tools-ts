@@ -12,6 +12,7 @@ import {
   CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
+import { calculateManualExecProof } from './execution.ts'
 import type {
   EVMExtraArgsV1,
   EVMExtraArgsV2,
@@ -31,11 +32,12 @@ import {
   type CCIPMessage,
   type CCIPRequest,
   type CCIPVerifications,
+  type CCIPVersion,
   type ChainFamily,
   type ChainTransaction,
   type CommitReport,
+  type ExecutionInput,
   type ExecutionReceipt,
-  type ExecutionReport,
   type Lane,
   type Log_,
   type Logger,
@@ -304,7 +306,7 @@ export type ExecuteReportOpts = {
   /** address of the OffRamp contract */
   offRamp: string
   /** execution report */
-  execReport: ExecutionReport
+  input: ExecutionInput
   /** gasLimit or computeUnits limit override for the ccipReceive call */
   gasLimit?: number
   /** For EVM, overrides gasLimit on tokenPool call */
@@ -579,6 +581,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
   /**
    * Fetches all CCIP messages contained in a given commit batch.
+   * To be implemented for chains supporting CCIPVersion\<=v1.6.0
    *
    * @param request - CCIPRequest to fetch batch for
    * @param commit - CommitReport range (min, max)
@@ -593,17 +596,55 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * const messages = await source.getMessagesInBatch(request, commit.report)
    * console.log(`Found ${messages.length} messages in batch`)
    * ```
+   * @internal
    */
-  abstract getMessagesInBatch<
+  getMessagesInBatch?<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
     request: R,
-    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
     opts?: { page?: number },
   ): Promise<R['message'][]>
+
+  /**
+   * Fetch input data needed for executing CCIPv1 messages
+   * \>=v2 messages only need verifications
+   * @param opts - getExecutionInput options containing request and verifications
+   * @returns ExecutionInput object to be passed to [[executeMessage]]
+   */
+  async getExecutionInput({
+    request,
+    verifications,
+    ...opts
+  }: {
+    request: CCIPRequest
+    verifications: CCIPVerifications
+  } & Pick<LogFilter, 'page'>): Promise<ExecutionInput> {
+    if ('verifications' in verifications) {
+      // >=v2 verifications is enough for execution
+      return {
+        message: request.message as CCIPMessage<typeof CCIPVersion.V2_0>,
+        ...verifications,
+      }
+    }
+    const messagesInBatch = await this.getMessagesInBatch!(request, verifications.report, opts)
+    const execReportProof = calculateManualExecProof(
+      messagesInBatch,
+      request.lane,
+      request.message.messageId,
+      verifications.report.merkleRoot,
+      this,
+    )
+    const offchainTokenData = await this.getOffchainTokenData(request)
+    return {
+      ...execReportProof,
+      message: request.message,
+      offchainTokenData,
+    } as ExecutionInput
+  }
   /**
    * Fetch typeAndVersion for a given CCIP contract address.
    *

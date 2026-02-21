@@ -5,7 +5,7 @@ import { Transaction } from '@mysten/sui/transactions'
 import { serializeExecutionReport } from './encoder.ts'
 import { CCIPMessageInvalidError } from '../../errors/specialized.ts'
 import { decodeExtraArgs } from '../../extra-args.ts'
-import type { ExecutionReport } from '../../types.ts'
+import type { ExecutionInput } from '../../types.ts'
 import { networkInfo } from '../../utils.ts'
 import type { CCIPMessage_V1_6_Sui } from '../types.ts'
 
@@ -30,7 +30,7 @@ export type TokenConfig = {
 /** Input parameters for building a Sui manual execution transaction. */
 export type SuiManuallyExecuteInput = {
   offrampAddress: string
-  executionReport: ExecutionReport<CCIPMessage_V1_6_Sui>
+  executionReport: ExecutionInput<CCIPMessage_V1_6_Sui>
   ccipAddress: string
   ccipObjectRef: string
   offrampStateObject: string

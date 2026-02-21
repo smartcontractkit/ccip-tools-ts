@@ -8,7 +8,7 @@ import { bcs } from '@mysten/bcs'
 import { getBytes } from 'ethers'
 
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import type { ChainFamily, ExecutionReport } from '../types.ts'
+import type { ChainFamily, ExecutionInput } from '../types.ts'
 import { getAddressBytes } from '../utils.ts'
 
 /** Aptos account type with async transaction signing capability. */
@@ -61,7 +61,7 @@ export const ExecutionReportCodec = bcs.struct('ExecutionReport', {
  * @returns BCS-encoded bytes.
  */
 export function serializeExecutionReport(
-  execReport: ExecutionReport<CCIPMessage_V1_6_EVM>,
+  execReport: ExecutionInput<CCIPMessage_V1_6_EVM>,
 ): Uint8Array {
   const message = execReport.message
   return ExecutionReportCodec.serialize({

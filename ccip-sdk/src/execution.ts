@@ -7,7 +7,7 @@ import {
   CCIPOffRampNotFoundError,
 } from './errors/index.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
-import type { CCIPMessage, CCIPVersion, ExecutionReport, Lane, WithLogger } from './types.ts'
+import type { CCIPMessage, CCIPVersion, Lane, WithLogger } from './types.ts'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
@@ -57,7 +57,7 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
   messageId: string,
   merkleRoot?: string,
   ctx?: WithLogger,
-): Omit<ExecutionReport, 'offchainTokenData' | 'message'> {
+) {
   const hasher = getLeafHasher(lane, ctx)
 
   const msgIdx = messagesInBatch.findIndex((message) => message.messageId === messageId)

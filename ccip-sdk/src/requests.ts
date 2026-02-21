@@ -307,7 +307,7 @@ const BLOCK_LOG_WINDOW_SIZE = 5000
  * Fetches all CCIP messages contained in a given commit batch.
  * @param source - The source chain.
  * @param request - The CCIP request containing lane and message info.
- * @param seqNrRange - Object containing minSeqNr and maxSeqNr for the batch range.
+ * @param range - Object containing minSeqNr and maxSeqNr for the batch range.
  * @param opts - Optional log filtering parameters.
  * @returns Array of messages in the batch.
  * @see {@link getCommitReport} - Get commit report to determine batch range

@@ -20,9 +20,7 @@
  */
 
 import {
-  type ExecutionReport,
   bigIntReplacer,
-  calculateManualExecProof,
   discoverOffRamp,
   estimateReceiveExecution,
   isSupportedTxHash,
@@ -164,8 +162,8 @@ async function manualExec(
 
   const dest = await getChain(request.lane.destChainSelector)
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
-  const verifications = await dest.getVerifications({ ...argv, offRamp, request })
 
+  const verifications = await dest.getVerifications({ ...argv, offRamp, request })
   switch (argv.format) {
     case Format.log:
       logger.log('commit =', verifications)
@@ -179,22 +177,6 @@ async function manualExec(
       break
   }
 
-  const messagesInBatch = await source.getMessagesInBatch(request, verifications.report, argv)
-  const execReportProof = calculateManualExecProof(
-    messagesInBatch,
-    request.lane,
-    request.message.messageId,
-    verifications.report.merkleRoot,
-    dest,
-  )
-
-  const offchainTokenData = await source.getOffchainTokenData(request)
-  const execReport: ExecutionReport = {
-    ...execReportProof,
-    message: request.message,
-    offchainTokenData,
-  }
-
   if (argv.estimateGasLimit != null) {
     let estimated = await estimateReceiveExecution({
       source,
@@ -205,7 +187,11 @@ async function manualExec(
     logger.info('Estimated gasLimit override:', estimated)
     estimated += Math.ceil((estimated * argv.estimateGasLimit) / 100)
     const origLimit = Number(
-      'gasLimit' in request.message ? request.message.gasLimit : request.message.computeUnits,
+      'ccipReceiveGasLimit' in request.message
+        ? request.message.ccipReceiveGasLimit
+        : 'gasLimit' in request.message
+          ? request.message.gasLimit
+          : request.message.computeUnits,
     )
     if (origLimit >= estimated) {
       logger.warn(
@@ -222,8 +208,10 @@ async function manualExec(
     }
   }
 
+  const input = await source.getExecutionInput({ ...argv, request, verifications })
+
   const [, wallet] = await loadChainWallet(dest, argv)
-  const receipt = await dest.executeReport({ ...argv, offRamp, execReport, wallet })
+  const receipt = await dest.executeReport({ ...argv, offRamp, input, wallet })
 
   switch (argv.format) {
     case Format.log:
