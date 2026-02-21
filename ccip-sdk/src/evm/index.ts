@@ -40,7 +40,6 @@ import {
   CCIPExecTxRevertedError,
   CCIPHasherVersionUnsupportedError,
   CCIPLogDataInvalidError,
-  CCIPNotImplementedError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
@@ -1085,18 +1084,47 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     input,
     ...opts
   }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedEVMTx> {
-    if ('verifications' in input)
-      throw new CCIPNotImplementedError('EVMChain.generateUnsignedExecuteReport v2 messages')
-    const [_, version] = await this.typeAndVersion(offRamp)
+    if ('verifications' in input) {
+      const contract = new Contract(
+        offRamp,
+        interfaces.OffRamp_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
+
+      // `execute` doesn't revert on failure, so we need to estimate using `executeSingleMessage`
+      const txGasLimit = await contract.executeSingleMessage.estimateGas(
+        {
+          ...input.message,
+          tokenTransfer: input.message.tokenAmounts,
+          executionGasLimit: BigInt(input.message.executionGasLimit),
+          ccipReceiveGasLimit: BigInt(input.message.ccipReceiveGasLimit),
+          finality: BigInt(input.message.finality),
+        },
+        input.message.messageId,
+        input.verifications.map(({ destAddress }) => destAddress),
+        input.verifications.map(({ ccvData }) => hexlify(ccvData)),
+        BigInt(opts.gasLimit ?? 0),
+        { from: offRamp }, // internal method
+      )
+      const execTx = await contract.execute.populateTransaction(
+        input.message.encodedMessage,
+        input.verifications.map(({ destAddress }) => destAddress),
+        input.verifications.map(({ ccvData }) => hexlify(ccvData)),
+        BigInt(opts.gasLimit ?? 0),
+      )
+      execTx.gasLimit = txGasLimit + 40000n // plus `execute`'s overhead
+      return { family: ChainFamily.EVM, transactions: [execTx] }
+    }
 
     let manualExecTx
+    const [_, version] = await this.typeAndVersion(offRamp)
     const offchainTokenData = input.offchainTokenData.map(encodeEVMOffchainTokenData)
 
     switch (version) {
       case CCIPVersion.V1_2: {
         const contract = new Contract(
           offRamp,
-          EVM2EVMOffRamp_1_2_ABI,
+          interfaces.EVM2EVMOffRamp_v1_2,
           this.provider,
         ) as unknown as TypedContract<typeof EVM2EVMOffRamp_1_2_ABI>
         const gasOverride = BigInt(opts.gasLimit ?? 0)
@@ -1114,7 +1142,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       case CCIPVersion.V1_5: {
         const contract = new Contract(
           offRamp,
-          EVM2EVMOffRamp_1_5_ABI,
+          interfaces.EVM2EVMOffRamp_v1_5,
           this.provider,
         ) as unknown as TypedContract<typeof EVM2EVMOffRamp_1_5_ABI>
         manualExecTx = await contract.manuallyExecute.populateTransaction(
@@ -1154,7 +1182,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         }
         const contract = new Contract(
           offRamp,
-          OffRamp_1_6_ABI,
+          interfaces.OffRamp_v1_6,
           this.provider,
         ) as unknown as TypedContract<typeof OffRamp_1_6_ABI>
         manualExecTx = await contract.manuallyExecute.populateTransaction(
@@ -1211,12 +1239,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ...opts,
       payer: await wallet.getAddress(),
     })
+
     const unsignedTx: TransactionRequest = unsignedTxs.transactions[0]!
     unsignedTx.nonce = await this.nextNonce(await wallet.getAddress())
     const populatedTx = await wallet.populateTransaction(unsignedTx)
     populatedTx.from = undefined // some signers don't like receiving pre-populated `from`
+
     const response = await submitTransaction(wallet, populatedTx, this.provider)
     this.logger.debug('manuallyExecute =>', response.hash)
+
     const receipt = await response.wait(1, 60_000)
     if (!receipt?.hash) throw new CCIPExecTxNotConfirmedError(response.hash)
     if (!receipt.status) throw new CCIPExecTxRevertedError(response.hash)
