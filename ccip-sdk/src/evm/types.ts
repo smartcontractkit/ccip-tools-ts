@@ -7,7 +7,7 @@ import type { ChainFamily } from '../types.ts'
  */
 export type UnsignedEVMTx = {
   family: typeof ChainFamily.EVM
-  transactions: Pick<TransactionRequest, 'from' | 'to' | 'data'>[]
+  transactions: Pick<TransactionRequest, 'from' | 'to' | 'data' | 'gasLimit'>[]
 }
 
 /**
