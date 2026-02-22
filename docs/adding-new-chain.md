@@ -215,7 +215,7 @@ Implement all abstract methods from the `Chain` base class.
 - **Message operations** - `getMessagesInBatch` (note: `getMessagesInTx` has a default implementation)
 - **Contract queries** - `typeAndVersion`, router/ramp getters
 - **Tokens** - `getTokenInfo`, `getSupportedTokens`, `getFeeTokens`, token pool methods
-- **Transaction building** - `generateUnsignedSendMessage`, `generateUnsignedExecuteReport`
+- **Transaction building** - `generateUnsignedSendMessage`, `generateUnsignedExecute`
 - **Execution** - `sendMessage`, `executeReport`, `getOffchainTokenData`
 
 **Important patterns:**

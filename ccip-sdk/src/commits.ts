@@ -7,7 +7,7 @@ import { type CCIPRequest, type CCIPVerifications, CCIPVersion } from './types.t
 /**
  * Look for a CommitReport at dest for given CCIPRequest
  * Provides a basic/generic implementation, but subclasses of Chain may override with more specific
- * logic in Chain.getCommitReport method
+ * logic in Chain.getVerifications method
  *
  * @param dest - Destination network provider
  * @param offRamp - Commit store address
