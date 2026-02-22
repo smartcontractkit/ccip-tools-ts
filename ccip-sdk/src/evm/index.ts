@@ -189,7 +189,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   private noncesPromises: Record<string, Promise<unknown>>
   /**
    * Cache of current nonces per wallet address.
-   * Used internally by {@link sendMessage} and {@link executeReport} to manage transaction ordering.
+   * Used internally by {@link sendMessage} and {@link execute} to manage transaction ordering.
    * Can be inspected for debugging or manually adjusted if needed.
    */
   nonces: Record<string, number>
@@ -1078,12 +1078,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * {@inheritDoc Chain.generateUnsignedExecuteReport}
+   * {@inheritDoc Chain.generateUnsignedExecute}
    * @returns array containing one unsigned `manuallyExecute` TransactionRequest object
    * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
    */
-  async generateUnsignedExecuteReport(
-    opts: Parameters<Chain['generateUnsignedExecuteReport']>[0],
+  async generateUnsignedExecute(
+    opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<UnsignedEVMTx> {
     let input: ExecutionInput, offRamp: string
     if (!('input' in opts)) {
@@ -1235,16 +1235,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * {@inheritDoc Chain.executeReport}
+   * {@inheritDoc Chain.execute}
    * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Signer
    * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm
    * @throws {@link CCIPExecTxRevertedError} if execution transaction reverts
    */
-  async executeReport(opts: Parameters<Chain['executeReport']>[0]) {
+  async execute(opts: Parameters<Chain['execute']>[0]) {
     const wallet = opts.wallet
     if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
 
-    const unsignedTxs = await this.generateUnsignedExecuteReport({
+    const unsignedTxs = await this.generateUnsignedExecute({
       ...opts,
       payer: await wallet.getAddress(),
     })
@@ -1488,7 +1488,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     )
   }
 
-  /** {@inheritDoc Chain.getCommitReport} */
+  /** {@inheritDoc Chain.getVerifications} */
   override async getVerifications(
     opts: Parameters<Chain['getVerifications']>[0],
   ): Promise<CCIPVerifications> {

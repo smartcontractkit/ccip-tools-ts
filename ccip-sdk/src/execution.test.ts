@@ -188,11 +188,11 @@ class MockChain extends Chain {
     return []
   }
 
-  override generateUnsignedExecuteReport(_opts: any): Promise<never> {
+  override generateUnsignedExecute(_opts: any): Promise<never> {
     return Promise.reject(new Error('not implemented'))
   }
 
-  async executeReport(_opts: any): Promise<CCIPExecution> {
+  async execute(_opts: any): Promise<CCIPExecution> {
     return Promise.reject(new Error('not implemented'))
   }
 

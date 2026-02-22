@@ -45,10 +45,10 @@ describe('TON index unit tests', () => {
 
   const mockNetworkInfo = networkInfo('ton-testnet')
 
-  describe('executeReport', { timeout: 10e3 }, () => {
+  describe('execute', { timeout: 10e3 }, () => {
     const mockWalletAddress = Address.parse('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
 
-    // Helper to create a valid ExecutionStateChanged BOC cell for executeReport tests
+    // Helper to create a valid ExecutionStateChanged BOC cell for execute tests
     function createExecutionStateChangedCell(
       sourceChainSelector: bigint,
       sequenceNumber: bigint,
@@ -163,7 +163,7 @@ describe('TON index unit tests', () => {
       const { client, wallet, getCapturedTransfer } = createMockClientAndWallet({ seqno: 42 })
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
-      await tonChain.executeReport({
+      await tonChain.execute({
         offRamp: TON_OFFRAMP_ADDRESS_TEST,
         input: baseExecReport,
         wallet,
@@ -180,7 +180,7 @@ describe('TON index unit tests', () => {
       const { client, wallet, getCapturedTransfer } = createMockClientAndWallet()
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
-      await tonChain.executeReport({
+      await tonChain.execute({
         offRamp: TON_OFFRAMP_ADDRESS_TEST,
         input: baseExecReport,
         wallet,
@@ -204,7 +204,7 @@ describe('TON index unit tests', () => {
       })
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
-      const result = await tonChain.executeReport({
+      const result = await tonChain.execute({
         offRamp: TON_OFFRAMP_ADDRESS_TEST,
         input: baseExecReport,
         wallet,
@@ -227,7 +227,7 @@ describe('TON index unit tests', () => {
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
       await assert.rejects(
-        tonChain.executeReport({
+        tonChain.execute({
           offRamp: TON_OFFRAMP_ADDRESS_TEST,
           input: baseExecReport,
           wallet: { invalid: true },
@@ -249,7 +249,7 @@ describe('TON index unit tests', () => {
       }
 
       await assert.rejects(
-        tonChain.executeReport({
+        tonChain.execute({
           offRamp: TON_OFFRAMP_ADDRESS_TEST,
           input: v1_5Report as any,
           wallet,
@@ -263,7 +263,7 @@ describe('TON index unit tests', () => {
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
       await assert.rejects(
-        tonChain.executeReport({
+        tonChain.execute({
           offRamp: TON_OFFRAMP_ADDRESS_TEST,
           input: baseExecReport,
           wallet,
@@ -273,14 +273,14 @@ describe('TON index unit tests', () => {
     })
   })
 
-  describe('generateUnsignedExecuteReport', () => {
+  describe('generateUnsignedExecute', () => {
     it('should return UnsignedTONTx with family=ton', async () => {
       const tonChain = new TONChain(
         { getTransactions: async () => [] } as any,
         mockNetworkInfo as any,
       )
 
-      const unsigned = await tonChain.generateUnsignedExecuteReport({
+      const unsigned = await tonChain.generateUnsignedExecute({
         payer: '0:' + 'b'.repeat(64),
         offRamp: TON_OFFRAMP_ADDRESS_TEST,
         input: baseExecReport,
@@ -307,7 +307,7 @@ describe('TON index unit tests', () => {
 
       assert.throws(
         () =>
-          tonChain.generateUnsignedExecuteReport({
+          tonChain.generateUnsignedExecute({
             payer: '0:' + 'b'.repeat(64),
             offRamp: TON_OFFRAMP_ADDRESS_TEST,
             input: v1_5Report as any,

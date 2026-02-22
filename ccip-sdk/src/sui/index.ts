@@ -734,20 +734,20 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
-  /** {@inheritDoc Chain.generateUnsignedExecuteReport} */
-  override generateUnsignedExecuteReport(
-    _opts: Parameters<Chain['generateUnsignedExecuteReport']>[0],
+  /** {@inheritDoc Chain.generateUnsignedExecute} */
+  override generateUnsignedExecute(
+    _opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<never> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.generateUnsignedExecuteReport'))
+    return Promise.reject(new CCIPNotImplementedError('SuiChain.generateUnsignedExecute'))
   }
 
   /**
-   * {@inheritDoc Chain.executeReport}
+   * {@inheritDoc Chain.execute}
    * @throws {@link CCIPError} if transaction submission fails
    * @throws {@link CCIPExecTxRevertedError} if transaction reverts
    */
-  async executeReport(
-    opts: Parameters<Chain['executeReport']>[0] & {
+  async execute(
+    opts: Parameters<Chain['execute']>[0] & {
       receiverObjectIds?: string[]
     },
   ): Promise<CCIPExecution> {
@@ -800,7 +800,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       tx.setGasBudget(opts.gasLimit)
     }
 
-    this.logger.info(`Executing Sui CCIP executeReport transaction...`)
+    this.logger.info(`Executing Sui CCIP execute transaction...`)
     // Sign and execute the transaction
     let result: SuiTransactionBlockResponse
     try {
@@ -815,7 +815,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     } catch (e) {
       throw new CCIPError(
         CCIPErrorCode.TRANSACTION_NOT_FINALIZED,
-        `Failed to send Sui executeReport transaction: ${(e as Error).message}`,
+        `Failed to send Sui execute transaction: ${(e as Error).message}`,
       )
     }
 

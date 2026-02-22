@@ -50,7 +50,7 @@ import {
   parseTypeAndVersion,
   sleep,
 } from '../utils.ts'
-import { generateUnsignedExecuteReport as generateUnsignedExecuteReportImpl } from './exec.ts'
+import { generateUnsignedExecuteReport } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import { type CCIPMessage_V1_6_TON, type UnsignedTONTx, isTONWallet } from './types.ts'
 import { crc32, lookupTxByRawHash, parseJettonContent } from './utils.ts'
@@ -1108,8 +1108,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * {@inheritDoc Chain.generateUnsignedExecuteReport}
    * @throws {@link CCIPExtraArgsInvalidError} if extra args are not EVMExtraArgsV2 format
    */
-  generateUnsignedExecuteReport(
-    opts: Parameters<Chain['generateUnsignedExecuteReport']>[0],
+  generateUnsignedExecute(
+    opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<UnsignedTONTx> {
     if (
       !(
@@ -1123,7 +1123,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
     const { offRamp, input } = opts
 
-    const unsigned = generateUnsignedExecuteReportImpl(
+    const unsigned = generateUnsignedExecuteReport(
       offRamp,
       input as ExecutionInput<CCIPMessage_V1_6_TON>,
       opts,
@@ -1136,11 +1136,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * {@inheritDoc Chain.executeReport}
+   * {@inheritDoc Chain.execute}
    * @throws {@link CCIPWalletInvalidError} if wallet is not a valid TON wallet
    * @throws {@link CCIPReceiptNotFoundError} if execution receipt not found within timeout
    */
-  async executeReport(opts: Parameters<Chain['executeReport']>[0]): Promise<CCIPExecution> {
+  async execute(opts: Parameters<Chain['execute']>[0]): Promise<CCIPExecution> {
     if (!('input' in opts && 'message' in opts.input))
       throw new CCIPExecutionReportChainMismatchError('TON')
     const { offRamp, wallet } = opts
@@ -1149,7 +1149,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
     const payer = await wallet.getAddress()
 
-    const { family: _, ...unsigned } = await this.generateUnsignedExecuteReport({
+    const { family: _, ...unsigned } = await this.generateUnsignedExecute({
       ...opts,
       payer,
     })

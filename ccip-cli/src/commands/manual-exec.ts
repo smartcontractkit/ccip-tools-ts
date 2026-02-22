@@ -211,7 +211,7 @@ async function manualExec(
   const input = await source.getExecutionInput({ ...argv, request, verifications })
 
   const [, wallet] = await loadChainWallet(dest, argv)
-  const receipt = await dest.executeReport({ ...argv, offRamp, input, wallet })
+  const receipt = await dest.execute({ ...argv, offRamp, input, wallet })
 
   switch (argv.format) {
     case Format.log:

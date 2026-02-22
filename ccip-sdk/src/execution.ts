@@ -26,7 +26,7 @@ import type { CCIPMessage, CCIPVersion, Lane, WithLogger } from './types.ts'
  * It builds a merkle tree from the messages, generates a proof for the target messageId,
  * and optionally validates against the provided merkleRoot.
  *
- * The returned proof can be used with `executeReport` to manually execute a stuck message.
+ * The returned proof can be used with `execute` to manually execute a stuck message.
  *
  * @example
  * ```typescript
@@ -34,7 +34,7 @@ import type { CCIPMessage, CCIPVersion, Lane, WithLogger } from './types.ts'
  *
  * // Fetch the request and all messages in its batch
  * const request = (await source.getMessagesInTx(txHash))[0]
- * const commit = await dest.getCommitReport({ commitStore, request })
+ * const verifications = await dest.getVerifications({ offRamp, request })
  * const messages = await source.getMessagesInBatch(request, commit.report)
  *
  * // Calculate proof for manual execution
@@ -48,8 +48,8 @@ import type { CCIPMessage, CCIPVersion, Lane, WithLogger } from './types.ts'
  * console.log('Proofs:', proof.proofs)
  * ```
  * @see {@link discoverOffRamp} - Find the OffRamp for manual execution
- * @see {@link executeReport} - Execute the report on destination chain
- * @see {@link generateUnsignedExecuteReport} - Build unsigned execution tx
+ * @see {@link execute} - Execute the report on destination chain
+ * @see {@link generateUnsignedExecute} - Build unsigned execution tx
  **/
 export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
   messagesInBatch: readonly CCIPMessage<V>[],
@@ -107,7 +107,7 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
  * console.log('OffRamp on destination:', offRamp)
  * ```
  * @see {@link calculateManualExecProof} - Use with OffRamp for manual execution
- * @see {@link executeReport} - Execute on destination chain
+ * @see {@link execute} - Execute on destination chain
  * @see {@link getExecutionReceipts} - Check execution status
  */
 export const discoverOffRamp = memoize(

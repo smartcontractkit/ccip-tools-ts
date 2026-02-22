@@ -560,13 +560,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /**
-   * {@inheritDoc Chain.generateUnsignedExecuteReport}
+   * {@inheritDoc Chain.generateUnsignedExecute}
    * @throws {@link CCIPAptosExtraArgsV2RequiredError} if message missing EVMExtraArgsV2 fields
    */
-  async generateUnsignedExecuteReport({
+  async generateUnsignedExecute({
     payer,
     ...opts
-  }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedAptosTx> {
+  }: Parameters<Chain['generateUnsignedExecute']>[0]): Promise<UnsignedAptosTx> {
     if (
       !(
         'input' in opts &&
@@ -592,16 +592,16 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /**
-   * {@inheritDoc Chain.executeReport}
+   * {@inheritDoc Chain.execute}
    * @throws {@link CCIPAptosWalletInvalidError} if wallet is not a valid Aptos account
    */
-  async executeReport(opts: Parameters<Chain['executeReport']>[0]): Promise<CCIPExecution> {
+  async execute(opts: Parameters<Chain['execute']>[0]): Promise<CCIPExecution> {
     const account = opts.wallet
     if (!isAptosAccount(account)) {
       throw new CCIPAptosWalletInvalidError(this.constructor.name, util.inspect(opts.wallet))
     }
 
-    const unsignedTx = await this.generateUnsignedExecuteReport({
+    const unsignedTx = await this.generateUnsignedExecute({
       ...opts,
       payer: account.accountAddress.toString(),
     })

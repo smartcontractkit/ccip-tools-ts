@@ -32,7 +32,7 @@ function isAnvilAvailable(): boolean {
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isAnvilAvailable()
 
-describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
+describe('execute - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
   let source: EVMChain | undefined
   let dest: EVMChain | undefined
   let wallet: Wallet
@@ -100,7 +100,7 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
       message: request.message,
       offchainTokenData,
     } as ExecutionInput
-    const execution = await dest.executeReport({
+    const execution = await dest.execute({
       offRamp,
       input,
       wallet,
