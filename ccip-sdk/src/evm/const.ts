@@ -1,3 +1,4 @@
+import { parseAbi } from 'abitype'
 import { type EventFragment, AbiCoder, Interface } from 'ethers'
 
 import Token_ABI from './abi/BurnMintERC677Token.ts'
@@ -10,9 +11,11 @@ import TokenPool_1_6_ABI from './abi/LockReleaseTokenPool_1_6_1.ts'
 import EVM2EVMOffRamp_1_2_ABI from './abi/OffRamp_1_2.ts'
 import EVM2EVMOffRamp_1_5_ABI from './abi/OffRamp_1_5.ts'
 import OffRamp_1_6_ABI from './abi/OffRamp_1_6.ts'
+import OffRamp_2_0_ABI from './abi/OffRamp_2_0.ts'
 import EVM2EVMOnRamp_1_2_ABI from './abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
+import OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
 import PriceRegistry_1_2_ABI from './abi/PriceRegistry_1_2.ts'
 import Router_ABI from './abi/Router.ts'
 import TokenAdminRegistry_ABI from './abi/TokenAdminRegistry_1_5.ts'
@@ -23,7 +26,10 @@ const customErrors = [
   'error NoContract()',
   'error NoGasForCallExactCheck()',
   'error NotEnoughGasForCall()',
+  'error InvalidChain(uint64 chainSelector)',
 ] as const
+
+export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 
 export const interfaces = {
   Router: new Interface(Router_ABI),
@@ -35,9 +41,11 @@ export const interfaces = {
   TokenPool_v1_6: new Interface(TokenPool_1_6_ABI),
   CommitStore_v1_5: new Interface(CommitStore_1_5_ABI),
   CommitStore_v1_2: new Interface(CommitStore_1_2_ABI),
+  OffRamp_v2_0: new Interface(OffRamp_2_0_ABI),
   OffRamp_v1_6: new Interface(OffRamp_1_6_ABI),
   EVM2EVMOffRamp_v1_5: new Interface(EVM2EVMOffRamp_1_5_ABI),
   EVM2EVMOffRamp_v1_2: new Interface(EVM2EVMOffRamp_1_2_ABI),
+  OnRamp_v2_0: new Interface(OnRamp_2_0_ABI),
   OnRamp_v1_6: new Interface(OnRamp_1_6_ABI),
   EVM2EVMOnRamp_v1_5: new Interface(EVM2EVMOnRamp_1_5_ABI),
   EVM2EVMOnRamp_v1_2: new Interface(EVM2EVMOnRamp_1_2_ABI),
@@ -71,3 +79,5 @@ export const commitsFragments = getAllFragmentsMatchingEvents([
   'CommitReportAccepted',
 ])
 export const receiptsFragments = getAllFragmentsMatchingEvents(['ExecutionStateChanged'])
+
+export const CCV_INDEXER_URL = 'https://chainlink-ccv-indexer.ccip.stage.external.griddle.sh/all'

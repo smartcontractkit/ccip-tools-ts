@@ -30,13 +30,12 @@ import {
   CCIPError,
   CCIPErrorCode,
   CCIPExecTxRevertedError,
-  CCIPNotImplementedError,
-} from '../errors/index.ts'
-import {
+  CCIPExecutionReportChainMismatchError,
   CCIPLogsAddressRequiredError,
+  CCIPNotImplementedError,
   CCIPSuiLogInvalidError,
   CCIPTopicsInvalidError,
-} from '../errors/specialized.ts'
+} from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessage, getMessagesInBatch } from '../requests.ts'
@@ -50,8 +49,8 @@ import {
   type CCIPVersion,
   type ChainTransaction,
   type CommitReport,
+  type ExecutionInput,
   type ExecutionReceipt,
-  type ExecutionReport,
   type ExecutionState,
   type Lane,
   type Log_,
@@ -246,10 +245,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     >,
   >(
     request: R,
-    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
-    opts?: { page?: number },
+    range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    opts?: Pick<LogFilter, 'page'>,
   ): Promise<R['message'][]> {
-    return getMessagesInBatch(this, request, commit, opts)
+    return getMessagesInBatch(this, request, range, opts)
   }
 
   /**
@@ -318,10 +317,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /**
-   * {@inheritDoc Chain.getOnRampForOffRamp}
+   * {@inheritDoc Chain.getOnRampsForOffRamp}
    * @throws {@link CCIPDataFormatUnsupportedError} if view call fails
    */
-  async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
+  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
     offRamp = await getLatestPackageId(offRamp, this.client)
     const functionName = 'get_source_chain_config'
     // Preserve module suffix if present, otherwise add it
@@ -390,12 +389,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     const onRampBytes = configBytes.slice(offset, offset + onRampLength)
 
     // Decode the address from the onRamp bytes
-    return decodeAddress(onRampBytes, networkInfo(sourceChainSelector).family)
-  }
-
-  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
-  getCommitStoreForOffRamp(offRamp: string): Promise<string> {
-    return Promise.resolve(offRamp)
+    return [decodeAddress(onRampBytes, networkInfo(sourceChainSelector).family)]
   }
 
   /**
@@ -740,24 +734,27 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
-  /** {@inheritDoc Chain.generateUnsignedExecuteReport} */
-  override generateUnsignedExecuteReport(
-    _opts: Parameters<Chain['generateUnsignedExecuteReport']>[0],
+  /** {@inheritDoc Chain.generateUnsignedExecute} */
+  override generateUnsignedExecute(
+    _opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<never> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.generateUnsignedExecuteReport'))
+    return Promise.reject(new CCIPNotImplementedError('SuiChain.generateUnsignedExecute'))
   }
 
   /**
-   * {@inheritDoc Chain.executeReport}
+   * {@inheritDoc Chain.execute}
    * @throws {@link CCIPError} if transaction submission fails
    * @throws {@link CCIPExecTxRevertedError} if transaction reverts
    */
-  async executeReport(
-    opts: Parameters<Chain['executeReport']>[0] & {
+  async execute(
+    opts: Parameters<Chain['execute']>[0] & {
       receiverObjectIds?: string[]
     },
   ): Promise<CCIPExecution> {
-    const { execReport, offRamp } = opts
+    if (!('input' in opts && 'message' in opts.input)) {
+      throw new CCIPExecutionReportChainMismatchError('Sui')
+    }
+    const { input, offRamp } = opts
     const wallet = opts.wallet as Keypair
 
     // Discover the CCIP package from the offramp
@@ -769,20 +766,20 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       this.client,
       ccip,
       ccipObjectRef,
-      execReport.message.receiver,
+      input.message.receiver,
     )
     let tokenConfigs: TokenConfig[] = []
-    if (execReport.message.tokenAmounts.length !== 0) {
+    if (input.message.tokenAmounts.length !== 0) {
       tokenConfigs = await fetchTokenConfigs(
         this.client,
         ccip,
         ccipObjectRef,
-        execReport.message.tokenAmounts as CCIPMessage<typeof CCIPVersion.V1_6>['tokenAmounts'],
+        input.message.tokenAmounts as CCIPMessage<typeof CCIPVersion.V1_6>['tokenAmounts'],
       )
     }
 
-    const input: SuiManuallyExecuteInput = {
-      executionReport: execReport as ExecutionReport<CCIPMessage_V1_6_Sui>,
+    const suiInput: SuiManuallyExecuteInput = {
+      executionReport: input as ExecutionInput<CCIPMessage_V1_6_Sui>,
       offrampAddress: offRamp,
       ccipAddress: ccip,
       ccipObjectRef,
@@ -794,16 +791,16 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       this.logger.info(
         `Overriding Sui Manual Execution receiverObjectIds with: ${opts.receiverObjectIds.join(', ')}`,
       )
-      input.overrideReceiverObjectIds = opts.receiverObjectIds
+      suiInput.overrideReceiverObjectIds = opts.receiverObjectIds
     }
-    const tx = buildManualExecutionPTB(input)
+    const tx = buildManualExecutionPTB(suiInput)
 
     // Set gas budget if provided
     if (opts.gasLimit) {
       tx.setGasBudget(opts.gasLimit)
     }
 
-    this.logger.info(`Executing Sui CCIP executeReport transaction...`)
+    this.logger.info(`Executing Sui CCIP execute transaction...`)
     // Sign and execute the transaction
     let result: SuiTransactionBlockResponse
     try {
@@ -818,7 +815,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     } catch (e) {
       throw new CCIPError(
         CCIPErrorCode.TRANSACTION_NOT_FINALIZED,
-        `Failed to send Sui executeReport transaction: ${(e as Error).message}`,
+        `Failed to send Sui execute transaction: ${(e as Error).message}`,
       )
     }
 

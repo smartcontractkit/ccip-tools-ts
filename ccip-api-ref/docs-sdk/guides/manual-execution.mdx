@@ -101,73 +101,48 @@ if (!needsManualExecution) {
 }
 ```
 
-### Step 4: Get the Commit Report
+### Step 4: Get the Verifications
 
 Verify the message has been committed:
 
 ```typescript
-const commit = await dest.getCommitReport({
+const verifications = await dest.getVerifications({
   commitStore: offRamp,
   request,
 })
 
-if (!commit) {
+if (!verifications) {
   console.log('Message not yet committed')
   console.log('Wait for the DON to commit the merkle root')
   process.exit(1)
 }
 
 console.log('Commit found!')
-console.log('Merkle root:', commit.report.merkleRoot)
-console.log('Min sequence:', commit.report.minSeqNr)
-console.log('Max sequence:', commit.report.maxSeqNr)
-console.log('Commit tx:', commit.log.transactionHash)
+console.log('Merkle root:', verifications.report.merkleRoot)
+console.log('Min sequence:', verifications.report.minSeqNr)
+console.log('Max sequence:', verifications.report.maxSeqNr)
+console.log('Commit tx:', verifications.log.transactionHash)
 ```
 
-### Step 5: Fetch All Messages in Batch
+### Step 5: Fetch Execution Inputs and Calculate Proof
 
-Get all messages in the commit batch (needed for merkle proof):
+Get execution input and calculate proofs:
 
 ```typescript
-const messagesInBatch = await source.getMessagesInBatch(request, commit.report)
+const input = await source.getExecutionInput({ request, verifications })
 
-console.log(
-  'Messages in batch:',
-  messagesInBatch.map((m) => m.messageId)
-)
+console.log('Calculated proof:', input.merkleRoot)
+console.log('Offchain tokenData:', input.offchainTokenData)
 ```
 
-### Step 6: Calculate Merkle Proof
-
-Calculate the merkle proof for your message:
-
-```typescript
-import { calculateManualExecProof } from '@chainlink/ccip-sdk'
-
-const proof = calculateManualExecProof(
-  messagesInBatch,
-  request.lane,
-  request.message.messageId,
-  commit.report.merkleRoot // Optional: validates proof
-)
-
-console.log('Proof calculated successfully')
-console.log('Merkle root:', proof.merkleRoot)
-console.log('Proof hashes:', proof.proofs.length)
-```
-
-### Step 7: Execute the Report
+### Step 6: Execute the Report
 
 Submit the manual execution transaction:
 
 ```typescript
-const execution = await dest.executeReport({
+const execution = await dest.execute({
   offRamp,
-  execReport: {
-    ...proof,
-    message: request.message,
-    offchainTokenData: [], // Empty for non-CCTP tokens
-  },
+  input,
   wallet: destWallet,
 })
 
@@ -181,7 +156,6 @@ console.log('Execution confirmed in block:', execution.log.blockNumber)
 import { ethers } from 'ethers'
 import {
   EVMChain,
-  calculateManualExecProof,
   discoverOffRamp,
   ExecutionState,
 } from '@chainlink/ccip-sdk'
@@ -216,31 +190,19 @@ async function manuallyExecuteMessage(
   }
 
   // Step 4: Get commit
-  const commit = await dest.getCommitReport({ commitStore: offRamp, request })
-  if (!commit) {
+  const verifications = await dest.getVerifications({ offRamp, request })
+  if (!verifications) {
     console.log('Not yet committed')
     return { status: 'pending_commit' }
   }
 
   // Step 5: Get messages in batch
-  const messagesInBatch = await source.getMessagesInBatch(request, commit.report)
+  const input = await source.getExecutionInput({ request, verifications })
 
-  // Step 6: Calculate proof
-  const proof = calculateManualExecProof(
-    messagesInBatch,
-    request.lane,
-    request.message.messageId,
-    commit.report.merkleRoot
-  )
-
-  // Step 7: Execute
-  const execution = await dest.executeReport({
+  // Step 6: Execute
+  const execution = await dest.execute({
     offRamp,
-    execReport: {
-      ...proof,
-      message: request.message,
-      offchainTokenData: [],
-    },
+    input,
     wallet,
   })
 
@@ -270,15 +232,12 @@ For USDC transfers using CCTP, you need to fetch the Circle attestation. The SDK
 
 ```typescript
 // Fetch offchain token data (handles USDC attestations automatically)
-const offchainTokenData = await source.getOffchainTokenData(request)
+const input = await source.getExecutionInput({ request, verifications })
+console.log('offchainTokenData:', input.offchainTokenData)
 
-const execution = await dest.executeReport({
+const execution = await dest.execute({
   offRamp,
-  execReport: {
-    ...proof,
-    message: request.message,
-    offchainTokenData, // Includes USDC attestation if applicable
-  },
+  input,
   wallet: destWallet,
 })
 ```
@@ -288,7 +247,7 @@ const execution = await dest.executeReport({
 For non-CCTP tokens, `offchainTokenData` is typically empty:
 
 ```typescript
-const execution = await dest.executeReport({
+const execution = await dest.execute({
   offRamp,
   execReport: {
     ...proof,
@@ -301,42 +260,6 @@ const execution = await dest.executeReport({
 
 ## Troubleshooting
 
-### Merkle Root Mismatch
-
-If you get a merkle root mismatch error:
-
-```typescript
-try {
-  const proof = calculateManualExecProof(
-    messagesInBatch,
-    request.lane,
-    request.message.messageId,
-    commit.report.merkleRoot
-  )
-} catch (error) {
-  if (error.message.includes('Merkle root mismatch')) {
-    console.log('Merkle root mismatch - debugging...')
-
-    // Calculate without validation to see the computed root
-    const unvalidatedProof = calculateManualExecProof(
-      messagesInBatch,
-      request.lane,
-      request.message.messageId
-      // No expectedRoot - skip validation
-    )
-
-    console.log('Computed root:', unvalidatedProof.merkleRoot)
-    console.log('Expected root:', commit.report.merkleRoot)
-    console.log('Messages in batch:', messagesInBatch.length)
-
-    // Common causes:
-    // - Missing messages in batch
-    // - Wrong lane configuration
-    // - Incorrect sequence range
-  }
-}
-```
-
 ### Execution Reverts
 
 If manual execution reverts, check:
@@ -347,9 +270,9 @@ If manual execution reverts, check:
 
 ```typescript
 // Increase gas limit for execution
-const execution = await dest.executeReport({
+const execution = await dest.execute({
   offRamp,
-  execReport: executionReport,
+  input,
   wallet: destWallet,
   gasLimit: 500000, // Override gas limit
 })

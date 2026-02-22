@@ -43,14 +43,14 @@ export {
 export { estimateReceiveExecution } from './gas.ts'
 export { decodeMessage, getMessagesForSender, sourceToDestTokenAddresses } from './requests.ts'
 export {
-  type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
+  type CCIPVerifications,
   type ChainTransaction,
   type CommitReport,
+  type ExecutionInput,
   type ExecutionReceipt,
-  type ExecutionReport,
   type Lane,
   type Logger,
   type MessageInput,

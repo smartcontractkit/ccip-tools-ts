@@ -82,8 +82,8 @@ describe.skip('TON index integration tests', () => {
       )
     })
 
-    it('TONChain.getOnRampForOffRamp should return source chain onRamp address', async () => {
-      const onRamp = await tonChain.getOnRampForOffRamp(
+    it('TONChain.getOnRampsForOffRamp should return source chain onRamp address', async () => {
+      const [onRamp] = await tonChain.getOnRampsForOffRamp(
         ADDRESSES_TO_ASSERT.tonOffRamp,
         SEPOLIA_CHAIN_SELECTOR,
       )
@@ -97,18 +97,6 @@ describe.skip('TON index integration tests', () => {
         onRamp.toLowerCase(),
         ADDRESSES_TO_ASSERT.evmOnramp.toLowerCase(),
         'Should match expected EVM OnRamp address',
-      )
-    })
-
-    it('TONChain.getCommitStoreForOffRamp should return offRamp address for v1.6', async () => {
-      const commitStore = await tonChain.getCommitStoreForOffRamp(ADDRESSES_TO_ASSERT.tonOffRamp)
-
-      assert.ok(commitStore, 'Should return commit store address')
-
-      assert.equal(
-        Address.parse(commitStore).toRawString(),
-        Address.parse(ADDRESSES_TO_ASSERT.tonOffRamp).toRawString(),
-        'CommitStore should be the same as OffRamp for v1.6',
       )
     })
   })

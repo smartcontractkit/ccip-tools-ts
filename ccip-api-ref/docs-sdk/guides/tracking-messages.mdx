@@ -88,14 +88,11 @@ const request = requests[0]
 
 const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
 
-const commit = await dest.getCommitReport({
-  commitStore: offRamp,
-  request,
-})
+const verifications = await dest.getVerifications({ offRamp, request })
 
-if (commit) {
-  console.log('Committed at block:', commit.log.blockNumber)
-  console.log('Merkle root:', commit.report.merkleRoot)
+if (verifications) {
+  console.log('Committed at block:', verifications.log.blockNumber)
+  console.log('Merkle root:', verifications.report.merkleRoot)
 } else {
   console.log('Not yet committed')
 }
@@ -151,16 +148,16 @@ async function trackMessage(sourceTxHash: string) {
 
   // Stage 2: Check commit status
   console.log('Checking commit status...')
-  const commit = await dest.getCommitReport({
-    commitStore: offRamp,
+  const verifications = await dest.getVerifications({
+    offRamp,
     request,
   })
 
-  if (!commit) {
+  if (!verifications) {
     console.log('Status: Pending commit')
     return { status: 'pending_commit', request }
   }
-  console.log('Committed at block:', commit.log.blockNumber)
+  console.log('Committed at block:', verifications.log.blockNumber)
 
   // Stage 3: Check execution status
   console.log('Checking execution status...')

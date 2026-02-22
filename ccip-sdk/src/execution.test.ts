@@ -120,16 +120,12 @@ class MockChain extends Chain {
     return this.mockOffRampsForRouter.get(_router) || []
   }
 
-  async getOnRampForOffRamp(_offRamp: string, _chainSelector: bigint): Promise<string> {
-    return this.mockOnRampForOffRamp.get(_offRamp) || '0xDefaultOnRamp'
+  async getOnRampsForOffRamp(_offRamp: string, _chainSelector: bigint): Promise<string[]> {
+    return [this.mockOnRampForOffRamp.get(_offRamp) || '0xDefaultOnRamp']
   }
 
   async getOnRampForRouter(_router: string, _destChainSelector: bigint): Promise<string> {
     return '0xOnRamp'
-  }
-
-  async getCommitStoreForOffRamp(_offRamp: string): Promise<string> {
-    return '0xCommitStore'
   }
 
   async getSupportedTokens(_address: string, _opts?: { page?: number }): Promise<string[]> {
@@ -192,11 +188,11 @@ class MockChain extends Chain {
     return []
   }
 
-  override generateUnsignedExecuteReport(_opts: any): Promise<never> {
+  override generateUnsignedExecute(_opts: any): Promise<never> {
     return Promise.reject(new Error('not implemented'))
   }
 
-  async executeReport(_opts: any): Promise<CCIPExecution> {
+  async execute(_opts: any): Promise<CCIPExecution> {
     return Promise.reject(new Error('not implemented'))
   }
 

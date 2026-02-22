@@ -118,7 +118,7 @@ export function parseWithFragment(
 
 // join truthy property names, separated by a dot
 function j(...args: string[]): string {
-  return args.filter(Boolean).join('.')
+  return args.reduce((acc, v) => (!v ? acc : acc ? acc + (v.match(/^\w/) ? '.' : '') + v : v), '')
 }
 
 /**
@@ -137,7 +137,11 @@ export function recursiveParseError(
     if (data.length === 0) return key ? [[key, data.toArray()]] : []
     let kv: ReturnType<typeof recursiveParseError>
     try {
-      kv = Object.entries(data.toObject()).map(([k, v]) => [j(key, k), v])
+      const obj = data.toObject()
+      const keys = Object.keys(obj)
+      // eslint-disable-next-line no-restricted-syntax
+      if (keys.length > 0 && keys.every((k) => k.startsWith('_'))) throw new Error('not an obj')
+      kv = Object.entries(obj).map(([k, v]) => [j(key, k), v])
     } catch (_) {
       kv = data.toArray().map((v, i) => [j(key, `[${i}]`), v])
     }

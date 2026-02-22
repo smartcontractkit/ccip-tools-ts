@@ -2,14 +2,14 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { generateUnsignedExecuteReport } from './exec.ts'
-import type { ExecutionReport } from '../types.ts'
+import type { ExecutionInput } from '../types.ts'
 import { type CCIPMessage_V1_6_TON, MANUALLY_EXECUTE_OPCODE } from './types.ts'
 
 describe('TON exec unit tests', () => {
   describe('TON generateUnsignedExecuteReport', () => {
     const offrampAddress = '0:' + '5'.repeat(64)
 
-    const baseExecReport: ExecutionReport<CCIPMessage_V1_6_TON> = {
+    const baseExecReport: ExecutionInput<CCIPMessage_V1_6_TON> = {
       message: {
         messageId: '0x' + '1'.repeat(64),
         sourceChainSelector: 743186221051783445n,

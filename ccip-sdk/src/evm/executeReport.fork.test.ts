@@ -6,7 +6,7 @@ import { JsonRpcProvider, Wallet } from 'ethers'
 import { anvil } from 'prool/instances'
 
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
-import { type ExecutionReport, ExecutionState } from '../types.ts'
+import { type ExecutionInput, ExecutionState } from '../types.ts'
 import { EVMChain } from './index.ts'
 
 const FUJI_RPC = process.env['RPC_FUJI'] || 'https://avalanche-fuji-c-chain-rpc.publicnode.com'
@@ -32,7 +32,7 @@ function isAnvilAvailable(): boolean {
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isAnvilAvailable()
 
-describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
+describe('execute - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
   let source: EVMChain | undefined
   let dest: EVMChain | undefined
   let wallet: Wallet
@@ -75,19 +75,19 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
     assert.ok(offRamp, 'offRamp should be discovered')
 
     // 3. Get commit store and commit report
-    const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
-    const commit = await dest.getCommitReport({ commitStore, request })
-    assert.ok(commit.report.merkleRoot, 'commit should have a merkle root')
+    const verifications = await dest.getVerifications({ offRamp, request })
+    assert.ok('report' in verifications, 'commit should have a merkle root')
+    assert.ok(verifications.report.merkleRoot, 'commit should have a merkle root')
 
     // 4. Get all messages in the commit batch from source
-    const messagesInBatch = await source.getMessagesInBatch(request, commit.report)
+    const messagesInBatch = await source.getMessagesInBatch(request, verifications.report)
 
     // 5. Calculate manual execution proof
     const execReportProof = calculateManualExecProof(
       messagesInBatch,
       request.lane,
       request.message.messageId,
-      commit.report.merkleRoot,
+      verifications.report.merkleRoot,
       dest,
     )
 
@@ -95,14 +95,14 @@ describe('executeReport - Anvil Fork Tests', { skip, timeout: 180_000 }, () => {
     const offchainTokenData = await source.getOffchainTokenData(request)
 
     // 7. Build execution report and execute
-    const execReport: ExecutionReport = {
+    const input = {
       ...execReportProof,
       message: request.message,
       offchainTokenData,
-    }
-    const execution = await dest.executeReport({
+    } as ExecutionInput
+    const execution = await dest.execute({
       offRamp,
-      execReport,
+      input,
       wallet,
       gasLimit: 500_000,
     })

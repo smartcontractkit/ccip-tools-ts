@@ -46,6 +46,14 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
     source_chain_selector?: string
     sourceChainSelector?: string
     extraArgs?: string | Record<string, unknown>
+    sequenceNumber?: bigint
+    messageNumber?: bigint
+    tokenTransfer?: {
+      destExecData: string
+      destGasAmount?: bigint
+      token?: string
+      sourceTokenAddress?: string
+    }[]
     tokenAmounts: {
       destExecData: string
       destGasAmount?: bigint
@@ -60,6 +68,7 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
         totalAmount: bigint
       }
     }
+    receipts?: { feeTokenAmount: bigint }[]
     sourceNetworkInfo?: { chainSelector: string }
     destNetworkInfo?: { chainSelector: string }
   }
@@ -82,7 +91,7 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
       ? BigInt(v as string | number | bigint)
       : k?.match(/(^dest.*address)|(receiver|offramp|accounts)/i)
         ? decodeAddress(v as BytesLike, destFamily)
-        : k?.match(/((source.*address)|sender|origin|onramp|(feetoken$)|(token.*address$))/i)
+        : k?.match(/((source.*address)|sender|issuer|origin|onramp|(feetoken$)|(token.*address$))/i)
           ? decodeAddress(v as BytesLike, sourceFamily)
           : v instanceof Uint8Array ||
               (Array.isArray(v) && v.length >= 4 && v.every((e) => typeof e === 'number'))
@@ -90,6 +99,10 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
             : v,
   ) as typeof data_
 
+  if (data_.tokenTransfer) {
+    data_.tokenAmounts = data_.tokenTransfer
+    delete data_.tokenTransfer
+  }
   for (const ta of data_.tokenAmounts) {
     if (ta.token && !ta.sourceTokenAddress) ta.sourceTokenAddress = ta.token
     if (!ta.token && ta.sourceTokenAddress) ta.token = ta.sourceTokenAddress
@@ -120,6 +133,15 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
   if (data_.fees && !data_.feeToken) {
     data_.feeToken = data_.fees.fixedFeesDetails.tokenAddress
     data_.feeTokenAmount = data_.fees.fixedFeesDetails.totalAmount
+  }
+  if (data_.sequenceNumber == null && data_.messageNumber != null) {
+    data_.sequenceNumber = data_.messageNumber
+  }
+  if (!data_.feeTokenAmount && data_.receipts) {
+    data_.feeTokenAmount = data_.receipts.reduce(
+      (acc, receipt) => acc + receipt.feeTokenAmount,
+      BigInt(0),
+    )
   }
 
   return data_ as unknown as CCIPMessage
@@ -285,10 +307,10 @@ const BLOCK_LOG_WINDOW_SIZE = 5000
  * Fetches all CCIP messages contained in a given commit batch.
  * @param source - The source chain.
  * @param request - The CCIP request containing lane and message info.
- * @param seqNrRange - Object containing minSeqNr and maxSeqNr for the batch range.
+ * @param range - Object containing minSeqNr and maxSeqNr for the batch range.
  * @param opts - Optional log filtering parameters.
  * @returns Array of messages in the batch.
- * @see {@link getCommitReport} - Get commit report to determine batch range
+ * @see {@link getVerifications} - Get commit report to determine batch range
  */
 export async function getMessagesInBatch<
   C extends Chain,
@@ -330,6 +352,7 @@ export async function getMessagesInBatch<
       const message = (source.constructor as ChainStatic).decodeMessage(log)
       if (
         !message ||
+        !('sequenceNumber' in message) ||
         ('destChainSelector' in message &&
           message.destChainSelector !== request.lane.destChainSelector)
       )
@@ -351,6 +374,7 @@ export async function getMessagesInBatch<
       const message = (source.constructor as ChainStatic).decodeMessage(log)
       if (
         !message ||
+        !('sequenceNumber' in message) ||
         ('destChainSelector' in message &&
           message.destChainSelector !== request.lane.destChainSelector)
       )

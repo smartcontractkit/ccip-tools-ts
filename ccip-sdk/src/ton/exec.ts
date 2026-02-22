@@ -1,6 +1,6 @@
 import { type Cell, beginCell } from '@ton/core'
 
-import type { ExecutionReport } from '../types.ts'
+import type { ExecutionInput } from '../types.ts'
 import {
   type CCIPMessage_V1_6_TON,
   MANUALLY_EXECUTE_OPCODE,
@@ -17,7 +17,7 @@ import {
  */
 export function generateUnsignedExecuteReport(
   offRamp: string,
-  execReport: ExecutionReport<CCIPMessage_V1_6_TON>,
+  execReport: ExecutionInput<CCIPMessage_V1_6_TON>,
   opts?: { gasLimit?: number },
 ): { to: string; body: Cell } {
   // Serialize the execution report

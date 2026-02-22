@@ -4,6 +4,7 @@ import type { Chain } from './chain.ts'
 import {
   CCIPContractTypeInvalidError,
   CCIPMethodUnsupportedError,
+  CCIPOnRampRequiredError,
   CCIPTokenDecimalsInsufficientError,
 } from './errors/index.ts'
 import { discoverOffRamp } from './execution.ts'
@@ -101,7 +102,9 @@ export async function estimateReceiveExecution({
       if (!tnv[0].includes('OffRamp'))
         throw new CCIPContractTypeInvalidError(routerOrRamp, tnv[2], ['OffRamp'])
       offRamp = routerOrRamp
-      onRamp = await dest.getOnRampForOffRamp(offRamp, source.network.chainSelector)
+      const onRamps = await dest.getOnRampsForOffRamp(offRamp, source.network.chainSelector)
+      if (!onRamps.length) throw new CCIPOnRampRequiredError()
+      onRamp = onRamps[onRamps.length - 1]!
     } catch {
       throw sourceErr // re-throw original error
     }

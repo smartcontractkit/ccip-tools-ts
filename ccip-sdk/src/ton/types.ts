@@ -3,7 +3,7 @@ import { toBigInt } from 'ethers'
 
 import { CCIPDataFormatUnsupportedError } from '../errors/specialized.ts'
 import type { EVMExtraArgsV2 } from '../extra-args.ts'
-import type { CCIPMessage_V1_6, ChainFamily, ExecutionReport } from '../types.ts'
+import type { CCIPMessage_V1_6, ChainFamily, ExecutionInput } from '../types.ts'
 import { bytesToBuffer } from '../utils.ts'
 
 /** TON-specific CCIP v1.6 message type with EVMExtraArgsV2 (GenericExtraArgsV2) */
@@ -83,7 +83,7 @@ function asSnakeData<T>(array: T[], builderFn: (item: T) => Builder): Cell {
  * @returns BOC-serialized Cell containing the execution report.
  */
 export function serializeExecutionReport(
-  execReport: ExecutionReport<CCIPMessage_V1_6_TON>,
+  execReport: ExecutionInput<CCIPMessage_V1_6_TON>,
 ): Builder {
   return beginCell()
     .storeUint(execReport.message.sourceChainSelector, 64)
