@@ -1121,10 +1121,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *   second to last
    * @throws {@link CCIPExecutionReportChainMismatchError} if message is not a Solana message
    */
-  async generateUnsignedExecuteReport({
+  async generateUnsignedExecute({
     payer,
     ...opts
-  }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedSolanaTx> {
+  }: Parameters<Chain['generateUnsignedExecute']>[0]): Promise<UnsignedSolanaTx> {
     if (!('input' in opts) || !('message' in opts.input) || !('computeUnits' in opts.input.message))
       throw new CCIPExecutionReportChainMismatchError('Solana')
     const { offRamp, input } = opts
@@ -1139,11 +1139,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * {@inheritDoc Chain.executeReport}
+   * {@inheritDoc Chain.execute}
    * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Solana wallet
    */
-  async executeReport(
-    opts: Parameters<Chain['executeReport']>[0] & {
+  async execute(
+    opts: Parameters<Chain['execute']>[0] & {
       // when cleaning leftover LookUp Tables, wait deactivation grace period (~513 slots) then close ALT
       waitDeactivation?: boolean
     },
@@ -1154,7 +1154,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     let hash
     do {
       try {
-        const unsigned = await this.generateUnsignedExecuteReport({
+        const unsigned = await this.generateUnsignedExecute({
           ...opts,
           payer: wallet.publicKey.toBase58(),
         })

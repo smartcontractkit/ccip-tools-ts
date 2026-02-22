@@ -476,7 +476,7 @@ export class CCIPLaneNotFoundError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   const commit = await chain.getCommitReport({ commitStore, request })
+ *   const verifications = await chain.getVerifications({ offRamp, request })
  * } catch (error) {
  *   if (error instanceof CCIPCommitNotFoundError) {
  *     if (error.isTransient) {
@@ -859,7 +859,7 @@ export class CCIPWalletNotSignerError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await chain.executeReport({ offRamp, execReport, wallet })
+ *   await chain.execute({ offRamp, input, wallet })
  * } catch (error) {
  *   if (error instanceof CCIPExecTxNotConfirmedError) {
  *     if (error.isTransient) {
@@ -888,7 +888,7 @@ export class CCIPExecTxNotConfirmedError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await chain.executeReport({ offRamp, execReport, wallet })
+ *   await chain.execute({ offRamp, input, wallet })
  * } catch (error) {
  *   if (error instanceof CCIPExecTxRevertedError) {
  *     console.log(`Execution reverted: ${error.context.txHash}`)
@@ -2276,7 +2276,7 @@ export class CCIPExecutionStateInvalidError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await chain.executeReport({ offRamp, execReport, wallet })
+ *   await chain.execute({ offRamp, input, wallet })
  * } catch (error) {
  *   if (error instanceof CCIPExecutionReportChainMismatchError) {
  *     console.log(`Message not for ${error.context.chain}`)
@@ -2567,7 +2567,7 @@ export class CCIPAptosWalletInvalidError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await aptosChain.executeReport({ offRamp, execReport, wallet })
+ *   await aptosChain.execute({ offRamp, input, wallet })
  * } catch (error) {
  *   if (error instanceof CCIPAptosExtraArgsV2RequiredError) {
  *     console.log('Aptos requires EVMExtraArgsV2 format')
@@ -3274,7 +3274,7 @@ export class CCIPCctpMultipleEventsError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await solanaChain.executeReport({ offRamp, execReport, wallet })
+ *   await solanaChain.execute({ offRamp, input, wallet })
  * } catch (error) {
  *   if (error instanceof CCIPSolanaComputeUnitsExceededError) {
  *     console.log(`CU: ${error.context.simulated} > limit ${error.context.limit}`)

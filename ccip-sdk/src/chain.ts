@@ -300,7 +300,7 @@ export type SendMessageOpts = {
 }
 
 /**
- * Common options for {@link Chain.generateUnsignedExecuteReport} and {@link Chain.executeReport} methods.
+ * Common options for {@link Chain.generateUnsignedExecute} and {@link Chain.execute} methods.
  */
 export type ExecuteOpts = (
   | {
@@ -599,7 +599,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @example Get all messages in a batch
    * ```typescript
-   * const commit = await dest.getCommitReport({ commitStore, request })
+   * const verifications = await dest.getVerifications({ offRamp, request })
    * const messages = await source.getMessagesInBatch(request, commit.report)
    * console.log(`Found ${messages.length} messages in batch`)
    * ```
@@ -927,7 +927,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @example Generate unsigned execution tx
    * ```typescript
-   * const unsignedTx = await dest.generateUnsignedExecuteReport({
+   * const unsignedTx = await dest.generateUnsignedExecute({
    *   offRamp: offRampAddress,
    *   execReport,
    *   payer: walletAddress,
@@ -935,7 +935,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * // Sign and send with external wallet
    * ```
    */
-  abstract generateUnsignedExecuteReport(
+  abstract generateUnsignedExecute(
     opts: ExecuteOpts & {
       /** address which will be used to send the report tx */
       payer: string
@@ -953,28 +953,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @example Manual execution of pending message
    * ```typescript
-   * const execReportProof = calculateManualExecProof(
-   *   messagesInBatch: await source.getMessagesInBatch(request, commit.report),
-   *   request.lane,
-   *   request.message.messageId,
-   *   commit.report.merkleRoot,
-   *   dest,
-   * )
-   * const receipt = await dest.executeReport({
-   *   offRamp,
-   *   execReport: {
-   *     ...execReportProof,
-   *     message: request.message,
-   *     offchainTokenData: await source.getOffchainTokenData(request),
-   *   },
-   *   wallet,
-   * })
+   * const input = await source.getExecutionInput({ request, verifications })
+   * const receipt = await dest.execute({ offRamp, input, wallet })
    * console.log(`Executed: ${receipt.log.transactionHash}`)
    * ```
    * @throws {@link CCIPWalletNotSignerError} if wallet cannot sign transactions
    * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm
    */
-  abstract executeReport(
+  abstract execute(
     opts: ExecuteOpts & {
       // Signer instance (chain-dependent)
       wallet: unknown
@@ -985,18 +971,18 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Look for a CommitReport at dest for given CCIP request.
    * May be specialized by some subclasses.
    *
-   * @param opts - getCommitReport options
+   * @param opts - getVerifications options
    * @returns CCIPCommit info
    *
    * @throws {@link CCIPCommitNotFoundError} if no commit found for the request (transient)
    *
    * @example Get commit for a request
    * ```typescript
-   * const commit = await dest.getCommitReport({
-   *   commitStore: offRampAddress, // v1.6+
+   * const verifications = await dest.getVerifications({
+   *   offRamp: offRampAddress,
    *   request,
    * })
-   * console.log(`Committed at block: ${commit.log.blockNumber}`)
+   * console.log(`Committed at block: ${verifications.log.blockNumber}`)
    * ```
    */
   async getVerifications({

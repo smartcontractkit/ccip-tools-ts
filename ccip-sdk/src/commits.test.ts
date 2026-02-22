@@ -176,11 +176,11 @@ class MockChain extends Chain {
     return []
   }
 
-  override generateUnsignedExecuteReport(_opts: any): Promise<never> {
+  override generateUnsignedExecute(_opts: any): Promise<never> {
     return Promise.reject(new Error('not implemented'))
   }
 
-  async executeReport(_opts: any) {
+  async execute(_opts: any) {
     return Promise.reject(new Error('not implemented'))
   }
 
@@ -202,7 +202,7 @@ class MockChain extends Chain {
       if (parsed12?.name === 'ReportAccepted') {
         if (!lane) return undefined
         // For v1.2, we don't have lane info in the event, so we just return it with the provided lane
-        // The actual filtering happens in getCommitReport based on the commitStore address
+        // The actual filtering happens in getOnchainCommitReport based on the commitStore address
         return [
           {
             merkleRoot: parsed12.args.report.merkleRoot as string,
@@ -314,7 +314,7 @@ class MockChain extends Chain {
   }
 }
 
-describe('getCommitReport', () => {
+describe('getOnchainCommitReport', () => {
   it('should return first matching commit report for v1.2', async () => {
     const dest = new MockChain(11155111, 'EVM2EVMOffRamp 1.2.0')
 
