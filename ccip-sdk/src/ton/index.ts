@@ -12,6 +12,7 @@ import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
 import { type ChainContext, type GetBalanceOpts, type LogFilter, Chain } from '../chain.ts'
 import {
   CCIPArgumentInvalidError,
+  CCIPExecutionReportChainMismatchError,
   CCIPExtraArgsInvalidError,
   CCIPHttpError,
   CCIPNotImplementedError,
@@ -20,7 +21,7 @@ import {
   CCIPTopicsInvalidError,
   CCIPTransactionNotFoundError,
   CCIPWalletInvalidError,
-} from '../errors/specialized.ts'
+} from '../errors/index.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
@@ -1107,14 +1108,20 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * {@inheritDoc Chain.generateUnsignedExecuteReport}
    * @throws {@link CCIPExtraArgsInvalidError} if extra args are not EVMExtraArgsV2 format
    */
-  generateUnsignedExecuteReport({
-    offRamp,
-    input,
-    ...opts
-  }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedTONTx> {
-    if (!('allowOutOfOrderExecution' in input.message && 'gasLimit' in input.message)) {
+  generateUnsignedExecuteReport(
+    opts: Parameters<Chain['generateUnsignedExecuteReport']>[0],
+  ): Promise<UnsignedTONTx> {
+    if (
+      !(
+        'input' in opts &&
+        'message' in opts.input &&
+        'allowOutOfOrderExecution' in opts.input.message &&
+        'gasLimit' in opts.input.message
+      )
+    ) {
       throw new CCIPExtraArgsInvalidError('TON')
     }
+    const { offRamp, input } = opts
 
     const unsigned = generateUnsignedExecuteReportImpl(
       offRamp,
@@ -1134,6 +1141,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @throws {@link CCIPReceiptNotFoundError} if execution receipt not found within timeout
    */
   async executeReport(opts: Parameters<Chain['executeReport']>[0]): Promise<CCIPExecution> {
+    if (!('input' in opts && 'message' in opts.input))
+      throw new CCIPExecutionReportChainMismatchError('TON')
     const { offRamp, wallet } = opts
     if (!isTONWallet(wallet)) {
       throw new CCIPWalletInvalidError(wallet)

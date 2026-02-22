@@ -302,11 +302,18 @@ export type SendMessageOpts = {
 /**
  * Common options for {@link Chain.generateUnsignedExecuteReport} and {@link Chain.executeReport} methods.
  */
-export type ExecuteReportOpts = {
-  /** address of the OffRamp contract */
-  offRamp: string
-  /** execution report */
-  input: ExecutionInput
+export type ExecuteOpts = (
+  | {
+      /** address of the OffRamp contract */
+      offRamp: string
+      /** execution report */
+      input: ExecutionInput
+    }
+  | {
+      /** messageId of message to execute */
+      messageId: string
+    }
+) & {
   /** gasLimit or computeUnits limit override for the ccipReceive call */
   gasLimit?: number
   /** For EVM, overrides gasLimit on tokenPool call */
@@ -626,7 +633,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     if ('verifications' in verifications) {
       // >=v2 verifications is enough for execution
       return {
-        message: request.message as CCIPMessage<typeof CCIPVersion.V2_0>,
+        encodedMessage: (request.message as CCIPMessage<typeof CCIPVersion.V2_0>).encodedMessage,
         ...verifications,
       }
     }
@@ -915,7 +922,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Generate unsigned tx to manuallyExecute a message.
    *
-   * @param opts - {@link ExecuteReportOpts} with payer address which will send the exec tx
+   * @param opts - {@link ExecuteOpts} with payer address which will send the exec tx
    * @returns Promise resolving to chain-family specific unsigned txs
    *
    * @example Generate unsigned execution tx
@@ -929,7 +936,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   abstract generateUnsignedExecuteReport(
-    opts: ExecuteReportOpts & {
+    opts: ExecuteOpts & {
       /** address which will be used to send the report tx */
       payer: string
     },
@@ -937,7 +944,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Execute messages in report in an offRamp.
    *
-   * @param opts - {@link ExecuteReportOpts} with chain-specific wallet to sign and send tx
+   * @param opts - {@link ExecuteOpts} with chain-specific wallet to sign and send tx
    * @returns Promise resolving to transaction of the execution
    *
    * @throws {@link CCIPWalletNotSignerError} if wallet is not a valid signer
@@ -968,7 +975,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm
    */
   abstract executeReport(
-    opts: ExecuteReportOpts & {
+    opts: ExecuteOpts & {
       // Signer instance (chain-dependent)
       wallet: unknown
     },
