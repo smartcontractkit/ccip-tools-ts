@@ -6,6 +6,7 @@ import {
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
   CCIPMessageNotFoundInTxError,
+  CCIPNotImplementedError,
   CCIPTimeoutError,
   CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
@@ -15,6 +16,7 @@ import {
   type CCIPMessage,
   type CCIPRequest,
   type ChainTransaction,
+  type ExecutionInput,
   type Log_,
   type Logger,
   type NetworkInfo,
@@ -416,6 +418,16 @@ export class CCIPAPIClient {
     }
 
     return raw.data.map((msg) => msg.messageId)
+  }
+
+  /**
+   * Fetches the execution input for a given message by id.
+   * @param messageId - The ID of the message to fetch the execution input for.
+   * @returns Either \{ encodedMessage, verifications \} or \{ message, offchainTokenData, ...proof \}, and offRamp
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  getExecutionInput(messageId: string): Promise<ExecutionInput & { offRamp: string }> {
+    throw new CCIPNotImplementedError(`CCIPAPIClient.getExecutionInput`)
   }
 
   /**

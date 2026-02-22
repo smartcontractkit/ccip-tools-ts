@@ -565,19 +565,24 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    */
   async generateUnsignedExecuteReport({
     payer,
-    offRamp,
-    input,
     ...opts
   }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedAptosTx> {
-    if (!('allowOutOfOrderExecution' in input.message && 'gasLimit' in input.message)) {
+    if (
+      !(
+        'input' in opts &&
+        'message' in opts.input &&
+        'allowOutOfOrderExecution' in opts.input.message &&
+        'gasLimit' in opts.input.message
+      )
+    ) {
       throw new CCIPAptosExtraArgsV2RequiredError()
     }
 
     const tx = await generateUnsignedExecuteReport(
       this.provider,
       payer,
-      offRamp,
-      input as ExecutionInput<CCIPMessage_V1_6_EVM>,
+      opts.offRamp,
+      opts.input as ExecutionInput<CCIPMessage_V1_6_EVM>,
       opts,
     )
     return {

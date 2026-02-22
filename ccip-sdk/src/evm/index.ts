@@ -16,6 +16,7 @@ import {
   hexlify,
   isBytesLike,
   isHexString,
+  keccak256,
   toBeHex,
   zeroPadValue,
 } from 'ethers'
@@ -32,6 +33,7 @@ import {
 } from '../chain.ts'
 import {
   CCIPAddressInvalidEvmError,
+  CCIPApiClientNotAvailableError,
   CCIPBlockNotFoundError,
   CCIPContractNotRouterError,
   CCIPContractTypeInvalidError,
@@ -59,6 +61,7 @@ import {
   type CCIPVerifications,
   type ChainTransaction,
   type CommitReport,
+  type ExecutionInput,
   type ExecutionReceipt,
   type ExecutionState,
   type Lane,
@@ -1079,11 +1082,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @returns array containing one unsigned `manuallyExecute` TransactionRequest object
    * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
    */
-  async generateUnsignedExecuteReport({
-    offRamp,
-    input,
-    ...opts
-  }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedEVMTx> {
+  async generateUnsignedExecuteReport(
+    opts: Parameters<Chain['generateUnsignedExecuteReport']>[0],
+  ): Promise<UnsignedEVMTx> {
+    let input: ExecutionInput, offRamp: string
+    if (!('input' in opts)) {
+      if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
+      ;({ offRamp, ...input } = await this.apiClient.getExecutionInput(opts.messageId))
+    } else {
+      ;({ offRamp, input } = opts)
+    }
     if ('verifications' in input) {
       const contract = new Contract(
         offRamp,
@@ -1091,23 +1099,24 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         this.provider,
       ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
 
+      const message = decodeMessageV1(input.encodedMessage)
+      const messageId = keccak256(input.encodedMessage)
       // `execute` doesn't revert on failure, so we need to estimate using `executeSingleMessage`
       const txGasLimit = await contract.executeSingleMessage.estimateGas(
         {
-          ...input.message,
-          tokenTransfer: input.message.tokenAmounts,
-          executionGasLimit: BigInt(input.message.executionGasLimit),
-          ccipReceiveGasLimit: BigInt(input.message.ccipReceiveGasLimit),
-          finality: BigInt(input.message.finality),
+          ...message,
+          executionGasLimit: BigInt(message.executionGasLimit),
+          ccipReceiveGasLimit: BigInt(message.ccipReceiveGasLimit),
+          finality: BigInt(message.finality),
         },
-        input.message.messageId,
+        messageId,
         input.verifications.map(({ destAddress }) => destAddress),
         input.verifications.map(({ ccvData }) => hexlify(ccvData)),
         BigInt(opts.gasLimit ?? 0),
         { from: offRamp }, // internal method
       )
       const execTx = await contract.execute.populateTransaction(
-        input.message.encodedMessage,
+        input.encodedMessage,
         input.verifications.map(({ destAddress }) => destAddress),
         input.verifications.map(({ ccvData }) => hexlify(ccvData)),
         BigInt(opts.gasLimit ?? 0),

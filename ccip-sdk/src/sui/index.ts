@@ -30,13 +30,12 @@ import {
   CCIPError,
   CCIPErrorCode,
   CCIPExecTxRevertedError,
-  CCIPNotImplementedError,
-} from '../errors/index.ts'
-import {
+  CCIPExecutionReportChainMismatchError,
   CCIPLogsAddressRequiredError,
+  CCIPNotImplementedError,
   CCIPSuiLogInvalidError,
   CCIPTopicsInvalidError,
-} from '../errors/specialized.ts'
+} from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessage, getMessagesInBatch } from '../requests.ts'
@@ -752,6 +751,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       receiverObjectIds?: string[]
     },
   ): Promise<CCIPExecution> {
+    if (!('input' in opts && 'message' in opts.input)) {
+      throw new CCIPExecutionReportChainMismatchError('Sui')
+    }
     const { input, offRamp } = opts
     const wallet = opts.wallet as Keypair
 

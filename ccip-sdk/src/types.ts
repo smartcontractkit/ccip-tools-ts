@@ -402,8 +402,10 @@ export type OffchainTokenData = { _tag: string; [k: string]: BytesLike } | undef
 export type ExecutionInput<M extends CCIPMessage = CCIPMessage> =
   M extends CCIPMessage<typeof CCIPVersion.V2_0>
     ? {
-        message: M
-        verifications: VerifierResult[]
+        /** encodedMessage as per CCIPv2 codec */
+        encodedMessage: M['encodedMessage']
+        /** Off-Chain verifications containing verifierResults' ccvData and ccvs addresses */
+        verifications: Pick<VerifierResult, 'ccvData' | 'destAddress'>[]
       }
     : {
         /** The CCIP message to execute. */
