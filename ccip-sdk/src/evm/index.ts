@@ -42,6 +42,7 @@ import {
   CCIPExecTxRevertedError,
   CCIPHasherVersionUnsupportedError,
   CCIPLogDataInvalidError,
+  CCIPNotImplementedError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
@@ -1494,14 +1495,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   ): Promise<CCIPVerifications> {
     const { offRamp, request } = opts
     if (request.lane.version >= CCIPVersion.V2_0) {
+      const message = request.message as CCIPMessage_V2_0
+      if (!message.encodedMessage)
+        throw new CCIPNotImplementedError(`CCIPAPIClient getMessageById v2 encodedMessage`)
       const contract = new Contract(
         offRamp,
         interfaces.OffRamp_v2_0,
         this.provider,
       ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
-      const ccvs = await contract.getCCVsForMessage(
-        (request.message as CCIPMessage_V2_0).encodedMessage,
-      )
+      const ccvs = await contract.getCCVsForMessage(message.encodedMessage)
       const [requiredCCVs, optionalCCVs, optionalThreshold] = ccvs.map(
         resultToObject,
       ) as unknown as CleanAddressable<typeof ccvs>

@@ -219,7 +219,10 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       logger.info(`[${MessageStatus.Blessed}] Waiting for execution on destination chain...`)
     else logger.info('Receipts (dest):')
     return verifications
-  })()
+  })().catch((err) => {
+    logger.debug('getVerifications error:', err)
+    return undefined
+  })
 
   let found = false
   for await (const receipt of dest.getExecutionReceipts({
