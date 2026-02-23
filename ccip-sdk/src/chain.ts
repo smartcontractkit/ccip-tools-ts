@@ -760,16 +760,16 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getOnRampForRouter(router: string, destChainSelector: bigint): Promise<string>
   /**
-   * Fetch the OnRamp address set in OffRamp config.
+   * Fetch the OnRamps addresses set in OffRamp config.
    * Used to discover OffRamp connected to an OnRamp.
    *
    * @param offRamp - OffRamp contract address
    * @param sourceChainSelector - Source chain selector
-   * @returns Promise resolving to OnRamp address
+   * @returns Promise resolving to OnRamps addresses
    *
    * @example Get onRamp from offRamp config
    * ```typescript
-   * const onRamp = await dest.getOnRampForOffRamp(offRampAddress, sourceSelector)
+   * const [onRamp] = await dest.getOnRampsForOffRamp(offRampAddress, sourceSelector)
    * console.log(`OnRamp: ${onRamp}`)
    * ```
    */
