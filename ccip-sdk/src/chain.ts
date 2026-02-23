@@ -310,7 +310,10 @@ export type ExecuteOpts = (
       input: ExecutionInput
     }
   | {
-      /** messageId of message to execute; requires `apiClient` */
+      /**
+       * messageId of message to execute; requires `apiClient`.
+       * @remarks Currently throws CCIPNotImplementedError - API endpoint pending.
+       */
       messageId: string
     }
 ) & {
