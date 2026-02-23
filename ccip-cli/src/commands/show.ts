@@ -39,10 +39,10 @@ import { type Ctx, Format } from './types.ts'
 import {
   getCtx,
   logParsedError,
-  prettyCommit,
   prettyReceipt,
   prettyRequest,
   prettyTable,
+  prettyVerifications,
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
@@ -191,15 +191,14 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
 
   const dest = await getChain(request.lane.destChainSelector)
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
-  const commitStore = await dest.getCommitStoreForOffRamp(offRamp)
 
-  let cancelWaitCommit: (() => void) | undefined
-  const commit$ = (async () => {
-    const commit = await dest.getCommitReport({
-      commitStore,
+  let cancelWaitVerifications: (() => void) | undefined
+  const verifications$ = (async () => {
+    const verifications = await dest.getVerifications({
+      offRamp,
       request,
       ...argv,
-      watch: argv.wait && new Promise<void>((resolve) => (cancelWaitCommit = resolve)),
+      watch: argv.wait && new Promise<void>((resolve) => (cancelWaitVerifications = resolve)),
     })
     cancelWaitFinalized?.()
     await finalized$
@@ -207,20 +206,23 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       logger.info(`[${MessageStatus.Committed}] Commit report accepted on destination chain`)
     switch (argv.format) {
       case Format.log:
-        logger.log('commit =', commit)
+        logger.log('commit =', verifications)
         break
       case Format.pretty:
-        await prettyCommit.call(ctx, dest, commit, request)
+        await prettyVerifications.call(ctx, dest, verifications, request)
         break
       case Format.json:
-        logger.info(JSON.stringify(commit, bigIntReplacer, 2))
+        logger.info(JSON.stringify(verifications, bigIntReplacer, 2))
         break
     }
     if (argv.wait)
       logger.info(`[${MessageStatus.Blessed}] Waiting for execution on destination chain...`)
     else logger.info('Receipts (dest):')
-    return commit
-  })()
+    return verifications
+  })().catch((err) => {
+    logger.debug('getVerifications error:', err)
+    return undefined
+  })
 
   let found = false
   for await (const receipt of dest.getExecutionReceipts({
@@ -229,11 +231,11 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     messageId: request.message.messageId,
     sourceChainSelector: request.message.sourceChainSelector,
     startTime: request.tx.timestamp,
-    commit: !argv.wait ? await commit$ : undefined,
+    verifications: !argv.wait ? await verifications$ : undefined,
     watch: argv.wait && ctx.destroy$,
   })) {
-    cancelWaitCommit?.()
-    await commit$
+    cancelWaitVerifications?.()
+    await verifications$
     const status =
       receipt.receipt.state === ExecutionState.Success
         ? MessageStatus.Success

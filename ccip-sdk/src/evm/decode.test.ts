@@ -77,6 +77,7 @@ describe('EVMChain.decodeMessage', () => {
       assert.equal(result.feeToken.toLowerCase(), testAddresses.feeToken.toLowerCase())
       assert.equal(result.messageId, testHash.messageId)
       assert.equal(result.sequenceNumber, 100n)
+      assert.ok('nonce' in result)
       assert.equal(result.nonce, 1n)
       assert.equal(result.sourceChainSelector, 1n)
     })
@@ -114,35 +115,6 @@ describe('EVMChain.decodeMessage', () => {
       assert.equal(ta0.amount, 1000n)
       assert.equal(ta1.token?.toLowerCase(), testAddresses.token2.toLowerCase())
       assert.equal(ta1.amount, 2000n)
-    })
-
-    it('should set allowOutOfOrderExecution when nonce is 0', () => {
-      const fragment = interfaces.EVM2EVMOnRamp_v1_5.getEvent('CCIPSendRequested')!
-      const encoded = interfaces.EVM2EVMOnRamp_v1_5.encodeEventLog(fragment, [
-        {
-          sourceChainSelector: 1n,
-          sender: testAddresses.sender,
-          receiver: testAddresses.receiver,
-          sequenceNumber: 1n,
-          gasLimit: 100_000n,
-          strict: false,
-          nonce: 0n,
-          feeToken: ZeroAddress,
-          feeTokenAmount: 0n,
-          data: '0x',
-          tokenAmounts: [],
-          sourceTokenData: [],
-          messageId: testHash.messageId,
-        },
-      ])
-
-      const result = EVMChain.decodeMessage({ topics: encoded.topics, data: encoded.data })
-
-      assert.ok(result)
-      assert.equal(
-        (result as { allowOutOfOrderExecution?: boolean }).allowOutOfOrderExecution,
-        true,
-      )
     })
   })
 
@@ -187,6 +159,7 @@ describe('EVMChain.decodeMessage', () => {
       assert.equal(result.feeToken.toLowerCase(), testAddresses.feeToken.toLowerCase())
       assert.equal(result.messageId, testHash.messageId)
       assert.equal(result.sequenceNumber, 500n)
+      assert.ok('nonce' in result)
       assert.equal(result.nonce, 10n)
       assert.equal(result.sourceChainSelector, sourceChainSelector)
       assert.equal((result as { destChainSelector?: bigint }).destChainSelector, destChainSelector)

@@ -136,12 +136,12 @@ const request = requests[0]
 
 const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
 
-const commit = await dest.getCommitReport({
-  commitStore: offRamp,
+const verifications = await dest.getVerifications({
+  offRamp,
   request,
 })
 
-if (!commit) {
+if (!verifications) {
   throw new Error('Message not yet committed - cannot execute')
 }
 ```
@@ -149,34 +149,16 @@ if (!commit) {
 ### Step 2: Calculate Merkle Proof
 
 ```typescript
-import { calculateManualExecProof } from '@chainlink/ccip-sdk'
-
 // Fetch all messages in the commit batch
-const messagesInBatch = await source.getMessagesInBatch(request, commit.report)
-
-const proof = calculateManualExecProof(
-  messagesInBatch,
-  request.lane,
-  request.message.messageId,
-  commit.report.merkleRoot
-)
-
-console.log('Merkle root:', proof.merkleRoot)
-console.log('Proof hashes:', proof.proofs)
+const input = await source.getExecutionInput({ request, verifications})
 ```
 
 ### Step 3: Execute
 
 ```typescript
-const executionReport = {
-  ...proof,
-  message: request.message,
-  offchainTokenData: [],
-}
-
-const execution = await dest.executeReport({
+const execution = await dest.execute({
   offRamp,
-  execReport: executionReport,
+  input,
   wallet, // Required: signer instance
 })
 console.log('Manual execution tx:', execution.log.transactionHash)
@@ -295,11 +277,8 @@ async function recoverFailedMessage(sourceTxHash: string) {
   }
 
   // Step 4: Get commit
-  const commit = await dest.getCommitReport({
-    commitStore: offRamp,
-    request,
-  })
-  if (!commit) {
+  const verifications = await dest.getVerifications({ offRamp, request })
+  if (!verifications) {
     console.log('Not yet committed - wait for DON to commit')
     return { status: 'pending_commit' }
   }
@@ -307,23 +286,12 @@ async function recoverFailedMessage(sourceTxHash: string) {
   // Step 5: Manual execution
   if (needsManualExecution) {
     // Fetch all messages in the commit batch
-    const messagesInBatch = await source.getMessagesInBatch(request, commit.report)
-
-    const proof = calculateManualExecProof(
-      messagesInBatch,
-      request.lane,
-      request.message.messageId,
-      commit.report.merkleRoot
-    )
+    const input = await source.getExecutionInput({ request, verifications })
 
     console.log('Executing manually...')
-    const execution = await dest.executeReport({
+    const execution = await dest.execute({
       offRamp,
-      execReport: {
-        ...proof,
-        message: request.message,
-        offchainTokenData: [],
-      },
+      input,
       wallet, // Required: signer instance
     })
 

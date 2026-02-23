@@ -14,7 +14,7 @@ import BN from 'bn.js'
 import { hexlify } from 'ethers'
 
 import { CCIPSolanaLookupTableNotFoundError } from '../errors/index.ts'
-import { type ExecutionReport, type WithLogger, ChainFamily } from '../types.ts'
+import { type ExecutionInput, type WithLogger, ChainFamily } from '../types.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
 import type { CCIPMessage_V1_6_Solana, UnsignedSolanaTx } from './types.ts'
@@ -43,7 +43,7 @@ export async function generateUnsignedExecuteReport(
   ctx: { connection: Connection } & WithLogger,
   payer: PublicKey,
   offramp: PublicKey,
-  execReport: ExecutionReport<CCIPMessage_V1_6_Solana>,
+  execReport: ExecutionInput<CCIPMessage_V1_6_Solana>,
   opts?: { forceLookupTable?: boolean; forceBuffer?: boolean; clearLeftoverAccounts?: boolean },
 ): Promise<UnsignedSolanaTx> {
   const { connection, logger = console } = ctx
@@ -274,7 +274,7 @@ async function getManuallyExecuteInputs({
 }: {
   payer: PublicKey
   offramp: Program<typeof CCIP_OFFRAMP_IDL>
-  execReport: ExecutionReport<CCIPMessage_V1_6_Solana>
+  execReport: ExecutionInput<CCIPMessage_V1_6_Solana>
   bufferId?: Buffer
 } & WithLogger) {
   const executionReport = prepareExecutionReport(execReport)
@@ -346,7 +346,7 @@ function prepareExecutionReport({
   message,
   offchainTokenData,
   proofs,
-}: ExecutionReport<CCIPMessage_V1_6_Solana>): IdlTypes<
+}: ExecutionInput<CCIPMessage_V1_6_Solana>): IdlTypes<
   typeof CCIP_OFFRAMP_IDL
 >['ExecutionReportSingleChain'] {
   return {

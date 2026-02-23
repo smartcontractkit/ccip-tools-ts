@@ -12,6 +12,7 @@ import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
 import { type ChainContext, type GetBalanceOpts, type LogFilter, Chain } from '../chain.ts'
 import {
   CCIPArgumentInvalidError,
+  CCIPExecutionReportChainMismatchError,
   CCIPExtraArgsInvalidError,
   CCIPHttpError,
   CCIPNotImplementedError,
@@ -20,7 +21,7 @@ import {
   CCIPTopicsInvalidError,
   CCIPTransactionNotFoundError,
   CCIPWalletInvalidError,
-} from '../errors/specialized.ts'
+} from '../errors/index.ts'
 import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
@@ -30,8 +31,8 @@ import {
   type CCIPRequest,
   type ChainTransaction,
   type CommitReport,
+  type ExecutionInput,
   type ExecutionReceipt,
-  type ExecutionReport,
   type Lane,
   type Log_,
   type NetworkInfo,
@@ -49,7 +50,7 @@ import {
   parseTypeAndVersion,
   sleep,
 } from '../utils.ts'
-import { generateUnsignedExecuteReport as generateUnsignedExecuteReportImpl } from './exec.ts'
+import { generateUnsignedExecuteReport } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import { type CCIPMessage_V1_6_TON, type UnsignedTONTx, isTONWallet } from './types.ts'
 import { crc32, lookupTxByRawHash, parseJettonContent } from './utils.ts'
@@ -370,10 +371,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
   }
 
-  /**
-   * {@inheritDoc Chain.getMessagesInBatch}
-   * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
-   */
+  /** {@inheritDoc Chain.getMessagesInBatch} */
   override async getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
@@ -381,10 +379,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     >,
   >(
     request: R,
-    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
-    opts?: { page?: number },
+    range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    opts?: Pick<LogFilter, 'page'>,
   ): Promise<R['message'][]> {
-    return getMessagesInBatch(this, request, commit, opts)
+    return getMessagesInBatch(this, request, range, opts)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
@@ -462,10 +460,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * {@inheritDoc Chain.getOnRampForOffRamp}
+   * {@inheritDoc Chain.getOnRampsForOffRamp}
    * @throws {@link CCIPSourceChainUnsupportedError} if source chain is not configured
    */
-  async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
+  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
     try {
       const offRampContract = this.provider.provider(Address.parse(offRamp))
 
@@ -493,7 +491,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         const onRampLength = onRampSlice.loadUint(8)
         onRamp = onRampSlice.loadBuffer(onRampLength)
       }
-      return decodeAddress(onRamp, networkInfo(sourceChainSelector).family)
+      return [decodeAddress(onRamp, networkInfo(sourceChainSelector).family)]
     } catch (error) {
       if (isTvmError(error) && error.exitCode === 266) {
         throw new CCIPSourceChainUnsupportedError(sourceChainSelector, {
@@ -502,12 +500,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       }
       throw error
     }
-  }
-
-  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
-  async getCommitStoreForOffRamp(offRamp: string): Promise<string> {
-    // TODO: FIXME: check assumption
-    return Promise.resolve(offRamp)
   }
 
   /**
@@ -1113,21 +1105,27 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * {@inheritDoc Chain.generateUnsignedExecuteReport}
+   * {@inheritDoc Chain.generateUnsignedExecute}
    * @throws {@link CCIPExtraArgsInvalidError} if extra args are not EVMExtraArgsV2 format
    */
-  generateUnsignedExecuteReport({
-    offRamp,
-    execReport,
-    ...opts
-  }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedTONTx> {
-    if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
+  generateUnsignedExecute(
+    opts: Parameters<Chain['generateUnsignedExecute']>[0],
+  ): Promise<UnsignedTONTx> {
+    if (
+      !(
+        'input' in opts &&
+        'message' in opts.input &&
+        'allowOutOfOrderExecution' in opts.input.message &&
+        'gasLimit' in opts.input.message
+      )
+    ) {
       throw new CCIPExtraArgsInvalidError('TON')
     }
+    const { offRamp, input } = opts
 
-    const unsigned = generateUnsignedExecuteReportImpl(
+    const unsigned = generateUnsignedExecuteReport(
       offRamp,
-      execReport as ExecutionReport<CCIPMessage_V1_6_TON>,
+      input as ExecutionInput<CCIPMessage_V1_6_TON>,
       opts,
     )
 
@@ -1138,18 +1136,20 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * {@inheritDoc Chain.executeReport}
+   * {@inheritDoc Chain.execute}
    * @throws {@link CCIPWalletInvalidError} if wallet is not a valid TON wallet
    * @throws {@link CCIPReceiptNotFoundError} if execution receipt not found within timeout
    */
-  async executeReport(opts: Parameters<Chain['executeReport']>[0]): Promise<CCIPExecution> {
+  async execute(opts: Parameters<Chain['execute']>[0]): Promise<CCIPExecution> {
+    if (!('input' in opts && 'message' in opts.input))
+      throw new CCIPExecutionReportChainMismatchError('TON')
     const { offRamp, wallet } = opts
     if (!isTONWallet(wallet)) {
       throw new CCIPWalletInvalidError(wallet)
     }
     const payer = await wallet.getAddress()
 
-    const { family: _, ...unsigned } = await this.generateUnsignedExecuteReport({
+    const { family: _, ...unsigned } = await this.generateUnsignedExecute({
       ...opts,
       payer,
     })
@@ -1161,7 +1161,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       ...unsigned,
     })
 
-    const message = opts.execReport.message as CCIPMessage_V1_6_TON
+    const message = opts.input.message as CCIPMessage_V1_6_TON
     for await (const exec of this.getExecutionReceipts({
       offRamp,
       messageId: message.messageId,

@@ -73,14 +73,14 @@ import SELECTORS from '../selectors.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
-  type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
+  type CCIPVerifications,
   type ChainTransaction,
   type CommitReport,
+  type ExecutionInput,
   type ExecutionReceipt,
-  type ExecutionReport,
   type Lane,
   type Log_,
   type MergeArrayElements,
@@ -96,6 +96,7 @@ import {
   createRateLimitedFetch,
   decodeAddress,
   decodeOnRampAddress,
+  getAddressBytes,
   getDataBytes,
   leToBigInt,
   networkInfo,
@@ -476,15 +477,15 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /** {@inheritDoc Chain.getMessagesInBatch} */
-  async getMessagesInBatch<
+  override async getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
     request: R,
-    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
-    opts?: { page?: number },
+    range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    opts?: Pick<LogFilter, 'page'>,
   ): Promise<R['message'][]> {
     const [destChainStatePda] = PublicKey.findProgramAddressSync(
       [Buffer.from('dest_chain_state'), toLeArray(request.lane.destChainSelector, 8)],
@@ -497,7 +498,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       programs: [request.log.address],
       address: destChainStatePda.toBase58(),
     }
-    return getMessagesInBatch(this, request, commit, opts_)
+    return getMessagesInBatch(this, request, range, opts_)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
@@ -582,8 +583,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return Promise.resolve(router) // solana's Router is also the OnRamp
   }
 
-  /** {@inheritDoc Chain.getOnRampForOffRamp} */
-  async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
+  /** {@inheritDoc Chain.getOnRampsForOffRamp} */
+  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
     const program = new Program(CCIP_OFFRAMP_IDL, new PublicKey(offRamp), {
       connection: this.connection,
     })
@@ -597,15 +598,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const {
       config: { onRamp },
     } = await program.account.sourceChain.fetch(statePda)
-    return decodeAddress(
-      new Uint8Array(onRamp.bytes.slice(0, onRamp.len)),
-      networkInfo(sourceChainSelector).family,
-    )
-  }
-
-  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
-  getCommitStoreForOffRamp(offRamp: string): Promise<string> {
-    return Promise.resolve(offRamp) // Solana supports only CCIP>=1.6, for which OffRamp and CommitStore are the same
+    return [
+      decodeAddress(
+        getAddressBytes(onRamp.bytes).subarray(0, onRamp.len),
+        networkInfo(sourceChainSelector).family,
+      ),
+    ]
   }
 
   /**
@@ -1115,7 +1113,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * {@inheritDoc Chain.generateUnsignedExecuteReport}
+   * {@inheritDoc Chain.generateUnsignedExecute}
    * @returns instructions - array of instructions to execute the report
    *   lookupTables - array of lookup tables for `manuallyExecute` call
    *   mainIndex - index of the `manuallyExecute` instruction in the array; last unless
@@ -1123,15 +1121,14 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *   second to last
    * @throws {@link CCIPExecutionReportChainMismatchError} if message is not a Solana message
    */
-  async generateUnsignedExecuteReport({
+  async generateUnsignedExecute({
     payer,
-    offRamp,
-    execReport,
     ...opts
-  }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedSolanaTx> {
-    if (!('computeUnits' in execReport.message))
+  }: Parameters<Chain['generateUnsignedExecute']>[0]): Promise<UnsignedSolanaTx> {
+    if (!('input' in opts) || !('message' in opts.input) || !('computeUnits' in opts.input.message))
       throw new CCIPExecutionReportChainMismatchError('Solana')
-    const execReport_ = execReport as ExecutionReport<CCIPMessage_V1_6_Solana>
+    const { offRamp, input } = opts
+    const execReport_ = input as ExecutionInput<CCIPMessage_V1_6_Solana>
     return generateUnsignedExecuteReport(
       this,
       new PublicKey(payer),
@@ -1142,11 +1139,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * {@inheritDoc Chain.executeReport}
+   * {@inheritDoc Chain.execute}
    * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Solana wallet
    */
-  async executeReport(
-    opts: Parameters<Chain['executeReport']>[0] & {
+  async execute(
+    opts: Parameters<Chain['execute']>[0] & {
       // when cleaning leftover LookUp Tables, wait deactivation grace period (~513 slots) then close ALT
       waitDeactivation?: boolean
     },
@@ -1157,7 +1154,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     let hash
     do {
       try {
-        const unsigned = await this.generateUnsignedExecuteReport({
+        const unsigned = await this.generateUnsignedExecute({
           ...opts,
           payer: wallet.publicKey.toBase58(),
         })
@@ -1233,39 +1230,36 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   /**
    * Solana specialization: use getProgramAccounts to fetch commit reports from PDAs
    */
-  override async getCommitReport(
-    opts: Parameters<Chain['getCommitReport']>[0],
-  ): Promise<CCIPCommit> {
-    const { commitStore, request } = opts
-    const commitsAroundSeqNum = await this.connection.getProgramAccounts(
-      new PublicKey(commitStore),
-      {
-        filters: [
-          {
-            // commit report account discriminator filter
-            memcmp: {
-              offset: 0,
-              bytes: encodeBase58(BorshAccountsCoder.accountDiscriminator('CommitReport')),
-            },
+  override async getVerifications(
+    opts: Parameters<Chain['getVerifications']>[0],
+  ): Promise<CCIPVerifications> {
+    const { offRamp, request } = opts
+    const commitsAroundSeqNum = await this.connection.getProgramAccounts(new PublicKey(offRamp), {
+      filters: [
+        {
+          // commit report account discriminator filter
+          memcmp: {
+            offset: 0,
+            bytes: encodeBase58(BorshAccountsCoder.accountDiscriminator('CommitReport')),
           },
-          {
-            // sourceChainSelector filter
-            memcmp: {
-              offset: 8 + 1,
-              bytes: encodeBase58(toLeArray(request.lane.sourceChainSelector, 8)),
-            },
+        },
+        {
+          // sourceChainSelector filter
+          memcmp: {
+            offset: 8 + 1,
+            bytes: encodeBase58(toLeArray(request.lane.sourceChainSelector, 8)),
           },
-          // memcmp report.min with msg.sequenceNumber's without least-significant byte;
-          // this should be ~256 around seqNum, i.e. big chance of a match; requires PDAs not to have been closed
-          {
-            memcmp: {
-              offset: 8 + 1 + 8 + 32 + 8 + /*skip byte*/ 1,
-              bytes: encodeBase58(toLeArray(request.message.sequenceNumber, 8).slice(1)),
-            },
+        },
+        // memcmp report.min with msg.sequenceNumber's without least-significant byte;
+        // this should be ~256 around seqNum, i.e. big chance of a match; requires PDAs not to have been closed
+        {
+          memcmp: {
+            offset: 8 + 1 + 8 + 32 + 8 + /*skip byte*/ 1,
+            bytes: encodeBase58(toLeArray(request.message.sequenceNumber, 8).slice(1)),
           },
-        ],
-      },
-    )
+        },
+      ],
+    })
     for (const acc of commitsAroundSeqNum) {
       // const merkleRoot = acc.account.data.subarray(8 + 1 + 8, 8 + 1 + 8 + 32)
       const minSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8)
@@ -1275,7 +1269,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       // we have all the commit report info, but we also need log details (txHash, etc)
       for await (const log of this.getLogs({
         startTime: 1, // just to force getting the oldest log first
-        programs: [commitStore],
+        programs: [offRamp],
         address: acc.pubkey.toBase58(),
         topics: ['CommitReportAccepted'],
       })) {
@@ -1288,23 +1282,23 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       }
     }
     // in case we can't find it, fallback to generic iterating txs
-    return super.getCommitReport(opts)
+    return super.getVerifications(opts)
   }
 
   /** {@inheritDoc Chain.getExecutionReceipts} */
   override async *getExecutionReceipts(
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
-    const { offRamp, sourceChainSelector, commit } = opts
+    const { offRamp, sourceChainSelector, verifications } = opts
     let opts_: Parameters<Chain['getExecutionReceipts']>[0] &
       Parameters<SolanaChain['getLogs']>[0] = opts
-    if (commit && sourceChainSelector) {
+    if (sourceChainSelector && verifications && 'report' in verifications) {
       // if we know of commit, use `commit_report` PDA as more specialized address
       const [commitReportPda] = PublicKey.findProgramAddressSync(
         [
           Buffer.from('commit_report'),
           toLeArray(sourceChainSelector, 8),
-          bytesToBuffer(commit.report.merkleRoot),
+          bytesToBuffer(verifications.report.merkleRoot),
         ],
         new PublicKey(offRamp),
       )

@@ -1,6 +1,6 @@
 import { type Aptos, AccountAddress } from '@aptos-labs/ts-sdk'
 
-import type { ExecutionReport } from '../types.ts'
+import type { ExecutionInput } from '../types.ts'
 import { serializeExecutionReport } from './types.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 
@@ -18,7 +18,7 @@ export async function generateUnsignedExecuteReport(
   provider: Aptos,
   payer: string,
   offRamp: string,
-  execReport: ExecutionReport<CCIPMessage_V1_6_EVM>,
+  execReport: ExecutionInput<CCIPMessage_V1_6_EVM>,
   opts?: { gasLimit?: number },
 ) {
   // Prepare proofs as byte arrays

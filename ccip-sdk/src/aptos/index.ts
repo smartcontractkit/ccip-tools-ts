@@ -58,8 +58,8 @@ import {
   type CCIPRequest,
   type ChainTransaction,
   type CommitReport,
+  type ExecutionInput,
   type ExecutionReceipt,
-  type ExecutionReport,
   type Lane,
   type Log_,
   type NetworkInfo,
@@ -241,17 +241,17 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /** {@inheritDoc Chain.getMessagesInBatch} */
-  async getMessagesInBatch<
+  override async getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
     request: R,
-    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
     opts?: { page?: number },
   ): Promise<R['message'][]> {
-    return getMessagesInBatch(this, request, commit, opts)
+    return getMessagesInBatch(this, request, range, opts)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
@@ -291,8 +291,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return Promise.resolve(router.split('::')[0] + '::onramp')
   }
 
-  /** {@inheritDoc Chain.getOnRampForOffRamp} */
-  async getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
+  /** {@inheritDoc Chain.getOnRampsForOffRamp} */
+  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
     const [sourceChainConfig] = await this.provider.view<[{ on_ramp: string }]>({
       payload: {
         function:
@@ -300,12 +300,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         functionArguments: [sourceChainSelector],
       },
     })
-    return decodeAddress(sourceChainConfig.on_ramp, networkInfo(sourceChainSelector).family)
-  }
-
-  /** {@inheritDoc Chain.getCommitStoreForOffRamp} */
-  getCommitStoreForOffRamp(offRamp: string): Promise<string> {
-    return Promise.resolve(offRamp.split('::')[0] + '::offramp')
+    return [decodeAddress(sourceChainConfig.on_ramp, networkInfo(sourceChainSelector).family)]
   }
 
   /** {@inheritDoc Chain.getTokenForTokenPool} */
@@ -565,24 +560,29 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /**
-   * {@inheritDoc Chain.generateUnsignedExecuteReport}
+   * {@inheritDoc Chain.generateUnsignedExecute}
    * @throws {@link CCIPAptosExtraArgsV2RequiredError} if message missing EVMExtraArgsV2 fields
    */
-  async generateUnsignedExecuteReport({
+  async generateUnsignedExecute({
     payer,
-    offRamp,
-    execReport,
     ...opts
-  }: Parameters<Chain['generateUnsignedExecuteReport']>[0]): Promise<UnsignedAptosTx> {
-    if (!('allowOutOfOrderExecution' in execReport.message && 'gasLimit' in execReport.message)) {
+  }: Parameters<Chain['generateUnsignedExecute']>[0]): Promise<UnsignedAptosTx> {
+    if (
+      !(
+        'input' in opts &&
+        'message' in opts.input &&
+        'allowOutOfOrderExecution' in opts.input.message &&
+        'gasLimit' in opts.input.message
+      )
+    ) {
       throw new CCIPAptosExtraArgsV2RequiredError()
     }
 
     const tx = await generateUnsignedExecuteReport(
       this.provider,
       payer,
-      offRamp,
-      execReport as ExecutionReport<CCIPMessage_V1_6_EVM>,
+      opts.offRamp,
+      opts.input as ExecutionInput<CCIPMessage_V1_6_EVM>,
       opts,
     )
     return {
@@ -592,16 +592,16 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /**
-   * {@inheritDoc Chain.executeReport}
+   * {@inheritDoc Chain.execute}
    * @throws {@link CCIPAptosWalletInvalidError} if wallet is not a valid Aptos account
    */
-  async executeReport(opts: Parameters<Chain['executeReport']>[0]): Promise<CCIPExecution> {
+  async execute(opts: Parameters<Chain['execute']>[0]): Promise<CCIPExecution> {
     const account = opts.wallet
     if (!isAptosAccount(account)) {
       throw new CCIPAptosWalletInvalidError(this.constructor.name, util.inspect(opts.wallet))
     }
 
-    const unsignedTx = await this.generateUnsignedExecuteReport({
+    const unsignedTx = await this.generateUnsignedExecute({
       ...opts,
       payer: account.accountAddress.toString(),
     })
@@ -628,9 +628,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @returns Parsed data or undefined.
    */
   static parse(data: unknown) {
-    if (isBytesLike(data)) {
-      const parsedExtraArgs = this.decodeExtraArgs(data)
-      if (parsedExtraArgs) return parsedExtraArgs
+    try {
+      if (isBytesLike(data)) {
+        const parsedExtraArgs = this.decodeExtraArgs(data)
+        if (parsedExtraArgs) return parsedExtraArgs
+      }
+    } catch {
+      // ignore
     }
   }
 

@@ -6,7 +6,7 @@ import { Interface } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { Chain } from './chain.ts'
-import { getCommitReport } from './commits.ts'
+import { getOnchainCommitReport } from './commits.ts'
 import CommitStore_1_2_ABI from './evm/abi/CommitStore_1_2.ts'
 import OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
 import {
@@ -112,16 +112,12 @@ class MockChain extends Chain {
     return []
   }
 
-  async getOnRampForOffRamp(_offRamp: string, _chainSelector: bigint): Promise<string> {
-    return '0xOnRamp'
+  async getOnRampsForOffRamp(_offRamp: string, _chainSelector: bigint): Promise<string[]> {
+    return ['0xOnRamp']
   }
 
   async getOnRampForRouter(_router: string, _destChainSelector: bigint): Promise<string> {
     return '0xOnRamp'
-  }
-
-  async getCommitStoreForOffRamp(_offRamp: string): Promise<string> {
-    return '0xCommitStore'
   }
 
   async getSupportedTokens(_address: string, _opts?: { page?: number }): Promise<string[]> {
@@ -180,11 +176,11 @@ class MockChain extends Chain {
     return []
   }
 
-  override generateUnsignedExecuteReport(_opts: any): Promise<never> {
+  override generateUnsignedExecute(_opts: any): Promise<never> {
     return Promise.reject(new Error('not implemented'))
   }
 
-  async executeReport(_opts: any) {
+  async execute(_opts: any) {
     return Promise.reject(new Error('not implemented'))
   }
 
@@ -206,7 +202,7 @@ class MockChain extends Chain {
       if (parsed12?.name === 'ReportAccepted') {
         if (!lane) return undefined
         // For v1.2, we don't have lane info in the event, so we just return it with the provided lane
-        // The actual filtering happens in getCommitReport based on the commitStore address
+        // The actual filtering happens in getOnchainCommitReport based on the commitStore address
         return [
           {
             merkleRoot: parsed12.args.report.merkleRoot as string,
@@ -318,7 +314,7 @@ class MockChain extends Chain {
   }
 }
 
-describe('getCommitReport', () => {
+describe('getOnchainCommitReport', () => {
   it('should return first matching commit report for v1.2', async () => {
     const dest = new MockChain(11155111, 'EVM2EVMOffRamp 1.2.0')
 
@@ -356,8 +352,9 @@ describe('getCommitReport', () => {
     }
 
     const hints = { startBlock: 12345 }
-    const result = await getCommitReport(dest, '0xCommitStore', request, hints)
+    const result = await getOnchainCommitReport(dest, '0xCommitStore', request, hints)
 
+    assert.ok('report' in result)
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 1n)
     assert.equal(result.report.maxSeqNr, 2n)
@@ -415,7 +412,7 @@ describe('getCommitReport', () => {
     const hints = { startBlock: 12345 }
 
     await assert.rejects(
-      async () => await getCommitReport(dest, '0xCommitStore', request, hints),
+      async () => await getOnchainCommitReport(dest, '0xCommitStore', request, hints),
       /Could not find commit after 12345 for sequenceNumber=1/,
     )
   })
@@ -466,8 +463,9 @@ describe('getCommitReport', () => {
     }
 
     const hints = { startBlock: 12345 }
-    const result = await getCommitReport(dest, '0xOffRamp', request, hints)
+    const result = await getOnchainCommitReport(dest, '0xOffRamp', request, hints)
 
+    assert.ok('report' in result)
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 3n)
     assert.equal(result.report.maxSeqNr, 8n)
@@ -526,7 +524,7 @@ describe('getCommitReport', () => {
     const hints = { startBlock: 12345 }
 
     await assert.rejects(
-      async () => await getCommitReport(dest, '0xOffRamp', request, hints),
+      async () => await getOnchainCommitReport(dest, '0xOffRamp', request, hints),
       /Could not find commit after 12345 for sequenceNumber=5/,
     )
   })
@@ -600,8 +598,9 @@ describe('getCommitReport', () => {
     }
 
     const hints = { startBlock: 12345 }
-    const result = await getCommitReport(dest, '0xOffRamp', request, hints)
+    const result = await getOnchainCommitReport(dest, '0xOffRamp', request, hints)
 
+    assert.ok('report' in result)
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 4n)
     assert.equal(result.report.maxSeqNr, 10n)
@@ -655,8 +654,9 @@ describe('getCommitReport', () => {
     }
 
     // No hints provided, should use timestamp
-    const result = await getCommitReport(dest, '0xOffRamp', request)
+    const result = await getOnchainCommitReport(dest, '0xOffRamp', request)
 
+    assert.ok('report' in result)
     assert.ok(result.report)
     assert.equal(result.report.minSeqNr, 1n)
     assert.equal(result.report.maxSeqNr, 5n)

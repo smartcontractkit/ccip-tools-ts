@@ -6,6 +6,7 @@ import {
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
   CCIPMessageNotFoundInTxError,
+  CCIPNotImplementedError,
   CCIPTimeoutError,
   CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
@@ -15,6 +16,7 @@ import {
   type CCIPMessage,
   type CCIPRequest,
   type ChainTransaction,
+  type ExecutionInput,
   type Log_,
   type Logger,
   type NetworkInfo,
@@ -419,6 +421,20 @@ export class CCIPAPIClient {
   }
 
   /**
+   * Fetches the execution input for a given message by id.
+   * @param messageId - The ID of the message to fetch the execution input for.
+   * @returns Either `{ encodedMessage, verifications }` or `{ message, offchainTokenData, ...proof }`, and offRamp
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  getExecutionInput(messageId: string): Promise<ExecutionInput & { offRamp: string }> {
+    throw new CCIPNotImplementedError(`CCIPAPIClient.getExecutionInput`)
+    // TODO: fetch (memoized) request with metadata from `getMessageById`
+    // TODO: if request doesn't contain averything needed (e.g. <v2.0), fetch `batch` and
+    // `offchainTokenData` from `/execution-input`
+    // TODO: if <v2.0, `calculateManualExecProof` and return `offRamp` and `input`
+  }
+
+  /**
    * Transforms raw API response to CCIPRequest with metadata.
    * Populates all derivable CCIPRequest fields from API data.
    * @internal
@@ -435,7 +451,6 @@ export class CCIPAPIClient {
       onramp,
       version,
       readyForManualExecution,
-      finality,
       sendTransactionHash,
       receiptTransactionHash,
       sendTimestamp,
@@ -499,7 +514,6 @@ export class CCIPAPIClient {
       metadata: {
         status: validateMessageStatus(status, this.logger),
         readyForManualExecution,
-        finality,
         receiptTransactionHash,
         receiptTimestamp: receiptTimestamp_,
         deliveryTime,
