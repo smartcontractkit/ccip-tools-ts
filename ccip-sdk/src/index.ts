@@ -98,11 +98,3 @@ import { ChainFamily, NetworkType } from './types.ts'
 export { AptosChain, ChainFamily, EVMChain, NetworkType, SolanaChain, SuiChain, TONChain }
 // use `supportedChains` to override/register derived classes, if needed
 export { supportedChains } from './supported-chains.ts'
-// import `allSupportedChains` to get them all registered, in tree-shaken environments
-export const allSupportedChains = {
-  [ChainFamily.EVM]: EVMChain,
-  [ChainFamily.Solana]: SolanaChain,
-  [ChainFamily.Aptos]: AptosChain,
-  [ChainFamily.Sui]: SuiChain,
-  [ChainFamily.TON]: TONChain,
-}

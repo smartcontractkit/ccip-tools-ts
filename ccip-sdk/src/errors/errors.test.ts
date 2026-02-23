@@ -22,7 +22,6 @@ import {
   CCIPMerkleTreeEmptyError,
   CCIPMessageIdNotFoundError,
   CCIPMessageInvalidError,
-  CCIPMessageNotFoundInTxError,
   CCIPMessageNotInBatchError,
   CCIPNotImplementedError,
   CCIPOffRampNotFoundError,
@@ -380,15 +379,6 @@ describe('specialized errors', () => {
       assert.equal(error.code, 'MESSAGE_INVALID')
       assert.equal(error.isTransient, false)
       assert.deepEqual(error.context.data, data)
-    })
-
-    it('CCIPMessageNotFoundInTxError should be transient', () => {
-      const error = new CCIPMessageNotFoundInTxError('0xtxhash')
-
-      assert.equal(error.code, 'MESSAGE_NOT_FOUND_IN_TX')
-      assert.equal(error.isTransient, true)
-      assert.equal(error.retryAfterMs, 30000)
-      assert.equal(error.context.txHash, '0xtxhash')
     })
 
     it('CCIPMessageNotInBatchError should be permanent', () => {

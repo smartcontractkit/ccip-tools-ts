@@ -1,3 +1,24 @@
+/**
+ * CCIP CLI Manual Execution Command
+ *
+ * Manually executes pending or failed CCIP messages on the destination chain.
+ * Use this when automatic execution fails or is delayed.
+ *
+ * @example
+ * ```bash
+ * # Execute a stuck message
+ * ccip-cli manualExec 0xSourceTxHash... --wallet $PRIVATE_KEY
+ *
+ * # Execute with custom gas limit
+ * ccip-cli manualExec 0xSourceTxHash... --gas-limit 500000
+ *
+ * # Execute all messages in sender queue
+ * ccip-cli manualExec 0xSourceTxHash... --sender-queue
+ * ```
+ *
+ * @packageDocumentation
+ */
+
 import {
   type ExecutionReport,
   bigIntReplacer,
@@ -134,7 +155,7 @@ async function manualExec(
       break
     }
     case Format.pretty:
-      await prettyRequest.call(ctx, source, request)
+      await prettyRequest.call(ctx, request, source)
       break
     case Format.json:
       logger.info(JSON.stringify(request, bigIntReplacer, 2))

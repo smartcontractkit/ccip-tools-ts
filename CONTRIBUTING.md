@@ -172,7 +172,7 @@ constructor(network: NetworkInfo, ctx?: ChainContext) {
   } else if (apiClient !== undefined) {
     this.apiClient = apiClient                         // Use provided instance
   } else {
-    this.apiClient = new CCIPAPIClient(undefined, { logger })  // Default
+    this.apiClient = CCIPAPIClient.fromUrl(undefined, { logger })  // Default
   }
 }
 ```
@@ -184,7 +184,7 @@ constructor(network: NetworkInfo, ctx?: ChainContext) {
 const chain = await EVMChain.fromUrl(rpcUrl)
 
 // Custom API endpoint
-const api = new CCIPAPIClient('https://staging.example.com')
+const api = CCIPAPIClient.fromUrl('https://staging.example.com')
 const chain = await EVMChain.fromUrl(rpcUrl, { apiClient: api })
 
 // Decentralized mode: no external API calls (100% on-chain)

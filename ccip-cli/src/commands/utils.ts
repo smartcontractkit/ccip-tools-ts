@@ -124,14 +124,17 @@ export function formatDisplayTxHash(hash: string, family: ChainFamily): string {
 }
 
 async function formatToken(
-  source: Chain,
-  ta: { amount: bigint } & ({ token: string } | { sourcePoolAddress: string }),
+  source: Chain | undefined,
+  ta: { amount: bigint } & (
+    | { token: string }
+    | { sourceTokenAddress?: string; sourcePoolAddress: string }
+  ),
 ): Promise<string> {
+  if (!source) return `${ta.amount} ${'sourcePoolAddress' in ta ? ta.sourcePoolAddress : ta.token}`
   let token
   if ('token' in ta) token = ta.token
-  else {
-    token = await source.getTokenForTokenPool(ta.sourcePoolAddress)
-  }
+  else if (ta.sourceTokenAddress) token = ta.sourceTokenAddress
+  else token = await source.getTokenForTokenPool(ta.sourcePoolAddress)
   const { symbol, decimals } = await source.getTokenInfo(token)
   return `${formatUnits(ta.amount, decimals)} ${symbol}`
 }
@@ -249,16 +252,16 @@ function formatDataString(data: string): Record<string, string> {
 
 /**
  * Prints a CCIP request in a human-readable format.
- * @param source - Source chain instance.
  * @param request - CCIP request to print.
+ * @param source - Source chain instance.
  */
-export async function prettyRequest(this: Ctx, source: Chain, request: CCIPRequest) {
+export async function prettyRequest(this: Ctx, request: CCIPRequest, source?: Chain) {
   prettyLane.call(this, request.lane)
   this.logger.info('Request (source):')
 
   let finalized
   try {
-    finalized = await source.getBlockTimestamp('finalized')
+    if (source) finalized = await source.getBlockTimestamp('finalized')
   } catch (_) {
     // no finalized tag support
   }
@@ -522,6 +525,13 @@ export function formatCCIPError(err: unknown, verbose = false): string | null {
   const lines: string[] = []
 
   lines.push(`error[${err.code}]: ${err.message}`)
+
+  if (Object.keys(err.context).length > 0) {
+    lines.push('  context:')
+    for (const [key, value] of Object.entries(err.context)) {
+      lines.push(`    ${key}: ${value as string}`)
+    }
+  }
 
   if (err.recovery) {
     lines.push(`  help: ${err.recovery}`)

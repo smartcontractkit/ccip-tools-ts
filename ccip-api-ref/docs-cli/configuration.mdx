@@ -1,0 +1,184 @@
+---
+id: configuration
+title: 'Configuration'
+description: 'Configure RPC endpoints, wallets, and global options for the CCIP CLI.'
+sidebar_label: Configuration
+sidebar_position: 1
+custom_edit_url: null
+---
+
+import { RpcProviders } from '@site/src/components'
+
+# Configuration
+
+## RPC Endpoints
+
+All commands require RPC endpoints for the networks involved. The CLI accepts both `http[s]` and `ws[s]` URLs.
+
+### Where to Get RPCs
+
+<RpcProviders variant="table" />
+
+### Providing RPCs
+
+**Command line:** Use `--rpc` or `--rpcs` to specify endpoints directly:
+
+```bash
+ccip-cli show 0x123... \
+  --rpc https://eth-sepolia.example.com \
+  --rpc https://arb-sepolia.example.com
+```
+
+You can also pass comma-separated values:
+
+```bash
+ccip-cli show 0x123... \
+  --rpcs "https://eth-sepolia.example.com,https://arb-sepolia.example.com"
+```
+
+**Environment variables:** Export variables prefixed with `RPC_`. See [Environment Variables](#environment-variables) for details.
+
+**Configuration file:** Use `--rpcs-file` to load from a file (default: `./.env`):
+
+```bash
+ccip-cli show 0x123... --rpcs-file ./my-rpcs.txt
+```
+
+### File Format
+
+The parser extracts URLs from any format. Lines can contain prefixes, suffixes, or comments:
+
+```text
+https://eth-sepolia.g.alchemy.com/v2/demo
+ARB_SEPOLIA_RPC: https://arbitrum-sepolia.drpc.org
+RPC_AVALANCHE_TESTNET=https://avalanche-fuji-c-chain-rpc.publicnode.com
+https://api.devnet.solana.com  # solana devnet
+https://api.testnet.aptoslabs.com/v1
+```
+
+The CLI connects to all endpoints in parallel and uses the fastest responding RPC for each network.
+
+## Environment Variables
+
+The CLI supports environment variables for configuration. Command-line flags override environment variables.
+
+### RPC Configuration
+
+| Variable | Description                | Example                   |
+| -------- | -------------------------- | ------------------------- |
+| `RPC_*`  | RPC endpoints (any suffix) | `RPC_SEPOLIA=https://...` |
+
+### Wallet Configuration
+
+| Variable            | Description                            |
+| ------------------- | -------------------------------------- |
+| `USER_KEY`          | Private key (EVM: hex, Solana: base58) |
+| `PRIVATE_KEY`       | Alias for `USER_KEY`                   |
+| `USER_KEY_PASSWORD` | Password for encrypted JSON keystore   |
+
+### Output Preferences
+
+| Variable       | Description                             | Default  |
+| -------------- | --------------------------------------- | -------- |
+| `CCIP_FORMAT`  | Output format (`pretty`, `log`, `json`) | `pretty` |
+| `CCIP_VERBOSE` | Enable debug logging (`true`/`false`)   | `false`  |
+| `CCIP_PAGE`    | Pagination size for `getLogs` queries   | `10000`  |
+
+**Example .env file:**
+
+```bash
+# RPC Endpoints
+RPC_SEPOLIA=https://eth-sepolia.example.com
+RPC_ARB_SEPOLIA=https://arb-sepolia.example.com
+RPC_AVALANCHE_FUJI=https://avalanche-fuji.example.com
+
+# Wallet (for send/manualExec commands)
+USER_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+
+# Output preferences
+CCIP_FORMAT=json
+CCIP_VERBOSE=false
+```
+
+Use `--rpcs-file` to load a different file: `ccip-cli show 0x... --rpcs-file ./prod.env`
+
+## Wallet Configuration
+
+Commands that send transactions require a wallet. The CLI checks these sources in order:
+
+### Auto-Detection
+
+If `--wallet` is omitted, the CLI automatically looks for `USER_KEY=` or `PRIVATE_KEY=` in your `--rpcs-file` (default: `./.env`):
+
+```bash
+# .env file
+RPC_SEPOLIA=https://eth-sepolia.example.com
+USER_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+
+# CLI will use USER_KEY automatically
+ccip-cli send ethereum-testnet-sepolia 0x... dest --receiver 0x...
+```
+
+### --wallet Option
+
+Pass directly or specify a file path:
+
+| Chain  | Accepted Formats                                                                               |
+| ------ | ---------------------------------------------------------------------------------------------- |
+| EVM    | Hex private key, or path to encrypted JSON keystore (password via `USER_KEY_PASSWORD` env var) |
+| Solana | Base58 private key, or path to `id.json` file (default: `~/.config/solana/id.json`)            |
+| Aptos  | Hex private key, or path to text file containing it                                            |
+
+### Ledger Hardware Wallet
+
+Connect a Ledger device:
+
+```bash
+ccip-cli send ... --wallet ledger
+```
+
+Use a specific derivation index:
+
+```bash
+ccip-cli send ... --wallet ledger:1  # Uses m/44'/60'/1'/0/0 for EVM
+```
+
+## Global Options
+
+These options are available on all commands:
+
+| Option        | Alias   | Type     | Default  | Description                                   |
+| ------------- | ------- | -------- | -------- | --------------------------------------------- |
+| `--rpcs`      | `--rpc` | string[] | -        | RPC endpoint URLs                             |
+| `--rpcs-file` | -       | string   | `./.env` | File containing RPC endpoints                 |
+| `--format`    | `-f`    | string   | `pretty` | Output format: `pretty`, `log`, or `json`     |
+| `--verbose`   | `-v`    | boolean  | -        | Enable debug logging                          |
+| `--page`      | -       | number   | -        | Pagination size for `getLogs` queries         |
+| `--no-api`    | -       | boolean  | `false`  | Disable CCIP API (full decentralization mode) |
+| `--help`      | `-h`    | boolean  | -        | Show help                                     |
+| `--version`   | `-V`    | boolean  | -        | Show version                                  |
+
+**Output formats:**
+
+| Format   | Use Case                                 |
+| -------- | ---------------------------------------- |
+| `pretty` | Human-readable tables (default)          |
+| `log`    | Console output with additional details   |
+| `json`   | Machine-readable, suitable for scripting |
+
+## Network Identifiers
+
+Networks can be specified by name or chain ID. The CLI uses [chain-selectors](https://github.com/smartcontractkit/chain-selectors) for resolution.
+
+| Chain Family | Identifier Format | Example                                        |
+| ------------ | ----------------- | ---------------------------------------------- |
+| EVM          | Numeric chain ID  | `1` (Ethereum), `11155111` (Sepolia)           |
+| EVM          | Network name      | `ethereum-mainnet`, `ethereum-testnet-sepolia` |
+| Solana       | Genesis hash      | `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d` |
+| Aptos        | Prefixed chain ID | `aptos:1` (mainnet), `aptos:2` (testnet)       |
+| Sui          | Prefixed chain ID | `sui:1`                                        |
+
+## See Also
+
+- [show](/cli/show) - Track cross-chain messages
+- [send](/cli/send) - Send messages with wallet configuration

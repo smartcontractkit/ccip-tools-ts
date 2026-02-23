@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: **Breaking**: Reduce bundle size by eliminating cross-chain imports
+  - Move `DEFAULT_GAS_LIMIT` from `evm/const.ts` to `shared/constants.ts`
+  - Move BCS codecs and encoding utils to `shared/bcs-codecs.ts` (shared by Aptos/Sui)
+  - Remove `DEFAULT_APPROVE_GAS_LIMIT` (unused)
+  - Non-EVM chains no longer bundle EVM ABIs (~500KB savings per chain)
+  - Sui no longer bundles Aptos code (~300KB savings)
+- API: make `CCIPAPIClient.fromUrl` memoized non-async
+- CLI: Support `messageId` from API in `show` command
+
+## [0.96.0] - 2026-02-10 - Pre-release
+
+- SDK: **Breaking**: Move `allSupportedChains` to `@chainlink/ccip-sdk/all` entry point (fixes tree-shaking in esbuild/Bun/Parcel)
 - CLI: Add kebab-case aliases for multi-word commands (`manual-exec`, `get-supported-tokens`, `parse-bytes`, `parse-data`)
 - CLI: Add `--fee-tokens` flag to `getSupportedTokens` command to list fee tokens instead of transferable tokens
 - SDK: **Breaking**: `CCIPRequest` now includes optional `metadata?: APICCIPRequestMetadata` field
@@ -22,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDK: Add `TOKEN_REMOTE_NOT_CONFIGURED` error code for missing TokenPool remote chain configurations
 - SDK: Fix EVM `getTokenPoolRemotes` to throw `CCIPTokenPoolChainConfigNotFoundError` when remote token is not configured
 - SDK: Fix Aptos `getTokenPoolRemotes` to throw `CCIPTokenPoolChainConfigNotFoundError` when remote chain config is missing
+- TON: Full `send` support
 
 ## [0.95.0] - 2026-01-28 - Pre-release
 

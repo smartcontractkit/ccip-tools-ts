@@ -12,7 +12,6 @@ function getDefaultRetryDelay(code: CCIPErrorCode): number {
     case 'BLOCK_NOT_FOUND':
       return 12000
     case 'MESSAGE_ID_NOT_FOUND':
-    case 'MESSAGE_NOT_FOUND_IN_TX':
       return 30000
     case 'COMMIT_NOT_FOUND':
       return 60000

@@ -28,6 +28,38 @@ import {
  * @param merkleRoot - Optional merkleRoot of the CommitReport, for validation
  * @param ctx - Context for logging
  * @returns ManualExec report arguments
+ * @throws CCIPMessageNotInBatchError - When the messageId is not found in the provided batch
+ * @throws CCIPMerkleRootMismatchError - When calculated merkle root doesn't match the provided one
+ *
+ * @remarks
+ * This is a pure/sync function that performs no I/O - all data must be pre-fetched.
+ * It builds a merkle tree from the messages, generates a proof for the target messageId,
+ * and optionally validates against the provided merkleRoot.
+ *
+ * The returned proof can be used with `executeReport` to manually execute a stuck message.
+ *
+ * @example
+ * ```typescript
+ * import { calculateManualExecProof, EVMChain } from '@chainlink/ccip-sdk'
+ *
+ * // Fetch the request and all messages in its batch
+ * const request = (await source.getMessagesInTx(txHash))[0]
+ * const commit = await dest.getCommitReport({ commitStore, request })
+ * const messages = await source.getMessagesInBatch(request, commit.report)
+ *
+ * // Calculate proof for manual execution
+ * const proof = calculateManualExecProof(
+ *   messages,
+ *   request.lane,
+ *   request.message.messageId,
+ *   commit.report.merkleRoot
+ * )
+ * console.log('Merkle root:', proof.merkleRoot)
+ * console.log('Proofs:', proof.proofs)
+ * ```
+ * @see {@link discoverOffRamp} - Find the OffRamp for manual execution
+ * @see {@link executeReport} - Execute the report on destination chain
+ * @see {@link generateUnsignedExecuteReport} - Build unsigned execution tx
  **/
 export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
   messagesInBatch: readonly CCIPMessage<V>[],
@@ -64,6 +96,30 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
   }
 }
 
+/**
+ * Discover the OffRamp address for a given OnRamp and destination chain.
+ * Results are memoized for performance.
+ *
+ * @param source - Source chain instance.
+ * @param dest - Destination chain instance.
+ * @param onRamp - OnRamp contract address on source chain.
+ * @param ctx - Optional context with logger.
+ * @returns OffRamp address on destination chain.
+ * @throws CCIPOffRampNotFoundError - When no matching OffRamp is found for the OnRamp
+ * @example
+ * ```typescript
+ * import { discoverOffRamp, EVMChain } from '@chainlink/ccip-sdk'
+ *
+ * const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+ * const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+ *
+ * const offRamp = await discoverOffRamp(source, dest, onRampAddress)
+ * console.log('OffRamp on destination:', offRamp)
+ * ```
+ * @see {@link calculateManualExecProof} - Use with OffRamp for manual execution
+ * @see {@link executeReport} - Execute on destination chain
+ * @see {@link getExecutionReceipts} - Check execution status
+ */
 export const discoverOffRamp = memoize(
   async function discoverOffRamp_(
     source: Chain,
@@ -174,6 +230,8 @@ export const discoverOffRamp = memoize(
  * @param request - CCIP request to search executions for.
  * @param commit - Optional commit info to narrow down search.
  * @param hints - Optional hints (e.g., `page` for getLogs pagination range).
+ * @see {@link getCommitReport} - Check commit status before execution
+ * @see {@link discoverOffRamp} - Find OffRamp address
  */
 export async function* getExecutionReceipts(
   dest: Chain,

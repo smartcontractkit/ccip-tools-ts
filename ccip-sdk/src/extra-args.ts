@@ -9,7 +9,7 @@ export const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '
 /** Tag identifier for EVMExtraArgsV2 encoding. */
 export const EVMExtraArgsV2Tag = id('CCIP EVMExtraArgsV2').substring(0, 10) as '0x181dcf10'
 /** Tag identifier for GenericExtraArgsV3 encoding (tightly packed binary format). */
-export const GenericExtraArgsV3Tag = '0x302326cb' as const
+export const GenericExtraArgsV3Tag = id('CCIP GenericExtraArgsV3').substring(0, 10) as '0xa69dd4aa'
 /** Tag identifier for SVMExtraArgsV1 encoding. */
 export const SVMExtraArgsV1Tag = id('CCIP SVMExtraArgsV1').substring(0, 10) as '0x1f3b3aba'
 /** Tag identifier for SuiExtraArgsV1 encoding. */
@@ -145,6 +145,7 @@ export type ExtraArgs =
  * Encodes extra arguments for CCIP messages.
  * The args are *to* a dest network, but are encoded as a message *from* this source chain.
  * E.g. Solana uses Borsh to encode extraArgs in its produced requests, even those targeting EVM.
+ *
  * @param args - Extra arguments to encode
  * @param from - Source chain family for encoding format (defaults to EVM)
  * @returns Encoded extra arguments as hex string
@@ -152,12 +153,16 @@ export type ExtraArgs =
  *
  * @example
  * ```typescript
+ * import { encodeExtraArgs } from '@chainlink/ccip-sdk'
+ *
  * const encoded = encodeExtraArgs({
  *   gasLimit: 200_000n,
  *   allowOutOfOrderExecution: true,
  * })
- * // Returns: '0x181dcf10...'
+ * console.log('Encoded:', encoded) // '0x181dcf10...'
  * ```
+ *
+ * @see {@link decodeExtraArgs} - Decode extra arguments from bytes
  */
 export function encodeExtraArgs(args: ExtraArgs, from: ChainFamily = ChainFamily.EVM): string {
   const chain = supportedChains[from]
@@ -175,11 +180,16 @@ export function encodeExtraArgs(args: ExtraArgs, from: ChainFamily = ChainFamily
  *
  * @example
  * ```typescript
+ * import { decodeExtraArgs } from '@chainlink/ccip-sdk'
+ *
  * const decoded = decodeExtraArgs('0x181dcf10...')
  * if (decoded?._tag === 'EVMExtraArgsV2') {
- *   console.log(decoded.gasLimit, decoded.allowOutOfOrderExecution)
+ *   console.log('Gas limit:', decoded.gasLimit)
+ *   console.log('Out of order:', decoded.allowOutOfOrderExecution)
  * }
  * ```
+ *
+ * @see {@link encodeExtraArgs} - Encode extra arguments to bytes
  */
 export function decodeExtraArgs(
   data: BytesLike,

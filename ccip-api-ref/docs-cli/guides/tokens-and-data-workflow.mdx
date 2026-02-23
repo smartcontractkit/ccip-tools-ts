@@ -1,0 +1,340 @@
+---
+id: tokens-and-data-workflow
+title: 'Transfer Tokens and Data'
+description: 'Send tokens with arbitrary data cross-chain using the CCIP CLI.'
+sidebar_label: Transfer Tokens and Data
+sidebar_position: 3
+custom_edit_url: null
+---
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+# Transfer Tokens and Data
+
+Transfer tokens along with arbitrary data (programmable token transfers) using a four-step workflow: verify token support, estimate fees, send the transfer, and track execution.
+
+## Workflow
+
+| Step        | Command                         | Purpose                         |
+| ----------- | ------------------------------- | ------------------------------- |
+| 1. Verify   | `getSupportedTokens`            | Check token support on the lane |
+| 2. Estimate | `send --only-get-fee`           | Get fee quote                   |
+| 3. Send     | `send --transfer-tokens --data` | Execute transfer                |
+| 4. Track    | `show`                          | Monitor execution               |
+
+## Use Cases
+
+Programmable token transfers enable:
+
+- **DeFi operations**: Deposit tokens to a protocol with instructions
+- **NFT purchases**: Send payment with metadata
+- **Cross-chain swaps**: Transfer tokens with swap parameters
+- **Governance**: Send tokens with voting instructions
+
+## Prerequisites
+
+Configure RPC endpoints and wallet:
+
+```bash title=".env"
+RPC_SEPOLIA=https://ethereum-sepolia-rpc.publicnode.com
+RPC_ARB_SEPOLIA=https://arbitrum-sepolia-rpc.publicnode.com
+USER_KEY=0xYourPrivateKeyHere
+```
+
+Required balances on source chain:
+
+- Tokens to transfer
+- Gas for source transaction
+- CCIP fee (native token or LINK)
+
+## Step 1: Verify Token Support
+
+Check that your token is supported on the lane:
+
+```bash
+ccip-cli getSupportedTokens \
+  -n ethereum-testnet-sepolia \
+  -a 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -t 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05
+```
+
+Verify:
+
+| Field       | Requirement                     |
+| ----------- | ------------------------------- |
+| Destination | Target chain is listed          |
+| Rate Limit  | Transfer amount is within limit |
+| Available   | Capacity exists for transfer    |
+
+## Step 2: Estimate Fee
+
+Get the fee quote including both tokens and data:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverContract \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --data "deposit:pool-123" \
+  --only-get-fee
+```
+
+Output:
+
+```
+Fee: 0.001345678901234567 ETH (native)
+```
+
+<Callout type="info" title="Fee Calculation">
+  The fee includes costs for both token transfer and data delivery. Larger data payloads increase
+  the fee.
+</Callout>
+
+## Step 3: Send Transfer with Data
+
+### Basic transfer with data
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverContract \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --data "deposit:pool-123" \
+  --wallet ledger
+```
+
+### Multiple tokens with data
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverContract \
+  --transfer-tokens 0xToken1=1.0 \
+  --transfer-tokens 0xToken2=100.5 \
+  --data "swap:token1-to-token2" \
+  --wallet ledger
+```
+
+### With hex-encoded data
+
+For ABI-encoded function calls or structured data:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverContract \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --data 0x095ea7b3000000000000000000000000abcdef... \
+  --wallet ledger
+```
+
+### Pay fee in LINK
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverContract \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --data "deposit:pool-123" \
+  --fee-token LINK \
+  --wallet ledger
+```
+
+### With custom gas limit
+
+Programmable transfers often need higher gas limits for complex receiver logic:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverContract \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --data "deposit:pool-123" \
+  --gas-limit 500000 \
+  --wallet ledger
+```
+
+### With estimated gas limit
+
+Let the CLI estimate the required gas:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverContract \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --data "deposit:pool-123" \
+  --estimate-gas-limit 15 \
+  --wallet ledger
+```
+
+## Step 4: Track Transfer
+
+Check message status:
+
+```bash
+ccip-cli show 0xYourTransactionHash
+```
+
+Wait for execution to complete:
+
+```bash
+ccip-cli show 0xYourTransactionHash --wait
+```
+
+Or include `--wait` in the send command:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xYourReceiverContract \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --data "deposit:pool-123" \
+  --wallet ledger \
+  --wait
+```
+
+## Example
+
+```bash
+# Verify token support
+ccip-cli getSupportedTokens \
+  -n ethereum-testnet-sepolia \
+  -a 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -t 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05
+
+# Estimate fee
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --data "deposit:pool-123" \
+  --fee-token LINK \
+  --only-get-fee
+
+# Send transfer with data
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  --receiver 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
+  --transfer-tokens 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05=1.0 \
+  --data "deposit:pool-123" \
+  --fee-token LINK \
+  --gas-limit 400000 \
+  --wallet ledger
+
+# Track execution
+ccip-cli show 0xabc123... --wait
+```
+
+## Chain-Specific Behavior
+
+<Tabs>
+<TabItem value="evm" label="EVM to EVM" default>
+
+The receiver contract must implement the `IAny2EVMMessageReceiver` interface to handle both tokens and data:
+
+```solidity
+function ccipReceive(Client.Any2EVMMessage calldata message) external {
+    // message.data contains your arbitrary data
+    // message.destTokenAmounts contains transferred tokens
+}
+```
+
+**Token approvals:**
+
+The CLI handles approvals automatically. Use `--approve-max` for unlimited allowance:
+
+```bash
+--approve-max
+```
+
+</TabItem>
+<TabItem value="solana" label="EVM to Solana">
+
+Receiver is a Solana program address. Token receiver may differ from program receiver.
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  -d solana-devnet \
+  --receiver <SOLANA_PROGRAM_ADDRESS> \
+  --token-receiver <SOLANA_TOKEN_ACCOUNT> \
+  --transfer-tokens 0xToken=1.0 \
+  --data "instruction-data" \
+  --account <ACCOUNT_1> \
+  --wallet ledger
+```
+
+</TabItem>
+<TabItem value="from-solana" label="Solana to EVM">
+
+Source addresses use Solana format. Token amounts use SPL token decimals.
+
+```bash
+ccip-cli send \
+  -s solana-devnet \
+  -r <SOLANA_ROUTER> \
+  -d ethereum-testnet-sepolia \
+  --receiver 0xEvmContract \
+  --transfer-tokens <SPL_TOKEN_MINT>=1.0 \
+  --data "instruction-data" \
+  --wallet ledger
+```
+
+</TabItem>
+</Tabs>
+
+## Failures
+
+For failed transfers, see [Debugging Failed Messages](/cli/guides/debugging-workflow).
+
+| Issue                  | Cause                 | Solution                            |
+| ---------------------- | --------------------- | ----------------------------------- |
+| Transfer stuck         | Rate limiter depleted | Wait for refill or reduce amount    |
+| Execution failed       | Insufficient gas      | Retry with `manualExec --gas-limit` |
+| Receiver reverts       | Contract logic error  | Fix receiver contract               |
+| Token not supported    | Token not registered  | Use a supported token               |
+| Insufficient allowance | Approval failed       | Run send again or approve manually  |
+
+## Gas Limit Considerations
+
+Programmable token transfers typically require more gas than simple transfers:
+
+| Receiver Logic     | Recommended Gas Limit |
+| ------------------ | --------------------- |
+| Simple storage     | 200,000 - 300,000     |
+| DeFi interaction   | 400,000 - 600,000     |
+| Complex operations | 600,000 - 1,000,000   |
+
+Use `--estimate-gas-limit` to automatically calculate the required gas with a buffer.
+
+## Related
+
+- [Token Transfer](/cli/guides/token-transfer-workflow) - Transfer tokens only
+- [Transfer Data](/cli/guides/data-transfer-workflow) - Transfer data only
+- [getSupportedTokens](/cli/supported-tokens) - Command reference
+- [send](/cli/send) - Command reference
+- [show](/cli/show) - Command reference
+- [Configuration](/cli/configuration) - RPC and wallet setup

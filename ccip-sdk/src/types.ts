@@ -313,7 +313,11 @@ export const MessageStatus = {
   Verifying: 'VERIFYING',
   /** Message has been verified by the CCIP network */
   Verified: 'VERIFIED',
-  /** Unknown status returned by API */
+  /**
+   * API returned an unrecognized status value.
+   * This typically means the CCIP API has new status values that this SDK version
+   * doesn't recognize. Consider updating to the latest SDK version.
+   */
   Unknown: 'UNKNOWN',
 } as const
 /** Type representing a CCIP message lifecycle status. */
@@ -422,7 +426,12 @@ export type ExecutionReport<M extends CCIPMessage = CCIPMessage> = {
  * ```
  */
 export type AnyMessage = {
-  /** Receiver address on the destination chain. */
+  /**
+   * Receiver address on the destination chain.
+   * Must be a valid address for the destination chain family. For instance:
+   * - EVM: 20-byte hex (e.g., `0x6d1af98d635d3121286ddda1a0c2d7078b1523ed`)
+   * - Solana: Base58 public key (e.g., `7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV`)
+   */
   receiver: BytesLike
   /** Extra arguments for gas limits and other settings. */
   extraArgs: ExtraArgs

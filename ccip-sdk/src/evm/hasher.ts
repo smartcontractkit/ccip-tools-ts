@@ -102,24 +102,39 @@ export function getV16LeafHasher(
   onRamp: string,
   { logger = console }: WithLogger = {},
 ): LeafHasher<typeof CCIPVersion.V1_6> {
+  const onRampBytes = getAddressBytes(onRamp)
+  // Addresses ≤32 bytes (EVM 20B, Aptos/Solana/Sui 32B) are zero-padded to 32 bytes;
+  // Addresses >32 bytes (e.g., TON 36B) are used as raw bytes without padding
+  const onRampForHash = onRampBytes.length <= 32 ? zeroPadValue(onRampBytes, 32) : onRampBytes
+
   const metadataInput = concat([
     ANY_2_EVM_MESSAGE_HASH,
     toBeHex(sourceChainSelector, 32),
     toBeHex(destChainSelector, 32),
-    keccak256(zeroPadValue(getAddressBytes(onRamp), 32)),
+    keccak256(onRampForHash),
   ])
 
   return (message: ReadonlyDeep<CCIPMessage<typeof CCIPVersion.V1_6>>): string => {
     logger.debug('Message', message)
-    const parsedArgs = decodeExtraArgs(
-      message.extraArgs,
-      networkInfo(message.sourceChainSelector).family,
-    )
-    if (
-      !parsedArgs ||
-      (parsedArgs._tag !== 'EVMExtraArgsV1' && parsedArgs._tag !== 'EVMExtraArgsV2')
-    )
-      throw new CCIPExtraArgsInvalidError('EVM', message.extraArgs)
+
+    // Non-EVM sources (e.g., TON) embed gasLimit on the message during parsing,
+    // since their extraArgs format differs. EVM sources decode from extraArgs.
+    let gasLimit: bigint
+    if ('gasLimit' in message) {
+      gasLimit = message.gasLimit
+    } else {
+      const parsedArgs = decodeExtraArgs(
+        message.extraArgs,
+        networkInfo(message.sourceChainSelector).family,
+      )
+      if (
+        !parsedArgs ||
+        (parsedArgs._tag !== 'EVMExtraArgsV1' && parsedArgs._tag !== 'EVMExtraArgsV2')
+      )
+        throw new CCIPExtraArgsInvalidError('EVM', message.extraArgs)
+      gasLimit = parsedArgs.gasLimit
+    }
+
     const tokenAmounts = message.tokenAmounts.map((ta) => ({
       ...ta,
       sourcePoolAddress: zeroPadValue(getAddressBytes(ta.sourcePoolAddress), 32),
@@ -140,16 +155,13 @@ export function getV16LeafHasher(
         'uint256 gasLimit',
         'uint64 nonce',
       ],
-      [
-        message.messageId,
-        message.receiver,
-        message.sequenceNumber,
-        parsedArgs.gasLimit,
-        message.nonce,
-      ],
+      [message.messageId, message.receiver, message.sequenceNumber, gasLimit, message.nonce],
     )
 
-    const sender = zeroPadValue(getAddressBytes(message.sender), 32)
+    const senderBytes = getAddressBytes(message.sender)
+    // Addresses ≤32 bytes (EVM 20B, Aptos/Solana/Sui 32B) are zero-padded to 32 bytes;
+    // Addresses >32 bytes (e.g., TON 36B) are used as raw bytes without padding
+    const sender = senderBytes.length <= 32 ? zeroPadValue(senderBytes, 32) : senderBytes
 
     const packedValues = defaultAbiCoder.encode(
       [
