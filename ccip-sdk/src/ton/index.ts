@@ -1105,7 +1105,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * {@inheritDoc Chain.generateUnsignedExecuteReport}
+   * {@inheritDoc Chain.generateUnsignedExecute}
    * @throws {@link CCIPExtraArgsInvalidError} if extra args are not EVMExtraArgsV2 format
    */
   generateUnsignedExecute(

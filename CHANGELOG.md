@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.97.0] - 2026-02-23 - Pre-release
+
 - SDK: v2.0 support:
   - new `Chain.getExecutionInput` method, which consolidates `getMessagesInBatch`, `calculateManualExecProof` and `getOffchainTokenData`
   - **Breaking**: rename `generateUnsignedExecuteReport`, `executeReport` to `generateUnsignedExecute`, `execute`

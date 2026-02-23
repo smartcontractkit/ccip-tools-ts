@@ -1113,7 +1113,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * {@inheritDoc Chain.generateUnsignedExecuteReport}
+   * {@inheritDoc Chain.generateUnsignedExecute}
    * @returns instructions - array of instructions to execute the report
    *   lookupTables - array of lookup tables for `manuallyExecute` call
    *   mainIndex - index of the `manuallyExecute` instruction in the array; last unless
