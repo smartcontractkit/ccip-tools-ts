@@ -588,10 +588,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
   /**
    * Fetches all CCIP messages contained in a given commit batch.
-   * To be implemented for chains supporting CCIPVersion\<=v1.6.0
+   * To be implemented for chains supporting CCIPVersion &lt;= v1.6.0
    *
    * @param request - CCIPRequest to fetch batch for
-   * @param commit - CommitReport range (min, max)
+   * @param range - batch range \{ minSeqnr, maxSeqNr \}, e.g. from [[CommitReport]]
    * @param opts - Optional parameters (e.g., `page` for pagination width)
    * @returns Array of messages in the batch
    *
@@ -600,10 +600,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @example Get all messages in a batch
    * ```typescript
    * const verifications = await dest.getVerifications({ offRamp, request })
-   * const messages = await source.getMessagesInBatch(request, commit.report)
+   * const messages = await source.getMessagesInBatch(request, verifications.report)
    * console.log(`Found ${messages.length} messages in batch`)
    * ```
-   * @internal
    */
   getMessagesInBatch?<
     R extends PickDeep<

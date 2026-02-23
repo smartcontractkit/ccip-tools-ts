@@ -205,9 +205,7 @@ export type ChainTransaction = {
 export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
   /** Lane configuration for this request. */
   lane: Lane<V>
-  /** The CCIP message being sent. */
   message: CCIPMessage<V>
-  /** Log event from the OnRamp. */
   log: Log_
   /** Transaction that emitted the request. */
   tx: Pick<ChainTransaction, 'hash' | 'logs' | 'blockNumber' | 'timestamp' | 'from' | 'error'>

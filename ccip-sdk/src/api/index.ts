@@ -423,7 +423,7 @@ export class CCIPAPIClient {
   /**
    * Fetches the execution input for a given message by id.
    * @param messageId - The ID of the message to fetch the execution input for.
-   * @returns Either \{ encodedMessage, verifications \} or \{ message, offchainTokenData, ...proof \}, and offRamp
+   * @returns Either `{ encodedMessage, verifications }` or `{ message, offchainTokenData, ...proof }`, and offRamp
    */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   getExecutionInput(messageId: string): Promise<ExecutionInput & { offRamp: string }> {
