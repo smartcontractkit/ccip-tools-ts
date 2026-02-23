@@ -306,11 +306,11 @@ export type ExecuteOpts = (
   | {
       /** address of the OffRamp contract */
       offRamp: string
-      /** execution report */
+      /** input payload to execute message; contains proofs for v1 and verifications for v2 */
       input: ExecutionInput
     }
   | {
-      /** messageId of message to execute */
+      /** messageId of message to execute; requires `apiClient` */
       messageId: string
     }
 ) & {
@@ -617,10 +617,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   ): Promise<R['message'][]>
 
   /**
-   * Fetch input data needed for executing CCIPv1 messages
-   * \>=v2 messages only need verifications
+   * Fetch input data needed for executing messages
+   * Should be called on the *source* instance
    * @param opts - getExecutionInput options containing request and verifications
-   * @returns ExecutionInput object to be passed to [[executeMessage]]
+   * @returns `input` payload to be passed to [[execute]]
+   * @see {@link execute} - method to execute a message
    */
   async getExecutionInput({
     request,
@@ -637,6 +638,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
         ...verifications,
       }
     }
+    // other messages in same batch are available from `source` side;
+    // not needed for chain families supporting only >=v2
     const messagesInBatch = await this.getMessagesInBatch!(request, verifications.report, opts)
     const execReportProof = calculateManualExecProof(
       messagesInBatch,
