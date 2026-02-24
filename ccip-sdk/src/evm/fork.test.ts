@@ -337,6 +337,49 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       }
       assert.ok(foundSuccess, 'should find a success receipt for a known successful message')
     })
+
+    // Pick a known FAILED message (Fuji -> Sepolia) — reuses the executeReport test message
+    const failedMsg = FUJI_TO_SEPOLIA.find((m) => m.status === 'FAILED')!
+
+    it('should find a failed receipt with no preceding success for a known failed message', async () => {
+      assert.ok(fujiChain, 'source chain should be initialized')
+      assert.ok(sepoliaChain, 'dest chain should be initialized')
+
+      const tx = await fujiChain.getTransaction(failedMsg.txHash)
+      const requests = await fujiChain.getMessagesInTx(tx)
+      const request = requests.find((r) => r.message.messageId === failedMsg.messageId)!
+      assert.ok(request, 'should find the request in the transaction')
+
+      const offRamp = await discoverOffRamp(
+        fujiChain,
+        sepoliaChain,
+        request.lane.onRamp,
+        fujiChain,
+      )
+      assert.ok(offRamp, 'offRamp should be discovered')
+
+      let foundFailed = false
+      for await (const exec of sepoliaChain.getExecutionReceipts({
+        offRamp,
+        messageId: failedMsg.messageId,
+      })) {
+        assert.notEqual(
+          exec.receipt.state,
+          ExecutionState.Success,
+          'should not find a success receipt before the failed one',
+        )
+        if (exec.receipt.state === ExecutionState.Failed) {
+          foundFailed = true
+          assert.equal(
+            exec.receipt.messageId,
+            failedMsg.messageId,
+            'receipt messageId should match',
+          )
+          break
+        }
+      }
+      assert.ok(foundFailed, 'should find a failed receipt for a known failed message')
+    })
   })
 
   describe('executeReport', () => {
