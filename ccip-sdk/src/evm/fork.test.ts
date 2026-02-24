@@ -47,7 +47,7 @@ const CCIP_MESSAGE_SENT_TOPIC = interfaces.OnRamp_v1_6.getEvent('CCIPMessageSent
 // Token with pool support on the Sepolia -> Aptos lane
 const APTOS_SUPPORTED_TOKEN = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
 
-// ── executeReport constants ──
+// ── execute constants ──
 
 // Known message stuck in FAILED state on sepolia, sent from fuji (v1.6)
 const EXEC_TEST_MSG = FUJI_TO_SEPOLIA.find((m) => m.status === 'FAILED' && m.version === '1.6')!
@@ -91,6 +91,12 @@ function isAnvilAvailable(): boolean {
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isAnvilAvailable()
 
+const testLogger = process.env.VERBOSE
+  ? console
+  : { debug() {}, info() {}, warn: console.warn, error: console.error }
+
+const skipHighRpcLoad = !process.env.RUN_HIGH_RPC_LOAD_TESTS
+
 describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   let sepoliaChain: EVMChain | undefined
   let fujiChain: EVMChain | undefined
@@ -108,8 +114,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     )
     const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
 
-    sepoliaChain = await EVMChain.fromProvider(sepoliaProvider, { apiClient: null })
-    fujiChain = await EVMChain.fromProvider(fujiProvider, { apiClient: null })
+    sepoliaChain = await EVMChain.fromProvider(sepoliaProvider, {
+      apiClient: null,
+      logger: testLogger,
+    })
+    fujiChain = await EVMChain.fromProvider(fujiProvider, { apiClient: null, logger: testLogger })
     wallet = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
   })
 
@@ -124,7 +133,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
       assert.ok(fujiChain, 'fuji chain should be initialized')
 
-      const apiClient = new CCIPAPIClient()
+      const apiClient = new CCIPAPIClient(undefined, { logger: testLogger })
 
       // Select token-transfer messages from test data (2 per direction)
       const tokenTransferMessages = [
@@ -183,6 +192,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         }
       }
 
+      console.log(`  balances: ${nonZeroNative} nonzero native, ${nonZeroToken} nonzero token`)
       assert.ok(nonZeroNative > 0, `expected some nonzero native balances, got ${nonZeroNative}`)
       assert.ok(nonZeroToken > 0, `expected some nonzero token balances, got ${nonZeroToken}`)
     })
@@ -204,11 +214,12 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
       assert.ok(fujiChain, 'fuji chain should be initialized')
 
-      const apiClient = new CCIPAPIClient()
+      const apiClient = new CCIPAPIClient(undefined, { logger: testLogger })
       const chainBySource = { sepolia: sepoliaChain, fuji: fujiChain }
 
       for (const msg of testMessages) {
         const label = `${msg.source} v${msg.version} ${msg.messageId.slice(0, 10)}`
+        console.log(`  comparing ${label}`)
         const chain = chainBySource[msg.source]
 
         // API path
@@ -292,14 +303,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   describe('getFeeTokens', () => {
-    it('should return fee tokens for v1.5 and v1.6 routers on both chains', async () => {
+    it('should return fee tokens for v1.6 routers on both chains', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
       assert.ok(fujiChain, 'fuji chain should be initialized')
 
-      // Fuji v1.5 omitted: v1.5 scans FeeConfigSet events from block 1, and free-tier
-      // Fuji RPC providers reject the ~52M-block range required for full-history queries.
       const cases = [
-        { chain: sepoliaChain, router: SEPOLIA_ROUTER, label: 'sepolia v1.5' },
         { chain: sepoliaChain, router: SEPOLIA_V1_6_ROUTER, label: 'sepolia v1.6' },
         { chain: fujiChain, router: FUJI_V1_6_ROUTER, label: 'fuji v1.6' },
       ]
@@ -309,6 +317,9 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         const entries = Object.entries(feeTokens)
         assert.ok(entries.length > 0, `${label}: should have at least one fee token`)
 
+        console.log(
+          `  ${label}: ${entries.map(([a, i]) => `${i.symbol}(${a.slice(0, 8)}…)`).join(', ')}`,
+        )
         for (const [address, info] of entries) {
           assert.match(address, /^0x[0-9a-fA-F]{40}$/, `${label}: token address should be valid`)
           assert.ok(info.symbol.length > 0, `${label}: ${address} should have a symbol`)
@@ -316,6 +327,36 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         }
       }
     })
+
+    // v1.5 scans FeeConfigSet events from block 1, requiring wide block ranges that
+    // free-tier RPC providers may reject or serve very slowly.
+    it(
+      'should return fee tokens for v1.5 router on sepolia',
+      { skip: skipHighRpcLoad },
+      async () => {
+        assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+        const feeTokens = await sepoliaChain.getFeeTokens(SEPOLIA_ROUTER)
+        const entries = Object.entries(feeTokens)
+        assert.ok(entries.length > 0, 'sepolia v1.5: should have at least one fee token')
+
+        console.log(
+          `  sepolia v1.5: ${entries.map(([a, i]) => `${i.symbol}(${a.slice(0, 8)}…)`).join(', ')}`,
+        )
+        for (const [address, info] of entries) {
+          assert.match(
+            address,
+            /^0x[0-9a-fA-F]{40}$/,
+            `sepolia v1.5: token address should be valid`,
+          )
+          assert.ok(info.symbol.length > 0, `sepolia v1.5: ${address} should have a symbol`)
+          assert.ok(
+            info.decimals >= 0,
+            `sepolia v1.5: ${address} should have non-negative decimals`,
+          )
+        }
+      },
+    )
   })
 
   describe('getFee', () => {
@@ -366,6 +407,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
 
       for (const { chain, router, dest, message, label } of cases) {
         const fee = await chain.getFee({ router, destChainSelector: dest, message })
+        console.log(`  ${label}: fee = ${fee}`)
         assert.ok(fee > 0n, `${label}: fee should be positive (got ${fee})`)
       }
     })
@@ -395,6 +437,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       })) {
         if (exec.receipt.state === ExecutionState.Success) {
           foundSuccess = true
+          console.log(`  receipt: state=Success messageId=${successMsg.messageId.slice(0, 10)}…`)
           assert.equal(
             exec.receipt.messageId,
             successMsg.messageId,
@@ -407,14 +450,13 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.ok(foundSuccess, 'should find a success receipt for a known successful message')
     })
 
-    // Pick a known FAILED message  — reuses the executeReport test message
+    // Pick a known FAILED message  — reuses the execute test message
     const failedMsg = FUJI_TO_SEPOLIA.find((m) => m.status === 'FAILED')!
 
-    // Skipped because it makes a lot of log requests to reach the "failed" receipt, and will get longer as the chain
-    // advances. To be run manually only.
+    // Requires many log requests to reach the "failed" receipt, and gets slower as the chain advances.
     it(
       'should find a failed receipt with no preceding success for a known failed message',
-      { skip: true },
+      { skip: skipHighRpcLoad },
       async () => {
         assert.ok(fujiChain, 'source chain should be initialized')
         assert.ok(sepoliaChain, 'dest chain should be initialized')
@@ -572,7 +614,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     })
   })
 
-  describe('executeReport', () => {
+  describe('execute', () => {
     it('should manually execute a failed v1.6 message (Fuji -> Sepolia)', async () => {
       assert.ok(fujiChain, 'source chain should be initialized')
       assert.ok(sepoliaChain, 'dest chain should be initialized')
