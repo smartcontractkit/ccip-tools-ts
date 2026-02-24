@@ -56,6 +56,11 @@ const EXEC_TEST_MSG = FUJI_TO_SEPOLIA.find(
 const SOURCE_TX_HASH = EXEC_TEST_MSG.txHash
 const MESSAGE_ID = EXEC_TEST_MSG.messageId
 
+// Second failed v1.6 message for getExecutionInput test (different from above so both can execute)
+const EXEC_INPUT_TEST_MSG = FUJI_TO_SEPOLIA.find(
+  (m) => m.status === MessageStatus.Failed && m.version === '1.6' && m !== EXEC_TEST_MSG,
+)!
+
 // ── Helpers ──
 
 async function setERC20Balance(
@@ -665,6 +670,50 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       })
 
       assert.equal(execution.receipt.messageId, MESSAGE_ID, 'receipt messageId should match')
+      assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
+      assert.ok(execution.timestamp > 0, 'execution should have a positive timestamp')
+      assert.ok(
+        execution.receipt.state === ExecutionState.Success,
+        'execution state should be Success',
+      )
+    })
+
+    it('should execute via getExecutionInput (Fuji -> Sepolia)', async () => {
+      assert.ok(fujiChain, 'source chain should be initialized')
+      assert.ok(sepoliaChain, 'dest chain should be initialized')
+
+      // 1. Get source transaction and extract CCIPRequest
+      const tx = await fujiChain.getTransaction(EXEC_INPUT_TEST_MSG.txHash)
+      const requests = await fujiChain.getMessagesInTx(tx)
+      const request = requests.find((r) => r.message.messageId === EXEC_INPUT_TEST_MSG.messageId)!
+      assert.ok(request, 'should find the expected message')
+
+      // 2. Discover OffRamp on destination chain
+      const offRamp = await discoverOffRamp(fujiChain, sepoliaChain, request.lane.onRamp, fujiChain)
+      assert.ok(offRamp, 'offRamp should be discovered')
+
+      // 3. Get verifications from destination chain
+      const verifications = await sepoliaChain.getVerifications({ offRamp, request })
+
+      // 4. Build execution input via getExecutionInput (replaces manual proof + offchain steps)
+      const input = await fujiChain.getExecutionInput({ request, verifications })
+
+      // 5. Execute on destination
+      const execution = await sepoliaChain.execute({
+        offRamp,
+        input,
+        wallet,
+        gasLimit: 500_000,
+      })
+
+      console.log(
+        `  executed ${EXEC_INPUT_TEST_MSG.messageId.slice(0, 10)}… → state=${execution.receipt.state}`,
+      )
+      assert.equal(
+        execution.receipt.messageId,
+        EXEC_INPUT_TEST_MSG.messageId,
+        'receipt messageId should match',
+      )
       assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
       assert.ok(execution.timestamp > 0, 'execution should have a positive timestamp')
       assert.ok(
