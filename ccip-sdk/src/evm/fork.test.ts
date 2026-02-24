@@ -113,6 +113,77 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     await Promise.all([sepoliaInstance?.stop(), fujiInstance?.stop()])
   })
 
+  describe('getBalance', () => {
+    it('should return native and token balances for CCIP transfer participants', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      const apiClient = new CCIPAPIClient()
+
+      // Select token-transfer messages from test data (2 per direction)
+      const tokenTransferMessages = [
+        ...SEPOLIA_TO_FUJI.filter((m) => m.description.includes('token transfer')).slice(0, 2),
+        ...FUJI_TO_SEPOLIA.filter((m) => m.description.includes('token transfer')).slice(0, 2),
+      ]
+      assert.ok(tokenTransferMessages.length >= 3, 'should have at least 3 token transfer messages')
+
+      const chainBySelector = (selector: bigint) => {
+        if (selector === SEPOLIA_SELECTOR) return sepoliaChain
+        if (selector === FUJI_SELECTOR) return fujiChain
+        return undefined
+      }
+
+      let nonZeroNative = 0
+      let nonZeroToken = 0
+      for (const msg of tokenTransferMessages) {
+        const request = await apiClient.getMessageById(msg.messageId)
+        const { sourceNetworkInfo, destNetworkInfo } = request.metadata
+
+        const sourceChain = chainBySelector(sourceNetworkInfo.chainSelector)
+        const destChain = chainBySelector(destNetworkInfo.chainSelector)
+
+        const { sender, receiver } = request.message
+        const tokenAmounts = request.message.tokenAmounts as unknown as {
+          sourceTokenAddress: string
+          destTokenAddress: string
+        }[]
+
+        // Check sender native + token balance on source chain
+        if (sourceChain) {
+          const nativeBalance = await sourceChain.getBalance({ holder: sender })
+          if (nativeBalance > 0n) nonZeroNative++
+
+          if (tokenAmounts.length) {
+            const tokenBalance = await sourceChain.getBalance({
+              holder: sender,
+              token: tokenAmounts[0]!.sourceTokenAddress,
+            })
+            if (tokenBalance > 0n) nonZeroToken++
+          }
+        }
+
+        // Check receiver native + token balance on dest chain
+        if (destChain) {
+          const nativeBalance = await destChain.getBalance({ holder: receiver })
+          if (nativeBalance > 0n) nonZeroNative++
+
+          if (tokenAmounts.length) {
+            const tokenBalance = await destChain.getBalance({
+              holder: receiver,
+              token: tokenAmounts[0]!.destTokenAddress,
+            })
+            if (tokenBalance > 0n) nonZeroToken++
+          }
+        }
+      }
+
+      assert.ok(nonZeroNative > 0, `expected some nonzero native balances, got ${nonZeroNative}`)
+      assert.ok(nonZeroToken > 0, `expected some nonzero token balances, got ${nonZeroToken}`)
+    })
+  })
+
+  // ── State-mutating tests below: keep these last so read-only tests see clean fork state ──
+
   describe('sendMessage', () => {
     it('should send via v1.5 lane (Sepolia -> Fuji) and emit CCIPSendRequested', async () => {
       assert.ok(sepoliaChain, 'chain should be initialized')
@@ -281,75 +352,6 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         execution.receipt.state === ExecutionState.Success,
         'execution state should be Success',
       )
-    })
-  })
-
-  describe('getBalance', () => {
-    it('should return native and token balances for CCIP transfer participants', async () => {
-      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
-      assert.ok(fujiChain, 'fuji chain should be initialized')
-
-      const apiClient = new CCIPAPIClient()
-
-      // Select token-transfer messages from test data (2 per direction)
-      const tokenTransferMessages = [
-        ...SEPOLIA_TO_FUJI.filter((m) => m.description.includes('token transfer')).slice(0, 2),
-        ...FUJI_TO_SEPOLIA.filter((m) => m.description.includes('token transfer')).slice(0, 2),
-      ]
-      assert.ok(tokenTransferMessages.length >= 3, 'should have at least 3 token transfer messages')
-
-      const chainBySelector = (selector: bigint) => {
-        if (selector === SEPOLIA_SELECTOR) return sepoliaChain
-        if (selector === FUJI_SELECTOR) return fujiChain
-        return undefined
-      }
-
-      let nonZeroNative = 0
-      let nonZeroToken = 0
-      for (const msg of tokenTransferMessages) {
-        const request = await apiClient.getMessageById(msg.messageId)
-        const { sourceNetworkInfo, destNetworkInfo } = request.metadata
-
-        const sourceChain = chainBySelector(sourceNetworkInfo.chainSelector)
-        const destChain = chainBySelector(destNetworkInfo.chainSelector)
-
-        const { sender, receiver } = request.message
-        const tokenAmounts = request.message.tokenAmounts as unknown as {
-          sourceTokenAddress: string
-          destTokenAddress: string
-        }[]
-
-        // Check sender native + token balance on source chain
-        if (sourceChain) {
-          const nativeBalance = await sourceChain.getBalance({ holder: sender })
-          if (nativeBalance > 0n) nonZeroNative++
-
-          if (tokenAmounts.length) {
-            const tokenBalance = await sourceChain.getBalance({
-              holder: sender,
-              token: tokenAmounts[0]!.sourceTokenAddress,
-            })
-            if (tokenBalance > 0n) nonZeroToken++
-          }
-        }
-
-        // Check receiver native + token balance on dest chain
-        if (destChain) {
-          const nativeBalance = await destChain.getBalance({ holder: receiver })
-          if (nativeBalance > 0n) nonZeroNative++
-
-          if (tokenAmounts.length) {
-            const tokenBalance = await destChain.getBalance({
-              holder: receiver,
-              token: tokenAmounts[0]!.destTokenAddress,
-            })
-            if (tokenBalance > 0n) nonZeroToken++
-          }
-        }
-      }
-
-      assert.ok(nonZeroNative > 0, `expected some nonzero native balances, got ${nonZeroNative}`)
-      assert.ok(nonZeroToken > 0, `expected some nonzero token balances, got ${nonZeroToken}`)
     })
   })
 })
