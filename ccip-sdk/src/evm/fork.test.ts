@@ -28,6 +28,7 @@ const ANVIL_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae7
 // ── getFeeTokens constants ──
 
 const SEPOLIA_V1_6_ROUTER = '0x866071AB5167081Cf28d02A2bfA592b6f0dc6c15'
+const FUJI_ROUTER = '0xF694E193200268f9a4868e4Aa017A0118C9a8177'
 const FUJI_V1_6_ROUTER = '0x7397Da7131aa4D32010BB375090222cd341303ce'
 
 // ── sendMessage constants ──
@@ -313,6 +314,59 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
           assert.ok(info.symbol.length > 0, `${label}: ${address} should have a symbol`)
           assert.ok(info.decimals >= 0, `${label}: ${address} should have non-negative decimals`)
         }
+      }
+    })
+  })
+
+  describe('getFee', () => {
+    it('should return positive fees for v1.5 and v1.6 routers on both chains', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      const receiver = wallet.address
+
+      // Built via buildMessageForDest (default V2 extraArgs)
+      const builtMessage = EVMChain.buildMessageForDest({ receiver })
+      // Manually constructed with explicit extraArgs
+      const manualMessage = {
+        receiver,
+        extraArgs: { gasLimit: 200_000n, allowOutOfOrderExecution: true },
+      }
+
+      const cases = [
+        {
+          chain: sepoliaChain,
+          router: SEPOLIA_ROUTER,
+          dest: FUJI_SELECTOR,
+          message: manualMessage,
+          label: 'sepolia v1.5',
+        },
+        {
+          chain: sepoliaChain,
+          router: SEPOLIA_V1_6_ROUTER,
+          dest: FUJI_SELECTOR,
+          message: builtMessage,
+          label: 'sepolia v1.6',
+        },
+        {
+          chain: fujiChain,
+          router: FUJI_ROUTER,
+          dest: SEPOLIA_SELECTOR,
+          message: manualMessage,
+          label: 'fuji v1.5',
+        },
+        {
+          chain: fujiChain,
+          router: FUJI_V1_6_ROUTER,
+          dest: SEPOLIA_SELECTOR,
+          message: builtMessage,
+          label: 'fuji v1.6',
+        },
+      ]
+
+      for (const { chain, router, dest, message, label } of cases) {
+        const fee = await chain.getFee({ router, destChainSelector: dest, message })
+        assert.ok(fee > 0n, `${label}: fee should be positive (got ${fee})`)
       }
     })
   })
