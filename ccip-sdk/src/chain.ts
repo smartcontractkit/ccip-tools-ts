@@ -371,6 +371,7 @@ export type UnsignedTx = {
   [ChainFamily.Aptos]: UnsignedAptosTx
   [ChainFamily.TON]: UnsignedTONTx
   [ChainFamily.Sui]: UnsignedSuiTx
+  [ChainFamily.Canton]: never // TODO
   [ChainFamily.Unknown]: never
 }
 
