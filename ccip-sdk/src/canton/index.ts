@@ -28,10 +28,9 @@ import {
 } from '../types.ts'
 import { networkInfo } from '../utils.ts'
 import { type CantonClient, createCantonClient } from './client/index.ts'
+import type { DisclosureProvider } from './explicit-disclosures/types.ts'
 
 export type { CantonClient, CantonClientConfig } from './client/index.ts'
-
-const EDS_API_URL = ''
 
 /**
  * Canton chain implementation supporting Canton Ledger networks.
@@ -47,21 +46,25 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   override readonly network: NetworkInfo<typeof ChainFamily.Canton>
   readonly provider: CantonClient
+  readonly disclosureProvider: DisclosureProvider
 
   /**
    * Creates a new CantonChain instance.
    * @param client - Canton Ledger API client.
+   * @param disclosureProvider - Provider used for explicit disclosures.
    * @param network - Network information for this chain.
    * @param ctx - Context containing logger.
    */
   constructor(
     client: CantonClient,
+    disclosureProvider: DisclosureProvider,
     network: NetworkInfo<typeof ChainFamily.Canton>,
     ctx?: ChainContext,
   ) {
     super(network, ctx)
     this.provider = client
     this.network = network
+    this.disclosureProvider = disclosureProvider
   }
 
   /**
@@ -92,7 +95,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    *
    * @throws {@link CCIPChainNotFoundError} if no connected synchronizer alias maps to a known Canton chain
    */
-  static async fromClient(client: CantonClient, ctx?: ChainContext): Promise<CantonChain> {
+  static async fromClient(
+    client: CantonClient,
+    disclosureProvider: DisclosureProvider,
+    ctx?: ChainContext,
+  ): Promise<CantonChain> {
     const synchronizers = await client.getConnectedSynchronizers()
 
     // TODO: Check synchronizer returned aliases against known Canton chain names to determine the network.
@@ -103,6 +110,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       if (chainId) {
         return new CantonChain(
           client,
+          disclosureProvider,
           networkInfo(chainId) as NetworkInfo<typeof ChainFamily.Canton>,
           ctx,
         )
