@@ -4,7 +4,7 @@ import { describe, it, mock } from 'node:test'
 import { type Cell, Address, Dictionary, beginCell, toNano } from '@ton/core'
 import type { TonClient } from '@ton/ton'
 
-import { type ExecutionReport, ChainFamily } from '../types.ts'
+import { type ExecutionInput, ChainFamily } from '../types.ts'
 import { TONChain } from './index.ts'
 import { type CCIPMessage_V1_6_TON, type TONWallet, MANUALLY_EXECUTE_OPCODE } from './types.ts'
 import { crc32 } from './utils.ts'
@@ -19,7 +19,7 @@ describe('TON index unit tests', () => {
     '0:9f2e995aebceb97ae094dbe4cf973cbc8a402b4f0ac5287a00be8aca042d51b9'
 
   // Shared test data
-  const baseExecReport: ExecutionReport<CCIPMessage_V1_6_TON> = {
+  const baseExecReport: ExecutionInput<CCIPMessage_V1_6_TON> = {
     message: {
       messageId: '0x' + '0'.repeat(63) + '1',
       sourceChainSelector: CHAINSEL_EVM_TEST_90000001,
@@ -45,10 +45,10 @@ describe('TON index unit tests', () => {
 
   const mockNetworkInfo = networkInfo('ton-testnet')
 
-  describe('executeReport', { timeout: 10e3 }, () => {
+  describe('execute', { timeout: 10e3 }, () => {
     const mockWalletAddress = Address.parse('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
 
-    // Helper to create a valid ExecutionStateChanged BOC cell for executeReport tests
+    // Helper to create a valid ExecutionStateChanged BOC cell for execute tests
     function createExecutionStateChangedCell(
       sourceChainSelector: bigint,
       sequenceNumber: bigint,
@@ -163,9 +163,9 @@ describe('TON index unit tests', () => {
       const { client, wallet, getCapturedTransfer } = createMockClientAndWallet({ seqno: 42 })
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
-      await tonChain.executeReport({
+      await tonChain.execute({
         offRamp: TON_OFFRAMP_ADDRESS_TEST,
-        execReport: baseExecReport,
+        input: baseExecReport,
         wallet,
       })
 
@@ -180,9 +180,9 @@ describe('TON index unit tests', () => {
       const { client, wallet, getCapturedTransfer } = createMockClientAndWallet()
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
-      await tonChain.executeReport({
+      await tonChain.execute({
         offRamp: TON_OFFRAMP_ADDRESS_TEST,
-        execReport: baseExecReport,
+        input: baseExecReport,
         wallet,
       })
 
@@ -204,9 +204,9 @@ describe('TON index unit tests', () => {
       })
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
-      const result = await tonChain.executeReport({
+      const result = await tonChain.execute({
         offRamp: TON_OFFRAMP_ADDRESS_TEST,
-        execReport: baseExecReport,
+        input: baseExecReport,
         wallet,
       })
 
@@ -227,9 +227,9 @@ describe('TON index unit tests', () => {
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
       await assert.rejects(
-        tonChain.executeReport({
+        tonChain.execute({
           offRamp: TON_OFFRAMP_ADDRESS_TEST,
-          execReport: baseExecReport,
+          input: baseExecReport,
           wallet: { invalid: true },
         }),
         /Wallet must be a Signer/,
@@ -249,9 +249,9 @@ describe('TON index unit tests', () => {
       }
 
       await assert.rejects(
-        tonChain.executeReport({
+        tonChain.execute({
           offRamp: TON_OFFRAMP_ADDRESS_TEST,
-          execReport: v1_5Report as any,
+          input: v1_5Report as any,
           wallet,
         }),
         /Invalid extraArgs for TON/,
@@ -263,9 +263,9 @@ describe('TON index unit tests', () => {
       const tonChain = new TONChain(client, mockNetworkInfo as any)
 
       await assert.rejects(
-        tonChain.executeReport({
+        tonChain.execute({
           offRamp: TON_OFFRAMP_ADDRESS_TEST,
-          execReport: baseExecReport,
+          input: baseExecReport,
           wallet,
         }),
         /Transaction failed/,
@@ -273,17 +273,17 @@ describe('TON index unit tests', () => {
     })
   })
 
-  describe('generateUnsignedExecuteReport', () => {
+  describe('generateUnsignedExecute', () => {
     it('should return UnsignedTONTx with family=ton', async () => {
       const tonChain = new TONChain(
         { getTransactions: async () => [] } as any,
         mockNetworkInfo as any,
       )
 
-      const unsigned = await tonChain.generateUnsignedExecuteReport({
+      const unsigned = await tonChain.generateUnsignedExecute({
         payer: '0:' + 'b'.repeat(64),
         offRamp: TON_OFFRAMP_ADDRESS_TEST,
-        execReport: baseExecReport,
+        input: baseExecReport,
       })
 
       assert.equal(unsigned.family, ChainFamily.TON)
@@ -307,10 +307,10 @@ describe('TON index unit tests', () => {
 
       assert.throws(
         () =>
-          tonChain.generateUnsignedExecuteReport({
+          tonChain.generateUnsignedExecute({
             payer: '0:' + 'b'.repeat(64),
             offRamp: TON_OFFRAMP_ADDRESS_TEST,
-            execReport: v1_5Report as any,
+            input: v1_5Report as any,
           }),
         /Invalid extraArgs for TON/,
       )

@@ -3,7 +3,7 @@ import type { PickDeep, SetOptional } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
 import type { UnsignedAptosTx } from './aptos/types.ts'
-import { getCommitReport } from './commits.ts'
+import { getOnchainCommitReport } from './commits.ts'
 import {
   CCIPApiClientNotAvailableError,
   CCIPChainFamilyMismatchError,
@@ -12,6 +12,7 @@ import {
   CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
+import { calculateManualExecProof } from './execution.ts'
 import type {
   EVMExtraArgsV1,
   EVMExtraArgsV2,
@@ -27,15 +28,16 @@ import type { UnsignedSolanaTx } from './solana/types.ts'
 import type { UnsignedTONTx } from './ton/types.ts'
 import {
   type AnyMessage,
-  type CCIPCommit,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
+  type CCIPVerifications,
+  type CCIPVersion,
   type ChainFamily,
   type ChainTransaction,
   type CommitReport,
+  type ExecutionInput,
   type ExecutionReceipt,
-  type ExecutionReport,
   type Lane,
   type Log_,
   type Logger,
@@ -298,13 +300,23 @@ export type SendMessageOpts = {
 }
 
 /**
- * Common options for {@link Chain.generateUnsignedExecuteReport} and {@link Chain.executeReport} methods.
+ * Common options for {@link Chain.generateUnsignedExecute} and {@link Chain.execute} methods.
  */
-export type ExecuteReportOpts = {
-  /** address of the OffRamp contract */
-  offRamp: string
-  /** execution report */
-  execReport: ExecutionReport
+export type ExecuteOpts = (
+  | {
+      /** address of the OffRamp contract */
+      offRamp: string
+      /** input payload to execute message; contains proofs for v1 and verifications for v2 */
+      input: ExecutionInput
+    }
+  | {
+      /**
+       * messageId of message to execute; requires `apiClient`.
+       * @remarks Currently throws CCIPNotImplementedError - API endpoint pending.
+       */
+      messageId: string
+    }
+) & {
   /** gasLimit or computeUnits limit override for the ccipReceive call */
   gasLimit?: number
   /** For EVM, overrides gasLimit on tokenPool call */
@@ -579,9 +591,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
   /**
    * Fetches all CCIP messages contained in a given commit batch.
+   * To be implemented for chains supporting CCIPVersion &lt;= v1.6.0
    *
    * @param request - CCIPRequest to fetch batch for
-   * @param commit - CommitReport range (min, max)
+   * @param range - batch range \{ minSeqnr, maxSeqNr \}, e.g. from [[CommitReport]]
    * @param opts - Optional parameters (e.g., `page` for pagination width)
    * @returns Array of messages in the batch
    *
@@ -589,21 +602,61 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @example Get all messages in a batch
    * ```typescript
-   * const commit = await dest.getCommitReport({ commitStore, request })
-   * const messages = await source.getMessagesInBatch(request, commit.report)
+   * const verifications = await dest.getVerifications({ offRamp, request })
+   * const messages = await source.getMessagesInBatch(request, verifications.report)
    * console.log(`Found ${messages.length} messages in batch`)
    * ```
    */
-  abstract getMessagesInBatch<
+  getMessagesInBatch?<
     R extends PickDeep<
       CCIPRequest,
       'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
     >,
   >(
     request: R,
-    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
+    range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
     opts?: { page?: number },
   ): Promise<R['message'][]>
+
+  /**
+   * Fetch input data needed for executing messages
+   * Should be called on the *source* instance
+   * @param opts - getExecutionInput options containing request and verifications
+   * @returns `input` payload to be passed to [[execute]]
+   * @see {@link execute} - method to execute a message
+   */
+  async getExecutionInput({
+    request,
+    verifications,
+    ...opts
+  }: {
+    request: CCIPRequest
+    verifications: CCIPVerifications
+  } & Pick<LogFilter, 'page'>): Promise<ExecutionInput> {
+    if ('verifications' in verifications) {
+      // >=v2 verifications is enough for execution
+      return {
+        encodedMessage: (request.message as CCIPMessage<typeof CCIPVersion.V2_0>).encodedMessage,
+        ...verifications,
+      }
+    }
+    // other messages in same batch are available from `source` side;
+    // not needed for chain families supporting only >=v2
+    const messagesInBatch = await this.getMessagesInBatch!(request, verifications.report, opts)
+    const execReportProof = calculateManualExecProof(
+      messagesInBatch,
+      request.lane,
+      request.message.messageId,
+      verifications.report.merkleRoot,
+      this,
+    )
+    const offchainTokenData = await this.getOffchainTokenData(request)
+    return {
+      ...execReportProof,
+      message: request.message,
+      offchainTokenData,
+    } as ExecutionInput
+  }
   /**
    * Fetch typeAndVersion for a given CCIP contract address.
    *
@@ -707,34 +760,20 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   abstract getOnRampForRouter(router: string, destChainSelector: bigint): Promise<string>
   /**
-   * Fetch the OnRamp address set in OffRamp config.
+   * Fetch the OnRamps addresses set in OffRamp config.
    * Used to discover OffRamp connected to an OnRamp.
    *
    * @param offRamp - OffRamp contract address
    * @param sourceChainSelector - Source chain selector
-   * @returns Promise resolving to OnRamp address
+   * @returns Promise resolving to OnRamps addresses
    *
    * @example Get onRamp from offRamp config
    * ```typescript
-   * const onRamp = await dest.getOnRampForOffRamp(offRampAddress, sourceSelector)
+   * const [onRamp] = await dest.getOnRampsForOffRamp(offRampAddress, sourceSelector)
    * console.log(`OnRamp: ${onRamp}`)
    * ```
    */
-  abstract getOnRampForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string>
-  /**
-   * Fetch the CommitStore set in OffRamp config (CCIP v1.5 and earlier).
-   * For CCIP v1.6 and later, it should return the offRamp address.
-   *
-   * @param offRamp - OffRamp contract address
-   * @returns Promise resolving to CommitStore address
-   *
-   * @example Get commit store
-   * ```typescript
-   * const commitStore = await dest.getCommitStoreForOffRamp(offRampAddress)
-   * // For v1.6+, commitStore === offRampAddress
-   * ```
-   */
-  abstract getCommitStoreForOffRamp(offRamp: string): Promise<string>
+  abstract getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]>
   /**
    * Fetch the TokenPool's token/mint.
    *
@@ -888,12 +927,12 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Generate unsigned tx to manuallyExecute a message.
    *
-   * @param opts - {@link ExecuteReportOpts} with payer address which will send the exec tx
+   * @param opts - {@link ExecuteOpts} with payer address which will send the exec tx
    * @returns Promise resolving to chain-family specific unsigned txs
    *
    * @example Generate unsigned execution tx
    * ```typescript
-   * const unsignedTx = await dest.generateUnsignedExecuteReport({
+   * const unsignedTx = await dest.generateUnsignedExecute({
    *   offRamp: offRampAddress,
    *   execReport,
    *   payer: walletAddress,
@@ -901,8 +940,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * // Sign and send with external wallet
    * ```
    */
-  abstract generateUnsignedExecuteReport(
-    opts: ExecuteReportOpts & {
+  abstract generateUnsignedExecute(
+    opts: ExecuteOpts & {
       /** address which will be used to send the report tx */
       payer: string
     },
@@ -910,7 +949,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Execute messages in report in an offRamp.
    *
-   * @param opts - {@link ExecuteReportOpts} with chain-specific wallet to sign and send tx
+   * @param opts - {@link ExecuteOpts} with chain-specific wallet to sign and send tx
    * @returns Promise resolving to transaction of the execution
    *
    * @throws {@link CCIPWalletNotSignerError} if wallet is not a valid signer
@@ -919,29 +958,15 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @example Manual execution of pending message
    * ```typescript
-   * const execReportProof = calculateManualExecProof(
-   *   messagesInBatch: await source.getMessagesInBatch(request, commit.report),
-   *   request.lane,
-   *   request.message.messageId,
-   *   commit.report.merkleRoot,
-   *   dest,
-   * )
-   * const receipt = await dest.executeReport({
-   *   offRamp,
-   *   execReport: {
-   *     ...execReportProof,
-   *     message: request.message,
-   *     offchainTokenData: await source.getOffchainTokenData(request),
-   *   },
-   *   wallet,
-   * })
+   * const input = await source.getExecutionInput({ request, verifications })
+   * const receipt = await dest.execute({ offRamp, input, wallet })
    * console.log(`Executed: ${receipt.log.transactionHash}`)
    * ```
    * @throws {@link CCIPWalletNotSignerError} if wallet cannot sign transactions
    * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm
    */
-  abstract executeReport(
-    opts: ExecuteReportOpts & {
+  abstract execute(
+    opts: ExecuteOpts & {
       // Signer instance (chain-dependent)
       wallet: unknown
     },
@@ -951,31 +976,34 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Look for a CommitReport at dest for given CCIP request.
    * May be specialized by some subclasses.
    *
-   * @param opts - getCommitReport options
+   * @param opts - getVerifications options
    * @returns CCIPCommit info
    *
    * @throws {@link CCIPCommitNotFoundError} if no commit found for the request (transient)
    *
    * @example Get commit for a request
    * ```typescript
-   * const commit = await dest.getCommitReport({
-   *   commitStore: offRampAddress, // v1.6+
+   * const verifications = await dest.getVerifications({
+   *   offRamp: offRampAddress,
    *   request,
    * })
-   * console.log(`Committed at block: ${commit.log.blockNumber}`)
+   * console.log(`Committed at block: ${verifications.log.blockNumber}`)
    * ```
    */
-  async getCommitReport({
-    commitStore,
+  async getVerifications({
+    offRamp,
     request,
     ...hints
   }: {
-    /** address of commitStore (OffRamp in \>=v1.6) */
-    commitStore: string
+    /** address of offRamp or commitStore contract */
+    offRamp: string
     /** CCIPRequest subset object */
-    request: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>
-  } & Pick<LogFilter, 'page' | 'watch' | 'startBlock'>): Promise<CCIPCommit> {
-    return getCommitReport(this, commitStore, request, hints)
+    request: PickDeep<
+      CCIPRequest,
+      'lane' | `message.${'sequenceNumber' | 'messageId'}` | 'tx.timestamp'
+    >
+  } & Pick<LogFilter, 'page' | 'watch' | 'startBlock'>): Promise<CCIPVerifications> {
+    return getOnchainCommitReport(this, offRamp, request, hints)
   }
 
   /**
@@ -1040,7 +1068,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     offRamp,
     messageId,
     sourceChainSelector,
-    commit,
+    verifications,
     ...hints
   }: {
     /** address of OffRamp contract */
@@ -1050,12 +1078,12 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     /** filter: yield only executions for this source chain */
     sourceChainSelector?: bigint
     /** optional commit associated with the request, can be used for optimizations in some families */
-    commit?: CCIPCommit
+    verifications?: CCIPVerifications
   } & Pick<
     LogFilter,
     'page' | 'watch' | 'startBlock' | 'startTime'
   >): AsyncIterableIterator<CCIPExecution> {
-    hints.startBlock ??= commit?.log.blockNumber
+    if (verifications && 'log' in verifications) hints.startBlock ??= verifications.log.blockNumber
     const onlyLast = !hints.startTime && !hints.startBlock // backwards
     for await (const log of this.getLogs({
       address: offRamp,

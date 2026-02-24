@@ -2,33 +2,33 @@ import type { PickDeep } from 'type-fest'
 
 import type { Chain, ChainStatic, LogFilter } from './chain.ts'
 import { CCIPCommitNotFoundError } from './errors/index.ts'
-import { type CCIPCommit, type CCIPRequest, CCIPVersion } from './types.ts'
+import { type CCIPRequest, type CCIPVerifications, CCIPVersion } from './types.ts'
 
 /**
  * Look for a CommitReport at dest for given CCIPRequest
  * Provides a basic/generic implementation, but subclasses of Chain may override with more specific
- * logic in Chain.getCommitReport method
+ * logic in Chain.getVerifications method
  *
  * @param dest - Destination network provider
- * @param commitStore - Commit store address
+ * @param offRamp - Commit store address
  * @param request - CCIP request info
  * @param hints - Additional filtering hints
  * @returns CCIP commit info
  **/
-export async function getCommitReport(
+export async function getOnchainCommitReport(
   dest: Chain,
-  commitStore: string,
+  offRamp: string,
   {
     lane,
     message,
     tx: { timestamp: requestTimestamp },
-  }: PickDeep<CCIPRequest, 'lane' | 'message.sequenceNumber' | 'tx.timestamp'>,
-  hints?: Pick<LogFilter, 'page' | 'watch'> & { startBlock?: number },
-): Promise<CCIPCommit> {
+  }: PickDeep<CCIPRequest, 'lane' | `message.${'sequenceNumber' | 'messageId'}` | 'tx.timestamp'>,
+  hints?: Pick<LogFilter, 'page' | 'watch' | 'startBlock'>,
+): Promise<CCIPVerifications> {
   for await (const log of dest.getLogs({
     ...hints,
     ...(!hints?.startBlock ? { startTime: requestTimestamp } : { startBlock: hints.startBlock }),
-    address: commitStore,
+    address: offRamp,
     topics: [lane.version < CCIPVersion.V1_6 ? 'ReportAccepted' : 'CommitReportAccepted'],
   })) {
     const reports = (dest.constructor as ChainStatic).decodeCommits(log, lane)

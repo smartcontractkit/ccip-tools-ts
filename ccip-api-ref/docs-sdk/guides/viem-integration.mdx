@@ -233,26 +233,15 @@ const request = requests[0]
 
 // Find OffRamp and get commit
 const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
-const commit = await dest.getCommitReport({ commitStore: offRamp, request })
+const verifications = await dest.getVerifications({ offRamp, request })
 
 // Calculate merkle proof
-const messagesInBatch = await source.getMessagesInBatch(request, commit.report)
-
-const proof = calculateManualExecProof(
-  messagesInBatch,
-  request.lane,
-  request.message.messageId,
-  commit.report.merkleRoot
-)
+const input = await source.getExecutionInput({ request, verifications })
 
 // Execute with viem wallet
-const execution = await dest.executeReport({
+const execution = await dest.execute({
   offRamp,
-  execReport: {
-    ...proof,
-    message: request.message,
-    offchainTokenData: [],
-  },
+  input,
   wallet: viemWallet(walletClient),
 })
 

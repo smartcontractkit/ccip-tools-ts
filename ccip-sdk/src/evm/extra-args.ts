@@ -1,6 +1,5 @@
 import {
   type BytesLike,
-  Result,
   concat,
   dataSlice,
   encodeBase58,
@@ -28,6 +27,7 @@ import {
 import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 import { getAddressBytes, getDataBytes } from '../utils.ts'
 import { defaultAbiCoder } from './const.ts'
+import { resultToObject } from './types.ts'
 
 // ABI type strings for extra args encoding
 const EVMExtraArgsV1ABI = 'tuple(uint256 gasLimit)'
@@ -36,24 +36,6 @@ const SVMExtraArgsV1ABI =
   'tuple(uint32 computeUnits, uint64 accountIsWritableBitmap, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] accounts)'
 const SuiExtraArgsV1ABI =
   'tuple(uint256 gasLimit, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] receiverObjectIds)'
-
-/**
- * Converts an ethers Result to a plain object.
- * @internal
- */
-function resultToObject<T>(o: T): T {
-  if (o instanceof Promise) return o.then(resultToObject) as T
-  if (!(o instanceof Result)) return o
-  if (o.length === 0) return o.toArray() as T
-  try {
-    const obj = o.toObject()
-    if (!Object.keys(obj).every((k) => /^_+\d*$/.test(k)))
-      return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, resultToObject(v)])) as T
-  } catch (_) {
-    // fallthrough
-  }
-  return o.toArray().map(resultToObject) as T
-}
 
 /**
  * Encodes GenericExtraArgsV3 using tightly packed binary format.

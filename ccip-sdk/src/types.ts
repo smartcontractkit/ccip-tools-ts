@@ -3,7 +3,7 @@ import type { BytesLike, Log } from 'ethers'
 
 import type { APICCIPRequestMetadata } from './api/types.ts'
 import type OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
-import type { CCIPMessage_EVM, CCIPMessage_V1_6_EVM } from './evm/messages.ts'
+import type { CCIPMessage_EVM, CCIPMessage_V1_6_EVM, CCIPMessage_V2_0 } from './evm/messages.ts'
 import type { ExtraArgs } from './extra-args.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
 import type { CCIPMessage_V1_6_Sui } from './sui/types.ts'
@@ -88,6 +88,7 @@ export const CCIPVersion = {
   V1_2: '1.2.0',
   V1_5: '1.5.0',
   V1_6: '1.6.0',
+  V2_0: '2.0.0',
 } as const
 /** Type representing one of the supported CCIP versions. */
 export type CCIPVersion = (typeof CCIPVersion)[keyof typeof CCIPVersion]
@@ -153,11 +154,11 @@ export interface Lane<V extends CCIPVersion = CCIPVersion> {
 /**
  * Union type representing a CCIP message across different versions and chain families.
  */
-export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends
-  | typeof CCIPVersion.V1_2
-  | typeof CCIPVersion.V1_5
-  ? CCIPMessage_EVM<V>
-  : CCIPMessage_V1_6_EVM | CCIPMessage_V1_6_Solana | CCIPMessage_V1_6_Sui | CCIPMessage_V1_6_TON
+export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends typeof CCIPVersion.V2_0
+  ? CCIPMessage_V2_0
+  : V extends typeof CCIPVersion.V1_6
+    ? CCIPMessage_V1_6_EVM | CCIPMessage_V1_6_Solana | CCIPMessage_V1_6_Sui | CCIPMessage_V1_6_TON
+    : CCIPMessage_EVM<V>
 
 /**
  * Generic log structure compatible across chain families.
@@ -204,9 +205,7 @@ export type ChainTransaction = {
 export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
   /** Lane configuration for this request. */
   lane: Lane<V>
-  /** The CCIP message being sent. */
   message: CCIPMessage<V>
-  /** Log event from the OnRamp. */
   log: Log_
   /** Transaction that emitted the request. */
   tx: Pick<ChainTransaction, 'hash' | 'logs' | 'blockNumber' | 'timestamp' | 'from' | 'error'>
@@ -236,21 +235,46 @@ export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
 }
 
 /**
- * Commit report structure from the OffRamp CommitReportAccepted event.
+ * OnChain Commit report structure from the OffRamp CommitReportAccepted event.
  */
 export type CommitReport = AbiParametersToPrimitiveTypes<
   ExtractAbiEvent<typeof OffRamp_1_6_ABI, 'CommitReportAccepted'>['inputs']
 >[0][number]
 
 /**
- * CCIP commit information containing the report and its log.
+ * OffChain Verification result for a CCIP v2.0 message, returned by the indexer API.
  */
-export interface CCIPCommit {
-  /** The commit report data. */
-  report: CommitReport
-  /** Log event from the commit. */
-  log: Log_
+export type VerifierResult = {
+  /** Verification data required for destination execution (e.g. signatures). */
+  ccvData: BytesLike
+  /** Source CCV contract address. */
+  sourceAddress: string
+  /** Destination CCV contract address. */
+  destAddress: string
+  /** Timestamp of the attestation (Unix seconds). */
+  timestamp?: number
 }
+
+/**
+ * Verification data for a ccip message (onchain CommitReport, or offchain Verifications)
+ */
+export type CCIPVerifications =
+  | {
+      /** The commit report data. */
+      report: CommitReport
+      /** Log event from the commit. */
+      log: Log_
+    }
+  | {
+      /** Policy for this request */
+      verificationPolicy: {
+        optionalCCVs: readonly string[]
+        requiredCCVs: readonly string[]
+        optionalThreshold: number
+      }
+      /** Verifications array; one for each requiredCCV is needed for exec */
+      verifications: VerifierResult[]
+    }
 
 /**
  * Enumeration of possible execution states for a CCIP message.
@@ -373,18 +397,26 @@ export type OffchainTokenData = { _tag: string; [k: string]: BytesLike } | undef
  * }
  * ```
  */
-export type ExecutionReport<M extends CCIPMessage = CCIPMessage> = {
-  /** The CCIP message to execute. */
-  message: M
-  /** Merkle proofs for the message. */
-  proofs: readonly BytesLike[]
-  /** Bit flags for proof verification. */
-  proofFlagBits: bigint
-  /** Merkle root for verification. */
-  merkleRoot: string
-  /** Offchain token data for each token transfer. */
-  offchainTokenData: readonly OffchainTokenData[]
-}
+export type ExecutionInput<M extends CCIPMessage = CCIPMessage> =
+  M extends CCIPMessage<typeof CCIPVersion.V2_0>
+    ? {
+        /** encodedMessage as per CCIPv2 codec */
+        encodedMessage: M['encodedMessage']
+        /** Off-Chain verifications containing verifierResults' ccvData and ccvs addresses */
+        verifications: Pick<VerifierResult, 'ccvData' | 'destAddress'>[]
+      }
+    : {
+        /** The CCIP message to execute. */
+        message: M
+        /** Merkle proofs for the message. */
+        proofs: readonly BytesLike[]
+        /** Bit flags for proof verification. */
+        proofFlagBits: bigint
+        /** Merkle root for verification. */
+        merkleRoot: string
+        /** Offchain token data for each token transfer. */
+        offchainTokenData: readonly OffchainTokenData[]
+      }
 
 /**
  * A message to be sent to another network.

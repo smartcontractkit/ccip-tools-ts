@@ -1,23 +1,13 @@
 import { memoize } from 'micro-memoize'
 
-import type { Chain, ChainStatic } from './chain.ts'
+import type { Chain } from './chain.ts'
 import {
   CCIPMerkleRootMismatchError,
   CCIPMessageNotInBatchError,
   CCIPOffRampNotFoundError,
 } from './errors/index.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
-import {
-  type CCIPCommit,
-  type CCIPExecution,
-  type CCIPMessage,
-  type CCIPRequest,
-  type CCIPVersion,
-  type ExecutionReport,
-  type Lane,
-  type WithLogger,
-  ExecutionState,
-} from './types.ts'
+import type { CCIPMessage, CCIPVersion, Lane, WithLogger } from './types.ts'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
@@ -36,7 +26,7 @@ import {
  * It builds a merkle tree from the messages, generates a proof for the target messageId,
  * and optionally validates against the provided merkleRoot.
  *
- * The returned proof can be used with `executeReport` to manually execute a stuck message.
+ * The returned proof can be used with `execute` to manually execute a stuck message.
  *
  * @example
  * ```typescript
@@ -44,7 +34,7 @@ import {
  *
  * // Fetch the request and all messages in its batch
  * const request = (await source.getMessagesInTx(txHash))[0]
- * const commit = await dest.getCommitReport({ commitStore, request })
+ * const verifications = await dest.getVerifications({ offRamp, request })
  * const messages = await source.getMessagesInBatch(request, commit.report)
  *
  * // Calculate proof for manual execution
@@ -58,8 +48,8 @@ import {
  * console.log('Proofs:', proof.proofs)
  * ```
  * @see {@link discoverOffRamp} - Find the OffRamp for manual execution
- * @see {@link executeReport} - Execute the report on destination chain
- * @see {@link generateUnsignedExecuteReport} - Build unsigned execution tx
+ * @see {@link execute} - Execute the report on destination chain
+ * @see {@link generateUnsignedExecute} - Build unsigned execution tx
  **/
 export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
   messagesInBatch: readonly CCIPMessage<V>[],
@@ -67,7 +57,7 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
   messageId: string,
   merkleRoot?: string,
   ctx?: WithLogger,
-): Omit<ExecutionReport, 'offchainTokenData' | 'message'> {
+) {
   const hasher = getLeafHasher(lane, ctx)
 
   const msgIdx = messagesInBatch.findIndex((message) => message.messageId === messageId)
@@ -117,7 +107,7 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
  * console.log('OffRamp on destination:', offRamp)
  * ```
  * @see {@link calculateManualExecProof} - Use with OffRamp for manual execution
- * @see {@link executeReport} - Execute on destination chain
+ * @see {@link execute} - Execute on destination chain
  * @see {@link getExecutionReceipts} - Check execution status
  */
 export const discoverOffRamp = memoize(
@@ -133,42 +123,76 @@ export const discoverOffRamp = memoize(
       dest.network.chainSelector,
     )
     for (const offRamp of sourceOffRamps) {
-      let destOnRamp: string
+      let destOnRamps
       try {
-        destOnRamp = await source.getOnRampForOffRamp(offRamp, dest.network.chainSelector)
-      } catch {
-        logger.debug('discoverOffRamp: skipping offRamp', offRamp, '(no valid source chain config)')
+        destOnRamps = await source.getOnRampsForOffRamp(offRamp, dest.network.chainSelector)
+      } catch (err) {
+        logger.debug(
+          'discoverOffRamp: skipping offRamp',
+          offRamp,
+          '(no valid source chain config)',
+          err,
+        )
         continue
       }
-      const destRouter = await dest.getRouterForOnRamp(destOnRamp, source.network.chainSelector)
-      const destOffRamps = await dest.getOffRampsForRouter(destRouter, source.network.chainSelector)
-      for (const offRamp of destOffRamps) {
-        let offRampsOnRamp: string
-        try {
-          offRampsOnRamp = await dest.getOnRampForOffRamp(offRamp, source.network.chainSelector)
-        } catch {
-          logger.debug(
-            'discoverOffRamp: skipping dest offRamp',
-            offRamp,
-            '(no valid source chain config)',
-          )
-          continue
-        }
-        logger.debug(
-          'discoverOffRamp: found, from',
-          {
-            sourceOnRamp: onRamp,
-            sourceRouter,
-            sourceOffRamps,
-            destOnRamp,
-            destOffRamps,
-            offRampsOnRamp,
-          },
-          '=',
-          offRamp,
+      for (const destOnRamp of destOnRamps) {
+        const destRouter = await dest.getRouterForOnRamp(destOnRamp, source.network.chainSelector)
+        const destOffRamps = await dest.getOffRampsForRouter(
+          destRouter,
+          source.network.chainSelector,
         )
-        if (offRampsOnRamp === onRamp) {
-          return offRamp
+        for (const offRamp of destOffRamps) {
+          let offRampsOnRamps
+          try {
+            offRampsOnRamps = await dest.getOnRampsForOffRamp(offRamp, source.network.chainSelector)
+          } catch (err) {
+            logger.debug(
+              'discoverOffRamp: skipping dest offRamp',
+              offRamp,
+              '(no valid source chain config)',
+              err,
+            )
+            continue
+          }
+          for (const offRampsOnRamp of offRampsOnRamps) {
+            logger.debug(
+              'discoverOffRamp: found, from',
+              {
+                sourceOnRamp: onRamp,
+                sourceRouter,
+                sourceOffRamps,
+                destOnRamp,
+                destOffRamps,
+                offRampsOnRamp,
+              },
+              '=',
+              offRamp,
+            )
+            for (const offRamp of destOffRamps) {
+              const offRampsOnRamps = await dest.getOnRampsForOffRamp(
+                offRamp,
+                source.network.chainSelector,
+              )
+              for (const offRampsOnRamp of offRampsOnRamps) {
+                logger.debug(
+                  'discoverOffRamp: found, from',
+                  {
+                    sourceOnRamp: onRamp,
+                    sourceRouter,
+                    sourceOffRamps,
+                    destOnRamp,
+                    destOffRamps,
+                    offRampsOnRamps,
+                  },
+                  '=',
+                  offRamp,
+                )
+                if (offRampsOnRamp === onRamp) {
+                  return offRamp
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -179,46 +203,3 @@ export const discoverOffRamp = memoize(
       [source.network.chainSelector, dest.network.chainSelector, onRamp] as const,
   },
 )
-
-/**
- * Generic implementation for fetching ExecutionReceipts for given requests.
- * If more than one request is given, may yield them interleaved.
- * Completes as soon as there's no more work to be done.
- *
- * Two possible behaviors:
- * - if `startBlock|startTime` is given, pages forward from that block up;
- *   completes when success (final) receipt is found for all requests (or reach latest block)
- * - otherwise, pages backwards and returns only the most recent receipt per request;
- *   completes when receipts for all requests were seen
- *
- * @param dest - Provider to page through.
- * @param offRamp - OffRamp contract address.
- * @param request - CCIP request to search executions for.
- * @param commit - Optional commit info to narrow down search.
- * @param hints - Optional hints (e.g., `page` for getLogs pagination range).
- * @see {@link getCommitReport} - Check commit status before execution
- * @see {@link discoverOffRamp} - Find OffRamp address
- */
-export async function* getExecutionReceipts(
-  dest: Chain,
-  offRamp: string,
-  request: CCIPRequest,
-  commit?: CCIPCommit,
-  hints?: { page?: number },
-): AsyncGenerator<CCIPExecution> {
-  const onlyLast = !commit?.log.blockNumber && !request.tx.timestamp // backwards
-  for await (const log of dest.getLogs({
-    startBlock: commit?.log.blockNumber,
-    startTime: request.tx.timestamp,
-    address: offRamp,
-    topics: ['ExecutionStateChanged'],
-    ...hints,
-  })) {
-    const receipt = (dest.constructor as ChainStatic).decodeReceipt(log)
-    if (!receipt || receipt.messageId !== request.message.messageId) continue
-
-    const timestamp = log.tx?.timestamp ?? (await dest.getBlockTimestamp(log.blockNumber))
-    yield { receipt, log, timestamp }
-    if (onlyLast || receipt.state === ExecutionState.Success) break
-  }
-}
