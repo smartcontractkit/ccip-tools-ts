@@ -1,7 +1,6 @@
 import { memoize } from 'micro-memoize'
 import type { SetRequired } from 'type-fest'
 
-import packageJson from '../../package.json' with { type: 'json' }
 import {
   CCIPHttpError,
   CCIPLaneNotFoundError,
@@ -46,7 +45,10 @@ export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
 export const DEFAULT_TIMEOUT_MS = 30000
 
 /** SDK version string for telemetry header */
-export const SDK_VERSION = packageJson.version
+// generate:nofail
+// `export const SDK_VERSION = '${require('./package.json').version}'`
+export const SDK_VERSION = '0.97.0'
+// generate:end
 
 /** SDK telemetry header name */
 export const SDK_VERSION_HEADER = 'X-SDK-Version'
