@@ -8,7 +8,7 @@ import { anvil } from 'prool/instances'
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
 import { CCIPAPIClient } from '../api/index.ts'
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
-import { type ExecutionInput, ExecutionState } from '../types.ts'
+import { type ExecutionInput, ExecutionState, MessageStatus } from '../types.ts'
 import { interfaces } from './const.ts'
 import { FUJI_TO_SEPOLIA, SEPOLIA_TO_FUJI } from './fork.test.data.ts'
 import { EVMChain } from './index.ts'
@@ -50,7 +50,9 @@ const APTOS_SUPPORTED_TOKEN = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
 // ── execute constants ──
 
 // Known message stuck in FAILED state on sepolia, sent from fuji (v1.6)
-const EXEC_TEST_MSG = FUJI_TO_SEPOLIA.find((m) => m.status === 'FAILED' && m.version === '1.6')!
+const EXEC_TEST_MSG = FUJI_TO_SEPOLIA.find(
+  (m) => m.status === MessageStatus.Failed && m.version === '1.6',
+)!
 const SOURCE_TX_HASH = EXEC_TEST_MSG.txHash
 const MESSAGE_ID = EXEC_TEST_MSG.messageId
 
@@ -205,7 +207,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       { ...SEPOLIA_TO_FUJI.find((m) => m.version === '1.6')!, source: 'sepolia' as const },
       { ...FUJI_TO_SEPOLIA.find((m) => m.version === '1.5')!, source: 'fuji' as const },
       {
-        ...FUJI_TO_SEPOLIA.find((m) => m.version === '1.6' && m.status !== 'FAILED')!,
+        ...FUJI_TO_SEPOLIA.find((m) => m.version === '1.6' && m.status !== MessageStatus.Failed)!,
         source: 'fuji' as const,
       },
     ]
@@ -415,7 +417,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
 
   describe('getExecutionReceipts', () => {
     // Pick a known SUCCESS message (Fuji -> Sepolia) so we can query receipts on the dest fork
-    const successMsg = FUJI_TO_SEPOLIA.find((m) => m.status === 'SUCCESS')!
+    const successMsg = FUJI_TO_SEPOLIA.find((m) => m.status === MessageStatus.Success)!
 
     it('should find a success receipt for a known successful message', async () => {
       assert.ok(fujiChain, 'source chain should be initialized')
@@ -451,7 +453,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     })
 
     // Pick a known FAILED message  — reuses the execute test message
-    const failedMsg = FUJI_TO_SEPOLIA.find((m) => m.status === 'FAILED')!
+    const failedMsg = FUJI_TO_SEPOLIA.find((m) => m.status === MessageStatus.Failed)!
 
     // Requires many log requests to reach the "failed" receipt, and gets slower as the chain advances.
     it(
