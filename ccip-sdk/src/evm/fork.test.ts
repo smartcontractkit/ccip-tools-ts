@@ -297,6 +297,48 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     })
   })
 
+  describe('getExecutionReceipts', () => {
+    // Pick a known SUCCESS message (Fuji -> Sepolia) so we can query receipts on the dest fork
+    const successMsg = FUJI_TO_SEPOLIA.find((m) => m.status === 'SUCCESS')!
+
+    it('should find a success receipt for a known successful message', async () => {
+      assert.ok(fujiChain, 'source chain should be initialized')
+      assert.ok(sepoliaChain, 'dest chain should be initialized')
+
+      // Discover offRamp from the source transaction
+      const tx = await fujiChain.getTransaction(successMsg.txHash)
+      const requests = await fujiChain.getMessagesInTx(tx)
+      const request = requests.find((r) => r.message.messageId === successMsg.messageId)!
+      assert.ok(request, 'should find the request in the transaction')
+
+      const offRamp = await discoverOffRamp(
+        fujiChain,
+        sepoliaChain,
+        request.lane.onRamp,
+        fujiChain,
+      )
+      assert.ok(offRamp, 'offRamp should be discovered')
+
+      let foundSuccess = false
+      for await (const exec of sepoliaChain.getExecutionReceipts({
+        offRamp,
+        messageId: successMsg.messageId,
+      })) {
+        if (exec.receipt.state === ExecutionState.Success) {
+          foundSuccess = true
+          assert.equal(
+            exec.receipt.messageId,
+            successMsg.messageId,
+            'receipt messageId should match',
+          )
+          assert.ok(exec.timestamp > 0, 'execution should have a positive timestamp')
+          break
+        }
+      }
+      assert.ok(foundSuccess, 'should find a success receipt for a known successful message')
+    })
+  })
+
   describe('executeReport', () => {
     it('should manually execute a failed v1.6 message (Fuji -> Sepolia)', async () => {
       assert.ok(fujiChain, 'source chain should be initialized')
