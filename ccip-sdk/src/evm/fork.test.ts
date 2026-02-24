@@ -182,6 +182,109 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     })
   })
 
+  describe('getMessageById vs getMessagesInTx', () => {
+    // One v1.5 + one v1.6 from each source chain
+    const testMessages = [
+      { ...SEPOLIA_TO_FUJI.find((m) => m.version === '1.5')!, source: 'sepolia' as const },
+      { ...SEPOLIA_TO_FUJI.find((m) => m.version === '1.6')!, source: 'sepolia' as const },
+      { ...FUJI_TO_SEPOLIA.find((m) => m.version === '1.5')!, source: 'fuji' as const },
+      {
+        ...FUJI_TO_SEPOLIA.find((m) => m.version === '1.6' && m.status !== 'FAILED')!,
+        source: 'fuji' as const,
+      },
+    ]
+
+    it('should return matching lane and message fields from API and RPC', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      const apiClient = new CCIPAPIClient()
+      const chainBySource = { sepolia: sepoliaChain, fuji: fujiChain }
+
+      for (const msg of testMessages) {
+        const label = `${msg.source} v${msg.version} ${msg.messageId.slice(0, 10)}`
+        const chain = chainBySource[msg.source]
+
+        // API path
+        const apiResult = await apiClient.getMessageById(msg.messageId)
+
+        // RPC path
+        const tx = await chain.getTransaction(msg.txHash)
+        const rpcResults = await chain.getMessagesInTx(tx)
+        const rpcResult = rpcResults.find((r) => r.message.messageId === msg.messageId)
+        assert.ok(rpcResult, `${label}: RPC should find message in tx`)
+
+        // ── metadata presence ──
+        assert.ok(apiResult.metadata, `${label}: API result should have metadata`)
+        assert.equal(rpcResult.metadata, undefined, `${label}: RPC result should not have metadata`)
+
+        // ── lane comparison ──
+        assert.equal(
+          apiResult.lane.sourceChainSelector,
+          rpcResult.lane.sourceChainSelector,
+          `${label}: sourceChainSelector should match`,
+        )
+        assert.equal(
+          apiResult.lane.destChainSelector,
+          rpcResult.lane.destChainSelector,
+          `${label}: destChainSelector should match`,
+        )
+        assert.equal(apiResult.lane.onRamp, rpcResult.lane.onRamp, `${label}: onRamp should match`)
+        assert.equal(
+          apiResult.lane.version,
+          rpcResult.lane.version,
+          `${label}: version should match`,
+        )
+
+        // ── message comparison ──
+        assert.equal(
+          apiResult.message.messageId,
+          rpcResult.message.messageId,
+          `${label}: messageId should match`,
+        )
+        assert.equal(
+          apiResult.message.sender,
+          rpcResult.message.sender,
+          `${label}: sender should match`,
+        )
+        assert.equal(
+          apiResult.message.receiver,
+          rpcResult.message.receiver,
+          `${label}: receiver should match`,
+        )
+        assert.equal(
+          String(apiResult.message.data),
+          String(rpcResult.message.data),
+          `${label}: data should match`,
+        )
+        assert.equal(
+          apiResult.message.sequenceNumber,
+          rpcResult.message.sequenceNumber,
+          `${label}: sequenceNumber should match`,
+        )
+        const apiMsg = apiResult.message as unknown as Record<string, unknown>
+        const rpcMsg = rpcResult.message as unknown as Record<string, unknown>
+        assert.equal(apiMsg.nonce, rpcMsg.nonce, `${label}: nonce should match`)
+
+        // ── tokenAmounts comparison ──
+        const apiTokens = apiResult.message.tokenAmounts as unknown as { amount: bigint }[]
+        const rpcTokens = rpcResult.message.tokenAmounts as unknown as { amount: bigint }[]
+        assert.equal(
+          apiTokens.length,
+          rpcTokens.length,
+          `${label}: tokenAmounts length should match`,
+        )
+        for (let i = 0; i < apiTokens.length; i++) {
+          assert.equal(
+            apiTokens[i]!.amount,
+            rpcTokens[i]!.amount,
+            `${label}: tokenAmounts[${i}].amount should match`,
+          )
+        }
+      }
+    })
+  })
+
   // ── State-mutating tests below: keep these last so read-only tests see clean fork state ──
 
   describe('sendMessage', () => {
@@ -311,12 +414,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       const request = requests.find((r) => r.message.messageId === successMsg.messageId)!
       assert.ok(request, 'should find the request in the transaction')
 
-      const offRamp = await discoverOffRamp(
-        fujiChain,
-        sepoliaChain,
-        request.lane.onRamp,
-        fujiChain,
-      )
+      const offRamp = await discoverOffRamp(fujiChain, sepoliaChain, request.lane.onRamp, fujiChain)
       assert.ok(offRamp, 'offRamp should be discovered')
 
       let foundSuccess = false
@@ -338,10 +436,12 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.ok(foundSuccess, 'should find a success receipt for a known successful message')
     })
 
-    // Pick a known FAILED message (Fuji -> Sepolia) — reuses the executeReport test message
+    // Pick a known FAILED message  — reuses the executeReport test message
     const failedMsg = FUJI_TO_SEPOLIA.find((m) => m.status === 'FAILED')!
 
-    it('should find a failed receipt with no preceding success for a known failed message', async () => {
+    // Skipped because it makes a lot of log requests to reach the "failed" receipt, and will get longer as the chain
+    // advances. To be run manually only.
+    it('should find a failed receipt with no preceding success for a known failed message', {skip: true}, async () => {
       assert.ok(fujiChain, 'source chain should be initialized')
       assert.ok(sepoliaChain, 'dest chain should be initialized')
 
@@ -350,12 +450,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       const request = requests.find((r) => r.message.messageId === failedMsg.messageId)!
       assert.ok(request, 'should find the request in the transaction')
 
-      const offRamp = await discoverOffRamp(
-        fujiChain,
-        sepoliaChain,
-        request.lane.onRamp,
-        fujiChain,
-      )
+      const offRamp = await discoverOffRamp(fujiChain, sepoliaChain, request.lane.onRamp, fujiChain)
       assert.ok(offRamp, 'offRamp should be discovered')
 
       let foundFailed = false
