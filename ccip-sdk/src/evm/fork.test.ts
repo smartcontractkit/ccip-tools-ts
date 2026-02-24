@@ -25,6 +25,11 @@ const FUJI_CHAIN_ID = 43113
 
 const ANVIL_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 
+// ── getFeeTokens constants ──
+
+const SEPOLIA_V1_6_ROUTER = '0x866071AB5167081Cf28d02A2bfA592b6f0dc6c15'
+const FUJI_V1_6_ROUTER = '0x7397Da7131aa4D32010BB375090222cd341303ce'
+
 // ── sendMessage constants ──
 
 // v1.5 lane: Sepolia -> Fuji (OnRamp 0x1249…025B)
@@ -285,6 +290,119 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     })
   })
 
+  describe('getFeeTokens', () => {
+    it('should return fee tokens for v1.5 and v1.6 routers on both chains', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      // Fuji v1.5 omitted: v1.5 scans FeeConfigSet events from block 1, and free-tier
+      // Fuji RPC providers reject the ~52M-block range required for full-history queries.
+      const cases = [
+        { chain: sepoliaChain, router: SEPOLIA_ROUTER, label: 'sepolia v1.5' },
+        { chain: sepoliaChain, router: SEPOLIA_V1_6_ROUTER, label: 'sepolia v1.6' },
+        { chain: fujiChain, router: FUJI_V1_6_ROUTER, label: 'fuji v1.6' },
+      ]
+
+      for (const { chain, router, label } of cases) {
+        const feeTokens = await chain.getFeeTokens(router)
+        const entries = Object.entries(feeTokens)
+        assert.ok(entries.length > 0, `${label}: should have at least one fee token`)
+
+        for (const [address, info] of entries) {
+          assert.match(address, /^0x[0-9a-fA-F]{40}$/, `${label}: token address should be valid`)
+          assert.ok(info.symbol.length > 0, `${label}: ${address} should have a symbol`)
+          assert.ok(info.decimals >= 0, `${label}: ${address} should have non-negative decimals`)
+        }
+      }
+    })
+  })
+
+  describe('getExecutionReceipts', () => {
+    // Pick a known SUCCESS message (Fuji -> Sepolia) so we can query receipts on the dest fork
+    const successMsg = FUJI_TO_SEPOLIA.find((m) => m.status === 'SUCCESS')!
+
+    it('should find a success receipt for a known successful message', async () => {
+      assert.ok(fujiChain, 'source chain should be initialized')
+      assert.ok(sepoliaChain, 'dest chain should be initialized')
+
+      // Discover offRamp from the source transaction
+      const tx = await fujiChain.getTransaction(successMsg.txHash)
+      const requests = await fujiChain.getMessagesInTx(tx)
+      const request = requests.find((r) => r.message.messageId === successMsg.messageId)!
+      assert.ok(request, 'should find the request in the transaction')
+
+      const offRamp = await discoverOffRamp(fujiChain, sepoliaChain, request.lane.onRamp, fujiChain)
+      assert.ok(offRamp, 'offRamp should be discovered')
+
+      let foundSuccess = false
+      for await (const exec of sepoliaChain.getExecutionReceipts({
+        offRamp,
+        messageId: successMsg.messageId,
+      })) {
+        if (exec.receipt.state === ExecutionState.Success) {
+          foundSuccess = true
+          assert.equal(
+            exec.receipt.messageId,
+            successMsg.messageId,
+            'receipt messageId should match',
+          )
+          assert.ok(exec.timestamp > 0, 'execution should have a positive timestamp')
+          break
+        }
+      }
+      assert.ok(foundSuccess, 'should find a success receipt for a known successful message')
+    })
+
+    // Pick a known FAILED message  — reuses the executeReport test message
+    const failedMsg = FUJI_TO_SEPOLIA.find((m) => m.status === 'FAILED')!
+
+    // Skipped because it makes a lot of log requests to reach the "failed" receipt, and will get longer as the chain
+    // advances. To be run manually only.
+    it(
+      'should find a failed receipt with no preceding success for a known failed message',
+      { skip: true },
+      async () => {
+        assert.ok(fujiChain, 'source chain should be initialized')
+        assert.ok(sepoliaChain, 'dest chain should be initialized')
+
+        const tx = await fujiChain.getTransaction(failedMsg.txHash)
+        const requests = await fujiChain.getMessagesInTx(tx)
+        const request = requests.find((r) => r.message.messageId === failedMsg.messageId)!
+        assert.ok(request, 'should find the request in the transaction')
+
+        const offRamp = await discoverOffRamp(
+          fujiChain,
+          sepoliaChain,
+          request.lane.onRamp,
+          fujiChain,
+        )
+        assert.ok(offRamp, 'offRamp should be discovered')
+
+        let foundFailed = false
+        for await (const exec of sepoliaChain.getExecutionReceipts({
+          offRamp,
+          messageId: failedMsg.messageId,
+        })) {
+          assert.notEqual(
+            exec.receipt.state,
+            ExecutionState.Success,
+            'should not find a success receipt before the failed one',
+          )
+          if (exec.receipt.state === ExecutionState.Failed) {
+            foundFailed = true
+            assert.equal(
+              exec.receipt.messageId,
+              failedMsg.messageId,
+              'receipt messageId should match',
+            )
+            break
+          }
+        }
+        assert.ok(foundFailed, 'should find a failed receipt for a known failed message')
+      },
+    )
+  })
+
   // ── State-mutating tests below: keep these last so read-only tests see clean fork state ──
 
   describe('sendMessage', () => {
@@ -397,83 +515,6 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
       assert.ok(tokenAmounts[0]!.sourcePoolAddress, 'v1.6 should have sourcePoolAddress')
       assert.ok(tokenAmounts[0]!.destTokenAddress, 'v1.6 should have destTokenAddress')
-    })
-  })
-
-  describe('getExecutionReceipts', () => {
-    // Pick a known SUCCESS message (Fuji -> Sepolia) so we can query receipts on the dest fork
-    const successMsg = FUJI_TO_SEPOLIA.find((m) => m.status === 'SUCCESS')!
-
-    it('should find a success receipt for a known successful message', async () => {
-      assert.ok(fujiChain, 'source chain should be initialized')
-      assert.ok(sepoliaChain, 'dest chain should be initialized')
-
-      // Discover offRamp from the source transaction
-      const tx = await fujiChain.getTransaction(successMsg.txHash)
-      const requests = await fujiChain.getMessagesInTx(tx)
-      const request = requests.find((r) => r.message.messageId === successMsg.messageId)!
-      assert.ok(request, 'should find the request in the transaction')
-
-      const offRamp = await discoverOffRamp(fujiChain, sepoliaChain, request.lane.onRamp, fujiChain)
-      assert.ok(offRamp, 'offRamp should be discovered')
-
-      let foundSuccess = false
-      for await (const exec of sepoliaChain.getExecutionReceipts({
-        offRamp,
-        messageId: successMsg.messageId,
-      })) {
-        if (exec.receipt.state === ExecutionState.Success) {
-          foundSuccess = true
-          assert.equal(
-            exec.receipt.messageId,
-            successMsg.messageId,
-            'receipt messageId should match',
-          )
-          assert.ok(exec.timestamp > 0, 'execution should have a positive timestamp')
-          break
-        }
-      }
-      assert.ok(foundSuccess, 'should find a success receipt for a known successful message')
-    })
-
-    // Pick a known FAILED message  — reuses the executeReport test message
-    const failedMsg = FUJI_TO_SEPOLIA.find((m) => m.status === 'FAILED')!
-
-    // Skipped because it makes a lot of log requests to reach the "failed" receipt, and will get longer as the chain
-    // advances. To be run manually only.
-    it('should find a failed receipt with no preceding success for a known failed message', {skip: true}, async () => {
-      assert.ok(fujiChain, 'source chain should be initialized')
-      assert.ok(sepoliaChain, 'dest chain should be initialized')
-
-      const tx = await fujiChain.getTransaction(failedMsg.txHash)
-      const requests = await fujiChain.getMessagesInTx(tx)
-      const request = requests.find((r) => r.message.messageId === failedMsg.messageId)!
-      assert.ok(request, 'should find the request in the transaction')
-
-      const offRamp = await discoverOffRamp(fujiChain, sepoliaChain, request.lane.onRamp, fujiChain)
-      assert.ok(offRamp, 'offRamp should be discovered')
-
-      let foundFailed = false
-      for await (const exec of sepoliaChain.getExecutionReceipts({
-        offRamp,
-        messageId: failedMsg.messageId,
-      })) {
-        assert.notEqual(
-          exec.receipt.state,
-          ExecutionState.Success,
-          'should not find a success receipt before the failed one',
-        )
-        if (exec.receipt.state === ExecutionState.Failed) {
-          foundFailed = true
-          assert.equal(
-            exec.receipt.messageId,
-            failedMsg.messageId,
-            'receipt messageId should match',
-          )
-          break
-        }
-      }
-      assert.ok(foundFailed, 'should find a failed receipt for a known failed message')
     })
   })
 
