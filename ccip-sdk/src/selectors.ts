@@ -1742,6 +1742,41 @@ const selectors: Selectors = {
     family: 'TON',
   },
   // end:generate
+
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors_canton.yml')
+  //   .then((res) => res.text())
+  //   .then((body) => require('yaml').parse(body, { intAsBigInt: true }).selectors)
+  //   .then((obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => {
+  //     if (!v.network_type) throw new Error(`Missing network_type for Canton chain ${k}`)
+  //     return [`canton:${k}`, { ...v, family: 'CANTON', network_type: v.network_type.toUpperCase() }]
+  //   })))
+  //   .then((obj) => [...require('util').inspect(obj).split('\n').slice(1, -1), ','])
+  'canton:LocalNet': {
+    selector: 8706591216959472610n,
+    name: 'canton-localnet',
+    network_type: 'TESTNET',
+    family: 'CANTON',
+  },
+  'canton:DevNet': {
+    selector: 10109143320554840099n,
+    name: 'canton-devnet',
+    network_type: 'TESTNET',
+    family: 'CANTON',
+  },
+  'canton:TestNet': {
+    selector: 9268731218649498074n,
+    name: 'canton-testnet',
+    network_type: 'TESTNET',
+    family: 'CANTON',
+  },
+  'canton:MainNet': {
+    selector: 2308837218439511688n,
+    name: 'canton-mainnet',
+    network_type: 'MAINNET',
+    family: 'CANTON',
+  },
+  // end:generate
 }
 
 export default selectors
