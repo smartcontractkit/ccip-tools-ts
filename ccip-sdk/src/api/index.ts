@@ -147,7 +147,7 @@ export class CCIPAPIClient {
     this.baseUrl = baseUrl ?? DEFAULT_API_BASE_URL
     this.logger = ctx?.logger ?? console
     this.timeoutMs = ctx?.timeoutMs ?? DEFAULT_TIMEOUT_MS
-    this._fetch = ctx?.fetch ?? globalThis.fetch
+    this._fetch = ctx?.fetch ?? globalThis.fetch.bind(globalThis)
   }
 
   /**
