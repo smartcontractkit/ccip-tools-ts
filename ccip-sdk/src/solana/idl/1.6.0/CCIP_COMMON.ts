@@ -3,7 +3,7 @@
 //   .then((res) => res.text())
 //   .then((text) => text.trim())
 export type CcipCommon = {
-  version: '0.1.1'
+  version: '1.6.1'
   name: 'ccip_common'
   instructions: []
   accounts: [
@@ -102,11 +102,26 @@ export type CcipCommon = {
       name: 'InvalidSVMAddress'
       msg: 'Invalid SVM address'
     },
+    {
+      code: 10011
+      name: 'InvalidTVMAddress'
+      msg: 'Invalid TVM address'
+    },
+    {
+      code: 10012
+      name: 'InvalidAptosAddress'
+      msg: 'Invalid Aptos address'
+    },
+    {
+      code: 10013
+      name: 'InvalidSuiAddress'
+      msg: 'Invalid Sui address'
+    },
   ]
 }
 
 export const IDL: CcipCommon = {
-  version: '0.1.1',
+  version: '1.6.1',
   name: 'ccip_common',
   instructions: [],
   accounts: [
@@ -204,6 +219,21 @@ export const IDL: CcipCommon = {
       code: 10010,
       name: 'InvalidSVMAddress',
       msg: 'Invalid SVM address',
+    },
+    {
+      code: 10011,
+      name: 'InvalidTVMAddress',
+      msg: 'Invalid TVM address',
+    },
+    {
+      code: 10012,
+      name: 'InvalidAptosAddress',
+      msg: 'Invalid Aptos address',
+    },
+    {
+      code: 10013,
+      name: 'InvalidSuiAddress',
+      msg: 'Invalid Sui address',
     },
   ],
 }
