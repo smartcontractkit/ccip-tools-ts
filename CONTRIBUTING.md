@@ -28,6 +28,43 @@ npm run build       # Full build
 
 CI runs: `npm ci` → `npm run check` → `npm test`
 
+## Fork Tests
+
+Fork tests exercise the SDK against real chain state. They use [Anvil](https://book.getfoundry.sh/reference/anvil/) (via the `prool` library) to fork live testnets (Sepolia, Fuji) and run SDK methods against real CCIP messages — decoding, fee estimation, sending, manual execution, etc.
+
+### Prerequisites
+
+- **Anvil** — install [Foundry](https://getfoundry.sh/). If `anvil` is not on your `PATH`, fork tests are automatically skipped.
+
+### Running
+
+Fork tests run as part of `npm test`. You can control their behaviour with environment variables:
+
+| Variable | Effect |
+| --- | --- |
+| `SKIP_INTEGRATION_TESTS=1` | Skip fork tests entirely |
+| `RPC_SEPOLIA=<url>` | Custom Sepolia RPC (default: public node) |
+| `RPC_FUJI=<url>` | Custom Fuji RPC (default: public node) |
+| `RUN_HIGH_RPC_LOAD_TESTS=1` | Enable tests that scan wide block ranges (slow, may hit rate limits on free RPCs) |
+| `VERBOSE=1` | Enable debug logging |
+
+```bash
+# Run everything including fork tests
+npm test
+
+# Skip fork tests
+SKIP_INTEGRATION_TESTS=1 npm test
+
+# Run with custom RPCs and verbose output
+RPC_SEPOLIA=https://my-sepolia.example.com VERBOSE=1 npm test
+```
+
+### Test data
+
+Fork tests use curated real testnet CCIP messages defined in [`ccip-sdk/src/evm/fork.test.data.ts`](ccip-sdk/src/evm/fork.test.data.ts). Each entry is a `ForkTestMessage` with a message ID, transaction hash, expected status, protocol version, and a short description.
+
+To add a new test message, append an entry to the appropriate lane array (e.g. `SEPOLIA_TO_FUJI`, `FUJI_TO_SEPOLIA`) with the real on-chain data. Pick messages with stable, terminal statuses (`Success`, `Failed`) so they don't change as the chain advances.
+
 ## Error Handling
 
 The SDK defines specialized `CCIPError` classes in `ccip-sdk/src/errors/`. Never throw generic `Error`.
