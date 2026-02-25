@@ -1,4 +1,4 @@
-# CCIP Tools Documentation
+# CCIP Tools Reference Documentation
 
 This directory contains the API reference documentation for `@chainlink/ccip-sdk`, `@chainlink/ccip-cli`, and the CCIP REST API, built with [Docusaurus](https://docusaurus.io/).
 

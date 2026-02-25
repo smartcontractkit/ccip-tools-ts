@@ -83,7 +83,8 @@
   --ifm-heading-color: #141921;
 
   /* Typography */
-  --ifm-font-family-base: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --ifm-font-family-base:
+    'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --ifm-font-family-monospace:
     'SF Mono', 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
 
@@ -275,7 +276,7 @@ button[class*='copyButton']:hover {
   color: #d16969 !important;
 }
 
-.token.property-access, 
+.token.property-access,
 .token.maybe-class-name {
   color: #95a4ba !important;
 }
