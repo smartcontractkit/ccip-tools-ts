@@ -217,18 +217,6 @@ export default defineConfig({
 })
 ```
 
-## Fetch Binding Fix
-
-Some bundlers break the native fetch context. If you see "Illegal invocation" errors:
-
-```typescript
-// main.tsx or index.tsx - Add at the top
-if (typeof globalThis.fetch === 'function') {
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = (input, init) => originalFetch.call(globalThis, input, init)
-}
-```
-
 ## Using with Wagmi/Viem
 
 When using the SDK with wagmi, you may encounter type mismatches with `fromViemClient()`:
@@ -385,12 +373,6 @@ Expected sizes for EVM-only: ~740 KB minified, ~180 KB gzipped.
 **Cause:** Wallet libraries (MetaMask SDK, WalletConnect) require `process`.
 
 **Solution:** Add the process polyfill if using wallet libraries that require it.
-
-### "Illegal invocation" on fetch
-
-**Cause:** Some bundlers break the native fetch context.
-
-**Solution:** Add the fetch binding fix shown above.
 
 ### Bundle size larger than expected
 

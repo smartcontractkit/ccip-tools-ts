@@ -46,7 +46,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.0.0-5c35b70'
+export const SDK_VERSION = '1.0.0-5e69df4'
 // generate:end
 
 /** SDK telemetry header name */
@@ -147,7 +147,7 @@ export class CCIPAPIClient {
     this.baseUrl = baseUrl ?? DEFAULT_API_BASE_URL
     this.logger = ctx?.logger ?? console
     this.timeoutMs = ctx?.timeoutMs ?? DEFAULT_TIMEOUT_MS
-    this._fetch = ctx?.fetch ?? globalThis.fetch
+    this._fetch = ctx?.fetch ?? globalThis.fetch.bind(globalThis)
   }
 
   /**
