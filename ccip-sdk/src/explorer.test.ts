@@ -68,7 +68,6 @@ describe('getCCIPExplorerLinks', () => {
     },
     tx: {
       hash: '0xaf8c73a7f872c831da535a62e3837fe5a62f1b92e4b09fddc773b956c3c27d56',
-      logs: [],
       blockNumber: 12345,
       timestamp: 1234567890,
       from: '0xbff1d393d0f318c4aaf54fdb670e63cb44ed3461',

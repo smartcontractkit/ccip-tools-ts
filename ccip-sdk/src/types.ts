@@ -208,7 +208,7 @@ export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
   message: CCIPMessage<V>
   log: Log_
   /** Transaction that emitted the request. */
-  tx: Pick<ChainTransaction, 'hash' | 'logs' | 'blockNumber' | 'timestamp' | 'from' | 'error'>
+  tx: Omit<ChainTransaction, 'logs'>
 
   /**
    * API-enriched metadata. Present only when fetched via CCIP API.
