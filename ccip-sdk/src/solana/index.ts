@@ -981,7 +981,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     } else throw new CCIPExecutionStateInvalidError(util.inspect(decoded.data.state))
 
     let returnData
-    if (log.tx) {
+    if (log.tx?.logs) {
       // use only last receipt per tx+message (i.e. skip intermediary InProgress=1 states for Solana)
       const laterReceiptLog = log.tx.logs
         .filter((l) => l.index > log.index)

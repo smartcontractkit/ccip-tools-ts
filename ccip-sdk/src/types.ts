@@ -1,5 +1,6 @@
 import type { AbiParametersToPrimitiveTypes, ExtractAbiEvent } from 'abitype'
 import type { BytesLike, Log as EVMLog } from 'ethers'
+import type { SetOptional } from 'type-fest'
 
 import type { APICCIPRequestMetadata } from './api/types.ts'
 import type OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
@@ -170,7 +171,7 @@ export type ChainLog = Pick<
   /** Log data as bytes or parsed object. */
   data: BytesLike | Record<string, unknown>
   /** Optional reference to the containing transaction. */
-  tx?: ChainTransaction
+  tx?: SetOptional<ChainTransaction, 'logs'>
 }
 
 /**
