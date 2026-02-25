@@ -8,7 +8,7 @@
 //     else throw new Error('isMut is already true, no need for this workaround anymore');
 //   }))
 export type CcipRouter = {
-  version: '0.1.1'
+  version: '1.6.1'
   name: 'ccip_router'
   docs: [
     'The `ccip_router` module contains the implementation of the Cross-Chain Interoperability Protocol (CCIP) Router.',
@@ -2339,7 +2339,7 @@ export type CcipRouter = {
 }
 
 export const IDL: CcipRouter = {
-  version: '0.1.1',
+  version: '1.6.1',
   name: 'ccip_router',
   docs: [
     'The `ccip_router` module contains the implementation of the Cross-Chain Interoperability Protocol (CCIP) Router.',
