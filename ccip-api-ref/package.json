@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-api-ref",
-  "version": "0.96.0",
+  "version": "1.0.0",
   "private": true,
   "description": "API Reference documentation for CCIP SDK and CLI",
   "scripts": {
