@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
-import { keccak256 } from 'ethers'
-
 import { getLbtcAttestation, getUsdcAttestation } from './offchain.ts'
 import { NetworkType } from './types.ts'
 
@@ -25,82 +23,184 @@ describe('getUsdcAttestation', () => {
   })
 
   it('should call the mainnet Circle API when networkType is MAINNET', async () => {
-    const messageHex = '0x1234567890abcdef'
-    const msgHash = keccak256(messageHex)
-    const completeResponse = { status: 'complete', attestation: '0xabcd' }
+    const sourceDomain = 0
+    const nonce = 12345
+    const txHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+    const completeResponse = {
+      messages: [
+        {
+          status: 'complete' as const,
+          eventNonce: '12345',
+          attestation: '0xabcd',
+          message: '0xmessage',
+        },
+      ],
+    }
 
     mockedFetchJson.mock.mockImplementation(() => Promise.resolve(completeResponse))
 
-    const result = await getUsdcAttestation(messageHex, NetworkType.Mainnet)
+    const result = await getUsdcAttestation({ sourceDomain, nonce, txHash }, NetworkType.Mainnet)
 
     assert.equal(mockedFetch.mock.calls.length, 1)
     assert.equal(
       mockedFetch.mock.calls[0]?.arguments[0],
-      `https://iris-api.circle.com/v1/attestations/${msgHash}`,
+      `https://iris-api.circle.com/v2/messages/${sourceDomain}?transactionHash=${txHash}`,
     )
-    assert.equal(result, '0xabcd')
+    assert.equal(result.attestation, '0xabcd')
+    assert.equal(result.message, '0xmessage')
   })
 
   it('should call the testnet Circle API when networkType is TESTNET', async () => {
-    const messageHex = '0x1234567890abcdef'
-    const msgHash = keccak256(messageHex)
-    const completeResponse = { status: 'complete', attestation: '0xabcd' }
+    const sourceDomain = 1
+    const nonce = 54321
+    const txHash = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890'
+    const completeResponse = {
+      messages: [
+        {
+          status: 'complete' as const,
+          eventNonce: '54321',
+          attestation: '0xabcd',
+          message: '0xmessage',
+        },
+      ],
+    }
 
     mockedFetchJson.mock.mockImplementation(() => Promise.resolve(completeResponse))
 
-    const result = await getUsdcAttestation(messageHex, NetworkType.Testnet)
+    const result = await getUsdcAttestation({ sourceDomain, nonce, txHash }, NetworkType.Testnet)
 
     assert.equal(mockedFetch.mock.calls.length, 1)
     assert.equal(
       mockedFetch.mock.calls[0]?.arguments[0],
-      `https://iris-api-sandbox.circle.com/v1/attestations/${msgHash}`,
+      `https://iris-api-sandbox.circle.com/v2/messages/${sourceDomain}?transactionHash=${txHash}`,
     )
-    assert.equal(result, '0xabcd')
+    assert.equal(result.attestation, '0xabcd')
+    assert.equal(result.message, '0xmessage')
   })
 
   it('should correctly fetch complete attestation for a real CCTP message', async () => {
-    const messageHex = '0x1234567890abcdef1234567890abcdef'
-    const expectedMessageHash = keccak256(messageHex)
+    const sourceDomain = 2
+    const nonce = 99999
+    const txHash = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890'
     const expectedAttestation =
       '0x9a7bf4c29c41c5e5e54c848c0cd4a7a6094ccf17e590a0fa30f0de1d18ba5b0c15dff962c0b6c64621c618e6add5f71bc8e3b8c3bcaae98ed55cf9f75a71f5da1c'
+    const expectedMessage = '0x000000000000000000000000...'
 
     mockedFetchJson.mock.mockImplementation(() =>
       Promise.resolve({
-        status: 'complete',
-        attestation: expectedAttestation,
+        messages: [
+          {
+            status: 'complete' as const,
+            eventNonce: '99999',
+            attestation: expectedAttestation,
+            message: expectedMessage,
+          },
+        ],
       }),
     )
 
-    const result = await getUsdcAttestation(messageHex, NetworkType.Testnet)
+    const result = await getUsdcAttestation({ sourceDomain, nonce, txHash }, NetworkType.Testnet)
 
     assert.equal(mockedFetch.mock.calls.length, 1)
     assert.equal(
       mockedFetch.mock.calls[0]?.arguments[0],
-      `https://iris-api-sandbox.circle.com/v1/attestations/${expectedMessageHash}`,
+      `https://iris-api-sandbox.circle.com/v2/messages/${sourceDomain}?transactionHash=${txHash}`,
     )
-    assert.equal(result, expectedAttestation)
+    assert.equal(result.attestation, expectedAttestation)
+    assert.equal(result.message, expectedMessage)
   })
 
   it('should throw an error if the Circle API response is not "complete"', async () => {
-    const messageHex = '0x1234567890abcdef'
-    const pendingResponse = { status: 'pending_confirmations', attestation: null }
+    const sourceDomain = 0
+    const nonce = 12345
+    const txHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+    const pendingResponse = {
+      messages: [
+        {
+          status: 'pending_confirmations' as const,
+          eventNonce: '12345',
+          attestation: '0x',
+          message: '0x',
+        },
+      ],
+    }
 
     mockedFetchJson.mock.mockImplementation(() => Promise.resolve(pendingResponse))
 
     await assert.rejects(
-      async () => await getUsdcAttestation(messageHex, NetworkType.Testnet),
+      async () => await getUsdcAttestation({ sourceDomain, nonce, txHash }, NetworkType.Testnet),
       /Could not fetch USDC attestation/,
     )
   })
 
   it('should throw an error if the Circle API response has an error', async () => {
-    const messageHex = '0x1234567890abcdef'
+    const sourceDomain = 0
+    const nonce = 12345
+    const txHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
     const errorResponse = { error: 'Not found' }
 
     mockedFetchJson.mock.mockImplementation(() => Promise.resolve(errorResponse))
 
     await assert.rejects(
-      async () => await getUsdcAttestation(messageHex, NetworkType.Testnet),
+      async () => await getUsdcAttestation({ sourceDomain, nonce, txHash }, NetworkType.Testnet),
+      /Could not fetch USDC attestation/,
+    )
+  })
+
+  it('should filter by nonce when multiple messages are returned', async () => {
+    const sourceDomain = 0
+    const nonce = 12345
+    const txHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+    const response = {
+      messages: [
+        {
+          status: 'complete' as const,
+          eventNonce: '12344',
+          attestation: '0xwrong1',
+          message: '0xwrongmsg1',
+        },
+        {
+          status: 'complete' as const,
+          eventNonce: '12345',
+          attestation: '0xcorrect',
+          message: '0xcorrectmsg',
+        },
+        {
+          status: 'complete' as const,
+          eventNonce: '12346',
+          attestation: '0xwrong2',
+          message: '0xwrongmsg2',
+        },
+      ],
+    }
+
+    mockedFetchJson.mock.mockImplementation(() => Promise.resolve(response))
+
+    const result = await getUsdcAttestation({ sourceDomain, nonce, txHash }, NetworkType.Testnet)
+
+    assert.equal(result.attestation, '0xcorrect')
+    assert.equal(result.message, '0xcorrectmsg')
+  })
+
+  it('should throw error if no complete message matches the nonce', async () => {
+    const sourceDomain = 0
+    const nonce = 12345
+    const txHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+    const response = {
+      messages: [
+        {
+          status: 'complete' as const,
+          eventNonce: '12344',
+          attestation: '0xother',
+          message: '0xothermsg',
+        },
+      ],
+    }
+
+    mockedFetchJson.mock.mockImplementation(() => Promise.resolve(response))
+
+    await assert.rejects(
+      async () => await getUsdcAttestation({ sourceDomain, nonce, txHash }, NetworkType.Testnet),
       /Could not fetch USDC attestation/,
     )
   })

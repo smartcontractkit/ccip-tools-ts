@@ -831,7 +831,7 @@ export default [
   },
   {
     type: 'error',
-    name: 'CustomBlockConfirmationNotSupportedOnPoolV1',
+    name: 'CustomBlockConfirmationsNotSupportedOnPoolV1',
     inputs: [],
   },
   {

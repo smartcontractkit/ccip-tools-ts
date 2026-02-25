@@ -18,9 +18,9 @@ import { SuiChain } from './sui/index.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
+  type ChainLog,
   type ChainTransaction,
   type Lane,
-  type Log_,
   CCIPVersion,
 } from './types.ts'
 import { bigIntReplacer, networkInfo } from './utils.ts'
@@ -53,7 +53,7 @@ class MockChain {
     Promise.resolve(['OnRamp', CCIPVersion.V1_2, `OnRamp ${CCIPVersion.V1_2}`]),
   )
   getLogs = mock.fn((opts: LogFilter) => {
-    const logs: Log_[] = [
+    const logs: ChainLog[] = [
       {
         address: opts.address ?? rampAddress,
         index: 1,
@@ -61,7 +61,7 @@ class MockChain {
         data: mockedMessage(1),
         blockNumber: 12000,
         transactionHash: '0x123',
-      } as Log_,
+      } as ChainLog,
     ]
     return (async function* () {
       for (const log of logs) {
@@ -160,7 +160,7 @@ describe('fetchCCIPMessagesInTx', () => {
           blockNumber: 12000,
           transactionHash: '0x123',
           index: 0,
-        } as Log_,
+        } as ChainLog,
       ],
       timestamp: 1234567890,
       blockNumber: 12000,
@@ -187,7 +187,7 @@ describe('fetchCCIPMessagesInTx', () => {
           blockNumber: 12000,
           transactionHash: '0x123',
           index: 0,
-        } as Log_,
+        } as ChainLog,
         {
           address: getAddress(hexlify(randomBytes(20))),
           topics: [topic0],
@@ -195,7 +195,7 @@ describe('fetchCCIPMessagesInTx', () => {
           blockNumber: 12000,
           transactionHash: '0x123',
           index: 1,
-        } as Log_,
+        } as ChainLog,
       ],
       timestamp: 1234567890,
       blockNumber: 12000,
@@ -256,7 +256,7 @@ describe('fetchCCIPMessageById', () => {
           data: msg,
           blockNumber: 12000,
           transactionHash: '0x123',
-        } as Log_
+        } as ChainLog
       })(),
     )
 
@@ -279,7 +279,7 @@ describe('fetchCCIPMessageById', () => {
           data: mockedMessage(2),
           blockNumber: 12000,
           transactionHash: '0x123',
-        } as Log_
+        } as ChainLog
       })(),
     )
 
@@ -335,7 +335,7 @@ describe('getMessagesInBatch', () => {
         transactionHash: '0x123',
         index: 0,
         data: mockedMessage(9),
-      } as Log_,
+      } as ChainLog,
       message: {
         messageId: '0xMessageId9',
         sourceChainSelector: 16015286601757825753n,
@@ -378,7 +378,7 @@ describe('getMessagesInBatch', () => {
         transactionHash: '0x123',
         index: 0,
         data: mockedMessage(5),
-      } as Log_,
+      } as ChainLog,
       message: {
         messageId: '0xMessageId5',
         sourceChainSelector: 16015286601757825753n,
@@ -434,7 +434,7 @@ describe('getMessagesForSender', () => {
           blockNumber: 12000,
           transactionHash: '0x123',
           index: 0,
-        } as Log_
+        } as ChainLog
         yield {
           address: rampAddress,
           topics: [topic0],
@@ -442,7 +442,7 @@ describe('getMessagesForSender', () => {
           blockNumber: 12001,
           transactionHash: '0x124',
           index: 0,
-        } as Log_
+        } as ChainLog
         yield {
           address: rampAddress,
           topics: [topic0],
@@ -450,7 +450,7 @@ describe('getMessagesForSender', () => {
           blockNumber: 12002,
           transactionHash: '0x125',
           index: 0,
-        } as Log_
+        } as ChainLog
       })(),
     )
 

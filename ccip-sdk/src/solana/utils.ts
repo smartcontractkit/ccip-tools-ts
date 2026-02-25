@@ -26,7 +26,7 @@ import {
   CCIPTokenMintNotFoundError,
   CCIPTransactionNotFinalizedError,
 } from '../errors/index.ts'
-import type { Log_, WithLogger } from '../types.ts'
+import type { ChainLog, WithLogger } from '../types.ts'
 import { getDataBytes, sleep } from '../utils.ts'
 import type { IDL as BASE_TOKEN_POOL_IDL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import type { UnsignedSolanaTx, Wallet } from './types.ts'
@@ -143,7 +143,7 @@ export function camelToSnakeCase(str: string): string {
     .replace(/^_/, '')
 }
 
-type ParsedLog = Pick<Log_, 'topics' | 'index' | 'address' | 'data'> & {
+type ParsedLog = Pick<ChainLog, 'topics' | 'index' | 'address' | 'data'> & {
   data: string
   level: number
 }
@@ -160,7 +160,7 @@ type ParsedLog = Pick<Log_, 'topics' | 'index' | 'address' | 'data'> & {
  * This function:
  * 1. Tracks the program call stack to determine which program emitted each log
  * 2. Extracts the first 8 bytes from base64 "Program data:" logs as topics (event discriminants)
- * 3. Converts logs to EVM-compatible Log_ format for CCIP compatibility
+ * 3. Converts logs to EVM-compatible ChainLog format for CCIP compatibility
  * 4. Returns ALL logs from the transaction - filtering should be done by the caller
  *
  * @param logs - Array of logMessages from Solana transaction
@@ -215,7 +215,10 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
  * @returns Parsed error info with program and error details.
  */
 export function getErrorFromLogs(
-  logs_: readonly string[] | readonly Pick<Log_, 'address' | 'index' | 'data' | 'topics'>[] | null,
+  logs_:
+    | readonly string[]
+    | readonly Pick<ChainLog, 'address' | 'index' | 'data' | 'topics'>[]
+    | null,
 ): { program: string; [k: string]: string } | undefined {
   if (!logs_?.length) return
   let logs
@@ -229,7 +232,7 @@ export function getErrorFromLogs(
       (acc, l) =>
         // if acc is empty (i.e. on last log), or it is emitted by the same program and not a Program data:
         !acc.length || (l.address === acc[0]!.address && !l.topics.length) ? [l, ...acc] : acc,
-      [] as Pick<Log_, 'address' | 'index' | 'data'>[],
+      [] as Pick<ChainLog, 'address' | 'index' | 'data'>[],
     )
     .map(({ data }) => data as string)
     .reduceRight(

@@ -22,6 +22,7 @@ import type {
   SuiExtraArgsV1,
 } from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
+import { getOffchainTokenData } from './offchain.ts'
 import { getMessagesInTx } from './requests.ts'
 import { DEFAULT_GAS_LIMIT } from './shared/constants.ts'
 import type { UnsignedSolanaTx } from './solana/types.ts'
@@ -34,12 +35,12 @@ import {
   type CCIPVerifications,
   type CCIPVersion,
   type ChainFamily,
+  type ChainLog,
   type ChainTransaction,
   type CommitReport,
   type ExecutionInput,
   type ExecutionReceipt,
   type Lane,
-  type Log_,
   type Logger,
   type MessageInput,
   type NetworkInfo,
@@ -501,7 +502,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPLogsWatchRequiresStartError} if watch mode is used without startBlock or startTime
    * @throws {@link CCIPLogsAddressRequiredError} if address is required but not provided (chain-specific)
    */
-  abstract getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
+  abstract getLogs(opts: LogFilter): AsyncIterableIterator<ChainLog>
 
   /**
    * Fetch all CCIP requests in a transaction.
@@ -910,12 +911,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   ): Promise<CCIPRequest>
   /**
    * Fetch supported offchain token data for a request from this network.
+   * It logs but doesn't throw in case it can't fetch attestation, as the transfers may not be
+   * from the expected attestation providers. It returns default offchainData=undefined for those.
    *
-   * @param request - CCIP request, with tx, logs and message
+   * @param request - CCIP request, with tx.hash and message
    * @returns Promise resolving to array with one offchain token data for each token transfer
-   *
-   * @throws {@link CCIPUsdcAttestationError} if USDC attestation fetch fails (transient)
-   * @throws {@link CCIPLbtcAttestationError} if LBTC attestation fetch fails (transient)
    *
    * @example Get offchain token data for USDC transfer
    * ```typescript
@@ -923,7 +923,12 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * // Use in execution report
    * ```
    */
-  abstract getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]>
+  async getOffchainTokenData(
+    request: PickDeep<CCIPRequest, 'tx.hash' | `message`>,
+  ): Promise<OffchainTokenData[]> {
+    return getOffchainTokenData(request, this)
+  }
+
   /**
    * Generate unsigned tx to manuallyExecute a message.
    *
@@ -1405,7 +1410,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * }
    * ```
    */
-  decodeMessage(log: Pick<Log_, 'data'>): CCIPMessage | undefined
+  decodeMessage(log: Pick<ChainLog, 'data'>): CCIPMessage | undefined
   /**
    * Try to decode an extraArgs array serialized for this chain family.
    *
@@ -1461,7 +1466,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * }
    * ```
    */
-  decodeCommits(log: Pick<Log_, 'data'>, lane?: Lane): CommitReport[] | undefined
+  decodeCommits(log: Pick<ChainLog, 'data'>, lane?: Lane): CommitReport[] | undefined
   /**
    * Decode a receipt (ExecutionStateChanged) event.
    *
@@ -1476,7 +1481,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * }
    * ```
    */
-  decodeReceipt(log: Pick<Log_, 'data'>): ExecutionReceipt | undefined
+  decodeReceipt(log: Pick<ChainLog, 'data'>): ExecutionReceipt | undefined
   /**
    * Receive a bytes array and try to decode and normalize it as an address of this chain family.
    *

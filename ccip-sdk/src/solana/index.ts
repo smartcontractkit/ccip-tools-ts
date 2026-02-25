@@ -77,15 +77,14 @@ import {
   type CCIPMessage,
   type CCIPRequest,
   type CCIPVerifications,
+  type ChainLog,
   type ChainTransaction,
   type CommitReport,
   type ExecutionInput,
   type ExecutionReceipt,
   type Lane,
-  type Log_,
   type MergeArrayElements,
   type NetworkInfo,
-  type OffchainTokenData,
   type WithLogger,
   CCIPVersion,
   ChainFamily,
@@ -113,7 +112,6 @@ import { IDL as CCIP_CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import { getTransactionsForAddress } from './logs.ts'
-import { fetchSolanaOffchainTokenData } from './offchain.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
@@ -160,7 +158,7 @@ const unknownTokens: { [mint: string]: string } = {
 }
 
 /** Solana-specific log structure with transaction reference and log level. */
-export type SolanaLog = Log_ & { tx: SolanaTransaction; data: string; level: number }
+export type SolanaLog = ChainLog & { tx: SolanaTransaction; data: string; level: number }
 /** Solana-specific transaction structure with versioned transaction response. */
 export type SolanaTransaction = MergeArrayElements<
   ChainTransaction,
@@ -430,13 +428,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *   - `watch`: Watch for new logs
    *   - `programs`: Special option to allow querying by address of interest, but yielding matching
    *     logs from specific (string address) program or any (true)
-   * @returns AsyncIterableIterator of parsed Log_ objects.
+   * @returns AsyncIterableIterator of parsed ChainLog objects.
    * @throws {@link CCIPLogsAddressRequiredError} if address is not provided
    * @throws {@link CCIPTopicsInvalidError} if topics contain invalid values
    */
   async *getLogs(
     opts: LogFilter & { programs?: string[] | true },
-  ): AsyncGenerator<Log_ & { tx: SolanaTransaction }> {
+  ): AsyncGenerator<ChainLog & { tx: SolanaTransaction }> {
     let programs: true | string[]
     if (!opts.address) {
       throw new CCIPLogsAddressRequiredError()
@@ -895,7 +893,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @throws {@link CCIPLogDataMissingError} if log data is missing
    */
   static decodeCommits(
-    log: Pick<Log_, 'data'>,
+    log: Pick<ChainLog, 'data'>,
     lane?: Omit<Lane, 'destChainSelector'>,
   ): CommitReport[] | undefined {
     // Check if this is a CommitReportAccepted event by looking at the discriminant
@@ -950,7 +948,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @throws {@link CCIPLogDataMissingError} if log data is missing
    * @throws {@link CCIPExecutionStateInvalidError} if execution state is invalid
    */
-  static decodeReceipt(log: Pick<Log_, 'data' | 'tx' | 'index'>): ExecutionReceipt | undefined {
+  static decodeReceipt(log: Pick<ChainLog, 'data' | 'tx' | 'index'>): ExecutionReceipt | undefined {
     // Check if this is a ExecutionStateChanged event by looking at the discriminant
     if (!log.data || typeof log.data !== 'string') {
       throw new CCIPLogDataMissingError()
@@ -983,7 +981,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     } else throw new CCIPExecutionStateInvalidError(util.inspect(decoded.data.state))
 
     let returnData
-    if (log.tx) {
+    if (log.tx?.logs) {
       // use only last receipt per tx+message (i.e. skip intermediary InProgress=1 states for Solana)
       const laterReceiptLog = log.tx.logs
         .filter((l) => l.index > log.index)
@@ -1107,11 +1105,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]!
   }
 
-  /** {@inheritDoc Chain.getOffchainTokenData} */
-  async getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
-    return fetchSolanaOffchainTokenData(request, this)
-  }
-
   /**
    * {@inheritDoc Chain.generateUnsignedExecute}
    * @returns instructions - array of instructions to execute the report
@@ -1209,13 +1202,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       if (Array.isArray(data)) {
         if (data.every((e) => typeof e === 'string')) return getErrorFromLogs(data)
         else if (data.every((e) => typeof e === 'object' && 'data' in e && 'address' in e))
-          return getErrorFromLogs(data as Log_[])
+          return getErrorFromLogs(data as ChainLog[])
       } else if (typeof data === 'object') {
         if ('transactionLogs' in data && 'transactionMessage' in data) {
-          const parsed = getErrorFromLogs(data.transactionLogs as Log_[] | string[])
+          const parsed = getErrorFromLogs(data.transactionLogs as ChainLog[] | string[])
           if (parsed) return { message: data.transactionMessage, ...parsed }
         }
-        if ('logs' in data) return getErrorFromLogs(data.logs as Log_[] | string[])
+        if ('logs' in data) return getErrorFromLogs(data.logs as ChainLog[] | string[])
       } else if (typeof data === 'string') {
         const parsedExtraArgs = this.decodeExtraArgs(getDataBytes(data))
         if (parsedExtraArgs) return parsedExtraArgs

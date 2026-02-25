@@ -60,15 +60,14 @@ import {
   type CCIPMessage,
   type CCIPRequest,
   type CCIPVerifications,
+  type ChainLog,
   type ChainTransaction,
   type CommitReport,
   type ExecutionInput,
   type ExecutionReceipt,
   type ExecutionState,
   type Lane,
-  type Log_,
   type NetworkInfo,
-  type OffchainTokenData,
   type WithLogger,
   CCIPVersion,
   ChainFamily,
@@ -122,7 +121,7 @@ import {
 } from './messages.ts'
 export { decodeMessageV1 }
 export type { MessageV1, TokenTransferV1 }
-import { encodeEVMOffchainTokenData, fetchEVMOffchainTokenData } from './offchain.ts'
+import { encodeEVMOffchainTokenData } from './offchain.ts'
 import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
 import { type UnsignedEVMTx, resultToObject } from './types.ts'
 export type { UnsignedEVMTx }
@@ -339,9 +338,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const chainTx = {
       ...tx,
       timestamp,
-      logs: [] as Log_[],
+      logs: [] as ChainLog[],
     }
-    const logs: Log_[] = tx.logs.map((l) => Object.assign(l, { tx: chainTx }))
+    const logs: ChainLog[] = tx.logs.map((l) => Object.assign(l, { tx: chainTx }))
     chainTx.logs = logs
     return chainTx
   }
@@ -1071,11 +1070,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.logger.debug('ccipSend =>', response.hash)
     const tx = (await response.wait(1, 60_000))!
     return (await this.getMessagesInTx(await this.getTransaction(tx)))[0]!
-  }
-
-  /** {@inheritDoc Chain.getOffchainTokenData} */
-  getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
-    return fetchEVMOffchainTokenData(request, this)
   }
 
   /**

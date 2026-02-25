@@ -12,11 +12,11 @@ import OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
+  type ChainLog,
   type ChainTransaction,
   type CommitReport,
   type ExecutionState,
   type Lane,
-  type Log_,
   CCIPVersion,
   ChainFamily,
 } from './types.ts'
@@ -26,7 +26,7 @@ import { networkInfo } from './utils.ts'
 class MockChain extends Chain {
   static family = ChainFamily.EVM
   private mockTypeAndVersion: string
-  private mockLogs: Log_[] = []
+  private mockLogs: ChainLog[] = []
   private mockBlockTimestamp = 1700000000
 
   constructor(chainId: number, typeAndVersion: string = 'EVM2EVMOffRamp 1.5.0') {
@@ -34,7 +34,7 @@ class MockChain extends Chain {
     this.mockTypeAndVersion = typeAndVersion
   }
 
-  setLogs(logs: Log_[]) {
+  setLogs(logs: ChainLog[]) {
     this.mockLogs = logs
   }
 
@@ -72,7 +72,7 @@ class MockChain extends Chain {
     address?: string
     topics?: string[] | string[][]
     page?: number
-  }): AsyncIterableIterator<Log_> {
+  }): AsyncIterableIterator<ChainLog> {
     for (const log of this.mockLogs) {
       // Filter by address if specified
       if (opts.address && log.address !== opts.address) {
@@ -172,10 +172,6 @@ class MockChain extends Chain {
     return Promise.reject(new Error('not implemented'))
   }
 
-  async getOffchainTokenData(_request: CCIPRequest): Promise<any[]> {
-    return []
-  }
-
   override generateUnsignedExecute(_opts: any): Promise<never> {
     return Promise.reject(new Error('not implemented'))
   }
@@ -184,11 +180,11 @@ class MockChain extends Chain {
     return Promise.reject(new Error('not implemented'))
   }
 
-  static decodeMessage(_log: Log_): CCIPMessage | undefined {
+  static decodeMessage(_log: ChainLog): CCIPMessage | undefined {
     return undefined
   }
 
-  static decodeCommits(log: Log_, lane?: Lane): CommitReport[] | undefined {
+  static decodeCommits(log: ChainLog, lane?: Lane): CommitReport[] | undefined {
     const ifaceCommitStore = new Interface(CommitStore_1_2_ABI)
     const iface16 = new Interface(OffRamp_1_6_ABI)
 
@@ -269,7 +265,7 @@ class MockChain extends Chain {
     return undefined
   }
 
-  static decodeReceipt(_log: Log_) {
+  static decodeReceipt(_log: ChainLog) {
     const iface = new Interface(OffRamp_1_6_ABI)
     try {
       const parsed = iface.parseLog({
@@ -327,7 +323,7 @@ describe('getOnchainCommitReport', () => {
       },
     ])
 
-    const log: Log_ = {
+    const log: ChainLog = {
       address: '0xCommitStore',
       blockNumber: 12346,
       transactionHash: '0xTxHash',
@@ -385,7 +381,7 @@ describe('getOnchainCommitReport', () => {
       },
     ])
 
-    const log: Log_ = {
+    const log: ChainLog = {
       address: '0xCommitStore',
       blockNumber: 12346,
       transactionHash: '0xTxHash',
@@ -438,7 +434,7 @@ describe('getOnchainCommitReport', () => {
       { tokenPriceUpdates: [], gasPriceUpdates: [] }, // priceUpdates
     ])
 
-    const log: Log_ = {
+    const log: ChainLog = {
       address: '0xOffRamp',
       blockNumber: 12346,
       transactionHash: '0xTxHash',
@@ -497,7 +493,7 @@ describe('getOnchainCommitReport', () => {
       { tokenPriceUpdates: [], gasPriceUpdates: [] },
     ])
 
-    const log: Log_ = {
+    const log: ChainLog = {
       address: '0xOffRamp',
       blockNumber: 12346,
       transactionHash: '0xTxHash',
@@ -564,7 +560,7 @@ describe('getOnchainCommitReport', () => {
       { tokenPriceUpdates: [], gasPriceUpdates: [] },
     ])
 
-    const log1: Log_ = {
+    const log1: ChainLog = {
       address: '0xOffRamp',
       blockNumber: 12346,
       transactionHash: '0xTxHash1',
@@ -573,7 +569,7 @@ describe('getOnchainCommitReport', () => {
       data: encoded1.data,
     }
 
-    const log2: Log_ = {
+    const log2: ChainLog = {
       address: '0xOffRamp',
       blockNumber: 12347,
       transactionHash: '0xTxHash2',
@@ -628,7 +624,7 @@ describe('getOnchainCommitReport', () => {
       { tokenPriceUpdates: [], gasPriceUpdates: [] },
     ])
 
-    const log: Log_ = {
+    const log: ChainLog = {
       address: '0xOffRamp',
       blockNumber: 12346,
       transactionHash: '0xTxHash',

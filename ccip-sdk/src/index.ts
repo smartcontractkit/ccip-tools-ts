@@ -46,12 +46,14 @@ export {
   encodeExtraArgs,
 } from './extra-args.ts'
 export { estimateReceiveExecution } from './gas.ts'
+export { getOffchainTokenData } from './offchain.ts'
 export { decodeMessage, getMessagesForSender, sourceToDestTokenAddresses } from './requests.ts'
 export {
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
   type CCIPVerifications,
+  type ChainLog,
   type ChainTransaction,
   type CommitReport,
   type ExecutionInput,

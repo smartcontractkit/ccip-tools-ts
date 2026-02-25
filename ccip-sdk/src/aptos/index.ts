@@ -56,14 +56,13 @@ import {
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
+  type ChainLog,
   type ChainTransaction,
   type CommitReport,
   type ExecutionInput,
   type ExecutionReceipt,
   type Lane,
-  type Log_,
   type NetworkInfo,
-  type OffchainTokenData,
   type WithLogger,
   ChainFamily,
 } from '../types.ts'
@@ -236,7 +235,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /** {@inheritDoc Chain.getLogs} */
-  async *getLogs(opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<Log_> {
+  async *getLogs(opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<ChainLog> {
     yield* streamAptosLogs(this, opts)
   }
 
@@ -415,7 +414,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @returns Array of CommitReport or undefined if not valid.
    * @throws {@link CCIPAptosLogInvalidError} if log data format is invalid
    */
-  static decodeCommits({ data }: Pick<Log_, 'data'>, lane?: Lane): CommitReport[] | undefined {
+  static decodeCommits({ data }: Pick<ChainLog, 'data'>, lane?: Lane): CommitReport[] | undefined {
     if (!data || typeof data != 'object') throw new CCIPAptosLogInvalidError(data)
     const data_ = data as {
       blessed_merkle_roots: unknown[] | undefined
@@ -449,7 +448,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @returns ExecutionReceipt or undefined if not valid.
    * @throws {@link CCIPAptosLogInvalidError} if log data format is invalid
    */
-  static decodeReceipt({ data }: Pick<Log_, 'data'>): ExecutionReceipt | undefined {
+  static decodeReceipt({ data }: Pick<ChainLog, 'data'>): ExecutionReceipt | undefined {
     if (!data || typeof data != 'object') throw new CCIPAptosLogInvalidError(data)
     const data_ = data as { message_id: string; state: number }
     if (!data_.message_id || !data_.state) return
@@ -551,12 +550,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
 
     // Return the CCIPRequest by fetching it
     return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]!
-  }
-
-  /** {@inheritDoc Chain.getOffchainTokenData} */
-  getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
-    // default offchain token data
-    return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
   /**

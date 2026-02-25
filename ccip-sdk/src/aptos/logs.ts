@@ -15,7 +15,7 @@ import {
   CCIPLogsWatchRequiresStartError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
-import type { Log_ } from '../types.ts'
+import type { ChainLog } from '../types.ts'
 import { sleep } from '../utils.ts'
 
 const DEFAULT_POLL_INTERVAL = 5e3
@@ -241,7 +241,7 @@ async function* fetchEventsBackward(
 export async function* streamAptosLogs(
   ctx: { provider: Aptos },
   opts: LogFilter & { versionAsHash?: boolean },
-): AsyncGenerator<Log_> {
+): AsyncGenerator<ChainLog> {
   const limit = 100
   if (!opts.address || !opts.address.includes('::')) throw new CCIPAptosAddressModuleRequiredError()
   if (opts.topics?.length !== 1 || typeof opts.topics[0] !== 'string')

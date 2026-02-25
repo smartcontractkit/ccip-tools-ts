@@ -47,15 +47,14 @@ import {
   type CCIPMessage,
   type CCIPRequest,
   type CCIPVersion,
+  type ChainLog,
   type ChainTransaction,
   type CommitReport,
   type ExecutionInput,
   type ExecutionReceipt,
   type ExecutionState,
   type Lane,
-  type Log_,
   type NetworkInfo,
-  type OffchainTokenData,
   type WithLogger,
   ChainFamily,
 } from '../types.ts'
@@ -181,7 +180,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     })
 
     // Extract events from the transaction
-    const events: Log_[] = []
+    const events: ChainLog[] = []
     if (txResponse.events?.length) {
       for (const [i, event] of txResponse.events.entries()) {
         const eventType = event.type
@@ -576,7 +575,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @returns Decoded CCIPMessage or undefined if not valid.
    * @throws {@link CCIPSuiLogInvalidError} if log data format is invalid
    */
-  static decodeMessage(log: Log_): CCIPMessage | undefined {
+  static decodeMessage(log: ChainLog): CCIPMessage | undefined {
     const { data } = log
     if (
       (typeof data !== 'string' || !data.startsWith('{')) &&
@@ -622,7 +621,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @returns Array of decoded commit reports or undefined.
    */
   static decodeCommits(
-    { data, topics }: SetOptional<Pick<Log_, 'data' | 'topics'>, 'topics'>,
+    { data, topics }: SetOptional<Pick<ChainLog, 'data' | 'topics'>, 'topics'>,
     lane?: Lane,
   ): CommitReport[] | undefined {
     // Check if this is an CommitReportAccepted event
@@ -658,7 +657,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   static decodeReceipt({
     data,
     topics,
-  }: SetOptional<Pick<Log_, 'data' | 'topics'>, 'topics'>): ExecutionReceipt | undefined {
+  }: SetOptional<Pick<ChainLog, 'data' | 'topics'>, 'topics'>): ExecutionReceipt | undefined {
     // Check if this is an ExecutionStateChanged event
     if (topics?.[0] && topics[0] !== 'ExecutionStateChanged') return
 
@@ -726,12 +725,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   /** {@inheritDoc Chain.sendMessage} */
   async sendMessage(_opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.sendMessage'))
-  }
-
-  /** {@inheritDoc Chain.getOffchainTokenData} */
-  getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
-    // default offchain token data
-    return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
   /** {@inheritDoc Chain.generateUnsignedExecute} */
