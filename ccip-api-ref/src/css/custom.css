@@ -4,7 +4,7 @@
  * Colors from: ./build/documentation/src/styles/theme.css
  */
 
-/* Import Chainlink design system global styles */
+/* Import Chainlink design system global styles (includes Inter via fonts.css) */
 @import '@chainlink/design-system/global-styles.css';
 
 :root {
@@ -83,7 +83,8 @@
   --ifm-heading-color: #141921;
 
   /* Typography */
-  --ifm-font-family-base: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --ifm-font-family-base:
+    'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --ifm-font-family-monospace:
     'SF Mono', 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
 
@@ -123,7 +124,7 @@
   --card-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.4);
 
   /* h1, h2, h3, ... colors */
-  --ifm-heading-color: rgb(99, 112, 131);
+  --ifm-heading-color: rgb(202, 213, 229);
 }
 
 /* === NAVBAR STYLING (consistent with main docs) === */
@@ -230,7 +231,7 @@ button[class*='copyButton']:hover {
 }
 
 .token.punctuation {
-  color: #d4d4d4 !important;
+  color: #e8e8e8 !important;
 }
 
 .token.property,
@@ -239,7 +240,7 @@ button[class*='copyButton']:hover {
 .token.number,
 .token.constant,
 .token.symbol {
-  color: #b5cea8 !important;
+  color: #f0f0f0 !important;
 }
 
 .token.selector,
@@ -255,7 +256,7 @@ button[class*='copyButton']:hover {
 .token.url,
 .language-css .token.string,
 .style .token.string {
-  color: #d4d4d4 !important;
+  color: #e8e8e8 !important;
 }
 
 .token.atrule,
@@ -273,6 +274,17 @@ button[class*='copyButton']:hover {
 .token.important,
 .token.variable {
   color: #d16969 !important;
+}
+
+.token.property-access,
+.token.maybe-class-name {
+  color: #95a4ba !important;
+}
+
+/* Plain/unstyled code - keep readable on dark background */
+.prism-code .token.plain,
+[class*='codeBlockContainer'] .token.plain {
+  color: #f0f0f0 !important;
 }
 
 /* === CARD HOVER EFFECTS === */

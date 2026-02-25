@@ -104,22 +104,22 @@
 }
 
 .maintainerBadge {
-  font-size: 0.6875rem;
-  font-weight: 600;
+  font-size: 0.75rem;
+  font-weight: 500;
   padding: 2px 8px;
+  background-color: var(--chainlink-blue-light, #375bd2);
+  color: #ffffff;
   border-radius: 4px;
-  text-transform: uppercase;
-  white-space: nowrap;
 }
 
 .maintainerChainlink {
-  background-color: var(--chainlink-blue-light, #e3ecff);
-  color: var(--chainlink-blue, #375bd2);
+  background-color: var(--chainlink-blue-light, #375bd2);
+  color: var(--chainlink-white, #ffffff);
 }
 
 [data-theme='dark'] .maintainerChainlink {
-  background-color: rgba(55, 91, 210, 0.2);
-  color: var(--chainlink-blue-light, #5a8dee);
+  background-color: var(--chainlink-blue-light, #375bd2);
+  color: var(--chainlink-white, #ffffff);
 }
 
 .maintainerCommunity {
