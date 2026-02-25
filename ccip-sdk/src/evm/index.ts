@@ -60,13 +60,13 @@ import {
   type CCIPMessage,
   type CCIPRequest,
   type CCIPVerifications,
+  type ChainLog,
   type ChainTransaction,
   type CommitReport,
   type ExecutionInput,
   type ExecutionReceipt,
   type ExecutionState,
   type Lane,
-  type Log_,
   type NetworkInfo,
   type WithLogger,
   CCIPVersion,
@@ -338,9 +338,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const chainTx = {
       ...tx,
       timestamp,
-      logs: [] as Log_[],
+      logs: [] as ChainLog[],
     }
-    const logs: Log_[] = tx.logs.map((l) => Object.assign(l, { tx: chainTx }))
+    const logs: ChainLog[] = tx.logs.map((l) => Object.assign(l, { tx: chainTx }))
     chainTx.logs = logs
     return chainTx
   }

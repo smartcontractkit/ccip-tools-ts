@@ -1,5 +1,5 @@
 import type { AbiParametersToPrimitiveTypes, ExtractAbiEvent } from 'abitype'
-import type { BytesLike, Log } from 'ethers'
+import type { BytesLike, Log as EVMLog } from 'ethers'
 
 import type { APICCIPRequestMetadata } from './api/types.ts'
 import type OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
@@ -163,7 +163,10 @@ export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends typeof 
 /**
  * Generic log structure compatible across chain families.
  */
-export type Log_ = Pick<Log, 'topics' | 'index' | 'address' | 'blockNumber' | 'transactionHash'> & {
+export type ChainLog = Pick<
+  EVMLog,
+  'topics' | 'index' | 'address' | 'blockNumber' | 'transactionHash'
+> & {
   /** Log data as bytes or parsed object. */
   data: BytesLike | Record<string, unknown>
   /** Optional reference to the containing transaction. */
@@ -188,7 +191,7 @@ export type ChainTransaction = {
   /** Transaction hash. */
   hash: string
   /** Logs emitted by this transaction. */
-  logs: readonly Log_[]
+  logs: readonly ChainLog[]
   /** Block number containing this transaction. */
   blockNumber: number
   /** Unix timestamp of the block. */
@@ -206,7 +209,7 @@ export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
   /** Lane configuration for this request. */
   lane: Lane<V>
   message: CCIPMessage<V>
-  log: Log_
+  log: ChainLog
   /** Transaction that emitted the request. */
   tx: Omit<ChainTransaction, 'logs'>
 
@@ -263,7 +266,7 @@ export type CCIPVerifications =
       /** The commit report data. */
       report: CommitReport
       /** Log event from the commit. */
-      log: Log_
+      log: ChainLog
     }
   | {
       /** Policy for this request */
@@ -373,7 +376,7 @@ export interface CCIPExecution {
   /** Execution receipt data. */
   receipt: ExecutionReceipt
   /** Log event from the execution. */
-  log: Log_
+  log: ChainLog
   /** Unix timestamp of the execution. */
   timestamp: number
 }

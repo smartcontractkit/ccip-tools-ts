@@ -29,12 +29,12 @@ import { supportedChains } from '../supported-chains.ts'
 import {
   type CCIPExecution,
   type CCIPRequest,
+  type ChainLog,
   type ChainTransaction,
   type CommitReport,
   type ExecutionInput,
   type ExecutionReceipt,
   type Lane,
-  type Log_,
   type NetworkInfo,
   type WithLogger,
   CCIPVersion,
@@ -307,13 +307,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const compositeHash = `${address.toRawString()}:${tx.lt}:${tx.hash().toString('hex')}`
     const res = {
       hash: compositeHash,
-      logs: [] as Log_[],
+      logs: [] as ChainLog[],
       blockNumber: Number(tx.lt), // Note: This is lt (logical time), not block seqno
       timestamp: tx.now,
       from: address.toRawString(),
       tx,
     }
-    const logs: Log_[] = []
+    const logs: ChainLog[] = []
     for (const [index, msg] of tx.outMessages) {
       if (msg.info.type !== 'external-out') continue
       const topics = []
@@ -349,7 +349,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param opts - Log filter options (startBlock/endBlock are interpreted as lt values)
    * @throws {@link CCIPTopicsInvalidError} if topics format is invalid
    */
-  async *getLogs(opts: LogFilter): AsyncIterableIterator<Log_> {
+  async *getLogs(opts: LogFilter): AsyncIterableIterator<ChainLog> {
     let topics
     if (opts.topics?.length) {
       if (!opts.topics.every((topic) => typeof topic === 'string'))

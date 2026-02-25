@@ -19,8 +19,8 @@ import {
   type CCIPMessage,
   type CCIPRequest,
   type CCIPVersion,
+  type ChainLog,
   type ChainTransaction,
-  type Log_,
   type MessageInput,
   ChainFamily,
 } from './types.ts'
@@ -180,7 +180,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
   // try bytearray decoding on each supported chain
   for (const chain of Object.values(supportedChains)) {
     try {
-      const decoded = chain.decodeMessage({ data } as unknown as Log_)
+      const decoded = chain.decodeMessage({ data } as unknown as ChainLog)
       if (decoded) return decoded
     } catch (_) {
       // continue

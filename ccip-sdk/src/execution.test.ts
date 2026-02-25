@@ -14,11 +14,11 @@ import {
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
+  type ChainLog,
   type ChainTransaction,
   type CommitReport,
   type ExecutionState,
   type Lane,
-  type Log_,
   CCIPVersion,
   ChainFamily,
 } from './types.ts'
@@ -28,7 +28,7 @@ import { networkInfo } from './utils.ts'
 class MockChain extends Chain {
   static family = ChainFamily.EVM
   private mockTypeAndVersion: string
-  private mockLogs: Log_[] = []
+  private mockLogs: ChainLog[] = []
   private mockBlockTimestamp = 1700000000
   private mockRouterForOnRamp: Map<string, string> = new Map()
   private mockOffRampsForRouter: Map<string, string[]> = new Map()
@@ -39,7 +39,7 @@ class MockChain extends Chain {
     this.mockTypeAndVersion = typeAndVersion
   }
 
-  setLogs(logs: Log_[]) {
+  setLogs(logs: ChainLog[]) {
     this.mockLogs = logs
   }
 
@@ -89,7 +89,7 @@ class MockChain extends Chain {
     address?: string
     topics?: string[] | string[][]
     page?: number
-  }): AsyncIterableIterator<Log_> {
+  }): AsyncIterableIterator<ChainLog> {
     for (const log of this.mockLogs) {
       // Filter by address if specified
       if (opts.address && log.address !== opts.address) {
@@ -192,11 +192,11 @@ class MockChain extends Chain {
     return Promise.reject(new Error('not implemented'))
   }
 
-  static decodeMessage(_log: Log_): CCIPMessage | null {
+  static decodeMessage(_log: ChainLog): CCIPMessage | null {
     return null
   }
 
-  static decodeReceipt(_log: Log_) {
+  static decodeReceipt(_log: ChainLog) {
     const iface = new Interface(OffRamp_1_6_ABI)
     try {
       const parsed = iface.parseLog({

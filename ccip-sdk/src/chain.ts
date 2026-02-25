@@ -35,12 +35,12 @@ import {
   type CCIPVerifications,
   type CCIPVersion,
   type ChainFamily,
+  type ChainLog,
   type ChainTransaction,
   type CommitReport,
   type ExecutionInput,
   type ExecutionReceipt,
   type Lane,
-  type Log_,
   type Logger,
   type MessageInput,
   type NetworkInfo,
@@ -502,7 +502,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPLogsWatchRequiresStartError} if watch mode is used without startBlock or startTime
    * @throws {@link CCIPLogsAddressRequiredError} if address is required but not provided (chain-specific)
    */
-  abstract getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
+  abstract getLogs(opts: LogFilter): AsyncIterableIterator<ChainLog>
 
   /**
    * Fetch all CCIP requests in a transaction.
@@ -1410,7 +1410,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * }
    * ```
    */
-  decodeMessage(log: Pick<Log_, 'data'>): CCIPMessage | undefined
+  decodeMessage(log: Pick<ChainLog, 'data'>): CCIPMessage | undefined
   /**
    * Try to decode an extraArgs array serialized for this chain family.
    *
@@ -1466,7 +1466,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * }
    * ```
    */
-  decodeCommits(log: Pick<Log_, 'data'>, lane?: Lane): CommitReport[] | undefined
+  decodeCommits(log: Pick<ChainLog, 'data'>, lane?: Lane): CommitReport[] | undefined
   /**
    * Decode a receipt (ExecutionStateChanged) event.
    *
@@ -1481,7 +1481,7 @@ export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
    * }
    * ```
    */
-  decodeReceipt(log: Pick<Log_, 'data'>): ExecutionReceipt | undefined
+  decodeReceipt(log: Pick<ChainLog, 'data'>): ExecutionReceipt | undefined
   /**
    * Receive a bytes array and try to decode and normalize it as an address of this chain family.
    *

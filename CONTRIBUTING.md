@@ -320,7 +320,7 @@ export * from './errors/index.ts' // Star export acceptable for errors
 **AsyncIterableIterator** for paginated or streaming results:
 
 ```typescript
-abstract getLogs(opts: LogFilter): AsyncIterableIterator<Log_>
+abstract getLogs(opts: LogFilter): AsyncIterableIterator<ChainLog>
 
 // Consumer uses for-await-of
 for await (const log of chain.getLogs({ startBlock: 1000 })) {

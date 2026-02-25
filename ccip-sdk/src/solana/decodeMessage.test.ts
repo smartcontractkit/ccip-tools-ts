@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import type { CCIPMessage, CCIPVersion, Log_ } from '../types.ts'
+import type { CCIPMessage, CCIPVersion, ChainLog } from '../types.ts'
 import '../index.ts'
 import { SolanaChain } from './index.ts'
 
@@ -13,7 +13,7 @@ describe('SolanaChain.decodeMessage', () => {
     const programData =
       'F01Jt3u5cznZGtnJT7pB3mcIAAAAAAAAyMrU+A3ltcQ2wQK+7fsr7weXFpcww0DBwhR8cOp+BcDfN+OU4sfs49ka2clPukHeZwgAAAAAAAAAAAAAAAAAAFYj5CcDWSru4rkavfS0b24pHEzu18G5iTPcau9cy94HAAAAACAAAAAAAAAAAAAAAAAAAAC9J82rXJEJszkLJbTf99lwkYzFUBUAAAAYHc8Qf8kSAAAAAAAAAAAAAAAAAAEGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAAQEAAACyj5pu4elxk1FJg6M6L9oSK+l+h7GziUa6ZHUBTaWBEyAAAAAAAAAAAAAAAAAAAAAcfUsZbLDHsB10P7xhFqkCN5xyOEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACkWwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFECcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAMNQEigAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOq+HeV/AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
-    const mockLog: Log_ = {
+    const mockLog: ChainLog = {
       data: programData,
       topics: [],
       index: 0,
@@ -68,7 +68,7 @@ describe('SolanaChain.decodeMessage', () => {
   })
 
   it('should throw error for invalid log data', () => {
-    const invalidLog: Log_ = {
+    const invalidLog: ChainLog = {
       data: '0xinvaliddata',
       topics: [],
       index: 0,
@@ -81,7 +81,7 @@ describe('SolanaChain.decodeMessage', () => {
   })
 
   it('should throw error for missing log data', () => {
-    const invalidLog: Log_ = {
+    const invalidLog: ChainLog = {
       data: '',
       topics: [],
       index: 0,

@@ -15,9 +15,9 @@ import { decodeMessage } from '../requests.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
+  type ChainLog,
   type ChainTransaction,
   type ExecutionInput,
-  type Log_,
   type Logger,
   type NetworkInfo,
   type WithLogger,
@@ -498,7 +498,7 @@ export class CCIPAPIClient {
     }
 
     // Build log from API data
-    const log: Log_ = {
+    const log: ChainLog = {
       transactionHash: sendTransactionHash,
       address: raw.onramp,
       data: { message: parseJson(text) },
