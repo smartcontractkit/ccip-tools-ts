@@ -172,10 +172,6 @@ class MockChain extends Chain {
     return Promise.reject(new Error('not implemented'))
   }
 
-  async getOffchainTokenData(_request: CCIPRequest): Promise<any[]> {
-    return []
-  }
-
   override generateUnsignedExecute(_opts: any): Promise<never> {
     return Promise.reject(new Error('not implemented'))
   }

@@ -477,8 +477,6 @@ describe('CCIPAPIClient', () => {
       assert.equal(result.lane.version, CCIPVersion.V1_6) // Default when version not provided
       assert.equal(result.lane.onRamp, getAddress(minimalResponse.onramp))
       assert.equal(result.message.sequenceNumber, 12345n)
-      assert.ok('nonce' in result.message)
-      assert.equal(result.message.nonce, 0n) // nonce is still optional
       assert.ok(result.metadata, 'metadata should be defined')
       assert.equal(result.metadata.receiptTransactionHash, undefined)
     })
