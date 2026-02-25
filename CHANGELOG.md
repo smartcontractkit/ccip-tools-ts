@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: `getOffchainTokenData` now uses CCTPv2 API for USDC transfers; can be called from either `source` or `dest`
+
 ## [0.97.0] - 2026-02-23 - Pre-release
 
 - SDK: v2.0 support:
@@ -14,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Breaking**: rename `generateUnsignedExecuteReport`, `executeReport` to `generateUnsignedExecute`, `execute`
   - **Breaking**: `generateUnsignedExecute`, `execute` receives `input: ExecutionInput` instead of `execReport`
   - **Breaking**: rename `Chain.getCommitReport` to `getValidations`
-  - **Breaking**: deprecate `Chain.getCommitStoreForOffRamp`: needed, available and used internally only in `EVMChain`; `getValidations` (fka `getCommitReport`) now receives `offRamp` address instead of `commitStore`
+  - **Breaking**: deprecate `Chain.getCommitStoreForOffRamp`: needed, available and used internally only in `EVMChain`; `getVerifications` (fka `getCommitReport`) now receives `offRamp` address instead of `commitStore`
 - SDK: **Breaking**: Reduce bundle size by eliminating cross-chain imports
   - Move `DEFAULT_GAS_LIMIT` from `evm/const.ts` to `shared/constants.ts`
   - Move BCS codecs and encoding utils to `shared/bcs-codecs.ts` (shared by Aptos/Sui)
