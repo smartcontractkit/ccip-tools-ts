@@ -216,10 +216,10 @@ Implement all abstract methods from the `Chain` base class.
 - **Contract queries** - `typeAndVersion`, router/ramp getters
 - **Tokens** - `getTokenInfo`, `getSupportedTokens`, `getFeeTokens`, token pool methods
 - **Transaction building** - `generateUnsignedSendMessage`, `generateUnsignedExecute`
-- **Execution** - `sendMessage`, `executeReport`, `getOffchainTokenData`
+- **Execution** - `sendMessage`, `execute`, `getOffchainTokenData`
 
 **Important patterns:**
-- Methods use opts objects (e.g., `SendMessageOpts`, `ExecuteReportOpts`) - see type definitions in `chain.ts`
+- Methods use opts objects (e.g., `SendMessageOpts`, `ExecuteOpts`) - see type definitions in `chain.ts`
 - `getLogs` is an async generator - see Engineering Patterns section
 - Some methods have default implementations that can be overridden
 
@@ -250,7 +250,7 @@ Message hash computation must match the on-chain implementation exactly. Test ag
 
 **File:** `ccip-sdk/src/yourchain/types.ts`
 
-Define your chain-specific types, including the unsigned transaction type for `generateUnsignedSendMessage` and `generateUnsignedExecuteReport`.
+Define your chain-specific types, including the unsigned transaction type for `generateUnsignedSendMessage` and `generateUnsignedExecute`.
 
 **Then update `ccip-sdk/src/chain.ts`:**
 - Add your `UnsignedYourChainTx` to the `UnsignedTx` type mapping

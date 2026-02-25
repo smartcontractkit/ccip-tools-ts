@@ -1,13 +1,13 @@
 ---
 id: manual-exec
-title: 'manualExec'
+title: 'manual-exec'
 description: 'Manually execute pending or failed CCIP messages on the destination chain.'
-sidebar_label: manualExec
+sidebar_label: manual-exec
 sidebar_position: 4
 custom_edit_url: null
 ---
 
-# manualExec
+# manual-exec
 
 <ChainSupport />
 
@@ -16,12 +16,12 @@ Manually execute pending or failed CCIP messages on the destination chain.
 ## Synopsis
 
 ```bash
-ccip-cli manualExec <tx-hash> [options]
+ccip-cli manual-exec <tx-hash> [options]
 ```
 
 ## Description
 
-The `manualExec` command allows you to manually trigger the execution of a CCIP message that is stuck or has failed. It retrieves the original request, calculates the merkle proof, fetches any required offchain data, and submits the execution transaction.
+The `manual-exec` command allows you to manually trigger the execution of a CCIP message that is stuck or has failed. It retrieves the original request, calculates the merkle proof, fetches any required offchain data, and submits the execution transaction.
 
 ## Arguments
 
@@ -76,9 +76,9 @@ See [Configuration](/cli/configuration) for global options (`--rpcs`, `--format`
 
 ## Command Builder
 
-Build your `manualExec` command interactively:
+Build your `manual-exec` command interactively:
 
-<CLIBuilder command="manualExec" />
+<CLIBuilder command="manual-exec" />
 
 ## When to Use
 
@@ -100,7 +100,7 @@ Manual execution is needed when:
 ### Execute a pending message
 
 ```bash
-ccip-cli manualExec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b \
+ccip-cli manual-exec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b \
   --rpc https://eth-sepolia.example.com \
   --rpc https://arb-sepolia.example.com \
   --wallet ledger
@@ -109,7 +109,7 @@ ccip-cli manualExec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce502
 ### Override gas limit
 
 ```bash
-ccip-cli manualExec 0xabc123... \
+ccip-cli manual-exec 0xabc123... \
   --gas-limit 500000 \
   --wallet ledger
 ```
@@ -117,7 +117,7 @@ ccip-cli manualExec 0xabc123... \
 ### Estimate and apply gas limit with margin
 
 ```bash
-ccip-cli manualExec 0xabc123... \
+ccip-cli manual-exec 0xabc123... \
   --estimate-gas-limit 15 \
   --wallet ledger
 ```
@@ -127,7 +127,7 @@ ccip-cli manualExec 0xabc123... \
 For large messages on Solana:
 
 ```bash
-ccip-cli manualExec 0xabc123... \
+ccip-cli manual-exec 0xabc123... \
   --wallet ledger \
   --gas-limit 500000 \
   --force-buffer \
@@ -139,7 +139,7 @@ ccip-cli manualExec 0xabc123... \
 For Sui destinations that require receiver object IDs:
 
 ```bash
-ccip-cli manualExec 0xabc123... \
+ccip-cli manual-exec 0xabc123... \
   --wallet ledger \
   --receiver-object-ids 0xabc... 0xdef...
 ```
@@ -179,5 +179,5 @@ After successful execution, buffers auto-clear. Lookup tables require a grace pe
 Use in scripts:
 
 ```bash
-ccip-cli manualExec $TX_HASH --wallet ledger --format json || exit $?
+ccip-cli manual-exec $TX_HASH --wallet ledger --format json || exit $?
 ```

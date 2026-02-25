@@ -8,6 +8,10 @@
     "type": "git",
     "url": "git+https://github.com/smartcontractkit/ccip-tools-ts.git"
   },
+  "homepage": "https://docs.chain.link/ccip/tools/sdk/",
+  "bugs": {
+    "url": "https://github.com/smartcontractkit/ccip-tools-ts/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "exports": {

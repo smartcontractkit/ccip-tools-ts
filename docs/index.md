@@ -20,8 +20,8 @@ This tool is provided under an MIT license and is for convenience and illustrati
 |------|------|---------|
 | Track message status | CLI | `ccip-cli show 0xTxHash` |
 | Send cross-chain message | SDK/CLI | Programmatic or command-line |
-| Manually execute stuck message | CLI | `ccip-cli manualExec 0xTxHash` |
-| Check supported tokens | CLI | `ccip-cli getSupportedTokens chain router` |
+| Manually execute stuck message | CLI | `ccip-cli manual-exec 0xTxHash` |
+| Check supported tokens | CLI | `ccip-cli get-supported-tokens chain router` |
 | Query lane latency | CLI/SDK | `ccip-cli lane-latency eth-mainnet arb-mainnet` |
 | Integrate CCIP in your dApp | SDK | Import and use in your code |
 
@@ -85,8 +85,8 @@ console.log('Fee:', fee.toString())
 │  │                          │        │                          │  │
 │  │   @chainlink/ccip-sdk    │◀───────│   @chainlink/ccip-cli    │  │
 │  │                          │        │                          │  │
-│  │  • Chain abstraction     │        │  • show, send, manualExec│  │
-│  │  • Message tracking      │        │  • parse, getSupportedTokens│
+│  │  • Chain abstraction     │        │  • show, send, manual-exec│ │
+│  │  • Message tracking      │        │  • parse, get-supported-tokens│
 │  │  • Fee estimation        │        │  • lane-latency          │  │
 │  │  • Transaction building  │        │  • RPC & wallet mgmt     │  │
 │  │  • API client            │        │  • Output formatting     │  │

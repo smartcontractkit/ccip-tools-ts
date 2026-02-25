@@ -7,13 +7,13 @@
  * @example
  * ```bash
  * # Execute a stuck message
- * ccip-cli manualExec 0xSourceTxHash... --wallet $PRIVATE_KEY
+ * ccip-cli manual-exec 0xSourceTxHash... --wallet $PRIVATE_KEY
  *
  * # Execute with custom gas limit
- * ccip-cli manualExec 0xSourceTxHash... --gas-limit 500000
+ * ccip-cli manual-exec 0xSourceTxHash... --gas-limit 500000
  *
  * # Execute all messages in sender queue
- * ccip-cli manualExec 0xSourceTxHash... --sender-queue
+ * ccip-cli manual-exec 0xSourceTxHash... --sender-queue
  * ```
  *
  * @packageDocumentation

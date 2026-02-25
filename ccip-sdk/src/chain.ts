@@ -939,7 +939,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```typescript
    * const unsignedTx = await dest.generateUnsignedExecute({
    *   offRamp: offRampAddress,
-   *   execReport,
+   *   input,
    *   payer: walletAddress,
    * })
    * // Sign and send with external wallet
@@ -982,7 +982,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * May be specialized by some subclasses.
    *
    * @param opts - getVerifications options
-   * @returns CCIPCommit info
+   * @returns CCIPVerifications
    *
    * @throws {@link CCIPCommitNotFoundError} if no commit found for the request (transient)
    *

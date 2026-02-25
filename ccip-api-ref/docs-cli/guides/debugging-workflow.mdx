@@ -16,11 +16,11 @@ Debug failed or stuck CCIP messages using a three-step workflow: track the messa
 
 ## Workflow
 
-| Step        | Command               | Purpose                                    |
-| ----------- | --------------------- | ------------------------------------------ |
-| 1. Track    | `ccip-cli show`       | Check message status and identify failures |
-| 2. Diagnose | `ccip-cli parse`      | Decode error data                          |
-| 3. Execute  | `ccip-cli manualExec` | Retry with corrected parameters            |
+| Step        | Command                | Purpose                                    |
+| ----------- | ---------------------- | ------------------------------------------ |
+| 1. Track    | `ccip-cli show`        | Check message status and identify failures |
+| 2. Diagnose | `ccip-cli parse`       | Decode error data                          |
+| 3. Execute  | `ccip-cli manual-exec` | Retry with corrected parameters            |
 
 ## Prerequisites
 
@@ -142,7 +142,7 @@ Cause: Receiver contract exceeded gas limit.
 Fix: Increase gas limit in manual execution:
 
 ```bash
-ccip-cli manualExec 0xTxHash --gas-limit 500000 --wallet ledger
+ccip-cli manual-exec 0xTxHash --gas-limit 500000 --wallet ledger
 ```
 
 </TabItem>
@@ -159,7 +159,7 @@ Cause: Token not registered on this lane.
 
 Fix:
 
-1. Verify token registration with `getSupportedTokens`
+1. Verify token registration with `get-supported-tokens`
 2. Check token pool liquidity
 3. Use a supported token
 
@@ -190,7 +190,7 @@ Cause: CCIP enforces sender nonce ordering. An earlier message from the same sen
 Fix: Execute messages in order:
 
 ```bash
-ccip-cli manualExec 0xFirstFailedTxHash \
+ccip-cli manual-exec 0xFirstFailedTxHash \
   --sender-queue \
   --exec-failed \
   --wallet ledger
@@ -206,13 +206,13 @@ Execute the message manually after identifying and addressing the failure cause.
 ### Basic execution
 
 ```bash
-ccip-cli manualExec 0xYourTxHash --wallet ledger
+ccip-cli manual-exec 0xYourTxHash --wallet ledger
 ```
 
 ### With increased gas limit
 
 ```bash
-ccip-cli manualExec 0xYourTxHash \
+ccip-cli manual-exec 0xYourTxHash \
   --gas-limit 500000 \
   --wallet ledger
 ```
@@ -222,7 +222,7 @@ ccip-cli manualExec 0xYourTxHash \
 Estimate gas and add a percentage margin:
 
 ```bash
-ccip-cli manualExec 0xYourTxHash \
+ccip-cli manual-exec 0xYourTxHash \
   --estimate-gas-limit 20 \
   --wallet ledger
 ```
@@ -232,7 +232,7 @@ ccip-cli manualExec 0xYourTxHash \
 Process all pending messages from a sender in order:
 
 ```bash
-ccip-cli manualExec 0xFirstTxHash \
+ccip-cli manual-exec 0xFirstTxHash \
   --sender-queue \
   --exec-failed \
   --wallet ledger
@@ -262,7 +262,7 @@ ccip-cli manualExec 0xFirstTxHash \
 For large messages, use buffer and lookup table options:
 
 ```bash
-ccip-cli manualExec 0xTxHash \
+ccip-cli manual-exec 0xTxHash \
   --force-buffer \
   --force-lookup-table \
   --wallet ledger
@@ -273,7 +273,7 @@ ccip-cli manualExec 0xTxHash \
 Use `--compute-units` instead of `--gas-limit`:
 
 ```bash
-ccip-cli manualExec 0xTxHash \
+ccip-cli manual-exec 0xTxHash \
   --compute-units 500000 \
   --wallet ledger
 ```
@@ -281,7 +281,7 @@ ccip-cli manualExec 0xTxHash \
 **Cleanup after failed attempts:**
 
 ```bash
-ccip-cli manualExec 0xTxHash \
+ccip-cli manual-exec 0xTxHash \
   --clear-leftover-accounts \
   --wallet ledger
 ```
@@ -303,7 +303,7 @@ ccip-cli parse 0x08c379a0000000...
 # Output: Error: "Insufficient gas for receiver"
 
 # Retry with higher gas limit
-ccip-cli manualExec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b \
+ccip-cli manual-exec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b \
   --gas-limit 500000 \
   --wallet ledger
 
@@ -326,5 +326,5 @@ ccip-cli show 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b
 
 - [show](/cli/show) - Command reference
 - [parse](/cli/parse) - Command reference
-- [manualExec](/cli/manual-exec) - Command reference
+- [manual-exec](/cli/manual-exec) - Command reference
 - [Configuration](/cli/configuration) - RPC and wallet setup

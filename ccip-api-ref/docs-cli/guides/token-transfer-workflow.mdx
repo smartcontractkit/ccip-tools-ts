@@ -18,7 +18,7 @@ Transfer tokens cross-chain using a four-step workflow: verify token support, es
 
 | Step        | Command                  | Purpose                         |
 | ----------- | ------------------------ | ------------------------------- |
-| 1. Verify   | `getSupportedTokens`     | Check token support on the lane |
+| 1. Verify   | `get-supported-tokens`   | Check token support on the lane |
 | 2. Estimate | `send --only-get-fee`    | Get fee quote                   |
 | 3. Send     | `send --transfer-tokens` | Execute transfer                |
 | 4. Track    | `show`                   | Monitor execution               |
@@ -44,7 +44,7 @@ Required balances on source chain:
 Check that your token is supported on the lane:
 
 ```bash
-ccip-cli getSupportedTokens \
+ccip-cli get-supported-tokens \
   -n ethereum-testnet-sepolia \
   -a 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59
 ```
@@ -77,7 +77,7 @@ Verify:
 Query a specific token directly:
 
 ```bash
-ccip-cli getSupportedTokens \
+ccip-cli get-supported-tokens \
   -n ethereum-testnet-sepolia \
   -a 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
   -t 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05
@@ -215,7 +215,7 @@ ccip-cli send \
 
 ```bash
 # Verify token support
-ccip-cli getSupportedTokens \
+ccip-cli get-supported-tokens \
   -n ethereum-testnet-sepolia \
   -a 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
   -t 0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05
@@ -297,12 +297,12 @@ ccip-cli send \
 
 For failed transfers, see [Debugging Failed Messages](/cli/guides/debugging-workflow).
 
-| Issue                  | Cause                 | Solution                            |
-| ---------------------- | --------------------- | ----------------------------------- |
-| Transfer stuck         | Rate limiter depleted | Wait for refill or reduce amount    |
-| Execution failed       | Insufficient gas      | Retry with `manualExec --gas-limit` |
-| Token not supported    | Token not registered  | Use a supported token               |
-| Insufficient allowance | Approval failed       | Run send again or approve manually  |
+| Issue                  | Cause                 | Solution                             |
+| ---------------------- | --------------------- | ------------------------------------ |
+| Transfer stuck         | Rate limiter depleted | Wait for refill or reduce amount     |
+| Execution failed       | Insufficient gas      | Retry with `manual-exec --gas-limit` |
+| Token not supported    | Token not registered  | Use a supported token                |
+| Insufficient allowance | Approval failed       | Run send again or approve manually   |
 
 ## Token Amount Format
 
@@ -330,7 +330,7 @@ Short form:
 
 - [Transfer Data](/cli/guides/data-transfer-workflow) - Transfer data only
 - [Transfer Tokens and Data](/cli/guides/tokens-and-data-workflow) - Transfer both
-- [getSupportedTokens](/cli/supported-tokens) - Command reference
+- [get-supported-tokens](/cli/supported-tokens) - Command reference
 - [send](/cli/send) - Command reference
 - [show](/cli/show) - Command reference
 - [Configuration](/cli/configuration) - RPC and wallet setup
