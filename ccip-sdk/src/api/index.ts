@@ -6,7 +6,7 @@ import {
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
   CCIPMessageNotFoundInTxError,
-  CCIPNotImplementedError,
+  CCIPMessageNotVerifiedYetError,
   CCIPTimeoutError,
   CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
@@ -19,6 +19,7 @@ import {
   type ExecutionInput,
   type Logger,
   type NetworkInfo,
+  type OffchainTokenData,
   type WithLogger,
   CCIPVersion,
   ChainFamily,
@@ -29,11 +30,13 @@ import { bigIntReviver, parseJson } from '../utils.ts'
 import type {
   APIErrorResponse,
   LaneLatencyResponse,
+  RawExecutionInputsResult,
   RawLaneLatencyResponse,
   RawMessageResponse,
   RawMessagesResponse,
   RawNetworkInfo,
 } from './types.ts'
+import { calculateManualExecProof } from '../execution.ts'
 
 export type { APICCIPRequestMetadata, APIErrorResponse, LaneLatencyResponse } from './types.ts'
 
@@ -148,6 +151,20 @@ export class CCIPAPIClient {
     this.logger = ctx?.logger ?? console
     this.timeoutMs = ctx?.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this._fetch = ctx?.fetch ?? globalThis.fetch.bind(globalThis)
+
+    this.getMessageById = memoize(this.getMessageById.bind(this), {
+      async: true,
+      expires: 4_000,
+      maxArgs: 1,
+      maxSize: 100,
+    })
+
+    this.getExecutionInput = memoize(this.getExecutionInput.bind(this), {
+      async: true,
+      expires: 4_000,
+      maxArgs: 1,
+      maxSize: 100,
+    })
   }
 
   /**
@@ -439,13 +456,94 @@ export class CCIPAPIClient {
    * @param messageId - The ID of the message to fetch the execution input for.
    * @returns Either `{ encodedMessage, verifications }` or `{ message, offchainTokenData, ...proof }`, and offRamp
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  getExecutionInput(messageId: string): Promise<ExecutionInput & { offRamp: string }> {
-    throw new CCIPNotImplementedError(`CCIPAPIClient.getExecutionInput`)
-    // TODO: fetch (memoized) request with metadata from `getMessageById`
-    // TODO: if request doesn't contain everything needed (e.g. <v2.0), fetch `batch` and
-    // `offchainTokenData` from `/execution-input`
-    // TODO: if <v2.0, `calculateManualExecProof` and return `offRamp` and `input`
+  async getExecutionInput(messageId: string): Promise<ExecutionInput & { offRamp: string }> {
+    const request = await this.getMessageById(messageId)
+
+    const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}/execution-inputs`
+
+    this.logger.debug(`CCIPAPIClient: GET ${url}`)
+
+    const response = await this._fetchWithTimeout(url, 'getExecutionInput')
+    if (!response.ok) {
+      // Try to parse structured error response from API
+      let apiError: APIErrorResponse | undefined
+      try {
+        apiError = parseJson<APIErrorResponse>(await response.text())
+      } catch {
+        // Response body not JSON, use HTTP status only
+      }
+
+      // 404 - Message not found
+      if (response.status === HttpStatus.NOT_FOUND) {
+        throw new CCIPMessageIdNotFoundError(messageId, {
+          context: apiError
+            ? {
+                apiErrorCode: apiError.error,
+                apiErrorMessage: apiError.message,
+              }
+            : undefined,
+        })
+      }
+
+      // Generic HTTP error for other cases
+      throw new CCIPHttpError(response.status, response.statusText, {
+        context: apiError
+          ? {
+              apiErrorCode: apiError.error,
+              apiErrorMessage: apiError.message,
+            }
+          : undefined,
+      })
+    }
+
+    const raw = JSON.parse(await response.text(), bigIntReviver) as RawExecutionInputsResult
+    this.logger.debug('getExecutionInput raw response:', raw)
+
+    const offRamp = raw.offramp
+    if ('encodedMessage' in raw) {
+      // v2 messages
+      if (!raw.verificationComplete) throw new CCIPMessageNotVerifiedYetError(messageId)
+      return {
+        offRamp,
+        encodedMessage: raw.encodedMessage,
+        verifications: raw.ccvData.map((ccvData, i) => ({
+          ccvData,
+          destAddress: raw.verifierAddresses[i]!,
+        })),
+      }
+    }
+
+    const rawMessage = raw.messagesBatch.find((message) => message.messageId === messageId)!
+    const messagesInBatch = raw.messagesBatch.map(decodeMessage)
+    const proof = calculateManualExecProof(
+      messagesInBatch,
+      request.lane,
+      messageId,
+      undefined,
+      this,
+    )
+    const offchainTokenData = new Array(rawMessage.tokenAmounts.length) as OffchainTokenData[]
+    if (rawMessage.usdcData && rawMessage.usdcData.status === 'complete')
+      offchainTokenData[0] = {
+        _tag: 'usdc',
+        message: rawMessage.usdcData.message_bytes_hex!,
+        attestation: rawMessage.usdcData.attestation!,
+      }
+    else if (
+      rawMessage.lbtcData &&
+      rawMessage.lbtcData.status === 'NOTARIZATION_STATUS_SESSION_APPROVED'
+    )
+      offchainTokenData[0] = {
+        _tag: 'lbtc',
+        message_hash: rawMessage.lbtcData.message_hash!,
+        attestation: rawMessage.lbtcData.attestation!,
+      }
+    return {
+      offRamp,
+      message: request.message,
+      offchainTokenData,
+      ...proof,
+    } as ExecutionInput & { offRamp: string }
   }
 
   /**

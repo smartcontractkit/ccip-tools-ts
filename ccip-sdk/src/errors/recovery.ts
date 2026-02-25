@@ -129,7 +129,6 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   LBTC_ATTESTATION_NOT_APPROVED: 'LBTC attestation not yet approved. Wait for notarization.',
   CCTP_DECODE_FAILED:
     'Ensure the transaction contains a valid CCTP MessageSent event. Verify this is a USDC transfer.',
-  CCTP_MULTIPLE_EVENTS: 'Multiple CCTP events found. Expected only one per transaction.',
 
   LOG_DATA_INVALID: 'Ensure the log data is a valid hex string from a transaction receipt.',
   LOG_DATA_MISSING: 'Log data is missing or not a string.',
