@@ -55,7 +55,6 @@ import {
   type Lane,
   type Log_,
   type NetworkInfo,
-  type OffchainTokenData,
   type WithLogger,
   ChainFamily,
 } from '../types.ts'
@@ -726,12 +725,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   /** {@inheritDoc Chain.sendMessage} */
   async sendMessage(_opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.sendMessage'))
-  }
-
-  /** {@inheritDoc Chain.getOffchainTokenData} */
-  getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
-    // default offchain token data
-    return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
   /** {@inheritDoc Chain.generateUnsignedExecute} */

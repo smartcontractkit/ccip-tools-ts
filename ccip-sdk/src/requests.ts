@@ -78,7 +78,6 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
     data_.sourceNetworkInfo?.chainSelector
   if (!sourceChainSelector) throw new CCIPMessageInvalidError(data)
   data_.sourceChainSelector ??= sourceChainSelector
-  data_.nonce ??= 0n
   const sourceFamily = networkInfo(sourceChainSelector).family
 
   const destChainSelector =

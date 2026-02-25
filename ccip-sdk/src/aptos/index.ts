@@ -63,7 +63,6 @@ import {
   type Lane,
   type Log_,
   type NetworkInfo,
-  type OffchainTokenData,
   type WithLogger,
   ChainFamily,
 } from '../types.ts'
@@ -551,12 +550,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
 
     // Return the CCIPRequest by fetching it
     return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]!
-  }
-
-  /** {@inheritDoc Chain.getOffchainTokenData} */
-  getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
-    // default offchain token data
-    return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
   /**

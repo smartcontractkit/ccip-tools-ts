@@ -36,7 +36,6 @@ import {
   type Lane,
   type Log_,
   type NetworkInfo,
-  type OffchainTokenData,
   type WithLogger,
   CCIPVersion,
   ChainFamily,
@@ -1097,11 +1096,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
 
     throw new CCIPTransactionNotFoundError(seqno.toString())
-  }
-
-  /** {@inheritDoc Chain.getOffchainTokenData} */
-  getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
-    return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
   /**

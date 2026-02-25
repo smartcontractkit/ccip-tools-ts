@@ -1,29 +1,10 @@
-import { type BN, BorshCoder } from '@coral-xyz/anchor'
-import type { PublicKey } from '@solana/web3.js'
+import { BorshCoder } from '@coral-xyz/anchor'
 import { hexlify } from 'ethers'
 
-import {
-  CCIPCctpDecodeError,
-  CCIPCctpMultipleEventsError,
-  CCIPDataFormatUnsupportedError,
-} from '../errors/index.ts'
-import { getUsdcAttestation } from '../offchain.ts'
-import type { CCIPMessage, CCIPRequest, OffchainTokenData, WithLogger } from '../types.ts'
-import { bytesToBuffer, networkInfo, util } from '../utils.ts'
+import type { OffchainTokenData } from '../types.ts'
+import { bytesToBuffer } from '../utils.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
-import type { SolanaLog, SolanaTransaction } from './index.ts'
-import { hexDiscriminator } from './utils.ts'
-
-interface CcipCctpMessageSentEvent {
-  originalSender: PublicKey
-  remoteChainSelector: BN
-  msgTotalNonce: BN
-  eventAddress: PublicKey
-  sourceDomain: number
-  cctpNonce: BN
-  messageSentBytes: Uint8Array
-}
 
 interface CcipCctpMessageAndAttestation {
   message: {
@@ -37,84 +18,6 @@ const cctpTokenPoolCoder = new BorshCoder({
   events: [...BASE_TOKEN_POOL.events, ...CCTP_TOKEN_POOL.events],
   errors: [...BASE_TOKEN_POOL.errors, ...CCTP_TOKEN_POOL.errors],
 })
-
-/**
- * Analyzes a Solana transaction to extract CcipCctpMessageSentEvent, fetch Circle attestation,
- * and encode the data in the format required by the destination chain.
- * @param request - CCIP request containing transaction data and chain routing info.
- * @param logger - Logger instance for logging messages.
- * @returns Array of encoded offchain token data (only one supported for Solana right now).
- * @throws Error if transaction hash is missing or CcipCctpMessageSentEvent parsing fails.
- */
-export async function fetchSolanaOffchainTokenData(
-  request: Pick<CCIPRequest, 'tx' | 'lane'> & {
-    message: CCIPMessage
-    log: Pick<CCIPRequest['log'], 'topics' | 'index' | 'transactionHash' | 'address'>
-  },
-  { logger = console }: WithLogger = {},
-): Promise<OffchainTokenData[]> {
-  if (!request.message.tokenAmounts.length) {
-    return []
-  }
-
-  if (request.message.tokenAmounts.length > 1) {
-    throw new CCIPDataFormatUnsupportedError(
-      `Expected at most 1 token transfer, found ${request.message.tokenAmounts.length}`,
-    )
-  }
-
-  const { networkType } = networkInfo(request.lane.sourceChainSelector)
-  const txSignature = request.log.transactionHash
-
-  // Parse Solana transaction to find CCTP event
-  const tx = request.tx as SolanaTransaction
-  const log = request.log as SolanaLog
-  const logMessages = tx.tx.meta!.logMessages!
-  // there may have multiple ccipSend calls in same tx;
-  // use `invoke [level]` to filter only logs inside this call
-  const requestInvokeIdx = logMessages.findLastIndex(
-    (l, i) => i < log.index && l === `Program ${request.log.address} invoke [${log.level}]`,
-  )
-  const cctpEvents = []
-  for (const l of tx.logs) {
-    if (requestInvokeIdx >= l.index || l.index >= log.index) continue
-    if (l.topics[0] !== hexDiscriminator('CcipCctpMessageSentEvent')) continue
-    const decoded = cctpTokenPoolCoder.events.decode(l.data)
-    if (!decoded) throw new CCIPCctpDecodeError(util.inspect(l))
-    cctpEvents.push(decoded.data as unknown as CcipCctpMessageSentEvent)
-  }
-  const offchainTokenData: OffchainTokenData[] = request.message.tokenAmounts.map(() => undefined)
-
-  // If no CcipCctpMessageSentEvent found, return defaults so we don't block execution
-  if (cctpEvents.length === 0) {
-    logger.debug('No USDC/CCTP events found')
-    return offchainTokenData
-  }
-
-  // Currently, we only support ONE token per transfer
-  if (cctpEvents.length > 1) {
-    throw new CCIPCctpMultipleEventsError(cctpEvents.length, txSignature)
-  }
-
-  // NOTE: assuming USDC token is the first (and only) token in the CCIP message, we will process the CCTP event.
-  // If later multi-token transfers support is added, we need to add more info in order to match each token with it's event and offchainTokenData.
-  const cctpEvent = cctpEvents[0]
-  if (cctpEvent) {
-    const message = hexlify(cctpEvent.messageSentBytes)
-    try {
-      // Extract message bytes to fetch circle's attestation and then encode offchainTokenData.
-      const attestation = await getUsdcAttestation(message, networkType)
-
-      offchainTokenData[0] = { _tag: 'usdc', message, attestation }
-    } catch (error) {
-      logger.warn(`❌ Solana CCTP: Failed to fetch attestation for ${txSignature}:`, message, error)
-    }
-  }
-
-  logger.debug('Got Solana offchain token data', offchainTokenData)
-
-  return offchainTokenData
-}
 
 /**
  * Encodes CCTP message and attestation

@@ -22,6 +22,7 @@ import type {
   SuiExtraArgsV1,
 } from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
+import { getOffchainTokenData } from './offchain.ts'
 import { getMessagesInTx } from './requests.ts'
 import { DEFAULT_GAS_LIMIT } from './shared/constants.ts'
 import type { UnsignedSolanaTx } from './solana/types.ts'
@@ -910,12 +911,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   ): Promise<CCIPRequest>
   /**
    * Fetch supported offchain token data for a request from this network.
+   * It logs but doesn't throw in case it can't fetch attestation, as the transfers may not be
+   * from the expected attestation providers. It returns default offchainData=undefined for those.
    *
-   * @param request - CCIP request, with tx, logs and message
+   * @param request - CCIP request, with tx.hash and message
    * @returns Promise resolving to array with one offchain token data for each token transfer
-   *
-   * @throws {@link CCIPUsdcAttestationError} if USDC attestation fetch fails (transient)
-   * @throws {@link CCIPLbtcAttestationError} if LBTC attestation fetch fails (transient)
    *
    * @example Get offchain token data for USDC transfer
    * ```typescript
@@ -923,7 +923,12 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * // Use in execution report
    * ```
    */
-  abstract getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]>
+  async getOffchainTokenData(
+    request: PickDeep<CCIPRequest, 'tx.hash' | `message`>,
+  ): Promise<OffchainTokenData[]> {
+    return getOffchainTokenData(request, this)
+  }
+
   /**
    * Generate unsigned tx to manuallyExecute a message.
    *

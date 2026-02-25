@@ -85,7 +85,6 @@ import {
   type Log_,
   type MergeArrayElements,
   type NetworkInfo,
-  type OffchainTokenData,
   type WithLogger,
   CCIPVersion,
   ChainFamily,
@@ -113,7 +112,6 @@ import { IDL as CCIP_CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import { getTransactionsForAddress } from './logs.ts'
-import { fetchSolanaOffchainTokenData } from './offchain.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
@@ -1105,11 +1103,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     const hash = await simulateAndSendTxs(this, opts.wallet, unsigned)
     return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]!
-  }
-
-  /** {@inheritDoc Chain.getOffchainTokenData} */
-  async getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
-    return fetchSolanaOffchainTokenData(request, this)
   }
 
   /**
