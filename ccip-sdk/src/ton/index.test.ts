@@ -6,8 +6,9 @@ import type { TonClient } from '@ton/ton'
 
 import { type ExecutionInput, ChainFamily } from '../types.ts'
 import { TONChain } from './index.ts'
-import { type CCIPMessage_V1_6_TON, type TONWallet, MANUALLY_EXECUTE_OPCODE } from './types.ts'
+import { type TONWallet, MANUALLY_EXECUTE_OPCODE } from './types.ts'
 import { crc32 } from './utils.ts'
+import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import { networkInfo } from '../utils.ts'
 
 describe('TON index unit tests', () => {
@@ -19,7 +20,7 @@ describe('TON index unit tests', () => {
     '0:9f2e995aebceb97ae094dbe4cf973cbc8a402b4f0ac5287a00be8aca042d51b9'
 
   // Shared test data
-  const baseExecReport: ExecutionInput<CCIPMessage_V1_6_TON> = {
+  const baseExecReport: ExecutionInput<CCIPMessage_V1_6_EVM> = {
     message: {
       messageId: '0x' + '0'.repeat(63) + '1',
       sourceChainSelector: CHAINSEL_EVM_TEST_90000001,
