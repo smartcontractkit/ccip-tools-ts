@@ -182,3 +182,36 @@ export type APICCIPRequestMetadata = {
   /** Destination network metadata. */
   destNetworkInfo: NetworkInfo
 }
+
+// ============================================================================
+// GET /v2/messages/${messageId}/execution-inputs search endpoint types
+// ============================================================================
+
+/** Raw API response from GET /v2/messages/:messageId/execution-inputs */
+export type RawExecutionInputsResult = {
+  offramp: string
+} & (
+  | {
+      messagesBatch: {
+        [key: string]: unknown
+        messageId: string
+        tokenAmounts: { token: string; amount: string }[]
+        usdcData?: {
+          status: 'pending_confirmations' | 'complete'
+          attestation?: string
+          message_bytes_hex?: string
+        }
+        lbtcData?: {
+          status: 'NOTARIZATION_STATUS_SESSION_APPROVED' | 'NOTARIZATION_STATUS_SESSION_PENDING'
+          attestation?: string
+          message_hash?: string
+        }
+      }[]
+    }
+  | {
+      encodedMessage: string
+      verificationComplete?: boolean
+      ccvData: string[]
+      verifierAddresses: string[]
+    }
+)

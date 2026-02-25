@@ -1490,15 +1490,24 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   ): Promise<CCIPVerifications> {
     const { offRamp, request } = opts
     if (request.lane.version >= CCIPVersion.V2_0) {
-      const message = request.message as CCIPMessage_V2_0
-      if (!message.encodedMessage)
+      let { encodedMessage } = request.message as CCIPMessage_V2_0
+      if (!encodedMessage && this.apiClient) {
+        try {
+          // API's `getMessageById` doesn't have `encodedMessage`, but `getExecutionInput` does
+          const input = await this.apiClient.getExecutionInput(request.message.messageId)
+          if ('encodedMessage' in input) encodedMessage = input.encodedMessage
+        } catch {
+          // pass
+        }
+      }
+      if (!encodedMessage)
         throw new CCIPNotImplementedError(`CCIPAPIClient getMessageById v2 encodedMessage`)
       const contract = new Contract(
         offRamp,
         interfaces.OffRamp_v2_0,
         this.provider,
       ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
-      const ccvs = await contract.getCCVsForMessage(message.encodedMessage)
+      const ccvs = await contract.getCCVsForMessage(encodedMessage)
       const [requiredCCVs, optionalCCVs, optionalThreshold] = ccvs.map(
         resultToObject,
       ) as unknown as CleanAddressable<typeof ccvs>
