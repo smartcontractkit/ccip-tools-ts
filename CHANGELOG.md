@@ -7,11 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-02-25 - Major refactoring stable
+## [1.0.0] - 2026-02-26 - Major refactoring stable
 
 - SDK: `getOffchainTokenData` now uses CCTPv2 API for USDC transfers; can be called from either `source` or `dest`
 - SDK: `request.tx` doesn't require all tx `logs` anymore; `Log_` type renamed to `ChainLog`
 - SDK: Fix browser "Illegal invocation" error by binding `globalThis.fetch` in `CCIPAPIClient` constructor
+- CLI: allow passing `--api=<url>` (CCIP-API still can be disabled with `--no-api` or `--api=false`)
 
 ## [0.97.0] - 2026-02-23 - Pre-release
 

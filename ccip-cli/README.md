@@ -112,7 +112,7 @@ don't support large ranges)
 
 **Environment variable prefix:** All CLI options can be set via environment variables using the
 `CCIP_` prefix. For example:
-- `CCIP_NO_API=true` → same as `--no-api`
+- `CCIP_API=false` → same as `--no-api`
 - `CCIP_VERBOSE=true` → same as `--verbose`
 - `CCIP_FORMAT=json` → same as `--format=json`
 
