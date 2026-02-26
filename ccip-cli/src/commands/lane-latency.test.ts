@@ -145,7 +145,7 @@ describe('lane-latency command', () => {
           source: '5009297550715157269',
           dest: '4949039107694359620',
           format: Format.json,
-          noApi: true, // Simulate --no-api flag
+          api: false, // Simulate --no-api flag
         } as Parameters<typeof getLaneLatencyCmd>[1]),
       (err: unknown) =>
         err instanceof CCIPApiClientNotAvailableError &&
@@ -162,27 +162,27 @@ describe('lane-latency command', () => {
       source: '5009297550715157269',
       dest: '4949039107694359620',
       format: Format.json,
-      noApi: false, // Explicit false
+      api: true, // Explicit true
     } as Parameters<typeof getLaneLatencyCmd>[1])
 
     // Verify fetch was called (API was used)
     assert.equal(mockedFetch.mock.calls.length, 1)
   })
 
-  describe('CCIP_NO_API environment variable integration', () => {
-    it('should respect CCIP_NO_API=true environment variable', async () => {
-      const origEnv = process.env.CCIP_NO_API
+  describe('CCIP_API environment variable integration', () => {
+    it('should respect CCIP_API=false environment variable', async () => {
+      const origEnv = process.env.CCIP_API
       try {
-        process.env.CCIP_NO_API = 'true'
+        process.env.CCIP_API = 'false'
 
-        // Simulate yargs .env('CCIP') behavior - yargs converts CCIP_NO_API to noApi
+        // Simulate yargs .env('CCIP') behavior - yargs converts CCIP_API to api
         await assert.rejects(
           async () =>
             await getLaneLatencyCmd(createCtx(), {
               source: '5009297550715157269',
               dest: '4949039107694359620',
               format: Format.json,
-              noApi: process.env.CCIP_NO_API === 'true',
+              api: process.env.CCIP_API !== 'false',
             } as Parameters<typeof getLaneLatencyCmd>[1]),
           (err: unknown) => err instanceof CCIPApiClientNotAvailableError,
         )
@@ -191,9 +191,9 @@ describe('lane-latency command', () => {
         assert.equal(mockedFetch.mock.calls.length, 0)
       } finally {
         if (origEnv === undefined) {
-          delete process.env.CCIP_NO_API
+          delete process.env.CCIP_API
         } else {
-          process.env.CCIP_NO_API = origEnv
+          process.env.CCIP_API = origEnv
         }
       }
     })

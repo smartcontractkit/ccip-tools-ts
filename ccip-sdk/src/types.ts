@@ -8,7 +8,6 @@ import type { CCIPMessage_EVM, CCIPMessage_V1_6_EVM, CCIPMessage_V2_0 } from './
 import type { ExtraArgs } from './extra-args.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
 import type { CCIPMessage_V1_6_Sui } from './sui/types.ts'
-import type { CCIPMessage_V1_6_TON } from './ton/types.ts'
 // v1.6 Base type from EVM contains the intersection of all other CCIPMessage v1.6 types
 export type { CCIPMessage_V1_6 } from './evm/messages.ts'
 
@@ -158,7 +157,7 @@ export interface Lane<V extends CCIPVersion = CCIPVersion> {
 export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends typeof CCIPVersion.V2_0
   ? CCIPMessage_V2_0
   : V extends typeof CCIPVersion.V1_6
-    ? CCIPMessage_V1_6_EVM | CCIPMessage_V1_6_Solana | CCIPMessage_V1_6_Sui | CCIPMessage_V1_6_TON
+    ? CCIPMessage_V1_6_EVM | CCIPMessage_V1_6_Solana | CCIPMessage_V1_6_Sui
     : CCIPMessage_EVM<V>
 
 /**

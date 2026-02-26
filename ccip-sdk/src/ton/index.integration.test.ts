@@ -5,8 +5,8 @@ import { Address } from '@ton/core'
 
 import '../index.ts'
 import { TONChain } from './index.ts'
-import type { CCIPMessage_V1_6_TON } from './types.ts'
 import { crc32 } from './utils.ts'
+import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 
 // CRC32 hex values for TON external message topics
 const CCIP_MESSAGE_SENT_TOPIC = crc32('CCIPMessageSent') // 0xa45d293c
@@ -250,7 +250,7 @@ describe.skip('TON index integration tests', () => {
   })
 
   describe('decodeMessage', () => {
-    let message: CCIPMessage_V1_6_TON | undefined
+    let message: CCIPMessage_V1_6_EVM | undefined
     let ccipTxHash: string | undefined
     let messageLog: any
 

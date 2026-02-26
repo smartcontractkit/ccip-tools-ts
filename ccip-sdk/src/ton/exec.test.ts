@@ -3,13 +3,14 @@ import { describe, it } from 'node:test'
 
 import { generateUnsignedExecuteReport } from './exec.ts'
 import type { ExecutionInput } from '../types.ts'
-import { type CCIPMessage_V1_6_TON, MANUALLY_EXECUTE_OPCODE } from './types.ts'
+import { MANUALLY_EXECUTE_OPCODE } from './types.ts'
+import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 
 describe('TON exec unit tests', () => {
   describe('TON generateUnsignedExecute', () => {
     const offrampAddress = '0:' + '5'.repeat(64)
 
-    const baseExecReport: ExecutionInput<CCIPMessage_V1_6_TON> = {
+    const baseExecReport: ExecutionInput<CCIPMessage_V1_6_EVM> = {
       message: {
         messageId: '0x' + '1'.repeat(64),
         sourceChainSelector: 743186221051783445n,

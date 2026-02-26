@@ -51,8 +51,9 @@ import {
 } from '../utils.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
-import { type CCIPMessage_V1_6_TON, type UnsignedTONTx, isTONWallet } from './types.ts'
+import { type UnsignedTONTx, isTONWallet } from './types.ts'
 import { crc32, lookupTxByRawHash, parseJettonContent } from './utils.ts'
+import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 export type { TONWallet, UnsignedTONTx } from './types.ts'
 
 /**
@@ -586,7 +587,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }: {
     data: unknown
     topics?: readonly string[]
-  }): CCIPMessage_V1_6_TON | undefined {
+  }): CCIPMessage_V1_6_EVM | undefined {
     if (!data || typeof data !== 'string') return
     if (topics?.length && topics[0] !== crc32('CCIPMessageSent')) return
 
@@ -659,7 +660,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
       // Load tokenAmounts from ref 3
       const _tokenAmountsCell = bodySlice.loadRef()
-      const tokenAmounts: CCIPMessage_V1_6_TON['tokenAmounts'] = [] // TODO: FIXME: parse when implemented
+      const tokenAmounts: CCIPMessage_V1_6_EVM['tokenAmounts'] = [] // TODO: FIXME: parse when implemented
 
       // Load feeToken (inline address in body)
       const feeToken = bodySlice.loadMaybeAddress()?.toString() ?? ''
@@ -1119,7 +1120,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
     const unsigned = generateUnsignedExecuteReport(
       offRamp,
-      input as ExecutionInput<CCIPMessage_V1_6_TON>,
+      input as ExecutionInput<CCIPMessage_V1_6_EVM>,
       opts,
     )
 
@@ -1155,7 +1156,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       ...unsigned,
     })
 
-    const message = opts.input.message as CCIPMessage_V1_6_TON
+    const message = opts.input.message as CCIPMessage_V1_6_EVM
     for await (const exec of this.getExecutionReceipts({
       offRamp,
       messageId: message.messageId,
