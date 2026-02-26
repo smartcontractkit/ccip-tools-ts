@@ -1247,9 +1247,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     unsignedTx.nonce = await this.nextNonce(await wallet.getAddress())
     const populatedTx = await wallet.populateTransaction(unsignedTx)
     populatedTx.from = undefined // some signers don't like receiving pre-populated `from`
+    if (opts.gasLimit) populatedTx.gasLimit = opts.gasLimit + 100000
 
     const response = await submitTransaction(wallet, populatedTx, this.provider)
     this.logger.debug('manuallyExecute =>', response.hash)
+    if ('returnTx' in opts && opts.returnTx) {
+      return response
+    }
 
     const receipt = await response.wait(1, 60_000)
     if (!receipt?.hash) throw new CCIPExecTxNotConfirmedError(response.hash)
