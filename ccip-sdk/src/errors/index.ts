@@ -10,6 +10,7 @@ export {
   CCIPChainFamilyUnsupportedError,
   CCIPChainNotFoundError,
   CCIPMethodUnsupportedError,
+  CCIPNetworkFamilyUnsupportedError,
 } from './specialized.ts'
 
 // Specialized errors - Block & Transaction
@@ -67,6 +68,7 @@ export { CCIPExtraArgsInvalidError, CCIPExtraArgsParseError } from './specialize
 
 // Specialized errors - Token & Registry
 export {
+  CCIPLegacyTokenPoolsUnsupportedError,
   CCIPTokenDecimalsInsufficientError,
   CCIPTokenNotConfiguredError,
   CCIPTokenNotFoundError,
@@ -135,6 +137,7 @@ export {
   CCIPAptosNetworkUnknownError,
   CCIPAptosRegistryTypeInvalidError,
   CCIPAptosTokenNotRegisteredError,
+  CCIPAptosTopicInvalidError,
   CCIPAptosTransactionInvalidError,
   CCIPAptosTransactionTypeInvalidError,
   CCIPAptosTransactionTypeUnexpectedError,

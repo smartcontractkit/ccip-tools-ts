@@ -6,7 +6,7 @@ import type { ExecutionInput } from '../types.ts'
 import { type CCIPMessage_V1_6_TON, MANUALLY_EXECUTE_OPCODE } from './types.ts'
 
 describe('TON exec unit tests', () => {
-  describe('TON generateUnsignedExecuteReport', () => {
+  describe('TON generateUnsignedExecute', () => {
     const offrampAddress = '0:' + '5'.repeat(64)
 
     const baseExecReport: ExecutionInput<CCIPMessage_V1_6_TON> = {

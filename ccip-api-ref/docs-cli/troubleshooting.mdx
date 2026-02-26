@@ -86,7 +86,7 @@ Solutions:
 Error: Wallet required for this command
 ```
 
-Commands `send` and `manualExec` require a wallet.
+Commands `send` and `manual-exec` require a wallet.
 
 <Tabs>
 <TabItem value="env" label=".env" default>
@@ -192,16 +192,16 @@ Return Data: 0x (empty or gas-related)
 
 Receiver contract exceeded gas limit.
 
-Use `manualExec` with higher gas:
+Use `manual-exec` with higher gas:
 
 ```bash
-ccip-cli manualExec 0x... --gas-limit 500000 --wallet ledger
+ccip-cli manual-exec 0x... --gas-limit 500000 --wallet ledger
 ```
 
 Or auto-estimate:
 
 ```bash
-ccip-cli manualExec 0x... --estimate-gas-limit 20 --wallet ledger
+ccip-cli manual-exec 0x... --estimate-gas-limit 20 --wallet ledger
 ```
 
 ### Receiver reverted
@@ -232,14 +232,14 @@ Solutions:
 1. Wait for execution
 2. Check for ordering issues:
    ```bash
-   ccip-cli manualExec 0xFirstFailedTx... \
+   ccip-cli manual-exec 0xFirstFailedTx... \
      --sender-queue \
      --exec-failed \
      --wallet ledger
    ```
 3. Check rate limiter:
    ```bash
-   ccip-cli getSupportedTokens -n source -a router -t token
+   ccip-cli get-supported-tokens -n source -a router -t token
    ```
 
 ### Already executed
@@ -289,7 +289,7 @@ Error: Transaction too large
 Use buffer and lookup table:
 
 ```bash
-ccip-cli manualExec 0x... \
+ccip-cli manual-exec 0x... \
   --force-buffer \
   --force-lookup-table \
   --wallet ledger
@@ -304,7 +304,7 @@ Error: Program failed to complete
 Increase compute units:
 
 ```bash
-ccip-cli manualExec 0x... \
+ccip-cli manual-exec 0x... \
   --compute-units 500000 \
   --wallet ledger
 ```
@@ -318,7 +318,7 @@ Error: Account already exists
 Clear accounts from failed attempt:
 
 ```bash
-ccip-cli manualExec 0x... \
+ccip-cli manual-exec 0x... \
   --clear-leftover-accounts \
   --wallet ledger
 ```
@@ -352,7 +352,7 @@ Error: UnsupportedToken
 Check supported tokens:
 
 ```bash
-ccip-cli getSupportedTokens -n source -a router
+ccip-cli get-supported-tokens -n source -a router
 ```
 
 ### Rate limiter depleted
@@ -362,7 +362,7 @@ Transfer stuck or rejected due to rate limit.
 Check rate limiter status:
 
 ```bash
-ccip-cli getSupportedTokens -n source -a router -t token
+ccip-cli get-supported-tokens -n source -a router -t token
 ```
 
 Wait for bucket refill or reduce transfer amount.

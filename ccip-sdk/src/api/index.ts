@@ -443,7 +443,7 @@ export class CCIPAPIClient {
   getExecutionInput(messageId: string): Promise<ExecutionInput & { offRamp: string }> {
     throw new CCIPNotImplementedError(`CCIPAPIClient.getExecutionInput`)
     // TODO: fetch (memoized) request with metadata from `getMessageById`
-    // TODO: if request doesn't contain averything needed (e.g. <v2.0), fetch `batch` and
+    // TODO: if request doesn't contain everything needed (e.g. <v2.0), fetch `batch` and
     // `offchainTokenData` from `/execution-input`
     // TODO: if <v2.0, `calculateManualExecProof` and return `offRamp` and `input`
   }

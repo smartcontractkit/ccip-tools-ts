@@ -1,13 +1,13 @@
 ---
 id: supported-tokens
-title: 'getSupportedTokens'
+title: 'get-supported-tokens'
 description: 'List tokens supported for CCIP transfers and display token pool configurations.'
-sidebar_label: getSupportedTokens
+sidebar_label: get-supported-tokens
 sidebar_position: 6
 custom_edit_url: null
 ---
 
-# getSupportedTokens
+# get-supported-tokens
 
 <ChainSupport />
 
@@ -16,14 +16,12 @@ List tokens supported for CCIP transfers and display token pool configurations.
 ## Synopsis
 
 ```bash
-ccip-cli getSupportedTokens -n <network> -a <address> [options]
+ccip-cli get-supported-tokens -n <network> -a <address> [options]
 ```
-
-Aliases: `get-supported-tokens`
 
 ## Description
 
-The `getSupportedTokens` command queries CCIP infrastructure to display supported tokens and their pool configurations. It provides information about fee tokens, transfer limits, and rate limiter states.
+The `get-supported-tokens` command queries CCIP infrastructure to display supported tokens and their pool configurations. It provides information about fee tokens, transfer limits, and rate limiter states.
 
 ## Options
 
@@ -45,9 +43,9 @@ See [Configuration](/cli/configuration) for global options (`--rpcs`, `--format`
 
 ## Command Builder
 
-Build your `getSupportedTokens` command interactively:
+Build your `get-supported-tokens` command interactively:
 
-<CLIBuilder command="getSupportedTokens" />
+<CLIBuilder command="get-supported-tokens" />
 
 ## Output Modes
 
@@ -78,13 +76,13 @@ When a token is selected or specified:
 ### List supported tokens on Ethereum mainnet
 
 ```bash
-ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D
+ccip-cli get-supported-tokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D
 ```
 
 ### Query a specific token
 
 ```bash
-ccip-cli getSupportedTokens \
+ccip-cli get-supported-tokens \
   -n ethereum-mainnet \
   -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D \
   -t 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
@@ -93,19 +91,19 @@ ccip-cli getSupportedTokens \
 ### Query a token pool directly
 
 ```bash
-ccip-cli getSupportedTokens -n ethereum-mainnet -a 0xTokenPoolAddress
+ccip-cli get-supported-tokens -n ethereum-mainnet -a 0xTokenPoolAddress
 ```
 
 ### Output as JSON
 
 ```bash
-ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0... --format json
+ccip-cli get-supported-tokens -n ethereum-mainnet -a 0x80226fc0... --format json
 ```
 
 ### List fee tokens
 
 ```bash
-ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D --fee-tokens
+ccip-cli get-supported-tokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D --fee-tokens
 ```
 
 ## Rate Limiter Information
@@ -144,5 +142,5 @@ In `--format pretty` (default), the token list is interactive:
 Use in scripts:
 
 ```bash
-ccip-cli getSupportedTokens -n $NETWORK -a $ROUTER --format json | jq '.tokens'
+ccip-cli get-supported-tokens -n $NETWORK -a $ROUTER --format json | jq '.tokens'
 ```

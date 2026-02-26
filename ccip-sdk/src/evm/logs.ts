@@ -183,7 +183,7 @@ async function getFallbackArchiveLogs(
  *   - If undefined (default): paginate main provider only by filter.page
  *   - If false: first try whole range with main provider, then fallback to archive provider
  *   - If true: don't paginate (throw if can't fetch wide range from either provider)
- * @param ctx - Context object containing provider, logger and destry$ notify promise
+ * @param ctx - Context object containing provider, logger and destroy$ notify promise
  * @returns Async iterator of logs.
  */
 export async function* getEvmLogs(

@@ -680,7 +680,7 @@ describe('TON index unit tests', () => {
     })
   })
 
-  describe('fetchExecutionReceipts override', () => {
+  describe('getExecutionReceipts override', () => {
     const mockNetworkInfo = networkInfo('ton-testnet')
 
     const TEST_MESSAGE_ID = '0x' + '1'.repeat(64)

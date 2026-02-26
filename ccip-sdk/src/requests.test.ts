@@ -148,7 +148,7 @@ afterEach(() => {
   mockedChain.getLaneForOnRamp.mock.restore()
 })
 
-describe('fetchCCIPMessagesInTx', () => {
+describe('getMessagesInTx', () => {
   it('should return CCIP requests', async () => {
     const mockTx: ChainTransaction = {
       hash: '0x123',
@@ -244,7 +244,7 @@ describe('fetchCCIPMessagesInTx', () => {
   })
 })
 
-describe('fetchCCIPMessageById', () => {
+describe('getMessageById', () => {
   it('should return a CCIP request by messageId', async () => {
     const msg = mockedMessage(1)
     mockedChain.getLogs.mock.mockImplementationOnce(() =>

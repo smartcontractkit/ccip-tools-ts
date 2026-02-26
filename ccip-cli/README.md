@@ -190,10 +190,10 @@ The `--log-index` option allows to pre-select a request non-interactively.
 If an RPC for dest is also available, scans for the CommitReport for this request, and Execution
 Receipts until a `success` receipt or latest block is hit.
 
-### `manualExec`
+### `manual-exec`
 
 ```sh
-ccip-cli manualExec <request_transaction_hash> [--gas-limit num] [--tokens-gas-limit num]
+ccip-cli manual-exec <request_transaction_hash> [--gas-limit num] [--tokens-gas-limit num]
 ```
 
 Try to manually execute the message in source transaction. If more than one found, user is prompted
@@ -233,7 +233,7 @@ to be cleared.
 
 #### Example
 ```sh
-ccip-cli manualExec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b \
+ccip-cli manual-exec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b \
   --wallet ledger \
   --compute-units 500000 \
   --force-buffer \
@@ -254,10 +254,10 @@ Attempts to parse function call data, error and revert reasons for CCIP contract
 
 It'll recursively try to decode `returnData` and `error` arguments.
 
-### `getSupportedTokens`
+### `get-supported-tokens`
 
 ```sh
-ccip-cli getSupportedTokens --network <network> --address <address> [--token <token>]
+ccip-cli get-supported-tokens --network <network> --address <address> [--token <token>]
 ```
 
 List supported tokens in a given Router/OnRamp/TokenAdminRegistry, or show info about a specific token/pool.
@@ -279,13 +279,13 @@ List supported tokens in a given Router/OnRamp/TokenAdminRegistry, or show info 
 
 ```sh
 # List all supported tokens from a router
-ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D
+ccip-cli get-supported-tokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D
 
 # Get details for a specific token
-ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D -t 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+ccip-cli get-supported-tokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D -t 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 
 # Query a token pool directly
-ccip-cli getSupportedTokens -n ethereum-mainnet -a 0xTokenPoolAddress
+ccip-cli get-supported-tokens -n ethereum-mainnet -a 0xTokenPoolAddress
 ```
 
 #### Output Format Options
@@ -328,10 +328,10 @@ ccip-cli token -n ethereum-mainnet -H 0x1234...abcd -t 0xA0b86991c6218b36c1d19D4
 ccip-cli token -n solana-devnet -H EPUjBP3Xf76K1VKsDSc6GupBWE8uykNksCLJgXZn87CB
 ```
 
-### `laneLatency`
+### `lane-latency`
 
 ```sh
-ccip-cli laneLatency <source> <dest> [--api-url <url>]
+ccip-cli lane-latency <source> <dest> [--api-url <url>]
 ```
 
 Query real-time lane latency between source and destination chains using the CCIP API.
@@ -354,7 +354,7 @@ Query real-time lane latency between source and destination chains using the CCI
 #### Example
 
 ```sh
-ccip-cli laneLatency ethereum-mainnet arbitrum-mainnet
+ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet
 ```
 
 ## Supported Chains

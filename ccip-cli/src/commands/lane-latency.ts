@@ -7,10 +7,10 @@
  * @example
  * ```bash
  * # Get latency between Ethereum and Arbitrum
- * ccip-cli laneLatency ethereum-mainnet arbitrum-mainnet
+ * ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet
  *
  * # Use custom API URL
- * ccip-cli laneLatency sepolia fuji --api-url https://custom-api.example.com
+ * ccip-cli lane-latency sepolia fuji --api-url https://custom-api.example.com
  * ```
  *
  * @packageDocumentation

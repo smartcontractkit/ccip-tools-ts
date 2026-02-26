@@ -189,9 +189,9 @@ docs-cli/
 ├── configuration.md      # Global options, RPCs, wallets
 ├── show.md               # show command
 ├── send.md               # send command
-├── manual-exec.md        # manualExec command
+├── manual-exec.md        # manual-exec command
 ├── parse.md              # parse command
-└── supported-tokens.md   # getSupportedTokens command
+└── supported-tokens.md   # get-supported-tokens command
 ```
 
 ### Adding a New Command

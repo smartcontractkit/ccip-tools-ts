@@ -1,13 +1,13 @@
 ---
 id: lane-latency
-title: 'laneLatency'
+title: 'lane-latency'
 description: 'Query real-time lane latency between source and destination chains.'
-sidebar_label: laneLatency
+sidebar_label: lane-latency
 sidebar_position: 7
 custom_edit_url: null
 ---
 
-# laneLatency
+# lane-latency
 
 <ChainSupport />
 
@@ -16,16 +16,12 @@ Query real-time lane latency between source and destination chains.
 ## Synopsis
 
 ```bash
-ccip-cli laneLatency <source> <dest> [options]
+ccip-cli lane-latency <source> <dest> [options]
 ```
-
-Aliases: `lane-latency`
-
-Shorthand: `latency`
 
 ## Description
 
-The `laneLatency` command queries the CCIP API to retrieve estimated delivery time for cross-chain messages between a source and destination chain. This helps developers understand expected latency for their CCIP transfers.
+The `lane-latency` command queries the CCIP API to retrieve estimated delivery time for cross-chain messages between a source and destination chain. This helps developers understand expected latency for their CCIP transfers.
 
 The latency estimate includes time for:
 
@@ -54,40 +50,40 @@ This command requires API access. If `--no-api` flag is set, the command will fa
 
 ## Command Builder
 
-Build your `laneLatency` command interactively:
+Build your `lane-latency` command interactively:
 
-<CLIBuilder command="laneLatency" />
+<CLIBuilder command="lane-latency" />
 
 ## Examples
 
 ### Query latency between Ethereum and Arbitrum
 
 ```bash
-ccip-cli laneLatency ethereum-mainnet arbitrum-mainnet
+ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet
 ```
 
 ### Query using chain selectors
 
 ```bash
-ccip-cli laneLatency 5009297550715157269 4949039107694359620
+ccip-cli lane-latency 5009297550715157269 4949039107694359620
 ```
 
 ### Query using chain IDs
 
 ```bash
-ccip-cli laneLatency 1 42161
+ccip-cli lane-latency 1 42161
 ```
 
 ### Output as JSON for scripting
 
 ```bash
-ccip-cli laneLatency ethereum-mainnet arbitrum-mainnet --format json
+ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet --format json
 ```
 
 ### Use custom API endpoint
 
 ```bash
-ccip-cli laneLatency ethereum-mainnet arbitrum-mainnet --api-url https://staging-api.example.com
+ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet --api-url https://staging-api.example.com
 ```
 
 ## Output
@@ -135,5 +131,5 @@ The `totalMs` value represents the estimated delivery time in milliseconds (1200
 Use in scripts:
 
 ```bash
-ccip-cli laneLatency ethereum-mainnet arbitrum-mainnet --format json && echo "Success" || echo "Failed"
+ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet --format json && echo "Success" || echo "Failed"
 ```
