@@ -73,7 +73,7 @@ export async function getLaneLatencyCmd(ctx: Ctx, argv: Parameters<typeof handle
   const { logger } = ctx
 
   // Respect --no-api flag - this command requires API access
-  if (argv.noApi) {
+  if (argv.api === false) {
     throw new CCIPApiClientNotAvailableError({
       context: {
         reason:

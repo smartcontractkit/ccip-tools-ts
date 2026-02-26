@@ -7,6 +7,7 @@ import {
   type ChainTransaction,
   type EVMChain,
   type TONChain,
+  CCIPAPIClient,
   CCIPChainFamilyUnsupportedError,
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
@@ -22,6 +23,7 @@ import { loadSolanaWallet } from './solana.ts'
 import { loadSuiWallet } from './sui.ts'
 import { loadTonWallet } from './ton.ts'
 import type { Ctx } from '../commands/index.ts'
+import type { GlobalOpts } from '../index.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
 
@@ -54,11 +56,11 @@ async function collectEndpoints(
 
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: { rpcs?: string[]; rpcsFile?: string; noApi?: boolean },
+  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'>,
 ): ChainGetter
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: { rpcs?: string[]; rpcsFile?: string; noApi?: boolean },
+  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'>,
   txHash: string,
 ): [ChainGetter, Promise<[Chain, ChainTransaction]>]
 
@@ -73,7 +75,7 @@ export function fetchChainsFromRpcs(
  */
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: { rpcs?: string[]; rpcsFile?: string; noApi?: boolean },
+  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'>,
   txHash?: string,
 ) {
   const chains: Record<string, Promise<Chain>> = {}
@@ -103,7 +105,12 @@ export function fetchChainsFromRpcs(
       for (const url of endpoints) {
         const chain$ = C.fromUrl(url, {
           ...ctx,
-          apiClient: argv.noApi ? null : undefined,
+          apiClient:
+            argv.api === false
+              ? null
+              : typeof argv.api === 'string'
+                ? CCIPAPIClient.fromUrl(argv.api)
+                : undefined,
         })
         chains$.push(chain$)
 

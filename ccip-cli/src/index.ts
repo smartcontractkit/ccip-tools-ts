@@ -42,18 +42,32 @@ const globalOpts = {
     type: 'number',
     describe: 'getLogs page/range size',
   },
-  'no-api': {
-    type: 'boolean',
-    describe: 'Disable CCIP API integration (full decentralization mode)',
-    default: false,
+  api: {
+    type: 'string',
+    describe: 'CCIP API URL (use --no-api to disable, enabled by default)',
+    defaultDescription: 'true',
+    coerce: (arg: string | undefined): string | boolean => {
+      if (arg === 'false' || arg === 'no') return false
+      if (arg == null || arg === 'true' || arg === 'yes') return true
+      return arg // it's a URL string
+    },
   },
 } as const
 
 /** Type for global CLI options. */
 export type GlobalOpts = ArgumentsCamelCase<InferredOptionTypes<typeof globalOpts>>
 
+function preprocessArgv(argv: string[]): string[] {
+  return argv.map((arg) => {
+    if (arg === '--no-api') {
+      return '--api=false'
+    }
+    return arg
+  })
+}
+
 async function main() {
-  await yargs(hideBin(process.argv))
+  await yargs(preprocessArgv(hideBin(process.argv)))
     .scriptName(process.env.CLI_NAME || 'ccip-cli')
     .env('CCIP')
     .options(globalOpts)

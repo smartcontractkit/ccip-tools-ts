@@ -104,8 +104,11 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     return selectRequest(await source_.getMessagesInTx(tx), 'to know more', argv)
   })()
 
-  if (argv.noApi !== true) {
-    const apiClient = CCIPAPIClient.fromUrl(undefined, ctx)
+  if (argv.api !== false) {
+    const apiClient = CCIPAPIClient.fromUrl(
+      typeof argv.api === 'string' ? argv.api : undefined,
+      ctx,
+    )
     if (isHexString(argv.txHashOrId, 32)) {
       request$ = Promise.any([request$, apiClient.getMessageById(argv.txHashOrId)])
     }
