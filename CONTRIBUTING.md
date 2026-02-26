@@ -262,16 +262,17 @@ async getLaneLatency(destChainSelector: bigint): Promise<LaneLatencyResponse>
 ```typescript
 // ✅ Good: Runtime values + type safety, tree-shakeable, no enum overhead
 export const ChainFamily = {
-  EVM: 'evm',
-  Solana: 'solana',
-  Aptos: 'aptos',
-  Sui: 'sui',
-  TON: 'ton',
+  EVM: 'EVM',
+  Solana: 'SVM',
+  Aptos: 'APTOS',
+  Sui: 'SUI',
+  TON: 'TON',
+  Unknown: 'UNKNOWN',
 } as const
 export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
 
-// Runtime: ChainFamily.EVM → 'evm'
-// Type: ChainFamily is 'evm' | 'solana' | 'aptos' | 'sui' | 'ton'
+// Runtime: ChainFamily.EVM → 'EVM'
+// Type: ChainFamily is 'EVM' | 'SVM' | 'APTOS' | 'SUI' | 'TON' | 'UNKNOWN'
 ```
 
 **Discriminated unions with `_tag`** for runtime type narrowing:

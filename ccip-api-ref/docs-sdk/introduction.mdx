@@ -20,7 +20,7 @@ TypeScript SDK for sending, tracking, and executing cross-chain messages on CCIP
 <div className="info-grid">
   <div className="info-item"><span className="info-label">Package</span><code>@chainlink/ccip-sdk</code></div>
   <div className="info-item"><span className="info-label">Version</span><span><PackageVersion package="sdk" /></span></div>
-  <div className="info-item"><span className="info-label">Node.js</span><span>v20+ (v23+ recommended)</span></div>
+  <div className="info-item"><span className="info-label">Node.js</span><span>v20+ (v24+ recommended)</span></div>
   <div className="info-item"><span className="info-label">License</span><span>MIT</span></div>
 </div>
 
@@ -73,7 +73,7 @@ for (const req of requests) {
 
 ## Prerequisites
 
-You need RPC endpoints for the chains you want to interact with. Node.js v20+ is required (v23+ recommended for native fetch support).
+You need RPC endpoints for the chains you want to interact with. Node.js v20+ is required (v24+ recommended for native fetch support).
 
 <RpcProviders variant="list" />
 
@@ -89,7 +89,7 @@ You need RPC endpoints for the chains you want to interact with. Node.js v20+ is
 | Track message | `chain.getMessagesInTx(txHash)` | [getMessagesInTx](/sdk/interfaces/Chain#getmessagesintx) |
 | Get fee | `chain.getFee({ router, destChainSelector, message })` | [getFee](/sdk/interfaces/Chain#getfee) |
 | Send message | `chain.sendMessage({ router, destChainSelector, message })` | [sendMessage](/sdk/interfaces/Chain#sendmessage) |
-| Manual execution | `calculateManualExecProof(request)` | [calculateManualExecProof](/sdk/functions/calculateManualExecProof) |
+| Manual execution | `source.getExecutionInput({ request, verifications })` | [getExecutionInput](/sdk/interfaces/Chain#getexecutioninput) |
 | Decode message | `decodeMessage(log)` | [decodeMessage](/sdk/functions/decodeMessage) |
 
 ## Concepts

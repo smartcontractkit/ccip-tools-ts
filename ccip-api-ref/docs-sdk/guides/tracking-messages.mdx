@@ -88,13 +88,13 @@ const request = requests[0]
 
 const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
 
-const verifications = await dest.getVerifications({ offRamp, request })
-
-if (verifications) {
+try {
+  const verifications = await dest.getVerifications({ offRamp, request })
   console.log('Committed at block:', verifications.log.blockNumber)
   console.log('Merkle root:', verifications.report.merkleRoot)
-} else {
-  console.log('Not yet committed')
+} catch (error) {
+  // getVerifications throws CCIPCommitNotFoundError (transient) when not yet committed
+  console.log('Not yet committed — retry later')
 }
 ```
 
@@ -110,9 +110,8 @@ const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
 for await (const execution of dest.getExecutionReceipts({
   offRamp,
   messageId: request.message.messageId,
-  commit,
 })) {
-  console.log('Execution state:', ExecutionState[execution.receipt.state])
+  console.log('Execution state:', execution.receipt.state) // 1=InProgress, 2=Success, 3=Failed
   console.log('Gas used:', execution.receipt.gasUsed)
 
   if (execution.receipt.state === ExecutionState.Success) {
@@ -148,12 +147,14 @@ async function trackMessage(sourceTxHash: string) {
 
   // Stage 2: Check commit status
   console.log('Checking commit status...')
-  const verifications = await dest.getVerifications({
-    offRamp,
-    request,
-  })
-
-  if (!verifications) {
+  let verifications
+  try {
+    verifications = await dest.getVerifications({
+      offRamp,
+      request,
+    })
+  } catch (error) {
+    // getVerifications throws CCIPCommitNotFoundError (transient) when not yet committed
     console.log('Status: Pending commit')
     return { status: 'pending_commit', request }
   }
@@ -164,16 +165,15 @@ async function trackMessage(sourceTxHash: string) {
   for await (const execution of dest.getExecutionReceipts({
     offRamp,
     messageId: request.message.messageId,
-    commit,
   })) {
     if (execution.receipt.state === ExecutionState.Success) {
       console.log('Status: Executed')
-      return { status: 'executed', request, commit, execution }
+      return { status: 'executed', request, verifications, execution }
     }
   }
 
   console.log('Status: Committed, pending execution')
-  return { status: 'pending_execution', request, commit }
+  return { status: 'pending_execution', request, verifications }
 }
 
 const result = await trackMessage('0x1234...')
@@ -245,7 +245,7 @@ async function pollMessageStatus(
       const message = await chain.getMessageById(messageId)
       const status = message.metadata?.status ?? MessageStatus.Unknown
 
-      console.log('Current status:', MessageStatus[status])
+      console.log('Current status:', status) // e.g., 'SUCCESS', 'FAILED', 'COMMITTED'
 
       // Check for final states
       if (status === MessageStatus.Success || status === MessageStatus.Failed) {

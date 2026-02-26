@@ -40,7 +40,7 @@ npm run build       # Full build
 | Resource | Description |
 |----------|-------------|
 | [CONTRIBUTING.md](https://github.com/smartcontractkit/ccip-tools-ts/blob/main/CONTRIBUTING.md) | Full contributing guide |
-| [Adding New Chain](./adding-new-chain) | Implement a new blockchain |
+| [Adding New Chain](../adding-new-chain) | Implement a new blockchain |
 | [GitHub Issues](https://github.com/smartcontractkit/ccip-tools-ts/issues) | Bug reports & feature requests |
 | [Pull Requests](https://github.com/smartcontractkit/ccip-tools-ts/pulls) | Open PRs |
 

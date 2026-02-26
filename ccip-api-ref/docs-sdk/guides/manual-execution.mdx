@@ -75,7 +75,7 @@ for await (const execution of dest.getExecutionReceipts({
   offRamp,
   messageId: request.message.messageId,
 })) {
-  console.log('Execution state:', ExecutionState[execution.receipt.state])
+  console.log('Execution state:', execution.receipt.state) // 1=InProgress, 2=Success, 3=Failed
 
   switch (execution.receipt.state) {
     case ExecutionState.Success:
@@ -106,12 +106,14 @@ if (!needsManualExecution) {
 Verify the message has been committed:
 
 ```typescript
-const verifications = await dest.getVerifications({
-  commitStore: offRamp,
-  request,
-})
-
-if (!verifications) {
+let verifications
+try {
+  verifications = await dest.getVerifications({
+    offRamp,
+    request,
+  })
+} catch (error) {
+  // getVerifications throws CCIPCommitNotFoundError (transient) when not yet committed
   console.log('Message not yet committed')
   console.log('Wait for the DON to commit the merkle root')
   process.exit(1)
@@ -189,9 +191,11 @@ async function manuallyExecuteMessage(
     }
   }
 
-  // Step 4: Get commit
-  const verifications = await dest.getVerifications({ offRamp, request })
-  if (!verifications) {
+  // Step 4: Get commit (throws CCIPCommitNotFoundError if not yet committed)
+  let verifications
+  try {
+    verifications = await dest.getVerifications({ offRamp, request })
+  } catch (error) {
     console.log('Not yet committed')
     return { status: 'pending_commit' }
   }
@@ -247,13 +251,12 @@ const execution = await dest.execute({
 For non-CCTP tokens, `offchainTokenData` is typically empty:
 
 ```typescript
+// getExecutionInput handles standard tokens automatically (empty offchainTokenData)
+const input = await source.getExecutionInput({ request, verifications })
+
 const execution = await dest.execute({
   offRamp,
-  execReport: {
-    ...proof,
-    message: request.message,
-    offchainTokenData: [], // Empty for standard tokens
-  },
+  input,
   wallet: destWallet,
 })
 ```
@@ -290,7 +293,7 @@ const sourceNetwork = networkInfo(source.network.chainSelector)
 console.log('Source chain:', sourceNetwork.name)
 
 // Check if the transaction hash is correct
-const tx = await source.provider.getTransaction(sourceTxHash)
+const tx = await source.getTransaction(sourceTxHash)
 if (!tx) {
   console.log('Transaction not found - verify the hash and chain')
 }

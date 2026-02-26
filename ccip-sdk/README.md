@@ -5,7 +5,7 @@ TypeScript SDK for integrating [CCIP](https://chain.link/cross-chain) (Cross-Cha
 > [!IMPORTANT]
 > This tool is provided under an MIT license and is for convenience and illustration purposes only.
 
-📖 **[Full SDK Documentation](https://github.com/smartcontractkit/ccip-tools-ts/blob/main/docs/sdk/index.md)** - Complete API reference, advanced patterns, and tree-shaking guide.
+📖 **[Full SDK Documentation](https://docs.chain.link/ccip/tools/sdk/)** - Complete API reference, advanced patterns, and tree-shaking guide.
 
 ## Installation
 
@@ -14,7 +14,7 @@ npm install @chainlink/ccip-sdk
 ```
 
 > [!NOTE]
-> Node.js v20+ required. v23+ recommended for native TypeScript execution.
+> Node.js v20+ required. v24+ recommended for development (native TypeScript execution).
 
 ## Chain Classes
 
@@ -65,7 +65,7 @@ const destChainSelector = networkInfo('ethereum-testnet-sepolia-arbitrum-1').cha
 const fee = await source.getFee({ router, destChainSelector, message: {
   receiver: '0xYourReceiverAddress',
   data: '0x48656c6c6f', // "Hello" in hex
-  extraArgs: { gasLimit: 200_000 }, // Gas limit for receiver's ccipReceive callback
+  extraArgs: { gasLimit: 200_000n }, // Gas limit for receiver's ccipReceive callback
 } })
 
 console.log('Fee in native token:', fee.toString())
@@ -88,10 +88,10 @@ const fee = await source.getFee({ router, destChainSelector, message: {
   receiver: '0xYourReceiverAddress',
   data: '0x48656c6c6f',
   extraArgs: {
-    gasLimit: 200_000,
+    gasLimit: 200_000n,
     allowOutOfOrderExecution: true, // Don't wait for prior messages from this sender
   },
-})
+} })
 
 // Send the message
 const request = await source.sendMessage({
@@ -100,7 +100,7 @@ const request = await source.sendMessage({
   message: {
     receiver: '0xYourReceiverAddress',
     data: '0x48656c6c6f',
-    extraArgs: { gasLimit: 200_000, allowOutOfOrderExecution: true },
+    extraArgs: { gasLimit: 200_000n, allowOutOfOrderExecution: true },
     fee,
   },
   wallet,
@@ -133,7 +133,9 @@ const unsignedTx = await source.generateUnsignedSendMessage({
   message
 })
 
-// Sign and send with your own logic
+// Sign and send with your own logic (EVM example - uses .transactions)
+// Solana uses .instructions, Aptos uses .transactions (BCS-encoded), TON uses .body
+// Sui does not support unsigned transaction generation
 for (const tx of unsignedTx.transactions) {
   const signed = await customSigner.sign(tx)
   await customSender.broadcast(signed)
@@ -150,14 +152,15 @@ const signer = await source.provider.getSigner(0)
 
 | Chain Family | Class         | Library                                                                  | Status         |
 | ------------ | ------------- | ------------------------------------------------------------------------ | -------------- |
-| EVM          | `EVMChain`    | [ethers.js v6](https://docs.ethers.org/v6/)                              | Supported      |
+| EVM          | `EVMChain`    | [ethers.js v6](https://docs.ethers.org/v6/) ([viem](https://viem.sh) optional) | Supported      |
 | Solana       | `SolanaChain` | [solana-web3.js](https://github.com/solana-foundation/solana-web3.js)    | Supported      |
 | Aptos        | `AptosChain`  | [aptos-ts-sdk](https://github.com/aptos-labs/aptos-ts-sdk)               | Supported      |
 | Sui          | `SuiChain`    | [@mysten/sui](https://github.com/MystenLabs/sui)                         | Partial (manual exec) |
-| TON          | `TONChain`    | [@ton/ton](https://github.com/ton-org/ton)                               | Partial (manual exec) |
+| TON          | `TONChain`    | [@ton/ton](https://github.com/ton-org/ton)                               | Partial (no token pool/registry queries) |
 
 ## Related
 
+- [SDK API Reference](https://docs.chain.link/ccip/tools/sdk/) - Full SDK documentation
 - [@chainlink/ccip-cli](https://www.npmjs.com/package/@chainlink/ccip-cli) - Command-line interface
 - [CCIP Official Docs](https://docs.chain.link/ccip) - Protocol documentation
 - [CCIP Directory](https://docs.chain.link/ccip/directory) - Router addresses

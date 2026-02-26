@@ -27,9 +27,9 @@ The `parse` command decodes hex-encoded bytes into human-readable format. It sup
 
 ## Arguments
 
-| Argument | Type   | Required | Description                 |
-| -------- | ------ | -------- | --------------------------- |
-| `<data>` | string | Yes      | Hex-encoded bytes to decode |
+| Argument | Type   | Required | Description                                           |
+| -------- | ------ | -------- | ----------------------------------------------------- |
+| `<data>` | string | Yes      | Data to parse (hex, base64, or chain-specific format) |
 
 ## Options
 
@@ -93,10 +93,10 @@ ccip-cli parse 0xbf16aab6... --format json
 
 ## Exit Codes
 
-| Code | Meaning                                                |
-| ---- | ------------------------------------------------------ |
-| `0`  | Success - data decoded (or "Unknown data" if no match) |
-| `1`  | Error (invalid hex input, missing arguments)           |
+| Code | Meaning                                                          |
+| ---- | ---------------------------------------------------------------- |
+| `0`  | Success - data decoded                                           |
+| `1`  | Error (no decoder matched, invalid hex input, missing arguments) |
 
 Use in scripts:
 

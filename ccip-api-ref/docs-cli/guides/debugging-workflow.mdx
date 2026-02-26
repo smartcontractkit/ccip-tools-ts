@@ -187,13 +187,11 @@ Symptom: Message stuck as `UNTOUCHED` after commit.
 
 Cause: CCIP enforces sender nonce ordering. An earlier message from the same sender failed.
 
-Fix: Execute messages in order:
+Fix: Execute each failed message individually in order:
 
 ```bash
-ccip-cli manual-exec 0xFirstFailedTxHash \
-  --sender-queue \
-  --exec-failed \
-  --wallet ledger
+ccip-cli manual-exec 0xFirstFailedTxHash --wallet ledger
+ccip-cli manual-exec 0xSecondFailedTxHash --wallet ledger
 ```
 
 </TabItem>
@@ -227,15 +225,15 @@ ccip-cli manual-exec 0xYourTxHash \
   --wallet ledger
 ```
 
-### Execute sender queue
+### Execute sender queue (Coming Soon)
 
-Process all pending messages from a sender in order:
+:::warning
+Queue execution (`--sender-queue`) is not yet implemented. Execute each message individually using its transaction hash instead.
+:::
 
 ```bash
-ccip-cli manual-exec 0xFirstTxHash \
-  --sender-queue \
-  --exec-failed \
-  --wallet ledger
+ccip-cli manual-exec 0xFirstTxHash --wallet ledger
+ccip-cli manual-exec 0xSecondTxHash --wallet ledger
 ```
 
 ## Chain-Specific Behavior

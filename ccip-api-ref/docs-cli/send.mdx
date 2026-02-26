@@ -48,7 +48,7 @@ The `send` command constructs and submits a CCIP message to transfer data and/or
 | --------------------------- | ----------------------- | ------- | ------- | ------------------------------------------------------------------------------------------------ |
 | `--gas-limit`               | `-L`, `--compute-units` | number  | -       | Gas limit for receiver callback. Defaults to ramp config (~200k) if not specified.               |
 | `--estimate-gas-limit`      | -                       | number  | -       | Estimate gas limit with a percentage margin (e.g., `10` for +10%). Conflicts with `--gas-limit`. |
-| `--allow-out-of-order-exec` | `--ooo`                 | boolean | `false` | Allow out-of-order execution. Required for some destinations. Only v1.5+ lanes.                  |
+| `--allow-out-of-order-exec` | `--ooo`                 | boolean | -       | Allow out-of-order execution. Only v1.5+ lanes. When omitted, defaults to `true`.                |
 
 <Callout type="warning" title="Gas Limit">
   Omitting `--gas-limit` uses the ramp default (~200k). If your receiver contract requires more gas,
@@ -62,12 +62,12 @@ The `send` command constructs and submits a CCIP message to transfer data and/or
 | `--wallet`      | `-w`  | string  | Wallet source. See [Configuration](/cli/configuration#wallet-configuration). |
 | `--approve-max` | -     | boolean | Approve maximum token allowance instead of exact amount needed.              |
 
-### Solana-Specific Options
+### Solana/Sui-Specific Options
 
-| Option             | Alias                  | Type     | Description                                                                   |
-| ------------------ | ---------------------- | -------- | ----------------------------------------------------------------------------- |
-| `--token-receiver` | -                      | string   | Token receiver address if different from program receiver.                    |
-| `--account`        | `--receiver-object-id` | string[] | Additional accounts for receiver program. Append `=rw` for writable accounts. |
+| Option             | Alias                  | Type     | Description                                                             |
+| ------------------ | ---------------------- | -------- | ----------------------------------------------------------------------- |
+| `--token-receiver` | -                      | string   | Solana token receiver address if different from program receiver.       |
+| `--account`        | `--receiver-object-id` | string[] | Solana accounts (append `=rw` for writable) or Sui receiver object IDs. |
 
 ### Dry-Run Options
 

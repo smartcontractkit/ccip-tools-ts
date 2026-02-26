@@ -35,7 +35,7 @@ Before starting, study these files:
 | EVM    | `ccip-sdk/src/evm/index.ts`    | Full implementation      |
 | Solana | `ccip-sdk/src/solana/index.ts` | Full implementation      |
 | Aptos  | `ccip-sdk/src/aptos/index.ts`  | Full implementation      |
-| TON    | `ccip-sdk/src/ton/index.ts`    | Partial (manual exec) |
+| TON    | `ccip-sdk/src/ton/index.ts`    | Partial (no token pool/registry queries) |
 | Sui    | `ccip-sdk/src/sui/index.ts`    | Partial (manual exec) |
 
 ---

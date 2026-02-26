@@ -21,8 +21,8 @@ This tool is provided under an MIT license and is for convenience and illustrati
 | Track message status | CLI | `ccip-cli show 0xTxHash` |
 | Send cross-chain message | SDK/CLI | Programmatic or command-line |
 | Manually execute stuck message | CLI | `ccip-cli manual-exec 0xTxHash` |
-| Check supported tokens | CLI | `ccip-cli get-supported-tokens chain router` |
-| Query lane latency | CLI/SDK | `ccip-cli lane-latency eth-mainnet arb-mainnet` |
+| Check supported tokens | CLI | `ccip-cli get-supported-tokens -n <network> -a <address>` |
+| Query lane latency | CLI/SDK | `ccip-cli lane-latency <source> <dest>` |
 | Integrate CCIP in your dApp | SDK | Import and use in your code |
 
 ## Quick Start
@@ -64,7 +64,7 @@ const dest = networkInfo('ethereum-testnet-sepolia-arbitrum-1').chainSelector
 const message = {
   receiver: '0xYourReceiverAddress',
   data: '0x48656c6c6f', // "Hello" in hex
-  extraArgs: { gasLimit: 200_000 }, // Gas for receiver's ccipReceive callback
+  extraArgs: { gasLimit: 200_000n }, // Gas for receiver's ccipReceive callback
 }
 
 // 3. Get the fee
@@ -87,7 +87,7 @@ console.log('Fee:', fee.toString())
 │  │                          │        │                          │  │
 │  │  • Chain abstraction     │        │  • show, send, manual-exec│ │
 │  │  • Message tracking      │        │  • parse, get-supported-tokens│
-│  │  • Fee estimation        │        │  • lane-latency          │  │
+│  │  • Fee estimation        │        │  • token, lane-latency   │  │
 │  │  • Transaction building  │        │  • RPC & wallet mgmt     │  │
 │  │  • API client            │        │  • Output formatting     │  │
 │  │                          │        │                          │  │
@@ -107,11 +107,11 @@ console.log('Fee:', fee.toString())
 | Solana | Mainnet, Devnet | [solana-web3.js](https://github.com/solana-foundation/solana-web3.js) | Supported |
 | Aptos | Mainnet, Testnet | [aptos-ts-sdk](https://github.com/aptos-labs/aptos-ts-sdk) | Supported |
 | Sui | Mainnet, Testnet | [@mysten/sui](https://github.com/MystenLabs/sui) | Partial (manual exec) |
-| TON | Mainnet, Testnet | [@ton/ton](https://github.com/ton-org/ton) | Partial (manual exec) |
+| TON | Mainnet, Testnet | [@ton/ton](https://github.com/ton-org/ton) | Partial (no token pool/registry queries) |
 
 ## Requirements
 
-- **Node.js** v20+ (v23+ recommended for native TypeScript execution)
+- **Node.js** v20+ (v24+ recommended for development and running tests)
 - **npm** for package management
 - **RPC endpoints** for the networks you want to interact with
 

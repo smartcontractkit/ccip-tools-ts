@@ -9,7 +9,7 @@ compatible RPCs for each involved network.
 > [!IMPORTANT]
 > This tool is provided under an MIT license and is for convenience and illustration purposes only.
 
-📖 **[Full Documentation](https://github.com/smartcontractkit/ccip-tools-ts/blob/main/docs/cli/index.md)** - Complete command reference, all options, and troubleshooting guide.
+📖 **[Full Documentation](https://docs.chain.link/ccip/tools/cli/)** - Complete command reference, all options, and troubleshooting guide.
 
 ## Installation
 
@@ -109,10 +109,12 @@ ChainIDs depend on the chain family and must be passed using this pattern:
 - `--page=10000`: limits `eth_getLogs` (and others) pagination/scanning ranges (e.g. for RPCs which
 don't support large ranges)
 - `--no-api`: Disable CCIP API integration (fully decentralized mode, RPC-only)
+- `--api=<url>`: Use a custom CCIP API URL instead of the default `api.ccip.chain.link`
 
 **Environment variable prefix:** All CLI options can be set via environment variables using the
 `CCIP_` prefix. For example:
 - `CCIP_API=false` → same as `--no-api`
+- `CCIP_API=https://custom-api.example.com` → same as `--api=https://custom-api.example.com`
 - `CCIP_VERBOSE=true` → same as `--verbose`
 - `CCIP_FORMAT=json` → same as `--format=json`
 
@@ -177,15 +179,20 @@ Sends a CCIP message from source to destination chain.
 ### `show` (default command)
 
 ```sh
-ccip-cli [show] <request_transaction_hash> [--log-index num]
+ccip-cli [show] <tx_hash_or_message_id> [--log-index num] [--wait]
 ```
 
-Receives a transaction containing a `CCIPSendRequested` (<=v1.5) or `CCIPMessageSent` (>=1.6) event.
-Try every available RPC and uses first network to respond with this transaction.
+Accepts a transaction hash or CCIP message ID (both are 32-byte hex strings). When given a tx hash,
+it looks for `CCIPSendRequested` (<=v1.5) or `CCIPMessageSent` (>=1.6) events in the transaction,
+trying every available RPC and using the first network to respond. When the CCIP API is enabled
+(default), it also tries to look up the input as a message ID via the API; whichever resolves first
+wins.
 
-If more than one CCIP message request is present in this transaction, the user is prompted to select
+If more than one CCIP message request is present in a transaction, the user is prompted to select
 one from a list, with some basic info on the screen.
 The `--log-index` option allows to pre-select a request non-interactively.
+
+`--wait` watches for execution on the destination chain instead of exiting after showing current state.
 
 If an RPC for dest is also available, scans for the CommitReport for this request, and Execution
 Receipts until a `success` receipt or latest block is hit.
@@ -193,11 +200,11 @@ Receipts until a `success` receipt or latest block is hit.
 ### `manual-exec`
 
 ```sh
-ccip-cli manual-exec <request_transaction_hash> [--gas-limit num] [--tokens-gas-limit num]
+ccip-cli manual-exec <request_transaction_hash> [--log-index num] [--gas-limit num] [--tokens-gas-limit num] [--wallet wallet]
 ```
 
 Try to manually execute the message in source transaction. If more than one found, user is prompted
-same as with `show` command above.
+same as with `show` command above. `--log-index` allows pre-selecting a message non-interactively.
 
 `--gas-limit` (aliases `-L`, `--compute-units`) allows to override the exec limit for this message
 (in the OffRamp, not transaction, which is always estimated). `--gas-limit=0` default re-uses limit
@@ -274,6 +281,7 @@ List supported tokens in a given Router/OnRamp/TokenAdminRegistry, or show info 
 | Option | Alias | Description |
 |--------|-------|-------------|
 | `--token` | `-t` | Token address to query (pre-selects from list if address is a registry) |
+| `--fee-tokens` | | List fee tokens instead of transferable tokens |
 
 #### Examples
 
@@ -365,4 +373,11 @@ ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet
 | Solana | Supported | Full functionality |
 | Aptos | Supported | Full functionality |
 | Sui | Partial | Manual execution only |
-| TON | Partial | Manual execution only |
+| TON | Partial | No token pool/registry queries |
+
+## Related
+
+- [CLI Documentation](https://docs.chain.link/ccip/tools/cli/) - Full CLI documentation
+- [@chainlink/ccip-sdk](https://www.npmjs.com/package/@chainlink/ccip-sdk) - TypeScript SDK
+- [CCIP Official Docs](https://docs.chain.link/ccip) - Protocol documentation
+- [CCIP Directory](https://docs.chain.link/ccip/directory) - Router addresses

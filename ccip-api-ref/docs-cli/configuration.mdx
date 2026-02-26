@@ -74,15 +74,17 @@ The CLI supports environment variables for configuration. Command-line flags ove
 | ------------------- | -------------------------------------- |
 | `USER_KEY`          | Private key (EVM: hex, Solana: base58) |
 | `PRIVATE_KEY`       | Alias for `USER_KEY`                   |
+| `OWNER_KEY`         | Alias for `USER_KEY`                   |
 | `USER_KEY_PASSWORD` | Password for encrypted JSON keystore   |
 
 ### Output Preferences
 
-| Variable       | Description                             | Default  |
-| -------------- | --------------------------------------- | -------- |
-| `CCIP_FORMAT`  | Output format (`pretty`, `log`, `json`) | `pretty` |
-| `CCIP_VERBOSE` | Enable debug logging (`true`/`false`)   | `false`  |
-| `CCIP_PAGE`    | Pagination size for `getLogs` queries   | `10000`  |
+| Variable       | Description                                                                 | Default                       |
+| -------------- | --------------------------------------------------------------------------- | ----------------------------- |
+| `CCIP_FORMAT`  | Output format (`pretty`, `log`, `json`)                                     | `pretty`                      |
+| `CCIP_VERBOSE` | Enable debug logging (`true`/`false`)                                       | `false`                       |
+| `CCIP_PAGE`    | Pagination size for `getLogs` queries                                       | `10000`                       |
+| `CCIP_API`     | CCIP API endpoint URL, or `false` to disable API calls (decentralized mode) | `https://api.ccip.chain.link` |
 
 **Example .env file:**
 
@@ -91,6 +93,8 @@ The CLI supports environment variables for configuration. Command-line flags ove
 RPC_SEPOLIA=https://eth-sepolia.example.com
 RPC_ARB_SEPOLIA=https://arb-sepolia.example.com
 RPC_AVALANCHE_FUJI=https://avalanche-fuji.example.com
+RPC_SOLANA_DEVNET=https://api.devnet.solana.com
+RPC_APTOS_TESTNET=https://api.testnet.aptoslabs.com/v1
 
 # Wallet (for send/manual-exec commands)
 USER_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
@@ -108,7 +112,7 @@ Commands that send transactions require a wallet. The CLI checks these sources i
 
 ### Auto-Detection
 
-If `--wallet` is omitted, the CLI automatically looks for `USER_KEY=` or `PRIVATE_KEY=` in your `--rpcs-file` (default: `./.env`):
+If `--wallet` is omitted, the CLI automatically looks for `PRIVATE_KEY=`, `USER_KEY=`, or `OWNER_KEY=` in your `--rpcs-file` (default: `./.env`):
 
 ```bash
 # .env file
@@ -147,16 +151,16 @@ ccip-cli send ... --wallet ledger:1  # Uses m/44'/60'/1'/0/0 for EVM
 
 These options are available on all commands:
 
-| Option        | Alias   | Type     | Default  | Description                                   |
-| ------------- | ------- | -------- | -------- | --------------------------------------------- |
-| `--rpcs`      | `--rpc` | string[] | -        | RPC endpoint URLs                             |
-| `--rpcs-file` | -       | string   | `./.env` | File containing RPC endpoints                 |
-| `--format`    | `-f`    | string   | `pretty` | Output format: `pretty`, `log`, or `json`     |
-| `--verbose`   | `-v`    | boolean  | -        | Enable debug logging                          |
-| `--page`      | -       | number   | -        | Pagination size for `getLogs` queries         |
-| `--no-api`    | -       | boolean  | `false`  | Disable CCIP API (full decentralization mode) |
-| `--help`      | `-h`    | boolean  | -        | Show help                                     |
-| `--version`   | `-V`    | boolean  | -        | Show version                                  |
+| Option        | Alias   | Type     | Default                       | Description                                                                                                                          |
+| ------------- | ------- | -------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `--rpcs`      | `--rpc` | string[] | -                             | RPC endpoint URLs                                                                                                                    |
+| `--rpcs-file` | -       | string   | `./.env`                      | File containing RPC endpoints                                                                                                        |
+| `--format`    | `-f`    | string   | `pretty`                      | Output format: `pretty`, `log`, or `json`                                                                                            |
+| `--verbose`   | `-v`    | boolean  | -                             | Enable debug logging                                                                                                                 |
+| `--page`      | -       | number   | -                             | Pagination size for `getLogs` queries                                                                                                |
+| `--api`       | -       | string   | `https://api.ccip.chain.link` | CCIP API endpoint URL. Enabled by default. Pass a URL for a custom endpoint. Use `--no-api` to disable (decentralized RPC-only mode) |
+| `--help`      | `-h`    | boolean  | -                             | Show help                                                                                                                            |
+| `--version`   | `-V`    | boolean  | -                             | Show version                                                                                                                         |
 
 **Output formats:**
 

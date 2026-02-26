@@ -34,8 +34,8 @@ const destChainSelector = networkInfo('ethereum-testnet-sepolia-arbitrum-1').cha
 const fee = await source.getFee({ router, destChainSelector, message: {
   receiver: '0xYourAddress',
   data: '0x48656c6c6f',
-  extraArgs: { gasLimit: 200_000 },
-}})
+  extraArgs: { gasLimit: 200_000n },
+} })
 ```
 
 ## Supported Chains
@@ -46,7 +46,7 @@ const fee = await source.getFee({ router, destChainSelector, message: {
 | Solana       | Mainnet, Devnet                                              | Supported      |
 | Aptos        | Mainnet, Testnet                                             | Supported      |
 | Sui          | Mainnet, Testnet                                             | Partial (manual exec) |
-| TON          | Mainnet, Testnet                                             | Partial (manual exec) |
+| TON          | Mainnet, Testnet                                             | Partial (no token pool/registry queries) |
 
 ## Documentation
 

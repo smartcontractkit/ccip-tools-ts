@@ -172,8 +172,9 @@ const message = {
   tokenAmounts: [{ token: tokenAddress, amount }],
 }
 
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
 const fee = await chain.getFee({
-  router: chain.network.router,
+  router,
   destChainSelector: networkInfo('avalanche-testnet-fuji').chainSelector,
   message,
 })
@@ -195,10 +196,6 @@ const latency = await chain.getLaneLatency(destSelector)
 
 const minutes = Math.round(latency.totalMs / 60000)
 console.log(`Estimated transfer time: ~${minutes} minutes`)
-
-// Breakdown
-console.log('Source finality:', latency.sourceFinality, 'ms')
-console.log('Dest finality:', latency.destFinality, 'ms')
 ```
 
 ### Display to Users
@@ -273,7 +270,8 @@ import { EVMChain } from '@chainlink/ccip-sdk'
 const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
 // Get TokenAdminRegistry address from router
-const registry = await chain.getTokenAdminRegistryFor(chain.network.router)
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
+const registry = await chain.getTokenAdminRegistryFor(router)
 
 // Get all supported tokens
 const tokens = await chain.getSupportedTokens(registry)
@@ -288,7 +286,8 @@ for (const token of tokens) {
 ### Get Fee Tokens
 
 ```typescript
-const feeTokens = await chain.getFeeTokens(chain.network.router)
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
+const feeTokens = await chain.getFeeTokens(router)
 
 console.log('Fee tokens:', feeTokens)
 // Returns Record<string, TokenInfo> with token addresses as keys
@@ -316,7 +315,8 @@ async function getTransferInfo(
   const destSelector = networkInfo(destNetworkName).chainSelector
 
   // Get registry first for token queries
-  const registry = await chain.getTokenAdminRegistryFor(chain.network.router)
+  const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
+  const registry = await chain.getTokenAdminRegistryFor(router)
 
   // Parallel queries for efficiency
   const [
@@ -350,7 +350,7 @@ async function getTransferInfo(
 
   // Estimate fee
   const fee = await chain.getFee({
-    router: chain.network.router,
+    router,
     destChainSelector: destSelector,
     message: {
       receiver: walletAddress,
@@ -396,7 +396,7 @@ For standalone API queries without creating a chain instance:
 ```typescript
 import { CCIPAPIClient } from '@chainlink/ccip-sdk'
 
-const api = new CCIPAPIClient()
+const api = CCIPAPIClient.fromUrl()
 
 // Get estimated delivery time
 const latency = await api.getLaneLatency(
@@ -412,7 +412,7 @@ console.log(`Estimated delivery: ${Math.round(latency.totalMs / 60000)} minutes`
 ```typescript
 import { CCIPAPIClient } from '@chainlink/ccip-sdk'
 
-const api = new CCIPAPIClient()
+const api = CCIPAPIClient.fromUrl()
 
 const request = await api.getMessageById(messageId)
 
@@ -425,7 +425,7 @@ console.log('Delivery time:', request.metadata?.deliveryTime, 'ms')
 ### Find Messages in Transaction
 
 ```typescript
-const api = new CCIPAPIClient()
+const api = CCIPAPIClient.fromUrl()
 
 const messageIds = await api.getMessageIdsInTx(txHash)
 console.log(`Found ${messageIds.length} CCIP message(s)`)
@@ -439,7 +439,7 @@ for (const id of messageIds) {
 ### Custom Configuration
 
 ```typescript
-const api = new CCIPAPIClient('https://api.ccip.chain.link', {
+const api = CCIPAPIClient.fromUrl('https://custom-api.example.com', {
   timeoutMs: 60000,     // Request timeout (default: 30000)
   logger: customLogger, // Custom logger
   fetch: customFetch,   // Custom fetch function

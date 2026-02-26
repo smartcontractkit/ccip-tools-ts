@@ -19,6 +19,8 @@ Manually execute pending or failed CCIP messages on the destination chain.
 ccip-cli manual-exec <tx-hash> [options]
 ```
 
+Aliases: `manualExec`
+
 ## Description
 
 The `manual-exec` command allows you to manually trigger the execution of a CCIP message that is stuck or has failed. It retrieves the original request, calculates the merkle proof, fetches any required offchain data, and submits the execution transaction.
@@ -55,9 +57,9 @@ The `manual-exec` command allows you to manually trigger the execution of a CCIP
 
 | Option                      | Type    | Default | Description                                                 |
 | --------------------------- | ------- | ------- | ----------------------------------------------------------- |
-| `--force-buffer`            | boolean | `false` | Use buffer for messages too large for a single transaction. |
-| `--force-lookup-table`      | boolean | `false` | Create a lookup table for accounts to fit in transaction.   |
-| `--clear-leftover-accounts` | boolean | `false` | Clear buffers or lookup tables from previous attempts.      |
+| `--force-buffer`            | boolean | -       | Use buffer for messages too large for a single transaction. |
+| `--force-lookup-table`      | boolean | -       | Create a lookup table for accounts to fit in transaction.   |
+| `--clear-leftover-accounts` | boolean | -       | Clear buffers or lookup tables from previous attempts.      |
 
 ### Sui-Specific Options
 
@@ -65,7 +67,11 @@ The `manual-exec` command allows you to manually trigger the execution of a CCIP
 | ----------------------- | -------- | ------- | --------------------------------------------------------- |
 | `--receiver-object-ids` | string[] | -       | Receiver object IDs for Sui execution (e.g., `0xabc...`). |
 
-### Queue Execution
+### Queue Execution (Coming Soon)
+
+:::warning
+Queue execution (`--sender-queue` and `--exec-failed`) is not yet implemented. These options are accepted by the CLI but have no effect. This feature will be available in a future release.
+:::
 
 | Option           | Type    | Default | Description                                                                                |
 | ---------------- | ------- | ------- | ------------------------------------------------------------------------------------------ |
@@ -147,10 +153,10 @@ ccip-cli manual-exec 0xabc123... \
 ## Execution Flow
 
 1. Fetches the original request from the source chain
-1. Retrieves the commit report from the destination chain
-1. Calculates the merkle proof for manual execution
-1. Fetches any required offchain token data (e.g., CCTP attestations)
-1. Submits the execution transaction to the destination chain
+1. Retrieves the commit report (verifications) from the destination chain
+1. Optionally estimates gas limit (when `--estimate-gas-limit` is used)
+1. Builds execution input (calculates merkle proof, fetches offchain token data like CCTP attestations)
+1. Loads wallet and submits the execution transaction to the destination chain
 
 ## Solana Considerations
 

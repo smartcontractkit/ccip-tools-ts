@@ -19,6 +19,8 @@ List tokens supported for CCIP transfers and display token pool configurations.
 ccip-cli get-supported-tokens -n <network> -a <address> [options]
 ```
 
+Aliases: `getSupportedTokens`
+
 ## Description
 
 The `get-supported-tokens` command queries CCIP infrastructure to display supported tokens and their pool configurations. It provides information about fee tokens, transfer limits, and rate limiter states.
@@ -55,8 +57,13 @@ When querying a Router without specifying a token:
 
 | Section        | Description                               |
 | -------------- | ----------------------------------------- |
-| **Fee Tokens** | Tokens accepted for CCIP fees             |
 | **Token List** | Interactive searchable list of all tokens |
+
+Use `--fee-tokens` to display fee tokens instead:
+
+```bash
+ccip-cli get-supported-tokens -n ethereum-mainnet -a 0xRouter... --fee-tokens
+```
 
 ### Token Detail Mode
 
@@ -142,5 +149,6 @@ In `--format pretty` (default), the token list is interactive:
 Use in scripts:
 
 ```bash
-ccip-cli get-supported-tokens -n $NETWORK -a $ROUTER --format json | jq '.tokens'
+# JSON output is newline-delimited (one JSON object per token)
+ccip-cli get-supported-tokens -n $NETWORK -a $ROUTER --format json | jq -s '.[].symbol'
 ```

@@ -30,7 +30,7 @@ Command-line interface for querying, sending, and managing cross-chain messages 
   </div>
   <div className="info-item">
     <span className="info-label">Node.js</span>
-    <span>v20+ (v23+ recommended)</span>
+    <span>v20+ (v24+ recommended)</span>
   </div>
   <div className="info-item">
     <span className="info-label">License</span>
@@ -49,6 +49,13 @@ This documentation covers the latest version. For previous versions, see the [Gi
 
 ```bash
 npm install -g @chainlink/ccip-cli
+```
+
+</TabItem>
+<TabItem value="npx" label="npx (no install)">
+
+```bash
+npx @chainlink/ccip-cli --help
 ```
 
 </TabItem>
@@ -143,6 +150,7 @@ ccip-cli show <tx-hash-from-send>
 | Execute pending message | `ccip-cli manual-exec <tx-hash>`                       | [manual-exec](/cli/manual-exec)               |
 | Decode error data       | `ccip-cli parse <data>`                                | [parse](/cli/parse)                           |
 | List supported tokens   | `ccip-cli get-supported-tokens -n <network> -a <addr>` | [get-supported-tokens](/cli/supported-tokens) |
+| Query token balance     | `ccip-cli token -n <network> -H <holder>`              | [token](/cli/token)                           |
 | Query lane latency      | `ccip-cli lane-latency <source> <dest>`                | [lane-latency](/cli/lane-latency)             |
 
 Each command page includes full argument and option reference, practical examples, and cross-references to related commands.
