@@ -8,14 +8,15 @@ This directory contains the API reference documentation for `@chainlink/ccip-sdk
 # Install dependencies (from repo root)
 npm install
 
-# Start development server
-npm run docs:dev
+# Start development server (from ccip-api-ref/)
+cd ccip-api-ref
+npm run dev
 
 # Build for production
-npm run docs:build
+npm run build
 
 # Preview production build
-npm run docs:serve
+npm run serve
 ```
 
 ## Architecture
@@ -27,9 +28,9 @@ ccip-api-ref/
 ├── docs/                  # Landing page (unversioned)
 │   └── intro.md
 ├── docs-cli/              # CLI documentation (versioned independently)
-│   ├── index.md           # CLI overview
-│   ├── configuration.md   # Global options and setup
-│   └── *.md               # Command reference pages
+│   ├── index.mdx          # CLI overview
+│   ├── configuration.mdx  # Global options and setup
+│   └── *.mdx              # Command reference pages
 ├── docs-sdk/              # SDK API reference (versioned independently)
 │   └── (auto-generated)   # TypeDoc generates content here
 ├── docs-api/              # CCIP REST API reference (versioned independently)
@@ -54,7 +55,7 @@ ccip-api-ref/
 
 | Section      | Source                                              | How to Update                        |
 | ------------ | --------------------------------------------------- | ------------------------------------ |
-| CLI docs     | `docs-cli/*.md`                                     | Edit markdown files directly         |
+| CLI docs     | `docs-cli/*.mdx`                                    | Edit MDX files directly              |
 | SDK docs     | TypeDoc from `ccip-sdk/src/`                        | Update JSDoc comments in source code |
 | CCIP API     | OpenAPI spec at `api.ccip.chain.link/api-docs.json` | Regenerate from updated spec         |
 | Landing page | `docs/intro.md`                                     | Edit markdown directly               |
@@ -70,7 +71,7 @@ Both packages display the version configured in `docusaurus.config.ts`:
 ```typescript
 versions: {
   current: {
-    label: '0.91.1',
+    label: '1.0.0',
     badge: true,
   },
 },
@@ -185,18 +186,21 @@ Each command has its own file:
 
 ```
 docs-cli/
-├── index.md              # CLI overview and installation
-├── configuration.md      # Global options, RPCs, wallets
-├── show.md               # show command
-├── send.md               # send command
-├── manual-exec.md        # manual-exec command
-├── parse.md              # parse command
-└── supported-tokens.md   # get-supported-tokens command
+├── index.mdx              # CLI overview and installation
+├── configuration.mdx      # Global options, RPCs, wallets
+├── show.mdx               # show command
+├── send.mdx               # send command
+├── manual-exec.mdx        # manual-exec command
+├── parse.mdx              # parse command
+├── supported-tokens.mdx   # get-supported-tokens command
+├── token.mdx              # token command
+├── lane-latency.mdx       # lane-latency command
+└── troubleshooting.mdx    # Troubleshooting guide
 ```
 
 ### Adding a New Command
 
-1. Create `docs-cli/new-command.md`
+1. Create `docs-cli/new-command.mdx`
 1. Add to `sidebars-cli.ts`:
 
 ```typescript
@@ -388,12 +392,19 @@ Deploy the `ccip-api-ref/build/` directory to any static hosting (Vercel, Netlif
 
 ### Vercel Configuration
 
-The included `vercel.json` configures proper routing:
+The included `vercel.json` configures build settings and URL rewrites for hosting under `/ccip/tools/`:
 
 ```json
 {
-  "cleanUrls": true,
-  "trailingSlash": false
+  "buildCommand": "npm run gen-api && npm run build",
+  "outputDirectory": "build",
+  "installCommand": "cd .. && npm ci",
+  "framework": "docusaurus-2",
+  "rewrites": [
+    { "source": "/ccip/tools/:path*/", "destination": "/:path*/" },
+    { "source": "/ccip/tools/:path*", "destination": "/:path*" }
+  ],
+  "redirects": [{ "source": "/", "destination": "/ccip/tools/", "permanent": false }]
 }
 ```
 

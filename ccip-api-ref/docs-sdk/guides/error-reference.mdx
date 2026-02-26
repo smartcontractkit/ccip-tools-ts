@@ -73,13 +73,17 @@ const result = await withRetry(
 ### Error Serialization
 
 ```typescript
-import { formatErrorForLogging } from '@chainlink/ccip-sdk'
+import { CCIPError, formatErrorForLogging } from '@chainlink/ccip-sdk'
 
 try {
   await chain.sendMessage(...)
 } catch (error) {
-  // Safe to log (handles non-enumerable properties)
-  console.error(JSON.stringify(formatErrorForLogging(error)))
+  if (CCIPError.isCCIPError(error)) {
+    // Safe to log (handles non-enumerable properties)
+    console.error(JSON.stringify(formatErrorForLogging(error)))
+  } else {
+    console.error('Non-CCIP error:', error)
+  }
 }
 ```
 
@@ -106,7 +110,7 @@ try {
 
 | Error | Code | Transient | When Thrown | Recovery |
 |-------|------|-----------|-------------|----------|
-| `CCIPMessageNotFoundInTxError` | `MESSAGE_NOT_FOUND_IN_TX` | Yes | Transaction has no CCIP messages | Verify correct transaction hash |
+| `CCIPMessageNotFoundInTxError` | `MESSAGE_NOT_FOUND_IN_TX` | No | Transaction has no CCIP messages | Verify correct transaction hash |
 | `CCIPMessageIdNotFoundError` | `MESSAGE_ID_NOT_FOUND` | Yes | Message ID not found in search | Provide OnRamp hint, expand search range |
 | `CCIPMessageDecodeError` | `MESSAGE_DECODE_FAILED` | No | Failed to decode message data | Check message format compatibility |
 | `CCIPMessageBatchIncompleteError` | `MESSAGE_BATCH_INCOMPLETE` | Yes | Not all messages in batch found | Retry with larger search range |
@@ -154,7 +158,7 @@ try {
 | `CCIPUsdcAttestationError` | `USDC_ATTESTATION_FAILED` | Yes | USDC attestation service error | Retry after delay |
 | `CCIPLbtcAttestationError` | `LBTC_ATTESTATION_ERROR` | Yes | LBTC attestation service error | Retry after delay |
 | `CCIPLbtcAttestationNotFoundError` | `LBTC_ATTESTATION_NOT_FOUND` | Yes | LBTC attestation not yet available | Wait and retry |
-| `CCIPLbtcAttestationNotApprovedError` | `LBTC_ATTESTATION_NOT_APPROVED` | Yes | LBTC attestation pending approval | Wait for approval |
+| `CCIPLbtcAttestationNotApprovedError` | `LBTC_ATTESTATION_NOT_APPROVED` | No | LBTC attestation pending approval | Wait for approval |
 
 ### Wallet & Signer Errors
 
@@ -308,7 +312,6 @@ const TRANSIENT_CODES = [
   'TRANSACTION_NOT_FOUND',
   'BLOCK_TIME_NOT_FOUND',
   'TRANSACTION_NOT_FINALIZED',
-  'MESSAGE_NOT_FOUND_IN_TX',
   'MESSAGE_ID_NOT_FOUND',
   'MESSAGE_BATCH_INCOMPLETE',
   'COMMIT_NOT_FOUND',

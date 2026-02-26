@@ -230,12 +230,10 @@ Causes:
 Solutions:
 
 1. Wait for execution
-2. Check for ordering issues:
+2. Check for ordering issues — execute each failed message individually in order:
    ```bash
-   ccip-cli manual-exec 0xFirstFailedTx... \
-     --sender-queue \
-     --exec-failed \
-     --wallet ledger
+   ccip-cli manual-exec 0xFirstFailedTx... --wallet ledger
+   ccip-cli manual-exec 0xSecondFailedTx... --wallet ledger
    ```
 3. Check rate limiter:
    ```bash

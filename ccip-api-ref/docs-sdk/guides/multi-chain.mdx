@@ -81,7 +81,7 @@ console.log('Connected to:', aptos.network.name)
 All chain classes implement the `Chain` interface for chain-agnostic code:
 
 ```typescript
-import { Chain, EVMChain, SolanaChain } from '@chainlink/ccip-sdk'
+import { type Chain, EVMChain, SolanaChain } from '@chainlink/ccip-sdk'
 
 async function trackMessage(chain: Chain, txHash: string) {
   const requests = await chain.getMessagesInTx(txHash)
@@ -102,7 +102,7 @@ const solanaRequests = await trackMessage(solanaChain, 'base58signature...')
 ### EVM to Solana
 
 ```typescript
-import { EVMChain, encodeExtraArgs, networkInfo } from '@chainlink/ccip-sdk'
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
 
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
@@ -113,18 +113,19 @@ const message = {
   data: '0x1234...',
   tokenAmounts: [],
   feeToken: '0x' + '0'.repeat(40),
-  extraArgs: encodeExtraArgs({
+  extraArgs: {
     computeUnits: 200000n,
     accountIsWritableBitmap: 0n,
     allowOutOfOrderExecution: true,
     tokenReceiver: '',
     accounts: [],
-  }),
+  },
 }
 
 const destSelector = networkInfo('solana-devnet').chainSelector
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
 const fee = await source.getFee({
-  router: source.network.router,
+  router,
   destChainSelector: destSelector,
   message,
 })
@@ -133,7 +134,7 @@ const fee = await source.getFee({
 ### Solana to EVM
 
 ```typescript
-import { SolanaChain, encodeExtraArgs, networkInfo } from '@chainlink/ccip-sdk'
+import { SolanaChain, networkInfo } from '@chainlink/ccip-sdk'
 
 const source = await SolanaChain.fromUrl('https://api.devnet.solana.com')
 
@@ -141,10 +142,10 @@ const message = {
   receiver: '0xEVMReceiverAddress...',
   data: Buffer.from('hello'),
   tokenAmounts: [],
-  extraArgs: encodeExtraArgs({
+  extraArgs: {
     gasLimit: 200000n,
     allowOutOfOrderExecution: false,
-  }),
+  },
 }
 
 const destSelector = networkInfo('ethereum-testnet-sepolia').chainSelector
@@ -282,7 +283,7 @@ Use the base `Chain` type for maximum flexibility:
 
 ```typescript
 import {
-  Chain,
+  type Chain,
   EVMChain,
   SolanaChain,
   networkInfo,

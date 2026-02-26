@@ -136,14 +136,11 @@ const request = requests[0]
 
 const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
 
+// getVerifications throws CCIPCommitNotFoundError (transient) when not yet committed
 const verifications = await dest.getVerifications({
   offRamp,
   request,
 })
-
-if (!verifications) {
-  throw new Error('Message not yet committed - cannot execute')
-}
 ```
 
 ### Step 2: Calculate Merkle Proof
@@ -276,9 +273,11 @@ async function recoverFailedMessage(sourceTxHash: string) {
     }
   }
 
-  // Step 4: Get commit
-  const verifications = await dest.getVerifications({ offRamp, request })
-  if (!verifications) {
+  // Step 4: Get commit (throws CCIPCommitNotFoundError if not yet committed)
+  let verifications
+  try {
+    verifications = await dest.getVerifications({ offRamp, request })
+  } catch (error) {
     console.log('Not yet committed - wait for DON to commit')
     return { status: 'pending_commit' }
   }
@@ -346,8 +345,8 @@ import { SolanaChain } from '@chainlink/ccip-sdk'
 try {
   await sendTransaction(transaction, connection)
 } catch (error) {
-  // Pass the error (which may contain logs) or transaction logs directly
-  const parsed = SolanaChain.parse(error.logs || error)
+  // Accepts error objects with .logs, arrays of log strings, or raw data
+  const parsed = SolanaChain.parse(error)
   if (parsed) {
     console.log('Error:', parsed)
     // => { program: '...', error: 'Rate limit exceeded', ... }
@@ -427,11 +426,11 @@ const result = await withRetry(
     return await someApiCall()
   },
   {
-    maxRetries: 3,              // Max retry attempts (default: 3)
-    initialDelayMs: 1000,       // Initial delay before first retry (default: 1000)
-    backoffMultiplier: 2,       // Multiplier for exponential backoff (default: 2)
-    maxDelayMs: 30000,          // Maximum delay cap (default: 30000)
-    respectRetryAfterHint: true, // Use error's retryAfterMs when available
+    maxRetries: 3,              // Required: max retry attempts
+    initialDelayMs: 1000,       // Required: initial delay before first retry
+    backoffMultiplier: 2,       // Required: multiplier for exponential backoff
+    maxDelayMs: 30000,          // Required: maximum delay cap
+    respectRetryAfterHint: true, // Required: use error's retryAfterMs when available
     logger: console,            // Optional: logs retry attempts
   },
 )
@@ -442,18 +441,22 @@ The utility only retries on transient errors (5xx HTTP errors, timeouts). Non-tr
 ### Checking Transient Errors
 
 ```typescript
-import { isTransientError } from '@chainlink/ccip-sdk'
+import { CCIPError, isTransientError } from '@chainlink/ccip-sdk'
 
 try {
   const result = await chain.getMessageById(messageId)
 } catch (error) {
-  if (isTransientError(error)) {
+  if (CCIPError.isCCIPError(error) && error.isTransient) {
     console.log('Transient error - safe to retry')
   } else {
     console.log('Permanent error - do not retry')
     throw error
   }
 }
+
+// You can also check a specific error code directly:
+// isTransientError('COMMIT_NOT_FOUND') // true (thrown by CCIPCommitNotFoundError)
+// isTransientError('MERKLE_ROOT_MISMATCH') // false (permanent error)
 ```
 
 ## API Mode Configuration

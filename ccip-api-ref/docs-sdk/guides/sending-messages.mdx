@@ -14,19 +14,18 @@ import TabItem from '@theme/TabItem'
 ## Message Structure
 
 ```typescript
+import type { BytesLike } from 'ethers' // string | Uint8Array
+
 // MessageInput type - only receiver is required, all other fields are optional
 type MessageInput = {
-  receiver: string           // Required: Destination address (encoded for target chain)
-  data?: string              // Optional: Arbitrary data payload (hex string)
+  receiver: BytesLike        // Required: Destination address (hex string or bytes)
+  data?: BytesLike           // Optional: Arbitrary data payload (hex string or bytes)
   tokenAmounts?: {           // Optional: Tokens to transfer
     token: string            // Source token address
     amount: bigint           // Amount in smallest unit
   }[]
   feeToken?: string          // Optional: Fee payment token (address or zero for native)
-  extraArgs?: {              // Optional: Encoded or object extra arguments
-    gasLimit?: bigint        // Gas for receiver execution
-    allowOutOfOrderExecution?: boolean
-  }
+  extraArgs?: Partial<ExtraArgs> // Optional: Extra arguments (object, SDK encodes internally)
   fee?: bigint               // Optional: Fee amount (returned by getFee)
 }
 ```
@@ -36,7 +35,7 @@ type MessageInput = {
 Send arbitrary data to a contract on another chain:
 
 ```typescript
-import { EVMChain, encodeExtraArgs, networkInfo, CCIPError } from '@chainlink/ccip-sdk'
+import { EVMChain, networkInfo, CCIPError } from '@chainlink/ccip-sdk'
 import { toHex } from 'viem'
 
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
@@ -46,13 +45,13 @@ const message = {
   data: toHex('Hello from Sepolia!'),
   tokenAmounts: [],
   feeToken: '0x0000000000000000000000000000000000000000', // Native ETH
-  extraArgs: encodeExtraArgs({
+  extraArgs: {
     gasLimit: 200000n,
     allowOutOfOrderExecution: false,
-  }),
+  },
 }
 
-const router = source.network.router
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
 const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
 
 try {
@@ -85,7 +84,7 @@ try {
 Transfer tokens cross-chain:
 
 ```typescript
-import { EVMChain, encodeExtraArgs, networkInfo } from '@chainlink/ccip-sdk'
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
 
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
@@ -101,14 +100,14 @@ const message = {
     },
   ],
   feeToken: LINK_TOKEN, // Pay fee in LINK
-  extraArgs: encodeExtraArgs({
+  extraArgs: {
     gasLimit: 0n, // No receiver execution needed
     allowOutOfOrderExecution: true,
-  }),
+  },
 }
 
 const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
-const router = source.network.router
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
 
 const fee = await source.getFee({
   router,
@@ -130,7 +129,20 @@ Before sending tokens, approve the Router contract to spend your tokens. `sendMe
 
 ## Extra Arguments
 
-Extra arguments control execution behavior on the destination chain.
+Extra arguments control execution behavior on the destination chain. When using `sendMessage` or `getFee`, pass them as an object — the SDK encodes them internally:
+
+```typescript
+const message = {
+  receiver: '0x...',
+  extraArgs: {
+    gasLimit: 200000n,
+    allowOutOfOrderExecution: true,
+  },
+}
+await source.sendMessage({ router, destChainSelector, message, wallet })
+```
+
+The `encodeExtraArgs` utility is available for low-level use (e.g., building raw on-chain transactions outside the SDK):
 
 <Tabs>
 <TabItem value="evm" label="EVM Destination">
@@ -139,13 +151,13 @@ Extra arguments control execution behavior on the destination chain.
 import { encodeExtraArgs } from '@chainlink/ccip-sdk'
 
 // EVM V2 (recommended) - inferred from allowOutOfOrderExecution
-const extraArgs = encodeExtraArgs({
+const encoded = encodeExtraArgs({
   gasLimit: 200000n,              // Gas for receiver execution
   allowOutOfOrderExecution: true, // Allow out-of-order execution
 })
 
 // EVM V1 (legacy) - inferred when only gasLimit is set
-const extraArgsV1 = encodeExtraArgs({
+const encodedV1 = encodeExtraArgs({
   gasLimit: 200000n,
 })
 ```
@@ -157,7 +169,7 @@ const extraArgsV1 = encodeExtraArgs({
 import { encodeExtraArgs } from '@chainlink/ccip-sdk'
 
 // SVM (Solana) - inferred from computeUnits
-const extraArgs = encodeExtraArgs({
+const encoded = encodeExtraArgs({
   computeUnits: 200000n,
   accountIsWritableBitmap: 0n,
   allowOutOfOrderExecution: true,
@@ -283,7 +295,6 @@ Send data and tokens with fee buffer:
 ```typescript
 import {
   EVMChain,
-  encodeExtraArgs,
   networkInfo,
   CCIPError
 } from '@chainlink/ccip-sdk'
@@ -293,7 +304,7 @@ import { toHex, parseEther, type WalletClient } from 'viem'
 async function sendCrossChainMessage(walletClient: WalletClient) {
   const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
-  const router = source.network.router
+  const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
   const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
 
   const message = {
@@ -306,10 +317,10 @@ async function sendCrossChainMessage(walletClient: WalletClient) {
       },
     ],
     feeToken: '0x0000000000000000000000000000000000000000', // Native ETH
-    extraArgs: encodeExtraArgs({
+    extraArgs: {
       gasLimit: 300000n,
       allowOutOfOrderExecution: false,
-    }),
+    },
   }
 
   try {

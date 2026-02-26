@@ -150,7 +150,7 @@ const walletClient = createWalletClient({
 const chain = await fromViemClient(publicClient)
 
 // Send message with viem wallet
-const router = chain.network.router
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
 const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
 
 const message = {
@@ -343,8 +343,9 @@ function MyComponent() {
 
     const chain = await fromViemClient(toGenericPublicClient(publicClient))
 
+    const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
     const request = await chain.sendMessage({
-      router: chain.network.router,
+      router,
       destChainSelector: networkInfo('avalanche-testnet-fuji').chainSelector,
       message: {
         receiver: '0xReceiverAddress...',
