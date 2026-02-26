@@ -46,6 +46,8 @@ const config: Config = {
   },
 
   plugins: [
+    // Google Tag Manager - inject early for page tracking (head + body noscript)
+    './plugins/docusaurus-plugin-gtm',
     // JSON-LD Structured Data Plugin
     [
       './plugins/docusaurus-plugin-jsonld',

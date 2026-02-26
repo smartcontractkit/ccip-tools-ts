@@ -30,6 +30,7 @@ export default defineConfig(
             '*.mjs',
             '.cjs',
             'ccip-api-ref/plugins/docusaurus-plugin-jsonld/index.js',
+            'ccip-api-ref/plugins/docusaurus-plugin-gtm/index.js',
           ],
         },
         tsconfigRootDir: import.meta.dirname,
