@@ -436,6 +436,23 @@ for (const id of messageIds) {
 }
 ```
 
+### Get Execution Input
+
+Fetch execution inputs (proofs, verifications, offchain token data) for manual execution:
+
+```typescript
+const api = CCIPAPIClient.fromUrl()
+
+const execInput = await api.getExecutionInput('0xMessageId...')
+
+console.log('OffRamp:', execInput.offRamp)
+console.log('Version:', execInput.version)
+
+// Use with dest.execute():
+const { offRamp, ...input } = execInput
+await dest.execute({ offRamp, input, wallet })
+```
+
 ### Custom Configuration
 
 ```typescript

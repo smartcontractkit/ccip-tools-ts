@@ -16,20 +16,20 @@ Manually execute pending or failed CCIP messages on the destination chain.
 ## Synopsis
 
 ```bash
-ccip-cli manual-exec <tx-hash> [options]
+ccip-cli manual-exec <tx-hash-or-id> [options]
 ```
 
 Aliases: `manualExec`
 
 ## Description
 
-The `manual-exec` command allows you to manually trigger the execution of a CCIP message that is stuck or has failed. It retrieves the original request, calculates the merkle proof, fetches any required offchain data, and submits the execution transaction.
+The `manual-exec` command allows you to manually trigger the execution of a CCIP message that is stuck or has failed. It accepts either a source transaction hash or a CCIP message ID (32-byte hex). When given a transaction hash, it retrieves the original request from the source chain, calculates the merkle proof, and fetches any required offchain data. When given a message ID (with `--api` enabled, the default), it fetches execution inputs directly from the CCIP API, removing the need for source chain RPC access. In both cases, it submits the execution transaction to the destination chain.
 
 ## Arguments
 
-| Argument    | Type   | Required | Description                                                   |
-| ----------- | ------ | -------- | ------------------------------------------------------------- |
-| `<tx-hash>` | string | Yes      | Transaction hash of the original CCIP request on source chain |
+| Argument          | Type   | Required | Description                                                                       |
+| ----------------- | ------ | -------- | --------------------------------------------------------------------------------- |
+| `<tx-hash-or-id>` | string | Yes      | Transaction hash of the original CCIP request, or a CCIP message ID (32-byte hex) |
 
 ## Options
 
@@ -67,17 +67,6 @@ The `manual-exec` command allows you to manually trigger the execution of a CCIP
 | ----------------------- | -------- | ------- | --------------------------------------------------------- |
 | `--receiver-object-ids` | string[] | -       | Receiver object IDs for Sui execution (e.g., `0xabc...`). |
 
-### Queue Execution (Coming Soon)
-
-:::warning
-Queue execution (`--sender-queue` and `--exec-failed`) is not yet implemented. These options are accepted by the CLI but have no effect. This feature will be available in a future release.
-:::
-
-| Option           | Type    | Default | Description                                                                                |
-| ---------------- | ------- | ------- | ------------------------------------------------------------------------------------------ |
-| `--sender-queue` | boolean | `false` | Execute all pending messages from the same sender, starting from the provided transaction. |
-| `--exec-failed`  | boolean | `false` | Include failed messages in queue execution. Requires `--sender-queue`.                     |
-
 See [Configuration](/cli/configuration) for global options (`--rpcs`, `--format`, etc.).
 
 ## Command Builder
@@ -103,11 +92,21 @@ Manual execution is needed when:
 
 ## Examples
 
-### Execute a pending message
+### Execute by transaction hash
 
 ```bash
 ccip-cli manual-exec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b \
   --rpc https://eth-sepolia.example.com \
+  --rpc https://arb-sepolia.example.com \
+  --wallet ledger
+```
+
+### Execute by message ID
+
+When the CCIP API is available (default), you can pass a message ID instead of a transaction hash. This only requires a destination chain RPC:
+
+```bash
+ccip-cli manual-exec 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef \
   --rpc https://arb-sepolia.example.com \
   --wallet ledger
 ```
@@ -152,11 +151,21 @@ ccip-cli manual-exec 0xabc123... \
 
 ## Execution Flow
 
+**When given a transaction hash:**
+
 1. Fetches the original request from the source chain
 1. Retrieves the commit report (verifications) from the destination chain
 1. Optionally estimates gas limit (when `--estimate-gas-limit` is used)
 1. Builds execution input (calculates merkle proof, fetches offchain token data like CCTP attestations)
 1. Loads wallet and submits the execution transaction to the destination chain
+
+**When given a message ID (with `--api` enabled, the default):**
+
+1. Fetches execution inputs (proofs, verifications, offchain token data) from the CCIP API
+1. Optionally estimates gas limit (when `--estimate-gas-limit` is used)
+1. Loads wallet and submits the execution transaction to the destination chain
+
+The message ID path is simpler because it delegates proof calculation to the API, removing the need for source chain RPC access.
 
 ## Solana Considerations
 

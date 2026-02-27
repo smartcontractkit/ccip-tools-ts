@@ -6,25 +6,31 @@
  *
  * @example
  * ```bash
- * # Execute a stuck message
+ * # Execute by transaction hash
  * ccip-cli manual-exec 0xSourceTxHash... --wallet $PRIVATE_KEY
+ *
+ * # Execute by message ID (only needs dest chain RPC)
+ * ccip-cli manual-exec 0xMessageId... --wallet $PRIVATE_KEY
  *
  * # Execute with custom gas limit
  * ccip-cli manual-exec 0xSourceTxHash... --gas-limit 500000
- *
- * # Execute all messages in sender queue
- * ccip-cli manual-exec 0xSourceTxHash... --sender-queue
  * ```
  *
  * @packageDocumentation
  */
 
 import {
+  type CCIPRequest,
+  type Chain,
+  CCIPAPIClient,
+  CCIPMessageIdNotFoundError,
+  CCIPTransactionNotFoundError,
   bigIntReplacer,
   discoverOffRamp,
   estimateReceiveExecution,
   isSupportedTxHash,
 } from '@chainlink/ccip-sdk/src/index.ts'
+import { isHexString } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -34,7 +40,6 @@ import {
   logParsedError,
   prettyReceipt,
   prettyRequest,
-  prettyVerifications,
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
@@ -44,7 +49,7 @@ import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 // const MAX_EXECS_IN_BATCH = 1
 // const MAX_PENDING_TXS = 25
 
-export const command = ['manualExec <tx-hash>', 'manual-exec <tx-hash>']
+export const command = ['manualExec <tx-hash-or-id>', 'manual-exec <tx-hash-or-id>']
 export const describe = 'Execute manually pending or failed messages'
 
 /**
@@ -54,12 +59,12 @@ export const describe = 'Execute manually pending or failed messages'
  */
 export const builder = (yargs: Argv) =>
   yargs
-    .positional('tx-hash', {
+    .positional('tx-hash-or-id', {
       type: 'string',
       demandOption: true,
-      describe: 'transaction hash of the request (source) message',
+      describe: 'transaction hash or message ID (32-byte hex) of the CCIP request',
     })
-    .check(({ txHash }) => isSupportedTxHash(txHash))
+    .check(({ 'tx-hash-or-id': txHashOrId }) => isSupportedTxHash(txHashOrId))
     .options({
       'log-index': {
         type: 'number',
@@ -106,17 +111,6 @@ export const builder = (yargs: Argv) =>
         string: true,
         example: '--receiver-object-ids 0xabc... 0xdef...',
       },
-      'sender-queue': {
-        type: 'boolean',
-        describe: 'Execute all messages in sender queue, starting with the provided tx',
-        default: false,
-      },
-      'exec-failed': {
-        type: 'boolean',
-        describe:
-          'Whether to re-execute failed messages (instead of just non-executed) in sender queue',
-        implies: 'sender-queue',
-      },
     })
 
 /**
@@ -141,10 +135,34 @@ async function manualExec(
   argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts,
 ) {
   const { logger } = ctx
-  // messageId not yet implemented for Solana
-  const [getChain, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHash)
-  const [source, tx] = await tx$
-  const request = await selectRequest(await source.getMessagesInTx(tx), 'to know more', argv)
+  const [getChain, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHashOrId)
+
+  let source: Chain | undefined, offRamp
+  let request$: Promise<CCIPRequest> | ReturnType<CCIPAPIClient['getMessageById']> = (async () => {
+    const [source_, tx] = await tx$
+    source = source_
+    return selectRequest(await source_.getMessagesInTx(tx), 'to know more', argv)
+  })()
+
+  let apiClient
+  if (argv.api !== false && isHexString(argv.txHashOrId, 32)) {
+    apiClient = CCIPAPIClient.fromUrl(typeof argv.api === 'string' ? argv.api : undefined, ctx)
+    request$ = Promise.any([request$, apiClient.getMessageById(argv.txHashOrId)])
+  }
+
+  let request
+  try {
+    request = await request$
+    if ('offRampAddress' in request.message) {
+      offRamp = request.message.offRampAddress
+    }
+  } catch (err) {
+    if (err instanceof AggregateError && err.errors.length === 2) {
+      if (!(err.errors[0] instanceof CCIPTransactionNotFoundError)) throw err.errors[0] as Error
+      else if (!(err.errors[1] instanceof CCIPMessageIdNotFoundError)) throw err.errors[1] as Error
+    }
+    throw err
+  }
 
   switch (argv.format) {
     case Format.log: {
@@ -161,57 +179,53 @@ async function manualExec(
   }
 
   const dest = await getChain(request.lane.destChainSelector)
-  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
 
-  const verifications = await dest.getVerifications({ ...argv, offRamp, request })
-  switch (argv.format) {
-    case Format.log:
-      logger.log('commit =', verifications)
-      break
-    case Format.pretty:
-      logger.info('Commit (dest):')
-      await prettyVerifications.call(ctx, dest, verifications, request)
-      break
-    case Format.json:
-      logger.info(JSON.stringify(verifications, bigIntReplacer, 2))
-      break
-  }
+  let inputs
+  if (source) {
+    offRamp ??= await discoverOffRamp(source, dest, request.lane.onRamp, source)
+    const verifications = await dest.getVerifications({ ...argv, offRamp, request })
 
-  if (argv.estimateGasLimit != null) {
-    let estimated = await estimateReceiveExecution({
-      source,
-      dest,
-      routerOrRamp: offRamp,
-      message: request.message,
-    })
-    logger.info('Estimated gasLimit override:', estimated)
-    estimated += Math.ceil((estimated * argv.estimateGasLimit) / 100)
-    const origLimit = Number(
-      'ccipReceiveGasLimit' in request.message
-        ? request.message.ccipReceiveGasLimit
-        : 'gasLimit' in request.message
-          ? request.message.gasLimit
-          : request.message.computeUnits,
-    )
-    if (origLimit >= estimated) {
-      logger.warn(
-        'Estimated +',
-        argv.estimateGasLimit,
-        '% =',
-        estimated,
-        '< original gasLimit =',
-        origLimit,
-        '. Leaving unchanged.',
+    if (argv.estimateGasLimit != null) {
+      let estimated = await estimateReceiveExecution({
+        source,
+        dest,
+        routerOrRamp: offRamp,
+        message: request.message,
+      })
+      logger.info('Estimated gasLimit override:', estimated)
+      estimated += Math.ceil((estimated * argv.estimateGasLimit) / 100)
+      const origLimit = Number(
+        'ccipReceiveGasLimit' in request.message
+          ? request.message.ccipReceiveGasLimit
+          : 'gasLimit' in request.message
+            ? request.message.gasLimit
+            : request.message.computeUnits,
       )
-    } else {
-      argv.gasLimit = estimated
+      if (origLimit >= estimated) {
+        logger.warn(
+          'Estimated +',
+          argv.estimateGasLimit,
+          '% =',
+          estimated,
+          '< original gasLimit =',
+          origLimit,
+          '. Leaving unchanged.',
+        )
+      } else {
+        argv.gasLimit = estimated
+      }
     }
-  }
 
-  const input = await source.getExecutionInput({ ...argv, request, verifications })
+    const input = await source.getExecutionInput({ ...argv, request, verifications })
+    inputs = { input, offRamp }
+  }
 
   const [, wallet] = await loadChainWallet(dest, argv)
-  const receipt = await dest.execute({ ...argv, offRamp, input, wallet })
+  const receipt = await dest.execute({
+    ...argv,
+    wallet,
+    ...(inputs ?? { messageId: request.message.messageId }),
+  })
 
   switch (argv.format) {
     case Format.log:

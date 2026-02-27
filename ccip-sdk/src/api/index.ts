@@ -2,14 +2,15 @@ import { memoize } from 'micro-memoize'
 import type { SetRequired } from 'type-fest'
 
 import {
+  CCIPApiClientNotAvailableError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
   CCIPMessageNotFoundInTxError,
-  CCIPNotImplementedError,
   CCIPTimeoutError,
   CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
+import { decodeMessageV1 } from '../evm/messages.ts'
 import { HttpStatus } from '../http-status.ts'
 import { decodeMessage } from '../requests.ts'
 import {
@@ -17,8 +18,10 @@ import {
   type CCIPRequest,
   type ChainLog,
   type ExecutionInput,
+  type Lane,
   type Logger,
   type NetworkInfo,
+  type OffchainTokenData,
   type WithLogger,
   CCIPVersion,
   ChainFamily,
@@ -29,11 +32,13 @@ import { bigIntReviver, parseJson } from '../utils.ts'
 import type {
   APIErrorResponse,
   LaneLatencyResponse,
+  RawExecutionInputsResult,
   RawLaneLatencyResponse,
   RawMessageResponse,
   RawMessagesResponse,
   RawNetworkInfo,
 } from './types.ts'
+import { calculateManualExecProof } from '../execution.ts'
 
 export type { APICCIPRequestMetadata, APIErrorResponse, LaneLatencyResponse } from './types.ts'
 
@@ -46,7 +51,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.0.0-0c096d1'
+export const SDK_VERSION = '1.0.0-e7f7262'
 // generate:end
 
 /** SDK telemetry header name */
@@ -134,7 +139,7 @@ export class CCIPAPIClient {
   static {
     CCIPAPIClient.fromUrl = memoize(
       (baseUrl?: string, ctx?: CCIPAPIClientContext) => new CCIPAPIClient(baseUrl, ctx),
-      { maxArgs: 1 },
+      { maxArgs: 1, transformKey: ([baseUrl]) => [baseUrl ?? DEFAULT_API_BASE_URL] },
     )
   }
 
@@ -144,10 +149,26 @@ export class CCIPAPIClient {
    * @param ctx - Optional context with logger and custom fetch
    */
   constructor(baseUrl?: string, ctx?: CCIPAPIClientContext) {
+    if (typeof baseUrl === 'boolean' || (baseUrl as unknown) === null)
+      throw new CCIPApiClientNotAvailableError({ context: { baseUrl } }) // shouldn't happen
     this.baseUrl = baseUrl ?? DEFAULT_API_BASE_URL
     this.logger = ctx?.logger ?? console
     this.timeoutMs = ctx?.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this._fetch = ctx?.fetch ?? globalThis.fetch.bind(globalThis)
+
+    this.getMessageById = memoize(this.getMessageById.bind(this), {
+      async: true,
+      expires: 4_000,
+      maxArgs: 1,
+      maxSize: 100,
+    })
+
+    this.getExecutionInput = memoize(this.getExecutionInput.bind(this), {
+      async: true,
+      expires: 4_000,
+      maxArgs: 1,
+      maxSize: 100,
+    })
   }
 
   /**
@@ -436,16 +457,126 @@ export class CCIPAPIClient {
 
   /**
    * Fetches the execution input for a given message by id.
-   * @param messageId - The ID of the message to fetch the execution input for.
-   * @returns Either `{ encodedMessage, verifications }` or `{ message, offchainTokenData, ...proof }`, and offRamp
+   * For v2.0 messages, returns `{ encodedMessage, verifications }`.
+   * For pre-v2 messages, returns `{ message, offchainTokenData, proofs, ... }` with merkle proof.
+   *
+   * @param messageId - The CCIP message ID (32-byte hex string)
+   * @returns Execution input with offRamp address and lane info
+   *
+   * @throws {@link CCIPMessageIdNotFoundError} when message not found (404)
+   * @throws {@link CCIPTimeoutError} if request times out
+   * @throws {@link CCIPHttpError} on other HTTP errors
+   *
+   * @example
+   * ```typescript
+   * const api = CCIPAPIClient.fromUrl()
+   * const execInput = await api.getExecutionInput('0x1234...')
+   * // Use with dest.execute():
+   * const { offRamp, ...input } = execInput
+   * await dest.execute({ offRamp, input, wallet })
+   * ```
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  getExecutionInput(messageId: string): Promise<ExecutionInput & { offRamp: string }> {
-    throw new CCIPNotImplementedError(`CCIPAPIClient.getExecutionInput`)
-    // TODO: fetch (memoized) request with metadata from `getMessageById`
-    // TODO: if request doesn't contain everything needed (e.g. <v2.0), fetch `batch` and
-    // `offchainTokenData` from `/execution-input`
-    // TODO: if <v2.0, `calculateManualExecProof` and return `offRamp` and `input`
+  async getExecutionInput(messageId: string): Promise<ExecutionInput & Lane & { offRamp: string }> {
+    const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}/execution-inputs`
+
+    this.logger.debug(`CCIPAPIClient: GET ${url}`)
+
+    const response = await this._fetchWithTimeout(url, 'getExecutionInput')
+    if (!response.ok) {
+      // Try to parse structured error response from API
+      let apiError: APIErrorResponse | undefined
+      try {
+        apiError = parseJson<APIErrorResponse>(await response.text())
+      } catch {
+        // Response body not JSON, use HTTP status only
+      }
+
+      // 404 - Message not found
+      if (response.status === HttpStatus.NOT_FOUND) {
+        throw new CCIPMessageIdNotFoundError(messageId, {
+          context: apiError
+            ? {
+                apiErrorCode: apiError.error,
+                apiErrorMessage: apiError.message,
+              }
+            : undefined,
+        })
+      }
+
+      // Generic HTTP error for other cases
+      throw new CCIPHttpError(response.status, response.statusText, {
+        context: apiError
+          ? {
+              apiErrorCode: apiError.error,
+              apiErrorMessage: apiError.message,
+            }
+          : undefined,
+      })
+    }
+
+    const raw = JSON.parse(await response.text(), bigIntReviver) as RawExecutionInputsResult
+    this.logger.debug('getExecutionInput raw response:', raw)
+
+    const offRamp = raw.offramp
+    let lane: Lane
+    if ('encodedMessage' in raw) {
+      // v2 messages
+      const {
+        sourceChainSelector,
+        destChainSelector,
+        onRampAddress: onRamp,
+      } = decodeMessageV1(raw.encodedMessage)
+      return {
+        sourceChainSelector,
+        destChainSelector,
+        onRamp,
+        offRamp,
+        version: CCIPVersion.V2_0,
+        encodedMessage: raw.encodedMessage,
+        verifications: (raw.ccvData ?? []).map((ccvData, i) => ({
+          ccvData,
+          destAddress: raw.verifierAddresses[i]!,
+        })),
+      }
+    }
+
+    const messagesInBatch = raw.messageBatch.map(decodeMessage)
+    const message = messagesInBatch.find((message) => message.messageId === messageId)!
+    if ('onramp' in raw && raw.onramp && raw.version) {
+      lane = {
+        sourceChainSelector: raw.sourceChainSelector,
+        destChainSelector: raw.destChainSelector,
+        onRamp: raw.onramp,
+        version: raw.version as CCIPVersion,
+      }
+    } else {
+      ;({ lane } = await this.getMessageById(messageId))
+    }
+
+    const proof = calculateManualExecProof(messagesInBatch, lane, messageId, raw.merkleRoot, this)
+
+    const rawMessage = raw.messageBatch.find((message) => message.messageId === messageId)!
+    const offchainTokenData: OffchainTokenData[] = rawMessage.tokenAmounts.map(() => undefined)
+    if (rawMessage.usdcData?.status === 'complete')
+      offchainTokenData[0] = {
+        _tag: 'usdc',
+        message: rawMessage.usdcData.message_bytes_hex!,
+        attestation: rawMessage.usdcData.attestation!,
+      }
+    else if (rawMessage.lbtcData?.status === 'NOTARIZATION_STATUS_SESSION_APPROVED')
+      offchainTokenData[0] = {
+        _tag: 'lbtc',
+        message_hash: rawMessage.lbtcData.message_hash!,
+        attestation: rawMessage.lbtcData.attestation!,
+      }
+
+    return {
+      offRamp,
+      ...lane,
+      message,
+      offchainTokenData,
+      ...proof,
+    } as ExecutionInput & Lane & { offRamp: string }
   }
 
   /**

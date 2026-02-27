@@ -94,12 +94,13 @@ export type ChainContext = WithLogger & {
    * CCIP API client instance for lane information queries.
    *
    * - `undefined` (default): Creates CCIPAPIClient with {@link DEFAULT_API_BASE_URL}
+   * - `string`: Creates CCIPAPIClient with provided URL
    * - `CCIPAPIClient`: Uses provided instance (allows custom URL, fetch, etc.)
    * - `null`: Disables API client entirely (getLaneLatency() will throw)
    *
    * Default: `undefined` (auto-create with production endpoint)
    */
-  apiClient?: CCIPAPIClient | null
+  apiClient?: CCIPAPIClient | string | null
 
   /**
    * Retry configuration for API fallback operations.
@@ -313,7 +314,7 @@ export type ExecuteOpts = (
   | {
       /**
        * messageId of message to execute; requires `apiClient`.
-       * @remarks Currently throws CCIPNotImplementedError - API endpoint pending.
+       * The SDK will fetch execution inputs (offRamp, proofs/verifications) from the CCIP API.
        */
       messageId: string
     }
@@ -362,11 +363,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     if (apiClient === null) {
       this.apiClient = null // Explicit opt-out
       this.apiRetryConfig = null // No retry config needed without API client
-    } else if (apiClient !== undefined) {
+    } else if (apiClient && typeof apiClient !== 'string') {
       this.apiClient = apiClient // Use provided instance
       this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     } else {
-      this.apiClient = CCIPAPIClient.fromUrl(undefined, { logger }) // Default
+      this.apiClient = CCIPAPIClient.fromUrl(apiClient, ctx) // default=undefined or provided string as URL
       this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     }
   }
@@ -961,11 +962,15 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPExecTxRevertedError} if execution transaction reverts
    * @throws {@link CCIPMerkleRootMismatchError} if merkle proof is invalid
    *
-   * @example Manual execution of pending message
+   * @example Manual execution using message ID (simplified, requires API)
+   * ```typescript
+   * const receipt = await dest.execute({ messageId: '0x...', wallet })
+   * ```
+   *
+   * @example Manual execution using transaction hash
    * ```typescript
    * const input = await source.getExecutionInput({ request, verifications })
    * const receipt = await dest.execute({ offRamp, input, wallet })
-   * console.log(`Executed: ${receipt.log.transactionHash}`)
    * ```
    * @throws {@link CCIPWalletNotSignerError} if wallet cannot sign transactions
    * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm
