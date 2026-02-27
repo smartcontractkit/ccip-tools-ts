@@ -200,10 +200,12 @@ Receipts until a `success` receipt or latest block is hit.
 ### `manual-exec`
 
 ```sh
-ccip-cli manual-exec <request_transaction_hash> [--log-index num] [--gas-limit num] [--tokens-gas-limit num] [--wallet wallet]
+ccip-cli manual-exec <tx-hash-or-id> [--log-index num] [--gas-limit num] [--tokens-gas-limit num] [--wallet wallet]
 ```
 
-Try to manually execute the message in source transaction. If more than one found, user is prompted
+Try to manually execute the message identified by a source transaction hash or CCIP message ID (32-byte hex).
+When a message ID is provided and the API is available (default), execution inputs are fetched from the CCIP API,
+removing the need for source chain RPC access. If more than one message is found, user is prompted
 same as with `show` command above. `--log-index` allows pre-selecting a message non-interactively.
 
 `--gas-limit` (aliases `-L`, `--compute-units`) allows to override the exec limit for this message
@@ -215,12 +217,6 @@ specified in original request.
 `--estimate-gas-limit` option will try to estimate automatically the gas limit override for the
 message execution, based on the current state of the network. That's only for main `ccipReceive`
 exec callback. Tokens gas limit override estimation is not supported for estimation.
-
-`--sender-queue` opts into collecting all following messages from the same sender, starting from
-the provided message, and executing all of the eligible ones. By default, only pending
-(non-executed) messages are included. `--exec-failed` includes failed messages as well. This option
-can take some time, specially for older messages, as it needs to scan the source and dest networks
-since request, to find messages and their execution state.
 
 #### Solana Special Cases
 

@@ -30,7 +30,26 @@ Before manual execution, ensure:
 2. The **source chain finality** period has passed
 3. You have a funded **wallet** on the destination chain
 
-## Step-by-Step Workflow
+## Simplified Workflow (Message ID)
+
+If you have the CCIP message ID and the API is available (default), you can skip the source chain entirely:
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+const execution = await dest.execute({
+  messageId: '0x1234...', // CCIP message ID (32-byte hex)
+  wallet: destWallet,
+})
+
+console.log('Execution tx:', execution.log.transactionHash)
+```
+
+This delegates proof calculation and offchain token data fetching to the CCIP API, removing the need for source chain RPC access.
+
+## Step-by-Step Workflow (Transaction Hash)
 
 ### Step 1: Get the Original Request
 
@@ -152,7 +171,37 @@ console.log('Manual execution submitted:', execution.log.transactionHash)
 console.log('Execution confirmed in block:', execution.log.blockNumber)
 ```
 
-## Complete Example
+## Complete Example (Message ID)
+
+```typescript
+import { ethers } from 'ethers'
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+async function manuallyExecuteByMessageId(
+  destRpc: string,
+  messageId: string,
+  wallet: ethers.Signer
+) {
+  const dest = await EVMChain.fromUrl(destRpc)
+
+  const execution = await dest.execute({ messageId, wallet })
+
+  console.log('Manual execution tx:', execution.log.transactionHash)
+  return { status: 'executed', txHash: execution.log.transactionHash }
+}
+
+// Usage
+const destProvider = new ethers.JsonRpcProvider('https://rpc.fuji.avax.network')
+const destWallet = new ethers.Wallet(process.env.DEST_PRIVATE_KEY!, destProvider)
+
+await manuallyExecuteByMessageId(
+  'https://rpc.fuji.avax.network',
+  '0xYourMessageId...',
+  destWallet
+)
+```
+
+## Complete Example (Transaction Hash)
 
 ```typescript
 import { ethers } from 'ethers'
@@ -304,10 +353,15 @@ if (!tx) {
 The CLI provides a simpler interface for manual execution:
 
 ```bash
-# Execute a stuck message
+# Execute by transaction hash (needs source + dest RPCs)
 ccip-cli manual-exec 0xSourceTxHash \
-  --source ethereum-testnet-sepolia \
-  --dest avalanche-testnet-fuji \
+  --rpc https://rpc.sepolia.org \
+  --rpc https://rpc.fuji.avax.network \
+  --wallet $PRIVATE_KEY
+
+# Execute by message ID (only needs dest chain RPC)
+ccip-cli manual-exec 0xMessageId \
+  --rpc https://rpc.fuji.avax.network \
   --wallet $PRIVATE_KEY
 ```
 

@@ -457,8 +457,24 @@ export class CCIPAPIClient {
 
   /**
    * Fetches the execution input for a given message by id.
-   * @param messageId - The ID of the message to fetch the execution input for.
-   * @returns Either `{ encodedMessage, verifications }` or `{ message, offchainTokenData, ...proof }`, offRamp and lane
+   * For v2.0 messages, returns `{ encodedMessage, verifications }`.
+   * For pre-v2 messages, returns `{ message, offchainTokenData, proofs, ... }` with merkle proof.
+   *
+   * @param messageId - The CCIP message ID (32-byte hex string)
+   * @returns Execution input with offRamp address and lane info
+   *
+   * @throws {@link CCIPMessageIdNotFoundError} when message not found (404)
+   * @throws {@link CCIPTimeoutError} if request times out
+   * @throws {@link CCIPHttpError} on other HTTP errors
+   *
+   * @example
+   * ```typescript
+   * const api = CCIPAPIClient.fromUrl()
+   * const execInput = await api.getExecutionInput('0x1234...')
+   * // Use with dest.execute():
+   * const { offRamp, ...input } = execInput
+   * await dest.execute({ offRamp, input, wallet })
+   * ```
    */
   async getExecutionInput(messageId: string): Promise<ExecutionInput & Lane & { offRamp: string }> {
     const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}/execution-inputs`

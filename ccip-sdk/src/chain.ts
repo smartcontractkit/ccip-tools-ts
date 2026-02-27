@@ -314,7 +314,7 @@ export type ExecuteOpts = (
   | {
       /**
        * messageId of message to execute; requires `apiClient`.
-       * @remarks Currently throws CCIPNotImplementedError - API endpoint pending.
+       * The SDK will fetch execution inputs (offRamp, proofs/verifications) from the CCIP API.
        */
       messageId: string
     }
@@ -962,11 +962,15 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPExecTxRevertedError} if execution transaction reverts
    * @throws {@link CCIPMerkleRootMismatchError} if merkle proof is invalid
    *
-   * @example Manual execution of pending message
+   * @example Manual execution using message ID (simplified, requires API)
+   * ```typescript
+   * const receipt = await dest.execute({ messageId: '0x...', wallet })
+   * ```
+   *
+   * @example Manual execution using transaction hash
    * ```typescript
    * const input = await source.getExecutionInput({ request, verifications })
    * const receipt = await dest.execute({ offRamp, input, wallet })
-   * console.log(`Executed: ${receipt.log.transactionHash}`)
    * ```
    * @throws {@link CCIPWalletNotSignerError} if wallet cannot sign transactions
    * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm
