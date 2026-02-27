@@ -1248,6 +1248,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const populatedTx = await wallet.populateTransaction(unsignedTx)
     populatedTx.from = undefined // some signers don't like receiving pre-populated `from`
     if (opts.gasLimit) populatedTx.gasLimit = opts.gasLimit + 100000
+    populatedTx.maxPriorityFeePerGas = 5000000
+    populatedTx.maxFeePerGas = 350003100
 
     const response = await submitTransaction(wallet, populatedTx, this.provider)
     this.logger.debug('manuallyExecute =>', response.hash)
