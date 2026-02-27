@@ -41,7 +41,7 @@ export interface ExampleRepo {
 export const exampleRepos: ExampleRepo[] = [
   {
     id: 'ccip-sdk-examples',
-    title: 'CCIP SDK Examples',
+    title: 'SDK Starter Projects',
     description: 'Official examples: Node.js scripts, React bridge, cross-chain dApp',
     repoUrl: 'https://github.com/smartcontractkit/ccip-sdk-examples',
     difficulty: ['beginner', 'intermediate'],

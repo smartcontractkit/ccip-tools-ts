@@ -17,6 +17,7 @@ export {
   ChainBadge,
   ChainSupport,
   DeprecationBanner,
+  ExamplesLink,
   PackageVersion,
   RpcProviders,
 } from './composed/index.ts'

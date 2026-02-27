@@ -30,7 +30,6 @@ export default defineConfig(
             '*.mjs',
             '.cjs',
             'ccip-api-ref/plugins/docusaurus-plugin-jsonld/index.js',
-            'ccip-api-ref/plugins/docusaurus-plugin-gtm/index.js',
           ],
         },
         tsconfigRootDir: import.meta.dirname,
@@ -180,10 +179,7 @@ export default defineConfig(
   {
     files: ['ccip-api-ref/sidebars*.ts'],
     rules: {
-      'import/no-unresolved': [
-        'error',
-        { ignore: ['typedoc-sidebar\\.cjs$', '/sidebar$'] },
-      ],
+      'import/no-unresolved': ['error', { ignore: ['typedoc-sidebar\\.cjs$', '/sidebar$'] }],
       'import/extensions': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',
     },
