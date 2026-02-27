@@ -109,7 +109,7 @@ export function fetchChainsFromRpcs(
             argv.api === false
               ? null
               : typeof argv.api === 'string'
-                ? CCIPAPIClient.fromUrl(argv.api)
+                ? CCIPAPIClient.fromUrl(argv.api, ctx)
                 : undefined,
         })
         chains$.push(chain$)
