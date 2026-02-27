@@ -28,7 +28,6 @@ import {
   type ExecutionInput,
   ExecutionState,
   discoverOffRamp,
-  networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
@@ -186,14 +185,12 @@ async function execCommand(ctx: Ctx, argv: ExecArgv, destroy: () => void) {
 
   try {
     // Connect to chains
-    const sourceNetwork = networkInfo(argv.source)
-    const destNetwork = networkInfo(argv.dest)
     const getChain = fetchChainsFromRpcs(ctx, argv)
-    const source = await getChain(sourceNetwork.name)
-    const dest = await getChain(destNetwork.name)
+    const source = await getChain(argv.source)
+    const dest = await getChain(argv.dest)
 
     // Discover onRamp and offRamp
-    const onRamp = await source.getOnRampForRouter(argv.router, destNetwork.chainSelector)
+    const onRamp = await source.getOnRampForRouter(argv.router, dest.network.chainSelector)
     logger.info(`OnRamp: ${onRamp}`)
 
     const offRamp = await discoverOffRamp(source, dest, onRamp, source)
@@ -263,31 +260,15 @@ async function execCommand(ctx: Ctx, argv: ExecArgv, destroy: () => void) {
       try {
         logger.info(`⚙️  Executing messageId=${messageId} ...`)
 
-        // Get verifications (commit report)
-        const verifications = await dest.getVerifications({
+        // Execute on dest
+        const result = await dest.execute({
           ...argv,
-          offRamp,
-          request,
-        })
-
-        // Build execution input from source
-        const input: ExecutionInput = await source.getExecutionInput({
-          ...argv,
-          request,
-          verifications,
-        })
-
-        // Execute on dest — may return CCIPExecution or ChainTransaction
-        const result: CCIPExecution | ChainTransaction = (await dest.execute({
-          offRamp,
-          input,
+          messageId,
           wallet,
-          ...(argv.gasLimit != null && { gasLimit: argv.gasLimit }),
-          ...(argv.tokensGasLimit != null && { tokensGasLimit: argv.tokensGasLimit }),
           ...{ returnTx: true },
-        })) as CCIPExecution | ChainTransaction
+        })
 
-        if ('receipt' in result) {
+        if (result.receipt as unknown) {
           // CCIPExecution — we know the execution state
           executions.set(messageId, result.receipt.state)
 
@@ -303,9 +284,9 @@ async function execCommand(ctx: Ctx, argv: ExecArgv, destroy: () => void) {
             )
           }
         } else {
-          // ChainTransaction — just log the hash and count as executed
+          // just log the hash and count as executed
           totalExecuted++
-          logger.info(`✅ messageId=${messageId} sent, tx=${result.hash}`)
+          logger.info(`✅ messageId=${messageId} sent, tx=${result.log.transactionHash}`)
         }
       } catch (err) {
         totalFailed++
@@ -387,7 +368,7 @@ async function execCommand(ctx: Ctx, argv: ExecArgv, destroy: () => void) {
           // Filter by source chain
           if (
             receipt.sourceChainSelector &&
-            receipt.sourceChainSelector !== sourceNetwork.chainSelector
+            receipt.sourceChainSelector !== source.network.chainSelector
           )
             continue
 
@@ -432,27 +413,35 @@ async function execCommand(ctx: Ctx, argv: ExecArgv, destroy: () => void) {
           // Filter for our dest chain if the message has destChainSelector
           if (
             'destChainSelector' in message &&
-            message.destChainSelector !== destNetwork.chainSelector
+            message.destChainSelector !== dest.network.chainSelector
           )
             continue
 
           totalFound++
 
+          const timestamp =
+            log.tx?.timestamp ?? (await source.getBlockTimestamp(log.blockNumber).catch(() => 0))
+
           if (Date.now() - lastProgressLog >= 10_000) {
             logger.info(
-              `📡 Source scan progress: ${totalFound} requests found, ${totalSkipped} skipped, ${pendingQueue.length} queued, block=${log.blockNumber}`,
+              `📡 Source scan progress:`,
+              totalFound,
+              `requests found,`,
+              totalSkipped,
+              `skipped, `,
+              pendingQueue.length,
+              `queued, block`,
+              log.blockNumber,
+              new Date(timestamp * 1e3),
             )
             lastProgressLog = Date.now()
           }
 
-          const timestamp =
-            log.tx?.timestamp ?? (await source.getBlockTimestamp(log.blockNumber).catch(() => 0))
-
           // Build a minimal CCIPRequest for execution
           const [, version] = await source.typeAndVersion(log.address)
           const lane = {
-            sourceChainSelector: sourceNetwork.chainSelector,
-            destChainSelector: destNetwork.chainSelector,
+            sourceChainSelector: source.network.chainSelector,
+            destChainSelector: dest.network.chainSelector,
             onRamp: log.address,
             version,
           }
