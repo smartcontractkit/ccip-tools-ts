@@ -380,6 +380,41 @@ export class CCIPMessageRetrievalError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when a CCIP message has not been verified yet by the offchain system.
+ * This is a transient error - the message needs time to be verified before execution input can be retrieved.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const execInput = await api.getExecutionInput(messageId)
+ * } catch (error) {
+ *   if (error instanceof CCIPMessageNotVerifiedYetError) {
+ *     console.log(`Message not verified yet, retry after ${error.retryAfterMs}ms`)
+ *     await sleep(error.retryAfterMs ?? 15000)
+ *     // Retry the request
+ *   }
+ * }
+ * ```
+ */
+export class CCIPMessageNotVerifiedYetError extends CCIPError {
+  override readonly name = 'CCIPMessageNotVerifiedYetError'
+  /** Creates a message not verified yet error. */
+  constructor(messageId: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.MESSAGE_NOT_VERIFIED_YET,
+      `Message ${messageId} has not been verified yet. The offchain verification system needs time to process this message.`,
+      {
+        ...options,
+        isTransient: true,
+        retryAfterMs: 15000,
+        recovery: 'Wait for the message to be verified by the offchain system, then retry.',
+        context: { ...options?.context, messageId },
+      },
+    )
+  }
+}
+
 // Lane & Routing
 
 /**
@@ -3235,36 +3270,6 @@ export class CCIPSolanaLaneVersionUnsupportedError extends CCIPError {
       isTransient: false,
       context: { ...options?.context, version },
     })
-  }
-}
-
-/**
- * Thrown when multiple CCTP events found in transaction.
- *
- * @example
- * ```typescript
- * try {
- *   const cctpData = await chain.getOffchainTokenData(request)
- * } catch (error) {
- *   if (error instanceof CCIPCctpMultipleEventsError) {
- *     console.log(`Found ${error.context.count} events, expected 1`)
- *   }
- * }
- * ```
- */
-export class CCIPCctpMultipleEventsError extends CCIPError {
-  override readonly name = 'CCIPCctpMultipleEventsError'
-  /** Creates a CCTP multiple events error. */
-  constructor(count: number, txSignature: string, options?: CCIPErrorOptions) {
-    super(
-      CCIPErrorCode.CCTP_MULTIPLE_EVENTS,
-      `Expected only 1 CcipCctpMessageSentEvent, found ${count} in transaction ${txSignature}`,
-      {
-        ...options,
-        isTransient: false,
-        context: { ...options?.context, count, txSignature },
-      },
-    )
   }
 }
 

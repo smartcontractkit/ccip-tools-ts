@@ -10,7 +10,7 @@
  * ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet
  *
  * # Use custom API URL
- * ccip-cli lane-latency sepolia fuji --api-url https://custom-api.example.com
+ * ccip-cli lane-latency sepolia fuji --api https://custom-api.example.com
  * ```
  *
  * @packageDocumentation
@@ -49,10 +49,6 @@ export const builder = (yargs: Argv) =>
       demandOption: true,
       describe: 'Destination network (chainId, selector, or name). Example: arbitrum-mainnet',
     })
-    .option('api-url', {
-      type: 'string',
-      describe: 'Custom CCIP API URL (defaults to api.ccip.chain.link)',
-    })
 
 /**
  * Handler for the lane-latency command.
@@ -85,7 +81,7 @@ export async function getLaneLatencyCmd(ctx: Ctx, argv: Parameters<typeof handle
   const sourceNetwork = networkInfo(argv.source)
   const destNetwork = networkInfo(argv.dest)
 
-  const apiClient = CCIPAPIClient.fromUrl(argv.apiUrl, { logger })
+  const apiClient = CCIPAPIClient.fromUrl(argv.api === true ? undefined : argv.api, ctx)
 
   const result = await apiClient.getLaneLatency(
     sourceNetwork.chainSelector,

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - SDK: `getFeeTokens` now supports CCIP v2.0 lanes (via FeeQuoter, same as v1.6)
+- SDK: implemented `CCIPAPIClient.getExecutionInput(messageId: string)`
+- SDK: `dest.execute` and `dest.generateUnsignedExecute` can now execute directly from a `messageId`, without the need for an explicit `source.getExecutionInput`
+- SDK: `Chain` constructors context can receive a string URL for `apiClient`
+- CLI: using all the above, `manual-exec` now can receive a `messageId` as positional argument (besides `txHash`), and execute from CCIP-API's `/execution-inputs` without needing a source RPC
 
 ## [1.0.0] - 2026-02-26 - Major refactoring stable
 

@@ -31,6 +31,7 @@ export {
   CCIPMessageInvalidError,
   CCIPMessageNotFoundInTxError,
   CCIPMessageNotInBatchError,
+  CCIPMessageNotVerifiedYetError,
   CCIPMessageRetrievalError,
 } from './specialized.ts'
 
@@ -100,7 +101,6 @@ export {
 export {
   CCIPBlockTimeNotFoundError,
   CCIPCctpDecodeError,
-  CCIPCctpMultipleEventsError,
   CCIPExecutionReportChainMismatchError,
   CCIPExecutionStateInvalidError,
   CCIPExtraArgsLengthInvalidError,

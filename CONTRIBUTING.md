@@ -209,7 +209,7 @@ constructor(network: NetworkInfo, ctx?: ChainContext) {
   } else if (apiClient !== undefined) {
     this.apiClient = apiClient                         // Use provided instance
   } else {
-    this.apiClient = CCIPAPIClient.fromUrl(undefined, { logger })  // Default
+    this.apiClient = CCIPAPIClient.fromUrl(undefined, ctx)  // Default
   }
 }
 ```
