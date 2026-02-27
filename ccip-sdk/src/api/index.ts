@@ -11,6 +11,7 @@ import {
   CCIPTimeoutError,
   CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
+import { decodeMessageV1 } from '../evm/messages.ts'
 import { HttpStatus } from '../http-status.ts'
 import { decodeMessage } from '../requests.ts'
 import {
@@ -458,9 +459,9 @@ export class CCIPAPIClient {
   /**
    * Fetches the execution input for a given message by id.
    * @param messageId - The ID of the message to fetch the execution input for.
-   * @returns Either `{ encodedMessage, verifications }` or `{ message, offchainTokenData, ...proof }`, and offRamp
+   * @returns Either `{ encodedMessage, verifications }` or `{ message, offchainTokenData, ...proof }`, offRamp and lane
    */
-  async getExecutionInput(messageId: string): Promise<ExecutionInput & { offRamp: string }> {
+  async getExecutionInput(messageId: string): Promise<ExecutionInput & Lane & { offRamp: string }> {
     const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}/execution-inputs`
 
     this.logger.debug(`CCIPAPIClient: GET ${url}`)
@@ -502,11 +503,21 @@ export class CCIPAPIClient {
     this.logger.debug('getExecutionInput raw response:', raw)
 
     const offRamp = raw.offramp
+    let lane: Lane
     if ('encodedMessage' in raw) {
       // v2 messages
       if (!raw.verificationComplete) throw new CCIPMessageNotVerifiedYetError(messageId)
+      const {
+        sourceChainSelector,
+        destChainSelector,
+        onRampAddress: onRamp,
+      } = decodeMessageV1(raw.encodedMessage)
       return {
+        sourceChainSelector,
+        destChainSelector,
+        onRamp,
         offRamp,
+        version: CCIPVersion.V2_0,
         encodedMessage: raw.encodedMessage,
         verifications: raw.ccvData.map((ccvData, i) => ({
           ccvData,
@@ -517,7 +528,6 @@ export class CCIPAPIClient {
 
     const messagesInBatch = raw.messageBatch.map(decodeMessage)
     const message = messagesInBatch.find((message) => message.messageId === messageId)!
-    let lane: Lane
     if ('onramp' in raw && raw.onramp && raw.version) {
       lane = {
         sourceChainSelector: raw.sourceChainSelector,
@@ -548,10 +558,11 @@ export class CCIPAPIClient {
 
     return {
       offRamp,
+      ...lane,
       message,
       offchainTokenData,
       ...proof,
-    } as ExecutionInput & { offRamp: string }
+    } as ExecutionInput & Lane & { offRamp: string }
   }
 
   /**
