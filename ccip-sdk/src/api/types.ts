@@ -221,7 +221,7 @@ export type RawExecutionInputsResult = {
     | {
         encodedMessage: string
         verificationComplete?: boolean
-        ccvData: string[]
+        ccvData?: string[]
         verifierAddresses: string[]
       }
   )
