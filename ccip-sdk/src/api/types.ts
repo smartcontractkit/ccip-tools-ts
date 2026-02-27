@@ -192,26 +192,36 @@ export type RawExecutionInputsResult = {
   offramp: string
 } & (
   | {
-      messageBatch: {
-        [key: string]: unknown
-        messageId: string
-        tokenAmounts: { token: string; amount: string }[]
-        usdcData?: {
-          status: 'pending_confirmations' | 'complete'
-          attestation?: string
-          message_bytes_hex?: string
-        }
-        lbtcData?: {
-          status: 'NOTARIZATION_STATUS_SESSION_APPROVED' | 'NOTARIZATION_STATUS_SESSION_PENDING'
-          attestation?: string
-          message_hash?: string
-        }
-      }[]
+      onramp: string
+      sourceChainSelector: bigint
+      destChainSelector: bigint
+      version: string
     }
-  | {
-      encodedMessage: string
-      verificationComplete?: boolean
-      ccvData: string[]
-      verifierAddresses: string[]
-    }
-)
+  | object
+) &
+  (
+    | {
+        merkleRoot?: string
+        messageBatch: {
+          [key: string]: unknown
+          messageId: string
+          tokenAmounts: { token: string; amount: string }[]
+          usdcData?: {
+            status: 'pending_confirmations' | 'complete'
+            attestation?: string
+            message_bytes_hex?: string
+          }
+          lbtcData?: {
+            status: 'NOTARIZATION_STATUS_SESSION_APPROVED' | 'NOTARIZATION_STATUS_SESSION_PENDING'
+            attestation?: string
+            message_hash?: string
+          }
+        }[]
+      }
+    | {
+        encodedMessage: string
+        verificationComplete?: boolean
+        ccvData: string[]
+        verifierAddresses: string[]
+      }
+  )

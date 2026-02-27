@@ -17,6 +17,7 @@ import {
   type CCIPRequest,
   type ChainLog,
   type ExecutionInput,
+  type Lane,
   type Logger,
   type NetworkInfo,
   type OffchainTokenData,
@@ -513,15 +514,19 @@ export class CCIPAPIClient {
 
     const messagesInBatch = raw.messageBatch.map(decodeMessage)
     const message = messagesInBatch.find((message) => message.messageId === messageId)!
-    const request = await this.getMessageById(messageId)
+    let lane: Lane
+    if ('onramp' in raw && raw.onramp && raw.version) {
+      lane = {
+        sourceChainSelector: raw.sourceChainSelector,
+        destChainSelector: raw.destChainSelector,
+        onRamp: raw.onramp,
+        version: raw.version as CCIPVersion,
+      }
+    } else {
+      ;({ lane } = await this.getMessageById(messageId))
+    }
 
-    const proof = calculateManualExecProof(
-      messagesInBatch,
-      request.lane,
-      messageId,
-      undefined,
-      this,
-    )
+    const proof = calculateManualExecProof(messagesInBatch, lane, messageId, raw.merkleRoot, this)
 
     const rawMessage = raw.messageBatch.find((message) => message.messageId === messageId)!
     const offchainTokenData: OffchainTokenData[] = rawMessage.tokenAmounts.map(() => undefined)
