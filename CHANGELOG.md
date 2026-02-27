@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: `getFeeTokens` now supports CCIP v2.0 lanes (via FeeQuoter, same as v1.6)
+
 ## [1.0.0] - 2026-02-26 - Major refactoring stable
 
 - SDK: `getOffchainTokenData` now uses CCTPv2 API for USDC transfers; can be called from either `source` or `dest`
