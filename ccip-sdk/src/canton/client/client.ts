@@ -1,6 +1,4 @@
-import createClient from 'openapi-fetch'
-
-import type { components, paths } from './generated/ledger-api.ts'
+import type { components } from './generated/ledger-api.ts'
 import { CCIPError } from '../../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../../errors/codes.ts'
 
@@ -39,31 +37,23 @@ export interface CantonClientConfig {
  * Create a typed Canton Ledger API client
  */
 export function createCantonClient(config: CantonClientConfig) {
-  const client = createClient<paths>({
-    baseUrl: config.baseUrl,
-    headers: config.token ? { Authorization: `Bearer ${config.token}` } : undefined,
-  })
+  const baseUrl = config.baseUrl.replace(/\/$/, '')
+  const headers = buildHeaders(config.token)
+  const timeoutMs = config.timeout ?? 30_000
 
   return {
-    /**
-     * Raw openapi-fetch client for advanced usage
-     */
-    raw: client,
-
     /**
      * Submit a command and wait for completion
      * @returns The update ID and completion offset
      */
     async submitAndWait(commands: JsCommands): Promise<SubmitAndWaitResponse> {
-      const { data, error } = await client.POST('/v2/commands/submit-and-wait', {
-        body: commands,
-      })
-
-      if (error || !data) {
-        throw new CantonApiError('submitAndWait failed', error)
-      }
-
-      return data
+      return ledgerPost<SubmitAndWaitResponse>(
+        baseUrl,
+        '/v2/commands/submit-and-wait',
+        headers,
+        timeoutMs,
+        commands,
+      )
     },
 
     /**
@@ -74,18 +64,13 @@ export function createCantonClient(config: CantonClientConfig) {
       commands: JsCommands,
       eventFormat?: EventFormat,
     ): Promise<JsSubmitAndWaitForTransactionResponse> {
-      const { data, error } = await client.POST('/v2/commands/submit-and-wait-for-transaction', {
-        body: {
-          commands,
-          eventFormat,
-        },
-      })
-
-      if (error || !data) {
-        throw new CantonApiError('submitAndWaitForTransaction failed', error)
-      }
-
-      return data
+      return ledgerPost<JsSubmitAndWaitForTransactionResponse>(
+        baseUrl,
+        '/v2/commands/submit-and-wait-for-transaction',
+        headers,
+        timeoutMs,
+        { commands, eventFormat },
+      )
     },
 
     /**
@@ -96,30 +81,28 @@ export function createCantonClient(config: CantonClientConfig) {
       request: GetActiveContractsRequest,
       options?: { limit?: number },
     ): Promise<JsGetActiveContractsResponse[]> {
-      const { data, error } = await client.POST('/v2/state/active-contracts', {
-        body: request,
-        params: {
-          query: options?.limit ? { limit: options.limit } : undefined,
-        },
-      })
-
-      if (error || !data) {
-        throw new CantonApiError('getActiveContracts failed', error)
-      }
-
-      return data
+      const queryParams =
+        options?.limit !== undefined ? { limit: String(options.limit) } : undefined
+      return ledgerPost<JsGetActiveContractsResponse[]>(
+        baseUrl,
+        '/v2/state/active-contracts',
+        headers,
+        timeoutMs,
+        request,
+        queryParams,
+      )
     },
 
     /**
      * Get the current ledger end offset
      */
     async getLedgerEnd(): Promise<{ offset: number }> {
-      const { data, error } = await client.GET('/v2/state/ledger-end')
-
-      if (error || !data) {
-        throw new CantonApiError('getLedgerEnd failed', error)
-      }
-
+      const data = await ledgerGet<{ offset?: number }>(
+        baseUrl,
+        '/v2/state/ledger-end',
+        headers,
+        timeoutMs,
+      )
       return { offset: data.offset ?? 0 }
     },
 
@@ -127,16 +110,14 @@ export function createCantonClient(config: CantonClientConfig) {
      * List known parties on the participant
      */
     async listParties(options?: { filterParty?: string }) {
-      const { data, error } = await client.GET('/v2/parties', {
-        params: {
-          query: options?.filterParty ? { 'filter-party': options.filterParty } : undefined,
-        },
-      })
-
-      if (error || !data) {
-        throw new CantonApiError('listParties failed', error)
-      }
-
+      const queryParams = options?.filterParty ? { 'filter-party': options.filterParty } : undefined
+      const data = await ledgerGet<{ partyDetails?: unknown[] }>(
+        baseUrl,
+        '/v2/parties',
+        headers,
+        timeoutMs,
+        queryParams,
+      )
       return data.partyDetails
     },
 
@@ -144,12 +125,12 @@ export function createCantonClient(config: CantonClientConfig) {
      * Get the participant ID
      */
     async getParticipantId(): Promise<string> {
-      const { data, error } = await client.GET('/v2/parties/participant-id')
-
-      if (error || !data) {
-        throw new CantonApiError('getParticipantId failed', error)
-      }
-
+      const data = await ledgerGet<{ participantId?: string }>(
+        baseUrl,
+        '/v2/parties/participant-id',
+        headers,
+        timeoutMs,
+      )
       return data.participantId ?? ''
     },
 
@@ -157,12 +138,12 @@ export function createCantonClient(config: CantonClientConfig) {
      * Get the list of synchronizers the participant is currently connected to
      */
     async getConnectedSynchronizers(): Promise<ConnectedSynchronizer[]> {
-      const { data, error } = await client.GET('/v2/state/connected-synchronizers')
-
-      if (error || !data) {
-        throw new CantonApiError('getConnectedSynchronizers failed', error)
-      }
-
+      const data = await ledgerGet<{ connectedSynchronizers?: ConnectedSynchronizer[] }>(
+        baseUrl,
+        '/v2/state/connected-synchronizers',
+        headers,
+        timeoutMs,
+      )
       return data.connectedSynchronizers ?? []
     },
 
@@ -171,8 +152,8 @@ export function createCantonClient(config: CantonClientConfig) {
      */
     async isAlive(): Promise<boolean> {
       try {
-        const { error } = await client.GET('/livez')
-        return !error
+        await ledgerRequest('GET', baseUrl, '/livez', headers, timeoutMs)
+        return true
       } catch {
         return false
       }
@@ -183,8 +164,8 @@ export function createCantonClient(config: CantonClientConfig) {
      */
     async isReady(): Promise<boolean> {
       try {
-        const { data, error } = await client.GET('/readyz')
-        return !error && data !== undefined
+        await ledgerRequest('GET', baseUrl, '/readyz', headers, timeoutMs)
+        return true
       } catch {
         return false
       }
@@ -197,48 +178,49 @@ export function createCantonClient(config: CantonClientConfig) {
      * @returns The full update with all events
      */
     async getUpdateById(updateId: string, party: string): Promise<unknown> {
-      const { data, error } = await client.POST('/v2/updates/update-by-id', {
-        body: {
-          updateId,
-          updateFormat: {
-            includeTransactions: {
-              eventFormat: {
-                filtersByParty: {
-                  [party]: {
-                    cumulative: [
-                      {
-                        identifierFilter: {
-                          WildcardFilter: {
-                            value: {
-                              includeCreatedEventBlob: false,
-                            },
+      return ledgerPost<unknown>(baseUrl, '/v2/updates/update-by-id', headers, timeoutMs, {
+        updateId,
+        updateFormat: {
+          includeTransactions: {
+            eventFormat: {
+              filtersByParty: {
+                [party]: {
+                  cumulative: [
+                    {
+                      identifierFilter: {
+                        WildcardFilter: {
+                          value: {
+                            includeCreatedEventBlob: false,
                           },
                         },
                       },
-                    ],
-                  },
+                    },
+                  ],
                 },
-                verbose: true,
               },
-              transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
+              verbose: true,
             },
+            transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
           },
         },
       })
-
-      if (error || !data) {
-        throw new CantonApiError('getUpdateById failed', error)
-      }
-
-      return data
     },
   }
 }
 
 /**
+ * Type alias for the Canton client instance
+ */
+export type CantonClient = ReturnType<typeof createCantonClient>
+
+// ---------------------------------------------------------------------------
+// Error class
+// ---------------------------------------------------------------------------
+
+/**
  * Custom error class for Canton API errors
  */
-export class CantonApiError extends CCIPError {
+class CantonApiError extends CCIPError {
   override readonly name = 'CantonApiError'
 
   constructor(message: string, error: unknown, statusCode?: number) {
@@ -268,7 +250,76 @@ export class CantonApiError extends CCIPError {
   }
 }
 
-/**
- * Type alias for the Canton client instance
- */
-export type CantonClient = ReturnType<typeof createCantonClient>
+function buildHeaders(token?: string): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  return headers
+}
+
+async function parseErrorBody(response: Response): Promise<unknown> {
+  try {
+    return await response.json()
+  } catch {
+    return `HTTP ${response.status}`
+  }
+}
+
+async function ledgerRequest<T>(
+  method: 'GET' | 'POST',
+  baseUrl: string,
+  path: string,
+  headers: Record<string, string>,
+  timeoutMs: number,
+  options?: { body?: unknown; queryParams?: Record<string, string> },
+): Promise<T> {
+  const url = new URL(path, baseUrl)
+  if (options?.queryParams) {
+    for (const [key, value] of Object.entries(options.queryParams)) {
+      url.searchParams.set(key, value)
+    }
+  }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let response: Response
+  try {
+    response = await fetch(url.toString(), {
+      method,
+      headers,
+      body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal,
+    })
+  } catch (err) {
+    throw new CantonApiError(`${method} ${path} failed`, err)
+  } finally {
+    clearTimeout(timer)
+  }
+  if (!response.ok) {
+    throw new CantonApiError(
+      `${method} ${path} failed`,
+      await parseErrorBody(response),
+      response.status,
+    )
+  }
+  return response.json() as Promise<T>
+}
+
+async function ledgerGet<T>(
+  baseUrl: string,
+  path: string,
+  headers: Record<string, string>,
+  timeoutMs: number,
+  queryParams?: Record<string, string>,
+): Promise<T> {
+  return ledgerRequest<T>('GET', baseUrl, path, headers, timeoutMs, { queryParams })
+}
+
+async function ledgerPost<T>(
+  baseUrl: string,
+  path: string,
+  headers: Record<string, string>,
+  timeoutMs: number,
+  body: unknown,
+  queryParams?: Record<string, string>,
+): Promise<T> {
+  return ledgerRequest<T>('POST', baseUrl, path, headers, timeoutMs, { body, queryParams })
+}
