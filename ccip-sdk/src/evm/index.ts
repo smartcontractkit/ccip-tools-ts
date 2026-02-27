@@ -1461,7 +1461,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         tokens = Array.from(tokens_)
         break
       }
-      case CCIPVersion.V1_6: {
+      case CCIPVersion.V1_6:
+      case CCIPVersion.V2_0: {
         const feeQuoter = await this.getFeeQuoterFor(onRamp)
         const contract = new Contract(
           feeQuoter,
