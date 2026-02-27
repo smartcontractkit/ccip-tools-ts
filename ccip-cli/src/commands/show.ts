@@ -97,25 +97,27 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   const { logger } = ctx
   const [getChain, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHashOrId)
 
-  let source: Chain | undefined
+  let source: Chain | undefined, offRamp
   let request$ = (async () => {
     const [source_, tx] = await tx$
     source = source_
     return selectRequest(await source_.getMessagesInTx(tx), 'to know more', argv)
   })()
 
-  if (argv.api !== false) {
+  if (argv.api !== false && isHexString(argv.txHashOrId, 32)) {
     const apiClient = CCIPAPIClient.fromUrl(
       typeof argv.api === 'string' ? argv.api : undefined,
       ctx,
     )
-    if (isHexString(argv.txHashOrId, 32)) {
-      request$ = Promise.any([request$, apiClient.getMessageById(argv.txHashOrId)])
-    }
+    request$ = Promise.any([request$, apiClient.getMessageById(argv.txHashOrId)])
   }
+
   let request
   try {
     request = await request$
+    if ('offRampAddress' in request.message) {
+      offRamp = request.message.offRampAddress
+    }
   } catch (err) {
     if (err instanceof AggregateError && err.errors.length === 2) {
       if (!(err.errors[0] instanceof CCIPTransactionNotFoundError)) throw err.errors[0] as Error
@@ -124,6 +126,8 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     throw err
   }
   if (!source) {
+    // source isn't strictly needed when fetching messageId from API, but it may be useful to print
+    // more information, e.g. request's token symbols
     try {
       source = await getChain(request.lane.sourceChainSelector)
     } catch (err) {
@@ -193,7 +197,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   })()
 
   const dest = await getChain(request.lane.destChainSelector)
-  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp, source)
+  offRamp ??= await discoverOffRamp(source, dest, request.lane.onRamp, source)
 
   let cancelWaitVerifications: (() => void) | undefined
   const verifications$ = (async () => {
