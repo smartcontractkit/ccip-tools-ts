@@ -1,33 +1,11 @@
-import { keccak256, toUtf8Bytes } from 'ethers'
-
-import type {
-  AcsDisclosureConfig,
-  DisclosedContract,
-  DisclosureProvider,
-  ExecutionDisclosures,
-  SendDisclosures,
-} from './types.ts'
-import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
+import type { DisclosedContract } from './types.ts'
+import { CCIPError, CCIPErrorCode, CCIPNotImplementedError } from '../../errors/index.ts'
 import {
   type CantonClient,
   type EventFormat,
   type GetActiveContractsRequest,
   createCantonClient,
 } from '../client/index.ts'
-
-/**
- * Compute the Canton `InstanceAddress` from a contract's `instanceId` and its
- * signatory party. Matches Go: `instanceID.RawInstanceAddress(party).InstanceAddress()`.
- *
- * Format: `keccak256(utf8("<instanceId>@<signatoryParty>"))`
- */
-function computeInstanceAddress(instanceId: string, signatory: string): string {
-  return keccak256(toUtf8Bytes(`${instanceId}@${signatory}`))
-}
-
-function instanceAddressEquals(a: string, b: string): boolean {
-  return a.toLowerCase().replace(/^0x/, '') === b.toLowerCase().replace(/^0x/, '')
-}
 
 /**
  * Extract the `instanceId` string from a contract's `createArgument` object.
@@ -83,14 +61,8 @@ function buildWildcardEventFormat(party: string): EventFormat {
  * without requiring a specific package ID.
  */
 const CCIP_MODULE_ENTITIES = {
-  offRamp: 'CCIP.OffRamp:OffRamp',
-  globalConfig: 'CCIP.GlobalConfig:GlobalConfig',
-  tokenAdminRegistry: 'CCIP.TokenAdminRegistry:TokenAdminRegistry',
-  rmnRemote: 'CCIP.RMNRemote:RMNRemote',
-  committeeVerifier: 'CCIP.CommitteeVerifier:CommitteeVerifier',
   perPartyRouter: 'CCIP.PerPartyRouter:PerPartyRouter',
-  onRamp: 'CCIP.OnRamp:OnRamp',
-  feeQuoter: 'CCIP.FeeQuoter:FeeQuoter',
+  ccipReceiver: 'CCIP.CCIPReceiver:CCIPReceiver',
 } as const
 
 type CcipContractType = keyof typeof CCIP_MODULE_ENTITIES
@@ -118,12 +90,14 @@ async function fetchRichSnapshot(
   party: string,
 ): Promise<Map<string, RichContractMatch[]>> {
   const { offset } = await client.getLedgerEnd()
+
   const request: GetActiveContractsRequest = {
     eventFormat: buildWildcardEventFormat(party),
     verbose: false,
     activeAtOffset: offset,
   }
 
+  // Note: this may be inefficient and if the party has many active contracts.
   const responses = await client.getActiveContracts(request)
   const byModuleEntity = new Map<string, RichContractMatch[]>()
 
@@ -156,27 +130,24 @@ async function fetchRichSnapshot(
 }
 
 /**
- * From a pre-fetched ACS snapshot, find the single contract matching the given
- * contract type and instance address.
+ * From a pre-fetched ACS snapshot, return the single active contract of the given type
+ * whose signatory matches `party`.
+ *
+ * Used for contracts (like `CCIPReceiver`) whose instance IDs are generated with a random
+ * suffix at deployment time and therefore cannot be derived from the party ID.
  *
  * @throws `CCIPError(CANTON_API_ERROR)` if no matching contract is found.
  */
-function pickByInstanceAddress(
+function pickBySignatory(
   snapshot: Map<string, RichContractMatch[]>,
   contractType: CcipContractType,
-  targetInstanceAddress: string,
+  party: string,
 ): DisclosedContract {
   const moduleEntity = CCIP_MODULE_ENTITIES[contractType]
   const candidates = snapshot.get(moduleEntity) ?? []
 
   for (const c of candidates) {
-    if (!c.instanceId || !c.signatory) continue
-    if (
-      instanceAddressEquals(
-        computeInstanceAddress(c.instanceId, c.signatory),
-        targetInstanceAddress,
-      )
-    ) {
+    if (c.signatory === party) {
       return {
         templateId: c.templateId,
         contractId: c.contractId,
@@ -188,46 +159,41 @@ function pickByInstanceAddress(
 
   throw new CCIPError(
     CCIPErrorCode.CANTON_API_ERROR,
-    `Canton ACS: no active "${moduleEntity}" contract found at instance address ` +
-      `${targetInstanceAddress}. Verify the address is correct and the contract is ` +
-      `active for the configured party.`,
+    `Canton ACS: no active "${moduleEntity}" contract found with signatory "${party}". ` +
+      `Verify the party is correct and the contract is active.`,
   )
 }
 
-// ---------------------------------------------------------------------------
-// AcsDisclosureProvider
-// ---------------------------------------------------------------------------
+/**
+ * Configuration for the ACS-based disclosure provider.
+ * Requires direct access to the Canton Ledger API and the full set of contract
+ * instance addresses.
+ */
+export type AcsDisclosureConfig = {
+  /** Canton party ID acting on behalf of the user */
+  party: string
+}
+
+/**
+ * Same party disclosed contracts required to submit a `ccipExecute` command on Canton.
+ */
+export type AcsExecutionDisclosures = {
+  perPartyRouter: DisclosedContract
+  ccipReceiver: DisclosedContract
+}
+
+/**
+ * Same party disclosed contracts required to submit a `ccipSend` command on Canton.
+ */
+export type AcsSendDisclosures = never // not implemented yet
 
 /**
  * Disclosure provider that fetches `createdEventBlob`s directly from the Canton
  * Ledger API Active Contract Set.
  *
- * A single wildcard ACS query is issued per `fetchExecutionDisclosures()` /
- * `fetchSendDisclosures()` call (package-ID agnostic, matches the EDS strategy).
- *
- * @example
- * ```ts
- * const provider = new AcsDisclosureProvider(cantonClient, {
- *   jwt: '...',
- *   party: 'Alice::122...',
- *   instanceAddresses: {
- *     offRampAddress: '0xabc...',
- *     globalConfigAddress: '0xdef...',
- *     tokenAdminRegistryAddress: '0x123...',
- *     rmnRemoteAddress: '0x456...',
- *     perPartyRouterFactoryAddress: '0x789...',
- *     ccvAddresses: ['0xaaa...'],
- *   },
- * })
- * const disclosures = await provider.fetchExecutionDisclosures()
- * ```
- *
- * Use this provider when:
- *  - Direct Ledger API access is available.
- *  - A running EDS instance is not needed (local dev, integration tests).
- *  - Multiple CCVs or GlobalConfig / RMNRemote disclosures are required.
+ * Use this provider to access disclosures available in the same party
  */
-export class AcsDisclosureProvider implements DisclosureProvider {
+export class AcsDisclosureProvider {
   private readonly client: CantonClient
   private readonly config: AcsDisclosureConfig
 
@@ -235,7 +201,7 @@ export class AcsDisclosureProvider implements DisclosureProvider {
    * Create an `AcsDisclosureProvider` from a pre-built Canton Ledger API client.
    *
    * @param client - Authenticated Canton Ledger API client (JWT already embedded).
-   * @param config - ACS provider configuration: party ID and contract instance addresses.
+   * @param config - ACS provider configuration: party ID
    */
   constructor(client: CantonClient, config: AcsDisclosureConfig) {
     this.client = client
@@ -256,70 +222,24 @@ export class AcsDisclosureProvider implements DisclosureProvider {
 
   /**
    * Fetch all contracts that must be disclosed for a `ccipExecute` command.
-   *
-   * Issues a single wildcard ACS query, then resolves OffRamp, GlobalConfig,
-   * TokenAdminRegistry, RMNRemote, and all CCVs by instance address.
    */
-  async fetchExecutionDisclosures(extraCcvAddresses: string[] = []): Promise<ExecutionDisclosures> {
-    const { party, instanceAddresses, additionalCcvAddresses = [] } = this.config
-    const snapshot = await fetchRichSnapshot(this.client, party)
+  async fetchExecutionDisclosures(): Promise<AcsExecutionDisclosures> {
+    const snapshot = await fetchRichSnapshot(this.client, this.config.party)
 
-    const offRamp = pickByInstanceAddress(snapshot, 'offRamp', instanceAddresses.offRampAddress)
-    const globalConfig = pickByInstanceAddress(
-      snapshot,
-      'globalConfig',
-      instanceAddresses.globalConfigAddress,
-    )
-    const tokenAdminRegistry = pickByInstanceAddress(
-      snapshot,
-      'tokenAdminRegistry',
-      instanceAddresses.tokenAdminRegistryAddress,
-    )
-    const rmnRemote = pickByInstanceAddress(
-      snapshot,
-      'rmnRemote',
-      instanceAddresses.rmnRemoteAddress,
-    )
+    const existingRouter = pickBySignatory(snapshot, 'perPartyRouter', this.config.party)
+    const existingReceiver = pickBySignatory(snapshot, 'ccipReceiver', this.config.party)
 
-    const allCcvAddresses = [
-      ...new Set([
-        ...instanceAddresses.ccvAddresses,
-        ...additionalCcvAddresses,
-        ...extraCcvAddresses,
-      ]),
-    ]
-
-    const verifiers: DisclosedContract[] = allCcvAddresses.map((addr) =>
-      pickByInstanceAddress(snapshot, 'committeeVerifier', addr),
-    )
-
-    return { offRamp, globalConfig, tokenAdminRegistry, rmnRemote, verifiers }
+    return {
+      perPartyRouter: existingRouter,
+      ccipReceiver: existingReceiver,
+    }
   }
 
   /**
    * Fetch all contracts that must be disclosed for a `ccipSend` command.
-   *
-   * Requires `routerAddress`, `onRampAddress`, and `feeQuoterAddress` to be
-   * provided in `instanceAddresses`.
    */
-  async fetchSendDisclosures(): Promise<SendDisclosures> {
-    const { party, instanceAddresses } = this.config
-    const { routerAddress, onRampAddress, feeQuoterAddress } = instanceAddresses
-
-    if (!routerAddress || !onRampAddress || !feeQuoterAddress) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        'Canton ACS: fetchSendDisclosures requires routerAddress, onRampAddress, and ' +
-          'feeQuoterAddress to be set in the instanceAddresses configuration.',
-      )
-    }
-
-    const snapshot = await fetchRichSnapshot(this.client, party)
-
-    const router = pickByInstanceAddress(snapshot, 'perPartyRouter', routerAddress)
-    const onRamp = pickByInstanceAddress(snapshot, 'onRamp', onRampAddress)
-    const feeQuoter = pickByInstanceAddress(snapshot, 'feeQuoter', feeQuoterAddress)
-
-    return { router, onRamp, feeQuoter }
+  async fetchSendDisclosures(): Promise<AcsSendDisclosures> {
+    await Promise.resolve() // placeholder for potential future implementation
+    throw new CCIPNotImplementedError('AcsDisclosureProvider.fetchSendDisclosures')
   }
 }
