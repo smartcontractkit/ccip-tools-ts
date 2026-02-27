@@ -461,6 +461,12 @@ export class CCIPAPIClient {
    * @returns Either `{ encodedMessage, verifications }` or `{ message, offchainTokenData, ...proof }`, offRamp and lane
    */
   async getExecutionInput(messageId: string): Promise<ExecutionInput & Lane & { offRamp: string }> {
+    const request = await this.getMessageById(messageId)
+    if (request.metadata.receiptTransactionHash != null)
+      throw new Error(
+        `Already executed: ${messageId} => ${request.metadata.receiptTransactionHash}`,
+      )
+
     const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}/execution-inputs`
 
     this.logger.debug(`CCIPAPIClient: GET ${url}`)
@@ -534,7 +540,7 @@ export class CCIPAPIClient {
         version: raw.version as CCIPVersion,
       }
     } else {
-      ;({ lane } = await this.getMessageById(messageId))
+      lane = request.lane
     }
 
     const proof = calculateManualExecProof(messagesInBatch, lane, messageId, raw.merkleRoot, this)
