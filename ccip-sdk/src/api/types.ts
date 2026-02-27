@@ -192,7 +192,7 @@ export type RawExecutionInputsResult = {
   offramp: string
 } & (
   | {
-      messagesBatch: {
+      messageBatch: {
         [key: string]: unknown
         messageId: string
         tokenAmounts: { token: string; amount: string }[]

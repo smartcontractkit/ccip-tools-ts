@@ -457,8 +457,6 @@ export class CCIPAPIClient {
    * @returns Either `{ encodedMessage, verifications }` or `{ message, offchainTokenData, ...proof }`, and offRamp
    */
   async getExecutionInput(messageId: string): Promise<ExecutionInput & { offRamp: string }> {
-    const request = await this.getMessageById(messageId)
-
     const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}/execution-inputs`
 
     this.logger.debug(`CCIPAPIClient: GET ${url}`)
@@ -513,8 +511,10 @@ export class CCIPAPIClient {
       }
     }
 
-    const rawMessage = raw.messagesBatch.find((message) => message.messageId === messageId)!
-    const messagesInBatch = raw.messagesBatch.map(decodeMessage)
+    const messagesInBatch = raw.messageBatch.map(decodeMessage)
+    const message = messagesInBatch.find((message) => message.messageId === messageId)!
+    const request = await this.getMessageById(messageId)
+
     const proof = calculateManualExecProof(
       messagesInBatch,
       request.lane,
@@ -522,25 +522,25 @@ export class CCIPAPIClient {
       undefined,
       this,
     )
-    const offchainTokenData = new Array(rawMessage.tokenAmounts.length) as OffchainTokenData[]
-    if (rawMessage.usdcData && rawMessage.usdcData.status === 'complete')
+
+    const rawMessage = raw.messageBatch.find((message) => message.messageId === messageId)!
+    const offchainTokenData: OffchainTokenData[] = rawMessage.tokenAmounts.map(() => undefined)
+    if (rawMessage.usdcData?.status === 'complete')
       offchainTokenData[0] = {
         _tag: 'usdc',
         message: rawMessage.usdcData.message_bytes_hex!,
         attestation: rawMessage.usdcData.attestation!,
       }
-    else if (
-      rawMessage.lbtcData &&
-      rawMessage.lbtcData.status === 'NOTARIZATION_STATUS_SESSION_APPROVED'
-    )
+    else if (rawMessage.lbtcData?.status === 'NOTARIZATION_STATUS_SESSION_APPROVED')
       offchainTokenData[0] = {
         _tag: 'lbtc',
         message_hash: rawMessage.lbtcData.message_hash!,
         attestation: rawMessage.lbtcData.attestation!,
       }
+
     return {
       offRamp,
-      message: request.message,
+      message,
       offchainTokenData,
       ...proof,
     } as ExecutionInput & { offRamp: string }
