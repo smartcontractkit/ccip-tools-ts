@@ -93,7 +93,6 @@
     "ethers": "6.16.0",
     "got": "^11.8.6",
     "micro-memoize": "^5.1.1",
-    "openapi-fetch": "^0.17.0",
     "type-fest": "^5.4.4",
     "yaml": "2.8.2"
   },

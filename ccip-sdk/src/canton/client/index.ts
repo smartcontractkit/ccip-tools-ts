@@ -20,6 +20,5 @@ export {
   type TemplateFilter,
   type TransactionFilter,
   type WildcardFilter,
-  CantonApiError,
   createCantonClient,
 } from './client.ts'

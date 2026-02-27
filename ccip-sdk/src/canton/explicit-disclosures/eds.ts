@@ -1,55 +1,79 @@
-import type {
-  DisclosedContract,
-  DisclosureProvider,
-  EdsDisclosureConfig,
-  ExecutionDisclosures,
-  SendDisclosures,
-} from './types.ts'
+import type { DisclosedContract } from './types.ts'
 import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
 
-/** Structured Daml template identifier as returned by the EDS. */
-interface EdsTemplateID {
-  packageId: string
-  moduleName: string
-  entityName: string
+/**
+ * Configuration for the EDS-based disclosure provider.
+ * Requires only the EDS base URL — no direct ledger access needed.
+ */
+interface EdsDisclosureConfig {
+  /** Base URL of the running EDS instance, e.g. `http://eds-host:8090` */
+  edsBaseUrl: string
+  /** Optional request timeout in milliseconds (default: 10_000) */
+  timeoutMs?: number
 }
 
 /**
- * A single contract as returned by the EDS.
- * `createdEventBlob` is base64-encoded.
+ * The context returned by the EDS for a send or execute request.
+ *
+ * Corresponds to `ChoiceContext` in the EDS OpenAPI spec.
+ * - `choiceContextData` must be included as additional data when exercising the Canton choice.
+ * - `disclosedContracts` must be attached to the Canton command submission.
  */
-interface EdsDisclosedContract {
+interface EdsChoiceContext {
+  /** Additional opaque data required when exercising the Canton choice. */
+  choiceContextData: unknown
+  /** Contracts that must be explicitly disclosed in the command submission. */
+  disclosedContracts: DisclosedContract[]
+}
+
+/**
+ * Result of a `fetchPerPartyRouterFactoryDisclosures()` call.
+ *
+ * Corresponds to `CCIPPerPartyRouterFactoryResponse` in the EDS OpenAPI spec.
+ */
+interface EdsPerPartyRouterFactoryResult {
+  /** The Contract ID of the PerPartyRouterFactory. */
+  perPartyRouterFactoryId: string
+  /** Disclosures for all contracts required to instantiate a PerPartyRouter. */
+  disclosedContracts: DisclosedContract[]
+}
+
+/**
+ * A single disclosed contract as returned by the EDS API.
+ * `templateId` is already a flat colon-delimited string (`"<pkgId>:Module:Entity"`).
+ */
+interface EdsApiDisclosedContract {
+  templateId: string
   contractId: string
-  instanceId: string
-  templateId: EdsTemplateID
   createdEventBlob: string
-  synchronizerId?: string
+  synchronizerId: string
 }
 
-// TODO: Add EdsCCIPExecuteDisclosures interface here once the EDS execute endpoint
-// returns globalConfig and rmnRemote fields.
-
-/** EDS `/disclosures/send` response body. */
-interface EdsCCIPSendDisclosures {
-  environmentId: string
-  contracts: {
-    router: EdsDisclosedContract | null
-    onRamp: EdsDisclosedContract | null
-    feeQuoter: EdsDisclosedContract | null
-  }
+/** `ChoiceContext` object returned from send/execute endpoints. */
+interface EdsApiChoiceContext {
+  choiceContextData: unknown
+  disclosedContracts: EdsApiDisclosedContract[]
 }
 
-/** EDS `/health` response body. */
-interface EdsHealthResponse {
-  status: string
-  ledgerApiConnected: boolean
-  environments: string[]
+/** Response body of `POST /ccip/v1/message/send`. */
+interface EdsCCIPSendResponse {
+  choiceContext: EdsApiChoiceContext
+}
+
+/** Response body of `POST /ccip/v1/message/execute`. */
+interface EdsCCIPExecuteResponse {
+  choiceContext: EdsApiChoiceContext
+}
+
+/** Response body of `POST /ccip/v1/perPartyRouter/factory`. */
+interface EdsPerPartyRouterFactoryResponse {
+  perPartyRouterFactoryId: string
+  disclosedContracts: EdsApiDisclosedContract[]
 }
 
 /** EDS error response body. */
 interface EdsErrorResponse {
   error: string
-  code?: string
   details?: string
 }
 
@@ -57,25 +81,33 @@ interface EdsErrorResponse {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Convert an EDS `DisclosedContract` to the SDK's internal `DisclosedContract`.
- * The EDS uses a structured `templateId`; the SDK uses a flat colon-delimited string.
- */
-function edsContractToSdk(c: EdsDisclosedContract): DisclosedContract {
+function edsContractToSdk(c: EdsApiDisclosedContract): DisclosedContract {
   return {
-    templateId: `${c.templateId.packageId}:${c.templateId.moduleName}:${c.templateId.entityName}`,
+    templateId: c.templateId,
     contractId: c.contractId,
     createdEventBlob: c.createdEventBlob,
     synchronizerId: c.synchronizerId,
   }
 }
 
-async function edsGet<T>(url: string, timeoutMs: number): Promise<T> {
+function rawContextToSdk(raw: EdsApiChoiceContext): EdsChoiceContext {
+  return {
+    choiceContextData: raw.choiceContextData,
+    disclosedContracts: raw.disclosedContracts.map(edsContractToSdk),
+  }
+}
+
+async function edsPost<T>(url: string, body: unknown, timeoutMs: number): Promise<T> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   let response: Response
   try {
-    response = await fetch(url, { signal: controller.signal })
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     throw new CCIPError(
@@ -90,8 +122,8 @@ async function edsGet<T>(url: string, timeoutMs: number): Promise<T> {
   if (!response.ok) {
     let detail = ''
     try {
-      const body = (await response.json()) as EdsErrorResponse
-      detail = ` [${body.code ?? response.status}] ${body.error}`
+      const errBody = (await response.json()) as EdsErrorResponse
+      detail = ` ${errBody.error}${errBody.details ? `: ${errBody.details}` : ''}`
     } catch {
       detail = ` HTTP ${response.status}`
     }
@@ -101,38 +133,12 @@ async function edsGet<T>(url: string, timeoutMs: number): Promise<T> {
   return response.json() as Promise<T>
 }
 
-// ---------------------------------------------------------------------------
-// EdsDisclosureProvider
-// ---------------------------------------------------------------------------
-
 /**
- * Disclosure provider that fetches `createdEventBlob`s from a running EDS instance.
- *
- * This is the recommended approach for deployments where CCIP contracts are owned
- * by a different party than the message executor — the EDS holds credentials
- * allowing it to read those contracts on the user's behalf.
- *
- * @example
- * ```ts
- * const provider = new EdsDisclosureProvider({
- *   edsBaseUrl: 'http://eds.internal:8090',
- *   environmentId: 'testnet',
- * })
- *
- * // Optional: verify connectivity before use
- * await provider.checkHealth()
- *
- * const disclosures = await provider.fetchSendDisclosures()
- * ```
- *
- * @remarks
- * **Placeholder**: `fetchExecutionDisclosures()` currently throws because the EDS
- * execute endpoint does not yet return `globalConfig` or `rmnRemote`. Use
- * `AcsDisclosureProvider` for execution until the EDS is extended.
+ * Disclosure provider that fetches explicit disclosures from a running EDS instance
+ * using the CCIP Explicit Disclosure API
  */
-export class EdsDisclosureProvider implements DisclosureProvider {
+export class EdsDisclosureProvider {
   private readonly edsBaseUrl: string
-  private readonly environmentId: string
   private readonly timeoutMs: number
 
   /**
@@ -142,88 +148,57 @@ export class EdsDisclosureProvider implements DisclosureProvider {
    */
   constructor(config: EdsDisclosureConfig) {
     this.edsBaseUrl = config.edsBaseUrl.replace(/\/$/, '')
-    this.environmentId = config.environmentId
     this.timeoutMs = config.timeoutMs ?? 10_000
   }
 
   /**
-   * Verify that the EDS is reachable and has the configured environment loaded.
+   * Fetch the explicit disclosures required to send a CCIP message to Canton.
    *
-   * @throws `CCIPError(CANTON_API_ERROR)` if the EDS is unreachable or the
-   *   environment is not listed in the health response.
+   * Calls `POST /ccip/v1/message/send`.
+   *
+   * @param destChain - Destination chain selector (integer).
+   * @returns `EdsChoiceContext` containing the `choiceContextData` and all
+   *   `disclosedContracts` that must be attached to the Canton command submission.
    */
-  async checkHealth(): Promise<void> {
-    const url = `${this.edsBaseUrl}/api/v1/health`
-    const health = await edsGet<EdsHealthResponse>(url, this.timeoutMs)
-
-    if (health.status !== 'healthy') {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        `EDS reports unhealthy status: "${health.status}"`,
-      )
-    }
-
-    if (!health.environments.includes(this.environmentId)) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        `EDS does not have environment "${this.environmentId}" loaded. ` +
-          `Available: ${health.environments.join(', ') || '(none)'}`,
-      )
-    }
+  async fetchSendDisclosures(destChain: number): Promise<EdsChoiceContext> {
+    const url = `${this.edsBaseUrl}/ccip/v1/message/send`
+    const resp = await edsPost<EdsCCIPSendResponse>(url, { destChain }, this.timeoutMs)
+    return rawContextToSdk(resp.choiceContext)
   }
 
   /**
-   * Fetch all contracts that must be disclosed for a `ccipExecute` command.
+   * Fetch the explicit disclosures required to execute a CCIP message on Canton.
    *
-   * @throws Always — the EDS execute endpoint does not yet return `globalConfig`
-   *   or `rmnRemote`. This method is a placeholder pending EDS extension.
-   *   Use `AcsDisclosureProvider` for execution.
+   * Calls `POST /ccip/v1/message/execute`.
+   *
+   * @param sourceChain - Source chain selector (integer).
+   * @returns `EdsChoiceContext` containing the `choiceContextData` and all
+   *   `disclosedContracts` that must be attached to the Canton command submission.
    */
-  fetchExecutionDisclosures(_extraCcvAddresses: string[] = []): Promise<ExecutionDisclosures> {
-    // TODO: Remove this throw and uncomment mapExecuteDisclosures() once the EDS
-    // CCIPExecuteContracts struct is extended with globalConfig and rmnRemote fields.
-    throw new CCIPError(
-      CCIPErrorCode.CANTON_API_ERROR,
-      'EdsDisclosureProvider.fetchExecutionDisclosures is not yet available: the EDS execute ' +
-        'endpoint does not return "globalConfig" or "rmnRemote". Use AcsDisclosureProvider.',
-    )
+  async fetchExecutionDisclosures(sourceChain: number): Promise<EdsChoiceContext> {
+    const url = `${this.edsBaseUrl}/ccip/v1/message/execute`
+    const resp = await edsPost<EdsCCIPExecuteResponse>(url, { sourceChain }, this.timeoutMs)
+    return rawContextToSdk(resp.choiceContext)
   }
 
   /**
-   * Fetch all contracts that must be disclosed for a `ccipSend` command.
+   * Fetch the explicit disclosures required to instantiate a PerPartyRouter
+   * using the PerPartyRouterFactory.
    *
-   * Calls `GET /api/v1/ccip/ENVIRONMENT_ID/disclosures/send`.
+   * Calls `POST /ccip/v1/perPartyRouter/factory`.
+   *
+   * @param partyID - The Daml party ID of the caller.
+   * @returns `EdsPerPartyRouterFactoryResult` containing the factory contract ID
+   *   and all `disclosedContracts` needed to instantiate a PerPartyRouter.
    */
-  async fetchSendDisclosures(): Promise<SendDisclosures> {
-    const url = `${this.edsBaseUrl}/api/v1/ccip/${encodeURIComponent(this.environmentId)}/disclosures/send`
-    const eds = await edsGet<EdsCCIPSendDisclosures>(url, this.timeoutMs)
-    return this.mapSendDisclosures(eds)
-  }
-
-  /** Map the EDS send response to the SDK `SendDisclosures` shape. */
-  private mapSendDisclosures(eds: EdsCCIPSendDisclosures): SendDisclosures {
-    const { router, onRamp, feeQuoter } = eds.contracts
-
-    if (!router) this.missingContract('router', 'send')
-    if (!onRamp) this.missingContract('onRamp', 'send')
-    if (!feeQuoter) this.missingContract('feeQuoter', 'send')
-
-    // TypeScript narrows router/onRamp/feeQuoter to non-null after the missingContract() guards above
-    // because missingContract() returns `never` — execution only reaches here when all three are set.
+  async fetchPerPartyRouterFactoryDisclosures(
+    partyID: string,
+  ): Promise<EdsPerPartyRouterFactoryResult> {
+    const url = `${this.edsBaseUrl}/ccip/v1/perPartyRouter/factory`
+    const resp = await edsPost<EdsPerPartyRouterFactoryResponse>(url, { partyID }, this.timeoutMs)
     return {
-      router: edsContractToSdk(router),
-      onRamp: edsContractToSdk(onRamp),
-      feeQuoter: edsContractToSdk(feeQuoter),
+      perPartyRouterFactoryId: resp.perPartyRouterFactoryId,
+      disclosedContracts: resp.disclosedContracts.map(edsContractToSdk),
     }
-  }
-
-  /** Throw a descriptive error for a missing contract in an EDS response. */
-  private missingContract(field: string, operation: string): never {
-    throw new CCIPError(
-      CCIPErrorCode.CANTON_API_ERROR,
-      `EDS returned null for "${field}" in the ${operation} disclosures response ` +
-        `(environment "${this.environmentId}"). ` +
-        `Verify the EDS environments.yaml configuration contains a "${field}" instance ID.`,
-    )
   }
 }

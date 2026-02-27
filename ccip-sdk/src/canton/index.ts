@@ -1,7 +1,16 @@
 import type { BytesLike } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
-import { type ChainContext, type GetBalanceOpts, type LogFilter, Chain } from '../chain.ts'
+import {
+  type ChainContext,
+  type GetBalanceOpts,
+  type LogFilter,
+  type RegistryTokenConfig,
+  type TokenInfo,
+  type TokenPoolConfig,
+  type TokenPoolRemote,
+  Chain,
+} from '../chain.ts'
 import {
   CCIPChainNotFoundError,
   CCIPError,
@@ -16,19 +25,24 @@ import {
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
+  type CCIPVerifications,
+  type ChainLog,
   type ChainTransaction,
   type CommitReport,
   type ExecutionReceipt,
   type Lane,
-  type Log_,
   type NetworkInfo,
   type OffchainTokenData,
+  type VerifierResult,
   type WithLogger,
+  CCIPVersion,
   ChainFamily,
 } from '../types.ts'
 import { networkInfo } from '../utils.ts'
 import { type CantonClient, createCantonClient } from './client/index.ts'
-import type { DisclosureProvider } from './explicit-disclosures/types.ts'
+import { type AcsDisclosureConfig, AcsDisclosureProvider } from './explicit-disclosures/acs.ts'
+import { CCV_INDEXER_URL } from '../evm/const.ts'
+import { EdsDisclosureProvider } from './explicit-disclosures/eds.ts'
 
 export type { CantonClient, CantonClientConfig } from './client/index.ts'
 
@@ -46,25 +60,33 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   override readonly network: NetworkInfo<typeof ChainFamily.Canton>
   readonly provider: CantonClient
-  readonly disclosureProvider: DisclosureProvider
+  readonly acsDisclosureProvider: AcsDisclosureProvider
+  readonly edsDisclosureProvider: EdsDisclosureProvider
+  readonly indexerUrl: string
 
   /**
    * Creates a new CantonChain instance.
    * @param client - Canton Ledger API client.
-   * @param disclosureProvider - Provider used for explicit disclosures.
+   * @param acsDisclosureProvider - ACS-based disclosure provider.
+   * @param edsDisclosureProvider - EDS-based disclosure provider.
+   * @param indexerUrl - Base URL of the CCV indexer service.
    * @param network - Network information for this chain.
    * @param ctx - Context containing logger.
    */
   constructor(
     client: CantonClient,
-    disclosureProvider: DisclosureProvider,
+    acsDisclosureProvider: AcsDisclosureProvider,
+    edsDisclosureProvider: EdsDisclosureProvider,
+    indexerUrl: string,
     network: NetworkInfo<typeof ChainFamily.Canton>,
     ctx?: ChainContext,
   ) {
     super(network, ctx)
     this.provider = client
     this.network = network
-    this.disclosureProvider = disclosureProvider
+    this.acsDisclosureProvider = acsDisclosureProvider
+    this.edsDisclosureProvider = edsDisclosureProvider
+    this.indexerUrl = indexerUrl
   }
 
   /**
@@ -84,6 +106,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     ['mainnet', 'canton:MainNet'],
     ['main', 'canton:MainNet'],
     ['canton-mainnet', 'canton:MainNet'],
+    ['global', 'canton:DevNet'],
   ])
 
   /**
@@ -97,7 +120,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    */
   static async fromClient(
     client: CantonClient,
-    disclosureProvider: DisclosureProvider,
+    acsDisclosureProvider: AcsDisclosureProvider,
+    edsDisclosureProvider: EdsDisclosureProvider,
+    indexerUrl = CCV_INDEXER_URL,
     ctx?: ChainContext,
   ): Promise<CantonChain> {
     const synchronizers = await client.getConnectedSynchronizers()
@@ -110,7 +135,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       if (chainId) {
         return new CantonChain(
           client,
-          disclosureProvider,
+          acsDisclosureProvider,
+          edsDisclosureProvider,
+          indexerUrl,
           networkInfo(chainId) as NetworkInfo<typeof ChainFamily.Canton>,
           ctx,
         )
@@ -146,7 +173,13 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         `Failed to connect to Canton Ledger API ${url}: ${message}`,
       )
     }
-    return CantonChain.fromClient(client, ctx)
+    const defaultACSConfig: AcsDisclosureConfig = {
+      party: 'ccip-sdk-party',
+    }
+    // TODO: These need to come from input
+    const acsDisclosureProvider = new AcsDisclosureProvider(client, defaultACSConfig)
+    const edsDisclosureProvider = new EdsDisclosureProvider({ edsBaseUrl: url })
+    return CantonChain.fromClient(client, acsDisclosureProvider, edsDisclosureProvider, '', ctx)
   }
 
   /**
@@ -177,7 +210,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
    */
   // eslint-disable-next-line require-yield
-  async *getLogs(_opts: LogFilter): AsyncIterableIterator<Log_> {
+  async *getLogs(_opts: LogFilter): AsyncIterableIterator<ChainLog> {
     throw new CCIPNotImplementedError('CantonChain.getLogs')
   }
 
@@ -212,6 +245,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
    */
   async getRouterForOnRamp(_onRamp: string, _destChainSelector: bigint): Promise<string> {
+    // TODO: Contract discovery can come from EDS.
     throw new CCIPNotImplementedError('CantonChain.getRouterForOnRamp')
   }
 
@@ -248,18 +282,13 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * {@inheritDoc Chain.getOnRampForOffRamp}
+   * {@inheritDoc Chain.getOnRampsForOffRamp}
    * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
    */
-  async getOnRampForOffRamp(_offRamp: string, _sourceChainSelector: bigint): Promise<string> {
-    throw new CCIPNotImplementedError('CantonChain.getOnRampForOffRamp')
+  async getOnRampsForOffRamp(_offRamp: string, _sourceChainSelector: bigint): Promise<string[]> {
+    throw new CCIPNotImplementedError('CantonChain.getOnRampsForOffRamp')
   }
 
-  /**
-   * {@inheritDoc Chain.getCommitStoreForOffRamp}
-   *
-   * For Canton (CCIP v1.6+), the OffRamp itself serves as the commit store.
-   */
   async getCommitStoreForOffRamp(offRamp: string): Promise<string> {
     return Promise.resolve(offRamp)
   }
@@ -325,7 +354,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   /**
    * {@inheritDoc Chain.getOffchainTokenData}
    */
-  getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
+  override getOffchainTokenData(request: CCIPRequest): Promise<OffchainTokenData[]> {
     return Promise.resolve(request.message.tokenAmounts.map(() => undefined))
   }
 
@@ -333,8 +362,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * {@inheritDoc Chain.generateUnsignedExecuteReport}
    * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
    */
-  override generateUnsignedExecuteReport(
-    _opts: Parameters<Chain['generateUnsignedExecuteReport']>[0],
+  override generateUnsignedExecute(
+    _opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<never> {
     return Promise.reject(new CCIPNotImplementedError('CantonChain.generateUnsignedExecuteReport'))
   }
@@ -343,15 +372,83 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * {@inheritDoc Chain.executeReport}
    * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
    */
-  async executeReport(_opts: Parameters<Chain['executeReport']>[0]): Promise<CCIPExecution> {
+  async execute(opts: Parameters<Chain['execute']>[0]): Promise<CCIPExecution> {
+    // TODO
     throw new CCIPNotImplementedError('CantonChain.executeReport')
+  }
+
+  /**
+   * Fetches CCV verification results for a CCIP message from the Canton indexer.
+   * @param opts - Options including the CCIP request containing the message ID to query.
+   * @returns CCIPVerifications with verification policy and individual verifier results.
+   */
+  override async getVerifications(
+    opts: Parameters<Chain['getVerifications']>[0],
+  ): Promise<CCIPVerifications> {
+    const { request } = opts
+    if (request.lane.version < CCIPVersion.V2_0) {
+      throw new CCIPError(
+        CCIPErrorCode.METHOD_UNSUPPORTED,
+        `CantonChain.getVerifications: CCIP versions below v2.0 are not supported in Canton (request lane version: ${request.lane.version})`,
+      )
+    }
+
+    const url = `${this.indexerUrl}/v1/verifierresults/${request.message.messageId}`
+    const res = await fetch(url)
+    if (!res.ok) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        `Canton indexer responded with ${res.status} for message ${request.message.messageId}`,
+      )
+    }
+
+    const json = (await res.json()) as {
+      success: boolean
+      results: Array<{
+        verifierResult: {
+          message_ccv_addresses: string[]
+          ccv_data: string
+          timestamp: string
+          verifier_source_address: string
+          verifier_dest_address: string
+        }
+      }>
+      messageID: string
+    }
+
+    if (!json.success) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        `Canton indexer returned success=false for message ${request.message.messageId}`,
+      )
+    }
+
+    // message_ccv_addresses is a message-level property — identical across all results.
+    // Use the first result's list as requiredCCVs; fall back to empty if no results yet.
+    const requiredCCVs: string[] = json.results[0]?.verifierResult.message_ccv_addresses ?? []
+
+    const verifications: VerifierResult[] = json.results.map(({ verifierResult: vr }) => ({
+      ccvData: vr.ccv_data,
+      sourceAddress: vr.verifier_source_address,
+      destAddress: vr.verifier_dest_address,
+      timestamp: vr.timestamp ? Math.floor(new Date(vr.timestamp).getTime() / 1000) : undefined,
+    }))
+
+    return {
+      verificationPolicy: {
+        requiredCCVs,
+        optionalCCVs: [],
+        optionalThreshold: 0,
+      },
+      verifications,
+    }
   }
 
   /**
    * {@inheritDoc Chain.getSupportedTokens}
    * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
    */
-  async getSupportedTokens(_address: string): Promise<string[]> {
+  async getSupportedTokens(_address: string, _opts?: { page?: number }): Promise<string[]> {
     throw new CCIPNotImplementedError('CantonChain.getSupportedTokens')
   }
 
@@ -359,7 +456,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * {@inheritDoc Chain.getRegistryTokenConfig}
    * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
    */
-  async getRegistryTokenConfig(_registry: string, _token: string): Promise<never> {
+  async getRegistryTokenConfig(_registry: string, _token: string): Promise<RegistryTokenConfig> {
     throw new CCIPNotImplementedError('CantonChain.getRegistryTokenConfig')
   }
 
@@ -367,7 +464,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * {@inheritDoc Chain.getTokenPoolConfig}
    * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
    */
-  async getTokenPoolConfig(_tokenPool: string): Promise<never> {
+  async getTokenPoolConfig(_tokenPool: string): Promise<TokenPoolConfig> {
     throw new CCIPNotImplementedError('CantonChain.getTokenPoolConfig')
   }
 
@@ -375,7 +472,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * {@inheritDoc Chain.getTokenPoolRemotes}
    * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
    */
-  async getTokenPoolRemotes(_tokenPool: string): Promise<never> {
+  async getTokenPoolRemotes(
+    _tokenPool: string,
+    _remoteChainSelector?: bigint,
+  ): Promise<Record<string, TokenPoolRemote>> {
     throw new CCIPNotImplementedError('CantonChain.getTokenPoolRemotes')
   }
 
@@ -383,7 +483,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * {@inheritDoc Chain.getFeeTokens}
    * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
    */
-  async getFeeTokens(_router: string): Promise<never> {
+  async getFeeTokens(_router: string): Promise<Record<string, TokenInfo>> {
     throw new CCIPNotImplementedError('CantonChain.getFeeTokens')
   }
 
@@ -393,7 +493,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * Try to decode a CCIP message from a Canton log/event.
    * @returns undefined (Canton message format not yet supported)
    */
-  static decodeMessage(_log: Pick<Log_, 'data'>): CCIPMessage | undefined {
+  static decodeMessage(_log: Pick<ChainLog, 'data'>): CCIPMessage | undefined {
     // TODO: implement Canton message decoding
     return undefined
   }
@@ -419,7 +519,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * Try to decode a commit report from a Canton log.
    * @returns undefined (Canton commit format not yet supported)
    */
-  static decodeCommits(_log: Pick<Log_, 'data'>, _lane?: Lane): CommitReport[] | undefined {
+  static decodeCommits(_log: Pick<ChainLog, 'data'>, _lane?: Lane): CommitReport[] | undefined {
     // TODO: implement Canton commit report decoding
     return undefined
   }
@@ -428,7 +528,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * Try to decode an execution receipt from a Canton log.
    * @returns undefined (Canton receipt format not yet supported)
    */
-  static decodeReceipt(_log: Pick<Log_, 'data'>): ExecutionReceipt | undefined {
+  static decodeReceipt(_log: Pick<ChainLog, 'data'>): ExecutionReceipt | undefined {
     // TODO: implement Canton execution receipt decoding
     return undefined
   }
