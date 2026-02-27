@@ -7,7 +7,6 @@ import {
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
   CCIPMessageNotFoundInTxError,
-  CCIPMessageNotVerifiedYetError,
   CCIPTimeoutError,
   CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
@@ -506,7 +505,6 @@ export class CCIPAPIClient {
     let lane: Lane
     if ('encodedMessage' in raw) {
       // v2 messages
-      if (!raw.verificationComplete) throw new CCIPMessageNotVerifiedYetError(messageId)
       const {
         sourceChainSelector,
         destChainSelector,
@@ -519,7 +517,7 @@ export class CCIPAPIClient {
         offRamp,
         version: CCIPVersion.V2_0,
         encodedMessage: raw.encodedMessage,
-        verifications: raw.ccvData.map((ccvData, i) => ({
+        verifications: (raw.ccvData ?? []).map((ccvData, i) => ({
           ccvData,
           destAddress: raw.verifierAddresses[i]!,
         })),
