@@ -7,7 +7,6 @@ import {
   type ChainTransaction,
   type EVMChain,
   type TONChain,
-  CCIPAPIClient,
   CCIPChainFamilyUnsupportedError,
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
@@ -106,11 +105,7 @@ export function fetchChainsFromRpcs(
         const chain$ = C.fromUrl(url, {
           ...ctx,
           apiClient:
-            argv.api === false
-              ? null
-              : typeof argv.api === 'string'
-                ? CCIPAPIClient.fromUrl(argv.api, ctx)
-                : undefined,
+            argv.api === false ? null : typeof argv.api === 'string' ? argv.api : undefined,
         })
         chains$.push(chain$)
 

@@ -34,9 +34,9 @@ export const laneLatencySchema: CommandSchema<'laneLatency'> = {
   options: [
     {
       type: 'string',
-      name: 'api-url',
+      name: 'api',
       label: 'API URL',
-      description: 'Custom CCIP API URL (defaults to api.ccip.chain.link)',
+      description: 'Custom CCIP API URL (defaults to https://api.ccip.chain.link)',
       group: 'output',
       placeholder: 'https://api.ccip.chain.link',
     },

@@ -94,12 +94,13 @@ export type ChainContext = WithLogger & {
    * CCIP API client instance for lane information queries.
    *
    * - `undefined` (default): Creates CCIPAPIClient with {@link DEFAULT_API_BASE_URL}
+   * - `string`: Creates CCIPAPIClient with provided URL
    * - `CCIPAPIClient`: Uses provided instance (allows custom URL, fetch, etc.)
    * - `null`: Disables API client entirely (getLaneLatency() will throw)
    *
    * Default: `undefined` (auto-create with production endpoint)
    */
-  apiClient?: CCIPAPIClient | null
+  apiClient?: CCIPAPIClient | string | null
 
   /**
    * Retry configuration for API fallback operations.
@@ -362,11 +363,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     if (apiClient === null) {
       this.apiClient = null // Explicit opt-out
       this.apiRetryConfig = null // No retry config needed without API client
-    } else if (apiClient !== undefined) {
+    } else if (apiClient && typeof apiClient !== 'string') {
       this.apiClient = apiClient // Use provided instance
       this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     } else {
-      this.apiClient = CCIPAPIClient.fromUrl(undefined, { logger }) // Default
+      this.apiClient = CCIPAPIClient.fromUrl(apiClient, ctx) // default=undefined or provided string as URL
       this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     }
   }

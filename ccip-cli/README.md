@@ -339,7 +339,7 @@ ccip-cli token -n solana-devnet -H EPUjBP3Xf76K1VKsDSc6GupBWE8uykNksCLJgXZn87CB
 ### `lane-latency`
 
 ```sh
-ccip-cli lane-latency <source> <dest> [--api-url <url>]
+ccip-cli lane-latency <source> <dest> [--api=<url>]
 ```
 
 Query real-time lane latency between source and destination chains using the CCIP API.
@@ -355,7 +355,7 @@ Query real-time lane latency between source and destination chains using the CCI
 
 | Option | Description |
 |--------|-------------|
-| `--api-url` | Custom CCIP API URL (default: api.ccip.chain.link) |
+| `--api` | Custom CCIP API URL (default: https://api.ccip.chain.link) |
 
 > **Note:** This command requires CCIP API access and respects the `--no-api` flag.
 
