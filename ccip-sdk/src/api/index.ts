@@ -2,6 +2,7 @@ import { memoize } from 'micro-memoize'
 import type { SetRequired } from 'type-fest'
 
 import {
+  CCIPApiClientNotAvailableError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
@@ -138,7 +139,7 @@ export class CCIPAPIClient {
   static {
     CCIPAPIClient.fromUrl = memoize(
       (baseUrl?: string, ctx?: CCIPAPIClientContext) => new CCIPAPIClient(baseUrl, ctx),
-      { maxArgs: 1 },
+      { maxArgs: 1, transformKey: ([baseUrl]) => [baseUrl ?? DEFAULT_API_BASE_URL] },
     )
   }
 
@@ -148,6 +149,8 @@ export class CCIPAPIClient {
    * @param ctx - Optional context with logger and custom fetch
    */
   constructor(baseUrl?: string, ctx?: CCIPAPIClientContext) {
+    if (typeof baseUrl === 'boolean' || (baseUrl as unknown) === null)
+      throw new CCIPApiClientNotAvailableError({ context: { baseUrl } }) // shouldn't happen
     this.baseUrl = baseUrl ?? DEFAULT_API_BASE_URL
     this.logger = ctx?.logger ?? console
     this.timeoutMs = ctx?.timeoutMs ?? DEFAULT_TIMEOUT_MS
