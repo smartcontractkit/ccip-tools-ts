@@ -179,10 +179,7 @@ export default defineConfig(
   {
     files: ['ccip-api-ref/sidebars*.ts'],
     rules: {
-      'import/no-unresolved': [
-        'error',
-        { ignore: ['typedoc-sidebar\\.cjs$', '/sidebar$'] },
-      ],
+      'import/no-unresolved': ['error', { ignore: ['typedoc-sidebar\\.cjs$', '/sidebar$'] }],
       'import/extensions': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',
     },

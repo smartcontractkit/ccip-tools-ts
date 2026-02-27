@@ -576,14 +576,6 @@ export default [
     name: 'DuplicateCCVNotAllowed',
     inputs: [{ name: 'ccvAddress', type: 'address', internalType: 'address' }],
   },
-  {
-    type: 'error',
-    name: 'ExecutionError',
-    inputs: [
-      { name: 'messageId', type: 'bytes32', internalType: 'bytes32' },
-      { name: 'err', type: 'bytes', internalType: 'bytes' },
-    ],
-  },
   { type: 'error', name: 'GasCannotBeZero', inputs: [] },
   {
     type: 'error',
@@ -666,6 +658,14 @@ export default [
   },
   {
     type: 'error',
+    name: 'InvalidOptionalThreshold',
+    inputs: [
+      { name: 'wanted', type: 'uint8', internalType: 'uint8' },
+      { name: 'got', type: 'uint256', internalType: 'uint256' },
+    ],
+  },
+  {
+    type: 'error',
     name: 'InvalidVerifierResultsLength',
     inputs: [
       { name: 'expected', type: 'uint256', internalType: 'uint256' },
@@ -677,6 +677,14 @@ export default [
     type: 'error',
     name: 'MustSpecifyDefaultOrRequiredCCVs',
     inputs: [],
+  },
+  {
+    type: 'error',
+    name: 'NoStateProgressMade',
+    inputs: [
+      { name: 'messageId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'err', type: 'bytes', internalType: 'bytes' },
+    ],
   },
   {
     type: 'error',

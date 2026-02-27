@@ -15,3 +15,5 @@ export type { RpcProvidersProps } from './RpcProviders/index.ts'
 
 export { DeprecationBanner } from './DeprecationBanner/index.ts'
 export type { DeprecationBannerProps } from './DeprecationBanner/index.ts'
+
+export { ExamplesLink } from './ExamplesLink/index.ts'

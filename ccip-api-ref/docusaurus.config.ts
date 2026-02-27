@@ -46,6 +46,8 @@ const config: Config = {
   },
 
   plugins: [
+    // Google Tag Manager - uses official Docusaurus plugin (auto-disables in dev mode)
+    ['@docusaurus/plugin-google-tag-manager', { containerId: 'GTM-N6DQ47T' }],
     // JSON-LD Structured Data Plugin
     [
       './plugins/docusaurus-plugin-jsonld',
