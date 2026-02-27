@@ -1333,7 +1333,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm.
    * @throws {@link CCIPExecTxRevertedError} if execution transaction reverts.
    */
-  async execute(opts: Parameters<Chain['execute']>[0]) {
+  async execute(opts: Parameters<Chain['execute']>[0] & { returnTx?: boolean }) {
     const wallet = opts.wallet
     if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
 
@@ -1350,8 +1350,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     const response = await submitTransaction(wallet, populatedTx, this.provider)
     this.logger.debug('manuallyExecute =>', response.hash)
-    if ('returnTx' in opts && opts.returnTx) {
-      return response
+    if (opts.returnTx) {
+      return { log: { transactionHash: response.hash } } as unknown as CCIPExecution
     }
 
     let receipt = await response.wait(0)
