@@ -127,7 +127,8 @@ export async function estimateReceiveExecution({
         dest.getTokenInfo(tokenAmount.destTokenAddress),
       ])
       const destAmount =
-        (tokenAmount.amount * 10n ** BigInt(destDecimals)) / 10n ** BigInt(sourceDecimals)
+        (tokenAmount.amount * BigInt(10) ** BigInt(destDecimals)) /
+        BigInt(10) ** BigInt(sourceDecimals)
       if (destAmount === 0n)
         throw new CCIPTokenDecimalsInsufficientError(
           tokenAmount.destTokenAddress,

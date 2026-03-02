@@ -992,7 +992,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ) as unknown as TypedContract<typeof Token_ABI>
           const allowance = await contract.allowance(sender, router)
           if (allowance >= amount) return
-          const amnt = opts.approveMax ? 2n ** 256n - 1n : amount
+          const amnt = opts.approveMax ? BigInt(2) ** BigInt(256) - BigInt(1) : amount
           return contract.approve.populateTransaction(router, amnt, { from: sender })
         }),
       )
