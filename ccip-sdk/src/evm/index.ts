@@ -1225,6 +1225,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       default:
         throw new CCIPVersionUnsupportedError(version)
     }
+    if ('gasLimit' in input.message && input.message.gasLimit && !manualExecTx.gasLimit)
+      manualExecTx.gasLimit = BigInt(input.message.gasLimit) + 200000n
     return { family: ChainFamily.EVM, transactions: [manualExecTx] }
   }
 
@@ -1247,9 +1249,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     unsignedTx.nonce = await this.nextNonce(await wallet.getAddress())
     const populatedTx = await wallet.populateTransaction(unsignedTx)
     populatedTx.from = undefined // some signers don't like receiving pre-populated `from`
-    if (opts.gasLimit) populatedTx.gasLimit = opts.gasLimit + 100000
-    populatedTx.maxPriorityFeePerGas = 5000000
-    populatedTx.maxFeePerGas = 350003100
+
+    // opts.gasLimit = 100000
+    // opts.tokensGasLimit = 250000
+    populatedTx.gasLimit ??= 240000
+
+    populatedTx.maxPriorityFeePerGas = 1800000
+    // populatedTx.maxFeePerGas = 980000000
 
     const response = await submitTransaction(wallet, populatedTx, this.provider)
     this.logger.debug('manuallyExecute =>', response.hash)
@@ -1257,7 +1263,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       return { log: { transactionHash: response.hash } } as unknown as CCIPExecution
     }
 
-    const receipt = await response.wait(1, 60_000)
+    let receipt = await response.wait(0)
+    if (!receipt) receipt = await response.wait(1, 240_000)
     if (!receipt?.hash) throw new CCIPExecTxNotConfirmedError(response.hash)
     if (!receipt.status) throw new CCIPExecTxRevertedError(response.hash)
     const tx = await this.getTransaction(receipt)
