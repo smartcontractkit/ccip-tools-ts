@@ -1288,6 +1288,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       default:
         throw new CCIPVersionUnsupportedError(version)
     }
+
+    let gasLimit = await this.provider.estimateGas(manualExecTx)
+    if (
+      'gasLimit' in input.message &&
+      input.message.gasLimit &&
+      gasLimit < input.message.gasLimit + 100000n
+    )
+      gasLimit = BigInt(input.message.gasLimit) + 200000n
+    else if ('gasLimit' in input.message && !input.message.gasLimit && gasLimit < 240000n)
+      gasLimit = 240000n
+    manualExecTx.gasLimit = gasLimit
+
     return { family: ChainFamily.EVM, transactions: [manualExecTx] }
   }
 
@@ -1314,7 +1326,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const response = await submitTransaction(wallet, populatedTx, this.provider)
     this.logger.debug('manuallyExecute =>', response.hash)
 
-    const receipt = await response.wait(1, 60_000)
+    let receipt = await response.wait(0)
+    if (!receipt) receipt = await response.wait(1, 240_000)
     if (!receipt?.hash) throw new CCIPExecTxNotConfirmedError(response.hash)
     if (!receipt.status) throw new CCIPExecTxRevertedError(response.hash)
     const tx = await this.getTransaction(receipt)
