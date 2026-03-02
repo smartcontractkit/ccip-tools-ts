@@ -3,6 +3,8 @@ import type { SetRequired } from 'type-fest'
 
 import {
   CCIPApiClientNotAvailableError,
+  CCIPError,
+  CCIPErrorCode,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
@@ -51,7 +53,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.0.0-e7f7262'
+export const SDK_VERSION = '1.0.0-793305b'
 // generate:end
 
 /** SDK telemetry header name */
@@ -461,6 +463,12 @@ export class CCIPAPIClient {
    * @returns Either `{ encodedMessage, verifications }` or `{ message, offchainTokenData, ...proof }`, offRamp and lane
    */
   async getExecutionInput(messageId: string): Promise<ExecutionInput & Lane & { offRamp: string }> {
+    const request = await this.getMessageById(messageId)
+    if (request.metadata.status === MessageStatus.Success)
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, `Already executed`, {
+        context: { messageId, txHash: request.metadata.receiptTransactionHash },
+      })
+
     const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}/execution-inputs`
 
     this.logger.debug(`CCIPAPIClient: GET ${url}`)
@@ -534,7 +542,7 @@ export class CCIPAPIClient {
         version: raw.version as CCIPVersion,
       }
     } else {
-      ;({ lane } = await this.getMessageById(messageId))
+      lane = request.lane
     }
 
     const proof = calculateManualExecProof(messagesInBatch, lane, messageId, raw.merkleRoot, this)
