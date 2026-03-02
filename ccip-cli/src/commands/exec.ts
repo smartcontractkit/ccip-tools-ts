@@ -180,6 +180,9 @@ async function execCommand(ctx: Ctx, argv: ExecArgv, destroy: () => void) {
     logger.info('\nGracefully shutting down...')
     cancelResolve()
     destroy()
+    setTimeout(() => {
+      process.exit(1)
+    }, 5000).unref()
   }
   process.on('SIGINT', onSigint)
 
@@ -265,7 +268,7 @@ async function execCommand(ctx: Ctx, argv: ExecArgv, destroy: () => void) {
           ...argv,
           messageId,
           wallet,
-          ...{ returnTx: true },
+          // ...{ returnTx: Number(request.message.sequenceNumber) % 10 != 0 },
         })
 
         if (result.receipt as unknown) {
@@ -282,6 +285,7 @@ async function execCommand(ctx: Ctx, argv: ExecArgv, destroy: () => void) {
             logger.warn(
               `⚠️  messageId=${messageId} execution state=${result.receipt.state}, tx=${result.log.transactionHash}`,
             )
+            if (argv.execFailed) pendingQueue.push(request) // retry
           }
         } else {
           // just log the hash and count as executed
@@ -291,6 +295,23 @@ async function execCommand(ctx: Ctx, argv: ExecArgv, destroy: () => void) {
       } catch (err) {
         totalFailed++
         logger.error(`❌ messageId=${messageId} execution failed:`, err)
+        if (
+          err instanceof Error &&
+          ['wait for transaction timeout'].some((msg) => err.message.includes(msg))
+        ) {
+          // fatal
+          cancelResolve()
+          destroy()
+          setTimeout(() => {
+            process.exit(1)
+          }, 5000).unref()
+        } else if (
+          !(err instanceof Error) ||
+          !['Already executed'].some((msg) => err.message.includes(msg))
+        ) {
+          // retriable
+          pendingQueue.push(request)
+        }
       }
     }
 
