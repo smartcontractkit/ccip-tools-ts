@@ -319,7 +319,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       if (msg.info.type !== 'external-out') continue
       const topics = []
       // logs are external messages where dest "address" is the uint32 topic (e.g. crc32("ExecutionStateChanged"))
-      if (msg.info.dest && msg.info.dest.value > 0n && msg.info.dest.value < 2n ** 32n)
+      if (
+        msg.info.dest &&
+        msg.info.dest.value > 0n &&
+        msg.info.dest.value < BigInt(2) ** BigInt(32)
+      )
         topics.push(toBeHex(msg.info.dest.value, 4))
       let data = ''
       try {
