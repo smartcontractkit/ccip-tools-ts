@@ -7,6 +7,7 @@ import { anvil } from 'prool/instances'
 
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
 import { CCIPAPIClient } from '../api/index.ts'
+import { LaneCapability } from '../chain.ts'
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
 import { type ExecutionInput, ExecutionState, MessageStatus } from '../types.ts'
 import { interfaces } from './const.ts'
@@ -46,6 +47,21 @@ const CCIP_MESSAGE_SENT_TOPIC = interfaces.OnRamp_v1_6.getEvent('CCIPMessageSent
 
 // Token with pool support on the Sepolia -> Aptos lane
 const APTOS_SUPPORTED_TOKEN = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
+
+// ── getCapabilities constants ──
+
+// v1.6 onRamp: Sepolia -> Fuji
+const SEPOLIA_V1_6_ONRAMP = '0x37ea845b0F019eAb760caA59a982B9AcF3A71CAB'
+// v2.0 onRamp: Sepolia -> Fuji
+const SEPOLIA_V2_0_ONRAMP = '0x0F887309075403d02563CBCbB3D98Fb2ef2D2946'
+// v2.0 onRamp: Fuji -> Sepolia
+const FUJI_V2_0_ONRAMP = '0x2162318D639BBbC2bc8D1562a7baFA459b9F29BF'
+// Token on Sepolia whose pool (BurnMintTokenPool 1.7.0-dev) supports the older
+// singular getMinBlockConfirmation(), not the plural getMinBlockConfirmations()
+// in our current ABI. This exercises the try-catch fallback path.
+const OLD_POOL_TOKEN_SEPOLIA = '0x67f000ca40cb1c6ee3bd2c7fda2fd22ddf56faab'
+// Token on Fuji whose pool (LombardTokenPool 2.0.0-dev) DOES support getMinBlockConfirmations
+const FTF_TOKEN_FUJI = '0x7FbdC44BfEBDe80C970ba622B678daB36cee31f6'
 
 // ── execute constants ──
 
@@ -504,6 +520,72 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         assert.ok(foundFailed, 'should find a failed receipt for a known failed message')
       },
     )
+  })
+
+  describe('getCapabilities', () => {
+    it('should return MIN_BLOCK_CONFIRMATIONS=0 for v1.6 onRamp', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const caps = await sepoliaChain.getCapabilities({
+        onRamp: SEPOLIA_V1_6_ONRAMP,
+        destChainSelector: FUJI_SELECTOR,
+      })
+
+      assert.equal(
+        caps[LaneCapability.MIN_BLOCK_CONFIRMATIONS],
+        0,
+        'v1.6 lane should have FTF disabled (MIN_BLOCK_CONFIRMATIONS=0)',
+      )
+    })
+
+    it('should return MIN_BLOCK_CONFIRMATIONS=1 for v2.0 onRamp without token', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const caps = await sepoliaChain.getCapabilities({
+        onRamp: SEPOLIA_V2_0_ONRAMP,
+        destChainSelector: FUJI_SELECTOR,
+      })
+
+      assert.equal(
+        caps[LaneCapability.MIN_BLOCK_CONFIRMATIONS],
+        1,
+        'v2.0 lane without token should default to 1 block confirmation',
+      )
+    })
+
+    it('should return MIN_BLOCK_CONFIRMATIONS=0 for token with old pool (fallback)', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const caps = await sepoliaChain.getCapabilities({
+        onRamp: SEPOLIA_V2_0_ONRAMP,
+        destChainSelector: FUJI_SELECTOR,
+        token: OLD_POOL_TOKEN_SEPOLIA,
+      })
+
+      assert.equal(
+        caps[LaneCapability.MIN_BLOCK_CONFIRMATIONS],
+        0,
+        'token with old pool should fall back to FTF disabled (MIN_BLOCK_CONFIRMATIONS=0)',
+      )
+    })
+
+    it('should query token pool for MIN_BLOCK_CONFIRMATIONS on v2.0 pool', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      const caps = await fujiChain.getCapabilities({
+        onRamp: FUJI_V2_0_ONRAMP,
+        destChainSelector: SEPOLIA_SELECTOR,
+        token: FTF_TOKEN_FUJI,
+      })
+
+      const minBlocks = caps[LaneCapability.MIN_BLOCK_CONFIRMATIONS]
+      console.log(`  Lombard pool MIN_BLOCK_CONFIRMATIONS = ${minBlocks}`)
+      assert.equal(
+        minBlocks,
+        0,
+        'Lombard pool should return MIN_BLOCK_CONFIRMATIONS=0 (FTF not enabled)',
+      )
+    })
   })
 
   // ── State-mutating tests below: keep these last so read-only tests see clean fork state ──

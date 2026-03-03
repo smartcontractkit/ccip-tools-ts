@@ -659,15 +659,20 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       opts.token,
     )) as string
 
-    // Query token pool for min block confirmations
-    const poolContract = new Contract(
-      tokenPool,
-      interfaces.TokenPool_v2_0,
-      this.provider,
-    ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
-    const minBlockConfirmations = Number(await poolContract.getMinBlockConfirmations())
+    // Query token pool for min block confirmations; older pools may not
+    // support this function, in which case FTF is not available for this token
+    try {
+      const poolContract = new Contract(
+        tokenPool,
+        interfaces.TokenPool_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
+      const minBlockConfirmations = Number(await poolContract.getMinBlockConfirmations())
 
-    return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: minBlockConfirmations }
+      return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: minBlockConfirmations }
+    } catch {
+      return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: 0 }
+    }
   }
 
   /**
