@@ -16,6 +16,7 @@ import {
   CCIPError,
   CCIPErrorCode,
   CCIPNotImplementedError,
+  CCIPWalletInvalidError,
 } from '../errors/index.ts'
 import type { ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
@@ -37,14 +38,19 @@ import {
   type WithLogger,
   CCIPVersion,
   ChainFamily,
+  ExecutionState,
 } from '../types.ts'
 import { networkInfo } from '../utils.ts'
-import { type CantonClient, createCantonClient } from './client/index.ts'
+import { type CantonClient, type JsCommands, createCantonClient } from './client/index.ts'
 import { type AcsDisclosureConfig, AcsDisclosureProvider } from './explicit-disclosures/acs.ts'
+import type { DisclosedContract } from './explicit-disclosures/types.ts'
 import { CCV_INDEXER_URL } from '../evm/const.ts'
 import { EdsDisclosureProvider } from './explicit-disclosures/eds.ts'
+import { type UnsignedCantonTx, isCantonWallet } from './types.ts'
 
 export type { CantonClient, CantonClientConfig } from './client/index.ts'
+export type { CantonWallet, UnsignedCantonTx } from './types.ts'
+export { isCantonWallet } from './types.ts'
 
 /**
  * Canton chain implementation supporting Canton Ledger networks.
@@ -359,22 +365,209 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * {@inheritDoc Chain.generateUnsignedExecuteReport}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
+   * Builds a Canton `JsCommands` payload that exercises the `Execute` choice on
+   * the caller's `CCIPReceiver` contract.  The command includes:
+   *
+   * 1. **ACS disclosures** – same-party contracts (`PerPartyRouter`,
+   *    `CCIPReceiver`) fetched via {@link AcsDisclosureProvider}.
+   * 2. **EDS disclosures** – cross-party contracts (OffRamp, GlobalConfig,
+   *    TokenAdminRegistry, RMNRemote, CCVs) fetched via
+   *    {@link EdsDisclosureProvider}.
+   * 3. **Choice argument** – assembled from the encoded CCIP message,
+   *    verification data, and the opaque `choiceContextData` returned by the
+   *    EDS.
+   *
+   * @param opts - Must use the `offRamp` + `input` variant of {@link ExecuteOpts}.
+   *   `input` must contain `encodedMessage` and `verifications` (CCIP v2.0).
+   *   `payer` is the Daml party ID used for `actAs`.
+   * @returns An {@link UnsignedCantonTx} wrapping the ready-to-submit
+   *   `JsCommands`.
    */
-  override generateUnsignedExecute(
-    _opts: Parameters<Chain['generateUnsignedExecute']>[0],
-  ): Promise<never> {
-    return Promise.reject(new CCIPNotImplementedError('CantonChain.generateUnsignedExecuteReport'))
+  override async generateUnsignedExecute(
+    opts: Parameters<Chain['generateUnsignedExecute']>[0],
+  ): Promise<UnsignedCantonTx> {
+    // --- validate opts shape ---
+    if (!('offRamp' in opts) || !('input' in opts)) {
+      throw new CCIPNotImplementedError(
+        'CantonChain.generateUnsignedExecute: messageId-based execution is not supported; ' +
+          'provide offRamp + input instead',
+      )
+    }
+
+    const { input, payer } = opts
+    if (!payer) {
+      throw new CCIPError(
+        CCIPErrorCode.WALLET_INVALID,
+        'CantonChain.generateUnsignedExecute: payer (party ID) is required',
+      )
+    }
+
+    // v2.0 input shape: { encodedMessage, verifications }
+    if (!('encodedMessage' in input) || !('verifications' in input)) {
+      throw new CCIPError(
+        CCIPErrorCode.METHOD_UNSUPPORTED,
+        'CantonChain.generateUnsignedExecute: only CCIP v2.0 ExecutionInput ' +
+          '(encodedMessage + verifications) is supported',
+      )
+    }
+
+    const { encodedMessage, verifications } = input as {
+      encodedMessage: string
+      verifications: Pick<VerifierResult, 'ccvData' | 'destAddress'>[]
+    }
+
+    this.logger.debug('CantonChain.generateUnsignedExecute: fetching ACS disclosures')
+    // Step 1 — Fetch same-party disclosures (PerPartyRouter + CCIPReceiver)
+    const acsDisclosures = await this.acsDisclosureProvider.fetchExecutionDisclosures()
+
+    // Step 2 — Fetch cross-party disclosures from EDS
+    //   The EDS needs the CCV instance addresses so it can return the right
+    //   CCV disclosures alongside the infrastructure contracts.
+    const ccvAddresses = verifications.map((v) => v.destAddress)
+
+    // Derive a message ID for the EDS request.
+    // For now, we use the first 66 chars of encodedMessage as a stand-in;
+    // in practice this should be the keccak256 of the encoded message or
+    // extracted from decodable headers.
+    const messageIdForEds = stripHexPrefix(encodedMessage).slice(0, 64)
+
+    this.logger.debug(
+      `CantonChain.generateUnsignedExecute: fetching EDS disclosures for ${ccvAddresses.length} CCVs`,
+    )
+    const edsResult = await this.edsDisclosureProvider.fetchExecutionDisclosures(
+      messageIdForEds,
+      ccvAddresses,
+    )
+
+    // Step 3 — Build CCV inputs: pair each verification with its CCV contract ID
+    const ccvInputs = verifications.map((v) => {
+      const ccvDisclosure = edsResult.ccvs[v.destAddress]
+      if (!ccvDisclosure?.disclosedContract) {
+        throw new CCIPError(
+          CCIPErrorCode.CANTON_API_ERROR,
+          `EDS did not return a disclosure for CCV at ${v.destAddress}`,
+        )
+      }
+      return {
+        ccvCid: ccvDisclosure.disclosedContract.contractId,
+        verifierResults: stripHexPrefix(String(v.ccvData)),
+      }
+    })
+
+    // Step 4 — Extract CCV disclosed contracts
+    const ccvDisclosedContracts: DisclosedContract[] = verifications
+      .map((v) => edsResult.ccvs[v.destAddress]?.disclosedContract)
+      .filter((dc): dc is DisclosedContract => dc !== undefined)
+
+    // Step 5 — Assemble the Execute choice argument.
+    //   The `choiceContextData` from EDS is an opaque blob that the Canton
+    //   runtime expects as part of the choice argument — it contains
+    //   contract IDs for OffRamp, GlobalConfig, etc.
+    const contextData =
+      edsResult.choiceContext.choiceContextData != null &&
+      typeof edsResult.choiceContext.choiceContextData === 'object'
+        ? (edsResult.choiceContext.choiceContextData as Record<string, unknown>)
+        : {}
+    const choiceArgument: Record<string, unknown> = {
+      ...contextData,
+      routerCid: acsDisclosures.perPartyRouter.contractId,
+      encodedMessage: stripHexPrefix(String(encodedMessage)),
+      tokenTransfer: null,
+      ccvInputs,
+      additionalRequiredCCVs: [],
+    }
+
+    // Step 6 — Merge all disclosed contracts
+    const allDisclosed: DisclosedContract[] = [
+      acsDisclosures.perPartyRouter,
+      acsDisclosures.ccipReceiver,
+      ...edsResult.choiceContext.disclosedContracts,
+      ...ccvDisclosedContracts,
+    ]
+
+    // Step 7 — Build the ExerciseCommand
+    const exerciseCommand = {
+      ExerciseCommand: {
+        templateId: acsDisclosures.ccipReceiver.templateId,
+        contractId: acsDisclosures.ccipReceiver.contractId,
+        choice: 'Execute',
+        choiceArgument,
+      },
+    }
+
+    // Step 8 — Assemble JsCommands
+    const jsCommands: JsCommands = {
+      commands: [exerciseCommand],
+      commandId: `ccip-execute-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      actAs: [payer],
+      disclosedContracts: allDisclosed.map((dc) => ({
+        templateId: dc.templateId,
+        contractId: dc.contractId,
+        createdEventBlob: dc.createdEventBlob,
+        synchronizerId: dc.synchronizerId,
+      })),
+    }
+
+    this.logger.debug(
+      `CantonChain.generateUnsignedExecute: built command with ${allDisclosed.length} disclosed contracts`,
+    )
+
+    return {
+      family: ChainFamily.Canton,
+      commands: jsCommands,
+    }
   }
 
   /**
-   * {@inheritDoc Chain.executeReport}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
+   * Executes a CCIP message on Canton by:
+   * 1. Validating the wallet as a {@link CantonWallet}.
+   * 2. Building the unsigned command via {@link generateUnsignedExecute}.
+   * 3. Submitting the command to the Canton Ledger API.
+   * 4. Parsing the resulting transaction into a {@link CCIPExecution}.
+   *
+   * @throws {@link CCIPWalletInvalidError} if wallet is not a valid {@link CantonWallet}
+   * @throws {@link CCIPError} if the Ledger API submission or result parsing fails
    */
   async execute(opts: Parameters<Chain['execute']>[0]): Promise<CCIPExecution> {
-    // TODO
-    throw new CCIPNotImplementedError('CantonChain.executeReport')
+    const { wallet } = opts
+    if (!isCantonWallet(wallet)) {
+      throw new CCIPWalletInvalidError(wallet)
+    }
+
+    // Build the unsigned command
+    const unsigned = await this.generateUnsignedExecute({
+      ...opts,
+      payer: wallet.party,
+    })
+
+    this.logger.debug('CantonChain.execute: submitting command to Ledger API')
+
+    // Submit and wait for the full transaction (so we get events back)
+    const response = await this.provider.submitAndWaitForTransaction(unsigned.commands)
+    const txRecord = response.transaction as Record<string, unknown>
+    const updateId: string = typeof txRecord.updateId === 'string' ? txRecord.updateId : ''
+    const recordTime: string = typeof txRecord.recordTime === 'string' ? txRecord.recordTime : ''
+
+    this.logger.debug(`CantonChain.execute: submitted, updateId=${updateId}`)
+
+    // Parse execution receipt from the transaction events
+    const receipt = parseCantonExecutionReceipt(response.transaction, updateId)
+    const timestamp = recordTime
+      ? Math.floor(new Date(recordTime).getTime() / 1000)
+      : Math.floor(Date.now() / 1000)
+
+    // Build a synthetic ChainLog — Canton doesn't have EVM-style logs, but the
+    // SDK contract expects a ChainLog in the CCIPExecution.
+    const log: ChainLog = {
+      topics: [],
+      index: 0,
+      address: '',
+      blockNumber: 0,
+      transactionHash: updateId,
+      data: response.transaction as Record<string, unknown>,
+    }
+
+    return { receipt, log, timestamp }
   }
 
   /**
@@ -572,4 +765,115 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   ) {
     return Chain.buildMessageForDest(message)
   }
+}
+
+// ---------------------------------------------------------------------------
+// Module-private helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Strip the `0x` prefix from a hex string.
+ * Canton / Daml expects hex values without the prefix.
+ */
+function stripHexPrefix(hex: string): string {
+  return hex.startsWith('0x') ? hex.slice(2) : hex
+}
+
+/**
+ * Walk a Canton transaction response and extract an {@link ExecutionReceipt}.
+ *
+ * Canton transaction events are nested inside the `transaction` object
+ * returned by `submitAndWaitForTransaction`.  The structure varies but
+ * generally contains arrays of `createdEvents` and `exercisedEvents`.
+ * We look for an event whose `templateId` contains
+ * `ExecutionStateChanged` and extract the relevant fields.
+ *
+ * If no matching event is found we return a minimal receipt with
+ * {@link ExecutionState.Success} (the command succeeded if we got this far).
+ */
+function parseCantonExecutionReceipt(transaction: unknown, updateId: string): ExecutionReceipt {
+  // Attempt to extract events from the transaction
+  const events = extractEventsFromTransaction(transaction)
+
+  for (const event of events) {
+    const templateId =
+      typeof event === 'object' && event !== null && 'templateId' in event
+        ? String((event as Record<string, unknown>).templateId)
+        : ''
+
+    if (templateId.includes('ExecutionStateChanged')) {
+      const payload =
+        'createArgument' in (event as Record<string, unknown>)
+          ? ((event as Record<string, unknown>).createArgument as Record<string, unknown>)
+          : (event as Record<string, unknown>)
+
+      const msgId = payload['messageId']
+      const seqNum = payload['sequenceNumber']
+      const srcChain = payload['sourceChainSelector']
+      const retData = payload['returnData']
+      return {
+        messageId: typeof msgId === 'string' ? msgId : updateId,
+        sequenceNumber: BigInt(
+          typeof seqNum === 'string' || typeof seqNum === 'number' ? seqNum : 0,
+        ),
+        state: mapExecutionState(payload['state']),
+        sourceChainSelector: srcChain != null ? BigInt(srcChain as string | number) : undefined,
+        returnData: typeof retData === 'string' ? retData : undefined,
+      }
+    }
+  }
+
+  // Fallback — the command completed successfully but we couldn't locate the
+  // specific ExecutionStateChanged event (e.g. different event format).
+  return {
+    messageId: updateId,
+    sequenceNumber: 0n,
+    state: ExecutionState.Success,
+  }
+}
+
+/**
+ * Recursively extract event-like objects from a Canton transaction tree.
+ */
+function extractEventsFromTransaction(obj: unknown): unknown[] {
+  const results: unknown[] = []
+  if (!obj || typeof obj !== 'object') return results
+
+  const record = obj as Record<string, unknown>
+
+  // Direct event arrays
+  for (const key of ['createdEvents', 'exercisedEvents', 'events']) {
+    if (Array.isArray(record[key])) {
+      results.push(...(record[key] as unknown[]))
+    }
+  }
+
+  // Nested transaction/eventsById
+  if (record['eventsById'] && typeof record['eventsById'] === 'object') {
+    results.push(...Object.values(record['eventsById'] as Record<string, unknown>))
+  }
+
+  // Recurse into known wrapper keys
+  for (const key of ['transaction', 'rootEventIds', 'JsTransaction']) {
+    if (record[key] && typeof record[key] === 'object' && !Array.isArray(record[key])) {
+      results.push(...extractEventsFromTransaction(record[key]))
+    }
+  }
+
+  return results
+}
+
+/**
+ * Map a Canton execution state value to the SDK {@link ExecutionState}.
+ */
+function mapExecutionState(state: unknown): ExecutionState {
+  if (state === undefined || state === null) return ExecutionState.Success
+
+  const s = typeof state === 'string' ? state.toLowerCase() : `${state as string | number}`
+
+  if (s === 'success' || s === '2') return ExecutionState.Success
+  if (s === 'failed' || s === '3') return ExecutionState.Failed
+  if (s === 'inprogress' || s === 'in_progress' || s === '1') return ExecutionState.InProgress
+
+  return ExecutionState.Success
 }

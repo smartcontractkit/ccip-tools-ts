@@ -9,5 +9,5 @@ export interface DisclosedContract {
   /** Opaque base64/hex blob obtained from the ACS `createdEvent.createdEventBlob` field */
   createdEventBlob: string
   /** Synchronizer from which the contract was read (required for multi-synchronizer Canton deployments) */
-  synchronizerId?: string
+  synchronizerId: string
 }
