@@ -15,6 +15,7 @@ import {
   getAddress,
   hexlify,
   isBytesLike,
+  isError,
   isHexString,
   keccak256,
   toBeHex,
@@ -47,6 +48,7 @@ import {
   CCIPNotImplementedError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
+  CCIPTokenNotFoundError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
   CCIPVersionFeatureUnavailableError,
@@ -659,6 +661,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       opts.token,
     )) as string
 
+    if (!tokenPool || tokenPool === ZeroAddress)
+      throw new CCIPTokenNotFoundError(opts.token, {
+        context: { onRamp: opts.onRamp, destChainSelector: String(opts.destChainSelector) },
+        recovery: 'Verify the token is supported on this lane',
+      })
+
     // Query token pool for min block confirmations; older pools may not
     // support this function, in which case FTF is not available for this token
     try {
@@ -670,8 +678,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       const minBlockConfirmations = Number(await poolContract.getMinBlockConfirmations())
 
       return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: minBlockConfirmations }
-    } catch {
-      return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: 0 }
+    } catch (err) {
+      if (isError(err, 'CALL_EXCEPTION')) {
+        return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: 0 }
+      }
+      throw err
     }
   }
 
