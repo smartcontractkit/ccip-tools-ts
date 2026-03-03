@@ -1099,7 +1099,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *   onRamp: '0x...',
    *   destChainSelector: 4949039107694359620n,
    * })
-   * if (caps.MIN_BLOCK_CONFIRMATIONS !== undefined) {
+   * // FTF is enabled when MIN_BLOCK_CONFIRMATIONS is defined and > 0.
+   * // A value of 0 means FTF is disabled for this lane.
+   * if (caps.MIN_BLOCK_CONFIRMATIONS != null && caps.MIN_BLOCK_CONFIRMATIONS > 0) {
    *   console.log(`FTF enabled with ${caps.MIN_BLOCK_CONFIRMATIONS} confirmations`)
    * }
    * ```
