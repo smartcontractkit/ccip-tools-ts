@@ -97,6 +97,7 @@ import type OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import type OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
 import type Router_ABI from './abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
+import type TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
 import {
   CCV_INDEXER_URL,
   VersionedContractABI,
@@ -647,8 +648,26 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: 1 }
     }
 
-    // TODO: Query token pool for token-specific min block confirmations
-    return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: 0 }
+    // Resolve token → token pool via OnRamp.getPoolBySourceToken
+    const onRampContract = new Contract(
+      opts.onRamp,
+      interfaces.OnRamp_v2_0,
+      this.provider,
+    ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
+    const tokenPool = (await onRampContract.getPoolBySourceToken(
+      opts.destChainSelector,
+      opts.token,
+    )) as string
+
+    // Query token pool for min block confirmations
+    const poolContract = new Contract(
+      tokenPool,
+      interfaces.TokenPool_v2_0,
+      this.provider,
+    ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
+    const minBlockConfirmations = Number(await poolContract.getMinBlockConfirmations())
+
+    return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: minBlockConfirmations }
   }
 
   /**
