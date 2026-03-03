@@ -60,6 +60,8 @@ const FUJI_V2_0_ROUTER = '0xE7b62d27D6DDca525FE2e1ea526905EbfB36a1e1'
 const OLD_POOL_TOKEN_SEPOLIA = '0x67f000ca40cb1c6ee3bd2c7fda2fd22ddf56faab'
 // Token on Fuji whose pool (LombardTokenPool 2.0.0-dev) DOES support getMinBlockConfirmations
 const FTF_TOKEN_FUJI = '0x7FbdC44BfEBDe80C970ba622B678daB36cee31f6'
+// CCIP-BnM on Sepolia — supported on v1.5 Sepolia→Fuji lane
+const CCIP_BNM_TOKEN_SEPOLIA = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
 
 // ── execute constants ──
 
@@ -622,6 +624,38 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         LaneFeature.CUSTOM_FINALITY_RATE_LIMITS in features,
         false,
         'FTF disabled pool should not have CUSTOM_FINALITY_RATE_LIMITS',
+      )
+    })
+
+    it('should return RATE_LIMITS for v1.5 router with token (legacy pool)', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const features = await sepoliaChain.getLaneFeatures({
+        router: SEPOLIA_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        token: CCIP_BNM_TOKEN_SEPOLIA,
+      })
+
+      assert.equal(
+        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        undefined,
+        'v1.5 lane should not include MIN_BLOCK_CONFIRMATIONS (FTF does not exist pre-v2.0)',
+      )
+
+      // Legacy pool should expose RATE_LIMITS via getCurrentOutboundRateLimiterState
+      assert.ok(LaneFeature.RATE_LIMITS in features, 'v1.5 lane with token should have RATE_LIMITS')
+      const rateLimits = features[LaneFeature.RATE_LIMITS]
+      if (rateLimits != null) {
+        assert.equal(typeof rateLimits.tokens, 'bigint', 'tokens should be bigint')
+        assert.equal(typeof rateLimits.capacity, 'bigint', 'capacity should be bigint')
+        assert.equal(typeof rateLimits.rate, 'bigint', 'rate should be bigint')
+      }
+
+      // FTF doesn't exist on legacy lanes → no CUSTOM_FINALITY_RATE_LIMITS
+      assert.equal(
+        LaneFeature.CUSTOM_FINALITY_RATE_LIMITS in features,
+        false,
+        'legacy lane should not have CUSTOM_FINALITY_RATE_LIMITS',
       )
     })
   })

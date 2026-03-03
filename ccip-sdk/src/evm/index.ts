@@ -663,42 +663,63 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const [, version] = await this.typeAndVersion(onRamp)
 
     // Resolve token → pool contract if token provided and version supports it
-    let poolContract: TypedContract<typeof TokenPool_2_0_ABI> | null = null
-    if (version >= CCIPVersion.V2_0 && opts.token) {
-      const onRampContract = new Contract(
-        onRamp,
-        interfaces.OnRamp_v2_0,
-        this.provider,
-      ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
-      const tokenPool = (await onRampContract.getPoolBySourceToken(
-        opts.destChainSelector,
-        opts.token,
-      )) as string
-      poolContract = new Contract(
-        tokenPool,
-        interfaces.TokenPool_v2_0,
-        this.provider,
-      ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
+    let poolV2: TypedContract<typeof TokenPool_2_0_ABI> | null = null
+    let poolLegacy: TypedContract<typeof TokenPool_ABI> | null = null
+    if (opts.token) {
+      if (version >= CCIPVersion.V2_0) {
+        const onRampContract = new Contract(
+          onRamp,
+          interfaces.OnRamp_v2_0,
+          this.provider,
+        ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
+        const tokenPool = (await onRampContract.getPoolBySourceToken(
+          opts.destChainSelector,
+          opts.token,
+        )) as string
+        poolV2 = new Contract(
+          tokenPool,
+          interfaces.TokenPool_v2_0,
+          this.provider,
+        ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
+      } else {
+        // All legacy OnRamps (v1.2, v1.5, v1.6) share the same getPoolBySourceToken signature
+        const onRampContract = new Contract(
+          onRamp,
+          interfaces.OnRamp_v1_6,
+          this.provider,
+        ) as unknown as TypedContract<typeof OnRamp_1_6_ABI>
+        const tokenPool = (await onRampContract.getPoolBySourceToken(
+          opts.destChainSelector,
+          opts.token,
+        )) as string
+        if (tokenPool && tokenPool !== ZeroAddress) {
+          poolLegacy = new Contract(
+            tokenPool,
+            interfaces.TokenPool_v1_6,
+            this.provider,
+          ) as unknown as TypedContract<typeof TokenPool_ABI>
+        }
+      }
     }
 
     const result: Partial<LaneFeatures> = {}
 
     // MIN_BLOCK_CONFIRMATIONS — V2_0+ only
-    const minBlocks = await this.getMinBlockConfirmationsFeature(version, poolContract)
+    const minBlocks = await this.getMinBlockConfirmationsFeature(version, poolV2)
     if (minBlocks != null) result[LaneFeature.MIN_BLOCK_CONFIRMATIONS] = minBlocks
 
-    // Rate limits — V2_0+ only, requires token/pool
-    if (poolContract) {
+    // Rate limits — V2_0+, requires token/pool
+    if (poolV2) {
       try {
         const { outboundRateLimiterState: outbound } = resultToObject(
-          await poolContract.getCurrentRateLimiterState(opts.destChainSelector, false),
+          await poolV2.getCurrentRateLimiterState(opts.destChainSelector, false),
         ) as unknown as { outboundRateLimiterState: RateLimiterBucket }
         result[LaneFeature.RATE_LIMITS] = outbound.isEnabled ? outbound : null
 
         // Custom finality rate limits only when FTF is enabled
         if (minBlocks != null && minBlocks > 0) {
           const { outboundRateLimiterState: customOutbound } = resultToObject(
-            await poolContract.getCurrentRateLimiterState(opts.destChainSelector, true),
+            await poolV2.getCurrentRateLimiterState(opts.destChainSelector, true),
           ) as unknown as { outboundRateLimiterState: RateLimiterBucket }
           result[LaneFeature.CUSTOM_FINALITY_RATE_LIMITS] = customOutbound.isEnabled
             ? customOutbound
@@ -707,6 +728,19 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       } catch {
         // Older pools may not support getCurrentRateLimiterState; omit rate limit keys
       }
+    }
+
+    // Rate limits — legacy pools (v1.2–v1.6)
+    if (poolLegacy) {
+      try {
+        const outbound = resultToObject(
+          await poolLegacy.getCurrentOutboundRateLimiterState(opts.destChainSelector),
+        ) as unknown as RateLimiterBucket
+        result[LaneFeature.RATE_LIMITS] = outbound.isEnabled ? outbound : null
+      } catch {
+        // Pool may not support rate limiter query; omit rate limit key
+      }
+      // No CUSTOM_FINALITY_RATE_LIMITS — FTF doesn't exist on legacy lanes
     }
 
     return result
