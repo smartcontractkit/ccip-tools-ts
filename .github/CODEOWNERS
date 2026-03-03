@@ -1,3 +1,5 @@
 * @smartcontractkit/ccip-data
 
+ccip-api-ref/ @smartcontractkit/product-docs @smartcontractkit/ccip-pm @smartcontractkit/ccip-data
+
 .github/workflows/publish.yml @smartcontractkit/prodsec-public
