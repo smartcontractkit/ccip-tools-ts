@@ -168,7 +168,14 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * @throws {@link CCIPNotImplementedError} if Canton network detection is not yet implemented
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<CantonChain> {
-    const client = createCantonClient({ baseUrl: url })
+    // Check that ctx has the necessary cantonConfig
+    if (!ctx || !ctx.cantonConfig || typeof ctx.cantonConfig.jwt !== 'string') {
+      throw new CCIPError(
+        CCIPErrorCode.METHOD_UNSUPPORTED,
+        'CantonChain.fromUrl: ctx.cantonConfig is required',
+      )
+    }
+    const client = createCantonClient({ baseUrl: url, jwt: ctx.cantonConfig.jwt })
     try {
       const alive = await client.isAlive()
       if (!alive) throw new CCIPNotImplementedError('Canton Ledger JSON API is not alive')
@@ -179,13 +186,17 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         `Failed to connect to Canton Ledger API ${url}: ${message}`,
       )
     }
-    const defaultACSConfig: AcsDisclosureConfig = {
-      party: 'ccip-sdk-party',
-    }
-    // TODO: These need to come from input
-    const acsDisclosureProvider = new AcsDisclosureProvider(client, defaultACSConfig)
-    const edsDisclosureProvider = new EdsDisclosureProvider({ edsBaseUrl: url })
-    return CantonChain.fromClient(client, acsDisclosureProvider, edsDisclosureProvider, '', ctx)
+    const acsDisclosureProvider = new AcsDisclosureProvider(client, {
+      party: ctx.cantonConfig.party,
+    })
+    const edsDisclosureProvider = new EdsDisclosureProvider({ edsBaseUrl: ctx.cantonConfig.edsUrl })
+    return CantonChain.fromClient(
+      client,
+      acsDisclosureProvider,
+      edsDisclosureProvider,
+      ctx.cantonConfig.indexerUrl ?? '',
+      ctx,
+    )
   }
 
   /**

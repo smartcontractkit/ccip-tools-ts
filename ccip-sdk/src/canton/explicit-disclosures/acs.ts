@@ -216,7 +216,7 @@ export class AcsDisclosureProvider {
     jwt: string,
     config: AcsDisclosureConfig,
   ): AcsDisclosureProvider {
-    const client = createCantonClient({ baseUrl: ledgerApiUrl, token: jwt })
+    const client = createCantonClient({ baseUrl: ledgerApiUrl, jwt })
     return new AcsDisclosureProvider(client, config)
   }
 
