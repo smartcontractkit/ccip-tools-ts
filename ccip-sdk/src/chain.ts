@@ -130,7 +130,7 @@ export type ChainContext = WithLogger & {
    * Default: DEFAULT_API_RETRY_CONFIG
    */
   apiRetryConfig?: ApiRetryConfig
-}
+} & WithCantonConfig
 
 /**
  * Configuration for retry behavior with exponential backoff.
@@ -158,6 +158,30 @@ export const DEFAULT_API_RETRY_CONFIG: Required<ApiRetryConfig> = {
   backoffMultiplier: 2,
   maxDelayMs: 30000,
   respectRetryAfterHint: true,
+}
+
+/**
+ * An options object which may have Canton configuration
+ */
+export type WithCantonConfig = {
+  cantonConfig?: CantonConfig
+}
+
+/**
+ * Configuration for connecting to a Canton Ledger API and fetch CCIP disclosures.
+ */
+export type CantonConfig = {
+  /** Party identifier for the Canton Ledger API. */
+  party: string
+
+  /** JSON Web Token for authentication with the Canton Ledger API. */
+  jwt: string
+
+  /** Base URL for the EDS (Explicit Disclosure Service) API. */
+  edsUrl: string
+
+  /** Optional base URL for a transaction indexer to fetch CCV verifications; if not provided, default URL will be used. */
+  indexerUrl?: string
 }
 
 /**

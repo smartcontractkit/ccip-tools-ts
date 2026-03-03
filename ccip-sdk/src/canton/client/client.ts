@@ -27,8 +27,8 @@ export type GetConnectedSynchronizersResponse =
 export interface CantonClientConfig {
   /** Base URL of the Canton JSON Ledger API (e.g., http://localhost:7575) */
   baseUrl: string
-  /** Optional bearer token for authentication */
-  token?: string
+  /** JWT for authentication */
+  jwt: string
   /** Request timeout in milliseconds */
   timeout?: number
 }
@@ -38,7 +38,7 @@ export interface CantonClientConfig {
  */
 export function createCantonClient(config: CantonClientConfig) {
   const baseUrl = config.baseUrl.replace(/\/$/, '')
-  const headers = buildHeaders(config.token)
+  const headers = buildHeaders(config.jwt)
   const timeoutMs = config.timeout ?? 30_000
 
   return {
@@ -250,9 +250,9 @@ class CantonApiError extends CCIPError {
   }
 }
 
-function buildHeaders(token?: string): Record<string, string> {
+function buildHeaders(jwt?: string): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) headers['Authorization'] = `Bearer ${token}`
+  if (jwt) headers['Authorization'] = `Bearer ${jwt}`
   return headers
 }
 
