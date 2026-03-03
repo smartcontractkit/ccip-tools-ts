@@ -630,16 +630,25 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /**
    * {@inheritDoc Chain.getCapabilities}
    */
-  override getCapabilities(_opts: {
+  override async getCapabilities(opts: {
     onRamp: string
     destChainSelector: bigint
     token?: string
   }): Promise<Partial<LaneCapabilities>> {
-    // TODO: Implement actual capability detection from OnRamp contract
-    // For now, return stubbed value
-    return Promise.resolve({
-      [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: 1,
-    })
+    const [, version] = await this.typeAndVersion(opts.onRamp)
+
+    // FTF only exists on V2_0+
+    if (version < CCIPVersion.V2_0) {
+      return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: 0 }
+    }
+
+    // No token transfer → FTF supported, default 1 confirmation
+    if (!opts.token) {
+      return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: 1 }
+    }
+
+    // TODO: Query token pool for token-specific min block confirmations
+    return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: 0 }
   }
 
   /**

@@ -192,10 +192,20 @@ export type LaneCapability = (typeof LaneCapability)[keyof typeof LaneCapability
  * Lane capabilities record.
  * Maps capability keys to their values.
  */
-export type LaneCapabilities = {
+export interface LaneCapabilities {
   /** Minimum block confirmations for FTF. */
-  [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: number
+  MIN_BLOCK_CONFIRMATIONS: number
 }
+
+// Compile-time check: LaneCapability keys and LaneCapabilities keys must match.
+// If this errors, the two definitions have diverged.
+type _AssertCapabilityKeysMatch = [LaneCapability] extends [keyof LaneCapabilities]
+  ? [keyof LaneCapabilities] extends [LaneCapability]
+    ? true
+    : never
+  : never
+const _capabilityKeysMatch: _AssertCapabilityKeysMatch = true
+void _capabilityKeysMatch
 
 /**
  * Options for getBalance query.
@@ -1078,6 +1088,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Retrieve capabilities for a lane (onRamp/destChainSelector/token triplet).
    *
    * @param _opts - Options containing onRamp address, destChainSelector, and optional token
+   *   address (the token to be transferred in a hypothetical message on this lane)
    * @returns Promise resolving to partial capabilities record
    *
    * @throws {@link CCIPNotImplementedError} if not implemented for this chain family
