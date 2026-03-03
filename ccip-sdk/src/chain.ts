@@ -3,6 +3,7 @@ import type { PickDeep, SetOptional } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
 import type { UnsignedAptosTx } from './aptos/types.ts'
+import type { UnsignedCantonTx } from './canton/types.ts'
 import { getOnchainCommitReport } from './commits.ts'
 import {
   CCIPApiClientNotAvailableError,
@@ -371,7 +372,7 @@ export type UnsignedTx = {
   [ChainFamily.Aptos]: UnsignedAptosTx
   [ChainFamily.TON]: UnsignedTONTx
   [ChainFamily.Sui]: UnsignedSuiTx
-  [ChainFamily.Canton]: never // TODO
+  [ChainFamily.Canton]: UnsignedCantonTx
   [ChainFamily.Unknown]: never
 }
 
