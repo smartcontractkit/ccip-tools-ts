@@ -8,6 +8,7 @@ import {
   CCIPApiClientNotAvailableError,
   CCIPChainFamilyMismatchError,
   CCIPExecTxRevertedError,
+  CCIPNotImplementedError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
@@ -171,6 +172,29 @@ export type TokenInfo = {
   readonly decimals: number
   /** Optional human-readable token name. */
   readonly name?: string
+}
+
+/**
+ * Available lane capability keys.
+ * These represent features or thresholds that can be configured per-lane.
+ */
+export const LaneCapability = {
+  /**
+   * Minimum block confirmations required for Faster Time to Finality (FTF).
+   * When present and non-zero, indicates FTF is enabled on this lane.
+   */
+  MIN_BLOCK_CONFIRMATIONS: 'MIN_BLOCK_CONFIRMATIONS',
+} as const
+/** Type representing one of the lane capability keys. */
+export type LaneCapability = (typeof LaneCapability)[keyof typeof LaneCapability]
+
+/**
+ * Lane capabilities record.
+ * Maps capability keys to their values.
+ */
+export type LaneCapabilities = {
+  /** Minimum block confirmations for FTF. */
+  [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: number
 }
 
 /**
@@ -1048,6 +1072,33 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       throw new CCIPApiClientNotAvailableError()
     }
     return this.apiClient.getLaneLatency(this.network.chainSelector, destChainSelector)
+  }
+
+  /**
+   * Retrieve capabilities for a lane (onRamp/destChainSelector/token triplet).
+   *
+   * @param _opts - Options containing onRamp address, destChainSelector, and optional token
+   * @returns Promise resolving to partial capabilities record
+   *
+   * @throws {@link CCIPNotImplementedError} if not implemented for this chain family
+   *
+   * @example Get lane capabilities
+   * ```typescript
+   * const caps = await chain.getCapabilities({
+   *   onRamp: '0x...',
+   *   destChainSelector: 4949039107694359620n,
+   * })
+   * if (caps.MIN_BLOCK_CONFIRMATIONS !== undefined) {
+   *   console.log(`FTF enabled with ${caps.MIN_BLOCK_CONFIRMATIONS} confirmations`)
+   * }
+   * ```
+   */
+  getCapabilities(_opts: {
+    onRamp: string
+    destChainSelector: bigint
+    token?: string
+  }): Promise<Partial<LaneCapabilities>> {
+    return Promise.reject(new CCIPNotImplementedError('getCapabilities'))
   }
 
   /**

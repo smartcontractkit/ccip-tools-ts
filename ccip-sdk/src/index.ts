@@ -27,6 +27,7 @@ export type {
   ChainGetter,
   ChainStatic,
   GetBalanceOpts,
+  LaneCapabilities,
   LogFilter,
   RateLimiterState,
   RegistryTokenConfig,
@@ -34,7 +35,7 @@ export type {
   TokenPoolConfig,
   TokenPoolRemote,
 } from './chain.ts'
-export { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
+export { DEFAULT_API_RETRY_CONFIG, LaneCapability } from './chain.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
 export {
   type EVMExtraArgsV1,

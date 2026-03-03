@@ -27,9 +27,11 @@ import type { PickDeep, SetRequired } from 'type-fest'
 import {
   type ChainContext,
   type GetBalanceOpts,
+  type LaneCapabilities,
   type LogFilter,
   type TokenPoolRemote,
   Chain,
+  LaneCapability,
 } from '../chain.ts'
 import {
   CCIPAddressInvalidEvmError,
@@ -623,6 +625,21 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       default:
         throw new CCIPVersionUnsupportedError(version)
     }
+  }
+
+  /**
+   * {@inheritDoc Chain.getCapabilities}
+   */
+  override getCapabilities(_opts: {
+    onRamp: string
+    destChainSelector: bigint
+    token?: string
+  }): Promise<Partial<LaneCapabilities>> {
+    // TODO: Implement actual capability detection from OnRamp contract
+    // For now, return stubbed value
+    return Promise.resolve({
+      [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: 1,
+    })
   }
 
   /**
