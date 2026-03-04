@@ -36,7 +36,7 @@ import type { Ctx } from './types.ts'
 import { getCtx, logParsedError } from './utils.ts'
 import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 
-const MAX_IN_FLIGHT = 25
+const MAX_IN_FLIGHT = 15
 
 export const command = 'exec'
 export const describe =
@@ -297,7 +297,9 @@ async function execCommand(ctx: Ctx, argv: ExecArgv, destroy: () => void) {
         logger.error(`❌ messageId=${messageId} execution failed:`, err)
         if (
           err instanceof Error &&
-          ['wait for transaction timeout'].some((msg) => err.message.includes(msg))
+          ['wait for transaction timeout', 'txpool is full'].some((msg) =>
+            err.message.includes(msg),
+          )
         ) {
           // fatal
           cancelResolve()
