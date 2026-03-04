@@ -28,11 +28,11 @@ import type { PickDeep, SetRequired } from 'type-fest'
 import {
   type ChainContext,
   type GetBalanceOpts,
-  type LaneCapabilities,
+  type LaneFeatures,
   type LogFilter,
   type TokenPoolRemote,
   Chain,
-  LaneCapability,
+  LaneFeature,
 } from '../chain.ts'
 import {
   CCIPAddressInvalidEvmError,
@@ -631,23 +631,23 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * {@inheritDoc Chain.getCapabilities}
+   * {@inheritDoc Chain.getLaneFeatures}
    */
-  override async getCapabilities(opts: {
+  override async getLaneFeatures(opts: {
     onRamp: string
     destChainSelector: bigint
     token?: string
-  }): Promise<Partial<LaneCapabilities>> {
+  }): Promise<Partial<LaneFeatures>> {
     const [, version] = await this.typeAndVersion(opts.onRamp)
 
     // FTF only exists on V2_0+
     if (version < CCIPVersion.V2_0) {
-      return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: 0 }
+      return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: 0 }
     }
 
     // No token transfer → FTF supported, default 1 confirmation
     if (!opts.token) {
-      return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: 1 }
+      return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: 1 }
     }
 
     // Resolve token → token pool via OnRamp.getPoolBySourceToken
@@ -677,10 +677,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
       const minBlockConfirmations = Number(await poolContract.getMinBlockConfirmations())
 
-      return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: minBlockConfirmations }
+      return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: minBlockConfirmations }
     } catch (err) {
       if (isError(err, 'CALL_EXCEPTION')) {
-        return { [LaneCapability.MIN_BLOCK_CONFIRMATIONS]: 0 }
+        return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: 0 }
       }
       throw err
     }

@@ -175,37 +175,37 @@ export type TokenInfo = {
 }
 
 /**
- * Available lane capability keys.
+ * Available lane feature keys.
  * These represent features or thresholds that can be configured per-lane.
  */
-export const LaneCapability = {
+export const LaneFeature = {
   /**
    * Minimum block confirmations required for Faster Time to Finality (FTF).
    * When present and non-zero, indicates FTF is enabled on this lane.
    */
   MIN_BLOCK_CONFIRMATIONS: 'MIN_BLOCK_CONFIRMATIONS',
 } as const
-/** Type representing one of the lane capability keys. */
-export type LaneCapability = (typeof LaneCapability)[keyof typeof LaneCapability]
+/** Type representing one of the lane feature keys. */
+export type LaneFeature = (typeof LaneFeature)[keyof typeof LaneFeature]
 
 /**
- * Lane capabilities record.
- * Maps capability keys to their values.
+ * Lane features record.
+ * Maps feature keys to their values.
  */
-export interface LaneCapabilities {
+export interface LaneFeatures {
   /** Minimum block confirmations for FTF. */
   MIN_BLOCK_CONFIRMATIONS: number
 }
 
-// Compile-time check: LaneCapability keys and LaneCapabilities keys must match.
+// Compile-time check: LaneFeature keys and LaneFeatures keys must match.
 // If this errors, the two definitions have diverged.
-type _AssertCapabilityKeysMatch = [LaneCapability] extends [keyof LaneCapabilities]
-  ? [keyof LaneCapabilities] extends [LaneCapability]
+type _AssertFeatureKeysMatch = [LaneFeature] extends [keyof LaneFeatures]
+  ? [keyof LaneFeatures] extends [LaneFeature]
     ? true
     : never
   : never
-const _capabilityKeysMatch: _AssertCapabilityKeysMatch = true
-void _capabilityKeysMatch
+const _featureKeysMatch: _AssertFeatureKeysMatch = true
+void _featureKeysMatch
 
 /**
  * Options for getBalance query.
@@ -1085,33 +1085,33 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
-   * Retrieve capabilities for a lane (onRamp/destChainSelector/token triplet).
+   * Retrieve features for a lane (onRamp/destChainSelector/token triplet).
    *
    * @param _opts - Options containing onRamp address, destChainSelector, and optional token
    *   address (the token to be transferred in a hypothetical message on this lane)
-   * @returns Promise resolving to partial capabilities record
+   * @returns Promise resolving to partial lane features record
    *
    * @throws {@link CCIPNotImplementedError} if not implemented for this chain family
    *
-   * @example Get lane capabilities
+   * @example Get lane features
    * ```typescript
-   * const caps = await chain.getCapabilities({
+   * const features = await chain.getLaneFeatures({
    *   onRamp: '0x...',
    *   destChainSelector: 4949039107694359620n,
    * })
    * // FTF is enabled when MIN_BLOCK_CONFIRMATIONS is defined and > 0.
    * // A value of 0 means FTF is disabled for this lane.
-   * if (caps.MIN_BLOCK_CONFIRMATIONS != null && caps.MIN_BLOCK_CONFIRMATIONS > 0) {
-   *   console.log(`FTF enabled with ${caps.MIN_BLOCK_CONFIRMATIONS} confirmations`)
+   * if (features.MIN_BLOCK_CONFIRMATIONS != null && features.MIN_BLOCK_CONFIRMATIONS > 0) {
+   *   console.log(`FTF enabled with ${features.MIN_BLOCK_CONFIRMATIONS} confirmations`)
    * }
    * ```
    */
-  getCapabilities(_opts: {
+  getLaneFeatures(_opts: {
     onRamp: string
     destChainSelector: bigint
     token?: string
-  }): Promise<Partial<LaneCapabilities>> {
-    return Promise.reject(new CCIPNotImplementedError('getCapabilities'))
+  }): Promise<Partial<LaneFeatures>> {
+    return Promise.reject(new CCIPNotImplementedError('getLaneFeatures'))
   }
 
   /**
