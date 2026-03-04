@@ -682,7 +682,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: minBlockConfirmations }
     } catch (err) {
       if (isError(err, 'CALL_EXCEPTION')) {
-        return {}
+        return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: 0 }
       }
       throw CCIPError.from(err, 'UNKNOWN')
     }

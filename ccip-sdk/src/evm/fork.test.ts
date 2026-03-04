@@ -562,8 +562,8 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
 
       assert.equal(
         features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
-        undefined,
-        'token with old pool should not include MIN_BLOCK_CONFIRMATIONS (pool does not support FTF)',
+        0,
+        'token with old pool should have FTF disabled (MIN_BLOCK_CONFIRMATIONS=0)',
       )
     })
 
