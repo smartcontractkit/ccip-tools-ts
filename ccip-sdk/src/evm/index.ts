@@ -41,6 +41,7 @@ import {
   CCIPContractNotRouterError,
   CCIPContractTypeInvalidError,
   CCIPDataFormatUnsupportedError,
+  CCIPError,
   CCIPExecTxNotConfirmedError,
   CCIPExecTxRevertedError,
   CCIPHasherVersionUnsupportedError,
@@ -643,7 +644,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     // FTF only exists on V2_0+
     if (version < CCIPVersion.V2_0) {
-      return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: 0 }
+      return {}
     }
 
     // No token transfer → FTF supported, default 1 confirmation
@@ -681,9 +682,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: minBlockConfirmations }
     } catch (err) {
       if (isError(err, 'CALL_EXCEPTION')) {
-        return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: 0 }
+        return {}
       }
-      throw err
+      throw CCIPError.from(err, 'UNKNOWN')
     }
   }
 
