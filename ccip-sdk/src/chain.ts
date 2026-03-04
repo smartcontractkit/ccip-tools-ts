@@ -1085,9 +1085,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
-   * Retrieve features for a lane (onRamp/destChainSelector/token triplet).
+   * Retrieve features for a lane (router/destChainSelector/token triplet).
    *
-   * @param _opts - Options containing onRamp address, destChainSelector, and optional token
+   * @param _opts - Options containing router address, destChainSelector, and optional token
    *   address (the token to be transferred in a hypothetical message on this lane)
    * @returns Promise resolving to partial lane features record
    *
@@ -1096,7 +1096,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @example Get lane features
    * ```typescript
    * const features = await chain.getLaneFeatures({
-   *   onRamp: '0x...',
+   *   router: '0x...',
    *   destChainSelector: 4949039107694359620n,
    * })
    * // FTF is enabled when MIN_BLOCK_CONFIRMATIONS is defined and > 0.
@@ -1107,7 +1107,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   getLaneFeatures(_opts: {
-    onRamp: string
+    router: string
     destChainSelector: bigint
     token?: string
   }): Promise<Partial<LaneFeatures>> {

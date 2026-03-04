@@ -337,7 +337,11 @@ export default [
         type: 'uint64',
         internalType: 'uint64',
       },
-      { name: 'amount', type: 'uint256', internalType: 'uint256' },
+      {
+        name: 'sourceDenominatedAmount',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
       {
         name: 'blockConfirmationsRequested',
         type: 'uint16',

@@ -50,12 +50,10 @@ const APTOS_SUPPORTED_TOKEN = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
 
 // ── getLaneFeatures constants ──
 
-// v1.6 onRamp: Sepolia -> Fuji
-const SEPOLIA_V1_6_ONRAMP = '0x37ea845b0F019eAb760caA59a982B9AcF3A71CAB'
-// v2.0 onRamp: Sepolia -> Fuji
-const SEPOLIA_V2_0_ONRAMP = '0x0F887309075403d02563CBCbB3D98Fb2ef2D2946'
-// v2.0 onRamp: Fuji -> Sepolia
-const FUJI_V2_0_ONRAMP = '0x2162318D639BBbC2bc8D1562a7baFA459b9F29BF'
+// v2.0 router for Sepolia -> Fuji lane
+const SEPOLIA_V2_0_ROUTER = '0xc0f457e615348708FaAB3B40ECC26Badb32B7b30'
+// v2.0 router for Fuji -> Sepolia lane
+const FUJI_V2_0_ROUTER = '0xE7b62d27D6DDca525FE2e1ea526905EbfB36a1e1'
 // Token on Sepolia whose pool (BurnMintTokenPool 1.7.0-dev) supports the older
 // singular getMinBlockConfirmation(), not the plural getMinBlockConfirmations()
 // in our current ABI. This exercises the try-catch fallback path.
@@ -523,11 +521,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   describe('getLaneFeatures', () => {
-    it('should return MIN_BLOCK_CONFIRMATIONS=0 for v1.6 onRamp', async () => {
+    it('should return MIN_BLOCK_CONFIRMATIONS=0 for v1.6 router', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const features = await sepoliaChain.getLaneFeatures({
-        onRamp: SEPOLIA_V1_6_ONRAMP,
+        router: SEPOLIA_V1_6_ROUTER,
         destChainSelector: FUJI_SELECTOR,
       })
 
@@ -538,11 +536,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
     })
 
-    it('should return MIN_BLOCK_CONFIRMATIONS=1 for v2.0 onRamp without token', async () => {
+    it('should return MIN_BLOCK_CONFIRMATIONS=1 for v2.0 router without token', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const features = await sepoliaChain.getLaneFeatures({
-        onRamp: SEPOLIA_V2_0_ONRAMP,
+        router: SEPOLIA_V2_0_ROUTER,
         destChainSelector: FUJI_SELECTOR,
       })
 
@@ -557,7 +555,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const features = await sepoliaChain.getLaneFeatures({
-        onRamp: SEPOLIA_V2_0_ONRAMP,
+        router: SEPOLIA_V2_0_ROUTER,
         destChainSelector: FUJI_SELECTOR,
         token: OLD_POOL_TOKEN_SEPOLIA,
       })
@@ -573,7 +571,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.ok(fujiChain, 'fuji chain should be initialized')
 
       const features = await fujiChain.getLaneFeatures({
-        onRamp: FUJI_V2_0_ONRAMP,
+        router: FUJI_V2_0_ROUTER,
         destChainSelector: SEPOLIA_SELECTOR,
         token: FTF_TOKEN_FUJI,
       })

@@ -634,11 +634,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * {@inheritDoc Chain.getLaneFeatures}
    */
   override async getLaneFeatures(opts: {
-    onRamp: string
+    router: string
     destChainSelector: bigint
     token?: string
   }): Promise<Partial<LaneFeatures>> {
-    const [, version] = await this.typeAndVersion(opts.onRamp)
+    const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
+    const [, version] = await this.typeAndVersion(onRamp)
 
     // FTF only exists on V2_0+
     if (version < CCIPVersion.V2_0) {
@@ -652,7 +653,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     // Resolve token → token pool via OnRamp.getPoolBySourceToken
     const onRampContract = new Contract(
-      opts.onRamp,
+      onRamp,
       interfaces.OnRamp_v2_0,
       this.provider,
     ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
@@ -663,7 +664,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     if (!tokenPool || tokenPool === ZeroAddress)
       throw new CCIPTokenNotFoundError(opts.token, {
-        context: { onRamp: opts.onRamp, destChainSelector: String(opts.destChainSelector) },
+        context: { router: opts.router, destChainSelector: String(opts.destChainSelector) },
         recovery: 'Verify the token is supported on this lane',
       })
 
