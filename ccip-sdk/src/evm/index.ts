@@ -48,6 +48,7 @@ import {
   CCIPNotImplementedError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
+  CCIPTokenNotFoundError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
   CCIPVersionFeatureUnavailableError,
@@ -668,39 +669,35 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     let poolV2: TypedContract<typeof TokenPool_2_0_ABI> | null = null
     let poolLegacy: TypedContract<typeof TokenPool_ABI> | null = null
     if (opts.token) {
+      // All OnRamp versions share the same getPoolBySourceToken(uint64, address) signature
+      const onRampContract = new Contract(
+        onRamp,
+        interfaces.OnRamp_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
+      const tokenPool = (await onRampContract.getPoolBySourceToken(
+        opts.destChainSelector,
+        opts.token,
+      )) as string
+
+      if (!tokenPool || tokenPool === ZeroAddress)
+        throw new CCIPTokenNotFoundError(opts.token, {
+          context: { router: opts.router, destChainSelector: String(opts.destChainSelector) },
+          recovery: 'Verify the token is supported on this lane',
+        })
+
       if (version >= CCIPVersion.V2_0) {
-        const onRampContract = new Contract(
-          onRamp,
-          interfaces.OnRamp_v2_0,
-          this.provider,
-        ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
-        const tokenPool = (await onRampContract.getPoolBySourceToken(
-          opts.destChainSelector,
-          opts.token,
-        )) as string
         poolV2 = new Contract(
           tokenPool,
           interfaces.TokenPool_v2_0,
           this.provider,
         ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
       } else {
-        // All legacy OnRamps (v1.2, v1.5, v1.6) share the same getPoolBySourceToken signature
-        const onRampContract = new Contract(
-          onRamp,
-          interfaces.OnRamp_v1_6,
+        poolLegacy = new Contract(
+          tokenPool,
+          interfaces.TokenPool_v1_6,
           this.provider,
-        ) as unknown as TypedContract<typeof OnRamp_1_6_ABI>
-        const tokenPool = (await onRampContract.getPoolBySourceToken(
-          opts.destChainSelector,
-          opts.token,
-        )) as string
-        if (tokenPool && tokenPool !== ZeroAddress) {
-          poolLegacy = new Contract(
-            tokenPool,
-            interfaces.TokenPool_v1_6,
-            this.provider,
-          ) as unknown as TypedContract<typeof TokenPool_ABI>
-        }
+        ) as unknown as TypedContract<typeof TokenPool_ABI>
       }
     }
 
