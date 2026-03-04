@@ -17,11 +17,16 @@ The CCIP SDK works in browser environments with proper bundler configuration. Th
 
 ### SDK-Only Projects
 
-If you're using `@chainlink/ccip-sdk` **without** wallet UI libraries, you only need the `buffer` polyfill:
+The `buffer` polyfill is required by the SDK's **Solana, TON, and Sui** chain implementations. EVM-only and Aptos-only consumers do not need `buffer` at runtime.
 
-| Polyfill | Required By | Reason |
-|----------|-------------|--------|
-| `buffer` | CCIP SDK (Solana, TON, Sui chains) | Binary data handling |
+| Polyfill | Required By | NOT Required By |
+|----------|-------------|-----------------|
+| `buffer` | Solana, TON, Sui chains | EVM, Aptos |
+
+**Bundler behavior differs:**
+
+- **Vite:** Always include the `buffer` polyfill, even for EVM-only projects. Vite's dev server pre-bundles all SDK dependencies eagerly (including Solana/TON code), so the polyfill must be resolvable.
+- **Webpack/Next.js:** EVM-only consumers do **not** need the `buffer` polyfill. Non-EVM code is tree-shaken in production and never executed at runtime in development.
 
 ### With Wallet Libraries
 
@@ -29,11 +34,59 @@ If you're using wallet connection libraries (RainbowKit, MetaMask SDK, Solana Wa
 
 | Polyfill | Required By | NOT Required By |
 |----------|-------------|-----------------|
-| `buffer` | **@chainlink/ccip-sdk** | - |
+| `buffer` | Solana, TON, Sui chains | EVM, Aptos |
 | `crypto` | @metamask/sdk, wallet libraries | @chainlink/ccip-sdk |
 | `stream` | @metamask/sdk | @chainlink/ccip-sdk |
 | `process` | @metamask/sdk, @walletconnect | @chainlink/ccip-sdk |
 | `util` | @solana/wallet-adapter | @chainlink/ccip-sdk |
+
+## Dependency Version Conflict (`@noble/hashes`)
+
+The SDK depends on `ethers` (which pins `@noble/hashes@1.3.2`) and `@mysten/sui` (which requires `@noble/hashes@^1.8.0`). Node.js handles this automatically via nested `node_modules`, but **Webpack and Next.js** may resolve to the wrong version, causing `ERR_PACKAGE_PATH_NOT_EXPORTED`.
+
+Add version overrides to your project's `package.json` to force a single compatible version:
+
+<Tabs>
+<TabItem value="npm" label="npm">
+
+```json
+{
+  "overrides": {
+    "@noble/hashes": "^1.8.0"
+  }
+}
+```
+
+</TabItem>
+<TabItem value="yarn" label="yarn">
+
+```json
+{
+  "resolutions": {
+    "**/@noble/hashes": "^1.8.0"
+  }
+}
+```
+
+</TabItem>
+<TabItem value="pnpm" label="pnpm">
+
+```json
+{
+  "pnpm": {
+    "overrides": {
+      "@noble/hashes": "^1.8.0"
+    }
+  }
+}
+```
+
+</TabItem>
+</Tabs>
+
+This is safe — `@noble/hashes@1.8.0` is backward-compatible with ethers' needs.
+
+In addition, add a `resolve.alias` in your bundler config to ensure the correct version is used (see the [Webpack](#webpack-configuration) and [Next.js](#nextjs) sections below).
 
 ## Vite Configuration
 
@@ -96,14 +149,36 @@ npm install vite-plugin-node-polyfills
 ## Webpack Configuration
 
 <Tabs>
-<TabItem value="minimal" label="SDK Only">
+<TabItem value="evm" label="EVM Only">
 
 ```javascript
-// webpack.config.js - Minimal config
+// webpack.config.js - EVM-only (no polyfills needed)
+const path = require('path')
+
+module.exports = {
+  resolve: {
+    alias: {
+      '@noble/hashes': path.dirname(require.resolve('@noble/hashes')),
+    },
+  },
+}
+```
+
+EVM-only consumers do not need the `buffer` polyfill on Webpack. Non-EVM code is tree-shaken in production and never executed in development.
+
+</TabItem>
+<TabItem value="minimal" label="Multi-Chain">
+
+```javascript
+// webpack.config.js - Multi-chain (Solana, TON, Sui)
+const path = require('path')
 const webpack = require('webpack')
 
 module.exports = {
   resolve: {
+    alias: {
+      '@noble/hashes': path.dirname(require.resolve('@noble/hashes')),
+    },
     fallback: {
       buffer: require.resolve('buffer/'),
     },
@@ -120,11 +195,15 @@ module.exports = {
 <TabItem value="full" label="With Wallet Libraries">
 
 ```javascript
-// webpack.config.js - Full config
+// webpack.config.js - Full config with wallet libraries
+const path = require('path')
 const webpack = require('webpack')
 
 module.exports = {
   resolve: {
+    alias: {
+      '@noble/hashes': path.dirname(require.resolve('@noble/hashes')),
+    },
     fallback: {
       buffer: require.resolve('buffer/'),
       crypto: require.resolve('crypto-browserify'),
@@ -148,6 +227,7 @@ module.exports = {
 Install polyfill packages:
 
 ```bash
+# If using Solana, TON, or Sui chains:
 npm install buffer
 # If using wallet libraries:
 npm install crypto-browserify stream-browserify util process
@@ -155,14 +235,24 @@ npm install crypto-browserify stream-browserify util process
 
 ## Next.js Configuration
 
+**Recommended:** Next.js >= 13.4.5 (supports `moduleResolution: "bundler"`). For older versions, see the [legacy workaround](#nextjs-12--1344-legacy) below.
+
+<Tabs>
+<TabItem value="evm" label="EVM Only">
+
 ```javascript
 // next.config.js
+const path = require('path')
+
+/** @type {import('next').NextConfig} */
 const nextConfig = {
-  webpack: (config) => {
-    config.resolve.fallback = {
-      ...config.resolve.fallback,
-      buffer: require.resolve('buffer/'),
-      // Add more if using wallet libraries
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      // Fix @noble/hashes version conflict
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        '@noble/hashes': path.dirname(require.resolve('@noble/hashes')),
+      }
     }
     return config
   },
@@ -171,9 +261,42 @@ const nextConfig = {
 module.exports = nextConfig
 ```
 
+EVM-only consumers do not need the `buffer` polyfill on Next.js.
+
+</TabItem>
+<TabItem value="multi" label="Multi-Chain">
+
+```javascript
+// next.config.js
+const path = require('path')
+
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      // Fix @noble/hashes version conflict
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        '@noble/hashes': path.dirname(require.resolve('@noble/hashes')),
+      }
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        buffer: require.resolve('buffer/'),
+      }
+    }
+    return config
+  },
+}
+
+module.exports = nextConfig
+```
+
+</TabItem>
+</Tabs>
+
 ## Tree-Shaking
 
-The SDK supports tree-shaking - only the chains you import are bundled:
+The SDK supports tree-shaking — only the chains you import are bundled:
 
 ```typescript
 // Only EVMChain is bundled
@@ -185,6 +308,8 @@ import { SolanaChain } from '@chainlink/ccip-sdk'
 // All chains - largest bundle, use only if needed
 import { allSupportedChains } from '@chainlink/ccip-sdk/all'
 ```
+
+**Webpack/Next.js:** Tree-shaking requires the [`@noble/hashes` version fix](#dependency-version-conflict-noblehashes) first. Without it, Webpack fails at module resolution before tree-shaking can run.
 
 ### Bundle Sizes
 
@@ -288,34 +413,38 @@ export default defineConfig({
 
 ### Next.js
 
+See the [Next.js Configuration](#nextjs-configuration) section above for webpack config (including the required `@noble/hashes` `resolve.alias` fix).
+
+For client components using Solana/TON/Sui, install the buffer polyfill and add at the top:
+
 ```bash
 npm install buffer
 ```
-
-```javascript
-// next.config.js
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  webpack: (config, { isServer }) => {
-    if (!isServer) {
-      config.resolve.fallback = {
-        ...config.resolve.fallback,
-        buffer: require.resolve('buffer/'),
-      }
-    }
-    return config
-  },
-}
-module.exports = nextConfig
-```
-
-For client components using Solana/TON, add at the top:
 
 ```tsx
 'use client'
 import { Buffer } from 'buffer'
 if (typeof window !== 'undefined') {
   window.Buffer = Buffer
+}
+```
+
+#### Next.js 12 – 13.4.4 (Legacy)
+
+These versions force `moduleResolution: "node"`, which cannot resolve the SDK's type declarations. Add the following `paths` mapping to your `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "paths": {
+      "@chainlink/ccip-sdk": [
+        "./node_modules/@chainlink/ccip-sdk/src/index.ts"
+      ],
+      "@chainlink/ccip-sdk/viem": [
+        "./node_modules/@chainlink/ccip-sdk/src/viem.ts"
+      ]
+    }
+  }
 }
 ```
 
@@ -358,6 +487,12 @@ npx source-map-explorer dist/bundle.js
 Expected sizes for EVM-only: ~740 KB minified, ~180 KB gzipped.
 
 ## Troubleshooting
+
+### "ERR_PACKAGE_PATH_NOT_EXPORTED"
+
+**Cause:** `ethers` pins `@noble/hashes@1.3.2` while other SDK dependencies require `@noble/hashes@1.8.0+`. Webpack may resolve to the v1.3.2 copy, which lacks sub-paths like `./blake2.js` and `./sha2.js` that were added in v1.8.0.
+
+**Solution:** Add version overrides to your `package.json` and `resolve.alias` to your bundler config. See the [Dependency Version Conflict](#dependency-version-conflict-noblehashes) section above.
 
 ### "Buffer is not defined"
 

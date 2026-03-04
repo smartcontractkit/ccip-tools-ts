@@ -30,7 +30,7 @@ type MessageInput = {
 }
 ```
 
-## Simple Message
+## Arbitrary Messaging (Data Only)
 
 Send arbitrary data to a contract on another chain:
 
@@ -81,7 +81,7 @@ try {
 
 ## Token Transfer
 
-Transfer tokens cross-chain:
+Transfer tokens cross-chain. For token-only transfers (no data), the SDK auto-populates all `extraArgs` with sensible defaults — you only need `receiver` and `tokenAmounts`:
 
 ```typescript
 import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
@@ -92,7 +92,6 @@ const LINK_TOKEN = '0x779877A7B0D9E8603169DdbD7836e478b4624789' // LINK on Sepol
 
 const message = {
   receiver: '0xRecipientAddress...',
-  data: '0x', // No data, just token transfer
   tokenAmounts: [
     {
       token: LINK_TOKEN,
@@ -100,10 +99,6 @@ const message = {
     },
   ],
   feeToken: LINK_TOKEN, // Pay fee in LINK
-  extraArgs: {
-    gasLimit: 0n, // No receiver execution needed
-    allowOutOfOrderExecution: true,
-  },
 }
 
 const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
@@ -126,6 +121,8 @@ const request = await source.sendMessage({
 ```
 
 Before sending tokens, approve the Router contract to spend your tokens. `sendMessage` fails if allowance is insufficient.
+
+This works for **any destination chain** (EVM, Solana, Aptos, Sui, TON). The SDK handles chain-specific fields like `computeUnits`, `tokenReceiver`, and `allowOutOfOrderExecution` automatically for token-only transfers. See [Multi-Chain](/sdk/guides/multi-chain) for cross-chain examples.
 
 ## Extra Arguments
 
@@ -288,9 +285,9 @@ const messageId = messages[0].message.messageId
 console.log('Message ID:', messageId)
 ```
 
-## Complete Example
+## Programmable Token Transfer
 
-Send data and tokens with fee buffer:
+Send **both data and tokens** in a single message. The receiver contract executes custom logic with the tokens (e.g., deposit, swap, stake):
 
 ```typescript
 import {
@@ -354,6 +351,13 @@ async function sendCrossChainMessage(walletClient: WalletClient) {
   }
 }
 ```
+
+Unlike token-only transfers, programmable token transfers require `extraArgs.gasLimit` (for the receiver contract execution) and a `data` payload.
+
+**Non-EVM destinations** have additional requirements for programmable token transfers. For the full message structure details, see:
+
+- [Build CCIP messages to Solana](https://docs.chain.link/ccip/tutorials/svm/destination/build-messages) — `tokenReceiver` (required), `computeUnits`, `accounts`, `accountIsWritableBitmap`
+- [Build CCIP messages to Aptos](https://docs.chain.link/ccip/tutorials/aptos/destination/build-messages) — resource accounts, `gasLimit`, `allowOutOfOrderExecution`
 
 ## Related
 
