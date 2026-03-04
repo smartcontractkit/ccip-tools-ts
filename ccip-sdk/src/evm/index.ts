@@ -15,6 +15,7 @@ import {
   getAddress,
   hexlify,
   isBytesLike,
+  isError,
   isHexString,
   keccak256,
   toBeHex,
@@ -646,8 +647,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     // Query token pool; older pools may not support this function
     try {
       return Number(await poolContract.getMinBlockConfirmations())
-    } catch {
-      return 0
+    } catch (err) {
+      if (isError(err, 'CALL_EXCEPTION')) return 0
+      throw err
     }
   }
 
@@ -725,7 +727,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
             ? customOutbound
             : null
         }
-      } catch {
+      } catch (err) {
+        if (!isError(err, 'CALL_EXCEPTION')) throw err
         // Older pools may not support getCurrentRateLimiterState; omit rate limit keys
       }
     }
@@ -737,7 +740,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           await poolLegacy.getCurrentOutboundRateLimiterState(opts.destChainSelector),
         ) as unknown as RateLimiterBucket
         result[LaneFeature.RATE_LIMITS] = outbound.isEnabled ? outbound : null
-      } catch {
+      } catch (err) {
+        if (!isError(err, 'CALL_EXCEPTION')) throw err
         // Pool may not support rate limiter query; omit rate limit key
       }
       // No CUSTOM_FINALITY_RATE_LIMITS — FTF doesn't exist on legacy lanes
