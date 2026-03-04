@@ -8,6 +8,7 @@ import {
   CCIPApiClientNotAvailableError,
   CCIPChainFamilyMismatchError,
   CCIPExecTxRevertedError,
+  CCIPNotImplementedError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
@@ -171,6 +172,29 @@ export type TokenInfo = {
   readonly decimals: number
   /** Optional human-readable token name. */
   readonly name?: string
+}
+
+/**
+ * Available lane feature keys.
+ * These represent features or thresholds that can be configured per-lane.
+ */
+export const LaneFeature = {
+  /**
+   * Minimum block confirmations required for Faster Time to Finality (FTF).
+   * When present and non-zero, indicates FTF is enabled on this lane.
+   */
+  MIN_BLOCK_CONFIRMATIONS: 'MIN_BLOCK_CONFIRMATIONS',
+} as const
+/** Type representing one of the lane feature keys. */
+export type LaneFeature = (typeof LaneFeature)[keyof typeof LaneFeature]
+
+/**
+ * Lane features record.
+ * Maps feature keys to their values.
+ */
+export interface LaneFeatures extends Record<LaneFeature, unknown> {
+  /** Minimum block confirmations for FTF. */
+  MIN_BLOCK_CONFIRMATIONS: number
 }
 
 /**
@@ -1048,6 +1072,36 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       throw new CCIPApiClientNotAvailableError()
     }
     return this.apiClient.getLaneLatency(this.network.chainSelector, destChainSelector)
+  }
+
+  /**
+   * Retrieve features for a lane (router/destChainSelector/token triplet).
+   *
+   * @param _opts - Options containing router address, destChainSelector, and optional token
+   *   address (the token to be transferred in a hypothetical message on this lane)
+   * @returns Promise resolving to partial lane features record
+   *
+   * @throws {@link CCIPNotImplementedError} if not implemented for this chain family
+   *
+   * @example Get lane features
+   * ```typescript
+   * const features = await chain.getLaneFeatures({
+   *   router: '0x...',
+   *   destChainSelector: 4949039107694359620n,
+   * })
+   * // FTF is enabled when MIN_BLOCK_CONFIRMATIONS is defined and > 0.
+   * // A value of 0 means FTF is disabled for this lane.
+   * if (features.MIN_BLOCK_CONFIRMATIONS != null && features.MIN_BLOCK_CONFIRMATIONS > 0) {
+   *   console.log(`FTF enabled with ${features.MIN_BLOCK_CONFIRMATIONS} confirmations`)
+   * }
+   * ```
+   */
+  getLaneFeatures(_opts: {
+    router: string
+    destChainSelector: bigint
+    token?: string
+  }): Promise<Partial<LaneFeatures>> {
+    return Promise.reject(new CCIPNotImplementedError('getLaneFeatures'))
   }
 
   /**

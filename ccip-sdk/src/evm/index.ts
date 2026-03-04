@@ -15,6 +15,7 @@ import {
   getAddress,
   hexlify,
   isBytesLike,
+  isError,
   isHexString,
   keccak256,
   toBeHex,
@@ -27,9 +28,11 @@ import type { PickDeep, SetRequired } from 'type-fest'
 import {
   type ChainContext,
   type GetBalanceOpts,
+  type LaneFeatures,
   type LogFilter,
   type TokenPoolRemote,
   Chain,
+  LaneFeature,
 } from '../chain.ts'
 import {
   CCIPAddressInvalidEvmError,
@@ -38,6 +41,7 @@ import {
   CCIPContractNotRouterError,
   CCIPContractTypeInvalidError,
   CCIPDataFormatUnsupportedError,
+  CCIPError,
   CCIPExecTxNotConfirmedError,
   CCIPExecTxRevertedError,
   CCIPHasherVersionUnsupportedError,
@@ -45,6 +49,7 @@ import {
   CCIPNotImplementedError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
+  CCIPTokenNotFoundError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
   CCIPVersionFeatureUnavailableError,
@@ -95,6 +100,7 @@ import type OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import type OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
 import type Router_ABI from './abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
+import type TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
 import {
   CCV_INDEXER_URL,
   VersionedContractABI,
@@ -622,6 +628,63 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       }
       default:
         throw new CCIPVersionUnsupportedError(version)
+    }
+  }
+
+  /**
+   * {@inheritDoc Chain.getLaneFeatures}
+   */
+  override async getLaneFeatures(opts: {
+    router: string
+    destChainSelector: bigint
+    token?: string
+  }): Promise<Partial<LaneFeatures>> {
+    const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
+    const [, version] = await this.typeAndVersion(onRamp)
+
+    // FTF only exists on V2_0+
+    if (version < CCIPVersion.V2_0) {
+      return {}
+    }
+
+    // No token transfer → FTF supported, default 1 confirmation
+    if (!opts.token) {
+      return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: 1 }
+    }
+
+    // Resolve token → token pool via OnRamp.getPoolBySourceToken
+    const onRampContract = new Contract(
+      onRamp,
+      interfaces.OnRamp_v2_0,
+      this.provider,
+    ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
+    const tokenPool = (await onRampContract.getPoolBySourceToken(
+      opts.destChainSelector,
+      opts.token,
+    )) as string
+
+    if (!tokenPool || tokenPool === ZeroAddress)
+      throw new CCIPTokenNotFoundError(opts.token, {
+        context: { router: opts.router, destChainSelector: String(opts.destChainSelector) },
+        recovery: 'Verify the token is supported on this lane',
+      })
+
+    // Query token pool for min block confirmations; older pools may not
+    // support this function, in which case FTF is not available for this token
+    try {
+      const poolContract = new Contract(
+        tokenPool,
+        interfaces.TokenPool_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
+      const minBlockConfirmations = Number(await poolContract.getMinBlockConfirmations())
+
+      return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: minBlockConfirmations }
+    } catch (err) {
+      if (isError(err, 'CALL_EXCEPTION')) {
+        return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: 0 }
+      }
+      throw CCIPError.from(err, 'UNKNOWN')
     }
   }
 

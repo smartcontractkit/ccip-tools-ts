@@ -7,6 +7,7 @@ import { anvil } from 'prool/instances'
 
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
 import { CCIPAPIClient } from '../api/index.ts'
+import { LaneFeature } from '../chain.ts'
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
 import { type ExecutionInput, ExecutionState, MessageStatus } from '../types.ts'
 import { interfaces } from './const.ts'
@@ -46,6 +47,19 @@ const CCIP_MESSAGE_SENT_TOPIC = interfaces.OnRamp_v1_6.getEvent('CCIPMessageSent
 
 // Token with pool support on the Sepolia -> Aptos lane
 const APTOS_SUPPORTED_TOKEN = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
+
+// ── getLaneFeatures constants ──
+
+// v2.0 router for Sepolia -> Fuji lane
+const SEPOLIA_V2_0_ROUTER = '0xc0f457e615348708FaAB3B40ECC26Badb32B7b30'
+// v2.0 router for Fuji -> Sepolia lane
+const FUJI_V2_0_ROUTER = '0xE7b62d27D6DDca525FE2e1ea526905EbfB36a1e1'
+// Token on Sepolia whose pool (BurnMintTokenPool 1.7.0-dev) supports the older
+// singular getMinBlockConfirmation(), not the plural getMinBlockConfirmations()
+// in our current ABI. This exercises the try-catch fallback path.
+const OLD_POOL_TOKEN_SEPOLIA = '0x67f000ca40cb1c6ee3bd2c7fda2fd22ddf56faab'
+// Token on Fuji whose pool (LombardTokenPool 2.0.0-dev) DOES support getMinBlockConfirmations
+const FTF_TOKEN_FUJI = '0x7FbdC44BfEBDe80C970ba622B678daB36cee31f6'
 
 // ── execute constants ──
 
@@ -504,6 +518,72 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         assert.ok(foundFailed, 'should find a failed receipt for a known failed message')
       },
     )
+  })
+
+  describe('getLaneFeatures', () => {
+    it('should return MIN_BLOCK_CONFIRMATIONS=0 for v1.6 router', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const features = await sepoliaChain.getLaneFeatures({
+        router: SEPOLIA_V1_6_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+      })
+
+      assert.equal(
+        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        undefined,
+        'v1.6 lane should not include MIN_BLOCK_CONFIRMATIONS (FTF does not exist pre-v2.0)',
+      )
+    })
+
+    it('should return MIN_BLOCK_CONFIRMATIONS=1 for v2.0 router without token', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const features = await sepoliaChain.getLaneFeatures({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+      })
+
+      assert.equal(
+        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        1,
+        'v2.0 lane without token should default to 1 block confirmation',
+      )
+    })
+
+    it('should return MIN_BLOCK_CONFIRMATIONS=0 for token with old pool (fallback)', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const features = await sepoliaChain.getLaneFeatures({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        token: OLD_POOL_TOKEN_SEPOLIA,
+      })
+
+      assert.equal(
+        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        0,
+        'token with old pool should have FTF disabled (MIN_BLOCK_CONFIRMATIONS=0)',
+      )
+    })
+
+    it('should query token pool for MIN_BLOCK_CONFIRMATIONS on v2.0 pool', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      const features = await fujiChain.getLaneFeatures({
+        router: FUJI_V2_0_ROUTER,
+        destChainSelector: SEPOLIA_SELECTOR,
+        token: FTF_TOKEN_FUJI,
+      })
+
+      const minBlocks = features[LaneFeature.MIN_BLOCK_CONFIRMATIONS]
+      console.log(`  Lombard pool MIN_BLOCK_CONFIRMATIONS = ${minBlocks}`)
+      assert.equal(
+        minBlocks,
+        0,
+        'Lombard pool should return MIN_BLOCK_CONFIRMATIONS=0 (FTF not enabled)',
+      )
+    })
   })
 
   // ── State-mutating tests below: keep these last so read-only tests see clean fork state ──
