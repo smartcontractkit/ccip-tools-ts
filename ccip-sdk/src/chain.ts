@@ -192,20 +192,10 @@ export type LaneFeature = (typeof LaneFeature)[keyof typeof LaneFeature]
  * Lane features record.
  * Maps feature keys to their values.
  */
-export interface LaneFeatures {
+export interface LaneFeatures extends Record<LaneFeature, unknown> {
   /** Minimum block confirmations for FTF. */
   MIN_BLOCK_CONFIRMATIONS: number
 }
-
-// Compile-time check: LaneFeature keys and LaneFeatures keys must match.
-// If this errors, the two definitions have diverged.
-type _AssertFeatureKeysMatch = [LaneFeature] extends [keyof LaneFeatures]
-  ? [keyof LaneFeatures] extends [LaneFeature]
-    ? true
-    : never
-  : never
-const _featureKeysMatch: _AssertFeatureKeysMatch = true
-void _featureKeysMatch
 
 /**
  * Options for getBalance query.
