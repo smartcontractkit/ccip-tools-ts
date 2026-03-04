@@ -521,7 +521,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   describe('getLaneFeatures', () => {
-    it('should return MIN_BLOCK_CONFIRMATIONS=0 for v1.6 router', async () => {
+    it('should return MIN_BLOCK_CONFIRMATIONS=0 and no rate limits for v1.6 router', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const features = await sepoliaChain.getLaneFeatures({
@@ -534,9 +534,19 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         undefined,
         'v1.6 lane should not include MIN_BLOCK_CONFIRMATIONS (FTF does not exist pre-v2.0)',
       )
+      assert.equal(
+        LaneFeature.RATE_LIMITS in features,
+        false,
+        'v1.6 lane should not have RATE_LIMITS',
+      )
+      assert.equal(
+        LaneFeature.CUSTOM_FINALITY_RATE_LIMITS in features,
+        false,
+        'v1.6 lane should not have CUSTOM_FINALITY_RATE_LIMITS',
+      )
     })
 
-    it('should return MIN_BLOCK_CONFIRMATIONS=1 for v2.0 router without token', async () => {
+    it('should return MIN_BLOCK_CONFIRMATIONS=1 and no rate limits for v2.0 router without token', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const features = await sepoliaChain.getLaneFeatures({
@@ -548,6 +558,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
         1,
         'v2.0 lane without token should default to 1 block confirmation',
+      )
+      assert.equal(
+        LaneFeature.RATE_LIMITS in features,
+        false,
+        'v2.0 lane without token should not have RATE_LIMITS (no pool to query)',
       )
     })
 
@@ -565,9 +580,18 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         0,
         'token with old pool should have FTF disabled (MIN_BLOCK_CONFIRMATIONS=0)',
       )
+      // Old pool doesn't support getMinBlockConfirmations but does support
+      // getCurrentRateLimiterState, so RATE_LIMITS may still be present
+      assert.ok(LaneFeature.RATE_LIMITS in features, 'old pool should still have RATE_LIMITS')
+      // FTF disabled → no CUSTOM_FINALITY_RATE_LIMITS
+      assert.equal(
+        LaneFeature.CUSTOM_FINALITY_RATE_LIMITS in features,
+        false,
+        'FTF disabled pool should not have CUSTOM_FINALITY_RATE_LIMITS',
+      )
     })
 
-    it('should query token pool for MIN_BLOCK_CONFIRMATIONS on v2.0 pool', async () => {
+    it('should query token pool for features on v2.0 pool', async () => {
       assert.ok(fujiChain, 'fuji chain should be initialized')
 
       const features = await fujiChain.getLaneFeatures({
@@ -582,6 +606,22 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         minBlocks,
         0,
         'Lombard pool should return MIN_BLOCK_CONFIRMATIONS=0 (FTF not enabled)',
+      )
+
+      // RATE_LIMITS should be present for v2.0 pool with token
+      assert.ok(LaneFeature.RATE_LIMITS in features, 'v2.0 pool should have RATE_LIMITS')
+      const rateLimits = features[LaneFeature.RATE_LIMITS]
+      if (rateLimits != null) {
+        assert.equal(typeof rateLimits.tokens, 'bigint', 'tokens should be bigint')
+        assert.equal(typeof rateLimits.capacity, 'bigint', 'capacity should be bigint')
+        assert.equal(typeof rateLimits.rate, 'bigint', 'rate should be bigint')
+      }
+
+      // FTF disabled → no CUSTOM_FINALITY_RATE_LIMITS
+      assert.equal(
+        LaneFeature.CUSTOM_FINALITY_RATE_LIMITS in features,
+        false,
+        'FTF disabled pool should not have CUSTOM_FINALITY_RATE_LIMITS',
       )
     })
   })

@@ -184,6 +184,16 @@ export const LaneFeature = {
    * When present and non-zero, indicates FTF is enabled on this lane.
    */
   MIN_BLOCK_CONFIRMATIONS: 'MIN_BLOCK_CONFIRMATIONS',
+  /**
+   * Rate limiter bucket state for the lane/token with default finality.
+   */
+  RATE_LIMITS: 'RATE_LIMITS',
+  /**
+   * Rate limiter bucket state when using non-default finality (FTF).
+   * Only meaningful when FTF is supported on this lane, i.e.
+   * {@link LaneFeature.MIN_BLOCK_CONFIRMATIONS} is present and \> 0.
+   */
+  CUSTOM_FINALITY_RATE_LIMITS: 'CUSTOM_FINALITY_RATE_LIMITS',
 } as const
 /** Type representing one of the lane feature keys. */
 export type LaneFeature = (typeof LaneFeature)[keyof typeof LaneFeature]
@@ -195,6 +205,10 @@ export type LaneFeature = (typeof LaneFeature)[keyof typeof LaneFeature]
 export interface LaneFeatures extends Record<LaneFeature, unknown> {
   /** Minimum block confirmations for FTF. */
   MIN_BLOCK_CONFIRMATIONS: number
+  /** Rate limiter bucket state for the lane/token with default finality. */
+  RATE_LIMITS: RateLimiterState
+  /** Rate limiter bucket state when using non-default finality (FTF). */
+  CUSTOM_FINALITY_RATE_LIMITS: RateLimiterState
 }
 
 /**

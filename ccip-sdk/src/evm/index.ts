@@ -15,7 +15,6 @@ import {
   getAddress,
   hexlify,
   isBytesLike,
-  isError,
   isHexString,
   keccak256,
   toBeHex,
@@ -41,7 +40,6 @@ import {
   CCIPContractNotRouterError,
   CCIPContractTypeInvalidError,
   CCIPDataFormatUnsupportedError,
-  CCIPError,
   CCIPExecTxNotConfirmedError,
   CCIPExecTxRevertedError,
   CCIPHasherVersionUnsupportedError,
@@ -49,7 +47,6 @@ import {
   CCIPNotImplementedError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
-  CCIPTokenNotFoundError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
   CCIPVersionFeatureUnavailableError,
@@ -131,6 +128,9 @@ import { encodeEVMOffchainTokenData } from './offchain.ts'
 import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
 import { type UnsignedEVMTx, resultToObject } from './types.ts'
 export type { UnsignedEVMTx }
+
+/** Raw on-chain TokenBucket struct returned by TokenPool rate limiter queries. */
+type RateLimiterBucket = { tokens: bigint; isEnabled: boolean; capacity: bigint; rate: bigint }
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
 function isSigner(wallet: unknown): wallet is Signer {
@@ -632,6 +632,26 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Query the MIN_BLOCK_CONFIRMATIONS feature from a token pool.
+   * @returns min block confirmations value, or undefined if FTF is not applicable
+   */
+  private async getMinBlockConfirmationsFeature(
+    version: string,
+    poolContract: TypedContract<typeof TokenPool_2_0_ABI> | null,
+  ): Promise<number | undefined> {
+    // FTF only exists on V2_0+
+    if (version < CCIPVersion.V2_0) return undefined
+    // No pool (no token transfer) → FTF supported, default 1 confirmation
+    if (!poolContract) return 1
+    // Query token pool; older pools may not support this function
+    try {
+      return Number(await poolContract.getMinBlockConfirmations())
+    } catch {
+      return 0
+    }
+  }
+
+  /**
    * {@inheritDoc Chain.getLaneFeatures}
    */
   override async getLaneFeatures(opts: {
@@ -642,50 +662,54 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
     const [, version] = await this.typeAndVersion(onRamp)
 
-    // FTF only exists on V2_0+
-    if (version < CCIPVersion.V2_0) {
-      return {}
-    }
-
-    // No token transfer → FTF supported, default 1 confirmation
-    if (!opts.token) {
-      return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: 1 }
-    }
-
-    // Resolve token → token pool via OnRamp.getPoolBySourceToken
-    const onRampContract = new Contract(
-      onRamp,
-      interfaces.OnRamp_v2_0,
-      this.provider,
-    ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
-    const tokenPool = (await onRampContract.getPoolBySourceToken(
-      opts.destChainSelector,
-      opts.token,
-    )) as string
-
-    if (!tokenPool || tokenPool === ZeroAddress)
-      throw new CCIPTokenNotFoundError(opts.token, {
-        context: { router: opts.router, destChainSelector: String(opts.destChainSelector) },
-        recovery: 'Verify the token is supported on this lane',
-      })
-
-    // Query token pool for min block confirmations; older pools may not
-    // support this function, in which case FTF is not available for this token
-    try {
-      const poolContract = new Contract(
+    // Resolve token → pool contract if token provided and version supports it
+    let poolContract: TypedContract<typeof TokenPool_2_0_ABI> | null = null
+    if (version >= CCIPVersion.V2_0 && opts.token) {
+      const onRampContract = new Contract(
+        onRamp,
+        interfaces.OnRamp_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
+      const tokenPool = (await onRampContract.getPoolBySourceToken(
+        opts.destChainSelector,
+        opts.token,
+      )) as string
+      poolContract = new Contract(
         tokenPool,
         interfaces.TokenPool_v2_0,
         this.provider,
       ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
-      const minBlockConfirmations = Number(await poolContract.getMinBlockConfirmations())
-
-      return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: minBlockConfirmations }
-    } catch (err) {
-      if (isError(err, 'CALL_EXCEPTION')) {
-        return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: 0 }
-      }
-      throw CCIPError.from(err, 'UNKNOWN')
     }
+
+    const result: Partial<LaneFeatures> = {}
+
+    // MIN_BLOCK_CONFIRMATIONS — V2_0+ only
+    const minBlocks = await this.getMinBlockConfirmationsFeature(version, poolContract)
+    if (minBlocks != null) result[LaneFeature.MIN_BLOCK_CONFIRMATIONS] = minBlocks
+
+    // Rate limits — V2_0+ only, requires token/pool
+    if (poolContract) {
+      try {
+        const { outboundRateLimiterState: outbound } = resultToObject(
+          await poolContract.getCurrentRateLimiterState(opts.destChainSelector, false),
+        ) as unknown as { outboundRateLimiterState: RateLimiterBucket }
+        result[LaneFeature.RATE_LIMITS] = outbound.isEnabled ? outbound : null
+
+        // Custom finality rate limits only when FTF is enabled
+        if (minBlocks != null && minBlocks > 0) {
+          const { outboundRateLimiterState: customOutbound } = resultToObject(
+            await poolContract.getCurrentRateLimiterState(opts.destChainSelector, true),
+          ) as unknown as { outboundRateLimiterState: RateLimiterBucket }
+          result[LaneFeature.CUSTOM_FINALITY_RATE_LIMITS] = customOutbound.isEnabled
+            ? customOutbound
+            : null
+        }
+      } catch {
+        // Older pools may not support getCurrentRateLimiterState; omit rate limit keys
+      }
+    }
+
+    return result
   }
 
   /**
