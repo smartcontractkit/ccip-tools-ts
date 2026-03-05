@@ -180,8 +180,13 @@ export type TokenInfo = {
  */
 export const LaneFeature = {
   /**
-   * Minimum block confirmations required for Faster Time to Finality (FTF).
-   * When present and non-zero, indicates FTF is enabled on this lane.
+   * Minimum block confirmations for Faster Time to Finality (FTF).
+   * - **absent**: the lane does not support FTF (pre-v2.0 lane).
+   * - **0**: the lane supports FTF, but it is not enabled for this
+   *   token (e.g. the token pool predates FTF, or FTF is configured
+   *   to use default finality only).
+   * - **\> 0**: FTF is enabled; this is the minimum number of block
+   *   confirmations required to use it.
    */
   MIN_BLOCK_CONFIRMATIONS: 'MIN_BLOCK_CONFIRMATIONS',
   /**
@@ -1107,10 +1112,15 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *   router: '0x...',
    *   destChainSelector: 4949039107694359620n,
    * })
-   * // FTF is enabled when MIN_BLOCK_CONFIRMATIONS is defined and > 0.
-   * // A value of 0 means FTF is disabled for this lane.
-   * if (features.MIN_BLOCK_CONFIRMATIONS != null && features.MIN_BLOCK_CONFIRMATIONS > 0) {
-   *   console.log(`FTF enabled with ${features.MIN_BLOCK_CONFIRMATIONS} confirmations`)
+   * // MIN_BLOCK_CONFIRMATIONS has three states:
+   * // - undefined: FTF is not supported on this lane (pre-v2.0)
+   * // - 0: the lane supports FTF, but it is not enabled for this token
+   * // - > 0: FTF is enabled with this many block confirmations
+   * const ftf = features.MIN_BLOCK_CONFIRMATIONS
+   * if (ftf != null && ftf > 0) {
+   *   console.log(`FTF enabled with ${ftf} confirmations`)
+   * } else if (ftf === 0) {
+   *   console.log('FTF supported on this lane but not enabled for this token')
    * }
    * ```
    */
