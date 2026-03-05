@@ -4,7 +4,8 @@ import { describe, it } from 'node:test'
 import { concat, toBeHex } from 'ethers'
 
 import '../index.ts' // Import to ensure all chains are registered for decodeAddress
-import { type SourceTokenData, decodeMessageV1, parseSourceTokenData } from './messages.ts'
+import { type SourceTokenData, parseSourceTokenData } from './messages.ts'
+import { decodeMessageV1 } from '../messages.ts'
 
 describe('encode/parseSourceTokenData', () => {
   const decoded: SourceTokenData = {

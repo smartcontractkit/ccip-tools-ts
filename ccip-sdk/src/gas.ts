@@ -20,6 +20,10 @@ export type EstimateMessageInput = {
   messageId?: string
   /** optional sender: zero address will be used if omitted */
   sender?: string
+  /** optional onRampAddress */
+  onRampAddress?: string
+  /** optional offRampAddress */
+  offRampAddress?: string
   /** optional data: zero bytes will be used if omitted */
   data?: BytesLike
   /**
@@ -89,26 +93,29 @@ export async function estimateReceiveExecution({
   if (!dest.estimateReceiveExecution)
     throw new CCIPMethodUnsupportedError(dest.constructor.name, 'estimateReceiveExecution')
 
-  let onRamp, offRamp: string
-  try {
-    const tnv = await source.typeAndVersion(routerOrRamp)
-    if (!tnv[0].includes('OnRamp'))
-      onRamp = await source.getOnRampForRouter(routerOrRamp, dest.network.chainSelector)
-    else onRamp = routerOrRamp
-    offRamp = await discoverOffRamp(source, dest, onRamp, source)
-  } catch (sourceErr) {
+  let onRamp: string, offRamp: string
+  if (message.onRampAddress) onRamp = message.onRampAddress
+  if (message.offRampAddress) offRamp = message.offRampAddress
+  if (!onRamp! || !offRamp!)
     try {
-      const tnv = await dest.typeAndVersion(routerOrRamp)
-      if (!tnv[0].includes('OffRamp'))
-        throw new CCIPContractTypeInvalidError(routerOrRamp, tnv[2], ['OffRamp'])
-      offRamp = routerOrRamp
-      const onRamps = await dest.getOnRampsForOffRamp(offRamp, source.network.chainSelector)
-      if (!onRamps.length) throw new CCIPOnRampRequiredError()
-      onRamp = onRamps[onRamps.length - 1]!
-    } catch {
-      throw sourceErr // re-throw original error
+      const tnv = await source.typeAndVersion(routerOrRamp)
+      if (!tnv[0].includes('OnRamp'))
+        onRamp = await source.getOnRampForRouter(routerOrRamp, dest.network.chainSelector)
+      else onRamp = routerOrRamp
+      offRamp = await discoverOffRamp(source, dest, onRamp, source)
+    } catch (sourceErr) {
+      try {
+        const tnv = await dest.typeAndVersion(routerOrRamp)
+        if (!tnv[0].includes('OffRamp'))
+          throw new CCIPContractTypeInvalidError(routerOrRamp, tnv[2], ['OffRamp'])
+        offRamp = routerOrRamp
+        const onRamps = await dest.getOnRampsForOffRamp(offRamp, source.network.chainSelector)
+        if (!onRamps.length) throw new CCIPOnRampRequiredError()
+        onRamp = onRamps[onRamps.length - 1]!
+      } catch {
+        throw sourceErr // re-throw original error
+      }
     }
-  }
 
   const destTokenAmounts = await Promise.all(
     (message.tokenAmounts ?? []).map(async (ta) => {
