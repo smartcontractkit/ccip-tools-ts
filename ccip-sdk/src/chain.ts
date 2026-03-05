@@ -175,6 +175,33 @@ export type TokenInfo = {
 }
 
 /**
+ * Token transfer fee configuration returned by TokenPool v2.0 contracts.
+ */
+export type TokenTransferFeeConfig = {
+  destGasOverhead: number
+  destBytesOverhead: number
+  defaultBlockConfirmationsFeeUSDCents: number
+  customBlockConfirmationsFeeUSDCents: number
+  defaultBlockConfirmationsTransferFeeBps: number
+  customBlockConfirmationsTransferFeeBps: number
+  isEnabled: boolean
+}
+
+/**
+ * Options for {@link Chain.getTokenPoolFee}.
+ * Provide either `tokenPool` directly or `token` + `router` to auto-resolve it.
+ */
+export type TokenPoolFeeOpts = {
+  destChainSelector: bigint
+  blockConfirmationsRequested: number
+  /** Hex-encoded bytes passed as tokenArgs to the pool contract. */
+  tokenArgs: string
+} & (
+  | { tokenPool: string; token?: undefined; router?: undefined }
+  | { token: string; router: string; tokenPool?: undefined }
+)
+
+/**
  * Available lane feature keys.
  * These represent features or thresholds that can be configured per-lane.
  */
@@ -1102,6 +1129,18 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     token?: string
   }): Promise<Partial<LaneFeatures>> {
     return Promise.reject(new CCIPNotImplementedError('getLaneFeatures'))
+  }
+
+  /**
+   * Retrieve the token transfer fee configuration from a TokenPool v2.0 contract.
+   *
+   * Returns `null` when the pool does not support fee config (pre-2.0 pools).
+   * Throws on RPC or other unexpected errors.
+   *
+   * @param _opts - Either `{ tokenPool }` or `{ token, router }` plus shared fields.
+   */
+  getTokenPoolFee(_opts: TokenPoolFeeOpts): Promise<TokenTransferFeeConfig | null> {
+    return Promise.reject(new CCIPNotImplementedError('getTokenPoolFee'))
   }
 
   /**

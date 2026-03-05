@@ -30,7 +30,9 @@ import {
   type GetBalanceOpts,
   type LaneFeatures,
   type LogFilter,
+  type TokenPoolFeeOpts,
   type TokenPoolRemote,
+  type TokenTransferFeeConfig,
   Chain,
   LaneFeature,
 } from '../chain.ts'
@@ -684,6 +686,70 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       if (isError(err, 'CALL_EXCEPTION')) {
         return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: 0 }
       }
+      throw CCIPError.from(err, 'UNKNOWN')
+    }
+  }
+
+  /**
+   * {@inheritDoc Chain.getTokenPoolFee}
+   */
+  override async getTokenPoolFee(opts: TokenPoolFeeOpts): Promise<TokenTransferFeeConfig | null> {
+    let poolAddress: string
+    let token: string
+
+    if ('tokenPool' in opts && opts.tokenPool) {
+      poolAddress = opts.tokenPool
+      token = await this.getTokenForTokenPool(poolAddress)
+    } else if ('token' in opts && opts.token && 'router' in opts && opts.router) {
+      const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
+      const onRampContract = new Contract(
+        onRamp,
+        interfaces.OnRamp_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
+      const resolved = (await onRampContract.getPoolBySourceToken(
+        opts.destChainSelector,
+        opts.token,
+      )) as string
+
+      if (!resolved || resolved === ZeroAddress)
+        throw new CCIPTokenNotFoundError(opts.token, {
+          context: { router: opts.router, destChainSelector: String(opts.destChainSelector) },
+          recovery: 'Verify the token is supported on this lane',
+        })
+      poolAddress = resolved
+      token = opts.token
+    } else {
+      throw new CCIPError('UNKNOWN', 'Either tokenPool or both token and router must be provided')
+    }
+
+    try {
+      const poolContract = new Contract(
+        poolAddress,
+        interfaces.TokenPool_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
+      const result = await poolContract.getTokenTransferFeeConfig(
+        token,
+        opts.destChainSelector,
+        BigInt(opts.blockConfirmationsRequested),
+        opts.tokenArgs,
+      )
+      return {
+        destGasOverhead: Number(result.destGasOverhead),
+        destBytesOverhead: Number(result.destBytesOverhead),
+        defaultBlockConfirmationsFeeUSDCents: Number(result.defaultBlockConfirmationsFeeUSDCents),
+        customBlockConfirmationsFeeUSDCents: Number(result.customBlockConfirmationsFeeUSDCents),
+        defaultBlockConfirmationsTransferFeeBps: Number(
+          result.defaultBlockConfirmationsTransferFeeBps,
+        ),
+        customBlockConfirmationsTransferFeeBps: Number(
+          result.customBlockConfirmationsTransferFeeBps,
+        ),
+        isEnabled: result.isEnabled,
+      }
+    } catch (err) {
+      if (isError(err, 'CALL_EXCEPTION')) return null
       throw CCIPError.from(err, 'UNKNOWN')
     }
   }
