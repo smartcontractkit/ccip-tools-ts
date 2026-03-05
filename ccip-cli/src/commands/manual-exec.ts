@@ -179,6 +179,9 @@ async function manualExec(
   }
 
   const dest = await getChain(request.lane.destChainSelector)
+  // `--estimate-gas-limit` requires source
+  if (argv.estimateGasLimit != null && !source)
+    source = await getChain(request.lane.sourceChainSelector)
 
   let inputs
   if (source) {

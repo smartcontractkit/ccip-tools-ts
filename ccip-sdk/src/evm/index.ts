@@ -1162,6 +1162,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       const txGasLimit = await contract.executeSingleMessage.estimateGas(
         {
           ...message,
+          onRampAddress: zeroPadValue(getAddressBytes(message.onRampAddress), 32),
+          sender: zeroPadValue(getAddressBytes(message.sender), 32),
+          tokenTransfer: message.tokenTransfer.map((ta) => ({
+            ...ta,
+            sourcePoolAddress: zeroPadValue(getAddressBytes(ta.sourcePoolAddress), 32),
+            sourceTokenAddress: zeroPadValue(getAddressBytes(ta.sourceTokenAddress), 32),
+          })),
           executionGasLimit: BigInt(message.executionGasLimit),
           ccipReceiveGasLimit: BigInt(message.ccipReceiveGasLimit),
           finality: BigInt(message.finality),
