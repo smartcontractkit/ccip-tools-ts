@@ -652,6 +652,56 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Resolve a token to its pool contract for a given destination chain.
+   * @returns v2 or legacy pool contract, with the other set to null
+   */
+  private async getTokenPoolForDest(
+    onRamp: string,
+    destChainSelector: bigint,
+    token: string,
+    version: string,
+  ): Promise<{
+    poolV2: TypedContract<typeof TokenPool_2_0_ABI> | null
+    poolLegacy: TypedContract<typeof TokenPool_ABI> | null
+  }> {
+    // All OnRamp versions share the same getPoolBySourceToken(uint64, address) signature
+    const onRampContract = new Contract(
+      onRamp,
+      interfaces.OnRamp_v2_0,
+      this.provider,
+    ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
+    const tokenPool = (await onRampContract.getPoolBySourceToken(
+      destChainSelector,
+      token,
+    )) as string
+
+    if (!tokenPool || tokenPool === ZeroAddress)
+      throw new CCIPTokenNotFoundError(token, {
+        context: { destChainSelector: String(destChainSelector) },
+        recovery: 'Verify the token is supported on this lane',
+      })
+
+    if (version >= CCIPVersion.V2_0) {
+      return {
+        poolV2: new Contract(
+          tokenPool,
+          interfaces.TokenPool_v2_0,
+          this.provider,
+        ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>,
+        poolLegacy: null,
+      }
+    }
+    return {
+      poolV2: null,
+      poolLegacy: new Contract(
+        tokenPool,
+        interfaces.TokenPool_v1_6,
+        this.provider,
+      ) as unknown as TypedContract<typeof TokenPool_ABI>,
+    }
+  }
+
+  /**
    * {@inheritDoc Chain.getLaneFeatures}
    */
   override async getLaneFeatures(opts: {
@@ -662,41 +712,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
     const [, version] = await this.typeAndVersion(onRamp)
 
-    // Resolve token → pool contract if token provided and version supports it
-    let poolV2: TypedContract<typeof TokenPool_2_0_ABI> | null = null
-    let poolLegacy: TypedContract<typeof TokenPool_ABI> | null = null
-    if (opts.token) {
-      // All OnRamp versions share the same getPoolBySourceToken(uint64, address) signature
-      const onRampContract = new Contract(
-        onRamp,
-        interfaces.OnRamp_v2_0,
-        this.provider,
-      ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
-      const tokenPool = (await onRampContract.getPoolBySourceToken(
-        opts.destChainSelector,
-        opts.token,
-      )) as string
-
-      if (!tokenPool || tokenPool === ZeroAddress)
-        throw new CCIPTokenNotFoundError(opts.token, {
-          context: { router: opts.router, destChainSelector: String(opts.destChainSelector) },
-          recovery: 'Verify the token is supported on this lane',
-        })
-
-      if (version >= CCIPVersion.V2_0) {
-        poolV2 = new Contract(
-          tokenPool,
-          interfaces.TokenPool_v2_0,
-          this.provider,
-        ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
-      } else {
-        poolLegacy = new Contract(
-          tokenPool,
-          interfaces.TokenPool_v1_6,
-          this.provider,
-        ) as unknown as TypedContract<typeof TokenPool_ABI>
-      }
-    }
+    const { poolV2, poolLegacy } = opts.token
+      ? await this.getTokenPoolForDest(onRamp, opts.destChainSelector, opts.token, version)
+      : { poolV2: null, poolLegacy: null }
 
     const result: Partial<LaneFeatures> = {}
 
