@@ -504,7 +504,7 @@ export class CCIPAPIClient {
     const offRamp = raw.offramp
     let lane: Lane
     if ('encodedMessage' in raw) {
-      // v2 messages
+      // CCIP 2.0 messages use MessageV1Codec, which is chain-independent serialization
       const {
         sourceChainSelector,
         destChainSelector,

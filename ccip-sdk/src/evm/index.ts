@@ -1288,14 +1288,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         throw new CCIPVersionUnsupportedError(version)
     }
 
+    /* Executing a message for the first time has some hard try/catches on-chain
+     * so we need to ensure some lower-bounds gasLimits */
     let gasLimit = await this.provider.estimateGas(manualExecTx)
     if (
       'gasLimit' in input.message &&
       input.message.gasLimit &&
       gasLimit < input.message.gasLimit + 100000n
     )
+      // if message requested gasLimit, ensure execution more than 100k above requested, otherwise it's clearly a try/catch fail
       gasLimit = BigInt(input.message.gasLimit) + 200000n
     else if ('gasLimit' in input.message && !input.message.gasLimit && gasLimit < 240000n)
+      // if message didn't request gasLimit, ensure execution gasLimit is above 240k (empiric)
       gasLimit = 240000n
     manualExecTx.gasLimit = gasLimit
 
