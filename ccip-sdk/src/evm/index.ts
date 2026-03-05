@@ -131,6 +131,27 @@ function toRateLimiterState(b: RateLimiterBucket): RateLimiterState {
   return b.isEnabled ? { tokens: b.tokens, capacity: b.capacity, rate: b.rate } : null
 }
 
+/**
+ * Query the MIN_BLOCK_CONFIRMATIONS feature from a token pool.
+ * @returns min block confirmations value, or undefined if FTF is not applicable
+ */
+async function getMinBlockConfirmationsFeature(
+  version: string,
+  poolContract: TypedContract<typeof TokenPool_2_0_ABI> | null,
+): Promise<number | undefined> {
+  // FTF only exists on V2_0+
+  if (version < CCIPVersion.V2_0) return undefined
+  // No pool (no token transfer) → FTF supported, default 1 confirmation
+  if (!poolContract) return 1
+  // Query token pool; older pools may not support this function
+  try {
+    return Number(await poolContract.getMinBlockConfirmations())
+  } catch (err) {
+    if (isError(err, 'CALL_EXCEPTION')) return 0
+    throw err
+  }
+}
+
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
 function isSigner(wallet: unknown): wallet is Signer {
   return (
@@ -631,27 +652,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Query the MIN_BLOCK_CONFIRMATIONS feature from a token pool.
-   * @returns min block confirmations value, or undefined if FTF is not applicable
-   */
-  private async getMinBlockConfirmationsFeature(
-    version: string,
-    poolContract: TypedContract<typeof TokenPool_2_0_ABI> | null,
-  ): Promise<number | undefined> {
-    // FTF only exists on V2_0+
-    if (version < CCIPVersion.V2_0) return undefined
-    // No pool (no token transfer) → FTF supported, default 1 confirmation
-    if (!poolContract) return 1
-    // Query token pool; older pools may not support this function
-    try {
-      return Number(await poolContract.getMinBlockConfirmations())
-    } catch (err) {
-      if (isError(err, 'CALL_EXCEPTION')) return 0
-      throw err
-    }
-  }
-
-  /**
    * {@inheritDoc Chain.getLaneFeatures}
    */
   override async getLaneFeatures(opts: {
@@ -701,7 +701,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const result: Partial<LaneFeatures> = {}
 
     // MIN_BLOCK_CONFIRMATIONS — V2_0+ only
-    const minBlocks = await this.getMinBlockConfirmationsFeature(version, poolV2)
+    const minBlocks = await getMinBlockConfirmationsFeature(version, poolV2)
     if (minBlocks != null) result[LaneFeature.MIN_BLOCK_CONFIRMATIONS] = minBlocks
 
     // Rate limits — V2_0+, requires token/pool
