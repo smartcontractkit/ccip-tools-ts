@@ -586,6 +586,107 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     })
   })
 
+  describe('getTokenPoolFee', () => {
+    it('should return disabled fee config for token with old pool', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const result = await sepoliaChain.getTokenPoolFee({
+        token: OLD_POOL_TOKEN_SEPOLIA,
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        blockConfirmationsRequested: 0,
+        tokenArgs: '0x',
+      })
+
+      // Old pools may respond with all-zero config rather than reverting
+      assert.notEqual(result, null, 'old pool responds to the call')
+      assert.equal(result!.isEnabled, false, 'fee config should not be enabled on old pool')
+    })
+
+    it('should return fee config for v2.0 pool via token+router', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      const result = await fujiChain.getTokenPoolFee({
+        token: FTF_TOKEN_FUJI,
+        router: FUJI_V2_0_ROUTER,
+        destChainSelector: SEPOLIA_SELECTOR,
+        blockConfirmationsRequested: 0,
+        tokenArgs: '0x',
+      })
+
+      assert.notEqual(result, null, 'v2.0 pool should return fee config')
+      assert.equal(typeof result!.destGasOverhead, 'number')
+      assert.equal(typeof result!.destBytesOverhead, 'number')
+      assert.equal(typeof result!.isEnabled, 'boolean')
+      console.log('  v2.0 pool fee config (blockConfirmationsRequested=0):')
+      console.log(
+        `    defaultBlockConfirmationsFeeUSDCents = ${result!.defaultBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    customBlockConfirmationsFeeUSDCents  = ${result!.customBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    defaultBlockConfirmationsTransferFeeBps = ${result!.defaultBlockConfirmationsTransferFeeBps}`,
+      )
+      console.log(
+        `    customBlockConfirmationsTransferFeeBps  = ${result!.customBlockConfirmationsTransferFeeBps}`,
+      )
+    })
+
+    it('should return fee config with blockConfirmationsRequested=1', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      const result = await fujiChain.getTokenPoolFee({
+        token: FTF_TOKEN_FUJI,
+        router: FUJI_V2_0_ROUTER,
+        destChainSelector: SEPOLIA_SELECTOR,
+        blockConfirmationsRequested: 1,
+        tokenArgs: '0x',
+      })
+
+      assert.notEqual(result, null, 'v2.0 pool should return fee config')
+      assert.equal(typeof result!.destGasOverhead, 'number')
+      assert.equal(typeof result!.destBytesOverhead, 'number')
+      assert.equal(typeof result!.isEnabled, 'boolean')
+      console.log('  v2.0 pool fee config (blockConfirmationsRequested=1):')
+      console.log(
+        `    defaultBlockConfirmationsFeeUSDCents = ${result!.defaultBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    customBlockConfirmationsFeeUSDCents  = ${result!.customBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    defaultBlockConfirmationsTransferFeeBps = ${result!.defaultBlockConfirmationsTransferFeeBps}`,
+      )
+      console.log(
+        `    customBlockConfirmationsTransferFeeBps  = ${result!.customBlockConfirmationsTransferFeeBps}`,
+      )
+    })
+
+    it('should return fee config when given tokenPool directly', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      // Resolve pool address to exercise the tokenPool input path
+      const onRamp = await fujiChain.getOnRampForRouter(FUJI_V2_0_ROUTER, SEPOLIA_SELECTOR)
+      const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, fujiChain.provider)
+      const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+        SEPOLIA_SELECTOR,
+        FTF_TOKEN_FUJI,
+      )) as string
+
+      const result = await fujiChain.getTokenPoolFee({
+        tokenPool: poolAddress,
+        destChainSelector: SEPOLIA_SELECTOR,
+        blockConfirmationsRequested: 0,
+        tokenArgs: '0x',
+      })
+
+      assert.notEqual(result, null, 'v2.0 pool should return fee config via direct address')
+      assert.equal(typeof result!.destGasOverhead, 'number')
+      assert.equal(typeof result!.isEnabled, 'boolean')
+    })
+  })
+
   // ── State-mutating tests below: keep these last so read-only tests see clean fork state ──
 
   describe('sendMessage', () => {
