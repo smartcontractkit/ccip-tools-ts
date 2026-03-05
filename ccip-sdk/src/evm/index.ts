@@ -116,19 +116,11 @@ import {
 import { estimateExecGas } from './gas.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { getEvmLogs } from './logs.ts'
-import {
-  type CCIPMessage_V1_6_EVM,
-  type CCIPMessage_V2_0,
-  type CleanAddressable,
-  type MessageV1,
-  type TokenTransferV1,
-  decodeMessageV1,
-} from './messages.ts'
-export { decodeMessageV1 }
-export type { MessageV1, TokenTransferV1 }
+import type { CCIPMessage_V1_6_EVM, CCIPMessage_V2_0, CleanAddressable } from './messages.ts'
 import { encodeEVMOffchainTokenData } from './offchain.ts'
 import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
 import { type UnsignedEVMTx, resultToObject } from './types.ts'
+import { decodeMessageV1 } from '../messages.ts'
 export type { UnsignedEVMTx }
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */

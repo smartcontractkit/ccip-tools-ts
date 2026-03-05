@@ -10,8 +10,8 @@ import {
   CCIPTimeoutError,
   CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
-import { decodeMessageV1 } from '../evm/messages.ts'
 import { HttpStatus } from '../http-status.ts'
+import { decodeMessageV1 } from '../messages.ts'
 import { decodeMessage } from '../requests.ts'
 import {
   type CCIPMessage,
