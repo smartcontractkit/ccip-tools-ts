@@ -174,11 +174,17 @@ export type CantonConfig = {
   /** Party identifier for the Canton Ledger API. */
   party: string
 
+  /** CCIP party identifier */
+  ccipParty: string
+
   /** JSON Web Token for authentication with the Canton Ledger API. */
   jwt: string
 
   /** Base URL for the EDS (Explicit Disclosure Service) API. */
   edsUrl: string
+
+  /** Base URL for the Transfer Instruction API. */
+  transferInstructionUrl: string
 
   /** Optional base URL for a transaction indexer to fetch CCV verifications; if not provided, default URL will be used. */
   indexerUrl?: string
