@@ -1585,20 +1585,24 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const apiRes = await this.apiClient.getMessageById(request.message.messageId)
         if ('verifiers' in apiRes.message) {
           const verifiers = apiRes.message.verifiers as {
-            items: {
+            items?: {
               destAddress: string
               sourceAddress: string
-              verification: { data: string; timestamp: string }
+              verification?: { data: string; timestamp: string }
             }[]
           }
           return {
             verificationPolicy,
-            verifications: verifiers.items.map((item) => ({
-              destAddress: item.destAddress,
-              sourceAddress: item.sourceAddress,
-              ccvData: item.verification.data,
-              timestamp: new Date(item.verification.timestamp).getTime() / 1e3,
-            })),
+            verifications: (verifiers.items ?? [])
+              .filter((item) => item.verification?.data)
+              .map((item) => ({
+                destAddress: item.destAddress,
+                sourceAddress: item.sourceAddress,
+                ccvData: item.verification!.data,
+                ...(!!item.verification?.timestamp && {
+                  timestamp: new Date(item.verification.timestamp).getTime() / 1e3,
+                }),
+              })),
           }
         }
       }
