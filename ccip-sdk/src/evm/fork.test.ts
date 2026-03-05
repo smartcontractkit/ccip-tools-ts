@@ -545,9 +545,9 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         'v1.6 lane should not have RATE_LIMITS',
       )
       assert.equal(
-        LaneFeature.CUSTOM_FINALITY_RATE_LIMITS in features,
+        LaneFeature.CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
         false,
-        'v1.6 lane should not have CUSTOM_FINALITY_RATE_LIMITS',
+        'v1.6 lane should not have CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS',
       )
     })
 
@@ -588,11 +588,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       // Old pool doesn't support getMinBlockConfirmations but does support
       // getCurrentRateLimiterState, so RATE_LIMITS may still be present
       assert.ok(LaneFeature.RATE_LIMITS in features, 'old pool should still have RATE_LIMITS')
-      // FTF disabled → no CUSTOM_FINALITY_RATE_LIMITS
+      // FTF disabled → no CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS
       assert.equal(
-        LaneFeature.CUSTOM_FINALITY_RATE_LIMITS in features,
+        LaneFeature.CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
         false,
-        'FTF disabled pool should not have CUSTOM_FINALITY_RATE_LIMITS',
+        'FTF disabled pool should not have CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS',
       )
     })
 
@@ -622,11 +622,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         assert.equal(typeof rateLimits.rate, 'bigint', 'rate should be bigint')
       }
 
-      // FTF disabled → no CUSTOM_FINALITY_RATE_LIMITS
+      // FTF disabled → no CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS
       assert.equal(
-        LaneFeature.CUSTOM_FINALITY_RATE_LIMITS in features,
+        LaneFeature.CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
         false,
-        'FTF disabled pool should not have CUSTOM_FINALITY_RATE_LIMITS',
+        'FTF disabled pool should not have CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS',
       )
     })
 
@@ -654,11 +654,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         assert.equal(typeof rateLimits.rate, 'bigint', 'rate should be bigint')
       }
 
-      // FTF doesn't exist on legacy lanes → no CUSTOM_FINALITY_RATE_LIMITS
+      // FTF doesn't exist on legacy lanes → no CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS
       assert.equal(
-        LaneFeature.CUSTOM_FINALITY_RATE_LIMITS in features,
+        LaneFeature.CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
         false,
-        'legacy lane should not have CUSTOM_FINALITY_RATE_LIMITS',
+        'legacy lane should not have CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS',
       )
     })
   })

@@ -200,7 +200,7 @@ export const LaneFeature = {
    * {@link LaneFeature.MIN_BLOCK_CONFIRMATIONS} is present and \> 0.
    * If absent, the default rate limits ({@link LaneFeature.RATE_LIMITS}) apply even when using custom finality.
    */
-  CUSTOM_FINALITY_RATE_LIMITS: 'CUSTOM_FINALITY_RATE_LIMITS',
+  CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS: 'CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS',
 } as const
 /** Type representing one of the lane feature keys. */
 export type LaneFeature = (typeof LaneFeature)[keyof typeof LaneFeature]
@@ -218,7 +218,7 @@ export interface LaneFeatures extends Record<LaneFeature, unknown> {
    * Rate limiter bucket state when using non-default finality (FTF).
    * If absent, the default rate limits ({@link LaneFeatures.RATE_LIMITS}) apply even when using custom finality.
    */
-  CUSTOM_FINALITY_RATE_LIMITS: RateLimiterState
+  CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS: RateLimiterState
 }
 
 /**

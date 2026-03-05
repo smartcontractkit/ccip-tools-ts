@@ -717,7 +717,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           const { outboundRateLimiterState: customOutbound } = resultToObject(
             await poolV2.getCurrentRateLimiterState(opts.destChainSelector, true),
           ) as unknown as { outboundRateLimiterState: RateLimiterBucket }
-          result[LaneFeature.CUSTOM_FINALITY_RATE_LIMITS] = toRateLimiterState(customOutbound)
+          result[LaneFeature.CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS] =
+            toRateLimiterState(customOutbound)
         }
       } catch (err) {
         if (!isError(err, 'CALL_EXCEPTION')) throw err
@@ -736,7 +737,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         if (!isError(err, 'CALL_EXCEPTION')) throw err
         // Pool may not support rate limiter query; omit rate limit key
       }
-      // No CUSTOM_FINALITY_RATE_LIMITS — FTF doesn't exist on legacy lanes
+      // No CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS — FTF doesn't exist on legacy lanes
     }
 
     return result
