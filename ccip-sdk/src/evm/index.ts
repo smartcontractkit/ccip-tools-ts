@@ -46,7 +46,6 @@ import {
   CCIPExecTxRevertedError,
   CCIPHasherVersionUnsupportedError,
   CCIPLogDataInvalidError,
-  CCIPNotImplementedError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
   CCIPTokenNotFoundError,
@@ -117,19 +116,11 @@ import {
 import { estimateExecGas } from './gas.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { getEvmLogs } from './logs.ts'
-import {
-  type CCIPMessage_V1_6_EVM,
-  type CCIPMessage_V2_0,
-  type CleanAddressable,
-  type MessageV1,
-  type TokenTransferV1,
-  decodeMessageV1,
-} from './messages.ts'
-export { decodeMessageV1 }
-export type { MessageV1, TokenTransferV1 }
+import type { CCIPMessage_V1_6_EVM, CCIPMessage_V2_0, CleanAddressable } from './messages.ts'
 import { encodeEVMOffchainTokenData } from './offchain.ts'
 import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
 import { type UnsignedEVMTx, resultToObject } from './types.ts'
+import { decodeMessageV1 } from '../messages.ts'
 export type { UnsignedEVMTx }
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
@@ -1163,6 +1154,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       const txGasLimit = await contract.executeSingleMessage.estimateGas(
         {
           ...message,
+          onRampAddress: zeroPadValue(getAddressBytes(message.onRampAddress), 32),
+          sender: zeroPadValue(getAddressBytes(message.sender), 32),
+          tokenTransfer: message.tokenTransfer.map((ta) => ({
+            ...ta,
+            sourcePoolAddress: zeroPadValue(getAddressBytes(ta.sourcePoolAddress), 32),
+            sourceTokenAddress: zeroPadValue(getAddressBytes(ta.sourceTokenAddress), 32),
+          })),
           executionGasLimit: BigInt(message.executionGasLimit),
           ccipReceiveGasLimit: BigInt(message.ccipReceiveGasLimit),
           finality: BigInt(message.finality),
@@ -1289,6 +1287,22 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       default:
         throw new CCIPVersionUnsupportedError(version)
     }
+
+    /* Executing a message for the first time has some hard try/catches on-chain
+     * so we need to ensure some lower-bounds gasLimits */
+    let gasLimit = await this.provider.estimateGas(manualExecTx)
+    if (
+      'gasLimit' in input.message &&
+      input.message.gasLimit &&
+      gasLimit < input.message.gasLimit + 100000n
+    )
+      // if message requested gasLimit, ensure execution more than 100k above requested, otherwise it's clearly a try/catch fail
+      gasLimit = BigInt(input.message.gasLimit) + 200000n
+    else if ('gasLimit' in input.message && !input.message.gasLimit && gasLimit < 240000n)
+      // if message didn't request gasLimit, ensure execution gasLimit is above 240k (empiric)
+      gasLimit = 240000n
+    manualExecTx.gasLimit = gasLimit
+
     return { family: ChainFamily.EVM, transactions: [manualExecTx] }
   }
 
@@ -1315,7 +1329,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const response = await submitTransaction(wallet, populatedTx, this.provider)
     this.logger.debug('manuallyExecute =>', response.hash)
 
-    const receipt = await response.wait(1, 60_000)
+    let receipt = await response.wait(0)
+    if (!receipt) receipt = await response.wait(1, 240_000)
     if (!receipt?.hash) throw new CCIPExecTxNotConfirmedError(response.hash)
     if (!receipt.status) throw new CCIPExecTxRevertedError(response.hash)
     const tx = await this.getTransaction(receipt)
@@ -1553,15 +1568,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   ): Promise<CCIPVerifications> {
     const { offRamp, request } = opts
     if (request.lane.version >= CCIPVersion.V2_0) {
-      const message = request.message as CCIPMessage_V2_0
-      if (!message.encodedMessage)
-        throw new CCIPNotImplementedError(`CCIPAPIClient getMessageById v2 encodedMessage`)
+      const { encodedMessage } = request.message as CCIPMessage_V2_0
       const contract = new Contract(
         offRamp,
         interfaces.OffRamp_v2_0,
         this.provider,
       ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
-      const ccvs = await contract.getCCVsForMessage(message.encodedMessage)
+      const ccvs = await contract.getCCVsForMessage(encodedMessage)
       const [requiredCCVs, optionalCCVs, optionalThreshold] = ccvs.map(
         resultToObject,
       ) as unknown as CleanAddressable<typeof ccvs>
@@ -1575,20 +1588,24 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const apiRes = await this.apiClient.getMessageById(request.message.messageId)
         if ('verifiers' in apiRes.message) {
           const verifiers = apiRes.message.verifiers as {
-            items: {
+            items?: {
               destAddress: string
               sourceAddress: string
-              verification: { data: string; timestamp: string }
+              verification?: { data: string; timestamp: string }
             }[]
           }
           return {
             verificationPolicy,
-            verifications: verifiers.items.map((item) => ({
-              destAddress: item.destAddress,
-              sourceAddress: item.sourceAddress,
-              ccvData: item.verification.data,
-              timestamp: new Date(item.verification.timestamp).getTime() / 1e3,
-            })),
+            verifications: (verifiers.items ?? [])
+              .filter((item) => item.verification?.data)
+              .map((item) => ({
+                destAddress: item.destAddress,
+                sourceAddress: item.sourceAddress,
+                ccvData: item.verification!.data,
+                ...(!!item.verification?.timestamp && {
+                  timestamp: new Date(item.verification.timestamp).getTime() / 1e3,
+                }),
+              })),
           }
         }
       }

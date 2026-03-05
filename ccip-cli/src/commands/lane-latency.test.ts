@@ -91,7 +91,7 @@ describe('lane-latency command', () => {
     await getLaneLatencyCmd(createCtx(), {
       source: '1',
       dest: '42161',
-      apiUrl: 'https://custom.api.example.com/',
+      api: 'https://custom.api.example.com/',
       format: Format.json,
     } as Parameters<typeof getLaneLatencyCmd>[1])
 
