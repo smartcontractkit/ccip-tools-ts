@@ -1,5 +1,5 @@
 import type { DisclosedContract } from './types.ts'
-import { CCIPError, CCIPErrorCode, CCIPNotImplementedError } from '../../errors/index.ts'
+import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
 import {
   type CantonClient,
   type EventFormat,
@@ -8,20 +8,20 @@ import {
 } from '../client/index.ts'
 
 /**
- * Extract the `instanceId` string from a contract's `createArgument` object.
+ * Extract a named string field from a contract's `createArgument` object.
  * Handles both verbose mode (direct field) and structured fields arrays.
  */
-function extractInstanceId(createArgument: unknown): string | null {
+function extractStringField(createArgument: unknown, fieldName: string): string | null {
   if (!createArgument || typeof createArgument !== 'object') return null
   const arg = createArgument as Record<string, unknown>
 
-  if ('instanceId' in arg && typeof arg['instanceId'] === 'string') {
-    return arg['instanceId']
+  if (fieldName in arg && typeof arg[fieldName] === 'string') {
+    return arg[fieldName]
   }
 
   if ('fields' in arg && Array.isArray(arg['fields'])) {
     for (const field of arg['fields'] as Array<Record<string, unknown>>) {
-      if (field['label'] === 'instanceId') {
+      if (field['label'] === fieldName) {
         const val = field['value']
         if (typeof val === 'string') return val
         if (val && typeof val === 'object' && 'text' in val) {
@@ -33,6 +33,9 @@ function extractInstanceId(createArgument: unknown): string | null {
   return null
 }
 
+function extractInstanceId(createArgument: unknown): string | null {
+  return extractStringField(createArgument, 'instanceId')
+}
 /**
  * Metadata for each CCIP contract type needed for ACS filtering:
  * - `templateId`: package-name reference used directly in the `TemplateFilter` so the
@@ -48,6 +51,10 @@ const CCIP_TEMPLATES = {
   ccipReceiver: {
     templateId: '#ccip-receiver:CCIP.CCIPReceiver:CCIPReceiver',
     moduleEntity: 'CCIP.CCIPReceiver:CCIPReceiver',
+  },
+  ccipSender: {
+    templateId: '#ccip-sender:CCIP.CCIPSender:CCIPSender',
+    moduleEntity: 'CCIP.CCIPSender:CCIPSender',
   },
 } as const
 
@@ -87,6 +94,8 @@ interface RichContractMatch {
   synchronizerId: string
   instanceId: string | null
   signatory: string | null
+  /** partyOwner field from createArgument (present on PerPartyRouter) */
+  partyOwner: string | null
 }
 
 /**
@@ -127,6 +136,7 @@ async function fetchRichSnapshot(
       synchronizerId: active.synchronizerId,
       instanceId: extractInstanceId(created.createArgument),
       signatory: signatories.length === 1 ? (signatories[0] ?? null) : null,
+      partyOwner: extractStringField(created.createArgument, 'partyOwner'),
     }
 
     const list = byModuleEntity.get(moduleEntity) ?? []
@@ -205,6 +215,32 @@ function pickBySignatory(
   )
 }
 
+function pickByPartyOwner(
+  snapshot: Map<string, RichContractMatch[]>,
+  contractType: CcipContractType,
+  party: string,
+): DisclosedContract {
+  const moduleEntity = CCIP_MODULE_ENTITIES[contractType]
+  const candidates = snapshot.get(moduleEntity) ?? []
+
+  for (const c of candidates) {
+    if (c.partyOwner === party) {
+      return {
+        templateId: c.templateId,
+        contractId: c.contractId,
+        createdEventBlob: c.createdEventBlob,
+        synchronizerId: c.synchronizerId,
+      }
+    }
+  }
+
+  throw new CCIPError(
+    CCIPErrorCode.CANTON_API_ERROR,
+    `Canton ACS: no active "${moduleEntity}" contract found with partyOwner "${party}". ` +
+      `Verify the party is correct and the contract is active.`,
+  )
+}
+
 /**
  * Configuration for the ACS-based disclosure provider.
  * Requires direct access to the Canton Ledger API and the full set of contract
@@ -226,7 +262,12 @@ export type AcsExecutionDisclosures = {
 /**
  * Same party disclosed contracts required to submit a `ccipSend` command on Canton.
  */
-export type AcsSendDisclosures = never // not implemented yet
+export type AcsSendDisclosures = {
+  /** The sender's PerPartyRouter contract. */
+  perPartyRouter: DisclosedContract
+  /** The sender's CCIPSender contract. */
+  ccipSender: DisclosedContract
+}
 
 /**
  * Disclosure provider that fetches `createdEventBlob`s directly from the Canton
@@ -271,19 +312,29 @@ export class AcsDisclosureProvider {
   async fetchExecutionDisclosures(receiverCid?: string): Promise<AcsExecutionDisclosures> {
     const snapshot = await fetchRichSnapshot(this.client, this.config.party)
 
-    const perPartyRouter = pickBySignatory(snapshot, 'perPartyRouter', this.config.party)
+    const existingRouter = pickByPartyOwner(snapshot, 'perPartyRouter', this.config.party)
     const ccipReceiver = receiverCid
       ? pickByContractId(snapshot, receiverCid)
       : pickBySignatory(snapshot, 'ccipReceiver', this.config.party)
 
-    return { perPartyRouter, ccipReceiver }
+    return { perPartyRouter: existingRouter, ccipReceiver }
   }
 
   /**
    * Fetch all contracts that must be disclosed for a `ccipSend` command.
+   *
+   * Returns the sender's `PerPartyRouter` and `CCIPSender` contracts from the
+   * Active Contract Set, matched by signatory (the sender party).
    */
   async fetchSendDisclosures(): Promise<AcsSendDisclosures> {
-    await Promise.resolve() // placeholder for potential future implementation
-    throw new CCIPNotImplementedError('AcsDisclosureProvider.fetchSendDisclosures')
+    const snapshot = await fetchRichSnapshot(this.client, this.config.party)
+
+    const existingRouter = pickByPartyOwner(snapshot, 'perPartyRouter', this.config.party)
+    const existingSender = pickBySignatory(snapshot, 'ccipSender', this.config.party)
+
+    return {
+      perPartyRouter: existingRouter,
+      ccipSender: existingSender,
+    }
   }
 }
