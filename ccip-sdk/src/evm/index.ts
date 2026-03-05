@@ -30,6 +30,7 @@ import {
   type GetBalanceOpts,
   type LaneFeatures,
   type LogFilter,
+  type RateLimiterState,
   type TokenPoolRemote,
   Chain,
   LaneFeature,
@@ -133,6 +134,11 @@ export type { UnsignedEVMTx }
 
 /** Raw on-chain TokenBucket struct returned by TokenPool rate limiter queries. */
 type RateLimiterBucket = { tokens: bigint; isEnabled: boolean; capacity: bigint; rate: bigint }
+
+/** Converts an on-chain bucket to the public RateLimiterState, stripping `isEnabled`. */
+function toRateLimiterState(b: RateLimiterBucket): RateLimiterState {
+  return b.isEnabled ? { tokens: b.tokens, capacity: b.capacity, rate: b.rate } : null
+}
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
 function isSigner(wallet: unknown): wallet is Signer {
@@ -713,16 +719,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const { outboundRateLimiterState: outbound } = resultToObject(
           await poolV2.getCurrentRateLimiterState(opts.destChainSelector, false),
         ) as unknown as { outboundRateLimiterState: RateLimiterBucket }
-        result[LaneFeature.RATE_LIMITS] = outbound.isEnabled ? outbound : null
+        result[LaneFeature.RATE_LIMITS] = toRateLimiterState(outbound)
 
         // Custom finality rate limits only when FTF is enabled
         if (minBlocks != null && minBlocks > 0) {
           const { outboundRateLimiterState: customOutbound } = resultToObject(
             await poolV2.getCurrentRateLimiterState(opts.destChainSelector, true),
           ) as unknown as { outboundRateLimiterState: RateLimiterBucket }
-          result[LaneFeature.CUSTOM_FINALITY_RATE_LIMITS] = customOutbound.isEnabled
-            ? customOutbound
-            : null
+          result[LaneFeature.CUSTOM_FINALITY_RATE_LIMITS] = toRateLimiterState(customOutbound)
         }
       } catch (err) {
         if (!isError(err, 'CALL_EXCEPTION')) throw err
@@ -736,7 +740,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const outbound = resultToObject(
           await poolLegacy.getCurrentOutboundRateLimiterState(opts.destChainSelector),
         ) as unknown as RateLimiterBucket
-        result[LaneFeature.RATE_LIMITS] = outbound.isEnabled ? outbound : null
+        result[LaneFeature.RATE_LIMITS] = toRateLimiterState(outbound)
       } catch (err) {
         if (!isError(err, 'CALL_EXCEPTION')) throw err
         // Pool may not support rate limiter query; omit rate limit key
@@ -1540,8 +1544,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
               {
                 remoteToken: decodeAddress(remoteTokenRaw, chain.family),
                 remotePools: remotePools[i]!.map((pool) => decodeAddress(pool, chain.family)),
-                inboundRateLimiterState: remoteInfo[i]![1].isEnabled ? remoteInfo[i]![1] : null,
-                outboundRateLimiterState: remoteInfo[i]![2].isEnabled ? remoteInfo[i]![2] : null,
+                inboundRateLimiterState: toRateLimiterState(remoteInfo[i]![1]),
+                outboundRateLimiterState: toRateLimiterState(remoteInfo[i]![2]),
               },
             ] as const
           }),
