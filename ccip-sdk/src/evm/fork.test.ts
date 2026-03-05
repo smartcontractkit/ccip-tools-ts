@@ -69,6 +69,9 @@ const EXEC_TEST_MSG = FUJI_TO_SEPOLIA.find(
 )!
 const SOURCE_TX_HASH = EXEC_TEST_MSG.txHash
 const MESSAGE_ID = EXEC_TEST_MSG.messageId
+const V2_API_EXEC_MSG = {
+  messageId: '0x886836ec7b9adc834d45d70c4cbd05f2623f56add4e15a96e12758c941452155',
+}
 
 // Second failed v1.6 message for getExecutionInput test (different from above so both can execute)
 const EXEC_INPUT_TEST_MSG = FUJI_TO_SEPOLIA.find(
@@ -800,6 +803,42 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         execution.receipt.state === ExecutionState.Success,
         'execution state should be Success',
       )
+    })
+
+    it('should execute a v2.0 message via API-driven path (Fuji -> Sepolia)', async () => {
+      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+
+      // Create a sepolia chain with staging API client (execution-inputs endpoint)
+      const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
+      const sepoliaProvider = new JsonRpcProvider(
+        `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
+      )
+      const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
+        apiClient: stagingApi,
+        logger: testLogger,
+      })
+      const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
+
+      // Execute via messageId only — triggers API-driven path
+      const execution = await sepoliaWithApi.execute({
+        messageId: V2_API_EXEC_MSG.messageId,
+        wallet: w,
+        gasLimit: 500_000,
+      })
+
+      console.log(
+        `  executed ${V2_API_EXEC_MSG.messageId.slice(0, 10)}… via API → state=${execution.receipt.state}`,
+      )
+      assert.equal(
+        execution.receipt.messageId,
+        V2_API_EXEC_MSG.messageId,
+        'receipt messageId should match',
+      )
+      assert.ok(execution.log.transactionHash, 'should have tx hash')
+      assert.ok(execution.timestamp > 0, 'should have timestamp')
+      assert.equal(execution.receipt.state, ExecutionState.Success)
+
+      sepoliaWithApi.destroy?.()
     })
   })
 })
