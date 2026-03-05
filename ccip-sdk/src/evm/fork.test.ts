@@ -62,6 +62,9 @@ const OLD_POOL_TOKEN_SEPOLIA = '0x67f000ca40cb1c6ee3bd2c7fda2fd22ddf56faab'
 const FTF_TOKEN_FUJI = '0x7FbdC44BfEBDe80C970ba622B678daB36cee31f6'
 // CCIP-BnM on Sepolia — supported on v1.5 Sepolia→Fuji lane
 const CCIP_BNM_TOKEN_SEPOLIA = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
+// Token pools with FTF enabled and custom rate limits configured
+const FTF_ENABLED_POOL_SEPOLIA = '0x161d23c30b5ae2899c3d4d969ba2b82026f3954a'
+const FTF_ENABLED_POOL_FUJI = '0xc9346f85a04a47188710d8830127a2490959cbd9'
 
 // ── execute constants ──
 
@@ -659,6 +662,92 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         LaneFeature.CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
         false,
         'legacy lane should not have CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+      )
+    })
+
+    it('should return nonzero MIN_BLOCK_CONFIRMATIONS and custom rate limits for FTF-enabled pool (Sepolia)', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const token = await sepoliaChain.getTokenForTokenPool(FTF_ENABLED_POOL_SEPOLIA)
+      const features = await sepoliaChain.getLaneFeatures({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        token,
+      })
+
+      const minBlocks = features[LaneFeature.MIN_BLOCK_CONFIRMATIONS]
+      console.log(`  FTF-enabled pool MIN_BLOCK_CONFIRMATIONS = ${minBlocks}`)
+      assert.ok(
+        minBlocks != null && minBlocks > 0,
+        `FTF-enabled pool should have MIN_BLOCK_CONFIRMATIONS > 0 (got ${minBlocks})`,
+      )
+
+      // Default rate limits should be present
+      assert.ok(LaneFeature.RATE_LIMITS in features, 'FTF-enabled pool should have RATE_LIMITS')
+      const rateLimits = features[LaneFeature.RATE_LIMITS]
+      assert.ok(rateLimits != null, 'RATE_LIMITS should not be null')
+      assert.equal(typeof rateLimits.tokens, 'bigint', 'tokens should be bigint')
+      assert.equal(typeof rateLimits.capacity, 'bigint', 'capacity should be bigint')
+      assert.equal(typeof rateLimits.rate, 'bigint', 'rate should be bigint')
+
+      // Custom finality rate limits should be present when FTF is enabled
+      assert.ok(
+        LaneFeature.CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        'FTF-enabled pool should have CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+      )
+      const customRateLimits = features[LaneFeature.CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS]
+      assert.ok(customRateLimits != null, 'CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS should not be null')
+      assert.equal(typeof customRateLimits.tokens, 'bigint', 'custom tokens should be bigint')
+      assert.equal(typeof customRateLimits.capacity, 'bigint', 'custom capacity should be bigint')
+      assert.equal(typeof customRateLimits.rate, 'bigint', 'custom rate should be bigint')
+
+      // Custom rate limits should differ from default rate limits
+      const differs =
+        rateLimits.capacity !== customRateLimits.capacity ||
+        rateLimits.rate !== customRateLimits.rate
+      assert.ok(
+        differs,
+        `custom rate limits should differ from default (default: capacity=${rateLimits.capacity} rate=${rateLimits.rate}, custom: capacity=${customRateLimits.capacity} rate=${customRateLimits.rate})`,
+      )
+    })
+
+    it('should return nonzero MIN_BLOCK_CONFIRMATIONS and custom rate limits for FTF-enabled pool (Fuji)', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      const token = await fujiChain.getTokenForTokenPool(FTF_ENABLED_POOL_FUJI)
+      const features = await fujiChain.getLaneFeatures({
+        router: FUJI_V2_0_ROUTER,
+        destChainSelector: SEPOLIA_SELECTOR,
+        token,
+      })
+
+      const minBlocks = features[LaneFeature.MIN_BLOCK_CONFIRMATIONS]
+      console.log(`  FTF-enabled Fuji pool MIN_BLOCK_CONFIRMATIONS = ${minBlocks}`)
+      assert.ok(
+        minBlocks != null && minBlocks > 0,
+        `FTF-enabled pool should have MIN_BLOCK_CONFIRMATIONS > 0 (got ${minBlocks})`,
+      )
+
+      // Default rate limits should be present
+      assert.ok(LaneFeature.RATE_LIMITS in features, 'FTF-enabled pool should have RATE_LIMITS')
+      const rateLimits = features[LaneFeature.RATE_LIMITS]
+      assert.ok(rateLimits != null, 'RATE_LIMITS should not be null')
+
+      // Custom finality rate limits should be present when FTF is enabled
+      assert.ok(
+        LaneFeature.CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        'FTF-enabled pool should have CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+      )
+      const customRateLimits = features[LaneFeature.CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS]
+      assert.ok(customRateLimits != null, 'CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS should not be null')
+
+      // Custom rate limits should differ from default rate limits
+      const differs =
+        rateLimits.capacity !== customRateLimits.capacity ||
+        rateLimits.rate !== customRateLimits.rate
+      assert.ok(
+        differs,
+        `custom rate limits should differ from default (default: capacity=${rateLimits.capacity} rate=${rateLimits.rate}, custom: capacity=${customRateLimits.capacity} rate=${customRateLimits.rate})`,
       )
     })
   })
