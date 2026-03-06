@@ -658,7 +658,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const remote = await this.getTokenPoolRemote(tokenPool, opts.destChainSelector)
         result[LaneFeature.RATE_LIMITS] = remote.outboundRateLimiterState
         if (minBlockConfirmations && 'customBlockConfirmationsOutboundRateLimiterState' in remote) {
-          result[LaneFeature.CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS] =
+          result[LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS] =
             remote.customBlockConfirmationsOutboundRateLimiterState
         }
       }
