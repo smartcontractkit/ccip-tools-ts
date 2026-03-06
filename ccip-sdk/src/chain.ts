@@ -181,10 +181,26 @@ export type TokenInfo = {
  */
 export const LaneFeature = {
   /**
-   * Minimum block confirmations required for Faster Time to Finality (FTF).
-   * When present and non-zero, indicates FTF is enabled on this lane.
+   * Minimum block confirmations for Faster Time to Finality (FTF).
+   * - **absent**: the lane does not support FTF (pre-v2.0 lane).
+   * - **0**: the lane supports FTF, but it is not enabled for this
+   *   token (e.g. the token pool predates FTF, or FTF is configured
+   *   to use default finality only).
+   * - **\> 0**: FTF is enabled; this is the minimum number of block
+   *   confirmations required to use it.
    */
   MIN_BLOCK_CONFIRMATIONS: 'MIN_BLOCK_CONFIRMATIONS',
+  /**
+   * Rate limiter bucket state for the lane/token with default finality.
+   */
+  RATE_LIMITS: 'RATE_LIMITS',
+  /**
+   * Rate limiter bucket state when using non-default finality (FTF).
+   * Only meaningful when FTF is supported on this lane, i.e.
+   * {@link LaneFeature.MIN_BLOCK_CONFIRMATIONS} is present and \> 0.
+   * If absent, the default rate limits ({@link LaneFeature.RATE_LIMITS}) apply even when using custom finality.
+   */
+  CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS: 'CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS',
 } as const
 /** Type representing one of the lane feature keys. */
 export type LaneFeature = (typeof LaneFeature)[keyof typeof LaneFeature]
@@ -196,6 +212,13 @@ export type LaneFeature = (typeof LaneFeature)[keyof typeof LaneFeature]
 export interface LaneFeatures extends Record<LaneFeature, unknown> {
   /** Minimum block confirmations for FTF. */
   MIN_BLOCK_CONFIRMATIONS: number
+  /** Rate limiter bucket state for the lane/token with default finality. */
+  RATE_LIMITS: RateLimiterState
+  /**
+   * Rate limiter bucket state when using non-default finality (FTF).
+   * If absent, the default rate limits ({@link LaneFeatures.RATE_LIMITS}) apply even when using custom finality.
+   */
+  CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS: RateLimiterState
 }
 
 /**
@@ -1090,10 +1113,15 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *   router: '0x...',
    *   destChainSelector: 4949039107694359620n,
    * })
-   * // FTF is enabled when MIN_BLOCK_CONFIRMATIONS is defined and > 0.
-   * // A value of 0 means FTF is disabled for this lane.
-   * if (features.MIN_BLOCK_CONFIRMATIONS != null && features.MIN_BLOCK_CONFIRMATIONS > 0) {
-   *   console.log(`FTF enabled with ${features.MIN_BLOCK_CONFIRMATIONS} confirmations`)
+   * // MIN_BLOCK_CONFIRMATIONS has three states:
+   * // - undefined: FTF is not supported on this lane (pre-v2.0)
+   * // - 0: the lane supports FTF, but it is not enabled for this token
+   * // - > 0: FTF is enabled with this many block confirmations
+   * const ftf = features.MIN_BLOCK_CONFIRMATIONS
+   * if (ftf != null && ftf > 0) {
+   *   console.log(`FTF enabled with ${ftf} confirmations`)
+   * } else if (ftf === 0) {
+   *   console.log('FTF supported on this lane but not enabled for this token')
    * }
    * ```
    */

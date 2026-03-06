@@ -30,6 +30,7 @@ import {
   type GetBalanceOpts,
   type LaneFeatures,
   type LogFilter,
+  type RateLimiterState,
   type TokenPoolRemote,
   Chain,
   LaneFeature,
@@ -41,7 +42,6 @@ import {
   CCIPContractNotRouterError,
   CCIPContractTypeInvalidError,
   CCIPDataFormatUnsupportedError,
-  CCIPError,
   CCIPExecTxNotConfirmedError,
   CCIPExecTxRevertedError,
   CCIPHasherVersionUnsupportedError,
@@ -122,6 +122,35 @@ import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../reque
 import { type UnsignedEVMTx, resultToObject } from './types.ts'
 import { decodeMessageV1 } from '../messages.ts'
 export type { UnsignedEVMTx }
+
+/** Raw on-chain TokenBucket struct returned by TokenPool rate limiter queries. */
+type RateLimiterBucket = { tokens: bigint; isEnabled: boolean; capacity: bigint; rate: bigint }
+
+/** Converts an on-chain bucket to the public RateLimiterState, stripping `isEnabled`. */
+function toRateLimiterState(b: RateLimiterBucket): RateLimiterState {
+  return b.isEnabled ? { tokens: b.tokens, capacity: b.capacity, rate: b.rate } : null
+}
+
+/**
+ * Query the MIN_BLOCK_CONFIRMATIONS feature from a token pool.
+ * @returns min block confirmations value, or undefined if FTF is not applicable
+ */
+async function getMinBlockConfirmationsFeature(
+  version: string,
+  poolContract: TypedContract<typeof TokenPool_2_0_ABI> | null,
+): Promise<number | undefined> {
+  // FTF only exists on V2_0+
+  if (version < CCIPVersion.V2_0) return undefined
+  // No pool (no token transfer) → FTF supported, default 1 confirmation
+  if (!poolContract) return 1
+  // Query token pool; older pools may not support this function
+  try {
+    return Number(await poolContract.getMinBlockConfirmations())
+  } catch (err) {
+    if (isError(err, 'CALL_EXCEPTION')) return 0
+    throw err
+  }
+}
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
 function isSigner(wallet: unknown): wallet is Signer {
@@ -623,6 +652,56 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Resolve a token to its pool contract for a given destination chain.
+   * @returns v2 or legacy pool contract, with the other set to null
+   */
+  private async getTokenPoolForDest(
+    onRamp: string,
+    destChainSelector: bigint,
+    token: string,
+    version: string,
+  ): Promise<{
+    poolV2: TypedContract<typeof TokenPool_2_0_ABI> | null
+    poolLegacy: TypedContract<typeof TokenPool_ABI> | null
+  }> {
+    // All OnRamp versions share the same getPoolBySourceToken(uint64, address) signature
+    const onRampContract = new Contract(
+      onRamp,
+      interfaces.OnRamp_v2_0,
+      this.provider,
+    ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
+    const tokenPool = (await onRampContract.getPoolBySourceToken(
+      destChainSelector,
+      token,
+    )) as string
+
+    if (!tokenPool || tokenPool === ZeroAddress)
+      throw new CCIPTokenNotFoundError(token, {
+        context: { destChainSelector: String(destChainSelector) },
+        recovery: 'Verify the token is supported on this lane',
+      })
+
+    if (version >= CCIPVersion.V2_0) {
+      return {
+        poolV2: new Contract(
+          tokenPool,
+          interfaces.TokenPool_v2_0,
+          this.provider,
+        ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>,
+        poolLegacy: null,
+      }
+    }
+    return {
+      poolV2: null,
+      poolLegacy: new Contract(
+        tokenPool,
+        interfaces.TokenPool_v1_6,
+        this.provider,
+      ) as unknown as TypedContract<typeof TokenPool_ABI>,
+    }
+  }
+
+  /**
    * {@inheritDoc Chain.getLaneFeatures}
    */
   override async getLaneFeatures(opts: {
@@ -633,50 +712,53 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
     const [, version] = await this.typeAndVersion(onRamp)
 
-    // FTF only exists on V2_0+
-    if (version < CCIPVersion.V2_0) {
-      return {}
-    }
+    const { poolV2, poolLegacy } = opts.token
+      ? await this.getTokenPoolForDest(onRamp, opts.destChainSelector, opts.token, version)
+      : { poolV2: null, poolLegacy: null }
 
-    // No token transfer → FTF supported, default 1 confirmation
-    if (!opts.token) {
-      return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: 1 }
-    }
+    const result: Partial<LaneFeatures> = {}
 
-    // Resolve token → token pool via OnRamp.getPoolBySourceToken
-    const onRampContract = new Contract(
-      onRamp,
-      interfaces.OnRamp_v2_0,
-      this.provider,
-    ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
-    const tokenPool = (await onRampContract.getPoolBySourceToken(
-      opts.destChainSelector,
-      opts.token,
-    )) as string
+    // MIN_BLOCK_CONFIRMATIONS — V2_0+ only
+    const minBlocks = await getMinBlockConfirmationsFeature(version, poolV2)
+    if (minBlocks != null) result[LaneFeature.MIN_BLOCK_CONFIRMATIONS] = minBlocks
 
-    if (!tokenPool || tokenPool === ZeroAddress)
-      throw new CCIPTokenNotFoundError(opts.token, {
-        context: { router: opts.router, destChainSelector: String(opts.destChainSelector) },
-        recovery: 'Verify the token is supported on this lane',
-      })
+    // Rate limits — V2_0+, requires token/pool
+    if (poolV2) {
+      try {
+        const { outboundRateLimiterState: outbound } = resultToObject(
+          await poolV2.getCurrentRateLimiterState(opts.destChainSelector, false),
+        ) as unknown as { outboundRateLimiterState: RateLimiterBucket }
+        result[LaneFeature.RATE_LIMITS] = toRateLimiterState(outbound)
 
-    // Query token pool for min block confirmations; older pools may not
-    // support this function, in which case FTF is not available for this token
-    try {
-      const poolContract = new Contract(
-        tokenPool,
-        interfaces.TokenPool_v2_0,
-        this.provider,
-      ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
-      const minBlockConfirmations = Number(await poolContract.getMinBlockConfirmations())
-
-      return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: minBlockConfirmations }
-    } catch (err) {
-      if (isError(err, 'CALL_EXCEPTION')) {
-        return { [LaneFeature.MIN_BLOCK_CONFIRMATIONS]: 0 }
+        // Custom finality rate limits only when FTF is enabled
+        if (minBlocks != null && minBlocks > 0) {
+          const { outboundRateLimiterState: customOutbound } = resultToObject(
+            await poolV2.getCurrentRateLimiterState(opts.destChainSelector, true),
+          ) as unknown as { outboundRateLimiterState: RateLimiterBucket }
+          result[LaneFeature.CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS] =
+            toRateLimiterState(customOutbound)
+        }
+      } catch (err) {
+        if (!isError(err, 'CALL_EXCEPTION')) throw err
+        // Older pools may not support getCurrentRateLimiterState; omit rate limit keys
       }
-      throw CCIPError.from(err, 'UNKNOWN')
     }
+
+    // Rate limits — legacy pools (v1.2–v1.6)
+    if (poolLegacy) {
+      try {
+        const outbound = resultToObject(
+          await poolLegacy.getCurrentOutboundRateLimiterState(opts.destChainSelector),
+        ) as unknown as RateLimiterBucket
+        result[LaneFeature.RATE_LIMITS] = toRateLimiterState(outbound)
+      } catch (err) {
+        if (!isError(err, 'CALL_EXCEPTION')) throw err
+        // Pool may not support rate limiter query; omit rate limit key
+      }
+      // No CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS — FTF doesn't exist on legacy lanes
+    }
+
+    return result
   }
 
   /**
@@ -1496,8 +1578,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
               {
                 remoteToken: decodeAddress(remoteTokenRaw, chain.family),
                 remotePools: remotePools[i]!.map((pool) => decodeAddress(pool, chain.family)),
-                inboundRateLimiterState: remoteInfo[i]![1].isEnabled ? remoteInfo[i]![1] : null,
-                outboundRateLimiterState: remoteInfo[i]![2].isEnabled ? remoteInfo[i]![2] : null,
+                inboundRateLimiterState: toRateLimiterState(remoteInfo[i]![1]),
+                outboundRateLimiterState: toRateLimiterState(remoteInfo[i]![2]),
               },
             ] as const
           }),
