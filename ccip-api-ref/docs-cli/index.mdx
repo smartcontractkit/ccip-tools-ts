@@ -11,7 +11,7 @@ slug: /
 
 import Tabs from '@theme/Tabs'
 import TabItem from '@theme/TabItem'
-import { PackageVersion, RpcProviders } from '@site/src/components'
+import { PackageVersion } from '@site/src/components'
 
 # CCIP CLI
 
@@ -37,10 +37,6 @@ Command-line interface for querying, sending, and managing cross-chain messages 
     <span>MIT</span>
   </div>
 </div>
-
-:::note
-This documentation covers the latest version. For previous versions, see the [GitHub releases](https://github.com/smartcontractkit/ccip-tools-ts/releases).
-:::
 
 ## Installation
 
@@ -73,101 +69,53 @@ npm install
 
 ## Quick Start
 
-### 1. Get RPC Endpoints
+Before running commands, configure RPC endpoints and wallets. See [Configuration](/cli/configuration) for all options.
 
-You need RPC endpoints for the chains you want to query:
-
-<RpcProviders variant="list" showTip={false} />
-
-### 2. Set Up Your Environment
-
-Create a `.env` file with your RPC endpoints:
-
-```bash title=".env"
-# Testnets (for learning/testing)
-RPC_SEPOLIA=https://ethereum-sepolia-rpc.publicnode.com
-RPC_ARB_SEPOLIA=https://arbitrum-sepolia-rpc.publicnode.com
-RPC_FUJI=https://avalanche-fuji-c-chain-rpc.publicnode.com
-
-# Optional: Add wallet for send commands
-USER_KEY=0xYourPrivateKeyHere
-```
-
-### 3. Track an Existing Message
-
-Find any CCIP transaction on a block explorer and track it:
+Track a CCIP message by transaction hash or message ID:
 
 ```bash
-ccip-cli show 0x0bc402c594a3721e4eb2d2b6c561490ebb5d53e2f6e18a6e2a8f2b1d3c4e5f60
+ccip-cli 0xSourceTxHash...
 ```
 
-The CLI shows the message lifecycle: Lane → Request → Commit → Execution.
+`show` is the default command — you can omit it. The CLI displays the full message lifecycle: Lane, Request, Commit, and Execution.
 
-### 4. Check a Transfer Fee (No Wallet Needed)
-
-Before sending, check how much the transfer will cost:
+Send a test message (requires a [wallet](/cli/configuration#wallet-configuration)):
 
 ```bash
 ccip-cli send \
   -s ethereum-testnet-sepolia \
   -d ethereum-testnet-sepolia-arbitrum-1 \
   -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
-  --to 0xYourReceiverAddress \
-  --only-get-fee
-```
-
-**Sample output:**
-
-```
-Fee: 0.001234567890123456 ETH (native)
-```
-
-### 5. Send Your First Message
-
-Once you have a wallet configured, send a test message:
-
-```bash
-ccip-cli send \
-  -s ethereum-testnet-sepolia \
-  -d ethereum-testnet-sepolia-arbitrum-1 \
-  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
-  --to 0xYourReceiverAddress \
+  --to 0xReceiverAddress \
   --data "Hello from CLI!"
 ```
 
-Then track it with the returned transaction hash:
+Check the fee first without sending (no wallet needed):
 
 ```bash
-ccip-cli show <tx-hash-from-send>
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -d ethereum-testnet-sepolia-arbitrum-1 \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  --to 0xReceiverAddress \
+  --only-get-fee
 ```
 
-## Quick Reference
+## Commands
 
-| Task                    | Command                                                | Documentation                                 |
-| ----------------------- | ------------------------------------------------------ | --------------------------------------------- |
-| Track a message         | `ccip-cli show <tx-hash>`                              | [show](/cli/show)                             |
-| Send a message          | `ccip-cli send -s <source> -d <dest> -r <router>`      | [send](/cli/send)                             |
-| Execute pending message | `ccip-cli manual-exec <tx-hash>`                       | [manual-exec](/cli/manual-exec)               |
-| Decode error data       | `ccip-cli parse <data>`                                | [parse](/cli/parse)                           |
-| List supported tokens   | `ccip-cli get-supported-tokens -n <network> -a <addr>` | [get-supported-tokens](/cli/supported-tokens) |
-| Query token balance     | `ccip-cli token -n <network> -H <holder>`              | [token](/cli/token)                           |
-| Query lane latency      | `ccip-cli lane-latency <source> <dest>`                | [lane-latency](/cli/lane-latency)             |
-
-Each command page includes full argument and option reference, practical examples, and cross-references to related commands.
-
-## Common Issues
-
-| Error                           | Solution                                                           |
-| ------------------------------- | ------------------------------------------------------------------ |
-| `No RPC configured for chain X` | Add an RPC endpoint for that chain via `--rpcs` or `RPC_*` env var |
-| `Transaction not found`         | Verify the tx hash and ensure you have RPCs for the source chain   |
-| `timeout`                       | The RPC may be slow or rate-limited. Try a different provider.     |
-| `insufficient funds`            | Ensure your wallet has enough native tokens for gas + CCIP fee     |
-
-See [Troubleshooting](/cli/troubleshooting) for more solutions.
+| Command                                                | Description                                | Documentation                                 |
+| ------------------------------------------------------ | ------------------------------------------ | --------------------------------------------- |
+| `ccip-cli <tx-hash-or-id>`                             | Track a message (default command)          | [show](/cli/show)                             |
+| `ccip-cli send -s <source> -d <dest> -r <router>`      | Send a cross-chain message                 | [send](/cli/send)                             |
+| `ccip-cli manual-exec <tx-hash-or-id>`                 | Execute a pending or failed message        | [manual-exec](/cli/manual-exec)               |
+| `ccip-cli parse <data>`                                | Decode error data, revert reasons, events  | [parse](/cli/parse)                           |
+| `ccip-cli get-supported-tokens -n <network> -a <addr>` | List supported tokens for a router or pool | [get-supported-tokens](/cli/supported-tokens) |
+| `ccip-cli token -n <network> -H <holder>`              | Query native or token balance              | [token](/cli/token)                           |
+| `ccip-cli lane-latency <source> <dest>`                | Query real-time lane latency               | [lane-latency](/cli/lane-latency)             |
 
 ## Next Steps
 
-- [Configuration](/cli/configuration) - Set up RPC endpoints and wallets
-- [Debugging Failed Messages](/cli/guides/debugging-workflow) - Track, debug, and manually execute
-- [Token Transfer Workflow](/cli/guides/token-transfer-workflow) - Send tokens cross-chain
+- [Configuration](/cli/configuration) — RPC endpoints, wallets, global options
+- [Debugging Failed Messages](/cli/guides/debugging-workflow) — Track, debug, and manually execute
+- [Token Transfer Workflow](/cli/guides/token-transfer-workflow) — Send tokens cross-chain
+- [Troubleshooting](/cli/troubleshooting) — Common errors and solutions

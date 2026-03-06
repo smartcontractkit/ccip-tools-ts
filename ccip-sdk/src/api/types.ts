@@ -187,7 +187,14 @@ export type APICCIPRequestMetadata = {
 // GET /v2/messages/${messageId}/execution-inputs search endpoint types
 // ============================================================================
 
-/** Raw API response from GET /v2/messages/:messageId/execution-inputs */
+/**
+ * Raw API response from GET /v2/messages/:messageId/execution-inputs.
+ *
+ * @remarks
+ * The response has two union branches:
+ * - **v2.0+**: contains `encodedMessage` (MessageV1Codec-serialized), optional `ccvData` array, and `verifierAddresses`
+ * - **pre-v2**: contains `messageBatch` array with decoded messages, `merkleRoot`, and optional USDC/LBTC attestation data
+ */
 export type RawExecutionInputsResult = {
   offramp: string
 } & (

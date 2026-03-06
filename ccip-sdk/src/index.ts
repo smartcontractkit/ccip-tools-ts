@@ -41,6 +41,7 @@ export {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
   type ExtraArgs,
+  type GenericExtraArgsV3,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
   decodeExtraArgs,

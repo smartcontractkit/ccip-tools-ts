@@ -1,7 +1,7 @@
 ---
 id: querying-data
 title: 'Querying Data'
-description: 'Query balances, token metadata, lane latency, and other on-chain data.'
+description: 'Query network info, token metadata, lane capabilities, balances, and fees.'
 sidebar_label: Querying Data
 sidebar_position: 4
 ---
@@ -11,86 +11,260 @@ import TabItem from '@theme/TabItem'
 
 # Querying Data
 
-The SDK provides methods to query balances, token information, and lane characteristics.
+The SDK provides methods to query network information, token metadata, lane capabilities, balances, and fees. Most methods are RPC-based and work without the CCIP API.
 
-## Balance Queries
+## Network Information
 
-### Native Token Balance
+### Look Up Chains
 
-Query ETH, AVAX, SOL, or other native token balances:
-
-```typescript
-import { EVMChain, CCIPError } from '@chainlink/ccip-sdk'
-import { formatEther } from 'viem'
-
-const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
-
-try {
-  const balance = await chain.getBalance({
-    holder: '0xWalletAddress...',
-  })
-
-  console.log('Balance:', formatEther(balance), 'ETH')
-} catch (error) {
-  if (CCIPError.isCCIPError(error)) {
-    console.error('Failed to get balance:', error.message)
-  } else {
-    throw error
-  }
-}
-```
-
-### Token Balance
-
-Query ERC20/SPL token balances:
+`networkInfo` resolves chain selectors, chain IDs, and chain names to a `NetworkInfo` object. The result is memoized.
 
 ```typescript
-import { EVMChain, CCIPError } from '@chainlink/ccip-sdk'
-import { formatUnits } from 'viem'
+import { networkInfo } from '@chainlink/ccip-sdk'
 
-const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+// By name
+const sepolia = networkInfo('ethereum-testnet-sepolia')
 
-try {
-  const balance = await chain.getBalance({
-    holder: '0xWalletAddress...',
-    token: '0xTokenAddress...',
-  })
+// By chain ID (number)
+const mainnet = networkInfo(1)
 
-  // Get decimals for formatting
-  const tokenInfo = await chain.getTokenInfo('0xTokenAddress...')
-  console.log('Balance:', formatUnits(balance, tokenInfo.decimals), tokenInfo.symbol)
-} catch (error) {
-  if (CCIPError.isCCIPError(error)) {
-    console.error('Failed to get token balance:', error.message)
-  } else {
-    throw error
-  }
-}
+// By CCIP chain selector (bigint)
+const fuji = networkInfo(14767482510784806043n)
+
+console.log('Name:', sepolia.name)           // 'ethereum-testnet-sepolia'
+console.log('Chain ID:', sepolia.chainId)     // 11155111
+console.log('Selector:', sepolia.chainSelector) // 16015286601757825753n
+console.log('Family:', sepolia.family)        // 'EVM'
 ```
 
-### Multi-Chain Balance Examples
+Throws `CCIPChainNotFoundError` if the chain is not supported by CCIP.
 
-<Tabs>
-<TabItem value="evm" label="EVM">
+### Chain Selectors vs Chain IDs
+
+CCIP uses **chain selectors** (not chain IDs) to identify networks. Always use selectors for `destChainSelector`, lane configuration, and fee estimation:
+
+```typescript
+import { networkInfo } from '@chainlink/ccip-sdk'
+
+// Wrong: chain ID
+const destChain = 84532 // Base Sepolia chain ID — DON'T USE
+
+// Correct: CCIP chain selector
+const destSelector = networkInfo('ethereum-testnet-sepolia-base-1').chainSelector
+// => 10344971235874465080n
+```
+
+## Token Queries
+
+### Token Metadata
+
+`getTokenInfo` returns the symbol, decimals, and optional name for any token. RPC-only.
 
 ```typescript
 import { EVMChain } from '@chainlink/ccip-sdk'
 
 const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
 
-// Native balance (ETH)
-const nativeBalance = await chain.getBalance({
-  holder: '0xYourAddress...',
-})
+const tokenInfo = await chain.getTokenInfo('0xTokenAddress...')
 
-// ERC-20 token balance
-const tokenBalance = await chain.getBalance({
-  holder: '0xYourAddress...',
+console.log('Symbol:', tokenInfo.symbol)     // e.g. 'LINK'
+console.log('Decimals:', tokenInfo.decimals)  // e.g. 18
+console.log('Name:', tokenInfo.name)          // e.g. 'ChainLink Token' (optional)
+```
+
+Use `getTokenInfo` whenever you need to parse or format token amounts:
+
+```typescript
+import { parseUnits, formatUnits } from 'viem'
+
+const tokenInfo = await chain.getTokenInfo(tokenAddress)
+
+// Parse user input with correct decimals
+const amount = parseUnits('10.5', tokenInfo.decimals)
+
+// Format on-chain amounts for display
+const display = formatUnits(balance, tokenInfo.decimals)
+console.log(`${display} ${tokenInfo.symbol}`)
+```
+
+### Supported Tokens
+
+Query which tokens are configured for cross-chain transfers on a given router:
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
+
+// Step 1: Get the TokenAdminRegistry address
+const registry = await chain.getTokenAdminRegistryFor(router)
+
+// Step 2: Get all configured tokens
+const tokens = await chain.getSupportedTokens(registry)
+
+for (const token of tokens) {
+  const info = await chain.getTokenInfo(token)
+  console.log(`${info.symbol} (${info.decimals} decimals): ${token}`)
+}
+```
+
+`getTokenAdminRegistryFor` accepts a Router, OnRamp, or OffRamp address — it auto-detects the contract type and resolves the registry.
+
+### Fee Tokens
+
+`getFeeTokens` returns the tokens accepted for paying CCIP fees on a given router, along with their metadata:
+
+```typescript
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
+const feeTokens = await chain.getFeeTokens(router)
+
+// Record<string, TokenInfo> — token address → { symbol, decimals, name? }
+for (const [address, info] of Object.entries(feeTokens)) {
+  console.log(`${info.symbol}: ${address}`)
+}
+```
+
+## Lane Queries
+
+### Lane Capabilities
+
+`getLaneFeatures` checks what features are available on a specific lane. Use this to adapt your message parameters — for example, to set `blockConfirmations` in extra args when Faster-Than-Finality (FTF) is enabled.
+
+```typescript
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
+
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
+const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+
+// Without token — lane-level features
+const laneFeatures = await chain.getLaneFeatures({ router, destChainSelector: destSelector })
+
+// With token — token-specific features (rate limits, FTF for this token)
+const tokenFeatures = await chain.getLaneFeatures({
+  router,
+  destChainSelector: destSelector,
   token: '0xTokenAddress...',
 })
 ```
 
-</TabItem>
+Returns `Partial<LaneFeatures>` — not all fields are guaranteed:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `MIN_BLOCK_CONFIRMATIONS` | `number \| undefined` | `undefined` = pre-v2.0 lane (no FTF), `0` = FTF supported but not enabled for this token, `>0` = FTF enabled with this many block confirmations |
+| `RATE_LIMITS` | `RateLimiterState \| null` | Standard rate limiter state (`null` if disabled) |
+| `CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS` | `RateLimiterState \| null` | FTF-specific rate limiter (only when `MIN_BLOCK_CONFIRMATIONS > 0`) |
+
+```typescript
+const features = await chain.getLaneFeatures({
+  router,
+  destChainSelector: destSelector,
+  token: tokenAddress,
+})
+
+if (features.MIN_BLOCK_CONFIRMATIONS != null && features.MIN_BLOCK_CONFIRMATIONS > 0) {
+  console.log('FTF enabled — block confirmations:', features.MIN_BLOCK_CONFIRMATIONS)
+  // Can set blockConfirmations in extraArgs for faster delivery
+}
+
+if (features.RATE_LIMITS) {
+  console.log('Rate limit capacity:', features.RATE_LIMITS.capacity)
+  console.log('Available tokens:', features.RATE_LIMITS.tokens)
+}
+```
+
+:::note
+`getLaneFeatures` is currently implemented for EVM chains only. Requires `token` to query token-specific features (rate limits, FTF).
+:::
+
+### Lane Latency
+
+`getLaneLatency` estimates the delivery time for a lane. **Requires the CCIP API** (enabled by default).
+
+```typescript
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
+
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+
+const latency = await chain.getLaneLatency(destSelector)
+console.log(`Estimated delivery: ~${Math.round(latency.totalMs / 60000)} minutes`)
+```
+
+Throws `CCIPApiClientNotAvailableError` if you created the chain with `apiClient: null`. Throws `CCIPLaneNotFoundError` if the lane doesn't exist.
+
+### Fee Estimation
+
+`getFee` returns the fee amount in the fee token's smallest units. RPC-only — calls the Router contract directly.
+
+```typescript
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
+import { parseUnits, formatUnits } from 'viem'
+
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
+const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+
+const tokenAddress = '0xTokenAddress...'
+const tokenInfo = await chain.getTokenInfo(tokenAddress)
+const amount = parseUnits('10', tokenInfo.decimals)
+
+const fee = await chain.getFee({
+  router,
+  destChainSelector: destSelector,
+  message: {
+    receiver: '0xReceiverAddress...',
+    data: '0x',
+    tokenAmounts: [{ token: tokenAddress, amount }],
+  },
+})
+
+// Fee is in native token units (wei) when paying with native, or fee token units
+console.log('Fee:', formatUnits(fee, 18), 'ETH')
+```
+
+To pay with a specific fee token (e.g., LINK), set `feeToken` in the message:
+
+```typescript
+const fee = await chain.getFee({
+  router,
+  destChainSelector: destSelector,
+  message: {
+    receiver: '0xReceiverAddress...',
+    data: '0x',
+    tokenAmounts: [],
+    feeToken: '0xLINKAddress...', // Pay fees in LINK
+  },
+})
+```
+
+## Balance Queries
+
+`getBalance` returns balances in the token's smallest units. RPC-only.
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+import { formatEther, formatUnits } from 'viem'
+
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const holder = '0xWalletAddress...'
+
+// Native token balance (ETH)
+const nativeBalance = await chain.getBalance({ holder })
+console.log('ETH:', formatEther(nativeBalance))
+
+// ERC-20 token balance
+const tokenAddress = '0xTokenAddress...'
+const tokenBalance = await chain.getBalance({ holder, token: tokenAddress })
+const tokenInfo = await chain.getTokenInfo(tokenAddress)
+console.log(`${tokenInfo.symbol}:`, formatUnits(tokenBalance, tokenInfo.decimals))
+```
+
+Works across all chain families:
+
+<Tabs>
 <TabItem value="solana" label="Solana">
 
 ```typescript
@@ -99,9 +273,7 @@ import { SolanaChain } from '@chainlink/ccip-sdk'
 const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
 
 // SOL balance
-const solBalance = await chain.getBalance({
-  holder: 'YourSolanaAddress',
-})
+const solBalance = await chain.getBalance({ holder: 'YourSolanaAddress' })
 
 // SPL Token balance (auto-detects Token-2022)
 const splBalance = await chain.getBalance({
@@ -119,9 +291,7 @@ import { AptosChain } from '@chainlink/ccip-sdk'
 const chain = await AptosChain.fromUrl('https://api.testnet.aptoslabs.com/v1')
 
 // APT balance
-const aptBalance = await chain.getBalance({
-  holder: '0xYourAptosAddress',
-})
+const aptBalance = await chain.getBalance({ holder: '0xYourAptosAddress' })
 
 // Fungible Asset balance
 const faBalance = await chain.getBalance({
@@ -133,172 +303,101 @@ const faBalance = await chain.getBalance({
 </TabItem>
 </Tabs>
 
-## Token Information
+## CCIP API Client
 
-### Get Token Metadata
+For standalone API queries without creating a chain instance, use `CCIPAPIClient` directly. This is useful for backend services that don't need RPC connections.
 
 ```typescript
-import { EVMChain } from '@chainlink/ccip-sdk'
+import { CCIPAPIClient } from '@chainlink/ccip-sdk'
 
-const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
-
-const tokenInfo = await chain.getTokenInfo('0xTokenAddress...')
-
-console.log('Name:', tokenInfo.name)
-console.log('Symbol:', tokenInfo.symbol)
-console.log('Decimals:', tokenInfo.decimals)
+const api = CCIPAPIClient.fromUrl() // defaults to https://api.ccip.chain.link
 ```
 
-### Use with Fee Estimation
+`fromUrl` is memoized — calling it with the same URL returns the same instance.
 
-Always fetch decimals before formatting amounts:
+### Get Message by ID
 
 ```typescript
-import { EVMChain, networkInfo, encodeExtraArgs } from '@chainlink/ccip-sdk'
-import { parseUnits, formatUnits } from 'viem'
+const request = await api.getMessageById('0xMessageId...')
 
-const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
-const tokenAddress = '0xTokenAddress...'
+console.log('Status:', request.metadata.status)
+console.log('Source:', request.metadata.sourceNetworkInfo.name)
+console.log('Dest:', request.metadata.destNetworkInfo.name)
 
-// Get token decimals
-const tokenInfo = await chain.getTokenInfo(tokenAddress)
-
-// Parse user input with correct decimals
-const amount = parseUnits('10', tokenInfo.decimals) // 10 tokens
-
-const message = {
-  receiver: '0xReceiverAddress...',
-  data: '0x',
-  tokenAmounts: [{ token: tokenAddress, amount }],
+if (request.metadata.deliveryTime) {
+  console.log('Delivery time:', request.metadata.deliveryTime, 'ms')
 }
+```
 
-const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
-const fee = await chain.getFee({
-  router,
-  destChainSelector: networkInfo('avalanche-testnet-fuji').chainSelector,
-  message,
+### Find Messages in Transaction
+
+```typescript
+const messageIds = await api.getMessageIdsInTx('0xTxHash...')
+
+for (const id of messageIds) {
+  const request = await api.getMessageById(id)
+  console.log(`${id}: ${request.metadata.status}`)
+}
+```
+
+### Get Execution Input
+
+Fetch execution inputs (proof, off-chain token data) for [manual execution](/sdk/guides/manual-execution):
+
+```typescript
+const execInput = await api.getExecutionInput('0xMessageId...')
+
+console.log('OffRamp:', execInput.offRamp)
+console.log('Version:', execInput.version)
+
+// Use with dest.execute()
+const { offRamp, ...input } = execInput
+await dest.execute({ offRamp, input, wallet })
+```
+
+### Lane Latency (Standalone)
+
+```typescript
+const latency = await api.getLaneLatency(
+  5009297550715157269n,  // Ethereum mainnet selector
+  4949039107694359620n,  // Arbitrum mainnet selector
+)
+
+console.log(`Estimated delivery: ~${Math.round(latency.totalMs / 60000)} minutes`)
+```
+
+Unlike `chain.getLaneLatency(destSelector)`, the standalone version requires both source and destination selectors.
+
+### Custom Configuration
+
+```typescript
+const api = CCIPAPIClient.fromUrl('https://custom-api.example.com', {
+  timeoutMs: 60000,     // Request timeout (default: 30000)
+  logger: customLogger, // Custom logger
+  fetch: customFetch,   // Custom fetch function
 })
-
-console.log('Fee:', formatUnits(fee, 18), 'ETH')
 ```
 
-## Lane Latency
+## Explorer Links
 
-Estimate transfer time for a specific lane:
-
-```typescript
-import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
-
-const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
-
-const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
-const latency = await chain.getLaneLatency(destSelector)
-
-const minutes = Math.round(latency.totalMs / 60000)
-console.log(`Estimated transfer time: ~${minutes} minutes`)
-```
-
-### Display to Users
+Generate links to the [CCIP Explorer](https://ccip.chain.link) — no API or RPC needed:
 
 ```typescript
-function formatLatency(totalMs: number): string {
-  const minutes = Math.round(totalMs / 60000)
-  if (minutes < 1) return 'Less than 1 minute'
-  if (minutes === 1) return '~1 minute'
-  return `~${minutes} minutes`
-}
+import { getCCIPExplorerUrl } from '@chainlink/ccip-sdk'
 
-const latency = await chain.getLaneLatency(destSelector)
-console.log('Transfer time:', formatLatency(latency.totalMs))
-```
+const messageUrl = getCCIPExplorerUrl('msg', messageId)
+// => 'https://ccip.chain.link/msg/0x...'
 
-## Network Information
+const txUrl = getCCIPExplorerUrl('tx', txHash)
+// => 'https://ccip.chain.link/tx/0x...'
 
-### Get Network by Name, ID, or Selector
-
-```typescript
-import { networkInfo } from '@chainlink/ccip-sdk'
-
-// By name
-const sepolia = networkInfo('ethereum-testnet-sepolia')
-
-// By chain ID
-const mainnet = networkInfo(1)
-
-// By chain ID as string
-const arbitrum = networkInfo('42161')
-
-// By CCIP chain selector
-const fuji = networkInfo(14767482510784806043n)
-
-console.log('Name:', sepolia.name)
-console.log('Chain ID:', sepolia.chainId)
-console.log('Selector:', sepolia.chainSelector)
-console.log('Family:', sepolia.family) // 'EVM', 'SVM', etc.
-```
-
-### Chain Selectors vs Chain IDs
-
-CCIP uses **chain selectors** (not chain IDs) to identify networks:
-
-```typescript
-import { networkInfo } from '@chainlink/ccip-sdk'
-
-// Wrong: Using chain ID for CCIP operations
-const destChain = 84532 // Base Sepolia chain ID - DON'T USE
-
-// Correct: Using CCIP chain selector
-const destSelector = networkInfo('ethereum-testnet-sepolia-base-1').chainSelector
-// or
-const destSelector = 10344971235874465080n // Base Sepolia selector
-```
-
-Chain selectors are unique identifiers assigned by CCIP that remain consistent across the protocol. Always use selectors for:
-- `destChainSelector` in messages
-- Lane configuration
-- Fee estimation
-
-## Supported Tokens
-
-### Get Supported Tokens
-
-Query tokens configured in the TokenAdminRegistry:
-
-```typescript
-import { EVMChain } from '@chainlink/ccip-sdk'
-
-const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
-
-// Get TokenAdminRegistry address from router
-const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
-const registry = await chain.getTokenAdminRegistryFor(router)
-
-// Get all supported tokens
-const tokens = await chain.getSupportedTokens(registry)
-
-console.log('Supported tokens:', tokens)
-for (const token of tokens) {
-  const info = await chain.getTokenInfo(token)
-  console.log(`  ${info.symbol}: ${token}`)
-}
-```
-
-### Get Fee Tokens
-
-```typescript
-const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
-const feeTokens = await chain.getFeeTokens(router)
-
-console.log('Fee tokens:', feeTokens)
-// Returns Record<string, TokenInfo> with token addresses as keys
-for (const [address, info] of Object.entries(feeTokens)) {
-  console.log(`  ${info.symbol}: ${address}`)
-}
+const addressUrl = getCCIPExplorerUrl('address', senderAddress)
+// => 'https://ccip.chain.link/address/0x...'
 ```
 
 ## Complete Example
 
-Build a transfer form with all necessary data:
+Build a transfer form that queries all necessary data before sending:
 
 ```typescript
 import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
@@ -312,32 +411,26 @@ async function getTransferInfo(
   amountString: string
 ) {
   const chain = await EVMChain.fromUrl(sourceRpc)
+  const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
   const destSelector = networkInfo(destNetworkName).chainSelector
 
-  // Get registry first for token queries
-  const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
+  // Get registry for token queries
   const registry = await chain.getTokenAdminRegistryFor(router)
 
-  // Parallel queries for efficiency
-  const [
-    tokenInfo,
-    balance,
-    nativeBalance,
-    latency,
-    supportedTokens,
-  ] = await Promise.all([
-    chain.getTokenInfo(tokenAddress),
-    chain.getBalance({ holder: walletAddress, token: tokenAddress }),
-    chain.getBalance({ holder: walletAddress }),
-    chain.getLaneLatency(destSelector),
-    chain.getSupportedTokens(registry),
-  ])
+  // Parallel queries — all RPC-based except latency
+  const [tokenInfo, balance, nativeBalance, supportedTokens, laneFeatures] =
+    await Promise.all([
+      chain.getTokenInfo(tokenAddress),
+      chain.getBalance({ holder: walletAddress, token: tokenAddress }),
+      chain.getBalance({ holder: walletAddress }),
+      chain.getSupportedTokens(registry),
+      chain.getLaneFeatures({ router, destChainSelector: destSelector, token: tokenAddress }),
+    ])
 
   // Check if token is supported
   const isSupported = supportedTokens.some(
-    t => t.toLowerCase() === tokenAddress.toLowerCase()
+    (t) => t.toLowerCase() === tokenAddress.toLowerCase()
   )
-
   if (!isSupported) {
     throw new Error(`Token ${tokenInfo.symbol} not supported on this lane`)
   }
@@ -368,86 +461,36 @@ async function getTransferInfo(
     balance: formatUnits(balance, tokenInfo.decimals),
     amount: amountString,
     fee: formatUnits(fee, 18),
-    estimatedTime: `~${Math.round(latency.totalMs / 60000)} minutes`,
-    isSupported,
+    ftfEnabled:
+      laneFeatures.MIN_BLOCK_CONFIRMATIONS != null &&
+      laneFeatures.MIN_BLOCK_CONFIRMATIONS > 0,
+    rateLimited: laneFeatures.RATE_LIMITS != null,
   }
 }
-
-// Usage
-const info = await getTransferInfo(
-  'https://rpc.sepolia.org',
-  'avalanche-testnet-fuji',
-  '0xMyWallet...',
-  '0xTokenAddress...',
-  '10.5'
-)
-
-console.log(`Transfer ${info.amount} ${info.token.symbol}`)
-console.log(`Fee: ${info.fee} ETH`)
-console.log(`Time: ${info.estimatedTime}`)
 ```
 
-## CCIP API Client
+## Method Reference
 
-For standalone API queries without creating a chain instance:
-
-### Standalone Usage
-
-```typescript
-import { CCIPAPIClient } from '@chainlink/ccip-sdk'
-
-const api = CCIPAPIClient.fromUrl()
-
-// Get estimated delivery time
-const latency = await api.getLaneLatency(
-  5009297550715157269n, // Ethereum mainnet selector
-  4949039107694359620n, // Arbitrum mainnet selector
-)
-
-console.log(`Estimated delivery: ${Math.round(latency.totalMs / 60000)} minutes`)
-```
-
-### Fetch Message by ID
-
-```typescript
-import { CCIPAPIClient } from '@chainlink/ccip-sdk'
-
-const api = CCIPAPIClient.fromUrl()
-
-const request = await api.getMessageById(messageId)
-
-console.log('Message ID:', request.message.messageId)
-console.log('Sender:', request.message.sender)
-console.log('Status:', request.metadata?.status)
-console.log('Delivery time:', request.metadata?.deliveryTime, 'ms')
-```
-
-### Find Messages in Transaction
-
-```typescript
-const api = CCIPAPIClient.fromUrl()
-
-const messageIds = await api.getMessageIdsInTx(txHash)
-console.log(`Found ${messageIds.length} CCIP message(s)`)
-
-for (const id of messageIds) {
-  const request = await api.getMessageById(id)
-  console.log(`Message ${id}: ${request.metadata?.status}`)
-}
-```
-
-### Custom Configuration
-
-```typescript
-const api = CCIPAPIClient.fromUrl('https://custom-api.example.com', {
-  timeoutMs: 60000,     // Request timeout (default: 30000)
-  logger: customLogger, // Custom logger
-  fetch: customFetch,   // Custom fetch function
-})
-```
+| Method | Called on | Data source | Purpose |
+|--------|----------|-------------|---------|
+| `networkInfo(selectorOrIdOrName)` | — (standalone) | Built-in registry | Resolve chain names, IDs, and selectors |
+| `getTokenInfo(token)` | Chain | RPC | Get token symbol, decimals, and name |
+| `getSupportedTokens(registry)` | Chain | RPC | List tokens configured in TokenAdminRegistry |
+| `getTokenAdminRegistryFor(address)` | Chain | RPC | Resolve TokenAdminRegistry from Router/OnRamp/OffRamp |
+| `getFeeTokens(router)` | Chain | RPC | List accepted fee tokens with metadata |
+| `getLaneFeatures({ router, destChainSelector, token? })` | Chain | RPC | Query lane capabilities (FTF, rate limits) |
+| `getLaneLatency(destSelector)` | Chain | CCIP API | Estimated delivery time |
+| `getFee({ router, destChainSelector, message })` | Chain | RPC | Fee estimation in fee token units |
+| `getBalance({ holder, token? })` | Chain | RPC | Native or token balance |
+| `getCCIPExplorerUrl(type, value)` | — (standalone) | None | Generate CCIP Explorer URLs |
+| `CCIPAPIClient.fromUrl(url?)` | — (static) | — | Create standalone API client |
+| `api.getMessageById(id)` | CCIPAPIClient | CCIP API | Full message with lifecycle metadata |
+| `api.getMessageIdsInTx(txHash)` | CCIPAPIClient | CCIP API | Message IDs in a transaction |
+| `api.getExecutionInput(messageId)` | CCIPAPIClient | CCIP API | Proof and off-chain data for manual execution |
+| `api.getLaneLatency(source, dest)` | CCIPAPIClient | CCIP API | Estimated delivery time (standalone) |
 
 ## Related
 
-- [Sending Messages](/sdk/guides/sending-messages) - Send transfers
-- [Token Pools](/sdk/guides/token-pools) - Query pool configuration
-- [Tracking Messages](/sdk/guides/tracking-messages) - Track transfer status
+- [Sending Messages](/sdk/guides/sending-messages) — Send cross-chain messages
+- [Token Pools](/sdk/guides/token-pools) — Query pool configuration and rate limits
+- [Tracking Messages](/sdk/guides/tracking-messages) — Track message lifecycle

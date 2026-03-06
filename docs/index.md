@@ -20,7 +20,7 @@ This tool is provided under an MIT license and is for convenience and illustrati
 |------|------|---------|
 | Track message status | CLI | `ccip-cli show 0xTxHash` |
 | Send cross-chain message | SDK/CLI | Programmatic or command-line |
-| Manually execute stuck message | CLI | `ccip-cli manual-exec 0xTxHash` |
+| Manually execute stuck message | CLI | `ccip-cli manual-exec 0xTxHashOrMessageId` |
 | Check supported tokens | CLI | `ccip-cli get-supported-tokens -n <network> -a <address>` |
 | Query lane latency | CLI/SDK | `ccip-cli lane-latency <source> <dest>` |
 | Integrate CCIP in your dApp | SDK | Import and use in your code |

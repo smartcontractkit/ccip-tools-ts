@@ -68,7 +68,7 @@ export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
 export type GenericExtraArgsV3 = {
   /** Gas limit for execution on the destination chain (uint32). */
   gasLimit: bigint
-  /** Number of block confirmations required. */
+  /** Number of source-chain block confirmations to wait before relaying the message. */
   blockConfirmations: number
   /** Cross-chain verifier addresses (EVM addresses). */
   ccvs: string[]
@@ -132,7 +132,17 @@ export type SuiExtraArgsV1 = EVMExtraArgsV2 & {
 }
 
 /**
- * Union type of all supported extra arguments formats.
+ * Union of all supported extra arguments formats for CCIP messages.
+ *
+ * The SDK auto-detects the correct variant based on the fields provided:
+ * - {@link EVMExtraArgsV1} - EVM legacy (gasLimit only)
+ * - {@link EVMExtraArgsV2} - EVM with out-of-order execution support
+ * - {@link GenericExtraArgsV3} - Generic V3 with minimum block confirmations, cross-chain verifiers, custom executor, and per-token receiver/args
+ * - {@link SVMExtraArgsV1} - Solana (compute units, accounts)
+ * - {@link SuiExtraArgsV1} - Sui (gas limit, receiver object IDs)
+ *
+ * @see {@link encodeExtraArgs} - Encode extra arguments for on-chain use.
+ * @see {@link decodeExtraArgs} - Decode extra arguments from bytes.
  */
 export type ExtraArgs =
   | EVMExtraArgsV1
@@ -146,10 +156,10 @@ export type ExtraArgs =
  * The args are *to* a dest network, but are encoded as a message *from* this source chain.
  * E.g. Solana uses Borsh to encode extraArgs in its produced requests, even those targeting EVM.
  *
- * @param args - Extra arguments to encode
- * @param from - Source chain family for encoding format (defaults to EVM)
- * @returns Encoded extra arguments as hex string
- * @throws {@link CCIPChainFamilyUnsupportedError} if chain family not supported
+ * @param args - Extra arguments to encode.
+ * @param from - Source chain family for encoding format (defaults to EVM).
+ * @returns Encoded extra arguments as hex string.
+ * @throws {@link CCIPChainFamilyUnsupportedError} if chain family not supported.
  *
  * @example
  * ```typescript
@@ -175,8 +185,8 @@ export function encodeExtraArgs(args: ExtraArgs, from: ChainFamily = ChainFamily
  * @param data - Extra arguments bytearray data.
  * @param from - Optional chain family to narrow decoding attempts.
  * @returns Extra arguments object if found, undefined otherwise.
- * @throws {@link CCIPChainFamilyUnsupportedError} if specified chain family not supported
- * @throws {@link CCIPExtraArgsParseError} if data cannot be parsed as valid extra args
+ * @throws {@link CCIPChainFamilyUnsupportedError} if specified chain family not supported.
+ * @throws {@link CCIPExtraArgsParseError} if data cannot be parsed as valid extra args.
  *
  * @example
  * ```typescript
