@@ -77,7 +77,6 @@
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^5.2.1",
-    "buffer": "^6.0.3",
     "@coral-xyz/anchor": "^0.29.0",
     "@mysten/bcs": "^1.9.2",
     "@mysten/sui": "^1.45.2",
@@ -90,6 +89,7 @@
     "bn.js": "^5.2.3",
     "borsh": "^2.0.0",
     "bs58": "^6.0.0",
+    "buffer": "^6.0.3",
     "ethers": "6.16.0",
     "got": "^11.8.6",
     "micro-memoize": "^5.1.1",
