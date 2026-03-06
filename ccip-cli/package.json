@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-cli",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "CCIP Command Line Interface, based on @chainlink/ccip-sdk",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -36,7 +36,7 @@
   ],
   "devDependencies": {
     "@eslint/js": "^9.39.3",
-    "@types/node": "25.3.0",
+    "@types/node": "25.3.5",
     "@types/yargs": "17.0.35",
     "eslint": "^9.39.3",
     "eslint-config-prettier": "10.1.8",
@@ -44,15 +44,15 @@
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-jsdoc": "^62.7.1",
     "eslint-plugin-prettier": "^5.5.5",
-    "eslint-plugin-tsdoc": "^0.5.1",
+    "eslint-plugin-tsdoc": "^0.5.2",
     "prettier": "^3.8.1",
     "tsx": "4.21.0",
     "typescript": "5.9.3",
     "typescript-eslint": "8.56.1"
   },
   "dependencies": {
+    "@chainlink/ccip-sdk": "^1.1.0",
     "@aptos-labs/ts-sdk": "^5.2.1",
-    "@chainlink/ccip-sdk": "^1.0.0",
     "@coral-xyz/anchor": "^0.29.0",
     "@ethers-ext/signer-ledger": "^6.0.0-beta.1",
     "@inquirer/prompts": "8.3.0",
