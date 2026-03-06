@@ -125,6 +125,7 @@ export const builder = (yargs: Argv) =>
         string: true,
         describe:
           'Extra args to pass in the message: key=value (value parsed as JSON with bigint support, fallback to string; repeated keys become arrays)',
+        example: '-x ccvs=["0xvalue1", "0xvalue2"] --extra=blockConfirmations=1',
       },
       'only-get-fee': {
         type: 'boolean',
@@ -179,6 +180,9 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
  * Parse --extra=key=value entries into a record.
  * Values are parsed as JSON with bigint support for integers; fallback to string.
  * Repeated keys are accumulated into an array.
+ *
+ * @example
+ * `assert.eq(parseExtraArgs(['ccvs=["0xvalue1", "0xvalue2"]', 'blockConfirmations=1', 'flag=true']), { ccvs: ["0xvalue1", "0xvalue2"], blockConfirmations: 1n, flag: true })`
  */
 function parseExtraArgs(extra: readonly string[] | undefined): Record<string, unknown> {
   if (!extra?.length) return {}
