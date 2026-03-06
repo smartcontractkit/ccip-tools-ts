@@ -1590,6 +1590,23 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   static override buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
   ): AnyMessage & { extraArgs: SVMExtraArgsV1 } {
+    /** Valid field names for SVMExtraArgsV1, including recognised aliases. */
+    const SVM_EXTRA_ARGS_FIELDS = new Set([
+      'computeUnits',
+      'gasLimit', // alias for computeUnits
+      'allowOutOfOrderExecution',
+      'tokenReceiver',
+      'accounts',
+      'accountIsWritableBitmap',
+    ])
+    if (message.extraArgs) {
+      const unknown = Object.keys(message.extraArgs).filter((k) => !SVM_EXTRA_ARGS_FIELDS.has(k))
+      if (unknown.length)
+        throw new CCIPArgumentInvalidError(
+          'extraArgs',
+          `unknown field(s) for SVMExtraArgsV1: ${unknown.map((k) => JSON.stringify(k)).join(', ')}`,
+        )
+    }
     if (
       !(
         message.extraArgs &&
