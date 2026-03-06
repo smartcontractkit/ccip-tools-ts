@@ -223,7 +223,15 @@ async function manualExec(
     inputs = { input, offRamp }
   }
 
-  const [, wallet] = await loadChainWallet(dest, argv)
+  const [walletAddr, wallet] = await loadChainWallet(dest, argv)
+  console.debug(
+    'Loaded wallet:',
+    walletAddr,
+    'for',
+    dest.constructor.name,
+    'on network',
+    dest.network.name,
+  )
   const receipt = await dest.execute({
     ...argv,
     wallet,

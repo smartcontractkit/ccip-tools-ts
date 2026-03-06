@@ -28,6 +28,7 @@ import { getOffchainTokenData } from './offchain.ts'
 import { getMessagesInTx } from './requests.ts'
 import { DEFAULT_GAS_LIMIT } from './shared/constants.ts'
 import type { UnsignedSolanaTx } from './solana/types.ts'
+import type { UnsignedSuiTx } from './sui/types.ts'
 import type { UnsignedTONTx } from './ton/types.ts'
 import {
   type AnyMessage,
@@ -364,7 +365,7 @@ export type UnsignedTx = {
   [ChainFamily.Solana]: UnsignedSolanaTx
   [ChainFamily.Aptos]: UnsignedAptosTx
   [ChainFamily.TON]: UnsignedTONTx
-  [ChainFamily.Sui]: never // TODO
+  [ChainFamily.Sui]: UnsignedSuiTx
   [ChainFamily.Unknown]: never
 }
 
@@ -1009,6 +1010,25 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     request: PickDeep<CCIPRequest, 'tx.hash' | `message`>,
   ): Promise<OffchainTokenData[]> {
     return getOffchainTokenData(request, this)
+  }
+
+  /**
+   * Resolves {@link ExecuteOpts} that may contain a `messageId` (API shorthand) into the
+   * canonical `{ offRamp, input }` form required by {@link generateUnsignedExecute}.
+   *
+   * When `opts` already contains `input` the method is a no-op and returns it unchanged.
+   * When `opts` contains only a `messageId` it calls `apiClient.getExecutionInput` and merges
+   * the result back with any extra opts fields (e.g. `gasLimit`).
+   *
+   * @throws {@link CCIPApiClientNotAvailableError} if `messageId` is provided but no apiClient
+   */
+  protected async resolveExecuteOpts(
+    opts: ExecuteOpts,
+  ): Promise<Omit<ExecuteOpts, 'messageId'> & { offRamp: string; input: ExecutionInput }> {
+    if ('input' in opts) return opts
+    if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
+    const { offRamp, ...input } = await this.apiClient.getExecutionInput(opts.messageId)
+    return { ...opts, offRamp, input }
   }
 
   /**

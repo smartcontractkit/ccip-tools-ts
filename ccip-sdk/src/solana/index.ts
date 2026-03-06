@@ -1118,9 +1118,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     payer,
     ...opts
   }: Parameters<Chain['generateUnsignedExecute']>[0]): Promise<UnsignedSolanaTx> {
-    if (!('input' in opts) || !('message' in opts.input) || !('computeUnits' in opts.input.message))
+    const resolved = await this.resolveExecuteOpts(opts)
+    if (!('message' in resolved.input) || !('computeUnits' in resolved.input.message))
       throw new CCIPExecutionReportChainMismatchError('Solana')
-    const { offRamp, input } = opts
+    const { offRamp, input } = resolved
     const execReport_ = input as ExecutionInput<CCIPMessage_V1_6_Solana>
     return generateUnsignedExecuteReport(
       this,
