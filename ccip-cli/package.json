@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-cli",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "CCIP Command Line Interface, based on @chainlink/ccip-sdk",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -51,7 +51,7 @@
     "typescript-eslint": "8.56.1"
   },
   "dependencies": {
-    "@chainlink/ccip-sdk": "^1.1.0",
+    "@chainlink/ccip-sdk": "^1.1.1",
     "@aptos-labs/ts-sdk": "^5.2.1",
     "@coral-xyz/anchor": "^0.29.0",
     "@ethers-ext/signer-ledger": "^6.0.0-beta.1",
