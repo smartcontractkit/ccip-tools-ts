@@ -279,11 +279,19 @@ export type TokenPoolRemote = {
    * - Version management (different pool implementations)
    */
   remotePools: string[]
-  /** Inbound rate limiter state for tokens coming into this chain. */
-  inboundRateLimiterState: RateLimiterState
   /** Outbound rate limiter state for tokens leaving this chain. */
   outboundRateLimiterState: RateLimiterState
-}
+  /** Inbound rate limiter state for tokens coming into this chain. */
+  inboundRateLimiterState: RateLimiterState
+} & (
+  | {
+      /** Outbound rate limiter state for tokens leaving this chain (FTF/v2). */
+      customBlockConfirmationsOutboundRateLimiterState: RateLimiterState
+      /** Inbound rate limiter state for tokens coming into this chain (FTF/v2). */
+      customBlockConfirmationsInboundRateLimiterState: RateLimiterState
+    }
+  | object
+)
 
 /**
  * Token pool configuration returned by {@link Chain.getTokenPoolConfig}.
@@ -304,6 +312,13 @@ export type TokenPoolConfig = {
    * May be undefined for older pool implementations that don't expose this method.
    */
   typeAndVersion?: string
+  /**
+   * Min custom block confirmations for Faster Time to Finality (FTF),
+   * if TokenPool version \>= v2.0.0 and FTF is supported on this lane.
+   * `0` indicates FTF is supported but not enabled for this token; `>0` indicates FTF is enabled
+   *  with this many minimum confirmations.
+   */
+  minBlockConfirmations?: number
 }
 
 /**
