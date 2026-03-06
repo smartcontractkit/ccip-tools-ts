@@ -1030,10 +1030,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     )
 
     // make sure to approve once per token, for the total amount (including fee, if needed)
-    const amountsToApprove = (message.tokenAmounts ?? []).reduce(
-      (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
-      {} as { [token: string]: bigint },
-    )
+    const amountsToApprove = (message.tokenAmounts ?? [])
+      .filter(({ token }) => token && token !== ZeroAddress)
+      .reduce(
+        (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
+        {} as { [token: string]: bigint },
+      )
     if (feeToken !== ZeroAddress)
       amountsToApprove[feeToken] = (amountsToApprove[feeToken] ?? 0n) + message.fee
 
@@ -1058,6 +1060,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       interfaces.Router,
       this.provider,
     ) as unknown as TypedContract<typeof Router_ABI>
+
+    // if `token` is ZeroAddress, send its `amount` as `value` to router/EtherSenderReceiver (plus possibly native fee)
+    // if native fee, include it in value; otherwise, it's transferedFrom feeToken
+    const value = (message.tokenAmounts ?? [])
+      .filter(({ token }) => token === ZeroAddress)
+      .reduce((acc, { amount }) => acc + amount, feeToken === ZeroAddress ? message.fee : 0n)
+
     const sendTx = await contract.ccipSend.populateTransaction(
       destChainSelector,
       {
@@ -1067,11 +1076,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         extraArgs,
         feeToken,
       },
-      {
-        from: sender,
-        // if native fee, include it in value; otherwise, it's transferedFrom feeToken
-        ...(feeToken === ZeroAddress && { value: message.fee }),
-      },
+      { from: sender, ...(value > 0n ? { value } : {}) },
     )
     const txRequests = [...approveTxs, sendTx] as SetRequired<typeof sendTx, 'from'>[]
     return {
