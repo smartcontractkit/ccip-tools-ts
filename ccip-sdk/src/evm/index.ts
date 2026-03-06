@@ -37,7 +37,6 @@ import {
 } from '../chain.ts'
 import {
   CCIPAddressInvalidEvmError,
-  CCIPApiClientNotAvailableError,
   CCIPBlockNotFoundError,
   CCIPContractNotRouterError,
   CCIPContractTypeInvalidError,
@@ -67,7 +66,6 @@ import {
   type ChainLog,
   type ChainTransaction,
   type CommitReport,
-  type ExecutionInput,
   type ExecutionReceipt,
   type ExecutionState,
   type Lane,
@@ -1140,13 +1138,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   async generateUnsignedExecute(
     opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<UnsignedEVMTx> {
-    let input: ExecutionInput, offRamp: string
-    if (!('input' in opts)) {
-      if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
-      ;({ offRamp, ...input } = await this.apiClient.getExecutionInput(opts.messageId))
-    } else {
-      ;({ offRamp, input } = opts)
-    }
+    const { offRamp, input } = await this.resolveExecuteOpts(opts)
     if ('verifications' in input) {
       const contract = new Contract(
         offRamp,

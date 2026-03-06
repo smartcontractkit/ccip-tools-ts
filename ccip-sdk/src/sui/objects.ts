@@ -135,11 +135,12 @@ export async function getReceiverModule(
   ccipObjectRef: string,
   receiverPackageId: string,
 ) {
+  const ccipBarePackageId = ccipPackageId.split('::')[0]!
   // Call get_receiver_config from receiver_registry contract
   const tx = new Transaction()
 
   tx.moveCall({
-    target: `${ccipPackageId}::receiver_registry::get_receiver_config`,
+    target: `${ccipBarePackageId}::receiver_registry::get_receiver_config`,
     arguments: [tx.object(ccipObjectRef), tx.pure.address(receiverPackageId)],
   })
 
@@ -207,12 +208,13 @@ export async function fetchTokenConfigs(
   ]
 
   // Fetch token config for each unique token address
+  const ccipBarePackageId = ccipPackageId.split('::')[0]!
   for (const tokenAddress of tokenAddresses) {
     const tx = new Transaction()
 
     // Call get_token_config_struct from token_admin_registry
     tx.moveCall({
-      target: `${ccipPackageId}::token_admin_registry::get_token_config_struct`,
+      target: `${ccipBarePackageId}::token_admin_registry::get_token_config_struct`,
       arguments: [tx.object(ccipObjectRef), tx.pure.address(tokenAddress)],
     })
 

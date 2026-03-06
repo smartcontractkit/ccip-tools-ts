@@ -560,13 +560,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     payer,
     ...opts
   }: Parameters<Chain['generateUnsignedExecute']>[0]): Promise<UnsignedAptosTx> {
+    const resolved = await this.resolveExecuteOpts(opts)
     if (
-      !(
-        'input' in opts &&
-        'message' in opts.input &&
-        'allowOutOfOrderExecution' in opts.input.message &&
-        'gasLimit' in opts.input.message
-      )
+      !('message' in resolved.input) ||
+      !('allowOutOfOrderExecution' in resolved.input.message) ||
+      !('gasLimit' in resolved.input.message)
     ) {
       throw new CCIPAptosExtraArgsV2RequiredError()
     }
@@ -574,9 +572,9 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     const tx = await generateUnsignedExecuteReport(
       this.provider,
       payer,
-      opts.offRamp,
-      opts.input as ExecutionInput<CCIPMessage_V1_6_EVM>,
-      opts,
+      resolved.offRamp,
+      resolved.input as ExecutionInput<CCIPMessage_V1_6_EVM>,
+      resolved,
     )
     return {
       family: ChainFamily.Aptos,

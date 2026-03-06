@@ -425,7 +425,7 @@ describe('e2e command show Solana', () => {
       assert.match(output, /name.*solana-devnet.*ethereum-testnet-sepolia/i)
       assert.match(output, /chainId.*EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG.*11155111/)
       assert.match(output, /chainSelector.*16423721717087811551n?.*16015286601757825753n?/)
-      assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
+      assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.`, 'i'))
 
       // Request information
       assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))

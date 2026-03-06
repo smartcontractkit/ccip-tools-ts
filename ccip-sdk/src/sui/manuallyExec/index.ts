@@ -4,9 +4,7 @@ import { Transaction } from '@mysten/sui/transactions'
 
 import { serializeExecutionReport } from './encoder.ts'
 import { CCIPMessageInvalidError } from '../../errors/specialized.ts'
-import { decodeExtraArgs } from '../../extra-args.ts'
 import type { ExecutionInput } from '../../types.ts'
-import { networkInfo } from '../../utils.ts'
 import type { CCIPMessage_V1_6_Sui } from '../types.ts'
 
 /** Configuration for manually executing a Sui receiver module. */
@@ -56,12 +54,16 @@ export function buildManualExecutionPTB({
 }: SuiManuallyExecuteInput): Transaction {
   const reportBytes = serializeExecutionReport(executionReport)
 
+  // Strip any ::module suffixes to get bare package IDs for move call targets
+  const offrampPackageId = offrampAddress.split('::')[0]!
+  const ccipPackageId = ccipAddress.split('::')[0]!
+
   // Create transaction
   const tx = new Transaction()
 
   // Step 1: Call manually_init_execute to prepare the execution
   const receiverParamsArg = tx.moveCall({
-    target: `${offrampAddress}::offramp::manually_init_execute`,
+    target: `${offrampPackageId}::offramp::manually_init_execute`,
     arguments: [
       tx.object(ccipObjectRef),
       tx.object(offrampStateObject),
@@ -72,7 +74,7 @@ export function buildManualExecutionPTB({
 
   // Get the message from the from the report using the offramp helper
   const messageArg = tx.moveCall({
-    target: `${ccipAddress}::offramp_state_helper::extract_any2sui_message`,
+    target: `${ccipPackageId}::offramp_state_helper::extract_any2sui_message`,
     arguments: [receiverParamsArg],
   })
 
@@ -96,17 +98,9 @@ export function buildManualExecutionPTB({
     }
   }
 
-  // Decode extraArgs to get receiverObjectIds
-  const decodedExtraArgs = decodeExtraArgs(
-    executionReport.message.extraArgs,
-    networkInfo(executionReport.message.destChainSelector).family,
-  )
+  const { receiverObjectIds } = executionReport.message
 
-  if (!decodedExtraArgs || decodedExtraArgs._tag !== 'SuiExtraArgsV1') {
-    throw new CCIPMessageInvalidError('Expected Sui extra args')
-  }
-
-  if (decodedExtraArgs.receiverObjectIds.length === 0) {
+  if (receiverObjectIds.length === 0) {
     throw new CCIPMessageInvalidError('No receiverObjectIds provided in SUIExtraArgsV1')
   }
   // Call the receiver contract
@@ -116,16 +110,16 @@ export function buildManualExecutionPTB({
       tx.pure.vector('u8', Buffer.from(executionReport.message.messageId.slice(2), 'hex')),
       tx.object(ccipObjectRef),
       messageArg,
-      // if overrideReceiverObjectIds is provided, use them; otherwise, use the ones from decodedExtraArgs (original message)
+      // if overrideReceiverObjectIds is provided, use them; otherwise, use the ones from the message
       ...(overrideReceiverObjectIds && overrideReceiverObjectIds.length > 0
         ? overrideReceiverObjectIds.map(tx.object)
-        : decodedExtraArgs.receiverObjectIds.map(tx.object)),
+        : receiverObjectIds.map(tx.object)),
     ],
   })
 
   // Step 2: Call finish_execute to complete the execution
   tx.moveCall({
-    target: `${offrampAddress}::offramp::finish_execute`,
+    target: `${offrampPackageId}::offramp::finish_execute`,
     arguments: [
       tx.object(ccipObjectRef),
       tx.object(offrampStateObject),

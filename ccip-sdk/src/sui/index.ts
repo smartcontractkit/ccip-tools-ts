@@ -1,5 +1,5 @@
 import { bcs } from '@mysten/sui/bcs'
-import { type SuiTransactionBlockResponse, SuiClient } from '@mysten/sui/client'
+import { SuiClient } from '@mysten/sui/client'
 import type { Keypair } from '@mysten/sui/cryptography'
 import { SuiGraphQLClient } from '@mysten/sui/graphql'
 import { Transaction } from '@mysten/sui/transactions'
@@ -17,20 +17,13 @@ import {
 import { getCcipStateAddress, getOffRampForCcip } from './discovery.ts'
 import { type CommitEvent, streamSuiLogs } from './events.ts'
 import { getSuiLeafHasher } from './hasher.ts'
-import {
-  deriveObjectID,
-  fetchTokenConfigs,
-  getLatestPackageId,
-  getObjectRef,
-  getReceiverModule,
-} from './objects.ts'
+import { deriveObjectID, getLatestPackageId, getObjectRef } from './objects.ts'
 import {
   CCIPArgumentInvalidError,
   CCIPContractNotRouterError,
   CCIPDataFormatUnsupportedError,
   CCIPError,
   CCIPErrorCode,
-  CCIPExecTxRevertedError,
   CCIPExecutionReportChainMismatchError,
   CCIPLogsAddressRequiredError,
   CCIPNotImplementedError,
@@ -47,7 +40,6 @@ import {
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
-  type CCIPVersion,
   type ChainLog,
   type ChainTransaction,
   type CommitReport,
@@ -67,12 +59,9 @@ import {
   parseTypeAndVersion,
   util,
 } from '../utils.ts'
-import {
-  type SuiManuallyExecuteInput,
-  type TokenConfig,
-  buildManualExecutionPTB,
-} from './manuallyExec/index.ts'
-import type { CCIPMessage_V1_6_Sui } from './types.ts'
+import { generateUnsignedExecutePTB, signAndExecuteSuiTx } from './exec.ts'
+import type { CCIPMessage_V1_6_Sui, UnsignedSuiTx } from './types.ts'
+export type { UnsignedSuiTx }
 
 const DEFAULT_GAS_LIMIT = 1000000n
 
@@ -728,11 +717,28 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.sendMessage'))
   }
 
-  /** {@inheritDoc Chain.generateUnsignedExecute} */
-  override generateUnsignedExecute(
-    _opts: Parameters<Chain['generateUnsignedExecute']>[0],
-  ): Promise<never> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.generateUnsignedExecute'))
+  /**
+   * {@inheritDoc Chain.generateUnsignedExecute}
+   * @throws {@link CCIPExecutionReportChainMismatchError} if input is not a Sui v1.6 execution report
+   */
+  override async generateUnsignedExecute(
+    opts: Parameters<Chain['generateUnsignedExecute']>[0],
+  ): Promise<UnsignedSuiTx> {
+    const resolved = await this.resolveExecuteOpts(opts)
+    if (!resolved.offRamp.includes('::')) resolved.offRamp += '::offramp'
+    if (!('message' in resolved.input)) {
+      throw new CCIPExecutionReportChainMismatchError('Sui')
+    }
+
+    return generateUnsignedExecutePTB(
+      this.client,
+      resolved.offRamp,
+      resolved.input as ExecutionInput<CCIPMessage_V1_6_Sui>,
+      {
+        gasLimit: resolved.gasLimit,
+        receiverObjectIds: (resolved as { receiverObjectIds?: string[] }).receiverObjectIds,
+      },
+    )
   }
 
   /**
@@ -745,94 +751,23 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       receiverObjectIds?: string[]
     },
   ): Promise<CCIPExecution> {
-    if (!('input' in opts && 'message' in opts.input)) {
-      throw new CCIPExecutionReportChainMismatchError('Sui')
-    }
-    const { input, offRamp } = opts
     const wallet = opts.wallet as Keypair
 
-    // Discover the CCIP package from the offramp
-    const ccip = await getCcipStateAddress(offRamp, this.client)
-
-    const ccipObjectRef = await getObjectRef(ccip, this.client)
-    const offrampStateObject = await getObjectRef(offRamp, this.client)
-    const receiverConfig = await getReceiverModule(
-      this.client,
-      ccip,
-      ccipObjectRef,
-      input.message.receiver,
-    )
-    let tokenConfigs: TokenConfig[] = []
-    if (input.message.tokenAmounts.length !== 0) {
-      tokenConfigs = await fetchTokenConfigs(
-        this.client,
-        ccip,
-        ccipObjectRef,
-        input.message.tokenAmounts as CCIPMessage<typeof CCIPVersion.V1_6>['tokenAmounts'],
-      )
-    }
-
-    const suiInput: SuiManuallyExecuteInput = {
-      executionReport: input as ExecutionInput<CCIPMessage_V1_6_Sui>,
-      offrampAddress: offRamp,
-      ccipAddress: ccip,
-      ccipObjectRef,
-      offrampStateObject,
-      receiverConfig,
-      tokenConfigs,
-    }
     if (opts.receiverObjectIds) {
       this.logger.info(
         `Overriding Sui Manual Execution receiverObjectIds with: ${opts.receiverObjectIds.join(', ')}`,
       )
-      suiInput.overrideReceiverObjectIds = opts.receiverObjectIds
-    }
-    const tx = buildManualExecutionPTB(suiInput)
-
-    // Set gas budget if provided
-    if (opts.gasLimit) {
-      tx.setGasBudget(opts.gasLimit)
     }
 
-    this.logger.info(`Executing Sui CCIP execute transaction...`)
-    // Sign and execute the transaction
-    let result: SuiTransactionBlockResponse
-    try {
-      result = await this.client.signAndExecuteTransaction({
-        signer: wallet,
-        transaction: tx,
-        options: {
-          showEffects: true,
-          showEvents: true,
-        },
-      })
-    } catch (e) {
-      throw new CCIPError(
-        CCIPErrorCode.TRANSACTION_NOT_FINALIZED,
-        `Failed to send Sui execute transaction: ${(e as Error).message}`,
-      )
-    }
-
-    // Check if transaction inmediately reverted
-    if (result.effects?.status.status !== 'success') {
-      const errorMsg = result.effects?.status.error || 'Unknown error'
-      throw new CCIPExecTxRevertedError(result.digest, {
-        context: { error: errorMsg },
-      })
-    }
-
-    this.logger.info(`Waiting for Sui transaction ${result.digest} to be finalized...`)
-
-    await this.client.waitForTransaction({
-      digest: result.digest,
-      options: {
-        showEffects: true,
-        showEvents: true,
-      },
+    const unsignedTx = await this.generateUnsignedExecute({
+      ...opts,
+      payer: '',
     })
 
+    const digest = await signAndExecuteSuiTx(this.client, wallet, unsignedTx, this.logger)
+
     // Return the transaction as a ChainTransaction
-    return this.getExecutionReceiptInTx(await this.getTransaction(result.digest))
+    return this.getExecutionReceiptInTx(await this.getTransaction(digest))
   }
 
   /**
