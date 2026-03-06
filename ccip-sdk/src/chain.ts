@@ -6,6 +6,7 @@ import type { UnsignedAptosTx } from './aptos/types.ts'
 import { getOnchainCommitReport } from './commits.ts'
 import {
   CCIPApiClientNotAvailableError,
+  CCIPArgumentInvalidError,
   CCIPChainFamilyMismatchError,
   CCIPExecTxRevertedError,
   CCIPNotImplementedError,
@@ -51,8 +52,12 @@ import {
 } from './types.ts'
 import { networkInfo, util, withRetry } from './utils.ts'
 
-/** Field names unique to GenericExtraArgsV3 (not present in V2). */
-const V3_ONLY_FIELDS = [
+/** All valid field names for GenericExtraArgsV2. */
+const V2_FIELDS = new Set(['gasLimit', 'allowOutOfOrderExecution'])
+
+/** All valid field names for GenericExtraArgsV3. */
+const V3_FIELDS = new Set([
+  'gasLimit',
   'blockConfirmations',
   'ccvs',
   'ccvArgs',
@@ -60,12 +65,26 @@ const V3_ONLY_FIELDS = [
   'executorArgs',
   'tokenReceiver',
   'tokenArgs',
-] as const
+])
 
-/** Check if extraArgs contains any V3-only fields. */
+/** Throw if any key in extraArgs is not in the allowed set. */
+function assertNoUnknownFields(
+  extraArgs: Partial<ExtraArgs>,
+  allowed: Set<string>,
+  variant: string,
+): void {
+  const unknown = Object.keys(extraArgs).filter((k) => !allowed.has(k))
+  if (unknown.length)
+    throw new CCIPArgumentInvalidError(
+      'extraArgs',
+      `unknown field(s) for ${variant}: ${unknown.map((k) => JSON.stringify(k)).join(', ')}`,
+    )
+}
+
+/** Check if extraArgs contains any V3-only fields (i.e. fields in V3 but not in V2). */
 function hasV3ExtraArgs(extraArgs: Partial<ExtraArgs> | undefined): boolean {
   if (!extraArgs) return false
-  return V3_ONLY_FIELDS.some((field) => field in extraArgs)
+  return Object.keys(extraArgs).some((k) => V3_FIELDS.has(k) && !V2_FIELDS.has(k))
 }
 
 /**
@@ -1409,6 +1428,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
     // Detect if user wants V3 by checking for any V3-only field
     if (hasV3ExtraArgs(message.extraArgs)) {
+      if (message.extraArgs)
+        assertNoUnknownFields(message.extraArgs, V3_FIELDS, 'GenericExtraArgsV3')
       // V3 defaults (GenericExtraArgsV3)
       return {
         ...message,
@@ -1426,6 +1447,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       }
     }
 
+    if (message.extraArgs) assertNoUnknownFields(message.extraArgs, V2_FIELDS, 'EVMExtraArgsV2')
     // Default to V2 (GenericExtraArgsV2, aka EVMExtraArgsV2)
     return {
       ...message,

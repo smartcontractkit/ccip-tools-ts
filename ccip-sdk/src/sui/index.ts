@@ -25,6 +25,7 @@ import {
   getReceiverModule,
 } from './objects.ts'
 import {
+  CCIPArgumentInvalidError,
   CCIPContractNotRouterError,
   CCIPDataFormatUnsupportedError,
   CCIPError,
@@ -881,6 +882,22 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   static override buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
   ): AnyMessage & { extraArgs: SuiExtraArgsV1 } {
+    /** Valid field names for SuiExtraArgsV1, including recognised aliases. */
+    const SUI_EXTRA_ARGS_FIELDS = new Set([
+      'gasLimit',
+      'allowOutOfOrderExecution',
+      'tokenReceiver',
+      'receiverObjectIds',
+      'accounts', // alias for receiverObjectIds
+    ])
+    if (message.extraArgs) {
+      const unknown = Object.keys(message.extraArgs).filter((k) => !SUI_EXTRA_ARGS_FIELDS.has(k))
+      if (unknown.length)
+        throw new CCIPArgumentInvalidError(
+          'extraArgs',
+          `unknown field(s) for SuiExtraArgsV1: ${unknown.map((k) => JSON.stringify(k)).join(', ')}`,
+        )
+    }
     const gasLimit =
       message.extraArgs && 'gasLimit' in message.extraArgs && message.extraArgs.gasLimit != null
         ? message.extraArgs.gasLimit
