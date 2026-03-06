@@ -42,13 +42,13 @@ import {
   CCIPContractNotRouterError,
   CCIPContractTypeInvalidError,
   CCIPDataFormatUnsupportedError,
+  CCIPError,
   CCIPExecTxNotConfirmedError,
   CCIPExecTxRevertedError,
   CCIPHasherVersionUnsupportedError,
   CCIPLogDataInvalidError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
-  CCIPTokenNotFoundError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
   CCIPVersionFeatureUnavailableError,
@@ -129,27 +129,6 @@ type RateLimiterBucket = { tokens: bigint; isEnabled: boolean; capacity: bigint;
 /** Converts an on-chain bucket to the public RateLimiterState, stripping `isEnabled`. */
 function toRateLimiterState(b: RateLimiterBucket): RateLimiterState {
   return b.isEnabled ? { tokens: b.tokens, capacity: b.capacity, rate: b.rate } : null
-}
-
-/**
- * Query the MIN_BLOCK_CONFIRMATIONS feature from a token pool.
- * @returns min block confirmations value, or undefined if FTF is not applicable
- */
-async function getMinBlockConfirmationsFeature(
-  version: string,
-  poolContract: TypedContract<typeof TokenPool_2_0_ABI> | null,
-): Promise<number | undefined> {
-  // FTF only exists on V2_0+
-  if (version < CCIPVersion.V2_0) return undefined
-  // No pool (no token transfer) → FTF supported, default 1 confirmation
-  if (!poolContract) return 1
-  // Query token pool; older pools may not support this function
-  try {
-    return Number(await poolContract.getMinBlockConfirmations())
-  } catch (err) {
-    if (isError(err, 'CALL_EXCEPTION')) return 0
-    throw err
-  }
 }
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
@@ -652,56 +631,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Resolve a token to its pool contract for a given destination chain.
-   * @returns v2 or legacy pool contract, with the other set to null
-   */
-  private async getTokenPoolForDest(
-    onRamp: string,
-    destChainSelector: bigint,
-    token: string,
-    version: string,
-  ): Promise<{
-    poolV2: TypedContract<typeof TokenPool_2_0_ABI> | null
-    poolLegacy: TypedContract<typeof TokenPool_ABI> | null
-  }> {
-    // All OnRamp versions share the same getPoolBySourceToken(uint64, address) signature
-    const onRampContract = new Contract(
-      onRamp,
-      interfaces.OnRamp_v2_0,
-      this.provider,
-    ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
-    const tokenPool = (await onRampContract.getPoolBySourceToken(
-      destChainSelector,
-      token,
-    )) as string
-
-    if (!tokenPool || tokenPool === ZeroAddress)
-      throw new CCIPTokenNotFoundError(token, {
-        context: { destChainSelector: String(destChainSelector) },
-        recovery: 'Verify the token is supported on this lane',
-      })
-
-    if (version >= CCIPVersion.V2_0) {
-      return {
-        poolV2: new Contract(
-          tokenPool,
-          interfaces.TokenPool_v2_0,
-          this.provider,
-        ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>,
-        poolLegacy: null,
-      }
-    }
-    return {
-      poolV2: null,
-      poolLegacy: new Contract(
-        tokenPool,
-        interfaces.TokenPool_v1_6,
-        this.provider,
-      ) as unknown as TypedContract<typeof TokenPool_ABI>,
-    }
-  }
-
-  /**
    * {@inheritDoc Chain.getLaneFeatures}
    */
   override async getLaneFeatures(opts: {
@@ -712,50 +641,29 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
     const [, version] = await this.typeAndVersion(onRamp)
 
-    const { poolV2, poolLegacy } = opts.token
-      ? await this.getTokenPoolForDest(onRamp, opts.destChainSelector, opts.token, version)
-      : { poolV2: null, poolLegacy: null }
-
     const result: Partial<LaneFeatures> = {}
 
+    // default FTF value for V2_0+ lanes if no token/pool or pool doesn't specify
+    if (version >= CCIPVersion.V2_0) result[LaneFeature.MIN_BLOCK_CONFIRMATIONS] = 1
+
     // MIN_BLOCK_CONFIRMATIONS — V2_0+ only
-    const minBlocks = await getMinBlockConfirmationsFeature(version, poolV2)
-    if (minBlocks != null) result[LaneFeature.MIN_BLOCK_CONFIRMATIONS] = minBlocks
+    if (opts.token) {
+      const { tokenPool } = await this.getRegistryTokenConfig(
+        await this.getTokenAdminRegistryFor(onRamp),
+        opts.token,
+      )
+      if (tokenPool) {
+        const { minBlockConfirmations } = await this.getTokenPoolConfig(tokenPool)
+        if (minBlockConfirmations != null)
+          result[LaneFeature.MIN_BLOCK_CONFIRMATIONS] = minBlockConfirmations
 
-    // Rate limits — V2_0+, requires token/pool
-    if (poolV2) {
-      try {
-        const { outboundRateLimiterState: outbound } = resultToObject(
-          await poolV2.getCurrentRateLimiterState(opts.destChainSelector, false),
-        ) as unknown as { outboundRateLimiterState: RateLimiterBucket }
-        result[LaneFeature.RATE_LIMITS] = toRateLimiterState(outbound)
-
-        // Custom finality rate limits only when FTF is enabled
-        if (minBlocks != null && minBlocks > 0) {
-          const { outboundRateLimiterState: customOutbound } = resultToObject(
-            await poolV2.getCurrentRateLimiterState(opts.destChainSelector, true),
-          ) as unknown as { outboundRateLimiterState: RateLimiterBucket }
-          result[LaneFeature.CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS] =
-            toRateLimiterState(customOutbound)
+        const remote = await this.getTokenPoolRemote(tokenPool, opts.destChainSelector)
+        result[LaneFeature.RATE_LIMITS] = remote.outboundRateLimiterState
+        if (minBlockConfirmations && 'customBlockConfirmationsOutboundRateLimiterState' in remote) {
+          result[LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS] =
+            remote.customBlockConfirmationsOutboundRateLimiterState
         }
-      } catch (err) {
-        if (!isError(err, 'CALL_EXCEPTION')) throw err
-        // Older pools may not support getCurrentRateLimiterState; omit rate limit keys
       }
-    }
-
-    // Rate limits — legacy pools (v1.2–v1.6)
-    if (poolLegacy) {
-      try {
-        const outbound = resultToObject(
-          await poolLegacy.getCurrentOutboundRateLimiterState(opts.destChainSelector),
-        ) as unknown as RateLimiterBucket
-        result[LaneFeature.RATE_LIMITS] = toRateLimiterState(outbound)
-      } catch (err) {
-        if (!isError(err, 'CALL_EXCEPTION')) throw err
-        // Pool may not support rate limiter query; omit rate limit key
-      }
-      // No CUSTOM_MIN_BLOCK_CONFIRMATIONS_RATE_LIMITS — FTF doesn't exist on legacy lanes
     }
 
     return result
@@ -1023,11 +931,22 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ? type.includes('OnRamp')
           ? interfaces.EVM2EVMOnRamp_v1_5
           : interfaces.EVM2EVMOffRamp_v1_5
-        : type.includes('OnRamp')
-          ? interfaces.OnRamp_v1_6
-          : interfaces.OffRamp_v1_6,
+        : version < CCIPVersion.V2_0
+          ? type.includes('OnRamp')
+            ? interfaces.OnRamp_v1_6
+            : interfaces.OffRamp_v1_6
+          : type.includes('OnRamp')
+            ? interfaces.OnRamp_v2_0
+            : interfaces.OffRamp_v2_0,
       this.provider,
-    ) as unknown as TypedContract<typeof OnRamp_1_6_ABI | typeof OffRamp_1_6_ABI>
+    ) as unknown as TypedContract<
+      | typeof EVM2EVMOnRamp_1_5_ABI
+      | typeof EVM2EVMOffRamp_1_5_ABI
+      | typeof OnRamp_1_6_ABI
+      | typeof OffRamp_1_6_ABI
+      | typeof OnRamp_2_0_ABI
+      | typeof OffRamp_2_0_ABI
+    >
     const { tokenAdminRegistry } = await contract.getStaticConfig()
     return tokenAdminRegistry as string
   }
@@ -1488,24 +1407,44 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     token: string
     router: string
     typeAndVersion: string
+    minBlockConfirmations?: number
   }> {
-    const [_, , typeAndVersion] = await this.typeAndVersion(tokenPool)
+    const [_, version, typeAndVersion] = await this.typeAndVersion(tokenPool)
 
-    const contract = new Contract(
-      tokenPool,
-      interfaces.TokenPool_v1_6,
-      this.provider,
-    ) as unknown as TypedContract<typeof TokenPool_ABI>
-
+    let contract, router, minBlockConfirmations
+    if (version < CCIPVersion.V2_0) {
+      contract = new Contract(
+        tokenPool,
+        interfaces.TokenPool_v1_6,
+        this.provider,
+      ) as unknown as TypedContract<typeof TokenPool_ABI>
+      router = contract.getRouter()
+    } else {
+      contract = new Contract(
+        tokenPool,
+        interfaces.TokenPool_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
+      router = contract.getDynamicConfig().then(([router]) => router)
+      minBlockConfirmations = contract.getMinBlockConfirmations().catch((err) => {
+        if (isError(err, 'CALL_EXCEPTION')) return 0
+        throw CCIPError.from(err)
+      })
+    }
     const token = contract.getToken()
-    const router = contract.getRouter()
-    return Promise.all([token, router]).then(([token, router]) => {
-      return {
-        token: token as string,
-        router: router as string,
-        typeAndVersion,
-      }
-    })
+
+    return Promise.all([token, router, minBlockConfirmations]).then(
+      ([token, router, minBlockConfirmations]) => {
+        return {
+          token: token as CleanAddressable<typeof token>,
+          router: router as CleanAddressable<typeof router>,
+          typeAndVersion,
+          ...(minBlockConfirmations != null && {
+            minBlockConfirmations: Number(minBlockConfirmations),
+          }),
+        }
+      },
+    )
   }
 
   /** {@inheritDoc Chain.getTokenPoolRemotes} */
@@ -1519,53 +1458,93 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (remoteChainSelector) supportedChains = Promise.resolve([networkInfo(remoteChainSelector)])
 
     let remotePools: Promise<string[][]>
-    let contract
+    let remoteInfo
     if (version < '1.5.1') {
-      const contract_ = new Contract(
+      const contract = new Contract(
         tokenPool,
         interfaces.TokenPool_v1_5,
         this.provider,
       ) as unknown as TypedContract<typeof TokenPool_1_5_ABI>
-      contract = contract_
       supportedChains ??= contract.getSupportedChains().then((chains) => chains.map(networkInfo))
       remotePools = supportedChains.then((chains) =>
         Promise.all(
           chains.map((chain) =>
-            contract_
+            contract
               .getRemotePool(chain.chainSelector)
               .then((remotePool) => [decodeAddress(remotePool, chain.family)]),
           ),
         ),
       )
-    } else {
-      const contract_ = new Contract(
+      remoteInfo = supportedChains.then((chains) =>
+        Promise.all(
+          chains.map((chain) =>
+            Promise.all([
+              contract.getRemoteToken(chain.chainSelector),
+              resultToObject(contract.getCurrentOutboundRateLimiterState(chain.chainSelector)),
+              resultToObject(contract.getCurrentInboundRateLimiterState(chain.chainSelector)),
+            ] as const),
+          ),
+        ),
+      )
+    } else if (version < CCIPVersion.V2_0) {
+      const contract = new Contract(
         tokenPool,
         interfaces.TokenPool_v1_6,
         this.provider,
       ) as unknown as TypedContract<typeof TokenPool_ABI>
-      contract = contract_
       supportedChains ??= contract.getSupportedChains().then((chains) => chains.map(networkInfo))
       remotePools = supportedChains.then((chains) =>
         Promise.all(
           chains.map((chain) =>
-            contract_
+            contract
               .getRemotePools(chain.chainSelector)
               .then((pools) => pools.map((remotePool) => decodeAddress(remotePool, chain.family))),
           ),
         ),
       )
-    }
-    const remoteInfo = supportedChains.then((chains) =>
-      Promise.all(
-        chains.map((chain) =>
-          Promise.all([
-            contract.getRemoteToken(chain.chainSelector),
-            resultToObject(contract.getCurrentInboundRateLimiterState(chain.chainSelector)),
-            resultToObject(contract.getCurrentOutboundRateLimiterState(chain.chainSelector)),
-          ] as const),
+      remoteInfo = supportedChains.then((chains) =>
+        Promise.all(
+          chains.map((chain) =>
+            Promise.all([
+              contract.getRemoteToken(chain.chainSelector),
+              resultToObject(contract.getCurrentOutboundRateLimiterState(chain.chainSelector)),
+              resultToObject(contract.getCurrentInboundRateLimiterState(chain.chainSelector)),
+            ] as const),
+          ),
         ),
-      ),
-    )
+      )
+    } else {
+      const contract = new Contract(
+        tokenPool,
+        interfaces.TokenPool_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
+      supportedChains ??= contract.getSupportedChains().then((chains) => chains.map(networkInfo))
+      remotePools = supportedChains.then((chains) =>
+        Promise.all(
+          chains.map((chain) =>
+            contract
+              .getRemotePools(chain.chainSelector)
+              .then((pools) => pools.map((remotePool) => decodeAddress(remotePool, chain.family))),
+          ),
+        ),
+      )
+      remoteInfo = supportedChains.then((chains) =>
+        Promise.all(
+          chains.map((chain) =>
+            Promise.all([
+              contract.getRemoteToken(chain.chainSelector),
+              contract.getCurrentRateLimiterState(chain.chainSelector, false),
+              contract.getCurrentRateLimiterState(chain.chainSelector, true),
+            ] as const).then(
+              ([remoteToken, [outbound, inbound], [customOutbound, customInbound]]) => {
+                return [remoteToken, outbound, inbound, customOutbound, customInbound] as const
+              },
+            ),
+          ),
+        ),
+      )
+    }
     return Promise.all([supportedChains, remotePools, remoteInfo]).then(
       ([supportedChains, remotePools, remoteInfo]) =>
         Object.fromEntries(
@@ -1578,8 +1557,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
               {
                 remoteToken: decodeAddress(remoteTokenRaw, chain.family),
                 remotePools: remotePools[i]!.map((pool) => decodeAddress(pool, chain.family)),
-                inboundRateLimiterState: toRateLimiterState(remoteInfo[i]![1]),
-                outboundRateLimiterState: toRateLimiterState(remoteInfo[i]![2]),
+                outboundRateLimiterState: toRateLimiterState(remoteInfo[i]![1]),
+                inboundRateLimiterState: toRateLimiterState(remoteInfo[i]![2]),
+                ...(remoteInfo[i]!.length === 5 && {
+                  customBlockConfirmationsOutboundRateLimiterState: toRateLimiterState(
+                    remoteInfo[i]![3],
+                  ),
+                  customBlockConfirmationsInboundRateLimiterState: toRateLimiterState(
+                    remoteInfo[i]![4],
+                  ),
+                }),
               },
             ] as const
           }),
