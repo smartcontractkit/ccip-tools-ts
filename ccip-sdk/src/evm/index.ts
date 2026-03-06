@@ -15,6 +15,7 @@ import {
   getAddress,
   hexlify,
   isBytesLike,
+  isError,
   isHexString,
   keccak256,
   toBeHex,
@@ -41,6 +42,7 @@ import {
   CCIPContractNotRouterError,
   CCIPContractTypeInvalidError,
   CCIPDataFormatUnsupportedError,
+  CCIPError,
   CCIPExecTxNotConfirmedError,
   CCIPExecTxRevertedError,
   CCIPHasherVersionUnsupportedError,
@@ -1424,7 +1426,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         this.provider,
       ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
       router = contract.getDynamicConfig().then(([router]) => router)
-      minBlockConfirmations = contract.getMinBlockConfirmations().catch(() => 0)
+      minBlockConfirmations = contract.getMinBlockConfirmations().catch((err) => {
+        if (isError(err, 'CALL_EXCEPTION')) return 0
+        throw CCIPError.from(err)
+      })
     }
     const token = contract.getToken()
 
