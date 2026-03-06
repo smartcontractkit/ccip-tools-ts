@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-sdk",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "SDK/Library to interact with CCIP",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -59,7 +59,7 @@
     "@depay/web3-mock": "^15.3.0",
     "@eslint/js": "^9.39.3",
     "@types/bn.js": "^5.2.0",
-    "@types/node": "25.3.0",
+    "@types/node": "25.3.5",
     "@types/yargs": "17.0.35",
     "eslint": "^9.39.3",
     "eslint-config-prettier": "10.1.8",
@@ -67,13 +67,13 @@
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-jsdoc": "^62.7.1",
     "eslint-plugin-prettier": "^5.5.5",
-    "eslint-plugin-tsdoc": "^0.5.1",
+    "eslint-plugin-tsdoc": "^0.5.2",
     "ethers-abitype": "1.0.3",
     "prettier": "^3.8.1",
     "prool": "^0.0.17",
     "typescript": "5.9.3",
     "typescript-eslint": "8.56.1",
-    "viem": "^2.46.3"
+    "viem": "^2.47.0"
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^5.2.1",
@@ -98,6 +98,6 @@
   },
   "overrides": {
     "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
-    "axios": "^1.13.2"
+    "axios": "^1.13.5"
   }
 }
