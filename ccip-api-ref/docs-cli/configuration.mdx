@@ -70,11 +70,13 @@ The CLI supports environment variables for configuration. Command-line flags ove
 
 ### Wallet Configuration
 
+The CLI checks these environment variables in order: `PRIVATE_KEY`, `USER_KEY`, `OWNER_KEY`.
+
 | Variable            | Description                            |
 | ------------------- | -------------------------------------- |
-| `USER_KEY`          | Private key (EVM: hex, Solana: base58) |
-| `PRIVATE_KEY`       | Alias for `USER_KEY`                   |
-| `OWNER_KEY`         | Alias for `USER_KEY`                   |
+| `PRIVATE_KEY`       | Private key (EVM: hex, Solana: base58) |
+| `USER_KEY`          | Alias for `PRIVATE_KEY`                |
+| `OWNER_KEY`         | Alias for `PRIVATE_KEY`                |
 | `USER_KEY_PASSWORD` | Password for encrypted JSON keystore   |
 
 ### Output Preferences
@@ -83,7 +85,7 @@ The CLI supports environment variables for configuration. Command-line flags ove
 | -------------- | --------------------------------------------------------------------------- | ----------------------------- |
 | `CCIP_FORMAT`  | Output format (`pretty`, `log`, `json`)                                     | `pretty`                      |
 | `CCIP_VERBOSE` | Enable debug logging (`true`/`false`)                                       | `false`                       |
-| `CCIP_PAGE`    | Pagination size for `getLogs` queries                                       | `10000`                       |
+| `CCIP_PAGE`    | Pagination size for `getLogs` queries                                       | -                             |
 | `CCIP_API`     | CCIP API endpoint URL, or `false` to disable API calls (decentralized mode) | `https://api.ccip.chain.link` |
 
 **Example .env file:**
@@ -112,7 +114,7 @@ Commands that send transactions require a wallet. The CLI checks these sources i
 
 ### Auto-Detection
 
-If `--wallet` is omitted, the CLI automatically looks for `PRIVATE_KEY=`, `USER_KEY=`, or `OWNER_KEY=` in your `--rpcs-file` (default: `./.env`):
+If `--wallet` is omitted, the CLI checks environment variables first (`PRIVATE_KEY`, `USER_KEY`, `OWNER_KEY` in that order), then falls back to scanning your `--rpcs-file` (default: `./.env`):
 
 ```bash
 # .env file
@@ -172,15 +174,16 @@ These options are available on all commands:
 
 ## Network Identifiers
 
-Networks can be specified by name or chain ID. The CLI uses [chain-selectors](https://github.com/smartcontractkit/chain-selectors) for resolution.
+Networks can be specified by name, chain ID, or CCIP chain selector. The CLI uses [chain-selectors](https://github.com/smartcontractkit/chain-selectors) for resolution.
 
-| Chain Family | Identifier Format | Example                                        |
-| ------------ | ----------------- | ---------------------------------------------- |
-| EVM          | Numeric chain ID  | `1` (Ethereum), `11155111` (Sepolia)           |
-| EVM          | Network name      | `ethereum-mainnet`, `ethereum-testnet-sepolia` |
-| Solana       | Genesis hash      | `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d` |
-| Aptos        | Prefixed chain ID | `aptos:1` (mainnet), `aptos:2` (testnet)       |
-| Sui          | Prefixed chain ID | `sui:1`                                        |
+| Chain Family | Identifier Format   | Example                                        |
+| ------------ | ------------------- | ---------------------------------------------- |
+| All          | CCIP chain selector | `16015286601757825753` (Sepolia)               |
+| All          | Network name        | `ethereum-mainnet`, `ethereum-testnet-sepolia` |
+| EVM          | Numeric chain ID    | `1` (Ethereum), `11155111` (Sepolia)           |
+| Solana       | Genesis hash        | `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d` |
+| Aptos        | Prefixed chain ID   | `aptos:1` (mainnet), `aptos:2` (testnet)       |
+| Sui          | Prefixed chain ID   | `sui:1`                                        |
 
 ## See Also
 

@@ -68,7 +68,7 @@ const V3_FIELDS = new Set([
   'tokenArgs',
 ])
 
-/** Throw if any key in extraArgs is not in the allowed set. */
+/** Throw {@link CCIPArgumentInvalidError} if any key in extraArgs is not in the allowed set. */
 function assertNoUnknownFields(
   extraArgs: Partial<ExtraArgs>,
   allowed: Set<string>,
@@ -201,7 +201,7 @@ export type TokenInfo = {
  */
 export const LaneFeature = {
   /**
-   * Minimum block confirmations for Faster Time to Finality (FTF).
+   * Minimum block confirmations for Faster-Than-Finality (FTF).
    * - **absent**: the lane does not support FTF (pre-v2.0 lane).
    * - **0**: the lane supports FTF, but it is not enabled for this
    *   token (e.g. the token pool predates FTF, or FTF is configured
@@ -285,6 +285,11 @@ export type RateLimiterState = {
  * @remarks
  * Each entry represents the configuration needed to transfer tokens
  * from the current chain to a specific destination chain.
+ *
+ * The `customBlockConfirmationsOutboundRateLimiterState` and
+ * `customBlockConfirmationsInboundRateLimiterState` fields are present only for
+ * TokenPool v2.0+ contracts. These provide separate rate limits applied when
+ * Faster-Than-Finality (FTF) custom block confirmations are used.
  */
 export type TokenPoolRemote = {
   /** Address of the remote token on the destination chain. */
@@ -333,7 +338,7 @@ export type TokenPoolConfig = {
    */
   typeAndVersion?: string
   /**
-   * Min custom block confirmations for Faster Time to Finality (FTF),
+   * Min custom block confirmations for Faster-Than-Finality (FTF),
    * if TokenPool version \>= v2.0.0 and FTF is supported on this lane.
    * `0` indicates FTF is supported but not enabled for this token; `>0` indicates FTF is enabled
    *  with this many minimum confirmations.
@@ -396,7 +401,7 @@ export type ExecuteOpts = (
   | {
       /**
        * messageId of message to execute; requires `apiClient`.
-       * @remarks Currently throws CCIPNotImplementedError - API endpoint pending.
+       * The SDK will fetch execution inputs (offRamp, proofs/verifications) from the CCIP API.
        */
       messageId: string
     }
@@ -1056,21 +1061,24 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Execute messages in report in an offRamp.
    *
-   * @param opts - {@link ExecuteOpts} with chain-specific wallet to sign and send tx
-   * @returns Promise resolving to transaction of the execution
+   * @param opts - {@link ExecuteOpts} with chain-specific wallet to sign and send tx.
+   * @returns Promise resolving to transaction of the execution.
    *
-   * @throws {@link CCIPWalletNotSignerError} if wallet is not a valid signer
-   * @throws {@link CCIPExecTxRevertedError} if execution transaction reverts
-   * @throws {@link CCIPMerkleRootMismatchError} if merkle proof is invalid
+   * @throws {@link CCIPWalletNotSignerError} if wallet is not a valid signer.
+   * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm.
+   * @throws {@link CCIPExecTxRevertedError} if execution transaction reverts.
+   * @throws {@link CCIPMerkleRootMismatchError} if merkle proof is invalid.
    *
-   * @example Manual execution of pending message
+   * @example Manual execution using message ID (simplified, requires API)
+   * ```typescript
+   * const receipt = await dest.execute({ messageId: '0x...', wallet })
+   * ```
+   *
+   * @example Manual execution using transaction hash
    * ```typescript
    * const input = await source.getExecutionInput({ request, verifications })
    * const receipt = await dest.execute({ offRamp, input, wallet })
-   * console.log(`Executed: ${receipt.log.transactionHash}`)
    * ```
-   * @throws {@link CCIPWalletNotSignerError} if wallet cannot sign transactions
-   * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm
    */
   abstract execute(
     opts: ExecuteOpts & {
@@ -1438,8 +1446,15 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Returns a copy of a message, populating missing fields like `extraArgs` with defaults.
    * It's expected to return a message suitable at least for basic token transfers.
    *
-   * @param message - AnyMessage (from source), containing at least `receiver`
-   * @returns A message suitable for `sendMessage` to this destination chain family
+   * @param message - AnyMessage (from source), containing at least `receiver`.
+   * @returns A message suitable for `sendMessage` to this destination chain family.
+   *
+   * @remarks
+   * V3 (GenericExtraArgsV3) is auto-detected when any V3-only field is present
+   * (e.g. `blockConfirmations`, `ccvs`, `ccvArgs`, `executor`, `executorArgs`,
+   * `tokenReceiver`, `tokenArgs`). Otherwise defaults to V2 (EVMExtraArgsV2).
+   *
+   * @throws {@link CCIPArgumentInvalidError} if extraArgs contains unknown fields for the detected version.
    */
   static buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],

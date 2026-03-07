@@ -3,7 +3,7 @@ id: multi-chain
 title: 'Multi-Chain'
 description: 'Work with EVM, Solana, Aptos, Sui, and TON chains using the unified SDK interface.'
 sidebar_label: Multi-Chain
-sidebar_position: 4
+sidebar_position: 6
 ---
 
 import Tabs from '@theme/Tabs'
@@ -11,15 +11,23 @@ import TabItem from '@theme/TabItem'
 
 # Multi-Chain
 
+The SDK provides a unified `Chain` interface across all supported blockchain families. This guide covers connecting to each chain, cross-family messaging, and chain-specific details.
+
+For EVM-only usage, see [Sending Messages](/sdk/guides/sending-messages) and [Tracking Messages](/sdk/guides/tracking-messages) — they cover the full workflow without multi-chain considerations.
+
 ## Supported Chains
 
-| Chain Class | Family | Networks |
-|-------------|--------|----------|
-| `EVMChain` | EVM | Ethereum, Arbitrum, Optimism, Avalanche, Base, Polygon, BSC |
-| `SolanaChain` | Solana | Solana Mainnet, Devnet |
-| `AptosChain` | Aptos | Aptos Mainnet, Testnet |
-| `SuiChain` | Sui | Sui Mainnet, Testnet |
-| `TONChain` | TON | TON Mainnet, Testnet |
+| Chain Class | Family | Wallet Type | Send | Execute | Token Pools |
+|-------------|--------|-------------|------|---------|-------------|
+| `EVMChain` | EVM | ethers `Signer` or `viemWallet(client)` | Yes | Yes | Yes |
+| `SolanaChain` | Solana | Anchor-compatible `Wallet` | Yes | Yes | Yes |
+| `AptosChain` | Aptos | `AptosAsyncAccount` | Yes | Yes | Yes |
+| `SuiChain` | Sui | `Keypair` | No | Yes | No |
+| `TONChain` | TON | `TONWallet` | Yes | Yes | No |
+
+:::note
+**Sui is execution-only** — it can execute incoming messages but cannot send cross-chain messages. Token pool queries are not implemented on Sui or TON.
+:::
 
 ## Connecting
 
@@ -29,16 +37,7 @@ import TabItem from '@theme/TabItem'
 ```typescript
 import { EVMChain } from '@chainlink/ccip-sdk'
 
-// From RPC URL
-const ethereum = await EVMChain.fromUrl('https://rpc.sepolia.org')
-const arbitrum = await EVMChain.fromUrl('https://sepolia-rollup.arbitrum.io/rpc')
-
-// With custom logger
-const chain = await EVMChain.fromUrl(
-  'https://rpc.sepolia.org',
-  { logger: console }
-)
-
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
 console.log('Connected to:', chain.network.name)
 console.log('Chain selector:', chain.network.chainSelector)
 ```
@@ -49,15 +48,7 @@ console.log('Chain selector:', chain.network.chainSelector)
 ```typescript
 import { SolanaChain } from '@chainlink/ccip-sdk'
 
-// From RPC URL
-const solana = await SolanaChain.fromUrl('https://api.devnet.solana.com')
-
-// With custom logger
-const chain = await SolanaChain.fromUrl(
-  'https://api.devnet.solana.com',
-  { logger: console }
-)
-
+const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
 console.log('Connected to:', chain.network.name)
 ```
 
@@ -67,161 +58,147 @@ console.log('Connected to:', chain.network.name)
 ```typescript
 import { AptosChain } from '@chainlink/ccip-sdk'
 
-// From RPC URL
-const aptos = await AptosChain.fromUrl('https://fullnode.testnet.aptoslabs.com/v1')
+const chain = await AptosChain.fromUrl('https://fullnode.testnet.aptoslabs.com/v1')
+console.log('Connected to:', chain.network.name)
+```
 
-console.log('Connected to:', aptos.network.name)
+</TabItem>
+<TabItem value="ton" label="TON">
+
+```typescript
+import { TONChain } from '@chainlink/ccip-sdk'
+
+const chain = await TONChain.fromUrl('https://toncenter.com/api/v2/jsonRPC')
+console.log('Connected to:', chain.network.name)
 ```
 
 </TabItem>
 </Tabs>
 
-## Unified Interface
-
-All chain classes implement the `Chain` interface for chain-agnostic code:
+All chains accept the same `ChainContext` options:
 
 ```typescript
-import { type Chain, EVMChain, SolanaChain } from '@chainlink/ccip-sdk'
+const chain = await EVMChain.fromUrl('https://rpc.sepolia.org', {
+  logger: console,        // Custom logger
+  apiClient: null,         // Disable CCIP API (RPC-only mode)
+})
+```
 
-async function trackMessage(chain: Chain, txHash: string) {
-  const requests = await chain.getMessagesInTx(txHash)
-  return requests
+## Unified Interface
+
+All chain classes implement the `Chain` interface, so you can write chain-agnostic code:
+
+```typescript
+import {
+  type Chain,
+  EVMChain,
+  SolanaChain,
+  AptosChain,
+  networkInfo,
+  ChainFamily,
+} from '@chainlink/ccip-sdk'
+
+function createChain(rpcUrl: string, family: ChainFamily): Promise<Chain> {
+  switch (family) {
+    case ChainFamily.EVM:
+      return EVMChain.fromUrl(rpcUrl)
+    case ChainFamily.Solana:
+      return SolanaChain.fromUrl(rpcUrl)
+    case ChainFamily.Aptos:
+      return AptosChain.fromUrl(rpcUrl)
+    default:
+      throw new Error(`Unsupported family: ${family}`)
+  }
 }
 
-// Use with EVM
-const evmChain = await EVMChain.fromUrl('https://rpc.sepolia.org')
-const evmRequests = await trackMessage(evmChain, '0x1234...')
-
-// Use with Solana
-const solanaChain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
-const solanaRequests = await trackMessage(solanaChain, 'base58signature...')
+// Works with any chain
+async function getMessages(chain: Chain, txHash: string) {
+  const requests = await chain.getMessagesInTx(txHash)
+  for (const req of requests) {
+    console.log('Message ID:', req.message.messageId)
+  }
+  return requests
+}
 ```
 
 ## Cross-Chain Token Transfers
 
-For token-only transfers (no data), the SDK abstracts away all chain-specific complexity. You only need `receiver` and `tokenAmounts` — the SDK auto-populates `extraArgs` with sensible defaults for every destination chain:
-
-<Tabs>
-<TabItem value="evm-evm" label="EVM → EVM">
+For token-only transfers (no `data`), the SDK auto-populates `extraArgs` with sensible defaults for the destination chain. You only need `receiver` and `tokenAmounts`:
 
 ```typescript
 import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
+import { parseUnits } from 'viem'
 
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
 const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
-const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+
+// Same code works regardless of destination chain family
+const destSelector = networkInfo('solana-devnet').chainSelector // or 'avalanche-testnet-fuji', 'aptos-testnet'
+
+const tokenInfo = await source.getTokenInfo(tokenAddress)
+const amount = parseUnits('10', tokenInfo.decimals)
 
 const message = {
-  receiver: '0xRecipientAddress...',
-  tokenAmounts: [{ token: LINK_TOKEN, amount: 1000000000000000000n }],
+  receiver: 'RecipientAddressOnDestChain...',
+  tokenAmounts: [{ token: tokenAddress, amount }],
 }
 
 const fee = await source.getFee({ router, destChainSelector: destSelector, message })
 await source.sendMessage({
-  router, destChainSelector: destSelector,
-  message: { ...message, fee },
+  router,
+  destChainSelector: destSelector,
+  message,
   wallet,
 })
 ```
 
-</TabItem>
-<TabItem value="evm-solana" label="EVM → Solana">
-
-```typescript
-import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
-
-const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
-const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
-const destSelector = networkInfo('solana-devnet').chainSelector
-
-const message = {
-  receiver: 'SolanaRecipientWalletAddress...', // Solana wallet address
-  tokenAmounts: [{ token: LINK_TOKEN, amount: 1000000000000000000n }],
-}
-
-const fee = await source.getFee({ router, destChainSelector: destSelector, message })
-await source.sendMessage({
-  router, destChainSelector: destSelector,
-  message: { ...message, fee },
-  wallet,
-})
-```
-
-</TabItem>
-<TabItem value="evm-aptos" label="EVM → Aptos">
-
-```typescript
-import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
-
-const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
-const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
-const destSelector = networkInfo('aptos-testnet').chainSelector
-
-const message = {
-  receiver: '0xAptosRecipientAddress...', // Aptos account address
-  tokenAmounts: [{ token: LINK_TOKEN, amount: 1000000000000000000n }],
-}
-
-const fee = await source.getFee({ router, destChainSelector: destSelector, message })
-await source.sendMessage({
-  router, destChainSelector: destSelector,
-  message: { ...message, fee },
-  wallet,
-})
-```
-
-</TabItem>
-</Tabs>
-
-The SDK automatically handles `computeUnits` (Solana), `gasLimit` (Aptos), `tokenReceiver`, `allowOutOfOrderExecution`, and other chain-specific fields.
+The SDK handles `computeUnits` (Solana), `gasLimit` (EVM/Aptos), `tokenReceiver`, `allowOutOfOrderExecution`, and other chain-specific fields automatically.
 
 ## Cross-Family Messaging
 
-For messages with **data** (arbitrary messaging or programmable token transfers), you need to provide chain-specific `extraArgs`. The sections below show the SDK usage. For full details on building the message structure for each chain, see the dedicated tutorials:
+For messages with **data** (arbitrary messaging or programmable token transfers), you must provide chain-specific `extraArgs`. The SDK encodes them automatically — just pass the right fields.
 
+For full details on receiver contract setup and account configuration, see the dedicated tutorials:
 - [Build CCIP messages to Solana](https://docs.chain.link/ccip/tutorials/svm/destination/build-messages)
 - [Build CCIP messages from Solana](https://docs.chain.link/ccip/tutorials/svm/source/build-messages)
 - [Build CCIP messages to Aptos](https://docs.chain.link/ccip/tutorials/aptos/destination/build-messages)
 - [Build CCIP messages from Aptos](https://docs.chain.link/ccip/tutorials/aptos/source/build-messages)
 
-### EVM to Solana
+<Tabs>
+<TabItem value="evm-to-solana" label="EVM → Solana">
 
 ```typescript
 import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
 
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const destSelector = networkInfo('solana-devnet').chainSelector
 
 const message = {
-  receiver: '...', // Solana program address
+  receiver: 'SolanaProgramAddress...',
   data: '0x1234...',
   tokenAmounts: [],
-  feeToken: '0x' + '0'.repeat(40),
   extraArgs: {
     computeUnits: 200000n,
     accountIsWritableBitmap: 0n,
     allowOutOfOrderExecution: true,
-    tokenReceiver: '',
-    accounts: [],
+    tokenReceiver: '',      // Required when sending data + tokens
+    accounts: [],            // Additional accounts the program needs
   },
 }
 
-const destSelector = networkInfo('solana-devnet').chainSelector
-const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
-const fee = await source.getFee({
-  router,
-  destChainSelector: destSelector,
-  message,
-})
+const fee = await source.getFee({ router, destChainSelector: destSelector, message })
 ```
 
-When sending **data + tokens** to Solana, `tokenReceiver` is required — it must be the Solana wallet or PDA that will receive the tokens. See [Build CCIP messages to Solana](https://docs.chain.link/ccip/tutorials/svm/destination/build-messages) for full details on `accounts`, `accountIsWritableBitmap`, and `computeUnits`.
+When sending **data + tokens**, `tokenReceiver` must be set to the Solana wallet or PDA that will receive the tokens.
 
-### Solana to EVM
+</TabItem>
+<TabItem value="solana-to-evm" label="Solana → EVM">
 
 ```typescript
 import { SolanaChain, networkInfo } from '@chainlink/ccip-sdk'
 
 const source = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+const destSelector = networkInfo('ethereum-testnet-sepolia').chainSelector
 
 const message = {
   receiver: '0xEVMReceiverAddress...',
@@ -232,47 +209,38 @@ const message = {
     allowOutOfOrderExecution: false,
   },
 }
-
-const destSelector = networkInfo('ethereum-testnet-sepolia').chainSelector
 ```
 
-See [Build CCIP messages from Solana](https://docs.chain.link/ccip/tutorials/svm/source/build-messages) for full details.
-
-### EVM to Aptos
+</TabItem>
+<TabItem value="evm-to-aptos" label="EVM → Aptos">
 
 ```typescript
 import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
 
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const destSelector = networkInfo('aptos-testnet').chainSelector
 
 const message = {
-  receiver: '0xAptosModuleAddress...', // Aptos account with ccip_receive
+  receiver: '0xAptosModuleAddress...',
   data: '0x1234...',
   tokenAmounts: [],
-  feeToken: '0x' + '0'.repeat(40),
   extraArgs: {
     gasLimit: 200000n,
     allowOutOfOrderExecution: true,
   },
 }
 
-const destSelector = networkInfo('aptos-testnet').chainSelector
-const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
-const fee = await source.getFee({
-  router,
-  destChainSelector: destSelector,
-  message,
-})
+const fee = await source.getFee({ router, destChainSelector: destSelector, message })
 ```
 
-See [Build CCIP messages to Aptos](https://docs.chain.link/ccip/tutorials/aptos/destination/build-messages) for details on receiver addressing, resource accounts, and programmable token transfers.
-
-### Aptos to EVM
+</TabItem>
+<TabItem value="aptos-to-evm" label="Aptos → EVM">
 
 ```typescript
 import { AptosChain, networkInfo } from '@chainlink/ccip-sdk'
 
 const source = await AptosChain.fromUrl('https://fullnode.testnet.aptoslabs.com/v1')
+const destSelector = networkInfo('ethereum-testnet-sepolia').chainSelector
 
 const message = {
   receiver: '0xEVMReceiverAddress...',
@@ -283,73 +251,41 @@ const message = {
     allowOutOfOrderExecution: false,
   },
 }
-
-const destSelector = networkInfo('ethereum-testnet-sepolia').chainSelector
 ```
 
-See [Build CCIP messages from Aptos](https://docs.chain.link/ccip/tutorials/aptos/source/build-messages) for full details.
+</TabItem>
+</Tabs>
 
-## Chain-Specific Notes
+## Extra Args by Destination
 
-### EVM
+The `extraArgs` fields depend on the **destination** chain family:
 
-- Full log filtering by topic and address
-- Supports block range pagination
-- Transaction receipts include gas used
+| Destination | Extra Args Type | Key Fields |
+|-------------|----------------|------------|
+| EVM | `EVMExtraArgsV1/V2/V3` | `gasLimit`, `allowOutOfOrderExecution` |
+| Solana | `SVMExtraArgsV1` | `computeUnits`, `accounts`, `accountIsWritableBitmap`, `tokenReceiver`, `allowOutOfOrderExecution` |
+| Aptos | `EVMExtraArgsV2` | `gasLimit`, `allowOutOfOrderExecution` |
+| Sui | `SuiExtraArgsV1` | `gasLimit`, `allowOutOfOrderExecution`, `tokenReceiver`, `receiverObjectIds` |
+| TON | `EVMExtraArgsV2` | `gasLimit`, `allowOutOfOrderExecution` |
 
-```typescript
-import { EVMChain } from '@chainlink/ccip-sdk'
+For token-only transfers (no `data`), you can omit `extraArgs` entirely — the SDK fills in defaults.
 
-const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+## Solana Notes
 
-for await (const log of chain.getLogs({
-  topics: ['CCIPMessageSent'],
-  startBlock: 1000000,
-  endBlock: 1001000,
-})) {
-  console.log('Log at block:', log.blockNumber)
-}
-```
+### Transaction Flow
 
-### Solana
-
-- Requires program address for log filtering
-- Uses signatures instead of transaction hashes
-- Account-based model affects message structure
+Solana uses transaction signatures (not hashes). Use `getTransaction()` to fetch details:
 
 ```typescript
-import { SolanaChain } from '@chainlink/ccip-sdk'
-
 const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
 
-for await (const log of chain.getLogs({
-  address: 'CCIPProgramAddress...',
-  topics: ['CCIPMessageSent'],
-})) {
-  console.log('Found message')
-}
-```
-
-#### Solana Transaction Flow
-
-For Solana, use `getTransaction()` to fetch transaction details before extracting messages:
-
-```typescript
-import { SolanaChain } from '@chainlink/ccip-sdk'
-
-const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
-
-// Fetch transaction details from signature
 const tx = await chain.getTransaction(signature)
-
-// Extract messages from the transaction
 const messages = await chain.getMessagesInTx(tx)
-const messageId = messages[0]?.message.messageId
 ```
 
-#### Solana Wallet Integration
+### Unsigned Transactions
 
-Modern wallets like Phantom automatically add compute budget and priority fee instructions:
+For browser wallets (Phantom, Solflare), generate unsigned transactions and let the wallet handle signing, compute budget, and priority fees:
 
 ```typescript
 import { SolanaChain } from '@chainlink/ccip-sdk'
@@ -357,7 +293,6 @@ import { TransactionMessage, VersionedTransaction } from '@solana/web3.js'
 
 const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
 
-// Generate unsigned transaction
 const unsignedTx = await chain.generateUnsignedSendMessage({
   sender: walletPublicKey.toBase58(),
   router: routerAddress,
@@ -374,160 +309,12 @@ const messageV0 = new TransactionMessage({
 }).compileToV0Message(unsignedTx.lookupTables)
 
 const transaction = new VersionedTransaction(messageV0)
-
-// Wallet automatically adds compute budget and priority fees
 const signature = await sendTransaction(transaction, connection)
-```
-
-### Aptos
-
-- Move-based smart contracts
-- Different event structure
-- Sequence numbers for ordering
-
-```typescript
-import { AptosChain } from '@chainlink/ccip-sdk'
-
-const chain = await AptosChain.fromUrl('https://fullnode.testnet.aptoslabs.com/v1')
-
-const requests = await chain.getMessagesInTx('0xAptosTransactionHash...')
-```
-
-## Network Information
-
-Use `networkInfo` to get chain details:
-
-```typescript
-import { networkInfo } from '@chainlink/ccip-sdk'
-
-// Get by network name
-const sepolia = networkInfo('ethereum-testnet-sepolia')
-console.log('Chain selector:', sepolia.chainSelector)
-console.log('Family:', sepolia.family) // 'EVM'
-
-// Get by chain selector
-const fuji = networkInfo(14767482510784806043n)
-console.log('Network name:', fuji.name) // 'avalanche-testnet-fuji'
-
-// Check chain family
-const solana = networkInfo('solana-devnet')
-console.log('Is EVM:', solana.family === 'EVM') // false
-console.log('Is Solana:', solana.family === 'SVM') // true
-```
-
-## Chain-Agnostic Code
-
-Use the base `Chain` type for maximum flexibility:
-
-```typescript
-import {
-  type Chain,
-  EVMChain,
-  SolanaChain,
-  networkInfo,
-  ChainFamily
-} from '@chainlink/ccip-sdk'
-
-async function getChain(networkName: string): Promise<Chain> {
-  const network = networkInfo(networkName)
-
-  switch (network.family) {
-    case ChainFamily.EVM:
-      return EVMChain.fromUrl(getRpcUrl(networkName))
-    case ChainFamily.Solana:
-      return SolanaChain.fromUrl(getRpcUrl(networkName))
-    default:
-      throw new Error(`Unsupported chain family: ${network.family}`)
-  }
-}
-
-async function trackAnyMessage(networkName: string, txHash: string) {
-  const chain = await getChain(networkName)
-  const requests = await chain.getMessagesInTx(txHash)
-
-  console.log('Found', requests.length, 'messages on', networkName)
-  return requests
-}
-```
-
-## Complete Example
-
-Track a cross-chain message from any source to any destination:
-
-```typescript
-import {
-  EVMChain,
-  SolanaChain,
-  discoverOffRamp,
-  networkInfo,
-  ChainFamily,
-  type Chain,
-} from '@chainlink/ccip-sdk'
-
-async function createChain(networkName: string, rpcUrl: string): Promise<Chain> {
-  const { family } = networkInfo(networkName)
-  switch (family) {
-    case ChainFamily.EVM:
-      return EVMChain.fromUrl(rpcUrl)
-    case ChainFamily.Solana:
-      return SolanaChain.fromUrl(rpcUrl)
-    default:
-      throw new Error(`Unsupported: ${family}`)
-  }
-}
-
-async function trackCrossChainMessage(
-  sourceNetwork: string,
-  sourceRpc: string,
-  destNetwork: string,
-  destRpc: string,
-  sourceTxHash: string
-) {
-  const source = await createChain(sourceNetwork, sourceRpc)
-  const dest = await createChain(destNetwork, destRpc)
-
-  console.log(`Tracking ${sourceNetwork} -> ${destNetwork}`)
-
-  const requests = await source.getMessagesInTx(sourceTxHash)
-  const request = requests[0]
-  console.log('Message ID:', request.message.messageId)
-
-  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
-  console.log('OffRamp:', offRamp)
-
-  for await (const execution of dest.getExecutionReceipts({
-    offRamp,
-    messageId: request.message.messageId,
-  })) {
-    console.log('Execution state:', execution.receipt.state)
-    return execution
-  }
-
-  console.log('Not yet executed')
-  return null
-}
-
-// Track EVM to EVM
-await trackCrossChainMessage(
-  'ethereum-testnet-sepolia',
-  'https://rpc.sepolia.org',
-  'avalanche-testnet-fuji',
-  'https://rpc.fuji.avax.network',
-  '0x1234...'
-)
-
-// Track EVM to Solana
-await trackCrossChainMessage(
-  'ethereum-testnet-sepolia',
-  'https://rpc.sepolia.org',
-  'solana-devnet',
-  'https://api.devnet.solana.com',
-  '0x5678...'
-)
 ```
 
 ## Related
 
-- [Tracking Messages](/sdk/guides/tracking-messages) - Message tracking details
-- [Sending Messages](/sdk/guides/sending-messages) - Send cross-chain messages
-- [Error Handling](/sdk/guides/error-handling) - Handle chain-specific errors
+- [Sending Messages](/sdk/guides/sending-messages) — EVM send workflow, message types, extra args
+- [Tracking Messages](/sdk/guides/tracking-messages) — Track message lifecycle
+- [Querying Data](/sdk/guides/querying-data) — Network info, balances, fees
+- [Token Pools](/sdk/guides/token-pools) — Pool configuration and rate limits

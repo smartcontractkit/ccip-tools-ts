@@ -1,16 +1,16 @@
 /**
  * LaneLatency Command Schema
  *
- * Defines the schema for the `ccip-cli laneLatency` command.
+ * Defines the schema for the `ccip-cli lane-latency` command.
  */
 
 import { outputOptions } from './common.ts'
 import type { CommandSchema } from '../types/index.ts'
 
-export const laneLatencySchema: CommandSchema<'laneLatency'> = {
-  name: 'laneLatency',
+export const laneLatencySchema: CommandSchema<'lane-latency'> = {
+  name: 'lane-latency',
   description: 'Query real-time lane latency between source and destination chains',
-  synopsis: 'ccip-cli laneLatency <source> <dest> [options]',
+  synopsis: 'ccip-cli lane-latency <source> <dest> [options]',
 
   arguments: [
     {
@@ -46,15 +46,15 @@ export const laneLatencySchema: CommandSchema<'laneLatency'> = {
   examples: [
     {
       title: 'Query latency between Ethereum and Arbitrum',
-      command: 'ccip-cli laneLatency ethereum-mainnet arbitrum-mainnet',
+      command: 'ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet',
     },
     {
       title: 'Query using chain selectors',
-      command: 'ccip-cli laneLatency 5009297550715157269 4949039107694359620',
+      command: 'ccip-cli lane-latency 5009297550715157269 4949039107694359620',
     },
     {
       title: 'JSON output for scripting',
-      command: 'ccip-cli laneLatency ethereum-mainnet arbitrum-mainnet --format json',
+      command: 'ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet --format json',
     },
   ],
 }

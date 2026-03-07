@@ -381,13 +381,13 @@ export class CCIPAPIClient {
   /**
    * Fetches message IDs from a source transaction hash.
    *
-   * @param txHash - Source transaction hash (EVM hex or Solana Base58)
-   * @returns Promise resolving to array of message IDs
+   * @param txHash - Source transaction hash (EVM hex or Solana Base58).
+   * @returns Promise resolving to array of message IDs.
    *
-   * @throws {@link CCIPMessageNotFoundInTxError} when no messages found (404 or empty)
-   * @throws {@link CCIPUnexpectedPaginationError} when hasNextPage is true
-   * @throws {@link CCIPTimeoutError} if request times out
-   * @throws {@link CCIPHttpError} on HTTP errors
+   * @throws {@link CCIPMessageNotFoundInTxError} when no messages found (404 or empty).
+   * @throws {@link CCIPUnexpectedPaginationError} when hasNextPage is true.
+   * @throws {@link CCIPTimeoutError} if request times out.
+   * @throws {@link CCIPHttpError} on HTTP errors.
    *
    * @example Basic usage
    * ```typescript
@@ -395,6 +395,16 @@ export class CCIPAPIClient {
    *   '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
    * )
    * console.log(`Found ${messageIds.length} messages`)
+   * ```
+   *
+   * @example Fetch full details for each message
+   * ```typescript
+   * const api = CCIPAPIClient.fromUrl()
+   * const messageIds = await api.getMessageIdsInTx(txHash)
+   * for (const id of messageIds) {
+   *   const request = await api.getMessageById(id)
+   *   console.log(`${id}: ${request.metadata.status}`)
+   * }
    * ```
    */
   async getMessageIdsInTx(txHash: string): Promise<string[]> {
@@ -457,8 +467,24 @@ export class CCIPAPIClient {
 
   /**
    * Fetches the execution input for a given message by id.
-   * @param messageId - The ID of the message to fetch the execution input for.
-   * @returns Either `{ encodedMessage, verifications }` or `{ message, offchainTokenData, ...proof }`, offRamp and lane
+   * For v2.0 messages, returns `{ encodedMessage, verifications }`.
+   * For pre-v2 messages, returns `{ message, offchainTokenData, proofs, ... }` with merkle proof.
+   *
+   * @param messageId - The CCIP message ID (32-byte hex string)
+   * @returns Execution input with offRamp address and lane info
+   *
+   * @throws {@link CCIPMessageIdNotFoundError} when message not found (404)
+   * @throws {@link CCIPTimeoutError} if request times out
+   * @throws {@link CCIPHttpError} on other HTTP errors
+   *
+   * @example
+   * ```typescript
+   * const api = CCIPAPIClient.fromUrl()
+   * const execInput = await api.getExecutionInput('0x1234...')
+   * // Use with dest.execute():
+   * const { offRamp, ...input } = execInput
+   * await dest.execute({ offRamp, input, wallet })
+   * ```
    */
   async getExecutionInput(messageId: string): Promise<ExecutionInput & Lane & { offRamp: string }> {
     const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}/execution-inputs`

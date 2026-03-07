@@ -6,14 +6,14 @@
  *
  * @example
  * ```bash
- * # Execute a stuck message
+ * # Execute by transaction hash
  * ccip-cli manual-exec 0xSourceTxHash... --wallet $PRIVATE_KEY
+ *
+ * # Execute by message ID (only needs dest chain RPC)
+ * ccip-cli manual-exec 0xMessageId... --wallet $PRIVATE_KEY
  *
  * # Execute with custom gas limit
  * ccip-cli manual-exec 0xSourceTxHash... --gas-limit 500000
- *
- * # Execute all messages in sender queue
- * ccip-cli manual-exec 0xSourceTxHash... --sender-queue
  * ```
  *
  * @packageDocumentation
@@ -62,7 +62,7 @@ export const builder = (yargs: Argv) =>
     .positional('tx-hash-or-id', {
       type: 'string',
       demandOption: true,
-      describe: 'transaction hash of the request (source) message',
+      describe: 'transaction hash or message ID (32-byte hex) of the CCIP request',
     })
     .check(({ 'tx-hash-or-id': txHashOrId }) => isSupportedTxHash(txHashOrId))
     .options({

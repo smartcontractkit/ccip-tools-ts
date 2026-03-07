@@ -1003,9 +1003,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * {@inheritDoc Chain.generateUnsignedSendMessage}
-   * @returns Array containing 0 or more unsigned token approvals txs (if needed at the time of
-   *   generation), followed by a ccipSend TransactionRequest
+   * Generates unsigned EVM transactions for sending a CCIP message.
+   *
+   * @param opts - Send message options with sender address for populating transaction fields.
+   * @returns Unsigned EVM transaction set containing 0 or more token approval txs
+   *   (if needed at the time of generation), followed by a ccipSend TransactionRequest.
+   *
+   * @remarks
+   * When a token in `tokenAmounts` has `ZeroAddress` as its address, the corresponding
+   * amount is included as native `value` in the `ccipSend` transaction instead of
+   * going through the ERC-20 approve flow.
    */
   async generateUnsignedSendMessage(
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
@@ -1306,9 +1313,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /**
    * {@inheritDoc Chain.execute}
-   * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Signer
-   * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm
-   * @throws {@link CCIPExecTxRevertedError} if execution transaction reverts
+   * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Signer.
+   * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm.
+   * @throws {@link CCIPExecTxRevertedError} if execution transaction reverts.
    */
   async execute(opts: Parameters<Chain['execute']>[0]) {
     const wallet = opts.wallet
@@ -1399,7 +1406,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /** {@inheritDoc Chain.getTokenPoolConfig} */
+  /**
+   * Fetches the token pool configuration for an EVM token pool contract.
+   *
+   * @param tokenPool - Token pool contract address.
+   * @returns Token pool config containing token, router, typeAndVersion, and optionally minBlockConfirmations.
+   *
+   * @remarks
+   * For pools with version \>= 2.0, also returns `minBlockConfirmations` for
+   * Faster-Than-Finality (FTF) support. Pre-2.0 pools omit this field.
+   */
   async getTokenPoolConfig(tokenPool: string): Promise<{
     token: string
     router: string
@@ -1444,7 +1460,22 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     )
   }
 
-  /** {@inheritDoc Chain.getTokenPoolRemotes} */
+  /**
+   * Fetches remote chain configurations for an EVM token pool contract.
+   *
+   * @param tokenPool - Token pool address on the current chain.
+   * @param remoteChainSelector - Optional chain selector to filter results to a single destination.
+   * @returns Record mapping chain names to {@link TokenPoolRemote} configs.
+   *
+   * @remarks
+   * Handles 3 pool version branches:
+   * - v1.5: single remote pool via `getRemotePool`, standard rate limiters.
+   * - v1.6: multiple remote pools via `getRemotePools`, standard rate limiters.
+   * - v2.0+: multiple remote pools plus FTF (Faster-Than-Finality) rate limiters
+   *   (`customBlockConfirmationsOutboundRateLimiterState` / `customBlockConfirmationsInboundRateLimiterState`).
+   *
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if remote token is not configured for a chain.
+   */
   async getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
