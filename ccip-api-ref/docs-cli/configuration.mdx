@@ -182,6 +182,20 @@ Networks can be specified by name or chain ID. The CLI uses [chain-selectors](ht
 | Aptos        | Prefixed chain ID | `aptos:1` (mainnet), `aptos:2` (testnet)       |
 | Sui          | Prefixed chain ID | `sui:1`                                        |
 
+## Shell Completion
+
+Enable tab-completion for commands and options by adding the completion script to your shell profile:
+
+```bash
+# bash
+ccip-cli completion >> ~/.bashrc
+
+# zsh
+ccip-cli completion >> ~/.zshrc
+```
+
+Restart your shell or run `source ~/.bashrc` (or `~/.zshrc`) to activate. Once enabled, press `Tab` to autocomplete commands, subcommands, and flags.
+
 ## See Also
 
 - [show](/cli/show) - Track cross-chain messages

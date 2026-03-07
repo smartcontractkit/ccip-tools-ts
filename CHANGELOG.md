@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CLI: add shell completion support (`ccip-cli completion`) for bash and zsh
+
 ## [1.1.0] - 2026-03-06
 
 - SDK: `getFeeTokens` now supports CCIP v2.0 lanes (via FeeQuoter, same as v1.6)
