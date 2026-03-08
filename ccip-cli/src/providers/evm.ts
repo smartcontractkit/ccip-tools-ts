@@ -1,5 +1,7 @@
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 import { CCIPArgumentInvalidError } from '@chainlink/ccip-sdk/src/index.ts'
 import { LedgerSigner } from '@ethers-ext/signer-ledger'
@@ -50,6 +52,23 @@ export async function loadEvmWallet(
     const ledger = new LedgerSigner(HIDTransport, provider, derivationPath)
     console.info('Ledger connected:', await ledger.getAddress(), ', derivationPath:', ledger.path)
     return ledger
+  }
+  if (walletOpt.startsWith('keystore:')) {
+    const accountName = walletOpt.slice('keystore:'.length)
+    const foundryDir = process.env['FOUNDRY_DIR'] ?? join(homedir(), '.foundry')
+    const keystorePath = join(foundryDir, 'keystores', accountName)
+    if (!existsSync(keystorePath)) {
+      throw new CCIPArgumentInvalidError(
+        'wallet',
+        `Foundry keystore '${accountName}' not found at ${keystorePath}`,
+      )
+    }
+    let pw = process.env['KEYSTORE_PASSWORD'] ?? process.env['USER_KEY_PASSWORD']
+    if (!pw)
+      pw = await password({ message: `Enter password for Foundry keystore '${accountName}'` })
+    return (await Wallet.fromEncryptedJson(await readFile(keystorePath, 'utf8'), pw)).connect(
+      provider,
+    )
   }
   if (existsSync(walletOpt)) {
     let pw = process.env['USER_KEY_PASSWORD']

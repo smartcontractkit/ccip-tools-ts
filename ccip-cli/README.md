@@ -80,6 +80,13 @@ Wallet options can also be passed as `--wallet`, where each chain family may int
 can:
 - EVM can receive a 0x-hex private key, or the path to an encrypted json file (e.g. from geth,
 decrypted using the `USER_KEY_PASSWORD` environment variable or prompted password).
+- EVM also supports **Foundry Cast keystores** via `--wallet keystore:<name>`, which reads
+`~/.foundry/keystores/<name>` (overridable with `$FOUNDRY_DIR`). The password is taken from
+`$KEYSTORE_PASSWORD`, then `$USER_KEY_PASSWORD`, or prompted interactively:
+  ```sh
+  cast wallet import sender --interactive
+  ccip-cli send ... --wallet keystore:sender
+  ```
 - Solana can receive base58 private key, or the path to an `id.json` file
 (default=`~/.config/solana/id.json`) containing a private key encoded as a json array of numbers.
 - Aptos can receive 0x-hex private key string, or the path of a text file containing it.
