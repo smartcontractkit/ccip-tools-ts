@@ -510,6 +510,43 @@ describe('decodeMessage', () => {
     }
   })
 
+  it('should decode Solana message with all-digit receiver address', () => {
+    // Solana system program address "11111111111111111111111111111111" is all digits
+    // and must not be converted to BigInt by the JSON parser
+    const msg = decodeMessage({
+      header: {
+        messageId: '0xabc123',
+        sourceChainSelector: '13264668187771770619',
+        destChainSelector: '16423721717087811551',
+        sequenceNumber: '1',
+        nonce: '0',
+      },
+      sender: '0x8700e9ca8e50fa33759a8c0930fa52495c46bfa8',
+      receiver: '11111111111111111111111111111111',
+      data: '',
+      tokenAmounts: [],
+      feeToken: '0xae13d989dac2f0debff460ac112a837c89baa7cd',
+      feeTokenAmount: '416791700726361',
+      feeValueJuels: '13802361978645159',
+      extraArgs:
+        '0x1f3b3aba00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000018efef6f9e6fff9129a24e22073f078266865bd80c3be8130a2f897ab3f5d365e00000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000',
+      computeUnits: 0,
+      accountIsWritableBitmap: '0',
+      tokenReceiver: 'AdCPLpAoBYtbpRJaDDm6MFrLCykKpYUXNJ2tkoPv1X1P',
+      allowOutOfOrderExecution: true,
+    })
+
+    assert.equal(msg.messageId, '0xabc123')
+    // receiver should be a string, not converted to BigInt
+    assert.equal(typeof msg.receiver, 'string')
+    assert.equal(msg.receiver, '11111111111111111111111111111111')
+    assert.equal(msg.feeTokenAmount, 416791700726361n)
+    assert.ok('feeValueJuels' in msg)
+    if ('feeValueJuels' in msg) {
+      assert.equal(msg.feeValueJuels, 13802361978645159n)
+    }
+  })
+
   describe('buildMessageForDest', () => {
     describe('Chain (base implementation)', () => {
       it('should populate default extraArgs for EVM with data', () => {
