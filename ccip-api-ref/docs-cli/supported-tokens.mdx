@@ -69,14 +69,15 @@ ccip-cli get-supported-tokens -n ethereum-mainnet -a 0xRouter... --fee-tokens
 
 When a token is selected or specified:
 
-| Field         | Description                                   |
-| ------------- | --------------------------------------------- |
-| Token address | Contract address on the source chain          |
-| Symbol / Name | Token symbol and full name                    |
-| Decimals      | Token decimal places                          |
-| Pool address  | Associated token pool contract                |
-| Pool type     | Lock/Release, Burn/Mint, etc.                 |
-| Remote chains | Supported destination chains with rate limits |
+| Field                   | Description                                                                                    |
+| ----------------------- | ---------------------------------------------------------------------------------------------- |
+| Token address           | Contract address on the source chain                                                           |
+| Symbol / Name           | Token symbol and full name                                                                     |
+| Decimals                | Token decimal places                                                                           |
+| Pool address            | Associated token pool contract                                                                 |
+| Pool type               | Lock/Release, Burn/Mint, etc.                                                                  |
+| `minBlockConfirmations` | (v2.0+ pools) Minimum source-chain block confirmations for FTF (0 = supported but not enabled) |
+| Remote chains           | Supported destination chains with rate limits                                                  |
 
 ## Examples
 
@@ -123,6 +124,17 @@ For each remote chain, the command displays rate limiter state:
 | `tokens`     | Current available tokens (percentage of capacity) |
 | `rate`       | Refill rate per second                            |
 | `timeToFull` | Time until bucket reaches capacity (if not full)  |
+
+### Faster-Than-Finality (FTF) Fields
+
+For TokenPool v2.0+ contracts, additional fields may appear:
+
+| Field           | Description                                                  |
+| --------------- | ------------------------------------------------------------ |
+| `[ftf]outbound` | FTF outbound rate limiter state (custom block confirmations) |
+| `[ftf]inbound`  | FTF inbound rate limiter state (custom block confirmations)  |
+
+These FTF rate limiters apply separate limits when transfers use custom (lower) block confirmations instead of full finality.
 
 ## Interactive Mode
 

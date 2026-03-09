@@ -66,7 +66,10 @@ export function CLIBuilder({
         <p>
           Unknown command: <code>{command}</code>
         </p>
-        <p>Available commands: send, show, manual-exec</p>
+        <p>
+          Available commands: send, show, manual-exec, parse, get-supported-tokens, lane-latency,
+          token
+        </p>
       </div>
     )
   }

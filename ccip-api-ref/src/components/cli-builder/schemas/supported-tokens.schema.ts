@@ -1,16 +1,16 @@
 /**
  * GetSupportedTokens Command Schema
  *
- * Defines the schema for the `ccip-cli getSupportedTokens` command.
+ * Defines the schema for the `ccip-cli get-supported-tokens` command.
  */
 
 import { outputOptions, rpcOptions } from './common.ts'
 import type { CommandSchema } from '../types/index.ts'
 
-export const supportedTokensSchema: CommandSchema<'getSupportedTokens'> = {
-  name: 'getSupportedTokens',
+export const supportedTokensSchema: CommandSchema<'get-supported-tokens'> = {
+  name: 'get-supported-tokens',
   description: 'List tokens supported for CCIP transfers',
-  synopsis: 'ccip-cli getSupportedTokens -n <network> -a <address> [options]',
+  synopsis: 'ccip-cli get-supported-tokens -n <network> -a <address> [options]',
 
   arguments: [],
 
@@ -67,20 +67,20 @@ export const supportedTokensSchema: CommandSchema<'getSupportedTokens'> = {
     {
       title: 'List tokens on Ethereum',
       command:
-        'ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D',
+        'ccip-cli get-supported-tokens -n ethereum-mainnet -a 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D',
     },
     {
       title: 'Query specific token',
       command:
-        'ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0... -t 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        'ccip-cli get-supported-tokens -n ethereum-mainnet -a 0x80226fc0... -t 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
     },
     {
       title: 'List fee tokens',
-      command: 'ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0... --fee-tokens',
+      command: 'ccip-cli get-supported-tokens -n ethereum-mainnet -a 0x80226fc0... --fee-tokens',
     },
     {
       title: 'JSON output',
-      command: 'ccip-cli getSupportedTokens -n ethereum-mainnet -a 0x80226fc0... --format json',
+      command: 'ccip-cli get-supported-tokens -n ethereum-mainnet -a 0x80226fc0... --format json',
     },
   ],
 }

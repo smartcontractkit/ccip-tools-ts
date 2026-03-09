@@ -1,26 +1,26 @@
 /**
  * ManualExec Command Schema
  *
- * Defines the schema for the `ccip-cli manualExec` command.
+ * Defines the schema for the `ccip-cli manual-exec` command.
  */
 
 import { outputOptions, rpcOptions, walletOptions } from './common.ts'
 import type { CommandSchema } from '../types/index.ts'
 
-export const manualExecSchema: CommandSchema<'manualExec'> = {
-  name: 'manualExec',
+export const manualExecSchema: CommandSchema<'manual-exec'> = {
+  name: 'manual-exec',
   description: 'Manually execute pending or failed CCIP messages',
-  synopsis: 'ccip-cli manualExec <tx-hash> [options]',
+  synopsis: 'ccip-cli manual-exec <tx-hash-or-id> [options]',
 
   arguments: [
     {
-      name: 'tx-hash',
-      label: 'Transaction Hash',
+      name: 'tx-hash-or-id',
+      label: 'Transaction Hash or Message ID',
       type: 'string',
       required: true,
       placeholder: '0x1234567890abcdef...',
-      pattern: /^0x[a-fA-F0-9]{64}$/,
-      description: 'Transaction hash of the original CCIP request',
+      description:
+        'Transaction hash or CCIP message ID (32-byte hex). Message ID path only needs destination RPC.',
     },
   ],
 
@@ -93,22 +93,6 @@ export const manualExecSchema: CommandSchema<'manualExec'> = {
       placeholder: '0xabc...',
       itemType: 'string',
     },
-    // Queue Options
-    {
-      type: 'boolean',
-      name: 'sender-queue',
-      label: 'Sender Queue',
-      description: 'Execute all pending messages from the same sender',
-      group: 'queue',
-      defaultValue: false,
-    },
-    {
-      type: 'boolean',
-      name: 'exec-failed',
-      label: 'Include Failed',
-      description: 'Include failed messages in queue execution. Requires --sender-queue.',
-      group: 'queue',
-    },
     ...walletOptions,
     ...rpcOptions,
     ...outputOptions,
@@ -117,19 +101,19 @@ export const manualExecSchema: CommandSchema<'manualExec'> = {
   examples: [
     {
       title: 'Execute pending message',
-      command: 'ccip-cli manualExec 0x1234... --wallet ledger',
+      command: 'ccip-cli manual-exec 0x1234... --wallet ledger',
     },
     {
       title: 'Override gas limit',
-      command: 'ccip-cli manualExec 0x1234... --gas-limit 500000',
+      command: 'ccip-cli manual-exec 0x1234... --gas-limit 500000',
     },
     {
       title: 'Solana with buffer',
-      command: 'ccip-cli manualExec 0x1234... --force-buffer --clear-leftover-accounts',
+      command: 'ccip-cli manual-exec 0x1234... --force-buffer --clear-leftover-accounts',
     },
     {
       title: 'Sui with receiver objects',
-      command: 'ccip-cli manualExec 0x1234... --receiver-object-ids 0xabc... 0xdef...',
+      command: 'ccip-cli manual-exec 0x1234... --receiver-object-ids 0xabc... 0xdef...',
     },
   ],
 }
