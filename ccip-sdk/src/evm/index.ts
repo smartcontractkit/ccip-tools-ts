@@ -689,10 +689,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         break
       }
       case CCIPVersion.V1_6:
-        offRampABI = OffRamp_1_6_ABI
+        offRampABI ??= OffRamp_1_6_ABI
       // falls through
       case CCIPVersion.V2_0: {
-        offRampABI = OffRamp_2_0_ABI
+        offRampABI ??= OffRamp_2_0_ABI
         const contract = new Contract(
           offRamp,
           offRampABI,
@@ -1754,6 +1754,31 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       }
     }
     yield* super.getExecutionReceipts(opts_)
+  }
+
+  /** {@inheritDoc Chain.estimateGasForMessageId} */
+  override async estimateGasForMessageId(messageId: string): Promise<number> {
+    const { lane, message } = await this.getMessageById(messageId)
+
+    const offRamp =
+      ('offRampAddress' in message && message.offRampAddress) ||
+      (await this.apiClient!.getExecutionInput(messageId)).offRamp
+
+    const destTokenAmounts = message.tokenAmounts
+      .filter((ta): ta is typeof ta & { destTokenAddress: string } => 'destTokenAddress' in ta)
+      .map((ta) => ({ token: ta.destTokenAddress, amount: ta.amount }))
+
+    return this.estimateReceiveExecution({
+      offRamp,
+      receiver: message.receiver,
+      message: {
+        sourceChainSelector: lane.sourceChainSelector,
+        messageId: message.messageId,
+        sender: message.sender,
+        data: message.data,
+        destTokenAmounts,
+      },
+    })
   }
 
   /** {@inheritDoc Chain.estimateReceiveExecution} */

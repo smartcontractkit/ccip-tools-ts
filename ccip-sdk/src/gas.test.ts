@@ -3,9 +3,11 @@ import { after, beforeEach, describe, it, mock } from 'node:test'
 
 import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
+import { CCIPApiClientNotAvailableError } from './errors/index.ts'
 import { estimateExecGas } from './evm/gas.ts'
+import { EVMChain } from './evm/index.ts'
 import { estimateReceiveExecution } from './gas.ts'
-import { ChainFamily, NetworkType } from './types.ts'
+import { CCIPVersion, ChainFamily, NetworkType } from './types.ts'
 
 // Test doubles - we create mock chain objects that implement the minimal interface needed
 // The discoverOffRamp function performs a complex cross-check between chains, so we need
@@ -369,5 +371,155 @@ describe('estimateExecGasForRequest', () => {
     // Should not have stateOverrides when no tokens
     const sendCall = mockDestChain.provider.send.mock.calls[0]
     assert.equal(sendCall.arguments[1].length, 2) // Only transaction and block, no stateOverrides
+  })
+})
+
+describe('EVMChain.estimateGasForMessageId', () => {
+  beforeEach(() => {
+    mock.restoreAll()
+  })
+
+  after(() => {
+    mock.restoreAll()
+  })
+
+  function createMockEVMChain(overrides: Record<string, unknown> = {}) {
+    const offRamp = getAddress(hexlify(randomBytes(20)))
+    const router = getAddress(hexlify(randomBytes(20)))
+    const provider = {
+      send: mock.fn(async () => toBeHex(44_000)),
+      call: mock.fn(
+        async () => '0x0000000000000000000000000000000000000000000000000000000000000000',
+      ),
+    }
+    const chain = Object.create(EVMChain.prototype)
+    chain.provider = provider
+    chain.logger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} }
+    chain.apiClient = null
+    chain.apiRetryConfig = null
+    chain.network = {
+      name: 'base-sepolia',
+      chainId: 84532,
+      chainSelector: 10344971235874465080n,
+      family: ChainFamily.EVM,
+      networkType: NetworkType.Testnet,
+    }
+    chain.getRouterForOffRamp = mock.fn(async () => router)
+    Object.assign(chain, overrides)
+    return { chain, offRamp, router, provider }
+  }
+
+  it('should estimate gas for a v2.0 message using offRampAddress', async () => {
+    const onRamp = getAddress(hexlify(randomBytes(20)))
+    const messageId = hexlify(randomBytes(32))
+    const sender = getAddress(hexlify(randomBytes(20)))
+    const receiver = getAddress(hexlify(randomBytes(20)))
+    const { chain, offRamp } = createMockEVMChain()
+
+    chain.getMessageById = mock.fn(async () => ({
+      lane: {
+        sourceChainSelector: 16015286601757825753n,
+        destChainSelector: 10344971235874465080n,
+        onRamp,
+        version: CCIPVersion.V2_0,
+      },
+      message: {
+        messageId,
+        sender,
+        receiver,
+        data: '0xdaad',
+        tokenAmounts: [],
+        offRampAddress: offRamp,
+      },
+    }))
+
+    const result = await chain.estimateGasForMessageId(messageId)
+
+    assert.equal(result, 23700) // 44000 - (21000 - 700)
+    assert.equal(chain.getMessageById.mock.calls.length, 1)
+  })
+
+  it('should fall back to getExecutionInput for pre-v2.0 offRamp', async () => {
+    const onRamp = getAddress(hexlify(randomBytes(20)))
+    const messageId = hexlify(randomBytes(32))
+    const sender = getAddress(hexlify(randomBytes(20)))
+    const receiver = getAddress(hexlify(randomBytes(20)))
+    const { chain, offRamp } = createMockEVMChain()
+
+    chain.apiClient = {
+      getExecutionInput: mock.fn(async () => ({ offRamp })),
+    }
+
+    chain.getMessageById = mock.fn(async () => ({
+      lane: {
+        sourceChainSelector: 16015286601757825753n,
+        destChainSelector: 10344971235874465080n,
+        onRamp,
+        version: CCIPVersion.V1_5,
+      },
+      message: {
+        messageId,
+        sender,
+        receiver,
+        data: '0x',
+        tokenAmounts: [],
+      },
+    }))
+
+    const result = await chain.estimateGasForMessageId(messageId)
+
+    assert.equal(result, 23700)
+    assert.equal(chain.apiClient.getExecutionInput.mock.calls.length, 1)
+  })
+
+  it('should throw CCIPApiClientNotAvailableError when no apiClient', async () => {
+    const { chain } = createMockEVMChain()
+
+    await assert.rejects(
+      () => chain.estimateGasForMessageId(hexlify(randomBytes(32))),
+      CCIPApiClientNotAvailableError,
+    )
+  })
+
+  it('should pass token amounts with destTokenAddress to estimateReceiveExecution', async () => {
+    const onRamp = getAddress(hexlify(randomBytes(20)))
+    const messageId = hexlify(randomBytes(32))
+    const sender = getAddress(hexlify(randomBytes(20)))
+    const receiver = getAddress(hexlify(randomBytes(20)))
+    const destTokenAddress = getAddress(hexlify(randomBytes(20)))
+    const { chain, offRamp, provider } = createMockEVMChain()
+
+    provider.send = mock.fn(async () => toBeHex(55_000))
+
+    chain.getMessageById = mock.fn(async () => ({
+      lane: {
+        sourceChainSelector: 16015286601757825753n,
+        destChainSelector: 10344971235874465080n,
+        onRamp,
+        version: CCIPVersion.V2_0,
+      },
+      message: {
+        messageId,
+        sender,
+        receiver,
+        data: '0x',
+        tokenAmounts: [
+          {
+            destTokenAddress,
+            sourcePoolAddress: getAddress(hexlify(randomBytes(20))),
+            amount: 1000n,
+          },
+        ],
+        offRampAddress: offRamp,
+      },
+    }))
+
+    const result = await chain.estimateGasForMessageId(messageId)
+
+    assert.equal(result, 34700) // 55000 - (21000 - 700)
+    // Verify state override was applied for the dest token
+    const sendCall = provider.send.mock.calls.at(-1)!
+    const stateOverrides = (sendCall.arguments as any)[1][2]
+    assert.ok(destTokenAddress in stateOverrides)
   })
 })
