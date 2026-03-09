@@ -300,6 +300,10 @@ async function ledgerRequest<T>(
       response.status,
     )
   }
+  const contentLength = response.headers.get('content-length')
+  if (response.status === 204 || contentLength === '0') {
+    return undefined as T
+  }
   return response.json() as Promise<T>
 }
 
