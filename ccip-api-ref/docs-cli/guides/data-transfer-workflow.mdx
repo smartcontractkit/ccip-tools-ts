@@ -47,7 +47,7 @@ ccip-cli send \
   --wallet ledger
 ```
 
-The receiver must implement `ccipReceive(Client.Any2EVMMessage)` — EOAs cannot receive CCIP data messages.
+To process the message and act on the data, the receiver must implement `ccipReceive(Client.Any2EVMMessage)`. EOAs can also be receivers: the OffRamp detects the EOA and skips the `ccipReceive` callback entirely, marking the message as executed. The sent data can still be queried via the CCIP API or explorer.
 
 ### EVM to Solana
 
@@ -104,7 +104,6 @@ Add `--wait` to block until execution completes. You can also include `--wait` i
 | ---------------- | --------------------------------------------------------------- |
 | Execution failed | Increase gas with [`manual-exec --gas-limit`](/cli/manual-exec) |
 | Receiver reverts | Fix receiver contract, then re-execute with `manual-exec`       |
-| Invalid receiver | Must be a contract implementing `ccipReceive`, not an EOA       |
 
 See [Debugging Failed Messages](/cli/guides/debugging-workflow) for the full debugging workflow.
 
