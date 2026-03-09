@@ -89,6 +89,19 @@ export const sendSchema: CommandSchema<'send'> = {
       ],
     },
 
+    // Extra Args
+    {
+      type: 'array',
+      name: 'extra',
+      alias: 'x',
+      label: 'Extra Args',
+      description:
+        'Extra args as key=value (e.g., blockConfirmations=5). Requires CCIP v2+ lanes for V3 fields.',
+      group: 'message',
+      itemType: 'string',
+      placeholder: 'key=value',
+    },
+
     // Gas Options
     {
       type: 'number',
@@ -96,7 +109,7 @@ export const sendSchema: CommandSchema<'send'> = {
       alias: 'L',
       label: 'Gas Limit',
       description:
-        'Gas limit for receiver callback. Defaults to ramp config (~200k) if not specified. Alias: --compute-units',
+        'Gas limit for receiver callback. Defaults to 200k when data present, 0 for token-only. Alias: --compute-units',
       group: 'gas',
       placeholder: '200000',
     },

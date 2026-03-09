@@ -3,7 +3,7 @@ id: manual-execution
 title: 'Manual Execution'
 description: 'Manually execute CCIP messages when automatic execution fails or is delayed.'
 sidebar_label: Manual Execution
-sidebar_position: 6
+sidebar_position: 3
 ---
 
 import Tabs from '@theme/Tabs'
@@ -11,135 +11,117 @@ import TabItem from '@theme/TabItem'
 
 # Manual Execution
 
-When automatic CCIP message execution fails on the destination chain, you can manually execute the message. This guide covers the complete workflow for manual execution.
+When automatic execution fails or is delayed on the destination chain, you can manually execute the message. The SDK provides two paths depending on what data you have.
 
-## When to Manually Execute
+## Two Approaches
 
-Manual execution is needed when:
+| Approach | What you need | Data source | When to use |
+|----------|--------------|-------------|-------------|
+| **By message ID** | Message ID + dest RPC | CCIP API | Default — covers most scenarios with minimal setup |
+| **By transaction hash** | Source tx hash + source RPC + dest RPC | On-chain (RPC) | When operating without the API (`apiClient: null`) |
 
-- **Receiver contract reverts** - The destination contract throws an error
-- **Insufficient gas limit** - The gas limit set in extraArgs was too low
-- **Rate limiter blocked** - Token transfer exceeded rate limits
-- **Execution timeout** - Automatic execution window expired
+## When Manual Execution Is Needed
 
-## Prerequisites
+- **Receiver contract reverts** — destination contract throws an error
+- **Insufficient gas limit** — `gasLimit` in extraArgs was too low
+- **Rate limiter blocked** — token transfer exceeded rate limits
+- **Execution timeout** — automatic execution window expired
 
-Before manual execution, ensure:
-
+Before executing, ensure:
 1. The message has been **committed** on the destination chain
-2. The **source chain finality** period has passed
-3. You have a funded **wallet** on the destination chain
+2. **Source chain finality** has passed
+3. You have a **funded wallet** on the destination chain
 
-## Step-by-Step Workflow
+## By Message ID
 
-### Step 1: Get the Original Request
-
-Retrieve the message from the source chain transaction:
+The CCIP API handles proof calculation, off-chain token data (USDC attestations, LBTC attestations), and OffRamp discovery. You only need the message ID and a destination chain wallet.
 
 ```typescript
 import { EVMChain } from '@chainlink/ccip-sdk'
 
+const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+const execution = await dest.execute({
+  messageId: '0x1234...abcd', // 32-byte CCIP message ID
+  wallet: destWallet,         // ethers Signer or viemWallet(client)
+})
+
+console.log('Execution tx:', execution.log.transactionHash)
+console.log('Block:', execution.log.blockNumber)
+```
+
+**Requires the CCIP API** (enabled by default). Throws `CCIPApiClientNotAvailableError` if you created the chain with `apiClient: null`.
+
+### Where to Get the Message ID
+
+- From `sendMessage` return: `request.message.messageId`
+- From `getMessagesInTx`: `requests[0].message.messageId`
+- From the [CCIP Explorer](https://ccip.chain.link)
+- From the `getMessageById` API call
+
+## By Transaction Hash
+
+Use this when operating without the CCIP API, or when you need full control over each step.
+
+### Step 1: Get the Message
+
+```typescript
+import { EVMChain, discoverOffRamp } from '@chainlink/ccip-sdk'
+
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
 const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
 
-const sourceTxHash = '0x1234...' // Transaction that sent the CCIP message
-
-// getMessagesInTx throws CCIPMessageNotFoundInTxError if no messages found
-const requests = await source.getMessagesInTx(sourceTxHash)
-const request = requests[0]
+// Decode CCIP messages from the source transaction
+const requests = await source.getMessagesInTx('0xSourceTxHash...')
+const request = requests[0] // first message; use [n] if multiple messages in tx
 console.log('Message ID:', request.message.messageId)
-console.log('Sequence Number:', request.message.sequenceNumber)
 ```
 
-### Step 2: Find the OffRamp Contract
+If the transaction contains multiple CCIP messages, select the one you want by index.
 
-Discover the OffRamp contract on the destination chain:
+### Step 2: Check Execution Status
 
 ```typescript
-import { discoverOffRamp } from '@chainlink/ccip-sdk'
+import { discoverOffRamp, ExecutionState } from '@chainlink/ccip-sdk'
 
 const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
-console.log('OffRamp address:', offRamp)
-```
-
-### Step 3: Check Execution Status
-
-Verify whether the message needs manual execution:
-
-```typescript
-import { ExecutionState } from '@chainlink/ccip-sdk'
-
-let needsManualExecution = true
 
 for await (const execution of dest.getExecutionReceipts({
   offRamp,
   messageId: request.message.messageId,
 })) {
-  console.log('Execution state:', execution.receipt.state) // 1=InProgress, 2=Success, 3=Failed
-
-  switch (execution.receipt.state) {
-    case ExecutionState.Success:
-      console.log('Message already executed successfully')
-      needsManualExecution = false
-      break
-
-    case ExecutionState.Failed:
-      console.log('Previous execution failed')
-      console.log('Return data:', execution.receipt.returnData)
-      // Can proceed with manual execution
-      break
-
-    case ExecutionState.InProgress:
-      console.log('Execution in progress')
-      // Wait and check again
-      break
+  if (execution.receipt.state === ExecutionState.Success) {
+    console.log('Already executed — nothing to do')
+    process.exit(0)
   }
-}
-
-if (!needsManualExecution) {
-  process.exit(0)
+  if (execution.receipt.state === ExecutionState.Failed) {
+    console.log('Previous execution failed — proceeding with manual execution')
+  }
 }
 ```
 
-### Step 4: Get the Verifications
-
-Verify the message has been committed:
+### Step 3: Get Verifications
 
 ```typescript
 let verifications
 try {
-  verifications = await dest.getVerifications({
-    offRamp,
-    request,
-  })
-} catch (error) {
-  // getVerifications throws CCIPCommitNotFoundError (transient) when not yet committed
-  console.log('Message not yet committed')
-  console.log('Wait for the DON to commit the merkle root')
+  verifications = await dest.getVerifications({ offRamp, request })
+} catch {
+  // CCIPCommitNotFoundError (transient) — message not yet committed
+  console.log('Not yet committed — wait and retry')
   process.exit(1)
 }
-
-console.log('Commit found!')
-console.log('Merkle root:', verifications.report.merkleRoot)
-console.log('Min sequence:', verifications.report.minSeqNr)
-console.log('Max sequence:', verifications.report.maxSeqNr)
-console.log('Commit tx:', verifications.log.transactionHash)
 ```
 
-### Step 5: Fetch Execution Inputs and Calculate Proof
+### Step 4: Build Execution Input
 
-Get execution input and calculate proofs:
+`getExecutionInput` runs on the **source** chain. It fetches all messages in the commit batch, calculates the Merkle proof, and fetches off-chain token data (USDC/LBTC attestations) automatically.
 
 ```typescript
 const input = await source.getExecutionInput({ request, verifications })
-
-console.log('Calculated proof:', input.merkleRoot)
-console.log('Offchain tokenData:', input.offchainTokenData)
 ```
 
-### Step 6: Execute the Report
-
-Submit the manual execution transaction:
+### Step 5: Execute
 
 ```typescript
 const execution = await dest.execute({
@@ -148,11 +130,40 @@ const execution = await dest.execute({
   wallet: destWallet,
 })
 
-console.log('Manual execution submitted:', execution.log.transactionHash)
-console.log('Execution confirmed in block:', execution.log.blockNumber)
+console.log('Execution tx:', execution.log.transactionHash)
 ```
 
-## Complete Example
+## Complete Examples
+
+### By Message ID
+
+```typescript
+import { ethers } from 'ethers'
+import { EVMChain, CCIPError } from '@chainlink/ccip-sdk'
+
+async function executeByMessageId(
+  destRpc: string,
+  messageId: string,
+  wallet: ethers.Signer
+) {
+  const dest = await EVMChain.fromUrl(destRpc)
+
+  try {
+    const execution = await dest.execute({ messageId, wallet })
+    console.log('Execution tx:', execution.log.transactionHash)
+    return execution
+  } catch (error) {
+    if (CCIPError.isCCIPError(error)) {
+      console.error(`${error.code}: ${error.message}`)
+      if (error.isTransient) console.log('Transient — safe to retry')
+      if (error.recovery) console.log('Recovery:', error.recovery)
+    }
+    throw error
+  }
+}
+```
+
+### By Transaction Hash (No API)
 
 ```typescript
 import { ethers } from 'ethers'
@@ -160,161 +171,181 @@ import {
   EVMChain,
   discoverOffRamp,
   ExecutionState,
+  CCIPError,
 } from '@chainlink/ccip-sdk'
 
-async function manuallyExecuteMessage(
+async function executeByTxHash(
   sourceRpc: string,
   destRpc: string,
   sourceTxHash: string,
-  wallet: ethers.Signer
+  wallet: ethers.Signer,
+  messageIndex = 0
 ) {
-  // Connect to chains
-  const source = await EVMChain.fromUrl(sourceRpc)
-  const dest = await EVMChain.fromUrl(destRpc)
+  const source = await EVMChain.fromUrl(sourceRpc, { apiClient: null })
+  const dest = await EVMChain.fromUrl(destRpc, { apiClient: null })
 
-  // Step 1: Get the request (throws CCIPMessageNotFoundInTxError if not found)
+  // 1. Get the message
   const requests = await source.getMessagesInTx(sourceTxHash)
-  const request = requests[0]
-  console.log('Processing message:', request.message.messageId)
+  const request = requests[messageIndex]
+  console.log('Message ID:', request.message.messageId)
 
-  // Step 2: Find OffRamp
+  // 2. Discover OffRamp (memoized)
   const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
 
-  // Step 3: Check if already executed
+  // 3. Check if already executed
   for await (const execution of dest.getExecutionReceipts({
     offRamp,
     messageId: request.message.messageId,
   })) {
     if (execution.receipt.state === ExecutionState.Success) {
       console.log('Already executed')
-      return { status: 'already_executed' }
+      return { status: 'already_executed' as const }
     }
   }
 
-  // Step 4: Get commit (throws CCIPCommitNotFoundError if not yet committed)
+  // 4. Get verifications (throws CCIPCommitNotFoundError if not yet committed)
   let verifications
   try {
     verifications = await dest.getVerifications({ offRamp, request })
   } catch (error) {
-    console.log('Not yet committed')
-    return { status: 'pending_commit' }
+    if (CCIPError.isCCIPError(error) && error.isTransient) {
+      console.log('Not yet committed — retry later')
+      return { status: 'pending_commit' as const }
+    }
+    throw error
   }
 
-  // Step 5: Get messages in batch
+  // 5. Build execution input (Merkle proof + off-chain token data)
   const input = await source.getExecutionInput({ request, verifications })
 
-  // Step 6: Execute
-  const execution = await dest.execute({
-    offRamp,
-    input,
-    wallet,
-  })
-
-  console.log('Manual execution tx:', execution.log.transactionHash)
-  return { status: 'executed', txHash: execution.log.transactionHash }
-}
-
-// Usage
-const destProvider = new ethers.JsonRpcProvider('https://rpc.fuji.avax.network')
-const destWallet = new ethers.Wallet(process.env.DEST_PRIVATE_KEY!, destProvider)
-
-await manuallyExecuteMessage(
-  'https://rpc.sepolia.org',
-  'https://rpc.fuji.avax.network',
-  '0xSourceTxHash...',
-  destWallet
-)
-```
-
-## Handling Token Transfers
-
-For messages with token transfers, you may need offchain token data:
-
-### USDC (CCTP) Transfers
-
-For USDC transfers using CCTP, you need to fetch the Circle attestation. The SDK handles this automatically:
-
-```typescript
-// Fetch offchain token data (handles USDC attestations automatically)
-const input = await source.getExecutionInput({ request, verifications })
-console.log('offchainTokenData:', input.offchainTokenData)
-
-const execution = await dest.execute({
-  offRamp,
-  input,
-  wallet: destWallet,
-})
-```
-
-### Standard Token Transfers
-
-For non-CCTP tokens, `offchainTokenData` is typically empty:
-
-```typescript
-// getExecutionInput handles standard tokens automatically (empty offchainTokenData)
-const input = await source.getExecutionInput({ request, verifications })
-
-const execution = await dest.execute({
-  offRamp,
-  input,
-  wallet: destWallet,
-})
-```
-
-## Troubleshooting
-
-### Execution Reverts
-
-If manual execution reverts, check:
-
-1. **Gas limit** - Increase gas for the destination execution
-2. **Receiver contract** - Ensure the receiver can handle the message
-3. **Token allowances** - Verify token pool has sufficient liquidity
-
-```typescript
-// Increase gas limit for execution
-const execution = await dest.execute({
-  offRamp,
-  input,
-  wallet: destWallet,
-  gasLimit: 500000, // Override gas limit
-})
-```
-
-### Message Not Found
-
-If the message isn't found on the source chain:
-
-```typescript
-import { networkInfo } from '@chainlink/ccip-sdk'
-
-// Verify you're on the correct source chain
-const sourceNetwork = networkInfo(source.network.chainSelector)
-console.log('Source chain:', sourceNetwork.name)
-
-// Check if the transaction hash is correct
-const tx = await source.getTransaction(sourceTxHash)
-if (!tx) {
-  console.log('Transaction not found - verify the hash and chain')
+  // 6. Execute on destination
+  const execution = await dest.execute({ offRamp, input, wallet })
+  console.log('Execution tx:', execution.log.transactionHash)
+  return { status: 'executed' as const, txHash: execution.log.transactionHash }
 }
 ```
+
+## Gas Limit Overrides
+
+If execution reverts due to insufficient gas, override the gas limit:
+
+```typescript
+const execution = await dest.execute({
+  offRamp,
+  input,
+  wallet: destWallet,
+  gasLimit: 500_000,      // Override gas for ccipReceive call
+  tokensGasLimit: 100_000, // Override gas for tokenPool.releaseOrMint (EVM only)
+})
+```
+
+The `gasLimit` override applies to the receiver contract's `ccipReceive` call. The `tokensGasLimit` override applies to each token pool operation.
+
+## Off-Chain Token Data
+
+`getExecutionInput` automatically handles off-chain token data for all token types:
+
+| Token type | What the SDK does |
+|-----------|-------------------|
+| **USDC (CCTP)** | Fetches Circle attestation from Circle API |
+| **LBTC** | Fetches attestation from Lombard API |
+| **Standard tokens** | No off-chain data needed (empty) |
+
+Both the message ID path (`dest.execute({ messageId })`) and the transaction hash path (`source.getExecutionInput()`) handle this automatically.
+
+## Unsigned Transactions
+
+Use `generateUnsignedExecute` to separate transaction construction from signing. This lets you build execution transactions on a backend with reliable RPCs and return them to clients for signing — or feed them into multi-sig wallets, offline signing workflows, or any system where signing happens separately.
+
+### By Message ID
+
+```typescript
+const unsignedTx = await dest.generateUnsignedExecute({
+  messageId: '0x1234...abcd',
+  payer: walletAddress, // address of the wallet that will sign
+})
+
+// Single transaction — send to the OffRamp contract
+const tx = unsignedTx.transactions[0]
+const hash = await walletClient.sendTransaction(tx)
+```
+
+### By Transaction Hash
+
+```typescript
+const input = await source.getExecutionInput({ request, verifications })
+
+const unsignedTx = await dest.generateUnsignedExecute({
+  offRamp,
+  input,
+  payer: walletAddress,
+  gasLimit: 500_000, // optional override
+})
+
+const tx = unsignedTx.transactions[0]
+const hash = await walletClient.sendTransaction(tx)
+```
+
+Unlike `generateUnsignedSendMessage` (which may return multiple transactions for token approvals), `generateUnsignedExecute` always returns a single transaction.
 
 ## Using the CLI
 
-The CLI provides a simpler interface for manual execution:
-
 ```bash
-# Execute a stuck message
-ccip-cli manual-exec 0xSourceTxHash \
-  --source ethereum-testnet-sepolia \
-  --dest avalanche-testnet-fuji \
+# By message ID (needs dest RPC only)
+ccip-cli manual-exec 0xMessageId \
+  --rpc https://rpc.fuji.avax.network \
   --wallet $PRIVATE_KEY
+
+# By transaction hash (needs source + dest RPCs)
+ccip-cli manual-exec 0xSourceTxHash \
+  --rpc https://rpc.sepolia.org \
+  --rpc https://rpc.fuji.avax.network \
+  --wallet $PRIVATE_KEY
+
+# Override gas limit
+ccip-cli manual-exec 0xMessageId \
+  --rpc https://rpc.fuji.avax.network \
+  --wallet $PRIVATE_KEY \
+  --gas-limit 500000
+
+# Select specific message in multi-message transaction
+ccip-cli manual-exec 0xSourceTxHash \
+  --rpc https://rpc.sepolia.org \
+  --rpc https://rpc.fuji.avax.network \
+  --wallet $PRIVATE_KEY \
+  --log-index 1
 ```
 
-See [CLI Manual Exec](/cli/manual-exec) for more options.
+The CLI auto-detects whether the argument is a message ID or transaction hash.
+
+## Method Reference
+
+| Method | Called on | Data source | Purpose |
+|--------|----------|-------------|---------|
+| `execute({ messageId, wallet })` | Destination | CCIP API | Execute by message ID (simplest) |
+| `execute({ offRamp, input, wallet })` | Destination | Pre-computed input | Execute with pre-fetched proof |
+| `generateUnsignedExecute({ messageId, payer })` | Destination | CCIP API | Unsigned execution tx by message ID |
+| `generateUnsignedExecute({ offRamp, input, payer })` | Destination | Pre-computed input | Unsigned execution tx with pre-fetched proof |
+| `getExecutionInput({ request, verifications })` | **Source** | RPC | Build Merkle proof + fetch off-chain token data |
+| `getVerifications({ offRamp, request })` | Destination | RPC | Get commit report or verifier results |
+| `getExecutionReceipts({ offRamp, messageId })` | Destination | RPC | Check current execution state |
+| `discoverOffRamp(source, dest, onRamp)` | — | RPC | Find OffRamp address (memoized) |
+
+## Errors
+
+| Error | Transient | Meaning |
+|-------|-----------|---------|
+| `CCIPCommitNotFoundError` | Yes | Message not yet committed — wait and retry |
+| `CCIPMessageBatchIncompleteError` | Yes | Not all batch messages found — retry with larger range |
+| `CCIPUsdcAttestationError` | Yes | USDC attestation not ready — retry |
+| `CCIPLbtcAttestationError` | Yes | LBTC attestation not ready — retry |
+| `CCIPExecTxRevertedError` | No | Execution reverted — check gas limit, receiver contract |
+| `CCIPMerkleRootMismatchError` | No | Proof mismatch — verify all messages in batch |
+| `CCIPOffRampNotFoundError` | No | No OffRamp for this lane — verify lane exists |
+| `CCIPApiClientNotAvailableError` | No | API disabled — use transaction hash path instead |
 
 ## Related
 
-- [Error Handling](/sdk/guides/error-handling) - Error types and recovery
-- [Tracking Messages](/sdk/guides/tracking-messages) - Monitor message status
-- [CLI Manual Exec](/cli/manual-exec) - Command-line manual execution
+- [Tracking Messages](/sdk/guides/tracking-messages) — Check message status before executing
+- [Error Handling](/sdk/guides/error-handling) — Error recovery patterns
+- [CLI Manual Exec](/cli/manual-exec) — CLI reference

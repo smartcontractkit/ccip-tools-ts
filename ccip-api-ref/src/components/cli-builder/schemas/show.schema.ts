@@ -10,17 +10,16 @@ import type { CommandSchema } from '../types/index.ts'
 export const showSchema: CommandSchema<'show'> = {
   name: 'show',
   description: 'Display details of a CCIP request',
-  synopsis: 'ccip-cli show <tx-hash> [options]',
+  synopsis: 'ccip-cli show <tx-hash-or-id> [options]',
 
   arguments: [
     {
-      name: 'tx-hash',
-      label: 'Transaction Hash',
+      name: 'tx-hash-or-id',
+      label: 'Transaction Hash or Message ID',
       type: 'string',
       required: true,
       placeholder: '0x1234567890abcdef...',
-      pattern: /^0x[a-fA-F0-9]{64}$/,
-      description: 'Transaction hash containing the CCIP request',
+      description: 'Transaction hash (EVM hex or Solana Base58) or CCIP message ID (32-byte hex)',
     },
   ],
 
@@ -33,15 +32,6 @@ export const showSchema: CommandSchema<'show'> = {
         'Pre-select a message request by log index (when multiple CCIP messages exist in one transaction)',
       group: 'output',
       placeholder: '0',
-    },
-    {
-      type: 'string',
-      name: 'id-from-source',
-      label: 'Message ID from Source',
-      description:
-        'Search by messageId instead of txHash. Format: [onRamp@]sourceNetwork (onRamp address may be required for some chains)',
-      group: 'output',
-      placeholder: '0xOnRamp@ethereum-testnet-sepolia',
     },
     {
       type: 'boolean',

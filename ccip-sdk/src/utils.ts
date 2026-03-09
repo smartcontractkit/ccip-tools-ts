@@ -190,10 +190,16 @@ export const networkInfo = memoize(function networkInfo_(
 
 const BLOCK_RANGE = 10_000
 /**
- * Generates exclusive block ranges [fromBlock, toBlock]
- * If startBlock is given, moves forward from there (up to latestBlock),
- * Otherwise, moves backwards down to genesis (you probably want to break/return before that)
- **/
+ * Generates block ranges for paginated log queries.
+ *
+ * @param params - Range parameters:
+ *   - `singleBlock` - yields a single `{ fromBlock, toBlock }` for that block.
+ *   - `endBlock` + optional `startBlock` - if `startBlock` is given, moves forward
+ *     from there up to `endBlock`; otherwise moves backward from `endBlock` to genesis.
+ *   - `page` - step size per range (default 10 000).
+ * @returns Generator of `{ fromBlock, toBlock }` pairs, optionally with a `progress` percentage
+ *   string when iterating forward.
+ */
 export function* blockRangeGenerator(
   params: { page?: number } & ({ endBlock: number; startBlock?: number } | { singleBlock: number }),
 ) {

@@ -12,9 +12,7 @@ import TabItem from '@theme/TabItem'
 
 # Debugging Failed Messages
 
-Debug failed or stuck CCIP messages using a three-step workflow: track the message status, diagnose the error, and manually execute with corrected parameters.
-
-## Workflow
+Debug failed or stuck CCIP messages in three steps: track status, diagnose the error, and manually execute.
 
 | Step        | Command                | Purpose                                    |
 | ----------- | ---------------------- | ------------------------------------------ |
@@ -22,103 +20,36 @@ Debug failed or stuck CCIP messages using a three-step workflow: track the messa
 | 2. Diagnose | `ccip-cli parse`       | Decode error data                          |
 | 3. Execute  | `ccip-cli manual-exec` | Retry with corrected parameters            |
 
-## Prerequisites
-
-Configure RPC endpoints for both source and destination chains:
-
-```bash title=".env"
-RPC_SEPOLIA=https://ethereum-sepolia-rpc.publicnode.com
-RPC_ARB_SEPOLIA=https://arbitrum-sepolia-rpc.publicnode.com
-USER_KEY=0xYourPrivateKeyHere
-```
+You need RPC endpoints for both source and destination chains. For manual execution, you also need a wallet. See [Configuration](/cli/configuration).
 
 ## Step 1: Track the Message
 
-Check message status with the transaction hash from the source chain:
-
 ```bash
-ccip-cli show 0xYourTransactionHash
+ccip-cli show 0xSourceTxHash
 ```
 
-### Output Interpretation
-
-The output contains three sections: Request, Commit, and Receipts.
-
-<Tabs>
-<TabItem value="success" label="Success" default>
-
-```
-═══ Request ═══
-Source:      ethereum-testnet-sepolia
-Destination: ethereum-testnet-sepolia-arbitrum-1
-Message ID:  0xabc123...
-Sender:      0x1234...
-Receiver:    0x5678...
-
-═══ Commit ═══
-Commit Tx:   0xdef456...
-Block:       12345678
-
-═══ Receipts ═══
-State:       SUCCESS
-Exec Tx:     0xghi789...
-Gas Used:    150000
-```
-
-No action required.
-
-</TabItem>
-<TabItem value="pending" label="Pending">
-
-```
-═══ Request ═══
-Source:      ethereum-testnet-sepolia
-Destination: ethereum-testnet-sepolia-arbitrum-1
-Message ID:  0xabc123...
-
-═══ Commit ═══
-Status:      COMMITTED
-
-═══ Receipts ═══
-State:       UNTOUCHED
-```
-
-Wait for execution, or proceed to Step 3 for manual execution.
-
-</TabItem>
-<TabItem value="failed" label="Failed">
-
-```
-═══ Request ═══
-Source:      ethereum-testnet-sepolia
-Destination: ethereum-testnet-sepolia-arbitrum-1
-Message ID:  0xabc123...
-
-═══ Commit ═══
-Status:      COMMITTED
-
-═══ Receipts ═══
-State:       FAILURE
-Return Data: 0x08c379a0000000000000000000000000...
-```
-
-Decode the error (Step 2) and retry (Step 3).
-
-</TabItem>
-</Tabs>
+You can also pass a message ID (32-byte hex) instead of a tx hash. See [show command reference](/cli/show).
 
 ### Message States
 
-| State         | Description             | Action                 |
-| ------------- | ----------------------- | ---------------------- |
-| `UNTOUCHED`   | Committed, not executed | Wait or manual execute |
-| `IN_PROGRESS` | Execution in progress   | Wait                   |
-| `SUCCESS`     | Executed                | None                   |
-| `FAILURE`     | Execution failed        | Diagnose and retry     |
+| State         | Description                 | Action                 |
+| ------------- | --------------------------- | ---------------------- |
+| `UNTOUCHED`   | Committed, not yet executed | Wait or manual execute |
+| `IN_PROGRESS` | Execution in progress       | Wait                   |
+| `SUCCESS`     | Executed successfully       | None                   |
+| `FAILURE`     | Execution failed            | Diagnose and retry     |
+
+If the state is `FAILURE`, the output includes **Return Data** — hex-encoded error bytes you can decode in Step 2.
+
+If the state is `UNTOUCHED` after a long time, possible causes:
+
+- The DON hasn't executed it yet (wait longer)
+- An earlier message from the same sender failed (sender nonce ordering) — execute each failed message in order
+- Rate limiter exhausted
 
 ## Step 2: Diagnose the Failure
 
-Decode the error data from the Receipts section:
+Decode the Return Data from Step 1:
 
 ```bash
 ccip-cli parse 0x08c379a0000000000000000000000000...
@@ -126,138 +57,48 @@ ccip-cli parse 0x08c379a0000000000000000000000000...
 
 ### Common Errors
 
-<Tabs>
-<TabItem value="gas" label="Out of Gas" default>
-
-Error output:
-
-```
-Panic: 0x11 (Arithmetic overflow/underflow)
-```
-
-Or execution fails with empty return data.
-
-Cause: Receiver contract exceeded gas limit.
-
-Fix: Increase gas limit in manual execution:
-
-```bash
-ccip-cli manual-exec 0xTxHash --gas-limit 500000 --wallet ledger
-```
-
-</TabItem>
-<TabItem value="token" label="Unsupported Token">
-
-Error output:
-
-```
-Error: EVM2EVMOnRamp_1.2.0.UnsupportedToken(address)
-Args: { token: '0x779877A7B0D9E8603169DdbD7836e478b4624789' }
-```
-
-Cause: Token not registered on this lane.
-
-Fix:
-
-1. Verify token registration with `get-supported-tokens`
-2. Check token pool liquidity
-3. Use a supported token
-
-</TabItem>
-<TabItem value="receiver" label="Receiver Revert">
-
-Error output:
-
-```
-Error: "Custom error from receiver contract"
-```
-
-Cause: Application-specific receiver logic failed.
-
-Fix:
-
-1. Review receiver contract logic
-2. Verify data format
-3. Check receiver permissions and state
-
-</TabItem>
-<TabItem value="order" label="Ordering">
-
-Symptom: Message stuck as `UNTOUCHED` after commit.
-
-Cause: CCIP enforces sender nonce ordering. An earlier message from the same sender failed.
-
-Fix: Execute each failed message individually in order:
-
-```bash
-ccip-cli manual-exec 0xFirstFailedTxHash --wallet ledger
-ccip-cli manual-exec 0xSecondFailedTxHash --wallet ledger
-```
-
-</TabItem>
-</Tabs>
+| Error                              | Cause                             | Fix                                                       |
+| ---------------------------------- | --------------------------------- | --------------------------------------------------------- |
+| Empty return data or `Panic: 0x11` | Receiver exceeded gas limit       | Increase gas with `--gas-limit` or `--estimate-gas-limit` |
+| `UnsupportedToken(address)`        | Token not registered on this lane | Verify with `get-supported-tokens`                        |
+| `Error: "..."` (custom string)     | Receiver contract logic failed    | Fix the receiver contract, then re-execute                |
 
 ## Step 3: Manual Execution
 
-Execute the message manually after identifying and addressing the failure cause.
-
-### Basic execution
+Execute the message with corrected parameters:
 
 ```bash
-ccip-cli manual-exec 0xYourTxHash --wallet ledger
+ccip-cli manual-exec 0xSourceTxHash --wallet ledger
 ```
 
-### With increased gas limit
+Or by message ID (only needs destination chain RPC):
 
 ```bash
-ccip-cli manual-exec 0xYourTxHash \
-  --gas-limit 500000 \
-  --wallet ledger
+ccip-cli manual-exec 0xMessageId --wallet ledger
 ```
 
-### With auto-estimated gas
-
-Estimate gas and add a percentage margin:
+### With Gas Override
 
 ```bash
-ccip-cli manual-exec 0xYourTxHash \
-  --estimate-gas-limit 20 \
-  --wallet ledger
+# Explicit gas limit
+ccip-cli manual-exec 0xSourceTxHash --gas-limit 500000 --wallet ledger
+
+# Auto-estimate with 20% margin
+ccip-cli manual-exec 0xSourceTxHash --estimate-gas-limit 20 --wallet ledger
 ```
 
-### Execute sender queue (Coming Soon)
+### Ordering Issues
 
-:::warning
-Queue execution (`--sender-queue`) is not yet implemented. Execute each message individually using its transaction hash instead.
-:::
+CCIP enforces sender nonce ordering. If an earlier message failed, later messages from the same sender are blocked. Execute each failed message in order:
 
 ```bash
-ccip-cli manual-exec 0xFirstTxHash --wallet ledger
-ccip-cli manual-exec 0xSecondTxHash --wallet ledger
+ccip-cli manual-exec 0xFirstFailedTx --wallet ledger
+ccip-cli manual-exec 0xSecondFailedTx --wallet ledger
 ```
 
-## Chain-Specific Behavior
+### Solana
 
-<Tabs>
-<TabItem value="evm" label="EVM" default>
-
-**Gas:**
-
-- Default gas limit (~200k) may be insufficient for complex receivers
-- Use `--estimate-gas-limit` for automatic estimation
-- Token transfers require additional gas for pool operations
-
-**Finality:**
-
-- Execution requires commit finalization
-- Finality times vary by chain
-
-</TabItem>
-<TabItem value="solana" label="Solana">
-
-**Transaction size limits:**
-
-For large messages, use buffer and lookup table options:
+Solana transactions have size limits. For large messages:
 
 ```bash
 ccip-cli manual-exec 0xTxHash \
@@ -266,63 +107,23 @@ ccip-cli manual-exec 0xTxHash \
   --wallet ledger
 ```
 
-**Compute units:**
+Use `--clear-leftover-accounts` to clean up from a previous failed attempt.
 
-Use `--compute-units` instead of `--gas-limit`:
+See the [manual-exec command reference](/cli/manual-exec) for all options.
 
-```bash
-ccip-cli manual-exec 0xTxHash \
-  --compute-units 500000 \
-  --wallet ledger
-```
+## Verify
 
-**Cleanup after failed attempts:**
+After manual execution, confirm the message succeeded:
 
 ```bash
-ccip-cli manual-exec 0xTxHash \
-  --clear-leftover-accounts \
-  --wallet ledger
+ccip-cli show 0xSourceTxHash
 ```
 
-</TabItem>
-</Tabs>
-
-## Example
-
-```bash
-# Check message status
-ccip-cli show 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b
-
-# Output shows State: FAILURE with Return Data: 0x08c379a0000000...
-
-# Decode the error
-ccip-cli parse 0x08c379a0000000...
-
-# Output: Error: "Insufficient gas for receiver"
-
-# Retry with higher gas limit
-ccip-cli manual-exec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b \
-  --gas-limit 500000 \
-  --wallet ledger
-
-# Verify execution
-ccip-cli show 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b
-# State: SUCCESS
-```
-
-## Common Issues
-
-| Issue                           | Solution                                     |
-| ------------------------------- | -------------------------------------------- |
-| `No RPC configured for chain X` | Add RPC endpoint via `--rpcs` or `.env`      |
-| `Message not found`             | Verify transaction hash and source chain RPC |
-| `Message not committed yet`     | Wait for DON to commit                       |
-| `Already executed`              | Message succeeded; no action needed          |
-| `Wallet not configured`         | Set `USER_KEY` in `.env` or use `--wallet`   |
+The state should now be `SUCCESS`.
 
 ## Related
 
-- [show](/cli/show) - Command reference
-- [parse](/cli/parse) - Command reference
-- [manual-exec](/cli/manual-exec) - Command reference
-- [Configuration](/cli/configuration) - RPC and wallet setup
+- [show](/cli/show) — Command reference
+- [parse](/cli/parse) — Command reference
+- [manual-exec](/cli/manual-exec) — Command reference
+- [Troubleshooting](/cli/troubleshooting) — Common errors and solutions
