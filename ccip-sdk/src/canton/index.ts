@@ -427,7 +427,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       verifications: Pick<VerifierResult, 'ccvData' | 'destAddress'>[]
     }
 
-    this.logger.debug('CantonChain.generateUnsignedExecute: fetching ACS disclosures')
     // Step 1 — Fetch same-party disclosures (PerPartyRouter + CCIPReceiver)
     const acsDisclosures = await this.acsDisclosureProvider.fetchExecutionDisclosures()
 
@@ -442,9 +441,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     // extracted from decodable headers.
     const messageIdForEds = stripHexPrefix(encodedMessage).slice(0, 64)
 
-    this.logger.debug(
-      `CantonChain.generateUnsignedExecute: fetching EDS disclosures for ${ccvAddresses.length} CCVs`,
-    )
     const edsResult = await this.edsDisclosureProvider.fetchExecutionDisclosures(
       messageIdForEds,
       ccvAddresses,
@@ -459,10 +455,12 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           `EDS did not return a disclosure for CCV at ${v.destAddress}`,
         )
       }
-      return {
+      const entry = {
         ccvCid: ccvDisclosure.disclosedContract.contractId,
         verifierResults: stripHexPrefix(String(v.ccvData)),
+        ccvExtraContext: { values: {} },
       }
+      return entry
     })
 
     // Step 4 — Extract CCV disclosed contracts
@@ -472,15 +470,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     // Step 5 — Assemble the Execute choice argument.
     //   The `choiceContextData` from EDS is an opaque blob that the Canton
-    //   runtime expects as part of the choice argument — it contains
-    //   contract IDs for OffRamp, GlobalConfig, etc.
-    const contextData =
-      edsResult.choiceContext.choiceContextData != null &&
-      typeof edsResult.choiceContext.choiceContextData === 'object'
-        ? (edsResult.choiceContext.choiceContextData as Record<string, unknown>)
-        : {}
+    //   runtime expects under the `context` field of the Execute choice — it
+    //   contains contract IDs for OffRamp, GlobalConfig, etc.
     const choiceArgument: Record<string, unknown> = {
-      ...contextData,
+      context: edsResult.choiceContext.choiceContextData ?? {},
       routerCid: acsDisclosures.perPartyRouter.contractId,
       encodedMessage: stripHexPrefix(String(encodedMessage)),
       tokenTransfer: null,
@@ -519,10 +512,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       })),
     }
 
-    this.logger.debug(
-      `CantonChain.generateUnsignedExecute: built command with ${allDisclosed.length} disclosed contracts`,
-    )
-
     return {
       family: ChainFamily.Canton,
       commands: jsCommands,
@@ -551,18 +540,16 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       payer: wallet.party,
     })
 
-    this.logger.debug('CantonChain.execute: submitting command to Ledger API')
-
     // Submit and wait for the full transaction (so we get events back)
     const response = await this.provider.submitAndWaitForTransaction(unsigned.commands)
+
     const txRecord = response.transaction as Record<string, unknown>
     const updateId: string = typeof txRecord.updateId === 'string' ? txRecord.updateId : ''
     const recordTime: string = typeof txRecord.recordTime === 'string' ? txRecord.recordTime : ''
 
-    this.logger.debug(`CantonChain.execute: submitted, updateId=${updateId}`)
-
     // Parse execution receipt from the transaction events
     const receipt = parseCantonExecutionReceipt(response.transaction, updateId)
+
     const timestamp = recordTime
       ? Math.floor(new Date(recordTime).getTime() / 1000)
       : Math.floor(Date.now() / 1000)
@@ -583,7 +570,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * Fetches CCV verification results for a CCIP message from the Canton indexer.
-   * @param opts - Options including the CCIP request containing the message ID to query.
+   * @param opts - Options that should only include the CCIP request with the message ID to query.
    * @returns CCIPVerifications with verification policy and individual verifier results.
    */
   override async getVerifications(
