@@ -16,6 +16,7 @@ export {
   type JsCommands,
   type JsGetActiveContractsResponse,
   type JsSubmitAndWaitForTransactionResponse,
+  type JsTransaction,
   type SubmitAndWaitResponse,
   type TemplateFilter,
   type TransactionFilter,

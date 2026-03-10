@@ -40,7 +40,12 @@ import {
   ChainFamily,
 } from '../types.ts'
 import { networkInfo } from '../utils.ts'
-import { type CantonClient, type JsCommands, createCantonClient } from './client/index.ts'
+import {
+  type CantonClient,
+  type JsCommands,
+  type JsTransaction,
+  createCantonClient,
+} from './client/index.ts'
 import { parseCantonExecutionReceipt, parseCantonSendResult, resolveTimestamp } from './events.ts'
 import { AcsDisclosureProvider } from './explicit-disclosures/acs.ts'
 import { EdsDisclosureProvider } from './explicit-disclosures/eds.ts'
@@ -142,7 +147,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     ['mainnet', 'canton:MainNet'],
     ['main', 'canton:MainNet'],
     ['canton-mainnet', 'canton:MainNet'],
-    ['global', 'canton:DevNet'],
+    ['global', 'canton:LocalNet'],
   ])
 
   /**
@@ -260,18 +265,76 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * {@inheritDoc Chain.getTransaction}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
+   * Fetches a Canton transaction (update) by its update ID.
+   *
+   * The ledger is queried via `/v2/updates/transaction-by-id` with a wildcard
+   * party filter so that all visible events are returned without requiring a
+   * known party ID.
+   *
+   * Canton concepts are mapped to {@link ChainTransaction} fields as follows:
+   * - `hash`        — the Canton `updateId`
+   * - `blockNumber` — the ledger `offset`
+   * - `timestamp`   — `effectiveAt` parsed to Unix seconds
+   * - `from`        — first `actingParties` entry of the first exercised event
+   * - `logs`        — one {@link ChainLog} per transaction event
+   *
+   * @param hash - The Canton update ID (transaction hash) to look up.
+   * @returns A {@link ChainTransaction} with events mapped to logs.
    */
-  getTransaction(_hash: string): Promise<ChainTransaction> {
-    throw new CCIPNotImplementedError('CantonChain.getTransaction')
+  async getTransaction(hash: string): Promise<ChainTransaction> {
+    const tx: JsTransaction = await this.provider.getTransactionById(hash)
+
+    const timestamp = tx.effectiveAt
+      ? Math.floor(new Date(tx.effectiveAt).getTime() / 1000)
+      : Math.floor(Date.now() / 1000)
+
+    // Extract the submitter from the first exercised event's actingParties.
+    let from = ''
+    for (const event of tx.events) {
+      const ev = event as Record<string, unknown>
+      const exercised = ev['ExercisedEvent'] as Record<string, unknown> | undefined
+      if (
+        exercised?.actingParties &&
+        Array.isArray(exercised.actingParties) &&
+        exercised.actingParties.length > 0
+      ) {
+        from = String(exercised.actingParties[0])
+        break
+      }
+    }
+
+    // Build one ChainLog per event.  Events can be
+    // { CreatedEvent: ... }, { ExercisedEvent: ... }, or { ArchivedEvent: ... }.
+    const logs: ChainLog[] = tx.events.map((event, index) => {
+      const ev = event as Record<string, unknown>
+      const inner = (ev['CreatedEvent'] ??
+        ev['ExercisedEvent'] ??
+        ev['ArchivedEvent'] ??
+        ev) as Record<string, unknown>
+      const templateId = typeof inner['templateId'] === 'string' ? inner['templateId'] : ''
+      return {
+        address: templateId,
+        transactionHash: hash,
+        index,
+        blockNumber: tx.offset,
+        topics: templateId ? [templateId] : [],
+        data: inner,
+      }
+    })
+
+    return {
+      hash,
+      blockNumber: tx.offset,
+      timestamp,
+      from,
+      logs,
+    }
   }
 
   /**
    * {@inheritDoc Chain.getLogs}
    * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
    */
-  // eslint-disable-next-line require-yield
   getLogs(_opts: LogFilter): AsyncIterableIterator<ChainLog> {
     throw new CCIPNotImplementedError('CantonChain.getLogs')
   }
