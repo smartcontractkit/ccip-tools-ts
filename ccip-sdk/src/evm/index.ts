@@ -19,6 +19,7 @@ import {
   isHexString,
   keccak256,
   toBeHex,
+  toBigInt,
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
@@ -689,7 +690,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         break
       }
       case CCIPVersion.V1_6:
-        offRampABI ??= OffRamp_1_6_ABI
+        offRampABI = OffRamp_1_6_ABI
       // falls through
       case CCIPVersion.V2_0: {
         offRampABI ??= OffRamp_2_0_ABI
@@ -1756,35 +1757,48 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     yield* super.getExecutionReceipts(opts_)
   }
 
-  /** {@inheritDoc Chain.estimateGasForMessageId} */
-  override async estimateGasForMessageId(messageId: string): Promise<number> {
-    const { lane, message } = await this.getMessageById(messageId)
-
-    const offRamp =
-      ('offRampAddress' in message && message.offRampAddress) ||
-      (await this.apiClient!.getExecutionInput(messageId)).offRamp
-
-    const destTokenAmounts = message.tokenAmounts
-      .filter((ta): ta is typeof ta & { destTokenAddress: string } => 'destTokenAddress' in ta)
-      .map((ta) => ({ token: ta.destTokenAddress, amount: ta.amount }))
-
-    return this.estimateReceiveExecution({
-      offRamp,
-      receiver: message.receiver,
-      message: {
-        sourceChainSelector: lane.sourceChainSelector,
-        messageId: message.messageId,
-        sender: message.sender,
-        data: message.data,
-        destTokenAmounts,
-      },
-    })
-  }
-
   /** {@inheritDoc Chain.estimateReceiveExecution} */
   override async estimateReceiveExecution(
     opts: Parameters<NonNullable<Chain['estimateReceiveExecution']>>[0],
   ): Promise<number> {
+    if (!('offRamp' in opts)) {
+      const { lane, message, metadata } = await this.getMessageById(opts.messageId)
+
+      const offRamp =
+        ('offRampAddress' in message && message.offRampAddress) ||
+        metadata?.offRamp ||
+        (await this.apiClient!.getExecutionInput(opts.messageId)).offRamp
+
+      const destTokenAmounts = await Promise.all(
+        message.tokenAmounts.map(async (ta) => {
+          const token = 'destTokenAddress' in ta ? ta.destTokenAddress : ta.token
+          let amount = ta.amount
+          if ('extraData' in ta && isHexString(ta.extraData, 32)) {
+            // extraData is source token decimals in most pools derived from standard TP contracts;
+            // we can identify for it being exactly 32B and being a small integer; otherwise, assume same decimals
+            const sourceDecimals = toBigInt(ta.extraData)
+            if (sourceDecimals <= 36) {
+              const { decimals: destDecimals } = await this.getTokenInfo(token)
+              amount =
+                (amount * BigInt(10) ** BigInt(destDecimals)) / BigInt(10) ** BigInt(sourceDecimals)
+            }
+          }
+          return { token, amount }
+        }),
+      )
+
+      opts = {
+        offRamp,
+        message: {
+          sourceChainSelector: lane.sourceChainSelector,
+          messageId: message.messageId,
+          receiver: message.receiver,
+          sender: message.sender,
+          data: message.data,
+          destTokenAmounts,
+        },
+      }
+    }
     const destRouter = await this.getRouterForOffRamp(
       opts.offRamp,
       opts.message.sourceChainSelector,

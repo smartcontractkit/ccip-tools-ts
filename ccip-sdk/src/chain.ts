@@ -1495,35 +1495,28 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
-   * Estimate `ccipReceive` gas for a message identified by its messageId.
-   *
-   * Fetches the message from the API, discovers the offRamp, and simulates execution.
-   *
-   * @param messageId - The message ID to estimate gas for
-   * @returns estimated execution gas
-   * @throws {@link CCIPApiClientNotAvailableError} if API client is not available
-   */
-  estimateGasForMessageId?(messageId: string): Promise<number>
-
-  /**
    * Estimate `ccipReceive` execution cost (gas, computeUnits) for this *dest*
-   * @param opts - estimation options
+   * @param opts - estimation options, either `messageId` (for api) or `offRamp`, `message` (with `destTokenAmounts`)
    * @returns estimated execution cost (gas or computeUnits)
    */
-  estimateReceiveExecution?(opts: {
-    offRamp: string
-    receiver: string
-    message: {
-      sourceChainSelector: bigint
-      messageId: string
-      sender?: string
-      data?: BytesLike
-      destTokenAmounts?: readonly {
-        token: string
-        amount: bigint
-      }[]
-    }
-  }): Promise<number>
+  estimateReceiveExecution?(
+    opts:
+      | {
+          offRamp: string
+          message: {
+            sourceChainSelector: bigint
+            messageId: string
+            receiver: string
+            sender?: string
+            data?: BytesLike
+            destTokenAmounts?: readonly {
+              token: string
+              amount: bigint
+            }[]
+          }
+        }
+      | { messageId: string },
+  ): Promise<number>
 }
 
 /**

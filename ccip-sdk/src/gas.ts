@@ -122,7 +122,12 @@ export async function estimateReceiveExecution({
       const tokenAmount =
         'destTokenAddress' in ta
           ? ta
-          : await sourceToDestTokenAddresses(source, dest.network.chainSelector, onRamp, ta)
+          : await sourceToDestTokenAddresses({
+              source,
+              onRamp,
+              destChainSelector: dest.network.chainSelector,
+              sourceTokenAmount: ta,
+            })
       const sourceTokenAddress =
         'token' in ta
           ? ta.token
@@ -147,10 +152,10 @@ export async function estimateReceiveExecution({
     }),
   )
   return dest.estimateReceiveExecution({
-    receiver: message.receiver,
     offRamp,
     message: {
       messageId: message.messageId ?? hexlify(randomBytes(32)),
+      receiver: message.receiver,
       sender: message.sender,
       data: message.data,
       sourceChainSelector: source.network.chainSelector,

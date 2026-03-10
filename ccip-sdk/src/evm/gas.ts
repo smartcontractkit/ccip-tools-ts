@@ -77,13 +77,13 @@ const findBalancesSlot = memoize(
   { maxArgs: 1 },
 )
 
-type EstimateExecGasOpts = Pick<
-  Parameters<NonNullable<Chain['estimateReceiveExecution']>>[0],
-  'message' | 'receiver'
-> & {
-  /*  */
+type EstimateExecGasOpts = {
   provider: JsonRpcApiProvider
   router: string
+  message: Extract<
+    Parameters<NonNullable<Chain['estimateReceiveExecution']>>[0],
+    { message: unknown }
+  >['message']
 }
 
 /**
@@ -91,12 +91,7 @@ type EstimateExecGasOpts = Pick<
  * @param opts - Options for estimation: provider, destRouter, receiver address and message
  * @returns Estimated gasLimit
  */
-export async function estimateExecGas({
-  provider,
-  router,
-  receiver,
-  message,
-}: EstimateExecGasOpts) {
+export async function estimateExecGas({ provider, router, message }: EstimateExecGasOpts) {
   // we need to override the state, increasing receiver's balance for each token, to simulate the
   // state after tokens were transferred by the offRamp just before calling `ccipReceive`
   const destAmounts: Record<string, bigint> = {}
@@ -106,17 +101,15 @@ export async function estimateExecGas({
       const tokenContract = new Contract(token, TokenABI, provider) as unknown as TypedContract<
         typeof TokenABI
       >
-      const currentBalance = await tokenContract.balanceOf(receiver)
+      const currentBalance = await tokenContract.balanceOf(message.receiver)
       destAmounts[token] = currentBalance
     }
     destAmounts[token]! += amount
-    const balancesSlot = await findBalancesSlot(token, provider, receiver, router)
+    const balancesSlot = await findBalancesSlot(token, provider, message.receiver, router)
     stateOverrides[token] = {
       stateDiff: {
-        [solidityPackedKeccak256(['uint256', 'uint256'], [receiver, balancesSlot])]: toBeHex(
-          destAmounts[token]!,
-          32,
-        ),
+        [solidityPackedKeccak256(['uint256', 'uint256'], [message.receiver, balancesSlot])]:
+          toBeHex(destAmounts[token]!, 32),
       },
     }
   }
@@ -138,7 +131,7 @@ export async function estimateExecGas({
       (await provider.send('eth_estimateGas', [
         {
           from: router,
-          to: receiver,
+          to: message.receiver,
           data: calldata,
         },
         'latest',

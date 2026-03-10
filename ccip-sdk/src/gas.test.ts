@@ -374,7 +374,7 @@ describe('estimateExecGasForRequest', () => {
   })
 })
 
-describe('EVMChain.estimateGasForMessageId', () => {
+describe('EVMChain.estimateReceiveExecution({ messageId })', () => {
   beforeEach(() => {
     mock.restoreAll()
   })
@@ -433,7 +433,7 @@ describe('EVMChain.estimateGasForMessageId', () => {
       },
     }))
 
-    const result = await chain.estimateGasForMessageId(messageId)
+    const result = await chain.estimateReceiveExecution({ messageId })
 
     assert.equal(result, 23700) // 44000 - (21000 - 700)
     assert.equal(chain.getMessageById.mock.calls.length, 1)
@@ -466,7 +466,7 @@ describe('EVMChain.estimateGasForMessageId', () => {
       },
     }))
 
-    const result = await chain.estimateGasForMessageId(messageId)
+    const result = await chain.estimateReceiveExecution({ messageId })
 
     assert.equal(result, 23700)
     assert.equal(chain.apiClient.getExecutionInput.mock.calls.length, 1)
@@ -476,7 +476,7 @@ describe('EVMChain.estimateGasForMessageId', () => {
     const { chain } = createMockEVMChain()
 
     await assert.rejects(
-      () => chain.estimateGasForMessageId(hexlify(randomBytes(32))),
+      () => chain.estimateReceiveExecution({ messageId: hexlify(randomBytes(32)) }),
       CCIPApiClientNotAvailableError,
     )
   })
@@ -514,7 +514,7 @@ describe('EVMChain.estimateGasForMessageId', () => {
       },
     }))
 
-    const result = await chain.estimateGasForMessageId(messageId)
+    const result = await chain.estimateReceiveExecution({ messageId })
 
     assert.equal(result, 34700) // 55000 - (21000 - 700)
     // Verify state override was applied for the dest token

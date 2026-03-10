@@ -771,6 +771,7 @@ export class CCIPAPIClient {
       status,
       origin,
       onramp,
+      offramp,
       version,
       readyForManualExecution,
       sendTransactionHash,
@@ -840,6 +841,7 @@ export class CCIPAPIClient {
         deliveryTime,
         sourceNetworkInfo: ensureNetworkInfo(sourceNetworkInfo, this.logger),
         destNetworkInfo: ensureNetworkInfo(destNetworkInfo, this.logger),
+        offRamp: offramp,
       },
     }
   }
