@@ -107,7 +107,14 @@ export const builder = (yargs: Argv) =>
       wallet: {
         alias: 'w',
         type: 'string',
-        describe: 'Wallet: ledger[:index] or private key',
+        describe:
+          'Wallet: ledger[:index], keystore:<name> (requires --keystore-type), or private key',
+      },
+      'keystore-type': {
+        type: 'string',
+        describe:
+          'Keystore type when using keystore:<name>. foundry: reads ~/.foundry/keystores/<name>. hardhat: runs node_modules/.bin/hardhat keystore get (must run from inside a Hardhat project)',
+        choices: ['foundry', 'hardhat'],
       },
       'token-receiver': {
         type: 'string',

@@ -84,10 +84,11 @@ For array fields (`ccvs`, `ccvArgs`, `tokenArgs`), repeating a key creates an ar
 
 ### Wallet
 
-| Option          | Alias | Type    | Description                                                                  |
-| --------------- | ----- | ------- | ---------------------------------------------------------------------------- |
-| `--wallet`      | `-w`  | string  | Wallet source. See [Configuration](/cli/configuration#wallet-configuration). |
-| `--approve-max` | -     | boolean | Approve maximum token allowance instead of exact amount needed.              |
+| Option            | Alias | Type    | Description                                                                                           |
+| ----------------- | ----- | ------- | ----------------------------------------------------------------------------------------------------- |
+| `--wallet`        | `-w`  | string  | Wallet source. See [Configuration](/cli/configuration#wallet-configuration).                          |
+| `--keystore-type` | -     | string  | Keystore type for `keystore:<name>` wallets: `foundry` or `hardhat`. Required with `keystore:<name>`. |
+| `--approve-max`   | -     | boolean | Approve maximum token allowance instead of exact amount needed.                                       |
 
 ### Dry-Run
 

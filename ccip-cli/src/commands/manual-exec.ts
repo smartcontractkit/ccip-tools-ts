@@ -90,7 +90,13 @@ export const builder = (yargs: Argv) =>
         alias: 'w',
         type: 'string',
         describe:
-          'Wallet to send transactions with; pass `ledger[:index_or_derivation]` to use Ledger USB hardware wallet, or private key in `USER_KEY` environment variable',
+          'Wallet to send transactions with; pass `ledger[:index_or_derivation]` to use Ledger USB hardware wallet, `keystore:<name>` for an encrypted keystore (see --keystore-type), or private key in `USER_KEY` environment variable',
+      },
+      'keystore-type': {
+        type: 'string',
+        describe:
+          'Keystore type when using keystore:<name>. foundry: reads ~/.foundry/keystores/<name>. hardhat: runs node_modules/.bin/hardhat keystore get (must run from inside a Hardhat project)',
+        choices: ['foundry', 'hardhat'],
       },
       'force-buffer': {
         type: 'boolean',
