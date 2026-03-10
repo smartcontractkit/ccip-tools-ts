@@ -11,6 +11,8 @@ export type SubmitAndWaitResponse = components['schemas']['SubmitAndWaitResponse
 /** Full transaction response including all events */
 export type JsSubmitAndWaitForTransactionResponse =
   components['schemas']['JsSubmitAndWaitForTransactionResponse']
+/** A single transaction from the ledger */
+export type JsTransaction = components['schemas']['JsTransaction']
 /** Request to get active contracts */
 export type GetActiveContractsRequest = components['schemas']['GetActiveContractsRequest']
 /** Response containing active contracts */
@@ -185,6 +187,43 @@ export function createCantonClient(config: CantonClientConfig) {
       } catch {
         return false
       }
+    },
+
+    /**
+     * Fetch a transaction by its update ID without requiring a known party.
+     * Uses `filtersForAnyParty` with a wildcard so all visible events are returned.
+     * @param updateId - The update ID (Canton transaction hash)
+     * @returns The full `JsTransaction` including all events
+     */
+    async getTransactionById(updateId: string): Promise<JsTransaction> {
+      const response = await ledgerPost<{ transaction: JsTransaction }>(
+        baseUrl,
+        '/v2/updates/transaction-by-id',
+        headers,
+        timeoutMs,
+        {
+          updateId,
+          transactionFormat: {
+            eventFormat: {
+              filtersByParty: {},
+              filtersForAnyParty: {
+                cumulative: [
+                  {
+                    identifierFilter: {
+                      WildcardFilter: {
+                        value: { includeCreatedEventBlob: false },
+                      },
+                    },
+                  },
+                ],
+              },
+              verbose: true,
+            },
+            transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
+          },
+        },
+      )
+      return response.transaction
     },
 
     /**
