@@ -420,25 +420,6 @@ export default [
   },
   {
     type: 'event',
-    name: 'MaxGasBufferToUpdateStateUpdated',
-    inputs: [
-      {
-        name: 'oldMaxGasBufferToUpdateState',
-        type: 'uint32',
-        indexed: false,
-        internalType: 'uint32',
-      },
-      {
-        name: 'newMaxGasBufferToUpdateState',
-        type: 'uint32',
-        indexed: false,
-        internalType: 'uint32',
-      },
-    ],
-    anonymous: false,
-  },
-  {
-    type: 'event',
     name: 'OwnershipTransferRequested',
     inputs: [
       {
@@ -610,6 +591,19 @@ export default [
     type: 'error',
     name: 'InvalidEncodingVersion',
     inputs: [{ name: 'version', type: 'uint8', internalType: 'uint8' }],
+  },
+  {
+    type: 'error',
+    name: 'InvalidFinalityForReceiver',
+    inputs: [
+      { name: 'receiver', type: 'address', internalType: 'address' },
+      { name: 'msgBlockDepth', type: 'uint16', internalType: 'uint16' },
+      {
+        name: 'requiredBlockDepth',
+        type: 'uint16',
+        internalType: 'uint16',
+      },
+    ],
   },
   {
     type: 'error',
