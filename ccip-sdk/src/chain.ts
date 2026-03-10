@@ -1,4 +1,4 @@
-import { type BytesLike, dataLength } from 'ethers'
+import { type BytesLike, dataLength, keccak256 } from 'ethers'
 import type { PickDeep, SetOptional } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
@@ -24,6 +24,7 @@ import type {
   SuiExtraArgsV1,
 } from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
+import { decodeMessageV1 } from './messages.ts'
 import { getOffchainTokenData } from './offchain.ts'
 import { getMessagesInTx } from './requests.ts'
 import { DEFAULT_GAS_LIMIT } from './shared/constants.ts'
@@ -1024,16 +1025,56 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * When `opts` already contains `input` the method is a no-op and returns it unchanged.
    * When `opts` contains only a `messageId` it calls `apiClient.getExecutionInput` and merges
    * the result back with any extra opts fields (e.g. `gasLimit`).
+   * If opts.gasLimit is undefined and `estimateReceiveExecution` is available, try to estimate gasLimitOverride
    *
    * @throws {@link CCIPApiClientNotAvailableError} if `messageId` is provided but no apiClient
    */
   protected async resolveExecuteOpts(
     opts: ExecuteOpts,
-  ): Promise<Omit<ExecuteOpts, 'messageId'> & { offRamp: string; input: ExecutionInput }> {
-    if ('input' in opts) return opts
-    if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
-    const { offRamp, ...input } = await this.apiClient.getExecutionInput(opts.messageId)
-    return { ...opts, offRamp, input }
+  ): Promise<Extract<ExecuteOpts, { input: unknown }>> {
+    let opts_: Extract<typeof opts, { input: unknown }>
+    if ('input' in opts) {
+      opts_ = opts
+    } else if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
+    else {
+      const { offRamp, ...input } = await this.apiClient.getExecutionInput(opts.messageId)
+      opts_ = { ...opts, offRamp, input }
+    }
+
+    if (
+      opts_.gasLimit == null &&
+      this.estimateReceiveExecution &&
+      (!('message' in opts_.input) ||
+        !opts_.input.message.tokenAmounts.length ||
+        opts_.input.message.tokenAmounts.every((ta) => 'destTokenAddress' in ta))
+    ) {
+      let message
+      if ('message' in opts_.input) {
+        message = {
+          ...opts_.input.message,
+          // pass `tokenAmount` with `destTokenAddress` to estimate
+          destTokenAmounts: opts_.input.message.tokenAmounts,
+        }
+      } else {
+        const decoded = decodeMessageV1(opts_.input.encodedMessage)
+        message = {
+          ...decoded,
+          messageId: keccak256(opts_.input.encodedMessage),
+          destTokenAmounts: decoded.tokenTransfer,
+        }
+      }
+      try {
+        opts_.gasLimit = await this.estimateReceiveExecution({
+          offRamp: opts_.offRamp,
+          message,
+        })
+      } catch (err) {
+        // ignore if receiver fails, let estimation of execute method itself throw if needed
+        this.logger.debug('Failed to auto-estimateReceiveExecution for:', opts, err)
+      }
+    }
+
+    return opts_
   }
 
   /**
@@ -1509,10 +1550,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
             receiver: string
             sender?: string
             data?: BytesLike
-            destTokenAmounts?: readonly {
-              token: string
-              amount: bigint
-            }[]
+            destTokenAmounts?: readonly ((
+              | { token: string }
+              | { destTokenAddress: string; extraData?: string }
+            ) & { amount: bigint })[]
           }
         }
       | { messageId: string },

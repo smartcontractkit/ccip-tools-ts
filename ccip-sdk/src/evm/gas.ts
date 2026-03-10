@@ -1,4 +1,5 @@
 import {
+  type BytesLike,
   type JsonRpcApiProvider,
   Contract,
   FunctionFragment,
@@ -14,7 +15,6 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 import { memoize } from 'micro-memoize'
 
-import type { Chain } from '../chain.ts'
 import TokenABI from './abi/BurnMintERC677Token.ts'
 import RouterABI from './abi/Router.ts'
 import { defaultAbiCoder, interfaces } from './const.ts'
@@ -80,10 +80,14 @@ const findBalancesSlot = memoize(
 type EstimateExecGasOpts = {
   provider: JsonRpcApiProvider
   router: string
-  message: Extract<
-    Parameters<NonNullable<Chain['estimateReceiveExecution']>>[0],
-    { message: unknown }
-  >['message']
+  message: {
+    sourceChainSelector: bigint
+    messageId: string
+    receiver: string
+    sender?: string
+    data?: BytesLike
+    destTokenAmounts?: readonly { token: string; amount: bigint }[]
+  }
 }
 
 /**

@@ -28,7 +28,7 @@ export type EstimateMessageInput = {
   data?: BytesLike
   /**
    * optional tokenAmounts; `amount` with either source `token` (as in MessageInput) or
-   * `{ sourceTokenAddress?, sourcePoolAddress, destTokenAddress }` (as in v1.5..v1.7 tokenAmounts)
+   * `{ sourceTokenAddress?, sourcePoolAddress, destTokenAddress }` (as in v1.5..v2.0 tokenAmounts)
    * can be provided
    */
   tokenAmounts?: readonly ({
