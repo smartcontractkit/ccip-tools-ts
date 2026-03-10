@@ -28,10 +28,12 @@ import {
   MessageStatus,
   NetworkType,
 } from '../types.ts'
-import { bigIntReviver, parseJson } from '../utils.ts'
+import { bigIntReviver, decodeAddress, parseJson } from '../utils.ts'
 import type {
   APIErrorResponse,
   LaneLatencyResponse,
+  MessageSearchFilters,
+  MessageSearchPage,
   RawExecutionInputsResult,
   RawLaneLatencyResponse,
   RawMessageResponse,
@@ -40,7 +42,14 @@ import type {
 } from './types.ts'
 import { calculateManualExecProof } from '../execution.ts'
 
-export type { APICCIPRequestMetadata, APIErrorResponse, LaneLatencyResponse } from './types.ts'
+export type {
+  APICCIPRequestMetadata,
+  APIErrorResponse,
+  LaneLatencyResponse,
+  MessageSearchFilters,
+  MessageSearchPage,
+  MessageSearchResult,
+} from './types.ts'
 
 /** Default CCIP API base URL */
 export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
@@ -51,7 +60,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.1.1-fcb4788'
+export const SDK_VERSION = '1.1.1-e19fa14'
 // generate:end
 
 /** SDK telemetry header name */
@@ -87,6 +96,7 @@ const validateMessageStatus = (value: string, logger: Logger): MessageStatus => 
 
 const ensureNetworkInfo = (o: RawNetworkInfo, logger: Logger): NetworkInfo => {
   return Object.assign(o, {
+    chainSelector: BigInt(o.chainSelector),
     networkType: o.name.includes('-mainnet') ? NetworkType.Mainnet : NetworkType.Testnet,
     ...(!('family' in o) && { family: validateChainFamily(o.chainFamily, logger) }),
   }) as unknown as NetworkInfo
@@ -379,9 +389,135 @@ export class CCIPAPIClient {
   }
 
   /**
+   * Searches CCIP messages using filters with cursor-based pagination.
+   *
+   * @param filters - Optional search filters. Ignored when `options.cursor` is provided
+   *   (the cursor already encodes the original filters).
+   * @param options - Optional pagination options: `limit` (max results per page) and
+   *   `cursor` (opaque token from a previous {@link MessageSearchPage} for the next page).
+   * @returns Promise resolving to a {@link MessageSearchPage} with results and pagination info.
+   *
+   * @remarks
+   * A 404 response is treated as "no results found" and returns an empty page,
+   * unlike {@link CCIPAPIClient.getMessageById} which throws on 404.
+   * When paginating with a cursor, the `filters` parameter is ignored because
+   * the cursor encodes the original filters.
+   *
+   * @throws {@link CCIPTimeoutError} if request times out.
+   * @throws {@link CCIPHttpError} on HTTP errors (4xx/5xx, except 404 which returns empty).
+   *
+   * @see {@link MessageSearchFilters} — available filter fields
+   * @see {@link MessageSearchPage} — return type with pagination
+   * @see {@link CCIPAPIClient.getMessageById} — fetch full message details for a search result
+   * @see {@link CCIPAPIClient.getMessageIdsInTx} — convenience wrapper using `sourceTransactionHash`
+   *
+   * @example Search by sender
+   * ```typescript
+   * const page = await api.searchMessages({
+   *   sender: '0x9d087fC03ae39b088326b67fA3C788236645b717',
+   * })
+   * for (const msg of page.data) {
+   *   console.log(`${msg.messageId}: ${msg.status}`)
+   * }
+   * ```
+   *
+   * @example Paginate through all results
+   * ```typescript
+   * let page = await api.searchMessages({ sender: '0x...' }, { limit: 10 })
+   * const all = [...page.data]
+   * while (page.hasNextPage) {
+   *   page = await api.searchMessages(undefined, { cursor: page.cursor! })
+   *   all.push(...page.data)
+   * }
+   * ```
+   *
+   * @example Filter by lane and sender
+   * ```typescript
+   * const page = await api.searchMessages({
+   *   sender: '0x9d087fC03ae39b088326b67fA3C788236645b717',
+   *   sourceChainSelector: 16015286601757825753n,
+   *   destChainSelector: 14767482510784806043n,
+   * })
+   * ```
+   */
+  async searchMessages(
+    filters?: MessageSearchFilters,
+    options?: { limit?: number; cursor?: string },
+  ): Promise<MessageSearchPage> {
+    const url = new URL(`${this.baseUrl}/v2/messages`)
+
+    if (options?.cursor) {
+      // Cursor encodes all original filters — only send cursor (and optional limit)
+      url.searchParams.set('cursor', options.cursor)
+    } else if (filters) {
+      if (filters.sender) url.searchParams.set('sender', filters.sender)
+      if (filters.receiver) url.searchParams.set('receiver', filters.receiver)
+      if (filters.sourceChainSelector != null)
+        url.searchParams.set('sourceChainSelector', filters.sourceChainSelector.toString())
+      if (filters.destChainSelector != null)
+        url.searchParams.set('destChainSelector', filters.destChainSelector.toString())
+      if (filters.sourceTransactionHash)
+        url.searchParams.set('sourceTransactionHash', filters.sourceTransactionHash)
+      if (filters.readyForManualExecOnly != null)
+        url.searchParams.set('readyForManualExecOnly', String(filters.readyForManualExecOnly))
+    }
+
+    if (options?.limit != null) url.searchParams.set('limit', options.limit.toString())
+
+    this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`)
+
+    const response = await this._fetchWithTimeout(url.toString(), 'searchMessages')
+
+    if (!response.ok) {
+      // 404 → empty results (search found nothing)
+      if (response.status === HttpStatus.NOT_FOUND) {
+        return { data: [], hasNextPage: false }
+      }
+
+      let apiError: APIErrorResponse | undefined
+      try {
+        apiError = parseJson<APIErrorResponse>(await response.text())
+      } catch {
+        // Response body not JSON
+      }
+
+      throw new CCIPHttpError(response.status, response.statusText, {
+        context: apiError
+          ? { apiErrorCode: apiError.error, apiErrorMessage: apiError.message }
+          : undefined,
+      })
+    }
+
+    const raw = parseJson<RawMessagesResponse>(await response.text())
+
+    this.logger.debug('searchMessages raw response:', raw)
+
+    return {
+      data: raw.data.map((msg) => {
+        const sourceInfo = ensureNetworkInfo(msg.sourceNetworkInfo, this.logger)
+        const destInfo = ensureNetworkInfo(msg.destNetworkInfo, this.logger)
+        return {
+          ...msg,
+          status: validateMessageStatus(msg.status, this.logger),
+          sourceNetworkInfo: sourceInfo,
+          destNetworkInfo: destInfo,
+          sender: decodeAddress(msg.sender, sourceInfo.family),
+          receiver: decodeAddress(msg.receiver, destInfo.family),
+          origin: decodeAddress(msg.origin, sourceInfo.family),
+        }
+      }),
+      hasNextPage: raw.pagination.hasNextPage,
+      cursor: raw.pagination.cursor ?? undefined,
+    }
+  }
+
+  /**
    * Fetches message IDs from a source transaction hash.
    *
-   * @param txHash - Source transaction hash (EVM hex or Solana Base58).
+   * @remarks
+   * Uses {@link CCIPAPIClient.searchMessages} internally with `sourceTransactionHash` filter and `limit: 100`.
+   *
+   * @param txHash - Source transaction hash.
    * @returns Promise resolving to array of message IDs.
    *
    * @throws {@link CCIPMessageNotFoundInTxError} when no messages found (404 or empty).
@@ -408,61 +544,17 @@ export class CCIPAPIClient {
    * ```
    */
   async getMessageIdsInTx(txHash: string): Promise<string[]> {
-    const url = new URL(`${this.baseUrl}/v2/messages`)
-    url.searchParams.set('sourceTransactionHash', txHash)
-    url.searchParams.set('limit', '100')
+    const result = await this.searchMessages({ sourceTransactionHash: txHash }, { limit: 100 })
 
-    this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`)
-
-    const response = await this._fetchWithTimeout(url.toString(), 'getMessageIdsInTx')
-
-    if (!response.ok) {
-      // Try to parse structured error response from API
-      let apiError: APIErrorResponse | undefined
-      try {
-        apiError = parseJson<APIErrorResponse>(await response.text())
-      } catch {
-        // Response body not JSON, use HTTP status only
-      }
-
-      // 404 - No messages found
-      if (response.status === HttpStatus.NOT_FOUND) {
-        throw new CCIPMessageNotFoundInTxError(txHash, {
-          context: apiError
-            ? {
-                apiErrorCode: apiError.error,
-                apiErrorMessage: apiError.message,
-              }
-            : undefined,
-        })
-      }
-
-      // Generic HTTP error for other cases
-      throw new CCIPHttpError(response.status, response.statusText, {
-        context: apiError
-          ? {
-              apiErrorCode: apiError.error,
-              apiErrorMessage: apiError.message,
-            }
-          : undefined,
-      })
-    }
-
-    const raw = parseJson<RawMessagesResponse>(await response.text())
-
-    this.logger.debug('getMessageIdsInTx raw response:', raw)
-
-    // Handle empty results
-    if (raw.data.length === 0) {
+    if (result.data.length === 0) {
       throw new CCIPMessageNotFoundInTxError(txHash)
     }
 
-    // Handle unexpected pagination (more than 100 messages)
-    if (raw.pagination.hasNextPage) {
-      throw new CCIPUnexpectedPaginationError(txHash, raw.data.length)
+    if (result.hasNextPage) {
+      throw new CCIPUnexpectedPaginationError(txHash, result.data.length)
     }
 
-    return raw.data.map((msg) => msg.messageId)
+    return result.data.map((msg) => msg.messageId)
   }
 
   /**

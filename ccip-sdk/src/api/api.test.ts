@@ -836,14 +836,299 @@ describe('CCIPAPIClient', () => {
     })
   })
 
+  describe('searchMessages', () => {
+    const mockSearchResponse = {
+      data: [
+        {
+          messageId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+          origin: '0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E',
+          sender: '0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E',
+          receiver: '0x893f0bcAa7F325C2B6BbD2133536f4E4B8feA88e',
+          status: 'SUCCESS',
+          sourceNetworkInfo: {
+            name: 'ethereum-mainnet',
+            chainSelector: '5009297550715157269',
+            chainId: '1',
+            chainFamily: 'EVM',
+          },
+          destNetworkInfo: {
+            name: 'arbitrum-mainnet',
+            chainSelector: '4949039107694359620',
+            chainId: '42161',
+            chainFamily: 'EVM',
+          },
+          sendTransactionHash: '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
+          sendTimestamp: '2023-12-01T10:30:00Z',
+        },
+      ],
+      pagination: {
+        limit: 10,
+        hasNextPage: false,
+      },
+    }
+
+    it('should set sender filter as query parameter', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(mockSearchResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      await client.searchMessages({ sender: '0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E' })
+
+      const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.includes('/v2/messages'))
+      assert.ok(url.includes('sender=0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E'))
+    })
+
+    it('should set all filters as query parameters', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(mockSearchResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      await client.searchMessages({
+        sender: '0xSender',
+        receiver: '0xReceiver',
+        sourceChainSelector: 5009297550715157269n,
+        destChainSelector: 4949039107694359620n,
+        sourceTransactionHash: '0xTxHash',
+        readyForManualExecOnly: true,
+      })
+
+      const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.includes('sender=0xSender'))
+      assert.ok(url.includes('receiver=0xReceiver'))
+      assert.ok(url.includes('sourceChainSelector=5009297550715157269'))
+      assert.ok(url.includes('destChainSelector=4949039107694359620'))
+      assert.ok(url.includes(`sourceTransactionHash=${encodeURIComponent('0xTxHash')}`))
+      assert.ok(url.includes('readyForManualExecOnly=true'))
+    })
+
+    it('should send readyForManualExecOnly=false when explicitly set', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(mockSearchResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      await client.searchMessages({ readyForManualExecOnly: false })
+
+      const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.includes('readyForManualExecOnly=false'))
+    })
+
+    it('should set limit query parameter', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(mockSearchResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      await client.searchMessages({ sender: '0xSender' }, { limit: 25 })
+
+      const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.includes('limit=25'))
+    })
+
+    it('should use cursor instead of filters when cursor is provided', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(mockSearchResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      await client.searchMessages({ sender: '0xShouldBeIgnored' }, { cursor: 'abc123cursor' })
+
+      const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.includes('cursor=abc123cursor'))
+      assert.ok(!url.includes('sender='))
+    })
+
+    it('should return transformed search results', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(mockSearchResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const page = await client.searchMessages({ sender: '0xSender' })
+
+      assert.equal(page.data.length, 1)
+      assert.equal(
+        page.data[0]!.messageId,
+        '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      )
+      assert.equal(page.data[0]!.status, 'SUCCESS')
+      assert.equal(page.data[0]!.sourceNetworkInfo.chainSelector, 5009297550715157269n)
+      assert.equal(page.data[0]!.destNetworkInfo.chainSelector, 4949039107694359620n)
+      assert.equal(page.hasNextPage, false)
+      assert.equal(page.cursor, undefined)
+    })
+
+    it('should return cursor when hasNextPage is true', async () => {
+      const paginatedResponse = {
+        ...mockSearchResponse,
+        pagination: { limit: 10, hasNextPage: true, cursor: 'nextPageCursor123' },
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(paginatedResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const page = await client.searchMessages({ sender: '0xSender' })
+
+      assert.equal(page.hasNextPage, true)
+      assert.equal(page.cursor, 'nextPageCursor123')
+    })
+
+    it('should return empty data on 404 (no results)', async () => {
+      globalThis.fetch = (() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.NOT_FOUND,
+          statusText: 'Not Found',
+          text: () =>
+            Promise.resolve(JSON.stringify({ error: 'NOT_FOUND', message: 'No messages' })),
+        })) as unknown as typeof fetch
+
+      const client = new CCIPAPIClient()
+      const page = await client.searchMessages({ sender: '0xNonExistent' })
+
+      assert.equal(page.data.length, 0)
+      assert.equal(page.hasNextPage, false)
+    })
+
+    it('should throw CCIPHttpError on non-404 errors', async () => {
+      const errorResponse = { error: 'BAD_REQUEST', message: 'Invalid parameters' }
+      globalThis.fetch = (() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.BAD_REQUEST,
+          statusText: 'Bad Request',
+          text: () => Promise.resolve(JSON.stringify(errorResponse)),
+        })) as unknown as typeof fetch
+
+      const client = new CCIPAPIClient()
+      await assert.rejects(
+        async () => await client.searchMessages({ sender: '0xBad' }),
+        (err: unknown) =>
+          err instanceof CCIPHttpError &&
+          err.context.status === HttpStatus.BAD_REQUEST &&
+          err.context.apiErrorCode === 'BAD_REQUEST',
+      )
+    })
+
+    it('should throw CCIPHttpError with transient flag on 5xx', async () => {
+      globalThis.fetch = (() =>
+        Promise.resolve({
+          ok: false,
+          status: HttpStatus.INTERNAL_SERVER_ERROR,
+          statusText: 'Internal Server Error',
+          text: () => Promise.resolve(JSON.stringify({ error: 'INTERNAL', message: 'Error' })),
+        })) as unknown as typeof fetch
+
+      const client = new CCIPAPIClient()
+      await assert.rejects(
+        async () => await client.searchMessages({ sender: '0x...' }),
+        (err: unknown) => err instanceof CCIPHttpError && err.isTransient === true,
+      )
+    })
+
+    it('should validate message status from API', async () => {
+      const responseWithUnknownStatus = {
+        ...mockSearchResponse,
+        data: [{ ...mockSearchResponse.data[0], status: 'BRAND_NEW_STATUS' }],
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(responseWithUnknownStatus)),
+        }),
+      )
+      const warnFn = mock.fn()
+      const client = new CCIPAPIClient(undefined, {
+        fetch: customFetch as any,
+        logger: { log: () => {}, debug: () => {}, warn: warnFn } as any,
+      })
+      const page = await client.searchMessages({ sender: '0xSender' })
+
+      assert.equal(page.data[0]!.status, 'UNKNOWN')
+      assert.ok(warnFn.mock.calls.length > 0)
+    })
+
+    it('should log raw response via debug', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(mockSearchResponse)),
+        }),
+      )
+      const debugFn = mock.fn()
+      const client = new CCIPAPIClient(undefined, {
+        logger: { log: () => {}, debug: debugFn } as any,
+        fetch: customFetch as any,
+      })
+
+      await client.searchMessages({ sender: '0xSender' })
+
+      assert.equal(debugFn.mock.calls.length, 2) // Once for URL, once for raw response
+      const lastCall = debugFn.mock.calls[1] as unknown as { arguments: unknown[] }
+      assert.equal(lastCall.arguments[0], 'searchMessages raw response:')
+    })
+
+    it('should omit undefined filters from query parameters', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(mockSearchResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      await client.searchMessages({ sender: '0xOnly' })
+
+      const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.includes('sender=0xOnly'))
+      assert.ok(!url.includes('receiver='))
+      assert.ok(!url.includes('sourceChainSelector='))
+      assert.ok(!url.includes('destChainSelector='))
+      assert.ok(!url.includes('sourceTransactionHash='))
+      assert.ok(!url.includes('readyForManualExecOnly='))
+    })
+
+    it('should work with no filters and no options', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(mockSearchResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const page = await client.searchMessages()
+
+      const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.endsWith('/v2/messages'))
+      assert.equal(page.data.length, 1)
+    })
+  })
+
   describe('getMessageIdsInTx', () => {
     const mockMessagesResponse = {
       data: [
         {
           messageId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-          origin: '0x742d35Cc6634C0532925a3b8D5c8C22C5B2D8a3E',
-          sender: '0x742d35Cc6634C0532925a3b8D5c8C22C5B2D8a3E',
-          receiver: '0x893F0bCaa7F325c2b6bBd2133536f4e4b8fea88e',
+          origin: '0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E',
+          sender: '0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E',
+          receiver: '0x893f0bcAa7F325C2B6BbD2133536f4E4B8feA88e',
           status: 'SUCCESS',
           sourceNetworkInfo: {
             name: 'ethereum-mainnet',
@@ -970,7 +1255,9 @@ describe('CCIPAPIClient', () => {
             '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
           ),
         (err: unknown) =>
-          err instanceof CCIPMessageNotFoundInTxError && err.context.apiErrorCode === 'NOT_FOUND',
+          err instanceof CCIPMessageNotFoundInTxError &&
+          err.context.txHash ===
+            '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
       )
     })
 
@@ -1014,7 +1301,7 @@ describe('CCIPAPIClient', () => {
       )
     })
 
-    it('should log raw response via debug', async () => {
+    it('should log raw response via debug (via searchMessages)', async () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
@@ -1033,7 +1320,7 @@ describe('CCIPAPIClient', () => {
 
       assert.equal(debugFn.mock.calls.length, 2) // Once for URL, once for raw response
       const lastCall = debugFn.mock.calls[1] as unknown as { arguments: unknown[] }
-      assert.equal(lastCall.arguments[0], 'getMessageIdsInTx raw response:')
+      assert.equal(lastCall.arguments[0], 'searchMessages raw response:')
       assert.ok(lastCall.arguments[1])
     })
 
