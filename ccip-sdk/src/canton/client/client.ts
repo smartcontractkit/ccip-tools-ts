@@ -2,22 +2,36 @@ import type { components } from './generated/ledger-api.ts'
 import { CCIPError } from '../../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../../errors/codes.ts'
 
-// Re-export useful types from the generated schema
+/** Commands to submit to the ledger */
 export type JsCommands = components['schemas']['JsCommands']
+/** A single command */
 export type Command = components['schemas']['Command']
+/** Response from submit-and-wait operation */
 export type SubmitAndWaitResponse = components['schemas']['SubmitAndWaitResponse']
+/** Full transaction response including all events */
 export type JsSubmitAndWaitForTransactionResponse =
   components['schemas']['JsSubmitAndWaitForTransactionResponse']
+/** Request to get active contracts */
 export type GetActiveContractsRequest = components['schemas']['GetActiveContractsRequest']
+/** Response containing active contracts */
 export type JsGetActiveContractsResponse = components['schemas']['JsGetActiveContractsResponse']
+/** An active contract on the ledger */
 export type JsActiveContract = components['schemas']['JsActiveContract']
+/** An event created by a contract */
 export type CreatedEvent = components['schemas']['CreatedEvent']
+/** Error returned by Canton API */
 export type JsCantonError = components['schemas']['JsCantonError']
+/** Filter for transactions */
 export type TransactionFilter = components['schemas']['TransactionFilter']
+/** Format for events in responses */
 export type EventFormat = components['schemas']['EventFormat']
+/** Filter for templates */
 export type TemplateFilter = components['schemas']['TemplateFilter']
+/** Wildcard filter for matching patterns */
 export type WildcardFilter = components['schemas']['WildcardFilter']
+/** Information about a connected synchronizer */
 export type ConnectedSynchronizer = components['schemas']['ConnectedSynchronizer']
+/** Response containing connected synchronizers */
 export type GetConnectedSynchronizersResponse =
   components['schemas']['GetConnectedSynchronizersResponse']
 
@@ -223,6 +237,12 @@ export type CantonClient = ReturnType<typeof createCantonClient>
 class CantonApiError extends CCIPError {
   override readonly name = 'CantonApiError'
 
+  /**
+   * Creates a new CantonApiError instance
+   * @param message - The error message
+   * @param error - The underlying error object or details
+   * @param statusCode - Optional HTTP status code
+   */
   constructor(message: string, error: unknown, statusCode?: number) {
     const context: Record<string, unknown> = {}
     let fullMessage = message
