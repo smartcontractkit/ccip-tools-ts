@@ -1,6 +1,7 @@
 import { type CCIPErrorOptions, CCIPError } from './CCIPError.ts'
 import { CCIPErrorCode } from './codes.ts'
 import { isTransientHttpStatus } from '../http-status.ts'
+import { bigIntReplacer } from '../utils.ts'
 
 // Chain/Network
 
@@ -166,7 +167,10 @@ export class CCIPMessageInvalidError extends CCIPError {
   override readonly name = 'CCIPMessageInvalidError'
   /** Creates a message invalid error. */
   constructor(data: unknown, options?: CCIPErrorOptions) {
-    const dataStr = typeof data === 'object' && data !== null ? JSON.stringify(data) : String(data)
+    const dataStr =
+      typeof data === 'object' && data !== null
+        ? JSON.stringify(data, bigIntReplacer)
+        : String(data)
     super(CCIPErrorCode.MESSAGE_INVALID, `Invalid CCIP message format: ${dataStr}`, {
       ...options,
       isTransient: false,
