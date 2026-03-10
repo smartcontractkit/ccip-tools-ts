@@ -1204,6 +1204,34 @@ export class CCIPTimeoutError extends CCIPError {
 }
 
 /**
+ * Thrown when a request is aborted via an AbortSignal.
+ *
+ * @example
+ * ```typescript
+ * const controller = new AbortController()
+ * setTimeout(() => controller.abort(), 1000)
+ * try {
+ *   await api.searchMessages({ sender: '0x...' }, { signal: controller.signal })
+ * } catch (error) {
+ *   if (error instanceof CCIPAbortError) {
+ *     console.log(`Request was cancelled: ${error.context.operation}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPAbortError extends CCIPError {
+  override readonly name = 'CCIPAbortError'
+  /** Creates an abort error. */
+  constructor(operation: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.ABORT, `Request aborted: ${operation}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, operation },
+    })
+  }
+}
+
+/**
  * Thrown for not implemented features.
  *
  * @example

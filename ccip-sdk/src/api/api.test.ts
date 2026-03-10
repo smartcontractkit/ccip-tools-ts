@@ -5,12 +5,15 @@ import '../index.ts'
 import { getAddress } from 'ethers'
 
 import { CCIPAPIClient, DEFAULT_API_BASE_URL, SDK_VERSION, SDK_VERSION_HEADER } from './index.ts'
+import type { MessageSearchResult } from './types.ts'
 import {
+  CCIPAbortError,
   CCIPApiClientNotAvailableError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
   CCIPMessageNotFoundInTxError,
+  CCIPTimeoutError,
   CCIPUnexpectedPaginationError,
   HttpStatus,
 } from '../errors/index.ts'
@@ -1121,6 +1124,211 @@ describe('CCIPAPIClient', () => {
     })
   })
 
+  describe('searchAllMessages', () => {
+    const makeMockResponse = (
+      messages: Array<{ messageId: string }>,
+      hasNextPage: boolean,
+      cursor?: string,
+    ) => ({
+      data: messages.map((m) => ({
+        ...m,
+        origin: '0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E',
+        sender: '0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E',
+        receiver: '0x893f0bcAa7F325C2B6BbD2133536f4E4B8feA88e',
+        status: 'SUCCESS',
+        sourceNetworkInfo: {
+          name: 'ethereum-mainnet',
+          chainSelector: '5009297550715157269',
+          chainId: '1',
+          chainFamily: 'EVM',
+        },
+        destNetworkInfo: {
+          name: 'arbitrum-mainnet',
+          chainSelector: '4949039107694359620',
+          chainId: '42161',
+          chainFamily: 'EVM',
+        },
+        sendTransactionHash: '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
+        sendTimestamp: '2023-12-01T10:30:00Z',
+      })),
+      pagination: { limit: 10, hasNextPage, cursor },
+    })
+
+    it('should yield all results from a single page', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () =>
+            Promise.resolve(
+              JSON.stringify(
+                makeMockResponse(
+                  [{ messageId: '0x' + 'aa'.repeat(32) }, { messageId: '0x' + 'bb'.repeat(32) }],
+                  false,
+                ),
+              ),
+            ),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const results: MessageSearchResult[] = []
+      for await (const msg of client.searchAllMessages({
+        sender: '0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E',
+      })) {
+        results.push(msg)
+      }
+      assert.equal(results.length, 2)
+      assert.equal(results[0]!.messageId, '0x' + 'aa'.repeat(32))
+      assert.equal(results[1]!.messageId, '0x' + 'bb'.repeat(32))
+      assert.equal(customFetch.mock.callCount(), 1)
+    })
+
+    it('should yield all results across multiple pages', async () => {
+      let callCount = 0
+      const customFetch = mock.fn(() => {
+        callCount++
+        const response =
+          callCount === 1
+            ? makeMockResponse([{ messageId: '0x' + 'aa'.repeat(32) }], true, 'cursor-page2')
+            : makeMockResponse([{ messageId: '0x' + 'bb'.repeat(32) }], false)
+        return Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(response)),
+        })
+      })
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const results: MessageSearchResult[] = []
+      for await (const msg of client.searchAllMessages({
+        sender: '0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E',
+      })) {
+        results.push(msg)
+      }
+      assert.equal(results.length, 2)
+      assert.equal(results[0]!.messageId, '0x' + 'aa'.repeat(32))
+      assert.equal(results[1]!.messageId, '0x' + 'bb'.repeat(32))
+      assert.equal(customFetch.mock.callCount(), 2)
+    })
+
+    it('should stop when no more pages', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () =>
+            Promise.resolve(
+              JSON.stringify(makeMockResponse([{ messageId: '0x' + 'aa'.repeat(32) }], false)),
+            ),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const results: MessageSearchResult[] = []
+      for await (const msg of client.searchAllMessages()) {
+        results.push(msg)
+      }
+      assert.equal(results.length, 1)
+      assert.equal(customFetch.mock.callCount(), 1)
+    })
+
+    it('should pass limit as per-page fetch size', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () =>
+            Promise.resolve(
+              JSON.stringify(makeMockResponse([{ messageId: '0x' + 'aa'.repeat(32) }], false)),
+            ),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      for await (const _ of client.searchAllMessages(
+        { sender: '0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E' },
+        { limit: 5 },
+      )) {
+        // consume
+      }
+      const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.includes('limit=5'))
+    })
+
+    it('should pass filters to searchMessages', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () =>
+            Promise.resolve(
+              JSON.stringify(makeMockResponse([{ messageId: '0x' + 'aa'.repeat(32) }], false)),
+            ),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      for await (const _ of client.searchAllMessages({
+        sender: '0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E',
+        sourceChainSelector: 5009297550715157269n,
+      })) {
+        // consume
+      }
+      const url = (customFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.includes('sender=0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E'))
+      assert.ok(url.includes('sourceChainSelector=5009297550715157269'))
+    })
+
+    it('should yield nothing on empty results', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const results: MessageSearchResult[] = []
+      for await (const msg of client.searchAllMessages({ sender: '0xnonexistent' })) {
+        results.push(msg)
+      }
+      assert.equal(results.length, 0)
+    })
+
+    it('should stop fetching pages on early break', async () => {
+      let callCount = 0
+      const customFetch = mock.fn(() => {
+        callCount++
+        const response = makeMockResponse(
+          [{ messageId: `0x${String(callCount).padStart(64, '0')}` }],
+          true,
+          `cursor-page${callCount + 1}`,
+        )
+        return Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(response)),
+        })
+      })
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      for await (const _ of client.searchAllMessages()) {
+        break // stop after first result
+      }
+      // Only one page fetched — generator did not continue to page 2
+      assert.equal(customFetch.mock.callCount(), 1)
+    })
+
+    it('should propagate errors from searchMessages', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error',
+          text: () => Promise.resolve(''),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      await assert.rejects(
+        async () => {
+          for await (const _ of client.searchAllMessages()) {
+            // should not reach here
+          }
+        },
+        (err: any) => err.name === 'CCIPHttpError',
+      )
+    })
+  })
+
   describe('getMessageIdsInTx', () => {
     const mockMessagesResponse = {
       data: [
@@ -1348,6 +1556,242 @@ describe('CCIPAPIClient', () => {
             '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234' &&
           err.context.messageCount === 1,
       )
+    })
+  })
+
+  describe('AbortSignal support', () => {
+    it('should throw CCIPTimeoutError when request times out', async () => {
+      const customFetch = mock.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            // Simulate real fetch: reject when signal aborts (timeout or user)
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('The operation was aborted', 'AbortError')),
+            )
+          }),
+      )
+      const client = new CCIPAPIClient(undefined, {
+        fetch: customFetch as any,
+        timeoutMs: 50,
+      })
+      await assert.rejects(
+        () => client.getLaneLatency(1n, 2n),
+        (err: any) => err instanceof CCIPTimeoutError && err.context.operation === 'getLaneLatency',
+      )
+    })
+
+    it('should throw CCIPAbortError when signal is aborted', async () => {
+      const customFetch = mock.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('The operation was aborted', 'AbortError')),
+            )
+          }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(), 10)
+      await assert.rejects(
+        () => client.getLaneLatency(1n, 2n, { signal: controller.signal }),
+        (err: any) => err instanceof CCIPAbortError && err.context.operation === 'getLaneLatency',
+      )
+    })
+
+    it('should throw CCIPAbortError when signal is already aborted', async () => {
+      const customFetch = mock.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            if (init.signal?.aborted) {
+              reject(new DOMException('The operation was aborted', 'AbortError'))
+              return
+            }
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('The operation was aborted', 'AbortError')),
+            )
+          }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      await assert.rejects(
+        () => client.getLaneLatency(1n, 2n, { signal: AbortSignal.abort() }),
+        (err: any) => err instanceof CCIPAbortError,
+      )
+    })
+
+    it('should forward signal to searchMessages', async () => {
+      const customFetch = mock.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('The operation was aborted', 'AbortError')),
+            )
+          }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(), 10)
+      await assert.rejects(
+        () => client.searchMessages({ sender: '0x' }, { signal: controller.signal }),
+        (err: any) => err instanceof CCIPAbortError && err.context.operation === 'searchMessages',
+      )
+    })
+
+    it('should forward signal to getMessageById', async () => {
+      const customFetch = mock.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('The operation was aborted', 'AbortError')),
+            )
+          }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(), 10)
+      await assert.rejects(
+        () => client.getMessageById('0x' + 'aa'.repeat(32), { signal: controller.signal }),
+        (err: any) => err instanceof CCIPAbortError && err.context.operation === 'getMessageById',
+      )
+    })
+
+    it('should forward signal to getExecutionInput', async () => {
+      const customFetch = mock.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('The operation was aborted', 'AbortError')),
+            )
+          }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(), 10)
+      await assert.rejects(
+        () => client.getExecutionInput('0x' + 'aa'.repeat(32), { signal: controller.signal }),
+        (err: any) =>
+          err instanceof CCIPAbortError && err.context.operation === 'getExecutionInput',
+      )
+    })
+
+    it('should forward signal to getMessageIdsInTx', async () => {
+      const customFetch = mock.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('The operation was aborted', 'AbortError')),
+            )
+          }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(), 10)
+      await assert.rejects(
+        () => client.getMessageIdsInTx('0x' + 'aa'.repeat(32), { signal: controller.signal }),
+        (err: any) => err instanceof CCIPAbortError,
+      )
+    })
+
+    it('should abort searchAllMessages mid-pagination', async () => {
+      const controller = new AbortController()
+      let callCount = 0
+      const customFetch = mock.fn((_url: string, init: RequestInit) => {
+        callCount++
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: true,
+            text: () =>
+              Promise.resolve(
+                JSON.stringify({
+                  data: [
+                    {
+                      messageId: '0x' + 'aa'.repeat(32),
+                      origin: '0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E',
+                      sender: '0x742D35cc6634C0532925A3B8D5c8c22c5b2D8A3E',
+                      receiver: '0x893f0bcAa7F325C2B6BbD2133536f4E4B8feA88e',
+                      status: 'SUCCESS',
+                      sourceNetworkInfo: {
+                        name: 'ethereum-mainnet',
+                        chainSelector: '5009297550715157269',
+                        chainId: '1',
+                        chainFamily: 'EVM',
+                      },
+                      destNetworkInfo: {
+                        name: 'arbitrum-mainnet',
+                        chainSelector: '4949039107694359620',
+                        chainId: '42161',
+                        chainFamily: 'EVM',
+                      },
+                      sendTransactionHash:
+                        '0x9428debf5e5f0123456789abcdef1234567890abcdef1234567890abcdef1234',
+                      sendTimestamp: '2023-12-01T10:30:00Z',
+                    },
+                  ],
+                  pagination: { limit: 10, hasNextPage: true, cursor: 'cursor-page2' },
+                }),
+              ),
+          })
+        }
+        // Second call: signal is already aborted
+        return new Promise<Response>((_resolve, reject) => {
+          if (init.signal?.aborted) {
+            reject(new DOMException('The operation was aborted', 'AbortError'))
+            return
+          }
+          init.signal?.addEventListener('abort', () =>
+            reject(new DOMException('The operation was aborted', 'AbortError')),
+          )
+        })
+      })
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const results: MessageSearchResult[] = []
+
+      // Abort after consuming first page
+      await assert.rejects(
+        async () => {
+          for await (const msg of client.searchAllMessages(undefined, {
+            signal: controller.signal,
+          })) {
+            results.push(msg)
+            // Abort after getting first result — next page fetch will fail
+            controller.abort()
+          }
+        },
+        (err: any) => err instanceof CCIPAbortError,
+      )
+      assert.equal(results.length, 1)
+    })
+
+    it('should not affect normal operation when signal is not provided', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () =>
+            Promise.resolve(
+              JSON.stringify({
+                lane: {
+                  sourceNetworkInfo: {
+                    name: 'ethereum-mainnet',
+                    chainSelector: '5009297550715157269',
+                    chainId: '1',
+                    chainFamily: 'evm',
+                  },
+                  destNetworkInfo: {
+                    name: 'arbitrum-mainnet',
+                    chainSelector: '4949039107694359620',
+                    chainId: '42161',
+                    chainFamily: 'evm',
+                  },
+                  routerAddress: '0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D',
+                },
+                totalMs: 1147000,
+              }),
+            ),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      // Should work fine without signal
+      const result = await client.getLaneLatency(1n, 2n)
+      assert.equal(result.totalMs, 1147000)
     })
   })
 })

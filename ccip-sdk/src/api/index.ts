@@ -2,6 +2,7 @@ import { memoize } from 'micro-memoize'
 import type { SetRequired } from 'type-fest'
 
 import {
+  CCIPAbortError,
   CCIPApiClientNotAvailableError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
@@ -34,6 +35,7 @@ import type {
   LaneLatencyResponse,
   MessageSearchFilters,
   MessageSearchPage,
+  MessageSearchResult,
   RawExecutionInputsResult,
   RawLaneLatencyResponse,
   RawMessageResponse,
@@ -60,7 +62,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.1.1-e19fa14'
+export const SDK_VERSION = '1.1.1-3e62f51'
 // generate:end
 
 /** SDK telemetry header name */
@@ -201,25 +203,33 @@ export class CCIPAPIClient {
    * @throws CCIPTimeoutError if request times out
    * @internal
    */
-  private async _fetchWithTimeout(url: string, operation: string): Promise<Response> {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs)
+  private async _fetchWithTimeout(
+    url: string,
+    operation: string,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    const timeoutSignal = AbortSignal.timeout(this.timeoutMs)
+    const combinedSignal = signal ? AbortSignal.any([timeoutSignal, signal]) : timeoutSignal
 
     try {
       return await this._fetch(url, {
-        signal: controller.signal,
+        signal: combinedSignal,
         headers: {
           'Content-Type': 'application/json',
           [SDK_VERSION_HEADER]: `CCIP SDK v${SDK_VERSION}`,
         },
       })
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (
+        error instanceof Error &&
+        (error.name === 'AbortError' || error.name === 'TimeoutError')
+      ) {
+        if (signal?.aborted) {
+          throw new CCIPAbortError(operation)
+        }
         throw new CCIPTimeoutError(operation, this.timeoutMs)
       }
       throw error
-    } finally {
-      clearTimeout(timeoutId)
     }
   }
 
@@ -232,6 +242,7 @@ export class CCIPAPIClient {
    *
    * @throws {@link CCIPLaneNotFoundError} when lane not found (404)
    * @throws {@link CCIPTimeoutError} if request times out
+   * @throws {@link CCIPAbortError} if request is aborted via signal
    * @throws {@link CCIPHttpError} on other HTTP errors with context:
    *   - `status` - HTTP status code (e.g., 500)
    *   - `statusText` - HTTP status message
@@ -261,6 +272,7 @@ export class CCIPAPIClient {
   async getLaneLatency(
     sourceChainSelector: bigint,
     destChainSelector: bigint,
+    options?: { signal?: AbortSignal },
   ): Promise<LaneLatencyResponse> {
     const url = new URL(`${this.baseUrl}/v2/lanes/latency`)
     url.searchParams.set('sourceChainSelector', sourceChainSelector.toString())
@@ -268,7 +280,7 @@ export class CCIPAPIClient {
 
     this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`)
 
-    const response = await this._fetchWithTimeout(url.toString(), 'getLaneLatency')
+    const response = await this._fetchWithTimeout(url.toString(), 'getLaneLatency', options?.signal)
 
     if (!response.ok) {
       // Try to parse structured error response from API
@@ -318,6 +330,7 @@ export class CCIPAPIClient {
    *
    * @throws {@link CCIPMessageIdNotFoundError} when message not found (404)
    * @throws {@link CCIPTimeoutError} if request times out
+   * @throws {@link CCIPAbortError} if request is aborted via signal
    * @throws {@link CCIPHttpError} on HTTP errors with context:
    *   - `status` - HTTP status code
    *   - `statusText` - HTTP status message
@@ -344,12 +357,15 @@ export class CCIPAPIClient {
    * }
    * ```
    */
-  async getMessageById(messageId: string): Promise<SetRequired<CCIPRequest, 'metadata'>> {
+  async getMessageById(
+    messageId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<SetRequired<CCIPRequest, 'metadata'>> {
     const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}`
 
     this.logger.debug(`CCIPAPIClient: GET ${url}`)
 
-    const response = await this._fetchWithTimeout(url, 'getMessageById')
+    const response = await this._fetchWithTimeout(url, 'getMessageById', options?.signal)
 
     if (!response.ok) {
       // Try to parse structured error response from API
@@ -404,10 +420,12 @@ export class CCIPAPIClient {
    * the cursor encodes the original filters.
    *
    * @throws {@link CCIPTimeoutError} if request times out.
+   * @throws {@link CCIPAbortError} if request is aborted via signal.
    * @throws {@link CCIPHttpError} on HTTP errors (4xx/5xx, except 404 which returns empty).
    *
    * @see {@link MessageSearchFilters} — available filter fields
    * @see {@link MessageSearchPage} — return type with pagination
+   * @see {@link CCIPAPIClient.searchAllMessages} — async generator that handles pagination automatically
    * @see {@link CCIPAPIClient.getMessageById} — fetch full message details for a search result
    * @see {@link CCIPAPIClient.getMessageIdsInTx} — convenience wrapper using `sourceTransactionHash`
    *
@@ -442,7 +460,7 @@ export class CCIPAPIClient {
    */
   async searchMessages(
     filters?: MessageSearchFilters,
-    options?: { limit?: number; cursor?: string },
+    options?: { limit?: number; cursor?: string; signal?: AbortSignal },
   ): Promise<MessageSearchPage> {
     const url = new URL(`${this.baseUrl}/v2/messages`)
 
@@ -466,7 +484,7 @@ export class CCIPAPIClient {
 
     this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`)
 
-    const response = await this._fetchWithTimeout(url.toString(), 'searchMessages')
+    const response = await this._fetchWithTimeout(url.toString(), 'searchMessages', options?.signal)
 
     if (!response.ok) {
       // 404 → empty results (search found nothing)
@@ -512,6 +530,55 @@ export class CCIPAPIClient {
   }
 
   /**
+   * Async generator that streams all messages matching the given filters,
+   * handling cursor-based pagination automatically.
+   *
+   * @param filters - Optional search filters (same as {@link CCIPAPIClient.searchMessages}).
+   * @param options - Optional `limit` controlling the per-page fetch size (number of
+   *   results fetched per API call). The total number of results is controlled by the
+   *   consumer — break out of the loop to stop early.
+   * @returns AsyncGenerator yielding {@link MessageSearchResult} one at a time, across all pages.
+   *
+   * @throws {@link CCIPTimeoutError} if a page request times out.
+   * @throws {@link CCIPAbortError} if a page request is aborted via signal.
+   * @throws {@link CCIPHttpError} on HTTP errors (4xx/5xx, except 404 which yields nothing).
+   *
+   * @see {@link CCIPAPIClient.searchMessages} — for page-level control and explicit cursor handling
+   * @see {@link CCIPAPIClient.getMessageById} — fetch full message details for a search result
+   *
+   * @example Iterate all messages for a sender
+   * ```typescript
+   * for await (const msg of api.searchAllMessages({ sender: '0x...' })) {
+   *   console.log(`${msg.messageId}: ${msg.status}`)
+   * }
+   * ```
+   *
+   * @example Stop after collecting 5 results
+   * ```typescript
+   * const results: MessageSearchResult[] = []
+   * for await (const msg of api.searchAllMessages({ sender: '0x...' })) {
+   *   results.push(msg)
+   *   if (results.length >= 5) break
+   * }
+   * ```
+   */
+  async *searchAllMessages(
+    filters?: MessageSearchFilters,
+    options?: { limit?: number; signal?: AbortSignal },
+  ): AsyncGenerator<MessageSearchResult> {
+    let cursor: string | undefined
+    do {
+      const page = await this.searchMessages(filters, {
+        limit: options?.limit,
+        cursor,
+        signal: options?.signal,
+      })
+      yield* page.data
+      cursor = page.cursor
+    } while (cursor)
+  }
+
+  /**
    * Fetches message IDs from a source transaction hash.
    *
    * @remarks
@@ -523,6 +590,7 @@ export class CCIPAPIClient {
    * @throws {@link CCIPMessageNotFoundInTxError} when no messages found (404 or empty).
    * @throws {@link CCIPUnexpectedPaginationError} when hasNextPage is true.
    * @throws {@link CCIPTimeoutError} if request times out.
+   * @throws {@link CCIPAbortError} if request is aborted via signal.
    * @throws {@link CCIPHttpError} on HTTP errors.
    *
    * @example Basic usage
@@ -543,8 +611,11 @@ export class CCIPAPIClient {
    * }
    * ```
    */
-  async getMessageIdsInTx(txHash: string): Promise<string[]> {
-    const result = await this.searchMessages({ sourceTransactionHash: txHash }, { limit: 100 })
+  async getMessageIdsInTx(txHash: string, options?: { signal?: AbortSignal }): Promise<string[]> {
+    const result = await this.searchMessages(
+      { sourceTransactionHash: txHash },
+      { limit: 100, signal: options?.signal },
+    )
 
     if (result.data.length === 0) {
       throw new CCIPMessageNotFoundInTxError(txHash)
@@ -567,6 +638,7 @@ export class CCIPAPIClient {
    *
    * @throws {@link CCIPMessageIdNotFoundError} when message not found (404)
    * @throws {@link CCIPTimeoutError} if request times out
+   * @throws {@link CCIPAbortError} if request is aborted via signal
    * @throws {@link CCIPHttpError} on other HTTP errors
    *
    * @example
@@ -578,12 +650,15 @@ export class CCIPAPIClient {
    * await dest.execute({ offRamp, input, wallet })
    * ```
    */
-  async getExecutionInput(messageId: string): Promise<ExecutionInput & Lane & { offRamp: string }> {
+  async getExecutionInput(
+    messageId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<ExecutionInput & Lane & { offRamp: string }> {
     const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}/execution-inputs`
 
     this.logger.debug(`CCIPAPIClient: GET ${url}`)
 
-    const response = await this._fetchWithTimeout(url, 'getExecutionInput')
+    const response = await this._fetchWithTimeout(url, 'getExecutionInput', options?.signal)
     if (!response.ok) {
       // Try to parse structured error response from API
       let apiError: APIErrorResponse | undefined

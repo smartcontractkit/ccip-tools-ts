@@ -222,9 +222,13 @@ export default [
     name: 'getAllSourceChainConfigs',
     inputs: [],
     outputs: [
-      { name: '', type: 'uint64[]', internalType: 'uint64[]' },
       {
-        name: '',
+        name: 'sourceChainSelectors',
+        type: 'uint64[]',
+        internalType: 'uint64[]',
+      },
+      {
+        name: 'sourceChainConfigs',
         type: 'tuple[]',
         internalType: 'struct OffRamp.SourceChainConfig[]',
         components: [

@@ -232,12 +232,21 @@ export type MessageSearchResult = {
  *
  * @see {@link MessageSearchFilters}
  * @see {@link CCIPAPIClient.searchMessages}
+ * @see {@link CCIPAPIClient.searchAllMessages} — async generator alternative that handles
+ *   pagination automatically
  *
- * @example
+ * @example Manual pagination
  * ```typescript
  * let page = await api.searchMessages({ sender: '0x...' }, { limit: 10 })
  * while (page.hasNextPage) {
  *   page = await api.searchMessages(undefined, { cursor: page.cursor! })
+ * }
+ * ```
+ *
+ * @example Automatic pagination (preferred for most use cases)
+ * ```typescript
+ * for await (const msg of api.searchAllMessages({ sender: '0x...' })) {
+ *   console.log(msg.messageId)
  * }
  * ```
  */

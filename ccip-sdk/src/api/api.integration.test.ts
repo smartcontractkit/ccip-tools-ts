@@ -272,6 +272,52 @@ describe(
       })
     })
 
+    describe('searchAllMessages', () => {
+      it('should iterate all messages for a known sender', { timeout: 60000 }, async () => {
+        const results = []
+        for await (const msg of api.searchAllMessages({ sender: EVM_SENDER }, { limit: 5 })) {
+          results.push(msg)
+          if (results.length >= 10) break // cap to avoid long test
+        }
+        assert.ok(results.length > 0, 'Should yield at least one message')
+        for (const msg of results) {
+          assert.ok(msg.messageId, 'Each result should have a messageId')
+          assert.ok(msg.status, 'Each result should have a status')
+        }
+      })
+
+      it(
+        'should stop on early break without fetching unnecessary pages',
+        { timeout: 30000 },
+        async () => {
+          let count = 0
+          for await (const msg of api.searchAllMessages({ sender: EVM_SENDER }, { limit: 1 })) {
+            count++
+            assert.ok(msg.messageId)
+            break // stop after first result
+          }
+          assert.equal(count, 1)
+        },
+      )
+
+      it('should yield results consistent with searchMessages', { timeout: 60000 }, async () => {
+        // Fetch first page via searchMessages
+        const page = await api.searchMessages({ sender: EVM_SENDER }, { limit: 3 })
+
+        // Fetch same results via searchAllMessages
+        const generatorResults = []
+        for await (const msg of api.searchAllMessages({ sender: EVM_SENDER }, { limit: 3 })) {
+          generatorResults.push(msg)
+          if (generatorResults.length >= page.data.length) break
+        }
+
+        assert.equal(generatorResults.length, page.data.length)
+        for (let i = 0; i < page.data.length; i++) {
+          assert.equal(generatorResults[i]!.messageId, page.data[i]!.messageId)
+        }
+      })
+    })
+
     describe('getMessageIdsInTx', () => {
       it('should return message IDs for known CCIP transaction', { timeout: 30000 }, async () => {
         const messageIds = await api.getMessageIdsInTx(KNOWN_TX_HASH)
