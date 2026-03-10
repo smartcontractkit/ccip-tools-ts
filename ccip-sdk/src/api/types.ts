@@ -105,6 +105,7 @@ export type RawMessageResponse = {
   origin: string
   sequenceNumber: string
   onramp: string
+  offramp?: string
   sendBlockNumber: bigint
   sendLogIndex: bigint
   // Optional fields
@@ -296,6 +297,8 @@ export type APICCIPRequestMetadata = {
   sourceNetworkInfo: NetworkInfo
   /** Destination network metadata. */
   destNetworkInfo: NetworkInfo
+  /** OffRamp address on dest */
+  offRamp?: string
 }
 
 // ============================================================================

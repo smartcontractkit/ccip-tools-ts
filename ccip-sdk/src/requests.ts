@@ -456,10 +456,7 @@ export async function* getMessagesForSender(
  * Resolves token routing by querying the TokenAdminRegistry and TokenPool
  * to find the corresponding destination chain token.
  *
- * @param source - Source chain instance
- * @param destChainSelector - Destination chain selector
- * @param onRamp - OnRamp contract address
- * @param sourceTokenAmount - Token amount object containing `token` and `amount`
+ * @param opts - options to convert source to dest token addresses
  * @returns Extended token amount with `sourcePoolAddress`, `sourceTokenAddress`, and `destTokenAddress`
  *
  * @throws {@link CCIPTokenNotInRegistryError} if token is not registered in TokenAdminRegistry
@@ -479,12 +476,21 @@ export async function* getMessagesForSender(
  * console.log(`Dest token: ${tokenAmount.destTokenAddress}`)
  * ```
  */
-export async function sourceToDestTokenAddresses<S extends { token: string }>(
-  source: Chain,
-  destChainSelector: bigint,
-  onRamp: string,
-  sourceTokenAmount: S,
-): Promise<
+export async function sourceToDestTokenAddresses<S extends { token: string }>({
+  source,
+  onRamp,
+  destChainSelector,
+  sourceTokenAmount,
+}: {
+  /** Source chain instance */
+  source: Chain
+  /** OnRamp contract address */
+  onRamp: string
+  /** Destination chain selector */
+  destChainSelector: bigint
+  /** Token amount object containing `token` and `amount` */
+  sourceTokenAmount: S
+}): Promise<
   S & {
     sourcePoolAddress: string
     sourceTokenAddress: string
