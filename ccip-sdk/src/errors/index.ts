@@ -156,6 +156,7 @@ export { CCIPBorshMethodUnknownError, CCIPBorshTypeUnknownError } from './specia
 
 // Specialized errors - HTTP & Data
 export {
+  CCIPAbortError,
   CCIPBlockBeforeTimestampNotFoundError,
   CCIPDataFormatUnsupportedError,
   CCIPDataParseError,
