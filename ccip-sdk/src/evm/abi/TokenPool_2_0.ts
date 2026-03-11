@@ -1546,7 +1546,6 @@ export default [
     name: 'InvalidTransferFeeBps',
     inputs: [{ name: 'bps', type: 'uint256', internalType: 'uint256' }],
   },
-  { type: 'error', name: 'MismatchedArrayLengths', inputs: [] },
   { type: 'error', name: 'MustBeProposedOwner', inputs: [] },
   {
     type: 'error',
