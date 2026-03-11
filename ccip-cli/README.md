@@ -80,6 +80,20 @@ Wallet options can also be passed as `--wallet`, where each chain family may int
 can:
 - EVM can receive a 0x-hex private key, or the path to an encrypted json file (e.g. from geth,
 decrypted using the `USER_KEY_PASSWORD` environment variable or prompted password).
+- EVM also supports **named keystores** (Foundry Cast or Hardhat) via `--wallet foundry:<name>` /
+`--wallet hardhat:<name>`. The password is taken from
+`$FOUNDRY_KEYSTORE_PASSWORD` / `$HARDHAT_KEYSTORE_PASSWORD` (tool-specific), then `$USER_KEY_PASSWORD`, or prompted interactively.
+Foundry directory can be overridden with `$FOUNDRY_DIR` (default: `~/.foundry`).
+Hardhat support delegates to `node_modules/.bin/hardhat keystore get` — Hardhat must be installed in your project:
+  ```sh
+  # Foundry
+  cast wallet import sender --interactive
+  ccip-cli send ... --wallet foundry:sender
+
+  # Hardhat (run from inside your Hardhat project)
+  npx hardhat keystore set sender
+  ccip-cli send ... --wallet hardhat:sender
+  ```
 - Solana can receive base58 private key, or the path to an `id.json` file
 (default=`~/.config/solana/id.json`) containing a private key encoded as a json array of numbers.
 - Aptos can receive 0x-hex private key string, or the path of a text file containing it.
@@ -355,7 +369,7 @@ ccip-cli token -n solana-devnet -H EPUjBP3Xf76K1VKsDSc6GupBWE8uykNksCLJgXZn87CB
 ### `lane-latency`
 
 ```sh
-ccip-cli lane-latency <source> <dest> [--api=<url>]
+ccip-cli lane-latency <source> <dest> [--api=<url>] [--block-confirmations=<n>]
 ```
 
 Query real-time lane latency between source and destination chains using the CCIP API.
@@ -372,6 +386,7 @@ Query real-time lane latency between source and destination chains using the CCI
 | Option | Description |
 |--------|-------------|
 | `--api` | Custom CCIP API URL (default: https://api.ccip.chain.link) |
+| `--block-confirmations`, `-c` | Number of block confirmations to use for latency calculation |
 
 > **Note:** This command requires CCIP API access and respects the `--no-api` flag.
 

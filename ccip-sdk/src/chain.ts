@@ -1,4 +1,4 @@
-import { type BytesLike, dataLength } from 'ethers'
+import { type BytesLike, dataLength, keccak256 } from 'ethers'
 import type { PickDeep, SetOptional } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
@@ -24,6 +24,7 @@ import type {
   SuiExtraArgsV1,
 } from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
+import { decodeMessageV1 } from './messages.ts'
 import { getOffchainTokenData } from './offchain.ts'
 import { getMessagesInTx } from './requests.ts'
 import { DEFAULT_GAS_LIMIT } from './shared/constants.ts'
@@ -1024,16 +1025,57 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * When `opts` already contains `input` the method is a no-op and returns it unchanged.
    * When `opts` contains only a `messageId` it calls `apiClient.getExecutionInput` and merges
    * the result back with any extra opts fields (e.g. `gasLimit`).
+   * If opts.gasLimit is undefined and `estimateReceiveExecution` is available, try to estimate gasLimitOverride
    *
    * @throws {@link CCIPApiClientNotAvailableError} if `messageId` is provided but no apiClient
    */
   protected async resolveExecuteOpts(
     opts: ExecuteOpts,
-  ): Promise<Omit<ExecuteOpts, 'messageId'> & { offRamp: string; input: ExecutionInput }> {
-    if ('input' in opts) return opts
-    if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
-    const { offRamp, ...input } = await this.apiClient.getExecutionInput(opts.messageId)
-    return { ...opts, offRamp, input }
+  ): Promise<Extract<ExecuteOpts, { input: unknown }>> {
+    let opts_: Extract<typeof opts, { input: unknown }>
+    if ('input' in opts) {
+      opts_ = opts
+    } else if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
+    else {
+      const { offRamp, ...input } = await this.apiClient.getExecutionInput(opts.messageId)
+      opts_ = { ...opts, offRamp, input }
+    }
+
+    if (
+      opts_.gasLimit == null &&
+      this.estimateReceiveExecution &&
+      (!('message' in opts_.input) ||
+        !opts_.input.message.tokenAmounts.length ||
+        opts_.input.message.tokenAmounts.every((ta) => 'destTokenAddress' in ta))
+    ) {
+      let message
+      if ('message' in opts_.input) {
+        message = {
+          ...opts_.input.message,
+          // pass `tokenAmount` with `destTokenAddress` to estimate
+          destTokenAmounts: opts_.input.message.tokenAmounts,
+        }
+      } else {
+        const decoded = decodeMessageV1(opts_.input.encodedMessage)
+        message = {
+          ...decoded,
+          messageId: keccak256(opts_.input.encodedMessage),
+          destTokenAmounts: decoded.tokenTransfer,
+        }
+      }
+      try {
+        opts_.gasLimit = await this.estimateReceiveExecution({
+          offRamp: opts_.offRamp,
+          message,
+        })
+        this.logger.debug('Estimated receiver execution:', opts_.gasLimit)
+      } catch (err) {
+        // ignore if receiver fails, let estimation of execute method itself throw if needed
+        this.logger.debug('Failed to auto-estimateReceiveExecution for:', opts, err)
+      }
+    }
+
+    return opts_
   }
 
   /**
@@ -1126,10 +1168,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Uses this chain's selector as the source.
    *
    * @param destChainSelector - Destination CCIP chain selector (bigint)
+   * @param numberOfBlocks - Optional number of block confirmations to use for latency
+   *   calculation. When omitted or 0, uses the lane's default finality. When provided
+   *   as a positive integer, the API returns latency for that custom finality value.
    * @returns Promise resolving to {@link LaneLatencyResponse} containing:
-   *   - `lane.sourceNetworkInfo` - Source chain metadata (name, selector, chainId)
-   *   - `lane.destNetworkInfo` - Destination chain metadata
-   *   - `lane.routerAddress` - Router contract address on source chain
    *   - `totalMs` - Estimated delivery time in milliseconds
    *
    * @throws {@link CCIPApiClientNotAvailableError} if apiClient was disabled (set to `null`)
@@ -1145,19 +1187,31 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * try {
    *   const latency = await chain.getLaneLatency(4949039107694359620n) // Arbitrum
    *   console.log(`Estimated delivery: ${Math.round(latency.totalMs / 60000)} minutes`)
-   *   console.log(`Router: ${latency.lane.routerAddress}`)
    * } catch (err) {
    *   if (err instanceof CCIPHttpError) {
    *     console.error(`API error: ${err.context.apiErrorCode}`)
    *   }
    * }
    * ```
+   *
+   * @example Get latency with custom block confirmations
+   * ```typescript
+   * const latency = await chain.getLaneLatency(4949039107694359620n, 10)
+   * console.log(`Latency with 10 confirmations: ${Math.round(latency.totalMs / 60000)} minutes`)
+   * ```
    */
-  async getLaneLatency(destChainSelector: bigint): Promise<LaneLatencyResponse> {
+  async getLaneLatency(
+    destChainSelector: bigint,
+    numberOfBlocks?: number,
+  ): Promise<LaneLatencyResponse> {
     if (!this.apiClient) {
       throw new CCIPApiClientNotAvailableError()
     }
-    return this.apiClient.getLaneLatency(this.network.chainSelector, destChainSelector)
+    return this.apiClient.getLaneLatency(
+      this.network.chainSelector,
+      destChainSelector,
+      numberOfBlocks,
+    )
   }
 
   /**
@@ -1496,23 +1550,27 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
   /**
    * Estimate `ccipReceive` execution cost (gas, computeUnits) for this *dest*
-   * @param opts - estimation options
+   * @param opts - estimation options, either `messageId` (for api) or `offRamp`, `message` (with `destTokenAmounts`)
    * @returns estimated execution cost (gas or computeUnits)
    */
-  estimateReceiveExecution?(opts: {
-    offRamp: string
-    receiver: string
-    message: {
-      sourceChainSelector: bigint
-      messageId: string
-      sender?: string
-      data?: BytesLike
-      destTokenAmounts?: readonly {
-        token: string
-        amount: bigint
-      }[]
-    }
-  }): Promise<number>
+  estimateReceiveExecution?(
+    opts:
+      | {
+          offRamp: string
+          message: {
+            sourceChainSelector: bigint
+            messageId: string
+            receiver: string
+            sender?: string
+            data?: BytesLike
+            destTokenAmounts?: readonly ((
+              | { token: string }
+              | { destTokenAddress: string; extraData?: string }
+            ) & { amount: bigint })[]
+          }
+        }
+      | { messageId: string },
+  ): Promise<number>
 }
 
 /**

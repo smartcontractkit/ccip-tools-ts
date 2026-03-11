@@ -1,6 +1,7 @@
 import { type CCIPErrorOptions, CCIPError } from './CCIPError.ts'
 import { CCIPErrorCode } from './codes.ts'
 import { isTransientHttpStatus } from '../http-status.ts'
+import { bigIntReplacer } from '../utils.ts'
 
 // Chain/Network
 
@@ -166,7 +167,10 @@ export class CCIPMessageInvalidError extends CCIPError {
   override readonly name = 'CCIPMessageInvalidError'
   /** Creates a message invalid error. */
   constructor(data: unknown, options?: CCIPErrorOptions) {
-    const dataStr = typeof data === 'object' && data !== null ? JSON.stringify(data) : String(data)
+    const dataStr =
+      typeof data === 'object' && data !== null
+        ? JSON.stringify(data, bigIntReplacer)
+        : String(data)
     super(CCIPErrorCode.MESSAGE_INVALID, `Invalid CCIP message format: ${dataStr}`, {
       ...options,
       isTransient: false,
@@ -1199,6 +1203,34 @@ export class CCIPTimeoutError extends CCIPError {
       isTransient: true,
       retryAfterMs: 5000,
       context: { ...options?.context, operation, timeoutMs },
+    })
+  }
+}
+
+/**
+ * Thrown when a request is aborted via an AbortSignal.
+ *
+ * @example
+ * ```typescript
+ * const controller = new AbortController()
+ * setTimeout(() => controller.abort(), 1000)
+ * try {
+ *   await api.searchMessages({ sender: '0x...' }, { signal: controller.signal })
+ * } catch (error) {
+ *   if (error instanceof CCIPAbortError) {
+ *     console.log(`Request was cancelled: ${error.context.operation}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPAbortError extends CCIPError {
+  override readonly name = 'CCIPAbortError'
+  /** Creates an abort error. */
+  constructor(operation: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.ABORT, `Request aborted: ${operation}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, operation },
     })
   }
 }

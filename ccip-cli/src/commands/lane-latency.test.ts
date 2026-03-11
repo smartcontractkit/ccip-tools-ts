@@ -169,6 +169,29 @@ describe('lane-latency command', () => {
     assert.equal(mockedFetch.mock.calls.length, 1)
   })
 
+  it('should forward blockConfirmations to API URL', async () => {
+    await getLaneLatencyCmd(createCtx(), {
+      source: '5009297550715157269',
+      dest: '4949039107694359620',
+      format: Format.json,
+      blockConfirmations: 10,
+    } as Parameters<typeof getLaneLatencyCmd>[1])
+
+    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+    assert.ok(url.includes('numOfBlocks=10'))
+  })
+
+  it('should not include numOfBlocks when blockConfirmations is not provided', async () => {
+    await getLaneLatencyCmd(createCtx(), {
+      source: '5009297550715157269',
+      dest: '4949039107694359620',
+      format: Format.json,
+    } as Parameters<typeof getLaneLatencyCmd>[1])
+
+    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+    assert.ok(!url.includes('numOfBlocks'))
+  })
+
   describe('CCIP_API environment variable integration', () => {
     it('should respect CCIP_API=false environment variable', async () => {
       const origEnv = process.env.CCIP_API

@@ -12,6 +12,9 @@ export type {
   APIErrorResponse,
   CCIPAPIClientContext,
   LaneLatencyResponse,
+  MessageSearchFilters,
+  MessageSearchPage,
+  MessageSearchResult,
 } from './api/index.ts'
 export {
   CCIPAPIClient,

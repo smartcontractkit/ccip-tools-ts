@@ -12,6 +12,7 @@ import {
   JsonRpcProvider,
   WebSocketProvider,
   ZeroAddress,
+  formatUnits,
   getAddress,
   hexlify,
   isBytesLike,
@@ -19,6 +20,7 @@ import {
   isHexString,
   keccak256,
   toBeHex,
+  toBigInt,
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
@@ -47,6 +49,7 @@ import {
   CCIPHasherVersionUnsupportedError,
   CCIPLogDataInvalidError,
   CCIPSourceChainUnsupportedError,
+  CCIPTokenDecimalsInsufficientError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
@@ -692,7 +695,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         offRampABI = OffRamp_1_6_ABI
       // falls through
       case CCIPVersion.V2_0: {
-        offRampABI = OffRamp_2_0_ABI
+        offRampABI ??= OffRamp_2_0_ABI
         const contract = new Contract(
           offRamp,
           offRampABI,
@@ -1145,7 +1148,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   async generateUnsignedExecute(
     opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<UnsignedEVMTx> {
-    const { offRamp, input } = await this.resolveExecuteOpts(opts)
+    const { offRamp, input, gasLimit } = await this.resolveExecuteOpts(opts)
     if ('verifications' in input) {
       const contract = new Contract(
         offRamp,
@@ -1173,14 +1176,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         messageId,
         input.verifications.map(({ destAddress }) => destAddress),
         input.verifications.map(({ ccvData }) => hexlify(ccvData)),
-        BigInt(opts.gasLimit ?? 0),
+        BigInt(gasLimit ?? 0),
         { from: offRamp }, // internal method
       )
       const execTx = await contract.execute.populateTransaction(
         input.encodedMessage,
         input.verifications.map(({ destAddress }) => destAddress),
         input.verifications.map(({ ccvData }) => hexlify(ccvData)),
-        BigInt(opts.gasLimit ?? 0),
+        BigInt(gasLimit ?? 0),
       )
       execTx.gasLimit = txGasLimit + 40000n // plus `execute`'s overhead
       return { family: ChainFamily.EVM, transactions: [execTx] }
@@ -1197,7 +1200,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           interfaces.EVM2EVMOffRamp_v1_2,
           this.provider,
         ) as unknown as TypedContract<typeof EVM2EVMOffRamp_1_2_ABI>
-        const gasOverride = BigInt(opts.gasLimit ?? 0)
+        const gasOverride = BigInt(gasLimit ?? 0)
         manualExecTx = await contract.manuallyExecute.populateTransaction(
           {
             ...input,
@@ -1224,9 +1227,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           },
           [
             {
-              receiverExecutionGasLimit: BigInt(opts.gasLimit ?? 0),
+              receiverExecutionGasLimit: BigInt(gasLimit ?? 0),
               tokenGasOverrides: input.message.tokenAmounts.map(() =>
-                BigInt(opts.tokensGasLimit ?? opts.gasLimit ?? 0),
+                BigInt(opts.tokensGasLimit ?? gasLimit ?? 0),
               ),
             },
           ],
@@ -1279,9 +1282,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           [
             [
               {
-                receiverExecutionGasLimit: BigInt(opts.gasLimit ?? 0),
+                receiverExecutionGasLimit: BigInt(gasLimit ?? 0),
                 tokenGasOverrides: input.message.tokenAmounts.map(() =>
-                  BigInt(opts.tokensGasLimit ?? opts.gasLimit ?? 0),
+                  BigInt(opts.tokensGasLimit ?? gasLimit ?? 0),
                 ),
               },
             ],
@@ -1295,18 +1298,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     /* Executing a message for the first time has some hard try/catches on-chain
      * so we need to ensure some lower-bounds gasLimits */
-    let gasLimit = await this.provider.estimateGas(manualExecTx)
+    let txGasLimit = await this.provider.estimateGas(manualExecTx)
     if (
       'gasLimit' in input.message &&
       input.message.gasLimit &&
-      gasLimit < input.message.gasLimit + 100000n
+      txGasLimit < input.message.gasLimit + 100000n
     )
       // if message requested gasLimit, ensure execution more than 100k above requested, otherwise it's clearly a try/catch fail
-      gasLimit = BigInt(input.message.gasLimit) + 200000n
-    else if ('gasLimit' in input.message && !input.message.gasLimit && gasLimit < 240000n)
+      txGasLimit = BigInt(input.message.gasLimit) + 200000n
+    else if ('gasLimit' in input.message && !input.message.gasLimit && txGasLimit < 240000n)
       // if message didn't request gasLimit, ensure execution gasLimit is above 240k (empiric)
-      gasLimit = 240000n
-    manualExecTx.gasLimit = gasLimit
+      txGasLimit = 240000n
+    manualExecTx.gasLimit = txGasLimit
 
     return { family: ChainFamily.EVM, transactions: [manualExecTx] }
   }
@@ -1760,10 +1763,76 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   override async estimateReceiveExecution(
     opts: Parameters<NonNullable<Chain['estimateReceiveExecution']>>[0],
   ): Promise<number> {
+    const convertAmounts = (
+      tokenAmounts?: readonly ((
+        | { token: string }
+        | { destTokenAddress: string; extraData?: string }
+      ) & {
+        amount: bigint
+      })[],
+    ) =>
+      !tokenAmounts
+        ? undefined
+        : Promise.all(
+            tokenAmounts.map(async (ta) => {
+              if (!('destTokenAddress' in ta)) return ta
+              let amount = ta.amount
+              if (isHexString(ta.extraData, 32)) {
+                // extraData is source token decimals in most pools derived from standard TP contracts;
+                // we can identify for it being exactly 32B and being a small integer; otherwise, assume same decimals
+                const sourceDecimals = toBigInt(ta.extraData)
+                if (0 < sourceDecimals && sourceDecimals <= 36) {
+                  const { decimals: destDecimals } = await this.getTokenInfo(ta.destTokenAddress)
+                  amount =
+                    (amount * BigInt(10) ** BigInt(destDecimals)) /
+                    BigInt(10) ** BigInt(sourceDecimals)
+                  if (amount === 0n)
+                    throw new CCIPTokenDecimalsInsufficientError(
+                      ta.destTokenAddress,
+                      destDecimals,
+                      this.network.name,
+                      formatUnits(amount, sourceDecimals),
+                    )
+                }
+              }
+              return { token: ta.destTokenAddress, amount }
+            }),
+          )
+
+    let opts_
+    if (!('offRamp' in opts)) {
+      const { lane, message, metadata } = await this.getMessageById(opts.messageId)
+
+      const offRamp =
+        ('offRampAddress' in message && message.offRampAddress) ||
+        metadata?.offRamp ||
+        (await this.apiClient!.getExecutionInput(opts.messageId)).offRamp
+
+      opts_ = {
+        offRamp,
+        message: {
+          sourceChainSelector: lane.sourceChainSelector,
+          messageId: message.messageId,
+          receiver: message.receiver,
+          sender: message.sender,
+          data: message.data,
+          destTokenAmounts: await convertAmounts(message.tokenAmounts),
+        },
+      }
+    } else {
+      opts_ = {
+        ...opts,
+        message: {
+          ...opts.message,
+          destTokenAmounts: await convertAmounts(opts.message.destTokenAmounts),
+        },
+      }
+    }
+
     const destRouter = await this.getRouterForOffRamp(
-      opts.offRamp,
-      opts.message.sourceChainSelector,
+      opts_.offRamp,
+      opts_.message.sourceChainSelector,
     )
-    return estimateExecGas({ provider: this.provider, router: destRouter, ...opts })
+    return estimateExecGas({ provider: this.provider, router: destRouter, ...opts_ })
   }
 }

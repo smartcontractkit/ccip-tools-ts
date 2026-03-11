@@ -90,7 +90,7 @@ export const builder = (yargs: Argv) =>
         alias: 'w',
         type: 'string',
         describe:
-          'Wallet to send transactions with; pass `ledger[:index_or_derivation]` to use Ledger USB hardware wallet, or private key in `USER_KEY` environment variable',
+          'Wallet to send transactions with; pass `ledger[:index_or_derivation]` for Ledger, `foundry:<name>` or `hardhat:<name>` for named keystores, or private key in `USER_KEY` environment variable',
       },
       'force-buffer': {
         type: 'boolean',
