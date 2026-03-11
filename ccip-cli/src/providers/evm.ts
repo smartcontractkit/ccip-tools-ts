@@ -46,7 +46,7 @@ const KEYSTORE_PROVIDERS: Record<
         )
       }
       let pw = process.env['FOUNDRY_KEYSTORE_PASSWORD'] ?? process.env['USER_KEY_PASSWORD']
-      if (!pw) pw = await password({ message: `Enter password for Foundry keystore '${name}'` })
+      pw ??= await password({ message: `Enter password for Foundry keystore '${name}'` })
       return (await Wallet.fromEncryptedJson(await readFile(keystorePath, 'utf8'), pw)).privateKey
     },
   },
