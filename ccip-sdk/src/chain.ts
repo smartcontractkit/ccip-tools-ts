@@ -1068,6 +1068,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           offRamp: opts_.offRamp,
           message,
         })
+        this.logger.debug('Estimated receiver execution:', opts_.gasLimit)
       } catch (err) {
         // ignore if receiver fails, let estimation of execute method itself throw if needed
         this.logger.debug('Failed to auto-estimateReceiveExecution for:', opts, err)
