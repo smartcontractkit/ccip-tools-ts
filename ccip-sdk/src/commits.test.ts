@@ -131,9 +131,15 @@ class MockChain extends Chain {
   async getTokenPoolConfig(_tokenPool: string): Promise<{
     token: string
     router: string
+    owner: string
     typeAndVersion?: string
   }> {
-    return { token: '0xToken', router: '0xRouter', typeAndVersion: 'TokenPool 1.5.0' }
+    return {
+      token: '0xToken',
+      router: '0xRouter',
+      owner: '0xOwner',
+      typeAndVersion: 'TokenPool 1.5.0',
+    }
   }
 
   async getTokenPoolRemotes(_pool: string, _remoteChainSelector: bigint): Promise<any> {

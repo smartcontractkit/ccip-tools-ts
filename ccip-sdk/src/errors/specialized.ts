@@ -3472,3 +3472,841 @@ export class CCIPViemAdapterError extends CCIPError {
     })
   }
 }
+
+// ─── Token Deployment ─────────────────────────────────────────────────────────
+
+/**
+ * Thrown when token deployment parameters are invalid (e.g., empty name, decimals out of range).
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await admin.deployToken({ name: '', symbol: 'MTK', decimals: 18 })
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenDeployParamsInvalidError) {
+ *     console.log(`Invalid param: ${error.context.param} — ${error.context.reason}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPTokenDeployParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPTokenDeployParamsInvalidError'
+  /** Creates a token deploy params invalid error. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.TOKEN_DEPLOY_PARAMS_INVALID,
+      `Invalid token deployment parameter "${param}": ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, param, reason },
+      },
+    )
+  }
+}
+
+/**
+ * Thrown when a token deployment transaction fails (reverts or is not confirmed).
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await admin.deployToken({ name: 'My Token', symbol: 'MTK', decimals: 18 })
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenDeployFailedError) {
+ *     console.log(`Deploy failed: ${error.context.txHash}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPTokenDeployFailedError extends CCIPError {
+  override readonly name = 'CCIPTokenDeployFailedError'
+  /** Creates a token deploy failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.TOKEN_DEPLOY_FAILED, `Token deployment failed: ${reason}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, reason },
+    })
+  }
+}
+
+// ── Pool Deployment ──────────────────────────────────────────────────────────
+
+/**
+ * Thrown when pool deployment parameters fail validation.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await admin.deployPool(wallet, { poolType: 'burn-mint', tokenAddress: '', localTokenDecimals: 18, routerAddress: '0x...' })
+ * } catch (error) {
+ *   if (error instanceof CCIPPoolDeployParamsInvalidError) {
+ *     console.log(`Invalid param: ${error.context.param} — ${error.context.reason}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPPoolDeployParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPPoolDeployParamsInvalidError'
+  /** Creates a pool deploy params invalid error. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.POOL_DEPLOY_PARAMS_INVALID,
+      `Invalid pool deployment parameter "${param}": ${reason}`,
+      { ...options, isTransient: false, context: { ...options?.context, param, reason } },
+    )
+  }
+}
+
+/**
+ * Thrown when pool deployment transaction fails on-chain.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await admin.deployPool(wallet, params)
+ * } catch (error) {
+ *   if (error instanceof CCIPPoolDeployFailedError) {
+ *     console.log(`Pool deploy failed: ${error.message}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPPoolDeployFailedError extends CCIPError {
+  override readonly name = 'CCIPPoolDeployFailedError'
+  /** Creates a pool deploy failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.POOL_DEPLOY_FAILED, `Pool deployment failed: ${reason}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, reason },
+    })
+  }
+}
+
+/**
+ * Thrown when an operation is attempted on an uninitialized Aptos generic pool.
+ *
+ * Generic pools (`burn_mint_token_pool`, `lock_release_token_pool`) require a
+ * separate `initialize()` call from the token creator module with capability refs
+ * (`BurnRef`/`MintRef`/`TransferRef`) that cannot be provided from TypeScript.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await admin.transferOwnership(wallet, { poolAddress, newOwner })
+ * } catch (error) {
+ *   if (error instanceof CCIPPoolNotInitializedError) {
+ *     console.log(`Pool not initialized: ${error.message}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPPoolNotInitializedError extends CCIPError {
+  override readonly name = 'CCIPPoolNotInitializedError'
+  /** Creates a pool not initialized error. */
+  constructor(poolAddress: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.POOL_NOT_INITIALIZED,
+      `Pool at ${poolAddress} is not initialized. ` +
+        `The token creator module must call initialize() with capability refs ` +
+        `(BurnRef/MintRef/TransferRef) before this operation can be used.`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, poolAddress },
+      },
+    )
+  }
+}
+
+// ── Propose Admin Role ──────────────────────────────────────────────────────
+
+/**
+ * Thrown when proposeAdminRole parameters are invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await admin.proposeAdminRole(wallet, params)
+ * } catch (error) {
+ *   if (error instanceof CCIPProposeAdminRoleParamsInvalidError) {
+ *     console.log(`Invalid param: ${error.context.param} — ${error.context.reason}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPProposeAdminRoleParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPProposeAdminRoleParamsInvalidError'
+  /** Creates a propose admin role params invalid error. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.PROPOSE_ADMIN_ROLE_PARAMS_INVALID,
+      `Invalid proposeAdminRole parameter "${param}": ${reason}`,
+      { ...options, isTransient: false, context: { ...options?.context, param, reason } },
+    )
+  }
+}
+
+/**
+ * Thrown when proposeAdminRole transaction fails on-chain.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await admin.proposeAdminRole(wallet, params)
+ * } catch (error) {
+ *   if (error instanceof CCIPProposeAdminRoleFailedError) {
+ *     console.log(`Propose admin role failed: ${error.message}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPProposeAdminRoleFailedError extends CCIPError {
+  override readonly name = 'CCIPProposeAdminRoleFailedError'
+  /** Creates a propose admin role failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.PROPOSE_ADMIN_ROLE_FAILED, `Propose admin role failed: ${reason}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, reason },
+    })
+  }
+}
+
+/**
+ * Thrown when acceptAdminRole parameters are invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await admin.acceptAdminRole(wallet, params)
+ * } catch (error) {
+ *   if (error instanceof CCIPAcceptAdminRoleParamsInvalidError) {
+ *     console.log(`Invalid param: ${error.context.param} — ${error.context.reason}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPAcceptAdminRoleParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPAcceptAdminRoleParamsInvalidError'
+  /** Creates an accept admin role params invalid error. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.ACCEPT_ADMIN_ROLE_PARAMS_INVALID,
+      `Invalid acceptAdminRole parameter "${param}": ${reason}`,
+      { ...options, isTransient: false, context: { ...options?.context, param, reason } },
+    )
+  }
+}
+
+/**
+ * Thrown when acceptAdminRole transaction fails on-chain.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await admin.acceptAdminRole(wallet, params)
+ * } catch (error) {
+ *   if (error instanceof CCIPAcceptAdminRoleFailedError) {
+ *     console.log(`Accept admin role failed: ${error.message}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPAcceptAdminRoleFailedError extends CCIPError {
+  override readonly name = 'CCIPAcceptAdminRoleFailedError'
+  /** Creates an accept admin role failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.ACCEPT_ADMIN_ROLE_FAILED, `Accept admin role failed: ${reason}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, reason },
+    })
+  }
+}
+
+// ── Transfer Admin Role ─────────────────────────────────────────────────────
+
+/**
+ * Thrown when transferAdminRole parameters are invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await admin.transferAdminRole(wallet, params)
+ * } catch (error) {
+ *   if (error instanceof CCIPTransferAdminRoleParamsInvalidError) {
+ *     console.log(`Invalid param: ${error.context.param} — ${error.context.reason}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPTransferAdminRoleParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPTransferAdminRoleParamsInvalidError'
+  /** Creates a transfer admin role params invalid error. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.TRANSFER_ADMIN_ROLE_PARAMS_INVALID,
+      `Invalid transferAdminRole parameter "${param}": ${reason}`,
+      { ...options, isTransient: false, context: { ...options?.context, param, reason } },
+    )
+  }
+}
+
+/**
+ * Thrown when transferAdminRole transaction fails on-chain.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await admin.transferAdminRole(wallet, params)
+ * } catch (error) {
+ *   if (error instanceof CCIPTransferAdminRoleFailedError) {
+ *     console.log(`Transfer admin role failed: ${error.message}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPTransferAdminRoleFailedError extends CCIPError {
+  override readonly name = 'CCIPTransferAdminRoleFailedError'
+  /** Creates a transfer admin role failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.TRANSFER_ADMIN_ROLE_FAILED, `Transfer admin role failed: ${reason}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, reason },
+    })
+  }
+}
+
+// ── Apply Chain Updates ─────────────────────────────────────────────────────
+
+/** Thrown when applyChainUpdates parameters are invalid. */
+export class CCIPApplyChainUpdatesParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPApplyChainUpdatesParamsInvalidError'
+  /** Creates a params-invalid error for apply chain updates. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.APPLY_CHAIN_UPDATES_PARAMS_INVALID,
+      `Invalid applyChainUpdates param "${param}": ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, param, reason },
+      },
+    )
+  }
+}
+
+/** Thrown when the applyChainUpdates transaction fails. */
+export class CCIPApplyChainUpdatesFailedError extends CCIPError {
+  override readonly name = 'CCIPApplyChainUpdatesFailedError'
+  /** Creates an apply chain updates failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.APPLY_CHAIN_UPDATES_FAILED, `Apply chain updates failed: ${reason}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, reason },
+    })
+  }
+}
+
+// ── Set Chain Rate Limiter Config ───────────────────────────────────────────
+
+/** Thrown when setChainRateLimiterConfig parameters are invalid. */
+export class CCIPSetRateLimiterConfigParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPSetRateLimiterConfigParamsInvalidError'
+  /** Creates a params-invalid error for set rate limiter config. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.SET_RATE_LIMITER_CONFIG_PARAMS_INVALID,
+      `Invalid setChainRateLimiterConfig param "${param}": ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, param, reason },
+      },
+    )
+  }
+}
+
+/** Thrown when the setChainRateLimiterConfig transaction fails. */
+export class CCIPSetRateLimiterConfigFailedError extends CCIPError {
+  override readonly name = 'CCIPSetRateLimiterConfigFailedError'
+  /** Creates a set rate limiter config failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.SET_RATE_LIMITER_CONFIG_FAILED,
+      `Set rate limiter config failed: ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, reason },
+      },
+    )
+  }
+}
+
+// ── Set Rate Limit Admin ────────────────────────────────────────────────────
+
+/** Thrown when setRateLimitAdmin parameters are invalid. */
+export class CCIPSetRateLimitAdminParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPSetRateLimitAdminParamsInvalidError'
+  /** Creates a params-invalid error for set rate limit admin. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.SET_RATE_LIMIT_ADMIN_PARAMS_INVALID,
+      `Invalid setRateLimitAdmin param "${param}": ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, param, reason },
+      },
+    )
+  }
+}
+
+/** Thrown when the setRateLimitAdmin transaction fails. */
+export class CCIPSetRateLimitAdminFailedError extends CCIPError {
+  override readonly name = 'CCIPSetRateLimitAdminFailedError'
+  /** Creates a set rate limit admin failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.SET_RATE_LIMIT_ADMIN_FAILED, `Set rate limit admin failed: ${reason}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, reason },
+    })
+  }
+}
+
+// ── Create Pool Mint Authority Multisig (Solana-only) ───────────────────────
+
+/** Thrown when createPoolMintAuthorityMultisig parameters are invalid. */
+export class CCIPCreatePoolMultisigParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPCreatePoolMultisigParamsInvalidError'
+  /** Creates a params-invalid error for create pool multisig. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.CREATE_POOL_MULTISIG_PARAMS_INVALID,
+      `Invalid createPoolMintAuthorityMultisig param "${param}": ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, param, reason },
+      },
+    )
+  }
+}
+
+/** Thrown when the createPoolMintAuthorityMultisig transaction fails. */
+export class CCIPCreatePoolMultisigFailedError extends CCIPError {
+  override readonly name = 'CCIPCreatePoolMultisigFailedError'
+  /** Creates a create pool multisig failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.CREATE_POOL_MULTISIG_FAILED,
+      `Create pool mint authority multisig failed: ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, reason },
+      },
+    )
+  }
+}
+
+// Transfer Mint Authority (Solana-only)
+
+/** Thrown when transferMintAuthority params are invalid. */
+export class CCIPTransferMintAuthorityParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPTransferMintAuthorityParamsInvalidError'
+  /** Creates a params-invalid error for transfer mint authority. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.TRANSFER_MINT_AUTHORITY_PARAMS_INVALID,
+      `Invalid transferMintAuthority param "${param}": ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, param, reason },
+      },
+    )
+  }
+}
+
+/** Thrown when the transferMintAuthority transaction fails. */
+export class CCIPTransferMintAuthorityFailedError extends CCIPError {
+  override readonly name = 'CCIPTransferMintAuthorityFailedError'
+  /** Creates a transfer mint authority failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.TRANSFER_MINT_AUTHORITY_FAILED,
+      `Transfer mint authority failed: ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, reason },
+      },
+    )
+  }
+}
+
+// Grant Mint/Burn Access
+
+/** Thrown when grantMintBurnAccess params are invalid. */
+export class CCIPGrantMintBurnAccessParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPGrantMintBurnAccessParamsInvalidError'
+  /** Creates a params-invalid error for grant mint/burn access. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.GRANT_MINT_BURN_ACCESS_PARAMS_INVALID,
+      `Invalid grantMintBurnAccess param "${param}": ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, param, reason },
+      },
+    )
+  }
+}
+
+/** Thrown when the grantMintBurnAccess transaction fails. */
+export class CCIPGrantMintBurnAccessFailedError extends CCIPError {
+  override readonly name = 'CCIPGrantMintBurnAccessFailedError'
+  /** Creates a grant mint/burn access failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.GRANT_MINT_BURN_ACCESS_FAILED, `Grant mint/burn access failed: ${reason}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, reason },
+    })
+  }
+}
+
+// Revoke Mint/Burn Access
+
+/** Thrown when revokeMintBurnAccess params are invalid. */
+export class CCIPRevokeMintBurnAccessParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPRevokeMintBurnAccessParamsInvalidError'
+  /** Creates a params-invalid error for revoke mint/burn access. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.REVOKE_MINT_BURN_ACCESS_PARAMS_INVALID,
+      `Invalid revokeMintBurnAccess param "${param}": ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, param, reason },
+      },
+    )
+  }
+}
+
+/** Thrown when the revokeMintBurnAccess transaction fails. */
+export class CCIPRevokeMintBurnAccessFailedError extends CCIPError {
+  override readonly name = 'CCIPRevokeMintBurnAccessFailedError'
+  /** Creates a revoke mint/burn access failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.REVOKE_MINT_BURN_ACCESS_FAILED,
+      `Revoke mint/burn access failed: ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, reason },
+      },
+    )
+  }
+}
+
+// ── Create Pool Token Account (Solana-only) ─────────────────────────────────
+
+/** Thrown when createPoolTokenAccount params are invalid. */
+export class CCIPCreatePoolTokenAccountParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPCreatePoolTokenAccountParamsInvalidError'
+  /** Creates a params-invalid error for create pool token account. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.CREATE_POOL_TOKEN_ACCOUNT_PARAMS_INVALID,
+      `Invalid createPoolTokenAccount param "${param}": ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, param, reason },
+      },
+    )
+  }
+}
+
+/** Thrown when the createPoolTokenAccount transaction fails. */
+export class CCIPCreatePoolTokenAccountFailedError extends CCIPError {
+  override readonly name = 'CCIPCreatePoolTokenAccountFailedError'
+  /** Creates a create pool token account failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.CREATE_POOL_TOKEN_ACCOUNT_FAILED,
+      `Create pool token account failed: ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, reason },
+      },
+    )
+  }
+}
+
+// ── Create Token Address Lookup Table (Solana-only) ─────────────────────────
+
+/** Thrown when createTokenAlt params are invalid. */
+export class CCIPCreateTokenAltParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPCreateTokenAltParamsInvalidError'
+  /** Creates a params-invalid error for create token ALT. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.CREATE_TOKEN_ALT_PARAMS_INVALID,
+      `Invalid createTokenAlt param "${param}": ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, param, reason },
+      },
+    )
+  }
+}
+
+/** Thrown when the createTokenAlt transaction fails. */
+export class CCIPCreateTokenAltFailedError extends CCIPError {
+  override readonly name = 'CCIPCreateTokenAltFailedError'
+  /** Creates a create token ALT failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.CREATE_TOKEN_ALT_FAILED,
+      `Create token address lookup table failed: ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, reason },
+      },
+    )
+  }
+}
+
+// ── Set Pool ────────────────────────────────────────────────────────────────
+
+/** Thrown when setPool parameters are invalid. */
+export class CCIPSetPoolParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPSetPoolParamsInvalidError'
+  /** Creates a set pool params invalid error. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.SET_POOL_PARAMS_INVALID,
+      `Invalid setPool parameter "${param}": ${reason}`,
+      { ...options, isTransient: false, context: { ...options?.context, param, reason } },
+    )
+  }
+}
+
+/** Thrown when the setPool transaction fails on-chain. */
+export class CCIPSetPoolFailedError extends CCIPError {
+  override readonly name = 'CCIPSetPoolFailedError'
+  /** Creates a set pool failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.SET_POOL_FAILED, `Set pool failed: ${reason}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, reason },
+    })
+  }
+}
+
+// ── Transfer Ownership ──────────────────────────────────────────────────────
+
+/** Thrown when transferOwnership parameters are invalid. */
+export class CCIPTransferOwnershipParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPTransferOwnershipParamsInvalidError'
+  /** Creates a transfer ownership params invalid error. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.TRANSFER_OWNERSHIP_PARAMS_INVALID,
+      `Invalid transferOwnership parameter "${param}": ${reason}`,
+      { ...options, isTransient: false, context: { ...options?.context, param, reason } },
+    )
+  }
+}
+
+/** Thrown when the transferOwnership transaction fails on-chain. */
+export class CCIPTransferOwnershipFailedError extends CCIPError {
+  override readonly name = 'CCIPTransferOwnershipFailedError'
+  /** Creates a transfer ownership failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.TRANSFER_OWNERSHIP_FAILED, `Transfer ownership failed: ${reason}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, reason },
+    })
+  }
+}
+
+// ── Accept Ownership ────────────────────────────────────────────────────────
+
+/** Thrown when acceptOwnership parameters are invalid. */
+export class CCIPAcceptOwnershipParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPAcceptOwnershipParamsInvalidError'
+  /** Creates an accept ownership params invalid error. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.ACCEPT_OWNERSHIP_PARAMS_INVALID,
+      `Invalid acceptOwnership parameter "${param}": ${reason}`,
+      { ...options, isTransient: false, context: { ...options?.context, param, reason } },
+    )
+  }
+}
+
+/** Thrown when the acceptOwnership transaction fails on-chain. */
+export class CCIPAcceptOwnershipFailedError extends CCIPError {
+  override readonly name = 'CCIPAcceptOwnershipFailedError'
+  /** Creates an accept ownership failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.ACCEPT_OWNERSHIP_FAILED, `Accept ownership failed: ${reason}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, reason },
+    })
+  }
+}
+
+// ── Execute Ownership Transfer (Aptos 3rd step) ─────────────────────────────
+
+/** Thrown when executeOwnershipTransfer parameters are invalid. */
+export class CCIPExecuteOwnershipTransferParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPExecuteOwnershipTransferParamsInvalidError'
+  /** Creates an execute ownership transfer params invalid error. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.EXECUTE_OWNERSHIP_TRANSFER_PARAMS_INVALID,
+      `Invalid executeOwnershipTransfer parameter "${param}": ${reason}`,
+      { ...options, isTransient: false, context: { ...options?.context, param, reason } },
+    )
+  }
+}
+
+/** Thrown when the executeOwnershipTransfer transaction fails on-chain. */
+export class CCIPExecuteOwnershipTransferFailedError extends CCIPError {
+  override readonly name = 'CCIPExecuteOwnershipTransferFailedError'
+  /** Creates an execute ownership transfer failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.EXECUTE_OWNERSHIP_TRANSFER_FAILED,
+      `Execute ownership transfer failed: ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, reason },
+      },
+    )
+  }
+}
+
+// ── Append Remote Pool Addresses ─────────────────────────────────────────────
+
+/** Thrown when appendRemotePoolAddresses parameters are invalid. */
+export class CCIPAppendRemotePoolAddressesParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPAppendRemotePoolAddressesParamsInvalidError'
+  /** Creates a params-invalid error for append remote pool addresses. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.APPEND_REMOTE_POOL_ADDRESSES_PARAMS_INVALID,
+      `Invalid appendRemotePoolAddresses param "${param}": ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, param, reason },
+      },
+    )
+  }
+}
+
+/** Thrown when the appendRemotePoolAddresses transaction fails. */
+export class CCIPAppendRemotePoolAddressesFailedError extends CCIPError {
+  override readonly name = 'CCIPAppendRemotePoolAddressesFailedError'
+  /** Creates an append remote pool addresses failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.APPEND_REMOTE_POOL_ADDRESSES_FAILED,
+      `Append remote pool addresses failed: ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, reason },
+      },
+    )
+  }
+}
+
+// ── Delete Chain Config ─────────────────────────────────────────────────────
+
+/** Thrown when deleteChainConfig parameters are invalid. */
+export class CCIPDeleteChainConfigParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPDeleteChainConfigParamsInvalidError'
+  /** Creates a params-invalid error for delete chain config. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.DELETE_CHAIN_CONFIG_PARAMS_INVALID,
+      `Invalid deleteChainConfig param "${param}": ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, param, reason },
+      },
+    )
+  }
+}
+
+/** Thrown when the deleteChainConfig transaction fails. */
+export class CCIPDeleteChainConfigFailedError extends CCIPError {
+  override readonly name = 'CCIPDeleteChainConfigFailedError'
+  /** Creates a delete chain config failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.DELETE_CHAIN_CONFIG_FAILED, `Delete chain config failed: ${reason}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, reason },
+    })
+  }
+}
+
+/** Thrown when removeRemotePoolAddresses params are invalid. */
+export class CCIPRemoveRemotePoolAddressesParamsInvalidError extends CCIPError {
+  override readonly name = 'CCIPRemoveRemotePoolAddressesParamsInvalidError'
+  /** Creates a remove remote pool addresses params invalid error. */
+  constructor(param: string, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.REMOVE_REMOTE_POOL_ADDRESSES_PARAMS_INVALID,
+      `Invalid removeRemotePoolAddresses param "${param}": ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, param, reason },
+      },
+    )
+  }
+}
+
+/** Thrown when the removeRemotePoolAddresses transaction fails. */
+export class CCIPRemoveRemotePoolAddressesFailedError extends CCIPError {
+  override readonly name = 'CCIPRemoveRemotePoolAddressesFailedError'
+  /** Creates a remove remote pool addresses failed error. */
+  constructor(reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.REMOVE_REMOTE_POOL_ADDRESSES_FAILED,
+      `Remove remote pool addresses failed: ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, reason },
+      },
+    )
+  }
+}

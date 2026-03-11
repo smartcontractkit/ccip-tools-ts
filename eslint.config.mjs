@@ -114,6 +114,7 @@ export default defineConfig(
   },
   {
     // Ban cli imports from @chainlink/ccip-sdk modules other than /src/index.ts
+    // and /src/token-admin/*/index.ts (heavy deps kept out of the main barrel).
     files: ['ccip-cli/src/**/*.ts'],
     rules: {
       'no-restricted-imports': [
@@ -121,8 +122,10 @@ export default defineConfig(
         {
           patterns: [
             {
-              regex: '^(?!@chainlink/ccip-sdk/src/index\\.ts$).*\\/ccip-sdk\\b',
-              message: 'Import from @chainlink/ccip-sdk/src/index.ts instead of other modules.',
+              regex:
+                '^(?!@chainlink/ccip-sdk/src/index\\.ts$|@chainlink/ccip-sdk/src/token-admin/[^/]+/index\\.ts$).*\\/ccip-sdk\\b',
+              message:
+                'Import from @chainlink/ccip-sdk/src/index.ts or @chainlink/ccip-sdk/src/token-admin/*/index.ts instead of other modules.',
             },
           ],
         },

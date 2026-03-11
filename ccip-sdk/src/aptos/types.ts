@@ -92,5 +92,5 @@ export function serializeExecutionReport(
  */
 export type UnsignedAptosTx = {
   family: typeof ChainFamily.Aptos
-  transactions: [Uint8Array]
+  transactions: [Uint8Array, ...Uint8Array[]]
 }
