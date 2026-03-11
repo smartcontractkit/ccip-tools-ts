@@ -61,7 +61,7 @@ const KEYSTORE_PROVIDERS: Record<
         )
       }
       let pw = process.env['HARDHAT_KEYSTORE_PASSWORD'] ?? process.env['USER_KEY_PASSWORD']
-      if (!pw) pw = await password({ message: `Enter password for Hardhat keystore '${name}'` })
+      pw ??= await password({ message: `Enter password for Hardhat keystore '${name}'` })
       const result = spawnSync(hardhatBin, ['keystore', 'get', name], {
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'inherit'],
