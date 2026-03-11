@@ -11,7 +11,6 @@ import {
   decodeExtraArgs,
   encodeExtraArgs,
 } from './extra-args.ts'
-import { extractMagicTag } from './ton/utils.ts'
 import { ChainFamily } from './types.ts'
 
 describe('encodeExtraArgs', () => {
@@ -87,8 +86,10 @@ describe('encodeExtraArgs', () => {
         ChainFamily.TON,
       )
 
-      assert.equal(extractMagicTag(encoded), EVMExtraArgsV2Tag)
-      assert.ok(encoded.length > 10)
+      assert.equal(
+        encoded,
+        EVMExtraArgsV2Tag + '8000000000000000000000000000000000000000000000000000000000030d4040',
+      )
     })
 
     it('should encode EVMExtraArgsV2 (GenericExtraArgsV2) with allowOutOfOrderExecution false', () => {
@@ -97,8 +98,10 @@ describe('encodeExtraArgs', () => {
         ChainFamily.TON,
       )
 
-      assert.equal(extractMagicTag(encoded), EVMExtraArgsV2Tag)
-      assert.ok(encoded.length > 10)
+      assert.equal(
+        encoded,
+        EVMExtraArgsV2Tag + '800000000000000000000000000000000000000000000000000000000003d09000',
+      )
     })
 
     it('should parse real Sepolia->TON message extraArgs', () => {
@@ -301,7 +304,7 @@ describe('parseExtraArgs', () => {
       const tonEncoded = encodeExtraArgs(args, ChainFamily.TON)
 
       assert.equal(evmEncoded.substring(0, 10), EVMExtraArgsV2Tag)
-      assert.equal(extractMagicTag(tonEncoded), EVMExtraArgsV2Tag)
+      assert.equal(tonEncoded.substring(0, 10), EVMExtraArgsV2Tag)
       assert.notEqual(evmEncoded, tonEncoded)
     })
   })

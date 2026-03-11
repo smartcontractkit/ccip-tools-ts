@@ -3,7 +3,18 @@ import { Buffer } from 'buffer'
 import { type Transaction, Address, Cell, beginCell, toNano } from '@ton/core'
 import { TonClient } from '@ton/ton'
 import { type AxiosAdapter, getAdapter } from 'axios'
-import { type BytesLike, hexlify, isBytesLike, isHexString, toBeArray, toBeHex } from 'ethers'
+import {
+  type BytesLike,
+  concat,
+  dataLength,
+  dataSlice,
+  hexlify,
+  isBytesLike,
+  isHexString,
+  toBeArray,
+  toBeHex,
+  toBigInt,
+} from 'ethers'
 import { type Memoized, memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
@@ -45,6 +56,7 @@ import {
   bytesToBuffer,
   createRateLimitedFetch,
   decodeAddress,
+  getDataBytes,
   networkInfo,
   parseTypeAndVersion,
   sleep,
@@ -62,6 +74,16 @@ export type { TONWallet, UnsignedTONTx } from './types.ts'
  */
 function isTvmError(error: unknown): error is Error & { exitCode: number } {
   return error instanceof Error && 'exitCode' in error && typeof error.exitCode === 'number'
+}
+
+function bitsToBytes(bits: string): Uint8Array {
+  return Uint8Array.from(bits.match(/.{1,8}/g)!.map((byte) => parseInt(byte.padEnd(8, '0'), 2)))
+}
+
+function bytesToBits(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((B) => B.toString(2).padStart(8, '0'))
+    .join('')
 }
 
 /**
@@ -702,14 +724,14 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    */
   static encodeExtraArgs(args: ExtraArgs): string {
     if ('gasLimit' in args && 'allowOutOfOrderExecution' in args) {
-      const cell = beginCell()
-        .storeUint(Number(EVMExtraArgsV2Tag), 32) // magic tag
-        .storeUint(args.gasLimit, 256) // gasLimit
-        .storeBit(args.allowOutOfOrderExecution) // bool
-        .endCell()
-
-      // Return full BOC including headers
-      return '0x' + cell.toBoc().toString('hex')
+      return concat([
+        EVMExtraArgsV2Tag,
+        bitsToBytes(
+          '1' +
+            bytesToBits(toBeArray(args.gasLimit, 32)) +
+            (args.allowOutOfOrderExecution ? '1' : '0'),
+        ),
+      ])
     }
     return '0x'
   }
@@ -729,25 +751,24 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   static decodeExtraArgs(
     extraArgs: BytesLike,
   ): (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' }) | undefined {
-    const data = bytesToBuffer(extraArgs)
+    if (dataSlice(extraArgs, 0, 4) !== EVMExtraArgsV2Tag || dataLength(extraArgs) < 5) return
+    const data = getDataBytes(extraArgs).subarray(4)
+    let bits = bytesToBits(data)
+    let gasLimit = 0n
+    if (bits[0] === '1') {
+      if (bits.length < 1 + 32 * 8) return
+      gasLimit = toBigInt(bitsToBytes(bits.substring(1, 1 + 32 * 8)))
+      bits = bits.substring(1 + 32 * 8)
+    } else {
+      bits = bits.substring(1)
+    }
 
-    try {
-      // Parse BOC format to extract cell data
-      const cell = Cell.fromBoc(data)[0]!
-      const slice = cell.beginParse()
+    const allowOutOfOrderExecution = bits[0] === '1'
 
-      // Load and verify magic tag to ensure correct extra args type
-      const magicTag = slice.loadUint(32)
-      if (magicTag !== Number(EVMExtraArgsV2Tag)) return undefined
-
-      return {
-        _tag: 'EVMExtraArgsV2',
-        gasLimit: slice.loadUintBig(256),
-        allowOutOfOrderExecution: slice.loadBit(),
-      }
-    } catch {
-      // Return undefined for any parsing errors (invalid BOC, malformed data, etc.)
-      return undefined
+    return {
+      _tag: 'EVMExtraArgsV2',
+      gasLimit,
+      allowOutOfOrderExecution,
     }
   }
 
