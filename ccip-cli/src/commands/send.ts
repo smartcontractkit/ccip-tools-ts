@@ -107,7 +107,7 @@ export const builder = (yargs: Argv) =>
       wallet: {
         alias: 'w',
         type: 'string',
-        describe: 'Wallet: ledger[:index] or private key',
+        describe: 'Wallet: ledger[:index], foundry:<name>, hardhat:<name>, or private key',
       },
       'token-receiver': {
         type: 'string',

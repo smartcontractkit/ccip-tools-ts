@@ -72,12 +72,15 @@ The CLI supports environment variables for configuration. Command-line flags ove
 
 The CLI checks these environment variables in order: `PRIVATE_KEY`, `USER_KEY`, `OWNER_KEY`.
 
-| Variable            | Description                            |
-| ------------------- | -------------------------------------- |
-| `PRIVATE_KEY`       | Private key (EVM: hex, Solana: base58) |
-| `USER_KEY`          | Alias for `PRIVATE_KEY`                |
-| `OWNER_KEY`         | Alias for `PRIVATE_KEY`                |
-| `USER_KEY_PASSWORD` | Password for encrypted JSON keystore   |
+| Variable                    | Description                                                             |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `PRIVATE_KEY`               | Private key (EVM: hex, Solana: base58)                                  |
+| `USER_KEY`                  | Alias for `PRIVATE_KEY`                                                 |
+| `OWNER_KEY`                 | Alias for `PRIVATE_KEY`                                                 |
+| `USER_KEY_PASSWORD`         | Password for encrypted JSON keystore file or keystore fallback          |
+| `FOUNDRY_KEYSTORE_PASSWORD` | Password for Foundry keystore (takes priority over `USER_KEY_PASSWORD`) |
+| `HARDHAT_KEYSTORE_PASSWORD` | Password for Hardhat keystore (takes priority over `USER_KEY_PASSWORD`) |
+| `FOUNDRY_DIR`               | Override Foundry home directory (default: `~/.foundry`)                 |
 
 ### Output Preferences
 
@@ -100,6 +103,9 @@ RPC_APTOS_TESTNET=https://api.testnet.aptoslabs.com/v1
 
 # Wallet (for send/manual-exec commands)
 USER_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+# Or use a named keystore (pass --wallet keystore:<name> --keystore-type foundry|hardhat)
+# FOUNDRY_KEYSTORE_PASSWORD=yourFoundryKeystorePassword
+# HARDHAT_KEYSTORE_PASSWORD=yourHardhatKeystorePassword  # hardhat type requires running from inside a Hardhat project
 
 # Output preferences
 CCIP_FORMAT=json
@@ -129,11 +135,49 @@ ccip-cli send ethereum-testnet-sepolia 0x... dest --receiver 0x...
 
 Pass directly or specify a file path:
 
-| Chain  | Accepted Formats                                                                               |
-| ------ | ---------------------------------------------------------------------------------------------- |
-| EVM    | Hex private key, or path to encrypted JSON keystore (password via `USER_KEY_PASSWORD` env var) |
-| Solana | Base58 private key, or path to `id.json` file (default: `~/.config/solana/id.json`)            |
-| Aptos  | Hex private key, or path to text file containing it                                            |
+| Chain  | Accepted Formats                                                                                          |
+| ------ | --------------------------------------------------------------------------------------------------------- |
+| EVM    | Hex private key, path to encrypted JSON keystore, `ledger[:index]`, `foundry:<name>`, or `hardhat:<name>` |
+| Solana | Base58 private key, or path to `id.json` file (default: `~/.config/solana/id.json`)                       |
+| Aptos  | Hex private key, or path to text file containing it                                                       |
+
+### Foundry Cast Keystore
+
+If you manage keys with [Foundry Cast](https://book.getfoundry.sh/reference/cast/cast-wallet-import), use `foundry:<name>`:
+
+```bash
+# Import a key into the Foundry keystore (one-time setup)
+cast wallet import sender --interactive
+
+# Use it with the CLI
+ccip-cli send ... --wallet foundry:sender
+```
+
+Password resolution order:
+
+1. `$FOUNDRY_KEYSTORE_PASSWORD` env var
+2. `$USER_KEY_PASSWORD` env var
+3. Interactive prompt
+
+The keystore directory defaults to `~/.foundry/keystores/` and can be overridden with `$FOUNDRY_DIR`.
+
+### Hardhat Keystore
+
+If you manage keys with [Hardhat's built-in keystore](https://hardhat.org/hardhat-runner/docs/guides/configuration-variables), use `hardhat:<name>`. The CLI runs `node_modules/.bin/hardhat keystore get` directly, so Hardhat must be installed as a dev dependency in your project:
+
+```bash
+# Import a key into the Hardhat keystore (one-time setup)
+npx hardhat keystore set sender
+
+# Use it with the CLI (run from inside your Hardhat project)
+ccip-cli send ... --wallet hardhat:sender
+```
+
+Password resolution order:
+
+1. `$HARDHAT_KEYSTORE_PASSWORD` env var (piped silently to Hardhat)
+2. `$USER_KEY_PASSWORD` env var (piped silently to Hardhat)
+3. Interactive prompt (ccip-cli prompts, answer is piped to Hardhat)
 
 ### Ledger Hardware Wallet
 
