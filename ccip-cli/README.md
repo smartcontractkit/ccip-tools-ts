@@ -112,6 +112,25 @@ ChainIDs depend on the chain family and must be passed using this pattern:
 - `Solana`: genesis hash; e.g. `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d` for `solana-mainnet`
 - `Aptos`, `Sui`: numeric chain id, prefixed with chain family and colon: e.g `aptos:1` for `aptos-mainnet`
 
+## Shell Completion
+
+The CLI supports shell tab-completion for commands and options. To enable it, add the completion script to your shell profile:
+
+```sh
+# bash
+ccip-cli completion >> ~/.bashrc
+
+# zsh
+ccip-cli completion >> ~/.zshrc
+```
+
+Then restart your shell or source the profile. After setup, pressing `<TAB>` will autocomplete commands and flags:
+
+```sh
+ccip-cli s<TAB>        # completes to: send, show, get-supported-tokens
+ccip-cli send --<TAB>  # lists all send options
+```
+
 ## Quick command reference:
 
 ### Common options

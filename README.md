@@ -22,6 +22,8 @@ ccip-cli show 0xYOUR_TX_HASH \
   --rpc https://sepolia-rollup.arbitrum.io/rpc
 ```
 
+**Enable shell completion (optional):** `ccip-cli completion >> ~/.bashrc` (or `~/.zshrc`)
+
 ### Integrate in Your App (SDK)
 
 ```ts
