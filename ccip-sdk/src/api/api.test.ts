@@ -268,6 +268,30 @@ describe('CCIPAPIClient', () => {
       )
     })
 
+    it('should include numOfBlocks param when numberOfBlocks > 0', async () => {
+      const client = new CCIPAPIClient()
+      await client.getLaneLatency(1n, 2n, 5)
+
+      const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(url.includes('numOfBlocks=5'))
+    })
+
+    it('should not include numOfBlocks param when numberOfBlocks is 0', async () => {
+      const client = new CCIPAPIClient()
+      await client.getLaneLatency(1n, 2n, 0)
+
+      const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(!url.includes('numOfBlocks'))
+    })
+
+    it('should not include numOfBlocks param when numberOfBlocks is omitted', async () => {
+      const client = new CCIPAPIClient()
+      await client.getLaneLatency(1n, 2n)
+
+      const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+      assert.ok(!url.includes('numOfBlocks'))
+    })
+
     it('should include INVALID_PARAMETERS error details', async () => {
       const errorResponse = {
         error: 'INVALID_PARAMETERS',
@@ -1593,7 +1617,7 @@ describe('CCIPAPIClient', () => {
       const controller = new AbortController()
       setTimeout(() => controller.abort(), 10)
       await assert.rejects(
-        () => client.getLaneLatency(1n, 2n, { signal: controller.signal }),
+        () => client.getLaneLatency(1n, 2n, undefined, { signal: controller.signal }),
         (err: any) => err instanceof CCIPAbortError && err.context.operation === 'getLaneLatency',
       )
     })
@@ -1613,7 +1637,7 @@ describe('CCIPAPIClient', () => {
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
       await assert.rejects(
-        () => client.getLaneLatency(1n, 2n, { signal: AbortSignal.abort() }),
+        () => client.getLaneLatency(1n, 2n, undefined, { signal: AbortSignal.abort() }),
         (err: any) => err instanceof CCIPAbortError,
       )
     })

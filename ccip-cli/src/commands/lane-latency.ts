@@ -49,6 +49,11 @@ export const builder = (yargs: Argv) =>
       demandOption: true,
       describe: 'Destination network (chainId, selector, or name). Example: arbitrum-mainnet',
     })
+    .option('block-confirmations', {
+      alias: 'c',
+      type: 'number',
+      describe: 'Number of block confirmations to use for latency calculation',
+    })
 
 /**
  * Handler for the lane-latency command.
@@ -86,6 +91,7 @@ export async function getLaneLatencyCmd(ctx: Ctx, argv: Parameters<typeof handle
   const result = await apiClient.getLaneLatency(
     sourceNetwork.chainSelector,
     destNetwork.chainSelector,
+    argv.blockConfirmations,
   )
 
   switch (argv.format) {

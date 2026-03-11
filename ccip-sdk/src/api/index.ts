@@ -62,7 +62,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.1.1-3e62f51'
+export const SDK_VERSION = '1.1.1-e159bf3'
 // generate:end
 
 /** SDK telemetry header name */
@@ -238,6 +238,10 @@ export class CCIPAPIClient {
    *
    * @param sourceChainSelector - Source chain selector (bigint)
    * @param destChainSelector - Destination chain selector (bigint)
+   * @param numberOfBlocks - Optional number of block confirmations for latency calculation.
+   *   When omitted or 0, uses the lane's default finality. When provided as a positive
+   *   integer, the API returns latency for that custom finality value (sent as `numOfBlocks`
+   *   query parameter).
    * @returns Promise resolving to {@link LaneLatencyResponse} with totalMs
    *
    * @throws {@link CCIPLaneNotFoundError} when lane not found (404)
@@ -258,6 +262,15 @@ export class CCIPAPIClient {
    * console.log(`Estimated delivery: ${Math.round(latency.totalMs / 60000)} minutes`)
    * ```
    *
+   * @example Custom block confirmations
+   * ```typescript
+   * const latency = await api.getLaneLatency(
+   *   5009297550715157269n,  // Ethereum mainnet
+   *   4949039107694359620n,  // Arbitrum mainnet
+   *   10,                    // 10 block confirmations
+   * )
+   * ```
+   *
    * @example Handling specific API errors
    * ```typescript
    * try {
@@ -272,11 +285,15 @@ export class CCIPAPIClient {
   async getLaneLatency(
     sourceChainSelector: bigint,
     destChainSelector: bigint,
+    numberOfBlocks?: number,
     options?: { signal?: AbortSignal },
   ): Promise<LaneLatencyResponse> {
     const url = new URL(`${this.baseUrl}/v2/lanes/latency`)
     url.searchParams.set('sourceChainSelector', sourceChainSelector.toString())
     url.searchParams.set('destChainSelector', destChainSelector.toString())
+    if (numberOfBlocks) {
+      url.searchParams.set('numOfBlocks', numberOfBlocks.toString())
+    }
 
     this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`)
 
