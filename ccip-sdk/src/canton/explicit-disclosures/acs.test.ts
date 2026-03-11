@@ -20,8 +20,11 @@ function makeAcsEntry(
   contractId: string,
   createdEventBlob: string,
   signatory: string,
-  instanceId?: string,
+  opts?: { instanceId?: string; partyOwner?: string },
 ): JsGetActiveContractsResponse {
+  const createArgument: Record<string, string> = {}
+  if (opts?.instanceId) createArgument['instanceId'] = opts.instanceId
+  if (opts?.partyOwner) createArgument['partyOwner'] = opts.partyOwner
   return {
     contractEntry: {
       JsActiveContract: {
@@ -31,7 +34,7 @@ function makeAcsEntry(
           contractId,
           createdEventBlob,
           signatories: [signatory],
-          createArgument: instanceId ? { instanceId } : {},
+          createArgument,
           // remaining CreatedEvent fields — not used by fetchRichSnapshot
           observers: [],
           witnesses: [],
@@ -54,10 +57,20 @@ const RECEIVER_CONTRACT_ID = 'receiver-cid-002'
 const RECEIVER_BLOB = 'receiver-blob'
 const RECEIVER_TEMPLATE_ID = 'pkg-receiver:CCIP.CCIPReceiver:CCIPReceiver'
 
-/** ACS snapshot returned by the stub for the default two-contract scenario */
+const SENDER_CONTRACT_ID = 'sender-cid-003'
+const SENDER_BLOB = 'sender-blob'
+const SENDER_TEMPLATE_ID = 'pkg-sender:CCIP.CCIPSender:CCIPSender'
+
+/** ACS snapshot for the default execute scenario (router + receiver) */
 const DEFAULT_ACS: JsGetActiveContractsResponse[] = [
-  makeAcsEntry(ROUTER_TEMPLATE_ID, ROUTER_CONTRACT_ID, ROUTER_BLOB, PARTY),
+  makeAcsEntry(ROUTER_TEMPLATE_ID, ROUTER_CONTRACT_ID, ROUTER_BLOB, PARTY, { partyOwner: PARTY }),
   makeAcsEntry(RECEIVER_TEMPLATE_ID, RECEIVER_CONTRACT_ID, RECEIVER_BLOB, PARTY),
+]
+
+/** ACS snapshot for the default send scenario (router + sender) */
+const SEND_ACS: JsGetActiveContractsResponse[] = [
+  makeAcsEntry(ROUTER_TEMPLATE_ID, ROUTER_CONTRACT_ID, ROUTER_BLOB, PARTY, { partyOwner: PARTY }),
+  makeAcsEntry(SENDER_TEMPLATE_ID, SENDER_CONTRACT_ID, SENDER_BLOB, PARTY),
 ]
 
 // ---------------------------------------------------------------------------
@@ -102,7 +115,7 @@ describe('canton/acs', () => {
     const OTHER_BLOB = 'other-receiver-blob'
     const entries = [
       ...DEFAULT_ACS,
-      makeAcsEntry(RECEIVER_TEMPLATE_ID, OTHER_CID, OTHER_BLOB, 'other-party::ff'),
+      makeAcsEntry(RECEIVER_TEMPLATE_ID, OTHER_CID, OTHER_BLOB, 'other-party::ff', {}),
     ]
 
     const provider = new AcsDisclosureProvider(makeStubClient(entries), { party: PARTY })
@@ -119,7 +132,9 @@ describe('canton/acs', () => {
   })
 
   it('fetchExecutionDisclosures throws when no matching PerPartyRouter is found', async () => {
-    const entries = [makeAcsEntry(RECEIVER_TEMPLATE_ID, RECEIVER_CONTRACT_ID, RECEIVER_BLOB, PARTY)]
+    const entries = [
+      makeAcsEntry(RECEIVER_TEMPLATE_ID, RECEIVER_CONTRACT_ID, RECEIVER_BLOB, PARTY, {}),
+    ]
 
     const provider = new AcsDisclosureProvider(makeStubClient(entries), { party: PARTY })
 
@@ -137,6 +152,56 @@ describe('canton/acs', () => {
       () => provider.fetchExecutionDisclosures('nonexistent-cid'),
       /nonexistent-cid/,
       'should throw mentioning the missing contract ID',
+    )
+  })
+
+  // -------------------------------------------------------------------------
+  // fetchSendDisclosures
+  // -------------------------------------------------------------------------
+
+  it('fetchSendDisclosures returns PerPartyRouter and CCIPSender', async () => {
+    const provider = new AcsDisclosureProvider(makeStubClient(SEND_ACS), { party: PARTY })
+
+    const disclosures = await provider.fetchSendDisclosures()
+
+    assert.equal(disclosures.perPartyRouter.contractId, ROUTER_CONTRACT_ID)
+    assert.equal(disclosures.perPartyRouter.templateId, ROUTER_TEMPLATE_ID)
+    assert.equal(disclosures.perPartyRouter.createdEventBlob, ROUTER_BLOB)
+    assert.equal(disclosures.perPartyRouter.synchronizerId, SYNC_ID)
+
+    assert.equal(disclosures.ccipSender.contractId, SENDER_CONTRACT_ID)
+    assert.equal(disclosures.ccipSender.templateId, SENDER_TEMPLATE_ID)
+    assert.equal(disclosures.ccipSender.createdEventBlob, SENDER_BLOB)
+    assert.equal(disclosures.ccipSender.synchronizerId, SYNC_ID)
+  })
+
+  it('fetchSendDisclosures throws when no matching CCIPSender is found', async () => {
+    // Only router in the ACS — no sender contract
+    const entries = [
+      makeAcsEntry(ROUTER_TEMPLATE_ID, ROUTER_CONTRACT_ID, ROUTER_BLOB, PARTY, {
+        partyOwner: PARTY,
+      }),
+    ]
+
+    const provider = new AcsDisclosureProvider(makeStubClient(entries), { party: PARTY })
+
+    await assert.rejects(
+      () => provider.fetchSendDisclosures(),
+      /CCIPSender/,
+      'should throw mentioning CCIPSender',
+    )
+  })
+
+  it('fetchSendDisclosures throws when no matching PerPartyRouter is found', async () => {
+    // Only sender in the ACS — no router contract
+    const entries = [makeAcsEntry(SENDER_TEMPLATE_ID, SENDER_CONTRACT_ID, SENDER_BLOB, PARTY, {})]
+
+    const provider = new AcsDisclosureProvider(makeStubClient(entries), { party: PARTY })
+
+    await assert.rejects(
+      () => provider.fetchSendDisclosures(),
+      /PerPartyRouter/,
+      'should throw mentioning PerPartyRouter',
     )
   })
 })

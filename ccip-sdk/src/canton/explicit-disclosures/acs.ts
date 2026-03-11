@@ -220,7 +220,7 @@ function pickByPartyOwner(
   contractType: CcipContractType,
   party: string,
 ): DisclosedContract {
-  const moduleEntity = CCIP_MODULE_ENTITIES[contractType]
+  const { moduleEntity } = CCIP_TEMPLATES[contractType]
   const candidates = snapshot.get(moduleEntity) ?? []
 
   for (const c of candidates) {
