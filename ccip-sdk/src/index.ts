@@ -96,6 +96,30 @@ export {
 // errors
 export * from './errors/index.ts'
 
+// token-admin shared types
+export type {
+  AcceptOwnershipParams,
+  AppendRemotePoolAddressesParams,
+  AppendRemotePoolAddressesResult,
+  ApplyChainUpdatesParams,
+  ChainRateLimiterConfig,
+  DeleteChainConfigParams,
+  DeleteChainConfigResult,
+  ExecuteOwnershipTransferParams,
+  GrantMintBurnAccessParams,
+  MintBurnRole,
+  OwnershipResult,
+  RateLimiterConfig,
+  RemoteChainConfig,
+  RemoveRemotePoolAddressesParams,
+  RemoveRemotePoolAddressesResult,
+  RevokeMintBurnAccessParams,
+  RevokeMintBurnAccessResult,
+  SetChainRateLimiterConfigParams,
+  SetRateLimitAdminParams,
+  TransferOwnershipParams,
+} from './token-admin/types.ts'
+
 // chains
 import { AptosChain } from './aptos/index.ts'
 export type { UnsignedAptosTx } from './aptos/index.ts'

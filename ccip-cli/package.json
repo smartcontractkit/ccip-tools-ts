@@ -21,7 +21,7 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck",
     "build": "npm run clean && tsc -p ./tsconfig.build.json && npm run patch-dist",
-    "patch-dist": "chmod +x ./dist/index.js && find ./dist -type f -name \"*.js\" -exec sed -i.bkp 's|@chainlink/ccip-sdk/src/.*\\.ts|@chainlink/ccip-sdk|g' {} + && find ./dist -type f -name \"*.bkp\" -delete",
+    "patch-dist": "chmod +x ./dist/index.js && find ./dist -type f -name \"*.js\" -exec sed -i.bkp -e 's|@chainlink/ccip-sdk/src/token-admin/\\([^/]*\\)/index\\.ts|@chainlink/ccip-sdk/token-admin/\\1|g' -e 's|@chainlink/ccip-sdk/src/token-admin/types\\.ts|@chainlink/ccip-sdk/token-admin/types|g' -e 's|@chainlink/ccip-sdk/src/.*\\.ts|@chainlink/ccip-sdk|g' {} + && find ./dist -type f -name \"*.bkp\" -delete",
     "start": "./ccip-cli",
     "clean": "rm -rfv ./dist",
     "prepare": "npm run build"

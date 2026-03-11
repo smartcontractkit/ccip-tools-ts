@@ -186,6 +186,125 @@ export { CCIPSourceChainUnsupportedError } from './specialized.ts'
 // Specialized errors - CLI & Validation
 export { CCIPArgumentInvalidError, CCIPInsufficientBalanceError } from './specialized.ts'
 
+// Specialized errors - Token Deployment
+export { CCIPTokenDeployFailedError, CCIPTokenDeployParamsInvalidError } from './specialized.ts'
+
+// Specialized errors - Pool Deployment
+export {
+  CCIPPoolDeployFailedError,
+  CCIPPoolDeployParamsInvalidError,
+  CCIPPoolNotInitializedError,
+} from './specialized.ts'
+
+// Specialized errors - Propose Admin Role
+export {
+  CCIPProposeAdminRoleFailedError,
+  CCIPProposeAdminRoleParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Accept Admin Role
+export { CCIPAcceptAdminRoleParamsInvalidError } from './specialized.ts'
+export { CCIPAcceptAdminRoleFailedError } from './specialized.ts'
+
+// Specialized errors - Transfer Admin Role
+export {
+  CCIPTransferAdminRoleFailedError,
+  CCIPTransferAdminRoleParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Apply Chain Updates
+export {
+  CCIPApplyChainUpdatesFailedError,
+  CCIPApplyChainUpdatesParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Append Remote Pool Addresses
+export {
+  CCIPAppendRemotePoolAddressesFailedError,
+  CCIPAppendRemotePoolAddressesParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Delete Chain Config
+export {
+  CCIPDeleteChainConfigFailedError,
+  CCIPDeleteChainConfigParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Remove Remote Pool Addresses
+export {
+  CCIPRemoveRemotePoolAddressesFailedError,
+  CCIPRemoveRemotePoolAddressesParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Set Chain Rate Limiter Config
+export {
+  CCIPSetRateLimiterConfigFailedError,
+  CCIPSetRateLimiterConfigParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Set Rate Limit Admin
+export {
+  CCIPSetRateLimitAdminFailedError,
+  CCIPSetRateLimitAdminParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Create Pool Mint Authority Multisig (Solana-only)
+export {
+  CCIPCreatePoolMultisigFailedError,
+  CCIPCreatePoolMultisigParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Transfer Mint Authority (Solana-only)
+export {
+  CCIPTransferMintAuthorityFailedError,
+  CCIPTransferMintAuthorityParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Grant Mint/Burn Access
+export {
+  CCIPGrantMintBurnAccessFailedError,
+  CCIPGrantMintBurnAccessParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Revoke Mint/Burn Access
+export {
+  CCIPRevokeMintBurnAccessFailedError,
+  CCIPRevokeMintBurnAccessParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Create Pool Token Account (Solana-only)
+export {
+  CCIPCreatePoolTokenAccountFailedError,
+  CCIPCreatePoolTokenAccountParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Create Token Address Lookup Table (Solana-only)
+export {
+  CCIPCreateTokenAltFailedError,
+  CCIPCreateTokenAltParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Set Pool
+export { CCIPSetPoolFailedError, CCIPSetPoolParamsInvalidError } from './specialized.ts'
+
+// Specialized errors - Transfer Ownership
+export {
+  CCIPTransferOwnershipFailedError,
+  CCIPTransferOwnershipParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Accept Ownership
+export {
+  CCIPAcceptOwnershipFailedError,
+  CCIPAcceptOwnershipParamsInvalidError,
+} from './specialized.ts'
+
+// Specialized errors - Execute Ownership Transfer (Aptos 3rd step)
+export {
+  CCIPExecuteOwnershipTransferFailedError,
+  CCIPExecuteOwnershipTransferParamsInvalidError,
+} from './specialized.ts'
+
 // HTTP Status codes (re-exported from root)
 export { HttpStatus, isServerError, isTransientHttpStatus } from '../http-status.ts'
 
