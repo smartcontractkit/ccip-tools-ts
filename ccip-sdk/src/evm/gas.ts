@@ -118,10 +118,11 @@ export async function estimateExecGas({ provider, router, message }: EstimateExe
     }
   }
 
+  const senderBytes = getAddressBytes(message.sender ?? '0x')
   const receiverMsg: Any2EVMMessage = {
     ...message,
     destTokenAmounts: message.destTokenAmounts ?? [],
-    sender: zeroPadValue(getAddressBytes(message.sender ?? '0x'), 32),
+    sender: senderBytes.length < 32 ? zeroPadValue(senderBytes, 32) : hexlify(senderBytes),
     data: hexlify(getDataBytes(message.data || '0x')),
     sourceChainSelector: message.sourceChainSelector,
   }

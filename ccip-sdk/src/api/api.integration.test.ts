@@ -16,6 +16,7 @@ const SEPOLIA_SELECTOR = 16015286601757825753n
 const FUJI_SELECTOR = 14767482510784806043n
 const KNOWN_MESSAGE_ID = '0xdfb374fef50749b0bc86784e097ecc9547c5145ddfb8f9d96f1da3024abfcd04'
 const KNOWN_TX_HASH = '0x25e63fa89abb77acd353edc24ed3ab5880a8d206c8229e6f61dc00d399f447b3'
+const STAGING_API_URL = 'https://api.ccip.cldev.cloud'
 
 // Multi-chain-family senders for searchMessages tests
 const EVM_SENDER = '0x9d087fC03ae39b088326b67fA3C788236645b717'
@@ -40,6 +41,18 @@ describe(
         assert.equal(typeof result.totalMs, 'number')
         assert.ok(result.totalMs > 0, `Expected positive totalMs, got ${result.totalMs}`)
       })
+
+      it(
+        'should return totalMs for valid testnet lane with numberOfBlocks (staging)',
+        { timeout: 30000 },
+        async () => {
+          const staging = CCIPAPIClient.fromUrl(STAGING_API_URL)
+          const result = await staging.getLaneLatency(SEPOLIA_SELECTOR, FUJI_SELECTOR, 10)
+
+          assert.equal(typeof result.totalMs, 'number')
+          assert.ok(result.totalMs > 0, `Expected positive totalMs, got ${result.totalMs}`)
+        },
+      )
 
       it(
         'should throw CCIPLaneNotFoundError for non-existent lane',
