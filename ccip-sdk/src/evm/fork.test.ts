@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process'
 import { after, before, describe, it } from 'node:test'
 
 import { AbiCoder, Contract, JsonRpcProvider, Wallet, keccak256, parseUnits, toBeHex } from 'ethers'
-import { anvil } from 'prool/instances'
+import { Instance } from 'prool'
 
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
 import '../ton/index.ts' // register TON chain family for cross-family message decoding
@@ -131,12 +131,16 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   let sepoliaChain: EVMChain | undefined
   let fujiChain: EVMChain | undefined
   let wallet: Wallet
-  let sepoliaInstance: ReturnType<typeof anvil> | undefined
-  let fujiInstance: ReturnType<typeof anvil> | undefined
+  let sepoliaInstance: ReturnType<typeof Instance.anvil> | undefined
+  let fujiInstance: ReturnType<typeof Instance.anvil> | undefined
 
   before(async () => {
-    sepoliaInstance = anvil({ forkUrl: SEPOLIA_RPC, chainId: SEPOLIA_CHAIN_ID, port: 8646 })
-    fujiInstance = anvil({ forkUrl: FUJI_RPC, chainId: FUJI_CHAIN_ID, port: 8645 })
+    sepoliaInstance = Instance.anvil({
+      forkUrl: SEPOLIA_RPC,
+      chainId: SEPOLIA_CHAIN_ID,
+      port: 8646,
+    })
+    fujiInstance = Instance.anvil({ forkUrl: FUJI_RPC, chainId: FUJI_CHAIN_ID, port: 8645 })
     await Promise.all([sepoliaInstance.start(), fujiInstance.start()])
 
     const sepoliaProvider = new JsonRpcProvider(

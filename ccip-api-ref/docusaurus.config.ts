@@ -1,5 +1,5 @@
 import type * as Preset from '@docusaurus/preset-classic'
-import type { Config } from '@docusaurus/types'
+import type { Config, Plugin } from '@docusaurus/types'
 import type * as OpenApiPlugin from 'docusaurus-plugin-openapi-docs'
 import { themes as prismThemes } from 'prism-react-renderer'
 
@@ -46,6 +46,17 @@ const config: Config = {
   },
 
   plugins: [
+    // Webpack fallback for Node built-ins used by server-only deps (bigint-buffer, postman-code-generators)
+    // that get transitively pulled into the browser bundle via @chainlink/ccip-sdk and the OpenAPI plugin.
+    function webpackNodeFallbacks(): Plugin {
+      return {
+        name: 'webpack-node-fallbacks',
+        configureWebpack(_config, isServer) {
+          if (isServer) return {}
+          return { resolve: { fallback: { path: false } } }
+        },
+      }
+    },
     // Google Tag Manager - uses official Docusaurus plugin (auto-disables in dev mode)
     ['@docusaurus/plugin-google-tag-manager', { containerId: 'GTM-N6DQ47T' }],
     // JSON-LD Structured Data Plugin

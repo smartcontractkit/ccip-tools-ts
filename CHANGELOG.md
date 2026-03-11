@@ -7,10 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-03-11
+
 - CLI: add shell completion support (`ccip-cli completion`) for bash and zsh
 - SDK: add `CCIPAPIClient.searchMessages` with filters and cursor-based pagination, `searchAllMessages` async generator for automatic pagination, and `AbortSignal` support on all API methods
 - SDK: `Chain.estimateReceiverExecution` can now take a `messageId` and try to fetch messages details from API
 - SDK: `Chain.generateUnsignedExecute` and `execute` automatically try to `estimateReceiverExecution` if supported by dest chain and no `gasLimit` override is provided
+- CLI: add `--wallet hardhat:<name>` and  `--wallet foundry:<name>` keystore support for EVM
 
 ## [1.1.0] - 2026-03-06
 
