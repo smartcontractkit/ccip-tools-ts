@@ -1167,10 +1167,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Uses this chain's selector as the source.
    *
    * @param destChainSelector - Destination CCIP chain selector (bigint)
+   * @param numberOfBlocks - Optional number of block confirmations to use for latency
+   *   calculation. When omitted or 0, uses the lane's default finality. When provided
+   *   as a positive integer, the API returns latency for that custom finality value.
    * @returns Promise resolving to {@link LaneLatencyResponse} containing:
-   *   - `lane.sourceNetworkInfo` - Source chain metadata (name, selector, chainId)
-   *   - `lane.destNetworkInfo` - Destination chain metadata
-   *   - `lane.routerAddress` - Router contract address on source chain
    *   - `totalMs` - Estimated delivery time in milliseconds
    *
    * @throws {@link CCIPApiClientNotAvailableError} if apiClient was disabled (set to `null`)
@@ -1186,19 +1186,31 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * try {
    *   const latency = await chain.getLaneLatency(4949039107694359620n) // Arbitrum
    *   console.log(`Estimated delivery: ${Math.round(latency.totalMs / 60000)} minutes`)
-   *   console.log(`Router: ${latency.lane.routerAddress}`)
    * } catch (err) {
    *   if (err instanceof CCIPHttpError) {
    *     console.error(`API error: ${err.context.apiErrorCode}`)
    *   }
    * }
    * ```
+   *
+   * @example Get latency with custom block confirmations
+   * ```typescript
+   * const latency = await chain.getLaneLatency(4949039107694359620n, 10)
+   * console.log(`Latency with 10 confirmations: ${Math.round(latency.totalMs / 60000)} minutes`)
+   * ```
    */
-  async getLaneLatency(destChainSelector: bigint): Promise<LaneLatencyResponse> {
+  async getLaneLatency(
+    destChainSelector: bigint,
+    numberOfBlocks?: number,
+  ): Promise<LaneLatencyResponse> {
     if (!this.apiClient) {
       throw new CCIPApiClientNotAvailableError()
     }
-    return this.apiClient.getLaneLatency(this.network.chainSelector, destChainSelector)
+    return this.apiClient.getLaneLatency(
+      this.network.chainSelector,
+      destChainSelector,
+      numberOfBlocks,
+    )
   }
 
   /**
