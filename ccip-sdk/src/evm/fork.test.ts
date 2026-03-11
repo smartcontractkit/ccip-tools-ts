@@ -6,6 +6,7 @@ import { AbiCoder, Contract, JsonRpcProvider, Wallet, keccak256, parseUnits, toB
 import { anvil } from 'prool/instances'
 
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
+import '../ton/index.ts' // register TON chain family for cross-family message decoding
 import { CCIPAPIClient } from '../api/index.ts'
 import { LaneFeature } from '../chain.ts'
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
@@ -1003,6 +1004,42 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         V2_API_EXEC_MSG.messageId,
         'receipt messageId should match',
       )
+      assert.ok(execution.log.transactionHash, 'should have tx hash')
+      assert.ok(execution.timestamp > 0, 'should have timestamp')
+      assert.equal(execution.receipt.state, ExecutionState.Success)
+
+      sepoliaWithApi.destroy?.()
+    })
+
+    // TON-source messages were historically problematic due to data quality issues
+    // on AtlasDB. This test verifies the API workaround that resolves the issue.
+    it('should execute a TON-source message via API-driven path (TON -> Sepolia)', async () => {
+      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+
+      const messageId =
+        '0x5f27001312aa1111f671e462a5d29f8022c745ec6fb3b5bca23204f46a9691c2'
+
+      const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
+      const sepoliaProvider = new JsonRpcProvider(
+        `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
+      )
+      const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
+        apiClient: stagingApi,
+        logger: testLogger,
+      })
+      const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
+
+      // Execute via messageId only — triggers API-driven path
+      const execution = await sepoliaWithApi.execute({
+        messageId,
+        wallet: w,
+        gasLimit: 500_000,
+      })
+
+      console.log(
+        `  executed ${messageId.slice(0, 10)}… via API (TON source) → state=${execution.receipt.state}`,
+      )
+      assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
       assert.ok(execution.log.transactionHash, 'should have tx hash')
       assert.ok(execution.timestamp > 0, 'should have timestamp')
       assert.equal(execution.receipt.state, ExecutionState.Success)
