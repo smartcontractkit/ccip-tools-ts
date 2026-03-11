@@ -1,0 +1,256 @@
+// TODO: track a v2 release tag and the v2.0.0 folder instead of a commit + latest/ folder, once 2.0.0 is released in `chainlink-ccip`
+export default [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/main/chains/evm/gobindings/generated/v2_0_0/erc20_lock_box/erc20_lock_box.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
+  {
+    type: 'constructor',
+    inputs: [{ name: 'token', type: 'address', internalType: 'address' }],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'acceptOwnership',
+    inputs: [],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'applyAuthorizedCallerUpdates',
+    inputs: [
+      {
+        name: 'authorizedCallerArgs',
+        type: 'tuple',
+        internalType: 'struct AuthorizedCallers.AuthorizedCallerArgs',
+        components: [
+          {
+            name: 'addedCallers',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+          {
+            name: 'removedCallers',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+        ],
+      },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'deposit',
+    inputs: [
+      { name: 'token', type: 'address', internalType: 'address' },
+      { name: '', type: 'uint64', internalType: 'uint64' },
+      { name: 'amount', type: 'uint256', internalType: 'uint256' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'getAllAuthorizedCallers',
+    inputs: [],
+    outputs: [{ name: '', type: 'address[]', internalType: 'address[]' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getToken',
+    inputs: [],
+    outputs: [{ name: '', type: 'address', internalType: 'contract IERC20' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'isTokenSupported',
+    inputs: [{ name: 'token', type: 'address', internalType: 'address' }],
+    outputs: [{ name: '', type: 'bool', internalType: 'bool' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'owner',
+    inputs: [],
+    outputs: [{ name: '', type: 'address', internalType: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'transferOwnership',
+    inputs: [{ name: 'to', type: 'address', internalType: 'address' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'typeAndVersion',
+    inputs: [],
+    outputs: [{ name: '', type: 'string', internalType: 'string' }],
+    stateMutability: 'pure',
+  },
+  {
+    type: 'function',
+    name: 'withdraw',
+    inputs: [
+      { name: 'token', type: 'address', internalType: 'address' },
+      { name: '', type: 'uint64', internalType: 'uint64' },
+      { name: 'amount', type: 'uint256', internalType: 'uint256' },
+      { name: 'recipient', type: 'address', internalType: 'address' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'event',
+    name: 'AuthorizedCallerAdded',
+    inputs: [
+      {
+        name: 'caller',
+        type: 'address',
+        indexed: false,
+        internalType: 'address',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'AuthorizedCallerRemoved',
+    inputs: [
+      {
+        name: 'caller',
+        type: 'address',
+        indexed: false,
+        internalType: 'address',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'Deposit',
+    inputs: [
+      {
+        name: 'token',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'depositor',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'amount',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'OwnershipTransferRequested',
+    inputs: [
+      {
+        name: 'from',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'to',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'OwnershipTransferred',
+    inputs: [
+      {
+        name: 'from',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'to',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'Withdrawal',
+    inputs: [
+      {
+        name: 'token',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'recipient',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'amount',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  { type: 'error', name: 'CannotTransferToSelf', inputs: [] },
+  {
+    type: 'error',
+    name: 'InsufficientBalance',
+    inputs: [
+      { name: 'requested', type: 'uint256', internalType: 'uint256' },
+      { name: 'available', type: 'uint256', internalType: 'uint256' },
+    ],
+  },
+  { type: 'error', name: 'MustBeProposedOwner', inputs: [] },
+  { type: 'error', name: 'OnlyCallableByOwner', inputs: [] },
+  { type: 'error', name: 'OwnerCannotBeZero', inputs: [] },
+  { type: 'error', name: 'RecipientCannotBeZeroAddress', inputs: [] },
+  {
+    type: 'error',
+    name: 'SafeERC20FailedOperation',
+    inputs: [{ name: 'token', type: 'address', internalType: 'address' }],
+  },
+  { type: 'error', name: 'TokenAmountCannotBeZero', inputs: [] },
+  {
+    type: 'error',
+    name: 'UnauthorizedCaller',
+    inputs: [{ name: 'caller', type: 'address', internalType: 'address' }],
+  },
+  {
+    type: 'error',
+    name: 'UnsupportedToken',
+    inputs: [{ name: 'token', type: 'address', internalType: 'address' }],
+  },
+  { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  // generate:end
+] as const

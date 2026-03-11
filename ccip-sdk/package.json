@@ -27,6 +27,26 @@
       "types": "./dist/all-chains.d.ts",
       "default": "./dist/all-chains.js"
     },
+    "./token-admin/evm": {
+      "types": "./dist/token-admin/evm/index.d.ts",
+      "default": "./dist/token-admin/evm/index.js"
+    },
+    "./token-admin/solana": {
+      "types": "./dist/token-admin/solana/index.d.ts",
+      "default": "./dist/token-admin/solana/index.js"
+    },
+    "./token-admin/aptos": {
+      "types": "./dist/token-admin/aptos/index.d.ts",
+      "default": "./dist/token-admin/aptos/index.js"
+    },
+    "./token-admin/types": {
+      "types": "./dist/token-admin/types.d.ts",
+      "default": "./dist/token-admin/types.js"
+    },
+    "./verify": {
+      "types": "./dist/verify/index.d.ts",
+      "default": "./dist/verify/index.js"
+    },
     "./src/*": "./src/*"
   },
   "scripts": {
@@ -35,7 +55,8 @@
     "lint:fix": "prettier --write ./src && eslint --fix ./src",
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck",
-    "build": "npm run clean && tsc -p ./tsconfig.build.json",
+    "build": "npm run clean && tsc -p ./tsconfig.build.json && npm run copy-verify-fixtures",
+    "copy-verify-fixtures": "mkdir -p dist/verify/fixtures && cp src/verify/fixtures/*.json dist/verify/fixtures/",
     "clean": "rm -rfv ./dist",
     "prepare": "npm run build"
   },
