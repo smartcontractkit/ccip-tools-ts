@@ -34,38 +34,47 @@ function extractInstanceId(createArgument: unknown): string | null {
 }
 
 /**
- * Build a wildcard `EventFormat` that returns all contracts belonging to `party`,
- * including the opaque `createdEventBlob` needed for disclosure.
+ * Metadata for each CCIP contract type needed for ACS filtering:
+ * - `templateId`: package-name reference used directly in the `TemplateFilter` so the
+ *   server only returns contracts of that exact template (no client-side scan).
+ * - `moduleEntity`: the `ModuleName:EntityName` suffix extracted from the full template ID
+ *   string returned by the ledger, used to key the result map.
  */
-function buildWildcardEventFormat(party: string): EventFormat {
+const CCIP_TEMPLATES = {
+  perPartyRouter: {
+    templateId: '#ccip-perpartyrouter:CCIP.PerPartyRouter:PerPartyRouter',
+    moduleEntity: 'CCIP.PerPartyRouter:PerPartyRouter',
+  },
+  ccipReceiver: {
+    templateId: '#ccip-receiver:CCIP.CCIPReceiver:CCIPReceiver',
+    moduleEntity: 'CCIP.CCIPReceiver:CCIPReceiver',
+  },
+} as const
+
+type CcipContractType = keyof typeof CCIP_TEMPLATES
+
+/**
+ * Build a targeted `EventFormat` that requests only the specific CCIP contract
+ * templates needed, including the `createdEventBlob` required for disclosure.
+ * Using explicit `TemplateFilter`s instead of a wildcard avoids pulling every
+ * active contract for the party over the wire.
+ */
+function buildTargetedEventFormat(party: string): EventFormat {
   return {
     filtersByParty: {
       [party]: {
-        cumulative: [
-          {
-            identifierFilter: {
-              WildcardFilter: {
-                value: { includeCreatedEventBlob: true },
-              },
+        cumulative: Object.values(CCIP_TEMPLATES).map(({ templateId }) => ({
+          identifierFilter: {
+            TemplateFilter: {
+              value: { templateId, includeCreatedEventBlob: true },
             },
           },
-        ],
+        })),
       },
     },
     verbose: true,
   }
 }
-
-/**
- * The `ModuleName:EntityName` suffix used to identify each CCIP contract type
- * without requiring a specific package ID.
- */
-const CCIP_MODULE_ENTITIES = {
-  perPartyRouter: 'CCIP.PerPartyRouter:PerPartyRouter',
-  ccipReceiver: 'CCIP.CCIPReceiver:CCIPReceiver',
-} as const
-
-type CcipContractType = keyof typeof CCIP_MODULE_ENTITIES
 
 /**
  * Internal per-contract entry in the ACS snapshot, enriched with instance
@@ -81,7 +90,7 @@ interface RichContractMatch {
 }
 
 /**
- * Query the ACS once with a wildcard filter and build a lookup map keyed by
+ * Query the ACS once with targeted template filters and build a lookup map keyed by
  * `"ModuleName:EntityName"`, preserving all fields needed for instance-address
  * matching.
  */
@@ -92,12 +101,11 @@ async function fetchRichSnapshot(
   const { offset } = await client.getLedgerEnd()
 
   const request: GetActiveContractsRequest = {
-    eventFormat: buildWildcardEventFormat(party),
+    eventFormat: buildTargetedEventFormat(party),
     verbose: false,
     activeAtOffset: offset,
   }
 
-  // Note: this may be inefficient and if the party has many active contracts.
   const responses = await client.getActiveContracts(request)
   const byModuleEntity = new Map<string, RichContractMatch[]>()
 
@@ -130,6 +138,39 @@ async function fetchRichSnapshot(
 }
 
 /**
+ * From a pre-fetched ACS snapshot, return the contract whose `contractId` matches
+ * `cid`, regardless of template type.
+ *
+ * Used when the caller already knows the exact contract ID (e.g. a `CCIPReceiver`
+ * whose CID was persisted at deployment time) and template identity is irrelevant.
+ *
+ * @throws `CCIPError(CANTON_API_ERROR)` if no matching contract is found.
+ */
+function pickByContractId(
+  snapshot: Map<string, RichContractMatch[]>,
+  cid: string,
+): DisclosedContract {
+  for (const contracts of snapshot.values()) {
+    for (const c of contracts) {
+      if (c.contractId === cid) {
+        return {
+          templateId: c.templateId,
+          contractId: c.contractId,
+          createdEventBlob: c.createdEventBlob,
+          synchronizerId: c.synchronizerId,
+        }
+      }
+    }
+  }
+
+  throw new CCIPError(
+    CCIPErrorCode.CANTON_API_ERROR,
+    `Canton ACS: no active contract found with contractId "${cid}". ` +
+      `Verify the contract ID is correct and the contract is active.`,
+  )
+}
+
+/**
  * From a pre-fetched ACS snapshot, return the single active contract of the given type
  * whose signatory matches `party`.
  *
@@ -143,7 +184,7 @@ function pickBySignatory(
   contractType: CcipContractType,
   party: string,
 ): DisclosedContract {
-  const moduleEntity = CCIP_MODULE_ENTITIES[contractType]
+  const { moduleEntity } = CCIP_TEMPLATES[contractType]
   const candidates = snapshot.get(moduleEntity) ?? []
 
   for (const c of candidates) {
@@ -222,17 +263,20 @@ export class AcsDisclosureProvider {
 
   /**
    * Fetch all contracts that must be disclosed for a `ccipExecute` command.
+   *
+   * @param receiverCid - When provided, the `CCIPReceiver` disclosure is resolved
+   *   by contract ID rather than by signatory, making the lookup independent of
+   *   the contract's template type.
    */
-  async fetchExecutionDisclosures(): Promise<AcsExecutionDisclosures> {
+  async fetchExecutionDisclosures(receiverCid?: string): Promise<AcsExecutionDisclosures> {
     const snapshot = await fetchRichSnapshot(this.client, this.config.party)
 
-    const existingRouter = pickBySignatory(snapshot, 'perPartyRouter', this.config.party)
-    const existingReceiver = pickBySignatory(snapshot, 'ccipReceiver', this.config.party)
+    const perPartyRouter = pickBySignatory(snapshot, 'perPartyRouter', this.config.party)
+    const ccipReceiver = receiverCid
+      ? pickByContractId(snapshot, receiverCid)
+      : pickBySignatory(snapshot, 'ccipReceiver', this.config.party)
 
-    return {
-      perPartyRouter: existingRouter,
-      ccipReceiver: existingReceiver,
-    }
+    return { perPartyRouter, ccipReceiver }
   }
 
   /**
