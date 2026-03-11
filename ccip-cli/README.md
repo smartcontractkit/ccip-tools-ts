@@ -80,19 +80,19 @@ Wallet options can also be passed as `--wallet`, where each chain family may int
 can:
 - EVM can receive a 0x-hex private key, or the path to an encrypted json file (e.g. from geth,
 decrypted using the `USER_KEY_PASSWORD` environment variable or prompted password).
-- EVM also supports **encrypted keystores** (Foundry Cast or Hardhat) via `--wallet keystore:<name>`
-and `--keystore-type foundry|hardhat` (required). The password is taken from
+- EVM also supports **named keystores** (Foundry Cast or Hardhat) via `--wallet foundry:<name>` /
+`--wallet hardhat:<name>`. The password is taken from
 `$FOUNDRY_KEYSTORE_PASSWORD` / `$HARDHAT_KEYSTORE_PASSWORD` (tool-specific), then `$USER_KEY_PASSWORD`, or prompted interactively.
 Foundry directory can be overridden with `$FOUNDRY_DIR` (default: `~/.foundry`).
 Hardhat support delegates to `node_modules/.bin/hardhat keystore get` — Hardhat must be installed in your project:
   ```sh
   # Foundry
   cast wallet import sender --interactive
-  ccip-cli send ... --wallet keystore:sender --keystore-type foundry
+  ccip-cli send ... --wallet foundry:sender
 
   # Hardhat (run from inside your Hardhat project)
   npx hardhat keystore set sender
-  ccip-cli send ... --wallet keystore:sender --keystore-type hardhat
+  ccip-cli send ... --wallet hardhat:sender
   ```
 - Solana can receive base58 private key, or the path to an `id.json` file
 (default=`~/.config/solana/id.json`) containing a private key encoded as a json array of numbers.

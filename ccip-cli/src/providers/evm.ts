@@ -25,7 +25,7 @@ Object.assign(LedgerSigner.prototype, {
 })
 
 /**
- * Registry of named keystore providers, keyed by --keystore-type value.
+ * Registry of named keystore providers, keyed by --wallet prefix (e.g. "foundry", "hardhat").
  * Each entry defines a human-readable label and an async function that resolves
  * the private key from an account name.
  * Add a new entry here to support additional keystore formats.
@@ -95,7 +95,7 @@ const KEYSTORE_PROVIDERS: Record<
  */
 export async function loadEvmWallet(
   provider: JsonRpcApiProvider,
-  { wallet: walletOpt, keystoreType }: { wallet?: unknown; keystoreType?: string },
+  { wallet: walletOpt }: { wallet?: unknown },
 ): Promise<Signer> {
   if (
     typeof walletOpt === 'number' ||
@@ -117,23 +117,12 @@ export async function loadEvmWallet(
     console.info('Ledger connected:', await ledger.getAddress(), ', derivationPath:', ledger.path)
     return ledger
   }
-  if (walletOpt.startsWith('keystore:')) {
-    const accountName = walletOpt.slice('keystore:'.length)
-    if (!keystoreType) {
-      throw new CCIPArgumentInvalidError(
-        'keystore-type',
-        `--keystore-type is required when using keystore:<name>. Supported: ${Object.keys(KEYSTORE_PROVIDERS).join(', ')}`,
-      )
+  for (const [prefix, keystoreProvider] of Object.entries(KEYSTORE_PROVIDERS)) {
+    if (walletOpt.startsWith(`${prefix}:`)) {
+      const accountName = walletOpt.slice(prefix.length + 1)
+      const privateKey = await keystoreProvider.resolvePrivateKey(accountName)
+      return new BaseWallet(new SigningKey(privateKey), provider)
     }
-    const keystoreProvider = KEYSTORE_PROVIDERS[keystoreType]
-    if (!keystoreProvider) {
-      throw new CCIPArgumentInvalidError(
-        'keystore-type',
-        `Unknown keystore type '${keystoreType}'. Supported: ${Object.keys(KEYSTORE_PROVIDERS).join(', ')}`,
-      )
-    }
-    const privateKey = await keystoreProvider.resolvePrivateKey(accountName)
-    return new BaseWallet(new SigningKey(privateKey), provider)
   }
   if (existsSync(walletOpt)) {
     let pw = process.env['USER_KEY_PASSWORD']

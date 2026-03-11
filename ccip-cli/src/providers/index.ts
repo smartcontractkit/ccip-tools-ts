@@ -186,10 +186,7 @@ export function fetchChainsFromRpcs(
  * @param argv - Wallet options (as passed from yargs argv)
  * @returns Promise to chain-specific wallet instance
  */
-export async function loadChainWallet(
-  chain: Chain,
-  argv: { wallet?: unknown; rpcsFile?: string; keystoreType?: string },
-) {
+export async function loadChainWallet(chain: Chain, argv: { wallet?: unknown; rpcsFile?: string }) {
   // Centralized wallet resolution: check env vars first, then rpcsFile
   if (!argv.wallet) {
     argv.wallet = process.env['PRIVATE_KEY'] || process.env['USER_KEY'] || process.env['OWNER_KEY']

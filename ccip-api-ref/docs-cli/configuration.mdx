@@ -135,22 +135,22 @@ ccip-cli send ethereum-testnet-sepolia 0x... dest --receiver 0x...
 
 Pass directly or specify a file path:
 
-| Chain  | Accepted Formats                                                                                                            |
-| ------ | --------------------------------------------------------------------------------------------------------------------------- |
-| EVM    | Hex private key, path to encrypted JSON keystore, or `keystore:<name>` (use `--keystore-type` to select Foundry or Hardhat) |
-| Solana | Base58 private key, or path to `id.json` file (default: `~/.config/solana/id.json`)                                         |
-| Aptos  | Hex private key, or path to text file containing it                                                                         |
+| Chain  | Accepted Formats                                                                                          |
+| ------ | --------------------------------------------------------------------------------------------------------- |
+| EVM    | Hex private key, path to encrypted JSON keystore, `ledger[:index]`, `foundry:<name>`, or `hardhat:<name>` |
+| Solana | Base58 private key, or path to `id.json` file (default: `~/.config/solana/id.json`)                       |
+| Aptos  | Hex private key, or path to text file containing it                                                       |
 
 ### Foundry Cast Keystore
 
-If you manage keys with [Foundry Cast](https://book.getfoundry.sh/reference/cast/cast-wallet-import), use `keystore:<name>` with `--keystore-type foundry`:
+If you manage keys with [Foundry Cast](https://book.getfoundry.sh/reference/cast/cast-wallet-import), use `foundry:<name>`:
 
 ```bash
 # Import a key into the Foundry keystore (one-time setup)
 cast wallet import sender --interactive
 
 # Use it with the CLI
-ccip-cli send ... --wallet keystore:sender --keystore-type foundry
+ccip-cli send ... --wallet foundry:sender
 ```
 
 Password resolution order:
@@ -163,14 +163,14 @@ The keystore directory defaults to `~/.foundry/keystores/` and can be overridden
 
 ### Hardhat Keystore
 
-If you manage keys with [Hardhat's built-in keystore](https://hardhat.org/hardhat-runner/docs/guides/configuration-variables), use `keystore:<name>` with `--keystore-type hardhat`. The CLI runs `node_modules/.bin/hardhat keystore get` directly, so Hardhat must be installed as a dev dependency in your project:
+If you manage keys with [Hardhat's built-in keystore](https://hardhat.org/hardhat-runner/docs/guides/configuration-variables), use `hardhat:<name>`. The CLI runs `node_modules/.bin/hardhat keystore get` directly, so Hardhat must be installed as a dev dependency in your project:
 
 ```bash
 # Import a key into the Hardhat keystore (one-time setup)
 npx hardhat keystore set sender
 
 # Use it with the CLI (run from inside your Hardhat project)
-ccip-cli send ... --wallet keystore:sender --keystore-type hardhat
+ccip-cli send ... --wallet hardhat:sender
 ```
 
 Password resolution order:
