@@ -426,6 +426,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     }
 
     // Step 1 — Fetch same-party disclosures (PerPartyRouter + CCIPReceiver)
+    // TODO: This should include receiverCid when provided. We need to figure out how to get that from the input or opts.
     const acsDisclosures = await this.acsDisclosureProvider.fetchExecutionDisclosures()
 
     // Step 2 — Fetch cross-party disclosures from EDS
