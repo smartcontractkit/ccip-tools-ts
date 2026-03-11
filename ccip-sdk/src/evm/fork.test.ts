@@ -1016,7 +1016,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     it('should execute a TON-source message via API-driven path (TON -> Sepolia)', async () => {
       assert.ok(sepoliaInstance, 'sepolia anvil should be running')
 
-      const messageId = '0x5f27001312aa1111f671e462a5d29f8022c745ec6fb3b5bca23204f46a9691c2'
+      const messageId = '0xe913d21d8bc14316286646539db34bc7dd14b11c6ae3b0c307e7e52f6af02805'
 
       const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
       const sepoliaProvider = new JsonRpcProvider(
