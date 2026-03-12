@@ -32,7 +32,7 @@ import {
   getDataBytes,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
-import { type BytesLike, formatUnits, toUtf8Bytes } from 'ethers'
+import { type BytesLike, AbiCoder, formatUnits, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -77,7 +77,8 @@ export const builder = (yargs: Argv) =>
       },
       data: {
         type: 'string',
-        describe: 'Data payload to send (non-hex will be UTF-8 encoded)',
+        describe:
+          'Data payload to send (0x-bytearrays are used as is; "0x:" prefix will be string abi.encoded, otherwise it\'ll be raw-UTF-8 encoded)',
       },
       'gas-limit': {
         alias: ['L', 'compute-units'],
@@ -228,9 +229,13 @@ async function sendMessage(
   let data: BytesLike | undefined
   if (argv.data) {
     try {
+      // 0x or base64 bytearrays
       data = getDataBytes(argv.data)
     } catch (_) {
-      data = toUtf8Bytes(argv.data)
+      if (argv.data.startsWith('0x:')) {
+        // if data is a non-bytearray string prefixed with "0x:", abi.encode as string
+        data = AbiCoder.defaultAbiCoder().encode(['string'], [argv.data.substring(3)])
+      } else data = toUtf8Bytes(argv.data) // otherwise, raw string, encode as UTF-8 bytes
     }
   }
 
