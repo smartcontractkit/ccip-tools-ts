@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process'
 import { after, before, describe, it } from 'node:test'
 
 import { AbiCoder, Contract, JsonRpcProvider, Wallet, keccak256, parseUnits, toBeHex } from 'ethers'
-import { Instance } from 'prool'
+import { anvil } from 'prool/instances'
 
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
 import '../ton/index.ts' // register TON chain family for cross-family message decoding
@@ -66,6 +66,8 @@ const CCIP_BNM_TOKEN_SEPOLIA = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
 // Token pools with FTF enabled and custom rate limits configured
 const FTF_ENABLED_POOL_SEPOLIA = '0x161d23c30b5ae2899c3d4d969ba2b82026f3954a'
 const FTF_ENABLED_POOL_FUJI = '0xc9346f85a04a47188710d8830127a2490959cbd9'
+// Token served by FTF_ENABLED_POOL_SEPOLIA — works with V3 extra args on Sepolia→Fuji v2.0 lane
+const FTF_TOKEN_SEPOLIA = '0x6b039E8bDB3F92093AdC417367379089be7A80B1'
 
 // ── execute constants ──
 
@@ -131,16 +133,16 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   let sepoliaChain: EVMChain | undefined
   let fujiChain: EVMChain | undefined
   let wallet: Wallet
-  let sepoliaInstance: ReturnType<typeof Instance.anvil> | undefined
-  let fujiInstance: ReturnType<typeof Instance.anvil> | undefined
+  let sepoliaInstance: ReturnType<typeof anvil> | undefined
+  let fujiInstance: ReturnType<typeof anvil> | undefined
 
   before(async () => {
-    sepoliaInstance = Instance.anvil({
+    sepoliaInstance = anvil({
       forkUrl: SEPOLIA_RPC,
       chainId: SEPOLIA_CHAIN_ID,
       port: 8646,
     })
-    fujiInstance = Instance.anvil({ forkUrl: FUJI_RPC, chainId: FUJI_CHAIN_ID, port: 8645 })
+    fujiInstance = anvil({ forkUrl: FUJI_RPC, chainId: FUJI_CHAIN_ID, port: 8645 })
     await Promise.all([sepoliaInstance.start(), fujiInstance.start()])
 
     const sepoliaProvider = new JsonRpcProvider(
@@ -882,6 +884,84 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
       assert.equal(typeof result.token, 'string')
       assert.equal(typeof result.router, 'string')
+    })
+  })
+
+  describe('getTotalFeesEstimate', () => {
+    it('should return nativeFee and no tokenTransferFee for data-only message', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const estimate = await sepoliaChain.getTotalFeesEstimate({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: { receiver: '0x0000000000000000000000000000000000000001', data: '0x1337' },
+      })
+
+      assert.equal(typeof estimate.nativeFee, 'bigint')
+      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
+      assert.equal(estimate.tokenTransferFee, undefined)
+    })
+
+    it('should return token transfer fee for message with tokenAmounts', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const amount = 1_000_000n
+      const estimate = await sepoliaChain.getTotalFeesEstimate({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: {
+          receiver: '0x0000000000000000000000000000000000000001',
+          tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount }],
+        },
+      })
+
+      assert.equal(typeof estimate.nativeFee, 'bigint')
+      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
+      assert.ok(estimate.tokenTransferFee, 'tokenTransferFee should be present')
+
+      const tf = estimate.tokenTransferFee
+      assert.equal(typeof tf.value, 'bigint')
+      assert.equal(typeof tf.bps, 'number')
+      assert.equal(tf.value, (amount * BigInt(tf.bps)) / 10_000n)
+
+      console.log('  getTotalFeesEstimate (default blockConfirmations):')
+      console.log(`    nativeFee = ${estimate.nativeFee}`)
+      console.log(`    value = ${tf.value} (${tf.bps} bps)`)
+    })
+
+    it('should use custom BPS when blockConfirmations > 0', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const amount = 1_000_000n
+      const estimate = await sepoliaChain.getTotalFeesEstimate({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: {
+          receiver: '0x0000000000000000000000000000000000000001',
+          tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount }],
+          extraArgs: {
+            gasLimit: 200_000n,
+            blockConfirmations: 1,
+            ccvs: [],
+            ccvArgs: [],
+            executor: '',
+            executorArgs: '0x',
+            tokenReceiver: '',
+            tokenArgs: '0x',
+          },
+        },
+      })
+
+      assert.equal(typeof estimate.nativeFee, 'bigint')
+      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
+      assert.ok(estimate.tokenTransferFee, 'tokenTransferFee should be present')
+
+      const tf = estimate.tokenTransferFee
+      assert.equal(tf.value, (amount * BigInt(tf.bps)) / 10_000n)
+
+      console.log('  getTotalFeesEstimate (blockConfirmations=1):')
+      console.log(`    nativeFee = ${estimate.nativeFee}`)
+      console.log(`    value = ${tf.value} (${tf.bps} bps)`)
     })
   })
 

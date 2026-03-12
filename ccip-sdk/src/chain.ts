@@ -197,6 +197,26 @@ export type TokenInfo = {
 }
 
 /**
+ * Per-token transfer fee computed by {@link Chain.getTotalFeesEstimate}.
+ */
+export type TokenTransferFee = {
+  /** Fee in token units: amount * bps / 10_000 */
+  value: bigint
+  /** The BPS rate applied. */
+  bps: number
+}
+
+/**
+ * Total fees estimate returned by {@link Chain.getTotalFeesEstimate}.
+ */
+export type TotalFeesEstimate = {
+  /** Native fee from Router.getFee (wei or native smallest unit). */
+  nativeFee: bigint
+  /** Token transfer fee, present only when the message includes a token transfer. */
+  tokenTransferFee?: TokenTransferFee
+}
+
+/**
  * Token transfer fee configuration returned by TokenPool v2.0 contracts.
  */
 export type TokenTransferFeeConfig = {
@@ -1584,6 +1604,35 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
         ...message.extraArgs,
       },
     }
+  }
+
+  /**
+   * Estimate total fees for a cross-chain message, combining the native CCIP fee
+   * with per-token transfer fees (BPS applied to actual transfer amounts).
+   *
+   * @param _opts - {@link SendMessageOpts} without approveMax
+   * @returns with native fee and per-token transfer fees
+   * @throws {@link CCIPNotImplementedError} if not implemented for this chain family
+   *
+   * @example Estimate total fees
+   * ```typescript
+   * const estimate = await chain.getTotalFeesEstimate({
+   *   router: routerAddress,
+   *   destChainSelector: destSelector,
+   *   message: {
+   *     receiver: '0x...',
+   *     tokenAmounts: [{ token: '0xToken', amount: 1000000n }],
+   *   },
+   * })
+   * console.log(`Native fee: ${estimate.nativeFee}`)
+   * if (estimate.tokenTransferFee) {
+   *   const tf = estimate.tokenTransferFee
+   *   console.log(`${tf.value} (${tf.bps} bps)`)
+   * }
+   * ```
+   */
+  getTotalFeesEstimate(_opts: Omit<SendMessageOpts, 'approveMax'>): Promise<TotalFeesEstimate> {
+    return Promise.reject(new CCIPNotImplementedError('getTotalFeesEstimate'))
   }
 
   /**

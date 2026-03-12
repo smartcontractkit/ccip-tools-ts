@@ -36,6 +36,7 @@ import {
   type TokenPoolRemote,
   type TokenTransferFeeConfig,
   type TokenTransferFeeOpts,
+  type TotalFeesEstimate,
   Chain,
   LaneFeature,
 } from '../chain.ts'
@@ -60,7 +61,7 @@ import {
   CCIPVersionUnsupportedError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
-import type { ExtraArgs } from '../extra-args.ts'
+import type { ExtraArgs, GenericExtraArgsV3 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -1005,6 +1006,61 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         (this.constructor as typeof EVMChain).encodeExtraArgs(populatedMessage.extraArgs),
       ),
     })
+  }
+
+  /** {@inheritDoc Chain.getTotalFeesEstimate} */
+  override async getTotalFeesEstimate(
+    opts: Parameters<Chain['getTotalFeesEstimate']>[0],
+  ): Promise<TotalFeesEstimate> {
+    const tokenAmounts = opts.message.tokenAmounts
+    const nativeFeeP = this.getFee(opts)
+
+    if (!tokenAmounts?.length) {
+      return { nativeFee: await nativeFeeP }
+    }
+
+    const { token, amount } = tokenAmounts[0]!
+
+    // Determine blockConfirmations and tokenArgs from extraArgs
+    const extraArgs = opts.message.extraArgs
+    let blockConfirmations = 0
+    let tokenArgs: string = '0x'
+    if (extraArgs && 'blockConfirmations' in extraArgs) {
+      const v3 = extraArgs as GenericExtraArgsV3
+      blockConfirmations = v3.blockConfirmations
+      tokenArgs = String(v3.tokenArgs)
+    }
+
+    // Resolve pool and fetch fee config in parallel with native fee
+    const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
+    const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, this.provider)
+
+    const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+      opts.destChainSelector,
+      token,
+    )) as string
+
+    const [nativeFee, { tokenTransferFeeConfig }] = await Promise.all([
+      nativeFeeP,
+      this.getTokenPoolConfig(poolAddress, {
+        destChainSelector: opts.destChainSelector,
+        blockConfirmationsRequested: blockConfirmations,
+        tokenArgs,
+      }),
+    ])
+
+    const useCustom = blockConfirmations > 0
+    const bps = useCustom
+      ? (tokenTransferFeeConfig?.customBlockConfirmationsTransferFeeBps ?? 0)
+      : (tokenTransferFeeConfig?.defaultBlockConfirmationsTransferFeeBps ?? 0)
+
+    return {
+      nativeFee,
+      tokenTransferFee: {
+        value: (BigInt(amount) * BigInt(bps)) / 10_000n,
+        bps,
+      },
+    }
   }
 
   /**
