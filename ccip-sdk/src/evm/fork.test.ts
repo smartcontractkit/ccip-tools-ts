@@ -133,7 +133,9 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   let sepoliaChain: EVMChain | undefined
   let fujiChain: EVMChain | undefined
   let wallet: Wallet
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
   let sepoliaInstance: ReturnType<typeof anvil> | undefined
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
   let fujiInstance: ReturnType<typeof anvil> | undefined
 
   before(async () => {
