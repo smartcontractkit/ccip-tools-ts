@@ -929,6 +929,28 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       console.log(`    value = ${tf.value} (${tf.bps} bps)`)
     })
 
+    it('should return nativeFee only for pre-v2.0 lane with token transfer', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const amount = 1_000_000n
+      const estimate = await sepoliaChain.getTotalFeesEstimate({
+        router: SEPOLIA_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: {
+          receiver: '0x0000000000000000000000000000000000000001',
+          tokenAmounts: [{ token: CCIP_BNM_TOKEN_SEPOLIA, amount }],
+        },
+      })
+
+      assert.equal(typeof estimate.nativeFee, 'bigint')
+      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
+      assert.equal(
+        estimate.tokenTransferFee,
+        undefined,
+        'pre-v2.0 lane should not return tokenTransferFee',
+      )
+    })
+
     it('should use custom BPS when blockConfirmations > 0', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 

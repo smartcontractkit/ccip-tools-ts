@@ -1049,10 +1049,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       }),
     ])
 
+    if (!tokenTransferFeeConfig) {
+      return { nativeFee }
+    }
+
     const useCustom = blockConfirmations > 0
     const bps = useCustom
-      ? (tokenTransferFeeConfig?.customBlockConfirmationsTransferFeeBps ?? 0)
-      : (tokenTransferFeeConfig?.defaultBlockConfirmationsTransferFeeBps ?? 0)
+      ? tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps
+      : tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps
 
     return {
       nativeFee,
