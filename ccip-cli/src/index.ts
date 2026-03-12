@@ -11,7 +11,7 @@ import { Format } from './commands/index.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '1.1.1-f915d74'
+const VERSION = '1.1.1-7c1e223'
 // generate:end
 
 const globalOpts = {
@@ -51,6 +51,22 @@ const globalOpts = {
       if (arg == null || arg === 'true' || arg === 'yes') return true
       return arg // it's a URL string
     },
+  },
+  'canton-jwt': {
+    type: 'string',
+    describe: 'JWT bearer token for Canton Ledger API authentication',
+  },
+  'canton-party': {
+    type: 'string',
+    describe: 'Daml party ID for Canton command submissions (e.g. participant1::12208...)',
+  },
+  'canton-eds-url': {
+    type: 'string',
+    describe: 'Base URL for the Canton Explicit Disclosure Service (EDS)',
+  },
+  'indexer-url': {
+    type: 'string',
+    describe: '(Optional) Base URL for the CCV indexer service',
   },
 } as const
 

@@ -96,6 +96,7 @@ export * from './errors/index.ts'
 // chains
 import { AptosChain } from './aptos/index.ts'
 export type { UnsignedAptosTx } from './aptos/index.ts'
+import { CantonChain } from './canton/index.ts'
 import { EVMChain } from './evm/index.ts'
 export type { UnsignedEVMTx } from './evm/index.ts'
 import { SolanaChain } from './solana/index.ts'
@@ -104,7 +105,17 @@ import { SuiChain } from './sui/index.ts'
 export type { UnsignedSuiTx } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'
 export type { UnsignedTONTx } from './ton/index.ts'
+export type { CantonWallet, UnsignedCantonTx } from './canton/index.ts'
 import { ChainFamily, NetworkType } from './types.ts'
-export { AptosChain, ChainFamily, EVMChain, NetworkType, SolanaChain, SuiChain, TONChain }
+export {
+  AptosChain,
+  CantonChain,
+  ChainFamily,
+  EVMChain,
+  NetworkType,
+  SolanaChain,
+  SuiChain,
+  TONChain,
+}
 // use `supportedChains` to override/register derived classes, if needed
 export { supportedChains } from './supported-chains.ts'
