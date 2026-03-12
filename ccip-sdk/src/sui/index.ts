@@ -826,7 +826,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       'accounts', // alias for receiverObjectIds
     ])
     if (message.extraArgs) {
-      const unknown = Object.keys(message.extraArgs).filter((k) => !SUI_EXTRA_ARGS_FIELDS.has(k))
+      const unknown = Object.keys(message.extraArgs).filter(
+        (k) => k !== '_tag' && !SUI_EXTRA_ARGS_FIELDS.has(k),
+      )
       if (unknown.length)
         throw new CCIPArgumentInvalidError(
           'extraArgs',

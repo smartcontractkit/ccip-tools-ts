@@ -1601,7 +1601,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       'accountIsWritableBitmap',
     ])
     if (message.extraArgs) {
-      const unknown = Object.keys(message.extraArgs).filter((k) => !SVM_EXTRA_ARGS_FIELDS.has(k))
+      const unknown = Object.keys(message.extraArgs).filter(
+        (k) => k !== '_tag' && !SVM_EXTRA_ARGS_FIELDS.has(k),
+      )
       if (unknown.length)
         throw new CCIPArgumentInvalidError(
           'extraArgs',
