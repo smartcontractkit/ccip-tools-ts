@@ -33,10 +33,9 @@ import {
   type LaneFeatures,
   type LogFilter,
   type RateLimiterState,
-
-  type TokenPoolFeeOpts,
   type TokenPoolRemote,
   type TokenTransferFeeConfig,
+  type TokenTransferFeeOpts,
   Chain,
   LaneFeature,
 } from '../chain.ts'
@@ -54,7 +53,6 @@ import {
   CCIPSourceChainUnsupportedError,
   CCIPTokenDecimalsInsufficientError,
   CCIPTokenNotConfiguredError,
-  CCIPTokenNotFoundError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
   CCIPVersionFeatureUnavailableError,
@@ -672,70 +670,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
 
     return result
-  }
-
-  /**
-   * {@inheritDoc Chain.getTokenPoolFee}
-   */
-  override async getTokenPoolFee(opts: TokenPoolFeeOpts): Promise<TokenTransferFeeConfig | null> {
-    let poolAddress: string
-    let token: string
-
-    if ('tokenPool' in opts && opts.tokenPool) {
-      poolAddress = opts.tokenPool
-      token = await this.getTokenForTokenPool(poolAddress)
-    } else if ('token' in opts && opts.token && 'router' in opts && opts.router) {
-      const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
-      const onRampContract = new Contract(
-        onRamp,
-        interfaces.OnRamp_v2_0,
-        this.provider,
-      ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
-      const resolved = (await onRampContract.getPoolBySourceToken(
-        opts.destChainSelector,
-        opts.token,
-      )) as string
-
-      if (!resolved || resolved === ZeroAddress)
-        throw new CCIPTokenNotFoundError(opts.token, {
-          context: { router: opts.router, destChainSelector: String(opts.destChainSelector) },
-          recovery: 'Verify the token is supported on this lane',
-        })
-      poolAddress = resolved
-      token = opts.token
-    } else {
-      throw new CCIPError('UNKNOWN', 'Either tokenPool or both token and router must be provided')
-    }
-
-    try {
-      const poolContract = new Contract(
-        poolAddress,
-        interfaces.TokenPool_v2_0,
-        this.provider,
-      ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
-      const result = await poolContract.getTokenTransferFeeConfig(
-        token,
-        opts.destChainSelector,
-        BigInt(opts.blockConfirmationsRequested),
-        opts.tokenArgs,
-      )
-      return {
-        destGasOverhead: Number(result.destGasOverhead),
-        destBytesOverhead: Number(result.destBytesOverhead),
-        defaultBlockConfirmationsFeeUSDCents: Number(result.defaultBlockConfirmationsFeeUSDCents),
-        customBlockConfirmationsFeeUSDCents: Number(result.customBlockConfirmationsFeeUSDCents),
-        defaultBlockConfirmationsTransferFeeBps: Number(
-          result.defaultBlockConfirmationsTransferFeeBps,
-        ),
-        customBlockConfirmationsTransferFeeBps: Number(
-          result.customBlockConfirmationsTransferFeeBps,
-        ),
-        isEnabled: result.isEnabled,
-      }
-    } catch (err) {
-      if (isError(err, 'CALL_EXCEPTION')) return null
-      throw CCIPError.from(err, 'UNKNOWN')
-    }
   }
 
   /**
@@ -1481,21 +1415,28 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Fetches the token pool configuration for an EVM token pool contract.
    *
    * @param tokenPool - Token pool contract address.
-   * @returns Token pool config containing token, router, typeAndVersion, and optionally minBlockConfirmations.
+   * @param feeOpts - Optional parameters to also fetch token transfer fee config.
+   * @returns Token pool config containing token, router, typeAndVersion, and optionally
+   *          minBlockConfirmations and tokenTransferFeeConfig.
    *
    * @remarks
    * For pools with version \>= 2.0, also returns `minBlockConfirmations` for
    * Faster-Than-Finality (FTF) support. Pre-2.0 pools omit this field.
+   * When `feeOpts` is provided and the pool is v2.0+, also fetches token transfer fee config.
    */
-  async getTokenPoolConfig(tokenPool: string): Promise<{
+  async getTokenPoolConfig(
+    tokenPool: string,
+    feeOpts?: TokenTransferFeeOpts,
+  ): Promise<{
     token: string
     router: string
     typeAndVersion: string
     minBlockConfirmations?: number
+    tokenTransferFeeConfig?: TokenTransferFeeConfig
   }> {
     const [_, version, typeAndVersion] = await this.typeAndVersion(tokenPool)
 
-    let contract, router, minBlockConfirmations
+    let contract, router, minBlockConfirmations, tokenTransferFeeConfig
     if (version < CCIPVersion.V2_0) {
       contract = new Contract(
         tokenPool,
@@ -1514,11 +1455,44 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         if (isError(err, 'CALL_EXCEPTION')) return 0
         throw CCIPError.from(err)
       })
+      if (feeOpts) {
+        const v2Contract = contract
+        tokenTransferFeeConfig = contract.getToken().then((token) =>
+          v2Contract
+            .getTokenTransferFeeConfig(
+              token as string,
+              feeOpts.destChainSelector,
+              BigInt(feeOpts.blockConfirmationsRequested),
+              feeOpts.tokenArgs,
+            )
+            .then((result) => ({
+              destGasOverhead: Number(result.destGasOverhead),
+              destBytesOverhead: Number(result.destBytesOverhead),
+              defaultBlockConfirmationsFeeUSDCents: Number(
+                result.defaultBlockConfirmationsFeeUSDCents,
+              ),
+              customBlockConfirmationsFeeUSDCents: Number(
+                result.customBlockConfirmationsFeeUSDCents,
+              ),
+              defaultBlockConfirmationsTransferFeeBps: Number(
+                result.defaultBlockConfirmationsTransferFeeBps,
+              ),
+              customBlockConfirmationsTransferFeeBps: Number(
+                result.customBlockConfirmationsTransferFeeBps,
+              ),
+              isEnabled: result.isEnabled,
+            }))
+            .catch((err) => {
+              if (isError(err, 'CALL_EXCEPTION')) return undefined
+              throw CCIPError.from(err, 'UNKNOWN')
+            }),
+        )
+      }
     }
     const token = contract.getToken()
 
-    return Promise.all([token, router, minBlockConfirmations]).then(
-      ([token, router, minBlockConfirmations]) => {
+    return Promise.all([token, router, minBlockConfirmations, tokenTransferFeeConfig]).then(
+      ([token, router, minBlockConfirmations, tokenTransferFeeConfig]) => {
         return {
           token: token as CleanAddressable<typeof token>,
           router: router as CleanAddressable<typeof router>,
@@ -1526,6 +1500,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...(minBlockConfirmations != null && {
             minBlockConfirmations: Number(minBlockConfirmations),
           }),
+          ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
         }
       },
     )

@@ -210,18 +210,14 @@ export type TokenTransferFeeConfig = {
 }
 
 /**
- * Options for {@link Chain.getTokenPoolFee}.
- * Provide either `tokenPool` directly or `token` + `router` to auto-resolve it.
+ * Options for fetching token transfer fee config as part of {@link Chain.getTokenPoolConfig}.
  */
-export type TokenPoolFeeOpts = {
+export type TokenTransferFeeOpts = {
   destChainSelector: bigint
   blockConfirmationsRequested: number
   /** Hex-encoded bytes passed as tokenArgs to the pool contract. */
   tokenArgs: string
-} & (
-  | { tokenPool: string; token?: undefined; router?: undefined }
-  | { token: string; router: string; tokenPool?: undefined }
-)
+}
 
 /**
  * Available lane feature keys.
@@ -372,6 +368,12 @@ export type TokenPoolConfig = {
    *  with this many minimum confirmations.
    */
   minBlockConfirmations?: number
+  /**
+   * Token transfer fee configuration from the pool contract.
+   * Only present when {@link TokenTransferFeeOpts} is provided to
+   * {@link Chain.getTokenPoolConfig} and the pool supports it (v2.0+).
+   */
+  tokenTransferFeeConfig?: TokenTransferFeeConfig
 }
 
 /**
@@ -1282,18 +1284,6 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
-   * Retrieve the token transfer fee configuration from a TokenPool v2.0 contract.
-   *
-   * Returns `null` when the pool does not support fee config (pre-2.0 pools).
-   * Throws on RPC or other unexpected errors.
-   *
-   * @param _opts - Either `{ tokenPool }` or `{ token, router }` plus shared fields.
-   */
-  getTokenPoolFee(_opts: TokenPoolFeeOpts): Promise<TokenTransferFeeConfig | null> {
-    return Promise.reject(new CCIPNotImplementedError('getTokenPoolFee'))
-  }
-
-  /**
    * Default/generic implementation of getExecutionReceipts.
    * Yields execution receipts for a given offRamp.
    *
@@ -1443,10 +1433,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    *
    * @param tokenPool - Token pool contract address.
-   * @returns {@link TokenPoolConfig} containing token, router, and version info.
+   * @param feeOpts - Optional parameters to also fetch token transfer fee config.
+   * @returns {@link TokenPoolConfig} containing token, router, version info, and optionally fee config.
    * @throws {@link CCIPNotImplementedError} on Sui or TON chains
    */
-  abstract getTokenPoolConfig(tokenPool: string): Promise<TokenPoolConfig>
+  abstract getTokenPoolConfig(
+    tokenPool: string,
+    feeOpts?: TokenTransferFeeOpts,
+  ): Promise<TokenPoolConfig>
 
   /**
    * Fetch remote chain configurations for a token pool.

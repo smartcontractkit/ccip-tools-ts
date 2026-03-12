@@ -36,9 +36,9 @@ export type {
   RegistryTokenConfig,
   TokenInfo,
   TokenPoolConfig,
-  TokenPoolFeeOpts,
   TokenPoolRemote,
   TokenTransferFeeConfig,
+  TokenTransferFeeOpts,
 } from './chain.ts'
 export { DEFAULT_API_RETRY_CONFIG, LaneFeature } from './chain.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'

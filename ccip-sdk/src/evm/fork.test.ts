@@ -763,87 +763,37 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     })
   })
 
-  describe('getTokenPoolFee', () => {
+  describe('getTokenPoolConfig with tokenTransferFeeConfig', () => {
     it('should return disabled fee config for token with old pool', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
-      const result = await sepoliaChain.getTokenPoolFee({
-        token: OLD_POOL_TOKEN_SEPOLIA,
-        router: SEPOLIA_V2_0_ROUTER,
+      // Resolve pool address for the old pool token
+      const onRamp = await sepoliaChain.getOnRampForRouter(SEPOLIA_V2_0_ROUTER, FUJI_SELECTOR)
+      const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, sepoliaChain.provider)
+      const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+        FUJI_SELECTOR,
+        OLD_POOL_TOKEN_SEPOLIA,
+      )) as string
+
+      const result = await sepoliaChain.getTokenPoolConfig(poolAddress, {
         destChainSelector: FUJI_SELECTOR,
         blockConfirmationsRequested: 0,
         tokenArgs: '0x',
       })
 
       // Old pools may respond with all-zero config rather than reverting
-      assert.notEqual(result, null, 'old pool responds to the call')
-      assert.equal(result!.isEnabled, false, 'fee config should not be enabled on old pool')
-    })
-
-    it('should return fee config for v2.0 pool via token+router', async () => {
-      assert.ok(fujiChain, 'fuji chain should be initialized')
-
-      const result = await fujiChain.getTokenPoolFee({
-        token: FTF_TOKEN_FUJI,
-        router: FUJI_V2_0_ROUTER,
-        destChainSelector: SEPOLIA_SELECTOR,
-        blockConfirmationsRequested: 0,
-        tokenArgs: '0x',
-      })
-
-      assert.notEqual(result, null, 'v2.0 pool should return fee config')
-      assert.equal(typeof result!.destGasOverhead, 'number')
-      assert.equal(typeof result!.destBytesOverhead, 'number')
-      assert.equal(typeof result!.isEnabled, 'boolean')
-      console.log('  v2.0 pool fee config (blockConfirmationsRequested=0):')
-      console.log(
-        `    defaultBlockConfirmationsFeeUSDCents = ${result!.defaultBlockConfirmationsFeeUSDCents}`,
-      )
-      console.log(
-        `    customBlockConfirmationsFeeUSDCents  = ${result!.customBlockConfirmationsFeeUSDCents}`,
-      )
-      console.log(
-        `    defaultBlockConfirmationsTransferFeeBps = ${result!.defaultBlockConfirmationsTransferFeeBps}`,
-      )
-      console.log(
-        `    customBlockConfirmationsTransferFeeBps  = ${result!.customBlockConfirmationsTransferFeeBps}`,
+      assert.ok(result.tokenTransferFeeConfig, 'old pool responds to the call')
+      assert.equal(
+        result.tokenTransferFeeConfig.isEnabled,
+        false,
+        'fee config should not be enabled on old pool',
       )
     })
 
-    it('should return fee config with blockConfirmationsRequested=1', async () => {
+    it('should return fee config for v2.0 pool', async () => {
       assert.ok(fujiChain, 'fuji chain should be initialized')
 
-      const result = await fujiChain.getTokenPoolFee({
-        token: FTF_TOKEN_FUJI,
-        router: FUJI_V2_0_ROUTER,
-        destChainSelector: SEPOLIA_SELECTOR,
-        blockConfirmationsRequested: 1,
-        tokenArgs: '0x',
-      })
-
-      assert.notEqual(result, null, 'v2.0 pool should return fee config')
-      assert.equal(typeof result!.destGasOverhead, 'number')
-      assert.equal(typeof result!.destBytesOverhead, 'number')
-      assert.equal(typeof result!.isEnabled, 'boolean')
-      console.log('  v2.0 pool fee config (blockConfirmationsRequested=1):')
-      console.log(
-        `    defaultBlockConfirmationsFeeUSDCents = ${result!.defaultBlockConfirmationsFeeUSDCents}`,
-      )
-      console.log(
-        `    customBlockConfirmationsFeeUSDCents  = ${result!.customBlockConfirmationsFeeUSDCents}`,
-      )
-      console.log(
-        `    defaultBlockConfirmationsTransferFeeBps = ${result!.defaultBlockConfirmationsTransferFeeBps}`,
-      )
-      console.log(
-        `    customBlockConfirmationsTransferFeeBps  = ${result!.customBlockConfirmationsTransferFeeBps}`,
-      )
-    })
-
-    it('should return fee config when given tokenPool directly', async () => {
-      assert.ok(fujiChain, 'fuji chain should be initialized')
-
-      // Resolve pool address to exercise the tokenPool input path
+      // Resolve pool address
       const onRamp = await fujiChain.getOnRampForRouter(FUJI_V2_0_ROUTER, SEPOLIA_SELECTOR)
       const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, fujiChain.provider)
       const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
@@ -851,16 +801,87 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         FTF_TOKEN_FUJI,
       )) as string
 
-      const result = await fujiChain.getTokenPoolFee({
-        tokenPool: poolAddress,
+      const result = await fujiChain.getTokenPoolConfig(poolAddress, {
         destChainSelector: SEPOLIA_SELECTOR,
         blockConfirmationsRequested: 0,
         tokenArgs: '0x',
       })
 
-      assert.notEqual(result, null, 'v2.0 pool should return fee config via direct address')
-      assert.equal(typeof result!.destGasOverhead, 'number')
-      assert.equal(typeof result!.isEnabled, 'boolean')
+      assert.ok(result.tokenTransferFeeConfig, 'v2.0 pool should return fee config')
+      assert.equal(typeof result.tokenTransferFeeConfig.destGasOverhead, 'number')
+      assert.equal(typeof result.tokenTransferFeeConfig.destBytesOverhead, 'number')
+      assert.equal(typeof result.tokenTransferFeeConfig.isEnabled, 'boolean')
+      console.log('  v2.0 pool fee config (blockConfirmationsRequested=0):')
+      console.log(
+        `    defaultBlockConfirmationsFeeUSDCents = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    customBlockConfirmationsFeeUSDCents  = ${result.tokenTransferFeeConfig.customBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    defaultBlockConfirmationsTransferFeeBps = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps}`,
+      )
+      console.log(
+        `    customBlockConfirmationsTransferFeeBps  = ${result.tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps}`,
+      )
+    })
+
+    it('should return fee config with blockConfirmationsRequested=1', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      // Resolve pool address
+      const onRamp = await fujiChain.getOnRampForRouter(FUJI_V2_0_ROUTER, SEPOLIA_SELECTOR)
+      const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, fujiChain.provider)
+      const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+        SEPOLIA_SELECTOR,
+        FTF_TOKEN_FUJI,
+      )) as string
+
+      const result = await fujiChain.getTokenPoolConfig(poolAddress, {
+        destChainSelector: SEPOLIA_SELECTOR,
+        blockConfirmationsRequested: 1,
+        tokenArgs: '0x',
+      })
+
+      assert.ok(result.tokenTransferFeeConfig, 'v2.0 pool should return fee config')
+      assert.equal(typeof result.tokenTransferFeeConfig.destGasOverhead, 'number')
+      assert.equal(typeof result.tokenTransferFeeConfig.destBytesOverhead, 'number')
+      assert.equal(typeof result.tokenTransferFeeConfig.isEnabled, 'boolean')
+      console.log('  v2.0 pool fee config (blockConfirmationsRequested=1):')
+      console.log(
+        `    defaultBlockConfirmationsFeeUSDCents = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    customBlockConfirmationsFeeUSDCents  = ${result.tokenTransferFeeConfig.customBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    defaultBlockConfirmationsTransferFeeBps = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps}`,
+      )
+      console.log(
+        `    customBlockConfirmationsTransferFeeBps  = ${result.tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps}`,
+      )
+    })
+
+    it('should omit fee config when feeOpts not provided', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      // Resolve pool address
+      const onRamp = await fujiChain.getOnRampForRouter(FUJI_V2_0_ROUTER, SEPOLIA_SELECTOR)
+      const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, fujiChain.provider)
+      const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+        SEPOLIA_SELECTOR,
+        FTF_TOKEN_FUJI,
+      )) as string
+
+      const result = await fujiChain.getTokenPoolConfig(poolAddress)
+
+      assert.equal(
+        result.tokenTransferFeeConfig,
+        undefined,
+        'fee config should be undefined without feeOpts',
+      )
+      assert.equal(typeof result.token, 'string')
+      assert.equal(typeof result.router, 'string')
     })
   })
 
