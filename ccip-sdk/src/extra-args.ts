@@ -1,5 +1,6 @@
 import { type BytesLike, id } from 'ethers'
 
+import type { CantonExtraArgsV1 } from './canton/types.ts'
 import { CCIPChainFamilyUnsupportedError, CCIPExtraArgsParseError } from './errors/index.ts'
 import { supportedChains } from './supported-chains.ts'
 import { ChainFamily } from './types.ts'
@@ -150,6 +151,7 @@ export type ExtraArgs =
   | GenericExtraArgsV3
   | SVMExtraArgsV1
   | SuiExtraArgsV1
+  | CantonExtraArgsV1
 
 /**
  * Encodes extra arguments for CCIP messages.

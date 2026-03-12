@@ -61,7 +61,7 @@ export function createCantonClient(config: CantonClientConfig) {
      * @returns The update ID and completion offset
      */
     async submitAndWait(commands: JsCommands): Promise<SubmitAndWaitResponse> {
-      return ledgerPost<SubmitAndWaitResponse>(
+      return post<SubmitAndWaitResponse>(
         baseUrl,
         '/v2/commands/submit-and-wait',
         headers,
@@ -78,7 +78,7 @@ export function createCantonClient(config: CantonClientConfig) {
       commands: JsCommands,
       eventFormat?: EventFormat,
     ): Promise<JsSubmitAndWaitForTransactionResponse> {
-      return ledgerPost<JsSubmitAndWaitForTransactionResponse>(
+      return post<JsSubmitAndWaitForTransactionResponse>(
         baseUrl,
         '/v2/commands/submit-and-wait-for-transaction',
         headers,
@@ -97,7 +97,7 @@ export function createCantonClient(config: CantonClientConfig) {
     ): Promise<JsGetActiveContractsResponse[]> {
       const queryParams =
         options?.limit !== undefined ? { limit: String(options.limit) } : undefined
-      return ledgerPost<JsGetActiveContractsResponse[]>(
+      return post<JsGetActiveContractsResponse[]>(
         baseUrl,
         '/v2/state/active-contracts',
         headers,
@@ -111,7 +111,7 @@ export function createCantonClient(config: CantonClientConfig) {
      * Get the current ledger end offset
      */
     async getLedgerEnd(): Promise<{ offset: number }> {
-      const data = await ledgerGet<{ offset?: number }>(
+      const data = await get<{ offset?: number }>(
         baseUrl,
         '/v2/state/ledger-end',
         headers,
@@ -125,7 +125,7 @@ export function createCantonClient(config: CantonClientConfig) {
      */
     async listParties(options?: { filterParty?: string }) {
       const queryParams = options?.filterParty ? { 'filter-party': options.filterParty } : undefined
-      const data = await ledgerGet<{ partyDetails?: unknown[] }>(
+      const data = await get<{ partyDetails?: unknown[] }>(
         baseUrl,
         '/v2/parties',
         headers,
@@ -139,7 +139,7 @@ export function createCantonClient(config: CantonClientConfig) {
      * Get the participant ID
      */
     async getParticipantId(): Promise<string> {
-      const data = await ledgerGet<{ participantId?: string }>(
+      const data = await get<{ participantId?: string }>(
         baseUrl,
         '/v2/parties/participant-id',
         headers,
@@ -152,7 +152,7 @@ export function createCantonClient(config: CantonClientConfig) {
      * Get the list of synchronizers the participant is currently connected to
      */
     async getConnectedSynchronizers(): Promise<ConnectedSynchronizer[]> {
-      const data = await ledgerGet<{ connectedSynchronizers?: ConnectedSynchronizer[] }>(
+      const data = await get<{ connectedSynchronizers?: ConnectedSynchronizer[] }>(
         baseUrl,
         '/v2/state/connected-synchronizers',
         headers,
@@ -166,10 +166,12 @@ export function createCantonClient(config: CantonClientConfig) {
      */
     async isAlive(): Promise<boolean> {
       try {
-        await ledgerRequest('GET', baseUrl, '/livez', headers, timeoutMs)
+        await request('GET', baseUrl, '/livez', headers, timeoutMs)
         return true
-      } catch {
-        return false
+      } catch (e) {
+        console.log(`Ledger API is not alive at ${baseUrl}/livez:`, e)
+        throw new CantonApiError('Ledger API is not alive', e)
+        // return false
       }
     },
 
@@ -178,7 +180,7 @@ export function createCantonClient(config: CantonClientConfig) {
      */
     async isReady(): Promise<boolean> {
       try {
-        await ledgerRequest('GET', baseUrl, '/readyz', headers, timeoutMs)
+        await request('GET', baseUrl, '/readyz', headers, timeoutMs)
         return true
       } catch {
         return false
@@ -192,7 +194,7 @@ export function createCantonClient(config: CantonClientConfig) {
      * @returns The full update with all events
      */
     async getUpdateById(updateId: string, party: string): Promise<unknown> {
-      return ledgerPost<unknown>(baseUrl, '/v2/updates/update-by-id', headers, timeoutMs, {
+      return post<unknown>(baseUrl, '/v2/updates/update-by-id', headers, timeoutMs, {
         updateId,
         updateFormat: {
           includeTransactions: {
@@ -284,7 +286,7 @@ async function parseErrorBody(response: Response): Promise<unknown> {
   }
 }
 
-async function ledgerRequest<T>(
+async function request<T>(
   method: 'GET' | 'POST',
   baseUrl: string,
   path: string,
@@ -313,6 +315,7 @@ async function ledgerRequest<T>(
   } finally {
     clearTimeout(timer)
   }
+
   if (!response.ok) {
     throw new CantonApiError(
       `${method} ${path} failed`,
@@ -327,17 +330,40 @@ async function ledgerRequest<T>(
   return response.json() as Promise<T>
 }
 
-async function ledgerGet<T>(
+/**
+ * Send a GET request
+ *
+ * @param baseUrl - The base URL of the Canton API.
+ * @param path - The endpoint path to send the request to.
+ * @param headers - HTTP headers to include in the request.
+ * @param timeoutMs - Timeout for the request in milliseconds.
+ * @param queryParams - Optional query parameters to append to the URL.
+ * @returns A promise resolving to the parsed response of type T.
+ * @throws {CantonApiError} If the request fails or the response is not OK.
+ */
+export async function get<T>(
   baseUrl: string,
   path: string,
   headers: Record<string, string>,
   timeoutMs: number,
   queryParams?: Record<string, string>,
 ): Promise<T> {
-  return ledgerRequest<T>('GET', baseUrl, path, headers, timeoutMs, { queryParams })
+  return request<T>('GET', baseUrl, path, headers, timeoutMs, { queryParams })
 }
 
-async function ledgerPost<T>(
+/**
+ * Send a POST request
+ *
+ * @param baseUrl - The base URL of the Canton API.
+ * @param path - The endpoint path to send the request to.
+ * @param headers - HTTP headers to include in the request.
+ * @param timeoutMs - Timeout for the request in milliseconds.
+ * @param body - The request payload to send as JSON.
+ * @param queryParams - Optional query parameters to append to the URL.
+ * @returns A promise resolving to the parsed response of type T.
+ * @throws {CantonApiError} If the request fails or the response is not OK.
+ */
+export async function post<T>(
   baseUrl: string,
   path: string,
   headers: Record<string, string>,
@@ -345,5 +371,5 @@ async function ledgerPost<T>(
   body: unknown,
   queryParams?: Record<string, string>,
 ): Promise<T> {
-  return ledgerRequest<T>('POST', baseUrl, path, headers, timeoutMs, { body, queryParams })
+  return request<T>('POST', baseUrl, path, headers, timeoutMs, { body, queryParams })
 }
