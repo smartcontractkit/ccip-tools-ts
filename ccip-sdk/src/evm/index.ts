@@ -34,6 +34,9 @@ import {
   type LogFilter,
   type RateLimiterState,
   type TokenPoolRemote,
+  type TokenTransferFeeConfig,
+  type TokenTransferFeeOpts,
+  type TotalFeesEstimate,
   Chain,
   LaneFeature,
 } from '../chain.ts'
@@ -58,7 +61,7 @@ import {
   CCIPVersionUnsupportedError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
-import type { ExtraArgs } from '../extra-args.ts'
+import type { ExtraArgs, GenericExtraArgsV3 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -1018,6 +1021,65 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     })
   }
 
+  /** {@inheritDoc Chain.getTotalFeesEstimate} */
+  override async getTotalFeesEstimate(
+    opts: Parameters<Chain['getTotalFeesEstimate']>[0],
+  ): Promise<TotalFeesEstimate> {
+    const tokenAmounts = opts.message.tokenAmounts
+    const nativeFeeP = this.getFee(opts)
+
+    if (!tokenAmounts?.length) {
+      return { nativeFee: await nativeFeeP }
+    }
+
+    const { token, amount } = tokenAmounts[0]!
+
+    // Determine blockConfirmations and tokenArgs from extraArgs
+    const extraArgs = opts.message.extraArgs
+    let blockConfirmations = 0
+    let tokenArgs: string = '0x'
+    if (extraArgs && 'blockConfirmations' in extraArgs) {
+      const v3 = extraArgs as GenericExtraArgsV3
+      blockConfirmations = v3.blockConfirmations
+      tokenArgs = String(v3.tokenArgs)
+    }
+
+    // Resolve pool and fetch fee config in parallel with native fee
+    const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
+    const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, this.provider)
+
+    const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+      opts.destChainSelector,
+      token,
+    )) as string
+
+    const [nativeFee, { tokenTransferFeeConfig }] = await Promise.all([
+      nativeFeeP,
+      this.getTokenPoolConfig(poolAddress, {
+        destChainSelector: opts.destChainSelector,
+        blockConfirmationsRequested: blockConfirmations,
+        tokenArgs,
+      }),
+    ])
+
+    if (!tokenTransferFeeConfig) {
+      return { nativeFee }
+    }
+
+    const useCustom = blockConfirmations > 0
+    const bps = useCustom
+      ? tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps
+      : tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps
+
+    return {
+      nativeFee,
+      tokenTransferFee: {
+        value: (BigInt(amount) * BigInt(bps)) / 10_000n,
+        bps,
+      },
+    }
+  }
+
   /**
    * Generates unsigned EVM transactions for sending a CCIP message.
    *
@@ -1426,21 +1488,28 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Fetches the token pool configuration for an EVM token pool contract.
    *
    * @param tokenPool - Token pool contract address.
-   * @returns Token pool config containing token, router, typeAndVersion, and optionally minBlockConfirmations.
+   * @param feeOpts - Optional parameters to also fetch token transfer fee config.
+   * @returns Token pool config containing token, router, typeAndVersion, and optionally
+   *          minBlockConfirmations and tokenTransferFeeConfig.
    *
    * @remarks
    * For pools with version \>= 2.0, also returns `minBlockConfirmations` for
    * Faster-Than-Finality (FTF) support. Pre-2.0 pools omit this field.
+   * When `feeOpts` is provided and the pool is v2.0+, also fetches token transfer fee config.
    */
-  async getTokenPoolConfig(tokenPool: string): Promise<{
+  async getTokenPoolConfig(
+    tokenPool: string,
+    feeOpts?: TokenTransferFeeOpts,
+  ): Promise<{
     token: string
     router: string
     typeAndVersion: string
     minBlockConfirmations?: number
+    tokenTransferFeeConfig?: TokenTransferFeeConfig
   }> {
     const [_, version, typeAndVersion] = await this.typeAndVersion(tokenPool)
 
-    let contract, router, minBlockConfirmations
+    let contract, router, minBlockConfirmations, tokenTransferFeeConfig
     if (version < CCIPVersion.V2_0) {
       contract = new Contract(
         tokenPool,
@@ -1459,11 +1528,44 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         if (isError(err, 'CALL_EXCEPTION')) return 0
         throw CCIPError.from(err)
       })
+      if (feeOpts) {
+        const v2Contract = contract
+        tokenTransferFeeConfig = contract.getToken().then((token) =>
+          v2Contract
+            .getTokenTransferFeeConfig(
+              token as string,
+              feeOpts.destChainSelector,
+              BigInt(feeOpts.blockConfirmationsRequested),
+              feeOpts.tokenArgs,
+            )
+            .then((result) => ({
+              destGasOverhead: Number(result.destGasOverhead),
+              destBytesOverhead: Number(result.destBytesOverhead),
+              defaultBlockConfirmationsFeeUSDCents: Number(
+                result.defaultBlockConfirmationsFeeUSDCents,
+              ),
+              customBlockConfirmationsFeeUSDCents: Number(
+                result.customBlockConfirmationsFeeUSDCents,
+              ),
+              defaultBlockConfirmationsTransferFeeBps: Number(
+                result.defaultBlockConfirmationsTransferFeeBps,
+              ),
+              customBlockConfirmationsTransferFeeBps: Number(
+                result.customBlockConfirmationsTransferFeeBps,
+              ),
+              isEnabled: result.isEnabled,
+            }))
+            .catch((err) => {
+              if (isError(err, 'CALL_EXCEPTION')) return undefined
+              throw CCIPError.from(err, 'UNKNOWN')
+            }),
+        )
+      }
     }
     const token = contract.getToken()
 
-    return Promise.all([token, router, minBlockConfirmations]).then(
-      ([token, router, minBlockConfirmations]) => {
+    return Promise.all([token, router, minBlockConfirmations, tokenTransferFeeConfig]).then(
+      ([token, router, minBlockConfirmations, tokenTransferFeeConfig]) => {
         return {
           token: token as CleanAddressable<typeof token>,
           router: router as CleanAddressable<typeof router>,
@@ -1471,6 +1573,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...(minBlockConfirmations != null && {
             minBlockConfirmations: Number(minBlockConfirmations),
           }),
+          ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
         }
       },
     )

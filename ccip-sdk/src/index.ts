@@ -37,6 +37,10 @@ export type {
   TokenInfo,
   TokenPoolConfig,
   TokenPoolRemote,
+  TokenTransferFee,
+  TokenTransferFeeConfig,
+  TokenTransferFeeOpts,
+  TotalFeesEstimate,
 } from './chain.ts'
 export { DEFAULT_API_RETRY_CONFIG, LaneFeature } from './chain.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'

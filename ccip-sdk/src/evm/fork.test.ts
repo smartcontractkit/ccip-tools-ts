@@ -66,6 +66,8 @@ const CCIP_BNM_TOKEN_SEPOLIA = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
 // Token pools with FTF enabled and custom rate limits configured
 const FTF_ENABLED_POOL_SEPOLIA = '0x161d23c30b5ae2899c3d4d969ba2b82026f3954a'
 const FTF_ENABLED_POOL_FUJI = '0xc9346f85a04a47188710d8830127a2490959cbd9'
+// Token served by FTF_ENABLED_POOL_SEPOLIA — works with V3 extra args on Sepolia→Fuji v2.0 lane
+const FTF_TOKEN_SEPOLIA = '0x6b039E8bDB3F92093AdC417367379089be7A80B1'
 
 // ── execute constants ──
 
@@ -760,6 +762,228 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         differs,
         `custom rate limits should differ from default (default: capacity=${rateLimits.capacity} rate=${rateLimits.rate}, custom: capacity=${customRateLimits.capacity} rate=${customRateLimits.rate})`,
       )
+    })
+  })
+
+  describe('getTokenPoolConfig with tokenTransferFeeConfig', () => {
+    it('should return disabled fee config for token with old pool', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      // Resolve pool address for the old pool token
+      const onRamp = await sepoliaChain.getOnRampForRouter(SEPOLIA_V2_0_ROUTER, FUJI_SELECTOR)
+      const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, sepoliaChain.provider)
+      const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+        FUJI_SELECTOR,
+        OLD_POOL_TOKEN_SEPOLIA,
+      )) as string
+
+      const result = await sepoliaChain.getTokenPoolConfig(poolAddress, {
+        destChainSelector: FUJI_SELECTOR,
+        blockConfirmationsRequested: 0,
+        tokenArgs: '0x',
+      })
+
+      // Old pools may respond with all-zero config rather than reverting
+      assert.ok(result.tokenTransferFeeConfig, 'old pool responds to the call')
+      assert.equal(
+        result.tokenTransferFeeConfig.isEnabled,
+        false,
+        'fee config should not be enabled on old pool',
+      )
+    })
+
+    it('should return fee config for v2.0 pool', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      // Resolve pool address
+      const onRamp = await fujiChain.getOnRampForRouter(FUJI_V2_0_ROUTER, SEPOLIA_SELECTOR)
+      const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, fujiChain.provider)
+      const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+        SEPOLIA_SELECTOR,
+        FTF_TOKEN_FUJI,
+      )) as string
+
+      const result = await fujiChain.getTokenPoolConfig(poolAddress, {
+        destChainSelector: SEPOLIA_SELECTOR,
+        blockConfirmationsRequested: 0,
+        tokenArgs: '0x',
+      })
+
+      assert.ok(result.tokenTransferFeeConfig, 'v2.0 pool should return fee config')
+      assert.equal(typeof result.tokenTransferFeeConfig.destGasOverhead, 'number')
+      assert.equal(typeof result.tokenTransferFeeConfig.destBytesOverhead, 'number')
+      assert.equal(typeof result.tokenTransferFeeConfig.isEnabled, 'boolean')
+      console.log('  v2.0 pool fee config (blockConfirmationsRequested=0):')
+      console.log(
+        `    defaultBlockConfirmationsFeeUSDCents = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    customBlockConfirmationsFeeUSDCents  = ${result.tokenTransferFeeConfig.customBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    defaultBlockConfirmationsTransferFeeBps = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps}`,
+      )
+      console.log(
+        `    customBlockConfirmationsTransferFeeBps  = ${result.tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps}`,
+      )
+    })
+
+    it('should return fee config with blockConfirmationsRequested=1', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      // Resolve pool address
+      const onRamp = await fujiChain.getOnRampForRouter(FUJI_V2_0_ROUTER, SEPOLIA_SELECTOR)
+      const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, fujiChain.provider)
+      const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+        SEPOLIA_SELECTOR,
+        FTF_TOKEN_FUJI,
+      )) as string
+
+      const result = await fujiChain.getTokenPoolConfig(poolAddress, {
+        destChainSelector: SEPOLIA_SELECTOR,
+        blockConfirmationsRequested: 1,
+        tokenArgs: '0x',
+      })
+
+      assert.ok(result.tokenTransferFeeConfig, 'v2.0 pool should return fee config')
+      assert.equal(typeof result.tokenTransferFeeConfig.destGasOverhead, 'number')
+      assert.equal(typeof result.tokenTransferFeeConfig.destBytesOverhead, 'number')
+      assert.equal(typeof result.tokenTransferFeeConfig.isEnabled, 'boolean')
+      console.log('  v2.0 pool fee config (blockConfirmationsRequested=1):')
+      console.log(
+        `    defaultBlockConfirmationsFeeUSDCents = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    customBlockConfirmationsFeeUSDCents  = ${result.tokenTransferFeeConfig.customBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    defaultBlockConfirmationsTransferFeeBps = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps}`,
+      )
+      console.log(
+        `    customBlockConfirmationsTransferFeeBps  = ${result.tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps}`,
+      )
+    })
+
+    it('should omit fee config when feeOpts not provided', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      // Resolve pool address
+      const onRamp = await fujiChain.getOnRampForRouter(FUJI_V2_0_ROUTER, SEPOLIA_SELECTOR)
+      const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, fujiChain.provider)
+      const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+        SEPOLIA_SELECTOR,
+        FTF_TOKEN_FUJI,
+      )) as string
+
+      const result = await fujiChain.getTokenPoolConfig(poolAddress)
+
+      assert.equal(
+        result.tokenTransferFeeConfig,
+        undefined,
+        'fee config should be undefined without feeOpts',
+      )
+      assert.equal(typeof result.token, 'string')
+      assert.equal(typeof result.router, 'string')
+    })
+  })
+
+  describe('getTotalFeesEstimate', () => {
+    it('should return nativeFee and no tokenTransferFee for data-only message', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const estimate = await sepoliaChain.getTotalFeesEstimate({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: { receiver: '0x0000000000000000000000000000000000000001', data: '0x1337' },
+      })
+
+      assert.equal(typeof estimate.nativeFee, 'bigint')
+      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
+      assert.equal(estimate.tokenTransferFee, undefined)
+    })
+
+    it('should return token transfer fee for message with tokenAmounts', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const amount = 1_000_000n
+      const estimate = await sepoliaChain.getTotalFeesEstimate({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: {
+          receiver: '0x0000000000000000000000000000000000000001',
+          tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount }],
+        },
+      })
+
+      assert.equal(typeof estimate.nativeFee, 'bigint')
+      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
+      assert.ok(estimate.tokenTransferFee, 'tokenTransferFee should be present')
+
+      const tf = estimate.tokenTransferFee
+      assert.equal(typeof tf.value, 'bigint')
+      assert.equal(typeof tf.bps, 'number')
+      assert.equal(tf.value, (amount * BigInt(tf.bps)) / 10_000n)
+
+      console.log('  getTotalFeesEstimate (default blockConfirmations):')
+      console.log(`    nativeFee = ${estimate.nativeFee}`)
+      console.log(`    value = ${tf.value} (${tf.bps} bps)`)
+    })
+
+    it('should return nativeFee only for pre-v2.0 lane with token transfer', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const amount = 1_000_000n
+      const estimate = await sepoliaChain.getTotalFeesEstimate({
+        router: SEPOLIA_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: {
+          receiver: '0x0000000000000000000000000000000000000001',
+          tokenAmounts: [{ token: CCIP_BNM_TOKEN_SEPOLIA, amount }],
+        },
+      })
+
+      assert.equal(typeof estimate.nativeFee, 'bigint')
+      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
+      assert.equal(
+        estimate.tokenTransferFee,
+        undefined,
+        'pre-v2.0 lane should not return tokenTransferFee',
+      )
+    })
+
+    it('should use custom BPS when blockConfirmations > 0', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const amount = 1_000_000n
+      const estimate = await sepoliaChain.getTotalFeesEstimate({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: {
+          receiver: '0x0000000000000000000000000000000000000001',
+          tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount }],
+          extraArgs: {
+            gasLimit: 200_000n,
+            blockConfirmations: 1,
+            ccvs: [],
+            ccvArgs: [],
+            executor: '',
+            executorArgs: '0x',
+            tokenReceiver: '',
+            tokenArgs: '0x',
+          },
+        },
+      })
+
+      assert.equal(typeof estimate.nativeFee, 'bigint')
+      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
+      assert.ok(estimate.tokenTransferFee, 'tokenTransferFee should be present')
+
+      const tf = estimate.tokenTransferFee
+      assert.equal(tf.value, (amount * BigInt(tf.bps)) / 10_000n)
+
+      console.log('  getTotalFeesEstimate (blockConfirmations=1):')
+      console.log(`    nativeFee = ${estimate.nativeFee}`)
+      console.log(`    value = ${tf.value} (${tf.bps} bps)`)
     })
   })
 

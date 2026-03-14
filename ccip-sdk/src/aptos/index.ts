@@ -17,6 +17,7 @@ import {
   type LogFilter,
   type TokenInfo,
   type TokenPoolRemote,
+  type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
@@ -678,7 +679,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /** {@inheritDoc Chain.getTokenPoolConfig} */
-  async getTokenPoolConfig(tokenPool: string): Promise<{
+  async getTokenPoolConfig(
+    tokenPool: string,
+    _feeOpts?: TokenTransferFeeOpts,
+  ): Promise<{
     token: string
     router: string
     typeAndVersion?: string

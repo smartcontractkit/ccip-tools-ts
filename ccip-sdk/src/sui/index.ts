@@ -12,6 +12,7 @@ import {
   type ChainStatic,
   type GetBalanceOpts,
   type LogFilter,
+  type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
 import { getCcipStateAddress, getOffRampForCcip } from './discovery.ts'
@@ -793,7 +794,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.getTokenPoolConfig} */
-  async getTokenPoolConfig(_tokenPool: string): Promise<never> {
+  async getTokenPoolConfig(_tokenPool: string, _feeOpts?: TokenTransferFeeOpts): Promise<never> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.getTokenPoolConfig'))
   }
 
