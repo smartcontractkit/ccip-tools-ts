@@ -10,7 +10,8 @@ import '../ton/index.ts' // register TON chain family for cross-family message d
 import { CCIPAPIClient } from '../api/index.ts'
 import { LaneFeature } from '../chain.ts'
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
-import { type ExecutionInput, ExecutionState, MessageStatus } from '../types.ts'
+import { getUsdcBurnFees } from '../offchain.ts'
+import { type ExecutionInput, ExecutionState, MessageStatus, NetworkType } from '../types.ts'
 import { interfaces } from './const.ts'
 import { FUJI_TO_SEPOLIA, SEPOLIA_TO_FUJI } from './fork.test.data.ts'
 import { EVMChain } from './index.ts'
@@ -1036,6 +1037,31 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.equal(destDomain.enabled, true, 'Base Sepolia domain should be enabled')
 
       console.log(`  Fuji (domain ${sourceDomain}) -> Base Sepolia (domain ${destDomainId})`)
+
+      // Extend: use the resolved domains to fetch burn fees from Circle's CCTP API
+      const burnFees = await getUsdcBurnFees(sourceDomain, destDomainId, NetworkType.Testnet)
+
+      assert.ok(Array.isArray(burnFees), 'burnFees should be an array')
+      assert.ok(burnFees.length > 0, 'should have at least one fee tier')
+
+      for (const tier of burnFees) {
+        assert.equal(typeof tier.finalityThreshold, 'number')
+        assert.equal(typeof tier.minimumFee, 'number')
+        assert.ok(tier.finalityThreshold >= 0, 'finalityThreshold should be non-negative')
+        assert.ok(tier.minimumFee >= 0, 'minimumFee should be non-negative')
+      }
+
+      // The fast tier (low finality threshold) should have a positive fee
+      const fastTier = burnFees.find((t) => t.finalityThreshold <= 1000)
+      // The standard tier (high finality threshold) typically has 0 bps
+      const standardTier = burnFees.find((t) => t.finalityThreshold > 1000)
+
+      console.log('  Circle API burn fee tiers:')
+      for (const tier of burnFees) {
+        console.log(`    threshold=${tier.finalityThreshold}, fee=${tier.minimumFee} bps`)
+      }
+      if (fastTier) console.log(`  Fast tier: ${fastTier.minimumFee} bps`)
+      if (standardTier) console.log(`  Standard tier: ${standardTier.minimumFee} bps`)
     })
 
     it('should discover CCTPVerifier when passed as ccv in extraArgs', async () => {
