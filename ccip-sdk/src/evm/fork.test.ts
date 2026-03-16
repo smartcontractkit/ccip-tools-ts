@@ -10,7 +10,7 @@ import '../ton/index.ts' // register TON chain family for cross-family message d
 import { CCIPAPIClient } from '../api/index.ts'
 import { LaneFeature } from '../chain.ts'
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
-import { getUsdcBurnFees } from '../offchain.ts'
+import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
 import { type ExecutionInput, ExecutionState, MessageStatus, NetworkType } from '../types.ts'
 import { interfaces } from './const.ts'
 import { FUJI_TO_SEPOLIA, SEPOLIA_TO_FUJI } from './fork.test.data.ts'
@@ -1051,10 +1051,10 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         assert.ok(tier.minimumFee >= 0, 'minimumFee should be non-negative')
       }
 
-      // The fast tier (low finality threshold) should have a positive fee
-      const fastTier = burnFees.find((t) => t.finalityThreshold <= 1000)
-      // The standard tier (high finality threshold) typically has 0 bps
-      const standardTier = burnFees.find((t) => t.finalityThreshold > 1000)
+      // The fast tier (pre-finality) should have a positive fee
+      const fastTier = burnFees.find((t) => t.finalityThreshold <= CCTP_FINALITY_FAST)
+      // The standard tier (full finality) typically has 0 bps
+      const standardTier = burnFees.find((t) => t.finalityThreshold > CCTP_FINALITY_FAST)
 
       console.log('  Circle API burn fee tiers:')
       for (const tier of burnFees) {

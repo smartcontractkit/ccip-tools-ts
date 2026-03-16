@@ -62,6 +62,24 @@ export async function getUsdcAttestation(
 }
 
 /**
+ * CCTP V2 finality tier identifiers returned by Circle's burn-fees API.
+ *
+ * These are **opaque tier IDs**, not block counts or durations.
+ * The CCTP V2 whitepaper (Section 8, Table 2) defines exactly two tiers today;
+ * additional tiers may be added in the future (the wide spacing between values
+ * is intentional to leave room).
+ *
+ * @see https://developers.circle.com/cctp/concepts/fees
+ * @see CCTP V2 Whitepaper, Section 8 — "Finality Levels"
+ */
+
+/** Fast / pre-finality tier: attested seconds after soft confirmation. */
+export const CCTP_FINALITY_FAST = 1000
+
+/** Standard / finalized tier: attested after full on-chain finality. */
+export const CCTP_FINALITY_STANDARD = 2000
+
+/**
  * Fetches USDC burn fee tiers from Circle's CCTP API.
  *
  * @param sourceDomain - CCTP source domain identifier

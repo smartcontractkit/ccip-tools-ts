@@ -63,7 +63,7 @@ import {
 } from '../errors/index.ts'
 import type { ExtraArgs, GenericExtraArgsV3 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
-import { getUsdcBurnFees } from '../offchain.ts'
+import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type CCIPExecution,
@@ -1185,7 +1185,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       )
       const fast = blockConfirmations > 0
       const tier = burnFees.find((t) =>
-        fast ? t.finalityThreshold <= 1000 : t.finalityThreshold > 1000,
+        fast
+          ? t.finalityThreshold <= CCTP_FINALITY_FAST
+          : t.finalityThreshold > CCTP_FINALITY_FAST,
       )
       if (tier && tier.minimumFee > 0) {
         return {
