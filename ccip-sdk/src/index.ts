@@ -56,7 +56,7 @@ export {
 } from './extra-args.ts'
 export { estimateReceiveExecution } from './gas.ts'
 export { CCTP_FINALITY_FAST, CCTP_FINALITY_STANDARD, getOffchainTokenData } from './offchain.ts'
-export { decodeMessage, getMessagesForSender, sourceToDestTokenAddresses } from './requests.ts'
+export { decodeMessage, sourceToDestTokenAddresses } from './requests.ts'
 export {
   type CCIPExecution,
   type CCIPMessage,

@@ -6,13 +6,7 @@ import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 import './index.ts' // Import to ensure chains are loaded
 import { type LogFilter, Chain } from './chain.ts'
 import type { GenericExtraArgsV3, SVMExtraArgsV1 } from './extra-args.ts'
-import {
-  decodeMessage,
-  getMessageById,
-  getMessagesForSender,
-  getMessagesInBatch,
-  getMessagesInTx,
-} from './requests.ts'
+import { decodeMessage, getMessageById, getMessagesInBatch, getMessagesInTx } from './requests.ts'
 import { SolanaChain } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
 import {
@@ -416,55 +410,6 @@ describe('getMessagesInBatch', () => {
         }),
       /Could not find all messages in batch/,
     )
-  })
-})
-
-describe('getMessagesForSender', () => {
-  it('should yield requests for a sender', async () => {
-    const sender = '0x0000000000000000000000000000000000000045'
-    const someOtherMessage = mockedMessage(18)
-    someOtherMessage.sender = '0xUnknownSender'
-
-    mockedChain.getLogs.mock.mockImplementationOnce((_opts: LogFilter) =>
-      (async function* () {
-        yield {
-          address: rampAddress,
-          topics: [topic0],
-          data: mockedMessage(2),
-          blockNumber: 12000,
-          transactionHash: '0x123',
-          index: 0,
-        } as ChainLog
-        yield {
-          address: rampAddress,
-          topics: [topic0],
-          data: someOtherMessage,
-          blockNumber: 12001,
-          transactionHash: '0x124',
-          index: 0,
-        } as ChainLog
-        yield {
-          address: rampAddress,
-          topics: [topic0],
-          data: mockedMessage(3),
-          blockNumber: 12002,
-          transactionHash: '0x125',
-          index: 0,
-        } as ChainLog
-      })(),
-    )
-
-    const res: Omit<CCIPRequest, 'tx' | 'timestamp'>[] = []
-    const generator = getMessagesForSender(mockedChain as unknown as Chain, sender, {
-      address: rampAddress,
-      startBlock: 11,
-    })
-
-    for await (const req of generator) {
-      res.push(req)
-    }
-
-    assert.equal(res.length, 2) // Only messages with matching sender
   })
 })
 
