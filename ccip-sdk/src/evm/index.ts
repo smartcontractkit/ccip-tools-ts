@@ -37,7 +37,6 @@ import {
   type TokenTransferFeeConfig,
   type TokenTransferFeeOpts,
   type TotalFeesEstimate,
-  type UsdcBurnFeeTier,
   Chain,
   LaneFeature,
 } from '../chain.ts'
@@ -1092,22 +1091,37 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       this.detectUsdcPool(poolAddress, this.network.chainSelector, opts.destChainSelector),
     ])
 
-    // Fetch USDC burn fees from Circle API if this is a USDC pool
-    let usdcBurnFees: UsdcBurnFeeTier[] | undefined
+    // USDC path: use Circle CCTP burn fees
     if (usdcDomains) {
       try {
-        usdcBurnFees = await getUsdcBurnFees(
+        const burnFees = await getUsdcBurnFees(
           usdcDomains.sourceDomain,
           usdcDomains.destDomain,
           this.network.networkType,
         )
+        const fast = blockConfirmations > 0
+        const tier = burnFees.find((t) =>
+          fast ? t.finalityThreshold <= 1000 : t.finalityThreshold > 1000,
+        )
+        if (tier && tier.minimumFee > 0) {
+          return {
+            nativeFee,
+            tokenTransferFee: {
+              value: (BigInt(amount) * BigInt(tier.minimumFee)) / 10_000n,
+              bps: tier.minimumFee,
+            },
+          }
+        }
+        return { nativeFee }
       } catch (err) {
         this.logger.warn('Failed to fetch USDC burn fees from Circle API:', err)
+        return { nativeFee }
       }
     }
 
+    // Non-USDC path: use on-chain tokenTransferFeeConfig
     if (!tokenTransferFeeConfig || !tokenTransferFeeConfig.isEnabled) {
-      return { nativeFee, ...(usdcBurnFees && { usdcBurnFees }) }
+      return { nativeFee }
     }
 
     const useCustom = blockConfirmations > 0
@@ -1121,7 +1135,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         value: (BigInt(amount) * BigInt(bps)) / 10_000n,
         bps,
       },
-      ...(usdcBurnFees && { usdcBurnFees }),
     }
   }
 

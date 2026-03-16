@@ -214,18 +214,6 @@ export type TotalFeesEstimate = {
   nativeFee: bigint
   /** Token transfer fee, present only when the message includes a token transfer. */
   tokenTransferFee?: TokenTransferFee
-  /** USDC CCTP burn fee tiers from Circle API, present only for USDC transfers. */
-  usdcBurnFees?: UsdcBurnFeeTier[]
-}
-
-/**
- * A single fee tier returned by Circle's CCTP burn fees API.
- */
-export type UsdcBurnFeeTier = {
-  /** Number of block confirmations for this fee tier. */
-  finalityThreshold: number
-  /** Fee in basis points (1 = 0.01%). */
-  minimumFee: number
 }
 
 /**
