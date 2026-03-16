@@ -1621,7 +1621,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * Returns two components:
    * - **ccipFee**: from `Router.getFee()`, denominated in the message's
-   *   `feeToken` (native token when feeToken is omitted, all CCIP versions).
+   *   `feeToken` (native token if omitted). Includes gas, DON costs, and
+   *   FeeQuoter-level token transfer overhead (all CCIP versions).
    * - **tokenTransferFee**: pool-level BPS fee deducted from the transferred
    *   token amount (v2.0+ only). The recipient receives
    *   `amount - feeDeducted` on the destination chain. Absent on pre-v2.0
