@@ -107,7 +107,6 @@ import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
 import type TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
 import {
   CCV_INDEXER_URL,
-  UsdcTokenPoolABI,
   VersionedContractABI,
   commitsFragments,
   interfaces,
@@ -1024,29 +1023,106 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Detect whether a token pool is a USDC/CCTP pool by calling getDomain().
-   * Returns source and dest CCTP domain IDs if the pool supports it, undefined otherwise.
+   * Detect whether a token pool is a USDC/CCTP pool via typeAndVersion, then resolve
+   * the CCTPVerifier address and fetch source/dest CCTP domain IDs.
+   *
+   * @param poolAddress - The token pool address to check.
+   * @param destChainSelector - Destination chain selector for getDomain().
+   * @param ccvs - Cross-chain verifier addresses from extraArgs (fallback for verifier discovery).
+   * @returns Source and dest CCTP domain IDs, or undefined if not a USDC pool.
    */
-  private async detectUsdcPool(
+  private async detectUsdcDomains(
     poolAddress: string,
-    sourceChainSelector: bigint,
     destChainSelector: bigint,
+    ccvs: string[],
   ): Promise<{ sourceDomain: number; destDomain: number } | undefined> {
-    const contract = new Contract(poolAddress, UsdcTokenPoolABI, this.provider)
-    const getDomain = contract.getFunction('getDomain')
+    // 1. Check if pool is USDCTokenPoolProxy
+    let poolType: string
     try {
-      const [sourceDomainResult, destDomainResult] = (await Promise.all([
-        getDomain(sourceChainSelector),
-        getDomain(destChainSelector),
-      ])) as [{ domainIdentifier: bigint }, { domainIdentifier: bigint }]
+      ;[poolType] = await this.typeAndVersion(poolAddress)
+    } catch {
+      return undefined
+    }
+    if (poolType !== 'USDCTokenPoolProxy') return undefined
+
+    // 2. Find CCTPVerifier address
+    let verifierAddress: string | undefined
+
+    // 2a. Try pool's getStaticConfig (returns resolver/verifier address)
+    try {
+      const proxy = new Contract(poolAddress, interfaces.USDCTokenPoolProxy_v2_0, this.provider)
+      const config = (await proxy.getFunction('getStaticConfig')()) as {
+        cctpVerifier: string
+      }
+      const candidate = config.cctpVerifier
+      if (candidate && candidate !== ZeroAddress) {
+        verifierAddress = await this.resolveVerifier(candidate, destChainSelector)
+      }
+    } catch {
+      /* proxy may not be initialized */
+    }
+
+    // 2b. Fall back to scanning ccvs from extraArgs
+    if (!verifierAddress) {
+      for (const ccv of ccvs) {
+        if (!ccv) continue
+        try {
+          const resolved = await this.resolveVerifier(ccv, destChainSelector)
+          if (resolved) {
+            verifierAddress = resolved
+            break
+          }
+        } catch {
+          /* not a valid contract */
+        }
+      }
+    }
+
+    if (!verifierAddress) return undefined
+
+    // 3. Fetch source and dest CCTP domain IDs from verifier
+    try {
+      const verifier = new Contract(verifierAddress, interfaces.CCTPVerifier_v2_0, this.provider)
+      const [verifierConfig, destDomainResult] = (await Promise.all([
+        verifier.getFunction('getStaticConfig')(),
+        verifier.getFunction('getDomain')(destChainSelector),
+      ])) as [{ localDomainIdentifier: bigint }, { domainIdentifier: bigint }]
       return {
-        sourceDomain: Number(sourceDomainResult.domainIdentifier),
+        sourceDomain: Number(verifierConfig.localDomainIdentifier),
         destDomain: Number(destDomainResult.domainIdentifier),
       }
     } catch (err) {
       if (isError(err, 'CALL_EXCEPTION')) return undefined
       throw CCIPError.from(err)
     }
+  }
+
+  /**
+   * Given a candidate address, check if it's a CCTPVerifier or VersionedVerifierResolver
+   * and return the actual verifier address (resolving through the resolver if needed).
+   */
+  private async resolveVerifier(
+    candidate: string,
+    destChainSelector: bigint,
+  ): Promise<string | undefined> {
+    try {
+      const [candidateType] = await this.typeAndVersion(candidate)
+      if (candidateType === 'VersionedVerifierResolver') {
+        const resolver = new Contract(
+          candidate,
+          interfaces.VersionedVerifierResolver_v2_0,
+          this.provider,
+        )
+        return (await resolver.getFunction('getOutboundImplementation')(
+          destChainSelector,
+          '0x',
+        )) as string
+      }
+      if (candidateType === 'CCTPVerifier') return candidate
+    } catch {
+      /* not a valid versioned contract */
+    }
+    return undefined
   }
 
   /** {@inheritDoc Chain.getTotalFeesEstimate} */
@@ -1088,7 +1164,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         blockConfirmationsRequested: blockConfirmations,
         tokenArgs,
       }),
-      this.detectUsdcPool(poolAddress, this.network.chainSelector, opts.destChainSelector),
+      this.detectUsdcDomains(
+        poolAddress,
+        opts.destChainSelector,
+        extraArgs && 'ccvs' in extraArgs ? (extraArgs as GenericExtraArgsV3).ccvs : [],
+      ),
     ])
 
     // USDC path: use Circle CCTP burn fees

@@ -68,6 +68,8 @@ const FTF_ENABLED_POOL_SEPOLIA = '0x161d23c30b5ae2899c3d4d969ba2b82026f3954a'
 const FTF_ENABLED_POOL_FUJI = '0xc9346f85a04a47188710d8830127a2490959cbd9'
 // Token served by FTF_ENABLED_POOL_SEPOLIA — works with V3 extra args on Sepolia→Fuji v2.0 lane
 const FTF_TOKEN_SEPOLIA = '0x6b039E8bDB3F92093AdC417367379089be7A80B1'
+// Circle's official testnet USDC on Sepolia — served by USDCTokenPoolCCTPV2
+const USDC_TOKEN_SEPOLIA = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'
 
 // ── execute constants ──
 
@@ -984,6 +986,75 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       console.log('  getTotalFeesEstimate (blockConfirmations=1):')
       console.log(`    nativeFee = ${estimate.nativeFee}`)
       console.log(`    value = ${tf.value} (${tf.bps} bps)`)
+    })
+  })
+
+  describe('getTotalFeesEstimate USDC', () => {
+    it('should return nativeFee for USDC standard transfer (blockConfirmations=0)', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const amount = 1_000_000n
+      const estimate = await sepoliaChain.getTotalFeesEstimate({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: {
+          receiver: '0x0000000000000000000000000000000000000001',
+          tokenAmounts: [{ token: USDC_TOKEN_SEPOLIA, amount }],
+        },
+      })
+
+      assert.equal(typeof estimate.nativeFee, 'bigint')
+      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
+
+      // Standard transfers (finalityThreshold > 1000) typically have 0 bps
+      if (estimate.tokenTransferFee) {
+        const tf = estimate.tokenTransferFee
+        assert.equal(typeof tf.bps, 'number')
+        assert.equal(tf.value, (amount * BigInt(tf.bps)) / 10_000n)
+        console.log(
+          `  USDC standard: nativeFee=${estimate.nativeFee}, fee=${tf.value} (${tf.bps} bps)`,
+        )
+      } else {
+        console.log(
+          `  USDC standard: nativeFee=${estimate.nativeFee}, no token transfer fee (0 bps)`,
+        )
+      }
+    })
+
+    it('should return tokenTransferFee for USDC fast transfer (blockConfirmations > 0)', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const amount = 1_000_000n
+      const estimate = await sepoliaChain.getTotalFeesEstimate({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: {
+          receiver: '0x0000000000000000000000000000000000000001',
+          tokenAmounts: [{ token: USDC_TOKEN_SEPOLIA, amount }],
+          extraArgs: {
+            gasLimit: 200_000n,
+            blockConfirmations: 1,
+            ccvs: [],
+            ccvArgs: [],
+            executor: '',
+            executorArgs: '0x',
+            tokenReceiver: '',
+            tokenArgs: '0x',
+          },
+        },
+      })
+
+      assert.equal(typeof estimate.nativeFee, 'bigint')
+      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
+      assert.ok(estimate.tokenTransferFee, 'fast USDC transfer should have tokenTransferFee')
+
+      const tf = estimate.tokenTransferFee
+      assert.equal(typeof tf.value, 'bigint')
+      assert.equal(typeof tf.bps, 'number')
+      assert.ok(tf.bps > 0, 'fast transfer BPS should be positive')
+      assert.equal(tf.value, (amount * BigInt(tf.bps)) / 10_000n)
+
+      console.log(`  USDC fast: nativeFee=${estimate.nativeFee}, fee=${tf.value} (${tf.bps} bps)`)
     })
   })
 
