@@ -1178,30 +1178,25 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     // USDC path: use Circle CCTP burn fees
     if (usdcDomains) {
-      try {
-        const burnFees = await getUsdcBurnFees(
-          usdcDomains.sourceDomain,
-          usdcDomains.destDomain,
-          this.network.networkType,
-        )
-        const fast = blockConfirmations > 0
-        const tier = burnFees.find((t) =>
-          fast ? t.finalityThreshold <= 1000 : t.finalityThreshold > 1000,
-        )
-        if (tier && tier.minimumFee > 0) {
-          return {
-            ccipFee,
-            tokenTransferFee: {
-              feeDeducted: (BigInt(amount) * BigInt(tier.minimumFee)) / 10_000n,
-              bps: tier.minimumFee,
-            },
-          }
+      const burnFees = await getUsdcBurnFees(
+        usdcDomains.sourceDomain,
+        usdcDomains.destDomain,
+        this.network.networkType,
+      )
+      const fast = blockConfirmations > 0
+      const tier = burnFees.find((t) =>
+        fast ? t.finalityThreshold <= 1000 : t.finalityThreshold > 1000,
+      )
+      if (tier && tier.minimumFee > 0) {
+        return {
+          ccipFee,
+          tokenTransferFee: {
+            feeDeducted: (BigInt(amount) * BigInt(tier.minimumFee)) / 10_000n,
+            bps: tier.minimumFee,
+          },
         }
-        return { ccipFee }
-      } catch (err) {
-        this.logger.warn('Failed to fetch USDC burn fees from Circle API:', err)
-        return { ccipFee }
       }
+      return { ccipFee }
     }
 
     // Non-USDC path: use on-chain tokenTransferFeeConfig
