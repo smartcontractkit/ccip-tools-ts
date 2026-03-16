@@ -75,7 +75,7 @@ function assertNoUnknownFields(
   allowed: Set<string>,
   variant: string,
 ): void {
-  const unknown = Object.keys(extraArgs).filter((k) => !allowed.has(k))
+  const unknown = Object.keys(extraArgs).filter((k) => k !== '_tag' && !allowed.has(k))
   if (unknown.length)
     throw new CCIPArgumentInvalidError(
       'extraArgs',

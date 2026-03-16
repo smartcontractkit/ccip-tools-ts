@@ -1,4 +1,4 @@
-import { type BytesLike, dataLength, dataSlice, getBytes, toNumber } from 'ethers'
+import { type BytesLike, dataLength, dataSlice, toNumber } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import {
@@ -8,7 +8,7 @@ import {
 } from './errors/index.ts'
 import { parseSourceTokenData } from './evm/messages.ts'
 import { type CCIPRequest, type OffchainTokenData, type WithLogger, NetworkType } from './types.ts'
-import { networkInfo } from './utils.ts'
+import { getDataBytes, networkInfo } from './utils.ts'
 
 const CIRCLE_API_URL = {
   mainnet: 'https://iris-api.circle.com',
@@ -122,7 +122,7 @@ export async function getOffchainTokenData(
   const { networkType } = networkInfo(request.message.sourceChainSelector)
 
   function looksUsdcData(extraData: BytesLike) {
-    if (dataLength(extraData) !== 64) return
+    if (getDataBytes(extraData).length !== 64) return
     // USDCTokenPool's extraData is a packed `SourceTokenDataPayloadV1{uint64 nonce, uint32 sourceDomain}`,
     // which we need to query CCTPv2 (by sourceDomain and txHash) and to filter by nonce among messages,
     // if more than one in tx
@@ -139,11 +139,9 @@ export async function getOffchainTokenData(
 
   function looksLbtcData(extraData: BytesLike) {
     // LBTC returns `message_hash`/`payloadHash` directly as `bytes32 extraData`
-    if (
-      dataLength(extraData) === 32 &&
-      getBytes(extraData, 'extraData').filter(Boolean).length > 20 // looks like a hash
-    )
-      return true
+    const bytes = getDataBytes(extraData)
+    // looks like a hash
+    if (bytes.length === 32 && bytes.filter(Boolean).length > 20) return true
   }
 
   return Promise.all(

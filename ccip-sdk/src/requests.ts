@@ -197,6 +197,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
  */
 export function buildMessageForDest(message: MessageInput, dest: ChainFamily): AnyMessage {
   const chain = supportedChains[dest] ?? Chain
+  if (message.extraArgs && '_tag' in message.extraArgs) delete message.extraArgs._tag
   return chain.buildMessageForDest(message)
 }
 

@@ -976,11 +976,24 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (version < CCIPVersion.V1_6)
       throw new CCIPVersionFeatureUnavailableError('feeQuoter', version, 'v1.6')
 
+    const isOnRamp = type.includes('OnRamp')
     const contract = new Contract(
       address,
-      type.includes('OnRamp') ? interfaces.OnRamp_v1_6 : interfaces.OffRamp_v1_6,
+      version < CCIPVersion.V2_0
+        ? isOnRamp
+          ? interfaces.OnRamp_v1_6
+          : interfaces.OffRamp_v1_6
+        : isOnRamp
+          ? interfaces.OnRamp_v2_0
+          : interfaces.OffRamp_v2_0,
       this.provider,
-    ) as unknown as TypedContract<typeof OnRamp_1_6_ABI | typeof OffRamp_1_6_ABI>
+    ) as unknown as TypedContract<
+      | typeof OnRamp_1_6_ABI
+      | typeof OffRamp_1_6_ABI
+      | typeof OnRamp_2_0_ABI
+      | typeof OffRamp_2_0_ABI
+    >
+
     const { feeQuoter } = await contract.getDynamicConfig()
     return feeQuoter as string
   }
