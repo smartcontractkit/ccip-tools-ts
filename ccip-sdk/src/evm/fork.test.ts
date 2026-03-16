@@ -68,9 +68,6 @@ const FTF_ENABLED_POOL_SEPOLIA = '0x161d23c30b5ae2899c3d4d969ba2b82026f3954a'
 const FTF_ENABLED_POOL_FUJI = '0xc9346f85a04a47188710d8830127a2490959cbd9'
 // Token served by FTF_ENABLED_POOL_SEPOLIA — works with V3 extra args on Sepolia→Fuji v2.0 lane
 const FTF_TOKEN_SEPOLIA = '0x6b039E8bDB3F92093AdC417367379089be7A80B1'
-// Circle's official testnet USDC on Sepolia — served by USDCTokenPoolCCTPV2
-const USDC_TOKEN_SEPOLIA = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'
-
 // ── execute constants ──
 
 // Known message stuck in FAILED state on sepolia, sent from fuji (v1.6)
@@ -989,72 +986,88 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     })
   })
 
-  describe('getTotalFeesEstimate USDC', () => {
-    it('should return nativeFee for USDC standard transfer (blockConfirmations=0)', async () => {
-      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+  // ── USDC / CCTP detection tests ──
+  // These test the CCTPVerifier-based USDC detection flow directly.
+  // Limitations: on staging testnet the USDCTokenPoolProxy is deployed but not fully
+  // initialized (getStaticConfig/getToken revert), so we can't test end-to-end through
+  // getTotalFeesEstimate. Instead we exercise the detection building blocks:
+  //   1. Pool typeAndVersion identification
+  //   2. CCTPVerifier discovery via ccvs (extraArgs fallback path)
+  //   3. CCTP domain resolution from the verifier
+  describe('USDC / CCTP detection', () => {
+    // CCTPVerifier on Fuji — known working, returns domain IDs
+    const CCTP_VERIFIER_FUJI = '0x79DA0F0c54876C5c601877e335B92BD0E23ce1aA'
+    // USDCTokenPoolProxy on Fuji — deployed but proxy not initialized
+    const USDC_POOL_PROXY_FUJI = '0x53aAAA2b52D6bc2DbC7BC290f686B47799F61748'
+    const BASE_SEPOLIA_SELECTOR = 10344971235874465080n
 
-      const amount = 1_000_000n
-      const estimate = await sepoliaChain.getTotalFeesEstimate({
-        router: SEPOLIA_V2_0_ROUTER,
-        destChainSelector: FUJI_SELECTOR,
-        message: {
-          receiver: '0x0000000000000000000000000000000000000001',
-          tokenAmounts: [{ token: USDC_TOKEN_SEPOLIA, amount }],
-        },
-      })
+    it('should identify USDCTokenPoolProxy via typeAndVersion', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
 
-      assert.equal(typeof estimate.nativeFee, 'bigint')
-      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
-
-      // Standard transfers (finalityThreshold > 1000) typically have 0 bps
-      if (estimate.tokenTransferFee) {
-        const tf = estimate.tokenTransferFee
-        assert.equal(typeof tf.bps, 'number')
-        assert.equal(tf.value, (amount * BigInt(tf.bps)) / 10_000n)
-        console.log(
-          `  USDC standard: nativeFee=${estimate.nativeFee}, fee=${tf.value} (${tf.bps} bps)`,
-        )
-      } else {
-        console.log(
-          `  USDC standard: nativeFee=${estimate.nativeFee}, no token transfer fee (0 bps)`,
-        )
-      }
+      const [type, , full] = await fujiChain.typeAndVersion(USDC_POOL_PROXY_FUJI)
+      assert.equal(type, 'USDCTokenPoolProxy')
+      console.log(`  Pool typeAndVersion: ${full}`)
     })
 
-    it('should return tokenTransferFee for USDC fast transfer (blockConfirmations > 0)', async () => {
-      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+    it('should identify CCTPVerifier via typeAndVersion', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
 
-      const amount = 1_000_000n
-      const estimate = await sepoliaChain.getTotalFeesEstimate({
-        router: SEPOLIA_V2_0_ROUTER,
-        destChainSelector: FUJI_SELECTOR,
-        message: {
-          receiver: '0x0000000000000000000000000000000000000001',
-          tokenAmounts: [{ token: USDC_TOKEN_SEPOLIA, amount }],
-          extraArgs: {
-            gasLimit: 200_000n,
-            blockConfirmations: 1,
-            ccvs: [],
-            ccvArgs: [],
-            executor: '',
-            executorArgs: '0x',
-            tokenReceiver: '',
-            tokenArgs: '0x',
-          },
-        },
-      })
+      const [type, , full] = await fujiChain.typeAndVersion(CCTP_VERIFIER_FUJI)
+      assert.equal(type, 'CCTPVerifier')
+      console.log(`  Verifier typeAndVersion: ${full}`)
+    })
 
-      assert.equal(typeof estimate.nativeFee, 'bigint')
-      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
-      assert.ok(estimate.tokenTransferFee, 'fast USDC transfer should have tokenTransferFee')
+    it('should resolve CCTP domains from CCTPVerifier', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
 
-      const tf = estimate.tokenTransferFee
-      assert.equal(typeof tf.value, 'bigint')
-      assert.equal(typeof tf.bps, 'number')
-      assert.ok(tf.bps > 0, 'fast transfer BPS should be positive')
-      assert.equal(tf.value, (amount * BigInt(tf.bps)) / 10_000n)
+      const provider = new JsonRpcProvider(FUJI_RPC)
+      const verifier = new Contract(CCTP_VERIFIER_FUJI, interfaces.CCTPVerifier_v2_0, provider)
 
-      console.log(`  USDC fast: nativeFee=${estimate.nativeFee}, fee=${tf.value} (${tf.bps} bps)`)
+      const [staticConfig, destDomain] = (await Promise.all([
+        verifier.getFunction('getStaticConfig')(),
+        verifier.getFunction('getDomain')(BASE_SEPOLIA_SELECTOR),
+      ])) as [{ localDomainIdentifier: bigint }, { domainIdentifier: bigint; enabled: boolean }]
+
+      const sourceDomain = Number(staticConfig.localDomainIdentifier)
+      const destDomainId = Number(destDomain.domainIdentifier)
+
+      assert.equal(sourceDomain, 1, 'Fuji CCTP domain should be 1')
+      assert.equal(destDomainId, 6, 'Base Sepolia CCTP domain should be 6')
+      assert.equal(destDomain.enabled, true, 'Base Sepolia domain should be enabled')
+
+      console.log(`  Fuji (domain ${sourceDomain}) -> Base Sepolia (domain ${destDomainId})`)
+    })
+
+    it('should discover CCTPVerifier when passed as ccv in extraArgs', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      // Simulate the ccvs scanning loop from detectUsdcDomains:
+      // given the CCTPVerifier address in ccvs, verify we can identify and use it
+      const ccvs = [CCTP_VERIFIER_FUJI]
+      let verifierAddress: string | undefined
+
+      for (const ccv of ccvs) {
+        const [ccvType] = await fujiChain.typeAndVersion(ccv)
+        if (ccvType === 'CCTPVerifier') {
+          verifierAddress = ccv
+          break
+        }
+      }
+
+      assert.ok(verifierAddress, 'should find CCTPVerifier in ccvs')
+      assert.equal(verifierAddress, CCTP_VERIFIER_FUJI)
+
+      // Now resolve domains from the discovered verifier
+      const provider = new JsonRpcProvider(FUJI_RPC)
+      const verifier = new Contract(verifierAddress, interfaces.CCTPVerifier_v2_0, provider)
+      const destDomain = (await verifier.getFunction('getDomain')(BASE_SEPOLIA_SELECTOR)) as {
+        domainIdentifier: bigint
+      }
+
+      assert.equal(Number(destDomain.domainIdentifier), 6)
+      console.log(
+        `  Discovered verifier ${verifierAddress.slice(0, 10)}..., dest domain: ${Number(destDomain.domainIdentifier)}`,
+      )
     })
   })
 
