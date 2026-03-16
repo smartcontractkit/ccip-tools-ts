@@ -32,6 +32,25 @@ const customErrors = [
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 
+export const UsdcTokenPoolABI = [
+  {
+    type: 'function',
+    name: 'getDomain',
+    inputs: [{ name: 'chainSelector', type: 'uint64', internalType: 'uint64' }],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple',
+        components: [
+          { name: 'allowedCaller', type: 'bytes32', internalType: 'bytes32' },
+          { name: 'domainIdentifier', type: 'uint32', internalType: 'uint32' },
+        ],
+      },
+    ],
+    stateMutability: 'view',
+  },
+] as const
+
 export const interfaces = {
   Router: new Interface(Router_ABI),
   Token: new Interface(Token_ABI),

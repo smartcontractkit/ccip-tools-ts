@@ -5,6 +5,7 @@ import {
   CCIPLbtcAttestationNotApprovedError,
   CCIPLbtcAttestationNotFoundError,
   CCIPUsdcAttestationError,
+  CCIPUsdcBurnFeesError,
 } from './errors/index.ts'
 import { parseSourceTokenData } from './evm/messages.ts'
 import { type CCIPRequest, type OffchainTokenData, type WithLogger, NetworkType } from './types.ts'
@@ -58,6 +59,28 @@ export async function getUsdcAttestation(
   }
   if (!att?.message) throw new CCIPUsdcAttestationError(txHash, json, { context: opts })
   return att
+}
+
+/**
+ * Fetches USDC burn fee tiers from Circle's CCTP API.
+ *
+ * @param sourceDomain - CCTP source domain identifier
+ * @param destDomain - CCTP destination domain identifier
+ * @param networkType - network type (mainnet or testnet)
+ * @returns Array of fee tiers with finality thresholds and BPS fees
+ */
+export async function getUsdcBurnFees(
+  sourceDomain: number,
+  destDomain: number,
+  networkType: NetworkType,
+): Promise<{ finalityThreshold: number; minimumFee: number }[]> {
+  const baseUrl =
+    networkType === NetworkType.Mainnet ? CIRCLE_API_URL.mainnet : CIRCLE_API_URL.testnet
+  const res = await fetch(`${baseUrl}/v2/burn/USDC/fees/${sourceDomain}/${destDomain}`)
+  if (!res.ok) {
+    throw new CCIPUsdcBurnFeesError(sourceDomain, destDomain, res.status)
+  }
+  return (await res.json()) as { finalityThreshold: number; minimumFee: number }[]
 }
 
 const LOMBARD_API_URL = {

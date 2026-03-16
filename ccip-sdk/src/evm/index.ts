@@ -37,6 +37,7 @@ import {
   type TokenTransferFeeConfig,
   type TokenTransferFeeOpts,
   type TotalFeesEstimate,
+  type UsdcBurnFeeTier,
   Chain,
   LaneFeature,
 } from '../chain.ts'
@@ -63,6 +64,7 @@ import {
 } from '../errors/index.ts'
 import type { ExtraArgs, GenericExtraArgsV3 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { getUsdcBurnFees } from '../offchain.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type CCIPExecution,
@@ -106,6 +108,7 @@ import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
 import type TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
 import {
   CCV_INDEXER_URL,
+  UsdcTokenPoolABI,
   VersionedContractABI,
   commitsFragments,
   interfaces,
@@ -1021,6 +1024,32 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     })
   }
 
+  /**
+   * Detect whether a token pool is a USDC/CCTP pool by calling getDomain().
+   * Returns source and dest CCTP domain IDs if the pool supports it, undefined otherwise.
+   */
+  private async detectUsdcPool(
+    poolAddress: string,
+    sourceChainSelector: bigint,
+    destChainSelector: bigint,
+  ): Promise<{ sourceDomain: number; destDomain: number } | undefined> {
+    const contract = new Contract(poolAddress, UsdcTokenPoolABI, this.provider)
+    const getDomain = contract.getFunction('getDomain')
+    try {
+      const [sourceDomainResult, destDomainResult] = (await Promise.all([
+        getDomain(sourceChainSelector),
+        getDomain(destChainSelector),
+      ])) as [{ domainIdentifier: bigint }, { domainIdentifier: bigint }]
+      return {
+        sourceDomain: Number(sourceDomainResult.domainIdentifier),
+        destDomain: Number(destDomainResult.domainIdentifier),
+      }
+    } catch (err) {
+      if (isError(err, 'CALL_EXCEPTION')) return undefined
+      throw CCIPError.from(err)
+    }
+  }
+
   /** {@inheritDoc Chain.getTotalFeesEstimate} */
   override async getTotalFeesEstimate(
     opts: Parameters<Chain['getTotalFeesEstimate']>[0],
@@ -1053,17 +1082,32 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       token,
     )) as string
 
-    const [nativeFee, { tokenTransferFeeConfig }] = await Promise.all([
+    const [nativeFee, { tokenTransferFeeConfig }, usdcDomains] = await Promise.all([
       nativeFeeP,
       this.getTokenPoolConfig(poolAddress, {
         destChainSelector: opts.destChainSelector,
         blockConfirmationsRequested: blockConfirmations,
         tokenArgs,
       }),
+      this.detectUsdcPool(poolAddress, this.network.chainSelector, opts.destChainSelector),
     ])
 
+    // Fetch USDC burn fees from Circle API if this is a USDC pool
+    let usdcBurnFees: UsdcBurnFeeTier[] | undefined
+    if (usdcDomains) {
+      try {
+        usdcBurnFees = await getUsdcBurnFees(
+          usdcDomains.sourceDomain,
+          usdcDomains.destDomain,
+          this.network.networkType,
+        )
+      } catch (err) {
+        this.logger.warn('Failed to fetch USDC burn fees from Circle API:', err)
+      }
+    }
+
     if (!tokenTransferFeeConfig || !tokenTransferFeeConfig.isEnabled) {
-      return { nativeFee }
+      return { nativeFee, ...(usdcBurnFees && { usdcBurnFees }) }
     }
 
     const useCustom = blockConfirmations > 0
@@ -1077,6 +1121,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         value: (BigInt(amount) * BigInt(bps)) / 10_000n,
         bps,
       },
+      ...(usdcBurnFees && { usdcBurnFees }),
     }
   }
 
