@@ -985,6 +985,99 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       console.log(`    ccipFee = ${estimate.ccipFee}`)
       console.log(`    value = ${tf.feeDeducted} (${tf.bps} bps)`)
     })
+
+    // ── Historical message validation ──
+    // Fetches real testnet messages from the staging API to get their fee breakdowns,
+    // then runs preflight estimation with matching parameters and asserts the BPS
+    // values match. This validates that on-chain fee estimation agrees with observed
+    // historical behavior.
+    //
+    // TODO: once CCIPAPIClient exposes bpsFeeDetails from the API response, replace
+    // the raw fetch below with client.getMessageById() and read fees from the result.
+
+    const STAGING_API = 'https://api.ccip.cldev.cloud'
+
+    const HISTORICAL_MESSAGE_IDS = [
+      // Fuji → Sepolia, default finality (blockConfirmations=0), 0% BPS
+      '0x39dda11d8d8ccf35055825349ab8c1842587966389cb8200eb5b72830318f707',
+      // Fuji → Sepolia, custom finality (blockConfirmations=5), 1% BPS
+      '0x88bf551330e9767ac981582a3e7fac510b876a7038e38a633e32c63ac7dd0169',
+      // Sepolia → Fuji, default finality (blockConfirmations=0), 0% BPS
+      '0x2a6eeea60b80235cbd1e3ead45f6cd848374961831c21733170d7cb965514f31',
+      // Sepolia → Fuji, custom finality (blockConfirmations=1), 10% BPS
+      '0x42683f3a0efb956e881b3e9eec4e4161e32b09a98c680ee82219d011fcd9df1d',
+    ]
+
+    /** Resolve source chain selector to the matching fork chain + v2.0 router. */
+    function resolveChain(sourceSelector: string) {
+      if (sourceSelector === FUJI_SELECTOR.toString()) {
+        assert.ok(fujiChain, 'fuji chain should be initialized')
+        return { chain: fujiChain, router: FUJI_V2_0_ROUTER }
+      }
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+      return { chain: sepoliaChain, router: SEPOLIA_V2_0_ROUTER }
+    }
+
+    for (const messageId of HISTORICAL_MESSAGE_IDS) {
+      it(`preflight fee estimation should match API breakdown for ${messageId}`, async () => {
+        // Fetch raw message from staging API (includes bpsFeeDetails not yet
+        // exposed by CCIPAPIClient)
+        const url = `${STAGING_API}/v2/messages/${messageId}`
+        const res = await fetch(url)
+        assert.ok(res.ok, `API request failed: ${res.status} ${res.statusText}`)
+        const raw = (await res.json()) as Record<string, any>
+
+        const { chain, router } = resolveChain(raw.sourceNetworkInfo.chainSelector)
+        const destChainSelector = BigInt(raw.destNetworkInfo.chainSelector)
+        const token = raw.tokenAmounts[0].sourceTokenAddress as string
+        const blockConfirmations: number = raw.extraArgs?.blockConfirmations ?? 0
+
+        // Reconstruct original sent amount = post-fee amount + bps fee deducted
+        const bpsEntry = raw.fees?.bpsFeeDetails?.[0]
+        const apiBps: number = bpsEntry?.bps ?? 0
+        const apiFeeDeducted = BigInt(bpsEntry?.amount ?? '0')
+        const postFeeAmount = BigInt(raw.tokenAmounts[0].amount)
+        const originalAmount = postFeeAmount + apiFeeDeducted
+
+        console.log(`  [${messageId.slice(0, 10)}…] API: ${apiBps} bps, fee=${apiFeeDeducted}`)
+
+        // Build estimation request matching the historical message
+        const message: Parameters<typeof chain.getTotalFeesEstimate>[0]['message'] = {
+          receiver: '0x0000000000000000000000000000000000000001',
+          tokenAmounts: [{ token, amount: originalAmount }],
+        }
+        if (blockConfirmations > 0) {
+          message.extraArgs = {
+            gasLimit: 0n,
+            blockConfirmations,
+            ccvs: [],
+            ccvArgs: [],
+            executor: '',
+            executorArgs: '0x',
+            tokenReceiver: '',
+            tokenArgs: '0x',
+          }
+        }
+
+        const estimate = await chain.getTotalFeesEstimate({
+          router,
+          destChainSelector,
+          message,
+        })
+
+        assert.ok(estimate.ccipFee > 0n, 'ccipFee should be positive')
+
+        const estimatedBps = estimate.tokenTransferFee?.bps ?? 0
+        const estimatedFee = estimate.tokenTransferFee?.feeDeducted ?? 0n
+
+        console.log(
+          `  [${messageId.slice(0, 10)}…] Estimated: ${estimatedBps} bps, fee=${estimatedFee}`,
+        )
+
+        assert.equal(estimatedBps, apiBps, `BPS mismatch for ${messageId}`)
+        assert.equal(estimatedFee, apiFeeDeducted, `feeDeducted mismatch for ${messageId}`)
+      })
+    }
   })
 
   // ── USDC / CCTP detection tests ──
