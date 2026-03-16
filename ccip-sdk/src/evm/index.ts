@@ -1130,10 +1130,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     opts: Parameters<Chain['getTotalFeesEstimate']>[0],
   ): Promise<TotalFeesEstimate> {
     const tokenAmounts = opts.message.tokenAmounts
-    const nativeFeeP = this.getFee(opts)
+    const ccipFeeP = this.getFee(opts)
 
     if (!tokenAmounts?.length) {
-      return { nativeFee: await nativeFeeP }
+      return { ccipFee: await ccipFeeP }
     }
 
     const { token, amount } = tokenAmounts[0]!
@@ -1145,11 +1145,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (extraArgs && 'blockConfirmations' in extraArgs) {
       const v3 = extraArgs as GenericExtraArgsV3
       blockConfirmations = v3.blockConfirmations
-      tokenArgs = String(v3.tokenArgs)
+      tokenArgs = hexlify(v3.tokenArgs)
     }
 
-    // Resolve pool and fetch fee config in parallel with native fee
+    // Skip pool-level fee lookup for pre-v2.0 lanes
     const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
+    const [, version] = await this.typeAndVersion(onRamp)
+    if (version < CCIPVersion.V2_0) {
+      return { ccipFee: await ccipFeeP }
+    }
+
     const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, this.provider)
 
     const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
@@ -1157,8 +1162,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       token,
     )) as string
 
-    const [nativeFee, { tokenTransferFeeConfig }, usdcDomains] = await Promise.all([
-      nativeFeeP,
+    const [ccipFee, { tokenTransferFeeConfig }, usdcDomains] = await Promise.all([
+      ccipFeeP,
       this.getTokenPoolConfig(poolAddress, {
         destChainSelector: opts.destChainSelector,
         blockConfirmationsRequested: blockConfirmations,
@@ -1185,23 +1190,23 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         )
         if (tier && tier.minimumFee > 0) {
           return {
-            nativeFee,
+            ccipFee,
             tokenTransferFee: {
-              value: (BigInt(amount) * BigInt(tier.minimumFee)) / 10_000n,
+              feeDeducted: (BigInt(amount) * BigInt(tier.minimumFee)) / 10_000n,
               bps: tier.minimumFee,
             },
           }
         }
-        return { nativeFee }
+        return { ccipFee }
       } catch (err) {
         this.logger.warn('Failed to fetch USDC burn fees from Circle API:', err)
-        return { nativeFee }
+        return { ccipFee }
       }
     }
 
     // Non-USDC path: use on-chain tokenTransferFeeConfig
     if (!tokenTransferFeeConfig || !tokenTransferFeeConfig.isEnabled) {
-      return { nativeFee }
+      return { ccipFee }
     }
 
     const useCustom = blockConfirmations > 0
@@ -1210,9 +1215,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       : tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps
 
     return {
-      nativeFee,
+      ccipFee,
       tokenTransferFee: {
-        value: (BigInt(amount) * BigInt(bps)) / 10_000n,
+        feeDeducted: (BigInt(amount) * BigInt(bps)) / 10_000n,
         bps,
       },
     }

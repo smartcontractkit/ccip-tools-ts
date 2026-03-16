@@ -200,9 +200,10 @@ export type TokenInfo = {
  * Per-token transfer fee computed by {@link Chain.getTotalFeesEstimate}.
  */
 export type TokenTransferFee = {
-  /** Fee in token units: amount * bps / 10_000 */
-  value: bigint
-  /** The BPS rate applied. */
+  /** Amount deducted from the transferred token by the pool (amount * bps / 10_000).
+   *  The recipient receives `amount - feeDeducted` on the destination chain. */
+  feeDeducted: bigint
+  /** The BPS rate applied (basis points, where 10_000 = 100%). */
   bps: number
 }
 
@@ -210,14 +211,23 @@ export type TokenTransferFee = {
  * Total fees estimate returned by {@link Chain.getTotalFeesEstimate}.
  */
 export type TotalFeesEstimate = {
-  /** Native fee from Router.getFee (wei or native smallest unit). */
-  nativeFee: bigint
+  /** Fee from Router.getFee(), denominated in the message's feeToken
+   *  (native token when feeToken is omitted). */
+  ccipFee: bigint
   /** Token transfer fee, present only when the message includes a token transfer. */
   tokenTransferFee?: TokenTransferFee
 }
 
 /**
  * Token transfer fee configuration returned by TokenPool v2.0 contracts.
+ *
+ * @remarks
+ * Contains two fee dimensions per finality mode (default vs custom/FTF):
+ * - A flat USD surcharge (in cents) added to the CCIP fee via FeeQuoter
+ * - A BPS rate deducted directly from the transferred token amount by the pool
+ *
+ * "Default" fields apply when `blockConfirmations = 0` (standard finality).
+ * "Custom" fields apply when `blockConfirmations > 0` (Faster-Than-Finality).
  */
 export type TokenTransferFeeConfig = {
   destGasOverhead: number
@@ -1607,29 +1617,19 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
-   * Estimate total fees for a cross-chain message, combining the native CCIP fee
-   * with per-token transfer fees (BPS applied to actual transfer amounts).
+   * Estimate total fees for a cross-chain message.
+   *
+   * Returns two components:
+   * - **ccipFee**: from `Router.getFee()`, denominated in the message's
+   *   `feeToken` (native token when feeToken is omitted, all CCIP versions).
+   * - **tokenTransferFee**: pool-level BPS fee deducted from the transferred
+   *   token amount (v2.0+ only). The recipient receives
+   *   `amount - feeDeducted` on the destination chain. Absent on pre-v2.0
+   *   lanes or data-only messages.
    *
    * @param _opts - {@link SendMessageOpts} without approveMax
-   * @returns with native fee and per-token transfer fees
+   * @returns Promise resolving to {@link TotalFeesEstimate}
    * @throws {@link CCIPNotImplementedError} if not implemented for this chain family
-   *
-   * @example Estimate total fees
-   * ```typescript
-   * const estimate = await chain.getTotalFeesEstimate({
-   *   router: routerAddress,
-   *   destChainSelector: destSelector,
-   *   message: {
-   *     receiver: '0x...',
-   *     tokenAmounts: [{ token: '0xToken', amount: 1000000n }],
-   *   },
-   * })
-   * console.log(`Native fee: ${estimate.nativeFee}`)
-   * if (estimate.tokenTransferFee) {
-   *   const tf = estimate.tokenTransferFee
-   *   console.log(`${tf.value} (${tf.bps} bps)`)
-   * }
-   * ```
    */
   getTotalFeesEstimate(_opts: Omit<SendMessageOpts, 'approveMax'>): Promise<TotalFeesEstimate> {
     return Promise.reject(new CCIPNotImplementedError('getTotalFeesEstimate'))

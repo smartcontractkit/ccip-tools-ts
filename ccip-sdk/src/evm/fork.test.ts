@@ -888,7 +888,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   describe('getTotalFeesEstimate', () => {
-    it('should return nativeFee and no tokenTransferFee for data-only message', async () => {
+    it('should return ccipFee and no tokenTransferFee for data-only message', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const estimate = await sepoliaChain.getTotalFeesEstimate({
@@ -897,8 +897,8 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         message: { receiver: '0x0000000000000000000000000000000000000001', data: '0x1337' },
       })
 
-      assert.equal(typeof estimate.nativeFee, 'bigint')
-      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
+      assert.equal(typeof estimate.ccipFee, 'bigint')
+      assert.ok(estimate.ccipFee > 0n, 'ccipFee should be positive')
       assert.equal(estimate.tokenTransferFee, undefined)
     })
 
@@ -915,21 +915,21 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         },
       })
 
-      assert.equal(typeof estimate.nativeFee, 'bigint')
-      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
+      assert.equal(typeof estimate.ccipFee, 'bigint')
+      assert.ok(estimate.ccipFee > 0n, 'ccipFee should be positive')
       assert.ok(estimate.tokenTransferFee, 'tokenTransferFee should be present')
 
       const tf = estimate.tokenTransferFee
-      assert.equal(typeof tf.value, 'bigint')
+      assert.equal(typeof tf.feeDeducted, 'bigint')
       assert.equal(typeof tf.bps, 'number')
-      assert.equal(tf.value, (amount * BigInt(tf.bps)) / 10_000n)
+      assert.equal(tf.feeDeducted, (amount * BigInt(tf.bps)) / 10_000n)
 
       console.log('  getTotalFeesEstimate (default blockConfirmations):')
-      console.log(`    nativeFee = ${estimate.nativeFee}`)
-      console.log(`    value = ${tf.value} (${tf.bps} bps)`)
+      console.log(`    ccipFee = ${estimate.ccipFee}`)
+      console.log(`    value = ${tf.feeDeducted} (${tf.bps} bps)`)
     })
 
-    it('should return nativeFee only for pre-v2.0 lane with token transfer', async () => {
+    it('should return ccipFee only for pre-v2.0 lane with token transfer', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const amount = 1_000_000n
@@ -942,8 +942,8 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         },
       })
 
-      assert.equal(typeof estimate.nativeFee, 'bigint')
-      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
+      assert.equal(typeof estimate.ccipFee, 'bigint')
+      assert.ok(estimate.ccipFee > 0n, 'ccipFee should be positive')
       assert.equal(
         estimate.tokenTransferFee,
         undefined,
@@ -974,16 +974,16 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         },
       })
 
-      assert.equal(typeof estimate.nativeFee, 'bigint')
-      assert.ok(estimate.nativeFee > 0n, 'nativeFee should be positive')
+      assert.equal(typeof estimate.ccipFee, 'bigint')
+      assert.ok(estimate.ccipFee > 0n, 'ccipFee should be positive')
       assert.ok(estimate.tokenTransferFee, 'tokenTransferFee should be present')
 
       const tf = estimate.tokenTransferFee
-      assert.equal(tf.value, (amount * BigInt(tf.bps)) / 10_000n)
+      assert.equal(tf.feeDeducted, (amount * BigInt(tf.bps)) / 10_000n)
 
       console.log('  getTotalFeesEstimate (blockConfirmations=1):')
-      console.log(`    nativeFee = ${estimate.nativeFee}`)
-      console.log(`    value = ${tf.value} (${tf.bps} bps)`)
+      console.log(`    ccipFee = ${estimate.ccipFee}`)
+      console.log(`    value = ${tf.feeDeducted} (${tf.bps} bps)`)
     })
   })
 
