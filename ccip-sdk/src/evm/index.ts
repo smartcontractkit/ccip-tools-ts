@@ -1185,9 +1185,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       )
       const fast = blockConfirmations > 0
       const tier = burnFees.find((t) =>
-        fast
-          ? t.finalityThreshold <= CCTP_FINALITY_FAST
-          : t.finalityThreshold > CCTP_FINALITY_FAST,
+        fast ? t.finalityThreshold <= CCTP_FINALITY_FAST : t.finalityThreshold > CCTP_FINALITY_FAST,
       )
       if (tier && tier.minimumFee > 0) {
         return {
