@@ -1062,7 +1062,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       }),
     ])
 
-    if (!tokenTransferFeeConfig) {
+    if (!tokenTransferFeeConfig || !tokenTransferFeeConfig.isEnabled) {
       return { nativeFee }
     }
 
@@ -1509,31 +1509,32 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }> {
     const [_, version, typeAndVersion] = await this.typeAndVersion(tokenPool)
 
-    let contract, router, minBlockConfirmations, tokenTransferFeeConfig
+    let token, router, minBlockConfirmations, tokenTransferFeeConfig
     if (version < CCIPVersion.V2_0) {
-      contract = new Contract(
+      const contract = new Contract(
         tokenPool,
         interfaces.TokenPool_v1_6,
         this.provider,
       ) as unknown as TypedContract<typeof TokenPool_ABI>
+      token = contract.getToken()
       router = contract.getRouter()
     } else {
-      contract = new Contract(
+      const contract = new Contract(
         tokenPool,
         interfaces.TokenPool_v2_0,
         this.provider,
       ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
+      token = contract.getToken()
       router = contract.getDynamicConfig().then(([router]) => router)
       minBlockConfirmations = contract.getMinBlockConfirmations().catch((err) => {
         if (isError(err, 'CALL_EXCEPTION')) return 0
         throw CCIPError.from(err)
       })
       if (feeOpts) {
-        const v2Contract = contract
-        tokenTransferFeeConfig = contract.getToken().then((token) =>
-          v2Contract
+        tokenTransferFeeConfig = token.then((tokenAddr) =>
+          contract
             .getTokenTransferFeeConfig(
-              token as string,
+              tokenAddr as string,
               feeOpts.destChainSelector,
               BigInt(feeOpts.blockConfirmationsRequested),
               feeOpts.tokenArgs,
@@ -1562,7 +1563,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         )
       }
     }
-    const token = contract.getToken()
 
     return Promise.all([token, router, minBlockConfirmations, tokenTransferFeeConfig]).then(
       ([token, router, minBlockConfirmations, tokenTransferFeeConfig]) => {
