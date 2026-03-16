@@ -9,7 +9,7 @@ import {
 } from './errors/index.ts'
 import { parseSourceTokenData } from './evm/messages.ts'
 import { type CCIPRequest, type OffchainTokenData, type WithLogger, NetworkType } from './types.ts'
-import { getDataBytes, networkInfo } from './utils.ts'
+import { fetchWithTimeout, getDataBytes, networkInfo } from './utils.ts'
 
 const CIRCLE_API_URL = {
   mainnet: 'https://iris-api.circle.com',
@@ -76,11 +76,22 @@ export async function getUsdcBurnFees(
 ): Promise<{ finalityThreshold: number; minimumFee: number }[]> {
   const baseUrl =
     networkType === NetworkType.Mainnet ? CIRCLE_API_URL.mainnet : CIRCLE_API_URL.testnet
-  const res = await fetch(`${baseUrl}/v2/burn/USDC/fees/${sourceDomain}/${destDomain}`)
+  const url = `${baseUrl}/v2/burn/USDC/fees/${sourceDomain}/${destDomain}`
+  const res = await fetchWithTimeout(url, 'getUsdcBurnFees')
   if (!res.ok) {
     throw new CCIPUsdcBurnFeesError(sourceDomain, destDomain, res.status)
   }
-  return (await res.json()) as { finalityThreshold: number; minimumFee: number }[]
+  const json: unknown = await res.json()
+  if (!Array.isArray(json)) {
+    throw new CCIPUsdcBurnFeesError(sourceDomain, destDomain, res.status)
+  }
+  for (const tier of json) {
+    const t = tier as Record<string, unknown>
+    if (typeof t.finalityThreshold !== 'number' || typeof t.minimumFee !== 'number') {
+      throw new CCIPUsdcBurnFeesError(sourceDomain, destDomain, res.status)
+    }
+  }
+  return json as { finalityThreshold: number; minimumFee: number }[]
 }
 
 const LOMBARD_API_URL = {

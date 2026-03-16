@@ -2,13 +2,11 @@ import { memoize } from 'micro-memoize'
 import type { SetRequired } from 'type-fest'
 
 import {
-  CCIPAbortError,
   CCIPApiClientNotAvailableError,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
   CCIPMessageNotFoundInTxError,
-  CCIPTimeoutError,
   CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
 import { HttpStatus } from '../http-status.ts'
@@ -29,7 +27,7 @@ import {
   MessageStatus,
   NetworkType,
 } from '../types.ts'
-import { bigIntReviver, decodeAddress, parseJson } from '../utils.ts'
+import { bigIntReviver, decodeAddress, fetchWithTimeout, parseJson } from '../utils.ts'
 import type {
   APIErrorResponse,
   LaneLatencyResponse,
@@ -208,29 +206,17 @@ export class CCIPAPIClient {
     operation: string,
     signal?: AbortSignal,
   ): Promise<Response> {
-    const timeoutSignal = AbortSignal.timeout(this.timeoutMs)
-    const combinedSignal = signal ? AbortSignal.any([timeoutSignal, signal]) : timeoutSignal
-
-    try {
-      return await this._fetch(url, {
-        signal: combinedSignal,
+    return fetchWithTimeout(url, operation, {
+      timeoutMs: this.timeoutMs,
+      signal,
+      fetch: this._fetch,
+      init: {
         headers: {
           'Content-Type': 'application/json',
           [SDK_VERSION_HEADER]: `CCIP SDK v${SDK_VERSION}`,
         },
-      })
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        (error.name === 'AbortError' || error.name === 'TimeoutError')
-      ) {
-        if (signal?.aborted) {
-          throw new CCIPAbortError(operation)
-        }
-        throw new CCIPTimeoutError(operation, this.timeoutMs)
-      }
-      throw error
-    }
+      },
+    })
   }
 
   /**
