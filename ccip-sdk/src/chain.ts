@@ -26,6 +26,7 @@ import { getOffchainTokenData } from './offchain.ts'
 import { getMessagesInTx } from './requests.ts'
 import { DEFAULT_GAS_LIMIT } from './shared/constants.ts'
 import type { UnsignedSolanaTx } from './solana/types.ts'
+import type { UnsignedSuiTx } from './sui/types.ts'
 import type { UnsignedTONTx } from './ton/types.ts'
 import {
   type AnyMessage,
@@ -282,7 +283,7 @@ export type UnsignedTx = {
   [ChainFamily.Solana]: UnsignedSolanaTx
   [ChainFamily.Aptos]: UnsignedAptosTx
   [ChainFamily.TON]: UnsignedTONTx
-  [ChainFamily.Sui]: never // TODO
+  [ChainFamily.Sui]: UnsignedSuiTx
   [ChainFamily.Unknown]: never
 }
 
