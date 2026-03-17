@@ -1018,13 +1018,10 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     it('should execute a v1.5 message via API-driven path (Sepolia -> Fuji)', async () => {
       assert.ok(fujiInstance, 'fuji anvil should be running')
 
-      const messageId =
-        '0xe654dc68b4d98e8ea2f182ee45d5766af4f62e2417395153a90c4b377d3fcd07'
+      const messageId = '0xe654dc68b4d98e8ea2f182ee45d5766af4f62e2417395153a90c4b377d3fcd07'
 
       const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
-      const fujiProvider = new JsonRpcProvider(
-        `http://${fujiInstance.host}:${fujiInstance.port}`,
-      )
+      const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
       const fujiWithApi = await EVMChain.fromProvider(fujiProvider, {
         apiClient: stagingApi,
         logger: testLogger,
