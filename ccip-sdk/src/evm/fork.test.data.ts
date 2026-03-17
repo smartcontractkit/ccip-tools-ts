@@ -108,6 +108,15 @@ export const SEPOLIA_TO_FUJI: ForkTestMessage[] = [
     version: '1.5',
     description: 'token transfer (0.2 tokens) via contract',
   },
+  // FAILED — token transfer via contract, problematic for manual exec API path
+  {
+    messageId: '0xe654dc68b4d98e8ea2f182ee45d5766af4f62e2417395153a90c4b377d3fcd07',
+    txHash: '0xdc3266201eb0ffe263586f750eab624611c242f02fccd9f2a043a3b36804b037',
+    status: MessageStatus.Failed,
+    version: '1.5',
+    description:
+      'failed token transfer (10000 tokens) via contract, ready for manual exec — problematic API path',
+  },
 ]
 
 // ── Sepolia → Aptos (EVM → Aptos) ──

@@ -1,11 +1,19 @@
 import { Buffer } from 'buffer'
 
-import { type Transaction, Address, Cell, beginCell, toNano } from '@ton/core'
+import {
+  type Transaction,
+  Address,
+  BitReader,
+  BitString,
+  Cell,
+  Slice,
+  beginCell,
+  toNano,
+} from '@ton/core'
 import { TonClient } from '@ton/ton'
 import { type AxiosAdapter, getAdapter } from 'axios'
 import {
   type BytesLike,
-  concat,
   dataLength,
   dataSlice,
   hexlify,
@@ -13,13 +21,12 @@ import {
   isHexString,
   toBeArray,
   toBeHex,
-  toBigInt,
 } from 'ethers'
 import { type Memoized, memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { streamTransactionsForAddress } from './logs.ts'
-import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
+import { encodeExtraArgsCell, generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
 import { type ChainContext, type GetBalanceOpts, type LogFilter, Chain } from '../chain.ts'
 import {
   CCIPArgumentInvalidError,
@@ -56,7 +63,6 @@ import {
   bytesToBuffer,
   createRateLimitedFetch,
   decodeAddress,
-  getDataBytes,
   networkInfo,
   parseTypeAndVersion,
   sleep,
@@ -74,16 +80,6 @@ export type { TONWallet, UnsignedTONTx } from './types.ts'
  */
 function isTvmError(error: unknown): error is Error & { exitCode: number } {
   return error instanceof Error && 'exitCode' in error && typeof error.exitCode === 'number'
-}
-
-function bitsToBytes(bits: string): Uint8Array {
-  return Uint8Array.from(bits.match(/.{1,8}/g)!.map((byte) => parseInt(byte.padEnd(8, '0'), 2)))
-}
-
-function bytesToBits(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((B) => B.toString(2).padStart(8, '0'))
-    .join('')
 }
 
 /**
@@ -668,24 +664,14 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
       // Load extraArgs from ref 2
       const extraArgsCell = bodySlice.loadRef()
-      const extraArgsSlice = extraArgsCell.beginParse()
-
-      // Read tag (32 bits)
-      const extraArgsTag = extraArgsSlice.loadUint(32)
-      if (extraArgsTag !== Number(EVMExtraArgsV2Tag)) return undefined
-
-      // Read gasLimit (maybe uint256): 1 bit flag + 256 bits if present
-      const hasGasLimit = extraArgsSlice.loadBit()
-      const gasLimit = hasGasLimit ? extraArgsSlice.loadUintBig(256) : 0n
-
-      // Read allowOutOfOrderExecution (1 bit)
-      const allowOutOfOrderExecution = extraArgsSlice.loadBit()
 
       // Build extraArgs as raw hex matching reference format
-      const extraArgs = '0x' + extraArgsCell.toBoc().toString('hex')
+      const extraArgs = '0x' + extraArgsCell.bits.toString().toLowerCase().replace('_', '0')
+      const parsed = this.decodeExtraArgs(extraArgs)
+      if (!parsed) return
+      const { _tag, ...extraArgsObj } = parsed
 
       // Load tokenAmounts from ref 3
-      const _tokenAmountsCell = bodySlice.loadRef()
       const tokenAmounts: CCIPMessage_V1_6_EVM['tokenAmounts'] = [] // TODO: FIXME: parse when implemented
 
       // Load feeToken (inline address in body)
@@ -704,8 +690,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         feeTokenAmount,
         feeValueJuels,
         extraArgs,
-        gasLimit,
-        allowOutOfOrderExecution,
+        ...extraArgsObj,
       }
     } catch {
       return undefined
@@ -723,17 +708,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @returns Hex string of BOC-encoded extra args (0x-prefixed)
    */
   static encodeExtraArgs(args: ExtraArgs): string {
-    if ('gasLimit' in args && 'allowOutOfOrderExecution' in args) {
-      return concat([
-        EVMExtraArgsV2Tag,
-        bitsToBytes(
-          '1' +
-            bytesToBits(toBeArray(args.gasLimit, 32)) +
-            (args.allowOutOfOrderExecution ? '1' : '0'),
-        ),
-      ])
-    }
-    return '0x'
+    const cell = encodeExtraArgsCell(args)
+    return '0x' + cell.bits.toString().toLowerCase().replace('_', '0')
   }
 
   /**
@@ -751,19 +727,12 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   static decodeExtraArgs(
     extraArgs: BytesLike,
   ): (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' }) | undefined {
-    if (dataSlice(extraArgs, 0, 4) !== EVMExtraArgsV2Tag || dataLength(extraArgs) < 5) return
-    const data = getDataBytes(extraArgs).subarray(4)
-    let bits = bytesToBits(data)
-    let gasLimit = 0n
-    if (bits[0] === '1') {
-      if (bits.length < 1 + 32 * 8) return
-      gasLimit = toBigInt(bitsToBytes(bits.substring(1, 1 + 32 * 8)))
-      bits = bits.substring(1 + 32 * 8)
-    } else {
-      bits = bits.substring(1)
-    }
+    const bytes = bytesToBuffer(extraArgs)
+    if (dataSlice(bytes, 0, 4) !== EVMExtraArgsV2Tag || dataLength(extraArgs) < 5) return
 
-    const allowOutOfOrderExecution = bits[0] === '1'
+    const slice = new Slice(new BitReader(new BitString(bytes, 32, bytes.length * 8)), [])
+    const gasLimit = slice.loadMaybeUintBig(256) ?? 0n
+    const allowOutOfOrderExecution = slice.loadBit()
 
     return {
       _tag: 'EVMExtraArgsV2',
