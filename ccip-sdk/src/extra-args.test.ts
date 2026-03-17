@@ -88,7 +88,7 @@ describe('encodeExtraArgs', () => {
 
       assert.equal(
         encoded,
-        EVMExtraArgsV2Tag + '8000000000000000000000000000000000000000000000000000000000030d4040',
+        EVMExtraArgsV2Tag + '8000000000000000000000000000000000000000000000000000000000030d4060',
       )
     })
 
@@ -100,7 +100,7 @@ describe('encodeExtraArgs', () => {
 
       assert.equal(
         encoded,
-        EVMExtraArgsV2Tag + '800000000000000000000000000000000000000000000000000000000003d09000',
+        EVMExtraArgsV2Tag + '800000000000000000000000000000000000000000000000000000000003d09020',
       )
     })
 
