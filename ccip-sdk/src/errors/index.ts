@@ -95,6 +95,7 @@ export {
   CCIPLbtcAttestationNotApprovedError,
   CCIPLbtcAttestationNotFoundError,
   CCIPUsdcAttestationError,
+  CCIPUsdcBurnFeesError,
 } from './specialized.ts'
 
 // Specialized errors - Solana-specific

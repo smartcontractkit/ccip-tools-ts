@@ -35,6 +35,7 @@ import {
   type LogFilter,
   type TokenInfo,
   type TokenPoolRemote,
+  type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
 import {
@@ -1366,7 +1367,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * {@inheritDoc Chain.getTokenPoolConfig}
    * @throws {@link CCIPTokenPoolStateNotFoundError} if token pool state not found
    */
-  async getTokenPoolConfig(tokenPool: string): Promise<{
+  async getTokenPoolConfig(
+    tokenPool: string,
+    _feeOpts?: TokenTransferFeeOpts,
+  ): Promise<{
     token: string
     router: string
     tokenPoolProgram: string

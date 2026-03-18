@@ -197,6 +197,59 @@ export type TokenInfo = {
 }
 
 /**
+ * Per-token transfer fee computed by {@link Chain.getTotalFeesEstimate}.
+ */
+export type TokenTransferFee = {
+  /** Amount deducted from the transferred token by the pool (amount * bps / 10_000).
+   *  The recipient receives `amount - feeDeducted` on the destination chain. */
+  feeDeducted: bigint
+  /** The BPS rate applied (basis points, where 10_000 = 100%). */
+  bps: number
+}
+
+/**
+ * Total fees estimate returned by {@link Chain.getTotalFeesEstimate}.
+ */
+export type TotalFeesEstimate = {
+  /** Fee from Router.getFee(), denominated in the message's feeToken
+   *  (native token when feeToken is omitted). */
+  ccipFee: bigint
+  /** Token transfer fee, present only when the message includes a token transfer. */
+  tokenTransferFee?: TokenTransferFee
+}
+
+/**
+ * Token transfer fee configuration returned by TokenPool v2.0 contracts.
+ *
+ * @remarks
+ * Contains two fee dimensions per finality mode (default vs custom/FTF):
+ * - A flat USD surcharge (in cents) added to the CCIP fee via FeeQuoter
+ * - A BPS rate deducted directly from the transferred token amount by the pool
+ *
+ * "Default" fields apply when `blockConfirmations = 0` (standard finality).
+ * "Custom" fields apply when `blockConfirmations > 0` (Faster-Than-Finality).
+ */
+export type TokenTransferFeeConfig = {
+  destGasOverhead: number
+  destBytesOverhead: number
+  defaultBlockConfirmationsFeeUSDCents: number
+  customBlockConfirmationsFeeUSDCents: number
+  defaultBlockConfirmationsTransferFeeBps: number
+  customBlockConfirmationsTransferFeeBps: number
+  isEnabled: boolean
+}
+
+/**
+ * Options for fetching token transfer fee config as part of {@link Chain.getTokenPoolConfig}.
+ */
+export type TokenTransferFeeOpts = {
+  destChainSelector: bigint
+  blockConfirmationsRequested: number
+  /** Hex-encoded bytes passed as tokenArgs to the pool contract. */
+  tokenArgs: string
+}
+
+/**
  * Available lane feature keys.
  * These represent features or thresholds that can be configured per-lane.
  */
@@ -345,6 +398,12 @@ export type TokenPoolConfig = {
    *  with this many minimum confirmations.
    */
   minBlockConfirmations?: number
+  /**
+   * Token transfer fee configuration from the pool contract.
+   * Only present when {@link TokenTransferFeeOpts} is provided to
+   * {@link Chain.getTokenPoolConfig} and the pool supports it (v2.0+).
+   */
+  tokenTransferFeeConfig?: TokenTransferFeeConfig
 }
 
 /**
@@ -1404,10 +1463,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    *
    * @param tokenPool - Token pool contract address.
-   * @returns {@link TokenPoolConfig} containing token, router, and version info.
+   * @param feeOpts - Optional parameters to also fetch token transfer fee config.
+   * @returns {@link TokenPoolConfig} containing token, router, version info, and optionally fee config.
    * @throws {@link CCIPNotImplementedError} on Sui or TON chains
    */
-  abstract getTokenPoolConfig(tokenPool: string): Promise<TokenPoolConfig>
+  abstract getTokenPoolConfig(
+    tokenPool: string,
+    feeOpts?: TokenTransferFeeOpts,
+  ): Promise<TokenPoolConfig>
 
   /**
    * Fetch remote chain configurations for a token pool.
@@ -1551,6 +1614,26 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
         ...message.extraArgs,
       },
     }
+  }
+
+  /**
+   * Estimate total fees for a cross-chain message.
+   *
+   * Returns two components:
+   * - **ccipFee**: from `Router.getFee()`, denominated in the message's
+   *   `feeToken` (native token if omitted). Includes gas, DON costs, and
+   *   FeeQuoter-level token transfer overhead (all CCIP versions).
+   * - **tokenTransferFee**: pool-level BPS fee deducted from the transferred
+   *   token amount (v2.0+ only). The recipient receives
+   *   `amount - feeDeducted` on the destination chain. Absent on pre-v2.0
+   *   lanes or data-only messages.
+   *
+   * @param _opts - {@link SendMessageOpts} without approveMax
+   * @returns Promise resolving to {@link TotalFeesEstimate}
+   * @throws {@link CCIPNotImplementedError} if not implemented for this chain family
+   */
+  getTotalFeesEstimate(_opts: Omit<SendMessageOpts, 'approveMax'>): Promise<TotalFeesEstimate> {
+    return Promise.reject(new CCIPNotImplementedError('getTotalFeesEstimate'))
   }
 
   /**

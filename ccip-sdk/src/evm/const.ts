@@ -2,6 +2,7 @@ import { parseAbi } from 'abitype'
 import { type EventFragment, AbiCoder, Interface } from 'ethers'
 
 import Token_ABI from './abi/BurnMintERC677Token.ts'
+import CCTPVerifier_2_0_ABI from './abi/CCTPVerifier_2_0.ts'
 import CommitStore_1_2_ABI from './abi/CommitStore_1_2.ts'
 import CommitStore_1_5_ABI from './abi/CommitStore_1_5.ts'
 import FeeQuoter_ABI from './abi/FeeQuoter_1_6.ts'
@@ -20,6 +21,8 @@ import PriceRegistry_1_2_ABI from './abi/PriceRegistry_1_2.ts'
 import Router_ABI from './abi/Router.ts'
 import TokenAdminRegistry_ABI from './abi/TokenAdminRegistry_1_5.ts'
 import TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
+import USDCTokenPoolProxy_2_0_ABI from './abi/USDCTokenPoolProxy_2_0.ts'
+import VersionedVerifierResolver_2_0_ABI from './abi/VersionedVerifierResolver_2_0.ts'
 
 export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
 
@@ -52,6 +55,9 @@ export const interfaces = {
   EVM2EVMOnRamp_v1_5: new Interface(EVM2EVMOnRamp_1_5_ABI),
   EVM2EVMOnRamp_v1_2: new Interface(EVM2EVMOnRamp_1_2_ABI),
   PriceRegistry_v1_2: new Interface(PriceRegistry_1_2_ABI),
+  USDCTokenPoolProxy_v2_0: new Interface(USDCTokenPoolProxy_2_0_ABI),
+  CCTPVerifier_v2_0: new Interface(CCTPVerifier_2_0_ABI),
+  VersionedVerifierResolver_v2_0: new Interface(VersionedVerifierResolver_2_0_ABI),
   Custom: new Interface(customErrors),
 } as const
 

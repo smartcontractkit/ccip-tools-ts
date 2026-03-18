@@ -128,6 +128,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   LBTC_ATTESTATION_ERROR: 'LBTC attestation fetch failed. Wait and retry.',
   LBTC_ATTESTATION_NOT_FOUND: 'LBTC attestation not found. Verify the payload hash.',
   LBTC_ATTESTATION_NOT_APPROVED: 'LBTC attestation not yet approved. Wait for notarization.',
+  USDC_BURN_FEES_FAILED:
+    'Failed to fetch USDC burn fees from the Circle API. Retry later or check Circle API status.',
   CCTP_DECODE_FAILED:
     'Ensure the transaction contains a valid CCTP MessageSent event. Verify this is a USDC transfer.',
 

@@ -16,12 +16,14 @@ import yaml from 'yaml'
 
 import type { Chain, ChainStatic } from './chain.ts'
 import {
+  CCIPAbortError,
   CCIPBlockBeforeTimestampNotFoundError,
   CCIPChainFamilyUnsupportedError,
   CCIPChainNotFoundError,
   CCIPDataFormatUnsupportedError,
   CCIPError,
   CCIPHttpError,
+  CCIPTimeoutError,
   CCIPTypeVersionInvalidError,
   HttpStatus,
 } from './errors/index.ts'
@@ -812,6 +814,46 @@ export function createRateLimitedFetch(
     }
 
     throw lastError || CCIPError.from('Request failed after all retries', 'HTTP_ERROR')
+  }
+}
+
+/**
+ * Performs a fetch request with timeout and abort signal support.
+ *
+ * @param url - URL to fetch
+ * @param operation - Operation name for error context
+ * @param opts - Optional timeout, abort signal, fetch function, and extra RequestInit fields
+ * @returns Promise resolving to Response
+ * @throws CCIPTimeoutError if request times out
+ * @throws CCIPAbortError if request is aborted via signal
+ */
+export async function fetchWithTimeout(
+  url: string,
+  operation: string,
+  opts?: {
+    timeoutMs?: number
+    signal?: AbortSignal
+    fetch?: typeof globalThis.fetch
+    init?: RequestInit
+  },
+): Promise<Response> {
+  const timeoutMs = opts?.timeoutMs ?? 30_000
+  const fetchFn = opts?.fetch ?? globalThis.fetch.bind(globalThis)
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  const combinedSignal = opts?.signal
+    ? AbortSignal.any([timeoutSignal, opts.signal])
+    : timeoutSignal
+
+  try {
+    return await fetchFn(url, { ...opts?.init, signal: combinedSignal })
+  } catch (error) {
+    if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+      if (opts?.signal?.aborted) {
+        throw new CCIPAbortError(operation)
+      }
+      throw new CCIPTimeoutError(operation, timeoutMs)
+    }
+    throw error
   }
 }
 

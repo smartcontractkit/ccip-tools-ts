@@ -26,7 +26,13 @@ import type { PickDeep } from 'type-fest'
 
 import { streamTransactionsForAddress } from './logs.ts'
 import { encodeExtraArgsCell, generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
-import { type ChainContext, type GetBalanceOpts, type LogFilter, Chain } from '../chain.ts'
+import {
+  type ChainContext,
+  type GetBalanceOpts,
+  type LogFilter,
+  type TokenTransferFeeOpts,
+  Chain,
+} from '../chain.ts'
 import {
   CCIPArgumentInvalidError,
   CCIPExecutionReportChainMismatchError,
@@ -1205,7 +1211,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * {@inheritDoc Chain.getTokenPoolConfig}
    * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
    */
-  async getTokenPoolConfig(_tokenPool: string): Promise<never> {
+  async getTokenPoolConfig(_tokenPool: string, _feeOpts?: TokenTransferFeeOpts): Promise<never> {
     return Promise.reject(new CCIPNotImplementedError('getTokenPoolConfig'))
   }
 

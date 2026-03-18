@@ -37,6 +37,10 @@ export type {
   TokenInfo,
   TokenPoolConfig,
   TokenPoolRemote,
+  TokenTransferFee,
+  TokenTransferFeeConfig,
+  TokenTransferFeeOpts,
+  TotalFeesEstimate,
 } from './chain.ts'
 export { DEFAULT_API_RETRY_CONFIG, LaneFeature } from './chain.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
@@ -51,7 +55,7 @@ export {
   encodeExtraArgs,
 } from './extra-args.ts'
 export { estimateReceiveExecution } from './gas.ts'
-export { getOffchainTokenData } from './offchain.ts'
+export { CCTP_FINALITY_FAST, CCTP_FINALITY_STANDARD, getOffchainTokenData } from './offchain.ts'
 export { decodeMessage, getMessagesForSender, sourceToDestTokenAddresses } from './requests.ts'
 export {
   type CCIPExecution,

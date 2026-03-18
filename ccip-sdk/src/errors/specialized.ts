@@ -983,6 +983,21 @@ export class CCIPUsdcAttestationError extends CCIPError {
 }
 
 /**
+ * Thrown when fetching USDC burn fees from Circle's CCTP API fails.
+ */
+export class CCIPUsdcBurnFeesError extends CCIPError {
+  override readonly name = 'CCIPUsdcBurnFeesError'
+  /** Creates a USDC burn fees error. */
+  constructor(sourceDomain: number, destDomain: number, httpStatus: number) {
+    super(
+      CCIPErrorCode.USDC_BURN_FEES_FAILED,
+      `Failed to fetch USDC burn fees for domains ${sourceDomain} -> ${destDomain} (HTTP ${httpStatus})`,
+      { context: { sourceDomain, destDomain, httpStatus } },
+    )
+  }
+}
+
+/**
  * Thrown when LBTC attestation fetch fails. Transient: attestation may not be ready.
  *
  * @example
