@@ -61,7 +61,7 @@ import {
   CCIPVersionUnsupportedError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
-import type { ExtraArgs, GenericExtraArgsV3 } from '../extra-args.ts'
+import type { ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
 import { supportedChains } from '../supported-chains.ts'
@@ -91,6 +91,7 @@ import {
   parseTypeAndVersion,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
+import type CCTPVerifier_2_0_ABI from './abi/CCTPVerifier_2_0.ts'
 import type FeeQuoter_ABI from './abi/FeeQuoter_1_6.ts'
 import type TokenPool_1_5_ABI from './abi/LockReleaseTokenPool_1_5.ts'
 import type TokenPool_ABI from './abi/LockReleaseTokenPool_1_6_1.ts'
@@ -105,6 +106,8 @@ import type OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
 import type Router_ABI from './abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
 import type TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
+import type USDCTokenPoolProxy_2_0_ABI from './abi/USDCTokenPoolProxy_2_0.ts'
+import type VersionedVerifierResolver_2_0_ABI from './abi/VersionedVerifierResolver_2_0.ts'
 import {
   CCV_INDEXER_URL,
   VersionedContractABI,
@@ -245,6 +248,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       maxArgs: 1,
     })
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { async: true, maxArgs: 1 })
+    this.detectUsdcDomains = memoize(this.detectUsdcDomains.bind(this))
+    this.resolveVerifier = memoize(this.resolveVerifier.bind(this))
   }
 
   /**
@@ -1026,20 +1031,20 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Detect whether a token pool is a USDC/CCTP pool via typeAndVersion, then resolve
    * the CCTPVerifier address and fetch source/dest CCTP domain IDs.
    *
-   * @param poolAddress - The token pool address to check.
+   * @param tokenPool - The token pool address to check.
    * @param destChainSelector - Destination chain selector for getDomain().
    * @param ccvs - Cross-chain verifier addresses from extraArgs (fallback for verifier discovery).
    * @returns Source and dest CCTP domain IDs, or undefined if not a USDC pool.
    */
   private async detectUsdcDomains(
-    poolAddress: string,
+    tokenPool: string,
     destChainSelector: bigint,
-    ccvs: string[],
+    ccvs: string[] = [],
   ): Promise<{ sourceDomain: number; destDomain: number } | undefined> {
     // 1. Check if pool is USDCTokenPoolProxy
     let poolType: string
     try {
-      ;[poolType] = await this.typeAndVersion(poolAddress)
+      ;[poolType] = await this.typeAndVersion(tokenPool)
     } catch {
       return undefined
     }
@@ -1050,11 +1055,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     // 2a. Try pool's getStaticConfig (returns resolver/verifier address)
     try {
-      const proxy = new Contract(poolAddress, interfaces.USDCTokenPoolProxy_v2_0, this.provider)
-      const config = (await proxy.getFunction('getStaticConfig')()) as {
-        cctpVerifier: string
-      }
-      const candidate = config.cctpVerifier
+      const proxy = new Contract(
+        tokenPool,
+        interfaces.USDCTokenPoolProxy_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof USDCTokenPoolProxy_2_0_ABI>
+      const [, , cctpVerifier] = await proxy.getStaticConfig()
+      const candidate = cctpVerifier as string
       if (candidate && candidate !== ZeroAddress) {
         verifierAddress = await this.resolveVerifier(candidate, destChainSelector)
       }
@@ -1082,14 +1089,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     // 3. Fetch source and dest CCTP domain IDs from verifier
     try {
-      const verifier = new Contract(verifierAddress, interfaces.CCTPVerifier_v2_0, this.provider)
-      const [verifierConfig, destDomainResult] = (await Promise.all([
-        verifier.getFunction('getStaticConfig')(),
-        verifier.getFunction('getDomain')(destChainSelector),
-      ])) as [{ localDomainIdentifier: bigint }, { domainIdentifier: bigint }]
+      const verifier = new Contract(
+        verifierAddress,
+        interfaces.CCTPVerifier_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof CCTPVerifier_2_0_ABI>
+      const [staticConfig, domainResult] = await Promise.all([
+        verifier.getStaticConfig(),
+        verifier.getDomain(destChainSelector),
+      ])
       return {
-        sourceDomain: Number(verifierConfig.localDomainIdentifier),
-        destDomain: Number(destDomainResult.domainIdentifier),
+        sourceDomain: Number(staticConfig[3]), // localDomainIdentifier
+        destDomain: Number(domainResult.domainIdentifier),
       }
     } catch (err) {
       if (isError(err, 'CALL_EXCEPTION')) return undefined
@@ -1112,11 +1123,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           candidate,
           interfaces.VersionedVerifierResolver_v2_0,
           this.provider,
-        )
-        return (await resolver.getFunction('getOutboundImplementation')(
-          destChainSelector,
-          '0x',
-        )) as string
+        ) as unknown as TypedContract<typeof VersionedVerifierResolver_2_0_ABI>
+        return (await resolver.getOutboundImplementation(destChainSelector, '0x')) as string
       }
       if (candidateType === 'CCTPVerifier') return candidate
     } catch {
@@ -1130,10 +1138,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     opts: Parameters<Chain['getTotalFeesEstimate']>[0],
   ): Promise<TotalFeesEstimate> {
     const tokenAmounts = opts.message.tokenAmounts
-    const ccipFeeP = this.getFee(opts)
+    const ccipFee$ = this.getFee(opts)
 
     if (!tokenAmounts?.length) {
-      return { ccipFee: await ccipFeeP }
+      return { ccipFee: await ccipFee$ }
     }
 
     const { token, amount } = tokenAmounts[0]!
@@ -1143,27 +1151,30 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     let blockConfirmations = 0
     let tokenArgs: string = '0x'
     if (extraArgs && 'blockConfirmations' in extraArgs) {
-      const v3 = extraArgs as GenericExtraArgsV3
-      blockConfirmations = v3.blockConfirmations
-      tokenArgs = hexlify(v3.tokenArgs)
+      blockConfirmations = extraArgs.blockConfirmations as number
+      tokenArgs = hexlify(extraArgs.tokenArgs as BytesLike)
     }
 
     // Skip pool-level fee lookup for pre-v2.0 lanes
     const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
     const [, version] = await this.typeAndVersion(onRamp)
     if (version < CCIPVersion.V2_0) {
-      return { ccipFee: await ccipFeeP }
+      return { ccipFee: await ccipFee$ }
     }
 
-    const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, this.provider)
+    const onRampContract = new Contract(
+      onRamp,
+      interfaces.OnRamp_v2_0,
+      this.provider,
+    ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
 
-    const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+    const poolAddress = (await onRampContract.getPoolBySourceToken(
       opts.destChainSelector,
       token,
     )) as string
 
     const [ccipFee, { tokenTransferFeeConfig }, usdcDomains] = await Promise.all([
-      ccipFeeP,
+      ccipFee$,
       this.getTokenPoolConfig(poolAddress, {
         destChainSelector: opts.destChainSelector,
         blockConfirmationsRequested: blockConfirmations,
@@ -1172,7 +1183,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       this.detectUsdcDomains(
         poolAddress,
         opts.destChainSelector,
-        extraArgs && 'ccvs' in extraArgs ? (extraArgs as GenericExtraArgsV3).ccvs : [],
+        extraArgs && 'ccvs' in extraArgs ? extraArgs.ccvs : [],
       ),
     ])
 
@@ -1184,9 +1195,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         this.network.networkType,
       )
       const fast = blockConfirmations > 0
-      const tier = burnFees.find((t) =>
-        fast ? t.finalityThreshold <= CCTP_FINALITY_FAST : t.finalityThreshold > CCTP_FINALITY_FAST,
-      )
+      // Tiers are sorted ascending by finalityThreshold; findLast for fast ensures
+      // we pick the highest tier still within the fast threshold.
+      const tier = fast
+        ? burnFees.findLast((t) => t.finalityThreshold <= CCTP_FINALITY_FAST)
+        : burnFees.find((t) => t.finalityThreshold > CCTP_FINALITY_FAST)
       if (tier && tier.minimumFee > 0) {
         return {
           ccipFee,
