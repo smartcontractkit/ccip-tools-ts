@@ -14,7 +14,6 @@ import { TonClient } from '@ton/ton'
 import { type AxiosAdapter, getAdapter } from 'axios'
 import {
   type BytesLike,
-  dataLength,
   dataSlice,
   hexlify,
   isBytesLike,
@@ -727,8 +726,19 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   static decodeExtraArgs(
     extraArgs: BytesLike,
   ): (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' }) | undefined {
-    const bytes = bytesToBuffer(extraArgs)
-    if (dataSlice(bytes, 0, 4) !== EVMExtraArgsV2Tag || dataLength(extraArgs) < 5) return
+    let bytes
+    try {
+      bytes = bytesToBuffer(extraArgs)
+
+      // If the data is BOC-wrapped (starts with TON BOC magic 0xb5ee9c72), extract bits
+      if (dataSlice(bytes, 0, 4) !== EVMExtraArgsV2Tag) {
+        const cell = Cell.fromBoc(bytes)[0]!
+        bytes = bytesToBuffer('0x' + cell.bits.toString().toLowerCase().replace('_', '0'))
+      }
+      if (dataSlice(bytes, 0, 4) !== EVMExtraArgsV2Tag) return
+    } catch {
+      return
+    }
 
     const slice = new Slice(new BitReader(new BitString(bytes, 32, bytes.length * 8)), [])
     const gasLimit = slice.loadMaybeUintBig(256) ?? 0n
