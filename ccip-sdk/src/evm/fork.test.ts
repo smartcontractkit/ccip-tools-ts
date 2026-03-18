@@ -12,7 +12,7 @@ import { LaneFeature } from '../chain.ts'
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
 import { type ExecutionInput, ExecutionState, MessageStatus } from '../types.ts'
 import { interfaces } from './const.ts'
-import { FUJI_TO_SEPOLIA, SEPOLIA_TO_FUJI } from './fork.test.data.ts'
+import { FUJI_TO_SEPOLIA, SEPOLIA_TO_FUJI, TON_TO_SEPOLIA } from './fork.test.data.ts'
 import { EVMChain } from './index.ts'
 
 // ── Chain constants ──
@@ -1073,6 +1073,40 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         `  executed ${messageId.slice(0, 10)}… via API (TON source) → state=${execution.receipt.state}`,
       )
       assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
+      assert.ok(execution.log.transactionHash, 'should have tx hash')
+      assert.ok(execution.timestamp > 0, 'should have timestamp')
+      assert.equal(execution.receipt.state, ExecutionState.Success)
+
+      sepoliaWithApi.destroy?.()
+    })
+
+    // Another problematic TON-source message with gasLimit=1 and data payload.
+    // Validates the API-driven manual execution path for TON → Sepolia.
+    it('should execute a problematic TON-source message via API-driven path (TON -> Sepolia, gasLimit=1)', async () => {
+      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+
+      const msg = TON_TO_SEPOLIA[0]!
+
+      const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
+      const sepoliaProvider = new JsonRpcProvider(
+        `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
+      )
+      const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
+        apiClient: stagingApi,
+        logger: testLogger,
+      })
+      const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
+
+      const execution = await sepoliaWithApi.execute({
+        messageId: msg.messageId,
+        wallet: w,
+        gasLimit: 500_000,
+      })
+
+      console.log(
+        `  executed ${msg.messageId.slice(0, 10)}… via API (TON source, gasLimit=1) → state=${execution.receipt.state}`,
+      )
+      assert.equal(execution.receipt.messageId, msg.messageId, 'receipt messageId should match')
       assert.ok(execution.log.transactionHash, 'should have tx hash')
       assert.ok(execution.timestamp > 0, 'should have timestamp')
       assert.equal(execution.receipt.state, ExecutionState.Success)

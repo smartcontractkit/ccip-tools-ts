@@ -400,3 +400,17 @@ export const APTOS_TO_FUJI: ForkTestMessage[] = [
     description: 'data-only, no token transfer',
   },
 ]
+
+// ── TON Testnet → Sepolia (TON → EVM) ──
+
+export const TON_TO_SEPOLIA: ForkTestMessage[] = [
+  // FAILED — data-only, ready for manual exec, problematic API path
+  {
+    messageId: '0xed568f4bda27dfbb93e0b193ad1467854d37e3b33441241f5d3f2cd8e5b5c572',
+    txHash: '0x1a1c020fff2f3f6e573fd6614e3d86835a8ff59a4df2254db595dbe0b7c3712b',
+    status: MessageStatus.Failed,
+    version: '1.6',
+    description:
+      'failed data-only (gasLimit=1) from TON, ready for manual exec — problematic API path',
+  },
+]
