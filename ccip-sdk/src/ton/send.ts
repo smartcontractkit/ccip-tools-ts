@@ -3,10 +3,10 @@ import { type TonClient, Address } from '@ton/ton'
 import { zeroPadValue } from 'ethers'
 
 import type { UnsignedTONTx } from './types.ts'
-import { CCIPError, CCIPErrorCode } from '../errors/index.ts'
-import { EVMExtraArgsV2Tag } from '../extra-args.ts'
-import type { AnyMessage, WithLogger } from '../types.ts'
-import { bytesToBuffer, getDataBytes } from '../utils.ts'
+import { CCIPError, CCIPErrorCode, CCIPExtraArgsInvalidError } from '../errors/index.ts'
+import { type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
+import { type AnyMessage, type WithLogger, ChainFamily } from '../types.ts'
+import { bigIntReplacer, bytesToBuffer, getDataBytes } from '../utils.ts'
 
 /** Opcode for Router ccipSend operation */
 export const CCIP_SEND_OPCODE = 0x31768d95
@@ -51,28 +51,27 @@ function encodeTokenAmounts(
  * Format per chainlink-ton TL-B:
  * - tag: 32-bit opcode (0x181dcf10)
  * - gasLimit: Maybe<uint256> (1 bit flag + 256 bits if present)
- * - allowOutOfOrderExecution: 1 bit (must be true)
+ * - allowOutOfOrderExecution: 1 bit
+ * @param extraArgs - Extra arguments for CCIP message
+ * @returns Cell encoding the extra arguments
  */
-function encodeExtraArgsCell(extraArgs: AnyMessage['extraArgs']): Cell {
-  const allowOutOfOrderExecution = true
+export function encodeExtraArgsCell(extraArgs: ExtraArgs): Cell {
+  if (
+    Object.keys(extraArgs).filter((k) => k !== '_tag').length !== 2 ||
+    !('gasLimit' in extraArgs && 'allowOutOfOrderExecution' in extraArgs)
+  )
+    throw new CCIPExtraArgsInvalidError(ChainFamily.TON, JSON.stringify(extraArgs, bigIntReplacer))
 
-  let gasLimit = 0n
-  let hasGasLimit = false
-
-  if ('gasLimit' in extraArgs && extraArgs.gasLimit > 0n) {
-    hasGasLimit = true
+  let gasLimit: bigint | null = null
+  if (extraArgs.gasLimit > 0n) {
     gasLimit = extraArgs.gasLimit
   }
 
-  const builder = beginCell()
-    .storeUint(Number(EVMExtraArgsV2Tag), 32) // 0x181dcf10
-    .storeBit(hasGasLimit)
+  const builder = beginCell().storeUint(Number(EVMExtraArgsV2Tag), 32) // 0x181dcf10
+  builder.storeMaybeUint(gasLimit, 256)
+  builder.storeBit(extraArgs.allowOutOfOrderExecution)
 
-  if (hasGasLimit) {
-    builder.storeUint(gasLimit, 256)
-  }
-
-  return builder.storeBit(allowOutOfOrderExecution).endCell()
+  return builder.endCell()
 }
 
 /**
