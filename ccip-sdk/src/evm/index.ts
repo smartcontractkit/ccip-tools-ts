@@ -1015,7 +1015,19 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       {
         from: sender,
         // if native fee, include it in value; otherwise, it's transferedFrom feeToken
-        ...(feeToken === ZeroAddress && { value: message.fee }),
+        ...(feeToken === ZeroAddress && {
+          value: await (async () => {
+            // On chains like Hedera where the native token has fewer than 18 decimals
+            // (e.g. WHBAR has 8 decimals / tinybars), the fee is returned in those units.
+            // EVM transactions expect value in wei (18 decimals), so scale up accordingly.
+            const nativeToken = await this.getNativeTokenForRouter(router)
+            const { decimals: nativeDecimals } = await this.getTokenInfo(nativeToken)
+            const evmDecimals = (this.constructor as typeof EVMChain).decimals
+            return nativeDecimals < evmDecimals
+              ? message.fee * 10n ** BigInt(evmDecimals - nativeDecimals)
+              : message.fee
+          })(),
+        }),
       },
     )
     const txRequests = [...approveTxs, sendTx] as SetRequired<typeof sendTx, 'from'>[]
