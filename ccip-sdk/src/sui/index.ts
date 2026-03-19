@@ -1,10 +1,10 @@
 import { bcs } from '@mysten/sui/bcs'
-import { SuiClient } from '@mysten/sui/client'
+import { type SuiTransactionBlockResponse, SuiClient } from '@mysten/sui/client'
 import type { Keypair } from '@mysten/sui/cryptography'
 import { SuiGraphQLClient } from '@mysten/sui/graphql'
 import { Transaction } from '@mysten/sui/transactions'
 import { isValidSuiAddress, isValidTransactionDigest, normalizeSuiAddress } from '@mysten/sui/utils'
-import { type BytesLike, dataLength, hexlify, isBytesLike, isHexString } from 'ethers'
+import { type BytesLike, concat, dataLength, hexlify, isBytesLike, isHexString } from 'ethers'
 import type { PickDeep, SetOptional } from 'type-fest'
 
 import {
@@ -31,10 +31,20 @@ import {
   CCIPSuiLogInvalidError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
-import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
+import {
+  type EVMExtraArgsV2,
+  type ExtraArgs,
+  type SVMExtraArgsV1,
+  type SuiExtraArgsV1,
+  EVMExtraArgsV2Tag,
+} from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
-import { decodeMessage, getMessagesInBatch } from '../requests.ts'
-import { decodeMoveExtraArgs, getMoveAddress } from '../shared/bcs-codecs.ts'
+import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
+import {
+  BcsEVMExtraArgsV2Codec,
+  decodeMoveExtraArgs,
+  getMoveAddress,
+} from '../shared/bcs-codecs.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
@@ -61,7 +71,10 @@ import {
   util,
 } from '../utils.ts'
 import { generateUnsignedExecutePTB, signAndExecuteSuiTx } from './exec.ts'
-import type { CCIPMessage_V1_6_Sui, UnsignedSuiTx } from './types.ts'
+import { resolveExecuteOptsForSui } from './resolve-execute-opts.ts'
+import { buildCcipSendPTB, getFee as getFeeForSend } from './send.ts'
+import { type CCIPMessage_V1_6_Sui, type UnsignedSuiTx, encodeSuiExtraArgsV1 } from './types.ts'
+
 export type { UnsignedSuiTx }
 
 const DEFAULT_GAS_LIMIT = 1000000n
@@ -489,42 +502,39 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @throws {@link CCIPError} if token address is invalid or metadata cannot be loaded
    */
   async getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }> {
-    const normalizedTokenAddress = normalizeSuiAddress(token)
-    if (!isValidSuiAddress(normalizedTokenAddress)) {
-      throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
-    }
-
-    const objectResponse = await this.client.getObject({
-      id: normalizedTokenAddress,
-      options: { showType: true },
-    })
-
-    const getCoinFromMetadata = (metadata: string) => {
-      // Extract the type parameter from CoinMetadata<...>
-      const match = metadata.match(/CoinMetadata<(.+)>$/)
-
-      if (!match || !match[1]) {
-        throw new CCIPError(CCIPErrorCode.UNKNOWN, `Invalid metadata format: ${metadata}`)
-      }
-
-      return match[1]
-    }
-
     let coinType: string
-    const objectType = objectResponse.data?.type
 
-    // Check if this is a CoinMetadata object or a coin type string
-    if (objectType?.includes('CoinMetadata')) {
-      coinType = getCoinFromMetadata(objectType)
-    } else if (token.includes('::')) {
-      // This is a coin type string (e.g., "0xabc::coin::COIN")
+    if (token.includes('::')) {
+      // Coin type string (e.g., "0x2::sui::SUI" or "0xabc::module::TYPE")
       coinType = token
     } else {
-      // This is a package address or unknown format
-      throw new CCIPError(
-        CCIPErrorCode.UNKNOWN,
-        `Token address ${token} is not a CoinMetadata object or coin type. Expected format: package::module::Type`,
-      )
+      const normalizedTokenAddress = normalizeSuiAddress(token)
+      if (!isValidSuiAddress(normalizedTokenAddress)) {
+        throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
+      }
+
+      const objectResponse = await this.client.getObject({
+        id: normalizedTokenAddress,
+        options: { showType: true },
+      })
+
+      const getCoinFromMetadata = (metadata: string) => {
+        const match = metadata.match(/CoinMetadata<(.+)>$/)
+        if (!match || !match[1]) {
+          throw new CCIPError(CCIPErrorCode.UNKNOWN, `Invalid metadata format: ${metadata}`)
+        }
+        return match[1]
+      }
+
+      const objectType = objectResponse.data?.type
+      if (objectType?.includes('CoinMetadata')) {
+        coinType = getCoinFromMetadata(objectType)
+      } else {
+        throw new CCIPError(
+          CCIPErrorCode.UNKNOWN,
+          `Token address ${token} is not a CoinMetadata object or coin type. Expected format: package::module::Type`,
+        )
+      }
     }
 
     if (coinType.split('::').length < 3) {
@@ -597,12 +607,19 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /**
    * Encodes extra arguments for CCIP messages.
-   * @param _extraArgs - Extra arguments to encode.
+   * @param extraArgs - Extra arguments to encode.
    * @returns Encoded extra arguments as a hex string.
    * @throws {@link CCIPNotImplementedError} always (not yet implemented)
    */
-  static encodeExtraArgs(_extraArgs: ExtraArgs): string {
-    throw new CCIPNotImplementedError()
+  static encodeExtraArgs(extraArgs: ExtraArgs): string {
+    if ('gasLimit' in extraArgs && 'allowOutOfOrderExecution' in extraArgs) {
+      // EVM-style extra args: use BCS encoding with EVMExtraArgsV2Tag (same as Aptos)
+      return concat([EVMExtraArgsV2Tag, BcsEVMExtraArgsV2Codec.serialize(extraArgs).toBytes()])
+    }
+    if ('tokenReceiver' in extraArgs && 'receiverObjectIds' in extraArgs) {
+      return encodeSuiExtraArgsV1(extraArgs as unknown as SuiExtraArgsV1)
+    }
+    throw new CCIPNotImplementedError('SuiChain.encodeExtraArgs: unsupported extra args format')
   }
 
   /**
@@ -702,20 +719,88 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.getFee} */
-  async getFee(_opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getFee'))
+  async getFee(opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+    const populatedMessage = buildMessageForDest(
+      opts.message,
+      networkInfo(opts.destChainSelector).family,
+    )
+    return getFeeForSend(this.client, opts.router, opts.destChainSelector, populatedMessage)
   }
 
   /** {@inheritDoc Chain.generateUnsignedSendMessage} */
-  override generateUnsignedSendMessage(
-    _opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
-  ): Promise<never> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.generateUnsignedSendMessage'))
+  override async generateUnsignedSendMessage(
+    opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
+  ): Promise<UnsignedSuiTx> {
+    const populatedMessage = buildMessageForDest(
+      opts.message,
+      networkInfo(opts.destChainSelector).family,
+    )
+    const fee = opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage }))
+    const message = { ...populatedMessage, fee }
+    const tx = await buildCcipSendPTB(
+      this.client,
+      opts.sender,
+      opts.router,
+      opts.destChainSelector,
+      message,
+    )
+    const txBytes = await tx.build({ client: this.client })
+    return {
+      family: ChainFamily.Sui,
+      transactions: [txBytes],
+    }
   }
 
   /** {@inheritDoc Chain.sendMessage} */
-  async sendMessage(_opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.sendMessage'))
+  async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
+    const wallet = opts.wallet as Keypair
+    const sender = wallet.toSuiAddress()
+
+    const populatedMessage = buildMessageForDest(
+      opts.message,
+      networkInfo(opts.destChainSelector).family,
+    )
+    const fee = opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage }))
+    const message = { ...populatedMessage, fee }
+
+    const tx = await buildCcipSendPTB(
+      this.client,
+      sender,
+      opts.router,
+      opts.destChainSelector,
+      message,
+    )
+
+    this.logger.info('Sending Sui CCIP message...')
+    let result: SuiTransactionBlockResponse
+    try {
+      result = await this.client.signAndExecuteTransaction({
+        signer: wallet,
+        transaction: tx,
+        options: {
+          showEffects: true,
+          showEvents: true,
+        },
+      })
+    } catch (e) {
+      throw new CCIPError(
+        CCIPErrorCode.TRANSACTION_NOT_FINALIZED,
+        `Failed to send Sui CCIP transaction: ${(e as Error).message}`,
+      )
+    }
+
+    if (result.effects?.status.status !== 'success') {
+      const errorMsg = result.effects?.status.error || 'Unknown error'
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, `Sui CCIP send reverted: ${errorMsg}`)
+    }
+
+    this.logger.info(`Waiting for Sui transaction ${result.digest} to be finalized...`)
+    await this.client.waitForTransaction({
+      digest: result.digest,
+      options: { showEffects: true, showEvents: true },
+    })
+
+    return (await this.getMessagesInTx(await this.getTransaction(result.digest)))[0]!
   }
 
   /**
@@ -725,15 +810,16 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   override async generateUnsignedExecute(
     opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<UnsignedSuiTx> {
-    const resolved = await this.resolveExecuteOpts(opts)
-    if (!resolved.offRamp.includes('::')) resolved.offRamp += '::offramp'
+    const resolved = await resolveExecuteOptsForSui(this, opts)
+    let offRamp = resolved.offRamp
+    if (!offRamp.includes('::')) offRamp += '::offramp'
     if (!('message' in resolved.input)) {
       throw new CCIPExecutionReportChainMismatchError('Sui')
     }
 
     return generateUnsignedExecutePTB(
       this.client,
-      resolved.offRamp,
+      offRamp,
       resolved.input as ExecutionInput<CCIPMessage_V1_6_Sui>,
       {
         gasLimit: resolved.gasLimit,

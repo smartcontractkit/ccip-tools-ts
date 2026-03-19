@@ -476,6 +476,9 @@ export type ExecuteOpts = (
   forceLookupTable?: boolean
 }
 
+/** Result of {@link Chain.resolveExecuteOpts}: execute options with a concrete `input` payload. */
+export type ResolvedExecuteOpts = Extract<ExecuteOpts, { input: ExecutionInput }>
+
 /**
  * Works like an interface for a base Chain class, but provides implementation (which can be
  * specialized) for some basic methods
@@ -1088,10 +1091,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @throws {@link CCIPApiClientNotAvailableError} if `messageId` is provided but no apiClient
    */
-  protected async resolveExecuteOpts(
-    opts: ExecuteOpts,
-  ): Promise<Extract<ExecuteOpts, { input: unknown }>> {
-    let opts_: Extract<typeof opts, { input: unknown }>
+  /** Resolves {@link ExecuteOpts} to a form that always includes `input` (fetches from API when using `messageId`). */
+  async resolveExecuteOpts(opts: ExecuteOpts): Promise<ResolvedExecuteOpts> {
+    let opts_: ResolvedExecuteOpts
     if ('input' in opts) {
       opts_ = opts
     } else if (!this.apiClient) throw new CCIPApiClientNotAvailableError()

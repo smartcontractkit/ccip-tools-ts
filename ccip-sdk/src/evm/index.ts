@@ -1297,9 +1297,20 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     // if `token` is ZeroAddress, send its `amount` as `value` to router/EtherSenderReceiver (plus possibly native fee)
     // if native fee, include it in value; otherwise, it's transferedFrom feeToken
-    const value = (message.tokenAmounts ?? [])
+    // Native `value`: wrapped/native token amounts sent as ZeroAddress, plus msg.value when fee is native.
+    let value = (message.tokenAmounts ?? [])
       .filter(({ token }) => token === ZeroAddress)
-      .reduce((acc, { amount }) => acc + amount, feeToken === ZeroAddress ? message.fee : 0n)
+      .reduce((acc, { amount }) => acc + amount, 0n)
+    if (feeToken === ZeroAddress) {
+      // Hedera and similar: fee quote may use wrapped native decimals; tx `value` is always 18-decimal wei.
+      const nativeToken = await this.getNativeTokenForRouter(router)
+      const { decimals: nativeDecimals } = await this.getTokenInfo(nativeToken)
+      const evmDecimals = (this.constructor as typeof EVMChain).decimals
+      value +=
+        nativeDecimals < evmDecimals
+          ? message.fee * BigInt(10) ** BigInt(evmDecimals - nativeDecimals)
+          : message.fee
+    }
 
     const sendTx = await contract.ccipSend.populateTransaction(
       destChainSelector,

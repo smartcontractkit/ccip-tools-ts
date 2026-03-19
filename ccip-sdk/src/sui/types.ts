@@ -9,12 +9,12 @@ import { getAddressBytes, getDataBytes } from '../utils.ts'
 export type CCIPMessage_V1_6_Sui = CCIPMessage_V1_6 & SuiExtraArgsV1
 
 /**
- * Unsigned Sui transaction, serialized via Transaction#serialize().
- * Reconstruct with Transaction.from(transactions[0]).
+ * Unsigned Sui transaction payload for `Transaction.from(transactions[0])`.
+ * Use JSON from Transaction#serialize(), or BCS bytes from Transaction#build().
  */
 export type UnsignedSuiTx = {
   family: typeof ChainFamily.Sui
-  transactions: [string]
+  transactions: [string | Uint8Array]
 }
 
 export const SuiExtraArgsV1Codec = bcs.struct('SuiExtraArgsV1', {

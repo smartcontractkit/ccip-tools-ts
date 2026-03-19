@@ -32,7 +32,7 @@ import {
   getDataBytes,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
-import { type BytesLike, AbiCoder, formatUnits, toUtf8Bytes } from 'ethers'
+import { type BytesLike, AbiCoder, ZeroAddress, formatUnits, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -318,7 +318,14 @@ async function sendMessage(
   }
 
   let feeToken, feeTokenInfo
-  if (argv.feeToken) {
+  const feeTokenArg = (argv.feeToken ?? '').toLowerCase()
+  if (feeTokenArg === 'native' || feeTokenArg === 'hbar') {
+    // CCIP Directory lists native HBAR as a fee token on Hedera; use ZeroAddress so EVM sends msg.value
+    feeToken = ZeroAddress
+    const wrappedNative = await source.getNativeTokenForRouter(argv.router)
+    feeTokenInfo = await source.getTokenInfo(wrappedNative)
+    feeTokenInfo = { ...feeTokenInfo, symbol: feeTokenInfo.symbol.replace(/^W/, '') || 'HBAR' }
+  } else if (argv.feeToken) {
     try {
       feeToken = (source.constructor as ChainStatic).getAddress(argv.feeToken)
       feeTokenInfo = await source.getTokenInfo(feeToken)
@@ -336,6 +343,13 @@ async function sendMessage(
   } else {
     const nativeToken = await source.getNativeTokenForRouter(argv.router)
     feeTokenInfo = await source.getTokenInfo(nativeToken)
+    if (feeTokenInfo.symbol === 'WHBAR') {
+      // On Hedera, default to native HBAR (msg.value) rather than WHBAR approval
+      feeToken = ZeroAddress
+      feeTokenInfo = { ...feeTokenInfo, symbol: 'HBAR' }
+    } else {
+      feeToken = nativeToken
+    }
   }
 
   const message: MessageInput = {
@@ -371,9 +385,11 @@ async function sendMessage(
     const balance = await source.getBalance({ holder: walletAddress, token: feeToken })
     if (balance < fee) {
       const symbol =
-        feeTokenInfo.symbol.startsWith('W') && !feeToken
-          ? feeTokenInfo.symbol.substring(1)
-          : feeTokenInfo.symbol
+        feeToken === ZeroAddress
+          ? feeTokenInfo.symbol
+          : feeTokenInfo.symbol.startsWith('W')
+            ? feeTokenInfo.symbol.substring(1)
+            : feeTokenInfo.symbol
       throw new CCIPInsufficientBalanceError(
         formatUnits(balance, feeTokenInfo.decimals),
         formatUnits(fee, feeTokenInfo.decimals),

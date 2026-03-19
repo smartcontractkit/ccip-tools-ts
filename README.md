@@ -45,9 +45,10 @@ const fee = await source.getFee({ router, destChainSelector, message: {
 | Chain Family | Networks                                                     | Status         |
 | ------------ | ------------------------------------------------------------ | -------------- |
 | EVM          | Ethereum, Arbitrum, Optimism, Polygon, Avalanche, Base, etc. | Supported      |
+| EVM (Hedera) | Mainnet, Testnet                                             | Supported (native HBAR fee) |
 | Solana       | Mainnet, Devnet                                              | Supported      |
 | Aptos        | Mainnet, Testnet                                             | Supported      |
-| Sui          | Mainnet, Testnet                                             | Partial (manual exec) |
+| Sui          | Mainnet, Testnet                                             | Partial (no token pool queries) |
 | TON          | Mainnet, Testnet                                             | Partial (no token pool/registry queries) |
 
 ## Documentation
