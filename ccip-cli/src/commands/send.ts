@@ -342,8 +342,14 @@ async function sendMessage(
     }
   } else {
     const nativeToken = await source.getNativeTokenForRouter(argv.router)
-    feeToken = nativeToken
     feeTokenInfo = await source.getTokenInfo(nativeToken)
+    if (feeTokenInfo.symbol === 'WHBAR') {
+      // On Hedera, default to native HBAR (msg.value) rather than WHBAR approval
+      feeToken = ZeroAddress
+      feeTokenInfo = { ...feeTokenInfo, symbol: 'HBAR' }
+    } else {
+      feeToken = nativeToken
+    }
   }
 
   const message: MessageInput = {
