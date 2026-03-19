@@ -71,6 +71,7 @@ import {
   util,
 } from '../utils.ts'
 import { generateUnsignedExecutePTB, signAndExecuteSuiTx } from './exec.ts'
+import { resolveExecuteOptsForSui } from './resolve-execute-opts.ts'
 import { buildCcipSendPTB, getFee as getFeeForSend } from './send.ts'
 import { type CCIPMessage_V1_6_Sui, type UnsignedSuiTx, encodeSuiExtraArgsV1 } from './types.ts'
 
@@ -809,15 +810,16 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   override async generateUnsignedExecute(
     opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<UnsignedSuiTx> {
-    const resolved = await this.resolveExecuteOpts(opts)
-    if (!resolved.offRamp.includes('::')) resolved.offRamp += '::offramp'
+    const resolved = await resolveExecuteOptsForSui(this, opts)
+    let offRamp = resolved.offRamp
+    if (!offRamp.includes('::')) offRamp += '::offramp'
     if (!('message' in resolved.input)) {
       throw new CCIPExecutionReportChainMismatchError('Sui')
     }
 
     return generateUnsignedExecutePTB(
       this.client,
-      resolved.offRamp,
+      offRamp,
       resolved.input as ExecutionInput<CCIPMessage_V1_6_Sui>,
       {
         gasLimit: resolved.gasLimit,
