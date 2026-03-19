@@ -149,24 +149,20 @@ for (const request of requests) {
 
 ### Search by Sender Address
 
-`getMessagesForSender` scans on-chain logs for all messages from a specific sender. RPC-only — no API dependency.
+Use `CCIPAPIClient.searchAllMessages` to find all messages from a specific sender via the CCIP API:
 
 ```typescript
-import { EVMChain, getMessagesForSender } from '@chainlink/ccip-sdk'
+import { CCIPAPIClient } from '@chainlink/ccip-sdk'
 
-const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const api = CCIPAPIClient.fromUrl()
 
-for await (const request of getMessagesForSender(
-  source,
-  '0xSenderAddress...',
-  { startBlock: 1000000 }
-)) {
-  console.log('Message ID:', request.message.messageId)
-  console.log('Sent to:', request.lane.destChainSelector)
+for await (const msg of api.searchAllMessages({ sender: '0xSenderAddress...' })) {
+  console.log('Message ID:', msg.messageId)
+  console.log('Status:', msg.status)
 }
 ```
 
-`getMessagesForSender` yields partial requests — `tx` and `timestamp` fields are omitted since it scans logs without fetching full transaction data. To get the full `CCIPRequest`, call `getMessagesInTx` with the message's transaction hash.
+`searchAllMessages` is an async generator that handles cursor-based pagination automatically. You can also filter by `receiver`, `sourceChainSelector`, `destChainSelector`, and `readyForManualExecOnly`. To get full message details for a specific result, use `api.getMessageById(msg.messageId)`.
 
 ### Check Commit/Verification Status
 
@@ -310,7 +306,7 @@ const txUrl = getCCIPExplorerUrl('tx', txHash)
 |--------|-------------|--------------|---------|
 | `getMessageById(id)` | CCIP API | Yes | `CCIPRequest` with `metadata` (status, delivery time, execution receipt) |
 | `getMessagesInTx(txHash)` | RPC (API fallback) | No | `CCIPRequest[]` (no `metadata` unless API fallback used) |
-| `getMessagesForSender(chain, sender, filter)` | RPC (log scan) | No | Partial `CCIPRequest` (no `tx`, `timestamp`, or `metadata`) |
+| `api.searchAllMessages({ sender })` | CCIP API | Yes | `MessageSearchResult` (async generator with pagination) |
 | `getVerifications({offRamp, request})` | RPC (log scan) | No | `CCIPVerifications` (commit report or verifier results) |
 | `getExecutionReceipts({offRamp, messageId})` | RPC (log scan) | No | `CCIPExecution` iterator (state, gasUsed, return data) |
 | `discoverOffRamp(source, dest, onRamp)` | RPC (contract calls) | No | OffRamp address (memoized) |

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CLI: add `search messages` command to query CCIP messages via API with filters (sender, receiver, chains, manual-exec) and interactive result inspector
+- SDK: **Breaking**: remove `getMessagesForSender` — use `CCIPAPIClient.searchAllMessages({ sender })` instead
+
 ## [1.2.0] - 2026-03-11
 
 - CLI: add shell completion support (`ccip-cli completion`) for bash and zsh

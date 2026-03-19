@@ -1,7 +1,7 @@
 import { type BytesLike, hexlify, isBytesLike, toBigInt } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
-import { type ChainStatic, type LogFilter, Chain } from './chain.ts'
+import { type ChainStatic, Chain } from './chain.ts'
 import {
   CCIPChainFamilyUnsupportedError,
   CCIPMessageBatchIncompleteError,
@@ -391,64 +391,6 @@ export async function getMessagesInBatch<
     )
   }
   return messages
-}
-
-/**
- * Fetches CCIP requests originated by a specific sender.
- * @param source - Source chain instance.
- * @param sender - Sender address.
- * @param filter - Log filter options.
- * @returns Async generator of CCIP requests.
- * @throws {@link CCIPChainFamilyUnsupportedError} if chain family not supported for legacy messages
- *
- * @example
- * ```typescript
- * import { getMessagesForSender, EVMChain } from '@chainlink/ccip-sdk'
- *
- * const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
- *
- * for await (const request of getMessagesForSender(chain, '0xSenderAddress', {})) {
- *   console.log('Message ID:', request.message.messageId)
- *   console.log('Destination:', request.lane.destChainSelector)
- * }
- * ```
- *
- * @see {@link getMessagesInTx} - Fetch from specific transaction
- * @see {@link getMessageById} - Search by messageId
- */
-export async function* getMessagesForSender(
-  source: Chain,
-  sender: string,
-  filter: Pick<LogFilter, 'address' | 'startBlock' | 'startTime' | 'endBlock'>,
-): AsyncGenerator<Omit<CCIPRequest, 'tx' | 'timestamp'>, void, unknown> {
-  const filterWithSender = {
-    ...filter,
-    sender, // some chain families may use this to look for account lookup/narrow down the search
-    topics: ['CCIPSendRequested', 'CCIPMessageSent'],
-  }
-  for await (const log of source.getLogs(filterWithSender)) {
-    const message = (source.constructor as ChainStatic).decodeMessage(log)
-    if (message?.sender !== sender) continue
-    let destChainSelector, version
-    if ('destChainSelector' in message) {
-      destChainSelector = message.destChainSelector
-      ;[, version] = await source.typeAndVersion(log.address)
-    } else if (source.network.family === ChainFamily.EVM) {
-      ;({ destChainSelector, version } = await (source as EVMChain).getLaneForOnRamp(log.address))
-    } else {
-      throw new CCIPChainFamilyUnsupportedError(source.network.family)
-    }
-    yield {
-      lane: {
-        sourceChainSelector: source.network.chainSelector,
-        destChainSelector,
-        onRamp: log.address,
-        version: version as CCIPVersion,
-      },
-      message,
-      log,
-    }
-  }
 }
 
 /**
