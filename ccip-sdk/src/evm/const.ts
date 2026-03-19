@@ -4,7 +4,8 @@ import { type EventFragment, AbiCoder, Interface } from 'ethers'
 import Token_ABI from './abi/BurnMintERC677Token.ts'
 import CommitStore_1_2_ABI from './abi/CommitStore_1_2.ts'
 import CommitStore_1_5_ABI from './abi/CommitStore_1_5.ts'
-import FeeQuoter_ABI from './abi/FeeQuoter_1_6.ts'
+import FeeQuoter_1_6_ABI from './abi/FeeQuoter_1_6.ts'
+import FeeQuoter_2_0_ABI from './abi/FeeQuoter_2_0.ts'
 import TokenPool_1_5_ABI from './abi/LockReleaseTokenPool_1_5.ts'
 import TokenPool_1_5_1_ABI from './abi/LockReleaseTokenPool_1_5_1.ts'
 import TokenPool_1_6_ABI from './abi/LockReleaseTokenPool_1_6_1.ts'
@@ -35,7 +36,9 @@ export const interfaces = {
   Router: new Interface(Router_ABI),
   Token: new Interface(Token_ABI),
   TokenAdminRegistry: new Interface(TokenAdminRegistry_ABI),
-  FeeQuoter: new Interface(FeeQuoter_ABI),
+  FeeQuoter: new Interface(FeeQuoter_1_6_ABI),
+  FeeQuoter_v1_6: new Interface(FeeQuoter_1_6_ABI),
+  FeeQuoter_v2_0: new Interface(FeeQuoter_2_0_ABI),
   TokenPool_v1_5_1: new Interface(TokenPool_1_5_1_ABI),
   TokenPool_v1_5: new Interface(TokenPool_1_5_ABI),
   TokenPool_v1_6: new Interface(TokenPool_1_6_ABI),
