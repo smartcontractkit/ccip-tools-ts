@@ -31,11 +31,20 @@ import {
   CCIPSuiLogInvalidError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
-import { EVMExtraArgsV2Tag } from '../extra-args.ts'
-import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
+import {
+  type EVMExtraArgsV2,
+  type ExtraArgs,
+  type SVMExtraArgsV1,
+  type SuiExtraArgsV1,
+  EVMExtraArgsV2Tag,
+} from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
-import { BcsEVMExtraArgsV2Codec, decodeMoveExtraArgs, getMoveAddress } from '../shared/bcs-codecs.ts'
+import {
+  BcsEVMExtraArgsV2Codec,
+  decodeMoveExtraArgs,
+  getMoveAddress,
+} from '../shared/bcs-codecs.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
@@ -62,9 +71,8 @@ import {
   util,
 } from '../utils.ts'
 import { generateUnsignedExecutePTB, signAndExecuteSuiTx } from './exec.ts'
-import { getFee as getFeeForSend, buildCcipSendPTB } from './send.ts'
-import { encodeSuiExtraArgsV1 } from './types.ts'
-import type { CCIPMessage_V1_6_Sui, UnsignedSuiTx } from './types.ts'
+import { buildCcipSendPTB, getFee as getFeeForSend } from './send.ts'
+import { type CCIPMessage_V1_6_Sui, type UnsignedSuiTx, encodeSuiExtraArgsV1 } from './types.ts'
 
 export type { UnsignedSuiTx }
 
@@ -598,7 +606,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /**
    * Encodes extra arguments for CCIP messages.
-   * @param _extraArgs - Extra arguments to encode.
+   * @param extraArgs - Extra arguments to encode.
    * @returns Encoded extra arguments as a hex string.
    * @throws {@link CCIPNotImplementedError} always (not yet implemented)
    */
@@ -726,8 +734,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       opts.message,
       networkInfo(opts.destChainSelector).family,
     )
-    const fee =
-      opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage }))
+    const fee = opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage }))
     const message = { ...populatedMessage, fee }
     const tx = await buildCcipSendPTB(
       this.client,
@@ -752,8 +759,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       opts.message,
       networkInfo(opts.destChainSelector).family,
     )
-    const fee =
-      opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage }))
+    const fee = opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage }))
     const message = { ...populatedMessage, fee }
 
     const tx = await buildCcipSendPTB(

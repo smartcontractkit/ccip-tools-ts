@@ -1308,7 +1308,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       const evmDecimals = (this.constructor as typeof EVMChain).decimals
       value +=
         nativeDecimals < evmDecimals
-          ? message.fee * 10n ** BigInt(evmDecimals - nativeDecimals)
+          ? message.fee * BigInt(10) ** BigInt(evmDecimals - nativeDecimals)
           : message.fee
     }
 
