@@ -27,11 +27,12 @@ import {
   CCIPInsufficientBalanceError,
   CCIPTokenNotFoundError,
   ChainFamily,
+  bigIntReviver,
   estimateReceiveExecution,
   getDataBytes,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
-import { type BytesLike, ZeroAddress, formatUnits, toUtf8Bytes } from 'ethers'
+import { type BytesLike, AbiCoder, ZeroAddress, formatUnits, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -76,7 +77,8 @@ export const builder = (yargs: Argv) =>
       },
       data: {
         type: 'string',
-        describe: 'Data payload to send (non-hex will be UTF-8 encoded)',
+        describe:
+          'Data payload to send (0x-bytearrays are used as is; "0x:" prefix will be string abi.encoded, otherwise it\'ll be raw-UTF-8 encoded)',
       },
       'gas-limit': {
         alias: ['L', 'compute-units'],
@@ -106,7 +108,7 @@ export const builder = (yargs: Argv) =>
       wallet: {
         alias: 'w',
         type: 'string',
-        describe: 'Wallet: ledger[:index] or private key',
+        describe: 'Wallet: ledger[:index], foundry:<name>, hardhat:<name>, or private key',
       },
       'token-receiver': {
         type: 'string',
@@ -117,6 +119,14 @@ export const builder = (yargs: Argv) =>
         type: 'array',
         string: true,
         describe: 'Solana accounts (append =rw for writable) or Sui object IDs',
+      },
+      extra: {
+        alias: 'x',
+        type: 'array',
+        string: true,
+        describe:
+          'Extra args to pass in the message: key=value (value parsed as JSON with bigint support, fallback to string; repeated keys become arrays)',
+        example: '-x ccvs=["0xvalue1", "0xvalue2"] --extra=blockConfirmations=1',
       },
       'only-get-fee': {
         type: 'boolean',
@@ -141,6 +151,7 @@ export const builder = (yargs: Argv) =>
       ({ 'transfer-tokens': transferTokens }) =>
         !transferTokens || transferTokens.every((t) => /^[^=]+=\d+(\.\d+)?$/.test(t)),
     )
+    .check(({ extra }) => !extra || extra.every((e) => /^[^=]+=/.test(e)))
     .example([
       [
         'ccip-cli send -s ethereum-testnet-sepolia -d arbitrum-sepolia -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 --only-get-fee',
@@ -166,6 +177,45 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
     .finally(destroy)
 }
 
+/**
+ * Parse --extra=key=value entries into a record.
+ * Values are parsed as JSON with bigint support for integers; fallback to string.
+ * Repeated keys are accumulated into an array.
+ *
+ * @example
+ * `assert.eq(parseExtraArgs(['ccvs=["0xvalue1", "0xvalue2"]', 'blockConfirmations=1', 'flag=true']), { ccvs: ["0xvalue1", "0xvalue2"], blockConfirmations: 1n, flag: true })`
+ */
+function parseExtraArgs(extra: readonly string[] | undefined): Record<string, unknown> {
+  if (!extra?.length) return {}
+  const result: Record<string, unknown> = {}
+  for (const entry of extra) {
+    const eqIdx = entry.indexOf('=')
+    const key = entry.substring(0, eqIdx)
+    const raw = entry.substring(eqIdx + 1)
+    let value: unknown
+    try {
+      // Quote bare integer literals (outside JSON strings) so bigIntReviver can convert them to BigInt.
+      // The alternation matches JSON strings first (preserved as-is) and number tokens second
+      // (pure integers get quoted; floats/scientific-notation are left alone).
+      const quoted = raw.replace(/"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g, (m) =>
+        m.startsWith('"') || !/^-?\d+$/.test(m) ? m : `"${m}"`,
+      )
+      value = JSON.parse(quoted, bigIntReviver)
+    } catch {
+      value = raw
+    }
+    if (key in result) {
+      const existing = result[key]
+      result[key] = Array.isArray(existing)
+        ? (existing as unknown[]).concat([value])
+        : ([existing, value] as unknown[])
+    } else {
+      result[key] = value
+    }
+  }
+  return result
+}
+
 async function sendMessage(
   ctx: Ctx,
   argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts,
@@ -179,9 +229,13 @@ async function sendMessage(
   let data: BytesLike | undefined
   if (argv.data) {
     try {
+      // 0x or base64 bytearrays
       data = getDataBytes(argv.data)
     } catch (_) {
-      data = toUtf8Bytes(argv.data)
+      if (argv.data.startsWith('0x:')) {
+        // if data is a non-bytearray string prefixed with "0x:", abi.encode as string
+        data = AbiCoder.defaultAbiCoder().encode(['string'], [argv.data.substring(3)])
+      } else data = toUtf8Bytes(argv.data) // otherwise, raw string, encode as UTF-8 bytes
     }
   }
 
@@ -248,6 +302,7 @@ async function sendMessage(
 
   // builds a catch-all extraArgs object, which can be massaged by
   // [[Chain.buildMessageForDest]] to create suitable extraArgs with defaults if needed
+  // --extra entries are spread last so they take priority over code-generated values
   const extraArgs = {
     ...(argv.allowOutOfOrderExec != null && {
       allowOutOfOrderExecution: !!argv.allowOutOfOrderExec,
@@ -259,6 +314,7 @@ async function sendMessage(
         : { gasLimit: BigInt(argv.gasLimit) }),
     ...(!!argv.tokenReceiver && { tokenReceiver: argv.tokenReceiver }),
     ...(!!accounts && { accounts, accountIsWritableBitmap }), // accounts also used as Sui receiverObjectIds
+    ...parseExtraArgs(argv.extra),
   }
 
   let feeToken, feeTokenInfo

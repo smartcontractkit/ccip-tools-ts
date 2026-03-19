@@ -1,15 +1,38 @@
 import { Buffer } from 'buffer'
 
-import { type Transaction, Address, Cell, beginCell, toNano } from '@ton/core'
+import {
+  type Transaction,
+  Address,
+  BitReader,
+  BitString,
+  Cell,
+  Slice,
+  beginCell,
+  toNano,
+} from '@ton/core'
 import { TonClient } from '@ton/ton'
 import { type AxiosAdapter, getAdapter } from 'axios'
-import { type BytesLike, hexlify, isBytesLike, isHexString, toBeArray, toBeHex } from 'ethers'
+import {
+  type BytesLike,
+  dataSlice,
+  hexlify,
+  isBytesLike,
+  isHexString,
+  toBeArray,
+  toBeHex,
+} from 'ethers'
 import { type Memoized, memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { streamTransactionsForAddress } from './logs.ts'
-import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
-import { type ChainContext, type GetBalanceOpts, type LogFilter, Chain } from '../chain.ts'
+import { encodeExtraArgsCell, generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
+import {
+  type ChainContext,
+  type GetBalanceOpts,
+  type LogFilter,
+  type TokenTransferFeeOpts,
+  Chain,
+} from '../chain.ts'
 import {
   CCIPArgumentInvalidError,
   CCIPExecutionReportChainMismatchError,
@@ -319,7 +342,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       if (msg.info.type !== 'external-out') continue
       const topics = []
       // logs are external messages where dest "address" is the uint32 topic (e.g. crc32("ExecutionStateChanged"))
-      if (msg.info.dest && msg.info.dest.value > 0n && msg.info.dest.value < 2n ** 32n)
+      if (
+        msg.info.dest &&
+        msg.info.dest.value > 0n &&
+        msg.info.dest.value < BigInt(2) ** BigInt(32)
+      )
         topics.push(toBeHex(msg.info.dest.value, 4))
       let data = ''
       try {
@@ -642,24 +669,14 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
       // Load extraArgs from ref 2
       const extraArgsCell = bodySlice.loadRef()
-      const extraArgsSlice = extraArgsCell.beginParse()
-
-      // Read tag (32 bits)
-      const extraArgsTag = extraArgsSlice.loadUint(32)
-      if (extraArgsTag !== Number(EVMExtraArgsV2Tag)) return undefined
-
-      // Read gasLimit (maybe uint256): 1 bit flag + 256 bits if present
-      const hasGasLimit = extraArgsSlice.loadBit()
-      const gasLimit = hasGasLimit ? extraArgsSlice.loadUintBig(256) : 0n
-
-      // Read allowOutOfOrderExecution (1 bit)
-      const allowOutOfOrderExecution = extraArgsSlice.loadBit()
 
       // Build extraArgs as raw hex matching reference format
-      const extraArgs = '0x' + extraArgsCell.toBoc().toString('hex')
+      const extraArgs = '0x' + extraArgsCell.bits.toString().toLowerCase().replace('_', '0')
+      const parsed = this.decodeExtraArgs(extraArgs)
+      if (!parsed) return
+      const { _tag, ...extraArgsObj } = parsed
 
       // Load tokenAmounts from ref 3
-      const _tokenAmountsCell = bodySlice.loadRef()
       const tokenAmounts: CCIPMessage_V1_6_EVM['tokenAmounts'] = [] // TODO: FIXME: parse when implemented
 
       // Load feeToken (inline address in body)
@@ -678,8 +695,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         feeTokenAmount,
         feeValueJuels,
         extraArgs,
-        gasLimit,
-        allowOutOfOrderExecution,
+        ...extraArgsObj,
       }
     } catch {
       return undefined
@@ -697,17 +713,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @returns Hex string of BOC-encoded extra args (0x-prefixed)
    */
   static encodeExtraArgs(args: ExtraArgs): string {
-    if ('gasLimit' in args && 'allowOutOfOrderExecution' in args) {
-      const cell = beginCell()
-        .storeUint(Number(EVMExtraArgsV2Tag), 32) // magic tag
-        .storeUint(args.gasLimit, 256) // gasLimit
-        .storeBit(args.allowOutOfOrderExecution) // bool
-        .endCell()
-
-      // Return full BOC including headers
-      return '0x' + cell.toBoc().toString('hex')
-    }
-    return '0x'
+    const cell = encodeExtraArgsCell(args)
+    return '0x' + cell.bits.toString().toLowerCase().replace('_', '0')
   }
 
   /**
@@ -725,25 +732,28 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   static decodeExtraArgs(
     extraArgs: BytesLike,
   ): (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' }) | undefined {
-    const data = bytesToBuffer(extraArgs)
-
+    let bytes
     try {
-      // Parse BOC format to extract cell data
-      const cell = Cell.fromBoc(data)[0]!
-      const slice = cell.beginParse()
+      bytes = bytesToBuffer(extraArgs)
 
-      // Load and verify magic tag to ensure correct extra args type
-      const magicTag = slice.loadUint(32)
-      if (magicTag !== Number(EVMExtraArgsV2Tag)) return undefined
-
-      return {
-        _tag: 'EVMExtraArgsV2',
-        gasLimit: slice.loadUintBig(256),
-        allowOutOfOrderExecution: slice.loadBit(),
+      // If the data is BOC-wrapped (starts with TON BOC magic 0xb5ee9c72), extract bits
+      if (dataSlice(bytes, 0, 4) !== EVMExtraArgsV2Tag) {
+        const cell = Cell.fromBoc(bytes)[0]!
+        bytes = bytesToBuffer('0x' + cell.bits.toString().toLowerCase().replace('_', '0'))
       }
+      if (dataSlice(bytes, 0, 4) !== EVMExtraArgsV2Tag) return
     } catch {
-      // Return undefined for any parsing errors (invalid BOC, malformed data, etc.)
-      return undefined
+      return
+    }
+
+    const slice = new Slice(new BitReader(new BitString(bytes, 32, bytes.length * 8)), [])
+    const gasLimit = slice.loadMaybeUintBig(256) ?? 0n
+    const allowOutOfOrderExecution = slice.loadBit()
+
+    return {
+      _tag: 'EVMExtraArgsV2',
+      gasLimit,
+      allowOutOfOrderExecution,
     }
   }
 
@@ -1201,7 +1211,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * {@inheritDoc Chain.getTokenPoolConfig}
    * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
    */
-  async getTokenPoolConfig(_tokenPool: string): Promise<never> {
+  async getTokenPoolConfig(_tokenPool: string, _feeOpts?: TokenTransferFeeOpts): Promise<never> {
     return Promise.reject(new CCIPNotImplementedError('getTokenPoolConfig'))
   }
 

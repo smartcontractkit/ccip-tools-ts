@@ -93,7 +93,7 @@ export async function cleanUpBuffers(
       } catch (err) {
         const info = await connection.getAddressLookupTable(lookupTable)
         if (!info.value) break
-        else if (info.value.state.deactivationSlot < 2n ** 63n)
+        else if (info.value.state.deactivationSlot < BigInt(2) ** BigInt(63))
           deactivationSlot = Number(info.value.state.deactivationSlot)
         logger.warn('Failed to close lookup table', altAddr, err)
       }
@@ -196,7 +196,7 @@ export async function cleanUpBuffers(
             'not owned by us, but by',
             info.value.state.authority?.toBase58(),
           )
-        } else if (info.value.state.deactivationSlot < 2n ** 63n) {
+        } else if (info.value.state.deactivationSlot < BigInt(2) ** BigInt(63)) {
           // non-deactivated have deactivationSlot=MAX_UINT64
           pendingPromises.push(closeAlt(lookupTable, Number(info.value.state.deactivationSlot)))
         } else if (

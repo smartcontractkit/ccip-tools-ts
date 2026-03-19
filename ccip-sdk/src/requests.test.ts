@@ -510,6 +510,43 @@ describe('decodeMessage', () => {
     }
   })
 
+  it('should decode Solana message with all-digit receiver address', () => {
+    // Solana system program address "11111111111111111111111111111111" is all digits
+    // and must not be converted to BigInt by the JSON parser
+    const msg = decodeMessage({
+      header: {
+        messageId: '0xabc123',
+        sourceChainSelector: '13264668187771770619',
+        destChainSelector: '16423721717087811551',
+        sequenceNumber: '1',
+        nonce: '0',
+      },
+      sender: '0x8700e9ca8e50fa33759a8c0930fa52495c46bfa8',
+      receiver: '11111111111111111111111111111111',
+      data: '',
+      tokenAmounts: [],
+      feeToken: '0xae13d989dac2f0debff460ac112a837c89baa7cd',
+      feeTokenAmount: '416791700726361',
+      feeValueJuels: '13802361978645159',
+      extraArgs:
+        '0x1f3b3aba00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000018efef6f9e6fff9129a24e22073f078266865bd80c3be8130a2f897ab3f5d365e00000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000',
+      computeUnits: 0,
+      accountIsWritableBitmap: '0',
+      tokenReceiver: 'AdCPLpAoBYtbpRJaDDm6MFrLCykKpYUXNJ2tkoPv1X1P',
+      allowOutOfOrderExecution: true,
+    })
+
+    assert.equal(msg.messageId, '0xabc123')
+    // receiver should be a string, not converted to BigInt
+    assert.equal(typeof msg.receiver, 'string')
+    assert.equal(msg.receiver, '11111111111111111111111111111111')
+    assert.equal(msg.feeTokenAmount, 416791700726361n)
+    assert.ok('feeValueJuels' in msg)
+    if ('feeValueJuels' in msg) {
+      assert.equal(msg.feeValueJuels, 13802361978645159n)
+    }
+  })
+
   describe('buildMessageForDest', () => {
     describe('Chain (base implementation)', () => {
       it('should populate default extraArgs for EVM with data', () => {
@@ -617,6 +654,38 @@ describe('decodeMessage', () => {
 
         assert.deepEqual(result.tokenAmounts, message.tokenAmounts)
         assert.equal(result.feeToken, message.feeToken)
+      })
+
+      it('should throw on unknown fields for V2 extraArgs', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+          extraArgs: {
+            gasLimit: 200000n,
+            typo: 'oops',
+          } as any,
+        }
+
+        assert.throws(
+          () => Chain.buildMessageForDest(message),
+          /unknown field.*EVMExtraArgsV2.*"typo"/i,
+        )
+      })
+
+      it('should throw on unknown fields for V3 extraArgs', () => {
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+          data: '0x1234',
+          extraArgs: {
+            blockConfirmations: 1,
+            typo: 'oops',
+          } as any,
+        }
+
+        assert.throws(
+          () => Chain.buildMessageForDest(message),
+          /unknown field.*GenericExtraArgsV3.*"typo"/i,
+        )
       })
     })
 
@@ -818,7 +887,7 @@ describe('decodeMessage', () => {
         assert.equal(extraArgs.computeUnits, 0n)
       })
 
-      it('should output only strict SVMExtraArgsV1 variables', () => {
+      it('should throw on unknown fields for SVMExtraArgsV1', () => {
         const message = {
           receiver: 'DummyReceiverAddress1234567890123456789012',
           data: '0x1234',
@@ -828,17 +897,10 @@ describe('decodeMessage', () => {
           },
         }
 
-        const result = SolanaChain.buildMessageForDest(message)
-
-        const extraArgs = result.extraArgs as SVMExtraArgsV1
-        assert.ok('computeUnits' in extraArgs)
-        assert.ok('allowOutOfOrderExecution' in extraArgs)
-        assert.ok('tokenReceiver' in extraArgs)
-        assert.ok('accounts' in extraArgs)
-        assert.ok('accountIsWritableBitmap' in extraArgs)
-        assert.ok(!('gasLimit' in extraArgs))
-        assert.ok(!('someOtherField' in extraArgs))
-        assert.equal(Object.keys(extraArgs).length, 5)
+        assert.throws(
+          () => SolanaChain.buildMessageForDest(message),
+          /unknown field.*SVMExtraArgsV1.*"someOtherField"/i,
+        )
       })
 
       it('should use custom tokenReceiver when provided', () => {
@@ -1149,7 +1211,7 @@ describe('decodeMessage', () => {
         assert.equal(result.feeToken, message.feeToken)
       })
 
-      it('should output only SuiExtraArgsV1 variables', () => {
+      it('should throw on unknown fields for SuiExtraArgsV1', () => {
         const message = {
           receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
           data: '0x1234',
@@ -1159,14 +1221,10 @@ describe('decodeMessage', () => {
           },
         }
 
-        const result = SuiChain.buildMessageForDest(message)
-
-        assert.ok('gasLimit' in result.extraArgs)
-        assert.ok('allowOutOfOrderExecution' in result.extraArgs)
-        assert.ok('tokenReceiver' in result.extraArgs)
-        assert.ok('receiverObjectIds' in result.extraArgs)
-        assert.ok(!('unknownField' in result.extraArgs))
-        assert.equal(Object.keys(result.extraArgs).length, 4)
+        assert.throws(
+          () => SuiChain.buildMessageForDest(message),
+          /unknown field.*SuiExtraArgsV1.*"unknownField"/i,
+        )
       })
     })
   })

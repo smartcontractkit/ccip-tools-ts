@@ -27,7 +27,7 @@ import {
   CCIPTransactionNotFinalizedError,
 } from '../errors/index.ts'
 import type { ChainLog, WithLogger } from '../types.ts'
-import { getDataBytes, sleep } from '../utils.ts'
+import { bigIntReplacer, getDataBytes, sleep } from '../utils.ts'
 import type { IDL as BASE_TOKEN_POOL_IDL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import type { UnsignedSolanaTx, Wallet } from './types.ts'
 import type { RateLimiterState } from '../chain.ts'
@@ -347,7 +347,7 @@ export async function simulateTransaction(
     throw new SendTransactionError({
       action: 'simulate',
       signature: '',
-      transactionMessage: JSON.stringify(result.value.err),
+      transactionMessage: JSON.stringify(result.value.err, bigIntReplacer),
       logs: result.value.logs!,
     })
   }

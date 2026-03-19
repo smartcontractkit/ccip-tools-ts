@@ -40,9 +40,9 @@ The latency estimate includes time for:
 
 ## Options
 
-| Option      | Type   | Default                       | Description         |
-| ----------- | ------ | ----------------------------- | ------------------- |
-| `--api-url` | string | `https://api.ccip.chain.link` | Custom CCIP API URL |
+| Option  | Type   | Default                       | Description         |
+| ------- | ------ | ----------------------------- | ------------------- |
+| `--api` | string | `https://api.ccip.chain.link` | Custom CCIP API URL |
 
 See [Configuration](/cli/configuration) for global options (`--format`, `--no-api`, etc.).
 
@@ -85,7 +85,7 @@ ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet --format json
 ### Use custom API endpoint
 
 ```bash
-ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet --api-url https://staging-api.example.com
+ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet --api https://staging-api.example.com
 ```
 
 ## Output

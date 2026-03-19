@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-03-11
+
+- CLI: add shell completion support (`ccip-cli completion`) for bash and zsh
+- SDK: add `CCIPAPIClient.searchMessages` with filters and cursor-based pagination, `searchAllMessages` async generator for automatic pagination, and `AbortSignal` support on all API methods
+- SDK: `Chain.estimateReceiverExecution` can now take a `messageId` and try to fetch messages details from API
+- SDK: `Chain.generateUnsignedExecute` and `execute` automatically try to `estimateReceiverExecution` if supported by dest chain and no `gasLimit` override is provided
+- CLI: add `--wallet hardhat:<name>` and  `--wallet foundry:<name>` keystore support for EVM
+
+## [1.1.0] - 2026-03-06
+
+- SDK: `getFeeTokens` now supports CCIP v2.0 lanes (via FeeQuoter, same as v1.6)
+- SDK: implemented `CCIPAPIClient.getExecutionInput(messageId: string)`
+- SDK: `dest.execute` and `dest.generateUnsignedExecute` can now execute directly from a `messageId`, without the need for an explicit `source.getExecutionInput`
+- SDK: `Chain` constructors context can receive a string URL for `apiClient`
+- CLI: using all the above, `manual-exec` now can receive a `messageId` as positional argument (besides `txHash`), and execute from CCIP-API's `/execution-inputs` without needing a source RPC
+- SDK: add TokenPool v2 support to `getTokenPoolRemotes` (`customBlockConfirmations[Out|In]boundRateLimiterState`) and `getTokenPoolConfig` (`minBlockConfirmations`)
+- CLI: add `minBlockConfirmations` and `[ftf]` rate limiter state info to `get-supported-tokens` command output
+- CLI: add `send --extra/-x key=value` param to pass arbitrary `extraArgs` to `send` messages
+
 ## [1.0.0] - 2026-02-26 - Major refactoring stable
 
 - SDK: `getOffchainTokenData` now uses CCTPv2 API for USDC transfers; can be called from either `source` or `dest`

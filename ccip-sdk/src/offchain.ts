@@ -1,14 +1,15 @@
-import { type BytesLike, dataLength, dataSlice, getBytes, toNumber } from 'ethers'
+import { type BytesLike, dataLength, dataSlice, toNumber } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import {
   CCIPLbtcAttestationNotApprovedError,
   CCIPLbtcAttestationNotFoundError,
   CCIPUsdcAttestationError,
+  CCIPUsdcBurnFeesError,
 } from './errors/index.ts'
 import { parseSourceTokenData } from './evm/messages.ts'
 import { type CCIPRequest, type OffchainTokenData, type WithLogger, NetworkType } from './types.ts'
-import { networkInfo } from './utils.ts'
+import { fetchWithTimeout, getDataBytes, networkInfo } from './utils.ts'
 
 const CIRCLE_API_URL = {
   mainnet: 'https://iris-api.circle.com',
@@ -58,6 +59,57 @@ export async function getUsdcAttestation(
   }
   if (!att?.message) throw new CCIPUsdcAttestationError(txHash, json, { context: opts })
   return att
+}
+
+/**
+ * CCTP V2 finality tier identifiers returned by Circle's burn-fees API.
+ *
+ * These are **opaque tier IDs**, not block counts or durations.
+ * The CCTP V2 whitepaper (Section 8, Table 2) defines exactly two tiers today;
+ * additional tiers may be added in the future (the wide spacing between values
+ * is intentional to leave room).
+ *
+ * @see https://developers.circle.com/cctp/concepts/fees
+ * @see CCTP V2 Whitepaper, Section 8 — "Finality Levels"
+ */
+
+/** Fast / pre-finality tier: attested seconds after soft confirmation. */
+export const CCTP_FINALITY_FAST = 1000
+
+/** Standard / finalized tier: attested after full on-chain finality. */
+export const CCTP_FINALITY_STANDARD = 2000
+
+/**
+ * Fetches USDC burn fee tiers from Circle's CCTP API.
+ *
+ * @param sourceDomain - CCTP source domain identifier
+ * @param destDomain - CCTP destination domain identifier
+ * @param networkType - network type (mainnet or testnet)
+ * @returns Array of fee tiers with finality thresholds and BPS fees
+ */
+export async function getUsdcBurnFees(
+  sourceDomain: number,
+  destDomain: number,
+  networkType: NetworkType,
+): Promise<{ finalityThreshold: number; minimumFee: number }[]> {
+  const baseUrl =
+    networkType === NetworkType.Mainnet ? CIRCLE_API_URL.mainnet : CIRCLE_API_URL.testnet
+  const url = `${baseUrl}/v2/burn/USDC/fees/${sourceDomain}/${destDomain}`
+  const res = await fetchWithTimeout(url, 'getUsdcBurnFees')
+  if (!res.ok) {
+    throw new CCIPUsdcBurnFeesError(sourceDomain, destDomain, res.status)
+  }
+  const json: unknown = await res.json()
+  if (!Array.isArray(json)) {
+    throw new CCIPUsdcBurnFeesError(sourceDomain, destDomain, res.status)
+  }
+  for (const tier of json) {
+    const t = tier as Record<string, unknown>
+    if (typeof t.finalityThreshold !== 'number' || typeof t.minimumFee !== 'number') {
+      throw new CCIPUsdcBurnFeesError(sourceDomain, destDomain, res.status)
+    }
+  }
+  return json as { finalityThreshold: number; minimumFee: number }[]
 }
 
 const LOMBARD_API_URL = {
@@ -122,7 +174,7 @@ export async function getOffchainTokenData(
   const { networkType } = networkInfo(request.message.sourceChainSelector)
 
   function looksUsdcData(extraData: BytesLike) {
-    if (dataLength(extraData) !== 64) return
+    if (getDataBytes(extraData).length !== 64) return
     // USDCTokenPool's extraData is a packed `SourceTokenDataPayloadV1{uint64 nonce, uint32 sourceDomain}`,
     // which we need to query CCTPv2 (by sourceDomain and txHash) and to filter by nonce among messages,
     // if more than one in tx
@@ -139,11 +191,9 @@ export async function getOffchainTokenData(
 
   function looksLbtcData(extraData: BytesLike) {
     // LBTC returns `message_hash`/`payloadHash` directly as `bytes32 extraData`
-    if (
-      dataLength(extraData) === 32 &&
-      getBytes(extraData, 'extraData').filter(Boolean).length > 20 // looks like a hash
-    )
-      return true
+    const bytes = getDataBytes(extraData)
+    // looks like a hash
+    if (bytes.length === 32 && bytes.filter(Boolean).length > 20) return true
   }
 
   return Promise.all(

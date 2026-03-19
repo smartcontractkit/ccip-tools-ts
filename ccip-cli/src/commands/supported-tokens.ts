@@ -125,7 +125,7 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     return
   }
 
-  let info, tokenPool, poolConfigs, registryConfig
+  let info, tokenPool, poolConfig, registryConfig
   if (registry && !argv.token) {
     // router + interactive list
     info = await listTokens(ctx, source, registry, argv)
@@ -133,16 +133,16 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     registryConfig = await source.getRegistryTokenConfig(registry, info.token)
     tokenPool = registryConfig.tokenPool
     if (!tokenPool) throw new CCIPTokenNotConfiguredError(info.token, registry)
-    poolConfigs = await source.getTokenPoolConfig(tokenPool)
+    poolConfig = await source.getTokenPoolConfig(tokenPool)
   } else {
     if (!argv.token) {
       // tokenPool
       tokenPool = argv.address
-      poolConfigs = await source.getTokenPoolConfig(tokenPool)
-      registry ??= await source.getTokenAdminRegistryFor(poolConfigs.router)
+      poolConfig = await source.getTokenPoolConfig(tokenPool)
+      registry ??= await source.getTokenAdminRegistryFor(poolConfig.router)
       ;[info, registryConfig] = await Promise.all([
-        source.getTokenInfo(poolConfigs.token),
-        source.getRegistryTokenConfig(registry, poolConfigs.token),
+        source.getTokenInfo(poolConfig.token),
+        source.getRegistryTokenConfig(registry, poolConfig.token),
       ])
     } else {
       registry ??= await source.getTokenAdminRegistryFor(argv.address)
@@ -152,16 +152,16 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
       registryConfig = await source.getRegistryTokenConfig(registry, argv.token)
       tokenPool = registryConfig.tokenPool
       if (!tokenPool) throw new CCIPTokenNotConfiguredError(argv.token, registry)
-      poolConfigs = await source.getTokenPoolConfig(tokenPool)
+      poolConfig = await source.getTokenPoolConfig(tokenPool)
     }
 
     if (argv.format === Format.json) {
-      logger.log(JSON.stringify({ ...info, tokenPool, ...poolConfigs }, bigIntReplacer, 2))
+      logger.log(JSON.stringify({ ...info, tokenPool, ...poolConfig }, bigIntReplacer, 2))
       return
     } else if (argv.format === Format.log) {
-      logger.log('Token:', poolConfigs.token, info)
+      logger.log('Token:', poolConfig.token, info)
       logger.log('Token Pool:', tokenPool)
-      logger.log('Pool Configs:', poolConfigs)
+      logger.log('Pool Configs:', poolConfig)
       return
     }
   }
@@ -169,17 +169,21 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
 
   prettyTable.call(ctx, {
     network: `${source.network.name} [${source.network.chainSelector}]`,
-    token: poolConfigs.token,
+    token: poolConfig.token,
     symbol: info.symbol,
     name: info.name,
     decimals: info.decimals,
     tokenPool,
-    typeAndVersion: poolConfigs.typeAndVersion,
-    router: poolConfigs.router,
+    typeAndVersion: poolConfig.typeAndVersion,
+    router: poolConfig.router,
     tokenAdminRegistry: registry,
     administrator: registryConfig.administrator,
     ...(registryConfig.pendingAdministrator && {
       pendingAdministrator: registryConfig.pendingAdministrator,
+    }),
+    ...(poolConfig.minBlockConfirmations != null && {
+      minBlockConfirmations:
+        poolConfig.minBlockConfirmations === 0 ? '0 (finality)' : poolConfig.minBlockConfirmations,
     }),
   })
   const remotesLen = Object.keys(remotes).length
@@ -189,8 +193,18 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
       remoteNetwork: `${network} [${networkInfo(network).chainSelector}]`,
       remoteToken: remote.remoteToken,
       remotePool: remote.remotePools,
-      inbound: prettyRateLimiter(remote.inboundRateLimiterState, info),
       outbound: prettyRateLimiter(remote.outboundRateLimiterState, info),
+      inbound: prettyRateLimiter(remote.inboundRateLimiterState, info),
+      ...('customBlockConfirmationsOutboundRateLimiterState' in remote && {
+        ['[ftf]outbound']: prettyRateLimiter(
+          remote.customBlockConfirmationsOutboundRateLimiterState,
+          info,
+        ),
+        ['[ftf]inbound']: prettyRateLimiter(
+          remote.customBlockConfirmationsInboundRateLimiterState,
+          info,
+        ),
+      }),
     })
 }
 

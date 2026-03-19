@@ -11,7 +11,7 @@ slug: /
 
 import Tabs from '@theme/Tabs'
 import TabItem from '@theme/TabItem'
-import { PackageVersion, ChainSupport, RpcProviders } from '@site/src/components'
+import { ExamplesLink, PackageVersion, ChainSupport, RpcProviders } from '@site/src/components'
 
 # CCIP SDK
 
@@ -22,6 +22,7 @@ TypeScript SDK for sending, tracking, and executing cross-chain messages on CCIP
   <div className="info-item"><span className="info-label">Version</span><span><PackageVersion package="sdk" /></span></div>
   <div className="info-item"><span className="info-label">Node.js</span><span>v20+ (v24+ recommended)</span></div>
   <div className="info-item"><span className="info-label">License</span><span>MIT</span></div>
+  <div className="info-item"><span className="info-label">Examples</span><span><ExamplesLink /></span></div>
 </div>
 
 :::note
@@ -88,9 +89,11 @@ You need RPC endpoints for the chains you want to interact with. Node.js v20+ is
 | Connect to chain | `EVMChain.fromUrl(rpcUrl)` | [EVMChain](/sdk/classes/EVMChain) |
 | Track message | `chain.getMessagesInTx(txHash)` | [getMessagesInTx](/sdk/interfaces/Chain#getmessagesintx) |
 | Get fee | `chain.getFee({ router, destChainSelector, message })` | [getFee](/sdk/interfaces/Chain#getfee) |
-| Send message | `chain.sendMessage({ router, destChainSelector, message })` | [sendMessage](/sdk/interfaces/Chain#sendmessage) |
-| Manual execution | `source.getExecutionInput({ request, verifications })` | [getExecutionInput](/sdk/interfaces/Chain#getexecutioninput) |
-| Decode message | `decodeMessage(log)` | [decodeMessage](/sdk/functions/decodeMessage) |
+| Send message | `chain.sendMessage({ router, destChainSelector, message, wallet })` | [sendMessage](/sdk/interfaces/Chain#sendmessage) |
+| Manual execution (by message ID) | `dest.execute({ messageId, wallet })` | [execute](/sdk/interfaces/Chain#execute) |
+| Manual execution (by tx hash) | `source.getExecutionInput({ request, verifications })` | [getExecutionInput](/sdk/interfaces/Chain#getexecutioninput) |
+| Check lane features | `chain.getLaneFeatures({ router, destChainSelector })` | [getLaneFeatures](/sdk/interfaces/Chain#getlanefeatures) |
+| Decode message | `decodeMessage(data)` | [decodeMessage](/sdk/functions/decodeMessage) |
 
 ## Concepts
 
@@ -134,15 +137,16 @@ Use `networkInfo()` to convert between chain IDs, names, and selectors.
 
 ### Extra Arguments
 
-Configure gas limits and execution parameters:
+Configure gas limits and execution parameters. Pass them as an object — the SDK encodes internally:
 
 ```typescript
-import { encodeExtraArgs } from '@chainlink/ccip-sdk'
-
-const extraArgs = encodeExtraArgs({
-  gasLimit: 200000n,
-  allowOutOfOrderExecution: true,
-})
+const message = {
+  receiver: '0x...',
+  extraArgs: {
+    gasLimit: 200000n,
+    allowOutOfOrderExecution: true,
+  },
+}
 ```
 
 ## Error Handling
@@ -175,4 +179,4 @@ See [Error Handling](/sdk/guides/error-handling) for recovery patterns.
 
 - [EVMChain](/sdk/classes/EVMChain) - EVM chain operations
 - [getMessagesForSender](/sdk/functions/getMessagesForSender) - Query by sender address
-- [calculateManualExecProof](/sdk/functions/calculateManualExecProof) - Manual execution
+- [Manual Execution](/sdk/guides/manual-execution) - Execute stuck messages

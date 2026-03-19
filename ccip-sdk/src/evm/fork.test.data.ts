@@ -108,6 +108,15 @@ export const SEPOLIA_TO_FUJI: ForkTestMessage[] = [
     version: '1.5',
     description: 'token transfer (0.2 tokens) via contract',
   },
+  // FAILED — token transfer via contract, problematic for manual exec API path
+  {
+    messageId: '0xe654dc68b4d98e8ea2f182ee45d5766af4f62e2417395153a90c4b377d3fcd07',
+    txHash: '0xdc3266201eb0ffe263586f750eab624611c242f02fccd9f2a043a3b36804b037',
+    status: MessageStatus.Failed,
+    version: '1.5',
+    description:
+      'failed token transfer (10000 tokens) via contract, ready for manual exec — problematic API path',
+  },
 ]
 
 // ── Sepolia → Aptos (EVM → Aptos) ──
@@ -389,5 +398,19 @@ export const APTOS_TO_FUJI: ForkTestMessage[] = [
     status: MessageStatus.Success,
     version: '1.6',
     description: 'data-only, no token transfer',
+  },
+]
+
+// ── TON Testnet → Sepolia (TON → EVM) ──
+
+export const TON_TO_SEPOLIA: ForkTestMessage[] = [
+  // FAILED — data-only, ready for manual exec, problematic API path
+  {
+    messageId: '0xed568f4bda27dfbb93e0b193ad1467854d37e3b33441241f5d3f2cd8e5b5c572',
+    txHash: '0x1a1c020fff2f3f6e573fd6614e3d86835a8ff59a4df2254db595dbe0b7c3712b',
+    status: MessageStatus.Failed,
+    version: '1.6',
+    description:
+      'failed data-only (gasLimit=1) from TON, ready for manual exec — problematic API path',
   },
 ]

@@ -222,9 +222,13 @@ export default [
     name: 'getAllSourceChainConfigs',
     inputs: [],
     outputs: [
-      { name: '', type: 'uint64[]', internalType: 'uint64[]' },
       {
-        name: '',
+        name: 'sourceChainSelectors',
+        type: 'uint64[]',
+        internalType: 'uint64[]',
+      },
+      {
+        name: 'sourceChainConfigs',
         type: 'tuple[]',
         internalType: 'struct OffRamp.SourceChainConfig[]',
         components: [
@@ -420,25 +424,6 @@ export default [
   },
   {
     type: 'event',
-    name: 'MaxGasBufferToUpdateStateUpdated',
-    inputs: [
-      {
-        name: 'oldMaxGasBufferToUpdateState',
-        type: 'uint32',
-        indexed: false,
-        internalType: 'uint32',
-      },
-      {
-        name: 'newMaxGasBufferToUpdateState',
-        type: 'uint32',
-        indexed: false,
-        internalType: 'uint32',
-      },
-    ],
-    anonymous: false,
-  },
-  {
-    type: 'event',
     name: 'OwnershipTransferRequested',
     inputs: [
       {
@@ -576,14 +561,6 @@ export default [
     name: 'DuplicateCCVNotAllowed',
     inputs: [{ name: 'ccvAddress', type: 'address', internalType: 'address' }],
   },
-  {
-    type: 'error',
-    name: 'ExecutionError',
-    inputs: [
-      { name: 'messageId', type: 'bytes32', internalType: 'bytes32' },
-      { name: 'err', type: 'bytes', internalType: 'bytes' },
-    ],
-  },
   { type: 'error', name: 'GasCannotBeZero', inputs: [] },
   {
     type: 'error',
@@ -618,6 +595,19 @@ export default [
     type: 'error',
     name: 'InvalidEncodingVersion',
     inputs: [{ name: 'version', type: 'uint8', internalType: 'uint8' }],
+  },
+  {
+    type: 'error',
+    name: 'InvalidFinalityForReceiver',
+    inputs: [
+      { name: 'receiver', type: 'address', internalType: 'address' },
+      { name: 'msgBlockDepth', type: 'uint16', internalType: 'uint16' },
+      {
+        name: 'requiredBlockDepth',
+        type: 'uint16',
+        internalType: 'uint16',
+      },
+    ],
   },
   {
     type: 'error',
@@ -666,6 +656,14 @@ export default [
   },
   {
     type: 'error',
+    name: 'InvalidOptionalThreshold',
+    inputs: [
+      { name: 'wanted', type: 'uint8', internalType: 'uint8' },
+      { name: 'got', type: 'uint256', internalType: 'uint256' },
+    ],
+  },
+  {
+    type: 'error',
     name: 'InvalidVerifierResultsLength',
     inputs: [
       { name: 'expected', type: 'uint256', internalType: 'uint256' },
@@ -677,6 +675,14 @@ export default [
     type: 'error',
     name: 'MustSpecifyDefaultOrRequiredCCVs',
     inputs: [],
+  },
+  {
+    type: 'error',
+    name: 'NoStateProgressMade',
+    inputs: [
+      { name: 'messageId', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'err', type: 'bytes', internalType: 'bytes' },
+    ],
   },
   {
     type: 'error',

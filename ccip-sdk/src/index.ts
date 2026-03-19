@@ -12,6 +12,9 @@ export type {
   APIErrorResponse,
   CCIPAPIClientContext,
   LaneLatencyResponse,
+  MessageSearchFilters,
+  MessageSearchPage,
+  MessageSearchResult,
 } from './api/index.ts'
 export {
   CCIPAPIClient,
@@ -27,26 +30,32 @@ export type {
   ChainGetter,
   ChainStatic,
   GetBalanceOpts,
+  LaneFeatures,
   LogFilter,
   RateLimiterState,
   RegistryTokenConfig,
   TokenInfo,
   TokenPoolConfig,
   TokenPoolRemote,
+  TokenTransferFee,
+  TokenTransferFeeConfig,
+  TokenTransferFeeOpts,
+  TotalFeesEstimate,
 } from './chain.ts'
-export { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
+export { DEFAULT_API_RETRY_CONFIG, LaneFeature } from './chain.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
 export {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
   type ExtraArgs,
+  type GenericExtraArgsV3,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
   decodeExtraArgs,
   encodeExtraArgs,
 } from './extra-args.ts'
 export { estimateReceiveExecution } from './gas.ts'
-export { getOffchainTokenData } from './offchain.ts'
+export { CCTP_FINALITY_FAST, CCTP_FINALITY_STANDARD, getOffchainTokenData } from './offchain.ts'
 export { decodeMessage, getMessagesForSender, sourceToDestTokenAddresses } from './requests.ts'
 export {
   type CCIPExecution,
@@ -99,6 +108,7 @@ export type { UnsignedEVMTx } from './evm/index.ts'
 import { SolanaChain } from './solana/index.ts'
 export type { UnsignedSolanaTx } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
+export type { UnsignedSuiTx } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'
 export type { UnsignedTONTx } from './ton/index.ts'
 import { ChainFamily, NetworkType } from './types.ts'

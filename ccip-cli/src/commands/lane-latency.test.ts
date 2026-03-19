@@ -91,7 +91,7 @@ describe('lane-latency command', () => {
     await getLaneLatencyCmd(createCtx(), {
       source: '1',
       dest: '42161',
-      apiUrl: 'https://custom.api.example.com/',
+      api: 'https://custom.api.example.com/',
       format: Format.json,
     } as Parameters<typeof getLaneLatencyCmd>[1])
 
@@ -167,6 +167,29 @@ describe('lane-latency command', () => {
 
     // Verify fetch was called (API was used)
     assert.equal(mockedFetch.mock.calls.length, 1)
+  })
+
+  it('should forward blockConfirmations to API URL', async () => {
+    await getLaneLatencyCmd(createCtx(), {
+      source: '5009297550715157269',
+      dest: '4949039107694359620',
+      format: Format.json,
+      blockConfirmations: 10,
+    } as Parameters<typeof getLaneLatencyCmd>[1])
+
+    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+    assert.ok(url.includes('numOfBlocks=10'))
+  })
+
+  it('should not include numOfBlocks when blockConfirmations is not provided', async () => {
+    await getLaneLatencyCmd(createCtx(), {
+      source: '5009297550715157269',
+      dest: '4949039107694359620',
+      format: Format.json,
+    } as Parameters<typeof getLaneLatencyCmd>[1])
+
+    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
+    assert.ok(!url.includes('numOfBlocks'))
   })
 
   describe('CCIP_API environment variable integration', () => {

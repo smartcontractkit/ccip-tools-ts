@@ -11,37 +11,79 @@ import TabItem from '@theme/TabItem'
 
 # Browser Setup
 
-The CCIP SDK works in browser environments with proper bundler configuration. This guide covers polyfill requirements and common bundler setups.
+The CCIP SDK works in browser environments with proper bundler configuration. What you need depends on which chains you use and which bundler you have.
 
-## Polyfill Requirements
+## What You Need
 
-### SDK-Only Projects
+The SDK itself requires only the `buffer` polyfill — and only when using Solana, TON, or Sui chains. Wallet libraries (MetaMask SDK, WalletConnect, RainbowKit) may require additional polyfills.
 
-If you're using `@chainlink/ccip-sdk` **without** wallet UI libraries, you only need the `buffer` polyfill:
+| Polyfill | When required |
+|----------|--------------|
+| `buffer` | Solana, TON, or Sui chains (not needed for EVM-only or Aptos-only) |
+| `crypto` | MetaMask SDK, some wallet libraries |
+| `stream` | MetaMask SDK |
+| `process` | MetaMask SDK, WalletConnect |
+| `util` | Solana Wallet Adapter |
 
-| Polyfill | Required By | Reason |
-|----------|-------------|--------|
-| `buffer` | CCIP SDK (Solana, TON, Sui chains) | Binary data handling |
+Additionally, **Webpack and Next.js** need a `resolve.alias` for `@noble/hashes` to fix a version conflict between SDK dependencies. The `ethers` dependency tree includes an older `@noble/hashes` version that lacks sub-paths (`./blake2.js`, `./sha2.js`) required by `@mysten/sui`. Without the alias, you'll get `ERR_PACKAGE_PATH_NOT_EXPORTED`. Add version overrides to your `package.json`:
 
-### With Wallet Libraries
+<Tabs>
+<TabItem value="npm" label="npm">
 
-If you're using wallet connection libraries (RainbowKit, MetaMask SDK, Solana Wallet Adapter), additional polyfills are needed:
+```json
+{
+  "overrides": {
+    "@noble/hashes": "^1.8.0"
+  }
+}
+```
 
-| Polyfill | Required By | NOT Required By |
-|----------|-------------|-----------------|
-| `buffer` | **@chainlink/ccip-sdk** | - |
-| `crypto` | @metamask/sdk, wallet libraries | @chainlink/ccip-sdk |
-| `stream` | @metamask/sdk | @chainlink/ccip-sdk |
-| `process` | @metamask/sdk, @walletconnect | @chainlink/ccip-sdk |
-| `util` | @solana/wallet-adapter | @chainlink/ccip-sdk |
+</TabItem>
+<TabItem value="yarn" label="yarn">
 
-## Vite Configuration
+```json
+{
+  "resolutions": {
+    "**/@noble/hashes": "^1.8.0"
+  }
+}
+```
+
+</TabItem>
+<TabItem value="pnpm" label="pnpm">
+
+```json
+{
+  "pnpm": {
+    "overrides": {
+      "@noble/hashes": "^1.8.0"
+    }
+  }
+}
+```
+
+</TabItem>
+</Tabs>
+
+This is safe — `@noble/hashes@1.8.0` is backward-compatible with ethers' needs. Vite does not need this fix.
+
+## Vite
+
+Install the polyfill plugin:
+
+```bash
+npm install vite-plugin-node-polyfills
+```
+
+:::note
+Vite always needs the `buffer` polyfill, even for EVM-only projects. Vite's dev server pre-bundles all SDK dependencies eagerly (including Solana/TON code), so the polyfill must be resolvable. Production builds tree-shake correctly.
+:::
 
 <Tabs>
 <TabItem value="minimal" label="SDK Only">
 
 ```typescript
-// vite.config.ts - Minimal config for CCIP SDK only
+// vite.config.ts
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
@@ -61,7 +103,7 @@ export default defineConfig({
 <TabItem value="full" label="With Wallet Libraries">
 
 ```typescript
-// vite.config.ts - Full config with wallet libraries
+// vite.config.ts
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
@@ -81,29 +123,64 @@ export default defineConfig({
   define: {
     'process.env': {},
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          // Don't include @chainlink/ccip-sdk — let it tree-shake
+        },
+      },
+    },
+  },
+  optimizeDeps: {
+    include: ['buffer'],
+  },
 })
 ```
 
 </TabItem>
 </Tabs>
 
-Install the polyfill plugin:
+## Webpack
 
-```bash
-npm install vite-plugin-node-polyfills
-```
+EVM-only consumers do **not** need the `buffer` polyfill on Webpack — non-EVM code is tree-shaken in production and never executed in development.
 
-## Webpack Configuration
+All Webpack configs need the `@noble/hashes` alias (see [above](#what-you-need)).
 
 <Tabs>
-<TabItem value="minimal" label="SDK Only">
+<TabItem value="evm" label="EVM Only">
 
 ```javascript
-// webpack.config.js - Minimal config
+// webpack.config.js
+const path = require('path')
+
+module.exports = {
+  resolve: {
+    alias: {
+      '@noble/hashes': path.dirname(require.resolve('@noble/hashes')),
+    },
+  },
+}
+```
+
+</TabItem>
+<TabItem value="multi" label="Multi-Chain">
+
+```bash
+npm install buffer
+```
+
+```javascript
+// webpack.config.js
+const path = require('path')
 const webpack = require('webpack')
 
 module.exports = {
   resolve: {
+    alias: {
+      '@noble/hashes': path.dirname(require.resolve('@noble/hashes')),
+    },
     fallback: {
       buffer: require.resolve('buffer/'),
     },
@@ -119,12 +196,20 @@ module.exports = {
 </TabItem>
 <TabItem value="full" label="With Wallet Libraries">
 
+```bash
+npm install buffer crypto-browserify stream-browserify util process
+```
+
 ```javascript
-// webpack.config.js - Full config
+// webpack.config.js
+const path = require('path')
 const webpack = require('webpack')
 
 module.exports = {
   resolve: {
+    alias: {
+      '@noble/hashes': path.dirname(require.resolve('@noble/hashes')),
+    },
     fallback: {
       buffer: require.resolve('buffer/'),
       crypto: require.resolve('crypto-browserify'),
@@ -145,24 +230,27 @@ module.exports = {
 </TabItem>
 </Tabs>
 
-Install polyfill packages:
+## Next.js
 
-```bash
-npm install buffer
-# If using wallet libraries:
-npm install crypto-browserify stream-browserify util process
-```
+Requires Next.js >= 13.4.5 (supports `moduleResolution: "bundler"`). For older versions, see the [legacy workaround](#nextjs-12--1344) below.
 
-## Next.js Configuration
+Like Webpack, EVM-only consumers do **not** need the `buffer` polyfill. All configs need the `@noble/hashes` alias.
+
+<Tabs>
+<TabItem value="evm" label="EVM Only">
 
 ```javascript
 // next.config.js
+const path = require('path')
+
+/** @type {import('next').NextConfig} */
 const nextConfig = {
-  webpack: (config) => {
-    config.resolve.fallback = {
-      ...config.resolve.fallback,
-      buffer: require.resolve('buffer/'),
-      // Add more if using wallet libraries
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        '@noble/hashes': path.dirname(require.resolve('@noble/hashes')),
+      }
     }
     return config
   },
@@ -171,122 +259,8 @@ const nextConfig = {
 module.exports = nextConfig
 ```
 
-## Tree-Shaking
-
-The SDK supports tree-shaking - only the chains you import are bundled:
-
-```typescript
-// Only EVMChain is bundled
-import { EVMChain } from '@chainlink/ccip-sdk'
-
-// Only SolanaChain is bundled
-import { SolanaChain } from '@chainlink/ccip-sdk'
-
-// All chains - largest bundle, use only if needed
-import { allSupportedChains } from '@chainlink/ccip-sdk/all'
-```
-
-### Bundle Sizes
-
-| Import | Minified | Gzipped |
-|--------|----------|---------|
-| EVM only | 740 KB | ~180 KB |
-| Solana only | 1.2 MB | ~290 KB |
-| Aptos only | 700 KB | ~170 KB |
-| Sui only | 756 KB | ~185 KB |
-| TON only | 760 KB | ~185 KB |
-| EVM + Solana | 1.4 MB | ~340 KB |
-| All chains | 2.0 MB | ~480 KB |
-
-**Important:** Don't place `@chainlink/ccip-sdk` in `manualChunks` configuration, as this disables tree-shaking:
-
-```typescript
-// vite.config.ts
-export default defineConfig({
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom'],
-          'vendor-solana': ['@solana/web3.js'],
-          // DON'T add @chainlink/ccip-sdk here
-        },
-      },
-    },
-  },
-})
-```
-
-## Using with Wagmi/Viem
-
-When using the SDK with wagmi, you may encounter type mismatches with `fromViemClient()`:
-
-```typescript
-import { getPublicClient } from '@wagmi/core'
-import { fromViemClient } from '@chainlink/ccip-sdk/viem'
-import type { PublicClient, Transport, Chain } from 'viem'
-
-// Type bridge for wagmi compatibility
-function toGenericPublicClient(
-  client: ReturnType<typeof getPublicClient>
-): PublicClient<Transport, Chain> {
-  return client as PublicClient<Transport, Chain>
-}
-
-// Usage
-const wagmiClient = getPublicClient(wagmiConfig, { chainId: 11155111 })
-const publicClient = toGenericPublicClient(wagmiClient)
-const chain = await fromViemClient(publicClient)
-```
-
-This cast is safe when both packages use the same viem version.
-
-## Complete Vite Example
-
-Full configuration for a React app with EVM and Solana support:
-
-```typescript
-// vite.config.ts
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import { nodePolyfills } from 'vite-plugin-node-polyfills'
-
-export default defineConfig({
-  plugins: [
-    react(),
-    nodePolyfills({
-      include: ['buffer', 'crypto', 'stream', 'util', 'process'],
-      globals: {
-        Buffer: true,
-        global: true,
-        process: true,
-      },
-    }),
-  ],
-  define: {
-    'process.env': {},
-  },
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom'],
-          'vendor-solana': ['@solana/web3.js', '@solana/wallet-adapter-base'],
-          'vendor-evm': ['wagmi', 'viem', '@rainbow-me/rainbowkit'],
-          // Don't include @chainlink/ccip-sdk - let it tree-shake
-        },
-      },
-    },
-  },
-  optimizeDeps: {
-    include: ['buffer'],
-  },
-})
-```
-
-## Framework Integration
-
-### Next.js
+</TabItem>
+<TabItem value="multi" label="Multi-Chain">
 
 ```bash
 npm install buffer
@@ -294,10 +268,16 @@ npm install buffer
 
 ```javascript
 // next.config.js
+const path = require('path')
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   webpack: (config, { isServer }) => {
     if (!isServer) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        '@noble/hashes': path.dirname(require.resolve('@noble/hashes')),
+      }
       config.resolve.fallback = {
         ...config.resolve.fallback,
         buffer: require.resolve('buffer/'),
@@ -306,10 +286,11 @@ const nextConfig = {
     return config
   },
 }
+
 module.exports = nextConfig
 ```
 
-For client components using Solana/TON, add at the top:
+For client components using Solana/TON/Sui, add at the top of the component:
 
 ```tsx
 'use client'
@@ -319,9 +300,31 @@ if (typeof window !== 'undefined') {
 }
 ```
 
-### Remix
+</TabItem>
+</Tabs>
 
-Remix uses esbuild under the hood. Add the buffer shim to your client entry:
+### Next.js 12 – 13.4.4
+
+These versions force `moduleResolution: "node"`, which cannot resolve the SDK's type declarations. Add `paths` to your `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "paths": {
+      "@chainlink/ccip-sdk": [
+        "./node_modules/@chainlink/ccip-sdk/src/index.ts"
+      ],
+      "@chainlink/ccip-sdk/viem": [
+        "./node_modules/@chainlink/ccip-sdk/src/viem.ts"
+      ]
+    }
+  }
+}
+```
+
+## Remix
+
+Remix uses esbuild. Add the buffer shim to your client entry:
 
 ```bash
 npm install buffer
@@ -335,85 +338,85 @@ globalThis.Buffer = Buffer
 // ... rest of entry.client.tsx
 ```
 
-## Verify Your Setup
+## Tree-Shaking
 
-After configuring your bundler, verify the polyfill is working:
+The SDK supports tree-shaking — only the chains you import are bundled:
 
 ```typescript
-// Add to your app's entry point or browser console
-console.log('Buffer available:', typeof Buffer !== 'undefined')
-console.log('Buffer works:', Buffer.from('test').toString('hex') === '74657374')
+// Only EVMChain code is bundled
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+// All chains — largest bundle, use only if needed
+import { allSupportedChains } from '@chainlink/ccip-sdk/all'
 ```
 
-Check bundle size to verify tree-shaking:
+| Import | Minified | Gzipped |
+|--------|----------|---------|
+| EVM only | 740 KB | ~180 KB |
+| Solana only | 1.2 MB | ~290 KB |
+| Aptos only | 700 KB | ~170 KB |
+| Sui only | 756 KB | ~185 KB |
+| TON only | 760 KB | ~185 KB |
+| EVM + Solana | 1.4 MB | ~340 KB |
+| All chains | 2.0 MB | ~480 KB |
+
+Don't place `@chainlink/ccip-sdk` in `manualChunks` — this disables tree-shaking:
+
+```typescript
+// vite.config.ts
+export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          // DON'T add @chainlink/ccip-sdk here
+        },
+      },
+    },
+  },
+})
+```
+
+To verify tree-shaking is working, check your bundle size:
 
 ```bash
-# Check output file size
-ls -lh dist/*.js
+# Vite
+npx vite-bundle-visualizer
 
-# For detailed analysis
-npx source-map-explorer dist/bundle.js
+# Webpack
+npx webpack-bundle-analyzer dist/stats.json
 ```
 
-Expected sizes for EVM-only: ~740 KB minified, ~180 KB gzipped.
+EVM-only bundles should be ~740 KB minified. If you see >1 MB, tree-shaking may not be working — verify you're using ES module imports (not `require()`) and not importing `allSupportedChains`.
 
 ## Troubleshooting
 
+### "ERR_PACKAGE_PATH_NOT_EXPORTED"
+
+The `ethers` dependency tree includes an older `@noble/hashes` that conflicts with other SDK dependencies requiring v1.8.0+. Add the `package.json` overrides and `resolve.alias` shown in [What You Need](#what-you-need) and your bundler section above.
+
 ### "Buffer is not defined"
 
-**Cause:** Using Solana or TON chains without the Buffer polyfill, or the polyfill isn't loading before SDK code.
-
-**Solution:**
-1. Verify the polyfill configuration for your bundler
-2. Ensure `buffer` package is installed: `npm ls buffer`
-3. For Bun, use a custom build script to ensure correct load order
+Using Solana, TON, or Sui chains without the Buffer polyfill, or the polyfill isn't loading before SDK code. Follow the configuration for your bundler above.
 
 ### "process is not defined"
 
-**Cause:** Wallet libraries (MetaMask SDK, WalletConnect) require `process`.
-
-**Solution:** Add the process polyfill if using wallet libraries that require it.
+Wallet libraries (MetaMask SDK, WalletConnect) require `process`. Use the "With Wallet Libraries" tab in your bundler section above.
 
 ### Bundle size larger than expected
 
-**Cause:** Tree-shaking may not be working, or you're importing more chains than needed.
-
-**Symptoms:** EVM-only bundle exceeds 1 MB.
-
-**Solution:**
-1. Verify you're using ES module imports (not `require()`)
-2. Check you're importing specific chains, not `allSupportedChains`
-3. Run a bundle analyzer:
-   ```bash
-   # Webpack
-   npx webpack-bundle-analyzer dist/stats.json
-
-   # Vite
-   npx vite-bundle-visualizer
-   ```
+Verify you're importing specific chains (`EVMChain`), not `allSupportedChains`. Run a bundle analyzer (see [Tree-Shaking](#tree-shaking)). On Webpack/Next.js, the `@noble/hashes` alias fix must be applied before tree-shaking can work.
 
 ### Vite dev server errors with EVM-only code
 
-**Cause:** Vite pre-bundles all SDK dependencies in development mode, including Solana/TON libraries that need Buffer.
-
-**Solution:** Add the Buffer polyfill even for EVM-only development. This is only needed for `vite dev`; production builds will tree-shake correctly.
-
-### Type errors with wagmi
-
-**Cause:** Wagmi's `getPublicClient()` returns a chain-specific typed client that doesn't match the SDK's expected type.
-
-**Solution:** Use the type bridge function shown in "Using with Wagmi/Viem" section, or see the [Viem Integration](/sdk/guides/viem-integration#using-with-wagmi) guide.
+Vite pre-bundles all SDK dependencies in dev mode, including Solana/TON libraries that need Buffer. Add the Buffer polyfill even for EVM-only development — production builds tree-shake correctly.
 
 ### "Cannot find module 'buffer'"
 
-**Cause:** The `buffer` package is not installed.
-
-**Solution:**
-```bash
-npm install buffer
-```
+Install it: `npm install buffer`
 
 ## Related
 
-- [Viem Integration](/sdk/guides/viem-integration) - Use viem clients with the SDK
-- [Multi-Chain Support](/sdk/guides/multi-chain) - Work with different blockchain families
+- [Viem Integration](/sdk/guides/viem-integration) — Use viem/wagmi clients with the SDK
+- [Multi-Chain](/sdk/guides/multi-chain) — Chain-specific setup and cross-family messaging

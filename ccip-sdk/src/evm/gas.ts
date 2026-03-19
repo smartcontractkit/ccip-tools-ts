@@ -1,4 +1,5 @@
 import {
+  type BytesLike,
   type JsonRpcApiProvider,
   Contract,
   FunctionFragment,
@@ -14,7 +15,6 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 import { memoize } from 'micro-memoize'
 
-import type { Chain } from '../chain.ts'
 import TokenABI from './abi/BurnMintERC677Token.ts'
 import RouterABI from './abi/Router.ts'
 import { defaultAbiCoder, interfaces } from './const.ts'
@@ -77,13 +77,17 @@ const findBalancesSlot = memoize(
   { maxArgs: 1 },
 )
 
-type EstimateExecGasOpts = Pick<
-  Parameters<NonNullable<Chain['estimateReceiveExecution']>>[0],
-  'message' | 'receiver'
-> & {
-  /*  */
+type EstimateExecGasOpts = {
   provider: JsonRpcApiProvider
   router: string
+  message: {
+    sourceChainSelector: bigint
+    messageId: string
+    receiver: string
+    sender?: string
+    data?: BytesLike
+    destTokenAmounts?: readonly { token: string; amount: bigint }[]
+  }
 }
 
 /**
@@ -91,12 +95,7 @@ type EstimateExecGasOpts = Pick<
  * @param opts - Options for estimation: provider, destRouter, receiver address and message
  * @returns Estimated gasLimit
  */
-export async function estimateExecGas({
-  provider,
-  router,
-  receiver,
-  message,
-}: EstimateExecGasOpts) {
+export async function estimateExecGas({ provider, router, message }: EstimateExecGasOpts) {
   // we need to override the state, increasing receiver's balance for each token, to simulate the
   // state after tokens were transferred by the offRamp just before calling `ccipReceive`
   const destAmounts: Record<string, bigint> = {}
@@ -106,25 +105,24 @@ export async function estimateExecGas({
       const tokenContract = new Contract(token, TokenABI, provider) as unknown as TypedContract<
         typeof TokenABI
       >
-      const currentBalance = await tokenContract.balanceOf(receiver)
+      const currentBalance = await tokenContract.balanceOf(message.receiver)
       destAmounts[token] = currentBalance
     }
     destAmounts[token]! += amount
-    const balancesSlot = await findBalancesSlot(token, provider, receiver, router)
+    const balancesSlot = await findBalancesSlot(token, provider, message.receiver, router)
     stateOverrides[token] = {
       stateDiff: {
-        [solidityPackedKeccak256(['uint256', 'uint256'], [receiver, balancesSlot])]: toBeHex(
-          destAmounts[token]!,
-          32,
-        ),
+        [solidityPackedKeccak256(['uint256', 'uint256'], [message.receiver, balancesSlot])]:
+          toBeHex(destAmounts[token]!, 32),
       },
     }
   }
 
+  const senderBytes = getAddressBytes(message.sender ?? '0x')
   const receiverMsg: Any2EVMMessage = {
     ...message,
     destTokenAmounts: message.destTokenAmounts ?? [],
-    sender: zeroPadValue(getAddressBytes(message.sender ?? '0x'), 32),
+    sender: senderBytes.length < 32 ? zeroPadValue(senderBytes, 32) : hexlify(senderBytes),
     data: hexlify(getDataBytes(message.data || '0x')),
     sourceChainSelector: message.sourceChainSelector,
   }
@@ -138,7 +136,7 @@ export async function estimateExecGas({
       (await provider.send('eth_estimateGas', [
         {
           from: router,
-          to: receiver,
+          to: message.receiver,
           data: calldata,
         },
         'latest',

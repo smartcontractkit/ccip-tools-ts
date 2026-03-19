@@ -1,5 +1,9 @@
 import type { SidebarsConfig } from '@docusaurus/plugin-content-docs'
 
+import { exampleRepos } from './src/config/examples.config.ts'
+
+const activeExample = exampleRepos.find((r) => r.status === 'active')
+
 /**
  * SDK Documentation Sidebar
  * Auto-generated from TypeDoc with custom overview
@@ -11,6 +15,15 @@ const sidebars: SidebarsConfig = {
       id: 'introduction',
       label: 'Overview',
     },
+    ...(activeExample
+      ? [
+          {
+            type: 'link' as const,
+            label: activeExample.title,
+            href: activeExample.repoUrl,
+          },
+        ]
+      : []),
     {
       type: 'category',
       label: 'Guides',

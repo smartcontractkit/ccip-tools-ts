@@ -1,4 +1,4 @@
-import { type BytesLike, dataLength } from 'ethers'
+import { type BytesLike, dataLength, keccak256 } from 'ethers'
 import type { PickDeep, SetOptional } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
@@ -6,8 +6,10 @@ import type { UnsignedAptosTx } from './aptos/types.ts'
 import { getOnchainCommitReport } from './commits.ts'
 import {
   CCIPApiClientNotAvailableError,
+  CCIPArgumentInvalidError,
   CCIPChainFamilyMismatchError,
   CCIPExecTxRevertedError,
+  CCIPNotImplementedError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
@@ -22,6 +24,7 @@ import type {
   SuiExtraArgsV1,
 } from './extra-args.ts'
 import type { LeafHasher } from './hasher/common.ts'
+import { decodeMessageV1 } from './messages.ts'
 import { getOffchainTokenData } from './offchain.ts'
 import { getMessagesInTx } from './requests.ts'
 import { DEFAULT_GAS_LIMIT } from './shared/constants.ts'
@@ -51,8 +54,12 @@ import {
 } from './types.ts'
 import { networkInfo, util, withRetry } from './utils.ts'
 
-/** Field names unique to GenericExtraArgsV3 (not present in V2). */
-const V3_ONLY_FIELDS = [
+/** All valid field names for GenericExtraArgsV2. */
+const V2_FIELDS = new Set(['gasLimit', 'allowOutOfOrderExecution'])
+
+/** All valid field names for GenericExtraArgsV3. */
+const V3_FIELDS = new Set([
+  'gasLimit',
   'blockConfirmations',
   'ccvs',
   'ccvArgs',
@@ -60,12 +67,26 @@ const V3_ONLY_FIELDS = [
   'executorArgs',
   'tokenReceiver',
   'tokenArgs',
-] as const
+])
 
-/** Check if extraArgs contains any V3-only fields. */
+/** Throw {@link CCIPArgumentInvalidError} if any key in extraArgs is not in the allowed set. */
+function assertNoUnknownFields(
+  extraArgs: Partial<ExtraArgs>,
+  allowed: Set<string>,
+  variant: string,
+): void {
+  const unknown = Object.keys(extraArgs).filter((k) => k !== '_tag' && !allowed.has(k))
+  if (unknown.length)
+    throw new CCIPArgumentInvalidError(
+      'extraArgs',
+      `unknown field(s) for ${variant}: ${unknown.map((k) => JSON.stringify(k)).join(', ')}`,
+    )
+}
+
+/** Check if extraArgs contains any V3-only fields (i.e. fields in V3 but not in V2). */
 function hasV3ExtraArgs(extraArgs: Partial<ExtraArgs> | undefined): boolean {
   if (!extraArgs) return false
-  return V3_ONLY_FIELDS.some((field) => field in extraArgs)
+  return Object.keys(extraArgs).some((k) => V3_FIELDS.has(k) && !V2_FIELDS.has(k))
 }
 
 /**
@@ -95,12 +116,13 @@ export type ChainContext = WithLogger & {
    * CCIP API client instance for lane information queries.
    *
    * - `undefined` (default): Creates CCIPAPIClient with {@link DEFAULT_API_BASE_URL}
+   * - `string`: Creates CCIPAPIClient with provided URL
    * - `CCIPAPIClient`: Uses provided instance (allows custom URL, fetch, etc.)
    * - `null`: Disables API client entirely (getLaneLatency() will throw)
    *
    * Default: `undefined` (auto-create with production endpoint)
    */
-  apiClient?: CCIPAPIClient | null
+  apiClient?: CCIPAPIClient | string | null
 
   /**
    * Retry configuration for API fallback operations.
@@ -175,6 +197,105 @@ export type TokenInfo = {
 }
 
 /**
+ * Per-token transfer fee computed by {@link Chain.getTotalFeesEstimate}.
+ */
+export type TokenTransferFee = {
+  /** Amount deducted from the transferred token by the pool (amount * bps / 10_000).
+   *  The recipient receives `amount - feeDeducted` on the destination chain. */
+  feeDeducted: bigint
+  /** The BPS rate applied (basis points, where 10_000 = 100%). */
+  bps: number
+}
+
+/**
+ * Total fees estimate returned by {@link Chain.getTotalFeesEstimate}.
+ */
+export type TotalFeesEstimate = {
+  /** Fee from Router.getFee(), denominated in the message's feeToken
+   *  (native token when feeToken is omitted). */
+  ccipFee: bigint
+  /** Token transfer fee, present only when the message includes a token transfer. */
+  tokenTransferFee?: TokenTransferFee
+}
+
+/**
+ * Token transfer fee configuration returned by TokenPool v2.0 contracts.
+ *
+ * @remarks
+ * Contains two fee dimensions per finality mode (default vs custom/FTF):
+ * - A flat USD surcharge (in cents) added to the CCIP fee via FeeQuoter
+ * - A BPS rate deducted directly from the transferred token amount by the pool
+ *
+ * "Default" fields apply when `blockConfirmations = 0` (standard finality).
+ * "Custom" fields apply when `blockConfirmations > 0` (Faster-Than-Finality).
+ */
+export type TokenTransferFeeConfig = {
+  destGasOverhead: number
+  destBytesOverhead: number
+  defaultBlockConfirmationsFeeUSDCents: number
+  customBlockConfirmationsFeeUSDCents: number
+  defaultBlockConfirmationsTransferFeeBps: number
+  customBlockConfirmationsTransferFeeBps: number
+  isEnabled: boolean
+}
+
+/**
+ * Options for fetching token transfer fee config as part of {@link Chain.getTokenPoolConfig}.
+ */
+export type TokenTransferFeeOpts = {
+  destChainSelector: bigint
+  blockConfirmationsRequested: number
+  /** Hex-encoded bytes passed as tokenArgs to the pool contract. */
+  tokenArgs: string
+}
+
+/**
+ * Available lane feature keys.
+ * These represent features or thresholds that can be configured per-lane.
+ */
+export const LaneFeature = {
+  /**
+   * Minimum block confirmations for Faster-Than-Finality (FTF).
+   * - **absent**: the lane does not support FTF (pre-v2.0 lane).
+   * - **0**: the lane supports FTF, but it is not enabled for this
+   *   token (e.g. the token pool predates FTF, or FTF is configured
+   *   to use default finality only).
+   * - **\> 0**: FTF is enabled; this is the minimum number of block
+   *   confirmations required to use it.
+   */
+  MIN_BLOCK_CONFIRMATIONS: 'MIN_BLOCK_CONFIRMATIONS',
+  /**
+   * Rate limiter bucket state for the lane/token with default finality.
+   */
+  RATE_LIMITS: 'RATE_LIMITS',
+  /**
+   * Rate limiter bucket state when using non-default finality (FTF).
+   * Only meaningful when FTF is supported on this lane, i.e.
+   * {@link LaneFeature.MIN_BLOCK_CONFIRMATIONS} is present and \> 0.
+   * If absent, the default rate limits ({@link LaneFeature.RATE_LIMITS}) apply even when using custom finality.
+   */
+  CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS: 'CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+} as const
+/** Type representing one of the lane feature keys. */
+export type LaneFeature = (typeof LaneFeature)[keyof typeof LaneFeature]
+
+/**
+ * Lane features record.
+ * Maps feature keys to their values.
+ */
+export interface LaneFeatures extends Record<LaneFeature, unknown> {
+  /** Minimum block confirmations for FTF. */
+  MIN_BLOCK_CONFIRMATIONS: number
+  /** Rate limiter bucket state for the lane/token with default finality. */
+  RATE_LIMITS: RateLimiterState
+  /**
+   * Rate limiter bucket state when using non-default finality (FTF).
+   * If absent, the default rate limits ({@link LaneFeatures.RATE_LIMITS}) apply even when using custom finality.
+   */
+  CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS: RateLimiterState
+}
+
+/**
  * Options for getBalance query.
  */
 export type GetBalanceOpts = {
@@ -218,6 +339,11 @@ export type RateLimiterState = {
  * @remarks
  * Each entry represents the configuration needed to transfer tokens
  * from the current chain to a specific destination chain.
+ *
+ * The `customBlockConfirmationsOutboundRateLimiterState` and
+ * `customBlockConfirmationsInboundRateLimiterState` fields are present only for
+ * TokenPool v2.0+ contracts. These provide separate rate limits applied when
+ * Faster-Than-Finality (FTF) custom block confirmations are used.
  */
 export type TokenPoolRemote = {
   /** Address of the remote token on the destination chain. */
@@ -232,11 +358,19 @@ export type TokenPoolRemote = {
    * - Version management (different pool implementations)
    */
   remotePools: string[]
-  /** Inbound rate limiter state for tokens coming into this chain. */
-  inboundRateLimiterState: RateLimiterState
   /** Outbound rate limiter state for tokens leaving this chain. */
   outboundRateLimiterState: RateLimiterState
-}
+  /** Inbound rate limiter state for tokens coming into this chain. */
+  inboundRateLimiterState: RateLimiterState
+} & (
+  | {
+      /** Outbound rate limiter state for tokens leaving this chain (FTF/v2). */
+      customBlockConfirmationsOutboundRateLimiterState: RateLimiterState
+      /** Inbound rate limiter state for tokens coming into this chain (FTF/v2). */
+      customBlockConfirmationsInboundRateLimiterState: RateLimiterState
+    }
+  | object
+)
 
 /**
  * Token pool configuration returned by {@link Chain.getTokenPoolConfig}.
@@ -257,6 +391,19 @@ export type TokenPoolConfig = {
    * May be undefined for older pool implementations that don't expose this method.
    */
   typeAndVersion?: string
+  /**
+   * Min custom block confirmations for Faster-Than-Finality (FTF),
+   * if TokenPool version \>= v2.0.0 and FTF is supported on this lane.
+   * `0` indicates FTF is supported but not enabled for this token; `>0` indicates FTF is enabled
+   *  with this many minimum confirmations.
+   */
+  minBlockConfirmations?: number
+  /**
+   * Token transfer fee configuration from the pool contract.
+   * Only present when {@link TokenTransferFeeOpts} is provided to
+   * {@link Chain.getTokenPoolConfig} and the pool supports it (v2.0+).
+   */
+  tokenTransferFeeConfig?: TokenTransferFeeConfig
 }
 
 /**
@@ -314,7 +461,7 @@ export type ExecuteOpts = (
   | {
       /**
        * messageId of message to execute; requires `apiClient`.
-       * @remarks Currently throws CCIPNotImplementedError - API endpoint pending.
+       * The SDK will fetch execution inputs (offRamp, proofs/verifications) from the CCIP API.
        */
       messageId: string
     }
@@ -363,11 +510,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     if (apiClient === null) {
       this.apiClient = null // Explicit opt-out
       this.apiRetryConfig = null // No retry config needed without API client
-    } else if (apiClient !== undefined) {
+    } else if (apiClient && typeof apiClient !== 'string') {
       this.apiClient = apiClient // Use provided instance
       this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     } else {
-      this.apiClient = CCIPAPIClient.fromUrl(undefined, { logger }) // Default
+      this.apiClient = CCIPAPIClient.fromUrl(apiClient, ctx) // default=undefined or provided string as URL
       this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     }
   }
@@ -931,6 +1078,71 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
+   * Resolves {@link ExecuteOpts} that may contain a `messageId` (API shorthand) into the
+   * canonical `{ offRamp, input }` form required by {@link generateUnsignedExecute}.
+   *
+   * When `opts` already contains `input` the method is a no-op and returns it unchanged.
+   * When `opts` contains only a `messageId` it calls `apiClient.getExecutionInput` and merges
+   * the result back with any extra opts fields (e.g. `gasLimit`).
+   * If opts.gasLimit is undefined and `estimateReceiveExecution` is available, try to estimate gasLimitOverride
+   *
+   * @throws {@link CCIPApiClientNotAvailableError} if `messageId` is provided but no apiClient
+   */
+  protected async resolveExecuteOpts(
+    opts: ExecuteOpts,
+  ): Promise<Extract<ExecuteOpts, { input: unknown }>> {
+    let opts_: Extract<typeof opts, { input: unknown }>
+    if ('input' in opts) {
+      opts_ = opts
+    } else if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
+    else {
+      const { offRamp, ...input } = await this.apiClient.getExecutionInput(opts.messageId)
+      opts_ = { ...opts, offRamp, input }
+    }
+
+    if (
+      opts_.gasLimit == null &&
+      this.estimateReceiveExecution &&
+      (!('message' in opts_.input) ||
+        !opts_.input.message.tokenAmounts.length ||
+        opts_.input.message.tokenAmounts.every((ta) => 'destTokenAddress' in ta))
+    ) {
+      let message
+      if ('message' in opts_.input) {
+        message = {
+          ...opts_.input.message,
+          // pass `tokenAmount` with `destTokenAddress` to estimate
+          destTokenAmounts: opts_.input.message.tokenAmounts,
+        }
+      } else {
+        const decoded = decodeMessageV1(opts_.input.encodedMessage)
+        message = {
+          ...decoded,
+          messageId: keccak256(opts_.input.encodedMessage),
+          destTokenAmounts: decoded.tokenTransfer,
+        }
+      }
+      try {
+        const estimated = await this.estimateReceiveExecution({
+          offRamp: opts_.offRamp,
+          message,
+        })
+        this.logger.debug('Estimated receiver execution:', estimated)
+        if (
+          ('gasLimit' in message && estimated > message.gasLimit) ||
+          ('ccipReceiveGasLimit' in message && estimated > message.ccipReceiveGasLimit)
+        )
+          opts_.gasLimit = estimated
+      } catch (err) {
+        // ignore if receiver fails, let estimation of execute method itself throw if needed
+        this.logger.debug('Failed to auto-estimateReceiveExecution for:', opts, err)
+      }
+    }
+
+    return opts_
+  }
+
+  /**
    * Generate unsigned tx to manuallyExecute a message.
    *
    * @param opts - {@link ExecuteOpts} with payer address which will send the exec tx
@@ -955,21 +1167,24 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Execute messages in report in an offRamp.
    *
-   * @param opts - {@link ExecuteOpts} with chain-specific wallet to sign and send tx
-   * @returns Promise resolving to transaction of the execution
+   * @param opts - {@link ExecuteOpts} with chain-specific wallet to sign and send tx.
+   * @returns Promise resolving to transaction of the execution.
    *
-   * @throws {@link CCIPWalletNotSignerError} if wallet is not a valid signer
-   * @throws {@link CCIPExecTxRevertedError} if execution transaction reverts
-   * @throws {@link CCIPMerkleRootMismatchError} if merkle proof is invalid
+   * @throws {@link CCIPWalletNotSignerError} if wallet is not a valid signer.
+   * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm.
+   * @throws {@link CCIPExecTxRevertedError} if execution transaction reverts.
+   * @throws {@link CCIPMerkleRootMismatchError} if merkle proof is invalid.
    *
-   * @example Manual execution of pending message
+   * @example Manual execution using message ID (simplified, requires API)
+   * ```typescript
+   * const receipt = await dest.execute({ messageId: '0x...', wallet })
+   * ```
+   *
+   * @example Manual execution using transaction hash
    * ```typescript
    * const input = await source.getExecutionInput({ request, verifications })
    * const receipt = await dest.execute({ offRamp, input, wallet })
-   * console.log(`Executed: ${receipt.log.transactionHash}`)
    * ```
-   * @throws {@link CCIPWalletNotSignerError} if wallet cannot sign transactions
-   * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm
    */
   abstract execute(
     opts: ExecuteOpts & {
@@ -1017,10 +1232,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Uses this chain's selector as the source.
    *
    * @param destChainSelector - Destination CCIP chain selector (bigint)
+   * @param numberOfBlocks - Optional number of block confirmations to use for latency
+   *   calculation. When omitted or 0, uses the lane's default finality. When provided
+   *   as a positive integer, the API returns latency for that custom finality value.
    * @returns Promise resolving to {@link LaneLatencyResponse} containing:
-   *   - `lane.sourceNetworkInfo` - Source chain metadata (name, selector, chainId)
-   *   - `lane.destNetworkInfo` - Destination chain metadata
-   *   - `lane.routerAddress` - Router contract address on source chain
    *   - `totalMs` - Estimated delivery time in milliseconds
    *
    * @throws {@link CCIPApiClientNotAvailableError} if apiClient was disabled (set to `null`)
@@ -1036,19 +1251,66 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * try {
    *   const latency = await chain.getLaneLatency(4949039107694359620n) // Arbitrum
    *   console.log(`Estimated delivery: ${Math.round(latency.totalMs / 60000)} minutes`)
-   *   console.log(`Router: ${latency.lane.routerAddress}`)
    * } catch (err) {
    *   if (err instanceof CCIPHttpError) {
    *     console.error(`API error: ${err.context.apiErrorCode}`)
    *   }
    * }
    * ```
+   *
+   * @example Get latency with custom block confirmations
+   * ```typescript
+   * const latency = await chain.getLaneLatency(4949039107694359620n, 10)
+   * console.log(`Latency with 10 confirmations: ${Math.round(latency.totalMs / 60000)} minutes`)
+   * ```
    */
-  async getLaneLatency(destChainSelector: bigint): Promise<LaneLatencyResponse> {
+  async getLaneLatency(
+    destChainSelector: bigint,
+    numberOfBlocks?: number,
+  ): Promise<LaneLatencyResponse> {
     if (!this.apiClient) {
       throw new CCIPApiClientNotAvailableError()
     }
-    return this.apiClient.getLaneLatency(this.network.chainSelector, destChainSelector)
+    return this.apiClient.getLaneLatency(
+      this.network.chainSelector,
+      destChainSelector,
+      numberOfBlocks,
+    )
+  }
+
+  /**
+   * Retrieve features for a lane (router/destChainSelector/token triplet).
+   *
+   * @param _opts - Options containing router address, destChainSelector, and optional token
+   *   address (the token to be transferred in a hypothetical message on this lane)
+   * @returns Promise resolving to partial lane features record
+   *
+   * @throws {@link CCIPNotImplementedError} if not implemented for this chain family
+   *
+   * @example Get lane features
+   * ```typescript
+   * const features = await chain.getLaneFeatures({
+   *   router: '0x...',
+   *   destChainSelector: 4949039107694359620n,
+   * })
+   * // MIN_BLOCK_CONFIRMATIONS has three states:
+   * // - undefined: FTF is not supported on this lane (pre-v2.0)
+   * // - 0: the lane supports FTF, but it is not enabled for this token
+   * // - > 0: FTF is enabled with this many block confirmations
+   * const ftf = features.MIN_BLOCK_CONFIRMATIONS
+   * if (ftf != null && ftf > 0) {
+   *   console.log(`FTF enabled with ${ftf} confirmations`)
+   * } else if (ftf === 0) {
+   *   console.log('FTF supported on this lane but not enabled for this token')
+   * }
+   * ```
+   */
+  getLaneFeatures(_opts: {
+    router: string
+    destChainSelector: bigint
+    token?: string
+  }): Promise<Partial<LaneFeatures>> {
+    return Promise.reject(new CCIPNotImplementedError('getLaneFeatures'))
   }
 
   /**
@@ -1201,10 +1463,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    *
    * @param tokenPool - Token pool contract address.
-   * @returns {@link TokenPoolConfig} containing token, router, and version info.
+   * @param feeOpts - Optional parameters to also fetch token transfer fee config.
+   * @returns {@link TokenPoolConfig} containing token, router, version info, and optionally fee config.
    * @throws {@link CCIPNotImplementedError} on Sui or TON chains
    */
-  abstract getTokenPoolConfig(tokenPool: string): Promise<TokenPoolConfig>
+  abstract getTokenPoolConfig(
+    tokenPool: string,
+    feeOpts?: TokenTransferFeeOpts,
+  ): Promise<TokenPoolConfig>
 
   /**
    * Fetch remote chain configurations for a token pool.
@@ -1302,8 +1568,15 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Returns a copy of a message, populating missing fields like `extraArgs` with defaults.
    * It's expected to return a message suitable at least for basic token transfers.
    *
-   * @param message - AnyMessage (from source), containing at least `receiver`
-   * @returns A message suitable for `sendMessage` to this destination chain family
+   * @param message - AnyMessage (from source), containing at least `receiver`.
+   * @returns A message suitable for `sendMessage` to this destination chain family.
+   *
+   * @remarks
+   * V3 (GenericExtraArgsV3) is auto-detected when any V3-only field is present
+   * (e.g. `blockConfirmations`, `ccvs`, `ccvArgs`, `executor`, `executorArgs`,
+   * `tokenReceiver`, `tokenArgs`). Otherwise defaults to V2 (EVMExtraArgsV2).
+   *
+   * @throws {@link CCIPArgumentInvalidError} if extraArgs contains unknown fields for the detected version.
    */
   static buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
@@ -1312,6 +1585,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
     // Detect if user wants V3 by checking for any V3-only field
     if (hasV3ExtraArgs(message.extraArgs)) {
+      if (message.extraArgs)
+        assertNoUnknownFields(message.extraArgs, V3_FIELDS, 'GenericExtraArgsV3')
       // V3 defaults (GenericExtraArgsV3)
       return {
         ...message,
@@ -1329,6 +1604,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       }
     }
 
+    if (message.extraArgs) assertNoUnknownFields(message.extraArgs, V2_FIELDS, 'EVMExtraArgsV2')
     // Default to V2 (GenericExtraArgsV2, aka EVMExtraArgsV2)
     return {
       ...message,
@@ -1341,24 +1617,48 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
+   * Estimate total fees for a cross-chain message.
+   *
+   * Returns two components:
+   * - **ccipFee**: from `Router.getFee()`, denominated in the message's
+   *   `feeToken` (native token if omitted). Includes gas, DON costs, and
+   *   FeeQuoter-level token transfer overhead (all CCIP versions).
+   * - **tokenTransferFee**: pool-level BPS fee deducted from the transferred
+   *   token amount (v2.0+ only). The recipient receives
+   *   `amount - feeDeducted` on the destination chain. Absent on pre-v2.0
+   *   lanes or data-only messages.
+   *
+   * @param _opts - {@link SendMessageOpts} without approveMax
+   * @returns Promise resolving to {@link TotalFeesEstimate}
+   * @throws {@link CCIPNotImplementedError} if not implemented for this chain family
+   */
+  getTotalFeesEstimate(_opts: Omit<SendMessageOpts, 'approveMax'>): Promise<TotalFeesEstimate> {
+    return Promise.reject(new CCIPNotImplementedError('getTotalFeesEstimate'))
+  }
+
+  /**
    * Estimate `ccipReceive` execution cost (gas, computeUnits) for this *dest*
-   * @param opts - estimation options
+   * @param opts - estimation options, either `messageId` (for api) or `offRamp`, `message` (with `destTokenAmounts`)
    * @returns estimated execution cost (gas or computeUnits)
    */
-  estimateReceiveExecution?(opts: {
-    offRamp: string
-    receiver: string
-    message: {
-      sourceChainSelector: bigint
-      messageId: string
-      sender?: string
-      data?: BytesLike
-      destTokenAmounts?: readonly {
-        token: string
-        amount: bigint
-      }[]
-    }
-  }): Promise<number>
+  estimateReceiveExecution?(
+    opts:
+      | {
+          offRamp: string
+          message: {
+            sourceChainSelector: bigint
+            messageId: string
+            receiver: string
+            sender?: string
+            data?: BytesLike
+            destTokenAmounts?: readonly ((
+              | { token: string }
+              | { destTokenAddress: string; extraData?: string }
+            ) & { amount: bigint })[]
+          }
+        }
+      | { messageId: string },
+  ): Promise<number>
 }
 
 /**

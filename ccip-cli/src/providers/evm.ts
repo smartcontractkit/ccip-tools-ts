@@ -1,5 +1,8 @@
+import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 import { CCIPArgumentInvalidError } from '@chainlink/ccip-sdk/src/index.ts'
 import { LedgerSigner } from '@ethers-ext/signer-ledger'
@@ -20,6 +23,69 @@ Object.assign(LedgerSigner.prototype, {
     return new LedgerSigner(HIDTransport, provider, this.path)
   },
 })
+
+/**
+ * Registry of named keystore providers, keyed by --wallet prefix (e.g. "foundry", "hardhat").
+ * Each entry defines a human-readable label and an async function that resolves
+ * the private key from an account name.
+ * Add a new entry here to support additional keystore formats.
+ */
+const KEYSTORE_PROVIDERS: Record<
+  string,
+  { label: string; resolvePrivateKey: (name: string) => Promise<string> }
+> = {
+  foundry: {
+    label: 'Foundry',
+    resolvePrivateKey: async (name: string) => {
+      const dir = process.env['FOUNDRY_DIR'] ?? join(homedir(), '.foundry')
+      const keystorePath = join(dir, 'keystores', name)
+      if (!existsSync(keystorePath)) {
+        throw new CCIPArgumentInvalidError(
+          'wallet',
+          `Foundry keystore '${name}' not found at ${keystorePath}`,
+        )
+      }
+      let pw = process.env['FOUNDRY_KEYSTORE_PASSWORD'] ?? process.env['USER_KEY_PASSWORD']
+      pw ??= await password({ message: `Enter password for Foundry keystore '${name}'` })
+      return (await Wallet.fromEncryptedJson(await readFile(keystorePath, 'utf8'), pw)).privateKey
+    },
+  },
+  hardhat: {
+    label: 'Hardhat',
+    resolvePrivateKey: async (name: string) => {
+      const hardhatBin = join(process.cwd(), 'node_modules', '.bin', 'hardhat')
+      if (!existsSync(hardhatBin)) {
+        throw new CCIPArgumentInvalidError(
+          'wallet',
+          `Hardhat not found at ${hardhatBin}. Run ccip-cli from inside a Hardhat project with Hardhat installed as a dependency.`,
+        )
+      }
+      let pw = process.env['HARDHAT_KEYSTORE_PASSWORD'] ?? process.env['USER_KEY_PASSWORD']
+      pw ??= await password({ message: `Enter password for Hardhat keystore '${name}'` })
+      const result = spawnSync(hardhatBin, ['keystore', 'get', name], {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'inherit'],
+        input: pw + '\n',
+      })
+      if (result.status !== 0) {
+        throw new CCIPArgumentInvalidError(
+          'wallet',
+          `Failed to get Hardhat keystore '${name}'. Ensure ccip-cli is run from inside a Hardhat project directory with Hardhat installed as a dependency.`,
+        )
+      }
+      // Hardhat writes its prompt ("[hardhat-keystore] Enter the password: ") to stdout,
+      // so we extract the private key by matching the first 0x-prefixed 32-byte hex string.
+      const key = result.stdout.match(/0x[0-9a-fA-F]{64}/)?.[0]
+      if (!key) {
+        throw new CCIPArgumentInvalidError(
+          'wallet',
+          `No output from 'hardhat keystore get ${name}'. Ensure Hardhat is installed in the project.`,
+        )
+      }
+      return key
+    },
+  },
+}
 
 /**
  * Overwrite EVMChain.getWallet to support reading private key from file, env var or Ledger
@@ -50,6 +116,13 @@ export async function loadEvmWallet(
     const ledger = new LedgerSigner(HIDTransport, provider, derivationPath)
     console.info('Ledger connected:', await ledger.getAddress(), ', derivationPath:', ledger.path)
     return ledger
+  }
+  for (const [prefix, keystoreProvider] of Object.entries(KEYSTORE_PROVIDERS)) {
+    if (walletOpt.startsWith(`${prefix}:`)) {
+      const accountName = walletOpt.slice(prefix.length + 1)
+      const privateKey = await keystoreProvider.resolvePrivateKey(accountName)
+      return new BaseWallet(new SigningKey(privateKey), provider)
+    }
   }
   if (existsSync(walletOpt)) {
     let pw = process.env['USER_KEY_PASSWORD']

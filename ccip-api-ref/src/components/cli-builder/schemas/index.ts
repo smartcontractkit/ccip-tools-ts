@@ -27,9 +27,12 @@ export const SCHEMA_REGISTRY: Record<string, CommandSchema> = {
   send: sendSchema,
   show: showSchema,
   manualExec: manualExecSchema,
+  'manual-exec': manualExecSchema,
   parse: parseSchema,
   getSupportedTokens: supportedTokensSchema,
+  'get-supported-tokens': supportedTokensSchema,
   laneLatency: laneLatencySchema,
+  'lane-latency': laneLatencySchema,
   token: tokenSchema,
 }
 

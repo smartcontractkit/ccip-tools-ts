@@ -31,6 +31,7 @@ export {
   CCIPMessageInvalidError,
   CCIPMessageNotFoundInTxError,
   CCIPMessageNotInBatchError,
+  CCIPMessageNotVerifiedYetError,
   CCIPMessageRetrievalError,
 } from './specialized.ts'
 
@@ -94,13 +95,13 @@ export {
   CCIPLbtcAttestationNotApprovedError,
   CCIPLbtcAttestationNotFoundError,
   CCIPUsdcAttestationError,
+  CCIPUsdcBurnFeesError,
 } from './specialized.ts'
 
 // Specialized errors - Solana-specific
 export {
   CCIPBlockTimeNotFoundError,
   CCIPCctpDecodeError,
-  CCIPCctpMultipleEventsError,
   CCIPExecutionReportChainMismatchError,
   CCIPExecutionStateInvalidError,
   CCIPExtraArgsLengthInvalidError,
@@ -156,6 +157,7 @@ export { CCIPBorshMethodUnknownError, CCIPBorshTypeUnknownError } from './specia
 
 // Specialized errors - HTTP & Data
 export {
+  CCIPAbortError,
   CCIPBlockBeforeTimestampNotFoundError,
   CCIPDataFormatUnsupportedError,
   CCIPDataParseError,

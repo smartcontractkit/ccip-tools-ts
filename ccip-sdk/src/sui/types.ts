@@ -2,17 +2,19 @@ import { bcs } from '@mysten/sui/bcs'
 import { concat } from 'ethers'
 
 import { type SuiExtraArgsV1, SuiExtraArgsV1Tag } from '../extra-args.ts'
-import type { CCIPMessage_V1_6 } from '../types.ts'
-import { ChainFamily } from '../types.ts'
+import type { CCIPMessage_V1_6, ChainFamily } from '../types.ts'
 import { getAddressBytes, getDataBytes } from '../utils.ts'
 
 /** Sui-specific CCIP v1.6 message type with Sui extra args. */
 export type CCIPMessage_V1_6_Sui = CCIPMessage_V1_6 & SuiExtraArgsV1
 
-/** Unsigned Sui transaction, serialized as bytes. */
+/**
+ * Unsigned Sui transaction payload for `Transaction.from(transactions[0])`.
+ * Use JSON from Transaction#serialize(), or BCS bytes from Transaction#build().
+ */
 export type UnsignedSuiTx = {
   family: typeof ChainFamily.Sui
-  transactions: [Uint8Array]
+  transactions: [string | Uint8Array]
 }
 
 export const SuiExtraArgsV1Codec = bcs.struct('SuiExtraArgsV1', {

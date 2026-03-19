@@ -73,6 +73,14 @@ export default defineConfig(
           message:
             'Use CCIPError or specialized error classes instead of generic Error. Use "new" with error classes.',
         },
+        // Required for NextJS Turbopack compatibility
+        'error',
+        {
+          selector:
+            "BinaryExpression[operator='**'][left.type='Literal'][left.bigint], BinaryExpression[operator='**'][right.type='Literal'][right.bigint]",
+          message:
+            'Do not use the ** operator with bigint literals. Use BigInt() for operands instead, e.g. BigInt(2) ** BigInt(64).',
+        },
       ],
     },
   },
@@ -179,10 +187,7 @@ export default defineConfig(
   {
     files: ['ccip-api-ref/sidebars*.ts'],
     rules: {
-      'import/no-unresolved': [
-        'error',
-        { ignore: ['typedoc-sidebar\\.cjs$', '/sidebar$'] },
-      ],
+      'import/no-unresolved': ['error', { ignore: ['typedoc-sidebar\\.cjs$', '/sidebar$'] }],
       'import/extensions': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',
     },

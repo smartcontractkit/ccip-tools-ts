@@ -3,14 +3,17 @@ import { execSync } from 'node:child_process'
 import { after, before, describe, it } from 'node:test'
 
 import { AbiCoder, Contract, JsonRpcProvider, Wallet, keccak256, parseUnits, toBeHex } from 'ethers'
-import { anvil } from 'prool/instances'
+import { Instance } from 'prool'
 
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
+import '../ton/index.ts' // register TON chain family for cross-family message decoding
 import { CCIPAPIClient } from '../api/index.ts'
+import { LaneFeature } from '../chain.ts'
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
-import { type ExecutionInput, ExecutionState, MessageStatus } from '../types.ts'
+import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
+import { type ExecutionInput, ExecutionState, MessageStatus, NetworkType } from '../types.ts'
 import { interfaces } from './const.ts'
-import { FUJI_TO_SEPOLIA, SEPOLIA_TO_FUJI } from './fork.test.data.ts'
+import { FUJI_TO_SEPOLIA, SEPOLIA_TO_FUJI, TON_TO_SEPOLIA } from './fork.test.data.ts'
 import { EVMChain } from './index.ts'
 
 // ── Chain constants ──
@@ -20,7 +23,7 @@ const SEPOLIA_CHAIN_ID = 11155111
 const SEPOLIA_SELECTOR = 16015286601757825753n
 const SEPOLIA_ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
 
-const FUJI_RPC = process.env['RPC_FUJI'] || 'https://avalanche-fuji-c-chain-rpc.publicnode.com'
+const FUJI_RPC = process.env['RPC_FUJI'] || 'https://avalanche-fuji.drpc.org'
 const FUJI_CHAIN_ID = 43113
 
 const ANVIL_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
@@ -47,6 +50,25 @@ const CCIP_MESSAGE_SENT_TOPIC = interfaces.OnRamp_v1_6.getEvent('CCIPMessageSent
 // Token with pool support on the Sepolia -> Aptos lane
 const APTOS_SUPPORTED_TOKEN = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
 
+// ── getLaneFeatures constants ──
+
+// v2.0 router for Sepolia -> Fuji lane
+const SEPOLIA_V2_0_ROUTER = '0xc0f457e615348708FaAB3B40ECC26Badb32B7b30'
+// v2.0 router for Fuji -> Sepolia lane
+const FUJI_V2_0_ROUTER = '0xE7b62d27D6DDca525FE2e1ea526905EbfB36a1e1'
+// Token on Sepolia whose pool (BurnMintTokenPool 1.7.0-dev) supports the older
+// singular getMinBlockConfirmation(), not the plural getMinBlockConfirmations()
+// in our current ABI. This exercises the try-catch fallback path.
+const OLD_POOL_TOKEN_SEPOLIA = '0x67f000ca40cb1c6ee3bd2c7fda2fd22ddf56faab'
+// Token on Fuji whose pool (LombardTokenPool 2.0.0-dev) DOES support getMinBlockConfirmations
+const FTF_TOKEN_FUJI = '0x7FbdC44BfEBDe80C970ba622B678daB36cee31f6'
+// CCIP-BnM on Sepolia — supported on v1.5 Sepolia→Fuji lane
+const CCIP_BNM_TOKEN_SEPOLIA = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
+// Token pools with FTF enabled and custom rate limits configured
+const FTF_ENABLED_POOL_SEPOLIA = '0x161d23c30b5ae2899c3d4d969ba2b82026f3954a'
+const FTF_ENABLED_POOL_FUJI = '0xc9346f85a04a47188710d8830127a2490959cbd9'
+// Token served by FTF_ENABLED_POOL_SEPOLIA — works with V3 extra args on Sepolia→Fuji v2.0 lane
+const FTF_TOKEN_SEPOLIA = '0x6b039E8bDB3F92093AdC417367379089be7A80B1'
 // ── execute constants ──
 
 // Known message stuck in FAILED state on sepolia, sent from fuji (v1.6)
@@ -55,6 +77,9 @@ const EXEC_TEST_MSG = FUJI_TO_SEPOLIA.find(
 )!
 const SOURCE_TX_HASH = EXEC_TEST_MSG.txHash
 const MESSAGE_ID = EXEC_TEST_MSG.messageId
+const V2_API_EXEC_MSG = {
+  messageId: '0x886836ec7b9adc834d45d70c4cbd05f2623f56add4e15a96e12758c941452155',
+}
 
 // Second failed v1.6 message for getExecutionInput test (different from above so both can execute)
 const EXEC_INPUT_TEST_MSG = FUJI_TO_SEPOLIA.find(
@@ -108,12 +133,16 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   let sepoliaChain: EVMChain | undefined
   let fujiChain: EVMChain | undefined
   let wallet: Wallet
-  let sepoliaInstance: ReturnType<typeof anvil> | undefined
-  let fujiInstance: ReturnType<typeof anvil> | undefined
+  let sepoliaInstance: ReturnType<typeof Instance.anvil> | undefined
+  let fujiInstance: ReturnType<typeof Instance.anvil> | undefined
 
   before(async () => {
-    sepoliaInstance = anvil({ forkUrl: SEPOLIA_RPC, chainId: SEPOLIA_CHAIN_ID, port: 8646 })
-    fujiInstance = anvil({ forkUrl: FUJI_RPC, chainId: FUJI_CHAIN_ID, port: 8645 })
+    sepoliaInstance = Instance.anvil({
+      forkUrl: SEPOLIA_RPC,
+      chainId: SEPOLIA_CHAIN_ID,
+      port: 8646,
+    })
+    fujiInstance = Instance.anvil({ forkUrl: FUJI_RPC, chainId: FUJI_CHAIN_ID, port: 8645 })
     await Promise.all([sepoliaInstance.start(), fujiInstance.start()])
 
     const sepoliaProvider = new JsonRpcProvider(
@@ -506,6 +535,661 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     )
   })
 
+  describe('getLaneFeatures', () => {
+    it('should return MIN_BLOCK_CONFIRMATIONS=0 and no rate limits for v1.6 router', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const features = await sepoliaChain.getLaneFeatures({
+        router: SEPOLIA_V1_6_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+      })
+
+      assert.equal(
+        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        undefined,
+        'v1.6 lane should not include MIN_BLOCK_CONFIRMATIONS (FTF does not exist pre-v2.0)',
+      )
+      assert.equal(
+        LaneFeature.RATE_LIMITS in features,
+        false,
+        'v1.6 lane should not have RATE_LIMITS',
+      )
+      assert.equal(
+        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        false,
+        'v1.6 lane should not have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+      )
+    })
+
+    it('should return MIN_BLOCK_CONFIRMATIONS=1 and no rate limits for v2.0 router without token', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const features = await sepoliaChain.getLaneFeatures({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+      })
+
+      assert.equal(
+        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        1,
+        'v2.0 lane without token should default to 1 block confirmation',
+      )
+      assert.equal(
+        LaneFeature.RATE_LIMITS in features,
+        false,
+        'v2.0 lane without token should not have RATE_LIMITS (no pool to query)',
+      )
+    })
+
+    it('should return MIN_BLOCK_CONFIRMATIONS=0 for token with old pool (fallback)', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const features = await sepoliaChain.getLaneFeatures({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        token: OLD_POOL_TOKEN_SEPOLIA,
+      })
+
+      assert.equal(
+        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        0,
+        'token with old pool should have FTF disabled (MIN_BLOCK_CONFIRMATIONS=0)',
+      )
+      // Old pool doesn't support getMinBlockConfirmations but does support
+      // getCurrentRateLimiterState, so RATE_LIMITS may still be present
+      assert.ok(LaneFeature.RATE_LIMITS in features, 'old pool should still have RATE_LIMITS')
+      // FTF disabled → no CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS
+      assert.equal(
+        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        false,
+        'FTF disabled pool should not have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+      )
+    })
+
+    it('should query token pool for features on v2.0 pool', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      const features = await fujiChain.getLaneFeatures({
+        router: FUJI_V2_0_ROUTER,
+        destChainSelector: SEPOLIA_SELECTOR,
+        token: FTF_TOKEN_FUJI,
+      })
+
+      const minBlocks = features[LaneFeature.MIN_BLOCK_CONFIRMATIONS]
+      console.log(`  Lombard pool MIN_BLOCK_CONFIRMATIONS = ${minBlocks}`)
+      assert.equal(
+        minBlocks,
+        0,
+        'Lombard pool should return MIN_BLOCK_CONFIRMATIONS=0 (FTF not enabled)',
+      )
+
+      // RATE_LIMITS should be present for v2.0 pool with token
+      assert.ok(LaneFeature.RATE_LIMITS in features, 'v2.0 pool should have RATE_LIMITS')
+      const rateLimits = features[LaneFeature.RATE_LIMITS]
+      if (rateLimits != null) {
+        assert.equal(typeof rateLimits.tokens, 'bigint', 'tokens should be bigint')
+        assert.equal(typeof rateLimits.capacity, 'bigint', 'capacity should be bigint')
+        assert.equal(typeof rateLimits.rate, 'bigint', 'rate should be bigint')
+      }
+
+      // FTF disabled → no CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS
+      assert.equal(
+        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        false,
+        'FTF disabled pool should not have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+      )
+    })
+
+    it('should return RATE_LIMITS for v1.5 router with token (legacy pool)', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const features = await sepoliaChain.getLaneFeatures({
+        router: SEPOLIA_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        token: CCIP_BNM_TOKEN_SEPOLIA,
+      })
+
+      assert.equal(
+        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        undefined,
+        'v1.5 lane should not include MIN_BLOCK_CONFIRMATIONS (FTF does not exist pre-v2.0)',
+      )
+
+      // Legacy pool should expose RATE_LIMITS via getCurrentOutboundRateLimiterState
+      assert.ok(LaneFeature.RATE_LIMITS in features, 'v1.5 lane with token should have RATE_LIMITS')
+      const rateLimits = features[LaneFeature.RATE_LIMITS]
+      if (rateLimits != null) {
+        assert.equal(typeof rateLimits.tokens, 'bigint', 'tokens should be bigint')
+        assert.equal(typeof rateLimits.capacity, 'bigint', 'capacity should be bigint')
+        assert.equal(typeof rateLimits.rate, 'bigint', 'rate should be bigint')
+      }
+
+      // FTF doesn't exist on legacy lanes → no CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS
+      assert.equal(
+        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        false,
+        'legacy lane should not have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+      )
+    })
+
+    it('should return nonzero MIN_BLOCK_CONFIRMATIONS and custom rate limits for FTF-enabled pool (Sepolia)', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const token = await sepoliaChain.getTokenForTokenPool(FTF_ENABLED_POOL_SEPOLIA)
+      const features = await sepoliaChain.getLaneFeatures({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        token,
+      })
+
+      const minBlocks = features[LaneFeature.MIN_BLOCK_CONFIRMATIONS]
+      console.log(`  FTF-enabled pool MIN_BLOCK_CONFIRMATIONS = ${minBlocks}`)
+      assert.ok(
+        minBlocks != null && minBlocks > 0,
+        `FTF-enabled pool should have MIN_BLOCK_CONFIRMATIONS > 0 (got ${minBlocks})`,
+      )
+
+      // Default rate limits should be present
+      assert.ok(LaneFeature.RATE_LIMITS in features, 'FTF-enabled pool should have RATE_LIMITS')
+      const rateLimits = features[LaneFeature.RATE_LIMITS]
+      assert.ok(rateLimits != null, 'RATE_LIMITS should not be null')
+      assert.equal(typeof rateLimits.tokens, 'bigint', 'tokens should be bigint')
+      assert.equal(typeof rateLimits.capacity, 'bigint', 'capacity should be bigint')
+      assert.equal(typeof rateLimits.rate, 'bigint', 'rate should be bigint')
+
+      // Custom finality rate limits should be present when FTF is enabled
+      assert.ok(
+        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        'FTF-enabled pool should have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+      )
+      const customRateLimits = features[LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS]
+      assert.ok(
+        customRateLimits != null,
+        'CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS should not be null',
+      )
+      assert.equal(typeof customRateLimits.tokens, 'bigint', 'custom tokens should be bigint')
+      assert.equal(typeof customRateLimits.capacity, 'bigint', 'custom capacity should be bigint')
+      assert.equal(typeof customRateLimits.rate, 'bigint', 'custom rate should be bigint')
+
+      // Custom rate limits should differ from default rate limits
+      const differs =
+        rateLimits.capacity !== customRateLimits.capacity ||
+        rateLimits.rate !== customRateLimits.rate
+      assert.ok(
+        differs,
+        `custom rate limits should differ from default (default: capacity=${rateLimits.capacity} rate=${rateLimits.rate}, custom: capacity=${customRateLimits.capacity} rate=${customRateLimits.rate})`,
+      )
+    })
+
+    it('should return nonzero MIN_BLOCK_CONFIRMATIONS and custom rate limits for FTF-enabled pool (Fuji)', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      const token = await fujiChain.getTokenForTokenPool(FTF_ENABLED_POOL_FUJI)
+      const features = await fujiChain.getLaneFeatures({
+        router: FUJI_V2_0_ROUTER,
+        destChainSelector: SEPOLIA_SELECTOR,
+        token,
+      })
+
+      const minBlocks = features[LaneFeature.MIN_BLOCK_CONFIRMATIONS]
+      console.log(`  FTF-enabled Fuji pool MIN_BLOCK_CONFIRMATIONS = ${minBlocks}`)
+      assert.ok(
+        minBlocks != null && minBlocks > 0,
+        `FTF-enabled pool should have MIN_BLOCK_CONFIRMATIONS > 0 (got ${minBlocks})`,
+      )
+
+      // Default rate limits should be present
+      assert.ok(LaneFeature.RATE_LIMITS in features, 'FTF-enabled pool should have RATE_LIMITS')
+      const rateLimits = features[LaneFeature.RATE_LIMITS]
+      assert.ok(rateLimits != null, 'RATE_LIMITS should not be null')
+
+      // Custom finality rate limits should be present when FTF is enabled
+      assert.ok(
+        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        'FTF-enabled pool should have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+      )
+      const customRateLimits = features[LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS]
+      assert.ok(
+        customRateLimits != null,
+        'CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS should not be null',
+      )
+
+      // Custom rate limits should differ from default rate limits
+      const differs =
+        rateLimits.capacity !== customRateLimits.capacity ||
+        rateLimits.rate !== customRateLimits.rate
+      assert.ok(
+        differs,
+        `custom rate limits should differ from default (default: capacity=${rateLimits.capacity} rate=${rateLimits.rate}, custom: capacity=${customRateLimits.capacity} rate=${customRateLimits.rate})`,
+      )
+    })
+  })
+
+  describe('getTokenPoolConfig with tokenTransferFeeConfig', () => {
+    it('should return disabled fee config for token with old pool', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      // Resolve pool address for the old pool token
+      const onRamp = await sepoliaChain.getOnRampForRouter(SEPOLIA_V2_0_ROUTER, FUJI_SELECTOR)
+      const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, sepoliaChain.provider)
+      const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+        FUJI_SELECTOR,
+        OLD_POOL_TOKEN_SEPOLIA,
+      )) as string
+
+      const result = await sepoliaChain.getTokenPoolConfig(poolAddress, {
+        destChainSelector: FUJI_SELECTOR,
+        blockConfirmationsRequested: 0,
+        tokenArgs: '0x',
+      })
+
+      // Old pools may respond with all-zero config rather than reverting
+      assert.ok(result.tokenTransferFeeConfig, 'old pool responds to the call')
+      assert.equal(
+        result.tokenTransferFeeConfig.isEnabled,
+        false,
+        'fee config should not be enabled on old pool',
+      )
+    })
+
+    it('should return fee config for v2.0 pool', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      // Resolve pool address
+      const onRamp = await fujiChain.getOnRampForRouter(FUJI_V2_0_ROUTER, SEPOLIA_SELECTOR)
+      const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, fujiChain.provider)
+      const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+        SEPOLIA_SELECTOR,
+        FTF_TOKEN_FUJI,
+      )) as string
+
+      const result = await fujiChain.getTokenPoolConfig(poolAddress, {
+        destChainSelector: SEPOLIA_SELECTOR,
+        blockConfirmationsRequested: 0,
+        tokenArgs: '0x',
+      })
+
+      assert.ok(result.tokenTransferFeeConfig, 'v2.0 pool should return fee config')
+      assert.equal(typeof result.tokenTransferFeeConfig.destGasOverhead, 'number')
+      assert.equal(typeof result.tokenTransferFeeConfig.destBytesOverhead, 'number')
+      assert.equal(typeof result.tokenTransferFeeConfig.isEnabled, 'boolean')
+      console.log('  v2.0 pool fee config (blockConfirmationsRequested=0):')
+      console.log(
+        `    defaultBlockConfirmationsFeeUSDCents = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    customBlockConfirmationsFeeUSDCents  = ${result.tokenTransferFeeConfig.customBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    defaultBlockConfirmationsTransferFeeBps = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps}`,
+      )
+      console.log(
+        `    customBlockConfirmationsTransferFeeBps  = ${result.tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps}`,
+      )
+    })
+
+    it('should return fee config with blockConfirmationsRequested=1', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      // Resolve pool address
+      const onRamp = await fujiChain.getOnRampForRouter(FUJI_V2_0_ROUTER, SEPOLIA_SELECTOR)
+      const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, fujiChain.provider)
+      const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+        SEPOLIA_SELECTOR,
+        FTF_TOKEN_FUJI,
+      )) as string
+
+      const result = await fujiChain.getTokenPoolConfig(poolAddress, {
+        destChainSelector: SEPOLIA_SELECTOR,
+        blockConfirmationsRequested: 1,
+        tokenArgs: '0x',
+      })
+
+      assert.ok(result.tokenTransferFeeConfig, 'v2.0 pool should return fee config')
+      assert.equal(typeof result.tokenTransferFeeConfig.destGasOverhead, 'number')
+      assert.equal(typeof result.tokenTransferFeeConfig.destBytesOverhead, 'number')
+      assert.equal(typeof result.tokenTransferFeeConfig.isEnabled, 'boolean')
+      console.log('  v2.0 pool fee config (blockConfirmationsRequested=1):')
+      console.log(
+        `    defaultBlockConfirmationsFeeUSDCents = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    customBlockConfirmationsFeeUSDCents  = ${result.tokenTransferFeeConfig.customBlockConfirmationsFeeUSDCents}`,
+      )
+      console.log(
+        `    defaultBlockConfirmationsTransferFeeBps = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps}`,
+      )
+      console.log(
+        `    customBlockConfirmationsTransferFeeBps  = ${result.tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps}`,
+      )
+    })
+
+    it('should omit fee config when feeOpts not provided', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      // Resolve pool address
+      const onRamp = await fujiChain.getOnRampForRouter(FUJI_V2_0_ROUTER, SEPOLIA_SELECTOR)
+      const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, fujiChain.provider)
+      const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
+        SEPOLIA_SELECTOR,
+        FTF_TOKEN_FUJI,
+      )) as string
+
+      const result = await fujiChain.getTokenPoolConfig(poolAddress)
+
+      assert.equal(
+        result.tokenTransferFeeConfig,
+        undefined,
+        'fee config should be undefined without feeOpts',
+      )
+      assert.equal(typeof result.token, 'string')
+      assert.equal(typeof result.router, 'string')
+    })
+  })
+
+  describe('getTotalFeesEstimate', () => {
+    it('should return ccipFee and no tokenTransferFee for data-only message', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const estimate = await sepoliaChain.getTotalFeesEstimate({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: { receiver: '0x0000000000000000000000000000000000000001', data: '0x1337' },
+      })
+
+      assert.equal(typeof estimate.ccipFee, 'bigint')
+      assert.ok(estimate.ccipFee > 0n, 'ccipFee should be positive')
+      assert.equal(estimate.tokenTransferFee, undefined)
+    })
+
+    it('should return token transfer fee for message with tokenAmounts', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const amount = 1_000_000n
+      const estimate = await sepoliaChain.getTotalFeesEstimate({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: {
+          receiver: '0x0000000000000000000000000000000000000001',
+          tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount }],
+        },
+      })
+
+      assert.equal(typeof estimate.ccipFee, 'bigint')
+      assert.ok(estimate.ccipFee > 0n, 'ccipFee should be positive')
+      assert.ok(estimate.tokenTransferFee, 'tokenTransferFee should be present')
+
+      const tf = estimate.tokenTransferFee
+      assert.equal(typeof tf.feeDeducted, 'bigint')
+      assert.equal(typeof tf.bps, 'number')
+      assert.equal(tf.feeDeducted, (amount * BigInt(tf.bps)) / 10_000n)
+
+      console.log('  getTotalFeesEstimate (default blockConfirmations):')
+      console.log(`    ccipFee = ${estimate.ccipFee}`)
+      console.log(`    value = ${tf.feeDeducted} (${tf.bps} bps)`)
+    })
+
+    it('should return ccipFee only for pre-v2.0 lane with token transfer', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const amount = 1_000_000n
+      const estimate = await sepoliaChain.getTotalFeesEstimate({
+        router: SEPOLIA_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: {
+          receiver: '0x0000000000000000000000000000000000000001',
+          tokenAmounts: [{ token: CCIP_BNM_TOKEN_SEPOLIA, amount }],
+        },
+      })
+
+      assert.equal(typeof estimate.ccipFee, 'bigint')
+      assert.ok(estimate.ccipFee > 0n, 'ccipFee should be positive')
+      assert.equal(
+        estimate.tokenTransferFee,
+        undefined,
+        'pre-v2.0 lane should not return tokenTransferFee',
+      )
+    })
+
+    it('should use custom BPS when blockConfirmations > 0', async () => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+
+      const amount = 1_000_000n
+      const estimate = await sepoliaChain.getTotalFeesEstimate({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: {
+          receiver: '0x0000000000000000000000000000000000000001',
+          tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount }],
+          extraArgs: {
+            gasLimit: 200_000n,
+            blockConfirmations: 1,
+            ccvs: [],
+            ccvArgs: [],
+            executor: '',
+            executorArgs: '0x',
+            tokenReceiver: '',
+            tokenArgs: '0x',
+          },
+        },
+      })
+
+      assert.equal(typeof estimate.ccipFee, 'bigint')
+      assert.ok(estimate.ccipFee > 0n, 'ccipFee should be positive')
+      assert.ok(estimate.tokenTransferFee, 'tokenTransferFee should be present')
+
+      const tf = estimate.tokenTransferFee
+      assert.equal(tf.feeDeducted, (amount * BigInt(tf.bps)) / 10_000n)
+
+      console.log('  getTotalFeesEstimate (blockConfirmations=1):')
+      console.log(`    ccipFee = ${estimate.ccipFee}`)
+      console.log(`    value = ${tf.feeDeducted} (${tf.bps} bps)`)
+    })
+
+    // ── Historical message validation ──
+    // Fetches real testnet messages from the staging API to get their fee breakdowns,
+    // then runs preflight estimation with matching parameters and asserts the BPS
+    // values match. This validates that on-chain fee estimation agrees with observed
+    // historical behavior.
+    //
+    // TODO: once CCIPAPIClient exposes bpsFeeDetails from the API response, replace
+    // the raw fetch below with client.getMessageById() and read fees from the result.
+
+    const STAGING_API = 'https://api.ccip.cldev.cloud'
+
+    const HISTORICAL_MESSAGE_IDS = [
+      // Fuji → Sepolia, default finality (blockConfirmations=0), 0% BPS
+      '0x39dda11d8d8ccf35055825349ab8c1842587966389cb8200eb5b72830318f707',
+      // Fuji → Sepolia, custom finality (blockConfirmations=5), 1% BPS
+      '0x88bf551330e9767ac981582a3e7fac510b876a7038e38a633e32c63ac7dd0169',
+      // Sepolia → Fuji, default finality (blockConfirmations=0), 0% BPS
+      '0x2a6eeea60b80235cbd1e3ead45f6cd848374961831c21733170d7cb965514f31',
+      // Sepolia → Fuji, custom finality (blockConfirmations=1), 10% BPS
+      '0x42683f3a0efb956e881b3e9eec4e4161e32b09a98c680ee82219d011fcd9df1d',
+    ]
+
+    /** Resolve source chain selector to the matching fork chain + v2.0 router. */
+    function resolveChain(sourceSelector: string) {
+      if (sourceSelector === FUJI_SELECTOR.toString()) {
+        assert.ok(fujiChain, 'fuji chain should be initialized')
+        return { chain: fujiChain, router: FUJI_V2_0_ROUTER }
+      }
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+      return { chain: sepoliaChain, router: SEPOLIA_V2_0_ROUTER }
+    }
+
+    for (const messageId of HISTORICAL_MESSAGE_IDS) {
+      it(`preflight fee estimation should match API breakdown for ${messageId}`, async () => {
+        // Fetch raw message from staging API (includes bpsFeeDetails not yet
+        // exposed by CCIPAPIClient)
+        const url = `${STAGING_API}/v2/messages/${messageId}`
+        const res = await fetch(url)
+        assert.ok(res.ok, `API request failed: ${res.status} ${res.statusText}`)
+        const raw = (await res.json()) as Record<string, any>
+
+        const { chain, router } = resolveChain(raw.sourceNetworkInfo.chainSelector)
+        const destChainSelector = BigInt(raw.destNetworkInfo.chainSelector)
+        const token = raw.tokenAmounts[0].sourceTokenAddress as string
+        const blockConfirmations: number = raw.extraArgs?.blockConfirmations ?? 0
+
+        // Reconstruct original sent amount = post-fee amount + bps fee deducted
+        const bpsEntry = raw.fees?.bpsFeeDetails?.[0]
+        const apiBps: number = bpsEntry?.bps ?? 0
+        const apiFeeDeducted = BigInt(bpsEntry?.amount ?? '0')
+        const postFeeAmount = BigInt(raw.tokenAmounts[0].amount)
+        const originalAmount = postFeeAmount + apiFeeDeducted
+
+        console.log(`  [${messageId.slice(0, 10)}…] API: ${apiBps} bps, fee=${apiFeeDeducted}`)
+
+        // Build estimation request matching the historical message
+        const message: Parameters<typeof chain.getTotalFeesEstimate>[0]['message'] = {
+          receiver: '0x0000000000000000000000000000000000000001',
+          tokenAmounts: [{ token, amount: originalAmount }],
+        }
+        if (blockConfirmations > 0) {
+          message.extraArgs = {
+            gasLimit: 0n,
+            blockConfirmations,
+            ccvs: [],
+            ccvArgs: [],
+            executor: '',
+            executorArgs: '0x',
+            tokenReceiver: '',
+            tokenArgs: '0x',
+          }
+        }
+
+        const estimate = await chain.getTotalFeesEstimate({
+          router,
+          destChainSelector,
+          message,
+        })
+
+        assert.ok(estimate.ccipFee > 0n, 'ccipFee should be positive')
+
+        const estimatedBps = estimate.tokenTransferFee?.bps ?? 0
+        const estimatedFee = estimate.tokenTransferFee?.feeDeducted ?? 0n
+
+        console.log(
+          `  [${messageId.slice(0, 10)}…] Estimated: ${estimatedBps} bps, fee=${estimatedFee}`,
+        )
+
+        assert.equal(estimatedBps, apiBps, `BPS mismatch for ${messageId}`)
+        assert.equal(estimatedFee, apiFeeDeducted, `feeDeducted mismatch for ${messageId}`)
+      })
+    }
+  })
+
+  // ── USDC / CCTP detection tests ──
+  // These test the CCTPVerifier-based USDC detection flow directly.
+  // Limitations: on staging testnet the USDCTokenPoolProxy is deployed but not fully
+  // initialized (getStaticConfig/getToken revert), so we can't test end-to-end through
+  // getTotalFeesEstimate. Instead we exercise the detection building blocks:
+  //   1. Pool typeAndVersion identification
+  //   2. CCTPVerifier discovery via ccvs (extraArgs fallback path)
+  //   3. CCTP domain resolution from the verifier
+  describe('USDC / CCTP detection', () => {
+    // CCTPVerifier on Fuji — known working, returns domain IDs
+    const CCTP_VERIFIER_FUJI = '0x79DA0F0c54876C5c601877e335B92BD0E23ce1aA'
+    // USDCTokenPoolProxy on Fuji — deployed but proxy not initialized
+    const USDC_POOL_PROXY_FUJI = '0x53aAAA2b52D6bc2DbC7BC290f686B47799F61748'
+    const BASE_SEPOLIA_SELECTOR = 10344971235874465080n
+
+    it('should identify USDCTokenPoolProxy via typeAndVersion', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      const [type, , full] = await fujiChain.typeAndVersion(USDC_POOL_PROXY_FUJI)
+      assert.equal(type, 'USDCTokenPoolProxy')
+      console.log(`  Pool typeAndVersion: ${full}`)
+    })
+
+    it('should identify CCTPVerifier via typeAndVersion', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      const [type, , full] = await fujiChain.typeAndVersion(CCTP_VERIFIER_FUJI)
+      assert.equal(type, 'CCTPVerifier')
+      console.log(`  Verifier typeAndVersion: ${full}`)
+    })
+
+    it('should resolve CCTP domains from CCTPVerifier', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      const provider = new JsonRpcProvider(FUJI_RPC)
+      const verifier = new Contract(CCTP_VERIFIER_FUJI, interfaces.CCTPVerifier_v2_0, provider)
+
+      const [staticConfig, destDomain] = (await Promise.all([
+        verifier.getFunction('getStaticConfig')(),
+        verifier.getFunction('getDomain')(BASE_SEPOLIA_SELECTOR),
+      ])) as [{ localDomainIdentifier: bigint }, { domainIdentifier: bigint; enabled: boolean }]
+
+      const sourceDomain = Number(staticConfig.localDomainIdentifier)
+      const destDomainId = Number(destDomain.domainIdentifier)
+
+      assert.equal(sourceDomain, 1, 'Fuji CCTP domain should be 1')
+      assert.equal(destDomainId, 6, 'Base Sepolia CCTP domain should be 6')
+      assert.equal(destDomain.enabled, true, 'Base Sepolia domain should be enabled')
+
+      console.log(`  Fuji (domain ${sourceDomain}) -> Base Sepolia (domain ${destDomainId})`)
+
+      // Extend: use the resolved domains to fetch burn fees from Circle's CCTP API
+      const burnFees = await getUsdcBurnFees(sourceDomain, destDomainId, NetworkType.Testnet)
+
+      assert.ok(Array.isArray(burnFees), 'burnFees should be an array')
+      assert.ok(burnFees.length > 0, 'should have at least one fee tier')
+
+      for (const tier of burnFees) {
+        assert.equal(typeof tier.finalityThreshold, 'number')
+        assert.equal(typeof tier.minimumFee, 'number')
+        assert.ok(tier.finalityThreshold >= 0, 'finalityThreshold should be non-negative')
+        assert.ok(tier.minimumFee >= 0, 'minimumFee should be non-negative')
+      }
+
+      // The fast tier (pre-finality) should have a positive fee
+      const fastTier = burnFees.find((t) => t.finalityThreshold <= CCTP_FINALITY_FAST)
+      // The standard tier (full finality) typically has 0 bps
+      const standardTier = burnFees.find((t) => t.finalityThreshold > CCTP_FINALITY_FAST)
+
+      console.log('  Circle API burn fee tiers:')
+      for (const tier of burnFees) {
+        console.log(`    threshold=${tier.finalityThreshold}, fee=${tier.minimumFee} bps`)
+      }
+      if (fastTier) console.log(`  Fast tier: ${fastTier.minimumFee} bps`)
+      if (standardTier) console.log(`  Standard tier: ${standardTier.minimumFee} bps`)
+    })
+
+    it('should discover CCTPVerifier when passed as ccv in extraArgs', async () => {
+      assert.ok(fujiChain, 'fuji chain should be initialized')
+
+      // Simulate the ccvs scanning loop from detectUsdcDomains:
+      // given the CCTPVerifier address in ccvs, verify we can identify and use it
+      const ccvs = [CCTP_VERIFIER_FUJI]
+      let verifierAddress: string | undefined
+
+      for (const ccv of ccvs) {
+        const [ccvType] = await fujiChain.typeAndVersion(ccv)
+        if (ccvType === 'CCTPVerifier') {
+          verifierAddress = ccv
+          break
+        }
+      }
+
+      assert.ok(verifierAddress, 'should find CCTPVerifier in ccvs')
+      assert.equal(verifierAddress, CCTP_VERIFIER_FUJI)
+
+      // Now resolve domains from the discovered verifier
+      const provider = new JsonRpcProvider(FUJI_RPC)
+      const verifier = new Contract(verifierAddress, interfaces.CCTPVerifier_v2_0, provider)
+      const destDomain = (await verifier.getFunction('getDomain')(BASE_SEPOLIA_SELECTOR)) as {
+        domainIdentifier: bigint
+      }
+
+      assert.equal(Number(destDomain.domainIdentifier), 6)
+      console.log(
+        `  Discovered verifier ${verifierAddress.slice(0, 10)}..., dest domain: ${Number(destDomain.domainIdentifier)}`,
+      )
+    })
+  })
+
   // ── State-mutating tests below: keep these last so read-only tests see clean fork state ──
 
   describe('sendMessage', () => {
@@ -720,6 +1404,141 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         execution.receipt.state === ExecutionState.Success,
         'execution state should be Success',
       )
+    })
+
+    it('should execute a v2.0 message via API-driven path (Fuji -> Sepolia)', async () => {
+      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+
+      // Create a sepolia chain with staging API client (execution-inputs endpoint)
+      const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
+      const sepoliaProvider = new JsonRpcProvider(
+        `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
+      )
+      const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
+        apiClient: stagingApi,
+        logger: testLogger,
+      })
+      const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
+
+      // Execute via messageId only — triggers API-driven path
+      const execution = await sepoliaWithApi.execute({
+        messageId: V2_API_EXEC_MSG.messageId,
+        wallet: w,
+        gasLimit: 500_000,
+      })
+
+      console.log(
+        `  executed ${V2_API_EXEC_MSG.messageId.slice(0, 10)}… via API → state=${execution.receipt.state}`,
+      )
+      assert.equal(
+        execution.receipt.messageId,
+        V2_API_EXEC_MSG.messageId,
+        'receipt messageId should match',
+      )
+      assert.ok(execution.log.transactionHash, 'should have tx hash')
+      assert.ok(execution.timestamp > 0, 'should have timestamp')
+      assert.equal(execution.receipt.state, ExecutionState.Success)
+
+      sepoliaWithApi.destroy?.()
+    })
+
+    it('should execute a v1.5 message via API-driven path (Sepolia -> Fuji)', async () => {
+      assert.ok(fujiInstance, 'fuji anvil should be running')
+
+      const messageId = '0xe654dc68b4d98e8ea2f182ee45d5766af4f62e2417395153a90c4b377d3fcd07'
+
+      const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
+      const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
+      const fujiWithApi = await EVMChain.fromProvider(fujiProvider, {
+        apiClient: stagingApi,
+        logger: testLogger,
+      })
+      const w = new Wallet(ANVIL_PRIVATE_KEY, fujiProvider)
+
+      const execution = await fujiWithApi.execute({
+        messageId,
+        wallet: w,
+        gasLimit: 500_000,
+      })
+
+      console.log(
+        `  executed ${messageId.slice(0, 10)}… via API (v1.5 Sepolia→Fuji) → state=${execution.receipt.state}`,
+      )
+      assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
+      assert.ok(execution.log.transactionHash, 'should have tx hash')
+      assert.ok(execution.timestamp > 0, 'should have timestamp')
+      assert.equal(execution.receipt.state, ExecutionState.Success)
+
+      fujiWithApi.destroy?.()
+    })
+
+    // TON-source messages were historically problematic due to data quality issues
+    // on AtlasDB. This test verifies the API workaround that resolves the issue.
+    it('should execute a TON-source message via API-driven path (TON -> Sepolia)', async () => {
+      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+
+      const messageId = '0xe913d21d8bc14316286646539db34bc7dd14b11c6ae3b0c307e7e52f6af02805'
+
+      const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
+      const sepoliaProvider = new JsonRpcProvider(
+        `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
+      )
+      const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
+        apiClient: stagingApi,
+        logger: testLogger,
+      })
+      const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
+
+      // Execute via messageId only — triggers API-driven path
+      const execution = await sepoliaWithApi.execute({
+        messageId,
+        wallet: w,
+        gasLimit: 500_000,
+      })
+
+      console.log(
+        `  executed ${messageId.slice(0, 10)}… via API (TON source) → state=${execution.receipt.state}`,
+      )
+      assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
+      assert.ok(execution.log.transactionHash, 'should have tx hash')
+      assert.ok(execution.timestamp > 0, 'should have timestamp')
+      assert.equal(execution.receipt.state, ExecutionState.Success)
+
+      sepoliaWithApi.destroy?.()
+    })
+
+    // Another problematic TON-source message with gasLimit=1 and data payload.
+    // Validates the API-driven manual execution path for TON → Sepolia.
+    it('should execute a problematic TON-source message via API-driven path (TON -> Sepolia, gasLimit=1)', async () => {
+      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+
+      const msg = TON_TO_SEPOLIA[0]!
+
+      const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
+      const sepoliaProvider = new JsonRpcProvider(
+        `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
+      )
+      const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
+        apiClient: stagingApi,
+        logger: testLogger,
+      })
+      const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
+
+      const execution = await sepoliaWithApi.execute({
+        messageId: msg.messageId,
+        wallet: w,
+        gasLimit: 500_000,
+      })
+
+      console.log(
+        `  executed ${msg.messageId.slice(0, 10)}… via API (TON source, gasLimit=1) → state=${execution.receipt.state}`,
+      )
+      assert.equal(execution.receipt.messageId, msg.messageId, 'receipt messageId should match')
+      assert.ok(execution.log.transactionHash, 'should have tx hash')
+      assert.ok(execution.timestamp > 0, 'should have timestamp')
+      assert.equal(execution.receipt.state, ExecutionState.Success)
+
+      sepoliaWithApi.destroy?.()
     })
   })
 })

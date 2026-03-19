@@ -37,6 +37,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Verify you are using the correct destination chain. Check that sourceChainSelector and destChainSelector match your lane.',
   MESSAGE_RETRIEVAL_FAILED:
     'Both API and RPC failed to retrieve the message. Verify the transaction hash is correct and the transaction is confirmed. Check RPC and network connectivity.',
+  MESSAGE_NOT_VERIFIED_YET: 'Message not yet committed or verified; wait and retry.',
   MESSAGE_VERSION_INVALID:
     'Ensure the source chain onRamp uses CCIP v1.6. Older message versions are not compatible with this destination.',
 
@@ -127,9 +128,10 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   LBTC_ATTESTATION_ERROR: 'LBTC attestation fetch failed. Wait and retry.',
   LBTC_ATTESTATION_NOT_FOUND: 'LBTC attestation not found. Verify the payload hash.',
   LBTC_ATTESTATION_NOT_APPROVED: 'LBTC attestation not yet approved. Wait for notarization.',
+  USDC_BURN_FEES_FAILED:
+    'Failed to fetch USDC burn fees from the Circle API. Retry later or check Circle API status.',
   CCTP_DECODE_FAILED:
     'Ensure the transaction contains a valid CCTP MessageSent event. Verify this is a USDC transfer.',
-  CCTP_MULTIPLE_EVENTS: 'Multiple CCTP events found. Expected only one per transaction.',
 
   LOG_DATA_INVALID: 'Ensure the log data is a valid hex string from a transaction receipt.',
   LOG_DATA_MISSING: 'Log data is missing or not a string.',
@@ -170,6 +172,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   RPC_NOT_FOUND: 'No RPC endpoint found. Configure an RPC URL.',
   TIMEOUT:
     'Request timed out. Check network connectivity and try again. Consider increasing timeoutMs if the server is slow.',
+  ABORT:
+    'Request was aborted. This is usually intentional (e.g. user cancellation or component unmount).',
 
   VIEM_ADAPTER_ERROR:
     'Check that your viem client has both account and chain defined. For WalletClient, use createWalletClient({ chain, account, ... }).',

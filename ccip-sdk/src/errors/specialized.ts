@@ -1,6 +1,7 @@
 import { type CCIPErrorOptions, CCIPError } from './CCIPError.ts'
 import { CCIPErrorCode } from './codes.ts'
 import { isTransientHttpStatus } from '../http-status.ts'
+import { bigIntReplacer } from '../utils.ts'
 
 // Chain/Network
 
@@ -166,7 +167,10 @@ export class CCIPMessageInvalidError extends CCIPError {
   override readonly name = 'CCIPMessageInvalidError'
   /** Creates a message invalid error. */
   constructor(data: unknown, options?: CCIPErrorOptions) {
-    const dataStr = typeof data === 'object' && data !== null ? JSON.stringify(data) : String(data)
+    const dataStr =
+      typeof data === 'object' && data !== null
+        ? JSON.stringify(data, bigIntReplacer)
+        : String(data)
     super(CCIPErrorCode.MESSAGE_INVALID, `Invalid CCIP message format: ${dataStr}`, {
       ...options,
       isTransient: false,
@@ -375,6 +379,41 @@ export class CCIPMessageRetrievalError extends CCIPError {
           apiError: apiError?.message,
           rpcError: rpcError?.message,
         },
+      },
+    )
+  }
+}
+
+/**
+ * Thrown when a CCIP message has not been verified yet by the offchain system.
+ * This is a transient error - the message needs time to be verified before execution input can be retrieved.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const execInput = await api.getExecutionInput(messageId)
+ * } catch (error) {
+ *   if (error instanceof CCIPMessageNotVerifiedYetError) {
+ *     console.log(`Message not verified yet, retry after ${error.retryAfterMs}ms`)
+ *     await sleep(error.retryAfterMs ?? 15000)
+ *     // Retry the request
+ *   }
+ * }
+ * ```
+ */
+export class CCIPMessageNotVerifiedYetError extends CCIPError {
+  override readonly name = 'CCIPMessageNotVerifiedYetError'
+  /** Creates a message not verified yet error. */
+  constructor(messageId: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.MESSAGE_NOT_VERIFIED_YET,
+      `Message ${messageId} has not been verified yet. The offchain verification system needs time to process this message.`,
+      {
+        ...options,
+        isTransient: true,
+        retryAfterMs: 15000,
+        recovery: 'Wait for the message to be verified by the offchain system, then retry.',
+        context: { ...options?.context, messageId },
       },
     )
   }
@@ -944,6 +983,21 @@ export class CCIPUsdcAttestationError extends CCIPError {
 }
 
 /**
+ * Thrown when fetching USDC burn fees from Circle's CCTP API fails.
+ */
+export class CCIPUsdcBurnFeesError extends CCIPError {
+  override readonly name = 'CCIPUsdcBurnFeesError'
+  /** Creates a USDC burn fees error. */
+  constructor(sourceDomain: number, destDomain: number, httpStatus: number) {
+    super(
+      CCIPErrorCode.USDC_BURN_FEES_FAILED,
+      `Failed to fetch USDC burn fees for domains ${sourceDomain} -> ${destDomain} (HTTP ${httpStatus})`,
+      { context: { sourceDomain, destDomain, httpStatus } },
+    )
+  }
+}
+
+/**
  * Thrown when LBTC attestation fetch fails. Transient: attestation may not be ready.
  *
  * @example
@@ -1164,6 +1218,34 @@ export class CCIPTimeoutError extends CCIPError {
       isTransient: true,
       retryAfterMs: 5000,
       context: { ...options?.context, operation, timeoutMs },
+    })
+  }
+}
+
+/**
+ * Thrown when a request is aborted via an AbortSignal.
+ *
+ * @example
+ * ```typescript
+ * const controller = new AbortController()
+ * setTimeout(() => controller.abort(), 1000)
+ * try {
+ *   await api.searchMessages({ sender: '0x...' }, { signal: controller.signal })
+ * } catch (error) {
+ *   if (error instanceof CCIPAbortError) {
+ *     console.log(`Request was cancelled: ${error.context.operation}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPAbortError extends CCIPError {
+  override readonly name = 'CCIPAbortError'
+  /** Creates an abort error. */
+  constructor(operation: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.ABORT, `Request aborted: ${operation}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, operation },
     })
   }
 }
@@ -3235,36 +3317,6 @@ export class CCIPSolanaLaneVersionUnsupportedError extends CCIPError {
       isTransient: false,
       context: { ...options?.context, version },
     })
-  }
-}
-
-/**
- * Thrown when multiple CCTP events found in transaction.
- *
- * @example
- * ```typescript
- * try {
- *   const cctpData = await chain.getOffchainTokenData(request)
- * } catch (error) {
- *   if (error instanceof CCIPCctpMultipleEventsError) {
- *     console.log(`Found ${error.context.count} events, expected 1`)
- *   }
- * }
- * ```
- */
-export class CCIPCctpMultipleEventsError extends CCIPError {
-  override readonly name = 'CCIPCctpMultipleEventsError'
-  /** Creates a CCTP multiple events error. */
-  constructor(count: number, txSignature: string, options?: CCIPErrorOptions) {
-    super(
-      CCIPErrorCode.CCTP_MULTIPLE_EVENTS,
-      `Expected only 1 CcipCctpMessageSentEvent, found ${count} in transaction ${txSignature}`,
-      {
-        ...options,
-        isTransient: false,
-        context: { ...options?.context, count, txSignature },
-      },
-    )
   }
 }
 

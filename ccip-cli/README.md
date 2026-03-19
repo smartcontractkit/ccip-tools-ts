@@ -80,6 +80,20 @@ Wallet options can also be passed as `--wallet`, where each chain family may int
 can:
 - EVM can receive a 0x-hex private key, or the path to an encrypted json file (e.g. from geth,
 decrypted using the `USER_KEY_PASSWORD` environment variable or prompted password).
+- EVM also supports **named keystores** (Foundry Cast or Hardhat) via `--wallet foundry:<name>` /
+`--wallet hardhat:<name>`. The password is taken from
+`$FOUNDRY_KEYSTORE_PASSWORD` / `$HARDHAT_KEYSTORE_PASSWORD` (tool-specific), then `$USER_KEY_PASSWORD`, or prompted interactively.
+Foundry directory can be overridden with `$FOUNDRY_DIR` (default: `~/.foundry`).
+Hardhat support delegates to `node_modules/.bin/hardhat keystore get` — Hardhat must be installed in your project:
+  ```sh
+  # Foundry
+  cast wallet import sender --interactive
+  ccip-cli send ... --wallet foundry:sender
+
+  # Hardhat (run from inside your Hardhat project)
+  npx hardhat keystore set sender
+  ccip-cli send ... --wallet hardhat:sender
+  ```
 - Solana can receive base58 private key, or the path to an `id.json` file
 (default=`~/.config/solana/id.json`) containing a private key encoded as a json array of numbers.
 - Aptos can receive 0x-hex private key string, or the path of a text file containing it.
@@ -97,6 +111,25 @@ ChainIDs depend on the chain family and must be passed using this pattern:
 - `EVM`: numeric chain id; e.g. `1` for `ethereum-mainnet`.
 - `Solana`: genesis hash; e.g. `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d` for `solana-mainnet`
 - `Aptos`, `Sui`: numeric chain id, prefixed with chain family and colon: e.g `aptos:1` for `aptos-mainnet`
+
+## Shell Completion
+
+The CLI supports shell tab-completion for commands and options. To enable it, add the completion script to your shell profile:
+
+```sh
+# bash
+ccip-cli completion >> ~/.bashrc
+
+# zsh
+ccip-cli completion >> ~/.zshrc
+```
+
+Then restart your shell or source the profile. After setup, pressing `<TAB>` will autocomplete commands and flags:
+
+```sh
+ccip-cli s<TAB>        # completes to: send, show, get-supported-tokens
+ccip-cli send --<TAB>  # lists all send options
+```
 
 ## Quick command reference:
 
@@ -151,6 +184,7 @@ Sends a CCIP message from source to destination chain.
 | `--gas-limit` | `-L` | Gas limit for receiver callback (default: ramp config) |
 | `--estimate-gas-limit` | | Auto-estimate with % margin; conflicts with `--gas-limit` |
 | `--allow-out-of-order-exec` | `--ooo` | Skip sender nonce enforcement (v1.5+ lanes) |
+| `--extra` | `-x` | Extra args as `key=value` (parsed as JSON with bigint support; repeated keys become arrays) |
 
 **Token options:**
 
@@ -200,10 +234,12 @@ Receipts until a `success` receipt or latest block is hit.
 ### `manual-exec`
 
 ```sh
-ccip-cli manual-exec <request_transaction_hash> [--log-index num] [--gas-limit num] [--tokens-gas-limit num] [--wallet wallet]
+ccip-cli manual-exec <tx-hash-or-id> [--log-index num] [--gas-limit num] [--tokens-gas-limit num] [--wallet wallet]
 ```
 
-Try to manually execute the message in source transaction. If more than one found, user is prompted
+Try to manually execute the message identified by a source transaction hash or CCIP message ID (32-byte hex).
+When a message ID is provided and the API is available (default), execution inputs are fetched from the CCIP API,
+removing the need for source chain RPC access. If more than one message is found, user is prompted
 same as with `show` command above. `--log-index` allows pre-selecting a message non-interactively.
 
 `--gas-limit` (aliases `-L`, `--compute-units`) allows to override the exec limit for this message
@@ -215,12 +251,6 @@ specified in original request.
 `--estimate-gas-limit` option will try to estimate automatically the gas limit override for the
 message execution, based on the current state of the network. That's only for main `ccipReceive`
 exec callback. Tokens gas limit override estimation is not supported for estimation.
-
-`--sender-queue` opts into collecting all following messages from the same sender, starting from
-the provided message, and executing all of the eligible ones. By default, only pending
-(non-executed) messages are included. `--exec-failed` includes failed messages as well. This option
-can take some time, specially for older messages, as it needs to scan the source and dest networks
-since request, to find messages and their execution state.
 
 #### Solana Special Cases
 
@@ -339,7 +369,7 @@ ccip-cli token -n solana-devnet -H EPUjBP3Xf76K1VKsDSc6GupBWE8uykNksCLJgXZn87CB
 ### `lane-latency`
 
 ```sh
-ccip-cli lane-latency <source> <dest> [--api-url <url>]
+ccip-cli lane-latency <source> <dest> [--api=<url>] [--block-confirmations=<n>]
 ```
 
 Query real-time lane latency between source and destination chains using the CCIP API.
@@ -355,7 +385,8 @@ Query real-time lane latency between source and destination chains using the CCI
 
 | Option | Description |
 |--------|-------------|
-| `--api-url` | Custom CCIP API URL (default: api.ccip.chain.link) |
+| `--api` | Custom CCIP API URL (default: https://api.ccip.chain.link) |
+| `--block-confirmations`, `-c` | Number of block confirmations to use for latency calculation |
 
 > **Note:** This command requires CCIP API access and respects the `--no-api` flag.
 

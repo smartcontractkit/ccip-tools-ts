@@ -11,343 +11,437 @@ import TabItem from '@theme/TabItem'
 
 # Sending Messages
 
-## Message Structure
+## Send Workflow
 
-```typescript
-import type { BytesLike } from 'ethers' // string | Uint8Array
+Every CCIP send follows these steps:
 
-// MessageInput type - only receiver is required, all other fields are optional
-type MessageInput = {
-  receiver: BytesLike        // Required: Destination address (hex string or bytes)
-  data?: BytesLike           // Optional: Arbitrary data payload (hex string or bytes)
-  tokenAmounts?: {           // Optional: Tokens to transfer
-    token: string            // Source token address
-    amount: bigint           // Amount in smallest unit
-  }[]
-  feeToken?: string          // Optional: Fee payment token (address or zero for native)
-  extraArgs?: Partial<ExtraArgs> // Optional: Extra arguments (object, SDK encodes internally)
-  fee?: bigint               // Optional: Fee amount (returned by getFee)
-}
-```
-
-## Simple Message
-
-Send arbitrary data to a contract on another chain:
-
-```typescript
-import { EVMChain, networkInfo, CCIPError } from '@chainlink/ccip-sdk'
-import { toHex } from 'viem'
-
-const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
-
-const message = {
-  receiver: '0xReceiverContract...',
-  data: toHex('Hello from Sepolia!'),
-  tokenAmounts: [],
-  feeToken: '0x0000000000000000000000000000000000000000', // Native ETH
-  extraArgs: {
-    gasLimit: 200000n,
-    allowOutOfOrderExecution: false,
-  },
-}
-
-const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
-const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
-
-try {
-  const fee = await source.getFee({
-    router,
-    destChainSelector: destSelector,
-    message,
-  })
-  console.log('Fee:', fee, 'wei')
-
-  const request = await source.sendMessage({
-    router,
-    destChainSelector: destSelector,
-    message: { ...message, fee },
-    wallet, // Required: ethers Signer or viemWallet(client)
-  })
-  console.log('Sent in tx:', request.tx.hash)
-} catch (error) {
-  if (CCIPError.isCCIPError(error)) {
-    console.error('CCIP error:', error.code, error.message)
-    if (error.recovery) console.error('Recovery:', error.recovery)
-  } else {
-    throw error
-  }
-}
-```
-
-## Token Transfer
-
-Transfer tokens cross-chain:
+1. **Check lane capabilities** — determine which extra arguments the lane supports
+2. **Build the message** — set receiver, data, tokens, and extra arguments
+3. **Estimate the fee** — call `getFee` to get the cost
+4. **Send** — call `sendMessage` with the fee and a wallet
 
 ```typescript
 import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
 
 const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
+const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
 
-const LINK_TOKEN = '0x779877A7B0D9E8603169DdbD7836e478b4624789' // LINK on Sepolia
+// 1. Check lane capabilities
+const features = await source.getLaneFeatures({ router, destChainSelector: destSelector })
 
+// 2. Build message with version-appropriate extra arguments
 const message = {
-  receiver: '0xRecipientAddress...',
-  data: '0x', // No data, just token transfer
-  tokenAmounts: [
-    {
-      token: LINK_TOKEN,
-      amount: 1000000000000000000n, // 1 LINK (18 decimals)
-    },
-  ],
-  feeToken: LINK_TOKEN, // Pay fee in LINK
-  extraArgs: {
-    gasLimit: 0n, // No receiver execution needed
-    allowOutOfOrderExecution: true,
-  },
+  receiver: '0xReceiverAddress...',
+  data: '0x',
+  extraArgs: features.MIN_BLOCK_CONFIRMATIONS != null
+    ? { gasLimit: 200_000n } // v2.0+ lane — V3 encoding (V2-style fields also accepted)
+    : { gasLimit: 200_000n, allowOutOfOrderExecution: true }, // pre-v2.0 lane — V2 encoding
 }
 
-const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
-const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
+// 3. Estimate fee
+const fee = await source.getFee({ router, destChainSelector: destSelector, message })
 
-const fee = await source.getFee({
-  router,
-  destChainSelector: destSelector,
-  message,
-})
-console.log('Fee:', fee, 'LINK wei')
-
-// Ensure LINK allowance is set for router before sending
+// 4. Send
 const request = await source.sendMessage({
   router,
   destChainSelector: destSelector,
   message: { ...message, fee },
-  wallet, // Required: ethers Signer or viemWallet(client)
+  wallet, // ethers Signer or viemWallet(client)
 })
+
+console.log('Message ID:', request.message.messageId)
+console.log('Tx hash:', request.tx.hash)
 ```
 
-Before sending tokens, approve the Router contract to spend your tokens. `sendMessage` fails if allowance is insufficient.
+The SDK auto-encodes `extraArgs` and auto-populates defaults for omitted fields. You never need to call `encodeExtraArgs` when using `sendMessage` or `getFee`.
 
-## Extra Arguments
+## Message Types
 
-Extra arguments control execution behavior on the destination chain. When using `sendMessage` or `getFee`, pass them as an object — the SDK encodes them internally:
+CCIP supports three message types. The only required field for all is `receiver`.
+
+### Data Only
+
+Send ABI-encoded data to a contract on the destination chain. The receiver contract's `ccipReceive` function is called with the data payload — use `abi.decode` on the receiver side to unpack it.
+
+```typescript
+import { AbiCoder } from 'ethers'
+
+const abiCoder = AbiCoder.defaultAbiCoder()
+
+const message = {
+  receiver: '0xReceiverContract...',
+  data: abiCoder.encode(
+    ['address', 'uint256'],
+    ['0xUserAddress...', 1000n]
+  ),
+  extraArgs: { gasLimit: 200_000n, allowOutOfOrderExecution: true },
+}
+```
+
+Requires `extraArgs.gasLimit` — the receiver contract needs gas to process the data.
+
+### Token Transfer
+
+Transfer tokens cross-chain. For token-only transfers (no `data`), the SDK auto-populates `extraArgs` with `gasLimit: 0n` and `allowOutOfOrderExecution: true` — you only need `receiver` and `tokenAmounts`:
+
+```typescript
+import { parseUnits } from 'viem'
+
+const LINK_TOKEN = '0x779877A7B0D9E8603169DdbD7836e478b4624789'
+
+// Use getTokenInfo to get decimals — don't hardcode
+const tokenInfo = await source.getTokenInfo(LINK_TOKEN)
+
+const message = {
+  receiver: '0xRecipientAddress...',
+  tokenAmounts: [
+    { token: LINK_TOKEN, amount: parseUnits('1', tokenInfo.decimals) }, // 1 LINK
+  ],
+  feeToken: LINK_TOKEN, // pay fee in LINK
+}
+```
+
+Before sending tokens, approve the Router to spend your tokens. `sendMessage` handles approvals automatically if allowance is insufficient (generates approval transactions internally).
+
+### Data + Tokens (Programmable Transfer)
+
+Send both data and tokens. The receiver contract executes custom logic with the tokens (deposit, swap, stake). ABI-encode the data so the receiver can decode it with `abi.decode`:
+
+```typescript
+import { AbiCoder } from 'ethers'
+import { parseUnits } from 'viem'
+
+const abiCoder = AbiCoder.defaultAbiCoder()
+const LINK_TOKEN = '0x779877A7B0D9E8603169DdbD7836e478b4624789'
+const tokenInfo = await source.getTokenInfo(LINK_TOKEN)
+
+const message = {
+  receiver: '0xReceiverContract...',
+  data: abiCoder.encode(
+    ['uint8', 'address'],
+    [1, '0xUserAddress...'] // e.g., action=1 (deposit), user address
+  ),
+  tokenAmounts: [
+    { token: LINK_TOKEN, amount: parseUnits('0.1', tokenInfo.decimals) },
+  ],
+  extraArgs: { gasLimit: 300_000n, allowOutOfOrderExecution: false },
+}
+```
+
+Unlike token-only transfers, programmable transfers require `extraArgs.gasLimit` because the receiver contract runs custom logic.
+
+### Native ETH Transfers
+
+Use `ZeroAddress` as the token address to transfer native ETH. The SDK wraps it automatically:
 
 ```typescript
 const message = {
-  receiver: '0x...',
-  extraArgs: {
-    gasLimit: 200000n,
-    allowOutOfOrderExecution: true,
-  },
+  receiver: '0xRecipientAddress...',
+  tokenAmounts: [
+    { token: '0x0000000000000000000000000000000000000000', amount: parseEther('0.1') },
+  ],
+  feeToken: '0x0000000000000000000000000000000000000000', // pay fee in native ETH
 }
-await source.sendMessage({ router, destChainSelector, message, wallet })
 ```
 
-The `encodeExtraArgs` utility is available for low-level use (e.g., building raw on-chain transactions outside the SDK):
+The token `amount` and `fee` are sent as transaction `value` (native ETH), not via ERC-20 approval.
+
+## Checking Lane Capabilities
+
+### Why Check?
+
+The SDK does **not** validate your `extraArgs` against the lane's on-chain version. If you pass V3 fields (e.g. `blockConfirmations`) to a pre-v2.0 lane, the transaction will **revert** on-chain. Always call `getLaneFeatures` first.
+
+### `MIN_BLOCK_CONFIRMATIONS`
+
+| Value | Lane version | What it means | Extra arguments to use |
+|-------|-------------|---------------|----------------------|
+| **undefined** | Pre-v2.0 | V3 is **not supported** | V2: `gasLimit` + `allowOutOfOrderExecution` |
+| **0** | v2.0+ | V3 supported, FTF not enabled for this token | V2 or V3 (no speed-up from `blockConfirmations`) |
+| **> 0** | v2.0+ with FTF | Minimum `blockConfirmations` for faster relaying | V3 with `blockConfirmations >= minValue` |
+
+```typescript
+const features = await source.getLaneFeatures({
+  router,
+  destChainSelector: destSelector,
+  token, // optional — pass to get token-specific FTF and rate limit info
+})
+
+const minConfirmations = features.MIN_BLOCK_CONFIRMATIONS
+```
+
+:::note
+Without a `token`, the result reflects lane version only: `undefined` for pre-v2.0, or a hardcoded `1` for v2.0+ (confirming V3 support without pool-specific FTF data). Pass a `token` to get the actual pool-specific value.
+:::
+
+### Choosing Extra Arguments
+
+```typescript
+let extraArgs
+
+if (minConfirmations == null) {
+  // Pre-v2.0 lane — V2 encoding only
+  extraArgs = {
+    gasLimit: 200_000n,
+    allowOutOfOrderExecution: true,
+  }
+} else if (minConfirmations > 0) {
+  // v2.0+ lane with FTF enabled — use V3 with blockConfirmations
+  extraArgs = {
+    gasLimit: 200_000n,
+    blockConfirmations: minConfirmations, // minimum allowed value
+  }
+} else {
+  // v2.0+ lane, FTF not enabled (minConfirmations === 0) —
+  // V3 is supported but blockConfirmations has no effect.
+  // V2-style args or V3 without blockConfirmations both work.
+  extraArgs = {
+    gasLimit: 200_000n,
+    allowOutOfOrderExecution: true,
+  }
+}
+```
+
+### Checking Rate Limits
+
+When a `token` is provided, `getLaneFeatures` also returns outbound rate limiter state:
+
+```typescript
+const rateLimits = features.RATE_LIMITS
+if (rateLimits) {
+  console.log(`Available: ${rateLimits.tokens}, Capacity: ${rateLimits.capacity}`)
+  console.log(`Refill rate: ${rateLimits.rate} tokens/second`)
+}
+
+// FTF-specific rate limits (only present when FTF is enabled)
+const ftfRateLimits = features.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS
+if (ftfRateLimits) {
+  console.log(`FTF available: ${ftfRateLimits.tokens}`)
+}
+```
+
+Rate limiter values are `null` when rate limiting is disabled (unlimited throughput).
+
+## Fee Estimation
+
+`getFee` returns the fee in the `feeToken`'s smallest unit. It auto-encodes `extraArgs` and auto-populates missing fields, just like `sendMessage`.
+
+```typescript
+// Fee in native ETH
+const fee = await source.getFee({
+  router,
+  destChainSelector: destSelector,
+  message: { ...message, feeToken: '0x' + '0'.repeat(40) },
+})
+
+// Fee in LINK
+const linkFee = await source.getFee({
+  router,
+  destChainSelector: destSelector,
+  message: { ...message, feeToken: LINK_TOKEN },
+})
+```
+
+If you omit `fee` in `sendMessage`, the SDK calls `getFee` internally. Calling it explicitly lets you display the fee to users or add a buffer:
+
+```typescript
+const feeWithBuffer = (fee * 110n) / 100n // 10% buffer for gas price fluctuations
+```
+
+## Extra Arguments Reference
+
+The SDK auto-detects the encoding version based on which fields you provide. Pass `extraArgs` as an object — the SDK encodes internally.
+
+### Version Auto-Detection
+
+| Fields present | Detected version | Encoding tag |
+|---------------|-----------------|-------------|
+| `gasLimit` only | EVMExtraArgsV1 | `0x97a657c9` |
+| `gasLimit` + `allowOutOfOrderExecution` | EVMExtraArgsV2 | `0x181dcf10` |
+| Any of: `blockConfirmations`, `ccvs`, `ccvArgs`, `executor`, `executorArgs`, `tokenReceiver`, `tokenArgs` | GenericExtraArgsV3 | `0xa69dd4aa` |
+| `computeUnits` | SVMExtraArgsV1 (Solana) | `0x1f3b3aba` |
+| `receiverObjectIds` | SuiExtraArgsV1 | `0x21ea4ca9` |
+
+Unknown fields throw `CCIPArgumentInvalidError`, catching typos before the transaction is submitted.
+
+### V3 (GenericExtraArgsV3) Fields
+
+V3 does **not** include `allowOutOfOrderExecution`. If migrating from V2, remove that field.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `gasLimit` | `bigint` | `0n` (no data) / `200_000n` (with data) | Gas for receiver execution |
+| `blockConfirmations` | `number` | `0` | Source-chain confirmations before relaying (FTF) |
+| `ccvs` | `string[]` | `[]` | Cross-chain verifier addresses |
+| `ccvArgs` | `BytesLike[]` | `[]` | Per-CCV arguments |
+| `executor` | `string` | `''` | Custom executor address |
+| `executorArgs` | `BytesLike` | `'0x'` | Executor-specific arguments |
+| `tokenReceiver` | `string` | `''` | Per-token receiver address |
+| `tokenArgs` | `BytesLike` | `'0x'` | Token pool-specific arguments |
+
+### encodeExtraArgs (Low-Level)
+
+`encodeExtraArgs` is only needed when building raw on-chain transactions outside the SDK (e.g., direct contract calls, transaction data for external systems). `sendMessage` and `getFee` auto-encode internally.
 
 <Tabs>
-<TabItem value="evm" label="EVM Destination">
+<TabItem value="evm" label="EVM (V1/V2)">
 
 ```typescript
 import { encodeExtraArgs } from '@chainlink/ccip-sdk'
 
-// EVM V2 (recommended) - inferred from allowOutOfOrderExecution
+// V2 — inferred from allowOutOfOrderExecution
 const encoded = encodeExtraArgs({
-  gasLimit: 200000n,              // Gas for receiver execution
-  allowOutOfOrderExecution: true, // Allow out-of-order execution
+  gasLimit: 200_000n,
+  allowOutOfOrderExecution: true,
 })
 
-// EVM V1 (legacy) - inferred when only gasLimit is set
-const encodedV1 = encodeExtraArgs({
-  gasLimit: 200000n,
+// V1 (legacy) — inferred when only gasLimit is set
+const encodedV1 = encodeExtraArgs({ gasLimit: 200_000n })
+```
+
+</TabItem>
+<TabItem value="evm-v3" label="EVM (V3)">
+
+```typescript
+import { encodeExtraArgs } from '@chainlink/ccip-sdk'
+
+// V3 — auto-detected from blockConfirmations (or any V3-only field)
+const encoded = encodeExtraArgs({
+  gasLimit: 200_000n,
+  blockConfirmations: 5,
+  ccvs: [],
+  ccvArgs: [],
+  executor: '',
+  executorArgs: '0x',
+  tokenReceiver: '',
+  tokenArgs: '0x',
 })
 ```
 
 </TabItem>
-<TabItem value="solana" label="Solana Destination">
+<TabItem value="solana" label="Solana">
 
 ```typescript
 import { encodeExtraArgs } from '@chainlink/ccip-sdk'
 
-// SVM (Solana) - inferred from computeUnits
+// SVM — inferred from computeUnits
 const encoded = encodeExtraArgs({
-  computeUnits: 200000n,
+  computeUnits: 200_000n,
   accountIsWritableBitmap: 0n,
   allowOutOfOrderExecution: true,
   tokenReceiver: '', // Solana token account
-  accounts: [], // Additional accounts for CPI
+  accounts: [],      // Additional accounts for CPI
 })
 ```
 
 </TabItem>
 </Tabs>
 
-## Fee Estimation
-
-Estimate fees before sending:
-
-```typescript
-import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
-
-const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
-
-// Fee in native token
-const nativeMessage = { ...message, feeToken: '0x' + '0'.repeat(40) }
-const nativeFee = await source.getFee({
-  router,
-  destChainSelector: destSelector,
-  message: nativeMessage,
-})
-
-// Fee in LINK
-const linkMessage = { ...message, feeToken: LINK_TOKEN }
-const linkFee = await source.getFee({
-  router,
-  destChainSelector: destSelector,
-  message: linkMessage,
-})
-
-console.log('Native fee:', nativeFee, 'wei')
-console.log('LINK fee:', linkFee, 'wei')
-```
-
-Fees depend on destination chain gas costs, token transfer complexity, message data size, and current gas prices.
-
 ## Unsigned Transactions
 
-Generate unsigned transactions for browser wallets, offline signing, or multi-sig wallets.
-
-### Why Use Unsigned Transactions?
-
-Browser wallets (MetaMask, Phantom) don't support `signTransaction()` - they only support `sendTransaction()`. The SDK's `sendMessage()` method uses `signTransaction()` internally, which won't work in browsers.
-
-**Solution**: Use `generateUnsignedSendMessage()` to get unsigned transactions, then sign them with your wallet provider.
-
-### Basic Usage
+Use `generateUnsignedSendMessage` to separate transaction generation from signing. This lets you generate transaction data on a backend with reliable RPCs and return it to clients for signing — or feed it into multi-sig wallets, offline signing workflows, or any system where signing happens separately from transaction construction.
 
 ```typescript
-import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
-
-const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
-
 const unsignedTx = await source.generateUnsignedSendMessage({
   router,
   destChainSelector: destSelector,
-  message,
-  sender: walletAddress, // Required: address of wallet that will send
+  message: { ...message, fee },
+  sender: walletAddress, // address of the wallet that will sign
 })
 
-console.log('Unsigned tx:', unsignedTx)
-```
-
-### EVM Multi-Transaction Flow
-
-For token transfers on EVM, you typically need **two transactions**:
-
-1. **Approve** - Allow the CCIP Router to spend your tokens
-2. **ccipSend** - Execute the cross-chain transfer
-
-The SDK returns both in `unsignedTx.transactions[]`:
-
-```typescript
-import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
-
-const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
-
-const unsignedTx = await source.generateUnsignedSendMessage({
-  router,
-  destChainSelector: destSelector,
-  message: {
-    receiver: '0xReceiver...',
-    tokenAmounts: [{ token: tokenAddress, amount }],
-    fee,
-  },
-  sender: walletAddress,
-})
-
-// Process all transactions in order (approvals first, then send)
+// transactions[] contains approval TXs (if needed) followed by the ccipSend TX
 for (const tx of unsignedTx.transactions) {
   const hash = await walletClient.sendTransaction(tx)
   await publicClient.waitForTransactionReceipt({ hash })
 }
+
+// Extract message ID from the final (ccipSend) transaction
+const sendTxHash = /* hash of last transaction */
+const messages = await source.getMessagesInTx(sendTxHash)
+console.log('Message ID:', messages[0].message.messageId)
 ```
 
-### Get Message After Sending
-
-After the final transaction confirms, extract the message ID:
-
-```typescript
-// Last transaction is the ccipSend
-const sendTx = unsignedTx.transactions[unsignedTx.transactions.length - 1]
-const hash = await walletClient.sendTransaction(sendTx)
-const receipt = await publicClient.waitForTransactionReceipt({ hash })
-
-// Get message details
-const messages = await source.getMessagesInTx(hash)
-const messageId = messages[0].message.messageId
-
-console.log('Message ID:', messageId)
-```
+For token transfers, `transactions[]` includes ERC-20 approval transactions before the `ccipSend` transaction. Process them in order.
 
 ## Complete Example
 
-Send data and tokens with fee buffer:
+Send a token transfer that works on both pre-v2.0 and v2.0+ lanes:
 
 ```typescript
-import {
-  EVMChain,
-  networkInfo,
-  CCIPError
-} from '@chainlink/ccip-sdk'
-import { viemWallet } from '@chainlink/ccip-sdk/viem'
-import { toHex, parseEther, type WalletClient } from 'viem'
+import { EVMChain, networkInfo, CCIPError } from '@chainlink/ccip-sdk'
 
-async function sendCrossChainMessage(walletClient: WalletClient) {
-  const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+async function sendTokens(
+  sourceRpc: string,
+  destName: string,
+  routerAddress: string,
+  tokenAddress: string,
+  amount: bigint,
+  receiver: string,
+  wallet: import('ethers').Signer
+) {
+  const source = await EVMChain.fromUrl(sourceRpc)
+  const destSelector = networkInfo(destName).chainSelector
 
-  const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59' // Sepolia Router
-  const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+  // 1. Check lane capabilities and rate limits
+  const features = await source.getLaneFeatures({
+    router: routerAddress,
+    destChainSelector: destSelector,
+    token: tokenAddress,
+  })
 
-  const message = {
-    receiver: '0xReceiverContract...',
-    data: toHex(JSON.stringify({ action: 'deposit', user: '0x...' })),
-    tokenAmounts: [
-      {
-        token: '0x779877A7B0D9E8603169DdbD7836e478b4624789', // LINK
-        amount: parseEther('0.1'),
-      },
-    ],
-    feeToken: '0x0000000000000000000000000000000000000000', // Native ETH
-    extraArgs: {
-      gasLimit: 300000n,
-      allowOutOfOrderExecution: false,
-    },
+  // 2. Verify rate limits
+  const rateLimits = features.RATE_LIMITS
+  if (rateLimits && amount > rateLimits.tokens) {
+    throw new Error(
+      `Amount ${amount} exceeds available rate limit capacity ${rateLimits.tokens}`
+    )
   }
 
+  // 3. Choose extra arguments based on lane version
+  let extraArgs
+  const minConfirmations = features.MIN_BLOCK_CONFIRMATIONS
+
+  if (minConfirmations == null) {
+    // Pre-v2.0 lane
+    extraArgs = { gasLimit: 0n, allowOutOfOrderExecution: true }
+  } else if (minConfirmations > 0) {
+    // v2.0+ with FTF — use minimum block confirmations for faster delivery
+    extraArgs = { gasLimit: 0n, blockConfirmations: minConfirmations }
+  } else {
+    // v2.0+, FTF not enabled — V2-style args work fine
+    extraArgs = { gasLimit: 0n, allowOutOfOrderExecution: true }
+  }
+
+  // 4. Build message
+  const message = {
+    receiver,
+    tokenAmounts: [{ token: tokenAddress, amount }],
+    extraArgs,
+  }
+
+  // 5. Estimate fee (native ETH)
+  const fee = await source.getFee({
+    router: routerAddress,
+    destChainSelector: destSelector,
+    message,
+  })
+  console.log('Fee:', fee, 'wei')
+
+  // 6. Send
   try {
-    const fee = await source.getFee({
-      router,
-      destChainSelector: destSelector,
-      message,
-    })
-    console.log('Estimated fee:', fee, 'wei')
-
-    // Add 10% buffer for gas price fluctuations
-    const feeWithBuffer = (fee * 110n) / 100n
-
     const request = await source.sendMessage({
-      router,
+      router: routerAddress,
       destChainSelector: destSelector,
-      message: { ...message, fee: feeWithBuffer },
-      wallet: viemWallet(walletClient), // Wrap viem WalletClient
+      message: { ...message, fee },
+      wallet,
     })
-
-    console.log('Transaction hash:', request.tx.hash)
     console.log('Message ID:', request.message.messageId)
-
+    console.log('Tx hash:', request.tx.hash)
     return request
   } catch (error) {
     if (CCIPError.isCCIPError(error)) {
-      console.error('CCIP error:', error.code, error.message)
+      console.error(`${error.code}: ${error.message}`)
       if (error.recovery) console.error('Recovery:', error.recovery)
     }
     throw error
@@ -355,8 +449,42 @@ async function sendCrossChainMessage(walletClient: WalletClient) {
 }
 ```
 
+## MessageInput Reference
+
+| Field | Type | Required | Default |
+|-------|------|----------|---------|
+| `receiver` | `BytesLike` | Yes | — |
+| `data` | `BytesLike` | No | `'0x'` |
+| `tokenAmounts` | `{ token: string, amount: bigint }[]` | No | `[]` |
+| `feeToken` | `string` | No | `ZeroAddress` (native token) |
+| `extraArgs` | `Partial<ExtraArgs>` | No | Auto-populated by SDK (see below) |
+| `fee` | `bigint` | No | Auto-calculated via `getFee` if omitted |
+
+### Auto-Populated Defaults
+
+When `extraArgs` is omitted or partial, the SDK fills in defaults:
+
+| Condition | Default extraArgs |
+|-----------|------------------|
+| Message has `data` | `{ gasLimit: 200_000n, allowOutOfOrderExecution: true }` |
+| Token-only (no `data`) | `{ gasLimit: 0n, allowOutOfOrderExecution: true }` |
+| Any V3-only field present | V3 defaults: `blockConfirmations: 0`, empty arrays/strings for other fields |
+
+## Non-EVM Destinations
+
+For Solana and Sui destinations, `extraArgs` requires chain-specific fields. The SDK auto-populates defaults for token-only transfers, but programmable transfers need explicit configuration.
+
+| Destination | Required extraArgs fields | Reference |
+|-------------|--------------------------|-----------|
+| **Solana** | `computeUnits`, `accountIsWritableBitmap`, `tokenReceiver`, `accounts` | [Build messages to Solana](https://docs.chain.link/ccip/tutorials/svm/destination/build-messages) |
+| **Aptos** | `gasLimit`, `allowOutOfOrderExecution` | [Build messages to Aptos](https://docs.chain.link/ccip/tutorials/aptos/destination/build-messages) |
+| **Sui** | `gasLimit`, `allowOutOfOrderExecution`, `tokenReceiver`, `receiverObjectIds` | — |
+
+See [Multi-Chain](/sdk/guides/multi-chain) for cross-chain send examples.
+
 ## Related
 
-- [Tracking Messages](/sdk/guides/tracking-messages) - Monitor sent messages
-- [Error Handling](/sdk/guides/error-handling) - Handle failures and retry
-- [Multi-Chain Support](/sdk/guides/multi-chain) - Send to non-EVM chains
+- [Tracking Messages](/sdk/guides/tracking-messages) — Monitor sent messages
+- [Manual Execution](/sdk/guides/manual-execution) — Execute stuck messages
+- [Token Pools](/sdk/guides/token-pools) — Query pool configuration and rate limits
+- [Error Handling](/sdk/guides/error-handling) — Handle failures and retry

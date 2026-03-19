@@ -35,6 +35,7 @@ import {
   type LogFilter,
   type TokenInfo,
   type TokenPoolRemote,
+  type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
 import {
@@ -1118,9 +1119,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     payer,
     ...opts
   }: Parameters<Chain['generateUnsignedExecute']>[0]): Promise<UnsignedSolanaTx> {
-    if (!('input' in opts) || !('message' in opts.input) || !('computeUnits' in opts.input.message))
+    const resolved = await this.resolveExecuteOpts(opts)
+    if (!('message' in resolved.input) || !('computeUnits' in resolved.input.message))
       throw new CCIPExecutionReportChainMismatchError('Solana')
-    const { offRamp, input } = opts
+    const { offRamp, input } = resolved
     const execReport_ = input as ExecutionInput<CCIPMessage_V1_6_Solana>
     return generateUnsignedExecuteReport(
       this,
@@ -1365,7 +1367,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * {@inheritDoc Chain.getTokenPoolConfig}
    * @throws {@link CCIPTokenPoolStateNotFoundError} if token pool state not found
    */
-  async getTokenPoolConfig(tokenPool: string): Promise<{
+  async getTokenPoolConfig(
+    tokenPool: string,
+    _feeOpts?: TokenTransferFeeOpts,
+  ): Promise<{
     token: string
     router: string
     tokenPoolProgram: string
@@ -1590,6 +1595,25 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   static override buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
   ): AnyMessage & { extraArgs: SVMExtraArgsV1 } {
+    /** Valid field names for SVMExtraArgsV1, including recognised aliases. */
+    const SVM_EXTRA_ARGS_FIELDS = new Set([
+      'computeUnits',
+      'gasLimit', // alias for computeUnits
+      'allowOutOfOrderExecution',
+      'tokenReceiver',
+      'accounts',
+      'accountIsWritableBitmap',
+    ])
+    if (message.extraArgs) {
+      const unknown = Object.keys(message.extraArgs).filter(
+        (k) => k !== '_tag' && !SVM_EXTRA_ARGS_FIELDS.has(k),
+      )
+      if (unknown.length)
+        throw new CCIPArgumentInvalidError(
+          'extraArgs',
+          `unknown field(s) for SVMExtraArgsV1: ${unknown.map((k) => JSON.stringify(k)).join(', ')}`,
+        )
+    }
     if (
       !(
         message.extraArgs &&

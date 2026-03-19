@@ -1,314 +1,136 @@
 ---
 id: error-handling
 title: 'Error Handling'
-description: 'Handle CCIP errors, recover from failures, and manually execute stuck messages.'
+description: 'Catch, retry, and recover from CCIP SDK errors.'
 sidebar_label: Error Handling
-sidebar_position: 3
+sidebar_position: 9
 ---
-
-import Tabs from '@theme/Tabs'
-import TabItem from '@theme/TabItem'
 
 # Error Handling
 
-## Error Types
+All SDK errors extend `CCIPError`, which provides structured information for programmatic error handling. See the [Error Reference](/sdk/guides/error-reference) for the complete catalog of error codes.
 
-### Core Errors
+## CCIPError Structure
 
-| Error | Description |
-|-------|-------------|
-| `CCIPTransactionNotFoundError` | Transaction hash doesn't exist |
-| `CCIPMessageNotFoundInTxError` | Transaction contains no CCIP messages |
-| `CCIPMessageIdNotFoundError` | Message ID not found after searching |
-| `CCIPMessageDecodeError` | Failed to decode message data |
-| `CCIPBlockNotFoundError` | Block doesn't exist or isn't finalized |
-| `CCIPOffRampNotFoundError` | No OffRamp found for the lane |
-| `CCIPMerkleRootMismatchError` | Merkle proof validation failed |
-
-### API Errors
-
-| Error | Description |
-|-------|-------------|
-| `CCIPHttpError` | HTTP request failed (includes status code) |
-| `CCIPApiClientNotAvailableError` | API disabled with `apiClient: null` |
-| `CCIPMessageRetrievalError` | Both API and RPC failed to retrieve message |
-| `CCIPTimeoutError` | Request timed out (transient, safe to retry) |
-| `CCIPUnexpectedPaginationError` | Transaction contains >100 CCIP messages |
-| `CCIPMessageIdValidationError` | Invalid message ID format |
-
-## Basic Error Handling
+Every `CCIPError` includes:
 
 ```typescript
-import { EVMChain } from '@chainlink/ccip-sdk'
+interface CCIPError {
+  code: CCIPErrorCode             // Machine-readable error code (e.g. 'TRANSACTION_NOT_FOUND')
+  message: string                 // Human-readable description
+  context: Record<string, unknown> // Structured context (IDs, addresses, hashes)
+  isTransient: boolean            // True if retry may succeed
+  retryAfterMs?: number           // Suggested retry delay in milliseconds
+  recovery?: string               // Recovery suggestion
+}
+```
 
-const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+## Catching Errors
+
+Use `CCIPError.isCCIPError()` to check if an error is from the SDK, then switch on `error.code`:
+
+```typescript
+import { CCIPError, CCIPErrorCode } from '@chainlink/ccip-sdk'
 
 try {
-  const requests = await chain.getMessagesInTx('0x1234...')
-  console.log('Found', requests.length, 'messages')
+  const requests = await chain.getMessagesInTx(txHash)
 } catch (error) {
-  if (error.message.includes('not found')) {
-    console.log('Transaction not found - check the hash')
-  } else if (error.message.includes('no CCIP messages')) {
-    console.log('Transaction exists but has no CCIP messages')
+  if (!CCIPError.isCCIPError(error)) throw error
+
+  switch (error.code) {
+    case CCIPErrorCode.TRANSACTION_NOT_FOUND:
+      console.log('Transaction not found — verify the hash')
+      break
+    case CCIPErrorCode.MESSAGE_NOT_FOUND_IN_TX:
+      console.log('No CCIP messages in this transaction')
+      break
+    default:
+      console.log(`${error.code}: ${error.message}`)
+      if (error.recovery) console.log('Recovery:', error.recovery)
+  }
+}
+```
+
+To wrap an unknown error as a `CCIPError`, use `CCIPError.from(error)`.
+
+## Transient vs Permanent Errors
+
+Transient errors (`error.isTransient === true`) may succeed on retry — for example, a message not yet indexed by the API, or a commit not yet landed on-chain. Permanent errors will not succeed on retry.
+
+```typescript
+import { CCIPError, getRetryDelay } from '@chainlink/ccip-sdk'
+
+try {
+  const request = await chain.getMessageById(messageId)
+} catch (error) {
+  if (CCIPError.isCCIPError(error) && error.isTransient) {
+    const delay = getRetryDelay(error) // Uses retryAfterMs hint or defaults by error code
+    if (delay !== null) {
+      console.log(`Transient error — retrying in ${delay}ms`)
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      // Retry...
+    }
   } else {
-    console.error('Unexpected error:', error)
+    throw error // Permanent error — do not retry
   }
 }
 ```
 
-## Search Failures
+`getRetryDelay` returns a delay based on the error code (e.g., 60s for `COMMIT_NOT_FOUND`, 30s for attestation errors, 5s for HTTP errors) or `null` if the error is not transient.
 
-Handle search failures when looking up messages by ID:
+You can also check a specific error code directly:
 
 ```typescript
-import { EVMChain } from '@chainlink/ccip-sdk'
+import { isTransientError } from '@chainlink/ccip-sdk'
 
-async function findMessage(messageId: string) {
-  const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+isTransientError('COMMIT_NOT_FOUND')      // true
+isTransientError('MERKLE_ROOT_MISMATCH')  // false
+```
 
-  try {
-    const request = await chain.getMessageById(messageId)
-    return request
-  } catch (error) {
-    if (error.message.includes('not found')) {
-      console.log('Message not found - it may be:')
-      console.log('  - Very old (before search window)')
-      console.log('  - On a different chain')
-      console.log('  - Invalid message ID')
-      return null
-    }
-    throw error
+## withRetry Utility
+
+The SDK exports a `withRetry` function with exponential backoff. It only retries on transient errors — permanent errors are thrown immediately:
+
+```typescript
+import { withRetry } from '@chainlink/ccip-sdk'
+
+const request = await withRetry(
+  () => chain.getMessageById(messageId),
+  {
+    maxRetries: 5,
+    initialDelayMs: 2000,
+    backoffMultiplier: 2,
+    maxDelayMs: 60000,
+    respectRetryAfterHint: true, // Uses error.retryAfterMs when available
+    logger: console,             // Optional — logs retry attempts
   }
-}
-```
-
-The `getMessageById` method uses the CCIP API to look up messages by their unique ID.
-
-## Execution States
-
-Messages can fail execution for several reasons:
-
-```typescript
-import { EVMChain, ExecutionState } from '@chainlink/ccip-sdk'
-
-async function checkExecutionStatus(dest: EVMChain, offRamp: string, request: any) {
-  for await (const execution of dest.getExecutionReceipts({
-    offRamp,
-    messageId: request.message.messageId,
-  })) {
-    switch (execution.receipt.state) {
-      case ExecutionState.Success:
-        console.log('Message executed successfully')
-        return 'success'
-
-      case ExecutionState.Failed:
-        console.log('Execution failed - receiver reverted')
-        console.log('Return data:', execution.receipt.returnData)
-        return 'failed'
-
-      case ExecutionState.InProgress:
-        console.log('Message execution in progress')
-        return 'pending'
-    }
-  }
-  return 'not_found'
-}
-```
-
-## Manual Execution
-
-When automatic execution fails, manually execute the message.
-
-### Step 1: Gather Data
-
-```typescript
-import {
-  EVMChain,
-  discoverOffRamp
-} from '@chainlink/ccip-sdk'
-
-const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
-const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
-
-const requests = await source.getMessagesInTx('0x1234...')
-const request = requests[0]
-
-const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
-
-// getVerifications throws CCIPCommitNotFoundError (transient) when not yet committed
-const verifications = await dest.getVerifications({
-  offRamp,
-  request,
-})
-```
-
-### Step 2: Calculate Merkle Proof
-
-```typescript
-// Fetch all messages in the commit batch
-const input = await source.getExecutionInput({ request, verifications})
-```
-
-### Step 3: Execute
-
-```typescript
-const execution = await dest.execute({
-  offRamp,
-  input,
-  wallet, // Required: signer instance
-})
-console.log('Manual execution tx:', execution.log.transactionHash)
-```
-
-## Merkle Root Mismatches
-
-If the calculated merkle root doesn't match the commit:
-
-```typescript
-import { calculateManualExecProof } from '@chainlink/ccip-sdk'
-
-try {
-  const proof = calculateManualExecProof(
-    messagesInBatch,
-    request.lane,
-    request.message.messageId,
-    commit.report.merkleRoot
-  )
-} catch (error) {
-  if (error.message.includes('Merkle root mismatch')) {
-    console.log('Merkle root mismatch - possible causes:')
-    console.log('  - Messages in batch are incomplete')
-    console.log('  - Wrong lane configuration')
-    console.log('  - Message was modified')
-
-    // Try without validation to see calculated root
-    const unvalidatedProof = calculateManualExecProof(
-      messagesInBatch,
-      request.lane,
-      request.message.messageId
-    )
-    console.log('Calculated root:', unvalidatedProof.merkleRoot)
-    console.log('Expected root:', commit.report.merkleRoot)
-  }
-}
-```
-
-## Retry Logic
-
-Implement retry logic for transient failures:
-
-```typescript
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  maxRetries = 3,
-  delayMs = 1000
-): Promise<T> {
-  let lastError: Error | undefined
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn()
-    } catch (error) {
-      lastError = error as Error
-
-      // Don't retry on definitive failures
-      if (
-        error.message.includes('not found') ||
-        error.message.includes('invalid')
-      ) {
-        throw error
-      }
-
-      console.log(`Attempt ${attempt} failed, retrying in ${delayMs}ms...`)
-      await new Promise(resolve => setTimeout(resolve, delayMs))
-      delayMs *= 2 // Exponential backoff
-    }
-  }
-
-  throw lastError
-}
-
-const request = await withRetry(() =>
-  chain.getMessageById(messageId)
 )
 ```
 
-## Complete Recovery Example
+The SDK also exports `DEFAULT_API_RETRY_CONFIG` with sensible defaults (3 retries, 1s initial delay, 2x backoff, 30s max).
+
+## Error Serialization
+
+`formatErrorForLogging` safely serializes a `CCIPError` for structured logging (handles non-enumerable properties):
 
 ```typescript
-import {
-  EVMChain,
-  calculateManualExecProof,
-  discoverOffRamp,
-  ExecutionState,
-} from '@chainlink/ccip-sdk'
+import { CCIPError, formatErrorForLogging } from '@chainlink/ccip-sdk'
 
-async function recoverFailedMessage(sourceTxHash: string) {
-  const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
-  const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
-
-  // Step 1: Get the request
-  const requests = await source.getMessagesInTx(sourceTxHash)
-  const request = requests[0]
-  console.log('Message ID:', request.message.messageId)
-
-  // Step 2: Find OffRamp
-  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
-
-  // Step 3: Check current execution status
-  let needsManualExecution = false
-  for await (const execution of dest.getExecutionReceipts({
-    offRamp,
-    messageId: request.message.messageId,
-  })) {
-    if (execution.receipt.state === ExecutionState.Success) {
-      console.log('Already executed')
-      return { status: 'already_executed' }
-    }
-    if (execution.receipt.state === ExecutionState.Failed) {
-      console.log('Previous execution failed, attempting manual execution...')
-      needsManualExecution = true
-      break
-    }
+try {
+  await chain.sendMessage({ router, destChainSelector, message, wallet })
+} catch (error) {
+  if (CCIPError.isCCIPError(error)) {
+    console.error(JSON.stringify(formatErrorForLogging(error)))
+    // => { name, code, message, isTransient, context, recovery, stack, cause }
   }
-
-  // Step 4: Get commit (throws CCIPCommitNotFoundError if not yet committed)
-  let verifications
-  try {
-    verifications = await dest.getVerifications({ offRamp, request })
-  } catch (error) {
-    console.log('Not yet committed - wait for DON to commit')
-    return { status: 'pending_commit' }
-  }
-
-  // Step 5: Manual execution
-  if (needsManualExecution) {
-    // Fetch all messages in the commit batch
-    const input = await source.getExecutionInput({ request, verifications })
-
-    console.log('Executing manually...')
-    const execution = await dest.execute({
-      offRamp,
-      input,
-      wallet, // Required: signer instance
-    })
-
-    console.log('Manual execution tx:', execution.log.transactionHash)
-    return { status: 'manually_executed', tx: execution.log.transactionHash }
-  }
-
-  return { status: 'pending_execution' }
 }
 ```
 
-## Error Parsing
+## Contract Error Parsing
 
-The SDK provides chain-specific error parsing to decode CCIP contract errors into human-readable messages.
+SDK errors are thrown by the SDK itself. On-chain contract reverts are different — they come from the EVM or Solana runtime. Use the chain-specific `parse` method to decode them:
 
-### EVM Error Parsing
-
-Parse errors from EVM transaction reverts:
+### EVM
 
 ```typescript
 import { EVMChain } from '@chainlink/ccip-sdk'
@@ -318,26 +140,13 @@ try {
 } catch (error) {
   const parsed = EVMChain.parse(error)
   if (parsed) {
-    // parsed contains keys like 'revert', 'revert.ChainNotAllowed', etc.
-    console.log('Error:', parsed)
+    console.log('Parsed error:', parsed)
     // => { revert: 'ChainNotAllowed(uint64 destChainSelector)', ... }
-
-    // Extract error name
-    for (const [key, value] of Object.entries(parsed)) {
-      if (key.startsWith('revert') && typeof value === 'string') {
-        const match = value.match(/^(\w+)\(/)
-        if (match) {
-          console.log('Error name:', match[1]) // e.g., 'ChainNotAllowed'
-        }
-      }
-    }
   }
 }
 ```
 
-### Solana Error Parsing
-
-Parse errors from Solana transaction logs:
+### Solana
 
 ```typescript
 import { SolanaChain } from '@chainlink/ccip-sdk'
@@ -345,159 +154,32 @@ import { SolanaChain } from '@chainlink/ccip-sdk'
 try {
   await sendTransaction(transaction, connection)
 } catch (error) {
-  // Accepts error objects with .logs, arrays of log strings, or raw data
   const parsed = SolanaChain.parse(error)
   if (parsed) {
-    console.log('Error:', parsed)
-    // => { program: '...', error: 'Rate limit exceeded', ... }
+    console.log('Program:', parsed.program)
+    console.log('Error:', parsed.error)
   }
 }
 ```
 
-## Common CCIP Errors
+### Common On-Chain Revert Errors
 
-| Error | Description | Solution |
-|-------|-------------|----------|
-| `ChainNotAllowed` | Destination chain not enabled for this token | Use a supported route |
-| `RateLimitReached` | Token bucket rate limit exceeded | Try smaller amount or wait for refill |
-| `UnsupportedToken` | Token not supported on this lane | Use a different token or route |
-| `InsufficientFeeTokenAmount` | Not enough fee provided | Ensure sufficient native tokens |
-| `InvalidReceiver` | Receiver address format invalid | Check address format for destination chain |
-| `SenderNotAllowed` | Sender not on allowlist | Contact token issuer for allowlist |
-| `InvalidExtraArgsTag` | Invalid extra args encoding | Use `encodeExtraArgs()` helper |
-| `MessageTooLarge` | Message data exceeds max size | Reduce data payload size |
-| `TokenMaxCapacityExceeded` | Transfer exceeds pool capacity | Try smaller amount |
+These are contract-level errors (not SDK errors). Use `EVMChain.parse` to decode them from reverts:
 
-## CCIPError Class
-
-The SDK provides a base error class with useful properties:
-
-```typescript
-import { CCIPError, getRetryDelay } from '@chainlink/ccip-sdk'
-
-try {
-  const message = await chain.getMessageById(messageId)
-} catch (error) {
-  if (CCIPError.isCCIPError(error)) {
-    console.log('Message:', error.message)
-    console.log('Is transient:', error.isTransient) // Can retry?
-    console.log('Retry after:', error.retryAfterMs) // Suggested delay
-    console.log('Recovery hint:', error.recovery)
-
-    // Use SDK utility for retry delay
-    const delay = getRetryDelay(error)
-    if (delay !== null) {
-      await new Promise(resolve => setTimeout(resolve, delay))
-      // Retry the operation...
-    }
-  }
-}
-```
-
-### Expected Errors During Polling
-
-`CCIPMessageIdNotFoundError` is expected when polling for a recently sent message:
-
-```typescript
-import { CCIPMessageIdNotFoundError } from '@chainlink/ccip-sdk'
-
-try {
-  const message = await chain.getMessageById(messageId)
-} catch (error) {
-  if (error instanceof CCIPMessageIdNotFoundError) {
-    // Expected - message not indexed yet, keep polling
-    console.log('Message not found yet, will retry...')
-  } else {
-    throw error
-  }
-}
-```
-
-## Retry Utility
-
-The SDK exports a `withRetry` utility for implementing custom retry logic with exponential backoff:
-
-```typescript
-import { withRetry, DEFAULT_API_RETRY_CONFIG } from '@chainlink/ccip-sdk'
-
-const result = await withRetry(
-  async () => {
-    // Your async operation that may fail transiently
-    return await someApiCall()
-  },
-  {
-    maxRetries: 3,              // Required: max retry attempts
-    initialDelayMs: 1000,       // Required: initial delay before first retry
-    backoffMultiplier: 2,       // Required: multiplier for exponential backoff
-    maxDelayMs: 30000,          // Required: maximum delay cap
-    respectRetryAfterHint: true, // Required: use error's retryAfterMs when available
-    logger: console,            // Optional: logs retry attempts
-  },
-)
-```
-
-The utility only retries on transient errors (5xx HTTP errors, timeouts). Non-transient errors (4xx, validation errors) are thrown immediately.
-
-### Checking Transient Errors
-
-```typescript
-import { CCIPError, isTransientError } from '@chainlink/ccip-sdk'
-
-try {
-  const result = await chain.getMessageById(messageId)
-} catch (error) {
-  if (CCIPError.isCCIPError(error) && error.isTransient) {
-    console.log('Transient error - safe to retry')
-  } else {
-    console.log('Permanent error - do not retry')
-    throw error
-  }
-}
-
-// You can also check a specific error code directly:
-// isTransientError('COMMIT_NOT_FOUND') // true (thrown by CCIPCommitNotFoundError)
-// isTransientError('MERKLE_ROOT_MISMATCH') // false (permanent error)
-```
-
-## API Mode Configuration
-
-By default, Chain instances use the CCIP API for enhanced functionality. You can configure this behavior:
-
-```typescript
-import { EVMChain, DEFAULT_API_RETRY_CONFIG } from '@chainlink/ccip-sdk'
-
-// Default: API enabled with automatic retry on fallback
-const chain = await EVMChain.fromUrl(url)
-
-// Custom retry configuration for API fallback operations
-const chainWithRetry = await EVMChain.fromUrl(url, {
-  apiRetryConfig: {
-    maxRetries: 5,
-    initialDelayMs: 2000,
-    backoffMultiplier: 1.5,
-    maxDelayMs: 60000,
-    respectRetryAfterHint: true,
-  },
-})
-
-// Fully decentralized mode - uses only RPC data, no API
-const decentralizedChain = await EVMChain.fromUrl(url, { apiClient: null })
-```
-
-### Decentralized Mode
-
-Disable the API entirely for fully decentralized operation:
-
-```typescript
-// Opt-out of API - uses only RPC data
-const chain = await EVMChain.fromUrl(url, { apiClient: null })
-
-// API-dependent methods will throw CCIPApiClientNotAvailableError
-await chain.getLaneLatency(destSelector) // Throws
-```
+| Error | Meaning |
+|-------|---------|
+| `ChainNotAllowed` | Destination chain not enabled for this token |
+| `RateLimitReached` | Token bucket rate limit exceeded — try smaller amount or wait |
+| `UnsupportedToken` | Token not supported on this lane |
+| `InsufficientFeeTokenAmount` | Not enough fee provided |
+| `InvalidReceiver` | Receiver address format invalid for destination chain |
+| `SenderNotAllowed` | Sender not on allowlist |
+| `InvalidExtraArgsTag` | Invalid extra args encoding |
+| `MessageTooLarge` | Message data exceeds max size |
+| `TokenMaxCapacityExceeded` | Transfer exceeds pool capacity |
 
 ## Related
 
-- [Tracking Messages](/sdk/guides/tracking-messages) - Monitor message status
-- [Sending Messages](/sdk/guides/sending-messages) - Send messages correctly
-- [Multi-Chain Support](/sdk/guides/multi-chain) - Chain-specific error handling
+- [Error Reference](/sdk/guides/error-reference) — Complete catalog of all SDK error codes
+- [Manual Execution](/sdk/guides/manual-execution) — Handle execution failures
+- [Tracking Messages](/sdk/guides/tracking-messages) — Check message status

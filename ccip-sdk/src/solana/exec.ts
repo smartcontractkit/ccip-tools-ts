@@ -198,7 +198,7 @@ async function buildLookupTableIxs(
     lookupTable: new AddressLookupTableAccount({
       key: altAddr,
       state: {
-        deactivationSlot: 2n ** 64n - 1n,
+        deactivationSlot: BigInt(2) ** BigInt(64) - BigInt(1),
         lastExtendedSlot: recentSlot,
         lastExtendedSlotStartIndex: 0,
         addresses,

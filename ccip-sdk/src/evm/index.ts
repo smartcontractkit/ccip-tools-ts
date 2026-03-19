@@ -12,12 +12,15 @@ import {
   JsonRpcProvider,
   WebSocketProvider,
   ZeroAddress,
+  formatUnits,
   getAddress,
   hexlify,
   isBytesLike,
+  isError,
   isHexString,
   keccak256,
   toBeHex,
+  toBigInt,
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
@@ -27,23 +30,29 @@ import type { PickDeep, SetRequired } from 'type-fest'
 import {
   type ChainContext,
   type GetBalanceOpts,
+  type LaneFeatures,
   type LogFilter,
+  type RateLimiterState,
   type TokenPoolRemote,
+  type TokenTransferFeeConfig,
+  type TokenTransferFeeOpts,
+  type TotalFeesEstimate,
   Chain,
+  LaneFeature,
 } from '../chain.ts'
 import {
   CCIPAddressInvalidEvmError,
-  CCIPApiClientNotAvailableError,
   CCIPBlockNotFoundError,
   CCIPContractNotRouterError,
   CCIPContractTypeInvalidError,
   CCIPDataFormatUnsupportedError,
+  CCIPError,
   CCIPExecTxNotConfirmedError,
   CCIPExecTxRevertedError,
   CCIPHasherVersionUnsupportedError,
   CCIPLogDataInvalidError,
-  CCIPNotImplementedError,
   CCIPSourceChainUnsupportedError,
+  CCIPTokenDecimalsInsufficientError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
@@ -54,6 +63,7 @@ import {
 } from '../errors/index.ts'
 import type { ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type CCIPExecution,
@@ -63,7 +73,6 @@ import {
   type ChainLog,
   type ChainTransaction,
   type CommitReport,
-  type ExecutionInput,
   type ExecutionReceipt,
   type ExecutionState,
   type Lane,
@@ -82,6 +91,7 @@ import {
   parseTypeAndVersion,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
+import type CCTPVerifier_2_0_ABI from './abi/CCTPVerifier_2_0.ts'
 import type FeeQuoter_ABI from './abi/FeeQuoter_1_6.ts'
 import type TokenPool_1_5_ABI from './abi/LockReleaseTokenPool_1_5.ts'
 import type TokenPool_ABI from './abi/LockReleaseTokenPool_1_6_1.ts'
@@ -95,6 +105,9 @@ import type OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import type OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
 import type Router_ABI from './abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
+import type TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
+import type USDCTokenPoolProxy_2_0_ABI from './abi/USDCTokenPoolProxy_2_0.ts'
+import type VersionedVerifierResolver_2_0_ABI from './abi/VersionedVerifierResolver_2_0.ts'
 import {
   CCV_INDEXER_URL,
   VersionedContractABI,
@@ -111,20 +124,20 @@ import {
 import { estimateExecGas } from './gas.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { getEvmLogs } from './logs.ts'
-import {
-  type CCIPMessage_V1_6_EVM,
-  type CCIPMessage_V2_0,
-  type CleanAddressable,
-  type MessageV1,
-  type TokenTransferV1,
-  decodeMessageV1,
-} from './messages.ts'
-export { decodeMessageV1 }
-export type { MessageV1, TokenTransferV1 }
+import type { CCIPMessage_V1_6_EVM, CCIPMessage_V2_0, CleanAddressable } from './messages.ts'
 import { encodeEVMOffchainTokenData } from './offchain.ts'
 import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
 import { type UnsignedEVMTx, resultToObject } from './types.ts'
+import { decodeMessageV1 } from '../messages.ts'
 export type { UnsignedEVMTx }
+
+/** Raw on-chain TokenBucket struct returned by TokenPool rate limiter queries. */
+type RateLimiterBucket = { tokens: bigint; isEnabled: boolean; capacity: bigint; rate: bigint }
+
+/** Converts an on-chain bucket to the public RateLimiterState, stripping `isEnabled`. */
+function toRateLimiterState(b: RateLimiterBucket): RateLimiterState {
+  return b.isEnabled ? { tokens: b.tokens, capacity: b.capacity, rate: b.rate } : null
+}
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
 function isSigner(wallet: unknown): wallet is Signer {
@@ -235,6 +248,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       maxArgs: 1,
     })
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { async: true, maxArgs: 1 })
+    this.detectUsdcDomains = memoize(this.detectUsdcDomains.bind(this))
+    this.resolveVerifier = memoize(this.resolveVerifier.bind(this))
   }
 
   /**
@@ -626,6 +641,45 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
+   * {@inheritDoc Chain.getLaneFeatures}
+   */
+  override async getLaneFeatures(opts: {
+    router: string
+    destChainSelector: bigint
+    token?: string
+  }): Promise<Partial<LaneFeatures>> {
+    const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
+    const [, version] = await this.typeAndVersion(onRamp)
+
+    const result: Partial<LaneFeatures> = {}
+
+    // default FTF value for V2_0+ lanes if no token/pool or pool doesn't specify
+    if (version >= CCIPVersion.V2_0) result[LaneFeature.MIN_BLOCK_CONFIRMATIONS] = 1
+
+    // MIN_BLOCK_CONFIRMATIONS — V2_0+ only
+    if (opts.token) {
+      const { tokenPool } = await this.getRegistryTokenConfig(
+        await this.getTokenAdminRegistryFor(onRamp),
+        opts.token,
+      )
+      if (tokenPool) {
+        const { minBlockConfirmations } = await this.getTokenPoolConfig(tokenPool)
+        if (minBlockConfirmations != null)
+          result[LaneFeature.MIN_BLOCK_CONFIRMATIONS] = minBlockConfirmations
+
+        const remote = await this.getTokenPoolRemote(tokenPool, opts.destChainSelector)
+        result[LaneFeature.RATE_LIMITS] = remote.outboundRateLimiterState
+        if (minBlockConfirmations && 'customBlockConfirmationsOutboundRateLimiterState' in remote) {
+          result[LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS] =
+            remote.customBlockConfirmationsOutboundRateLimiterState
+        }
+      }
+    }
+
+    return result
+  }
+
+  /**
    * {@inheritDoc Chain.getRouterForOffRamp}
    * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
    */
@@ -650,7 +704,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         offRampABI = OffRamp_1_6_ABI
       // falls through
       case CCIPVersion.V2_0: {
-        offRampABI = OffRamp_2_0_ABI
+        offRampABI ??= OffRamp_2_0_ABI
         const contract = new Contract(
           offRamp,
           offRampABI,
@@ -887,11 +941,22 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ? type.includes('OnRamp')
           ? interfaces.EVM2EVMOnRamp_v1_5
           : interfaces.EVM2EVMOffRamp_v1_5
-        : type.includes('OnRamp')
-          ? interfaces.OnRamp_v1_6
-          : interfaces.OffRamp_v1_6,
+        : version < CCIPVersion.V2_0
+          ? type.includes('OnRamp')
+            ? interfaces.OnRamp_v1_6
+            : interfaces.OffRamp_v1_6
+          : type.includes('OnRamp')
+            ? interfaces.OnRamp_v2_0
+            : interfaces.OffRamp_v2_0,
       this.provider,
-    ) as unknown as TypedContract<typeof OnRamp_1_6_ABI | typeof OffRamp_1_6_ABI>
+    ) as unknown as TypedContract<
+      | typeof EVM2EVMOnRamp_1_5_ABI
+      | typeof EVM2EVMOffRamp_1_5_ABI
+      | typeof OnRamp_1_6_ABI
+      | typeof OffRamp_1_6_ABI
+      | typeof OnRamp_2_0_ABI
+      | typeof OffRamp_2_0_ABI
+    >
     const { tokenAdminRegistry } = await contract.getStaticConfig()
     return tokenAdminRegistry as string
   }
@@ -917,11 +982,24 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (version < CCIPVersion.V1_6)
       throw new CCIPVersionFeatureUnavailableError('feeQuoter', version, 'v1.6')
 
+    const isOnRamp = type.includes('OnRamp')
     const contract = new Contract(
       address,
-      type.includes('OnRamp') ? interfaces.OnRamp_v1_6 : interfaces.OffRamp_v1_6,
+      version < CCIPVersion.V2_0
+        ? isOnRamp
+          ? interfaces.OnRamp_v1_6
+          : interfaces.OffRamp_v1_6
+        : isOnRamp
+          ? interfaces.OnRamp_v2_0
+          : interfaces.OffRamp_v2_0,
       this.provider,
-    ) as unknown as TypedContract<typeof OnRamp_1_6_ABI | typeof OffRamp_1_6_ABI>
+    ) as unknown as TypedContract<
+      | typeof OnRamp_1_6_ABI
+      | typeof OffRamp_1_6_ABI
+      | typeof OnRamp_2_0_ABI
+      | typeof OffRamp_2_0_ABI
+    >
+
     const { feeQuoter } = await contract.getDynamicConfig()
     return feeQuoter as string
   }
@@ -950,9 +1028,220 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * {@inheritDoc Chain.generateUnsignedSendMessage}
-   * @returns Array containing 0 or more unsigned token approvals txs (if needed at the time of
-   *   generation), followed by a ccipSend TransactionRequest
+   * Detect whether a token pool is a USDC/CCTP pool via typeAndVersion, then resolve
+   * the CCTPVerifier address and fetch source/dest CCTP domain IDs.
+   *
+   * @param tokenPool - The token pool address to check.
+   * @param destChainSelector - Destination chain selector for getDomain().
+   * @param ccvs - Cross-chain verifier addresses from extraArgs (fallback for verifier discovery).
+   * @returns Source and dest CCTP domain IDs, or undefined if not a USDC pool.
+   */
+  private async detectUsdcDomains(
+    tokenPool: string,
+    destChainSelector: bigint,
+    ccvs: string[] = [],
+  ): Promise<{ sourceDomain: number; destDomain: number } | undefined> {
+    // 1. Check if pool is USDCTokenPoolProxy
+    let poolType: string
+    try {
+      ;[poolType] = await this.typeAndVersion(tokenPool)
+    } catch {
+      return undefined
+    }
+    if (poolType !== 'USDCTokenPoolProxy') return undefined
+
+    // 2. Find CCTPVerifier address
+    let verifierAddress: string | undefined
+
+    // 2a. Try pool's getStaticConfig (returns resolver/verifier address)
+    try {
+      const proxy = new Contract(
+        tokenPool,
+        interfaces.USDCTokenPoolProxy_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof USDCTokenPoolProxy_2_0_ABI>
+      const [, , cctpVerifier] = await proxy.getStaticConfig()
+      const candidate = cctpVerifier as string
+      if (candidate && candidate !== ZeroAddress) {
+        verifierAddress = await this.resolveVerifier(candidate, destChainSelector)
+      }
+    } catch {
+      /* proxy may not be initialized */
+    }
+
+    // 2b. Fall back to scanning ccvs from extraArgs
+    if (!verifierAddress) {
+      for (const ccv of ccvs) {
+        if (!ccv) continue
+        try {
+          const resolved = await this.resolveVerifier(ccv, destChainSelector)
+          if (resolved) {
+            verifierAddress = resolved
+            break
+          }
+        } catch {
+          /* not a valid contract */
+        }
+      }
+    }
+
+    if (!verifierAddress) return undefined
+
+    // 3. Fetch source and dest CCTP domain IDs from verifier
+    try {
+      const verifier = new Contract(
+        verifierAddress,
+        interfaces.CCTPVerifier_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof CCTPVerifier_2_0_ABI>
+      const [staticConfig, domainResult] = await Promise.all([
+        verifier.getStaticConfig(),
+        verifier.getDomain(destChainSelector),
+      ])
+      return {
+        sourceDomain: Number(staticConfig[3]), // localDomainIdentifier
+        destDomain: Number(domainResult.domainIdentifier),
+      }
+    } catch (err) {
+      if (isError(err, 'CALL_EXCEPTION')) return undefined
+      throw CCIPError.from(err)
+    }
+  }
+
+  /**
+   * Given a candidate address, check if it's a CCTPVerifier or VersionedVerifierResolver
+   * and return the actual verifier address (resolving through the resolver if needed).
+   */
+  private async resolveVerifier(
+    candidate: string,
+    destChainSelector: bigint,
+  ): Promise<string | undefined> {
+    try {
+      const [candidateType] = await this.typeAndVersion(candidate)
+      if (candidateType === 'VersionedVerifierResolver') {
+        const resolver = new Contract(
+          candidate,
+          interfaces.VersionedVerifierResolver_v2_0,
+          this.provider,
+        ) as unknown as TypedContract<typeof VersionedVerifierResolver_2_0_ABI>
+        return (await resolver.getOutboundImplementation(destChainSelector, '0x')) as string
+      }
+      if (candidateType === 'CCTPVerifier') return candidate
+    } catch {
+      /* not a valid versioned contract */
+    }
+    return undefined
+  }
+
+  /** {@inheritDoc Chain.getTotalFeesEstimate} */
+  override async getTotalFeesEstimate(
+    opts: Parameters<Chain['getTotalFeesEstimate']>[0],
+  ): Promise<TotalFeesEstimate> {
+    const tokenAmounts = opts.message.tokenAmounts
+    const ccipFee$ = this.getFee(opts)
+
+    if (!tokenAmounts?.length) {
+      return { ccipFee: await ccipFee$ }
+    }
+
+    const { token, amount } = tokenAmounts[0]!
+
+    // Determine blockConfirmations and tokenArgs from extraArgs
+    const extraArgs = opts.message.extraArgs
+    let blockConfirmations = 0
+    let tokenArgs: string = '0x'
+    if (extraArgs && 'blockConfirmations' in extraArgs) {
+      blockConfirmations = extraArgs.blockConfirmations as number
+      tokenArgs = hexlify(extraArgs.tokenArgs as BytesLike)
+    }
+
+    // Skip pool-level fee lookup for pre-v2.0 lanes
+    const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
+    const [, version] = await this.typeAndVersion(onRamp)
+    if (version < CCIPVersion.V2_0) {
+      return { ccipFee: await ccipFee$ }
+    }
+
+    const onRampContract = new Contract(
+      onRamp,
+      interfaces.OnRamp_v2_0,
+      this.provider,
+    ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
+
+    const poolAddress = (await onRampContract.getPoolBySourceToken(
+      opts.destChainSelector,
+      token,
+    )) as string
+
+    const [ccipFee, { tokenTransferFeeConfig }, usdcDomains] = await Promise.all([
+      ccipFee$,
+      this.getTokenPoolConfig(poolAddress, {
+        destChainSelector: opts.destChainSelector,
+        blockConfirmationsRequested: blockConfirmations,
+        tokenArgs,
+      }),
+      this.detectUsdcDomains(
+        poolAddress,
+        opts.destChainSelector,
+        extraArgs && 'ccvs' in extraArgs ? extraArgs.ccvs : [],
+      ),
+    ])
+
+    // USDC path: use Circle CCTP burn fees
+    if (usdcDomains) {
+      const burnFees = await getUsdcBurnFees(
+        usdcDomains.sourceDomain,
+        usdcDomains.destDomain,
+        this.network.networkType,
+      )
+      const fast = blockConfirmations > 0
+      // Tiers are sorted ascending by finalityThreshold; findLast for fast ensures
+      // we pick the highest tier still within the fast threshold.
+      const tier = fast
+        ? burnFees.findLast((t) => t.finalityThreshold <= CCTP_FINALITY_FAST)
+        : burnFees.find((t) => t.finalityThreshold > CCTP_FINALITY_FAST)
+      if (tier && tier.minimumFee > 0) {
+        return {
+          ccipFee,
+          tokenTransferFee: {
+            feeDeducted: (BigInt(amount) * BigInt(tier.minimumFee)) / 10_000n,
+            bps: tier.minimumFee,
+          },
+        }
+      }
+      return { ccipFee }
+    }
+
+    // Non-USDC path: use on-chain tokenTransferFeeConfig
+    if (!tokenTransferFeeConfig || !tokenTransferFeeConfig.isEnabled) {
+      return { ccipFee }
+    }
+
+    const useCustom = blockConfirmations > 0
+    const bps = useCustom
+      ? tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps
+      : tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps
+
+    return {
+      ccipFee,
+      tokenTransferFee: {
+        feeDeducted: (BigInt(amount) * BigInt(bps)) / 10_000n,
+        bps,
+      },
+    }
+  }
+
+  /**
+   * Generates unsigned EVM transactions for sending a CCIP message.
+   *
+   * @param opts - Send message options with sender address for populating transaction fields.
+   * @returns Unsigned EVM transaction set containing 0 or more token approval txs
+   *   (if needed at the time of generation), followed by a ccipSend TransactionRequest.
+   *
+   * @remarks
+   * When a token in `tokenAmounts` has `ZeroAddress` as its address, the corresponding
+   * amount is included as native `value` in the `ccipSend` transaction instead of
+   * going through the ERC-20 approve flow.
    */
   async generateUnsignedSendMessage(
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
@@ -975,10 +1264,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     )
 
     // make sure to approve once per token, for the total amount (including fee, if needed)
-    const amountsToApprove = (message.tokenAmounts ?? []).reduce(
-      (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
-      {} as { [token: string]: bigint },
-    )
+    const amountsToApprove = (message.tokenAmounts ?? [])
+      .filter(({ token }) => token && token !== ZeroAddress)
+      .reduce(
+        (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
+        {} as { [token: string]: bigint },
+      )
     if (feeToken !== ZeroAddress)
       amountsToApprove[feeToken] = (amountsToApprove[feeToken] ?? 0n) + message.fee
 
@@ -992,7 +1283,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ) as unknown as TypedContract<typeof Token_ABI>
           const allowance = await contract.allowance(sender, router)
           if (allowance >= amount) return
-          const amnt = opts.approveMax ? 2n ** 256n - 1n : amount
+          const amnt = opts.approveMax ? BigInt(2) ** BigInt(256) - BigInt(1) : amount
           return contract.approve.populateTransaction(router, amnt, { from: sender })
         }),
       )
@@ -1003,6 +1294,24 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       interfaces.Router,
       this.provider,
     ) as unknown as TypedContract<typeof Router_ABI>
+
+    // if `token` is ZeroAddress, send its `amount` as `value` to router/EtherSenderReceiver (plus possibly native fee)
+    // if native fee, include it in value; otherwise, it's transferedFrom feeToken
+    // Native `value`: wrapped/native token amounts sent as ZeroAddress, plus msg.value when fee is native.
+    let value = (message.tokenAmounts ?? [])
+      .filter(({ token }) => token === ZeroAddress)
+      .reduce((acc, { amount }) => acc + amount, 0n)
+    if (feeToken === ZeroAddress) {
+      // Hedera and similar: fee quote may use wrapped native decimals; tx `value` is always 18-decimal wei.
+      const nativeToken = await this.getNativeTokenForRouter(router)
+      const { decimals: nativeDecimals } = await this.getTokenInfo(nativeToken)
+      const evmDecimals = (this.constructor as typeof EVMChain).decimals
+      value +=
+        nativeDecimals < evmDecimals
+          ? message.fee * 10n ** BigInt(evmDecimals - nativeDecimals)
+          : message.fee
+    }
+
     const sendTx = await contract.ccipSend.populateTransaction(
       destChainSelector,
       {
@@ -1012,23 +1321,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         extraArgs,
         feeToken,
       },
-      {
-        from: sender,
-        // if native fee, include it in value; otherwise, it's transferedFrom feeToken
-        ...(feeToken === ZeroAddress && {
-          value: await (async () => {
-            // On chains like Hedera where the native token has fewer than 18 decimals
-            // (e.g. WHBAR has 8 decimals / tinybars), the fee is returned in those units.
-            // EVM transactions expect value in wei (18 decimals), so scale up accordingly.
-            const nativeToken = await this.getNativeTokenForRouter(router)
-            const { decimals: nativeDecimals } = await this.getTokenInfo(nativeToken)
-            const evmDecimals = (this.constructor as typeof EVMChain).decimals
-            return nativeDecimals < evmDecimals
-              ? message.fee * 10n ** BigInt(evmDecimals - nativeDecimals)
-              : message.fee
-          })(),
-        }),
-      },
+      { from: sender, ...(value > 0n ? { value } : {}) },
     )
     const txRequests = [...approveTxs, sendTx] as SetRequired<typeof sendTx, 'from'>[]
     return {
@@ -1092,13 +1385,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   async generateUnsignedExecute(
     opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<UnsignedEVMTx> {
-    let input: ExecutionInput, offRamp: string
-    if (!('input' in opts)) {
-      if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
-      ;({ offRamp, ...input } = await this.apiClient.getExecutionInput(opts.messageId))
-    } else {
-      ;({ offRamp, input } = opts)
-    }
+    const { offRamp, input, gasLimit } = await this.resolveExecuteOpts(opts)
     if ('verifications' in input) {
       const contract = new Contract(
         offRamp,
@@ -1112,6 +1399,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       const txGasLimit = await contract.executeSingleMessage.estimateGas(
         {
           ...message,
+          onRampAddress: zeroPadValue(getAddressBytes(message.onRampAddress), 32),
+          sender: zeroPadValue(getAddressBytes(message.sender), 32),
+          tokenTransfer: message.tokenTransfer.map((ta) => ({
+            ...ta,
+            sourcePoolAddress: zeroPadValue(getAddressBytes(ta.sourcePoolAddress), 32),
+            sourceTokenAddress: zeroPadValue(getAddressBytes(ta.sourceTokenAddress), 32),
+          })),
           executionGasLimit: BigInt(message.executionGasLimit),
           ccipReceiveGasLimit: BigInt(message.ccipReceiveGasLimit),
           finality: BigInt(message.finality),
@@ -1119,14 +1413,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         messageId,
         input.verifications.map(({ destAddress }) => destAddress),
         input.verifications.map(({ ccvData }) => hexlify(ccvData)),
-        BigInt(opts.gasLimit ?? 0),
+        BigInt(gasLimit ?? 0),
         { from: offRamp }, // internal method
       )
       const execTx = await contract.execute.populateTransaction(
         input.encodedMessage,
         input.verifications.map(({ destAddress }) => destAddress),
         input.verifications.map(({ ccvData }) => hexlify(ccvData)),
-        BigInt(opts.gasLimit ?? 0),
+        BigInt(gasLimit ?? 0),
       )
       execTx.gasLimit = txGasLimit + 40000n // plus `execute`'s overhead
       return { family: ChainFamily.EVM, transactions: [execTx] }
@@ -1143,7 +1437,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           interfaces.EVM2EVMOffRamp_v1_2,
           this.provider,
         ) as unknown as TypedContract<typeof EVM2EVMOffRamp_1_2_ABI>
-        const gasOverride = BigInt(opts.gasLimit ?? 0)
+        const gasOverride = BigInt(gasLimit ?? 0)
         manualExecTx = await contract.manuallyExecute.populateTransaction(
           {
             ...input,
@@ -1170,9 +1464,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           },
           [
             {
-              receiverExecutionGasLimit: BigInt(opts.gasLimit ?? 0),
+              receiverExecutionGasLimit: BigInt(gasLimit ?? 0),
               tokenGasOverrides: input.message.tokenAmounts.map(() =>
-                BigInt(opts.tokensGasLimit ?? opts.gasLimit ?? 0),
+                BigInt(opts.tokensGasLimit ?? gasLimit ?? 0),
               ),
             },
           ],
@@ -1225,9 +1519,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           [
             [
               {
-                receiverExecutionGasLimit: BigInt(opts.gasLimit ?? 0),
+                receiverExecutionGasLimit: BigInt(gasLimit ?? 0),
                 tokenGasOverrides: input.message.tokenAmounts.map(() =>
-                  BigInt(opts.tokensGasLimit ?? opts.gasLimit ?? 0),
+                  BigInt(opts.tokensGasLimit ?? gasLimit ?? 0),
                 ),
               },
             ],
@@ -1238,14 +1532,30 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       default:
         throw new CCIPVersionUnsupportedError(version)
     }
+
+    /* Executing a message for the first time has some hard try/catches on-chain
+     * so we need to ensure some lower-bounds gasLimits */
+    let txGasLimit = await this.provider.estimateGas(manualExecTx)
+    if (
+      'gasLimit' in input.message &&
+      input.message.gasLimit &&
+      txGasLimit < input.message.gasLimit + 100000n
+    )
+      // if message requested gasLimit, ensure execution more than 100k above requested, otherwise it's clearly a try/catch fail
+      txGasLimit = BigInt(input.message.gasLimit) + 200000n
+    else if ('gasLimit' in input.message && !input.message.gasLimit && txGasLimit < 240000n)
+      // if message didn't request gasLimit, ensure execution gasLimit is above 240k (empiric)
+      txGasLimit = 240000n
+    manualExecTx.gasLimit = txGasLimit
+
     return { family: ChainFamily.EVM, transactions: [manualExecTx] }
   }
 
   /**
    * {@inheritDoc Chain.execute}
-   * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Signer
-   * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm
-   * @throws {@link CCIPExecTxRevertedError} if execution transaction reverts
+   * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Signer.
+   * @throws {@link CCIPExecTxNotConfirmedError} if execution transaction fails to confirm.
+   * @throws {@link CCIPExecTxRevertedError} if execution transaction reverts.
    */
   async execute(opts: Parameters<Chain['execute']>[0]) {
     const wallet = opts.wallet
@@ -1264,7 +1574,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const response = await submitTransaction(wallet, populatedTx, this.provider)
     this.logger.debug('manuallyExecute =>', response.hash)
 
-    const receipt = await response.wait(1, 60_000)
+    let receipt = await response.wait(0)
+    if (!receipt) receipt = await response.wait(1, 240_000)
     if (!receipt?.hash) throw new CCIPExecTxNotConfirmedError(response.hash)
     if (!receipt.status) throw new CCIPExecTxRevertedError(response.hash)
     const tx = await this.getTransaction(receipt)
@@ -1335,32 +1646,117 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /** {@inheritDoc Chain.getTokenPoolConfig} */
-  async getTokenPoolConfig(tokenPool: string): Promise<{
+  /**
+   * Fetches the token pool configuration for an EVM token pool contract.
+   *
+   * @param tokenPool - Token pool contract address.
+   * @param feeOpts - Optional parameters to also fetch token transfer fee config.
+   * @returns Token pool config containing token, router, typeAndVersion, and optionally
+   *          minBlockConfirmations and tokenTransferFeeConfig.
+   *
+   * @remarks
+   * For pools with version \>= 2.0, also returns `minBlockConfirmations` for
+   * Faster-Than-Finality (FTF) support. Pre-2.0 pools omit this field.
+   * When `feeOpts` is provided and the pool is v2.0+, also fetches token transfer fee config.
+   */
+  async getTokenPoolConfig(
+    tokenPool: string,
+    feeOpts?: TokenTransferFeeOpts,
+  ): Promise<{
     token: string
     router: string
     typeAndVersion: string
+    minBlockConfirmations?: number
+    tokenTransferFeeConfig?: TokenTransferFeeConfig
   }> {
-    const [_, , typeAndVersion] = await this.typeAndVersion(tokenPool)
+    const [_, version, typeAndVersion] = await this.typeAndVersion(tokenPool)
 
-    const contract = new Contract(
-      tokenPool,
-      interfaces.TokenPool_v1_6,
-      this.provider,
-    ) as unknown as TypedContract<typeof TokenPool_ABI>
-
-    const token = contract.getToken()
-    const router = contract.getRouter()
-    return Promise.all([token, router]).then(([token, router]) => {
-      return {
-        token: token as string,
-        router: router as string,
-        typeAndVersion,
+    let token, router, minBlockConfirmations, tokenTransferFeeConfig
+    if (version < CCIPVersion.V2_0) {
+      const contract = new Contract(
+        tokenPool,
+        interfaces.TokenPool_v1_6,
+        this.provider,
+      ) as unknown as TypedContract<typeof TokenPool_ABI>
+      token = contract.getToken()
+      router = contract.getRouter()
+    } else {
+      const contract = new Contract(
+        tokenPool,
+        interfaces.TokenPool_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
+      token = contract.getToken()
+      router = contract.getDynamicConfig().then(([router]) => router)
+      minBlockConfirmations = contract.getMinBlockConfirmations().catch((err) => {
+        if (isError(err, 'CALL_EXCEPTION')) return 0
+        throw CCIPError.from(err)
+      })
+      if (feeOpts) {
+        tokenTransferFeeConfig = token.then((tokenAddr) =>
+          contract
+            .getTokenTransferFeeConfig(
+              tokenAddr as string,
+              feeOpts.destChainSelector,
+              BigInt(feeOpts.blockConfirmationsRequested),
+              feeOpts.tokenArgs,
+            )
+            .then((result) => ({
+              destGasOverhead: Number(result.destGasOverhead),
+              destBytesOverhead: Number(result.destBytesOverhead),
+              defaultBlockConfirmationsFeeUSDCents: Number(
+                result.defaultBlockConfirmationsFeeUSDCents,
+              ),
+              customBlockConfirmationsFeeUSDCents: Number(
+                result.customBlockConfirmationsFeeUSDCents,
+              ),
+              defaultBlockConfirmationsTransferFeeBps: Number(
+                result.defaultBlockConfirmationsTransferFeeBps,
+              ),
+              customBlockConfirmationsTransferFeeBps: Number(
+                result.customBlockConfirmationsTransferFeeBps,
+              ),
+              isEnabled: result.isEnabled,
+            }))
+            .catch((err) => {
+              if (isError(err, 'CALL_EXCEPTION')) return undefined
+              throw CCIPError.from(err, 'UNKNOWN')
+            }),
+        )
       }
-    })
+    }
+
+    return Promise.all([token, router, minBlockConfirmations, tokenTransferFeeConfig]).then(
+      ([token, router, minBlockConfirmations, tokenTransferFeeConfig]) => {
+        return {
+          token: token as CleanAddressable<typeof token>,
+          router: router as CleanAddressable<typeof router>,
+          typeAndVersion,
+          ...(minBlockConfirmations != null && {
+            minBlockConfirmations: Number(minBlockConfirmations),
+          }),
+          ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
+        }
+      },
+    )
   }
 
-  /** {@inheritDoc Chain.getTokenPoolRemotes} */
+  /**
+   * Fetches remote chain configurations for an EVM token pool contract.
+   *
+   * @param tokenPool - Token pool address on the current chain.
+   * @param remoteChainSelector - Optional chain selector to filter results to a single destination.
+   * @returns Record mapping chain names to {@link TokenPoolRemote} configs.
+   *
+   * @remarks
+   * Handles 3 pool version branches:
+   * - v1.5: single remote pool via `getRemotePool`, standard rate limiters.
+   * - v1.6: multiple remote pools via `getRemotePools`, standard rate limiters.
+   * - v2.0+: multiple remote pools plus FTF (Faster-Than-Finality) rate limiters
+   *   (`customBlockConfirmationsOutboundRateLimiterState` / `customBlockConfirmationsInboundRateLimiterState`).
+   *
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if remote token is not configured for a chain.
+   */
   async getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
@@ -1371,53 +1767,93 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (remoteChainSelector) supportedChains = Promise.resolve([networkInfo(remoteChainSelector)])
 
     let remotePools: Promise<string[][]>
-    let contract
+    let remoteInfo
     if (version < '1.5.1') {
-      const contract_ = new Contract(
+      const contract = new Contract(
         tokenPool,
         interfaces.TokenPool_v1_5,
         this.provider,
       ) as unknown as TypedContract<typeof TokenPool_1_5_ABI>
-      contract = contract_
       supportedChains ??= contract.getSupportedChains().then((chains) => chains.map(networkInfo))
       remotePools = supportedChains.then((chains) =>
         Promise.all(
           chains.map((chain) =>
-            contract_
+            contract
               .getRemotePool(chain.chainSelector)
               .then((remotePool) => [decodeAddress(remotePool, chain.family)]),
           ),
         ),
       )
-    } else {
-      const contract_ = new Contract(
+      remoteInfo = supportedChains.then((chains) =>
+        Promise.all(
+          chains.map((chain) =>
+            Promise.all([
+              contract.getRemoteToken(chain.chainSelector),
+              resultToObject(contract.getCurrentOutboundRateLimiterState(chain.chainSelector)),
+              resultToObject(contract.getCurrentInboundRateLimiterState(chain.chainSelector)),
+            ] as const),
+          ),
+        ),
+      )
+    } else if (version < CCIPVersion.V2_0) {
+      const contract = new Contract(
         tokenPool,
         interfaces.TokenPool_v1_6,
         this.provider,
       ) as unknown as TypedContract<typeof TokenPool_ABI>
-      contract = contract_
       supportedChains ??= contract.getSupportedChains().then((chains) => chains.map(networkInfo))
       remotePools = supportedChains.then((chains) =>
         Promise.all(
           chains.map((chain) =>
-            contract_
+            contract
               .getRemotePools(chain.chainSelector)
               .then((pools) => pools.map((remotePool) => decodeAddress(remotePool, chain.family))),
           ),
         ),
       )
-    }
-    const remoteInfo = supportedChains.then((chains) =>
-      Promise.all(
-        chains.map((chain) =>
-          Promise.all([
-            contract.getRemoteToken(chain.chainSelector),
-            resultToObject(contract.getCurrentInboundRateLimiterState(chain.chainSelector)),
-            resultToObject(contract.getCurrentOutboundRateLimiterState(chain.chainSelector)),
-          ] as const),
+      remoteInfo = supportedChains.then((chains) =>
+        Promise.all(
+          chains.map((chain) =>
+            Promise.all([
+              contract.getRemoteToken(chain.chainSelector),
+              resultToObject(contract.getCurrentOutboundRateLimiterState(chain.chainSelector)),
+              resultToObject(contract.getCurrentInboundRateLimiterState(chain.chainSelector)),
+            ] as const),
+          ),
         ),
-      ),
-    )
+      )
+    } else {
+      const contract = new Contract(
+        tokenPool,
+        interfaces.TokenPool_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
+      supportedChains ??= contract.getSupportedChains().then((chains) => chains.map(networkInfo))
+      remotePools = supportedChains.then((chains) =>
+        Promise.all(
+          chains.map((chain) =>
+            contract
+              .getRemotePools(chain.chainSelector)
+              .then((pools) => pools.map((remotePool) => decodeAddress(remotePool, chain.family))),
+          ),
+        ),
+      )
+      remoteInfo = supportedChains.then((chains) =>
+        Promise.all(
+          chains.map((chain) =>
+            Promise.all([
+              contract.getRemoteToken(chain.chainSelector),
+              contract.getCurrentRateLimiterState(chain.chainSelector, false),
+              contract.getCurrentRateLimiterState(chain.chainSelector, true),
+            ] as const).then(
+              ([remoteToken, [outbound, inbound], [customOutbound, customInbound]]) => {
+                return [remoteToken, outbound, inbound, customOutbound, customInbound] as const
+              },
+            ),
+          ),
+        ),
+      )
+    }
     return Promise.all([supportedChains, remotePools, remoteInfo]).then(
       ([supportedChains, remotePools, remoteInfo]) =>
         Object.fromEntries(
@@ -1430,8 +1866,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
               {
                 remoteToken: decodeAddress(remoteTokenRaw, chain.family),
                 remotePools: remotePools[i]!.map((pool) => decodeAddress(pool, chain.family)),
-                inboundRateLimiterState: remoteInfo[i]![1].isEnabled ? remoteInfo[i]![1] : null,
-                outboundRateLimiterState: remoteInfo[i]![2].isEnabled ? remoteInfo[i]![2] : null,
+                outboundRateLimiterState: toRateLimiterState(remoteInfo[i]![1]),
+                inboundRateLimiterState: toRateLimiterState(remoteInfo[i]![2]),
+                ...(remoteInfo[i]!.length === 5 && {
+                  customBlockConfirmationsOutboundRateLimiterState: toRateLimiterState(
+                    remoteInfo[i]![3],
+                  ),
+                  customBlockConfirmationsInboundRateLimiterState: toRateLimiterState(
+                    remoteInfo[i]![4],
+                  ),
+                }),
               },
             ] as const
           }),
@@ -1473,7 +1917,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         tokens = Array.from(tokens_)
         break
       }
-      case CCIPVersion.V1_6: {
+      case CCIPVersion.V1_6:
+      case CCIPVersion.V2_0: {
         const feeQuoter = await this.getFeeQuoterFor(onRamp)
         const contract = new Contract(
           feeQuoter,
@@ -1501,15 +1946,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   ): Promise<CCIPVerifications> {
     const { offRamp, request } = opts
     if (request.lane.version >= CCIPVersion.V2_0) {
-      const message = request.message as CCIPMessage_V2_0
-      if (!message.encodedMessage)
-        throw new CCIPNotImplementedError(`CCIPAPIClient getMessageById v2 encodedMessage`)
+      const { encodedMessage } = request.message as CCIPMessage_V2_0
       const contract = new Contract(
         offRamp,
         interfaces.OffRamp_v2_0,
         this.provider,
       ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
-      const ccvs = await contract.getCCVsForMessage(message.encodedMessage)
+      const ccvs = await contract.getCCVsForMessage(encodedMessage)
       const [requiredCCVs, optionalCCVs, optionalThreshold] = ccvs.map(
         resultToObject,
       ) as unknown as CleanAddressable<typeof ccvs>
@@ -1523,20 +1966,24 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const apiRes = await this.apiClient.getMessageById(request.message.messageId)
         if ('verifiers' in apiRes.message) {
           const verifiers = apiRes.message.verifiers as {
-            items: {
+            items?: {
               destAddress: string
               sourceAddress: string
-              verification: { data: string; timestamp: string }
+              verification?: { data: string; timestamp: string }
             }[]
           }
           return {
             verificationPolicy,
-            verifications: verifiers.items.map((item) => ({
-              destAddress: item.destAddress,
-              sourceAddress: item.sourceAddress,
-              ccvData: item.verification.data,
-              timestamp: new Date(item.verification.timestamp).getTime() / 1e3,
-            })),
+            verifications: (verifiers.items ?? [])
+              .filter((item) => item.verification?.data)
+              .map((item) => ({
+                destAddress: item.destAddress,
+                sourceAddress: item.sourceAddress,
+                ccvData: item.verification!.data,
+                ...(!!item.verification?.timestamp && {
+                  timestamp: new Date(item.verification.timestamp).getTime() / 1e3,
+                }),
+              })),
           }
         }
       }
@@ -1594,10 +2041,76 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   override async estimateReceiveExecution(
     opts: Parameters<NonNullable<Chain['estimateReceiveExecution']>>[0],
   ): Promise<number> {
+    const convertAmounts = (
+      tokenAmounts?: readonly ((
+        | { token: string }
+        | { destTokenAddress: string; extraData?: string }
+      ) & {
+        amount: bigint
+      })[],
+    ) =>
+      !tokenAmounts
+        ? undefined
+        : Promise.all(
+            tokenAmounts.map(async (ta) => {
+              if (!('destTokenAddress' in ta)) return ta
+              let amount = ta.amount
+              if (isHexString(ta.extraData, 32)) {
+                // extraData is source token decimals in most pools derived from standard TP contracts;
+                // we can identify for it being exactly 32B and being a small integer; otherwise, assume same decimals
+                const sourceDecimals = toBigInt(ta.extraData)
+                if (0 < sourceDecimals && sourceDecimals <= 36) {
+                  const { decimals: destDecimals } = await this.getTokenInfo(ta.destTokenAddress)
+                  amount =
+                    (amount * BigInt(10) ** BigInt(destDecimals)) /
+                    BigInt(10) ** BigInt(sourceDecimals)
+                  if (amount === 0n)
+                    throw new CCIPTokenDecimalsInsufficientError(
+                      ta.destTokenAddress,
+                      destDecimals,
+                      this.network.name,
+                      formatUnits(amount, sourceDecimals),
+                    )
+                }
+              }
+              return { token: ta.destTokenAddress, amount }
+            }),
+          )
+
+    let opts_
+    if (!('offRamp' in opts)) {
+      const { lane, message, metadata } = await this.getMessageById(opts.messageId)
+
+      const offRamp =
+        ('offRampAddress' in message && message.offRampAddress) ||
+        metadata?.offRamp ||
+        (await this.apiClient!.getExecutionInput(opts.messageId)).offRamp
+
+      opts_ = {
+        offRamp,
+        message: {
+          sourceChainSelector: lane.sourceChainSelector,
+          messageId: message.messageId,
+          receiver: message.receiver,
+          sender: message.sender,
+          data: message.data,
+          destTokenAmounts: await convertAmounts(message.tokenAmounts),
+        },
+      }
+    } else {
+      opts_ = {
+        ...opts,
+        message: {
+          ...opts.message,
+          destTokenAmounts: await convertAmounts(opts.message.destTokenAmounts),
+        },
+      }
+    }
+
     const destRouter = await this.getRouterForOffRamp(
-      opts.offRamp,
-      opts.message.sourceChainSelector,
+      opts_.offRamp,
+      opts_.message.sourceChainSelector,
     )
-    return estimateExecGas({ provider: this.provider, router: destRouter, ...opts })
+    return estimateExecGas({ provider: this.provider, router: destRouter, ...opts_ })
   }
 }

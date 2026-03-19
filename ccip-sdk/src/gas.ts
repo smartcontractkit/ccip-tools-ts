@@ -20,11 +20,15 @@ export type EstimateMessageInput = {
   messageId?: string
   /** optional sender: zero address will be used if omitted */
   sender?: string
+  /** optional onRampAddress */
+  onRampAddress?: string
+  /** optional offRampAddress */
+  offRampAddress?: string
   /** optional data: zero bytes will be used if omitted */
   data?: BytesLike
   /**
    * optional tokenAmounts; `amount` with either source `token` (as in MessageInput) or
-   * `{ sourceTokenAddress?, sourcePoolAddress, destTokenAddress }` (as in v1.5..v1.7 tokenAmounts)
+   * `{ sourceTokenAddress?, sourcePoolAddress, destTokenAddress }` (as in v1.5..v2.0 tokenAmounts)
    * can be provided
    */
   tokenAmounts?: readonly ({
@@ -89,33 +93,41 @@ export async function estimateReceiveExecution({
   if (!dest.estimateReceiveExecution)
     throw new CCIPMethodUnsupportedError(dest.constructor.name, 'estimateReceiveExecution')
 
-  let onRamp, offRamp: string
-  try {
-    const tnv = await source.typeAndVersion(routerOrRamp)
-    if (!tnv[0].includes('OnRamp'))
-      onRamp = await source.getOnRampForRouter(routerOrRamp, dest.network.chainSelector)
-    else onRamp = routerOrRamp
-    offRamp = await discoverOffRamp(source, dest, onRamp, source)
-  } catch (sourceErr) {
+  let onRamp: string, offRamp: string
+  if (message.onRampAddress) onRamp = message.onRampAddress
+  if (message.offRampAddress) offRamp = message.offRampAddress
+  if (!onRamp! || !offRamp!)
     try {
-      const tnv = await dest.typeAndVersion(routerOrRamp)
-      if (!tnv[0].includes('OffRamp'))
-        throw new CCIPContractTypeInvalidError(routerOrRamp, tnv[2], ['OffRamp'])
-      offRamp = routerOrRamp
-      const onRamps = await dest.getOnRampsForOffRamp(offRamp, source.network.chainSelector)
-      if (!onRamps.length) throw new CCIPOnRampRequiredError()
-      onRamp = onRamps[onRamps.length - 1]!
-    } catch {
-      throw sourceErr // re-throw original error
+      const tnv = await source.typeAndVersion(routerOrRamp)
+      if (!tnv[0].includes('OnRamp'))
+        onRamp = await source.getOnRampForRouter(routerOrRamp, dest.network.chainSelector)
+      else onRamp = routerOrRamp
+      offRamp = await discoverOffRamp(source, dest, onRamp, source)
+    } catch (sourceErr) {
+      try {
+        const tnv = await dest.typeAndVersion(routerOrRamp)
+        if (!tnv[0].includes('OffRamp'))
+          throw new CCIPContractTypeInvalidError(routerOrRamp, tnv[2], ['OffRamp'])
+        offRamp = routerOrRamp
+        const onRamps = await dest.getOnRampsForOffRamp(offRamp, source.network.chainSelector)
+        if (!onRamps.length) throw new CCIPOnRampRequiredError()
+        onRamp = onRamps[onRamps.length - 1]!
+      } catch {
+        throw sourceErr // re-throw original error
+      }
     }
-  }
 
   const destTokenAmounts = await Promise.all(
     (message.tokenAmounts ?? []).map(async (ta) => {
       const tokenAmount =
         'destTokenAddress' in ta
           ? ta
-          : await sourceToDestTokenAddresses(source, dest.network.chainSelector, onRamp, ta)
+          : await sourceToDestTokenAddresses({
+              source,
+              onRamp,
+              destChainSelector: dest.network.chainSelector,
+              sourceTokenAmount: ta,
+            })
       const sourceTokenAddress =
         'token' in ta
           ? ta.token
@@ -127,7 +139,8 @@ export async function estimateReceiveExecution({
         dest.getTokenInfo(tokenAmount.destTokenAddress),
       ])
       const destAmount =
-        (tokenAmount.amount * 10n ** BigInt(destDecimals)) / 10n ** BigInt(sourceDecimals)
+        (tokenAmount.amount * BigInt(10) ** BigInt(destDecimals)) /
+        BigInt(10) ** BigInt(sourceDecimals)
       if (destAmount === 0n)
         throw new CCIPTokenDecimalsInsufficientError(
           tokenAmount.destTokenAddress,
@@ -139,10 +152,10 @@ export async function estimateReceiveExecution({
     }),
   )
   return dest.estimateReceiveExecution({
-    receiver: message.receiver,
     offRamp,
     message: {
       messageId: message.messageId ?? hexlify(randomBytes(32)),
+      receiver: message.receiver,
       sender: message.sender,
       data: message.data,
       sourceChainSelector: source.network.chainSelector,
