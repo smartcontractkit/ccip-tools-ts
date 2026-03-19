@@ -8,7 +8,7 @@
  * ```bash
  * ccip-cli search messages --sender 0x...
  * ccip-cli search messages -s ethereum-mainnet -d arbitrum-mainnet
- * ccip-cli search messages --manual-exec-only -n 10
+ * ccip-cli search messages --manual-exec-only --limit 10
  * ```
  *
  * @packageDocumentation

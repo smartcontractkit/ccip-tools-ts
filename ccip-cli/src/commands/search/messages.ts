@@ -2,7 +2,7 @@
  * CCIP CLI Search Messages Subcommand
  *
  * Searches CCIP messages via the API with filters for sender, receiver,
- * source/destination chains, tx hash, and manual execution eligibility.
+ * source/destination chains, and manual execution eligibility.
  *
  * @example
  * ```bash
@@ -13,7 +13,7 @@
  * ccip-cli search messages --source ethereum-mainnet --dest arbitrum-mainnet
  *
  * # Find stuck messages ready for manual execution
- * ccip-cli search messages --manual-exec-only -n 10
+ * ccip-cli search messages --manual-exec-only --limit 10
  *
  * # Positional sender shorthand
  * ccip-cli search messages 0x9d087fC03ae39b088326b67fA3C788236645b717
@@ -66,15 +66,6 @@ export const builder = (yargs: Argv) =>
         type: 'string',
         describe: 'Destination chain (name, chainId, or selector)',
       },
-      'tx-hash': {
-        type: 'string',
-        describe: 'Source transaction hash',
-      },
-      'message-id': {
-        alias: 'm',
-        type: 'string',
-        describe: 'CCIP message ID (fetches full details directly)',
-      },
       'manual-exec-only': {
         type: 'boolean',
         default: false,
@@ -114,30 +105,12 @@ export async function searchMessages(ctx: Ctx, argv: Parameters<typeof handler>[
 
   const apiClient = CCIPAPIClient.fromUrl(argv.api === true ? undefined : argv.api, ctx)
 
-  // Direct message ID lookup — short-circuit the search flow
-  if (argv.messageId) {
-    const full = await apiClient.getMessageById(argv.messageId)
-    switch (argv.format) {
-      case Format.json:
-        logger.log(JSON.stringify(full, bigIntReplacer, 2))
-        break
-      case Format.log:
-        logger.log('message =', withDateTimestamp(full))
-        break
-      default:
-        await prettyRequest.call(ctx, full)
-        break
-    }
-    return
-  }
-
   // Build filters from args
   const filters: Parameters<typeof apiClient.searchMessages>[0] = {}
   if (argv.sender) filters.sender = argv.sender
   if (argv.receiver) filters.receiver = argv.receiver
   if (argv.source) filters.sourceChainSelector = networkInfo(argv.source).chainSelector
   if (argv.dest) filters.destChainSelector = networkInfo(argv.dest).chainSelector
-  if (argv.txHash) filters.sourceTransactionHash = argv.txHash
   if (argv.manualExecOnly) filters.readyForManualExecOnly = true
 
   // Collect results up to limit (0 means unlimited)
@@ -251,6 +224,7 @@ async function interactiveMenu(
       answer = await select({
         message: 'Select a message to inspect, or quit:',
         choices,
+        loop: false,
       })
     } catch (err) {
       // User pressed Ctrl+C or prompt closed — exit cleanly

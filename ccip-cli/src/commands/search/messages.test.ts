@@ -146,33 +146,11 @@ describe('search messages command', () => {
     assert.ok(url.includes('destChainSelector=4949039107694359620'))
   })
 
-  it('should pass tx-hash filter to API', async () => {
-    const txHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
-    await searchMessages(createCtx(), createArgv({ txHash }))
-
-    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
-    assert.ok(
-      url.includes('sourceTransactionHash='),
-      `URL should contain sourceTransactionHash: ${url}`,
-    )
-  })
-
   it('should pass manual-exec-only filter to API', async () => {
     await searchMessages(createCtx(), createArgv({ manualExecOnly: true }))
 
     const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
     assert.ok(url.includes('readyForManualExecOnly=true'))
-  })
-
-  it('should use positional as sender filter', async () => {
-    const sender = '0x9d087fC03ae39b088326b67fA3C788236645b717'
-    await searchMessages(createCtx(), createArgv({ sender }))
-
-    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
-    assert.ok(
-      url.includes(`sender=${encodeURIComponent(sender)}`),
-      `URL should contain sender: ${url}`,
-    )
   })
 
   it('should treat limit 0 as unlimited', async () => {
@@ -265,27 +243,6 @@ describe('search messages command', () => {
 
     // Should still return results (falls back to default 20)
     assert.equal(mockLog.mock.calls.length, 1)
-  })
-
-  it('should call getMessageById endpoint when --message-id is provided', async () => {
-    const messageId = '0xabc123def456789012345678901234567890123456789012345678901234abcd'
-
-    // getMessageById goes through deep SDK parsing — we just verify the right endpoint is called
-    // and that search endpoint is NOT called
-    try {
-      await searchMessages(createCtx(), createArgv({ messageId }))
-    } catch {
-      // SDK may throw on our minimal mock — that's fine, we just check the URL
-    }
-
-    assert.ok(mockedFetch.mock.calls.length >= 1)
-    const url = (mockedFetch.mock.calls[0] as unknown as { arguments: string[] }).arguments[0]!
-    // Should hit /v2/messages/<id> (getMessageById), not /v2/messages?... (search)
-    assert.ok(
-      url.includes(`/v2/messages/${encodeURIComponent(messageId)}`),
-      `URL should be a getMessageById call: ${url}`,
-    )
-    assert.ok(!url.includes('?'), `URL should not have query params (not a search): ${url}`)
   })
 
   it('should output log format', async () => {
