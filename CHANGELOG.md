@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-03-19
+
+- SDK: Add `EVMChain.getTotalFeesEstimate` method, to provide a fee and tokens bps (v2.0) breakdown
 - CLI: add `search messages` command to query CCIP messages via API with filters (sender, receiver, chains, manual-exec) and interactive result inspector
 - SDK: **Breaking**: remove `getMessagesForSender` — use `CCIPAPIClient.searchAllMessages({ sender })` instead
 
