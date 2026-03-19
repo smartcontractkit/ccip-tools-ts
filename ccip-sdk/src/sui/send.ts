@@ -5,11 +5,10 @@ import { getBytes, hexlify, zeroPadValue } from 'ethers'
 
 import { CCIPError, CCIPErrorCode } from '../errors/index.ts'
 import { encodeExtraArgs } from '../extra-args.ts'
-import type { AnyMessage } from '../types.ts'
-import { ChainFamily } from '../types.ts'
+import { type AnyMessage, ChainFamily } from '../types.ts'
 import { getAddressBytes, getDataBytes } from '../utils.ts'
-import { fetchTokenConfigs, getLatestPackageId, getObjectRef } from './objects.ts'
 import { getCcipStateAddress } from './discovery.ts'
+import { getObjectRef } from './objects.ts'
 
 const SUI_CLOCK = '0x6'
 const SUI_NATIVE_COIN_TYPE = '0x2::sui::SUI'
@@ -130,8 +129,8 @@ async function discoverSuiFeeTokenMetadata(
 /**
  * Gets the fee for a CCIP send from Sui.
  *
- * get_fee<T>(&CCIPObjectRef, &Clock, u64, vector<u8>, vector<u8>,
- *            vector<address>, vector<u64>, &CoinMetadata<T>, vector<u8>) -> u64
+ * get_fee\<T\>(&CCIPObjectRef, &Clock, u64, vector\<u8\>, vector\<u8\>,
+ *            vector\<address\>, vector\<u64\>, &CoinMetadata\<T\>, vector\<u8\>) -\> u64
  */
 export async function getFee(
   client: SuiClient,
@@ -185,7 +184,7 @@ export async function getFee(
 
   const feeBytes = result.results[0].returnValues[0][0]
   const { bcs } = await import('@mysten/sui/bcs')
-  return bcs.u64().parse(new Uint8Array(feeBytes))
+  return BigInt(bcs.u64().parse(new Uint8Array(feeBytes)))
 }
 
 /**
@@ -223,8 +222,8 @@ export async function buildCcipSendPTB(
   // Encode tokenReceiver for create_token_transfer_params
   // When transferring tokens, the receiver needs the token; use the message receiver as default
   let tokenReceiverBytes: number[] = []
-  if (message.extraArgs && 'tokenReceiver' in message.extraArgs && message.extraArgs.tokenReceiver) {
-    tokenReceiverBytes = Array.from(getAddressBytes(message.extraArgs.tokenReceiver as string))
+  if ('tokenReceiver' in message.extraArgs && message.extraArgs.tokenReceiver) {
+    tokenReceiverBytes = Array.from(getAddressBytes(message.extraArgs.tokenReceiver))
   } else if (message.tokenAmounts?.length) {
     tokenReceiverBytes = Array.from(getBytes(zeroPadValue(getDataBytes(message.receiver), 32)))
   }
@@ -305,13 +304,13 @@ export async function buildCcipSendPTB(
       tx.pure.vector('u8', data),
       tokenParams,
       tx.object(feeToken.metadataId),
-      feeCoin!,
+      feeCoin,
       tx.pure.vector('u8', extraArgs),
     ],
   })
 
   // Return the remaining fee coin (Coin<SUI> doesn't have Drop)
-  tx.transferObjects([feeCoin!], sender)
+  tx.transferObjects([feeCoin], sender)
 
   return tx
 }
@@ -334,10 +333,7 @@ async function fetchSendTokenConfigs(
     if (tokenAddr.includes('::')) {
       const metadata = await client.getCoinMetadata({ coinType: tokenAddr })
       if (!metadata?.id) {
-        throw new CCIPError(
-          CCIPErrorCode.UNKNOWN,
-          `CoinMetadata not found for ${tokenAddr}`,
-        )
+        throw new CCIPError(CCIPErrorCode.UNKNOWN, `CoinMetadata not found for ${tokenAddr}`)
       }
       coinMetadataId = metadata.id
     } else {
