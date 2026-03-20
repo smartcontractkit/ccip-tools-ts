@@ -30,7 +30,9 @@ const customErrors = [
   'error NoContract()',
   'error NoGasForCallExactCheck()',
   'error NotEnoughGasForCall()',
+  'error NotEnoughGas()',
   'error InvalidChain(uint64 chainSelector)',
+  'error InvalidAdapter()',
 ] as const
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
