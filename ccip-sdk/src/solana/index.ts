@@ -1645,15 +1645,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       message.extraArgs.allowOutOfOrderExecution != null
         ? message.extraArgs.allowOutOfOrderExecution
         : true
-    const tokenReceiver =
-      message.extraArgs &&
-      'tokenReceiver' in message.extraArgs &&
-      message.extraArgs.tokenReceiver != null &&
-      typeof message.extraArgs.tokenReceiver === 'string'
-        ? message.extraArgs.tokenReceiver
+    const [tokenReceiver, receiver] =
+      message.extraArgs && 'tokenReceiver' in message.extraArgs && !!message.extraArgs.tokenReceiver
+        ? [message.extraArgs.tokenReceiver, message.receiver] // explicit tokenReceiver, keep both
         : message.tokenAmounts?.length
-          ? this.getAddress(message.receiver)
-          : PublicKey.default.toBase58()
+          ? [this.getAddress(message.receiver), PublicKey.default.toBase58()] // if sending tokens without tokenReceiver, set receiver to default and tokenReceiver to message.receiver
+          : [PublicKey.default.toBase58(), message.receiver] // otherwise, tokenReceiver is default and receiver is message.receiver
     const accounts =
       message.extraArgs && 'accounts' in message.extraArgs && message.extraArgs.accounts != null
         ? message.extraArgs.accounts
@@ -1675,9 +1672,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     return {
       ...message,
+      receiver,
       extraArgs,
-      // if tokenReceiver, then message.receiver can (must?) be default
-      ...(!!message.tokenAmounts?.length && { receiver: PublicKey.default.toBase58() }),
     }
   }
 }

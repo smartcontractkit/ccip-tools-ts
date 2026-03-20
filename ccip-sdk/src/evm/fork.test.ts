@@ -18,7 +18,7 @@ import { EVMChain } from './index.ts'
 
 // ── Chain constants ──
 
-const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://ethereum-sepolia-rpc.publicnode.com'
+const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://sepolia.drpc.org'
 const SEPOLIA_CHAIN_ID = 11155111
 const SEPOLIA_SELECTOR = 16015286601757825753n
 const SEPOLIA_ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'

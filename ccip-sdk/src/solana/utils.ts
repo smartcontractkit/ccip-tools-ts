@@ -27,7 +27,7 @@ import {
   CCIPTransactionNotFinalizedError,
 } from '../errors/index.ts'
 import type { ChainLog, WithLogger } from '../types.ts'
-import { bigIntReplacer, getDataBytes, sleep } from '../utils.ts'
+import { bigIntReplacer, getDataBytes, isBase64, sleep } from '../utils.ts'
 import type { IDL as BASE_TOKEN_POOL_IDL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import type { UnsignedSolanaTx, Wallet } from './types.ts'
 import type { RateLimiterState } from '../chain.ts'
@@ -217,7 +217,7 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
 export function getErrorFromLogs(
   logs_:
     | readonly string[]
-    | readonly Pick<ChainLog, 'address' | 'index' | 'data' | 'topics'>[]
+    | readonly Pick<ChainLog, 'address' | 'index' | 'data' | 'topics' | 'tx'>[]
     | null,
 ): { program: string; [k: string]: string } | undefined {
   if (!logs_?.length) return
@@ -234,12 +234,13 @@ export function getErrorFromLogs(
         !acc.length || (l.address === acc[0]!.address && !l.topics.length) ? [l, ...acc] : acc,
       [] as Pick<ChainLog, 'address' | 'index' | 'data'>[],
     )
+    .filter(({ data }) => !isBase64(data))
     .map(({ data }) => data as string)
     .reduceRight(
       (acc, l) =>
         l.endsWith(':') && acc.length
           ? [`${l} ${acc[0]}`, ...acc.slice(1)]
-          : l.split(': ').length > 1 && l.split('. ').length > 1
+          : l.indexOf(': ') >= 0 && l.indexOf('. ') >= 0
             ? [...l.replace(/\.$/, '').split('. '), ...acc]
             : [l, ...acc],
       [] as string[],
@@ -261,22 +262,28 @@ export function getErrorFromLogs(
         return l
       }
     })
-  if (lastProgramLogs.every((l) => l.indexOf(': ') >= 0)) {
-    return {
-      program: lastLog.address,
-      ...Object.fromEntries(
-        lastProgramLogs.map((l) => [
-          l.substring(0, l.indexOf(': ')),
-          l.substring(l.indexOf(': ') + 2),
-        ]),
-      ),
-    }
-  } else {
-    return {
-      program: lastLog.address,
-      error: lastProgramLogs.join('\n'),
-    }
+
+  const res: { program: string; [k: string]: string } = {
+    program: lastLog.address,
   }
+  if (lastProgramLogs.every((l) => l.indexOf(': ') >= 0 || l.indexOf(' in ') >= 0)) {
+    Object.assign(
+      res,
+      Object.fromEntries(lastProgramLogs.map((l) => l.split(/: | in /, 2) as [string, string])),
+    )
+  } else {
+    res['error'] = lastProgramLogs.join('\n')
+  }
+  if (!!logs[0] && 'tx' in logs[0] && !!logs[0].tx?.error)
+    Object.assign(
+      res,
+      Object.fromEntries(
+        Object.entries(logs[0].tx.error as Record<string, [number, string]>).map(
+          ([k, [i, e]]) => [`${k}[${i}]`, e] as const,
+        ),
+      ),
+    )
+  return res
 }
 
 /**
