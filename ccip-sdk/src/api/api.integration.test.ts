@@ -265,7 +265,7 @@ describe(
 
       it('should return empty data for non-existent sender', { timeout: 30000 }, async () => {
         const page = await api.searchMessages({
-          sender: '0x0000000000000000000000000000000000000001',
+          sender: '0x0000000000000000000000000000000000000007',
         })
 
         assert.equal(page.data.length, 0, 'Should find no messages for non-existent sender')

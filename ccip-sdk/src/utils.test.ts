@@ -1009,7 +1009,7 @@ describe('parseTypeAndVersion', () => {
 
   it('should handle version without patch number', () => {
     const result = parseTypeAndVersion('Router 2.1')
-    assert.deepEqual(result, ['Router', '2.1', 'Router 2.1'])
+    assert.deepEqual(result, ['Router', '2.1.0', 'Router 2.1'])
   })
 
   it('should capture suffix if present', () => {
