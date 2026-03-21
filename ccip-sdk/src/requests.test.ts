@@ -926,18 +926,18 @@ describe('decodeMessage', () => {
         assert.equal(extraArgs.accountIsWritableBitmap, bitmap)
       })
 
-      it('should override receiver to default when tokenAmounts present', () => {
+      it('should accept explicit receiver', () => {
         const message = {
           receiver: 'CustomReceiverAddress1234567890123456789012',
           tokenAmounts: [{ token: 'TokenMint123', amount: 100n }],
           extraArgs: {
             tokenReceiver: 'TokenReceiverAddress12345678901234567890',
-          } as any,
+          },
         }
 
         const result = SolanaChain.buildMessageForDest(message)
 
-        assert.equal(result.receiver, '11111111111111111111111111111111')
+        assert.equal(result.receiver, 'CustomReceiverAddress1234567890123456789012')
       })
 
       it('should allow custom allowOutOfOrderExecution', () => {

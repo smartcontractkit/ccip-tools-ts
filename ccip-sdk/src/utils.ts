@@ -616,9 +616,8 @@ export function parseTypeAndVersion(
 ): Awaited<ReturnType<Chain['typeAndVersion']>> {
   const match = typeAndVersion.match(/^(\w.+\S)\s+v?(\d+\.\d+(?:\.\d+)?)([^\d.].*)?$/)
   if (!match) throw new CCIPTypeVersionInvalidError(typeAndVersion)
-  const [, typeRaw, version] = match
   // some string normalization
-  const type = typeRaw!
+  const type = match[1]!
     .replaceAll(/-(\w)/g, (_, w: string) => w.toUpperCase()) // kebabToPascal
     .replace(/ccip/gi, 'CCIP')
     .replace(
@@ -626,8 +625,15 @@ export function parseTypeAndVersion(
       (_, o: string, n: string, ramp: string) =>
         `${o.toUpperCase()}${n.toLowerCase()}${ramp.charAt(0).toUpperCase()}${ramp.slice(1).toLowerCase()}`,
     ) // ccipOfframp -> CCIPOffRamp
-  if (!match[3]) return [type, version!, typeAndVersion]
-  else return [type, version!, typeAndVersion, match[3]]
+    .replace('router', 'Router') // ccip-router -> CCIPRouter
+
+  let version = match[2]!
+  // for core contracts, always use patch `.0`, to match CCIPVersion
+  if (type.match(/((o(n|ff)ramp)|router)\b/gi))
+    version = version.replace(/^(\d+\.\d+)(?:\.\d+)?$/, '$1.0')
+
+  if (!match[3]) return [type, version, typeAndVersion]
+  else return [type, version, typeAndVersion, match[3]]
 }
 
 /* eslint-disable jsdoc/require-jsdoc */

@@ -470,7 +470,7 @@ export type AnyMessage = {
  * }
  * ```
  */
-export type MessageInput = Partial<AnyMessage> & {
+export type MessageInput = Partial<Omit<AnyMessage, 'extraArgs'>> & {
   receiver: AnyMessage['receiver']
   extraArgs?: Partial<ExtraArgs>
   fee?: bigint
