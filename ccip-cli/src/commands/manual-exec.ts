@@ -216,6 +216,7 @@ async function manualExec(
         )
       } else {
         argv.gasLimit = estimated
+        argv.tokensGasLimit ??= 0
       }
     }
 
