@@ -1131,8 +1131,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
         if (
           ('gasLimit' in message && estimated > message.gasLimit) ||
           ('ccipReceiveGasLimit' in message && estimated > message.ccipReceiveGasLimit)
-        )
+        ) {
           opts_.gasLimit = estimated
+          opts_.tokensGasLimit ??= 0
+        }
       } catch (err) {
         // ignore if receiver fails, let estimation of execute method itself throw if needed
         this.logger.debug('Failed to auto-estimateReceiveExecution for:', opts, err)
