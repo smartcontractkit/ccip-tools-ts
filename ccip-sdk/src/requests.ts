@@ -310,6 +310,7 @@ const BLOCK_LOG_WINDOW_SIZE = 5000
  * @param range - Object containing minSeqNr and maxSeqNr for the batch range.
  * @param opts - Optional log filtering parameters.
  * @returns Array of messages in the batch.
+ * @throws {@link CCIPMessageBatchIncompleteError} if not all messages in the batch range could be found in source chain logs
  * @see {@link getVerifications} - Get commit report to determine batch range
  */
 export async function getMessagesInBatch<
@@ -409,12 +410,12 @@ export async function getMessagesInBatch<
  * import { sourceToDestTokenAddresses, EVMChain } from '@chainlink/ccip-sdk'
  *
  * const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
- * const tokenAmount = await sourceToDestTokenAddresses(
+ * const tokenAmount = await sourceToDestTokenAddresses({
  *   source,
- *   destChainSelector,
- *   '0xOnRamp...',
- *   { token: '0xLINK...', amount: 1000000000000000000n }
- * )
+ *   onRamp: '0xOnRamp...',
+ *   destChainSelector: 14767482510784806043n,
+ *   sourceTokenAmount: { token: '0xLINK...', amount: 1000000000000000000n },
+ * })
  * console.log(`Pool: ${tokenAmount.sourcePoolAddress}`)
  * console.log(`Dest token: ${tokenAmount.destTokenAddress}`)
  * ```

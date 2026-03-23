@@ -3,7 +3,7 @@ id: error-reference
 title: 'Error Reference'
 description: 'Complete catalog of CCIP SDK errors with codes, transient flags, and recovery hints.'
 sidebar_label: Error Reference
-sidebar_position: 10
+sidebar_position: 15
 ---
 
 # Error Reference
@@ -67,6 +67,7 @@ All transient — wait and retry.
 | `CCIPTokenNotInRegistryError` | `TOKEN_NOT_IN_REGISTRY` | Token not in admin registry | Register token with CCIP |
 | `CCIPTokenDecimalsInsufficientError` | `TOKEN_DECIMALS_INSUFFICIENT` | Token decimals too low for transfer | Use different token or adjust amount |
 | `CCIPTokenPoolChainConfigNotFoundError` | `TOKEN_REMOTE_NOT_CONFIGURED` | Remote chain not configured for token | Configure remote chain in pool |
+| `CCIPTokenDataParseError` | `TOKEN_DATA_PARSE_FAILED` | Unable to parse token data | Verify token address is valid and contract is deployed |
 
 ## Execution
 
@@ -78,14 +79,14 @@ All transient — wait and retry.
 
 ## Attestation (USDC / LBTC)
 
-All transient — wait and retry.
-
-| Error | Code | When Thrown | Recovery |
-|-------|------|-------------|----------|
-| `CCIPUsdcAttestationError` | `USDC_ATTESTATION_FAILED` | USDC attestation service error | Retry after delay |
-| `CCIPLbtcAttestationError` | `LBTC_ATTESTATION_ERROR` | LBTC attestation service error | Retry after delay |
-| `CCIPLbtcAttestationNotFoundError` | `LBTC_ATTESTATION_NOT_FOUND` | LBTC attestation not yet available | Wait and retry |
-| `CCIPLbtcAttestationNotApprovedError` | `LBTC_ATTESTATION_NOT_APPROVED` | LBTC attestation pending approval | Wait and retry (retryAfterMs: 30000) |
+| Error | Code | Transient | When Thrown | Recovery |
+|-------|------|-----------|-------------|----------|
+| `CCIPUsdcAttestationError` | `USDC_ATTESTATION_FAILED` | Yes | USDC attestation service error | Retry after delay |
+| `CCIPUsdcBurnFeesError` | `USDC_BURN_FEES_FAILED` | No | Failed to fetch USDC burn fees from Circle CCTP API | Retry later or check Circle API status |
+| `CCIPCctpDecodeError` | `CCTP_DECODE_FAILED` | No | Failed to decode CCTP MessageSent event from transaction | Verify this is a USDC transfer transaction |
+| `CCIPLbtcAttestationError` | `LBTC_ATTESTATION_ERROR` | Yes | LBTC attestation service error | Retry after delay |
+| `CCIPLbtcAttestationNotFoundError` | `LBTC_ATTESTATION_NOT_FOUND` | Yes | LBTC attestation not yet available | Wait and retry |
+| `CCIPLbtcAttestationNotApprovedError` | `LBTC_ATTESTATION_NOT_APPROVED` | Yes | LBTC attestation pending approval | Wait and retry (retryAfterMs: 30000) |
 
 ## Wallet and Signer
 
@@ -99,7 +100,7 @@ All transient — wait and retry.
 
 | Error | Code | When Thrown | Recovery |
 |-------|------|-------------|----------|
-| `CCIPVersionUnsupportedError` | `VERSION_UNSUPPORTED` | CCIP version not supported | Use supported version (v1.2, v1.5, v1.6) |
+| `CCIPVersionUnsupportedError` | `VERSION_UNSUPPORTED` | CCIP version not supported | Use supported version (v1.2, v1.5, v1.6, v2.0) |
 | `CCIPVersionFeatureUnavailableError` | `VERSION_FEATURE_UNAVAILABLE` | Feature not available in version | Upgrade to newer CCIP version |
 | `CCIPHasherVersionUnsupportedError` | `HASHER_VERSION_UNSUPPORTED` | Hasher not implemented for version | Use supported version |
 
@@ -109,7 +110,9 @@ All transient — wait and retry.
 |-------|------|-----------|-------------|----------|
 | `CCIPHttpError` | `HTTP_ERROR` | Yes | HTTP request failed | Retry with backoff |
 | `CCIPTimeoutError` | `TIMEOUT` | Yes | Operation timed out | Increase timeout, retry |
+| `CCIPAbortError` | `ABORT` | No | Request cancelled via `AbortSignal` | Intentional cancellation — no retry needed |
 | `CCIPApiClientNotAvailableError` | `API_CLIENT_NOT_AVAILABLE` | No | API client disabled (`apiClient: null`) | Use RPC-based methods or enable API |
+| `CCIPUnexpectedPaginationError` | `API_UNEXPECTED_PAGINATION` | No | Transaction contains >100 CCIP messages (unusually large) | Verify the transaction is correct |
 
 ## Solana-Specific
 
@@ -125,6 +128,15 @@ All transient — wait and retry.
 |-------|------|-------------|----------|
 | `CCIPAptosAddressInvalidError` | `ADDRESS_INVALID_APTOS` | Invalid Aptos address format | Use valid Aptos address |
 | `CCIPAptosExtraArgsV2RequiredError` | `EXTRA_ARGS_APTOS_V2_REQUIRED` | EVMExtraArgsV2 required for Aptos | Use EVMExtraArgsV2 with allowOutOfOrderExecution |
+
+## Data Format
+
+| Error | Code | When Thrown | Recovery |
+|-------|------|-------------|----------|
+| `CCIPDataFormatUnsupportedError` | `DATA_FORMAT_UNSUPPORTED` | Unsupported data format | Use hex, bytes, or base64 |
+| `CCIPDataParseError` | `DATA_PARSE_FAILED` | Could not parse the provided data | Verify data format |
+| `CCIPBorshTypeUnknownError` | `BORSH_TYPE_UNKNOWN` | Unknown Borsh type in schema | Check Borsh schema definition |
+| `CCIPBorshMethodUnknownError` | `BORSH_METHOD_UNKNOWN` | Unknown Borsh method | Check Borsh method name |
 
 ## Viem Adapter
 

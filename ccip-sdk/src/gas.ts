@@ -57,11 +57,12 @@ export type EstimateReceiveExecutionOpts = {
  * Estimate CCIP gasLimit needed to execute a request on a contract receiver.
  *
  * @param opts - {@link EstimateReceiveExecutionOpts} for estimation
- * @returns Estimated gasLimit
+ * @returns Estimated execution gas (base transaction cost subtracted)
  *
  * @throws {@link CCIPMethodUnsupportedError} if dest chain doesn't support estimation
  * @throws {@link CCIPContractTypeInvalidError} if routerOrRamp is not a valid contract type
  * @throws {@link CCIPTokenDecimalsInsufficientError} if dest token has insufficient decimals
+ * @throws {@link CCIPOnRampRequiredError} if no OnRamp found for the given OffRamp and source chain
  *
  * @example
  * ```typescript

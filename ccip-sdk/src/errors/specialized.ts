@@ -987,7 +987,12 @@ export class CCIPUsdcAttestationError extends CCIPError {
  */
 export class CCIPUsdcBurnFeesError extends CCIPError {
   override readonly name = 'CCIPUsdcBurnFeesError'
-  /** Creates a USDC burn fees error. */
+  /**
+   * Creates a USDC burn fees error.
+   * @param sourceDomain - CCTP source domain identifier.
+   * @param destDomain - CCTP destination domain identifier.
+   * @param httpStatus - HTTP status code from the failed request.
+   */
   constructor(sourceDomain: number, destDomain: number, httpStatus: number) {
     super(
       CCIPErrorCode.USDC_BURN_FEES_FAILED,
@@ -1240,7 +1245,11 @@ export class CCIPTimeoutError extends CCIPError {
  */
 export class CCIPAbortError extends CCIPError {
   override readonly name = 'CCIPAbortError'
-  /** Creates an abort error. */
+  /**
+   * Creates an abort error.
+   * @param operation - Name of the operation that was aborted.
+   * @param options - Optional error options.
+   */
   constructor(operation: string, options?: CCIPErrorOptions) {
     super(CCIPErrorCode.ABORT, `Request aborted: ${operation}`, {
       ...options,
@@ -3429,7 +3438,12 @@ export class CCIPApiClientNotAvailableError extends CCIPError {
  */
 export class CCIPUnexpectedPaginationError extends CCIPError {
   override readonly name = 'CCIPUnexpectedPaginationError'
-  /** Creates an unexpected pagination error. */
+  /**
+   * Creates an unexpected pagination error.
+   * @param txHash - Source transaction hash.
+   * @param messageCount - Number of messages returned in the first page.
+   * @param options - Optional error options.
+   */
   constructor(txHash: string, messageCount: number, options?: CCIPErrorOptions) {
     super(
       CCIPErrorCode.API_UNEXPECTED_PAGINATION,

@@ -54,6 +54,7 @@ function encodeTokenAmounts(
  * - allowOutOfOrderExecution: 1 bit
  * @param extraArgs - Extra arguments for CCIP message
  * @returns Cell encoding the extra arguments
+ * @throws {@link CCIPExtraArgsInvalidError} if `extraArgs` contains fields other than `gasLimit` and `allowOutOfOrderExecution`
  */
 export function encodeExtraArgsCell(extraArgs: ExtraArgs): Cell {
   if (
@@ -78,6 +79,12 @@ export function encodeExtraArgsCell(extraArgs: ExtraArgs): Cell {
  * Builds the Router ccipSend message cell.
  *
  * Relies on TL-B structure (Router_CCIPSend) from chainlink-ton repo.
+ *
+ * @param destChainSelector - Destination chain selector
+ * @param message - CCIP message containing receiver, data, tokenAmounts, and extraArgs
+ * @param feeTokenAddress - Fee token jetton address, or null for native TON
+ * @param queryId - TON query ID for the message (default: 0)
+ * @returns Cell containing the encoded Router ccipSend message
  */
 export function buildCcipSendCell(
   destChainSelector: bigint,

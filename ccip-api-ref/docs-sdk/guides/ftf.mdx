@@ -1,0 +1,287 @@
+---
+id: ftf
+title: 'Faster-Than-Finality (FTF)'
+description: 'Send CCIP messages with reduced block confirmations for faster delivery on v2.0+ lanes.'
+sidebar_label: Faster-Than-Finality
+sidebar_position: 5
+---
+
+# Faster-Than-Finality (FTF)
+
+FTF allows CCIP messages to be relayed before full source-chain finality by specifying a lower number of block confirmations. It is available on v2.0+ lanes where the token pool has FTF enabled.
+
+## Check FTF Availability
+
+Call `getLaneFeatures` with a `token` to get pool-specific FTF data:
+
+```typescript
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const router = '0xRouterAddress...'
+const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+
+const features = await source.getLaneFeatures({
+  router,
+  destChainSelector: destSelector,
+  token: '0xTokenAddress...',
+})
+
+const minConfirmations = features.MIN_BLOCK_CONFIRMATIONS
+```
+
+Interpret `MIN_BLOCK_CONFIRMATIONS`:
+
+| Value | Lane version | Meaning |
+|-------|-------------|---------|
+| `undefined` | Pre-v2.0 | FTF not supported. Use V2 extraArgs only. |
+| `0` | v2.0+ | V3 extraArgs supported, but FTF not enabled for this token. `blockConfirmations` has no effect. |
+| `> 0` | v2.0+ with FTF | FTF enabled. Use `blockConfirmations >= minValue` in V3 extraArgs. |
+
+:::note
+Without a `token`, the result reflects lane version only: `undefined` for pre-v2.0, or a hardcoded `1` for v2.0+ (confirming V3 support without pool-specific FTF data). Pass a `token` to get the actual pool-specific value.
+:::
+
+:::note
+`getLaneFeatures` is implemented for EVM chains only.
+:::
+
+## Send with FTF
+
+Set `blockConfirmations` in `extraArgs`. The SDK auto-detects V3 encoding when any V3-only field is present:
+
+```typescript
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const router = '0xRouterAddress...'
+const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+
+const features = await source.getLaneFeatures({
+  router,
+  destChainSelector: destSelector,
+  token: '0xTokenAddress...',
+})
+
+const minConfirmations = features.MIN_BLOCK_CONFIRMATIONS
+
+let extraArgs
+if (minConfirmations != null && minConfirmations > 0) {
+  // FTF enabled — use V3 with blockConfirmations
+  extraArgs = {
+    gasLimit: 200_000n,
+    blockConfirmations: minConfirmations,
+  }
+} else if (minConfirmations != null) {
+  // v2.0+ but FTF not enabled — V2-style args work
+  extraArgs = {
+    gasLimit: 200_000n,
+    allowOutOfOrderExecution: true,
+  }
+} else {
+  // Pre-v2.0 — V2 encoding only
+  extraArgs = {
+    gasLimit: 200_000n,
+    allowOutOfOrderExecution: true,
+  }
+}
+
+await source.sendMessage({
+  router,
+  destChainSelector: destSelector,
+  message: {
+    receiver: '0xReceiverAddress...',
+    tokenAmounts: [{ token: '0xTokenAddress...', amount: 1_000_000n }],
+    extraArgs,
+  },
+  wallet,
+})
+```
+
+The SDK does **not** validate `extraArgs` against the lane's on-chain version. Passing V3 fields (e.g., `blockConfirmations`) to a pre-v2.0 lane will **revert** on-chain.
+
+## Estimate FTF Latency
+
+Pass `numberOfBlocks` to `getLaneLatency` to estimate delivery time with FTF:
+
+```typescript
+// Standard finality (default)
+const standard = await source.getLaneLatency(destSelector)
+console.log('Standard delivery:', Math.round(standard.totalMs / 60000), 'minutes')
+
+// FTF with specific block confirmations
+const ftf = await source.getLaneLatency(destSelector, minConfirmations)
+console.log('FTF delivery:', Math.round(ftf.totalMs / 60000), 'minutes')
+```
+
+When `numberOfBlocks` is omitted or `0`, the API returns latency for the lane's default finality.
+
+## Estimate FTF Fees
+
+Token transfer fees differ between standard and FTF. Call `getTotalFeesEstimate` with `blockConfirmations` in `extraArgs`:
+
+```typescript
+const estimate = await source.getTotalFeesEstimate({
+  router,
+  destChainSelector: destSelector,
+  message: {
+    receiver: '0xReceiverAddress...',
+    tokenAmounts: [{ token: '0xTokenAddress...', amount: 1_000_000n }],
+    extraArgs: { blockConfirmations: minConfirmations },
+  },
+})
+
+console.log('CCIP fee:', estimate.ccipFee)
+
+if (estimate.tokenTransferFee) {
+  const sendAmount = 1_000_000n
+  const received = sendAmount - estimate.tokenTransferFee.feeDeducted
+  console.log('BPS rate:', estimate.tokenTransferFee.bps)
+  console.log('Fee deducted from token:', estimate.tokenTransferFee.feeDeducted)
+  console.log('Recipient receives:', received)
+}
+```
+
+The pool-level BPS rate applied depends on finality mode:
+
+| Finality mode | `blockConfirmations` | BPS field used |
+|---------------|---------------------|----------------|
+| Standard | `0` or omitted | `defaultBlockConfirmationsTransferFeeBps` |
+| FTF | `> 0` | `customBlockConfirmationsTransferFeeBps` |
+
+See [Fee Estimation](/sdk/guides/fee-estimation) for the full `TotalFeesEstimate` type and USDC/CCTP fee handling.
+
+## FTF Rate Limits
+
+FTF transfers have separate rate limiters from standard transfers. Query them via `getLaneFeatures`:
+
+```typescript
+const features = await source.getLaneFeatures({
+  router,
+  destChainSelector: destSelector,
+  token: '0xTokenAddress...',
+})
+
+// Standard rate limits
+if (features.RATE_LIMITS) {
+  console.log('Standard — available:', features.RATE_LIMITS.tokens, '/', features.RATE_LIMITS.capacity)
+}
+
+// FTF rate limits (only when FTF is enabled)
+if (features.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS) {
+  const ftf = features.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS
+  console.log('FTF — available:', ftf.tokens, '/', ftf.capacity)
+}
+```
+
+FTF rate limits are also available per remote chain via `getTokenPoolRemotes`:
+
+```typescript
+const remotes = await source.getTokenPoolRemotes(poolAddress, destSelector)
+const remote = Object.values(remotes)[0]
+
+if (remote && 'customBlockConfirmationsOutboundRateLimiterState' in remote) {
+  const ftfOutbound = remote.customBlockConfirmationsOutboundRateLimiterState
+  if (ftfOutbound) {
+    console.log('FTF outbound:', ftfOutbound.tokens, '/', ftfOutbound.capacity)
+  }
+}
+```
+
+Rate limiter values are `null` when rate limiting is disabled for that direction.
+
+## Complete Example
+
+Check FTF availability, estimate latency and fees, then send:
+
+```typescript
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
+
+async function sendWithFTF(
+  sourceRpc: string,
+  routerAddress: string,
+  destName: string,
+  tokenAddress: string,
+  amount: bigint,
+  receiver: string,
+  wallet: unknown,
+) {
+  const source = await EVMChain.fromUrl(sourceRpc)
+  const destSelector = networkInfo(destName).chainSelector
+
+  // 1. Check FTF availability
+  const features = await source.getLaneFeatures({
+    router: routerAddress,
+    destChainSelector: destSelector,
+    token: tokenAddress,
+  })
+
+  const minConfirmations = features.MIN_BLOCK_CONFIRMATIONS
+  if (minConfirmations == null || minConfirmations === 0) {
+    console.log('FTF not available on this lane/token')
+    return
+  }
+
+  // 2. Check FTF rate limits
+  if (features.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS) {
+    const available = features.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS.tokens
+    console.log('FTF rate limit available:', available)
+  }
+
+  // 3. Estimate FTF latency
+  const latency = await source.getLaneLatency(destSelector, minConfirmations)
+  console.log('FTF delivery estimate:', Math.round(latency.totalMs / 60000), 'minutes')
+
+  // 4. Estimate fees with FTF
+  const message = {
+    receiver,
+    tokenAmounts: [{ token: tokenAddress, amount }],
+    extraArgs: { blockConfirmations: minConfirmations },
+  }
+
+  const estimate = await source.getTotalFeesEstimate({
+    router: routerAddress,
+    destChainSelector: destSelector,
+    message,
+  })
+
+  console.log('CCIP fee:', estimate.ccipFee)
+  if (estimate.tokenTransferFee) {
+    console.log('Token BPS:', estimate.tokenTransferFee.bps)
+    console.log('Recipient receives:', amount - estimate.tokenTransferFee.feeDeducted)
+  }
+
+  // 5. Send
+  await source.sendMessage({
+    router: routerAddress,
+    destChainSelector: destSelector,
+    message,
+    wallet,
+  })
+}
+```
+
+## Error Handling
+
+| Error | When |
+|-------|------|
+| `CCIPNotImplementedError` | `getLaneFeatures` called on a non-EVM chain |
+| `CCIPLaneNotFoundError` | `getLaneLatency` — lane does not exist |
+| `CCIPApiClientNotAvailableError` | `getLaneLatency` — API client disabled |
+
+Fee estimation and send errors are documented in [Fee Estimation](/sdk/guides/fee-estimation) and [Sending Messages](/sdk/guides/sending-messages).
+
+## Method Reference
+
+| Method | Returns | Used for |
+|--------|---------|----------|
+| `chain.getLaneFeatures(opts)` | `Partial<LaneFeatures>` | Check FTF availability and rate limits |
+| `chain.getLaneLatency(destSelector, numberOfBlocks?)` | `LaneLatencyResponse` | Estimate FTF delivery time |
+| `chain.getTotalFeesEstimate(opts)` | `TotalFeesEstimate` | Estimate fees with FTF BPS rates |
+
+## Related
+
+- [Sending Messages](/sdk/guides/sending-messages) — ExtraArgs version detection and encoding
+- [Fee Estimation](/sdk/guides/fee-estimation) — Full `TotalFeesEstimate` type and USDC/CCTP fees
+- [Token Pools](/sdk/guides/token-pools) — Pool configuration and rate limiter details
+- [Querying Data](/sdk/guides/querying-data) — `getLaneFeatures` and `getLaneLatency`

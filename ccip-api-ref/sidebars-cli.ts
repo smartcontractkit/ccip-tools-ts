@@ -83,6 +83,11 @@ const sidebars: SidebarsConfig = {
           id: 'token',
           label: 'token',
         },
+        {
+          type: 'doc',
+          id: 'search',
+          label: 'search',
+        },
       ],
     },
     {

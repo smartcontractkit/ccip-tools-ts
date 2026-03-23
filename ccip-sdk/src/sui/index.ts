@@ -68,7 +68,6 @@ const DEFAULT_GAS_LIMIT = 1000000n
 
 /**
  * Sui chain implementation supporting Sui networks.
- * Note: This implementation is currently a placeholder.
  */
 export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   static {
@@ -814,6 +813,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    *
    * @param message - AnyMessage (from source), containing at least `receiver`
    * @returns A message suitable for `sendMessage` to this destination chain family
+   * @throws {@link CCIPArgumentInvalidError} if extraArgs contains unknown fields for SuiExtraArgsV1
    */
   static override buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],

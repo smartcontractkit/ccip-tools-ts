@@ -96,13 +96,13 @@ ccip-cli show 0xabc123... --wait
 
 ## Output
 
-The command displays three sections:
+The command displays up to three sections:
 
-| Section      | Description                                                    |
-| ------------ | -------------------------------------------------------------- |
-| **Request**  | Message details from the source chain (sender, receiver, data) |
-| **Commit**   | Commit report from destination chain (merkle root, sequences)  |
-| **Receipts** | Execution receipts showing success or failure status           |
+| Section      | Description                                                    | Always shown                                                             |
+| ------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **Request**  | Message details from the source chain (sender, receiver, data) | Yes                                                                      |
+| **Commit**   | Commit report from destination chain (merkle root, sequences)  | No — skipped when the API provides the receipt transaction hash directly |
+| **Receipts** | Execution receipts showing success or failure status           | Yes (if destination RPC is available)                                    |
 
 ## Behavior
 
@@ -111,7 +111,8 @@ The command displays three sections:
    - Local RPC lookup via `getMessagesInTx()`
    - CCIP API lookup via `getMessageById()`
 1. Uses the first source that responds with valid data
-1. If destination RPC is available, fetches commit and execution status
+1. If the API response includes `receiptTransactionHash` in the message metadata, the CLI fetches that receipt transaction directly — skipping OffRamp discovery, commit report scanning, and execution receipt scanning.
+1. Otherwise, the CLI discovers the OffRamp, scans for the commit report, then scans for execution receipts (the full three-section output)
 1. For multi-message transactions without `--log-index`, displays an interactive selection menu
 
 Use `--no-api` (see [Configuration](/cli/configuration)) to disable API fallback and use only RPC endpoints.
