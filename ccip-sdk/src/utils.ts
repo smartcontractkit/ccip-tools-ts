@@ -608,7 +608,10 @@ export async function withRetry<T>(
 /**
  * Parses a typeAndVersion string into its components.
  * @param typeAndVersion - String in format "TypeName vX.Y.Z".
- * @returns Tuple of [type, version, original, suffix?].
+ * @returns Tuple of `[normalizedType, normalizedVersion, original, suffix?]` where
+ *   `normalizedType` has kebab-to-PascalCase, `CCIP` uppercasing, and ramp casing applied
+ *   (e.g., `"ccip-offramp"` becomes `"CCIPOffRamp"`), and `normalizedVersion` has the patch
+ *   component forced to `.0` for core contracts (OnRamp, OffRamp, Router).
  * @throws {@link CCIPTypeVersionInvalidError} if string format is invalid
  */
 export function parseTypeAndVersion(
@@ -828,7 +831,11 @@ export function createRateLimitedFetch(
  *
  * @param url - URL to fetch
  * @param operation - Operation name for error context
- * @param opts - Optional timeout, abort signal, fetch function, and extra RequestInit fields
+ * @param opts - Optional configuration:
+ *   - `timeoutMs` — request timeout in milliseconds (default: 30000).
+ *   - `signal` — an external `AbortSignal` to cancel the request.
+ *   - `fetch` — custom fetch function (defaults to `globalThis.fetch`).
+ *   - `init` — additional `RequestInit` fields merged into the fetch call.
  * @returns Promise resolving to Response
  * @throws CCIPTimeoutError if request times out
  * @throws CCIPAbortError if request is aborted via signal

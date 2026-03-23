@@ -211,7 +211,7 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
 
 /**
  * Extracts error information from Solana transaction logs.
- * @param logs_ - Raw log strings or parsed log objects.
+ * @param logs_ - Raw log strings or parsed log objects (may include `tx` field with error info).
  * @returns Parsed error info with program and error details.
  */
 export function getErrorFromLogs(
@@ -397,6 +397,7 @@ export function simulationProvider(
  *   - lookupTables - lookupTables to be used for main instruction
  * @param computeUnits - max computeUnits limit to be used for main instruction
  * @returns - signature of successful transaction including main instruction
+ * @throws {@link CCIPSolanaComputeUnitsExceededError} if simulation exceeds compute units limit
  */
 export async function simulateAndSendTxs(
   ctx: { connection: Connection } & WithLogger,
@@ -465,7 +466,9 @@ export async function simulateAndSendTxs(
 }
 
 /**
- * Convert TokenPool's rate limit to RateLimiterState object
+ * Convert TokenPool's rate limit to RateLimiterState object.
+ * @param input - On-chain rate limiter bucket from the TokenPool IDL.
+ * @returns RateLimiterState with capacity, rate, and current tokens, or null if disabled.
  */
 export function convertRateLimiter(
   input: IdlTypes<typeof BASE_TOKEN_POOL_IDL>['BaseChain']['inboundRateLimit'],

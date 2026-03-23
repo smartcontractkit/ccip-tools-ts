@@ -184,6 +184,9 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
   /**
    * Detect client network and instantiate a TONChain instance.
+   * @param client - TonClient instance connected to the TON network.
+   * @param ctx - Optional chain context with logger, API client, and fetch function.
+   * @returns TONChain instance configured for the detected network (mainnet or testnet).
    */
   static async fromClient(
     client: TonClient,
@@ -560,10 +563,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
   }
 
-  /**
-   * {@inheritDoc Chain.getBalance}
-   * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
-   */
+  /** {@inheritDoc Chain.getBalance} */
   async getBalance(opts: GetBalanceOpts): Promise<bigint> {
     const { holder, token } = opts
     const holderAddress = Address.parse(holder)
@@ -606,7 +606,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   /**
    * Decodes a CCIP message from a TON log event.
    * @param log - Log with data field.
-   * @returns Decoded CCIPMessage or undefined if not valid.
+   * @returns Decoded CCIPMessage, or undefined if the data is not a valid CCIP message (parse errors are caught and silently return undefined).
    */
   static decodeMessage({
     data,
@@ -711,6 +711,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    *
    * @param args - Extra arguments containing gas limit and execution flags
    * @returns Hex string of BOC-encoded extra args (0x-prefixed)
+   * @throws {@link CCIPExtraArgsInvalidError} if args contains fields other than `gasLimit` and `allowOutOfOrderExecution`
    */
   static encodeExtraArgs(args: ExtraArgs): string {
     const cell = encodeExtraArgsCell(args)
@@ -718,15 +719,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * Decodes BOC-encoded extra arguments from TON messages.
-   * Parses the BOC format and extracts extra args, validating the magic tag
-   * to ensure correct type. Returns undefined if parsing fails or tag doesn't match.
+   * Decodes extra arguments from TON messages.
+   * Handles both raw bit-packed data (starts with EVMExtraArgsV2 tag directly)
+   * and BOC-wrapped data (starts with TON BOC magic `0xb5ee9c72`, unwrapped first).
+   * Returns undefined if parsing fails or the tag doesn't match.
    *
    * Currently only supports EVMExtraArgsV2 (GenericExtraArgsV2) encoding since TON
    * lanes are only connected to EVM chains. When new lanes are planned to be added,
    * this should be extended to support them (eg. Solana and SVMExtraArgsV1)
    *
-   * @param extraArgs - BOC-encoded extra args as hex string or bytes
+   * @param extraArgs - Extra args as hex string or bytes (raw bit-packed or BOC-wrapped)
    * @returns Decoded EVMExtraArgsV2 (GenericExtraArgsV2) object or undefined if invalid
    */
   static decodeExtraArgs(

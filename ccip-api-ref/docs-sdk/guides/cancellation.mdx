@@ -1,0 +1,127 @@
+---
+id: cancellation
+title: 'Cancellation with AbortSignal'
+description: 'Cancel in-flight CCIP API requests using AbortSignal.'
+sidebar_label: Cancellation
+sidebar_position: 13
+---
+
+# Cancellation with AbortSignal
+
+All `CCIPAPIClient` methods accept an optional `AbortSignal` to cancel in-flight requests.
+
+## Timeout
+
+Use `AbortSignal.timeout()` to set a deadline on a single call:
+
+```typescript
+import { CCIPAPIClient, CCIPTimeoutError } from '@chainlink/ccip-sdk'
+
+const api = CCIPAPIClient.fromUrl()
+
+try {
+  const request = await api.getMessageById('0x1234...', {
+    signal: AbortSignal.timeout(5000), // 5 seconds
+  })
+} catch (err) {
+  if (err instanceof CCIPTimeoutError) {
+    console.log('Request timed out')
+  }
+}
+```
+
+:::note
+Each API method has a built-in 30-second timeout (configurable via `timeoutMs` when constructing the client: `CCIPAPIClient.fromUrl(url, { timeoutMs: 60000 })`). `AbortSignal.timeout()` is useful when you need a per-call deadline shorter than the client default. The SDK combines both signals internally via `AbortSignal.any()` — whichever fires first wins.
+:::
+
+## User Cancellation
+
+Use `AbortController` when cancellation is triggered externally:
+
+```typescript
+import { CCIPAPIClient, CCIPAbortError } from '@chainlink/ccip-sdk'
+
+const api = CCIPAPIClient.fromUrl()
+const controller = new AbortController()
+
+// Cancel from elsewhere:
+// controller.abort()
+
+try {
+  const latency = await api.getLaneLatency(
+    16015286601757825753n,
+    14767482510784806043n,
+    undefined, // numberOfBlocks
+    { signal: controller.signal },
+  )
+} catch (err) {
+  if (err instanceof CCIPAbortError) {
+    console.log('Request cancelled')
+  }
+}
+```
+
+:::note
+If the signal is already aborted before the call, the request throws `CCIPAbortError` immediately.
+:::
+
+## Cancelling Mid-Pagination
+
+`searchAllMessages` forwards the signal to each `searchMessages` call inside its pagination loop. Aborting cancels the current or next in-flight HTTP request. Results already yielded from completed pages are kept:
+
+```typescript
+import { type MessageSearchResult, CCIPAPIClient, CCIPAbortError } from '@chainlink/ccip-sdk'
+
+const api = CCIPAPIClient.fromUrl()
+const controller = new AbortController()
+
+const results: MessageSearchResult[] = []
+try {
+  for await (const msg of api.searchAllMessages(
+    { sender: '0x...' },
+    { signal: controller.signal },
+  )) {
+    results.push(msg)
+    if (someCondition) controller.abort()
+  }
+} catch (err) {
+  if (err instanceof CCIPAbortError) {
+    console.log(`Cancelled after ${results.length} results`)
+  }
+}
+```
+
+`searchMessages` also accepts `signal` for single-page cancellation:
+
+```typescript
+const page = await api.searchMessages(
+  { sender: '0x...' },
+  { limit: 10, signal: controller.signal },
+)
+```
+
+## Error Handling
+
+| Error | `isTransient` | When thrown | Retry? |
+|-------|---------------|------------|--------|
+| `CCIPTimeoutError` | `true` | Built-in timeout or `AbortSignal.timeout()` elapsed | Yes — `retryAfterMs: 5000` |
+| `CCIPAbortError` | `false` | User-provided `AbortSignal` was aborted | No — cancellation is intentional |
+
+The SDK distinguishes the two by checking `signal.aborted` on the user-provided signal. If the user's signal triggered the abort, it throws `CCIPAbortError`. Otherwise, it throws `CCIPTimeoutError`.
+
+## Method Reference
+
+| Method | `signal` location |
+|--------|-------------------|
+| `api.getLaneLatency(source, dest, numberOfBlocks?, options?)` | `options.signal` |
+| `api.getMessageById(messageId, options?)` | `options.signal` |
+| `api.searchMessages(filters?, options?)` | `options.signal` |
+| `api.searchAllMessages(filters?, options?)` | `options.signal` |
+| `api.getMessageIdsInTx(txHash, options?)` | `options.signal` |
+| `api.getExecutionInput(messageId, options?)` | `options.signal` |
+
+## Related
+
+- [Searching Messages](/sdk/guides/searching-messages) — AbortSignal with search pagination
+- [Error Handling](/sdk/guides/error-handling) — Retry patterns and error classification
+- [Error Reference](/sdk/guides/error-reference) — `ABORT` and `TIMEOUT` error codes

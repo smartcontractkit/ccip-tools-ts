@@ -1639,7 +1639,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Fetches the token pool configuration for an EVM token pool contract.
    *
    * @param tokenPool - Token pool contract address.
-   * @param feeOpts - Optional parameters to also fetch token transfer fee config.
+   * @param feeOpts - Optional parameters to also fetch token transfer fee config:
+   *   - `destChainSelector` — destination chain selector.
+   *   - `blockConfirmationsRequested` — number of block confirmations (0 = standard, positive = FTF).
+   *   - `tokenArgs` — hex-encoded bytes passed to the pool contract.
    * @returns Token pool config containing token, router, typeAndVersion, and optionally
    *          minBlockConfirmations and tokenTransferFeeConfig.
    *
@@ -1658,7 +1661,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     minBlockConfirmations?: number
     tokenTransferFeeConfig?: TokenTransferFeeConfig
   }> {
-    const [_, version, typeAndVersion] = await this.typeAndVersion(tokenPool)
+    const [type, version, typeAndVersion] = await this.typeAndVersion(tokenPool)
 
     let token, router, minBlockConfirmations, tokenTransferFeeConfig
     if (version < CCIPVersion.V2_0) {
@@ -1670,6 +1673,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       token = contract.getToken()
       router = contract.getRouter()
     } else {
+      if (type === 'USDCTokenPoolProxy') {
+        const proxy = new Contract(
+          tokenPool,
+          interfaces.USDCTokenPoolProxy_v2_0,
+          this.provider,
+        ) as unknown as TypedContract<typeof USDCTokenPoolProxy_2_0_ABI>
+        tokenPool = (await proxy.getPools())['cctpV2PoolWithCCV'] as string
+      }
       const contract = new Contract(
         tokenPool,
         interfaces.TokenPool_v2_0,
@@ -1750,7 +1761,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     tokenPool: string,
     remoteChainSelector?: bigint,
   ): Promise<Record<string, TokenPoolRemote>> {
-    const [_, version] = await this.typeAndVersion(tokenPool)
+    const [type, version] = await this.typeAndVersion(tokenPool)
 
     let supportedChains: Promise<NetworkInfo[]> | undefined
     if (remoteChainSelector) supportedChains = Promise.resolve([networkInfo(remoteChainSelector)])
@@ -1812,6 +1823,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ),
       )
     } else {
+      if (type === 'USDCTokenPoolProxy') {
+        const proxy = new Contract(
+          tokenPool,
+          interfaces.USDCTokenPoolProxy_v2_0,
+          this.provider,
+        ) as unknown as TypedContract<typeof USDCTokenPoolProxy_2_0_ABI>
+        tokenPool = (await proxy.getPools())['cctpV2PoolWithCCV'] as string
+      }
       const contract = new Contract(
         tokenPool,
         interfaces.TokenPool_v2_0,

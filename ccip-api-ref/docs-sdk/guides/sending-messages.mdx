@@ -3,7 +3,7 @@ id: sending-messages
 title: 'Sending Messages'
 description: 'Send CCIP messages with token transfers, arbitrary data, and gas configuration.'
 sidebar_label: Sending Messages
-sidebar_position: 2
+sidebar_position: 3
 ---
 
 import Tabs from '@theme/Tabs'
@@ -149,79 +149,20 @@ The token `amount` and `fee` are sent as transaction `value` (native ETH), not v
 
 ## Checking Lane Capabilities
 
-### Why Check?
-
-The SDK does **not** validate your `extraArgs` against the lane's on-chain version. If you pass V3 fields (e.g. `blockConfirmations`) to a pre-v2.0 lane, the transaction will **revert** on-chain. Always call `getLaneFeatures` first.
-
-### `MIN_BLOCK_CONFIRMATIONS`
-
-| Value | Lane version | What it means | Extra arguments to use |
-|-------|-------------|---------------|----------------------|
-| **undefined** | Pre-v2.0 | V3 is **not supported** | V2: `gasLimit` + `allowOutOfOrderExecution` |
-| **0** | v2.0+ | V3 supported, FTF not enabled for this token | V2 or V3 (no speed-up from `blockConfirmations`) |
-| **> 0** | v2.0+ with FTF | Minimum `blockConfirmations` for faster relaying | V3 with `blockConfirmations >= minValue` |
+The SDK does **not** validate your `extraArgs` against the lane's on-chain version. If you pass V3 fields (e.g., `blockConfirmations`) to a pre-v2.0 lane, the transaction will **revert** on-chain. Call `getLaneFeatures` first to check what the lane supports:
 
 ```typescript
 const features = await source.getLaneFeatures({
   router,
   destChainSelector: destSelector,
-  token, // optional — pass to get token-specific FTF and rate limit info
+  token: '0xTokenAddress...', // pass to get token-specific FTF and rate limit info
 })
 
 const minConfirmations = features.MIN_BLOCK_CONFIRMATIONS
+// undefined = pre-v2.0 (V2 only), 0 = v2.0+ (V3 supported, no FTF), >0 = FTF enabled
 ```
 
-:::note
-Without a `token`, the result reflects lane version only: `undefined` for pre-v2.0, or a hardcoded `1` for v2.0+ (confirming V3 support without pool-specific FTF data). Pass a `token` to get the actual pool-specific value.
-:::
-
-### Choosing Extra Arguments
-
-```typescript
-let extraArgs
-
-if (minConfirmations == null) {
-  // Pre-v2.0 lane — V2 encoding only
-  extraArgs = {
-    gasLimit: 200_000n,
-    allowOutOfOrderExecution: true,
-  }
-} else if (minConfirmations > 0) {
-  // v2.0+ lane with FTF enabled — use V3 with blockConfirmations
-  extraArgs = {
-    gasLimit: 200_000n,
-    blockConfirmations: minConfirmations, // minimum allowed value
-  }
-} else {
-  // v2.0+ lane, FTF not enabled (minConfirmations === 0) —
-  // V3 is supported but blockConfirmations has no effect.
-  // V2-style args or V3 without blockConfirmations both work.
-  extraArgs = {
-    gasLimit: 200_000n,
-    allowOutOfOrderExecution: true,
-  }
-}
-```
-
-### Checking Rate Limits
-
-When a `token` is provided, `getLaneFeatures` also returns outbound rate limiter state:
-
-```typescript
-const rateLimits = features.RATE_LIMITS
-if (rateLimits) {
-  console.log(`Available: ${rateLimits.tokens}, Capacity: ${rateLimits.capacity}`)
-  console.log(`Refill rate: ${rateLimits.rate} tokens/second`)
-}
-
-// FTF-specific rate limits (only present when FTF is enabled)
-const ftfRateLimits = features.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS
-if (ftfRateLimits) {
-  console.log(`FTF available: ${ftfRateLimits.tokens}`)
-}
-```
-
-Rate limiter values are `null` when rate limiting is disabled (unlimited throughput).
+For the full FTF workflow — checking availability, choosing extraArgs, estimating FTF latency and fees, and querying FTF rate limits — see [Faster-Than-Finality](/sdk/guides/ftf).
 
 ## Fee Estimation
 
@@ -351,6 +292,7 @@ const unsignedTx = await source.generateUnsignedSendMessage({
 })
 
 // transactions[] contains approval TXs (if needed) followed by the ccipSend TX
+// Each tx may include `value` (native token amount for fees or native token transfers)
 for (const tx of unsignedTx.transactions) {
   const hash = await walletClient.sendTransaction(tx)
   await publicClient.waitForTransactionReceipt({ hash })

@@ -230,12 +230,19 @@ export type TotalFeesEstimate = {
  * "Custom" fields apply when `blockConfirmations > 0` (Faster-Than-Finality).
  */
 export type TokenTransferFeeConfig = {
+  /** Gas overhead added to the execution cost estimate for token transfers on the destination chain. */
   destGasOverhead: number
+  /** Byte overhead added to the data availability cost estimate for token transfers. */
   destBytesOverhead: number
+  /** USD surcharge (in cents) added to the CCIP fee under standard finality (`blockConfirmations = 0`). */
   defaultBlockConfirmationsFeeUSDCents: number
+  /** USD surcharge (in cents) added to the CCIP fee under FTF (`blockConfirmations > 0`). */
   customBlockConfirmationsFeeUSDCents: number
+  /** BPS rate deducted from the transferred token amount under standard finality. */
   defaultBlockConfirmationsTransferFeeBps: number
+  /** BPS rate deducted from the transferred token amount under FTF. */
   customBlockConfirmationsTransferFeeBps: number
+  /** Whether token transfer fees are enabled for this pool. */
   isEnabled: boolean
 }
 
@@ -243,7 +250,9 @@ export type TokenTransferFeeConfig = {
  * Options for fetching token transfer fee config as part of {@link Chain.getTokenPoolConfig}.
  */
 export type TokenTransferFeeOpts = {
+  /** Destination chain selector to query fee config for. */
   destChainSelector: bigint
+  /** Number of block confirmations requested (0 = standard finality, positive = FTF). */
   blockConfirmationsRequested: number
   /** Hex-encoded bytes passed as tokenArgs to the pool contract. */
   tokenArgs: string
@@ -740,10 +749,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
   /**
    * Fetches all CCIP messages contained in a given commit batch.
-   * To be implemented for chains supporting CCIPVersion &lt;= v1.6.0
+   * To be implemented for chains supporting CCIPVersion v1.6.0 and earlier
    *
    * @param request - CCIPRequest to fetch batch for
-   * @param range - batch range \{ minSeqnr, maxSeqNr \}, e.g. from [[CommitReport]]
+   * @param range - batch range \{ minSeqnr, maxSeqNr \}, e.g. from {@link CommitReport}
    * @param opts - Optional parameters (e.g., `page` for pagination width)
    * @returns Array of messages in the batch
    *
@@ -771,7 +780,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Fetch input data needed for executing messages
    * Should be called on the *source* instance
    * @param opts - getExecutionInput options containing request and verifications
-   * @returns `input` payload to be passed to [[execute]]
+   * @returns `input` payload to be passed to {@link execute}
    * @see {@link execute} - method to execute a message
    */
   async getExecutionInput({
@@ -1131,8 +1140,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
         if (
           ('gasLimit' in message && estimated > message.gasLimit) ||
           ('ccipReceiveGasLimit' in message && estimated > message.ccipReceiveGasLimit)
-        )
+        ) {
           opts_.gasLimit = estimated
+          opts_.tokensGasLimit ??= 0
+        }
       } catch (err) {
         // ignore if receiver fails, let estimation of execute method itself throw if needed
         this.logger.debug('Failed to auto-estimateReceiveExecution for:', opts, err)
@@ -1637,9 +1648,16 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
-   * Estimate `ccipReceive` execution cost (gas, computeUnits) for this *dest*
-   * @param opts - estimation options, either `messageId` (for api) or `offRamp`, `message` (with `destTokenAmounts`)
-   * @returns estimated execution cost (gas or computeUnits)
+   * Estimate `ccipReceive` execution cost (gas, computeUnits) for this destination chain.
+   *
+   * @param opts - Either:
+   *   - `{ offRamp, message }` — estimate from message fields directly. `message` must include
+   *     `sourceChainSelector`, `messageId`, `receiver`, and optionally `sender`, `data`,
+   *     `destTokenAmounts`.
+   *   - `{ messageId }` — fetch the message from the CCIP API via `getMessageById`, resolve
+   *     the offRamp from the message metadata or `getExecutionInput`, then estimate.
+   *     Requires `apiClient` to be available.
+   * @returns Estimated execution cost (gas for EVM, compute units for Solana)
    */
   estimateReceiveExecution?(
     opts:

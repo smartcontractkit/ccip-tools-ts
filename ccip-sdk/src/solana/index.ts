@@ -1588,9 +1588,19 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * Returns a copy of a message, populating missing fields like `extraArgs` with defaults.
    * It's expected to return a message suitable at least for basic token transfers.
    *
+   * @remarks
+   * Solana-specific receiver/tokenReceiver handling:
+   * - Explicit `tokenReceiver` in extraArgs: both `receiver` and `tokenReceiver` are kept as provided.
+   * - Tokens but no explicit `tokenReceiver`: `receiver` is set to `PublicKey.default` and
+   *   `tokenReceiver` is set to `message.receiver`.
+   * - No tokens: `tokenReceiver` is set to `PublicKey.default` and `receiver` is `message.receiver`.
+   *
+   * Accepts `gasLimit` as an alias for `computeUnits` in extraArgs.
+   *
    * @param message - AnyMessage (from source), containing at least `receiver`
    * @returns A message suitable for `sendMessage` to this destination chain family
    * @throws {@link CCIPArgumentInvalidError} if tokenReceiver missing when sending tokens with data
+   * @throws {@link CCIPArgumentInvalidError} if extraArgs contains unknown fields for SVMExtraArgsV1
    */
   static override buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
