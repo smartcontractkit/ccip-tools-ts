@@ -14,6 +14,7 @@ import {
 import { defaultAbiCoder, interfaces } from './const.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import { ChainFamily } from '../types.ts'
+import { networkInfo } from '../utils.ts'
 
 /**
  * Get error data from an error object, if possible
@@ -151,6 +152,16 @@ export function recursiveParseError(
     )
   }
   if (!isBytesLike(data) || [0, 20].includes(dataLength(data))) {
+    // include networkName for chainSelectors
+    if (key.match(/sel(ector)?$/i) && typeof data === 'bigint') {
+      let name
+      try {
+        ;({ name } = networkInfo(data))
+      } catch {
+        // ignore
+      }
+      if (name) return [[key, `${data} [${name}]`]]
+    }
     return [[key, data]]
   }
   try {
@@ -166,14 +177,16 @@ export function recursiveParseError(
   if (!parsed) return [[key, data]]
   const [fragment, _, args] = parsed
   const desc = fragment.format('full')
-  key = desc.split(' ')[0]!
-  const res = [[key, desc.substring(key.length + 1)]] as ReturnType<typeof recursiveParseError>
+  const key_ = j(key, desc.split(' ')[0]!)
+  const res = [[key_, desc.substring(desc.indexOf(' ') + 1)]] as ReturnType<
+    typeof recursiveParseError
+  >
   if (!args) return res
   if (['ReceiverError', 'TokenHandlingError'].includes(fragment.name) && args.err === '0x') {
-    res.push([`${key}.err`, '0x [possibly out-of-gas or abi.decode error]'])
+    res.push([`${key_}.err`, '0x [possibly out-of-gas or abi.decode error]'])
     return res
   }
-  res.push(...recursiveParseError('', args))
+  res.push(...recursiveParseError(key, args))
   return res
 }
 
@@ -187,7 +200,11 @@ export function parseData(data: unknown): Record<string, unknown> | undefined {
   if (isHexString(data)) {
     const parsed = recursiveParseError('', data)
     if (parsed.length === 1 && parsed[0]![1] === data) return
-    return Object.fromEntries(parsed)
+    // like Object.fromEntries, but on duplicated keys, add a space to first occurrence, to avoid overwriting and keep all values
+    return parsed.reduceRight(
+      (acc, [k, v]) => ({ ...{ [k && k in acc ? k + ' ' : k]: v }, ...acc }),
+      {},
+    )
   }
   if (typeof data !== 'object') return
   // ethers tx/simulation/call errors
