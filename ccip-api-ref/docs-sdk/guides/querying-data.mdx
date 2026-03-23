@@ -3,7 +3,7 @@ id: querying-data
 title: 'Querying Data'
 description: 'Query network info, token metadata, lane capabilities, balances, and fees.'
 sidebar_label: Querying Data
-sidebar_position: 4
+sidebar_position: 8
 ---
 
 import Tabs from '@theme/Tabs'
@@ -129,7 +129,7 @@ for (const [address, info] of Object.entries(feeTokens)) {
 
 ### Lane Capabilities
 
-`getLaneFeatures` checks what features are available on a specific lane. Use this to adapt your message parameters — for example, to set `blockConfirmations` in extra args when Faster-Than-Finality (FTF) is enabled.
+`getLaneFeatures` checks what features are available on a specific lane, including Faster-Than-Finality (FTF) support and rate limits:
 
 ```typescript
 import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
@@ -138,14 +138,10 @@ const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
 const router = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
 const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
 
-// Without token — lane-level features
-const laneFeatures = await chain.getLaneFeatures({ router, destChainSelector: destSelector })
-
-// With token — token-specific features (rate limits, FTF for this token)
-const tokenFeatures = await chain.getLaneFeatures({
+const features = await chain.getLaneFeatures({
   router,
   destChainSelector: destSelector,
-  token: '0xTokenAddress...',
+  token: '0xTokenAddress...', // pass to get token-specific FTF and rate limit info
 })
 ```
 
@@ -153,31 +149,15 @@ Returns `Partial<LaneFeatures>` — not all fields are guaranteed:
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `MIN_BLOCK_CONFIRMATIONS` | `number \| undefined` | `undefined` = pre-v2.0 lane (no FTF), `0` = FTF supported but not enabled for this token, `>0` = FTF enabled with this many block confirmations |
+| `MIN_BLOCK_CONFIRMATIONS` | `number \| undefined` | `undefined` = pre-v2.0 lane, `0` = v2.0+ but FTF not enabled for this token, `>0` = FTF enabled |
 | `RATE_LIMITS` | `RateLimiterState \| null` | Standard rate limiter state (`null` if disabled) |
 | `CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS` | `RateLimiterState \| null` | FTF-specific rate limiter (only when `MIN_BLOCK_CONFIRMATIONS > 0`) |
 
-```typescript
-const features = await chain.getLaneFeatures({
-  router,
-  destChainSelector: destSelector,
-  token: tokenAddress,
-})
-
-if (features.MIN_BLOCK_CONFIRMATIONS != null && features.MIN_BLOCK_CONFIRMATIONS > 0) {
-  console.log('FTF enabled — block confirmations:', features.MIN_BLOCK_CONFIRMATIONS)
-  // Can set blockConfirmations in extraArgs for faster delivery
-}
-
-if (features.RATE_LIMITS) {
-  console.log('Rate limit capacity:', features.RATE_LIMITS.capacity)
-  console.log('Available tokens:', features.RATE_LIMITS.tokens)
-}
-```
-
 :::note
-`getLaneFeatures` is currently implemented for EVM chains only. Requires `token` to query token-specific features (rate limits, FTF).
+`getLaneFeatures` is implemented for EVM chains only.
 :::
+
+For the full FTF workflow — checking availability, sending with FTF, estimating latency and fees, and rate limits — see [Faster-Than-Finality](/sdk/guides/ftf).
 
 ### Lane Latency
 

@@ -40,9 +40,10 @@ The latency estimate includes time for:
 
 ## Options
 
-| Option  | Type   | Default                       | Description         |
-| ------- | ------ | ----------------------------- | ------------------- |
-| `--api` | string | `https://api.ccip.chain.link` | Custom CCIP API URL |
+| Option                  | Alias | Type   | Default                       | Description                                                                                            |
+| ----------------------- | ----- | ------ | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `--block-confirmations` | `-c`  | number | -                             | Number of block confirmations for latency calculation. When omitted, uses the lane's default finality. |
+| `--api`                 |       | string | `https://api.ccip.chain.link` | Custom CCIP API URL                                                                                    |
 
 See [Configuration](/cli/configuration) for global options (`--format`, `--no-api`, etc.).
 

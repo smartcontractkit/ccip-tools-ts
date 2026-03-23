@@ -1,0 +1,154 @@
+---
+id: fee-estimation
+title: 'Fee Estimation'
+description: 'Estimate CCIP fees including Router fees and pool-level token transfer fees.'
+sidebar_label: Fee Estimation
+sidebar_position: 4
+---
+
+# Fee Estimation
+
+The SDK provides two fee estimation methods:
+
+| Method | What it returns | When to use |
+|--------|----------------|-------------|
+| `getFee` | CCIP fee (Router-level) | Data-only messages, or when you only need the CCIP fee |
+| `getTotalFeesEstimate` | CCIP fee + token transfer fee (pool-level BPS) | Token transfers where you need the full cost breakdown |
+
+Both call the Router contract via RPC.
+
+## CCIP Fee with `getFee`
+
+`getFee` returns the fee from `Router.getFee()` in the fee token's smallest units. This fee covers gas, DON costs, and FeeQuoter-level overhead.
+
+```typescript
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+
+const fee = await source.getFee({
+  router: '0xRouterAddress...',
+  destChainSelector: destSelector,
+  message: {
+    receiver: '0xReceiverAddress...',
+    data: '0x1234',
+  },
+})
+
+console.log('CCIP fee:', fee, 'wei')
+```
+
+See [Querying Data — Fee Estimation](/sdk/guides/querying-data#fee-estimation) for more `getFee` examples including fee token selection.
+
+## Total Fees with `getTotalFeesEstimate`
+
+`getTotalFeesEstimate` returns both the CCIP fee and the pool-level token transfer fee as a `TotalFeesEstimate`:
+
+```typescript
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const router = '0xRouterAddress...'
+const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+
+const estimate = await source.getTotalFeesEstimate({
+  router,
+  destChainSelector: destSelector,
+  message: {
+    receiver: '0xReceiverAddress...',
+    tokenAmounts: [{ token: '0xTokenAddress...', amount: 1_000_000n }],
+  },
+})
+
+console.log('CCIP fee:', estimate.ccipFee, 'wei')
+
+if (estimate.tokenTransferFee) {
+  console.log('Token transfer fee:', estimate.tokenTransferFee.bps, 'bps')
+  console.log('Amount deducted from transfer:', estimate.tokenTransferFee.feeDeducted)
+}
+```
+
+### When `tokenTransferFee` is present
+
+`tokenTransferFee` is included in the result only when all of these are true:
+
+- The message includes `tokenAmounts`
+- The lane is v2.0 or later
+- The token pool has fee config enabled (`isEnabled: true`)
+
+For data-only messages, pre-v2.0 lanes, or pools with fees disabled, only `ccipFee` is returned.
+
+### What the recipient receives
+
+When `tokenTransferFee` is present, the pool deducts `feeDeducted` from the transferred amount. The recipient receives `amount - feeDeducted` on the destination chain:
+
+```typescript
+const sendAmount = 1_000_000n // 1 USDC (6 decimals)
+const estimate = await source.getTotalFeesEstimate({
+  router,
+  destChainSelector: destSelector,
+  message: {
+    receiver: '0x...',
+    tokenAmounts: [{ token: usdcAddress, amount: sendAmount }],
+  },
+})
+
+if (estimate.tokenTransferFee) {
+  const received = sendAmount - estimate.tokenTransferFee.feeDeducted
+  console.log(`Send: ${sendAmount}, Receive: ${received}, Fee: ${estimate.tokenTransferFee.feeDeducted}`)
+  // e.g. Send: 1000000, Receive: 999900, Fee: 100 (at 10 bps)
+}
+```
+
+## Standard vs FTF Fees
+
+Token transfer fee rates differ based on finality mode:
+
+- **Standard finality** (`blockConfirmations = 0` or omitted): uses `defaultBlockConfirmationsTransferFeeBps`
+- **Faster-Than-Finality** (`blockConfirmations > 0`): uses `customBlockConfirmationsTransferFeeBps`
+
+For the full FTF workflow — checking availability, estimating FTF fees with code examples, and computing received amounts — see [Faster-Than-Finality](/sdk/guides/ftf).
+
+The SDK also reads `extraArgs.tokenArgs` (hex-encoded bytes passed to the pool contract) and `extraArgs.ccvs` (cross-chain verifier addresses, used for USDC domain detection) when present.
+
+## USDC / CCTP
+
+For USDC pools using Circle's CCTP, the SDK fetches burn fee tiers from Circle's API instead of reading on-chain BPS config. The fee tier depends on finality mode:
+
+- **Standard finality**: uses the first (lowest) tier with `finalityThreshold` above `CCTP_FINALITY_FAST` (1000)
+- **FTF**: uses the highest tier with `finalityThreshold` at or below `CCTP_FINALITY_FAST`
+
+The SDK also exports `CCTP_FINALITY_STANDARD` (2000) for reference, though it is not used directly by `getTotalFeesEstimate`.
+
+This happens automatically inside `getTotalFeesEstimate` — no special handling is needed by the caller. The returned `tokenTransferFee.bps` and `tokenTransferFee.feeDeducted` reflect the Circle fee tier. If no matching tier is found, or the tier's fee is zero, `tokenTransferFee` is absent from the result.
+
+## TotalFeesEstimate Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ccipFee` | `bigint` | Fee from `Router.getFee()`, in the fee token's smallest units. Denominated in native token when `message.feeToken` is omitted, or in the specified fee token otherwise. |
+| `tokenTransferFee` | `TokenTransferFee \| undefined` | Pool-level fee, present only for v2.0+ token transfers with fees enabled |
+| `tokenTransferFee.feeDeducted` | `bigint` | Amount deducted from the transferred token (`amount * bps / 10_000`) |
+| `tokenTransferFee.bps` | `number` | BPS rate applied (10,000 = 100%) |
+
+## Error Handling
+
+| Error | When |
+|-------|------|
+| `CCIPNotImplementedError` | `getTotalFeesEstimate` called on a non-EVM chain (only EVM is supported) |
+
+`getFee` errors are documented in [Querying Data](/sdk/guides/querying-data#fee-estimation).
+
+## Method Reference
+
+| Method | Returns | Scope |
+|--------|---------|-------|
+| `chain.getFee(opts)` | `bigint` | CCIP fee only (all versions, all supported chains) |
+| `chain.getTotalFeesEstimate(opts)` | `TotalFeesEstimate` | CCIP fee + token transfer fee (EVM only, v2.0+ for pool fees) |
+
+## Related
+
+- [Querying Data — Fee Estimation](/sdk/guides/querying-data#fee-estimation) — `getFee` examples and fee token selection
+- [Sending Messages](/sdk/guides/sending-messages) — Send cross-chain messages (auto-calculates fee if omitted)
+- [Token Pools](/sdk/guides/token-pools) — Token pool configuration and fee config details

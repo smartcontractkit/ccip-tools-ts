@@ -86,6 +86,7 @@ export const CCTP_FINALITY_STANDARD = 2000
  * @param destDomain - CCTP destination domain identifier
  * @param networkType - network type (mainnet or testnet)
  * @returns Array of fee tiers with finality thresholds and BPS fees
+ * @throws {@link CCIPUsdcBurnFeesError} if the HTTP request fails or the response is not a valid array of fee tiers
  */
 export async function getUsdcBurnFees(
   sourceDomain: number,

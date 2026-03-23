@@ -1,0 +1,191 @@
+---
+id: gas-estimation
+title: 'Gas Estimation'
+description: 'Estimate ccipReceive execution gas for CCIP messages before or after sending.'
+sidebar_label: Gas Estimation
+sidebar_position: 6
+---
+
+# Gas Estimation
+
+The SDK provides two ways to estimate the gas needed to execute a CCIP message on the destination chain:
+
+| Approach | Use when |
+|----------|----------|
+| Standalone `estimateReceiveExecution` function | Before sending — you have source and dest chain instances and want to set `gasLimit` in `extraArgs` |
+| `chain.estimateReceiveExecution({ messageId })` | After sending — you have a message ID and want to estimate gas before manual execution |
+
+Both simulate the `ccipReceive` call on the destination chain and return the estimated gas units. The returned value has the base transaction cost (21,000 gas) subtracted — it represents the execution cost only, suitable for use as `gasLimit` in `extraArgs` or `execute`.
+
+:::note
+Only EVM destinations support gas estimation. Solana, Aptos, Sui, and TON do not implement `estimateReceiveExecution`.
+:::
+
+## Estimate Before Sending
+
+The standalone `estimateReceiveExecution` function takes source and dest chain instances, a router or ramp address, and the message to simulate:
+
+```typescript
+import { estimateReceiveExecution, EVMChain } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+const gasLimit = await estimateReceiveExecution({
+  source,
+  dest,
+  routerOrRamp: '0xRouterAddress...',
+  message: {
+    receiver: '0xReceiverContract...',
+    data: '0x1234...',
+  },
+})
+
+console.log('Estimated gas:', gasLimit)
+```
+
+### How `routerOrRamp` Is Resolved
+
+The function uses a two-phase approach to discover the onRamp and offRamp:
+
+1. **Source chain first:** Calls `typeAndVersion` on the source chain. If the contract is a Router, calls `getOnRampForRouter` to find the OnRamp. If it is an OnRamp, uses it directly. Then discovers the OffRamp via `discoverOffRamp`.
+2. **Dest chain fallback:** If the source-side call fails, tries the dest chain. If the contract is an OffRamp, uses it directly and looks up the OnRamp. If it is not an OffRamp, throws `CCIPContractTypeInvalidError`.
+
+### With Token Amounts
+
+When the message includes token transfers, the function resolves destination token addresses and adjusts amounts for decimal differences between source and dest tokens. The simulation uses state overrides so the receiver is simulated as holding the correct token balances:
+
+```typescript
+const gasLimit = await estimateReceiveExecution({
+  source,
+  dest,
+  routerOrRamp: '0xRouterAddress...',
+  message: {
+    receiver: '0xReceiverContract...',
+    data: '0x',
+    tokenAmounts: [{ token: '0xSourceToken...', amount: 1_000_000n }],
+  },
+})
+```
+
+### Optional Fields
+
+| Field | Default when omitted |
+|-------|---------------------|
+| `message.messageId` | Random 32-byte hash |
+| `message.sender` | Empty bytes (zero-padded) |
+| `message.data` | Empty bytes |
+| `message.tokenAmounts` | Empty array |
+| `message.onRampAddress` | Discovered from `routerOrRamp` |
+| `message.offRampAddress` | Discovered from `routerOrRamp` |
+
+If both `onRampAddress` and `offRampAddress` are provided, the `routerOrRamp` discovery is skipped entirely.
+
+## Estimate for an Existing Message
+
+The `Chain.estimateReceiveExecution` instance method accepts a `messageId` and fetches the message from the CCIP API:
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+const gasLimit = await dest.estimateReceiveExecution({
+  messageId: '0xabcd1234...',
+})
+
+console.log('Estimated gas:', gasLimit)
+```
+
+This path:
+1. Calls `getMessageById` to fetch the message details (sender, receiver, data, tokenAmounts) from the API
+2. Resolves the offRamp in order: `message.offRampAddress`, `metadata.offRamp`, then `getExecutionInput` as a last resort
+3. Simulates `ccipReceive` on the destination chain using the fetched message data
+
+:::note
+Requires `apiClient` to be available (the default). Throws `CCIPApiClientNotAvailableError` if the chain was created with `apiClient: null`.
+:::
+
+## Auto-Estimation in `execute` and `generateUnsignedExecute`
+
+When calling `execute` or `generateUnsignedExecute` without a `gasLimit` override, the SDK attempts to auto-estimate via `estimateReceiveExecution` internally. The auto-estimation:
+
+- Runs only when `gasLimit` is not provided in the call options
+- Runs only when `estimateReceiveExecution` is available on the dest chain (EVM only)
+- Runs only when the message's token amounts already have `destTokenAddress` resolved (or the message has no token amounts)
+- Compares the estimate against the message's original gas limit (`gasLimit` for v2.0+ messages, `ccipReceiveGasLimit` for v1.x messages). Overrides only when the estimate exceeds the original value. If neither field is present in the message, no override is applied.
+- If estimation fails, proceeds without override (the error is logged at debug level)
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
+
+// No gasLimit provided — SDK auto-estimates
+await dest.execute({
+  messageId: '0xabcd1234...',
+  wallet,
+})
+
+// Explicit gasLimit — SDK skips auto-estimation
+await dest.execute({
+  messageId: '0xabcd1234...',
+  wallet,
+  gasLimit: 500_000,
+})
+```
+
+## Waiting for Source Finality
+
+Before manually executing a message, the source chain transaction must be finalized. Use `waitFinalized` to block until finality. See [Manual Execution](/sdk/guides/manual-execution) for the full workflow.
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const requests = await source.getMessagesInTx('0xSourceTxHash...')
+
+await source.waitFinalized({ request: requests[0] })
+console.log('Source transaction finalized')
+```
+
+`waitFinalized` checks whether the transaction's block has reached the finalized state. The `finality` parameter defaults to `'finalized'` but also accepts a numeric block number. Returns `true` when finalized, or throws `CCIPTransactionNotFinalizedError` if finality cannot be confirmed.
+
+Pass a `cancel$` promise to abort the wait:
+
+```typescript
+let cancel: () => void
+const cancel$ = new Promise<void>((resolve) => (cancel = resolve))
+
+await source.waitFinalized({
+  request: requests[0],
+  cancel$,
+})
+
+// Call cancel() from elsewhere to stop waiting
+```
+
+## Error Handling
+
+| Error | When |
+|-------|------|
+| `CCIPMethodUnsupportedError` | Dest chain does not implement `estimateReceiveExecution` (non-EVM) |
+| `CCIPContractTypeInvalidError` | `routerOrRamp` resolves on the dest chain but is not an OffRamp |
+| `CCIPOnRampRequiredError` | No OnRamp found for the given OffRamp and source chain |
+| `CCIPTokenDecimalsInsufficientError` | Dest token decimals too low to represent the converted amount |
+| `CCIPApiClientNotAvailableError` | `{ messageId }` path used but `apiClient` is null |
+| `CCIPTransactionNotFinalizedError` | `waitFinalized` cannot confirm finality |
+
+## Method Reference
+
+| Method | Input | Returns |
+|--------|-------|---------|
+| `estimateReceiveExecution(opts)` | `{ source, dest, routerOrRamp, message }` | `Promise<number>` — estimated gas |
+| `chain.estimateReceiveExecution(opts)` | `{ offRamp, message }` or `{ messageId }` | `Promise<number>` — estimated gas |
+| `chain.waitFinalized(opts)` | `{ request, finality?, cancel$? }` | `Promise<true>` |
+
+## Related
+
+- [Manual Execution](/sdk/guides/manual-execution) — Execute stuck or failed messages
+- [Fee Estimation](/sdk/guides/fee-estimation) — Estimate CCIP fees and token transfer fees
+- [Sending Messages](/sdk/guides/sending-messages) — Set `gasLimit` in `extraArgs`

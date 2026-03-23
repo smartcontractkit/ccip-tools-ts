@@ -60,7 +60,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.3.1-3203fa6'
+export const SDK_VERSION = '1.3.1-9542980'
 // generate:end
 
 /** SDK telemetry header name */
@@ -228,6 +228,8 @@ export class CCIPAPIClient {
    *   When omitted or 0, uses the lane's default finality. When provided as a positive
    *   integer, the API returns latency for that custom finality value (sent as `numOfBlocks`
    *   query parameter).
+   * @param options - Optional request options.
+   *   - `signal` — an `AbortSignal` to cancel the request.
    * @returns Promise resolving to {@link LaneLatencyResponse} with totalMs
    *
    * @throws {@link CCIPLaneNotFoundError} when lane not found (404)
@@ -329,6 +331,8 @@ export class CCIPAPIClient {
    * Fetches a CCIP message by its unique message ID.
    *
    * @param messageId - The message ID (0x prefix + 64 hex characters, e.g., "0x1234...abcd")
+   * @param options - Optional request options.
+   *   - `signal` — an `AbortSignal` to cancel the request.
    * @returns Promise resolving to {@link APICCIPRequest} with message details
    *
    * @throws {@link CCIPMessageIdNotFoundError} when message not found (404)
@@ -412,8 +416,10 @@ export class CCIPAPIClient {
    *
    * @param filters - Optional search filters. Ignored when `options.cursor` is provided
    *   (the cursor already encodes the original filters).
-   * @param options - Optional pagination options: `limit` (max results per page) and
-   *   `cursor` (opaque token from a previous {@link MessageSearchPage} for the next page).
+   * @param options - Optional pagination and request options:
+   *   - `limit` — max results per page.
+   *   - `cursor` — opaque token from a previous {@link MessageSearchPage} for the next page.
+   *   - `signal` — an `AbortSignal` to cancel the request.
    * @returns Promise resolving to a {@link MessageSearchPage} with results and pagination info.
    *
    * @remarks
@@ -537,9 +543,10 @@ export class CCIPAPIClient {
    * handling cursor-based pagination automatically.
    *
    * @param filters - Optional search filters (same as {@link CCIPAPIClient.searchMessages}).
-   * @param options - Optional `limit` controlling the per-page fetch size (number of
-   *   results fetched per API call). The total number of results is controlled by the
-   *   consumer — break out of the loop to stop early.
+   * @param options - Optional request options:
+   *   - `limit` — per-page fetch size (number of results fetched per API call). The total
+   *     number of results is controlled by the consumer — break out of the loop to stop early.
+   *   - `signal` — an `AbortSignal` that, when aborted, cancels the next page fetch.
    * @returns AsyncGenerator yielding {@link MessageSearchResult} one at a time, across all pages.
    *
    * @throws {@link CCIPTimeoutError} if a page request times out.
@@ -588,6 +595,8 @@ export class CCIPAPIClient {
    * Uses {@link CCIPAPIClient.searchMessages} internally with `sourceTransactionHash` filter and `limit: 100`.
    *
    * @param txHash - Source transaction hash.
+   * @param options - Optional request options.
+   *   - `signal` — an `AbortSignal` to cancel the request.
    * @returns Promise resolving to array of message IDs.
    *
    * @throws {@link CCIPMessageNotFoundInTxError} when no messages found (404 or empty).
@@ -637,6 +646,8 @@ export class CCIPAPIClient {
    * For pre-v2 messages, returns `{ message, offchainTokenData, proofs, ... }` with merkle proof.
    *
    * @param messageId - The CCIP message ID (32-byte hex string)
+   * @param options - Optional request options.
+   *   - `signal` — an `AbortSignal` to cancel the request.
    * @returns Execution input with offRamp address and lane info
    *
    * @throws {@link CCIPMessageIdNotFoundError} when message not found (404)

@@ -1,0 +1,240 @@
+---
+id: searching-messages
+title: 'Searching Messages'
+description: 'Search CCIP messages by sender, receiver, chain, or manual execution eligibility using the CCIP API.'
+sidebar_label: Searching Messages
+sidebar_position: 2
+---
+
+# Searching Messages
+
+The SDK provides two methods for searching CCIP messages via the API:
+
+| Method | Use when |
+|--------|----------|
+| `searchAllMessages` | You want to iterate all matching results. Handles pagination automatically. |
+| `searchMessages` | You need page-level control — explicit cursor handling, partial fetching, or custom page sizes. |
+
+Both require the CCIP API (enabled by default).
+
+## Filters
+
+All filters are optional. Omit a field to leave it unfiltered.
+
+| Filter | Type | Description |
+|--------|------|-------------|
+| `sender` | `string` | Sender address |
+| `receiver` | `string` | Receiver address |
+| `sourceChainSelector` | `bigint` | Source chain selector |
+| `destChainSelector` | `bigint` | Destination chain selector |
+| `sourceTransactionHash` | `string` | Source transaction hash |
+| `readyForManualExecOnly` | `boolean` | When `true`, return only messages eligible for manual execution |
+
+:::note
+`api.getMessageIdsInTx(txHash)` is a convenience wrapper that calls `searchMessages` with `sourceTransactionHash` internally.
+:::
+
+## Iterate All Results
+
+`searchAllMessages` is an async generator that yields one `MessageSearchResult` at a time, fetching pages internally:
+
+```typescript
+import { CCIPAPIClient } from '@chainlink/ccip-sdk'
+
+const api = CCIPAPIClient.fromUrl()
+
+for await (const msg of api.searchAllMessages({ sender: '0x9d087fC03ae39b088326b67fA3C788236645b717' })) {
+  console.log(msg.messageId, msg.status)
+  console.log(`  ${msg.sourceNetworkInfo.name} → ${msg.destNetworkInfo.name}`)
+}
+```
+
+### Stop Early
+
+Break out of the loop to stop fetching pages:
+
+```typescript
+import { type MessageSearchResult, CCIPAPIClient } from '@chainlink/ccip-sdk'
+
+const api = CCIPAPIClient.fromUrl()
+
+const results: MessageSearchResult[] = []
+for await (const msg of api.searchAllMessages({ sender: '0x...' })) {
+  results.push(msg)
+  if (results.length >= 10) break
+}
+```
+
+### Control Page Size
+
+The `limit` option controls how many results the API returns per page (not the total):
+
+```typescript
+for await (const msg of api.searchAllMessages({ sender: '0x...' }, { limit: 50 })) {
+  console.log(msg.messageId)
+}
+```
+
+## Manual Pagination
+
+`searchMessages` returns a `MessageSearchPage` with `data`, `hasNextPage`, and `cursor`:
+
+```typescript
+import { CCIPAPIClient } from '@chainlink/ccip-sdk'
+
+const api = CCIPAPIClient.fromUrl()
+
+// Fetch first page
+let page = await api.searchMessages(
+  { sender: '0x9d087fC03ae39b088326b67fA3C788236645b717' },
+  { limit: 10 },
+)
+
+console.log(`Page 1: ${page.data.length} results`)
+
+// Fetch subsequent pages using the cursor
+while (page.hasNextPage) {
+  page = await api.searchMessages(undefined, { cursor: page.cursor!, limit: 10 })
+  console.log(`Next page: ${page.data.length} results`)
+}
+```
+
+:::note
+When paginating with a cursor, the `filters` parameter is ignored — the cursor encodes the original filters.
+:::
+
+## Combine Filters
+
+```typescript
+import { CCIPAPIClient } from '@chainlink/ccip-sdk'
+
+const api = CCIPAPIClient.fromUrl()
+
+const page = await api.searchMessages({
+  sender: '0x9d087fC03ae39b088326b67fA3C788236645b717',
+  sourceChainSelector: 16015286601757825753n,
+  destChainSelector: 14767482510784806043n,
+})
+
+for (const msg of page.data) {
+  console.log(`${msg.messageId}: ${msg.status}`)
+}
+```
+
+## Find Stuck Messages
+
+Filter for messages that are eligible for manual execution:
+
+```typescript
+for await (const msg of api.searchAllMessages({ readyForManualExecOnly: true })) {
+  console.log(`Stuck: ${msg.messageId} (${msg.sourceNetworkInfo.name} → ${msg.destNetworkInfo.name})`)
+}
+```
+
+Combine with `sender` to find stuck messages for a specific address:
+
+```typescript
+for await (const msg of api.searchAllMessages({
+  sender: '0x...',
+  readyForManualExecOnly: true,
+})) {
+  console.log(msg.messageId, msg.status)
+}
+```
+
+## Get Full Message Details
+
+`MessageSearchResult` contains summary fields only. To get the full message (extraArgs, tokenAmounts, fees, execution details), call `getMessageById`:
+
+```typescript
+import { CCIPAPIClient, MessageStatus } from '@chainlink/ccip-sdk'
+
+const api = CCIPAPIClient.fromUrl()
+
+for await (const msg of api.searchAllMessages({ sender: '0x...' })) {
+  if (msg.status === MessageStatus.Failed) {
+    const full = await api.getMessageById(msg.messageId)
+    console.log('Receipt tx:', full.metadata.receiptTransactionHash)
+    if (full.metadata.deliveryTime != null) {
+      console.log('Delivery time:', Number(full.metadata.deliveryTime), 'ms')
+    }
+  }
+}
+```
+
+## Cancel a Search
+
+Pass an `AbortSignal` to cancel in-flight requests:
+
+```typescript
+import { CCIPAPIClient, CCIPAbortError } from '@chainlink/ccip-sdk'
+
+const api = CCIPAPIClient.fromUrl()
+const controller = new AbortController()
+
+// Cancel after 5 seconds
+setTimeout(() => controller.abort(), 5000)
+
+try {
+  for await (const msg of api.searchAllMessages(
+    { sender: '0x...' },
+    { signal: controller.signal },
+  )) {
+    console.log(msg.messageId)
+  }
+} catch (err) {
+  if (err instanceof CCIPAbortError) {
+    console.log('Search cancelled')
+  }
+}
+```
+
+`searchMessages` also accepts `signal` in its options:
+
+```typescript
+const page = await api.searchMessages(
+  { sender: '0x...' },
+  { limit: 10, signal: controller.signal },
+)
+```
+
+## MessageSearchResult Fields
+
+Each result contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `messageId` | `string` | CCIP message ID (0x-prefixed, 32-byte hex) |
+| `origin` | `string` | Transaction originator (EOA that submitted the send tx) |
+| `sender` | `string` | Message sender address |
+| `receiver` | `string` | Message receiver address |
+| `status` | `MessageStatus` | Lifecycle status (use `MessageStatus.Sent`, `MessageStatus.Success`, etc.) |
+| `sourceNetworkInfo` | `NetworkInfo` | Source chain name, selector, network type, family, and chain ID |
+| `destNetworkInfo` | `NetworkInfo` | Destination chain name, selector, network type, family, and chain ID |
+| `sendTransactionHash` | `string` | Source chain transaction hash |
+| `sendTimestamp` | `string` | ISO 8601 send timestamp |
+
+## Error Handling
+
+| Error | When |
+|-------|------|
+| `CCIPTimeoutError` | Request timed out |
+| `CCIPAbortError` | Request cancelled via `AbortSignal` |
+| `CCIPHttpError` | API returned 4xx/5xx (except 404) |
+
+:::note
+A 404 response is treated as "no results found" and returns an empty page (or yields nothing from `searchAllMessages`) — it does not throw.
+:::
+
+## Method Reference
+
+| Method | Returns | Pagination |
+|--------|---------|------------|
+| `api.searchAllMessages(filters?, options?)` | `AsyncGenerator<MessageSearchResult>` | Automatic |
+| `api.searchMessages(filters?, options?)` | `MessageSearchPage` | Manual (cursor) |
+
+## Related
+
+- [Tracking Messages](/sdk/guides/tracking-messages) — Track messages by ID or transaction hash
+- [Manual Execution](/sdk/guides/manual-execution) — Execute stuck or failed messages
+- [Error Handling](/sdk/guides/error-handling) — Retry patterns and error classification

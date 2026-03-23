@@ -3,7 +3,7 @@ id: token-pools
 title: 'Token Pools'
 description: 'Query token pool configuration, remote chain settings, and rate limits.'
 sidebar_label: Token Pools
-sidebar_position: 5
+sidebar_position: 9
 ---
 
 # Token Pools
@@ -52,20 +52,7 @@ The `typeAndVersion` string identifies the pool type (BurnMint, LockRelease, USD
 
 ### Faster-Than-Finality (FTF) Configuration
 
-On v2.0+ pools, `getTokenPoolConfig` also returns `minBlockConfirmations`:
-
-```typescript
-const poolConfig = await chain.getTokenPoolConfig(poolAddress)
-
-if (poolConfig.minBlockConfirmations != null) {
-  if (poolConfig.minBlockConfirmations === 0) {
-    console.log('FTF supported but not enabled for this pool')
-  } else {
-    console.log('FTF enabled — min block confirmations:', poolConfig.minBlockConfirmations)
-  }
-}
-// undefined means pre-v2.0 pool (FTF not supported)
-```
+On v2.0+ pools, `getTokenPoolConfig` also returns `minBlockConfirmations` (`undefined` on pre-v2.0 pools, `0` when FTF is not enabled, `>0` when enabled). See [Faster-Than-Finality](/sdk/guides/ftf) for the full FTF workflow.
 
 ## Remote Chain Configuration
 
@@ -151,28 +138,7 @@ type RateLimiterState = {
 
 ### FTF Rate Limits
 
-TokenPool v2.0+ contracts may include separate rate limiters for Faster-Than-Finality transfers. These apply when custom (lower) block confirmations are used instead of waiting for full finality:
-
-```typescript
-const remotes = await chain.getTokenPoolRemotes(poolAddress, destSelector)
-const remote = Object.values(remotes)[0]
-
-if (remote && 'customBlockConfirmationsOutboundRateLimiterState' in remote) {
-  const ftfOutbound = remote.customBlockConfirmationsOutboundRateLimiterState
-  if (ftfOutbound) {
-    console.log('FTF outbound:', ftfOutbound.tokens, '/', ftfOutbound.capacity)
-  }
-
-  const ftfInbound = remote.customBlockConfirmationsInboundRateLimiterState
-  if (ftfInbound) {
-    console.log('FTF inbound:', ftfInbound.tokens, '/', ftfInbound.capacity)
-  }
-}
-```
-
-:::note
-FTF rate limiter fields are only present on v2.0+ pools. Use the `in` operator to check before accessing them.
-:::
+TokenPool v2.0+ contracts may include separate rate limiters for Faster-Than-Finality transfers (`customBlockConfirmationsOutboundRateLimiterState` and `customBlockConfirmationsInboundRateLimiterState`). See [Faster-Than-Finality — FTF Rate Limits](/sdk/guides/ftf#ftf-rate-limits) for details and examples.
 
 ## Complete Example
 

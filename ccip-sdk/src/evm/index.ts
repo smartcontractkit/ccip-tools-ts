@@ -1639,7 +1639,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Fetches the token pool configuration for an EVM token pool contract.
    *
    * @param tokenPool - Token pool contract address.
-   * @param feeOpts - Optional parameters to also fetch token transfer fee config.
+   * @param feeOpts - Optional parameters to also fetch token transfer fee config:
+   *   - `destChainSelector` — destination chain selector.
+   *   - `blockConfirmationsRequested` — number of block confirmations (0 = standard, positive = FTF).
+   *   - `tokenArgs` — hex-encoded bytes passed to the pool contract.
    * @returns Token pool config containing token, router, typeAndVersion, and optionally
    *          minBlockConfirmations and tokenTransferFeeConfig.
    *

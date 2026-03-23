@@ -1,0 +1,157 @@
+---
+id: search
+title: 'search'
+description: 'Search CCIP messages via the API with filters for sender, receiver, chains, and manual execution eligibility.'
+sidebar_label: search
+sidebar_position: 8
+custom_edit_url: null
+---
+
+# search
+
+<ChainSupport />
+
+Search CCIP messages via the API with filters for sender, receiver, source/destination chains, and manual execution eligibility.
+
+## Synopsis
+
+```bash
+ccip-cli search messages [sender] [options]
+```
+
+Aliases: `msgs`
+
+## Description
+
+The `search` command queries the CCIP API to find cross-chain messages matching the provided filters. Results are paginated automatically — the CLI fetches pages until the `--limit` is reached or all matching messages are returned.
+
+In interactive terminals (TTY), after displaying results the CLI presents a menu to select and inspect individual messages in detail.
+
+This command requires API access. It fails if `--no-api` is set.
+
+## Arguments
+
+| Argument   | Type   | Required | Description                                   |
+| ---------- | ------ | -------- | --------------------------------------------- |
+| `[sender]` | string | No       | Filter by sender address. Same as `--sender`. |
+
+## Options
+
+| Option               | Alias | Type    | Default | Description                                     |
+| -------------------- | ----- | ------- | ------- | ----------------------------------------------- |
+| `--sender`           |       | string  | -       | Filter by sender address                        |
+| `--receiver`         |       | string  | -       | Filter by receiver address                      |
+| `--source`           | `-s`  | string  | -       | Source chain (name, chainId, or selector)       |
+| `--dest`             | `-d`  | string  | -       | Destination chain (name, chainId, or selector)  |
+| `--manual-exec-only` |       | boolean | `false` | Only return messages ready for manual execution |
+| `--limit`            |       | number  | `20`    | Max results to return. `0` = unlimited.         |
+
+See [Configuration](/cli/configuration) for global options (`--format`, `--api`, etc.).
+
+## Examples
+
+### Search by sender address
+
+```bash
+ccip-cli search messages 0x9d087fC03ae39b088326b67fA3C788236645b717
+```
+
+Or equivalently:
+
+```bash
+ccip-cli search messages --sender 0x9d087fC03ae39b088326b67fA3C788236645b717
+```
+
+### Filter by source and destination chain
+
+```bash
+ccip-cli search messages --source ethereum-mainnet --dest arbitrum-mainnet
+```
+
+Chain identifiers accept names (`ethereum-mainnet`), chain IDs (`1`), or chain selectors (`5009297550715157269`).
+
+### Find messages ready for manual execution
+
+```bash
+ccip-cli search messages --manual-exec-only
+```
+
+Combine with other filters to narrow the results:
+
+```bash
+ccip-cli search messages --sender 0x9d08... --manual-exec-only --limit 5
+```
+
+### Retrieve all matching messages
+
+```bash
+ccip-cli search messages --sender 0x9d08... --limit 0
+```
+
+Setting `--limit 0` removes the cap and fetches all pages. For large result sets (1,000+), the CLI prints a progress warning.
+
+### Output as JSON for scripting
+
+```bash
+ccip-cli search messages --sender 0x9d08... --format json
+```
+
+JSON output skips the interactive menu and writes directly to stdout, making it suitable for piping:
+
+```bash
+ccip-cli search messages --sender 0x9d08... --format json | jq '.[].messageId'
+```
+
+### Use a custom API endpoint
+
+```bash
+ccip-cli search messages --sender 0x9d08... --api https://staging-api.example.com
+```
+
+## Output
+
+### Table format (default)
+
+Each result is displayed as a table row with:
+
+| Field         | Description                                |
+| ------------- | ------------------------------------------ |
+| **messageId** | The CCIP message ID                        |
+| **status**    | Message status (e.g., `SUCCESS`, `FAILED`) |
+| **source**    | Source network name and chain ID           |
+| **dest**      | Destination network name and chain ID      |
+| **sender**    | Sender address                             |
+| **receiver**  | Receiver address                           |
+| **txHash**    | Source transaction hash                    |
+| **timestamp** | Send timestamp                             |
+
+After displaying results, an interactive selection menu appears (TTY only) allowing you to pick a message and view its full details — equivalent to running `ccip-cli show` on that message.
+
+### JSON format
+
+With `--format json`, results are written as a JSON array to stdout. No interactive menu is shown.
+
+### Log format
+
+With `--format log`, each result is printed as a raw JavaScript object. The interactive menu is still available in TTY mode.
+
+## Behavior
+
+1. Validates that API access is enabled (fails with an error if `--no-api` is set)
+2. Resolves `--source` and `--dest` to chain selectors via `networkInfo()`
+3. Paginates through the API using `searchAllMessages` until `--limit` is reached
+4. Displays results in the requested format
+5. In TTY mode (except JSON format), presents an interactive menu to inspect individual messages via `getMessageById`
+
+## See Also
+
+- [show](/cli/show) — Display full details of a CCIP message
+- [manual-exec](/cli/manual-exec) — Execute a pending or failed message
+- [Configuration](/cli/configuration) — API, RPC, and output format options
+
+## Exit Codes
+
+| Code | Meaning                                                       |
+| ---- | ------------------------------------------------------------- |
+| `0`  | Success — results returned (or no matches found with warning) |
+| `1`  | Error (API unavailable, network failure, invalid arguments)   |

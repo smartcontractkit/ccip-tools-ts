@@ -65,7 +65,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   MERKLE_INTERNAL_ERROR:
     'This is an internal SDK error. Please report this issue with the full error context.',
 
-  VERSION_UNSUPPORTED: 'Supported versions: 1.0, 1.2, 1.5, 1.6.',
+  VERSION_UNSUPPORTED: 'Supported versions: 1.2, 1.5, 1.6, 2.0.',
   HASHER_VERSION_UNSUPPORTED:
     'Use a supported CCIP version for this chain. Check the lane configuration for compatible versions.',
   VERSION_FEATURE_UNAVAILABLE: 'This feature requires CCIP v1.6 or later.',

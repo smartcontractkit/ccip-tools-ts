@@ -121,6 +121,10 @@ The `metadata.status` field reflects the API's view of the message lifecycle:
 | `Failed` | Execution failed on destination (final — may need [manual execution](/sdk/guides/manual-execution)) |
 | `Unknown` | API returned an unrecognized status — update to the latest SDK version |
 
+### MessageStatus vs ExecutionState
+
+`MessageStatus` (from the API) tracks the full lifecycle as a string enum with 9 values. `ExecutionState` (from on-chain `ExecutionStateChanged` events) is a numeric enum with 3 values: `InProgress` (1), `Success` (2), `Failed` (3). Use `MessageStatus` when polling the API via `getMessageById`. Use `ExecutionState` when scanning on-chain execution receipts via `getExecutionReceipts`.
+
 ## RPC-Based Tracking
 
 These methods read on-chain logs directly. They work with `apiClient: null` and do not depend on the CCIP API.
@@ -149,20 +153,7 @@ for (const request of requests) {
 
 ### Search by Sender Address
 
-Use `CCIPAPIClient.searchAllMessages` to find all messages from a specific sender via the CCIP API:
-
-```typescript
-import { CCIPAPIClient } from '@chainlink/ccip-sdk'
-
-const api = CCIPAPIClient.fromUrl()
-
-for await (const msg of api.searchAllMessages({ sender: '0xSenderAddress...' })) {
-  console.log('Message ID:', msg.messageId)
-  console.log('Status:', msg.status)
-}
-```
-
-`searchAllMessages` is an async generator that handles cursor-based pagination automatically. You can also filter by `receiver`, `sourceChainSelector`, `destChainSelector`, and `readyForManualExecOnly`. To get full message details for a specific result, use `api.getMessageById(msg.messageId)`.
+Use `CCIPAPIClient.searchAllMessages` to find messages by sender, receiver, chain, or manual execution eligibility. See [Searching Messages](/sdk/guides/searching-messages) for full details, filter options, and pagination.
 
 ### Check Commit/Verification Status
 
@@ -306,7 +297,7 @@ const txUrl = getCCIPExplorerUrl('tx', txHash)
 |--------|-------------|--------------|---------|
 | `getMessageById(id)` | CCIP API | Yes | `CCIPRequest` with `metadata` (status, delivery time, execution receipt) |
 | `getMessagesInTx(txHash)` | RPC (API fallback) | No | `CCIPRequest[]` (no `metadata` unless API fallback used) |
-| `api.searchAllMessages({ sender })` | CCIP API | Yes | `MessageSearchResult` (async generator with pagination) |
+| `api.searchAllMessages(filters?)` | CCIP API | Yes | `MessageSearchResult` (async generator — see [Searching Messages](/sdk/guides/searching-messages)) |
 | `getVerifications({offRamp, request})` | RPC (log scan) | No | `CCIPVerifications` (commit report or verifier results) |
 | `getExecutionReceipts({offRamp, messageId})` | RPC (log scan) | No | `CCIPExecution` iterator (state, gasUsed, return data) |
 | `discoverOffRamp(source, dest, onRamp)` | RPC (contract calls) | No | OffRamp address (memoized) |
@@ -314,6 +305,7 @@ const txUrl = getCCIPExplorerUrl('tx', txHash)
 
 ## Related
 
+- [Searching Messages](/sdk/guides/searching-messages) — Search messages by sender, receiver, chain, or manual execution eligibility
 - [Manual Execution](/sdk/guides/manual-execution) — Execute stuck or failed messages
 - [Sending Messages](/sdk/guides/sending-messages) — Send cross-chain messages
 - [Error Handling](/sdk/guides/error-handling) — Handle failures and retry patterns
