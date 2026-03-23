@@ -28,6 +28,14 @@ jobs:
     - name: Verify anvil is available
       run: anvil --version
 
+    - name: Install Surfpool v1.1.1 (for SVM fork tests)
+      run: |
+        curl -sSL https://github.com/solana-foundation/surfpool/releases/download/v1.1.1/surfpool-linux-x64.tar.gz \
+          | tar xz -C /usr/local/bin
+
+    - name: Verify surfpool is available
+      run: surfpool --version
+
     - name: Install dependencies and build
       run: npm ci
 
