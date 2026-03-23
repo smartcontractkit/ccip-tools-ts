@@ -33,6 +33,7 @@ const customErrors = [
   'error NotEnoughGas()',
   'error InvalidChain(uint64 chainSelector)',
   'error InvalidAdapter()',
+  'error BlacklistableBlacklistedAccount(address)',
 ] as const
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
