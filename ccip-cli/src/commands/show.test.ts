@@ -278,10 +278,10 @@ describe('e2e command show EVM', () => {
     { timeout: 120000 },
     async () => {
       // Test transaction hash
-      const TX_HASH = '0xe65111f4abeaf4acef6c71279358d2fe8f6e828fd3bc043103083895cf1e847f'
-      const MESSAGE_ID = '0x3cad04936caf2af67449ae09c74a969ac0fcd8abbc4fb28460431533969a2a04'
-      const SENDER = '0x90392A1E8A941098a3C75E0BDB172cFdE7E4f1f4'
-      const RECEIVER = '0x86a9391c0f8dfbada39cc017ea66a0533d445ae6ee8a85082ee5afe38bca1f49'
+      const TX_HASH = '0x69997bedbfbc352343f8a56cb49f2f22a3bc5e176f493c924f44ffca658c8257'
+      const MESSAGE_ID = '0xbb6d843891bf8e578265ee77781718a51749753deb9fb9c694904dc41b54f1ac'
+      const SENDER = '0x9d087fC03ae39b088326b67fA3C788236645b717'
+      const RECEIVER = '0x9d5f576e963f593c8be9a22baad798fe2bb4a4103f2d719181362a75fa162eaf'
       const ONRAMP = '0x23a5084Fa78104F3DF11C63Ae59fcac4f6AD9DeE'
       const OFFRAMP = '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45'
 
@@ -302,29 +302,29 @@ describe('e2e command show EVM', () => {
       assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
-      assert.match(output, /sequenceNumber.*97n?/)
+      assert.match(output, /sequenceNumber.*118n?/)
       assert.match(output, /nonce.*0n?.*allow out-of-order/)
-      assert.match(output, /gasLimit.*50n?/)
+      assert.match(output, /gasLimit.*0n?/)
       assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
-      assert.match(output, /data.*0x01\b/)
+      assert.match(output, /data.*0x'?/)
       assert.match(output, /allowOutOfOrderExecution.*true\b/)
 
       // Commit information
       assert.match(output, /Commit.*dest/i)
       assert.match(
         output,
-        /merkleRoot.*0x1f93bd26f4de9793e95135b9135d08faf5a78326a3c9914a863fb827a2f1ab29/i,
+        /merkleRoot.*0xcadbc221e627d31a51be0faecc6e44928d9b25d8fdaf5ccb9293cba57040a4ec/i,
       )
-      assert.match(output, /min.*97/)
-      assert.match(output, /max.*97/)
+      assert.match(output, /min.*118/)
+      assert.match(output, /max.*118/)
       assert.match(
         output,
-        /origin.*0x1b90035727683942129394d59d85196f341afab6375f25de7e900ebe67b7f5e6/i,
+        /origin.*0xf8db7fbae11c9ec9393ffeb0e8726489ee9d8181b5253d807d55fb7f5b5dce65/i,
       )
       assert.match(output, new RegExp(`contract.*${OFFRAMP}::offramp`, 'i'))
       assert.match(
         output,
-        /transactionHash.*0xfcfb828b869a9af57fff19dd81f7136e22ff877a033477275cc56103e3de3edd/i,
+        /transactionHash.*0xe6629dbc9c09e73a514f6e31181235459219f0bf0fc47a79154496ccba8c899a/i,
       )
 
       // Receipts information
@@ -332,7 +332,7 @@ describe('e2e command show EVM', () => {
       assert.match(output, /state.*success/i)
       assert.match(
         output,
-        /transactionHash.*0x90bdb7006825eaccc08cf480115cae8ea3a8c83ae988c729b61ac910d0d360e1/i,
+        /transactionHash.*0xc9d0414122d03cea72439647a7d3d9b6890baba4920305ad4eee693ce949487a/i,
       )
     },
   )
