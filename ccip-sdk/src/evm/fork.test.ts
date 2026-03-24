@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execSync } from 'node:child_process'
+import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 
 import { AbiCoder, Contract, JsonRpcProvider, Wallet, keccak256, parseUnits, toBeHex } from 'ethers'
@@ -123,9 +124,8 @@ function isAnvilAvailable(): boolean {
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isAnvilAvailable()
 
-const testLogger = process.env.VERBOSE
-  ? console
-  : { debug() {}, info() {}, warn: console.warn, error: console.error }
+const testLogger = new Console(process.stdout, process.stderr)
+if (!process.env.VERBOSE) testLogger.debug = () => {}
 
 const skipHighRpcLoad = !process.env.RUN_HIGH_RPC_LOAD_TESTS
 

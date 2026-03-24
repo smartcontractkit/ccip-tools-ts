@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { type ChildProcess, execSync, spawn } from 'node:child_process'
+import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 
 import { Wallet as AnchorWallet } from '@coral-xyz/anchor'
@@ -124,9 +125,8 @@ function createSurfpoolInstance({
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isSurfpoolAvailable()
 
-const testLogger = VERBOSE
-  ? console
-  : { debug() {}, info() {}, warn: console.warn, error: console.error }
+const testLogger = new Console(process.stdout, process.stderr)
+if (!VERBOSE) testLogger.debug = () => {}
 
 describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
   let solanaChain: SolanaChain | undefined
