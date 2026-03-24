@@ -47,4 +47,11 @@ export const ETHEREUM_TO_SOLANA: ForkTestMessage[] = [
     version: '1.6',
     description: 'token transfer from BSC to Solana (~15B units)',
   },
+  {
+    messageId: '0xda90d3c54f7ce256c8fa45ee0b8f265c48bf4446810d560ecfc9deebe41c9cff',
+    txHash: '0xc7731e71a9aa0cd8a241ee0dcd3c824a6f88bad329ecb2b5b0d0dd6219b6a02c',
+    status: MessageStatus.Failed,
+    version: '1.6',
+    description: 'failed token transfer (10 tokens) from Base to Solana, receiver=system program',
+  },
 ]

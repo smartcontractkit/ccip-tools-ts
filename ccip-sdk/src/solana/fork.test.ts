@@ -8,8 +8,9 @@ import { Connection, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js'
 
 import '../evm/index.ts' // register EVM chain family for cross-family message decoding
 import { CCIPAPIClient } from '../api/index.ts'
-import { ExecutionState } from '../types.ts'
+import { ExecutionState, MessageStatus } from '../types.ts'
 import { networkInfo } from '../utils.ts'
+import { ETHEREUM_TO_SOLANA } from './fork.test.data.ts'
 import { SolanaChain } from './index.ts'
 
 // ── Constants ──
@@ -229,8 +230,10 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   describe('execute', () => {
+    const EXEC_MSG = ETHEREUM_TO_SOLANA.find((m) => m.status === MessageStatus.Failed)!
+
     it('should execute a failed message via API-driven path (* -> Solana)', async () => {
-      const EXEC_MSG_ID = '0xda90d3c54f7ce256c8fa45ee0b8f265c48bf4446810d560ecfc9deebe41c9cff'
+      assert.ok(EXEC_MSG, 'should have a failed message in test data')
       assert.ok(connection, 'connection should be initialized')
       assert.ok(wallet, 'wallet should be initialized')
 
@@ -241,11 +244,15 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
       })
 
       const execution = await solanaWithApi.execute({
-        messageId: EXEC_MSG_ID,
+        messageId: EXEC_MSG.messageId,
         wallet,
       })
 
-      assert.equal(execution.receipt.messageId, EXEC_MSG_ID, 'receipt messageId should match')
+      assert.equal(
+        execution.receipt.messageId,
+        EXEC_MSG.messageId,
+        'receipt messageId should match',
+      )
       assert.ok(execution.log.transactionHash, 'should have tx hash')
       assert.ok(execution.timestamp > 0, 'should have timestamp')
       assert.equal(execution.receipt.state, ExecutionState.Success, 'execution should succeed')
@@ -257,7 +264,7 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
       )
       const receipt = offRampLogs
         .map((l) => SolanaChain.decodeReceipt(l))
-        .find((r) => r?.messageId === EXEC_MSG_ID)
+        .find((r) => r?.messageId === EXEC_MSG.messageId)
       assert.ok(receipt, 'should find ExecutionStateChanged in offRamp logs')
       assert.equal(receipt.state, ExecutionState.Success, 'offRamp log should confirm Success')
 
