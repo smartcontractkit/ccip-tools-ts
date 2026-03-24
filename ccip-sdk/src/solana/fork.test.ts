@@ -6,6 +6,8 @@ import { Wallet as AnchorWallet } from '@coral-xyz/anchor'
 import { Connection, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js'
 
 import '../evm/index.ts' // register EVM chain family for cross-family message decoding
+import { CCIPAPIClient } from '../api/index.ts'
+import { ExecutionState } from '../types.ts'
 import { networkInfo } from '../utils.ts'
 import { SolanaChain } from './index.ts'
 
@@ -17,7 +19,6 @@ const SOLANA_ROUTER = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C'
 const ETH_MAINNET_SELECTOR = 5009297550715157269n
 
 // ── Surfpool helpers ──
-
 interface SurfpoolInstance {
   host: string
   port: number
@@ -227,5 +228,41 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
     })
   })
 
-  // TODO: execute * -> Solana
+  describe('execute', () => {
+    it('should execute a failed message via API-driven path (* -> Solana)', async () => {
+
+      const EXEC_MSG_ID = '0xda90d3c54f7ce256c8fa45ee0b8f265c48bf4446810d560ecfc9deebe41c9cff'
+      assert.ok(connection, 'connection should be initialized')
+      assert.ok(wallet, 'wallet should be initialized')
+
+      const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
+      const solanaWithApi = new SolanaChain(connection, networkInfo('solana-mainnet'), {
+        apiClient: stagingApi,
+        logger: testLogger,
+      })
+
+      const execution = await solanaWithApi.execute({
+        messageId: EXEC_MSG_ID,
+        wallet,
+      })
+
+      assert.equal(execution.receipt.messageId, EXEC_MSG_ID, 'receipt messageId should match')
+      assert.ok(execution.log.transactionHash, 'should have tx hash')
+      assert.ok(execution.timestamp > 0, 'should have timestamp')
+      assert.equal(execution.receipt.state, ExecutionState.Success, 'execution should succeed')
+
+      // Confirm by re-reading the execution tx and decoding the ExecutionStateChanged log
+      const tx = await solanaWithApi.getTransaction(execution.log.transactionHash)
+      const offRampLogs = tx.logs.filter(
+        (l) => l.address === 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm',
+      )
+      const receipt = offRampLogs
+        .map((l) => SolanaChain.decodeReceipt(l))
+        .find((r) => r?.messageId === EXEC_MSG_ID)
+      assert.ok(receipt, 'should find ExecutionStateChanged in offRamp logs')
+      assert.equal(receipt.state, ExecutionState.Success, 'offRamp log should confirm Success')
+
+      solanaWithApi.destroy?.()
+    })
+  })
 })
