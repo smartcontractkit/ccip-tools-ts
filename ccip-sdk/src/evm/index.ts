@@ -1152,7 +1152,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     let tokenArgs: string = '0x'
     if (extraArgs && 'blockConfirmations' in extraArgs) {
       blockConfirmations = extraArgs.blockConfirmations as number
-      tokenArgs = hexlify(extraArgs.tokenArgs as BytesLike)
+      if (extraArgs.tokenArgs) tokenArgs = hexlify(extraArgs.tokenArgs)
     }
 
     // Skip pool-level fee lookup for pre-v2.0 lanes
