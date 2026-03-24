@@ -1,50 +1,50 @@
 import type { ForkTestMessage } from '../evm/fork.test.data.ts'
 import { MessageStatus } from '../types.ts'
 
-// All messages discovered via the CCIP staging API (api.ccip.cldev.cloud) on 2026-03-23.
-// Solana devnet chain selector: 16423721717087811551
-// Genesis hash: EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG
+// All messages discovered via the CCIP staging API (api.ccip.cldev.cloud) on 2026-03-24.
+// Solana mainnet chain selector: 124615329519749607
+// Genesis hash: 5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d
 
-export const SOLANA_TO_SEPOLIA: ForkTestMessage[] = [
+export const SOLANA_TO_ETHEREUM: ForkTestMessage[] = [
   {
-    messageId: '0x1eedaa9f593912c0ca79aeedbf6ed9a89f98d6e79ee04ba58671b304576696e3',
+    messageId: '0x2d5cb1ef113d128b055b136fe8fd9a3c8c236e419ca524d2aae6992442b0b133',
     txHash:
-      '3ZP8X35uCYbBgMBSLPTWByTFd7D3i1cNa42DxnbzJcZbifrEJgGwr53pUofNbKYCFXNPpenXLy2SSDfmPamSjNPw',
+      '47rEK1VRU2jdmmA4EADYRPFCRRJBsCgtNf5D9Zs9TgAq55edKoKfHiZq96wgF4HdJNqtLpqNif2zKie7anMGys1F',
     status: MessageStatus.Success,
     version: '1.6',
-    description: 'token transfer (45 tokens) from Solana to Sepolia',
+    description: 'data-only message from Solana to Ethereum',
   },
   {
-    messageId: '0x611b861aa75aeddcbfc01ef326cb93da17cbc2b04e76981686a68a2b6aaa62b0',
+    messageId: '0x6bacb96f497de5c20be944c9c92570df3ee735bdba7c33840355484197c242b0',
     txHash:
-      '4e4ADL2aq1P8fgkYNPkGZwz8avu7SzoUnnhi4zzjzuhQKq6KFe2fQ8qv8WZazbaDxwZEGaLAW47rq17xEf6gNnJ3',
+      '5Vhci2yRssCAm26RZjF1JJazZcKQbyZxtsmLtLiD4gjZ6AGSpm8aRZrL2SDi2r1vK2e7cdyCFyb6aVYN8D8rTPJS',
     status: MessageStatus.Success,
     version: '1.6',
-    description: 'token transfer (45 tokens) from Solana to Sepolia',
+    description: 'USDC token transfer (~57.8 USDC) from Solana to Ethereum',
   },
   {
-    messageId: '0xbd607f844acc61e16c2d7497ff528ad3d7a61eae2e7fe283154646eec7571bd0',
+    messageId: '0x71ccbe8726eef5f4678db2d73e27a93bef18094beac17e252fd69ff9169abe7b',
     txHash:
-      '4QUmX2mPz7Y4nfkR45zKUDC9cRzxFi679enThv74mpTzaFEzewB5WFetaZ4ziMFCaq8pQQJWYGkzpY7STehpkU2X',
+      '2r6L7HSFVLTi7DWEieHeJYNALmkCZH8vTba8JwGkCniHAxUZXpSHg3Ujkt622ETNoekQEpMz7Ainx3z8K5xd3b6j',
     status: MessageStatus.Success,
     version: '1.6',
-    description: 'token transfer (45 tokens) from Solana to Sepolia',
+    description: 'USDC token transfer (~13.7 USDC) from Solana to Ethereum',
   },
 ]
 
-export const SEPOLIA_TO_SOLANA: ForkTestMessage[] = [
+export const ETHEREUM_TO_SOLANA: ForkTestMessage[] = [
   {
-    messageId: '0x052c16788d18aa9d967aa402035de05b3daedb19c7f9aafbd4bd473511b45fa6',
-    txHash: '0x40cad340bbc7bfa7f08518b43c27138198f92ff30b2c4ded3f0243c493e9ef7c',
+    messageId: '0x8c8edfe2c116630204c2fa44ec4461024b3a4439cc98ae137a11c98647f8ab8c',
+    txHash: '0x31f4f01bb07a1d990cba9bbbf5b044f6d794e3c07be48e4f6bc988377b92a750',
     status: MessageStatus.Success,
     version: '1.6',
-    description: 'token transfer (1T units) from Sepolia to Solana',
+    description: 'data-only message from Ethereum to Solana',
   },
   {
-    messageId: '0x28597da56be79032b1200e3ed28fbee6751ca4ba856612993e2b43984b89b66c',
-    txHash: '0x6ef7f57480f62df565f7ed4b79eeb14427518d00ce3168741bbc76e10d71adbf',
+    messageId: '0x7ed0b76fde523b4723e75300cf92e38bd2629429a27a1ce6a69e431d8e5d024a',
+    txHash: '0x5b8ebd841d581566d8ce63166e1805f950aee27fed5c930e4411bfc9c0e5b61c',
     status: MessageStatus.Success,
     version: '1.6',
-    description: 'token transfer (1T units) from Sepolia to Solana',
+    description: 'token transfer from BSC to Solana (~15B units)',
   },
 ]

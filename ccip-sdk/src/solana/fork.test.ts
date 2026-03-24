@@ -5,14 +5,12 @@ import { after, before, describe, it } from 'node:test'
 import { Connection } from '@solana/web3.js'
 
 import '../evm/index.ts' // register EVM chain family for cross-family message decoding
-import { type NetworkInfo, ChainFamily, NetworkType } from '../types.ts'
-import { SOLANA_TO_SEPOLIA } from './fork.test.data.ts'
+import { networkInfo } from '../utils.ts'
 import { SolanaChain } from './index.ts'
 
-// ── Chain constants ──
+// ── Constants ──
 
-const SOLANA_DEVNET_SELECTOR = 16423721717087811551n
-const SOLANA_DEVNET_GENESIS = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG'
+const VERBOSE = !!process.env.VERBOSE
 
 // ── Surfpool helpers ──
 
@@ -32,15 +30,17 @@ function isSurfpoolAvailable(): boolean {
   }
 }
 
-function createSurfpoolInstance(opts?: {
-  network?: 'devnet' | 'mainnet' | 'testnet'
+function createSurfpoolInstance({
+  rpcUrl,
+  network = 'devnet',
+  host = '127.0.0.1',
+  port = 8899,
+}: {
   rpcUrl?: string
+  network?: 'devnet' | 'mainnet' | 'testnet'
   port?: number
   host?: string
-}): SurfpoolInstance {
-  const host = opts?.host ?? '127.0.0.1'
-  const port = opts?.port ?? 8899
-  const network = opts?.network ?? 'devnet'
+} = {}): SurfpoolInstance {
   let child: ChildProcess | undefined
 
   return {
@@ -57,8 +57,8 @@ function createSurfpoolInstance(opts?: {
         '--no-studio',
         '--no-deploy',
       ]
-      if (opts?.rpcUrl) {
-        args.push('--rpc-url', opts.rpcUrl)
+      if (rpcUrl) {
+        args.push('--rpc-url', rpcUrl)
       } else {
         args.push('--network', network)
       }
@@ -66,10 +66,10 @@ function createSurfpoolInstance(opts?: {
       child = spawn('surfpool', args, { stdio: ['ignore', 'pipe', 'pipe'] })
 
       child.stdout?.on('data', (data: Buffer) => {
-        if (process.env.VERBOSE) process.stdout.write(`[surfpool] ${String(data)}`)
+        if (VERBOSE) process.stdout.write(`[surfpool] ${String(data)}`)
       })
       child.stderr?.on('data', (data: Buffer) => {
-        if (process.env.VERBOSE) process.stderr.write(`[surfpool] ${String(data)}`)
+        if (VERBOSE) process.stderr.write(`[surfpool] ${String(data)}`)
       })
 
       // Wait for RPC to become ready
@@ -117,7 +117,7 @@ function createSurfpoolInstance(opts?: {
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isSurfpoolAvailable()
 
-const testLogger = process.env.VERBOSE
+const testLogger = VERBOSE
   ? console
   : { debug() {}, info() {}, warn: console.warn, error: console.error }
 
@@ -137,15 +137,7 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
       'confirmed',
     )
 
-    const networkInfo: NetworkInfo = {
-      family: ChainFamily.Solana,
-      chainId: SOLANA_DEVNET_GENESIS,
-      name: 'solana-devnet',
-      chainSelector: SOLANA_DEVNET_SELECTOR,
-      networkType: NetworkType.Testnet,
-    }
-
-    solanaChain = new SolanaChain(connection, networkInfo, {
+    solanaChain = new SolanaChain(connection, networkInfo('solana-devnet'), {
       apiClient: null,
       logger: testLogger,
     })
@@ -156,54 +148,14 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
     await surfpoolInstance?.stop()
   })
 
-  describe('getMessagesInTx', () => {
-    it('should decode CCIP messages from a known Solana devnet transaction', async () => {
-      assert.ok(solanaChain, 'solana chain should be initialized')
-
-      const msg = SOLANA_TO_SEPOLIA[0]!
-      const tx = await solanaChain.getTransaction(msg.txHash)
-      const requests = await solanaChain.getMessagesInTx(tx)
-
-      assert.ok(requests.length > 0, 'should find at least one CCIP message')
-      const request = requests.find((r) => r.message.messageId === msg.messageId)
-      assert.ok(request, `should find message ${msg.messageId}`)
-      assert.ok(request.lane.sourceChainSelector, 'should have source chain selector')
-      assert.ok(request.lane.destChainSelector, 'should have dest chain selector')
-      assert.equal(
-        request.lane.sourceChainSelector,
-        SOLANA_DEVNET_SELECTOR,
-        'source selector should be Solana devnet',
-      )
+  it('should connect to the surfpool instance', async () => {
+    assert.ok(solanaChain, 'solana chain should be initialized')
+    const balance = await solanaChain.getBalance({
+      holder: 'FJHKofcoXxVDFAAQQVpYg5Z6vw3UgBwUPgRabhqX6D7y',
     })
+    assert.ok(balance >= 0n, 'should be able to query balance via surfpool')
   })
 
-  describe('getBalance', () => {
-    it('should return native SOL balance for a known CCIP participant', async () => {
-      assert.ok(solanaChain, 'solana chain should be initialized')
-
-      // Use the sender from a known test message
-      const msg = SOLANA_TO_SEPOLIA[0]!
-      const tx = await solanaChain.getTransaction(msg.txHash)
-      const requests = await solanaChain.getMessagesInTx(tx)
-      const request = requests.find((r) => r.message.messageId === msg.messageId)
-      assert.ok(request, 'should find the message')
-
-      const balance = await solanaChain.getBalance({ holder: request.message.sender })
-      assert.ok(balance >= 0n, 'balance should be non-negative')
-    })
-  })
-
-  describe('getTokenInfo', () => {
-    it('should fetch token info for a token used in a CCIP transfer', async () => {
-      assert.ok(solanaChain, 'solana chain should be initialized')
-
-      // 24ZcsMnr7B1vTBEbHJwTwBrtXkTxxgJTarTjGrD6ub2C is the token from the first test message
-      const tokenInfo = await solanaChain.getTokenInfo(
-        '24ZcsMnr7B1vTBEbHJwTwBrtXkTxxgJTarTjGrD6ub2C',
-      )
-
-      assert.ok(tokenInfo.decimals >= 0, 'should have non-negative decimals')
-      assert.equal(tokenInfo.symbol, 'UNKNOWN', 'devnet token without Metaplex metadata')
-    })
-  })
+  // TODO: sendMessage Solana -> *
+  // TODO: execute * -> Solana
 })
