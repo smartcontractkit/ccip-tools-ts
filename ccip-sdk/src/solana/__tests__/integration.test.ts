@@ -3,7 +3,10 @@ import { before, describe, it } from 'node:test'
 
 import { Connection, PublicKey } from '@solana/web3.js'
 
+import '../../evm/index.ts' // register EVM chain family for cross-family message decoding
 import { type NetworkInfo, ChainFamily, NetworkType } from '../../types.ts'
+import { networkInfo } from '../../utils.ts'
+import { SOLANA_TO_ETHEREUM } from '../fork.test.data.ts'
 import { SolanaChain } from '../index.ts'
 
 // Integration test for real Solana mainnet token
@@ -185,6 +188,64 @@ describe(
           throw new Error('Token-2022 support is not working - got Invalid SPL token error')
         }
       }
+    })
+  },
+)
+
+// Integration tests against real Solana mainnet CCIP messages
+describe(
+  'SolanaChain Mainnet CCIP Integration',
+  { skip: !!process.env.SKIP_INTEGRATION_TESTS, timeout: 60_000 },
+  () => {
+    let solanaChain: SolanaChain
+
+    before(async () => {
+      const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed')
+      solanaChain = new SolanaChain(connection, networkInfo('solana-mainnet'), { apiClient: null })
+    })
+
+    describe('getMessagesInTx', () => {
+      it('should decode CCIP messages from a known Solana mainnet transaction', async () => {
+        const msg = SOLANA_TO_ETHEREUM[0]!
+        const tx = await solanaChain.getTransaction(msg.txHash)
+        const requests = await solanaChain.getMessagesInTx(tx)
+
+        assert.ok(requests.length > 0, 'should find at least one CCIP message')
+        const request = requests.find((r) => r.message.messageId === msg.messageId)
+        assert.ok(request, `should find message ${msg.messageId}`)
+        assert.ok(request.lane.sourceChainSelector, 'should have source chain selector')
+        assert.ok(request.lane.destChainSelector, 'should have dest chain selector')
+        assert.equal(
+          request.lane.sourceChainSelector,
+          networkInfo('solana-mainnet').chainSelector,
+          'source selector should be Solana mainnet',
+        )
+      })
+    })
+
+    describe('getBalance', () => {
+      it('should return native SOL balance for a known CCIP participant', async () => {
+        const msg = SOLANA_TO_ETHEREUM[0]!
+        const tx = await solanaChain.getTransaction(msg.txHash)
+        const requests = await solanaChain.getMessagesInTx(tx)
+        const request = requests.find((r) => r.message.messageId === msg.messageId)
+        assert.ok(request, 'should find the message')
+
+        const balance = await solanaChain.getBalance({ holder: request.message.sender })
+        assert.ok(balance >= 0n, 'balance should be non-negative')
+      })
+    })
+
+    describe('getTokenInfo', () => {
+      it('should fetch USDC token info', async () => {
+        // EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v is USDC on Solana mainnet
+        const tokenInfo = await solanaChain.getTokenInfo(
+          'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+        )
+
+        assert.equal(tokenInfo.symbol, 'USDC')
+        assert.equal(tokenInfo.decimals, 6)
+      })
     })
   },
 )

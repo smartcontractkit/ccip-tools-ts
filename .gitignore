@@ -6,6 +6,7 @@ dist/
 coverage-summary.txt
 .coverage
 .c8_output
+.surfpool/
 
 # Vercel
 .vercel/
