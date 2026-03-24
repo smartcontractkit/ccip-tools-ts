@@ -1152,7 +1152,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     let tokenArgs: string = '0x'
     if (extraArgs && 'blockConfirmations' in extraArgs) {
       blockConfirmations = extraArgs.blockConfirmations as number
-      tokenArgs = hexlify(extraArgs.tokenArgs as BytesLike)
+      if (extraArgs.tokenArgs) tokenArgs = hexlify(extraArgs.tokenArgs)
     }
 
     // Skip pool-level fee lookup for pre-v2.0 lanes
@@ -1689,6 +1689,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       token = contract.getToken()
       router = contract.getDynamicConfig().then(([router]) => router)
       minBlockConfirmations = contract.getMinBlockConfirmations().catch((err) => {
+        this.logger.debug(
+          typeAndVersion,
+          'threw when fetching minBlockConfirmations, defaulting to 0:',
+          err,
+        )
         if (isError(err, 'CALL_EXCEPTION')) return 0
         throw CCIPError.from(err)
       })

@@ -111,13 +111,13 @@ describe('recursiveParseError', () => {
   it('should parse object error data', () => {
     const data =
       '0xcf19edfd000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000440a8d6e8c0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
-    const res = recursiveParseError('revert', data)
+    const res = recursiveParseError('', data)
     assert.equal(res.length, 3)
     assert.equal(res[0]![0], 'error')
     assert.ok((res[0]![1] as string).includes('ExecutionError'))
-    assert.equal(res[1]![0], 'error')
+    assert.equal(res[1]![0], 'err.error')
     assert.ok((res[1]![1] as string).includes('ReceiverError'))
-    assert.equal(res[2]![0], 'error.err')
+    assert.equal(res[2]![0], 'err.error.err')
     assert.match(res[2]![1] as string, /\b0x\b/)
     assert.ok((res[2]![1] as string).includes('out-of-gas'))
   })
@@ -125,13 +125,13 @@ describe('recursiveParseError', () => {
   it('should parse array error data', () => {
     const data =
       '0xe1cd55090000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000006408c379a0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000156d73672e73656e646572206e6f74206d696e746572000000000000000000000000000000000000000000000000000000000000000000000000000000'
-    const res = recursiveParseError('revert', data)
+    const res = recursiveParseError('', data)
     assert.equal(res.length, 3)
     assert.equal(res[0]![0], 'error')
     assert.ok((res[0]![1] as string).includes('TokenHandlingError'))
-    assert.equal(res[1]![0], 'error')
+    assert.equal(res[1]![0], 'err.error')
     assert.ok((res[1]![1] as string).includes('Error(string)'))
-    assert.equal(res[2]![0], '[0]')
+    assert.equal(res[2]![0], 'err[0]')
     assert.equal(res[2]![1], 'msg.sender not minter')
   })
 })
