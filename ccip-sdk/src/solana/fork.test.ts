@@ -230,7 +230,6 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
 
   describe('execute', () => {
     it('should execute a failed message via API-driven path (* -> Solana)', async () => {
-
       const EXEC_MSG_ID = '0xda90d3c54f7ce256c8fa45ee0b8f265c48bf4446810d560ecfc9deebe41c9cff'
       assert.ok(connection, 'connection should be initialized')
       assert.ok(wallet, 'wallet should be initialized')
