@@ -24,6 +24,7 @@
 import {
   type Chain,
   type RateLimiterState,
+  type TokenInfo,
   CCIPTokenNotConfiguredError,
   bigIntReplacer,
   networkInfo,
@@ -63,13 +64,17 @@ export const builder = (yargs: Argv) =>
     .option('token', {
       alias: 't',
       type: 'string',
-      demandOption: false,
       describe: 'Token address to query (pre-selects from list if address is a registry)',
     })
     .option('fee-tokens', {
       type: 'boolean',
-      default: false,
+      default: true,
       describe: 'List fee tokens instead of transferable tokens',
+    })
+    .option('only-fee-tokens', {
+      type: 'boolean',
+      implies: 'fee-tokens',
+      describe: 'Return after listing fee tokens',
     })
     .example([
       [
@@ -110,7 +115,17 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
 
   // Handle --fee-tokens flag
   if (argv.feeTokens) {
-    const feeTokens = await source.getFeeTokens(argv.address)
+    const feeTokens: Record<string, TokenInfo & { price?: number }> = await source.getFeeTokens(
+      argv.address,
+    )
+    await Promise.all(
+      Object.entries(feeTokens).map(async ([token]) =>
+        source.getTokenPrice({ router: argv.address, token }).then(
+          ({ price }) => (feeTokens[token]!.price = Number(price.toPrecision(4))),
+          () => {},
+        ),
+      ),
+    )
     switch (argv.format) {
       case Format.pretty:
         logger.info('Fee Tokens:')
@@ -122,7 +137,7 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
       default:
         logger.log('feeTokens:', feeTokens)
     }
-    return
+    if (argv.onlyFeeTokens) return
   }
 
   let info, tokenPool, poolConfig, registryConfig

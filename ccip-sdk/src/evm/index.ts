@@ -57,7 +57,6 @@ import {
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
-  CCIPVersionFeatureUnavailableError,
   CCIPVersionRequiresLaneError,
   CCIPVersionUnsupportedError,
   CCIPWalletInvalidError,
@@ -252,7 +251,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { async: true, maxArgs: 1 })
     this.detectUsdcDomains = memoize(this.detectUsdcDomains.bind(this))
     this.resolveVerifier = memoize(this.resolveVerifier.bind(this))
-    this._getPriceContractFor = memoize(this._getPriceContractFor.bind(this), {
+    this.getFeeQuoterFor = memoize(this.getFeeQuoterFor.bind(this), {
       async: true,
       maxArgs: 1,
     })
@@ -976,17 +975,26 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @throws {@link CCIPVersionFeatureUnavailableError} if contract version is below v1.6
    */
   async getFeeQuoterFor(address: string): Promise<string> {
-    let [type, version, typeAndVersion] = await this.typeAndVersion(address)
-    if (type === 'FeeQuoter') {
+    const [type, version, typeAndVersion] = await this.typeAndVersion(address)
+    if (type === 'FeeQuoter' || type === 'PriceRegistry') {
       return address
     } else if (type === 'Router') {
-      address = await this._getSomeOnRampFor(address)
-      ;[type, version, typeAndVersion] = await this.typeAndVersion(address)
+      return this.getFeeQuoterFor(await this._getSomeOnRampFor(address)) // use cache
     } else if (!type.includes('Ramp')) {
       throw new CCIPContractNotRouterError(address, typeAndVersion)
     }
-    if (version < CCIPVersion.V1_6)
-      throw new CCIPVersionFeatureUnavailableError('feeQuoter', version, 'v1.6')
+
+    if (version < CCIPVersion.V1_6) {
+      const contract = new Contract(
+        address,
+        version === CCIPVersion.V1_2
+          ? interfaces.EVM2EVMOnRamp_v1_2
+          : interfaces.EVM2EVMOnRamp_v1_5,
+        this.provider,
+      ) as unknown as TypedContract<typeof EVM2EVMOnRamp_1_2_ABI | typeof EVM2EVMOnRamp_1_5_ABI>
+      const { priceRegistry } = await contract.getDynamicConfig()
+      return priceRegistry as string
+    }
 
     const isOnRamp = type.includes('OnRamp')
     const contract = new Contract(
@@ -1008,29 +1016,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     const { feeQuoter } = await contract.getDynamicConfig()
     return feeQuoter as string
-  }
-
-  /**
-   * Resolves the price contract (PriceRegistry or FeeQuoter) for a given router.
-   * Memoized — the price contract for a router does not change.
-   * @internal
-   */
-  private async _getPriceContractFor(router: string): Promise<string> {
-    const onRamp = await this._getSomeOnRampFor(router)
-    const [, version] = await this.typeAndVersion(onRamp)
-
-    if (version >= CCIPVersion.V1_6) {
-      return this.getFeeQuoterFor(onRamp)
-    }
-
-    // v1.2 / v1.5: PriceRegistry from OnRamp getDynamicConfig
-    const contract = new Contract(
-      onRamp,
-      version === CCIPVersion.V1_2 ? interfaces.EVM2EVMOnRamp_v1_2 : interfaces.EVM2EVMOnRamp_v1_5,
-      this.provider,
-    ) as unknown as TypedContract<typeof EVM2EVMOnRamp_1_5_ABI>
-    const { priceRegistry } = await contract.getDynamicConfig()
-    return priceRegistry as string
   }
 
   /** {@inheritDoc Chain.getFee} */
@@ -1175,7 +1160,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       token = await this.getNativeTokenForRouter(opts.router)
     }
 
-    const priceContractAddress = await this._getPriceContractFor(opts.router)
+    const priceContractAddress = await this.getFeeQuoterFor(opts.router)
 
     // Both PriceRegistry (v1.2/v1.5) and FeeQuoter (v1.6+) expose
     // getTokenPrice(address) → { value: uint224, timestamp: uint32 }

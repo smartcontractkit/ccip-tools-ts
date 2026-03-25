@@ -1603,14 +1603,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     ])
 
     const usdPerToken = billingTokenConfigWrapper.config.usdPerToken
-
-    // Anchor decodes [u8; 28] as a number array in big-endian order.
-    // Pad to 32 bytes (4 zero bytes at front) and convert via BigInt hex.
-    const paddedHex =
-      '0x' + Buffer.concat([Buffer.alloc(4), Buffer.from(usdPerToken.value)]).toString('hex')
-    const rawPrice = BigInt(paddedHex)
-
-    return { price: Number(rawPrice) * 10 ** (decimals - 36) }
+    return { price: Number(toBigInt(Buffer.from(usdPerToken.value))) * 10 ** (decimals - 36) }
   }
 
   /**
