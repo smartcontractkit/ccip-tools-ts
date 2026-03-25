@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: Add `Chain.getTokenPrice({ router, token, destChainSelector })` to fetch on-chain USD token prices from FeeQuoter (v1.6+) or PriceRegistry (v1.2/v1.5) — implemented for EVM, Solana, and Aptos.
+
 ## [1.3.0] - 2026-03-19
 
 - SDK: Add `EVMChain.getTotalFeesEstimate` method, to provide a fee and tokens bps (v2.0) breakdown

@@ -37,6 +37,7 @@ export type {
   TokenInfo,
   TokenPoolConfig,
   TokenPoolRemote,
+  TokenPrice,
   TokenTransferFee,
   TokenTransferFeeConfig,
   TokenTransferFeeOpts,

@@ -35,6 +35,7 @@ import {
   type LogFilter,
   type TokenInfo,
   type TokenPoolRemote,
+  type TokenPrice,
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
@@ -112,6 +113,7 @@ import { IDL as BURN_MINT_TOKEN_POOL } from './idl/1.6.0/BURN_MINT_TOKEN_POOL.ts
 import { IDL as CCIP_CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
+import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
 import { getTransactionsForAddress } from './logs.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
@@ -1565,6 +1567,50 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         }),
       ),
     )
+  }
+
+  /** {@inheritDoc Chain.getTokenPrice} */
+  override async getTokenPrice(opts: {
+    router: string
+    token: string
+    timestamp?: number
+  }): Promise<TokenPrice> {
+    if (opts.timestamp != null) {
+      this.logger.warn(
+        'getTokenPrice: timestamp parameter not yet supported on Solana, returning latest price',
+      )
+    }
+    const { feeQuoter } = await this._getRouterConfig(opts.router)
+
+    // Resolve native SOL to wrapped SOL (NATIVE_MINT)
+    const tokenMint =
+      !opts.token || opts.token === PublicKey.default.toBase58()
+        ? NATIVE_MINT
+        : new PublicKey(opts.token)
+
+    const feeQuoterProgram = new Program(FEE_QUOTER_IDL, feeQuoter, {
+      connection: this.connection,
+    })
+
+    const [billingTokenConfigPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('fee_billing_token_config'), tokenMint.toBuffer()],
+      feeQuoter,
+    )
+
+    const [billingTokenConfigWrapper, { decimals }] = await Promise.all([
+      feeQuoterProgram.account.billingTokenConfigWrapper.fetch(billingTokenConfigPda),
+      this.getTokenInfo(tokenMint.toBase58()),
+    ])
+
+    const usdPerToken = billingTokenConfigWrapper.config.usdPerToken
+
+    // Anchor decodes [u8; 28] as a number array in big-endian order.
+    // Pad to 32 bytes (4 zero bytes at front) and convert via BigInt hex.
+    const paddedHex =
+      '0x' + Buffer.concat([Buffer.alloc(4), Buffer.from(usdPerToken.value)]).toString('hex')
+    const rawPrice = BigInt(paddedHex)
+
+    return { price: Number(rawPrice) * 10 ** (decimals - 36) }
   }
 
   /**

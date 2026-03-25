@@ -34,6 +34,7 @@ import {
   type LogFilter,
   type RateLimiterState,
   type TokenPoolRemote,
+  type TokenPrice,
   type TokenTransferFeeConfig,
   type TokenTransferFeeOpts,
   type TotalFeesEstimate,
@@ -87,6 +88,7 @@ import {
   decodeOnRampAddress,
   getAddressBytes,
   getDataBytes,
+  getSomeBlockNumberBefore,
   networkInfo,
   parseTypeAndVersion,
 } from '../utils.ts'
@@ -250,6 +252,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { async: true, maxArgs: 1 })
     this.detectUsdcDomains = memoize(this.detectUsdcDomains.bind(this))
     this.resolveVerifier = memoize(this.resolveVerifier.bind(this))
+    this._getPriceContractFor = memoize(this._getPriceContractFor.bind(this), {
+      async: true,
+      maxArgs: 1,
+    })
   }
 
   /**
@@ -1004,6 +1010,29 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return feeQuoter as string
   }
 
+  /**
+   * Resolves the price contract (PriceRegistry or FeeQuoter) for a given router.
+   * Memoized — the price contract for a router does not change.
+   * @internal
+   */
+  private async _getPriceContractFor(router: string): Promise<string> {
+    const onRamp = await this._getSomeOnRampFor(router)
+    const [, version] = await this.typeAndVersion(onRamp)
+
+    if (version >= CCIPVersion.V1_6) {
+      return this.getFeeQuoterFor(onRamp)
+    }
+
+    // v1.2 / v1.5: PriceRegistry from OnRamp getDynamicConfig
+    const contract = new Contract(
+      onRamp,
+      version === CCIPVersion.V1_2 ? interfaces.EVM2EVMOnRamp_v1_2 : interfaces.EVM2EVMOnRamp_v1_5,
+      this.provider,
+    ) as unknown as TypedContract<typeof EVM2EVMOnRamp_1_5_ABI>
+    const { priceRegistry } = await contract.getDynamicConfig()
+    return priceRegistry as string
+  }
+
   /** {@inheritDoc Chain.getFee} */
   async getFee({
     router,
@@ -1131,6 +1160,52 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       /* not a valid versioned contract */
     }
     return undefined
+  }
+
+  /** {@inheritDoc Chain.getTokenPrice} */
+  override async getTokenPrice(opts: {
+    router: string
+    token: string
+    timestamp?: number
+  }): Promise<TokenPrice> {
+    let { token } = opts
+
+    // Resolve native token (ZeroAddress) to wrapped native
+    if (token === ZeroAddress) {
+      token = await this.getNativeTokenForRouter(opts.router)
+    }
+
+    const priceContractAddress = await this._getPriceContractFor(opts.router)
+
+    // Both PriceRegistry (v1.2/v1.5) and FeeQuoter (v1.6+) expose
+    // getTokenPrice(address) → { value: uint224, timestamp: uint32 }
+    const contract = new Contract(
+      priceContractAddress,
+      interfaces.FeeQuoter,
+      this.provider,
+    ) as unknown as TypedContract<typeof FeeQuoter_ABI>
+
+    // If timestamp provided, resolve to block number for historical query
+    let blockTag: number | undefined
+    if (opts.timestamp != null) {
+      const { number: latestBlock } = (await this.provider.getBlock('latest'))!
+      blockTag = await getSomeBlockNumberBefore(
+        async (block: number) => (await this.provider.getBlock(block))!.timestamp,
+        latestBlock,
+        opts.timestamp,
+        this,
+      )
+    }
+
+    const [result, { decimals }] = await Promise.all([
+      blockTag != null
+        ? contract.getTokenPrice.staticCall(token, { blockTag })
+        : contract.getTokenPrice(token),
+      this.getTokenInfo(token),
+    ])
+
+    const rawPrice = BigInt(result.value)
+    return { price: Number(rawPrice) * 10 ** (decimals - 36) }
   }
 
   /** {@inheritDoc Chain.getTotalFeesEstimate} */
