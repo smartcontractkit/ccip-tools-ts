@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
 import {
+  type CantonConfig,
   type Chain,
   type ChainGetter,
   type ChainTransaction,
@@ -17,6 +18,7 @@ import {
 } from '@chainlink/ccip-sdk/src/index.ts'
 
 import { loadAptosWallet } from './aptos.ts'
+import { loadCantonWallet } from './canton.ts'
 import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
 import { loadSuiWallet } from './sui.ts'
@@ -55,11 +57,33 @@ async function collectEndpoints(
 
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'>,
+  argv: Pick<
+    GlobalOpts,
+    | 'rpcs'
+    | 'rpcsFile'
+    | 'api'
+    | 'cantonJwt'
+    | 'cantonParty'
+    | 'cantonEdsUrl'
+    | 'indexerUrl'
+    | 'cantonCcipParty'
+    | 'cantonTransferInstructionUrl'
+  >,
 ): ChainGetter
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'>,
+  argv: Pick<
+    GlobalOpts,
+    | 'rpcs'
+    | 'rpcsFile'
+    | 'api'
+    | 'cantonJwt'
+    | 'cantonParty'
+    | 'cantonEdsUrl'
+    | 'indexerUrl'
+    | 'cantonCcipParty'
+    | 'cantonTransferInstructionUrl'
+  >,
   txHash: string,
 ): [ChainGetter, Promise<[Chain, ChainTransaction]>]
 
@@ -74,9 +98,30 @@ export function fetchChainsFromRpcs(
  */
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'>,
+  argv: Pick<
+    GlobalOpts,
+    | 'rpcs'
+    | 'rpcsFile'
+    | 'api'
+    | 'cantonJwt'
+    | 'cantonParty'
+    | 'cantonEdsUrl'
+    | 'indexerUrl'
+    | 'cantonCcipParty'
+    | 'cantonTransferInstructionUrl'
+  >,
   txHash?: string,
 ) {
+  const cantonConfig: CantonConfig | undefined = argv.cantonJwt
+    ? {
+        jwt: argv.cantonJwt,
+        party: argv.cantonParty ?? '',
+        edsUrl: argv.cantonEdsUrl ?? '',
+        indexerUrl: argv.indexerUrl,
+        ccipParty: argv.cantonCcipParty ?? '',
+        transferInstructionUrl: argv.cantonTransferInstructionUrl ?? '',
+      }
+    : undefined
   const chains: Record<string, Promise<Chain>> = {}
   const chainsCbs: Record<
     string,
@@ -104,6 +149,7 @@ export function fetchChainsFromRpcs(
       for (const url of endpoints) {
         const chain$ = C.fromUrl(url, {
           ...ctx,
+          ...(cantonConfig ? { cantonConfig } : {}),
           apiClient:
             argv.api === false ? null : typeof argv.api === 'string' ? argv.api : undefined,
         })
@@ -222,6 +268,9 @@ export async function loadChainWallet(chain: Chain, argv: { wallet?: unknown; rp
         chain.network.networkType === NetworkType.Testnet,
       )
       return [wallet.getAddress(), wallet] as const
+    case ChainFamily.Canton:
+      wallet = loadCantonWallet(argv)
+      return [wallet.party, wallet] as const
     default:
       // TypeScript exhaustiveness check - this should never be reached
       throw new CCIPChainFamilyUnsupportedError((chain.network as { family: string }).family)

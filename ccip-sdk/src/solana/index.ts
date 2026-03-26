@@ -878,7 +878,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    */
   static encodeExtraArgs(args: ExtraArgs): string {
     if ('computeUnits' in args) throw new CCIPSolanaExtraArgsEncodingError()
-    const gasLimitUint128Le = toLeArray(args.gasLimit, 16)
+    const gasLimitUint128Le = toLeArray(args.gasLimit ?? 0n, 16)
     return concat([
       EVMExtraArgsV2Tag,
       gasLimitUint128Le,
