@@ -196,7 +196,7 @@ export function createCantonClient(config: CantonClientConfig) {
      * @returns The full `JsTransaction` including all events
      */
     async getTransactionById(updateId: string): Promise<JsTransaction> {
-      const response = await ledgerPost<{ transaction: JsTransaction }>(
+      const response = await post<{ transaction: JsTransaction }>(
         baseUrl,
         '/v2/updates/transaction-by-id',
         headers,

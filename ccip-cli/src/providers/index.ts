@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
 import {
+  type CantonConfig,
   type Chain,
   type ChainGetter,
   type ChainTransaction,
@@ -58,14 +59,30 @@ export function fetchChainsFromRpcs(
   ctx: Ctx,
   argv: Pick<
     GlobalOpts,
-    'rpcs' | 'rpcsFile' | 'api' | 'cantonJwt' | 'cantonParty' | 'cantonEdsUrl' | 'indexerUrl'
+    | 'rpcs'
+    | 'rpcsFile'
+    | 'api'
+    | 'cantonJwt'
+    | 'cantonParty'
+    | 'cantonEdsUrl'
+    | 'indexerUrl'
+    | 'cantonCcipParty'
+    | 'cantonTransferInstructionUrl'
   >,
 ): ChainGetter
 export function fetchChainsFromRpcs(
   ctx: Ctx,
   argv: Pick<
     GlobalOpts,
-    'rpcs' | 'rpcsFile' | 'api' | 'cantonJwt' | 'cantonParty' | 'cantonEdsUrl' | 'indexerUrl'
+    | 'rpcs'
+    | 'rpcsFile'
+    | 'api'
+    | 'cantonJwt'
+    | 'cantonParty'
+    | 'cantonEdsUrl'
+    | 'indexerUrl'
+    | 'cantonCcipParty'
+    | 'cantonTransferInstructionUrl'
   >,
   txHash: string,
 ): [ChainGetter, Promise<[Chain, ChainTransaction]>]
@@ -83,16 +100,26 @@ export function fetchChainsFromRpcs(
   ctx: Ctx,
   argv: Pick<
     GlobalOpts,
-    'rpcs' | 'rpcsFile' | 'api' | 'cantonJwt' | 'cantonParty' | 'cantonEdsUrl' | 'indexerUrl'
+    | 'rpcs'
+    | 'rpcsFile'
+    | 'api'
+    | 'cantonJwt'
+    | 'cantonParty'
+    | 'cantonEdsUrl'
+    | 'indexerUrl'
+    | 'cantonCcipParty'
+    | 'cantonTransferInstructionUrl'
   >,
   txHash?: string,
 ) {
-  const cantonConfig = argv.cantonJwt
+  const cantonConfig: CantonConfig | undefined = argv.cantonJwt
     ? {
         jwt: argv.cantonJwt,
         party: argv.cantonParty ?? '',
         edsUrl: argv.cantonEdsUrl ?? '',
         indexerUrl: argv.indexerUrl,
+        ccipParty: argv.cantonCcipParty ?? '',
+        transferInstructionUrl: argv.cantonTransferInstructionUrl ?? '',
       }
     : undefined
   const chains: Record<string, Promise<Chain>> = {}

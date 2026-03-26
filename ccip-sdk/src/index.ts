@@ -25,6 +25,7 @@ export {
 
 export type {
   ApiRetryConfig,
+  CantonConfig,
   Chain,
   ChainContext,
   ChainGetter,

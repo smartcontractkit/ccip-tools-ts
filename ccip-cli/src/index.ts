@@ -11,7 +11,7 @@ import { Format } from './commands/index.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '1.1.1-7c1e223'
+const VERSION = '1.3.1-850eb05'
 // generate:end
 
 const globalOpts = {
@@ -67,6 +67,14 @@ const globalOpts = {
   'indexer-url': {
     type: 'string',
     describe: '(Optional) Base URL for the CCV indexer service',
+  },
+  'canton-ccip-party': {
+    type: 'string',
+    describe: 'Daml party ID for Canton CCIP interactions (e.g. participant1::12208...)',
+  },
+  'canton-transfer-instruction-url': {
+    type: 'string',
+    describe: 'Base URL for fetching transfer instructions from Canton (if different from EDS URL)',
   },
 } as const
 

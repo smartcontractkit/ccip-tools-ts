@@ -94,7 +94,6 @@
     "got": "^11.8.6",
     "micro-memoize": "^5.1.1",
     "type-fest": "^5.5.0",
-    "openapi-fetch": "^0.17.0",
     "yaml": "2.8.2"
   },
   "overrides": {
