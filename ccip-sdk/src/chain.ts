@@ -208,6 +208,14 @@ export type TokenTransferFee = {
 }
 
 /**
+ * Token price returned by {@link Chain.getTokenPrice}.
+ */
+export type TokenPrice = {
+  /** Price per whole token in the quote currency (USD by default, e.g., 9.11 for LINK at $9.11). */
+  price: number
+}
+
+/**
  * Total fees estimate returned by {@link Chain.getTotalFeesEstimate}.
  */
 export type TotalFeesEstimate = {
@@ -1645,6 +1653,40 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   getTotalFeesEstimate(_opts: Omit<SendMessageOpts, 'approveMax'>): Promise<TotalFeesEstimate> {
     return Promise.reject(new CCIPNotImplementedError('getTotalFeesEstimate'))
+  }
+
+  /**
+   * Fetch the on-chain USD price of a token from the FeeQuoter or PriceRegistry.
+   *
+   * @remarks
+   * On EVM, the price contract is resolved via the Router's OnRamp:
+   * PriceRegistry for v1.2/v1.5 lanes, FeeQuoter for v1.6+ lanes.
+   * When `timestamp` is provided on EVM, the price is read at the
+   * block closest to that timestamp (requires archive node).
+   * On Solana and Aptos, the FeeQuoter is resolved directly from the
+   * Router config; `timestamp` is not yet supported and will be ignored.
+   *
+   * @param opts - Options identifying the token:
+   *   - `router` — Router address on this chain.
+   *   - `token` — Token address. Pass `ZeroAddress` for the native token
+   *     (auto-resolved to the wrapped native via {@link Chain.getNativeTokenForRouter}).
+   *   - `timestamp` — *(optional)* Unix timestamp in seconds. When provided
+   *     on EVM, returns the price at the block closest to this time.
+   *     Ignored on Solana and Aptos.
+   * @returns Promise resolving to {@link TokenPrice} with the USD price per whole token.
+   * @throws {@link CCIPNotImplementedError} if not implemented for this chain family
+   *
+   * @example
+   * ```typescript
+   * const { price } = await chain.getTokenPrice({
+   *   router: routerAddress,
+   *   token: linkAddress,
+   * })
+   * console.log(`LINK: $${price.toFixed(2)}`)
+   * ```
+   */
+  getTokenPrice(_opts: { router: string; token: string; timestamp?: number }): Promise<TokenPrice> {
+    return Promise.reject(new CCIPNotImplementedError('getTokenPrice'))
   }
 
   /**

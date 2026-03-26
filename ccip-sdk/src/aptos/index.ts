@@ -17,6 +17,7 @@ import {
   type LogFilter,
   type TokenInfo,
   type TokenPoolRemote,
+  type TokenPrice,
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
@@ -824,6 +825,36 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       }
     }
     throw CCIPError.from(firstErr ?? `Could not view 'get_remote_token' in ${tokenPool}`, 'UNKNOWN')
+  }
+
+  /** {@inheritDoc Chain.getTokenPrice} */
+  override async getTokenPrice(opts: {
+    router: string
+    token: string
+    timestamp?: number
+  }): Promise<TokenPrice> {
+    if (opts.timestamp != null) {
+      this.logger.warn(
+        'getTokenPrice: timestamp parameter not yet supported on Aptos, returning latest price',
+      )
+    }
+    const feeQuoterModule = `${opts.router.split('::')[0]}::fee_quoter`
+
+    const [[prices], { decimals }] = await Promise.all([
+      this.provider.view<[{ value: string; timestamp: string }[]]>({
+        payload: {
+          function:
+            `${feeQuoterModule}::get_token_prices` as `${string}::${string}::get_token_prices`,
+          functionArguments: [[opts.token]],
+        },
+      }),
+      this.getTokenInfo(opts.token),
+    ])
+
+    const rawPrice = BigInt(prices[0]!.value)
+    return {
+      price: Number(rawPrice) * 10 ** (decimals - 36),
+    }
   }
 
   /** {@inheritDoc Chain.getFeeTokens} */
