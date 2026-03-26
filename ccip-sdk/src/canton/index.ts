@@ -461,6 +461,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     throw new CCIPNotImplementedError('CantonChain.getFee')
   }
 
+  /** {@inheritDoc Chain.generateUnsignedSendMessage} */
   override async generateUnsignedSendMessage(
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedCantonTx> {
@@ -483,7 +484,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     }
 
     const cantonArgs = message.extraArgs as CantonExtraArgsV1 | undefined
-    if (!cantonArgs?.feeTokenHoldingCids?.length) {
+    if (!cantonArgs?.feeTokenHoldingCids.length) {
       throw new CCIPError(
         CCIPErrorCode.METHOD_UNSUPPORTED,
         'CantonChain.generateUnsignedSendMessage: message.extraArgs.feeTokenHoldingCids is required. ' +
@@ -624,7 +625,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     // Step 8 — Merge all disclosed contracts
     const transferFactoryDisclosures: DisclosedContract[] =
-      transferFactoryResponse.choiceContext.disclosedContracts ?? []
+      transferFactoryResponse.choiceContext.disclosedContracts
 
     const allDisclosed: DisclosedContract[] = [
       acsDisclosures.perPartyRouter,
@@ -686,7 +687,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     // Submit and wait for the full transaction (so we get events back)
     const response = await this.provider.submitAndWaitForTransaction(unsigned.commands)
-    const txRecord = (response.transaction ?? response) as Record<string, unknown>
+    const txRecord = response.transaction as Record<string, unknown>
     const updateId: string =
       (typeof txRecord.update_id === 'string' ? txRecord.update_id : null) ??
       (typeof txRecord.updateId === 'string' ? txRecord.updateId : '')
@@ -694,7 +695,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.logger.debug(`CantonChain.sendMessage: submitted, updateId=${updateId}`)
 
     // Parse CCIPMessageSent from the transaction events
-    const sendResult = parseCantonSendResult(response.transaction ?? response, updateId)
+    const sendResult = parseCantonSendResult(response.transaction, updateId)
 
     const timestamp = resolveTimestamp(txRecord)
 
@@ -920,13 +921,13 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     // Submit and wait for the full transaction (so we get events back)
     const response = await this.provider.submitAndWaitForTransaction(unsigned.commands)
-    const txRecord = (response.transaction ?? response) as Record<string, unknown>
+    const txRecord = response.transaction as Record<string, unknown>
     const updateId: string =
       (typeof txRecord.update_id === 'string' ? txRecord.update_id : null) ??
       (typeof txRecord.updateId === 'string' ? txRecord.updateId : '')
 
     // Parse execution receipt from the transaction events
-    const receipt = parseCantonExecutionReceipt(response.transaction ?? response, updateId)
+    const receipt = parseCantonExecutionReceipt(response.transaction, updateId)
     const timestamp = resolveTimestamp(txRecord)
 
     // Build a synthetic ChainLog — Canton doesn't have EVM-style logs, but the

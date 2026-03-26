@@ -1,5 +1,6 @@
 import type { ChainFamily } from '../types.ts'
 import type { JsCommands } from './client/index.ts'
+import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
 
 /**
  * A Canton "wallet" identifies the acting party and optionally overrides the
@@ -97,13 +98,14 @@ export interface CantonExtraArgsV1 {
  * Parse a fee-token string of the form `"admin::tokenId"` into a
  * {@link CantonInstrumentId}.
  *
- * @throws {Error} if the string does not contain the `::` separator.
+ * @throws {@link CCIPArgumentInvalidError} if the string does not contain the `::` separator.
  */
 export function parseInstrumentId(feeToken: string): CantonInstrumentId {
   const sep = feeToken.split('::')
   if (sep.length !== 3) {
-    throw new Error(
-      `Invalid Canton instrument ID "${feeToken}": expected "ad::min::tokenId" format`,
+    throw new CCIPArgumentInvalidError(
+      'feeToken',
+      `invalid Canton instrument ID "${feeToken}": expected "admin::tokenId" format`,
     )
   }
   const admin = [sep[0], sep[1]].join('::')

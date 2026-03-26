@@ -378,7 +378,7 @@ async function request<T>(
  * @param timeoutMs - Timeout for the request in milliseconds.
  * @param queryParams - Optional query parameters to append to the URL.
  * @returns A promise resolving to the parsed response of type T.
- * @throws {CantonApiError} If the request fails or the response is not OK.
+ * @throws {@link CantonApiError} If the request fails or the response is not OK.
  */
 export async function get<T>(
   baseUrl: string,
@@ -400,7 +400,7 @@ export async function get<T>(
  * @param body - The request payload to send as JSON.
  * @param queryParams - Optional query parameters to append to the URL.
  * @returns A promise resolving to the parsed response of type T.
- * @throws {CantonApiError} If the request fails or the response is not OK.
+ * @throws {@link CantonApiError} If the request fails or the response is not OK.
  */
 export async function post<T>(
   baseUrl: string,
