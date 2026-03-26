@@ -1261,7 +1261,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     const feeToken = message.feeToken ?? ZeroAddress
     const receiverBytes = getAddressBytes(message.receiver)
-    const receiver = receiverBytes.length <= 32 ? zeroPadValue(receiverBytes, 32) : hexlify(receiverBytes)
+    const receiver =
+      receiverBytes.length <= 32 ? zeroPadValue(receiverBytes, 32) : hexlify(receiverBytes)
     const data = hexlify(message.data ?? '0x')
     const extraArgs = hexlify(
       (this.constructor as typeof EVMChain).encodeExtraArgs(message.extraArgs),
