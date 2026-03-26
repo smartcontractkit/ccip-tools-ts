@@ -499,7 +499,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const payloadHex = message.data
       ? stripHexPrefix(typeof message.data === 'string' ? message.data : String(message.data))
       : ''
-    const gasLimit = cantonArgs.gasLimit ?? 200_000
+    const gasLimit = cantonArgs.gasLimit ?? 200_000n
     const feeTokenHoldingCids = cantonArgs.feeTokenHoldingCids
     const ccvRawAddresses = cantonArgs.ccvRawAddresses ?? []
     // Derive hex InstanceAddresses at runtime: keccak256 of each raw "instanceId@party" string

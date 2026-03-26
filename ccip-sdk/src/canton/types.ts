@@ -90,7 +90,7 @@ export interface CantonExtraArgsV1 {
    */
   ccvRawAddresses?: string[]
   /** Gas limit for ccipReceive on the destination chain */
-  gasLimit?: bigint | number
+  gasLimit?: bigint
 }
 
 /**
