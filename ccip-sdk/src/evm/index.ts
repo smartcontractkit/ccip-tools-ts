@@ -1017,7 +1017,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       this.provider,
     ) as unknown as TypedContract<typeof Router_ABI>
     return contract.getFee(destChainSelector, {
-      receiver: zeroPadValue(getAddressBytes(populatedMessage.receiver), 32),
+      receiver: (() => {
+        const receiverBytes = getAddressBytes(populatedMessage.receiver)
+        return receiverBytes.length <= 32 ? zeroPadValue(receiverBytes, 32) : hexlify(receiverBytes)
+      })(),
       data: hexlify(populatedMessage.data ?? '0x'),
       tokenAmounts: populatedMessage.tokenAmounts ?? [],
       feeToken: populatedMessage.feeToken ?? ZeroAddress,
@@ -1257,7 +1260,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
 
     const feeToken = message.feeToken ?? ZeroAddress
-    const receiver = zeroPadValue(getAddressBytes(message.receiver), 32)
+    const receiverBytes = getAddressBytes(message.receiver)
+    const receiver = receiverBytes.length <= 32 ? zeroPadValue(receiverBytes, 32) : hexlify(receiverBytes)
     const data = hexlify(message.data ?? '0x')
     const extraArgs = hexlify(
       (this.constructor as typeof EVMChain).encodeExtraArgs(message.extraArgs),
