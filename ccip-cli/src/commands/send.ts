@@ -40,6 +40,10 @@ import { showRequests } from './show.ts'
 import type { Ctx } from './types.ts'
 import { getCtx, logParsedError, parseTokenAmounts } from './utils.ts'
 import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
+import { decodeAddress } from '../../../ccip-sdk/dist/utils.js'
+
+// CLI send supports all chains
+import { allSupportedChains } from '@chainlink/ccip-sdk/all'
 
 export const command = 'send'
 export const describe = 'Send a CCIP message from source to destination chain'
@@ -226,6 +230,10 @@ async function sendMessage(
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
 
+  // Validate router and receiver addresses for source and destination chains, respectively
+  decodeAddress(argv.router, sourceNetwork.family)
+  if (argv.receiver) decodeAddress(argv.receiver, destNetwork.family)
+
   let data: BytesLike | undefined
   if (argv.data) {
     try {
@@ -243,9 +251,7 @@ async function sendMessage(
     ? await parseTokenAmounts(source, argv.transferTokens)
     : []
 
-  let receiver = argv.receiver
-  let accounts,
-    accountIsWritableBitmap = 0n
+  let accounts, accountIsWritableBitmap = 0n
   if (destNetwork.family === ChainFamily.Solana) {
     // parse accounts with or without `=rw` suffix
     if (argv.account?.length) {
@@ -259,6 +265,7 @@ async function sendMessage(
     }
   }
 
+  let receiver = argv.receiver
   let walletAddress, wallet
   if (!receiver) {
     if (sourceNetwork.family !== destNetwork.family)
