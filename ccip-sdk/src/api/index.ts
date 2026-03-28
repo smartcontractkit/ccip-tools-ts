@@ -3,6 +3,8 @@ import type { SetRequired } from 'type-fest'
 
 import {
   CCIPApiClientNotAvailableError,
+  CCIPError,
+  CCIPErrorCode,
   CCIPHttpError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
@@ -668,6 +670,12 @@ export class CCIPAPIClient {
     messageId: string,
     options?: { signal?: AbortSignal },
   ): Promise<ExecutionInput & Lane & { offRamp: string }> {
+    const request = await this.getMessageById(messageId)
+    if (request.metadata.status === MessageStatus.Success)
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, `Already executed`, {
+        context: { messageId, txHash: request.metadata.receiptTransactionHash },
+      })
+
     const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}/execution-inputs`
 
     this.logger.debug(`CCIPAPIClient: GET ${url}`)
@@ -741,7 +749,7 @@ export class CCIPAPIClient {
         version: raw.version as CCIPVersion,
       }
     } else {
-      ;({ lane } = await this.getMessageById(messageId))
+      lane = request.lane
     }
 
     const proof = calculateManualExecProof(messagesInBatch, lane, messageId, raw.merkleRoot, this)
