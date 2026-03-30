@@ -4,9 +4,14 @@ import { zeroPadValue } from 'ethers'
 
 import type { UnsignedTONTx } from './types.ts'
 import { CCIPError, CCIPErrorCode, CCIPExtraArgsInvalidError } from '../errors/index.ts'
-import { type ExtraArgs, type SVMExtraArgsV1, EVMExtraArgsV2Tag, SVMExtraArgsV1Tag } from '../extra-args.ts'
+import {
+  type ExtraArgs,
+  type SVMExtraArgsV1,
+  EVMExtraArgsV2Tag,
+  SVMExtraArgsV1Tag,
+} from '../extra-args.ts'
 import { type AnyMessage, type WithLogger, ChainFamily } from '../types.ts'
-import { bigIntReplacer, bytesToBuffer, getAddressBytes, getDataBytes } from '../utils.ts'
+import { bigIntReplacer, bytesToBuffer, getAddressBytes } from '../utils.ts'
 
 /** Opcode for Router ccipSend operation */
 export const CCIP_SEND_OPCODE = 0x31768d95
@@ -111,14 +116,15 @@ function encodeEVMExtraArgsCell(extraArgs: ExtraArgs): Cell {
 function addressToUint256(addr: string): bigint {
   const bytes = getAddressBytes(addr)
   // zeroPadValue returns a hex string, use it directly
-  const hex = bytes.length <= 32 ? zeroPadValue(bytes, 32) : '0x' + Buffer.from(bytes).toString('hex')
+  const hex =
+    bytes.length <= 32 ? zeroPadValue(bytes, 32) : '0x' + Buffer.from(bytes).toString('hex')
   return BigInt(hex)
 }
 
 function encodeSVMExtraArgsCell(extraArgs: SVMExtraArgsV1): Cell {
   // Encode accounts as a snaked cell of uint256 values
   let accountsCell = beginCell().endCell()
-  if (extraArgs.accounts && extraArgs.accounts.length > 0) {
+  if (extraArgs.accounts.length > 0) {
     const accountBuilder = beginCell()
     for (const account of extraArgs.accounts) {
       accountBuilder.storeUint(addressToUint256(account), 256)
@@ -127,14 +133,12 @@ function encodeSVMExtraArgsCell(extraArgs: SVMExtraArgsV1): Cell {
   }
 
   // Encode tokenReceiver as uint256
-  const tokenReceiver = extraArgs.tokenReceiver
-    ? addressToUint256(extraArgs.tokenReceiver)
-    : 0n
+  const tokenReceiver = extraArgs.tokenReceiver ? addressToUint256(extraArgs.tokenReceiver) : 0n
 
   const builder = beginCell()
     .storeUint(Number(SVMExtraArgsV1Tag), 32) // 0x1f3b3aba
     .storeUint(Number(extraArgs.computeUnits), 32)
-    .storeUint(Number(extraArgs.accountIsWritableBitmap ?? 0n), 64)
+    .storeUint(Number(extraArgs.accountIsWritableBitmap), 64)
     .storeBit(extraArgs.allowOutOfOrderExecution)
     .storeUint(tokenReceiver, 256) // uint256
     .storeRef(accountsCell) // SnakedCell<uint256>
