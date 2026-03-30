@@ -36,7 +36,6 @@ import {
 import {
   CCIPArgumentInvalidError,
   CCIPExecutionReportChainMismatchError,
-  CCIPExtraArgsInvalidError,
   CCIPHttpError,
   CCIPNotImplementedError,
   CCIPReceiptNotFoundError,
@@ -1115,25 +1114,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * {@inheritDoc Chain.generateUnsignedExecute}
    * @throws {@link CCIPExtraArgsInvalidError} if extra args are not EVMExtraArgsV2 format
    */
-  generateUnsignedExecute(
+  async generateUnsignedExecute(
     opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<UnsignedTONTx> {
-    if (
-      !(
-        'input' in opts &&
-        'message' in opts.input &&
-        'allowOutOfOrderExecution' in opts.input.message &&
-        'gasLimit' in opts.input.message
-      )
-    ) {
-      throw new CCIPExtraArgsInvalidError('TON')
-    }
-    const { offRamp, input } = opts
+    const resolved = await this.resolveExecuteOpts(opts)
+    const { offRamp, input } = resolved
 
     const unsigned = generateUnsignedExecuteReport(
       offRamp,
       input as ExecutionInput<CCIPMessage_V1_6_EVM>,
-      opts,
+      resolved,
     )
 
     return Promise.resolve({
@@ -1148,16 +1138,17 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @throws {@link CCIPReceiptNotFoundError} if execution receipt not found within timeout
    */
   async execute(opts: Parameters<Chain['execute']>[0]): Promise<CCIPExecution> {
-    if (!('input' in opts && 'message' in opts.input))
-      throw new CCIPExecutionReportChainMismatchError('TON')
-    const { offRamp, wallet } = opts
-    if (!isTONWallet(wallet)) {
-      throw new CCIPWalletInvalidError(wallet)
-    }
+    const { wallet } = opts
+    if (!isTONWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
     const payer = await wallet.getAddress()
 
+    const resolved = await this.resolveExecuteOpts(opts)
+    const { offRamp } = resolved
+    if (!('message' in resolved.input)) throw new CCIPExecutionReportChainMismatchError('TON')
+    const message = resolved.input.message as CCIPMessage_V1_6_EVM
+
     const { family: _, ...unsigned } = await this.generateUnsignedExecute({
-      ...opts,
+      ...resolved,
       payer,
     })
 
@@ -1168,7 +1159,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       ...unsigned,
     })
 
-    const message = opts.input.message as CCIPMessage_V1_6_EVM
     for await (const exec of this.getExecutionReceipts({
       offRamp,
       messageId: message.messageId,
