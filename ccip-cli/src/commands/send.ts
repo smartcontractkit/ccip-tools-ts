@@ -28,6 +28,7 @@ import {
   CCIPTokenNotFoundError,
   ChainFamily,
   bigIntReviver,
+  decodeAddress,
   estimateReceiveExecution,
   getDataBytes,
   networkInfo,
@@ -40,10 +41,6 @@ import { showRequests } from './show.ts'
 import type { Ctx } from './types.ts'
 import { getCtx, logParsedError, parseTokenAmounts } from './utils.ts'
 import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
-import { decodeAddress } from '../../../ccip-sdk/dist/utils.js'
-
-// CLI send supports all chains
-import { allSupportedChains } from '@chainlink/ccip-sdk/all'
 
 export const command = 'send'
 export const describe = 'Send a CCIP message from source to destination chain'
@@ -251,7 +248,8 @@ async function sendMessage(
     ? await parseTokenAmounts(source, argv.transferTokens)
     : []
 
-  let accounts, accountIsWritableBitmap = 0n
+  let accounts,
+    accountIsWritableBitmap = 0n
   if (destNetwork.family === ChainFamily.Solana) {
     // parse accounts with or without `=rw` suffix
     if (argv.account?.length) {
