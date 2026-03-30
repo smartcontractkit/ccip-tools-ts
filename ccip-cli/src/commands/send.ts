@@ -28,6 +28,7 @@ import {
   CCIPTokenNotFoundError,
   ChainFamily,
   bigIntReviver,
+  decodeAddress,
   estimateReceiveExecution,
   getDataBytes,
   networkInfo,
@@ -226,6 +227,10 @@ async function sendMessage(
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
 
+  // Validate router and receiver addresses for source and destination chains, respectively
+  decodeAddress(argv.router, sourceNetwork.family)
+  if (argv.receiver) decodeAddress(argv.receiver, destNetwork.family)
+
   let data: BytesLike | undefined
   if (argv.data) {
     try {
@@ -243,7 +248,6 @@ async function sendMessage(
     ? await parseTokenAmounts(source, argv.transferTokens)
     : []
 
-  let receiver = argv.receiver
   let accounts,
     accountIsWritableBitmap = 0n
   if (destNetwork.family === ChainFamily.Solana) {
@@ -259,6 +263,7 @@ async function sendMessage(
     }
   }
 
+  let receiver = argv.receiver
   let walletAddress, wallet
   if (!receiver) {
     if (sourceNetwork.family !== destNetwork.family)
