@@ -4,9 +4,9 @@ import { zeroPadValue } from 'ethers'
 
 import type { UnsignedTONTx } from './types.ts'
 import { CCIPError, CCIPErrorCode, CCIPExtraArgsInvalidError } from '../errors/index.ts'
-import { type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
+import { type ExtraArgs, type SVMExtraArgsV1, EVMExtraArgsV2Tag, SVMExtraArgsV1Tag } from '../extra-args.ts'
 import { type AnyMessage, type WithLogger, ChainFamily } from '../types.ts'
-import { bigIntReplacer, bytesToBuffer, getDataBytes } from '../utils.ts'
+import { bigIntReplacer, bytesToBuffer, getAddressBytes, getDataBytes } from '../utils.ts'
 
 /** Opcode for Router ccipSend operation */
 export const CCIP_SEND_OPCODE = 0x31768d95
@@ -46,17 +46,39 @@ function encodeTokenAmounts(
 }
 
 /**
+ * Checks if extraArgs is SVMExtraArgsV1 format.
+ */
+function isSVMExtraArgs(extraArgs: ExtraArgs): extraArgs is SVMExtraArgsV1 {
+  return 'computeUnits' in extraArgs
+}
+
+/**
+ * Encodes extraArgs as a Cell.
+ *
+ * Supports two formats based on the destination chain:
+ * - GenericExtraArgsV2 (EVMExtraArgsV2) for EVM/TON/Aptos destinations
+ * - SVMExtraArgsV1 for Solana destinations
+ *
+ * @param extraArgs - Extra arguments for CCIP message
+ * @returns Cell encoding the extra arguments
+ * @throws {@link CCIPExtraArgsInvalidError} if extraArgs format is invalid
+ */
+export function encodeExtraArgsCell(extraArgs: ExtraArgs): Cell {
+  if (isSVMExtraArgs(extraArgs)) {
+    return encodeSVMExtraArgsCell(extraArgs)
+  }
+  return encodeEVMExtraArgsCell(extraArgs)
+}
+
+/**
  * Encodes extraArgs as a Cell using the GenericExtraArgsV2 (EVMExtraArgsV2) format.
  *
  * Format per chainlink-ton TL-B:
  * - tag: 32-bit opcode (0x181dcf10)
  * - gasLimit: Maybe<uint256> (1 bit flag + 256 bits if present)
  * - allowOutOfOrderExecution: 1 bit
- * @param extraArgs - Extra arguments for CCIP message
- * @returns Cell encoding the extra arguments
- * @throws {@link CCIPExtraArgsInvalidError} if `extraArgs` contains fields other than `gasLimit` and `allowOutOfOrderExecution`
  */
-export function encodeExtraArgsCell(extraArgs: ExtraArgs): Cell {
+function encodeEVMExtraArgsCell(extraArgs: ExtraArgs): Cell {
   if (
     Object.keys(extraArgs).filter((k) => k !== '_tag').length !== 2 ||
     !('gasLimit' in extraArgs && 'allowOutOfOrderExecution' in extraArgs)
@@ -71,6 +93,51 @@ export function encodeExtraArgsCell(extraArgs: ExtraArgs): Cell {
   const builder = beginCell().storeUint(Number(EVMExtraArgsV2Tag), 32) // 0x181dcf10
   builder.storeMaybeUint(gasLimit, 256)
   builder.storeBit(extraArgs.allowOutOfOrderExecution)
+
+  return builder.endCell()
+}
+
+/**
+ * Encodes extraArgs as a Cell using the SVMExtraArgsV1 format.
+ *
+ * Format per chainlink-ton TL-B:
+ * - tag: 32-bit opcode (0x1f3b3aba)
+ * - computeUnits: uint32
+ * - accountIsWritableBitmap: uint64
+ * - allowOutOfOrderExecution: bool
+ * - tokenReceiver: uint256
+ * - accounts: SnakedCell<uint256>
+ */
+function addressToUint256(addr: string): bigint {
+  const bytes = getAddressBytes(addr)
+  // zeroPadValue returns a hex string, use it directly
+  const hex = bytes.length <= 32 ? zeroPadValue(bytes, 32) : '0x' + Buffer.from(bytes).toString('hex')
+  return BigInt(hex)
+}
+
+function encodeSVMExtraArgsCell(extraArgs: SVMExtraArgsV1): Cell {
+  // Encode accounts as a snaked cell of uint256 values
+  let accountsCell = beginCell().endCell()
+  if (extraArgs.accounts && extraArgs.accounts.length > 0) {
+    const accountBuilder = beginCell()
+    for (const account of extraArgs.accounts) {
+      accountBuilder.storeUint(addressToUint256(account), 256)
+    }
+    accountsCell = accountBuilder.endCell()
+  }
+
+  // Encode tokenReceiver as uint256
+  const tokenReceiver = extraArgs.tokenReceiver
+    ? addressToUint256(extraArgs.tokenReceiver)
+    : 0n
+
+  const builder = beginCell()
+    .storeUint(Number(SVMExtraArgsV1Tag), 32) // 0x1f3b3aba
+    .storeUint(Number(extraArgs.computeUnits), 32)
+    .storeUint(Number(extraArgs.accountIsWritableBitmap ?? 0n), 64)
+    .storeBit(extraArgs.allowOutOfOrderExecution)
+    .storeUint(tokenReceiver, 256) // uint256
+    .storeRef(accountsCell) // SnakedCell<uint256>
 
   return builder.endCell()
 }
@@ -92,8 +159,11 @@ export function buildCcipSendCell(
   feeTokenAddress: Address | null = null,
   queryId = 0n,
 ): Cell {
-  // Get receiver bytes and pad to 32 bytes for cross-chain encoding
-  const paddedReceiver = bytesToBuffer(zeroPadValue(getDataBytes(message.receiver), 32))
+  // Get receiver bytes — use getAddressBytes to handle hex, base58 (Solana), TON raw formats
+  const receiverBytes = getAddressBytes(message.receiver)
+  const paddedReceiver = bytesToBuffer(
+    receiverBytes.length <= 32 ? zeroPadValue(receiverBytes, 32) : receiverBytes,
+  )
 
   // Data cell (ref 0)
   const dataCell = beginCell()
@@ -162,8 +232,11 @@ export async function getFee(
   }
 
   // Build stack parameters for validatedFee call
-  const paddedReceiver = bytesToBuffer(zeroPadValue(getDataBytes(message.receiver), 32))
-  const receiverSlice = beginCell().storeBuffer(paddedReceiver).endCell()
+  const feeReceiverBytes = getAddressBytes(message.receiver)
+  const paddedFeeReceiver = bytesToBuffer(
+    feeReceiverBytes.length <= 32 ? zeroPadValue(feeReceiverBytes, 32) : feeReceiverBytes,
+  )
+  const receiverSlice = beginCell().storeBuffer(paddedFeeReceiver).endCell()
   const dataCell = beginCell()
     .storeBuffer(bytesToBuffer(message.data || '0x'))
     .endCell()
