@@ -1,14 +1,16 @@
 import { type Cell, beginCell, toNano } from '@ton/core'
 import { type TonClient, Address } from '@ton/ton'
-import { zeroPadValue } from 'ethers'
+import { toBigInt, zeroPadValue } from 'ethers'
 
 import type { UnsignedTONTx } from './types.ts'
 import { CCIPError, CCIPErrorCode, CCIPExtraArgsInvalidError } from '../errors/index.ts'
 import {
   type ExtraArgs,
   type SVMExtraArgsV1,
+  type SuiExtraArgsV1,
   EVMExtraArgsV2Tag,
   SVMExtraArgsV1Tag,
+  SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
 import { type AnyMessage, type WithLogger, ChainFamily } from '../types.ts'
 import { bigIntReplacer, bytesToBuffer, getAddressBytes } from '../utils.ts'
@@ -58,11 +60,19 @@ function isSVMExtraArgs(extraArgs: ExtraArgs): extraArgs is SVMExtraArgsV1 {
 }
 
 /**
+ * Checks if extraArgs is SuiExtraArgsV1 format.
+ */
+function isSuiExtraArgs(extraArgs: ExtraArgs): extraArgs is SuiExtraArgsV1 {
+  return 'receiverObjectIds' in extraArgs
+}
+
+/**
  * Encodes extraArgs as a Cell.
  *
- * Supports two formats based on the destination chain:
+ * Supports three formats based on the destination chain:
  * - GenericExtraArgsV2 (EVMExtraArgsV2) for EVM/TON/Aptos destinations
  * - SVMExtraArgsV1 for Solana destinations
+ * - SuiExtraArgsV1 for Sui destinations
  *
  * @param extraArgs - Extra arguments for CCIP message
  * @returns Cell encoding the extra arguments
@@ -71,6 +81,9 @@ function isSVMExtraArgs(extraArgs: ExtraArgs): extraArgs is SVMExtraArgsV1 {
 export function encodeExtraArgsCell(extraArgs: ExtraArgs): Cell {
   if (isSVMExtraArgs(extraArgs)) {
     return encodeSVMExtraArgsCell(extraArgs)
+  }
+  if (isSuiExtraArgs(extraArgs)) {
+    return encodeSuiExtraArgsCell(extraArgs)
   }
   return encodeEVMExtraArgsCell(extraArgs)
 }
@@ -113,13 +126,6 @@ function encodeEVMExtraArgsCell(extraArgs: ExtraArgs): Cell {
  * - tokenReceiver: uint256
  * - accounts: SnakedCell<uint256>
  */
-function addressToUint256(addr: string): bigint {
-  const bytes = getAddressBytes(addr)
-  // zeroPadValue returns a hex string, use it directly
-  const hex =
-    bytes.length <= 32 ? zeroPadValue(bytes, 32) : '0x' + Buffer.from(bytes).toString('hex')
-  return BigInt(hex)
-}
 
 function encodeSVMExtraArgsCell(extraArgs: SVMExtraArgsV1): Cell {
   // Encode accounts as a snaked cell of uint256 values
@@ -127,21 +133,59 @@ function encodeSVMExtraArgsCell(extraArgs: SVMExtraArgsV1): Cell {
   if (extraArgs.accounts.length > 0) {
     const accountBuilder = beginCell()
     for (const account of extraArgs.accounts) {
-      accountBuilder.storeUint(addressToUint256(account), 256)
+      accountBuilder.storeUint(toBigInt(getAddressBytes(account)), 256)
     }
     accountsCell = accountBuilder.endCell()
   }
 
   // Encode tokenReceiver as uint256
-  const tokenReceiver = extraArgs.tokenReceiver ? addressToUint256(extraArgs.tokenReceiver) : 0n
+  const tokenReceiver = extraArgs.tokenReceiver
+    ? toBigInt(getAddressBytes(extraArgs.tokenReceiver))
+    : 0n
 
   const builder = beginCell()
     .storeUint(Number(SVMExtraArgsV1Tag), 32) // 0x1f3b3aba
     .storeUint(Number(extraArgs.computeUnits), 32)
-    .storeUint(Number(extraArgs.accountIsWritableBitmap), 64)
+    .storeUint(extraArgs.accountIsWritableBitmap, 64)
     .storeBit(extraArgs.allowOutOfOrderExecution)
     .storeUint(tokenReceiver, 256) // uint256
     .storeRef(accountsCell) // SnakedCell<uint256>
+
+  return builder.endCell()
+}
+
+/**
+ * Encodes extraArgs as a Cell using the SuiExtraArgsV1 format.
+ *
+ * Format per chainlink-ton TL-B:
+ * - tag: 32-bit opcode (0x21ea4ca9)
+ * - gasLimit: uint256
+ * - allowOutOfOrderExecution: bool
+ * - tokenReceiver: uint256
+ * - receiverObjectIds: SnakedCell<uint256>
+ */
+function encodeSuiExtraArgsCell(extraArgs: SuiExtraArgsV1): Cell {
+  // Encode receiverObjectIds as a snaked cell of uint256 values
+  let objectIdsCell = beginCell().endCell()
+  if (extraArgs.receiverObjectIds.length > 0) {
+    const objectIdsBuilder = beginCell()
+    for (const objectId of extraArgs.receiverObjectIds) {
+      objectIdsBuilder.storeUint(toBigInt(getAddressBytes(objectId)), 256)
+    }
+    objectIdsCell = objectIdsBuilder.endCell()
+  }
+
+  // Encode tokenReceiver as uint256
+  const tokenReceiver = extraArgs.tokenReceiver
+    ? toBigInt(getAddressBytes(extraArgs.tokenReceiver))
+    : 0n
+
+  const builder = beginCell()
+    .storeUint(Number(SuiExtraArgsV1Tag), 32) // 0x21ea4ca9
+    .storeUint(extraArgs.gasLimit, 256)
+    .storeBit(extraArgs.allowOutOfOrderExecution)
+    .storeUint(tokenReceiver, 256) // uint256
+    .storeRef(objectIdsCell) // SnakedCell<uint256>
 
   return builder.endCell()
 }
