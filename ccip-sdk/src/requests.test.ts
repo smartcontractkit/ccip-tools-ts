@@ -5,6 +5,7 @@ import { PublicKey } from '@solana/web3.js'
 import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
 import type { Chain, LogFilter } from './chain.ts'
+import { CCIPAddressInvalidError } from './errors/specialized.ts'
 import type { GenericExtraArgsV3, SVMExtraArgsV1 } from './extra-args.ts'
 import { EVMChain } from './index.ts'
 import { decodeMessage, getMessageById, getMessagesInBatch, getMessagesInTx } from './requests.ts'
@@ -633,6 +634,18 @@ describe('decodeMessage', () => {
           /unknown field.*GenericExtraArgsV3.*"typo"/i,
         )
       })
+
+      it('should throw CCIPAddressInvalidError for malformed EVM receiver', () => {
+        // A valid Solana address passed to an EVM destination should be rejected
+        const message = {
+          receiver: 'So11111111111111111111111111111111111111112',
+        }
+
+        assert.throws(
+          () => EVMChain.buildMessageForDest(message),
+          (err: unknown) => err instanceof CCIPAddressInvalidError && err.context.family === 'EVM',
+        )
+      })
     })
 
     describe('V3 extraArgs detection', () => {
@@ -960,6 +973,18 @@ describe('decodeMessage', () => {
 
         const extraArgs = result.extraArgs as SVMExtraArgsV1
         assert.equal(extraArgs.allowOutOfOrderExecution, false)
+      })
+
+      it('should throw CCIPAddressInvalidError for malformed Solana receiver', () => {
+        // A valid EVM address passed to a Solana destination should be rejected
+        const message = {
+          receiver: '0x1234567890123456789012345678901234567890',
+        }
+
+        assert.throws(
+          () => SolanaChain.buildMessageForDest(message),
+          (err: unknown) => err instanceof CCIPAddressInvalidError && err.context.family === 'SVM',
+        )
       })
     })
 
