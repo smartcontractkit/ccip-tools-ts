@@ -129,7 +129,6 @@ export {
 
 // Specialized errors - Aptos-specific
 export {
-  CCIPAptosAddressInvalidError,
   CCIPAptosAddressModuleRequiredError,
   CCIPAptosExtraArgsEncodingError,
   CCIPAptosExtraArgsV2RequiredError,
@@ -179,7 +178,7 @@ export { CCIPApiClientNotAvailableError, CCIPUnexpectedPaginationError } from '.
 export { CCIPViemAdapterError } from './specialized.ts'
 
 // Specialized errors - Address Validation
-export { CCIPAddressInvalidEvmError } from './specialized.ts'
+export { CCIPAddressInvalidError } from './specialized.ts'
 
 // Specialized errors - Source Chain
 export { CCIPSourceChainUnsupportedError } from './specialized.ts'

@@ -412,7 +412,7 @@ describe('GenericExtraArgsV3', () => {
         blockConfirmations: 0,
         ccvs: [],
         ccvArgs: [],
-        executor: '0xabcdefABCDEF123456789012345678901234ABCD',
+        executor: '0xabcdefabcdef123456789012345678901234abcd',
         executorArgs: '0xaabb',
         tokenReceiver: '',
         tokenArgs: '0x',

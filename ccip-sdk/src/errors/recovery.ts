@@ -92,8 +92,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'The contract does not expose typeAndVersion(). Verify this is a valid CCIP contract.',
   REGISTRY_TYPE_INVALID: 'The contract is not a TokenAdminRegistry.',
 
-  ADDRESS_INVALID_EVM: 'Invalid EVM address. Must be 20 bytes.',
-  ADDRESS_INVALID_APTOS: 'Invalid Aptos address. Must be 32 bytes or less.',
+  ADDRESS_INVALID: 'Invalid address. Check chain family format and value.',
 
   TOKEN_NOT_FOUND: 'Token not found in supported tokens list. Verify the token address or symbol.',
   TOKEN_NOT_IN_REGISTRY: 'Token not found in TokenAdminRegistry.',
