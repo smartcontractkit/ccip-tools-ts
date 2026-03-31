@@ -1,7 +1,7 @@
 import { type BytesLike, hexlify, isBytesLike, toBigInt } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
-import { type ChainStatic, Chain } from './chain.ts'
+import type { Chain, ChainStatic } from './chain.ts'
 import {
   CCIPChainFamilyUnsupportedError,
   CCIPMessageBatchIncompleteError,
@@ -196,9 +196,8 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
  * @returns Original message or shallow copy with defaults for required fields
  */
 export function buildMessageForDest(message: MessageInput, dest: ChainFamily): AnyMessage {
-  const chain = supportedChains[dest] ?? Chain
   if (message.extraArgs && '_tag' in message.extraArgs) delete message.extraArgs._tag
-  return chain.buildMessageForDest(message)
+  return supportedChains[dest]!.buildMessageForDest(message)
 }
 
 /**

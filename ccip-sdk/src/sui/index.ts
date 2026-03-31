@@ -848,36 +848,38 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       message.extraArgs.allowOutOfOrderExecution != null
         ? message.extraArgs.allowOutOfOrderExecution
         : true
-    const tokenReceiver =
-      message.extraArgs &&
-      'tokenReceiver' in message.extraArgs &&
-      message.extraArgs.tokenReceiver != null &&
-      typeof message.extraArgs.tokenReceiver === 'string'
-        ? message.extraArgs.tokenReceiver
+    const [tokenReceiver, receiver] =
+      message.extraArgs && 'tokenReceiver' in message.extraArgs && !!message.extraArgs.tokenReceiver
+        ? [this.getAddress(message.extraArgs.tokenReceiver), this.getAddress(message.receiver)] // explicit tokenReceiver, keep both
         : message.tokenAmounts?.length
-          ? this.getAddress(message.receiver)
-          : '0x0000000000000000000000000000000000000000000000000000000000000000'
+          ? [
+              this.getAddress(message.receiver),
+              '0x0000000000000000000000000000000000000000000000000000000000000000',
+            ] // if sending tokens without tokenReceiver, set receiver to default and tokenReceiver to message.receiver
+          : [
+              '0x0000000000000000000000000000000000000000000000000000000000000000',
+              this.getAddress(message.receiver),
+            ] // otherwise, tokenReceiver is default and receiver is message.receiver
     const receiverObjectIds =
       message.extraArgs &&
       'receiverObjectIds' in message.extraArgs &&
       message.extraArgs.receiverObjectIds?.length
-        ? message.extraArgs.receiverObjectIds
+        ? message.extraArgs.receiverObjectIds.map(this.getAddress.bind(this))
         : message.extraArgs && 'accounts' in message.extraArgs && message.extraArgs.accounts?.length
-          ? message.extraArgs.accounts // populates receiverObjectIds from accounts
+          ? message.extraArgs.accounts.map(this.getAddress.bind(this)) // populates receiverObjectIds from accounts
           : []
+
     const extraArgs: SuiExtraArgsV1 = {
       gasLimit,
       allowOutOfOrderExecution,
       tokenReceiver,
       receiverObjectIds,
     }
+
     return {
       ...message,
+      receiver,
       extraArgs,
-      // if tokenReceiver, then message.receiver can (must?) be default
-      ...(!!message.tokenAmounts?.length && {
-        receiver: '0x0000000000000000000000000000000000000000000000000000000000000000',
-      }),
     }
   }
 }
