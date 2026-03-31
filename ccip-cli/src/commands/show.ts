@@ -202,15 +202,19 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   let execs$, cancelWaitVerifications: (() => void) | undefined, verifications$
   if (request.metadata?.receiptTransactionHash) {
     // if we got last receipt metadata from api, just fetch it instead of scanning (faster)
-    execs$ = await dest.getTransaction(request.metadata.receiptTransactionHash).then(({ logs }) => {
-      const res = []
-      for (const log of logs) {
-        const receipt = (dest.constructor as ChainStatic).decodeReceipt(log)
-        if (!receipt) continue
-        res.push({ receipt, log, timestamp: request.metadata!.receiptTimestamp! })
-      }
-      return res
-    })
+    execs$ = await dest
+      .getTransaction(request.metadata.receiptTransactionHash)
+      .then(async ({ logs }) => {
+        const res = []
+        for (const log of logs) {
+          const receipt = (dest.constructor as ChainStatic).decodeReceipt(log)
+          if (!receipt) continue
+          res.push({ receipt, log, timestamp: request.metadata!.receiptTimestamp! })
+        }
+        cancelWaitFinalized?.()
+        await finalized$
+        return res
+      })
   } else {
     offRamp ??= await discoverOffRamp(source, dest, request.lane.onRamp, source)
 
