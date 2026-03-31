@@ -42,7 +42,7 @@ import {
   LaneFeature,
 } from '../chain.ts'
 import {
-  CCIPAddressInvalidEvmError,
+  CCIPAddressInvalidError,
   CCIPBlockNotFoundError,
   CCIPContractNotRouterError,
   CCIPContractTypeInvalidError,
@@ -560,16 +560,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    */
   static getAddress(bytes: BytesLike): string {
     if (isHexString(bytes, 20)) return getAddress(bytes)
-    bytes = getAddressBytes(bytes)
-    if (bytes.length < 20) throw new CCIPAddressInvalidEvmError(hexlify(bytes))
-    else if (bytes.length > 20) {
-      if (bytes.slice(0, bytes.length - 20).every((b) => b === 0)) {
-        bytes = bytes.slice(-20)
+    let bytes_ = getAddressBytes(bytes)
+    if (bytes_.length < 20) throw new CCIPAddressInvalidError(bytes, this.family)
+    else if (bytes_.length > 20) {
+      if (bytes_.slice(0, bytes_.length - 20).every((b) => b === 0)) {
+        bytes_ = bytes_.slice(-20)
       } else {
-        throw new CCIPAddressInvalidEvmError(hexlify(bytes))
+        throw new CCIPAddressInvalidError(hexlify(bytes_), this.family)
       }
     }
-    return getAddress(hexlify(bytes))
+    return getAddress(hexlify(bytes_))
   }
 
   /**

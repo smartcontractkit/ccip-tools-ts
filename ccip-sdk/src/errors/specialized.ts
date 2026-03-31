@@ -1,7 +1,10 @@
+import type { BytesLike } from 'ethers'
+
 import { type CCIPErrorOptions, CCIPError } from './CCIPError.ts'
 import { CCIPErrorCode } from './codes.ts'
 import { isTransientHttpStatus } from '../http-status.ts'
-import { bigIntReplacer } from '../utils.ts'
+import type { ChainFamily } from '../types.ts'
+import { bigIntReplacer, getAddressBytes, util } from '../utils.ts'
 
 // Chain/Network
 
@@ -1862,14 +1865,22 @@ export class CCIPMerkleInternalError extends CCIPError {
  * }
  * ```
  */
-export class CCIPAddressInvalidEvmError extends CCIPError {
-  override readonly name = 'CCIPAddressInvalidEvmError'
+export class CCIPAddressInvalidError extends CCIPError {
+  override readonly name = 'CCIPAddressInvalidError'
   /** Creates an EVM address invalid error. */
-  constructor(address: string, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.ADDRESS_INVALID_EVM, `Invalid EVM address: ${address}`, {
+  constructor(address: BytesLike, family: ChainFamily, options?: CCIPErrorOptions) {
+    const len = address.length
+    const type = typeof address === 'object' ? address.constructor.name : typeof address
+    let bytesLen
+    try {
+      bytesLen = getAddressBytes(address).length
+    } catch (err) {
+      bytesLen = (err as Error).message
+    }
+    super(CCIPErrorCode.ADDRESS_INVALID, `Invalid ${family} address: ${util.inspect(address)}`, {
       ...options,
       isTransient: false,
-      context: { ...options?.context, address },
+      context: { ...options?.context, address, family, len, type, bytesLen },
     })
   }
 }
@@ -2561,34 +2572,6 @@ export class CCIPAptosLogInvalidError extends CCIPError {
       ...options,
       isTransient: false,
       context: { ...options?.context, log },
-    })
-  }
-}
-
-/**
- * Thrown when Aptos address is invalid.
- *
- * @example
- * ```typescript
- * import { CCIPDataFormatUnsupportedError } from '@chainlink/ccip-sdk'
- *
- * try {
- *   AptosChain.getAddress('invalid-address')
- * } catch (error) {
- *   if (error instanceof CCIPDataFormatUnsupportedError) {
- *     console.log(`Invalid address: ${error.message}`)
- *   }
- * }
- * ```
- */
-export class CCIPAptosAddressInvalidError extends CCIPError {
-  override readonly name = 'CCIPAptosAddressInvalidError'
-  /** Creates an Aptos address invalid error. */
-  constructor(address: string, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.ADDRESS_INVALID_APTOS, `Invalid aptos address: "${address}"`, {
-      ...options,
-      isTransient: false,
-      context: { ...options?.context, address },
     })
   }
 }

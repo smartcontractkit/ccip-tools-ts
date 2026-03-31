@@ -40,6 +40,7 @@ import {
   Chain,
 } from '../chain.ts'
 import {
+  CCIPAddressInvalidError,
   CCIPArgumentInvalidError,
   CCIPBlockTimeNotFoundError,
   CCIPContractNotRouterError,
@@ -1023,7 +1024,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     } catch (_) {
       // pass
     }
-    return encodeBase58(getDataBytes(bytes))
+    try {
+      const decoded = getDataBytes(bytes)
+      if (decoded.length === 32) return encodeBase58(decoded)
+    } catch {
+      // pass
+    }
+    throw new CCIPAddressInvalidError(bytes, this.family)
   }
 
   /**
