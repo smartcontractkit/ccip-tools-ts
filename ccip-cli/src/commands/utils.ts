@@ -335,6 +335,7 @@ export async function prettyRequest(this: Ctx, request: CCIPRequest, source?: Ch
     ...('accounts' in request.message ? formatArray('accounts', request.message.accounts) : {}),
     ...('receipts' in request.message ? formatArray('receipts', request.message.receipts) : {}),
     ...rest,
+    ...(!!request.metadata && omit(request.metadata, 'sourceNetworkInfo', 'destNetworkInfo')),
   })
   this.logger.info('CCIP Explorer:', getCCIPExplorerUrl('msg', request.message.messageId))
 }

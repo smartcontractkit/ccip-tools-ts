@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-sdk",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "SDK/Library to interact with CCIP",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -72,7 +72,7 @@
     "prettier": "^3.8.1",
     "prool": "^0.2.4",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.57.2",
+    "typescript-eslint": "8.58.0",
     "viem": "^2.47.6"
   },
   "dependencies": {
@@ -98,6 +98,6 @@
   },
   "overrides": {
     "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
-    "axios": "^1.13.6"
+    "axios": "1.13.6"
   }
 }
