@@ -65,8 +65,5 @@
     "css-minimizer-webpack-plugin": {
       "serialize-javascript": "7.0.5"
     }
-  },
-  "dependencies": {
-    "got": "^11.8.6"
   }
 }
