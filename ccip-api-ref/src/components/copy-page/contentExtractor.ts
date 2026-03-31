@@ -650,6 +650,6 @@ export async function copyToClipboard(text: string): Promise<void> {
     }
   } catch (error) {
     console.error('[CopyPage] Failed to copy to clipboard:', error)
-    throw new Error('Failed to copy to clipboard')
+    throw new Error('Failed to copy to clipboard', { cause: error })
   }
 }
