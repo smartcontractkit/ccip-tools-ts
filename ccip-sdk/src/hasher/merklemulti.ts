@@ -279,7 +279,7 @@ export function verifyComputeRoot(leafHashes: Hash[], proof: Proof): Hash {
 
   for (let i = 0; i < totalHashes; i++) {
     let a: Hash | undefined = undefined
-    let b: Hash | undefined = undefined
+    let b: Hash | undefined
 
     if (proof.sourceFlags[i] === true) {
       if (leafPos < leavesLength) {

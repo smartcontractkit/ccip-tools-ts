@@ -31,8 +31,8 @@ export async function getTokenInfo(provider: Aptos, token: string): Promise<Toke
         }
       }
     }
-  } catch (err) {
-    lastErr = err as Error
+  } catch {
+    // ignore; subsequent attempts will update lastErr if they also fail
   }
 
   // Try to get info using standard coin functions with type arguments

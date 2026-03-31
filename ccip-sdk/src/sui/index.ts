@@ -545,7 +545,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
     }
 
-    let metadata = null
+    let metadata
     try {
       metadata = await this.client.getCoinMetadata({ coinType })
     } catch (e) {

@@ -1,7 +1,8 @@
 // @ts-check
 import eslint from '@eslint/js'
 import { defineConfig } from 'eslint/config'
-import importPlugin from 'eslint-plugin-import'
+import { createNodeResolver } from 'eslint-plugin-import-x'
+import importXPlugin from 'eslint-plugin-import-x'
 import jsdoc from 'eslint-plugin-jsdoc'
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
 import tsdoc from 'eslint-plugin-tsdoc'
@@ -18,8 +19,21 @@ export default defineConfig(
   },
   eslint.configs.recommended,
   eslintPluginPrettierRecommended,
-  importPlugin.flatConfigs.recommended,
-  importPlugin.flatConfigs.typescript,
+  importXPlugin.flatConfigs.recommended,
+  // Inline the useful parts of flatConfigs.typescript without its broken
+  // eslint-import-resolver-typescript dependency. Our source files already
+  // use explicit .ts extensions, so createNodeResolver handles everything.
+  {
+    settings: {
+      'import-x/extensions': ['.ts', '.tsx', '.cts', '.mts', '.js', '.jsx', '.cjs', '.mjs'],
+      'import-x/external-module-folders': ['node_modules', 'node_modules/@types'],
+      'import-x/parsers': { '@typescript-eslint/parser': ['.ts', '.tsx', '.cts', '.mts'] },
+    },
+    rules: {
+      // TypeScript compiler already validates named imports
+      'import-x/named': 'off',
+    },
+  },
   ...tseslintConfigs.recommendedTypeChecked,
   {
     languageOptions: {
@@ -90,7 +104,7 @@ export default defineConfig(
     files: ['ccip-sdk/src/**/*.ts'],
     ignores: ['**/*.test.ts', '**/__tests__/**', '**/__mocks__/**'],
     rules: {
-      'import/no-nodejs-modules': [
+      'import-x/no-nodejs-modules': [
         'error',
         {
           allow: ['buffer'], // Allowed because we explicitly import { Buffer } from 'buffer'
@@ -132,22 +146,12 @@ export default defineConfig(
   },
   {
     settings: {
-      'import/parsers': {
-        '@typescript-eslint/parser': ['.ts'],
-      },
-      'import/resolver': {
-        typescript: {
-          project: ['tsconfig.json'],
-          alwaysTryTypes: true,
-        },
-        node: {
-          project: ['tsconfig.json'],
-        },
-      },
-      'import/extensions': ['.ts', '.js', '.mjs', '.cjs'],
+      'import-x/resolver-next': [
+        createNodeResolver({ extensions: ['.ts', '.tsx', '.cts', '.mts', '.js', '.jsx', '.cjs', '.mjs'] }),
+      ],
     },
     rules: {
-      'import/order': [
+      'import-x/order': [
         'warn',
         {
           groups: ['builtin', ['external', 'internal'], ['parent', 'sibling', 'index']],
@@ -156,15 +160,15 @@ export default defineConfig(
           alphabetize: { order: 'asc' },
         },
       ],
-      'import/no-duplicates': ['warn', { 'prefer-inline': true }],
-      'import/extensions': ['warn', 'always', { ignorePackages: true, checkTypeImports: true }],
+      'import-x/no-duplicates': ['warn', { 'prefer-inline': true }],
+      'import-x/extensions': ['warn', 'always', { ignorePackages: true, checkTypeImports: true }],
     },
   },
   // Docusaurus - ignore virtual module imports and generated files
   {
     files: ['ccip-api-ref/src/**/*.tsx', 'ccip-api-ref/src/**/*.ts'],
     rules: {
-      'import/no-unresolved': [
+      'import-x/no-unresolved': [
         'error',
         { ignore: ['^@docusaurus/', '^@theme/', '^@theme-original/', '^@site/'] },
       ],
@@ -187,8 +191,8 @@ export default defineConfig(
   {
     files: ['ccip-api-ref/sidebars*.ts'],
     rules: {
-      'import/no-unresolved': ['error', { ignore: ['typedoc-sidebar\\.cjs$', '/sidebar$'] }],
-      'import/extensions': 'off',
+      'import-x/no-unresolved': ['error', { ignore: ['typedoc-sidebar\\.cjs$', '/sidebar$'] }],
+      'import-x/extensions': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',
     },
   },

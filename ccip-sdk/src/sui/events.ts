@@ -370,7 +370,6 @@ async function* fetchEventsBackward<T>(
       const { nodes, pageInfo } = result.data.events
 
       if (!nodes.length) {
-        hasNextPage = false
         break
       }
 

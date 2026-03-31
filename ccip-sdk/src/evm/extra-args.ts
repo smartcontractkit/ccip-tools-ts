@@ -249,7 +249,6 @@ function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
   // tokenArgs (variable)
   if (offset + tokenArgsLen > data.length) return undefined
   const tokenArgs = hexlify(data.slice(offset, offset + tokenArgsLen))
-  offset += tokenArgsLen
 
   return {
     gasLimit,
