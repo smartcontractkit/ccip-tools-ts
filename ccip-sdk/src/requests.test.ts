@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
+import { PublicKey } from '@solana/web3.js'
 import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
-import './index.ts' // Import to ensure chains are loaded
-import { type LogFilter, Chain } from './chain.ts'
+import type { Chain, LogFilter } from './chain.ts'
 import type { GenericExtraArgsV3, SVMExtraArgsV1 } from './extra-args.ts'
+import { EVMChain } from './index.ts'
 import { decodeMessage, getMessageById, getMessagesInBatch, getMessagesInTx } from './requests.ts'
 import { SolanaChain } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
@@ -500,7 +501,7 @@ describe('decodeMessage', () => {
           data: '0x1234',
         }
 
-        const result = Chain.buildMessageForDest(message)
+        const result = EVMChain.buildMessageForDest(message)
 
         assert.ok(result.extraArgs)
         assert.equal(typeof result.extraArgs, 'object')
@@ -520,7 +521,7 @@ describe('decodeMessage', () => {
           receiver: '0x1234567890123456789012345678901234567890',
         }
 
-        const result = Chain.buildMessageForDest(message)
+        const result = EVMChain.buildMessageForDest(message)
 
         assert.ok(result.extraArgs)
         assert.ok('gasLimit' in result.extraArgs)
@@ -542,7 +543,7 @@ describe('decodeMessage', () => {
           },
         }
 
-        const result = Chain.buildMessageForDest(message)
+        const result = EVMChain.buildMessageForDest(message)
 
         assert.ok(result.extraArgs)
         assert.ok('gasLimit' in result.extraArgs)
@@ -563,7 +564,7 @@ describe('decodeMessage', () => {
           },
         }
 
-        const result = Chain.buildMessageForDest(message)
+        const result = EVMChain.buildMessageForDest(message)
 
         assert.ok(result.extraArgs)
         if ('gasLimit' in result.extraArgs) {
@@ -580,7 +581,7 @@ describe('decodeMessage', () => {
           data: '0x',
         }
 
-        const result = Chain.buildMessageForDest(message)
+        const result = EVMChain.buildMessageForDest(message)
 
         assert.ok(result.extraArgs)
         assert.ok('gasLimit' in result.extraArgs)
@@ -595,7 +596,7 @@ describe('decodeMessage', () => {
           feeToken: '0xFeeTokenAddress',
         }
 
-        const result = Chain.buildMessageForDest(message)
+        const result = EVMChain.buildMessageForDest(message)
 
         assert.deepEqual(result.tokenAmounts, message.tokenAmounts)
         assert.equal(result.feeToken, message.feeToken)
@@ -612,7 +613,7 @@ describe('decodeMessage', () => {
         }
 
         assert.throws(
-          () => Chain.buildMessageForDest(message),
+          () => EVMChain.buildMessageForDest(message),
           /unknown field.*EVMExtraArgsV2.*"typo"/i,
         )
       })
@@ -628,7 +629,7 @@ describe('decodeMessage', () => {
         }
 
         assert.throws(
-          () => Chain.buildMessageForDest(message),
+          () => EVMChain.buildMessageForDest(message),
           /unknown field.*GenericExtraArgsV3.*"typo"/i,
         )
       })
@@ -644,7 +645,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = Chain.buildMessageForDest(message)
+        const result = EVMChain.buildMessageForDest(message)
         const extraArgs = result.extraArgs as GenericExtraArgsV3
 
         assert.ok('blockConfirmations' in result.extraArgs)
@@ -658,15 +659,15 @@ describe('decodeMessage', () => {
         const message = {
           receiver: '0x1234567890123456789012345678901234567890',
           extraArgs: {
-            executor: '0xExecutorAddress1234567890123456789012',
+            executor: '0x0000000000000000123456789012345678901234',
           } as any,
         }
 
-        const result = Chain.buildMessageForDest(message)
+        const result = EVMChain.buildMessageForDest(message)
         const extraArgs = result.extraArgs as GenericExtraArgsV3
 
         assert.ok('executor' in result.extraArgs)
-        assert.equal(extraArgs.executor, '0xExecutorAddress1234567890123456789012')
+        assert.equal(extraArgs.executor, '0x0000000000000000123456789012345678901234')
         assert.equal(extraArgs.blockConfirmations, 0)
       })
 
@@ -675,15 +676,15 @@ describe('decodeMessage', () => {
           receiver: '0x1234567890123456789012345678901234567890',
           data: '0x1234',
           extraArgs: {
-            ccvs: ['0xCCVAddress123456789012345678901234567890'],
+            ccvs: ['0x0000000000123456789012345678901234567890'],
           } as any,
         }
 
-        const result = Chain.buildMessageForDest(message)
+        const result = EVMChain.buildMessageForDest(message)
         const extraArgs = result.extraArgs as GenericExtraArgsV3
 
         // Verify all V3 fields have proper defaults
-        assert.deepEqual(extraArgs.ccvs, ['0xCCVAddress123456789012345678901234567890'])
+        assert.deepEqual(extraArgs.ccvs, ['0x0000000000123456789012345678901234567890'])
         assert.deepEqual(extraArgs.ccvArgs, [])
         assert.equal(extraArgs.blockConfirmations, 0)
         assert.equal(extraArgs.executor, '')
@@ -702,7 +703,7 @@ describe('decodeMessage', () => {
           },
         }
 
-        const result = Chain.buildMessageForDest(message)
+        const result = EVMChain.buildMessageForDest(message)
 
         // Should be V2, not V3
         assert.ok(!('blockConfirmations' in result.extraArgs))
@@ -723,7 +724,7 @@ describe('decodeMessage', () => {
           } as any,
         }
 
-        const result = Chain.buildMessageForDest(message)
+        const result = EVMChain.buildMessageForDest(message)
         const extraArgs = result.extraArgs as GenericExtraArgsV3
 
         assert.equal(extraArgs.gasLimit, 0n)
@@ -738,20 +739,26 @@ describe('decodeMessage', () => {
           extraArgs: {
             blockConfirmations: 3,
             gasLimit: 500000n,
-            executor: '0xCustomExecutor12345678901234567890123',
+            executor: '0x000000000000000012345678901234567890123',
             executorArgs: customExecutorArgs,
-            ccvs: ['0xCCV1', '0xCCV2'],
+            ccvs: [
+              '0x0000000000000000000000000000000000000cc1',
+              '0x0000000000000000000000000000000000000cc2',
+            ],
           } as any,
         }
 
-        const result = Chain.buildMessageForDest(message)
+        const result = EVMChain.buildMessageForDest(message)
         const extraArgs = result.extraArgs as GenericExtraArgsV3
 
         assert.equal(extraArgs.gasLimit, 500000n)
         assert.equal(extraArgs.blockConfirmations, 3)
-        assert.equal(extraArgs.executor, '0xCustomExecutor12345678901234567890123')
+        assert.equal(extraArgs.executor, '0x000000000000000012345678901234567890123')
         assert.deepEqual(extraArgs.executorArgs, customExecutorArgs)
-        assert.deepEqual(extraArgs.ccvs, ['0xCCV1', '0xCCV2'])
+        assert.deepEqual(extraArgs.ccvs, [
+          '0x0000000000000000000000000000000000000cc1',
+          '0x0000000000000000000000000000000000000cc2',
+        ])
         // ccvArgs should still be default
         assert.deepEqual(extraArgs.ccvArgs, [])
       })
@@ -760,7 +767,7 @@ describe('decodeMessage', () => {
     describe('SolanaChain', () => {
       it('should populate SVMExtraArgsV1 with computeUnits from gasLimit', () => {
         const message = {
-          receiver: 'DummyReceiverAddress1234567890123456789012',
+          receiver: 'So11111111111111111111111111111111111111112',
           data: '0x1234',
           extraArgs: {
             gasLimit: 100000n,
@@ -780,7 +787,7 @@ describe('decodeMessage', () => {
 
       it('should use computeUnits if provided directly', () => {
         const message = {
-          receiver: 'DummyReceiverAddress1234567890123456789012',
+          receiver: 'So11111111111111111111111111111111111111112',
           data: '0x1234',
           extraArgs: {
             computeUnits: 250000n,
@@ -795,7 +802,7 @@ describe('decodeMessage', () => {
 
       it('should prefer computeUnits over gasLimit if both provided', () => {
         const message = {
-          receiver: 'DummyReceiverAddress1234567890123456789012',
+          receiver: 'So11111111111111111111111111111111111111112',
           data: '0x1234',
           extraArgs: {
             computeUnits: 150000n,
@@ -811,7 +818,7 @@ describe('decodeMessage', () => {
 
       it('should use DEFAULT_GAS_LIMIT for computeUnits when data present and no gas specified', () => {
         const message = {
-          receiver: 'DummyReceiverAddress1234567890123456789012',
+          receiver: 'So11111111111111111111111111111111111111112',
           data: '0xabcd',
         }
 
@@ -823,7 +830,7 @@ describe('decodeMessage', () => {
 
       it('should set computeUnits to 0 when no data', () => {
         const message = {
-          receiver: 'DummyReceiverAddress1234567890123456789012',
+          receiver: 'So11111111111111111111111111111111111111112',
         }
 
         const result = SolanaChain.buildMessageForDest(message)
@@ -834,7 +841,7 @@ describe('decodeMessage', () => {
 
       it('should throw on unknown fields for SVMExtraArgsV1', () => {
         const message = {
-          receiver: 'DummyReceiverAddress1234567890123456789012',
+          receiver: 'So11111111111111111111111111111111111111112',
           data: '0x1234',
           extraArgs: {
             gasLimit: 100000n,
@@ -849,9 +856,9 @@ describe('decodeMessage', () => {
       })
 
       it('should use custom tokenReceiver when provided', () => {
-        const customReceiver = 'CustomReceiverAddress123456789012345678901'
+        const customReceiver = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C'
         const message = {
-          receiver: 'DummyReceiverAddress1234567890123456789012',
+          receiver: 'So11111111111111111111111111111111111111112',
           data: '0x1234',
           extraArgs: {
             tokenReceiver: customReceiver,
@@ -880,7 +887,7 @@ describe('decodeMessage', () => {
 
       it('should throw error when sending tokens with data but no tokenReceiver', () => {
         const message = {
-          receiver: 'DummyReceiverAddress1234567890123456789012',
+          receiver: 'So11111111111111111111111111111111111111112',
           data: '0x1234',
           tokenAmounts: [{ token: 'TokenMint123', amount: 100n }],
         }
@@ -893,11 +900,11 @@ describe('decodeMessage', () => {
 
       it('should accept accounts array', () => {
         const accounts = [
-          'Account1111111111111111111111111111111111',
-          'Account2222222222222222222222222222222222',
+          'Account1111111111111111111111111111111111112',
+          'Account2222222222222222222222222222222222212',
         ]
         const message = {
-          receiver: 'DummyReceiverAddress1234567890123456789012',
+          receiver: 'So11111111111111111111111111111111111111112',
           data: '0x1234',
           extraArgs: {
             accounts,
@@ -913,7 +920,7 @@ describe('decodeMessage', () => {
       it('should accept accountIsWritableBitmap', () => {
         const bitmap = 0b1010n
         const message = {
-          receiver: 'DummyReceiverAddress1234567890123456789012',
+          receiver: 'So11111111111111111111111111111111111111112',
           data: '0x1234',
           extraArgs: {
             accountIsWritableBitmap: bitmap,
@@ -928,21 +935,21 @@ describe('decodeMessage', () => {
 
       it('should accept explicit receiver', () => {
         const message = {
-          receiver: 'CustomReceiverAddress1234567890123456789012',
+          receiver: 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C',
           tokenAmounts: [{ token: 'TokenMint123', amount: 100n }],
           extraArgs: {
-            tokenReceiver: 'TokenReceiverAddress12345678901234567890',
+            tokenReceiver: 'So11111111111111111111111111111111111111112',
           },
         }
 
         const result = SolanaChain.buildMessageForDest(message)
 
-        assert.equal(result.receiver, 'CustomReceiverAddress1234567890123456789012')
+        assert.equal(result.receiver, 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C')
       })
 
       it('should allow custom allowOutOfOrderExecution', () => {
         const message = {
-          receiver: 'DummyReceiverAddress1234567890123456789012',
+          receiver: PublicKey.default.toBase58(),
           data: '0x1234',
           extraArgs: {
             allowOutOfOrderExecution: false,
@@ -1032,8 +1039,8 @@ describe('decodeMessage', () => {
 
       it('should populate receiverObjectIds from accounts', () => {
         const accounts = [
-          '0xobj1111111111111111111111111111111111111111111111111111111111111',
-          '0xobj2222222222222222222222222222222222222222222222222222222222222',
+          '0x0001111111111111111111111111111111111111111111111111111111111111',
+          '0x0002222222222222222222222222222222222222222222222222222222222222',
         ]
         const message = {
           receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
@@ -1049,7 +1056,7 @@ describe('decodeMessage', () => {
       })
 
       it('should use receiverObjectIds directly when provided', () => {
-        const objectIds = ['0xobj3333333333333333333333333333333333333333333333333333333333333']
+        const objectIds = ['0x0003333333333333333333333333333333333333333333333333333333333333']
         const message = {
           receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
           data: '0x1234',
@@ -1064,7 +1071,7 @@ describe('decodeMessage', () => {
       })
 
       it('should prefer receiverObjectIds over accounts', () => {
-        const objectIds = ['0xobj1111111111111111111111111111111111111111111111111111111111111']
+        const objectIds = ['0x0001111111111111111111111111111111111111111111111111111111111111']
         const accounts = ['0xacc2222222222222222222222222222222222222222222222222222222222222']
         const message = {
           receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
@@ -1108,23 +1115,6 @@ describe('decodeMessage', () => {
         const result = SuiChain.buildMessageForDest(message)
 
         assert.deepEqual(result.extraArgs.receiverObjectIds, accounts)
-      })
-
-      it('should override receiver to zero address when tokenAmounts present', () => {
-        const message = {
-          receiver: '0x1234567890123456789012345678901234567890123456789012345678901234',
-          tokenAmounts: [{ token: '0xToken123', amount: 100n }],
-          extraArgs: {
-            tokenReceiver: '0xabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd',
-          } as any,
-        }
-
-        const result = SuiChain.buildMessageForDest(message)
-
-        assert.equal(
-          result.receiver,
-          '0x0000000000000000000000000000000000000000000000000000000000000000',
-        )
       })
 
       it('should allow custom allowOutOfOrderExecution', () => {

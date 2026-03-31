@@ -4,6 +4,7 @@ import { describe, it, mock } from 'node:test'
 import { type Cell, Address, Dictionary, beginCell, toNano } from '@ton/core'
 import type { TonClient } from '@ton/ton'
 
+import '../index.ts'
 import { type ExecutionInput, ChainFamily } from '../types.ts'
 import { TONChain } from './index.ts'
 import { type TONWallet, MANUALLY_EXECUTE_OPCODE } from './types.ts'

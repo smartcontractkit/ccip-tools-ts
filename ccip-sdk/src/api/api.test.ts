@@ -656,6 +656,11 @@ describe('CCIPAPIClient', () => {
     it('should parse SVM extraArgs correctly', async () => {
       const response = {
         ...mockMessageResponse,
+        tokenAmounts: mockMessageResponse.tokenAmounts.map((ta) => ({
+          ...ta,
+          destTokenAddress: 'So11111111111111111111111111111111111111113',
+        })),
+        receiver: 'So11111111111111111111111111111111111111112',
         destChainSelector: networkInfo('solana-mainnet').chainSelector,
         extraArgs: {
           computeUnits: 200000,
