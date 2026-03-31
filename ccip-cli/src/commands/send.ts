@@ -28,6 +28,7 @@ import {
   CCIPTokenNotFoundError,
   ChainFamily,
   bigIntReviver,
+  decodeAddress,
   estimateReceiveExecution,
   getDataBytes,
   networkInfo,
@@ -225,6 +226,7 @@ async function sendMessage(
   const destNetwork = networkInfo(argv.dest)
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
+  decodeAddress(argv.router, sourceNetwork.family)
 
   let data: BytesLike | undefined
   if (argv.data) {
