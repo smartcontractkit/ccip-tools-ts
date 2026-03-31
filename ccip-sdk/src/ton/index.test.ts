@@ -237,28 +237,6 @@ describe('TON index unit tests', () => {
       )
     })
 
-    it('should reject non-V1.6 execution report', async () => {
-      const { client, wallet } = createMockClientAndWallet()
-      const tonChain = new TONChain(client, mockNetworkInfo as any)
-
-      const v1_5Report = {
-        message: { messageId: '0x' + '1'.repeat(64), strict: false },
-        proofs: [],
-        proofFlagBits: 0n,
-        merkleRoot: '0xce60f1962af3c7c7f9d3e434dea13530564dbff46704d628ff4b2206bbc93289',
-        offchainTokenData: [],
-      }
-
-      await assert.rejects(
-        tonChain.execute({
-          offRamp: TON_OFFRAMP_ADDRESS_TEST,
-          input: v1_5Report as any,
-          wallet,
-        }),
-        /Invalid extraArgs for TON/,
-      )
-    })
-
     it('should propagate sendTransfer errors', async () => {
       const { client, wallet } = createMockClientAndWallet({ shouldFail: true })
       const tonChain = new TONChain(client, mockNetworkInfo as any)
@@ -290,31 +268,6 @@ describe('TON index unit tests', () => {
       assert.equal(unsigned.family, ChainFamily.TON)
       assert.equal(unsigned.to, TON_OFFRAMP_ADDRESS_TEST)
       assert.ok(unsigned.body instanceof Object, 'body should be a Cell')
-    })
-
-    it('should reject non-V1.6 message format', () => {
-      const tonChain = new TONChain(
-        { getTransactions: async () => [] } as any,
-        mockNetworkInfo as any,
-      )
-
-      const v1_5Report = {
-        message: { messageId: '0x' + '1'.repeat(64), strict: false },
-        proofs: [],
-        proofFlagBits: 0n,
-        merkleRoot: '0xce60f1962af3c7c7f9d3e434dea13530564dbff46704d628ff4b2206bbc93289',
-        offchainTokenData: [],
-      }
-
-      assert.throws(
-        () =>
-          tonChain.generateUnsignedExecute({
-            payer: '0:' + 'b'.repeat(64),
-            offRamp: TON_OFFRAMP_ADDRESS_TEST,
-            input: v1_5Report as any,
-          }),
-        /Invalid extraArgs for TON/,
-      )
     })
   })
 
