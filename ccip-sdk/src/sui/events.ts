@@ -1,5 +1,5 @@
-import type { SuiClient, SuiEventFilter } from '@mysten/sui/client'
 import type { GraphQLQueryResult, SuiGraphQLClient } from '@mysten/sui/graphql'
+import type { SuiEventFilter, SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 
 import type { LogFilter } from '../chain.ts'
 import {
@@ -27,7 +27,7 @@ export type CommitEvent = {
 }
 
 async function getCheckpointRightBefore(
-  client: SuiClient,
+  client: SuiJsonRpcClient,
   startTime: number,
 ): Promise<number | undefined> {
   const filter: SuiEventFilter = {
@@ -116,7 +116,7 @@ async function getLatestCheckpoint(graphqlClient: SuiGraphQLClient): Promise<num
  * Fetches events in forward direction (ascending checkpoint order).
  */
 async function* fetchEventsForward<T>(
-  ctx: { client: SuiClient; graphqlClient: SuiGraphQLClient },
+  ctx: { client: SuiJsonRpcClient; graphqlClient: SuiGraphQLClient },
   opts: LogFilter & { pollInterval?: number },
   type: string,
   limit = 50,
@@ -278,7 +278,7 @@ async function* fetchEventsForward<T>(
  * Fetches events in backward direction (descending checkpoint order).
  */
 async function* fetchEventsBackward<T>(
-  ctx: { client: SuiClient; graphqlClient: SuiGraphQLClient },
+  ctx: { client: SuiJsonRpcClient; graphqlClient: SuiGraphQLClient },
   opts: LogFilter,
   type: string,
   limit = 50,
@@ -404,7 +404,7 @@ async function* fetchEventsBackward<T>(
  * @returns Async generator of log entries.
  */
 export async function* streamSuiLogs<T>(
-  ctx: { client: SuiClient; graphqlClient: SuiGraphQLClient },
+  ctx: { client: SuiJsonRpcClient; graphqlClient: SuiGraphQLClient },
   opts: LogFilter,
 ): AsyncGenerator<EventNode<T>> {
   if (opts.topics?.length !== 1 || typeof opts.topics[0] !== 'string')

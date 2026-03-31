@@ -52,7 +52,7 @@
   },
   "dependencies": {
     "@chainlink/ccip-sdk": "^1.4.1",
-    "@aptos-labs/ts-sdk": "^5.2.1",
+    "@aptos-labs/ts-sdk": "^6.3.1",
     "@coral-xyz/anchor": "^0.29.0",
     "@ethers-ext/signer-ledger": "^6.0.0-beta.1",
     "@inquirer/prompts": "8.3.2",

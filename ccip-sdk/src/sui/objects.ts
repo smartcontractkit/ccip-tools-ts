@@ -1,7 +1,7 @@
 import { Buffer } from 'buffer'
 
 import { bcs } from '@mysten/sui/bcs'
-import type { SuiClient } from '@mysten/sui/client'
+import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { normalizeSuiAddress } from '@mysten/sui/utils'
 import { blake2b } from '@noble/hashes/blake2.js'
@@ -62,7 +62,7 @@ export function deriveObjectID(parentAddress: string, keyBytes: Uint8Array): str
  * The StatePointer contains a reference to the parent object used for derivation.
  */
 export const getObjectRef = memoize(
-  async function getPackageIds_(address: string, client: SuiClient): Promise<string> {
+  async function getPackageIds_(address: string, client: SuiJsonRpcClient): Promise<string> {
     let stateObjectName
     if (address.endsWith('::onramp')) stateObjectName = 'OnRampState'
     else if (address.endsWith('::offramp')) stateObjectName = 'OffRampState'
@@ -100,7 +100,7 @@ export const getObjectRef = memoize(
  * The StatePointer contains a reference to the parent object used for derivation.
  */
 export const getLatestPackageId = memoize(
-  async function getLatestPackageId_(address: string, client: SuiClient): Promise<string> {
+  async function getLatestPackageId_(address: string, client: SuiJsonRpcClient): Promise<string> {
     const suffix = address.split('::')[1]
     try {
       const stateObjectId = await getObjectRef(address, client)
@@ -130,7 +130,7 @@ export const getLatestPackageId = memoize(
  * @returns Receiver module name and package ID
  */
 export async function getReceiverModule(
-  provider: SuiClient,
+  provider: SuiJsonRpcClient,
   ccipPackageId: string,
   ccipObjectRef: string,
   receiverPackageId: string,
@@ -192,7 +192,7 @@ export async function getReceiverModule(
  * @returns Array of token configurations
  */
 export async function fetchTokenConfigs(
-  client: SuiClient,
+  client: SuiJsonRpcClient,
   ccipPackageId: string,
   ccipObjectRef: string,
   tokenAmounts: CCIPMessage<typeof CCIPVersion.V1_6>['tokenAmounts'],
