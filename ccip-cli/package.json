@@ -47,7 +47,7 @@
     "eslint-plugin-tsdoc": "^0.5.2",
     "prettier": "^3.8.1",
     "tsx": "4.21.0",
-    "typescript": "5.9.3",
+    "typescript": "6.0.2",
     "typescript-eslint": "8.58.0"
   },
   "dependencies": {
