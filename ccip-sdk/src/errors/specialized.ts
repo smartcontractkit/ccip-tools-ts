@@ -1867,7 +1867,7 @@ export class CCIPMerkleInternalError extends CCIPError {
  */
 export class CCIPAddressInvalidError extends CCIPError {
   override readonly name = 'CCIPAddressInvalidError'
-  /** Creates an EVM address invalid error. */
+  /** Creates an address invalid error for the given chain family. */
   constructor(address: BytesLike, family: ChainFamily, options?: CCIPErrorOptions) {
     const len = address.length
     const type = typeof address === 'object' ? address.constructor.name : typeof address
