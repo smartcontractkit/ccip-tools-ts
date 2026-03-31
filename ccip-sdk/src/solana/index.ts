@@ -1703,13 +1703,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         : true
     const [tokenReceiver, receiver] =
       message.extraArgs && 'tokenReceiver' in message.extraArgs && !!message.extraArgs.tokenReceiver
-        ? [message.extraArgs.tokenReceiver, message.receiver] // explicit tokenReceiver, keep both
+        ? [this.getAddress(message.extraArgs.tokenReceiver), this.getAddress(message.receiver)] // explicit tokenReceiver, keep both
         : message.tokenAmounts?.length
           ? [this.getAddress(message.receiver), PublicKey.default.toBase58()] // if sending tokens without tokenReceiver, set receiver to default and tokenReceiver to message.receiver
-          : [PublicKey.default.toBase58(), message.receiver] // otherwise, tokenReceiver is default and receiver is message.receiver
+          : [PublicKey.default.toBase58(), this.getAddress(message.receiver)] // otherwise, tokenReceiver is default and receiver is message.receiver
     const accounts =
       message.extraArgs && 'accounts' in message.extraArgs && message.extraArgs.accounts != null
-        ? message.extraArgs.accounts
+        ? message.extraArgs.accounts.map(this.getAddress.bind(this))
         : []
     const accountIsWritableBitmap =
       message.extraArgs &&

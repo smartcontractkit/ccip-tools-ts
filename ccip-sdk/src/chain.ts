@@ -1598,17 +1598,28 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPArgumentInvalidError} if extraArgs contains unknown fields for the detected version.
    */
   static buildMessageForDest(
+    this: ChainStatic,
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
   ): AnyMessage {
+    const receiver = this.getAddress(message.receiver) // validate receiver address for dest chain family
     const gasLimit = message.data && dataLength(message.data) ? DEFAULT_GAS_LIMIT : 0n
 
     // Detect if user wants V3 by checking for any V3-only field
     if (hasV3ExtraArgs(message.extraArgs)) {
       if (message.extraArgs)
         assertNoUnknownFields(message.extraArgs, V3_FIELDS, 'GenericExtraArgsV3')
+      let tokenReceiver = ''
+      if (
+        message.extraArgs &&
+        'tokenReceiver' in message.extraArgs &&
+        message.extraArgs.tokenReceiver
+      ) {
+        tokenReceiver = this.getAddress(message.extraArgs.tokenReceiver) // validate
+      }
       // V3 defaults (GenericExtraArgsV3)
       return {
         ...message,
+        receiver,
         extraArgs: {
           gasLimit,
           blockConfirmations: 0,
@@ -1616,9 +1627,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           ccvArgs: [],
           executor: '',
           executorArgs: '0x',
-          tokenReceiver: '',
           tokenArgs: '0x',
           ...message.extraArgs,
+          tokenReceiver,
         },
       }
     }
@@ -1627,6 +1638,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     // Default to V2 (GenericExtraArgsV2, aka EVMExtraArgsV2)
     return {
       ...message,
+      receiver,
       extraArgs: {
         gasLimit,
         allowOutOfOrderExecution: true,

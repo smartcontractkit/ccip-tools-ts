@@ -476,7 +476,7 @@ export function convertKeysToCamelCase(
   mapValues?: (value: unknown, key?: string) => unknown,
   key?: string,
 ): unknown {
-  if (Array.isArray(obj) && obj.every((v) => typeof v === 'number')) {
+  if (Array.isArray(obj) && obj.length && obj.every((v) => typeof v === 'number')) {
     return mapValues ? mapValues(obj, key) : obj
   } else if (Array.isArray(obj)) {
     return obj.map((v) => convertKeysToCamelCase(v, mapValues, key))
