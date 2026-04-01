@@ -68,13 +68,20 @@ export const builder = (yargs: Argv) =>
     })
     .option('fee-tokens', {
       type: 'boolean',
-      default: true,
-      describe: 'List fee tokens instead of transferable tokens',
+      describe:
+        'List fee tokens instead of transferable tokens; default=true for Routers; Use `--no-fee-tokens` to disable',
     })
     .option('only-fee-tokens', {
       type: 'boolean',
-      implies: 'fee-tokens',
       describe: 'Return after listing fee tokens',
+    })
+    .check(({ onlyFeeTokens, feeTokens }) => {
+      if (onlyFeeTokens && feeTokens === false)
+        throw new Error(
+          'Invalid options: --only-fee-tokens requires --fee-tokens to be true or omitted',
+        )
+
+      return true
     })
     .example([
       [
@@ -114,7 +121,7 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
   }
 
   // Handle --fee-tokens flag
-  if (argv.feeTokens) {
+  if (argv.feeTokens === true || argv.onlyFeeTokens || (argv.feeTokens == null && registry)) {
     const feeTokens: Record<string, TokenInfo & { price?: number }> = await source.getFeeTokens(
       argv.address,
     )
