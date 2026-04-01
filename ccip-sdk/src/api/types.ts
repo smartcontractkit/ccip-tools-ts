@@ -179,6 +179,8 @@ export type MessageSearchFilters = {
   destChainSelector?: bigint
   /** Filter by source transaction hash */
   sourceTransactionHash?: string
+  /** Filter by source token address */
+  sourceTokenAddress?: string
   /** When `true`, return only messages eligible for manual execution (stuck/failed messages) */
   readyForManualExecOnly?: boolean
 }
