@@ -286,20 +286,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @returns A ready JSON-RPC provider.
    */
   static async _getProvider(url: string): Promise<JsonRpcApiProvider> {
-    let provider: JsonRpcApiProvider
     let providerReady: Promise<JsonRpcApiProvider>
     if (url.startsWith('ws')) {
-      const provider_ = new WebSocketProvider(url)
+      const provider = new WebSocketProvider(url)
       providerReady = new Promise((resolve, reject) => {
-        provider_.websocket.onerror = reject
-        provider_
+        provider.websocket.onerror = reject
+        provider
           ._waitUntilReady()
-          .then(() => resolve(provider_))
+          .then(() => resolve(provider))
           .catch(reject)
       })
-      provider = provider_
     } else if (url.startsWith('http')) {
-      provider = new JsonRpcProvider(url)
+      const provider = new JsonRpcProvider(url)
       providerReady = Promise.resolve(provider)
     } else {
       throw new CCIPDataFormatUnsupportedError(url)
@@ -931,13 +929,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @throws {@link CCIPContractNotRouterError} if address is not a Router, OnRamp, or OffRamp
    */
   async getTokenAdminRegistryFor(address: string): Promise<string> {
-    let [type, version, typeAndVersion] = await this.typeAndVersion(address)
+    let [type, version] = await this.typeAndVersion(address)
     if (type === 'TokenAdminRegistry') {
       return address
     } else if (type === 'Router') {
       address = await this._getSomeOnRampFor(address)
-      ;[type, version, typeAndVersion] = await this.typeAndVersion(address)
+      ;[type, version] = await this.typeAndVersion(address)
     } else if (!type.includes('Ramp')) {
+      const [, , typeAndVersion] = await this.typeAndVersion(address)
       throw new CCIPContractNotRouterError(address, typeAndVersion)
     }
     const contract = new Contract(
@@ -2083,9 +2082,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
     const { messageId, sourceChainSelector } = opts
-    let opts_: Parameters<Chain['getExecutionReceipts']>[0] & Parameters<EVMChain['getLogs']>[0] =
-      opts
     const [, version] = await this.typeAndVersion(opts.offRamp)
+    let opts_: Parameters<Chain['getExecutionReceipts']>[0] & Parameters<EVMChain['getLogs']>[0]
     if (version < CCIPVersion.V1_6) {
       opts_ = {
         ...opts,
