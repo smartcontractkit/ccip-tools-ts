@@ -72,7 +72,7 @@ export default defineConfig(
   },
   {
     // Ban generic Error constructor - enforce typed error classes
-    files: ['ccip-sdk/src/**/*.ts', 'ccip-cli/src/**/*.ts'],
+    files: ['ccip-sdk/src/**/*.ts'],
     ignores: ['**/*.test.ts', '**/__tests__/**', '**/__mocks__/**'],
     rules: {
       'no-restricted-syntax': [
@@ -87,6 +87,14 @@ export default defineConfig(
           message:
             'Use CCIPError or specialized error classes instead of generic Error. Use "new" with error classes.',
         },
+      ],
+    },
+  },
+  {
+    files: ['ccip-sdk/src/**/*.ts', 'ccip-cli/src/**/*.ts'],
+    ignores: ['**/*.test.ts', '**/__tests__/**', '**/__mocks__/**'],
+    rules: {
+      'no-restricted-syntax': [
         // Required for NextJS Turbopack compatibility
         'error',
         {
