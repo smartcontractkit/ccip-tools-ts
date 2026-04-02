@@ -1326,6 +1326,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     administrator: string
     pendingAdministrator?: string
     tokenPool?: string
+    poolLookupTable?: string
+    poolLookupTableEntries?: string[]
   }> {
     const registry_ = new PublicKey(registry)
     const tokenMint = new PublicKey(token)
@@ -1342,6 +1344,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       administrator: string
       pendingAdministrator?: string
       tokenPool?: string
+      poolLookupTable?: string
+      poolLookupTableEntries?: string[]
     } = {
       administrator: encodeBase58(tokenAdminRegistry.data.subarray(9, 9 + 32)),
     }
@@ -1355,15 +1359,20 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       config.pendingAdministrator = pendingAdministrator.toBase58()
     }
 
-    // Get token pool from lookup table if available
+    // Get token pool and lookup table from TAR data if available
     try {
       const lookupTableAddr = new PublicKey(tokenAdminRegistry.data.subarray(73, 73 + 32))
-      const lookupTable = await this.connection.getAddressLookupTable(lookupTableAddr)
-      if (lookupTable.value) {
-        // tokenPool state PDA is at index [3]
-        const tokenPoolAddress = lookupTable.value.state.addresses[3]
-        if (tokenPoolAddress && !tokenPoolAddress.equals(PublicKey.default)) {
-          config.tokenPool = tokenPoolAddress.toBase58()
+      if (!lookupTableAddr.equals(PublicKey.default)) {
+        config.poolLookupTable = lookupTableAddr.toBase58()
+        const lookupTable = await this.connection.getAddressLookupTable(lookupTableAddr)
+        if (lookupTable.value) {
+          // Return all ALT entries
+          config.poolLookupTableEntries = lookupTable.value.state.addresses.map((a) => a.toBase58())
+          // tokenPool state PDA is at index [3]
+          const tokenPoolAddress = lookupTable.value.state.addresses[3]
+          if (tokenPoolAddress && !tokenPoolAddress.equals(PublicKey.default)) {
+            config.tokenPool = tokenPoolAddress.toBase58()
+          }
         }
       }
     } catch (_err) {
@@ -1382,6 +1391,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   ): Promise<{
     token: string
     router: string
+    owner: string
+    proposedOwner?: string
+    rateLimitAdmin?: string
     tokenPoolProgram: string
     typeAndVersion?: string
   }> {
@@ -1398,14 +1410,27 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       // TokenPool may not have a typeAndVersion
     }
 
-    // const { config }: { config: IdlTypes<typeof BASE_TOKEN_POOL>['BaseConfig'] } =
-    //   tokenPoolCoder.accounts.decode('state', tokenPoolState.data)
-    const mint = new PublicKey(tokenPoolState.data.subarray(41, 41 + 32))
-    const router = new PublicKey(tokenPoolState.data.subarray(266, 266 + 32))
+    const {
+      config,
+    }: {
+      config: {
+        mint: PublicKey
+        router: PublicKey
+        owner: PublicKey
+        proposedOwner: PublicKey
+        rateLimitAdmin: PublicKey
+      }
+    } = tokenPoolCoder.accounts.decode('state', tokenPoolState.data)
+
+    const isProposedOwnerZero = config.proposedOwner.equals(PublicKey.default)
+    const isRateLimitAdminZero = config.rateLimitAdmin.equals(PublicKey.default)
 
     return {
-      token: mint.toBase58(),
-      router: router.toBase58(),
+      token: config.mint.toBase58(),
+      router: config.router.toBase58(),
+      owner: config.owner.toBase58(),
+      ...(isProposedOwnerZero ? {} : { proposedOwner: config.proposedOwner.toBase58() }),
+      ...(isRateLimitAdminZero ? {} : { rateLimitAdmin: config.rateLimitAdmin.toBase58() }),
       tokenPoolProgram,
       typeAndVersion,
     }

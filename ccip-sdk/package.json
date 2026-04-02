@@ -27,6 +27,22 @@
       "types": "./dist/all-chains.d.ts",
       "default": "./dist/all-chains.js"
     },
+    "./token-admin/evm": {
+      "types": "./dist/token-admin/evm/index.d.ts",
+      "default": "./dist/token-admin/evm/index.js"
+    },
+    "./token-admin/solana": {
+      "types": "./dist/token-admin/solana/index.d.ts",
+      "default": "./dist/token-admin/solana/index.js"
+    },
+    "./token-admin/aptos": {
+      "types": "./dist/token-admin/aptos/index.d.ts",
+      "default": "./dist/token-admin/aptos/index.js"
+    },
+    "./token-admin/types": {
+      "types": "./dist/token-admin/types.d.ts",
+      "default": "./dist/token-admin/types.js"
+    },
     "./src/*": "./src/*"
   },
   "scripts": {

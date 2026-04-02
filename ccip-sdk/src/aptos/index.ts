@@ -671,7 +671,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         functionArguments: [token],
       },
     })
-    if (administrator.match(/^0x0*$/)) throw new CCIPAptosTokenNotRegisteredError(token, registry)
+    if (administrator.match(/^0x0*$/) && pendingAdministrator.match(/^0x0*$/))
+      throw new CCIPAptosTokenNotRegisteredError(token, registry)
     return {
       administrator,
       ...(!pendingAdministrator.match(/^0x0*$/) && { pendingAdministrator }),
@@ -686,6 +687,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   ): Promise<{
     token: string
     router: string
+    owner: string
     typeAndVersion?: string
   }> {
     const modulesNames = (await this._getAccountModulesNames(tokenPool))
@@ -694,7 +696,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     let firstErr
     for (const name of modulesNames) {
       try {
-        const [typeAndVersion, token, router] = await Promise.all([
+        const [typeAndVersion, token, router, owner] = await Promise.all([
           this.typeAndVersion(`${tokenPool}::${name}`),
           this.provider.view<[string]>({
             payload: {
@@ -708,10 +710,17 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
               functionArguments: [],
             },
           }),
+          this.provider.view<[string]>({
+            payload: {
+              function: `${tokenPool}::${name}::owner`,
+              functionArguments: [],
+            },
+          }),
         ])
         return {
           token: token[0],
           router: router[0],
+          owner: owner[0],
           typeAndVersion: typeAndVersion[2],
         }
       } catch (err) {

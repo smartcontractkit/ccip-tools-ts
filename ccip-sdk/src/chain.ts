@@ -401,6 +401,10 @@ export type TokenPoolConfig = {
   token: string
   /** Address of the CCIP router this pool is registered with. */
   router: string
+  /** Current owner of the token pool. */
+  owner: string
+  /** Proposed new owner (if an ownership transfer is pending). */
+  proposedOwner?: string
   /**
    * Version identifier string (e.g., "BurnMintTokenPool 1.5.1").
    *
@@ -408,6 +412,23 @@ export type TokenPoolConfig = {
    * May be undefined for older pool implementations that don't expose this method.
    */
   typeAndVersion?: string
+  /**
+   * Address of the rate limit admin, if set.
+   *
+   * @remarks
+   * The rate limit admin can update rate limiter configs without being the pool owner.
+   * Not available on Aptos (setRateLimitAdmin is unsupported).
+   * A zero-address value indicates no rate limit admin is set.
+   */
+  rateLimitAdmin?: string
+  /**
+   * Address of the fee admin (EVM v2.0+ only).
+   *
+   * @remarks
+   * The fee admin can configure token transfer fees.
+   * Only available on EVM pools v2.0+ (from `getDynamicConfig()`).
+   */
+  feeAdmin?: string
   /**
    * Min custom block confirmations for Faster-Than-Finality (FTF),
    * if TokenPool version \>= v2.0.0 and FTF is supported on this lane.
@@ -437,6 +458,10 @@ export type RegistryTokenConfig = {
   pendingAdministrator?: string
   /** Address of the token pool authorized to handle this token's transfers. */
   tokenPool?: string
+  /** Address Lookup Table for pool accounts (Solana only). */
+  poolLookupTable?: string
+  /** Addresses stored in the pool lookup table (Solana only). */
+  poolLookupTableEntries?: string[]
 }
 
 /**

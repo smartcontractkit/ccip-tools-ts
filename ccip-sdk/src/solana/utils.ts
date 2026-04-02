@@ -90,6 +90,35 @@ export async function resolveATA(
   }
 }
 
+/** CCIP token pool signer PDA seed. */
+const CCIP_TOKENPOOL_SIGNER_SEED = 'ccip_tokenpool_signer'
+
+/**
+ * Derives the Pool Signer PDA for a given mint and pool program.
+ * Seeds: `["ccip_tokenpool_signer", mint]`
+ *
+ * The Pool Signer PDA is the authority that signs mint/burn transactions
+ * autonomously for CCIP cross-chain operations.
+ *
+ * @param mint - Token mint public key
+ * @param poolProgramId - Pool program public key
+ * @returns `[poolSignerPda, bump]`
+ *
+ * @example
+ * ```typescript
+ * const [poolSignerPda] = derivePoolSignerPDA(mintPubkey, poolProgramPubkey)
+ * ```
+ */
+export function derivePoolSignerPDA(
+  mint: PublicKey,
+  poolProgramId: PublicKey,
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from(CCIP_TOKENPOOL_SIGNER_SEED), mint.toBuffer()],
+    poolProgramId,
+  )
+}
+
 /**
  * Generates a hex-encoded discriminator for a Solana event.
  * @param eventName - Name of the event.
