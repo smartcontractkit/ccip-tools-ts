@@ -37,10 +37,10 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "25.5.0",
+    "@types/update-notifier": "^6.0.8",
     "@types/yargs": "17.0.35",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "10.1.8",
-
     "eslint-plugin-import-x": "^4.16.2",
     "eslint-plugin-jsdoc": "^62.8.1",
     "eslint-plugin-prettier": "^5.5.5",
@@ -51,8 +51,8 @@
     "typescript-eslint": "8.58.0"
   },
   "dependencies": {
-    "@chainlink/ccip-sdk": "^1.4.2",
     "@aptos-labs/ts-sdk": "^6.3.1",
+    "@chainlink/ccip-sdk": "^1.4.2",
     "@coral-xyz/anchor": "^0.29.0",
     "@ethers-ext/signer-ledger": "^6.0.0-beta.1",
     "@inquirer/prompts": "8.3.2",
@@ -64,6 +64,7 @@
     "bs58": "^6.0.0",
     "ethers": "6.16.0",
     "type-fest": "^5.5.0",
+    "update-notifier": "^7.3.1",
     "yargs": "18.0.0"
   }
 }
