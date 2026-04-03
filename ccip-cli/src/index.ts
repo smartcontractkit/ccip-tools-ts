@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { realpathSync } from 'fs'
+import { createRequire } from 'module'
 import util from 'node:util'
 import { pathToFileURL } from 'url'
 
+import updateNotifier from 'update-notifier'
 import yargs, { type ArgumentsCamelCase, type InferredOptionTypes } from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
@@ -11,8 +13,40 @@ import { Format } from './commands/index.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '1.4.2-7f8e132'
+const VERSION = '1.4.2-f874d03'
 // generate:end
+
+const require = createRequire(import.meta.url)
+const pkg = require('../package.json') as { name: string; version: string }
+
+const useColor = !process.env.NO_COLOR && process.stderr.isTTY
+const dim = (s: string) => (useColor ? `\x1b[2m${s}\x1b[22m` : s)
+const green = (s: string) => (useColor ? `\x1b[32m${s}\x1b[39m` : s)
+const cyan = (s: string) => (useColor ? `\x1b[36m${s}\x1b[39m` : s)
+const yellow = (s: string) => (useColor ? `\x1b[33m${s}\x1b[39m` : s)
+
+const FOUR_HOURS = 1000 * 60 * 60 * 4
+const notifier = updateNotifier({
+  pkg,
+  updateCheckInterval: FOUR_HOURS,
+  shouldNotifyInNpmScript: true,
+})
+
+// Show update notification after command output completes
+process.on('exit', () => {
+  try {
+    notifier.notify({
+      defer: false,
+      isGlobal: true,
+      message:
+        `Update available: ${dim('{currentVersion}')} → ${green('{latestVersion}')}\n` +
+        `Run ${cyan(`npm install -g ${pkg.name}`)} to update\n` +
+        `${yellow('Changelog')}: https://github.com/smartcontractkit/ccip-tools-ts/releases`,
+    })
+  } catch {
+    // never let update check crash the CLI
+  }
+})
 
 const globalOpts = {
   rpcs: {
