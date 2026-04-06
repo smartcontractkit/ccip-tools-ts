@@ -100,7 +100,7 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
 
 /** Exported for testing */
 export async function searchMessages(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
-  const { logger } = ctx
+  const { output, logger } = ctx
 
   if (argv.api === false) {
     throw new CCIPApiClientNotAvailableError({
@@ -152,16 +152,16 @@ export async function searchMessages(ctx: Ctx, argv: Parameters<typeof handler>[
   // Output results
   switch (argv.format) {
     case Format.json:
-      logger.log(JSON.stringify(results, bigIntReplacer, 2))
+      output.write(JSON.stringify(results, bigIntReplacer, 2))
       return // no interactive follow-up for JSON
     case Format.log:
-      for (const msg of results) logger.log(msg)
+      for (const msg of results) output.write(msg)
       break
     default:
       for (const msg of results) {
         prettyTable.call(ctx, formatResult(msg))
       }
-      logger.info(`\n${results.length} message(s) found.`)
+      output.write(`\n${results.length} message(s) found.`)
       break
   }
 
@@ -197,10 +197,10 @@ async function fetchAndShowDetails(
     const full = await apiClient.getMessageById(messageId)
     switch (format) {
       case Format.json:
-        ctx.logger.log(JSON.stringify(full, bigIntReplacer, 2))
+        ctx.output.write(JSON.stringify(full, bigIntReplacer, 2))
         break
       case Format.log:
-        ctx.logger.log('message =', withDateTimestamp(full))
+        ctx.output.write('message =', withDateTimestamp(full))
         break
       default:
         await prettyRequest.call(ctx, full)

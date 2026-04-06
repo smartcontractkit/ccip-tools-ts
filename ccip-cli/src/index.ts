@@ -1,4 +1,16 @@
 #!/usr/bin/env node
+
+// Redirect console.log/debug/info to stderr before any imports. Third-party libraries (notably
+// ethers.js v6) use bare console.log for retry/diagnostic messages, which would pollute stdout
+// and break JSON.parse(stdout) for agents. Our own code uses ctx.output (stdout) and ctx.logger (stderr).
+// Using `new Console(process.stderr)` preserves Node's exact formatting (util.format, util.inspect,
+// format specifiers like %s/%d, color support, etc.) — only the destination stream changes.
+
+const stderrConsole = new console.Console(process.stderr)
+console.log = stderrConsole.log.bind(stderrConsole)
+console.debug = stderrConsole.debug.bind(stderrConsole)
+console.info = stderrConsole.info.bind(stderrConsole)
+
 import { realpathSync } from 'fs'
 import { createRequire } from 'module'
 import util from 'node:util'

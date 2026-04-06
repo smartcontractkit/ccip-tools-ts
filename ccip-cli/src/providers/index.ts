@@ -6,6 +6,7 @@ import {
   type ChainGetter,
   type ChainTransaction,
   type EVMChain,
+  type Logger,
   type TONChain,
   CCIPChainFamilyUnsupportedError,
   CCIPRpcNotFoundError,
@@ -186,7 +187,11 @@ export function fetchChainsFromRpcs(
  * @param argv - Wallet options (as passed from yargs argv)
  * @returns Promise to chain-specific wallet instance
  */
-export async function loadChainWallet(chain: Chain, argv: { wallet?: unknown; rpcsFile?: string }) {
+export async function loadChainWallet(
+  chain: Chain,
+  argv: { wallet?: unknown; rpcsFile?: string },
+  logger?: Logger,
+) {
   // Centralized wallet resolution: check env vars first, then rpcsFile
   if (!argv.wallet) {
     argv.wallet = process.env['PRIVATE_KEY'] || process.env['USER_KEY'] || process.env['OWNER_KEY']
@@ -204,13 +209,13 @@ export async function loadChainWallet(chain: Chain, argv: { wallet?: unknown; rp
   let wallet
   switch (chain.network.family) {
     case ChainFamily.EVM:
-      wallet = await loadEvmWallet((chain as EVMChain).provider, argv)
+      wallet = await loadEvmWallet((chain as EVMChain).provider, argv, logger)
       return [await wallet.getAddress(), wallet] as const
     case ChainFamily.Solana:
-      wallet = await loadSolanaWallet(argv)
+      wallet = await loadSolanaWallet(argv, logger)
       return [wallet.publicKey.toBase58(), wallet] as const
     case ChainFamily.Aptos:
-      wallet = await loadAptosWallet(argv)
+      wallet = await loadAptosWallet(argv, logger)
       return [wallet.accountAddress.toString(), wallet] as const
     case ChainFamily.Sui:
       wallet = loadSuiWallet(argv)
@@ -220,6 +225,7 @@ export async function loadChainWallet(chain: Chain, argv: { wallet?: unknown; rp
         (chain as TONChain).provider,
         argv,
         chain.network.networkType === NetworkType.Testnet,
+        logger,
       )
       return [wallet.getAddress(), wallet] as const
     default:

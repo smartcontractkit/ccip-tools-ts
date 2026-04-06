@@ -95,7 +95,17 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
  * Show details of a request.
  */
 export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
-  const { logger } = ctx
+  const { output, logger } = ctx
+
+  // In JSON mode, accumulate all output into a single envelope so JSON.parse(stdout) works.
+  // Fields are added as they become available; omitted if not applicable.
+  const jsonEnvelope:
+    | { request?: unknown; attestations?: unknown; verifications?: unknown; receipts?: unknown[] }
+    | undefined = argv.format === Format.json ? {} : undefined
+  const emitJsonEnvelope = () => {
+    if (jsonEnvelope) output.write(JSON.stringify(jsonEnvelope, bigIntReplacer, 2))
+  }
+
   const [getChain, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHashOrId)
 
   let source: Chain | undefined, offRamp
@@ -143,14 +153,14 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
 
   switch (argv.format) {
     case Format.log: {
-      logger.log(`message ${request.log.index} =`, withDateTimestamp(request))
+      output.write(`message ${request.log.index} =`, withDateTimestamp(request))
       break
     }
     case Format.pretty:
       await prettyRequest.call(ctx, request, source)
       break
     case Format.json:
-      logger.info(JSON.stringify(request, bigIntReplacer, 2))
+      jsonEnvelope!.request = request
       break
   }
   if (request.tx.error)
@@ -158,8 +168,14 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       context: { error: request.tx.error },
     })
 
-  if (!source) return
-  if (argv.wait === false) return // `false` used by call at end of `send` command without `--wait`
+  if (!source) {
+    emitJsonEnvelope()
+    return
+  }
+  if (argv.wait === false) {
+    emitJsonEnvelope()
+    return // `false` used by call at end of `send` command without `--wait`
+  }
 
   let cancelWaitFinalized: (() => void) | undefined
   const finalized$ = (async () => {
@@ -176,25 +192,26 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     if (offchainTokenData.length && offchainTokenData.some((d) => !!d)) {
       switch (argv.format) {
         case Format.log: {
-          logger.log('attestations =', offchainTokenData)
+          output.write('attestations =', offchainTokenData)
           break
         }
         case Format.pretty:
-          logger.info('Attestations:')
+          output.write('Attestations:')
           for (const attestation of offchainTokenData) {
             const { _tag: type, ...rest } = attestation!
             prettyTable.call(ctx, { type, ...rest })
           }
           break
         case Format.json:
-          logger.info(JSON.stringify({ attestations: offchainTokenData }, bigIntReplacer, 2))
+          jsonEnvelope!.attestations = offchainTokenData
           break
       }
     }
 
     if (argv.wait)
       logger.info(`[${MessageStatus.SourceFinalized}] Waiting for commit on destination chain...`)
-    else if (!request.metadata?.receiptTransactionHash) logger.info('Commit (dest):')
+    else if (!request.metadata?.receiptTransactionHash && argv.format !== Format.json)
+      output.write('Commit (dest):')
   })()
 
   const dest = await getChain(request.lane.destChainSelector)
@@ -231,18 +248,18 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
         logger.info(`[${MessageStatus.Committed}] Commit report accepted on destination chain`)
       switch (argv.format) {
         case Format.log:
-          logger.log('commit =', verifications)
+          output.write('commit =', verifications)
           break
         case Format.pretty:
           await prettyVerifications.call(ctx, dest, verifications, request)
           break
         case Format.json:
-          logger.info(JSON.stringify(verifications, bigIntReplacer, 2))
+          jsonEnvelope!.verifications = verifications
           break
       }
       if (argv.wait)
         logger.info(`[${MessageStatus.Blessed}] Waiting for execution on destination chain...`)
-      else logger.info('Receipts (dest):')
+      else if (argv.format !== Format.json) output.write('Receipts (dest):')
       return verifications
     })().catch((err) => {
       logger.debug('getVerifications error:', err)
@@ -272,7 +289,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     logger.info(`[${status}] ${statusMessage}`)
     switch (argv.format) {
       case Format.log:
-        logger.log('receipt =', withDateTimestamp(exec))
+        output.write('receipt =', withDateTimestamp(exec))
         break
       case Format.pretty:
         prettyReceipt.call(
@@ -284,11 +301,13 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
         )
         break
       case Format.json:
-        logger.info(JSON.stringify(exec, bigIntReplacer, 2))
+        jsonEnvelope!.receipts ??= []
+        jsonEnvelope!.receipts.push(exec)
         break
     }
     found = true
     if (argv.wait) break
   }
   if (!found) logger.warn(`No execution receipt found for request`)
+  emitJsonEnvelope()
 }

@@ -48,17 +48,20 @@ describe('search messages command', () => {
   const mockLog = mock.fn()
   const mockWarn = mock.fn()
   const mockInfo = mock.fn()
+  const mockOutput = {
+    write: mockLog,
+    table: mock.fn(),
+  }
   const mockLogger = {
-    log: mockLog,
-    warn: mockWarn,
     info: mockInfo,
+    warn: mockWarn,
     error: mock.fn(),
     debug: mock.fn(),
-    table: mock.fn(),
   }
 
   const createCtx = (): Ctx => ({
     destroy$: Promise.resolve(),
+    output: mockOutput as unknown as Ctx['output'],
     logger: mockLogger as unknown as Ctx['logger'],
   })
 

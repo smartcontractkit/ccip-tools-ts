@@ -35,15 +35,20 @@ describe('lane-latency command', () => {
 
   const mockLog = mock.fn()
   const mockTable = mock.fn()
-  const mockLogger = {
-    log: mockLog,
-    error: mock.fn(),
-    debug: mock.fn(),
+  const mockOutput = {
+    write: mockLog,
     table: mockTable,
+  }
+  const mockLogger = {
+    info: mock.fn(),
+    error: mock.fn(),
+    warn: mock.fn(),
+    debug: mock.fn(),
   }
 
   const createCtx = (): Ctx => ({
     destroy$: Promise.resolve(),
+    output: mockOutput as unknown as Ctx['output'],
     logger: mockLogger as unknown as Ctx['logger'],
   })
 
