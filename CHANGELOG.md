@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: Add `getMessagesInRange()` to the abstract Chain class — range-based CCIP message discovery using `getLogs` + `decodeMessage`, returns `AsyncIterableIterator<CCIPRequest>`
+
 ## [1.6.0] - 2026-05-06
 
 - SDK: `Solana` support for `estimateReceiveExecution` method, to simulate receiver execution and `computeUnits` estimation
@@ -40,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDK: add `CCIPAPIClient.searchMessages` with filters and cursor-based pagination, `searchAllMessages` async generator for automatic pagination, and `AbortSignal` support on all API methods
 - SDK: `Chain.estimateReceiveExecution` can now take a `messageId` and try to fetch messages details from API
 - SDK: `Chain.generateUnsignedExecute` and `execute` automatically try to `estimateReceiveExecution` if supported by dest chain and no `gasLimit` override is provided
-- CLI: add `--wallet hardhat:<name>` and  `--wallet foundry:<name>` keystore support for EVM
+- CLI: add `--wallet hardhat:<name>` and `--wallet foundry:<name>` keystore support for EVM
 
 ## [1.1.0] - 2026-03-06
 
