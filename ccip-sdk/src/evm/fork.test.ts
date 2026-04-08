@@ -963,7 +963,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
           tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount }],
           extraArgs: {
             gasLimit: 200_000n,
-            blockConfirmations: 1,
+            requestedFinality: { blockDepth: 1 },
             ccvs: [],
             ccvArgs: [],
             executor: '',
@@ -1049,7 +1049,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         if (blockConfirmations > 0) {
           message.extraArgs = {
             gasLimit: 0n,
-            blockConfirmations,
+            requestedFinality: { blockDepth: blockConfirmations },
             ccvs: [],
             ccvArgs: [],
             executor: '',

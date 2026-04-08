@@ -121,6 +121,7 @@ import { parseData } from './errors.ts'
 import {
   decodeExtraArgs as decodeExtraArgs_,
   encodeExtraArgs as encodeExtraArgs_,
+  requestedFinalityToUint32,
 } from './extra-args.ts'
 import { estimateExecGas } from './gas.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
@@ -1208,12 +1209,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     const { token, amount } = tokenAmounts[0]!
 
-    // Determine blockConfirmations and tokenArgs from extraArgs
+    // Determine requestedFinality and tokenArgs from extraArgs
     const extraArgs = opts.message.extraArgs
-    let blockConfirmations = 0
+    let requestedFinalityRaw = 0
     let tokenArgs: string = '0x'
-    if (extraArgs && 'blockConfirmations' in extraArgs) {
-      blockConfirmations = extraArgs.blockConfirmations as number
+    if (extraArgs && 'requestedFinality' in extraArgs) {
+      requestedFinalityRaw = requestedFinalityToUint32(extraArgs.requestedFinality!)
       if (extraArgs.tokenArgs) tokenArgs = hexlify(extraArgs.tokenArgs)
     }
 
@@ -1239,7 +1240,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ccipFee$,
       this.getTokenPoolConfig(poolAddress, {
         destChainSelector: opts.destChainSelector,
-        blockConfirmationsRequested: blockConfirmations,
+        blockConfirmationsRequested: requestedFinalityRaw,
         tokenArgs,
       }),
       this.detectUsdcDomains(
@@ -1256,7 +1257,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         usdcDomains.destDomain,
         this.network.networkType,
       )
-      const fast = blockConfirmations > 0
+      const fast = requestedFinalityRaw !== 0
       // Tiers are sorted ascending by finalityThreshold; findLast for fast ensures
       // we pick the highest tier still within the fast threshold.
       const tier = fast
@@ -1279,7 +1280,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       return { ccipFee }
     }
 
-    const useCustom = blockConfirmations > 0
+    const useCustom = requestedFinalityRaw !== 0
     const bps = useCustom
       ? tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps
       : tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps

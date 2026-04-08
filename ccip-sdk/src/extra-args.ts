@@ -48,6 +48,28 @@ export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
 }
 
 /**
+ * Requested finality configuration for cross-chain messages.
+ *
+ * Determines how long to wait on the source chain before relaying the message:
+ * - `'finality'` — wait for full finality (safest, default).
+ * - `'safe'` — wait for the `safe` head tag.
+ * - `{ blockDepth: N }` — wait for N block confirmations (1–65535).
+ *
+ * @example
+ * ```typescript
+ * // Wait for full finality (default)
+ * const finality: RequestedFinality = 'finality'
+ *
+ * // Wait for the safe tag
+ * const safe: RequestedFinality = 'safe'
+ *
+ * // Wait for 5 block confirmations
+ * const blocks: RequestedFinality = { blockDepth: 5 }
+ * ```
+ */
+export type RequestedFinality = 'finality' | 'safe' | { blockDepth: number }
+
+/**
  * Generic extra arguments version 3 with cross-chain verifiers and executor support.
  * Uses tightly packed binary encoding (NOT ABI-encoded).
  *
@@ -55,7 +77,7 @@ export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
  * ```typescript
  * const args: GenericExtraArgsV3 = {
  *   gasLimit: 200_000n,
- *   blockConfirmations: 5,
+ *   requestedFinality: 'safe',
  *   ccvs: ['0x1234...'],
  *   ccvArgs: ['0x010203'],
  *   executor: '0x5678...',
@@ -68,8 +90,8 @@ export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
 export type GenericExtraArgsV3 = {
   /** Gas limit for execution on the destination chain (uint32). */
   gasLimit: bigint
-  /** Number of source-chain block confirmations to wait before relaying the message. */
-  blockConfirmations: number
+  /** Finality config for the source chain before relaying. See {@link RequestedFinality}. */
+  requestedFinality: RequestedFinality
   /** Cross-chain verifier addresses (EVM addresses). */
   ccvs: string[]
   /** Per-CCV arguments (BytesLike). */

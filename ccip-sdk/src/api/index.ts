@@ -60,7 +60,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.4.2-7f8e132'
+export const SDK_VERSION = '1.4.2-45b401e'
 // generate:end
 
 /** SDK telemetry header name */

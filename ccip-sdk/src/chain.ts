@@ -60,7 +60,7 @@ const V2_FIELDS = new Set(['gasLimit', 'allowOutOfOrderExecution'])
 /** All valid field names for GenericExtraArgsV3. */
 const V3_FIELDS = new Set([
   'gasLimit',
-  'blockConfirmations',
+  'requestedFinality',
   'ccvs',
   'ccvArgs',
   'executor',
@@ -1592,7 +1592,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @remarks
    * V3 (GenericExtraArgsV3) is auto-detected when any V3-only field is present
-   * (e.g. `blockConfirmations`, `ccvs`, `ccvArgs`, `executor`, `executorArgs`,
+   * (e.g. `requestedFinality`, `ccvs`, `ccvArgs`, `executor`, `executorArgs`,
    * `tokenReceiver`, `tokenArgs`). Otherwise defaults to V2 (EVMExtraArgsV2).
    *
    * @throws {@link CCIPArgumentInvalidError} if extraArgs contains unknown fields for the detected version.
@@ -1622,7 +1622,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
         receiver,
         extraArgs: {
           gasLimit,
-          blockConfirmations: 0,
+          requestedFinality: 'finality' as const,
           ccvs: [],
           ccvArgs: [],
           executor: '',

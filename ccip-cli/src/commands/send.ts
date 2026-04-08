@@ -127,7 +127,7 @@ export const builder = (yargs: Argv) =>
         string: true,
         describe:
           'Extra args to pass in the message: key=value (value parsed as JSON with bigint support, fallback to string; repeated keys become arrays)',
-        example: '-x ccvs=["0xvalue1", "0xvalue2"] --extra=blockConfirmations=1',
+        example: '-x ccvs=["0xvalue1", "0xvalue2"] --extra=requestedFinality=safe',
       },
       'only-get-fee': {
         type: 'boolean',
@@ -184,7 +184,7 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
  * Repeated keys are accumulated into an array.
  *
  * @example
- * `assert.eq(parseExtraArgs(['ccvs=["0xvalue1", "0xvalue2"]', 'blockConfirmations=1', 'flag=true']), { ccvs: ["0xvalue1", "0xvalue2"], blockConfirmations: 1n, flag: true })`
+ * `assert.eq(parseExtraArgs(['ccvs=["0xvalue1", "0xvalue2"]', 'requestedFinality=safe', 'flag=true']), { ccvs: ["0xvalue1", "0xvalue2"], requestedFinality: 'safe', flag: true })`
  */
 function parseExtraArgs(extra: readonly string[] | undefined): Record<string, unknown> {
   if (!extra?.length) return {}
@@ -194,17 +194,33 @@ function parseExtraArgs(extra: readonly string[] | undefined): Record<string, un
     const key = entry.substring(0, eqIdx)
     const raw = entry.substring(eqIdx + 1)
     let value: unknown
-    try {
-      // Quote bare integer literals (outside JSON strings) so bigIntReviver can convert them to BigInt.
-      // The alternation matches JSON strings first (preserved as-is) and number tokens second
-      // (pure integers get quoted; floats/scientific-notation are left alone).
-      const quoted = raw.replace(/"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g, (m) =>
-        m.startsWith('"') || !/^-?\d+$/.test(m) ? m : `"${m}"`,
-      )
-      value = JSON.parse(quoted, bigIntReviver)
-    } catch {
-      value = raw
+
+    // Special handling for requestedFinality: parse as discriminated union
+    if (key === 'requestedFinality') {
+      if (raw === 'finality' || raw === 'safe') {
+        value = raw
+      } else {
+        const depth = Number(raw)
+        if (!Number.isInteger(depth) || depth < 1 || depth > 65535)
+          throw new Error(
+            `Invalid requestedFinality: "${raw}". Use "finality", "safe", or a number 1-65535.`,
+          )
+        value = { blockDepth: depth }
+      }
+    } else {
+      try {
+        // Quote bare integer literals (outside JSON strings) so bigIntReviver can convert them to BigInt.
+        // The alternation matches JSON strings first (preserved as-is) and number tokens second
+        // (pure integers get quoted; floats/scientific-notation are left alone).
+        const quoted = raw.replace(/"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g, (m) =>
+          m.startsWith('"') || !/^-?\d+$/.test(m) ? m : `"${m}"`,
+        )
+        value = JSON.parse(quoted, bigIntReviver)
+      } catch {
+        value = raw
+      }
     }
+
     if (key in result) {
       const existing = result[key]
       result[key] = Array.isArray(existing)
