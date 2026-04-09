@@ -26,7 +26,7 @@ import type {
 import type { LeafHasher } from './hasher/common.ts'
 import { decodeMessageV1 } from './messages.ts'
 import { getOffchainTokenData } from './offchain.ts'
-import { getMessagesInTx } from './requests.ts'
+import { getMessagesInRange, getMessagesInTx } from './requests.ts'
 import { DEFAULT_GAS_LIMIT } from './shared/constants.ts'
 import type { UnsignedSolanaTx } from './solana/types.ts'
 import type { UnsignedSuiTx } from './sui/types.ts'
@@ -713,6 +713,43 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       }
       throw err
     }
+  }
+
+  /**
+   * Discover and decode CCIP messages within a block/slot/checkpoint range.
+   *
+   * @remarks
+   * This is the range-scanning equivalent of {@link getMessagesInTx}. Results are
+   * yielded in native log order (block number + log index for EVM, slot order for Solana).
+   * Non-CCIP logs in the range are silently skipped.
+   *
+   * On Solana, the `address` parameter is required (router program address).
+   * On EVM, it is optional but recommended for public RPCs that require address filtering.
+   *
+   * @param opts - {@link LogFilter} options (startBlock, endBlock, address, topics, page)
+   * @returns Async iterator of {@link CCIPRequest} objects in native log order
+   * @throws {@link CCIPChainFamilyUnsupportedError} if a pre-v1.6 message is found on a non-EVM chain
+   * @throws {@link CCIPLogsAddressRequiredError} on Solana if `address` is not provided (thrown by underlying {@link Chain.getLogs})
+   *
+   * @see {@link getMessagesInBatch} - Batch discovery by sequence number range
+   *
+   * @example Scan a block range on EVM
+   * ```typescript
+   * for await (const request of chain.getMessagesInRange({
+   *   startBlock: 1000000,
+   *   endBlock: 1001000,
+   *   address: '0xOnRampAddress...', // optional on EVM
+   * })) {
+   *   console.log(`seqNr=${request.message.sequenceNumber} dest=${request.lane.destChainSelector}`)
+   * }
+   * ```
+   *
+   * @see {@link getMessagesInTx} - Per-transaction message discovery
+   */
+  async *getMessagesInRange(
+    opts: Parameters<Chain['getLogs']>[0],
+  ): AsyncIterableIterator<CCIPRequest> {
+    yield* getMessagesInRange(this, opts)
   }
 
   /**

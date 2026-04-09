@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - SDK/CLI: Add `sourceTokenAddress` search filter to `searchMessages` and `--source-token` CLI option for filtering messages by source token
+- SDK: Add `getMessagesInRange()` to the abstract Chain class — range-based CCIP message discovery using `getLogs` + `decodeMessage`, returns `AsyncIterableIterator<CCIPRequest>`
 
 ## [1.4.0] - 2026-03-26
 

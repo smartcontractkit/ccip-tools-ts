@@ -8,7 +8,13 @@ import type { Chain, LogFilter } from './chain.ts'
 import { CCIPAddressInvalidError } from './errors/specialized.ts'
 import type { GenericExtraArgsV3, SVMExtraArgsV1 } from './extra-args.ts'
 import { EVMChain } from './index.ts'
-import { decodeMessage, getMessageById, getMessagesInBatch, getMessagesInTx } from './requests.ts'
+import {
+  decodeMessage,
+  getMessageById,
+  getMessagesInBatch,
+  getMessagesInRange,
+  getMessagesInTx,
+} from './requests.ts'
 import { SolanaChain } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
 import {
@@ -412,6 +418,223 @@ describe('getMessagesInBatch', () => {
         }),
       /Could not find all messages in batch/,
     )
+  })
+})
+
+describe('getMessagesInRange', () => {
+  it('should yield CCIP requests from logs', async () => {
+    // Use a fresh local mock chain to avoid state issues from other test suites
+    const localChain = new MockChain()
+    localChain.getLogs.mock.mockImplementation((_opts: LogFilter) =>
+      (async function* () {
+        yield {
+          address: rampAddress,
+          index: 1,
+          topics: [topic0],
+          data: mockedMessage(1),
+          blockNumber: 12000,
+          transactionHash: '0x111',
+          tx: {
+            hash: '0x111',
+            logs: [],
+            blockNumber: 12000,
+            timestamp: 1234567890,
+            from: '0x0000000000000000000000000000000000000001',
+          },
+        } as ChainLog
+        yield {
+          address: rampAddress,
+          index: 2,
+          topics: [topic0],
+          data: { notAMessage: true }, // non-CCIP log
+          blockNumber: 12000,
+          transactionHash: '0x222',
+        } as unknown as ChainLog
+        yield {
+          address: rampAddress,
+          index: 3,
+          topics: [topic0],
+          data: mockedMessage(2),
+          blockNumber: 12001,
+          transactionHash: '0x333',
+          tx: {
+            hash: '0x333',
+            logs: [],
+            blockNumber: 12001,
+            timestamp: 1234567891,
+            from: '0x0000000000000000000000000000000000000002',
+          },
+        } as ChainLog
+      })(),
+    )
+
+    const results: CCIPRequest[] = []
+    for await (const request of getMessagesInRange(localChain as unknown as Chain, {
+      startBlock: 12000,
+      endBlock: 12001,
+      address: rampAddress,
+    })) {
+      results.push(request)
+    }
+
+    // Should yield 2 messages (non-CCIP log skipped)
+    assert.equal(results.length, 2)
+    assert.equal(results[0]!.message.sequenceNumber, 1n)
+    assert.equal(results[1]!.message.sequenceNumber, 2n)
+    // Lane should be constructed
+    assert.equal(results[0]!.lane.onRamp, rampAddress)
+    assert.equal(results[0]!.lane.version, CCIPVersion.V1_2)
+    // getLaneForOnRamp should be called (no destChainSelector in mocked messages)
+    assert.equal(localChain.getLaneForOnRamp.mock.calls.length, 2)
+  })
+
+  it('should resolve lane via typeAndVersion for v1.6+ messages with destChainSelector', async () => {
+    const localChain = new MockChain()
+    localChain.typeAndVersion.mock.mockImplementation(() =>
+      Promise.resolve(['OnRamp', CCIPVersion.V1_6, `OnRamp ${CCIPVersion.V1_6}`]),
+    )
+    // Override decodeMessage to return a message with destChainSelector (v1.6+)
+    MockChain.decodeMessage.mock.mockImplementation(
+      (log: { topics: readonly string[]; data: unknown }): CCIPMessage | undefined => {
+        if (typeof log.data === 'object' && log.data && 'messageId' in log.data) {
+          const d = log.data as Record<string, unknown>
+          return {
+            messageId: d.messageId,
+            sourceChainSelector:
+              d.sourceChainSelector != null
+                ? (d.sourceChainSelector as bigint)
+                : 16015286601757825753n,
+            destChainSelector: d.destChainSelector as bigint, // v1.6+ field
+            sequenceNumber: d.sequenceNumber != null ? (d.sequenceNumber as bigint) : 1n,
+            nonce: 0n,
+            sender: '0x0000000000000000000000000000000000000045',
+            receiver: toBeHex(456, 32),
+            data: '0x',
+            tokenAmounts: [],
+            sourceTokenData: [],
+            gasLimit: 100n,
+            strict: false,
+            feeToken: '0x0000000000000000000000000000000000008916',
+            feeTokenAmount: 0n,
+          } as CCIPMessage
+        }
+        return undefined
+      },
+    )
+    const v16Message = {
+      ...mockedMessage(1),
+      destChainSelector: 4949039107694359620n, // v1.6+ includes destChainSelector
+    }
+    localChain.getLogs.mock.mockImplementation((_opts: LogFilter) =>
+      (async function* () {
+        yield {
+          address: rampAddress,
+          index: 1,
+          topics: [topic0],
+          data: v16Message,
+          blockNumber: 15000,
+          transactionHash: '0xV16Tx',
+          tx: {
+            hash: '0xV16Tx',
+            logs: [],
+            blockNumber: 15000,
+            timestamp: 1234567890,
+            from: '0x0000000000000000000000000000000000000001',
+          },
+        } as ChainLog
+      })(),
+    )
+
+    const results: CCIPRequest[] = []
+    for await (const request of getMessagesInRange(localChain as unknown as Chain, {
+      startBlock: 15000,
+      endBlock: 15000,
+    })) {
+      results.push(request)
+    }
+
+    assert.equal(results.length, 1)
+    // Lane should use typeAndVersion path (not getLaneForOnRamp)
+    assert.equal(localChain.typeAndVersion.mock.calls.length, 1)
+    assert.equal(localChain.getLaneForOnRamp.mock.calls.length, 0)
+    // Lane should have destChainSelector from the message
+    assert.equal(results[0]!.lane.destChainSelector, 4949039107694359620n)
+    assert.equal(results[0]!.lane.version, CCIPVersion.V1_6)
+    assert.equal(results[0]!.lane.onRamp, rampAddress)
+  })
+
+  it('should yield nothing for range with no CCIP messages', async () => {
+    mockedChain.getLogs.mock.mockImplementation((_opts: LogFilter) =>
+      (async function* () {
+        // empty
+      })(),
+    )
+
+    const results: CCIPRequest[] = []
+    for await (const request of getMessagesInRange(mockedChain as unknown as Chain, {
+      startBlock: 12000,
+      endBlock: 12001,
+    })) {
+      results.push(request)
+    }
+
+    assert.equal(results.length, 0)
+  })
+
+  it('should pass default topics and address to getLogs', async () => {
+    mockedChain.getLogs.mock.mockImplementation((_opts: LogFilter) =>
+      (async function* () {
+        // empty
+      })(),
+    )
+
+    for await (const _ of getMessagesInRange(mockedChain as unknown as Chain, {
+      startBlock: 100,
+      endBlock: 200,
+      address: '0xMyOnRamp',
+    })) {
+      // consume
+    }
+
+    assert.equal(mockedChain.getLogs.mock.calls.length, 1)
+    const callArgs = (mockedChain.getLogs.mock.calls[0] as unknown as { arguments: [LogFilter] })
+      .arguments[0]
+    assert.equal(callArgs.startBlock, 100)
+    assert.equal(callArgs.endBlock, 200)
+    assert.equal(callArgs.address, '0xMyOnRamp')
+    assert.deepEqual(callArgs.topics, ['CCIPSendRequested', 'CCIPMessageSent'])
+  })
+
+  it('should fetch transaction when log.tx is not available', async () => {
+    const localChain = new MockChain()
+    localChain.getLogs.mock.mockImplementation((_opts: LogFilter) =>
+      (async function* () {
+        yield {
+          address: rampAddress,
+          index: 1,
+          topics: [topic0],
+          data: mockedMessage(1),
+          blockNumber: 12000,
+          transactionHash: '0xNoTxLog',
+          // no tx field
+        } as ChainLog
+      })(),
+    )
+
+    const results: CCIPRequest[] = []
+    for await (const request of getMessagesInRange(localChain as unknown as Chain, {
+      startBlock: 12000,
+      endBlock: 12000,
+    })) {
+      results.push(request)
+    }
+
+    assert.equal(results.length, 1)
+    // getTransaction should have been called as fallback
+    assert.equal(localChain.getTransaction.mock.calls.length, 1)
+    const txHash = (localChain.getTransaction.mock.calls[0] as unknown as { arguments: [string] })
+      .arguments[0]
+    assert.equal(txHash, '0xNoTxLog')
   })
 })
 

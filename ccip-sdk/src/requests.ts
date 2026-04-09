@@ -1,7 +1,7 @@
 import { type BytesLike, hexlify, isBytesLike, toBigInt } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
-import type { Chain, ChainStatic } from './chain.ts'
+import type { Chain, ChainStatic, LogFilter } from './chain.ts'
 import {
   CCIPChainFamilyUnsupportedError,
   CCIPMessageBatchIncompleteError,
@@ -21,6 +21,7 @@ import {
   type CCIPVersion,
   type ChainLog,
   type ChainTransaction,
+  type Lane,
   type MessageInput,
   ChainFamily,
 } from './types.ts'
@@ -201,6 +202,30 @@ export function buildMessageForDest(message: MessageInput, dest: ChainFamily): A
 }
 
 /**
+ * Resolve the lane for a decoded CCIP message.
+ *
+ * Shared helper used by {@link getMessagesInTx}, {@link getMessageById}, and
+ * {@link getMessagesInRange} to build the {@link Lane} from a decoded message and log.
+ *
+ * @internal
+ */
+async function resolveLane(source: Chain, message: CCIPMessage, log: ChainLog): Promise<Lane> {
+  if ('destChainSelector' in message) {
+    const [_, version] = await source.typeAndVersion(log.address)
+    return {
+      sourceChainSelector: message.sourceChainSelector,
+      destChainSelector: message.destChainSelector,
+      onRamp: log.address,
+      version: version as CCIPVersion,
+    }
+  } else if (source.network.family !== ChainFamily.EVM) {
+    throw new CCIPChainFamilyUnsupportedError(source.network.family)
+  } else {
+    return await (source as EVMChain).getLaneForOnRamp(log.address)
+  }
+}
+
+/**
  * Fetch all CCIP messages in a transaction.
  * @param source - Source chain instance
  * @param tx - ChainTransaction to search in
@@ -211,25 +236,11 @@ export function buildMessageForDest(message: MessageInput, dest: ChainFamily): A
  * @see {@link getMessageById} - Search by messageId when tx hash unknown
  */
 export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Promise<CCIPRequest[]> {
-  // RPC fallback
   const requests: CCIPRequest[] = []
   for (const log of tx.logs) {
-    let lane
     const message = (source.constructor as ChainStatic).decodeMessage(log)
     if (!message) continue
-    if ('destChainSelector' in message) {
-      const [_, version] = await source.typeAndVersion(log.address)
-      lane = {
-        sourceChainSelector: message.sourceChainSelector,
-        destChainSelector: message.destChainSelector,
-        onRamp: log.address,
-        version: version as CCIPVersion,
-      }
-    } else if (source.network.family !== ChainFamily.EVM) {
-      throw new CCIPChainFamilyUnsupportedError(source.network.family)
-    } else {
-      lane = await (source as EVMChain).getLaneForOnRamp(log.address)
-    }
+    const lane = await resolveLane(source, message, log)
     requests.push({ lane, message, log, tx })
   }
   if (!requests.length)
@@ -276,25 +287,9 @@ export async function getMessageById(
   })) {
     const message = (source.constructor as ChainStatic).decodeMessage(log)
     if (message?.messageId !== messageId) continue
-    let destChainSelector, version
-    if ('destChainSelector' in message) {
-      destChainSelector = message.destChainSelector
-      ;[, version] = await source.typeAndVersion(log.address)
-    } else {
-      ;({ destChainSelector, version } = await (source as EVMChain).getLaneForOnRamp(log.address))
-    }
+    const lane = await resolveLane(source, message, log)
     const tx = log.tx ?? (await source.getTransaction(log.transactionHash))
-    return {
-      lane: {
-        sourceChainSelector: message.sourceChainSelector,
-        destChainSelector,
-        onRamp: log.address,
-        version: version as CCIPVersion,
-      },
-      message,
-      log,
-      tx,
-    }
+    return { lane, message, log, tx }
   }
   throw new CCIPMessageIdNotFoundError(messageId)
 }
@@ -391,6 +386,72 @@ export async function getMessagesInBatch<
     )
   }
   return messages
+}
+
+/**
+ * Discover and decode CCIP messages within a block/slot/checkpoint range.
+ *
+ * This is the range-scanning equivalent of {@link getMessagesInTx}. It composes
+ * {@link Chain.getLogs} and {@link ChainStatic.decodeMessage} to yield CCIP requests
+ * in discovery order without requiring transaction hashes upfront.
+ *
+ * Results are yielded in native log order: (blockNumber, logIndex) ascending for EVM,
+ * slot order for Solana. Non-CCIP logs in the range are silently skipped.
+ *
+ * @param source - Source chain to scan logs from
+ * @param opts - {@link LogFilter} options. Key fields:
+ *   - `startBlock` / `endBlock` — block/slot range (endBlock supports `'finalized'` and `'latest'`)
+ *   - `address` — onRamp/router address (optional on EVM, required on Solana)
+ *   - `topics` — defaults to both CCIP message event names
+ *   - `page` — batch size for log pagination
+ * @returns Async iterator of {@link CCIPRequest} objects in native log order
+ *
+ * @throws {@link CCIPChainFamilyUnsupportedError} if a pre-v1.6 message is found on a non-EVM chain
+ * @throws {@link CCIPLogsAddressRequiredError} on Solana if `address` is not provided
+ *
+ * @example EVM — scan a block range for all CCIP messages
+ *
+ * ```typescript
+ * const chain = await EVMChain.fromUrl('https://rpc.sepolia.org')
+ * for await (const request of getMessagesInRange(chain, {
+ *   startBlock: 1000000,
+ *   endBlock: 1001000,
+ *   address: '0xOnRampAddress...', // optional on EVM, but recommended for public RPCs
+ * })) {
+ *   console.log(`seqNr=${request.message.sequenceNumber} dest=${request.lane.destChainSelector}`)
+ * }
+ * ```
+ *
+ * @example Solana — scan a slot range (address required)
+ *
+ * ```typescript
+ * const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+ * for await (const request of getMessagesInRange(chain, {
+ *   startBlock: 450000000,
+ *   endBlock: 450100000,
+ *   address: 'Ccip842gzYHh...', // router program address (required on Solana)
+ * })) {
+ *   console.log(`seqNr=${request.message.sequenceNumber}`)
+ * }
+ * ```
+ *
+ * @see {@link getMessagesInTx} - Per-transaction message discovery
+ * @see {@link getMessagesInBatch} - Batch discovery by sequence number range
+ */
+export async function* getMessagesInRange(
+  source: Chain,
+  opts: LogFilter,
+): AsyncIterableIterator<CCIPRequest> {
+  for await (const log of source.getLogs({
+    ...opts,
+    topics: opts.topics ?? ['CCIPSendRequested', 'CCIPMessageSent'],
+  })) {
+    const message = (source.constructor as ChainStatic).decodeMessage(log)
+    if (!message) continue
+    const lane = await resolveLane(source, message, log)
+    const tx = log.tx ?? (await source.getTransaction(log.transactionHash))
+    yield { lane, message, log, tx }
+  }
 }
 
 /**
