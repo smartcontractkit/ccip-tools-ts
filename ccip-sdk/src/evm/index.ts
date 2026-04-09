@@ -140,6 +140,14 @@ function toRateLimiterState(b: RateLimiterBucket): RateLimiterState {
   return b.isEnabled ? { tokens: b.tokens, capacity: b.capacity, rate: b.rate } : null
 }
 
+// remote/alien addresses encoding for EVM
+// Addresses <32 bytes (EVM 20B, Aptos/Solana/Sui 32B) are zero-padded to 32 bytes;
+// Addresses >32 bytes (e.g., TON 4+32=36B) are used as raw bytes without padding
+function encodeAddressToEvm(address: BytesLike): string {
+  const bytes = getAddressBytes(address)
+  return bytes.length < 32 ? zeroPadValue(bytes, 32) : hexlify(bytes)
+}
+
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
 function isSigner(wallet: unknown): wallet is Signer {
   return (
@@ -1030,10 +1038,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       this.provider,
     ) as unknown as TypedContract<typeof Router_ABI>
     return contract.getFee(destChainSelector, {
-      receiver: (() => {
-        const receiverBytes = getAddressBytes(populatedMessage.receiver)
-        return receiverBytes.length <= 32 ? zeroPadValue(receiverBytes, 32) : hexlify(receiverBytes)
-      })(),
+      receiver: encodeAddressToEvm(populatedMessage.receiver),
       data: hexlify(populatedMessage.data ?? '0x'),
       tokenAmounts: populatedMessage.tokenAmounts ?? [],
       feeToken: populatedMessage.feeToken ?? ZeroAddress,
@@ -1320,9 +1325,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
 
     const feeToken = message.feeToken ?? ZeroAddress
-    const receiverBytes = getAddressBytes(message.receiver)
-    const receiver =
-      receiverBytes.length <= 32 ? zeroPadValue(receiverBytes, 32) : hexlify(receiverBytes)
+    const receiver = encodeAddressToEvm(message.receiver)
     const data = hexlify(message.data ?? '0x')
     const extraArgs = hexlify(
       (this.constructor as typeof EVMChain).encodeExtraArgs(message.extraArgs),
@@ -1439,7 +1442,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   async generateUnsignedExecute(
     opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<UnsignedEVMTx> {
-    const { offRamp, input, gasLimit } = await this.resolveExecuteOpts(opts)
+    const { offRamp, input, gasLimit, tokensGasLimit } = await this.resolveExecuteOpts(opts)
     if ('verifications' in input) {
       const contract = new Contract(
         offRamp,
@@ -1453,12 +1456,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       const txGasLimit = await contract.executeSingleMessage.estimateGas(
         {
           ...message,
-          onRampAddress: zeroPadValue(getAddressBytes(message.onRampAddress), 32),
-          sender: zeroPadValue(getAddressBytes(message.sender), 32),
+          onRampAddress: encodeAddressToEvm(message.onRampAddress),
+          sender: encodeAddressToEvm(message.sender),
           tokenTransfer: message.tokenTransfer.map((ta) => ({
             ...ta,
-            sourcePoolAddress: zeroPadValue(getAddressBytes(ta.sourcePoolAddress), 32),
-            sourceTokenAddress: zeroPadValue(getAddressBytes(ta.sourceTokenAddress), 32),
+            sourcePoolAddress: encodeAddressToEvm(ta.sourcePoolAddress),
+            sourceTokenAddress: encodeAddressToEvm(ta.sourceTokenAddress),
           })),
           executionGasLimit: BigInt(message.executionGasLimit),
           ccipReceiveGasLimit: BigInt(message.ccipReceiveGasLimit),
@@ -1519,24 +1522,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           [
             {
               receiverExecutionGasLimit: BigInt(gasLimit ?? 0),
-              tokenGasOverrides: input.message.tokenAmounts.map(() =>
-                BigInt(opts.tokensGasLimit ?? gasLimit ?? 0),
-              ),
+              tokenGasOverrides: input.message.tokenAmounts.map(() => BigInt(tokensGasLimit ?? 0)),
             },
           ],
         )
         break
       }
       case CCIPVersion.V1_6: {
-        // normalize message
-        const senderBytes = getAddressBytes(input.message.sender)
-        // Addresses ≤32 bytes (EVM 20B, Aptos/Solana/Sui 32B) are zero-padded to 32 bytes;
-        // Addresses >32 bytes (e.g., TON 36B) are used as raw bytes without padding
-        const sender =
-          senderBytes.length <= 32 ? zeroPadValue(senderBytes, 32) : hexlify(senderBytes)
+        const sender = encodeAddressToEvm(input.message.sender)
         const tokenAmounts = (input.message as CCIPMessage_V1_6_EVM).tokenAmounts.map((ta) => ({
           ...ta,
-          sourcePoolAddress: zeroPadValue(getAddressBytes(ta.sourcePoolAddress), 32),
+          sourcePoolAddress: encodeAddressToEvm(ta.sourcePoolAddress),
           extraData: hexlify(getDataBytes(ta.extraData)),
         }))
         const message = {
@@ -1575,7 +1571,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
               {
                 receiverExecutionGasLimit: BigInt(gasLimit ?? 0),
                 tokenGasOverrides: input.message.tokenAmounts.map(() =>
-                  BigInt(opts.tokensGasLimit ?? gasLimit ?? 0),
+                  BigInt(tokensGasLimit ?? 0),
                 ),
               },
             ],
@@ -1598,7 +1594,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       // if message requested gasLimit, ensure execution more than 100k above requested, otherwise it's clearly a try/catch fail
       txGasLimit = BigInt(input.message.gasLimit) + 200000n
     else if ('gasLimit' in input.message && !input.message.gasLimit && txGasLimit < 240000n)
-      // if message didn't request gasLimit, ensure execution gasLimit is above 240k (empiric)
+      // if message didn't request gasLimit, ensure minimum execution gasLimit (empiric)
       txGasLimit = 240000n
     manualExecTx.gasLimit = txGasLimit
 

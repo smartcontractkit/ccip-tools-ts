@@ -77,7 +77,8 @@ export const builder = (yargs: Argv) =>
       },
       'tokens-gas-limit': {
         type: 'number',
-        describe: 'Override gas limit for tokens releaseOrMint calls (0 keeps original)',
+        describe:
+          'Override gas limit for tokens releaseOrMint calls (0 keeps original, v1.5..v1.6 only)',
       },
       'estimate-gas-limit': {
         type: 'number',
