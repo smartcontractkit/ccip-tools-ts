@@ -1266,7 +1266,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         return {
           ccipFee,
           tokenTransferFee: {
-            feeDeducted: (BigInt(amount) * BigInt(tier.minimumFee)) / 10_000n,
+            feeDeducted:
+              (BigInt(amount) * BigInt(Math.round(tier.minimumFee * 1000))) / 10_000_000n,
             bps: tier.minimumFee,
           },
         }
