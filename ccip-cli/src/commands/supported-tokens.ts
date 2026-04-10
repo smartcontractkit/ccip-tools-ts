@@ -109,7 +109,7 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
 }
 
 async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
-  const { logger } = ctx
+  const { output } = ctx
   const sourceNetwork = networkInfo(argv.network)
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
@@ -119,6 +119,9 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
   } catch (_) {
     // ignore
   }
+
+  // In JSON mode, accumulate all output into a single envelope so JSON.parse(stdout) works.
+  let jsonFeeTokens: unknown
 
   // Handle --fee-tokens flag
   if (argv.feeTokens === true || argv.onlyFeeTokens || (argv.feeTokens == null && registry)) {
@@ -135,22 +138,26 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     )
     switch (argv.format) {
       case Format.pretty:
-        logger.info('Fee Tokens:')
-        logger.table(feeTokens)
+        output.write('Fee Tokens:')
+        output.table(feeTokens)
         break
       case Format.json:
-        logger.log(JSON.stringify(feeTokens, null, 2))
+        jsonFeeTokens = feeTokens // deferred — combined with subsequent output
         break
       default:
-        logger.log('feeTokens:', feeTokens)
+        output.write('feeTokens:', feeTokens)
     }
-    if (argv.onlyFeeTokens) return
+    if (argv.onlyFeeTokens) {
+      if (jsonFeeTokens !== undefined)
+        output.write(JSON.stringify({ feeTokens: jsonFeeTokens }, bigIntReplacer, 2))
+      return
+    }
   }
 
   let info, tokenPool, poolConfig, registryConfig
   if (registry && !argv.token) {
     // router + interactive list
-    info = await listTokens(ctx, source, registry, argv)
+    info = await listTokens(ctx, source, registry, argv, jsonFeeTokens)
     if (!info) return // format != pretty
     registryConfig = await source.getRegistryTokenConfig(registry, info.token)
     tokenPool = registryConfig.tokenPool
@@ -178,12 +185,23 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     }
 
     if (argv.format === Format.json) {
-      logger.log(JSON.stringify({ ...info, tokenPool, ...poolConfig }, bigIntReplacer, 2))
+      output.write(
+        JSON.stringify(
+          {
+            ...(jsonFeeTokens !== undefined && { feeTokens: jsonFeeTokens }),
+            ...info,
+            tokenPool,
+            ...poolConfig,
+          },
+          bigIntReplacer,
+          2,
+        ),
+      )
       return
     } else if (argv.format === Format.log) {
-      logger.log('Token:', poolConfig.token, info)
-      logger.log('Token Pool:', tokenPool)
-      logger.log('Pool Configs:', poolConfig)
+      output.write('Token:', poolConfig.token, info)
+      output.write('Token Pool:', tokenPool)
+      output.write('Pool Configs:', poolConfig)
       return
     }
   }
@@ -209,7 +227,7 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     }),
   })
   const remotesLen = Object.keys(remotes).length
-  if (remotesLen > 0) logger.info('Remotes [', remotesLen, ']:')
+  if (remotesLen > 0) output.write('Remotes [', remotesLen, ']:')
   for (const [network, remote] of Object.entries(remotes))
     prettyTable.call(ctx, {
       remoteNetwork: `${network} [${networkInfo(network).chainSelector}]`,
@@ -230,7 +248,13 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     })
 }
 
-async function listTokens({ logger }: Ctx, source: Chain, registry: string, argv: GlobalOpts) {
+async function listTokens(
+  { output, logger }: Ctx,
+  source: Chain,
+  registry: string,
+  argv: GlobalOpts,
+  jsonFeeTokens?: unknown,
+) {
   const tokens = await source.getSupportedTokens(registry)
   const infos: { token: string; symbol: string; decimals: number; name?: string }[] = []
   const batch = 500
@@ -243,7 +267,7 @@ async function listTokens({ logger }: Ctx, source: Chain, registry: string, argv
               const res = { token, ...info }
               if (argv.format === Format.log) {
                 // Format.log prints out-of-order, as it fetches data, concurrently
-                logger.info(token, '=', info)
+                output.write(token, '=', info)
               }
               return res
             },
@@ -254,13 +278,18 @@ async function listTokens({ logger }: Ctx, source: Chain, registry: string, argv
         ),
       )
     ).filter((e) => e !== undefined)
-    if (argv.format === Format.json) {
-      // Format.json keeps order, prints newline-separated objects
-      for (const info of infos_) {
-        logger.log(JSON.stringify(info))
-      }
-    }
     infos.push(...infos_)
+  }
+  if (argv.format === Format.json) {
+    // Emit a single JSON object with all tokens (and fee tokens if available)
+    output.write(
+      JSON.stringify(
+        { ...(jsonFeeTokens !== undefined && { feeTokens: jsonFeeTokens }), tokens: infos },
+        bigIntReplacer,
+        2,
+      ),
+    )
+    return
   }
   if (argv.format !== Format.pretty) return // Format.pretty interactive search and details
 

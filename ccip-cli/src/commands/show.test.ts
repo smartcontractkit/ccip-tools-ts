@@ -174,44 +174,38 @@ describe('e2e command show EVM', () => {
   })
 
   describe('json format', () => {
-    it('should output valid JSON with all expected fields', { timeout: 120000 }, async () => {
-      const args = buildShowArgs(TX_HASH, '--format', 'json')
-      const result = await spawnCLI(args, 120000)
+    it(
+      'should output a single valid JSON envelope with all expected fields',
+      { timeout: 120000 },
+      async () => {
+        const args = buildShowArgs(TX_HASH, '--format', 'json')
+        const result = await spawnCLI(args, 120000)
 
-      assert.equal(result.exitCode, 0)
+        assert.equal(result.exitCode, 0)
 
-      // Should contain valid JSON objects (multiple objects for request, commit, receipts)
-      const jsonObjects: any[] = []
-      let currentJson = ''
+        // Should be a single parseable JSON envelope
+        const envelope = JSON.parse(result.stdout)
 
-      // Accumulate lines to form complete JSON objects
-      const lines = result.stdout.trim().split('\n')
-      for (const line of lines) {
-        if (line.trim()) {
-          currentJson += line + '\n'
-          try {
-            const parsed = JSON.parse(currentJson)
-            jsonObjects.push(parsed)
-            currentJson = ''
-          } catch (_) {
-            // Not yet a complete JSON object, continue accumulating
-          }
-        }
-      }
+        // Request
+        assert.ok(envelope.request, 'envelope should contain request')
+        assert.ok(envelope.request.message, 'request should have message')
+        assert.match(envelope.request.message.messageId, new RegExp(MESSAGE_ID, 'i'))
+        assert.ok(envelope.request.message.sender, 'message should have sender')
+        assert.ok(envelope.request.message.receiver, 'message should have receiver')
+        assert.ok(
+          'sequenceNumber' in envelope.request.message,
+          'message should have sequenceNumber',
+        )
 
-      // Should have parsed at least one JSON object
-      assert.ok(jsonObjects.length > 0, result.stdout + result.stderr)
+        // Verifications (commit report)
+        assert.ok(envelope.verifications, 'envelope should contain verifications')
+        assert.match(JSON.stringify(envelope.verifications), /"merkleRoot"/)
 
-      // Verify messageId is in the output
-      assert.match(result.stdout, /"messageId"/)
-      assert.match(result.stdout, new RegExp(MESSAGE_ID, 'i'))
-
-      // Verify key fields are in JSON format
-      assert.match(result.stdout, /"sender"/)
-      assert.match(result.stdout, /"receiver"/)
-      assert.match(result.stdout, /"sequenceNumber"/)
-      assert.match(result.stdout, /"merkleRoot"/)
-    })
+        // Receipts
+        assert.ok(Array.isArray(envelope.receipts), 'envelope.receipts should be an array')
+        assert.ok(envelope.receipts.length >= 1, 'should have at least one receipt')
+      },
+    )
   })
 
   describe('log format', () => {

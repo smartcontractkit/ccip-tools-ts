@@ -1,4 +1,16 @@
 #!/usr/bin/env node
+
+// Redirect console.log/debug/info to stderr before any imports. Third-party libraries (notably
+// ethers.js v6) use bare console.log for retry/diagnostic messages, which would pollute stdout
+// and break JSON.parse(stdout) for agents. Our own code uses ctx.output (stdout) and ctx.logger (stderr).
+// Using `new Console(process.stderr)` preserves Node's exact formatting (util.format, util.inspect,
+// format specifiers like %s/%d, color support, etc.) — only the destination stream changes.
+
+const stderrConsole = new console.Console(process.stderr)
+console.log = stderrConsole.log.bind(stderrConsole)
+console.debug = stderrConsole.debug.bind(stderrConsole)
+console.info = stderrConsole.info.bind(stderrConsole)
+
 import { realpathSync } from 'fs'
 import { createRequire } from 'module'
 import util from 'node:util'
@@ -92,10 +104,9 @@ const globalOpts = {
 export type GlobalOpts = ArgumentsCamelCase<InferredOptionTypes<typeof globalOpts>>
 
 function preprocessArgv(argv: string[]): string[] {
-  return argv.map((arg) => {
-    if (arg === '--no-api') {
-      return '--api=false'
-    }
+  return argv.flatMap((arg) => {
+    if (arg === '--no-api') return '--api=false'
+    if (arg === '--json') return ['--format', 'json']
     return arg
   })
 }
@@ -105,6 +116,13 @@ async function main() {
     .scriptName(process.env.CLI_NAME || 'ccip-cli')
     .env('CCIP')
     .options(globalOpts)
+    .check((_argv) => {
+      const raw = process.argv
+      const hasJson = raw.includes('--json')
+      const hasFormat = raw.some((a) => a === '--format' || a === '-f' || a.startsWith('--format='))
+      if (hasJson && hasFormat) throw new Error('--json and --format are mutually exclusive')
+      return true
+    })
     .commandDir('commands', {
       extensions: [new URL(import.meta.url).pathname.split('.').pop()!],
       exclude: /\.test\.[tj]s$/,

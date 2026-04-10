@@ -89,10 +89,10 @@ export function withDateTimestamp<
  * @param lane - Lane configuration.
  */
 export function prettyLane(this: Ctx, lane: Lane) {
-  this.logger.info('Lane:')
+  this.output.write('Lane:')
   const source = networkInfo(lane.sourceChainSelector),
     dest = networkInfo(lane.destChainSelector)
-  this.logger.table({
+  this.output.table({
     name: { source: source.name, dest: dest.name },
     chainId: { source: source.chainId, dest: dest.chainId },
     chainSelector: { source: source.chainSelector, dest: dest.chainSelector },
@@ -261,7 +261,7 @@ function formatDataString(data: string): Record<string, string> {
  */
 export async function prettyRequest(this: Ctx, request: CCIPRequest, source?: Chain) {
   prettyLane.call(this, request.lane)
-  this.logger.info('Request (source):')
+  this.output.write('Request (source):')
 
   let finalized
   try {
@@ -337,7 +337,7 @@ export async function prettyRequest(this: Ctx, request: CCIPRequest, source?: Ch
     ...rest,
     ...(!!request.metadata && omit(request.metadata, 'sourceNetworkInfo', 'destNetworkInfo')),
   })
-  this.logger.info('CCIP Explorer:', getCCIPExplorerUrl('msg', request.message.messageId))
+  this.output.write('CCIP Explorer:', getCCIPExplorerUrl('msg', request.message.messageId))
 }
 
 /**
@@ -487,7 +487,7 @@ export function prettyTable(
       out.push([key, formatDate(value)])
     } else out.push([key, value])
   }
-  return this.logger.table(Object.fromEntries(out))
+  return this.output.table(Object.fromEntries(out))
 }
 
 /**
@@ -628,20 +628,36 @@ export async function* yieldResolved<T>(promises: readonly Promise<T>[]): AsyncG
 }
 
 /**
- * Create context for command execution
+ * Create context for command execution.
+ *
+ * Output architecture (following Vercel CLI / gws / gh patterns):
+ * - `output.write/table` → stdout (data only)
+ * - `logger.info/warn/error/debug` → stderr (status/diagnostics)
+ *
  * @param argv - yargs argv containing verbose flag
- * @returns AbortController and context object with destroy$ signal and logger
+ * @returns context object with destroy$ signal, output, and logger
  */
 export function getCtx(argv: { verbose?: boolean }): [ctx: Ctx, destroy: () => void] {
   let destroy
   const destroy$ = new Promise<void>((resolve) => (destroy = resolve))
 
-  const logger = new Console(process.stdout, process.stderr, true)
-  if (argv.verbose) {
-    logger.debug('Verbose mode enabled')
-  } else {
-    logger.debug = () => {}
+  // Logger: always stderr
+  const stderrConsole = new Console(process.stderr, process.stderr, true)
+  const logger: Ctx['logger'] = {
+    info: stderrConsole.info.bind(stderrConsole),
+    warn: stderrConsole.warn.bind(stderrConsole),
+    error: stderrConsole.error.bind(stderrConsole),
+    debug: argv.verbose ? stderrConsole.debug.bind(stderrConsole) : () => {},
   }
 
-  return [{ destroy$, logger, verbose: argv.verbose }, destroy!]
+  // Output: always stdout
+  const stdoutConsole = new Console(process.stdout, process.stderr, true)
+  const output: Ctx['output'] = {
+    write: stdoutConsole.log.bind(stdoutConsole),
+    table: stdoutConsole.table.bind(stdoutConsole),
+  }
+
+  if (argv.verbose) logger.debug('Verbose mode enabled')
+
+  return [{ destroy$, output, logger, verbose: argv.verbose }, destroy!]
 }
