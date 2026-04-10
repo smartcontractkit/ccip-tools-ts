@@ -104,10 +104,9 @@ const globalOpts = {
 export type GlobalOpts = ArgumentsCamelCase<InferredOptionTypes<typeof globalOpts>>
 
 function preprocessArgv(argv: string[]): string[] {
-  return argv.map((arg) => {
-    if (arg === '--no-api') {
-      return '--api=false'
-    }
+  return argv.flatMap((arg) => {
+    if (arg === '--no-api') return '--api=false'
+    if (arg === '--json') return ['--format', 'json']
     return arg
   })
 }
@@ -117,6 +116,13 @@ async function main() {
     .scriptName(process.env.CLI_NAME || 'ccip-cli')
     .env('CCIP')
     .options(globalOpts)
+    .check((_argv) => {
+      const raw = process.argv
+      const hasJson = raw.includes('--json')
+      const hasFormat = raw.some((a) => a === '--format' || a === '-f' || a.startsWith('--format='))
+      if (hasJson && hasFormat) throw new Error('--json and --format are mutually exclusive')
+      return true
+    })
     .commandDir('commands', {
       extensions: [new URL(import.meta.url).pathname.split('.').pop()!],
       exclude: /\.test\.[tj]s$/,
