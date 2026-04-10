@@ -164,9 +164,11 @@ export function fetchChainsFromRpcs(
     const c = (chains[network.name] = new Promise((resolve, reject) => {
       chainsCbs[network.name] = [resolve, reject]
     }))
-    void c.finally(() => {
-      delete chainsCbs[network.name] // when chain is settled, delete the callbacks
-    })
+    void c
+      .finally(() => {
+        delete chainsCbs[network.name] // when chain is settled, delete the callbacks
+      })
+      .catch(() => {}) // rejection already handled by chainGetter caller
     void loadChainFamily(network.family)
     return c
   }
