@@ -214,7 +214,19 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       output.write('Commit (dest):')
   })()
 
-  const dest = await getChain(request.lane.destChainSelector)
+  let dest: Chain | undefined
+  try {
+    dest = await getChain(request.lane.destChainSelector)
+  } catch (err) {
+    logger.debug(
+      'No dest RPC available for',
+      request.lane.destChainSelector,
+      '— emitting partial result:',
+      err,
+    )
+    emitJsonEnvelope()
+    return
+  }
 
   let execs$, cancelWaitVerifications: (() => void) | undefined, verifications$
   if (request.metadata?.receiptTransactionHash) {
