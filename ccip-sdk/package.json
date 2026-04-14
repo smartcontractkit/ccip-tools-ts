@@ -76,7 +76,7 @@
     "viem": "^2.47.11"
   },
   "dependencies": {
-    "axios": "1.14.0",
+    "axios": "1.15.0",
     "@aptos-labs/ts-sdk": "^6.3.1",
     "buffer": "^6.0.3",
     "@coral-xyz/anchor": "^0.29.0",
