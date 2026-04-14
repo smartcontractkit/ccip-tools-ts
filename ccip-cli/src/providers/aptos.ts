@@ -11,7 +11,11 @@ import {
   Ed25519Signature,
   generateSigningMessageForTransaction,
 } from '@aptos-labs/ts-sdk'
-import { type Logger, CCIPArgumentInvalidError } from '@chainlink/ccip-sdk/src/index.ts'
+import {
+  type Logger,
+  CCIPArgumentInvalidError,
+  CCIPInteractiveRequiredError,
+} from '@chainlink/ccip-sdk/src/index.ts'
 import AptosLedger from '@ledgerhq/hw-app-aptos'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
 import { type BytesLike, getBytes, hexlify } from 'ethers'
@@ -98,11 +102,17 @@ export class AptosLedgerSigner /*implements AptosAsyncAccount*/ {
  * @returns Promise to AptosAsyncAccount instance
  */
 export async function loadAptosWallet(
-  { wallet: walletOpt }: { wallet?: unknown },
+  { wallet: walletOpt, interactive }: { wallet?: unknown; interactive?: boolean },
   logger: Logger = console,
 ) {
   if (typeof walletOpt !== 'string') throw new CCIPArgumentInvalidError('wallet', String(walletOpt))
   if (walletOpt.startsWith('ledger')) {
+    if (interactive === false) {
+      throw new CCIPInteractiveRequiredError('Ledger wallet requires USB interaction', {
+        recovery:
+          'Use a private key or keystore wallet with password env var for non-interactive mode',
+      })
+    }
     let derivationPath = walletOpt.split(':')[1]
     if (!derivationPath) derivationPath = "m/44'/637'/0'/0'/0'"
     else if (!isNaN(Number(derivationPath))) derivationPath = `m/44'/637'/${derivationPath}'/0'/0'`
