@@ -98,7 +98,6 @@
     "yaml": "2.8.3"
   },
   "overrides": {
-    "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
-    "axios": "1.13.6"
+    "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10"
   }
 }
