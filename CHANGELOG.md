@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK/CLI: Add `sourceTokenAddress` search filter to `searchMessages` and `--source-token` CLI option for filtering messages by source token
+- CLI: Clean JSON output — data on stdout, diagnostics on stderr, single JSON envelope per command
+
 ## [1.4.0] - 2026-03-26
 
 - SDK: Add `Chain.getTokenPrice({ router, token, destChainSelector })` to fetch on-chain USD token prices from FeeQuoter (v1.6+) or PriceRegistry (v1.2/v1.5) — implemented for EVM, Solana, and Aptos.

@@ -60,7 +60,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.4.1-21f256c'
+export const SDK_VERSION = '1.4.2-36cc294'
 // generate:end
 
 /** SDK telemetry header name */
@@ -485,6 +485,8 @@ export class CCIPAPIClient {
         url.searchParams.set('destChainSelector', filters.destChainSelector.toString())
       if (filters.sourceTransactionHash)
         url.searchParams.set('sourceTransactionHash', filters.sourceTransactionHash)
+      if (filters.sourceTokenAddress)
+        url.searchParams.set('sourceTokenAddress', filters.sourceTokenAddress)
       if (filters.readyForManualExecOnly != null)
         url.searchParams.set('readyForManualExecOnly', String(filters.readyForManualExecOnly))
     }

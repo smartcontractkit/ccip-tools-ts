@@ -11,7 +11,7 @@ import {
   Ed25519Signature,
   generateSigningMessageForTransaction,
 } from '@aptos-labs/ts-sdk'
-import { CCIPArgumentInvalidError } from '@chainlink/ccip-sdk/src/index.ts'
+import { type Logger, CCIPArgumentInvalidError } from '@chainlink/ccip-sdk/src/index.ts'
 import AptosLedger from '@ledgerhq/hw-app-aptos'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
 import { type BytesLike, getBytes, hexlify } from 'ethers'
@@ -97,14 +97,17 @@ export class AptosLedgerSigner /*implements AptosAsyncAccount*/ {
  * @param wallet - wallet options (as passed from yargs argv)
  * @returns Promise to AptosAsyncAccount instance
  */
-export async function loadAptosWallet({ wallet: walletOpt }: { wallet?: unknown }) {
+export async function loadAptosWallet(
+  { wallet: walletOpt }: { wallet?: unknown },
+  logger: Logger = console,
+) {
   if (typeof walletOpt !== 'string') throw new CCIPArgumentInvalidError('wallet', String(walletOpt))
   if (walletOpt.startsWith('ledger')) {
     let derivationPath = walletOpt.split(':')[1]
     if (!derivationPath) derivationPath = "m/44'/637'/0'/0'/0'"
     else if (!isNaN(Number(derivationPath))) derivationPath = `m/44'/637'/${derivationPath}'/0'/0'`
     const signer = await AptosLedgerSigner.create(derivationPath)
-    console.info(
+    logger.info(
       'Ledger connected:',
       signer.accountAddress.toStringLong(),
       ', derivationPath:',

@@ -12,6 +12,9 @@
  * # Search by lane
  * ccip-cli search messages --source ethereum-mainnet --dest arbitrum-mainnet
  *
+ * # Filter by source token address
+ * ccip-cli search messages --source-token 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+ *
  * # Find stuck messages ready for manual execution
  * ccip-cli search messages --manual-exec-only --limit 10
  *
@@ -66,6 +69,10 @@ export const builder = (yargs: Argv) =>
         type: 'string',
         describe: 'Destination chain (name, chainId, or selector)',
       },
+      'source-token': {
+        type: 'string',
+        describe: 'Filter by source token address',
+      },
       'manual-exec-only': {
         type: 'boolean',
         default: false,
@@ -93,7 +100,7 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
 
 /** Exported for testing */
 export async function searchMessages(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
-  const { logger } = ctx
+  const { output, logger } = ctx
 
   if (argv.api === false) {
     throw new CCIPApiClientNotAvailableError({
@@ -111,6 +118,7 @@ export async function searchMessages(ctx: Ctx, argv: Parameters<typeof handler>[
   if (argv.receiver) filters.receiver = argv.receiver
   if (argv.source) filters.sourceChainSelector = networkInfo(argv.source).chainSelector
   if (argv.dest) filters.destChainSelector = networkInfo(argv.dest).chainSelector
+  if (argv.sourceToken) filters.sourceTokenAddress = argv.sourceToken
   if (argv.manualExecOnly) filters.readyForManualExecOnly = true
 
   // Collect results up to limit (0 means unlimited)
@@ -144,16 +152,16 @@ export async function searchMessages(ctx: Ctx, argv: Parameters<typeof handler>[
   // Output results
   switch (argv.format) {
     case Format.json:
-      logger.log(JSON.stringify(results, bigIntReplacer, 2))
+      output.write(JSON.stringify(results, bigIntReplacer, 2))
       return // no interactive follow-up for JSON
     case Format.log:
-      for (const msg of results) logger.log(msg)
+      for (const msg of results) output.write(msg)
       break
     default:
       for (const msg of results) {
         prettyTable.call(ctx, formatResult(msg))
       }
-      logger.info(`\n${results.length} message(s) found.`)
+      output.write(`\n${results.length} message(s) found.`)
       break
   }
 
@@ -189,10 +197,10 @@ async function fetchAndShowDetails(
     const full = await apiClient.getMessageById(messageId)
     switch (format) {
       case Format.json:
-        ctx.logger.log(JSON.stringify(full, bigIntReplacer, 2))
+        ctx.output.write(JSON.stringify(full, bigIntReplacer, 2))
         break
       case Format.log:
-        ctx.logger.log('message =', withDateTimestamp(full))
+        ctx.output.write('message =', withDateTimestamp(full))
         break
       default:
         await prettyRequest.call(ctx, full)

@@ -185,7 +185,9 @@ describe(
         // If this specific token doesn't work, that's okay - the important thing
         // is that we don't get an "Invalid SPL token" error for Token-2022 tokens
         if (error instanceof Error && error.message.includes('Invalid SPL token')) {
-          throw new Error('Token-2022 support is not working - got Invalid SPL token error')
+          throw new Error('Token-2022 support is not working - got Invalid SPL token error', {
+            cause: error,
+          })
         }
       }
     })

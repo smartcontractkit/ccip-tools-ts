@@ -1,5 +1,5 @@
-import type { SuiClient } from '@mysten/sui/client'
 import type { Keypair } from '@mysten/sui/cryptography'
+import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 
 import {
@@ -28,7 +28,7 @@ import type { CCIPMessage_V1_6_Sui, UnsignedSuiTx } from './types.ts'
  * @returns Serialized unsigned transaction ready to sign and submit.
  */
 export async function generateUnsignedExecutePTB(
-  client: SuiClient,
+  client: SuiJsonRpcClient,
   offRamp: string,
   input: ExecutionInput<CCIPMessage_V1_6_Sui>,
   opts?: { gasLimit?: number | bigint; receiverObjectIds?: string[] },
@@ -83,7 +83,7 @@ export async function generateUnsignedExecutePTB(
  * @returns The finalized transaction digest string.
  */
 export async function signAndExecuteSuiTx(
-  client: SuiClient,
+  client: SuiJsonRpcClient,
   wallet: Keypair,
   unsignedTx: UnsignedSuiTx,
   logger?: { info: (...args: unknown[]) => void },

@@ -77,7 +77,8 @@ export const builder = (yargs: Argv) =>
       },
       'tokens-gas-limit': {
         type: 'number',
-        describe: 'Override gas limit for tokens releaseOrMint calls (0 keeps original)',
+        describe:
+          'Override gas limit for tokens releaseOrMint calls (0 keeps original, v1.5..v1.6 only)',
       },
       'estimate-gas-limit': {
         type: 'number',
@@ -134,7 +135,7 @@ async function manualExec(
   ctx: Ctx,
   argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts,
 ) {
-  const { logger } = ctx
+  const { output, logger } = ctx
   const [getChain, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHashOrId)
 
   let source: Chain | undefined, offRamp
@@ -167,15 +168,14 @@ async function manualExec(
   switch (argv.format) {
     case Format.log: {
       const logPrefix = 'log' in request ? `message ${request.log.index} = ` : 'message = '
-      logger.log(logPrefix, withDateTimestamp(request))
+      output.write(logPrefix, withDateTimestamp(request))
       break
     }
     case Format.pretty:
       await prettyRequest.call(ctx, request, source)
       break
     case Format.json:
-      logger.info(JSON.stringify(request, bigIntReplacer, 2))
-      break
+      break // deferred to combined envelope with receipt
   }
 
   const dest = await getChain(request.lane.destChainSelector)
@@ -224,8 +224,8 @@ async function manualExec(
     inputs = { input, offRamp }
   }
 
-  const [walletAddr, wallet] = await loadChainWallet(dest, argv)
-  console.debug(
+  const [walletAddr, wallet] = await loadChainWallet(dest, argv, logger)
+  logger.debug(
     'Loaded wallet:',
     walletAddr,
     'for',
@@ -241,10 +241,10 @@ async function manualExec(
 
   switch (argv.format) {
     case Format.log:
-      logger.log('receipt =', withDateTimestamp(receipt))
+      output.write('receipt =', withDateTimestamp(receipt))
       break
     case Format.pretty:
-      logger.info('Receipt (dest):')
+      output.write('Receipt (dest):')
       prettyReceipt.call(
         ctx,
         receipt,
@@ -254,7 +254,7 @@ async function manualExec(
       )
       break
     case Format.json:
-      logger.info(JSON.stringify(receipt, bigIntReplacer, 2))
+      output.write(JSON.stringify({ request, receipt }, bigIntReplacer, 2))
       break
   }
 }

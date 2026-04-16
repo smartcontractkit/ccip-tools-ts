@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { CCIPArgumentInvalidError } from '@chainlink/ccip-sdk/src/index.ts'
+import { type Logger, CCIPArgumentInvalidError } from '@chainlink/ccip-sdk/src/index.ts'
 import { LedgerSigner } from '@ethers-ext/signer-ledger'
 import { password } from '@inquirer/prompts'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
@@ -96,6 +96,7 @@ const KEYSTORE_PROVIDERS: Record<
 export async function loadEvmWallet(
   provider: JsonRpcApiProvider,
   { wallet: walletOpt }: { wallet?: unknown },
+  logger: Logger = console,
 ): Promise<Signer> {
   if (
     typeof walletOpt === 'number' ||
@@ -114,7 +115,7 @@ export async function loadEvmWallet(
     if (derivationPath && !isNaN(Number(derivationPath)))
       derivationPath = `m/44'/60'/${derivationPath}'/0/0`
     const ledger = new LedgerSigner(HIDTransport, provider, derivationPath)
-    console.info('Ledger connected:', await ledger.getAddress(), ', derivationPath:', ledger.path)
+    logger.info('Ledger connected:', await ledger.getAddress(), ', derivationPath:', ledger.path)
     return ledger
   }
   for (const [prefix, keystoreProvider] of Object.entries(KEYSTORE_PROVIDERS)) {

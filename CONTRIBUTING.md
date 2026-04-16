@@ -422,6 +422,92 @@ export class MyChain extends Chain<typeof ChainFamily.MyChain> {
 
 This enables dynamic chain discovery via `supportedChains[family]` and is required for CLI auto-detection.
 
+## CLI Output Architecture
+
+The CLI separates data from diagnostics following established CLI conventions (stdout for data, stderr for everything else):
+
+- **`ctx.output`** writes to **stdout** — data only (JSON, tables, log-format results)
+- **`ctx.logger`** writes to **stderr** — status, progress, warnings, errors, debug
+
+This is unconditional. No format-dependent behavior. The type system enforces it — `ctx.logger` cannot write to stdout, `ctx.output` cannot write to stderr.
+
+### Channel Reference
+
+| Method | Destination | Use for |
+|--------|------------|---------|
+| `ctx.output.write(...)` | always stdout | Data: JSON envelopes, log-format output, pretty section headers |
+| `ctx.output.table(...)` | always stdout | Pretty-printed key-value tables |
+| `ctx.logger.info(...)` | always stderr | Status/progress ("Waiting for...", "Fee:", "Sending...") |
+| `ctx.logger.warn(...)` | always stderr | Warnings |
+| `ctx.logger.error(...)` | always stderr | Errors |
+| `ctx.logger.debug(...)` | always stderr (when `--verbose`) | Debug diagnostics |
+
+### Output Rules
+
+1. **Never use `console.*` in command or provider code.** Use `ctx.output` for data, `ctx.logger` for diagnostics. The only exceptions are `index.ts` top-level error and debug handlers (no ctx available). ESLint `no-console` rule enforces this.
+
+2. **Data output uses `ctx.output.write()`**, not `ctx.logger.info()`. This includes JSON envelopes, log-format assignments (`'result =', data`), and pretty-mode section headers (`'Lane:'`, `'Fee Tokens:'`).
+
+3. **Status/progress messages use `ctx.logger.info()`**. These are messages like `[Sent] Waiting for source chain finalization...` or `Fee: 0.001 ETH` (when continuing to send). They go to stderr so they never pollute piped output.
+
+4. **Provider functions receive a `logger` parameter with `console` as default.** Use `logger: Logger = console` in the function signature, then call `logger.info(...)` directly.
+
+### JSON Envelope Rule
+
+`--format json` must emit exactly one JSON object to stdout via `ctx.output.write(JSON.stringify(...))`. `JSON.parse(stdout)` must work.
+
+| Command | Envelope shape |
+|---------|---------------|
+| `show` | `{ request, attestations?, verifications?, receipts? }` |
+| `manual-exec` | `{ request, receipt }` |
+| `get-supported-tokens` (list) | `{ feeTokens?, tokens }` |
+| `get-supported-tokens` (detail) | `{ feeTokens?, ...tokenInfo, tokenPool, ...poolConfig }` |
+| `get-supported-tokens --only-fee-tokens` | `{ feeTokens }` |
+| `parse`, `token`, `lane-latency` | Single object (no envelope needed) |
+| `search messages` | JSON array of results |
+
+All `JSON.stringify` calls must use `bigIntReplacer`.
+
+### Format Switch Pattern
+
+```typescript
+const { output, logger } = ctx
+
+switch (argv.format) {
+  case Format.log:
+    output.write('result =', data)                              // stdout
+    break
+  case Format.pretty:
+    prettyTable.call(ctx, data)                                 // stdout (via output.table)
+    break
+  case Format.json:
+    output.write(JSON.stringify(data, bigIntReplacer, 2))       // stdout
+    break
+}
+
+logger.info('Status message')                                   // stderr (all formats)
+```
+
+### Provider Logger Threading
+
+Provider functions use the SDK `Logger` type (debug/info/warn/error — all stderr):
+
+```typescript
+export async function loadEvmWallet(
+  provider: JsonRpcApiProvider,
+  { wallet: walletOpt }: { wallet?: unknown },
+  logger: Logger = console,
+): Promise<Signer> {
+  logger.info('Ledger connected:', ...)  // stderr
+}
+```
+
+Command handlers pass `ctx.logger` when calling `loadChainWallet`:
+
+```typescript
+const [walletAddr, wallet] = await loadChainWallet(dest, argv, logger)
+```
+
 ## CLI Argument Guidelines
 
 The CLI follows established patterns from industry-standard CLIs (AWS, GCP, kubectl, docker) for argument design. These guidelines ensure consistency, usability, and maintainability.

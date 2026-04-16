@@ -64,7 +64,7 @@ export function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & Glob
 }
 
 function parseBytes(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
-  const { logger } = ctx
+  const { output } = ctx
   let parsed
   for (const chain of Object.values(supportedChains)) {
     try {
@@ -78,14 +78,14 @@ function parseBytes(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
 
   switch (argv.format) {
     case Format.log: {
-      logger.log(`parsed =`, parsed)
+      output.write(`parsed =`, parsed)
       break
     }
     case Format.pretty:
       prettyTable.call(ctx, parsed)
       break
     case Format.json:
-      logger.info(JSON.stringify(parsed, bigIntReplacer, 2))
+      output.write(JSON.stringify(parsed, bigIntReplacer, 2))
       break
   }
 }

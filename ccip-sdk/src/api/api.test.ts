@@ -928,6 +928,7 @@ describe('CCIPAPIClient', () => {
         sourceChainSelector: 5009297550715157269n,
         destChainSelector: 4949039107694359620n,
         sourceTransactionHash: '0xTxHash',
+        sourceTokenAddress: '0xTokenAddress',
         readyForManualExecOnly: true,
       })
 
@@ -937,6 +938,7 @@ describe('CCIPAPIClient', () => {
       assert.ok(url.includes('sourceChainSelector=5009297550715157269'))
       assert.ok(url.includes('destChainSelector=4949039107694359620'))
       assert.ok(url.includes(`sourceTransactionHash=${encodeURIComponent('0xTxHash')}`))
+      assert.ok(url.includes(`sourceTokenAddress=${encodeURIComponent('0xTokenAddress')}`))
       assert.ok(url.includes('readyForManualExecOnly=true'))
     })
 
@@ -1134,6 +1136,7 @@ describe('CCIPAPIClient', () => {
       assert.ok(!url.includes('sourceChainSelector='))
       assert.ok(!url.includes('destChainSelector='))
       assert.ok(!url.includes('sourceTransactionHash='))
+      assert.ok(!url.includes('sourceTokenAddress='))
       assert.ok(!url.includes('readyForManualExecOnly='))
     })
 

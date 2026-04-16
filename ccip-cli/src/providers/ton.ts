@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 
 import {
+  type Logger,
   type UnsignedTONTx,
   CCIPArgumentInvalidError,
   CCIPWalletInvalidError,
@@ -22,6 +23,7 @@ export async function loadTonWallet(
   client: TonClient,
   { wallet: walletOpt }: { wallet?: unknown } = {},
   isTestnet?: boolean,
+  logger: Logger = console,
 ) {
   if (typeof walletOpt !== 'string') throw new CCIPWalletInvalidError(walletOpt)
   if (walletOpt === 'ledger' || walletOpt.startsWith('ledger:')) {
@@ -41,7 +43,7 @@ export async function loadTonWallet(
       bounceable: false,
       testOnly: isTestnet,
     })
-    console.info('Ledger TON:', address, ', derivationPath:', derivationPath)
+    logger.info('Ledger TON:', address, ', derivationPath:', derivationPath)
     const contract = WalletContractV4.create({
       workchain: 0,
       publicKey,

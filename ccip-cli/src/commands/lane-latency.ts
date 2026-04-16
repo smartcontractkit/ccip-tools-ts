@@ -71,7 +71,7 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
 
 /** Exported for testing */
 export async function getLaneLatencyCmd(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
-  const { logger } = ctx
+  const { output } = ctx
 
   // Respect --no-api flag - this command requires API access
   if (argv.api === false) {
@@ -96,10 +96,10 @@ export async function getLaneLatencyCmd(ctx: Ctx, argv: Parameters<typeof handle
 
   switch (argv.format) {
     case Format.json:
-      logger.log(JSON.stringify(result, bigIntReplacer, 2))
+      output.write(JSON.stringify(result, bigIntReplacer, 2))
       break
     case Format.log:
-      logger.log('Lane Latency:', result)
+      output.write('Lane Latency:', result)
       break
     default: {
       prettyTable.call(ctx, {

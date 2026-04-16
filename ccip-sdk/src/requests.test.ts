@@ -2,15 +2,23 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
 import { PublicKey } from '@solana/web3.js'
+import { toNano } from '@ton/core'
 import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
 import type { Chain, LogFilter } from './chain.ts'
-import { CCIPAddressInvalidError } from './errors/specialized.ts'
+import { CCIPAddressInvalidError, CCIPArgumentInvalidError } from './errors/specialized.ts'
 import type { GenericExtraArgsV3, SVMExtraArgsV1 } from './extra-args.ts'
 import { EVMChain } from './index.ts'
-import { decodeMessage, getMessageById, getMessagesInBatch, getMessagesInTx } from './requests.ts'
+import {
+  buildMessageForDest,
+  decodeMessage,
+  getMessageById,
+  getMessagesInBatch,
+  getMessagesInTx,
+} from './requests.ts'
 import { SolanaChain } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
+import { TONChain } from './ton/index.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
@@ -18,6 +26,7 @@ import {
   type ChainTransaction,
   type Lane,
   CCIPVersion,
+  ChainFamily,
 } from './types.ts'
 import { bigIntReplacer, networkInfo } from './utils.ts'
 
@@ -645,6 +654,33 @@ describe('decodeMessage', () => {
           () => EVMChain.buildMessageForDest(message),
           (err: unknown) => err instanceof CCIPAddressInvalidError && err.context.family === 'EVM',
         )
+      })
+
+      it('should reject TON messages below the minimum gasLimit', () => {
+        assert.throws(
+          () =>
+            TONChain.buildMessageForDest({
+              receiver: 'EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2',
+            }),
+          (err: unknown) =>
+            err instanceof CCIPArgumentInvalidError && /0\.025 TON/.test(err.message),
+        )
+      })
+
+      it('should enforce the TON minimum through the shared buildMessageForDest helper', () => {
+        const result = buildMessageForDest(
+          {
+            receiver: 'EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2',
+            extraArgs: {
+              gasLimit: toNano('0.025'),
+              allowOutOfOrderExecution: true,
+            },
+          },
+          ChainFamily.TON,
+        )
+
+        assert.ok('gasLimit' in result.extraArgs)
+        assert.equal(result.extraArgs.gasLimit, toNano('0.025'))
       })
     })
 
