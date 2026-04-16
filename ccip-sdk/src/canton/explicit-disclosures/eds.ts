@@ -1,5 +1,5 @@
 import type { DisclosedContract } from './types.ts'
-import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
+import { get, post } from '../client/client.ts'
 
 /**
  * Configuration for the EDS-based disclosure provider.
@@ -137,12 +137,6 @@ interface EdsPerPartyRouterFactoryResponse {
   disclosedContracts: EdsApiDisclosedContract[]
 }
 
-/** EDS error response body. */
-interface EdsErrorResponse {
-  error: string
-  details?: string
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -184,52 +178,7 @@ function rawContextToSdk(raw: EdsApiChoiceContext): EdsChoiceContext {
   }
 }
 
-async function edsFetch<T>(url: string, init: RequestInit, timeoutMs: number): Promise<T> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  let response: Response
-  try {
-    response = await fetch(url, { ...init, signal: controller.signal })
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    throw new CCIPError(
-      CCIPErrorCode.CANTON_API_ERROR,
-      `EDS request failed for ${url}: ${msg}. Ensure the EDS is running and reachable.`,
-      { cause: err instanceof Error ? err : undefined },
-    )
-  } finally {
-    clearTimeout(timer)
-  }
-
-  if (!response.ok) {
-    let detail = ''
-    try {
-      const errBody = (await response.json()) as EdsErrorResponse
-      detail = ` ${errBody.error}${errBody.details ? `: ${errBody.details}` : ''}`
-    } catch {
-      detail = ` HTTP ${response.status}`
-    }
-    throw new CCIPError(CCIPErrorCode.CANTON_API_ERROR, `EDS${detail} — URL: ${url}`)
-  }
-
-  return response.json() as Promise<T>
-}
-
-async function edsPost<T>(url: string, body: unknown, timeoutMs: number): Promise<T> {
-  return edsFetch<T>(
-    url,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-    timeoutMs,
-  )
-}
-
-async function edsGet<T>(url: string, timeoutMs: number): Promise<T> {
-  return edsFetch<T>(url, { method: 'GET' }, timeoutMs)
-}
+const EDS_HEADERS: Record<string, string> = { 'Content-Type': 'application/json' }
 
 /**
  * Disclosure provider that fetches explicit disclosures from a running EDS instance
@@ -259,8 +208,13 @@ export class EdsDisclosureProvider {
    *   disclosure map (`ccvs`).
    */
   async fetchSendDisclosures(ccvs: string[]): Promise<EdsSendResult> {
-    const url = `${this.edsBaseUrl}/ccip/v1/message/send`
-    const resp = await edsPost<EdsCCIPSendResponse>(url, { ccvs }, this.timeoutMs)
+    const resp = await post<EdsCCIPSendResponse>(
+      this.edsBaseUrl,
+      '/ccip/v1/message/send',
+      EDS_HEADERS,
+      this.timeoutMs,
+      { ccvs },
+    )
     return {
       choiceContext: rawContextToSdk(resp.choiceContext),
       ccvs: rawCcvsToSdk(resp.ccvs),
@@ -272,14 +226,22 @@ export class EdsDisclosureProvider {
    *
    * Calls `POST /ccip/v1/message/execute`.
    *
-   * @param messageID - The message ID of the CCIP message to be executed.
+   * @param encodedMessage - The hex-encoded CCIP message to be executed (without `0x` prefix).
    * @param ccvs - InstanceAddresses of all CCVs that should verify the message.
    * @returns `EdsExecuteResult` containing the `choiceContext` and the per-CCV
    *   disclosure map (`ccvs`).
    */
-  async fetchExecutionDisclosures(messageID: string, ccvs: string[]): Promise<EdsExecuteResult> {
-    const url = `${this.edsBaseUrl}/ccip/v1/message/execute`
-    const resp = await edsPost<EdsCCIPExecuteResponse>(url, { messageID, ccvs }, this.timeoutMs)
+  async fetchExecutionDisclosures(
+    encodedMessage: string,
+    ccvs: string[],
+  ): Promise<EdsExecuteResult> {
+    const resp = await post<EdsCCIPExecuteResponse>(
+      this.edsBaseUrl,
+      '/ccip/v1/message/execute',
+      EDS_HEADERS,
+      this.timeoutMs,
+      { encodedMessage, ccvs },
+    )
     return {
       choiceContext: rawContextToSdk(resp.choiceContext),
       ccvs: rawCcvsToSdk(resp.ccvs),
@@ -299,8 +261,13 @@ export class EdsDisclosureProvider {
   async fetchPerPartyRouterFactoryDisclosures(
     partyID: string,
   ): Promise<EdsPerPartyRouterFactoryResult> {
-    const url = `${this.edsBaseUrl}/ccip/v1/perPartyRouter/factory`
-    const resp = await edsPost<EdsPerPartyRouterFactoryResponse>(url, { partyID }, this.timeoutMs)
+    const resp = await post<EdsPerPartyRouterFactoryResponse>(
+      this.edsBaseUrl,
+      '/ccip/v1/perPartyRouter/factory',
+      EDS_HEADERS,
+      this.timeoutMs,
+      { partyID },
+    )
     return {
       perPartyRouterFactoryId: resp.perPartyRouterFactoryId,
       disclosedContracts: resp.disclosedContracts.map(edsContractToSdk),
@@ -316,8 +283,12 @@ export class EdsDisclosureProvider {
    * @returns The `DisclosedContract` for the requested contract.
    */
   async fetchDisclosure(instanceAddress: string): Promise<DisclosedContract> {
-    const url = `${this.edsBaseUrl}/ccip/v1/disclosure/${encodeURIComponent(instanceAddress)}`
-    const resp = await edsGet<EdsApiDisclosedContract>(url, this.timeoutMs)
+    const resp = await get<EdsApiDisclosedContract>(
+      this.edsBaseUrl,
+      `/ccip/v1/disclosure/${encodeURIComponent(instanceAddress)}`,
+      EDS_HEADERS,
+      this.timeoutMs,
+    )
     return edsContractToSdk(resp)
   }
 }

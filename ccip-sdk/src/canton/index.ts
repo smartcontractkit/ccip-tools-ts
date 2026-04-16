@@ -805,24 +805,27 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       verifications: Pick<VerifierResult, 'ccvData' | 'destAddress'>[]
     }
 
-    // Step 1 — Fetch same-party disclosures (PerPartyRouter + CCIPReceiver)
-    // TODO: This should include receiverCid when provided. We need to figure out how to get that from the input or opts.
-    const acsDisclosures = await this.acsDisclosureProvider.fetchExecutionDisclosures()
-
-    // Step 2 — Fetch cross-party disclosures from EDS
-    //   The EDS needs the CCV instance addresses so it can return the right
+    // Step 1 — Fetch cross-party disclosures from EDS
+    //   The EDS needs the encoded message and CCV instance addresses so it can return the right
     //   CCV disclosures alongside the infrastructure contracts.
     const ccvAddresses = verifications.map((v) => v.destAddress)
 
-    // Derive a message ID for the EDS request.
-    // For now, we use the first 66 chars of encodedMessage as a stand-in;
-    // in practice this should be the keccak256 of the encoded message or
-    // extracted from decodable headers.
-    const messageIdForEds = stripHexPrefix(encodedMessage).slice(0, 64)
-
+    this.logger.debug(
+      `CantonChain.generateUnsignedExecute: fetching EDS disclosures for ${ccvAddresses.length} CCVs...`,
+    )
     const edsResult = await this.edsDisclosureProvider.fetchExecutionDisclosures(
-      messageIdForEds,
+      stripHexPrefix(encodedMessage),
       ccvAddresses,
+    )
+    // Step 2 — Fetch same-party disclosures (PerPartyRouter + CCIPReceiver)
+    // TODO: This should include receiverCid when provided. We need to figure out how to get that from the input or opts.
+    this.logger.debug(
+      'CantonChain.generateUnsignedExecute: fetching ACS disclosures for CCIPReceiver and PerPartyRouter...',
+    )
+    // Check opts for a pre-resolved receiver CID (threaded from execute() after find/create).
+    const cantonOpts = opts as typeof opts & { _cantonReceiverCid?: string }
+    const acsDisclosures = await this.acsDisclosureProvider.fetchExecutionDisclosures(
+      cantonOpts._cantonReceiverCid,
     )
 
     // Step 3 — Build CCV inputs: pair each verification with its CCV contract ID
@@ -857,7 +860,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       encodedMessage: stripHexPrefix(String(encodedMessage)),
       tokenTransfer: null,
       ccvInputs,
-      additionalRequiredCCVs: [],
     }
 
     // Step 6 — Merge all disclosed contracts
@@ -913,11 +915,29 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       throw new CCIPWalletInvalidError(wallet)
     }
 
-    // Build the unsigned command
+    // Decode the message finality and find/create a compatible CCIPReceiver.
+    const inputOpts = opts as { input?: { encodedMessage?: string } }
+    const encodedMessageHex = inputOpts.input?.encodedMessage ?? ''
+    const finality = decodeFinalityFromEncodedMessage(encodedMessageHex)
+    this.logger.debug(
+      `CantonChain.execute: message finality=${finality}, looking for compatible CCIPReceiver...`,
+    )
+
+    let receiverCid = (await this.acsDisclosureProvider.findReceiverForFinality(finality))
+      ?.contractId
+    if (!receiverCid) {
+      this.logger.debug(
+        `CantonChain.execute: no CCIPReceiver with minBlockConfirmations=${finality} found in ACS — creating one`,
+      )
+      receiverCid = await this.createReceiverForFinality(wallet.party, finality)
+    }
+
+    // Build the unsigned command, passing the resolved receiver CID via Canton-specific opts.
     const unsigned = await this.generateUnsignedExecute({
       ...opts,
       payer: wallet.party,
-    })
+      _cantonReceiverCid: receiverCid,
+    } as unknown as Parameters<Chain['generateUnsignedExecute']>[0])
 
     // Submit and wait for the full transaction (so we get events back)
     const response = await this.provider.submitAndWaitForTransaction(unsigned.commands)
@@ -942,6 +962,48 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     }
 
     return { receipt, log, timestamp }
+  }
+
+  /**
+   * Find or create a `CCIPReceiver` contract whose `minBlockConfirmations` equals `finality`.
+   *
+   * The `OffRamp.PrepareExecute` Daml choice rejects messages whose `finality` field does not
+   * match the receiver's `minBlockConfirmations`, so each distinct finality value needs its own
+   * receiver instance.  This method first searches the ACS; if no match is found it creates a
+   * fresh contract (mirroring the Go `deployReceiver` helper in the staging script).
+   */
+  private async createReceiverForFinality(payer: string, finality: number): Promise<string> {
+    const instanceId = `receiver-finality${finality}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    const createCmd: JsCommands = {
+      commands: [
+        {
+          CreateCommand: {
+            templateId: '#ccip-receiver:CCIP.CCIPReceiver:CCIPReceiver',
+            createArguments: {
+              instanceId,
+              owner: payer,
+              minBlockConfirmations: finality,
+              requiredCCVs: [],
+              optionalCCVs: [],
+              optionalThreshold: 0,
+            },
+          },
+        },
+      ],
+      commandId: `ccip-create-receiver-${Date.now()}`,
+      actAs: [payer],
+    }
+    const response = await this.provider.submitAndWaitForTransaction(createCmd)
+    const tx = response.transaction as { events?: unknown[] }
+    for (const event of tx.events ?? []) {
+      const ev = event as Record<string, unknown>
+      const created = ev['CreatedEvent'] as Record<string, unknown> | undefined
+      if (typeof created?.contractId === 'string') return created.contractId
+    }
+    throw new CCIPError(
+      CCIPErrorCode.CANTON_API_ERROR,
+      `CantonChain.createReceiverForFinality: CCIPReceiver creation produced no contract ID`,
+    )
   }
 
   /**
@@ -1151,4 +1213,23 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
  */
 function stripHexPrefix(hex: string): string {
   return hex.startsWith('0x') ? hex.slice(2) : hex
+}
+
+/**
+ * Decode the `finality` field from a Canton-encoded CCIP message.
+ *
+ * Wire format (big-endian, offsets in bytes):
+ *   0      version          (1)
+ *   1–8    source_chain     (8)
+ *   9–16   dest_chain       (8)
+ *   17–24  sequence_number  (8)
+ *   25–28  execution_gas    (4)
+ *   29–32  ccip_gas         (4)
+ *   33–34  finality         (2)  ← uint16 big-endian
+ */
+function decodeFinalityFromEncodedMessage(encodedHex: string): number {
+  const hex = encodedHex.startsWith('0x') ? encodedHex.slice(2) : encodedHex
+  // finality starts at byte 33 → hex offset 66, length 4 chars
+  if (hex.length < 70) return 0
+  return parseInt(hex.slice(66, 70), 16)
 }

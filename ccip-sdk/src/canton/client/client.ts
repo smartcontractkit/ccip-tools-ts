@@ -1,6 +1,12 @@
+import { Agent, fetch as undiciFetch } from 'undici'
+
 import type { components } from './generated/ledger-api.ts'
 import { CCIPError } from '../../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../../errors/codes.ts'
+
+// Canton JSON Ledger API requires HTTP/2. Use a dedicated undici Agent with
+// allowH2 so that ALPN negotiation selects h2 for all TLS connections.
+const h2Agent = new Agent({ allowH2: true })
 
 /** Commands to submit to the ledger */
 export type JsCommands = components['schemas']['JsCommands']
@@ -325,6 +331,9 @@ async function parseErrorBody(response: Response): Promise<unknown> {
   }
 }
 
+const DEFAULT_RETRY_COUNT = 10
+const DEFAULT_RETRY_DELAY_MS = 3_000
+
 async function request<T>(
   method: 'GET' | 'POST',
   baseUrl: string,
@@ -332,41 +341,63 @@ async function request<T>(
   headers: Record<string, string>,
   timeoutMs: number,
   options?: { body?: unknown; queryParams?: Record<string, string> },
+  retries = DEFAULT_RETRY_COUNT,
+  retryDelayMs = DEFAULT_RETRY_DELAY_MS,
 ): Promise<T> {
-  const url = new URL(path, baseUrl)
+  const url = new URL(baseUrl + path)
   if (options?.queryParams) {
     for (const [key, value] of Object.entries(options.queryParams)) {
       url.searchParams.set(key, value)
     }
   }
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  let response: Response
-  try {
-    response = await fetch(url.toString(), {
-      method,
-      headers,
-      body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
-      signal: controller.signal,
-    })
-  } catch (err) {
-    throw new CantonApiError(`${method} ${path} failed`, err)
-  } finally {
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    let response: Response
+    try {
+      response = (await undiciFetch(url.toString(), {
+        method,
+        headers,
+        body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
+        signal: controller.signal,
+        dispatcher: h2Agent,
+      })) as Response
+    } catch (err) {
+      clearTimeout(timer)
+      if (attempt < retries) {
+        console.log(
+          `[canton/client] ${method} ${path} failed (attempt ${attempt}/${retries}), retrying in ${retryDelayMs}ms:`,
+          err,
+        )
+        await new Promise((r) => setTimeout(r, retryDelayMs))
+        continue
+      }
+      throw new CantonApiError(`${method} ${path} failed`, err)
+    }
     clearTimeout(timer)
+
+    if (!response.ok) {
+      const errorBody = await parseErrorBody(response)
+      if (attempt < retries) {
+        console.log(
+          `[canton/client] ${method} ${path} failed with status ${response.status} (attempt ${attempt}/${retries}), retrying in ${retryDelayMs}ms:`,
+          errorBody,
+        )
+        await new Promise((r) => setTimeout(r, retryDelayMs))
+        continue
+      }
+      throw new CantonApiError(`${method} ${path} failed`, errorBody, response.status)
+    }
+
+    const contentLength = response.headers.get('content-length')
+    if (response.status === 204 || contentLength === '0') {
+      return undefined as T
+    }
+    return response.json() as Promise<T>
   }
 
-  if (!response.ok) {
-    throw new CantonApiError(
-      `${method} ${path} failed`,
-      await parseErrorBody(response),
-      response.status,
-    )
-  }
-  const contentLength = response.headers.get('content-length')
-  if (response.status === 204 || contentLength === '0') {
-    return undefined as T
-  }
-  return response.json() as Promise<T>
+  throw new CantonApiError(`${method} ${path} failed after ${retries} attempts`, undefined)
 }
 
 /**

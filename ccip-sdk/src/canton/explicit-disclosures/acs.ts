@@ -36,6 +36,34 @@ function extractStringField(createArgument: unknown, fieldName: string): string 
 function extractInstanceId(createArgument: unknown): string | null {
   return extractStringField(createArgument, 'instanceId')
 }
+
+/**
+ * Extract a named numeric field from a contract's `createArgument` object.
+ * Handles both direct numeric values and Canton JSON API tagged variants (`{ int64: n }`).
+ */
+function extractNumberField(createArgument: unknown, fieldName: string): number | null {
+  if (!createArgument || typeof createArgument !== 'object') return null
+  const arg = createArgument as Record<string, unknown>
+
+  if (fieldName in arg && typeof arg[fieldName] === 'number') {
+    return arg[fieldName]
+  }
+
+  if ('fields' in arg && Array.isArray(arg['fields'])) {
+    for (const field of arg['fields'] as Array<Record<string, unknown>>) {
+      if (field['label'] === fieldName) {
+        const val = field['value']
+        if (typeof val === 'number') return val
+        if (val && typeof val === 'object') {
+          const v = val as Record<string, unknown>
+          if ('int64' in v) return Number(v['int64'])
+          if ('numeric' in v && typeof v['numeric'] === 'string') return Number(v['numeric'])
+        }
+      }
+    }
+  }
+  return null
+}
 /**
  * Metadata for each CCIP contract type needed for ACS filtering:
  * - `templateId`: package-name reference used directly in the `TemplateFilter` so the
@@ -96,6 +124,8 @@ interface RichContractMatch {
   signatory: string | null
   /** partyOwner field from createArgument (present on PerPartyRouter) */
   partyOwner: string | null
+  /** minBlockConfirmations field from createArgument (present on CCIPReceiver) */
+  minBlockConfirmations: number | null
 }
 
 /**
@@ -137,6 +167,7 @@ async function fetchRichSnapshot(
       instanceId: extractInstanceId(created.createArgument),
       signatory: signatories.length === 1 ? (signatories[0] ?? null) : null,
       partyOwner: extractStringField(created.createArgument, 'partyOwner'),
+      minBlockConfirmations: extractNumberField(created.createArgument, 'minBlockConfirmations'),
     }
 
     const list = byModuleEntity.get(moduleEntity) ?? []
@@ -318,6 +349,30 @@ export class AcsDisclosureProvider {
       : pickBySignatory(snapshot, 'ccipReceiver', this.config.party)
 
     return { perPartyRouter: existingRouter, ccipReceiver }
+  }
+
+  /**
+   * Find the first `CCIPReceiver` in the party's ACS with a `minBlockConfirmations`
+   * value matching `finality`, or `null` if none exists.
+   *
+   * Used by the execute flow to select the receiver that is compatible with the
+   * message finality so the `PrepareExecute` choice does not reject the message.
+   */
+  async findReceiverForFinality(finality: number): Promise<DisclosedContract | null> {
+    const snapshot = await fetchRichSnapshot(this.client, this.config.party)
+    const { moduleEntity } = CCIP_TEMPLATES.ccipReceiver
+    const candidates = snapshot.get(moduleEntity) ?? []
+    for (const c of candidates) {
+      if (c.minBlockConfirmations === finality) {
+        return {
+          templateId: c.templateId,
+          contractId: c.contractId,
+          createdEventBlob: c.createdEventBlob,
+          synchronizerId: c.synchronizerId,
+        }
+      }
+    }
+    return null
   }
 
   /**
