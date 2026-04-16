@@ -43,7 +43,7 @@
   },
   "overrides": {
     "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
-    "axios": "1.13.6",
+    "axios": "1.15.0",
     "tar": "7.5.13",
     "elliptic": "6.6.1",
     "brace-expansion": "5.0.5",
