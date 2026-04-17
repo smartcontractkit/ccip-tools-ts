@@ -1589,18 +1589,25 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     /* Executing a message for the first time has some hard try/catches on-chain
      * so we need to ensure some lower-bounds gasLimits */
-    let txGasLimit = await this.provider.estimateGas(manualExecTx)
-    if (
-      'gasLimit' in input.message &&
-      input.message.gasLimit &&
-      txGasLimit < input.message.gasLimit + 100000n
-    )
-      // if message requested gasLimit, ensure execution more than 100k above requested, otherwise it's clearly a try/catch fail
-      txGasLimit = BigInt(input.message.gasLimit) + 200000n
-    else if ('gasLimit' in input.message && !input.message.gasLimit && txGasLimit < 240000n)
-      // if message didn't request gasLimit, ensure execution gasLimit is above 240k (empiric)
-      txGasLimit = 240000n
-    manualExecTx.gasLimit = txGasLimit
+    try {
+      let txGasLimit = await this.provider.estimateGas(manualExecTx)
+      if (
+        'gasLimit' in input.message &&
+        input.message.gasLimit &&
+        txGasLimit < input.message.gasLimit + 100000n
+      )
+        // if message requested gasLimit, ensure execution more than 100k above requested, otherwise it's clearly a try/catch fail
+        txGasLimit = BigInt(input.message.gasLimit) + 200000n
+      else if ('gasLimit' in input.message && !input.message.gasLimit && txGasLimit < 240000n)
+        // if message didn't request gasLimit, ensure execution gasLimit is above 240k (empiric)
+        txGasLimit = 240000n
+      manualExecTx.gasLimit = txGasLimit
+    } catch (err) {
+      this.logger.warn(
+        'Gas estimation for manuallyExecute failed, using default fallback. Error:',
+        err,
+      )
+    }
 
     return { family: ChainFamily.EVM, transactions: [manualExecTx] }
   }
