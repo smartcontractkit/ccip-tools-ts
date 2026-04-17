@@ -1,8 +1,9 @@
-import { type Cell, beginCell, toNano } from '@ton/core'
+import { Builder, Cell, beginCell, toNano } from '@ton/core'
 import { type TonClient, Address } from '@ton/ton'
 import { toBigInt } from 'ethers'
 
 import type { UnsignedTONTx } from './types.ts'
+import { asSnakedCell } from './utils.ts'
 import { CCIPError, CCIPErrorCode, CCIPExtraArgsInvalidError } from '../errors/index.ts'
 import {
   type ExtraArgs,
@@ -129,14 +130,9 @@ function encodeEVMExtraArgsCell(extraArgs: ExtraArgs): Cell {
 
 function encodeSVMExtraArgsCell(extraArgs: SVMExtraArgsV1): Cell {
   // Encode accounts as a snaked cell of uint256 values
-  let accountsCell = beginCell().endCell()
-  if (extraArgs.accounts.length > 0) {
-    const accountBuilder = beginCell()
-    for (const account of extraArgs.accounts) {
-      accountBuilder.storeUint(toBigInt(getAddressBytes(account)), 256)
-    }
-    accountsCell = accountBuilder.endCell()
-  }
+  let accountsCell = asSnakedCell(extraArgs.accounts, (account: string) =>
+    new Builder().storeUint(toBigInt(getAddressBytes(account)), 256)
+  )
 
   // Encode tokenReceiver as uint256
   const tokenReceiver = extraArgs.tokenReceiver
@@ -166,14 +162,9 @@ function encodeSVMExtraArgsCell(extraArgs: SVMExtraArgsV1): Cell {
  */
 function encodeSuiExtraArgsCell(extraArgs: SuiExtraArgsV1): Cell {
   // Encode receiverObjectIds as a snaked cell of uint256 values
-  let objectIdsCell = beginCell().endCell()
-  if (extraArgs.receiverObjectIds.length > 0) {
-    const objectIdsBuilder = beginCell()
-    for (const objectId of extraArgs.receiverObjectIds) {
-      objectIdsBuilder.storeUint(toBigInt(getAddressBytes(objectId)), 256)
-    }
-    objectIdsCell = objectIdsBuilder.endCell()
-  }
+  let objectIdsCell = asSnakedCell(extraArgs.receiverObjectIds, (objectId: string) =>
+    new Builder().storeUint(toBigInt(getAddressBytes(objectId)), 256)
+  )
 
   // Encode tokenReceiver as uint256
   const tokenReceiver = extraArgs.tokenReceiver
