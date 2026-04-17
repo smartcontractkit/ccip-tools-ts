@@ -1,4 +1,4 @@
-import { Builder, Cell, beginCell, toNano } from '@ton/core'
+import { type Cell, Builder, beginCell, toNano } from '@ton/core'
 import { type TonClient, Address } from '@ton/ton'
 import { toBigInt } from 'ethers'
 
@@ -130,8 +130,8 @@ function encodeEVMExtraArgsCell(extraArgs: ExtraArgs): Cell {
 
 function encodeSVMExtraArgsCell(extraArgs: SVMExtraArgsV1): Cell {
   // Encode accounts as a snaked cell of uint256 values
-  let accountsCell = asSnakedCell(extraArgs.accounts, (account: string) =>
-    new Builder().storeUint(toBigInt(getAddressBytes(account)), 256)
+  const accountsCell = asSnakedCell(extraArgs.accounts, (account: string) =>
+    new Builder().storeUint(toBigInt(getAddressBytes(account)), 256),
   )
 
   // Encode tokenReceiver as uint256
@@ -162,8 +162,8 @@ function encodeSVMExtraArgsCell(extraArgs: SVMExtraArgsV1): Cell {
  */
 function encodeSuiExtraArgsCell(extraArgs: SuiExtraArgsV1): Cell {
   // Encode receiverObjectIds as a snaked cell of uint256 values
-  let objectIdsCell = asSnakedCell(extraArgs.receiverObjectIds, (objectId: string) =>
-    new Builder().storeUint(toBigInt(getAddressBytes(objectId)), 256)
+  const objectIdsCell = asSnakedCell(extraArgs.receiverObjectIds, (objectId: string) =>
+    new Builder().storeUint(toBigInt(getAddressBytes(objectId)), 256),
   )
 
   // Encode tokenReceiver as uint256

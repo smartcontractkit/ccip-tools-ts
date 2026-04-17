@@ -1,4 +1,4 @@
-import { Builder, Cell, Slice, Dictionary, beginCell } from '@ton/core'
+import { type Builder, type Slice, Cell, Dictionary, beginCell } from '@ton/core'
 import { hexlify, toBeHex } from 'ethers'
 
 import { CCIPTransactionNotFoundError } from '../errors/specialized.ts'
@@ -32,15 +32,17 @@ export function extractMagicTag(cell: string | Cell): string {
   return hexlify(tag)
 }
 
-// TODO: duplicate from https://github.com/smartcontractkit/chainlink-ton/blob/main/contracts/src/utils/types.ts
+/**
+ * TODO: duplicate from https://github.com/smartcontractkit/chainlink-ton/blob/main/contracts/src/utils/types.ts
+ */
 export function asSnakedCell<T>(array: T[], builderFn: (item: T) => Builder): Cell {
   const cells: Builder[] = []
   let builder = beginCell()
 
   for (const value of array) {
-    let itemBuilder = builderFn(value)
+    const itemBuilder = builderFn(value)
     if (itemBuilder.refs > 3) {
-      throw 'Cannot pack more than 3 refs per item, use storeRef to a cell containing the item'
+      throw new Error('Cannot pack more than 3 refs per item, use storeRef to a cell containing the item')
     }
     if (builder.availableBits < itemBuilder.bits || builder.availableRefs <= 1) {
       cells.push(builder)
@@ -64,7 +66,9 @@ export function asSnakedCell<T>(array: T[], builderFn: (item: T) => Builder): Ce
   return current
 }
 
-// TODO: duplicate from https://github.com/smartcontractkit/chainlink-ton/blob/main/contracts/src/utils/types.ts
+/**
+ * TODO: duplicate from https://github.com/smartcontractkit/chainlink-ton/blob/main/contracts/src/utils/types.ts
+ */
 export function fromSnakeData<T>(data: Cell, readerFn: (cs: Slice) => T): T[] {
   const array: T[] = []
   let cs = data.beginParse()
@@ -79,7 +83,9 @@ export function fromSnakeData<T>(data: Cell, readerFn: (cs: Slice) => T): T[] {
   return array
 }
 
-// TODO: duplicate from https://github.com/smartcontractkit/chainlink-ton/blob/main/contracts/src/utils/types.ts
+/**
+ * TODO: duplicate from https://github.com/smartcontractkit/chainlink-ton/blob/main/contracts/src/utils/types.ts
+ */
 export function isEmpty(slice: Slice): boolean {
   const remainingBits = slice.remainingBits
   const remainingRefs = slice.remainingRefs
