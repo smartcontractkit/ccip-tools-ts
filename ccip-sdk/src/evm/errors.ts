@@ -152,15 +152,15 @@ export function recursiveParseError(
     )
   }
   if (!isBytesLike(data) || [0, 20].includes(dataLength(data))) {
-    // include networkName for chainSelectors
-    if (key.match(/sel(ector)?$/i) && typeof data === 'bigint') {
-      let name
+    if (key.match(/[Ss]el(ector)?$/) && typeof data === 'bigint') {
+      // try to include networkName for chainSelectors
       try {
-        ;({ name } = networkInfo(data))
+        data = `${data} [${networkInfo(data).name}]`
       } catch {
         // ignore
       }
-      if (name) return [[key, `${data} [${name}]`]]
+    } else if (key.match(/\berr$/) && data === '0x') {
+      data = '0x [possibly out-of-gas or abi.decode error]'
     }
     return [[key, data]]
   }
@@ -182,10 +182,6 @@ export function recursiveParseError(
     typeof recursiveParseError
   >
   if (!args) return res
-  if (['ReceiverError', 'TokenHandlingError'].includes(fragment.name) && args.err === '0x') {
-    res.push([`${key_}.err`, '0x [possibly out-of-gas or abi.decode error]'])
-    return res
-  }
   res.push(...recursiveParseError(key, args))
   return res
 }
