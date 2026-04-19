@@ -96,7 +96,7 @@ export const sendSchema: CommandSchema<'send'> = {
       alias: 'x',
       label: 'Extra Args',
       description:
-        'Extra args as key=value (e.g., blockConfirmations=5). Requires CCIP v2+ lanes for V3 fields.',
+        'Extra args as key=value (e.g., finality=5). Requires CCIP v2+ lanes for V3 fields.',
       group: 'message',
       itemType: 'string',
       placeholder: 'key=value',

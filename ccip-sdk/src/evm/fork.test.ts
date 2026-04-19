@@ -54,7 +54,7 @@ const APTOS_SUPPORTED_TOKEN = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
 // ── getLaneFeatures constants ──
 
 // v2.0 router for Sepolia -> Fuji lane
-const SEPOLIA_V2_0_ROUTER = '0xc0f457e615348708FaAB3B40ECC26Badb32B7b30'
+const SEPOLIA_V2_0_ROUTER = '0x784d49a71BB4C48eB7dA4cD7e6Ecb424f9b5EAB1'
 // v2.0 router for Fuji -> Sepolia lane
 const FUJI_V2_0_ROUTER = '0xE7b62d27D6DDca525FE2e1ea526905EbfB36a1e1'
 // Token on Sepolia whose pool (BurnMintTokenPool 1.7.0-dev) supports the older
@@ -536,7 +536,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   describe('getLaneFeatures', () => {
-    it('should return MIN_BLOCK_CONFIRMATIONS=0 and no rate limits for v1.6 router', async () => {
+    it('should return FINALITY_FAST=undefined and no rate limits for v1.6 router', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const features = await sepoliaChain.getLaneFeatures({
@@ -545,9 +545,9 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       })
 
       assert.equal(
-        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        features[LaneFeature.FINALITY_FAST],
         undefined,
-        'v1.6 lane should not include MIN_BLOCK_CONFIRMATIONS (FTF does not exist pre-v2.0)',
+        'v1.6 lane should not include FINALITY_FAST (FTF does not exist pre-v2.0)',
       )
       assert.equal(
         LaneFeature.RATE_LIMITS in features,
@@ -555,13 +555,13 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         'v1.6 lane should not have RATE_LIMITS',
       )
       assert.equal(
-        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        LaneFeature.FAST_RATE_LIMITS in features,
         false,
-        'v1.6 lane should not have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+        'v1.6 lane should not have FAST_RATE_LIMITS',
       )
     })
 
-    it('should return MIN_BLOCK_CONFIRMATIONS=1 and no rate limits for v2.0 router without token', async () => {
+    it('should return FINALITY_FAST=1 and no rate limits for v2.0 router without token', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const features = await sepoliaChain.getLaneFeatures({
@@ -570,7 +570,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       })
 
       assert.equal(
-        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        features[LaneFeature.FINALITY_FAST],
         1,
         'v2.0 lane without token should default to 1 block confirmation',
       )
@@ -581,7 +581,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
     })
 
-    it('should return MIN_BLOCK_CONFIRMATIONS=0 for token with old pool (fallback)', async () => {
+    it('should return FINALITY_FAST=0 for token with old pool (fallback)', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const features = await sepoliaChain.getLaneFeatures({
@@ -591,18 +591,18 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       })
 
       assert.equal(
-        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        features[LaneFeature.FINALITY_FAST],
         0,
-        'token with old pool should have FTF disabled (MIN_BLOCK_CONFIRMATIONS=0)',
+        'token with old pool should have FTF disabled (FINALITY_FAST=0)',
       )
       // Old pool doesn't support getMinBlockConfirmations but does support
       // getCurrentRateLimiterState, so RATE_LIMITS may still be present
       assert.ok(LaneFeature.RATE_LIMITS in features, 'old pool should still have RATE_LIMITS')
-      // FTF disabled → no CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS
+      // FTF disabled → no FAST_RATE_LIMITS
       assert.equal(
-        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        LaneFeature.FAST_RATE_LIMITS in features,
         false,
-        'FTF disabled pool should not have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+        'FTF disabled pool should not have FAST_RATE_LIMITS',
       )
     })
 
@@ -615,13 +615,9 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         token: FTF_TOKEN_FUJI,
       })
 
-      const minBlocks = features[LaneFeature.MIN_BLOCK_CONFIRMATIONS]
-      console.log(`  Lombard pool MIN_BLOCK_CONFIRMATIONS = ${minBlocks}`)
-      assert.equal(
-        minBlocks,
-        0,
-        'Lombard pool should return MIN_BLOCK_CONFIRMATIONS=0 (FTF not enabled)',
-      )
+      const minBlocks = features[LaneFeature.FINALITY_FAST]
+      console.log(`  Lombard pool FINALITY_FAST = ${minBlocks}`)
+      assert.equal(minBlocks, 0, 'Lombard pool should return FINALITY_FAST=0 (FTF not enabled)')
 
       // RATE_LIMITS should be present for v2.0 pool with token
       assert.ok(LaneFeature.RATE_LIMITS in features, 'v2.0 pool should have RATE_LIMITS')
@@ -632,11 +628,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         assert.equal(typeof rateLimits.rate, 'bigint', 'rate should be bigint')
       }
 
-      // FTF disabled → no CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS
+      // FTF disabled → no FAST_RATE_LIMITS
       assert.equal(
-        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        LaneFeature.FAST_RATE_LIMITS in features,
         false,
-        'FTF disabled pool should not have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+        'FTF disabled pool should not have FAST_RATE_LIMITS',
       )
     })
 
@@ -650,9 +646,9 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       })
 
       assert.equal(
-        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        features[LaneFeature.FINALITY_FAST],
         undefined,
-        'v1.5 lane should not include MIN_BLOCK_CONFIRMATIONS (FTF does not exist pre-v2.0)',
+        'v1.5 lane should not include FINALITY_FAST (FTF does not exist pre-v2.0)',
       )
 
       // Legacy pool should expose RATE_LIMITS via getCurrentOutboundRateLimiterState
@@ -664,15 +660,15 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         assert.equal(typeof rateLimits.rate, 'bigint', 'rate should be bigint')
       }
 
-      // FTF doesn't exist on legacy lanes → no CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS
+      // FTF doesn't exist on legacy lanes → no FAST_RATE_LIMITS
       assert.equal(
-        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        LaneFeature.FAST_RATE_LIMITS in features,
         false,
-        'legacy lane should not have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+        'legacy lane should not have FAST_RATE_LIMITS',
       )
     })
 
-    it('should return nonzero MIN_BLOCK_CONFIRMATIONS and custom rate limits for FTF-enabled pool (Sepolia)', async () => {
+    it('should return nonzero FINALITY_FAST and FAST_RATE_LIMITS for FTF-enabled pool (Sepolia)', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const token = await sepoliaChain.getTokenForTokenPool(FTF_ENABLED_POOL_SEPOLIA)
@@ -682,11 +678,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         token,
       })
 
-      const minBlocks = features[LaneFeature.MIN_BLOCK_CONFIRMATIONS]
-      console.log(`  FTF-enabled pool MIN_BLOCK_CONFIRMATIONS = ${minBlocks}`)
+      const minBlocks = features[LaneFeature.FINALITY_FAST]
+      console.log(`  FTF-enabled pool FINALITY_FAST = ${minBlocks}`)
       assert.ok(
         minBlocks != null && minBlocks > 0,
-        `FTF-enabled pool should have MIN_BLOCK_CONFIRMATIONS > 0 (got ${minBlocks})`,
+        `FTF-enabled pool should have FINALITY_FAST > 0 (got ${minBlocks})`,
       )
 
       // Default rate limits should be present
@@ -699,14 +695,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
 
       // Custom finality rate limits should be present when FTF is enabled
       assert.ok(
-        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
-        'FTF-enabled pool should have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+        LaneFeature.FAST_RATE_LIMITS in features,
+        'FTF-enabled pool should have FAST_RATE_LIMITS',
       )
-      const customRateLimits = features[LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS]
-      assert.ok(
-        customRateLimits != null,
-        'CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS should not be null',
-      )
+      const customRateLimits = features[LaneFeature.FAST_RATE_LIMITS]
+      assert.ok(customRateLimits != null, 'FAST_RATE_LIMITS should not be null')
       assert.equal(typeof customRateLimits.tokens, 'bigint', 'custom tokens should be bigint')
       assert.equal(typeof customRateLimits.capacity, 'bigint', 'custom capacity should be bigint')
       assert.equal(typeof customRateLimits.rate, 'bigint', 'custom rate should be bigint')
@@ -721,7 +714,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
     })
 
-    it('should return nonzero MIN_BLOCK_CONFIRMATIONS and custom rate limits for FTF-enabled pool (Fuji)', async () => {
+    it('should return nonzero FINALITY_FAST and FAST_RATE_LIMITS for FTF-enabled pool (Fuji)', async () => {
       assert.ok(fujiChain, 'fuji chain should be initialized')
 
       const token = await fujiChain.getTokenForTokenPool(FTF_ENABLED_POOL_FUJI)
@@ -731,11 +724,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         token,
       })
 
-      const minBlocks = features[LaneFeature.MIN_BLOCK_CONFIRMATIONS]
-      console.log(`  FTF-enabled Fuji pool MIN_BLOCK_CONFIRMATIONS = ${minBlocks}`)
+      const minBlocks = features[LaneFeature.FINALITY_FAST]
+      console.log(`  FTF-enabled Fuji pool FINALITY_FAST = ${minBlocks}`)
       assert.ok(
         minBlocks != null && minBlocks > 0,
-        `FTF-enabled pool should have MIN_BLOCK_CONFIRMATIONS > 0 (got ${minBlocks})`,
+        `FTF-enabled pool should have FINALITY_FAST > 0 (got ${minBlocks})`,
       )
 
       // Default rate limits should be present
@@ -745,14 +738,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
 
       // Custom finality rate limits should be present when FTF is enabled
       assert.ok(
-        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
-        'FTF-enabled pool should have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+        LaneFeature.FAST_RATE_LIMITS in features,
+        'FTF-enabled pool should have FAST_RATE_LIMITS',
       )
-      const customRateLimits = features[LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS]
-      assert.ok(
-        customRateLimits != null,
-        'CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS should not be null',
-      )
+      const customRateLimits = features[LaneFeature.FAST_RATE_LIMITS]
+      assert.ok(customRateLimits != null, 'FAST_RATE_LIMITS should not be null')
 
       // Custom rate limits should differ from default rate limits
       const differs =
@@ -779,7 +769,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
 
       const result = await sepoliaChain.getTokenPoolConfig(poolAddress, {
         destChainSelector: FUJI_SELECTOR,
-        blockConfirmationsRequested: 0,
+        finality: 0,
         tokenArgs: '0x',
       })
 
@@ -805,7 +795,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
 
       const result = await fujiChain.getTokenPoolConfig(poolAddress, {
         destChainSelector: SEPOLIA_SELECTOR,
-        blockConfirmationsRequested: 0,
+        finality: 0,
         tokenArgs: '0x',
       })
 
@@ -813,22 +803,20 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.equal(typeof result.tokenTransferFeeConfig.destGasOverhead, 'number')
       assert.equal(typeof result.tokenTransferFeeConfig.destBytesOverhead, 'number')
       assert.equal(typeof result.tokenTransferFeeConfig.isEnabled, 'boolean')
-      console.log('  v2.0 pool fee config (blockConfirmationsRequested=0):')
+      console.log('  v2.0 pool fee config (finality=0):')
+      console.log(`    finalityFeeUSDCents = ${result.tokenTransferFeeConfig.finalityFeeUSDCents}`)
       console.log(
-        `    defaultBlockConfirmationsFeeUSDCents = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsFeeUSDCents}`,
+        `    fastFinalityFeeUSDCents = ${result.tokenTransferFeeConfig.fastFinalityFeeUSDCents}`,
       )
       console.log(
-        `    customBlockConfirmationsFeeUSDCents  = ${result.tokenTransferFeeConfig.customBlockConfirmationsFeeUSDCents}`,
+        `    finalityTransferFeeBps = ${result.tokenTransferFeeConfig.finalityTransferFeeBps}`,
       )
       console.log(
-        `    defaultBlockConfirmationsTransferFeeBps = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps}`,
-      )
-      console.log(
-        `    customBlockConfirmationsTransferFeeBps  = ${result.tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps}`,
+        `    fastFinalityTransferFeeBps = ${result.tokenTransferFeeConfig.fastFinalityTransferFeeBps}`,
       )
     })
 
-    it('should return fee config with blockConfirmationsRequested=1', async () => {
+    it('should return fee config with finality=1', async () => {
       assert.ok(fujiChain, 'fuji chain should be initialized')
 
       // Resolve pool address
@@ -841,7 +829,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
 
       const result = await fujiChain.getTokenPoolConfig(poolAddress, {
         destChainSelector: SEPOLIA_SELECTOR,
-        blockConfirmationsRequested: 1,
+        finality: 1,
         tokenArgs: '0x',
       })
 
@@ -849,18 +837,16 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.equal(typeof result.tokenTransferFeeConfig.destGasOverhead, 'number')
       assert.equal(typeof result.tokenTransferFeeConfig.destBytesOverhead, 'number')
       assert.equal(typeof result.tokenTransferFeeConfig.isEnabled, 'boolean')
-      console.log('  v2.0 pool fee config (blockConfirmationsRequested=1):')
+      console.log('  v2.0 pool fee config (finality=1):')
+      console.log(`    finalityFeeUSDCents = ${result.tokenTransferFeeConfig.finalityFeeUSDCents}`)
       console.log(
-        `    defaultBlockConfirmationsFeeUSDCents = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsFeeUSDCents}`,
+        `    fastFinalityFeeUSDCents = ${result.tokenTransferFeeConfig.fastFinalityFeeUSDCents}`,
       )
       console.log(
-        `    customBlockConfirmationsFeeUSDCents  = ${result.tokenTransferFeeConfig.customBlockConfirmationsFeeUSDCents}`,
+        `    finalityTransferFeeBps = ${result.tokenTransferFeeConfig.finalityTransferFeeBps}`,
       )
       console.log(
-        `    defaultBlockConfirmationsTransferFeeBps = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps}`,
-      )
-      console.log(
-        `    customBlockConfirmationsTransferFeeBps  = ${result.tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps}`,
+        `    fastFinalityTransferFeeBps = ${result.tokenTransferFeeConfig.fastFinalityTransferFeeBps}`,
       )
     })
 
@@ -924,7 +910,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.equal(typeof tf.bps, 'number')
       assert.equal(tf.feeDeducted, (amount * BigInt(tf.bps)) / 10_000n)
 
-      console.log('  getTotalFeesEstimate (default blockConfirmations):')
+      console.log('  getTotalFeesEstimate (standard finality):')
       console.log(`    ccipFee = ${estimate.ccipFee}`)
       console.log(`    value = ${tf.feeDeducted} (${tf.bps} bps)`)
     })
@@ -951,7 +937,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
     })
 
-    it('should use custom BPS when blockConfirmations > 0', async () => {
+    it('should use custom BPS when FTF', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const amount = 1_000_000n
@@ -963,7 +949,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
           tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount }],
           extraArgs: {
             gasLimit: 200_000n,
-            requestedFinality: { blockDepth: 1 },
+            finality: 1,
             ccvs: [],
             ccvArgs: [],
             executor: '',
@@ -981,7 +967,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       const tf = estimate.tokenTransferFee
       assert.equal(tf.feeDeducted, (amount * BigInt(tf.bps)) / 10_000n)
 
-      console.log('  getTotalFeesEstimate (blockConfirmations=1):')
+      console.log('  getTotalFeesEstimate (finality=1):')
       console.log(`    ccipFee = ${estimate.ccipFee}`)
       console.log(`    value = ${tf.feeDeducted} (${tf.bps} bps)`)
     })
@@ -998,13 +984,13 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     const STAGING_API = 'https://api.ccip.cldev.cloud'
 
     const HISTORICAL_MESSAGE_IDS = [
-      // Fuji → Sepolia, default finality (blockConfirmations=0), 0% BPS
+      // Fuji → Sepolia, default finality (finality=0), 0% BPS
       '0x39dda11d8d8ccf35055825349ab8c1842587966389cb8200eb5b72830318f707',
-      // Fuji → Sepolia, custom finality (blockConfirmations=5), 1% BPS
+      // Fuji → Sepolia, custom finality (finality=5), 1% BPS
       '0x88bf551330e9767ac981582a3e7fac510b876a7038e38a633e32c63ac7dd0169',
-      // Sepolia → Fuji, default finality (blockConfirmations=0), 0% BPS
+      // Sepolia → Fuji, default finality (finality=0), 0% BPS
       '0x2a6eeea60b80235cbd1e3ead45f6cd848374961831c21733170d7cb965514f31',
-      // Sepolia → Fuji, custom finality (blockConfirmations=1), 10% BPS
+      // Sepolia → Fuji, custom finality (finality=1), 10% BPS
       '0x42683f3a0efb956e881b3e9eec4e4161e32b09a98c680ee82219d011fcd9df1d',
     ]
 
@@ -1030,7 +1016,9 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         const { chain, router } = resolveChain(raw.sourceNetworkInfo.chainSelector)
         const destChainSelector = BigInt(raw.destNetworkInfo.chainSelector)
         const token = raw.tokenAmounts[0].sourceTokenAddress as string
-        const blockConfirmations: number = raw.extraArgs?.blockConfirmations ?? 0
+        // Note: the CCIP REST API still returns extraArgs.blockConfirmations (old name);
+        // we read it here and pass it as `finality` to the SDK (new name).
+        const finality: number = raw.extraArgs?.blockConfirmations ?? 0
 
         // Reconstruct original sent amount = post-fee amount + bps fee deducted
         const bpsEntry = raw.fees?.bpsFeeDetails?.[0]
@@ -1046,10 +1034,10 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
           receiver: '0x0000000000000000000000000000000000000001',
           tokenAmounts: [{ token, amount: originalAmount }],
         }
-        if (blockConfirmations > 0) {
+        if (finality > 0) {
           message.extraArgs = {
             gasLimit: 0n,
-            requestedFinality: { blockDepth: blockConfirmations },
+            finality: finality,
             ccvs: [],
             ccvArgs: [],
             executor: '',

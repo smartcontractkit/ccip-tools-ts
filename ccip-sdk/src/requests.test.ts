@@ -624,7 +624,7 @@ describe('decodeMessage', () => {
           receiver: '0x1234567890123456789012345678901234567890',
           data: '0x1234',
           extraArgs: {
-            requestedFinality: { blockDepth: 1 },
+            finality: 1,
             typo: 'oops',
           } as any,
         }
@@ -649,20 +649,20 @@ describe('decodeMessage', () => {
     })
 
     describe('V3 extraArgs detection', () => {
-      it('should detect V3 when requestedFinality is provided', () => {
+      it('should detect V3 when finality is provided', () => {
         const message = {
           receiver: '0x1234567890123456789012345678901234567890',
           data: '0x1234',
           extraArgs: {
-            requestedFinality: { blockDepth: 5 },
-          } as any,
+            finality: 5,
+          },
         }
 
         const result = EVMChain.buildMessageForDest(message)
         const extraArgs = result.extraArgs as GenericExtraArgsV3
 
-        assert.ok('requestedFinality' in result.extraArgs)
-        assert.deepEqual(extraArgs.requestedFinality, { blockDepth: 5 })
+        assert.ok('finality' in result.extraArgs)
+        assert.equal(extraArgs.finality, 5)
         assert.equal(extraArgs.gasLimit, 200000n)
         assert.deepEqual(extraArgs.ccvs, [])
         assert.equal(extraArgs.executor, '')
@@ -681,7 +681,7 @@ describe('decodeMessage', () => {
 
         assert.ok('executor' in result.extraArgs)
         assert.equal(extraArgs.executor, '0x0000000000000000123456789012345678901234')
-        assert.deepEqual(extraArgs.requestedFinality, 'finality')
+        assert.deepEqual(extraArgs.finality, 'finalized')
       })
 
       it('should apply V3 defaults for all fields when any V3 field is present', () => {
@@ -699,7 +699,7 @@ describe('decodeMessage', () => {
         // Verify all V3 fields have proper defaults
         assert.deepEqual(extraArgs.ccvs, ['0x0000000000123456789012345678901234567890'])
         assert.deepEqual(extraArgs.ccvArgs, [])
-        assert.deepEqual(extraArgs.requestedFinality, 'finality')
+        assert.deepEqual(extraArgs.finality, 'finalized')
         assert.equal(extraArgs.executor, '')
         assert.equal(extraArgs.executorArgs, '0x')
         assert.equal(extraArgs.tokenReceiver, '')
@@ -719,7 +719,7 @@ describe('decodeMessage', () => {
         const result = EVMChain.buildMessageForDest(message)
 
         // Should be V2, not V3
-        assert.ok(!('requestedFinality' in result.extraArgs))
+        assert.ok(!('finality' in result.extraArgs))
         assert.ok(!('executor' in result.extraArgs))
         if ('gasLimit' in result.extraArgs) {
           assert.equal(result.extraArgs.gasLimit, 300000n)
@@ -733,15 +733,15 @@ describe('decodeMessage', () => {
         const message = {
           receiver: '0x1234567890123456789012345678901234567890',
           extraArgs: {
-            requestedFinality: { blockDepth: 10 },
-          } as any,
+            finality: 10,
+          },
         }
 
         const result = EVMChain.buildMessageForDest(message)
         const extraArgs = result.extraArgs as GenericExtraArgsV3
 
         assert.equal(extraArgs.gasLimit, 0n)
-        assert.deepEqual(extraArgs.requestedFinality, { blockDepth: 10 })
+        assert.equal(extraArgs.finality, 10)
       })
 
       it('should allow user to override V3 defaults', () => {
@@ -750,7 +750,7 @@ describe('decodeMessage', () => {
           receiver: '0x1234567890123456789012345678901234567890',
           data: '0x1234',
           extraArgs: {
-            requestedFinality: { blockDepth: 3 },
+            finality: 3,
             gasLimit: 500000n,
             executor: '0x000000000000000012345678901234567890123',
             executorArgs: customExecutorArgs,
@@ -758,14 +758,14 @@ describe('decodeMessage', () => {
               '0x0000000000000000000000000000000000000cc1',
               '0x0000000000000000000000000000000000000cc2',
             ],
-          } as any,
+          },
         }
 
         const result = EVMChain.buildMessageForDest(message)
         const extraArgs = result.extraArgs as GenericExtraArgsV3
 
         assert.equal(extraArgs.gasLimit, 500000n)
-        assert.deepEqual(extraArgs.requestedFinality, { blockDepth: 3 })
+        assert.equal(extraArgs.finality, 3)
         assert.equal(extraArgs.executor, '0x000000000000000012345678901234567890123')
         assert.deepEqual(extraArgs.executorArgs, customExecutorArgs)
         assert.deepEqual(extraArgs.ccvs, [

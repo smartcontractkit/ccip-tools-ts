@@ -16,7 +16,6 @@ import {
   type EVMExtraArgsV2,
   type ExtraArgs,
   type GenericExtraArgsV3,
-  type RequestedFinality,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
   EVMExtraArgsV1Tag,
@@ -24,6 +23,8 @@ import {
   GenericExtraArgsV3Tag,
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
+  decodeFinalityRequested,
+  encodeFinality,
 } from '../extra-args.ts'
 import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 import { ChainFamily } from '../types.ts'
@@ -39,35 +40,13 @@ const SVMExtraArgsV1ABI =
 const SuiExtraArgsV1ABI =
   'tuple(uint256 gasLimit, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] receiverObjectIds)'
 
-/** WAIT_FOR_SAFE_FLAG = bit 16 set = 0x00010000. */
-const WAIT_FOR_SAFE_FLAG = 0x00010000
-
-/** Convert a {@link RequestedFinality} to its uint32 wire representation (bytes4). */
-export function requestedFinalityToUint32(rf: RequestedFinality): number {
-  if (rf === 'finality') return 0
-  if (rf === 'safe') return WAIT_FOR_SAFE_FLAG
-  return rf.blockDepth
-}
-
-/** Convert a uint32 wire value (bytes4) to a {@link RequestedFinality}. */
-export function uint32ToRequestedFinality(val: number): RequestedFinality {
-  if (val === 0) return 'finality'
-  const flags = val >>> 16
-  const depth = val & 0xffff
-  if (flags !== 0 && depth === 0) return 'safe'
-  if (flags === 0 && depth > 0) return { blockDepth: depth }
-  // Mixed flags+depth: on-chain validation ensures this shouldn't happen for
-  // requestedFinality, but for decoding robustness surface the depth.
-  return { blockDepth: depth }
-}
-
 /**
  * Encodes GenericExtraArgsV3 using tightly packed binary format.
  *
  * Binary format:
  * - tag (4 bytes): 0xa69dd4aa
  * - gasLimit (4 bytes): uint32 big-endian
- * - requestedFinalityConfig (4 bytes): bytes4 big-endian (see FinalityCodec)
+ * - finality (4 bytes): uint32 big-endian (see FinalityCodec / encodeFinality)
  * - ccvsLength (1 byte): uint8
  * - For each CCV:
  *   - ccvAddressLength (1 byte): 0 or 20
@@ -92,8 +71,8 @@ function encodeExtraArgsV3(args: GenericExtraArgsV3): string {
   // gasLimit (4 bytes, uint32 big-endian)
   parts.push(toBeArray(args.gasLimit, 4))
 
-  // requestedFinalityConfig (4 bytes, uint32 big-endian)
-  parts.push(toBeArray(requestedFinalityToUint32(args.requestedFinality), 4))
+  // finality (4 bytes, uint32 big-endian)
+  parts.push(toBeArray(encodeFinality(args.finality), 4))
 
   // ccvsLength (1 byte)
   parts.push(new Uint8Array([args.ccvs.length]))
@@ -175,9 +154,9 @@ function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
   const gasLimit = toBigInt(data.subarray(offset, offset + 4))
   offset += 4
 
-  // requestedFinalityConfig (4 bytes, uint32 big-endian)
+  // finality (4 bytes, uint32 big-endian)
   if (offset + 4 > data.length) return undefined
-  const requestedFinality = uint32ToRequestedFinality(toNumber(data.subarray(offset, offset + 4)))
+  const finality = decodeFinalityRequested(toNumber(data.subarray(offset, offset + 4)))
   offset += 4
 
   // ccvsLength (1 byte)
@@ -275,7 +254,7 @@ function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
 
   return {
     gasLimit,
-    requestedFinality,
+    finality,
     ccvs,
     ccvArgs,
     executor,
@@ -342,7 +321,7 @@ export function decodeExtraArgs(
  */
 export function encodeExtraArgs(args: ExtraArgs | undefined): string {
   if (!args) return '0x'
-  if ('requestedFinality' in args) {
+  if ('finality' in args) {
     // GenericExtraArgsV3 - tightly packed binary encoding
     return encodeExtraArgsV3(args)
   } else if ('computeUnits' in args) {

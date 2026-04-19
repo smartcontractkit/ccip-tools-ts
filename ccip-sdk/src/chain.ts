@@ -19,6 +19,8 @@ import type {
   EVMExtraArgsV1,
   EVMExtraArgsV2,
   ExtraArgs,
+  FinalityAllowed,
+  FinalityRequested,
   GenericExtraArgsV3,
   SVMExtraArgsV1,
   SuiExtraArgsV1,
@@ -60,7 +62,7 @@ const V2_FIELDS = new Set(['gasLimit', 'allowOutOfOrderExecution'])
 /** All valid field names for GenericExtraArgsV3. */
 const V3_FIELDS = new Set([
   'gasLimit',
-  'requestedFinality',
+  'finality',
   'ccvs',
   'ccvArgs',
   'executor',
@@ -234,22 +236,22 @@ export type TotalFeesEstimate = {
  * - A flat USD surcharge (in cents) added to the CCIP fee via FeeQuoter
  * - A BPS rate deducted directly from the transferred token amount by the pool
  *
- * "Default" fields apply when `blockConfirmations = 0` (standard finality).
- * "Custom" fields apply when `blockConfirmations > 0` (Faster-Than-Finality).
+ * "Default" fields apply when `finality` is `0` or `'finalized'` (standard finality).
+ * "Custom" fields apply when `finality` is a block depth \> 0 (Faster-Than-Finality).
  */
 export type TokenTransferFeeConfig = {
   /** Gas overhead added to the execution cost estimate for token transfers on the destination chain. */
   destGasOverhead: number
   /** Byte overhead added to the data availability cost estimate for token transfers. */
   destBytesOverhead: number
-  /** USD surcharge (in cents) added to the CCIP fee under standard finality (`blockConfirmations = 0`). */
-  defaultBlockConfirmationsFeeUSDCents: number
-  /** USD surcharge (in cents) added to the CCIP fee under FTF (`blockConfirmations > 0`). */
-  customBlockConfirmationsFeeUSDCents: number
+  /** USD surcharge (in cents) added to the CCIP fee under standard finality (`finality = 0` or `'finalized'`). */
+  finalityFeeUSDCents: number
+  /** USD surcharge (in cents) added to the CCIP fee under FTF (block depth `finality > 0`). */
+  fastFinalityFeeUSDCents: number
   /** BPS rate deducted from the transferred token amount under standard finality. */
-  defaultBlockConfirmationsTransferFeeBps: number
+  finalityTransferFeeBps: number
   /** BPS rate deducted from the transferred token amount under FTF. */
-  customBlockConfirmationsTransferFeeBps: number
+  fastFinalityTransferFeeBps: number
   /** Whether token transfer fees are enabled for this pool. */
   isEnabled: boolean
 }
@@ -260,8 +262,8 @@ export type TokenTransferFeeConfig = {
 export type TokenTransferFeeOpts = {
   /** Destination chain selector to query fee config for. */
   destChainSelector: bigint
-  /** Number of block confirmations requested (0 = standard finality, positive = FTF). */
-  blockConfirmationsRequested: number
+  /** Requested finality ('finalized', 'safe' or block depth). */
+  finality: FinalityRequested
   /** Hex-encoded bytes passed as tokenArgs to the pool contract. */
   tokenArgs: string
 }
@@ -280,18 +282,22 @@ export const LaneFeature = {
    * - **\> 0**: FTF is enabled; this is the minimum number of block
    *   confirmations required to use it.
    */
-  MIN_BLOCK_CONFIRMATIONS: 'MIN_BLOCK_CONFIRMATIONS',
+  FINALITY_FAST: 'FINALITY_FAST',
+  /**
+   * Token supports "safe" finality option, aka Fast Confirmation Rule
+   */
+  FINALITY_SAFE: 'FINALITY_SAFE',
   /**
    * Rate limiter bucket state for the lane/token with default finality.
    */
   RATE_LIMITS: 'RATE_LIMITS',
   /**
-   * Rate limiter bucket state when using non-default finality (FTF).
+   * Rate limiter bucket state when using non-default finality (FTF or FCR).
    * Only meaningful when FTF is supported on this lane, i.e.
-   * {@link LaneFeature.MIN_BLOCK_CONFIRMATIONS} is present and \> 0.
+   * {@link LaneFeature.FINALITY_FAST} is present and \> 0.
    * If absent, the default rate limits ({@link LaneFeature.RATE_LIMITS}) apply even when using custom finality.
    */
-  CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS: 'CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+  FAST_RATE_LIMITS: 'FAST_RATE_LIMITS',
 } as const
 /** Type representing one of the lane feature keys. */
 export type LaneFeature = (typeof LaneFeature)[keyof typeof LaneFeature]
@@ -302,15 +308,34 @@ export type LaneFeature = (typeof LaneFeature)[keyof typeof LaneFeature]
  */
 export interface LaneFeatures extends Record<LaneFeature, unknown> {
   /** Minimum block confirmations for FTF. */
-  MIN_BLOCK_CONFIRMATIONS: number
+  FINALITY_FAST: number
+  /** FCR/safe finality. */
+  FINALITY_SAFE: true
   /** Rate limiter bucket state for the lane/token with default finality. */
   RATE_LIMITS: RateLimiterState
   /**
    * Rate limiter bucket state when using non-default finality (FTF).
    * If absent, the default rate limits ({@link LaneFeatures.RATE_LIMITS}) apply even when using custom finality.
    */
-  CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS: RateLimiterState
+  FAST_RATE_LIMITS: RateLimiterState
 }
+
+/** Compile-time helpers to keep {@link LaneFeature} and {@link LaneFeatures} in sync. */
+type LaneFeatureKeysMatch_ = [LaneFeature] extends [keyof LaneFeatures]
+  ? [keyof LaneFeatures] extends [LaneFeature]
+    ? true
+    : Exclude<keyof LaneFeatures, LaneFeature>
+  : Exclude<LaneFeature, keyof LaneFeatures>
+const _laneFeatureKeysMatch: LaneFeatureKeysMatch_ = true
+
+/**
+ * Ensure LaneFeatures remains assignable to Record\<LaneFeature, unknown\>
+ * and does not declare extra keys beyond LaneFeature.
+ */
+const _laneFeaturesTypeCheck = null as unknown as LaneFeatures satisfies Record<
+  LaneFeature,
+  unknown
+>
 
 /**
  * Options for getBalance query.
@@ -357,10 +382,10 @@ export type RateLimiterState = {
  * Each entry represents the configuration needed to transfer tokens
  * from the current chain to a specific destination chain.
  *
- * The `customBlockConfirmationsOutboundRateLimiterState` and
- * `customBlockConfirmationsInboundRateLimiterState` fields are present only for
+ * The `fastOutboundRateLimiterState` and
+ * `fastInboundRateLimiterState` fields are present only for
  * TokenPool v2.0+ contracts. These provide separate rate limits applied when
- * Faster-Than-Finality (FTF) custom block confirmations are used.
+ * Faster-Than-Finality (FTF) or FCR (safe finality) is used.
  */
 export type TokenPoolRemote = {
   /** Address of the remote token on the destination chain. */
@@ -381,10 +406,10 @@ export type TokenPoolRemote = {
   inboundRateLimiterState: RateLimiterState
 } & (
   | {
-      /** Outbound rate limiter state for tokens leaving this chain (FTF/v2). */
-      customBlockConfirmationsOutboundRateLimiterState: RateLimiterState
-      /** Inbound rate limiter state for tokens coming into this chain (FTF/v2). */
-      customBlockConfirmationsInboundRateLimiterState: RateLimiterState
+      /** Outbound rate limiter state for tokens leaving this chain (FTF/FCR/v2). */
+      fastOutboundRateLimiterState: RateLimiterState
+      /** Inbound rate limiter state for tokens coming into this chain (FTF/FCR/v2). */
+      fastInboundRateLimiterState: RateLimiterState
     }
   | object
 )
@@ -409,19 +434,19 @@ export type TokenPoolConfig = {
    */
   typeAndVersion?: string
   /**
-   * Min custom block confirmations for Faster-Than-Finality (FTF),
-   * if TokenPool version \>= v2.0.0 and FTF is supported on this lane.
-   * `0` indicates FTF is supported but not enabled for this token; `>0` indicates FTF is enabled
-   *  with this many minimum confirmations.
-   */
-  minBlockConfirmations?: number
-  /**
    * Token transfer fee configuration from the pool contract.
    * Only present when {@link TokenTransferFeeOpts} is provided to
    * {@link Chain.getTokenPoolConfig} and the pool supports it (v2.0+).
    */
   tokenTransferFeeConfig?: TokenTransferFeeConfig
-}
+  /**
+   * Min finalityDepth and finality flags for Faster-Than-Finality (FTF) and FCR (safe),
+   * if TokenPool version \>= v2.0.0 and FTF is supported on this lane.
+   * `finalityDepth=0` indicates FTF is supported but not enabled for this token;
+   * `>0` indicates FTF is enabled with this many minimum confirmations.
+   * `finalitySafe=true` indicates support for FCR/safe finality.
+   */
+} & Partial<FinalityAllowed>
 
 /**
  * Token configuration from a TokenAdminRegistry, returned by {@link Chain.getRegistryTokenConfig}.
@@ -1312,13 +1337,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *   router: '0x...',
    *   destChainSelector: 4949039107694359620n,
    * })
-   * // MIN_BLOCK_CONFIRMATIONS has three states:
+   * // FINALITY_FAST has three states:
    * // - undefined: FTF is not supported on this lane (pre-v2.0)
    * // - 0: the lane supports FTF, but it is not enabled for this token
    * // - > 0: FTF is enabled with this many block confirmations
-   * const ftf = features.MIN_BLOCK_CONFIRMATIONS
+   * const ftf = features[LaneFeature.FINALITY_FAST]
    * if (ftf != null && ftf > 0) {
-   *   console.log(`FTF enabled with ${ftf} confirmations`)
+   *   console.log(`FTF enabled with ${ftf} block confirmations`)
    * } else if (ftf === 0) {
    *   console.log('FTF supported on this lane but not enabled for this token')
    * }
@@ -1592,7 +1617,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @remarks
    * V3 (GenericExtraArgsV3) is auto-detected when any V3-only field is present
-   * (e.g. `requestedFinality`, `ccvs`, `ccvArgs`, `executor`, `executorArgs`,
+   * (e.g. `finality`, `ccvs`, `ccvArgs`, `executor`, `executorArgs`,
    * `tokenReceiver`, `tokenArgs`). Otherwise defaults to V2 (EVMExtraArgsV2).
    *
    * @throws {@link CCIPArgumentInvalidError} if extraArgs contains unknown fields for the detected version.
@@ -1616,13 +1641,23 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       ) {
         tokenReceiver = this.getAddress(message.extraArgs.tokenReceiver) // validate
       }
+      let finality: FinalityRequested = 'finalized'
+      if (message.extraArgs && 'finality' in message.extraArgs) {
+        const finality_ = Number(message.extraArgs.finality)
+        if (!isNaN(finality_)) finality = finality_
+        else if (!['safe', 'finalized'].includes(message.extraArgs.finality as string))
+          throw new CCIPArgumentInvalidError(
+            'extraArgs.finality',
+            'finality must be "safe", "finalized", or a numeric block depth',
+            { context: { finality: message.extraArgs.finality } },
+          )
+      }
       // V3 defaults (GenericExtraArgsV3)
       return {
         ...message,
         receiver,
         extraArgs: {
           gasLimit,
-          requestedFinality: 'finality' as const,
           ccvs: [],
           ccvArgs: [],
           executor: '',
@@ -1630,6 +1665,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           tokenArgs: '0x',
           ...message.extraArgs,
           tokenReceiver,
+          finality,
         },
       }
     }

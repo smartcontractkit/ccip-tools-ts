@@ -34,7 +34,7 @@ const features = await source.getLaneFeatures({ router, destChainSelector: destS
 const message = {
   receiver: '0xReceiverAddress...',
   data: '0x',
-  extraArgs: features.MIN_BLOCK_CONFIRMATIONS != null
+  extraArgs: features.FINALITY_FAST != null
     ? { gasLimit: 200_000n } // v2.0+ lane — V3 encoding (V2-style fields also accepted)
     : { gasLimit: 200_000n, allowOutOfOrderExecution: true }, // pre-v2.0 lane — V2 encoding
 }
@@ -149,7 +149,7 @@ The token `amount` and `fee` are sent as transaction `value` (native ETH), not v
 
 ## Checking Lane Capabilities
 
-The SDK does **not** validate your `extraArgs` against the lane's on-chain version. If you pass V3 fields (e.g., `blockConfirmations`) to a pre-v2.0 lane, the transaction will **revert** on-chain. Call `getLaneFeatures` first to check what the lane supports:
+The SDK does **not** validate your `extraArgs` against the lane's on-chain version. If you pass V3 fields (e.g., `finality`) to a pre-v2.0 lane, the transaction will **revert** on-chain. Call `getLaneFeatures` first to check what the lane supports:
 
 ```typescript
 const features = await source.getLaneFeatures({
@@ -158,7 +158,7 @@ const features = await source.getLaneFeatures({
   token: '0xTokenAddress...', // pass to get token-specific FTF and rate limit info
 })
 
-const minConfirmations = features.MIN_BLOCK_CONFIRMATIONS
+const minConfirmations = features.FINALITY_FAST
 // undefined = pre-v2.0 (V2 only), 0 = v2.0+ (V3 supported, no FTF), >0 = FTF enabled
 ```
 
@@ -200,7 +200,7 @@ The SDK auto-detects the encoding version based on which fields you provide. Pas
 |---------------|-----------------|-------------|
 | `gasLimit` only | EVMExtraArgsV1 | `0x97a657c9` |
 | `gasLimit` + `allowOutOfOrderExecution` | EVMExtraArgsV2 | `0x181dcf10` |
-| Any of: `blockConfirmations`, `ccvs`, `ccvArgs`, `executor`, `executorArgs`, `tokenReceiver`, `tokenArgs` | GenericExtraArgsV3 | `0xa69dd4aa` |
+| Any of: `finality`, `ccvs`, `ccvArgs`, `executor`, `executorArgs`, `tokenReceiver`, `tokenArgs` | GenericExtraArgsV3 | `0xa69dd4aa` |
 | `computeUnits` | SVMExtraArgsV1 (Solana) | `0x1f3b3aba` |
 | `receiverObjectIds` | SuiExtraArgsV1 | `0x21ea4ca9` |
 
@@ -213,7 +213,7 @@ V3 does **not** include `allowOutOfOrderExecution`. If migrating from V2, remove
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `gasLimit` | `bigint` | `0n` (no data) / `200_000n` (with data) | Gas for receiver execution |
-| `blockConfirmations` | `number` | `0` | Source-chain confirmations before relaying (FTF) |
+| `finality` | `number \| 'safe' \| 'finalized'` | `0` | Source-chain confirmations before relaying (FTF), or 'safe'/'finalized' for mode-based finality |
 | `ccvs` | `string[]` | `[]` | Cross-chain verifier addresses |
 | `ccvArgs` | `BytesLike[]` | `[]` | Per-CCV arguments |
 | `executor` | `string` | `''` | Custom executor address |
@@ -247,10 +247,10 @@ const encodedV1 = encodeExtraArgs({ gasLimit: 200_000n })
 ```typescript
 import { encodeExtraArgs } from '@chainlink/ccip-sdk'
 
-// V3 — auto-detected from blockConfirmations (or any V3-only field)
+// V3 — auto-detected from finality (or any V3-only field)
 const encoded = encodeExtraArgs({
   gasLimit: 200_000n,
-  blockConfirmations: 5,
+  finality: 5,
   ccvs: [],
   ccvArgs: [],
   executor: '',
@@ -342,14 +342,14 @@ async function sendTokens(
 
   // 3. Choose extra arguments based on lane version
   let extraArgs
-  const minConfirmations = features.MIN_BLOCK_CONFIRMATIONS
+  const minConfirmations = features.FINALITY_FAST
 
   if (minConfirmations == null) {
     // Pre-v2.0 lane
     extraArgs = { gasLimit: 0n, allowOutOfOrderExecution: true }
   } else if (minConfirmations > 0) {
     // v2.0+ with FTF — use minimum block confirmations for faster delivery
-    extraArgs = { gasLimit: 0n, blockConfirmations: minConfirmations }
+    extraArgs = { gasLimit: 0n, finality: minConfirmations }
   } else {
     // v2.0+, FTF not enabled — V2-style args work fine
     extraArgs = { gasLimit: 0n, allowOutOfOrderExecution: true }
@@ -410,7 +410,7 @@ When `extraArgs` is omitted or partial, the SDK fills in defaults:
 |-----------|------------------|
 | Message has `data` | `{ gasLimit: 200_000n, allowOutOfOrderExecution: true }` |
 | Token-only (no `data`) | `{ gasLimit: 0n, allowOutOfOrderExecution: true }` |
-| Any V3-only field present | V3 defaults: `blockConfirmations: 0`, empty arrays/strings for other fields |
+| Any V3-only field present | V3 defaults: `finality: 0`, empty arrays/strings for other fields |
 
 ## Non-EVM Destinations
 

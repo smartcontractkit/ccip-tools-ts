@@ -203,9 +203,9 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     ...(registryConfig.pendingAdministrator && {
       pendingAdministrator: registryConfig.pendingAdministrator,
     }),
-    ...(poolConfig.minBlockConfirmations != null && {
-      minBlockConfirmations:
-        poolConfig.minBlockConfirmations === 0 ? '0 (finality)' : poolConfig.minBlockConfirmations,
+    ...(poolConfig.finalityDepth != null && {
+      finalityDepth: poolConfig.finalityDepth === 0 ? '0 (finalized)' : poolConfig.finalityDepth,
+      finalitySafe: poolConfig.finalitySafe ? 'true (FCR)' : false,
     }),
   })
   const remotesLen = Object.keys(remotes).length
@@ -217,15 +217,9 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
       remotePool: remote.remotePools,
       outbound: prettyRateLimiter(remote.outboundRateLimiterState, info),
       inbound: prettyRateLimiter(remote.inboundRateLimiterState, info),
-      ...('customBlockConfirmationsOutboundRateLimiterState' in remote && {
-        ['[ftf]outbound']: prettyRateLimiter(
-          remote.customBlockConfirmationsOutboundRateLimiterState,
-          info,
-        ),
-        ['[ftf]inbound']: prettyRateLimiter(
-          remote.customBlockConfirmationsInboundRateLimiterState,
-          info,
-        ),
+      ...('fastOutboundRateLimiterState' in remote && {
+        ['[fast]outbound']: prettyRateLimiter(remote.fastOutboundRateLimiterState, info),
+        ['[fast]inbound']: prettyRateLimiter(remote.fastInboundRateLimiterState, info),
       }),
     })
 }
