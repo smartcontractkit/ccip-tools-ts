@@ -46,14 +46,22 @@ import {
   CCIPTransactionNotFoundError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
-import { type EVMExtraArgsV1, type EVMExtraArgsV2, type ExtraArgs, type GenericExtraArgsV3, type SuiExtraArgsV1, type SVMExtraArgsV1, EVMExtraArgsV1Tag, EVMExtraArgsV2Tag, GenericExtraArgsV3Tag, SuiExtraArgsV1Tag, SVMExtraArgsV1Tag } from '../extra-args.ts'
+import {
+  type EVMExtraArgsV2,
+  type ExtraArgs,
+  type SVMExtraArgsV1,
+  type SuiExtraArgsV1,
+  EVMExtraArgsV2Tag,
+  SVMExtraArgsV1Tag,
+  SuiExtraArgsV1Tag,
+} from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
-  type CCIPMessage,
   type CCIPExecution,
+  type CCIPMessage,
   type CCIPRequest,
   type ChainLog,
   type ChainTransaction,
@@ -781,10 +789,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-  * Encodes TON extra args as a BOC-serialized cell.
+   * Encodes TON extra args as a BOC-serialized cell.
    *
-  * BOC serialization preserves nested refs, which is required for SVM and Sui
-  * extra args that use snaked cells.
+   * BOC serialization preserves nested refs, which is required for SVM and Sui
+   * extra args that use snaked cells.
    *
    * @param args - Extra arguments containing gas limit and execution flags
    * @returns Hex string of BOC-encoded extra args (0x-prefixed)
@@ -795,9 +803,9 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-  * Decodes TON extra arguments.
-  * Accepts BOC-serialized cells for all supported variants and legacy raw
-  * GenericExtraArgsV2 bits for backward compatibility.
+   * Decodes TON extra arguments.
+   * Accepts BOC-serialized cells for all supported variants and legacy raw
+   * GenericExtraArgsV2 bits for backward compatibility.
    *
    * @param extraArgs - Extra args as hex string or bytes
    * @returns Decoded TON extra args object or undefined if invalid

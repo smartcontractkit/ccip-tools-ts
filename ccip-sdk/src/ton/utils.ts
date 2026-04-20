@@ -42,7 +42,9 @@ export function asSnakedCell<T>(array: T[], builderFn: (item: T) => Builder): Ce
   for (const value of array) {
     const itemBuilder = builderFn(value)
     if (itemBuilder.refs > 3) {
-      throw new Error('Cannot pack more than 3 refs per item, use storeRef to a cell containing the item')
+      throw new Error(
+        'Cannot pack more than 3 refs per item, use storeRef to a cell containing the item',
+      )
     }
     if (builder.availableBits < itemBuilder.bits || builder.availableRefs <= 1) {
       cells.push(builder)
