@@ -191,6 +191,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
 
   ARGUMENT_INVALID: 'Check the command-line argument format and requirements.',
   INSUFFICIENT_BALANCE: 'Fund the wallet to cover the transaction fee.',
+  INTERACTIVE_REQUIRED:
+    'Provide the required input via CLI flags or environment variables, or remove --no-interactive to allow prompts.',
 
   NOT_IMPLEMENTED: 'This feature is not yet implemented.',
   UNKNOWN: 'An unknown error occurred. Check the error details.',

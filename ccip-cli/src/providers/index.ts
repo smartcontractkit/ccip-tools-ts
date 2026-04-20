@@ -191,7 +191,7 @@ export function fetchChainsFromRpcs(
  */
 export async function loadChainWallet(
   chain: Chain,
-  argv: { wallet?: unknown; rpcsFile?: string },
+  argv: { wallet?: unknown; rpcsFile?: string; interactive?: boolean },
   logger?: Logger,
 ) {
   // Centralized wallet resolution: check env vars first, then rpcsFile
