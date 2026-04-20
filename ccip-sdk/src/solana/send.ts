@@ -14,6 +14,7 @@ import { zeroPadValue } from 'ethers'
 
 import { SolanaChain } from './index.ts'
 import { CCIPError } from '../errors/CCIPError.ts'
+import { CCIPErrorCode } from '../errors/codes.ts'
 import {
   CCIPSolanaFeeResultInvalidError,
   CCIPSolanaLookupTableNotFoundError,
@@ -249,7 +250,7 @@ async function deriveAccountsCcipSend({
     // Decode return data from simulation
     if (!simResult.returnData?.data[0]) {
       throw new CCIPError(
-        'SOLANA_FEE_RESULT_INVALID',
+        CCIPErrorCode.SOLANA_SIMULATION_NO_RETURN_DATA,
         'No return data from deriveAccountsCcipSend simulation',
       )
     }

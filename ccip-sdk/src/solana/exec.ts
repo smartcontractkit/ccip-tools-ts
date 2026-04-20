@@ -14,6 +14,7 @@ import BN from 'bn.js'
 import { hexlify } from 'ethers'
 
 import { CCIPError } from '../errors/CCIPError.ts'
+import { CCIPErrorCode } from '../errors/codes.ts'
 import { CCIPSolanaLookupTableNotFoundError } from '../errors/index.ts'
 import { type ExecutionInput, type WithLogger, ChainFamily } from '../types.ts'
 import { bytesToBuffer, getDataBytes, toLeArray } from '../utils.ts'
@@ -465,7 +466,7 @@ async function autoDeriveExecutionAccounts({
     // Decode return data from simulation (skip 8-byte Anchor discriminator)
     if (!simResult.returnData?.data[0]) {
       throw new CCIPError(
-        'SOLANA_FEE_RESULT_INVALID',
+        CCIPErrorCode.SOLANA_SIMULATION_NO_RETURN_DATA,
         'No return data from deriveAccountsExecute simulation',
       )
     }
@@ -505,9 +506,12 @@ async function autoDeriveExecutionAccounts({
 
     // Collect lookup tables and resolve them for next iteration's V0 simulation
     for (const lt of response.lookUpTablesToSave) {
-      lookupTables.push(lt)
       const res = await offramp.provider.connection.getAddressLookupTable(lt)
-      if (res.value) resolvedLookupTables.push(res.value)
+      if (!res.value) {
+        throw new CCIPSolanaLookupTableNotFoundError(lt.toBase58())
+      }
+      lookupTables.push(lt)
+      resolvedLookupTables.push(res.value)
     }
 
     stage = response.nextStage
