@@ -183,7 +183,8 @@ export async function getFee(
 
   const result: IdlTypes<typeof CCIP_ROUTER_IDL>['GetFeeResult'] = program.coder.types.decode(
     'GetFeeResult',
-    Buffer.from(simResult.returnData.data[0], 'base64'),
+    // returnData.data[0] is base64-encoded
+    bytesToBuffer(simResult.returnData.data[0]),
   )
 
   return BigInt(result.amount.toString())
@@ -258,7 +259,8 @@ async function deriveAccountsCcipSend({
     const response: IdlTypes<typeof CCIP_ROUTER_IDL>['DeriveAccountsResponse'] =
       router.coder.types.decode(
         'DeriveAccountsResponse',
-        Buffer.from(simResult.returnData.data[0], 'base64'),
+        // returnData.data[0] is base64-encoded
+        bytesToBuffer(simResult.returnData.data[0]),
       )
 
     // Check if it is the start of a token transfer

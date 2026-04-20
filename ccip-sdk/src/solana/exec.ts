@@ -473,7 +473,8 @@ async function autoDeriveExecutionAccounts({
     const response: IdlTypes<typeof CCIP_OFFRAMP_IDL>['DeriveAccountsResponse'] =
       offramp.coder.types.decode(
         'DeriveAccountsResponse',
-        Buffer.from(simResult.returnData.data[0], 'base64'),
+        // returnData.data[0] is base64-encoded
+        bytesToBuffer(simResult.returnData.data[0]),
       )
 
     // Check if we're at the start of a token transfer
