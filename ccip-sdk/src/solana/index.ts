@@ -1150,6 +1150,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     opts: Parameters<Chain['execute']>[0] & {
       // when cleaning leftover LookUp Tables, wait deactivation grace period (~513 slots) then close ALT
       waitDeactivation?: boolean
+      clearLeftoverAccounts?: boolean
     },
   ): Promise<CCIPExecution> {
     const wallet = opts.wallet
@@ -1164,17 +1165,22 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         })
         hash = await simulateAndSendTxs(this, wallet, unsigned, opts.gasLimit)
       } catch (err) {
-        if (
-          !(err instanceof Error) ||
-          !['encoding overruns Uint8Array', 'too large'].some((e) => err.message.includes(e))
-        )
-          throw err
-        // in case of failure to serialize a report, first try buffering (because it gets
-        // auto-closed upon successful execution), then ALTs (need a grace period ~3min after
-        // deactivation before they can be closed/recycled)
-        if (!opts.forceBuffer) opts = { ...opts, forceBuffer: true }
-        else if (!opts.forceLookupTable) opts = { ...opts, forceLookupTable: true }
-        else throw err
+        if (!(err instanceof Error)) throw err
+        if (err.message.includes('AlreadyContainsChunk')) {
+          // stale buffer from a previous failed attempt; close it and retry
+          if (!opts.clearLeftoverAccounts) {
+            opts = { ...opts, clearLeftoverAccounts: true }
+          } else throw err
+        } else if (
+          ['encoding overruns Uint8Array', 'too large'].some((e) => err.message.includes(e))
+        ) {
+          // in case of failure to serialize a report, first try buffering (because it gets
+          // auto-closed upon successful execution), then ALTs (need a grace period ~3min after
+          // deactivation before they can be closed/recycled)
+          if (!opts.forceBuffer) opts = { ...opts, forceBuffer: true }
+          else if (!opts.forceLookupTable) opts = { ...opts, forceLookupTable: true }
+          else throw err
+        } else throw err
       }
     } while (!hash)
 
