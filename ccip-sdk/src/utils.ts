@@ -483,7 +483,8 @@ export function convertKeysToCamelCase(
     return obj.map((v) => convertKeysToCamelCase(v, mapValues, key))
   }
 
-  if (obj == null || typeof obj !== 'object') return mapValues ? mapValues(obj, key) : obj
+  if (obj == null) return obj
+  if (typeof obj !== 'object') return mapValues ? mapValues(obj, key) : obj
 
   const record = obj as Record<string, unknown>
   const converted: Record<string, unknown> = {}
