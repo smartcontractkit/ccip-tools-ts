@@ -1538,6 +1538,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const message = {
           ...(input.message as CCIPMessage_V1_6_EVM),
           sender,
+          data: hexlify(getDataBytes(input.message.data || '0x')),
           tokenAmounts,
         }
         const contract = new Contract(

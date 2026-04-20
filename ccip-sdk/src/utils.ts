@@ -394,6 +394,7 @@ export function isBase64(data: unknown): data is string {
  */
 export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
   if (Array.isArray(data)) return new Uint8Array(data)
+  if (typeof data === 'string' && data === '') return new Uint8Array(0)
   if (typeof data === 'string' && data.match(/^[0-9a-f]+[a-f][0-9a-f]+$/i)) data = '0x' + data
   else if (typeof data === 'string' && data.match(/^0X[0-9a-fA-F]+$/)) data = data.toLowerCase()
   if (typeof data === 'string' && data.startsWith('0x') && data.length % 2)
