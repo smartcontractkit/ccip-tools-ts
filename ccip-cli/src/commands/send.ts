@@ -27,6 +27,7 @@ import {
   CCIPInsufficientBalanceError,
   CCIPTokenNotFoundError,
   ChainFamily,
+  bigIntReplacer,
   bigIntReviver,
   decodeAddress,
   estimateReceiveExecution,
@@ -38,7 +39,7 @@ import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
 import { showRequests } from './show.ts'
-import type { Ctx } from './types.ts'
+import { type Ctx, Format } from './types.ts'
 import { getCtx, logParsedError, parseTokenAmounts } from './utils.ts'
 import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 
@@ -223,7 +224,7 @@ async function sendMessage(
   ctx: Ctx,
   argv: Awaited<ReturnType<typeof builder>['argv']> & GlobalOpts,
 ) {
-  const { logger } = ctx
+  const { output, logger } = ctx
   const sourceNetwork = networkInfo(argv.source)
   const destNetwork = networkInfo(argv.dest)
   const getChain = fetchChainsFromRpcs(ctx, argv)
@@ -267,7 +268,7 @@ async function sendMessage(
   if (!receiver) {
     if (sourceNetwork.family !== destNetwork.family)
       throw new CCIPArgumentInvalidError('receiver', 'required for cross-family transfers')
-    ;[walletAddress, wallet] = await loadChainWallet(source, argv)
+    ;[walletAddress, wallet] = await loadChainWallet(source, argv, logger)
     receiver = walletAddress // send to self if same family
   }
 
@@ -277,7 +278,7 @@ async function sendMessage(
 
     if (!walletAddress) {
       try {
-        ;[walletAddress, wallet] = await loadChainWallet(source, argv)
+        ;[walletAddress, wallet] = await loadChainWallet(source, argv, logger)
       } catch {
         // pass undefined sender for default
       }
@@ -294,14 +295,39 @@ async function sendMessage(
       },
     })
     argv.gasLimit = Math.ceil(estimated * (1 + (argv.estimateGasLimit ?? 0) / 100))
-    logger.log(
+    if (argv.onlyEstimate) {
+      // --only-estimate: the estimate IS the data output
+      if (argv.format === Format.json) {
+        output.write(
+          JSON.stringify(
+            {
+              estimated,
+              bufferPercent: argv.estimateGasLimit ?? 0,
+              withBuffer: argv.gasLimit,
+            },
+            bigIntReplacer,
+            2,
+          ),
+        )
+      } else {
+        output.write(
+          'Estimated gasLimit for sender =',
+          walletAddress,
+          ':',
+          estimated,
+          ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', argv.gasLimit] : []),
+        )
+      }
+      return
+    }
+    // When continuing to send, the estimate is a status message
+    logger.info(
       'Estimated gasLimit for sender =',
       walletAddress,
       ':',
       estimated,
       ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', argv.gasLimit] : []),
     )
-    if (argv.onlyEstimate) return
   }
 
   // builds a catch-all extraArgs object, which can be massaged by
@@ -357,18 +383,35 @@ async function sendMessage(
     message,
   })
 
-  logger.info(
-    'Fee:',
-    fee,
-    '=',
-    formatUnits(fee, feeTokenInfo.decimals),
+  const displaySymbol =
     !argv.feeToken && feeTokenInfo.symbol.startsWith('W')
       ? feeTokenInfo.symbol.substring(1)
-      : feeTokenInfo.symbol,
-  )
-  if (argv.onlyGetFee) return
+      : feeTokenInfo.symbol
+  if (argv.onlyGetFee) {
+    // --only-get-fee: the fee IS the data output
+    if (argv.format === Format.json) {
+      output.write(
+        JSON.stringify(
+          {
+            fee: fee.toString(),
+            feeFormatted: formatUnits(fee, feeTokenInfo.decimals),
+            feeToken: feeToken ?? 'native',
+            feeTokenSymbol: displaySymbol,
+            feeTokenDecimals: feeTokenInfo.decimals,
+          },
+          bigIntReplacer,
+          2,
+        ),
+      )
+    } else {
+      output.write('Fee:', fee, '=', formatUnits(fee, feeTokenInfo.decimals), displaySymbol)
+    }
+    return
+  }
+  // When continuing to send, the fee is a status message
+  logger.info('Fee:', fee, '=', formatUnits(fee, feeTokenInfo.decimals), displaySymbol)
 
-  if (!walletAddress) [walletAddress, wallet] = await loadChainWallet(source, argv)
+  if (!walletAddress) [walletAddress, wallet] = await loadChainWallet(source, argv, logger)
 
   // Check sender has sufficient balance for fee
   try {

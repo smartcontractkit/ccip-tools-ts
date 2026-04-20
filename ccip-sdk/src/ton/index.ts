@@ -8,6 +8,7 @@ import {
   Cell,
   Slice,
   beginCell,
+  fromNano,
   toNano,
 } from '@ton/core'
 import { TonClient } from '@ton/ton'
@@ -28,6 +29,7 @@ import { streamTransactionsForAddress } from './logs.ts'
 import { encodeExtraArgsCell, generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
 import {
   type ChainContext,
+  type ChainStatic,
   type GetBalanceOpts,
   type LogFilter,
   type TokenTransferFeeOpts,
@@ -49,6 +51,7 @@ import type { LeafHasher } from '../hasher/common.ts'
 import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
+  type AnyMessage,
   type CCIPExecution,
   type CCIPRequest,
   type ChainLog,
@@ -103,6 +106,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
   static readonly family = ChainFamily.TON
   static readonly decimals = 9 // TON uses 9 decimals (nanotons)
+  static readonly extraArgGasLimitMin = toNano('0.025') // 0.025 TON
   readonly rateLimitedFetch: typeof fetch
   readonly provider: TonClient
 
@@ -996,6 +1000,31 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
     return false
   }
+
+  /**
+   * Returns a copy of a message, populating missing fields like `extraArgs` with defaults.
+   * Ensures TON-bound messages satisfy the minimum destination gas requirement.
+   *
+   * @param message - AnyMessage (from source), containing at least `receiver`
+   * @returns A message suitable for `sendMessage` to a TON destination chain
+   * @throws {@link CCIPArgumentInvalidError} if extraArgs.gasLimit is below the TON minimum
+   */
+  static override buildMessageForDest(
+    message: Parameters<ChainStatic['buildMessageForDest']>[0],
+  ): AnyMessage {
+    const built = super.buildMessageForDest(message)
+    const gasLimit = 'gasLimit' in built.extraArgs ? built.extraArgs.gasLimit : undefined
+
+    if (!gasLimit || gasLimit < this.extraArgGasLimitMin) {
+      throw new CCIPArgumentInvalidError(
+        'extraArgs.gasLimit',
+        `(val=${gasLimit}) must be at least ${this.extraArgGasLimitMin} (${fromNano(this.extraArgGasLimitMin)} TON) for TON destinations`,
+      )
+    }
+
+    return built
+  }
+
   /**
    * Gets the leaf hasher for TON destination chains.
    * @param lane - Lane configuration.

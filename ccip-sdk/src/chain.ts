@@ -510,7 +510,7 @@ export type ExecuteOpts = (
 ) & {
   /** gasLimit or computeUnits limit override for the ccipReceive call */
   gasLimit?: number
-  /** For EVM, overrides gasLimit on tokenPool call */
+  /** For EVM (v1.5..v1.6), overrides gasLimit on tokenPool call */
   tokensGasLimit?: number
   /** For Solana, send report in chunks to OffRamp, to later execute */
   forceBuffer?: boolean
@@ -1174,7 +1174,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           ('gasLimit' in message && estimated > message.gasLimit) ||
           ('ccipReceiveGasLimit' in message && estimated > message.ccipReceiveGasLimit)
         ) {
-          opts_.gasLimit = estimated
+          opts_.gasLimit = Math.ceil(Number(estimated) * 1.1)
           opts_.tokensGasLimit ??= 0
         }
       } catch (err) {

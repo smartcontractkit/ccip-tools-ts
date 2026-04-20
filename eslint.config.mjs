@@ -111,6 +111,15 @@ export default defineConfig(
     },
   },
   {
+    // Enforce stdout/stderr separation: use ctx.output for data, ctx.logger for diagnostics.
+    // Direct console.* calls bypass the architecture. Only index.ts is exempt (top-level handlers).
+    files: ['ccip-cli/src/**/*.ts'],
+    ignores: ['**/*.test.ts', 'ccip-cli/src/index.ts'],
+    rules: {
+      'no-console': 'error',
+    },
+  },
+  {
     // Ban cli imports from @chainlink/ccip-sdk modules other than /src/index.ts
     files: ['ccip-cli/src/**/*.ts'],
     rules: {

@@ -1,6 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs'
 
-import { CCIPArgumentInvalidError, CCIPNotImplementedError } from '@chainlink/ccip-sdk/src/index.ts'
+import {
+  type Logger,
+  CCIPArgumentInvalidError,
+  CCIPNotImplementedError,
+} from '@chainlink/ccip-sdk/src/index.ts'
 import { Wallet as AnchorWallet } from '@coral-xyz/anchor'
 import SolanaLedger from '@ledgerhq/hw-app-solana'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
@@ -20,32 +24,40 @@ export class LedgerSolanaWallet {
   publicKey: PublicKey
   wallet: SolanaLedger.default
   path: string
+  private logger: Logger
 
   /**
    * Private constructor - use static `create` method instead.
    * @internal
    */
-  private constructor(solanaLW: SolanaLedger.default, pubKey: PublicKey, path: string) {
+  private constructor(
+    solanaLW: SolanaLedger.default,
+    pubKey: PublicKey,
+    path: string,
+    logger: Logger,
+  ) {
     this.wallet = solanaLW
     this.publicKey = pubKey
     this.path = path
+    this.logger = logger
   }
 
   /**
    * Creates a new LedgerSolanaWallet instance.
    * @param path - BIP44 derivation path.
+   * @param logger - Optional logger (falls back to console).
    * @returns A new LedgerSolanaWallet instance.
    */
-  static async create(path: string) {
+  static async create(path: string, logger: Logger = console) {
     try {
       const transport = await HIDTransport.default.create()
       const solana = new SolanaLedger.default(transport)
       const { address } = await solana.getAddress(path, false)
       const pubkey = new PublicKey(address)
-      console.info('Ledger connected:', pubkey.toBase58(), `, derivationPath:`, path)
-      return new LedgerSolanaWallet(solana, pubkey, path)
+      logger.info('Ledger connected:', pubkey.toBase58(), `, derivationPath:`, path)
+      return new LedgerSolanaWallet(solana, pubkey, path, logger)
     } catch (e) {
-      console.error('Ledger: Could not access ledger. Is it unlocked and Solana app open?')
+      logger.error('Ledger: Could not access ledger. Is it unlocked and Solana app open?')
       throw e
     }
   }
@@ -56,7 +68,7 @@ export class LedgerSolanaWallet {
    * @returns Signed transaction.
    */
   async signTransaction<T extends Transaction | VersionedTransaction>(tx: T) {
-    console.debug('Ledger: Request to sign message from', this.publicKey.toBase58())
+    this.logger.debug('Ledger: Request to sign message from', this.publicKey.toBase58())
     // serializeMessage on v0, serialize on v1
 
     let msg: Message | MessageV0
@@ -76,7 +88,7 @@ export class LedgerSolanaWallet {
    * @returns Signed transactions.
    */
   async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]) {
-    console.info('Signing multiple transactions with Ledger')
+    this.logger.info('Signing multiple transactions with Ledger')
     const signedTxs: T[] = []
     for (const tx of txs) {
       signedTxs.push(await this.signTransaction(tx))
@@ -95,9 +107,10 @@ export class LedgerSolanaWallet {
  * @param wallet - wallet options (as passed to yargs argv)
  * @returns Promise to Anchor Wallet instance
  */
-export async function loadSolanaWallet({
-  wallet: walletOpt,
-}: { wallet?: unknown } = {}): Promise<AnchorWallet> {
+export async function loadSolanaWallet(
+  { wallet: walletOpt }: { wallet?: unknown } = {},
+  logger: Logger = console,
+): Promise<AnchorWallet> {
   // Default to Solana's standard keypair location if no wallet provided
   if (!walletOpt) walletOpt = '~/.config/solana/id.json'
   let wallet: string
@@ -107,7 +120,7 @@ export async function loadSolanaWallet({
     let derivationPath = walletOpt.split(':')[1]
     if (!derivationPath) derivationPath = "44'/501'/0'"
     else if (!isNaN(Number(derivationPath))) derivationPath = `44'/501'/${derivationPath}'`
-    return (await LedgerSolanaWallet.create(derivationPath)) as AnchorWallet
+    return (await LedgerSolanaWallet.create(derivationPath, logger)) as AnchorWallet
   } else if (existsSync(walletOpt)) {
     wallet = hexlify(new Uint8Array(JSON.parse(readFileSync(walletOpt, 'utf8'))))
   }

@@ -69,15 +69,16 @@ ccip-cli get-supported-tokens -n ethereum-mainnet -a 0xRouter... --fee-tokens
 
 When a token is selected or specified:
 
-| Field                   | Description                                                                                    |
-| ----------------------- | ---------------------------------------------------------------------------------------------- |
-| Token address           | Contract address on the source chain                                                           |
-| Symbol / Name           | Token symbol and full name                                                                     |
-| Decimals                | Token decimal places                                                                           |
-| Pool address            | Associated token pool contract                                                                 |
-| Pool type               | Lock/Release, Burn/Mint, etc.                                                                  |
+| Field           | Description                                                                                    |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| Token address   | Contract address on the source chain                                                           |
+| Symbol / Name   | Token symbol and full name                                                                     |
+| Decimals        | Token decimal places                                                                           |
+| Pool address    | Associated token pool contract                                                                 |
+| Pool type       | Lock/Release, Burn/Mint, etc.                                                                  |
 | `finalityDepth` | (v2.0+ pools) Minimum source-chain block confirmations for FTF (0 = supported but not enabled) |
-| Remote chains           | Supported destination chains with rate limits                                                  |
+| `finalitySafe`  | (v2.0+ pools) Whether Pool supports safe finality (Fast Confirmation Rule)                     |
+| Remote chains   | Supported destination chains with rate limits                                                  |
 
 ## Examples
 
@@ -129,10 +130,10 @@ For each remote chain, the command displays rate limiter state:
 
 For TokenPool v2.0+ contracts, additional fields may appear:
 
-| Field           | Description                                                  |
-| --------------- | ------------------------------------------------------------ |
-| `[ftf]outbound` | FTF outbound rate limiter state (custom block confirmations) |
-| `[ftf]inbound`  | FTF inbound rate limiter state (custom block confirmations)  |
+| Field            | Description                                                  |
+| ---------------- | ------------------------------------------------------------ |
+| `[fast]outbound` | FTF outbound rate limiter state (custom block confirmations) |
+| `[fast]inbound`  | FTF inbound rate limiter state (custom block confirmations)  |
 
 These FTF rate limiters apply separate limits when transfers use custom (lower) block confirmations instead of full finality.
 
