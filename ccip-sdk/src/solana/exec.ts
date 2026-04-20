@@ -463,7 +463,7 @@ async function autoDeriveExecutionAccounts({
       throw error as Error
     })
 
-    // Decode return data from simulation (skip 8-byte Anchor discriminator)
+    // Decode return data from simulation
     if (!simResult.returnData?.data[0]) {
       throw new CCIPError(
         CCIPErrorCode.SOLANA_SIMULATION_NO_RETURN_DATA,
