@@ -13,6 +13,8 @@ import BN from 'bn.js'
 import { zeroPadValue } from 'ethers'
 
 import { SolanaChain } from './index.ts'
+import { CCIPError } from '../errors/CCIPError.ts'
+import { CCIPErrorCode } from '../errors/codes.ts'
 import {
   CCIPSolanaFeeResultInvalidError,
   CCIPSolanaLookupTableNotFoundError,
@@ -20,10 +22,10 @@ import {
   CCIPTokenAmountInvalidError,
 } from '../errors/index.ts'
 import { type AnyMessage, type WithLogger, ChainFamily } from '../types.ts'
-import { bytesToBuffer, toLeArray, util } from '../utils.ts'
+import { bytesToBuffer, toLeArray } from '../utils.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import type { UnsignedSolanaTx } from './types.ts'
-import { resolveATA, simulationProvider } from './utils.ts'
+import { resolveATA, simulateTransaction, simulationProvider } from './utils.ts'
 
 function anyToSvmMessage(message: AnyMessage): IdlTypes<typeof CCIP_ROUTER_IDL>['SVM2AnyMessage'] {
   const feeTokenPubkey = message.feeToken ? new PublicKey(message.feeToken) : PublicKey.default
@@ -113,27 +115,49 @@ export async function getFee(
   // Convert AnyMessage to SVM2AnyMessage format
   const svmMessage = anyToSvmMessage(message)
 
-  // 2 feeQuoter PDAs per token
-  const remainingAccounts = svmMessage.tokenAmounts
-    .map((ta) => [
+  // Per FeeQuoter IDL: remaining accounts must be ordered as:
+  // 1. All billing_token_config accounts (one per token, ZERO address if no billing config exists)
+  // 2. All per_chain_per_token_config accounts (same order)
+  const billingPdas = svmMessage.tokenAmounts.map(
+    (ta) =>
       PublicKey.findProgramAddressSync(
         [Buffer.from('fee_billing_token_config'), ta.token.toBuffer()],
         feeQuoter,
       )[0],
-      PublicKey.findProgramAddressSync(
-        [
-          Buffer.from('per_chain_per_token_config'),
-          toLeArray(destChainSelector, 8),
-          ta.token.toBuffer(),
-        ],
-        feeQuoter,
-      )[0],
-    ])
-    .flat()
-    .map((pubkey) => ({ pubkey, isWritable: false, isSigner: false }))
+  )
 
-  // Call getFee method
-  const result = (await program.methods
+  // Always pass the derived PDA: the program validates the key matches the
+  // expected PDA, regardless of whether the account is initialized on-chain.
+  const billingAccounts: AccountMeta[] = billingPdas.map((pda) => ({
+    pubkey: pda,
+    isWritable: false,
+    isSigner: false,
+  }))
+
+  const perChainAccounts: AccountMeta[] = svmMessage.tokenAmounts.map((ta) => ({
+    pubkey: PublicKey.findProgramAddressSync(
+      [
+        Buffer.from('per_chain_per_token_config'),
+        toLeArray(destChainSelector, 8),
+        ta.token.toBuffer(),
+      ],
+      feeQuoter,
+    )[0],
+    isWritable: false,
+    isSigner: false,
+  }))
+
+  const remainingAccounts = [...billingAccounts, ...perChainAccounts]
+
+  logger.debug('getFee remaining accounts:', {
+    billing: billingAccounts.map((a) => a.pubkey.toBase58()),
+    perChain: perChainAccounts.map((a) => a.pubkey.toBase58()),
+    total: remainingAccounts.length,
+    tokens: svmMessage.tokenAmounts.length,
+  })
+
+  // Use .instruction() + simulateTransaction() instead of .view() for V0 support
+  const ix = await program.methods
     .getFee(new BN(destChainSelector), svmMessage)
     .accounts({
       config: configPda,
@@ -145,11 +169,23 @@ export async function getFee(
       feeQuoterLinkTokenConfig: feeQuoterLinkTokenConfigPda,
     })
     .remainingAccounts(remainingAccounts)
-    .view()) as IdlTypes<typeof CCIP_ROUTER_IDL>['GetFeeResult'] | undefined
+    .instruction()
 
-  if (!result?.amount) {
-    throw new CCIPSolanaFeeResultInvalidError(util.inspect(result))
+  const payerKey = new PublicKey('11111111111111111111111111111112')
+  const simResult = await simulateTransaction(ctx, {
+    payerKey,
+    instructions: [ix],
+  })
+
+  if (!simResult.returnData?.data[0]) {
+    throw new CCIPSolanaFeeResultInvalidError('No return data from getFee simulation')
   }
+
+  const result: IdlTypes<typeof CCIP_ROUTER_IDL>['GetFeeResult'] = program.coder.types.decode(
+    'GetFeeResult',
+    // returnData.data[0] is base64-encoded
+    bytesToBuffer(simResult.returnData.data[0]),
+  )
 
   return BigInt(result.amount.toString())
 }
@@ -159,37 +195,73 @@ async function deriveAccountsCcipSend({
   destChainSelector,
   message,
   sender,
+  logger = console,
 }: {
   router: Program<typeof CCIP_ROUTER_IDL>
   destChainSelector: bigint
   message: IdlTypes<typeof CCIP_ROUTER_IDL>['SVM2AnyMessage']
   sender: PublicKey
-}) {
+} & WithLogger) {
   const connection = router.provider.connection
   const derivedAccounts: AccountMeta[] = []
   const addressLookupTableAccounts: AddressLookupTableAccount[] = []
+  const resolvedLookupTables: AddressLookupTableAccount[] = []
   const tokenIndices: number[] = []
   let askWith: AccountMeta[] = []
   let stage = 'Start'
   let tokenIndex = 0
 
   const [configPDA] = PublicKey.findProgramAddressSync([Buffer.from('config')], router.programId)
-  do {
-    // Create the transaction instruction for the deriveAccountsCcipSend method
-    const response = (await router.methods
-      .deriveAccountsCcipSend(
-        {
-          destChainSelector: new BN(destChainSelector.toString()),
-          ccipSendCaller: sender,
-          message,
-        },
-        stage,
-      )
+
+  while (stage) {
+    const params: IdlTypes<typeof CCIP_ROUTER_IDL>['DeriveAccountsCcipSendParams'] = {
+      destChainSelector: new BN(destChainSelector.toString()),
+      ccipSendCaller: sender,
+      message: { ...message },
+    }
+
+    // Workaround for tx-too-large issues during account derivation:
+    // Trim data payload to save space, but keep tokenAmounts (so the program
+    // enters token pool derivation stages) and extraArgs (validated by GetFee
+    // during NestedTokenDerive stages).
+    params.message = { ...message, data: Buffer.from([]) }
+
+    // Build instruction and simulate as V0 transaction (supports address lookup tables).
+    // This replaces .view() which uses legacy transactions without ALT support
+    const ix = await router.methods
+      .deriveAccountsCcipSend(params, stage)
       .accounts({
         config: configPDA,
       })
       .remainingAccounts(askWith)
-      .view()) as IdlTypes<typeof CCIP_ROUTER_IDL>['DeriveAccountsResponse']
+      .instruction()
+
+    const simResult = await simulateTransaction(
+      { connection, logger },
+      {
+        payerKey: sender,
+        instructions: [ix],
+        addressLookupTableAccounts: resolvedLookupTables.length ? resolvedLookupTables : undefined,
+      },
+    ).catch((error: unknown) => {
+      logger.error('Error deriving send accounts at stage', stage, ':', error)
+      throw error as Error
+    })
+
+    // Decode return data from simulation
+    if (!simResult.returnData?.data[0]) {
+      throw new CCIPError(
+        CCIPErrorCode.SOLANA_SIMULATION_NO_RETURN_DATA,
+        'No return data from deriveAccountsCcipSend simulation',
+      )
+    }
+
+    const response: IdlTypes<typeof CCIP_ROUTER_IDL>['DeriveAccountsResponse'] =
+      router.coder.types.decode(
+        'DeriveAccountsResponse',
+        // returnData.data[0] is base64-encoded
+        bytesToBuffer(simResult.returnData.data[0]),
+      )
 
     // Check if it is the start of a token transfer
     const isStartOfToken = /^TokenTransferStaticAccounts\/\d+\/0$/.test(response.currentStage)
@@ -201,6 +273,8 @@ async function deriveAccountsCcipSend({
 
     // Update token index
     tokenIndex += response.accountsToSave.length
+
+    logger.debug('After stage', stage, 'tokenIndices', tokenIndices, 'nextTokenIndex', tokenIndex)
 
     // Collect the derived accounts
     for (const meta of response.accountsToSave) {
@@ -220,23 +294,24 @@ async function deriveAccountsCcipSend({
       }),
     )
 
-    const lookupTableAccounts = await Promise.all(
-      response.lookUpTablesToSave.map(async (table) => {
-        const lookupTableAccountInfo = await connection.getAddressLookupTable(table)
+    // Collect lookup tables and resolve them immediately for next iteration's V0 simulation
+    for (const table of response.lookUpTablesToSave) {
+      const lookupTableAccountInfo = await connection.getAddressLookupTable(table)
 
-        if (!lookupTableAccountInfo.value) {
-          throw new CCIPSolanaLookupTableNotFoundError(table.toBase58())
-        }
+      if (!lookupTableAccountInfo.value) {
+        throw new CCIPSolanaLookupTableNotFoundError(table.toBase58())
+      }
 
-        return lookupTableAccountInfo.value
-      }),
-    )
-
-    // Collect lookup tables
-    addressLookupTableAccounts.push(...lookupTableAccounts)
+      addressLookupTableAccounts.push(lookupTableAccountInfo.value)
+      resolvedLookupTables.push(lookupTableAccountInfo.value)
+    }
 
     stage = response.nextStage
-  } while (stage.length)
+  }
+
+  logger.debug('Resulting derived accounts:', derivedAccounts)
+  logger.debug('Resulting derived address lookup tables:', addressLookupTableAccounts)
+  logger.debug('Resulting derived token indexes:', tokenIndices)
 
   return {
     accounts: derivedAccounts,
@@ -290,6 +365,7 @@ export async function generateUnsignedCcipSend(
     destChainSelector,
     sender,
     message: svmMessage,
+    logger: ctx.logger,
   })
 
   const sendIx = await program.methods
