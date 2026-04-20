@@ -46,12 +46,13 @@ import {
   CCIPTransactionNotFoundError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
-import { type EVMExtraArgsV2, type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
+import { type EVMExtraArgsV1, type EVMExtraArgsV2, type ExtraArgs, type GenericExtraArgsV3, type SuiExtraArgsV1, type SVMExtraArgsV1, EVMExtraArgsV1Tag, EVMExtraArgsV2Tag, GenericExtraArgsV3Tag, SuiExtraArgsV1Tag, SVMExtraArgsV1Tag } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
+  type CCIPMessage,
   type CCIPExecution,
   type CCIPRequest,
   type ChainLog,
@@ -77,7 +78,7 @@ import {
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import { type UnsignedTONTx, isTONWallet } from './types.ts'
-import { crc32, lookupTxByRawHash, parseJettonContent } from './utils.ts'
+import { crc32, fromSnakeData, lookupTxByRawHash, parseJettonContent } from './utils.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 export type { TONWallet, UnsignedTONTx } from './types.ts'
 
@@ -87,6 +88,80 @@ export type { TONWallet, UnsignedTONTx } from './types.ts'
  */
 function isTvmError(error: unknown): error is Error & { exitCode: number } {
   return error instanceof Error && 'exitCode' in error && typeof error.exitCode === 'number'
+}
+
+function decodeLegacyEVMTONExtraArgs(
+  extraArgs: BytesLike,
+): (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' }) | undefined {
+  let bytes
+  try {
+    bytes = bytesToBuffer(extraArgs)
+    if (dataSlice(bytes, 0, 4) !== EVMExtraArgsV2Tag) return
+  } catch {
+    return
+  }
+
+  const slice = new Slice(new BitReader(new BitString(bytes, 32, bytes.length * 8)), [])
+  const gasLimit = slice.loadMaybeUintBig(256) ?? 0n
+  const allowOutOfOrderExecution = slice.loadBit()
+
+  return {
+    _tag: 'EVMExtraArgsV2',
+    gasLimit,
+    allowOutOfOrderExecution,
+  }
+}
+
+function decodeTONExtraArgsCell(
+  cell: Cell,
+):
+  | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
+  | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
+  | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
+  | undefined {
+  const slice = cell.beginParse()
+  const tag = hexlify(slice.loadBuffer(4))
+
+  switch (tag) {
+    case EVMExtraArgsV2Tag:
+      return {
+        _tag: 'EVMExtraArgsV2',
+        gasLimit: slice.loadMaybeUintBig(256) ?? 0n,
+        allowOutOfOrderExecution: slice.loadBit(),
+      }
+
+    case SVMExtraArgsV1Tag:
+      return {
+        _tag: 'SVMExtraArgsV1',
+        computeUnits: BigInt(slice.loadUint(32)),
+        accountIsWritableBitmap: slice.loadUintBig(64),
+        allowOutOfOrderExecution: slice.loadBit(),
+        tokenReceiver: decodeAddress(toBeHex(slice.loadUintBig(256), 32), ChainFamily.Solana),
+        accounts:
+          slice.remainingRefs > 0
+            ? fromSnakeData(slice.loadRef(), (accountSlice) =>
+                decodeAddress(toBeHex(accountSlice.loadUintBig(256), 32), ChainFamily.Solana),
+              )
+            : [],
+      }
+
+    case SuiExtraArgsV1Tag:
+      return {
+        _tag: 'SuiExtraArgsV1',
+        gasLimit: slice.loadUintBig(256),
+        allowOutOfOrderExecution: slice.loadBit(),
+        tokenReceiver: decodeAddress(toBeHex(slice.loadUintBig(256), 32), ChainFamily.Sui),
+        receiverObjectIds:
+          slice.remainingRefs > 0
+            ? fromSnakeData(slice.loadRef(), (objectSlice) =>
+                decodeAddress(toBeHex(objectSlice.loadUintBig(256), 32), ChainFamily.Sui),
+              )
+            : [],
+      }
+
+    default:
+      return
+  }
 }
 
 /**
@@ -617,7 +692,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }: {
     data: unknown
     topics?: readonly string[]
-  }): CCIPMessage_V1_6_EVM | undefined {
+  }): CCIPMessage<typeof CCIPVersion.V1_6> | undefined {
     if (!data || typeof data !== 'string') return
     if (topics?.length && topics[0] !== crc32('CCIPMessageSent')) return
 
@@ -673,8 +748,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       // Load extraArgs from ref 2
       const extraArgsCell = bodySlice.loadRef()
 
-      // Build extraArgs as raw hex matching reference format
-      const extraArgs = '0x' + extraArgsCell.bits.toString().toLowerCase().replace('_', '0')
+      // Serialize full cell graph so nested refs are preserved for SVM/Sui extraArgs.
+      const extraArgs = hexlify(extraArgsCell.toBoc())
       const parsed = this.decodeExtraArgs(extraArgs)
       if (!parsed) return
       const { _tag, ...extraArgsObj } = parsed
@@ -706,59 +781,39 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * Encodes extra args from TON messages into BOC serialization format.
+  * Encodes TON extra args as a BOC-serialized cell.
    *
-   * Currently only supports GenericExtraArgsV2 (EVMExtraArgsV2) encoding since TON
-   * lanes are only connected to EVM chains. When new lanes are planned to be added,
-   * this should be extended to support them (eg. Solana and SVMExtraArgsV1)
+  * BOC serialization preserves nested refs, which is required for SVM and Sui
+  * extra args that use snaked cells.
    *
    * @param args - Extra arguments containing gas limit and execution flags
    * @returns Hex string of BOC-encoded extra args (0x-prefixed)
-   * @throws {@link CCIPExtraArgsInvalidError} if args contains fields other than `gasLimit` and `allowOutOfOrderExecution`
    */
   static encodeExtraArgs(args: ExtraArgs): string {
     const cell = encodeExtraArgsCell(args)
-    return '0x' + cell.bits.toString().toLowerCase().replace('_', '0')
+    return hexlify(cell.toBoc())
   }
 
   /**
-   * Decodes extra arguments from TON messages.
-   * Handles both raw bit-packed data (starts with EVMExtraArgsV2 tag directly)
-   * and BOC-wrapped data (starts with TON BOC magic `0xb5ee9c72`, unwrapped first).
-   * Returns undefined if parsing fails or the tag doesn't match.
+  * Decodes TON extra arguments.
+  * Accepts BOC-serialized cells for all supported variants and legacy raw
+  * GenericExtraArgsV2 bits for backward compatibility.
    *
-   * Currently only supports EVMExtraArgsV2 (GenericExtraArgsV2) encoding since TON
-   * lanes are only connected to EVM chains. When new lanes are planned to be added,
-   * this should be extended to support them (eg. Solana and SVMExtraArgsV1)
-   *
-   * @param extraArgs - Extra args as hex string or bytes (raw bit-packed or BOC-wrapped)
-   * @returns Decoded EVMExtraArgsV2 (GenericExtraArgsV2) object or undefined if invalid
+   * @param extraArgs - Extra args as hex string or bytes
+   * @returns Decoded TON extra args object or undefined if invalid
    */
   static decodeExtraArgs(
     extraArgs: BytesLike,
-  ): (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' }) | undefined {
-    let bytes
+  ):
+    | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
+    | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
+    | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
+    | undefined {
     try {
-      bytes = bytesToBuffer(extraArgs)
-
-      // If the data is BOC-wrapped (starts with TON BOC magic 0xb5ee9c72), extract bits
-      if (dataSlice(bytes, 0, 4) !== EVMExtraArgsV2Tag) {
-        const cell = Cell.fromBoc(bytes)[0]!
-        bytes = bytesToBuffer('0x' + cell.bits.toString().toLowerCase().replace('_', '0'))
-      }
-      if (dataSlice(bytes, 0, 4) !== EVMExtraArgsV2Tag) return
+      const cell = Cell.fromBoc(bytesToBuffer(extraArgs))[0]!
+      return decodeTONExtraArgsCell(cell)
     } catch {
-      return
-    }
-
-    const slice = new Slice(new BitReader(new BitString(bytes, 32, bytes.length * 8)), [])
-    const gasLimit = slice.loadMaybeUintBig(256) ?? 0n
-    const allowOutOfOrderExecution = slice.loadBit()
-
-    return {
-      _tag: 'EVMExtraArgsV2',
-      gasLimit,
-      allowOutOfOrderExecution,
+      return decodeLegacyEVMTONExtraArgs(extraArgs)
     }
   }
 

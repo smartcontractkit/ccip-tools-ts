@@ -86,10 +86,12 @@ describe('encodeExtraArgs', () => {
         ChainFamily.TON,
       )
 
-      assert.equal(
-        encoded,
-        EVMExtraArgsV2Tag + '8000000000000000000000000000000000000000000000000000000000030d4060',
-      )
+      assert.match(encoded, /^0xb5ee9c72/)
+      assert.deepEqual(decodeExtraArgs(encoded, ChainFamily.TON), {
+        _tag: 'EVMExtraArgsV2',
+        gasLimit: 400000n,
+        allowOutOfOrderExecution: true,
+      })
     })
 
     it('should encode EVMExtraArgsV2 (GenericExtraArgsV2) with allowOutOfOrderExecution false', () => {
@@ -98,10 +100,12 @@ describe('encodeExtraArgs', () => {
         ChainFamily.TON,
       )
 
-      assert.equal(
-        encoded,
-        EVMExtraArgsV2Tag + '800000000000000000000000000000000000000000000000000000000003d09020',
-      )
+      assert.match(encoded, /^0xb5ee9c72/)
+      assert.deepEqual(decodeExtraArgs(encoded, ChainFamily.TON), {
+        _tag: 'EVMExtraArgsV2',
+        gasLimit: 500000n,
+        allowOutOfOrderExecution: false,
+      })
     })
 
     it('should parse real Sepolia->TON message extraArgs', () => {
@@ -271,7 +275,44 @@ describe('parseExtraArgs', () => {
       const original = { gasLimit: 400_000n, allowOutOfOrderExecution: true }
       const encoded = encodeExtraArgs(original, ChainFamily.TON)
       const decoded = decodeExtraArgs(encoded, ChainFamily.TON)
+      assert.match(encoded, /^0xb5ee9c72/)
       assert.deepEqual(decoded, { ...original, _tag: 'EVMExtraArgsV2' })
+    })
+
+    it('should round-trip TON SVMExtraArgsV1', () => {
+      const original = {
+        computeUnits: 250_000n,
+        accountIsWritableBitmap: 3n,
+        allowOutOfOrderExecution: true,
+        tokenReceiver: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+        accounts: [
+          '11111111111111111111111111111111',
+          'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+        ],
+      }
+      const encoded = encodeExtraArgs(original, ChainFamily.TON)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.TON)
+
+      assert.match(encoded, /^0xb5ee9c72/)
+      assert.deepEqual(decoded, { ...original, _tag: 'SVMExtraArgsV1' })
+    })
+
+    it('should round-trip TON SuiExtraArgsV1', () => {
+      const original = {
+        gasLimit: 350_000n,
+        allowOutOfOrderExecution: false,
+        tokenReceiver:
+          '0x1111111111111111111111111111111111111111111111111111111111111111',
+        receiverObjectIds: [
+          '0x2222222222222222222222222222222222222222222222222222222222222222',
+          '0x3333333333333333333333333333333333333333333333333333333333333333',
+        ],
+      }
+      const encoded = encodeExtraArgs(original, ChainFamily.TON)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.TON)
+
+      assert.match(encoded, /^0xb5ee9c72/)
+      assert.deepEqual(decoded, { ...original, _tag: 'SuiExtraArgsV1' })
     })
   })
 
@@ -304,7 +345,7 @@ describe('parseExtraArgs', () => {
       const tonEncoded = encodeExtraArgs(args, ChainFamily.TON)
 
       assert.equal(evmEncoded.substring(0, 10), EVMExtraArgsV2Tag)
-      assert.equal(tonEncoded.substring(0, 10), EVMExtraArgsV2Tag)
+      assert.equal(tonEncoded.substring(0, 10), '0xb5ee9c72')
       assert.notEqual(evmEncoded, tonEncoded)
     })
   })

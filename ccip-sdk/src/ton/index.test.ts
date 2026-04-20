@@ -47,6 +47,56 @@ describe('TON index unit tests', () => {
 
   const mockNetworkInfo = networkInfo('ton-testnet')
 
+  describe('extra args codec', () => {
+    it('should round-trip EVM extra args through TONChain static codec', () => {
+      const original = { gasLimit: 400_000n, allowOutOfOrderExecution: true }
+
+      const encoded = TONChain.encodeExtraArgs(original)
+      const decoded = TONChain.decodeExtraArgs(encoded)
+
+      assert.match(encoded, /^0xb5ee9c72/)
+      assert.deepEqual(decoded, { ...original, _tag: 'EVMExtraArgsV2' })
+    })
+
+    it('should round-trip SVM extra args through TONChain static codec', () => {
+      const original = {
+        computeUnits: 250_000n,
+        accountIsWritableBitmap: 5n,
+        allowOutOfOrderExecution: true,
+        tokenReceiver: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+        accounts: [
+          '11111111111111111111111111111111',
+          'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+        ],
+      }
+
+      const encoded = TONChain.encodeExtraArgs(original)
+      const decoded = TONChain.decodeExtraArgs(encoded)
+
+      assert.match(encoded, /^0xb5ee9c72/)
+      assert.deepEqual(decoded, { ...original, _tag: 'SVMExtraArgsV1' })
+    })
+
+    it('should round-trip Sui extra args through TONChain static codec', () => {
+      const original = {
+        gasLimit: 350_000n,
+        allowOutOfOrderExecution: false,
+        tokenReceiver:
+          '0x1111111111111111111111111111111111111111111111111111111111111111',
+        receiverObjectIds: [
+          '0x2222222222222222222222222222222222222222222222222222222222222222',
+          '0x3333333333333333333333333333333333333333333333333333333333333333',
+        ],
+      }
+
+      const encoded = TONChain.encodeExtraArgs(original)
+      const decoded = TONChain.decodeExtraArgs(encoded)
+
+      assert.match(encoded, /^0xb5ee9c72/)
+      assert.deepEqual(decoded, { ...original, _tag: 'SuiExtraArgsV1' })
+    })
+  })
+
   describe('execute', { timeout: 10e3 }, () => {
     const mockWalletAddress = Address.parse('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
 
