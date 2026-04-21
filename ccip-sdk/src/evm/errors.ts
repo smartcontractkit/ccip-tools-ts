@@ -140,10 +140,10 @@ export function recursiveParseError(
     try {
       const obj = data.toObject()
       const keys = Object.keys(obj)
-
+      // eslint-disable-next-line no-restricted-syntax
       if (keys.length > 0 && keys.every((k) => k.startsWith('_'))) throw new Error('not an obj')
       kv = Object.entries(obj).map(([k, v]) => [j(key, k), v])
-    } catch (_) {
+    } catch {
       kv = data.toArray().map((v, i) => [j(key, `[${i}]`), v])
     }
     return kv.reduce(
