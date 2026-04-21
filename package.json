@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-tools-ts",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "description": "CLI and library to interact with CCIP",
   "author": "Chainlink devs",
   "license": "MIT",

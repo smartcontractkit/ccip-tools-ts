@@ -940,7 +940,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         onRampAddress,
         minSeqNr: BigInt(merkleRoot.minSeqNr.toString()),
         maxSeqNr: BigInt(merkleRoot.maxSeqNr.toString()),
-        merkleRoot: hexlify(getDataBytes(merkleRoot.merkleRoot)),
+        merkleRoot: hexlify(getDataBytes(merkleRoot.merkleRoot)) as `0x${string}`,
       },
     ]
   }

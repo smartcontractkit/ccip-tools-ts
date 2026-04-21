@@ -201,7 +201,7 @@ class MockChain extends Chain {
         // The actual filtering happens in getOnchainCommitReport based on the commitStore address
         return [
           {
-            merkleRoot: parsed12.args.report.merkleRoot as string,
+            merkleRoot: parsed12.args.report.merkleRoot as `0x${string}`,
             minSeqNr: parsed12.args.report.interval.min as bigint,
             maxSeqNr: parsed12.args.report.interval.max as bigint,
             sourceChainSelector: lane.sourceChainSelector,

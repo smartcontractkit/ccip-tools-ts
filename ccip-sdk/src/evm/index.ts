@@ -489,11 +489,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       if (isCcipV15) {
         return [
           {
-            merkleRoot: result.merkleRoot as string,
+            merkleRoot: result.merkleRoot as `0x${string}`,
             minSeqNr: (result.interval as Result).min as bigint,
             maxSeqNr: (result.interval as Result).max as bigint,
             sourceChainSelector: lane!.sourceChainSelector,
-            onRampAddress: lane!.onRamp,
+            onRampAddress: lane!.onRamp as `0x${string}`,
           },
         ]
       } else {
