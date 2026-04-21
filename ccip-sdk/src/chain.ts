@@ -1642,7 +1642,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
         tokenReceiver = this.getAddress(message.extraArgs.tokenReceiver) // validate
       }
       let finality: FinalityRequested = 'finalized'
-      if (message.extraArgs && 'finality' in message.extraArgs) {
+      if (
+        message.extraArgs &&
+        'finality' in message.extraArgs &&
+        message.extraArgs.finality != null
+      ) {
         const finality_ = Number(message.extraArgs.finality)
         if (!isNaN(finality_)) finality = finality_
         else if (!['safe', 'finalized'].includes(message.extraArgs.finality as string))
@@ -1651,6 +1655,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
             'finality must be "safe", "finalized", or a numeric block depth',
             { context: { finality: message.extraArgs.finality } },
           )
+        else finality = message.extraArgs.finality
       }
       // V3 defaults (GenericExtraArgsV3)
       return {
