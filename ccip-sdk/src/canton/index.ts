@@ -3,6 +3,7 @@ import type { PickDeep } from 'type-fest'
 
 import {
   type ChainContext,
+  type ChainStatic,
   type GetBalanceOpts,
   type LogFilter,
   type RegistryTokenConfig,
@@ -1457,10 +1458,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   /**
    * Build a message targeted at this Canton destination chain, populating missing fields.
    */
-  static override buildMessageForDest(
-    message: Parameters<(typeof Chain)['buildMessageForDest']>[0],
-  ) {
-    return Chain.buildMessageForDest(message)
+  static override buildMessageForDest(message: Parameters<ChainStatic['buildMessageForDest']>[0]) {
+    return super.buildMessageForDest(message)
   }
 }
 
