@@ -150,6 +150,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   SOLANA_LOOKUP_TABLE_NOT_FOUND: 'Lookup table account not found. It may not be synced yet.',
   SOLANA_ROUTER_CONFIG_NOT_FOUND: 'Router config PDA not found.',
   SOLANA_FEE_RESULT_INVALID: 'Invalid fee result from router. Check the router configuration.',
+  SOLANA_SIMULATION_NO_RETURN_DATA:
+    'Simulation returned no data. The on-chain program may have reverted silently.',
   SOLANA_REF_ADDRESSES_NOT_FOUND: 'Reference addresses account not found. Wait and retry.',
   SOLANA_OFFRAMP_EVENTS_NOT_FOUND: 'OffRamp events not found. Wait and retry.',
   SOLANA_SOURCE_CHAIN_UNSUPPORTED: 'This source chain is not supported for Solana destinations.',
@@ -189,6 +191,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
 
   ARGUMENT_INVALID: 'Check the command-line argument format and requirements.',
   INSUFFICIENT_BALANCE: 'Fund the wallet to cover the transaction fee.',
+  INTERACTIVE_REQUIRED:
+    'Provide the required input via CLI flags or environment variables, or remove --no-interactive to allow prompts.',
 
   NOT_IMPLEMENTED: 'This feature is not yet implemented.',
   UNKNOWN: 'An unknown error occurred. Check the error details.',

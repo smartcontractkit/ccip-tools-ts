@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
-import { getLbtcAttestation, getUsdcAttestation } from './offchain.ts'
+import { getLbtcAttestation, getOffchainTokenData, getUsdcAttestation } from './offchain.ts'
 import { NetworkType } from './types.ts'
 
 const origFetch = globalThis.fetch
@@ -314,5 +314,70 @@ describe('getLbtcAttestation', () => {
     const result = await getLbtcAttestation(approvedPayloadHash2, NetworkType.Testnet)
 
     assert.equal(result.attestation, approvedPayloadAttestation2)
+  })
+})
+
+describe('getOffchainTokenData', () => {
+  const lbtcHashHex = '0x1bb7b6793a5d97c3d9e55cfee4122e417adcb8fd7df0491a4378e12937c74337'
+  const lbtcHashBase64 = 'G7e2eTpdl8PZ5Vz+5BIuQXrcuP198EkaQ3jhKTfHQzc='
+  const lbtcAttestation = '0xattestation1'
+
+  const lombardResponse = {
+    attestations: [
+      {
+        message_hash: lbtcHashHex,
+        status: 'NOTARIZATION_STATUS_SESSION_APPROVED',
+        attestation: lbtcAttestation,
+      },
+    ],
+  }
+
+  const mockedFetchJson = mock.fn(() => Promise.resolve(lombardResponse as any))
+  const mockedFetch = mock.fn((_url: string, _opts?: any) =>
+    Promise.resolve({ json: mockedFetchJson }),
+  )
+
+  const makeRequest = (extraData: string) => ({
+    tx: { hash: '0xdeadbeef' },
+    message: {
+      sourceChainSelector: 16015286601757825753n, // Sepolia (testnet)
+      tokenAmounts: [{ extraData }],
+    },
+  })
+
+  beforeEach(() => {
+    mockedFetch.mock.resetCalls()
+    mockedFetchJson.mock.resetCalls()
+    globalThis.fetch = mockedFetch as any
+  })
+
+  afterEach(() => {
+    globalThis.fetch = origFetch
+    mockedFetch.mock.restore()
+    mockedFetchJson.mock.restore()
+  })
+
+  it('should normalize base64 extraData to hex when fetching LBTC attestation', async () => {
+    const request = makeRequest(lbtcHashBase64)
+
+    const result = await getOffchainTokenData(request as any, { logger: { warn: () => {} } as any })
+
+    assert.equal(mockedFetch.mock.calls.length, 1)
+    const body = JSON.parse(mockedFetch.mock.calls[0]!.arguments[1]!.body)
+    assert.deepEqual(body, { messageHash: [lbtcHashHex] })
+    assert.equal(result[0]!._tag, 'lbtc')
+    assert.equal(result[0]!.attestation, lbtcAttestation)
+  })
+
+  it('should handle hex extraData for LBTC attestation', async () => {
+    const request = makeRequest(lbtcHashHex)
+
+    const result = await getOffchainTokenData(request as any, { logger: { warn: () => {} } as any })
+
+    assert.equal(mockedFetch.mock.calls.length, 1)
+    const body = JSON.parse(mockedFetch.mock.calls[0]!.arguments[1]!.body)
+    assert.deepEqual(body, { messageHash: [lbtcHashHex] })
+    assert.equal(result[0]!._tag, 'lbtc')
+    assert.equal(result[0]!.attestation, lbtcAttestation)
   })
 })

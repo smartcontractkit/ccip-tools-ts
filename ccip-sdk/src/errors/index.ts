@@ -184,7 +184,11 @@ export { CCIPAddressInvalidError } from './specialized.ts'
 export { CCIPSourceChainUnsupportedError } from './specialized.ts'
 
 // Specialized errors - CLI & Validation
-export { CCIPArgumentInvalidError, CCIPInsufficientBalanceError } from './specialized.ts'
+export {
+  CCIPArgumentInvalidError,
+  CCIPInsufficientBalanceError,
+  CCIPInteractiveRequiredError,
+} from './specialized.ts'
 
 // HTTP Status codes (re-exported from root)
 export { HttpStatus, isServerError, isTransientHttpStatus } from '../http-status.ts'

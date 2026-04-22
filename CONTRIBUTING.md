@@ -79,14 +79,15 @@ CCIPError (base)
 └── recovery?: string           # Actionable fix
 ```
 
-| Scenario             | Error Class                    |
-| -------------------- | ------------------------------ |
-| Chain not found      | `CCIPChainNotFoundError`       |
-| Invalid input        | `CCIPArgumentInvalidError`     |
-| Transaction pending  | `CCIPTransactionNotFoundError` |
-| Message not in batch | `CCIPMessageNotInBatchError`   |
-| HTTP/RPC failure     | `CCIPHttpError`                |
-| Not implemented      | `CCIPNotImplementedError`      |
+| Scenario             | Error Class                      |
+| -------------------- | -------------------------------- |
+| Chain not found      | `CCIPChainNotFoundError`         |
+| Invalid input        | `CCIPArgumentInvalidError`       |
+| Transaction pending  | `CCIPTransactionNotFoundError`   |
+| Message not in batch | `CCIPMessageNotInBatchError`     |
+| HTTP/RPC failure     | `CCIPHttpError`                  |
+| Not implemented      | `CCIPNotImplementedError`        |
+| Interactive required | `CCIPInteractiveRequiredError`   |
 
 To add a new error type:
 

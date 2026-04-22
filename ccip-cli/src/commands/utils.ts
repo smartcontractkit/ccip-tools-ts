@@ -10,6 +10,7 @@ import {
   type Lane,
   CCIPError,
   CCIPErrorCode,
+  CCIPInteractiveRequiredError,
   ExecutionState,
   getCCIPExplorerUrl,
   getDataBytes,
@@ -40,10 +41,22 @@ import type { Ctx } from './types.ts'
 export async function selectRequest(
   requests: readonly CCIPRequest[],
   promptSuffix?: string,
-  hints?: { logIndex?: number },
+  hints?: { logIndex?: number; interactive?: boolean },
 ): Promise<CCIPRequest> {
   if (hints?.logIndex != null) requests = requests.filter((req) => req.log.index === hints.logIndex)
   if (requests.length === 1) return requests[0]!
+  if (hints?.interactive === false) {
+    throw new CCIPInteractiveRequiredError(
+      `Multiple messages found (${requests.length}). Use --log-index to select one`,
+      {
+        context: {
+          count: requests.length,
+          logIndices: requests.map((r) => r.log.index),
+          messageIds: requests.map((r) => r.message.messageId),
+        },
+      },
+    )
+  }
   const answer = await select({
     message: `${requests.length} messageIds found; select one${promptSuffix ? ' ' + promptSuffix : ''}`,
     choices: [

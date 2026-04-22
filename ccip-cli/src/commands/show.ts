@@ -109,10 +109,37 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   const [getChain, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHashOrId)
 
   let source: Chain | undefined, offRamp
+  // Track if we displayed all messages in non-interactive multi-message path
+  let displayedAllMessages = false
+
   let request$ = (async () => {
     const [source_, tx] = await tx$
     source = source_
-    return selectRequest(await source_.getMessagesInTx(tx), 'to know more', argv)
+    const messages = await source_.getMessagesInTx(tx)
+
+    // Non-interactive multi-message path: display all messages and signal early return
+    if (argv.interactive === false && argv.logIndex == null && messages.length > 1) {
+      switch (argv.format) {
+        case Format.log:
+          for (const req of messages) {
+            output.write(`message ${req.log.index} =`, withDateTimestamp(req))
+          }
+          break
+        case Format.pretty:
+          for (const req of messages) {
+            await prettyRequest.call(ctx, req, source)
+          }
+          break
+        case Format.json:
+          output.write(JSON.stringify({ requests: messages }, bigIntReplacer, 2))
+          break
+      }
+      logger.info('Use --log-index N for full details on a specific message.')
+      displayedAllMessages = true
+      return messages[0]! // return first to satisfy type; caller checks displayedAllMessages
+    }
+
+    return selectRequest(messages, 'to know more', argv)
   })()
 
   if (argv.api !== false && isHexString(argv.txHashOrId, 32)) {
@@ -126,6 +153,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   let request
   try {
     request = await request$
+    if (displayedAllMessages) return // already displayed all messages in non-interactive path
     if ('offRampAddress' in request.message) {
       offRamp = request.message.offRampAddress
     }

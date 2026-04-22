@@ -2956,6 +2956,21 @@ export class CCIPInsufficientBalanceError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when an operation requires user interaction (prompt, Ledger USB) but the CLI
+ * is running in non-interactive mode (`--no-interactive` or piped stdin).
+ */
+export class CCIPInteractiveRequiredError extends CCIPError {
+  override readonly name = 'CCIPInteractiveRequiredError'
+  /** Creates an interactive-required error. */
+  constructor(message: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.INTERACTIVE_REQUIRED, message, {
+      ...options,
+      isTransient: false,
+    })
+  }
+}
+
 // Solana-specific (additional)
 
 /**
