@@ -503,6 +503,64 @@ describe('decodeMessage', () => {
     }
   })
 
+  it('should decode v2.0 message with null verifiers[].destAddress (pre-execution state)', () => {
+    // Real-world API shape: a VERIFYING v2.0 message has verifiers[].destAddress === null
+    // until a verifier commits on the destination chain. The regex in decodeJsonMessage
+    // matches `destAddress` (via /^dest.*address/) and would otherwise crash on
+    // decodeAddress(null). Only `destAddress` is allowed to be null; other
+    // address-matched keys (sender, receiver, onramp, etc.) must still throw.
+    const msg = decodeMessage({
+      messageId: '0xd3ad975c42aea68b22a21f659b13cc803881f1a9f191da63d0dafaf9e03fa6b2',
+      sequenceNumber: '35',
+      onramp: '0x0F887309075403d02563CBCbB3D98Fb2ef2D2946',
+      sourceNetworkInfo: {
+        chainSelector: '16015286601757825753',
+        chainFamily: 'EVM',
+      },
+      destNetworkInfo: {
+        chainSelector: '14767482510784806043',
+        chainFamily: 'EVM',
+      },
+      sender: '0x9d087fC03ae39b088326b67fA3C788236645b717',
+      receiver: '0x9d087fC03ae39b088326b67fA3C788236645b717',
+      status: 'VERIFYING',
+      feeToken: '0x6846eF566e701136b2f77E3A7f21aAaDfc61B801',
+      feeTokenAmount: '375000000000000',
+      tokenAmounts: [
+        {
+          sourceTokenAddress: '0x67f000ca40cb1C6eE3Bd2c7FdA2Fd22DDF56FAAb',
+          destTokenAddress: '0x004936C8E8Cb18b40F79A142d4454467338d6F9E',
+          sourcePoolAddress: '0xF374Cb960A8D9bd8d7b295F90F22E27eC405Fc95',
+          amount: '1000',
+          extraData: '0x0000000000000000000000000000000000000000000000000000000000000012',
+          destGasAmount: '90000',
+        },
+      ],
+      verifiers: {
+        items: [
+          {
+            sourceAddress: '0x997bbB1Be075E6e9E7802B84C27c79e820A337A3',
+            destAddress: null,
+            metadata: null,
+            isRequired: null,
+            verification: null,
+            status: 'UNKNOWN',
+          },
+        ],
+        optionalThreshold: 0,
+      },
+    })
+
+    assert.equal(
+      msg.messageId,
+      '0xd3ad975c42aea68b22a21f659b13cc803881f1a9f191da63d0dafaf9e03fa6b2',
+    )
+    assert.equal(typeof msg.sender, 'string')
+    const verifiers = (msg as unknown as { verifiers: { items: { destAddress: unknown }[] } })
+      .verifiers
+    assert.equal(verifiers.items[0]!.destAddress, null)
+  })
+
   describe('buildMessageForDest', () => {
     describe('Chain (base implementation)', () => {
       it('should populate default extraArgs for EVM with data', () => {

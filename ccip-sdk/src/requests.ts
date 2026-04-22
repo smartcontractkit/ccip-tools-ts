@@ -89,7 +89,9 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
     k?.match(/(selector|amount|nonce|number|limit|bitmap|juels)$/i)
       ? BigInt(v as string | number | bigint)
       : k?.match(/(^dest.*address)|(receiver|offramp|accounts)/i)
-        ? decodeAddress((typeof v === 'bigint' ? v.toString() : v) as BytesLike, destFamily)
+        ? v == null && k === 'destAddress'
+          ? v
+          : decodeAddress((typeof v === 'bigint' ? v.toString() : v) as BytesLike, destFamily)
         : k?.match(/((source.*address)|sender|issuer|origin|onramp|(feetoken$)|(token.*address$))/i)
           ? decodeAddress((typeof v === 'bigint' ? v.toString() : v) as BytesLike, sourceFamily)
           : v instanceof Uint8Array ||

@@ -412,7 +412,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       this.provider,
     ) as unknown as TypedContract<typeof VersionedContractABI>
     const res = parseTypeAndVersion(await contract.typeAndVersion())
-    if (res[1].startsWith('1.7.')) res[1] = CCIPVersion.V2_0
     return res
   }
 
