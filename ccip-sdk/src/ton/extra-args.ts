@@ -71,11 +71,12 @@ function encodeEVMExtraArgsCell(extraArgs: ExtraArgs): Cell {
     gasLimit = extraArgs.gasLimit
   }
 
-  const builder = beginCell().storeUint(Number(EVMExtraArgsV2Tag), 32) // 0x181dcf10
-  builder.storeMaybeUint(gasLimit, 256)
-  builder.storeBit(extraArgs.allowOutOfOrderExecution)
-
-  return builder.endCell()
+  // 0x181dcf10
+  return beginCell()
+    .storeUint(Number(EVMExtraArgsV2Tag), 32)
+    .storeMaybeUint(gasLimit, 256)
+    .storeBit(extraArgs.allowOutOfOrderExecution)
+    .endCell()
 }
 
 /**
@@ -91,24 +92,23 @@ function encodeEVMExtraArgsCell(extraArgs: ExtraArgs): Cell {
  */
 function encodeSVMExtraArgsCell(extraArgs: SVMExtraArgsV1): Cell {
   // Encode accounts as a snaked cell of uint256 values
-  const accountsCell = asSnakedCell(extraArgs.accounts, (account: string) =>
-    new Builder().storeUint(toBigInt(getAddressBytes(account)), 256),
-  )
+  const builderFn = (account: string) =>
+    new Builder().storeUint(toBigInt(getAddressBytes(account)), 256)
+  const accountsCell = asSnakedCell(extraArgs.accounts, builderFn)
 
   // Encode tokenReceiver as uint256
   const tokenReceiver = extraArgs.tokenReceiver
     ? toBigInt(getAddressBytes(extraArgs.tokenReceiver))
     : 0n
 
-  const builder = beginCell()
+  return beginCell()
     .storeUint(Number(SVMExtraArgsV1Tag), 32) // 0x1f3b3aba
     .storeUint(Number(extraArgs.computeUnits), 32)
     .storeUint(extraArgs.accountIsWritableBitmap, 64)
     .storeBit(extraArgs.allowOutOfOrderExecution)
     .storeUint(tokenReceiver, 256) // uint256
     .storeRef(accountsCell) // SnakedCell<uint256>
-
-  return builder.endCell()
+    .endCell()
 }
 
 /**
@@ -123,23 +123,22 @@ function encodeSVMExtraArgsCell(extraArgs: SVMExtraArgsV1): Cell {
  */
 function encodeSuiExtraArgsCell(extraArgs: SuiExtraArgsV1): Cell {
   // Encode receiverObjectIds as a snaked cell of uint256 values
-  const objectIdsCell = asSnakedCell(extraArgs.receiverObjectIds, (objectId: string) =>
-    new Builder().storeUint(toBigInt(getAddressBytes(objectId)), 256),
-  )
+  const builderFn = (objectId: string) =>
+    new Builder().storeUint(toBigInt(getAddressBytes(objectId)), 256)
+  const objectIdsCell = asSnakedCell(extraArgs.receiverObjectIds, builderFn)
 
   // Encode tokenReceiver as uint256
   const tokenReceiver = extraArgs.tokenReceiver
     ? toBigInt(getAddressBytes(extraArgs.tokenReceiver))
     : 0n
 
-  const builder = beginCell()
+  return beginCell()
     .storeUint(Number(SuiExtraArgsV1Tag), 32) // 0x21ea4ca9
     .storeUint(extraArgs.gasLimit, 256)
     .storeBit(extraArgs.allowOutOfOrderExecution)
     .storeUint(tokenReceiver, 256) // uint256
     .storeRef(objectIdsCell) // SnakedCell<uint256>
-
-  return builder.endCell()
+    .endCell()
 }
 
 /**
