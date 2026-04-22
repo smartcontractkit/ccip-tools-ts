@@ -1,32 +1,14 @@
 import { Buffer } from 'buffer'
 
-import {
-  type Transaction,
-  Address,
-  BitReader,
-  BitString,
-  Cell,
-  Slice,
-  beginCell,
-  fromNano,
-  toNano,
-} from '@ton/core'
+import { type Transaction, Address, Cell, beginCell, fromNano, toNano } from '@ton/core'
 import { TonClient } from '@ton/ton'
 import { type AxiosAdapter, getAdapter } from 'axios'
-import {
-  type BytesLike,
-  dataSlice,
-  hexlify,
-  isBytesLike,
-  isHexString,
-  toBeArray,
-  toBeHex,
-} from 'ethers'
+import { type BytesLike, hexlify, isBytesLike, isHexString, toBeArray, toBeHex } from 'ethers'
 import { type Memoized, memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import { streamTransactionsForAddress } from './logs.ts'
-import { encodeExtraArgsCell, generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
+import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
 import {
   type ChainContext,
   type ChainStatic,
@@ -46,15 +28,7 @@ import {
   CCIPTransactionNotFoundError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
-import {
-  type EVMExtraArgsV2,
-  type ExtraArgs,
-  type SVMExtraArgsV1,
-  type SuiExtraArgsV1,
-  EVMExtraArgsV2Tag,
-  SVMExtraArgsV1Tag,
-  SuiExtraArgsV1Tag,
-} from '../extra-args.ts'
+import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
@@ -84,9 +58,14 @@ import {
   sleep,
 } from '../utils.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
+import {
+  decodeLegacyEVMTONExtraArgs,
+  decodeTONExtraArgsCell,
+  encodeExtraArgsCell,
+} from './extra-args.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import { type UnsignedTONTx, isTONWallet } from './types.ts'
-import { crc32, fromSnakeData, lookupTxByRawHash, parseJettonContent } from './utils.ts'
+import { crc32, lookupTxByRawHash, parseJettonContent } from './utils.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 export type { TONWallet, UnsignedTONTx } from './types.ts'
 
@@ -96,80 +75,6 @@ export type { TONWallet, UnsignedTONTx } from './types.ts'
  */
 function isTvmError(error: unknown): error is Error & { exitCode: number } {
   return error instanceof Error && 'exitCode' in error && typeof error.exitCode === 'number'
-}
-
-function decodeLegacyEVMTONExtraArgs(
-  extraArgs: BytesLike,
-): (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' }) | undefined {
-  let bytes
-  try {
-    bytes = bytesToBuffer(extraArgs)
-    if (dataSlice(bytes, 0, 4) !== EVMExtraArgsV2Tag) return
-  } catch {
-    return
-  }
-
-  const slice = new Slice(new BitReader(new BitString(bytes, 32, bytes.length * 8)), [])
-  const gasLimit = slice.loadMaybeUintBig(256) ?? 0n
-  const allowOutOfOrderExecution = slice.loadBit()
-
-  return {
-    _tag: 'EVMExtraArgsV2',
-    gasLimit,
-    allowOutOfOrderExecution,
-  }
-}
-
-function decodeTONExtraArgsCell(
-  cell: Cell,
-):
-  | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
-  | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
-  | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
-  | undefined {
-  const slice = cell.beginParse()
-  const tag = hexlify(slice.loadBuffer(4))
-
-  switch (tag) {
-    case EVMExtraArgsV2Tag:
-      return {
-        _tag: 'EVMExtraArgsV2',
-        gasLimit: slice.loadMaybeUintBig(256) ?? 0n,
-        allowOutOfOrderExecution: slice.loadBit(),
-      }
-
-    case SVMExtraArgsV1Tag:
-      return {
-        _tag: 'SVMExtraArgsV1',
-        computeUnits: BigInt(slice.loadUint(32)),
-        accountIsWritableBitmap: slice.loadUintBig(64),
-        allowOutOfOrderExecution: slice.loadBit(),
-        tokenReceiver: decodeAddress(toBeHex(slice.loadUintBig(256), 32), ChainFamily.Solana),
-        accounts:
-          slice.remainingRefs > 0
-            ? fromSnakeData(slice.loadRef(), (accountSlice) =>
-                decodeAddress(toBeHex(accountSlice.loadUintBig(256), 32), ChainFamily.Solana),
-              )
-            : [],
-      }
-
-    case SuiExtraArgsV1Tag:
-      return {
-        _tag: 'SuiExtraArgsV1',
-        gasLimit: slice.loadUintBig(256),
-        allowOutOfOrderExecution: slice.loadBit(),
-        tokenReceiver: decodeAddress(toBeHex(slice.loadUintBig(256), 32), ChainFamily.Sui),
-        receiverObjectIds:
-          slice.remainingRefs > 0
-            ? fromSnakeData(slice.loadRef(), (objectSlice) =>
-                decodeAddress(toBeHex(objectSlice.loadUintBig(256), 32), ChainFamily.Sui),
-              )
-            : [],
-      }
-
-    default:
-      return
-  }
 }
 
 /**

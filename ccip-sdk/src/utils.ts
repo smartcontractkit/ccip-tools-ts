@@ -10,7 +10,6 @@ import {
   isBytesLike,
   toBeArray,
   toBigInt,
-  zeroPadValue,
 } from 'ethers'
 import { memoize } from 'micro-memoize'
 import yaml from 'yaml'
@@ -469,7 +468,9 @@ export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Ar
  */
 export function encodeAddressToAny(address: BytesLike): Buffer {
   const bytes = getAddressBytes(address)
-  return bytesToBuffer(bytes.length < 32 ? zeroPadValue(bytes, 32) : bytes)
+  return bytes.length < 32
+    ? Buffer.concat([Buffer.alloc(32 - bytes.length), Buffer.from(bytes)]) // pad to 32 bytes
+    : Buffer.from(bytes)
 }
 
 /**

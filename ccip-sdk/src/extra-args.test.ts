@@ -344,7 +344,7 @@ describe('parseExtraArgs', () => {
       const tonEncoded = encodeExtraArgs(args, ChainFamily.TON)
 
       assert.equal(evmEncoded.substring(0, 10), EVMExtraArgsV2Tag)
-      assert.equal(tonEncoded.substring(0, 10), '0xb5ee9c72')
+      assert.equal(tonEncoded.substring(0, 10), '0xb5ee9c72') // TON's BOC encoding marker
       assert.notEqual(evmEncoded, tonEncoded)
     })
   })
