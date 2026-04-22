@@ -50,12 +50,12 @@ export class ViemTransportProvider extends JsonRpcApiProvider {
             method: p.method as Parameters<PublicClient['request']>[0]['method'],
             params: params as Parameters<PublicClient['request']>[0]['params'],
           })
-          return { id: p.id, result } as JsonRpcResult
+          return { id: p.id, result }
         } catch (error) {
           return {
             id: p.id,
             error: { code: -32000, message: String(error) },
-          } as JsonRpcError
+          }
         }
       }),
     )

@@ -212,7 +212,7 @@ describe('TON index unit tests', () => {
 
     it('should send to offRamp with correct value and seqno', async () => {
       const { client, wallet, getCapturedTransfer } = createMockClientAndWallet({ seqno: 42 })
-      const tonChain = new TONChain(client, mockNetworkInfo as any)
+      const tonChain = new TONChain(client, mockNetworkInfo)
 
       await tonChain.execute({
         offRamp: TON_OFFRAMP_ADDRESS_TEST,
@@ -229,7 +229,7 @@ describe('TON index unit tests', () => {
 
     it('should build Cell body with MANUALLY_EXECUTE_OPCODE', async () => {
       const { client, wallet, getCapturedTransfer } = createMockClientAndWallet()
-      const tonChain = new TONChain(client, mockNetworkInfo as any)
+      const tonChain = new TONChain(client, mockNetworkInfo)
 
       await tonChain.execute({
         offRamp: TON_OFFRAMP_ADDRESS_TEST,
@@ -253,7 +253,7 @@ describe('TON index unit tests', () => {
         txLt: '42317062000001',
         txHash: 'bb94e574159e19660ab558347f59f80fd005b44c544417df38d0dfb08f2bd395',
       })
-      const tonChain = new TONChain(client, mockNetworkInfo as any)
+      const tonChain = new TONChain(client, mockNetworkInfo)
 
       const result = await tonChain.execute({
         offRamp: TON_OFFRAMP_ADDRESS_TEST,
@@ -275,7 +275,7 @@ describe('TON index unit tests', () => {
 
     it('should reject non-TON wallet', async () => {
       const { client } = createMockClientAndWallet()
-      const tonChain = new TONChain(client, mockNetworkInfo as any)
+      const tonChain = new TONChain(client, mockNetworkInfo)
 
       await assert.rejects(
         tonChain.execute({
@@ -289,7 +289,7 @@ describe('TON index unit tests', () => {
 
     it('should propagate sendTransfer errors', async () => {
       const { client, wallet } = createMockClientAndWallet({ shouldFail: true })
-      const tonChain = new TONChain(client, mockNetworkInfo as any)
+      const tonChain = new TONChain(client, mockNetworkInfo)
 
       await assert.rejects(
         tonChain.execute({
@@ -304,10 +304,7 @@ describe('TON index unit tests', () => {
 
   describe('generateUnsignedExecute', () => {
     it('should return UnsignedTONTx with family=ton', async () => {
-      const tonChain = new TONChain(
-        { getTransactions: async () => [] } as any,
-        mockNetworkInfo as any,
-      )
+      const tonChain = new TONChain({ getTransactions: async () => [] } as any, mockNetworkInfo)
 
       const unsigned = await tonChain.generateUnsignedExecute({
         payer: '0:' + 'b'.repeat(64),
@@ -352,7 +349,7 @@ describe('TON index unit tests', () => {
         contractType: 'com.chainlink.ton.ccip.OffRamp',
         version: '1.6.0',
       })
-      const tonChain = new TONChain(client, mockNetworkInfo as any)
+      const tonChain = new TONChain(client, mockNetworkInfo)
 
       const result = await tonChain.typeAndVersion(
         'EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa',
@@ -368,7 +365,7 @@ describe('TON index unit tests', () => {
         contractType: 'com.chainlink.ton.ccip.OnRamp',
         version: '1.6.0',
       })
-      const tonChain = new TONChain(client, mockNetworkInfo as any)
+      const tonChain = new TONChain(client, mockNetworkInfo)
 
       const result = await tonChain.typeAndVersion(
         'EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa',
@@ -483,7 +480,7 @@ describe('TON index unit tests', () => {
         symbol: 'USDT',
         decimals: 6,
       })
-      const tonChain = new TONChain(client, mockNetworkInfo as any)
+      const tonChain = new TONChain(client, mockNetworkInfo)
 
       const result = await tonChain.getTokenInfo('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
 
@@ -495,7 +492,7 @@ describe('TON index unit tests', () => {
       const client = createMockClientForJetton({
         contentType: 'onchain',
       })
-      const tonChain = new TONChain(client, mockNetworkInfo as any)
+      const tonChain = new TONChain(client, mockNetworkInfo)
 
       const result = await tonChain.getTokenInfo('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
 
@@ -511,7 +508,7 @@ describe('TON index unit tests', () => {
         getTransactions: async () => [],
       } as unknown as TonClient
 
-      const tonChain = new TONChain(client, mockNetworkInfo as any)
+      const tonChain = new TONChain(client, mockNetworkInfo)
 
       const result = await tonChain.getTokenInfo('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
 
@@ -542,7 +539,7 @@ describe('TON index unit tests', () => {
         getTransactions: async () => [],
       } as unknown as TonClient
 
-      const tonChain = new TONChain(client, mockNetworkInfo as any)
+      const tonChain = new TONChain(client, mockNetworkInfo)
       const result = await tonChain.getTokenInfo('EQCVYafY2dq6dxpJXxm0ugndeoCi1uohtNthyotzpcGVmaoa')
 
       // Should use default decimals when parsing fails
@@ -760,7 +757,7 @@ describe('TON index unit tests', () => {
         createMockTransaction(2, 1001), // Success - should be yielded
       ])
 
-      const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
+      const tonChain = new TONChain(mockClient, mockNetworkInfo)
 
       const receipts = []
       for await (const receipt of tonChain.getExecutionReceipts({
@@ -781,7 +778,7 @@ describe('TON index unit tests', () => {
         createMockTransaction(3, 1001), // Failure - should be yielded
       ])
 
-      const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
+      const tonChain = new TONChain(mockClient, mockNetworkInfo)
 
       const receipts = []
       for await (const receipt of tonChain.getExecutionReceipts({
@@ -805,7 +802,7 @@ describe('TON index unit tests', () => {
         createMockTransaction(2, 1001, pastTimestamp + 1), // Success
       ])
 
-      const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
+      const tonChain = new TONChain(mockClient, mockNetworkInfo)
 
       // Use startTime before the mock transactions so they are included
       const request = {
@@ -878,7 +875,7 @@ describe('TON index unit tests', () => {
         },
       } as unknown as TonClient
 
-      const tonChain = new TONChain(mockClient, mockNetworkInfo as any)
+      const tonChain = new TONChain(mockClient, mockNetworkInfo)
 
       const receipts = []
       for await (const receipt of tonChain.getExecutionReceipts({

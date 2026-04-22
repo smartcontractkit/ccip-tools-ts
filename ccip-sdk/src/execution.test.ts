@@ -200,7 +200,7 @@ class MockChain extends Chain {
     const iface = new Interface(OffRamp_1_6_ABI)
     try {
       const parsed = iface.parseLog({
-        topics: _log.topics as string[],
+        topics: _log.topics,
         data: typeof _log.data === 'string' ? _log.data : '0x',
       })
       if (parsed?.name === 'ExecutionStateChanged') {
@@ -328,7 +328,7 @@ describe('calculateManualExecProof', () => {
         feeValueJuels: 1000n,
         feeTokenAmount: 1000n,
         allowOutOfOrderExecution: false,
-      } as any,
+      },
     ]
 
     const lane1_6: Lane = {
@@ -368,7 +368,7 @@ describe('calculateManualExecProof', () => {
         feeTokenAmount: 1547524n,
         allowOutOfOrderExecution: true,
         gasLimit: 25000000n,
-      } as any,
+      },
     ]
 
     const lane: Lane = {

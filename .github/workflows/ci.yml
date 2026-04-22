@@ -28,9 +28,9 @@ jobs:
     - name: Verify anvil is available
       run: anvil --version
 
-    - name: Install Surfpool v1.1.1 (for SVM fork tests)
+    - name: Install Surfpool v1.1.2 (for SVM fork tests)
       run: |
-        curl -sSL https://github.com/solana-foundation/surfpool/releases/download/v1.1.1/surfpool-linux-x64.tar.gz \
+        curl -sSL https://github.com/solana-foundation/surfpool/releases/download/v1.1.2/surfpool-linux-x64.tar.gz \
           | tar xz -C /usr/local/bin
 
     - name: Verify surfpool is available
@@ -53,6 +53,9 @@ jobs:
         npx @arethetypeswrong/cli --pack . --profile esm-only || true
 
     - name: Run tests with coverage
+      env:
+        # Temporary: pipe surfpool stdout/stderr to diagnose Solana fork test failures in CI
+        VERBOSE: '1'
       run: |
         set -o pipefail
         npm test 2>&1 | tee coverage-summary.txt

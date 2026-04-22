@@ -105,8 +105,8 @@ if (estimate.tokenTransferFee) {
 
 Token transfer fee rates differ based on finality mode:
 
-- **Standard finality** (`blockConfirmations = 0` or omitted): uses `defaultBlockConfirmationsTransferFeeBps`
-- **Faster-Than-Finality** (`blockConfirmations > 0`): uses `customBlockConfirmationsTransferFeeBps`
+- **Standard finality** (`finality = 0` or omitted): uses `finalityTransferFeeBps`
+- **Faster-Than-Finality** (block depth `finality > 0`): uses `fastFinalityTransferFeeBps`
 
 For the full FTF workflow — checking availability, estimating FTF fees with code examples, and computing received amounts — see [Faster-Than-Finality](/sdk/guides/ftf).
 

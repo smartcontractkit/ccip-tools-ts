@@ -33,7 +33,7 @@ export function getAptosLeafHasher<V extends CCIPVersion = CCIPVersion>({
       return ((message: CCIPMessage<typeof CCIPVersion.V1_6>): string =>
         hashV16AptosMessage(message, metadataHash)) as LeafHasher<V>
     default:
-      throw new CCIPAptosHasherVersionUnsupportedError(version as string)
+      throw new CCIPAptosHasherVersionUnsupportedError(version)
   }
 }
 

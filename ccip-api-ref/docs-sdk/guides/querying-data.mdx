@@ -149,9 +149,10 @@ Returns `Partial<LaneFeatures>` — not all fields are guaranteed:
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `MIN_BLOCK_CONFIRMATIONS` | `number \| undefined` | `undefined` = pre-v2.0 lane, `0` = v2.0+ but FTF not enabled for this token, `>0` = FTF enabled |
+| `FINALITY_FAST` | `number \| undefined` | `undefined` = pre-v2.0 lane, `0` = v2.0+ but FTF not enabled for this token, `>0` = FTF enabled |
+| `FINALITY_SAFE` | `true \| undefined` | `true` = FCR/safe finality supported on this lane |
 | `RATE_LIMITS` | `RateLimiterState \| null` | Standard rate limiter state (`null` if disabled) |
-| `CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS` | `RateLimiterState \| null` | FTF-specific rate limiter (only when `MIN_BLOCK_CONFIRMATIONS > 0`) |
+| `FAST_RATE_LIMITS` | `RateLimiterState \| null` | FTF/FCR-specific rate limiter (only when FINALITY_FAST > 0 or FINALITY_SAFE) |
 
 :::note
 `getLaneFeatures` is implemented for EVM chains only.
@@ -442,8 +443,8 @@ async function getTransferInfo(
     amount: amountString,
     fee: formatUnits(fee, 18),
     ftfEnabled:
-      laneFeatures.MIN_BLOCK_CONFIRMATIONS != null &&
-      laneFeatures.MIN_BLOCK_CONFIRMATIONS > 0,
+      laneFeatures.FINALITY_FAST != null &&
+      laneFeatures.FINALITY_FAST > 0,
     rateLimited: laneFeatures.RATE_LIMITS != null,
   }
 }

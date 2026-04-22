@@ -57,7 +57,7 @@ The `send` command constructs and submits a CCIP message to transfer data and/or
 | `--extra` | `-x`  | string[] | Extra args as `key=value`. Values parsed as JSON with BigInt support; fallback to string. Repeated keys become arrays. |
 
 :::note
-Extra args fields like `blockConfirmations`, `ccvs`, `ccvArgs`, `executor`, `executorArgs`, `tokenReceiver`, and `tokenArgs` require **CCIP v2+ lanes** (GenericExtraArgsV3). Using them on older lanes will fail. The SDK auto-detects V3 when any V3-only field is present. Check your lane version in the [CCIP Directory](https://docs.chain.link/ccip/directory).
+Extra args fields like `finality`, `ccvs`, `ccvArgs`, `executor`, `executorArgs`, `tokenReceiver`, and `tokenArgs` require **CCIP v2+ lanes** (GenericExtraArgsV3). Using them on older lanes will fail. The SDK auto-detects V3 when any V3-only field is present. Check your lane version in the [CCIP Directory](https://docs.chain.link/ccip/directory).
 :::
 
 :::caution Array fields with a single element
@@ -245,7 +245,7 @@ ccip-cli send \
   -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
   --to 0xAB4f961939BFE6A93567cC57C59eEd7084CE2131 \
   --data "hello world" \
-  -x blockConfirmations=5 \
+  -x finality=5 \
   -x ccvs='["0xVerifier1"]' \
   -x executor=0xExecutorAddress
 ```

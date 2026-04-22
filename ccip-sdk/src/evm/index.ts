@@ -34,7 +34,6 @@ import {
   type RateLimiterState,
   type TokenPoolRemote,
   type TokenPrice,
-  type TokenTransferFeeConfig,
   type TokenTransferFeeOpts,
   type TotalFeesEstimate,
   Chain,
@@ -60,7 +59,12 @@ import {
   CCIPVersionUnsupportedError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
-import type { ExtraArgs } from '../extra-args.ts'
+import {
+  type ExtraArgs,
+  type FinalityRequested,
+  decodeFinalityAllowed,
+  encodeFinality,
+} from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
 import { supportedChains } from '../supported-chains.ts'
@@ -407,7 +411,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       this.provider,
     ) as unknown as TypedContract<typeof VersionedContractABI>
     const res = parseTypeAndVersion(await contract.typeAndVersion())
-    if (res[1].startsWith('1.7.')) res[1] = CCIPVersion.V2_0
     return res
   }
 
@@ -484,7 +487,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       if (isCcipV15) {
         return [
           {
-            merkleRoot: result.merkleRoot as string,
+            merkleRoot: result.merkleRoot as `0x${string}`,
             minSeqNr: (result.interval as Result).min as bigint,
             maxSeqNr: (result.interval as Result).max as bigint,
             sourceChainSelector: lane!.sourceChainSelector,
@@ -664,24 +667,28 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const result: Partial<LaneFeatures> = {}
 
     // default FTF value for V2_0+ lanes if no token/pool or pool doesn't specify
-    if (version >= CCIPVersion.V2_0) result[LaneFeature.MIN_BLOCK_CONFIRMATIONS] = 1
+    if (version >= CCIPVersion.V2_0) {
+      result[LaneFeature.FINALITY_FAST] = 1
+      result[LaneFeature.FINALITY_SAFE] = true
+    }
 
-    // MIN_BLOCK_CONFIRMATIONS — V2_0+ only
+    // FINALITY_FAST — V2_0+ only
     if (opts.token) {
       const { tokenPool } = await this.getRegistryTokenConfig(
         await this.getTokenAdminRegistryFor(onRamp),
         opts.token,
       )
       if (tokenPool) {
-        const { minBlockConfirmations } = await this.getTokenPoolConfig(tokenPool)
-        if (minBlockConfirmations != null)
-          result[LaneFeature.MIN_BLOCK_CONFIRMATIONS] = minBlockConfirmations
+        const { finalityDepth, finalitySafe } = await this.getTokenPoolConfig(tokenPool)
+        if (finalityDepth != null) result[LaneFeature.FINALITY_FAST] = finalityDepth
+        else delete result[LaneFeature.FINALITY_FAST]
+        if (finalitySafe) result[LaneFeature.FINALITY_SAFE] = true
+        else delete result[LaneFeature.FINALITY_SAFE]
 
         const remote = await this.getTokenPoolRemote(tokenPool, opts.destChainSelector)
         result[LaneFeature.RATE_LIMITS] = remote.outboundRateLimiterState
-        if (minBlockConfirmations && 'customBlockConfirmationsOutboundRateLimiterState' in remote) {
-          result[LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS] =
-            remote.customBlockConfirmationsOutboundRateLimiterState
+        if ((finalityDepth || finalitySafe) && 'fastOutboundRateLimiterState' in remote) {
+          result[LaneFeature.FAST_RATE_LIMITS] = remote.fastOutboundRateLimiterState
         }
       }
     }
@@ -905,20 +912,23 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       case CCIPVersion.V1_5:
         if (networkInfo(sourceChainSelector).family !== ChainFamily.EVM)
           throw new CCIPSourceChainUnsupportedError(sourceChainSelector)
-        return getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher
+        return getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp)
       case CCIPVersion.V1_6:
-        return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp, ctx) as LeafHasher
+        return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp, ctx)
       default:
-        throw new CCIPHasherVersionUnsupportedError('EVM', version as string)
+        throw new CCIPHasherVersionUnsupportedError('EVM', version)
     }
   }
 
   /**
    * Gets any available OnRamp for the given router.
-   * @param router - Router contract address.
+   * @param address - Router or OnRamp contract address.
    * @returns OnRamp contract address.
    */
-  async _getSomeOnRampFor(router: string): Promise<string> {
+  async _getSomeOnRampFor(address: string): Promise<string> {
+    const [type, , typeAndVersion] = await this.typeAndVersion(address)
+    if (type.includes('OnRamp')) return address
+    else if (type !== 'Router') throw new CCIPContractNotRouterError(address, typeAndVersion)
     // when given a router, we take any onRamp we can find, as usually they all use same registry
     const someOtherNetwork =
       this.network.networkType === NetworkType.Testnet
@@ -928,7 +938,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         : this.network.name === 'ethereum-mainnet'
           ? 'avalanche-mainnet'
           : 'ethereum-mainnet'
-    return this.getOnRampForRouter(router, networkInfo(someOtherNetwork).chainSelector)
+    return this.getOnRampForRouter(address, networkInfo(someOtherNetwork).chainSelector)
   }
 
   /**
@@ -1212,12 +1222,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     const { token, amount } = tokenAmounts[0]!
 
-    // Determine blockConfirmations and tokenArgs from extraArgs
+    // Determine finality and tokenArgs from extraArgs
     const extraArgs = opts.message.extraArgs
-    let blockConfirmations = 0
+    let finality: FinalityRequested = 0
     let tokenArgs: string = '0x'
-    if (extraArgs && 'blockConfirmations' in extraArgs) {
-      blockConfirmations = extraArgs.blockConfirmations as number
+    if (extraArgs && 'finality' in extraArgs && extraArgs.finality != null) {
+      finality = extraArgs.finality
       if (extraArgs.tokenArgs) tokenArgs = hexlify(extraArgs.tokenArgs)
     }
 
@@ -1243,7 +1253,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ccipFee$,
       this.getTokenPoolConfig(poolAddress, {
         destChainSelector: opts.destChainSelector,
-        blockConfirmationsRequested: blockConfirmations,
+        finality,
         tokenArgs,
       }),
       this.detectUsdcDomains(
@@ -1260,7 +1270,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         usdcDomains.destDomain,
         this.network.networkType,
       )
-      const fast = blockConfirmations > 0
+      const fast = finality !== 0
       // Tiers are sorted ascending by finalityThreshold; findLast for fast ensures
       // we pick the highest tier still within the fast threshold.
       const tier = fast
@@ -1284,10 +1294,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       return { ccipFee }
     }
 
-    const useCustom = blockConfirmations > 0
+    const useCustom = finality !== 0
     const bps = useCustom
-      ? tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps
-      : tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps
+      ? tokenTransferFeeConfig.fastFinalityTransferFeeBps
+      : tokenTransferFeeConfig.finalityTransferFeeBps
 
     return {
       ccipFee,
@@ -1464,7 +1474,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           })),
           executionGasLimit: BigInt(message.executionGasLimit),
           ccipReceiveGasLimit: BigInt(message.ccipReceiveGasLimit),
-          finality: BigInt(message.finality),
+          finality: toBeHex(encodeFinality(message.finality), 4),
         },
         messageId,
         input.verifications.map(({ destAddress }) => destAddress),
@@ -1585,18 +1595,25 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     /* Executing a message for the first time has some hard try/catches on-chain
      * so we need to ensure some lower-bounds gasLimits */
-    let txGasLimit = await this.provider.estimateGas(manualExecTx)
-    if (
-      'gasLimit' in input.message &&
-      input.message.gasLimit &&
-      txGasLimit < input.message.gasLimit + 100000n
-    )
-      // if message requested gasLimit, ensure execution more than 100k above requested, otherwise it's clearly a try/catch fail
-      txGasLimit = BigInt(input.message.gasLimit) + 200000n
-    else if ('gasLimit' in input.message && !input.message.gasLimit && txGasLimit < 240000n)
-      // if message didn't request gasLimit, ensure minimum execution gasLimit (empiric)
-      txGasLimit = 240000n
-    manualExecTx.gasLimit = txGasLimit
+    try {
+      let txGasLimit = await this.provider.estimateGas(manualExecTx)
+      if (
+        'gasLimit' in input.message &&
+        input.message.gasLimit &&
+        txGasLimit < input.message.gasLimit + 100000n
+      )
+        // if message requested gasLimit, ensure execution more than 100k above requested, otherwise it's clearly a try/catch fail
+        txGasLimit = BigInt(input.message.gasLimit) + 200000n
+      else if ('gasLimit' in input.message && !input.message.gasLimit && txGasLimit < 240000n)
+        // if message didn't request gasLimit, ensure execution gasLimit is above 240k (empiric)
+        txGasLimit = 240000n
+      manualExecTx.gasLimit = txGasLimit
+    } catch (err) {
+      this.logger.warn(
+        'Gas estimation for manuallyExecute failed, using default fallback. Error:',
+        err,
+      )
+    }
 
     return { family: ChainFamily.EVM, transactions: [manualExecTx] }
   }
@@ -1702,29 +1719,23 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param tokenPool - Token pool contract address.
    * @param feeOpts - Optional parameters to also fetch token transfer fee config:
    *   - `destChainSelector` — destination chain selector.
-   *   - `blockConfirmationsRequested` — number of block confirmations (0 = standard, positive = FTF).
+   *   - `finality` — requested finality ('finalized', 'safe', or block depth number).
    *   - `tokenArgs` — hex-encoded bytes passed to the pool contract.
    * @returns Token pool config containing token, router, typeAndVersion, and optionally
-   *          minBlockConfirmations and tokenTransferFeeConfig.
+   *          finalityDepth, finalitySafe, and tokenTransferFeeConfig.
    *
    * @remarks
-   * For pools with version \>= 2.0, also returns `minBlockConfirmations` for
-   * Faster-Than-Finality (FTF) support. Pre-2.0 pools omit this field.
+   * For pools with version \>= 2.0, also returns `finalityDepth` and `finalitySafe` for
+   * Faster-Than-Finality (FTF) and FCR support. Pre-2.0 pools omit these fields.
    * When `feeOpts` is provided and the pool is v2.0+, also fetches token transfer fee config.
    */
   async getTokenPoolConfig(
     tokenPool: string,
     feeOpts?: TokenTransferFeeOpts,
-  ): Promise<{
-    token: string
-    router: string
-    typeAndVersion: string
-    minBlockConfirmations?: number
-    tokenTransferFeeConfig?: TokenTransferFeeConfig
-  }> {
+  ): Promise<SetRequired<Awaited<ReturnType<Chain['getTokenPoolConfig']>>, 'typeAndVersion'>> {
     const [type, version, typeAndVersion] = await this.typeAndVersion(tokenPool)
 
-    let token, router, minBlockConfirmations, tokenTransferFeeConfig
+    let token, router, allowedFinality, tokenTransferFeeConfig
     if (version < CCIPVersion.V2_0) {
       const contract = new Contract(
         tokenPool,
@@ -1749,10 +1760,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
       token = contract.getToken()
       router = contract.getDynamicConfig().then(([router]) => router)
-      minBlockConfirmations = contract.getMinBlockConfirmations().catch((err) => {
+      allowedFinality = contract.getAllowedFinalityConfig().catch((err) => {
         this.logger.debug(
           typeAndVersion,
-          'threw when fetching minBlockConfirmations, defaulting to 0:',
+          'threw when fetching getAllowedFinalityConfig, defaulting to 0:',
           err,
         )
         if (isError(err, 'CALL_EXCEPTION')) return 0
@@ -1764,24 +1775,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
             .getTokenTransferFeeConfig(
               tokenAddr as string,
               feeOpts.destChainSelector,
-              BigInt(feeOpts.blockConfirmationsRequested),
+              toBeHex(encodeFinality(feeOpts.finality), 4),
               feeOpts.tokenArgs,
             )
             .then((result) => ({
               destGasOverhead: Number(result.destGasOverhead),
               destBytesOverhead: Number(result.destBytesOverhead),
-              defaultBlockConfirmationsFeeUSDCents: Number(
-                result.defaultBlockConfirmationsFeeUSDCents,
-              ),
-              customBlockConfirmationsFeeUSDCents: Number(
-                result.customBlockConfirmationsFeeUSDCents,
-              ),
-              defaultBlockConfirmationsTransferFeeBps: Number(
-                result.defaultBlockConfirmationsTransferFeeBps,
-              ),
-              customBlockConfirmationsTransferFeeBps: Number(
-                result.customBlockConfirmationsTransferFeeBps,
-              ),
+              finalityFeeUSDCents: Number(result.finalityFeeUSDCents),
+              fastFinalityFeeUSDCents: Number(result.fastFinalityFeeUSDCents),
+              finalityTransferFeeBps: Number(result.finalityTransferFeeBps),
+              fastFinalityTransferFeeBps: Number(result.fastFinalityTransferFeeBps),
               isEnabled: result.isEnabled,
             }))
             .catch((err) => {
@@ -1792,15 +1795,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       }
     }
 
-    return Promise.all([token, router, minBlockConfirmations, tokenTransferFeeConfig]).then(
-      ([token, router, minBlockConfirmations, tokenTransferFeeConfig]) => {
+    return Promise.all([token, router, allowedFinality, tokenTransferFeeConfig]).then(
+      ([token, router, allowedFinality, tokenTransferFeeConfig]) => {
         return {
           token: token as CleanAddressable<typeof token>,
           router: router as CleanAddressable<typeof router>,
           typeAndVersion,
-          ...(minBlockConfirmations != null && {
-            minBlockConfirmations: Number(minBlockConfirmations),
-          }),
+          ...(allowedFinality != null && decodeFinalityAllowed(allowedFinality)),
           ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
         }
       },
@@ -1819,7 +1820,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * - v1.5: single remote pool via `getRemotePool`, standard rate limiters.
    * - v1.6: multiple remote pools via `getRemotePools`, standard rate limiters.
    * - v2.0+: multiple remote pools plus FTF (Faster-Than-Finality) rate limiters
-   *   (`customBlockConfirmationsOutboundRateLimiterState` / `customBlockConfirmationsInboundRateLimiterState`).
+   *   (`fastOutboundRateLimiterState` / `fastInboundRateLimiterState`).
    *
    * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if remote token is not configured for a chain.
    */
@@ -1919,11 +1920,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
               contract.getRemoteToken(chain.chainSelector),
               contract.getCurrentRateLimiterState(chain.chainSelector, false),
               contract.getCurrentRateLimiterState(chain.chainSelector, true),
-            ] as const).then(
-              ([remoteToken, [outbound, inbound], [customOutbound, customInbound]]) => {
-                return [remoteToken, outbound, inbound, customOutbound, customInbound] as const
-              },
-            ),
+            ] as const).then(([remoteToken, [outbound, inbound], [fastOutbound, fastInbound]]) => {
+              return [remoteToken, outbound, inbound, fastOutbound, fastInbound] as const
+            }),
           ),
         ),
       )
@@ -1943,12 +1942,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
                 outboundRateLimiterState: toRateLimiterState(remoteInfo[i]![1]),
                 inboundRateLimiterState: toRateLimiterState(remoteInfo[i]![2]),
                 ...(remoteInfo[i]!.length === 5 && {
-                  customBlockConfirmationsOutboundRateLimiterState: toRateLimiterState(
-                    remoteInfo[i]![3],
-                  ),
-                  customBlockConfirmationsInboundRateLimiterState: toRateLimiterState(
-                    remoteInfo[i]![4],
-                  ),
+                  fastOutboundRateLimiterState: toRateLimiterState(remoteInfo[i]![3]),
+                  fastInboundRateLimiterState: toRateLimiterState(remoteInfo[i]![4]),
                 }),
               },
             ] as const
@@ -1961,8 +1956,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * {@inheritDoc Chain.getFeeTokens}
    * @throws {@link CCIPVersionUnsupportedError} if OnRamp version is not supported
    */
-  async getFeeTokens(router: string) {
-    const onRamp = await this._getSomeOnRampFor(router)
+  async getFeeTokens(address: string) {
+    const onRamp = await this._getSomeOnRampFor(address)
     const [_, version] = await this.typeAndVersion(onRamp)
     let tokens
     let onRampIface: Interface | undefined

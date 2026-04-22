@@ -27,16 +27,16 @@ const features = await source.getLaneFeatures({
   token: '0xTokenAddress...',
 })
 
-const minConfirmations = features.MIN_BLOCK_CONFIRMATIONS
+const minConfirmations = features.FINALITY_FAST
 ```
 
-Interpret `MIN_BLOCK_CONFIRMATIONS`:
+Interpret `FINALITY_FAST`:
 
 | Value | Lane version | Meaning |
 |-------|-------------|---------|
 | `undefined` | Pre-v2.0 | FTF not supported. Use V2 extraArgs only. |
-| `0` | v2.0+ | V3 extraArgs supported, but FTF not enabled for this token. `blockConfirmations` has no effect. |
-| `> 0` | v2.0+ with FTF | FTF enabled. Use `blockConfirmations >= minValue` in V3 extraArgs. |
+| `0` | v2.0+ | V3 extraArgs supported, but FTF not enabled for this token. `finality` has no effect. |
+| `> 0` | v2.0+ with FTF | FTF enabled. Use `finality >= minValue` in V3 extraArgs. |
 
 :::note
 Without a `token`, the result reflects lane version only: `undefined` for pre-v2.0, or a hardcoded `1` for v2.0+ (confirming V3 support without pool-specific FTF data). Pass a `token` to get the actual pool-specific value.
@@ -48,7 +48,7 @@ Without a `token`, the result reflects lane version only: `undefined` for pre-v2
 
 ## Send with FTF
 
-Set `blockConfirmations` in `extraArgs`. The SDK auto-detects V3 encoding when any V3-only field is present:
+Set `finality` in `extraArgs`. The SDK auto-detects V3 encoding when any V3-only field is present:
 
 ```typescript
 import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
@@ -63,14 +63,14 @@ const features = await source.getLaneFeatures({
   token: '0xTokenAddress...',
 })
 
-const minConfirmations = features.MIN_BLOCK_CONFIRMATIONS
+const minConfirmations = features.FINALITY_FAST
 
 let extraArgs
 if (minConfirmations != null && minConfirmations > 0) {
-  // FTF enabled — use V3 with blockConfirmations
+  // FTF enabled — use V3 with finality
   extraArgs = {
     gasLimit: 200_000n,
-    blockConfirmations: minConfirmations,
+    finality: minConfirmations,
   }
 } else if (minConfirmations != null) {
   // v2.0+ but FTF not enabled — V2-style args work
@@ -98,7 +98,7 @@ await source.sendMessage({
 })
 ```
 
-The SDK does **not** validate `extraArgs` against the lane's on-chain version. Passing V3 fields (e.g., `blockConfirmations`) to a pre-v2.0 lane will **revert** on-chain.
+The SDK does **not** validate `extraArgs` against the lane's on-chain version. Passing V3 fields (e.g., `finality`) to a pre-v2.0 lane will **revert** on-chain.
 
 ## Estimate FTF Latency
 
@@ -118,7 +118,7 @@ When `numberOfBlocks` is omitted or `0`, the API returns latency for the lane's 
 
 ## Estimate FTF Fees
 
-Token transfer fees differ between standard and FTF. Call `getTotalFeesEstimate` with `blockConfirmations` in `extraArgs`:
+Token transfer fees differ between standard and FTF. Call `getTotalFeesEstimate` with `finality` in `extraArgs`:
 
 ```typescript
 const estimate = await source.getTotalFeesEstimate({
@@ -127,7 +127,7 @@ const estimate = await source.getTotalFeesEstimate({
   message: {
     receiver: '0xReceiverAddress...',
     tokenAmounts: [{ token: '0xTokenAddress...', amount: 1_000_000n }],
-    extraArgs: { blockConfirmations: minConfirmations },
+    extraArgs: { finality: minConfirmations },
   },
 })
 
@@ -144,10 +144,10 @@ if (estimate.tokenTransferFee) {
 
 The pool-level BPS rate applied depends on finality mode:
 
-| Finality mode | `blockConfirmations` | BPS field used |
+| Finality mode | `finality` | BPS field used |
 |---------------|---------------------|----------------|
-| Standard | `0` or omitted | `defaultBlockConfirmationsTransferFeeBps` |
-| FTF | `> 0` | `customBlockConfirmationsTransferFeeBps` |
+| Standard | `0` or omitted | `finalityTransferFeeBps` |
+| FTF | `> 0` (block depth) | `fastFinalityTransferFeeBps` |
 
 See [Fee Estimation](/sdk/guides/fee-estimation) for the full `TotalFeesEstimate` type and USDC/CCTP fee handling.
 
@@ -168,8 +168,8 @@ if (features.RATE_LIMITS) {
 }
 
 // FTF rate limits (only when FTF is enabled)
-if (features.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS) {
-  const ftf = features.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS
+if (features.FAST_RATE_LIMITS) {
+  const ftf = features.FAST_RATE_LIMITS
   console.log('FTF — available:', ftf.tokens, '/', ftf.capacity)
 }
 ```
@@ -180,8 +180,8 @@ FTF rate limits are also available per remote chain via `getTokenPoolRemotes`:
 const remotes = await source.getTokenPoolRemotes(poolAddress, destSelector)
 const remote = Object.values(remotes)[0]
 
-if (remote && 'customBlockConfirmationsOutboundRateLimiterState' in remote) {
-  const ftfOutbound = remote.customBlockConfirmationsOutboundRateLimiterState
+if (remote && 'fastOutboundRateLimiterState' in remote) {
+  const ftfOutbound = remote.fastOutboundRateLimiterState
   if (ftfOutbound) {
     console.log('FTF outbound:', ftfOutbound.tokens, '/', ftfOutbound.capacity)
   }
@@ -216,15 +216,15 @@ async function sendWithFTF(
     token: tokenAddress,
   })
 
-  const minConfirmations = features.MIN_BLOCK_CONFIRMATIONS
+  const minConfirmations = features.FINALITY_FAST
   if (minConfirmations == null || minConfirmations === 0) {
     console.log('FTF not available on this lane/token')
     return
   }
 
   // 2. Check FTF rate limits
-  if (features.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS) {
-    const available = features.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS.tokens
+  if (features.FAST_RATE_LIMITS) {
+    const available = features.FAST_RATE_LIMITS.tokens
     console.log('FTF rate limit available:', available)
   }
 
@@ -236,7 +236,7 @@ async function sendWithFTF(
   const message = {
     receiver,
     tokenAmounts: [{ token: tokenAddress, amount }],
-    extraArgs: { blockConfirmations: minConfirmations },
+    extraArgs: { finality: minConfirmations },
   }
 
   const estimate = await source.getTotalFeesEstimate({

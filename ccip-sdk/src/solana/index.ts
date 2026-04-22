@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer'
 
-import { type Idl, type IdlTypes, BorshAccountsCoder, BorshCoder, Program } from '@coral-xyz/anchor'
+import { type IdlTypes, BorshAccountsCoder, BorshCoder, Program } from '@coral-xyz/anchor'
 import { NATIVE_MINT } from '@solana/spl-token'
 import {
   type Commitment,
@@ -532,7 +532,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    */
   async getRouterForOffRamp(offRamp: string, _sourceChainSelector: bigint): Promise<string> {
     const offRamp_ = new PublicKey(offRamp)
-    const program = new Program(CCIP_OFFRAMP_IDL as Idl, offRamp_, {
+    const program = new Program(CCIP_OFFRAMP_IDL, offRamp_, {
       connection: this.connection,
     })
 
@@ -842,7 +842,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       feeValueJuels,
       extraArgs,
       ...rest,
-    } as CCIPMessage<typeof CCIPVersion.V1_6>
+    }
   }
 
   /**

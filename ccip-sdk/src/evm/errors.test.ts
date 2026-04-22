@@ -117,7 +117,7 @@ describe('recursiveParseError', () => {
     assert.ok((res[0]![1] as string).includes('ExecutionError'))
     assert.equal(res[1]![0], 'err.error')
     assert.ok((res[1]![1] as string).includes('ReceiverError'))
-    assert.equal(res[2]![0], 'err.error.err')
+    assert.equal(res[2]![0], 'err.err')
     assert.match(res[2]![1] as string, /\b0x\b/)
     assert.ok((res[2]![1] as string).includes('out-of-gas'))
   })

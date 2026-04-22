@@ -34,6 +34,7 @@ const customErrors = [
   'error InvalidChain(uint64 chainSelector)',
   'error InvalidAdapter()',
   'error BlacklistableBlacklistedAccount(address)',
+  'error WrongAsset(address expected, address received)',
 ] as const
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])

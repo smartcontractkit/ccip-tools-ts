@@ -1,6 +1,6 @@
 import type { AbiParametersToPrimitiveTypes, ExtractAbiEvent } from 'abitype'
 import type { BytesLike, Log as EVMLog } from 'ethers'
-import type { SetOptional } from 'type-fest'
+import type { SetFieldType, SetOptional } from 'type-fest'
 
 import type { APICCIPRequestMetadata } from './api/types.ts'
 import type OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
@@ -239,10 +239,15 @@ export interface CCIPRequest<V extends CCIPVersion = CCIPVersion> {
 
 /**
  * OnChain Commit report structure from the OffRamp CommitReportAccepted event.
+ * Replaces the stricter onRampAddress: `0x{string}` field type with a string for cross-chain compatibility.
  */
-export type CommitReport = AbiParametersToPrimitiveTypes<
-  ExtractAbiEvent<typeof OffRamp_1_6_ABI, 'CommitReportAccepted'>['inputs']
->[0][number]
+export type CommitReport = SetFieldType<
+  AbiParametersToPrimitiveTypes<
+    ExtractAbiEvent<typeof OffRamp_1_6_ABI, 'CommitReportAccepted'>['inputs']
+  >[0][number],
+  'onRampAddress',
+  string
+>
 
 /**
  * OffChain Verification result for a CCIP v2.0 message, returned by the indexer API.

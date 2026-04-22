@@ -1,7 +1,7 @@
 // TODO: track a v2 release tag and the v2.0.0 folder instead of a commit + latest/ folder, once 2.0.0 is released in `chainlink-ccip`
 export default [
   // generate:
-  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/develop/ccv/chains/evm/gobindings/generated/latest/token_pool/token_pool.go')
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/main/chains/evm/gobindings/generated/v2_0_0/token_pool/token_pool.go')
   //   .then((res) => res.text())
   //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
   //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
@@ -132,22 +132,22 @@ export default [
                 internalType: 'uint32',
               },
               {
-                name: 'defaultBlockConfirmationsFeeUSDCents',
+                name: 'finalityFeeUSDCents',
                 type: 'uint32',
                 internalType: 'uint32',
               },
               {
-                name: 'customBlockConfirmationsFeeUSDCents',
+                name: 'fastFinalityFeeUSDCents',
                 type: 'uint32',
                 internalType: 'uint32',
               },
               {
-                name: 'defaultBlockConfirmationsTransferFeeBps',
+                name: 'finalityTransferFeeBps',
                 type: 'uint16',
                 internalType: 'uint16',
               },
               {
-                name: 'customBlockConfirmationsTransferFeeBps',
+                name: 'fastFinalityTransferFeeBps',
                 type: 'uint16',
                 internalType: 'uint16',
               },
@@ -180,6 +180,19 @@ export default [
   },
   {
     type: 'function',
+    name: 'getAllowedFinalityConfig',
+    inputs: [],
+    outputs: [
+      {
+        name: 'allowedFinality',
+        type: 'bytes4',
+        internalType: 'bytes4',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     name: 'getCurrentRateLimiterState',
     inputs: [
       {
@@ -187,11 +200,7 @@ export default [
         type: 'uint64',
         internalType: 'uint64',
       },
-      {
-        name: 'customBlockConfirmations',
-        type: 'bool',
-        internalType: 'bool',
-      },
+      { name: 'fastFinality', type: 'bool', internalType: 'bool' },
     ],
     outputs: [
       {
@@ -265,9 +274,9 @@ export default [
       { name: '', type: 'uint256', internalType: 'uint256' },
       { name: '', type: 'address', internalType: 'address' },
       {
-        name: 'blockConfirmationsRequested',
-        type: 'uint16',
-        internalType: 'uint16',
+        name: 'requestedFinalityConfig',
+        type: 'bytes4',
+        internalType: 'bytes4',
       },
       { name: '', type: 'bytes', internalType: 'bytes' },
     ],
@@ -285,19 +294,6 @@ export default [
       },
       { name: 'tokenFeeBps', type: 'uint16', internalType: 'uint16' },
       { name: 'isEnabled', type: 'bool', internalType: 'bool' },
-    ],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'getMinBlockConfirmations',
-    inputs: [],
-    outputs: [
-      {
-        name: 'minBlockConfirmations',
-        type: 'uint16',
-        internalType: 'uint16',
-      },
     ],
     stateMutability: 'view',
   },
@@ -343,9 +339,9 @@ export default [
         internalType: 'uint256',
       },
       {
-        name: 'blockConfirmationsRequested',
-        type: 'uint16',
-        internalType: 'uint16',
+        name: 'requestedFinalityConfig',
+        type: 'bytes4',
+        internalType: 'bytes4',
       },
       { name: 'extraData', type: 'bytes', internalType: 'bytes' },
       {
@@ -407,7 +403,7 @@ export default [
         type: 'uint64',
         internalType: 'uint64',
       },
-      { name: '', type: 'uint16', internalType: 'uint16' },
+      { name: '', type: 'bytes4', internalType: 'bytes4' },
       { name: '', type: 'bytes', internalType: 'bytes' },
     ],
     outputs: [
@@ -427,22 +423,22 @@ export default [
             internalType: 'uint32',
           },
           {
-            name: 'defaultBlockConfirmationsFeeUSDCents',
+            name: 'finalityFeeUSDCents',
             type: 'uint32',
             internalType: 'uint32',
           },
           {
-            name: 'customBlockConfirmationsFeeUSDCents',
+            name: 'fastFinalityFeeUSDCents',
             type: 'uint32',
             internalType: 'uint32',
           },
           {
-            name: 'defaultBlockConfirmationsTransferFeeBps',
+            name: 'finalityTransferFeeBps',
             type: 'uint16',
             internalType: 'uint16',
           },
           {
-            name: 'customBlockConfirmationsTransferFeeBps',
+            name: 'fastFinalityTransferFeeBps',
             type: 'uint16',
             internalType: 'uint16',
           },
@@ -569,9 +565,9 @@ export default [
         ],
       },
       {
-        name: 'blockConfirmationsRequested',
-        type: 'uint16',
-        internalType: 'uint16',
+        name: 'requestedFinalityConfig',
+        type: 'bytes4',
+        internalType: 'bytes4',
       },
       { name: 'tokenArgs', type: 'bytes', internalType: 'bytes' },
     ],
@@ -659,6 +655,11 @@ export default [
           },
         ],
       },
+      {
+        name: 'requestedFinalityConfig',
+        type: 'bytes4',
+        internalType: 'bytes4',
+      },
     ],
     outputs: [
       {
@@ -727,11 +728,6 @@ export default [
           },
         ],
       },
-      {
-        name: 'blockConfirmationsRequested',
-        type: 'uint16',
-        internalType: 'uint16',
-      },
     ],
     outputs: [
       {
@@ -769,6 +765,19 @@ export default [
   },
   {
     type: 'function',
+    name: 'setAllowedFinalityConfig',
+    inputs: [
+      {
+        name: 'allowedFinality',
+        type: 'bytes4',
+        internalType: 'bytes4',
+      },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     name: 'setDynamicConfig',
     inputs: [
       { name: 'router', type: 'address', internalType: 'address' },
@@ -778,19 +787,6 @@ export default [
         internalType: 'address',
       },
       { name: 'feeAdmin', type: 'address', internalType: 'address' },
-    ],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    name: 'setMinBlockConfirmations',
-    inputs: [
-      {
-        name: 'minBlockConfirmations',
-        type: 'uint16',
-        internalType: 'uint16',
-      },
     ],
     outputs: [],
     stateMutability: 'nonpayable',
@@ -809,11 +805,7 @@ export default [
             type: 'uint64',
             internalType: 'uint64',
           },
-          {
-            name: 'customBlockConfirmations',
-            type: 'bool',
-            internalType: 'bool',
-          },
+          { name: 'fastFinality', type: 'bool', internalType: 'bool' },
           {
             name: 'outboundRateLimiterConfig',
             type: 'tuple',
@@ -861,7 +853,7 @@ export default [
     name: 'supportsInterface',
     inputs: [{ name: 'interfaceId', type: 'bytes4', internalType: 'bytes4' }],
     outputs: [{ name: '', type: 'bool', internalType: 'bool' }],
-    stateMutability: 'pure',
+    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -980,56 +972,6 @@ export default [
   },
   {
     type: 'event',
-    name: 'CustomBlockConfirmationsInboundRateLimitConsumed',
-    inputs: [
-      {
-        name: 'remoteChainSelector',
-        type: 'uint64',
-        indexed: true,
-        internalType: 'uint64',
-      },
-      {
-        name: 'token',
-        type: 'address',
-        indexed: false,
-        internalType: 'address',
-      },
-      {
-        name: 'amount',
-        type: 'uint256',
-        indexed: false,
-        internalType: 'uint256',
-      },
-    ],
-    anonymous: false,
-  },
-  {
-    type: 'event',
-    name: 'CustomBlockConfirmationsOutboundRateLimitConsumed',
-    inputs: [
-      {
-        name: 'remoteChainSelector',
-        type: 'uint64',
-        indexed: true,
-        internalType: 'uint64',
-      },
-      {
-        name: 'token',
-        type: 'address',
-        indexed: false,
-        internalType: 'address',
-      },
-      {
-        name: 'amount',
-        type: 'uint256',
-        indexed: false,
-        internalType: 'uint256',
-      },
-    ],
-    anonymous: false,
-  },
-  {
-    type: 'event',
     name: 'DynamicConfigSet',
     inputs: [
       {
@@ -1055,6 +997,56 @@ export default [
   },
   {
     type: 'event',
+    name: 'FastFinalityInboundRateLimitConsumed',
+    inputs: [
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        indexed: true,
+        internalType: 'uint64',
+      },
+      {
+        name: 'token',
+        type: 'address',
+        indexed: false,
+        internalType: 'address',
+      },
+      {
+        name: 'amount',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'FastFinalityOutboundRateLimitConsumed',
+    inputs: [
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        indexed: true,
+        internalType: 'uint64',
+      },
+      {
+        name: 'token',
+        type: 'address',
+        indexed: false,
+        internalType: 'address',
+      },
+      {
+        name: 'amount',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
     name: 'FeeTokenWithdrawn',
     inputs: [
       {
@@ -1074,6 +1066,19 @@ export default [
         type: 'uint256',
         indexed: false,
         internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'FinalityConfigSet',
+    inputs: [
+      {
+        name: 'allowedFinality',
+        type: 'bytes4',
+        indexed: false,
+        internalType: 'bytes4',
       },
     ],
     anonymous: false,
@@ -1130,19 +1135,6 @@ export default [
         type: 'uint256',
         indexed: false,
         internalType: 'uint256',
-      },
-    ],
-    anonymous: false,
-  },
-  {
-    type: 'event',
-    name: 'MinBlockConfirmationsSet',
-    inputs: [
-      {
-        name: 'minBlockConfirmations',
-        type: 'uint16',
-        indexed: false,
-        internalType: 'uint16',
       },
     ],
     anonymous: false,
@@ -1221,7 +1213,7 @@ export default [
         internalType: 'uint64',
       },
       {
-        name: 'customBlockConfirmations',
+        name: 'fastFinality',
         type: 'bool',
         indexed: false,
         internalType: 'bool',
@@ -1374,22 +1366,22 @@ export default [
             internalType: 'uint32',
           },
           {
-            name: 'defaultBlockConfirmationsFeeUSDCents',
+            name: 'finalityFeeUSDCents',
             type: 'uint32',
             internalType: 'uint32',
           },
           {
-            name: 'customBlockConfirmationsFeeUSDCents',
+            name: 'fastFinalityFeeUSDCents',
             type: 'uint32',
             internalType: 'uint32',
           },
           {
-            name: 'defaultBlockConfirmationsTransferFeeBps',
+            name: 'finalityTransferFeeBps',
             type: 'uint16',
             internalType: 'uint16',
           },
           {
-            name: 'customBlockConfirmationsTransferFeeBps',
+            name: 'fastFinalityTransferFeeBps',
             type: 'uint16',
             internalType: 'uint16',
           },
@@ -1430,11 +1422,6 @@ export default [
   { type: 'error', name: 'CursedByRMN', inputs: [] },
   {
     type: 'error',
-    name: 'CustomBlockConfirmationsNotEnabled',
-    inputs: [],
-  },
-  {
-    type: 'error',
     name: 'DisabledNonZeroRateLimit',
     inputs: [
       {
@@ -1459,18 +1446,6 @@ export default [
     inputs: [
       { name: 'expected', type: 'uint8', internalType: 'uint8' },
       { name: 'actual', type: 'uint8', internalType: 'uint8' },
-    ],
-  },
-  {
-    type: 'error',
-    name: 'InvalidMinBlockConfirmations',
-    inputs: [
-      { name: 'requested', type: 'uint16', internalType: 'uint16' },
-      {
-        name: 'minBlockConfirmations',
-        type: 'uint16',
-        internalType: 'uint16',
-      },
     ],
   },
   {
@@ -1511,6 +1486,22 @@ export default [
         name: 'remotePoolAddress',
         type: 'bytes',
         internalType: 'bytes',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidRequestedFinality',
+    inputs: [
+      {
+        name: 'requestedFinality',
+        type: 'bytes4',
+        internalType: 'bytes4',
+      },
+      {
+        name: 'allowedFinality',
+        type: 'bytes4',
+        internalType: 'bytes4',
       },
     ],
   },
@@ -1586,6 +1577,17 @@ export default [
         name: 'remotePoolAddress',
         type: 'bytes',
         internalType: 'bytes',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'RequestedFinalityCanOnlyHaveOneMode',
+    inputs: [
+      {
+        name: 'encodedFinality',
+        type: 'bytes4',
+        internalType: 'bytes4',
       },
     ],
   },

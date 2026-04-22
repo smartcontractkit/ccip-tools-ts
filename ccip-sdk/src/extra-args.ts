@@ -1,4 +1,4 @@
-import { type BytesLike, id } from 'ethers'
+import { type BytesLike, id, toNumber } from 'ethers'
 
 import { CCIPChainFamilyUnsupportedError, CCIPExtraArgsParseError } from './errors/index.ts'
 import { supportedChains } from './supported-chains.ts'
@@ -48,6 +48,38 @@ export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
 }
 
 /**
+ * Requested finality configuration for cross-chain messages.
+ *
+ * Determines how long to wait on the source chain before relaying the message:
+ * - `'finalized'` — wait for full finality (safest, default).
+ * - `'safe'` — wait for the `safe` head tag.
+ * - number — wait for this many block confirmations [1..65535].
+ *
+ * @example
+ * ```typescript
+ * // Wait for full finality (default)
+ * const finality: FinalityRequested = 'finalized'
+ *
+ * // Wait for the safe tag
+ * const safe: FinalityRequested = 'safe'
+ *
+ * // Wait for 5 block confirmations
+ * const blocks: FinalityRequested = 5
+ * ```
+ */
+export type FinalityRequested = 'finalized' | 'safe' | number
+
+/**
+ * Finality allowed by interested parties (e.g. TokenPools)
+ * - finalitySafe: Whether messages can be executed under "safe" finality (FCR) rules.
+ * - finalityDepth: Minimum block depth confirmations for Faster Than Finality (0 for Finalized).
+ */
+export type FinalityAllowed = {
+  finalitySafe?: boolean
+  finalityDepth: number
+}
+
+/**
  * Generic extra arguments version 3 with cross-chain verifiers and executor support.
  * Uses tightly packed binary encoding (NOT ABI-encoded).
  *
@@ -55,7 +87,7 @@ export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
  * ```typescript
  * const args: GenericExtraArgsV3 = {
  *   gasLimit: 200_000n,
- *   blockConfirmations: 5,
+ *   finality: 'safe',
  *   ccvs: ['0x1234...'],
  *   ccvArgs: ['0x010203'],
  *   executor: '0x5678...',
@@ -68,8 +100,8 @@ export type EVMExtraArgsV2 = EVMExtraArgsV1 & {
 export type GenericExtraArgsV3 = {
   /** Gas limit for execution on the destination chain (uint32). */
   gasLimit: bigint
-  /** Number of source-chain block confirmations to wait before relaying the message. */
-  blockConfirmations: number
+  /** Finality config for the source chain before relaying. See {@link FinalityRequested}. */
+  finality: FinalityRequested
   /** Cross-chain verifier addresses (EVM addresses). */
   ccvs: string[]
   /** Per-CCV arguments (BytesLike). */
@@ -225,4 +257,46 @@ export function decodeExtraArgs(
     if (decoded) return decoded
   }
   throw new CCIPExtraArgsParseError(String(from ?? data))
+}
+
+/**
+ * Decodes finality allowed by interested parties from bytes.
+ */
+export function decodeFinalityAllowed(finality: number | BytesLike): FinalityAllowed {
+  if (typeof finality !== 'number') finality = toNumber(finality)
+  const finalityDepth = finality & 0xffff
+  const finalityFlags = finality >>> 16
+  const finalitySafe = !!(finalityFlags & 0x1)
+  return {
+    ...(finalitySafe && { finalitySafe }),
+    finalityDepth,
+  }
+}
+
+/**
+ * Decodes requested finality from uint32, ensuring it is compatible with allowed finality.
+ */
+export function decodeFinalityRequested(finality: number | BytesLike): FinalityRequested {
+  const { finalitySafe, finalityDepth } = decodeFinalityAllowed(finality)
+  if (finalitySafe) {
+    if (finalityDepth)
+      throw new CCIPExtraArgsParseError('Invalid finality config: cannot have both safe and depth')
+    return 'safe'
+  } else if (!finalityDepth) return 'finalized'
+  return finalityDepth
+}
+
+/**
+ * Encodes finality allowed or requested into a uint32 format for on-chain use.
+ */
+export function encodeFinality(finality: FinalityAllowed | FinalityRequested | bigint): number {
+  if (typeof finality === 'number' || typeof finality === 'bigint' || !isNaN(Number(finality)))
+    return encodeFinality({ finalityDepth: Number(finality) })
+  else if (finality === 'finalized') return encodeFinality({ finalityDepth: 0 })
+  else if (finality === 'safe') return encodeFinality({ finalitySafe: true, finalityDepth: 0 })
+  if (finality.finalityDepth < 0 || finality.finalityDepth > 65535)
+    throw new CCIPExtraArgsParseError('Finality depth must be between 0 and 65535')
+  let finalityFlags = 0
+  if (finality.finalitySafe) finalityFlags |= 0x1
+  return (finalityFlags << 16) | finality.finalityDepth
 }

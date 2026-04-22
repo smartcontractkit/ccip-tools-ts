@@ -644,7 +644,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
           onRampAddress: decodeOnRampAddress(root.on_ramp_address),
           minSeqNr: BigInt(root.min_seq_nr),
           maxSeqNr: BigInt(root.max_seq_nr),
-          merkleRoot: hexlify(getDataBytes(root.merkle_root)),
+          merkleRoot: hexlify(getDataBytes(root.merkle_root)) as `0x${string}`,
         }
       })
       .filter((r) =>

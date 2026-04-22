@@ -1,7 +1,7 @@
 // TODO: track a v2 release tag and the v2.0.0 folder instead of a commit + latest/ folder, once 2.0.0 is released in `chainlink-ccip`
 export default [
   // generate:
-  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/develop/ccv/chains/evm/gobindings/generated/latest/offramp/offramp.go')
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/main/chains/evm/gobindings/generated/v2_0_0/offramp/offramp.go')
   //   .then((res) => res.text())
   //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
   //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
@@ -142,7 +142,7 @@ export default [
             type: 'uint32',
             internalType: 'uint32',
           },
-          { name: 'finality', type: 'uint16', internalType: 'uint16' },
+          { name: 'finality', type: 'bytes4', internalType: 'bytes4' },
           {
             name: 'ccvAndExecutorHash',
             type: 'bytes32',
@@ -598,19 +598,6 @@ export default [
   },
   {
     type: 'error',
-    name: 'InvalidFinalityForReceiver',
-    inputs: [
-      { name: 'receiver', type: 'address', internalType: 'address' },
-      { name: 'msgBlockDepth', type: 'uint16', internalType: 'uint16' },
-      {
-        name: 'requiredBlockDepth',
-        type: 'uint16',
-        internalType: 'uint16',
-      },
-    ],
-  },
-  {
-    type: 'error',
     name: 'InvalidGasLimitOverride',
     inputs: [
       {
@@ -664,6 +651,22 @@ export default [
   },
   {
     type: 'error',
+    name: 'InvalidRequestedFinality',
+    inputs: [
+      {
+        name: 'requestedFinality',
+        type: 'bytes4',
+        internalType: 'bytes4',
+      },
+      {
+        name: 'allowedFinality',
+        type: 'bytes4',
+        internalType: 'bytes4',
+      },
+    ],
+  },
+  {
+    type: 'error',
     name: 'InvalidVerifierResultsLength',
     inputs: [
       { name: 'expected', type: 'uint256', internalType: 'uint256' },
@@ -705,6 +708,17 @@ export default [
     inputs: [{ name: 'err', type: 'bytes', internalType: 'bytes' }],
   },
   { type: 'error', name: 'ReentrancyGuardReentrantCall', inputs: [] },
+  {
+    type: 'error',
+    name: 'RequestedFinalityCanOnlyHaveOneMode',
+    inputs: [
+      {
+        name: 'encodedFinality',
+        type: 'bytes4',
+        internalType: 'bytes4',
+      },
+    ],
+  },
   {
     type: 'error',
     name: 'RequiredCCVMissing',

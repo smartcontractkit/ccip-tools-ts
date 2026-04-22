@@ -1,9 +1,8 @@
 // @ts-check
 import eslint from '@eslint/js'
 import { defineConfig } from 'eslint/config'
-import { createNodeResolver } from 'eslint-plugin-import-x'
-import importXPlugin from 'eslint-plugin-import-x'
-import jsdoc from 'eslint-plugin-jsdoc'
+import { createNodeResolver, flatConfigs as importXFlatConfigs } from 'eslint-plugin-import-x'
+import { default as jsdoc } from 'eslint-plugin-jsdoc'
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
 import tsdoc from 'eslint-plugin-tsdoc'
 import { configs as tseslintConfigs } from 'typescript-eslint'
@@ -19,7 +18,7 @@ export default defineConfig(
   },
   eslint.configs.recommended,
   eslintPluginPrettierRecommended,
-  importXPlugin.flatConfigs.recommended,
+  importXFlatConfigs.recommended,
   // Inline the useful parts of flatConfigs.typescript without its broken
   // eslint-import-resolver-typescript dependency. Our source files already
   // use explicit .ts extensions, so createNodeResolver handles everything.
@@ -87,16 +86,7 @@ export default defineConfig(
           message:
             'Use CCIPError or specialized error classes instead of generic Error. Use "new" with error classes.',
         },
-      ],
-    },
-  },
-  {
-    files: ['ccip-sdk/src/**/*.ts', 'ccip-cli/src/**/*.ts'],
-    ignores: ['**/*.test.ts', '**/__tests__/**', '**/__mocks__/**'],
-    rules: {
-      'no-restricted-syntax': [
         // Required for NextJS Turbopack compatibility
-        'error',
         {
           selector:
             "BinaryExpression[operator='**'][left.type='Literal'][left.bigint], BinaryExpression[operator='**'][right.type='Literal'][right.bigint]",
@@ -164,7 +154,9 @@ export default defineConfig(
   {
     settings: {
       'import-x/resolver-next': [
-        createNodeResolver({ extensions: ['.ts', '.tsx', '.cts', '.mts', '.js', '.jsx', '.cjs', '.mjs'] }),
+        createNodeResolver({
+          extensions: ['.ts', '.tsx', '.cts', '.mts', '.js', '.jsx', '.cjs', '.mjs'],
+        }),
       ],
     },
     rules: {

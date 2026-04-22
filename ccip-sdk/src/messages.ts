@@ -1,6 +1,7 @@
 import { type BytesLike, dataSlice, hexlify, toBigInt, toNumber } from 'ethers'
 
 import { CCIPMessageDecodeError } from './errors/index.ts'
+import { type FinalityRequested, decodeFinalityRequested } from './extra-args.ts'
 import type { ChainFamily } from './types.ts'
 import { decodeAddress, getDataBytes, networkInfo } from './utils.ts'
 
@@ -21,7 +22,7 @@ export type MessageV1 = {
   messageNumber: bigint
   executionGasLimit: number
   ccipReceiveGasLimit: number
-  finality: number
+  finality: FinalityRequested
   ccvAndExecutorHash: string
   onRampAddress: string
   offRampAddress: string
@@ -143,7 +144,7 @@ function decodeTokenTransferV1(
  * @returns The decoded MessageV1 struct.
  */
 export function decodeMessageV1(encodedMessage: BytesLike): MessageV1 {
-  const MESSAGE_V1_BASE_SIZE = 77
+  const MESSAGE_V1_BASE_SIZE = 79
   const encoded = getDataBytes(encodedMessage)
 
   if (encoded.length < MESSAGE_V1_BASE_SIZE) throw new CCIPMessageDecodeError('MESSAGE_MIN_SIZE')
@@ -172,14 +173,14 @@ export function decodeMessageV1(encodedMessage: BytesLike): MessageV1 {
   // ccipReceiveGasLimit (4 bytes, big endian)
   const ccipReceiveGasLimit = toNumber(dataSlice(encoded, 29, 33))
 
-  // finality (2 bytes, big endian)
-  const finality = toNumber(dataSlice(encoded, 33, 35))
+  // finality (4 bytes, big endian)
+  const finality = decodeFinalityRequested(toNumber(dataSlice(encoded, 33, 37)))
 
   // ccvAndExecutorHash (32 bytes)
-  const ccvAndExecutorHash = hexlify(dataSlice(encoded, 35, 67))
+  const ccvAndExecutorHash = hexlify(dataSlice(encoded, 37, 69))
 
   // onRampAddressLength and onRampAddress
-  let offset = 67
+  let offset = 69
   if (offset >= encoded.length) throw new CCIPMessageDecodeError('MESSAGE_ONRAMP_ADDRESS_LENGTH')
   const onRampAddressLength = encoded[offset++]!
   if (offset + onRampAddressLength > encoded.length) {

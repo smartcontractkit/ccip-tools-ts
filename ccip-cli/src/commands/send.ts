@@ -21,7 +21,6 @@
 
 import {
   type ChainStatic,
-  type ExtraArgs,
   type MessageInput,
   CCIPArgumentInvalidError,
   CCIPInsufficientBalanceError,
@@ -128,7 +127,7 @@ export const builder = (yargs: Argv) =>
         string: true,
         describe:
           'Extra args to pass in the message: key=value (value parsed as JSON with bigint support, fallback to string; repeated keys become arrays)',
-        example: '-x ccvs=["0xvalue1", "0xvalue2"] --extra=blockConfirmations=1',
+        example: '-x ccvs=["0xvalue1", "0xvalue2"] --extra=finality=safe',
       },
       'only-get-fee': {
         type: 'boolean',
@@ -185,7 +184,7 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
  * Repeated keys are accumulated into an array.
  *
  * @example
- * `assert.eq(parseExtraArgs(['ccvs=["0xvalue1", "0xvalue2"]', 'blockConfirmations=1', 'flag=true']), { ccvs: ["0xvalue1", "0xvalue2"], blockConfirmations: 1n, flag: true })`
+ * `assert.eq(parseExtraArgs(['ccvs=["0xvalue1", "0xvalue2"]', 'finality=safe', 'flag=true']), { ccvs: ["0xvalue1", "0xvalue2"], finality: 'safe', flag: true })`
  */
 function parseExtraArgs(extra: readonly string[] | undefined): Record<string, unknown> {
   if (!extra?.length) return {}
@@ -195,6 +194,7 @@ function parseExtraArgs(extra: readonly string[] | undefined): Record<string, un
     const key = entry.substring(0, eqIdx)
     const raw = entry.substring(eqIdx + 1)
     let value: unknown
+
     try {
       // Quote bare integer literals (outside JSON strings) so bigIntReviver can convert them to BigInt.
       // The alternation matches JSON strings first (preserved as-is) and number tokens second
@@ -206,6 +206,7 @@ function parseExtraArgs(extra: readonly string[] | undefined): Record<string, un
     } catch {
       value = raw
     }
+
     if (key in result) {
       const existing = result[key]
       result[key] = Array.isArray(existing)
@@ -369,7 +370,7 @@ async function sendMessage(
   const message: MessageInput = {
     receiver,
     data,
-    extraArgs: extraArgs as ExtraArgs,
+    extraArgs,
     feeToken, // feeToken==ZeroAddress means native
     tokenAmounts,
   }

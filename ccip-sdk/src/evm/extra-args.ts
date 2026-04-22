@@ -23,6 +23,8 @@ import {
   GenericExtraArgsV3Tag,
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
+  decodeFinalityRequested,
+  encodeFinality,
 } from '../extra-args.ts'
 import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 import { ChainFamily } from '../types.ts'
@@ -44,7 +46,7 @@ const SuiExtraArgsV1ABI =
  * Binary format:
  * - tag (4 bytes): 0xa69dd4aa
  * - gasLimit (4 bytes): uint32 big-endian
- * - blockConfirmations (2 bytes): uint16 big-endian
+ * - finality (4 bytes): uint32 big-endian (see FinalityCodec / encodeFinality)
  * - ccvsLength (1 byte): uint8
  * - For each CCV:
  *   - ccvAddressLength (1 byte): 0 or 20
@@ -69,8 +71,8 @@ function encodeExtraArgsV3(args: GenericExtraArgsV3): string {
   // gasLimit (4 bytes, uint32 big-endian)
   parts.push(toBeArray(args.gasLimit, 4))
 
-  // blockConfirmations (2 bytes, uint16 big-endian)
-  parts.push(toBeArray(args.blockConfirmations, 2))
+  // finality (4 bytes, uint32 big-endian)
+  parts.push(toBeArray(encodeFinality(args.finality), 4))
 
   // ccvsLength (1 byte)
   parts.push(new Uint8Array([args.ccvs.length]))
@@ -152,10 +154,10 @@ function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
   const gasLimit = toBigInt(data.subarray(offset, offset + 4))
   offset += 4
 
-  // blockConfirmations (2 bytes, uint16 big-endian)
-  if (offset + 2 > data.length) return undefined
-  const blockConfirmations = toNumber(data.subarray(offset, offset + 2))
-  offset += 2
+  // finality (4 bytes, uint32 big-endian)
+  if (offset + 4 > data.length) return undefined
+  const finality = decodeFinalityRequested(toNumber(data.subarray(offset, offset + 4)))
+  offset += 4
 
   // ccvsLength (1 byte)
   if (offset + 1 > data.length) return undefined
@@ -252,7 +254,7 @@ function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
 
   return {
     gasLimit,
-    blockConfirmations,
+    finality,
     ccvs,
     ccvArgs,
     executor,
@@ -319,7 +321,7 @@ export function decodeExtraArgs(
  */
 export function encodeExtraArgs(args: ExtraArgs | undefined): string {
   if (!args) return '0x'
-  if ('blockConfirmations' in args) {
+  if ('finality' in args) {
     // GenericExtraArgsV3 - tightly packed binary encoding
     return encodeExtraArgsV3(args)
   } else if ('computeUnits' in args) {

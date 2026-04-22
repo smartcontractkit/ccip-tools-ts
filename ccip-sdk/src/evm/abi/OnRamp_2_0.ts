@@ -1,7 +1,7 @@
 // TODO: track a v2 release tag and the v2.0.0 folder instead of a commit + latest/ folder, once 2.0.0 is released in `chainlink-ccip`
 export default [
   // generate:
-  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/develop/ccv/chains/evm/gobindings/generated/latest/onramp/onramp.go')
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/main/chains/evm/gobindings/generated/v2_0_0/onramp/onramp.go')
   //   .then((res) => res.text())
   //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
   //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
@@ -831,11 +831,6 @@ export default [
   },
   {
     type: 'error',
-    name: 'CustomBlockConfirmationsNotSupportedOnPoolV1',
-    inputs: [],
-  },
-  {
-    type: 'error',
     name: 'DestinationChainNotSupported',
     inputs: [
       {
@@ -862,6 +857,7 @@ export default [
     name: 'DuplicateCCVNotAllowed',
     inputs: [{ name: 'ccvAddress', type: 'address', internalType: 'address' }],
   },
+  { type: 'error', name: 'FTFNotSupportedOnPoolV1', inputs: [] },
   {
     type: 'error',
     name: 'FeeExceedsMaxAllowed',
@@ -949,6 +945,17 @@ export default [
   { type: 'error', name: 'OnlyCallableByOwner', inputs: [] },
   { type: 'error', name: 'OwnerCannotBeZero', inputs: [] },
   { type: 'error', name: 'ReentrancyGuardReentrantCall', inputs: [] },
+  {
+    type: 'error',
+    name: 'RequestedFinalityCanOnlyHaveOneMode',
+    inputs: [
+      {
+        name: 'encodedFinality',
+        type: 'bytes4',
+        internalType: 'bytes4',
+      },
+    ],
+  },
   { type: 'error', name: 'RouterMustSetOriginalSender', inputs: [] },
   {
     type: 'error',

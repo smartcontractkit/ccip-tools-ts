@@ -27,6 +27,11 @@ const SEPOLIA_ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
 const FUJI_RPC = process.env['RPC_FUJI'] || 'https://api.avax-test.network/ext/bc/C/rpc'
 const FUJI_CHAIN_ID = 43113
 
+const ARB_SEP_RPC = process.env['RPC_ARB_SEPOLIA'] || 'https://arbitrum-sepolia-rpc.publicnode.com'
+const ARB_SEP_CHAIN_ID = 421614
+const ARB_SEP_SELECTOR = 3478487238524512106n
+const ARB_SEP_V2_0_ROUTER = '0x8F95FA37c55eF7beFdf05f6abDeC551773E17Fb4'
+
 const ANVIL_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 
 // ── getFeeTokens constants ──
@@ -54,22 +59,20 @@ const APTOS_SUPPORTED_TOKEN = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
 // ── getLaneFeatures constants ──
 
 // v2.0 router for Sepolia -> Fuji lane
-const SEPOLIA_V2_0_ROUTER = '0xc0f457e615348708FaAB3B40ECC26Badb32B7b30'
+const SEPOLIA_V2_0_ROUTER = '0x784d49a71BB4C48eB7dA4cD7e6Ecb424f9b5EAB1'
 // v2.0 router for Fuji -> Sepolia lane
-const FUJI_V2_0_ROUTER = '0xE7b62d27D6DDca525FE2e1ea526905EbfB36a1e1'
-// Token on Sepolia whose pool (BurnMintTokenPool 1.7.0-dev) supports the older
-// singular getMinBlockConfirmation(), not the plural getMinBlockConfirmations()
-// in our current ABI. This exercises the try-catch fallback path.
-const OLD_POOL_TOKEN_SEPOLIA = '0x67f000ca40cb1c6ee3bd2c7fda2fd22ddf56faab'
-// Token on Fuji whose pool (LombardTokenPool 2.0.0-dev) DOES support getMinBlockConfirmations
-const FTF_TOKEN_FUJI = '0x7FbdC44BfEBDe80C970ba622B678daB36cee31f6'
+const FUJI_V2_0_ROUTER = '0x7C9B8B4e8024e5Ee8A630F6FCe9015e470dA5763'
+// Token on Fuji whose v2.0 pool (BurnMintTokenPool 2.0.0) has FTF disabled
+// (allowedFinalityConfig = 0x00000000). Used by tests that need a v2.0 pool
+// without Fast Transfer Finality enabled.
+const NOFTF_TOKEN_FUJI = '0xcba4fd7b4fe7adf246007d6228d42162815a1fd0'
 // CCIP-BnM on Sepolia — supported on v1.5 Sepolia→Fuji lane
 const CCIP_BNM_TOKEN_SEPOLIA = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
 // Token pools with FTF enabled and custom rate limits configured
-const FTF_ENABLED_POOL_SEPOLIA = '0x161d23c30b5ae2899c3d4d969ba2b82026f3954a'
-const FTF_ENABLED_POOL_FUJI = '0xc9346f85a04a47188710d8830127a2490959cbd9'
+const FTF_ENABLED_POOL_SEPOLIA = '0x6e2df115f6cb112533be550ca70a41428a465925'
+const FTF_ENABLED_POOL_FUJI = '0xcf0e862b5dc183adb8c42595238a982e45f58df1'
 // Token served by FTF_ENABLED_POOL_SEPOLIA — works with V3 extra args on Sepolia→Fuji v2.0 lane
-const FTF_TOKEN_SEPOLIA = '0x6b039E8bDB3F92093AdC417367379089be7A80B1'
+const FTF_TOKEN_SEPOLIA = '0xa41a773a7b68e80d4760a176cfec8f50e80d65a7'
 // ── execute constants ──
 
 // Known message stuck in FAILED state on sepolia, sent from fuji (v1.6)
@@ -78,8 +81,12 @@ const EXEC_TEST_MSG = FUJI_TO_SEPOLIA.find(
 )!
 const SOURCE_TX_HASH = EXEC_TEST_MSG.txHash
 const MESSAGE_ID = EXEC_TEST_MSG.messageId
+// Arb-Sep → Fuji v2.0.0 message that FAILED on-chain due to intentional OOG
+// (ccipReceive gasLimit=100). CCV verification is COMPLETED so the message is
+// readyForManualExecution — re-executing it on a Fuji fork with a higher
+// gasLimit succeeds, exercising the API-driven manual-exec recovery path.
 const V2_API_EXEC_MSG = {
-  messageId: '0x886836ec7b9adc834d45d70c4cbd05f2623f56add4e15a96e12758c941452155',
+  messageId: '0x2dedf76b3e16020807ca43a28f3c7210bf4305a6eadf98df9d2c5ceddd4a4f71',
 }
 
 // Second failed v1.6 message for getExecutionInput test (different from above so both can execute)
@@ -132,9 +139,11 @@ const skipHighRpcLoad = !process.env.RUN_HIGH_RPC_LOAD_TESTS
 describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   let sepoliaChain: EVMChain | undefined
   let fujiChain: EVMChain | undefined
+  let arbSepChain: EVMChain | undefined
   let wallet: Wallet
   let sepoliaInstance: ReturnType<typeof Instance.anvil> | undefined
   let fujiInstance: ReturnType<typeof Instance.anvil> | undefined
+  let arbSepInstance: ReturnType<typeof Instance.anvil> | undefined
 
   before(async () => {
     sepoliaInstance = Instance.anvil({
@@ -143,25 +152,38 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       port: 8646,
     })
     fujiInstance = Instance.anvil({ forkUrl: FUJI_RPC, chainId: FUJI_CHAIN_ID, port: 8645 })
-    await Promise.all([sepoliaInstance.start(), fujiInstance.start()])
+    arbSepInstance = Instance.anvil({
+      forkUrl: ARB_SEP_RPC,
+      chainId: ARB_SEP_CHAIN_ID,
+      port: 8644,
+    })
+    await Promise.all([sepoliaInstance.start(), fujiInstance.start(), arbSepInstance.start()])
 
     const sepoliaProvider = new JsonRpcProvider(
       `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
     )
     const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
+    const arbSepProvider = new JsonRpcProvider(
+      `http://${arbSepInstance.host}:${arbSepInstance.port}`,
+    )
 
     sepoliaChain = await EVMChain.fromProvider(sepoliaProvider, {
       apiClient: null,
       logger: testLogger,
     })
     fujiChain = await EVMChain.fromProvider(fujiProvider, { apiClient: null, logger: testLogger })
+    arbSepChain = await EVMChain.fromProvider(arbSepProvider, {
+      apiClient: null,
+      logger: testLogger,
+    })
     wallet = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
   })
 
   after(async () => {
     sepoliaChain?.destroy?.()
     fujiChain?.destroy?.()
-    await Promise.all([sepoliaInstance?.stop(), fujiInstance?.stop()])
+    arbSepChain?.destroy?.()
+    await Promise.all([sepoliaInstance?.stop(), fujiInstance?.stop(), arbSepInstance?.stop()])
   })
 
   describe('getBalance', () => {
@@ -536,7 +558,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   describe('getLaneFeatures', () => {
-    it('should return MIN_BLOCK_CONFIRMATIONS=0 and no rate limits for v1.6 router', async () => {
+    it('should return FINALITY_FAST=undefined and no rate limits for v1.6 router', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const features = await sepoliaChain.getLaneFeatures({
@@ -545,9 +567,9 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       })
 
       assert.equal(
-        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        features[LaneFeature.FINALITY_FAST],
         undefined,
-        'v1.6 lane should not include MIN_BLOCK_CONFIRMATIONS (FTF does not exist pre-v2.0)',
+        'v1.6 lane should not include FINALITY_FAST (FTF does not exist pre-v2.0)',
       )
       assert.equal(
         LaneFeature.RATE_LIMITS in features,
@@ -555,13 +577,13 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         'v1.6 lane should not have RATE_LIMITS',
       )
       assert.equal(
-        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        LaneFeature.FAST_RATE_LIMITS in features,
         false,
-        'v1.6 lane should not have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+        'v1.6 lane should not have FAST_RATE_LIMITS',
       )
     })
 
-    it('should return MIN_BLOCK_CONFIRMATIONS=1 and no rate limits for v2.0 router without token', async () => {
+    it('should return FINALITY_FAST=1 and no rate limits for v2.0 router without token', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const features = await sepoliaChain.getLaneFeatures({
@@ -570,7 +592,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       })
 
       assert.equal(
-        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        features[LaneFeature.FINALITY_FAST],
         1,
         'v2.0 lane without token should default to 1 block confirmation',
       )
@@ -581,47 +603,18 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
     })
 
-    it('should return MIN_BLOCK_CONFIRMATIONS=0 for token with old pool (fallback)', async () => {
-      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
-
-      const features = await sepoliaChain.getLaneFeatures({
-        router: SEPOLIA_V2_0_ROUTER,
-        destChainSelector: FUJI_SELECTOR,
-        token: OLD_POOL_TOKEN_SEPOLIA,
-      })
-
-      assert.equal(
-        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
-        0,
-        'token with old pool should have FTF disabled (MIN_BLOCK_CONFIRMATIONS=0)',
-      )
-      // Old pool doesn't support getMinBlockConfirmations but does support
-      // getCurrentRateLimiterState, so RATE_LIMITS may still be present
-      assert.ok(LaneFeature.RATE_LIMITS in features, 'old pool should still have RATE_LIMITS')
-      // FTF disabled → no CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS
-      assert.equal(
-        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
-        false,
-        'FTF disabled pool should not have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
-      )
-    })
-
     it('should query token pool for features on v2.0 pool', async () => {
       assert.ok(fujiChain, 'fuji chain should be initialized')
 
       const features = await fujiChain.getLaneFeatures({
         router: FUJI_V2_0_ROUTER,
         destChainSelector: SEPOLIA_SELECTOR,
-        token: FTF_TOKEN_FUJI,
+        token: NOFTF_TOKEN_FUJI,
       })
 
-      const minBlocks = features[LaneFeature.MIN_BLOCK_CONFIRMATIONS]
-      console.log(`  Lombard pool MIN_BLOCK_CONFIRMATIONS = ${minBlocks}`)
-      assert.equal(
-        minBlocks,
-        0,
-        'Lombard pool should return MIN_BLOCK_CONFIRMATIONS=0 (FTF not enabled)',
-      )
+      const minBlocks = features[LaneFeature.FINALITY_FAST]
+      console.log(`  v2.0 FTF-disabled pool FINALITY_FAST = ${minBlocks}`)
+      assert.equal(minBlocks, 0, 'FTF-disabled v2.0 pool should return FINALITY_FAST=0')
 
       // RATE_LIMITS should be present for v2.0 pool with token
       assert.ok(LaneFeature.RATE_LIMITS in features, 'v2.0 pool should have RATE_LIMITS')
@@ -632,11 +625,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         assert.equal(typeof rateLimits.rate, 'bigint', 'rate should be bigint')
       }
 
-      // FTF disabled → no CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS
+      // FTF disabled → no FAST_RATE_LIMITS
       assert.equal(
-        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        LaneFeature.FAST_RATE_LIMITS in features,
         false,
-        'FTF disabled pool should not have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+        'FTF disabled pool should not have FAST_RATE_LIMITS',
       )
     })
 
@@ -650,9 +643,9 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       })
 
       assert.equal(
-        features[LaneFeature.MIN_BLOCK_CONFIRMATIONS],
+        features[LaneFeature.FINALITY_FAST],
         undefined,
-        'v1.5 lane should not include MIN_BLOCK_CONFIRMATIONS (FTF does not exist pre-v2.0)',
+        'v1.5 lane should not include FINALITY_FAST (FTF does not exist pre-v2.0)',
       )
 
       // Legacy pool should expose RATE_LIMITS via getCurrentOutboundRateLimiterState
@@ -664,15 +657,15 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         assert.equal(typeof rateLimits.rate, 'bigint', 'rate should be bigint')
       }
 
-      // FTF doesn't exist on legacy lanes → no CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS
+      // FTF doesn't exist on legacy lanes → no FAST_RATE_LIMITS
       assert.equal(
-        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
+        LaneFeature.FAST_RATE_LIMITS in features,
         false,
-        'legacy lane should not have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+        'legacy lane should not have FAST_RATE_LIMITS',
       )
     })
 
-    it('should return nonzero MIN_BLOCK_CONFIRMATIONS and custom rate limits for FTF-enabled pool (Sepolia)', async () => {
+    it('should return nonzero FINALITY_FAST and FAST_RATE_LIMITS for FTF-enabled pool (Sepolia)', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const token = await sepoliaChain.getTokenForTokenPool(FTF_ENABLED_POOL_SEPOLIA)
@@ -682,11 +675,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         token,
       })
 
-      const minBlocks = features[LaneFeature.MIN_BLOCK_CONFIRMATIONS]
-      console.log(`  FTF-enabled pool MIN_BLOCK_CONFIRMATIONS = ${minBlocks}`)
+      const minBlocks = features[LaneFeature.FINALITY_FAST]
+      console.log(`  FTF-enabled pool FINALITY_FAST = ${minBlocks}`)
       assert.ok(
         minBlocks != null && minBlocks > 0,
-        `FTF-enabled pool should have MIN_BLOCK_CONFIRMATIONS > 0 (got ${minBlocks})`,
+        `FTF-enabled pool should have FINALITY_FAST > 0 (got ${minBlocks})`,
       )
 
       // Default rate limits should be present
@@ -699,14 +692,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
 
       // Custom finality rate limits should be present when FTF is enabled
       assert.ok(
-        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
-        'FTF-enabled pool should have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+        LaneFeature.FAST_RATE_LIMITS in features,
+        'FTF-enabled pool should have FAST_RATE_LIMITS',
       )
-      const customRateLimits = features[LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS]
-      assert.ok(
-        customRateLimits != null,
-        'CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS should not be null',
-      )
+      const customRateLimits = features[LaneFeature.FAST_RATE_LIMITS]
+      assert.ok(customRateLimits != null, 'FAST_RATE_LIMITS should not be null')
       assert.equal(typeof customRateLimits.tokens, 'bigint', 'custom tokens should be bigint')
       assert.equal(typeof customRateLimits.capacity, 'bigint', 'custom capacity should be bigint')
       assert.equal(typeof customRateLimits.rate, 'bigint', 'custom rate should be bigint')
@@ -721,7 +711,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
     })
 
-    it('should return nonzero MIN_BLOCK_CONFIRMATIONS and custom rate limits for FTF-enabled pool (Fuji)', async () => {
+    it('should return nonzero FINALITY_FAST and FAST_RATE_LIMITS for FTF-enabled pool (Fuji)', async () => {
       assert.ok(fujiChain, 'fuji chain should be initialized')
 
       const token = await fujiChain.getTokenForTokenPool(FTF_ENABLED_POOL_FUJI)
@@ -731,11 +721,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         token,
       })
 
-      const minBlocks = features[LaneFeature.MIN_BLOCK_CONFIRMATIONS]
-      console.log(`  FTF-enabled Fuji pool MIN_BLOCK_CONFIRMATIONS = ${minBlocks}`)
+      const minBlocks = features[LaneFeature.FINALITY_FAST]
+      console.log(`  FTF-enabled Fuji pool FINALITY_FAST = ${minBlocks}`)
       assert.ok(
         minBlocks != null && minBlocks > 0,
-        `FTF-enabled pool should have MIN_BLOCK_CONFIRMATIONS > 0 (got ${minBlocks})`,
+        `FTF-enabled pool should have FINALITY_FAST > 0 (got ${minBlocks})`,
       )
 
       // Default rate limits should be present
@@ -745,14 +735,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
 
       // Custom finality rate limits should be present when FTF is enabled
       assert.ok(
-        LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS in features,
-        'FTF-enabled pool should have CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS',
+        LaneFeature.FAST_RATE_LIMITS in features,
+        'FTF-enabled pool should have FAST_RATE_LIMITS',
       )
-      const customRateLimits = features[LaneFeature.CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS]
-      assert.ok(
-        customRateLimits != null,
-        'CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS should not be null',
-      )
+      const customRateLimits = features[LaneFeature.FAST_RATE_LIMITS]
+      assert.ok(customRateLimits != null, 'FAST_RATE_LIMITS should not be null')
 
       // Custom rate limits should differ from default rate limits
       const differs =
@@ -766,32 +753,6 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   describe('getTokenPoolConfig with tokenTransferFeeConfig', () => {
-    it('should return disabled fee config for token with old pool', async () => {
-      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
-
-      // Resolve pool address for the old pool token
-      const onRamp = await sepoliaChain.getOnRampForRouter(SEPOLIA_V2_0_ROUTER, FUJI_SELECTOR)
-      const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, sepoliaChain.provider)
-      const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
-        FUJI_SELECTOR,
-        OLD_POOL_TOKEN_SEPOLIA,
-      )) as string
-
-      const result = await sepoliaChain.getTokenPoolConfig(poolAddress, {
-        destChainSelector: FUJI_SELECTOR,
-        blockConfirmationsRequested: 0,
-        tokenArgs: '0x',
-      })
-
-      // Old pools may respond with all-zero config rather than reverting
-      assert.ok(result.tokenTransferFeeConfig, 'old pool responds to the call')
-      assert.equal(
-        result.tokenTransferFeeConfig.isEnabled,
-        false,
-        'fee config should not be enabled on old pool',
-      )
-    })
-
     it('should return fee config for v2.0 pool', async () => {
       assert.ok(fujiChain, 'fuji chain should be initialized')
 
@@ -800,12 +761,12 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, fujiChain.provider)
       const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
         SEPOLIA_SELECTOR,
-        FTF_TOKEN_FUJI,
+        NOFTF_TOKEN_FUJI,
       )) as string
 
       const result = await fujiChain.getTokenPoolConfig(poolAddress, {
         destChainSelector: SEPOLIA_SELECTOR,
-        blockConfirmationsRequested: 0,
+        finality: 0,
         tokenArgs: '0x',
       })
 
@@ -813,22 +774,20 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.equal(typeof result.tokenTransferFeeConfig.destGasOverhead, 'number')
       assert.equal(typeof result.tokenTransferFeeConfig.destBytesOverhead, 'number')
       assert.equal(typeof result.tokenTransferFeeConfig.isEnabled, 'boolean')
-      console.log('  v2.0 pool fee config (blockConfirmationsRequested=0):')
+      console.log('  v2.0 pool fee config (finality=0):')
+      console.log(`    finalityFeeUSDCents = ${result.tokenTransferFeeConfig.finalityFeeUSDCents}`)
       console.log(
-        `    defaultBlockConfirmationsFeeUSDCents = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsFeeUSDCents}`,
+        `    fastFinalityFeeUSDCents = ${result.tokenTransferFeeConfig.fastFinalityFeeUSDCents}`,
       )
       console.log(
-        `    customBlockConfirmationsFeeUSDCents  = ${result.tokenTransferFeeConfig.customBlockConfirmationsFeeUSDCents}`,
+        `    finalityTransferFeeBps = ${result.tokenTransferFeeConfig.finalityTransferFeeBps}`,
       )
       console.log(
-        `    defaultBlockConfirmationsTransferFeeBps = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps}`,
-      )
-      console.log(
-        `    customBlockConfirmationsTransferFeeBps  = ${result.tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps}`,
+        `    fastFinalityTransferFeeBps = ${result.tokenTransferFeeConfig.fastFinalityTransferFeeBps}`,
       )
     })
 
-    it('should return fee config with blockConfirmationsRequested=1', async () => {
+    it('should return fee config with finality=1', async () => {
       assert.ok(fujiChain, 'fuji chain should be initialized')
 
       // Resolve pool address
@@ -836,12 +795,12 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, fujiChain.provider)
       const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
         SEPOLIA_SELECTOR,
-        FTF_TOKEN_FUJI,
+        NOFTF_TOKEN_FUJI,
       )) as string
 
       const result = await fujiChain.getTokenPoolConfig(poolAddress, {
         destChainSelector: SEPOLIA_SELECTOR,
-        blockConfirmationsRequested: 1,
+        finality: 1,
         tokenArgs: '0x',
       })
 
@@ -849,18 +808,16 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.equal(typeof result.tokenTransferFeeConfig.destGasOverhead, 'number')
       assert.equal(typeof result.tokenTransferFeeConfig.destBytesOverhead, 'number')
       assert.equal(typeof result.tokenTransferFeeConfig.isEnabled, 'boolean')
-      console.log('  v2.0 pool fee config (blockConfirmationsRequested=1):')
+      console.log('  v2.0 pool fee config (finality=1):')
+      console.log(`    finalityFeeUSDCents = ${result.tokenTransferFeeConfig.finalityFeeUSDCents}`)
       console.log(
-        `    defaultBlockConfirmationsFeeUSDCents = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsFeeUSDCents}`,
+        `    fastFinalityFeeUSDCents = ${result.tokenTransferFeeConfig.fastFinalityFeeUSDCents}`,
       )
       console.log(
-        `    customBlockConfirmationsFeeUSDCents  = ${result.tokenTransferFeeConfig.customBlockConfirmationsFeeUSDCents}`,
+        `    finalityTransferFeeBps = ${result.tokenTransferFeeConfig.finalityTransferFeeBps}`,
       )
       console.log(
-        `    defaultBlockConfirmationsTransferFeeBps = ${result.tokenTransferFeeConfig.defaultBlockConfirmationsTransferFeeBps}`,
-      )
-      console.log(
-        `    customBlockConfirmationsTransferFeeBps  = ${result.tokenTransferFeeConfig.customBlockConfirmationsTransferFeeBps}`,
+        `    fastFinalityTransferFeeBps = ${result.tokenTransferFeeConfig.fastFinalityTransferFeeBps}`,
       )
     })
 
@@ -872,7 +829,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       const onRampContract = new Contract(onRamp, interfaces.OnRamp_v2_0, fujiChain.provider)
       const poolAddress = (await onRampContract.getFunction('getPoolBySourceToken')(
         SEPOLIA_SELECTOR,
-        FTF_TOKEN_FUJI,
+        NOFTF_TOKEN_FUJI,
       )) as string
 
       const result = await fujiChain.getTokenPoolConfig(poolAddress)
@@ -924,7 +881,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.equal(typeof tf.bps, 'number')
       assert.equal(tf.feeDeducted, (amount * BigInt(tf.bps)) / 10_000n)
 
-      console.log('  getTotalFeesEstimate (default blockConfirmations):')
+      console.log('  getTotalFeesEstimate (standard finality):')
       console.log(`    ccipFee = ${estimate.ccipFee}`)
       console.log(`    value = ${tf.feeDeducted} (${tf.bps} bps)`)
     })
@@ -951,7 +908,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
     })
 
-    it('should use custom BPS when blockConfirmations > 0', async () => {
+    it('should use custom BPS when FTF', async () => {
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
 
       const amount = 1_000_000n
@@ -963,7 +920,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
           tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount }],
           extraArgs: {
             gasLimit: 200_000n,
-            blockConfirmations: 1,
+            finality: 1,
             ccvs: [],
             ccvArgs: [],
             executor: '',
@@ -981,7 +938,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       const tf = estimate.tokenTransferFee
       assert.equal(tf.feeDeducted, (amount * BigInt(tf.bps)) / 10_000n)
 
-      console.log('  getTotalFeesEstimate (blockConfirmations=1):')
+      console.log('  getTotalFeesEstimate (finality=1):')
       console.log(`    ccipFee = ${estimate.ccipFee}`)
       console.log(`    value = ${tf.feeDeducted} (${tf.bps} bps)`)
     })
@@ -998,14 +955,14 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     const STAGING_API = 'https://api.ccip.cldev.cloud'
 
     const HISTORICAL_MESSAGE_IDS = [
-      // Fuji → Sepolia, default finality (blockConfirmations=0), 0% BPS
-      '0x39dda11d8d8ccf35055825349ab8c1842587966389cb8200eb5b72830318f707',
-      // Fuji → Sepolia, custom finality (blockConfirmations=5), 1% BPS
-      '0x88bf551330e9767ac981582a3e7fac510b876a7038e38a633e32c63ac7dd0169',
-      // Sepolia → Fuji, default finality (blockConfirmations=0), 0% BPS
-      '0x2a6eeea60b80235cbd1e3ead45f6cd848374961831c21733170d7cb965514f31',
-      // Sepolia → Fuji, custom finality (blockConfirmations=1), 10% BPS
-      '0x42683f3a0efb956e881b3e9eec4e4161e32b09a98c680ee82219d011fcd9df1d',
+      // Fuji → Arb-Sepolia, finalized (finality=0), 20 bps (finalityTransferFeeBps)
+      '0xed535024b2c212ee0aef32a1c5790ffd0ed8684fed317623c704d991adc53a89',
+      // Fuji → Arb-Sepolia, FTF (finality=1), 100 bps (fastFinalityTransferFeeBps)
+      '0x1908420ed02f15577adf21277bb3ff562a20150c90d5848e1174237b5dc896c0',
+      // Arb-Sepolia → Fuji, finalized (finality=0), 20 bps
+      '0xd42a4152a46f062c73fcd7ad7c2702b97854573b93ab7a0476b91f5efd4547ec',
+      // Arb-Sepolia → Fuji, FTF (finality=1), 100 bps
+      '0x7c4502dd471f08db5801785095c87a20b0a6236e5350a7108e49342d884c6753',
     ]
 
     /** Resolve source chain selector to the matching fork chain + v2.0 router. */
@@ -1013,6 +970,10 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       if (sourceSelector === FUJI_SELECTOR.toString()) {
         assert.ok(fujiChain, 'fuji chain should be initialized')
         return { chain: fujiChain, router: FUJI_V2_0_ROUTER }
+      }
+      if (sourceSelector === ARB_SEP_SELECTOR.toString()) {
+        assert.ok(arbSepChain, 'arb-sepolia chain should be initialized')
+        return { chain: arbSepChain, router: ARB_SEP_V2_0_ROUTER }
       }
       assert.ok(sepoliaChain, 'sepolia chain should be initialized')
       return { chain: sepoliaChain, router: SEPOLIA_V2_0_ROUTER }
@@ -1030,7 +991,9 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         const { chain, router } = resolveChain(raw.sourceNetworkInfo.chainSelector)
         const destChainSelector = BigInt(raw.destNetworkInfo.chainSelector)
         const token = raw.tokenAmounts[0].sourceTokenAddress as string
-        const blockConfirmations: number = raw.extraArgs?.blockConfirmations ?? 0
+        // v2.0.0 API exposes finality at the top level; extraArgs.blockConfirmations
+        // was a dev-era compat field and is no longer populated.
+        const finality: number = Number(raw.finality ?? 0)
 
         // Reconstruct original sent amount = post-fee amount + bps fee deducted
         const bpsEntry = raw.fees?.bpsFeeDetails?.[0]
@@ -1046,10 +1009,10 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
           receiver: '0x0000000000000000000000000000000000000001',
           tokenAmounts: [{ token, amount: originalAmount }],
         }
-        if (blockConfirmations > 0) {
+        if (finality > 0) {
           message.extraArgs = {
             gasLimit: 0n,
-            blockConfirmations,
+            finality: finality,
             ccvs: [],
             ccvArgs: [],
             executor: '',
@@ -1408,22 +1371,20 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
     })
 
-    it('should execute a v2.0 message via API-driven path (Fuji -> Sepolia)', async () => {
-      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+    it('should execute a v2.0 message via API-driven path (Arb-Sep -> Fuji)', async () => {
+      assert.ok(fujiInstance, 'fuji anvil should be running')
 
-      // Create a sepolia chain with staging API client (execution-inputs endpoint)
+      // Create a fuji chain with staging API client (execution-inputs endpoint)
       const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
-      const sepoliaProvider = new JsonRpcProvider(
-        `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
-      )
-      const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
+      const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
+      const fujiWithApi = await EVMChain.fromProvider(fujiProvider, {
         apiClient: stagingApi,
         logger: testLogger,
       })
-      const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
+      const w = new Wallet(ANVIL_PRIVATE_KEY, fujiProvider)
 
       // Execute via messageId only — triggers API-driven path
-      const execution = await sepoliaWithApi.execute({
+      const execution = await fujiWithApi.execute({
         messageId: V2_API_EXEC_MSG.messageId,
         wallet: w,
         gasLimit: 500_000,
@@ -1441,7 +1402,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.ok(execution.timestamp > 0, 'should have timestamp')
       assert.equal(execution.receipt.state, ExecutionState.Success)
 
-      sepoliaWithApi.destroy?.()
+      fujiWithApi.destroy?.()
     })
 
     it('should execute a v1.5 message via API-driven path (Sepolia -> Fuji)', async () => {

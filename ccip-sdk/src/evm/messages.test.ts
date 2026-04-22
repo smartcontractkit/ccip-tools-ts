@@ -31,7 +31,7 @@ describe('decodeMessageV1', () => {
     const messageNumber = '0x0000000000000064' // 100
     const executionGasLimit = '0x00030d40' // 200000
     const ccipReceiveGasLimit = '0x00030d40' // 200000
-    const finality = '0x000a' // 10
+    const finality = '0x0000000a' // 10
     const ccvAndExecutorHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
 
     // Variable length fields
@@ -95,7 +95,7 @@ describe('decodeMessageV1', () => {
     const messageNumber = '0x00000000000003e8' // 1000
     const executionGasLimit = '0x000493e0' // 300000
     const ccipReceiveGasLimit = '0x000186a0' // 100000
-    const finality = '0x0014' // 20
+    const finality = '0x00000014' // 20
     const ccvAndExecutorHash = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 
     const onRampAddressLength = '0x14'

@@ -767,7 +767,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       )
       const minSeqNr = slice.loadUintBig(64)
       const maxSeqNr = slice.loadUintBig(64)
-      const merkleRoot = hexlify(slice.loadBuffer(32))
+      const merkleRoot = hexlify(slice.loadBuffer(32)) as `0x${string}`
 
       // Read hasPriceUpdates (1 bit): we don't need the data but should consume it
       if (slice.remainingBits >= 1) {

@@ -924,7 +924,7 @@ describe('getDataBytes', () => {
   })
 
   it('should throw error for invalid input', () => {
-    assert.throws(() => getDataBytes('not-hex-or-base64' as any), /Unsupported data format/)
+    assert.throws(() => getDataBytes('not-hex-or-base64'), /Unsupported data format/)
   })
 
   it('should handle empty hex string', () => {

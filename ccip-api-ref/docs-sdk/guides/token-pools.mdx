@@ -52,7 +52,7 @@ The `typeAndVersion` string identifies the pool type (BurnMint, LockRelease, USD
 
 ### Faster-Than-Finality (FTF) Configuration
 
-On v2.0+ pools, `getTokenPoolConfig` also returns `minBlockConfirmations` (`undefined` on pre-v2.0 pools, `0` when FTF is not enabled, `>0` when enabled). See [Faster-Than-Finality](/sdk/guides/ftf) for the full FTF workflow.
+On v2.0+ pools, `getTokenPoolConfig` also returns `finalityDepth` (`undefined` on pre-v2.0 pools, `0` when FTF is not enabled, `>0` when enabled) and `finalitySafe` (`true` when FCR/safe finality is supported). See [Faster-Than-Finality](/sdk/guides/ftf) for the full FTF workflow.
 
 ## Remote Chain Configuration
 
@@ -138,7 +138,7 @@ type RateLimiterState = {
 
 ### FTF Rate Limits
 
-TokenPool v2.0+ contracts may include separate rate limiters for Faster-Than-Finality transfers (`customBlockConfirmationsOutboundRateLimiterState` and `customBlockConfirmationsInboundRateLimiterState`). See [Faster-Than-Finality — FTF Rate Limits](/sdk/guides/ftf#ftf-rate-limits) for details and examples.
+TokenPool v2.0+ contracts may include separate rate limiters for Faster-Than-Finality transfers (`fastOutboundRateLimiterState` and `fastInboundRateLimiterState`). See [Faster-Than-Finality — FTF Rate Limits](/sdk/guides/ftf#ftf-rate-limits) for details and examples.
 
 ## Complete Example
 
@@ -172,8 +172,8 @@ async function inspectTokenPool(
   const poolConfig = await chain.getTokenPoolConfig(poolAddress)
   console.log('Type:', poolConfig.typeAndVersion)
 
-  if (poolConfig.minBlockConfirmations != null && poolConfig.minBlockConfirmations > 0) {
-    console.log('FTF enabled — min confirmations:', poolConfig.minBlockConfirmations)
+  if (poolConfig.finalityDepth != null && poolConfig.finalityDepth > 0) {
+    console.log('FTF enabled — min confirmations:', poolConfig.finalityDepth)
   }
 
   // 3. Get remote configuration for the destination
@@ -204,9 +204,9 @@ async function inspectTokenPool(
   }
 
   // 5. FTF rate limits (v2.0+ only)
-  if ('customBlockConfirmationsOutboundRateLimiterState' in remote) {
-    const ftfOut = remote.customBlockConfirmationsOutboundRateLimiterState
-    const ftfIn = remote.customBlockConfirmationsInboundRateLimiterState
+  if ('fastOutboundRateLimiterState' in remote) {
+    const ftfOut = remote.fastOutboundRateLimiterState
+    const ftfIn = remote.fastInboundRateLimiterState
     if (ftfOut) {
       console.log(`\nFTF outbound: ${ftfOut.tokens}/${ftfOut.capacity}`)
     }
@@ -231,7 +231,7 @@ await inspectTokenPool(
 |--------|----------|---------|
 | `getTokenAdminRegistryFor(address)` | Chain | Resolve TokenAdminRegistry from Router/OnRamp/OffRamp |
 | `getRegistryTokenConfig(registry, token)` | Chain | Get token's registry entry (pool address, admin) |
-| `getTokenPoolConfig(pool)` | Chain | Pool config: token, router, typeAndVersion, minBlockConfirmations |
+| `getTokenPoolConfig(pool)` | Chain | Pool config: token, router, typeAndVersion, finalityDepth, finalitySafe |
 | `getTokenPoolRemotes(pool, chainSelector?)` | Chain | Remote chain config: remote token, pools, rate limits |
 | `getSupportedTokens(registry)` | Chain | List all tokens in the registry |
 | `getTokenInfo(token)` | Chain | Token metadata (symbol, decimals, name) |

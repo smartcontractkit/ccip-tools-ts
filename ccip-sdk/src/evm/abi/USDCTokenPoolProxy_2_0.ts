@@ -1,7 +1,7 @@
 // TODO: track a v2 release tag and the v2.0.0 folder instead of a commit + latest/ folder, once 2.0.0 is released in `chainlink-ccip`
 export default [
   // generate:
-  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/develop/ccv/chains/evm/gobindings/generated/latest/usdc_token_pool_proxy/usdc_token_pool_proxy.go')
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/main/chains/evm/gobindings/generated/v2_0_0/usdc_token_pool_proxy/usdc_token_pool_proxy.go')
   //   .then((res) => res.text())
   //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
   //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
@@ -70,9 +70,9 @@ export default [
       { name: 'amount', type: 'uint256', internalType: 'uint256' },
       { name: 'feeToken', type: 'address', internalType: 'address' },
       {
-        name: 'blockConfirmationsRequested',
-        type: 'uint16',
-        internalType: 'uint16',
+        name: 'requestedFinalityConfig',
+        type: 'bytes4',
+        internalType: 'bytes4',
       },
       { name: 'tokenArgs', type: 'bytes', internalType: 'bytes' },
     ],
@@ -191,7 +191,7 @@ export default [
         internalType: 'uint64',
       },
       { name: '', type: 'uint256', internalType: 'uint256' },
-      { name: '', type: 'uint16', internalType: 'uint16' },
+      { name: '', type: 'bytes4', internalType: 'bytes4' },
       { name: 'extraData', type: 'bytes', internalType: 'bytes' },
       {
         name: 'direction',
@@ -247,9 +247,9 @@ export default [
         internalType: 'uint64',
       },
       {
-        name: 'blockConfirmationsRequested',
-        type: 'uint16',
-        internalType: 'uint16',
+        name: 'requestedFinalityConfig',
+        type: 'bytes4',
+        internalType: 'bytes4',
       },
       { name: 'tokenArgs', type: 'bytes', internalType: 'bytes' },
     ],
@@ -270,22 +270,22 @@ export default [
             internalType: 'uint32',
           },
           {
-            name: 'defaultBlockConfirmationsFeeUSDCents',
+            name: 'finalityFeeUSDCents',
             type: 'uint32',
             internalType: 'uint32',
           },
           {
-            name: 'customBlockConfirmationsFeeUSDCents',
+            name: 'fastFinalityFeeUSDCents',
             type: 'uint32',
             internalType: 'uint32',
           },
           {
-            name: 'defaultBlockConfirmationsTransferFeeBps',
+            name: 'finalityTransferFeeBps',
             type: 'uint16',
             internalType: 'uint16',
           },
           {
-            name: 'customBlockConfirmationsTransferFeeBps',
+            name: 'fastFinalityTransferFeeBps',
             type: 'uint16',
             internalType: 'uint16',
           },
@@ -394,9 +394,9 @@ export default [
         ],
       },
       {
-        name: 'blockConfirmationsRequested',
-        type: 'uint16',
-        internalType: 'uint16',
+        name: 'requestedFinalityConfig',
+        type: 'bytes4',
+        internalType: 'bytes4',
       },
       { name: 'tokenArgs', type: 'bytes', internalType: 'bytes' },
     ],
@@ -484,6 +484,11 @@ export default [
           },
         ],
       },
+      {
+        name: 'requestedFinalityConfig',
+        type: 'bytes4',
+        internalType: 'bytes4',
+      },
     ],
     outputs: [
       {
@@ -551,11 +556,6 @@ export default [
             internalType: 'bytes',
           },
         ],
-      },
-      {
-        name: 'blockConfirmationsRequested',
-        type: 'uint16',
-        internalType: 'uint16',
       },
     ],
     outputs: [

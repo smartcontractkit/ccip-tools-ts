@@ -46,7 +46,7 @@ function extractLanguage(className?: string): string {
 export default function CodeBlockWrapper(props: Props): React.JSX.Element {
   // Language can come from props.language or from className (may be undefined at runtime from markdown)
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- props.language may be undefined at runtime from markdown
-  const language = props.language ?? extractLanguage(props.className as string) ?? ''
+  const language = props.language ?? extractLanguage(props.className) ?? ''
   const languageLabel = LANGUAGE_LABELS[language.toLowerCase()] ?? language.toUpperCase()
   const showBadge = language && language !== 'text' && language !== ''
 

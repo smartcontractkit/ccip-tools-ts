@@ -901,9 +901,7 @@ const util =
     : {
         inspect: Object.assign((v: unknown) => JSON.stringify(v), {
           custom: Symbol('custom'),
-          defaultOptions: {
-            depth: 2,
-          } as Record<string, unknown>,
+          defaultOptions: { depth: 2 },
         }),
       }
 export { util }
