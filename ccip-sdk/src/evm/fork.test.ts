@@ -155,7 +155,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     arbSepInstance = Instance.anvil({
       forkUrl: ARB_SEP_RPC,
       chainId: ARB_SEP_CHAIN_ID,
-      port: 8647,
+      port: 8644,
     })
     await Promise.all([sepoliaInstance.start(), fujiInstance.start(), arbSepInstance.start()])
 
