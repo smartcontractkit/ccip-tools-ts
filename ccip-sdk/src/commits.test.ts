@@ -191,7 +191,7 @@ class MockChain extends Chain {
     try {
       // Try v1.2/1.5 format first (ReportAccepted from CommitStore)
       const parsed12 = ifaceCommitStore.parseLog({
-        topics: log.topics as string[],
+        topics: log.topics,
         data: typeof log.data === 'string' ? log.data : '0x',
       })
 
@@ -216,7 +216,7 @@ class MockChain extends Chain {
     try {
       // Try v1.6 format (CommitReportAccepted)
       const parsed16 = iface16.parseLog({
-        topics: log.topics as string[],
+        topics: log.topics,
         data: typeof log.data === 'string' ? log.data : '0x',
       })
 
@@ -269,7 +269,7 @@ class MockChain extends Chain {
     const iface = new Interface(OffRamp_1_6_ABI)
     try {
       const parsed = iface.parseLog({
-        topics: _log.topics as string[],
+        topics: _log.topics,
         data: typeof _log.data === 'string' ? _log.data : '0x',
       })
       if (parsed?.name === 'ExecutionStateChanged') {

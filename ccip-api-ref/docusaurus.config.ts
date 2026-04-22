@@ -12,8 +12,8 @@ interface PackageJson {
   name: string
 }
 
-const cliPackage: PackageJson = cliPackageJson as PackageJson
-const sdkPackage: PackageJson = sdkPackageJson as PackageJson
+const cliPackage: PackageJson = cliPackageJson
+const sdkPackage: PackageJson = sdkPackageJson
 
 const config: Config = {
   title: 'CCIP Tools Reference',

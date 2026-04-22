@@ -30,7 +30,7 @@ export function getSuiLeafHasher<V extends CCIPVersion = CCIPVersion>({
       return ((message: CCIPMessage<typeof CCIPVersion.V1_6>): string =>
         hashV16SuiMessage(message, metadataHash)) as LeafHasher<V>
     default:
-      throw new CCIPSuiHasherVersionUnsupportedError(version as string)
+      throw new CCIPSuiHasherVersionUnsupportedError(version)
   }
 }
 

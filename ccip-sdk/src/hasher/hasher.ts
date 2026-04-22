@@ -17,5 +17,5 @@ export function getLeafHasher<V extends CCIPVersion = CCIPVersion>(
   const destFamily = networkInfo(lane.destChainSelector).family
   const chain = supportedChains[destFamily]
   if (!chain) throw new CCIPChainFamilyUnsupportedError(destFamily)
-  return chain.getDestLeafHasher(lane, ctx) as LeafHasher<V>
+  return chain.getDestLeafHasher(lane, ctx)
 }

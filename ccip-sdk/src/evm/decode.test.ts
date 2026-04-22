@@ -337,17 +337,11 @@ describe('EVMChain.decodeMessage', () => {
 
   describe('error handling', () => {
     it('should throw on invalid data (not BytesLike)', () => {
-      assert.throws(
-        () => EVMChain.decodeMessage({ data: 123 as unknown as string }),
-        /Invalid log data/,
-      )
+      assert.throws(() => EVMChain.decodeMessage({ data: 123 }), /Invalid log data/)
     })
 
     it('should throw on invalid data (object)', () => {
-      assert.throws(
-        () => EVMChain.decodeMessage({ data: { foo: 'bar' } as unknown as string }),
-        /Invalid log data/,
-      )
+      assert.throws(() => EVMChain.decodeMessage({ data: { foo: 'bar' } }), /Invalid log data/)
     })
 
     it('should return undefined for unknown topic', () => {
@@ -616,10 +610,7 @@ describe('EVMChain.decodeCommits', () => {
 
   describe('error handling', () => {
     it('should throw on invalid data', () => {
-      assert.throws(
-        () => EVMChain.decodeCommits({ data: 123 as unknown as string }),
-        /Invalid log data/,
-      )
+      assert.throws(() => EVMChain.decodeCommits({ data: 123 }), /Invalid log data/)
     })
 
     it('should return undefined for unknown topic', () => {
@@ -719,10 +710,7 @@ describe('EVMChain.decodeReceipt', () => {
 
   describe('error handling', () => {
     it('should throw on invalid data', () => {
-      assert.throws(
-        () => EVMChain.decodeReceipt({ data: null as unknown as string }),
-        /Invalid log data/,
-      )
+      assert.throws(() => EVMChain.decodeReceipt({ data: null }), /Invalid log data/)
     })
 
     it('should return undefined for unknown topic', () => {

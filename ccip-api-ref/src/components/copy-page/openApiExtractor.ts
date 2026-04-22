@@ -373,9 +373,7 @@ function formatParameters(params: Parameter[]): string[] {
       const example = param.schema.example
       /* eslint-disable @typescript-eslint/no-unnecessary-condition -- typeof null === 'object' in JS */
       const exampleStr =
-        typeof example === 'object' && example !== null
-          ? JSON.stringify(example)
-          : String(example as string | number | boolean)
+        typeof example === 'object' && example !== null ? JSON.stringify(example) : String(example) // eslint-disable-line @typescript-eslint/no-base-to-string
       /* eslint-enable @typescript-eslint/no-unnecessary-condition */
       lines.push(`  - Example: \`${exampleStr}\``)
     }
@@ -437,7 +435,7 @@ function formatSchema(
         const exampleStr =
           typeof example === 'object' && example !== null
             ? JSON.stringify(example)
-            : String(example as string | number | boolean)
+            : String(example) // eslint-disable-line @typescript-eslint/no-base-to-string
         /* eslint-enable @typescript-eslint/no-unnecessary-condition */
         lines.push(`${indent}  - Example: \`${exampleStr}\``)
       }

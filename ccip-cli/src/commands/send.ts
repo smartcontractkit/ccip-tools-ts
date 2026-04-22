@@ -21,7 +21,6 @@
 
 import {
   type ChainStatic,
-  type ExtraArgs,
   type MessageInput,
   CCIPArgumentInvalidError,
   CCIPInsufficientBalanceError,
@@ -371,7 +370,7 @@ async function sendMessage(
   const message: MessageInput = {
     receiver,
     data,
-    extraArgs: extraArgs as ExtraArgs,
+    extraArgs,
     feeToken, // feeToken==ZeroAddress means native
     tokenAmounts,
   }

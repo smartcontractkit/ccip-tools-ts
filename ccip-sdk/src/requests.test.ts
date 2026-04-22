@@ -7,7 +7,7 @@ import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
 import type { Chain, LogFilter } from './chain.ts'
 import { CCIPAddressInvalidError, CCIPArgumentInvalidError } from './errors/specialized.ts'
-import type { GenericExtraArgsV3, SVMExtraArgsV1 } from './extra-args.ts'
+import type { GenericExtraArgsV3 } from './extra-args.ts'
 import { EVMChain } from './index.ts'
 import {
   buildMessageForDest,
@@ -66,7 +66,7 @@ class MockChain {
         data: mockedMessage(1),
         blockNumber: 12000,
         transactionHash: '0x123',
-      } as ChainLog,
+      },
     ]
     return (async function* () {
       for (const log of logs) {
@@ -165,7 +165,7 @@ describe('getMessagesInTx', () => {
           blockNumber: 12000,
           transactionHash: '0x123',
           index: 0,
-        } as ChainLog,
+        },
       ],
       timestamp: 1234567890,
       blockNumber: 12000,
@@ -192,7 +192,7 @@ describe('getMessagesInTx', () => {
           blockNumber: 12000,
           transactionHash: '0x123',
           index: 0,
-        } as ChainLog,
+        },
         {
           address: getAddress(hexlify(randomBytes(20))),
           topics: [topic0],
@@ -200,7 +200,7 @@ describe('getMessagesInTx', () => {
           blockNumber: 12000,
           transactionHash: '0x123',
           index: 1,
-        } as ChainLog,
+        },
       ],
       timestamp: 1234567890,
       blockNumber: 12000,
@@ -261,7 +261,7 @@ describe('getMessageById', () => {
           data: msg,
           blockNumber: 12000,
           transactionHash: '0x123',
-        } as ChainLog
+        }
       })(),
     )
 
@@ -284,7 +284,7 @@ describe('getMessageById', () => {
           data: mockedMessage(2),
           blockNumber: 12000,
           transactionHash: '0x123',
-        } as ChainLog
+        }
       })(),
     )
 
@@ -340,7 +340,7 @@ describe('getMessagesInBatch', () => {
         transactionHash: '0x123',
         index: 0,
         data: mockedMessage(9),
-      } as ChainLog,
+      },
       message: {
         messageId: '0xMessageId9',
         sourceChainSelector: 16015286601757825753n,
@@ -355,7 +355,7 @@ describe('getMessagesInBatch', () => {
         strict: false,
         feeToken: '0x0000000000000000000000000000000000008916',
         feeTokenAmount: 0n,
-      } as CCIPMessage,
+      },
       lane: {
         sourceChainSelector: 16015286601757825753n,
         destChainSelector: 10n,
@@ -383,7 +383,7 @@ describe('getMessagesInBatch', () => {
         transactionHash: '0x123',
         index: 0,
         data: mockedMessage(5),
-      } as ChainLog,
+      },
       message: {
         messageId: '0xMessageId5',
         sourceChainSelector: 16015286601757825753n,
@@ -398,7 +398,7 @@ describe('getMessagesInBatch', () => {
         strict: false,
         feeToken: '0x0000000000000000000000000000000000008916',
         feeTokenAmount: 0n,
-      } as CCIPMessage,
+      },
       lane: {
         sourceChainSelector: 16015286601757825753n,
         destChainSelector: 10n,
@@ -884,7 +884,7 @@ describe('decodeMessage', () => {
         const result = SolanaChain.buildMessageForDest(message)
 
         assert.ok(result.extraArgs)
-        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        const extraArgs = result.extraArgs
         assert.equal(extraArgs.computeUnits, 100000n)
         assert.equal(extraArgs.allowOutOfOrderExecution, true)
         assert.equal(extraArgs.tokenReceiver, '11111111111111111111111111111111')
@@ -903,7 +903,7 @@ describe('decodeMessage', () => {
 
         const result = SolanaChain.buildMessageForDest(message)
 
-        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        const extraArgs = result.extraArgs
         assert.equal(extraArgs.computeUnits, 250000n)
       })
 
@@ -919,7 +919,7 @@ describe('decodeMessage', () => {
 
         const result = SolanaChain.buildMessageForDest(message)
 
-        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        const extraArgs = result.extraArgs
         assert.equal(extraArgs.computeUnits, 150000n)
       })
 
@@ -931,7 +931,7 @@ describe('decodeMessage', () => {
 
         const result = SolanaChain.buildMessageForDest(message)
 
-        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        const extraArgs = result.extraArgs
         assert.equal(extraArgs.computeUnits, 200000n) // DEFAULT_GAS_LIMIT
       })
 
@@ -942,7 +942,7 @@ describe('decodeMessage', () => {
 
         const result = SolanaChain.buildMessageForDest(message)
 
-        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        const extraArgs = result.extraArgs
         assert.equal(extraArgs.computeUnits, 0n)
       })
 
@@ -974,7 +974,7 @@ describe('decodeMessage', () => {
 
         const result = SolanaChain.buildMessageForDest(message)
 
-        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        const extraArgs = result.extraArgs
         assert.equal(extraArgs.tokenReceiver, customReceiver)
       })
 
@@ -987,7 +987,7 @@ describe('decodeMessage', () => {
 
         const result = SolanaChain.buildMessageForDest(message)
 
-        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        const extraArgs = result.extraArgs
         assert.equal(extraArgs.tokenReceiver, receiverAddr)
         assert.equal(result.receiver, '11111111111111111111111111111111') // default PublicKey when tokens
       })
@@ -1020,7 +1020,7 @@ describe('decodeMessage', () => {
 
         const result = SolanaChain.buildMessageForDest(message)
 
-        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        const extraArgs = result.extraArgs
         assert.deepEqual(extraArgs.accounts, accounts)
       })
 
@@ -1036,7 +1036,7 @@ describe('decodeMessage', () => {
 
         const result = SolanaChain.buildMessageForDest(message)
 
-        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        const extraArgs = result.extraArgs
         assert.equal(extraArgs.accountIsWritableBitmap, bitmap)
       })
 
@@ -1065,7 +1065,7 @@ describe('decodeMessage', () => {
 
         const result = SolanaChain.buildMessageForDest(message)
 
-        const extraArgs = result.extraArgs as SVMExtraArgsV1
+        const extraArgs = result.extraArgs
         assert.equal(extraArgs.allowOutOfOrderExecution, false)
       })
 

@@ -127,7 +127,7 @@ export async function loadSolanaWallet(
     let derivationPath = walletOpt.split(':')[1]
     if (!derivationPath) derivationPath = "44'/501'/0'"
     else if (!isNaN(Number(derivationPath))) derivationPath = `44'/501'/${derivationPath}'`
-    return (await LedgerSolanaWallet.create(derivationPath, logger)) as AnchorWallet
+    return await LedgerSolanaWallet.create(derivationPath, logger)
   } else if (existsSync(walletOpt)) {
     wallet = hexlify(new Uint8Array(JSON.parse(readFileSync(walletOpt, 'utf8'))))
   }

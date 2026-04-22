@@ -491,7 +491,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
             minSeqNr: (result.interval as Result).min as bigint,
             maxSeqNr: (result.interval as Result).max as bigint,
             sourceChainSelector: lane!.sourceChainSelector,
-            onRampAddress: lane!.onRamp as `0x${string}`,
+            onRampAddress: lane!.onRamp,
           },
         ]
       } else {
@@ -912,11 +912,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       case CCIPVersion.V1_5:
         if (networkInfo(sourceChainSelector).family !== ChainFamily.EVM)
           throw new CCIPSourceChainUnsupportedError(sourceChainSelector)
-        return getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp) as LeafHasher
+        return getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp)
       case CCIPVersion.V1_6:
-        return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp, ctx) as LeafHasher
+        return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp, ctx)
       default:
-        throw new CCIPHasherVersionUnsupportedError('EVM', version as string)
+        throw new CCIPHasherVersionUnsupportedError('EVM', version)
     }
   }
 

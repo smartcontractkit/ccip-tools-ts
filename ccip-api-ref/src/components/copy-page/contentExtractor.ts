@@ -413,7 +413,7 @@ function convertTabsToMarkdown(el: HTMLElement): string {
   let visiblePanel: HTMLElement | null = null
 
   if (selectedTabId) {
-    visiblePanel = document.getElementById(selectedTabId) as HTMLElement
+    visiblePanel = document.getElementById(selectedTabId)
   }
 
   // If not found by ID, look for tabpanels in the common container

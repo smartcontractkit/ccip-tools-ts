@@ -48,8 +48,8 @@ describe('lane-latency command', () => {
 
   const createCtx = (): Ctx => ({
     destroy$: Promise.resolve(),
-    output: mockOutput as unknown as Ctx['output'],
-    logger: mockLogger as unknown as Ctx['logger'],
+    output: mockOutput,
+    logger: mockLogger,
   })
 
   beforeEach(() => {
