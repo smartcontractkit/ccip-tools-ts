@@ -110,7 +110,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
 
   let source: Chain | undefined, offRamp
   // Track if we displayed all messages in non-interactive multi-message path
-  let displayedAllMessages = false
+  let displayedAllMessages = false as boolean
 
   let request$ = (async () => {
     const [source_, tx] = await tx$

@@ -21,7 +21,7 @@ import {
   CCIPTokenAmountInvalidError,
 } from '../errors/index.ts'
 import { type AnyMessage, type WithLogger, ChainFamily } from '../types.ts'
-import { bytesToBuffer, toLeArray, encodeAddressToAny } from '../utils.ts'
+import { bytesToBuffer, encodeAddressToAny, toLeArray } from '../utils.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import type { UnsignedSolanaTx } from './types.ts'
 import { resolveATA, simulateTransaction, simulationProvider } from './utils.ts'

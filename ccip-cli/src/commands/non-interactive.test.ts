@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 import { type CCIPRequest, CCIPInteractiveRequiredError } from '@chainlink/ccip-sdk/src/index.ts'
 
 import { selectRequest } from './utils.ts'
+import type { GlobalOpts } from '../index.ts'
 
 /** Minimal mock CCIPRequest for testing selectRequest behavior. */
 function mockRequest(logIndex: number, messageId: string): CCIPRequest {
@@ -74,7 +75,6 @@ describe('preprocessArgv TTY auto-detection', () => {
   it('--interactive flag is defined in globalOpts', async () => {
     // Verify the flag exists by importing globalOpts type
     // This is a compile-time check — if the type doesn't include interactive, TS fails
-    type GlobalOpts = import('../index.ts').GlobalOpts
     const _check: GlobalOpts['interactive'] extends boolean | undefined ? true : never = true
     assert.ok(_check)
   })

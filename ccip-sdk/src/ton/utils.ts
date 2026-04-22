@@ -1,6 +1,7 @@
 import { type Builder, type Slice, Cell, Dictionary, beginCell } from '@ton/core'
 import { hexlify, toBeHex } from 'ethers'
 
+import { CCIPError, CCIPErrorCode } from '../errors/index.ts'
 import { CCIPTransactionNotFoundError } from '../errors/specialized.ts'
 import { type WithLogger, NetworkType } from '../types.ts'
 import { bytesToBuffer } from '../utils.ts'
@@ -42,7 +43,8 @@ export function asSnakedCell<T>(array: T[], builderFn: (item: T) => Builder): Ce
   for (const value of array) {
     const itemBuilder = builderFn(value)
     if (itemBuilder.refs > 3) {
-      throw new Error(
+      throw new CCIPError(
+        CCIPErrorCode.UNKNOWN,
         'Cannot pack more than 3 refs per item, use storeRef to a cell containing the item',
       )
     }
