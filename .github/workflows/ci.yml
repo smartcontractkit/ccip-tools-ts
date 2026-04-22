@@ -53,6 +53,9 @@ jobs:
         npx @arethetypeswrong/cli --pack . --profile esm-only || true
 
     - name: Run tests with coverage
+      env:
+        # Temporary: pipe surfpool stdout/stderr to diagnose Solana fork test failures in CI
+        VERBOSE: '1'
       run: |
         set -o pipefail
         npm test 2>&1 | tee coverage-summary.txt
