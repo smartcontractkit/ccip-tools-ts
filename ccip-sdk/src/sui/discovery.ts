@@ -1,4 +1,4 @@
-import type { SuiClient } from '@mysten/sui/client'
+import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { normalizeSuiAddress } from '@mysten/sui/utils'
 import { hexlify } from 'ethers'
@@ -16,7 +16,7 @@ import { getAddressBytes } from '../utils.ts'
  * @returns ccip package id
  */
 export const getCcipStateAddress = memoize(
-  async (ramp: string, client: SuiClient): Promise<string> => {
+  async (ramp: string, client: SuiJsonRpcClient): Promise<string> => {
     // Remove ::onramp suffix if present, then add it back with the function name
     const tx = new Transaction()
     tx.moveCall({
@@ -45,7 +45,7 @@ export const getCcipStateAddress = memoize(
  * @param client - Sui client
  * @returns Sui offramp package id
  */
-export const getOffRampForCcip = async (ccip: string, client: SuiClient) => {
+export const getOffRampForCcip = async (ccip: string, client: SuiJsonRpcClient) => {
   // Get CCIP publish tx info
   // Get the owner cap created in that tx.
   // Get owner of the ownercap object.
@@ -184,7 +184,11 @@ export const getOffRampForCcip = async (ccip: string, client: SuiClient) => {
   return findModulePackageId(client, 'offramp', ownerCapPackageIds as string[])
 }
 
-const findModulePackageId = async (client: SuiClient, moduleName: string, packageIds: string[]) => {
+const findModulePackageId = async (
+  client: SuiJsonRpcClient,
+  moduleName: string,
+  packageIds: string[],
+) => {
   const packagesInfo = await Promise.all(
     packageIds.map((pkgId) =>
       client.getNormalizedMoveModulesByPackage({

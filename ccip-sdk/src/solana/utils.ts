@@ -172,15 +172,17 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
 
   for (const [i, log] of logs.entries()) {
     // Track program calls and returns to maintain the address stack
-    let match
-    if ((match = log.match(/^Program (\w+) invoke\b/))) {
-      programStack.push(match[1]!)
-    } else if ((match = log.match(/^Program (\w+) (success|failed)\b/))) {
+    const matchInvoke = log.match(/^Program (\w+) invoke\b/)
+    const matchReturn = !matchInvoke && log.match(/^Program (\w+) (success|failed)\b/)
+    const matchLog = !matchInvoke && !matchReturn && log.match(/^Program (log|data): /)
+    if (matchInvoke) {
+      programStack.push(matchInvoke[1]!)
+    } else if (matchReturn) {
       // Pop from stack when program returns
       programStack.pop()
-    } else if ((match = log.match(/^Program (log|data): /))) {
+    } else if (matchLog) {
       // Extract the actual log data
-      const logData = log.slice(match[0].length)
+      const logData = log.slice(matchLog[0].length)
       const currentProgram = programStack[programStack.length - 1]!
       let topics: string[] = []
 

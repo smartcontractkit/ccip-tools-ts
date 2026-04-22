@@ -239,6 +239,14 @@ export type TokenTransferFee = {
 }
 
 /**
+ * Token price returned by {@link Chain.getTokenPrice}.
+ */
+export type TokenPrice = {
+  /** Price per whole token in the quote currency (USD by default, e.g., 9.11 for LINK at $9.11). */
+  price: number
+}
+
+/**
  * Total fees estimate returned by {@link Chain.getTotalFeesEstimate}.
  */
 export type TotalFeesEstimate = {
@@ -509,7 +517,7 @@ export type ExecuteOpts = (
 ) & {
   /** gasLimit or computeUnits limit override for the ccipReceive call */
   gasLimit?: number
-  /** For EVM, overrides gasLimit on tokenPool call */
+  /** For EVM (v1.5..v1.6), overrides gasLimit on tokenPool call */
   tokensGasLimit?: number
   /** For Solana, send report in chunks to OffRamp, to later execute */
   forceBuffer?: boolean
@@ -1173,7 +1181,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           ('gasLimit' in message && estimated > message.gasLimit) ||
           ('ccipReceiveGasLimit' in message && estimated > message.ccipReceiveGasLimit)
         ) {
-          opts_.gasLimit = estimated
+          opts_.gasLimit = Math.ceil(Number(estimated) * 1.1)
           opts_.tokensGasLimit ??= 0
         }
       } catch (err) {
@@ -1622,17 +1630,28 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPArgumentInvalidError} if extraArgs contains unknown fields for the detected version.
    */
   static buildMessageForDest(
+    this: ChainStatic,
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
   ): AnyMessage {
+    const receiver = this.getAddress(message.receiver) // validate receiver address for dest chain family
     const gasLimit = message.data && dataLength(message.data) ? DEFAULT_GAS_LIMIT : 0n
 
     // Detect if user wants V3 by checking for any V3-only field
     if (hasV3ExtraArgs(message.extraArgs)) {
       if (message.extraArgs)
         assertNoUnknownFields(message.extraArgs, V3_FIELDS, 'GenericExtraArgsV3')
+      let tokenReceiver = ''
+      if (
+        message.extraArgs &&
+        'tokenReceiver' in message.extraArgs &&
+        message.extraArgs.tokenReceiver
+      ) {
+        tokenReceiver = this.getAddress(message.extraArgs.tokenReceiver) // validate
+      }
       // V3 defaults (GenericExtraArgsV3)
       return {
         ...message,
+        receiver,
         extraArgs: {
           gasLimit,
           blockConfirmations: 0,
@@ -1640,9 +1659,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           ccvArgs: [],
           executor: '',
           executorArgs: '0x',
-          tokenReceiver: '',
           tokenArgs: '0x',
           ...message.extraArgs,
+          tokenReceiver,
         },
       }
     }
@@ -1651,6 +1670,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     // Default to V2 (GenericExtraArgsV2, aka EVMExtraArgsV2)
     return {
       ...message,
+      receiver,
       extraArgs: {
         gasLimit,
         allowOutOfOrderExecution: true,
@@ -1677,6 +1697,40 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   getTotalFeesEstimate(_opts: Omit<SendMessageOpts, 'approveMax'>): Promise<TotalFeesEstimate> {
     return Promise.reject(new CCIPNotImplementedError('getTotalFeesEstimate'))
+  }
+
+  /**
+   * Fetch the on-chain USD price of a token from the FeeQuoter or PriceRegistry.
+   *
+   * @remarks
+   * On EVM, the price contract is resolved via the Router's OnRamp:
+   * PriceRegistry for v1.2/v1.5 lanes, FeeQuoter for v1.6+ lanes.
+   * When `timestamp` is provided on EVM, the price is read at the
+   * block closest to that timestamp (requires archive node).
+   * On Solana and Aptos, the FeeQuoter is resolved directly from the
+   * Router config; `timestamp` is not yet supported and will be ignored.
+   *
+   * @param opts - Options identifying the token:
+   *   - `router` — Router address on this chain.
+   *   - `token` — Token address. Pass `ZeroAddress` for the native token
+   *     (auto-resolved to the wrapped native via {@link Chain.getNativeTokenForRouter}).
+   *   - `timestamp` — *(optional)* Unix timestamp in seconds. When provided
+   *     on EVM, returns the price at the block closest to this time.
+   *     Ignored on Solana and Aptos.
+   * @returns Promise resolving to {@link TokenPrice} with the USD price per whole token.
+   * @throws {@link CCIPNotImplementedError} if not implemented for this chain family
+   *
+   * @example
+   * ```typescript
+   * const { price } = await chain.getTokenPrice({
+   *   router: routerAddress,
+   *   token: linkAddress,
+   * })
+   * console.log(`LINK: $${price.toFixed(2)}`)
+   * ```
+   */
+  getTokenPrice(_opts: { router: string; token: string; timestamp?: number }): Promise<TokenPrice> {
+    return Promise.reject(new CCIPNotImplementedError('getTokenPrice'))
   }
 
   /**

@@ -394,6 +394,7 @@ export function isBase64(data: unknown): data is string {
  */
 export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
   if (Array.isArray(data)) return new Uint8Array(data)
+  if (data === '') return new Uint8Array(0)
   if (typeof data === 'string' && data.match(/^[0-9a-f]+[a-f][0-9a-f]+$/i)) data = '0x' + data
   else if (typeof data === 'string' && data.match(/^0X[0-9a-fA-F]+$/)) data = data.toLowerCase()
   if (typeof data === 'string' && data.startsWith('0x') && data.length % 2)
@@ -476,13 +477,14 @@ export function convertKeysToCamelCase(
   mapValues?: (value: unknown, key?: string) => unknown,
   key?: string,
 ): unknown {
-  if (Array.isArray(obj) && obj.every((v) => typeof v === 'number')) {
+  if (Array.isArray(obj) && obj.length && obj.every((v) => typeof v === 'number')) {
     return mapValues ? mapValues(obj, key) : obj
   } else if (Array.isArray(obj)) {
     return obj.map((v) => convertKeysToCamelCase(v, mapValues, key))
   }
 
-  if (obj == null || typeof obj !== 'object') return mapValues ? mapValues(obj, key) : obj
+  if (obj == null) return obj
+  if (typeof obj !== 'object') return mapValues ? mapValues(obj, key) : obj
 
   const record = obj as Record<string, unknown>
   const converted: Record<string, unknown> = {}

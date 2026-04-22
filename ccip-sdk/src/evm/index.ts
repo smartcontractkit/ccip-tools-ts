@@ -34,6 +34,7 @@ import {
   type LogFilter,
   type RateLimiterState,
   type TokenPoolRemote,
+  type TokenPrice,
   type TokenTransferFeeConfig,
   type TokenTransferFeeOpts,
   type TotalFeesEstimate,
@@ -41,7 +42,7 @@ import {
   LaneFeature,
 } from '../chain.ts'
 import {
-  CCIPAddressInvalidEvmError,
+  CCIPAddressInvalidError,
   CCIPBlockNotFoundError,
   CCIPContractNotRouterError,
   CCIPContractTypeInvalidError,
@@ -56,7 +57,6 @@ import {
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
-  CCIPVersionFeatureUnavailableError,
   CCIPVersionRequiresLaneError,
   CCIPVersionUnsupportedError,
   CCIPWalletInvalidError,
@@ -87,6 +87,7 @@ import {
   decodeOnRampAddress,
   getAddressBytes,
   getDataBytes,
+  getSomeBlockNumberBefore,
   networkInfo,
   parseTypeAndVersion,
 } from '../utils.ts'
@@ -137,6 +138,14 @@ type RateLimiterBucket = { tokens: bigint; isEnabled: boolean; capacity: bigint;
 /** Converts an on-chain bucket to the public RateLimiterState, stripping `isEnabled`. */
 function toRateLimiterState(b: RateLimiterBucket): RateLimiterState {
   return b.isEnabled ? { tokens: b.tokens, capacity: b.capacity, rate: b.rate } : null
+}
+
+// remote/alien addresses encoding for EVM
+// Addresses <32 bytes (EVM 20B, Aptos/Solana/Sui 32B) are zero-padded to 32 bytes;
+// Addresses >32 bytes (e.g., TON 4+32=36B) are used as raw bytes without padding
+function encodeAddressToEvm(address: BytesLike): string {
+  const bytes = getAddressBytes(address)
+  return bytes.length < 32 ? zeroPadValue(bytes, 32) : hexlify(bytes)
 }
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
@@ -250,6 +259,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { async: true, maxArgs: 1 })
     this.detectUsdcDomains = memoize(this.detectUsdcDomains.bind(this))
     this.resolveVerifier = memoize(this.resolveVerifier.bind(this))
+    this.getFeeQuoterFor = memoize(this.getFeeQuoterFor.bind(this), {
+      async: true,
+      maxArgs: 1,
+    })
   }
 
   /**
@@ -281,20 +294,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @returns A ready JSON-RPC provider.
    */
   static async _getProvider(url: string): Promise<JsonRpcApiProvider> {
-    let provider: JsonRpcApiProvider
     let providerReady: Promise<JsonRpcApiProvider>
     if (url.startsWith('ws')) {
-      const provider_ = new WebSocketProvider(url)
+      const provider = new WebSocketProvider(url)
       providerReady = new Promise((resolve, reject) => {
-        provider_.websocket.onerror = reject
-        provider_
+        provider.websocket.onerror = reject
+        provider
           ._waitUntilReady()
-          .then(() => resolve(provider_))
+          .then(() => resolve(provider))
           .catch(reject)
       })
-      provider = provider_
     } else if (url.startsWith('http')) {
-      provider = new JsonRpcProvider(url)
+      const provider = new JsonRpcProvider(url)
       providerReady = Promise.resolve(provider)
     } else {
       throw new CCIPDataFormatUnsupportedError(url)
@@ -555,16 +566,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    */
   static getAddress(bytes: BytesLike): string {
     if (isHexString(bytes, 20)) return getAddress(bytes)
-    bytes = getAddressBytes(bytes)
-    if (bytes.length < 20) throw new CCIPAddressInvalidEvmError(hexlify(bytes))
-    else if (bytes.length > 20) {
-      if (bytes.slice(0, bytes.length - 20).every((b) => b === 0)) {
-        bytes = bytes.slice(-20)
+    let bytes_ = getAddressBytes(bytes)
+    if (bytes_.length < 20) throw new CCIPAddressInvalidError(bytes, this.family)
+    else if (bytes_.length > 20) {
+      if (bytes_.slice(0, bytes_.length - 20).every((b) => b === 0)) {
+        bytes_ = bytes_.slice(-20)
       } else {
-        throw new CCIPAddressInvalidEvmError(hexlify(bytes))
+        throw new CCIPAddressInvalidError(hexlify(bytes_), this.family)
       }
     }
-    return getAddress(hexlify(bytes))
+    return getAddress(hexlify(bytes_))
   }
 
   /**
@@ -926,13 +937,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @throws {@link CCIPContractNotRouterError} if address is not a Router, OnRamp, or OffRamp
    */
   async getTokenAdminRegistryFor(address: string): Promise<string> {
-    let [type, version, typeAndVersion] = await this.typeAndVersion(address)
+    let [type, version] = await this.typeAndVersion(address)
     if (type === 'TokenAdminRegistry') {
       return address
     } else if (type === 'Router') {
       address = await this._getSomeOnRampFor(address)
-      ;[type, version, typeAndVersion] = await this.typeAndVersion(address)
+      ;[type, version] = await this.typeAndVersion(address)
     } else if (!type.includes('Ramp')) {
+      const [, , typeAndVersion] = await this.typeAndVersion(address)
       throw new CCIPContractNotRouterError(address, typeAndVersion)
     }
     const contract = new Contract(
@@ -970,17 +982,26 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @throws {@link CCIPVersionFeatureUnavailableError} if contract version is below v1.6
    */
   async getFeeQuoterFor(address: string): Promise<string> {
-    let [type, version, typeAndVersion] = await this.typeAndVersion(address)
-    if (type === 'FeeQuoter') {
+    const [type, version, typeAndVersion] = await this.typeAndVersion(address)
+    if (type === 'FeeQuoter' || type === 'PriceRegistry') {
       return address
     } else if (type === 'Router') {
-      address = await this._getSomeOnRampFor(address)
-      ;[type, version, typeAndVersion] = await this.typeAndVersion(address)
+      return this.getFeeQuoterFor(await this._getSomeOnRampFor(address)) // use cache
     } else if (!type.includes('Ramp')) {
       throw new CCIPContractNotRouterError(address, typeAndVersion)
     }
-    if (version < CCIPVersion.V1_6)
-      throw new CCIPVersionFeatureUnavailableError('feeQuoter', version, 'v1.6')
+
+    if (version < CCIPVersion.V1_6) {
+      const contract = new Contract(
+        address,
+        version === CCIPVersion.V1_2
+          ? interfaces.EVM2EVMOnRamp_v1_2
+          : interfaces.EVM2EVMOnRamp_v1_5,
+        this.provider,
+      ) as unknown as TypedContract<typeof EVM2EVMOnRamp_1_2_ABI | typeof EVM2EVMOnRamp_1_5_ABI>
+      const { priceRegistry } = await contract.getDynamicConfig()
+      return priceRegistry as string
+    }
 
     const isOnRamp = type.includes('OnRamp')
     const contract = new Contract(
@@ -1017,7 +1038,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       this.provider,
     ) as unknown as TypedContract<typeof Router_ABI>
     return contract.getFee(destChainSelector, {
-      receiver: zeroPadValue(getAddressBytes(populatedMessage.receiver), 32),
+      receiver: encodeAddressToEvm(populatedMessage.receiver),
       data: hexlify(populatedMessage.data ?? '0x'),
       tokenAmounts: populatedMessage.tokenAmounts ?? [],
       feeToken: populatedMessage.feeToken ?? ZeroAddress,
@@ -1133,6 +1154,52 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return undefined
   }
 
+  /** {@inheritDoc Chain.getTokenPrice} */
+  override async getTokenPrice(opts: {
+    router: string
+    token: string
+    timestamp?: number
+  }): Promise<TokenPrice> {
+    let { token } = opts
+
+    // Resolve native token (ZeroAddress) to wrapped native
+    if (token === ZeroAddress) {
+      token = await this.getNativeTokenForRouter(opts.router)
+    }
+
+    const priceContractAddress = await this.getFeeQuoterFor(opts.router)
+
+    // Both PriceRegistry (v1.2/v1.5) and FeeQuoter (v1.6+) expose
+    // getTokenPrice(address) → { value: uint224, timestamp: uint32 }
+    const contract = new Contract(
+      priceContractAddress,
+      interfaces.FeeQuoter,
+      this.provider,
+    ) as unknown as TypedContract<typeof FeeQuoter_ABI>
+
+    // If timestamp provided, resolve to block number for historical query
+    let blockTag: number | undefined
+    if (opts.timestamp != null) {
+      const { number: latestBlock } = (await this.provider.getBlock('latest'))!
+      blockTag = await getSomeBlockNumberBefore(
+        async (block: number) => (await this.provider.getBlock(block))!.timestamp,
+        latestBlock,
+        opts.timestamp,
+        this,
+      )
+    }
+
+    const [result, { decimals }] = await Promise.all([
+      blockTag != null
+        ? contract.getTokenPrice.staticCall(token, { blockTag })
+        : contract.getTokenPrice(token),
+      this.getTokenInfo(token),
+    ])
+
+    const rawPrice = BigInt(result.value)
+    return { price: Number(rawPrice) * 10 ** (decimals - 36) }
+  }
+
   /** {@inheritDoc Chain.getTotalFeesEstimate} */
   override async getTotalFeesEstimate(
     opts: Parameters<Chain['getTotalFeesEstimate']>[0],
@@ -1204,7 +1271,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         return {
           ccipFee,
           tokenTransferFee: {
-            feeDeducted: (BigInt(amount) * BigInt(tier.minimumFee)) / 10_000n,
+            feeDeducted:
+              (BigInt(amount) * BigInt(Math.round(tier.minimumFee * 1000))) / 10_000_000n,
             bps: tier.minimumFee,
           },
         }
@@ -1257,7 +1325,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
 
     const feeToken = message.feeToken ?? ZeroAddress
-    const receiver = zeroPadValue(getAddressBytes(message.receiver), 32)
+    const receiver = encodeAddressToEvm(message.receiver)
     const data = hexlify(message.data ?? '0x')
     const extraArgs = hexlify(
       (this.constructor as typeof EVMChain).encodeExtraArgs(message.extraArgs),
@@ -1374,7 +1442,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   async generateUnsignedExecute(
     opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<UnsignedEVMTx> {
-    const { offRamp, input, gasLimit } = await this.resolveExecuteOpts(opts)
+    const { offRamp, input, gasLimit, tokensGasLimit } = await this.resolveExecuteOpts(opts)
     if ('verifications' in input) {
       const contract = new Contract(
         offRamp,
@@ -1388,12 +1456,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       const txGasLimit = await contract.executeSingleMessage.estimateGas(
         {
           ...message,
-          onRampAddress: zeroPadValue(getAddressBytes(message.onRampAddress), 32),
-          sender: zeroPadValue(getAddressBytes(message.sender), 32),
+          onRampAddress: encodeAddressToEvm(message.onRampAddress),
+          sender: encodeAddressToEvm(message.sender),
           tokenTransfer: message.tokenTransfer.map((ta) => ({
             ...ta,
-            sourcePoolAddress: zeroPadValue(getAddressBytes(ta.sourcePoolAddress), 32),
-            sourceTokenAddress: zeroPadValue(getAddressBytes(ta.sourceTokenAddress), 32),
+            sourcePoolAddress: encodeAddressToEvm(ta.sourcePoolAddress),
+            sourceTokenAddress: encodeAddressToEvm(ta.sourceTokenAddress),
           })),
           executionGasLimit: BigInt(message.executionGasLimit),
           ccipReceiveGasLimit: BigInt(message.ccipReceiveGasLimit),
@@ -1454,29 +1522,23 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           [
             {
               receiverExecutionGasLimit: BigInt(gasLimit ?? 0),
-              tokenGasOverrides: input.message.tokenAmounts.map(() =>
-                BigInt(opts.tokensGasLimit ?? gasLimit ?? 0),
-              ),
+              tokenGasOverrides: input.message.tokenAmounts.map(() => BigInt(tokensGasLimit ?? 0)),
             },
           ],
         )
         break
       }
       case CCIPVersion.V1_6: {
-        // normalize message
-        const senderBytes = getAddressBytes(input.message.sender)
-        // Addresses ≤32 bytes (EVM 20B, Aptos/Solana/Sui 32B) are zero-padded to 32 bytes;
-        // Addresses >32 bytes (e.g., TON 36B) are used as raw bytes without padding
-        const sender =
-          senderBytes.length <= 32 ? zeroPadValue(senderBytes, 32) : hexlify(senderBytes)
+        const sender = encodeAddressToEvm(input.message.sender)
         const tokenAmounts = (input.message as CCIPMessage_V1_6_EVM).tokenAmounts.map((ta) => ({
           ...ta,
-          sourcePoolAddress: zeroPadValue(getAddressBytes(ta.sourcePoolAddress), 32),
+          sourcePoolAddress: encodeAddressToEvm(ta.sourcePoolAddress),
           extraData: hexlify(getDataBytes(ta.extraData)),
         }))
         const message = {
           ...(input.message as CCIPMessage_V1_6_EVM),
           sender,
+          data: hexlify(getDataBytes(input.message.data || '0x')),
           tokenAmounts,
         }
         const contract = new Contract(
@@ -1510,7 +1572,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
               {
                 receiverExecutionGasLimit: BigInt(gasLimit ?? 0),
                 tokenGasOverrides: input.message.tokenAmounts.map(() =>
-                  BigInt(opts.tokensGasLimit ?? gasLimit ?? 0),
+                  BigInt(tokensGasLimit ?? 0),
                 ),
               },
             ],
@@ -1533,7 +1595,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       // if message requested gasLimit, ensure execution more than 100k above requested, otherwise it's clearly a try/catch fail
       txGasLimit = BigInt(input.message.gasLimit) + 200000n
     else if ('gasLimit' in input.message && !input.message.gasLimit && txGasLimit < 240000n)
-      // if message didn't request gasLimit, ensure execution gasLimit is above 240k (empiric)
+      // if message didn't request gasLimit, ensure minimum execution gasLimit (empiric)
       txGasLimit = 240000n
     manualExecTx.gasLimit = txGasLimit
 
@@ -2018,9 +2080,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
     const { messageId, sourceChainSelector } = opts
-    let opts_: Parameters<Chain['getExecutionReceipts']>[0] & Parameters<EVMChain['getLogs']>[0] =
-      opts
     const [, version] = await this.typeAndVersion(opts.offRamp)
+    let opts_: Parameters<Chain['getExecutionReceipts']>[0] & Parameters<EVMChain['getLogs']>[0]
     if (version < CCIPVersion.V1_6) {
       opts_ = {
         ...opts,

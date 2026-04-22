@@ -3,7 +3,7 @@
  * Queries native or token balance for an address.
  */
 
-import { type ChainStatic, networkInfo } from '@chainlink/ccip-sdk/src/index.ts'
+import { type ChainStatic, bigIntReplacer, networkInfo } from '@chainlink/ccip-sdk/src/index.ts'
 import { formatUnits } from 'ethers'
 import type { Argv } from 'yargs'
 
@@ -67,7 +67,7 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
 }
 
 async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
-  const { logger } = ctx
+  const { output } = ctx
   const networkName = networkInfo(argv.network).name
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const chain = await getChain(networkName)
@@ -92,7 +92,7 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
 
   switch (argv.format) {
     case Format.json:
-      logger.log(
+      output.write(
         JSON.stringify(
           {
             network: networkName,
@@ -102,13 +102,13 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
             formatted,
             ...tokenInfo,
           },
-          null,
+          bigIntReplacer,
           2,
         ),
       )
       return
     case Format.log:
-      logger.log(
+      output.write(
         `Balance of`,
         tokenInfo ? argv.token : tokenLabel,
         ':',

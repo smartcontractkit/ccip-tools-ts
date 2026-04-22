@@ -8,6 +8,7 @@ import {
   Cell,
   Slice,
   beginCell,
+  fromNano,
   toNano,
 } from '@ton/core'
 import { TonClient } from '@ton/ton'
@@ -28,6 +29,7 @@ import { streamTransactionsForAddress } from './logs.ts'
 import { encodeExtraArgsCell, generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
 import {
   type ChainContext,
+  type ChainStatic,
   type GetBalanceOpts,
   type LogFilter,
   type TokenTransferFeeOpts,
@@ -36,7 +38,6 @@ import {
 import {
   CCIPArgumentInvalidError,
   CCIPExecutionReportChainMismatchError,
-  CCIPExtraArgsInvalidError,
   CCIPHttpError,
   CCIPNotImplementedError,
   CCIPReceiptNotFoundError,
@@ -50,6 +51,7 @@ import type { LeafHasher } from '../hasher/common.ts'
 import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
+  type AnyMessage,
   type CCIPExecution,
   type CCIPRequest,
   type ChainLog,
@@ -104,6 +106,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
   static readonly family = ChainFamily.TON
   static readonly decimals = 9 // TON uses 9 decimals (nanotons)
+  static readonly extraArgGasLimitMin = toNano('0.025') // 0.025 TON
   readonly rateLimitedFetch: typeof fetch
   readonly provider: TonClient
 
@@ -997,6 +1000,31 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
     return false
   }
+
+  /**
+   * Returns a copy of a message, populating missing fields like `extraArgs` with defaults.
+   * Ensures TON-bound messages satisfy the minimum destination gas requirement.
+   *
+   * @param message - AnyMessage (from source), containing at least `receiver`
+   * @returns A message suitable for `sendMessage` to a TON destination chain
+   * @throws {@link CCIPArgumentInvalidError} if extraArgs.gasLimit is below the TON minimum
+   */
+  static override buildMessageForDest(
+    message: Parameters<ChainStatic['buildMessageForDest']>[0],
+  ): AnyMessage {
+    const built = super.buildMessageForDest(message)
+    const gasLimit = 'gasLimit' in built.extraArgs ? built.extraArgs.gasLimit : undefined
+
+    if (!gasLimit || gasLimit < this.extraArgGasLimitMin) {
+      throw new CCIPArgumentInvalidError(
+        'extraArgs.gasLimit',
+        `(val=${gasLimit}) must be at least ${this.extraArgGasLimitMin} (${fromNano(this.extraArgGasLimitMin)} TON) for TON destinations`,
+      )
+    }
+
+    return built
+  }
+
   /**
    * Gets the leaf hasher for TON destination chains.
    * @param lane - Lane configuration.
@@ -1115,25 +1143,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * {@inheritDoc Chain.generateUnsignedExecute}
    * @throws {@link CCIPExtraArgsInvalidError} if extra args are not EVMExtraArgsV2 format
    */
-  generateUnsignedExecute(
+  async generateUnsignedExecute(
     opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<UnsignedTONTx> {
-    if (
-      !(
-        'input' in opts &&
-        'message' in opts.input &&
-        'allowOutOfOrderExecution' in opts.input.message &&
-        'gasLimit' in opts.input.message
-      )
-    ) {
-      throw new CCIPExtraArgsInvalidError('TON')
-    }
-    const { offRamp, input } = opts
+    const resolved = await this.resolveExecuteOpts(opts)
+    const { offRamp, input } = resolved
 
     const unsigned = generateUnsignedExecuteReport(
       offRamp,
       input as ExecutionInput<CCIPMessage_V1_6_EVM>,
-      opts,
+      resolved,
     )
 
     return Promise.resolve({
@@ -1148,16 +1167,17 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @throws {@link CCIPReceiptNotFoundError} if execution receipt not found within timeout
    */
   async execute(opts: Parameters<Chain['execute']>[0]): Promise<CCIPExecution> {
-    if (!('input' in opts && 'message' in opts.input))
-      throw new CCIPExecutionReportChainMismatchError('TON')
-    const { offRamp, wallet } = opts
-    if (!isTONWallet(wallet)) {
-      throw new CCIPWalletInvalidError(wallet)
-    }
+    const { wallet } = opts
+    if (!isTONWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
     const payer = await wallet.getAddress()
 
+    const resolved = await this.resolveExecuteOpts(opts)
+    const { offRamp } = resolved
+    if (!('message' in resolved.input)) throw new CCIPExecutionReportChainMismatchError('TON')
+    const message = resolved.input.message as CCIPMessage_V1_6_EVM
+
     const { family: _, ...unsigned } = await this.generateUnsignedExecute({
-      ...opts,
+      ...resolved,
       payer,
     })
 
@@ -1168,7 +1188,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       ...unsigned,
     })
 
-    const message = opts.input.message as CCIPMessage_V1_6_EVM
     for await (const exec of this.getExecutionReceipts({
       offRamp,
       messageId: message.messageId,

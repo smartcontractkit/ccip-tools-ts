@@ -1,7 +1,10 @@
+import type { BytesLike } from 'ethers'
+
 import { type CCIPErrorOptions, CCIPError } from './CCIPError.ts'
 import { CCIPErrorCode } from './codes.ts'
 import { isTransientHttpStatus } from '../http-status.ts'
-import { bigIntReplacer } from '../utils.ts'
+import type { ChainFamily } from '../types.ts'
+import { bigIntReplacer, getAddressBytes, util } from '../utils.ts'
 
 // Chain/Network
 
@@ -1862,14 +1865,22 @@ export class CCIPMerkleInternalError extends CCIPError {
  * }
  * ```
  */
-export class CCIPAddressInvalidEvmError extends CCIPError {
-  override readonly name = 'CCIPAddressInvalidEvmError'
-  /** Creates an EVM address invalid error. */
-  constructor(address: string, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.ADDRESS_INVALID_EVM, `Invalid EVM address: ${address}`, {
+export class CCIPAddressInvalidError extends CCIPError {
+  override readonly name = 'CCIPAddressInvalidError'
+  /** Creates an address invalid error for the given chain family. */
+  constructor(address: BytesLike, family: ChainFamily, options?: CCIPErrorOptions) {
+    const len = address.length
+    const type = typeof address === 'object' ? address.constructor.name : typeof address
+    let bytesLen
+    try {
+      bytesLen = getAddressBytes(address).length
+    } catch (err) {
+      bytesLen = (err as Error).message
+    }
+    super(CCIPErrorCode.ADDRESS_INVALID, `Invalid ${family} address: ${util.inspect(address)}`, {
       ...options,
       isTransient: false,
-      context: { ...options?.context, address },
+      context: { ...options?.context, address, family, len, type, bytesLen },
     })
   }
 }
@@ -2566,34 +2577,6 @@ export class CCIPAptosLogInvalidError extends CCIPError {
 }
 
 /**
- * Thrown when Aptos address is invalid.
- *
- * @example
- * ```typescript
- * import { CCIPDataFormatUnsupportedError } from '@chainlink/ccip-sdk'
- *
- * try {
- *   AptosChain.getAddress('invalid-address')
- * } catch (error) {
- *   if (error instanceof CCIPDataFormatUnsupportedError) {
- *     console.log(`Invalid address: ${error.message}`)
- *   }
- * }
- * ```
- */
-export class CCIPAptosAddressInvalidError extends CCIPError {
-  override readonly name = 'CCIPAptosAddressInvalidError'
-  /** Creates an Aptos address invalid error. */
-  constructor(address: string, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.ADDRESS_INVALID_APTOS, `Invalid aptos address: "${address}"`, {
-      ...options,
-      isTransient: false,
-      context: { ...options?.context, address },
-    })
-  }
-}
-
-/**
  * Thrown when Aptos can only encode specific extra args types.
  *
  * @example
@@ -2970,6 +2953,21 @@ export class CCIPInsufficientBalanceError extends CCIPError {
         context: { ...options?.context, have, need, symbol },
       },
     )
+  }
+}
+
+/**
+ * Thrown when an operation requires user interaction (prompt, Ledger USB) but the CLI
+ * is running in non-interactive mode (`--no-interactive` or piped stdin).
+ */
+export class CCIPInteractiveRequiredError extends CCIPError {
+  override readonly name = 'CCIPInteractiveRequiredError'
+  /** Creates an interactive-required error. */
+  constructor(message: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.INTERACTIVE_REQUIRED, message, {
+      ...options,
+      isTransient: false,
+    })
   }
 }
 

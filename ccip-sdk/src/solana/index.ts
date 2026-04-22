@@ -35,10 +35,12 @@ import {
   type LogFilter,
   type TokenInfo,
   type TokenPoolRemote,
+  type TokenPrice,
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
 import {
+  CCIPAddressInvalidError,
   CCIPArgumentInvalidError,
   CCIPBlockTimeNotFoundError,
   CCIPContractNotRouterError,
@@ -112,6 +114,7 @@ import { IDL as BURN_MINT_TOKEN_POOL } from './idl/1.6.0/BURN_MINT_TOKEN_POOL.ts
 import { IDL as CCIP_CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
+import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
 import { getTransactionsForAddress } from './logs.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
@@ -1021,7 +1024,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     } catch (_) {
       // pass
     }
-    return encodeBase58(getDataBytes(bytes))
+    try {
+      const decoded = getDataBytes(bytes)
+      if (decoded.length === 32) return encodeBase58(decoded)
+    } catch {
+      // pass
+    }
+    throw new CCIPAddressInvalidError(bytes, this.family)
   }
 
   /**
@@ -1141,6 +1150,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     opts: Parameters<Chain['execute']>[0] & {
       // when cleaning leftover LookUp Tables, wait deactivation grace period (~513 slots) then close ALT
       waitDeactivation?: boolean
+      clearLeftoverAccounts?: boolean
     },
   ): Promise<CCIPExecution> {
     const wallet = opts.wallet
@@ -1155,17 +1165,22 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         })
         hash = await simulateAndSendTxs(this, wallet, unsigned, opts.gasLimit)
       } catch (err) {
-        if (
-          !(err instanceof Error) ||
-          !['encoding overruns Uint8Array', 'too large'].some((e) => err.message.includes(e))
-        )
-          throw err
-        // in case of failure to serialize a report, first try buffering (because it gets
-        // auto-closed upon successful execution), then ALTs (need a grace period ~3min after
-        // deactivation before they can be closed/recycled)
-        if (!opts.forceBuffer) opts = { ...opts, forceBuffer: true }
-        else if (!opts.forceLookupTable) opts = { ...opts, forceLookupTable: true }
-        else throw err
+        if (!(err instanceof Error)) throw err
+        if (err.message.includes('AlreadyContainsChunk')) {
+          // stale buffer from a previous failed attempt; close it and retry
+          if (!opts.clearLeftoverAccounts) {
+            opts = { ...opts, clearLeftoverAccounts: true }
+          } else throw err
+        } else if (
+          ['encoding overruns Uint8Array', 'too large'].some((e) => err.message.includes(e))
+        ) {
+          // in case of failure to serialize a report, first try buffering (because it gets
+          // auto-closed upon successful execution), then ALTs (need a grace period ~3min after
+          // deactivation before they can be closed/recycled)
+          if (!opts.forceBuffer) opts = { ...opts, forceBuffer: true }
+          else if (!opts.forceLookupTable) opts = { ...opts, forceLookupTable: true }
+          else throw err
+        } else throw err
       }
     } while (!hash)
 
@@ -1567,6 +1582,43 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     )
   }
 
+  /** {@inheritDoc Chain.getTokenPrice} */
+  override async getTokenPrice(opts: {
+    router: string
+    token: string
+    timestamp?: number
+  }): Promise<TokenPrice> {
+    if (opts.timestamp != null) {
+      this.logger.warn(
+        'getTokenPrice: timestamp parameter not yet supported on Solana, returning latest price',
+      )
+    }
+    const { feeQuoter } = await this._getRouterConfig(opts.router)
+
+    // Resolve native SOL to wrapped SOL (NATIVE_MINT)
+    const tokenMint =
+      !opts.token || opts.token === PublicKey.default.toBase58()
+        ? NATIVE_MINT
+        : new PublicKey(opts.token)
+
+    const feeQuoterProgram = new Program(FEE_QUOTER_IDL, feeQuoter, {
+      connection: this.connection,
+    })
+
+    const [billingTokenConfigPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('fee_billing_token_config'), tokenMint.toBuffer()],
+      feeQuoter,
+    )
+
+    const [billingTokenConfigWrapper, { decimals }] = await Promise.all([
+      feeQuoterProgram.account.billingTokenConfigWrapper.fetch(billingTokenConfigPda),
+      this.getTokenInfo(tokenMint.toBase58()),
+    ])
+
+    const usdPerToken = billingTokenConfigWrapper.config.usdPerToken
+    return { price: Number(toBigInt(Buffer.from(usdPerToken.value))) * 10 ** (decimals - 36) }
+  }
+
   /**
    * Gets the router configuration from the Config PDA.
    * @param router - Router program address.
@@ -1657,13 +1709,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         : true
     const [tokenReceiver, receiver] =
       message.extraArgs && 'tokenReceiver' in message.extraArgs && !!message.extraArgs.tokenReceiver
-        ? [message.extraArgs.tokenReceiver, message.receiver] // explicit tokenReceiver, keep both
+        ? [this.getAddress(message.extraArgs.tokenReceiver), this.getAddress(message.receiver)] // explicit tokenReceiver, keep both
         : message.tokenAmounts?.length
           ? [this.getAddress(message.receiver), PublicKey.default.toBase58()] // if sending tokens without tokenReceiver, set receiver to default and tokenReceiver to message.receiver
-          : [PublicKey.default.toBase58(), message.receiver] // otherwise, tokenReceiver is default and receiver is message.receiver
+          : [PublicKey.default.toBase58(), this.getAddress(message.receiver)] // otherwise, tokenReceiver is default and receiver is message.receiver
     const accounts =
       message.extraArgs && 'accounts' in message.extraArgs && message.extraArgs.accounts != null
-        ? message.extraArgs.accounts
+        ? message.extraArgs.accounts.map(this.getAddress.bind(this))
         : []
     const accountIsWritableBitmap =
       message.extraArgs &&

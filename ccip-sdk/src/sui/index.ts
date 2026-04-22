@@ -1,7 +1,7 @@
 import { bcs } from '@mysten/sui/bcs'
-import { SuiClient } from '@mysten/sui/client'
 import type { Keypair } from '@mysten/sui/cryptography'
 import { SuiGraphQLClient } from '@mysten/sui/graphql'
+import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { isValidSuiAddress, isValidTransactionDigest, normalizeSuiAddress } from '@mysten/sui/utils'
 import { type BytesLike, dataLength, hexlify, isBytesLike, isHexString } from 'ethers'
@@ -77,7 +77,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   static readonly decimals = 9 // SUI has 9 decimals
 
   override readonly network: NetworkInfo<typeof ChainFamily.Sui>
-  readonly client: SuiClient
+  readonly client: SuiJsonRpcClient
   readonly graphqlClient: SuiGraphQLClient
 
   /**
@@ -85,7 +85,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @param client - Sui client for interacting with the Sui network.
    * @param network - Network information for this chain.
    */
-  constructor(client: SuiClient, network: NetworkInfo<typeof ChainFamily.Sui>, ctx?: ChainContext) {
+  constructor(
+    client: SuiJsonRpcClient,
+    network: NetworkInfo<typeof ChainFamily.Sui>,
+    ctx?: ChainContext,
+  ) {
     super(network, ctx)
 
     this.client = client
@@ -93,19 +97,24 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     // TODO: Graphql client should come from config
     let graphqlUrl: string
+    let suiNetwork: string
     if (this.network.name === 'sui-mainnet') {
       // Sui mainnet (sui:1)
       graphqlUrl = 'https://graphql.mainnet.sui.io/graphql'
+      suiNetwork = 'mainnet'
     } else if (this.network.name === 'sui-testnet') {
       // Sui testnet (sui:2)
       graphqlUrl = 'https://graphql.testnet.sui.io/graphql'
+      suiNetwork = 'testnet'
     } else {
       // Localnet (sui:4) or unknown
       graphqlUrl = 'https://graphql.devnet.sui.io/graphql'
+      suiNetwork = 'devnet'
     }
 
     this.graphqlClient = new SuiGraphQLClient({
       url: graphqlUrl,
+      network: suiNetwork,
     })
   }
 
@@ -117,10 +126,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @throws {@link CCIPError} if chain identifier is not supported
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<SuiChain> {
-    const client = new SuiClient({ url })
+    // Create a temporary client to detect the network (network name unknown yet)
+    const tempClient = new SuiJsonRpcClient({ url, network: url })
 
     // Get chain identifier from the client and map to network info format
-    const rawChainId = await client.getChainIdentifier().catch(() => null)
+    const rawChainId = await tempClient.getChainIdentifier().catch(() => null)
     if (rawChainId === null) {
       throw new CCIPDataFormatUnsupportedError(`Unable to fetch chain identifier from URL: ${url}`)
     }
@@ -128,12 +138,16 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     // Map Sui chain identifiers to our network info format
     // Reference: https://docs.sui.io/guides/developer/getting-started/connect
     let chainId: string
+    let suiNetwork: string
     if (rawChainId === '35834a8a') {
       chainId = 'sui:1' // mainnet
+      suiNetwork = 'mainnet'
     } else if (rawChainId === '4c78adac') {
       chainId = 'sui:2' // testnet
+      suiNetwork = 'testnet'
     } else if (rawChainId === 'b0c08dea') {
       chainId = 'sui:4' // devnet
+      suiNetwork = 'devnet'
     } else {
       throw new CCIPError(
         CCIPErrorCode.CHAIN_FAMILY_UNSUPPORTED,
@@ -141,6 +155,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       )
     }
 
+    const client = new SuiJsonRpcClient({ url, network: suiNetwork })
     const network = networkInfo(chainId) as NetworkInfo<typeof ChainFamily.Sui>
     const chain = new SuiChain(client, network, ctx)
     return Object.assign(chain, { url })
@@ -530,7 +545,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
     }
 
-    let metadata = null
+    let metadata
     try {
       metadata = await this.client.getCoinMetadata({ coinType })
     } catch (e) {
@@ -848,36 +863,38 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       message.extraArgs.allowOutOfOrderExecution != null
         ? message.extraArgs.allowOutOfOrderExecution
         : true
-    const tokenReceiver =
-      message.extraArgs &&
-      'tokenReceiver' in message.extraArgs &&
-      message.extraArgs.tokenReceiver != null &&
-      typeof message.extraArgs.tokenReceiver === 'string'
-        ? message.extraArgs.tokenReceiver
+    const [tokenReceiver, receiver] =
+      message.extraArgs && 'tokenReceiver' in message.extraArgs && !!message.extraArgs.tokenReceiver
+        ? [this.getAddress(message.extraArgs.tokenReceiver), this.getAddress(message.receiver)] // explicit tokenReceiver, keep both
         : message.tokenAmounts?.length
-          ? this.getAddress(message.receiver)
-          : '0x0000000000000000000000000000000000000000000000000000000000000000'
+          ? [
+              this.getAddress(message.receiver),
+              '0x0000000000000000000000000000000000000000000000000000000000000000',
+            ] // if sending tokens without tokenReceiver, set receiver to default and tokenReceiver to message.receiver
+          : [
+              '0x0000000000000000000000000000000000000000000000000000000000000000',
+              this.getAddress(message.receiver),
+            ] // otherwise, tokenReceiver is default and receiver is message.receiver
     const receiverObjectIds =
       message.extraArgs &&
       'receiverObjectIds' in message.extraArgs &&
       message.extraArgs.receiverObjectIds?.length
-        ? message.extraArgs.receiverObjectIds
+        ? message.extraArgs.receiverObjectIds.map(this.getAddress.bind(this))
         : message.extraArgs && 'accounts' in message.extraArgs && message.extraArgs.accounts?.length
-          ? message.extraArgs.accounts // populates receiverObjectIds from accounts
+          ? message.extraArgs.accounts.map(this.getAddress.bind(this)) // populates receiverObjectIds from accounts
           : []
+
     const extraArgs: SuiExtraArgsV1 = {
       gasLimit,
       allowOutOfOrderExecution,
       tokenReceiver,
       receiverObjectIds,
     }
+
     return {
       ...message,
+      receiver,
       extraArgs,
-      // if tokenReceiver, then message.receiver can (must?) be default
-      ...(!!message.tokenAmounts?.length && {
-        receiver: '0x0000000000000000000000000000000000000000000000000000000000000000',
-      }),
     }
   }
 }

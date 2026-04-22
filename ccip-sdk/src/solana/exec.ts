@@ -13,13 +13,15 @@ import {
 import BN from 'bn.js'
 import { hexlify } from 'ethers'
 
+import { CCIPError } from '../errors/CCIPError.ts'
+import { CCIPErrorCode } from '../errors/codes.ts'
 import { CCIPSolanaLookupTableNotFoundError } from '../errors/index.ts'
 import { type ExecutionInput, type WithLogger, ChainFamily } from '../types.ts'
+import { bytesToBuffer, getDataBytes, toLeArray } from '../utils.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
 import type { CCIPMessage_V1_6_Solana, UnsignedSolanaTx } from './types.ts'
-import { bytesToBuffer, getDataBytes, toLeArray } from '../utils.ts'
-import { simulationProvider } from './utils.ts'
+import { simulateTransaction, simulationProvider } from './utils.ts'
 
 type ExecAlt = {
   initialIxs: TransactionInstruction[]
@@ -415,6 +417,7 @@ async function autoDeriveExecutionAccounts({
   let tokenIndex = 0
 
   const [configPDA] = PublicKey.findProgramAddressSync([Buffer.from('config')], offramp.programId)
+  const resolvedLookupTables: AddressLookupTableAccount[] = []
 
   while (stage) {
     const params: IdlTypes<typeof CCIP_OFFRAMP_IDL>['DeriveAccountsExecuteParams'] = {
@@ -438,19 +441,41 @@ async function autoDeriveExecutionAccounts({
       }))
     }
 
-    // Execute as a view call to get the response
-    const response = (await offramp.methods
+    // Build instruction and simulate as V0 transaction (supports address lookup tables)
+    const ix = await offramp.methods
       .deriveAccountsExecute(params, stage)
       .accounts({
         config: configPDA,
       })
       .remainingAccounts(askWith)
-      .view()
-      .catch((error: unknown) => {
-        logger.error('Error deriving accounts:', error)
-        logger.error('Params:', params)
-        throw error as Error
-      })) as IdlTypes<typeof CCIP_OFFRAMP_IDL>['DeriveAccountsResponse']
+      .instruction()
+
+    const simResult = await simulateTransaction(
+      { connection: offramp.provider.connection, logger },
+      {
+        payerKey: payer,
+        instructions: [ix],
+        addressLookupTableAccounts: resolvedLookupTables.length ? resolvedLookupTables : undefined,
+      },
+    ).catch((error: unknown) => {
+      logger.error('Error deriving accounts:', error)
+      logger.error('Params:', params)
+      throw error as Error
+    })
+
+    // Decode return data from simulation
+    if (!simResult.returnData?.data[0]) {
+      throw new CCIPError(
+        CCIPErrorCode.SOLANA_SIMULATION_NO_RETURN_DATA,
+        'No return data from deriveAccountsExecute simulation',
+      )
+    }
+    const response: IdlTypes<typeof CCIP_OFFRAMP_IDL>['DeriveAccountsResponse'] =
+      offramp.coder.types.decode(
+        'DeriveAccountsResponse',
+        // returnData.data[0] is base64-encoded
+        bytesToBuffer(simResult.returnData.data[0]),
+      )
 
     // Check if we're at the start of a token transfer
     const isStartOfToken = /^TokenTransferStaticAccounts\/\d+\/0$/.test(response.currentStage)
@@ -480,8 +505,15 @@ async function autoDeriveExecutionAccounts({
       isSigner: meta.isSigner,
     }))
 
-    // Collect lookup tables
-    lookupTables.push(...response.lookUpTablesToSave)
+    // Collect lookup tables and resolve them for next iteration's V0 simulation
+    for (const lt of response.lookUpTablesToSave) {
+      const res = await offramp.provider.connection.getAddressLookupTable(lt)
+      if (!res.value) {
+        throw new CCIPSolanaLookupTableNotFoundError(lt.toBase58())
+      }
+      lookupTables.push(lt)
+      resolvedLookupTables.push(res.value)
+    }
 
     stage = response.nextStage
   }

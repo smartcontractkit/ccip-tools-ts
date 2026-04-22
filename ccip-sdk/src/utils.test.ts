@@ -722,6 +722,26 @@ describe('convertKeysToCamelCase', () => {
     })
   })
 
+  it('should not pass null/undefined values to mapValues callback', () => {
+    const input = {
+      valid_value: '42',
+      null_value: null,
+      undefined_value: undefined,
+      nested: { also_null: null, ok_value: '7' },
+    }
+    const mapValues = (value: unknown) => {
+      if (value == null) throw new Error('mapValues should not receive null/undefined')
+      if (typeof value === 'string' && value.match(/^\d+$/)) return Number(value)
+      return value
+    }
+    assert.deepEqual(convertKeysToCamelCase(input, mapValues), {
+      validValue: 42,
+      nullValue: null,
+      undefinedValue: undefined,
+      nested: { alsoNull: null, okValue: 7 },
+    })
+  })
+
   it('should handle undefined and null values', () => {
     const input = {
       null_value: null,

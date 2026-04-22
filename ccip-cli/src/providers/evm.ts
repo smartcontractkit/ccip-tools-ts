@@ -4,7 +4,11 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { CCIPArgumentInvalidError } from '@chainlink/ccip-sdk/src/index.ts'
+import {
+  type Logger,
+  CCIPArgumentInvalidError,
+  CCIPInteractiveRequiredError,
+} from '@chainlink/ccip-sdk/src/index.ts'
 import { LedgerSigner } from '@ethers-ext/signer-ledger'
 import { password } from '@inquirer/prompts'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
@@ -32,11 +36,14 @@ Object.assign(LedgerSigner.prototype, {
  */
 const KEYSTORE_PROVIDERS: Record<
   string,
-  { label: string; resolvePrivateKey: (name: string) => Promise<string> }
+  {
+    label: string
+    resolvePrivateKey: (name: string, interactive?: boolean) => Promise<string>
+  }
 > = {
   foundry: {
     label: 'Foundry',
-    resolvePrivateKey: async (name: string) => {
+    resolvePrivateKey: async (name: string, interactive?: boolean) => {
       const dir = process.env['FOUNDRY_DIR'] ?? join(homedir(), '.foundry')
       const keystorePath = join(dir, 'keystores', name)
       if (!existsSync(keystorePath)) {
@@ -46,13 +53,19 @@ const KEYSTORE_PROVIDERS: Record<
         )
       }
       let pw = process.env['FOUNDRY_KEYSTORE_PASSWORD'] ?? process.env['USER_KEY_PASSWORD']
+      if (!pw && interactive === false) {
+        throw new CCIPInteractiveRequiredError(
+          'Keystore password required but --no-interactive is set',
+          { recovery: 'Set FOUNDRY_KEYSTORE_PASSWORD or USER_KEY_PASSWORD environment variable' },
+        )
+      }
       pw ??= await password({ message: `Enter password for Foundry keystore '${name}'` })
       return (await Wallet.fromEncryptedJson(await readFile(keystorePath, 'utf8'), pw)).privateKey
     },
   },
   hardhat: {
     label: 'Hardhat',
-    resolvePrivateKey: async (name: string) => {
+    resolvePrivateKey: async (name: string, interactive?: boolean) => {
       const hardhatBin = join(process.cwd(), 'node_modules', '.bin', 'hardhat')
       if (!existsSync(hardhatBin)) {
         throw new CCIPArgumentInvalidError(
@@ -61,6 +74,12 @@ const KEYSTORE_PROVIDERS: Record<
         )
       }
       let pw = process.env['HARDHAT_KEYSTORE_PASSWORD'] ?? process.env['USER_KEY_PASSWORD']
+      if (!pw && interactive === false) {
+        throw new CCIPInteractiveRequiredError(
+          'Keystore password required but --no-interactive is set',
+          { recovery: 'Set HARDHAT_KEYSTORE_PASSWORD or USER_KEY_PASSWORD environment variable' },
+        )
+      }
       pw ??= await password({ message: `Enter password for Hardhat keystore '${name}'` })
       const result = spawnSync(hardhatBin, ['keystore', 'get', name], {
         encoding: 'utf8',
@@ -95,7 +114,8 @@ const KEYSTORE_PROVIDERS: Record<
  */
 export async function loadEvmWallet(
   provider: JsonRpcApiProvider,
-  { wallet: walletOpt }: { wallet?: unknown },
+  { wallet: walletOpt, interactive }: { wallet?: unknown; interactive?: boolean },
+  logger: Logger = console,
 ): Promise<Signer> {
   if (
     typeof walletOpt === 'number' ||
@@ -110,22 +130,34 @@ export async function loadEvmWallet(
   }
   if (typeof walletOpt !== 'string') throw new CCIPArgumentInvalidError('wallet', String(walletOpt))
   if (walletOpt.startsWith('ledger')) {
+    if (interactive === false) {
+      throw new CCIPInteractiveRequiredError('Ledger wallet requires USB interaction', {
+        recovery:
+          'Use a private key or keystore wallet with password env var for non-interactive mode',
+      })
+    }
     let derivationPath = walletOpt.split(':')[1]
     if (derivationPath && !isNaN(Number(derivationPath)))
       derivationPath = `m/44'/60'/${derivationPath}'/0/0`
     const ledger = new LedgerSigner(HIDTransport, provider, derivationPath)
-    console.info('Ledger connected:', await ledger.getAddress(), ', derivationPath:', ledger.path)
+    logger.info('Ledger connected:', await ledger.getAddress(), ', derivationPath:', ledger.path)
     return ledger
   }
   for (const [prefix, keystoreProvider] of Object.entries(KEYSTORE_PROVIDERS)) {
     if (walletOpt.startsWith(`${prefix}:`)) {
       const accountName = walletOpt.slice(prefix.length + 1)
-      const privateKey = await keystoreProvider.resolvePrivateKey(accountName)
+      const privateKey = await keystoreProvider.resolvePrivateKey(accountName, interactive)
       return new BaseWallet(new SigningKey(privateKey), provider)
     }
   }
   if (existsSync(walletOpt)) {
     let pw = process.env['USER_KEY_PASSWORD']
+    if (!pw && interactive === false) {
+      throw new CCIPInteractiveRequiredError(
+        'JSON wallet password required but --no-interactive is set',
+        { recovery: 'Set USER_KEY_PASSWORD environment variable' },
+      )
+    }
     if (!pw) pw = await password({ message: 'Enter password for json wallet' })
     return (await Wallet.fromEncryptedJson(await readFile(walletOpt, 'utf8'), pw)).connect(provider)
   }

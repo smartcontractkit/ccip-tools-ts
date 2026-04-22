@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK/CLI: Add `sourceTokenAddress` search filter to `searchMessages` and `--source-token` CLI option for filtering messages by source token
+- CLI: Clean JSON output — data on stdout, diagnostics on stderr, single JSON envelope per command
+- SDK/CLI: Add `--no-interactive` mode to disable all prompts for AI agents and automation, with auto-detection of non-TTY stdin
+
+## [1.4.0] - 2026-03-26
+
+- SDK: Add `Chain.getTokenPrice({ router, token, destChainSelector })` to fetch on-chain USD token prices from FeeQuoter (v1.6+) or PriceRegistry (v1.2/v1.5) — implemented for EVM, Solana, and Aptos.
+- CLI: Show fee tokens prices in `get-supported-tokens --fee-tokens` output, enabled by default now (can be disabled with `--no-fee-tokens`, and shown alone with `--only-fee-tokens`)
+
 ## [1.3.0] - 2026-03-19
 
 - SDK: Add `EVMChain.getTotalFeesEstimate` method, to provide a fee and tokens bps (v2.0) breakdown

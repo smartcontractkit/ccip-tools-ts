@@ -1301,6 +1301,18 @@ const selectors: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '102030': {
+    selector: 18240105181246962294n,
+    name: 'creditcoin-mainnet',
+    network_type: 'MAINNET',
+    family: 'EVM',
+  },
+  '102031': {
+    selector: 16960985330067274105n,
+    name: 'creditcoin-testnet',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
   '128123': {
     selector: 1910019406958449359n,
     name: 'etherlink-testnet',
