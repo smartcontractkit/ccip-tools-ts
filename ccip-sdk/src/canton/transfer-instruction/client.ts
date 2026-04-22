@@ -93,7 +93,7 @@ export function createTransferInstructionClient(config: TransferInstructionClien
   const headers = buildHeaders(config.jwt)
   const timeoutMs = config.timeout ?? 30_000
 
-  const appendScanProxyPath = (path: string) => `/api/validator/v0/scan-proxy${path}`
+  const appendScanProxyPath = (path: string) => `/v0/scan-proxy${path}`
   return {
     /**
      * Get the factory and choice context for executing a direct transfer.

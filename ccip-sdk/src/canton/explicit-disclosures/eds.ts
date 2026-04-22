@@ -275,6 +275,34 @@ export class EdsDisclosureProvider {
   }
 
   /**
+   * Filter `ccvs` to only those that this EDS instance can serve.
+   *
+   * Probes each CCV via `GET /ccip/v1/disclosure/{instanceAddress}` with a
+   * single attempt (no retries) so that invalid CCVs are detected quickly
+   * without incurring retry delays. Returns only the addresses that succeed.
+   *
+   * Use this before {@link fetchSendDisclosures} when CCVs are discovered
+   * dynamically and some may not be registered with this EDS instance.
+   *
+   * @param ccvs - CCV InstanceAddresses to probe.
+   * @returns The subset of `ccvs` that the EDS can serve.
+   */
+  async filterValidCCVsForSend(ccvs: string[]): Promise<string[]> {
+    const results = await Promise.allSettled(
+      ccvs.map((addr) =>
+        get<EdsApiDisclosedContract>(
+          this.edsBaseUrl,
+          `/ccip/v1/disclosure/${encodeURIComponent(addr)}`,
+          EDS_HEADERS,
+          this.timeoutMs,
+          undefined, // no query params
+        ),
+      ),
+    )
+    return ccvs.filter((_, i) => results[i]!.status === 'fulfilled')
+  }
+
+  /**
    * Fetch the explicit disclosure for a single contract by its InstanceAddress.
    *
    * Calls `GET /ccip/v1/disclosure/{instanceAddress}`.

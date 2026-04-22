@@ -38,10 +38,36 @@ function extractInstanceId(createArgument: unknown): string | null {
 }
 
 /**
+ * Extract the `receiverFinalityConfig` Daml variant from a contract's `createArgument`.
+ * The Canton JSON Ledger API v2 represents variants as `{ tag: string, value: unknown }`.
+ */
+function extractFinalityConfig(createArgument: unknown): { tag: string; value: unknown } | null {
+  if (!createArgument || typeof createArgument !== 'object') return null
+  const arg = createArgument as Record<string, unknown>
+
+  const direct = arg['receiverFinalityConfig']
+  if (direct && typeof direct === 'object' && 'tag' in (direct as Record<string, unknown>)) {
+    return direct as { tag: string; value: unknown }
+  }
+
+  if ('fields' in arg && Array.isArray(arg['fields'])) {
+    for (const field of arg['fields'] as Array<Record<string, unknown>>) {
+      if (field['label'] === 'receiverFinalityConfig') {
+        const val = field['value']
+        if (val && typeof val === 'object' && 'tag' in (val as Record<string, unknown>)) {
+          return val as { tag: string; value: unknown }
+        }
+      }
+    }
+  }
+  return null
+}
+
+/**
  * Extract a named numeric field from a contract's `createArgument` object.
  * Handles both direct numeric values and Canton JSON API tagged variants (`{ int64: n }`).
  */
-function extractNumberField(createArgument: unknown, fieldName: string): number | null {
+function _extractNumberField(createArgument: unknown, fieldName: string): number | null {
   if (!createArgument || typeof createArgument !== 'object') return null
   const arg = createArgument as Record<string, unknown>
 
@@ -84,6 +110,10 @@ const CCIP_TEMPLATES = {
     templateId: '#ccip-sender:CCIP.CCIPSender:CCIPSender',
     moduleEntity: 'CCIP.CCIPSender:CCIPSender',
   },
+  executor: {
+    templateId: '#ccip-executor:CCIP.Executor:Executor',
+    moduleEntity: 'CCIP.Executor:Executor',
+  },
 } as const
 
 type CcipContractType = keyof typeof CCIP_TEMPLATES
@@ -112,6 +142,50 @@ function buildTargetedEventFormat(party: string): EventFormat {
 }
 
 /**
+ * Extract the chain-selector keys from the `remoteChainConfigs` GENMAP field
+ * on an Executor contract's `createArgument`.
+ *
+ * Handles both verbose mode (direct property) and the `fields` array format
+ * returned by the Canton JSON Ledger API v2.
+ *
+ * The Daml type `Map.Map (Numeric 0) RemoteChainConfig` is serialized as a
+ * plain JSON object with stringified numeric keys (e.g. `{"16015286601757825753": {...}}`).
+ */
+function extractRemoteChainConfigKeys(createArgument: unknown): string[] {
+  if (!createArgument || typeof createArgument !== 'object') return []
+  const arg = createArgument as Record<string, unknown>
+
+  // Try direct property access (verbose mode)
+  let configs: unknown = arg['remoteChainConfigs']
+
+  // Fallback: fields array format
+  if (configs === undefined && 'fields' in arg && Array.isArray(arg['fields'])) {
+    for (const field of arg['fields'] as Array<Record<string, unknown>>) {
+      if (field['label'] === 'remoteChainConfigs') {
+        configs = field['value']
+        break
+      }
+    }
+  }
+
+  if (!configs || typeof configs !== 'object') return []
+
+  // Daml `Numeric 0` keys are serialized with a trailing dot (e.g. "16015286601757825753.")
+  // — strip it so comparisons against plain bigint strings work.
+  const normalizeKey = (k: string) => k.replace(/\.$/, '')
+
+  // GENMAP serializes as a plain JSON object with string keys
+  if (!Array.isArray(configs)) {
+    return Object.keys(configs as Record<string, unknown>).map(normalizeKey)
+  }
+
+  // Fallback: array-of-tuples format [[key, value], ...]
+  return configs
+    .filter((entry): entry is [unknown, unknown] => Array.isArray(entry) && entry.length >= 1)
+    .map((entry) => normalizeKey(String(entry[0])))
+}
+
+/**
  * Internal per-contract entry in the ACS snapshot, enriched with instance
  * address components for later matching.
  */
@@ -124,8 +198,10 @@ interface RichContractMatch {
   signatory: string | null
   /** partyOwner field from createArgument (present on PerPartyRouter) */
   partyOwner: string | null
-  /** minBlockConfirmations field from createArgument (present on CCIPReceiver) */
-  minBlockConfirmations: number | null
+  /** receiverFinalityConfig variant from createArgument (present on CCIPReceiver) */
+  receiverFinalityConfig: { tag: string; value: unknown } | null
+  /** remoteChainConfigs keys (chain selector strings) — present on Executor contracts */
+  remoteChainConfigKeys: string[]
 }
 
 /**
@@ -167,7 +243,8 @@ async function fetchRichSnapshot(
       instanceId: extractInstanceId(created.createArgument),
       signatory: signatories.length === 1 ? (signatories[0] ?? null) : null,
       partyOwner: extractStringField(created.createArgument, 'partyOwner'),
-      minBlockConfirmations: extractNumberField(created.createArgument, 'minBlockConfirmations'),
+      receiverFinalityConfig: extractFinalityConfig(created.createArgument),
+      remoteChainConfigKeys: extractRemoteChainConfigKeys(created.createArgument),
     }
 
     const list = byModuleEntity.get(moduleEntity) ?? []
@@ -298,6 +375,8 @@ export type AcsSendDisclosures = {
   perPartyRouter: DisclosedContract
   /** The sender's CCIPSender contract. */
   ccipSender: DisclosedContract
+  /** The sender's Executor contract. */
+  executor: DisclosedContract
 }
 
 /**
@@ -352,18 +431,28 @@ export class AcsDisclosureProvider {
   }
 
   /**
-   * Find the first `CCIPReceiver` in the party's ACS with a `minBlockConfirmations`
-   * value matching `finality`, or `null` if none exists.
+   * Find the first `CCIPReceiver` in the party's ACS whose `receiverFinalityConfig`
+   * variant is compatible with `finality`, or `null` if none exists.
    *
-   * Used by the execute flow to select the receiver that is compatible with the
-   * message finality so the `PrepareExecute` choice does not reject the message.
+   * Mirrors Go's `encodeReceiverFinalityConfig` mapping:
+   *   0         → WaitForFinality
+   *   0x00010000→ WaitForSafe
+   *   N (other) → BlockDepth(N)
    */
   async findReceiverForFinality(finality: number): Promise<DisclosedContract | null> {
     const snapshot = await fetchRichSnapshot(this.client, this.config.party)
     const { moduleEntity } = CCIP_TEMPLATES.ccipReceiver
     const candidates = snapshot.get(moduleEntity) ?? []
     for (const c of candidates) {
-      if (c.minBlockConfirmations === finality) {
+      const cfg = c.receiverFinalityConfig
+      if (!cfg) continue
+      const matches =
+        finality === 0
+          ? cfg.tag === 'WaitForFinality'
+          : finality === 0x00010000
+            ? cfg.tag === 'WaitForSafe'
+            : cfg.tag === 'BlockDepth' && Number(cfg.value) === finality
+      if (matches) {
         return {
           templateId: c.templateId,
           contractId: c.contractId,
@@ -378,18 +467,61 @@ export class AcsDisclosureProvider {
   /**
    * Fetch all contracts that must be disclosed for a `ccipSend` command.
    *
-   * Returns the sender's `PerPartyRouter` and `CCIPSender` contracts from the
-   * Active Contract Set, matched by signatory (the sender party).
+   * Returns the sender's `PerPartyRouter`, `CCIPSender`, and `Executor` contracts
+   * from the Active Contract Set. When `destChainSelector` is provided the Executor
+   * is chosen by filtering `remoteChainConfigs` for that chain; this avoids the
+   * "executor: unsupported destination chain" error when multiple Executor contracts
+   * are active for a party.
+   *
+   * @param destChainSelector - Optional destination chain selector used to pick
+   *   an Executor that supports that chain.
    */
-  async fetchSendDisclosures(): Promise<AcsSendDisclosures> {
+  async fetchSendDisclosures(destChainSelector?: bigint): Promise<AcsSendDisclosures> {
     const snapshot = await fetchRichSnapshot(this.client, this.config.party)
 
     const existingRouter = pickByPartyOwner(snapshot, 'perPartyRouter', this.config.party)
     const existingSender = pickBySignatory(snapshot, 'ccipSender', this.config.party)
+    const existingExecutor = this.pickExecutorForDestChain(snapshot, destChainSelector)
 
     return {
       perPartyRouter: existingRouter,
       ccipSender: existingSender,
+      executor: existingExecutor,
     }
+  }
+
+  /**
+   * Pick an Executor contract by signatory, preferring one whose `remoteChainConfigs`
+   * contains `destChainSelector`.
+   *
+   * Falls back to the first executor owned by the party when no chain-specific match
+   * is found (e.g. when the ACS data is not verbose enough to decode the GENMAP).
+   */
+  private pickExecutorForDestChain(
+    snapshot: Map<string, RichContractMatch[]>,
+    destChainSelector?: bigint,
+  ): DisclosedContract {
+    const { moduleEntity } = CCIP_TEMPLATES.executor
+    const candidates = snapshot.get(moduleEntity) ?? []
+    const party = this.config.party
+    const destKey = destChainSelector?.toString()
+
+    // 1st pass: executor that explicitly lists the destination chain
+    if (destKey) {
+      for (const c of candidates) {
+        if (c.signatory !== party) continue
+        if (c.remoteChainConfigKeys.includes(destKey)) {
+          return {
+            templateId: c.templateId,
+            contractId: c.contractId,
+            createdEventBlob: c.createdEventBlob,
+            synchronizerId: c.synchronizerId,
+          }
+        }
+      }
+    }
+
+    // 2nd pass: any executor by signatory (original behaviour)
+    return pickBySignatory(snapshot, 'executor', party)
   }
 }

@@ -86,12 +86,19 @@ export function createCantonClient(config: CantonClientConfig) {
       commands: JsCommands,
       eventFormat?: EventFormat,
     ): Promise<JsSubmitAndWaitForTransactionResponse> {
+      // Use a long timeout and no HTTP-level retry: submit-and-wait is not idempotent
+      // across retries when the contract data (e.g. fee holding CID) may be consumed
+      // or swept between attempts. Application-level retry with fresh data is done in
+      // CantonChain.sendMessage / execute instead.
+      const SUBMIT_TIMEOUT_MS = 120_000
       return post<JsSubmitAndWaitForTransactionResponse>(
         baseUrl,
         '/v2/commands/submit-and-wait-for-transaction',
         headers,
-        timeoutMs,
+        SUBMIT_TIMEOUT_MS,
         { commands, eventFormat },
+        undefined,
+        1, // no HTTP-level retry
       )
     },
 
@@ -417,8 +424,9 @@ export async function get<T>(
   headers: Record<string, string>,
   timeoutMs: number,
   queryParams?: Record<string, string>,
+  retries = DEFAULT_RETRY_COUNT,
 ): Promise<T> {
-  return request<T>('GET', baseUrl, path, headers, timeoutMs, { queryParams })
+  return request<T>('GET', baseUrl, path, headers, timeoutMs, { queryParams }, retries)
 }
 
 /**
@@ -440,6 +448,7 @@ export async function post<T>(
   timeoutMs: number,
   body: unknown,
   queryParams?: Record<string, string>,
+  retries = DEFAULT_RETRY_COUNT,
 ): Promise<T> {
-  return request<T>('POST', baseUrl, path, headers, timeoutMs, { body, queryParams })
+  return request<T>('POST', baseUrl, path, headers, timeoutMs, { body, queryParams }, retries)
 }
