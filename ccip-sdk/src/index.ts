@@ -110,6 +110,8 @@ export * from './errors/index.ts'
 import { AptosChain } from './aptos/index.ts'
 export type { UnsignedAptosTx } from './aptos/index.ts'
 import { EVMChain } from './evm/index.ts'
+import SELECTORS from './selectors.ts'
+export { SELECTORS }
 export type { UnsignedEVMTx } from './evm/index.ts'
 import { SolanaChain } from './solana/index.ts'
 export type { UnsignedSolanaTx } from './solana/index.ts'
