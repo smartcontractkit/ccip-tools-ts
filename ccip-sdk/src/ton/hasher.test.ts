@@ -102,5 +102,40 @@ describe('TON hasher unit tests', () => {
 
       assert.equal(computedHash, expectedHash)
     })
+
+    // https://api.ccip.chain.link/v2/messages/0xc9d521e2b4be8d995d7f9ffbde183e12d88ec93794d6b4329c23cb354db406a8/execution-inputs
+    it('should hash the live stuck Solana->TON message to the committed single-leaf merkle root', () => {
+      const sourceChainSelector = 16423721717087811551n
+      const destChainSelector = 1399300952838017768n
+      const hasher = getTONLeafHasher({
+        sourceChainSelector,
+        destChainSelector,
+        onRamp: 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C',
+        version: CCIPVersion.V1_6,
+      })
+
+      const message: CCIPMessage_V1_6 & EVMExtraArgsV2 = {
+        messageId: '0xc9d521e2b4be8d995d7f9ffbde183e12d88ec93794d6b4329c23cb354db406a8',
+        sourceChainSelector,
+        destChainSelector,
+        sequenceNumber: 4n,
+        nonce: 0n,
+        sender: '9NhaY2AXejCX3c4tXufzWuv52ZG7rjTJDeb1qSo9UV7S',
+        receiver: 'EQD4w5mxY0V7Szh2NsZ_BfWuMY6biF42HEjBz1-8_wRO-6gC',
+        data: '0x48656c6c6f',
+        extraArgs: '0x181dcf1040787d0100000000000000000000000001',
+        tokenAmounts: [],
+        feeToken: 'So11111111111111111111111111111111111111112',
+        feeTokenAmount: 1547524n,
+        feeValueJuels: 14388425000000000n,
+        gasLimit: 25_000_000n,
+        allowOutOfOrderExecution: true,
+      }
+
+      assert.equal(
+        hasher(message),
+        '0x050adeaa0cfe792abbd5e33a3ba6f2d9204052952d091f7624d1a2d23b771ad1',
+      )
+    })
   })
 })

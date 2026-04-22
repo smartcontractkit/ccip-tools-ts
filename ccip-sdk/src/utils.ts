@@ -462,6 +462,19 @@ export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Ar
 }
 
 /**
+ * Encodes remote/alien addresses for Any SRC
+ *
+ * Addresses less than 32 bytes (EVM 20B, Aptos/Solana/Sui 32B) are zero-padded to 32 bytes
+ * Addresses greater than 32 bytes (e.g., TON 4+32=36B) are used as raw bytes without padding
+ */
+export function encodeAddressToAny(address: BytesLike): Buffer {
+  const bytes = getAddressBytes(address)
+  return bytes.length < 32
+    ? Buffer.concat([Buffer.alloc(32 - bytes.length), Buffer.from(bytes)]) // pad to 32 bytes
+    : Buffer.from(bytes)
+}
+
+/**
  * Converts snake_case strings to camelCase
  */
 export function snakeToCamel(str: string): string {

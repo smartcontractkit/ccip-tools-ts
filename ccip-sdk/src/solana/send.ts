@@ -10,7 +10,6 @@ import {
   PublicKey,
 } from '@solana/web3.js'
 import BN from 'bn.js'
-import { zeroPadValue } from 'ethers'
 
 import { SolanaChain } from './index.ts'
 import { CCIPError } from '../errors/CCIPError.ts'
@@ -22,7 +21,7 @@ import {
   CCIPTokenAmountInvalidError,
 } from '../errors/index.ts'
 import { type AnyMessage, type WithLogger, ChainFamily } from '../types.ts'
-import { bytesToBuffer, toLeArray } from '../utils.ts'
+import { bytesToBuffer, toLeArray, encodeAddressToAny } from '../utils.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import type { UnsignedSolanaTx } from './types.ts'
 import { resolveATA, simulateTransaction, simulationProvider } from './utils.ts'
@@ -31,7 +30,7 @@ function anyToSvmMessage(message: AnyMessage): IdlTypes<typeof CCIP_ROUTER_IDL>[
   const feeTokenPubkey = message.feeToken ? new PublicKey(message.feeToken) : PublicKey.default
 
   const svmMessage: IdlTypes<typeof CCIP_ROUTER_IDL>['SVM2AnyMessage'] = {
-    receiver: bytesToBuffer(zeroPadValue(message.receiver, 32)),
+    receiver: encodeAddressToAny(message.receiver),
     data: bytesToBuffer(message.data || '0x'),
     tokenAmounts: (message.tokenAmounts || []).map((ta) => {
       if (!ta.token || ta.amount < 0n) {

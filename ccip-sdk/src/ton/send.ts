@@ -1,12 +1,11 @@
 import { type Cell, beginCell, toNano } from '@ton/core'
 import { type TonClient, Address } from '@ton/ton'
-import { zeroPadValue } from 'ethers'
 
+import { CCIPError, CCIPErrorCode } from '../errors/index.ts'
+import type { AnyMessage, WithLogger } from '../types.ts'
+import { bytesToBuffer, encodeAddressToAny } from '../utils.ts'
+import { encodeExtraArgsCell } from './extra-args.ts'
 import type { UnsignedTONTx } from './types.ts'
-import { CCIPError, CCIPErrorCode, CCIPExtraArgsInvalidError } from '../errors/index.ts'
-import { type ExtraArgs, EVMExtraArgsV2Tag } from '../extra-args.ts'
-import { type AnyMessage, type WithLogger, ChainFamily } from '../types.ts'
-import { bigIntReplacer, bytesToBuffer, getDataBytes } from '../utils.ts'
 
 /** Opcode for Router ccipSend operation */
 export const CCIP_SEND_OPCODE = 0x31768d95
@@ -46,36 +45,6 @@ function encodeTokenAmounts(
 }
 
 /**
- * Encodes extraArgs as a Cell using the GenericExtraArgsV2 (EVMExtraArgsV2) format.
- *
- * Format per chainlink-ton TL-B:
- * - tag: 32-bit opcode (0x181dcf10)
- * - gasLimit: Maybe<uint256> (1 bit flag + 256 bits if present)
- * - allowOutOfOrderExecution: 1 bit
- * @param extraArgs - Extra arguments for CCIP message
- * @returns Cell encoding the extra arguments
- * @throws {@link CCIPExtraArgsInvalidError} if `extraArgs` contains fields other than `gasLimit` and `allowOutOfOrderExecution`
- */
-export function encodeExtraArgsCell(extraArgs: ExtraArgs): Cell {
-  if (
-    Object.keys(extraArgs).filter((k) => k !== '_tag').length !== 2 ||
-    !('gasLimit' in extraArgs && 'allowOutOfOrderExecution' in extraArgs)
-  )
-    throw new CCIPExtraArgsInvalidError(ChainFamily.TON, JSON.stringify(extraArgs, bigIntReplacer))
-
-  let gasLimit: bigint | null = null
-  if (extraArgs.gasLimit > 0n) {
-    gasLimit = extraArgs.gasLimit
-  }
-
-  const builder = beginCell().storeUint(Number(EVMExtraArgsV2Tag), 32) // 0x181dcf10
-  builder.storeMaybeUint(gasLimit, 256)
-  builder.storeBit(extraArgs.allowOutOfOrderExecution)
-
-  return builder.endCell()
-}
-
-/**
  * Builds the Router ccipSend message cell.
  *
  * Relies on TL-B structure (Router_CCIPSend) from chainlink-ton repo.
@@ -92,8 +61,8 @@ export function buildCcipSendCell(
   feeTokenAddress: Address | null = null,
   queryId = 0n,
 ): Cell {
-  // Get receiver bytes and pad to 32 bytes for cross-chain encoding
-  const paddedReceiver = bytesToBuffer(zeroPadValue(getDataBytes(message.receiver), 32))
+  // Get receiver bytes — use getAddressBytes to handle hex, base58 (Solana), TON raw formats
+  const paddedReceiver = encodeAddressToAny(message.receiver)
 
   // Data cell (ref 0)
   const dataCell = beginCell()
@@ -162,8 +131,8 @@ export async function getFee(
   }
 
   // Build stack parameters for validatedFee call
-  const paddedReceiver = bytesToBuffer(zeroPadValue(getDataBytes(message.receiver), 32))
-  const receiverSlice = beginCell().storeBuffer(paddedReceiver).endCell()
+  const paddedFeeReceiver = encodeAddressToAny(message.receiver)
+  const receiverSlice = beginCell().storeBuffer(paddedFeeReceiver).endCell()
   const dataCell = beginCell()
     .storeBuffer(bytesToBuffer(message.data || '0x'))
     .endCell()

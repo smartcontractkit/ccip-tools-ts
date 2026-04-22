@@ -347,6 +347,46 @@ describe('calculateManualExecProof', () => {
     assert.equal(result.proofFlagBits, 0n)
   })
 
+  // https://api.ccip.chain.link/v2/messages/0xc9d521e2b4be8d995d7f9ffbde183e12d88ec93794d6b4329c23cb354db406a8/execution-inputs
+  it('should calculate manual execution proof for v1.6 Solana->TON', () => {
+    const merkleRoot = '0x050adeaa0cfe792abbd5e33a3ba6f2d9204052952d091f7624d1a2d23b771ad1'
+    const messageId = '0xc9d521e2b4be8d995d7f9ffbde183e12d88ec93794d6b4329c23cb354db406a8'
+    const messagesInBatch: CCIPMessage[] = [
+      {
+        data: '0x48656c6c6f',
+        nonce: 0n,
+        messageId,
+        sequenceNumber: 4n,
+        destChainSelector: 1399300952838017768n,
+        sourceChainSelector: 16423721717087811551n,
+        sender: '9NhaY2AXejCX3c4tXufzWuv52ZG7rjTJDeb1qSo9UV7S',
+        feeToken: 'So11111111111111111111111111111111111111112',
+        receiver: 'EQD4w5mxY0V7Szh2NsZ_BfWuMY6biF42HEjBz1-8_wRO-6gC',
+        extraArgs: '0x181dcf1040787d0100000000000000000000000001',
+        tokenAmounts: [],
+        feeValueJuels: 14388425000000000n,
+        feeTokenAmount: 1547524n,
+        allowOutOfOrderExecution: true,
+        gasLimit: 25000000n,
+      } as any,
+    ]
+
+    const lane: Lane = {
+      sourceChainSelector: 16423721717087811551n,
+      destChainSelector: 1399300952838017768n,
+      onRamp: 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C',
+      version: CCIPVersion.V1_6,
+    }
+
+    const result = calculateManualExecProof(messagesInBatch, lane, messageId, merkleRoot, {
+      logger: console,
+    })
+
+    assert.equal(result.merkleRoot, merkleRoot)
+    assert.equal(result.proofs.length, 0)
+    assert.equal(result.proofFlagBits, 0n)
+  })
+
   it('should calculate Aptos root correctly', () => {
     // Test with actual Aptos message structure from requests.test.ts
     const msgInfoString =
