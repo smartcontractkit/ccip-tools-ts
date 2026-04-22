@@ -1,4 +1,4 @@
-import { Cell, Dictionary, beginCell } from '@ton/core'
+import { type Builder, type Slice, Cell, Dictionary, beginCell } from '@ton/core'
 import { hexlify, toBeHex } from 'ethers'
 
 import { CCIPTransactionNotFoundError } from '../errors/specialized.ts'
@@ -30,6 +30,71 @@ export function extractMagicTag(cell: string | Cell): string {
   if (typeof cell === 'string') cell = Cell.fromBoc(bytesToBuffer(cell))[0]!
   const tag = cell.beginParse().loadBuffer(4)
   return hexlify(tag)
+}
+
+/**
+ * TODO: duplicate from https://github.com/smartcontractkit/chainlink-ton/blob/main/contracts/src/utils/types.ts
+ */
+export function asSnakedCell<T>(array: T[], builderFn: (item: T) => Builder): Cell {
+  const cells: Builder[] = []
+  let builder = beginCell()
+
+  for (const value of array) {
+    const itemBuilder = builderFn(value)
+    if (itemBuilder.refs > 3) {
+      throw new Error(
+        'Cannot pack more than 3 refs per item, use storeRef to a cell containing the item',
+      )
+    }
+    if (builder.availableBits < itemBuilder.bits || builder.availableRefs <= 1) {
+      cells.push(builder)
+      builder = beginCell()
+    }
+    builder.storeBuilder(itemBuilder)
+  }
+  cells.push(builder)
+
+  if (cells.length === 0) {
+    return beginCell().endCell()
+  }
+
+  // Build the linked structure from the end
+  let current = cells[cells.length - 1]!.endCell()
+  for (let i = cells.length - 2; i >= 0; i--) {
+    const b = cells[i]!
+    b.storeRef(current)
+    current = b.endCell()
+  }
+  return current
+}
+
+/**
+ * TODO: duplicate from https://github.com/smartcontractkit/chainlink-ton/blob/main/contracts/src/utils/types.ts
+ */
+export function fromSnakeData<T>(data: Cell, readerFn: (cs: Slice) => T): T[] {
+  const array: T[] = []
+  let cs = data.beginParse()
+  while (!isEmpty(cs)) {
+    if (cs.remainingBits > 0) {
+      const item = readerFn(cs)
+      array.push(item)
+    } else {
+      cs = cs.loadRef().beginParse()
+    }
+  }
+  return array
+}
+
+/**
+ * TODO: duplicate from https://github.com/smartcontractkit/chainlink-ton/blob/main/contracts/src/utils/types.ts
+ */
+export function isEmpty(slice: Slice): boolean {
+  const remainingBits = slice.remainingBits
+  const remainingRefs = slice.remainingRefs
+  if (remainingBits > 0 || remainingRefs > 0) {
+    return false
+  }
+  return true
 }
 
 /**

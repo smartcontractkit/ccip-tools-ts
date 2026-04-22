@@ -21,7 +21,6 @@ import {
   keccak256,
   toBeHex,
   toBigInt,
-  zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 import { memoize } from 'micro-memoize'
@@ -89,6 +88,7 @@ import {
 import {
   decodeAddress,
   decodeOnRampAddress,
+  encodeAddressToAny,
   getAddressBytes,
   getDataBytes,
   getSomeBlockNumberBefore,
@@ -148,8 +148,7 @@ function toRateLimiterState(b: RateLimiterBucket): RateLimiterState {
 // Addresses <32 bytes (EVM 20B, Aptos/Solana/Sui 32B) are zero-padded to 32 bytes;
 // Addresses >32 bytes (e.g., TON 4+32=36B) are used as raw bytes without padding
 function encodeAddressToEvm(address: BytesLike): string {
-  const bytes = getAddressBytes(address)
-  return bytes.length < 32 ? zeroPadValue(bytes, 32) : hexlify(bytes)
+  return hexlify(encodeAddressToAny(address))
 }
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
@@ -1548,6 +1547,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const message = {
           ...(input.message as CCIPMessage_V1_6_EVM),
           sender,
+          data: hexlify(getDataBytes(input.message.data || '0x')),
           tokenAmounts,
         }
         const contract = new Contract(

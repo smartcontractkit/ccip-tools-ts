@@ -1,4 +1,4 @@
-import { type BytesLike, dataLength, dataSlice, toNumber } from 'ethers'
+import { type BytesLike, dataLength, dataSlice, hexlify, toNumber } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import {
@@ -225,7 +225,10 @@ export async function getOffchainTokenData(
         }
       } else if (looksLbtcData(extraData)) {
         try {
-          const lbtcAttestation = await getLbtcAttestation(extraData, networkType)
+          const lbtcAttestation = await getLbtcAttestation(
+            hexlify(getDataBytes(extraData)),
+            networkType,
+          )
           return { _tag: 'lbtc', extraData, ...lbtcAttestation }
         } catch (err) {
           logger.warn(`❌ LBTC: Failed to fetch attestation for message:`, extraData, err)

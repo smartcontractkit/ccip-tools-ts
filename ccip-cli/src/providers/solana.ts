@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import {
   type Logger,
   CCIPArgumentInvalidError,
+  CCIPInteractiveRequiredError,
   CCIPNotImplementedError,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { Wallet as AnchorWallet } from '@coral-xyz/anchor'
@@ -108,7 +109,7 @@ export class LedgerSolanaWallet {
  * @returns Promise to Anchor Wallet instance
  */
 export async function loadSolanaWallet(
-  { wallet: walletOpt }: { wallet?: unknown } = {},
+  { wallet: walletOpt, interactive }: { wallet?: unknown; interactive?: boolean } = {},
   logger: Logger = console,
 ): Promise<AnchorWallet> {
   // Default to Solana's standard keypair location if no wallet provided
@@ -117,6 +118,12 @@ export async function loadSolanaWallet(
   if (typeof walletOpt !== 'string') throw new CCIPArgumentInvalidError('wallet', String(walletOpt))
   wallet = walletOpt
   if (walletOpt === 'ledger' || walletOpt.startsWith('ledger:')) {
+    if (interactive === false) {
+      throw new CCIPInteractiveRequiredError('Ledger wallet requires USB interaction', {
+        recovery:
+          'Use a private key or keystore wallet with password env var for non-interactive mode',
+      })
+    }
     let derivationPath = walletOpt.split(':')[1]
     if (!derivationPath) derivationPath = "44'/501'/0'"
     else if (!isNaN(Number(derivationPath))) derivationPath = `44'/501'/${derivationPath}'`

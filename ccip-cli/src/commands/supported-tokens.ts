@@ -287,6 +287,14 @@ async function listTokens(
   }
   if (argv.format !== Format.pretty) return // Format.pretty interactive search and details
 
+  if (argv.interactive === false) {
+    // Non-interactive: print all tokens, skip search prompt
+    for (const info of infos) {
+      output.write(info.token, '=', info)
+    }
+    return
+  }
+
   return search({
     message: 'Select a supported token to know more:',
     pageSize: 20,

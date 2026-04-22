@@ -166,7 +166,7 @@ export async function searchMessages(ctx: Ctx, argv: Parameters<typeof handler>[
   }
 
   // Interactive follow-up (TTY only, pretty/log formats)
-  if (!process.stdout.isTTY) return
+  if (!process.stdout.isTTY || argv.interactive === false) return
   await interactiveMenu(ctx, apiClient, results, argv.format)
 }
 

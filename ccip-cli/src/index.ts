@@ -98,17 +98,25 @@ const globalOpts = {
       return arg // it's a URL string
     },
   },
+  interactive: {
+    type: 'boolean',
+    default: true,
+    describe:
+      'Enable interactive prompts (use --no-interactive to disable for automation and AI agents)',
+  },
 } as const
 
 /** Type for global CLI options. */
 export type GlobalOpts = ArgumentsCamelCase<InferredOptionTypes<typeof globalOpts>>
 
 function preprocessArgv(argv: string[]): string[] {
-  return argv.flatMap((arg) => {
+  const result = argv.flatMap((arg) => {
     if (arg === '--no-api') return '--api=false'
     if (arg === '--json') return ['--format', 'json']
     return arg
   })
+  if (!process.stdin.isTTY && !result.includes('--no-interactive')) result.push('--no-interactive')
+  return result
 }
 
 async function main() {

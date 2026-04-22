@@ -4,6 +4,7 @@ import {
   type Logger,
   type UnsignedTONTx,
   CCIPArgumentInvalidError,
+  CCIPInteractiveRequiredError,
   CCIPWalletInvalidError,
   bytesToBuffer,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -21,12 +22,18 @@ import { TonTransport } from '@ton-community/ton-ledger'
  */
 export async function loadTonWallet(
   client: TonClient,
-  { wallet: walletOpt }: { wallet?: unknown } = {},
+  { wallet: walletOpt, interactive }: { wallet?: unknown; interactive?: boolean } = {},
   isTestnet?: boolean,
   logger: Logger = console,
 ) {
   if (typeof walletOpt !== 'string') throw new CCIPWalletInvalidError(walletOpt)
   if (walletOpt === 'ledger' || walletOpt.startsWith('ledger:')) {
+    if (interactive === false) {
+      throw new CCIPInteractiveRequiredError('Ledger wallet requires USB interaction', {
+        recovery:
+          'Use a private key or keystore wallet with password env var for non-interactive mode',
+      })
+    }
     const transport = await HIDTransport.default.create()
     const ton = new TonTransport(transport)
     let derivationPath = walletOpt.split(':')[1]

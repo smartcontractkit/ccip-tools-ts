@@ -10,7 +10,7 @@ import {
 import { decodeExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
-import { bytesToBuffer, networkInfo } from '../utils.ts'
+import { getAddressBytes, networkInfo } from '../utils.ts'
 import { tryParseCell } from './utils.ts'
 
 // TON uses 256 bits (32 bytes) of zeros as leaf domain separator
@@ -64,7 +64,7 @@ export const hashTONMetadata = (
 ): string => {
   // Domain separator for TON messages
   const versionHash = BigInt(sha256(Buffer.from('Any2TVMMessageHashV1')))
-  const onRampBytes = bytesToBuffer(onRamp)
+  const onRampBytes = Buffer.from(getAddressBytes(onRamp))
 
   // Build metadata cell
   const metadataCell = beginCell()
@@ -116,7 +116,7 @@ function hashV16TONMessage(message: CCIPMessage_V1_6, metadataHash: string): str
     .endCell()
 
   // Build sender cell with address bytes
-  const senderBytes = bytesToBuffer(message.sender)
+  const senderBytes = Buffer.from(getAddressBytes(message.sender))
   const senderCell = beginCell()
     .storeUint(BigInt(senderBytes.length), 8)
     .storeBuffer(senderBytes)
@@ -157,7 +157,7 @@ function buildTokenAmountsCell(tokenAmounts: readonly TokenAmount[]): Cell {
 
   // Process each token transfer
   for (const ta of tokenAmounts) {
-    const sourcePoolBytes = bytesToBuffer(ta.sourcePoolAddress)
+    const sourcePoolBytes = Buffer.from(getAddressBytes(ta.sourcePoolAddress))
 
     // Extract amount
     const amountSource =

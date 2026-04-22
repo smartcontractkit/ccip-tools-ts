@@ -23,6 +23,7 @@ import {
   type CCIPRequest,
   type Chain,
   CCIPAPIClient,
+  CCIPInteractiveRequiredError,
   CCIPMessageIdNotFoundError,
   CCIPTransactionNotFoundError,
   bigIntReplacer,
@@ -142,7 +143,20 @@ async function manualExec(
   let request$: Promise<CCIPRequest> | ReturnType<CCIPAPIClient['getMessageById']> = (async () => {
     const [source_, tx] = await tx$
     source = source_
-    return selectRequest(await source_.getMessagesInTx(tx), 'to know more', argv)
+    const messages = await source_.getMessagesInTx(tx)
+    if (argv.interactive === false && argv.logIndex == null && messages.length > 1) {
+      throw new CCIPInteractiveRequiredError(
+        `Multiple messages found (${messages.length}). Use --log-index to select which message to execute`,
+        {
+          context: {
+            count: messages.length,
+            logIndices: messages.map((m) => m.log.index),
+            messageIds: messages.map((m) => m.message.messageId),
+          },
+        },
+      )
+    }
+    return selectRequest(messages, 'to know more', argv)
   })()
 
   let apiClient
