@@ -168,6 +168,9 @@ export const CCIPErrorCode = {
 
   // Viem Adapter
   VIEM_ADAPTER_ERROR: 'VIEM_ADAPTER_ERROR',
+
+  // Canton
+  CANTON_API_ERROR: 'CANTON_API_ERROR',
 } as const
 
 /** Union type of all error codes. */
