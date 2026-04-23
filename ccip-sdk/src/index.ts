@@ -49,12 +49,16 @@ export {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
   type ExtraArgs,
+  type FinalityAllowed,
   type FinalityRequested,
   type GenericExtraArgsV3,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
   decodeExtraArgs,
+  decodeFinalityAllowed,
+  decodeFinalityRequested,
   encodeExtraArgs,
+  encodeFinality,
 } from './extra-args.ts'
 export { estimateReceiveExecution } from './gas.ts'
 export { CCTP_FINALITY_FAST, CCTP_FINALITY_STANDARD, getOffchainTokenData } from './offchain.ts'
@@ -106,6 +110,8 @@ export * from './errors/index.ts'
 import { AptosChain } from './aptos/index.ts'
 export type { UnsignedAptosTx } from './aptos/index.ts'
 import { EVMChain } from './evm/index.ts'
+import SELECTORS from './selectors.ts'
+export { SELECTORS }
 export type { UnsignedEVMTx } from './evm/index.ts'
 import { SolanaChain } from './solana/index.ts'
 export type { UnsignedSolanaTx } from './solana/index.ts'
