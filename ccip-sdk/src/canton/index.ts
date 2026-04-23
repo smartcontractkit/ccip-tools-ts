@@ -775,7 +775,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           address: '',
           blockNumber: 0,
           transactionHash: updateId,
-          data: response.transaction as Record<string, unknown>,
+          data: response.transaction,
         }
 
         const tx: Omit<ChainTransaction, 'logs'> = {
@@ -869,10 +869,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    const { encodedMessage, verifications } = input as {
-      encodedMessage: string
-      verifications: Pick<VerifierResult, 'ccvData' | 'destAddress'>[]
-    }
+    const { encodedMessage, verifications } = input
 
     // Step 1 — Fetch cross-party disclosures from EDS
     //   The EDS needs the encoded message and CCV instance addresses so it can return the right
@@ -1033,7 +1030,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       address: '',
       blockNumber: 0,
       transactionHash: updateId,
-      data: response.transaction as Record<string, unknown>,
+      data: response.transaction,
     }
 
     return { receipt, log, timestamp }

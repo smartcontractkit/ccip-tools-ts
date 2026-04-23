@@ -363,13 +363,13 @@ async function request<T>(
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     let response: Response
     try {
-      response = (await undiciFetch(url.toString(), {
+      response = await undiciFetch(url.toString(), {
         method,
         headers,
         body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
         signal: controller.signal,
         dispatcher: h2Agent,
-      })) as Response
+      })
     } catch (err) {
       clearTimeout(timer)
       if (attempt < retries) {
