@@ -53,8 +53,12 @@ export {
   type GenericExtraArgsV3,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
+  type FinalityAllowed,
   decodeExtraArgs,
+  decodeFinalityAllowed,
+  decodeFinalityRequested,
   encodeExtraArgs,
+  encodeFinality,
 } from './extra-args.ts'
 export { estimateReceiveExecution } from './gas.ts'
 export { CCTP_FINALITY_FAST, CCTP_FINALITY_STANDARD, getOffchainTokenData } from './offchain.ts'
