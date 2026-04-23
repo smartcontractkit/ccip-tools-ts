@@ -196,6 +196,9 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
 
   NOT_IMPLEMENTED: 'This feature is not yet implemented.',
   UNKNOWN: 'An unknown error occurred. Check the error details.',
+
+  CANTON_API_ERROR:
+    'Canton Ledger API returned an error. Verify the party ID is correct, the contract is active, and the Canton node is reachable.',
 }
 
 /** Returns default recovery hint for error code, or undefined if none. */
