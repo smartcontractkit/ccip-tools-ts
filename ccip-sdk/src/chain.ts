@@ -306,18 +306,18 @@ export type LaneFeature = (typeof LaneFeature)[keyof typeof LaneFeature]
  * Lane features record.
  * Maps feature keys to their values.
  */
-export interface LaneFeatures extends Partial<Record<LaneFeature, unknown>> {
-  /** Minimum block confirmations for FTF. Absent on pre-v2.0 lanes. */
-  FINALITY_FAST?: number
-  /** FCR/safe finality supported. Absent if not advertised by the pool. */
-  FINALITY_SAFE?: true
+export interface LaneFeatures extends Record<LaneFeature, unknown> {
+  /** Minimum block confirmations for FTF. */
+  FINALITY_FAST: number
+  /** FCR/safe finality. */
+  FINALITY_SAFE: true
   /** Rate limiter bucket state for the lane/token with default finality. */
-  RATE_LIMITS?: RateLimiterState
+  RATE_LIMITS: RateLimiterState
   /**
    * Rate limiter bucket state when using a non-default finality mode (FTF or FCR).
    * If absent, the default rate limits ({@link LaneFeatures.RATE_LIMITS}) apply even when using a non-default finality mode.
    */
-  FAST_RATE_LIMITS?: RateLimiterState
+  FAST_RATE_LIMITS: RateLimiterState
 }
 
 /** Compile-time helpers to keep {@link LaneFeature} and {@link LaneFeatures} in sync. */
@@ -329,11 +329,12 @@ type LaneFeatureKeysMatch_ = [LaneFeature] extends [keyof LaneFeatures]
 const _laneFeatureKeysMatch: LaneFeatureKeysMatch_ = true
 
 /**
- * Ensure LaneFeatures remains assignable to Partial\<Record\<LaneFeature, unknown\>\>
+ * Ensure LaneFeatures remains assignable to Record\<LaneFeature, unknown\>
  * and does not declare extra keys beyond LaneFeature.
  */
-const _laneFeaturesTypeCheck = null as unknown as LaneFeatures satisfies Partial<
-  Record<LaneFeature, unknown>
+const _laneFeaturesTypeCheck = null as unknown as LaneFeatures satisfies Record<
+  LaneFeature,
+  unknown
 >
 
 /**
