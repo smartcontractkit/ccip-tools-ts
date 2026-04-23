@@ -61,16 +61,21 @@ const SENDER_CONTRACT_ID = 'sender-cid-003'
 const SENDER_BLOB = 'sender-blob'
 const SENDER_TEMPLATE_ID = 'pkg-sender:CCIP.CCIPSender:CCIPSender'
 
+const EXECUTOR_CONTRACT_ID = 'executor-cid-004'
+const EXECUTOR_BLOB = 'executor-blob'
+const EXECUTOR_TEMPLATE_ID = 'pkg-executor:CCIP.Executor:Executor'
+
 /** ACS snapshot for the default execute scenario (router + receiver) */
 const DEFAULT_ACS: JsGetActiveContractsResponse[] = [
   makeAcsEntry(ROUTER_TEMPLATE_ID, ROUTER_CONTRACT_ID, ROUTER_BLOB, PARTY, { partyOwner: PARTY }),
   makeAcsEntry(RECEIVER_TEMPLATE_ID, RECEIVER_CONTRACT_ID, RECEIVER_BLOB, PARTY),
 ]
 
-/** ACS snapshot for the default send scenario (router + sender) */
+/** ACS snapshot for the default send scenario (router + sender + executor) */
 const SEND_ACS: JsGetActiveContractsResponse[] = [
   makeAcsEntry(ROUTER_TEMPLATE_ID, ROUTER_CONTRACT_ID, ROUTER_BLOB, PARTY, { partyOwner: PARTY }),
   makeAcsEntry(SENDER_TEMPLATE_ID, SENDER_CONTRACT_ID, SENDER_BLOB, PARTY),
+  makeAcsEntry(EXECUTOR_TEMPLATE_ID, EXECUTOR_CONTRACT_ID, EXECUTOR_BLOB, PARTY),
 ]
 
 // ---------------------------------------------------------------------------
@@ -173,6 +178,11 @@ describe('canton/acs', () => {
     assert.equal(disclosures.ccipSender.templateId, SENDER_TEMPLATE_ID)
     assert.equal(disclosures.ccipSender.createdEventBlob, SENDER_BLOB)
     assert.equal(disclosures.ccipSender.synchronizerId, SYNC_ID)
+
+    assert.equal(disclosures.executor.contractId, EXECUTOR_CONTRACT_ID)
+    assert.equal(disclosures.executor.templateId, EXECUTOR_TEMPLATE_ID)
+    assert.equal(disclosures.executor.createdEventBlob, EXECUTOR_BLOB)
+    assert.equal(disclosures.executor.synchronizerId, SYNC_ID)
   })
 
   it('fetchSendDisclosures throws when no matching CCIPSender is found', async () => {
