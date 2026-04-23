@@ -7,14 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.5.0] - 2025-04-22
+## [1.5.0] - 2026-04-22
 
 - SDK/CLI: Add `sourceTokenAddress` search filter to `searchMessages` and `--source-token` CLI option for filtering messages by source token
 - CLI: Clean JSON output — data on stdout, diagnostics on stderr, single JSON envelope per command
 - SDK/CLI: Add `--no-interactive` mode to disable all prompts for AI agents and automation, with auto-detection of non-TTY stdin
-- SDK: add Fast Confirmation Rule/FCR/SAFE support to v2.0 lanes:
-  - `LaneFeatures.MIN_BLOCK_CONFIRMATIONS` and `CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS` replaced with `FINALITY_FAST`, `FINALITY_SAFE`, `FAST_RATE_LIMITS`
-  - `GenericExtraArgsV3.blockConfirmations` replaced with `finality: 'finalized' | 'safe' | number`
+- SDK: **Breaking**: add Fast Confirmation Rule (FCR) / SAFE finality support to CCIP v2.0 lanes:
+  - `LaneFeatures.MIN_BLOCK_CONFIRMATIONS` renamed to `FINALITY_FAST`; `CUSTOM_BLOCK_CONFIRMATIONS_RATE_LIMITS` renamed to `FAST_RATE_LIMITS`; new `FINALITY_SAFE` key added
+  - `GenericExtraArgsV3.blockConfirmations: number` replaced with `finality: 'finalized' | 'safe' | number`
+- SDK: add `decodeFinalityAllowed()` and `decodeFinalityRequested()` helpers for decoding the 4-byte finality field from v2.0 extraArgs
+- SDK: **Breaking**: `CommitReport.onRampAddress` type widened from `` `0x${string}` `` to `string` for cross-chain compatibility (non-EVM source chains)
 
 ## [1.4.0] - 2026-03-26
 

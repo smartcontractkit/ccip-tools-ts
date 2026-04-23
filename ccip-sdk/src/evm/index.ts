@@ -437,7 +437,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     let message
     for (const fragment of fragments) {
       try {
-        // we don't actually use Interface instance here, `decodeEventLog` is mostly static when given a fragment
+        // The fragment is authoritative; any valid Interface works as a passthrough because
+        // ethers' decodeEventLog is fragment-driven. The v1.6 reference is incidental —
+        // v2.0 CCIPMessageSent events decode through this same path (see requestsFragments).
         const result = interfaces.OnRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
         message = resultToObject(result) as Record<string, unknown>
         if (message.message) message = message.message as Record<string, unknown> | undefined
