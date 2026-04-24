@@ -66,6 +66,7 @@ export const ChainFamily = {
   Aptos: 'APTOS',
   Sui: 'SUI',
   TON: 'TON',
+  Canton: 'CANTON',
   Unknown: 'UNKNOWN',
 } as const
 /** Type representing one of the supported chain families. */
@@ -98,7 +99,7 @@ type ChainFamilyWithId<F extends ChainFamily> = F extends
   | typeof ChainFamily.EVM
   | typeof ChainFamily.TON
   ? { readonly family: F; readonly chainId: number }
-  : F extends typeof ChainFamily.Solana
+  : F extends typeof ChainFamily.Solana | typeof ChainFamily.Canton
     ? { readonly family: F; readonly chainId: string }
     : F extends typeof ChainFamily.Aptos | typeof ChainFamily.Sui
       ? { readonly family: F; readonly chainId: `${Lowercase<F>}:${number}` }
