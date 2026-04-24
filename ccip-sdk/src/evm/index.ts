@@ -1051,7 +1051,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       receiver: encodeAddressToEvm(populatedMessage.receiver),
       data: hexlify(populatedMessage.data ?? '0x'),
       tokenAmounts: populatedMessage.tokenAmounts ?? [],
-      feeToken: populatedMessage.feeToken ?? ZeroAddress,
+      feeToken: populatedMessage.feeToken || ZeroAddress,
       extraArgs: hexlify(
         (this.constructor as typeof EVMChain).encodeExtraArgs(populatedMessage.extraArgs),
       ),
@@ -1334,7 +1334,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       fee: opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage })),
     }
 
-    const feeToken = message.feeToken ?? ZeroAddress
+    const feeToken = message.feeToken || ZeroAddress
     const receiver = encodeAddressToEvm(message.receiver)
     const data = hexlify(message.data ?? '0x')
     const extraArgs = hexlify(
