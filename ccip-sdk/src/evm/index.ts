@@ -18,7 +18,6 @@ import {
   isBytesLike,
   isError,
   isHexString,
-  keccak256,
   toBeHex,
   toBigInt,
 } from 'ethers'
@@ -1460,35 +1459,27 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
 
       const message = decodeMessageV1(input.encodedMessage)
-      const messageId = keccak256(input.encodedMessage)
-      // `execute` doesn't revert on failure, so we need to estimate using `executeSingleMessage`
-      const txGasLimit = await contract.executeSingleMessage.estimateGas(
-        {
-          ...message,
-          onRampAddress: encodeAddressToEvm(message.onRampAddress),
-          sender: encodeAddressToEvm(message.sender),
-          tokenTransfer: message.tokenTransfer.map((ta) => ({
-            ...ta,
-            sourcePoolAddress: encodeAddressToEvm(ta.sourcePoolAddress),
-            sourceTokenAddress: encodeAddressToEvm(ta.sourceTokenAddress),
-          })),
-          executionGasLimit: BigInt(message.executionGasLimit),
-          ccipReceiveGasLimit: BigInt(message.ccipReceiveGasLimit),
-          finality: toBeHex(encodeFinality(message.finality), 4),
-        },
-        messageId,
-        input.verifications.map(({ destAddress }) => destAddress),
-        input.verifications.map(({ ccvData }) => hexlify(ccvData)),
-        BigInt(gasLimit ?? 0),
-        { from: offRamp }, // internal method
-      )
+      const ccvs = input.verifications.map(({ destAddress }) => destAddress)
+      const verifierResults = input.verifications.map(({ ccvData }) => hexlify(ccvData))
+      const gasLimitOverride = BigInt(gasLimit ?? 0)
       const execTx = await contract.execute.populateTransaction(
         input.encodedMessage,
-        input.verifications.map(({ destAddress }) => destAddress),
-        input.verifications.map(({ ccvData }) => hexlify(ccvData)),
-        BigInt(gasLimit ?? 0),
+        ccvs,
+        verifierResults,
+        gasLimitOverride,
       )
-      execTx.gasLimit = txGasLimit + 40000n // plus `execute`'s overhead
+      // `execute()` swallows inner failures on first-exec (state=FAILURE, no revert),
+      // so `estimateGas` can measure the catch path. Floor at `message.executionGasLimit`
+      // + 20% to cover that case.
+      const estimated = await contract.execute.estimateGas(
+        input.encodedMessage,
+        ccvs,
+        verifierResults,
+        gasLimitOverride,
+      )
+      const declaredBudget = BigInt(message.executionGasLimit)
+      const bufferedFloor = (declaredBudget * 120n) / 100n
+      execTx.gasLimit = estimated > bufferedFloor ? estimated : bufferedFloor
       return { family: ChainFamily.EVM, transactions: [execTx] }
     }
 
