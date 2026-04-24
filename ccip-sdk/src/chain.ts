@@ -292,10 +292,10 @@ export const LaneFeature = {
    */
   RATE_LIMITS: 'RATE_LIMITS',
   /**
-   * Rate limiter bucket state when using non-default finality (FTF or FCR).
-   * Only meaningful when FTF is supported on this lane, i.e.
-   * {@link LaneFeature.FINALITY_FAST} is present and \> 0.
-   * If absent, the default rate limits ({@link LaneFeature.RATE_LIMITS}) apply even when using custom finality.
+   * Rate limiter bucket state when using a non-default finality mode (FTF or FCR).
+   * Only meaningful when a non-default mode is available on this lane, i.e.
+   * {@link LaneFeature.FINALITY_FAST} \> 0 OR {@link LaneFeature.FINALITY_SAFE} === true.
+   * If absent, the default rate limits ({@link LaneFeature.RATE_LIMITS}) apply even when using a non-default finality mode.
    */
   FAST_RATE_LIMITS: 'FAST_RATE_LIMITS',
 } as const
@@ -314,8 +314,8 @@ export interface LaneFeatures extends Record<LaneFeature, unknown> {
   /** Rate limiter bucket state for the lane/token with default finality. */
   RATE_LIMITS: RateLimiterState
   /**
-   * Rate limiter bucket state when using non-default finality (FTF).
-   * If absent, the default rate limits ({@link LaneFeatures.RATE_LIMITS}) apply even when using custom finality.
+   * Rate limiter bucket state when using a non-default finality mode (FTF or FCR).
+   * If absent, the default rate limits ({@link LaneFeatures.RATE_LIMITS}) apply even when using a non-default finality mode.
    */
   FAST_RATE_LIMITS: RateLimiterState
 }
