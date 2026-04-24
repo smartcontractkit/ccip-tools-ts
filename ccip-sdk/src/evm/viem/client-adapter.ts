@@ -5,7 +5,7 @@ import {
   JsonRpcApiProvider,
   Network,
 } from 'ethers'
-import type { Chain, PublicClient, Transport } from 'viem'
+import { type Chain, type PublicClient, type Transport, BaseError } from 'viem'
 
 import type { ChainContext } from '../../chain.ts'
 import { CCIPViemAdapterError } from '../../errors/index.ts'
@@ -52,9 +52,48 @@ export class ViemTransportProvider extends JsonRpcApiProvider {
           })
           return { id: p.id, result }
         } catch (error) {
+          // Preserve revert data through the viem→ethers bridge. viem throws a `BaseError`
+          // tree where one of the nodes carries the revert payload (`ContractFunctionRevertedError.raw`,
+          // `RpcRequestError.data`, `CallExecutionError.cause.data`). Stringifying via
+          // `String(error)` discards it; ethers' downstream `getErrorData`/`parseData` then
+          // can't decode the custom error. We walk the chain for the first node with a
+          // `data` field (same pattern viem's own `getContractError` uses) and forward its
+          // hex payload in the JSON-RPC error envelope.
+          let data: `0x${string}` | undefined
+          let message = String(error)
+
+          if (error instanceof BaseError) {
+            const node = error.walk((e) => e !== null && typeof e === 'object' && 'data' in e) as {
+              raw?: unknown
+              data?: unknown
+            } | null
+
+            // Prefer `.raw` (ContractFunctionRevertedError's raw revert bytes) over `.data`,
+            // because `.data` on that class is structured (decoded) while on RpcRequestError
+            // it's the raw hex we want.
+            const candidate = typeof node?.raw === 'string' ? node.raw : node?.data
+            if (
+              typeof candidate === 'string' &&
+              candidate.startsWith('0x') &&
+              candidate.length > 2
+            ) {
+              data = candidate as `0x${string}`
+            }
+
+            message = error.shortMessage
+          }
+
           return {
             id: p.id,
-            error: { code: -32000, message: String(error) },
+            error: {
+              // Use EIP-1474 execution-reverted code when we successfully extracted revert
+              // bytes — matches viem's own `EXECUTION_REVERTED_ERROR_CODE = 3` convention
+              // and satisfies ethers' `spelunkData` heuristic for `/revert/i`-containing
+              // messages paired with hex data.
+              code: data ? 3 : -32000,
+              message,
+              ...(data ? { data } : {}),
+            },
           }
         }
       }),
