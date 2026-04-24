@@ -5,6 +5,7 @@ import { after, before, describe, it } from 'node:test'
 
 import { AbiCoder, Contract, JsonRpcProvider, Wallet, keccak256, parseUnits, toBeHex } from 'ethers'
 import { Instance } from 'prool'
+import { createPublicClient, http } from 'viem'
 
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
 import '../ton/index.ts' // register TON chain family for cross-family message decoding
@@ -16,6 +17,7 @@ import { type ExecutionInput, ExecutionState, MessageStatus, NetworkType } from 
 import { interfaces } from './const.ts'
 import { FUJI_TO_SEPOLIA, SEPOLIA_TO_FUJI, TON_TO_SEPOLIA } from './fork.test.data.ts'
 import { EVMChain } from './index.ts'
+import { ViemTransportProvider } from './viem/client-adapter.ts'
 
 // ── Chain constants ──
 
@@ -1502,6 +1504,146 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.equal(execution.receipt.state, ExecutionState.Success)
 
       sepoliaWithApi.destroy?.()
+    })
+  })
+
+  describe('ViemTransportProvider — revert data forwarding', () => {
+    // Triggers a real pool-capacity revert through the viem adapter and asserts the
+    // SDK's error-decoding machinery recovers the custom error name + args.
+    // Pre-fix (before Patch B): `ViemTransportProvider._send` drops viem's error.data;
+    // `EVMChain.parse(err)` only sees the calldata selector and returns `method: "ccipSend"`
+    // with no `revert` key.
+    // Post-fix: the walk preserves error.data; `parseWithFragment` matches the selector
+    // against the pool ABI and returns `TokenMaxCapacityExceeded` with decoded args.
+    // BigInt-safe JSON stringifier — `parsed` contains decoded revert args as bigints.
+    const stringifyParsed = (v: unknown): string =>
+      JSON.stringify(v, (_, val) => (typeof val === 'bigint' ? val.toString() : val))
+
+    // Reads the pool's current outbound capacity through the SDK and returns 10× it, so
+    // the post-fee amount still exceeds capacity regardless of the pool's transfer-fee
+    // config. The pool deducts a percentage fee BEFORE the rate-limit check, so sending
+    // exactly `capacity + 1` underflows capacity after the fee and is accepted. Keeps
+    // the test dynamic across rate-limit reconfigs on the upstream pool.
+    const overCapacityAmount = async (): Promise<bigint> => {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized for capacity probe')
+      const features = await sepoliaChain.getLaneFeatures({
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        token: FTF_TOKEN_SEPOLIA,
+      })
+      const rateLimits = features[LaneFeature.RATE_LIMITS]
+      assert.ok(rateLimits?.capacity, 'pool must have rate-limit capacity configured')
+      return rateLimits.capacity * 10n + 1n
+    }
+
+    // Each test in this block submits real txs through a dedicated `EVMChain` instance
+    // so nonce caches start empty and re-fetch from the fork. The shared `sepoliaChain`
+    // used elsewhere in the suite holds cached nonces from prior tests, which become
+    // stale once other chains on the same fork consume nonces for this wallet.
+
+    it('decodes TokenMaxCapacityExceeded custom error on pool-capacity revert', async () => {
+      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+      const anvilUrl = `http://${sepoliaInstance.host}:${sepoliaInstance.port}`
+      const walletAddress = await wallet.getAddress()
+
+      // Amount = 10× pool's outbound capacity (see overCapacityAmount). Dynamic so the
+      // test survives rate-limit reconfig upstream. `sendMessage` handles approve internally.
+      const oversizedAmount = await overCapacityAmount()
+      const ethersProvider = wallet.provider as JsonRpcProvider
+      await setERC20Balance(ethersProvider, FTF_TOKEN_SEPOLIA, walletAddress, oversizedAmount)
+
+      // Build a viem PublicClient pointed at the same Anvil fork, wrap with
+      // ViemTransportProvider, and bind a Wallet to it. Every RPC call
+      // (estimateGas, eth_call, eth_sendTransaction) now flows through the adapter.
+      const viemClient = createPublicClient({
+        chain: { id: SEPOLIA_CHAIN_ID, name: 'Sepolia Fork' } as never,
+        transport: http(anvilUrl),
+      })
+      const viemProvider = new ViemTransportProvider(viemClient as never)
+      const viemWallet = new Wallet(ANVIL_PRIVATE_KEY, viemProvider)
+      const viemChain = await EVMChain.fromProvider(viemProvider, {
+        apiClient: null,
+        logger: testLogger,
+      })
+
+      let caught: unknown
+      try {
+        await viemChain.sendMessage({
+          router: SEPOLIA_V2_0_ROUTER,
+          destChainSelector: FUJI_SELECTOR,
+          message: {
+            receiver: walletAddress,
+            tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount: oversizedAmount }],
+            extraArgs: { gasLimit: 0n },
+          },
+          wallet: viemWallet,
+        })
+      } catch (err) {
+        caught = err
+      }
+
+      assert.ok(caught, 'sendMessage should throw on over-capacity amount')
+
+      const parsed = EVMChain.parse(caught)
+      assert.ok(parsed, 'EVMChain.parse should return a decoded envelope')
+
+      const flat = stringifyParsed(parsed)
+      assert.match(
+        flat,
+        /TokenMaxCapacityExceeded/,
+        `viem-adapter path should surface the decoded custom error name. Parsed: ${flat}`,
+      )
+
+      viemChain.destroy?.()
+    })
+
+    // Cross-check: same over-capacity send via the ethers-direct chain (sepoliaChain)
+    // must produce an equivalent decoded output. Proves the viem adapter achieves
+    // functional parity with the ethers-direct baseline.
+    it('produces equivalent decoded output on ethers-direct path', async () => {
+      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+      const anvilUrl = `http://${sepoliaInstance.host}:${sepoliaInstance.port}`
+      const walletAddress = await wallet.getAddress()
+
+      const oversizedAmount = await overCapacityAmount()
+      const ethersProvider = wallet.provider as JsonRpcProvider
+      await setERC20Balance(ethersProvider, FTF_TOKEN_SEPOLIA, walletAddress, oversizedAmount)
+
+      // Dedicated EVMChain for this test (see describe-block preamble).
+      const ethersChainLocal = await EVMChain.fromProvider(new JsonRpcProvider(anvilUrl), {
+        apiClient: null,
+        logger: testLogger,
+      })
+      const ethersWalletLocal = new Wallet(ANVIL_PRIVATE_KEY, ethersChainLocal.provider)
+
+      let caught: unknown
+      try {
+        await ethersChainLocal.sendMessage({
+          router: SEPOLIA_V2_0_ROUTER,
+          destChainSelector: FUJI_SELECTOR,
+          message: {
+            receiver: walletAddress,
+            tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount: oversizedAmount }],
+            extraArgs: { gasLimit: 0n },
+          },
+          wallet: ethersWalletLocal,
+        })
+      } catch (err) {
+        caught = err
+      }
+
+      assert.ok(caught, 'sendMessage should throw on oversized amount (ethers-direct)')
+      const parsed = EVMChain.parse(caught)
+      assert.ok(parsed, 'EVMChain.parse should decode the revert on ethers-direct path')
+
+      const flat = stringifyParsed(parsed)
+      assert.match(
+        flat,
+        /TokenMaxCapacityExceeded/,
+        `ethers-direct path should surface the decoded custom error name. Parsed: ${flat}`,
+      )
+
+      ethersChainLocal.destroy?.()
     })
   })
 })
