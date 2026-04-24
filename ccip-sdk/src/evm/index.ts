@@ -1470,18 +1470,25 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         verifierResults,
         gasLimitOverride,
       )
-      // `execute()` swallows inner failures on first-exec (state=FAILURE, no revert),
-      // so `estimateGas` can measure the catch path. Floor at `message.executionGasLimit`
-      // + 20% to cover that case.
-      const estimated = await contract.execute.estimateGas(
-        input.encodedMessage,
-        ccvs,
-        verifierResults,
-        gasLimitOverride,
-      )
-      const declaredBudget = BigInt(message.executionGasLimit)
-      const bufferedFloor = (declaredBudget * 120n) / 100n
-      execTx.gasLimit = estimated > bufferedFloor ? estimated : bufferedFloor
+      // `execute()` swallows inner failures on first-exec; floor at executionGasLimit*1.2.
+      // On estimateGas failure, leave gasLimit unset and still return the tx so wallets
+      // can run their own estimation and surface the native revert reason (mirrors v1.x below).
+      try {
+        const estimated = await contract.execute.estimateGas(
+          input.encodedMessage,
+          ccvs,
+          verifierResults,
+          gasLimitOverride,
+        )
+        const declaredBudget = BigInt(message.executionGasLimit)
+        const bufferedFloor = (declaredBudget * 120n) / 100n
+        execTx.gasLimit = estimated > bufferedFloor ? estimated : bufferedFloor
+      } catch (err) {
+        this.logger.warn(
+          'Gas estimation for execute failed, returning tx without gasLimit. Error:',
+          err,
+        )
+      }
       return { family: ChainFamily.EVM, transactions: [execTx] }
     }
 
