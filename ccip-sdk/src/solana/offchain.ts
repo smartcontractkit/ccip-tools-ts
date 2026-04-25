@@ -40,6 +40,8 @@ export function encodeSolanaOffchainTokenData(data: OffchainTokenData): string {
 
     const encoded = cctpTokenPoolCoder.types.encode('MessageAndAttestation', messageAndAttestation)
     return hexlify(encoded)
+  } else if (data?._tag === 'lbtc') {
+    return data.attestation as string
   }
   if (data?._tag === 'lbtc' && data.attestation) {
     // LBTC attestation is raw bytes, no Borsh encoding needed
