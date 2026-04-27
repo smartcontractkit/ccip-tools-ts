@@ -419,11 +419,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *   * Returns logs in chronological order (oldest first)
    *
    * - If opts.startBlock and opts.startTime are omitted:
-   *   * Fetches signatures in reverse chronological order (newest first)
-   *   * Returns logs in reverse chronological order (newest first)
+   *   * Uses slot 0 as the forward start for non-watch queries
    *
    * @param opts - Log filter options containing:
    *   - `startBlock`: Starting slot number (inclusive)
+   *       Solana's special case: if startBlock=0, fetch only one page of getSignaturesForAddress
    *   - `startTime`: Starting Unix timestamp (inclusive)
    *   - `endBlock`: Ending slot number (inclusive)
    *   - `endBefore`: Fetch signatures before this transaction
@@ -460,9 +460,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     // Process signatures and yield logs
     for await (const tx of this.getTransactionsForAddress(opts)) {
-      let logs = tx.logs
-      if (opts.startBlock == null && opts.startTime == null) logs = logs.toReversed() // backwards
-      for (const log of logs) {
+      for (const log of tx.logs) {
         // Filter and yield logs from the specified program, and which match event discriminant or log prefix
         if (
           (programs !== true && !programs.includes(log.address)) ||
@@ -573,6 +571,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     for await (const log of this.getLogs({
       programs: true,
       address: feeQuoterDestChainStateAccountAddress.toBase58(),
+      startBlock: 0, // use getLogs special-case to do a single getSignaturesForAddress pass
       topics: ['ExecutionStateChanged', 'CommitReportAccepted', 'Transmitted'],
     })) {
       return [log.address] // assume single offramp per router/deployment on Solana

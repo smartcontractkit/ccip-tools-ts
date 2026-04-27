@@ -19,6 +19,7 @@ export { CCIPBlockNotFoundError, CCIPTransactionNotFoundError } from './speciali
 // Specialized errors - Logs
 export {
   CCIPLogsAddressRequiredError,
+  CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
   CCIPLogsWatchRequiresStartError,
 } from './specialized.ts'

@@ -103,6 +103,7 @@ export async function cleanUpBuffers(
   let alreadyClosed = 0
   for await (const log of ctx.getLogs({
     address: wallet.publicKey.toBase58(),
+    startBlock: 0,
     topics: [
       'Instruction: BufferExecutionReport',
       'Instruction: CreateLookupTable',

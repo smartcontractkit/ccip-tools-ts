@@ -383,9 +383,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       ])
     }
     for await (const tx of streamTransactionsForAddress(opts, this)) {
-      const logs =
-        opts.startBlock == null && opts.startTime == null ? tx.logs.toReversed() : tx.logs
-      for (const log of logs) {
+      for (const log of tx.logs) {
         if (topics && !topics.has(log.topics[0]!)) continue
         yield log
       }

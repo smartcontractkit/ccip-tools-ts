@@ -92,7 +92,28 @@ describe('TON logs unit tests', () => {
         )
       })
 
-      it('should throw CCIPLogsWatchRequiresStartError when watch is true but no startBlock or startTime', async () => {
+      it('should throw CCIPLogsRequiresStartError when no startBlock or startTime is provided', async () => {
+        const mockProvider = {} as TonClient
+        const mockGetTransaction = mock.fn(async () => createMockChainTransaction('hash', 1))
+
+        await assert.rejects(
+          async () => {
+            for await (const _tx of streamTransactionsForAddress(
+              {
+                address: TEST_ADDRESS,
+              },
+              { provider: mockProvider, getTransaction: mockGetTransaction },
+            )) {
+              // Should not reach here
+            }
+          },
+          {
+            name: 'CCIPLogsRequiresStartError',
+          },
+        )
+      })
+
+      it('should throw CCIPLogsRequiresStartError when watch is true but no startBlock or startTime', async () => {
         const mockProvider = {} as TonClient
         const mockGetTransaction = mock.fn(async () => createMockChainTransaction('hash', 1))
 
@@ -109,7 +130,7 @@ describe('TON logs unit tests', () => {
             }
           },
           {
-            name: 'CCIPLogsWatchRequiresStartError',
+            name: 'CCIPLogsRequiresStartError',
           },
         )
       })
@@ -333,8 +354,8 @@ describe('TON logs unit tests', () => {
       })
     })
 
-    describe('backward fetching (without startBlock)', () => {
-      it('should fetch transactions backward when no startBlock or startTime', async () => {
+    describe('explicit origin start (startBlock=0)', () => {
+      it('should fetch transactions forward from the oldest available transaction', async () => {
         const tx1 = createMockTransaction({ lt: 1002n, now: 102 })
         const tx2 = createMockTransaction({ lt: 1001n, now: 101 })
         const tx3 = createMockTransaction({ lt: 1000n, now: 100 })
@@ -352,6 +373,7 @@ describe('TON logs unit tests', () => {
         for await (const tx of streamTransactionsForAddress(
           {
             address: TEST_ADDRESS,
+            startBlock: 0,
           },
           { provider: mockProvider, getTransaction: mockGetTransaction },
         )) {
@@ -359,10 +381,14 @@ describe('TON logs unit tests', () => {
         }
 
         assert.equal(results.length, 3)
+        assert.deepEqual(
+          results.map((tx) => tx.blockNumber),
+          [1000, 1001, 1002],
+        )
         assert.equal(mockGetTransaction.mock.calls.length, 3)
       })
 
-      it('should filter transactions by endBlock in backward mode', async () => {
+      it('should filter transactions by endBlock', async () => {
         const tx1 = createMockTransaction({ lt: 1002n, now: 102 })
         const tx2 = createMockTransaction({ lt: 1001n, now: 101 })
         const tx3 = createMockTransaction({ lt: 1000n, now: 100 })
@@ -380,6 +406,7 @@ describe('TON logs unit tests', () => {
         for await (const tx of streamTransactionsForAddress(
           {
             address: TEST_ADDRESS,
+            startBlock: 0,
             endBlock: 1001,
           },
           { provider: mockProvider, getTransaction: mockGetTransaction },
@@ -391,42 +418,7 @@ describe('TON logs unit tests', () => {
         assert.equal(results.length, 2)
       })
 
-      it('should handle endBefore parameter in backward mode', async () => {
-        const tx1 = createMockTransaction({ lt: 1002n, now: 102 })
-        const tx2 = createMockTransaction({ lt: 1001n, now: 101 })
-
-        const getTransactionsMock = mock.fn(async (addr, opts) => {
-          if (opts?.hash) {
-            assert.equal(opts.hash, 'testhash')
-            assert.equal(opts.lt, '1001')
-            return [tx2]
-          }
-          return [tx1, tx2]
-        })
-        const mockProvider = {
-          getTransactions: getTransactionsMock,
-        } as unknown as TonClient
-
-        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
-          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
-        )
-
-        const results: ChainTransaction[] = []
-        for await (const tx of streamTransactionsForAddress(
-          {
-            address: TEST_ADDRESS,
-            endBlock: 1001,
-            endBefore: 'testhash',
-          },
-          { provider: mockProvider, getTransaction: mockGetTransaction },
-        )) {
-          results.push(tx)
-        }
-
-        assert.ok(results.length >= 1)
-      })
-
-      it('should treat negative endBlock as latest in backward mode', async () => {
+      it('should treat negative endBlock as latest', async () => {
         const tx1 = createMockTransaction({ lt: 1000n, now: 100 })
 
         const getTransactionsMock = mock.fn(async () => [tx1])
@@ -442,6 +434,7 @@ describe('TON logs unit tests', () => {
         for await (const tx of streamTransactionsForAddress(
           {
             address: TEST_ADDRESS,
+            startBlock: 0,
             endBlock: -5,
           },
           { provider: mockProvider, getTransaction: mockGetTransaction },
@@ -452,11 +445,11 @@ describe('TON logs unit tests', () => {
         assert.equal(results.length, 1)
       })
 
-      it('should handle pagination in backward mode', async () => {
-        const batch1 = Array.from({ length: 100 }, (_, i) =>
+      it('should handle pagination', async () => {
+        const batch1 = Array.from({ length: 10 }, (_, i) =>
           createMockTransaction({ lt: BigInt(1100 - i), now: 1100 - i }),
         )
-        const batch2 = Array.from({ length: 50 }, (_, i) =>
+        const batch2 = Array.from({ length: 5 }, (_, i) =>
           createMockTransaction({ lt: BigInt(1000 - i), now: 1000 - i }),
         )
 
@@ -478,7 +471,8 @@ describe('TON logs unit tests', () => {
         for await (const tx of streamTransactionsForAddress(
           {
             address: TEST_ADDRESS,
-            page: 100,
+            startBlock: 0,
+            page: 10,
           },
           { provider: mockProvider, getTransaction: mockGetTransaction },
         )) {
@@ -908,6 +902,7 @@ describe('TON logs unit tests', () => {
           for await (const tx of streamTransactionsForAddress(
             {
               address: TEST_ADDRESS,
+              startBlock: 0,
               endBlock: 0,
             },
             { provider: mockProvider, getTransaction: mockGetTransaction },

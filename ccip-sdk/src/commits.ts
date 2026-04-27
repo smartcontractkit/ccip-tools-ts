@@ -27,7 +27,9 @@ export async function getOnchainCommitReport(
 ): Promise<CCIPVerifications> {
   for await (const log of dest.getLogs({
     ...hints,
-    ...(!hints?.startBlock ? { startTime: requestTimestamp } : { startBlock: hints.startBlock }),
+    ...(hints?.startBlock == null
+      ? { startTime: requestTimestamp }
+      : { startBlock: hints.startBlock }),
     address: offRamp,
     topics: [lane.version < CCIPVersion.V1_6 ? 'ReportAccepted' : 'CommitReportAccepted'],
   })) {

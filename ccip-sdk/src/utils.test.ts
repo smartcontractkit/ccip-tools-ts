@@ -46,6 +46,24 @@ describe('getSomeBlockNumberBefore', () => {
     assert.ok(blockNumber <= 800)
     assert.ok(blockNumber >= 790)
   })
+
+  it('should use the recent block timestamp instead of wall-clock time', async () => {
+    const baseTimestamp = 1_700_000_000
+    const getBlockTimestamp = mock.fn(async (num) => baseTimestamp + num * 12)
+
+    const blockNumber = await getSomeBlockNumberBefore(
+      getBlockTimestamp,
+      10_000,
+      baseTimestamp + 9_500 * 12,
+    )
+
+    assert.ok(blockNumber <= 9500)
+    assert.ok(blockNumber >= 9490)
+    assert.ok(
+      getBlockTimestamp.mock.calls.length < 20,
+      `expected interpolation to converge quickly, got ${getBlockTimestamp.mock.calls.length} calls`,
+    )
+  })
 })
 
 describe('decodeAddress', () => {
@@ -453,20 +471,6 @@ describe('networkInfo', () => {
 })
 
 describe('blockRangeGenerator', () => {
-  it('should generate block ranges backwards', () => {
-    const ranges = [...blockRangeGenerator({ endBlock: 100000 })]
-    assert.equal(ranges.length, 10)
-    assert.deepEqual(ranges[0], { fromBlock: 90001, toBlock: 100000 })
-    assert.deepEqual(ranges[1], { fromBlock: 80001, toBlock: 90000 })
-    assert.deepEqual(ranges[2], { fromBlock: 70001, toBlock: 80000 })
-    assert.deepEqual(ranges[3], { fromBlock: 60001, toBlock: 70000 })
-    assert.deepEqual(ranges[4], { fromBlock: 50001, toBlock: 60000 })
-    assert.deepEqual(ranges[5], { fromBlock: 40001, toBlock: 50000 })
-    assert.deepEqual(ranges[6], { fromBlock: 30001, toBlock: 40000 })
-    assert.deepEqual(ranges[7], { fromBlock: 20001, toBlock: 30000 })
-    assert.deepEqual(ranges[8], { fromBlock: 10001, toBlock: 20000 })
-    assert.deepEqual(ranges[9], { fromBlock: 1, toBlock: 10000 })
-  })
   it('should generate block ranges forwards', () => {
     const ranges = [...blockRangeGenerator({ startBlock: 1000, endBlock: 50000 })]
     assert.equal(ranges.length, 5)
@@ -495,7 +499,7 @@ describe('blockRangeGenerator', () => {
 
   it('should handle when endBlock equals startBlock', () => {
     const ranges = [...blockRangeGenerator({ startBlock: 100, endBlock: 100 })]
-    assert.equal(ranges.length, 0)
+    assert.deepEqual(ranges, [{ fromBlock: 100, toBlock: 100, progress: '0%' }])
   })
 })
 

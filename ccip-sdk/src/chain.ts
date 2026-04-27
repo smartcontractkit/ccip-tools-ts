@@ -9,6 +9,7 @@ import {
   CCIPArgumentInvalidError,
   CCIPChainFamilyMismatchError,
   CCIPExecTxRevertedError,
+  CCIPLogsRequiresStartError,
   CCIPNotImplementedError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFinalizedError,
@@ -166,13 +167,13 @@ export const DEFAULT_API_RETRY_CONFIG: Required<ApiRetryConfig> = {
  * Filter options for getLogs queries across chains.
  */
 export type LogFilter = {
-  /** Starting block number (inclusive). */
+  /** Starting block number (inclusive). Required unless startTime is provided; explicit 0 is allowed. */
   startBlock?: number
   /** Starting Unix timestamp (inclusive). */
   startTime?: number
   /** Ending block number (inclusive). */
   endBlock?: number | 'finalized' | 'latest'
-  /** Solana: optional hint txHash for end of iteration. */
+  /** Cursor hint for the exclusive upper end of iteration on chains that support it. */
   endBefore?: string
   /** watch mode: polls for new logs after fetching since start (required), until endBlock finality tag
    *  (e.g. endBlock=finalized polls only finalized logs); can be a promise to cancel loop
@@ -671,13 +672,12 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * An async generator that yields logs based on the provided options.
    * @param opts - Options object containing:
-   *   - `startBlock`: if provided, fetch and generate logs forward starting from this block;
-   *        otherwise, returns logs backwards in time from endBlock;
-   *        optionally, startTime may be provided to fetch logs forward starting from this time
+   *   - `startBlock`: fetch and generate logs forward starting from this block;
+   *        required unless startTime is provided; explicit 0 is allowed
    *   - `startTime`: instead of a startBlock, a start timestamp may be provided;
-   *        if either is provided, fetch logs forward from this starting point; otherwise, backwards
-   *   - `endBlock`: if omitted, use latest block; can be a block number, 'latest', 'finalized' or
-   *        negative finality block depth
+   *        if either is provided, fetch logs forward from this starting point
+   *   - `endBlock`: a fixed block height, finality tag or negative finality depth to stop iteration
+   *        at; defaults to `latest`
    *   - `endBefore`: optional hint signature for end of iteration, instead of endBlock
    *   - `address`: if provided, fetch logs for this address only (may be required in some
    *     networks/implementations)
@@ -686,10 +686,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *     some networks/implementations may not be able to filter topics other than topic0s, so one may
    *     want to assume those are optimization hints, instead of hard filters, and verify results
    *   - `page`: if provided, try to use this page/range for batches
-   *   - `watch`: true or cancellation promise, getLogs continuously after initial fetch
+   *   - `watch`: true or cancellation promise, stream logs after initial catch-up until endBlock
+   *       finality tag (e.g. 'finalized'); requires endBlock to be a finality tag
    * @returns An async iterable iterator of logs.
    * @throws {@link CCIPLogsWatchRequiresFinalityError} if watch mode is used without a finality endBlock tag
-   * @throws {@link CCIPLogsWatchRequiresStartError} if watch mode is used without startBlock or startTime
+   * @throws {@link CCIPLogsRequiresStartError} if used without startBlock or startTime
    * @throws {@link CCIPLogsAddressRequiredError} if address is required but not provided (chain-specific)
    */
   abstract getLogs(opts: LogFilter): AsyncIterableIterator<ChainLog>
@@ -1396,7 +1397,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     'page' | 'watch' | 'startBlock' | 'startTime'
   >): AsyncIterableIterator<CCIPExecution> {
     if (verifications && 'log' in verifications) hints.startBlock ??= verifications.log.blockNumber
-    const onlyLast = !hints.startTime && !hints.startBlock // backwards
+    if (hints.startTime == null && hints.startBlock == null) throw new CCIPLogsRequiresStartError()
     for await (const log of this.getLogs({
       address: offRamp,
       topics: ['ExecutionStateChanged'],
@@ -1415,7 +1416,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
       const timestamp = log.tx?.timestamp ?? (await this.getBlockTimestamp(log.blockNumber))
       yield { receipt, log, timestamp }
-      if (onlyLast || receipt.state === ExecutionState.Success) break
+      if (receipt.state === ExecutionState.Success) break
     }
   }
 
