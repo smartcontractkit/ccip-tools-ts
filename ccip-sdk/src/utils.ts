@@ -48,13 +48,16 @@ export async function getSomeBlockNumberBefore(
   timestamp: number,
   { precision = 10, logger = console }: { precision?: number } & WithLogger = {},
 ): Promise<number> {
+  const recentTimestamp = await getBlockTimestamp(recentBlockNumber)
+  if (recentTimestamp <= timestamp) return recentBlockNumber
+
   let beforeBlockNumber = Math.max(1, recentBlockNumber - precision * 1000)
   let beforeTimestamp = await getBlockTimestamp(beforeBlockNumber)
 
-  const now = Math.trunc(Date.now() / 1000)
-  let estimatedBlockTime = (now - beforeTimestamp) / (recentBlockNumber - beforeBlockNumber),
+  let estimatedBlockTime =
+      (recentTimestamp - beforeTimestamp) / (recentBlockNumber - beforeBlockNumber),
     afterBlockNumber = recentBlockNumber,
-    afterTimestamp = now
+    afterTimestamp = recentTimestamp
 
   // first, go back looking for a block prior to our target timestamp
   for (let iter = 0; beforeBlockNumber > 1 && beforeTimestamp > timestamp; iter++) {
@@ -66,7 +69,8 @@ export async function getSomeBlockNumberBefore(
         10 ** iter,
     )
     beforeTimestamp = await getBlockTimestamp(beforeBlockNumber)
-    estimatedBlockTime = (now - beforeTimestamp) / (recentBlockNumber - beforeBlockNumber)
+    estimatedBlockTime =
+      (recentTimestamp - beforeTimestamp) / (recentBlockNumber - beforeBlockNumber)
   }
 
   if (beforeTimestamp > timestamp) {
@@ -196,31 +200,23 @@ const BLOCK_RANGE = 10_000
  *
  * @param params - Range parameters:
  *   - `singleBlock` - yields a single `{ fromBlock, toBlock }` for that block.
- *   - `endBlock` + optional `startBlock` - if `startBlock` is given, moves forward
- *     from there up to `endBlock`; otherwise moves backward from `endBlock` to genesis.
+ *   - `startBlock` + `endBlock` - moves forward from `startBlock` up to `endBlock`.
  *   - `page` - step size per range (default 10 000).
  * @returns Generator of `{ fromBlock, toBlock }` pairs, optionally with a `progress` percentage
  *   string when iterating forward.
  */
 export function* blockRangeGenerator(
-  params: { page?: number } & ({ endBlock: number; startBlock?: number } | { singleBlock: number }),
+  params: { page?: number } & ({ endBlock: number; startBlock: number } | { singleBlock: number }),
 ) {
   const stepSize = params.page ?? BLOCK_RANGE
   if ('singleBlock' in params) {
     yield { fromBlock: params.singleBlock, toBlock: params.singleBlock }
-  } else if ('startBlock' in params && params.startBlock) {
-    for (let fromBlock = params.startBlock; fromBlock < params.endBlock; fromBlock += stepSize) {
+  } else {
+    for (let fromBlock = params.startBlock; fromBlock <= params.endBlock; fromBlock += stepSize) {
       yield {
         fromBlock,
         toBlock: Math.min(params.endBlock, fromBlock + stepSize - 1),
-        progress: `${Math.trunc(((fromBlock - params.startBlock) / (params.endBlock - params.startBlock)) * 10000) / 100}%`,
-      }
-    }
-  } else {
-    for (let toBlock = params.endBlock; toBlock > 1; toBlock -= stepSize) {
-      yield {
-        fromBlock: Math.max(1, toBlock - stepSize + 1),
-        toBlock,
+        progress: `${Math.trunc(((fromBlock - params.startBlock) / Math.max(params.endBlock - params.startBlock, 1)) * 10000) / 100}%`,
       }
     }
   }
@@ -752,7 +748,7 @@ export function createRateLimitedFetch(
 ): typeof fetch {
   opts.maxRequests ??= 40
   opts.maxRetries ??= 5
-  opts.windowMs ??= 11e3
+  opts.windowMs ??= 12e3
   const opts_ = opts as RateLimitOpts
 
   const extractMethod = (init?: RequestInit): string | undefined => {
@@ -809,6 +805,7 @@ export function createRateLimitedFetch(
           logger.debug(
             'fetched',
             response.status,
+            response.headers,
             body,
             // ((await response.clone().json()) as { result: unknown })?.result,
           )

@@ -30,13 +30,13 @@ Before starting, study these files:
 
 ### Reference Implementations
 
-| Chain  | File                           | Completeness             |
-| ------ | ------------------------------ | ------------------------ |
-| EVM    | `ccip-sdk/src/evm/index.ts`    | Full implementation      |
-| Solana | `ccip-sdk/src/solana/index.ts` | Full implementation      |
-| Aptos  | `ccip-sdk/src/aptos/index.ts`  | Full implementation      |
+| Chain  | File                           | Completeness                             |
+| ------ | ------------------------------ | ---------------------------------------- |
+| EVM    | `ccip-sdk/src/evm/index.ts`    | Full implementation                      |
+| Solana | `ccip-sdk/src/solana/index.ts` | Full implementation                      |
+| Aptos  | `ccip-sdk/src/aptos/index.ts`  | Full implementation                      |
 | TON    | `ccip-sdk/src/ton/index.ts`    | Partial (no token pool/registry queries) |
-| Sui    | `ccip-sdk/src/sui/index.ts`    | Partial (manual exec) |
+| Sui    | `ccip-sdk/src/sui/index.ts`    | Partial (manual exec)                    |
 
 ---
 
@@ -54,13 +54,13 @@ All bytearray fields (addresses, data payloads) use the **destination chain's na
 
 ### Format by Chain Family
 
-| Chain Family | Address Format | Data Payload | Explorer Example |
-|--------------|----------------|--------------|------------------|
-| EVM | Checksummed hex (`0x...`) | Hex string | Etherscan |
-| Solana | Base58 | Base64 | Solana Explorer |
-| Aptos | Full 32-byte hex + `::module` suffix | Hex string | Aptos Explorer |
-| Sui | Full 32-byte hex + `::module` suffix | Hex string | SuiVision |
-| TON | `workchain:hash` | Hex string | TONScan |
+| Chain Family | Address Format                       | Data Payload | Explorer Example |
+| ------------ | ------------------------------------ | ------------ | ---------------- |
+| EVM          | Checksummed hex (`0x...`)            | Hex string   | Etherscan        |
+| Solana       | Base58                               | Base64       | Solana Explorer  |
+| Aptos        | Full 32-byte hex + `::module` suffix | Hex string   | Aptos Explorer   |
+| Sui          | Full 32-byte hex + `::module` suffix | Hex string   | SuiVision        |
+| TON          | `workchain:hash`                     | Hex string   | TONScan          |
 
 :::tip Aptos/Sui Module Suffixes
 Aptos and Sui addresses often include module suffixes (e.g., `0x123...abc::router`, `0x123...abc::onramp`). The `getAddress()` method preserves these suffixes. Different CCIP components share the same package address but differ by module: `::router`, `::onramp`, `::offramp`, `::fee_quoter`.
@@ -78,11 +78,11 @@ Before implementing, check:
 
 The SDK provides utilities that handle format conversion:
 
-| Utility | Purpose | File |
-|---------|---------|------|
-| `getDataBytes(data)` | Normalize any input format to bytes | `utils.ts` |
-| `getAddressBytes(address)` | Extract address bytes (handles hex, base58, base64, strips `::module` suffixes) | `utils.ts` |
-| `decodeAddress(bytes, family)` | Convert bytes to chain-native string | `utils.ts` |
+| Utility                        | Purpose                                                                         | File       |
+| ------------------------------ | ------------------------------------------------------------------------------- | ---------- |
+| `getDataBytes(data)`           | Normalize any input format to bytes                                             | `utils.ts` |
+| `getAddressBytes(address)`     | Extract address bytes (handles hex, base58, base64, strips `::module` suffixes) | `utils.ts` |
+| `decodeAddress(bytes, family)` | Convert bytes to chain-native string                                            | `utils.ts` |
 
 ### Implementation Requirements
 
@@ -185,6 +185,7 @@ Implement all static methods defined in the `ChainStatic` interface.
 **Reference:** See `ccip-sdk/src/chain.ts` for the complete `ChainStatic` type definition with all required static methods and their signatures.
 
 **Key concepts:**
+
 - `fromUrl` - Async factory that creates a chain instance from an RPC URL
 - `decodeMessage` / `decodeCommits` / `decodeReceipt` - Parse chain-specific log formats; return `undefined` if log doesn't match (don't throw)
 - `decodeExtraArgs` / `encodeExtraArgs` - Handle your chain's extra args serialization; decoded args include a `_tag` discriminator (e.g., `{ ..., _tag: 'EVMExtraArgsV2' }`)
@@ -211,6 +212,7 @@ Implement all abstract methods from the `Chain` base class.
 **Reference:** See `ccip-sdk/src/chain.ts` for the complete list of abstract methods with JSDoc descriptions.
 
 **Method categories:**
+
 - **Block/Transaction** - `getBlockTimestamp`, `getTransaction`, `getLogs`
 - **Message operations** - `getMessagesInBatch` (note: `getMessagesInTx` has a default implementation)
 - **Contract queries** - `typeAndVersion`, router/ramp getters
@@ -219,6 +221,7 @@ Implement all abstract methods from the `Chain` base class.
 - **Execution** - `sendMessage`, `execute`, `getOffchainTokenData`
 
 **Important patterns:**
+
 - Methods use opts objects (e.g., `SendMessageOpts`, `ExecuteOpts`) - see type definitions in `chain.ts`
 - `getLogs` is an async generator - see Engineering Patterns section
 - Some methods have default implementations that can be overridden
@@ -236,6 +239,7 @@ The hasher computes deterministic message hashes that must match the on-chain im
 **Reference:** See `ccip-sdk/src/evm/hasher.ts` or `ccip-sdk/src/solana/hasher.ts` for complete examples.
 
 **Key points:**
+
 - Pre-compute lane metadata hash in the factory (done once per lane)
 - The returned hasher function encodes the message according to your chain's on-chain format
 - Implement `static getDestLeafHasher(lane, ctx)` in your chain class to return the appropriate hasher
@@ -253,6 +257,7 @@ Message hash computation must match the on-chain implementation exactly. Test ag
 Define your chain-specific types, including the unsigned transaction type for `generateUnsignedSendMessage` and `generateUnsignedExecute`.
 
 **Then update `ccip-sdk/src/chain.ts`:**
+
 - Add your `UnsignedYourChainTx` to the `UnsignedTx` type mapping
 
 **Reference:** See `ccip-sdk/src/solana/types.ts` or `ccip-sdk/src/evm/types.ts` for examples.
@@ -273,10 +278,12 @@ Define your chain-specific types, including the unsigned transaction type for `g
 ## Step 7: CLI Wallet Provider
 
 **Files:**
+
 - `ccip-cli/src/providers/yourchain.ts` - Wallet loading logic
 - `ccip-cli/src/providers/index.ts` - Add case to `loadChainWallet` switch
 
 **Wallet sources to support:**
+
 - Environment variable (`PRIVATE_KEY`)
 - File path
 - Ledger (if applicable)
@@ -313,6 +320,7 @@ The SDK uses `micro-memoize` to cache expensive RPC calls. Memoize methods in yo
 **Reference:** See `EVMChain` or `SolanaChain` constructors for memoization patterns.
 
 **Common `micro-memoize` options:**
+
 - `maxSize` - Limit cache size
 - `maxArgs` - Only use first N args for cache key
 - `transformKey` - Normalize cache keys
@@ -326,6 +334,7 @@ The SDK uses `micro-memoize` to cache expensive RPC calls. Memoize methods in yo
 Chain instances hold network connections that need cleanup.
 
 **Pattern:**
+
 1. Create `destroy$: Promise<void>` that resolves when `destroy()` is called
 2. Use `destroy$.finally()` to clean up the client connection
 3. In `getLogs`, integrate `destroy$` with watch cancellation via `Promise.race`
@@ -348,7 +357,8 @@ Chain instances hold network connections that need cleanup.
 **`typeAndVersion`:** Returns 4-tuple `[type, version, typeAndVersion, suffix?]`. Use `parseTypeAndVersion` utility from `utils.ts`.
 
 **`getLogs`:** Async generator that handles:
-- Forward vs backward iteration (based on `startBlock`/`startTime`)
+
+- Forward iteration from required `startBlock`/`startTime` hints
 - Watch mode validation and polling
 - Integration with `destroy$` for cancellation
 
@@ -363,6 +373,7 @@ CCIP message types vary by version (v1.2/v1.5 vs v1.6) and may contain extra arg
 Each chain family has 4-byte tag prefixes for their extra args encoding (see existing tags in `ccip-sdk/src/extra-args.ts`).
 
 **When adding a new chain with custom extra args:**
+
 1. Generate a tag: `id('CCIP YourChainExtraArgsV1').substring(0, 10)` (using ethers `id`)
 2. Add the constant to `ccip-sdk/src/extra-args.ts`
 3. Define your `YourChainExtraArgsV1` type in `extra-args.ts`
@@ -375,6 +386,7 @@ Each chain family has 4-byte tag prefixes for their extra args encoding (see exi
 Before submitting your PR:
 
 **Core Implementation:**
+
 - [ ] `ChainFamily` constant added to `types.ts`
 - [ ] Chain class extends `Chain<typeof ChainFamily.YourChain>`
 - [ ] Static registration block added (`static { supportedChains[...] = ... }`)
@@ -383,17 +395,21 @@ Before submitting your PR:
 - [ ] Key methods memoized (see Engineering Patterns)
 
 **Types and Exports:**
+
 - [ ] `UnsignedTx` type mapping added to `chain.ts`
 - [ ] Chain class exported from `index.ts`
 
 **Hasher:**
+
 - [ ] `getDestLeafHasher` static method implemented
 - [ ] Hasher tests pass with real transaction data
 
 **CLI:**
+
 - [ ] Wallet provider implemented in `ccip-cli/src/providers/`
 
 **Quality:**
+
 - [ ] All quality gates pass (`npm run check && npm test`)
 - [ ] CHANGELOG.md updated
 

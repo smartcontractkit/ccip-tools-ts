@@ -494,6 +494,8 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       for await (const exec of sepoliaChain.getExecutionReceipts({
         offRamp,
         messageId: successMsg.messageId,
+        sourceChainSelector: request.message.sourceChainSelector,
+        startTime: request.tx.timestamp,
       })) {
         if (exec.receipt.state === ExecutionState.Success) {
           foundSuccess = true
@@ -538,6 +540,8 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         for await (const exec of sepoliaChain.getExecutionReceipts({
           offRamp,
           messageId: failedMsg.messageId,
+          sourceChainSelector: request.message.sourceChainSelector,
+          startTime: request.tx.timestamp,
         })) {
           assert.notEqual(
             exec.receipt.state,

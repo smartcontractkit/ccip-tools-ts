@@ -2,10 +2,7 @@ import { Address } from '@ton/core'
 import type { TonClient, Transaction } from '@ton/ton'
 
 import type { LogFilter } from '../chain.ts'
-import {
-  CCIPLogsWatchRequiresFinalityError,
-  CCIPLogsWatchRequiresStartError,
-} from '../errors/index.ts'
+import { CCIPLogsRequiresStartError, CCIPLogsWatchRequiresFinalityError } from '../errors/index.ts'
 import { CCIPLogsAddressRequiredError } from '../errors/specialized.ts'
 import type { ChainTransaction } from '../types.ts'
 import { sleep } from '../utils.ts'
@@ -32,7 +29,7 @@ async function* fetchTxsForward(
     })
     until ??= batch[0]?.lt
 
-    while (batch.length > 0 && batch[batch.length - 1]!.now < (opts.startTime || 0)) {
+    while (batch.length > 0 && batch[batch.length - 1]!.now < (opts.startTime ?? 0)) {
       batch.length-- // truncate tail of txs which are older than requested start
     }
 
@@ -43,7 +40,7 @@ async function* fetchTxsForward(
 
   const notAfter =
     typeof opts.endBlock !== 'number' || opts.endBlock < 0 ? undefined : BigInt(opts.endBlock)
-  while (notAfter && allTxs.length > 0 && allTxs[allTxs.length - 1]!.lt > notAfter) {
+  while (notAfter != null && allTxs.length > 0 && allTxs[allTxs.length - 1]!.lt > notAfter) {
     allTxs.length-- // truncate head (after reverse) of txs newer than requested end
   }
   yield* allTxs // all past logs
@@ -73,38 +70,10 @@ async function* fetchTxsForward(
   }
 }
 
-async function* fetchTxsBackwards(
-  opts: LogFilter & { pollInterval?: number },
-  { provider }: { provider: TonClient },
-) {
-  const limit = Math.min(opts.page || 100, 100)
-
-  if (typeof opts.endBlock === 'number' && opts.endBlock < 0) opts.endBlock = 'latest'
-
-  let batch: Transaction[] | undefined
-  do {
-    batch = await provider.getTransactions(Address.parse(opts.address!), {
-      limit,
-      ...(batch?.length
-        ? {
-            lt: batch[batch.length - 1]!.lt.toString(),
-            hash: batch[batch.length - 1]!.hash().toString('base64'),
-          }
-        : opts.endBefore && opts.endBlock
-          ? { lt: opts.endBlock.toString(), hash: opts.endBefore }
-          : {}),
-    })
-    for (const tx of batch) {
-      if (typeof opts.endBlock === 'number' && tx.lt > BigInt(opts.endBlock)) continue
-      yield tx
-    }
-  } while (batch.length >= limit)
-}
-
 /**
  * Internal method to get transactions for an address with pagination.
  * @param opts - Log filter options.
- * @returns Async generator of Solana transactions.
+ * @returns Async generator of TON transactions.
  */
 export async function* streamTransactionsForAddress(
   opts: Omit<LogFilter, 'topics'> & { pollInterval?: number },
@@ -115,21 +84,16 @@ export async function* streamTransactionsForAddress(
 ): AsyncGenerator<ChainTransaction> {
   if (!opts.address) throw new CCIPLogsAddressRequiredError()
 
-  opts.endBlock ||= 'latest'
+  opts.endBlock ??= 'latest'
 
-  let allTransactions
-  if (opts.startBlock != null || opts.startTime != null) {
-    if (opts.watch && ((typeof opts.endBlock === 'number' && opts.endBlock > 0) || opts.endBefore))
-      throw new CCIPLogsWatchRequiresFinalityError(opts.endBlock)
+  const hasStart = opts.startBlock != null || opts.startTime != null
+  if (!hasStart) throw new CCIPLogsRequiresStartError()
+  if (opts.watch && ((typeof opts.endBlock === 'number' && opts.endBlock > 0) || opts.endBefore))
+    throw new CCIPLogsWatchRequiresFinalityError(opts.endBlock)
 
-    allTransactions = fetchTxsForward(opts, ctx)
-  } else {
-    if (opts.watch) throw new CCIPLogsWatchRequiresStartError()
+  const allTransactions = fetchTxsForward(opts, ctx)
 
-    allTransactions = fetchTxsBackwards(opts, ctx) // generate backwards until depleting getSignaturesForAddress
-  }
-
-  // Process signatures
+  // Process transactions
   for await (const tx of allTransactions) {
     yield await ctx.getTransaction(tx)
   }

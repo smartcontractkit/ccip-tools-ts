@@ -144,6 +144,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   LOGS_WATCH_REQUIRES_FINALITY:
     'Logs watch requires endBlock to be a `finalized`, `latest` or finality block depth (negative).',
   LOGS_WATCH_REQUIRES_START: 'Logs watch requires either startBlock or startTime (forward mode).',
+  LOGS_REQUIRES_START: 'Logs queries require either startBlock or startTime.',
   LOGS_ADDRESS_REQUIRED: 'Provide address for logs filtering.',
   TOPICS_INVALID: 'Topics must be strings for event filtering.',
 
