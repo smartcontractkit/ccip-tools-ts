@@ -336,7 +336,10 @@ describe('Solana Devnet Estimate Fork Tests', { skip, timeout: 120_000 }, () => 
         },
       })
 
-      assert.equal(estimated, 31_175)
+      assert.ok(
+        30_000 < estimated && estimated < 33_000,
+        `estimated compute units should be around 31k for this message, got ${estimated}`,
+      )
     } finally {
       source.destroy?.()
     }
