@@ -23,7 +23,7 @@ import {
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 import { memoize } from 'micro-memoize'
-import type { PickDeep, SetRequired } from 'type-fest'
+import type { PickDeep, SetFieldType, SetRequired } from 'type-fest'
 
 import {
   type ChainContext,
@@ -127,7 +127,7 @@ import {
 } from './extra-args.ts'
 import { estimateExecGas } from './gas.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
-import { getEvmLogs } from './logs.ts'
+import { type EVMEndBlockTag, getEvmLogs } from './logs.ts'
 import type { CCIPMessage_V1_6_EVM, CCIPMessage_V2_0, CleanAddressable } from './messages.ts'
 import { encodeEVMOffchainTokenData } from './offchain.ts'
 import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
@@ -352,7 +352,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.getBlockTimestamp} */
-  async getBlockTimestamp(block: number | 'finalized'): Promise<number> {
+  async getBlockTimestamp(block: EVMEndBlockTag): Promise<number> {
     const res = await this.provider.getBlock(block) // cached
     if (!res) throw new CCIPBlockNotFoundError(block)
     return res.timestamp
@@ -374,7 +374,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.getLogs} */
-  async *getLogs(filter: LogFilter & { onlyFallback?: boolean }): AsyncIterableIterator<Log> {
+  async *getLogs(
+    filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag> & { onlyFallback?: boolean },
+  ): AsyncIterableIterator<Log> {
     if (filter.watch instanceof Promise)
       filter = { ...filter, watch: Promise.race([filter.watch, this.destroy$]) }
     yield* getEvmLogs(filter, this)

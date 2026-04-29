@@ -1,9 +1,11 @@
 import { type BytesLike, hexlify, isBytesLike, toBigInt } from 'ethers'
+import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
-import type { Chain, ChainStatic } from './chain.ts'
+import type { Chain, ChainStatic, LogFilter } from './chain.ts'
 import {
   CCIPChainFamilyUnsupportedError,
+  CCIPLogsRequiresStartError,
   CCIPMessageBatchIncompleteError,
   CCIPMessageDecodeError,
   CCIPMessageIdNotFoundError,
@@ -19,6 +21,7 @@ import {
   type CCIPMessage,
   type CCIPRequest,
   type CCIPVersion,
+  type ChainLog,
   type ChainTransaction,
   type MessageInput,
   ChainFamily,
@@ -259,6 +262,7 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
  * const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
  * const request = await getMessageById(source, '0xabc123...', {
  *   onRamp: '0xOnRampAddress...',
+ *   startTime: 1710000000,
  * })
  * console.log(`Found: seqNr=${request.message.sequenceNumber}`)
  * ```
@@ -268,12 +272,14 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
 export async function getMessageById(
   source: Chain,
   messageId: string,
-  opts?: { page?: number; onRamp?: string },
+  opts?: Pick<LogFilter, 'page' | 'startBlock' | 'startTime'> & { onRamp?: string },
 ): Promise<CCIPRequest> {
+  if (opts?.startBlock == null && opts?.startTime == null) throw new CCIPLogsRequiresStartError()
+  const { onRamp, ...hints } = opts
   for await (const log of source.getLogs({
     topics: ['CCIPSendRequested', 'CCIPMessageSent'],
-    address: opts?.onRamp,
-    ...opts,
+    address: onRamp,
+    ...hints,
   })) {
     const message = (source.constructor as ChainStatic).decodeMessage(log)
     if (message?.messageId !== messageId) continue
@@ -302,6 +308,7 @@ export async function getMessageById(
 
 // Number of blocks to expand the search window for logs
 const BLOCK_LOG_WINDOW_SIZE = 5000
+const BATCH_LOG_LOOKBACK_SECONDS = 60 * 60
 
 /**
  * Fetches all CCIP messages contained in a given commit batch.
@@ -317,7 +324,9 @@ export async function getMessagesInBatch<
   C extends Chain,
   R extends PickDeep<
     CCIPRequest,
-    'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
+    | 'lane'
+    | `log.${'topics' | 'address' | 'blockNumber' | 'tx.timestamp'}`
+    | 'message.sequenceNumber'
   >,
 >(
   source: C,
@@ -325,73 +334,104 @@ export async function getMessagesInBatch<
   { minSeqNr, maxSeqNr }: { minSeqNr: bigint; maxSeqNr: bigint },
   opts: Parameters<C['getLogs']>[0] = { page: BLOCK_LOG_WINDOW_SIZE },
 ): Promise<R['message'][]> {
+  // short-circuit trivial batchSize=1
   if (minSeqNr === maxSeqNr) return [request.message]
 
-  const filter = {
-    page: BLOCK_LOG_WINDOW_SIZE,
+  type LogAnchor = PickDeep<ChainLog, 'blockNumber' | 'tx.timestamp'>
+  type BatchEntry = { log: LogAnchor; message: R['message'] }
+
+  const baseFilter = {
+    page: opts.page ?? BLOCK_LOG_WINDOW_SIZE,
     topics: [request.log.topics[0]],
     address: request.log.address,
     ...opts,
   }
-  if (request.message.sequenceNumber === maxSeqNr) filter.endBlock = request.log.blockNumber
-  else
-    // start proportionally before send request block, including case when seqNum==min => startBlock
-    filter.startBlock =
+
+  const entries: BatchEntry[] = []
+
+  const getLogTimestamp = memoize(
+    async (log: LogAnchor): Promise<number> => {
+      if (log.tx?.timestamp != null) {
+        getLogTimestamp.cache.set([log], Promise.resolve(log.tx.timestamp))
+        return log.tx.timestamp
+      }
+      const timestamp = source.getBlockTimestamp(log.blockNumber)
+      getLogTimestamp.cache.set([log], timestamp)
+      return timestamp
+    },
+    { async: true, transformKey: ([log]) => [log.blockNumber] as const },
+  )
+
+  const collectForward = async (filter: Parameters<C['getLogs']>[0]): Promise<boolean> => {
+    // on first, collect up to batch end; on subsequent, collect up to before earliest seen
+    const stopAtSeqNr = entries.length ? entries[0]!.message.sequenceNumber - 1n : maxSeqNr
+    let done = false
+    const head: BatchEntry[] = []
+    for await (const log of source.getLogs(filter)) {
+      const message = (source.constructor as ChainStatic).decodeMessage(log)
+      if (
+        !message ||
+        !('sequenceNumber' in message) ||
+        ('destChainSelector' in message &&
+          message.destChainSelector !== request.lane.destChainSelector)
+      )
+        continue
+      if (message.sequenceNumber <= minSeqNr) done = true // if we see anything before batch, we're sure there's nothing earlier
+      if (message.sequenceNumber < minSeqNr) continue // if before batch, ignore
+      if (message.sequenceNumber <= maxSeqNr) head.push({ log, message }) // inside batch, collect
+      if (message.sequenceNumber >= stopAtSeqNr) break
+    }
+    entries.unshift(...head)
+    return done
+  }
+
+  // first, start proportionally before send request block; guaranteed to return at least 1 item (request's)
+  let done = await collectForward({
+    ...baseFilter,
+    startBlock: Math.max(
+      0,
+      // edge cases: our req first => [req..]; our req last => [req-page..req]
       request.log.blockNumber -
-      Math.ceil(
-        (Number(request.message.sequenceNumber - minSeqNr) / Number(maxSeqNr - minSeqNr)) *
-          filter.page,
-      )
+        Math.ceil(
+          (Number(request.message.sequenceNumber - minSeqNr) / Number(maxSeqNr - minSeqNr)) *
+            baseFilter.page,
+        ),
+    ),
+    // iff our request is maxSeqNr, we know we don't need to go past it
+    ...(request.message.sequenceNumber === maxSeqNr && {
+      endBlock: request.log.blockNumber,
+    }),
+  })
 
-  const messages: R['message'][] = []
-  if (filter.startBlock) {
-    // forward
-    let backwardsBefore, backwardsEndBlock
-    for await (const log of source.getLogs(filter)) {
-      backwardsBefore ??= log.transactionHash
-      backwardsEndBlock ??= log.blockNumber - 1
-      const message = (source.constructor as ChainStatic).decodeMessage(log)
-      if (
-        !message ||
-        !('sequenceNumber' in message) ||
-        ('destChainSelector' in message &&
-          message.destChainSelector !== request.lane.destChainSelector)
-      )
-        continue
-      if (message.sequenceNumber < minSeqNr) continue
-      messages.push(message)
-      if (message.sequenceNumber >= maxSeqNr) break
-    }
-    if (messages.length && messages[0]!.sequenceNumber > minSeqNr) {
-      // still work to be done backwards
-      delete filter['startBlock']
-      filter['endBlock'] = backwardsEndBlock
-      filter['endBefore'] = backwardsBefore
-    }
-  }
-  if (filter.endBlock) {
-    // backwards
-    for await (const log of source.getLogs(filter)) {
-      const message = (source.constructor as ChainStatic).decodeMessage(log)
-      if (
-        !message ||
-        !('sequenceNumber' in message) ||
-        ('destChainSelector' in message &&
-          message.destChainSelector !== request.lane.destChainSelector)
-      )
-        continue
-      messages.unshift(message)
-      if (message.sequenceNumber <= minSeqNr) break
+  let retries = 0
+  const batchSize = Number(maxSeqNr - minSeqNr) + 1
+  while (!done && entries[0]!.message.sequenceNumber > minSeqNr) {
+    const earliest = entries[0]!
+    const earliestBefore = earliest.message.sequenceNumber
+    const earliestTimestamp = await getLogTimestamp(earliest.log)
+
+    done = await collectForward({
+      ...baseFilter,
+      startTime: Math.max(0, earliestTimestamp - BATCH_LOG_LOOKBACK_SECONDS * 2 ** retries),
+      endBlock: earliest.log.blockNumber,
+    })
+
+    const earliestAfter = entries[0]!.message.sequenceNumber
+    if (earliestAfter < earliestBefore) {
+      retries = 0
+    } else {
+      retries++
+      if (retries >= 6) break
     }
   }
 
-  if (messages.length != Number(maxSeqNr - minSeqNr) + 1) {
+  if (entries.length < batchSize) {
     throw new CCIPMessageBatchIncompleteError(
       { min: minSeqNr, max: maxSeqNr },
-      messages.map((e) => e.sequenceNumber),
+      entries.map((e) => e.message.sequenceNumber),
     )
   }
-  return messages
+  return entries.map((e) => e.message)
 }
 
 /**

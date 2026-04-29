@@ -84,7 +84,9 @@ class MockChain {
       from: '0x0000000000000000000000000000000000000001',
     } as ChainTransaction),
   )
-  getBlockTimestamp = mock.fn(() => Promise.resolve(1234567890))
+  getBlockTimestamp = mock.fn((_block?: number | 'latest' | 'finalized') =>
+    Promise.resolve(1234567890),
+  )
   static decodeMessage = mock.fn(
     (log: { topics: readonly string[]; data: unknown }): CCIPMessage | undefined => {
       if (typeof log.data === 'object' && log.data && 'messageId' in log.data) {
@@ -265,7 +267,9 @@ describe('getMessageById', () => {
       })(),
     )
 
-    const result = await getMessageById(mockedChain as unknown as Chain, '0xMessageId1')
+    const result = await getMessageById(mockedChain as unknown as Chain, '0xMessageId1', {
+      startBlock: 0,
+    })
     assert.equal(result.log.index, 1)
     assert.ok(result.message)
     assert.equal(result.tx.timestamp, 1234567890)
@@ -289,7 +293,8 @@ describe('getMessageById', () => {
     )
 
     await assert.rejects(
-      async () => await getMessageById(mockedChain as unknown as Chain, '0xMessageId1'),
+      async () =>
+        await getMessageById(mockedChain as unknown as Chain, '0xMessageId1', { startBlock: 0 }),
       /Could not find a CCIPSendRequested message with messageId: 0xMessageId1/,
     )
 
@@ -409,7 +414,15 @@ describe('getMessagesInBatch', () => {
 
     mockedChain.getLogs.mock.mockImplementation((_opts: LogFilter) =>
       (async function* () {
-        // Return empty to trigger error
+        // Only yield the request's own log — not enough to fill batch
+        yield {
+          address: rampAddress,
+          index: 5,
+          topics: [topic0],
+          data: mockedMessage(5),
+          blockNumber: 1,
+          transactionHash: '0x123',
+        }
       })(),
     )
 
@@ -421,6 +434,81 @@ describe('getMessagesInBatch', () => {
         }),
       /Could not find all messages in batch/,
     )
+  })
+
+  it('should retry missing earlier batch messages with a forward time window', async () => {
+    const mockRequest: Omit<CCIPRequest, 'tx' | 'timestamp'> = {
+      log: {
+        address: rampAddress,
+        topics: [topic0],
+        blockNumber: 500,
+        transactionHash: '0x500',
+        index: 0,
+        data: mockedMessage(5),
+      },
+      message: {
+        messageId: '0xMessageId5',
+        sourceChainSelector: 16015286601757825753n,
+        sequenceNumber: 5n,
+        nonce: 0n,
+        sender: '0x0000000000000000000000000000000000000045',
+        receiver: toBeHex(456, 32),
+        data: '0x',
+        tokenAmounts: [],
+        sourceTokenData: [],
+        gasLimit: 100n,
+        strict: false,
+        feeToken: '0x0000000000000000000000000000000000008916',
+        feeTokenAmount: 0n,
+      },
+      lane: {
+        sourceChainSelector: 16015286601757825753n,
+        destChainSelector: 10n,
+        onRamp: rampAddress,
+        version: CCIPVersion.V1_2,
+      },
+    }
+    const calls: LogFilter[] = []
+
+    mockedChain.getBlockTimestamp.mock.mockImplementation(
+      (block?: number | 'latest' | 'finalized') =>
+        Promise.resolve(typeof block === 'number' ? block * 10 : 0),
+    )
+    mockedChain.getLogs.mock.mockImplementation((opts: LogFilter) =>
+      (async function* () {
+        calls.push(opts)
+        const seqs = calls.length === 1 ? [3, 4, 5] : [1, 2, 3]
+        for (const seq of seqs) {
+          yield {
+            address: rampAddress,
+            index: seq,
+            topics: [topic0],
+            data: mockedMessage(seq),
+            blockNumber: seq * 100,
+            transactionHash: `0x${seq}`,
+          }
+        }
+      })(),
+    )
+
+    const result = await getMessagesInBatch(mockedChain as unknown as Chain, mockRequest, {
+      minSeqNr: 1n,
+      maxSeqNr: 5n,
+    })
+
+    assert.deepEqual(
+      result.map((message) => message.sequenceNumber),
+      [1n, 2n, 3n, 4n, 5n],
+    )
+    assert.equal(calls.length, 2)
+    assert.equal(calls[0]!.startBlock, 0)
+    assert.equal(calls[0]!.endBlock, 500)
+    assert.equal(calls[0]!.startTime, undefined)
+    assert.equal(calls[0]!.endBefore, undefined)
+    assert.equal(calls[1]!.endBlock, 300)
+    assert.equal(calls[1]!.startTime, 0)
+    assert.equal(calls[1]!.startBlock, undefined)
+    assert.equal(calls[1]!.endBefore, undefined)
   })
 })
 

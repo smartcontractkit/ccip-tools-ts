@@ -6,22 +6,26 @@ import {
   isHexString,
 } from 'ethers'
 import { memoize } from 'micro-memoize'
+import type { SetFieldType } from 'type-fest'
 
 import type { LogFilter } from '../chain.ts'
 import {
   CCIPLogTopicsNotFoundError,
   CCIPLogsAddressRequiredError,
   CCIPLogsNotFoundError,
+  CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
-  CCIPLogsWatchRequiresStartError,
   CCIPRpcNotFoundError,
 } from '../errors/index.ts'
+import type { FinalityRequested } from '../extra-args.ts'
 import { blockRangeGenerator, getSomeBlockNumberBefore } from '../utils.ts'
 import { getAllFragmentsMatchingEvents } from './const.ts'
 import type { WithLogger } from '../types.ts'
 
 const MAX_PARALLEL_JOBS = 24
 const PER_REQUEST_TIMEOUT = 5000
+/** Tags or values which can be used as `endBlock` in {@link EVMChain.getLogs} filter */
+export type EVMEndBlockTag = FinalityRequested | 'latest'
 
 const getFallbackRpcsList = memoize(
   async () => {
@@ -97,8 +101,8 @@ async function getFallbackArchiveLogs(
   filter: {
     address: string
     topics: (string | string[] | null)[]
-    startBlock?: number
-    endBlock?: number | 'latest'
+    startBlock: number
+    endBlock?: EVMEndBlockTag
   },
   { logger = console, destroy$ }: { destroy$?: Promise<unknown> } & WithLogger = {},
 ) {
@@ -106,8 +110,8 @@ async function getFallbackArchiveLogs(
   if (provider != null) {
     return (await provider).getLogs({
       ...filter,
-      fromBlock: filter.startBlock ?? 1,
-      toBlock: filter.endBlock ?? 'latest',
+      fromBlock: filter.startBlock,
+      toBlock: filter.endBlock || 'latest',
     })
   }
   let cancel!: (_?: unknown) => void
@@ -143,8 +147,8 @@ async function getFallbackArchiveLogs(
             await provider
               .getLogs({
                 ...filter,
-                fromBlock: filter.startBlock ?? 1,
-                toBlock: filter.endBlock ?? 'latest',
+                fromBlock: filter.startBlock,
+                toBlock: filter.endBlock || 'latest',
               })
               .then((logs) => {
                 if (!logs.length) throw new CCIPLogsNotFoundError(filter)
@@ -178,7 +182,7 @@ async function getFallbackArchiveLogs(
 
 /**
  * Implements Chain.getLogs for EVM.
- * If !(filter.startBlock|startTime), walks backwards from endBlock, otherwise forward from then.
+ * Walks logs forward from `startBlock` or `startTime`; if neither is provided, throws.
  * @param filter - Chain LogFilter. The `onlyFallback` option controls pagination behavior:
  *   - If undefined (default): paginate main provider only by filter.page
  *   - If false: first try whole range with main provider, then fallback to archive provider
@@ -187,17 +191,14 @@ async function getFallbackArchiveLogs(
  * @returns Async iterator of logs.
  */
 export async function* getEvmLogs(
-  filter: LogFilter & { onlyFallback?: boolean },
+  filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag> & { onlyFallback?: boolean },
   ctx: { provider: JsonRpcApiProvider; destroy$?: Promise<unknown> } & WithLogger,
 ): AsyncIterableIterator<Log> {
   const { provider, logger = console } = ctx
 
-  if (filter.watch) {
-    if (typeof filter.endBlock === 'number' && filter.endBlock > 0)
-      throw new CCIPLogsWatchRequiresFinalityError(filter.endBlock)
-    else if (filter.startBlock == null && filter.startTime == null)
-      throw new CCIPLogsWatchRequiresStartError()
-  }
+  if (filter.startBlock == null && filter.startTime == null) throw new CCIPLogsRequiresStartError()
+  if (filter.watch && typeof filter.endBlock === 'number' && filter.endBlock > 0)
+    throw new CCIPLogsWatchRequiresFinalityError(filter.endBlock)
 
   if (
     filter.topics?.length &&
@@ -217,7 +218,7 @@ export async function* getEvmLogs(
 
   const { number: endBlock } = (await provider.getBlock(filter.endBlock || 'latest'))!
 
-  if (filter.startBlock == null && filter.startTime) {
+  if (filter.startBlock == null && filter.startTime != null) {
     filter.startBlock = await getSomeBlockNumberBefore(
       async (block: number) => (await provider.getBlock(block))!.timestamp, // cached
       endBlock,
@@ -225,13 +226,15 @@ export async function* getEvmLogs(
       ctx,
     )
   }
+  filter.startBlock = Math.max(0, filter.startBlock!)
+  const startBlock = filter.startBlock
   if (filter.onlyFallback != null) {
     if (!filter.address || !filter.topics?.length) throw new CCIPLogsAddressRequiredError()
     let logs
     try {
       logs = await provider.getLogs({
         ...filter,
-        fromBlock: filter.startBlock ?? 1,
+        fromBlock: startBlock,
         toBlock: endBlock,
       })
     } catch (_) {
@@ -241,7 +244,7 @@ export async function* getEvmLogs(
           {
             address: filter.address,
             topics: filter.topics,
-            startBlock: filter.startBlock ?? 1,
+            startBlock,
             endBlock,
           },
           ctx,
@@ -251,15 +254,14 @@ export async function* getEvmLogs(
       }
     }
     if (logs) {
-      if (!filter.startBlock) logs.reverse()
       yield* logs
       return
     }
   }
 
-  let latestLogBlockNumber = filter.startBlock ?? 1
+  let latestLogBlockNumber = startBlock
   // paginate only if filter.onlyFallback isn't true
-  for (const blockRange of blockRangeGenerator({ ...filter, endBlock })) {
+  for (const blockRange of blockRangeGenerator({ ...filter, startBlock, endBlock })) {
     const filter_ = {
       ...blockRange,
       ...(filter.address ? { address: filter.address } : {}),
@@ -269,7 +271,6 @@ export async function* getEvmLogs(
     const logs = await provider.getLogs(filter_)
     if (logs.length)
       latestLogBlockNumber = Math.max(latestLogBlockNumber, logs[logs.length - 1]!.blockNumber)
-    if (filter.startBlock == null) logs.reverse()
     yield* logs
   }
 

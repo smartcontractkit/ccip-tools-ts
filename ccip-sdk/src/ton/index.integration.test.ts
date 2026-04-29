@@ -141,6 +141,7 @@ describe.skip('TON index integration tests', () => {
 
       for await (const log of tonChain.getLogs({
         address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        startBlock: 0,
         page: 10,
       })) {
         logs.push(log)
@@ -169,12 +170,12 @@ describe.skip('TON index integration tests', () => {
         )
       }
 
-      // Verify descending order if we have multiple logs
+      // Verify ascending order if we have multiple logs
       if (logs.length > 1) {
         for (let i = 1; i < logs.length; i++) {
           assert.ok(
-            logs[i - 1].blockNumber >= logs[i].blockNumber,
-            'Logs should be in descending order by blockNumber',
+            logs[i - 1].blockNumber <= logs[i].blockNumber,
+            'Logs should be in ascending order by blockNumber',
           )
         }
       }
@@ -185,6 +186,7 @@ describe.skip('TON index integration tests', () => {
 
       for await (const log of tonChain.getLogs({
         address: ADDRESSES_TO_ASSERT.tonOffRamp,
+        startBlock: 0,
         page: 10,
       })) {
         logs.push(log)
@@ -200,6 +202,7 @@ describe.skip('TON index integration tests', () => {
 
       for await (const log of tonChain.getLogs({
         address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        startBlock: 0,
         page: 5,
       })) {
         logs.push(log)
@@ -216,6 +219,7 @@ describe.skip('TON index integration tests', () => {
       const recentLogs: any[] = []
       for await (const log of tonChain.getLogs({
         address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        startBlock: 0,
         page: 5,
       })) {
         recentLogs.push(log)
@@ -224,14 +228,14 @@ describe.skip('TON index integration tests', () => {
 
       assert.ok(recentLogs.length >= 2, 'Need at least 2 logs to test filtering')
 
-      // Use the highest block from fetched logs (logs are in descending order by lt)
-      const highBlock = recentLogs[0].blockNumber
+      // Use the highest block from fetched logs.
+      const highBlock = Math.max(...recentLogs.map((log) => log.blockNumber))
 
-      // Test endBlock: should only get logs <= endBlock
-      // When endBlock is specified, iteration starts from that point going backwards
+      // Test endBlock: should only get logs <= endBlock.
       const logsWithEndBlock: any[] = []
       for await (const log of tonChain.getLogs({
         address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        startBlock: 0,
         endBlock: highBlock,
         page: 10,
       })) {
@@ -259,6 +263,7 @@ describe.skip('TON index integration tests', () => {
       // Fetch a real CCIPMessageSent log from OnRamp
       for await (const log of tonChain.getLogs({
         address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        startBlock: 0,
         page: 10,
       })) {
         const decoded = TONChain.decodeMessage(log)
@@ -428,6 +433,7 @@ describe.skip('TON index integration tests', () => {
       // Fetch a real CommitReportAccepted log from OffRamp
       for await (const log of tonChain.getLogs({
         address: ADDRESSES_TO_ASSERT.tonOffRamp,
+        startBlock: 0,
         topics: ['CommitReportAccepted'],
         page: 20,
       })) {
@@ -453,6 +459,7 @@ describe.skip('TON index integration tests', () => {
     it('should return undefined for non-commit BOC data', async () => {
       for await (const log of tonChain.getLogs({
         address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        startBlock: 0,
         page: 1,
       })) {
         assert.equal(
@@ -535,6 +542,7 @@ describe.skip('TON index integration tests', () => {
       // Fetch a real ExecutionStateChanged log from OffRamp
       for await (const log of tonChain.getLogs({
         address: ADDRESSES_TO_ASSERT.tonOffRamp,
+        startBlock: 0,
         topics: ['ExecutionStateChanged'],
         page: 20,
       })) {
@@ -561,6 +569,7 @@ describe.skip('TON index integration tests', () => {
       // Fetch CCIPMessageSent logs from OnRamp - these should NOT decode as receipts
       for await (const log of tonChain.getLogs({
         address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        startBlock: 0,
         page: 1,
       })) {
         assert.equal(
@@ -701,6 +710,7 @@ describe.skip('TON index integration tests', () => {
       // Get a known transaction hash from logs
       for await (const log of tonChain.getLogs({
         address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        startBlock: 0,
         page: 1,
       })) {
         knownTxHash = log.transactionHash
@@ -799,6 +809,7 @@ describe.skip('TON index integration tests', () => {
       let logLt: number | undefined
       for await (const log of tonChain.getLogs({
         address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        startBlock: 0,
         page: 1,
       })) {
         logLt = log.blockNumber
@@ -829,6 +840,7 @@ describe.skip('TON index integration tests', () => {
       let txHash: string | undefined
       for await (const log of tonChain.getLogs({
         address: ADDRESSES_TO_ASSERT.tonOnRamp,
+        startBlock: 0,
         page: 1,
       })) {
         if (TONChain.decodeMessage(log)) {

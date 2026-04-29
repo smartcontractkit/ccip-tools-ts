@@ -1493,7 +1493,7 @@ export class CCIPLogsNotFoundError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   const logs = await chain.getLogs({ topics: ['0xunknown'] })
+ *   const logs = await chain.getLogs({ startBlock: 0, topics: ['0xunknown'] })
  * } catch (error) {
  *   if (error instanceof CCIPLogTopicsNotFoundError) {
  *     console.log(`Topics not matched: ${error.context.topics}`)
@@ -1519,7 +1519,7 @@ export class CCIPLogTopicsNotFoundError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await chain.watchLogs({ endBlock: 1000 }) // Fixed endBlock not allowed
+ *   await chain.watchLogs({ startBlock: 0, endBlock: 1000 }) // Fixed endBlock not allowed
  * } catch (error) {
  *   if (error instanceof CCIPLogsWatchRequiresFinalityError) {
  *     console.log('Use "latest" or "finalized" for endBlock in watch mode')
@@ -1542,16 +1542,8 @@ export class CCIPLogsWatchRequiresFinalityError extends CCIPError {
 /**
  * Thrown when trying to `watch` logs but no start position provided.
  *
- * @example
- * ```typescript
- * try {
- *   await chain.watchLogs({}) // Missing startBlock or startTime
- * } catch (error) {
- *   if (error instanceof CCIPLogsWatchRequiresStartError) {
- *     console.log('Provide startBlock or startTime for watch mode')
- *   }
- * }
- * ```
+ * @deprecated Log queries now require a start position for all modes and throw
+ * {@link CCIPLogsRequiresStartError}; this class remains exported for compatibility.
  */
 export class CCIPLogsWatchRequiresStartError extends CCIPError {
   override readonly name = 'CCIPLogsWatchRequiresStartError'
@@ -1565,12 +1557,37 @@ export class CCIPLogsWatchRequiresStartError extends CCIPError {
 }
 
 /**
+ * Thrown when querying logs without an explicit start position.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getLogs({ address: '0x...', topics: ['CCIPMessageSent'] })
+ * } catch (error) {
+ *   if (error instanceof CCIPLogsRequiresStartError) {
+ *     console.log('Provide startBlock or startTime')
+ *   }
+ * }
+ * ```
+ */
+export class CCIPLogsRequiresStartError extends CCIPError {
+  override readonly name = 'CCIPLogsRequiresStartError'
+  /** Creates a logs requires start error. */
+  constructor(options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.LOGS_REQUIRES_START, `Logs query requires startBlock or startTime`, {
+      ...options,
+      isTransient: false,
+    })
+  }
+}
+
+/**
  * Thrown when address is required for logs filtering, but not provided.
  *
  * @example
  * ```typescript
  * try {
- *   await chain.getLogs({ topics: [...] }) // Missing address
+ *   await chain.getLogs({ startBlock: 0, topics: [...] }) // Missing address
  * } catch (error) {
  *   if (error instanceof CCIPLogsAddressRequiredError) {
  *     console.log('Contract address is required for this chain')
@@ -2102,7 +2119,7 @@ export class CCIPBlockTimeNotFoundError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await chain.getLogs({ topics: [123] }) // Invalid topic type
+ *   await chain.getLogs({ startBlock: 0, topics: [123] }) // Invalid topic type
  * } catch (error) {
  *   if (error instanceof CCIPTopicsInvalidError) {
  *     console.log('Topics must be string values')
@@ -2722,7 +2739,7 @@ export class CCIPAptosTransactionTypeUnexpectedError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await aptosChain.getLogs({ address: '0x1' }) // Missing module
+ *   await aptosChain.getLogs({ address: '0x1', startBlock: 0 }) // Missing module
  * } catch (error) {
  *   if (error instanceof CCIPAptosAddressModuleRequiredError) {
  *     console.log('Provide address with module name')
@@ -2751,7 +2768,7 @@ export class CCIPAptosAddressModuleRequiredError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await aptosChain.getLogs({ topics: ['invalid'] })
+ *   await aptosChain.getLogs({ startBlock: 0, topics: ['invalid'] })
  * } catch (error) {
  *   if (error instanceof CCIPAptosTopicInvalidError) {
  *     console.log(`Invalid topic: ${error.context.topic}`)

@@ -4,8 +4,8 @@ import type { LogFilter } from '../chain.ts'
 import type { SolanaTransaction } from './index.ts'
 import {
   CCIPLogsAddressRequiredError,
+  CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
-  CCIPLogsWatchRequiresStartError,
 } from '../errors/index.ts'
 import { sleep } from '../utils.ts'
 
@@ -32,14 +32,15 @@ async function* fetchSigsForward(
 
     while (
       batch.length > 0 &&
-      (batch[batch.length - 1]!.slot < (opts.startBlock || 0) ||
-        (batch[batch.length - 1]!.blockTime || -1) < (opts.startTime || 0))
+      (batch[batch.length - 1]!.slot < (opts.startBlock ?? 0) ||
+        (batch[batch.length - 1]!.blockTime ?? -1) < (opts.startTime ?? 0))
     ) {
       batch.length-- // truncate tail of txs which are older than requested start
     }
 
     allSigs.push(...batch) // concat in descending order
-  } while (batch.length >= limit)
+    // special case: if startBlock=0, do a single pass
+  } while (batch.length >= limit && (opts.startBlock || opts.startTime))
 
   allSigs.reverse() // forward
 
@@ -49,7 +50,7 @@ async function* fetchSigsForward(
       : opts.endBlock < 0
         ? (await connection.getSlot('confirmed')) + opts.endBlock
         : opts.endBlock
-  while (notAfter && allSigs.length > 0 && allSigs[allSigs.length - 1]!.slot > notAfter) {
+  while (notAfter != null && allSigs.length > 0 && allSigs[allSigs.length - 1]!.slot > notAfter) {
     allSigs.length-- // truncate head (after reverse) of txs newer than requested end
   }
   yield* allSigs // all past logs
@@ -81,43 +82,11 @@ async function* fetchSigsForward(
           : opts.endBlock
 
     for (const sig of batch) {
-      if (notAfter && sig.slot > notAfter) break
+      if (notAfter != null && sig.slot > notAfter) break
       until = sig.signature
       yield sig
     }
   }
-}
-
-async function* fetchSigsBackwards(
-  opts: LogFilter & { pollInterval?: number },
-  ctx: { connection: Connection },
-) {
-  const { connection } = ctx
-  const limit = Math.min(opts.page || 1000, 1000)
-  const commitment = opts.endBlock === 'finalized' ? 'finalized' : 'confirmed'
-
-  if (typeof opts.endBlock === 'number' && opts.endBlock < 0)
-    opts.endBlock = (await connection.getSlot('confirmed')) + opts.endBlock
-
-  let batch: Awaited<ReturnType<typeof connection.getSignaturesForAddress>> | undefined
-  do {
-    batch = await connection.getSignaturesForAddress(
-      new PublicKey(opts.address!),
-      {
-        limit,
-        before: batch?.length
-          ? batch[batch.length - 1]!.signature
-          : opts.endBefore
-            ? opts.endBefore
-            : undefined,
-      },
-      commitment,
-    )
-    for (const sig of batch) {
-      if (typeof opts.endBlock === 'number' && sig.slot > opts.endBlock) continue
-      yield sig
-    }
-  } while (batch.length >= limit)
 }
 
 /**
@@ -134,19 +103,14 @@ export async function* getTransactionsForAddress(
 ): AsyncGenerator<SolanaTransaction> {
   if (!opts.address) throw new CCIPLogsAddressRequiredError()
 
-  opts.endBlock ||= 'latest'
+  opts.endBlock ??= 'latest'
 
-  let allSignatures
-  if (opts.startBlock != null || opts.startTime != null) {
-    if (opts.watch && ((typeof opts.endBlock === 'number' && opts.endBlock > 0) || opts.endBefore))
-      throw new CCIPLogsWatchRequiresFinalityError(opts.endBlock)
+  const hasStart = opts.startBlock != null || opts.startTime != null
+  if (!hasStart) throw new CCIPLogsRequiresStartError()
+  if (opts.watch && ((typeof opts.endBlock === 'number' && opts.endBlock > 0) || opts.endBefore))
+    throw new CCIPLogsWatchRequiresFinalityError(opts.endBlock)
 
-    allSignatures = fetchSigsForward(opts, ctx)
-  } else {
-    if (opts.watch) throw new CCIPLogsWatchRequiresStartError()
-
-    allSignatures = fetchSigsBackwards(opts, ctx) // generate backwards until depleting getSignaturesForAddress
-  }
+  const allSignatures = fetchSigsForward(opts, ctx)
 
   // Process signatures
   for await (const signatureInfo of allSignatures) {

@@ -4,8 +4,8 @@ import type { SuiEventFilter, SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import type { LogFilter } from '../chain.ts'
 import {
   CCIPDataFormatUnsupportedError,
+  CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
-  CCIPLogsWatchRequiresStartError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
 import { sleep } from '../utils.ts'
@@ -127,18 +127,18 @@ async function* fetchEventsForward<T>(
     throw new CCIPLogsWatchRequiresFinalityError(opts.endBlock)
 
   // Determine starting checkpoint
-  let startCheckpoint
-  if (opts.startBlock) startCheckpoint = opts.startBlock
-  if (opts.startTime) {
+  let startCheckpoint: number | undefined
+  if (opts.startBlock != null) startCheckpoint = opts.startBlock
+  if (opts.startTime != null) {
     // Use getTransactionDigestsInTimeRange to find the checkpoint for startTime
     // Use a small time window to find transactions near startTime
     const startCheckpoint_ = await getCheckpointRightBefore(ctx.client, opts.startTime)
-    if (startCheckpoint_) {
-      if (startCheckpoint) startCheckpoint = Math.max(startCheckpoint, startCheckpoint_)
+    if (startCheckpoint_ != null) {
+      if (startCheckpoint != null) startCheckpoint = Math.max(startCheckpoint, startCheckpoint_)
       else startCheckpoint = startCheckpoint_
     }
   }
-  if (!startCheckpoint) throw new CCIPLogsWatchRequiresStartError()
+  if (startCheckpoint == null) throw new CCIPLogsRequiresStartError()
 
   // Determine ending checkpoint
   let endCheckpoint: number | undefined
@@ -237,7 +237,7 @@ async function* fetchEventsForward<T>(
 
         for (const node of nodes) {
           // Filter by startTime if provided (timestamp is in ISO format)
-          if (opts.startTime) {
+          if (opts.startTime != null) {
             const eventTime = new Date(node.timestamp).getTime() / 1000 // Convert to seconds
             if (eventTime < opts.startTime) continue
           }
@@ -275,128 +275,6 @@ async function* fetchEventsForward<T>(
 }
 
 /**
- * Fetches events in backward direction (descending checkpoint order).
- */
-async function* fetchEventsBackward<T>(
-  ctx: { client: SuiJsonRpcClient; graphqlClient: SuiGraphQLClient },
-  opts: LogFilter,
-  type: string,
-  limit = 50,
-): AsyncGenerator<EventNode<T>> {
-  // Determine ending checkpoint (where to stop going backwards)
-  let endCheckpoint: number | undefined
-  if (typeof opts.endBlock === 'number') {
-    if (opts.endBlock < 0) {
-      endCheckpoint = (await getLatestCheckpoint(ctx.graphqlClient)) + opts.endBlock
-    } else {
-      endCheckpoint = opts.endBlock
-    }
-  }
-
-  // Start from the latest checkpoint and go backwards
-  const latestCheckpoint = await getLatestCheckpoint(ctx.graphqlClient)
-  let currentCheckpoint = latestCheckpoint
-
-  const allEvents: EventNode<T>[] = []
-
-  // Fetch all events going backwards
-  while (currentCheckpoint >= 0) {
-    let cursor: string | undefined = undefined
-    let hasNextPage = true
-
-    const minCheckpoint = endCheckpoint !== undefined ? endCheckpoint : 0
-
-    while (hasNextPage) {
-      const query = `
-        query FetchEvents($type: String!, $after: String, $afterCheckpoint: UInt53!, $beforeCheckpoint: UInt53!) {
-          events(
-            filter: {
-              type: $type
-              afterCheckpoint: $afterCheckpoint
-              beforeCheckpoint: $beforeCheckpoint
-            }
-            after: $after
-            last: ${limit}
-          ) {
-            nodes {
-              sequenceNumber
-              sender {
-                address
-              }
-              timestamp
-              contents {
-                json
-              }
-              transaction {
-                effects {
-                  checkpoint {
-                    sequenceNumber
-                  }
-                }
-                digest
-              }
-            }
-            pageInfo {
-              hasNextPage
-              endCursor
-            }
-          }
-        }
-      `
-
-      const batchStartCheckpoint = Math.max(currentCheckpoint - 1000, minCheckpoint)
-
-      const result: { data?: EventsQueryResponse; errors?: unknown } =
-        await ctx.graphqlClient.query<EventsQueryResponse>({
-          query,
-          variables: {
-            type,
-            after: cursor,
-            afterCheckpoint: batchStartCheckpoint,
-            beforeCheckpoint: currentCheckpoint + 1,
-          },
-        })
-
-      if (result.errors) {
-        throw new CCIPDataFormatUnsupportedError(
-          `GraphQL errors: ${JSON.stringify(result.errors, null, 2)}`,
-        )
-      }
-
-      if (!result.data) {
-        throw new CCIPDataFormatUnsupportedError('No data returned from GraphQL query')
-      }
-
-      const { nodes, pageInfo } = result.data.events
-
-      if (!nodes.length) {
-        break
-      }
-
-      for (const node of nodes) {
-        allEvents.push(node as EventNode<T>)
-      }
-
-      hasNextPage = pageInfo.hasNextPage
-      cursor = pageInfo.endCursor ?? undefined
-    }
-
-    currentCheckpoint = Math.max(currentCheckpoint - 1000, minCheckpoint) - 1
-    if (currentCheckpoint < minCheckpoint) break
-  }
-
-  // Yield events in descending order (most recent first)
-  for (const event of allEvents.reverse()) {
-    // Filter out events after endBlock if specified
-    if (endCheckpoint !== undefined && event.transaction) {
-      const checkpoint = event.transaction.effects.checkpoint.sequenceNumber
-      if (checkpoint > endCheckpoint) continue
-    }
-    yield event
-  }
-}
-
-/**
  * Streams logs from the Sui blockchain based on filter options.
  * @param ctx - Context containing Sui client and grraphqlClient instances.
  * @param opts - Log filter options.
@@ -414,14 +292,8 @@ export async function* streamSuiLogs<T>(
   // opts.topics[0] is the EventName
   const eventType = `${opts.address}::${opts.topics[0]}`
 
-  // Forward mode: if startTime or startBlock are provided, or if watch is enabled
-  if (opts.startBlock || opts.startTime || opts.watch) {
-    if (opts.watch && !opts.startBlock && !opts.startTime) {
-      throw new CCIPLogsWatchRequiresStartError()
-    }
-    yield* fetchEventsForward<T>(ctx, opts, eventType)
-  } else {
-    // Backward mode: paginate backwards until depleting events
-    yield* fetchEventsBackward<T>(ctx, opts, eventType)
-  }
+  const hasStart = opts.startBlock != null || opts.startTime != null
+  if (!hasStart) throw new CCIPLogsRequiresStartError()
+
+  yield* fetchEventsForward<T>(ctx, opts, eventType)
 }

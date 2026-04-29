@@ -11,8 +11,8 @@ import type { LogFilter } from '../chain.ts'
 import {
   CCIPAptosAddressModuleRequiredError,
   CCIPAptosTransactionTypeUnexpectedError,
+  CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
-  CCIPLogsWatchRequiresStartError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
 import type { ChainLog } from '../types.ts'
@@ -97,7 +97,7 @@ async function* fetchEventsForward(
 ): AsyncGenerator<ResEvent> {
   if (opts.watch && typeof opts.endBlock === 'number' && opts.endBlock > 0)
     throw new CCIPLogsWatchRequiresFinalityError(opts.endBlock)
-  opts.endBlock ||= 'latest'
+  opts.endBlock ??= 'latest'
 
   const fetchBatch = memoize(
     async (start?: number) => {
@@ -119,18 +119,24 @@ async function* fetchEventsForward(
 
   let start
   if (
-    (!opts.startBlock || opts.startBlock < +initialBatch[0]!.version) &&
-    (!opts.startTime ||
-      opts.startTime < (await getVersionTimestamp(provider, +initialBatch[0]!.version)))
+    opts.startTime != null &&
+    (opts.startBlock == null || opts.startBlock < +initialBatch[0]!.version) &&
+    opts.startTime < (await getVersionTimestamp(provider, +initialBatch[0]!.version))
   ) {
     const i = await binarySearchFirst(0, Math.floor(end / limit) - 1, async (i) => {
       const batch = await fetchBatch(end - (i + 1) * limit + 1)
       const firstTimestamp = await getVersionTimestamp(provider, +batch[0]!.version)
       return firstTimestamp > opts.startTime!
     })
-    start = end - (i + 1) * limit + 1
+    start = Math.max(end - (i + 1) * limit + 1, 0)
+  } else if (
+    opts.startTime == null &&
+    opts.startBlock != null &&
+    opts.startBlock <= +initialBatch[0]!.version
+  ) {
+    start = 0
   } else {
-    start = end - limit + 1
+    start = Math.max(end - limit + 1, 0)
   }
 
   let notAfter =
@@ -155,7 +161,7 @@ async function* fetchEventsForward(
     const data = await fetchBatch(start)
     if (
       first &&
-      opts.startTime &&
+      opts.startTime != null &&
       (await getVersionTimestamp(provider, +data[0]!.version)) < opts.startTime
     ) {
       // the first batch may have some head which is not in the range
@@ -172,10 +178,10 @@ async function* fetchEventsForward(
     first = false
 
     for (const ev of data) {
-      if (opts.startBlock && +ev.version < opts.startBlock) continue
+      if (opts.startBlock != null && +ev.version < opts.startBlock) continue
       // there may be an unknown interval between yields, so we support memoized negative finality
       if (
-        notAfter &&
+        notAfter != null &&
         +ev.version > (typeof notAfter === 'function' ? await notAfter() : notAfter)
       ) {
         catchedUp = true
@@ -197,41 +203,6 @@ async function* fetchEventsForward(
   }
 }
 
-async function* fetchEventsBackward(
-  { provider }: { provider: Aptos },
-  opts: LogFilter,
-  eventHandlerField: string,
-  stateAddr: string,
-  limit = 100,
-): AsyncGenerator<ResEvent> {
-  let start
-  let cont = true
-  const notAfter =
-    typeof opts.endBlock !== 'number'
-      ? undefined
-      : opts.endBlock < 0
-        ? +(await provider.getLedgerInfo()).ledger_version + opts.endBlock
-        : opts.endBlock
-  do {
-    const { data } = await getAptosFullNode<object, ResEvent[]>({
-      aptosConfig: provider.config,
-      originMethod: 'getEventsByEventHandle',
-      path: `accounts/${stateAddr}/events/${opts.address}::${eventHandlerField}`,
-      params: { start, limit },
-    })
-
-    if (!data.length) break
-    else if (start === 1) cont = false
-    else start = Math.max(+data[0]!.sequence_number - limit, 1)
-
-    for (const ev of data.reverse()) {
-      if (notAfter && +ev.version > notAfter) continue
-      if (+ev.sequence_number <= 1) cont = false
-      yield ev
-    }
-  } while (cont)
-}
-
 /**
  * Streams logs from the Aptos blockchain based on filter options.
  * @param provider - Aptos provider instance.
@@ -246,6 +217,9 @@ export async function* streamAptosLogs(
   if (!opts.address || !opts.address.includes('::')) throw new CCIPAptosAddressModuleRequiredError()
   if (opts.topics?.length !== 1 || typeof opts.topics[0] !== 'string')
     throw new CCIPTopicsInvalidError(opts.topics!)
+  const hasStart = opts.startBlock != null || opts.startTime != null
+  if (!hasStart) throw new CCIPLogsRequiresStartError()
+
   let eventHandlerField = opts.topics[0]
   if (!eventHandlerField.includes('/')) {
     eventHandlerField = (eventToHandler as Record<string, string>)[eventHandlerField]!
@@ -257,18 +231,8 @@ export async function* streamAptosLogs(
     },
   })
 
-  let eventsIter
-  if (opts.startBlock || opts.startTime) {
-    eventsIter = fetchEventsForward(ctx, opts, eventHandlerField, stateAddr, limit)
-  } else if (opts.watch) {
-    throw new CCIPLogsWatchRequiresStartError()
-  } else {
-    // backwards, just paginate down to lowest sequence number
-    eventsIter = fetchEventsBackward(ctx, opts, eventHandlerField, stateAddr, limit)
-  }
-
   let topics
-  for await (const ev of eventsIter) {
+  for await (const ev of fetchEventsForward(ctx, opts, eventHandlerField, stateAddr, limit)) {
     topics ??= [ev.type.slice(ev.type.lastIndexOf('::') + 2)]
     yield {
       address: opts.address,
