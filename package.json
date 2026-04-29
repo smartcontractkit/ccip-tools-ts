@@ -38,18 +38,19 @@
     "glob": "13.0.6",
     "prettier": "3.8.3",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.59.0",
+    "typescript-eslint": "8.58.2",
     "yaml": "2.8.3"
   },
   "overrides": {
     "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
-    "axios": "1.15.2",
+    "axios": "1.15.0",
     "tar": "7.5.13",
     "elliptic": "6.6.1",
     "js-yaml": "4.1.1",
     "gray-matter": {
       "js-yaml": "3.14.2"
     },
+    "postcss": "8.5.10",
     "lodash": "4.18.1",
     "uuid": "^14.0.0",
     "yaml@1": "1.10.3",
