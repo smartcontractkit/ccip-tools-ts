@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: `Solana` support for `estimateReceiveExecution`
+- CLI: Solana-dest support for `<send|manual-exec> --estimate-gas=<%margin> [--only-estimate]`
+
 ## [1.5.0] - 2026-04-22
 
 - SDK/CLI: Add `sourceTokenAddress` search filter to `searchMessages` and `--source-token` CLI option for filtering messages by source token
