@@ -21,6 +21,7 @@ import {
   dataSlice,
   encodeBase58,
   encodeBase64,
+  formatUnits,
   hexlify,
   isHexString,
   toBigInt,
@@ -57,6 +58,7 @@ import {
   CCIPSplTokenInvalidError,
   CCIPTokenAccountNotFoundError,
   CCIPTokenDataParseError,
+  CCIPTokenDecimalsInsufficientError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTokenPoolInfoNotFoundError,
@@ -108,6 +110,7 @@ import {
 } from '../utils.ts'
 import { cleanUpBuffers } from './cleanup.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
+import { estimateExecComputeUnits } from './gas.ts'
 import { getV16SolanaLeafHasher } from './hasher.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as BURN_MINT_TOKEN_POOL } from './idl/1.6.0/BURN_MINT_TOKEN_POOL.ts'
@@ -1190,6 +1193,88 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
     const tx = await this.getTransaction(hash)
     return this.getExecutionReceiptInTx(tx)
+  }
+
+  /** {@inheritDoc Chain.estimateReceiveExecution} */
+  override async estimateReceiveExecution(
+    opts: Parameters<NonNullable<Chain['estimateReceiveExecution']>>[0],
+  ): Promise<number> {
+    const convertAmounts = (
+      tokenAmounts?: readonly ((
+        | { token: string }
+        | { destTokenAddress: string; extraData?: string }
+      ) & {
+        amount: bigint
+      })[],
+    ) =>
+      !tokenAmounts
+        ? undefined
+        : Promise.all(
+            tokenAmounts.map(async (ta) => {
+              if (!('destTokenAddress' in ta)) return ta
+              let amount = ta.amount
+              if (isHexString(ta.extraData, 32)) {
+                // extraData is source token decimals in most pools derived from standard TP contracts;
+                // we can identify it by being exactly 32B and a small integer; otherwise, assume same decimals.
+                const sourceDecimals = toBigInt(ta.extraData)
+                if (0 < sourceDecimals && sourceDecimals <= 36) {
+                  const { decimals: destDecimals } = await this.getTokenInfo(ta.destTokenAddress)
+                  amount =
+                    (amount * BigInt(10) ** BigInt(destDecimals)) /
+                    BigInt(10) ** BigInt(sourceDecimals)
+                  if (amount === 0n)
+                    throw new CCIPTokenDecimalsInsufficientError(
+                      ta.destTokenAddress,
+                      destDecimals,
+                      this.network.name,
+                      formatUnits(amount, sourceDecimals),
+                    )
+                }
+              }
+              return { token: ta.destTokenAddress, amount }
+            }),
+          )
+
+    let opts_
+    if (!('offRamp' in opts)) {
+      const { lane, message, metadata } = await this.getMessageById(opts.messageId)
+      const offRamp =
+        ('offRampAddress' in message && message.offRampAddress) ||
+        metadata?.offRamp ||
+        (await this.apiClient!.getExecutionInput(opts.messageId)).offRamp
+
+      opts_ = {
+        offRamp,
+        message: {
+          sourceChainSelector: lane.sourceChainSelector,
+          messageId: message.messageId,
+          receiver: message.receiver,
+          sender: message.sender,
+          data: message.data,
+          destTokenAmounts: await convertAmounts(message.tokenAmounts),
+          tokenReceiver: 'tokenReceiver' in message ? message.tokenReceiver : undefined,
+          accounts: 'accounts' in message ? message.accounts : undefined,
+          accountIsWritableBitmap:
+            'accountIsWritableBitmap' in message ? message.accountIsWritableBitmap : undefined,
+        },
+      }
+    } else {
+      opts_ = {
+        ...opts,
+        message: {
+          ...opts.message,
+          destTokenAmounts: await convertAmounts(opts.message.destTokenAmounts),
+        },
+      }
+    }
+
+    const router = await this.getRouterForOffRamp(opts_.offRamp, opts_.message.sourceChainSelector)
+    return estimateExecComputeUnits({
+      connection: this.connection,
+      router,
+      ...opts_,
+      logger: this.logger,
+    })
   }
 
   /**

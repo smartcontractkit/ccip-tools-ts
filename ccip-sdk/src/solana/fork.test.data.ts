@@ -55,3 +55,14 @@ export const ETHEREUM_TO_SOLANA: ForkTestMessage[] = [
     description: 'failed token transfer (10 tokens) from Base to Solana, receiver=system program',
   },
 ]
+
+export const FUJI_TO_SOLANA: ForkTestMessage[] = [
+  {
+    messageId: '0xa1faadaaec9be0b0da3e313ddf86ab59e6bf2fade84798d03547f1de07f965ad',
+    txHash: '0xf227699a7b8c962b46607647b2c8548439f7e710b8f3e08d0678aeefe5d262c6',
+    status: MessageStatus.Failed,
+    version: '1.6',
+    description:
+      'failed data-only message from Fuji to Solana devnet; receiver rejects all messages',
+  },
+]

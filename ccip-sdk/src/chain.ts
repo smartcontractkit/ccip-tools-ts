@@ -1797,6 +1797,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
             receiver: string
             sender?: string
             data?: BytesLike
+            tokenReceiver?: string
+            accounts?: readonly string[]
+            accountIsWritableBitmap?: bigint
             destTokenAmounts?: readonly ((
               | { token: string }
               | { destTokenAddress: string; extraData?: string }

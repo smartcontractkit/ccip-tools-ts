@@ -1,4 +1,4 @@
-import { type BytesLike, formatUnits, hexlify, randomBytes } from 'ethers'
+import { type BytesLike, formatUnits, hexlify, randomBytes, toBigInt } from 'ethers'
 
 import type { Chain } from './chain.ts'
 import {
@@ -9,6 +9,7 @@ import {
 } from './errors/index.ts'
 import { discoverOffRamp } from './execution.ts'
 import { sourceToDestTokenAddresses } from './requests.ts'
+import { getDataBytes } from './utils.ts'
 
 /**
  * A subset of {@link MessageInput} for estimating receive execution gas.
@@ -26,6 +27,12 @@ export type EstimateMessageInput = {
   offRampAddress?: string
   /** optional data: zero bytes will be used if omitted */
   data?: BytesLike
+  /** optional Solana token receiver for token transfers */
+  tokenReceiver?: string
+  /** optional Solana receiver accounts required by SVMExtraArgsV1 */
+  accounts?: readonly string[]
+  /** optional Solana writable bitmap for `accounts` */
+  accountIsWritableBitmap?: bigint
   /**
    * optional tokenAmounts; `amount` with either source `token` (as in MessageInput) or
    * `{ sourceTokenAddress?, sourcePoolAddress, destTokenAddress }` (as in v1.5..v2.0 tokenAmounts)
@@ -35,8 +42,25 @@ export type EstimateMessageInput = {
     amount: bigint
   } & (
     | { token: string }
-    | { sourceTokenAddress?: string; sourcePoolAddress: string; destTokenAddress: string }
+    | {
+        sourceTokenAddress?: string
+        sourcePoolAddress: string
+        destTokenAddress: string
+        extraData?: string
+      }
   ))[]
+}
+
+function getSourceDecimalsFromExtraData(extraData?: string): bigint | undefined {
+  if (!extraData) return undefined
+  try {
+    const bytes = getDataBytes(extraData)
+    if (bytes.length !== 32) return undefined
+    const decimals = toBigInt(bytes)
+    return 0 < decimals && decimals <= 36 ? decimals : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -129,16 +153,22 @@ export async function estimateReceiveExecution({
               destChainSelector: dest.network.chainSelector,
               sourceTokenAmount: ta,
             })
-      const sourceTokenAddress =
-        'token' in ta
-          ? ta.token
-          : ta.sourceTokenAddress
-            ? ta.sourceTokenAddress
-            : await source.getTokenForTokenPool(tokenAmount.sourcePoolAddress)
-      const [{ decimals: sourceDecimals }, { decimals: destDecimals }] = await Promise.all([
-        source.getTokenInfo(sourceTokenAddress),
-        dest.getTokenInfo(tokenAmount.destTokenAddress),
-      ])
+      const sourceDecimalsFromExtraData =
+        'extraData' in tokenAmount
+          ? getSourceDecimalsFromExtraData(tokenAmount.extraData)
+          : undefined
+      const { decimals: destDecimals } = await dest.getTokenInfo(tokenAmount.destTokenAddress)
+      const sourceDecimals =
+        sourceDecimalsFromExtraData ??
+        (
+          await source.getTokenInfo(
+            'token' in ta
+              ? ta.token
+              : ta.sourceTokenAddress
+                ? ta.sourceTokenAddress
+                : await source.getTokenForTokenPool(tokenAmount.sourcePoolAddress),
+          )
+        ).decimals
       const destAmount =
         (tokenAmount.amount * BigInt(10) ** BigInt(destDecimals)) /
         BigInt(10) ** BigInt(sourceDecimals)
@@ -149,7 +179,7 @@ export async function estimateReceiveExecution({
           dest.network.name,
           formatUnits(tokenAmount.amount, sourceDecimals),
         )
-      return { token: tokenAmount.destTokenAddress, amount: destAmount }
+      return { ...tokenAmount, token: tokenAmount.destTokenAddress, amount: destAmount }
     }),
   )
   return dest.estimateReceiveExecution({
@@ -161,6 +191,11 @@ export async function estimateReceiveExecution({
       data: message.data,
       sourceChainSelector: source.network.chainSelector,
       destTokenAmounts,
+      ...(!!message.tokenReceiver && { tokenReceiver: message.tokenReceiver }),
+      ...(!!message.accounts?.length && {
+        accounts: message.accounts,
+        accountIsWritableBitmap: message.accountIsWritableBitmap,
+      }),
     },
   })
 }

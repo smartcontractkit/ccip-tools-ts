@@ -291,6 +291,8 @@ async function sendMessage(
         receiver,
         data,
         tokenAmounts,
+        ...(!!argv.tokenReceiver && { tokenReceiver: argv.tokenReceiver }),
+        ...(accounts != null && accounts.length && { accounts, accountIsWritableBitmap }),
       },
     })
     argv.gasLimit = Math.ceil(estimated * (1 + (argv.estimateGasLimit ?? 0) / 100))
@@ -310,7 +312,9 @@ async function sendMessage(
         )
       } else {
         output.write(
-          'Estimated gasLimit for sender =',
+          'Estimated',
+          destNetwork.family === ChainFamily.Solana ? 'computeUnits' : 'gasLimit',
+          'for sender =',
           walletAddress,
           ':',
           estimated,
