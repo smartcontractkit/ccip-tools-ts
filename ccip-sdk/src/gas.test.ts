@@ -79,7 +79,16 @@ function createMockChains(onRamp: string, offRamp: string) {
     balanceOf: mock.fn(async () => 0n),
     estimateReceiveExecution: mock.fn(async (opts: any) => {
       const router = await mockDestChain.getRouterForOffRamp(opts.offRamp)
-      return estimateExecGas({ provider: mockDestChain.provider, router, ...opts })
+      const { tokenAmounts, ...message } = opts.message
+      return estimateExecGas({
+        provider: mockDestChain.provider,
+        router,
+        ...opts,
+        message: {
+          ...message,
+          destTokenAmounts: tokenAmounts,
+        },
+      })
     }),
   }
 
