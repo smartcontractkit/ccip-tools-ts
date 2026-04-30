@@ -5,6 +5,7 @@
  */
 
 import { AptosChain } from './aptos/index.ts'
+import { CantonChain } from './canton/index.ts'
 import { EVMChain } from './evm/index.ts'
 import { SolanaChain } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
@@ -21,6 +22,7 @@ export const allSupportedChains = {
   [ChainFamily.Aptos]: AptosChain,
   [ChainFamily.Sui]: SuiChain,
   [ChainFamily.TON]: TONChain,
+  [ChainFamily.Canton]: CantonChain,
 }
 
 export { supportedChains } from './supported-chains.ts'
