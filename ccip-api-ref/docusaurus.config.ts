@@ -46,14 +46,21 @@ const config: Config = {
   },
 
   plugins: [
-    // Webpack fallback for Node built-ins used by server-only deps (bigint-buffer, postman-code-generators)
-    // that get transitively pulled into the browser bundle via @chainlink/ccip-sdk and the OpenAPI plugin.
+    // Webpack shims for Node-only deps that get transitively pulled into the browser bundle.
+    //
+    // - `path`: used by bigint-buffer / postman-code-generators (pre-existing)
+    // - `undici`: used by @chainlink/ccip-sdk's Canton client (CantonChain → canton/client.ts).
     function webpackNodeFallbacks(): Plugin {
       return {
         name: 'webpack-node-fallbacks',
         configureWebpack(_config, isServer) {
           if (isServer) return {}
-          return { resolve: { fallback: { path: false } } }
+          return {
+            resolve: {
+              alias: { undici: false },
+              fallback: { path: false },
+            },
+          }
         },
       }
     },
