@@ -27,7 +27,6 @@ import {
   CCIPTokenNotFoundError,
   ChainFamily,
   bigIntReplacer,
-  bigIntReviver,
   decodeAddress,
   estimateReceiveExecution,
   getDataBytes,
@@ -39,7 +38,7 @@ import type { Argv } from 'yargs'
 import type { GlobalOpts } from '../index.ts'
 import { showRequests } from './show.ts'
 import { type Ctx, Format } from './types.ts'
-import { getCtx, logParsedError, parseTokenAmounts } from './utils.ts'
+import { getCtx, logParsedError, parseExtraArgs, parseTokenAmounts } from './utils.ts'
 import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 
 export const command = 'send'
@@ -176,47 +175,6 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
       if (!logParsedError.call(ctx, err)) ctx.logger.error(err)
     })
     .finally(destroy)
-}
-
-/**
- * Parse --extra=key=value entries into a record.
- * Values are parsed as JSON with bigint support for integers; fallback to string.
- * Repeated keys are accumulated into an array.
- *
- * @example
- * `assert.eq(parseExtraArgs(['ccvs=["0xvalue1", "0xvalue2"]', 'finality=safe', 'flag=true']), { ccvs: ["0xvalue1", "0xvalue2"], finality: 'safe', flag: true })`
- */
-function parseExtraArgs(extra: readonly string[] | undefined): Record<string, unknown> {
-  if (!extra?.length) return {}
-  const result: Record<string, unknown> = {}
-  for (const entry of extra) {
-    const eqIdx = entry.indexOf('=')
-    const key = entry.substring(0, eqIdx)
-    const raw = entry.substring(eqIdx + 1)
-    let value: unknown
-
-    try {
-      // Quote bare integer literals (outside JSON strings) so bigIntReviver can convert them to BigInt.
-      // The alternation matches JSON strings first (preserved as-is) and number tokens second
-      // (pure integers get quoted; floats/scientific-notation are left alone).
-      const quoted = raw.replace(/"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g, (m) =>
-        m.startsWith('"') || !/^-?\d+$/.test(m) ? m : `"${m}"`,
-      )
-      value = JSON.parse(quoted, bigIntReviver)
-    } catch {
-      value = raw
-    }
-
-    if (key in result) {
-      const existing = result[key]
-      result[key] = Array.isArray(existing)
-        ? (existing as unknown[]).concat([value])
-        : ([existing, value] as unknown[])
-    } else {
-      result[key] = value
-    }
-  }
-  return result
 }
 
 async function sendMessage(

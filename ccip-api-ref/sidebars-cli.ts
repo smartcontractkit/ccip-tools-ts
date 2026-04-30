@@ -60,6 +60,11 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'doc',
+          id: 'safe-propose',
+          label: 'safe-propose',
+        },
+        {
+          type: 'doc',
           id: 'manual-exec',
           label: 'manualExec',
         },

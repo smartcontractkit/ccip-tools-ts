@@ -1,0 +1,187 @@
+---
+id: safe-propose
+title: 'safe-propose'
+description: 'Propose a CCIP send as a Safe multisig transaction without immediate on-chain execution.'
+sidebar_label: safe-propose
+sidebar_position: 4
+custom_edit_url: null
+---
+
+# safe-propose
+
+Propose a CCIP send as a Safe multisig transaction.
+
+## Synopsis
+
+```bash
+ccip-cli safe-propose -s <source> -d <dest> -r <router> --safe <address> [options]
+```
+
+## Description
+
+The `safe-propose` command submits a CCIP message to the [Safe Transaction Service](https://docs.safe.global/core-api/transaction-service-overview) queue without executing it on-chain. Other Safe owners can then review, sign, and execute the transaction in the Safe UI.
+
+If the CCIP send requires ERC-20 approvals (token transfers or LINK fee payment), those are proposed as separate Safe transactions ahead of the `ccipSend`, with sequential nonces so they can be executed in order.
+
+The proposer must be a wallet that exposes a raw private key (private key, Foundry keystore, or Hardhat account). Hardware wallets are not supported.
+
+## Options
+
+### Required
+
+| Option     | Alias | Type   | Description                                       |
+| ---------- | ----- | ------ | ------------------------------------------------- |
+| `--source` | `-s`  | string | Source network (chain ID, selector, or name)      |
+| `--dest`   | `-d`  | string | Destination network (chain ID, selector, or name) |
+| `--router` | `-r`  | string | CCIP Router contract address on source chain      |
+| `--safe`   | -     | string | Safe multisig address (the CCIP message sender)   |
+
+### Message
+
+| Option              | Alias  | Type     | Default      | Description                                                                                                                                                                                  |
+| ------------------- | ------ | -------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--receiver`        | `--to` | string   | Safe address | Receiver address on destination. Defaults to the Safe address if omitted.                                                                                                                    |
+| `--data`            | -      | string   | -            | Message data payload. Hex byte arrays (`0x...`) and base64 strings are decoded as raw bytes. Prefix with `0x:` to ABI-encode as a Solidity `string`. All other values are raw UTF-8 encoded. |
+| `--transfer-tokens` | `-t`   | string[] | -            | Token transfers as `token=amount`. See [Token Amount Format](#token-amount-format).                                                                                                          |
+| `--fee-token`       | -      | string   | Native       | Fee token address or symbol (e.g., `LINK`). Omit to pay in native token. Note: if native fee is used, the Safe must hold enough native token before owners execute.                          |
+| `--token-receiver`  | -      | string   | -            | Token receiver address on destination if different from `--receiver`.                                                                                                                        |
+
+### Gas & Execution
+
+| Option                      | Alias                   | Type    | Default | Description                                             |
+| --------------------------- | ----------------------- | ------- | ------- | ------------------------------------------------------- |
+| `--gas-limit`               | `-L`, `--compute-units` | number  | -       | Gas limit for receiver callback.                        |
+| `--allow-out-of-order-exec` | `--ooo`                 | boolean | `true`  | Allow out-of-order execution. Supported on v1.5+ lanes. |
+
+### Safe
+
+| Option               | Type   | Default                             | Description                                                                                                                                   |
+| -------------------- | ------ | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--safe-api-key`     | string | `$SAFE_API_KEY`                     | API key for the Safe Transaction Service. Required when using `api.safe.global`. Can also be set via the `SAFE_API_KEY` environment variable. |
+| `--safe-service-url` | string | Official Safe service for the chain | Override the Safe Transaction Service URL. Use this for self-hosted or custom deployments.                                                    |
+
+### Wallet
+
+| Option          | Alias | Type    | Description                                                                                                    |
+| --------------- | ----- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `--wallet`      | `-w`  | string  | Proposer wallet. Accepts `0x<privateKey>`, `foundry:<name>`, or `hardhat:<name>`. Ledger is **not** supported. |
+| `--approve-max` | -     | boolean | Approve maximum token allowance instead of exact amount for any ERC-20 approvals.                              |
+
+### Extra Args
+
+| Option    | Alias | Type     | Description                                                                                                            |
+| --------- | ----- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `--extra` | `-x`  | string[] | Extra args as `key=value`. Values parsed as JSON with BigInt support; fallback to string. Repeated keys become arrays. |
+
+See [Configuration](/cli/configuration) for global options (`--rpcs`, `--rpcs-file`, `--format`, etc.).
+
+## Token Amount Format
+
+Same as [send token amount format](/cli/send#token-amount-format): `token=amount` pairs with human-readable decimals.
+
+```bash
+-t 0xTokenAddress=1.5
+-t USDC=100
+```
+
+## Output
+
+### Text output (default)
+
+```
+Fee: 223802089017692n = 0.000223802089017692 ETH
+Safe balance may be insufficient for fee: has 0.0 ETH, needs 0.000223802089017692 ETH. Ensure the Safe is funded before owners execute the queued transaction.
+1 ERC-20 approval(s) needed — will be queued before the ccipSend.
+✔ Enter password for Foundry keystore 'mykey'
+Proposing 2 transaction(s) to Safe 0xSafe... starting at nonce 3...
+  ✓ Proposed approve(tCCIP) (nonce 3): 0xabcd...
+  ✓ Proposed ccipSend (nonce 4): 0x1234...
+
+View & sign in Safe UI:
+  https://app.safe.global/transactions/queue?safe=sep:0xSafe...
+
+Proposed safeTxHashes:
+  approve(tCCIP): 0xabcd...
+  ccipSend: 0x1234...
+
+Note: execute the approval(s) in the Safe UI before executing the ccipSend.
+
+Once ccipSend is executed, track CCIP delivery with:
+  ccip-cli show <onChainTxHash> -s ethereum-testnet-sepolia
+```
+
+### JSON output (`--format json`)
+
+```json
+{
+  "safeAddress": "0xSafe...",
+  "proposer": "0xProposer...",
+  "transactionsProposed": 2,
+  "approvalsProposed": 1,
+  "fee": "223802089017692",
+  "feeFormatted": "0.000223802089017692 ETH",
+  "proposedHashes": ["0xabcd...", "0x1234..."],
+  "safeUiUrl": "https://app.safe.global/transactions/queue?safe=sep:0xSafe..."
+}
+```
+
+## Examples
+
+### Propose a data-only CCIP message
+
+```bash
+ccip-cli safe-propose \
+  -s ethereum-testnet-sepolia \
+  -d arbitrum-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  --safe 0xYourSafeAddress \
+  --to 0xReceiverAddress \
+  --data "hello" \
+  --wallet foundry:mykey
+```
+
+### Propose a token transfer (queues approve + ccipSend)
+
+```bash
+ccip-cli safe-propose \
+  -s ethereum-testnet-sepolia \
+  -d arbitrum-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  --safe 0xYourSafeAddress \
+  -t 0xTokenAddress=1.5 \
+  --wallet foundry:mykey \
+  --safe-api-key $SAFE_API_KEY
+```
+
+### Pay fee in LINK
+
+```bash
+ccip-cli safe-propose \
+  -s ethereum-testnet-sepolia \
+  -d arbitrum-sepolia \
+  -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 \
+  --safe 0xYourSafeAddress \
+  --to 0xReceiverAddress \
+  --data "hello" \
+  --fee-token LINK \
+  --wallet 0xYourPrivateKey
+```
+
+## Notes
+
+### Transaction ordering
+
+When approvals are needed, they are proposed with nonces strictly before the `ccipSend`. In the Safe UI, execute them in the displayed order — approvals first, then `ccipSend`.
+
+### Native fee and Safe balance
+
+If the fee is paid in the native token (default), the Safe must hold enough native token **at execution time**. The command warns if the Safe's current balance is below the estimated fee, but execution can still be queued and the Safe funded later.
+
+### Proposer requirements
+
+- Must be listed as an owner (or delegate) of the Safe on the Safe Transaction Service.
+- Must provide a private-key-based wallet. Hardware wallets (Ledger) are not supported because Safe transaction signing requires access to the raw private key to generate an EIP-712 signature.
+
+### API key
+
+The Safe Transaction Service at `api.safe.global` requires an API key. Obtain one at [developer.safe.global](https://developer.safe.global). Pass it via `--safe-api-key` or the `SAFE_API_KEY` environment variable. Self-hosted deployments typically do not require an API key — use `--safe-service-url` to point to them.

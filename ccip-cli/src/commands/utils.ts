@@ -12,6 +12,7 @@ import {
   CCIPErrorCode,
   CCIPInteractiveRequiredError,
   ExecutionState,
+  bigIntReviver,
   getCCIPExplorerUrl,
   getDataBytes,
   networkInfo,
@@ -613,6 +614,46 @@ export function logParsedError(this: Ctx, err: unknown): boolean {
 /**
  * Parse `--transfer-tokens token1=amount1 token2=amount2 ...` into `{ token, amount }[]`
  **/
+/**
+ * Parses --extra=key=value entries into a record.
+ * Values are parsed as JSON with bigint support for integers; fallback to string.
+ * Repeated keys are accumulated into an array.
+ *
+ * @example
+ * `assert.eq(parseExtraArgs(['ccvs=["0xvalue1"]', 'finality=safe']), { ccvs: ["0xvalue1"], finality: 'safe' })`
+ */
+export function parseExtraArgs(extra: readonly string[] | undefined): Record<string, unknown> {
+  if (!extra?.length) return {}
+  const result: Record<string, unknown> = {}
+  for (const entry of extra) {
+    const eqIdx = entry.indexOf('=')
+    const key = entry.substring(0, eqIdx)
+    const raw = entry.substring(eqIdx + 1)
+    let value: unknown
+    try {
+      const quoted = raw.replace(/"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g, (m) =>
+        m.startsWith('"') || !/^-?\d+$/.test(m) ? m : `"${m}"`,
+      )
+      value = JSON.parse(quoted, bigIntReviver)
+    } catch {
+      value = raw
+    }
+    if (key in result) {
+      const existing = result[key]
+      result[key] = Array.isArray(existing)
+        ? (existing as unknown[]).concat([value])
+        : ([existing, value] as unknown[])
+    } else {
+      result[key] = value
+    }
+  }
+  return result
+}
+
+/**
+ * Parses `token=amount` pairs into `{ token, amount }` objects,
+ * converting human-readable amounts to the token's smallest unit using on-chain decimals.
+ */
 export async function parseTokenAmounts(source: Chain, transferTokens: readonly string[]) {
   return Promise.all(
     transferTokens.map(async (tokenAmount) => {

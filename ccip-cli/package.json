@@ -59,6 +59,8 @@
     "@ledgerhq/hw-app-aptos": "6.37.0",
     "@ledgerhq/hw-app-solana": "7.9.0",
     "@ledgerhq/hw-transport-node-hid": "6.32.0",
+    "@safe-global/api-kit": "^4.1.0",
+    "@safe-global/protocol-kit": "^7.1.0",
     "@solana/web3.js": "^1.98.4",
     "@ton-community/ton-ledger": "^7.3.0",
     "bs58": "^6.0.0",
