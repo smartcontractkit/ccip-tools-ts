@@ -128,16 +128,17 @@ ccip-cli send \
 
 ## Commands
 
-| Command                                                | Description                                | Documentation                                 |
-| ------------------------------------------------------ | ------------------------------------------ | --------------------------------------------- |
-| `ccip-cli <tx-hash-or-id>`                             | Track a message (default command)          | [show](/cli/show)                             |
-| `ccip-cli send -s <source> -d <dest> -r <router>`      | Send a cross-chain message                 | [send](/cli/send)                             |
-| `ccip-cli manual-exec <tx-hash-or-id>`                 | Execute a pending or failed message        | [manual-exec](/cli/manual-exec)               |
-| `ccip-cli parse <data>`                                | Decode error data, revert reasons, events  | [parse](/cli/parse)                           |
-| `ccip-cli get-supported-tokens -n <network> -a <addr>` | List supported tokens for a router or pool | [get-supported-tokens](/cli/supported-tokens) |
-| `ccip-cli token -n <network> -H <holder>`              | Query native or token balance              | [token](/cli/token)                           |
-| `ccip-cli lane-latency <source> <dest>`                | Query real-time lane latency               | [lane-latency](/cli/lane-latency)             |
-| `ccip-cli search messages [--sender ...]`              | Search CCIP messages via API               | [search](/cli/search)                         |
+| Command                                                                    | Description                                        | Documentation                                 |
+| -------------------------------------------------------------------------- | -------------------------------------------------- | --------------------------------------------- |
+| `ccip-cli <tx-hash-or-id>`                                                 | Track a message (default command)                  | [show](/cli/show)                             |
+| `ccip-cli send -s <source> -d <dest> -r <router>`                          | Send a cross-chain message                         | [send](/cli/send)                             |
+| `ccip-cli safe-propose -s <source> -d <dest> -r <router> --safe <address>` | Propose a CCIP send as a Safe multisig transaction | [safe-propose](/cli/safe-propose)             |
+| `ccip-cli manual-exec <tx-hash-or-id>`                                     | Execute a pending or failed message                | [manual-exec](/cli/manual-exec)               |
+| `ccip-cli parse <data>`                                                    | Decode error data, revert reasons, events          | [parse](/cli/parse)                           |
+| `ccip-cli get-supported-tokens -n <network> -a <addr>`                     | List supported tokens for a router or pool         | [get-supported-tokens](/cli/supported-tokens) |
+| `ccip-cli token -n <network> -H <holder>`                                  | Query native or token balance                      | [token](/cli/token)                           |
+| `ccip-cli lane-latency <source> <dest>`                                    | Query real-time lane latency                       | [lane-latency](/cli/lane-latency)             |
+| `ccip-cli search messages [--sender ...]`                                  | Search CCIP messages via API                       | [search](/cli/search)                         |
 
 ## Next Steps
 

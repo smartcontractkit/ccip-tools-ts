@@ -25,7 +25,7 @@ import { loadTonWallet } from './ton.ts'
 import type { Ctx } from '../commands/index.ts'
 import type { GlobalOpts } from '../index.ts'
 
-const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
+export const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
 
 async function collectEndpoints(
   this: Ctx,
