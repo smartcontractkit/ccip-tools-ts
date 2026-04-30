@@ -18,6 +18,7 @@ import {
   isBytesLike,
   isError,
   isHexString,
+  randomBytes,
   toBeHex,
   toBigInt,
 } from 'ethers'
@@ -1737,7 +1738,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   ): Promise<SetRequired<Awaited<ReturnType<Chain['getTokenPoolConfig']>>, 'typeAndVersion'>> {
     const [type, version, typeAndVersion] = await this.typeAndVersion(tokenPool)
 
-    let token, router, allowedFinality, tokenTransferFeeConfig
+    let token,
+      router,
+      allowedFinality,
+      tokenTransferFeeConfig,
+      originalTokenPool: string | undefined
     if (version < CCIPVersion.V2_0) {
       const contract = new Contract(
         tokenPool,
@@ -1753,6 +1758,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           interfaces.USDCTokenPoolProxy_v2_0,
           this.provider,
         ) as unknown as TypedContract<typeof USDCTokenPoolProxy_2_0_ABI>
+        originalTokenPool = tokenPool
         tokenPool = (await proxy.getPools())['cctpV2PoolWithCCV'] as string
       }
       const contract = new Contract(
@@ -1805,6 +1811,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           typeAndVersion,
           ...(allowedFinality != null && decodeFinalityAllowed(allowedFinality)),
           ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
+          ...(originalTokenPool != null && { effectiveTokenPool: tokenPool }),
         }
       },
     )
@@ -2171,8 +2178,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       opts_ = {
         ...opts,
         message: {
+          messageId: hexlify(randomBytes(32)),
           ...opts.message,
-          destTokenAmounts: await convertAmounts(opts.message.destTokenAmounts),
+          destTokenAmounts: await convertAmounts(opts.message.tokenAmounts),
         },
       }
     }

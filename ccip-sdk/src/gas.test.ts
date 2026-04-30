@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { Buffer } from 'node:buffer'
 import { after, beforeEach, describe, it, mock } from 'node:test'
 
 import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
@@ -78,7 +79,16 @@ function createMockChains(onRamp: string, offRamp: string) {
     balanceOf: mock.fn(async () => 0n),
     estimateReceiveExecution: mock.fn(async (opts: any) => {
       const router = await mockDestChain.getRouterForOffRamp(opts.offRamp)
-      return estimateExecGas({ provider: mockDestChain.provider, router, ...opts })
+      const { tokenAmounts, ...message } = opts.message
+      return estimateExecGas({
+        provider: mockDestChain.provider,
+        router,
+        ...opts,
+        message: {
+          ...message,
+          destTokenAmounts: tokenAmounts,
+        },
+      })
     }),
   }
 
@@ -232,6 +242,54 @@ describe('estimateExecGasForRequest', () => {
 
     assert.equal(result, 29700) // 50000 - (21000 - 700)
     assert.equal(mockSourceChain.getTokenInfo.mock.calls.length, 1)
+    assert.equal(mockDestChain.getTokenInfo.mock.calls.length, 1)
+  })
+
+  it('should use token extraData source decimals when provided', async () => {
+    const onRamp = getAddress(hexlify(randomBytes(20)))
+    const offRamp = getAddress(hexlify(randomBytes(20)))
+    const router = getAddress(hexlify(randomBytes(20)))
+    const sourcePoolAddress = getAddress(hexlify(randomBytes(20)))
+    const destTokenAddress = getAddress(hexlify(randomBytes(20)))
+
+    const chains = createMockChains(onRamp, offRamp)
+    mockSourceChain = chains.mockSourceChain
+    mockDestChain = chains.mockDestChain
+
+    mockSourceChain.getTokenForTokenPool = mock.fn(async () => {
+      throw new Error('source pool lookup should not be called')
+    })
+    mockSourceChain.getTokenInfo = mock.fn(async () => {
+      throw new Error('source token info should not be called')
+    })
+    mockDestChain.getTokenInfo = mock.fn(async () => ({ decimals: 9 }))
+    mockDestChain.getRouterForOffRamp = mock.fn(async () => router)
+    mockDestChain.provider.send = mock.fn(async () => toBeHex(50_000))
+
+    const message = {
+      sender: getAddress(hexlify(randomBytes(20))),
+      receiver: getAddress(hexlify(randomBytes(20))),
+      data: '0x',
+      tokenAmounts: [
+        {
+          sourcePoolAddress,
+          destTokenAddress,
+          amount: 10_000000000000000000n,
+          extraData: Buffer.concat([Buffer.alloc(31), Buffer.from([18])]).toString('base64'),
+        },
+      ],
+    }
+
+    const result = await estimateReceiveExecution({
+      source: mockSourceChain,
+      dest: mockDestChain,
+      routerOrRamp: onRamp,
+      message,
+    })
+
+    assert.equal(result, 29700)
+    assert.equal(mockSourceChain.getTokenForTokenPool.mock.calls.length, 0)
+    assert.equal(mockSourceChain.getTokenInfo.mock.calls.length, 0)
     assert.equal(mockDestChain.getTokenInfo.mock.calls.length, 1)
   })
 

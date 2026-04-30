@@ -1,4 +1,5 @@
-import { type BytesLike, formatUnits, hexlify, randomBytes } from 'ethers'
+import { formatUnits, hexlify, randomBytes, toBigInt } from 'ethers'
+import type { Simplify } from 'type-fest'
 
 import type { Chain } from './chain.ts'
 import {
@@ -7,36 +8,52 @@ import {
   CCIPOnRampRequiredError,
   CCIPTokenDecimalsInsufficientError,
 } from './errors/index.ts'
+import type { CCIPMessage_V2_0 } from './evm/messages.ts'
 import { discoverOffRamp } from './execution.ts'
 import { sourceToDestTokenAddresses } from './requests.ts'
+import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
+import type { CCIPMessage, MessageInput } from './types.ts'
+import { getDataBytes } from './utils.ts'
 
 /**
  * A subset of {@link MessageInput} for estimating receive execution gas.
  */
-export type EstimateMessageInput = {
-  /** receiver contract address */
-  receiver: string
-  /** optional messageId; random hash will be passed if omitted */
-  messageId?: string
-  /** optional sender: zero address will be used if omitted */
-  sender?: string
-  /** optional onRampAddress */
-  onRampAddress?: string
-  /** optional offRampAddress */
-  offRampAddress?: string
-  /** optional data: zero bytes will be used if omitted */
-  data?: BytesLike
-  /**
-   * optional tokenAmounts; `amount` with either source `token` (as in MessageInput) or
-   * `{ sourceTokenAddress?, sourcePoolAddress, destTokenAddress }` (as in v1.5..v2.0 tokenAmounts)
-   * can be provided
-   */
-  tokenAmounts?: readonly ({
-    amount: bigint
-  } & (
-    | { token: string }
-    | { sourceTokenAddress?: string; sourcePoolAddress: string; destTokenAddress: string }
-  ))[]
+export type EstimateMessageInput = Simplify<
+  Pick<CCIPMessage, 'receiver' | 'sourceChainSelector'> &
+    Partial<Pick<MessageInput, 'data'>> &
+    Partial<Pick<CCIPMessage_V2_0, 'messageId' | 'sender' | 'onRampAddress' | 'offRampAddress'>> &
+    Partial<
+      Pick<CCIPMessage_V1_6_Solana, 'tokenReceiver' | 'accounts' | 'accountIsWritableBitmap'>
+    > & {
+      /**
+       * optional tokenAmounts; `amount` with either source `token` (as in MessageInput) or
+       * `{ sourceTokenAddress?, sourcePoolAddress, destTokenAddress }` (as in v1.5..v2.0 tokenAmounts)
+       * can be provided
+       */
+      tokenAmounts?: readonly ({
+        amount: bigint
+      } & (
+        | { token: string }
+        | {
+            sourceTokenAddress?: string
+            sourcePoolAddress: string
+            destTokenAddress: string
+            extraData?: string
+          }
+      ))[]
+    }
+>
+
+function getSourceDecimalsFromExtraData(extraData?: string): bigint | undefined {
+  if (!extraData) return undefined
+  try {
+    const bytes = getDataBytes(extraData)
+    if (bytes.length !== 32) return undefined
+    const decimals = toBigInt(bytes)
+    return 0 < decimals && decimals <= 36 ? decimals : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -50,7 +67,7 @@ export type EstimateReceiveExecutionOpts = {
   /** source router or onRamp, or dest offRamp contract address */
   routerOrRamp: string
   /** message to be simulated */
-  message: EstimateMessageInput
+  message: Omit<EstimateMessageInput, 'sourceChainSelector'>
 }
 
 /**
@@ -129,16 +146,22 @@ export async function estimateReceiveExecution({
               destChainSelector: dest.network.chainSelector,
               sourceTokenAmount: ta,
             })
-      const sourceTokenAddress =
-        'token' in ta
-          ? ta.token
-          : ta.sourceTokenAddress
-            ? ta.sourceTokenAddress
-            : await source.getTokenForTokenPool(tokenAmount.sourcePoolAddress)
-      const [{ decimals: sourceDecimals }, { decimals: destDecimals }] = await Promise.all([
-        source.getTokenInfo(sourceTokenAddress),
-        dest.getTokenInfo(tokenAmount.destTokenAddress),
-      ])
+      const sourceDecimalsFromExtraData =
+        'extraData' in tokenAmount
+          ? getSourceDecimalsFromExtraData(tokenAmount.extraData)
+          : undefined
+      const { decimals: destDecimals } = await dest.getTokenInfo(tokenAmount.destTokenAddress)
+      const sourceDecimals =
+        sourceDecimalsFromExtraData ??
+        (
+          await source.getTokenInfo(
+            'token' in ta
+              ? ta.token
+              : ta.sourceTokenAddress
+                ? ta.sourceTokenAddress
+                : await source.getTokenForTokenPool(tokenAmount.sourcePoolAddress),
+          )
+        ).decimals
       const destAmount =
         (tokenAmount.amount * BigInt(10) ** BigInt(destDecimals)) /
         BigInt(10) ** BigInt(sourceDecimals)
@@ -149,7 +172,7 @@ export async function estimateReceiveExecution({
           dest.network.name,
           formatUnits(tokenAmount.amount, sourceDecimals),
         )
-      return { token: tokenAmount.destTokenAddress, amount: destAmount }
+      return { ...tokenAmount, token: tokenAmount.destTokenAddress, amount: destAmount }
     }),
   )
   return dest.estimateReceiveExecution({
@@ -160,7 +183,12 @@ export async function estimateReceiveExecution({
       sender: message.sender,
       data: message.data,
       sourceChainSelector: source.network.chainSelector,
-      destTokenAmounts,
+      tokenAmounts: destTokenAmounts,
+      ...(!!message.tokenReceiver && { tokenReceiver: message.tokenReceiver }),
+      ...(!!message.accounts?.length && {
+        accounts: message.accounts,
+        accountIsWritableBitmap: message.accountIsWritableBitmap,
+      }),
     },
   })
 }

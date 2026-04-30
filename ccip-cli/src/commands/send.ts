@@ -127,7 +127,7 @@ export const builder = (yargs: Argv) =>
         string: true,
         describe:
           'Extra args to pass in the message: key=value (value parsed as JSON with bigint support, fallback to string; repeated keys become arrays)',
-        example: '-x ccvs=["0xvalue1", "0xvalue2"] --extra=finality=safe',
+        example: '-x ccvs=["0xvalue1","0xvalue2"] --extra=finality=safe',
       },
       'only-get-fee': {
         type: 'boolean',
@@ -291,6 +291,8 @@ async function sendMessage(
         receiver,
         data,
         tokenAmounts,
+        ...(!!argv.tokenReceiver && { tokenReceiver: argv.tokenReceiver }),
+        ...(accounts != null && accounts.length && { accounts, accountIsWritableBitmap }),
       },
     })
     argv.gasLimit = Math.ceil(estimated * (1 + (argv.estimateGasLimit ?? 0) / 100))
@@ -310,7 +312,9 @@ async function sendMessage(
         )
       } else {
         output.write(
-          'Estimated gasLimit for sender =',
+          'Estimated',
+          destNetwork.family === ChainFamily.Solana ? 'computeUnits' : 'gasLimit',
+          'for sender =',
           walletAddress,
           ':',
           estimated,

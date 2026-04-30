@@ -34,7 +34,7 @@ import { formatUnits } from 'ethers'
 import type { Argv } from 'yargs'
 
 import { type Ctx, Format } from './types.ts'
-import { formatDuration, getCtx, logParsedError, prettyTable } from './utils.ts'
+import { formatDuration, getCtx, logParsedError, omit, prettyTable } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
@@ -225,6 +225,7 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
       finalityDepth: poolConfig.finalityDepth === 0 ? '0 (finalized)' : poolConfig.finalityDepth,
       finalitySafe: poolConfig.finalitySafe ? 'true (FCR)' : false,
     }),
+    ...omit(poolConfig, 'typeAndVersion', 'router', 'token', 'finalityDepth', 'finalitySafe'),
   })
   const remotesLen = Object.keys(remotes).length
   if (remotesLen > 0) output.write('Remotes [', remotesLen, ']:')
@@ -239,6 +240,15 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
         ['[fast]outbound']: prettyRateLimiter(remote.fastOutboundRateLimiterState, info),
         ['[fast]inbound']: prettyRateLimiter(remote.fastInboundRateLimiterState, info),
       }),
+      ...omit(
+        remote,
+        'remoteToken',
+        'remotePools',
+        'outboundRateLimiterState',
+        'inboundRateLimiterState',
+        'fastOutboundRateLimiterState',
+        'fastInboundRateLimiterState',
+      ),
     })
 }
 

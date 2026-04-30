@@ -88,6 +88,11 @@ export const builder = (yargs: Argv) =>
         example: '10',
         conflicts: 'gas-limit',
       },
+      'only-estimate': {
+        type: 'boolean',
+        describe: 'Print gas estimate and exit',
+        implies: 'estimate-gas-limit',
+      },
       wallet: {
         alias: 'w',
         type: 'string',
@@ -203,14 +208,14 @@ async function manualExec(
     const verifications = await dest.getVerifications({ ...argv, offRamp, request })
 
     if (argv.estimateGasLimit != null) {
-      let estimated = await estimateReceiveExecution({
+      const estimated = await estimateReceiveExecution({
         source,
         dest,
         routerOrRamp: offRamp,
         message: request.message,
       })
       logger.info('Estimated gasLimit override:', estimated)
-      estimated += Math.ceil((estimated * argv.estimateGasLimit) / 100)
+      const withBuffer = estimated + Math.ceil((estimated * argv.estimateGasLimit) / 100)
       const origLimit = Number(
         'ccipReceiveGasLimit' in request.message
           ? request.message.ccipReceiveGasLimit
@@ -218,19 +223,42 @@ async function manualExec(
             ? request.message.gasLimit
             : request.message.computeUnits,
       )
-      if (origLimit >= estimated) {
+      if (origLimit >= withBuffer) {
         logger.warn(
           'Estimated +',
           argv.estimateGasLimit,
           '% =',
-          estimated,
+          withBuffer,
           '< original gasLimit =',
           origLimit,
           '. Leaving unchanged.',
         )
       } else {
-        argv.gasLimit = estimated
+        argv.gasLimit = withBuffer
         argv.tokensGasLimit ??= 0
+      }
+
+      if (argv.onlyEstimate) {
+        if (argv.format === Format.json) {
+          output.write(
+            JSON.stringify(
+              {
+                estimated,
+                bufferPercent: argv.estimateGasLimit,
+                withBuffer,
+              },
+              bigIntReplacer,
+              2,
+            ),
+          )
+        } else {
+          output.write(
+            'Estimated gasLimit override:',
+            estimated,
+            ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', withBuffer] : []),
+          )
+        }
+        return
       }
     }
 

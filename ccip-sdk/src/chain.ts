@@ -27,6 +27,7 @@ import type {
   SVMExtraArgsV1,
   SuiExtraArgsV1,
 } from './extra-args.ts'
+import type { EstimateMessageInput } from './gas.ts'
 import type { LeafHasher } from './hasher/common.ts'
 import { decodeMessageV1 } from './messages.ts'
 import { getOffchainTokenData } from './offchain.ts'
@@ -1187,14 +1188,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
         message = {
           ...opts_.input.message,
           // pass `tokenAmount` with `destTokenAddress` to estimate
-          destTokenAmounts: opts_.input.message.tokenAmounts,
+          tokenAmounts: opts_.input.message.tokenAmounts,
         }
       } else {
         const decoded = decodeMessageV1(opts_.input.encodedMessage)
         message = {
           ...decoded,
           messageId: keccak256(opts_.input.encodedMessage),
-          destTokenAmounts: decoded.tokenTransfer,
+          tokenAmounts: decoded.tokenTransfer,
         }
       }
       try {
@@ -1791,17 +1792,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     opts:
       | {
           offRamp: string
-          message: {
-            sourceChainSelector: bigint
-            messageId: string
-            receiver: string
-            sender?: string
-            data?: BytesLike
-            destTokenAmounts?: readonly ((
-              | { token: string }
-              | { destTokenAddress: string; extraData?: string }
-            ) & { amount: bigint })[]
-          }
+          message: Omit<EstimateMessageInput, 'onRampAddress' | 'offRampAddress'>
         }
       | { messageId: string },
   ): Promise<number>

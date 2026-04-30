@@ -6,7 +6,7 @@ import { after, before, describe, it } from 'node:test'
 import { Wallet as AnchorWallet } from '@coral-xyz/anchor'
 import { Connection, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js'
 
-import '../evm/index.ts' // register EVM chain family for cross-family message decoding
+import '../index.ts' // register chains
 import { CCIPAPIClient } from '../api/index.ts'
 import { ExecutionState, MessageStatus } from '../types.ts'
 import { networkInfo } from '../utils.ts'
@@ -18,7 +18,7 @@ import { SolanaChain } from './index.ts'
 const VERBOSE = !!process.env.VERBOSE
 
 const SOLANA_ROUTER = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C'
-const ETH_MAINNET_SELECTOR = 5009297550715157269n
+const ETH_MAINNET_SELECTOR = networkInfo('ethereum-mainnet').chainSelector
 
 // ── Surfpool helpers ──
 interface SurfpoolInstance {

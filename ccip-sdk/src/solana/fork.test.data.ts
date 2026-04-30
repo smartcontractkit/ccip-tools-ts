@@ -1,4 +1,5 @@
 import type { ForkTestMessage } from '../evm/fork.test.data.ts'
+import type { EstimateMessageInput } from '../gas.ts'
 import { MessageStatus } from '../types.ts'
 
 // All messages discovered via the CCIP staging API (api.ccip.cldev.cloud) on 2026-03-24.
@@ -55,3 +56,39 @@ export const ETHEREUM_TO_SOLANA: ForkTestMessage[] = [
     description: 'failed token transfer (10 tokens) from Base to Solana, receiver=system program',
   },
 ]
+
+export const FUJI_TO_SOLANA: ForkTestMessage[] = [
+  {
+    messageId: '0xa1faadaaec9be0b0da3e313ddf86ab59e6bf2fade84798d03547f1de07f965ad',
+    txHash: '0xf227699a7b8c962b46607647b2c8548439f7e710b8f3e08d0678aeefe5d262c6',
+    status: MessageStatus.Failed,
+    version: '1.6',
+    description:
+      'failed data-only message from Fuji to Solana devnet; receiver rejects all messages',
+  },
+]
+
+// based off on https://ccip.chain.link/msg/0xcf961d156e9278ba53ee92b4648e3db37793a360aaca1341cb5f752e6c598602
+export const SOLANA_ESTIMATE_RECEIVER_MESSAGE: EstimateMessageInput = {
+  sourceChainSelector: 16015286601757825753n,
+  receiver: 'BesnAdTWpzME36BGb9uv55NWQzzREc7K9rMCsUSzjUei',
+  data: 'SGVsbG8gU29sYW5hIENDSVA=',
+  tokenAmounts: [
+    {
+      amount: 1000000000000000000n,
+      extraData: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABI=',
+      token: 'J7cTWLLwHQfsv7c384FBrWKQVYJY853pBFQmK1TWsg3Y',
+    },
+  ],
+  tokenReceiver: 'DXdqFCfipfcK34Y2nYkdBqsDH5VDFzFVE9MEFmGs3PcE',
+  accounts: [
+    'H4UWEXGwhkBr5ofoEXZMSbd5SVyWhbYrmxWt7Bbuaiwt',
+    'F8CGQmR7ofkzoXmNyUre3VTvwjxAehNbTnWv9DPSiQrB',
+    'J7cTWLLwHQfsv7c384FBrWKQVYJY853pBFQmK1TWsg3Y',
+    'Da1dtMUhyXLdPGEe5hUGJXW6u3W5cZ5irgSDG4MrYdcp',
+    'DXdqFCfipfcK34Y2nYkdBqsDH5VDFzFVE9MEFmGs3PcE',
+    'HhZogge3sHoQoYyMbcjtKjwSBWqYFkvrQeziHHGuVM2u',
+    'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+  ],
+  accountIsWritableBitmap: 42n,
+}
