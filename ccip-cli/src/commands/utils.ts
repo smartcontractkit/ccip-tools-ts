@@ -236,7 +236,10 @@ export function formatDuration(secs: number) {
     .join('')
 }
 
-function omit<T extends Record<string, unknown>, K extends string>(
+/**
+ * Omit specified keys from an object and return a new object.
+ */
+export function omit<T extends Record<string, unknown>, K extends string>(
   obj: T,
   ...keys: K[]
 ): Omit<T, K> {
