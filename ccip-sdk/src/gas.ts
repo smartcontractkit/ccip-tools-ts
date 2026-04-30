@@ -1,4 +1,5 @@
-import { type BytesLike, formatUnits, hexlify, randomBytes, toBigInt } from 'ethers'
+import { formatUnits, hexlify, randomBytes, toBigInt } from 'ethers'
+import type { Simplify } from 'type-fest'
 
 import type { Chain } from './chain.ts'
 import {
@@ -7,49 +8,41 @@ import {
   CCIPOnRampRequiredError,
   CCIPTokenDecimalsInsufficientError,
 } from './errors/index.ts'
+import type { CCIPMessage_V2_0 } from './evm/messages.ts'
 import { discoverOffRamp } from './execution.ts'
 import { sourceToDestTokenAddresses } from './requests.ts'
+import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
+import type { CCIPMessage, MessageInput } from './types.ts'
 import { getDataBytes } from './utils.ts'
 
 /**
  * A subset of {@link MessageInput} for estimating receive execution gas.
  */
-export type EstimateMessageInput = {
-  /** receiver contract address */
-  receiver: string
-  /** optional messageId; random hash will be passed if omitted */
-  messageId?: string
-  /** optional sender: zero address will be used if omitted */
-  sender?: string
-  /** optional onRampAddress */
-  onRampAddress?: string
-  /** optional offRampAddress */
-  offRampAddress?: string
-  /** optional data: zero bytes will be used if omitted */
-  data?: BytesLike
-  /** optional Solana token receiver for token transfers */
-  tokenReceiver?: string
-  /** optional Solana receiver accounts required by SVMExtraArgsV1 */
-  accounts?: readonly string[]
-  /** optional Solana writable bitmap for `accounts` */
-  accountIsWritableBitmap?: bigint
-  /**
-   * optional tokenAmounts; `amount` with either source `token` (as in MessageInput) or
-   * `{ sourceTokenAddress?, sourcePoolAddress, destTokenAddress }` (as in v1.5..v2.0 tokenAmounts)
-   * can be provided
-   */
-  tokenAmounts?: readonly ({
-    amount: bigint
-  } & (
-    | { token: string }
-    | {
-        sourceTokenAddress?: string
-        sourcePoolAddress: string
-        destTokenAddress: string
-        extraData?: string
-      }
-  ))[]
-}
+export type EstimateMessageInput = Simplify<
+  Pick<CCIPMessage, 'receiver' | 'sourceChainSelector'> &
+    Partial<Pick<MessageInput, 'data'>> &
+    Partial<Pick<CCIPMessage_V2_0, 'messageId' | 'sender' | 'onRampAddress' | 'offRampAddress'>> &
+    Partial<
+      Pick<CCIPMessage_V1_6_Solana, 'tokenReceiver' | 'accounts' | 'accountIsWritableBitmap'>
+    > & {
+      /**
+       * optional tokenAmounts; `amount` with either source `token` (as in MessageInput) or
+       * `{ sourceTokenAddress?, sourcePoolAddress, destTokenAddress }` (as in v1.5..v2.0 tokenAmounts)
+       * can be provided
+       */
+      tokenAmounts?: readonly ({
+        amount: bigint
+      } & (
+        | { token: string }
+        | {
+            sourceTokenAddress?: string
+            sourcePoolAddress: string
+            destTokenAddress: string
+            extraData?: string
+          }
+      ))[]
+    }
+>
 
 function getSourceDecimalsFromExtraData(extraData?: string): bigint | undefined {
   if (!extraData) return undefined
@@ -74,7 +67,7 @@ export type EstimateReceiveExecutionOpts = {
   /** source router or onRamp, or dest offRamp contract address */
   routerOrRamp: string
   /** message to be simulated */
-  message: EstimateMessageInput
+  message: Omit<EstimateMessageInput, 'sourceChainSelector'>
 }
 
 /**
@@ -190,7 +183,7 @@ export async function estimateReceiveExecution({
       sender: message.sender,
       data: message.data,
       sourceChainSelector: source.network.chainSelector,
-      destTokenAmounts,
+      tokenAmounts: destTokenAmounts,
       ...(!!message.tokenReceiver && { tokenReceiver: message.tokenReceiver }),
       ...(!!message.accounts?.length && {
         accounts: message.accounts,

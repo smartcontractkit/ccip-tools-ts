@@ -18,6 +18,7 @@ import {
   isBytesLike,
   isError,
   isHexString,
+  randomBytes,
   toBeHex,
   toBigInt,
 } from 'ethers'
@@ -2171,8 +2172,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       opts_ = {
         ...opts,
         message: {
+          messageId: hexlify(randomBytes(32)),
           ...opts.message,
-          destTokenAmounts: await convertAmounts(opts.message.destTokenAmounts),
+          destTokenAmounts: await convertAmounts(opts.message.tokenAmounts),
         },
       }
     }

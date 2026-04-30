@@ -10,7 +10,11 @@ import { CCIPAPIClient } from '../api/index.ts'
 import { EVMChain, discoverOffRamp } from '../index.ts'
 import { ExecutionState, MessageStatus } from '../types.ts'
 import { networkInfo } from '../utils.ts'
-import { ETHEREUM_TO_SOLANA, FUJI_TO_SOLANA } from './fork.test.data.ts'
+import {
+  ETHEREUM_TO_SOLANA,
+  FUJI_TO_SOLANA,
+  SOLANA_ESTIMATE_RECEIVER_MESSAGE,
+} from './fork.test.data.ts'
 import { SolanaChain } from './index.ts'
 
 // ── Constants ──
@@ -18,7 +22,8 @@ import { SolanaChain } from './index.ts'
 const VERBOSE = !!process.env.VERBOSE
 
 const SOLANA_ROUTER = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C'
-const ETH_MAINNET_SELECTOR = 5009297550715157269n
+const SOLANA_OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
+const ETH_MAINNET_SELECTOR = networkInfo('ethereum-mainnet').chainSelector
 const FUJI_RPC = process.env.FUJI_RPC ?? 'https://api.avax-test.network/ext/bc/C/rpc'
 
 // ── Surfpool helpers ──
@@ -308,40 +313,55 @@ describe('Solana Devnet Estimate Fork Tests', { skip, timeout: 120_000 }, () => 
   it('should estimate receiver execution for a failed Fuji -> Solana devnet message', async () => {
     assert.ok(solanaDevnet, 'Solana devnet chain should be initialized')
 
-    const source = await EVMChain.fromUrl(FUJI_RPC, { apiClient: null, logger: testLogger })
-    try {
-      const tx = await source.getTransaction(ESTIMATE_MSG.txHash)
-      const requests = await source.getMessagesInTx(tx)
-      assert.equal(requests.length, 1, 'tx hash should contain one CCIP message')
+    await using disposer = new AsyncDisposableStack()
+    const source = disposer.adopt(
+      await EVMChain.fromUrl(FUJI_RPC, { apiClient: null, logger: testLogger }),
+      (source) => source.destroy?.(),
+    )
 
-      const request = requests[0]!
-      assert.equal(request.message.messageId, ESTIMATE_MSG.messageId)
+    const tx = await source.getTransaction(ESTIMATE_MSG.txHash)
+    const requests = await source.getMessagesInTx(tx)
+    assert.equal(requests.length, 1, 'tx hash should contain one CCIP message')
 
-      const offRamp = await discoverOffRamp(source, solanaDevnet, request.lane.onRamp, source)
-      const estimated = await solanaDevnet.estimateReceiveExecution({
-        offRamp,
-        message: {
-          sourceChainSelector: request.lane.sourceChainSelector,
-          messageId: request.message.messageId,
-          receiver: request.message.receiver,
-          sender: request.message.sender,
-          data: request.message.data,
-          tokenReceiver:
-            'tokenReceiver' in request.message ? request.message.tokenReceiver : undefined,
-          accounts: 'accounts' in request.message ? request.message.accounts : undefined,
-          accountIsWritableBitmap:
-            'accountIsWritableBitmap' in request.message
-              ? request.message.accountIsWritableBitmap
-              : undefined,
-        },
-      })
+    const request = requests[0]!
+    assert.equal(request.message.messageId, ESTIMATE_MSG.messageId)
 
-      assert.ok(
-        30_000 < estimated && estimated < 33_000,
-        `estimated compute units should be around 31k for this message, got ${estimated}`,
-      )
-    } finally {
-      source.destroy?.()
-    }
+    const offRamp = await discoverOffRamp(source, solanaDevnet, request.lane.onRamp, source)
+    const estimated = await solanaDevnet.estimateReceiveExecution({
+      offRamp,
+      message: {
+        sourceChainSelector: request.lane.sourceChainSelector,
+        messageId: request.message.messageId,
+        receiver: request.message.receiver,
+        sender: request.message.sender,
+        data: request.message.data,
+        tokenReceiver:
+          'tokenReceiver' in request.message ? request.message.tokenReceiver : undefined,
+        accounts: 'accounts' in request.message ? request.message.accounts : undefined,
+        accountIsWritableBitmap:
+          'accountIsWritableBitmap' in request.message
+            ? request.message.accountIsWritableBitmap
+            : undefined,
+      },
+    })
+
+    assert.ok(
+      30_000 < estimated && estimated < 33_000,
+      `estimated compute units should be around 31k for this message, got ${estimated}`,
+    )
+  })
+
+  it('should estimate receiver execution for a real message with token transfer', async () => {
+    assert.ok(solanaDevnet, 'Solana devnet chain should be initialized')
+
+    const estimated = await solanaDevnet.estimateReceiveExecution({
+      offRamp: SOLANA_OFFRAMP,
+      message: SOLANA_ESTIMATE_RECEIVER_MESSAGE,
+    })
+
+    assert.ok(
+      42_000 < estimated && estimated < 45_000,
+      `estimated compute units should be around 43k for this message, got ${estimated}`,
+    )
   })
 })

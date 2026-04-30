@@ -24,6 +24,7 @@ import {
   formatUnits,
   hexlify,
   isHexString,
+  randomBytes,
   toBigInt,
 } from 'ethers'
 import { type Memoized, memoize } from 'micro-memoize'
@@ -1262,8 +1263,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       opts_ = {
         ...opts,
         message: {
+          messageId: hexlify(randomBytes(32)),
           ...opts.message,
-          destTokenAmounts: await convertAmounts(opts.message.destTokenAmounts),
+          destTokenAmounts: await convertAmounts(opts.message.tokenAmounts),
         },
       }
     }
