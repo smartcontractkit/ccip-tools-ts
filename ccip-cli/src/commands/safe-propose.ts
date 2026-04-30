@@ -565,7 +565,7 @@ async function proposeMessage(
       output.write(`\nNote: execute the approval(s) in the Safe UI before executing the ccipSend.`)
     }
     output.write(
-      `\nOnce ccipSend is executed, track CCIP delivery with:\n  ccip-cli show <onChainTxHash> -s ${sourceNetwork.name}`,
+      `\nOnce ccipSend is executed, track CCIP delivery with:\n  ccip-cli show <onChainTxHash>`,
     )
   }
 }
