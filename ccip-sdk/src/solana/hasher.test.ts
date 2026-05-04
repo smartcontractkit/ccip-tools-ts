@@ -147,8 +147,7 @@ describe('MessageHasher', () => {
       feeValueJuels: 342764n,
       tokenAmounts: [
         {
-          sourcePoolAddress:
-            '0:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+          sourcePoolAddress: '0:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
           destTokenAddress: 'D8aGbSC8JYyyomBJWeokx8LUNry9QdFwcE7oRjq5cMBv',
           extraData: '0x',
           amount: 1n,

@@ -3,14 +3,13 @@ import { describe, it } from 'node:test'
 
 import { generateUnsignedExecuteReport } from './exec.ts'
 import type { ExecutionInput } from '../types.ts'
-import { MANUALLY_EXECUTE_OPCODE } from './types.ts'
-import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
+import { type CCIPMessage_V1_6_TON, MANUALLY_EXECUTE_OPCODE } from './types.ts'
 
 describe('TON exec unit tests', () => {
   describe('TON generateUnsignedExecute', () => {
     const offrampAddress = '0:' + '5'.repeat(64)
 
-    const baseExecReport: ExecutionInput<CCIPMessage_V1_6_EVM> = {
+    const baseExecReport: ExecutionInput<CCIPMessage_V1_6_TON> = {
       message: {
         messageId: '0x' + '1'.repeat(64),
         sourceChainSelector: 743186221051783445n,
@@ -98,6 +97,32 @@ describe('TON exec unit tests', () => {
             },
           ],
         },
+      })
+
+      assert.equal(unsigned.to, offrampAddress)
+      assert.ok(unsigned.body, 'Body should be defined')
+    })
+
+    it('should accept Solana source sender addresses for TON destination', () => {
+      const unsigned = generateUnsignedExecuteReport(offrampAddress, {
+        ...baseExecReport,
+        message: {
+          ...baseExecReport.message,
+          sourceChainSelector: 16423721717087811551n,
+          destChainSelector: 1399300952838017768n,
+          messageId: '0xc9d521e2b4be8d995d7f9ffbde183e12d88ec93794d6b4329c23cb354db406a8',
+          sequenceNumber: 4n,
+          sender: '9NhaY2AXejCX3c4tXufzWuv52ZG7rjTJDeb1qSo9UV7S',
+          receiver: 'EQD4w5mxY0V7Szh2NsZ_BfWuMY6biF42HEjBz1-8_wRO-6gC',
+          data: '0x48656c6c6f',
+          feeToken: 'So11111111111111111111111111111111111111112',
+          feeTokenAmount: 1547524n,
+          feeValueJuels: 14388425000000000n,
+          gasLimit: 25_000_000n,
+          allowOutOfOrderExecution: true,
+          tokenAmounts: [],
+        },
+        merkleRoot: '0x050adeaa0cfe792abbd5e33a3ba6f2d9204052952d091f7624d1a2d23b771ad1',
       })
 
       assert.equal(unsigned.to, offrampAddress)

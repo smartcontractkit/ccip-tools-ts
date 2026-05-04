@@ -2,9 +2,12 @@ import { type Builder, Address, Cell, beginCell } from '@ton/core'
 import { toBigInt } from 'ethers'
 
 import { CCIPDataFormatUnsupportedError } from '../errors/specialized.ts'
-import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
+import type { EVMExtraArgsV2 } from '../extra-args.ts'
 import type { CCIPMessage_V1_6, ChainFamily, ExecutionInput } from '../types.ts'
 import { bytesToBuffer, getAddressBytes } from '../utils.ts'
+
+/** TON-specific CCIP v1.6 message type. TON uses the same extra-args layout as EVM. */
+export type CCIPMessage_V1_6_TON = CCIPMessage_V1_6 & EVMExtraArgsV2
 
 /** Opcode for OffRamp_ManuallyExecute message on TON */
 export const MANUALLY_EXECUTE_OPCODE = 0xa00785cf
@@ -80,7 +83,7 @@ function asSnakeData<T>(array: T[], builderFn: (item: T) => Builder): Cell {
  * @returns BOC-serialized Cell containing the execution report.
  */
 export function serializeExecutionReport(
-  execReport: ExecutionInput<CCIPMessage_V1_6_EVM>,
+  execReport: ExecutionInput<CCIPMessage_V1_6_TON>,
 ): Builder {
   return beginCell()
     .storeUint(execReport.message.sourceChainSelector, 64)
@@ -94,7 +97,7 @@ export function serializeExecutionReport(
     .storeUint(execReport.proofFlagBits, 256)
 }
 
-function serializeMessage(message: CCIPMessage_V1_6_EVM): Builder {
+function serializeMessage(message: CCIPMessage_V1_6_TON): Builder {
   return beginCell()
     .storeUint(BigInt(message.messageId), 256)
     .storeUint(message.sourceChainSelector, 64)
