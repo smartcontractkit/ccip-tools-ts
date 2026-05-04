@@ -1,6 +1,5 @@
 import {
   type BytesLike,
-  type Interface,
   type JsonRpcApiProvider,
   type Log,
   type Result,
@@ -376,7 +375,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /** {@inheritDoc Chain.getLogs} */
   async *getLogs(
-    filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag> & { onlyFallback?: boolean },
+    filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag>,
   ): AsyncIterableIterator<Log> {
     if (filter.watch instanceof Promise)
       filter = { ...filter, watch: Promise.race([filter.watch, this.destroy$]) }
@@ -1966,49 +1965,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @throws {@link CCIPVersionUnsupportedError} if OnRamp version is not supported
    */
   async getFeeTokens(address: string) {
-    const onRamp = await this._getSomeOnRampFor(address)
-    const [_, version] = await this.typeAndVersion(onRamp)
-    let tokens
-    let onRampIface: Interface | undefined
-    switch (version) {
-      case CCIPVersion.V1_2:
-        onRampIface = interfaces.EVM2EVMOnRamp_v1_2
-      // falls through
-      case CCIPVersion.V1_5: {
-        onRampIface ??= interfaces.EVM2EVMOnRamp_v1_5
-        const fragment = onRampIface.getEvent('FeeConfigSet')!
-        const tokens_ = new Set()
-        for await (const log of this.getLogs({
-          address: onRamp,
-          topics: [fragment.topicHash],
-          startBlock: 1,
-          onlyFallback: true,
-        })) {
-          ;(
-            onRampIface.decodeEventLog(fragment, log.data, log.topics) as unknown as {
-              feeConfig: { token: string; enabled: boolean }[]
-            }
-          ).feeConfig.forEach(({ token, enabled }) =>
-            enabled ? tokens_.add(token) : tokens_.delete(token),
-          )
-        }
-        tokens = Array.from(tokens_)
-        break
-      }
-      case CCIPVersion.V1_6:
-      case CCIPVersion.V2_0: {
-        const feeQuoter = await this.getFeeQuoterFor(onRamp)
-        const contract = new Contract(
-          feeQuoter,
-          interfaces.FeeQuoter,
-          this.provider,
-        ) as unknown as TypedContract<typeof FeeQuoter_ABI>
-        tokens = await contract.getFeeTokens()
-        break
-      }
-      default:
-        throw new CCIPVersionUnsupportedError(version)
-    }
+    const feeQuoter = await this.getFeeQuoterFor(address)
+    const contract = new Contract(
+      feeQuoter,
+      interfaces.FeeQuoter,
+      this.provider,
+    ) as unknown as TypedContract<typeof FeeQuoter_ABI>
+    const tokens = await contract.getFeeTokens()
+
     return Object.fromEntries(
       await Promise.all(
         tokens.map(
@@ -2093,7 +2057,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           null,
           messageId ?? null,
         ],
-        // onlyFallback: false,
       }
     } else /* >= V1.6 */ {
       const topicHash =
@@ -2108,7 +2071,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           null,
           messageId ?? null,
         ],
-        // onlyFallback: false,
       }
     }
     yield* super.getExecutionReceipts(opts_)

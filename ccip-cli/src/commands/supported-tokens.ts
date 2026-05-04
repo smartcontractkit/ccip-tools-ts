@@ -124,7 +124,11 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
   let jsonFeeTokens: unknown
 
   // Handle --fee-tokens flag
-  if (argv.feeTokens === true || argv.onlyFeeTokens || (argv.feeTokens == null && registry)) {
+  if (
+    argv.feeTokens === true ||
+    argv.onlyFeeTokens ||
+    (argv.feeTokens == null && registry && !argv.token)
+  ) {
     const feeTokens: Record<string, TokenInfo & { price?: number }> = await source.getFeeTokens(
       argv.address,
     )

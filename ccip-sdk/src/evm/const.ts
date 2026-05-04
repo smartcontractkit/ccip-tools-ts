@@ -35,6 +35,7 @@ const customErrors = [
   'error InvalidAdapter()',
   'error BlacklistableBlacklistedAccount(address)',
   'error WrongAsset(address expected, address received)',
+  'error FailedInnerCall()',
 ] as const
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
