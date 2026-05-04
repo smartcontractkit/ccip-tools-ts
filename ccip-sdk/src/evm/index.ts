@@ -1,6 +1,5 @@
 import {
   type BytesLike,
-  type Interface,
   type JsonRpcApiProvider,
   type Log,
   type Result,
@@ -1966,49 +1965,40 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @throws {@link CCIPVersionUnsupportedError} if OnRamp version is not supported
    */
   async getFeeTokens(address: string) {
-    const onRamp = await this._getSomeOnRampFor(address)
-    const [_, version] = await this.typeAndVersion(onRamp)
     let tokens
-    let onRampIface: Interface | undefined
-    switch (version) {
-      case CCIPVersion.V1_2:
-        onRampIface = interfaces.EVM2EVMOnRamp_v1_2
-      // falls through
-      case CCIPVersion.V1_5: {
-        onRampIface ??= interfaces.EVM2EVMOnRamp_v1_5
-        const fragment = onRampIface.getEvent('FeeConfigSet')!
-        const tokens_ = new Set()
-        for await (const log of this.getLogs({
-          address: onRamp,
-          topics: [fragment.topicHash],
-          startBlock: 1,
-          onlyFallback: true,
-        })) {
-          ;(
-            onRampIface.decodeEventLog(fragment, log.data, log.topics) as unknown as {
-              feeConfig: { token: string; enabled: boolean }[]
-            }
-          ).feeConfig.forEach(({ token, enabled }) =>
-            enabled ? tokens_.add(token) : tokens_.delete(token),
-          )
+    const [type, version] = await this.typeAndVersion(address)
+
+    if (type.endsWith('OnRamp') && version < CCIPVersion.V1_6) {
+      // TODO: cleanup this branch once CCIP v1.5 is deprecated
+      const onRampIface =
+        version === CCIPVersion.V1_2 ? interfaces.EVM2EVMOnRamp_v1_2 : interfaces.EVM2EVMOnRamp_v1_5
+      const fragment = onRampIface.getEvent('FeeConfigSet')!
+      const tokens_ = new Set()
+      for await (const log of this.getLogs({
+        address,
+        topics: [fragment.topicHash],
+        startBlock: 1,
+        onlyFallback: true,
+      })) {
+        const decoded = onRampIface.decodeEventLog(fragment, log.data, log.topics) as unknown as {
+          feeConfig: { token: string; enabled: boolean }[]
+        } | null
+        for (const { token, enabled } of decoded?.feeConfig ?? []) {
+          if (enabled) tokens_.add(token)
+          else tokens_.delete(token)
         }
-        tokens = Array.from(tokens_)
-        break
       }
-      case CCIPVersion.V1_6:
-      case CCIPVersion.V2_0: {
-        const feeQuoter = await this.getFeeQuoterFor(onRamp)
-        const contract = new Contract(
-          feeQuoter,
-          interfaces.FeeQuoter,
-          this.provider,
-        ) as unknown as TypedContract<typeof FeeQuoter_ABI>
-        tokens = await contract.getFeeTokens()
-        break
-      }
-      default:
-        throw new CCIPVersionUnsupportedError(version)
+      tokens = Array.from(tokens_)
+    } else {
+      const feeQuoter = await this.getFeeQuoterFor(address)
+      const contract = new Contract(
+        feeQuoter,
+        interfaces.FeeQuoter,
+        this.provider,
+      ) as unknown as TypedContract<typeof FeeQuoter_ABI>
+      tokens = await contract.getFeeTokens()
     }
+
     return Object.fromEntries(
       await Promise.all(
         tokens.map(
