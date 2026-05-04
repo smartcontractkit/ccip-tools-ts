@@ -1,11 +1,8 @@
 import { type Cell, beginCell } from '@ton/core'
 
 import type { ExecutionInput } from '../types.ts'
-import {
-  type CCIPMessage_V1_6_TON,
-  MANUALLY_EXECUTE_OPCODE,
-  serializeExecutionReport,
-} from './types.ts'
+import { MANUALLY_EXECUTE_OPCODE, serializeExecutionReport } from './types.ts'
+import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 
 /**
  * Generates an unsigned execute report payload for the TON OffRamp contract.
@@ -17,7 +14,7 @@ import {
  */
 export function generateUnsignedExecuteReport(
   offRamp: string,
-  execReport: ExecutionInput<CCIPMessage_V1_6_TON>,
+  execReport: ExecutionInput<CCIPMessage_V1_6_EVM>,
   opts?: { gasLimit?: number },
 ): { to: string; body: Cell } {
   // Serialize the execution report

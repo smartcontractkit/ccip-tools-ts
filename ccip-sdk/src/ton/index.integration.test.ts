@@ -5,8 +5,8 @@ import { Address } from '@ton/core'
 
 import '../index.ts'
 import { TONChain } from './index.ts'
-import type { CCIPMessage_V1_6_TON } from './types.ts'
 import { crc32 } from './utils.ts'
+import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
 
 // CRC32 hex values for TON external message topics
@@ -396,10 +396,10 @@ describe.skip('TON index integration tests', () => {
     it('should decode gasLimit as positive bigint', () => {
       assert.ok(message)
       assert.ok('gasLimit' in message, 'message should have gasLimit property')
-      assert.equal(typeof (message as CCIPMessage_V1_6_TON).gasLimit, 'bigint')
-      assert.ok((message as CCIPMessage_V1_6_TON).gasLimit > 0n, 'gasLimit should be positive')
+      assert.equal(typeof (message as CCIPMessage_V1_6_EVM).gasLimit, 'bigint')
+      assert.ok((message as CCIPMessage_V1_6_EVM).gasLimit > 0n, 'gasLimit should be positive')
       assert.ok(
-        (message as CCIPMessage_V1_6_TON).gasLimit >= 100_000n,
+        (message as CCIPMessage_V1_6_EVM).gasLimit >= 100_000n,
         'gasLimit should be at least 100k for cross-chain calls',
       )
     })
