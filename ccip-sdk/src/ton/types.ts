@@ -4,7 +4,7 @@ import { toBigInt } from 'ethers'
 import { CCIPDataFormatUnsupportedError } from '../errors/specialized.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import type { CCIPMessage_V1_6, ChainFamily, ExecutionInput } from '../types.ts'
-import { bytesToBuffer } from '../utils.ts'
+import { bytesToBuffer, getAddressBytes } from '../utils.ts'
 
 /** Opcode for OffRamp_ManuallyExecute message on TON */
 export const MANUALLY_EXECUTE_OPCODE = 0xa00785cf
@@ -103,8 +103,8 @@ function serializeMessage(message: CCIPMessage_V1_6_EVM): Builder {
     .storeUint(message.nonce, 64)
     .storeRef(
       beginCell()
-        .storeUint(bytesToBuffer(message.sender).length, 8)
-        .storeBuffer(bytesToBuffer(message.sender))
+        .storeUint(getAddressBytes(message.sender).length, 8)
+        .storeBuffer(Buffer.from(getAddressBytes(message.sender)))
         .endCell(),
     )
     .storeRef(beginCell().storeBuffer(bytesToBuffer(message.data)).endCell())
@@ -131,6 +131,6 @@ function serializeTokenAmounts(tokenAmounts: CCIPMessage_V1_6['tokenAmounts']): 
 }
 
 function serializeSourcePool(address: string): Cell {
-  const bytes = bytesToBuffer(address)
+  const bytes = Buffer.from(getAddressBytes(address))
   return beginCell().storeUint(bytes.length, 8).storeBuffer(bytes).endCell()
 }

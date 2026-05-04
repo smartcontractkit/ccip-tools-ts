@@ -130,4 +130,51 @@ describe('MessageHasher', () => {
       '0x7a498ae46f8f32c55958a0ca3d3c1cf40ab28ded8fa36bfc3faa9ec3fc46a731',
     )
   })
+
+  it('should handle TON raw addresses in cross-family fields', async () => {
+    const message = {
+      messageId: '0xcb612421de1c4aa30fa9502b7e74bdc402b8aa93404232e3f4c61f86e57038bf',
+      sourceChainSelector: 1399300952838017768n,
+      destChainSelector: 16423721717087811551n,
+      sequenceNumber: 18n,
+      nonce: 0n,
+      sender: '0:358280f2b46935d7470439a34fd234cc8617f2019018545383a74b03b9035174',
+      data: '0x48656c6c6f',
+      receiver: 'KrRRsPSNNay6v7oJqxWtFRY5B7qauNcRHcj5mocuRsA',
+      extraArgs: '',
+      feeToken: '0x',
+      feeTokenAmount: 0n,
+      feeValueJuels: 342764n,
+      tokenAmounts: [
+        {
+          sourcePoolAddress: '0:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+          destTokenAddress: 'D8aGbSC8JYyyomBJWeokx8LUNry9QdFwcE7oRjq5cMBv',
+          extraData: '0x',
+          amount: 1n,
+          destExecData: '0x',
+          destGasAmount: 0n,
+        },
+      ],
+      computeUnits: 0n,
+      accountIsWritableBitmap: 3n,
+      allowOutOfOrderExecution: true,
+      tokenReceiver: '11111111111111111111111111111111',
+      accounts: [
+        'D8aGbSC8JYyyomBJWeokx8LUNry9QdFwcE7oRjq5cMBv',
+        '2DsXeNYNzx1DrannTPhNBc2cbpUDxjDJoTWQCP1wx7MT',
+        '11111111111111111111111111111111',
+      ],
+    } as CCIPMessage_V1_6_Solana
+
+    const lane = {
+      sourceChainSelector: message.sourceChainSelector,
+      destChainSelector: message.destChainSelector,
+      onRamp: '0:abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+      version: CCIPVersion.V1_6,
+    }
+
+    const hasher = getV16SolanaLeafHasher(lane)
+
+    assert.doesNotThrow(() => hasher(message))
+  })
 })

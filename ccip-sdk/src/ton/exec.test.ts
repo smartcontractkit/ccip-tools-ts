@@ -79,5 +79,55 @@ describe('TON exec unit tests', () => {
       const gasOverride = slice.loadCoins()
       assert.equal(gasOverride, 0n)
     })
+
+    it('should accept TON raw sender and source pool addresses', () => {
+      const unsigned = generateUnsignedExecuteReport(offrampAddress, {
+        ...baseExecReport,
+        message: {
+          ...baseExecReport.message,
+          sender: '0:358280f2b46935d7470439a34fd234cc8617f2019018545383a74b03b9035174',
+          tokenAmounts: [
+            {
+              amount: 1n,
+              sourcePoolAddress:
+                '0:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+              destTokenAddress: '0:' + '6'.repeat(64),
+              destGasAmount: 0n,
+              destExecData: '0x',
+              extraData: '0x',
+            },
+          ],
+        },
+      })
+
+      assert.equal(unsigned.to, offrampAddress)
+      assert.ok(unsigned.body, 'Body should be defined')
+    })
+
+    it('should accept Solana source sender addresses for TON destination', () => {
+      const unsigned = generateUnsignedExecuteReport(offrampAddress, {
+        ...baseExecReport,
+        message: {
+          ...baseExecReport.message,
+          sourceChainSelector: 16423721717087811551n,
+          destChainSelector: 1399300952838017768n,
+          messageId: '0xc9d521e2b4be8d995d7f9ffbde183e12d88ec93794d6b4329c23cb354db406a8',
+          sequenceNumber: 4n,
+          sender: '9NhaY2AXejCX3c4tXufzWuv52ZG7rjTJDeb1qSo9UV7S',
+          receiver: 'EQD4w5mxY0V7Szh2NsZ_BfWuMY6biF42HEjBz1-8_wRO-6gC',
+          data: '0x48656c6c6f',
+          feeToken: 'So11111111111111111111111111111111111111112',
+          feeTokenAmount: 1547524n,
+          feeValueJuels: 14388425000000000n,
+          gasLimit: 25_000_000n,
+          allowOutOfOrderExecution: true,
+          tokenAmounts: [],
+        },
+        merkleRoot: '0x050adeaa0cfe792abbd5e33a3ba6f2d9204052952d091f7624d1a2d23b771ad1',
+      })
+
+      assert.equal(unsigned.to, offrampAddress)
+      assert.ok(unsigned.body, 'Body should be defined')
+    })
   })
 })

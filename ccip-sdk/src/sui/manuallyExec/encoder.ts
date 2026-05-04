@@ -63,7 +63,7 @@ export function serializeExecutionReport(
     dest_chain_selector: message.destChainSelector,
     sequence_number: message.sequenceNumber,
     nonce: message.nonce,
-    sender: Array.from(bytesToBuffer(message.sender)),
+    sender: Array.from(getAddressBytes(message.sender)),
     data: Array.from(bytesToBuffer(message.data)),
     receiver: message.receiver,
     gas_limit: gasLimit,
