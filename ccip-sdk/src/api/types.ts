@@ -40,6 +40,7 @@ export type RawNetworkInfo = {
   chainSelector: string
   chainId: string
   chainFamily: string
+  displayName: string | null
 }
 
 /** Token amount from API response */
