@@ -79,5 +79,29 @@ describe('TON exec unit tests', () => {
       const gasOverride = slice.loadCoins()
       assert.equal(gasOverride, 0n)
     })
+
+    it('should accept TON raw sender and source pool addresses', () => {
+      const unsigned = generateUnsignedExecuteReport(offrampAddress, {
+        ...baseExecReport,
+        message: {
+          ...baseExecReport.message,
+          sender: '0:358280f2b46935d7470439a34fd234cc8617f2019018545383a74b03b9035174',
+          tokenAmounts: [
+            {
+              amount: 1n,
+              sourcePoolAddress:
+                '0:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+              destTokenAddress: '0:' + '6'.repeat(64),
+              destGasAmount: 0n,
+              destExecData: '0x',
+              extraData: '0x',
+            },
+          ],
+        },
+      })
+
+      assert.equal(unsigned.to, offrampAddress)
+      assert.ok(unsigned.body, 'Body should be defined')
+    })
   })
 })

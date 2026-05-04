@@ -17,7 +17,7 @@ import { CCIPError } from '../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../errors/codes.ts'
 import { CCIPSolanaLookupTableNotFoundError } from '../errors/index.ts'
 import { type ExecutionInput, type WithLogger, ChainFamily } from '../types.ts'
-import { bytesToBuffer, getDataBytes, toLeArray } from '../utils.ts'
+import { bytesToBuffer, getAddressBytes, getDataBytes, toLeArray } from '../utils.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
 import type { CCIPMessage_V1_6_Solana, UnsignedSolanaTx } from './types.ts'
@@ -325,7 +325,7 @@ async function getManuallyExecuteInputs({
     tokenIndexes,
   } = await autoDeriveExecutionAccounts({
     offramp,
-    originalSender: bytesToBuffer(execReport.message.sender),
+    originalSender: Buffer.from(getAddressBytes(execReport.message.sender)),
     payer,
     messagingAccounts,
     sourceChainSelector: execReport.message.sourceChainSelector,
@@ -361,11 +361,11 @@ function prepareExecutionReport({
         sequenceNumber: new BN(message.sequenceNumber),
         nonce: new BN(message.nonce),
       },
-      sender: bytesToBuffer(message.sender),
+      sender: Buffer.from(getAddressBytes(message.sender)),
       data: bytesToBuffer(message.data),
       tokenReceiver: new PublicKey(message.tokenReceiver),
       tokenAmounts: message.tokenAmounts.map((token) => ({
-        sourcePoolAddress: bytesToBuffer(token.sourcePoolAddress),
+        sourcePoolAddress: Buffer.from(getAddressBytes(token.sourcePoolAddress)),
         destTokenAddress: new PublicKey(token.destTokenAddress),
         destGasAmount: Number(token.destGasAmount),
         extraData: bytesToBuffer(token.extraData),
