@@ -375,7 +375,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /** {@inheritDoc Chain.getLogs} */
   async *getLogs(
-    filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag> & { onlyFallback?: boolean },
+    filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag>,
   ): AsyncIterableIterator<Log> {
     if (filter.watch instanceof Promise)
       filter = { ...filter, watch: Promise.race([filter.watch, this.destroy$]) }
@@ -1965,39 +1965,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @throws {@link CCIPVersionUnsupportedError} if OnRamp version is not supported
    */
   async getFeeTokens(address: string) {
-    let tokens
-    const [type, version] = await this.typeAndVersion(address)
-
-    if (type.endsWith('OnRamp') && version < CCIPVersion.V1_6) {
-      // TODO: cleanup this branch once CCIP v1.5 is deprecated
-      const onRampIface =
-        version === CCIPVersion.V1_2 ? interfaces.EVM2EVMOnRamp_v1_2 : interfaces.EVM2EVMOnRamp_v1_5
-      const fragment = onRampIface.getEvent('FeeConfigSet')!
-      const tokens_ = new Set()
-      for await (const log of this.getLogs({
-        address,
-        topics: [fragment.topicHash],
-        startBlock: 1,
-        onlyFallback: true,
-      })) {
-        const decoded = onRampIface.decodeEventLog(fragment, log.data, log.topics) as unknown as {
-          feeConfig: { token: string; enabled: boolean }[]
-        } | null
-        for (const { token, enabled } of decoded?.feeConfig ?? []) {
-          if (enabled) tokens_.add(token)
-          else tokens_.delete(token)
-        }
-      }
-      tokens = Array.from(tokens_)
-    } else {
-      const feeQuoter = await this.getFeeQuoterFor(address)
-      const contract = new Contract(
-        feeQuoter,
-        interfaces.FeeQuoter,
-        this.provider,
-      ) as unknown as TypedContract<typeof FeeQuoter_ABI>
-      tokens = await contract.getFeeTokens()
-    }
+    const feeQuoter = await this.getFeeQuoterFor(address)
+    const contract = new Contract(
+      feeQuoter,
+      interfaces.FeeQuoter,
+      this.provider,
+    ) as unknown as TypedContract<typeof FeeQuoter_ABI>
+    const tokens = await contract.getFeeTokens()
 
     return Object.fromEntries(
       await Promise.all(
@@ -2083,7 +2057,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           null,
           messageId ?? null,
         ],
-        // onlyFallback: false,
       }
     } else /* >= V1.6 */ {
       const topicHash =
@@ -2098,7 +2071,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           null,
           messageId ?? null,
         ],
-        // onlyFallback: false,
       }
     }
     yield* super.getExecutionReceipts(opts_)
