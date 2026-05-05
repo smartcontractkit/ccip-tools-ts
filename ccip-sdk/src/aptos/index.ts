@@ -94,7 +94,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   /** Native token decimals (8 for APT). */
   static readonly decimals = 8
 
-  readonly destroy$: Promise<void>
   /** The Aptos SDK provider for blockchain interactions. */
   provider: Aptos
 
@@ -111,7 +110,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   constructor(provider: Aptos, network: NetworkInfo, ctx?: ChainContext) {
     super(network, ctx)
 
-    this.destroy$ = new Promise<void>((resolve) => (this.destroy = resolve))
     this.provider = provider
 
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
@@ -238,6 +236,15 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
 
   /** {@inheritDoc Chain.getLogs} */
   async *getLogs(opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<ChainLog> {
+    if (opts.watch && this.abort) {
+      opts = {
+        ...opts,
+        watch:
+          opts.watch instanceof AbortSignal
+            ? AbortSignal.any([opts.watch, this.abort])
+            : this.abort,
+      }
+    }
     yield* streamAptosLogs(this, opts)
   }
 

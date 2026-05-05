@@ -16,7 +16,7 @@ import {
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
 import type { ChainLog } from '../types.ts'
-import { sleep } from '../utils.ts'
+import { signalToPromise } from '../utils.ts'
 
 const DEFAULT_POLL_INTERVAL = 5e3
 
@@ -156,7 +156,10 @@ async function* fetchEventsForward(
 
   let first = true,
     catchedUp = false
-  while (opts.watch || !catchedUp) {
+  while (
+    (opts.watch && (!(opts.watch instanceof AbortSignal) || !opts.watch.aborted)) ||
+    !catchedUp
+  ) {
     const lastReq = performance.now()
     const data = await fetchBatch(start)
     if (
@@ -193,12 +196,14 @@ async function* fetchEventsForward(
     }
     catchedUp ||= start >= end
     if (opts.watch && catchedUp) {
-      let break$ = sleep(
+      let delay$ = AbortSignal.timeout(
         Math.max((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq), 1),
-      ).then(() => false)
-      if (opts.watch instanceof Promise)
-        break$ = Promise.race([break$, opts.watch.then(() => true)])
-      if (await break$) break
+      )
+      if (opts.watch instanceof AbortSignal) {
+        if (opts.watch.aborted) break
+        delay$ = AbortSignal.any([opts.watch, delay$])
+      }
+      await signalToPromise(delay$).catch(() => false)
     }
   }
 }

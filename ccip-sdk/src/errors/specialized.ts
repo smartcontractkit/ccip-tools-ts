@@ -1449,11 +1449,11 @@ export class CCIPNetworkFamilyUnsupportedError extends CCIPError {
 export class CCIPRpcNotFoundError extends CCIPError {
   override readonly name = 'CCIPRpcNotFoundError'
   /** Creates an RPC not found error. */
-  constructor(chainId: string | number, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.RPC_NOT_FOUND, `No RPC found for chainId=${chainId}`, {
+  constructor(chain: string | number, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.RPC_NOT_FOUND, `No RPC found for chain=${chain}`, {
       ...options,
       isTransient: false,
-      context: { ...options?.context, chainId },
+      context: { ...options?.context, chain },
     })
   }
 }

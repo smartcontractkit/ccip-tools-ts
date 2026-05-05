@@ -8,7 +8,7 @@ import {
   CCIPLogsWatchRequiresFinalityError,
 } from '../errors/index.ts'
 import type { FinalityRequested } from '../extra-args.ts'
-import { blockRangeGenerator, getSomeBlockNumberBefore } from '../utils.ts'
+import { blockRangeGenerator, getSomeBlockNumberBefore, signalToPromise } from '../utils.ts'
 import { getAllFragmentsMatchingEvents } from './const.ts'
 import type { WithLogger } from '../types.ts'
 
@@ -19,12 +19,12 @@ export type EVMEndBlockTag = FinalityRequested | 'latest'
  * Implements Chain.getLogs for EVM.
  * Walks logs forward from `startBlock` or `startTime`; if neither is provided, throws.
  * @param filter - Chain LogFilter
- * @param ctx - Context object containing provider, logger and destroy$ notify promise
+ * @param ctx - Context object containing provider, logger and optional abort signal
  * @returns Async iterator of logs.
  */
 export async function* getEvmLogs(
   filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag>,
-  ctx: { provider: JsonRpcApiProvider; destroy$?: Promise<unknown> } & WithLogger,
+  ctx: { provider: JsonRpcApiProvider; abort?: AbortSignal } & WithLogger,
 ): AsyncIterableIterator<Log> {
   const { provider, logger = console } = ctx
 
@@ -77,20 +77,7 @@ export async function* getEvmLogs(
   }
 
   // watch mode, otherwise return
-  while (filter.watch) {
-    let cont$ = new Promise<number | false>(
-      (resolve) =>
-        void provider.once(
-          !filter.endBlock || typeof filter.endBlock === 'number' || filter.endBlock == 'latest'
-            ? 'block'
-            : filter.endBlock, // finalized | safe
-          resolve,
-        ),
-    )
-    if (filter.watch instanceof Promise)
-      cont$ = Promise.race([filter.watch.then(() => false as const), cont$])
-    if ((await cont$) === false) break
-
+  while (filter.watch && (!(filter.watch instanceof AbortSignal) || !filter.watch.aborted)) {
     const filter_ = {
       fromBlock: Math.max(latestLogBlockNumber, endBlock - (filter.page ?? 10e3)) + 1,
       toBlock: filter.endBlock || 'latest',
@@ -102,5 +89,19 @@ export async function* getEvmLogs(
     if (logs.length)
       latestLogBlockNumber = Math.max(latestLogBlockNumber, logs[logs.length - 1]!.blockNumber)
     yield* logs
+
+    const contAc = new AbortController()
+    let contSignal = contAc.signal
+    void provider.once(
+      !filter.endBlock || typeof filter.endBlock === 'number' || filter.endBlock == 'latest'
+        ? 'block'
+        : filter.endBlock, // finalized | safe
+      contAc.abort.bind(contAc),
+    )
+    if (filter.watch instanceof AbortSignal) {
+      if (filter.watch.aborted) break
+      contSignal = AbortSignal.any([filter.watch, contSignal])
+    }
+    await signalToPromise(contSignal).catch(() => false)
   }
 }

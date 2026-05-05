@@ -14,6 +14,7 @@ import {
   ChainFamily,
   NetworkType,
   networkInfo,
+  signalToPromise,
   supportedChains,
 } from '@chainlink/ccip-sdk/src/index.ts'
 
@@ -68,7 +69,7 @@ export function fetchChainsFromRpcs(
  * Receives a list of rpcs and/or rpcs file, and loads them concurrently for each chain family
  * If txHash is provided, fetches matching families first and returns [chainGetter, txPromise];
  * Otherwise, spawns racing URLs for each family asked by `getChain` getter
- * @param ctx - Context object containing destroy$ promise and logger properties
+ * @param ctx - Context object containing abort signal and logger properties
  * @param argv - Options containing rpcs (list), rpcs file and noApi flag
  * @param txHash - Optional txHash to fetch concurrently; causes the function to return a [ChainGetter, Promise<ChainTransaction>]
  * @returns a ChainGetter (if txHash was provided), or a tuple of [ChainGetter, Promise<ChainTransaction>]
@@ -103,8 +104,11 @@ export function fetchChainsFromRpcs(
       const txs$: Promise<unknown>[] = []
       let txFound = false
       for (const url of endpoints) {
+        ctx.abort.throwIfAborted()
+        const raceAc = new AbortController()
         const chain$ = C.fromUrl(url, {
           ...ctx,
+          abort: AbortSignal.any([ctx.abort, raceAc.signal]),
           apiClient:
             argv.api === false ? null : typeof argv.api === 'string' ? argv.api : undefined,
         })
@@ -114,10 +118,11 @@ export function fetchChainsFromRpcs(
           (chain) => {
             endpoints.delete(url) // when resolved, remove from set so it isn't tried for future families
             // on chain detected for url
-            if (chain.network.name in chains && !(chain.network.name in chainsCbs))
-              return chain.destroy?.() // but lost race, cleanup right away
-            // keep and schedule cleanup on shutdown
-            if (chain.destroy) void ctx.destroy$.finally(chain.destroy.bind(chain))
+            if (chain.network.name in chains && !(chain.network.name in chainsCbs)) {
+              raceAc.abort() // lost race, abort immediately (destroys provider via signal listener)
+              return
+            }
+            // winner: provider cleanup is handled automatically by ctx.abort signal
             if (!(chain.network.name in chains)) {
               // chain won for this network, but was not "asked" by getChain (yet?): save
               chains[chain.network.name] = Promise.resolve(chain)
@@ -134,6 +139,7 @@ export function fetchChainsFromRpcs(
         if (txHash) {
           txs$.push(
             chain$.then(async (chain) => {
+              raceAc.signal.throwIfAborted() // if chain lost the race, skip tx fetch
               const tx = await chain.getTransaction(txHash)
               if (!txFound) {
                 txFound = true
@@ -147,13 +153,19 @@ export function fetchChainsFromRpcs(
         }
       }
 
-      void Promise.race([Promise.allSettled(chains$), ctx.destroy$]).finally(() => {
-        if (finished[F]) return
-        finished[F] = true
-        Object.entries(chainsCbs)
-          .filter(([name]) => networkInfo(name).family === F)
-          .forEach(([name, [_, reject]]) => reject(new CCIPRpcNotFoundError(name)))
-      })
+      Promise.race([Promise.allSettled(chains$), signalToPromise(ctx.abort)])
+        .finally(() => {
+          if (finished[F]) return
+          finished[F] = true
+          Object.entries(chainsCbs)
+            .filter(([name]) => networkInfo(name).family === F)
+            .forEach(([name, [_, reject]]) => reject(new CCIPRpcNotFoundError(name)))
+        })
+        .catch(() => {
+          // signalToPromise(ctx.abort) rejects with DOMException when the parent
+          // context aborts before all race URLs settle; swallow it here so the
+          // void-discarded chain doesn't surface as an unhandled rejection.
+        })
       return Promise.any(txHash ? txs$ : chains$)
     }))
 

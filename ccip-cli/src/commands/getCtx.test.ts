@@ -108,7 +108,7 @@ describe('getCtx', () => {
     it('returns a working destroy function', async () => {
       const [ctx, destroy] = getCtx({})
       let resolved = false
-      ctx.destroy$.then(() => {
+      ctx.abort.addEventListener('abort', () => {
         resolved = true
       })
       destroy()

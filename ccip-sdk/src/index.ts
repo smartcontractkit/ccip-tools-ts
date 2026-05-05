@@ -94,6 +94,7 @@ export {
   getDataBytes,
   isSupportedTxHash,
   networkInfo,
+  signalToPromise,
   withRetry,
 } from './utils.ts'
 export {

@@ -160,7 +160,6 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   after(async () => {
-    solanaChain?.destroy?.()
     await surfpoolInstance?.stop()
   })
 
@@ -267,8 +266,6 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
         .find((r) => r?.messageId === EXEC_MSG.messageId)
       assert.ok(receipt, 'should find ExecutionStateChanged in offRamp logs')
       assert.equal(receipt.state, ExecutionState.Success, 'offRamp log should confirm Success')
-
-      solanaWithApi.destroy?.()
     })
   })
 })

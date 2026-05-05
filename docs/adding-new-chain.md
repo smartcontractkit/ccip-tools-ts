@@ -198,7 +198,7 @@ Your constructor should:
 
 1. **Call `super(network, ctx)`** - The base class handles logger and API client initialization
 2. **Store your chain's client** - The SDK client for your chain (e.g., ethers provider, Solana connection)
-3. **Setup `destroy$` pattern** - For resource cleanup (see Engineering Patterns)
+3. **Wire `abort` signal** - For resource cleanup and watch-loop cancellation (see Engineering Patterns)
 4. **Memoize expensive methods** - Cache RPC calls like `getTransaction`, `typeAndVersion` (see Engineering Patterns)
 
 **Reference:** See `EVMChain` or `SolanaChain` constructors for complete examples.
@@ -329,17 +329,21 @@ The SDK uses `micro-memoize` to cache expensive RPC calls. Memoize methods in yo
 
 **Methods to memoize:** `typeAndVersion`, `getTransaction`, `getTokenInfo`, `getTokenForTokenPool`, `getNativeTokenForRouter`, `getTokenAdminRegistryFor`, `getFeeTokens`
 
-### Resource Cleanup (`destroy$` Pattern)
+### Resource Cleanup (AbortSignal Pattern)
 
-Chain instances hold network connections that need cleanup.
+Chain instances hold network connections that need cleanup. The SDK uses the standard `AbortSignal` / `AbortController` API instead of a custom `destroy$` promise.
 
 **Pattern:**
 
-1. Create `destroy$: Promise<void>` that resolves when `destroy()` is called
-2. Use `destroy$.finally()` to clean up the client connection
-3. In `getLogs`, integrate `destroy$` with watch cancellation via `Promise.race`
+1. Pass an `abort?: AbortSignal` in `ChainContext` (the base `Chain` class stores it as `this.abort`)
+2. In your constructor (or `fromUrl` factory), attach a one-time abort listener on `ctx?.abort` to destroy the client:
+   ```ts
+   ctx?.abort?.addEventListener('abort', () => client.destroy(), { once: true })
+   ```
+3. In `getLogs`, merge per-call watch signals with `this.abort` via `AbortSignal.any([this.abort, opts.watch])`
+4. For explicit per-chain cleanup (e.g., in tests), call `chain.provider.destroy()` directly or fire the signal
 
-**Reference:** See `EVMChain` constructor for the pattern.
+**Reference:** See `EVMChain` constructor for the complete pattern.
 
 ### Error Handling Conventions
 
@@ -360,7 +364,8 @@ Chain instances hold network connections that need cleanup.
 
 - Forward iteration from required `startBlock`/`startTime` hints
 - Watch mode validation and polling
-- Integration with `destroy$` for cancellation
+- Integration with `this.abort` (merged via `AbortSignal.any`) for cancellation
+- Poll delays use `AbortSignal.timeout(ms)` instead of `sleep(ms)` promises
 
 **Reference:** See `ccip-sdk/src/evm/index.ts` for complete implementations.
 
@@ -391,7 +396,7 @@ Before submitting your PR:
 - [ ] Chain class extends `Chain<typeof ChainFamily.YourChain>`
 - [ ] Static registration block added (`static { supportedChains[...] = ... }`)
 - [ ] All abstract methods implemented
-- [ ] `destroy$` cleanup pattern implemented
+- [ ] AbortSignal cleanup wired in constructor (`ctx?.abort?.addEventListener('abort', () => ..., { once: true })`)
 - [ ] Key methods memoized (see Engineering Patterns)
 
 **Types and Exports:**

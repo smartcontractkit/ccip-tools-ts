@@ -65,7 +65,9 @@ import {
   encodeFinality,
 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { decodeMessageV1 } from '../messages.ts'
 import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
+import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type CCIPExecution,
@@ -130,9 +132,7 @@ import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { type EVMEndBlockTag, getEvmLogs } from './logs.ts'
 import type { CCIPMessage_V1_6_EVM, CCIPMessage_V2_0, CleanAddressable } from './messages.ts'
 import { encodeEVMOffchainTokenData } from './offchain.ts'
-import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
 import { type UnsignedEVMTx, resultToObject } from './types.ts'
-import { decodeMessageV1 } from '../messages.ts'
 export type { UnsignedEVMTx }
 
 /** Raw on-chain TokenBucket struct returned by TokenPool rate limiter queries. */
@@ -209,7 +209,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   static readonly decimals = 18
 
   provider: JsonRpcApiProvider
-  readonly destroy$: Promise<void>
   private noncesPromises: Record<string, Promise<unknown>>
   /**
    * Cache of current nonces per wallet address.
@@ -230,8 +229,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.nonces = {}
 
     this.provider = provider
-    this.destroy$ = new Promise<void>((resolve) => (this.destroy = resolve))
-    void this.destroy$.finally(() => provider.destroy())
+    ctx?.abort?.addEventListener('abort', () => provider.destroy(), { once: true })
 
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this))
 
@@ -295,10 +293,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param url - WebSocket (wss://) or HTTP (https://) endpoint URL.
    * @returns A ready JSON-RPC provider.
    */
-  static async _getProvider(url: string): Promise<JsonRpcApiProvider> {
+  static async _getProvider(url: string, abort?: AbortSignal): Promise<JsonRpcApiProvider> {
     let providerReady: Promise<JsonRpcApiProvider>
     if (url.startsWith('ws')) {
       const provider = new WebSocketProvider(url)
+      abort?.addEventListener('abort', () => void provider.destroy(), { once: true })
       providerReady = new Promise((resolve, reject) => {
         provider.websocket.onerror = reject
         provider
@@ -308,6 +307,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       })
     } else if (url.startsWith('http')) {
       const provider = new JsonRpcProvider(url)
+      abort?.addEventListener('abort', () => provider.destroy(), { once: true })
       providerReady = Promise.resolve(provider)
     } else {
       throw new CCIPDataFormatUnsupportedError(url)
@@ -348,7 +348,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * ```
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<EVMChain> {
-    return this.fromProvider(await this._getProvider(url), ctx)
+    return this.fromProvider(await this._getProvider(url, ctx?.abort), ctx)
   }
 
   /** {@inheritDoc Chain.getBlockTimestamp} */
@@ -377,8 +377,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   async *getLogs(
     filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag>,
   ): AsyncIterableIterator<Log> {
-    if (filter.watch instanceof Promise)
-      filter = { ...filter, watch: Promise.race([filter.watch, this.destroy$]) }
+    if (filter.watch && this.abort) {
+      filter = {
+        ...filter,
+        watch:
+          filter.watch instanceof AbortSignal
+            ? AbortSignal.any([filter.watch, this.abort])
+            : this.abort,
+      }
+    }
     yield* getEvmLogs(filter, this)
   }
 

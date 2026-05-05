@@ -631,15 +631,53 @@ export async function parseTokenAmounts(source: Chain, transferTokens: readonly 
  * Yield resolved promises (like Promise.all), but as they resolve.
  * Throws as soon as any promise rejects.
  *
- * @param promises - Promises to resolve
+ * @param promises - Promises to resolve (can be an array or a generator)
  * @returns Resolved values as they resolve
  **/
-export async function* yieldResolved<T>(promises: readonly Promise<T>[]): AsyncGenerator<T> {
-  const map = new Map(promises.map((p) => [p, p.then((res) => [p, res] as const)] as const))
-  while (map.size > 0) {
-    const [p, res] = await Promise.race(map.values())
-    map.delete(p)
-    yield res
+export async function* yieldResolved<T>(promises: Iterable<Promise<T>>): AsyncGenerator<T> {
+  const queue: T[] = []
+  let resolve: (() => void) | null = null
+  let reject: ((err: unknown) => void) | null = null
+  let remaining = 0
+  let done = false
+
+  try {
+    for (const p of promises) {
+      remaining++
+      p.then(
+        (value) => {
+          if (done) return
+          queue.push(value)
+          resolve?.()
+          resolve = null
+        },
+        (err) => {
+          if (done) return
+          reject?.(err)
+          reject = null
+        },
+      )
+    }
+
+    while (remaining > 0) {
+      if (queue.length === 0) {
+        await new Promise<void>((res, rej) => {
+          resolve = res
+          reject = rej
+        })
+        resolve = null
+        reject = null
+      }
+      while (queue.length > 0) {
+        remaining--
+        yield queue.shift()!
+      }
+    }
+  } finally {
+    done = true
+    resolve = null
+    reject = null
+    queue.length = 0
   }
 }
 
@@ -651,11 +689,12 @@ export async function* yieldResolved<T>(promises: readonly Promise<T>[]): AsyncG
  * - `logger.info/warn/error/debug` → stderr (status/diagnostics)
  *
  * @param argv - yargs argv containing verbose flag
- * @returns context object with destroy$ signal, output, and logger
+ * @returns context object with abort signal, output, and logger
  */
-export function getCtx(argv: { verbose?: boolean }): [ctx: Ctx, destroy: () => void] {
-  let destroy
-  const destroy$ = new Promise<void>((resolve) => (destroy = resolve))
+export function getCtx(argv: {
+  verbose?: boolean
+}): [ctx: Ctx, destroy: (reason?: unknown) => void] {
+  const ac = new AbortController()
 
   // Logger: always stderr
   const stderrConsole = new Console(process.stderr, process.stderr, true)
@@ -675,5 +714,5 @@ export function getCtx(argv: { verbose?: boolean }): [ctx: Ctx, destroy: () => v
 
   if (argv.verbose) logger.debug('Verbose mode enabled')
 
-  return [{ destroy$, output, logger, verbose: argv.verbose }, destroy!]
+  return [{ abort: ac.signal, output, logger, verbose: argv.verbose }, ac.abort.bind(ac)]
 }

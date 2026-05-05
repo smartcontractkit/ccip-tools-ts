@@ -744,7 +744,7 @@ const perHostnameRateLimits: Record<string, RateLimit> = {}
  */
 export function createRateLimitedFetch(
   opts: Partial<RateLimitOpts> = {},
-  { logger = console }: WithLogger = {},
+  { logger = console, abort }: { abort?: AbortSignal } & WithLogger = {},
 ): typeof fetch {
   opts.maxRequests ??= 40
   opts.maxRetries ??= 5
@@ -792,6 +792,12 @@ export function createRateLimitedFetch(
         await rl.waitForRateLimit(opts_, method)
         rl.recordRequest(method)
 
+        if (init?.signal && abort) init.signal = AbortSignal.any([init.signal, abort])
+        else if (abort) {
+          if (!init) init = {}
+          init.signal = abort
+        }
+        abort?.throwIfAborted()
         const response = await globalThis.fetch(
           input instanceof Request ? input.clone() : input,
           init,
@@ -902,3 +908,30 @@ const util =
         }),
       }
 export { util }
+
+const registry = new FinalizationRegistry(
+  ({ signal, listener }: { signal: AbortSignal; listener: () => void }) =>
+    signal.removeEventListener('abort', listener),
+)
+
+/**
+ * Converts an AbortSignal into a Promise that rejects when the signal is aborted.
+ * @param signal - AbortSignal to convert
+ * @returns Promise that rejects with the signal's reason when aborted
+ */
+export function signalToPromise(signal: AbortSignal): Promise<never> {
+  if (signal.aborted) return Promise.reject(signal.reason as Error)
+
+  const { promise, reject } = Promise.withResolvers<never>()
+  const weakReject = new WeakRef(reject)
+
+  const listener = () => {
+    const rejectFn = weakReject.deref()
+    rejectFn?.(signal.reason)
+  }
+
+  signal.addEventListener('abort', listener, { once: true })
+  registry.register(promise, { signal, listener })
+
+  return promise
+}

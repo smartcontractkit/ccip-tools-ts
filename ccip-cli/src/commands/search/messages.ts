@@ -129,9 +129,8 @@ export async function searchMessages(ctx: Ctx, argv: Parameters<typeof handler>[
   }
   const limit = requestedLimit === 0 ? Infinity : requestedLimit
 
-  // Wire abort signal from destroy$ for cancellation
   const ac = new AbortController()
-  ctx.destroy$.then(() => ac.abort()).catch(() => {})
+  ctx.abort.addEventListener('abort', () => ac.abort(), { once: true })
 
   let warned = false
   const results: MessageSearchResult[] = []

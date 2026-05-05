@@ -219,6 +219,15 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @throws {@link CCIPTopicsInvalidError} if topics format is invalid
    */
   async *getLogs(opts: LogFilter & { versionAsHash?: boolean }) {
+    if (opts.watch && this.abort) {
+      opts = {
+        ...opts,
+        watch:
+          opts.watch instanceof AbortSignal
+            ? AbortSignal.any([opts.watch, this.abort])
+            : this.abort,
+      }
+    }
     if (!opts.address) throw new CCIPLogsAddressRequiredError()
 
     // Extract the event type from topics

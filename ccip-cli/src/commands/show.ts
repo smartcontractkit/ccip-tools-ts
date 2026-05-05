@@ -209,9 +209,11 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   const finalized$ = (async () => {
     if (argv.wait) {
       logger.info(`[${MessageStatus.Sent}] Waiting for source chain finalization...`)
+      const finalizedAc = new AbortController()
+      cancelWaitFinalized = finalizedAc.abort.bind(finalizedAc)
       await source.waitFinalized({
         request,
-        cancel$: new Promise<void>((resolve) => (cancelWaitFinalized = resolve)),
+        abort: finalizedAc.signal,
       })
       logger.info(`[${MessageStatus.SourceFinalized}] Source chain finalized`)
     }
@@ -238,7 +240,11 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
 
     if (argv.wait)
       logger.info(`[${MessageStatus.SourceFinalized}] Waiting for commit on destination chain...`)
-    else if (!request.metadata?.receiptTransactionHash && argv.format !== Format.json)
+    else if (
+      !request.metadata?.receiptTransactionHash &&
+      argv.format !== Format.json &&
+      !ctx.abort.aborted
+    )
       output.write('Commit (dest):')
   })()
 
@@ -253,7 +259,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       err,
     )
     emitJsonEnvelope()
-    return
+    throw err
   }
 
   let execs$, cancelWaitVerifications: (() => void) | undefined, verifications$
@@ -275,12 +281,18 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   } else {
     offRamp ??= await discoverOffRamp(source, dest, request.lane.onRamp, source)
 
+    let watch
+    if (argv.wait) {
+      const ac = new AbortController()
+      watch = ac.signal
+      cancelWaitVerifications = ac.abort.bind(ac)
+    }
     verifications$ = (async () => {
       const verifications = await dest.getVerifications({
         offRamp,
         request,
         ...argv,
-        watch: argv.wait && new Promise<void>((resolve) => (cancelWaitVerifications = resolve)),
+        watch,
       })
       cancelWaitFinalized?.()
       await finalized$
@@ -312,7 +324,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       sourceChainSelector: request.message.sourceChainSelector,
       startTime: request.tx.timestamp,
       verifications: !argv.wait ? await verifications$ : undefined,
-      watch: argv.wait && ctx.destroy$,
+      watch: argv.wait && ctx.abort,
     })
   }
 

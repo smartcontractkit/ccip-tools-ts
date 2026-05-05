@@ -17,7 +17,7 @@ export type Format = (typeof Format)[keyof typeof Format]
  * - `logger` writes to stderr — used for status, progress, warnings, errors, debug.
  */
 export type Ctx = {
-  destroy$: Promise<unknown>
+  abort: AbortSignal
   /** Write data to stdout. */
   output: {
     /** Console.log to stdout — supports multiple args with util.inspect formatting. */

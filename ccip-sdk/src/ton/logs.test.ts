@@ -505,7 +505,7 @@ describe('TON logs unit tests', () => {
         )
 
         // Create a promise that resolves after a short delay to stop watching
-        const stopWatch = new Promise((resolve) => setTimeout(resolve, 50))
+        const stopWatch = AbortSignal.timeout(50)
 
         const results: ChainTransaction[] = []
         for await (const tx of streamTransactionsForAddress(
@@ -541,7 +541,7 @@ describe('TON logs unit tests', () => {
         )
 
         // Create a promise that resolves quickly to stop the loop
-        const stopWatch = new Promise((resolve) => setTimeout(resolve, 50))
+        const stopWatch = AbortSignal.timeout(50)
 
         const results: ChainTransaction[] = []
         for await (const tx of streamTransactionsForAddress(
@@ -571,7 +571,7 @@ describe('TON logs unit tests', () => {
           createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
         )
 
-        const stopWatch = new Promise((resolve) => setTimeout(resolve, 30))
+        const stopWatch = AbortSignal.timeout(30)
 
         const results: ChainTransaction[] = []
         const startTime = performance.now()
@@ -979,10 +979,7 @@ describe('TON logs unit tests', () => {
             createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
           )
 
-          let resolveCancel: () => void
-          const cancelPromise = new Promise<void>((resolve) => {
-            resolveCancel = resolve
-          })
+          const cancelAc = new AbortController()
 
           const results: ChainTransaction[] = []
 
@@ -991,7 +988,7 @@ describe('TON logs unit tests', () => {
             {
               address: TEST_ADDRESS,
               startBlock: 100,
-              watch: cancelPromise,
+              watch: cancelAc.signal,
               pollInterval: 100,
             },
             { provider: mockProvider, getTransaction: mockGetTransaction },
@@ -1002,7 +999,7 @@ describe('TON logs unit tests', () => {
           results.push(first.value)
 
           // Cancel after short delay
-          setTimeout(() => resolveCancel!(), 10)
+          setTimeout(() => cancelAc.abort(), 10)
 
           // Try to get more (should stop)
           for await (const tx of iterator) {

@@ -13,6 +13,7 @@ console.info = stderrConsole.info.bind(stderrConsole)
 
 import { realpathSync } from 'fs'
 import { createRequire } from 'module'
+import https from 'node:https'
 import util from 'node:util'
 import { pathToFileURL } from 'url'
 
@@ -159,8 +160,9 @@ if (import.meta.main || wasCalledAsScript()) {
     })
     .finally(() => {
       clearTimeout(later)
+      https.globalAgent.destroy() // cleanup kept-alive sockets
       setTimeout(() => {
-        util.inspect.defaultOptions.depth = 2
+        util.inspect.defaultOptions.depth = 3
         console.debug(
           'Pending handles after main completion:',
           (process as any)._getActiveHandles().length, // eslint-disable-line

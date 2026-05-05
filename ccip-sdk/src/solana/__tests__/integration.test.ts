@@ -260,9 +260,7 @@ describe('Solana Devnet estimateReceiveExecution Tests', { skip }, () => {
     })
   })
 
-  after(async () => {
-    chain?.destroy?.()
-  })
+  after(async () => {})
 
   it('should estimate receiver execution for a failed Fuji -> Solana devnet message', async () => {
     assert.ok(chain, 'Solana devnet chain should be initialized')
@@ -270,7 +268,7 @@ describe('Solana Devnet estimateReceiveExecution Tests', { skip }, () => {
     await using disposer = new AsyncDisposableStack()
     const source = disposer.adopt(
       await EVMChain.fromUrl(FUJI_RPC, { apiClient: null, logger: testLogger }),
-      (source) => source.destroy?.(),
+      (source) => source.provider.destroy(),
     )
 
     const tx = await source.getTransaction(ESTIMATE_MSG.txHash)

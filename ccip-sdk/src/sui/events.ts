@@ -8,7 +8,7 @@ import {
   CCIPLogsWatchRequiresFinalityError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
-import { sleep } from '../utils.ts'
+import { signalToPromise } from '../utils.ts'
 
 type MerkleRoot = {
   max_seq_nr: string
@@ -154,7 +154,10 @@ async function* fetchEventsForward<T>(
   let currentCheckpoint = startCheckpoint
   let catchedUp = false
 
-  while (opts.watch || !catchedUp) {
+  while (
+    (opts.watch && (!(opts.watch instanceof AbortSignal) || !opts.watch.aborted)) ||
+    !catchedUp
+  ) {
     const lastReq = performance.now()
 
     // Determine the range for this batch
@@ -264,12 +267,14 @@ async function* fetchEventsForward<T>(
     catchedUp ||= currentCheckpoint > batchEndCheckpoint
 
     if (opts.watch && catchedUp) {
-      let break$ = sleep(
+      let delay$ = AbortSignal.timeout(
         Math.max((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq), 1),
-      ).then(() => false)
-      if (opts.watch instanceof Promise)
-        break$ = Promise.race([break$, opts.watch.then(() => true)])
-      if (await break$) break
+      )
+      if (opts.watch instanceof AbortSignal) {
+        if (opts.watch.aborted) break
+        delay$ = AbortSignal.any([opts.watch, delay$])
+      }
+      await signalToPromise(delay$).catch(() => false)
     }
   }
 }

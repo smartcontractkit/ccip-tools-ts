@@ -47,7 +47,7 @@ describe('lane-latency command', () => {
   }
 
   const createCtx = (): Ctx => ({
-    destroy$: Promise.resolve(),
+    abort: new AbortController().signal,
     output: mockOutput,
     logger: mockLogger,
   })

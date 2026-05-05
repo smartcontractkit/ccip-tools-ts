@@ -135,6 +135,12 @@ export type ChainContext = WithLogger & {
    * Default: DEFAULT_API_RETRY_CONFIG
    */
   apiRetryConfig?: ApiRetryConfig
+
+  /**
+   * Abort signal for cancelling in-flight requests and watch loops on this chain.
+   * When the signal fires, the provider is destroyed and all active getLogs watch loops exit.
+   */
+  abort?: AbortSignal
 } & WithCantonConfig
 
 /**
@@ -208,9 +214,9 @@ export type LogFilter = {
   /** Cursor hint for the exclusive upper end of iteration on chains that support it. */
   endBefore?: string
   /** watch mode: polls for new logs after fetching since start (required), until endBlock finality tag
-   *  (e.g. endBlock=finalized polls only finalized logs); can be a promise to cancel loop
+   *  (e.g. endBlock=finalized polls only finalized logs); can be an AbortSignal to cancel loop
    */
-  watch?: boolean | Promise<unknown>
+  watch?: boolean | AbortSignal
   /** Contract address to filter logs by. */
   address?: string
   /** Topics to filter logs by. */
@@ -563,6 +569,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   readonly apiClient: CCIPAPIClient | null
   /** Retry configuration for API fallback operations (null if API client is disabled) */
   readonly apiRetryConfig: Required<ApiRetryConfig> | null
+  /** Abort signal from ChainContext; fires when the chain should tear down. */
+  readonly abort?: AbortSignal
 
   /**
    * Base constructor for Chain class.
@@ -571,7 +579,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPChainFamilyMismatchError} if network family doesn't match the Chain subclass
    */
   constructor(network: NetworkInfo, ctx?: ChainContext) {
-    const { logger = console, apiClient, apiRetryConfig } = ctx ?? {}
+    const { logger = console, apiClient, apiRetryConfig, abort } = ctx ?? {}
 
     if (network.family !== (this.constructor as ChainStatic).family)
       throw new CCIPChainFamilyMismatchError(
@@ -581,6 +589,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       )
     this.network = network as NetworkInfo<F>
     this.logger = logger
+    this.abort = abort
 
     // API client initialization: default enabled, null = explicit opt-out
     if (apiClient === null) {
@@ -594,9 +603,6 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     }
   }
-
-  /** Cleanup method to release resources (e.g., close connections). */
-  destroy?(): void | Promise<void>
 
   /** Custom inspector for Node.js util.inspect. */
   [util.inspect.custom]() {
@@ -665,7 +671,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   async waitFinalized({
     request: { log, tx },
     finality = 'finalized',
-    cancel$,
+    abort,
   }: {
     request: SetOptional<
       PickDeep<
@@ -676,7 +682,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       'tx'
     >
     finality?: number | 'finalized'
-    cancel$?: Promise<unknown>
+    abort?: AbortSignal
   }): Promise<true> {
     const timestamp = log.tx?.timestamp ?? tx?.timestamp
     if (!timestamp || Date.now() / 1e3 - timestamp > 60) {
@@ -687,12 +693,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       ])
       if (trans.timestamp <= finalizedTs) return true
     }
+    const signals = [this.abort, abort].filter(Boolean) as AbortSignal[]
+    const watch = signals.length ? AbortSignal.any(signals) : true
     for await (const l of this.getLogs({
       address: log.address,
       startBlock: log.blockNumber,
       endBlock: finality,
       topics: [log.topics[0]!],
-      watch: cancel$ ?? true,
+      watch,
     })) {
       if (l.transactionHash === log.transactionHash) {
         return true

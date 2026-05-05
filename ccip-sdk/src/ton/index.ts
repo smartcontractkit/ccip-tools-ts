@@ -55,7 +55,6 @@ import {
   decodeAddress,
   networkInfo,
   parseTypeAndVersion,
-  sleep,
 } from '../utils.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import {
@@ -206,8 +205,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const { logger = console } = ctx ?? {}
     if (!url.endsWith('/jsonRPC')) url += '/jsonRPC'
 
-    let fetchFn
-    let httpAdapter
+    let fetchFn: typeof fetch | undefined
+    let httpAdapter: AxiosAdapter | undefined
     if (['toncenter.com', 'tonapi.io'].some((d) => url.includes(d))) {
       logger.warn(
         'Public TONCenter API calls are rate-limited to ~1 req/sec, some commands may be slow',
@@ -216,6 +215,20 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       httpAdapter = (getAdapter as (name: string, config: object) => AxiosAdapter)('fetch', {
         env: { fetch: fetchFn },
       })
+    }
+
+    // Wrap the adapter (or the default 'http' adapter) so that every TonClient axios
+    // request inherits the abort signal. Without this, raceAc.abort() fires and prints
+    // "Aborting RPC race" but the in-flight axios socket has no signal to cancel against
+    // and stays alive in the keep-alive pool, preventing natural process exit.
+    if (ctx?.abort) {
+      const abort = ctx.abort
+      const base = httpAdapter ?? (getAdapter as (name: string) => AxiosAdapter)('http')
+      httpAdapter = (config) =>
+        base({
+          ...config,
+          signal: config.signal ? AbortSignal.any([config.signal as AbortSignal, abort]) : abort,
+        })
     }
 
     const client = new TonClient({ endpoint: url, httpAdapter })
@@ -372,6 +385,15 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @throws {@link CCIPTopicsInvalidError} if topics format is invalid
    */
   async *getLogs(opts: LogFilter): AsyncIterableIterator<ChainLog> {
+    if (opts.watch && this.abort) {
+      opts = {
+        ...opts,
+        watch:
+          opts.watch instanceof AbortSignal
+            ? AbortSignal.any([opts.watch, this.abort])
+            : this.abort,
+      }
+    }
     let topics
     if (opts.topics?.length) {
       if (!opts.topics.every((topic) => typeof topic === 'string'))
@@ -1081,7 +1103,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       address: onRamp,
       topics: [crc32('CCIPMessageSent')],
       startTime,
-      watch: sleep(5 * 60e3 /* 5m timeout */),
+      watch: AbortSignal.timeout(5 * 60e3 /* 5m timeout */),
     })) {
       const msg = TONChain.decodeMessage(log)
       if (!msg) continue
@@ -1159,7 +1181,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       messageId: message.messageId,
       sourceChainSelector: message.sourceChainSelector,
       startTime,
-      watch: sleep(10 * 60e3 /* 10m */),
+      watch: AbortSignal.timeout(10 * 60e3 /* 10m */),
     })) {
       return exec // break and return on first yield
     }

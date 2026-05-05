@@ -182,9 +182,9 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   after(async () => {
-    sepoliaChain?.destroy?.()
-    fujiChain?.destroy?.()
-    arbSepChain?.destroy?.()
+    sepoliaChain?.provider.destroy()
+    fujiChain?.provider.destroy()
+    arbSepChain?.provider.destroy()
     await Promise.all([sepoliaInstance?.stop(), fujiInstance?.stop(), arbSepInstance?.stop()])
   })
 
@@ -1408,7 +1408,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.ok(execution.timestamp > 0, 'should have timestamp')
       assert.equal(execution.receipt.state, ExecutionState.Success)
 
-      fujiWithApi.destroy?.()
+      fujiWithApi.provider.destroy()
     })
 
     it('should execute a v1.5 message via API-driven path (Sepolia -> Fuji)', async () => {
@@ -1438,7 +1438,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.ok(execution.timestamp > 0, 'should have timestamp')
       assert.equal(execution.receipt.state, ExecutionState.Success)
 
-      fujiWithApi.destroy?.()
+      fujiWithApi.provider.destroy()
     })
 
     // TON-source messages were historically problematic due to data quality issues
@@ -1473,7 +1473,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.ok(execution.timestamp > 0, 'should have timestamp')
       assert.equal(execution.receipt.state, ExecutionState.Success)
 
-      sepoliaWithApi.destroy?.()
+      sepoliaWithApi.provider.destroy()
     })
 
     // Another problematic TON-source message with gasLimit=1 and data payload.
@@ -1507,7 +1507,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.ok(execution.timestamp > 0, 'should have timestamp')
       assert.equal(execution.receipt.state, ExecutionState.Success)
 
-      sepoliaWithApi.destroy?.()
+      sepoliaWithApi.provider.destroy()
     })
   })
 
@@ -1598,7 +1598,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         `viem-adapter path should surface the decoded custom error name. Parsed: ${flat}`,
       )
 
-      viemChain.destroy?.()
+      viemChain.provider.destroy()
     })
 
     // Cross-check: same over-capacity send via the ethers-direct chain (sepoliaChain)
@@ -1647,7 +1647,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         `ethers-direct path should surface the decoded custom error name. Parsed: ${flat}`,
       )
 
-      ethersChainLocal.destroy?.()
+      ethersChainLocal.provider.destroy()
     })
   })
 })

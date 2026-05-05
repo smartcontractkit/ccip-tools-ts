@@ -7,7 +7,7 @@ import {
   CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
 } from '../errors/index.ts'
-import { sleep } from '../utils.ts'
+import { signalToPromise } from '../utils.ts'
 
 const DEFAULT_POLL_INTERVAL = 5e3
 
@@ -56,16 +56,9 @@ async function* fetchSigsForward(
   yield* allSigs // all past logs
 
   if (allSigs.length) until = allSigs[allSigs.length - 1]!.signature
-  let lastReq = performance.now()
   // if not watch mode, returns
-  while (opts.watch) {
-    let break$ = sleep(
-      Math.max((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq), 1),
-    ).then(() => false)
-    if (opts.watch instanceof Promise) break$ = Promise.race([break$, opts.watch.then(() => true)])
-    if (await break$) break
-
-    lastReq = performance.now()
+  while (opts.watch && (!(opts.watch instanceof AbortSignal) || !opts.watch.aborted)) {
+    const lastReq = performance.now()
     batch = await connection.getSignaturesForAddress(
       new PublicKey(opts.address!),
       { limit, until },
@@ -86,6 +79,15 @@ async function* fetchSigsForward(
       until = sig.signature
       yield sig
     }
+
+    let delay$ = AbortSignal.timeout(
+      Math.max((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq), 1),
+    )
+    if (opts.watch instanceof AbortSignal) {
+      if (opts.watch.aborted) break
+      delay$ = AbortSignal.any([opts.watch, delay$])
+    }
+    await signalToPromise(delay$).catch(() => false)
   }
 }
 

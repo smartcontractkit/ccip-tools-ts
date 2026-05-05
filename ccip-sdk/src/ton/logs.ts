@@ -5,7 +5,7 @@ import type { LogFilter } from '../chain.ts'
 import { CCIPLogsRequiresStartError, CCIPLogsWatchRequiresFinalityError } from '../errors/index.ts'
 import { CCIPLogsAddressRequiredError } from '../errors/specialized.ts'
 import type { ChainTransaction } from '../types.ts'
-import { sleep } from '../utils.ts'
+import { signalToPromise } from '../utils.ts'
 
 const DEFAULT_POLL_INTERVAL = 5000
 
@@ -46,16 +46,9 @@ async function* fetchTxsForward(
   yield* allTxs // all past logs
 
   if (allTxs.length) until = allTxs[allTxs.length - 1]!.lt
-  let lastReq = performance.now()
   // if not watch mode, returns
-  while (opts.watch) {
-    let break$ = sleep(
-      Math.max((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq), 1),
-    ).then(() => false)
-    if (opts.watch instanceof Promise) break$ = Promise.race([break$, opts.watch.then(() => true)])
-    if (await break$) break
-
-    lastReq = performance.now()
+  while (opts.watch && (!(opts.watch instanceof AbortSignal) || !opts.watch.aborted)) {
+    const lastReq = performance.now()
     batch = await provider.getTransactions(Address.parse(opts.address!), {
       limit,
       to_lt: until?.toString(),
@@ -67,6 +60,15 @@ async function* fetchTxsForward(
       until = tx.lt
       yield tx
     }
+
+    let delay$ = AbortSignal.timeout(
+      Math.max((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq), 1),
+    )
+    if (opts.watch instanceof AbortSignal) {
+      if (opts.watch.aborted) break
+      delay$ = AbortSignal.any([opts.watch, delay$])
+    }
+    await signalToPromise(delay$).catch(() => false)
   }
 }
 

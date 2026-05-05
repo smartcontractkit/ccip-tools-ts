@@ -212,7 +212,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   connection: Connection
   commitment: Commitment = 'confirmed'
-  readonly destroy$: Promise<void>
 
   /**
    * Creates a new SolanaChain instance.
@@ -223,7 +222,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     super(network, ctx)
 
     this.connection = connection
-    this.destroy$ = new Promise<void>((resolve) => (this.destroy = resolve))
 
     // Memoize expensive operations
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
@@ -407,8 +405,15 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async *getTransactionsForAddress(
     opts: Omit<LogFilter, 'topics'>,
   ): AsyncGenerator<SolanaTransaction> {
-    if (opts.watch instanceof Promise)
-      opts = { ...opts, watch: Promise.race([opts.watch, this.destroy$]) }
+    if (opts.watch && this.abort) {
+      opts = {
+        ...opts,
+        watch:
+          opts.watch instanceof AbortSignal
+            ? AbortSignal.any([opts.watch, this.abort])
+            : this.abort,
+      }
+    }
     yield* getTransactionsForAddress(opts, this)
   }
 
