@@ -229,7 +229,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.nonces = {}
 
     this.provider = provider
-    ctx?.abort?.addEventListener('abort', () => provider.destroy(), { once: true })
+    this.abort.addEventListener('abort', () => this.provider.destroy(), { once: true })
 
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this))
 

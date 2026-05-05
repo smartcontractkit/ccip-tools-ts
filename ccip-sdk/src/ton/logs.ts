@@ -62,7 +62,10 @@ async function* fetchTxsForward(
     }
 
     let delay$ = AbortSignal.timeout(
-      Math.max((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq), 1),
+      Math.max(
+        Math.ceil((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq)),
+        1,
+      ),
     )
     if (opts.watch instanceof AbortSignal) {
       if (opts.watch.aborted) break

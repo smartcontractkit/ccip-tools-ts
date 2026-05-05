@@ -635,9 +635,8 @@ export async function parseTokenAmounts(source: Chain, transferTokens: readonly 
  * @returns Resolved values as they resolve
  **/
 export async function* yieldResolved<T>(promises: Iterable<Promise<T>>): AsyncGenerator<T> {
-  const queue: T[] = []
+  const queue: ({ ok: true; value: T } | { ok: false; err: unknown })[] = []
   let resolve: (() => void) | null = null
-  let reject: ((err: unknown) => void) | null = null
   let remaining = 0
   let done = false
 
@@ -647,36 +646,36 @@ export async function* yieldResolved<T>(promises: Iterable<Promise<T>>): AsyncGe
       p.then(
         (value) => {
           if (done) return
-          queue.push(value)
+          queue.push({ ok: true, value })
           resolve?.()
           resolve = null
         },
         (err) => {
           if (done) return
-          reject?.(err)
-          reject = null
+          queue.push({ ok: false, err })
+          resolve?.()
+          resolve = null
         },
       )
     }
 
     while (remaining > 0) {
       if (queue.length === 0) {
-        await new Promise<void>((res, rej) => {
+        await new Promise<void>((res) => {
           resolve = res
-          reject = rej
         })
         resolve = null
-        reject = null
       }
       while (queue.length > 0) {
+        const result = queue.shift()!
         remaining--
-        yield queue.shift()!
+        if (!result.ok) throw result.err
+        yield result.value
       }
     }
   } finally {
     done = true
     resolve = null
-    reject = null
     queue.length = 0
   }
 }

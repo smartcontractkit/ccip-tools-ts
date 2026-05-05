@@ -80,35 +80,28 @@ export function fetchChainsFromRpcs(
   txHash?: string,
 ) {
   const chains: Record<string, Promise<Chain>> = {}
-  const chainsCbs: Record<
+  const pendingChainsCbs: Record<
     string,
     readonly [resolve: (value: Chain) => void, reject: (reason?: unknown) => void]
   > = {}
-  const finished: Partial<Record<ChainFamily, boolean>> = {}
+  const finished: Partial<Record<ChainFamily, true>> = {}
   const initFamily$: Partial<Record<ChainFamily, Promise<unknown>>> = {}
   let endpoints$: Promise<Set<string>> | undefined
-
-  let txResolve: (value: [Chain, ChainTransaction]) => void, txReject: (reason?: unknown) => void
-  const txResult = new Promise<[Chain, ChainTransaction]>((resolve, reject) => {
-    txResolve = resolve
-    txReject = reject
-  })
+  let txFoundIn: string | undefined
 
   const loadChainFamily = (F: ChainFamily, txHash?: string) =>
     (initFamily$[F] ??= (endpoints$ ??= collectEndpoints.call(ctx, argv)).then((endpoints) => {
       const C = supportedChains[F]
       if (!C) throw new CCIPChainFamilyUnsupportedError(F)
+      ctx.abort.throwIfAborted()
       ctx.logger.debug('Racing', endpoints.size, 'RPC endpoints for', F)
 
       const chains$: Promise<Chain>[] = []
-      const txs$: Promise<unknown>[] = []
-      let txFound = false
+      const txOnlyRacers = new WeakSet<Chain>()
       for (const url of endpoints) {
-        ctx.abort.throwIfAborted()
-        const raceAc = new AbortController()
         const chain$ = C.fromUrl(url, {
           ...ctx,
-          abort: AbortSignal.any([ctx.abort, raceAc.signal]),
+          abort: ctx.abort,
           apiClient:
             argv.api === false ? null : typeof argv.api === 'string' ? argv.api : undefined,
         })
@@ -117,47 +110,53 @@ export function fetchChainsFromRpcs(
         void chain$.then(
           (chain) => {
             endpoints.delete(url) // when resolved, remove from set so it isn't tried for future families
-            // on chain detected for url
-            if (chain.network.name in chains && !(chain.network.name in chainsCbs)) {
-              raceAc.abort() // lost race, abort immediately (destroys provider via signal listener)
-              return
-            }
             // winner: provider cleanup is handled automatically by ctx.abort signal
             if (!(chain.network.name in chains)) {
               // chain won for this network, but was not "asked" by getChain (yet?): save
-              chains[chain.network.name] = Promise.resolve(chain)
-            } else if (chain.network.name in chainsCbs) {
+              chains[chain.network.name] = chain$
+            } else if (chain.network.name in pendingChainsCbs) {
               // chain detected, and there's a "pending request" by getChain: resolve
-              const [resolve] = chainsCbs[chain.network.name]!
+              const [resolve] = pendingChainsCbs[chain.network.name]!
               resolve(chain)
+            } else if (!txHash || txFoundIn) {
+              chain.destroy() // lost race (either network's or tx's)
+            } else {
+              txOnlyRacers.add(chain) // lost race, but may still find tx before winner and take its place
             }
-            return chain
           },
           () => {},
         )
-
-        if (txHash) {
-          txs$.push(
-            chain$.then(async (chain) => {
-              raceAc.signal.throwIfAborted() // if chain lost the race, skip tx fetch
+      }
+      let txs$
+      if (txHash) {
+        txs$ = Promise.any(
+          chains$.map(async (chain$) => {
+            const chain = await chain$
+            chain.abort.throwIfAborted()
+            try {
+              if (txFoundIn) throw new Error('tx already raced')
               const tx = await chain.getTransaction(txHash)
-              if (!txFound) {
-                txFound = true
-                // in case tx is first found, prefer it over any previously found chain for this network
-                chains[chain.network.name] = chain$
-                delete chainsCbs[chain.network.name]
+              if (txFoundIn) {
+                if (txFoundIn === chain.network.name) chain.destroy()
+                throw new Error('tx already raced')
               }
-              txResolve([chain, tx])
-            }),
-          )
-        }
+              txFoundIn = chain.network.name
+              // in case tx is first found, prefer it over any previously found chain for this network
+              chains[chain.network.name] = chain$
+              return [chain, tx] as const
+            } catch (err) {
+              if (txOnlyRacers.has(chain)) chain.destroy()
+              throw err
+            }
+          }),
+        )
       }
 
       Promise.race([Promise.allSettled(chains$), signalToPromise(ctx.abort)])
         .finally(() => {
           if (finished[F]) return
           finished[F] = true
-          Object.entries(chainsCbs)
+          Object.entries(pendingChainsCbs)
             .filter(([name]) => networkInfo(name).family === F)
             .forEach(([name, [_, reject]]) => reject(new CCIPRpcNotFoundError(name)))
         })
@@ -166,32 +165,37 @@ export function fetchChainsFromRpcs(
           // context aborts before all race URLs settle; swallow it here so the
           // void-discarded chain doesn't surface as an unhandled rejection.
         })
-      return Promise.any(txHash ? txs$ : chains$)
+      return txs$
     }))
 
   const chainGetter = async (idOrSelectorOrName: number | string | bigint): Promise<Chain> => {
     const network = networkInfo(idOrSelectorOrName)
     if (network.name in chains) return chains[network.name]!
     if (finished[network.family]) throw new CCIPRpcNotFoundError(network.name)
-    const c = (chains[network.name] = new Promise((resolve, reject) => {
-      chainsCbs[network.name] = [resolve, reject]
-    }))
-    void c
+
+    const { promise, resolve, reject } = Promise.withResolvers<Chain>()
+    chains[network.name] = promise
+    pendingChainsCbs[network.name] = [resolve, reject]
+
+    void promise
       .finally(() => {
-        delete chainsCbs[network.name] // when chain is settled, delete the callbacks
+        delete pendingChainsCbs[network.name] // when chain is settled, delete the callbacks
       })
       .catch(() => {}) // rejection already handled by chainGetter caller
     void loadChainFamily(network.family)
-    return c
+    return promise
   }
 
   if (!txHash) return chainGetter
 
-  void Promise.allSettled(
+  // truty txHash means txs$ return branch of loadChainFamily
+  const txResult = Promise.any(
     Object.values(supportedChains)
       .filter((C) => C.isTxHash(txHash))
-      .map((C) => loadChainFamily(C.family, txHash)),
-  ).finally(() => txReject(new CCIPTransactionNotFoundError(txHash))) // noop if txResolved
+      .map((C) => loadChainFamily(C.family, txHash) as Promise<[Chain, ChainTransaction]>),
+  ).catch((err) =>
+    Promise.reject(new CCIPTransactionNotFoundError(txHash, { context: { aggregateErr: err } })),
+  )
   return [chainGetter, txResult]
 }
 

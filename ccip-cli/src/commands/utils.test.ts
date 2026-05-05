@@ -7,7 +7,7 @@ import {
   CCIPUsdcAttestationError,
 } from '@chainlink/ccip-sdk/src/index.ts'
 
-import { formatCCIPError } from './utils.ts'
+import { formatCCIPError, yieldResolved } from './utils.ts'
 
 describe('formatCCIPError', () => {
   it('should return null for non-CCIPError instances', () => {
@@ -87,5 +87,23 @@ describe('formatCCIPError', () => {
 
     assert.ok(formatted)
     assert.doesNotMatch(formatted, /Stack trace:/)
+  })
+})
+
+describe('yieldResolved', () => {
+  it('throws if a promise rejects while the generator is paused after a yield', async () => {
+    const err = new Error('late failure')
+    let rejectLater!: (err: Error) => void
+    const lateReject = new Promise<number>((_, reject) => {
+      rejectLater = reject
+    })
+
+    const gen = yieldResolved([Promise.resolve(1), lateReject])
+    assert.deepEqual(await gen.next(), { value: 1, done: false })
+
+    rejectLater(err)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    await assert.rejects(gen.next(), err)
   })
 })

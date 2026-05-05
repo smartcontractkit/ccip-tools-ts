@@ -92,16 +92,20 @@ export async function* getEvmLogs(
 
     const contAc = new AbortController()
     let contSignal = contAc.signal
-    void provider.once(
+    const contEvent =
       !filter.endBlock || typeof filter.endBlock === 'number' || filter.endBlock == 'latest'
         ? 'block'
-        : filter.endBlock, // finalized | safe
-      contAc.abort.bind(contAc),
-    )
+        : filter.endBlock // finalized | safe
+    const contListener = () => contAc.abort()
+    void provider.once(contEvent, contListener)
     if (filter.watch instanceof AbortSignal) {
       if (filter.watch.aborted) break
       contSignal = AbortSignal.any([filter.watch, contSignal])
     }
-    await signalToPromise(contSignal).catch(() => false)
+    try {
+      await signalToPromise(contSignal).catch(() => false)
+    } finally {
+      void provider.off(contEvent, contListener)
+    }
   }
 }

@@ -570,7 +570,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /** Retry configuration for API fallback operations (null if API client is disabled) */
   readonly apiRetryConfig: Required<ApiRetryConfig> | null
   /** Abort signal from ChainContext; fires when the chain should tear down. */
-  readonly abort?: AbortSignal
+  readonly abort: AbortSignal
 
   /**
    * Base constructor for Chain class.
@@ -589,7 +589,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       )
     this.network = network as NetworkInfo<F>
     this.logger = logger
-    this.abort = abort
+
+    const ac = new AbortController()
+    this.abort = ac.signal
+    this.destroy = ac.abort.bind(ac)
+    abort?.addEventListener('abort', (r?: unknown) => this.destroy(r), { once: true })
 
     // API client initialization: default enabled, null = explicit opt-out
     if (apiClient === null) {
@@ -603,6 +607,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       this.apiRetryConfig = { ...DEFAULT_API_RETRY_CONFIG, ...apiRetryConfig }
     }
   }
+
+  /** Cleanup method to release resources (e.g., close connections). */
+  destroy: (reason?: unknown) => void;
 
   /** Custom inspector for Node.js util.inspect. */
   [util.inspect.custom]() {
