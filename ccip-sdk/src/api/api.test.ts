@@ -317,6 +317,7 @@ describe('CCIPAPIClient', () => {
   })
 
   describe('getMessageById', () => {
+    // v1.x lane fixture (no requestedFinalityConfig in extraArgs — GenericExtraArgsV2)
     const mockMessageResponse = {
       messageId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
       sender: '0x742d35cc6634c0532925a3b8d5c8c22c5b2d8a3e',
@@ -362,6 +363,56 @@ describe('CCIPAPIClient', () => {
       receiptTimestamp: '2023-12-01T10:45:00Z',
       deliveryTime: 900000,
       data: '0xabcdef',
+    }
+
+    // v2.0 lane fixture (GenericExtraArgsV3 with requestedFinalityConfig)
+    // Tests that requestedFinalityConfig '0x00010000' decodes to 'safe' finality
+    const mockV2MessageResponse = {
+      messageId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      sender: '0x1111111111111111111111111111111111111111',
+      receiver: '0x2222222222222222222222222222222222222222',
+      status: 'SUCCESS',
+      sourceNetworkInfo: {
+        name: 'ethereum-testnet-sepolia-arbitrum-1',
+        chainSelector: '3478487238524512106',
+        chainId: '421614',
+        chainFamily: 'EVM',
+      },
+      destNetworkInfo: {
+        name: 'avalanche-testnet-fuji',
+        chainSelector: '14767482510784806043',
+        chainId: '43113',
+        chainFamily: 'EVM',
+      },
+      sendTransactionHash: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      sendTimestamp: '2026-04-22T20:54:50.000Z',
+      tokenAmounts: [],
+      extraArgs: {
+        gasLimit: '0',
+        requestedFinalityConfig: '0x00010000',
+        ccvs: ['0x3333333333333333333333333333333333333333'],
+        ccvArgs: ['0x'],
+        executor: '0x4444444444444444444444444444444444444444',
+        executorArgs: '0x',
+        tokenReceiver: '0x2222222222222222222222222222222222222222',
+        tokenArgs: '0x0000000000000000000000000000000000000000000000000000000000000012',
+      },
+      readyForManualExecution: false,
+      finality: 0,
+      fees: {
+        fixedFeesDetails: {
+          tokenAddress: '0x5555555555555555555555555555555555555555',
+          totalAmount: '1055000000000000',
+        },
+      },
+      version: '2.0.0',
+      onramp: '0x6666666666666666666666666666666666666666',
+      origin: '0x1111111111111111111111111111111111111111',
+      sequenceNumber: '40',
+      receiptTransactionHash: '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+      receiptTimestamp: '2026-04-22T21:08:59.000Z',
+      deliveryTime: 849000,
+      data: '0x',
     }
 
     it('should fetch message by ID with correct URL', async () => {
@@ -426,6 +477,64 @@ describe('CCIPAPIClient', () => {
       assert.equal(result.metadata.sourceNetworkInfo.name, 'ethereum-mainnet')
       assert.equal(result.metadata.sourceNetworkInfo.chainSelector, 5009297550715157269n)
       assert.equal(result.metadata.destNetworkInfo.name, 'ethereum-mainnet-arbitrum-1')
+    })
+
+    it('should decode requestedFinalityConfig 0x00010000 (SAFE) into message.finality = "safe"', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(mockV2MessageResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageById(mockV2MessageResponse.messageId)
+
+      assert.equal((result.message as any).finality, 'safe')
+      assert.ok(!('requestedFinalityConfig' in result.message))
+    })
+
+    it('should decode requestedFinalityConfig 0x00000000 (FINALIZED) into message.finality = "finalized"', async () => {
+      const response = {
+        ...mockV2MessageResponse,
+        extraArgs: { ...mockV2MessageResponse.extraArgs, requestedFinalityConfig: '0x00000000' },
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({ ok: true, text: () => Promise.resolve(JSON.stringify(response)) }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageById(response.messageId)
+
+      assert.equal((result.message as any).finality, 'finalized')
+      assert.ok(!('requestedFinalityConfig' in result.message))
+    })
+
+    it('should decode requestedFinalityConfig 0x00000005 (BLOCK_DEPTH=5) into message.finality = 5', async () => {
+      const response = {
+        ...mockV2MessageResponse,
+        extraArgs: { ...mockV2MessageResponse.extraArgs, requestedFinalityConfig: '0x00000005' },
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({ ok: true, text: () => Promise.resolve(JSON.stringify(response)) }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageById(response.messageId)
+
+      assert.equal((result.message as any).finality, 5)
+      assert.ok(!('requestedFinalityConfig' in result.message))
+    })
+
+    it('should leave message.finality as bigint for v1.x lanes (no requestedFinalityConfig)', async () => {
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(mockMessageResponse)),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getMessageById(mockMessageResponse.messageId)
+
+      // v1.x: finality comes from top-level API field as bigint, not decoded
+      assert.equal(typeof (result.message as any).finality, 'bigint')
     })
 
     it('should throw CCIPMessageIdNotFoundError on 404', async () => {
@@ -1098,6 +1207,28 @@ describe('CCIPAPIClient', () => {
 
       assert.equal(page.data[0]!.status, 'UNKNOWN')
       assert.ok(warnFn.mock.calls.length > 0)
+    })
+
+    it('should pass through UNCONFIRMED status as a recognized value', async () => {
+      const responseWithUnconfirmed = {
+        ...mockSearchResponse,
+        data: [{ ...mockSearchResponse.data[0], status: 'UNCONFIRMED' }],
+      }
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve(JSON.stringify(responseWithUnconfirmed)),
+        }),
+      )
+      const warnFn = mock.fn()
+      const client = new CCIPAPIClient(undefined, {
+        fetch: customFetch as any,
+        logger: { log: () => {}, debug: () => {}, warn: warnFn } as any,
+      })
+      const page = await client.searchMessages({ sender: '0xSender' })
+
+      assert.equal(page.data[0]!.status, 'UNCONFIRMED')
+      assert.equal(warnFn.mock.calls.length, 0)
     })
 
     it('should log raw response via debug', async () => {

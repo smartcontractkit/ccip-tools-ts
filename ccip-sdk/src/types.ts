@@ -320,6 +320,8 @@ export const MessageStatus = {
   Verifying: 'VERIFYING',
   /** Message has been verified by the CCIP network */
   Verified: 'VERIFIED',
+  /** Execute called on destination but receiver has not confirmed yet (lane v1.x ANY → TON). */
+  Unconfirmed: 'UNCONFIRMED',
   /**
    * API returned an unrecognized status value.
    * This typically means the CCIP API has new status values that this SDK version

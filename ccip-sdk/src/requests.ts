@@ -14,7 +14,7 @@ import {
   CCIPTokenNotInRegistryError,
 } from './errors/index.ts'
 import type { EVMChain } from './evm/index.ts'
-import { decodeExtraArgs } from './extra-args.ts'
+import { decodeExtraArgs, decodeFinalityRequested } from './extra-args.ts'
 import { supportedChains } from './supported-chains.ts'
 import {
   type AnyMessage,
@@ -129,7 +129,11 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
       Object.assign(data_, rest)
     }
   } else if (data_.extraArgs) {
-    Object.assign(data_, data_.extraArgs)
+    const { requestedFinalityConfig, ...rest } = data_.extraArgs as Record<string, unknown>
+    Object.assign(data_, rest)
+    if (requestedFinalityConfig != null) {
+      data_.finality = decodeFinalityRequested(parseInt(requestedFinalityConfig as string))
+    }
     delete data_.extraArgs
   }
 
