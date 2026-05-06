@@ -296,7 +296,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   static async _getProvider(url: string, abort?: AbortSignal): Promise<JsonRpcApiProvider> {
     let providerReady: Promise<JsonRpcApiProvider>
     if (url.startsWith('ws')) {
-      const provider = new WebSocketProvider(url)
+      const provider = new WebSocketProvider(url, undefined, { staticNetwork: true })
       abort?.addEventListener('abort', () => void provider.destroy(), { once: true })
       providerReady = new Promise((resolve, reject) => {
         provider.websocket.onerror = reject
@@ -306,7 +306,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           .catch(reject)
       })
     } else if (url.startsWith('http')) {
-      const provider = new JsonRpcProvider(url)
+      const provider = new JsonRpcProvider(url, undefined, { staticNetwork: true })
       abort?.addEventListener('abort', () => provider.destroy(), { once: true })
       providerReady = Promise.resolve(provider)
     } else {
