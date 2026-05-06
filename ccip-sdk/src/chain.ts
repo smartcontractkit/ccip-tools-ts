@@ -1183,11 +1183,23 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     opts: ExecuteOpts,
   ): Promise<Extract<ExecuteOpts, { input: unknown }>> {
     let opts_: Extract<typeof opts, { input: unknown }>
-    if ('input' in opts) {
+    if (
+      'input' in opts &&
+      ('encodedMessage' in opts.input || // v2
+        'feeValueJuels' in opts.input.message || // v1.6
+        'strict' in opts.input.message) // <=v1.5 with all required fields (API /messages lack some)
+    ) {
       opts_ = opts
-    } else if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
-    else {
-      const { offRamp, ...input } = await this.apiClient.getExecutionInput(opts.messageId)
+    } else if (!this.apiClient) {
+      throw new CCIPApiClientNotAvailableError()
+    } else {
+      const messageId =
+        'messageId' in opts
+          ? opts.messageId
+          : 'message' in opts.input
+            ? opts.input.message.messageId
+            : keccak256(opts.input.encodedMessage)
+      const { offRamp, ...input } = await this.apiClient.getExecutionInput(messageId)
       opts_ = { ...opts, offRamp, input }
     }
 

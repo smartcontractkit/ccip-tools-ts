@@ -24,6 +24,8 @@ import { hideBin } from 'yargs/helpers'
 import { Format } from './commands/index.ts'
 
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
+Error.stackTraceLimit = 50 // show more stack frames for better debugging
+
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
 const VERSION = '1.6.0-faa7467f'
