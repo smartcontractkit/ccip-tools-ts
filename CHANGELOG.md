@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- SDK: `Solana` support for `estimateReceiveExecution`
+## [1.6.0] - 2026-05-06
+
+- SDK: `Solana` support for `estimateReceiveExecution` method, to simulate receiver execution and `computeUnits` estimation
 - CLI: Solana-dest support for `<send|manual-exec> --estimate-gas=<%margin> [--only-estimate]`
+- SDK: Chains `ctx` construction parameter may receive `abort: AbortSignal` for disconnect and cancellation of inflight requests; `Chain.abort` property exposes a signal connected to it, and is aborted when `destroy()` is called
 
 ## [1.5.0] - 2026-04-22
 
