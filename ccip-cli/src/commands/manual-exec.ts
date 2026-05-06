@@ -214,7 +214,6 @@ async function manualExec(
         routerOrRamp: offRamp,
         message: request.message,
       })
-      logger.info('Estimated gasLimit override:', estimated)
       const withBuffer = estimated + Math.ceil((estimated * argv.estimateGasLimit) / 100)
       const origLimit = Number(
         'ccipReceiveGasLimit' in request.message
@@ -225,15 +224,20 @@ async function manualExec(
       )
       if (origLimit >= withBuffer) {
         logger.warn(
-          'Estimated +',
-          argv.estimateGasLimit,
-          '% =',
-          withBuffer,
+          'Estimated =',
+          estimated,
+          ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', withBuffer] : []),
           '< original gasLimit =',
           origLimit,
           '. Leaving unchanged.',
         )
       } else {
+        if (argv.format !== Format.json)
+          output.write(
+            'Estimated gasLimit override:',
+            estimated,
+            ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', withBuffer] : []),
+          )
         argv.gasLimit = withBuffer
         argv.tokensGasLimit ??= 0
       }
@@ -250,12 +254,6 @@ async function manualExec(
               bigIntReplacer,
               2,
             ),
-          )
-        } else {
-          output.write(
-            'Estimated gasLimit override:',
-            estimated,
-            ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', withBuffer] : []),
           )
         }
         return
