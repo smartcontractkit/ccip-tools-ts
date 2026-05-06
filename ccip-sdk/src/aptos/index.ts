@@ -236,7 +236,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
 
   /** {@inheritDoc Chain.getLogs} */
   async *getLogs(opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<ChainLog> {
-    if (opts.watch && this.abort) {
+    if (opts.watch) {
       opts = {
         ...opts,
         watch:

@@ -385,7 +385,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @throws {@link CCIPTopicsInvalidError} if topics format is invalid
    */
   async *getLogs(opts: LogFilter): AsyncIterableIterator<ChainLog> {
-    if (opts.watch && this.abort) {
+    if (opts.watch) {
       opts = {
         ...opts,
         watch:

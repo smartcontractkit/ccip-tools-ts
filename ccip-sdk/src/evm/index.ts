@@ -377,7 +377,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   async *getLogs(
     filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag>,
   ): AsyncIterableIterator<Log> {
-    if (filter.watch && this.abort) {
+    if (filter.watch) {
       filter = {
         ...filter,
         watch:

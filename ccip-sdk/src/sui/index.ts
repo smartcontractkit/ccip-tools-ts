@@ -219,7 +219,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @throws {@link CCIPTopicsInvalidError} if topics format is invalid
    */
   async *getLogs(opts: LogFilter & { versionAsHash?: boolean }) {
-    if (opts.watch && this.abort) {
+    if (opts.watch) {
       opts = {
         ...opts,
         watch:

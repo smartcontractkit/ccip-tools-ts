@@ -405,7 +405,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async *getTransactionsForAddress(
     opts: Omit<LogFilter, 'topics'>,
   ): AsyncGenerator<SolanaTransaction> {
-    if (opts.watch && this.abort) {
+    if (opts.watch) {
       opts = {
         ...opts,
         watch:
