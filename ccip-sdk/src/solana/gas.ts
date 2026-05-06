@@ -171,37 +171,19 @@ export async function estimateExecComputeUnits({
     return []
   })
 
-  if (setupIxs.length) {
-    try {
-      const [setupResult, fullResult] = await Promise.all([
-        simulateTransaction(
-          { connection, logger },
-          {
-            payerKey: SIMULATION_PAYER,
-            instructions: setupIxs,
-          },
-        ),
-        simulateTransaction(
-          { connection, logger },
-          {
-            payerKey: SIMULATION_PAYER,
-            instructions: [...setupIxs, receiveIx],
-          },
-        ),
-      ])
-      return Math.max(0, (fullResult.unitsConsumed ?? 0) - (setupResult.unitsConsumed ?? 0))
-    } catch (err) {
-      logger.debug('Failed to simulate Solana token setup; simulating receiver only:', err)
-    }
-  }
-
   const simResult = await simulateTransaction(
     { connection, logger },
-    {
-      payerKey: SIMULATION_PAYER,
-      instructions: [receiveIx],
-    },
+    { payerKey: SIMULATION_PAYER, instructions: [...setupIxs, receiveIx] },
   )
+
+  let re
+  for (const log of (simResult.logs ?? []).toReversed()) {
+    re ??= new RegExp(`^Program ${message.receiver} consumed (\\d+)\\b`)
+    const match = log.match(re)
+    if (match && Number(match[1]) > 0) {
+      return Number(match[1])
+    }
+  }
 
   return simResult.unitsConsumed ?? 0
 }

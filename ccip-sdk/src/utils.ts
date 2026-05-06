@@ -811,7 +811,7 @@ export function createRateLimitedFetch(
           logger.debug(
             'fetched',
             response.status,
-            response.headers,
+            // response.headers,
             body,
             // ((await response.clone().json()) as { result: unknown })?.result,
           )

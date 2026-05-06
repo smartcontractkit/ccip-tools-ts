@@ -345,13 +345,13 @@ export async function simulateTransaction(
 
   const result = await connection.simulateTransaction(tx, config)
 
+  logger.debug('Simulation results:', {
+    logs: result.value.logs,
+    unitsConsumed: result.value.unitsConsumed,
+    returnData: result.value.returnData,
+    err: result.value.err,
+  })
   if (result.value.err) {
-    logger.debug('Simulation results:', {
-      logs: result.value.logs,
-      unitsConsumed: result.value.unitsConsumed,
-      returnData: result.value.returnData,
-      err: result.value.err,
-    })
     // same error sendTransaction sends, to be catched up
     throw new SendTransactionError({
       action: 'simulate',
