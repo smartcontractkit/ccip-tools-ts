@@ -43,7 +43,7 @@
   },
   "overrides": {
     "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
-    "axios": "1.15.0",
+    "axios": "1.15.2",
     "tar": "7.5.13",
     "elliptic": "6.6.1",
     "js-yaml": "4.1.1",

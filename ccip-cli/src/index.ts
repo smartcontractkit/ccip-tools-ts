@@ -26,7 +26,7 @@ import { Format } from './commands/index.ts'
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '1.6.0-8f8d5b94'
+const VERSION = '1.6.0-faa7467f'
 // generate:end
 
 const require = createRequire(import.meta.url)
