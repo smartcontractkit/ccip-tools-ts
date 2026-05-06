@@ -489,7 +489,10 @@ export async function* getMessagesInRange(
 ): AsyncIterableIterator<CCIPRequest> {
   for await (const log of source.getLogs({
     ...opts,
-    topics: opts.topics ?? [...(source.network.family === ChainFamily.EVM ? ['CCIPSendRequested'] : []), 'CCIPMessageSent'],
+    topics: opts.topics ?? [
+      ...(source.network.family === ChainFamily.EVM ? ['CCIPSendRequested'] : []),
+      'CCIPMessageSent',
+    ],
   })) {
     const message = (source.constructor as ChainStatic).decodeMessage(log)
     if (!message) continue
