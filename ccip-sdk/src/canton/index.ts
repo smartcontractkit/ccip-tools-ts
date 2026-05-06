@@ -49,7 +49,7 @@ import {
 } from './client/index.ts'
 import { parseCantonExecutionReceipt, parseCantonSendResult, resolveTimestamp } from './events.ts'
 import { AcsDisclosureProvider } from './explicit-disclosures/acs.ts'
-import { EdsDisclosureProvider } from './explicit-disclosures/eds.ts'
+import { type EdsMessage, EdsDisclosureProvider } from './explicit-disclosures/eds.ts'
 import type { DisclosedContract } from './explicit-disclosures/types.ts'
 import { CCV_INDEXER_URL } from '../evm/const.ts'
 import { type TokenMetadataClient, createTokenMetadataClient } from './token-metadata/client.ts'
@@ -59,6 +59,7 @@ import {
 } from './transfer-instruction/client.ts'
 import {
   type CantonExtraArgsV1,
+  type CantonInstrumentId,
   type UnsignedCantonTx,
   isCantonWallet,
   parseInstrumentId,
@@ -236,7 +237,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const acsDisclosureProvider = new AcsDisclosureProvider(client, {
       party: ctx.cantonConfig.party,
     })
-    const edsDisclosureProvider = new EdsDisclosureProvider({ edsBaseUrl: ctx.cantonConfig.edsUrl })
+    const edsDisclosureProvider = new EdsDisclosureProvider({
+      edsBaseUrl: ctx.cantonConfig.edsUrl,
+      externalEdsUrlsByOwner: ctx.cantonConfig.externalEdsUrlsByOwner,
+    })
     const transferInstructionClient = createTransferInstructionClient({
       baseUrl: ctx.cantonConfig.transferInstructionUrl,
       jwt: ctx.cantonConfig.jwt,
@@ -496,7 +500,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     }
 
     // --- parse fields ---
-    const instrumentId = parseInstrumentId(message.feeToken)
+    const feeInstrument = parseInstrumentId(message.feeToken)
     const receiverHex = stripHexPrefix(
       typeof message.receiver === 'string' ? message.receiver : String(message.receiver),
     )
@@ -505,54 +509,25 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       : ''
     const gasLimit = cantonArgs.gasLimit ?? 200_000n
     const feeTokenHoldingCids = cantonArgs.feeTokenHoldingCids
-    const ccvRawAddresses = cantonArgs.ccvRawAddresses ?? []
-    // The keccak256 hex InstanceAddress is the EDS lookup key; the raw "instanceId@owner"
-    // string is what the Daml choice expects in ccvAddress.unpack
-    const ccvAddressMap = new Map<string, string>( // keccak256 hex → raw string
-      ccvRawAddresses.map((raw) => [keccak256Utf8(raw), raw]),
-    )
-    const ccvAddresses = [...ccvAddressMap.keys()]
+    const senderRequiredCCVs = cantonArgs.ccvRawAddresses ?? []
 
     this.logger.debug('CantonChain.generateUnsignedSendMessage: fetching ACS disclosures')
 
-    // Step 1 — Fetch same-party disclosures (PerPartyRouter + CCIPSender + Executor)
-    // Pass destChainSelector so the Executor is chosen to support that specific chain.
-    const acsDisclosures = await this.acsDisclosureProvider.fetchSendDisclosures(destChainSelector)
-
-    // Step 2 — Filter out CCVs not known to this EDS instance.
-    // Dynamically-discovered CCVs may include contracts from different synchronizers
-    // or configurations that are not registered with this EDS
-    const validCcvAddresses = await this.edsDisclosureProvider.filterValidCCVsForSend(ccvAddresses)
-    if (!validCcvAddresses.length && ccvAddresses.length > 0) {
+    const tokenAmounts = message.tokenAmounts ?? []
+    if (tokenAmounts.length > 1) {
       throw new CCIPError(
         CCIPErrorCode.METHOD_UNSUPPORTED,
-        `CantonChain.generateUnsignedSendMessage: none of the discovered CCVs are registered with this EDS instance (tried: ${ccvAddresses.join(', ')})`,
-      )
-    }
-    if (validCcvAddresses.length < ccvAddresses.length) {
-      this.logger.debug(
-        `CantonChain.generateUnsignedSendMessage: filtered out ${ccvAddresses.length - validCcvAddresses.length} CCV(s) unknown to EDS; using ${validCcvAddresses.join(', ')}`,
+        `CantonChain.generateUnsignedSendMessage: only one token transfer is supported, got ${tokenAmounts.length}`,
       )
     }
 
-    // Step 3 — Fetch cross-party disclosures from EDS
-    this.logger.debug(
-      `CantonChain.generateUnsignedSendMessage: fetching EDS disclosures for ${validCcvAddresses.join(', ')} CCVs`,
-    )
-    const edsResult = await this.edsDisclosureProvider.fetchSendDisclosures(validCcvAddresses)
-
-    // Step 4 — Extract CCV disclosed contracts
-    const ccvDisclosedContracts: DisclosedContract[] = validCcvAddresses
-      .map((addr) => edsResult.ccvs[addr]?.disclosedContract)
-      .filter((dc): dc is DisclosedContract => dc !== undefined)
-
-    // Step 5 — Fetch transfer factory from Transfer Instruction API
-    //   Mirrors the Go test flow: get registry admin, then call getTransferFactory
-    //   with choiceArguments describing the intended transfer.
     this.logger.debug(
       'CantonChain.generateUnsignedSendMessage: fetching registry admin from Token Metadata API',
     )
-    const registryInfo = await this.tokenMetadataClient.getRegistryInfo()
+    const [acsDisclosures, registryInfo] = await Promise.all([
+      this.acsDisclosureProvider.fetchSendDisclosures(),
+      this.tokenMetadataClient.getRegistryInfo(),
+    ])
     const registryAdmin = registryInfo.adminId
 
     this.logger.debug(
@@ -562,84 +537,145 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.logger.debug(
       'CantonChain.generateUnsignedSendMessage: fetching transfer factory from Transfer Instruction API',
     )
-    const transferFactoryResponse = await this.transferInstructionClient.getTransferFactory({
-      choiceArguments: {
-        expectedAdmin: registryAdmin,
-        transfer: {
-          sender,
-          receiver: this.ccipParty,
-          amount: '100.00',
-          instrumentId: { admin: instrumentId.admin, id: instrumentId.id },
-          lock: null,
-          requestedAt: new Date(Date.now() - 3_600_000).toISOString(),
-          executeBefore: new Date(Date.now() + 86_400_000).toISOString(),
-          inputHoldingCids: [],
-          meta: { values: {} },
-        },
-        extraArgs: {
-          context: { values: {} },
-          meta: { values: {} },
-        },
-      },
+    const feeTransferFactory = await this.getTransferFactoryForInstrument({
+      registryAdmin,
+      sender,
+      receiver: this.ccipParty,
+      instrumentId: feeInstrument,
     })
 
-    // Step 6 — Extract transfer factory context values
-    const transferFactoryContextValues: Record<string, unknown> = {}
-    const ctxData = transferFactoryResponse.choiceContext.choiceContextData
-    if (typeof ctxData === 'object' && 'values' in ctxData) {
-      const values = ctxData.values
-      if (values && typeof values === 'object') {
-        for (const [key, val] of Object.entries(values as Record<string, unknown>)) {
-          // Preserve the full variant structure (e.g. { tag: "AV_ContractId", value: "00..." })
-          // so the Canton JSON API receives the correct tagged union, not a bare string.
-          transferFactoryContextValues[key] = val
-        }
-      }
-    }
+    let messageTokenTransfer: Record<string, unknown> | null = null
+    let tokenTransferInput: Record<string, unknown> | null = null
+    let tokenTransferDisclosures: DisclosedContract[] = []
+    let tokenPoolRequiredCCVs: string[] = []
 
-    // Step 7 — Assemble the Send choice argument.
-    //   Field names must exactly match the Daml CCIPSender.Send choice definition.
-    //   The EDS `choiceContextData` is passed verbatim as the `context` field.
-    const edsContextData =
-      edsResult.choiceContext.choiceContextData != null &&
-      typeof edsResult.choiceContext.choiceContextData === 'object'
-        ? (edsResult.choiceContext.choiceContextData as Record<string, unknown>)
-        : {}
-
-    // ccvSendInputs field names: ccvAddress (RawInstanceAddress {unpack}), ccvCid, ccvExtraContext
-    const ccvSendInputsForDaml = validCcvAddresses.map((hexAddr) => {
-      const rawAddr = ccvAddressMap.get(hexAddr)!
-      const ccvDisclosure = edsResult.ccvs[hexAddr]
-      if (!ccvDisclosure?.disclosedContract) {
+    if (tokenAmounts.length === 1) {
+      const tokenAmount = tokenAmounts[0]!
+      if (tokenAmount.amount <= 0n) {
         throw new CCIPError(
-          CCIPErrorCode.CANTON_API_ERROR,
-          `EDS did not return a disclosure for CCV at ${hexAddr}`,
+          CCIPErrorCode.METHOD_UNSUPPORTED,
+          'CantonChain.generateUnsignedSendMessage: token transfer amount must be greater than zero',
         )
       }
-      return {
-        ccvAddress: { unpack: rawAddr },
-        ccvCid: ccvDisclosure.disclosedContract.contractId,
-        ccvExtraContext: { values: {} },
+
+      const tokenInstrument = parseInstrumentId(tokenAmount.token)
+      const tokenAmountDecimal = formatCantonDecimal(tokenAmount.amount)
+      messageTokenTransfer = {
+        token: { admin: tokenInstrument.admin, id: tokenInstrument.id },
+        amount: tokenAmountDecimal,
       }
+
+      const tokenPoolAddress = await this.edsDisclosureProvider.lookupTokenPool(
+        hashCantonInstrumentId(tokenInstrument),
+      )
+      if (!tokenPoolAddress) {
+        throw new CCIPError(
+          CCIPErrorCode.CANTON_API_ERROR,
+          `CantonChain.generateUnsignedSendMessage: no token pool registered for ${formatInstrumentId(tokenInstrument)}`,
+        )
+      }
+      if (
+        cantonArgs.tokenPoolAddress &&
+        !sameRawOrHashedAddress(cantonArgs.tokenPoolAddress, tokenPoolAddress)
+      ) {
+        throw new CCIPError(
+          CCIPErrorCode.METHOD_UNSUPPORTED,
+          `CantonChain.generateUnsignedSendMessage: tokenPoolAddress ${cantonArgs.tokenPoolAddress} does not match registry token pool ${tokenPoolAddress}`,
+        )
+      }
+
+      const tokenPoolEdsMessage = buildEdsMessage({
+        destChainSelector,
+        receiverHex,
+        payloadHex,
+        feeInstrument,
+        tokenTransfer: messageTokenTransfer,
+      })
+
+      const [tokenHoldings, tokenPoolSend] = await Promise.all([
+        this.resolveTokenTransferHoldings({
+          party: sender,
+          instrumentId: tokenInstrument,
+          explicitHoldingCids: cantonArgs.tokenTransferHoldingCids,
+          feeTokenHoldingCids,
+          requiredAmount: tokenAmount.amount,
+        }),
+        this.edsDisclosureProvider.fetchTokenPoolSendDisclosure(
+          tokenPoolAddress,
+          tokenPoolEdsMessage,
+        ),
+      ])
+
+      tokenPoolRequiredCCVs = tokenPoolSend.requiredCCVs
+      tokenTransferInput = {
+        senderInputCids: tokenHoldings.map((holding) => holding.contractId),
+        tokenPoolCid: tokenPoolSend.contractId,
+        poolExtraContext: tokenPoolSend.contextData,
+      }
+      tokenTransferDisclosures = [
+        ...tokenHoldings.map((holding) => holding.disclosedContract),
+        ...tokenPoolSend.disclosedContracts,
+      ]
+    }
+
+    const edsMessage = buildEdsMessage({
+      destChainSelector,
+      receiverHex,
+      payloadHex,
+      feeInstrument,
+      tokenTransfer: messageTokenTransfer,
     })
 
-    // ccvs for message.extraArgs.V3: ccvAddress (RawInstanceAddress {unpack}), ccvArgs
-    const ccvExtraArgs = validCcvAddresses.map((hexAddr) => ({
-      ccvAddress: { unpack: ccvAddressMap.get(hexAddr)! },
+    this.logger.debug('CantonChain.generateUnsignedSendMessage: fetching global EDS send data')
+    const edsResult = await this.edsDisclosureProvider.fetchSendDisclosures(
+      edsMessage,
+      senderRequiredCCVs,
+      tokenPoolRequiredCCVs,
+    )
+
+    const ccvSendResults = await Promise.all(
+      edsResult.ccvs.map((ccvAddress) =>
+        this.edsDisclosureProvider.fetchCcvSendDisclosure(ccvAddress, edsMessage),
+      ),
+    )
+
+    let executorInput: Record<string, unknown> | null = null
+    let executorDisclosures: DisclosedContract[] = []
+    if (edsResult.executor) {
+      const executorResult = await this.edsDisclosureProvider.fetchExecutorSendDisclosure(
+        edsResult.executor,
+        edsMessage,
+        ccvSendResults.map((ccv) => ccv.instanceAddress),
+      )
+      executorInput = {
+        executorCid: executorResult.contractId,
+        executorExtraContext: executorResult.contextData,
+      }
+      executorDisclosures = executorResult.disclosedContracts
+    }
+
+    const ccvSendInputsForDaml = ccvSendResults.map((ccv) => ({
+      ccvAddress: { unpack: ccv.rawInstanceAddress },
+      ccvCid: ccv.contractId,
+      ccvExtraContext: ccv.contextData,
+    }))
+
+    const ccvExtraArgs = ccvSendResults.map((ccv) => ({
+      ccvAddress: { unpack: ccv.rawInstanceAddress },
       ccvArgs: '',
     }))
 
     const choiceArgument: Record<string, unknown> = {
       // top-level Send fields (from CCIPSender.Send Daml struct)
       destinationChainSelector: destChainSelector.toString(),
-      context: edsContextData,
+      context: edsResult.contextData,
       routerCid: acsDisclosures.perPartyRouter.contractId,
       // Canton2AnyMessage nested under `message`
       message: {
         receiver: receiverHex,
         payload: payloadHex,
-        tokenTransfer: null,
-        feeToken: { admin: instrumentId.admin, id: instrumentId.id },
+        tokenTransfer: messageTokenTransfer,
+        feeToken: { admin: feeInstrument.admin, id: feeInstrument.id },
         extraArgs: {
           tag: 'V3',
           value: {
@@ -651,46 +687,30 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           },
         },
       },
-      // FeeTokenInput: senderInputCids + tokenInput
       feeTokenInput: {
         senderInputCids: feeTokenHoldingCids,
-        tokenInput: {
-          transferFactory: transferFactoryResponse.factoryId,
-          extraArgs: {
-            context: { values: transferFactoryContextValues },
-            meta: { values: {} },
-          },
-          tokenPoolHoldings: [],
+        feeTokenTransferFactory: feeTransferFactory.factoryId,
+        feeTokenExtraArgs: {
+          context: { values: feeTransferFactory.contextValues },
+          meta: { values: {} },
         },
       },
       ccvSendInputs: ccvSendInputsForDaml,
-      tokenTransferInput: null,
-      executorInput: {
-        executorCid: acsDisclosures.executor.contractId,
-        executorExtraContext: { values: {} },
-      },
+      tokenTransferInput,
+      executorInput,
     }
-
-    // Step 8 — Merge all disclosed contracts
-    const transferFactoryDisclosures: DisclosedContract[] =
-      transferFactoryResponse.choiceContext.disclosedContracts
 
     const allDisclosedRaw: DisclosedContract[] = [
       acsDisclosures.perPartyRouter,
       acsDisclosures.ccipSender,
-      acsDisclosures.executor,
-      ...edsResult.choiceContext.disclosedContracts,
-      ...ccvDisclosedContracts,
-      ...transferFactoryDisclosures,
+      ...edsResult.disclosedContracts,
+      ...ccvSendResults.flatMap((ccv) => ccv.disclosedContracts),
+      ...executorDisclosures,
+      ...feeTransferFactory.disclosedContracts,
+      ...tokenTransferDisclosures,
     ]
-    const seen = new Set<string>()
-    const allDisclosed = allDisclosedRaw.filter((dc) => {
-      if (seen.has(dc.contractId)) return false
-      seen.add(dc.contractId)
-      return true
-    })
+    const allDisclosed = dedupeDisclosedContracts(allDisclosedRaw)
 
-    // Step 9 — Build the ExerciseCommand
     const exerciseCommand = {
       ExerciseCommand: {
         templateId: acsDisclosures.ccipSender.templateId,
@@ -700,7 +720,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       },
     }
 
-    // Step 10 — Assemble JsCommands
     const jsCommands: JsCommands = {
       commands: [exerciseCommand],
       commandId: `ccip-send-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -791,6 +810,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
         const ccipMessage = {
           messageId: sendResult.messageId,
+          encodedMessage: sendResult.encodedMessage,
           sourceChainSelector: this.network.chainSelector,
           destChainSelector: opts.destChainSelector,
           sequenceNumber: sendResult.sequenceNumber,
@@ -801,7 +821,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
               ? opts.message.receiver
               : String(opts.message.receiver),
           data: sendResult.encodedMessage,
-          tokenAmounts: [] as readonly { token: string; amount: bigint }[],
+          tokenAmounts: (opts.message.tokenAmounts ?? []) as readonly {
+            token: string
+            amount: bigint
+          }[],
           feeToken: opts.message.feeToken ?? '',
           feeTokenAmount: 0n,
         } as unknown as CCIPMessage
@@ -836,8 +859,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    *    TokenAdminRegistry, RMNRemote, CCVs) fetched via
    *    {@link EdsDisclosureProvider}.
    * 3. **Choice argument** – assembled from the encoded CCIP message,
-   *    verification data, and the opaque `choiceContextData` returned by the
-   *    EDS.
+   *    verification data, and the opaque `contextData` returned by the EDS.
    *
    * @param opts - Must use the `offRamp` + `input` variant of {@link ExecuteOpts}.
    *   `input` must contain `encodedMessage` and `verifications` (CCIP v2.0).
@@ -875,18 +897,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     const { encodedMessage, verifications } = input
 
-    // Step 1 — Fetch cross-party disclosures from EDS
-    //   The EDS needs the encoded message and CCV instance addresses so it can return the right
-    //   CCV disclosures alongside the infrastructure contracts.
-    const ccvAddresses = verifications.map((v) => v.destAddress)
+    const encodedMessageHex = stripHexPrefix(String(encodedMessage))
 
-    this.logger.debug(
-      `CantonChain.generateUnsignedExecute: fetching EDS disclosures for ${ccvAddresses.length} CCVs...`,
-    )
-    const edsResult = await this.edsDisclosureProvider.fetchExecutionDisclosures(
-      stripHexPrefix(encodedMessage),
-      ccvAddresses,
-    )
+    this.logger.debug('CantonChain.generateUnsignedExecute: fetching global EDS execute data...')
+    const edsResult = await this.edsDisclosureProvider.fetchExecutionDisclosures(encodedMessageHex)
     // Step 2 — Fetch same-party disclosures (PerPartyRouter + CCIPReceiver)
     // TODO: This should include receiverCid when provided. We need to figure out how to get that from the input or opts.
     this.logger.debug(
@@ -898,37 +912,50 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       cantonOpts._cantonReceiverCid,
     )
 
-    // Step 3 — Build CCV inputs: pair each verification with its CCV contract ID
-    const ccvInputs = verifications.map((v) => {
-      const ccvDisclosure = edsResult.ccvs[v.destAddress]
-      if (!ccvDisclosure?.disclosedContract) {
-        throw new CCIPError(
-          CCIPErrorCode.CANTON_API_ERROR,
-          `EDS did not return a disclosure for CCV at ${v.destAddress}`,
-        )
-      }
-      const entry = {
-        ccvCid: ccvDisclosure.disclosedContract.contractId,
+    const ccvExecuteResults = await Promise.all(
+      verifications.map((v) =>
+        this.edsDisclosureProvider.fetchCcvExecuteDisclosure(v.destAddress, encodedMessageHex),
+      ),
+    )
+
+    const ccvInputs = verifications.map((v, index) => {
+      const ccv = ccvExecuteResults[index]!
+      return {
+        ccvCid: ccv.contractId,
         verifierResults: stripHexPrefix(String(v.ccvData)),
-        ccvExtraContext: { values: {} },
+        ccvExtraContext: ccv.contextData,
       }
-      return entry
     })
 
-    // Step 4 — Extract CCV disclosed contracts
-    const ccvDisclosedContracts: DisclosedContract[] = verifications
-      .map((v) => edsResult.ccvs[v.destAddress]?.disclosedContract)
-      .filter((dc): dc is DisclosedContract => dc !== undefined)
+    let tokenTransferInput: Record<string, unknown> | null = null
+    let tokenTransferDisclosures: DisclosedContract[] = []
+    if (edsResult.tokenPool) {
+      this.logger.debug(
+        'CantonChain.generateUnsignedExecute: token pool present; fetching token release EDS data...',
+      )
+      const tokenPoolExecute = await this.edsDisclosureProvider.fetchTokenPoolExecuteDisclosure(
+        edsResult.tokenPool,
+        encodedMessageHex,
+      )
+      assertRequiredCcvsCovered(
+        tokenPoolExecute.requiredCCVs,
+        verifications.map((v) => v.destAddress),
+      )
 
-    // Step 5 — Assemble the Execute choice argument.
-    //   The `choiceContextData` from EDS is an opaque blob that the Canton
-    //   runtime expects under the `context` field of the Execute choice — it
-    //   contains contract IDs for OffRamp, GlobalConfig, etc.
+      tokenTransferInput = {
+        tokenPoolCid: tokenPoolExecute.contractId,
+        tokenReceiverParty: payer,
+        poolExtraContext: tokenPoolExecute.contextData,
+      }
+      tokenTransferDisclosures = tokenPoolExecute.disclosedContracts
+    }
+
+    // The global EDS contextData is passed as the Execute choice context.
     const choiceArgument: Record<string, unknown> = {
-      context: edsResult.choiceContext.choiceContextData ?? {},
+      context: edsResult.contextData,
       routerCid: acsDisclosures.perPartyRouter.contractId,
-      encodedMessage: stripHexPrefix(String(encodedMessage)),
-      tokenTransfer: null,
+      encodedMessage: encodedMessageHex,
+      tokenTransfer: tokenTransferInput,
       ccvInputs,
     }
 
@@ -936,15 +963,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const allDisclosedRaw: DisclosedContract[] = [
       acsDisclosures.perPartyRouter,
       acsDisclosures.ccipReceiver,
-      ...edsResult.choiceContext.disclosedContracts,
-      ...ccvDisclosedContracts,
+      ...edsResult.disclosedContracts,
+      ...ccvExecuteResults.flatMap((ccv) => ccv.disclosedContracts),
+      ...tokenTransferDisclosures,
     ]
-    const seenExec = new Set<string>()
-    const allDisclosed = allDisclosedRaw.filter((dc) => {
-      if (seenExec.has(dc.contractId)) return false
-      seenExec.add(dc.contractId)
-      return true
-    })
+    const allDisclosed = dedupeDisclosedContracts(allDisclosedRaw)
 
     // Step 7 — Build the ExerciseCommand
     const exerciseCommand = {
@@ -1049,37 +1072,63 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * fresh contract (mirroring the Go `deployReceiver` helper in the staging script).
    */
   private async createReceiverForFinality(payer: string, finality: number): Promise<string> {
-    const instanceId = `receiver-finality${finality}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-    const createCmd: JsCommands = {
-      commands: [
-        {
-          CreateCommand: {
-            templateId: '#ccip-receiver:CCIP.CCIPReceiver:CCIPReceiver',
-            createArguments: {
-              instanceId,
-              owner: payer,
-              receiverFinalityConfig: encodeFinalityConfig(finality),
-              requiredCCVs: [],
-              optionalCCVs: [],
-              optionalThreshold: 0,
+    const attempts = 4
+    let lastError: unknown
+
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      const instanceId = `receiver-finality${finality}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      const createCmd: JsCommands = {
+        commands: [
+          {
+            CreateCommand: {
+              templateId: '#ccip-receiver:CCIP.CCIPReceiver:CCIPReceiver',
+              createArguments: {
+                instanceId,
+                owner: payer,
+                receiverFinalityConfig: encodeFinalityConfig(finality),
+                requiredCCVs: [],
+                optionalCCVs: [],
+                optionalThreshold: 0,
+              },
             },
           },
-        },
-      ],
-      commandId: `ccip-create-receiver-${Date.now()}`,
-      actAs: [payer],
+        ],
+        commandId: `ccip-create-receiver-${Date.now()}-${attempt}`,
+        actAs: [payer],
+      }
+
+      try {
+        this.logger.debug(
+          `CantonChain.createReceiverForFinality: creating CCIPReceiver finality=${finality} instanceId=${instanceId} attempt=${attempt}/${attempts}`,
+        )
+        const response = await this.provider.submitAndWaitForTransaction(createCmd)
+        const tx = response.transaction as { events?: unknown[] }
+        for (const event of tx.events ?? []) {
+          const ev = event as Record<string, unknown>
+          const created = ev['CreatedEvent'] as Record<string, unknown> | undefined
+          if (typeof created?.contractId === 'string') return created.contractId
+        }
+        throw new CCIPError(
+          CCIPErrorCode.CANTON_API_ERROR,
+          `CantonChain.createReceiverForFinality: CCIPReceiver creation produced no contract ID`,
+        )
+      } catch (err) {
+        lastError = err
+        if (attempt >= attempts || !isRetryableCantonSubmitError(err)) throw err
+
+        const delayMs = 2_000 * attempt
+        const detail =
+          CCIPError.isCCIPError(err) && Object.keys(err.context).length
+            ? ` context=${JSON.stringify(err.context)}`
+            : ''
+        this.logger.warn(
+          `CantonChain.createReceiverForFinality: receiver creation failed with a retryable Canton error; retrying in ${delayMs}ms (${attempt}/${attempts})${detail}`,
+        )
+        await delay(delayMs)
+      }
     }
-    const response = await this.provider.submitAndWaitForTransaction(createCmd)
-    const tx = response.transaction as { events?: unknown[] }
-    for (const event of tx.events ?? []) {
-      const ev = event as Record<string, unknown>
-      const created = ev['CreatedEvent'] as Record<string, unknown> | undefined
-      if (typeof created?.contractId === 'string') return created.contractId
-    }
-    throw new CCIPError(
-      CCIPErrorCode.CANTON_API_ERROR,
-      `CantonChain.createReceiverForFinality: CCIPReceiver creation produced no contract ID`,
-    )
+
+    throw CCIPError.from(lastError, CCIPErrorCode.CANTON_API_ERROR)
   }
 
   /**
@@ -1098,12 +1147,14 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    const url = `${this.indexerUrl}/v1/verifierresults/${request.message.messageId}`
+    const indexerMessageId = normalizeIndexerMessageId(request.message.messageId)
+    const url = `${this.indexerUrl}/v1/verifierresults/${indexerMessageId}`
     const res = await fetch(url)
     if (!res.ok) {
+      const body = await res.text()
       throw new CCIPError(
         CCIPErrorCode.CANTON_API_ERROR,
-        `Canton indexer responded with ${res.status} for message ${request.message.messageId}`,
+        `Canton indexer responded with ${res.status} for message ${indexerMessageId} (${url})${body ? `: ${body}` : ''}`,
       )
     }
 
@@ -1124,7 +1175,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     if (!json.success) {
       throw new CCIPError(
         CCIPErrorCode.CANTON_API_ERROR,
-        `Canton indexer returned success=false for message ${request.message.messageId}`,
+        `Canton indexer returned success=false for message ${indexerMessageId}`,
       )
     }
 
@@ -1192,158 +1243,120 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     throw new CCIPNotImplementedError('CantonChain.getFeeTokens')
   }
 
-  // ─── Discovery helpers ──────────────────────────────────────────────────
-
   /**
-   * Discover fee token holdings from the Active Contract Set.
-   *
-   * Queries the ACS for contracts implementing the Splice HoldingV1 interface,
-   * filtered by owner party and instrument ID. Returns all matching non-locked,
-   * non-zero holdings.
-   *
-   * Mirrors the Go `findUsableHoldingForInstrument` function.
-   *
-   * @param party - The owner party to match holdings against.
-   * @param instrumentId - Token instrument to match (admin + id).
-   * @returns Array of matching holdings with contractId and amount.
+   * Fetch a fresh Transfer Factory and choice context for a specific Canton instrument.
    */
-  async findFeeTokenHoldings(
-    party: string,
-    instrumentId: { admin: string; id: string },
-  ): Promise<Array<{ contractId: string; amount: string }>> {
-    const { offset } = await this.provider.getLedgerEnd()
-
-    const responses = await this.provider.getActiveContracts({
-      activeAtOffset: offset,
-      eventFormat: {
-        filtersByParty: {
-          [party]: {
-            cumulative: [
-              {
-                identifierFilter: {
-                  InterfaceFilter: {
-                    value: {
-                      interfaceId:
-                        '#splice-api-token-holding-v1:Splice.Api.Token.HoldingV1:Holding',
-                      includeInterfaceView: true,
-                      includeCreatedEventBlob: true,
-                    },
-                  },
-                },
-              },
-            ],
-          },
+  private async getTransferFactoryForInstrument({
+    registryAdmin,
+    sender,
+    receiver,
+    instrumentId,
+    amount = '100.00',
+  }: {
+    registryAdmin: string
+    sender: string
+    receiver: string
+    instrumentId: CantonInstrumentId
+    amount?: string
+  }): Promise<CantonTransferFactoryData> {
+    const transferFactoryResponse = await this.transferInstructionClient.getTransferFactory({
+      choiceArguments: {
+        expectedAdmin: registryAdmin,
+        transfer: {
+          sender,
+          receiver,
+          amount,
+          instrumentId: { admin: instrumentId.admin, id: instrumentId.id },
+          lock: null,
+          requestedAt: new Date(Date.now() - 3_600_000).toISOString(),
+          executeBefore: new Date(Date.now() + 86_400_000).toISOString(),
+          inputHoldingCids: [],
+          meta: { values: {} },
         },
-        verbose: true,
+        extraArgs: {
+          context: { values: {} },
+          meta: { values: {} },
+        },
       },
     })
 
-    const holdings: Array<{ contractId: string; amount: string }> = []
-
-    for (const response of responses) {
-      const entry = response.contractEntry
-      if (!entry || !('JsActiveContract' in entry)) continue
-
-      const active = entry.JsActiveContract
-      const created = active.createdEvent
-
-      // Find the HoldingV1 interface view
-      const holdingView = created.interfaceViews?.find(
-        (iv) => iv.interfaceId.includes('HoldingV1') && iv.viewValue != null,
-      )
-      if (!holdingView?.viewValue) continue
-
-      const view = holdingView.viewValue as Record<string, unknown>
-
-      // Check owner matches
-      if (view.owner !== party) continue
-
-      // Check instrument matches
-      const instId = view.instrumentId as Record<string, unknown> | undefined
-      if (!instId || instId.admin !== instrumentId.admin || instId.id !== instrumentId.id) continue
-
-      // Check amount is non-zero
-      const amount = typeof view.amount === 'string' ? view.amount : null
-      if (!amount || amount === '0' || amount === '0.0' || amount === '0.0000000000') continue
-
-      // Skip locked holdings
-      if (view.lock != null) continue
-
-      holdings.push({ contractId: created.contractId, amount })
+    return {
+      factoryId: transferFactoryResponse.factoryId,
+      contextValues: extractChoiceContextValues(
+        transferFactoryResponse.choiceContext.choiceContextData,
+      ),
+      disclosedContracts: transferFactoryResponse.choiceContext.disclosedContracts,
     }
-
-    return holdings
   }
 
   /**
-   * Discover CommitteeVerifier raw addresses from the Active Contract Set.
-   *
-   * Queries the ACS for CommitteeVerifier contracts visible to the given party,
-   * extracts their `instanceId` and `owner` fields, and returns raw addresses
-   * in `"instanceId@owner"` format — ready for use in `CantonExtraArgsV1.ccvRawAddresses`.
-   *
-   * @param party - The party whose ACS to query (typically the CCIP owner party).
-   * @returns Array of raw addresses (e.g. `"my-verifier@party::1220..."`)
+   * Resolve token-transfer sender holdings, optionally constrained to caller-supplied CIDs.
    */
-  async findCCVRawAddresses(party: string): Promise<string[]> {
-    const { offset } = await this.provider.getLedgerEnd()
+  private async resolveTokenTransferHoldings({
+    party,
+    instrumentId,
+    explicitHoldingCids,
+    feeTokenHoldingCids,
+    requiredAmount,
+  }: {
+    party: string
+    instrumentId: CantonInstrumentId
+    explicitHoldingCids: readonly string[] | undefined
+    feeTokenHoldingCids: readonly string[]
+    requiredAmount: bigint
+  }): Promise<TokenHoldingDetails[]> {
+    const holdings = await fetchTokenHoldings(this.provider, party, instrumentId)
+    const byCid = new Map(holdings.map((holding) => [holding.contractId, holding]))
 
-    const responses = await this.provider.getActiveContracts({
-      activeAtOffset: offset,
-      eventFormat: {
-        filtersByParty: {
-          [party]: {
-            cumulative: [
-              {
-                identifierFilter: {
-                  TemplateFilter: {
-                    value: {
-                      templateId:
-                        '#ccip-committeeverifier:CCIP.CommitteeVerifier:CommitteeVerifier',
-                      includeCreatedEventBlob: true,
-                    },
-                  },
-                },
-              },
-            ],
-          },
-        },
-        verbose: true,
-      },
-    })
-
-    const rawAddresses: string[] = []
-
-    for (const response of responses) {
-      const entry = response.contractEntry
-      if (!entry || !('JsActiveContract' in entry)) continue
-
-      const created = entry.JsActiveContract.createdEvent
-      const args = created.createArgument as Record<string, unknown> | undefined
-      if (!args) continue
-
-      const instanceId = typeof args.instanceId === 'string' ? args.instanceId : null
-      const owner = typeof args.owner === 'string' ? args.owner : null
-
-      if (instanceId && owner) {
-        rawAddresses.push(`${instanceId}@${owner}`)
+    if (explicitHoldingCids?.length) {
+      const resolved = explicitHoldingCids.map((cid) => {
+        const holding = byCid.get(cid)
+        if (!holding) {
+          throw new CCIPError(
+            CCIPErrorCode.CANTON_API_ERROR,
+            `CantonChain.generateUnsignedSendMessage: token transfer holding ${cid} was not found, is locked, has zero balance, or does not match ${formatInstrumentId(instrumentId)}`,
+          )
+        }
+        return holding
+      })
+      for (const holding of resolved) {
+        if (feeTokenHoldingCids.includes(holding.contractId)) {
+          throw new CCIPError(
+            CCIPErrorCode.METHOD_UNSUPPORTED,
+            `CantonChain.generateUnsignedSendMessage: fee holding and token transfer holding must be different contracts (${holding.contractId})`,
+          )
+        }
       }
+      return resolved
     }
 
-    return rawAddresses
+    const feeCidSet = new Set(feeTokenHoldingCids)
+    const requiredAmountDecimal = formatCantonDecimal(requiredAmount)
+    const holding = holdings.find(
+      (candidate) =>
+        !feeCidSet.has(candidate.contractId) &&
+        decimalStringToCantonUnits(candidate.amount) >= requiredAmount,
+    )
+    if (!holding) {
+      throw new CCIPError(
+        CCIPErrorCode.METHOD_UNSUPPORTED,
+        `CantonChain.generateUnsignedSendMessage: no unlocked holding for ${formatInstrumentId(instrumentId)} with at least ${requiredAmountDecimal}; pass message.extraArgs.tokenTransferHoldingCids`,
+      )
+    }
+    return [holding]
   }
+
+  // ─── Discovery helpers ──────────────────────────────────────────────────
 
   /**
    * Auto-discover everything needed to call {@link sendMessage} for a simple Canton-to-EVM send.
    *
-   * This is a convenience wrapper over {@link findFeeTokenHoldings} and
-   * {@link findCCVRawAddresses} that queries the token metadata registry to determine
-   * the default fee token (Amulet), finds the first usable holding for `party`, and
-   * collects all CommitteeVerifier raw addresses visible to `party`.
+   * Queries the token metadata registry to determine the default fee token
+   * (Amulet) and finds the first usable holding for `party`.
    *
    * @param party - The sender party ID.
    * @returns The resolved `feeToken` string and a ready-to-use {@link CantonExtraArgsV1}.
-   * @throws if no fee token holdings or no CCV contracts are found for `party`.
+   * @throws if no fee token holdings are found for `party`.
    */
   async discoverSendArgs(
     party: string,
@@ -1352,10 +1365,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const feeToken = `${registryInfo.adminId}::Amulet`
     const instrumentId = parseInstrumentId(feeToken)
 
-    const [holdings, ccvRawAddresses] = await Promise.all([
-      this.findFeeTokenHoldings(party, instrumentId),
-      this.findCCVRawAddresses(party),
-    ])
+    const holdings = await fetchTokenHoldings(this.provider, party, instrumentId)
 
     if (!holdings.length) {
       throw new CCIPError(
@@ -1363,18 +1373,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         `discoverSendArgs: no Amulet holdings found for party ${party}`,
       )
     }
-    if (!ccvRawAddresses.length) {
-      throw new CCIPError(
-        CCIPErrorCode.METHOD_UNSUPPORTED,
-        `discoverSendArgs: no CommitteeVerifier contracts found for party ${party}`,
-      )
-    }
 
     return {
       feeToken,
       extraArgs: {
         feeTokenHoldingCids: [holdings[0]!.contractId],
-        ccvRawAddresses,
       },
     }
   }
@@ -1468,12 +1471,314 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 // Module-private helpers
 // ---------------------------------------------------------------------------
 
+type CantonTransferFactoryData = {
+  factoryId: string
+  contextValues: Record<string, unknown>
+  disclosedContracts: DisclosedContract[]
+}
+
+type ActiveContractDetails = {
+  contractId: string
+  templateId: string
+  createdEventBlob: string
+  synchronizerId: string
+  createArgument: unknown
+  interfaceViews?: unknown[]
+  disclosedContract: DisclosedContract
+}
+
+type TokenHoldingDetails = ActiveContractDetails & {
+  amount: string
+  instrumentId: CantonInstrumentId
+}
+
+function extractChoiceContextValues(choiceContextData: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  if (!choiceContextData || typeof choiceContextData !== 'object') return out
+  const values = (choiceContextData as Record<string, unknown>)['values']
+  if (!values || typeof values !== 'object') return out
+  for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
+    out[key] = value
+  }
+  return out
+}
+
+async function fetchTokenHoldings(
+  client: CantonClient,
+  party: string,
+  instrumentId: CantonInstrumentId,
+): Promise<TokenHoldingDetails[]> {
+  const { offset } = await client.getLedgerEnd()
+
+  const responses = await client.getActiveContracts({
+    activeAtOffset: offset,
+    eventFormat: {
+      filtersByParty: {
+        [party]: {
+          cumulative: [
+            {
+              identifierFilter: {
+                InterfaceFilter: {
+                  value: {
+                    interfaceId: '#splice-api-token-holding-v1:Splice.Api.Token.HoldingV1:Holding',
+                    includeInterfaceView: true,
+                    includeCreatedEventBlob: true,
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+      verbose: true,
+    },
+  })
+
+  const holdings: TokenHoldingDetails[] = []
+  for (const response of responses) {
+    const active = activeContractFromResponse(response)
+    if (!active) continue
+
+    const holdingView = extractHoldingView(active)
+    if (!holdingView) continue
+    if (extractStringField(holdingView, 'owner') !== party) continue
+
+    const holdingInstrument = extractInstrumentId(holdingView)
+    if (!holdingInstrument || !sameInstrumentId(holdingInstrument, instrumentId)) continue
+
+    const amount = extractStringField(holdingView, 'amount')
+    if (!amount || decimalStringToCantonUnits(amount) <= 0n) continue
+    if (extractField(holdingView, 'lock') != null) continue
+
+    holdings.push({
+      ...active,
+      amount,
+      instrumentId: holdingInstrument,
+    })
+  }
+  return holdings
+}
+
+function activeContractFromResponse(response: unknown): ActiveContractDetails | null {
+  if (!response || typeof response !== 'object') return null
+  const entry = (response as Record<string, unknown>)['contractEntry']
+  if (!entry || typeof entry !== 'object' || !('JsActiveContract' in entry)) return null
+  const active = (entry as Record<string, unknown>)['JsActiveContract']
+  if (!active || typeof active !== 'object') return null
+  const activeRecord = active as Record<string, unknown>
+  const created = activeRecord['createdEvent']
+  if (!created || typeof created !== 'object') return null
+  const createdRecord = created as Record<string, unknown>
+
+  const contractId =
+    typeof createdRecord['contractId'] === 'string' ? createdRecord['contractId'] : ''
+  const templateId =
+    typeof createdRecord['templateId'] === 'string' ? createdRecord['templateId'] : ''
+  if (!contractId || !templateId) return null
+
+  const createdEventBlob =
+    typeof createdRecord['createdEventBlob'] === 'string' ? createdRecord['createdEventBlob'] : ''
+  const synchronizerId =
+    typeof activeRecord['synchronizerId'] === 'string' ? activeRecord['synchronizerId'] : ''
+
+  return {
+    contractId,
+    templateId,
+    createdEventBlob,
+    synchronizerId,
+    createArgument: createdRecord['createArgument'],
+    interfaceViews: Array.isArray(createdRecord['interfaceViews'])
+      ? (createdRecord['interfaceViews'] as unknown[])
+      : undefined,
+    disclosedContract: {
+      contractId,
+      templateId,
+      createdEventBlob,
+      synchronizerId,
+    },
+  }
+}
+
+function extractHoldingView(active: ActiveContractDetails): unknown {
+  const holdingView = active.interfaceViews?.find((view) => {
+    if (!view || typeof view !== 'object') return false
+    const viewRecord = view as Record<string, unknown>
+    return (
+      typeof viewRecord['interfaceId'] === 'string' &&
+      viewRecord['interfaceId'].includes('HoldingV1') &&
+      viewRecord['viewValue'] != null
+    )
+  })
+  if (holdingView && typeof holdingView === 'object') {
+    return (holdingView as Record<string, unknown>)['viewValue']
+  }
+  return active.createArgument
+}
+
+function extractField(record: unknown, fieldName: string): unknown {
+  if (!record || typeof record !== 'object') return undefined
+  const obj = unwrapDamlValue(record) as Record<string, unknown>
+
+  if (Object.prototype.hasOwnProperty.call(obj, fieldName)) {
+    return unwrapDamlValue(obj[fieldName])
+  }
+
+  if (Array.isArray(obj['fields'])) {
+    for (const field of obj['fields'] as Array<Record<string, unknown>>) {
+      if (field['label'] === fieldName) return unwrapDamlValue(field['value'])
+    }
+  }
+  return undefined
+}
+
+function unwrapDamlValue(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value
+  const obj = value as Record<string, unknown>
+
+  if ('Sum' in obj && obj['Sum'] && typeof obj['Sum'] === 'object') {
+    const sum = obj['Sum'] as Record<string, unknown>
+    const first = Object.values(sum)[0]
+    return unwrapDamlValue(first)
+  }
+  if ('value' in obj && Object.keys(obj).length <= 2) {
+    return unwrapDamlValue(obj['value'])
+  }
+  if ('Text' in obj) return obj['Text']
+  if ('text' in obj) return obj['text']
+  if ('Party' in obj) return obj['Party']
+  if ('party' in obj) return obj['party']
+  if ('Numeric' in obj) return obj['Numeric']
+  if ('numeric' in obj) return obj['numeric']
+  if ('Int64' in obj) return obj['Int64']
+  if ('int64' in obj) return obj['int64']
+  if ('ContractId' in obj) return obj['ContractId']
+  if ('contractId' in obj && Object.keys(obj).length === 1) return obj['contractId']
+  return value
+}
+
+function extractStringField(record: unknown, fieldName: string): string | null {
+  const value = extractField(record, fieldName)
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'bigint') return value.toString()
+  return null
+}
+
+function extractInstrumentId(record: unknown): CantonInstrumentId | null {
+  const rawInstrument = extractField(record, 'instrumentId')
+  if (!rawInstrument || typeof rawInstrument !== 'object') return null
+  const admin = extractStringField(rawInstrument, 'admin')
+  const id = extractStringField(rawInstrument, 'id')
+  if (!admin || !id) return null
+  return { admin, id }
+}
+
+function sameInstrumentId(a: CantonInstrumentId, b: CantonInstrumentId): boolean {
+  return a.admin === b.admin && a.id === b.id
+}
+
+function formatInstrumentId(instrumentId: CantonInstrumentId): string {
+  return `${instrumentId.admin}::${instrumentId.id}`
+}
+
+function buildEdsMessage({
+  destChainSelector,
+  receiverHex,
+  payloadHex,
+  feeInstrument,
+  tokenTransfer,
+}: {
+  destChainSelector: bigint
+  receiverHex: string
+  payloadHex: string
+  feeInstrument: CantonInstrumentId
+  tokenTransfer: Record<string, unknown> | null
+}): EdsMessage {
+  return {
+    destinationChainSelector: destChainSelector.toString(),
+    receiver: receiverHex,
+    payload: payloadHex,
+    tokenTransfer: tokenTransfer as EdsMessage['tokenTransfer'],
+    feeToken: { admin: feeInstrument.admin, id: feeInstrument.id },
+    executor: { type: '' },
+  }
+}
+
+function hashCantonInstrumentId(instrumentId: CantonInstrumentId): string {
+  return keccak256Utf8(`${instrumentId.id}@${instrumentId.admin}`)
+}
+
+function instanceAddressFor(address: string): string {
+  const trimmed = address.trim()
+  if (trimmed.includes('@')) return keccak256Utf8(trimmed).toLowerCase()
+  return trimmed.toLowerCase()
+}
+
+function sameRawOrHashedAddress(a: string, b: string): boolean {
+  return instanceAddressFor(a) === instanceAddressFor(b)
+}
+
+function dedupeDisclosedContracts(contracts: readonly DisclosedContract[]): DisclosedContract[] {
+  const seen = new Set<string>()
+  return contracts.filter((dc) => {
+    if (seen.has(dc.contractId)) return false
+    seen.add(dc.contractId)
+    return true
+  })
+}
+
+function assertRequiredCcvsCovered(required: readonly string[], provided: readonly string[]): void {
+  const providedAddresses = new Set(provided.map(instanceAddressFor))
+  const missing = required.filter((address) => !providedAddresses.has(instanceAddressFor(address)))
+  if (missing.length) {
+    throw new CCIPError(
+      CCIPErrorCode.CANTON_API_ERROR,
+      `CantonChain.generateUnsignedExecute: token pool requires CCV result(s) not provided by verifications: ${missing.join(', ')}`,
+    )
+  }
+}
+
+const CANTON_DECIMALS = 10n
+const CANTON_DECIMAL_SCALE = BigInt(10) ** CANTON_DECIMALS
+
+function formatCantonDecimal(amount: bigint): string {
+  if (amount < 0n) {
+    throw new CCIPError(CCIPErrorCode.METHOD_UNSUPPORTED, 'Canton token amounts cannot be negative')
+  }
+  const whole = amount / CANTON_DECIMAL_SCALE
+  const fraction = (amount % CANTON_DECIMAL_SCALE).toString().padStart(Number(CANTON_DECIMALS), '0')
+  return `${whole}.${fraction}`
+}
+
+function decimalStringToCantonUnits(raw: string): bigint {
+  const value = raw.trim().replace(/\.$/, '')
+  if (!/^\d+(\.\d+)?$/.test(value)) return 0n
+  const [wholeRaw, fractionRaw = ''] = value.split('.')
+  if (fractionRaw.length > Number(CANTON_DECIMALS)) return 0n
+  const whole = BigInt(wholeRaw || '0')
+  const fraction = BigInt(fractionRaw.padEnd(Number(CANTON_DECIMALS), '0') || '0')
+  return whole * CANTON_DECIMAL_SCALE + fraction
+}
+
 /**
  * Strip the `0x` prefix from a hex string.
  * Canton / Daml expects hex values without the prefix.
  */
 function stripHexPrefix(hex: string): string {
   return hex.startsWith('0x') ? hex.slice(2) : hex
+}
+
+function normalizeIndexerMessageId(messageId: string): string {
+  if (/^0x[0-9a-fA-F]{64}$/.test(messageId)) return messageId
+  if (/^[0-9a-fA-F]{64}$/.test(messageId)) return `0x${messageId}`
+  return messageId
+}
+
+function isRetryableCantonSubmitError(err: unknown): boolean {
+  return CCIPError.isCCIPError(err) && err.isTransient
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**

@@ -110,10 +110,6 @@ const CCIP_TEMPLATES = {
     templateId: '#ccip-sender:CCIP.CCIPSender:CCIPSender',
     moduleEntity: 'CCIP.CCIPSender:CCIPSender',
   },
-  executor: {
-    templateId: '#ccip-executor:CCIP.Executor:Executor',
-    moduleEntity: 'CCIP.Executor:Executor',
-  },
 } as const
 
 type CcipContractType = keyof typeof CCIP_TEMPLATES
@@ -142,50 +138,6 @@ function buildTargetedEventFormat(party: string): EventFormat {
 }
 
 /**
- * Extract the chain-selector keys from the `remoteChainConfigs` GENMAP field
- * on an Executor contract's `createArgument`.
- *
- * Handles both verbose mode (direct property) and the `fields` array format
- * returned by the Canton JSON Ledger API v2.
- *
- * The Daml type `Map.Map (Numeric 0) RemoteChainConfig` is serialized as a
- * plain JSON object with stringified numeric keys (e.g. `{"16015286601757825753": {...}}`).
- */
-function extractRemoteChainConfigKeys(createArgument: unknown): string[] {
-  if (!createArgument || typeof createArgument !== 'object') return []
-  const arg = createArgument as Record<string, unknown>
-
-  // Try direct property access (verbose mode)
-  let configs: unknown = arg['remoteChainConfigs']
-
-  // Fallback: fields array format
-  if (configs === undefined && 'fields' in arg && Array.isArray(arg['fields'])) {
-    for (const field of arg['fields'] as Array<Record<string, unknown>>) {
-      if (field['label'] === 'remoteChainConfigs') {
-        configs = field['value']
-        break
-      }
-    }
-  }
-
-  if (!configs || typeof configs !== 'object') return []
-
-  // Daml `Numeric 0` keys are serialized with a trailing dot (e.g. "16015286601757825753.")
-  // — strip it so comparisons against plain bigint strings work.
-  const normalizeKey = (k: string) => k.replace(/\.$/, '')
-
-  // GENMAP serializes as a plain JSON object with string keys
-  if (!Array.isArray(configs)) {
-    return Object.keys(configs as Record<string, unknown>).map(normalizeKey)
-  }
-
-  // Fallback: array-of-tuples format [[key, value], ...]
-  return configs
-    .filter((entry): entry is [unknown, unknown] => Array.isArray(entry) && entry.length >= 1)
-    .map((entry) => normalizeKey(String(entry[0])))
-}
-
-/**
  * Internal per-contract entry in the ACS snapshot, enriched with instance
  * address components for later matching.
  */
@@ -200,8 +152,6 @@ interface RichContractMatch {
   partyOwner: string | null
   /** receiverFinalityConfig variant from createArgument (present on CCIPReceiver) */
   receiverFinalityConfig: { tag: string; value: unknown } | null
-  /** remoteChainConfigs keys (chain selector strings) — present on Executor contracts */
-  remoteChainConfigKeys: string[]
 }
 
 /**
@@ -244,7 +194,6 @@ async function fetchRichSnapshot(
       signatory: signatories.length === 1 ? (signatories[0] ?? null) : null,
       partyOwner: extractStringField(created.createArgument, 'partyOwner'),
       receiverFinalityConfig: extractFinalityConfig(created.createArgument),
-      remoteChainConfigKeys: extractRemoteChainConfigKeys(created.createArgument),
     }
 
     const list = byModuleEntity.get(moduleEntity) ?? []
@@ -375,8 +324,6 @@ export type AcsSendDisclosures = {
   perPartyRouter: DisclosedContract
   /** The sender's CCIPSender contract. */
   ccipSender: DisclosedContract
-  /** The sender's Executor contract. */
-  executor: DisclosedContract
 }
 
 /**
@@ -467,61 +414,19 @@ export class AcsDisclosureProvider {
   /**
    * Fetch all contracts that must be disclosed for a `ccipSend` command.
    *
-   * Returns the sender's `PerPartyRouter`, `CCIPSender`, and `Executor` contracts
-   * from the Active Contract Set. When `destChainSelector` is provided the Executor
-   * is chosen by filtering `remoteChainConfigs` for that chain; this avoids the
-   * "executor: unsupported destination chain" error when multiple Executor contracts
-   * are active for a party.
-   *
-   * @param destChainSelector - Optional destination chain selector used to pick
-   *   an Executor that supports that chain.
+   * Returns the sender's `PerPartyRouter` and `CCIPSender` contracts from the
+   * Active Contract Set. Executor disclosures are supplied by the external EDS
+   * API when the global EDS selects one for the message.
    */
-  async fetchSendDisclosures(destChainSelector?: bigint): Promise<AcsSendDisclosures> {
+  async fetchSendDisclosures(): Promise<AcsSendDisclosures> {
     const snapshot = await fetchRichSnapshot(this.client, this.config.party)
 
     const existingRouter = pickByPartyOwner(snapshot, 'perPartyRouter', this.config.party)
     const existingSender = pickBySignatory(snapshot, 'ccipSender', this.config.party)
-    const existingExecutor = this.pickExecutorForDestChain(snapshot, destChainSelector)
 
     return {
       perPartyRouter: existingRouter,
       ccipSender: existingSender,
-      executor: existingExecutor,
     }
-  }
-
-  /**
-   * Pick an Executor contract by signatory, preferring one whose `remoteChainConfigs`
-   * contains `destChainSelector`.
-   *
-   * Falls back to the first executor owned by the party when no chain-specific match
-   * is found (e.g. when the ACS data is not verbose enough to decode the GENMAP).
-   */
-  private pickExecutorForDestChain(
-    snapshot: Map<string, RichContractMatch[]>,
-    destChainSelector?: bigint,
-  ): DisclosedContract {
-    const { moduleEntity } = CCIP_TEMPLATES.executor
-    const candidates = snapshot.get(moduleEntity) ?? []
-    const party = this.config.party
-    const destKey = destChainSelector?.toString()
-
-    // 1st pass: executor that explicitly lists the destination chain
-    if (destKey) {
-      for (const c of candidates) {
-        if (c.signatory !== party) continue
-        if (c.remoteChainConfigKeys.includes(destKey)) {
-          return {
-            templateId: c.templateId,
-            contractId: c.contractId,
-            createdEventBlob: c.createdEventBlob,
-            synchronizerId: c.synchronizerId,
-          }
-        }
-      }
-    }
-
-    // 2nd pass: any executor by signatory (original behaviour)
-    return pickBySignatory(snapshot, 'executor', party)
   }
 }

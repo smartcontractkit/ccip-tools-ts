@@ -83,6 +83,14 @@ export interface CantonTokenExtraArgs {
 export interface CantonExtraArgsV1 {
   /** Contract IDs of pre-funded fee-token holdings owned by the sender party. */
   feeTokenHoldingCids: string[]
+  /** Contract IDs of pre-funded token-transfer holdings owned by the sender party. */
+  tokenTransferHoldingCids?: string[]
+  /**
+   * Optional raw (`instanceId@owner`) or hashed InstanceAddress of the source
+   * Canton LockReleaseTokenPool. The global TokenAdminRegistry lookup remains
+   * authoritative; this value only validates/disambiguates the caller's intent.
+   */
+  tokenPoolAddress?: string
   /**
    * CCV raw instance address strings in `"instanceId@party"` format.
    * The corresponding hex InstanceAddresses (keccak256 of each raw address)

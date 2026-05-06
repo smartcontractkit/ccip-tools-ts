@@ -194,6 +194,13 @@ export type CantonConfig = {
   /** Base URL for the EDS (Explicit Disclosure Service) API. */
   edsUrl: string
 
+  /**
+   * Optional mapping from a Canton RawInstanceAddress owner party to that owner's
+   * external EDS base URL. When absent, `edsUrl` is used for both global and
+   * external EDS endpoints.
+   */
+  externalEdsUrlsByOwner?: Record<string, string>
+
   /** Base URL for the Transfer Instruction API. */
   transferInstructionUrl: string
 
