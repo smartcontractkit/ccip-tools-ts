@@ -271,7 +271,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
         const res = []
         for (const log of logs) {
           const receipt = (dest.constructor as ChainStatic).decodeReceipt(log)
-          if (!receipt) continue
+          if (receipt?.messageId !== request.message.messageId) continue
           res.push({ receipt, log, timestamp: request.metadata!.receiptTimestamp! })
         }
         cancelWaitFinalized?.()
