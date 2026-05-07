@@ -218,7 +218,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    const client = createCantonClient({ baseUrl: url, jwt: ctx.cantonConfig.jwt })
+    const client = createCantonClient({
+      baseUrl: url,
+      jwt: ctx.cantonConfig.jwt,
+      signal: ctx.abort,
+    })
     try {
       const alive = await client.isAlive()
       if (!alive) throw new CCIPNotImplementedError('Canton Ledger JSON API is not alive')

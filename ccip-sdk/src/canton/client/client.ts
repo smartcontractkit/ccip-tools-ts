@@ -1,12 +1,13 @@
-import { Agent, fetch as undiciFetch } from 'undici'
+import axios from 'axios'
 
 import type { components } from './generated/ledger-api.ts'
 import { CCIPError } from '../../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../../errors/codes.ts'
 
-// Canton JSON Ledger API requires HTTP/2. Use a dedicated undici Agent with
-// allowH2 so that ALPN negotiation selects h2 for all TLS connections.
-const h2Agent = new Agent({ allowH2: true })
+// Canton JSON Ledger API requires HTTP/2.
+// On Node.js, axios uses its http adapter with native http2.connect().
+// In browsers, HTTP/2 is negotiated automatically by the runtime.
+const cantonHttp = axios.create({ httpVersion: 2 })
 
 /** Commands to submit to the ledger */
 export type JsCommands = components['schemas']['JsCommands']
@@ -53,6 +54,8 @@ export interface CantonClientConfig {
   jwt: string
   /** Request timeout in milliseconds */
   timeout?: number
+  /** Abort signal for cancelling in-flight requests (e.g., from Chain.abort) */
+  signal?: AbortSignal
 }
 
 /**
@@ -62,6 +65,7 @@ export function createCantonClient(config: CantonClientConfig) {
   const baseUrl = config.baseUrl.replace(/\/$/, '')
   const headers = buildHeaders(config.jwt)
   const timeoutMs = config.timeout ?? 30_000
+  const signal = config.signal
 
   return {
     /**
@@ -75,6 +79,9 @@ export function createCantonClient(config: CantonClientConfig) {
         headers,
         timeoutMs,
         commands,
+        undefined,
+        undefined,
+        signal,
       )
     },
 
@@ -99,6 +106,7 @@ export function createCantonClient(config: CantonClientConfig) {
         { commands, eventFormat },
         undefined,
         1, // no HTTP-level retry
+        signal,
       )
     },
 
@@ -119,6 +127,8 @@ export function createCantonClient(config: CantonClientConfig) {
         timeoutMs,
         request,
         queryParams,
+        undefined,
+        signal,
       )
     },
 
@@ -131,6 +141,9 @@ export function createCantonClient(config: CantonClientConfig) {
         '/v2/state/ledger-end',
         headers,
         timeoutMs,
+        undefined,
+        undefined,
+        signal,
       )
       return { offset: data.offset ?? 0 }
     },
@@ -146,6 +159,8 @@ export function createCantonClient(config: CantonClientConfig) {
         headers,
         timeoutMs,
         queryParams,
+        undefined,
+        signal,
       )
       return data.partyDetails
     },
@@ -159,6 +174,9 @@ export function createCantonClient(config: CantonClientConfig) {
         '/v2/parties/participant-id',
         headers,
         timeoutMs,
+        undefined,
+        undefined,
+        signal,
       )
       return data.participantId ?? ''
     },
@@ -172,6 +190,9 @@ export function createCantonClient(config: CantonClientConfig) {
         '/v2/state/connected-synchronizers',
         headers,
         timeoutMs,
+        undefined,
+        undefined,
+        signal,
       )
       return data.connectedSynchronizers ?? []
     },
@@ -181,7 +202,17 @@ export function createCantonClient(config: CantonClientConfig) {
      */
     async isAlive(): Promise<boolean> {
       try {
-        await request('GET', baseUrl, '/livez', headers, timeoutMs)
+        await request(
+          'GET',
+          baseUrl,
+          '/livez',
+          headers,
+          timeoutMs,
+          undefined,
+          undefined,
+          undefined,
+          signal,
+        )
         return true
       } catch (e) {
         console.log(`Ledger API is not alive at ${baseUrl}/livez:`, e)
@@ -195,7 +226,17 @@ export function createCantonClient(config: CantonClientConfig) {
      */
     async isReady(): Promise<boolean> {
       try {
-        await request('GET', baseUrl, '/readyz', headers, timeoutMs)
+        await request(
+          'GET',
+          baseUrl,
+          '/readyz',
+          headers,
+          timeoutMs,
+          undefined,
+          undefined,
+          undefined,
+          signal,
+        )
         return true
       } catch {
         return false
@@ -235,6 +276,9 @@ export function createCantonClient(config: CantonClientConfig) {
             transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
           },
         },
+        undefined,
+        undefined,
+        signal,
       )
       return response.transaction
     },
@@ -246,32 +290,41 @@ export function createCantonClient(config: CantonClientConfig) {
      * @returns The full update with all events
      */
     async getUpdateById(updateId: string, party: string): Promise<unknown> {
-      return post<unknown>(baseUrl, '/v2/updates/update-by-id', headers, timeoutMs, {
-        updateId,
-        updateFormat: {
-          includeTransactions: {
-            eventFormat: {
-              filtersByParty: {
-                [party]: {
-                  cumulative: [
-                    {
-                      identifierFilter: {
-                        WildcardFilter: {
-                          value: {
-                            includeCreatedEventBlob: false,
+      return post<unknown>(
+        baseUrl,
+        '/v2/updates/update-by-id',
+        headers,
+        timeoutMs,
+        {
+          updateId,
+          updateFormat: {
+            includeTransactions: {
+              eventFormat: {
+                filtersByParty: {
+                  [party]: {
+                    cumulative: [
+                      {
+                        identifierFilter: {
+                          WildcardFilter: {
+                            value: {
+                              includeCreatedEventBlob: false,
+                            },
                           },
                         },
                       },
-                    },
-                  ],
+                    ],
+                  },
                 },
+                verbose: true,
               },
-              verbose: true,
+              transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
             },
-            transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
           },
         },
-      })
+        undefined,
+        undefined,
+        signal,
+      )
     },
   }
 }
@@ -330,14 +383,6 @@ function buildHeaders(jwt?: string): Record<string, string> {
   return headers
 }
 
-async function parseErrorBody(response: Response): Promise<unknown> {
-  try {
-    return await response.json()
-  } catch {
-    return `HTTP ${response.status}`
-  }
-}
-
 const DEFAULT_RETRY_COUNT = 10
 const DEFAULT_RETRY_DELAY_MS = 3_000
 
@@ -350,28 +395,23 @@ async function request<T>(
   options?: { body?: unknown; queryParams?: Record<string, string> },
   retries = DEFAULT_RETRY_COUNT,
   retryDelayMs = DEFAULT_RETRY_DELAY_MS,
+  signal?: AbortSignal,
 ): Promise<T> {
-  const url = new URL(baseUrl + path)
-  if (options?.queryParams) {
-    for (const [key, value] of Object.entries(options.queryParams)) {
-      url.searchParams.set(key, value)
-    }
-  }
-
   for (let attempt = 1; attempt <= retries; attempt++) {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
-    let response: Response
+    let response: { status: number; data: unknown; headers: Record<string, unknown> }
     try {
-      response = await undiciFetch(url.toString(), {
+      response = await cantonHttp.request({
         method,
+        url: baseUrl + path,
         headers,
-        body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
-        signal: controller.signal,
-        dispatcher: h2Agent,
+        params: options?.queryParams,
+        data: options?.body,
+        timeout: timeoutMs,
+        signal,
+        // Prevent axios from throwing on non-2xx so we can handle retries ourselves
+        validateStatus: () => true,
       })
     } catch (err) {
-      clearTimeout(timer)
       if (attempt < retries) {
         console.log(
           `[canton/client] ${method} ${path} failed (attempt ${attempt}/${retries}), retrying in ${retryDelayMs}ms:`,
@@ -382,10 +422,9 @@ async function request<T>(
       }
       throw new CantonApiError(`${method} ${path} failed`, err)
     }
-    clearTimeout(timer)
 
-    if (!response.ok) {
-      const errorBody = await parseErrorBody(response)
+    if (response.status < 200 || response.status >= 300) {
+      const errorBody = response.data ?? `HTTP ${response.status}`
       if (attempt < retries) {
         console.log(
           `[canton/client] ${method} ${path} failed with status ${response.status} (attempt ${attempt}/${retries}), retrying in ${retryDelayMs}ms:`,
@@ -397,11 +436,11 @@ async function request<T>(
       throw new CantonApiError(`${method} ${path} failed`, errorBody, response.status)
     }
 
-    const contentLength = response.headers.get('content-length')
+    const contentLength = response.headers['content-length']
     if (response.status === 204 || contentLength === '0') {
       return undefined as T
     }
-    return response.json() as Promise<T>
+    return response.data as T
   }
 
   throw new CantonApiError(`${method} ${path} failed after ${retries} attempts`, undefined)
@@ -425,8 +464,19 @@ export async function get<T>(
   timeoutMs: number,
   queryParams?: Record<string, string>,
   retries = DEFAULT_RETRY_COUNT,
+  signal?: AbortSignal,
 ): Promise<T> {
-  return request<T>('GET', baseUrl, path, headers, timeoutMs, { queryParams }, retries)
+  return request<T>(
+    'GET',
+    baseUrl,
+    path,
+    headers,
+    timeoutMs,
+    { queryParams },
+    retries,
+    undefined,
+    signal,
+  )
 }
 
 /**
@@ -449,6 +499,17 @@ export async function post<T>(
   body: unknown,
   queryParams?: Record<string, string>,
   retries = DEFAULT_RETRY_COUNT,
+  signal?: AbortSignal,
 ): Promise<T> {
-  return request<T>('POST', baseUrl, path, headers, timeoutMs, { body, queryParams }, retries)
+  return request<T>(
+    'POST',
+    baseUrl,
+    path,
+    headers,
+    timeoutMs,
+    { body, queryParams },
+    retries,
+    undefined,
+    signal,
+  )
 }
