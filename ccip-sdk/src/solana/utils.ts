@@ -238,19 +238,12 @@ export function getErrorFromLogs(
     )
     .filter(({ data }) => !isBase64(data))
     .map(({ data }) => data as string)
-    .reduceRight(
-      (acc, l) =>
-        l.endsWith(':') && acc.length
-          ? [`${l} ${acc[0]}`, ...acc.slice(1)]
-          : l.indexOf(': ') >= 0 && l.indexOf('. ') >= 0
-            ? [...l.replace(/\.$/, '').split('. '), ...acc]
-            : [l, ...acc],
-      [] as string[],
-    ) // cosmetic: join lines ending in ':' with next
-    .map((l) => {
+    .reduceRight((acc, l) => {
+      l = l.replace(/ (with message|thrown in) /, ' $1: ')
+      if (l.endsWith(':') && acc.length) l = `${l} ${acc.shift()!}` // cosmetic: join lines ending in ':' with next
       try {
         // convert number[]s (common in solana logs) into slightly more readable 0x-bytearrays
-        return l.replace(/\[(\d{1,3}, ){3,}\d+\]/g, (m) =>
+        l = l.replace(/\[(\d{1,3}, ){3,}\d+\]/g, (m) =>
           hexlify(
             new Uint8Array(
               m
@@ -260,18 +253,26 @@ export function getErrorFromLogs(
             ),
           ),
         )
-      } catch (_) {
-        return l
+      } catch {
+        // ignore
       }
-    })
+      const L = l.replace(/\.$/, '').split(/(?<=\w)\. /g)
+      acc.unshift(...L)
+      return acc
+    }, [] as string[])
 
   const res: { program: string; [k: string]: string } = {
     program: lastLog.address,
   }
-  if (lastProgramLogs.every((l) => l.indexOf(': ') >= 0 || l.indexOf(' in ') >= 0)) {
+  if (lastProgramLogs.every((l) => l.match(/\w: /))) {
     Object.assign(
       res,
-      Object.fromEntries(lastProgramLogs.map((l) => l.split(/: | in /, 2) as [string, string])),
+      Object.fromEntries(
+        lastProgramLogs.map((l) => [
+          l.substring(0, l.indexOf(': ')),
+          l.substring(l.indexOf(': ') + 2),
+        ]),
+      ),
     )
   } else {
     res['error'] = lastProgramLogs.join('\n')

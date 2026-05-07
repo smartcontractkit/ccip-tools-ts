@@ -73,7 +73,7 @@ function makeChainClass({
   networkName,
   connectDelay = () => 0,
   connectReject = () => false,
-  getTx = () => 'notfound' as 'found' | 'notfound',
+  getTx = () => 'notfound',
   txDelay = () => 0,
 }: {
   family: ChainFamily
@@ -189,7 +189,7 @@ describe('fetchChainsFromRpcs', () => {
       output: { write: () => {}, table: () => {} },
       logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     }
-    const restore = setupSupportedChains({ [ChainFamily.EVM]: FakeEvmChain as never })
+    const restore = setupSupportedChains({ [ChainFamily.EVM]: FakeEvmChain })
     try {
       const [, tx$] = fetchChainsFromRpcs(
         ctx,
