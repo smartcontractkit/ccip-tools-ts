@@ -370,9 +370,13 @@ class CantonApiError extends CCIPError {
       context['error'] = error
     }
 
+    const isTransient = typeof statusCode === 'number' && (statusCode === 429 || statusCode >= 500)
+
     super(CCIPErrorCode.CANTON_API_ERROR, fullMessage, {
       cause: error instanceof Error ? error : undefined,
       context,
+      isTransient,
+      retryAfterMs: isTransient ? DEFAULT_RETRY_DELAY_MS : undefined,
     })
   }
 }
