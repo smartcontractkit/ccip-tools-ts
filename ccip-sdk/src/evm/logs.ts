@@ -15,6 +15,19 @@ import type { WithLogger } from '../types.ts'
 /** Tags or values which can be used as `endBlock` in {@link EVMChain.getLogs} filter */
 export type EVMEndBlockTag = FinalityRequested | 'latest'
 
+function isInvalidBlockRangesError(
+  err: unknown,
+): err is { error: { code: number; message: string } } {
+  return !!(
+    err instanceof Error &&
+    'error' in err &&
+    typeof err.error === 'object' &&
+    err.error &&
+    'message' in err.error &&
+    err.error.message === 'invalid block range params'
+  )
+}
+
 /**
  * Implements Chain.getLogs for EVM.
  * Walks logs forward from `startBlock` or `startTime`; if neither is provided, throws.
@@ -85,7 +98,12 @@ export async function* getEvmLogs(
       ...(filter.topics?.length ? { topics: filter.topics } : {}),
     }
     logger.debug('evm watch getLogs:', filter_)
-    const logs = await provider.getLogs(filter_)
+    const logs = await provider.getLogs(filter_).catch((err) => {
+      if (isInvalidBlockRangesError(err)) {
+        return []
+      }
+      throw err
+    })
     if (logs.length)
       latestLogBlockNumber = Math.max(latestLogBlockNumber, logs[logs.length - 1]!.blockNumber)
     yield* logs

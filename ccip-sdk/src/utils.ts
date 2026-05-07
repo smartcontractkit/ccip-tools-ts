@@ -909,29 +909,21 @@ const util =
       }
 export { util }
 
-const registry = new FinalizationRegistry(
-  ({ signal, listener }: { signal: AbortSignal; listener: () => void }) =>
-    signal.removeEventListener('abort', listener),
-)
-
 /**
  * Converts an AbortSignal into a Promise that rejects when the signal is aborted.
+ *
+ * The listener closure captures `reject` strongly and is held alive by the
+ * signal, so the promise cannot be GC'd while the signal is alive. The
+ * `once` option ensures the listener (and its reference to `reject`) is
+ * released as soon as the signal fires.
+ *
  * @param signal - AbortSignal to convert
  * @returns Promise that rejects with the signal's reason when aborted
  */
 export function signalToPromise(signal: AbortSignal): Promise<never> {
   if (signal.aborted) return Promise.reject(signal.reason as Error)
 
-  const { promise, reject } = Promise.withResolvers<never>()
-  const weakReject = new WeakRef(reject)
-
-  const listener = () => {
-    const rejectFn = weakReject.deref()
-    rejectFn?.(signal.reason)
-  }
-
-  signal.addEventListener('abort', listener, { once: true })
-  registry.register(promise, { signal, listener })
-
-  return promise
+  return new Promise<never>((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(signal.reason as Error), { once: true })
+  })
 }
