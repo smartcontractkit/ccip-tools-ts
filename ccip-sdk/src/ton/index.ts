@@ -524,9 +524,9 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const cellBits = onRampCell.bits.length
       let onRamp: Buffer
 
-      if (cellBits === 160) {
+      if (cellBits === 160 || cellBits === 256) {
         // Raw 20-byte EVM address (no length prefix)
-        onRamp = onRampSlice.loadBuffer(20)
+        onRamp = onRampSlice.loadBuffer(cellBits / 8)
       } else {
         // Length-prefixed format: 8-bit length + data
         const onRampLength = onRampSlice.loadUint(8)
