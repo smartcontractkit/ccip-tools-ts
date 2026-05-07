@@ -700,8 +700,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       ])
       if (trans.timestamp <= finalizedTs) return true
     }
-    const signals = [this.abort, abort].filter(Boolean) as AbortSignal[]
-    const watch = signals.length ? AbortSignal.any(signals) : true
+    const watch = abort ? AbortSignal.any([this.abort, abort]) : this.abort
     for await (const l of this.getLogs({
       address: log.address,
       startBlock: log.blockNumber,
