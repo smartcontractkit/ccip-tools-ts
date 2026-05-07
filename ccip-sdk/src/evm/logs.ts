@@ -19,12 +19,15 @@ function isInvalidBlockRangesError(
   err: unknown,
 ): err is { error: { code: number; message: string } } {
   return !!(
-    err instanceof Error &&
-    'error' in err &&
-    typeof err.error === 'object' &&
-    err.error &&
-    'message' in err.error &&
-    err.error.message === 'invalid block range params'
+    (
+      err instanceof Error &&
+      (('error' in err &&
+        typeof err.error === 'object' &&
+        err.error &&
+        'code' in err.error &&
+        err.error.code === -32602) ||
+        err.message.match(/-32602\b/g))
+    ) // err: invalid block range params
   )
 }
 
@@ -61,20 +64,20 @@ export async function* getEvmLogs(
     filter.topics = [Array.from(topics)]
   }
 
-  const { number: endBlock } = (await provider.getBlock(filter.endBlock || 'latest'))!
+  filter.page ??= 10e3
+  filter.endBlock ||= 'latest'
+  const { number: endBlock } = (await provider.getBlock(filter.endBlock))!
+  filter.startBlock ??= await getSomeBlockNumberBefore(
+    async (block: number) => (await provider.getBlock(block))!.timestamp, // cached
+    endBlock,
+    filter.startTime!,
+    ctx,
+  )
+  let latestLogBlockNumber = filter.startBlock - 1
 
-  if (filter.startBlock == null && filter.startTime != null) {
-    filter.startBlock = await getSomeBlockNumberBefore(
-      async (block: number) => (await provider.getBlock(block))!.timestamp, // cached
-      endBlock,
-      filter.startTime,
-      ctx,
-    )
-  }
-  let latestLogBlockNumber = filter.startBlock!
   for (const blockRange of blockRangeGenerator({
     ...filter,
-    startBlock: filter.startBlock!,
+    startBlock: filter.startBlock,
     endBlock,
   })) {
     const filter_ = {
@@ -90,18 +93,18 @@ export async function* getEvmLogs(
   }
 
   // watch mode, otherwise return
+  let lastEvent
   while (filter.watch && (!(filter.watch instanceof AbortSignal) || !filter.watch.aborted)) {
     const filter_ = {
-      fromBlock: Math.max(latestLogBlockNumber, endBlock - (filter.page ?? 10e3)) + 1,
-      toBlock: filter.endBlock || 'latest',
+      fromBlock: Math.max(latestLogBlockNumber, endBlock - filter.page) + 1,
+      toBlock: await provider._getBlockTag(filter.endBlock),
       ...(filter.address ? { address: filter.address } : {}),
       ...(filter.topics?.length ? { topics: filter.topics } : {}),
     }
-    logger.debug('evm watch getLogs:', filter_)
+    logger.debug('evm watch getLogs:', { ...filter_, lastEvent })
     const logs = await provider.getLogs(filter_).catch((err) => {
-      if (isInvalidBlockRangesError(err)) {
-        return []
-      }
+      // when querying a tag (e.g. `finalized`), it can be "before" `fromBlock`; threat as empty
+      if (isInvalidBlockRangesError(err)) return []
       throw err
     })
     if (logs.length)
@@ -111,17 +114,18 @@ export async function* getEvmLogs(
     const contAc = new AbortController()
     let contSignal = contAc.signal
     const contEvent =
-      !filter.endBlock || typeof filter.endBlock === 'number' || filter.endBlock == 'latest'
-        ? 'block'
-        : filter.endBlock // finalized | safe
-    const contListener = () => contAc.abort()
+      typeof filter.endBlock === 'number' || filter.endBlock == 'latest' ? 'block' : filter.endBlock // finalized | safe
+    const contListener = (number?: number) => {
+      contAc.abort()
+      lastEvent = [contEvent, number] as const
+    }
     void provider.once(contEvent, contListener)
     if (filter.watch instanceof AbortSignal) {
       if (filter.watch.aborted) break
       contSignal = AbortSignal.any([filter.watch, contSignal])
     }
     try {
-      await signalToPromise(contSignal).catch(() => false)
+      await signalToPromise(contSignal).catch(() => {})
     } finally {
       void provider.off(contEvent, contListener)
     }

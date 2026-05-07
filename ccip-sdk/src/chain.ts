@@ -710,7 +710,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     const watch = abort ? AbortSignal.any([this.abort, abort]) : this.abort
     for await (const l of this.getLogs({
       address: log.address,
-      startBlock: log.blockNumber,
+      startBlock: log.blockNumber - 10,
       endBlock: finality,
       topics: [log.topics[0]!],
       watch,
