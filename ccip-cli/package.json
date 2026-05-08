@@ -35,18 +35,11 @@
     "!**/__mocks__"
   ],
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
     "@types/node": "25.6.0",
     "@types/update-notifier": "^6.0.8",
     "@types/yargs": "17.0.35",
-    "eslint": "^10.2.1",
-    "eslint-plugin-jsdoc": "^62.9.0",
-    "eslint-plugin-prettier": "^5.5.5",
-    "eslint-plugin-tsdoc": "^0.5.2",
-    "prettier": "^3.8.3",
     "tsx": "4.21.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.59.0"
+    "typescript": "6.0.3"
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^6.3.1",
@@ -57,8 +50,11 @@
     "@ledgerhq/hw-app-aptos": "6.37.0",
     "@ledgerhq/hw-app-solana": "7.9.0",
     "@ledgerhq/hw-transport-node-hid": "6.32.0",
+    "@mysten/sui": "^2.16.0",
     "@solana/web3.js": "^1.98.4",
     "@ton-community/ton-ledger": "^7.3.0",
+    "@ton/crypto": "^3.3.0",
+    "@ton/ton": "^16.2.4",
     "bs58": "^6.0.0",
     "ethers": "6.16.0",
     "type-fest": "^5.6.0",

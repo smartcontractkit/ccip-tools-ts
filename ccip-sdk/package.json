@@ -56,22 +56,11 @@
     }
   },
   "devDependencies": {
-    "@depay/web3-mock": "^15.3.0",
-    "@eslint/js": "^10.0.1",
     "@types/bn.js": "^5.2.0",
     "@types/node": "25.6.0",
-    "@types/yargs": "17.0.35",
-    "eslint": "^10.2.1",
-    "eslint-config-prettier": "10.1.8",
-    "eslint-plugin-import-x": "^4.16.2",
-    "eslint-plugin-jsdoc": "^62.9.0",
-    "eslint-plugin-prettier": "^5.5.5",
-    "eslint-plugin-tsdoc": "^0.5.2",
     "ethers-abitype": "1.0.3",
-    "prettier": "^3.8.3",
     "prool": "^0.2.4",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.59.0",
     "viem": "^2.48.4"
   },
   "dependencies": {
@@ -83,7 +72,6 @@
     "@solana/spl-token": "0.4.14",
     "@solana/web3.js": "^1.98.4",
     "@ton/core": "0.63.1",
-    "@ton/crypto": "^3.3.0",
     "@ton/ton": "^16.2.4",
     "abitype": "1.2.4",
     "axios": "1.15.2",

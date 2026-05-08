@@ -525,7 +525,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       let onRamp: Buffer
 
       if (cellBits === 160 || cellBits === 256) {
-        // Raw 20-byte EVM address (no length prefix)
+        // Raw bytes (EVM=20, Solana/Aptos=32) address (no length prefix)
         onRamp = onRampSlice.loadBuffer(cellBits / 8)
       } else {
         // Length-prefixed format: 8-bit length + data
