@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
 import {
+  type CantonConfig,
   type Chain,
   type ChainGetter,
   type ChainTransaction,
@@ -55,13 +56,42 @@ async function collectEndpoints(
   return endpoints
 }
 
+/**
+ * Load and validate a Canton config JSON file.
+ * @param configPath - Path to JSON file, or undefined if not provided.
+ * @param logger - Logger for debug output.
+ * @returns Parsed CantonConfig or undefined.
+ */
+function loadCantonConfig(
+  configPath: string | undefined,
+  logger?: Logger,
+): CantonConfig | undefined {
+  if (!configPath) return undefined
+  if (!existsSync(configPath)) {
+    throw new Error(`Canton config file not found: ${configPath}`)
+  }
+  const raw = readFileSync(configPath, 'utf8')
+  const parsed = JSON.parse(raw) as Record<string, unknown>
+
+  // Validate required fields
+  const required = ['party', 'ccipParty', 'jwt', 'edsUrl', 'transferInstructionUrl'] as const
+  for (const field of required) {
+    if (typeof parsed[field] !== 'string' || !(parsed[field] as string).length) {
+      throw new Error(`Canton config: "${field}" is required and must be a non-empty string`)
+    }
+  }
+
+  logger?.debug('Loaded Canton config from', configPath, 'for party', parsed['party'])
+  return parsed as unknown as CantonConfig
+}
+
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'>,
+  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'> & { cantonConfig?: string },
 ): ChainGetter
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'>,
+  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'> & { cantonConfig?: string },
   txHash: string,
 ): [ChainGetter, Promise<[Chain, ChainTransaction]>]
 
@@ -76,9 +106,10 @@ export function fetchChainsFromRpcs(
  */
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'>,
+  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'> & { cantonConfig?: string },
   txHash?: string,
 ) {
+  const cantonConfig = loadCantonConfig(argv.cantonConfig, ctx.logger)
   const chains: Record<string, Promise<Chain>> = {}
   const pendingChainsCbs: Record<
     string,
@@ -104,6 +135,7 @@ export function fetchChainsFromRpcs(
           abort: ctx.abort,
           apiClient:
             argv.api === false ? null : typeof argv.api === 'string' ? argv.api : undefined,
+          ...(cantonConfig && { cantonConfig }),
         })
         chains$.push(chain$)
 
@@ -207,7 +239,7 @@ export function fetchChainsFromRpcs(
  */
 export async function loadChainWallet(
   chain: Chain,
-  argv: { wallet?: unknown; rpcsFile?: string; interactive?: boolean },
+  argv: { wallet?: unknown; rpcsFile?: string; interactive?: boolean; cantonConfig?: string },
   logger?: Logger,
 ) {
   // Centralized wallet resolution: check env vars first, then rpcsFile
@@ -246,6 +278,16 @@ export async function loadChainWallet(
         logger,
       )
       return [wallet.getAddress(), wallet] as const
+    case ChainFamily.Canton: {
+      const cantonCfg = loadCantonConfig(argv.cantonConfig, logger)
+      const party = (typeof argv.wallet === 'string' && argv.wallet) || cantonCfg?.party
+      if (!party) {
+        throw new Error(
+          'Canton wallet requires a party ID: provide --wallet <party> or --canton-config with a "party" field',
+        )
+      }
+      return [party, { party }] as const
+    }
     default:
       // TypeScript exhaustiveness check - this should never be reached
       throw new CCIPChainFamilyUnsupportedError((chain.network as { family: string }).family)
