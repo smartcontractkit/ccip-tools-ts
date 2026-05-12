@@ -4,13 +4,12 @@ import { describe, it, mock } from 'node:test'
 import { type Cell, Address, Dictionary, beginCell, toNano } from '@ton/core'
 import type { TonClient } from '@ton/ton'
 
-import '../index.ts'
-import { type ExecutionInput, ChainFamily } from '../types.ts'
+import { ChainFamily, networkInfo } from '../index.ts'
+import type { ExecutionInput } from '../types.ts'
 import { TONChain } from './index.ts'
 import { type TONWallet, MANUALLY_EXECUTE_OPCODE } from './types.ts'
 import { crc32 } from './utils.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import { networkInfo } from '../utils.ts'
 
 describe('TON index unit tests', () => {
   // Test constants from chainlink-ton test suite

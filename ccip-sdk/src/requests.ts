@@ -15,24 +15,23 @@ import {
 } from './errors/index.ts'
 import type { EVMChain } from './evm/index.ts'
 import { decodeExtraArgs, decodeFinalityRequested } from './extra-args.ts'
+import { ChainFamily, networkInfo } from './networks.ts'
 import { supportedChains } from './supported-chains.ts'
-import {
-  type AnyMessage,
-  type CCIPMessage,
-  type CCIPRequest,
-  type CCIPVersion,
-  type ChainLog,
-  type ChainTransaction,
-  type Lane,
-  type MessageInput,
-  ChainFamily,
+import type {
+  AnyMessage,
+  CCIPMessage,
+  CCIPRequest,
+  CCIPVersion,
+  ChainLog,
+  ChainTransaction,
+  Lane,
+  MessageInput,
 } from './types.ts'
 import {
   convertKeysToCamelCase,
   decodeAddress,
   getDataBytes,
   leToBigInt,
-  networkInfo,
   parseJson,
 } from './utils.ts'
 
@@ -217,7 +216,11 @@ export function buildMessageForDest(message: MessageInput, dest: ChainFamily): A
  *
  * @internal
  */
-async function resolveLane(source: Chain, message: CCIPMessage, log: ChainLog): Promise<Lane> {
+export async function resolveLane(
+  source: Chain,
+  message: CCIPMessage,
+  log: ChainLog,
+): Promise<Lane> {
   if ('destChainSelector' in message) {
     const [_, version] = await source.typeAndVersion(log.address)
     return {

@@ -5,8 +5,9 @@ import { CCIPExtraArgsInvalidError } from '../errors/index.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
 import type { CCIPMessage, CCIPVersion, WithLogger } from '../types.ts'
-import { getAddressBytes, getDataBytes, networkInfo } from '../utils.ts'
+import { getAddressBytes, getDataBytes } from '../utils.ts'
 import { defaultAbiCoder } from './const.ts'
+import { networkInfo } from '../networks.ts'
 
 const METADATA_PREFIX_1_2 = id('EVM2EVMMessageHashV2')
 

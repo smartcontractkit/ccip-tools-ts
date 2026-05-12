@@ -16,12 +16,13 @@ import { hexlify } from 'ethers'
 import { CCIPError } from '../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../errors/codes.ts'
 import { CCIPSolanaLookupTableNotFoundError } from '../errors/index.ts'
-import { type ExecutionInput, type WithLogger, ChainFamily } from '../types.ts'
+import type { ExecutionInput, WithLogger } from '../types.ts'
 import { bytesToBuffer, getAddressBytes, getDataBytes, toLeArray } from '../utils.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
 import type { CCIPMessage_V1_6_Solana, UnsignedSolanaTx } from './types.ts'
 import { simulateTransaction, simulationProvider } from './utils.ts'
+import { ChainFamily } from '../networks.ts'
 
 type ExecAlt = {
   initialIxs: TransactionInstruction[]

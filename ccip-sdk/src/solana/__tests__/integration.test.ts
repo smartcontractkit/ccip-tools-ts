@@ -4,10 +4,9 @@ import { after, before, describe, it } from 'node:test'
 
 import { Connection, PublicKey } from '@solana/web3.js'
 
-import '../../index.ts' // register chains
 import { EVMChain } from '../../evm/index.ts'
 import { discoverOffRamp } from '../../execution.ts'
-import { networkInfo } from '../../utils.ts'
+import { networkInfo } from '../../index.ts'
 import {
   FUJI_TO_SOLANA,
   SOLANA_ESTIMATE_RECEIVER_MESSAGE,

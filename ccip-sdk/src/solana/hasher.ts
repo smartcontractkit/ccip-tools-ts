@@ -18,8 +18,9 @@ import {
 } from '../errors/index.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/index.ts'
+import { networkInfo } from '../networks.ts'
 import { type CCIPMessage, type Lane, type WithLogger, CCIPVersion } from '../types.ts'
-import { getAddressBytes, getDataBytes, networkInfo, toLeArray } from '../utils.ts'
+import { getAddressBytes, getDataBytes, toLeArray } from '../utils.ts'
 
 const SvmExtraArgsSchema = {
   struct: {

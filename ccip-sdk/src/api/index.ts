@@ -19,13 +19,10 @@ import {
   type ExecutionInput,
   type Lane,
   type Logger,
-  type NetworkInfo,
   type OffchainTokenData,
   type WithLogger,
   CCIPVersion,
-  ChainFamily,
   MessageStatus,
-  NetworkType,
 } from '../types.ts'
 import { bigIntReviver, decodeAddress, fetchWithTimeout, parseJson } from '../utils.ts'
 import type {
@@ -41,6 +38,7 @@ import type {
   RawNetworkInfo,
 } from './types.ts'
 import { calculateManualExecProof } from '../execution.ts'
+import { type NetworkInfo, ChainFamily, NetworkType } from '../networks.ts'
 
 export type {
   APICCIPRequestMetadata,

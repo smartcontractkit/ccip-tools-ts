@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
-import './index.ts'
 import { NATIVE_MINT } from '@solana/spl-token'
 import { dataLength } from 'ethers'
 
 import { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
 import { CCIPHttpError, CCIPTimeoutError } from './errors/index.ts'
-import { ChainFamily } from './types.ts'
+import { ChainFamily } from './index.ts'
+import { networkInfo } from './networks.ts'
 import {
   bigIntReplacer,
   bigIntReviver,
@@ -21,7 +21,6 @@ import {
   getSomeBlockNumberBefore,
   isBase64,
   leToBigInt,
-  networkInfo,
   parseTypeAndVersion,
   sleep,
   snakeToCamel,

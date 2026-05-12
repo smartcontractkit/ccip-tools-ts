@@ -58,31 +58,6 @@ export type MergeArrayElements<T, U> = {
 }
 
 /**
- * Enumeration of supported blockchain families.
- */
-export const ChainFamily = {
-  EVM: 'EVM',
-  Solana: 'SVM',
-  Aptos: 'APTOS',
-  Sui: 'SUI',
-  TON: 'TON',
-  Canton: 'CANTON',
-  Unknown: 'UNKNOWN',
-} as const
-/** Type representing one of the supported chain families. */
-export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
-
-/**
- * Enumeration of network types (mainnet vs testnet).
- */
-export const NetworkType = {
-  Mainnet: 'MAINNET',
-  Testnet: 'TESTNET',
-} as const
-/** Type representing the network environment type. */
-export type NetworkType = (typeof NetworkType)[keyof typeof NetworkType]
-
-/**
  * Enumeration of supported CCIP protocol versions.
  */
 export const CCIPVersion = {
@@ -93,40 +68,6 @@ export const CCIPVersion = {
 } as const
 /** Type representing one of the supported CCIP versions. */
 export type CCIPVersion = (typeof CCIPVersion)[keyof typeof CCIPVersion]
-
-/** Helper type that maps chain family to its chain ID format. */
-type ChainFamilyWithId<F extends ChainFamily> = F extends
-  | typeof ChainFamily.EVM
-  | typeof ChainFamily.TON
-  ? { readonly family: F; readonly chainId: number }
-  : F extends typeof ChainFamily.Solana | typeof ChainFamily.Canton
-    ? { readonly family: F; readonly chainId: string }
-    : F extends typeof ChainFamily.Aptos | typeof ChainFamily.Sui
-      ? { readonly family: F; readonly chainId: `${Lowercase<F>}:${number}` }
-      : never
-
-/**
- * Network information including chain selector and metadata.
- *
- * @example
- * ```typescript
- * const info: NetworkInfo = {
- *   chainSelector: 16015286601757825753n,
- *   name: 'ethereum-testnet-sepolia',
- *   networkType: 'TESTNET',
- *   family: 'EVM',
- *   chainId: 11155111,
- * }
- * ```
- */
-export type NetworkInfo<F extends ChainFamily = ChainFamily> = {
-  /** Unique chain selector used by CCIP. */
-  readonly chainSelector: bigint
-  /** Human-readable network name. */
-  readonly name: string
-  /** Network environment type. */
-  readonly networkType: NetworkType
-} & ChainFamilyWithId<F>
 
 /**
  * CCIP lane configuration connecting source and destination chains.

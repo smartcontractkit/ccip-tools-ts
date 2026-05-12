@@ -1,4 +1,4 @@
-import type { ChainFamily, NetworkType } from './types.ts'
+import type { ChainFamily, NetworkType } from './networks.ts'
 
 type Selectors = Record<
   string,
@@ -10,7 +10,7 @@ type Selectors = Record<
   }
 >
 
-const selectors: Selectors = {
+const SELECTORS: Selectors = {
   // generate:
   // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors.yml')
   //   .then((res) => res.text())
@@ -1791,4 +1791,4 @@ const selectors: Selectors = {
   // end:generate
 }
 
-export default selectors
+export default SELECTORS

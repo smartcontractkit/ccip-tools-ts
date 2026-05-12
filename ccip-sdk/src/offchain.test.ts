@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
+import { NetworkType } from './networks.ts'
 import { getLbtcAttestation, getOffchainTokenData, getUsdcAttestation } from './offchain.ts'
-import { NetworkType } from './types.ts'
 
 const origFetch = globalThis.fetch
 

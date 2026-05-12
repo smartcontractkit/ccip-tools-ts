@@ -36,32 +36,30 @@ import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessage, getMessagesInBatch } from '../requests.ts'
 import { decodeMoveExtraArgs, getMoveAddress } from '../shared/bcs-codecs.ts'
 import { supportedChains } from '../supported-chains.ts'
-import {
-  type AnyMessage,
-  type CCIPExecution,
-  type CCIPMessage,
-  type CCIPRequest,
-  type ChainLog,
-  type ChainTransaction,
-  type CommitReport,
-  type ExecutionInput,
-  type ExecutionReceipt,
-  type ExecutionState,
-  type Lane,
-  type NetworkInfo,
-  type WithLogger,
-  ChainFamily,
+import type {
+  AnyMessage,
+  CCIPExecution,
+  CCIPMessage,
+  CCIPRequest,
+  ChainLog,
+  ChainTransaction,
+  CommitReport,
+  ExecutionInput,
+  ExecutionReceipt,
+  ExecutionState,
+  Lane,
+  WithLogger,
 } from '../types.ts'
 import {
   decodeAddress,
   decodeOnRampAddress,
   getDataBytes,
-  networkInfo,
   parseTypeAndVersion,
   util,
 } from '../utils.ts'
 import { generateUnsignedExecutePTB, signAndExecuteSuiTx } from './exec.ts'
 import type { CCIPMessage_V1_6_Sui, UnsignedSuiTx } from './types.ts'
+import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 export type { UnsignedSuiTx }
 
 const DEFAULT_GAS_LIMIT = 1000000n

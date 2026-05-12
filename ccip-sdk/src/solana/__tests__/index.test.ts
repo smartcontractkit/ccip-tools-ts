@@ -3,7 +3,7 @@ import { beforeEach, describe, it, mock } from 'node:test'
 
 import { type Connection, PublicKey } from '@solana/web3.js'
 
-import { type NetworkInfo, ChainFamily, NetworkType } from '../../types.ts'
+import { type NetworkInfo, ChainFamily, NetworkType } from '../../networks.ts'
 import { SolanaChain } from '../index.ts'
 
 // Create mock functions

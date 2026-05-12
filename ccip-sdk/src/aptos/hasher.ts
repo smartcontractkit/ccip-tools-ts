@@ -6,9 +6,10 @@ import {
 } from '../errors/index.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
+import { networkInfo } from '../networks.ts'
 import { encodeNumber, encodeRawBytes } from '../shared/bcs-codecs.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
-import { getAddressBytes, networkInfo } from '../utils.ts'
+import { getAddressBytes } from '../utils.ts'
 
 /**
  * Creates a leaf hasher for Aptos CCIP messages.

@@ -1,7 +1,7 @@
 import { CCIPChainFamilyUnsupportedError } from '../errors/index.ts'
+import { networkInfo } from '../networks.ts'
 import { supportedChains } from '../supported-chains.ts'
 import type { CCIPVersion, Lane, WithLogger } from '../types.ts'
-import { networkInfo } from '../utils.ts'
 import type { LeafHasher } from './common.ts'
 
 /**

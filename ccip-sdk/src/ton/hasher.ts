@@ -10,8 +10,9 @@ import {
 import { decodeExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
-import { getAddressBytes, networkInfo } from '../utils.ts'
+import { getAddressBytes } from '../utils.ts'
 import { tryParseCell } from './utils.ts'
+import { networkInfo } from '../networks.ts'
 
 // TON uses 256 bits (32 bytes) of zeros as leaf domain separator
 const TON_LEAF_DOMAIN_SEPARATOR = 0n

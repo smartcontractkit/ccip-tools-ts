@@ -8,7 +8,8 @@ import { CCIPApiClientNotAvailableError } from './errors/index.ts'
 import { estimateExecGas } from './evm/gas.ts'
 import { EVMChain } from './evm/index.ts'
 import { estimateReceiveExecution } from './gas.ts'
-import { CCIPVersion, ChainFamily, NetworkType } from './types.ts'
+import { ChainFamily, NetworkType } from './networks.ts'
+import { CCIPVersion } from './types.ts'
 
 // Test doubles - we create mock chain objects that implement the minimal interface needed
 // The discoverOffRamp function performs a complex cross-check between chains, so we need

@@ -30,6 +30,7 @@ import type {
 import type { EstimateMessageInput } from './gas.ts'
 import type { LeafHasher } from './hasher/common.ts'
 import { decodeMessageV1 } from './messages.ts'
+import { type ChainFamily, type NetworkInfo, networkInfo } from './networks.ts'
 import { getOffchainTokenData } from './offchain.ts'
 import { getMessagesInRange, getMessagesInTx } from './requests.ts'
 import { DEFAULT_GAS_LIMIT } from './shared/constants.ts'
@@ -43,7 +44,6 @@ import {
   type CCIPRequest,
   type CCIPVerifications,
   type CCIPVersion,
-  type ChainFamily,
   type ChainLog,
   type ChainTransaction,
   type CommitReport,
@@ -52,12 +52,11 @@ import {
   type Lane,
   type Logger,
   type MessageInput,
-  type NetworkInfo,
   type OffchainTokenData,
   type WithLogger,
   ExecutionState,
 } from './types.ts'
-import { networkInfo, util, withRetry } from './utils.ts'
+import { util, withRetry } from './utils.ts'
 
 /** All valid field names for GenericExtraArgsV2. */
 const V2_FIELDS = new Set(['gasLimit', 'allowOutOfOrderExecution'])

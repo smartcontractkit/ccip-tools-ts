@@ -11,9 +11,9 @@ import {
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
-import { ChainFamily } from '../types.ts'
 import { bigIntReplacer, bytesToBuffer, decodeAddress, getAddressBytes } from '../utils.ts'
 import { asSnakedCell, fromSnakeData } from './utils.ts'
+import { ChainFamily } from '../networks.ts'
 
 /**
  * Checks if extraArgs is SVMExtraArgsV1 format.

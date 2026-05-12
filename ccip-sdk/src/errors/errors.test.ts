@@ -3,12 +3,12 @@ import { describe, it } from 'node:test'
 
 import { CCIPError } from './CCIPError.ts'
 import { CCIPErrorCode, TRANSIENT_ERROR_CODES, isTransientError } from './codes.ts'
+import { CCIPChainNotFoundError } from './pure.ts'
 import { DEFAULT_RECOVERY_HINTS, getDefaultRecovery } from './recovery.ts'
 import {
   CCIPAptosTransactionInvalidError,
   CCIPBlockNotFoundError,
   CCIPChainFamilyUnsupportedError,
-  CCIPChainNotFoundError,
   CCIPCommitNotFoundError,
   CCIPContractTypeInvalidError,
   CCIPExecTxNotConfirmedError,

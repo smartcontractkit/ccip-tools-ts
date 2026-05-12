@@ -8,7 +8,7 @@ import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 import type { Chain, LogFilter } from './chain.ts'
 import { CCIPAddressInvalidError, CCIPArgumentInvalidError } from './errors/specialized.ts'
 import type { GenericExtraArgsV3 } from './extra-args.ts'
-import { EVMChain } from './index.ts'
+import { ChainFamily, EVMChain, networkInfo } from './index.ts'
 import {
   buildMessageForDest,
   decodeMessage,
@@ -27,9 +27,8 @@ import {
   type ChainTransaction,
   type Lane,
   CCIPVersion,
-  ChainFamily,
 } from './types.ts'
-import { bigIntReplacer, networkInfo } from './utils.ts'
+import { bigIntReplacer } from './utils.ts'
 
 let rampAddress: string
 
@@ -533,7 +532,7 @@ describe('getMessagesInRange', () => {
             timestamp: 1234567890,
             from: '0x0000000000000000000000000000000000000001',
           },
-        } as ChainLog
+        }
         yield {
           address: rampAddress,
           index: 2,
@@ -541,7 +540,7 @@ describe('getMessagesInRange', () => {
           data: { notAMessage: true }, // non-CCIP log
           blockNumber: 12000,
           transactionHash: '0x222',
-        } as unknown as ChainLog
+        }
         yield {
           address: rampAddress,
           index: 3,
@@ -556,7 +555,7 @@ describe('getMessagesInRange', () => {
             timestamp: 1234567891,
             from: '0x0000000000000000000000000000000000000002',
           },
-        } as ChainLog
+        }
       })(),
     )
 
@@ -633,7 +632,7 @@ describe('getMessagesInRange', () => {
             timestamp: 1234567890,
             from: '0x0000000000000000000000000000000000000001',
           },
-        } as ChainLog
+        }
       })(),
     )
 
@@ -709,7 +708,7 @@ describe('getMessagesInRange', () => {
           blockNumber: 12000,
           transactionHash: '0xNoTxLog',
           // no tx field
-        } as ChainLog
+        }
       })(),
     )
 

@@ -2,8 +2,8 @@ import { type BytesLike, dataSlice, hexlify, toBigInt, toNumber } from 'ethers'
 
 import { CCIPMessageDecodeError } from './errors/index.ts'
 import { type FinalityRequested, decodeFinalityRequested } from './extra-args.ts'
-import type { ChainFamily } from './types.ts'
-import { decodeAddress, getDataBytes, networkInfo } from './utils.ts'
+import { type ChainFamily, networkInfo } from './networks.ts'
+import { decodeAddress, getDataBytes } from './utils.ts'
 
 /** Token transfer in MessageV1 format. */
 export type TokenTransferV1 = {

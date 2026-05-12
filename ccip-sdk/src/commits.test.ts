@@ -9,6 +9,7 @@ import { Chain } from './chain.ts'
 import { getOnchainCommitReport } from './commits.ts'
 import CommitStore_1_2_ABI from './evm/abi/CommitStore_1_2.ts'
 import OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
+import { ChainFamily, networkInfo } from './networks.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
@@ -18,9 +19,7 @@ import {
   type ExecutionState,
   type Lane,
   CCIPVersion,
-  ChainFamily,
 } from './types.ts'
-import { networkInfo } from './utils.ts'
 
 // Mock Chain class for testing
 class MockChain extends Chain {

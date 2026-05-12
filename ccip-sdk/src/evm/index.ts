@@ -80,11 +80,8 @@ import {
   type ExecutionReceipt,
   type ExecutionState,
   type Lane,
-  type NetworkInfo,
   type WithLogger,
   CCIPVersion,
-  ChainFamily,
-  NetworkType,
 } from '../types.ts'
 import {
   decodeAddress,
@@ -93,7 +90,6 @@ import {
   getAddressBytes,
   getDataBytes,
   getSomeBlockNumberBefore,
-  networkInfo,
   parseTypeAndVersion,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
@@ -133,6 +129,7 @@ import { type EVMEndBlockTag, getEvmLogs } from './logs.ts'
 import type { CCIPMessage_V1_6_EVM, CCIPMessage_V2_0, CleanAddressable } from './messages.ts'
 import { encodeEVMOffchainTokenData } from './offchain.ts'
 import { type UnsignedEVMTx, resultToObject } from './types.ts'
+import { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from '../networks.ts'
 export type { UnsignedEVMTx }
 
 /** Raw on-chain TokenBucket struct returned by TokenPool rate limiter queries. */
@@ -540,11 +537,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     } else fragments = Object.values(receiptsFragments)
     for (const fragment of fragments) {
       try {
-        const result = interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
+        const result = resultToObject(
+          interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics),
+        ) as unknown as {
+          [k: string]: unknown
+          state: bigint
+          messageNumber?: bigint
+          sequenceNumber: bigint
+        }
+        result.sequenceNumber = result.messageNumber ?? result.sequenceNumber
         return {
-          ...result.toObject(),
-          // ...(fragment.inputs.filter((p) => p.indexed).map((p, i) => [p.name, log.topics[i+1]] as const)).
-          state: Number(result.state as bigint) as ExecutionState,
+          ...result,
+          state: Number(result.state) as ExecutionState,
         } as ExecutionReceipt
       } catch (_) {
         // continue

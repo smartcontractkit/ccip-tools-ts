@@ -1,4 +1,5 @@
-import type { MessageStatus, NetworkInfo } from '../types.ts'
+import type { NetworkInfo } from '../networks.ts'
+import type { MessageStatus } from '../types.ts'
 
 /**
  * Response from GET /v2/lanes/latency endpoint.

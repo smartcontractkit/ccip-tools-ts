@@ -4,7 +4,7 @@ import { beforeEach, describe, it } from 'node:test'
 import { ErrorFragment, EventFragment, FunctionFragment, Result } from 'ethers'
 
 import { getErrorData, parseWithFragment, recursiveParseError } from './errors.ts'
-import { networkInfo } from '../utils.ts'
+import { networkInfo } from '../networks.ts'
 
 beforeEach(() => {
   // No mocks to clear in this test file

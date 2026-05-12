@@ -3,7 +3,8 @@ import { hexlify, toBeHex } from 'ethers'
 
 import { CCIPError, CCIPErrorCode } from '../errors/index.ts'
 import { CCIPTransactionNotFoundError } from '../errors/specialized.ts'
-import { type WithLogger, NetworkType } from '../types.ts'
+import { NetworkType } from '../networks.ts'
+import type { WithLogger } from '../types.ts'
 import { bytesToBuffer } from '../utils.ts'
 
 /**

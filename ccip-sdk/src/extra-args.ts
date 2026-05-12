@@ -2,8 +2,8 @@ import { type BytesLike, id, toNumber } from 'ethers'
 
 import type { CantonExtraArgsV1 } from './canton/types.ts'
 import { CCIPChainFamilyUnsupportedError, CCIPExtraArgsParseError } from './errors/index.ts'
+import { ChainFamily } from './networks.ts'
 import { supportedChains } from './supported-chains.ts'
-import { ChainFamily } from './types.ts'
 
 /** Tag identifier for EVMExtraArgsV1 encoding. */
 export const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'

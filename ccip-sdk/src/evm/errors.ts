@@ -13,8 +13,7 @@ import {
 
 import { defaultAbiCoder, interfaces } from './const.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
-import { ChainFamily } from '../types.ts'
-import { networkInfo } from '../utils.ts'
+import { ChainFamily, networkInfo } from '../networks.ts'
 
 /**
  * Get error data from an error object, if possible
