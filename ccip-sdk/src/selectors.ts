@@ -775,6 +775,12 @@ const SELECTORS: Selectors = {
     network_type: 'MAINNET',
     family: 'EVM',
   },
+  '4663': {
+    selector: 6180753054346818345n,
+    name: 'robinhood-mainnet',
+    network_type: 'MAINNET',
+    family: 'EVM',
+  },
   '4801': {
     selector: 5299555114858065850n,
     name: 'ethereum-testnet-sepolia-worldchain-1',
