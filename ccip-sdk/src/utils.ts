@@ -11,7 +11,6 @@ import {
   toBeArray,
   toBigInt,
 } from 'ethers'
-import { memoize } from 'micro-memoize'
 import yaml from 'yaml'
 
 import type { Chain, ChainStatic } from './chain.ts'
@@ -19,7 +18,6 @@ import {
   CCIPAbortError,
   CCIPBlockBeforeTimestampNotFoundError,
   CCIPChainFamilyUnsupportedError,
-  CCIPChainNotFoundError,
   CCIPDataFormatUnsupportedError,
   CCIPError,
   CCIPHttpError,
@@ -28,9 +26,9 @@ import {
   HttpStatus,
 } from './errors/index.ts'
 import { getRetryDelay, shouldRetry } from './errors/utils.ts'
-import SELECTORS from './selectors.ts'
+import { ChainFamily } from './networks.ts'
 import { supportedChains } from './supported-chains.ts'
-import { type NetworkInfo, type WithLogger, ChainFamily } from './types.ts'
+import type { WithLogger } from './types.ts'
 
 /**
  * Returns *some* block number with timestamp prior to `timestamp`
@@ -111,88 +109,6 @@ export async function getSomeBlockNumberBefore(
   }
   return beforeBlockNumber
 }
-
-/**
- * Converts a chain ID to complete NetworkInfo.
- * Memoized to return the same object reference for a given chainId.
- */
-const networkInfoFromChainId = memoize((chainId: NetworkInfo['chainId']): NetworkInfo => {
-  const sel = SELECTORS[chainId]
-  if (!sel?.name) throw new CCIPChainNotFoundError(chainId)
-  return {
-    chainId: isNaN(+chainId) ? chainId : +chainId,
-    chainSelector: sel.selector,
-    name: sel.name,
-    family: sel.family,
-    networkType: sel.network_type,
-  } as NetworkInfo
-})
-
-/**
- * Converts a chain selector, chain ID, or chain name to complete network information
- *
- * @param selectorOrIdOrName - Can be:
- *   - Chain selector as bigint or numeric string
- *   - Chain ID as number, bigint or string (EVM: "1", Aptos: "aptos:1", Solana: genesisHash)
- *   - Chain name as string ("ethereum-mainnet")
- * @returns Complete NetworkInfo object
- * @throws {@link CCIPChainNotFoundError} if chain is not found
- *
- * @example
- * ```typescript
- * import { networkInfo } from '@chainlink/ccip-sdk'
- *
- * // By chain name
- * const sepolia = networkInfo('ethereum-testnet-sepolia')
- * console.log('Selector:', sepolia.chainSelector)
- *
- * // By chain selector
- * const fuji = networkInfo(14767482510784806043n)
- * console.log('Name:', fuji.name) // 'avalanche-testnet-fuji'
- *
- * // By chain ID
- * const mainnet = networkInfo(1)
- * console.log('Family:', mainnet.family) // 'EVM'
- * ```
- */
-export const networkInfo = memoize(function networkInfo_(
-  selectorOrIdOrName: bigint | number | string,
-): NetworkInfo {
-  let chainId, match
-  if (typeof selectorOrIdOrName === 'number') {
-    chainId = selectorOrIdOrName
-  } else if (
-    typeof selectorOrIdOrName === 'string' &&
-    (match = selectorOrIdOrName.match(/^(-?\d+)n?$/))
-  ) {
-    selectorOrIdOrName = BigInt(match[1]!)
-  }
-  if (typeof selectorOrIdOrName === 'bigint') {
-    // maybe we got a chainId deserialized as bigint
-    if (selectorOrIdOrName.toString() in SELECTORS) {
-      chainId = Number(selectorOrIdOrName)
-    } else {
-      for (const id in SELECTORS) {
-        if (SELECTORS[id]!.selector === selectorOrIdOrName) {
-          chainId = id
-          break
-        }
-      }
-      if (!chainId) throw new CCIPChainNotFoundError(selectorOrIdOrName)
-    }
-  } else if (typeof selectorOrIdOrName === 'string') {
-    if (selectorOrIdOrName.includes('-', 1)) {
-      for (const id in SELECTORS) {
-        if (SELECTORS[id]!.name === selectorOrIdOrName) {
-          chainId = id
-          break
-        }
-      }
-    }
-    chainId ??= selectorOrIdOrName
-  }
-  return networkInfoFromChainId(chainId as string | number)
-})
 
 const BLOCK_RANGE = 10_000
 /**

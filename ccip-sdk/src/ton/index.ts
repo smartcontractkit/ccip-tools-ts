@@ -43,17 +43,14 @@ import {
   type ExecutionInput,
   type ExecutionReceipt,
   type Lane,
-  type NetworkInfo,
   type WithLogger,
   CCIPVersion,
-  ChainFamily,
   ExecutionState,
 } from '../types.ts'
 import {
   bytesToBuffer,
   createRateLimitedFetch,
   decodeAddress,
-  networkInfo,
   parseTypeAndVersion,
 } from '../utils.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
@@ -66,6 +63,7 @@ import { getTONLeafHasher } from './hasher.ts'
 import { type UnsignedTONTx, isTONWallet } from './types.ts'
 import { crc32, lookupTxByRawHash, parseJettonContent } from './utils.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
+import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 export type { TONWallet, UnsignedTONTx } from './types.ts'
 
 /**

@@ -3,7 +3,8 @@ import { toBigInt } from 'ethers'
 
 import { CCIPDataFormatUnsupportedError } from '../errors/specialized.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import type { CCIPMessage_V1_6, ChainFamily, ExecutionInput } from '../types.ts'
+import type { ChainFamily } from '../networks.ts'
+import type { CCIPMessage_V1_6, ExecutionInput } from '../types.ts'
 import { bytesToBuffer, getAddressBytes } from '../utils.ts'
 
 /** Opcode for OffRamp_ManuallyExecute message on TON */

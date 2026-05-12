@@ -26,8 +26,8 @@ import {
   decodeFinalityRequested,
   encodeFinality,
 } from '../extra-args.ts'
+import { ChainFamily } from '../networks.ts'
 import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
-import { ChainFamily } from '../types.ts'
 import { decodeAddress, getAddressBytes, getDataBytes } from '../utils.ts'
 import { defaultAbiCoder } from './const.ts'
 import { resultToObject } from './types.ts'

@@ -10,7 +10,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { mainnet, sepolia } from 'viem/chains'
 
 import { ViemTransportProvider, fromViemClient, viemWallet } from './index.ts'
-import { ChainFamily } from '../../types.ts'
+import { ChainFamily } from '../../networks.ts'
 import { createMockEthereumProvider } from '../__mocks__/ethereum-provider.ts'
 
 describe('SDK Integration - Viem Browser (custom transport)', () => {

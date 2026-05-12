@@ -19,8 +19,10 @@ import {
   CCIPNotImplementedError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
+import { CCV_INDEXER_URL } from '../evm/const.ts'
 import type { ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { getMessagesInBatch } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -33,14 +35,11 @@ import {
   type CommitReport,
   type ExecutionReceipt,
   type Lane,
-  type NetworkInfo,
   type OffchainTokenData,
   type VerifierResult,
   type WithLogger,
   CCIPVersion,
-  ChainFamily,
 } from '../types.ts'
-import { networkInfo } from '../utils.ts'
 import {
   type CantonClient,
   type JsCommands,
@@ -51,7 +50,6 @@ import { parseCantonExecutionReceipt, parseCantonSendResult, resolveTimestamp } 
 import { AcsDisclosureProvider } from './explicit-disclosures/acs.ts'
 import { type EdsMessage, EdsDisclosureProvider } from './explicit-disclosures/eds.ts'
 import type { DisclosedContract } from './explicit-disclosures/types.ts'
-import { CCV_INDEXER_URL } from '../evm/const.ts'
 import { type TokenMetadataClient, createTokenMetadataClient } from './token-metadata/client.ts'
 import {
   type TransferInstructionClient,

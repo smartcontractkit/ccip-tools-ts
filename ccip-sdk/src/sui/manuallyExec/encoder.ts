@@ -5,8 +5,9 @@ import type { BytesLike } from 'ethers'
 
 import { CCIPMessageInvalidError } from '../../errors/specialized.ts'
 import { decodeExtraArgs } from '../../extra-args.ts'
+import { networkInfo } from '../../networks.ts'
 import type { CCIPMessage, CCIPVersion, ExecutionInput } from '../../types.ts'
-import { bytesToBuffer, getAddressBytes, getDataBytes, networkInfo } from '../../utils.ts'
+import { bytesToBuffer, getAddressBytes, getDataBytes } from '../../utils.ts'
 
 const Any2SuiTokenTransferBCS = bcs.struct('Any2SuiTokenTransfer', {
   source_pool_address: bcs.vector(bcs.u8()),

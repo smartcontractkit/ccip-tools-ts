@@ -4,14 +4,13 @@ import { describe, it } from 'node:test'
 import { dataSlice, getNumber } from 'ethers'
 
 // Import index.ts to ensure all Chain classes are loaded and registered
-import './index.ts'
 import {
   type GenericExtraArgsV3,
   EVMExtraArgsV2Tag,
   decodeExtraArgs,
   encodeExtraArgs,
 } from './extra-args.ts'
-import { ChainFamily } from './types.ts'
+import { ChainFamily } from './index.ts'
 
 describe('encodeExtraArgs', () => {
   describe('EVM extra args', () => {

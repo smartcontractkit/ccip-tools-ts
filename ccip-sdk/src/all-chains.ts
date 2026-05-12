@@ -7,10 +7,10 @@
 import { AptosChain } from './aptos/index.ts'
 import { CantonChain } from './canton/index.ts'
 import { EVMChain } from './evm/index.ts'
+import { ChainFamily } from './networks.ts'
 import { SolanaChain } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'
-import { ChainFamily } from './types.ts'
 
 /**
  * Map of all supported chain families to their implementations.

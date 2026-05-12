@@ -75,6 +75,7 @@ import {
   EVMExtraArgsV2Tag,
 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import SELECTORS from '../selectors.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -90,10 +91,8 @@ import {
   type ExecutionReceipt,
   type Lane,
   type MergeArrayElements,
-  type NetworkInfo,
   type WithLogger,
   CCIPVersion,
-  ChainFamily,
   ExecutionState,
 } from '../types.ts'
 import {
@@ -104,7 +103,6 @@ import {
   getAddressBytes,
   getDataBytes,
   leToBigInt,
-  networkInfo,
   parseTypeAndVersion,
   toLeArray,
   util,

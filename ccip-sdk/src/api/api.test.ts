@@ -18,9 +18,10 @@ import {
   HttpStatus,
 } from '../errors/index.ts'
 import { EVMChain } from '../evm/index.ts'
+import { ChainFamily, NetworkType, networkInfo } from '../networks.ts'
 import { decodeMessage } from '../requests.ts'
-import { CCIPVersion, ChainFamily, NetworkType } from '../types.ts'
-import { bigIntReplacer, networkInfo } from '../utils.ts'
+import { CCIPVersion } from '../types.ts'
+import { bigIntReplacer } from '../utils.ts'
 
 const origFetch = globalThis.fetch
 

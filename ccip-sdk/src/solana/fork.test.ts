@@ -6,12 +6,11 @@ import { after, before, describe, it } from 'node:test'
 import { Wallet as AnchorWallet } from '@coral-xyz/anchor'
 import { Connection, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js'
 
-import '../index.ts' // register chains
 import { CCIPAPIClient } from '../api/index.ts'
 import { ExecutionState, MessageStatus } from '../types.ts'
-import { networkInfo } from '../utils.ts'
 import { ETHEREUM_TO_SOLANA } from './fork.test.data.ts'
 import { SolanaChain } from './index.ts'
+import { networkInfo } from '../index.ts'
 
 // ── Constants ──
 

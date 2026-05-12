@@ -3,39 +3,10 @@ import type { BytesLike } from 'ethers'
 import { type CCIPErrorOptions, CCIPError } from './CCIPError.ts'
 import { CCIPErrorCode } from './codes.ts'
 import { isTransientHttpStatus } from '../http-status.ts'
-import type { ChainFamily } from '../types.ts'
+import type { ChainFamily } from '../networks.ts'
 import { bigIntReplacer, getAddressBytes, util } from '../utils.ts'
 
 // Chain/Network
-
-/**
- * Thrown when chain not found by chainId, selector, or name.
- *
- * @example
- * ```typescript
- * import { networkInfo } from '@chainlink/ccip-sdk'
- *
- * try {
- *   const info = networkInfo(999999) // Unknown chain
- * } catch (error) {
- *   if (error instanceof CCIPChainNotFoundError) {
- *     console.log(`Chain not found: ${error.context.chainIdOrSelector}`)
- *     console.log(`Recovery: ${error.recovery}`)
- *   }
- * }
- * ```
- */
-export class CCIPChainNotFoundError extends CCIPError {
-  override readonly name = 'CCIPChainNotFoundError'
-  /** Creates a chain not found error. */
-  constructor(chainIdOrSelector: string | number | bigint, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.CHAIN_NOT_FOUND, `Chain not found: ${chainIdOrSelector}`, {
-      ...options,
-      isTransient: false,
-      context: { ...options?.context, chainIdOrSelector },
-    })
-  }
-}
 
 /**
  * Thrown when chain family is not supported.

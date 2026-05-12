@@ -1,6 +1,6 @@
 import { type TransactionRequest, Result } from 'ethers'
 
-import type { ChainFamily } from '../types.ts'
+import type { ChainFamily } from '../networks.ts'
 
 /**
  * Type representing a set of unsigned EVM transactions

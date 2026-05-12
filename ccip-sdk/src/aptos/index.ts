@@ -47,6 +47,7 @@ import {
 } from '../extra-args.ts'
 import { type UnsignedAptosTx, isAptosAccount } from './types.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import {
   BcsEVMExtraArgsV2Codec,
   BcsSVMExtraArgsV1Codec,
@@ -54,26 +55,23 @@ import {
   getMoveAddress,
 } from '../shared/bcs-codecs.ts'
 import { supportedChains } from '../supported-chains.ts'
-import {
-  type CCIPExecution,
-  type CCIPMessage,
-  type CCIPRequest,
-  type ChainLog,
-  type ChainTransaction,
-  type CommitReport,
-  type ExecutionInput,
-  type ExecutionReceipt,
-  type Lane,
-  type NetworkInfo,
-  type WithLogger,
-  ChainFamily,
+import type {
+  CCIPExecution,
+  CCIPMessage,
+  CCIPRequest,
+  ChainLog,
+  ChainTransaction,
+  CommitReport,
+  ExecutionInput,
+  ExecutionReceipt,
+  Lane,
+  WithLogger,
 } from '../types.ts'
 import {
   convertKeysToCamelCase,
   decodeAddress,
   decodeOnRampAddress,
   getAddressBytes,
-  networkInfo,
   parseTypeAndVersion,
   util,
 } from '../utils.ts'

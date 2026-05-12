@@ -2,7 +2,8 @@ import { type Aptos, AccountAddress } from '@aptos-labs/ts-sdk'
 import { getBytes, zeroPadValue } from 'ethers'
 
 import { encodeExtraArgs } from '../extra-args.ts'
-import { type AnyMessage, ChainFamily } from '../types.ts'
+import { ChainFamily } from '../networks.ts'
+import type { AnyMessage } from '../types.ts'
 import { getDataBytes } from '../utils.ts'
 
 export const DEFAULT_FEE_TOKEN = '0xa'

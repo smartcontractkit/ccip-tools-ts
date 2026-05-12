@@ -10,7 +10,7 @@ import {
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
-import { NetworkType } from '../types.ts'
+import { NetworkType } from '../networks.ts'
 
 describe('TON utils unit tests', () => {
   describe('tryParseCell', () => {

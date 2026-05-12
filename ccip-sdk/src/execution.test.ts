@@ -9,6 +9,7 @@ import { Chain } from './chain.ts'
 import OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
 import type { CCIPMessage_V1_6_EVM } from './evm/messages.ts'
 import { calculateManualExecProof, discoverOffRamp } from './execution.ts'
+import { ChainFamily, networkInfo } from './networks.ts'
 import { decodeMessage } from './requests.ts'
 import {
   type CCIPExecution,
@@ -20,9 +21,7 @@ import {
   type ExecutionState,
   type Lane,
   CCIPVersion,
-  ChainFamily,
 } from './types.ts'
-import { networkInfo } from './utils.ts'
 
 // Mock Chain class for testing
 class MockChain extends Chain {

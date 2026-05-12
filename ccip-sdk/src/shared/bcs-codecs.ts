@@ -23,7 +23,7 @@ import {
   EVMExtraArgsV2Tag,
   SVMExtraArgsV1Tag,
 } from '../extra-args.ts'
-import { ChainFamily } from '../types.ts'
+import { ChainFamily } from '../networks.ts'
 import { decodeAddress, getDataBytes } from '../utils.ts'
 
 /**

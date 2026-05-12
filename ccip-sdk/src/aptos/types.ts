@@ -8,7 +8,8 @@ import { bcs } from '@mysten/bcs'
 import { getBytes } from 'ethers'
 
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import type { ChainFamily, ExecutionInput } from '../types.ts'
+import type { ChainFamily } from '../networks.ts'
+import type { ExecutionInput } from '../types.ts'
 import { getAddressBytes } from '../utils.ts'
 
 /** Aptos account type with async transaction signing capability. */

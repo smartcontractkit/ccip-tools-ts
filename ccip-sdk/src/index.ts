@@ -77,7 +77,6 @@ export {
   type Lane,
   type Logger,
   type MessageInput,
-  type NetworkInfo,
   type OffchainTokenData,
   type WithLogger,
   CCIPVersion,
@@ -93,7 +92,6 @@ export {
   decodeAddress,
   getDataBytes,
   isSupportedTxHash,
-  networkInfo,
   signalToPromise,
   withRetry,
 } from './utils.ts'
@@ -113,6 +111,7 @@ import { AptosChain } from './aptos/index.ts'
 export type { UnsignedAptosTx } from './aptos/index.ts'
 import { CantonChain } from './canton/index.ts'
 import { EVMChain } from './evm/index.ts'
+export { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from './networks.ts'
 import SELECTORS from './selectors.ts'
 export { SELECTORS }
 export type { UnsignedEVMTx } from './evm/index.ts'
@@ -123,16 +122,6 @@ export type { UnsignedSuiTx } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'
 export type { UnsignedTONTx } from './ton/index.ts'
 export type { CantonWallet, UnsignedCantonTx } from './canton/index.ts'
-import { ChainFamily, NetworkType } from './types.ts'
-export {
-  AptosChain,
-  CantonChain,
-  ChainFamily,
-  EVMChain,
-  NetworkType,
-  SolanaChain,
-  SuiChain,
-  TONChain,
-}
+export { AptosChain, CantonChain, EVMChain, SolanaChain, SuiChain, TONChain }
 // use `supportedChains` to override/register derived classes, if needed
 export { supportedChains } from './supported-chains.ts'
