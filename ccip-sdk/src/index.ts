@@ -29,6 +29,7 @@ export type {
   ChainContext,
   ChainGetter,
   ChainStatic,
+  EvmSourceTxOverrides,
   GetBalanceOpts,
   LaneFeatures,
   LogFilter,

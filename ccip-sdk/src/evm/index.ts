@@ -29,6 +29,7 @@ import type { PickDeep, SetRequired } from 'type-fest'
 
 import {
   type ChainContext,
+  type EvmSourceTxOverrides,
   type GetBalanceOpts,
   type LaneFeatures,
   type LogFilter,
@@ -174,6 +175,24 @@ async function submitTransaction(
     const signed = await wallet.signTransaction(tx)
     return provider.broadcastTransaction(signed)
   }
+}
+
+/** Merge fee overrides after `populateTransaction` (or onto unsigned txs for offline signing). */
+function applyEvmSourceTxOverrides(
+  tx: TransactionRequest,
+  overrides: EvmSourceTxOverrides | undefined,
+): void {
+  if (!overrides) return
+  if (overrides.gasLimit != null) tx.gasLimit = overrides.gasLimit
+  if (overrides.gasPrice != null) {
+    tx.gasPrice = overrides.gasPrice
+    delete tx.maxFeePerGas
+    delete tx.maxPriorityFeePerGas
+    return
+  }
+  if (overrides.maxFeePerGas != null) tx.maxFeePerGas = overrides.maxFeePerGas
+  if (overrides.maxPriorityFeePerGas != null)
+    tx.maxPriorityFeePerGas = overrides.maxPriorityFeePerGas
 }
 
 /**
@@ -1381,6 +1400,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       { from: sender, ...(value > 0n ? { value } : {}) },
     )
     const txRequests = [...approveTxs, sendTx] as SetRequired<typeof sendTx, 'from'>[]
+    if (opts.sourceTxOverrides) {
+      for (const tx of txRequests) applyEvmSourceTxOverrides(tx, opts.sourceTxOverrides)
+    }
     return {
       family: ChainFamily.EVM,
       transactions: txRequests,
@@ -1407,6 +1429,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         try {
           tx = await wallet.populateTransaction(tx)
           tx.from = undefined
+          applyEvmSourceTxOverrides(tx, opts.sourceTxOverrides)
           const response = await submitTransaction(wallet, tx, this.provider)
           this.logger.debug('approve =>', response.hash)
           return response
@@ -1424,6 +1447,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       // sendTx.gasLimit = await this.provider.estimateGas(sendTx)
       sendTx = await wallet.populateTransaction(sendTx)
       sendTx.from = undefined // some signers don't like receiving pre-populated `from`
+      applyEvmSourceTxOverrides(sendTx, opts.sourceTxOverrides)
       response = await submitTransaction(wallet, sendTx, this.provider)
     } catch (err) {
       this.nonces[sender]!--

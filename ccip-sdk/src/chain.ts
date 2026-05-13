@@ -452,6 +452,18 @@ export type UnsignedTx = {
 }
 
 /**
+ * EVM-only overrides for **source-chain** transactions (`approve` + `ccipSend`), applied after fee
+ * estimation / `populateTransaction`. Does not affect {@link MessageInput} / CCIP `extraArgs`
+ * receiver gas (use {@link SendMessageOpts} `message.extraArgs` / CLI `--gas-limit` for that).
+ */
+export type EvmSourceTxOverrides = {
+  gasLimit?: bigint
+  gasPrice?: bigint
+  maxFeePerGas?: bigint
+  maxPriorityFeePerGas?: bigint
+}
+
+/**
  * Common options for {@link Chain.getFee}, {@link Chain.generateUnsignedSendMessage} and {@link Chain.sendMessage} methods.
  */
 export type SendMessageOpts = {
@@ -463,6 +475,11 @@ export type SendMessageOpts = {
   message: MessageInput
   /** Approve the maximum amount of tokens to transfer */
   approveMax?: boolean
+  /**
+   * EVM only: gas limit and/or gas price fields applied to each source-chain tx (token approvals and
+   * `ccipSend`). Ignored on non-EVM chains.
+   */
+  sourceTxOverrides?: EvmSourceTxOverrides
 }
 
 /**

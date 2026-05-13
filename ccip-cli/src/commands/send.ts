@@ -22,6 +22,7 @@
 import {
   type ChainStatic,
   type ExtraArgs,
+  type EvmSourceTxOverrides,
   type MessageInput,
   CCIPArgumentInvalidError,
   CCIPInsufficientBalanceError,
@@ -42,6 +43,37 @@ import { showRequests } from './show.ts'
 import { type Ctx, Format } from './types.ts'
 import { getCtx, logParsedError, parseTokenAmounts } from './utils.ts'
 import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
+
+function parseWeiIntString(raw: string | undefined): bigint | undefined {
+  if (raw == null) return undefined
+  const s = String(raw).trim()
+  if (!s) return undefined
+  return BigInt(s)
+}
+
+function sourceTxOverridesFromArgv(argv: {
+  txGasLimit?: number
+  txGasPrice?: string
+  txMaxFeePerGas?: string
+  txMaxPriorityFeePerGas?: string
+}): EvmSourceTxOverrides | undefined {
+  const o: EvmSourceTxOverrides = {}
+  if (argv.txGasLimit != null && argv.txGasLimit > 0) o.gasLimit = BigInt(argv.txGasLimit)
+  const gp = parseWeiIntString(argv.txGasPrice)
+  const mf = parseWeiIntString(argv.txMaxFeePerGas)
+  const mp = parseWeiIntString(argv.txMaxPriorityFeePerGas)
+  if (gp != null) o.gasPrice = gp
+  if (mf != null) o.maxFeePerGas = mf
+  if (mp != null) o.maxPriorityFeePerGas = mp
+  if (
+    o.gasLimit == null &&
+    o.gasPrice == null &&
+    o.maxFeePerGas == null &&
+    o.maxPriorityFeePerGas == null
+  )
+    return undefined
+  return o
+}
 
 export const command = 'send'
 export const describe = 'Send a CCIP message from source to destination chain'
@@ -148,12 +180,44 @@ export const builder = (yargs: Argv) =>
         default: false,
         describe: 'Wait for execution on destination',
       },
+      'tx-gas-limit': {
+        type: 'number',
+        describe:
+          'Source-chain tx gas limit (each approve + ccipSend). Not the CCIP receiver gas; use --gas-limit for that',
+      },
+      'tx-gas-price': {
+        type: 'string',
+        describe: 'Legacy source tx gasPrice (wei, decimal or 0x hex integer)',
+      },
+      'tx-max-fee-per-gas': {
+        type: 'string',
+        describe: 'EIP-1559 source tx maxFeePerGas (wei, decimal or 0x hex integer)',
+      },
+      'tx-max-priority-fee-per-gas': {
+        type: 'string',
+        describe: 'EIP-1559 source tx maxPriorityFeePerGas (wei, decimal or 0x hex integer)',
+      },
     })
     .check(
       ({ 'transfer-tokens': transferTokens }) =>
         !transferTokens || transferTokens.every((t) => /^[^=]+=\d+(\.\d+)?$/.test(t)),
     )
     .check(({ extra }) => !extra || extra.every((e) => /^[^=]+=/.test(e)))
+    .check((argv) => {
+      const hasLegacy =
+        argv.txGasPrice != null && String(argv.txGasPrice).trim() !== ''
+      const has1559 =
+        (argv.txMaxFeePerGas != null && String(argv.txMaxFeePerGas).trim() !== '') ||
+        (argv.txMaxPriorityFeePerGas != null &&
+          String(argv.txMaxPriorityFeePerGas).trim() !== '')
+      if (hasLegacy && has1559) {
+        throw new CCIPArgumentInvalidError(
+          'tx-gas-price',
+          'cannot combine --tx-gas-price with EIP-1559 fields (--tx-max-fee-per-gas / --tx-max-priority-fee-per-gas)',
+        )
+      }
+      return true
+    })
     .example([
       [
         'ccip-cli send -s ethereum-testnet-sepolia -d arbitrum-sepolia -r 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 --only-get-fee',
@@ -436,6 +500,7 @@ async function sendMessage(
     destChainSelector: destNetwork.chainSelector,
     message: { ...message, fee },
     wallet,
+    sourceTxOverrides: sourceTxOverridesFromArgv(argv),
   })
   logger.info(
     '🚀 Sending message to',
