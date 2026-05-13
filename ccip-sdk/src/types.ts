@@ -109,6 +109,7 @@ export type ChainLog = Pick<
   EVMLog,
   'topics' | 'index' | 'address' | 'blockNumber' | 'transactionHash'
 > & {
+  blockTimestamp: number
   /** Log data as bytes or parsed object. */
   data: BytesLike | Record<string, unknown>
   /** Optional reference to the containing transaction. */

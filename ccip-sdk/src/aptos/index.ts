@@ -140,7 +140,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       {
         maxSize: 100,
         async: true,
-        transformKey: ([arg]) => [(arg as { ledgerVersion: number }).ledgerVersion],
+        transformKey: ([arg]: [{ ledgerVersion: bigint | number }]) => [Number(arg.ledgerVersion)],
       },
     )
   }
@@ -216,16 +216,18 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     }
     if (tx.type !== TransactionResponseType.User) throw new CCIPAptosTransactionTypeInvalidError()
 
+    const timestamp = +tx.timestamp / 1e6
     return {
       hash: tx.hash,
       blockNumber: +tx.version,
       from: tx.sender,
-      timestamp: +tx.timestamp / 1e6,
+      timestamp,
       logs: tx.events.map((event, index) => ({
         address: event.type.slice(0, event.type.lastIndexOf('::')),
         transactionHash: tx.hash,
         index,
         blockNumber: +tx.version, // we use version as Aptos' blockNumber, as blockHeight isn't very useful
+        blockTimestamp: timestamp,
         data: event.data as Record<string, unknown>,
         topics: [event.type.slice(event.type.lastIndexOf('::') + 2)],
       })),

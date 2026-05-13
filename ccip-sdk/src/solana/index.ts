@@ -223,25 +223,35 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     // Memoize expensive operations
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
-      maxArgs: 1,
       async: true,
+      maxArgs: 1,
+      maxSize: 100,
     })
     this.getBlockTimestamp = memoize(this.getBlockTimestamp.bind(this), {
       async: true,
-      maxSize: 100,
+      maxSize: 1024,
       forceUpdate: ([k]) => typeof k !== 'number' || k <= 0,
     })
     this.getTransaction = memoize(this.getTransaction.bind(this), {
-      maxSize: 100,
+      async: true,
       maxArgs: 1,
+      maxSize: 100,
     })
-    this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this))
-    this.getTokenInfo = memoize(this.getTokenInfo.bind(this))
+    this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+    })
+    this.getTokenInfo = memoize(this.getTokenInfo.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+    })
     this.connection.getSignaturesForAddress = memoize(
       this.connection.getSignaturesForAddress.bind(this.connection),
       {
-        maxSize: 100,
         async: true,
+        maxSize: 100,
         // if options.before is defined, caches for long, otherwise for short (recent signatures)
         expires: (key) => (key[1] ? 2 ** 31 - 1 : 5e3),
         transformKey: ([address, options, commitment]: [
@@ -267,10 +277,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         [(address as PublicKey).toString(), commitment] as const,
     })
 
-    this._getRouterConfig = memoize(this._getRouterConfig.bind(this), { maxArgs: 1 })
+    this._getRouterConfig = memoize(this._getRouterConfig.bind(this), { async: true, maxArgs: 1 })
 
-    this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { maxArgs: 1 })
-    this.getOffRampsForRouter = memoize(this.getOffRampsForRouter.bind(this), { maxArgs: 1 })
+    this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { async: true, maxArgs: 1 })
+    this.getOffRampsForRouter = memoize(this.getOffRampsForRouter.bind(this), {
+      async: true,
+      maxArgs: 1,
+    })
   }
 
   /**
@@ -391,7 +404,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       tx, // specialized solana transaction
     }
     // solana logs include circular reference to tx
-    chainTx.logs = logs_.map((l) => Object.assign(l, { tx: chainTx }))
+    chainTx.logs = logs_.map((l) =>
+      Object.assign(l, { blockTimestamp: tx.blockTime!, tx: chainTx }),
+    )
     return chainTx
   }
 

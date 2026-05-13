@@ -327,6 +327,7 @@ describe('getOnchainCommitReport', () => {
       blockNumber: 12346,
       transactionHash: '0xTxHash',
       index: 0,
+      blockTimestamp: 1234567890,
       topics: encoded.topics,
       data: encoded.data,
     }
@@ -385,6 +386,7 @@ describe('getOnchainCommitReport', () => {
       blockNumber: 12346,
       transactionHash: '0xTxHash',
       index: 0,
+      blockTimestamp: 1234567890,
       topics: encoded.topics,
       data: encoded.data,
     }
@@ -438,6 +440,7 @@ describe('getOnchainCommitReport', () => {
       blockNumber: 12346,
       transactionHash: '0xTxHash',
       index: 0,
+      blockTimestamp: 1234567890,
       topics: encoded.topics,
       data: encoded.data,
     }
@@ -497,6 +500,7 @@ describe('getOnchainCommitReport', () => {
       blockNumber: 12346,
       transactionHash: '0xTxHash',
       index: 0,
+      blockTimestamp: 1234567890,
       topics: encoded.topics,
       data: encoded.data,
     }
@@ -564,6 +568,7 @@ describe('getOnchainCommitReport', () => {
       blockNumber: 12346,
       transactionHash: '0xTxHash1',
       index: 0,
+      blockTimestamp: 1234567890,
       topics: encoded1.topics,
       data: encoded1.data,
     }
@@ -573,6 +578,7 @@ describe('getOnchainCommitReport', () => {
       blockNumber: 12347,
       transactionHash: '0xTxHash2',
       index: 0,
+      blockTimestamp: 1234567890,
       topics: encoded2.topics,
       data: encoded2.data,
     }
@@ -628,6 +634,7 @@ describe('getOnchainCommitReport', () => {
       blockNumber: 12346,
       transactionHash: '0xTxHash',
       index: 0,
+      blockTimestamp: 1234567890,
       topics: encoded.topics,
       data: encoded.data,
     }

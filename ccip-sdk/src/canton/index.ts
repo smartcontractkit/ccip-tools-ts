@@ -322,6 +322,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         transactionHash: hash,
         index,
         blockNumber: tx.offset,
+        blockTimestamp: timestamp,
         topics: templateId ? [templateId] : [],
         data: inner,
       }
@@ -795,6 +796,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           index: 0,
           address: '',
           blockNumber: 0,
+          blockTimestamp: 0,
           transactionHash: updateId,
           data: response.transaction,
         }
@@ -1054,6 +1056,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       index: 0,
       address: '',
       blockNumber: 0,
+      blockTimestamp: 0,
       transactionHash: updateId,
       data: response.transaction,
     }

@@ -251,6 +251,7 @@ export async function* streamAptosLogs(
         ? `${ev.version}`
         : (await getUserTxByVersion(ctx.provider, +ev.version)).hash,
       data: ev.data as Record<string, unknown>,
+      blockTimestamp: await getVersionTimestamp(ctx.provider, +ev.version),
     }
   }
 }

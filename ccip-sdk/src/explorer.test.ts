@@ -64,6 +64,7 @@ describe('getCCIPExplorerLinks', () => {
       topics: [],
       data: '0x',
       blockNumber: 12345,
+      blockTimestamp: 1234567890,
       transactionHash: '0xaf8c73a7f872c831da535a62e3837fe5a62f1b92e4b09fddc773b956c3c27d56',
     },
     tx: {

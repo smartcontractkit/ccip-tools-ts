@@ -2,9 +2,12 @@ import {
   type BytesLike,
   type JsonRpcApiProvider,
   type Log,
+  type LogParams,
+  type Network,
   type Result,
   type Signer,
   type TransactionReceipt,
+  type TransactionReceiptParams,
   type TransactionRequest,
   type TransactionResponse,
   Contract,
@@ -13,6 +16,7 @@ import {
   ZeroAddress,
   formatUnits,
   getAddress,
+  getNumber,
   hexlify,
   isBytesLike,
   isError,
@@ -228,37 +232,84 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.provider = provider
     this.abort.addEventListener('abort', () => this.provider.destroy(), { once: true })
 
-    this.typeAndVersion = memoize(this.typeAndVersion.bind(this))
+    const getBlockTimestamp = memoize(this.getBlockTimestamp.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 1024,
+    })
+    this.getBlockTimestamp = getBlockTimestamp
 
-    this.provider.getBlock = memoize(provider.getBlock.bind(provider), {
-      maxSize: 100,
-      maxArgs: 1,
-      async: true,
-      forceUpdate: ([block]) => typeof block !== 'number' || block <= 0,
-    })
+    /** ethers doesn't support logs' new `blockTimestamp` property; to workaround having to do
+     * another roundtrip for it, we hook in these Provider methods, which have access to the 'raw'
+     * payloads of getTransactionReceipts and getLogs, cache the timestamps, and populate from
+     * cached this.getBlockTimestamp inside getTransaction and getEvmLogs */
+    type RawLog = { blockNumber: number | string; blockTimestamp?: string | number }
+    this.provider._wrapTransactionReceipt = (
+      value: TransactionReceiptParams,
+      network: Network,
+    ): TransactionReceipt => {
+      // on provider.getTransactionReceipt, cache logs block timestamp, hidden by ethers
+      if (value.logs.length && (value.logs[0] as RawLog).blockTimestamp)
+        getBlockTimestamp.cache.set(
+          [getNumber(value.logs[0]!.blockNumber)],
+          Promise.resolve(getNumber((value.logs[0]! as RawLog).blockTimestamp!)),
+        )
+      return (
+        this.provider.constructor as typeof JsonRpcApiProvider
+      ).prototype._wrapTransactionReceipt.call(this.provider, value, network)
+    }
+    this.provider._wrapLog = (value: LogParams, network: Network): Log => {
+      // on provider.getLogs, cache logs block timestamp, hidden by ethers
+      if ((value as RawLog).blockTimestamp)
+        getBlockTimestamp.cache.set(
+          [getNumber(value.blockNumber)],
+          Promise.resolve(getNumber((value as RawLog).blockTimestamp!)),
+        )
+      return (this.provider.constructor as typeof JsonRpcApiProvider).prototype._wrapLog.call(
+        this.provider,
+        value,
+        network,
+      )
+    }
+
+    this.typeAndVersion = memoize(this.typeAndVersion.bind(this), { async: true, maxArgs: 1 })
+
     this.getTransaction = memoize(this.getTransaction.bind(this), {
-      maxSize: 100,
-      transformKey: (args) =>
-        typeof args[0] !== 'string'
-          ? [(args[0] as unknown as TransactionReceipt).hash]
-          : (args as unknown as string[]),
-    })
-    this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this))
-    this.getNativeTokenForRouter = memoize(this.getNativeTokenForRouter.bind(this), {
-      maxArgs: 1,
       async: true,
+      maxSize: 100,
+      transformKey: ([tx]: [TransactionReceipt | string]) =>
+        typeof tx !== 'string' ? [tx.hash] : [tx],
     })
-    this.getTokenInfo = memoize(this.getTokenInfo.bind(this))
+    this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 1024,
+    })
+    this.getNativeTokenForRouter = memoize(this.getNativeTokenForRouter.bind(this), {
+      async: true,
+      maxArgs: 1,
+    })
+    this.getTokenInfo = memoize(this.getTokenInfo.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 1024,
+    })
     this.getTokenAdminRegistryFor = memoize(this.getTokenAdminRegistryFor.bind(this), {
       async: true,
       maxArgs: 1,
+      maxSize: 100,
     })
-    this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { async: true, maxArgs: 1 })
-    this.detectUsdcDomains = memoize(this.detectUsdcDomains.bind(this))
-    this.resolveVerifier = memoize(this.resolveVerifier.bind(this))
+    this.getFeeTokens = memoize(this.getFeeTokens.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+    })
+    this.detectUsdcDomains = memoize(this.detectUsdcDomains.bind(this), { async: true })
+    this.resolveVerifier = memoize(this.resolveVerifier.bind(this), { async: true })
     this.getFeeQuoterFor = memoize(this.getFeeQuoterFor.bind(this), {
       async: true,
       maxArgs: 1,
+      maxSize: 100,
     })
   }
 
@@ -358,14 +409,19 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /** {@inheritDoc Chain.getTransaction} */
   async getTransaction(hash: string | TransactionReceipt): Promise<ChainTransaction> {
     const tx = typeof hash === 'string' ? await this.provider.getTransactionReceipt(hash) : hash
-    if (!tx) throw new CCIPTransactionNotFoundError(hash as string)
+    if (!tx)
+      throw new CCIPTransactionNotFoundError(hash as string, {
+        context: { network: this.network.name },
+      })
     const timestamp = await this.getBlockTimestamp(tx.blockNumber)
     const chainTx = {
       ...tx,
       timestamp,
       logs: [] as ChainLog[],
     }
-    const logs: ChainLog[] = tx.logs.map((l) => Object.assign(l, { tx: chainTx }))
+    const logs: ChainLog[] = tx.logs.map((l) =>
+      Object.assign(l, { blockTimestamp: timestamp, tx: chainTx }),
+    )
     chainTx.logs = logs
     return chainTx
   }
@@ -373,7 +429,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /** {@inheritDoc Chain.getLogs} */
   async *getLogs(
     filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag>,
-  ): AsyncIterableIterator<Log> {
+  ): AsyncIterableIterator<Log & { blockTimestamp: number }> {
     if (filter.watch) {
       filter = {
         ...filter,

@@ -364,6 +364,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         topics,
         data,
         blockNumber: res.blockNumber, // Note: This is lt (logical time), not block seqno
+        blockTimestamp: tx.now,
         transactionHash: res.hash,
         index,
         tx: res,
