@@ -327,8 +327,6 @@ export interface CCIPExecution {
   receipt: ExecutionReceipt
   /** Log event from the execution. */
   log: ChainLog
-  /** Unix timestamp of the execution. */
-  timestamp: number
 }
 
 /**

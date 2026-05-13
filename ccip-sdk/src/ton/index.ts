@@ -5,7 +5,6 @@ import { TonClient } from '@ton/ton'
 import { type AxiosAdapter, getAdapter } from 'axios'
 import { type BytesLike, hexlify, isBytesLike, isHexString, toBeArray, toBeHex } from 'ethers'
 import { type Memoized, memoize } from 'micro-memoize'
-import type { PickDeep } from 'type-fest'
 
 import { streamTransactionsForAddress } from './logs.ts'
 import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
@@ -30,7 +29,7 @@ import {
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
-import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
+import { buildMessageForDest } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
@@ -409,20 +408,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         yield log
       }
     }
-  }
-
-  /** {@inheritDoc Chain.getMessagesInBatch} */
-  override async getMessagesInBatch<
-    R extends PickDeep<
-      CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
-    >,
-  >(
-    request: R,
-    range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
-    opts?: Pick<LogFilter, 'page'>,
-  ): Promise<R['message'][]> {
-    return getMessagesInBatch(this, request, range, opts)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

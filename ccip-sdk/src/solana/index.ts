@@ -129,7 +129,7 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-import { buildMessageForDest, getMessagesInBatch } from '../requests.ts'
+import { buildMessageForDest } from '../requests.ts'
 import { patchBorsh } from './patchBorsh.ts'
 import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 export type { UnsignedSolanaTx }
@@ -502,7 +502,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   override async getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
+      | 'lane'
+      | `log.${'topics' | 'address' | 'blockNumber' | 'blockTimestamp'}`
+      | 'message.sequenceNumber'
     >,
   >(
     request: R,
@@ -520,7 +522,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       programs: [request.log.address],
       address: destChainStatePda.toBase58(),
     }
-    return getMessagesInBatch(this, request, range, opts_)
+    return super.getMessagesInBatch(request, range, opts_)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

@@ -5,7 +5,7 @@ import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { isValidSuiAddress, isValidTransactionDigest, normalizeSuiAddress } from '@mysten/sui/utils'
 import { type BytesLike, dataLength, hexlify, isBytesLike, isHexString } from 'ethers'
-import type { PickDeep, SetOptional } from 'type-fest'
+import type { SetOptional } from 'type-fest'
 
 import {
   type ChainContext,
@@ -33,7 +33,7 @@ import {
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
-import { decodeMessage, getMessagesInBatch } from '../requests.ts'
+import { decodeMessage } from '../requests.ts'
 import { decodeMoveExtraArgs, getMoveAddress } from '../shared/bcs-codecs.ts'
 import { supportedChains } from '../supported-chains.ts'
 import type {
@@ -250,20 +250,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
         topics: [topic],
       }
     }
-  }
-
-  /** {@inheritDoc Chain.getMessagesInBatch} */
-  override async getMessagesInBatch<
-    R extends PickDeep<
-      CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
-    >,
-  >(
-    request: R,
-    range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
-    opts?: Pick<LogFilter, 'page'>,
-  ): Promise<R['message'][]> {
-    return getMessagesInBatch(this, request, range, opts)
   }
 
   /**

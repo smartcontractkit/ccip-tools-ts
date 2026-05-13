@@ -89,11 +89,23 @@ tokenTransfers =\t[${req.message.tokenAmounts.map((ta) => ('token' in ta ? ta.to
  * @returns Object with Date timestamp.
  */
 export function withDateTimestamp<
-  T extends { readonly timestamp: number } | { readonly tx: { readonly timestamp: number } },
+  T extends
+    | { readonly timestamp: number }
+    | { readonly blockTimestamp: number }
+    | { readonly log: { readonly blockTimestamp: number } }
+    | { readonly tx: { readonly timestamp: number } },
 >(obj: T): Omit<T, 'timestamp'> & { timestamp: Date } {
   return {
     ...obj,
-    timestamp: new Date(('timestamp' in obj ? obj.timestamp : obj.tx.timestamp) * 1e3),
+    timestamp: new Date(
+      ('timestamp' in obj
+        ? obj.timestamp
+        : 'blockTimestamp' in obj
+          ? obj.blockTimestamp
+          : 'log' in obj
+            ? obj.log.blockTimestamp
+            : obj.tx.timestamp) * 1e3,
+    ),
   }
 }
 
@@ -333,11 +345,11 @@ export async function prettyRequest(this: Ctx, request: CCIPRequest, source?: Ch
     transactionHash: displayTxHash,
     logIndex: request.log.index,
     blockNumber: request.log.blockNumber,
-    timestamp: `${formatDate(request.tx.timestamp)} (${formatDuration(Date.now() / 1e3 - request.tx.timestamp)} ago)`,
+    timestamp: `${formatDate(request.log.blockTimestamp)} (${formatDuration(Date.now() / 1e3 - request.log.blockTimestamp)} ago)`,
     finalized:
       finalized &&
-      (finalized < request.tx.timestamp
-        ? formatDuration(request.tx.timestamp - finalized) + ' left'
+      (finalized < request.log.blockTimestamp
+        ? formatDuration(request.log.blockTimestamp - finalized) + ' left'
         : true),
     fee: await formatToken(source, {
       token: request.message.feeToken,
@@ -366,7 +378,7 @@ export async function prettyVerifications(
   this: Ctx,
   dest: Chain,
   verifications: CCIPVerifications,
-  request: PickDeep<CCIPRequest, 'tx.timestamp' | 'lane.destChainSelector'>,
+  request: PickDeep<CCIPRequest, 'log.blockTimestamp' | 'lane.destChainSelector'>,
 ) {
   const destFamily = networkInfo(request.lane.destChainSelector).family
 
@@ -383,7 +395,7 @@ export async function prettyVerifications(
       contract: formatDisplayAddress(verifications.log.address, destFamily),
       transactionHash: formatDisplayTxHash(verifications.log.transactionHash, destFamily),
       blockNumber: verifications.log.blockNumber,
-      timestamp: `${formatDate(timestamp)} (${formatDuration(timestamp - request.tx.timestamp)} after request)`,
+      timestamp: `${formatDate(timestamp)} (${formatDuration(timestamp - request.log.blockTimestamp)} after request)`,
     })
   } else {
     let ts = 0
@@ -393,7 +405,7 @@ export async function prettyVerifications(
     prettyTable.call(this, {
       ...verifications,
       ...(ts && {
-        timestamp: `${formatDate(ts)} (${formatDuration(ts - request.tx.timestamp)} after request)`,
+        timestamp: `${formatDate(ts)} (${formatDuration(ts - request.log.blockTimestamp)} after request)`,
       }),
     })
   }
@@ -515,7 +527,7 @@ export function prettyTable(
 export function prettyReceipt(
   this: Ctx,
   receipt: CCIPExecution,
-  request: PickDeep<CCIPRequest, 'tx.timestamp' | 'lane.destChainSelector'>,
+  request: PickDeep<CCIPRequest, 'log.blockTimestamp' | 'lane.destChainSelector'>,
   origin?: string,
 ) {
   const destFamily = networkInfo(request.lane.destChainSelector).family
@@ -532,7 +544,7 @@ export function prettyReceipt(
     transactionHash: formatDisplayTxHash(receipt.log.transactionHash, destFamily),
     logIndex: receipt.log.index,
     blockNumber: receipt.log.blockNumber,
-    timestamp: `${formatDate(receipt.timestamp)} (${formatDuration(receipt.timestamp - request.tx.timestamp)} after request)`,
+    timestamp: `${formatDate(receipt.log.blockTimestamp)} (${formatDuration(receipt.log.blockTimestamp - request.log.blockTimestamp)} after request)`,
   })
 }
 

@@ -277,7 +277,7 @@ describe('getMessageById', () => {
     })
     assert.equal(result.log.index, 1)
     assert.ok(result.message)
-    assert.equal(result.tx.timestamp, 1234567890)
+    assert.equal(result.log.blockTimestamp, 1234567890)
     assert.equal(result.lane.version, CCIPVersion.V1_2)
   })
 
@@ -517,7 +517,7 @@ describe('getMessagesInBatch', () => {
     assert.equal(calls[0]!.startTime, undefined)
     assert.equal(calls[0]!.endBefore, undefined)
     assert.equal(calls[1]!.endBlock, 300)
-    assert.equal(calls[1]!.startTime, 0)
+    assert.ok(calls[1]!.startTime && calls[1]!.startTime <= 1234567890)
     assert.equal(calls[1]!.startBlock, undefined)
     assert.equal(calls[1]!.endBefore, undefined)
   })

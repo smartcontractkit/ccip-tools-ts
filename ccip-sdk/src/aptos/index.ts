@@ -9,7 +9,6 @@ import {
 } from '@aptos-labs/ts-sdk'
 import { type BytesLike, concat, isBytesLike, isHexString } from 'ethers'
 import { memoize } from 'micro-memoize'
-import type { PickDeep } from 'type-fest'
 
 import {
   type ChainContext,
@@ -77,7 +76,7 @@ import {
 } from '../utils.ts'
 import { getTokenInfo } from './token.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
+import { buildMessageForDest, decodeMessage } from '../requests.ts'
 export type { UnsignedAptosTx }
 
 /**
@@ -246,20 +245,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       }
     }
     yield* streamAptosLogs(this, opts)
-  }
-
-  /** {@inheritDoc Chain.getMessagesInBatch} */
-  override async getMessagesInBatch<
-    R extends PickDeep<
-      CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
-    >,
-  >(
-    request: R,
-    range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
-    opts?: { page?: number },
-  ): Promise<R['message'][]> {
-    return getMessagesInBatch(this, request, range, opts)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

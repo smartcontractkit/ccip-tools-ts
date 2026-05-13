@@ -344,7 +344,7 @@ describe('getOnchainCommitReport', () => {
     const request = {
       lane,
       message: { sequenceNumber: 1n } as any,
-      tx: { timestamp: 1700000000 },
+      log: { blockTimestamp: 1700000000 },
     }
 
     const hints = { startBlock: 12345 }
@@ -403,7 +403,7 @@ describe('getOnchainCommitReport', () => {
     const request = {
       lane,
       message: { sequenceNumber: 1n } as any,
-      tx: { timestamp: 1700000000 },
+      log: { blockTimestamp: 1700000000 },
     }
 
     const hints = { startBlock: 12345 }
@@ -457,7 +457,7 @@ describe('getOnchainCommitReport', () => {
     const request = {
       lane,
       message: { sequenceNumber: 4n } as any,
-      tx: { timestamp: 1700000000 },
+      log: { blockTimestamp: 1700000000 },
     }
 
     const hints = { startBlock: 12345 }
@@ -517,7 +517,7 @@ describe('getOnchainCommitReport', () => {
     const request = {
       lane,
       message: { sequenceNumber: 5n } as any,
-      tx: { timestamp: 1700000000 },
+      log: { blockTimestamp: 1700000000 },
     }
 
     const hints = { startBlock: 12345 }
@@ -595,7 +595,7 @@ describe('getOnchainCommitReport', () => {
     const request = {
       lane,
       message: { sequenceNumber: 5n } as any,
-      tx: { timestamp: 1700000000 },
+      log: { blockTimestamp: 1700000000 },
     }
 
     const hints = { startBlock: 12345 }
@@ -652,7 +652,7 @@ describe('getOnchainCommitReport', () => {
     const request = {
       lane,
       message: { sequenceNumber: 3n } as any,
-      tx: { timestamp: requestTimestamp },
+      log: { blockTimestamp: requestTimestamp },
     }
 
     // No hints provided, should use timestamp

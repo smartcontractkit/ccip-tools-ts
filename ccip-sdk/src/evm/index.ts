@@ -71,7 +71,7 @@ import {
 import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessageV1 } from '../messages.ts'
 import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
-import { buildMessageForDest, decodeMessage, getMessagesInBatch } from '../requests.ts'
+import { buildMessageForDest, decodeMessage } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type CCIPExecution,
@@ -446,7 +446,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   override getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
+      | 'lane'
+      | `log.${'topics' | 'address' | 'blockNumber' | 'blockTimestamp'}`
+      | 'message.sequenceNumber'
     >,
   >(
     request: R,
@@ -461,7 +463,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         topics: [[request.log.topics[0]!], [toBeHex(request.lane.destChainSelector, 32)]],
       }
     }
-    return getMessagesInBatch(this, request, range, opts_)
+    return super.getMessagesInBatch(request, range, opts_)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

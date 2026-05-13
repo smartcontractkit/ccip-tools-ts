@@ -252,7 +252,7 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
         'receipt messageId should match',
       )
       assert.ok(execution.log.transactionHash, 'should have tx hash')
-      assert.ok(execution.timestamp > 0, 'should have timestamp')
+      assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
       assert.equal(execution.receipt.state, ExecutionState.Success, 'execution should succeed')
 
       // Confirm by re-reading the execution tx and decoding the ExecutionStateChanged log
