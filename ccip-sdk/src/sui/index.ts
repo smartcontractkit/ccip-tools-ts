@@ -5,7 +5,7 @@ import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { isValidSuiAddress, isValidTransactionDigest, normalizeSuiAddress } from '@mysten/sui/utils'
 import { type BytesLike, dataLength, hexlify, isBytesLike, isHexString } from 'ethers'
-import type { PickDeep, SetOptional } from 'type-fest'
+import type { SetOptional } from 'type-fest'
 
 import {
   type ChainContext,
@@ -33,7 +33,7 @@ import {
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
-import { decodeMessage, getMessagesInBatch } from '../requests.ts'
+import { decodeMessage } from '../requests.ts'
 import { decodeMoveExtraArgs, getMoveAddress } from '../shared/bcs-codecs.ts'
 import { supportedChains } from '../supported-chains.ts'
 import type {
@@ -182,6 +182,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       },
     })
 
+    const timestamp = Number(txResponse.timestampMs || 0) / 1000
     // Extract events from the transaction
     const events: ChainLog[] = []
     if (txResponse.events?.length) {
@@ -196,6 +197,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
           transactionHash: digest,
           index: i,
           blockNumber: Number(txResponse.checkpoint || 0),
+          blockTimestamp: timestamp,
           data: event.parsedJson as Record<string, unknown>,
           topics: [eventName],
         })
@@ -206,7 +208,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       hash: digest,
       logs: events,
       blockNumber: Number(txResponse.checkpoint || 0),
-      timestamp: Number(txResponse.timestampMs || 0) / 1000,
+      timestamp,
       from: txResponse.transaction?.data.sender || '',
     }
   }
@@ -236,30 +238,18 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     for await (const event of streamSuiLogs<Record<string, unknown>>(this, opts)) {
       const eventData = event.contents?.json
+      const blockTimestamp = new Date(event.timestamp).getTime() / 1000
       if (!eventData) continue
       yield {
         address: opts.address,
         transactionHash: event.transaction!.digest,
         index: Number(event.sequenceNumber) || 0,
         blockNumber: Number(event.transaction?.effects.checkpoint.sequenceNumber || 0),
+        blockTimestamp,
         data: eventData,
         topics: [topic],
       }
     }
-  }
-
-  /** {@inheritDoc Chain.getMessagesInBatch} */
-  override async getMessagesInBatch<
-    R extends PickDeep<
-      CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
-    >,
-  >(
-    request: R,
-    range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
-    opts?: Pick<LogFilter, 'page'>,
-  ): Promise<R['message'][]> {
-    return getMessagesInBatch(this, request, range, opts)
   }
 
   /**

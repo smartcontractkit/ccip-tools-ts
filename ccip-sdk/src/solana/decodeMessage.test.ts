@@ -20,6 +20,7 @@ describe('SolanaChain.decodeMessage', () => {
       address: 'CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P',
       blockNumber: 12345,
       transactionHash: '0x123',
+      blockTimestamp: 1234567890,
     }
 
     const message = SolanaChain.decodeMessage(mockLog) as CCIPMessage<typeof CCIPVersion.V1_6>
@@ -75,6 +76,7 @@ describe('SolanaChain.decodeMessage', () => {
       address: 'CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P',
       blockNumber: 12345,
       transactionHash: '0x123',
+      blockTimestamp: 1234567890,
     }
 
     assert.equal(SolanaChain.decodeMessage(invalidLog), undefined)
@@ -88,6 +90,7 @@ describe('SolanaChain.decodeMessage', () => {
       address: 'CcipQ6z7nULJPwQyZnbRwiupj9Virv8oLJwSgxN2b55P',
       blockNumber: 12345,
       transactionHash: '0x123',
+      blockTimestamp: 1234567890,
     }
 
     assert.equal(SolanaChain.decodeMessage(invalidLog), undefined)

@@ -40,8 +40,12 @@ function isInvalidBlockRangesError(
  */
 export async function* getEvmLogs(
   filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag>,
-  ctx: { provider: JsonRpcApiProvider; abort?: AbortSignal } & WithLogger,
-): AsyncIterableIterator<Log> {
+  ctx: {
+    provider: JsonRpcApiProvider
+    getBlockTimestamp: (block: EVMEndBlockTag) => Promise<number>
+    abort?: AbortSignal
+  } & WithLogger,
+): AsyncIterableIterator<Log & { blockTimestamp: number }> {
   const { provider, logger = console } = ctx
 
   if (filter.startBlock == null && filter.startTime == null) throw new CCIPLogsRequiresStartError()
@@ -68,7 +72,7 @@ export async function* getEvmLogs(
   filter.endBlock ||= 'latest'
   const { number: endBlock } = (await provider.getBlock(filter.endBlock))!
   filter.startBlock ??= await getSomeBlockNumberBefore(
-    async (block: number) => (await provider.getBlock(block))!.timestamp, // cached
+    (block: number) => ctx.getBlockTimestamp(block), // cached
     endBlock,
     filter.startTime!,
     ctx,
@@ -89,7 +93,12 @@ export async function* getEvmLogs(
     const logs = await provider.getLogs(filter_)
     if (logs.length)
       latestLogBlockNumber = Math.max(latestLogBlockNumber, logs[logs.length - 1]!.blockNumber)
-    yield* logs
+    const logs_ = await Promise.all(
+      logs.map(async (l) =>
+        Object.assign(l, { blockTimestamp: await ctx.getBlockTimestamp(l.blockNumber) }),
+      ),
+    )
+    yield* logs_
   }
 
   // watch mode, otherwise return
@@ -109,7 +118,12 @@ export async function* getEvmLogs(
     })
     if (logs.length)
       latestLogBlockNumber = Math.max(latestLogBlockNumber, logs[logs.length - 1]!.blockNumber)
-    yield* logs
+    const logs_ = await Promise.all(
+      logs.map(async (l) =>
+        Object.assign(l, { blockTimestamp: await ctx.getBlockTimestamp(l.blockNumber) }),
+      ),
+    )
+    yield* logs_
 
     const contAc = new AbortController()
     let contSignal = contAc.signal

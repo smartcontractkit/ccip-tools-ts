@@ -322,7 +322,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       offRamp,
       messageId: request.message.messageId,
       sourceChainSelector: request.message.sourceChainSelector,
-      startTime: request.tx.timestamp,
+      startTime: request.log.blockTimestamp,
       verifications: !argv.wait ? await verifications$ : undefined,
       watch: argv.wait && ctx.abort,
     })

@@ -29,9 +29,21 @@ async function consume(iterable: AsyncIterable<unknown>) {
 
 describe('logs start position validation', () => {
   it('requires startBlock or startTime for EVM logs', async () => {
-    await assert.rejects(() => consume(getEvmLogs({}, { provider: {} as JsonRpcApiProvider })), {
-      name: 'CCIPLogsRequiresStartError',
-    })
+    await assert.rejects(
+      () =>
+        consume(
+          getEvmLogs(
+            {},
+            {
+              provider: {} as JsonRpcApiProvider,
+              getBlockTimestamp: async () => Math.floor(Date.now() / 1000),
+            },
+          ),
+        ),
+      {
+        name: 'CCIPLogsRequiresStartError',
+      },
+    )
   })
 
   it('requires startBlock or startTime for Solana logs', async () => {
@@ -97,7 +109,14 @@ describe('EVM logs block tags', () => {
     const provider = { getBlock, getLogs } as unknown as JsonRpcApiProvider
 
     await consume(
-      getEvmLogs({ startBlock: 100, endBlock: 'safe' }, { provider, logger: silentLogger }),
+      getEvmLogs(
+        { startBlock: 100, endBlock: 'safe' },
+        {
+          provider,
+          logger: silentLogger,
+          getBlockTimestamp: async (block) => (await getBlock(block)).timestamp,
+        },
+      ),
     )
 
     assert.equal(getBlock.mock.calls[0]!.arguments[0], 'safe')

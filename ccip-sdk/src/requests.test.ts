@@ -65,6 +65,7 @@ class MockChain {
         topics: Array.isArray(opts.topics?.[0]) ? opts.topics[0] : [topic0],
         data: mockedMessage(1),
         blockNumber: 12000,
+        blockTimestamp: 1234567890,
         transactionHash: '0x123',
       },
     ]
@@ -165,6 +166,7 @@ describe('getMessagesInTx', () => {
           topics: [topic0],
           data: mockedMessage(1),
           blockNumber: 12000,
+          blockTimestamp: 1234567890,
           transactionHash: '0x123',
           index: 0,
         },
@@ -192,6 +194,7 @@ describe('getMessagesInTx', () => {
           topics: [topic0],
           data: JSON.stringify(mockedMessage(1), bigIntReplacer),
           blockNumber: 12000,
+          blockTimestamp: 1234567890,
           transactionHash: '0x123',
           index: 0,
         },
@@ -200,6 +203,7 @@ describe('getMessagesInTx', () => {
           topics: [topic0],
           data: mockedMessage(2),
           blockNumber: 12000,
+          blockTimestamp: 1234567890,
           transactionHash: '0x123',
           index: 1,
         },
@@ -262,6 +266,7 @@ describe('getMessageById', () => {
           topics: [topic0],
           data: msg,
           blockNumber: 12000,
+          blockTimestamp: 1234567890,
           transactionHash: '0x123',
         }
       })(),
@@ -272,7 +277,7 @@ describe('getMessageById', () => {
     })
     assert.equal(result.log.index, 1)
     assert.ok(result.message)
-    assert.equal(result.tx.timestamp, 1234567890)
+    assert.equal(result.log.blockTimestamp, 1234567890)
     assert.equal(result.lane.version, CCIPVersion.V1_2)
   })
 
@@ -287,6 +292,7 @@ describe('getMessageById', () => {
           topics: [topic0],
           data: mockedMessage(2),
           blockNumber: 12000,
+          blockTimestamp: 1234567890,
           transactionHash: '0x123',
         }
       })(),
@@ -342,6 +348,7 @@ describe('getMessagesInBatch', () => {
         address: rampAddress,
         topics: [topic0],
         blockNumber: 12000,
+        blockTimestamp: 1234567890,
         transactionHash: '0x123',
         index: 0,
         data: mockedMessage(9),
@@ -385,6 +392,7 @@ describe('getMessagesInBatch', () => {
         address: rampAddress,
         topics: [topic0],
         blockNumber: 1,
+        blockTimestamp: 1234567890,
         transactionHash: '0x123',
         index: 0,
         data: mockedMessage(5),
@@ -421,6 +429,7 @@ describe('getMessagesInBatch', () => {
           topics: [topic0],
           data: mockedMessage(5),
           blockNumber: 1,
+          blockTimestamp: 1234567890,
           transactionHash: '0x123',
         }
       })(),
@@ -444,6 +453,7 @@ describe('getMessagesInBatch', () => {
         blockNumber: 500,
         transactionHash: '0x500',
         index: 0,
+        blockTimestamp: 1234567890,
         data: mockedMessage(5),
       },
       message: {
@@ -485,6 +495,7 @@ describe('getMessagesInBatch', () => {
             topics: [topic0],
             data: mockedMessage(seq),
             blockNumber: seq * 100,
+            blockTimestamp: 1234567890,
             transactionHash: `0x${seq}`,
           }
         }
@@ -506,7 +517,7 @@ describe('getMessagesInBatch', () => {
     assert.equal(calls[0]!.startTime, undefined)
     assert.equal(calls[0]!.endBefore, undefined)
     assert.equal(calls[1]!.endBlock, 300)
-    assert.equal(calls[1]!.startTime, 0)
+    assert.ok(calls[1]!.startTime && calls[1]!.startTime <= 1234567890)
     assert.equal(calls[1]!.startBlock, undefined)
     assert.equal(calls[1]!.endBefore, undefined)
   })
@@ -524,6 +535,7 @@ describe('getMessagesInRange', () => {
           topics: [topic0],
           data: mockedMessage(1),
           blockNumber: 12000,
+          blockTimestamp: 1234567890,
           transactionHash: '0x111',
           tx: {
             hash: '0x111',
@@ -539,6 +551,7 @@ describe('getMessagesInRange', () => {
           topics: [topic0],
           data: { notAMessage: true }, // non-CCIP log
           blockNumber: 12000,
+          blockTimestamp: 1234567890,
           transactionHash: '0x222',
         }
         yield {
@@ -547,6 +560,7 @@ describe('getMessagesInRange', () => {
           topics: [topic0],
           data: mockedMessage(2),
           blockNumber: 12001,
+          blockTimestamp: 1234567891,
           transactionHash: '0x333',
           tx: {
             hash: '0x333',
@@ -624,6 +638,7 @@ describe('getMessagesInRange', () => {
           topics: [topic0],
           data: v16Message,
           blockNumber: 15000,
+          blockTimestamp: 1234567890,
           transactionHash: '0xV16Tx',
           tx: {
             hash: '0xV16Tx',
@@ -706,6 +721,7 @@ describe('getMessagesInRange', () => {
           topics: [topic0],
           data: mockedMessage(1),
           blockNumber: 12000,
+          blockTimestamp: 1234567890,
           transactionHash: '0xNoTxLog',
           // no tx field
         }

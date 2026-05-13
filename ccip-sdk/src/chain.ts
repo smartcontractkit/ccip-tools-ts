@@ -1,5 +1,5 @@
 import { type BytesLike, dataLength, keccak256 } from 'ethers'
-import type { PickDeep, SetOptional } from 'type-fest'
+import type { PickDeep } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
 import type { UnsignedAptosTx } from './aptos/types.ts'
@@ -32,7 +32,7 @@ import type { LeafHasher } from './hasher/common.ts'
 import { decodeMessageV1 } from './messages.ts'
 import { type ChainFamily, type NetworkInfo, networkInfo } from './networks.ts'
 import { getOffchainTokenData } from './offchain.ts'
-import { getMessagesInRange, getMessagesInTx } from './requests.ts'
+import { getMessagesInBatch, getMessagesInRange, getMessagesInTx } from './requests.ts'
 import { DEFAULT_GAS_LIMIT } from './shared/constants.ts'
 import type { UnsignedSolanaTx } from './solana/types.ts'
 import type { UnsignedSuiTx } from './sui/types.ts'
@@ -682,23 +682,18 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   async waitFinalized({
-    request: { log, tx },
+    request: { log },
     finality = 'finalized',
     abort,
   }: {
-    request: SetOptional<
-      PickDeep<
-        CCIPRequest,
-        | `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'tx.timestamp'}`
-        | 'tx.timestamp'
-      >,
-      'tx'
+    request: PickDeep<
+      CCIPRequest,
+      `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
     >
     finality?: number | 'finalized'
     abort?: AbortSignal
   }): Promise<true> {
-    const timestamp = log.tx?.timestamp ?? tx?.timestamp
-    if (!timestamp || Date.now() / 1e3 - timestamp > 60) {
+    if (!log.blockTimestamp || Date.now() / 1e3 - log.blockTimestamp > 60) {
       // only try to fetch tx if request is old enough (>60s)
       const [trans, finalizedTs] = await Promise.all([
         this.getTransaction(log.transactionHash),
@@ -889,16 +884,20 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`Found ${messages.length} messages in batch`)
    * ```
    */
-  getMessagesInBatch?<
+  getMessagesInBatch<
     R extends PickDeep<
       CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
+      | 'lane'
+      | `log.${'topics' | 'address' | 'blockNumber' | 'blockTimestamp'}`
+      | 'message.sequenceNumber'
     >,
   >(
     request: R,
     range: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
     opts?: { page?: number },
-  ): Promise<R['message'][]>
+  ): Promise<R['message'][]> {
+    return getMessagesInBatch(this, request, range, opts)
+  }
 
   /**
    * Fetch input data needed for executing messages
@@ -924,7 +923,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     }
     // other messages in same batch are available from `source` side;
     // not needed for chain families supporting only >=v2
-    const messagesInBatch = await this.getMessagesInBatch!(request, verifications.report, opts)
+    const messagesInBatch = await this.getMessagesInBatch(request, verifications.report, opts)
     const execReportProof = calculateManualExecProof(
       messagesInBatch,
       request.lane,
@@ -1368,7 +1367,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     /** CCIPRequest subset object */
     request: PickDeep<
       CCIPRequest,
-      'lane' | `message.${'sequenceNumber' | 'messageId'}` | 'tx.timestamp'
+      'lane' | `message.${'sequenceNumber' | 'messageId'}` | 'log.blockTimestamp'
     >
   } & Pick<LogFilter, 'page' | 'watch' | 'startBlock'>): Promise<CCIPVerifications> {
     return getOnchainCommitReport(this, offRamp, request, hints)
@@ -1516,8 +1515,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       )
         continue
 
-      const timestamp = log.tx?.timestamp ?? (await this.getBlockTimestamp(log.blockNumber))
-      yield { receipt, log, timestamp }
+      yield { receipt, log }
       if (receipt.state === ExecutionState.Success) break
     }
   }
@@ -1540,11 +1538,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   async getExecutionReceiptInTx(tx: string | ChainTransaction): Promise<CCIPExecution> {
     if (typeof tx === 'string') tx = await this.getTransaction(tx)
     for (const log of tx.logs) {
-      const rcpt = (this.constructor as ChainStatic).decodeReceipt(log)
-      if (!rcpt) continue
+      const receipt = (this.constructor as ChainStatic).decodeReceipt(log)
+      if (!receipt) continue
 
-      const timestamp = tx.timestamp
-      return { receipt: rcpt, log, timestamp }
+      return { receipt, log }
     }
     throw new CCIPExecTxRevertedError(tx.hash)
   }

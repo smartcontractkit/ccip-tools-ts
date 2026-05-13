@@ -1,5 +1,4 @@
 import { type BytesLike, hexlify, isBytesLike, toBigInt } from 'ethers'
-import { memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import type { Chain, ChainStatic, LogFilter } from './chain.ts'
@@ -327,7 +326,7 @@ export async function getMessagesInBatch<
   R extends PickDeep<
     CCIPRequest,
     | 'lane'
-    | `log.${'topics' | 'address' | 'blockNumber' | 'tx.timestamp'}`
+    | `log.${'topics' | 'address' | 'blockNumber' | 'blockTimestamp'}`
     | 'message.sequenceNumber'
   >,
 >(
@@ -339,7 +338,7 @@ export async function getMessagesInBatch<
   // short-circuit trivial batchSize=1
   if (minSeqNr === maxSeqNr) return [request.message]
 
-  type LogAnchor = PickDeep<ChainLog, 'blockNumber' | 'tx.timestamp'>
+  type LogAnchor = Pick<R['log'], 'blockNumber' | 'blockTimestamp'>
   type BatchEntry = { log: LogAnchor; message: R['message'] }
 
   const baseFilter = {
@@ -350,19 +349,6 @@ export async function getMessagesInBatch<
   }
 
   const entries: BatchEntry[] = []
-
-  const getLogTimestamp = memoize(
-    async (log: LogAnchor): Promise<number> => {
-      if (log.tx?.timestamp != null) {
-        getLogTimestamp.cache.set([log], Promise.resolve(log.tx.timestamp))
-        return log.tx.timestamp
-      }
-      const timestamp = source.getBlockTimestamp(log.blockNumber)
-      getLogTimestamp.cache.set([log], timestamp)
-      return timestamp
-    },
-    { async: true, transformKey: ([log]) => [log.blockNumber] as const },
-  )
 
   const collectForward = async (filter: Parameters<C['getLogs']>[0]): Promise<boolean> => {
     // on first, collect up to batch end; on subsequent, collect up to before earliest seen
@@ -410,11 +396,13 @@ export async function getMessagesInBatch<
   while (!done && entries[0]!.message.sequenceNumber > minSeqNr) {
     const earliest = entries[0]!
     const earliestBefore = earliest.message.sequenceNumber
-    const earliestTimestamp = await getLogTimestamp(earliest.log)
 
     done = await collectForward({
       ...baseFilter,
-      startTime: Math.max(0, earliestTimestamp - BATCH_LOG_LOOKBACK_SECONDS * 2 ** retries),
+      startTime: Math.max(
+        0,
+        earliest.log.blockTimestamp - BATCH_LOG_LOOKBACK_SECONDS * 2 ** retries,
+      ),
       endBlock: earliest.log.blockNumber,
     })
 

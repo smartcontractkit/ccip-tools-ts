@@ -827,6 +827,7 @@ export class CCIPAPIClient {
       topics: [lane.version < CCIPVersion.V1_6 ? 'CCIPSendRequested' : 'CCIPMessageSent'],
       index: Number(sendLogIndex),
       blockNumber: Number(sendBlockNumber),
+      blockTimestamp: sendTimestamp_,
     }
 
     // Build tx from API data

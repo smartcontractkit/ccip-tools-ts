@@ -21,8 +21,11 @@ export async function getOnchainCommitReport(
   {
     lane,
     message,
-    tx: { timestamp: requestTimestamp },
-  }: PickDeep<CCIPRequest, 'lane' | `message.${'sequenceNumber' | 'messageId'}` | 'tx.timestamp'>,
+    log: { blockTimestamp: requestTimestamp },
+  }: PickDeep<
+    CCIPRequest,
+    'lane' | `message.${'sequenceNumber' | 'messageId'}` | 'log.blockTimestamp'
+  >,
   hints?: Pick<LogFilter, 'page' | 'watch' | 'startBlock'>,
 ): Promise<CCIPVerifications> {
   for await (const log of dest.getLogs({

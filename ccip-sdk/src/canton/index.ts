@@ -1,5 +1,4 @@
 import { type BytesLike, id as keccak256Utf8 } from 'ethers'
-import type { PickDeep } from 'type-fest'
 
 import {
   type ChainContext,
@@ -23,7 +22,6 @@ import { CCV_INDEXER_URL } from '../evm/const.ts'
 import type { ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
-import { getMessagesInBatch } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type CCIPExecution,
@@ -322,6 +320,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         transactionHash: hash,
         index,
         blockNumber: tx.offset,
+        blockTimestamp: timestamp,
         topics: templateId ? [templateId] : [],
         data: inner,
       }
@@ -342,22 +341,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    */
   getLogs(_opts: LogFilter): AsyncIterableIterator<ChainLog> {
     throw new CCIPNotImplementedError('CantonChain.getLogs')
-  }
-
-  /**
-   * {@inheritDoc Chain.getMessagesInBatch}
-   */
-  override async getMessagesInBatch<
-    R extends PickDeep<
-      CCIPRequest,
-      'lane' | `log.${'topics' | 'address' | 'blockNumber'}` | 'message.sequenceNumber'
-    >,
-  >(
-    request: R,
-    commit: Pick<CommitReport, 'minSeqNr' | 'maxSeqNr'>,
-    opts?: { page?: number },
-  ): Promise<R['message'][]> {
-    return getMessagesInBatch(this, request, commit, opts)
   }
 
   /**
@@ -795,6 +778,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           index: 0,
           address: '',
           blockNumber: 0,
+          blockTimestamp: 0,
           transactionHash: updateId,
           data: response.transaction,
         }
@@ -1053,12 +1037,13 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       topics: [],
       index: 0,
       address: '',
-      blockNumber: 0,
+      blockNumber: response.transaction.offset,
+      blockTimestamp: timestamp,
       transactionHash: updateId,
       data: response.transaction,
     }
 
-    return { receipt, log, timestamp }
+    return { receipt, log }
   }
 
   /**

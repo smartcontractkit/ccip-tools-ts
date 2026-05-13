@@ -496,7 +496,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         offRamp,
         messageId: successMsg.messageId,
         sourceChainSelector: request.message.sourceChainSelector,
-        startTime: request.tx.timestamp,
+        startTime: request.log.blockTimestamp,
       })) {
         if (exec.receipt.state === ExecutionState.Success) {
           foundSuccess = true
@@ -506,7 +506,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
             successMsg.messageId,
             'receipt messageId should match',
           )
-          assert.ok(exec.timestamp > 0, 'execution should have a positive timestamp')
+          assert.ok(exec.log.blockTimestamp > 0, 'execution should have a positive timestamp')
           break
         }
       }
@@ -542,7 +542,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
           offRamp,
           messageId: failedMsg.messageId,
           sourceChainSelector: request.message.sourceChainSelector,
-          startTime: request.tx.timestamp,
+          startTime: request.log.blockTimestamp,
         })) {
           assert.notEqual(
             exec.receipt.state,
@@ -1327,7 +1327,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
 
       assert.equal(execution.receipt.messageId, MESSAGE_ID, 'receipt messageId should match')
       assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
-      assert.ok(execution.timestamp > 0, 'execution should have a positive timestamp')
+      assert.ok(execution.log.blockTimestamp > 0, 'execution should have a positive timestamp')
       assert.ok(
         execution.receipt.state === ExecutionState.Success,
         'execution state should be Success',
@@ -1371,7 +1371,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         'receipt messageId should match',
       )
       assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
-      assert.ok(execution.timestamp > 0, 'execution should have a positive timestamp')
+      assert.ok(execution.log.blockTimestamp > 0, 'execution should have a positive timestamp')
       assert.ok(
         execution.receipt.state === ExecutionState.Success,
         'execution state should be Success',
@@ -1406,7 +1406,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         'receipt messageId should match',
       )
       assert.ok(execution.log.transactionHash, 'should have tx hash')
-      assert.ok(execution.timestamp > 0, 'should have timestamp')
+      assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
       assert.equal(execution.receipt.state, ExecutionState.Success)
 
       fujiWithApi.provider.destroy()
@@ -1436,7 +1436,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
       assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
       assert.ok(execution.log.transactionHash, 'should have tx hash')
-      assert.ok(execution.timestamp > 0, 'should have timestamp')
+      assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
       assert.equal(execution.receipt.state, ExecutionState.Success)
 
       fujiWithApi.provider.destroy()
@@ -1471,7 +1471,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
       assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
       assert.ok(execution.log.transactionHash, 'should have tx hash')
-      assert.ok(execution.timestamp > 0, 'should have timestamp')
+      assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
       assert.equal(execution.receipt.state, ExecutionState.Success)
 
       sepoliaWithApi.provider.destroy()
@@ -1505,7 +1505,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
       assert.equal(execution.receipt.messageId, msg.messageId, 'receipt messageId should match')
       assert.ok(execution.log.transactionHash, 'should have tx hash')
-      assert.ok(execution.timestamp > 0, 'should have timestamp')
+      assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
       assert.equal(execution.receipt.state, ExecutionState.Success)
 
       sepoliaWithApi.provider.destroy()
