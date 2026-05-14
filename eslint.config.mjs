@@ -93,6 +93,34 @@ export default defineConfig(
           message:
             'Do not use the ** operator with bigint literals. Use BigInt() for operands instead, e.g. BigInt(2) ** BigInt(64).',
         },
+
+        // DisposableStack must be declared with `using` so its [Symbol.dispose]()
+        // is called automatically. `const`/`let` assignments never trigger disposal
+        // unless the caller manually calls .dispose() in a try/finally.
+        {
+          selector:
+            'VariableDeclaration:not([kind="using"]) > VariableDeclarator > NewExpression[callee.name="DisposableStack"]',
+          message:
+            'Use `using stack = new DisposableStack()` — only `using` guarantees synchronous disposal at end of scope.',
+        },
+        {
+          selector: 'ExpressionStatement > NewExpression[callee.name="DisposableStack"]',
+          message:
+            'Assign `new DisposableStack()` with `using` so it is automatically disposed at end of scope.',
+        },
+        // AsyncDisposableStack must use `await using` (asynchronous disposal).
+        // Plain `using` is wrong here — it calls [Symbol.dispose]() which AsyncDisposableStack lacks.
+        {
+          selector:
+            'VariableDeclaration:not([kind="await using"]) > VariableDeclarator > NewExpression[callee.name="AsyncDisposableStack"]',
+          message:
+            'Use `await using stack = new AsyncDisposableStack()` — only `await using` guarantees asynchronous disposal at end of scope.',
+        },
+        {
+          selector: 'ExpressionStatement > NewExpression[callee.name="AsyncDisposableStack"]',
+          message:
+            'Assign `new AsyncDisposableStack()` with `await using` so it is automatically disposed at end of scope.',
+        },
       ],
     },
   },
