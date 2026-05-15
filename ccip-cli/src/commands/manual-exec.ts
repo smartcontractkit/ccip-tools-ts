@@ -120,6 +120,11 @@ export const builder = (yargs: Argv) =>
         string: true,
         example: '--receiver-object-ids 0xabc... 0xdef...',
       },
+      'canton-config': {
+        type: 'string',
+        describe:
+          'Path to Canton config JSON file (party, ccipParty, jwt, edsUrl, transferInstructionUrl, etc.)',
+      },
     })
 
 /**

@@ -147,6 +147,11 @@ export const builder = (yargs: Argv) =>
         default: false,
         describe: 'Wait for execution on destination',
       },
+      'canton-config': {
+        type: 'string',
+        describe:
+          'Path to Canton config JSON file (party, ccipParty, jwt, edsUrl, transferInstructionUrl, etc.)',
+      },
     })
     .check(
       ({ 'transfer-tokens': transferTokens }) =>
@@ -246,14 +251,7 @@ async function sendMessage(
   }
 
   const tokenAmounts: { token: string; amount: bigint }[] = argv.transferTokens?.length
-    ? sourceNetwork.family === ChainFamily.Canton
-      ? argv.transferTokens.map((t) => {
-          const [token, amountStr] = t.split('=') as [string, string]
-          // Canton uses 10 decimals for all tokens
-          const amount = parseUnits(amountStr, 10)
-          return { token, amount }
-        })
-      : await parseTokenAmounts(source, argv.transferTokens)
+    ? await parseTokenAmounts(source, argv.transferTokens)
     : []
 
   let receiver = argv.receiver
