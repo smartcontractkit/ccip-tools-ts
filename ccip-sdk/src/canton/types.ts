@@ -1,4 +1,4 @@
-import type { ChainFamily } from '../types.ts'
+import type { ChainFamily } from '../networks.ts'
 import type { JsCommands, PartySignatures } from './client/index.ts'
 import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
 

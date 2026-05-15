@@ -123,16 +123,6 @@ import { TONChain } from './ton/index.ts'
 export type { UnsignedTONTx } from './ton/index.ts'
 export type { CantonWallet, TransactionSigner, UnsignedCantonTx } from './canton/index.ts'
 export { Ed25519TransactionSigner } from './canton/index.ts'
-import { ChainFamily, NetworkType } from './types.ts'
-export {
-  AptosChain,
-  CantonChain,
-  ChainFamily,
-  EVMChain,
-  NetworkType,
-  SolanaChain,
-  SuiChain,
-  TONChain,
-}
+export { AptosChain, CantonChain, EVMChain, SolanaChain, SuiChain, TONChain }
 // use `supportedChains` to override/register derived classes, if needed
 export { supportedChains } from './supported-chains.ts'

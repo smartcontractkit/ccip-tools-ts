@@ -794,6 +794,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       index: 0,
       address: '',
       blockNumber: 0,
+      blockTimestamp: timestamp,
       transactionHash: updateId,
       data: response.transaction,
     }
