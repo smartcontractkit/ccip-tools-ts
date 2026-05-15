@@ -13,6 +13,7 @@ import {
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
   ChainFamily,
+  Ed25519TransactionSigner,
   NetworkType,
   networkInfo,
   signalToPromise,
@@ -280,12 +281,25 @@ export async function loadChainWallet(
       return [wallet.getAddress(), wallet] as const
     case ChainFamily.Canton: {
       const cantonCfg = loadCantonConfig(argv.cantonConfig, logger)
-      const party = (typeof argv.wallet === 'string' && argv.wallet) || cantonCfg?.party
+      const party = cantonCfg?.party
       if (!party) {
         throw new Error(
-          'Canton wallet requires a party ID: provide --wallet <party> or --canton-config with a "party" field',
+          'Canton wallet requires a party ID: provide --canton-config with a "party" field',
         )
       }
+
+      // When a private key is provided (--wallet, PRIVATE_KEY env, or rpcsFile),
+      // create an Ed25519 external signer so that sendMessage/execute use the
+      // interactive submission API (prepare → sign → execute).
+      const privateKey = typeof argv.wallet === 'string' ? argv.wallet : undefined
+      if (privateKey && /^(0x)?[0-9a-fA-F]{64}$/.test(privateKey)) {
+        const signer = new Ed25519TransactionSigner(privateKey, party)
+        logger?.debug(
+          `Canton wallet: external signer created (fingerprint=${signer.getFingerprint()})`,
+        )
+        return [party, { party, signer }] as const
+      }
+
       return [party, { party }] as const
     }
     default:

@@ -44,6 +44,29 @@ export type ConnectedSynchronizer = components['schemas']['ConnectedSynchronizer
 export type GetConnectedSynchronizersResponse =
   components['schemas']['GetConnectedSynchronizersResponse']
 
+// ---------------------------------------------------------------------------
+// Interactive submission types (external signing)
+// ---------------------------------------------------------------------------
+
+/** Request to prepare a transaction for external signing */
+export type JsPrepareSubmissionRequest = components['schemas']['JsPrepareSubmissionRequest']
+/** Response containing the prepared transaction and hash to sign */
+export type JsPrepareSubmissionResponse = components['schemas']['JsPrepareSubmissionResponse']
+/** Request to execute a prepared, externally-signed transaction and wait for the full transaction */
+export type JsExecuteSubmissionAndWaitForTransactionRequest =
+  components['schemas']['JsExecuteSubmissionAndWaitForTransactionRequest']
+/** Response containing the committed transaction after external signing submission */
+export type JsExecuteSubmissionAndWaitForTransactionResponse =
+  components['schemas']['JsExecuteSubmissionAndWaitForTransactionResponse']
+/** Signatures from all submitting parties */
+export type PartySignatures = components['schemas']['PartySignatures']
+/** Signatures from a single party */
+export type SinglePartySignatures = components['schemas']['SinglePartySignatures']
+/** A single cryptographic signature */
+export type Signature = components['schemas']['Signature']
+/** Hashing scheme version for interactive submissions */
+export type HashingSchemeVersion = NonNullable<JsPrepareSubmissionRequest['hashingSchemeVersion']>
+
 /**
  * Configuration for the Canton Ledger API client
  */
@@ -67,22 +90,51 @@ export function createCantonClient(config: CantonClientConfig) {
   const timeoutMs = config.timeout ?? 30_000
   const signal = config.signal
 
+  // Internal helpers that capture baseUrl/headers/timeoutMs/signal for
+  // cleaner call sites inside createCantonClient.
+  const get2 = <T>(
+    path: string,
+    queryParams?: Record<string, string>,
+    retries?: number,
+  ): Promise<T> =>
+    request<T>(
+      'GET',
+      baseUrl,
+      path,
+      headers,
+      timeoutMs,
+      { queryParams },
+      retries,
+      undefined,
+      signal,
+    )
+
+  const post2 = <T>(
+    path: string,
+    body: unknown,
+    queryParams?: Record<string, string>,
+    retries?: number,
+    overrideTimeoutMs?: number,
+  ): Promise<T> =>
+    request<T>(
+      'POST',
+      baseUrl,
+      path,
+      headers,
+      overrideTimeoutMs ?? timeoutMs,
+      { body, queryParams },
+      retries,
+      undefined,
+      signal,
+    )
+
   return {
     /**
      * Submit a command and wait for completion
      * @returns The update ID and completion offset
      */
     async submitAndWait(commands: JsCommands): Promise<SubmitAndWaitResponse> {
-      return post<SubmitAndWaitResponse>(
-        baseUrl,
-        '/v2/commands/submit-and-wait',
-        headers,
-        timeoutMs,
-        commands,
-        undefined,
-        undefined,
-        signal,
-      )
+      return post2<SubmitAndWaitResponse>('/v2/commands/submit-and-wait', commands)
     },
 
     /**
@@ -98,15 +150,12 @@ export function createCantonClient(config: CantonClientConfig) {
       // or swept between attempts. Application-level retry with fresh data is done in
       // CantonChain.sendMessage / execute instead.
       const SUBMIT_TIMEOUT_MS = 120_000
-      return post<JsSubmitAndWaitForTransactionResponse>(
-        baseUrl,
+      return post2<JsSubmitAndWaitForTransactionResponse>(
         '/v2/commands/submit-and-wait-for-transaction',
-        headers,
-        SUBMIT_TIMEOUT_MS,
         { commands, eventFormat },
         undefined,
         1, // no HTTP-level retry
-        signal,
+        SUBMIT_TIMEOUT_MS,
       )
     },
 
@@ -120,15 +169,10 @@ export function createCantonClient(config: CantonClientConfig) {
     ): Promise<JsGetActiveContractsResponse[]> {
       const queryParams =
         options?.limit !== undefined ? { limit: String(options.limit) } : undefined
-      return post<JsGetActiveContractsResponse[]>(
-        baseUrl,
+      return post2<JsGetActiveContractsResponse[]>(
         '/v2/state/active-contracts',
-        headers,
-        timeoutMs,
         request,
         queryParams,
-        undefined,
-        signal,
       )
     },
 
@@ -136,15 +180,7 @@ export function createCantonClient(config: CantonClientConfig) {
      * Get the current ledger end offset
      */
     async getLedgerEnd(): Promise<{ offset: number }> {
-      const data = await get<{ offset?: number }>(
-        baseUrl,
-        '/v2/state/ledger-end',
-        headers,
-        timeoutMs,
-        undefined,
-        undefined,
-        signal,
-      )
+      const data = await get2<{ offset?: number }>('/v2/state/ledger-end')
       return { offset: data.offset ?? 0 }
     },
 
@@ -153,15 +189,7 @@ export function createCantonClient(config: CantonClientConfig) {
      */
     async listParties(options?: { filterParty?: string }) {
       const queryParams = options?.filterParty ? { 'filter-party': options.filterParty } : undefined
-      const data = await get<{ partyDetails?: unknown[] }>(
-        baseUrl,
-        '/v2/parties',
-        headers,
-        timeoutMs,
-        queryParams,
-        undefined,
-        signal,
-      )
+      const data = await get2<{ partyDetails?: unknown[] }>('/v2/parties', queryParams)
       return data.partyDetails
     },
 
@@ -169,15 +197,7 @@ export function createCantonClient(config: CantonClientConfig) {
      * Get the participant ID
      */
     async getParticipantId(): Promise<string> {
-      const data = await get<{ participantId?: string }>(
-        baseUrl,
-        '/v2/parties/participant-id',
-        headers,
-        timeoutMs,
-        undefined,
-        undefined,
-        signal,
-      )
+      const data = await get2<{ participantId?: string }>('/v2/parties/participant-id')
       return data.participantId ?? ''
     },
 
@@ -185,14 +205,8 @@ export function createCantonClient(config: CantonClientConfig) {
      * Get the list of synchronizers the participant is currently connected to
      */
     async getConnectedSynchronizers(): Promise<ConnectedSynchronizer[]> {
-      const data = await get<{ connectedSynchronizers?: ConnectedSynchronizer[] }>(
-        baseUrl,
+      const data = await get2<{ connectedSynchronizers?: ConnectedSynchronizer[] }>(
         '/v2/state/connected-synchronizers',
-        headers,
-        timeoutMs,
-        undefined,
-        undefined,
-        signal,
       )
       return data.connectedSynchronizers ?? []
     },
@@ -202,17 +216,7 @@ export function createCantonClient(config: CantonClientConfig) {
      */
     async isAlive(): Promise<boolean> {
       try {
-        await request(
-          'GET',
-          baseUrl,
-          '/livez',
-          headers,
-          timeoutMs,
-          undefined,
-          undefined,
-          undefined,
-          signal,
-        )
+        await get2<unknown>('/livez')
         return true
       } catch (e) {
         console.log(`Ledger API is not alive at ${baseUrl}/livez:`, e)
@@ -226,17 +230,7 @@ export function createCantonClient(config: CantonClientConfig) {
      */
     async isReady(): Promise<boolean> {
       try {
-        await request(
-          'GET',
-          baseUrl,
-          '/readyz',
-          headers,
-          timeoutMs,
-          undefined,
-          undefined,
-          undefined,
-          signal,
-        )
+        await get2<unknown>('/readyz')
         return true
       } catch {
         return false
@@ -250,11 +244,8 @@ export function createCantonClient(config: CantonClientConfig) {
      * @returns The full `JsTransaction` including all events
      */
     async getTransactionById(updateId: string): Promise<JsTransaction> {
-      const response = await post<{ transaction: JsTransaction }>(
-        baseUrl,
+      const response = await post2<{ transaction: JsTransaction }>(
         '/v2/updates/transaction-by-id',
-        headers,
-        timeoutMs,
         {
           updateId,
           transactionFormat: {
@@ -276,9 +267,6 @@ export function createCantonClient(config: CantonClientConfig) {
             transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
           },
         },
-        undefined,
-        undefined,
-        signal,
       )
       return response.transaction
     },
@@ -290,40 +278,79 @@ export function createCantonClient(config: CantonClientConfig) {
      * @returns The full update with all events
      */
     async getUpdateById(updateId: string, party: string): Promise<unknown> {
-      return post<unknown>(
-        baseUrl,
-        '/v2/updates/update-by-id',
-        headers,
-        timeoutMs,
-        {
-          updateId,
-          updateFormat: {
-            includeTransactions: {
-              eventFormat: {
-                filtersByParty: {
-                  [party]: {
-                    cumulative: [
-                      {
-                        identifierFilter: {
-                          WildcardFilter: {
-                            value: {
-                              includeCreatedEventBlob: false,
-                            },
+      return post2<unknown>('/v2/updates/update-by-id', {
+        updateId,
+        updateFormat: {
+          includeTransactions: {
+            eventFormat: {
+              filtersByParty: {
+                [party]: {
+                  cumulative: [
+                    {
+                      identifierFilter: {
+                        WildcardFilter: {
+                          value: {
+                            includeCreatedEventBlob: false,
                           },
                         },
                       },
-                    ],
-                  },
+                    },
+                  ],
                 },
-                verbose: true,
               },
-              transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
+              verbose: true,
             },
+            transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
           },
         },
+      })
+    },
+
+    // -----------------------------------------------------------------------
+    // Interactive submission (external signing)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Prepare a transaction for external signing.
+     *
+     * Calls the Preparing Participant Node (PPN) to convert ledger commands
+     * into a Daml transaction. The response contains the prepared transaction
+     * blob and a hash that must be signed by the external party.
+     *
+     * @returns The prepared transaction, its hash, and the hashing scheme version.
+     */
+    async prepareSubmission(
+      request: JsPrepareSubmissionRequest,
+    ): Promise<JsPrepareSubmissionResponse> {
+      const PREPARE_TIMEOUT_MS = 120_000
+      return post2<JsPrepareSubmissionResponse>(
+        '/v2/interactive-submission/prepare',
+        request,
         undefined,
+        1, // no HTTP-level retry — caller handles retry with fresh ACS data
+        PREPARE_TIMEOUT_MS,
+      )
+    },
+
+    /**
+     * Execute a previously prepared and externally-signed transaction,
+     * waiting for the full transaction response.
+     *
+     * Calls the Executing Participant Node (EPN) with the prepared transaction
+     * and the party's signature(s), returning the committed transaction.
+     *
+     * @returns The committed transaction with all created/archived events.
+     */
+    async executeSubmissionAndWaitForTransaction(
+      request: JsExecuteSubmissionAndWaitForTransactionRequest,
+    ): Promise<JsExecuteSubmissionAndWaitForTransactionResponse> {
+      const EXECUTE_TIMEOUT_MS = 120_000
+      return post2<JsExecuteSubmissionAndWaitForTransactionResponse>(
+        '/v2/interactive-submission/executeAndWaitForTransaction',
+        request,
         undefined,
-        signal,
+        1, // no HTTP-level retry
+        EXECUTE_TIMEOUT_MS,
       )
     },
   }
@@ -389,7 +416,89 @@ function buildHeaders(jwt?: string): Record<string, string> {
 
 const DEFAULT_RETRY_COUNT = 10
 const DEFAULT_RETRY_DELAY_MS = 3_000
+const NETWORK_RETRY_DELAY_MS = 10_000
 
+/** Error codes that indicate a transient network issue (DNS, connection, etc.). */
+const NETWORK_ERROR_CODES = new Set([
+  'ENOTFOUND',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EPIPE',
+  'EAI_AGAIN',
+  'ERR_HTTP2_ERROR',
+])
+
+/**
+ * Recursively extract the `code` property from an error or its `cause` chain.
+ * Axios wraps the original network error in a `cause` property, so we check both levels.
+ */
+function getErrorCode(err: unknown): string | undefined {
+  if (!err || typeof err !== 'object') return undefined
+  const code = (err as { code?: string }).code
+  if (code) return code
+  return getErrorCode((err as { cause?: unknown }).cause)
+}
+
+/** Check whether an error is a transient network-level failure. */
+function isNetworkError(err: unknown): boolean {
+  const code = getErrorCode(err)
+  return !!code && NETWORK_ERROR_CODES.has(code)
+}
+
+/**
+ * Execute an axios request while suppressing orphaned HTTP/2 session errors.
+ *
+ * When DNS fails, `http2.connect()` may emit an `error` event on the
+ * `ClientHttp2Session` *after* the axios promise has already rejected.
+ * Without a listener that second emission crashes the process.  We
+ * temporarily bump the uncaught-exception guard for the duration of each
+ * request so those late-arriving errors are swallowed and surfaced through
+ * the normal retry path instead.
+ */
+async function safeHttp2Request(
+  config: Parameters<typeof cantonHttp.request>[0],
+): Promise<{ status: number; data: unknown; headers: Record<string, unknown> }> {
+  let captured: Error | undefined
+  const guard = (err: Error) => {
+    if (isNetworkError(err)) {
+      captured = err // swallow — the retry loop will handle it
+    } else {
+      throw err // rethrow non-network errors normally
+    }
+  }
+  process.on('uncaughtException', guard)
+  try {
+    return await cantonHttp.request(config)
+  } catch (err) {
+    throw captured ?? err
+  } finally {
+    // Give the event loop one tick so any late-firing HTTP/2 session errors
+    // are still caught by this guard before we remove it.
+    await new Promise((r) => setImmediate(r))
+    process.removeListener('uncaughtException', guard)
+  }
+}
+
+/**
+ * Detect whether an error represents a request cancelled via AbortSignal.
+ *
+ * Axios can surface cancellation in three forms depending on version and
+ * transport adapter:
+ * - `code === 'ERR_CANCELED'` (axios >=1.x)
+ * - `'__CANCEL__' in err`     (axios <1.x legacy)
+ * - `name === 'CanceledError'` (axios CanceledError class)
+ */
+function isCancelledError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const e = err as Record<string, unknown>
+  return e.code === 'ERR_CANCELED' || '__CANCEL__' in e || e.name === 'CanceledError'
+}
+
+/**
+ * Perform an HTTP/2 request with retry logic and orphaned-session error suppression.
+ * All Canton services (Ledger API, validator scan-proxy, EDS) require HTTP/2.
+ */
 async function request<T>(
   method: 'GET' | 'POST',
   baseUrl: string,
@@ -401,10 +510,18 @@ async function request<T>(
   retryDelayMs = DEFAULT_RETRY_DELAY_MS,
   signal?: AbortSignal,
 ): Promise<T> {
+  // Check if signal is already aborted before attempting any requests
+  if (signal?.aborted) {
+    throw new CantonApiError(
+      `${method} ${path} aborted before request`,
+      new Error('AbortSignal already aborted'),
+    )
+  }
+
   for (let attempt = 1; attempt <= retries; attempt++) {
     let response: { status: number; data: unknown; headers: Record<string, unknown> }
     try {
-      response = await cantonHttp.request({
+      const requestConfig = {
         method,
         url: baseUrl + path,
         headers,
@@ -414,14 +531,23 @@ async function request<T>(
         signal,
         // Prevent axios from throwing on non-2xx so we can handle retries ourselves
         validateStatus: () => true,
-      })
+      } as Parameters<typeof cantonHttp.request>[0]
+      response = await safeHttp2Request(requestConfig)
     } catch (err) {
+      // Don't retry if the request was cancelled via AbortSignal
+      if (isCancelledError(err)) {
+        throw new CantonApiError(`${method} ${path} cancelled`, err)
+      }
+
       if (attempt < retries) {
+        const isNetwork = isNetworkError(err)
+        const delay = isNetwork ? NETWORK_RETRY_DELAY_MS : retryDelayMs
+        const hint = isNetwork ? ' (network unreachable — check VPN?)' : ''
         console.log(
-          `[canton/client] ${method} ${path} failed (attempt ${attempt}/${retries}), retrying in ${retryDelayMs}ms:`,
-          err,
+          `[canton/client] ${method} ${path} failed${hint} (attempt ${attempt}/${retries}), retrying in ${delay / 1000}s…`,
+          isNetwork ? ((err as Error).message ?? err) : err,
         )
-        await new Promise((r) => setTimeout(r, retryDelayMs))
+        await new Promise((r) => setTimeout(r, delay))
         continue
       }
       throw new CantonApiError(`${method} ${path} failed`, err)
