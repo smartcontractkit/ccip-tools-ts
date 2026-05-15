@@ -83,7 +83,6 @@ export type {
   UnsignedCantonTx,
 } from './types.ts'
 export { isCantonWallet, parseInstrumentId } from './types.ts'
-export { Ed25519TransactionSigner } from './signer.ts'
 
 /**
  * Canton chain implementation supporting Canton Ledger networks.

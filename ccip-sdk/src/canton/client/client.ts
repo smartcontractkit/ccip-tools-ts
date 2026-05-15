@@ -485,8 +485,8 @@ async function safeHttp2Request(
  *
  * Axios can surface cancellation in three forms depending on version and
  * transport adapter:
- * - `code === 'ERR_CANCELED'` (axios >=1.x)
- * - `'__CANCEL__' in err`     (axios <1.x legacy)
+ * - `code === 'ERR_CANCELED'` (axios \>=1.x)
+ * - `'__CANCEL__' in err`     (axios \<1.x legacy)
  * - `name === 'CanceledError'` (axios CanceledError class)
  */
 function isCancelledError(err: unknown): boolean {
@@ -512,10 +512,9 @@ async function request<T>(
 ): Promise<T> {
   // Check if signal is already aborted before attempting any requests
   if (signal?.aborted) {
-    throw new CantonApiError(
-      `${method} ${path} aborted before request`,
-      new Error('AbortSignal already aborted'),
-    )
+    throw new CantonApiError(`${method} ${path} aborted before request`, {
+      message: 'AbortSignal already aborted',
+    })
   }
 
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -545,7 +544,7 @@ async function request<T>(
         const hint = isNetwork ? ' (network unreachable — check VPN?)' : ''
         console.log(
           `[canton/client] ${method} ${path} failed${hint} (attempt ${attempt}/${retries}), retrying in ${delay / 1000}s…`,
-          isNetwork ? ((err as Error).message ?? err) : err,
+          isNetwork ? (err as Error).message : err,
         )
         await new Promise((r) => setTimeout(r, delay))
         continue

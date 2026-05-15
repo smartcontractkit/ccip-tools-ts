@@ -33,7 +33,7 @@ import {
   getDataBytes,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
-import { type BytesLike, AbiCoder, formatUnits, parseUnits, toUtf8Bytes } from 'ethers'
+import { type BytesLike, AbiCoder, formatUnits, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -368,7 +368,7 @@ async function sendMessage(
           party: string,
         ): Promise<{ feeToken: string; extraArgs: Record<string, unknown> }>
       }
-    ).discoverSendArgs(walletAddress!)
+    ).discoverSendArgs(walletAddress)
 
     // Merge: discovered defaults < code-generated extraArgs (which already includes --extra overrides)
     const cantonExtraArgs = {
@@ -385,7 +385,7 @@ async function sendMessage(
       receiver,
       data,
       extraArgs: cantonExtraArgs,
-      feeToken: (argv.feeToken || discovered.feeToken) as string,
+      feeToken: argv.feeToken || discovered.feeToken,
       tokenAmounts,
     }
 

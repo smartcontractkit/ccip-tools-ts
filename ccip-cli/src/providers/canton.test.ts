@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash, createPrivateKey, createPublicKey, verify } from 'node:crypto'
 import { describe, it } from 'node:test'
 
-import { Ed25519TransactionSigner } from './signer.ts'
+import { Ed25519TransactionSigner } from './canton.ts'
 
 // ---------------------------------------------------------------------------
 // Test Constants
@@ -63,7 +63,7 @@ function derivePublicKeyDer(seedHex: string): Buffer {
   const pkcs8 = Buffer.concat([prefix, seed])
   const privateKey = createPrivateKey({ key: pkcs8, format: 'der', type: 'pkcs8' })
   const publicKey = createPublicKey(privateKey)
-  return publicKey.export({ type: 'spki', format: 'der' }) as Buffer
+  return publicKey.export({ type: 'spki', format: 'der' })
 }
 
 // ---------------------------------------------------------------------------

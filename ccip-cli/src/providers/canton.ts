@@ -1,7 +1,6 @@
 import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto'
 
-import type { PartySignatures } from './client/index.ts'
-import type { TransactionSigner } from './types.ts'
+import type { PartySignatures, TransactionSigner } from '@chainlink/ccip-sdk/src/index.ts'
 
 /**
  * An Ed25519 {@link TransactionSigner} for Canton external signing.
@@ -26,6 +25,7 @@ export class Ed25519TransactionSigner implements TransactionSigner {
   private readonly party: string
 
   /**
+   * Creates a new Ed25519 transaction signer.
    * @param privateKeyHex - 64-character hex string representing the 32-byte Ed25519 seed.
    * @param party - The Daml party ID this signer acts on behalf of.
    */
@@ -61,10 +61,10 @@ export class Ed25519TransactionSigner implements TransactionSigner {
    * @param hash - Raw hash bytes from the prepare response.
    * @returns PartySignatures ready for the execute submission request.
    */
-  async sign(hash: Uint8Array): Promise<PartySignatures> {
+  sign(hash: Uint8Array): Promise<PartySignatures> {
     const signature = sign(null, Buffer.from(hash), this.privateKeyObject)
 
-    return {
+    return Promise.resolve({
       signatures: [
         {
           party: this.party,
@@ -78,7 +78,7 @@ export class Ed25519TransactionSigner implements TransactionSigner {
           ],
         },
       ],
-    }
+    })
   }
 
   /** Returns the Canton key fingerprint for this signer. */
@@ -111,11 +111,13 @@ function computeCantonFingerprint(rawPublicKey: Buffer): string {
  * Wrap a 32-byte Ed25519 seed in a PKCS8 DER envelope.
  *
  * The ASN.1 structure is:
+ * ```
  *   SEQUENCE {
  *     INTEGER 0                          -- version
  *     SEQUENCE { OID 1.3.101.112 }       -- Ed25519 algorithm
  *     OCTET STRING { OCTET STRING seed } -- private key
  *   }
+ * ```
  */
 function buildEd25519Pkcs8Der(seed: Buffer): Buffer {
   // RFC 8410 §7 — Ed25519 private key encoded as PKCS#8 / OneAsymmetricKey.

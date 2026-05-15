@@ -13,7 +13,6 @@ import {
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
   ChainFamily,
-  Ed25519TransactionSigner,
   NetworkType,
   networkInfo,
   signalToPromise,
@@ -21,6 +20,7 @@ import {
 } from '@chainlink/ccip-sdk/src/index.ts'
 
 import { loadAptosWallet } from './aptos.ts'
+import { Ed25519TransactionSigner } from './canton.ts'
 import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
 import { loadSuiWallet } from './sui.ts'
@@ -77,7 +77,7 @@ function loadCantonConfig(
   // Validate required fields
   const required = ['party', 'ccipParty', 'jwt', 'edsUrl', 'transferInstructionUrl'] as const
   for (const field of required) {
-    if (typeof parsed[field] !== 'string' || !(parsed[field] as string).length) {
+    if (typeof parsed[field] !== 'string' || !parsed[field].length) {
       throw new Error(`Canton config: "${field}" is required and must be a non-empty string`)
     }
   }
