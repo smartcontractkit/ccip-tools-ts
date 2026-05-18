@@ -30,6 +30,7 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         'guides/tracking-messages',
+        'guides/searching-messages',
         'guides/sending-messages',
         'guides/manual-execution',
         'guides/querying-data',
