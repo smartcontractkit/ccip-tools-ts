@@ -1625,6 +1625,12 @@ const SELECTORS: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '2026041003': {
+    selector: 604447335222770945n,
+    name: 'private-testnet-rhyolite',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
   '2494104990': {
     selector: 13231703482326770598n,
     name: 'tron-testnet-shasta-evm',
