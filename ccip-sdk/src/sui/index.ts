@@ -12,6 +12,8 @@ import {
   type ChainStatic,
   type GetBalanceOpts,
   type LogFilter,
+  type OffRampConfig,
+  type OnRampConfig,
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
@@ -21,7 +23,6 @@ import { getSuiLeafHasher } from './hasher.ts'
 import { deriveObjectID, getLatestPackageId, getObjectRef } from './objects.ts'
 import {
   CCIPArgumentInvalidError,
-  CCIPContractNotRouterError,
   CCIPDataFormatUnsupportedError,
   CCIPError,
   CCIPErrorCode,
@@ -283,18 +284,85 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return parseTypeAndVersion(res)
   }
 
-  /** {@inheritDoc Chain.getRouterForOnRamp} */
-  async getRouterForOnRamp(onRamp: string, _destChainSelector: bigint): Promise<string> {
-    // In Sui, the router is the onRamp package itself
-    return Promise.resolve(onRamp)
+  /** {@inheritDoc Chain.getOnRampConfig} */
+  async getOnRampConfig(onRamp: string, _destChainSelector: bigint): Promise<OnRampConfig> {
+    const [type, version, typeAndVersion] = await this.typeAndVersion(onRamp)
+    return { router: onRamp, type, version, typeAndVersion }
   }
 
-  /**
-   * {@inheritDoc Chain.getRouterForOffRamp}
-   * @throws {@link CCIPContractNotRouterError} always (Sui architecture doesn't have separate router)
-   */
-  getRouterForOffRamp(offRamp: string, _sourceChainSelector: bigint): Promise<string> {
-    throw new CCIPContractNotRouterError(offRamp, 'unknown')
+  /** {@inheritDoc Chain.getOffRampConfig} */
+  async getOffRampConfig(offRamp: string, sourceChainSelector: bigint): Promise<OffRampConfig> {
+    const [type, version, typeAndVersion] = await this.typeAndVersion(offRamp)
+    offRamp = await getLatestPackageId(offRamp, this.client)
+    const functionName = 'get_source_chain_config'
+    const target = offRamp.includes('::')
+      ? `${offRamp}::${functionName}`
+      : `${offRamp}::offramp::${functionName}`
+
+    const ccip = await getCcipStateAddress(offRamp, this.client)
+    const offrampStateObject = await getObjectRef(offRamp, this.client)
+    const ccipObjectRef = await getObjectRef(ccip, this.client)
+    const tx = new Transaction()
+    tx.moveCall({
+      target,
+      arguments: [
+        tx.object(ccipObjectRef),
+        tx.object(offrampStateObject),
+        tx.pure.u64(sourceChainSelector),
+      ],
+    })
+
+    const result = await this.client.devInspectTransactionBlock({
+      sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      transactionBlock: tx,
+    })
+
+    if (result.effects.status.status !== 'success' || !result.results?.[0]?.returnValues?.[0]) {
+      throw new CCIPDataFormatUnsupportedError(
+        `Failed to call ${target}: ${result.effects.status.error || 'No return value'}`,
+      )
+    }
+
+    const [data] = result.results[0].returnValues[0]
+    const configBytes = new Uint8Array(data)
+    let offset = 0
+
+    const routerBytes = configBytes.slice(offset, offset + 32)
+    offset += 32
+    const router = `0x${Buffer.from(routerBytes).toString('hex')}`
+
+    const isEnabled = configBytes[offset]! !== 0
+    offset += 1
+
+    const minSeqNrBytes = configBytes.slice(offset, offset + 8)
+    offset += 8
+    const minSeqNr = new DataView(minSeqNrBytes.buffer, minSeqNrBytes.byteOffset).getBigUint64(
+      0,
+      true,
+    )
+
+    const isRmnVerificationDisabled = configBytes[offset]! !== 0
+    offset += 1
+
+    const onRampLength = configBytes[offset]!
+    offset += 1
+    const onRampBytes = configBytes.slice(offset, offset + onRampLength)
+    const onRamp = decodeAddress(onRampBytes, networkInfo(sourceChainSelector).family)
+
+    return {
+      router,
+      onRamp,
+      isEnabled,
+      minSeqNr,
+      isRmnVerificationDisabled,
+      type,
+      version,
+      typeAndVersion,
+    } as OffRampConfig & {
+      isEnabled: boolean
+      minSeqNr: bigint
+      isRmnVerificationDisabled: boolean
+    }
   }
 
   /** {@inheritDoc Chain.getNativeTokenForRouter} */
@@ -315,82 +383,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   getOnRampForRouter(router: string, _destChainSelector: bigint): Promise<string> {
     // For Sui, the router is the onramp package address
     return Promise.resolve(router)
-  }
-
-  /**
-   * {@inheritDoc Chain.getOnRampsForOffRamp}
-   * @throws {@link CCIPDataFormatUnsupportedError} if view call fails
-   */
-  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
-    offRamp = await getLatestPackageId(offRamp, this.client)
-    const functionName = 'get_source_chain_config'
-    // Preserve module suffix if present, otherwise add it
-    const target = offRamp.includes('::')
-      ? `${offRamp}::${functionName}`
-      : `${offRamp}::offramp::${functionName}`
-
-    // Discover the CCIP package from the offramp
-    const ccip = await getCcipStateAddress(offRamp, this.client)
-
-    // Get the OffRampState object
-    const offrampStateObject = await getObjectRef(offRamp, this.client)
-    const ccipObjectRef = await getObjectRef(ccip, this.client)
-    // Use the Transaction builder to create a move call
-    const tx = new Transaction()
-
-    // Add move call to the transaction with OffRampState object and source chain selector
-    tx.moveCall({
-      target,
-      arguments: [
-        tx.object(ccipObjectRef),
-        tx.object(offrampStateObject),
-        tx.pure.u64(sourceChainSelector),
-      ],
-    })
-
-    // Execute with devInspectTransactionBlock for read-only call
-    const result = await this.client.devInspectTransactionBlock({
-      sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
-      transactionBlock: tx,
-    })
-
-    if (result.effects.status.status !== 'success' || !result.results?.[0]?.returnValues?.[0]) {
-      throw new CCIPDataFormatUnsupportedError(
-        `Failed to call ${target}: ${result.effects.status.error || 'No return value'}`,
-      )
-    }
-
-    // The return value is a SourceChainConfig struct with the following fields:
-    // - Router (address = 32 bytes)
-    // - IsEnabled (bool = 1 byte)
-    // - MinSeqNr (u64 = 8 bytes)
-    // - IsRmnVerificationDisabled (bool = 1 byte)
-    // - OnRamp (vector<u8> = length + bytes)
-    const returnValue = result.results[0].returnValues[0]
-    const [data] = returnValue
-    const configBytes = new Uint8Array(data)
-
-    let offset = 0
-
-    // Skip Router (32 bytes)
-    offset += 32
-
-    // Skip IsEnabled (1 byte)
-    offset += 1
-
-    // Skip MinSeqNr (8 bytes)
-    offset += 8
-
-    // Skip IsRmnVerificationDisabled (1 byte)
-    offset += 1
-
-    // OnRamp (vector<u8>)
-    const onRampLength = configBytes[offset]!
-    offset += 1
-    const onRampBytes = configBytes.slice(offset, offset + onRampLength)
-
-    // Decode the address from the onRamp bytes
-    return [decodeAddress(onRampBytes, networkInfo(sourceChainSelector).family)]
   }
 
   /**

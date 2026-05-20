@@ -95,12 +95,40 @@ class MockChain extends Chain {
     return [parts[0], parts[1], this.mockTypeAndVersion]
   }
 
-  async getRouterForOnRamp(_onRamp: string, _destChainSelector: bigint): Promise<string> {
+  override async getRouterForOnRamp(_onRamp: string, _destChainSelector: bigint): Promise<string> {
     return '0xRouter'
   }
 
-  async getRouterForOffRamp(_offRamp: string, _sourceChainSelector: bigint): Promise<string> {
+  override async getRouterForOffRamp(
+    _offRamp: string,
+    _sourceChainSelector: bigint,
+  ): Promise<string> {
     return '0xRouter'
+  }
+
+  async getOnRampConfig(
+    _onRamp: string,
+    _destChainSelector: bigint,
+  ): Promise<import('./chain.ts').OnRampConfig> {
+    return {
+      router: '0xRouter',
+      type: 'EVM2EVMOnRamp',
+      version: '1.5.0',
+      typeAndVersion: 'EVM2EVMOnRamp 1.5.0',
+    }
+  }
+
+  async getOffRampConfig(
+    _offRamp: string,
+    _sourceChainSelector: bigint,
+  ): Promise<import('./chain.ts').OffRampConfig> {
+    return {
+      router: '0xRouter',
+      onRamp: '0xOnRamp',
+      type: 'EVM2EVMOffRamp',
+      version: '1.5.0',
+      typeAndVersion: 'EVM2EVMOffRamp 1.5.0',
+    }
   }
 
   async getNativeTokenForRouter(_router: string): Promise<string> {
@@ -111,7 +139,7 @@ class MockChain extends Chain {
     return []
   }
 
-  async getOnRampsForOffRamp(_offRamp: string, _chainSelector: bigint): Promise<string[]> {
+  override async getOnRampsForOffRamp(_offRamp: string, _chainSelector: bigint): Promise<string[]> {
     return ['0xOnRamp']
   }
 

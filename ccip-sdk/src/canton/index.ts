@@ -5,6 +5,8 @@ import {
   type ChainStatic,
   type GetBalanceOpts,
   type LogFilter,
+  type OffRampConfig,
+  type OnRampConfig,
   type RegistryTokenConfig,
   type TokenInfo,
   type TokenPoolConfig,
@@ -354,20 +356,17 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * {@inheritDoc Chain.getRouterForOnRamp}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
+   *
    */
-  getRouterForOnRamp(_onRamp: string, _destChainSelector: bigint): Promise<string> {
-    // TODO: Contract discovery can come from EDS.
-    throw new CCIPNotImplementedError('CantonChain.getRouterForOnRamp')
+  async getOnRampConfig(_onRamp: string, _destChainSelector: bigint): Promise<OnRampConfig> {
+    throw new CCIPNotImplementedError('CantonChain.getOnRampConfig')
   }
 
   /**
-   * {@inheritDoc Chain.getRouterForOffRamp}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
+   *
    */
-  getRouterForOffRamp(_offRamp: string, _sourceChainSelector: bigint): Promise<string> {
-    throw new CCIPNotImplementedError('CantonChain.getRouterForOffRamp')
+  async getOffRampConfig(_offRamp: string, _sourceChainSelector: bigint): Promise<OffRampConfig> {
+    throw new CCIPNotImplementedError('CantonChain.getOffRampConfig')
   }
 
   /**
@@ -392,14 +391,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    */
   getOnRampForRouter(_router: string, _destChainSelector: bigint): Promise<string> {
     throw new CCIPNotImplementedError('CantonChain.getOnRampForRouter')
-  }
-
-  /**
-   * {@inheritDoc Chain.getOnRampsForOffRamp}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
-   */
-  getOnRampsForOffRamp(_offRamp: string, _sourceChainSelector: bigint): Promise<string[]> {
-    throw new CCIPNotImplementedError('CantonChain.getOnRampsForOffRamp')
   }
 
   /**

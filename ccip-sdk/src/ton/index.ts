@@ -153,6 +153,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       ctx?.fetchFn ?? createRateLimitedFetch({ maxRequests: 1, windowMs: 1500, maxRetries: 5 }, ctx)
 
     this.getTransaction = memoize(this.getTransaction.bind(this), {
+      async: true,
       maxSize: 100,
     })
 
@@ -166,6 +167,17 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
       maxArgs: 1,
       async: true,
+    })
+
+    this.getOnRampConfig = memoize(this.getOnRampConfig.bind(this), {
+      async: true,
+      maxArgs: 2,
+      expires: 60e3,
+    })
+    this.getOffRampConfig = memoize(this.getOffRampConfig.bind(this), {
+      async: true,
+      maxArgs: 2,
+      expires: 60e3,
     })
   }
 
@@ -436,22 +448,48 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return parseTypeAndVersion(typeAndVersionStr)
   }
 
-  /** {@inheritDoc Chain.getRouterForOnRamp} */
-  async getRouterForOnRamp(onRamp: string, destChainSelector: bigint): Promise<string> {
-    const { stack: destConfig } = await this.provider.runMethod(
-      Address.parse(onRamp),
-      'destChainConfig',
-      [{ type: 'int', value: destChainSelector }],
-    )
-    return destConfig.readAddress().toRawString()
-  }
-
-  /** {@inheritDoc Chain.getRouterForOffRamp} */
-  async getRouterForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
-    const { stack } = await this.provider.runMethod(Address.parse(offRamp), 'sourceChainConfig', [
-      { type: 'int', value: sourceChainSelector },
+  /** {@inheritDoc Chain.getOnRampConfig} */
+  async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
+    const onRampAddress = Address.parse(onRamp)
+    const [
+      { stack: staticStack },
+      { stack: dynamicStack },
+      { stack: destStack },
+      [, , typeAndVersion],
+    ] = await Promise.all([
+      this.provider.runMethod(onRampAddress, 'staticConfig', []),
+      this.provider.runMethod(onRampAddress, 'dynamicConfig', []),
+      this.provider.runMethod(onRampAddress, 'destChainConfig', [
+        { type: 'int', value: destChainSelector },
+      ]),
+      this.typeAndVersion(onRamp),
     ])
-    return stack.readAddress().toRawString()
+
+    // staticConfig() -> chainSelector: uint64
+    const chainSelector = staticStack.readBigNumber()
+
+    // dynamicConfig() -> feeQuoter, feeAggregator, allowlistAdmin, reserve
+    const feeQuoter = dynamicStack.readAddress().toRawString()
+    const feeAggregator = dynamicStack.readAddress().toRawString()
+    const allowlistAdmin = dynamicStack.readAddress().toRawString()
+    const reserve = dynamicStack.readBigNumber()
+
+    // destChainConfig() -> router, sequenceNumber, allowlistEnabled, allowedSenders (dict cell)
+    const router = destStack.readAddress().toRawString()
+    const sequenceNumber = BigInt(destStack.readBigNumber().toString())
+    const allowlistEnabled = destStack.readBoolean()
+
+    return {
+      chainSelector,
+      feeQuoter,
+      feeAggregator,
+      allowlistAdmin,
+      reserve,
+      router,
+      sequenceNumber,
+      allowlistEnabled,
+      typeAndVersion,
+    }
   }
 
   /**
@@ -484,39 +522,50 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     return stack.readAddress().toRawString()
   }
 
-  /**
-   * {@inheritDoc Chain.getOnRampsForOffRamp}
-   * @throws {@link CCIPSourceChainUnsupportedError} if source chain is not configured
-   */
-  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
+  /** {@inheritDoc Chain.getOffRampConfig} */
+  async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
     try {
-      const offRampContract = this.provider.provider(Address.parse(offRamp))
-
-      const { stack } = await offRampContract.get('sourceChainConfig', [
+      const { stack } = await this.provider.runMethod(Address.parse(offRamp), 'sourceChainConfig', [
         { type: 'int', value: sourceChainSelector },
       ])
-      stack.readAddress() // router
-      stack.readBoolean() // isEnabled
-      stack.readBigNumber() // minSeqNr
-      stack.readBoolean() // isRMNVerificationDisabled
+      const router = stack.readAddress().toRawString()
+      const isEnabled = stack.readBoolean()
+      const minSeqNr = BigInt(stack.readBigNumber().toString())
+      const isRMNVerificationDisabled = stack.readBoolean()
 
-      // onRamp is stored as CrossChainAddress cell
       const onRampCell = stack.readCell()
       const onRampSlice = onRampCell.beginParse()
-
-      // Check if length-prefixed or raw format based on cell bit length
       const cellBits = onRampCell.bits.length
-      let onRamp: Buffer
-
+      let onRampBytes: Buffer
       if (cellBits === 160 || cellBits === 256) {
-        // Raw bytes (EVM=20, Solana/Aptos=32) address (no length prefix)
-        onRamp = onRampSlice.loadBuffer(cellBits / 8)
+        onRampBytes = onRampSlice.loadBuffer(cellBits / 8)
       } else {
-        // Length-prefixed format: 8-bit length + data
         const onRampLength = onRampSlice.loadUint(8)
-        onRamp = onRampSlice.loadBuffer(onRampLength)
+        onRampBytes = onRampSlice.loadBuffer(onRampLength)
       }
-      return [decodeAddress(onRamp, networkInfo(sourceChainSelector).family)]
+      const onRamp = decodeAddress(onRampBytes, networkInfo(sourceChainSelector).family)
+
+      const [{ stack: cfgStack }, [, , typeAndVersion]] = await Promise.all([
+        this.provider.runMethod(Address.parse(offRamp), 'config', []),
+        this.typeAndVersion(offRamp),
+      ])
+
+      // config() -> chainSelector, feeQuoter, permissionlessExecutionThresholdSeconds
+      const chainSelector = cfgStack.readBigNumber()
+      const feeQuoter = cfgStack.readAddress().toRawString()
+      const permissionlessExecutionThresholdSeconds = cfgStack.readNumber()
+
+      return {
+        chainSelector,
+        feeQuoter,
+        permissionlessExecutionThresholdSeconds,
+        router,
+        isEnabled,
+        minSeqNr,
+        isRMNVerificationDisabled,
+        onRamps: [onRamp],
+        typeAndVersion,
+      }
     } catch (error) {
       if (isTvmError(error) && error.exitCode === 266) {
         throw new CCIPSourceChainUnsupportedError(sourceChainSelector, {

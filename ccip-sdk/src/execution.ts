@@ -8,6 +8,7 @@ import {
 } from './errors/index.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
 import type { CCIPMessage, CCIPVersion, Lane, WithLogger } from './types.ts'
+import { decodeOnRampAddress } from './utils.ts'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
@@ -117,6 +118,12 @@ export const discoverOffRamp = memoize(
     onRamp: string,
     { logger = console }: WithLogger = {},
   ): Promise<string> {
+    try {
+      onRamp = decodeOnRampAddress(onRamp, source.network.family)
+    } catch {
+      // pass
+    }
+
     const sourceRouter = await source.getRouterForOnRamp(onRamp, dest.network.chainSelector)
     const sourceOffRamps = await source.getOffRampsForRouter(
       sourceRouter,

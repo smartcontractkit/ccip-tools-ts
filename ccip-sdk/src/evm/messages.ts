@@ -17,11 +17,13 @@ import type { MessageV1 } from '../messages.ts'
 /** Utility type that cleans up address types to just `string`. */
 export type CleanAddressable<T> = T extends string | Addressable
   ? string
-  : T extends { [K: string]: unknown } | [...unknown[]]
-    ? { [K in keyof T]: CleanAddressable<T[K]> }
-    : T extends { readonly [K: string]: unknown } | readonly [...unknown[]]
-      ? { readonly [K in keyof T]: CleanAddressable<T[K]> }
-      : T
+  : T extends Promise<infer U>
+    ? Promise<CleanAddressable<U>>
+    : T extends { [K: string]: unknown } | [...unknown[]]
+      ? { [K in keyof T]: CleanAddressable<T[K]> }
+      : T extends { readonly [K: string]: unknown } | readonly [...unknown[]]
+        ? { readonly [K in keyof T]: CleanAddressable<T[K]> }
+        : T
 
 // v1.2-v1.5 Message ()
 type EVM2AnyMessageRequested = CleanAddressable<

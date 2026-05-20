@@ -510,6 +510,50 @@ export type RegistryTokenConfig = {
 }
 
 /**
+ * Minimum shape of the OnRamp configuration returned by {@link Chain.getOnRampConfig}.
+ *
+ * @remarks
+ * Concrete subclasses return richer objects containing every field exposed by
+ * the underlying contract (static config, dynamic config, and the per-destination
+ * config) preserving the contract-native field names where possible. This base
+ * interface only states the bare minimum properties guaranteed to be present
+ * across all chain families.
+ */
+export interface OnRampConfig {
+  /** Original (unparsed) typeAndVersion() string. */
+  typeAndVersion: string
+  /** Router address connected to this OnRamp on the source chain. */
+  router: string
+  /** Address of the FeeQuoter contract for this OffRamp. */
+  feeQuoter: string
+}
+
+/**
+ * Minimum shape of the OffRamp configuration returned by {@link Chain.getOffRampConfig}.
+ *
+ * @remarks
+ * Concrete subclasses return richer objects containing every field exposed by
+ * the underlying contract (static config, dynamic config, and the per-source
+ * config) preserving the contract-native field names where possible. This base
+ * interface only states the bare minimum properties guaranteed to be present
+ * across all chain families. Subclasses where the OffRamp accepts multiple
+ * OnRamps (e.g. EVM v2.0) should additionally expose an `onRamps: string[]`
+ * field; `onRamp` is then the most recent/canonical OnRamp in that list.
+ */
+export interface OffRampConfig {
+  /** Original (unparsed) typeAndVersion() string. */
+  typeAndVersion: string
+  /** Router address connected to this OffRamp for this source chain. */
+  router: string
+  /**
+   * Source OnRamp address (in source-family format) accepted by this OffRamp.
+   * Concrete subclasses that support multiple OnRamps per source chain
+   * (e.g. EVM v2.0) additionally expose `onRamps: string[]`.
+   */
+  onRamps: string[]
+}
+
+/**
  * Maps chain family to respective unsigned transaction type.
  */
 export type UnsignedTx = {
@@ -964,8 +1008,48 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   ): Promise<[type: string, version: string, typeAndVersion: string, suffix?: string]>
 
   /**
+   * Fetch the full OnRamp configuration for a given destination chain.
+   *
+   * @remarks
+   * Returns a merged object containing every static (per-contract) and per-destination
+   * field exposed by the underlying contract. Concrete subclasses (e.g. {@link EVMChain})
+   * preserve the contract-native field names and return richer objects than the
+   * {@link OnRampConfig} base interface declares — they may include extra fields
+   * available only on specific versions.
+   *
+   * @param onRamp - OnRamp contract address.
+   * @param destChainSelector - Destination chain selector.
+   * @returns Merged OnRamp config — at minimum `router`, `type`, `version`, `typeAndVersion`.
+   *
+   * @throws {@link CCIPContractTypeInvalidError} if address is not an OnRamp.
+   */
+  abstract getOnRampConfig(onRamp: string, destChainSelector: bigint): Promise<OnRampConfig>
+
+  /**
+   * Fetch the full OffRamp configuration for a given source chain.
+   *
+   * @remarks
+   * Returns a merged object containing every static (per-contract) and per-source
+   * field exposed by the underlying contract. Concrete subclasses preserve the
+   * contract-native field names and return richer objects than the
+   * {@link OffRampConfig} base interface declares — they may include extra fields
+   * available only on specific versions (e.g. EVM v2.0 exposes `onRamps: string[]`).
+   *
+   * @param offRamp - OffRamp contract address.
+   * @param sourceChainSelector - Source chain selector.
+   * @returns Merged OffRamp config — at minimum `router`, `onRamp`, `type`, `version`, `typeAndVersion`.
+   *
+   * @throws {@link CCIPContractTypeInvalidError} if address is not an OffRamp.
+   */
+  abstract getOffRampConfig(offRamp: string, sourceChainSelector: bigint): Promise<OffRampConfig>
+
+  /**
    * Fetch the Router address set in OnRamp config.
    * Used to discover OffRamp connected to OnRamp.
+   *
+   * @remarks
+   * Default implementation reads `.router` from {@link Chain.getOnRampConfig}; subclasses
+   * generally need not override this.
    *
    * @param onRamp - OnRamp contract address
    * @param destChainSelector - Destination chain selector
@@ -979,9 +1063,15 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`Router: ${router}`)
    * ```
    */
-  abstract getRouterForOnRamp(onRamp: string, destChainSelector: bigint): Promise<string>
+  async getRouterForOnRamp(onRamp: string, destChainSelector: bigint): Promise<string> {
+    return (await this.getOnRampConfig(onRamp, destChainSelector)).router
+  }
   /**
    * Fetch the Router address set in OffRamp config.
+   *
+   * @remarks
+   * Default implementation reads `.router` from {@link Chain.getOffRampConfig}; subclasses
+   * generally need not override this.
    *
    * @param offRamp - OffRamp contract address
    * @param sourceChainSelector - Source chain selector
@@ -995,7 +1085,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`Router: ${router}`)
    * ```
    */
-  abstract getRouterForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string>
+  async getRouterForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
+    return (await this.getOffRampConfig(offRamp, sourceChainSelector)).router
+  }
   /**
    * Get the native token address for a Router.
    *
@@ -1044,6 +1136,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Fetch the OnRamps addresses set in OffRamp config.
    * Used to discover OffRamp connected to an OnRamp.
    *
+   * @remarks
+   * Default implementation reads from {@link Chain.getOffRampConfig}; if the concrete
+   * config exposes an `onRamps: string[]` (e.g. EVM v2.0 with multiple historical
+   * OnRamps), it is returned as-is; otherwise `[cfg.onRamp]` is returned.
+   *
    * @param offRamp - OffRamp contract address
    * @param sourceChainSelector - Source chain selector
    * @returns Promise resolving to OnRamps addresses
@@ -1054,7 +1151,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`OnRamp: ${onRamp}`)
    * ```
    */
-  abstract getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]>
+  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
+    const cfg = await this.getOffRampConfig(offRamp, sourceChainSelector)
+    return cfg.onRamps
+  }
+
   /**
    * Fetch the TokenPool's token/mint.
    *

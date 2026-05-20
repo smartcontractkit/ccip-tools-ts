@@ -13,6 +13,7 @@ import {
   SYSVAR_CLOCK_PUBKEY,
   SystemProgram,
 } from '@solana/web3.js'
+import BN from 'bn.js'
 import bs58 from 'bs58'
 import {
   type BytesLike,
@@ -55,7 +56,6 @@ import {
   CCIPLogsAddressRequiredError,
   CCIPSolanaExtraArgsEncodingError,
   CCIPSolanaOffRampEventsNotFoundError,
-  CCIPSolanaRefAddressesNotFoundError,
   CCIPSplTokenInvalidError,
   CCIPTokenAccountNotFoundError,
   CCIPTokenDataParseError,
@@ -174,6 +174,40 @@ export type SolanaTransaction = MergeArrayElements<
   }
 >
 
+type NormalizedPda<T> = T extends PublicKey
+  ? string
+  : T extends BN
+    ? bigint
+    : T extends Array<infer U>
+      ? Array<NormalizedPda<U>>
+      : T extends Record<string, unknown>
+        ? { [K in keyof T]: NormalizedPda<T[K]> }
+        : T
+
+function normalizePda<O extends Record<string, unknown>>(obj: O): NormalizedPda<O> {
+  const result: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (v instanceof PublicKey) {
+      result[k] = v.toString()
+    } else if (BN.isBN(v)) {
+      result[k] = BigInt(v.toString())
+    } else if (Array.isArray(v)) {
+      result[k] = v.map((item) =>
+        item instanceof PublicKey
+          ? item.toString()
+          : item !== null && typeof item === 'object'
+            ? normalizePda(item as Record<string, unknown>)
+            : (item as O),
+      )
+    } else if (v !== null && typeof v === 'object') {
+      result[k] = normalizePda(v as Record<string, unknown>)
+    } else {
+      result[k] = v
+    }
+  }
+  return result as NormalizedPda<O>
+}
+
 /**
  * Solana chain implementation supporting Solana networks.
  *
@@ -277,7 +311,21 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         [(address as PublicKey).toString(), commitment] as const,
     })
 
-    this._getRouterConfig = memoize(this._getRouterConfig.bind(this), { async: true, maxArgs: 1 })
+    this._getRouterConfig = memoize(this._getRouterConfig.bind(this), {
+      async: true,
+      maxArgs: 1,
+      expires: 60e3,
+    })
+    this.getOnRampConfig = memoize(this.getOnRampConfig.bind(this), {
+      async: true,
+      maxArgs: 2,
+      expires: 60e3,
+    })
+    this.getOffRampConfig = memoize(this.getOffRampConfig.bind(this), {
+      async: true,
+      maxArgs: 2,
+      expires: 60e3,
+    })
 
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { async: true, maxArgs: 1 })
     this.getOffRampsForRouter = memoize(this.getOffRampsForRouter.bind(this), {
@@ -543,34 +591,63 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return res
   }
 
-  /** {@inheritDoc Chain.getRouterForOnRamp} */
-  getRouterForOnRamp(onRamp: string, _destChainSelector: bigint): Promise<string> {
-    return Promise.resolve(onRamp) // Solana's router is also the onRamp
-  }
+  /** {@inheritDoc Chain.getOnRampConfig} */
+  async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
+    const [, , typeAndVersion] = await this.typeAndVersion(onRamp)
+    const routerConfig = await this._getRouterConfig(onRamp)
 
-  /**
-   * {@inheritDoc Chain.getRouterForOffRamp}
-   * @throws {@link CCIPSolanaRefAddressesNotFoundError} if reference addresses PDA not found
-   */
-  async getRouterForOffRamp(offRamp: string, _sourceChainSelector: bigint): Promise<string> {
-    const offRamp_ = new PublicKey(offRamp)
-    const program = new Program(CCIP_OFFRAMP_IDL, offRamp_, {
+    const program = new Program(CCIP_ROUTER_IDL, new PublicKey(onRamp), {
       connection: this.connection,
     })
 
+    const [destChainStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('dest_chain_state'), toLeArray(destChainSelector, 8)],
+      new PublicKey(onRamp),
+    )
+    const destChainState = await program.account.destChain.fetch(destChainStatePda)
+
+    return normalizePda({
+      ...routerConfig,
+      ...destChainState.config,
+      router: onRamp,
+      typeAndVersion,
+    })
+  }
+
+  /**
+   * {@inheritDoc Chain.getOffRampConfig}
+   */
+  async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
+    const offRamp_ = new PublicKey(offRamp)
+    const [, , typeAndVersion] = await this.typeAndVersion(offRamp)
+
+    // Read referenceAddresses PDA for router and other fields
+    const program = new Program(CCIP_OFFRAMP_IDL, offRamp_, { connection: this.connection })
     const [referenceAddressesAddr] = PublicKey.findProgramAddressSync(
       [Buffer.from('reference_addresses')],
       offRamp_,
     )
-    const referenceAddressesPda = await this.connection.getAccountInfo(referenceAddressesAddr)
-    if (!referenceAddressesPda) throw new CCIPSolanaRefAddressesNotFoundError(offRamp)
+    const refAddresses = await program.account.referenceAddresses.fetch(referenceAddressesAddr)
 
-    // Decode the config account using the program's coder
-    const { router }: { router: PublicKey } = program.coder.accounts.decode(
-      'referenceAddresses',
-      referenceAddressesPda.data,
+    // Read source_chain_state PDA for onRamp and other config fields
+    const [statePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('source_chain_state'), toLeArray(sourceChainSelector, 8)],
+      offRamp_,
     )
-    return router.toBase58()
+    const {
+      config: { onRamp: onRampField, ...sourceConfig },
+    } = await program.account.sourceChain.fetch(statePda)
+    const onRamp = decodeAddress(
+      getAddressBytes(onRampField.bytes).subarray(0, onRampField.len),
+      networkInfo(sourceChainSelector).family,
+    )
+
+    return normalizePda({
+      ...refAddresses,
+      ...sourceConfig,
+      onRamps: [onRamp],
+      typeAndVersion,
+    })
   }
 
   /** {@inheritDoc Chain.getNativeTokenForRouter} */
@@ -606,29 +683,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   /** {@inheritDoc Chain.getOnRampForRouter} */
   getOnRampForRouter(router: string, _destChainSelector: bigint): Promise<string> {
     return Promise.resolve(router) // solana's Router is also the OnRamp
-  }
-
-  /** {@inheritDoc Chain.getOnRampsForOffRamp} */
-  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
-    const program = new Program(CCIP_OFFRAMP_IDL, new PublicKey(offRamp), {
-      connection: this.connection,
-    })
-
-    const [statePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('source_chain_state'), toLeArray(sourceChainSelector, 8)],
-      program.programId,
-    )
-
-    // Decode the config account using the program's coder
-    const {
-      config: { onRamp },
-    } = await program.account.sourceChain.fetch(statePda)
-    return [
-      decodeAddress(
-        getAddressBytes(onRamp.bytes).subarray(0, onRamp.len),
-        networkInfo(sourceChainSelector).family,
-      ),
-    ]
   }
 
   /**

@@ -98,6 +98,8 @@ import {
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
 import type CCTPVerifier_2_0_ABI from './abi/CCTPVerifier_2_0.ts'
+import CommitStore_1_2_ABI from './abi/CommitStore_1_2.ts'
+import CommitStore_1_5_ABI from './abi/CommitStore_1_5.ts'
 import type FeeQuoter_ABI from './abi/FeeQuoter_1_6.ts'
 import type TokenPool_1_5_ABI from './abi/LockReleaseTokenPool_1_5.ts'
 import type TokenPool_ABI from './abi/LockReleaseTokenPool_1_6_1.ts'
@@ -107,8 +109,8 @@ import OffRamp_1_6_ABI from './abi/OffRamp_1_6.ts'
 import OffRamp_2_0_ABI from './abi/OffRamp_2_0.ts'
 import EVM2EVMOnRamp_1_2_ABI from './abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
-import type OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
-import type OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
+import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
+import OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
 import type Router_ABI from './abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
 import type TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
@@ -277,6 +279,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       async: true,
       maxSize: 100,
+      expires: 5e3, // 5 seconds, to allow for confirmed->finalized transition
       transformKey: ([tx]: [TransactionReceipt | string]) =>
         typeof tx !== 'string' ? [tx.hash] : [tx],
     })
@@ -288,11 +291,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.getNativeTokenForRouter = memoize(this.getNativeTokenForRouter.bind(this), {
       async: true,
       maxArgs: 1,
+      maxSize: 10,
     })
     this.getTokenInfo = memoize(this.getTokenInfo.bind(this), {
       async: true,
       maxArgs: 1,
-      maxSize: 1024,
+      maxSize: 100,
     })
     this.getTokenAdminRegistryFor = memoize(this.getTokenAdminRegistryFor.bind(this), {
       async: true,
@@ -302,7 +306,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), {
       async: true,
       maxArgs: 1,
-      maxSize: 100,
+      maxSize: 10,
     })
     this.detectUsdcDomains = memoize(this.detectUsdcDomains.bind(this), { async: true })
     this.resolveVerifier = memoize(this.resolveVerifier.bind(this), { async: true })
@@ -310,6 +314,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+    })
+    this.getOnRampConfig = memoize(this.getOnRampConfig.bind(this), {
+      async: true,
+      maxArgs: 2,
+      maxSize: 10,
+      expires: 60e3,
+    })
+    this.getOffRampConfig = memoize(this.getOffRampConfig.bind(this), {
+      async: true,
+      maxArgs: 2,
+      maxSize: 10,
+      expires: 60e3,
     })
   }
 
@@ -683,12 +699,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /**
-   * {@inheritDoc Chain.getRouterForOnRamp}
-   * @throws {@link CCIPVersionUnsupportedError} if OnRamp version is not supported
-   */
-  async getRouterForOnRamp(onRamp: string, destChainSelector: bigint): Promise<string> {
-    const [, version] = await this.typeAndVersion(onRamp)
+  /** {@inheritDoc Chain.getOnRampConfig} */
+  async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
+    const [, version, typeAndVersion] = await this.typeAndVersion(onRamp)
     let onRampABI
     switch (version) {
       case CCIPVersion.V1_2:
@@ -699,8 +712,25 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const contract = new Contract(onRamp, onRampABI, this.provider) as unknown as TypedContract<
           typeof onRampABI
         >
-        const { router } = await contract.getDynamicConfig()
-        return router as string
+        const [staticConfig, dynamicConfig] = await Promise.all([
+          resultToObject(contract.getStaticConfig()),
+          resultToObject(contract.getDynamicConfig()),
+        ])
+        if (destChainSelector && staticConfig.destChainSelector !== destChainSelector) {
+          throw new CCIPSourceChainUnsupportedError(destChainSelector, {
+            context: {
+              network: this.network.name,
+              onRamp,
+              actualDestChainSelector: staticConfig.destChainSelector,
+            },
+          })
+        }
+        return {
+          feeQuoter: dynamicConfig.priceRegistry,
+          ...staticConfig,
+          ...dynamicConfig,
+          typeAndVersion,
+        }
       }
       case CCIPVersion.V1_6: {
         const contract = new Contract(
@@ -708,8 +738,20 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           interfaces.OnRamp_v1_6,
           this.provider,
         ) as unknown as TypedContract<typeof OnRamp_1_6_ABI>
-        const [, , router] = await contract.getDestChainConfig(destChainSelector)
-        return router as string
+        const [staticConfig, dynamicConfig, destChainConfigRaw] = await Promise.all([
+          resultToObject(contract.getStaticConfig()),
+          resultToObject(contract.getDynamicConfig()),
+          contract.getDestChainConfig(destChainSelector),
+        ])
+        const [_, allowlistEnabled, router] = destChainConfigRaw
+        const destChainConfig = { allowlistEnabled, router }
+        return {
+          ...staticConfig,
+          destChainSelector,
+          ...dynamicConfig,
+          ...resultToObject(destChainConfig),
+          typeAndVersion,
+        }
       }
       case CCIPVersion.V2_0: {
         const contract = new Contract(
@@ -717,8 +759,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           interfaces.OnRamp_v2_0,
           this.provider,
         ) as unknown as TypedContract<typeof OnRamp_2_0_ABI>
-        const { router } = await contract.getDestChainConfig(destChainSelector)
-        return router as string
+        const [staticConfig, dynamicConfig, destChainConfig] = await Promise.all([
+          resultToObject(contract.getStaticConfig()),
+          resultToObject(contract.getDynamicConfig()),
+          resultToObject(contract.getDestChainConfig(destChainSelector)),
+        ])
+        return {
+          ...staticConfig,
+          ...dynamicConfig,
+          destChainSelector,
+          ...destChainConfig,
+          typeAndVersion,
+        }
       }
       default:
         throw new CCIPVersionUnsupportedError(version)
@@ -768,46 +820,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return result
   }
 
-  /**
-   * {@inheritDoc Chain.getRouterForOffRamp}
-   * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
-   */
-  async getRouterForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
-    const [, version] = await this.typeAndVersion(offRamp)
-    let offRampABI, router
-    switch (version) {
-      case CCIPVersion.V1_2:
-        offRampABI = EVM2EVMOffRamp_1_2_ABI
-      // falls through
-      case CCIPVersion.V1_5: {
-        offRampABI ??= EVM2EVMOffRamp_1_5_ABI
-        const contract = new Contract(
-          offRamp,
-          offRampABI,
-          this.provider,
-        ) as unknown as TypedContract<typeof offRampABI>
-        ;({ router } = await contract.getDynamicConfig())
-        break
-      }
-      case CCIPVersion.V1_6:
-        offRampABI = OffRamp_1_6_ABI
-      // falls through
-      case CCIPVersion.V2_0: {
-        offRampABI ??= OffRamp_2_0_ABI
-        const contract = new Contract(
-          offRamp,
-          offRampABI,
-          this.provider,
-        ) as unknown as TypedContract<typeof offRampABI>
-        ;({ router } = await contract.getSourceChainConfig(sourceChainSelector))
-        break
-      }
-      default:
-        throw new CCIPVersionUnsupportedError(version)
-    }
-    return router as string
-  }
-
   /** {@inheritDoc Chain.getNativeTokenForRouter} */
   async getNativeTokenForRouter(router: string): Promise<string> {
     const contract = new Contract(
@@ -841,90 +853,98 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return contract.getOnRamp(destChainSelector) as Promise<string>
   }
 
-  /**
-   * {@inheritDoc Chain.getOnRampsForOffRamp}
-   * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
-   */
-  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
-    const [, version] = await this.typeAndVersion(offRamp)
-    let offRampABI
+  /** {@inheritDoc Chain.getOffRampConfig} */
+  async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
+    const [, version, typeAndVersion] = await this.typeAndVersion(offRamp)
+    const sourceFamily = networkInfo(sourceChainSelector).family
+    let offRampABI, commitStoreABI
     switch (version) {
-      case CCIPVersion.V1_2:
+      case CCIPVersion.V1_2: {
         offRampABI = EVM2EVMOffRamp_1_2_ABI
+        commitStoreABI = CommitStore_1_2_ABI
+      }
       // falls through
       case CCIPVersion.V1_5: {
         offRampABI ??= EVM2EVMOffRamp_1_5_ABI
+        commitStoreABI ??= CommitStore_1_5_ABI
         const contract = new Contract(
           offRamp,
           offRampABI,
           this.provider,
         ) as unknown as TypedContract<typeof offRampABI>
-        const { onRamp, sourceChainSelector: configSourceChainSelector } =
-          await contract.getStaticConfig()
-        if (configSourceChainSelector !== sourceChainSelector) return []
-        return [onRamp as string]
+        const [staticConfig, dynamicConfig] = await Promise.all([
+          resultToObject(contract.getStaticConfig()),
+          resultToObject(contract.getDynamicConfig()),
+        ])
+        const csContract = new Contract(
+          staticConfig.commitStore,
+          commitStoreABI,
+          this.provider,
+        ) as unknown as TypedContract<typeof commitStoreABI>
+        const [csStaticConfig, csDynamicConfig] = await Promise.all([
+          resultToObject(csContract.getStaticConfig()),
+          resultToObject(csContract.getDynamicConfig()),
+        ])
+        if (sourceChainSelector && staticConfig.sourceChainSelector !== sourceChainSelector) {
+          throw new CCIPSourceChainUnsupportedError(sourceChainSelector, {
+            context: {
+              network: this.network.name,
+              offRamp,
+              actualSourceChainSelector: staticConfig.sourceChainSelector,
+            },
+          })
+        }
+        return {
+          ...csStaticConfig,
+          ...csDynamicConfig,
+          ...staticConfig,
+          ...dynamicConfig,
+          onRamps: [staticConfig.onRamp],
+          typeAndVersion,
+        }
       }
       case CCIPVersion.V1_6: {
-        offRampABI = OffRamp_1_6_ABI
         const contract = new Contract(
           offRamp,
-          offRampABI,
+          OffRamp_1_6_ABI,
           this.provider,
-        ) as unknown as TypedContract<typeof offRampABI>
-        const { onRamp } = await contract.getSourceChainConfig(sourceChainSelector)
-        if (!onRamp || onRamp.match(/^(0x)?0*$/i)) return []
-        return [decodeOnRampAddress(onRamp, networkInfo(sourceChainSelector).family)]
+        ) as unknown as TypedContract<typeof OffRamp_1_6_ABI>
+        const [staticConfig, dynamicConfig, sourceChainConfig] = await Promise.all([
+          resultToObject(contract.getStaticConfig()),
+          resultToObject(contract.getDynamicConfig()),
+          resultToObject(contract.getSourceChainConfig(sourceChainSelector)),
+        ])
+        const onRamp = decodeOnRampAddress(sourceChainConfig.onRamp, sourceFamily)
+        return {
+          ...staticConfig,
+          ...dynamicConfig,
+          sourceChainSelector,
+          ...sourceChainConfig,
+          onRamps: [onRamp],
+          typeAndVersion,
+        }
       }
       case CCIPVersion.V2_0: {
-        offRampABI = OffRamp_2_0_ABI
         const contract = new Contract(
           offRamp,
-          offRampABI,
+          OffRamp_2_0_ABI,
           this.provider,
-        ) as unknown as TypedContract<typeof offRampABI>
-        const { onRamps } = await contract.getSourceChainConfig(sourceChainSelector)
-        const sourceFamily = networkInfo(sourceChainSelector).family
-        return onRamps.map((onRamp) => decodeOnRampAddress(onRamp, sourceFamily))
+        ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
+        const [staticConfig, sourceChainConfig] = await Promise.all([
+          resultToObject(contract.getStaticConfig()),
+          resultToObject(contract.getSourceChainConfig(sourceChainSelector)),
+        ])
+        const onRamps = sourceChainConfig.onRamps.map((o) => decodeOnRampAddress(o, sourceFamily))
+        return {
+          ...staticConfig,
+          sourceChainSelector,
+          ...sourceChainConfig,
+          onRamps,
+          typeAndVersion,
+        }
       }
       default:
         throw new CCIPVersionUnsupportedError(version)
-    }
-  }
-
-  /**
-   * Fetch the CommitStore set in OffRamp config (CCIP v1.5 and earlier).
-   * For CCIP v1.6 and later, it should return the offRamp address.
-   *
-   * @param offRamp - OffRamp contract address
-   * @returns Promise resolving to CommitStore address
-   *
-   * @example Get commit store
-   * ```typescript
-   * const commitStore = await dest.getCommitStoreForOffRamp(offRampAddress)
-   * // For v1.6+, commitStore === offRampAddress
-   * ```
-   * @throws {@link CCIPVersionUnsupportedError} if OffRamp version is not supported
-   * @internal
-   */
-  async getCommitStoreForOffRamp(offRamp: string): Promise<string> {
-    const [, version] = await this.typeAndVersion(offRamp)
-    let offRampABI
-    switch (version) {
-      case CCIPVersion.V1_2:
-        offRampABI = EVM2EVMOffRamp_1_2_ABI
-      // falls through
-      case CCIPVersion.V1_5: {
-        offRampABI ??= EVM2EVMOffRamp_1_5_ABI
-        const contract = new Contract(
-          offRamp,
-          offRampABI,
-          this.provider,
-        ) as unknown as TypedContract<typeof offRampABI>
-        const { commitStore } = await contract.getStaticConfig()
-        return commitStore as string
-      }
-      default:
-        return offRamp
     }
   }
 
@@ -1030,17 +1050,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       const [, , typeAndVersion] = await this.typeAndVersion(address)
       throw new CCIPContractNotRouterError(address, typeAndVersion)
     }
+    const isOnRamp = type.includes('OnRamp')
     const contract = new Contract(
       address,
       version < CCIPVersion.V1_6
-        ? type.includes('OnRamp')
+        ? isOnRamp
           ? interfaces.EVM2EVMOnRamp_v1_5
           : interfaces.EVM2EVMOffRamp_v1_5
         : version < CCIPVersion.V2_0
-          ? type.includes('OnRamp')
+          ? isOnRamp
             ? interfaces.OnRamp_v1_6
             : interfaces.OffRamp_v1_6
-          : type.includes('OnRamp')
+          : isOnRamp
             ? interfaces.OnRamp_v2_0
             : interfaces.OffRamp_v2_0,
       this.provider,
@@ -1052,8 +1073,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       | typeof OnRamp_2_0_ABI
       | typeof OffRamp_2_0_ABI
     >
-    const { tokenAdminRegistry } = await contract.getStaticConfig()
-    return tokenAdminRegistry as string
+    const { tokenAdminRegistry } = await resultToObject(contract.getStaticConfig())
+    return tokenAdminRegistry
   }
 
   /**
@@ -1073,39 +1094,37 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     } else if (!type.includes('Ramp')) {
       throw new CCIPContractNotRouterError(address, typeAndVersion)
     }
+    const isOnRamp = type.includes('OnRamp')
 
     if (version < CCIPVersion.V1_6) {
-      const contract = new Contract(
-        address,
-        version === CCIPVersion.V1_2
-          ? interfaces.EVM2EVMOnRamp_v1_2
-          : interfaces.EVM2EVMOnRamp_v1_5,
-        this.provider,
-      ) as unknown as TypedContract<typeof EVM2EVMOnRamp_1_2_ABI | typeof EVM2EVMOnRamp_1_5_ABI>
-      const { priceRegistry } = await contract.getDynamicConfig()
-      return priceRegistry as string
+      const rampAbi =
+        version < CCIPVersion.V1_5
+          ? isOnRamp
+            ? EVM2EVMOnRamp_1_2_ABI
+            : EVM2EVMOffRamp_1_2_ABI
+          : isOnRamp
+            ? EVM2EVMOnRamp_1_5_ABI
+            : EVM2EVMOffRamp_1_5_ABI
+      const contract = new Contract(address, rampAbi, this.provider) as unknown as TypedContract<
+        typeof rampAbi
+      >
+      const { priceRegistry } = await resultToObject(contract.getDynamicConfig())
+      return priceRegistry
     }
 
-    const isOnRamp = type.includes('OnRamp')
-    const contract = new Contract(
-      address,
+    const rampAbi =
       version < CCIPVersion.V2_0
         ? isOnRamp
-          ? interfaces.OnRamp_v1_6
-          : interfaces.OffRamp_v1_6
+          ? OnRamp_1_6_ABI
+          : OffRamp_1_6_ABI
         : isOnRamp
-          ? interfaces.OnRamp_v2_0
-          : interfaces.OffRamp_v2_0,
-      this.provider,
-    ) as unknown as TypedContract<
-      | typeof OnRamp_1_6_ABI
-      | typeof OffRamp_1_6_ABI
-      | typeof OnRamp_2_0_ABI
-      | typeof OffRamp_2_0_ABI
+          ? OnRamp_2_0_ABI
+          : OffRamp_2_0_ABI
+    const contract = new Contract(address, rampAbi, this.provider) as unknown as TypedContract<
+      typeof rampAbi
     >
-
-    const { feeQuoter } = await contract.getDynamicConfig()
-    return feeQuoter as string
+    const { feeQuoter } = await resultToObject(contract.getDynamicConfig())
+    return feeQuoter
   }
 
   /** {@inheritDoc Chain.getFee} */
@@ -2107,7 +2126,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       return json as CCIPVerifications
     } else if (request.lane.version < CCIPVersion.V1_6) {
       // v1.2..v1.5 EVM (only) have separate CommitStore
-      opts.offRamp = await this.getCommitStoreForOffRamp(opts.offRamp)
+      const { commitStore } = (await this.getOffRampConfig(
+        opts.offRamp,
+        request.lane.sourceChainSelector,
+      )) as Extract<Awaited<ReturnType<EVMChain['getOffRampConfig']>>, { commitStore: unknown }>
+      opts.offRamp = commitStore
     }
     // fallback <=v1.6
     return super.getVerifications(opts)

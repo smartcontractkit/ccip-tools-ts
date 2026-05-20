@@ -115,14 +115,29 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       expires: 60e3, // 1min
     })
     this.getTransaction = memoize(this.getTransaction.bind(this), {
+      async: true,
       maxSize: 100,
       maxArgs: 1,
     })
     this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this), {
+      async: true,
       maxSize: 100,
       maxArgs: 1,
     })
+    this.getOnRampConfig = memoize(this.getOnRampConfig.bind(this), {
+      async: true,
+      maxSize: 100,
+      maxArgs: 2,
+      expires: 60e3, // 1min
+    })
+    this.getOffRampConfig = memoize(this.getOffRampConfig.bind(this), {
+      maxSize: 100,
+      maxArgs: 2,
+      async: true,
+      expires: 60e3, // 1min
+    })
     this.getTokenInfo = memoize((token) => getTokenInfo(this.provider, token), {
+      async: true,
       maxSize: 100,
       maxArgs: 1,
     })
@@ -258,15 +273,53 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return parseTypeAndVersion(typeAndVersion)
   }
 
-  /** {@inheritDoc Chain.getRouterForOnRamp} */
-  getRouterForOnRamp(onRamp: string, _destChainSelector: bigint): Promise<string> {
-    // router is same package as onramp, changing only module
-    return Promise.resolve(onRamp.split('::')[0] + '::router')
+  /** {@inheritDoc Chain.getOnRampConfig} */
+  async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
+    const pkg = onRamp.split('::')[0]!
+    const onRampModule = `${pkg}::onramp`
+    const feeQuoter = `${pkg}::fee_quoter`
+    const [, , typeAndVersion] = await this.typeAndVersion(onRampModule)
+    const [sequenceNumber, allowlistEnabled, router, routerStateAddress] = await this.provider.view<
+      [
+        sequence_number: string,
+        allowlist_enabled: boolean,
+        router: string,
+        router_state_address: string,
+      ]
+    >({
+      payload: {
+        function:
+          `${onRampModule}::get_dest_chain_config_v2` as `${string}::${string}::get_dest_chain_config`,
+        functionArguments: [destChainSelector],
+      },
+    })
+    return {
+      feeQuoter,
+      sequenceNumber: +sequenceNumber,
+      allowlistEnabled,
+      router: router.includes('::') ? router : `${router}::router`,
+      routerStateAddress,
+      typeAndVersion,
+    }
   }
 
-  /** {@inheritDoc Chain.getRouterForOffRamp} */
-  getRouterForOffRamp(offRamp: string, _sourceChainSelector: bigint): Promise<string> {
-    return Promise.resolve(offRamp.split('::')[0] + '::router')
+  /** {@inheritDoc Chain.getOffRampConfig} */
+  async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
+    const pkg = offRamp.split('::')[0]!
+    const router = `${pkg}::router`
+    const offRampModule = offRamp.includes('::') ? offRamp : `${pkg}::offramp`
+    const [, , typeAndVersion] = await this.typeAndVersion(offRampModule)
+    const [sourceChainConfig] = await this.provider.view<
+      [Record<string, unknown> & { on_ramp: string }]
+    >({
+      payload: {
+        function:
+          `${offRampModule}::get_source_chain_config` as `${string}::${string}::get_source_chain_config`,
+        functionArguments: [sourceChainSelector],
+      },
+    })
+    const onRamp = decodeAddress(sourceChainConfig.on_ramp, networkInfo(sourceChainSelector).family)
+    return { ...sourceChainConfig, router, onRamps: [onRamp], typeAndVersion }
   }
 
   /** {@inheritDoc Chain.getNativeTokenForRouter} */
@@ -282,18 +335,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   /** {@inheritDoc Chain.getOnRampForRouter} */
   getOnRampForRouter(router: string, _destChainSelector: bigint): Promise<string> {
     return Promise.resolve(router.split('::')[0] + '::onramp')
-  }
-
-  /** {@inheritDoc Chain.getOnRampsForOffRamp} */
-  async getOnRampsForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string[]> {
-    const [sourceChainConfig] = await this.provider.view<[{ on_ramp: string }]>({
-      payload: {
-        function:
-          `${offRamp.includes('::') ? offRamp : offRamp + '::offramp'}::get_source_chain_config` as `${string}::${string}::get_source_chain_config`,
-        functionArguments: [sourceChainSelector],
-      },
-    })
-    return [decodeAddress(sourceChainConfig.on_ramp, networkInfo(sourceChainSelector).family)]
   }
 
   /** {@inheritDoc Chain.getTokenForTokenPool} */
