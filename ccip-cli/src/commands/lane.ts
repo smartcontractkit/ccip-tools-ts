@@ -65,10 +65,15 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
   const destNetwork = networkInfo(argv.dest)
 
   const getChain = fetchChainsFromRpcs(ctx, argv)
-  const [source, dest] = await Promise.all([
-    getChain(sourceNetwork.name),
-    getChain(destNetwork.name),
-  ])
+
+  // In JSON mode, accumulate into a single envelope so JSON.parse(stdout) works.
+  const jsonEnvelope: Record<string, unknown> | undefined =
+    argv.format === Format.json ? {} : undefined
+  const emitJsonEnvelope = () => {
+    if (jsonEnvelope) output.write(JSON.stringify(jsonEnvelope, bigIntReplacer, 2))
+  }
+
+  const source = await getChain(sourceNetwork.name)
 
   // Resolve router-or-onramp: if typeAndVersion identifies it as a Router, fetch the OnRamp.
   // typeAndVersion may throw for chains where the address format requires a module suffix
@@ -77,47 +82,75 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
   try {
     const [type] = await source.typeAndVersion(argv.router)
     if (type === 'Router') {
-      onRamp = await source.getOnRampForRouter(argv.router, dest.network.chainSelector)
+      onRamp = await source.getOnRampForRouter(argv.router, destNetwork.chainSelector)
       logger.debug('Resolved OnRamp from Router:', onRamp)
     }
   } catch (_) {
     // treat as OnRamp
   }
 
-  const [onRampConfig, offRamp] = await Promise.all([
-    source.getOnRampConfig(onRamp, dest.network.chainSelector),
-    discoverOffRamp(source, dest, onRamp, ctx),
-  ])
-
-  const offRampConfig = await dest.getOffRampConfig(offRamp, source.network.chainSelector)
+  const onRampConfig = await source.getOnRampConfig(onRamp, destNetwork.chainSelector)
 
   switch (argv.format) {
-    case Format.json:
-      output.write(
-        JSON.stringify(
-          {
-            source: sourceNetwork.name,
-            dest: destNetwork.name,
-            onRamp,
-            onRampConfig,
-            offRamp,
-            offRampConfig,
-          },
-          bigIntReplacer,
-          2,
-        ),
-      )
-      break
     case Format.log:
       output.write('onRamp:', onRamp)
       output.write('onRampConfig =', onRampConfig)
+      break
+    case Format.pretty:
+      output.write(`OnRamp (${sourceNetwork.name}):`)
+      prettyTable.call(ctx, { onRamp, ...onRampConfig })
+      break
+    default:
+      if (jsonEnvelope) {
+        jsonEnvelope.source = sourceNetwork.name
+        jsonEnvelope.dest = destNetwork.name
+        jsonEnvelope.onRamp = onRamp
+        jsonEnvelope.onRampConfig = onRampConfig
+      }
+  }
+
+  let dest
+  try {
+    dest = await getChain(destNetwork.name)
+  } catch (err) {
+    logger.debug('No dest RPC available for', destNetwork.name, '—', err)
+    emitJsonEnvelope()
+    throw err
+  }
+
+  let offRamp: string
+  try {
+    offRamp = await discoverOffRamp(source, dest, onRamp, ctx)
+  } catch (err) {
+    logger.debug('No offRamp found for', onRamp, '—', err)
+    emitJsonEnvelope()
+    throw err
+  }
+
+  let offRampConfig
+  try {
+    offRampConfig = await dest.getOffRampConfig(offRamp, source.network.chainSelector)
+  } catch (err) {
+    logger.debug('Failed to fetch offRamp config for', offRamp, '—', err)
+    emitJsonEnvelope()
+    throw err
+  }
+
+  switch (argv.format) {
+    case Format.log:
       output.write('offRamp:', offRamp)
       output.write('offRampConfig =', offRampConfig)
       break
-    default: // pretty
-      output.write(`OnRamp (${sourceNetwork.name}):`)
-      prettyTable.call(ctx, { onRamp, ...onRampConfig })
+    case Format.pretty:
       output.write(`OffRamp (${destNetwork.name}):`)
       prettyTable.call(ctx, { offRamp, ...offRampConfig })
+      break
+    default:
+      if (jsonEnvelope) {
+        jsonEnvelope.offRamp = offRamp
+        jsonEnvelope.offRampConfig = offRampConfig
+      }
   }
+
+  emitJsonEnvelope()
 }
