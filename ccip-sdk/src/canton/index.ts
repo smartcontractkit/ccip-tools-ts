@@ -5,8 +5,6 @@ import {
   type ChainStatic,
   type GetBalanceOpts,
   type LogFilter,
-  type OffRampConfig,
-  type OnRampConfig,
   type RegistryTokenConfig,
   type TokenInfo,
   type TokenPoolConfig,
@@ -355,17 +353,19 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     throw new CCIPNotImplementedError('CantonChain.typeAndVersion')
   }
 
-  /**
-   *
-   */
-  async getOnRampConfig(_onRamp: string, _destChainSelector: bigint): Promise<OnRampConfig> {
+  /** {@inheritDoc Chain.getOnRampConfig} */
+  async getOnRampConfig(
+    _onRamp: string,
+    _destChainSelector: bigint,
+  ): ReturnType<Chain['getOnRampConfig']> {
     throw new CCIPNotImplementedError('CantonChain.getOnRampConfig')
   }
 
-  /**
-   *
-   */
-  async getOffRampConfig(_offRamp: string, _sourceChainSelector: bigint): Promise<OffRampConfig> {
+  /** {@inheritDoc Chain.getOffRampConfig} */
+  async getOffRampConfig(
+    _offRamp: string,
+    _sourceChainSelector: bigint,
+  ): ReturnType<Chain['getOffRampConfig']> {
     throw new CCIPNotImplementedError('CantonChain.getOffRampConfig')
   }
 

@@ -67,6 +67,7 @@ export default defineConfig(
       ],
       '@typescript-eslint/no-import-type-side-effects': 'warn',
       '@typescript-eslint/no-unnecessary-condition': 'warn',
+      '@typescript-eslint/require-await': 'off',
     },
   },
   {
@@ -176,7 +177,6 @@ export default defineConfig(
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-floating-promises': 'off',
-      '@typescript-eslint/require-await': 'off',
     },
   },
   {

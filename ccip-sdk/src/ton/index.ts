@@ -469,13 +469,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const chainSelector = staticStack.readBigNumber()
 
     // dynamicConfig() -> feeQuoter, feeAggregator, allowlistAdmin, reserve
-    const feeQuoter = dynamicStack.readAddress().toRawString()
-    const feeAggregator = dynamicStack.readAddress().toRawString()
-    const allowlistAdmin = dynamicStack.readAddress().toRawString()
+    const feeQuoter = dynamicStack.readAddress().toString()
+    const feeAggregator = dynamicStack.readAddress().toString()
+    const allowlistAdmin = dynamicStack.readAddress().toString()
     const reserve = dynamicStack.readBigNumber()
 
     // destChainConfig() -> router, sequenceNumber, allowlistEnabled, allowedSenders (dict cell)
-    const router = destStack.readAddress().toRawString()
+    const router = destStack.readAddress().toString()
     const sequenceNumber = BigInt(destStack.readBigNumber().toString())
     const allowlistEnabled = destStack.readBoolean()
 
@@ -528,7 +528,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const { stack } = await this.provider.runMethod(Address.parse(offRamp), 'sourceChainConfig', [
         { type: 'int', value: sourceChainSelector },
       ])
-      const router = stack.readAddress().toRawString()
+      const router = stack.readAddress().toString()
       const isEnabled = stack.readBoolean()
       const minSeqNr = BigInt(stack.readBigNumber().toString())
       const isRMNVerificationDisabled = stack.readBoolean()
@@ -552,7 +552,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
       // config() -> chainSelector, feeQuoter, permissionlessExecutionThresholdSeconds
       const chainSelector = cfgStack.readBigNumber()
-      const feeQuoter = cfgStack.readAddress().toRawString()
+      const feeQuoter = cfgStack.readAddress().toString()
       const permissionlessExecutionThresholdSeconds = cfgStack.readNumber()
 
       return {

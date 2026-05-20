@@ -12,8 +12,6 @@ import {
   type ChainStatic,
   type GetBalanceOpts,
   type LogFilter,
-  type OffRampConfig,
-  type OnRampConfig,
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
@@ -285,14 +283,18 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.getOnRampConfig} */
-  async getOnRampConfig(onRamp: string, _destChainSelector: bigint): Promise<OnRampConfig> {
-    const [type, version, typeAndVersion] = await this.typeAndVersion(onRamp)
-    return { router: onRamp, type, version, typeAndVersion }
+  async getOnRampConfig(onRamp: string, _destChainSelector: bigint) {
+    const [, , typeAndVersion] = await this.typeAndVersion(onRamp)
+    return {
+      router: onRamp,
+      feeQuoter: onRamp, // FIXME
+      typeAndVersion,
+    }
   }
 
   /** {@inheritDoc Chain.getOffRampConfig} */
-  async getOffRampConfig(offRamp: string, sourceChainSelector: bigint): Promise<OffRampConfig> {
-    const [type, version, typeAndVersion] = await this.typeAndVersion(offRamp)
+  async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
+    const [, , typeAndVersion] = await this.typeAndVersion(offRamp)
     offRamp = await getLatestPackageId(offRamp, this.client)
     const functionName = 'get_source_chain_config'
     const target = offRamp.includes('::')
@@ -351,17 +353,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     return {
       router,
-      onRamp,
+      onRamps: [onRamp],
       isEnabled,
       minSeqNr,
       isRmnVerificationDisabled,
-      type,
-      version,
       typeAndVersion,
-    } as OffRampConfig & {
-      isEnabled: boolean
-      minSeqNr: bigint
-      isRmnVerificationDisabled: boolean
     }
   }
 

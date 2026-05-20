@@ -289,12 +289,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     >({
       payload: {
         function:
-          `${onRampModule}::get_dest_chain_config_v2` as `${string}::${string}::get_dest_chain_config`,
+          `${onRampModule}::get_dest_chain_config_v2` as `${string}::${string}::get_dest_chain_config_v2`,
         functionArguments: [destChainSelector],
       },
     })
     return {
       feeQuoter,
+      destChainSelector,
       sequenceNumber: +sequenceNumber,
       allowlistEnabled,
       router: router.includes('::') ? router : `${router}::router`,
@@ -319,7 +320,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       },
     })
     const onRamp = decodeAddress(sourceChainConfig.on_ramp, networkInfo(sourceChainSelector).family)
-    return { ...sourceChainConfig, router, onRamps: [onRamp], typeAndVersion }
+    return {
+      sourceChainSelector,
+      ...sourceChainConfig,
+      onRamps: [onRamp],
+      router,
+      typeAndVersion,
+    }
   }
 
   /** {@inheritDoc Chain.getNativeTokenForRouter} */

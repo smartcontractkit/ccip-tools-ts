@@ -114,27 +114,18 @@ class MockChain extends Chain {
     return '0xRouter'
   }
 
-  async getOnRampConfig(
-    _onRamp: string,
-    _destChainSelector: bigint,
-  ): Promise<import('./chain.ts').OnRampConfig> {
+  async getOnRampConfig(_onRamp: string, _destChainSelector: bigint) {
     return {
       router: this.mockRouterForOnRamp.get(_onRamp) || '0xDefaultRouter',
-      type: 'EVM2EVMOnRamp',
-      version: '1.5.0',
+      feeQuoter: '0xFeeQuoter',
       typeAndVersion: 'EVM2EVMOnRamp 1.5.0',
     }
   }
 
-  async getOffRampConfig(
-    _offRamp: string,
-    _sourceChainSelector: bigint,
-  ): Promise<import('./chain.ts').OffRampConfig> {
+  async getOffRampConfig(_offRamp: string, _sourceChainSelector: bigint) {
     return {
       router: '0xRouter',
-      onRamp: this.mockOnRampForOffRamp.get(_offRamp) || '0xDefaultOnRamp',
-      type: 'EVM2EVMOffRamp',
-      version: '1.5.0',
+      onRamps: [this.mockOnRampForOffRamp.get(_offRamp) || '0xDefaultOnRamp'],
       typeAndVersion: 'EVM2EVMOffRamp 1.5.0',
     }
   }

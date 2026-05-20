@@ -859,10 +859,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const sourceFamily = networkInfo(sourceChainSelector).family
     let offRampABI, commitStoreABI
     switch (version) {
-      case CCIPVersion.V1_2: {
+      case CCIPVersion.V1_2:
         offRampABI = EVM2EVMOffRamp_1_2_ABI
         commitStoreABI = CommitStore_1_2_ABI
-      }
       // falls through
       case CCIPVersion.V1_5: {
         offRampABI ??= EVM2EVMOffRamp_1_5_ABI
@@ -904,9 +903,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         }
       }
       case CCIPVersion.V1_6: {
+        offRampABI = OffRamp_1_6_ABI
         const contract = new Contract(
           offRamp,
-          OffRamp_1_6_ABI,
+          offRampABI,
           this.provider,
         ) as unknown as TypedContract<typeof OffRamp_1_6_ABI>
         const [staticConfig, dynamicConfig, sourceChainConfig] = await Promise.all([
@@ -925,9 +925,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         }
       }
       case CCIPVersion.V2_0: {
+        offRampABI = OffRamp_2_0_ABI
         const contract = new Contract(
           offRamp,
-          OffRamp_2_0_ABI,
+          offRampABI,
           this.provider,
         ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
         const [staticConfig, sourceChainConfig] = await Promise.all([
@@ -1073,8 +1074,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       | typeof OnRamp_2_0_ABI
       | typeof OffRamp_2_0_ABI
     >
-    const { tokenAdminRegistry } = await resultToObject(contract.getStaticConfig())
-    return tokenAdminRegistry
+    return (await resultToObject(contract.getStaticConfig())).tokenAdminRegistry
   }
 
   /**
@@ -1123,8 +1123,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const contract = new Contract(address, rampAbi, this.provider) as unknown as TypedContract<
       typeof rampAbi
     >
-    const { feeQuoter } = await resultToObject(contract.getDynamicConfig())
-    return feeQuoter
+    return (await resultToObject(contract.getDynamicConfig())).feeQuoter
   }
 
   /** {@inheritDoc Chain.getFee} */
