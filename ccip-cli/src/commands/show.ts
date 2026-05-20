@@ -156,6 +156,8 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     if (displayedAllMessages) return // already displayed all messages in non-interactive path
     if ('offRampAddress' in request.message) {
       offRamp = request.message.offRampAddress
+    } else {
+      offRamp = request.metadata?.offRamp
     }
   } catch (err) {
     if (err instanceof AggregateError && err.errors.length === 2) {
