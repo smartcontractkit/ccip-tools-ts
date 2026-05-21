@@ -249,7 +249,8 @@ export function decodeOnRampAddress(
   family: ChainFamily = ChainFamily.EVM,
 ): string {
   let decoded = decodeAddress(address, family)
-  if (family === ChainFamily.Aptos || family === ChainFamily.Sui) decoded += '::onramp'
+  if ((family === ChainFamily.Aptos || family === ChainFamily.Sui) && !decoded.includes('::'))
+    decoded += '::onramp'
   return decoded
 }
 

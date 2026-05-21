@@ -914,13 +914,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           resultToObject(contract.getDynamicConfig()),
           resultToObject(contract.getSourceChainConfig(sourceChainSelector)),
         ])
-        const onRamp = decodeOnRampAddress(sourceChainConfig.onRamp, sourceFamily)
+        const onRamps = []
+        try {
+          onRamps.push(decodeOnRampAddress(sourceChainConfig.onRamp, sourceFamily))
+        } catch {
+          // ignore
+        }
         return {
           ...staticConfig,
           ...dynamicConfig,
           sourceChainSelector,
           ...sourceChainConfig,
-          onRamps: [onRamp],
+          onRamps,
           typeAndVersion,
         }
       }
