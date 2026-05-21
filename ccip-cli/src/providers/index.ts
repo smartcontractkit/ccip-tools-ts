@@ -250,7 +250,7 @@ export async function loadChainWallet(
       )
       return [wallet.getAddress(), wallet] as const
     case ChainFamily.Canton: {
-      const cantonWallet = await loadCantonWallet(argv, logger)
+      const cantonWallet = loadCantonWallet(argv, logger)
       return [cantonWallet.party, cantonWallet] as const
     }
     default:

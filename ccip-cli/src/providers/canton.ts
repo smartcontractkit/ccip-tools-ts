@@ -202,10 +202,10 @@ export function loadCantonConfig(
  * `sendMessage` / `execute` use the interactive submission API
  * (prepare → sign → execute).
  */
-export async function loadCantonWallet(
+export function loadCantonWallet(
   argv: { wallet?: unknown; cantonConfig?: string },
   logger?: Logger,
-): Promise<CantonWalletWithSigner> {
+): CantonWalletWithSigner {
   const cantonCfg = loadCantonConfig(argv.cantonConfig, logger)
   const party = cantonCfg?.party
   if (!party) {
