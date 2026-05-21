@@ -23,6 +23,7 @@ import type { ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { supportedChains } from '../supported-chains.ts'
+import { getDataBytes, sleep } from '../utils.ts'
 import {
   type CCIPExecution,
   type CCIPMessage,
@@ -408,10 +409,12 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * {@inheritDoc Chain.getNativeTokenForRouter}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
+   *
+   * Canton's default fee token is registry-level (not router-level): the
+   * Amulet instrument exposed by the token-metadata registry.
    */
-  getNativeTokenForRouter(_router: string): Promise<string> {
-    throw new CCIPNotImplementedError('CantonChain.getNativeTokenForRouter')
+  async getNativeTokenForRouter(_router: string): Promise<string> {
+    return this.getDefaultFeeToken()
   }
 
   /**
@@ -447,10 +450,15 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * {@inheritDoc Chain.getTokenInfo}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
+   *
+   * Looks up the instrument in the Canton token-metadata registry. `token` is
+   * the full Canton fee-token string (`"admin::id"`); the registry is keyed by
+   * the local `id` portion.
    */
-  getTokenInfo(_token: string): Promise<{ symbol: string; decimals: number }> {
-    throw new CCIPNotImplementedError('CantonChain.getTokenInfo')
+  async getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }> {
+    const { id } = parseInstrumentId(token)
+    const instrument = await this.tokenMetadataClient.getInstrument(id)
+    return { symbol: instrument.symbol, decimals: instrument.decimals }
   }
 
   /**
@@ -471,10 +479,13 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * {@inheritDoc Chain.getFee}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
+   *
+   * Canton has no scalar upfront CCIP fee — the cost is computed inside the
+   * on-chain command at send time. Returns `0n` so `--only-get-fee` and the
+   * balance check both pass cleanly.
    */
   getFee(_opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    throw new CCIPNotImplementedError('CantonChain.getFee')
+    return Promise.resolve(0n)
   }
 
   /** {@inheritDoc Chain.generateUnsignedSendMessage} */
@@ -760,8 +771,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       throw new CCIPWalletInvalidError(wallet)
     }
 
+    const message = await this.fillCantonSendDefaults(opts.message, wallet.party)
+
     const unsigned = await this.generateUnsignedSendMessage({
       ...opts,
+      message,
       sender: wallet.party,
     })
 
@@ -1092,7 +1106,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     }
 
     // Step 2 — Sign the hash
-    const hashBytes = base64ToUint8Array(prepareResponse.preparedTransactionHash)
+    const hashBytes = getDataBytes(prepareResponse.preparedTransactionHash)
     const partySignatures = await signer.sign(hashBytes)
 
     // Step 3 — Execute the signed transaction
@@ -1177,7 +1191,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         this.logger.warn(
           `CantonChain.createReceiverForFinality: receiver creation failed with a retryable Canton error; retrying in ${delayMs}ms (${attempt}/${attempts})${detail}`,
         )
-        await delay(delayMs)
+        await sleep(delayMs)
       }
     }
 
@@ -1402,36 +1416,44 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   // ─── Discovery helpers ──────────────────────────────────────────────────
 
   /**
-   * Auto-discover everything needed to call {@link sendMessage} for a simple Canton-to-EVM send.
+   * Resolve the registry-default fee token (Amulet) for this Canton chain.
    *
-   * Queries the token metadata registry to determine the default fee token
-   * (Amulet) and finds the first usable holding for `party`.
-   *
-   * @param party - The sender party ID.
-   * @returns The resolved `feeToken` string and a ready-to-use {@link CantonExtraArgsV1}.
-   * @throws if no fee token holdings are found for `party`.
+   * The fee token is registry-level, not router- or party-dependent: a single
+   * metadata lookup yields `"<adminId>::Amulet"`, where `adminId` is itself a
+   * Daml party ID (`name::fingerprint`).
    */
-  async discoverSendArgs(
-    party: string,
-  ): Promise<{ feeToken: string; extraArgs: CantonExtraArgsV1 }> {
+  private async getDefaultFeeToken(): Promise<string> {
     const registryInfo = await this.tokenMetadataClient.getRegistryInfo()
-    const feeToken = `${registryInfo.adminId}::Amulet`
-    const instrumentId = parseInstrumentId(feeToken)
+    return `${registryInfo.adminId}::Amulet`
+  }
 
-    const holdings = await fetchTokenHoldings(this.provider, party, instrumentId)
+  /**
+   * Fill in Canton-specific fields that {@link generateUnsignedSendMessage}
+   * requires but the generic `sendMessage` caller (e.g. the CLI) does not
+   * know how to populate: a default `feeToken` if missing, and at least one
+   * `feeTokenHoldingCids` entry discovered from `party`'s holdings.
+   */
+  private async fillCantonSendDefaults(
+    message: Parameters<Chain['sendMessage']>[0]['message'],
+    party: string,
+  ): Promise<Parameters<Chain['sendMessage']>[0]['message']> {
+    const feeToken = message.feeToken || (await this.getDefaultFeeToken())
+    const extraArgs = (message.extraArgs ?? {}) as Partial<CantonExtraArgsV1>
+    if (extraArgs.feeTokenHoldingCids?.length) {
+      return { ...message, feeToken }
+    }
 
+    const holdings = await fetchTokenHoldings(this.provider, party, parseInstrumentId(feeToken))
     if (!holdings.length) {
       throw new CCIPError(
         CCIPErrorCode.METHOD_UNSUPPORTED,
-        `discoverSendArgs: no Amulet holdings found for party ${party}`,
+        `CantonChain.sendMessage: no fee-token holdings found for party ${party} on instrument ${feeToken}`,
       )
     }
-
     return {
+      ...message,
       feeToken,
-      extraArgs: {
-        feeTokenHoldingCids: [holdings[0]!.contractId],
-      },
+      extraArgs: { ...extraArgs, feeTokenHoldingCids: [holdings[0]!.contractId] },
     }
   }
 
@@ -1820,16 +1842,6 @@ function stripHexPrefix(hex: string): string {
   return hex.startsWith('0x') ? hex.slice(2) : hex
 }
 
-/** Decode a base64-encoded string into a Uint8Array. */
-function base64ToUint8Array(b64: string): Uint8Array {
-  const binary = atob(b64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i)
-  }
-  return bytes
-}
-
 function normalizeIndexerMessageId(messageId: string): string {
   if (/^0x[0-9a-fA-F]{64}$/.test(messageId)) return messageId
   if (/^[0-9a-fA-F]{64}$/.test(messageId)) return `0x${messageId}`
@@ -1838,10 +1850,6 @@ function normalizeIndexerMessageId(messageId: string): string {
 
 function isRetryableCantonSubmitError(err: unknown): boolean {
   return CCIPError.isCCIPError(err) && err.isTransient
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**

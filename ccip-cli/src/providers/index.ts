@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
 import {
-  type CantonConfig,
   type Chain,
   type ChainGetter,
   type ChainTransaction,
@@ -20,7 +19,7 @@ import {
 } from '@chainlink/ccip-sdk/src/index.ts'
 
 import { loadAptosWallet } from './aptos.ts'
-import { Ed25519TransactionSigner } from './canton.ts'
+import { loadCantonConfig, loadCantonWallet } from './canton.ts'
 import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
 import { loadSuiWallet } from './sui.ts'
@@ -55,35 +54,6 @@ async function collectEndpoints(
     }
   }
   return endpoints
-}
-
-/**
- * Load and validate a Canton config JSON file.
- * @param configPath - Path to JSON file, or undefined if not provided.
- * @param logger - Logger for debug output.
- * @returns Parsed CantonConfig or undefined.
- */
-function loadCantonConfig(
-  configPath: string | undefined,
-  logger?: Logger,
-): CantonConfig | undefined {
-  if (!configPath) return undefined
-  if (!existsSync(configPath)) {
-    throw new Error(`Canton config file not found: ${configPath}`)
-  }
-  const raw = readFileSync(configPath, 'utf8')
-  const parsed = JSON.parse(raw) as Record<string, unknown>
-
-  // Validate required fields
-  const required = ['party', 'ccipParty', 'jwt', 'edsUrl', 'transferInstructionUrl'] as const
-  for (const field of required) {
-    if (typeof parsed[field] !== 'string' || !parsed[field].length) {
-      throw new Error(`Canton config: "${field}" is required and must be a non-empty string`)
-    }
-  }
-
-  logger?.debug('Loaded Canton config from', configPath, 'for party', parsed['party'])
-  return parsed as unknown as CantonConfig
 }
 
 export function fetchChainsFromRpcs(
@@ -280,27 +250,8 @@ export async function loadChainWallet(
       )
       return [wallet.getAddress(), wallet] as const
     case ChainFamily.Canton: {
-      const cantonCfg = loadCantonConfig(argv.cantonConfig, logger)
-      const party = cantonCfg?.party
-      if (!party) {
-        throw new Error(
-          'Canton wallet requires a party ID: provide --canton-config with a "party" field',
-        )
-      }
-
-      // When a private key is provided (--wallet, PRIVATE_KEY env, or rpcsFile),
-      // create an Ed25519 external signer so that sendMessage/execute use the
-      // interactive submission API (prepare → sign → execute).
-      const privateKey = typeof argv.wallet === 'string' ? argv.wallet : undefined
-      if (privateKey && /^(0x)?[0-9a-fA-F]{64}$/.test(privateKey)) {
-        const signer = new Ed25519TransactionSigner(privateKey, party)
-        logger?.debug(
-          `Canton wallet: external signer created (fingerprint=${signer.getFingerprint()})`,
-        )
-        return [party, { party, signer }] as const
-      }
-
-      return [party, { party }] as const
+      const cantonWallet = await loadCantonWallet(argv, logger)
+      return [cantonWallet.party, cantonWallet] as const
     }
     default:
       // TypeScript exhaustiveness check - this should never be reached

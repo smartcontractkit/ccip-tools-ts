@@ -25,7 +25,6 @@ import {
   CCIPAPIClient,
   CCIPInteractiveRequiredError,
   CCIPMessageIdNotFoundError,
-  CCIPNotImplementedError,
   CCIPTransactionNotFoundError,
   ChainFamily,
   bigIntReplacer,
@@ -119,11 +118,6 @@ export const builder = (yargs: Argv) =>
         describe: 'Receiver object IDs for Sui execution (if executing on Sui destination)',
         string: true,
         example: '--receiver-object-ids 0xabc... 0xdef...',
-      },
-      'canton-config': {
-        type: 'string',
-        describe:
-          'Path to Canton config JSON file (party, ccipParty, jwt, edsUrl, transferInstructionUrl, etc.)',
       },
     })
 
@@ -220,64 +214,55 @@ async function manualExec(
     const verifications = await dest.getVerifications({ ...argv, offRamp, request })
 
     if (argv.estimateGasLimit != null) {
-      try {
-        const estimated = await estimateReceiveExecution({
-          source,
-          dest,
-          routerOrRamp: offRamp,
-          message: request.message,
-        })
-        const withBuffer = estimated + Math.ceil((estimated * argv.estimateGasLimit) / 100)
-        const origLimit = Number(
-          'ccipReceiveGasLimit' in request.message
-            ? request.message.ccipReceiveGasLimit
-            : 'gasLimit' in request.message
-              ? request.message.gasLimit
-              : request.message.computeUnits,
+      const estimated = await estimateReceiveExecution({
+        source,
+        dest,
+        routerOrRamp: offRamp,
+        message: request.message,
+      })
+      const withBuffer = estimated + Math.ceil((estimated * argv.estimateGasLimit) / 100)
+      const origLimit = Number(
+        'ccipReceiveGasLimit' in request.message
+          ? request.message.ccipReceiveGasLimit
+          : 'gasLimit' in request.message
+            ? request.message.gasLimit
+            : request.message.computeUnits,
+      )
+      if (origLimit >= withBuffer) {
+        logger.warn(
+          'Estimated =',
+          estimated,
+          ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', withBuffer] : []),
+          '< original gasLimit =',
+          origLimit,
+          '. Leaving unchanged.',
         )
-        if (origLimit >= withBuffer) {
-          logger.warn(
-            'Estimated =',
+      } else {
+        if (argv.format !== Format.json)
+          output.write(
+            'Estimated gasLimit override:',
             estimated,
             ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', withBuffer] : []),
-            '< original gasLimit =',
-            origLimit,
-            '. Leaving unchanged.',
           )
-        } else {
-          if (argv.format !== Format.json)
-            output.write(
-              'Estimated gasLimit override:',
-              estimated,
-              ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', withBuffer] : []),
-            )
-          argv.gasLimit = withBuffer
-          argv.tokensGasLimit ??= 0
-        }
+        argv.gasLimit = withBuffer
+        argv.tokensGasLimit ??= 0
+      }
 
-        if (argv.onlyEstimate) {
-          if (argv.format === Format.json) {
-            output.write(
-              JSON.stringify(
-                {
-                  estimated,
-                  bufferPercent: argv.estimateGasLimit,
-                  withBuffer,
-                },
-                bigIntReplacer,
-                2,
-              ),
-            )
-          }
-          return
+      if (argv.onlyEstimate) {
+        if (argv.format === Format.json) {
+          output.write(
+            JSON.stringify(
+              {
+                estimated,
+                bufferPercent: argv.estimateGasLimit,
+                withBuffer,
+              },
+              bigIntReplacer,
+              2,
+            ),
+          )
         }
-      } catch (err) {
-        if (err instanceof CCIPNotImplementedError) {
-          logger.warn('Gas estimation not supported for this destination chain; skipping')
-          if (argv.onlyEstimate) return
-        } else {
-          throw err
-        }
+        return
       }
     }
 

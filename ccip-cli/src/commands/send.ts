@@ -147,11 +147,6 @@ export const builder = (yargs: Argv) =>
         default: false,
         describe: 'Wait for execution on destination',
       },
-      'canton-config': {
-        type: 'string',
-        describe:
-          'Path to Canton config JSON file (party, ccipParty, jwt, edsUrl, transferInstructionUrl, etc.)',
-      },
     })
     .check(
       ({ 'transfer-tokens': transferTokens }) =>
@@ -233,9 +228,7 @@ async function sendMessage(
   const destNetwork = networkInfo(argv.dest)
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
-  if (sourceNetwork.family !== ChainFamily.Canton) {
-    decodeAddress(argv.router, sourceNetwork.family)
-  }
+  decodeAddress(argv.router, sourceNetwork.family)
 
   let data: BytesLike | undefined
   if (argv.data) {
@@ -357,65 +350,6 @@ async function sendMessage(
     ...parseExtraArgs(argv.extra),
   }
 
-  // ─── Canton-specific send flow ──────────────────────────────────────────────
-  if (sourceNetwork.family === ChainFamily.Canton) {
-    if (!walletAddress) [walletAddress, wallet] = await loadChainWallet(source, argv, logger)
-
-    // Discover fee token and base extraArgs from on-chain state
-    const discovered = await (
-      source as unknown as {
-        discoverSendArgs(
-          party: string,
-        ): Promise<{ feeToken: string; extraArgs: Record<string, unknown> }>
-      }
-    ).discoverSendArgs(walletAddress)
-
-    // Merge: discovered defaults < code-generated extraArgs (which already includes --extra overrides)
-    const cantonExtraArgs = {
-      ...discovered.extraArgs,
-      ...extraArgs,
-    }
-
-    if (argv.onlyGetFee) {
-      logger.warn('Fee estimation is not supported for Canton; skipping --only-get-fee')
-      return
-    }
-
-    const message: MessageInput = {
-      receiver,
-      data,
-      extraArgs: cantonExtraArgs,
-      feeToken: argv.feeToken || discovered.feeToken,
-      tokenAmounts,
-    }
-
-    const request = await source.sendMessage({
-      ...argv,
-      destChainSelector: destNetwork.chainSelector,
-      message: { ...message, fee: 0n },
-      wallet,
-    })
-    logger.info(
-      '🚀 Sending message to',
-      receiver,
-      '@',
-      destNetwork.name,
-      ', tx =>',
-      request.tx.hash,
-      ', messageId =>',
-      request.message.messageId,
-    )
-    await showRequests(ctx, {
-      ...argv,
-      txHashOrId: request.tx.hash,
-      'tx-hash-or-id': request.tx.hash,
-      'log-index': undefined,
-      logIndex: undefined,
-    })
-    return
-  }
-
-  // ─── Standard (non-Canton) fee token & fee flow ────────────────────────────
   let feeToken, feeTokenInfo
   if (argv.feeToken) {
     try {

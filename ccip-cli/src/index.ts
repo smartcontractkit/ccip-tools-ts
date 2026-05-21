@@ -107,6 +107,11 @@ const globalOpts = {
     describe:
       'Enable interactive prompts (use --no-interactive to disable for automation and AI agents)',
   },
+  'canton-config': {
+    type: 'string',
+    describe:
+      'Path to Canton config JSON file (party, ccipParty, jwt, edsUrl, transferInstructionUrl, etc.)',
+  },
 } as const
 
 /** Type for global CLI options. */
