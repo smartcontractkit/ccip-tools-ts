@@ -193,7 +193,7 @@ describe('fetchChainsFromRpcs', () => {
     try {
       const [, tx$] = fetchChainsFromRpcs(
         ctx,
-        { rpcs: ['http://first.example', 'http://second.example'], rpcsFile: '', api: false },
+        { rpcs: ['http://first.example', 'http://second.example'], rpcsFile: '', api: false, cantonConfig: undefined },
         txHash,
       )
 
@@ -228,6 +228,7 @@ describe('fetchChainsFromRpcs', () => {
         rpcs: ['http://fast.example', 'http://slow.example'],
         rpcsFile: '',
         api: false,
+        cantonConfig: undefined,
       })
       const chain = await chainGetter('ethereum-testnet-sepolia')
       assert.equal(chain.network.name, 'ethereum-testnet-sepolia')
@@ -259,6 +260,7 @@ describe('fetchChainsFromRpcs', () => {
         rpcs: ['http://rpc.example'],
         rpcsFile: '',
         api: false,
+        cantonConfig: undefined,
       })
       // Called synchronously — no chain has connected yet
       const chainPromise = chainGetter('ethereum-testnet-sepolia')
@@ -285,6 +287,7 @@ describe('fetchChainsFromRpcs', () => {
         rpcs: ['http://bad1.example', 'http://bad2.example'],
         rpcsFile: '',
         api: false,
+        cantonConfig: undefined,
       })
       await assert.rejects(chainGetter('ethereum-testnet-sepolia'), CCIPRpcNotFoundError)
     } finally {
@@ -308,6 +311,7 @@ describe('fetchChainsFromRpcs', () => {
         rpcs: ['http://bad.example'],
         rpcsFile: '',
         api: false,
+        cantonConfig: undefined,
       })
       // First call drains the family
       await assert.rejects(chainGetter('ethereum-testnet-sepolia'), CCIPRpcNotFoundError)
@@ -336,7 +340,7 @@ describe('fetchChainsFromRpcs', () => {
     try {
       const [, txResult] = fetchChainsFromRpcs(
         ctx,
-        { rpcs: ['http://rpc1.example', 'http://rpc2.example'], rpcsFile: '', api: false },
+        { rpcs: ['http://rpc1.example', 'http://rpc2.example'], rpcsFile: '', api: false, cantonConfig: undefined },
         TX_HASH,
       )
       await assert.rejects(txResult, CCIPTransactionNotFoundError)
@@ -362,7 +366,7 @@ describe('fetchChainsFromRpcs', () => {
     try {
       const [, txResult] = fetchChainsFromRpcs(
         ctx,
-        { rpcs: ['http://a.example', 'http://b.example'], rpcsFile: '', api: false },
+        { rpcs: ['http://a.example', 'http://b.example'], rpcsFile: '', api: false, cantonConfig: undefined },
         TX_HASH,
       )
       const [chain, tx] = await txResult
@@ -398,7 +402,7 @@ describe('fetchChainsFromRpcs', () => {
     try {
       const [, txResult] = fetchChainsFromRpcs(
         ctx,
-        { rpcs: ['http://a.example', 'http://b.example'], rpcsFile: '', api: false },
+        { rpcs: ['http://a.example', 'http://b.example'], rpcsFile: '', api: false, cantonConfig: undefined },
         TX_HASH,
       )
       const [chain, tx] = await txResult
@@ -436,7 +440,7 @@ describe('fetchChainsFromRpcs', () => {
     try {
       const [chainGetter, txResult] = fetchChainsFromRpcs(
         ctx,
-        { rpcs: ['http://rpc.example'], rpcsFile: '', api: false },
+        { rpcs: ['http://rpc.example'], rpcsFile: '', api: false, cantonConfig: undefined },
         TX_HASH,
       )
       // Call before chain connects → Branch 2 pending
@@ -507,6 +511,7 @@ describe('fetchChainsFromRpcs', () => {
           rpcs: ['http://evm.example', 'http://s1.example', 'http://s2.example'],
           rpcsFile: '',
           api: false,
+          cantonConfig: undefined,
         },
         TX_HASH,
       )
