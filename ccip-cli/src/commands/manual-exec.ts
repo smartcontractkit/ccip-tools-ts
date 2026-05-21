@@ -26,7 +26,6 @@ import {
   CCIPInteractiveRequiredError,
   CCIPMessageIdNotFoundError,
   CCIPTransactionNotFoundError,
-  ChainFamily,
   bigIntReplacer,
   discoverOffRamp,
   estimateReceiveExecution,
