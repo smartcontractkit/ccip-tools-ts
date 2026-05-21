@@ -23,7 +23,6 @@ import type { ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { supportedChains } from '../supported-chains.ts'
-import { getDataBytes, sleep } from '../utils.ts'
 import {
   type CCIPExecution,
   type CCIPMessage,
@@ -39,6 +38,7 @@ import {
   type WithLogger,
   CCIPVersion,
 } from '../types.ts'
+import { getDataBytes, sleep } from '../utils.ts'
 import {
   type CantonClient,
   type JsCommands,

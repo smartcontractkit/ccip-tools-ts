@@ -205,12 +205,7 @@ async function manualExec(
 
   let inputs
   if (source) {
-    // Canton destinations don't use offRamp/onRamp discovery
-    if (dest.network.family === ChainFamily.Canton) {
-      offRamp ??= ''
-    } else {
-      offRamp ??= await discoverOffRamp(source, dest, request.lane.onRamp, source)
-    }
+    offRamp ??= await discoverOffRamp(source, dest, request.lane.onRamp, source)
     const verifications = await dest.getVerifications({ ...argv, offRamp, request })
 
     if (argv.estimateGasLimit != null) {

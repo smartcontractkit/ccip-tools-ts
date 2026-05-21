@@ -58,11 +58,11 @@ async function collectEndpoints(
 
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'> & { cantonConfig?: string },
+  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>,
 ): ChainGetter
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'> & { cantonConfig?: string },
+  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>,
   txHash: string,
 ): [ChainGetter, Promise<[Chain, ChainTransaction]>]
 
@@ -77,7 +77,7 @@ export function fetchChainsFromRpcs(
  */
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'> & { cantonConfig?: string },
+  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>,
   txHash?: string,
 ) {
   const cantonConfig = loadCantonConfig(argv.cantonConfig, ctx.logger)
