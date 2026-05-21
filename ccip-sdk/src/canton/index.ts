@@ -408,7 +408,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * {@inheritDoc Chain.getNativeTokenForRouter}
+   * Returns Canton's default fee token.
    *
    * Canton's default fee token is registry-level (not router-level): the
    * Amulet instrument exposed by the token-metadata registry.
@@ -449,7 +449,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * {@inheritDoc Chain.getTokenInfo}
+   * Returns token symbol and decimals for the given Canton fee token.
    *
    * Looks up the instrument in the Canton token-metadata registry. `token` is
    * the full Canton fee-token string (`"admin::id"`); the registry is keyed by
@@ -478,7 +478,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * {@inheritDoc Chain.getFee}
+   * Returns the CCIP fee for sending a message.
    *
    * Canton has no scalar upfront CCIP fee — the cost is computed inside the
    * on-chain command at send time. Returns `0n` so `--only-get-fee` and the
