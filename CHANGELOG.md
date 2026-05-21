@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - SDK: Add `getMessagesInRange()` to the abstract Chain class — range-based CCIP message discovery using `getLogs` + `decodeMessage`, returns `AsyncIterableIterator<CCIPRequest>`
+- SDK: add `getOnRampConfig`/`getOffRampConfig` to fetch chain-specific onramp/offramp address and config for a given lane
+- CLI: expose `lane --source <chain> --router <or_onramp> --dest <chain>` command to print lane config and ramps addresses
 
 ## [1.6.0] - 2026-05-06
 
