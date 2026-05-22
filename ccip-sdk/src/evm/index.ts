@@ -32,7 +32,6 @@ import type { PickDeep, SetFieldType, SetRequired } from 'type-fest'
 import {
   type ChainContext,
   type GetBalanceOpts,
-  type LaneFeatures,
   type LogFilter,
   type RateLimiterState,
   type TokenPoolRemote,
@@ -40,7 +39,6 @@ import {
   type TokenTransferFeeOpts,
   type TotalFeesEstimate,
   Chain,
-  LaneFeature,
 } from '../chain.ts'
 import {
   CCIPAddressInvalidError,
@@ -837,49 +835,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       default:
         throw new CCIPVersionUnsupportedError(version)
     }
-  }
-
-  /**
-   * {@inheritDoc Chain.getLaneFeatures}
-   */
-  override async getLaneFeatures(opts: {
-    router: string
-    destChainSelector: bigint
-    token?: string
-  }): Promise<Partial<LaneFeatures>> {
-    const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
-    const [, version] = await this.typeAndVersion(onRamp)
-
-    const result: Partial<LaneFeatures> = {}
-
-    // default FTF value for V2_0+ lanes if no token/pool or pool doesn't specify
-    if (version >= CCIPVersion.V2_0) {
-      result[LaneFeature.FINALITY_FAST] = 1
-      result[LaneFeature.FINALITY_SAFE] = true
-    }
-
-    // FINALITY_FAST — V2_0+ only
-    if (opts.token) {
-      const { tokenPool } = await this.getRegistryTokenConfig(
-        await this.getTokenAdminRegistryFor(onRamp),
-        opts.token,
-      )
-      if (tokenPool) {
-        const { finalityDepth, finalitySafe } = await this.getTokenPoolConfig(tokenPool)
-        if (finalityDepth != null) result[LaneFeature.FINALITY_FAST] = finalityDepth
-        else delete result[LaneFeature.FINALITY_FAST]
-        if (finalitySafe) result[LaneFeature.FINALITY_SAFE] = true
-        else delete result[LaneFeature.FINALITY_SAFE]
-
-        const remote = await this.getTokenPoolRemote(tokenPool, opts.destChainSelector)
-        result[LaneFeature.RATE_LIMITS] = remote.outboundRateLimiterState
-        if ((finalityDepth || finalitySafe) && 'fastOutboundRateLimiterState' in remote) {
-          result[LaneFeature.FAST_RATE_LIMITS] = remote.fastOutboundRateLimiterState
-        }
-      }
-    }
-
-    return result
   }
 
   /** {@inheritDoc Chain.getNativeTokenForRouter} */
