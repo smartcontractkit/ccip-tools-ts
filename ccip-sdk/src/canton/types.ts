@@ -1,14 +1,51 @@
 import type { ChainFamily } from '../networks.ts'
-import type { JsCommands } from './client/index.ts'
+import type { JsCommands, PartySignatures } from './client/index.ts'
 import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
 
 /**
- * A Canton "wallet" identifies the acting party and optionally overrides the
- * bearer token used for Ledger API authentication.
+ * Signs a prepared Canton transaction hash on behalf of an external party.
+ *
+ * Implementations receive the raw hash bytes (decoded from the base64
+ * `preparedTransactionHash` returned by the Preparing Participant Node) and
+ * must return a fully-assembled {@link PartySignatures} structure.
+ *
+ * @example
+ * ```ts
+ * const signer: TransactionSigner = {
+ *   async sign(hash) {
+ *     const sig = ed25519.sign(hash, privateKey)
+ *     return {
+ *       signatures: [{
+ *         party: partyId,
+ *         signatures: [{
+ *           format: 'CRYPTO_KEY_FORMAT_RAW',
+ *           signature: Buffer.from(sig).toString('base64'),
+ *           signedBy: keyFingerprint,
+ *           signingAlgorithmSpec: 'SIGNING_ALGORITHM_SPEC_ED25519',
+ *         }],
+ *       }],
+ *     }
+ *   },
+ * }
+ * ```
+ */
+export interface TransactionSigner {
+  sign(hash: Uint8Array): Promise<PartySignatures>
+}
+
+/**
+ * A Canton "wallet" identifies the acting party and optionally carries a
+ * {@link TransactionSigner} for external signing.
+ *
+ * When `signer` is present, {@link CantonChain.sendMessage} and
+ * {@link CantonChain.execute} use the external signing flow
+ * (prepare → sign → execute) instead of direct submission.
  */
 export interface CantonWallet {
   /** Daml party ID used for `actAs` in command submissions. */
   party: string
+  /** Optional external signer. When provided, transactions go through the interactive submission API. */
+  signer?: TransactionSigner
 }
 
 /**

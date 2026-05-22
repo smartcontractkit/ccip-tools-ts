@@ -1,4 +1,4 @@
-import { type BytesLike, id as keccak256Utf8 } from 'ethers'
+import { type BytesLike, hexlify, id as keccak256Utf8 } from 'ethers'
 
 import {
   type ChainContext,
@@ -38,9 +38,12 @@ import {
   type WithLogger,
   CCIPVersion,
 } from '../types.ts'
+import { getDataBytes, sleep } from '../utils.ts'
 import {
   type CantonClient,
   type JsCommands,
+  type JsPrepareSubmissionRequest,
+  type JsSubmitAndWaitForTransactionResponse,
   type JsTransaction,
   createCantonClient,
 } from './client/index.ts'
@@ -56,12 +59,20 @@ import {
 import {
   type CantonExtraArgsV1,
   type CantonInstrumentId,
+  type TransactionSigner,
   type UnsignedCantonTx,
   isCantonWallet,
   parseInstrumentId,
 } from './types.ts'
 
-export type { CantonClient, CantonClientConfig } from './client/index.ts'
+export type {
+  CantonClient,
+  CantonClientConfig,
+  HashingSchemeVersion,
+  PartySignatures,
+  Signature,
+  SinglePartySignatures,
+} from './client/index.ts'
 export type {
   CantonCCVSendInput,
   CantonExtraArgsV1,
@@ -69,6 +80,7 @@ export type {
   CantonTokenExtraArgs,
   CantonTokenInput,
   CantonWallet,
+  TransactionSigner,
   UnsignedCantonTx,
 } from './types.ts'
 export { isCantonWallet, parseInstrumentId } from './types.ts'
@@ -145,8 +157,13 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     ['mainnet', 'canton:MainNet'],
     ['main', 'canton:MainNet'],
     ['canton-mainnet', 'canton:MainNet'],
-    ['global', 'canton:LocalNet'],
   ])
+
+  /**
+   * Default Canton chain ID to use when the synchronizer alias is ambiguous
+   * (e.g. the generic "global" alias used across all Canton environments).
+   */
+  private static readonly DEFAULT_CANTON_CHAIN_ID = 'canton:DevNet'
 
   /**
    * Detect the Canton network and instantiate a CantonChain.
@@ -187,6 +204,27 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           ctx,
         )
       }
+    }
+
+    // fall back to the default Canton chain if there are synchronizers but none of their aliases are recognised
+    if (synchronizers.length) {
+      ctx?.logger?.debug(
+        'Canton: no specific alias matched for synchronizers',
+        synchronizers.map((s) => s.synchronizerAlias),
+        '— falling back to',
+        CantonChain.DEFAULT_CANTON_CHAIN_ID,
+      )
+      return new CantonChain(
+        client,
+        acsDisclosureProvider,
+        edsDisclosureProvider,
+        transferInstructionClient,
+        tokenMetadataClient,
+        ccipParty,
+        indexerUrl,
+        networkInfo(CantonChain.DEFAULT_CANTON_CHAIN_ID) as NetworkInfo<typeof ChainFamily.Canton>,
+        ctx,
+      )
     }
 
     throw new CCIPChainNotFoundError(
@@ -370,11 +408,13 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * {@inheritDoc Chain.getNativeTokenForRouter}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
+   * Returns Canton's default fee token.
+   *
+   * Canton's default fee token is registry-level (not router-level): the
+   * Amulet instrument exposed by the token-metadata registry.
    */
-  getNativeTokenForRouter(_router: string): Promise<string> {
-    throw new CCIPNotImplementedError('CantonChain.getNativeTokenForRouter')
+  async getNativeTokenForRouter(_router: string): Promise<string> {
+    return this.getDefaultFeeToken()
   }
 
   /**
@@ -409,11 +449,16 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * {@inheritDoc Chain.getTokenInfo}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
+   * Returns token symbol and decimals for the given Canton fee token.
+   *
+   * Looks up the instrument in the Canton token-metadata registry. `token` is
+   * the full Canton fee-token string (`"admin::id"`); the registry is keyed by
+   * the local `id` portion.
    */
-  getTokenInfo(_token: string): Promise<{ symbol: string; decimals: number }> {
-    throw new CCIPNotImplementedError('CantonChain.getTokenInfo')
+  async getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }> {
+    const { id } = parseInstrumentId(token)
+    const instrument = await this.tokenMetadataClient.getInstrument(id)
+    return { symbol: instrument.symbol, decimals: instrument.decimals }
   }
 
   /**
@@ -433,11 +478,14 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * {@inheritDoc Chain.getFee}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
+   * Returns the CCIP fee for sending a message.
+   *
+   * Canton has no scalar upfront CCIP fee — the cost is computed inside the
+   * on-chain command at send time. Returns `0n` so `--only-get-fee` and the
+   * balance check both pass cleanly.
    */
   getFee(_opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    throw new CCIPNotImplementedError('CantonChain.getFee')
+    return Promise.resolve(0n)
   }
 
   /** {@inheritDoc Chain.generateUnsignedSendMessage} */
@@ -474,10 +522,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     // --- parse fields ---
     const feeInstrument = parseInstrumentId(message.feeToken)
     const receiverHex = stripHexPrefix(
-      typeof message.receiver === 'string' ? message.receiver : String(message.receiver),
+      typeof message.receiver === 'string' ? message.receiver : hexlify(message.receiver),
     )
     const payloadHex = message.data
-      ? stripHexPrefix(typeof message.data === 'string' ? message.data : String(message.data))
+      ? stripHexPrefix(typeof message.data === 'string' ? message.data : hexlify(message.data))
       : ''
     const gasLimit = cantonArgs.gasLimit ?? 200_000n
     const feeTokenHoldingCids = cantonArgs.feeTokenHoldingCids
@@ -723,96 +771,76 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       throw new CCIPWalletInvalidError(wallet)
     }
 
-    // Retry the full generate+submit cycle (up to 3 attempts) so that each
-    // attempt uses freshly-discovered ACS data (fee holding CID, disclosed
-    // contracts, EDS context, etc.).  HTTP-level retries inside
-    // submitAndWaitForTransaction are disabled, so a stale holding that gets
-    // swept between discovery and submission simply causes a fast fail here and
-    // triggers re-discovery on the next attempt.
-    const MAX_SEND_ATTEMPTS = 3
-    let lastError: unknown
-    for (let attempt = 1; attempt <= MAX_SEND_ATTEMPTS; attempt++) {
-      try {
-        // Build the unsigned command fresh on every attempt (re-queries ACS / EDS).
-        const unsigned = await this.generateUnsignedSendMessage({
-          ...opts,
-          sender: wallet.party,
-        })
+    const message = await this.fillCantonSendDefaults(opts.message, wallet.party)
 
-        this.logger.debug(
-          `CantonChain.sendMessage: submitting command (attempt ${attempt}/${MAX_SEND_ATTEMPTS})`,
-        )
+    const unsigned = await this.generateUnsignedSendMessage({
+      ...opts,
+      message,
+      sender: wallet.party,
+    })
 
-        // Submit and wait for the full transaction (so we get events back)
-        const response = await this.provider.submitAndWaitForTransaction(unsigned.commands)
-        const txRecord = response.transaction as Record<string, unknown>
-        const updateId: string =
-          (typeof txRecord.update_id === 'string' ? txRecord.update_id : null) ??
-          (typeof txRecord.updateId === 'string' ? txRecord.updateId : '')
+    this.logger.debug(`CantonChain.sendMessage: submitting command`)
 
-        this.logger.debug(`CantonChain.sendMessage: submitted, updateId=${updateId}`)
+    // Submit and wait for the full transaction (so we get events back)
+    const response = await this.submitCommands(unsigned.commands, wallet.signer)
+    const txRecord = response.transaction as Record<string, unknown>
+    const updateId: string =
+      (typeof txRecord.update_id === 'string' ? txRecord.update_id : null) ??
+      (typeof txRecord.updateId === 'string' ? txRecord.updateId : '')
 
-        // Parse CCIPMessageSent from the transaction events
-        const sendResult = parseCantonSendResult(response.transaction, updateId)
-        const timestamp = resolveTimestamp(txRecord)
+    this.logger.debug(`CantonChain.sendMessage: submitted, updateId=${updateId}`)
 
-        // Build the Lane
-        const lane: Lane = {
-          sourceChainSelector: this.network.chainSelector,
-          destChainSelector: opts.destChainSelector,
-          onRamp: sendResult.onRampAddress ?? '',
-          version: CCIPVersion.V2_0,
-        }
+    // Parse CCIPMessageSent from the transaction events
+    const sendResult = parseCantonSendResult(response.transaction, updateId)
+    const timestamp = resolveTimestamp(txRecord)
 
-        const log: ChainLog = {
-          topics: [],
-          index: 0,
-          address: '',
-          blockNumber: 0,
-          blockTimestamp: 0,
-          transactionHash: updateId,
-          data: response.transaction,
-        }
-
-        const tx: Omit<ChainTransaction, 'logs'> = {
-          hash: updateId,
-          blockNumber: 0,
-          timestamp,
-          from: wallet.party,
-        }
-
-        const ccipMessage = {
-          messageId: sendResult.messageId,
-          encodedMessage: sendResult.encodedMessage,
-          sourceChainSelector: this.network.chainSelector,
-          destChainSelector: opts.destChainSelector,
-          sequenceNumber: sendResult.sequenceNumber,
-          nonce: sendResult.nonce ?? 0n,
-          sender: wallet.party,
-          receiver:
-            typeof opts.message.receiver === 'string'
-              ? opts.message.receiver
-              : String(opts.message.receiver),
-          data: sendResult.encodedMessage,
-          tokenAmounts: (opts.message.tokenAmounts ?? []) as readonly {
-            token: string
-            amount: bigint
-          }[],
-          feeToken: opts.message.feeToken ?? '',
-          feeTokenAmount: 0n,
-        } as unknown as CCIPMessage
-
-        return { lane, message: ccipMessage, log, tx }
-      } catch (err) {
-        lastError = err
-        if (attempt < MAX_SEND_ATTEMPTS) {
-          this.logger.debug(
-            `CantonChain.sendMessage: attempt ${attempt} failed, retrying with fresh data: ${err instanceof Error ? err.message : String(err)}`,
-          )
-        }
-      }
+    // Build the Lane
+    const lane: Lane = {
+      sourceChainSelector: this.network.chainSelector,
+      destChainSelector: opts.destChainSelector,
+      onRamp: sendResult.onRampAddress ?? '',
+      version: CCIPVersion.V2_0,
     }
-    throw lastError
+
+    const log: ChainLog = {
+      topics: [],
+      index: 0,
+      address: '',
+      blockNumber: 0,
+      blockTimestamp: timestamp,
+      transactionHash: updateId,
+      data: response.transaction,
+    }
+
+    const tx: Omit<ChainTransaction, 'logs'> = {
+      hash: updateId,
+      blockNumber: 0,
+      timestamp,
+      from: wallet.party,
+    }
+
+    const ccipMessage = {
+      messageId: sendResult.messageId,
+      encodedMessage: sendResult.encodedMessage,
+      sourceChainSelector: this.network.chainSelector,
+      destChainSelector: opts.destChainSelector,
+      sequenceNumber: sendResult.sequenceNumber,
+      nonce: sendResult.nonce ?? 0n,
+      sender: wallet.party,
+      receiver:
+        typeof opts.message.receiver === 'string'
+          ? opts.message.receiver
+          : String(opts.message.receiver),
+      data: sendResult.encodedMessage,
+      tokenAmounts: (opts.message.tokenAmounts ?? []) as readonly {
+        token: string
+        amount: bigint
+      }[],
+      feeToken: opts.message.feeToken ?? '',
+      feeTokenAmount: 0n,
+    } as unknown as CCIPMessage
+
+    return { lane, message: ccipMessage, log, tx }
   }
 
   /**
@@ -1001,7 +1029,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       this.logger.debug(
         `CantonChain.execute: no CCIPReceiver with minBlockConfirmations=${finality} found in ACS — creating one`,
       )
-      receiverCid = await this.createReceiverForFinality(wallet.party, finality)
+      receiverCid = await this.createReceiverForFinality(wallet.party, finality, wallet.signer)
     }
 
     // Build the unsigned command, passing the resolved receiver CID via Canton-specific opts.
@@ -1012,7 +1040,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     } as unknown as Parameters<Chain['generateUnsignedExecute']>[0])
 
     // Submit and wait for the full transaction (so we get events back)
-    const response = await this.provider.submitAndWaitForTransaction(unsigned.commands)
+    const response = await this.submitCommands(unsigned.commands, wallet.signer)
     const txRecord = response.transaction as Record<string, unknown>
     const updateId: string =
       (typeof txRecord.update_id === 'string' ? txRecord.update_id : null) ??
@@ -1037,6 +1065,67 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     return { receipt, log }
   }
 
+  // ─── Internal submission helper ─────────────────────────────────────────
+
+  /**
+   * Submit a command to the ledger, using external signing when a
+   * {@link TransactionSigner} is provided.
+   *
+   * - **No signer**: delegates to `submitAndWaitForTransaction` (direct submit).
+   * - **With signer**: uses the interactive submission API:
+   *   1. Prepare the transaction (`/v2/interactive-submission/prepare`).
+   *   2. Decode the hash and call `signer.sign(hashBytes)`.
+   *   3. Execute the signed transaction (`/v2/interactive-submission/executeAndWaitForTransaction`).
+   */
+  private async submitCommands(
+    commands: JsCommands,
+    signer?: TransactionSigner,
+  ): Promise<JsSubmitAndWaitForTransactionResponse> {
+    if (!signer) {
+      return this.provider.submitAndWaitForTransaction(commands)
+    }
+
+    // Step 1 — Prepare the transaction
+    const prepareRequest: JsPrepareSubmissionRequest = {
+      commandId: commands.commandId,
+      commands: commands.commands,
+      actAs: commands.actAs,
+      readAs: commands.readAs,
+      disclosedContracts: commands.disclosedContracts,
+      synchronizerId: commands.synchronizerId,
+      hashingSchemeVersion: 'HASHING_SCHEME_VERSION_V3',
+    }
+
+    const prepareResponse = await this.provider.prepareSubmission(prepareRequest)
+
+    if (!prepareResponse.preparedTransaction || !prepareResponse.preparedTransactionHash) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        'prepareSubmission returned an incomplete response (missing preparedTransaction or hash)',
+      )
+    }
+
+    // Step 2 — Sign the hash
+    const hashBytes = getDataBytes(prepareResponse.preparedTransactionHash)
+    const partySignatures = await signer.sign(hashBytes)
+
+    // Step 3 — Execute the signed transaction
+    const hashingSchemeVersion =
+      prepareResponse.hashingSchemeVersion &&
+      prepareResponse.hashingSchemeVersion !== 'HASHING_SCHEME_VERSION_UNSPECIFIED'
+        ? prepareResponse.hashingSchemeVersion
+        : 'HASHING_SCHEME_VERSION_V3'
+
+    const executeResponse = await this.provider.executeSubmissionAndWaitForTransaction({
+      preparedTransaction: prepareResponse.preparedTransaction,
+      partySignatures,
+      hashingSchemeVersion,
+      submissionId: `ext-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    })
+
+    return executeResponse
+  }
+
   /**
    * Find or create a `CCIPReceiver` contract whose `minBlockConfirmations` equals `finality`.
    *
@@ -1045,7 +1134,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * receiver instance.  This method first searches the ACS; if no match is found it creates a
    * fresh contract (mirroring the Go `deployReceiver` helper in the staging script).
    */
-  private async createReceiverForFinality(payer: string, finality: number): Promise<string> {
+  private async createReceiverForFinality(
+    payer: string,
+    finality: number,
+    signer?: TransactionSigner,
+  ): Promise<string> {
     const attempts = 4
     let lastError: unknown
 
@@ -1075,7 +1168,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         this.logger.debug(
           `CantonChain.createReceiverForFinality: creating CCIPReceiver finality=${finality} instanceId=${instanceId} attempt=${attempt}/${attempts}`,
         )
-        const response = await this.provider.submitAndWaitForTransaction(createCmd)
+        const response = await this.submitCommands(createCmd, signer)
         const tx = response.transaction as { events?: unknown[] }
         for (const event of tx.events ?? []) {
           const ev = event as Record<string, unknown>
@@ -1098,7 +1191,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         this.logger.warn(
           `CantonChain.createReceiverForFinality: receiver creation failed with a retryable Canton error; retrying in ${delayMs}ms (${attempt}/${attempts})${detail}`,
         )
-        await delay(delayMs)
+        await sleep(delayMs)
       }
     }
 
@@ -1323,36 +1416,44 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   // ─── Discovery helpers ──────────────────────────────────────────────────
 
   /**
-   * Auto-discover everything needed to call {@link sendMessage} for a simple Canton-to-EVM send.
+   * Resolve the registry-default fee token (Amulet) for this Canton chain.
    *
-   * Queries the token metadata registry to determine the default fee token
-   * (Amulet) and finds the first usable holding for `party`.
-   *
-   * @param party - The sender party ID.
-   * @returns The resolved `feeToken` string and a ready-to-use {@link CantonExtraArgsV1}.
-   * @throws if no fee token holdings are found for `party`.
+   * The fee token is registry-level, not router- or party-dependent: a single
+   * metadata lookup yields `"<adminId>::Amulet"`, where `adminId` is itself a
+   * Daml party ID (`name::fingerprint`).
    */
-  async discoverSendArgs(
-    party: string,
-  ): Promise<{ feeToken: string; extraArgs: CantonExtraArgsV1 }> {
+  private async getDefaultFeeToken(): Promise<string> {
     const registryInfo = await this.tokenMetadataClient.getRegistryInfo()
-    const feeToken = `${registryInfo.adminId}::Amulet`
-    const instrumentId = parseInstrumentId(feeToken)
+    return `${registryInfo.adminId}::Amulet`
+  }
 
-    const holdings = await fetchTokenHoldings(this.provider, party, instrumentId)
+  /**
+   * Fill in Canton-specific fields that {@link generateUnsignedSendMessage}
+   * requires but the generic `sendMessage` caller (e.g. the CLI) does not
+   * know how to populate: a default `feeToken` if missing, and at least one
+   * `feeTokenHoldingCids` entry discovered from `party`'s holdings.
+   */
+  private async fillCantonSendDefaults(
+    message: Parameters<Chain['sendMessage']>[0]['message'],
+    party: string,
+  ): Promise<Parameters<Chain['sendMessage']>[0]['message']> {
+    const feeToken = message.feeToken || (await this.getDefaultFeeToken())
+    const extraArgs = (message.extraArgs ?? {}) as Partial<CantonExtraArgsV1>
+    if (extraArgs.feeTokenHoldingCids?.length) {
+      return { ...message, feeToken }
+    }
 
+    const holdings = await fetchTokenHoldings(this.provider, party, parseInstrumentId(feeToken))
     if (!holdings.length) {
       throw new CCIPError(
         CCIPErrorCode.METHOD_UNSUPPORTED,
-        `discoverSendArgs: no Amulet holdings found for party ${party}`,
+        `CantonChain.sendMessage: no fee-token holdings found for party ${party} on instrument ${feeToken}`,
       )
     }
-
     return {
+      ...message,
       feeToken,
-      extraArgs: {
-        feeTokenHoldingCids: [holdings[0]!.contractId],
-      },
+      extraArgs: { ...extraArgs, feeTokenHoldingCids: [holdings[0]!.contractId] },
     }
   }
 
@@ -1749,10 +1850,6 @@ function normalizeIndexerMessageId(messageId: string): string {
 
 function isRetryableCantonSubmitError(err: unknown): boolean {
   return CCIPError.isCCIPError(err) && err.isTransient
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**

@@ -19,6 +19,7 @@ import {
 } from '@chainlink/ccip-sdk/src/index.ts'
 
 import { loadAptosWallet } from './aptos.ts'
+import { loadCantonConfig, loadCantonWallet } from './canton.ts'
 import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
 import { loadSuiWallet } from './sui.ts'
@@ -57,11 +58,11 @@ async function collectEndpoints(
 
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'>,
+  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>,
 ): ChainGetter
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'>,
+  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>,
   txHash: string,
 ): [ChainGetter, Promise<[Chain, ChainTransaction]>]
 
@@ -76,9 +77,10 @@ export function fetchChainsFromRpcs(
  */
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api'>,
+  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>,
   txHash?: string,
 ) {
+  const cantonConfig = loadCantonConfig(argv.cantonConfig, ctx.logger)
   const chains: Record<string, Promise<Chain>> = {}
   const pendingChainsCbs: Record<
     string,
@@ -104,6 +106,7 @@ export function fetchChainsFromRpcs(
           abort: ctx.abort,
           apiClient:
             argv.api === false ? null : typeof argv.api === 'string' ? argv.api : undefined,
+          ...(cantonConfig && { cantonConfig }),
         })
         chains$.push(chain$)
 
@@ -207,7 +210,7 @@ export function fetchChainsFromRpcs(
  */
 export async function loadChainWallet(
   chain: Chain,
-  argv: { wallet?: unknown; rpcsFile?: string; interactive?: boolean },
+  argv: { wallet?: unknown; rpcsFile?: string; interactive?: boolean; cantonConfig?: string },
   logger?: Logger,
 ) {
   // Centralized wallet resolution: check env vars first, then rpcsFile
@@ -246,6 +249,10 @@ export async function loadChainWallet(
         logger,
       )
       return [wallet.getAddress(), wallet] as const
+    case ChainFamily.Canton: {
+      const cantonWallet = loadCantonWallet(argv, logger)
+      return [cantonWallet.party, cantonWallet] as const
+    }
     default:
       // TypeScript exhaustiveness check - this should never be reached
       throw new CCIPChainFamilyUnsupportedError((chain.network as { family: string }).family)

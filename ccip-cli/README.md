@@ -21,6 +21,7 @@ ccip-cli --help
 ```
 
 To run it directly with NPX, do:
+
 ```
 npx @chainlink/ccip-cli --help
 ```
@@ -38,7 +39,6 @@ alias ccip-cli="$PWD/ccip-cli/ccip-cli"  # optional, to run from local repo dire
 > [!NOTE]
 > In dev context below, we'll assume you are on `ccip-cli` folder.
 
-
 ## RPCs
 
 All commands require a list of RPCs endpoints for the networks of interest (source and destination).
@@ -52,9 +52,8 @@ with any prefix or suffix (only URLs are parsed).
 The default filename is just for compatibility with previous tools, and isn't required to be an
 actual env file. `.txt`, `.csv` or `.json` arrays should work out of the box.
 
-
 > [!IMPORTANT]
-> We recommend .env files.  Do not upload RPCs with your API secrets in the URL to source countrol like github.
+> We recommend .env files. Do not upload RPCs with your API secrets in the URL to source countrol like github.
 
 Example `.env` file:
 
@@ -78,13 +77,15 @@ variable. Alternative names `USER_KEY` and `OWNER_KEY` are also supported (check
 
 Wallet options can also be passed as `--wallet`, where each chain family may interpret it however it
 can:
+
 - EVM can receive a 0x-hex private key, or the path to an encrypted json file (e.g. from geth,
-decrypted using the `USER_KEY_PASSWORD` environment variable or prompted password).
+  decrypted using the `USER_KEY_PASSWORD` environment variable or prompted password).
 - EVM also supports **named keystores** (Foundry Cast or Hardhat) via `--wallet foundry:<name>` /
-`--wallet hardhat:<name>`. The password is taken from
-`$FOUNDRY_KEYSTORE_PASSWORD` / `$HARDHAT_KEYSTORE_PASSWORD` (tool-specific), then `$USER_KEY_PASSWORD`, or prompted interactively.
-Foundry directory can be overridden with `$FOUNDRY_DIR` (default: `~/.foundry`).
-Hardhat support delegates to `node_modules/.bin/hardhat keystore get` — Hardhat must be installed in your project:
+  `--wallet hardhat:<name>`. The password is taken from
+  `$FOUNDRY_KEYSTORE_PASSWORD` / `$HARDHAT_KEYSTORE_PASSWORD` (tool-specific), then `$USER_KEY_PASSWORD`, or prompted interactively.
+  Foundry directory can be overridden with `$FOUNDRY_DIR` (default: `~/.foundry`).
+  Hardhat support delegates to `node_modules/.bin/hardhat keystore get` — Hardhat must be installed in your project:
+
   ```sh
   # Foundry
   cast wallet import sender --interactive
@@ -94,8 +95,9 @@ Hardhat support delegates to `node_modules/.bin/hardhat keystore get` — Hardha
   npx hardhat keystore set sender
   ccip-cli send ... --wallet hardhat:sender
   ```
+
 - Solana can receive base58 private key, or the path to an `id.json` file
-(default=`~/.config/solana/id.json`) containing a private key encoded as a json array of numbers.
+  (default=`~/.config/solana/id.json`) containing a private key encoded as a json array of numbers.
 - Aptos can receive 0x-hex private key string, or the path of a text file containing it.
 
 Additionally, `--wallet ledger` (or `--wallet "ledger:<derivationPath>"`) can be used to connect to
@@ -140,12 +142,13 @@ ccip-cli send --<TAB>  # lists all send options
 - `--format=log`: Basic console logging, may show some more details (e.g. token addresses)
 - `--format=json`: Machine-readable JSON
 - `--page=10000`: limits `eth_getLogs` (and others) pagination/scanning ranges (e.g. for RPCs which
-don't support large ranges)
+  don't support large ranges)
 - `--no-api`: Disable CCIP API integration (fully decentralized mode, RPC-only)
 - `--api=<url>`: Use a custom CCIP API URL instead of the default `api.ccip.chain.link`
 
 **Environment variable prefix:** All CLI options can be set via environment variables using the
 `CCIP_` prefix. For example:
+
 - `CCIP_API=false` → same as `--no-api`
 - `CCIP_API=https://custom-api.example.com` → same as `--api=https://custom-api.example.com`
 - `CCIP_VERBOSE=true` → same as `--verbose`
@@ -169,46 +172,46 @@ Sends a CCIP message from source to destination chain.
 
 **Required options:**
 
-| Option | Alias | Description |
-|--------|-------|-------------|
-| `--source` | `-s` | Source chain (chainId, selector, or name) |
-| `--dest` | `-d` | Destination chain (chainId, selector, or name) |
-| `--router` | `-r` | Router contract address on source |
+| Option     | Alias | Description                                    |
+| ---------- | ----- | ---------------------------------------------- |
+| `--source` | `-s`  | Source chain (chainId, selector, or name)      |
+| `--dest`   | `-d`  | Destination chain (chainId, selector, or name) |
+| `--router` | `-r`  | Router contract address on source              |
 
 **Message options:**
 
-| Option | Alias | Description |
-|--------|-------|-------------|
-| `--receiver` | `--to` | Receiver address; defaults to sender if same chain family |
-| `--data` | | Data payload (non-hex = UTF-8 encoded) |
-| `--gas-limit` | `-L` | Gas limit for receiver callback (default: ramp config) |
-| `--estimate-gas-limit` | | Auto-estimate with % margin; conflicts with `--gas-limit` |
-| `--allow-out-of-order-exec` | `--ooo` | Skip sender nonce enforcement (v1.5+ lanes) |
-| `--extra` | `-x` | Extra args as `key=value` (parsed as JSON with bigint support; repeated keys become arrays) |
+| Option                      | Alias   | Description                                                                                 |
+| --------------------------- | ------- | ------------------------------------------------------------------------------------------- |
+| `--receiver`                | `--to`  | Receiver address; defaults to sender if same chain family                                   |
+| `--data`                    |         | Data payload (non-hex = UTF-8 encoded)                                                      |
+| `--gas-limit`               | `-L`    | Gas limit for receiver callback (default: ramp config)                                      |
+| `--estimate-gas-limit`      |         | Auto-estimate with % margin; conflicts with `--gas-limit`                                   |
+| `--allow-out-of-order-exec` | `--ooo` | Skip sender nonce enforcement (v1.5+ lanes)                                                 |
+| `--extra`                   | `-x`    | Extra args as `key=value` (parsed as JSON with bigint support; repeated keys become arrays) |
 
 **Token options:**
 
-| Option | Alias | Description |
-|--------|-------|-------------|
-| `--fee-token` | | Pay fee in ERC20 (default: native token) |
-| `--transfer-tokens` | `-t` | Token transfers as `token=amount` (e.g., `0xToken=0.1`) |
-| `--approve-max` | | Approve max allowance instead of exact |
+| Option              | Alias | Description                                             |
+| ------------------- | ----- | ------------------------------------------------------- |
+| `--fee-token`       |       | Pay fee in ERC20 (default: native token)                |
+| `--transfer-tokens` | `-t`  | Token transfers as `token=amount` (e.g., `0xToken=0.1`) |
+| `--approve-max`     |       | Approve max allowance instead of exact                  |
 
 **Utility options:**
 
-| Option | Alias | Description |
-|--------|-------|-------------|
-| `--only-get-fee` | | Print fee and exit |
-| `--only-estimate` | | Print gas estimate and exit (requires `--estimate-gas-limit`) |
-| `--wait` | | Wait for execution on destination |
-| `--wallet` | `-w` | Wallet (ledger[:index] or private key) |
+| Option            | Alias | Description                                                   |
+| ----------------- | ----- | ------------------------------------------------------------- |
+| `--only-get-fee`  |       | Print fee and exit                                            |
+| `--only-estimate` |       | Print gas estimate and exit (requires `--estimate-gas-limit`) |
+| `--wait`          |       | Wait for execution on destination                             |
+| `--wallet`        | `-w`  | Wallet (ledger[:index] or private key)                        |
 
 **Solana/Sui options:**
 
-| Option | Description |
-|--------|-------------|
-| `--token-receiver` | Solana token receiver if different from program |
-| `--account` | Solana accounts (append `=rw` for writable) or Sui object IDs |
+| Option             | Description                                                   |
+| ------------------ | ------------------------------------------------------------- |
+| `--token-receiver` | Solana token receiver if different from program               |
+| `--account`        | Solana accounts (append `=rw` for writable) or Sui object IDs |
 
 ### `show` (default command)
 
@@ -268,7 +271,31 @@ to be cleared.
 
 `--receiver-object-ids` specifies receiver object IDs required for Sui execution (e.g., `--receiver-object-ids 0xabc... 0xdef...`).
 
+#### Canton Special Cases
+
+Canton requires a config file with connection parameters via `--canton-config <path>`. The Canton Ledger API URL is provided through the normal `--rpcs` mechanism.
+
+**Config file format (JSON):**
+
+```json
+{
+  "party": "sender::party",
+  "ccipParty": "ccip::party",
+  "jwt": "eyJ...",
+  "edsUrl": "https://eds.example.com",
+  "transferInstructionUrl": "https://transfer-instruction.example.com",
+  "externalEdsUrlsByOwner": {
+    "owner::party": "https://external-eds.example.com"
+  },
+  "indexerUrl": "https://indexer.example.com"
+}
+```
+
+**Required fields:** `party`, `ccipParty`, `jwt`, `edsUrl`, `transferInstructionUrl`  
+**Optional fields:** `externalEdsUrlsByOwner`, `indexerUrl`
+
 #### Example
+
 ```sh
 ccip-cli manual-exec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce5020c0b6b \
   --wallet ledger \
@@ -276,7 +303,6 @@ ccip-cli manual-exec 0xafd36a0b99d5457e403c918194cb69cd070d991dcbadc99576acfce50
   --force-buffer \
   --clear-leftover-accounts
 ```
-
 
 ### `parse`
 
@@ -301,17 +327,17 @@ List supported tokens in a given Router/OnRamp/TokenAdminRegistry, or show info 
 
 **Required options:**
 
-| Option | Alias | Description |
-|--------|-------|-------------|
-| `--network` | `-n` | Source network: chainId or name |
-| `--address` | `-a` | Router/OnRamp/TokenAdminRegistry/TokenPool contract address |
+| Option      | Alias | Description                                                 |
+| ----------- | ----- | ----------------------------------------------------------- |
+| `--network` | `-n`  | Source network: chainId or name                             |
+| `--address` | `-a`  | Router/OnRamp/TokenAdminRegistry/TokenPool contract address |
 
 **Optional:**
 
-| Option | Alias | Description |
-|--------|-------|-------------|
-| `--token` | `-t` | Token address to query (pre-selects from list if address is a registry) |
-| `--fee-tokens` | | List fee tokens instead of transferable tokens |
+| Option         | Alias | Description                                                             |
+| -------------- | ----- | ----------------------------------------------------------------------- |
+| `--token`      | `-t`  | Token address to query (pre-selects from list if address is a registry) |
+| `--fee-tokens` |       | List fee tokens instead of transferable tokens                          |
 
 #### Examples
 
@@ -342,16 +368,16 @@ Query native or token balance for an address.
 
 **Required options:**
 
-| Option | Alias | Description |
-|--------|-------|-------------|
-| `--network` | `-n` | Network: chainId or name (e.g., ethereum-mainnet, solana-devnet) |
-| `--holder` | `-H` | Wallet address to query balance for |
+| Option      | Alias | Description                                                      |
+| ----------- | ----- | ---------------------------------------------------------------- |
+| `--network` | `-n`  | Network: chainId or name (e.g., ethereum-mainnet, solana-devnet) |
+| `--holder`  | `-H`  | Wallet address to query balance for                              |
 
 **Optional:**
 
-| Option | Alias | Description |
-|--------|-------|-------------|
-| `--token` | `-t` | Token address (omit for native token balance) |
+| Option    | Alias | Description                                   |
+| --------- | ----- | --------------------------------------------- |
+| `--token` | `-t`  | Token address (omit for native token balance) |
 
 #### Examples
 
@@ -376,16 +402,16 @@ Query real-time lane latency between source and destination chains using the CCI
 
 **Arguments:**
 
-| Argument | Description |
-|----------|-------------|
-| `<source>` | Source network (chainId, selector, or name) |
-| `<dest>` | Destination network (chainId, selector, or name) |
+| Argument   | Description                                      |
+| ---------- | ------------------------------------------------ |
+| `<source>` | Source network (chainId, selector, or name)      |
+| `<dest>`   | Destination network (chainId, selector, or name) |
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--api` | Custom CCIP API URL (default: https://api.ccip.chain.link) |
+| Option                        | Description                                                  |
+| ----------------------------- | ------------------------------------------------------------ |
+| `--api`                       | Custom CCIP API URL (default: https://api.ccip.chain.link)   |
 | `--block-confirmations`, `-c` | Number of block confirmations to use for latency calculation |
 
 > **Note:** This command requires CCIP API access and respects the `--no-api` flag.
@@ -398,13 +424,14 @@ ccip-cli lane-latency ethereum-mainnet arbitrum-mainnet
 
 ## Supported Chains
 
-| Chain Family | Status | Notes |
-|--------------|--------|-------|
-| EVM | Supported | Full functionality |
-| Solana | Supported | Full functionality |
-| Aptos | Supported | Full functionality |
-| Sui | Partial | Manual execution only |
-| TON | Partial | No token pool/registry queries |
+| Chain Family | Status    | Notes                                     |
+| ------------ | --------- | ----------------------------------------- |
+| EVM          | Supported | Full functionality                        |
+| Solana       | Supported | Full functionality                        |
+| Aptos        | Supported | Full functionality                        |
+| Sui          | Partial   | Manual execution only                     |
+| TON          | Partial   | No token pool/registry queries            |
+| Canton       | Partial   | Requires config file; no fee/balance APIs |
 
 ## Related
 
