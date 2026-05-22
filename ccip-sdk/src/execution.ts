@@ -7,7 +7,6 @@ import {
   CCIPOffRampNotFoundError,
 } from './errors/index.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
-import { ChainFamily } from './index.ts'
 import type { CCIPMessage, CCIPVersion, Lane, WithLogger } from './types.ts'
 import { decodeOnRampAddress } from './utils.ts'
 
