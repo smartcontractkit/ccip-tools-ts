@@ -63,18 +63,15 @@ export function parseWithFragment(
       parsed?: Result,
     ]
   | undefined {
-  if (!dataLength(data ?? '0x') && isBytesLike(selector)) {
-    const len = dataLength(selector)
-    if (len >= 4 && len !== 32) {
-      data = dataSlice(selector, 4)
-      selector = dataSlice(selector, 0, 4)
-    }
-  }
   let res: readonly [ErrorFragment | FunctionFragment | EventFragment, string] | undefined
   for (const [name, iface] of Object.entries(interfaces)) {
     try {
-      const error = iface.getError(selector)
+      const error = iface.getError(isHexString(selector) ? dataSlice(selector, 0, 4) : selector)
       if (error) {
+        if (!data && isHexString(selector) && dataLength(selector) > 4) {
+          ;[selector, data] = [dataSlice(selector, 0, 4), dataSlice(selector, 4)]
+        }
+
         res = [error, name] as const
         break
       }
@@ -82,8 +79,11 @@ export function parseWithFragment(
       // test all abis
     }
     try {
-      const func = iface.getFunction(selector)
+      const func = iface.getFunction(isHexString(selector) ? dataSlice(selector, 0, 4) : selector)
       if (func) {
+        if (!data && isHexString(selector) && dataLength(selector) > 4) {
+          ;[selector, data] = [dataSlice(selector, 0, 4), dataSlice(selector, 4)]
+        }
         res = [func, name] as const
         break
       }
@@ -91,8 +91,11 @@ export function parseWithFragment(
       // test all abis
     }
     try {
-      const event = iface.getEvent(selector)
+      const event = iface.getEvent(isHexString(selector) ? dataSlice(selector, 0, 32) : selector)
       if (event) {
+        if (!data && isHexString(selector) && dataLength(selector) > 32) {
+          ;[selector, data] = [dataSlice(selector, 0, 32), dataSlice(selector, 32)]
+        }
         res = [event, name] as const
         break
       }
