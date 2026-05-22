@@ -193,7 +193,12 @@ describe('fetchChainsFromRpcs', () => {
     try {
       const [, tx$] = fetchChainsFromRpcs(
         ctx,
-        { rpcs: ['http://first.example', 'http://second.example'], rpcsFile: '', api: false, cantonConfig: undefined },
+        {
+          rpcs: ['http://first.example', 'http://second.example'],
+          rpcsFile: '',
+          api: false,
+          cantonConfig: undefined,
+        },
         txHash,
       )
 
@@ -340,7 +345,12 @@ describe('fetchChainsFromRpcs', () => {
     try {
       const [, txResult] = fetchChainsFromRpcs(
         ctx,
-        { rpcs: ['http://rpc1.example', 'http://rpc2.example'], rpcsFile: '', api: false, cantonConfig: undefined },
+        {
+          rpcs: ['http://rpc1.example', 'http://rpc2.example'],
+          rpcsFile: '',
+          api: false,
+          cantonConfig: undefined,
+        },
         TX_HASH,
       )
       await assert.rejects(txResult, CCIPTransactionNotFoundError)
@@ -366,7 +376,12 @@ describe('fetchChainsFromRpcs', () => {
     try {
       const [, txResult] = fetchChainsFromRpcs(
         ctx,
-        { rpcs: ['http://a.example', 'http://b.example'], rpcsFile: '', api: false, cantonConfig: undefined },
+        {
+          rpcs: ['http://a.example', 'http://b.example'],
+          rpcsFile: '',
+          api: false,
+          cantonConfig: undefined,
+        },
         TX_HASH,
       )
       const [chain, tx] = await txResult
@@ -402,7 +417,12 @@ describe('fetchChainsFromRpcs', () => {
     try {
       const [, txResult] = fetchChainsFromRpcs(
         ctx,
-        { rpcs: ['http://a.example', 'http://b.example'], rpcsFile: '', api: false, cantonConfig: undefined },
+        {
+          rpcs: ['http://a.example', 'http://b.example'],
+          rpcsFile: '',
+          api: false,
+          cantonConfig: undefined,
+        },
         TX_HASH,
       )
       const [chain, tx] = await txResult
