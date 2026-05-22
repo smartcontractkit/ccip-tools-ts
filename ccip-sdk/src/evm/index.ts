@@ -100,7 +100,8 @@ import type Token_ABI from './abi/BurnMintERC677Token.ts'
 import type CCTPVerifier_2_0_ABI from './abi/CCTPVerifier_2_0.ts'
 import CommitStore_1_2_ABI from './abi/CommitStore_1_2.ts'
 import CommitStore_1_5_ABI from './abi/CommitStore_1_5.ts'
-import type FeeQuoter_ABI from './abi/FeeQuoter_1_6.ts'
+import type FeeQuoter_1_6_ABI from './abi/FeeQuoter_1_6.ts'
+import type FeeQuoter_2_0_ABI from './abi/FeeQuoter_2_0.ts'
 import type TokenPool_1_5_ABI from './abi/LockReleaseTokenPool_1_5.ts'
 import type TokenPool_ABI from './abi/LockReleaseTokenPool_1_6_1.ts'
 import EVM2EVMOffRamp_1_2_ABI from './abi/OffRamp_1_2.ts'
@@ -136,6 +137,7 @@ import type { CCIPMessage_V1_6_EVM, CCIPMessage_V2_0, CleanAddressable } from '.
 import { encodeEVMOffchainTokenData } from './offchain.ts'
 import { type UnsignedEVMTx, resultToObject } from './types.ts'
 import { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from '../networks.ts'
+import type PriceRegistry_1_2 from './abi/PriceRegistry_1_2.ts'
 export type { UnsignedEVMTx }
 
 /** Raw on-chain TokenBucket struct returned by TokenPool rate limiter queries. */
@@ -322,6 +324,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       expires: 60e3,
     })
     this.getOffRampConfig = memoize(this.getOffRampConfig.bind(this), {
+      async: true,
+      maxArgs: 2,
+      maxSize: 10,
+      expires: 60e3,
+    })
+    this._getFeeQuoterDest = memoize(this._getFeeQuoterDest.bind(this), {
       async: true,
       maxArgs: 2,
       maxSize: 10,
@@ -699,6 +707,54 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
+  /**
+   * Fetch FeeQuoter dest state for a given contract and remote chainSelector
+   */
+  async _getFeeQuoterDest(feeQuoter: string, destChainSelector: bigint) {
+    const [type, version, typeAndVersion] = await this.typeAndVersion(feeQuoter)
+    if (type !== 'FeeQuoter' && type !== 'PriceRegistry')
+      throw new CCIPContractTypeInvalidError(feeQuoter, type, ['FeeQuoter', 'PriceRegistry'], {
+        context: { type, version, typeAndVersion },
+      })
+    let contract
+    if (type === 'PriceRegistry') {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+      contract = new Contract(
+        feeQuoter,
+        interfaces.PriceRegistry_v1_2,
+        this.provider,
+      ) as unknown as TypedContract<typeof PriceRegistry_1_2>
+      const [destChainGasPrice, stalenessThreshold] = await Promise.all([
+        contract.getDestinationChainGasPrice(destChainSelector),
+        contract.getStalenessThreshold(),
+      ])
+      return resultToObject({
+        destChainGasPrice,
+        stalenessThreshold,
+        typeAndVersion,
+      })
+    }
+    if (version < CCIPVersion.V2_0) {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+      contract = new Contract(
+        feeQuoter,
+        interfaces.FeeQuoter_v1_6,
+        this.provider,
+      ) as unknown as TypedContract<typeof FeeQuoter_1_6_ABI>
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+      contract = new Contract(
+        feeQuoter,
+        interfaces.FeeQuoter_v2_0,
+        this.provider,
+      ) as unknown as TypedContract<typeof FeeQuoter_2_0_ABI>
+    }
+    return {
+      ...(await resultToObject(contract.getDestChainConfig(destChainSelector))),
+      typeAndVersion,
+    }
+  }
+
   /** {@inheritDoc Chain.getOnRampConfig} */
   async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
     const [, version, typeAndVersion] = await this.typeAndVersion(onRamp)
@@ -729,6 +785,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           feeQuoter: dynamicConfig.priceRegistry,
           ...staticConfig,
           ...dynamicConfig,
+          priceRegistryConfig: await this._getFeeQuoterDest(
+            dynamicConfig.priceRegistry,
+            destChainSelector,
+          ),
           typeAndVersion,
         }
       }
@@ -745,18 +805,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ])
         const [_, allowlistEnabled, router] = destChainConfigRaw
         const destChainConfig = { allowlistEnabled, router }
-        const feeQuoter = new Contract(
-          dynamicConfig.feeQuoter,
-          interfaces.FeeQuoter,
-          this.provider,
-        ) as unknown as TypedContract<typeof FeeQuoter_ABI>
-        const feeQuoterState = await resultToObject(feeQuoter.getDestChainConfig(destChainSelector))
         return {
           ...staticConfig,
           destChainSelector,
           ...dynamicConfig,
           ...resultToObject(destChainConfig),
-          feeQuoterState,
+          feeQuoterConfig: await this._getFeeQuoterDest(dynamicConfig.feeQuoter, destChainSelector),
           typeAndVersion,
         }
       }
@@ -776,6 +830,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...dynamicConfig,
           destChainSelector,
           ...destChainConfig,
+          feeQuoterConfig: await this._getFeeQuoterDest(dynamicConfig.feeQuoter, destChainSelector),
           typeAndVersion,
         }
       }
@@ -905,6 +960,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...csDynamicConfig,
           ...staticConfig,
           ...dynamicConfig,
+          priceRegistryConfig: await this._getFeeQuoterDest(
+            dynamicConfig.priceRegistry,
+            sourceChainSelector,
+          ),
           onRamps: [staticConfig.onRamp],
           typeAndVersion,
         }
@@ -932,6 +991,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...dynamicConfig,
           sourceChainSelector,
           ...sourceChainConfig,
+          feeQuoterConfig: await this._getFeeQuoterDest(
+            dynamicConfig.feeQuoter,
+            sourceChainSelector,
+          ),
           onRamps,
           typeAndVersion,
         }
@@ -1286,9 +1349,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     // getTokenPrice(address) → { value: uint224, timestamp: uint32 }
     const contract = new Contract(
       priceContractAddress,
-      interfaces.FeeQuoter,
+      interfaces.FeeQuoter_v1_6,
       this.provider,
-    ) as unknown as TypedContract<typeof FeeQuoter_ABI>
+    ) as unknown as TypedContract<typeof FeeQuoter_1_6_ABI>
 
     // If timestamp provided, resolve to block number for historical query
     let blockTag: number | undefined
@@ -2069,9 +2132,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const feeQuoter = await this.getFeeQuoterFor(address)
     const contract = new Contract(
       feeQuoter,
-      interfaces.FeeQuoter,
+      interfaces.FeeQuoter_v1_6,
       this.provider,
-    ) as unknown as TypedContract<typeof FeeQuoter_ABI>
+    ) as unknown as TypedContract<typeof FeeQuoter_1_6_ABI>
     const tokens = await contract.getFeeTokens()
 
     return Object.fromEntries(

@@ -410,7 +410,11 @@ export function convertKeysToCamelCase(
   }
 
   if (obj == null) return obj
-  if (typeof obj !== 'object') return mapValues ? mapValues(obj, key) : obj
+  if (
+    typeof obj !== 'object' ||
+    !(Object.getPrototypeOf(obj) == null || Object.getPrototypeOf(obj) === Object.prototype)
+  )
+    return mapValues ? mapValues(obj, key) : obj
 
   const record = obj as Record<string, unknown>
   const converted: Record<string, unknown> = {}

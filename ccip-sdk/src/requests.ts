@@ -1,3 +1,4 @@
+import type BN from 'bn.js'
 import { type BytesLike, hexlify, isBytesLike, toBigInt } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
@@ -33,6 +34,39 @@ import {
   leToBigInt,
   parseJson,
 } from './utils.ts'
+
+/** Convert recursively a message or config record into normalized values */
+export function normalizeDeep<T extends Record<string, unknown>>(
+  data: T,
+  opts: { sourceFamily?: ChainFamily; destFamily?: ChainFamily } = {},
+): T {
+  return convertKeysToCamelCase(data, (v, k) =>
+    k === 'chainFamilySelector'
+      ? hexlify(getDataBytes(v as number[]))
+      : k?.match(/(selector|amount|nonce|number|limit|bitmap|juels|value)$/i)
+        ? toBigInt(
+            Array.isArray(v) ? getDataBytes(v) : (v as string | number | bigint | BN).toString(),
+          )
+        : k?.match(/(^dest.*address)|(receiver|offramp|accounts)/i)
+          ? v == null && k === 'destAddress'
+            ? v
+            : decodeAddress(
+                (typeof v === 'bigint' ? v.toString() : v) as BytesLike,
+                opts.destFamily,
+              )
+          : k?.match(
+                /((source.*address)|sender|issuer|origin|onramp|(feetoken$)|(token.*address$))/i,
+              )
+            ? decodeAddress(
+                (typeof v === 'bigint' ? v.toString() : v) as BytesLike,
+                opts.sourceFamily,
+              )
+            : v instanceof Uint8Array ||
+                (Array.isArray(v) && v.length >= 4 && v.every((e) => typeof e === 'number'))
+              ? hexlify(getDataBytes(v))
+              : v,
+  ) as T
+}
 
 function decodeJsonMessage(data: Record<string, unknown> | undefined) {
   if (!data || typeof data != 'object') throw new CCIPMessageInvalidError(data)
@@ -86,20 +120,7 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
   if (destChainSelector) data_.destChainSelector ??= destChainSelector
   const destFamily = destChainSelector ? networkInfo(destChainSelector).family : ChainFamily.EVM
   // transform type, normalize keys case, source/dest addresses, and ensure known bigints
-  data_ = convertKeysToCamelCase(data_, (v, k) =>
-    k?.match(/(selector|amount|nonce|number|limit|bitmap|juels)$/i)
-      ? BigInt(v as string | number | bigint)
-      : k?.match(/(^dest.*address)|(receiver|offramp|accounts)/i)
-        ? v == null && k === 'destAddress'
-          ? v
-          : decodeAddress((typeof v === 'bigint' ? v.toString() : v) as BytesLike, destFamily)
-        : k?.match(/((source.*address)|sender|issuer|origin|onramp|(feetoken$)|(token.*address$))/i)
-          ? decodeAddress((typeof v === 'bigint' ? v.toString() : v) as BytesLike, sourceFamily)
-          : v instanceof Uint8Array ||
-              (Array.isArray(v) && v.length >= 4 && v.every((e) => typeof e === 'number'))
-            ? hexlify(getDataBytes(v))
-            : v,
-  ) as typeof data_
+  data_ = normalizeDeep(data_, { sourceFamily, destFamily })
 
   if (data_.tokenTransfer) {
     data_.tokenAmounts = data_.tokenTransfer

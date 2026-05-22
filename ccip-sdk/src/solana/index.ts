@@ -129,7 +129,7 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-import { buildMessageForDest } from '../requests.ts'
+import { buildMessageForDest, normalizeDeep } from '../requests.ts'
 import { patchBorsh } from './patchBorsh.ts'
 import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 export type { UnsignedSolanaTx }
@@ -650,7 +650,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const feeQuoter = new Program(FEE_QUOTER_IDL, refAddresses.feeQuoter, {
       connection: this.connection,
     })
-    const feeQuoterState = await feeQuoter.account.destChain.fetch(
+    const destChainState = await feeQuoter.account.destChain.fetch(
       feeQuoterDestChainStateAccountAddress,
     )
 
@@ -658,7 +658,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       ...refAddresses,
       ...sourceConfig,
       ...state,
-      feeQuoterState,
+      feeQuoterState: normalizeDeep(destChainState),
       onRamps: [onRamp],
       typeAndVersion,
     })
