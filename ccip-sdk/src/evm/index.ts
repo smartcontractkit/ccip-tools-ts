@@ -745,11 +745,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ])
         const [_, allowlistEnabled, router] = destChainConfigRaw
         const destChainConfig = { allowlistEnabled, router }
+        const feeQuoter = new Contract(
+          dynamicConfig.feeQuoter,
+          interfaces.FeeQuoter,
+          this.provider,
+        ) as unknown as TypedContract<typeof FeeQuoter_ABI>
+        const feeQuoterState = await resultToObject(feeQuoter.getDestChainConfig(destChainSelector))
         return {
           ...staticConfig,
           destChainSelector,
           ...dynamicConfig,
           ...resultToObject(destChainConfig),
+          feeQuoterState,
           typeAndVersion,
         }
       }

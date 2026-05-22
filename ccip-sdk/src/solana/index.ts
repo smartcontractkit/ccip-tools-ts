@@ -636,15 +636,29 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     )
     const {
       config: { onRamp: onRampField, ...sourceConfig },
+      state,
     } = await program.account.sourceChain.fetch(statePda)
     const onRamp = decodeAddress(
       getAddressBytes(onRampField.bytes).subarray(0, onRampField.len),
       networkInfo(sourceChainSelector).family,
     )
 
+    const [feeQuoterDestChainStateAccountAddress] = PublicKey.findProgramAddressSync(
+      [Buffer.from('dest_chain'), toLeArray(sourceChainSelector, 8)],
+      refAddresses.feeQuoter,
+    )
+    const feeQuoter = new Program(FEE_QUOTER_IDL, refAddresses.feeQuoter, {
+      connection: this.connection,
+    })
+    const feeQuoterState = await feeQuoter.account.destChain.fetch(
+      feeQuoterDestChainStateAccountAddress,
+    )
+
     return normalizePda({
       ...refAddresses,
       ...sourceConfig,
+      ...state,
+      feeQuoterState,
       onRamps: [onRamp],
       typeAndVersion,
     })
