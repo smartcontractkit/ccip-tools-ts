@@ -170,7 +170,7 @@ export async function getLbtcAttestation(
  * @returns Promise resolving to an OffchainTokenData for each tokenAmount
  */
 export async function getOffchainTokenData(
-  request: PickDeep<CCIPRequest, 'tx.hash' | `message`>,
+  request: PickDeep<CCIPRequest, 'log.transactionHash' | `message`>,
   { logger = console }: WithLogger = {},
 ): Promise<OffchainTokenData[]> {
   const { networkType } = networkInfo(request.message.sourceChainSelector)
@@ -216,7 +216,7 @@ export async function getOffchainTokenData(
       if (usdcOpts) {
         try {
           const usdcAttestation = await getUsdcAttestation(
-            { ...usdcOpts, txHash: request.tx.hash },
+            { ...usdcOpts, txHash: request.log.transactionHash },
             networkType,
           )
           return { _tag: 'usdc', extraData, ...usdcAttestation }

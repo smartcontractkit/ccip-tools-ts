@@ -1305,7 +1305,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   async getOffchainTokenData(
-    request: PickDeep<CCIPRequest, 'tx.hash' | `message`>,
+    request: PickDeep<CCIPRequest, 'log.transactionHash' | `message`>,
   ): Promise<OffchainTokenData[]> {
     return getOffchainTokenData(request, this)
   }
@@ -1342,6 +1342,18 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
             ? opts.input.message.messageId
             : keccak256(opts.input.encodedMessage)
       const { offRamp, ...input } = await this.apiClient.getExecutionInput(messageId)
+      if (
+        'offchainTokenData' in input &&
+        input.message.tokenAmounts.length &&
+        !input.offchainTokenData[0]
+      ) {
+        // sometimes, attestation data may not be available on API, so try again to getOffchainTokenData from attestation providers;
+        const req = await this.apiClient.getMessageById(messageId)
+        input.offchainTokenData = await this.getOffchainTokenData({
+          log: req.log,
+          message: input.message,
+        })
+      }
       opts_ = { ...opts, offRamp, input }
     }
 
