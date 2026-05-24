@@ -755,6 +755,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ) as unknown as TypedContract<typeof FeeQuoter_2_0_ABI>
     }
     return {
+      ...(await resultToObject(contract.getStaticConfig())),
       ...(await resultToObject(contract.getDestChainConfig(destChainSelector))),
       typeAndVersion,
     }
@@ -922,10 +923,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...csDynamicConfig,
           ...staticConfig,
           ...dynamicConfig,
-          priceRegistryConfig: await this._getFeeQuoterDest(
-            dynamicConfig.priceRegistry,
-            sourceChainSelector,
-          ),
           onRamps: [staticConfig.onRamp],
           typeAndVersion,
         }
@@ -937,26 +934,22 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           offRampABI,
           this.provider,
         ) as unknown as TypedContract<typeof OffRamp_1_6_ABI>
-        const [staticConfig, dynamicConfig, sourceChainConfig] = await Promise.all([
+        const [staticConfig, dynamicConfig, { onRamp, ...sourceChainConfig }] = await Promise.all([
           resultToObject(contract.getStaticConfig()),
           resultToObject(contract.getDynamicConfig()),
           resultToObject(contract.getSourceChainConfig(sourceChainSelector)),
         ])
         const onRamps = []
         try {
-          onRamps.push(decodeOnRampAddress(sourceChainConfig.onRamp, sourceFamily))
+          onRamps.push(decodeOnRampAddress(onRamp, sourceFamily))
         } catch {
           // ignore
         }
         return {
+          sourceChainSelector,
           ...staticConfig,
           ...dynamicConfig,
-          sourceChainSelector,
           ...sourceChainConfig,
-          feeQuoterConfig: await this._getFeeQuoterDest(
-            dynamicConfig.feeQuoter,
-            sourceChainSelector,
-          ),
           onRamps,
           typeAndVersion,
         }

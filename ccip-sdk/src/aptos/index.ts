@@ -77,7 +77,7 @@ import {
 } from '../utils.ts'
 import { getTokenInfo } from './token.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import { buildMessageForDest, decodeMessage } from '../requests.ts'
+import { buildMessageForDest, decodeMessage, normalizeDeep } from '../requests.ts'
 export type { UnsignedAptosTx }
 
 /**
@@ -280,8 +280,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   /** {@inheritDoc Chain.getOnRampConfig} */
   async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
     const pkg = onRamp.split('::')[0]!
-    const onRampModule = `${pkg}::onramp`
     const feeQuoter = `${pkg}::fee_quoter`
+    const onRampModule = `${pkg}::onramp`
     const [, , typeAndVersion] = await this.typeAndVersion(onRampModule)
     const [sequenceNumber, allowlistEnabled, router, routerStateAddress] = await this.provider.view<
       [
@@ -297,15 +297,28 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         functionArguments: [destChainSelector],
       },
     })
-    return {
+    const [feeQuoterConfig] = await this.provider.view<[Record<string, unknown>]>({
+      payload: {
+        function: `${feeQuoter}::get_static_config` as `${string}::${string}::get_static_config`,
+      },
+    })
+    const [feeQuoterDestConfig] = await this.provider.view<[Record<string, unknown>]>({
+      payload: {
+        function:
+          `${feeQuoter}::get_dest_chain_config` as `${string}::${string}::get_dest_chain_config`,
+        functionArguments: [destChainSelector],
+      },
+    })
+    return normalizeDeep({
       feeQuoter,
       destChainSelector,
       sequenceNumber: +sequenceNumber,
       allowlistEnabled,
       router: router.includes('::') ? router : `${router}::router`,
       routerStateAddress,
+      feeQuoterConfig: { ...feeQuoterConfig, ...feeQuoterDestConfig },
       typeAndVersion,
-    }
+    })
   }
 
   /** {@inheritDoc Chain.getOffRampConfig} */
@@ -324,13 +337,19 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       },
     })
     const onRamp = decodeAddress(sourceChainConfig.on_ramp, networkInfo(sourceChainSelector).family)
-    return {
-      sourceChainSelector,
-      ...sourceChainConfig,
-      onRamps: [onRamp],
-      router,
-      typeAndVersion,
-    }
+    return normalizeDeep(
+      {
+        sourceChainSelector,
+        ...sourceChainConfig,
+        onRamps: [onRamp],
+        router,
+        typeAndVersion,
+      },
+      {
+        sourceFamily: networkInfo(sourceChainSelector).family,
+        destFamily: (this.constructor as typeof AptosChain).family,
+      },
+    )
   }
 
   /** {@inheritDoc Chain.getNativeTokenForRouter} */

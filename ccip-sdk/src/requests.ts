@@ -1,5 +1,6 @@
+import type { PublicKey } from '@solana/web3.js'
 import type BN from 'bn.js'
-import { type BytesLike, hexlify, isBytesLike, toBigInt } from 'ethers'
+import { type Addressable, type BytesLike, hexlify, isBytesLike, toBigInt } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import type { Chain, ChainStatic, LogFilter } from './chain.ts'
@@ -35,37 +36,51 @@ import {
   parseJson,
 } from './utils.ts'
 
+type Normalized<T> = T extends PublicKey | Addressable
+  ? string
+  : T extends BN
+    ? bigint
+    : T extends Array<infer U>
+      ? Array<Normalized<U>>
+      : T extends ReadonlyArray<infer U>
+        ? ReadonlyArray<Normalized<U>>
+        : T extends Record<string, unknown>
+          ? { [K in keyof T]: Normalized<T[K]> }
+          : T extends Readonly<Record<string, unknown>>
+            ? { readonly [K in keyof T]: Normalized<T[K]> }
+            : T
+
 /** Convert recursively a message or config record into normalized values */
 export function normalizeDeep<T extends Record<string, unknown>>(
   data: T,
   opts: { sourceFamily?: ChainFamily; destFamily?: ChainFamily } = {},
-): T {
-  return convertKeysToCamelCase(data, (v, k) =>
-    k === 'chainFamilySelector'
-      ? hexlify(getDataBytes(v as number[]))
-      : k?.match(/(selector|amount|nonce|number|limit|bitmap|juels|value)$/i)
-        ? toBigInt(
-            Array.isArray(v) ? getDataBytes(v) : (v as string | number | bigint | BN).toString(),
-          )
-        : k?.match(/(^dest.*address)|(receiver|offramp|accounts)/i)
-          ? v == null && k === 'destAddress'
-            ? v
-            : decodeAddress(
-                (typeof v === 'bigint' ? v.toString() : v) as BytesLike,
-                opts.destFamily,
-              )
-          : k?.match(
-                /((source.*address)|sender|issuer|origin|onramp|(feetoken$)|(token.*address$))/i,
-              )
-            ? decodeAddress(
-                (typeof v === 'bigint' ? v.toString() : v) as BytesLike,
-                opts.sourceFamily,
-              )
-            : v instanceof Uint8Array ||
-                (Array.isArray(v) && v.length >= 4 && v.every((e) => typeof e === 'number'))
-              ? hexlify(getDataBytes(v))
-              : v,
-  ) as T
+): Normalized<T> {
+  return convertKeysToCamelCase(data, (v, k) => {
+    if (k === 'chainFamilySelector') return hexlify(getDataBytes(v as number[]))
+    if ((v as { _bn?: unknown } | undefined)?._bn) return (v as PublicKey).toString()
+    if (
+      k?.match(/(selector|amount|nonce|number|limit|bitmap|juels|value)$/i) ||
+      (v as { words?: unknown } | undefined)?.words
+    )
+      return toBigInt(
+        Array.isArray(v) ? getDataBytes(v) : (v as string | number | bigint | BN).toString(),
+      )
+    if (k?.match(/(^dest.*address)|(receiver|offramp|accounts)/i))
+      return (
+        v && decodeAddress((typeof v === 'bigint' ? v.toString() : v) as BytesLike, opts.destFamily)
+      )
+    if (k?.match(/((source.*address)|sender|issuer|origin|onramp|(feetoken$)|(token.*address$))/i))
+      return decodeAddress(
+        (typeof v === 'bigint' ? v.toString() : v) as BytesLike,
+        opts.sourceFamily,
+      )
+    if (
+      v instanceof Uint8Array ||
+      (Array.isArray(v) && v.length >= 4 && v.every((e) => typeof e === 'number'))
+    )
+      return hexlify(getDataBytes(v))
+    return v
+  }) as Normalized<T>
 }
 
 function decodeJsonMessage(data: Record<string, unknown> | undefined) {

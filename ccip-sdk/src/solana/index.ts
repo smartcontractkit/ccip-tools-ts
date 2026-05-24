@@ -13,7 +13,6 @@ import {
   SYSVAR_CLOCK_PUBKEY,
   SystemProgram,
 } from '@solana/web3.js'
-import BN from 'bn.js'
 import bs58 from 'bs58'
 import {
   type BytesLike,
@@ -143,6 +142,7 @@ const TOKEN_POOL_IDL = {
   events: BASE_TOKEN_POOL.events,
   errors: [...BASE_TOKEN_POOL.errors, ...BURN_MINT_TOKEN_POOL.errors],
 }
+
 const tokenPoolCoder = new BorshCoder(TOKEN_POOL_IDL)
 const CCTP_TOKEN_POOL_IDL = {
   ...CCIP_CCTP_TOKEN_POOL,
@@ -174,40 +174,6 @@ export type SolanaTransaction = MergeArrayElements<
     logs: readonly SolanaLog[]
   }
 >
-
-type NormalizedPda<T> = T extends PublicKey
-  ? string
-  : T extends BN
-    ? bigint
-    : T extends Array<infer U>
-      ? Array<NormalizedPda<U>>
-      : T extends Record<string, unknown>
-        ? { [K in keyof T]: NormalizedPda<T[K]> }
-        : T
-
-function normalizePda<O extends Record<string, unknown>>(obj: O): NormalizedPda<O> {
-  const result: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(obj)) {
-    if (v instanceof PublicKey) {
-      result[k] = v.toString()
-    } else if (BN.isBN(v)) {
-      result[k] = BigInt(v.toString())
-    } else if (Array.isArray(v)) {
-      result[k] = v.map((item) =>
-        item instanceof PublicKey
-          ? item.toString()
-          : item !== null && typeof item === 'object'
-            ? normalizePda(item as Record<string, unknown>)
-            : (item as O),
-      )
-    } else if (v !== null && typeof v === 'object') {
-      result[k] = normalizePda(v as Record<string, unknown>)
-    } else {
-      result[k] = v
-    }
-  }
-  return result as NormalizedPda<O>
-}
 
 /**
  * Solana chain implementation supporting Solana networks.
@@ -608,12 +574,34 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     )
     const destChainState = await program.account.destChain.fetch(destChainStatePda)
 
-    return normalizePda({
-      ...routerConfig,
-      ...destChainState.config,
-      router: onRamp,
-      typeAndVersion,
+    const feeQuoter = new Program(FEE_QUOTER_IDL, routerConfig.feeQuoter, {
+      connection: this.connection,
     })
+    const [feeQuoterConfigAddress] = PublicKey.findProgramAddressSync(
+      [Buffer.from('config')],
+      routerConfig.feeQuoter,
+    )
+    const [feeQuoterDestAddress] = PublicKey.findProgramAddressSync(
+      [Buffer.from('dest_chain'), toLeArray(destChainSelector, 8)],
+      routerConfig.feeQuoter,
+    )
+    const [feeQuoterConfig, feeQuoterDestConfig] = await Promise.all([
+      feeQuoter.account.config.fetch(feeQuoterConfigAddress),
+      feeQuoter.account.destChain.fetch(feeQuoterDestAddress),
+    ])
+    return normalizeDeep(
+      {
+        ...routerConfig,
+        ...destChainState.config,
+        feeQuoterConfig: { ...feeQuoterConfig, ...feeQuoterDestConfig },
+        router: onRamp,
+        typeAndVersion,
+      },
+      {
+        sourceFamily: (this.constructor as typeof SolanaChain).family,
+        destFamily: networkInfo(destChainSelector).family,
+      },
+    )
   }
 
   /**
@@ -645,25 +633,19 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       networkInfo(sourceChainSelector).family,
     )
 
-    const [feeQuoterDestChainStateAccountAddress] = PublicKey.findProgramAddressSync(
-      [Buffer.from('dest_chain'), toLeArray(sourceChainSelector, 8)],
-      refAddresses.feeQuoter,
+    return normalizeDeep(
+      {
+        ...refAddresses,
+        ...sourceConfig,
+        ...state,
+        onRamps: [onRamp],
+        typeAndVersion,
+      },
+      {
+        sourceFamily: networkInfo(sourceChainSelector).family,
+        destFamily: (this.constructor as typeof SolanaChain).family,
+      },
     )
-    const feeQuoter = new Program(FEE_QUOTER_IDL, refAddresses.feeQuoter, {
-      connection: this.connection,
-    })
-    const destChainState = await feeQuoter.account.destChain.fetch(
-      feeQuoterDestChainStateAccountAddress,
-    )
-
-    return normalizePda({
-      ...refAddresses,
-      ...sourceConfig,
-      ...state,
-      feeQuoterState: normalizeDeep(destChainState),
-      onRamps: [onRamp],
-      typeAndVersion,
-    })
   }
 
   /** {@inheritDoc Chain.getNativeTokenForRouter} */
@@ -689,6 +671,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       programs: true,
       address: feeQuoterDestChainStateAccountAddress.toBase58(),
       startBlock: 0, // use getLogs special-case to do a single getSignaturesForAddress pass
+      endBlock: 'finalized',
       topics: ['ExecutionStateChanged', 'CommitReportAccepted', 'Transmitted'],
     })) {
       return [log.address] // assume single offramp per router/deployment on Solana
@@ -1111,7 +1094,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @param bytes - Bytes to convert.
    * @returns Base58-encoded Solana address.
    */
-  static getAddress(bytes: BytesLike): string {
+  static getAddress(bytes: BytesLike | PublicKey): string {
+    if (bytes instanceof PublicKey) return bytes.toBase58()
     try {
       if (typeof bytes === 'string' && bs58.decode(bytes).length === 32) return bytes
     } catch (_) {

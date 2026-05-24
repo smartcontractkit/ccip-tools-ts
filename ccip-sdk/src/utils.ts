@@ -23,7 +23,7 @@ import {
   CCIPHttpError,
   CCIPTimeoutError,
   CCIPTypeVersionInvalidError,
-  HttpStatus,
+  isTransientHttpStatus,
 } from './errors/index.ts'
 import { getRetryDelay, shouldRetry } from './errors/utils.ts'
 import { ChainFamily } from './networks.ts'
@@ -693,10 +693,9 @@ export function createRateLimitedFetch(
     return input.hostname
   }
 
-  const isRateLimitError = (error: unknown): boolean => {
-    if (error instanceof Error) {
-      return !!error.message.match(/\b(429\b|rate.?limit)/i)
-    }
+  const isRetryableError = (error: unknown): boolean => {
+    if (error instanceof CCIPHttpError) return error.isTransient === true
+    if (error instanceof Error) return !!error.message.match(/\b(429\b|rate.?limit)/i)
     return false
   }
 
@@ -739,8 +738,8 @@ export function createRateLimitedFetch(
           return response
         }
 
-        // For rate limit responses, throw an error to trigger retry
-        if (response.status === HttpStatus.TOO_MANY_REQUESTS) {
+        // For transient responses (429, 5xx), throw to trigger retry
+        if (isTransientHttpStatus(response.status)) {
           throw new CCIPHttpError(response.status, response.statusText)
         }
 
@@ -751,8 +750,8 @@ export function createRateLimitedFetch(
         logger.debug('fetch errored', attempt, error, input, init?.body)
         lastError = error instanceof Error ? error : CCIPError.from(error, 'HTTP_ERROR')
 
-        // Only retry on rate limit errors
-        if (!isRateLimitError(lastError)) {
+        // Only retry on transient errors (429, 5xx, network errors matching rate-limit pattern)
+        if (!isRetryableError(lastError)) {
           throw lastError
         }
 
