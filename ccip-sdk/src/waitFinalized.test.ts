@@ -6,6 +6,7 @@ import type { PickDeep } from 'type-fest'
 import { type BlockInfo, type LogFilter, Chain } from './chain.ts'
 import { CCIPTransactionNotFinalizedError, CCIPTransactionNotFoundError } from './errors/index.ts'
 import { ChainFamily, networkInfo } from './networks.ts'
+import { waitFinalized } from './requests.ts'
 import type { CCIPRequest, ChainLog, ChainTransaction } from './types.ts'
 
 // ---------------------------------------------------------------------------
@@ -44,7 +45,7 @@ class WaitFinalizedMockChain extends Chain {
   static family = ChainFamily.EVM
   static decimals = 18 as const
 
-  /** Sequence of { number, timestamp } values returned by successive getBlockInfo calls */
+  /** Sequence of values returned by successive getBlockInfo calls */
   blockInfoQueue: BlockInfo[] = []
   /** Default block info when queue is empty */
   defaultBlockInfo: BlockInfo = { number: 100, timestamp: 1_700_000_000 }
@@ -86,15 +87,10 @@ class WaitFinalizedMockChain extends Chain {
     }
     // In watch mode, hang until the watch signal aborts
     if (opts.watch) {
-      const signal =
-        opts.watch instanceof AbortSignal ? opts.watch : this.abort
+      const signal = opts.watch instanceof AbortSignal ? opts.watch : this.abort
       await new Promise<void>((_resolve, reject) => {
         if (signal.aborted) return reject(signal.reason as Error)
-        signal.addEventListener(
-          'abort',
-          () => reject(signal.reason as Error),
-          { once: true },
-        )
+        signal.addEventListener('abort', () => reject(signal.reason as Error), { once: true })
       }).catch(() => {})
     }
   }
@@ -210,7 +206,8 @@ describe('waitFinalized', () => {
     }
 
     const result = await chain.waitFinalized({ request: makeRequest(log) })
-    assert.equal(result, true)
+    assert.equal(typeof result.number, 'number')
+    assert.equal(typeof result.timestamp, 'number')
     chain.destroy()
   })
 
@@ -223,11 +220,11 @@ describe('waitFinalized', () => {
     chain.logsToYield = [log]
 
     const result = await chain.waitFinalized({ request: makeRequest(log) })
-    assert.equal(result, true)
+    assert.equal(typeof result.number, 'number')
     chain.destroy()
   })
 
-  it('getLogs watch: returns true when matching log appears', async () => {
+  it('getLogs watch: returns BlockInfo when matching log appears', async () => {
     const chain = new WaitFinalizedMockChain()
     const log = makeLog()
     // Keep finalized behind so fast-path doesn't trigger and poller doesn't fire
@@ -242,7 +239,7 @@ describe('waitFinalized', () => {
     chain.logsToYield = [log] // getLogs yields the matching log
 
     const result = await chain.waitFinalized({ request: makeRequest(log) })
-    assert.equal(result, true)
+    assert.equal(typeof result.number, 'number')
     chain.destroy()
   })
 
@@ -360,7 +357,7 @@ describe('waitFinalized', () => {
       request: makeRequest(log),
       reorgSafetyBlocks: 3,
     })
-    assert.equal(result, true)
+    assert.equal(typeof result.number, 'number')
     assert.ok(txCallCount >= 1, 'getTransaction should have been called for reorg check')
     chain.destroy()
   })
@@ -415,7 +412,27 @@ describe('waitFinalized', () => {
     chain.logsToYield = [log]
 
     const result = await chain.waitFinalized({ request: makeRequest(log) })
-    assert.equal(result, true)
+    assert.equal(typeof result.number, 'number')
+    chain.destroy()
+  })
+
+  it('standalone function returns BlockInfo directly', async () => {
+    const chain = new WaitFinalizedMockChain()
+    const log = makeLog({
+      blockTimestamp: Math.floor(Date.now() / 1e3) - 120,
+    })
+    chain.defaultBlockInfo = { number: 200, timestamp: 1_700_000_000 }
+    chain.txResult = {
+      hash: log.transactionHash,
+      logs: [],
+      blockNumber: 100,
+      timestamp: 1_700_000_000,
+      from: '0xSender',
+    }
+
+    const result = await waitFinalized(chain, { request: makeRequest(log) })
+    assert.equal(result.number, 200)
+    assert.equal(result.timestamp, 1_700_000_000)
     chain.destroy()
   })
 })

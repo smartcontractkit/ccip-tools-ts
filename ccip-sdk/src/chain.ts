@@ -13,7 +13,6 @@ import {
   CCIPLogsRequiresStartError,
   CCIPNotImplementedError,
   CCIPTokenPoolChainConfigNotFoundError,
-  CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
 import { calculateManualExecProof } from './execution.ts'
@@ -32,7 +31,12 @@ import type { LeafHasher } from './hasher/common.ts'
 import { decodeMessageV1 } from './messages.ts'
 import { type ChainFamily, type NetworkInfo, networkInfo } from './networks.ts'
 import { getOffchainTokenData } from './offchain.ts'
-import { getMessagesInBatch, getMessagesInRange, getMessagesInTx } from './requests.ts'
+import {
+  getMessagesInBatch,
+  getMessagesInRange,
+  getMessagesInTx,
+  waitFinalized,
+} from './requests.ts'
 import { DEFAULT_GAS_LIMIT } from './shared/constants.ts'
 import type { UnsignedSolanaTx } from './solana/types.ts'
 import type { UnsignedSuiTx } from './sui/types.ts'
@@ -56,7 +60,7 @@ import {
   CCIPVersion,
   ExecutionState,
 } from './types.ts'
-import { signalToPromise, util, withRetry } from './utils.ts'
+import { util, withRetry } from './utils.ts'
 
 /** All valid field names for GenericExtraArgsV2. */
 const V2_FIELDS = new Set(['gasLimit', 'allowOutOfOrderExecution'])
@@ -727,7 +731,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Confirm a log tx is finalized or wait for it to be finalized.
    *
    * @param opts - Options containing the request, finality level, and optional cancel promise
-   * @returns true when the transaction is finalized
+   * @returns Some block info at or after tx finalization
    *
    * @throws {@link CCIPTransactionNotFinalizedError} if the transaction is not included (e.g., due to a reorg)
    *
@@ -744,94 +748,20 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * }
    * ```
    */
-  async waitFinalized({
-    request: { log },
-    finality = 'finalized',
-    abort,
-    reorgSafetyBlocks = 10,
-    pollIntervalMs = 5_000,
-  }: {
+  async waitFinalized(opts: {
     request: PickDeep<
       CCIPRequest,
       `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
     >
-    finality?: number | 'finalized' | 'latest'
+    finality?: Parameters<Chain['getBlockInfo']>[0]
     abort?: AbortSignal
     /** How many blocks past the original tx blockNumber must be finalized
      *  without the tx reappearing before we declare it reorged out. Default: 10 */
     reorgSafetyBlocks?: number
     /** Delay in ms between block-height poller iterations. Default: 5000 */
     pollIntervalMs?: number
-  }): Promise<true> {
-    // Fast-path: if the log is old enough, check tx timestamp vs finalized timestamp
-    if (!log.blockTimestamp || Date.now() / 1e3 - log.blockTimestamp > 60) {
-      const [trans, finalizedInfo] = await Promise.all([
-        this.getTransaction(log.transactionHash),
-        this.getBlockInfo(finality),
-      ])
-      if (trans.timestamp <= finalizedInfo.timestamp) return true
-    }
-    const watch = abort ? AbortSignal.any([this.abort, abort]) : this.abort
-
-    // Block-height deadline: poll finalized block height and abort if tx is gone
-    const deadlineAc = new AbortController()
-    const deadline = deadlineAc.signal
-    let txBlockNumber = log.blockNumber
-    const blockHeightPoller = (async () => {
-      while (!watch.aborted && !deadline.aborted) {
-        try {
-          const info = await this.getBlockInfo(finality)
-          if (info.number >= txBlockNumber + reorgSafetyBlocks) {
-            // Deadline reached — but the tx may have been reorged to a later block.
-            // Re-fetch the tx: if it's still present, update blockNumber and keep going.
-            try {
-              const tx = await this.getTransaction(log.transactionHash)
-              if (tx.blockNumber !== txBlockNumber) {
-                txBlockNumber = tx.blockNumber
-              }
-              // tx still present — fall through to the delay and re-evaluate;
-              // if it's genuinely finalized, the concurrent getLogs loop will match it
-            } catch {
-              // tx not found — definitively reorged out
-              deadlineAc.abort(new CCIPTransactionNotFinalizedError(log.transactionHash))
-              return
-            }
-          }
-        } catch {
-          // transient RPC error — retry on next poll
-        }
-        // wait before re-checking; exit early on watch abort
-        await signalToPromise(
-          AbortSignal.any([watch, deadline, AbortSignal.timeout(pollIntervalMs)]),
-        ).catch(() => {})
-      }
-    })()
-
-    // Race: getLogs watch vs block height deadline
-    try {
-      const combinedWatch = AbortSignal.any([watch, deadline])
-      for await (const l of this.getLogs({
-        address: log.address,
-        startBlock: log.blockNumber - 10,
-        endBlock: finality,
-        topics: [log.topics[0]!],
-        watch: combinedWatch,
-      })) {
-        if (l.transactionHash === log.transactionHash) {
-          return true
-        } else if (l.blockNumber > log.blockNumber) {
-          break
-        }
-      }
-    } catch (err) {
-      // If the deadline signal fired, its reason is already the right error
-      if (deadline.aborted) throw deadline.reason
-      throw err
-    } finally {
-      deadlineAc.abort() // stop the poller if getLogs resolved first
-      await blockHeightPoller // clean up
-    }
-    throw new CCIPTransactionNotFinalizedError(log.transactionHash)
+  }): ReturnType<Chain['getBlockInfo']> {
+    return waitFinalized(this, opts)
   }
   /**
    * An async generator that yields logs based on the provided options.
