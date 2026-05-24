@@ -32,6 +32,7 @@ import { type Memoized, memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
 
 import {
+  type BlockInfo,
   type ChainContext,
   type ChainStatic,
   type GetBalanceOpts,
@@ -261,7 +262,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       maxArgs: 1,
       maxSize: 100,
     })
-    this.getBlockTimestamp = memoize(this.getBlockTimestamp.bind(this), {
+    this.getBlockInfo = memoize(this.getBlockInfo.bind(this), {
       async: true,
       maxSize: 1024,
       forceUpdate: ([k]) => typeof k !== 'number' || k <= 0,
@@ -393,17 +394,17 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   // cached
   /**
-   * {@inheritDoc Chain.getBlockTimestamp}
+   * {@inheritDoc Chain.getBlockInfo}
    * @throws {@link CCIPBlockTimeNotFoundError} if block time cannot be retrieved
    */
-  async getBlockTimestamp(block: number | 'latest' | 'finalized'): Promise<number> {
+  async getBlockInfo(block: number | 'latest' | 'finalized'): Promise<BlockInfo> {
     if (typeof block !== 'number') {
       const slot = await this.connection.getSlot(block === 'latest' ? 'confirmed' : block)
       const blockTime = await this.connection.getBlockTime(slot)
       if (blockTime === null) {
         throw new CCIPBlockTimeNotFoundError(`finalized slot ${slot}`)
       }
-      return blockTime
+      return { number: slot, timestamp: blockTime }
     } else if (block <= 0) {
       block = (await this.connection.getSlot('confirmed')) + block
     }
@@ -412,7 +413,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     if (blockTime === null) {
       throw new CCIPBlockTimeNotFoundError(block)
     }
-    return blockTime
+    return { number: block, timestamp: blockTime }
   }
 
   /**
@@ -426,11 +427,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     })
     if (!tx) throw new CCIPTransactionNotFoundError(hash)
     if (tx.blockTime) {
-      ;(
-        this.getBlockTimestamp as Memoized<typeof this.getBlockTimestamp, { async: true }>
-      ).cache.set([tx.slot], Promise.resolve(tx.blockTime))
+      ;(this.getBlockInfo as Memoized<typeof this.getBlockInfo, { async: true }>).cache.set(
+        [tx.slot],
+        Promise.resolve({ number: tx.slot, timestamp: tx.blockTime }),
+      )
     } else {
-      tx.blockTime = await this.getBlockTimestamp(tx.slot)
+      tx.blockTime = (await this.getBlockInfo(tx.slot)).timestamp
     }
 
     // Parse logs from transaction using helper function

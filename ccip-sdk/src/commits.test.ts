@@ -37,8 +37,10 @@ class MockChain extends Chain {
     this.mockLogs = logs
   }
 
-  async getBlockTimestamp(_block: number | 'finalized'): Promise<number> {
-    return this.mockBlockTimestamp
+  async getBlockInfo(
+    _block: number | 'finalized' | 'latest',
+  ): Promise<{ number: number; timestamp: number }> {
+    return { number: 1000, timestamp: this.mockBlockTimestamp }
   }
 
   async getTransaction(_hash: string): Promise<ChainTransaction> {

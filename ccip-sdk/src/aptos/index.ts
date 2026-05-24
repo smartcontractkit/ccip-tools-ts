@@ -11,6 +11,7 @@ import { type BytesLike, concat, isBytesLike, isHexString } from 'ethers'
 import { memoize } from 'micro-memoize'
 
 import {
+  type BlockInfo,
   type ChainContext,
   type GetBalanceOpts,
   type LogFilter,
@@ -207,9 +208,12 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return this.fromAptosConfig(config, ctx)
   }
 
-  /** {@inheritDoc Chain.getBlockTimestamp} */
-  async getBlockTimestamp(version: number | 'finalized'): Promise<number> {
-    return getVersionTimestamp(this.provider, version)
+  /** {@inheritDoc Chain.getBlockInfo} */
+  async getBlockInfo(version: number | 'finalized' | 'latest'): Promise<BlockInfo> {
+    let version_ = typeof version !== 'number' ? 0 : version
+    if (version_ <= 0) version_ = +(await this.provider.getLedgerInfo()).ledger_version + version_
+    const timestamp = await getVersionTimestamp(this.provider, version_)
+    return { number: version_, timestamp }
   }
 
   /**

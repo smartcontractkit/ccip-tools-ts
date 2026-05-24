@@ -30,6 +30,7 @@ import { memoize } from 'micro-memoize'
 import type { PickDeep, SetFieldType, SetRequired } from 'type-fest'
 
 import {
+  type BlockInfo,
   type ChainContext,
   type GetBalanceOpts,
   type LogFilter,
@@ -234,17 +235,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.provider = provider
     this.abort.addEventListener('abort', () => this.provider.destroy(), { once: true })
 
-    const getBlockTimestamp = memoize(this.getBlockTimestamp.bind(this), {
+    const getBlockInfo = memoize(this.getBlockInfo.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 1024,
     })
-    this.getBlockTimestamp = getBlockTimestamp
+    this.getBlockInfo = getBlockInfo
 
     /** ethers doesn't support logs' new `blockTimestamp` property; to workaround having to do
      * another roundtrip for it, we hook in these Provider methods, which have access to the 'raw'
      * payloads of getTransactionReceipts and getLogs, cache the timestamps, and populate from
-     * cached this.getBlockTimestamp inside getTransaction and getEvmLogs */
+     * cached this.getBlockInfo inside getTransaction and getEvmLogs */
     type RawLog = { blockNumber: number | string; blockTimestamp?: string | number }
     this.provider._wrapTransactionReceipt = (
       value: TransactionReceiptParams,
@@ -252,9 +253,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     ): TransactionReceipt => {
       // on provider.getTransactionReceipt, cache logs block timestamp, hidden by ethers
       if (value.logs.length && (value.logs[0] as RawLog).blockTimestamp)
-        getBlockTimestamp.cache.set(
+        getBlockInfo.cache.set(
           [getNumber(value.logs[0]!.blockNumber)],
-          Promise.resolve(getNumber((value.logs[0]! as RawLog).blockTimestamp!)),
+          Promise.resolve({
+            number: getNumber(value.logs[0]!.blockNumber),
+            timestamp: getNumber((value.logs[0]! as RawLog).blockTimestamp!),
+          }),
         )
       return (
         this.provider.constructor as typeof JsonRpcApiProvider
@@ -263,9 +267,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.provider._wrapLog = (value: LogParams, network: Network): Log => {
       // on provider.getLogs, cache logs block timestamp, hidden by ethers
       if ((value as RawLog).blockTimestamp)
-        getBlockTimestamp.cache.set(
+        getBlockInfo.cache.set(
           [getNumber(value.blockNumber)],
-          Promise.resolve(getNumber((value as RawLog).blockTimestamp!)),
+          Promise.resolve({
+            number: getNumber(value.blockNumber),
+            timestamp: getNumber((value as RawLog).blockTimestamp!),
+          }),
         )
       return (this.provider.constructor as typeof JsonRpcApiProvider).prototype._wrapLog.call(
         this.provider,
@@ -421,11 +428,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return this.fromProvider(await this._getProvider(url, ctx?.abort), ctx)
   }
 
-  /** {@inheritDoc Chain.getBlockTimestamp} */
-  async getBlockTimestamp(block: EVMEndBlockTag): Promise<number> {
+  /** {@inheritDoc Chain.getBlockInfo} */
+  async getBlockInfo(block: EVMEndBlockTag): Promise<BlockInfo> {
     const res = await this.provider.getBlock(block) // cached
     if (!res) throw new CCIPBlockNotFoundError(block)
-    return res.timestamp
+    return { number: res.number, timestamp: res.timestamp }
   }
 
   /** {@inheritDoc Chain.getTransaction} */
@@ -435,7 +442,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       throw new CCIPTransactionNotFoundError(hash as string, {
         context: { network: this.network.name },
       })
-    const timestamp = await this.getBlockTimestamp(tx.blockNumber)
+    const { timestamp } = await this.getBlockInfo(tx.blockNumber)
     const chainTx = {
       ...tx,
       timestamp,

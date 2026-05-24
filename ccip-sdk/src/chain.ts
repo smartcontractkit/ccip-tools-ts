@@ -56,7 +56,7 @@ import {
   CCIPVersion,
   ExecutionState,
 } from './types.ts'
-import { util, withRetry } from './utils.ts'
+import { signalToPromise, util, withRetry } from './utils.ts'
 
 /** All valid field names for GenericExtraArgsV2. */
 const V2_FIELDS = new Set(['gasLimit', 'allowOutOfOrderExecution'])
@@ -241,6 +241,16 @@ export type TokenInfo = {
   readonly decimals: number
   /** Optional human-readable token name. */
   readonly name?: string
+}
+
+/**
+ * Block metadata returned by {@link Chain.getBlockInfo}.
+ */
+export type BlockInfo = {
+  /** Block number (or slot, version, etc. depending on chain family). */
+  readonly number: number
+  /** Unix timestamp of the block in seconds. */
+  readonly timestamp: number
 }
 
 /**
@@ -667,21 +677,30 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
-   * Fetch the timestamp of a given block.
-   *
-   * @param block - Positive block number, negative finality depth, or 'finalized' tag
-   * @returns Promise resolving to timestamp of the block, in seconds
+   * Fetch info (number and timestamp) for a given block or finality tag.
+   * @param block - Block number, or tag like `'finalized'` or `'latest'`
+   * @returns Block info with number and timestamp
    *
    * @throws {@link CCIPBlockNotFoundError} if block does not exist
    *
-   * @example Get finalized block timestamp
+   * @example Get finalized block info
    * ```typescript
    * const chain = await EVMChain.fromUrl('https://eth-mainnet.example.com')
-   * const timestamp = await chain.getBlockTimestamp('finalized')
-   * console.log(`Finalized at: ${new Date(timestamp * 1000).toISOString()}`)
+   * const info = await chain.getBlockInfo('finalized')
+   * console.log(`Finalized block ${info.number} at ${new Date(info.timestamp * 1000).toISOString()}`)
    * ```
    */
-  abstract getBlockTimestamp(block: number | 'finalized'): Promise<number>
+  abstract getBlockInfo(block: number | 'finalized' | 'latest'): Promise<BlockInfo>
+
+  /**
+   * Fetch the timestamp of a given block.
+   * @param block - Block number or finality tag
+   * @returns Unix timestamp in seconds
+   * @deprecated Use {@link Chain.getBlockInfo} instead.
+   */
+  async getBlockTimestamp(block: number | 'finalized' | 'latest'): Promise<number> {
+    return (await this.getBlockInfo(block)).timestamp
+  }
   /**
    * Fetch a transaction by its hash.
    *
@@ -729,35 +748,88 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     request: { log },
     finality = 'finalized',
     abort,
+    reorgSafetyBlocks = 10,
+    pollIntervalMs = 5_000,
   }: {
     request: PickDeep<
       CCIPRequest,
       `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
     >
-    finality?: number | 'finalized'
+    finality?: number | 'finalized' | 'latest'
     abort?: AbortSignal
+    /** How many blocks past the original tx blockNumber must be finalized
+     *  without the tx reappearing before we declare it reorged out. Default: 10 */
+    reorgSafetyBlocks?: number
+    /** Delay in ms between block-height poller iterations. Default: 5000 */
+    pollIntervalMs?: number
   }): Promise<true> {
+    // Fast-path: if the log is old enough, check tx timestamp vs finalized timestamp
     if (!log.blockTimestamp || Date.now() / 1e3 - log.blockTimestamp > 60) {
-      // only try to fetch tx if request is old enough (>60s)
-      const [trans, finalizedTs] = await Promise.all([
+      const [trans, finalizedInfo] = await Promise.all([
         this.getTransaction(log.transactionHash),
-        this.getBlockTimestamp(finality),
+        this.getBlockInfo(finality),
       ])
-      if (trans.timestamp <= finalizedTs) return true
+      if (trans.timestamp <= finalizedInfo.timestamp) return true
     }
     const watch = abort ? AbortSignal.any([this.abort, abort]) : this.abort
-    for await (const l of this.getLogs({
-      address: log.address,
-      startBlock: log.blockNumber - 10,
-      endBlock: finality,
-      topics: [log.topics[0]!],
-      watch,
-    })) {
-      if (l.transactionHash === log.transactionHash) {
-        return true
-      } else if (l.blockNumber > log.blockNumber) {
-        break
+
+    // Block-height deadline: poll finalized block height and abort if tx is gone
+    const deadlineAc = new AbortController()
+    const deadline = deadlineAc.signal
+    let txBlockNumber = log.blockNumber
+    const blockHeightPoller = (async () => {
+      while (!watch.aborted && !deadline.aborted) {
+        try {
+          const info = await this.getBlockInfo(finality)
+          if (info.number >= txBlockNumber + reorgSafetyBlocks) {
+            // Deadline reached — but the tx may have been reorged to a later block.
+            // Re-fetch the tx: if it's still present, update blockNumber and keep going.
+            try {
+              const tx = await this.getTransaction(log.transactionHash)
+              if (tx.blockNumber !== txBlockNumber) {
+                txBlockNumber = tx.blockNumber
+              }
+              // tx still present — fall through to the delay and re-evaluate;
+              // if it's genuinely finalized, the concurrent getLogs loop will match it
+            } catch {
+              // tx not found — definitively reorged out
+              deadlineAc.abort(new CCIPTransactionNotFinalizedError(log.transactionHash))
+              return
+            }
+          }
+        } catch {
+          // transient RPC error — retry on next poll
+        }
+        // wait before re-checking; exit early on watch abort
+        await signalToPromise(
+          AbortSignal.any([watch, deadline, AbortSignal.timeout(pollIntervalMs)]),
+        ).catch(() => {})
       }
+    })()
+
+    // Race: getLogs watch vs block height deadline
+    try {
+      const combinedWatch = AbortSignal.any([watch, deadline])
+      for await (const l of this.getLogs({
+        address: log.address,
+        startBlock: log.blockNumber - 10,
+        endBlock: finality,
+        topics: [log.topics[0]!],
+        watch: combinedWatch,
+      })) {
+        if (l.transactionHash === log.transactionHash) {
+          return true
+        } else if (l.blockNumber > log.blockNumber) {
+          break
+        }
+      }
+    } catch (err) {
+      // If the deadline signal fired, its reason is already the right error
+      if (deadline.aborted) throw deadline.reason
+      throw err
+    } finally {
+      deadlineAc.abort() // stop the poller if getLogs resolved first
+      await blockHeightPoller // clean up
     }
     throw new CCIPTransactionNotFinalizedError(log.transactionHash)
   }

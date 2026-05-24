@@ -36,7 +36,10 @@ describe('logs start position validation', () => {
             {},
             {
               provider: {} as JsonRpcApiProvider,
-              getBlockTimestamp: async () => Math.floor(Date.now() / 1000),
+              getBlockInfo: async () => ({
+                number: 1000,
+                timestamp: Math.floor(Date.now() / 1000),
+              }),
             },
           ),
         ),
@@ -114,7 +117,7 @@ describe('EVM logs block tags', () => {
         {
           provider,
           logger: silentLogger,
-          getBlockTimestamp: async (block) => (await getBlock(block)).timestamp,
+          getBlockInfo: (block) => getBlock(block),
         },
       ),
     )
