@@ -658,7 +658,7 @@ export async function waitFinalized<C extends Chain>(
     while (!watch.aborted && !deadline.aborted) {
       try {
         const info = await chain.getBlockInfo(finality)
-        if (info.number >= txBlockNumber + reorgSafetyBlocks) {
+        if (info.number >= txBlockNumber) {
           // Deadline reached — but the tx may have been reorged to a later block.
           // Re-fetch the tx: if it's still present, update blockNumber and keep going.
           try {
@@ -669,9 +669,11 @@ export async function waitFinalized<C extends Chain>(
             // tx still present — fall through to the delay and re-evaluate;
             // if it's genuinely finalized, the concurrent getLogs loop will match it
           } catch {
-            // tx not found — definitively reorged out
-            deadlineAc.abort(new CCIPTransactionNotFinalizedError(log.transactionHash))
-            return
+            if (info.number >= txBlockNumber + reorgSafetyBlocks) {
+              // tx not found — definitively reorged out
+              deadlineAc.abort(new CCIPTransactionNotFinalizedError(log.transactionHash))
+              return
+            }
           }
         }
       } catch {
