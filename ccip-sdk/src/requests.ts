@@ -655,25 +655,34 @@ export async function waitFinalized<C extends Chain>(
   const deadline = deadlineAc.signal
   let txBlockNumber = log.blockNumber
   const blockHeightPoller = (async () => {
+    let firstFinalized
     while (!watch.aborted && !deadline.aborted) {
       try {
         const info = await chain.getBlockInfo(finality)
         if (info.number >= txBlockNumber) {
-          // Deadline reached — but the tx may have been reorged to a later block.
+          firstFinalized ??= info.number
+          // OG txBlock finalized — but the tx may have been reorged to a later block.
           // Re-fetch the tx: if it's still present, update blockNumber and keep going.
           try {
             const tx = await chain.getTransaction(log.transactionHash)
-            if (tx.blockNumber !== txBlockNumber) {
-              txBlockNumber = tx.blockNumber
-            }
+            if (tx.blockNumber !== txBlockNumber) txBlockNumber = tx.blockNumber
             // tx still present — fall through to the delay and re-evaluate;
             // if it's genuinely finalized, the concurrent getLogs loop will match it
           } catch {
-            if (info.number >= txBlockNumber + reorgSafetyBlocks) {
-              // tx not found — definitively reorged out
+            if (info.number > Math.max(firstFinalized, txBlockNumber + reorgSafetyBlocks - 1)) {
+              // some block after the original tx block has been finalized without the tx reappearing — very likely reorged out
               deadlineAc.abort(new CCIPTransactionNotFinalizedError(log.transactionHash))
               return
             }
+            chain.logger.debug(`waitFinalized: tx not found`, {
+              network: chain.network.name,
+              txHash: log.transactionHash,
+              finality,
+              finalizedBlock: info,
+              firstFinalized,
+              txBlockNumber,
+              reorgSafetyBlocks,
+            })
           }
         }
       } catch {

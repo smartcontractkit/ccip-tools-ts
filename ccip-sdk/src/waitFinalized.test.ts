@@ -272,8 +272,13 @@ describe('waitFinalized', () => {
   it('block-height poller throws when tx eventually disappears after deadline', async () => {
     const chain = new WaitFinalizedMockChain()
     const log = makeLog({ blockNumber: 100 })
-    // Finalized block is already way past the deadline (100 + 3 = 103)
-    chain.defaultBlockInfo = { number: 200, timestamp: 1_700_000_000 }
+    // Poll 1: finalized=200 → firstFinalized=200, tx found (txCallCount=1)
+    // Poll 2: finalized=201 → tx throws, 201 > max(200,102) → true → abort
+    chain.blockInfoQueue = [
+      { number: 200, timestamp: 1_700_000_000 },
+      { number: 201, timestamp: 1_700_000_001 },
+    ]
+    chain.defaultBlockInfo = { number: 201, timestamp: 1_700_000_001 }
     // getTransaction returns tx at same blockNumber once, then throws
     let txCallCount = 0
     chain.txResult = (hash: string) => {
@@ -306,7 +311,13 @@ describe('waitFinalized', () => {
   it('block-height poller throws when tx is not found (reorged out)', async () => {
     const chain = new WaitFinalizedMockChain()
     const log = makeLog({ blockNumber: 100 })
-    chain.defaultBlockInfo = { number: 200, timestamp: 1_700_000_000 }
+    // Poll 1: finalized=200 → firstFinalized=200, tx throws, 200 > max(200,102) → false (need NEW block)
+    // Poll 2: finalized=201 → tx throws, 201 > max(200,102) → true → abort
+    chain.blockInfoQueue = [
+      { number: 200, timestamp: 1_700_000_000 },
+      { number: 201, timestamp: 1_700_000_001 },
+    ]
+    chain.defaultBlockInfo = { number: 201, timestamp: 1_700_000_001 }
     // getTransaction throws — tx gone
     chain.txError = new CCIPTransactionNotFoundError(log.transactionHash)
     chain.logsToYield = []
@@ -316,6 +327,7 @@ describe('waitFinalized', () => {
         chain.waitFinalized({
           request: makeRequest(log),
           reorgSafetyBlocks: 3,
+          pollIntervalMs: 10,
         }),
       CCIPTransactionNotFinalizedError,
     )
