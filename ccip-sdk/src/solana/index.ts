@@ -165,7 +165,12 @@ const unknownTokens: { [mint: string]: string } = {
 }
 
 /** Solana-specific log structure with transaction reference and log level. */
-export type SolanaLog = ChainLog & { tx: SolanaTransaction; data: string; level: number }
+export type SolanaLog = ChainLog & {
+  tx?: SolanaTransaction
+  data: string
+  level: number
+  type: 'log' | 'data'
+}
 /** Solana-specific transaction structure with versioned transaction response. */
 export type SolanaTransaction = MergeArrayElements<
   ChainTransaction,
@@ -474,9 +479,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @throws {@link CCIPLogsAddressRequiredError} if address is not provided
    * @throws {@link CCIPTopicsInvalidError} if topics contain invalid values
    */
-  async *getLogs(
-    opts: LogFilter & { programs?: string[] | true },
-  ): AsyncGenerator<ChainLog & { tx: SolanaTransaction }> {
+  async *getLogs(opts: LogFilter & { programs?: string[] | true }): AsyncGenerator<SolanaLog> {
     let programs: true | string[]
     if (!opts.address) {
       throw new CCIPLogsAddressRequiredError()
@@ -1072,7 +1075,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       if (laterReceiptLog) {
         return // ignore intermediary state (InProgress=1) if we can find a later receipt
       } else if (state !== ExecutionState.Success) {
-        returnData = getErrorFromLogs(log.tx.logs)
+        returnData = getErrorFromLogs(log.tx.logs as SolanaLog[])
       } else if (log.tx.error) {
         returnData = util.inspect(log.tx.error)
         state = ExecutionState.Failed
@@ -1379,13 +1382,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       if (Array.isArray(data)) {
         if (data.every((e) => typeof e === 'string')) return getErrorFromLogs(data)
         else if (data.every((e) => typeof e === 'object' && 'data' in e && 'address' in e))
-          return getErrorFromLogs(data as ChainLog[])
+          return getErrorFromLogs(data as SolanaLog[])
       } else if (typeof data === 'object') {
         if ('transactionLogs' in data && 'transactionMessage' in data) {
-          const parsed = getErrorFromLogs(data.transactionLogs as ChainLog[] | string[])
+          const parsed = getErrorFromLogs(data.transactionLogs as SolanaLog[] | string[])
           if (parsed) return { message: data.transactionMessage, ...parsed }
         }
-        if ('logs' in data) return getErrorFromLogs(data.logs as ChainLog[] | string[])
+        if ('logs' in data) return getErrorFromLogs(data.logs as SolanaLog[] | string[])
       } else if (typeof data === 'string') {
         const parsedExtraArgs = this.decodeExtraArgs(getDataBytes(data))
         if (parsedExtraArgs) return parsedExtraArgs

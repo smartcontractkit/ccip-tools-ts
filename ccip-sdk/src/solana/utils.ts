@@ -26,11 +26,12 @@ import {
   CCIPTokenMintNotFoundError,
   CCIPTransactionNotFinalizedError,
 } from '../errors/index.ts'
-import type { ChainLog, WithLogger } from '../types.ts'
-import { bigIntReplacer, getDataBytes, isBase64, sleep } from '../utils.ts'
+import type { WithLogger } from '../types.ts'
+import { bigIntReplacer, getDataBytes, sleep } from '../utils.ts'
 import type { IDL as BASE_TOKEN_POOL_IDL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import type { UnsignedSolanaTx, Wallet } from './types.ts'
 import type { RateLimiterState } from '../chain.ts'
+import type { SolanaLog } from './index.ts'
 
 /**
  * Result of resolving an Associated Token Account for a given mint and owner.
@@ -143,10 +144,7 @@ export function camelToSnakeCase(str: string): string {
     .replace(/^_/, '')
 }
 
-type ParsedLog = Pick<ChainLog, 'topics' | 'index' | 'address' | 'data'> & {
-  data: string
-  level: number
-}
+type ParsedLog = Pick<SolanaLog, 'topics' | 'index' | 'address' | 'data' | 'level' | 'type'>
 
 /**
  * Utility function to parse Solana logs with proper address and topic extraction.
@@ -181,6 +179,7 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
       // Pop from stack when program returns
       programStack.pop()
     } else if (matchLog) {
+      const type = matchLog[1]! as 'log' | 'data'
       // Extract the actual log data
       const logData = log.slice(matchLog[0].length)
       const currentProgram = programStack[programStack.length - 1]!
@@ -204,6 +203,7 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
         address: currentProgram,
         data: logData,
         level: programStack.length,
+        type,
       })
     }
   }
@@ -219,7 +219,7 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
 export function getErrorFromLogs(
   logs_:
     | readonly string[]
-    | readonly Pick<ChainLog, 'address' | 'index' | 'data' | 'topics' | 'tx'>[]
+    | readonly Pick<SolanaLog, 'address' | 'index' | 'data' | 'topics' | 'tx' | 'level' | 'type'>[]
     | null,
 ): { program: string; [k: string]: string } | undefined {
   if (!logs_?.length) return
@@ -234,11 +234,10 @@ export function getErrorFromLogs(
       (acc, l) =>
         // if acc is empty (i.e. on last log), or it is emitted by the same program and not a Program data:
         !acc.length || (l.address === acc[0]!.address && !l.topics.length) ? [l, ...acc] : acc,
-      [] as Pick<ChainLog, 'address' | 'index' | 'data'>[],
+      [] as typeof logs,
     )
-    .filter(({ data }) => !isBase64(data))
-    .map(({ data }) => data as string)
-    .reduceRight((acc, l) => {
+    .filter(({ type }) => type !== 'data')
+    .reduceRight((acc, { data: l }) => {
       l = l.replace(/ (with message|thrown in) /, ' $1: ')
       if (l.endsWith(':') && acc.length) l = `${l} ${acc.shift()!}` // cosmetic: join lines ending in ':' with next
       try {

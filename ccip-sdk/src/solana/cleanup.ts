@@ -114,7 +114,7 @@ export async function cleanUpBuffers(
     const tx = log.tx
     switch (log.data) {
       case 'Instruction: BufferExecutionReport': {
-        const bufferIds = tx.tx.transaction.message.compiledInstructions
+        const bufferIds = tx!.tx.transaction.message.compiledInstructions
           .filter(
             // method discriminant plus 4B first param bytearray length of 32B=0x20 (bufferId)
             ({ data }) => dataSlice(data, 0, 8 + 4) === '0x23cafcdc0252bd1720000000',
@@ -182,7 +182,7 @@ export async function cleanUpBuffers(
       }
       case 'Instruction: DeactivateLookupTable':
       case 'Instruction: CreateLookupTable': {
-        const lookupTable = tx.tx.transaction.message.staticAccountKeys[1]!
+        const lookupTable = tx!.tx.transaction.message.staticAccountKeys[1]!
         if (seenAccs.has(lookupTable.toBase58())) continue
         seenAccs.add(lookupTable.toBase58())
 
