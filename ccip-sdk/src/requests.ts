@@ -1,5 +1,6 @@
+import type { PublicKey } from '@solana/web3.js'
 import type BN from 'bn.js'
-import { type BytesLike, hexlify, isBytesLike, toBigInt } from 'ethers'
+import { type Addressable, type BytesLike, hexlify, isBytesLike, toBigInt } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import type { Chain, ChainStatic, LogFilter } from './chain.ts'
@@ -12,6 +13,7 @@ import {
   CCIPMessageInvalidError,
   CCIPMessageNotFoundInTxError,
   CCIPTokenNotInRegistryError,
+  CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
 import type { EVMChain } from './evm/index.ts'
 import { decodeExtraArgs, decodeFinalityRequested } from './extra-args.ts'
@@ -33,39 +35,54 @@ import {
   getDataBytes,
   leToBigInt,
   parseJson,
+  signalToPromise,
 } from './utils.ts'
+
+type Normalized<T> = T extends PublicKey | Addressable
+  ? string
+  : T extends BN
+    ? bigint
+    : T extends Array<infer U>
+      ? Array<Normalized<U>>
+      : T extends ReadonlyArray<infer U>
+        ? ReadonlyArray<Normalized<U>>
+        : T extends Record<string, unknown>
+          ? { [K in keyof T]: Normalized<T[K]> }
+          : T extends Readonly<Record<string, unknown>>
+            ? { readonly [K in keyof T]: Normalized<T[K]> }
+            : T
 
 /** Convert recursively a message or config record into normalized values */
 export function normalizeDeep<T extends Record<string, unknown>>(
   data: T,
   opts: { sourceFamily?: ChainFamily; destFamily?: ChainFamily } = {},
-): T {
-  return convertKeysToCamelCase(data, (v, k) =>
-    k === 'chainFamilySelector'
-      ? hexlify(getDataBytes(v as number[]))
-      : k?.match(/(selector|amount|nonce|number|limit|bitmap|juels|value)$/i)
-        ? toBigInt(
-            Array.isArray(v) ? getDataBytes(v) : (v as string | number | bigint | BN).toString(),
-          )
-        : k?.match(/(^dest.*address)|(receiver|offramp|accounts)/i)
-          ? v == null && k === 'destAddress'
-            ? v
-            : decodeAddress(
-                (typeof v === 'bigint' ? v.toString() : v) as BytesLike,
-                opts.destFamily,
-              )
-          : k?.match(
-                /((source.*address)|sender|issuer|origin|onramp|(feetoken$)|(token.*address$))/i,
-              )
-            ? decodeAddress(
-                (typeof v === 'bigint' ? v.toString() : v) as BytesLike,
-                opts.sourceFamily,
-              )
-            : v instanceof Uint8Array ||
-                (Array.isArray(v) && v.length >= 4 && v.every((e) => typeof e === 'number'))
-              ? hexlify(getDataBytes(v))
-              : v,
-  ) as T
+): Normalized<T> {
+  return convertKeysToCamelCase(data, (v, k) => {
+    if (k === 'chainFamilySelector') return hexlify(getDataBytes(v as number[]))
+    if ((v as { _bn?: unknown } | undefined)?._bn) return (v as PublicKey).toString()
+    if (
+      k?.match(/(selector|amount|nonce|number|limit|bitmap|juels|value)$/i) ||
+      (v as { words?: unknown } | undefined)?.words
+    )
+      return toBigInt(
+        Array.isArray(v) ? getDataBytes(v) : (v as string | number | bigint | BN).toString(),
+      )
+    if (k?.match(/(^dest.*address)|(receiver|offramp|accounts)/i))
+      return (
+        v && decodeAddress((typeof v === 'bigint' ? v.toString() : v) as BytesLike, opts.destFamily)
+      )
+    if (k?.match(/((source.*address)|sender|issuer|origin|onramp|(feetoken$)|(token.*address$))/i))
+      return decodeAddress(
+        (typeof v === 'bigint' ? v.toString() : v) as BytesLike,
+        opts.sourceFamily,
+      )
+    if (
+      v instanceof Uint8Array ||
+      (Array.isArray(v) && v.length >= 4 && v.every((e) => typeof e === 'number'))
+    )
+      return hexlify(getDataBytes(v))
+    return v
+  }) as Normalized<T>
 }
 
 function decodeJsonMessage(data: Record<string, unknown> | undefined) {
@@ -576,4 +593,131 @@ export async function sourceToDestTokenAddresses<S extends { token: string }>({
     sourceTokenAddress,
     destTokenAddress: remotes[networkInfo(destChainSelector).name]!.remoteToken,
   }
+}
+
+/**
+ * Confirm a log tx is finalized or wait for it to be finalized.
+ *
+ * @param chain - Chain instance to check finality on
+ * @param opts - Options containing the request, finality level, and optional cancel promise
+ * @returns Some block info at or after tx finalization
+ *
+ * @throws {@link CCIPTransactionNotFinalizedError} if the transaction is not included (e.g., due to a reorg)
+ *
+ * @example Wait for message finality
+ * ```typescript
+ * const request = await source.getMessagesInTx(txHash)
+ * try {
+ *   await waitFinalized(chain, { request: request[0] })
+ *   console.log('Transaction finalized')
+ * } catch (err) {
+ *   if (err instanceof CCIPTransactionNotFinalizedError) {
+ *     console.log('Transaction not yet finalized')
+ *   }
+ * }
+ * ```
+ */
+export async function waitFinalized<C extends Chain>(
+  chain: C,
+  {
+    request: { log },
+    finality = 'finalized',
+    abort,
+    reorgSafetyBlocks = 10,
+    pollIntervalMs = 5_000,
+  }: {
+    request: PickDeep<
+      CCIPRequest,
+      `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
+    >
+    finality?: Parameters<Chain['getBlockInfo']>[0]
+    abort?: AbortSignal
+    /** How many blocks past the original tx blockNumber must be finalized
+     *  without the tx reappearing before we declare it reorged out. Default: 10 */
+    reorgSafetyBlocks?: number
+    /** Delay in ms between block-height poller iterations. Default: 5000 */
+    pollIntervalMs?: number
+  },
+): ReturnType<Chain['getBlockInfo']> {
+  // Fast-path: if the log is old enough, check tx timestamp vs finalized timestamp
+  if (!log.blockTimestamp || Date.now() / 1e3 - log.blockTimestamp > 60) {
+    const [tx, finalized, latest] = await Promise.all([
+      chain.getTransaction(log.transactionHash),
+      chain.getBlockInfo(finality),
+      chain.getBlockInfo('latest'),
+    ])
+    if (tx.timestamp <= finalized.timestamp) return latest
+  }
+  const watch = abort ? AbortSignal.any([chain.abort, abort]) : chain.abort
+
+  // Block-height deadline: poll finalized block height and abort if tx is gone
+  const deadlineAc = new AbortController()
+  const deadline = deadlineAc.signal
+  let txBlockNumber = log.blockNumber
+  const blockHeightPoller = (async () => {
+    let firstFinalized
+    while (!watch.aborted && !deadline.aborted) {
+      try {
+        const info = await chain.getBlockInfo(finality)
+        if (info.number >= txBlockNumber) {
+          firstFinalized ??= info.number
+          // OG txBlock finalized — but the tx may have been reorged to a later block.
+          // Re-fetch the tx: if it's still present, update blockNumber and keep going.
+          try {
+            const tx = await chain.getTransaction(log.transactionHash)
+            if (tx.blockNumber !== txBlockNumber) txBlockNumber = tx.blockNumber
+            // tx still present — fall through to the delay and re-evaluate;
+            // if it's genuinely finalized, the concurrent getLogs loop will match it
+          } catch {
+            if (info.number > Math.max(firstFinalized, txBlockNumber + reorgSafetyBlocks - 1)) {
+              // some block after the original tx block has been finalized without the tx reappearing — very likely reorged out
+              deadlineAc.abort(new CCIPTransactionNotFinalizedError(log.transactionHash))
+              return
+            }
+            chain.logger.debug(`waitFinalized: tx not found`, {
+              network: chain.network.name,
+              txHash: log.transactionHash,
+              finality,
+              finalizedBlock: info,
+              firstFinalized,
+              txBlockNumber,
+              reorgSafetyBlocks,
+            })
+          }
+        }
+      } catch {
+        // transient RPC error — retry on next poll
+      }
+      // wait before re-checking; exit early on watch abort
+      await signalToPromise(
+        AbortSignal.any([watch, deadline, AbortSignal.timeout(pollIntervalMs)]),
+      ).catch(() => {})
+    }
+  })()
+
+  // Race: getLogs watch vs block height deadline
+  const combinedWatch = AbortSignal.any([watch, deadline])
+  try {
+    for await (const l of chain.getLogs({
+      address: log.address,
+      startBlock: log.blockNumber - 10,
+      endBlock: finality,
+      topics: [log.topics[0]!],
+      watch: combinedWatch,
+    })) {
+      if (l.transactionHash === log.transactionHash) {
+        return chain.getBlockInfo('latest')
+      } else if (l.blockNumber > txBlockNumber) {
+        break
+      }
+    }
+  } catch (err) {
+    // If the deadline signal fired, its reason is already the right error
+    if (deadline.aborted) throw deadline.reason
+    throw err
+  } finally {
+    deadlineAc.abort() // stop the poller if getLogs resolved first
+    await blockHeightPoller // clean up
+  }
+  throw new CCIPTransactionNotFinalizedError(log.transactionHash)
 }

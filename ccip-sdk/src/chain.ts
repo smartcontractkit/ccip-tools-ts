@@ -13,7 +13,6 @@ import {
   CCIPLogsRequiresStartError,
   CCIPNotImplementedError,
   CCIPTokenPoolChainConfigNotFoundError,
-  CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
 import { calculateManualExecProof } from './execution.ts'
@@ -32,7 +31,12 @@ import type { LeafHasher } from './hasher/common.ts'
 import { decodeMessageV1 } from './messages.ts'
 import { type ChainFamily, type NetworkInfo, networkInfo } from './networks.ts'
 import { getOffchainTokenData } from './offchain.ts'
-import { getMessagesInBatch, getMessagesInRange, getMessagesInTx } from './requests.ts'
+import {
+  getMessagesInBatch,
+  getMessagesInRange,
+  getMessagesInTx,
+  waitFinalized,
+} from './requests.ts'
 import { DEFAULT_GAS_LIMIT } from './shared/constants.ts'
 import type { UnsignedSolanaTx } from './solana/types.ts'
 import type { UnsignedSuiTx } from './sui/types.ts'
@@ -241,6 +245,16 @@ export type TokenInfo = {
   readonly decimals: number
   /** Optional human-readable token name. */
   readonly name?: string
+}
+
+/**
+ * Block metadata returned by {@link Chain.getBlockInfo}.
+ */
+export type BlockInfo = {
+  /** Block number (or slot, version, etc. depending on chain family). */
+  readonly number: number
+  /** Unix timestamp of the block in seconds. */
+  readonly timestamp: number
 }
 
 /**
@@ -667,21 +681,30 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
-   * Fetch the timestamp of a given block.
-   *
-   * @param block - Positive block number, negative finality depth, or 'finalized' tag
-   * @returns Promise resolving to timestamp of the block, in seconds
+   * Fetch info (number and timestamp) for a given block or finality tag.
+   * @param block - Block number, or tag like `'finalized'` or `'latest'`
+   * @returns Block info with number and timestamp
    *
    * @throws {@link CCIPBlockNotFoundError} if block does not exist
    *
-   * @example Get finalized block timestamp
+   * @example Get finalized block info
    * ```typescript
    * const chain = await EVMChain.fromUrl('https://eth-mainnet.example.com')
-   * const timestamp = await chain.getBlockTimestamp('finalized')
-   * console.log(`Finalized at: ${new Date(timestamp * 1000).toISOString()}`)
+   * const info = await chain.getBlockInfo('finalized')
+   * console.log(`Finalized block ${info.number} at ${new Date(info.timestamp * 1000).toISOString()}`)
    * ```
    */
-  abstract getBlockTimestamp(block: number | 'finalized'): Promise<number>
+  abstract getBlockInfo(block: number | 'finalized' | 'latest'): Promise<BlockInfo>
+
+  /**
+   * Fetch the timestamp of a given block.
+   * @param block - Block number or finality tag
+   * @returns Unix timestamp in seconds
+   * @deprecated Use {@link Chain.getBlockInfo} instead.
+   */
+  async getBlockTimestamp(block: number | 'finalized' | 'latest'): Promise<number> {
+    return (await this.getBlockInfo(block)).timestamp
+  }
   /**
    * Fetch a transaction by its hash.
    *
@@ -708,7 +731,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Confirm a log tx is finalized or wait for it to be finalized.
    *
    * @param opts - Options containing the request, finality level, and optional cancel promise
-   * @returns true when the transaction is finalized
+   * @returns Some block info at or after tx finalization
    *
    * @throws {@link CCIPTransactionNotFinalizedError} if the transaction is not included (e.g., due to a reorg)
    *
@@ -725,41 +748,20 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * }
    * ```
    */
-  async waitFinalized({
-    request: { log },
-    finality = 'finalized',
-    abort,
-  }: {
+  async waitFinalized(opts: {
     request: PickDeep<
       CCIPRequest,
       `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
     >
-    finality?: number | 'finalized'
+    finality?: Parameters<Chain['getBlockInfo']>[0]
     abort?: AbortSignal
-  }): Promise<true> {
-    if (!log.blockTimestamp || Date.now() / 1e3 - log.blockTimestamp > 60) {
-      // only try to fetch tx if request is old enough (>60s)
-      const [trans, finalizedTs] = await Promise.all([
-        this.getTransaction(log.transactionHash),
-        this.getBlockTimestamp(finality),
-      ])
-      if (trans.timestamp <= finalizedTs) return true
-    }
-    const watch = abort ? AbortSignal.any([this.abort, abort]) : this.abort
-    for await (const l of this.getLogs({
-      address: log.address,
-      startBlock: log.blockNumber - 10,
-      endBlock: finality,
-      topics: [log.topics[0]!],
-      watch,
-    })) {
-      if (l.transactionHash === log.transactionHash) {
-        return true
-      } else if (l.blockNumber > log.blockNumber) {
-        break
-      }
-    }
-    throw new CCIPTransactionNotFinalizedError(log.transactionHash)
+    /** How many blocks past the original tx blockNumber must be finalized
+     *  without the tx reappearing before we declare it reorged out. Default: 10 */
+    reorgSafetyBlocks?: number
+    /** Delay in ms between block-height poller iterations. Default: 5000 */
+    pollIntervalMs?: number
+  }): ReturnType<Chain['getBlockInfo']> {
+    return waitFinalized(this, opts)
   }
   /**
    * An async generator that yields logs based on the provided options.

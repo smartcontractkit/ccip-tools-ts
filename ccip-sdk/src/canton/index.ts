@@ -1,6 +1,7 @@
 import { type BytesLike, hexlify, id as keccak256Utf8 } from 'ethers'
 
 import {
+  type BlockInfo,
   type ChainContext,
   type ChainStatic,
   type GetBalanceOpts,
@@ -296,12 +297,12 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * {@inheritDoc Chain.getBlockTimestamp}
-   * @throws {@link CCIPNotImplementedError} for numeric blocks (Canton ledger uses offsets, not block numbers)
+   * {@inheritDoc Chain.getBlockInfo}
+   * @throws {@link CCIPNotImplementedError} Canton ledger uses offsets, not block numbers
    */
-  getBlockTimestamp(block: number | 'finalized'): Promise<number> {
+  getBlockInfo(block: number | 'finalized' | 'latest'): Promise<BlockInfo> {
     throw new CCIPNotImplementedError(
-      `CantonChain.getBlockTimestamp: block ${block} — Canton uses ledger offsets, not block numbers`,
+      `CantonChain.getBlockInfo: block ${block} — Canton uses ledger offsets, not block numbers`,
     )
   }
 

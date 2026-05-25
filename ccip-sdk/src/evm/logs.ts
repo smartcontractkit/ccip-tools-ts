@@ -42,7 +42,7 @@ export async function* getEvmLogs(
   filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag>,
   ctx: {
     provider: JsonRpcApiProvider
-    getBlockTimestamp: (block: EVMEndBlockTag) => Promise<number>
+    getBlockInfo: (block: EVMEndBlockTag) => Promise<{ number: number; timestamp: number }>
     abort?: AbortSignal
   } & WithLogger,
 ): AsyncIterableIterator<Log & { blockTimestamp: number }> {
@@ -72,7 +72,7 @@ export async function* getEvmLogs(
   filter.endBlock ||= 'latest'
   const { number: endBlock } = (await provider.getBlock(filter.endBlock))!
   filter.startBlock ??= await getSomeBlockNumberBefore(
-    (block: number) => ctx.getBlockTimestamp(block), // cached
+    async (block: number) => (await ctx.getBlockInfo(block)).timestamp,
     endBlock,
     filter.startTime!,
     ctx,
@@ -95,7 +95,7 @@ export async function* getEvmLogs(
       latestLogBlockNumber = Math.max(latestLogBlockNumber, logs[logs.length - 1]!.blockNumber)
     const logs_ = await Promise.all(
       logs.map(async (l) =>
-        Object.assign(l, { blockTimestamp: await ctx.getBlockTimestamp(l.blockNumber) }),
+        Object.assign(l, { blockTimestamp: (await ctx.getBlockInfo(l.blockNumber)).timestamp }),
       ),
     )
     yield* logs_
@@ -120,7 +120,7 @@ export async function* getEvmLogs(
       latestLogBlockNumber = Math.max(latestLogBlockNumber, logs[logs.length - 1]!.blockNumber)
     const logs_ = await Promise.all(
       logs.map(async (l) =>
-        Object.assign(l, { blockTimestamp: await ctx.getBlockTimestamp(l.blockNumber) }),
+        Object.assign(l, { blockTimestamp: (await ctx.getBlockInfo(l.blockNumber)).timestamp }),
       ),
     )
     yield* logs_

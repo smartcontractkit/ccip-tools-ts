@@ -1,49 +1,7 @@
-import { spawn } from 'child_process'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
-import path from 'path'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const CLI_PATH = path.join(__dirname, '..', 'index.ts')
-
-const RPCS = [
-  process.env['RPC_SEPOLIA'] || 'https://ethereum-sepolia-rpc.publicnode.com',
-  process.env['RPC_AVAX'] || 'https://avalanche-fuji-c-chain-rpc.publicnode.com',
-  process.env['RPC_APTOS'] || 'testnet',
-  process.env['RPC_SOLANA'] || 'https://api.devnet.solana.com',
-  process.env['RPC_TON'] || 'https://testnet.toncenter.com/api/v2',
-]
-
-async function spawnCLI(
-  args: string[],
-  timeout = 60000,
-): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn('node', [CLI_PATH, ...args], { env: { ...process.env } })
-
-    let stdout = ''
-    let stderr = ''
-
-    child.stdout.on('data', (data) => (stdout += data.toString()))
-    child.stderr.on('data', (data) => (stderr += data.toString()))
-
-    const timeoutId = setTimeout(() => {
-      child.kill('SIGTERM')
-      reject(new Error(`CLI command timed out after ${timeout / 1e3}s`))
-    }, timeout)
-
-    child.on('close', (code) => {
-      clearTimeout(timeoutId)
-      resolve({ stdout, stderr, exitCode: code })
-    })
-
-    child.on('error', (err) => {
-      clearTimeout(timeoutId)
-      reject(err)
-    })
-  })
-}
+import { RPCS, spawnCLI } from './e2e-helpers.test.ts'
 
 function buildLaneArgs(
   source: string,
@@ -138,6 +96,11 @@ describe('e2e command lane EVM v2.0', () => {
     assert.match(envelope.onRamp, new RegExp(ONRAMP, 'i'))
     assert.match(envelope.onRampConfig.typeAndVersion, /OnRamp 2\.0\.0/)
     assert.ok(envelope.onRampConfig.router, 'onRampConfig should have router')
+    assert.ok(envelope.onRampConfig.feeQuoterConfig, 'onRampConfig should have feeQuoterConfig')
+    assert.ok(
+      envelope.onRampConfig.feeQuoterConfig.typeAndVersion,
+      'feeQuoterConfig should have typeAndVersion',
+    )
     assert.ok(envelope.offRamp, 'offRamp should be discovered')
     assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 2\.0\.0/)
     assert.ok(envelope.offRampConfig.router, 'offRampConfig should have router')
@@ -173,6 +136,11 @@ describe('e2e command lane EVM <-> Aptos (v1.6)', () => {
     assert.match(envelope.onRamp, new RegExp(EVM_ONRAMP, 'i'))
     assert.match(envelope.onRampConfig.typeAndVersion, /OnRamp 1\.6\.0/)
     assert.ok(envelope.onRampConfig.router, 'onRampConfig should have router')
+    assert.ok(envelope.onRampConfig.feeQuoterConfig, 'onRampConfig should have feeQuoterConfig')
+    assert.ok(
+      envelope.onRampConfig.feeQuoterConfig.typeAndVersion,
+      'feeQuoterConfig should have typeAndVersion',
+    )
     assert.match(envelope.offRamp, new RegExp(APTOS_PACKAGE, 'i'))
     assert.match(envelope.offRampConfig.typeAndVersion, /1\.6\.0/)
     assert.ok(envelope.offRampConfig.router, 'offRampConfig should have router')
@@ -204,6 +172,10 @@ describe('e2e command lane EVM <-> Aptos (v1.6)', () => {
     assert.match(envelope.onRamp, new RegExp(APTOS_PACKAGE, 'i'))
     assert.match(envelope.onRampConfig.typeAndVersion, /1\.6\.0/)
     assert.ok(envelope.onRampConfig.router, 'onRampConfig should have router')
+    assert.ok(
+      envelope.onRampConfig.feeQuoterConfig,
+      'onRampConfig (Aptos) should have feeQuoterConfig',
+    )
     assert.match(envelope.offRamp, new RegExp(EVM_OFFRAMP, 'i'))
     assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 1\.6\.0/)
     assert.ok(envelope.offRampConfig.router, 'offRampConfig should have router')
@@ -242,6 +214,11 @@ describe('e2e command lane EVM <-> Solana (v1.6)', () => {
     assert.match(envelope.onRamp, new RegExp(EVM_ONRAMP, 'i'))
     assert.match(envelope.onRampConfig.typeAndVersion, /OnRamp 1\.6\.0/)
     assert.ok(envelope.onRampConfig.router, 'onRampConfig should have router')
+    assert.ok(envelope.onRampConfig.feeQuoterConfig, 'onRampConfig should have feeQuoterConfig')
+    assert.ok(
+      envelope.onRampConfig.feeQuoterConfig.typeAndVersion,
+      'feeQuoterConfig should have typeAndVersion',
+    )
     assert.match(envelope.offRamp, new RegExp(SOLANA_OFFRAMP))
     assert.match(envelope.offRampConfig.typeAndVersion, /1\.6\./)
     assert.ok(envelope.offRampConfig.router, 'offRampConfig should have router')
@@ -273,6 +250,10 @@ describe('e2e command lane EVM <-> Solana (v1.6)', () => {
     assert.match(envelope.onRamp, new RegExp(SOLANA_ONRAMP))
     assert.match(envelope.onRampConfig.typeAndVersion, /1\.6\./)
     assert.ok(envelope.onRampConfig.router, 'onRampConfig should have router')
+    assert.ok(
+      envelope.onRampConfig.feeQuoterConfig,
+      'onRampConfig (Solana) should have feeQuoterConfig',
+    )
     assert.match(envelope.offRamp, new RegExp(EVM_OFFRAMP, 'i'))
     assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 1\.6\.0/)
     assert.ok(envelope.offRampConfig.router, 'offRampConfig should have router')
@@ -307,6 +288,26 @@ describe('e2e command lane EVM <-> TON (v1.6)', () => {
     assert.match(envelope.onRamp, new RegExp(TON_ONRAMP.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     assert.match(envelope.onRampConfig.typeAndVersion, /1\.6\.0/)
     assert.ok(envelope.onRampConfig.router, 'onRampConfig should have router')
+    assert.ok(
+      envelope.onRampConfig.feeQuoterConfig,
+      'onRampConfig (TON) should have feeQuoterConfig',
+    )
+    assert.ok(
+      envelope.onRampConfig.feeQuoterConfig.maxFeeJuelsPerMsg !== undefined,
+      'feeQuoterConfig should have maxFeeJuelsPerMsg',
+    )
+    assert.ok(
+      envelope.onRampConfig.feeQuoterConfig.linkToken,
+      'feeQuoterConfig should have linkToken',
+    )
+    assert.ok(
+      envelope.onRampConfig.feeQuoterConfig.usdPerUnitGas,
+      'feeQuoterConfig should have usdPerUnitGas',
+    )
+    assert.ok(
+      envelope.onRampConfig.feeQuoterConfig.defaultTxGasLimit !== undefined,
+      'feeQuoterConfig should have defaultTxGasLimit',
+    )
     assert.match(envelope.offRamp, /^0x[0-9a-fA-F]{40}$/, 'offRamp should be an EVM address')
     assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 1\.6\.0/)
     assert.ok(envelope.offRampConfig.router, 'offRampConfig should have router')
@@ -329,6 +330,11 @@ describe('e2e command lane EVM <-> TON (v1.6)', () => {
     assert.match(envelope.onRamp, new RegExp(EVM_ONRAMP_TON, 'i'))
     assert.match(envelope.onRampConfig.typeAndVersion, /OnRamp 1\.6\.0/)
     assert.ok(envelope.onRampConfig.router, 'onRampConfig should have router')
+    assert.ok(envelope.onRampConfig.feeQuoterConfig, 'onRampConfig should have feeQuoterConfig')
+    assert.ok(
+      envelope.onRampConfig.feeQuoterConfig.typeAndVersion,
+      'feeQuoterConfig should have typeAndVersion',
+    )
     assert.match(envelope.offRamp, /^0:[0-9a-fA-F]+$/, 'offRamp should be a raw TON address')
     assert.match(envelope.offRampConfig.typeAndVersion, /1\.6\.0/)
     assert.ok(envelope.offRampConfig.router, 'offRampConfig should have router')

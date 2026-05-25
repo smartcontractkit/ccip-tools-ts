@@ -97,7 +97,7 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
       output.write('onRampConfig =', onRampConfig)
       break
     case Format.pretty:
-      output.write(`OnRamp (${sourceNetwork.name}):`)
+      output.write(`OnRamp (${sourceNetwork.name}) [${sourceNetwork.family}]:`)
       prettyTable.call(ctx, { onRamp, ...onRampConfig })
       break
     default:
@@ -142,7 +142,7 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
       output.write('offRampConfig =', offRampConfig)
       break
     case Format.pretty:
-      output.write(`OffRamp (${destNetwork.name}):`)
+      output.write(`OffRamp (${destNetwork.name}) [${destNetwork.family}]:`)
       prettyTable.call(ctx, { offRamp, ...offRampConfig })
       break
     default:

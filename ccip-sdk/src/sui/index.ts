@@ -8,6 +8,7 @@ import { type BytesLike, dataLength, hexlify, isBytesLike, isHexString } from 'e
 import type { SetOptional } from 'type-fest'
 
 import {
+  type BlockInfo,
   type ChainContext,
   type ChainStatic,
   type GetBalanceOpts,
@@ -158,13 +159,19 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Object.assign(chain, { url })
   }
 
-  /** {@inheritDoc Chain.getBlockTimestamp} */
-  async getBlockTimestamp(block: number | 'finalized'): Promise<number> {
-    if (typeof block !== 'number' || block <= 0) return Math.floor(Date.now() / 1000)
+  /** {@inheritDoc Chain.getBlockInfo} */
+  async getBlockInfo(block: number | 'finalized' | 'latest'): Promise<BlockInfo> {
+    if (typeof block !== 'number' || block <= 0) {
+      const now = Math.floor(Date.now() / 1000)
+      return { number: now, timestamp: now }
+    }
     const checkpoint = await this.client.getCheckpoint({
       id: String(block),
     })
-    return Number(checkpoint.timestampMs) / 1000
+    return {
+      number: Number(checkpoint.sequenceNumber),
+      timestamp: Number(checkpoint.timestampMs) / 1000,
+    }
   }
 
   /** {@inheritDoc Chain.getTransaction} */

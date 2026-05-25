@@ -9,6 +9,7 @@ import { type Memoized, memoize } from 'micro-memoize'
 import { streamTransactionsForAddress } from './logs.ts'
 import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
 import {
+  type BlockInfo,
   type ChainContext,
   type ChainStatic,
   type GetBalanceOpts,
@@ -157,7 +158,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       maxSize: 100,
     })
 
-    this.getBlockTimestamp = memoize(this.getBlockTimestamp.bind(this), {
+    this.getBlockInfo = memoize(this.getBlockInfo.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
@@ -216,6 +217,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
     let fetchFn: typeof fetch | undefined
     let httpAdapter: AxiosAdapter | undefined
+    // For known public providers, detect network from URL to avoid an API call during init
+    // (free-tier endpoints are rate-limited and return transient 5xx errors).
+    let isMainnetHint: boolean | undefined
+
     if (['toncenter.com', 'tonapi.io'].some((d) => url.includes(d))) {
       logger.warn(
         'Public TONCenter API calls are rate-limited to ~1 req/sec, some commands may be slow',
@@ -224,6 +229,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       httpAdapter = (getAdapter as (name: string, config: object) => AxiosAdapter)('fetch', {
         env: { fetch: fetchFn },
       })
+      // testnet.toncenter.com / testnet.tonapi.io → testnet; bare domain → mainnet
+      isMainnetHint = !url.includes('testnet.')
     }
 
     // Wrap the adapter (or the default 'http' adapter) so that every TonClient axios
@@ -242,10 +249,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
     const client = new TonClient({ endpoint: url, httpAdapter })
     try {
-      const chain = await this.fromClient(client, {
-        ...ctx,
-        fetchFn,
-      })
+      const chain =
+        isMainnetHint !== undefined
+          ? new TONChain(client, networkInfo(isMainnetHint ? 'ton-mainnet' : 'ton-testnet'), {
+              ...ctx,
+              fetchFn,
+            })
+          : await this.fromClient(client, { ...ctx, fetchFn })
       logger.debug(`Connected to TON V2 endpoint: ${url}`)
       return chain
     } catch (error) {
@@ -265,15 +275,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @returns Unix timestamp in seconds
    * @throws {@link CCIPNotImplementedError} if lt is not in cache
    */
-  async getBlockTimestamp(block: number | 'finalized'): Promise<number> {
+  async getBlockInfo(block: number | 'finalized' | 'latest'): Promise<BlockInfo> {
     if (typeof block != 'number') {
-      return Promise.resolve(Math.floor(Date.now() / 1000))
+      const now = Math.floor(Date.now() / 1000)
+      return { number: now, timestamp: now }
     }
 
     // For TON, we cannot look up timestamp by lt alone without the account address.
     // The lt must have been cached during a previous getLogs or getTransaction call.
     throw new CCIPNotImplementedError(
-      `getBlockTimestamp: lt ${block} not in cache. ` +
+      `getBlockInfo: lt ${block} not in cache. ` +
         `TON requires lt to be cached from getLogs or getTransaction calls first.`,
     )
   }
@@ -336,10 +347,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       address = new Address(0, Buffer.from(toBeArray(tx.address, 32)))
     }
 
-    // Cache lt → timestamp for later getBlockTimestamp lookups
-    ;(this.getBlockTimestamp as Memoized<typeof this.getBlockTimestamp, { async: true }>).cache.set(
+    // Cache lt → timestamp for later getBlockInfo lookups
+    ;(this.getBlockInfo as Memoized<typeof this.getBlockInfo, { async: true }>).cache.set(
       [Number(tx.lt)],
-      Promise.resolve(tx.now),
+      Promise.resolve({ number: Number(tx.lt), timestamp: tx.now }),
     )
 
     // Extract logs from outgoing external messages
@@ -479,6 +490,50 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const sequenceNumber = BigInt(destStack.readBigNumber().toString())
     const allowlistEnabled = destStack.readBoolean()
 
+    const feeQuoterAddress = Address.parse(feeQuoter)
+    const [{ stack: fqStaticStack }, { stack: fqDestStack }] = await Promise.all([
+      this.provider.runMethod(feeQuoterAddress, 'staticConfig', []),
+      this.provider.runMethod(feeQuoterAddress, 'destChainConfig', [
+        { type: 'int', value: destChainSelector },
+      ]),
+    ])
+
+    // FeeQuoter staticConfig() -> maxFeeJuelsPerMsg: uint96, linkToken: address, tokenPriceStalenessThreshold: uint32
+    const maxFeeJuelsPerMsg = fqStaticStack.readBigNumber()
+    const linkToken = fqStaticStack.readAddress().toString()
+    const tokenPriceStalenessThreshold = fqStaticStack.readNumber()
+
+    // FeeQuoter destChainConfig() -> 18 FeeQuoterDestChainConfig scalar fields, then usdPerUnitGas cell
+    const destChainConfig = {
+      isEnabled: fqDestStack.readBoolean(),
+      maxNumberOfTokensPerMsg: fqDestStack.readNumber(),
+      maxDataBytes: fqDestStack.readNumber(),
+      maxPerMsgGasLimit: fqDestStack.readNumber(),
+      destGasOverhead: fqDestStack.readNumber(),
+      destGasPerPayloadByteBase: fqDestStack.readNumber(),
+      destGasPerPayloadByteHigh: fqDestStack.readNumber(),
+      destGasPerPayloadByteThreshold: fqDestStack.readNumber(),
+      destDataAvailabilityOverheadGas: fqDestStack.readNumber(),
+      destGasPerDataAvailabilityByte: fqDestStack.readNumber(),
+      destDataAvailabilityMultiplierBps: fqDestStack.readNumber(),
+      chainFamilySelector: fqDestStack.readNumber(),
+      defaultTokenFeeUsdCents: fqDestStack.readNumber(),
+      defaultTokenDestGasOverhead: fqDestStack.readNumber(),
+      defaultTxGasLimit: fqDestStack.readNumber(),
+      gasMultiplierWeiPerEth: fqDestStack.readBigNumber(),
+      gasPriceStalenessThreshold: fqDestStack.readNumber(),
+      networkFeeUsdCents: fqDestStack.readNumber(),
+    }
+
+    // usdPerUnitGas is a cell ref following the 18 scalar fields (GasPrice struct)
+    const usdPerUnitGasCell = fqDestStack.readCell()
+    const gasSlice = usdPerUnitGasCell.beginParse()
+    const usdPerUnitGas = {
+      executionGasPrice: gasSlice.loadUintBig(112),
+      dataAvailabilityGasPrice: gasSlice.loadUintBig(112),
+      timestamp: gasSlice.loadUintBig(64),
+    }
+
     return {
       chainSelector,
       feeQuoter,
@@ -489,6 +544,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       sequenceNumber,
       allowlistEnabled,
       typeAndVersion,
+      feeQuoterConfig: {
+        maxFeeJuelsPerMsg,
+        linkToken,
+        tokenPriceStalenessThreshold,
+        usdPerUnitGas,
+        ...destChainConfig,
+      },
     }
   }
 

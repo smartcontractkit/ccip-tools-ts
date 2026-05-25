@@ -54,8 +54,14 @@ class MockChain extends Chain {
     this.mockOnRampForOffRamp.set(offRamp, onRamp)
   }
 
-  async getBlockTimestamp(_block: number | 'finalized'): Promise<number> {
-    return this.mockBlockTimestamp
+  override async getBlockTimestamp(block: number | 'finalized'): Promise<number> {
+    return (await this.getBlockInfo(block)).timestamp
+  }
+
+  async getBlockInfo(
+    _block: number | 'finalized' | 'latest',
+  ): Promise<{ number: number; timestamp: number }> {
+    return { number: 1000, timestamp: this.mockBlockTimestamp }
   }
 
   async getTransaction(_hash: string): Promise<ChainTransaction> {
