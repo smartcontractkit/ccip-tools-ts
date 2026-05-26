@@ -39,6 +39,7 @@ export {
 // Specialized errors - Lane & Routing
 export {
   CCIPLaneNotFoundError,
+  CCIPLaneVersionUnsupportedError,
   CCIPOffRampNotFoundError,
   CCIPOnRampRequiredError,
 } from './specialized.ts'
@@ -66,7 +67,11 @@ export {
 } from './specialized.ts'
 
 // Specialized errors - ExtraArgs
-export { CCIPExtraArgsInvalidError, CCIPExtraArgsParseError } from './specialized.ts'
+export {
+  CCIPExtraArgsEncodingUnsupportedError,
+  CCIPExtraArgsInvalidError,
+  CCIPExtraArgsParseError,
+} from './specialized.ts'
 
 // Specialized errors - Token & Registry
 export {
@@ -75,6 +80,7 @@ export {
   CCIPTokenNotConfiguredError,
   CCIPTokenNotFoundError,
   CCIPTokenNotInRegistryError,
+  CCIPTokenNotRegisteredError,
 } from './specialized.ts'
 
 // Specialized errors - Contract Type
@@ -108,9 +114,7 @@ export {
   CCIPExtraArgsLengthInvalidError,
   CCIPLogDataMissingError,
   CCIPSolanaComputeUnitsExceededError,
-  CCIPSolanaExtraArgsEncodingError,
   CCIPSolanaFeeResultInvalidError,
-  CCIPSolanaLaneVersionUnsupportedError,
   CCIPSolanaLookupTableNotFoundError,
   CCIPSolanaOffRampEventsNotFoundError,
   CCIPSolanaRefAddressesNotFoundError,
@@ -131,26 +135,17 @@ export {
 // Specialized errors - Aptos-specific
 export {
   CCIPAptosAddressModuleRequiredError,
-  CCIPAptosExtraArgsEncodingError,
   CCIPAptosExtraArgsV2RequiredError,
-  CCIPAptosHasherVersionUnsupportedError,
-  CCIPAptosLogInvalidError,
   CCIPAptosNetworkUnknownError,
   CCIPAptosRegistryTypeInvalidError,
-  CCIPAptosTokenNotRegisteredError,
   CCIPAptosTopicInvalidError,
   CCIPAptosTransactionInvalidError,
   CCIPAptosTransactionTypeInvalidError,
   CCIPAptosTransactionTypeUnexpectedError,
-  CCIPAptosWalletInvalidError,
 } from './specialized.ts'
 
 // Specialized errors - Sui-specific
-export {
-  CCIPSuiHasherVersionUnsupportedError,
-  CCIPSuiLogInvalidError,
-  CCIPSuiMessageVersionInvalidError,
-} from './specialized.ts'
+export { CCIPSuiMessageVersionInvalidError } from './specialized.ts'
 
 // Specialized errors - Borsh
 export { CCIPBorshMethodUnknownError, CCIPBorshTypeUnknownError } from './specialized.ts'
@@ -190,6 +185,38 @@ export {
   CCIPInsufficientBalanceError,
   CCIPInteractiveRequiredError,
 } from './specialized.ts'
+
+// ---------------------------------------------------------------------------
+// Deprecated in v1.7 (2026-05-25) — prefer the generic equivalents above.
+// These re-exports will be removed in a future major version.
+// ---------------------------------------------------------------------------
+
+/** @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPHasherVersionUnsupportedError} with chain='Sui'. */
+export { CCIPSuiHasherVersionUnsupportedError } from './specialized.ts'
+
+/** @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPHasherVersionUnsupportedError} with chain='Aptos'. */
+export { CCIPAptosHasherVersionUnsupportedError } from './specialized.ts'
+
+/** @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPLogDataInvalidError} with chain option. */
+export { CCIPSuiLogInvalidError } from './specialized.ts'
+
+/** @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPLogDataInvalidError} with chain option. */
+export { CCIPAptosLogInvalidError } from './specialized.ts'
+
+/** @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPWalletInvalidError} with className option. */
+export { CCIPAptosWalletInvalidError } from './specialized.ts'
+
+/** @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPExtraArgsEncodingUnsupportedError} with chainFamily='SVM'. */
+export { CCIPSolanaExtraArgsEncodingError } from './specialized.ts'
+
+/** @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPExtraArgsEncodingUnsupportedError} with chainFamily='Aptos'. */
+export { CCIPAptosExtraArgsEncodingError } from './specialized.ts'
+
+/** @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPLaneVersionUnsupportedError}. */
+export { CCIPSolanaLaneVersionUnsupportedError } from './specialized.ts'
+
+/** @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPTokenNotRegisteredError}. */
+export { CCIPAptosTokenNotRegisteredError } from './specialized.ts'
 
 // HTTP Status codes (re-exported from root)
 export { HttpStatus, isServerError, isTransientHttpStatus } from '../http-status.ts'

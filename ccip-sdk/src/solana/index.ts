@@ -50,11 +50,11 @@ import {
   CCIPDataFormatUnsupportedError,
   CCIPExecutionReportChainMismatchError,
   CCIPExecutionStateInvalidError,
+  CCIPExtraArgsEncodingUnsupportedError,
   CCIPExtraArgsInvalidError,
   CCIPExtraArgsLengthInvalidError,
   CCIPLogDataMissingError,
   CCIPLogsAddressRequiredError,
-  CCIPSolanaExtraArgsEncodingError,
   CCIPSolanaOffRampEventsNotFoundError,
   CCIPSplTokenInvalidError,
   CCIPTokenAccountNotFoundError,
@@ -959,7 +959,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @throws {@link CCIPSolanaExtraArgsEncodingError} if SVMExtraArgsV1 encoding is attempted
    */
   static encodeExtraArgs(args: ExtraArgs): string {
-    if ('computeUnits' in args) throw new CCIPSolanaExtraArgsEncodingError()
+    if ('computeUnits' in args)
+      throw new CCIPExtraArgsEncodingUnsupportedError(ChainFamily.Solana, 'EVMExtraArgsV2 format')
     const gasLimitUint128Le = toLeArray(args.gasLimit ?? 0n, 16)
     return concat([
       EVMExtraArgsV2Tag,

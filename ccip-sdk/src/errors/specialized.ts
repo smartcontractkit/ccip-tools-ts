@@ -1077,6 +1077,109 @@ export class CCIPLbtcAttestationNotApprovedError extends CCIPError {
   }
 }
 
+// Lane Version
+
+/**
+ * Thrown when lane version is not supported.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const lane = await chain.getLane(onRamp, offRamp)
+ * } catch (error) {
+ *   if (error instanceof CCIPLaneVersionUnsupportedError) {
+ *     console.log(`Unsupported version: ${error.context.version}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPLaneVersionUnsupportedError extends CCIPError {
+  override readonly name = 'CCIPLaneVersionUnsupportedError'
+  /** Creates a lane version unsupported error. */
+  constructor(version: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.LANE_VERSION_UNSUPPORTED, `Unsupported lane version: ${version}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, version },
+    })
+  }
+}
+
+// Token Registration
+
+/**
+ * Thrown when token is not registered in a chain's token admin registry.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getRegistryTokenConfig(registry, token)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenNotRegisteredError) {
+ *     console.log(`Token ${error.context.token} not in registry`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPTokenNotRegisteredError extends CCIPError {
+  override readonly name = 'CCIPTokenNotRegisteredError'
+  /** Creates a token not registered error. */
+  constructor(token: string, registry: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.TOKEN_NOT_REGISTERED,
+      `Token=${token} not registered in registry=${registry}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, token, registry },
+      },
+    )
+  }
+}
+
+// ExtraArgs Encoding
+
+/**
+ * Thrown when a chain family cannot encode the given extraArgs format.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   chain.encodeExtraArgs(unsupportedArgs)
+ * } catch (error) {
+ *   if (error instanceof CCIPExtraArgsEncodingUnsupportedError) {
+ *     console.log(`${error.context.chainFamily} only supports: ${error.context.supportedFormats}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPExtraArgsEncodingUnsupportedError extends CCIPError {
+  override readonly name = 'CCIPExtraArgsEncodingUnsupportedError'
+  /** Creates an extraArgs encoding unsupported error. */
+  constructor(
+    chainFamily: typeof ChainFamily.Solana | typeof ChainFamily.Aptos,
+    supportedFormats: string,
+    options?: CCIPErrorOptions,
+  ) {
+    const ERROR_CODE_MAP: Record<
+      typeof ChainFamily.Solana | typeof ChainFamily.Aptos,
+      CCIPErrorCode
+    > = {
+      SVM: CCIPErrorCode.EXTRA_ARGS_SOLANA_EVM_ONLY,
+      APTOS: CCIPErrorCode.EXTRA_ARGS_APTOS_RESTRICTION,
+    }
+    super(
+      ERROR_CODE_MAP[chainFamily],
+      `${chainFamily} extraArgs encoding only supports ${supportedFormats}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, chainFamily, supportedFormats },
+      },
+    )
+  }
+}
+
 // Solana
 
 /**
@@ -1985,12 +2088,17 @@ export class CCIPContractNotRouterError extends CCIPError {
 export class CCIPLogDataInvalidError extends CCIPError {
   override readonly name = 'CCIPLogDataInvalidError'
   /** Creates a log data invalid error. */
-  constructor(data: unknown, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.LOG_DATA_INVALID, `Invalid log data: ${String(data)}`, {
-      ...options,
-      isTransient: false,
-      context: { ...options?.context, data },
-    })
+  constructor(data: unknown, options?: CCIPErrorOptions & { chain?: ChainFamily }) {
+    const chain = options?.chain
+    super(
+      CCIPErrorCode.LOG_DATA_INVALID,
+      `Invalid ${chain ? chain + ' ' : ''}log data: ${String(data)}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, data, ...(chain && { chain }) },
+      },
+    )
   }
 }
 
@@ -2013,10 +2121,15 @@ export class CCIPLogDataInvalidError extends CCIPError {
 export class CCIPWalletInvalidError extends CCIPError {
   override readonly name = 'CCIPWalletInvalidError'
   /** Creates a wallet invalid error. */
-  constructor(wallet: unknown, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.WALLET_INVALID, `Wallet must be a Signer, got ${String(wallet)}`, {
+  constructor(wallet: unknown, options?: CCIPErrorOptions & { className?: string }) {
+    const className = options?.className
+    const msg = className
+      ? `${className} requires a valid wallet, got ${String(wallet)}`
+      : `Wallet must be a Signer, got ${String(wallet)}`
+    super(CCIPErrorCode.WALLET_INVALID, msg, {
       ...options,
       isTransient: false,
+      context: { ...options?.context, ...(className && { className }) },
     })
   }
 }
@@ -2281,6 +2394,8 @@ export class CCIPExtraArgsLengthInvalidError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPExtraArgsEncodingUnsupportedError} with chainFamily='SVM' instead.
+ *
  * Thrown when Solana can only encode EVMExtraArgsV2 but got different args.
  *
  * @example
@@ -2539,6 +2654,8 @@ export class CCIPAptosRegistryTypeInvalidError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPLogDataInvalidError} with chain='Aptos' instead.
+ *
  * Thrown when Aptos log data is invalid.
  *
  * @example
@@ -2565,6 +2682,8 @@ export class CCIPAptosLogInvalidError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPExtraArgsEncodingUnsupportedError} with chainFamily='Aptos' instead.
+ *
  * Thrown when Aptos can only encode specific extra args types.
  *
  * @example
@@ -2594,6 +2713,8 @@ export class CCIPAptosExtraArgsEncodingError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPWalletInvalidError} with className option instead.
+ *
  * Thrown when Aptos wallet is invalid.
  *
  * @example
@@ -2649,6 +2770,8 @@ export class CCIPAptosExtraArgsV2RequiredError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPTokenNotRegisteredError} instead.
+ *
  * Thrown when token is not registered in Aptos registry.
  *
  * @example
@@ -3197,6 +3320,8 @@ export class CCIPCctpDecodeError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPHasherVersionUnsupportedError} with chain='Sui' instead.
+ *
  * Thrown when Sui hasher version is unsupported.
  *
  * @example
@@ -3256,6 +3381,8 @@ export class CCIPSuiMessageVersionInvalidError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPLogDataInvalidError} with chain='Sui' instead.
+ *
  * Thrown when Sui log data is invalid.
  *
  * This error occurs when attempting to decode a Sui event log that doesn't
@@ -3290,6 +3417,8 @@ export class CCIPSuiLogInvalidError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPLaneVersionUnsupportedError} instead.
+ *
  * Thrown when Solana lane version is unsupported.
  *
  * @example
@@ -3346,6 +3475,8 @@ export class CCIPSolanaComputeUnitsExceededError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPHasherVersionUnsupportedError} with chain='Aptos' instead.
+ *
  * Thrown when Aptos hasher version is unsupported.
  *
  * @example

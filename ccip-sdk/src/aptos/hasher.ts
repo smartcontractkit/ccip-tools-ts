@@ -1,12 +1,9 @@
 import { concat, id, keccak256, zeroPadValue } from 'ethers'
 
-import {
-  CCIPAptosHasherVersionUnsupportedError,
-  CCIPExtraArgsInvalidError,
-} from '../errors/index.ts'
+import { CCIPExtraArgsInvalidError, CCIPHasherVersionUnsupportedError } from '../errors/index.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
-import { networkInfo } from '../networks.ts'
+import { ChainFamily, networkInfo } from '../networks.ts'
 import { encodeNumber, encodeRawBytes } from '../shared/bcs-codecs.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import { getAddressBytes } from '../utils.ts'
@@ -34,7 +31,7 @@ export function getAptosLeafHasher<V extends CCIPVersion = CCIPVersion>({
       return ((message: CCIPMessage<typeof CCIPVersion.V1_6>): string =>
         hashV16AptosMessage(message, metadataHash)) as LeafHasher<V>
     default:
-      throw new CCIPAptosHasherVersionUnsupportedError(version)
+      throw new CCIPHasherVersionUnsupportedError(ChainFamily.Aptos, version)
   }
 }
 
