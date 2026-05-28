@@ -12,6 +12,7 @@ import {
   CCIPExecTxRevertedError,
   CCIPLogsRequiresStartError,
   CCIPNotImplementedError,
+  CCIPRateLimitExceededError,
   CCIPTokenPoolChainConfigNotFoundError,
 } from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
@@ -1221,6 +1222,41 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   abstract getTokenAdminRegistryFor(address: string): Promise<string>
+
+  /**
+   * Pre-flight check if the token transfers in a message is supported for given lane, and have enough rate limit
+   * @throws {@link CCIPRateLimitExceededError} if amount exceeds the rate limit (capacity or available) for remote
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if tokenPool or remote config for the lane is not found
+   * @returns true if all token transfers are supported and within the rate limit
+   * @internal
+   */
+  async checkSendMessage({
+    router,
+    destChainSelector,
+    message,
+  }: PickDeep<
+    SendMessageOpts,
+    'router' | 'destChainSelector' | 'message.tokenAmounts'
+  >): Promise<true> {
+    let registry
+    for (const { token, amount } of message.tokenAmounts ?? []) {
+      registry ??= await this.getTokenAdminRegistryFor(router)
+      const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
+      const remote = await this.getTokenPoolRemote(tokenPool!, destChainSelector)
+      if (!remote.outboundRateLimiterState) continue
+      if (amount > remote.outboundRateLimiterState.tokens) {
+        throw new CCIPRateLimitExceededError('OUTBOUND', remote.outboundRateLimiterState, {
+          token,
+          amount,
+          tokenPool: tokenPool!,
+          registry,
+          sourceChainSelector: this.network.chainSelector,
+          destChainSelector,
+        })
+      }
+    }
+    return true
+  }
   /**
    * Fetch the current fee for a given intended message.
    *

@@ -2,8 +2,9 @@ import type { BytesLike } from 'ethers'
 
 import { type CCIPErrorOptions, CCIPError } from './CCIPError.ts'
 import { CCIPErrorCode } from './codes.ts'
+import type { RateLimiterState } from '../chain.ts'
 import { isTransientHttpStatus } from '../http-status.ts'
-import type { ChainFamily } from '../networks.ts'
+import { type ChainFamily, networkInfo } from '../networks.ts'
 import { bigIntReplacer, getAddressBytes, util } from '../utils.ts'
 
 // Chain/Network
@@ -794,6 +795,75 @@ export class CCIPTokenDecimalsInsufficientError extends CCIPError {
         ...options,
         isTransient: false,
         context: { ...options?.context, token, destDecimals, destChain, amount },
+      },
+    )
+  }
+}
+
+/**
+ * Thrown when TokenPool's rate limit is not enough for the requested amount.
+ * Transient: rate limit may refill after some time, or user can reduce amount and retry immediately.
+ * Not transient: amount exceeds total capacity of the pool, so it will never be processable until pool configs change.
+ *
+ * @example
+ * ```typescript
+ * let fee
+ * do {
+ *   try {
+ *     fee = await chain.getFee({
+ *       router,
+ *       destChainSelector,
+ *       message: { receiver, tokenAmounts: [{ token, amount }] },
+ *     })
+ *   } catch (error) {
+ *     if (!(error instanceof CCIPRateLimitExceededError) || !error.isTransient) {
+ *       throw error
+ *     }
+ *     console.log(`Token ${error.context.token} exceeds rate limit, retrying after ${error.retryAfterMs}ms`)
+ *     await sleep(error.retryAfterMs)
+ *   }
+ * } while (fee === undefined)
+ * ```
+ */
+export class CCIPRateLimitExceededError extends CCIPError {
+  override readonly name = 'CCIPRateLimitExceededError'
+  /** Creates a rate limit exceeded error. */
+  constructor(
+    direction: 'OUTBOUND' | 'INBOUND',
+    rateLimiterState: NonNullable<RateLimiterState>,
+    tokenInfo: {
+      token: string
+      amount: bigint
+      registry?: string
+      tokenPool: string
+      sourceChainSelector: bigint
+      destChainSelector: bigint
+    },
+    options?: CCIPErrorOptions,
+  ) {
+    const isTransient = tokenInfo.amount <= rateLimiterState.capacity
+    let retryAfterMs
+    if (isTransient) {
+      retryAfterMs = Number(
+        ((tokenInfo.amount - rateLimiterState.tokens) * 1000n) / rateLimiterState.rate,
+      )
+    }
+    const localNetwork =
+      direction === 'INBOUND'
+        ? networkInfo(tokenInfo.destChainSelector)
+        : networkInfo(tokenInfo.sourceChainSelector)
+    const remoteNetwork =
+      direction === 'INBOUND'
+        ? networkInfo(tokenInfo.sourceChainSelector)
+        : networkInfo(tokenInfo.destChainSelector)
+    super(
+      CCIPErrorCode.RATE_LIMIT_EXCEEDED,
+      `Requested token transfer amount=${tokenInfo.amount} on tokenPool=${tokenInfo.tokenPool} for token=${tokenInfo.token} at "${localNetwork.name}" ${direction === 'INBOUND' ? 'from' : 'to'} "${remoteNetwork.name}" exceeds rate limiter's ${isTransient ? 'available tokens' : 'capacity'}`,
+      {
+        ...options,
+        isTransient,
+        ...(isTransient && { retryAfterMs }),
+        context: { ...options?.context, direction, ...tokenInfo, ...rateLimiterState },
       },
     )
   }

@@ -52,6 +52,7 @@ import {
   CCIPExecTxRevertedError,
   CCIPHasherVersionUnsupportedError,
   CCIPLogDataInvalidError,
+  CCIPRateLimitExceededError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenDecimalsInsufficientError,
   CCIPTokenNotConfiguredError,
@@ -1157,11 +1158,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.getFee} */
-  async getFee({
-    router,
-    destChainSelector,
-    message,
-  }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+  async getFee(opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+    await this.checkSendMessage(opts)
+    const { router, destChainSelector, message } = opts
     const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
     const contract = new Contract(
       router,

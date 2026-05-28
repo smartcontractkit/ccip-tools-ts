@@ -1148,7 +1148,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /** {@inheritDoc Chain.getFee} */
-  getFee({ router, destChainSelector, message }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+  async getFee(opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+    await this.checkSendMessage(opts)
+    const { router, destChainSelector, message } = opts
     const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
     return getFee(this, router, destChainSelector, populatedMessage)
   }

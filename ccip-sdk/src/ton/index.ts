@@ -1119,17 +1119,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /** {@inheritDoc Chain.getFee} */
-  async getFee({
-    router,
-    destChainSelector,
-    message,
-  }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    return getFeeImpl(
-      this,
-      router,
-      destChainSelector,
-      buildMessageForDest(message, networkInfo(destChainSelector).family),
-    )
+  async getFee(opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+    await this.checkSendMessage(opts)
+    const { router, destChainSelector, message } = opts
+    const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
+    return getFeeImpl(this, router, destChainSelector, populatedMessage)
   }
 
   /** {@inheritDoc Chain.generateUnsignedSendMessage} */

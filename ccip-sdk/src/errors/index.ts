@@ -76,6 +76,7 @@ export {
 // Specialized errors - Token & Registry
 export {
   CCIPLegacyTokenPoolsUnsupportedError,
+  CCIPRateLimitExceededError,
   CCIPTokenDecimalsInsufficientError,
   CCIPTokenNotConfiguredError,
   CCIPTokenNotFoundError,
