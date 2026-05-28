@@ -423,10 +423,10 @@ export const SOLANA_DEVNET_TO_SEPOLIA: ForkTestMessage[] = [
   // codepath to mishandle the lane version in ccip-sdk versions prior to 1.7.1.
   {
     messageId: '0xacb7f265a4d02eb1b902c6f171655aabd4b6c7c1d5b4519bee0b261fc2a88c5f',
-    txHash: 'ZHKdh1vcqUVedGtF38feWhKq46kB3d8j3SNTZYXUBDF51bArDVmhDuSSod9oBvwYKEjrm2PqtjDDXpsBvbfbA85',
+    txHash:
+      'ZHKdh1vcqUVedGtF38feWhKq46kB3d8j3SNTZYXUBDF51bArDVmhDuSSod9oBvwYKEjrm2PqtjDDXpsBvbfbA85',
     status: MessageStatus.Failed,
     version: '1.6',
-    description:
-      'failed from Solana Devnet, ready for manual exec — API reports version "1.6.2"',
+    description: 'failed from Solana Devnet, ready for manual exec — API reports version "1.6.2"',
   },
 ]
