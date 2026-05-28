@@ -64,6 +64,8 @@ export const CCIPVersion = {
   V1_2: '1.2.0',
   V1_5: '1.5.0',
   V1_6: '1.6.0',
+  // Hack: Solana support
+  V1_6_2: '1.6.2',
   V2_0: '2.0.0',
 } as const
 /** Type representing one of the supported CCIP versions. */

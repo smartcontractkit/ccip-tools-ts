@@ -1039,6 +1039,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           throw new CCIPSourceChainUnsupportedError(sourceChainSelector)
         return getV12LeafHasher(sourceChainSelector, destChainSelector, onRamp)
       case CCIPVersion.V1_6:
+      case CCIPVersion.V1_6_2:
         return getV16LeafHasher(sourceChainSelector, destChainSelector, onRamp, ctx)
       default:
         throw new CCIPHasherVersionUnsupportedError('EVM', version)
