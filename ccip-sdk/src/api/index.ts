@@ -58,7 +58,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.7.0-85af8e56'
+export const SDK_VERSION = '1.7.0-1d6f78e'
 // generate:end
 
 /** SDK telemetry header name */
@@ -816,7 +816,8 @@ export class CCIPAPIClient {
       dest,
       destChainSelector: dest.chainSelector,
       onRamp: onramp,
-      version: (version?.replace(/-dev$/, '') ?? CCIPVersion.V1_6) as CCIPVersion,
+      version: (version?.replace(/-dev$/, '').replace(/^(\d+\.\d+)(?:\.\d+)?$/, '$1.0') ??
+        CCIPVersion.V1_6) as CCIPVersion,
     }
 
     // Build log from API data
