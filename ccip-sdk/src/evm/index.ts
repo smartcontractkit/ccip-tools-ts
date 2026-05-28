@@ -2236,50 +2236,66 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   override async estimateReceiveExecution(
     opts: Parameters<NonNullable<Chain['estimateReceiveExecution']>>[0],
   ): Promise<number> {
+    let sourceChainSelector: bigint
     const convertAmounts = (
-      tokenAmounts?: readonly ((
+      tokenAmounts: readonly ((
         | { token: string }
         | { destTokenAddress: string; extraData?: string }
       ) & {
         amount: bigint
       })[],
+      registry: string,
     ) =>
-      !tokenAmounts
-        ? undefined
-        : Promise.all(
-            tokenAmounts.map(async (ta) => {
-              if (!('destTokenAddress' in ta)) return ta
-              let amount = ta.amount
-              if (isHexString(ta.extraData, 32)) {
-                // extraData is source token decimals in most pools derived from standard TP contracts;
-                // we can identify for it being exactly 32B and being a small integer; otherwise, assume same decimals
-                const sourceDecimals = toBigInt(ta.extraData)
-                if (0 < sourceDecimals && sourceDecimals <= 36) {
-                  const { decimals: destDecimals } = await this.getTokenInfo(ta.destTokenAddress)
-                  amount =
-                    (amount * BigInt(10) ** BigInt(destDecimals)) /
-                    BigInt(10) ** BigInt(sourceDecimals)
-                  if (amount === 0n)
-                    throw new CCIPTokenDecimalsInsufficientError(
-                      ta.destTokenAddress,
-                      destDecimals,
-                      this.network.name,
-                      formatUnits(amount, sourceDecimals),
-                    )
-                }
-              }
-              return { token: ta.destTokenAddress, amount }
-            }),
-          )
+      Promise.all(
+        tokenAmounts.map(async (ta) => {
+          if (!('destTokenAddress' in ta)) return ta
+          let amount = ta.amount
+          if (isHexString(ta.extraData, 32)) {
+            // extraData is source token decimals in most pools derived from standard TP contracts;
+            // we can identify for it being exactly 32B and being a small integer; otherwise, assume same decimals
+            const sourceDecimals = toBigInt(ta.extraData)
+            if (0 < sourceDecimals && sourceDecimals <= 36) {
+              const { decimals: destDecimals } = await this.getTokenInfo(ta.destTokenAddress)
+              amount =
+                (amount * BigInt(10) ** BigInt(destDecimals)) / BigInt(10) ** BigInt(sourceDecimals)
+              if (amount === 0n)
+                throw new CCIPTokenDecimalsInsufficientError(
+                  ta.destTokenAddress,
+                  destDecimals,
+                  this.network.name,
+                  formatUnits(amount, sourceDecimals),
+                )
+            }
+          }
+          const { tokenPool } = await this.getRegistryTokenConfig(registry, ta.destTokenAddress)
+          const remote = await this.getTokenPoolRemote(tokenPool!, sourceChainSelector)
+          if (remote.inboundRateLimiterState && amount > remote.inboundRateLimiterState.tokens) {
+            throw new CCIPRateLimitExceededError('INBOUND', remote.inboundRateLimiterState, {
+              token: ta.destTokenAddress,
+              amount,
+              sourceChainSelector,
+              destChainSelector: this.network.chainSelector,
+              tokenPool: tokenPool!,
+              registry,
+            })
+          }
+          return { token: ta.destTokenAddress, amount }
+        }),
+      )
 
-    let opts_
+    let opts_, destRouter, destRegistry
     if (!('offRamp' in opts)) {
       const { lane, message, metadata } = await this.getMessageById(opts.messageId)
+      sourceChainSelector = lane.sourceChainSelector
 
       const offRamp =
         ('offRampAddress' in message && message.offRampAddress) ||
         metadata?.offRamp ||
         (await this.apiClient!.getExecutionInput(opts.messageId)).offRamp
+      ;[destRouter, destRegistry] = await Promise.all([
+        this.getRouterForOffRamp(offRamp, message.sourceChainSelector),
+        this.getTokenAdminRegistryFor(offRamp),
+      ])
 
       opts_ = {
         offRamp,
@@ -2289,24 +2305,27 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           receiver: message.receiver,
           sender: message.sender,
           data: message.data,
-          destTokenAmounts: await convertAmounts(message.tokenAmounts),
+          destTokenAmounts: await convertAmounts(message.tokenAmounts, destRegistry),
         },
       }
     } else {
+      sourceChainSelector = opts.message.sourceChainSelector
+      ;[destRouter, destRegistry] = await Promise.all([
+        this.getRouterForOffRamp(opts.offRamp, opts.message.sourceChainSelector),
+        this.getTokenAdminRegistryFor(opts.offRamp),
+      ])
       opts_ = {
         ...opts,
         message: {
           messageId: hexlify(randomBytes(32)),
           ...opts.message,
-          destTokenAmounts: await convertAmounts(opts.message.tokenAmounts),
+          destTokenAmounts: opts.message.tokenAmounts?.length
+            ? await convertAmounts(opts.message.tokenAmounts, destRegistry)
+            : undefined,
         },
       }
     }
 
-    const destRouter = await this.getRouterForOffRamp(
-      opts_.offRamp,
-      opts_.message.sourceChainSelector,
-    )
     return estimateExecGas({ provider: this.provider, router: destRouter, ...opts_ })
   }
 }
