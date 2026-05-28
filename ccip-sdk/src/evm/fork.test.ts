@@ -8,6 +8,7 @@ import { Instance } from 'prool'
 import { createPublicClient, http } from 'viem'
 
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
+import '../solana/index.ts' // register Solana chain family for cross-family message decoding
 import '../ton/index.ts' // register TON chain family for cross-family message decoding
 import { CCIPAPIClient } from '../api/index.ts'
 import { LaneFeature } from '../chain.ts'
@@ -16,7 +17,12 @@ import { NetworkType } from '../networks.ts'
 import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
 import { type ExecutionInput, ExecutionState, MessageStatus } from '../types.ts'
 import { interfaces } from './const.ts'
-import { FUJI_TO_SEPOLIA, SEPOLIA_TO_FUJI, TON_TO_SEPOLIA } from './fork.test.data.ts'
+import {
+  FUJI_TO_SEPOLIA,
+  SEPOLIA_TO_FUJI,
+  SOLANA_DEVNET_TO_SEPOLIA,
+  TON_TO_SEPOLIA,
+} from './fork.test.data.ts'
 import { EVMChain } from './index.ts'
 import { ViemTransportProvider } from './viem/client-adapter.ts'
 
@@ -1502,6 +1508,42 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
 
       console.log(
         `  executed ${msg.messageId.slice(0, 10)}… via API (TON source, gasLimit=1) → state=${execution.receipt.state}`,
+      )
+      assert.equal(execution.receipt.messageId, msg.messageId, 'receipt messageId should match')
+      assert.ok(execution.log.transactionHash, 'should have tx hash')
+      assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
+      assert.equal(execution.receipt.state, ExecutionState.Success)
+
+      sepoliaWithApi.provider.destroy()
+    })
+
+    // Solana Devnet → Sepolia message whose lane.version reported by the API is "1.6.2".
+    // The CCIPVersion enum only knows "1.6.0", so the API-driven manual-exec codepath
+    // must normalize patch-level versions to avoid breaking downstream handling
+    // (e.g. leaf hasher selection in calculateManualExecProof).
+    it('should execute a Solana-source message via API-driven path (Solana Devnet -> Sepolia)', async () => {
+      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+
+      const msg = SOLANA_DEVNET_TO_SEPOLIA[0]!
+
+      const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
+      const sepoliaProvider = new JsonRpcProvider(
+        `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
+      )
+      const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
+        apiClient: stagingApi,
+        logger: testLogger,
+      })
+      const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
+
+      const execution = await sepoliaWithApi.execute({
+        messageId: msg.messageId,
+        wallet: w,
+        gasLimit: 500_000,
+      })
+
+      console.log(
+        `  executed ${msg.messageId.slice(0, 10)}… via API (Solana source) → state=${execution.receipt.state}`,
       )
       assert.equal(execution.receipt.messageId, msg.messageId, 'receipt messageId should match')
       assert.ok(execution.log.transactionHash, 'should have tx hash')
