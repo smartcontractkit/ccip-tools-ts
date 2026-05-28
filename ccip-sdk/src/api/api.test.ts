@@ -626,6 +626,8 @@ describe('CCIPAPIClient', () => {
         ['1.2.0-dev', CCIPVersion.V1_2],
         ['1.5.0-dev', CCIPVersion.V1_5],
         ['1.6.0-dev', CCIPVersion.V1_6],
+        ['1.6.2', CCIPVersion.V1_6],
+        ['1.6.2-dev', CCIPVersion.V1_6],
       ] as const) {
         const response = { ...mockMessageResponse, version: versionStr }
         const customFetch = mock.fn(() =>
