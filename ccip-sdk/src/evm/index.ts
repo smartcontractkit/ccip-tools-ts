@@ -35,6 +35,7 @@ import {
   type GetBalanceOpts,
   type LogFilter,
   type RateLimiterState,
+  type TokenPoolConfig,
   type TokenPoolRemote,
   type TokenPrice,
   type TokenTransferFeeOpts,
@@ -118,6 +119,7 @@ import type TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
 import type USDCTokenPoolProxy_2_0_ABI from './abi/USDCTokenPoolProxy_2_0.ts'
 import type VersionedVerifierResolver_2_0_ABI from './abi/VersionedVerifierResolver_2_0.ts'
 import {
+  type TokenPoolAndProxyABI,
   CCV_INDEXER_URL,
   VersionedContractABI,
   commitsFragments,
@@ -1852,14 +1854,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   async getTokenPoolConfig(
     tokenPool: string,
     feeOpts?: TokenTransferFeeOpts,
-  ): Promise<SetRequired<Awaited<ReturnType<Chain['getTokenPoolConfig']>>, 'typeAndVersion'>> {
+  ): Promise<
+    TokenPoolConfig & {
+      typeAndVersion: string
+      previousPool?: string
+      previousTypeAndVersion?: string
+    }
+  > {
     const [type, version, typeAndVersion] = await this.typeAndVersion(tokenPool)
 
-    let token,
-      router,
-      allowedFinality,
-      tokenTransferFeeConfig,
-      originalTokenPool: string | undefined
+    let token, router, allowedFinality, tokenTransferFeeConfig, previousPool: string | undefined
     if (version < CCIPVersion.V2_0) {
       const contract = new Contract(
         tokenPool,
@@ -1868,6 +1872,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ) as unknown as TypedContract<typeof TokenPool_ABI>
       token = contract.getToken()
       router = contract.getRouter()
+      if (type.endsWith('AndProxy')) {
+        const proxy = new Contract(
+          tokenPool,
+          interfaces.TokenPoolAndProxy,
+          this.provider,
+        ) as unknown as TypedContract<typeof TokenPoolAndProxyABI>
+        const previousPool_ = await proxy.getPreviousPool().catch(() => null)
+        if (previousPool_ && previousPool_ !== ZeroAddress)
+          previousPool = previousPool_ as CleanAddressable<typeof previousPool_>
+      }
     } else {
       if (type === 'USDCTokenPoolProxy') {
         const proxy = new Contract(
@@ -1875,11 +1889,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           interfaces.USDCTokenPoolProxy_v2_0,
           this.provider,
         ) as unknown as TypedContract<typeof USDCTokenPoolProxy_2_0_ABI>
-        originalTokenPool = tokenPool
-        tokenPool = (await proxy.getPools())['cctpV2PoolWithCCV'] as string
+        previousPool = (await proxy.getPools())['cctpV2PoolWithCCV'] as CleanAddressable<
+          Awaited<ReturnType<(typeof proxy)['getPools']>>
+        >['cctpV2PoolWithCCV']
       }
       const contract = new Contract(
-        tokenPool,
+        previousPool ?? tokenPool,
         interfaces.TokenPool_v2_0,
         this.provider,
       ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
@@ -1919,19 +1934,28 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         )
       }
     }
+    let previousTypeAndVersion
+    if (previousPool) previousTypeAndVersion = this.typeAndVersion(previousPool)
 
-    return Promise.all([token, router, allowedFinality, tokenTransferFeeConfig]).then(
-      ([token, router, allowedFinality, tokenTransferFeeConfig]) => {
-        return {
-          token: token as CleanAddressable<typeof token>,
-          router: router as CleanAddressable<typeof router>,
-          typeAndVersion,
-          ...(allowedFinality != null && decodeFinalityAllowed(allowedFinality)),
-          ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
-          ...(originalTokenPool != null && { effectiveTokenPool: tokenPool }),
-        }
-      },
-    )
+    return Promise.all([
+      token,
+      router,
+      allowedFinality,
+      tokenTransferFeeConfig,
+      previousTypeAndVersion,
+    ]).then(([token, router, allowedFinality, tokenTransferFeeConfig, previousTypeAndVersion]) => {
+      return {
+        token: token as CleanAddressable<typeof token>,
+        router: router as CleanAddressable<typeof router>,
+        typeAndVersion,
+        ...(allowedFinality != null && decodeFinalityAllowed(allowedFinality)),
+        ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
+        ...(previousPool != null && {
+          previousPool,
+          previousTypeAndVersion: previousTypeAndVersion![2],
+        }),
+      }
+    })
   }
 
   /**
@@ -1954,7 +1978,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     tokenPool: string,
     remoteChainSelector?: bigint,
   ): Promise<Record<string, TokenPoolRemote>> {
-    const [type, version] = await this.typeAndVersion(tokenPool)
+    const { typeAndVersion, previousPool } = await this.getTokenPoolConfig(tokenPool)
+    const [type, version] = parseTypeAndVersion(typeAndVersion)
 
     let supportedChains: Promise<NetworkInfo[]> | undefined
     if (remoteChainSelector) supportedChains = Promise.resolve([networkInfo(remoteChainSelector)])
@@ -1977,13 +2002,22 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ),
         ),
       )
+      let rlContract = contract
+      // v1.5.0 proxys to v1.4 TPs need to query rate limits from the previous TP
+      if (previousPool) {
+        rlContract = new Contract(
+          previousPool,
+          interfaces.TokenPool_v1_5,
+          this.provider,
+        ) as unknown as TypedContract<typeof TokenPool_1_5_ABI>
+      }
       remoteInfo = supportedChains.then((chains) =>
         Promise.all(
           chains.map((chain) =>
             Promise.all([
               contract.getRemoteToken(chain.chainSelector),
-              resultToObject(contract.getCurrentOutboundRateLimiterState(chain.chainSelector)),
-              resultToObject(contract.getCurrentInboundRateLimiterState(chain.chainSelector)),
+              resultToObject(rlContract.getCurrentOutboundRateLimiterState(chain.chainSelector)),
+              resultToObject(rlContract.getCurrentInboundRateLimiterState(chain.chainSelector)),
             ] as const),
           ),
         ),

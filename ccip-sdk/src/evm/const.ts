@@ -40,6 +40,7 @@ const customErrors = [
 ] as const
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
+export const TokenPoolAndProxyABI = parseAbi(['function getPreviousPool() view returns (address)'])
 
 export const interfaces = {
   Router: new Interface(Router_ABI),
@@ -51,6 +52,7 @@ export const interfaces = {
   TokenPool_v1_6: new Interface(TokenPool_1_6_ABI),
   TokenPool_v1_5_1: new Interface(TokenPool_1_5_1_ABI),
   TokenPool_v1_5: new Interface(TokenPool_1_5_ABI),
+  TokenPoolAndProxy: new Interface(TokenPoolAndProxyABI),
   CommitStore_v1_5: new Interface(CommitStore_1_5_ABI),
   CommitStore_v1_2: new Interface(CommitStore_1_2_ABI),
   OffRamp_v2_0: new Interface(OffRamp_2_0_ABI),
