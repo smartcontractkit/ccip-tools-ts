@@ -61,17 +61,30 @@ async function* fetchTxsForward(
       yield tx
     }
 
-    let delay$ = AbortSignal.timeout(
-      Math.max(
-        Math.ceil((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq)),
-        1,
-      ),
+    const delay = Math.max(
+      Math.ceil((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq)),
+      1,
     )
-    if (opts.watch instanceof AbortSignal) {
-      if (opts.watch.aborted) break
-      delay$ = AbortSignal.any([opts.watch, delay$])
+
+    if (opts.watch instanceof AbortSignal && opts.watch.aborted) {
+      break
     }
-    await signalToPromise(delay$).catch(() => false)
+
+    // NOTE:
+    // We intentionally avoid `AbortSignal.timeout()` here because Node.js
+    // implements it using an unref'd timer internally. Unref'd timers do not
+    // keep the event loop alive, which caused the process to exit while this
+    // polling loop was awaiting the delay between requests.
+    //
+    // Using a normal `setTimeout()` keeps the polling loop alive correctly,
+    // while `signalToPromise(opts.watch)` still allows immediate cancellation
+    // when the external AbortSignal is aborted.
+    await Promise.race([
+      new Promise((resolve) => setTimeout(resolve, delay)),
+      opts.watch instanceof AbortSignal
+        ? signalToPromise(opts.watch).catch(() => false)
+        : undefined,
+    ])
   }
 }
 
