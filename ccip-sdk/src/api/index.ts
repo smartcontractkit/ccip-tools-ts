@@ -816,7 +816,8 @@ export class CCIPAPIClient {
       dest,
       destChainSelector: dest.chainSelector,
       onRamp: onramp,
-      version: (version?.replace(/-dev$/, '') ?? CCIPVersion.V1_6) as CCIPVersion,
+      version: (version?.replace(/-dev$/, '').replace(/^(\d+\.\d+)(?:\.\d+)?$/, '$1.0') ??
+        CCIPVersion.V1_6) as CCIPVersion,
     }
 
     // Build log from API data
