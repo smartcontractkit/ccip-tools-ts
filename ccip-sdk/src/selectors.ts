@@ -805,6 +805,12 @@ const SELECTORS: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '5042': {
+    selector: 6370580034781731079n,
+    name: 'arc-mainnet',
+    network_type: 'MAINNET',
+    family: 'EVM',
+  },
   '5330': {
     selector: 470401360549526817n,
     name: 'superseed-mainnet',
