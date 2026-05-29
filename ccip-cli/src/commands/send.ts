@@ -24,6 +24,7 @@ import {
   type MessageInput,
   CCIPArgumentInvalidError,
   CCIPInsufficientBalanceError,
+  CCIPMethodUnsupportedError,
   CCIPTokenNotFoundError,
   ChainFamily,
   bigIntReplacer,
@@ -33,7 +34,7 @@ import {
   getDataBytes,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
-import { type BytesLike, AbiCoder, formatUnits, toUtf8Bytes } from 'ethers'
+import { type BytesLike, AbiCoder, formatUnits, randomBytes, toUtf8Bytes } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -265,73 +266,95 @@ async function sendMessage(
 
   let walletAddress, wallet
   if (!receiver) {
-    if (sourceNetwork.family !== destNetwork.family)
-      throw new CCIPArgumentInvalidError('receiver', 'required for cross-family transfers')
-    ;[walletAddress, wallet] = await loadChainWallet(source, argv, logger)
+    try {
+      if (sourceNetwork.family !== destNetwork.family)
+        throw new CCIPArgumentInvalidError('receiver', 'required for cross-family transfers')
+      ;[walletAddress, wallet] = await loadChainWallet(source, argv, logger)
+    } catch (err) {
+      if (!argv.onlyGetFee && !argv.onlyEstimate) throw err
+      // if we can't load wallet for receiver, and it's only for estimation, generate a random one
+      walletAddress = decodeAddress(
+        randomBytes(
+          destNetwork.family === ChainFamily.EVM
+            ? 20
+            : destNetwork.family === ChainFamily.TON
+              ? 36
+              : 32,
+        ),
+        destNetwork.family,
+      )
+    }
     receiver = walletAddress // send to self if same family
   }
 
-  if (argv.estimateGasLimit != null || argv.onlyEstimate) {
-    // TODO: implement for all chain families
-    const dest = await getChain(destNetwork.chainSelector)
+  if (argv.estimateGasLimit == null || argv.estimateGasLimit > -100)
+    try {
+      const dest = await getChain(destNetwork.chainSelector)
 
-    if (!walletAddress) {
-      try {
-        ;[walletAddress, wallet] = await loadChainWallet(source, argv, logger)
-      } catch {
-        // pass undefined sender for default
+      if (!walletAddress) {
+        try {
+          ;[walletAddress, wallet] = await loadChainWallet(source, argv, logger)
+        } catch {
+          // pass undefined sender as default
+        }
       }
-    }
-    const estimated = await estimateReceiveExecution({
-      source,
-      dest,
-      routerOrRamp: argv.router,
-      message: {
-        sender: walletAddress,
-        receiver,
-        data,
-        tokenAmounts,
-        ...(!!argv.tokenReceiver && { tokenReceiver: argv.tokenReceiver }),
-        ...(accounts != null && accounts.length && { accounts, accountIsWritableBitmap }),
-      },
-    })
-    argv.gasLimit = Math.ceil(estimated * (1 + (argv.estimateGasLimit ?? 0) / 100))
-    if (argv.onlyEstimate) {
-      // --only-estimate: the estimate IS the data output
-      if (argv.format === Format.json) {
-        output.write(
-          JSON.stringify(
-            {
-              estimated,
-              bufferPercent: argv.estimateGasLimit ?? 0,
-              withBuffer: argv.gasLimit,
-            },
-            bigIntReplacer,
-            2,
-          ),
-        )
-      } else {
-        output.write(
-          'Estimated',
-          destNetwork.family === ChainFamily.Solana ? 'computeUnits' : 'gasLimit',
-          'for sender =',
-          walletAddress,
-          ':',
-          estimated,
-          ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', argv.gasLimit] : []),
-        )
+
+      const estimated = await estimateReceiveExecution({
+        source,
+        dest,
+        routerOrRamp: argv.router,
+        message: {
+          sender: walletAddress,
+          receiver,
+          data,
+          tokenAmounts,
+          ...(!!argv.tokenReceiver && { tokenReceiver: argv.tokenReceiver }),
+          ...(accounts != null && accounts.length && { accounts, accountIsWritableBitmap }),
+        },
+      })
+      argv.gasLimit = Math.ceil(estimated * (1 + (argv.estimateGasLimit ?? 10) / 100))
+      if (argv.onlyEstimate) {
+        // --only-estimate: the estimate IS the data output
+        if (argv.format === Format.json) {
+          output.write(
+            JSON.stringify(
+              {
+                estimated,
+                bufferPercent: argv.estimateGasLimit ?? 0,
+                withBuffer: argv.gasLimit,
+              },
+              bigIntReplacer,
+              2,
+            ),
+          )
+        } else {
+          output.write(
+            'Estimated',
+            destNetwork.family === ChainFamily.Solana ? 'computeUnits' : 'gasLimit',
+            'for sender =',
+            walletAddress,
+            ':',
+            estimated,
+            ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', argv.gasLimit] : []),
+          )
+        }
+        return
       }
-      return
+      // When continuing to send, the estimate is a status message
+      logger.info(
+        'Estimated gasLimit for sender =',
+        walletAddress,
+        ':',
+        estimated,
+        ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', argv.gasLimit] : []),
+      )
+    } catch (err) {
+      // if user requested estimation explicitly, surface any error
+      if (argv.estimateGasLimit != null || argv.onlyEstimate) throw err
+      // otherwise, surface anything other than unimplemented error (e.g. CCIPRateLimitExceededError)
+      if (!(err instanceof CCIPMethodUnsupportedError)) throw err
+      logger.debug('estimateReceiveExecution not supported for', destNetwork.name, '—', err)
     }
-    // When continuing to send, the estimate is a status message
-    logger.info(
-      'Estimated gasLimit for sender =',
-      walletAddress,
-      ':',
-      estimated,
-      ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', argv.gasLimit] : []),
-    )
-  }
 
   // builds a catch-all extraArgs object, which can be massaged by
   // [[Chain.buildMessageForDest]] to create suitable extraArgs with defaults if needed
