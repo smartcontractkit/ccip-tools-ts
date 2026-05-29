@@ -367,27 +367,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return Promise.resolve(router.split('::')[0] + '::onramp')
   }
 
-  /** {@inheritDoc Chain.getTokenForTokenPool} */
-  async getTokenForTokenPool(tokenPool: string): Promise<string> {
-    const modulesNames = (await this._getAccountModulesNames(tokenPool))
-      .reverse()
-      .filter((name) => name.endsWith('token_pool'))
-    let firstErr
-    for (const name of modulesNames) {
-      try {
-        const res = await this.provider.view<[string]>({
-          payload: {
-            function: `${tokenPool}::${name}::get_token`,
-          },
-        })
-        return res[0]
-      } catch (err) {
-        firstErr ??= err as Error
-      }
-    }
-    throw CCIPError.from(firstErr ?? `Could not view 'get_token' in ${tokenPool}`, 'UNKNOWN')
-  }
-
   /** {@inheritDoc Chain.getBalance} */
   async getBalance(opts: GetBalanceOpts): Promise<bigint> {
     const { holder, token } = opts

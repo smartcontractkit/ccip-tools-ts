@@ -26,9 +26,9 @@ import {
   CCIPError,
   CCIPErrorCode,
   CCIPExecutionReportChainMismatchError,
+  CCIPLogDataInvalidError,
   CCIPLogsAddressRequiredError,
   CCIPNotImplementedError,
-  CCIPSuiLogInvalidError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
@@ -393,7 +393,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @throws {@link CCIPError} if token pool type is invalid or state not found
    * @throws {@link CCIPDataFormatUnsupportedError} if view call fails
    */
-  async getTokenForTokenPool(tokenPool: string): Promise<string> {
+  override async getTokenForTokenPool(tokenPool: string): Promise<string> {
     const normalizedTokenPool = normalizeSuiAddress(tokenPool)
 
     // Get objects owned by this package (looking for state pointers)
@@ -578,7 +578,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       (typeof data !== 'string' || !data.startsWith('{')) &&
       (typeof data !== 'object' || isBytesLike(data))
     )
-      throw new CCIPSuiLogInvalidError(util.inspect(log))
+      throw new CCIPLogDataInvalidError(util.inspect(log), { chain: this.family })
     // offload massaging to generic decodeJsonMessage
     try {
       return decodeMessage(data)

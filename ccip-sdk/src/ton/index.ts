@@ -638,14 +638,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
   }
 
-  /**
-   * {@inheritDoc Chain.getTokenForTokenPool}
-   * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
-   */
-  async getTokenForTokenPool(_tokenPool: string): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError('getTokenForTokenPool'))
-  }
-
   /** {@inheritDoc Chain.getTokenInfo} */
   async getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }> {
     const tokenAddress = Address.parse(token)

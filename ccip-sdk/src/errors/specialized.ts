@@ -3,6 +3,7 @@ import type { BytesLike } from 'ethers'
 import { type CCIPErrorOptions, CCIPError } from './CCIPError.ts'
 import { CCIPErrorCode } from './codes.ts'
 import type { RateLimiterState } from '../chain.ts'
+import type { FinalityAllowed, FinalityRequested } from '../extra-args.ts'
 import { isTransientHttpStatus } from '../http-status.ts'
 import { type ChainFamily, networkInfo } from '../networks.ts'
 import { bigIntReplacer, getAddressBytes, util } from '../utils.ts'
@@ -3673,6 +3674,51 @@ export class CCIPViemAdapterError extends CCIPError {
     super(CCIPErrorCode.VIEM_ADAPTER_ERROR, message, {
       ...options,
       isTransient: false,
+    })
+  }
+}
+
+// Finality
+
+/**
+ * Thrown when a receiver contract rejects the requested finality.
+ *
+ * The receiver either does not support `"safe"` (FCR) finality, or requires a higher
+ * minimum confirmation depth than what was requested. Inspect `context.requested` and
+ * `context.allowed` for the exact mismatch.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.estimateReceiveExecution({ offRamp, message })
+ * } catch (error) {
+ *   if (error instanceof CCIPFinalityNotAllowedError) {
+ *     console.log(
+ *       `Receiver ${error.context.receiver} rejected finality`,
+ *       `requested=${error.context.requested}`,
+ *       `allowed=${JSON.stringify(error.context.allowed)}`,
+ *     )
+ *   }
+ * }
+ * ```
+ */
+export class CCIPFinalityNotAllowedError extends CCIPError {
+  override readonly name = 'CCIPFinalityNotAllowedError'
+  /**
+   * Creates a finality not allowed error.
+   * @param requested - The finality value that was requested (`"safe"` or a block depth number).
+   * @param allowed - The finality config the receiver actually accepts.
+   * @param options - Optional error options.
+   */
+  constructor(requested: FinalityRequested, allowed: FinalityAllowed, options?: CCIPErrorOptions) {
+    const detail =
+      requested === 'safe'
+        ? `Receiver does not support "safe" finality`
+        : `Receiver requires minimum finality depth of ${allowed.finalityDepth}, but ${requested} was requested`
+    super(CCIPErrorCode.FINALITY_NOT_ALLOWED, detail, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, requested, allowed },
     })
   }
 }

@@ -2,6 +2,7 @@ import { parseAbi } from 'abitype'
 import { type EventFragment, AbiCoder, Interface } from 'ethers'
 
 import Token_ABI from './abi/BurnMintERC677Token.ts'
+import CCIPReceiver_2_0_ABI from './abi/CCIPReceiver_2_0.ts'
 import CCTPVerifier_2_0_ABI from './abi/CCTPVerifier_2_0.ts'
 import CommitStore_1_2_ABI from './abi/CommitStore_1_2.ts'
 import CommitStore_1_5_ABI from './abi/CommitStore_1_5.ts'
@@ -55,6 +56,7 @@ export const interfaces = {
   TokenPoolAndProxy: new Interface(TokenPoolAndProxyABI),
   CommitStore_v1_5: new Interface(CommitStore_1_5_ABI),
   CommitStore_v1_2: new Interface(CommitStore_1_2_ABI),
+  Receiver_v2_0: new Interface(CCIPReceiver_2_0_ABI),
   OffRamp_v2_0: new Interface(OffRamp_2_0_ABI),
   OffRamp_v1_6: new Interface(OffRamp_1_6_ABI),
   EVM2EVMOffRamp_v1_5: new Interface(EVM2EVMOffRamp_1_5_ABI),

@@ -14,7 +14,7 @@ import {
   JsonRpcProvider,
   WebSocketProvider,
   ZeroAddress,
-  formatUnits,
+  ZeroHash,
   getAddress,
   getNumber,
   hexlify,
@@ -23,7 +23,6 @@ import {
   isHexString,
   randomBytes,
   toBeHex,
-  toBigInt,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 import { memoize } from 'micro-memoize'
@@ -51,11 +50,10 @@ import {
   CCIPError,
   CCIPExecTxNotConfirmedError,
   CCIPExecTxRevertedError,
+  CCIPFinalityNotAllowedError,
   CCIPHasherVersionUnsupportedError,
   CCIPLogDataInvalidError,
-  CCIPRateLimitExceededError,
   CCIPSourceChainUnsupportedError,
-  CCIPTokenDecimalsInsufficientError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
@@ -65,12 +63,15 @@ import {
 } from '../errors/index.ts'
 import {
   type ExtraArgs,
+  type FinalityAllowed,
   type FinalityRequested,
   decodeFinalityAllowed,
   encodeFinality,
 } from '../extra-args.ts'
+import { getDestTokenAmount } from '../gas.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessageV1 } from '../messages.ts'
+import { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from '../networks.ts'
 import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
 import { buildMessageForDest, decodeMessage } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
@@ -98,6 +99,7 @@ import {
   parseTypeAndVersion,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
+import type Receiver_2_0_ABI from './abi/CCIPReceiver_2_0.ts'
 import type CCTPVerifier_2_0_ABI from './abi/CCTPVerifier_2_0.ts'
 import CommitStore_1_2_ABI from './abi/CommitStore_1_2.ts'
 import CommitStore_1_5_ABI from './abi/CommitStore_1_5.ts'
@@ -113,6 +115,7 @@ import EVM2EVMOnRamp_1_2_ABI from './abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
+import type PriceRegistry_1_2 from './abi/PriceRegistry_1_2.ts'
 import type Router_ABI from './abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
 import type TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
@@ -138,8 +141,6 @@ import { type EVMEndBlockTag, getEvmLogs } from './logs.ts'
 import type { CCIPMessage_V1_6_EVM, CCIPMessage_V2_0, CleanAddressable } from './messages.ts'
 import { encodeEVMOffchainTokenData } from './offchain.ts'
 import { type UnsignedEVMTx, resultToObject } from './types.ts'
-import { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from '../networks.ts'
-import type PriceRegistry_1_2 from './abi/PriceRegistry_1_2.ts'
 export type { UnsignedEVMTx }
 
 /** Raw on-chain TokenBucket struct returned by TokenPool rate limiter queries. */
@@ -980,16 +981,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       default:
         throw new CCIPVersionUnsupportedError(version)
     }
-  }
-
-  /** {@inheritDoc Chain.getTokenForTokenPool} */
-  async getTokenForTokenPool(tokenPool: string): Promise<string> {
-    const contract = new Contract(
-      tokenPool,
-      interfaces.TokenPool_v1_6,
-      this.provider,
-    ) as unknown as TypedContract<typeof TokenPool_ABI>
-    return contract.getToken() as Promise<string>
   }
 
   /** {@inheritDoc Chain.getTokenInfo} */
@@ -2236,67 +2227,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   override async estimateReceiveExecution(
     opts: Parameters<NonNullable<Chain['estimateReceiveExecution']>>[0],
   ): Promise<number> {
-    let sourceChainSelector: bigint
-    const convertAmounts = (
-      tokenAmounts: readonly ((
-        | { token: string }
-        | { destTokenAddress: string; extraData?: string }
-      ) & {
-        amount: bigint
-      })[],
-      registry: string,
-    ) =>
-      Promise.all(
-        tokenAmounts.map(async (ta) => {
-          if (!('destTokenAddress' in ta)) return ta
-          let amount = ta.amount
-          if (isHexString(ta.extraData, 32)) {
-            // extraData is source token decimals in most pools derived from standard TP contracts;
-            // we can identify for it being exactly 32B and being a small integer; otherwise, assume same decimals
-            const sourceDecimals = toBigInt(ta.extraData)
-            if (0 < sourceDecimals && sourceDecimals <= 36) {
-              const { decimals: destDecimals } = await this.getTokenInfo(ta.destTokenAddress)
-              amount =
-                (amount * BigInt(10) ** BigInt(destDecimals)) / BigInt(10) ** BigInt(sourceDecimals)
-              if (amount === 0n)
-                throw new CCIPTokenDecimalsInsufficientError(
-                  ta.destTokenAddress,
-                  destDecimals,
-                  this.network.name,
-                  formatUnits(amount, sourceDecimals),
-                )
-            }
-          }
-          const { tokenPool } = await this.getRegistryTokenConfig(registry, ta.destTokenAddress)
-          const remote = await this.getTokenPoolRemote(tokenPool!, sourceChainSelector)
-          if (remote.inboundRateLimiterState && amount > remote.inboundRateLimiterState.tokens) {
-            throw new CCIPRateLimitExceededError('INBOUND', remote.inboundRateLimiterState, {
-              token: ta.destTokenAddress,
-              amount,
-              sourceChainSelector,
-              destChainSelector: this.network.chainSelector,
-              tokenPool: tokenPool!,
-              registry,
-            })
-          }
-          return { token: ta.destTokenAddress, amount }
-        }),
-      )
-
-    let opts_, destRouter, destRegistry
+    let opts_, destRouter
     if (!('offRamp' in opts)) {
       const { lane, message, metadata } = await this.getMessageById(opts.messageId)
-      sourceChainSelector = lane.sourceChainSelector
 
       const offRamp =
         ('offRampAddress' in message && message.offRampAddress) ||
         metadata?.offRamp ||
         (await this.apiClient!.getExecutionInput(opts.messageId)).offRamp
-      ;[destRouter, destRegistry] = await Promise.all([
-        this.getRouterForOffRamp(offRamp, message.sourceChainSelector),
-        this.getTokenAdminRegistryFor(offRamp),
-      ])
-
+      destRouter = await this.getRouterForOffRamp(offRamp, message.sourceChainSelector)
       opts_ = {
         offRamp,
         message: {
@@ -2305,24 +2244,74 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           receiver: message.receiver,
           sender: message.sender,
           data: message.data,
-          destTokenAmounts: await convertAmounts(message.tokenAmounts, destRegistry),
+          destTokenAmounts: await Promise.all(
+            message.tokenAmounts.map((tokenAmount) =>
+              getDestTokenAmount({ dest: this, tokenAmount }),
+            ),
+          ),
         },
       }
     } else {
-      sourceChainSelector = opts.message.sourceChainSelector
-      ;[destRouter, destRegistry] = await Promise.all([
-        this.getRouterForOffRamp(opts.offRamp, opts.message.sourceChainSelector),
-        this.getTokenAdminRegistryFor(opts.offRamp),
-      ])
+      destRouter = await this.getRouterForOffRamp(opts.offRamp, opts.message.sourceChainSelector)
       opts_ = {
         ...opts,
         message: {
           messageId: hexlify(randomBytes(32)),
           ...opts.message,
-          destTokenAmounts: opts.message.tokenAmounts?.length
-            ? await convertAmounts(opts.message.tokenAmounts, destRegistry)
-            : undefined,
+          destTokenAmounts: await Promise.all(
+            (opts.message.tokenAmounts ?? []).map((tokenAmount) =>
+              getDestTokenAmount({ dest: this, tokenAmount }),
+            ),
+          ),
         },
+      }
+    }
+
+    // v2: check allowed finality
+    if (opts_.message.finality && opts_.message.finality !== 'finalized') {
+      let allowedFinality: FinalityAllowed = {
+        finalityDepth: 1,
+        finalitySafe: true,
+      } // default=loose for non-receivers
+      try {
+        const receiver = new Contract(
+          opts_.message.receiver,
+          interfaces.Receiver_v2_0,
+          this.provider,
+        ) as unknown as TypedContract<typeof Receiver_2_0_ABI>
+        if (await receiver.supportsInterface(receiver.ccipReceive.fragment.selector))
+          allowedFinality = { finalityDepth: 0 } // default=finalized for legacy receivers
+
+        const [, , , allowedFinality_] = await receiver.getCCVsAndFinalityConfig(
+          opts_.message.sourceChainSelector,
+          opts_.message.sender ?? ZeroHash,
+        )
+        allowedFinality = decodeFinalityAllowed(allowedFinality_)
+      } catch (err) {
+        this.logger.debug(
+          `Failed to fetch allowed finality config from receiver="${opts_.message.receiver}", defaulting to: ${JSON.stringify(allowedFinality)}. Error:`,
+          err,
+        )
+      }
+      if (opts_.message.finality === 'safe') {
+        if (!allowedFinality.finalitySafe)
+          throw new CCIPFinalityNotAllowedError(opts_.message.finality, allowedFinality, {
+            context: {
+              source: networkInfo(opts_.message.sourceChainSelector).name,
+              sender: opts_.message.sender,
+              dest: this.network.name,
+              receiver: opts_.message.receiver,
+            },
+          })
+      } else if (opts_.message.finality < allowedFinality.finalityDepth) {
+        throw new CCIPFinalityNotAllowedError(opts_.message.finality, allowedFinality, {
+          context: {
+            source: networkInfo(opts_.message.sourceChainSelector).name,
+            sender: opts_.message.sender,
+            dest: this.network.name,
+            receiver: opts_.message.receiver,
+          },
+        })
       }
     }
 

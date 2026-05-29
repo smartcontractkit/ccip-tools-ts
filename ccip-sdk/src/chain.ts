@@ -1171,7 +1171,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`Token: ${token}`)
    * ```
    */
-  abstract getTokenForTokenPool(tokenPool: string): Promise<string>
+  async getTokenForTokenPool(tokenPool: string): Promise<string> {
+    return (await this.getTokenPoolConfig(tokenPool)).token
+  }
+
   /**
    * Fetch token metadata.
    *
@@ -1185,6 +1188,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   abstract getTokenInfo(token: string): Promise<TokenInfo>
+
   /**
    * Query token balance for an address.
    *
@@ -1257,6 +1261,44 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     }
     return true
   }
+
+  /**
+   * Pre-flight check if the token transfers in a message is supported for dest given lane, and have enough rate limit
+   * @param opts - Execution options
+   * @throws {@link CCIPRateLimitExceededError} if amount exceeds the rate limit (capacity or available) for remote
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if tokenPool or remote config for the lane is not found
+   * @returns true if all token transfers are supported and within the rate limit
+   * @internal
+   */
+  async checkExecute({
+    offRamp,
+    message,
+  }: {
+    offRamp: string
+    message: Pick<EstimateMessageInput, 'sourceChainSelector' | 'tokenAmounts' | 'finality'>
+  }): Promise<true> {
+    let registry
+    for (const ta of message.tokenAmounts ?? []) {
+      const amount = ta.amount
+      const token = 'destTokenAddress' in ta ? ta.destTokenAddress : ta.token
+      registry ??= await this.getTokenAdminRegistryFor(offRamp)
+      const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
+      const remote = await this.getTokenPoolRemote(tokenPool!, message.sourceChainSelector)
+      if (!remote.inboundRateLimiterState) continue
+      if (amount > remote.inboundRateLimiterState.tokens) {
+        throw new CCIPRateLimitExceededError('INBOUND', remote.inboundRateLimiterState, {
+          token,
+          amount,
+          tokenPool: tokenPool!,
+          registry,
+          sourceChainSelector: message.sourceChainSelector,
+          destChainSelector: this.network.chainSelector,
+        })
+      }
+    }
+    return true
+  }
+
   /**
    * Fetch the current fee for a given intended message.
    *

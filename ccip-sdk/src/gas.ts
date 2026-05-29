@@ -7,10 +7,11 @@ import {
   CCIPMethodUnsupportedError,
   CCIPOnRampRequiredError,
   CCIPTokenDecimalsInsufficientError,
+  CCIPTokenNotInRegistryError,
 } from './errors/index.ts'
 import type { CCIPMessage_V2_0 } from './evm/messages.ts'
 import { discoverOffRamp } from './execution.ts'
-import { sourceToDestTokenAddresses } from './requests.ts'
+import { networkInfo } from './networks.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
 import type { CCIPMessage, MessageInput } from './types.ts'
 import { getDataBytes } from './utils.ts'
@@ -21,7 +22,12 @@ import { getDataBytes } from './utils.ts'
 export type EstimateMessageInput = Simplify<
   Pick<CCIPMessage, 'receiver' | 'sourceChainSelector'> &
     Partial<Pick<MessageInput, 'data'>> &
-    Partial<Pick<CCIPMessage_V2_0, 'messageId' | 'sender' | 'onRampAddress' | 'offRampAddress'>> &
+    Partial<
+      Pick<
+        CCIPMessage_V2_0,
+        'messageId' | 'sender' | 'onRampAddress' | 'offRampAddress' | 'finality'
+      >
+    > &
     Partial<
       Pick<CCIPMessage_V1_6_Solana, 'tokenReceiver' | 'accounts' | 'accountIsWritableBitmap'>
     > & {
@@ -32,17 +38,95 @@ export type EstimateMessageInput = Simplify<
        */
       tokenAmounts?: readonly ({
         amount: bigint
+        extraData?: string
       } & (
         | { token: string }
         | {
             sourceTokenAddress?: string
             sourcePoolAddress: string
             destTokenAddress: string
-            extraData?: string
           }
       ))[]
     }
 >
+
+/**
+ * Options for {@link estimateReceiveExecution} function.
+ */
+export type EstimateReceiveExecutionOpts = {
+  /** Source chain instance (for token data retrieval) */
+  source: Chain
+  /** Dest chain instance (for token and execution simulation) */
+  dest: Chain
+  /** source router or onRamp, or dest offRamp contract address */
+  routerOrRamp: string
+  /** message to be simulated */
+  message: Omit<EstimateMessageInput, 'sourceChainSelector'>
+}
+
+/**
+ * Map source token to its pool address and destination token address.
+ *
+ * Resolves token routing by querying the TokenAdminRegistry and TokenPool
+ * to find the corresponding destination chain token.
+ *
+ * @param opts - options to convert source to dest token addresses
+ * @returns Extended token amount with `sourcePoolAddress`, `sourceTokenAddress`, and `destTokenAddress`
+ *
+ * @throws {@link CCIPTokenNotInRegistryError} if token is not registered in TokenAdminRegistry
+ *
+ * @example
+ * ```typescript
+ * import { sourceToDestTokenAddresses, EVMChain } from '@chainlink/ccip-sdk'
+ *
+ * const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+ * const tokenAmount = await sourceToDestTokenAddresses({
+ *   source,
+ *   onRamp: '0xOnRamp...',
+ *   destChainSelector: 14767482510784806043n,
+ *   sourceTokenAmount: { token: '0xLINK...', amount: 1000000000000000000n },
+ * })
+ * console.log(`Pool: ${tokenAmount.sourcePoolAddress}`)
+ * console.log(`Dest token: ${tokenAmount.destTokenAddress}`)
+ * ```
+ */
+export async function sourceToDestTokenAddresses<S extends { token: string }>({
+  source,
+  onRamp,
+  destChainSelector,
+  sourceTokenAmount,
+}: {
+  /** Source chain instance */
+  source: Chain
+  /** OnRamp contract address */
+  onRamp: string
+  /** Destination chain selector */
+  destChainSelector: bigint
+  /** Token amount object containing `token` and `amount` */
+  sourceTokenAmount: S
+}): Promise<
+  S & {
+    sourcePoolAddress: string
+    sourceTokenAddress: string
+    destTokenAddress: string
+  }
+> {
+  const tokenAdminRegistry = await source.getTokenAdminRegistryFor(onRamp)
+  const sourceTokenAddress = sourceTokenAmount.token
+  const { tokenPool: sourcePoolAddress } = await source.getRegistryTokenConfig(
+    tokenAdminRegistry,
+    sourceTokenAddress,
+  )
+  if (!sourcePoolAddress)
+    throw new CCIPTokenNotInRegistryError(sourceTokenAddress, tokenAdminRegistry)
+  const remotes = await source.getTokenPoolRemotes(sourcePoolAddress, destChainSelector)
+  return {
+    ...sourceTokenAmount,
+    sourcePoolAddress,
+    sourceTokenAddress,
+    destTokenAddress: remotes[networkInfo(destChainSelector).name]!.remoteToken,
+  }
+}
 
 function getSourceDecimalsFromExtraData(extraData?: string): bigint | undefined {
   if (!extraData) return undefined
@@ -57,17 +141,61 @@ function getSourceDecimalsFromExtraData(extraData?: string): bigint | undefined 
 }
 
 /**
- * Options for {@link estimateReceiveExecution} function.
+ * If given a `{token, amount}` and no `source` (e.g. when called from Chain.estimateReceiveExecution),
+ * assume it's already a dest tokenAmount and return as-is.
+ * Otherwise, if given a source tokenAmount, resolve the corresponding destTokenAddress and adjust
+ * the amount for decimals difference.
+ * @param opts - options to get destination token amount
+ * @returns dest `token` and adjusted `amount` for the given source token amount
  */
-export type EstimateReceiveExecutionOpts = {
-  /** Source chain instance (for token data retrieval) */
-  source: Chain
-  /** Dest chain instance (for token and execution simulation) */
+export async function getDestTokenAmount({
+  source,
+  onRamp,
+  dest,
+  tokenAmount,
+}: {
+  source?: Chain
+  onRamp?: string
   dest: Chain
-  /** source router or onRamp, or dest offRamp contract address */
-  routerOrRamp: string
-  /** message to be simulated */
-  message: Omit<EstimateMessageInput, 'sourceChainSelector'>
+  tokenAmount: NonNullable<EstimateMessageInput['tokenAmounts']>[number]
+}): Promise<{ token: string; amount: bigint }> {
+  let sourceTokenAddress, sourcePoolAddress, destTokenAddress
+  if ('destTokenAddress' in tokenAmount) {
+    ;({ destTokenAddress, sourcePoolAddress, sourceTokenAddress } = tokenAmount)
+  } else if (!source)
+    return tokenAmount // if we don't have a source, assume we were already given a dest `{token, amount}`
+  else {
+    ;({ destTokenAddress, sourceTokenAddress, sourcePoolAddress } =
+      await sourceToDestTokenAddresses({
+        source,
+        onRamp: onRamp!,
+        destChainSelector: dest.network.chainSelector,
+        sourceTokenAmount: tokenAmount,
+      }))
+  }
+
+  const { decimals: destDecimals } = await dest.getTokenInfo(destTokenAddress)
+  const sourceDecimals =
+    getSourceDecimalsFromExtraData(tokenAmount.extraData) ??
+    (source
+      ? (
+          await source.getTokenInfo(
+            sourceTokenAddress ?? (await source.getTokenForTokenPool(sourcePoolAddress)),
+          )
+        ).decimals
+      : destDecimals)
+
+  const destAmount =
+    (tokenAmount.amount * BigInt(10) ** BigInt(destDecimals)) / BigInt(10) ** BigInt(sourceDecimals)
+  if (destAmount === 0n)
+    throw new CCIPTokenDecimalsInsufficientError(
+      destTokenAddress,
+      destDecimals,
+      dest.network.name,
+      formatUnits(tokenAmount.amount, sourceDecimals),
+    )
+
+  return { token: destTokenAddress, amount: destAmount }
 }
 
 /**
@@ -108,24 +236,21 @@ export async function estimateReceiveExecution({
   routerOrRamp,
   message,
 }: EstimateReceiveExecutionOpts) {
-  if (!dest.estimateReceiveExecution)
-    throw new CCIPMethodUnsupportedError(dest.constructor.name, 'estimateReceiveExecution')
-
   let onRamp: string, offRamp: string
   if (message.onRampAddress) onRamp = message.onRampAddress
   if (message.offRampAddress) offRamp = message.offRampAddress
   if (!onRamp! || !offRamp!)
     try {
-      const tnv = await source.typeAndVersion(routerOrRamp)
-      if (!tnv[0].includes('OnRamp'))
+      const [type] = await source.typeAndVersion(routerOrRamp)
+      if (!type.includes('OnRamp'))
         onRamp = await source.getOnRampForRouter(routerOrRamp, dest.network.chainSelector)
       else onRamp = routerOrRamp
-      offRamp = await discoverOffRamp(source, dest, onRamp, source)
+      offRamp ||= await discoverOffRamp(source, dest, onRamp, source)
     } catch (sourceErr) {
       try {
-        const tnv = await dest.typeAndVersion(routerOrRamp)
-        if (!tnv[0].includes('OffRamp'))
-          throw new CCIPContractTypeInvalidError(routerOrRamp, tnv[2], ['OffRamp'])
+        const [type, , tnv] = await dest.typeAndVersion(routerOrRamp)
+        if (!type.includes('OffRamp'))
+          throw new CCIPContractTypeInvalidError(routerOrRamp, tnv, ['OffRamp'])
         offRamp = routerOrRamp
         const onRamps = await dest.getOnRampsForOffRamp(offRamp, source.network.chainSelector)
         if (!onRamps.length) throw new CCIPOnRampRequiredError()
@@ -136,46 +261,11 @@ export async function estimateReceiveExecution({
     }
 
   const destTokenAmounts = await Promise.all(
-    (message.tokenAmounts ?? []).map(async (ta) => {
-      const tokenAmount =
-        'destTokenAddress' in ta
-          ? ta
-          : await sourceToDestTokenAddresses({
-              source,
-              onRamp,
-              destChainSelector: dest.network.chainSelector,
-              sourceTokenAmount: ta,
-            })
-      const sourceDecimalsFromExtraData =
-        'extraData' in tokenAmount
-          ? getSourceDecimalsFromExtraData(tokenAmount.extraData)
-          : undefined
-      const { decimals: destDecimals } = await dest.getTokenInfo(tokenAmount.destTokenAddress)
-      const sourceDecimals =
-        sourceDecimalsFromExtraData ??
-        (
-          await source.getTokenInfo(
-            'token' in ta
-              ? ta.token
-              : ta.sourceTokenAddress
-                ? ta.sourceTokenAddress
-                : await source.getTokenForTokenPool(tokenAmount.sourcePoolAddress),
-          )
-        ).decimals
-      const destAmount =
-        (tokenAmount.amount * BigInt(10) ** BigInt(destDecimals)) /
-        BigInt(10) ** BigInt(sourceDecimals)
-      if (destAmount === 0n)
-        throw new CCIPTokenDecimalsInsufficientError(
-          tokenAmount.destTokenAddress,
-          destDecimals,
-          dest.network.name,
-          formatUnits(tokenAmount.amount, sourceDecimals),
-        )
-      return { ...tokenAmount, token: tokenAmount.destTokenAddress, amount: destAmount }
-    }),
+    (message.tokenAmounts ?? []).map(async (tokenAmount) =>
+      getDestTokenAmount({ source, dest, onRamp, tokenAmount }),
+    ),
   )
-  return dest.estimateReceiveExecution({
+  const payload = {
     offRamp,
     message: {
       messageId: message.messageId ?? hexlify(randomBytes(32)),
@@ -190,5 +280,11 @@ export async function estimateReceiveExecution({
         accountIsWritableBitmap: message.accountIsWritableBitmap,
       }),
     },
-  })
+  }
+  await dest.checkExecute(payload)
+
+  if (!dest.estimateReceiveExecution)
+    throw new CCIPMethodUnsupportedError(dest.constructor.name, 'estimateReceiveExecution')
+
+  return dest.estimateReceiveExecution(payload)
 }
