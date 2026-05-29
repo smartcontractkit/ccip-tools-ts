@@ -125,6 +125,9 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   EXECUTION_STATE_INVALID: 'Invalid execution state returned from contract.',
   RECEIPT_NOT_FOUND: 'Receipt not found in transaction logs. Wait and retry.',
 
+  FINALITY_NOT_ALLOWED:
+    "The receiver contract does not accept the requested finality. Check the receiver's getCCVsAndFinalityConfig() for the allowed depth or safe flag.",
+
   USDC_ATTESTATION_FAILED: 'USDC attestation not ready. Wait and retry (10-30 min typical).',
   LBTC_ATTESTATION_ERROR: 'LBTC attestation fetch failed. Wait and retry.',
   LBTC_ATTESTATION_NOT_FOUND: 'LBTC attestation not found. Verify the payload hash.',

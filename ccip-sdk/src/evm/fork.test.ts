@@ -1612,6 +1612,8 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         apiClient: null,
         logger: testLogger,
       })
+      // Bypass SDK preflight so the on-chain TokenMaxCapacityExceeded revert reaches EVMChain.parse.
+      viemChain.checkSendMessage = async () => true as const
 
       let caught: unknown
       try {
@@ -1661,6 +1663,8 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
         apiClient: null,
         logger: testLogger,
       })
+      // Bypass SDK preflight so the on-chain TokenMaxCapacityExceeded revert reaches EVMChain.parse.
+      ethersChainLocal.checkSendMessage = async () => true as const
       const ethersWalletLocal = new Wallet(ANVIL_PRIVATE_KEY, ethersChainLocal.provider)
 
       let caught: unknown

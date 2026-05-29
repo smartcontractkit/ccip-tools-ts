@@ -126,9 +126,6 @@ class WaitFinalizedMockChain extends Chain {
   async getTokenPoolRemotes(): Promise<any> {
     return {}
   }
-  async getTokenForTokenPool() {
-    return '0x'
-  }
   async getTokenInfo() {
     return { symbol: 'T', decimals: 18 }
   }
