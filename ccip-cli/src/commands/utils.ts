@@ -1,4 +1,5 @@
 import { Console } from 'node:console'
+import util from 'node:util'
 
 import {
   type CCIPExecution,
@@ -564,7 +565,7 @@ export function formatCCIPError(err: unknown, verbose = false): string | null {
   if (Object.keys(err.context).length > 0) {
     lines.push('  context:')
     for (const [key, value] of Object.entries(err.context)) {
-      lines.push(`    ${key}: ${value as string}`)
+      lines.push(`    ${key}: ${util.inspect(value)}`)
     }
   }
 

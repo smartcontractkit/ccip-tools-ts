@@ -2229,7 +2229,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   ): Promise<number> {
     let opts_, destRouter
     if (!('offRamp' in opts)) {
-      const { lane, message, metadata } = await this.getMessageById(opts.messageId)
+      const { message, metadata } = await this.getMessageById(opts.messageId)
 
       const offRamp =
         ('offRampAddress' in message && message.offRampAddress) ||
@@ -2239,11 +2239,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       opts_ = {
         offRamp,
         message: {
-          sourceChainSelector: lane.sourceChainSelector,
-          messageId: message.messageId,
-          receiver: message.receiver,
-          sender: message.sender,
-          data: message.data,
+          ...message,
           destTokenAmounts: await Promise.all(
             message.tokenAmounts.map((tokenAmount) =>
               getDestTokenAmount({ dest: this, tokenAmount }),
@@ -2268,7 +2264,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
 
     // v2: check allowed finality
-    if (opts_.message.finality && opts_.message.finality !== 'finalized') {
+    if (
+      'finality' in opts_.message &&
+      opts_.message.finality &&
+      opts_.message.finality !== 'finalized'
+    ) {
       let allowedFinality: FinalityAllowed = {
         finalityDepth: 1,
         finalitySafe: true,

@@ -287,6 +287,23 @@ async function sendMessage(
     receiver = walletAddress // send to self if same family
   }
 
+  // builds a catch-all extraArgs object, which can be massaged by
+  // [[Chain.buildMessageForDest]] to create suitable extraArgs with defaults if needed
+  // --extra entries are spread last so they take priority over code-generated values
+  const extraArgs = {
+    ...(argv.allowOutOfOrderExec != null && {
+      allowOutOfOrderExecution: !!argv.allowOutOfOrderExec,
+    }),
+    ...(argv.gasLimit == null
+      ? {}
+      : destNetwork.family === ChainFamily.Solana
+        ? { computeUnits: BigInt(argv.gasLimit) }
+        : { gasLimit: BigInt(argv.gasLimit) }),
+    ...(!!argv.tokenReceiver && { tokenReceiver: argv.tokenReceiver }),
+    ...(!!accounts && { accounts, accountIsWritableBitmap }), // accounts also used as Sui receiverObjectIds
+    ...parseExtraArgs(argv.extra),
+  }
+
   if (argv.estimateGasLimit == null || argv.estimateGasLimit > -100)
     try {
       const dest = await getChain(destNetwork.chainSelector)
@@ -308,8 +325,7 @@ async function sendMessage(
           receiver,
           data,
           tokenAmounts,
-          ...(!!argv.tokenReceiver && { tokenReceiver: argv.tokenReceiver }),
-          ...(accounts != null && accounts.length && { accounts, accountIsWritableBitmap }),
+          ...extraArgs,
         },
       })
       argv.gasLimit = Math.ceil(estimated * (1 + (argv.estimateGasLimit ?? 10) / 100))
@@ -355,23 +371,6 @@ async function sendMessage(
       if (!(err instanceof CCIPMethodUnsupportedError)) throw err
       logger.debug('estimateReceiveExecution not supported for', destNetwork.name, '—', err)
     }
-
-  // builds a catch-all extraArgs object, which can be massaged by
-  // [[Chain.buildMessageForDest]] to create suitable extraArgs with defaults if needed
-  // --extra entries are spread last so they take priority over code-generated values
-  const extraArgs = {
-    ...(argv.allowOutOfOrderExec != null && {
-      allowOutOfOrderExecution: !!argv.allowOutOfOrderExec,
-    }),
-    ...(argv.gasLimit == null
-      ? {}
-      : destNetwork.family === ChainFamily.Solana
-        ? { computeUnits: BigInt(argv.gasLimit) }
-        : { gasLimit: BigInt(argv.gasLimit) }),
-    ...(!!argv.tokenReceiver && { tokenReceiver: argv.tokenReceiver }),
-    ...(!!accounts && { accounts, accountIsWritableBitmap }), // accounts also used as Sui receiverObjectIds
-    ...parseExtraArgs(argv.extra),
-  }
 
   let feeToken, feeTokenInfo
   if (argv.feeToken) {

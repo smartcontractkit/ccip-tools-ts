@@ -38,6 +38,7 @@ const customErrors = [
   'error BlacklistableBlacklistedAccount(address)',
   'error WrongAsset(address expected, address received)',
   'error FailedInnerCall()',
+  'error SenderNotAllowed(uint64 sourceChainSelector, bytes sender)',
 ] as const
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])

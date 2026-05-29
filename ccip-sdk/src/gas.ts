@@ -268,17 +268,10 @@ export async function estimateReceiveExecution({
   const payload = {
     offRamp,
     message: {
+      ...message,
       messageId: message.messageId ?? hexlify(randomBytes(32)),
-      receiver: message.receiver,
-      sender: message.sender,
-      data: message.data,
       sourceChainSelector: source.network.chainSelector,
       tokenAmounts: destTokenAmounts,
-      ...(!!message.tokenReceiver && { tokenReceiver: message.tokenReceiver }),
-      ...(!!message.accounts?.length && {
-        accounts: message.accounts,
-        accountIsWritableBitmap: message.accountIsWritableBitmap,
-      }),
     },
   }
   await dest.checkExecute(payload)

@@ -487,6 +487,7 @@ describe('EVMChain.estimateReceiveExecution({ messageId })', () => {
         messageId,
         sender,
         receiver,
+        sourceChainSelector: 16015286601757825753n,
         data: '0xdaad',
         tokenAmounts: [],
         offRampAddress: offRamp,
@@ -521,6 +522,7 @@ describe('EVMChain.estimateReceiveExecution({ messageId })', () => {
         messageId,
         sender,
         receiver,
+        sourceChainSelector: 16015286601757825753n,
         data: '0x',
         tokenAmounts: [],
       },
@@ -562,6 +564,7 @@ describe('EVMChain.estimateReceiveExecution({ messageId })', () => {
         messageId,
         sender,
         receiver,
+        sourceChainSelector: 16015286601757825753n,
         data: '0x',
         tokenAmounts: [
           {
