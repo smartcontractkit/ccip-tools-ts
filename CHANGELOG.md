@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: `checkSendMessage` method called at `getFee` time, checks source rate limits before sending
+- SDK: `checkExecute` method checks dest rate limits, called by standalone `estimateReceiveExecution` function
+- SDK: `estimateReceiveExecution` method also checks requested finality is within `ccipReceiver` `allowedFinality`
+- CLI: `send` performs all these `--estimate-gas-limit` checks by default before sending
+
 ## [1.7.0] - 2026-05-25
 
 - SDK: Add `getMessagesInRange()` to the abstract Chain class — range-based CCIP message discovery using `getLogs` + `decodeMessage`, returns `AsyncIterableIterator<CCIPRequest>`
