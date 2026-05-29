@@ -112,6 +112,12 @@ const globalOpts = {
     describe:
       'Path to Canton config JSON file (party, ccipParty, jwt, edsUrl, transferInstructionUrl, etc.)',
   },
+  indexer: {
+    type: 'array',
+    string: true,
+    describe:
+      'Additional CCIP v2 indexer base URLs to query for CCV verifications (e.g. https://indexer-1.ccip.chain.link)',
+  },
 } as const
 
 /** Type for global CLI options. */

@@ -99,5 +99,3 @@ export const commitsFragments = getAllFragmentsMatchingEvents([
   'CommitReportAccepted',
 ])
 export const receiptsFragments = getAllFragmentsMatchingEvents(['ExecutionStateChanged'])
-
-export const CCV_INDEXER_URL = 'https://chainlink-ccv-indexer.ccip.stage.external.griddle.sh/all'

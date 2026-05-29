@@ -12,6 +12,7 @@ import {
   type TokenPoolRemote,
   Chain,
 } from '../chain.ts'
+import { MAINNET_INDEXER_URLS } from '../commits.ts'
 import {
   CCIPChainNotFoundError,
   CCIPError,
@@ -19,7 +20,6 @@ import {
   CCIPNotImplementedError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
-import { CCV_INDEXER_URL } from '../evm/const.ts'
 import type { ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
@@ -182,7 +182,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     transferInstructionClient: TransferInstructionClient,
     tokenMetadataClient: TokenMetadataClient,
     ccipParty: string,
-    indexerUrl = CCV_INDEXER_URL,
+    indexerUrl = MAINNET_INDEXER_URLS[0]!,
     ctx?: ChainContext,
   ): Promise<CantonChain> {
     const synchronizers = await client.getConnectedSynchronizers()

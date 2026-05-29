@@ -31,7 +31,7 @@ import type {
 import type { EstimateMessageInput } from './gas.ts'
 import type { LeafHasher } from './hasher/common.ts'
 import { decodeMessageV1 } from './messages.ts'
-import { type ChainFamily, type NetworkInfo, networkInfo } from './networks.ts'
+import { type ChainFamily, type NetworkInfo, type NetworkType, networkInfo } from './networks.ts'
 import { getOffchainTokenData } from './offchain.ts'
 import {
   getMessagesInBatch,
@@ -1590,6 +1590,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       CCIPRequest,
       'lane' | `message.${'sequenceNumber' | 'messageId'}` | 'log.blockTimestamp'
     >
+    /** Optional list of CCIP v2 indexer base URLs to query for CCV verifications, or a NetworkType to use default URLs */
+    indexer?: readonly string[] | NetworkType
   } & Pick<LogFilter, 'page' | 'watch' | 'startBlock'>): Promise<CCIPVerifications> {
     return getOnchainCommitReport(this, offRamp, request, hints)
   }
