@@ -26,7 +26,7 @@ import {
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 import { memoize } from 'micro-memoize'
-import type { PickDeep, SetFieldType, SetRequired } from 'type-fest'
+import type { PickDeep, SetFieldType, SetRequired, TupleOf } from 'type-fest'
 
 import {
   type BlockInfo,
@@ -1065,12 +1065,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @throws {@link CCIPContractNotRouterError} if address is not a Router, OnRamp, or OffRamp
    */
   async getTokenAdminRegistryFor(address: string): Promise<string> {
-    let [type, version] = await this.typeAndVersion(address)
+    const [type, version] = await this.typeAndVersion(address)
     if (type === 'TokenAdminRegistry') {
       return address
+    } else if (type.includes('TokenPool')) {
+      address = (await this.getTokenPoolConfig(address)).router
+      return this.getTokenAdminRegistryFor(address)
     } else if (type === 'Router') {
       address = await this._getSomeOnRampFor(address)
-      ;[type, version] = await this.typeAndVersion(address)
+      return this.getTokenAdminRegistryFor(address)
     } else if (!type.includes('Ramp')) {
       const [, , typeAndVersion] = await this.typeAndVersion(address)
       throw new CCIPContractNotRouterError(address, typeAndVersion)
@@ -1114,7 +1117,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (type === 'FeeQuoter' || type === 'PriceRegistry') {
       return address
     } else if (type === 'Router') {
-      return this.getFeeQuoterFor(await this._getSomeOnRampFor(address)) // use cache
+      address = await this._getSomeOnRampFor(address)
+      return this.getFeeQuoterFor(address) // use cache
     } else if (!type.includes('Ramp')) {
       throw new CCIPContractNotRouterError(address, typeAndVersion)
     }
@@ -1972,133 +1976,113 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const { typeAndVersion, previousPool } = await this.getTokenPoolConfig(tokenPool)
     const [type, version] = parseTypeAndVersion(typeAndVersion)
 
-    let supportedChains: Promise<NetworkInfo[]> | undefined
-    if (remoteChainSelector) supportedChains = Promise.resolve([networkInfo(remoteChainSelector)])
+    if (type === 'USDCTokenPoolProxy' && version >= CCIPVersion.V2_0) {
+      // USDC v2 proxys need to fetch most data from the implementation pool
+      tokenPool = previousPool!
+    }
+    // all versions share the same getSupportedChains() interface, and >=v1.5 getRemoteToken
+    const contract = new Contract(
+      tokenPool,
+      interfaces.TokenPool_v2_0,
+      this.provider,
+    ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
 
-    let remotePools: Promise<string[][]>
-    let remoteInfo
-    if (version < '1.5.1') {
-      const contract = new Contract(
-        tokenPool,
-        interfaces.TokenPool_v1_5,
-        this.provider,
-      ) as unknown as TypedContract<typeof TokenPool_1_5_ABI>
-      supportedChains ??= contract.getSupportedChains().then((chains) => chains.map(networkInfo))
-      remotePools = supportedChains.then((chains) =>
-        Promise.all(
-          chains.map((chain) =>
-            contract
-              .getRemotePool(chain.chainSelector)
-              .then((remotePool) => [decodeAddress(remotePool, chain.family)]),
-          ),
+    const supportedChains: Promise<NetworkInfo[]> = remoteChainSelector
+      ? Promise.resolve([networkInfo(remoteChainSelector)])
+      : (async () => {
+          const chains = await contract.getSupportedChains()
+          return chains.map(networkInfo)
+        })()
+
+    const remoteTokens: Promise<string[]> = supportedChains.then((chains) =>
+      Promise.all(
+        chains.map((chain) =>
+          contract.getRemoteToken(chain.chainSelector).then((remoteToken) => {
+            if (!remoteToken || remoteToken.match(/^(0x)?0*$/))
+              throw new CCIPTokenPoolChainConfigNotFoundError(tokenPool, tokenPool, chain.name)
+            return decodeAddress(remoteToken, chain.family)
+          }),
         ),
-      )
-      let rlContract = contract
-      // v1.5.0 proxys to v1.4 TPs need to query rate limits from the previous TP
-      if (previousPool) {
-        rlContract = new Contract(
-          previousPool,
+      ),
+    )
+
+    const remotePools: Promise<string[][]> = supportedChains.then((chains) => {
+      let remotePools
+      if (version < '1.5.1') {
+        const contract = new Contract(
+          tokenPool,
           interfaces.TokenPool_v1_5,
           this.provider,
         ) as unknown as TypedContract<typeof TokenPool_1_5_ABI>
+        // all versions >=v1.5.1 supports getRemotePools, but v1.5.0, which returns single pool
+        remotePools = Promise.all(
+          chains.map(async (chain) => [await contract.getRemotePool(chain.chainSelector)]),
+        )
+      } else {
+        remotePools = Promise.all(
+          chains.map((chain) => contract.getRemotePools(chain.chainSelector)),
+        )
       }
-      remoteInfo = supportedChains.then((chains) =>
-        Promise.all(
+      return remotePools.then((remotePools) =>
+        remotePools.map((pools, i) =>
+          pools
+            .filter((pool) => pool && !pool.match(/^(0x)?0*$/))
+            .map((pool) => decodeAddress(pool, chains[i]!.family)),
+        ),
+      )
+    })
+
+    const remoteRateLimits = supportedChains.then(
+      (chains): Promise<Readonly<TupleOf<2 | 4, RateLimiterBucket>>[]> => {
+        if (version < CCIPVersion.V2_0) {
+          // <v2 == v1.4..v1.6 TPs have compatible getCurrent(Out|In)boundRateLimiterState methods;
+          // assumes v1 *AndProxy (i.e. non-null previousPool) has v1 previousPool
+          const contract = new Contract(
+            previousPool ?? tokenPool,
+            interfaces.TokenPool_v1_6,
+            this.provider,
+          ) as unknown as TypedContract<typeof TokenPool_ABI>
+          return Promise.all(
+            chains.map((chain) =>
+              Promise.all([
+                contract.getCurrentOutboundRateLimiterState(chain.chainSelector),
+                contract.getCurrentInboundRateLimiterState(chain.chainSelector),
+              ] as const),
+            ),
+          )
+        }
+        return Promise.all(
           chains.map((chain) =>
             Promise.all([
-              contract.getRemoteToken(chain.chainSelector),
-              resultToObject(rlContract.getCurrentOutboundRateLimiterState(chain.chainSelector)),
-              resultToObject(rlContract.getCurrentInboundRateLimiterState(chain.chainSelector)),
-            ] as const),
-          ),
-        ),
-      )
-    } else if (version < CCIPVersion.V2_0) {
-      const contract = new Contract(
-        tokenPool,
-        interfaces.TokenPool_v1_6,
-        this.provider,
-      ) as unknown as TypedContract<typeof TokenPool_ABI>
-      supportedChains ??= contract.getSupportedChains().then((chains) => chains.map(networkInfo))
-      remotePools = supportedChains.then((chains) =>
-        Promise.all(
-          chains.map((chain) =>
-            contract
-              .getRemotePools(chain.chainSelector)
-              .then((pools) => pools.map((remotePool) => decodeAddress(remotePool, chain.family))),
-          ),
-        ),
-      )
-      remoteInfo = supportedChains.then((chains) =>
-        Promise.all(
-          chains.map((chain) =>
-            Promise.all([
-              contract.getRemoteToken(chain.chainSelector),
-              resultToObject(contract.getCurrentOutboundRateLimiterState(chain.chainSelector)),
-              resultToObject(contract.getCurrentInboundRateLimiterState(chain.chainSelector)),
-            ] as const),
-          ),
-        ),
-      )
-    } else {
-      if (type === 'USDCTokenPoolProxy') {
-        const proxy = new Contract(
-          tokenPool,
-          interfaces.USDCTokenPoolProxy_v2_0,
-          this.provider,
-        ) as unknown as TypedContract<typeof USDCTokenPoolProxy_2_0_ABI>
-        tokenPool = (await proxy.getPools())['cctpV2PoolWithCCV'] as string
-      }
-      const contract = new Contract(
-        tokenPool,
-        interfaces.TokenPool_v2_0,
-        this.provider,
-      ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
-      supportedChains ??= contract.getSupportedChains().then((chains) => chains.map(networkInfo))
-      remotePools = supportedChains.then((chains) =>
-        Promise.all(
-          chains.map((chain) =>
-            contract
-              .getRemotePools(chain.chainSelector)
-              .then((pools) => pools.map((remotePool) => decodeAddress(remotePool, chain.family))),
-          ),
-        ),
-      )
-      remoteInfo = supportedChains.then((chains) =>
-        Promise.all(
-          chains.map((chain) =>
-            Promise.all([
-              contract.getRemoteToken(chain.chainSelector),
               contract.getCurrentRateLimiterState(chain.chainSelector, false),
               contract.getCurrentRateLimiterState(chain.chainSelector, true),
-            ] as const).then(([remoteToken, [outbound, inbound], [fastOutbound, fastInbound]]) => {
-              return [remoteToken, outbound, inbound, fastOutbound, fastInbound] as const
+            ] as const).then(([[outbound, inbound], [fastOutbound, fastInbound]]) => {
+              return [outbound, inbound, fastOutbound, fastInbound] as const
             }),
           ),
-        ),
-      )
-    }
-    return Promise.all([supportedChains, remotePools, remoteInfo]).then(
-      ([supportedChains, remotePools, remoteInfo]) =>
+        )
+      },
+    )
+
+    return Promise.all([supportedChains, remotePools, remoteTokens, remoteRateLimits]).then(
+      ([supportedChains, remotePools, remoteTokens, remoteRateLimits]) =>
         Object.fromEntries(
-          supportedChains.map((chain, i) => {
-            const remoteTokenRaw = remoteInfo[i]![0]
-            if (!remoteTokenRaw || remoteTokenRaw.match(/^(0x)?0*$/))
-              throw new CCIPTokenPoolChainConfigNotFoundError(tokenPool, tokenPool, chain.name)
-            return [
-              chain.name,
-              {
-                remoteToken: decodeAddress(remoteTokenRaw, chain.family),
-                remotePools: remotePools[i]!.map((pool) => decodeAddress(pool, chain.family)),
-                outboundRateLimiterState: toRateLimiterState(remoteInfo[i]![1]),
-                inboundRateLimiterState: toRateLimiterState(remoteInfo[i]![2]),
-                ...(remoteInfo[i]!.length === 5 && {
-                  fastOutboundRateLimiterState: toRateLimiterState(remoteInfo[i]![3]),
-                  fastInboundRateLimiterState: toRateLimiterState(remoteInfo[i]![4]),
-                }),
-              },
-            ] as const
-          }),
+          supportedChains.map(
+            (chain, i) =>
+              [
+                chain.name,
+                {
+                  remoteToken: remoteTokens[i]!,
+                  remotePools: remotePools[i]!,
+                  outboundRateLimiterState: toRateLimiterState(remoteRateLimits[i]![0]),
+                  inboundRateLimiterState: toRateLimiterState(remoteRateLimits[i]![1]),
+                  ...(remoteRateLimits[i]!.length === 4 && {
+                    fastOutboundRateLimiterState: toRateLimiterState(remoteRateLimits[i]![2]),
+                    fastInboundRateLimiterState: toRateLimiterState(remoteRateLimits[i]![3]),
+                  }),
+                },
+              ] as const,
+          ),
         ),
     )
   }
