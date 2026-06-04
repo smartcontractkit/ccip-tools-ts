@@ -10,6 +10,7 @@ import {
   CCIPArgumentInvalidError,
   CCIPChainFamilyMismatchError,
   CCIPExecTxRevertedError,
+  CCIPInsufficientBalanceError,
   CCIPLogsRequiresStartError,
   CCIPNotImplementedError,
   CCIPRateLimitExceededError,
@@ -1264,6 +1265,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
   /**
    * Pre-flight check if the token transfers in a message is supported for dest given lane, and have enough rate limit
+   * For LockRelease TPs, also check it has enough liquidity
    * @param opts - Execution options
    * @throws {@link CCIPRateLimitExceededError} if amount exceeds the rate limit (capacity or available) for remote
    * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if tokenPool or remote config for the lane is not found
@@ -1283,6 +1285,21 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       const token = 'destTokenAddress' in ta ? ta.destTokenAddress : ta.token
       registry ??= await this.getTokenAdminRegistryFor(offRamp)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
+
+      const [type, , typeAndVersion] = await this.typeAndVersion(tokenPool!)
+      // if a LockReleaseTokenPool, also check it has enough liquidity
+      if (type.includes('Lock') && type.includes('Release')) {
+        const [balance, { symbol }] = await Promise.all([
+          this.getBalance({ holder: tokenPool!, token }),
+          this.getTokenInfo(token),
+        ])
+        if (balance < amount) {
+          throw new CCIPInsufficientBalanceError(balance.toString(), amount.toString(), symbol, {
+            context: { tokenPool, token, typeAndVersion, network: this.network.name },
+          })
+        }
+      }
+
       const remote = await this.getTokenPoolRemote(tokenPool!, message.sourceChainSelector)
       if (!remote.inboundRateLimiterState) continue
       if (amount > remote.inboundRateLimiterState.tokens) {
