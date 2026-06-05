@@ -160,10 +160,6 @@ class MockChain extends Chain {
     return { remoteToken: '0xRemoteToken', remotePools: [] }
   }
 
-  async getTokenForTokenPool(_tokenPool: string): Promise<string> {
-    return '0xToken'
-  }
-
   async getTokenInfo(_token: string): Promise<{ symbol: string; decimals: number; name?: string }> {
     return { symbol: 'TST', decimals: 18, name: 'Test Token' }
   }

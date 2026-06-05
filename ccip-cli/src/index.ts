@@ -120,7 +120,8 @@ export type GlobalOpts = ArgumentsCamelCase<InferredOptionTypes<typeof globalOpt
 function preprocessArgv(argv: string[]): string[] {
   const result = argv.flatMap((arg) => {
     if (arg === '--no-api') return '--api=false'
-    if (arg === '--json') return ['--format', 'json']
+    if (arg === '--json') return ['--format=json']
+    if (arg === '--no-estimate-gas-limit') return '--estimate-gas-limit=-100'
     return arg
   })
   if (!process.stdin.isTTY && !result.includes('--no-interactive')) result.push('--no-interactive')

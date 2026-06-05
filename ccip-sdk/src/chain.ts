@@ -10,8 +10,10 @@ import {
   CCIPArgumentInvalidError,
   CCIPChainFamilyMismatchError,
   CCIPExecTxRevertedError,
+  CCIPInsufficientBalanceError,
   CCIPLogsRequiresStartError,
   CCIPNotImplementedError,
+  CCIPRateLimitExceededError,
   CCIPTokenPoolChainConfigNotFoundError,
 } from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
@@ -498,6 +500,18 @@ export type TokenPoolConfig = {
    * {@link Chain.getTokenPoolConfig} and the pool supports it (v2.0+).
    */
   tokenTransferFeeConfig?: TokenTransferFeeConfig
+  /**
+   * For Proxy TokenPools, the address of the previous pool implementation (if any).
+   */
+  previousPool?: string
+  /**
+   * For Proxy TokenPools, the typeAndVersion() string of the previous pool implementation (if any).
+   */
+  previousPoolTypeAndVersion?: string
+  /**
+   * For LockReleaseTokenPool v2+, the address of the associated LockBox contract.
+   */
+  lockBox?: string
   /**
    * Min finalityDepth and finality flags for Faster-Than-Finality (FTF) and FCR (safe),
    * if TokenPool version \>= v2.0.0 and FTF is supported on this lane.
@@ -1170,7 +1184,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`Token: ${token}`)
    * ```
    */
-  abstract getTokenForTokenPool(tokenPool: string): Promise<string>
+  async getTokenForTokenPool(tokenPool: string): Promise<string> {
+    return (await this.getTokenPoolConfig(tokenPool)).token
+  }
+
   /**
    * Fetch token metadata.
    *
@@ -1184,6 +1201,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   abstract getTokenInfo(token: string): Promise<TokenInfo>
+
   /**
    * Query token balance for an address.
    *
@@ -1221,6 +1239,94 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   abstract getTokenAdminRegistryFor(address: string): Promise<string>
+
+  /**
+   * Pre-flight check if the token transfers in a message is supported for given lane, and have enough rate limit
+   * @throws {@link CCIPRateLimitExceededError} if amount exceeds the rate limit (capacity or available) for remote
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if tokenPool or remote config for the lane is not found
+   * @returns true if all token transfers are supported and within the rate limit
+   * @internal
+   */
+  async checkSendMessage({
+    router,
+    destChainSelector,
+    message,
+  }: PickDeep<
+    SendMessageOpts,
+    'router' | 'destChainSelector' | 'message.tokenAmounts'
+  >): Promise<true> {
+    let registry
+    for (const { token, amount } of message.tokenAmounts ?? []) {
+      registry ??= await this.getTokenAdminRegistryFor(router)
+      const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
+      const remote = await this.getTokenPoolRemote(tokenPool!, destChainSelector)
+      if (!remote.outboundRateLimiterState) continue
+      if (amount > remote.outboundRateLimiterState.tokens) {
+        throw new CCIPRateLimitExceededError('OUTBOUND', remote.outboundRateLimiterState, {
+          token,
+          amount,
+          tokenPool: tokenPool!,
+          registry,
+          sourceChainSelector: this.network.chainSelector,
+          destChainSelector,
+        })
+      }
+    }
+    return true
+  }
+
+  /**
+   * Pre-flight check if the token transfers in a message is supported for dest given lane, and have enough rate limit
+   * For LockRelease TPs, also check it has enough liquidity
+   * @param opts - Execution options
+   * @throws {@link CCIPRateLimitExceededError} if amount exceeds the rate limit (capacity or available) for remote
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if tokenPool or remote config for the lane is not found
+   * @returns true if all token transfers are supported and within the rate limit
+   * @internal
+   */
+  async checkExecute({
+    offRamp,
+    message,
+  }: {
+    offRamp: string
+    message: Pick<EstimateMessageInput, 'sourceChainSelector' | 'tokenAmounts' | 'finality'>
+  }): Promise<true> {
+    let registry
+    for (const ta of message.tokenAmounts ?? []) {
+      const amount = ta.amount
+      const token = 'destTokenAddress' in ta ? ta.destTokenAddress : ta.token
+      registry ??= await this.getTokenAdminRegistryFor(offRamp)
+      const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
+      const { typeAndVersion, lockBox } = await this.getTokenPoolConfig(tokenPool!)
+      // if a LockReleaseTokenPool, also check it has enough liquidity
+      if (typeAndVersion?.includes('LockRelease')) {
+        const [balance, { symbol }] = await Promise.all([
+          this.getBalance({ holder: lockBox || tokenPool!, token }),
+          this.getTokenInfo(token),
+        ])
+        if (balance < amount) {
+          throw new CCIPInsufficientBalanceError(balance.toString(), amount.toString(), symbol, {
+            context: { tokenPool, token, typeAndVersion, network: this.network.name },
+          })
+        }
+      }
+
+      const remote = await this.getTokenPoolRemote(tokenPool!, message.sourceChainSelector)
+      if (!remote.inboundRateLimiterState) continue
+      if (amount > remote.inboundRateLimiterState.tokens) {
+        throw new CCIPRateLimitExceededError('INBOUND', remote.inboundRateLimiterState, {
+          token,
+          amount,
+          tokenPool: tokenPool!,
+          registry,
+          sourceChainSelector: message.sourceChainSelector,
+          destChainSelector: this.network.chainSelector,
+        })
+      }
+    }
+    return true
+  }
+
   /**
    * Fetch the current fee for a given intended message.
    *

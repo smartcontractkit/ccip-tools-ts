@@ -435,21 +435,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * {@inheritDoc Chain.getCommitStoreForOffRamp}
-   */
-  async getCommitStoreForOffRamp(offRamp: string): Promise<string> {
-    return Promise.resolve(offRamp)
-  }
-
-  /**
-   * {@inheritDoc Chain.getTokenForTokenPool}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
-   */
-  getTokenForTokenPool(_tokenPool: string): Promise<string> {
-    throw new CCIPNotImplementedError('CantonChain.getTokenForTokenPool')
-  }
-
-  /**
    * Returns token symbol and decimals for the given Canton fee token.
    *
    * Looks up the instrument in the Canton token-metadata registry. `token` is

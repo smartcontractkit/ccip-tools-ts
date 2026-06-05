@@ -12,7 +12,6 @@ import {
   CCIPMessageIdNotFoundError,
   CCIPMessageInvalidError,
   CCIPMessageNotFoundInTxError,
-  CCIPTokenNotInRegistryError,
   CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
 import type { EVMChain } from './evm/index.ts'
@@ -528,70 +527,6 @@ export async function* getMessagesInRange(
     const lane = await resolveLane(source, message, log)
     const tx = log.tx ?? (await source.getTransaction(log.transactionHash))
     yield { lane, message, log, tx }
-  }
-}
-
-/**
- * Map source token to its pool address and destination token address.
- *
- * Resolves token routing by querying the TokenAdminRegistry and TokenPool
- * to find the corresponding destination chain token.
- *
- * @param opts - options to convert source to dest token addresses
- * @returns Extended token amount with `sourcePoolAddress`, `sourceTokenAddress`, and `destTokenAddress`
- *
- * @throws {@link CCIPTokenNotInRegistryError} if token is not registered in TokenAdminRegistry
- *
- * @example
- * ```typescript
- * import { sourceToDestTokenAddresses, EVMChain } from '@chainlink/ccip-sdk'
- *
- * const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
- * const tokenAmount = await sourceToDestTokenAddresses({
- *   source,
- *   onRamp: '0xOnRamp...',
- *   destChainSelector: 14767482510784806043n,
- *   sourceTokenAmount: { token: '0xLINK...', amount: 1000000000000000000n },
- * })
- * console.log(`Pool: ${tokenAmount.sourcePoolAddress}`)
- * console.log(`Dest token: ${tokenAmount.destTokenAddress}`)
- * ```
- */
-export async function sourceToDestTokenAddresses<S extends { token: string }>({
-  source,
-  onRamp,
-  destChainSelector,
-  sourceTokenAmount,
-}: {
-  /** Source chain instance */
-  source: Chain
-  /** OnRamp contract address */
-  onRamp: string
-  /** Destination chain selector */
-  destChainSelector: bigint
-  /** Token amount object containing `token` and `amount` */
-  sourceTokenAmount: S
-}): Promise<
-  S & {
-    sourcePoolAddress: string
-    sourceTokenAddress: string
-    destTokenAddress: string
-  }
-> {
-  const tokenAdminRegistry = await source.getTokenAdminRegistryFor(onRamp)
-  const sourceTokenAddress = sourceTokenAmount.token
-  const { tokenPool: sourcePoolAddress } = await source.getRegistryTokenConfig(
-    tokenAdminRegistry,
-    sourceTokenAddress,
-  )
-  if (!sourcePoolAddress)
-    throw new CCIPTokenNotInRegistryError(sourceTokenAddress, tokenAdminRegistry)
-  const remotes = await source.getTokenPoolRemotes(sourcePoolAddress, destChainSelector)
-  return {
-    ...sourceTokenAmount,
-    sourcePoolAddress,
-    sourceTokenAddress,
-    destTokenAddress: remotes[networkInfo(destChainSelector).name]!.remoteToken,
   }
 }
 

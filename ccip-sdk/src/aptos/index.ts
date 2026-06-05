@@ -26,17 +26,17 @@ import { getAptosLeafHasher } from './hasher.ts'
 import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import {
-  CCIPAptosExtraArgsEncodingError,
   CCIPAptosExtraArgsV2RequiredError,
-  CCIPAptosLogInvalidError,
   CCIPAptosNetworkUnknownError,
   CCIPAptosRegistryTypeInvalidError,
-  CCIPAptosTokenNotRegisteredError,
   CCIPAptosTransactionInvalidError,
   CCIPAptosTransactionTypeInvalidError,
-  CCIPAptosWalletInvalidError,
   CCIPError,
+  CCIPExtraArgsEncodingUnsupportedError,
+  CCIPLogDataInvalidError,
+  CCIPTokenNotRegisteredError,
   CCIPTokenPoolChainConfigNotFoundError,
+  CCIPWalletInvalidError,
 } from '../errors/index.ts'
 import {
   type EVMExtraArgsV2,
@@ -367,27 +367,6 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     return Promise.resolve(router.split('::')[0] + '::onramp')
   }
 
-  /** {@inheritDoc Chain.getTokenForTokenPool} */
-  async getTokenForTokenPool(tokenPool: string): Promise<string> {
-    const modulesNames = (await this._getAccountModulesNames(tokenPool))
-      .reverse()
-      .filter((name) => name.endsWith('token_pool'))
-    let firstErr
-    for (const name of modulesNames) {
-      try {
-        const res = await this.provider.view<[string]>({
-          payload: {
-            function: `${tokenPool}::${name}::get_token`,
-          },
-        })
-        return res[0]
-      } catch (err) {
-        firstErr ??= err as Error
-      }
-    }
-    throw CCIPError.from(firstErr ?? `Could not view 'get_token' in ${tokenPool}`, 'UNKNOWN')
-  }
-
   /** {@inheritDoc Chain.getBalance} */
   async getBalance(opts: GetBalanceOpts): Promise<bigint> {
     const { holder, token } = opts
@@ -427,7 +406,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       (typeof data !== 'string' || !data.startsWith('{')) &&
       (typeof data !== 'object' || isBytesLike(data))
     )
-      throw new CCIPAptosLogInvalidError(util.inspect(log))
+      throw new CCIPLogDataInvalidError(util.inspect(log), { chain: ChainFamily.Aptos })
     // offload massaging to generic decodeJsonMessage
     try {
       return decodeMessage(data)
@@ -469,7 +448,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
           accounts: extraArgs.accounts.map(getAddressBytes),
         }).toBytes(),
       ])
-    throw new CCIPAptosExtraArgsEncodingError()
+    throw new CCIPExtraArgsEncodingUnsupportedError(
+      ChainFamily.Aptos,
+      'EVMExtraArgsV2 & SVMExtraArgsV1',
+    )
   }
 
   /**
@@ -480,7 +462,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @throws {@link CCIPAptosLogInvalidError} if log data format is invalid
    */
   static decodeCommits({ data }: Pick<ChainLog, 'data'>, lane?: Lane): CommitReport[] | undefined {
-    if (!data || typeof data != 'object') throw new CCIPAptosLogInvalidError(data)
+    if (!data || typeof data != 'object')
+      throw new CCIPLogDataInvalidError(data, { chain: ChainFamily.Aptos })
     const data_ = data as {
       blessed_merkle_roots: unknown[] | undefined
       unblessed_merkle_roots: unknown[]
@@ -514,7 +497,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @throws {@link CCIPAptosLogInvalidError} if log data format is invalid
    */
   static decodeReceipt({ data }: Pick<ChainLog, 'data'>): ExecutionReceipt | undefined {
-    if (!data || typeof data != 'object') throw new CCIPAptosLogInvalidError(data)
+    if (!data || typeof data != 'object')
+      throw new CCIPLogDataInvalidError(data, { chain: ChainFamily.Aptos })
     const data_ = data as { message_id: string; state: number }
     if (!data_.message_id || !data_.state) return
     return convertKeysToCamelCase(data_, (v) =>
@@ -549,11 +533,9 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /** {@inheritDoc Chain.getFee} */
-  async getFee({
-    router,
-    destChainSelector,
-    message,
-  }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+  async getFee(opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+    await this.checkSendMessage(opts)
+    const { router, destChainSelector, message } = opts
     const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
     return getFee(this.provider, router, destChainSelector, populatedMessage)
   }
@@ -592,7 +574,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
     const account = opts.wallet
     if (!isAptosAccount(account)) {
-      throw new CCIPAptosWalletInvalidError(this.constructor.name, util.inspect(opts.wallet))
+      throw new CCIPWalletInvalidError(opts.wallet, { className: this.constructor.name })
     }
 
     const unsignedTx = await this.generateUnsignedSendMessage({
@@ -654,7 +636,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   async execute(opts: Parameters<Chain['execute']>[0]): Promise<CCIPExecution> {
     const account = opts.wallet
     if (!isAptosAccount(account)) {
-      throw new CCIPAptosWalletInvalidError(this.constructor.name, util.inspect(opts.wallet))
+      throw new CCIPWalletInvalidError(opts.wallet, { className: this.constructor.name })
     }
 
     const unsignedTx = await this.generateUnsignedExecute({
@@ -734,7 +716,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         functionArguments: [token],
       },
     })
-    if (administrator.match(/^0x0*$/)) throw new CCIPAptosTokenNotRegisteredError(token, registry)
+    if (administrator.match(/^0x0*$/)) throw new CCIPTokenNotRegisteredError(token, registry)
     return {
       administrator,
       ...(!pendingAdministrator.match(/^0x0*$/) && { pendingAdministrator }),

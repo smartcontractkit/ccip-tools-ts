@@ -100,6 +100,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   TOKEN_NOT_REGISTERED: 'Token is not registered in the TokenAdminRegistry.',
   TOKEN_REMOTE_NOT_CONFIGURED: 'Remote network is not registered in TokenPool.',
   TOKEN_DECIMALS_INSUFFICIENT: 'Destination token has insufficient decimals.',
+  RATE_LIMIT_EXCEEDED:
+    'Rate limit amount not enough for token transfer. Check capacity and retry when refilled.',
   TOKEN_INVALID_SPL: 'Invalid SPL token or Token-2022.',
   TOKEN_DATA_PARSE_FAILED:
     'Ensure the token address is valid and the token contract is deployed on this chain.',
@@ -122,6 +124,9 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   EXEC_TX_REVERTED: 'Transaction reverted. Check the receiver contract.',
   EXECUTION_STATE_INVALID: 'Invalid execution state returned from contract.',
   RECEIPT_NOT_FOUND: 'Receipt not found in transaction logs. Wait and retry.',
+
+  FINALITY_NOT_ALLOWED:
+    "The receiver contract does not accept the requested finality. Check the receiver's getCCVsAndFinalityConfig() for the allowed depth or safe flag.",
 
   USDC_ATTESTATION_FAILED: 'USDC attestation not ready. Wait and retry (10-30 min typical).',
   LBTC_ATTESTATION_ERROR: 'LBTC attestation fetch failed. Wait and retry.',

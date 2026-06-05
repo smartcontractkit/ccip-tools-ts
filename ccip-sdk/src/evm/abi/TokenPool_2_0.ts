@@ -1,11 +1,35 @@
 // TODO: track a v2 release tag and the v2.0.0 folder instead of a commit + latest/ folder, once 2.0.0 is released in `chainlink-ccip`
 export default [
   // generate:
-  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/main/chains/evm/gobindings/generated/v2_0_0/token_pool/token_pool.go')
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/main/chains/evm/gobindings/generated/v2_0_0/lock_release_token_pool/lock_release_token_pool.go')
   //   .then((res) => res.text())
   //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
   //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
   //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
+  {
+    type: 'constructor',
+    inputs: [
+      {
+        name: 'token',
+        type: 'address',
+        internalType: 'contract IERC20',
+      },
+      {
+        name: 'localTokenDecimals',
+        type: 'uint8',
+        internalType: 'uint8',
+      },
+      {
+        name: 'advancedPoolHooks',
+        type: 'address',
+        internalType: 'address',
+      },
+      { name: 'rmnProxy', type: 'address', internalType: 'address' },
+      { name: 'router', type: 'address', internalType: 'address' },
+      { name: 'lockBox', type: 'address', internalType: 'address' },
+    ],
+    stateMutability: 'nonpayable',
+  },
   {
     type: 'function',
     name: 'acceptOwnership',
@@ -295,6 +319,13 @@ export default [
       { name: 'tokenFeeBps', type: 'uint16', internalType: 'uint16' },
       { name: 'isEnabled', type: 'bool', internalType: 'bool' },
     ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getLockBox',
+    inputs: [],
+    outputs: [{ name: '', type: 'address', internalType: 'address' }],
     stateMutability: 'view',
   },
   {
@@ -861,6 +892,13 @@ export default [
     inputs: [{ name: 'to', type: 'address', internalType: 'address' }],
     outputs: [],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'typeAndVersion',
+    inputs: [],
+    outputs: [{ name: '', type: 'string', internalType: 'string' }],
+    stateMutability: 'pure',
   },
   {
     type: 'function',
