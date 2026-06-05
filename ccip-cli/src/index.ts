@@ -28,7 +28,7 @@ Error.stackTraceLimit = 50 // show more stack frames for better debugging
 
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '1.7.1-90c0438'
+const VERSION = '1.8.0-58177faf'
 // generate:end
 
 const require = createRequire(import.meta.url)
@@ -111,6 +111,12 @@ const globalOpts = {
     type: 'string',
     describe:
       'Path to Canton config JSON file (party, ccipParty, jwt, edsUrl, transferInstructionUrl, etc.)',
+  },
+  indexer: {
+    type: 'array',
+    string: true,
+    describe:
+      'Additional CCIP v2 indexer base URLs to query for CCV verifications (e.g. https://indexer-1.ccip.chain.link)',
   },
 } as const
 

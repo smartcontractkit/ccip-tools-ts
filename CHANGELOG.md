@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-06-05
+
 - SDK: `checkSendMessage` method called at `getFee` time, checks source rate limits before sending
 - SDK: `checkExecute` method checks dest rate limits, called by standalone `estimateReceiveExecution` function
 - SDK: `estimateReceiveExecution` method also checks requested finality is within `ccipReceiver` `allowedFinality`
 - CLI: `send` performs all these `--estimate-gas-limit` checks by default before sending
+- SDK: fetch v2 offchain verifications from Indexers
+- CLI: add `--indexer` global option to add custom indexers (relevant for `show` and `manual-exec` commands)
 
 ## [1.7.0] - 2026-05-25
 

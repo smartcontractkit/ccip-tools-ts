@@ -205,7 +205,11 @@ async function manualExec(
   let inputs
   if (source) {
     offRamp ??= await discoverOffRamp(source, dest, request.lane.onRamp, source)
-    const verifications = await dest.getVerifications({ ...argv, offRamp, request })
+    const verifications = await dest.getVerifications({
+      ...argv,
+      offRamp,
+      request,
+    })
 
     if (argv.estimateGasLimit != null) {
       const estimated = await estimateReceiveExecution({

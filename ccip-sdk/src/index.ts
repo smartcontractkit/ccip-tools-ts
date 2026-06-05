@@ -46,6 +46,7 @@ export type {
 } from './chain.ts'
 export { DEFAULT_API_RETRY_CONFIG, LaneFeature } from './chain.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
+export { type FetchVerificationsOpts, fetchVerifications } from './commits.ts'
 export {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,

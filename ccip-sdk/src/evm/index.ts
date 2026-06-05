@@ -41,6 +41,7 @@ import {
   type TotalFeesEstimate,
   Chain,
 } from '../chain.ts'
+import { fetchVerifications } from '../commits.ts'
 import {
   CCIPAddressInvalidError,
   CCIPBlockNotFoundError,
@@ -123,7 +124,6 @@ import type USDCTokenPoolProxy_2_0_ABI from './abi/USDCTokenPoolProxy_2_0.ts'
 import type VersionedVerifierResolver_2_0_ABI from './abi/VersionedVerifierResolver_2_0.ts'
 import {
   type TokenPoolAndProxyABI,
-  CCV_INDEXER_URL,
   VersionedContractABI,
   commitsFragments,
   interfaces,
@@ -2136,36 +2136,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         optionalThreshold: Number(optionalThreshold),
       }
 
-      if (this.apiClient) {
-        const apiRes = await this.apiClient.getMessageById(request.message.messageId)
-        if ('verifiers' in apiRes.message) {
-          const verifiers = apiRes.message.verifiers as {
-            items?: {
-              destAddress: string
-              sourceAddress: string
-              verification?: { data: string; timestamp: string }
-            }[]
-          }
-          return {
-            verificationPolicy,
-            verifications: (verifiers.items ?? [])
-              .filter((item) => item.verification?.data)
-              .map((item) => ({
-                destAddress: item.destAddress,
-                sourceAddress: item.sourceAddress,
-                ccvData: item.verification!.data,
-                ...(!!item.verification?.timestamp && {
-                  timestamp: new Date(item.verification.timestamp).getTime() / 1e3,
-                }),
-              })),
-          }
-        }
-      }
-
-      const url = `${CCV_INDEXER_URL}/v1/verifierresults/${request.message.messageId}`
-      const res = await fetch(url)
-      const json = await res.json()
-      return json as CCIPVerifications
+      // race API client + indexer URLs
+      const verifications = await fetchVerifications(request.message.messageId, {
+        apiClient: this.apiClient,
+        indexer: opts.indexer ?? this.network.networkType,
+        watch:
+          opts.watch instanceof AbortSignal
+            ? AbortSignal.any([opts.watch, this.abort])
+            : this.abort,
+      })
+      return { verificationPolicy, verifications }
     } else if (request.lane.version < CCIPVersion.V1_6) {
       // v1.2..v1.5 EVM (only) have separate CommitStore
       const { commitStore } = (await this.getOffRampConfig(
