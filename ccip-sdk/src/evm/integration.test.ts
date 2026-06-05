@@ -19,11 +19,14 @@ import { EVMChain } from './index.ts'
 
 // ── Chain constants ──
 
-const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://sepolia.gateway.tenderly.co'
+// Integration tests issue many live RPC calls (no anvil fork to absorb them), so the
+// defaults point at reliable public endpoints. Free gateways (tenderly, avax public)
+// rate-limit/stall under this load and time out the suite. Override via RPC_* env vars.
+const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://ethereum-sepolia-rpc.publicnode.com'
 const SEPOLIA_SELECTOR = 16015286601757825753n
 const SEPOLIA_ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
 
-const FUJI_RPC = process.env['RPC_FUJI'] || 'https://api.avax-test.network/ext/bc/C/rpc'
+const FUJI_RPC = process.env['RPC_FUJI'] || 'https://avalanche-fuji-c-chain-rpc.publicnode.com'
 
 const ARB_SEP_RPC = process.env['RPC_ARB_SEPOLIA'] || 'https://arbitrum-sepolia-rpc.publicnode.com'
 const ARB_SEP_SELECTOR = 3478487238524512106n

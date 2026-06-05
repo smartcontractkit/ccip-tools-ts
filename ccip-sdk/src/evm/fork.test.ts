@@ -128,16 +128,33 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   let arbSepInstance: ReturnType<typeof Instance.anvil> | undefined
 
   before(async () => {
+    // Fork-resilience options: anvil fetches historical blocks/state from the upstream
+    // RPC lazily, and public endpoints intermittently return 408/timeout under that load.
+    // Wait longer per request and retry timed-out ones with backoff, so a transient
+    // upstream error doesn't fail a fork mid-test. (Leave anvil's rate limiter on —
+    // disabling it floods the upstream and gets the fork throttled at startup.)
+    const forkOpts = {
+      retries: 8,
+      timeout: 60_000,
+      forkRetryBackoff: 1_000,
+    } as const
     sepoliaInstance = Instance.anvil({
       forkUrl: SEPOLIA_RPC,
       chainId: SEPOLIA_CHAIN_ID,
       port: 8646,
+      ...forkOpts,
     })
-    fujiInstance = Instance.anvil({ forkUrl: FUJI_RPC, chainId: FUJI_CHAIN_ID, port: 8645 })
+    fujiInstance = Instance.anvil({
+      forkUrl: FUJI_RPC,
+      chainId: FUJI_CHAIN_ID,
+      port: 8645,
+      ...forkOpts,
+    })
     arbSepInstance = Instance.anvil({
       forkUrl: ARB_SEP_RPC,
       chainId: ARB_SEP_CHAIN_ID,
       port: 8644,
+      ...forkOpts,
     })
     await Promise.all([sepoliaInstance.start(), fujiInstance.start(), arbSepInstance.start()])
 
