@@ -501,6 +501,18 @@ export type TokenPoolConfig = {
    */
   tokenTransferFeeConfig?: TokenTransferFeeConfig
   /**
+   * For Proxy TokenPools, the address of the previous pool implementation (if any).
+   */
+  previousPool?: string
+  /**
+   * For Proxy TokenPools, the typeAndVersion() string of the previous pool implementation (if any).
+   */
+  previousPoolTypeAndVersion?: string
+  /**
+   * For LockReleaseTokenPool v2+, the address of the associated LockBox contract.
+   */
+  lockBox?: string
+  /**
    * Min finalityDepth and finality flags for Faster-Than-Finality (FTF) and FCR (safe),
    * if TokenPool version \>= v2.0.0 and FTF is supported on this lane.
    * `finalityDepth=0` indicates FTF is supported but not enabled for this token;
@@ -1285,12 +1297,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       const token = 'destTokenAddress' in ta ? ta.destTokenAddress : ta.token
       registry ??= await this.getTokenAdminRegistryFor(offRamp)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
-
-      const [type, , typeAndVersion] = await this.typeAndVersion(tokenPool!)
+      const { typeAndVersion, lockBox } = await this.getTokenPoolConfig(tokenPool!)
       // if a LockReleaseTokenPool, also check it has enough liquidity
-      if (type.includes('Lock') && type.includes('Release')) {
+      if (typeAndVersion?.includes('LockRelease')) {
         const [balance, { symbol }] = await Promise.all([
-          this.getBalance({ holder: tokenPool!, token }),
+          this.getBalance({ holder: lockBox || tokenPool!, token }),
           this.getTokenInfo(token),
         ])
         if (balance < amount) {

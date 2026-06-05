@@ -1840,6 +1840,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    *   - `tokenArgs` — hex-encoded bytes passed to the pool contract.
    * @returns Token pool config containing token, router, typeAndVersion, and optionally
    *          finalityDepth, finalitySafe, and tokenTransferFeeConfig.
+   *          LockReleaseV2 TPs also return its `lockBox` address
    *
    * @remarks
    * For pools with version \>= 2.0, also returns `finalityDepth` and `finalitySafe` for
@@ -1849,16 +1850,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   async getTokenPoolConfig(
     tokenPool: string,
     feeOpts?: TokenTransferFeeOpts,
-  ): Promise<
-    TokenPoolConfig & {
-      typeAndVersion: string
-      previousPool?: string
-      previousTypeAndVersion?: string
-    }
-  > {
+  ): Promise<SetRequired<TokenPoolConfig, 'typeAndVersion'>> {
     const [type, version, typeAndVersion] = await this.typeAndVersion(tokenPool)
 
-    let token, router, allowedFinality, tokenTransferFeeConfig, previousPool: string | undefined
+    let token,
+      router,
+      allowedFinality,
+      tokenTransferFeeConfig,
+      previousPool: string | undefined,
+      lockBox: string | undefined
     if (version < CCIPVersion.V2_0) {
       const contract = new Contract(
         tokenPool,
@@ -1895,6 +1895,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
       token = contract.getToken()
       router = contract.getDynamicConfig().then(([router]) => router)
+      if (type.includes('LockRelease')) {
+        const lockBox_ = await resultToObject(contract.getLockBox().catch(() => null))
+        if (lockBox_ && !lockBox_.match(/^(0x)?0*$/)) lockBox = lockBox_
+      }
       allowedFinality = contract.getAllowedFinalityConfig().catch((err) => {
         this.logger.debug(
           typeAndVersion,
@@ -1949,6 +1953,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           previousPool,
           previousTypeAndVersion: previousTypeAndVersion![2],
         }),
+        ...(!!lockBox && { lockBox }),
       }
     })
   }
