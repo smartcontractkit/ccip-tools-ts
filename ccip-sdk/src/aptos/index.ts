@@ -104,12 +104,14 @@ function createAptosFetchClient(fetchFn: typeof fetch): Client {
       for (const [k, v] of Object.entries(req.headers ?? {})) {
         if (v != null) headers[k] = String(v)
       }
-      const contentType = req.contentType ?? 'application/json'
+      // The SDK moves contentType into headers before calling provider(), so
+      // req.contentType is undefined here. Check the header value directly.
+      const resolvedCT = headers['content-type'] ?? req.contentType ?? 'application/json'
       type FetchBody = NonNullable<Parameters<typeof fetch>[1]>['body']
       let body: FetchBody
       if (req.body != null) {
-        headers['content-type'] ??= contentType
-        body = contentType.includes('json') ? JSON.stringify(req.body) : (req.body as FetchBody)
+        headers['content-type'] ??= resolvedCT
+        body = resolvedCT.includes('json') ? JSON.stringify(req.body) : (req.body as FetchBody)
       }
       const resp = await fetchFn(url.toString(), { method: req.method, headers, body })
       const text = await resp.text()
