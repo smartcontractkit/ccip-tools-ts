@@ -71,6 +71,7 @@ import {
   type SVMExtraArgsV1,
   EVMExtraArgsV2Tag,
 } from '../extra-args.ts'
+import { fetchProfileForUrl } from '../fetch.ts'
 import { getDestTokenAmount } from '../gas.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
@@ -311,8 +312,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @returns Solana Connection instance.
    * @throws {@link CCIPDataFormatUnsupportedError} if URL format is invalid
    */
-  static _getConnection(url: string, ctx?: WithLogger): Connection {
-    const { logger = console } = ctx ?? {}
+  static _getConnection(
+    url: string,
+    ctx?: WithLogger & { fetch?: typeof fetch; abort?: AbortSignal },
+  ): Connection {
     if (!url.startsWith('http') && !url.startsWith('ws')) {
       throw new CCIPDataFormatUnsupportedError(
         `Invalid Solana RPC URL format (should be https://, http://, wss://, or ws://): ${url}`,
@@ -320,10 +323,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     const config: ConnectionConfig = { commitment: 'confirmed' }
-    if (url.includes('.solana.com')) {
-      config.fetch = createRateLimitedFetch(undefined, ctx) // public nodes
-      logger.warn('Using rate-limited fetch for public solana nodes, commands may be slow')
-    }
+    config.fetch = ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
 
     return new Connection(url, config)
   }

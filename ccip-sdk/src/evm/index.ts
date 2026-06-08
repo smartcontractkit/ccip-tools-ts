@@ -11,6 +11,7 @@ import {
   type TransactionRequest,
   type TransactionResponse,
   Contract,
+  FetchRequest,
   JsonRpcProvider,
   WebSocketProvider,
   ZeroAddress,
@@ -69,6 +70,7 @@ import {
   decodeFinalityAllowed,
   encodeFinality,
 } from '../extra-args.ts'
+import { fetchProfileForUrl } from '../fetch.ts'
 import { getDestTokenAmount } from '../gas.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessageV1 } from '../messages.ts'
@@ -91,6 +93,7 @@ import {
   CCIPVersion,
 } from '../types.ts'
 import {
+  createRateLimitedFetch,
   decodeAddress,
   decodeOnRampAddress,
   encodeAddressToAny,
@@ -374,7 +377,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param url - WebSocket (wss://) or HTTP (https://) endpoint URL.
    * @returns A ready JSON-RPC provider.
    */
-  static async _getProvider(url: string, abort?: AbortSignal): Promise<JsonRpcApiProvider> {
+  static async _getProvider(
+    url: string,
+    ctx?: { abort?: AbortSignal; fetch?: typeof fetch } & Parameters<
+      typeof createRateLimitedFetch
+    >[1],
+  ): Promise<JsonRpcApiProvider> {
+    const abort = ctx?.abort
     let providerReady: Promise<JsonRpcApiProvider>
     if (url.startsWith('ws')) {
       const provider = new WebSocketProvider(url, undefined, { staticNetwork: true })
@@ -387,7 +396,23 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           .catch(reject)
       })
     } else if (url.startsWith('http')) {
-      const provider = new JsonRpcProvider(url, undefined, { staticNetwork: true })
+      const fetchFn = ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
+      const req = new FetchRequest(url)
+      req.getUrlFunc = async (r, _signal) => {
+        const resp = await fetchFn(r.url, {
+          method: r.method || 'POST',
+          headers: Object.fromEntries(Object.entries(r.headers).map(([k, v]) => [k, String(v)])),
+          body: r.body ?? undefined,
+        })
+        const headers: Record<string, string> = {}
+        resp.headers.forEach((v, k) => {
+          headers[k] = v
+        })
+        const body = new Uint8Array(await resp.arrayBuffer())
+        return { statusCode: resp.status, statusMessage: resp.statusText, headers, body }
+      }
+      req.retryFunc = () => Promise.resolve(false) // our wrapper owns retries
+      const provider = new JsonRpcProvider(req, undefined, { staticNetwork: true })
       abort?.addEventListener('abort', () => provider.destroy(), { once: true })
       providerReady = Promise.resolve(provider)
     } else {
@@ -429,7 +454,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * ```
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<EVMChain> {
-    return this.fromProvider(await this._getProvider(url, ctx?.abort), ctx)
+    return this.fromProvider(await this._getProvider(url, ctx), ctx)
   }
 
   /** {@inheritDoc Chain.getBlockInfo} */

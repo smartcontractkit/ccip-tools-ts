@@ -123,6 +123,14 @@ function hasV3ExtraArgs(extraArgs: Partial<ExtraArgs> | undefined): boolean {
  */
 export type ChainContext = WithLogger & {
   /**
+   * Custom fetch implementation. When provided, it is used verbatim for all HTTP
+   * requests on this chain and the built-in rate-limit/retry wrapper is NOT applied.
+   * When omitted, a default per-endpoint rate-limited fetch (with adaptive throttle,
+   * 429/Retry-After handling and retries) is installed automatically.
+   */
+  fetch?: typeof fetch
+
+  /**
    * CCIP API client instance for lane information queries.
    *
    * - `undefined` (default): Creates CCIPAPIClient with {@link DEFAULT_API_BASE_URL}

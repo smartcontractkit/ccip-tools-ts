@@ -2,10 +2,14 @@ import { Buffer } from 'buffer'
 
 import { type Transaction, Address, Cell, beginCell, fromNano, toNano } from '@ton/core'
 import { TonClient } from '@ton/ton'
-import { type AxiosAdapter, getAdapter } from 'axios'
 import { type BytesLike, hexlify, isBytesLike, isHexString, toBeArray, toBeHex } from 'ethers'
 import { type Memoized, memoize } from 'micro-memoize'
 
+import {
+  decodeLegacyEVMTONExtraArgs,
+  decodeTONExtraArgsCell,
+  encodeExtraArgsCell,
+} from './extra-args.ts'
 import { streamTransactionsForAddress } from './logs.ts'
 import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
 import {
@@ -17,6 +21,7 @@ import {
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
+import { type UnsignedTONTx, isTONWallet } from './types.ts'
 import {
   CCIPArgumentInvalidError,
   CCIPExecutionReportChainMismatchError,
@@ -28,8 +33,11 @@ import {
   CCIPTransactionNotFoundError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
+import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
+import { createAxiosFetchAdapter, fetchProfileForUrl } from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { buildMessageForDest } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -54,16 +62,8 @@ import {
   parseTypeAndVersion,
 } from '../utils.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
-import {
-  decodeLegacyEVMTONExtraArgs,
-  decodeTONExtraArgsCell,
-  encodeExtraArgsCell,
-} from './extra-args.ts'
 import { getTONLeafHasher } from './hasher.ts'
-import { type UnsignedTONTx, isTONWallet } from './types.ts'
 import { crc32, lookupTxByRawHash, parseJettonContent } from './utils.ts'
-import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 export type { TONWallet, UnsignedTONTx } from './types.ts'
 
 /**
@@ -149,9 +149,12 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       return txs
     }
 
-    // Rate-limited fetch for TonCenter API (public tier: ~1 req/sec)
+    // Use caller-supplied fetch verbatim; fetchFn is a still-supported alias for back-compat.
+    // When neither is provided, fall back to a rate-limited default.
     this.rateLimitedFetch =
-      ctx?.fetchFn ?? createRateLimitedFetch({ maxRequests: 1, windowMs: 1500, maxRetries: 5 }, ctx)
+      ctx?.fetch ??
+      ctx?.fetchFn ??
+      createRateLimitedFetch({ seed: { limit: 1, windowMs: 1500 }, maxRetries: 5 }, ctx)
 
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       async: true,
@@ -215,37 +218,21 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const { logger = console } = ctx ?? {}
     if (!url.endsWith('/jsonRPC')) url += '/jsonRPC'
 
-    let fetchFn: typeof fetch | undefined
-    let httpAdapter: AxiosAdapter | undefined
+    // Resolve the fetch function: user-supplied verbatim, then rate-limited default.
+    const fetchFn: typeof fetch = ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
+
     // For known public providers, detect network from URL to avoid an API call during init
     // (free-tier endpoints are rate-limited and return transient 5xx errors).
     let isMainnetHint: boolean | undefined
 
     if (['toncenter.com', 'tonapi.io'].some((d) => url.includes(d))) {
-      logger.warn(
-        'Public TONCenter API calls are rate-limited to ~1 req/sec, some commands may be slow',
-      )
-      fetchFn = createRateLimitedFetch({ maxRequests: 1, windowMs: 1500, maxRetries: 5 }, ctx)
-      httpAdapter = (getAdapter as (name: string, config: object) => AxiosAdapter)('fetch', {
-        env: { fetch: fetchFn },
-      })
       // testnet.toncenter.com / testnet.tonapi.io → testnet; bare domain → mainnet
       isMainnetHint = !url.includes('testnet.')
     }
 
-    // Wrap the adapter (or the default 'http' adapter) so that every TonClient axios
-    // request inherits the abort signal. Without this, raceAc.abort() fires and prints
-    // "Aborting RPC race" but the in-flight axios socket has no signal to cancel against
-    // and stays alive in the keep-alive pool, preventing natural process exit.
-    if (ctx?.abort) {
-      const abort = ctx.abort
-      const base = httpAdapter ?? (getAdapter as (name: string) => AxiosAdapter)('http')
-      httpAdapter = (config) =>
-        base({
-          ...config,
-          signal: config.signal ? AbortSignal.any([config.signal as AbortSignal, abort]) : abort,
-        })
-    }
+    // Always use the fetch adapter so our fetch function is used for all requests.
+    // Also merges ctx.abort into every request signal so raceAc.abort() cancels in-flight sockets.
+    const httpAdapter = createAxiosFetchAdapter(fetchFn, ctx?.abort)
 
     const client = new TonClient({ endpoint: url, httpAdapter })
     try {

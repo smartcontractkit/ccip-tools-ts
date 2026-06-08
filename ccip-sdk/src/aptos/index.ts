@@ -1,4 +1,8 @@
 import {
+  type AptosSettings,
+  type Client,
+  type ClientRequest,
+  type ClientResponse,
   Aptos,
   AptosApiError,
   AptosConfig,
@@ -21,6 +25,7 @@ import {
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
+import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { getAptosLeafHasher } from './hasher.ts'
 import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
@@ -79,6 +84,60 @@ import { getTokenInfo } from './token.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import { buildMessageForDest, decodeMessage, normalizeDeep } from '../requests.ts'
 export type { UnsignedAptosTx }
+
+/**
+ * Creates an Aptos SDK `Client` that routes all HTTP calls through the supplied fetch function.
+ * Non-2xx responses are returned (not thrown) so the SDK can build its own `AptosApiError`.
+ */
+function createAptosFetchClient(fetchFn: typeof fetch): Client {
+  return {
+    async provider<Req, Res>(req: ClientRequest<Req>): Promise<ClientResponse<Res>> {
+      const url = new URL(req.url)
+      if (req.params) {
+        for (const [k, v] of Object.entries(
+          req.params as Record<string, string | number | boolean | null | undefined>,
+        )) {
+          if (v != null) url.searchParams.set(k, String(v))
+        }
+      }
+      const headers: Record<string, string> = {}
+      for (const [k, v] of Object.entries(req.headers ?? {})) {
+        if (v != null) headers[k] = String(v)
+      }
+      const contentType = req.contentType ?? 'application/json'
+      type FetchBody = NonNullable<Parameters<typeof fetch>[1]>['body']
+      let body: FetchBody
+      if (req.body != null) {
+        headers['content-type'] ??= contentType
+        body = contentType.includes('json') ? JSON.stringify(req.body) : (req.body as FetchBody)
+      }
+      const resp = await fetchFn(url.toString(), { method: req.method, headers, body })
+      const text = await resp.text()
+      let data: unknown = text
+      const respCT = resp.headers.get('content-type') ?? ''
+      if (respCT.includes('json') || (!respCT && text)) {
+        try {
+          data = text ? JSON.parse(text) : undefined
+        } catch {
+          // keep text as-is
+        }
+      }
+      const respHeaders: Record<string, string> = {}
+      resp.headers.forEach((v, k) => {
+        respHeaders[k] = v
+      })
+      return {
+        status: resp.status,
+        statusText: resp.statusText,
+        data: data as Res,
+        headers: respHeaders,
+        config: req,
+        request: null,
+        response: null,
+      }
+    },
+  }
+}
 
 /**
  * Aptos chain implementation supporting Aptos networks.
@@ -171,13 +230,52 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /**
-   * Creates an AptosChain instance from an Aptos configuration.
-   * @param config - Aptos configuration object.
-   * @param ctx - context containing logger.
+   * Creates an AptosChain instance from Aptos configuration settings.
+   *
+   * Installs a fetch-based `Client` shim so that all Aptos REST calls are routed
+   * through `ctx.fetch` (when provided) or through the built-in rate-limited fetch.
+   * If the settings already include an explicit `client`, that client is used as-is.
+   *
+   * Use {@link AptosChain.fromProvider} instead when you have a fully constructed
+   * `Aptos` instance and want no shim to be installed.
+   *
+   * @param settings - Aptos configuration settings (AptosSettings or AptosConfig).
+   * @param ctx - context containing logger and optional fetch override.
    * @returns A new AptosChain instance.
    */
-  static async fromAptosConfig(config: AptosConfig, ctx?: WithLogger): Promise<AptosChain> {
-    const provider = new Aptos(config)
+  static async fromAptosConfig(
+    settings: AptosSettings | AptosConfig,
+    ctx?: ChainContext,
+  ): Promise<AptosChain> {
+    // Detect whether the caller explicitly set a custom HTTP client adapter:
+    // - For raw AptosSettings: `client` is undefined unless explicitly set.
+    // - For a pre-built AptosConfig: the SDK always fills in `config.client` with a default
+    //   whose `.provider` is named `"aptosClient"`. Any other name or identity indicates a
+    //   user-supplied adapter.
+    const explicitClient = settings.client
+    const hasExplicitClient =
+      explicitClient != null && explicitClient.provider.name !== 'aptosClient'
+    let effectiveConfig: AptosConfig
+    if (hasExplicitClient) {
+      effectiveConfig = settings instanceof AptosConfig ? settings : new AptosConfig(settings)
+    } else {
+      const fetchFn =
+        ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(settings.fullnode ?? ''), ctx)
+      effectiveConfig = new AptosConfig({
+        network: settings.network,
+        fullnode: settings.fullnode,
+        faucet: settings.faucet,
+        indexer: settings.indexer,
+        pepper: settings.pepper,
+        prover: settings.prover,
+        clientConfig: settings.clientConfig,
+        fullnodeConfig: settings.fullnodeConfig,
+        indexerConfig: settings.indexerConfig,
+        faucetConfig: settings.faucetConfig,
+        client: createAptosFetchClient(fetchFn),
+      })
+    }
+    const provider = new Aptos(effectiveConfig)
     return this.fromProvider(provider, ctx)
   }
 
@@ -200,12 +298,14 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     else if (url.includes('testnet')) network = Network.TESTNET
     else if (url.includes('local')) network = Network.LOCAL
     else throw new CCIPAptosNetworkUnknownError(util.inspect(url))
-    const config: AptosConfig = new AptosConfig({
+    // Pass raw AptosSettings (not a pre-built AptosConfig) so fromAptosConfig can
+    // detect the absence of an explicit `client` and install the fetch shim.
+    const settings: AptosSettings = {
       network,
       fullnode: typeof url === 'string' && url.includes('://') ? url : undefined,
       // indexer: url.includes('://') ? `${url}/v1/graphql` : undefined,
-    })
-    return this.fromAptosConfig(config, ctx)
+    }
+    return this.fromAptosConfig(settings, ctx)
   }
 
   /** {@inheritDoc Chain.getBlockInfo} */
@@ -677,7 +777,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /** {@inheritDoc Chain.getSupportedTokens} */
-  async getSupportedTokens(address: string, opts?: { page?: number }): Promise<string[]> {
+  async getSupportedTokens(address: string, opts?: Pick<LogFilter, 'page'>): Promise<string[]> {
     const res = []
     let page,
       nextKey = '0x0',
