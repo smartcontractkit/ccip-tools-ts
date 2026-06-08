@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: `createRateLimitedFetch` wrapper applied by default, auto-detect and adapt to RPC rate limits
+- EVM: `getLogs` auto-detect `page` / `log range` errors and retry with suggested or halvened ranges
+
 ## [1.8.0] - 2026-06-05
 
 - SDK: `checkSendMessage` method called at `getFee` time, checks source rate limits before sending

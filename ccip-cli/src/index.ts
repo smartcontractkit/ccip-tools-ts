@@ -87,10 +87,6 @@ const globalOpts = {
     describe: 'enable debug logging',
     type: 'boolean',
   },
-  page: {
-    type: 'number',
-    describe: 'getLogs page/range size',
-  },
   api: {
     type: 'string',
     describe: 'CCIP API URL (use --no-api to disable, enabled by default)',

@@ -1751,6 +1751,38 @@ export class CCIPLogsAddressRequiredError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when a getLogs request is rejected because the requested block range is too large.
+ * Transient: the caller should retry with a smaller range.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const logs = await chain.getLogs({ startBlock: 0, endBlock: 100000 })
+ * } catch (error) {
+ *   if (error instanceof CCIPLogRangeTooLargeError) {
+ *     const { maxRange, suggestedRange } = error.context
+ *     console.log(`Reduce range to ${maxRange} blocks`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPLogRangeTooLargeError extends CCIPError {
+  override readonly name = 'CCIPLogRangeTooLargeError'
+  /** Creates a log range too large error. */
+  constructor(
+    info: { requestedRange?: number; maxRange?: number; suggestedRange?: [number, number] },
+    options?: CCIPErrorOptions,
+  ) {
+    const maxRangeStr = info.maxRange !== undefined ? ` (max: ${info.maxRange})` : ''
+    super(CCIPErrorCode.LOG_RANGE_TOO_LARGE, `getLogs block range is too large${maxRangeStr}`, {
+      ...options,
+      isTransient: true,
+      context: { ...options?.context, ...info },
+    })
+  }
+}
+
 // Chain Family
 
 /**

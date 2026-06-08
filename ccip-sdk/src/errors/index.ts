@@ -18,6 +18,7 @@ export { CCIPBlockNotFoundError, CCIPTransactionNotFoundError } from './speciali
 
 // Specialized errors - Logs
 export {
+  CCIPLogRangeTooLargeError,
   CCIPLogsAddressRequiredError,
   CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
