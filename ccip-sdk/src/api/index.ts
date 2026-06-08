@@ -10,6 +10,7 @@ import {
   CCIPMessageNotVerifiedYetError,
   CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
+import { fetchWithTimeout } from '../fetch.ts'
 import { HttpStatus } from '../http-status.ts'
 import { decodeMessageV1 } from '../messages.ts'
 import { decodeMessage } from '../requests.ts'
@@ -26,7 +27,7 @@ import {
   CCIPVersion,
   MessageStatus,
 } from '../types.ts'
-import { bigIntReviver, decodeAddress, fetchWithTimeout, parseJson } from '../utils.ts'
+import { bigIntReviver, decodeAddress, parseJson } from '../utils.ts'
 import type {
   APIErrorResponse,
   LaneLatencyResponse,
