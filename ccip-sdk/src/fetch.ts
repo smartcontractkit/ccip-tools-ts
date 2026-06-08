@@ -180,15 +180,20 @@ const endpointRegistry = new Map<string, EndpointState>()
 
 /** Derive a stable key from a fetch input (string | URL | Request). */
 export function endpointKey(input: Parameters<typeof fetch>[0]): string {
-  let url: URL
-  if (typeof input === 'string') {
-    url = new URL(input)
-  } else if (input instanceof Request) {
-    url = new URL(input.url)
-  } else {
-    url = input
+  try {
+    let url: URL
+    if (typeof input === 'string') {
+      url = new URL(input)
+    } else if (input instanceof Request) {
+      url = new URL(input.url)
+    } else {
+      url = input
+    }
+    return url.origin + url.pathname
+  } catch {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
+    return typeof input === 'string' ? input : String(input)
   }
-  return url.origin + url.pathname
 }
 
 function getOrCreateEndpoint(
