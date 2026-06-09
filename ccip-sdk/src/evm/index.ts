@@ -791,7 +791,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.getOnRampConfig} */
-  async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
+  async getOnRampConfig(onRamp: string, destChainSelector?: bigint) {
     const [, version, typeAndVersion] = await this.typeAndVersion(onRamp)
     let onRampABI
     switch (version) {
@@ -822,7 +822,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...dynamicConfig,
           priceRegistryConfig: await this._getFeeQuoterDest(
             dynamicConfig.priceRegistry,
-            destChainSelector,
+            staticConfig.destChainSelector,
           ),
           typeAndVersion,
         }
@@ -836,7 +836,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const [staticConfig, dynamicConfig, destChainConfigRaw] = await Promise.all([
           resultToObject(contract.getStaticConfig()),
           resultToObject(contract.getDynamicConfig()),
-          contract.getDestChainConfig(destChainSelector),
+          contract.getDestChainConfig(destChainSelector!),
         ])
         const [_, allowlistEnabled, router] = destChainConfigRaw
         const destChainConfig = { allowlistEnabled, router }
@@ -845,7 +845,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           destChainSelector,
           ...dynamicConfig,
           ...resultToObject(destChainConfig),
-          feeQuoterConfig: await this._getFeeQuoterDest(dynamicConfig.feeQuoter, destChainSelector),
+          feeQuoterConfig: await this._getFeeQuoterDest(
+            dynamicConfig.feeQuoter,
+            destChainSelector!,
+          ),
           typeAndVersion,
         }
       }
@@ -858,14 +861,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const [staticConfig, dynamicConfig, destChainConfig] = await Promise.all([
           resultToObject(contract.getStaticConfig()),
           resultToObject(contract.getDynamicConfig()),
-          resultToObject(contract.getDestChainConfig(destChainSelector)),
+          resultToObject(contract.getDestChainConfig(destChainSelector!)),
         ])
         return {
           ...staticConfig,
           ...dynamicConfig,
           destChainSelector,
           ...destChainConfig,
-          feeQuoterConfig: await this._getFeeQuoterDest(dynamicConfig.feeQuoter, destChainSelector),
+          feeQuoterConfig: await this._getFeeQuoterDest(
+            dynamicConfig.feeQuoter,
+            destChainSelector!,
+          ),
           typeAndVersion,
         }
       }
@@ -908,9 +914,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.getOffRampConfig} */
-  async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
+  async getOffRampConfig(offRamp: string, sourceChainSelector?: bigint) {
     const [, version, typeAndVersion] = await this.typeAndVersion(offRamp)
-    const sourceFamily = networkInfo(sourceChainSelector).family
+    const sourceFamily = sourceChainSelector
+      ? networkInfo(sourceChainSelector).family
+      : ChainFamily.EVM
     let offRampABI, commitStoreABI
     switch (version) {
       case CCIPVersion.V1_2:
@@ -966,7 +974,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const [staticConfig, dynamicConfig, { onRamp, ...sourceChainConfig }] = await Promise.all([
           resultToObject(contract.getStaticConfig()),
           resultToObject(contract.getDynamicConfig()),
-          resultToObject(contract.getSourceChainConfig(sourceChainSelector)),
+          resultToObject(contract.getSourceChainConfig(sourceChainSelector!)),
         ])
         const onRamps = []
         try {
@@ -992,7 +1000,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
         const [staticConfig, sourceChainConfig] = await Promise.all([
           resultToObject(contract.getStaticConfig()),
-          resultToObject(contract.getSourceChainConfig(sourceChainSelector)),
+          resultToObject(contract.getSourceChainConfig(sourceChainSelector!)),
         ])
         const onRamps = sourceChainConfig.onRamps.map((o) => decodeOnRampAddress(o, sourceFamily))
         return {
