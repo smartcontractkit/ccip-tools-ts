@@ -134,9 +134,20 @@ class AdaptiveLimiter {
     if (at > now) await sleep(at - now)
   }
 
-  /** On a 429: activate + pace ONLY when an explicit reset window is known. */
+  /** On a 429: activate + pace ONLY when an explicit reset window is known.
+   * For already-active (seeded) limiters with no reset hint, back off by doubling
+   * the window so retries space out exponentially instead of hammering at fixed pace. */
   onLimited(hint: { limit?: number; windowMs?: number }): void {
-    if (hint.windowMs == null) return // no window → caller just retries + backs off
+    if (hint.windowMs == null) {
+      // No explicit reset window. Inactive limiters (e.g. Solana) rely on jittered backoff
+      // in the retry loop. Active (seeded) limiters — like TON — double the pacing window
+      // so each consecutive 429 waits twice as long before the next attempt.
+      if (this.active) {
+        this.windowMs = clampWindow(this.windowMs * 2)
+        this.lastLimitTs = Date.now()
+      }
+      return
+    }
     this.limit = Math.max(1, hint.limit ?? this.limit)
     this.windowMs = clampWindow(hint.windowMs)
     this.lastLimitTs = Date.now()
@@ -374,7 +385,7 @@ export function fetchProfileForUrl(url: string): Partial<RateLimitOpts> {
       hostname === 'tonapi.io' ||
       hostname.endsWith('.tonapi.io')
     ) {
-      return { seed: { limit: 1, windowMs: 1500 }, maxRetries: 5 }
+      return { seed: { limit: 1, windowMs: 1500 }, maxRetries: 6 }
     }
     // Public Solana: no proactive seed. Its responses carry precise per-method
     // limit headers (`x-ratelimit-method-*`), so the adaptive limiter learns the

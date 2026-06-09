@@ -154,7 +154,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     this.rateLimitedFetch =
       ctx?.fetch ??
       ctx?.fetchFn ??
-      createRateLimitedFetch({ seed: { limit: 1, windowMs: 1500 }, maxRetries: 5 }, ctx)
+      createRateLimitedFetch({ seed: { limit: 1, windowMs: 1500 }, maxRetries: 6 }, ctx)
 
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       async: true,

@@ -664,6 +664,32 @@ describe('adaptive limiting', () => {
     assert.ok(Date.now() - t0 < 4000, `expected burst+retry (no pacing), took ${Date.now() - t0}ms`)
   })
 
+  it('seeded (TON-like) limiter doubles window on consecutive header-less 429s', async () => {
+    let calls = 0
+    globalThis.fetch = mock.fn(() => {
+      calls++
+      if (calls <= 3) {
+        return Promise.resolve({
+          ok: false,
+          status: 429,
+          statusText: 'Too Many Requests',
+          headers: new Headers(),
+        } as Response)
+      }
+      return Promise.resolve(ok())
+    })
+    // seed at 10ms (simulates TON's 1.5s but fast enough for a unit test)
+    const f = createRateLimitedFetch({ seed: { limit: 1, windowMs: 10 } })
+    const url = 'https://ton-backoff.example.com/rpc'
+    const t0 = Date.now()
+    await f(url, rpc('m', 0))
+    const elapsed = Date.now() - t0
+    // window doubles each 429: 10→20→40→80ms. Total pacing wait ≥ 70ms.
+    // Without doubling: only 3×10ms = 30ms. So ≥ 50ms distinguishes the two.
+    assert.ok(elapsed >= 50, `expected exponential window doubling, took ${elapsed}ms`)
+    assert.equal(calls, 4)
+  })
+
   it('caps concurrent in-flight requests per endpoint, flushing as each completes', async () => {
     let inFlight = 0
     let maxObserved = 0
