@@ -11,6 +11,7 @@ import {
   type TransactionRequest,
   type TransactionResponse,
   Contract,
+  FetchRequest,
   JsonRpcProvider,
   WebSocketProvider,
   ZeroAddress,
@@ -69,6 +70,7 @@ import {
   decodeFinalityAllowed,
   encodeFinality,
 } from '../extra-args.ts'
+import { fetchProfileForUrl } from '../fetch.ts'
 import { getDestTokenAmount } from '../gas.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessageV1 } from '../messages.ts'
@@ -91,6 +93,7 @@ import {
   CCIPVersion,
 } from '../types.ts'
 import {
+  createRateLimitedFetch,
   decodeAddress,
   decodeOnRampAddress,
   encodeAddressToAny,
@@ -374,7 +377,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param url - WebSocket (wss://) or HTTP (https://) endpoint URL.
    * @returns A ready JSON-RPC provider.
    */
-  static async _getProvider(url: string, abort?: AbortSignal): Promise<JsonRpcApiProvider> {
+  static async _getProvider(
+    url: string,
+    ctx?: { abort?: AbortSignal; fetch?: typeof fetch } & Parameters<
+      typeof createRateLimitedFetch
+    >[1],
+  ): Promise<JsonRpcApiProvider> {
+    const abort = ctx?.abort
     let providerReady: Promise<JsonRpcApiProvider>
     if (url.startsWith('ws')) {
       const provider = new WebSocketProvider(url, undefined, { staticNetwork: true })
@@ -387,7 +396,23 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           .catch(reject)
       })
     } else if (url.startsWith('http')) {
-      const provider = new JsonRpcProvider(url, undefined, { staticNetwork: true })
+      const fetchFn = ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
+      const req = new FetchRequest(url)
+      req.getUrlFunc = async (r, _signal) => {
+        const resp = await fetchFn(r.url, {
+          method: r.method || 'POST',
+          headers: Object.fromEntries(Object.entries(r.headers).map(([k, v]) => [k, String(v)])),
+          body: r.body ?? undefined,
+        })
+        const headers: Record<string, string> = {}
+        resp.headers.forEach((v, k) => {
+          headers[k] = v
+        })
+        const body = new Uint8Array(await resp.arrayBuffer())
+        return { statusCode: resp.status, statusMessage: resp.statusText, headers, body }
+      }
+      req.retryFunc = () => Promise.resolve(false) // our wrapper owns retries
+      const provider = new JsonRpcProvider(req, undefined, { staticNetwork: true })
       abort?.addEventListener('abort', () => provider.destroy(), { once: true })
       providerReady = Promise.resolve(provider)
     } else {
@@ -429,7 +454,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * ```
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<EVMChain> {
-    return this.fromProvider(await this._getProvider(url, ctx?.abort), ctx)
+    return this.fromProvider(await this._getProvider(url, ctx), ctx)
   }
 
   /** {@inheritDoc Chain.getBlockInfo} */
@@ -766,7 +791,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.getOnRampConfig} */
-  async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
+  async getOnRampConfig(onRamp: string, destChainSelector?: bigint) {
     const [, version, typeAndVersion] = await this.typeAndVersion(onRamp)
     let onRampABI
     switch (version) {
@@ -797,7 +822,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...dynamicConfig,
           priceRegistryConfig: await this._getFeeQuoterDest(
             dynamicConfig.priceRegistry,
-            destChainSelector,
+            staticConfig.destChainSelector,
           ),
           typeAndVersion,
         }
@@ -811,7 +836,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const [staticConfig, dynamicConfig, destChainConfigRaw] = await Promise.all([
           resultToObject(contract.getStaticConfig()),
           resultToObject(contract.getDynamicConfig()),
-          contract.getDestChainConfig(destChainSelector),
+          contract.getDestChainConfig(destChainSelector!),
         ])
         const [_, allowlistEnabled, router] = destChainConfigRaw
         const destChainConfig = { allowlistEnabled, router }
@@ -820,7 +845,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           destChainSelector,
           ...dynamicConfig,
           ...resultToObject(destChainConfig),
-          feeQuoterConfig: await this._getFeeQuoterDest(dynamicConfig.feeQuoter, destChainSelector),
+          feeQuoterConfig: await this._getFeeQuoterDest(
+            dynamicConfig.feeQuoter,
+            destChainSelector!,
+          ),
           typeAndVersion,
         }
       }
@@ -833,14 +861,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const [staticConfig, dynamicConfig, destChainConfig] = await Promise.all([
           resultToObject(contract.getStaticConfig()),
           resultToObject(contract.getDynamicConfig()),
-          resultToObject(contract.getDestChainConfig(destChainSelector)),
+          resultToObject(contract.getDestChainConfig(destChainSelector!)),
         ])
         return {
           ...staticConfig,
           ...dynamicConfig,
           destChainSelector,
           ...destChainConfig,
-          feeQuoterConfig: await this._getFeeQuoterDest(dynamicConfig.feeQuoter, destChainSelector),
+          feeQuoterConfig: await this._getFeeQuoterDest(
+            dynamicConfig.feeQuoter,
+            destChainSelector!,
+          ),
           typeAndVersion,
         }
       }
@@ -883,9 +914,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.getOffRampConfig} */
-  async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
+  async getOffRampConfig(offRamp: string, sourceChainSelector?: bigint) {
     const [, version, typeAndVersion] = await this.typeAndVersion(offRamp)
-    const sourceFamily = networkInfo(sourceChainSelector).family
+    const sourceFamily = sourceChainSelector
+      ? networkInfo(sourceChainSelector).family
+      : ChainFamily.EVM
     let offRampABI, commitStoreABI
     switch (version) {
       case CCIPVersion.V1_2:
@@ -941,7 +974,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const [staticConfig, dynamicConfig, { onRamp, ...sourceChainConfig }] = await Promise.all([
           resultToObject(contract.getStaticConfig()),
           resultToObject(contract.getDynamicConfig()),
-          resultToObject(contract.getSourceChainConfig(sourceChainSelector)),
+          resultToObject(contract.getSourceChainConfig(sourceChainSelector!)),
         ])
         const onRamps = []
         try {
@@ -967,7 +1000,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
         const [staticConfig, sourceChainConfig] = await Promise.all([
           resultToObject(contract.getStaticConfig()),
-          resultToObject(contract.getSourceChainConfig(sourceChainSelector)),
+          resultToObject(contract.getSourceChainConfig(sourceChainSelector!)),
         ])
         const onRamps = sourceChainConfig.onRamps.map((o) => decodeOnRampAddress(o, sourceFamily))
         return {

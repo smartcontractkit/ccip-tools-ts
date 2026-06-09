@@ -106,6 +106,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   readonly tokenMetadataClient: TokenMetadataClient
   readonly indexerUrl: string
   readonly ccipParty: string
+  /** Custom fetch function supplied via ctx, used for indexer requests. Falls back to globalThis.fetch. */
+  private readonly fetchFn: typeof fetch
 
   /**
    * Creates a new CantonChain instance.
@@ -139,6 +141,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.tokenMetadataClient = tokenMetadataClient
     this.ccipParty = ccipParty
     this.indexerUrl = indexerUrl
+    this.fetchFn = ctx?.fetch ?? globalThis.fetch.bind(globalThis)
   }
 
   /**
@@ -254,10 +257,12 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
+    const fetchFn = ctx.fetch
     const client = createCantonClient({
       baseUrl: url,
       jwt: ctx.cantonConfig.jwt,
       signal: ctx.abort,
+      fetch: fetchFn,
     })
     try {
       const alive = await client.isAlive()
@@ -1202,7 +1207,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     const indexerMessageId = normalizeIndexerMessageId(request.message.messageId)
     const url = `${this.indexerUrl}/v1/verifierresults/${indexerMessageId}`
-    const res = await fetch(url)
+    const res = await this.fetchFn(url)
     if (!res.ok) {
       const body = await res.text()
       throw new CCIPError(
