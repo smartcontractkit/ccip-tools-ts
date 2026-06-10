@@ -1042,7 +1042,7 @@ describe('decodeMessage', () => {
               receiver: 'EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2',
             }),
           (err: unknown) =>
-            err instanceof CCIPArgumentInvalidError && /0\.025 TON/.test(err.message),
+            err instanceof CCIPArgumentInvalidError && /0\.025 GRAM/.test(err.message),
         )
       })
 
