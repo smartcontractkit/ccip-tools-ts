@@ -295,10 +295,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.getOnRampConfig} */
-  async getOnRampConfig(onRamp: string, _destChainSelector: bigint) {
+  async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
     const [, , typeAndVersion] = await this.typeAndVersion(onRamp)
     return {
       router: onRamp,
+      destChainSelector,
       feeQuoter: onRamp, // FIXME
       typeAndVersion,
     }
@@ -365,6 +366,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     return {
       router,
+      sourceChainSelector,
       onRamps: [onRamp],
       isEnabled,
       minSeqNr,

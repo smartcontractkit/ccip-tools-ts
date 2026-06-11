@@ -555,25 +555,14 @@ export async function* getMessagesInRange(
 export async function waitFinalized<C extends Chain>(
   chain: C,
   {
-    request: { log },
     finality = 'finalized',
     abort,
     reorgSafetyBlocks = 10,
-    pollIntervalMs = 5_000,
-  }: {
-    request: PickDeep<
-      CCIPRequest,
-      `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
-    >
-    finality?: Parameters<Chain['getBlockInfo']>[0]
-    abort?: AbortSignal
-    /** How many blocks past the original tx blockNumber must be finalized
-     *  without the tx reappearing before we declare it reorged out. Default: 10 */
-    reorgSafetyBlocks?: number
-    /** Delay in ms between block-height poller iterations. Default: 5000 */
-    pollIntervalMs?: number
-  },
+    pollInterval = 5_000,
+    ...rest
+  }: Parameters<Chain['waitFinalized']>[0],
 ): ReturnType<Chain['getBlockInfo']> {
+  const log = 'request' in rest ? rest.request.log : rest.log
   // Fast-path: if the log is old enough, check tx timestamp vs finalized timestamp
   if (!log.blockTimestamp || Date.now() / 1e3 - log.blockTimestamp > 60) {
     const [tx, finalized, latest] = await Promise.all([
@@ -625,7 +614,7 @@ export async function waitFinalized<C extends Chain>(
       }
       // wait before re-checking; exit early on watch abort
       await signalToPromise(
-        AbortSignal.any([watch, deadline, AbortSignal.timeout(pollIntervalMs)]),
+        AbortSignal.any([watch, deadline, AbortSignal.timeout(pollInterval)]),
       ).catch(() => {})
     }
   })()

@@ -593,6 +593,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return normalizeDeep(
       {
         ...routerConfig,
+        destChainSelector,
         ...destChainState.config,
         feeQuoterConfig: { ...feeQuoterConfig, ...feeQuoterDestConfig },
         router: onRamp,
@@ -637,6 +638,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return normalizeDeep(
       {
         ...refAddresses,
+        sourceChainSelector,
         ...sourceConfig,
         ...state,
         onRamps: [onRamp],

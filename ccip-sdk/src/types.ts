@@ -327,6 +327,8 @@ export interface CCIPExecution {
   receipt: ExecutionReceipt
   /** Log event from the execution. */
   log: ChainLog
+  /** parsed error (e.g. failure reason), if available. */
+  error?: Record<string, unknown> | undefined | null
 }
 
 /**

@@ -21,7 +21,6 @@
 
 import {
   type Chain,
-  type ChainStatic,
   CCIPAPIClient,
   CCIPExecTxRevertedError,
   CCIPMessageIdNotFoundError,
@@ -214,7 +213,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       const finalizedAc = new AbortController()
       cancelWaitFinalized = finalizedAc.abort.bind(finalizedAc)
       await source.waitFinalized({
-        request,
+        log: request.log,
         abort: finalizedAc.signal,
       })
       logger.info(`[${MessageStatus.SourceFinalized}] Source chain finalized`)
@@ -267,19 +266,14 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   let execs$, cancelWaitVerifications: (() => void) | undefined, verifications$
   if (request.metadata?.receiptTransactionHash) {
     // if we got last receipt metadata from api, just fetch it instead of scanning (faster)
-    execs$ = await dest
-      .getTransaction(request.metadata.receiptTransactionHash)
-      .then(async ({ logs }) => {
-        const res = []
-        for (const log of logs) {
-          const receipt = (dest.constructor as ChainStatic).decodeReceipt(log)
-          if (receipt?.messageId !== request.message.messageId) continue
-          res.push({ receipt, log, timestamp: request.metadata!.receiptTimestamp! })
-        }
-        cancelWaitFinalized?.()
-        await finalized$
-        return res
-      })
+    execs$ = await dest.getExecutionReceiptsInTx(request.metadata.receiptTransactionHash, {
+      offRamp,
+      messageId: request.message.messageId,
+      sourceChainSelector: request.message.sourceChainSelector,
+      sequenceNumber: request.message.sequenceNumber,
+    })
+    cancelWaitFinalized?.()
+    await finalized$
   } else {
     offRamp ??= await discoverOffRamp(source, dest, request.lane.onRamp, source)
 

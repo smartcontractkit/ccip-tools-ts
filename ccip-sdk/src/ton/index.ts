@@ -523,6 +523,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
     return {
       chainSelector,
+      destChainSelector,
       feeQuoter,
       feeAggregator,
       allowlistAdmin,
@@ -606,6 +607,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
       return {
         chainSelector,
+        sourceChainSelector,
         feeQuoter,
         permissionlessExecutionThresholdSeconds,
         router,
