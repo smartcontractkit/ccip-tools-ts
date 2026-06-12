@@ -238,7 +238,7 @@ export function getErrorFromLogs(
     )
     .filter(({ type }) => type !== 'data')
     .reduceRight((acc, { data: l }) => {
-      l = l.replace(/ (with message|thrown in) /, ' $1: ')
+      l = l.replace(/ (with message|thrown in|at) /, ' $1: ')
       if (l.endsWith(':') && acc.length) l = `${l} ${acc.shift()!}` // cosmetic: join lines ending in ':' with next
       try {
         // convert number[]s (common in solana logs) into slightly more readable 0x-bytearrays
