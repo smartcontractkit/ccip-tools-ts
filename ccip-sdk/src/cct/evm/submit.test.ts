@@ -1,0 +1,122 @@
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
+import { makeError } from 'ethers'
+
+import { submit } from './submit.ts'
+import {
+  CCIPCctTxFailedError,
+  CCIPCctTxNotConfirmedError,
+  CCIPWalletInvalidError,
+} from '../../errors/index.ts'
+import type { EVMChain } from '../../evm/index.ts'
+import type { UnsignedEVMTx } from '../../evm/types.ts'
+import { ChainFamily } from '../../networks.ts'
+
+const TAR = '0x' + '44'.repeat(20)
+const HASH = '0x' + 'ab'.repeat(32)
+
+const UNSIGNED: UnsignedEVMTx = {
+  family: ChainFamily.EVM,
+  transactions: [{ to: TAR, data: '0x1234' }],
+}
+
+function stubChain(): EVMChain {
+  return {
+    provider: {} as never,
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
+  } as unknown as EVMChain
+}
+
+/**
+ * Fake ethers Signer. `wait` resolves to `receipt` (or rejects with `waitError`);
+ * `submitError` makes both send and sign paths reject (pre-broadcast failure).
+ */
+function fakeSigner(opts: {
+  receipt?: { status: number } | null
+  waitError?: Error
+  submitError?: Error
+}) {
+  const fail = opts.submitError
+  return {
+    signTransaction: () => (fail ? Promise.reject(fail) : Promise.resolve('0x')),
+    getAddress() {},
+    populateTransaction: (tx: unknown) => Promise.resolve({ ...(tx as object) }),
+    sendTransaction: (_tx: unknown) =>
+      fail
+        ? Promise.reject(fail)
+        : Promise.resolve({
+            hash: HASH,
+            wait: (_c?: number, _t?: number) =>
+              opts.waitError
+                ? Promise.reject(opts.waitError)
+                : Promise.resolve(opts.receipt ?? null),
+          }),
+  }
+}
+
+describe('submit (shared CCT submit pipeline)', () => {
+  it('returns the txHash on a successful receipt', async () => {
+    const result = await submit(
+      stubChain(),
+      fakeSigner({ receipt: { status: 1 } }),
+      UNSIGNED,
+      'setPool',
+    )
+    assert.deepEqual(result, { txHash: HASH })
+  })
+
+  it('throws CCIPCctTxFailedError (reverted) on status 0, tagged with the operation', async () => {
+    await assert.rejects(
+      () => submit(stubChain(), fakeSigner({ receipt: { status: 0 } }), UNSIGNED, 'setPool'),
+      (err: unknown) =>
+        err instanceof CCIPCctTxFailedError &&
+        err.context.operation === 'setPool' &&
+        err.context.txHash === HASH &&
+        !err.isTransient &&
+        err.message.includes('reverted'),
+    )
+  })
+
+  it('throws CCIPCctTxNotConfirmedError (transient, keeps hash) when no receipt arrives', async () => {
+    await assert.rejects(
+      () => submit(stubChain(), fakeSigner({ receipt: null }), UNSIGNED, 'setPool'),
+      (err: unknown) =>
+        err instanceof CCIPCctTxNotConfirmedError && err.context.txHash === HASH && err.isTransient,
+    )
+  })
+
+  it('throws CCIPCctTxNotConfirmedError (transient, keeps hash) on confirmation timeout', async () => {
+    await assert.rejects(
+      () =>
+        submit(
+          stubChain(),
+          fakeSigner({ waitError: makeError('timed out', 'TIMEOUT') }),
+          UNSIGNED,
+          'setPool',
+        ),
+      (err: unknown) =>
+        err instanceof CCIPCctTxNotConfirmedError && err.context.txHash === HASH && err.isTransient,
+    )
+  })
+
+  it('throws a transient CCIPCctTxFailedError when submission fails with a network error', async () => {
+    await assert.rejects(
+      () =>
+        submit(
+          stubChain(),
+          fakeSigner({ submitError: makeError('network down', 'NETWORK_ERROR') }),
+          UNSIGNED,
+          'setPool',
+        ),
+      (err: unknown) => err instanceof CCIPCctTxFailedError && err.isTransient,
+    )
+  })
+
+  it('rejects a non-signer wallet', async () => {
+    await assert.rejects(
+      () => submit(stubChain(), {}, UNSIGNED, 'setPool'),
+      (err: unknown) => err instanceof CCIPWalletInvalidError,
+    )
+  })
+})
