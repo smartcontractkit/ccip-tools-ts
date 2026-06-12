@@ -868,13 +868,13 @@ describe.skip('TON index integration tests', () => {
     const USDT_TESTNET = 'kQD0GKBM8ZbryVk2aESmzfU6b9b_8era_IkvBSELujFZPsyy'
     const TON_FAUCET = 'EQAuz15H1ZHrZ_psVrAra7HealMIVeFq0wguqlmFno1f3EJj'
 
-    it('should return native TON balance', async () => {
+    it('should return native GRAM balance', async () => {
       const balance = await tonChain.getBalance({
         holder: TON_FAUCET,
       })
 
       assert.equal(typeof balance, 'bigint')
-      assert.ok(balance > 0n, 'Faucet should have positive TON balance')
+      assert.ok(balance > 0n, 'Faucet should have positive GRAM balance')
     })
 
     it('should return USDT jetton balance', async () => {
