@@ -545,7 +545,7 @@ export async function withRetry<T>(
 export function parseTypeAndVersion(
   typeAndVersion: string,
 ): Awaited<ReturnType<Chain['typeAndVersion']>> {
-  const match = typeAndVersion.match(/^(\w.+\S)\s+v?(\d+\.\d+(?:\.\d+)?)([^\d.].*)?$/)
+  const match = typeAndVersion.match(/^(\w.+\S)\s+v?(\d+\.\d+(?:\.[x\d]+)?)([^\d.].*)?$/)
   if (!match) throw new CCIPTypeVersionInvalidError(typeAndVersion)
   // some string normalization
   const type = match[1]!

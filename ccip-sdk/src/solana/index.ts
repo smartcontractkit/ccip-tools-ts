@@ -27,7 +27,7 @@ import {
   toBigInt,
 } from 'ethers'
 import { type Memoized, memoize } from 'micro-memoize'
-import type { PickDeep } from 'type-fest'
+import type { PickDeep, Simplify } from 'type-fest'
 
 import {
   type BlockInfo,
@@ -283,6 +283,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     })
 
     this._getRouterConfig = memoize(this._getRouterConfig.bind(this), {
+      async: true,
+      maxArgs: 1,
+      expires: 60e3,
+    })
+    this._getOffRampReferenceAddresses = memoize(this._getOffRampReferenceAddresses.bind(this), {
       async: true,
       maxArgs: 1,
       expires: 60e3,
@@ -593,6 +598,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return normalizeDeep(
       {
         ...routerConfig,
+        destChainSelector,
         ...destChainState.config,
         feeQuoterConfig: { ...feeQuoterConfig, ...feeQuoterDestConfig },
         router: onRamp,
@@ -606,12 +612,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * {@inheritDoc Chain.getOffRampConfig}
+   * Fetch `reference_addresses` PDA for the OffRamp
    */
-  async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
+  private async _getOffRampReferenceAddresses(offRamp: string) {
     const offRamp_ = new PublicKey(offRamp)
-    const [, , typeAndVersion] = await this.typeAndVersion(offRamp)
-
     // Read referenceAddresses PDA for router and other fields
     const program = new Program(CCIP_OFFRAMP_IDL, offRamp_, { connection: this.connection })
     const [referenceAddressesAddr] = PublicKey.findProgramAddressSync(
@@ -619,6 +623,20 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       offRamp_,
     )
     const refAddresses = await program.account.referenceAddresses.fetch(referenceAddressesAddr)
+    return refAddresses as Simplify<typeof refAddresses>
+  }
+
+  /**
+   * {@inheritDoc Chain.getOffRampConfig}
+   */
+  async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
+    const offRamp_ = new PublicKey(offRamp)
+    const [, , typeAndVersion] = await this.typeAndVersion(offRamp)
+
+    const refAddresses = await this._getOffRampReferenceAddresses(offRamp)
+
+    // Read referenceAddresses PDA for router and other fields
+    const program = new Program(CCIP_OFFRAMP_IDL, offRamp_, { connection: this.connection })
 
     // Read source_chain_state PDA for onRamp and other config fields
     const [statePda] = PublicKey.findProgramAddressSync(
@@ -637,6 +655,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return normalizeDeep(
       {
         ...refAddresses,
+        sourceChainSelector,
         ...sourceConfig,
         ...state,
         onRamps: [onRamp],
@@ -1126,6 +1145,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    */
   async getTokenAdminRegistryFor(address: string): Promise<string> {
     const [type] = await this.typeAndVersion(address)
+    if (type.includes('OffRamp'))
+      return this.getTokenAdminRegistryFor(
+        (await this._getOffRampReferenceAddresses(address)).router.toBase58(),
+      )
     if (!type.includes('Router')) throw new CCIPContractNotRouterError(address, type)
     // Solana implements TokenAdminRegistry in the Router/OnRamp program
     return address
@@ -1347,6 +1370,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           const parsed = getErrorFromLogs(data.transactionLogs as SolanaLog[] | string[])
           if (parsed) return { message: data.transactionMessage, ...parsed }
         }
+        if ('program' in data || 'error' in data) return data
         if ('logs' in data) return getErrorFromLogs(data.logs as SolanaLog[] | string[])
       } else if (typeof data === 'string') {
         const parsedExtraArgs = this.decodeExtraArgs(getDataBytes(data))

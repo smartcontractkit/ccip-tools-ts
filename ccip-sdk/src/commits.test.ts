@@ -108,17 +108,19 @@ class MockChain extends Chain {
     return '0xRouter'
   }
 
-  async getOnRampConfig(_onRamp: string, _destChainSelector: bigint) {
+  async getOnRampConfig(_onRamp: string, destChainSelector: bigint) {
     return {
       router: '0xRouter',
+      destChainSelector,
       feeQuoter: '0xFeeQuoter',
       typeAndVersion: 'EVM2EVMOnRamp 1.5.0',
     }
   }
 
-  async getOffRampConfig(_offRamp: string, _sourceChainSelector: bigint) {
+  async getOffRampConfig(_offRamp: string, sourceChainSelector: bigint) {
     return {
       router: '0xRouter',
+      sourceChainSelector,
       onRamps: ['0xOnRamp'],
       typeAndVersion: 'EVM2EVMOffRamp 1.5.0',
     }

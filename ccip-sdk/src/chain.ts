@@ -1,4 +1,4 @@
-import { type BytesLike, dataLength, keccak256 } from 'ethers'
+import { type BytesLike, dataLength, isBytesLike, keccak256 } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
@@ -558,6 +558,8 @@ export type RegistryTokenConfig = {
 export interface OnRampConfig {
   /** Original (unparsed) typeAndVersion() string. */
   typeAndVersion: string
+  /** selector of onramp's dest config */
+  destChainSelector: bigint
   /** Router address connected to this OnRamp on the source chain. */
   router: string
   /** Address of the FeeQuoter contract for this OffRamp. */
@@ -579,6 +581,8 @@ export interface OnRampConfig {
 export interface OffRampConfig {
   /** Original (unparsed) typeAndVersion() string. */
   typeAndVersion: string
+  /** selector of offramp's source config */
+  sourceChainSelector: bigint
   /** Router address connected to this OffRamp for this source chain. */
   router: string
   /**
@@ -770,19 +774,31 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * }
    * ```
    */
-  async waitFinalized(opts: {
-    request: PickDeep<
-      CCIPRequest,
-      `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
-    >
-    finality?: Parameters<Chain['getBlockInfo']>[0]
-    abort?: AbortSignal
-    /** How many blocks past the original tx blockNumber must be finalized
-     *  without the tx reappearing before we declare it reorged out. Default: 10 */
-    reorgSafetyBlocks?: number
-    /** Delay in ms between block-height poller iterations. Default: 5000 */
-    pollIntervalMs?: number
-  }): ReturnType<Chain['getBlockInfo']> {
+  async waitFinalized(
+    opts: {
+      finality?: Parameters<Chain['getBlockInfo']>[0]
+      abort?: AbortSignal
+      /** How many blocks past the original tx blockNumber must be finalized
+       *  without the tx reappearing before we declare it reorged out. Default: 10 */
+      reorgSafetyBlocks?: number
+      /** Delay in ms between block-height poller iterations. Default: 5000 */
+      pollInterval?: number
+    } & (
+      | {
+          /** @deprecated Prefer passing `log` directly to `opts` */
+          request: PickDeep<
+            CCIPRequest,
+            `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
+          >
+        }
+      | {
+          log: Pick<
+            ChainLog,
+            'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'
+          >
+        }
+    ),
+  ): ReturnType<Chain['getBlockInfo']> {
     return waitFinalized(this, opts)
   }
   /**
@@ -1777,14 +1793,86 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           receipt.sourceChainSelector !== sourceChainSelector)
       )
         continue
-
-      yield { receipt, log }
+      let error
+      if (
+        receipt.state !== ExecutionState.Success &&
+        receipt.returnData &&
+        (!isBytesLike(receipt.returnData) || dataLength(receipt.returnData) > 0)
+      ) {
+        if (!isBytesLike(receipt.returnData)) error = receipt.returnData
+        try {
+          const parsed = (this.constructor as ChainStatic).parse?.(receipt.returnData)
+          if (parsed) error = parsed
+        } catch {
+          // ignore
+        }
+      }
+      yield { receipt, log, ...(!!error && { error }) }
       if (receipt.state === ExecutionState.Success) break
     }
   }
 
   /**
-   * Fetch first execution receipt inside a transaction.
+   * Fetch all execution receipts inside a transaction.
+   *
+   * @internal
+   * @param tx - Transaction hash or transaction object
+   * @param filter - Source, messageId or sequenceNumber filters to apply on receipts
+   * @returns CCIP executions array
+   */
+  async getExecutionReceiptsInTx(
+    tx: string | ChainTransaction,
+    filters?: {
+      offRamp?: string | null
+      sourceChainSelector?: bigint
+      messageId?: string
+      sequenceNumber?: bigint
+    },
+  ): Promise<CCIPExecution[]> {
+    if (typeof tx === 'string') tx = await this.getTransaction(tx)
+    const results = []
+    for (const log of tx.logs) {
+      if (filters?.offRamp && log.address !== filters.offRamp) continue
+      let receipt
+      try {
+        receipt = (this.constructor as ChainStatic).decodeReceipt(log)
+      } catch {
+        // continue
+      }
+      if (
+        !receipt ||
+        (filters?.messageId && receipt.messageId !== filters.messageId) ||
+        (filters?.sequenceNumber && receipt.sequenceNumber !== filters.sequenceNumber)
+      )
+        continue
+      if (filters?.sourceChainSelector) {
+        // <=v1.5 => EVM only => falsy sourceChainSelector => per-source OffRamp
+        receipt.sourceChainSelector ??= (
+          await this.getOffRampConfig(log.address, 0n)
+        ).sourceChainSelector
+        if (receipt.sourceChainSelector !== filters.sourceChainSelector) continue
+      }
+
+      let error
+      if (
+        receipt.state !== ExecutionState.Success &&
+        receipt.returnData &&
+        (!isBytesLike(receipt.returnData) || dataLength(receipt.returnData) > 0)
+      ) {
+        try {
+          error = (this.constructor as ChainStatic).parse?.(receipt.returnData)
+        } catch {
+          // ignore
+        }
+      }
+
+      results.push({ receipt, log, ...(!!error && { error }) })
+    }
+    return results
+  }
+
+  /**
+   * Fetch first execution receipt matching filters inside a transaction.
    *
    * @internal
    * @param tx - Transaction hash or transaction object
@@ -1798,15 +1886,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`State: ${exec.receipt.state}`)
    * ```
    */
-  async getExecutionReceiptInTx(tx: string | ChainTransaction): Promise<CCIPExecution> {
-    if (typeof tx === 'string') tx = await this.getTransaction(tx)
-    for (const log of tx.logs) {
-      const receipt = (this.constructor as ChainStatic).decodeReceipt(log)
-      if (!receipt) continue
-
-      return { receipt, log }
-    }
-    throw new CCIPExecTxRevertedError(tx.hash)
+  async getExecutionReceiptInTx(
+    tx: string | ChainTransaction,
+    filters?: Parameters<Chain['getExecutionReceiptsInTx']>[1],
+  ): Promise<CCIPExecution> {
+    const receipts = await this.getExecutionReceiptsInTx(tx, filters)
+    if (receipts.length) return receipts[0]!
+    throw new CCIPExecTxRevertedError(typeof tx === 'string' ? tx : tx.hash)
   }
 
   /**

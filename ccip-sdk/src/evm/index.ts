@@ -842,8 +842,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const destChainConfig = { allowlistEnabled, router }
         return {
           ...staticConfig,
-          destChainSelector,
           ...dynamicConfig,
+          destChainSelector: destChainSelector!,
           ...resultToObject(destChainConfig),
           feeQuoterConfig: await this._getFeeQuoterDest(
             dynamicConfig.feeQuoter,
@@ -866,7 +866,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         return {
           ...staticConfig,
           ...dynamicConfig,
-          destChainSelector,
+          destChainSelector: destChainSelector!,
           ...destChainConfig,
           feeQuoterConfig: await this._getFeeQuoterDest(
             dynamicConfig.feeQuoter,
@@ -983,9 +983,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           // ignore
         }
         return {
-          sourceChainSelector,
           ...staticConfig,
           ...dynamicConfig,
+          sourceChainSelector: sourceChainSelector!,
           ...sourceChainConfig,
           onRamps,
           typeAndVersion,
@@ -1005,7 +1005,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const onRamps = sourceChainConfig.onRamps.map((o) => decodeOnRampAddress(o, sourceFamily))
         return {
           ...staticConfig,
-          sourceChainSelector,
+          sourceChainSelector: sourceChainSelector!,
           ...sourceChainConfig,
           onRamps,
           typeAndVersion,
@@ -1796,7 +1796,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (!receipt?.hash) throw new CCIPExecTxNotConfirmedError(response.hash)
     if (!receipt.status) throw new CCIPExecTxRevertedError(response.hash)
     const tx = await this.getTransaction(receipt)
-    return this.getExecutionReceiptInTx(tx)
+    return this.getExecutionReceiptInTx(tx, { offRamp: populatedTx.to })
   }
 
   /**
