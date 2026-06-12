@@ -102,7 +102,18 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     | { request?: unknown; attestations?: unknown; verifications?: unknown; receipts?: unknown[] }
     | undefined = argv.format === Format.json ? {} : undefined
   const emitJsonEnvelope = () => {
-    if (jsonEnvelope) output.write(JSON.stringify(jsonEnvelope, bigIntReplacer, 2))
+    if (jsonEnvelope) {
+      const seen = new WeakSet<object>()
+      const uncircularReplacer = (key: string, value: unknown) => {
+        const replaced = bigIntReplacer(key, value)
+        if (typeof replaced === 'object' && replaced !== null) {
+          if (seen.has(replaced)) return undefined
+          seen.add(replaced)
+        }
+        return replaced
+      }
+      output.write(JSON.stringify(jsonEnvelope, uncircularReplacer, 2))
+    }
   }
 
   const [getChain, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHashOrId)
