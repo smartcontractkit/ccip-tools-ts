@@ -1799,8 +1799,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
         receipt.returnData &&
         (!isBytesLike(receipt.returnData) || dataLength(receipt.returnData) > 0)
       ) {
+        if (!isBytesLike(receipt.returnData)) error = receipt.returnData
         try {
-          error = (this.constructor as ChainStatic).parse?.(receipt.returnData)
+          const parsed = (this.constructor as ChainStatic).parse?.(receipt.returnData)
+          if (parsed) error = parsed
         } catch {
           // ignore
         }

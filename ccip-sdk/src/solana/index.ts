@@ -1349,6 +1349,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           const parsed = getErrorFromLogs(data.transactionLogs as SolanaLog[] | string[])
           if (parsed) return { message: data.transactionMessage, ...parsed }
         }
+        if ('program' in data || 'error' in data) return data
         if ('logs' in data) return getErrorFromLogs(data.logs as SolanaLog[] | string[])
       } else if (typeof data === 'string') {
         const parsedExtraArgs = this.decodeExtraArgs(getDataBytes(data))

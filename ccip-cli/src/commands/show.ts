@@ -197,10 +197,6 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       context: { error: request.tx.error },
     })
 
-  if (!source) {
-    emitJsonEnvelope()
-    return
-  }
   if (argv.wait === false) {
     emitJsonEnvelope()
     return // `false` used by call at end of `send` command without `--wait`
@@ -210,6 +206,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   const finalized$ = (async () => {
     if (argv.wait) {
       logger.info(`[${MessageStatus.Sent}] Waiting for source chain finalization...`)
+      if (!source) return
       const finalizedAc = new AbortController()
       cancelWaitFinalized = finalizedAc.abort.bind(finalizedAc)
       await source.waitFinalized({
@@ -219,8 +216,8 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       logger.info(`[${MessageStatus.SourceFinalized}] Source chain finalized`)
     }
 
-    const offchainTokenData = await source.getOffchainTokenData(request)
-    if (offchainTokenData.length && offchainTokenData.some((d) => !!d)) {
+    const offchainTokenData = await source?.getOffchainTokenData(request)
+    if (offchainTokenData?.length && offchainTokenData.some((d) => !!d)) {
       switch (argv.format) {
         case Format.log: {
           output.write('attestations =', offchainTokenData)
@@ -275,7 +272,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     cancelWaitFinalized?.()
     await finalized$
   } else {
-    offRamp ??= await discoverOffRamp(source, dest, request.lane.onRamp, source)
+    offRamp ??= await discoverOffRamp(source!, dest, request.lane.onRamp, source)
 
     let watch
     if (argv.wait) {
