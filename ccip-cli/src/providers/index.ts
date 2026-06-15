@@ -56,13 +56,11 @@ async function collectEndpoints(
   return endpoints
 }
 
+type FetchGlobalArgs = Partial<Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>>
+export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs): ChainGetter
 export function fetchChainsFromRpcs(
   ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>,
-): ChainGetter
-export function fetchChainsFromRpcs(
-  ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>,
+  argv: FetchGlobalArgs,
   txHash: string,
 ): [ChainGetter, Promise<[Chain, ChainTransaction]>]
 
@@ -75,11 +73,7 @@ export function fetchChainsFromRpcs(
  * @param txHash - Optional txHash to fetch concurrently; causes the function to return a [ChainGetter, Promise<ChainTransaction>]
  * @returns a ChainGetter (if txHash was provided), or a tuple of [ChainGetter, Promise<ChainTransaction>]
  */
-export function fetchChainsFromRpcs(
-  ctx: Ctx,
-  argv: Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>,
-  txHash?: string,
-) {
+export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: string) {
   const cantonConfig = loadCantonConfig(argv.cantonConfig, ctx.logger)
   const chains: Record<string, Promise<Chain>> = {}
   const pendingChainsCbs: Record<
