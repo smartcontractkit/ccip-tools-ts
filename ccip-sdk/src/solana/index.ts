@@ -1437,7 +1437,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       // const merkleRoot = acc.account.data.subarray(8 + 1 + 8, 8 + 1 + 8 + 32)
       const minSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8)
       const maxSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8 + 8)
-      if (request.message.sequenceNumber < minSeqNr || maxSeqNr < request.message.sequenceNumber)
+      if (
+        BigInt(request.message.sequenceNumber) < minSeqNr ||
+        maxSeqNr < BigInt(request.message.sequenceNumber)
+      )
         continue
       // we have all the commit report info, but we also need log details (txHash, etc)
       for await (const log of this.getLogs({

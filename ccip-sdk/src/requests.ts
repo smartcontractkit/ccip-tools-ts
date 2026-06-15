@@ -389,7 +389,7 @@ export async function getMessagesInBatch<
 
   const collectForward = async (filter: Parameters<C['getLogs']>[0]): Promise<boolean> => {
     // on first, collect up to batch end; on subsequent, collect up to before earliest seen
-    const stopAtSeqNr = entries.length ? entries[0]!.message.sequenceNumber - 1n : maxSeqNr
+    const stopAtSeqNr = entries.length ? BigInt(entries[0]!.message.sequenceNumber) - 1n : maxSeqNr
     let done = false
     const head: BatchEntry[] = []
     for await (const log of source.getLogs(filter)) {
@@ -401,10 +401,10 @@ export async function getMessagesInBatch<
           message.destChainSelector !== request.lane.destChainSelector)
       )
         continue
-      if (message.sequenceNumber <= minSeqNr) done = true // if we see anything before batch, we're sure there's nothing earlier
-      if (message.sequenceNumber < minSeqNr) continue // if before batch, ignore
-      if (message.sequenceNumber <= maxSeqNr) head.push({ log, message }) // inside batch, collect
-      if (message.sequenceNumber >= stopAtSeqNr) break
+      if (BigInt(message.sequenceNumber) <= minSeqNr) done = true // if we see anything before batch, we're sure there's nothing earlier
+      if (BigInt(message.sequenceNumber) < minSeqNr) continue // if before batch, ignore
+      if (BigInt(message.sequenceNumber) <= maxSeqNr) head.push({ log, message }) // inside batch, collect
+      if (BigInt(message.sequenceNumber) >= stopAtSeqNr) break
     }
     entries.unshift(...head)
     return done
@@ -416,21 +416,22 @@ export async function getMessagesInBatch<
     startBlock: Math.max(
       0,
       // edge cases: our req first => [req..]; our req last => [req-page..req]
-      request.log.blockNumber -
+      Number(request.log.blockNumber) -
         Math.ceil(
-          (Number(request.message.sequenceNumber - minSeqNr) / Number(maxSeqNr - minSeqNr)) *
+          (Number(BigInt(request.message.sequenceNumber) - minSeqNr) /
+            Number(maxSeqNr - minSeqNr)) *
             baseFilter.page,
         ),
     ),
     // iff our request is maxSeqNr, we know we don't need to go past it
-    ...(request.message.sequenceNumber === maxSeqNr && {
+    ...(BigInt(request.message.sequenceNumber) === maxSeqNr && {
       endBlock: request.log.blockNumber,
     }),
   })
 
   let retries = 0
   const batchSize = Number(maxSeqNr - minSeqNr) + 1
-  while (!done && entries[0]!.message.sequenceNumber > minSeqNr) {
+  while (!done && BigInt(entries[0]!.message.sequenceNumber) > minSeqNr) {
     const earliest = entries[0]!
     const earliestBefore = earliest.message.sequenceNumber
 
@@ -577,7 +578,7 @@ export async function waitFinalized<C extends Chain>(
   // Block-height deadline: poll finalized block height and abort if tx is gone
   const deadlineAc = new AbortController()
   const deadline = deadlineAc.signal
-  let txBlockNumber = log.blockNumber
+  let txBlockNumber = Number(log.blockNumber)
   const blockHeightPoller = (async () => {
     let firstFinalized
     while (!watch.aborted && !deadline.aborted) {
@@ -624,7 +625,7 @@ export async function waitFinalized<C extends Chain>(
   try {
     for await (const l of chain.getLogs({
       address: log.address,
-      startBlock: log.blockNumber - 10,
+      startBlock: Number(log.blockNumber) - 10,
       endBlock: finality,
       topics: [log.topics[0]!],
       watch: combinedWatch,

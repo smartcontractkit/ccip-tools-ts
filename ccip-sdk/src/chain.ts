@@ -1842,7 +1842,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       if (
         !receipt ||
         (filters?.messageId && receipt.messageId !== filters.messageId) ||
-        (filters?.sequenceNumber && receipt.sequenceNumber !== filters.sequenceNumber)
+        (filters?.sequenceNumber &&
+          BigInt(receipt.sequenceNumber) !== BigInt(filters.sequenceNumber))
       )
         continue
       if (filters?.sourceChainSelector) {
